@@ -3056,7 +3056,6 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int, ExecutionResultStatus)
 	}
 
 	failedCount := len(failedStepNames)
-	successfulCount := len(successfulStepNames)
 	totalSteps := len(v.ExecutionLogs)
 
 	// Determine execution status and success flag
@@ -3085,11 +3084,11 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int, ExecutionResultStatus)
 			success = true
 			errorMessage = ""
 		}
-	} else if successfulCount > 0 {
-		// Mixed results: some succeeded, some failed (partial success)
-		resultStatus = ExecutionPartialSuccess
-		success = false // Keep false for backward compatibility, but provide status for detailed handling
-		errorMessage = formatExecutionErrorMessage("Partial success", failedCount, totalSteps, failedStepNames)
+	} else if failedCount > 0 {
+		// Any failure should mark the overall result as FAILURE regardless of mixed successes
+		resultStatus = ExecutionFailure
+		success = false
+		errorMessage = formatExecutionErrorMessage("Some", failedCount, totalSteps, failedStepNames)
 	} else {
 		// All steps failed or no successful steps
 		resultStatus = ExecutionFailure

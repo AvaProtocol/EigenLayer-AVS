@@ -667,3 +667,25 @@ func FormatAsJSON(data interface{}) string {
 
 	return result
 }
+
+// FormatStringListWithAnd formats a list of strings with natural language conjunctions.
+// This is useful for generating human-readable lists in logs, emails, and UI messages.
+// Examples:
+//   - 1 item: "the node1 node"
+//   - 2 items: "both node1 and node2 nodes"
+//   - 3+ items: "node1, node2, and node3 nodes"
+func FormatStringListWithAnd(items []string) string {
+	switch len(items) {
+	case 0:
+		return ""
+	case 1:
+		return fmt.Sprintf("the %s node", items[0])
+	case 2:
+		return fmt.Sprintf("both %s and %s nodes", items[0], items[1])
+	default:
+		// Three or more: "X, Y, and Z nodes"
+		lastItem := items[len(items)-1]
+		otherItems := strings.Join(items[:len(items)-1], ", ")
+		return fmt.Sprintf("%s, and %s nodes", otherItems, lastItem)
+	}
+}

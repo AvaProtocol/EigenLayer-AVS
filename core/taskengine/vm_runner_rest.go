@@ -629,6 +629,8 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 					if aaSender, ok := r.vm.vars["aa_sender"].(string); ok && aaSender != "" {
 						smartWallet = aaSender
 					}
+					// Get execution index for "Run #X:" prefix
+					executionIndex := int64(-1)
 					if wc, ok := r.vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
 						if runner, ok := wc["runner"].(string); ok && runner != "" && smartWallet == "" {
 							smartWallet = runner
@@ -638,6 +640,17 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 						}
 						if eoa, ok := wc["eoaAddress"].(string); ok && eoa != "" && ownerEOA == "" {
 							ownerEOA = eoa
+						}
+						// Try to get execution index from workflow context (it may be populated for deployed workflows)
+						if idx, ok := wc["executionIndex"]; ok {
+							switch v := idx.(type) {
+							case int64:
+								executionIndex = v
+							case float64:
+								executionIndex = int64(v)
+							case int:
+								executionIndex = int64(v)
+							}
 						}
 					}
 					if smartWallet == "" {
@@ -650,8 +663,11 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 					r.vm.mu.Unlock()
 					dynamicData["runner"] = smartWallet
 					dynamicData["eoaAddress"] = shortHex(ownerEOA)
+					dynamicData["year"] = fmt.Sprintf("%d", time.Now().Year()) // Current year for email footer
 
 					// Compute skipped nodes (by name) = workflow nodes - executed step names
+					// Skip branch condition pseudo-nodes which are routing points, not actual nodes
+					// Include the CURRENT node since it's executing (not yet in ExecutionLogs)
 					executedNames := make(map[string]struct{})
 					for _, st := range r.vm.ExecutionLogs {
 						name := st.GetName()
@@ -662,16 +678,45 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 							executedNames[name] = struct{}{}
 						}
 					}
+					// Add current node name to executed list (it's executing but not yet in logs)
+					currentNodeName := ""
+					r.vm.mu.Lock()
+					if currentTaskNode, ok := r.vm.TaskNodes[stepID]; ok && currentTaskNode != nil {
+						currentNodeName = currentTaskNode.Name
+					}
+					r.vm.mu.Unlock()
+					if currentNodeName == "" {
+						currentNodeName = stepID
+					}
+					if currentNodeName != "" {
+						executedNames[currentNodeName] = struct{}{}
+					}
+
 					skippedNodes := make([]string, 0, len(r.vm.TaskNodes))
 					r.vm.mu.Lock()
-					for _, n := range r.vm.TaskNodes {
+					taskNodeCount := len(r.vm.TaskNodes)
+					for nodeID, n := range r.vm.TaskNodes {
 						if n != nil {
+							// Skip branch condition nodes (they have IDs like "nodeId.conditionId")
+							// These are routing/edge nodes, not actual executable nodes
+							if strings.Contains(nodeID, ".") {
+								continue
+							}
 							if _, ok := executedNames[n.Name]; !ok {
 								skippedNodes = append(skippedNodes, n.Name)
 							}
 						}
 					}
 					r.vm.mu.Unlock()
+
+					// Debug logging for skipped nodes calculation
+					r.vm.logger.Debug("Skipped nodes calculation",
+						"totalTaskNodes", taskNodeCount,
+						"executedCount", len(executedNames),
+						"executedNames", getMapKeys(executedNames),
+						"skippedCount", len(skippedNodes),
+						"skippedNodes", skippedNodes)
+
 					if len(skippedNodes) > 0 {
 						dynamicData["skippedNodes"] = skippedNodes
 					}
@@ -735,19 +780,26 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 					// Compose deterministic branch/skip summary strings
 					// When branches/skips are present, use the structured summary as the primary analysisHtml
-					if text, html := BuildBranchAndSkippedSummary(r.vm); strings.TrimSpace(html) != "" {
+					// Pass currentNodeName so BuildBranchAndSkippedSummary uses the same calculation logic
+					if text, html := BuildBranchAndSkippedSummary(r.vm, currentNodeName); strings.TrimSpace(html) != "" {
 						// Replace analysisHtml with the structured branch summary
 						// The old analysisHtml (from Summary.Body) often duplicates this information
 						dynamicData["analysisHtml"] = html
 						dynamicData["branchSummaryHtml"] = html
 
 						// Compute and set status, statusHtml, subject, and summary (deterministic)
-						totalSteps := getTotalWorkflowSteps(r.vm)
 						executedSteps := len(r.vm.ExecutionLogs)
-						skippedCount := 0
-						if totalSteps > executedSteps {
-							skippedCount = totalSteps - executedSteps
+
+						// Count actual skipped nodes by name (not by alternate branch paths)
+						// vm.TaskNodes includes nodes on ALL branch paths, but only one path is taken
+						skippedCount := len(skippedNodes) // Use actual skipped node names count
+
+						// For summary display, use executedSteps as total if nothing was truly skipped
+						totalSteps := executedSteps
+						if skippedCount > 0 {
+							totalSteps = executedSteps + skippedCount
 						}
+
 						failed, failedName, failedReason := findEarliestFailure(r.vm)
 
 						// Use ExecutionResultStatus enum
@@ -792,14 +844,38 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 						summaryLine := fmt.Sprintf("Your workflow '%s' executed %d out of %d total steps", workflowName, executedSteps, totalSteps)
 
 						// Update subject based on status
-						var newSubject string
+						var subjectStatusText string
 						switch resultStatus {
 						case ExecutionSuccess:
-							newSubject = fmt.Sprintf("%s successfully completed", workflowName)
+							subjectStatusText = "successfully completed"
 						case ExecutionPartialSuccess:
-							newSubject = fmt.Sprintf("%s partially executed", workflowName)
+							subjectStatusText = "partially executed"
 						case ExecutionFailure:
-							newSubject = fmt.Sprintf("%s failed to execute", workflowName)
+							subjectStatusText = "failed to execute"
+						}
+
+						// Build subject with appropriate prefix
+						var newSubject string
+						if r.vm.IsSimulation {
+							// Simulation: workflow_name status
+							newSubject = fmt.Sprintf("Simulation: %s %s", workflowName, subjectStatusText)
+							if r.vm.logger != nil {
+								r.vm.logger.Info("Using Simulation prefix for email subject", "subject", newSubject, "isSimulation", r.vm.IsSimulation)
+							}
+						} else {
+							// Deployed run: Run #X: workflow_name status
+							if executionIndex >= 0 {
+								newSubject = fmt.Sprintf("Run #%d: %s %s", executionIndex+1, workflowName, subjectStatusText) // +1 for 1-based display
+								if r.vm.logger != nil {
+									r.vm.logger.Info("Using Run # prefix for email subject", "subject", newSubject, "executionIndex", executionIndex, "displayIndex", executionIndex+1)
+								}
+							} else {
+								// Fallback if execution index not available
+								newSubject = fmt.Sprintf("%s %s", workflowName, subjectStatusText)
+								if r.vm.logger != nil {
+									r.vm.logger.Warn("Execution index not available, using basic subject format", "subject", newSubject)
+								}
+							}
 						}
 
 						dynamicData["statusHtml"] = statusHtml
@@ -1255,4 +1331,13 @@ func extractPreheaderFromSummaryText(text, fallback string) string {
 		return s
 	}
 	return fallback
+}
+
+// getMapKeys returns keys from a map[string]struct{} for logging
+func getMapKeys(m map[string]struct{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

@@ -34,7 +34,8 @@ func (s Summary) SendGridDynamicData() map[string]interface{} {
 // BuildBranchAndSkippedSummary builds a deterministic summary (text and HTML)
 // describing which nodes were skipped due to branching and which branch
 // conditions were selected along with the configured condition expressions.
-func BuildBranchAndSkippedSummary(vm *VM) (string, string) {
+// currentNodeName: optional name of the currently executing node (not yet in ExecutionLogs)
+func BuildBranchAndSkippedSummary(vm *VM, currentNodeName ...string) (string, string) {
 	if vm == nil {
 		return "", ""
 	}
@@ -50,12 +51,22 @@ func BuildBranchAndSkippedSummary(vm *VM) (string, string) {
 			executed[name] = struct{}{}
 		}
 	}
+	// Include the current node if provided (it's executing but not yet in ExecutionLogs)
+	if len(currentNodeName) > 0 && currentNodeName[0] != "" {
+		executed[currentNodeName[0]] = struct{}{}
+	}
 
 	// Compute skipped nodes (by name)
+	// Skip branch condition pseudo-nodes (e.g., "branch1.0", "branch1.1") which are routing points, not actual nodes
 	vm.mu.Lock()
 	skipped := make([]string, 0, len(vm.TaskNodes))
-	for _, n := range vm.TaskNodes {
+	for nodeID, n := range vm.TaskNodes {
 		if n == nil {
+			continue
+		}
+		// Skip branch condition nodes (they have IDs like "nodeId.conditionId")
+		// These are routing/edge nodes, not actual executable nodes
+		if strings.Contains(nodeID, ".") {
 			continue
 		}
 		if _, ok := executed[n.Name]; !ok {
@@ -151,8 +162,9 @@ func BuildBranchAndSkippedSummary(vm *VM) (string, string) {
 		}
 		// Count contract writes deterministically
 		if strings.Contains(t, "CONTRACT_WRITE") {
-			// Determine simulation mode (default to VM setting, override with per-node config)
-			isSimulated := vm.IsSimulation
+			// Determine simulation mode strictly from node config (source of truth from client request)
+			// No fallbacks. If missing, treat as real execution (isSimulated=false).
+			isSimulated := false
 			if st.GetConfig() != nil {
 				if cfgMap, ok := st.GetConfig().AsInterface().(map[string]interface{}); ok {
 					if sim, ok := cfgMap["isSimulated"]; ok {
@@ -160,11 +172,7 @@ func BuildBranchAndSkippedSummary(vm *VM) (string, string) {
 						case bool:
 							isSimulated = v
 						case string:
-							if strings.EqualFold(strings.TrimSpace(v), "true") {
-								isSimulated = true
-							} else if strings.EqualFold(strings.TrimSpace(v), "false") {
-								isSimulated = false
-							}
+							isSimulated = strings.EqualFold(strings.TrimSpace(v), "true")
 						}
 					}
 				}
@@ -200,24 +208,31 @@ func BuildBranchAndSkippedSummary(vm *VM) (string, string) {
 	if len(skipped) > 0 {
 		summaryLine = "The workflow did not fully execute. Some nodes were skipped due to branching conditions."
 	} else {
-		summaryLine = "The workflow executed without branching skips."
-	}
-	// On-chain clause
-	if successfulRealWrites > 0 {
-		summaryLine += fmt.Sprintf(" Executed %d on-chain transaction(s).", successfulRealWrites)
-	} else if successfulSimulatedWrites > 0 {
-		// Include simulated node names
-		if len(simulatedWriteNames) > 0 {
-			summaryLine += fmt.Sprintf(" No on-chain transactions executed, due to simulated mode of %s.", strings.Join(simulatedWriteNames, ", "))
-		} else {
-			summaryLine += " No on-chain transactions executed, due to simulated mode."
-		}
-	} else if failedWrites > 0 {
-		summaryLine += " No on-chain transactions executed; contract writes failed."
-	} else {
-		summaryLine += " No on-chain transactions executed."
+		summaryLine = "All nodes were executed successfully."
 	}
 	tb = append(tb, summaryLine)
+
+	// On-chain clause on separate line
+	onchainLine := ""
+	if successfulRealWrites > 0 {
+		onchainLine = fmt.Sprintf("Executed %d on-chain transaction(s).", successfulRealWrites)
+	} else if successfulSimulatedWrites > 0 {
+		// Include simulated node names with proper grammar
+		if len(simulatedWriteNames) > 0 {
+			nodeList := FormatStringListWithAnd(simulatedWriteNames)
+			onchainLine = fmt.Sprintf("No on-chain transactions were sent, as %s ran in simulation mode.", nodeList)
+		} else {
+			onchainLine = "No on-chain transactions were sent, as all contract write nodes ran in simulation mode."
+		}
+	} else if failedWrites > 0 {
+		onchainLine = "No on-chain transactions executed; contract writes failed."
+	} else if successfulRealWrites == 0 && successfulSimulatedWrites == 0 {
+		onchainLine = "No on-chain transactions executed."
+	}
+	if onchainLine != "" {
+		tb = append(tb, onchainLine)
+	}
+
 	tb = append(tb, "") // blank line before Skipped nodes
 	if len(skipped) > 0 {
 		tb = append(tb, "The below nodes were skipped due to branching conditions")
@@ -225,40 +240,43 @@ func BuildBranchAndSkippedSummary(vm *VM) (string, string) {
 			tb = append(tb, "- "+n)
 		}
 	}
-	for _, b := range branches {
-		path := normalizeBranchType(b.Path)
-		header := fmt.Sprintf("Branch '%s': selected %s condition", b.Step, path)
-		tb = append(tb, header)
+	// Only show branch details if there are skipped nodes (PartialSuccess scenario)
+	if len(skipped) > 0 {
+		for _, b := range branches {
+			path := normalizeBranchType(b.Path)
+			header := fmt.Sprintf("Branch '%s': selected %s condition", b.Step, path)
+			tb = append(tb, header)
 
-		// Use new structured evaluation data if available
-		if len(b.ConditionEvaluations) > 0 {
-			for _, eval := range b.ConditionEvaluations {
-				label := asString(eval["label"])
-				expr := asString(eval["expression"])
-				result, _ := eval["result"].(bool)
-				taken, _ := eval["taken"].(bool)
+			// Use new structured evaluation data if available
+			if len(b.ConditionEvaluations) > 0 {
+				for _, eval := range b.ConditionEvaluations {
+					label := asString(eval["label"])
+					expr := asString(eval["expression"])
+					result, _ := eval["result"].(bool)
+					taken, _ := eval["taken"].(bool)
 
-				if taken {
-					tb = append(tb, fmt.Sprintf("- %s (selected)", label))
-				} else if result {
-					tb = append(tb, fmt.Sprintf("- %s: true", label))
-				} else {
-					if strings.TrimSpace(expr) == "" {
-						tb = append(tb, fmt.Sprintf("- %s: false", label))
+					if taken {
+						tb = append(tb, fmt.Sprintf("- %s (selected)", label))
+					} else if result {
+						tb = append(tb, fmt.Sprintf("- %s: true", label))
 					} else {
-						tb = append(tb, fmt.Sprintf("- %s: false -> %s", label, expr))
+						if strings.TrimSpace(expr) == "" {
+							tb = append(tb, fmt.Sprintf("- %s: false", label))
+						} else {
+							tb = append(tb, fmt.Sprintf("- %s: false -> %s", label, expr))
+						}
 					}
 				}
-			}
-		} else if len(b.Conditions) > 0 {
-			// Fallback to old format for backward compatibility
-			tb = append(tb, "Conditions:")
-			for _, c := range b.Conditions {
-				label := normalizeBranchType(c.Type)
-				if strings.TrimSpace(c.Expr) == "" {
-					tb = append(tb, fmt.Sprintf("- %s", label))
-				} else {
-					tb = append(tb, fmt.Sprintf("- %s -> %s", label, c.Expr))
+			} else if len(b.Conditions) > 0 {
+				// Fallback to old format for backward compatibility
+				tb = append(tb, "Conditions:")
+				for _, c := range b.Conditions {
+					label := normalizeBranchType(c.Type)
+					if strings.TrimSpace(c.Expr) == "" {
+						tb = append(tb, fmt.Sprintf("- %s", label))
+					} else {
+						tb = append(tb, fmt.Sprintf("- %s -> %s", label, c.Expr))
+					}
 				}
 			}
 		}
@@ -269,7 +287,11 @@ func BuildBranchAndSkippedSummary(vm *VM) (string, string) {
 	var hb []string
 	// Summary heading and sentence
 	hb = append(hb, "<div style=\"font-weight:600; margin:8px 0 4px\">Summary</div>")
-	hb = append(hb, "<p style=\"margin:0 0 8px\">"+html.EscapeString(summaryLine)+"</p>")
+	hb = append(hb, "<p style=\"margin:0 0 4px\">"+html.EscapeString(summaryLine)+"</p>")
+	// On-chain line on separate paragraph
+	if onchainLine != "" {
+		hb = append(hb, "<p style=\"margin:0 0 8px\">"+html.EscapeString(onchainLine)+"</p>")
+	}
 	// Spacer before Skipped nodes
 	hb = append(hb, "<div style=\"height:8px\"></div>")
 	if len(skipped) > 0 {
@@ -280,69 +302,106 @@ func BuildBranchAndSkippedSummary(vm *VM) (string, string) {
 		}
 		hb = append(hb, "</ul>")
 	}
-	for _, b := range branches {
-		path := normalizeBranchType(b.Path)
-		// Include target node in header, matching the execution log format
-		headerText := fmt.Sprintf("Branch '%s': selected %s condition", b.Step, path)
-		if b.TargetNodeName != "" {
-			headerText += fmt.Sprintf(" -> led to node '%s'", b.TargetNodeName)
-		} else {
-			headerText += " -> no next node"
-		}
-		hb = append(hb, fmt.Sprintf("<div style=\"font-weight:600; margin:8px 0 4px\">%s</div>", html.EscapeString(headerText)))
+	// Only show branch details if there are skipped nodes
+	if len(skipped) > 0 {
+		for _, b := range branches {
+			path := normalizeBranchType(b.Path)
+			// Include target node in header, matching the execution log format
+			headerText := fmt.Sprintf("Branch '%s': selected %s condition", b.Step, path)
+			if b.TargetNodeName != "" {
+				headerText += fmt.Sprintf(" -> led to node '%s'", b.TargetNodeName)
+			} else {
+				headerText += " -> no next node"
+			}
+			hb = append(hb, fmt.Sprintf("<div style=\"font-weight:600; margin:8px 0 4px\">%s</div>", html.EscapeString(headerText)))
 
-		// Use new structured evaluation data if available
-		if len(b.ConditionEvaluations) > 0 {
-			// Use execution log format (not bullet list)
-			for _, eval := range b.ConditionEvaluations {
-				label := asString(eval["label"])
-				expr := asString(eval["expression"])
-				taken, _ := eval["taken"].(bool)
+			// Use new structured evaluation data if available
+			if len(b.ConditionEvaluations) > 0 {
+				// Use execution log format (not bullet list)
+				for _, eval := range b.ConditionEvaluations {
+					label := asString(eval["label"])
+					expr := asString(eval["expression"])
+					taken, _ := eval["taken"].(bool)
 
-				if taken {
-					// Condition that was selected - show in execution log format
-					if strings.TrimSpace(expr) != "" {
-						hb = append(hb, fmt.Sprintf("<p style=\"margin:4px 0 0 0; font-weight:500\">%s condition (selected)</p>", html.EscapeString(label)))
-						hb = append(hb, fmt.Sprintf("<p style=\"margin:0 0 8px 20px; font-family:monospace; font-size:0.9em\">Expression: %s</p>", html.EscapeString(expr)))
-					}
-				} else {
-					// False condition - show operand values if available
-					if strings.TrimSpace(expr) == "" {
-						hb = append(hb, fmt.Sprintf("<p style=\"margin:4px 0 0 0\">%s condition resolved to false (empty)</p>", html.EscapeString(label)))
-					} else {
-						hb = append(hb, fmt.Sprintf("<p style=\"margin:4px 0 0 0\">%s condition resolved to false</p>", html.EscapeString(label)))
-						hb = append(hb, fmt.Sprintf("<p style=\"margin:0 0 2px 20px; font-family:monospace; font-size:0.9em\">Expression: %s</p>", html.EscapeString(expr)))
+					if taken {
+						// Condition that was selected - show comparison operands if available (like false conditions)
+						if strings.TrimSpace(expr) != "" {
+							hb = append(hb, fmt.Sprintf("<p style=\"margin:4px 0 0 0; font-weight:500\">%s condition (selected)</p>", html.EscapeString(label)))
 
-						// Show variable values if available
-						if varVals, ok := eval["variableValues"].(map[string]interface{}); ok && len(varVals) > 0 {
-							hb = append(hb, "<p style=\"margin:0 0 8px 20px; font-size:0.9em; color:#6B7280\">Variable values:</p>")
-							for varName, varVal := range varVals {
-								// Truncate large values for readability
-								valStr := fmt.Sprintf("%v", varVal)
-								if len(valStr) > 100 {
-									valStr = valStr[:97] + "..."
+							// Check if we have structured comparison operand data (same as false condition logic)
+							operandData, hasOperandData := eval["variableValues"].(map[string]interface{})
+							if hasOperandData {
+								leftExpr, hasLeft := operandData["leftExpr"].(string)
+								rightExpr, hasRight := operandData["rightExpr"].(string)
+								operator, hasOp := operandData["operator"].(string)
+								if hasLeft && hasRight && hasOp && leftExpr != "" && rightExpr != "" && operator != "" {
+									// This is comparison operand data - format it using shared formatter
+									comparisonHTML := formatComparisonForHTML(operandData)
+									if comparisonHTML != "" {
+										hb = append(hb, comparisonHTML)
+									} else {
+										// Fallback to showing expression
+										hb = append(hb, fmt.Sprintf("<p style=\"margin:0 0 8px 20px; font-family:monospace; font-size:0.9em\">Expression: %s</p>", html.EscapeString(expr)))
+									}
+								} else {
+									// Not comparison data - show expression
+									hb = append(hb, fmt.Sprintf("<p style=\"margin:0 0 8px 20px; font-family:monospace; font-size:0.9em\">Expression: %s</p>", html.EscapeString(expr)))
 								}
-								hb = append(hb, fmt.Sprintf("<p style=\"margin:0 0 2px 40px; font-family:monospace; font-size:0.85em; color:#6B7280\">%s = %s</p>", html.EscapeString(varName), html.EscapeString(valStr)))
+							} else {
+								// No operand data - just show expression
+								hb = append(hb, fmt.Sprintf("<p style=\"margin:0 0 8px 20px; font-family:monospace; font-size:0.9em\">Expression: %s</p>", html.EscapeString(expr)))
+							}
+						}
+					} else {
+						// False condition - show comparison operands if available, otherwise fall back to expression
+						if strings.TrimSpace(expr) == "" {
+							hb = append(hb, fmt.Sprintf("<p style=\"margin:4px 0 0 0\">%s condition resolved to false (empty)</p>", html.EscapeString(label)))
+						} else {
+							hb = append(hb, fmt.Sprintf("<p style=\"margin:4px 0 0 0\">%s condition resolved to false</p>", html.EscapeString(label)))
+
+							// Check if we have structured comparison operand data (from consolidated parser)
+							// Comparison operand data has leftExpr, rightExpr, operator keys
+							operandData, hasOperandData := eval["variableValues"].(map[string]interface{})
+							if hasOperandData {
+								leftExpr, hasLeft := operandData["leftExpr"].(string)
+								rightExpr, hasRight := operandData["rightExpr"].(string)
+								operator, hasOp := operandData["operator"].(string)
+								if hasLeft && hasRight && hasOp && leftExpr != "" && rightExpr != "" && operator != "" {
+									// This is comparison operand data - format it using shared formatter
+									comparisonHTML := formatComparisonForHTML(operandData)
+									if comparisonHTML != "" {
+										hb = append(hb, comparisonHTML)
+									} else {
+										// Fallback to showing expression
+										hb = append(hb, fmt.Sprintf("<p style=\"margin:0 0 2px 20px; font-family:monospace; font-size:0.9em\">Expression: %s</p>", html.EscapeString(expr)))
+									}
+								} else {
+									// Not comparison data - show expression
+									hb = append(hb, fmt.Sprintf("<p style=\"margin:0 0 2px 20px; font-family:monospace; font-size:0.9em\">Expression: %s</p>", html.EscapeString(expr)))
+								}
+							} else {
+								// No operand data - just show expression
+								hb = append(hb, fmt.Sprintf("<p style=\"margin:0 0 2px 20px; font-family:monospace; font-size:0.9em\">Expression: %s</p>", html.EscapeString(expr)))
 							}
 						}
 					}
 				}
-			}
-			// Add spacing after branch details
-			hb = append(hb, "<div style=\"height:8px\"></div>")
-		} else if len(b.Conditions) > 0 {
-			// Fallback to old format for backward compatibility
-			hb = append(hb, "<ul style=\"margin:0 0 12px 20px; padding:0\">")
-			for _, c := range b.Conditions {
-				expr := html.EscapeString(c.Expr)
-				label := html.EscapeString(normalizeBranchType(c.Type))
-				if strings.TrimSpace(expr) == "" {
-					hb = append(hb, fmt.Sprintf("<li>%s</li>", label))
-				} else {
-					hb = append(hb, fmt.Sprintf("<li>%s → <code>%s</code></li>", label, expr))
+				// Add spacing after branch details
+				hb = append(hb, "<div style=\"height:8px\"></div>")
+			} else if len(b.Conditions) > 0 {
+				// Fallback to old format for backward compatibility
+				hb = append(hb, "<ul style=\"margin:0 0 12px 20px; padding:0\">")
+				for _, c := range b.Conditions {
+					expr := html.EscapeString(c.Expr)
+					label := html.EscapeString(normalizeBranchType(c.Type))
+					if strings.TrimSpace(expr) == "" {
+						hb = append(hb, fmt.Sprintf("<li>%s</li>", label))
+					} else {
+						hb = append(hb, fmt.Sprintf("<li>%s → <code>%s</code></li>", label, expr))
+					}
 				}
+				hb = append(hb, "</ul>")
 			}
-			hb = append(hb, "</ul>")
 		}
 	}
 	htmlOut := strings.Join(hb, "\n")
@@ -1101,8 +1160,8 @@ func formatComparisonForHTML(operandData map[string]interface{}) string {
 	rightVal := formatValueConcise(right)
 
 	return fmt.Sprintf(
-		"<p style=\"margin:0 0 2px 20px; font-family:monospace; font-size:0.9em\">%s %s %s</p>"+
-			"<p style=\"margin:0 0 8px 20px; font-family:monospace; font-size:0.9em\">%s %s %s</p>",
+		"<p style=\"margin:0 0 2px 20px; font-family:monospace; font-size:0.9em\">Expression: %s %s %s</p>"+
+			"<p style=\"margin:0 0 8px 20px; font-family:monospace; font-size:0.9em\">Evaluated: %s %s %s</p>",
 		html.EscapeString(leftExpr),
 		html.EscapeString(operator),
 		html.EscapeString(rightExpr),
