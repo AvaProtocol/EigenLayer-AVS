@@ -80,11 +80,7 @@ func TestVM_ContractRead_BasicExecution(t *testing.T) {
 		},
 	}
 
-<<<<<<< HEAD
 	executionStep, _ := vm.runContractRead(&avsproto.TaskNode{Id: "test_decimals", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_READ, TaskType: &avsproto.TaskNode_ContractRead{ContractRead: node}})
-=======
-	executionStep, _ := vm.runContractRead("test_decimals", &avsproto.TaskNode{Id: "test_decimals", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_READ, TaskType: &avsproto.TaskNode_ContractRead{ContractRead: node}}, node)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	assert.NotNil(t, executionStep)
 	assert.Equal(t, "test_decimals", executionStep.Id)
@@ -127,11 +123,7 @@ func TestVM_ContractRead_DecimalFormatting(t *testing.T) {
 		},
 	}
 
-<<<<<<< HEAD
 	executionStep, _ := vm.runContractRead(&avsproto.TaskNode{Id: "test_decimal_formatting", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_READ, TaskType: &avsproto.TaskNode_ContractRead{ContractRead: node}})
-=======
-	executionStep, _ := vm.runContractRead("test_decimal_formatting", &avsproto.TaskNode{Id: "test_decimal_formatting", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_READ, TaskType: &avsproto.TaskNode_ContractRead{ContractRead: node}}, node)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	assert.NotNil(t, executionStep)
 	assert.Equal(t, "test_decimal_formatting", executionStep.Id)
@@ -218,11 +210,7 @@ func TestVM_ContractRead_LatestRoundData(t *testing.T) {
 		},
 	}
 
-<<<<<<< HEAD
 	executionStep, _ := vm.runContractRead(&avsproto.TaskNode{Id: "test_latest_round", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_READ, TaskType: &avsproto.TaskNode_ContractRead{ContractRead: node}})
-=======
-	executionStep, _ := vm.runContractRead("test_latest_round", &avsproto.TaskNode{Id: "test_latest_round", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_READ, TaskType: &avsproto.TaskNode_ContractRead{ContractRead: node}}, node)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	assert.NotNil(t, executionStep)
 	assert.Equal(t, "test_latest_round", executionStep.Id)
@@ -432,11 +420,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 					ContractRead: tt.node,
 				},
 			}
-<<<<<<< HEAD
 			executionStep, _ := vm.runContractRead(taskNode)
-=======
-			executionStep, _ := vm.runContractRead("test_error", taskNode, tt.node)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 			assert.NotNil(t, executionStep)
 			assert.Equal(t, "test_error", executionStep.Id)
@@ -487,11 +471,7 @@ func TestVM_ContractWrite_BasicExecution(t *testing.T) {
 			ContractWrite: node,
 		},
 	}
-<<<<<<< HEAD
 	executionStep, err := vm.runContractWrite(taskNode)
-=======
-	executionStep, err := vm.runContractWrite("test_write", taskNode, node)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	// Contract write will likely fail in test environment, but should handle gracefully
 	assert.NotNil(t, executionStep)
@@ -616,11 +596,7 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 					ContractWrite: tt.node,
 				},
 			}
-<<<<<<< HEAD
 			executionStep, _ := vm.runContractWrite(taskNode)
-=======
-			executionStep, _ := vm.runContractWrite("test_write_error", taskNode, tt.node)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 			assert.NotNil(t, executionStep)
 			assert.Equal(t, "test_write_error", executionStep.Id)

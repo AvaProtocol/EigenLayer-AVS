@@ -41,11 +41,7 @@ func TestVM_ContractReadRunner(t *testing.T) {
 	vm.smartWalletConfig = testutil.GetTestSmartWalletConfig()
 
 	// Execute contract read
-<<<<<<< HEAD
 	executionStep, err := vm.runContractRead(&avsproto.TaskNode{Id: "test_contract_read", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_READ, TaskType: &avsproto.TaskNode_ContractRead{ContractRead: node}})
-=======
-	executionStep, err := vm.runContractRead("test_contract_read", &avsproto.TaskNode{Id: "test_contract_read", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_READ, TaskType: &avsproto.TaskNode_ContractRead{ContractRead: node}}, node)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	// The contract read might fail due to network/config issues, but should not panic
 	assert.NotNil(t, executionStep)
@@ -82,11 +78,7 @@ func TestVM_ContractReadRunner_MissingConfig(t *testing.T) {
 	vm.smartWalletConfig = nil
 
 	// Execute contract read (should fail gracefully)
-<<<<<<< HEAD
 	executionStep, err := vm.runContractRead(&avsproto.TaskNode{Id: "test_missing_config", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_READ, TaskType: &avsproto.TaskNode_ContractRead{ContractRead: node}})
-=======
-	executionStep, err := vm.runContractRead("test_missing_config", &avsproto.TaskNode{Id: "test_missing_config", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_READ, TaskType: &avsproto.TaskNode_ContractRead{ContractRead: node}}, node)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	// Should return execution step with failure
 	assert.NotNil(t, executionStep)
@@ -118,11 +110,7 @@ func TestVM_CustomCodeRunner(t *testing.T) {
 	}
 
 	// Execute custom code
-<<<<<<< HEAD
 	executionStep, err := vm.runCustomCode(&avsproto.TaskNode{Id: "test_custom_code", Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE, TaskType: &avsproto.TaskNode_CustomCode{CustomCode: node}})
-=======
-	executionStep, err := vm.runCustomCode("test_custom_code", &avsproto.TaskNode{Id: "test_custom_code", Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE, TaskType: &avsproto.TaskNode_CustomCode{CustomCode: node}}, node)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	// Verify execution results
 	assert.NoError(t, err)
@@ -152,11 +140,7 @@ func TestVM_CustomCodeRunner_SyntaxError(t *testing.T) {
 	}
 
 	// Execute custom code (should fail gracefully)
-<<<<<<< HEAD
 	executionStep, err := vm.runCustomCode(&avsproto.TaskNode{Id: "test_syntax_error", Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE, TaskType: &avsproto.TaskNode_CustomCode{CustomCode: node}})
-=======
-	executionStep, err := vm.runCustomCode("test_syntax_error", &avsproto.TaskNode{Id: "test_syntax_error", Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE, TaskType: &avsproto.TaskNode_CustomCode{CustomCode: node}}, node)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	// Should return execution step with failure
 	assert.NotNil(t, executionStep)
@@ -188,11 +172,7 @@ func TestVM_RestAPIRunner(t *testing.T) {
 	}
 
 	// Execute REST API call
-<<<<<<< HEAD
 	executionStep, err := vm.runRestApi(&avsproto.TaskNode{Id: "test_rest_api", Type: avsproto.NodeType_NODE_TYPE_REST_API, TaskType: &avsproto.TaskNode_RestApi{RestApi: node}})
-=======
-	executionStep, err := vm.runRestApi("test_rest_api", &avsproto.TaskNode{Id: "test_rest_api", Type: avsproto.NodeType_NODE_TYPE_REST_API, TaskType: &avsproto.TaskNode_RestApi{RestApi: node}}, node)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	// Verify execution results
 	assert.NotNil(t, executionStep)
@@ -230,11 +210,7 @@ func TestVM_EthTransferRunner(t *testing.T) {
 			EthTransfer: node,
 		},
 	}
-<<<<<<< HEAD
 	executionStep, err := vm.runEthTransfer(taskNode)
-=======
-	executionStep, err := vm.runEthTransfer("test_eth_transfer", taskNode, node)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	// Should return execution step with failure
 	assert.NotNil(t, executionStep)

@@ -1223,27 +1223,17 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 
 	var executionLogForNode *avsproto.Execution_Step // To capture log from methods that return it
 
-<<<<<<< HEAD
 	if node.GetRestApi() != nil {
 		executionLogForNode, err = v.runRestApi(node)
-=======
-	if nodeValue := node.GetRestApi(); nodeValue != nil {
-		executionLogForNode, err = v.runRestApi(node.Id, node, nodeValue) // runRestApi returns *avsproto.Execution_Step, error
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
 	} else if node.GetBranch() != nil {
 		var branchLog *avsproto.Execution_Step
-<<<<<<< HEAD
 		branchLog, nextStep, err = v.runBranch(node)
-=======
-		branchLog, nextStep, err = v.runBranch(node.Id, node, nodeValue) // runBranch now returns log, step, err
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 		if branchLog != nil {
 			v.addExecutionLog(branchLog)
 		}
-<<<<<<< HEAD
 	} else if node.GetGraphqlQuery() != nil {
 		executionLogForNode, err = v.runGraphQL(node)
 		if executionLogForNode != nil {
@@ -1261,25 +1251,6 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		}
 	} else if node.GetContractWrite() != nil {
 		executionLogForNode, err = v.runContractWrite(node)
-=======
-	} else if nodeValue := node.GetGraphqlQuery(); nodeValue != nil {
-		executionLogForNode, err = v.runGraphQL(node.Id, node, nodeValue)
-		if executionLogForNode != nil {
-			v.addExecutionLog(executionLogForNode)
-		}
-	} else if nodeValue := node.GetCustomCode(); nodeValue != nil {
-		executionLogForNode, err = v.runCustomCode(node.Id, node, nodeValue)
-		if executionLogForNode != nil {
-			v.addExecutionLog(executionLogForNode)
-		}
-	} else if nodeValue := node.GetContractRead(); nodeValue != nil {
-		executionLogForNode, err = v.runContractRead(node.Id, node, nodeValue)
-		if executionLogForNode != nil {
-			v.addExecutionLog(executionLogForNode)
-		}
-	} else if nodeValue := node.GetContractWrite(); nodeValue != nil {
-		executionLogForNode, err = v.runContractWrite(node.Id, node, nodeValue)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 
@@ -1312,7 +1283,6 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 				}
 			}
 		}
-<<<<<<< HEAD
 	} else if node.GetLoop() != nil {
 		executionLogForNode, err = v.runLoop(node)
 		if executionLogForNode != nil {
@@ -1325,29 +1295,11 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		}
 	} else if node.GetEthTransfer() != nil {
 		executionLogForNode, err = v.runEthTransfer(node)
-=======
-	} else if nodeValue := node.GetLoop(); nodeValue != nil {
-		executionLogForNode, err = v.runLoop(node.Id, node, nodeValue) // loop does not return a jump step
-		if executionLogForNode != nil {
-			v.addExecutionLog(executionLogForNode)
-		}
-	} else if nodeValue := node.GetFilter(); nodeValue != nil {
-		executionLogForNode, err = v.runFilter(node.Id, node, nodeValue)
-		if executionLogForNode != nil {
-			v.addExecutionLog(executionLogForNode)
-		}
-	} else if nodeValue := node.GetEthTransfer(); nodeValue != nil {
-		executionLogForNode, err = v.runEthTransfer(node.Id, node, nodeValue)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
 	} else if node.GetBalance() != nil {
-<<<<<<< HEAD
 		executionLogForNode, err = v.runBalance(node)
-=======
-		executionLogForNode, err = v.runBalance(node.Id, node)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
@@ -1378,16 +1330,12 @@ func (v *VM) addExecutionLog(log *avsproto.Execution_Step) {
 	v.ExecutionLogs = append(v.ExecutionLogs, log)
 }
 
-<<<<<<< HEAD
 func (v *VM) runRestApi(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, error) {
 	nodeValue := taskNode.GetRestApi()
 	if nodeValue == nil {
 		return nil, fmt.Errorf("taskNode does not contain a RestAPINode")
 	}
 	stepID := taskNode.Id
-=======
-func (v *VM) runRestApi(stepID string, taskNode *avsproto.TaskNode, nodeValue *avsproto.RestAPINode) (*avsproto.Execution_Step, error) {
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 	p := NewRestProcessor(v) // v is passed, CommonProcessor uses v.AddVar
 	p.CommonProcessor.SetTaskNode(taskNode)
 	executionLog, err := p.Execute(stepID, nodeValue) // p.Execute should use SetOutputVarForStep
@@ -1398,16 +1346,12 @@ func (v *VM) runRestApi(stepID string, taskNode *avsproto.TaskNode, nodeValue *a
 	return executionLog, err // RestAPI node doesn't dictate a jump
 }
 
-<<<<<<< HEAD
 func (v *VM) runGraphQL(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, error) {
 	node := taskNode.GetGraphqlQuery()
 	if node == nil {
 		return nil, fmt.Errorf("taskNode does not contain a GraphQLQueryNode")
 	}
 	stepID := taskNode.Id
-=======
-func (v *VM) runGraphQL(stepID string, taskNode *avsproto.TaskNode, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, error) {
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 	// GraphQL URL and query are now in Config message, not input variables
 	g, err := NewGraphqlQueryProcessor(v) // No URL parameter needed, processor gets it from Config
 	// Set task node for execution step context
@@ -1433,16 +1377,12 @@ func (v *VM) runGraphQL(stepID string, taskNode *avsproto.TaskNode, node *avspro
 	return executionLog, err
 }
 
-<<<<<<< HEAD
 func (v *VM) runContractRead(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, error) {
 	node := taskNode.GetContractRead()
 	if node == nil {
 		return nil, fmt.Errorf("taskNode does not contain a ContractReadNode")
 	}
 	stepID := taskNode.Id
-=======
-func (v *VM) runContractRead(stepID string, taskNode *avsproto.TaskNode, node *avsproto.ContractReadNode) (*avsproto.Execution_Step, error) {
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 	var executionLog *avsproto.Execution_Step
 
 	// Check if node has empty config first - let processor handle this case
@@ -1486,16 +1426,12 @@ func (v *VM) runContractRead(stepID string, taskNode *avsproto.TaskNode, node *a
 	return executionLog, err
 }
 
-<<<<<<< HEAD
 func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, error) {
 	node := taskNode.GetContractWrite()
 	if node == nil {
 		return nil, fmt.Errorf("taskNode does not contain a ContractWriteNode")
 	}
 	stepID := taskNode.Id
-=======
-func (v *VM) runContractWrite(stepID string, taskNode *avsproto.TaskNode, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 	var executionLog *avsproto.Execution_Step
 	if v.smartWalletConfig == nil || v.smartWalletConfig.EthRpcUrl == "" {
 		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract write")
@@ -1556,16 +1492,12 @@ func (v *VM) runContractWrite(stepID string, taskNode *avsproto.TaskNode, node *
 	return executionLog, err
 }
 
-<<<<<<< HEAD
 func (v *VM) runCustomCode(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, error) {
 	node := taskNode.GetCustomCode()
 	if node == nil {
 		return nil, fmt.Errorf("taskNode does not contain a CustomCodeNode")
 	}
 	stepID := taskNode.Id
-=======
-func (v *VM) runCustomCode(stepID string, taskNode *avsproto.TaskNode, node *avsproto.CustomCodeNode) (*avsproto.Execution_Step, error) {
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 	// Special handling for blockTrigger nodes that were created via CreateNodeFromType
 	// These nodes have no Config but should be handled specially
 	if node.Config == nil {
@@ -1642,16 +1574,12 @@ func (v *VM) runCustomCode(stepID string, taskNode *avsproto.TaskNode, node *avs
 	return executionLog, err
 }
 
-<<<<<<< HEAD
 func (v *VM) runBranch(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, *Step, error) {
 	nodeValue := taskNode.GetBranch()
 	if nodeValue == nil {
 		return nil, nil, fmt.Errorf("taskNode does not contain a BranchNode")
 	}
 	stepID := taskNode.Id
-=======
-func (v *VM) runBranch(stepID string, taskNode *avsproto.TaskNode, nodeValue *avsproto.BranchNode) (*avsproto.Execution_Step, *Step, error) {
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 	processor := NewBranchProcessor(v)
 	processor.CommonProcessor.SetTaskNode(taskNode)
 	executionLog, nextStep, err := processor.Execute(stepID, nodeValue)
@@ -1679,18 +1607,13 @@ func (v *VM) runBranch(stepID string, taskNode *avsproto.TaskNode, nodeValue *av
 	return executionLog, nextStep, err // Return the log, the next step, and any error
 }
 
-<<<<<<< HEAD
 func (v *VM) runLoop(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, error) {
 	nodeValue := taskNode.GetLoop()
 	if nodeValue == nil {
 		return nil, fmt.Errorf("taskNode does not contain a LoopNode")
 	}
 	stepID := taskNode.Id
-	// Use the queue-based execution with worker pools for better performance
-=======
-func (v *VM) runLoop(stepID string, taskNode *avsproto.TaskNode, nodeValue *avsproto.LoopNode) (*avsproto.Execution_Step, error) {
 	// Use the new queue-based execution instead of the old recursive approach
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 	executionLog, err := v.executeLoopWithQueue(stepID, taskNode, nodeValue)
 
 	v.mu.Lock()
@@ -1702,16 +1625,12 @@ func (v *VM) runLoop(stepID string, taskNode *avsproto.TaskNode, nodeValue *avsp
 	return executionLog, err // Loop node itself doesn't dictate a jump in the main plan
 }
 
-<<<<<<< HEAD
 func (v *VM) runFilter(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, error) {
 	nodeValue := taskNode.GetFilter()
 	if nodeValue == nil {
 		return nil, fmt.Errorf("taskNode does not contain a FilterNode")
 	}
 	stepID := taskNode.Id
-=======
-func (v *VM) runFilter(stepID string, taskNode *avsproto.TaskNode, nodeValue *avsproto.FilterNode) (*avsproto.Execution_Step, error) {
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 	p := NewFilterProcessor(v)
 	p.CommonProcessor.SetTaskNode(taskNode)
 	executionLog, err := p.Execute(stepID, nodeValue)
@@ -1724,16 +1643,12 @@ func (v *VM) runFilter(stepID string, taskNode *avsproto.TaskNode, nodeValue *av
 	return executionLog, err
 }
 
-<<<<<<< HEAD
 func (v *VM) runEthTransfer(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, error) {
 	node := taskNode.GetEthTransfer()
 	if node == nil {
 		return nil, fmt.Errorf("taskNode does not contain an ETHTransferNode")
 	}
 	stepID := taskNode.Id
-=======
-func (v *VM) runEthTransfer(stepID string, taskNode *avsproto.TaskNode, node *avsproto.ETHTransferNode) (*avsproto.Execution_Step, error) {
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 	var executionLog *avsproto.Execution_Step
 	if v.smartWalletConfig == nil {
 		err := fmt.Errorf("smart wallet config not set for ETH transfer")
@@ -4290,7 +4205,6 @@ func (v *VM) executeNodeWithIsolatedVars(node *avsproto.TaskNode, stepID string,
 		executionLogForNode, err = v.runCustomCodeWithIsolatedVars(stepID, node.GetCustomCode(), isolatedVars)
 	} else if node.GetRestApi() != nil {
 		// For other node types, fall back to regular execution (they may need similar isolation)
-<<<<<<< HEAD
 		executionLogForNode, err = v.runRestApi(node)
 	} else if node.GetBranch() != nil {
 		var nextStep *Step
@@ -4310,26 +4224,6 @@ func (v *VM) executeNodeWithIsolatedVars(node *avsproto.TaskNode, stepID string,
 		// For loop nodes, use the execution queue
 		loopNode := node.GetLoop()
 		return v.executeLoopWithQueue(stepID, node, loopNode)
-=======
-		executionLogForNode, err = v.runRestApi(stepID, node, nodeValue)
-	} else if nodeValue := node.GetBranch(); nodeValue != nil {
-		var nextStep *Step
-		executionLogForNode, nextStep, err = v.runBranch(stepID, node, nodeValue)
-		_ = nextStep // Ignore nextStep in direct execution
-	} else if nodeValue := node.GetGraphqlQuery(); nodeValue != nil {
-		executionLogForNode, err = v.runGraphQL(stepID, node, nodeValue)
-	} else if nodeValue := node.GetContractRead(); nodeValue != nil {
-		executionLogForNode, err = v.runContractRead(stepID, node, nodeValue)
-	} else if nodeValue := node.GetContractWrite(); nodeValue != nil {
-		executionLogForNode, err = v.runContractWrite(stepID, node, nodeValue)
-	} else if nodeValue := node.GetFilter(); nodeValue != nil {
-		executionLogForNode, err = v.runFilter(stepID, node, nodeValue)
-	} else if nodeValue := node.GetEthTransfer(); nodeValue != nil {
-		executionLogForNode, err = v.runEthTransfer(stepID, node, nodeValue)
-	} else if nodeValue := node.GetLoop(); nodeValue != nil {
-		// For loop nodes, use the execution queue
-		return v.executeLoopWithQueue(stepID, node, nodeValue)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 	} else {
 		err = fmt.Errorf("unknown node type for node ID %s", stepID)
 	}
@@ -4399,7 +4293,6 @@ func (v *VM) executeNodeDirect(node *avsproto.TaskNode, stepID string) (*avsprot
 	var err error
 
 	// Execute the appropriate node type
-<<<<<<< HEAD
 	if node.GetRestApi() != nil {
 		executionLogForNode, err = v.runRestApi(node)
 	} else if node.GetBranch() != nil {
@@ -4425,32 +4318,6 @@ func (v *VM) executeNodeDirect(node *avsproto.TaskNode, stepID string) (*avsprot
 		// For loop nodes, we need special handling to use the execution queue
 		loopNode := node.GetLoop()
 		return v.executeLoopWithQueue(stepID, node, loopNode)
-=======
-	if nodeValue := node.GetRestApi(); nodeValue != nil {
-		executionLogForNode, err = v.runRestApi(stepID, node, nodeValue)
-	} else if nodeValue := node.GetBranch(); nodeValue != nil {
-		var nextStep *Step
-		executionLogForNode, nextStep, err = v.runBranch(stepID, node, nodeValue)
-		// Note: We ignore nextStep in direct execution as we don't follow jumps
-		_ = nextStep
-	} else if nodeValue := node.GetGraphqlQuery(); nodeValue != nil {
-		executionLogForNode, err = v.runGraphQL(stepID, node, nodeValue)
-	} else if nodeValue := node.GetCustomCode(); nodeValue != nil {
-		executionLogForNode, err = v.runCustomCode(stepID, node, nodeValue)
-	} else if nodeValue := node.GetContractRead(); nodeValue != nil {
-		executionLogForNode, err = v.runContractRead(stepID, node, nodeValue)
-	} else if nodeValue := node.GetContractWrite(); nodeValue != nil {
-		executionLogForNode, err = v.runContractWrite(stepID, node, nodeValue)
-	} else if nodeValue := node.GetFilter(); nodeValue != nil {
-		executionLogForNode, err = v.runFilter(stepID, node, nodeValue)
-	} else if nodeValue := node.GetEthTransfer(); nodeValue != nil {
-		executionLogForNode, err = v.runEthTransfer(stepID, node, nodeValue)
-	} else if node.GetBalance() != nil {
-		executionLogForNode, err = v.runBalance(stepID, node)
-	} else if nodeValue := node.GetLoop(); nodeValue != nil {
-		// For loop nodes, we need special handling to use the execution queue
-		return v.executeLoopWithQueue(stepID, node, nodeValue)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 	} else {
 		err = fmt.Errorf("unknown node type for node ID %s", stepID)
 	}
@@ -4603,7 +4470,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				}
 
 				iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, iterationIndex)
-				nestedNode := createNestedNodeFromLoop(node, iterationStepID, iterInputs, v)
+				nestedNode := v.createNestedNodeFromLoop(node, iterationStepID, iterInputs)
 
 				// Debug: Log what variables are being set for this iteration
 				if v.logger != nil {
@@ -4672,7 +4539,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 			}
 
 			iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, i)
-			nestedNode := createNestedNodeFromLoop(node, iterationStepID, iterInputs, v)
+			nestedNode := v.createNestedNodeFromLoop(node, iterationStepID, iterInputs)
 
 			resultChannel := make(chan *ExecutionResult, 1)
 			task := &ExecutionTask{
@@ -4755,7 +4622,165 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	return s, nil
 }
 
-// Loop helper methods moved to loop_helpers.go for shared use
+// createNestedNodeFromLoop creates a nested node for loop iteration
+func (v *VM) createNestedNodeFromLoop(loopNodeDef *avsproto.LoopNode, iterationStepID string, iterInputs map[string]interface{}) *avsproto.TaskNode {
+	nodeName := fmt.Sprintf("loop_iteration_%s", iterationStepID)
+
+	if ethTransfer := loopNodeDef.GetEthTransfer(); ethTransfer != nil {
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_ETH_TRANSFER,
+			TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: ethTransfer},
+		}
+	} else if contractWrite := loopNodeDef.GetContractWrite(); contractWrite != nil {
+		// Apply template variable substitution
+		processedContractWrite := v.processContractWriteTemplates(contractWrite, iterInputs)
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE,
+			TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: processedContractWrite},
+		}
+	} else if contractRead := loopNodeDef.GetContractRead(); contractRead != nil {
+		processedContractRead := v.processContractReadTemplates(contractRead, iterInputs)
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_READ,
+			TaskType: &avsproto.TaskNode_ContractRead{ContractRead: processedContractRead},
+		}
+	} else if graphqlQuery := loopNodeDef.GetGraphqlDataQuery(); graphqlQuery != nil {
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_GRAPHQL_QUERY,
+			TaskType: &avsproto.TaskNode_GraphqlQuery{GraphqlQuery: graphqlQuery},
+		}
+	} else if restApi := loopNodeDef.GetRestApi(); restApi != nil {
+		processedRestApi := v.processRestApiTemplates(restApi, iterInputs)
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_REST_API,
+			TaskType: &avsproto.TaskNode_RestApi{RestApi: processedRestApi},
+		}
+	} else if customCode := loopNodeDef.GetCustomCode(); customCode != nil {
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
+			TaskType: &avsproto.TaskNode_CustomCode{CustomCode: customCode},
+		}
+	}
+
+	return nil
+}
+
+// Helper methods for template processing (these need to be moved from LoopProcessor)
+func (v *VM) processContractWriteTemplates(contractWrite *avsproto.ContractWriteNode, iterInputs map[string]interface{}) *avsproto.ContractWriteNode {
+	// Create a copy of the contract write configuration
+	processed := &avsproto.ContractWriteNode{
+		Config: &avsproto.ContractWriteNode_Config{
+			ContractAddress: v.substituteTemplateVariables(contractWrite.Config.ContractAddress, iterInputs),
+			ContractAbi:     contractWrite.Config.ContractAbi, // ⚠️ CRITICAL: ABI is NEVER subject to template substitution
+			CallData:        v.substituteTemplateVariables(contractWrite.Config.CallData, iterInputs),
+		},
+	}
+
+	// Process method calls
+	for _, methodCall := range contractWrite.Config.MethodCalls {
+		var processedCallData *string
+		if methodCall.CallData != nil {
+			// Use callData as-is without template substitution (callData should be literal hex string)
+			processedCallData = methodCall.CallData
+		}
+		processedMethodCall := &avsproto.ContractWriteNode_MethodCall{
+			CallData:     processedCallData,
+			MethodName:   v.substituteTemplateVariables(methodCall.MethodName, iterInputs),
+			MethodParams: SubstituteTemplateVariablesArray(methodCall.MethodParams, iterInputs, v.substituteTemplateVariables),
+		}
+
+		processed.Config.MethodCalls = append(processed.Config.MethodCalls, processedMethodCall)
+	}
+
+	return processed
+}
+
+func (v *VM) processContractReadTemplates(contractRead *avsproto.ContractReadNode, iterInputs map[string]interface{}) *avsproto.ContractReadNode {
+	// Create a copy of the contract read configuration
+	processed := &avsproto.ContractReadNode{
+		Config: &avsproto.ContractReadNode_Config{
+			ContractAddress: v.substituteTemplateVariables(contractRead.Config.ContractAddress, iterInputs),
+			ContractAbi:     contractRead.Config.ContractAbi, // ⚠️ CRITICAL: ABI is NEVER subject to template substitution
+		},
+	}
+
+	// Process method calls
+	for _, methodCall := range contractRead.Config.MethodCalls {
+		var processedCallData *string
+		if methodCall.CallData != nil {
+			// Use callData as-is without template substitution (callData should be literal hex string)
+			processedCallData = methodCall.CallData
+		}
+		processedMethodCall := &avsproto.ContractReadNode_MethodCall{
+			CallData:      processedCallData,
+			MethodName:    v.substituteTemplateVariables(methodCall.MethodName, iterInputs),
+			MethodParams:  SubstituteTemplateVariablesArray(methodCall.MethodParams, iterInputs, v.substituteTemplateVariables),
+			ApplyToFields: make([]string, len(methodCall.ApplyToFields)),
+		}
+
+		// Copy applyToFields (no template substitution needed for field names)
+		copy(processedMethodCall.ApplyToFields, methodCall.ApplyToFields)
+
+		processed.Config.MethodCalls = append(processed.Config.MethodCalls, processedMethodCall)
+	}
+
+	return processed
+}
+
+func (v *VM) processRestApiTemplates(restApi *avsproto.RestAPINode, iterInputs map[string]interface{}) *avsproto.RestAPINode {
+	// Create a copy of the REST API configuration
+	processed := &avsproto.RestAPINode{
+		Config: &avsproto.RestAPINode_Config{
+			Url:    v.substituteTemplateVariables(restApi.Config.Url, iterInputs),
+			Method: v.substituteTemplateVariables(restApi.Config.Method, iterInputs),
+			Body:   v.substituteTemplateVariables(restApi.Config.Body, iterInputs),
+		},
+	}
+
+	// Process headers
+	if restApi.Config.Headers != nil {
+		processed.Config.Headers = make(map[string]string)
+		for key, value := range restApi.Config.Headers {
+			processedKey := v.substituteTemplateVariables(key, iterInputs)
+			processedValue := v.substituteTemplateVariables(value, iterInputs)
+			processed.Config.Headers[processedKey] = processedValue
+		}
+	}
+
+	return processed
+}
+
+// substituteTemplateVariables replaces template variables like {{value}} and {{index}} with actual values
+func (v *VM) substituteTemplateVariables(text string, iterInputs map[string]interface{}) string {
+	if text == "" {
+		return text
+	}
+
+	// Simple template variable substitution
+	// Replace {{value}} with the current iteration value
+	// Replace {{index}} with the current iteration index
+	result := text
+
+	for varName, varValue := range iterInputs {
+		placeholder := fmt.Sprintf("{{%s}}", varName)
+		replacement := fmt.Sprintf("%v", varValue)
+		result = strings.ReplaceAll(result, placeholder, replacement)
+	}
+
+	return result
+}
 
 // getStatusText returns the standard HTTP status text for a given status code
 func getStatusText(statusCode int) string {

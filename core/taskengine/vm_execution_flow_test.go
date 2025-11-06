@@ -30,11 +30,7 @@ func TestVM_EthTransfer_BasicExecution(t *testing.T) {
 		},
 	}
 
-<<<<<<< HEAD
 	executionStep, err := vm.runEthTransfer(&avsproto.TaskNode{Id: "test_eth_transfer", Type: avsproto.NodeType_NODE_TYPE_ETH_TRANSFER, TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: node}})
-=======
-	executionStep, err := vm.runEthTransfer("test_eth_transfer", &avsproto.TaskNode{Id: "test_eth_transfer", Type: avsproto.NodeType_NODE_TYPE_ETH_TRANSFER, TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: node}}, node)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	// ETH transfer will likely fail in test environment, but should handle gracefully
 	assert.NotNil(t, executionStep)
@@ -99,11 +95,7 @@ func TestVM_EthTransfer_ErrorHandling(t *testing.T) {
 			vm.WithLogger(testutil.GetLogger())
 			tt.setupVM(vm)
 
-<<<<<<< HEAD
 			executionStep, _ := vm.runEthTransfer(&avsproto.TaskNode{Id: "test_eth_transfer_error", Type: avsproto.NodeType_NODE_TYPE_ETH_TRANSFER, TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: tt.node}})
-=======
-			executionStep, _ := vm.runEthTransfer("test_eth_transfer_error", &avsproto.TaskNode{Id: "test_eth_transfer_error", Type: avsproto.NodeType_NODE_TYPE_ETH_TRANSFER, TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: tt.node}}, tt.node)
->>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 			assert.NotNil(t, executionStep)
 			assert.Equal(t, "test_eth_transfer_error", executionStep.Id)
