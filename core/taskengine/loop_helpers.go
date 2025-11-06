@@ -12,6 +12,8 @@ import (
 // This file contains shared helper functions for loop execution.
 // These functions support template variable substitution, nested node creation, and
 // input variable resolution for loop iterations in VM.executeLoopWithQueue.
+// These functions handle template variable substitution, nested node creation, and
+// input variable resolution for loop iterations.
 
 // substituteTemplateVariables replaces template variables like {{value}} and {{index}} with actual values.
 // This is a pure function with no VM dependency.
@@ -183,21 +185,21 @@ func createNestedNodeFromLoop(loopNodeDef *avsproto.LoopNode, iterationStepID st
 			TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: ethTransfer},
 		}
 	} else if contractWrite := loopNodeDef.GetContractWrite(); contractWrite != nil {
-		// Don't do template substitution here - let execution-time processing handle it
-		// This allows dot notation like {{value.field}} to work correctly
+		// Apply template variable substitution
+		processedContractWrite := processContractWriteTemplates(vm, contractWrite, iterInputs)
 		return &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
 			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE,
-			TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: contractWrite},
+			TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: processedContractWrite},
 		}
 	} else if contractRead := loopNodeDef.GetContractRead(); contractRead != nil {
-		// Don't do template substitution here - let execution-time processing handle it
+		processedContractRead := processContractReadTemplates(vm, contractRead, iterInputs)
 		return &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
 			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_READ,
-			TaskType: &avsproto.TaskNode_ContractRead{ContractRead: contractRead},
+			TaskType: &avsproto.TaskNode_ContractRead{ContractRead: processedContractRead},
 		}
 	} else if graphqlQuery := loopNodeDef.GetGraphqlDataQuery(); graphqlQuery != nil {
 		return &avsproto.TaskNode{
@@ -207,12 +209,12 @@ func createNestedNodeFromLoop(loopNodeDef *avsproto.LoopNode, iterationStepID st
 			TaskType: &avsproto.TaskNode_GraphqlQuery{GraphqlQuery: graphqlQuery},
 		}
 	} else if restApi := loopNodeDef.GetRestApi(); restApi != nil {
-		// Don't do template substitution here - let execution-time processing handle it
+		processedRestApi := processRestApiTemplates(restApi, iterInputs)
 		return &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
 			Type:     avsproto.NodeType_NODE_TYPE_REST_API,
-			TaskType: &avsproto.TaskNode_RestApi{RestApi: restApi},
+			TaskType: &avsproto.TaskNode_RestApi{RestApi: processedRestApi},
 		}
 	} else if customCode := loopNodeDef.GetCustomCode(); customCode != nil {
 		return &avsproto.TaskNode{
