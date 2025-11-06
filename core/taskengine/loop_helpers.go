@@ -185,21 +185,21 @@ func createNestedNodeFromLoop(loopNodeDef *avsproto.LoopNode, iterationStepID st
 			TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: ethTransfer},
 		}
 	} else if contractWrite := loopNodeDef.GetContractWrite(); contractWrite != nil {
-		// Apply template variable substitution
-		processedContractWrite := processContractWriteTemplates(vm, contractWrite, iterInputs)
+		// Don't do template substitution here - let execution-time processing handle it
+		// This allows dot notation like {{value.field}} to work correctly
 		return &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
 			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE,
-			TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: processedContractWrite},
+			TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: contractWrite},
 		}
 	} else if contractRead := loopNodeDef.GetContractRead(); contractRead != nil {
-		processedContractRead := processContractReadTemplates(vm, contractRead, iterInputs)
+		// Don't do template substitution here - let execution-time processing handle it
 		return &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
 			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_READ,
-			TaskType: &avsproto.TaskNode_ContractRead{ContractRead: processedContractRead},
+			TaskType: &avsproto.TaskNode_ContractRead{ContractRead: contractRead},
 		}
 	} else if graphqlQuery := loopNodeDef.GetGraphqlDataQuery(); graphqlQuery != nil {
 		return &avsproto.TaskNode{
@@ -209,12 +209,12 @@ func createNestedNodeFromLoop(loopNodeDef *avsproto.LoopNode, iterationStepID st
 			TaskType: &avsproto.TaskNode_GraphqlQuery{GraphqlQuery: graphqlQuery},
 		}
 	} else if restApi := loopNodeDef.GetRestApi(); restApi != nil {
-		processedRestApi := processRestApiTemplates(restApi, iterInputs)
+		// Don't do template substitution here - let execution-time processing handle it
 		return &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
 			Type:     avsproto.NodeType_NODE_TYPE_REST_API,
-			TaskType: &avsproto.TaskNode_RestApi{RestApi: processedRestApi},
+			TaskType: &avsproto.TaskNode_RestApi{RestApi: restApi},
 		}
 	} else if customCode := loopNodeDef.GetCustomCode(); customCode != nil {
 		return &avsproto.TaskNode{
