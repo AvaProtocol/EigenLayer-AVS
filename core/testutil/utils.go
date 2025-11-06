@@ -90,12 +90,19 @@ func LoadDotEnv() error {
 	return nil
 }
 
-// init loads environment variables from .env file and test configuration.
-// When commands use a non-default path via --config flag, testConfig will be nil
-// and the test utility functions will panic if testConfig is not loaded.
+// init loads environment variables from .env file only.
+// Test config is now lazily loaded on first use to avoid loading during production binary startup.
 func init() {
 	// Load .env file first (if it exists)
 	_ = LoadDotEnv()
+}
+
+// loadTestConfigOnce lazily loads the test config on first access.
+// This avoids loading config during production binary startup.
+func loadTestConfigOnce() {
+	if testConfig != nil {
+		return // Already loaded
+	}
 
 	if _, thisFile, _, ok := runtime.Caller(0); ok {
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../.."))
@@ -130,6 +137,7 @@ func GetTestConfig() *config.Config {
 // GetTestRPC returns the RPC URL for tests from aggregator config
 // Panics if config is not loaded or EthHttpRpcUrl is empty
 func GetTestRPC() string {
+	loadTestConfigOnce()
 	if testConfig == nil {
 		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}
@@ -142,6 +150,7 @@ func GetTestRPC() string {
 // GetTestWsRPC returns the WebSocket RPC URL for tests from aggregator config
 // Panics if config is not loaded or EthWsRpcUrl is empty
 func GetTestWsRPC() string {
+	loadTestConfigOnce()
 	if testConfig == nil {
 		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}
@@ -158,6 +167,7 @@ func GetTestWsRPC() string {
 // GetTestBundlerRPC returns the bundler RPC URL for tests from aggregator config
 // Panics if config is not loaded or BundlerURL is empty
 func GetTestBundlerRPC() string {
+	loadTestConfigOnce()
 	if testConfig == nil {
 		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}

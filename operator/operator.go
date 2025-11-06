@@ -433,7 +433,13 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	)
 
 	if err != nil {
-		return nil, err
+		logger.Errorf("❌ Cannot decrypt ECDSA private key: %s", c.EcdsaPrivateKeyStorePath)
+		logger.Errorf("   Error: %v", err)
+		if strings.Contains(err.Error(), "password") || strings.Contains(err.Error(), "decrypt") {
+			logger.Errorf("   🔑 Wrong password for ECDSA key file")
+			logger.Infof("   💡 Set correct password: export OPERATOR_ECDSA_KEY_PASSWORD=your_password")
+		}
+		return nil, fmt.Errorf("failed to decrypt ECDSA key file %s: %w", c.EcdsaPrivateKeyStorePath, err)
 	}
 
 	sdkClients, err := clients.BuildAll(chainioConfig, operatorEcdsaPrivateKey, logger)
