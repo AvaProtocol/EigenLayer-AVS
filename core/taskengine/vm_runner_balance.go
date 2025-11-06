@@ -133,15 +133,16 @@ func formatBalance(rawBalance string, decimals int) string {
 }
 
 // runBalance is the VM method wrapper for balance node execution
-func (v *VM) runBalance(stepID string, taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runBalance(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, error) {
 	// Extract the balance node from taskNode
 	node := taskNode.GetBalance()
 	if node == nil {
 		err := fmt.Errorf("taskNode does not contain a BalanceNode")
-		executionLog := CreateNodeExecutionStep(stepID, taskNode, v)
+		executionLog := CreateNodeExecutionStep(taskNode.Id, taskNode, v)
 		finalizeStep(executionLog, false, err, err.Error(), "")
 		return executionLog, err
 	}
+	stepID := taskNode.Id
 	// Create execution step
 	executionLogStep := CreateNodeExecutionStep(stepID, taskNode, v)
 
