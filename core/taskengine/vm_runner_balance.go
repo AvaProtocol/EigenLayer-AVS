@@ -133,9 +133,17 @@ func formatBalance(rawBalance string, decimals int) string {
 }
 
 // runBalance is the VM method wrapper for balance node execution
-func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runBalance(stepID string, taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, error) {
+	// Extract the balance node from taskNode
+	node := taskNode.GetBalance()
+	if node == nil {
+		err := fmt.Errorf("taskNode does not contain a BalanceNode")
+		executionLog := CreateNodeExecutionStep(stepID, taskNode, v)
+		finalizeStep(executionLog, false, err, err.Error(), "")
+		return executionLog, err
+	}
 	// Create execution step
-	executionLogStep := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_BALANCE, v)
+	executionLogStep := CreateNodeExecutionStep(stepID, taskNode, v)
 
 	var logBuilder strings.Builder
 	logBuilder.WriteString(formatNodeExecutionLogHeader(executionLogStep))
@@ -145,7 +153,7 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 		finalizeStep(executionLogStep, err == nil, err, "", logBuilder.String())
 	}()
 
-	config := nodeValue.Config
+	config := node.Config
 	if err = validateNodeConfig(config, "BalanceNode"); err != nil {
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
 		return executionLogStep, err

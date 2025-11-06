@@ -436,7 +436,7 @@ func NewRestProcessorWithExecutor(vm *VM, executor HTTPRequestExecutor) *RestPro
 
 func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avsproto.Execution_Step, error) {
 	// Use shared function to create execution step
-	executionLogStep := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_REST_API, r.vm)
+	executionLogStep := CreateNodeExecutionStep(stepID, r.GetTaskNode(), r.vm)
 
 	var logBuilder strings.Builder
 	logBuilder.WriteString(formatNodeExecutionLogHeader(executionLogStep))

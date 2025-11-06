@@ -81,7 +81,7 @@ func (r *FilterProcessor) wrapExpressionForExecution(cleanExpression string) str
 
 func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*avsproto.Execution_Step, error) {
 	// Use shared function to create execution step
-	executionLogStep := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_FILTER, r.vm)
+	executionLogStep := CreateNodeExecutionStep(stepID, r.GetTaskNode(), r.vm)
 
 	var logBuilder strings.Builder
 	logBuilder.WriteString(formatNodeExecutionLogHeader(executionLogStep))

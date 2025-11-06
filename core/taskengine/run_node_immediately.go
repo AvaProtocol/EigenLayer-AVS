@@ -1482,8 +1482,11 @@ func (n *Engine) executeMethodCallForSimulation(ctx context.Context, methodCall 
 	tempVM.smartWalletConfig = n.smartWalletConfig // Use the engine's smart wallet config
 	tempVM.SetSimulation(true)                     // Use simulation mode for reads
 
-	// Execute the contract read using VM's runContractRead
-	executionStep, err := tempVM.runContractRead("temp_step", contractReadNode)
+	// Wrap into a temporary TaskNode and execute using VM's runContractRead
+	// Use the same ID style as real nodes for consistency
+	tempStepID := model.GenerateID()
+	tempTaskNode := &avsproto.TaskNode{Id: tempStepID, Type: avsproto.NodeType_NODE_TYPE_CONTRACT_READ, TaskType: &avsproto.TaskNode_ContractRead{ContractRead: contractReadNode}}
+	executionStep, err := tempVM.runContractRead(tempStepID, tempTaskNode, contractReadNode)
 	if err != nil {
 		return nil, fmt.Errorf("contract read failed: %v", err)
 	}

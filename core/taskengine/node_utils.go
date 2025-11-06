@@ -56,30 +56,24 @@ func updateTriggerVariableInVM(vm *VM, triggerVarName string, triggerVarData map
 	}
 }
 
-// createNodeExecutionStep creates a standardized execution step for node execution
+// CreateNodeExecutionStep creates a standardized execution step for node execution
 // This function consolidates the common logic used across all node runners
 // The Input field contains the node's configuration, not input data from previous steps
-func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) *avsproto.Execution_Step {
+//
+// Parameters:
+//   - stepID: The ID of the step being executed
+//   - node: The actual TaskNode being executed (used to get nodeType and type-specific config like is_simulated)
+//   - vm: The VM context
+func CreateNodeExecutionStep(stepID string, node *avsproto.TaskNode, vm *VM) *avsproto.Execution_Step {
 	t0 := time.Now()
 
 	// Get node data using helper function to reduce duplication
 	nodeName, nodeConfig := vm.GetNodeDataForExecution(stepID)
 
-	// Debug logging
-	if vm.logger != nil {
-		vm.logger.Debug("createNodeExecutionStep: Creating execution step",
-			"stepID", stepID,
-			"nodeType", nodeType.String(),
-			"nodeName", nodeName,
-			"nodeConfig_exists", nodeConfig != nil)
-
-		if nodeConfig != nil {
-			// Log the content of nodeConfig
-			vm.logger.Debug("createNodeExecutionStep: Node config details",
-				"stepID", stepID,
-				"nodeConfig_type", fmt.Sprintf("%T", nodeConfig),
-				"nodeConfig_string", nodeConfig.String())
-		}
+	// Get nodeType from the TaskNode
+	var nodeType avsproto.NodeType
+	if node != nil {
+		nodeType = node.Type
 	}
 
 	step := &avsproto.Execution_Step{
@@ -106,16 +100,13 @@ func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) 
 			isSimulated = true
 
 			// Check if node config explicitly sets is_simulated
-			vm.mu.Lock()
-			if taskNode, exists := vm.TaskNodes[stepID]; exists {
-				if contractWrite := taskNode.GetContractWrite(); contractWrite != nil && contractWrite.Config != nil {
-					// Respect the is_simulated config if explicitly set
+			if node != nil {
+				if contractWrite := node.GetContractWrite(); contractWrite != nil && contractWrite.Config != nil {
 					if contractWrite.Config.IsSimulated != nil {
 						isSimulated = *contractWrite.Config.IsSimulated
 					}
 				}
 			}
-			vm.mu.Unlock()
 		}
 
 		// Set provider based on simulation flag
@@ -137,13 +128,6 @@ func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) 
 		if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
 			step.ExecutionContext = ctxVal
 		}
-	}
-
-	// Log the final step
-	if vm.logger != nil {
-		vm.logger.Debug("createNodeExecutionStep: Created execution step",
-			"stepID", stepID,
-			"step_config_exists", step.Config != nil)
 	}
 
 	return step

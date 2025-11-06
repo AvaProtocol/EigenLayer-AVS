@@ -44,7 +44,7 @@ func NewLoopProcessor(vm *VM) *LoopProcessor {
 
 func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avsproto.Execution_Step, error) {
 	// Use shared function to create execution step
-	s := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_LOOP, r.vm)
+	s := CreateNodeExecutionStep(stepID, r.GetTaskNode(), r.vm)
 
 	var log strings.Builder
 	log.WriteString(formatNodeExecutionLogHeader(s))

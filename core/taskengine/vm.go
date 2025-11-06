@@ -84,8 +84,12 @@ type Step struct {
 }
 
 type CommonProcessor struct {
-	vm *VM
+	vm       *VM
+	taskNode *avsproto.TaskNode
 }
+
+func (c *CommonProcessor) SetTaskNode(node *avsproto.TaskNode) { c.taskNode = node }
+func (c *CommonProcessor) GetTaskNode() *avsproto.TaskNode     { return c.taskNode }
 
 func (c *CommonProcessor) SetVar(name string, data any) {
 	c.vm.AddVar(name, data)
@@ -1220,33 +1224,33 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 	var executionLogForNode *avsproto.Execution_Step // To capture log from methods that return it
 
 	if nodeValue := node.GetRestApi(); nodeValue != nil {
-		executionLogForNode, err = v.runRestApi(node.Id, nodeValue) // runRestApi returns *avsproto.Execution_Step, error
+		executionLogForNode, err = v.runRestApi(node.Id, node, nodeValue) // runRestApi returns *avsproto.Execution_Step, error
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
 	} else if nodeValue := node.GetBranch(); nodeValue != nil {
 		var branchLog *avsproto.Execution_Step
-		branchLog, nextStep, err = v.runBranch(node.Id, nodeValue) // runBranch now returns log, step, err
+		branchLog, nextStep, err = v.runBranch(node.Id, node, nodeValue) // runBranch now returns log, step, err
 		if branchLog != nil {
 			v.addExecutionLog(branchLog) // Log is added by runBranch itself if successful, this is a fallback or if runBranch changes
 		}
 	} else if nodeValue := node.GetGraphqlQuery(); nodeValue != nil {
-		executionLogForNode, err = v.runGraphQL(node.Id, nodeValue)
+		executionLogForNode, err = v.runGraphQL(node.Id, node, nodeValue)
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
 	} else if nodeValue := node.GetCustomCode(); nodeValue != nil {
-		executionLogForNode, err = v.runCustomCode(node.Id, nodeValue)
+		executionLogForNode, err = v.runCustomCode(node.Id, node, nodeValue)
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
 	} else if nodeValue := node.GetContractRead(); nodeValue != nil {
-		executionLogForNode, err = v.runContractRead(node.Id, nodeValue)
+		executionLogForNode, err = v.runContractRead(node.Id, node, nodeValue)
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
 	} else if nodeValue := node.GetContractWrite(); nodeValue != nil {
-		executionLogForNode, err = v.runContractWrite(node.Id, nodeValue)
+		executionLogForNode, err = v.runContractWrite(node.Id, node, nodeValue)
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 
@@ -1280,22 +1284,22 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 			}
 		}
 	} else if nodeValue := node.GetLoop(); nodeValue != nil {
-		executionLogForNode, err = v.runLoop(node.Id, nodeValue) // loop does not return a jump step
+		executionLogForNode, err = v.runLoop(node.Id, node, nodeValue) // loop does not return a jump step
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
 	} else if nodeValue := node.GetFilter(); nodeValue != nil {
-		executionLogForNode, err = v.runFilter(node.Id, nodeValue)
+		executionLogForNode, err = v.runFilter(node.Id, node, nodeValue)
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
 	} else if nodeValue := node.GetEthTransfer(); nodeValue != nil {
-		executionLogForNode, err = v.runEthTransfer(node.Id, nodeValue)
+		executionLogForNode, err = v.runEthTransfer(node.Id, node, nodeValue)
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
-	} else if nodeValue := node.GetBalance(); nodeValue != nil {
-		executionLogForNode, err = v.runBalance(node.Id, nodeValue)
+	} else if node.GetBalance() != nil {
+		executionLogForNode, err = v.runBalance(node.Id, node)
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
@@ -1326,8 +1330,9 @@ func (v *VM) addExecutionLog(log *avsproto.Execution_Step) {
 	v.ExecutionLogs = append(v.ExecutionLogs, log)
 }
 
-func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*avsproto.Execution_Step, error) {
-	p := NewRestProcessor(v)                          // v is passed, CommonProcessor uses v.AddVar
+func (v *VM) runRestApi(stepID string, taskNode *avsproto.TaskNode, nodeValue *avsproto.RestAPINode) (*avsproto.Execution_Step, error) {
+	p := NewRestProcessor(v) // v is passed, CommonProcessor uses v.AddVar
+	p.CommonProcessor.SetTaskNode(taskNode)
 	executionLog, err := p.Execute(stepID, nodeValue) // p.Execute should use SetOutputVarForStep
 	v.mu.Lock()
 	executionLog.Inputs = v.collectInputKeysForLog(stepID) // Pass stepID to exclude current node's variables
@@ -1336,9 +1341,11 @@ func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*avspro
 	return executionLog, err // RestAPI node doesn't dictate a jump
 }
 
-func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runGraphQL(stepID string, taskNode *avsproto.TaskNode, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, error) {
 	// GraphQL URL and query are now in Config message, not input variables
-	g, err := NewGraphqlQueryProcessor(v)     // No URL parameter needed, processor gets it from Config
+	g, err := NewGraphqlQueryProcessor(v) // No URL parameter needed, processor gets it from Config
+	// Set task node for execution step context
+	g.CommonProcessor.SetTaskNode(taskNode)
 	var executionLog *avsproto.Execution_Step // Declare to ensure it's always initialized
 	if err != nil {
 		// Create a failed execution log step
@@ -1360,7 +1367,7 @@ func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*avspro
 	return executionLog, err
 }
 
-func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runContractRead(stepID string, taskNode *avsproto.TaskNode, node *avsproto.ContractReadNode) (*avsproto.Execution_Step, error) {
 	var executionLog *avsproto.Execution_Step
 
 	// Check if node has empty config first - let processor handle this case
@@ -1393,6 +1400,7 @@ func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*a
 	defer rpcClient.Close()
 
 	processor := NewContractReadProcessor(v, rpcClient)
+	processor.CommonProcessor.SetTaskNode(taskNode)
 	executionLog, err = processor.Execute(stepID, node)
 	v.mu.Lock()
 	if executionLog != nil {
@@ -1403,7 +1411,7 @@ func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*a
 	return executionLog, err
 }
 
-func (v *VM) runContractWrite(stepID string, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runContractWrite(stepID string, taskNode *avsproto.TaskNode, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {
 	var executionLog *avsproto.Execution_Step
 	if v.smartWalletConfig == nil || v.smartWalletConfig.EthRpcUrl == "" {
 		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract write")
@@ -1453,6 +1461,7 @@ func (v *VM) runContractWrite(stepID string, node *avsproto.ContractWriteNode) (
 	}
 
 	processor := NewContractWriteProcessor(v, rpcClient, v.smartWalletConfig, v.TaskOwner)
+	processor.CommonProcessor.SetTaskNode(taskNode)
 	executionLog, err = processor.Execute(stepID, node)
 	v.mu.Lock()
 	if executionLog != nil {
@@ -1463,14 +1472,12 @@ func (v *VM) runContractWrite(stepID string, node *avsproto.ContractWriteNode) (
 	return executionLog, err
 }
 
-func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runCustomCode(stepID string, taskNode *avsproto.TaskNode, node *avsproto.CustomCodeNode) (*avsproto.Execution_Step, error) {
 	// Special handling for blockTrigger nodes that were created via CreateNodeFromType
 	// These nodes have no Config but should be handled specially
 	if node.Config == nil {
 		// Check if this is a blockTrigger node by looking at the node name in TaskNodes
-		v.mu.Lock()
-		taskNode, exists := v.TaskNodes[stepID]
-		v.mu.Unlock()
+		exists := taskNode != nil
 
 		if v.logger != nil {
 			v.logger.Info("runCustomCode: Config is nil", "stepID", stepID, "exists", exists)
@@ -1509,8 +1516,7 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 		}
 		// Get the node's configuration data
 		var nodeConfig *structpb.Value
-		v.mu.Lock()
-		if taskNode, exists := v.TaskNodes[stepID]; exists {
+		if taskNode != nil {
 			// Extract node configuration instead of the removed input field
 			nodeConfigMap := ExtractNodeConfiguration(taskNode)
 			if nodeConfigMap != nil {
@@ -1519,7 +1525,6 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 				}
 			}
 		}
-		v.mu.Unlock()
 
 		return &avsproto.Execution_Step{
 			Id:      stepID, // Use new 'id' field
@@ -1533,6 +1538,7 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 
 	// Normal custom code execution
 	r := NewJSProcessor(v)
+	r.CommonProcessor.SetTaskNode(taskNode)
 	executionLog, err := r.Execute(stepID, node)
 	v.mu.Lock()
 	if executionLog != nil {
@@ -1543,9 +1549,10 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 	return executionLog, err
 }
 
-func (v *VM) runBranch(stepID string, nodeValue *avsproto.BranchNode) (*avsproto.Execution_Step, *Step, error) {
+func (v *VM) runBranch(stepID string, taskNode *avsproto.TaskNode, nodeValue *avsproto.BranchNode) (*avsproto.Execution_Step, *Step, error) {
 	processor := NewBranchProcessor(v)
-	executionLog, nextStep, err := processor.Execute(stepID, nodeValue) // This evaluates conditions
+	processor.CommonProcessor.SetTaskNode(taskNode)
+	executionLog, nextStep, err := processor.Execute(stepID, nodeValue)
 	// executionLog is already populated by BranchProcessor.Execute, including Inputs.
 	// v.addExecutionLog(executionLog) // BranchProcessor's Execute already adds its log to its own VM or handles it.
 	// The log returned here is for the *main* VM.
@@ -1570,9 +1577,9 @@ func (v *VM) runBranch(stepID string, nodeValue *avsproto.BranchNode) (*avsproto
 	return executionLog, nextStep, err // Return the log, the next step, and any error
 }
 
-func (v *VM) runLoop(stepID string, nodeValue *avsproto.LoopNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runLoop(stepID string, taskNode *avsproto.TaskNode, nodeValue *avsproto.LoopNode) (*avsproto.Execution_Step, error) {
 	// Use the new queue-based execution instead of the old recursive approach
-	executionLog, err := v.executeLoopWithQueue(stepID, nodeValue)
+	executionLog, err := v.executeLoopWithQueue(stepID, taskNode, nodeValue)
 
 	v.mu.Lock()
 	if executionLog != nil {
@@ -1583,8 +1590,9 @@ func (v *VM) runLoop(stepID string, nodeValue *avsproto.LoopNode) (*avsproto.Exe
 	return executionLog, err // Loop node itself doesn't dictate a jump in the main plan
 }
 
-func (v *VM) runFilter(stepID string, nodeValue *avsproto.FilterNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runFilter(stepID string, taskNode *avsproto.TaskNode, nodeValue *avsproto.FilterNode) (*avsproto.Execution_Step, error) {
 	p := NewFilterProcessor(v)
+	p.CommonProcessor.SetTaskNode(taskNode)
 	executionLog, err := p.Execute(stepID, nodeValue)
 	v.mu.Lock()
 	if executionLog != nil {
@@ -1595,7 +1603,7 @@ func (v *VM) runFilter(stepID string, nodeValue *avsproto.FilterNode) (*avsproto
 	return executionLog, err
 }
 
-func (v *VM) runEthTransfer(stepID string, node *avsproto.ETHTransferNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runEthTransfer(stepID string, taskNode *avsproto.TaskNode, node *avsproto.ETHTransferNode) (*avsproto.Execution_Step, error) {
 	var executionLog *avsproto.Execution_Step
 	if v.smartWalletConfig == nil {
 		err := fmt.Errorf("smart wallet config not set for ETH transfer")
@@ -1607,6 +1615,7 @@ func (v *VM) runEthTransfer(stepID string, node *avsproto.ETHTransferNode) (*avs
 	// For now, we don't need an actual ETH client connection for simulation
 	// In the future, this would use the actual ETH RPC client
 	processor := NewETHTransferProcessor(v, nil, v.smartWalletConfig, &v.TaskOwner)
+	processor.CommonProcessor.SetTaskNode(taskNode)
 	executionLog, err := processor.Execute(stepID, node)
 	v.mu.Lock()
 	if executionLog != nil {
@@ -4151,24 +4160,24 @@ func (v *VM) executeNodeWithIsolatedVars(node *avsproto.TaskNode, stepID string,
 		executionLogForNode, err = v.runCustomCodeWithIsolatedVars(stepID, nodeValue, isolatedVars)
 	} else if nodeValue := node.GetRestApi(); nodeValue != nil {
 		// For other node types, fall back to regular execution (they may need similar isolation)
-		executionLogForNode, err = v.runRestApi(stepID, nodeValue)
+		executionLogForNode, err = v.runRestApi(stepID, node, nodeValue)
 	} else if nodeValue := node.GetBranch(); nodeValue != nil {
 		var nextStep *Step
-		executionLogForNode, nextStep, err = v.runBranch(stepID, nodeValue)
+		executionLogForNode, nextStep, err = v.runBranch(stepID, node, nodeValue)
 		_ = nextStep // Ignore nextStep in direct execution
 	} else if nodeValue := node.GetGraphqlQuery(); nodeValue != nil {
-		executionLogForNode, err = v.runGraphQL(stepID, nodeValue)
+		executionLogForNode, err = v.runGraphQL(stepID, node, nodeValue)
 	} else if nodeValue := node.GetContractRead(); nodeValue != nil {
-		executionLogForNode, err = v.runContractRead(stepID, nodeValue)
+		executionLogForNode, err = v.runContractRead(stepID, node, nodeValue)
 	} else if nodeValue := node.GetContractWrite(); nodeValue != nil {
-		executionLogForNode, err = v.runContractWrite(stepID, nodeValue)
+		executionLogForNode, err = v.runContractWrite(stepID, node, nodeValue)
 	} else if nodeValue := node.GetFilter(); nodeValue != nil {
-		executionLogForNode, err = v.runFilter(stepID, nodeValue)
+		executionLogForNode, err = v.runFilter(stepID, node, nodeValue)
 	} else if nodeValue := node.GetEthTransfer(); nodeValue != nil {
-		executionLogForNode, err = v.runEthTransfer(stepID, nodeValue)
+		executionLogForNode, err = v.runEthTransfer(stepID, node, nodeValue)
 	} else if nodeValue := node.GetLoop(); nodeValue != nil {
 		// For loop nodes, use the execution queue
-		return v.executeLoopWithQueue(stepID, nodeValue)
+		return v.executeLoopWithQueue(stepID, node, nodeValue)
 	} else {
 		err = fmt.Errorf("unknown node type for node ID %s", stepID)
 	}
@@ -4239,29 +4248,29 @@ func (v *VM) executeNodeDirect(node *avsproto.TaskNode, stepID string) (*avsprot
 
 	// Execute the appropriate node type
 	if nodeValue := node.GetRestApi(); nodeValue != nil {
-		executionLogForNode, err = v.runRestApi(stepID, nodeValue)
+		executionLogForNode, err = v.runRestApi(stepID, node, nodeValue)
 	} else if nodeValue := node.GetBranch(); nodeValue != nil {
 		var nextStep *Step
-		executionLogForNode, nextStep, err = v.runBranch(stepID, nodeValue)
+		executionLogForNode, nextStep, err = v.runBranch(stepID, node, nodeValue)
 		// Note: We ignore nextStep in direct execution as we don't follow jumps
 		_ = nextStep
 	} else if nodeValue := node.GetGraphqlQuery(); nodeValue != nil {
-		executionLogForNode, err = v.runGraphQL(stepID, nodeValue)
+		executionLogForNode, err = v.runGraphQL(stepID, node, nodeValue)
 	} else if nodeValue := node.GetCustomCode(); nodeValue != nil {
-		executionLogForNode, err = v.runCustomCode(stepID, nodeValue)
+		executionLogForNode, err = v.runCustomCode(stepID, node, nodeValue)
 	} else if nodeValue := node.GetContractRead(); nodeValue != nil {
-		executionLogForNode, err = v.runContractRead(stepID, nodeValue)
+		executionLogForNode, err = v.runContractRead(stepID, node, nodeValue)
 	} else if nodeValue := node.GetContractWrite(); nodeValue != nil {
-		executionLogForNode, err = v.runContractWrite(stepID, nodeValue)
+		executionLogForNode, err = v.runContractWrite(stepID, node, nodeValue)
 	} else if nodeValue := node.GetFilter(); nodeValue != nil {
-		executionLogForNode, err = v.runFilter(stepID, nodeValue)
+		executionLogForNode, err = v.runFilter(stepID, node, nodeValue)
 	} else if nodeValue := node.GetEthTransfer(); nodeValue != nil {
-		executionLogForNode, err = v.runEthTransfer(stepID, nodeValue)
-	} else if nodeValue := node.GetBalance(); nodeValue != nil {
-		executionLogForNode, err = v.runBalance(stepID, nodeValue)
+		executionLogForNode, err = v.runEthTransfer(stepID, node, nodeValue)
+	} else if node.GetBalance() != nil {
+		executionLogForNode, err = v.runBalance(stepID, node)
 	} else if nodeValue := node.GetLoop(); nodeValue != nil {
 		// For loop nodes, we need special handling to use the execution queue
-		return v.executeLoopWithQueue(stepID, nodeValue)
+		return v.executeLoopWithQueue(stepID, node, nodeValue)
 	} else {
 		err = fmt.Errorf("unknown node type for node ID %s", stepID)
 	}
@@ -4270,9 +4279,9 @@ func (v *VM) executeNodeDirect(node *avsproto.TaskNode, stepID string) (*avsprot
 }
 
 // executeLoopWithQueue executes a loop node using the execution queue instead of recursive VM calls
-func (v *VM) executeLoopWithQueue(stepID string, node *avsproto.LoopNode) (*avsproto.Execution_Step, error) {
+func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, node *avsproto.LoopNode) (*avsproto.Execution_Step, error) {
 	// Use shared function to create execution step
-	s := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_LOOP, v)
+	s := CreateNodeExecutionStep(stepID, taskNode, v)
 
 	var log strings.Builder
 	log.WriteString(fmt.Sprintf("Start loop execution at %s", time.Now()))
