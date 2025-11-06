@@ -240,7 +240,7 @@ func containsReturnStatement(code string) bool {
 
 func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*avsproto.Execution_Step, error) {
 	// Use shared function to create execution step
-	executionStep := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_CUSTOM_CODE, r.vm)
+	executionStep := CreateNodeExecutionStep(stepID, r.GetTaskNode(), r.vm)
 
 	var sb strings.Builder
 	sb.WriteString(formatNodeExecutionLogHeader(executionStep))
