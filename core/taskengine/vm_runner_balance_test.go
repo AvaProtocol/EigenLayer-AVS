@@ -585,7 +585,11 @@ func TestBalanceNode_InvalidAddress(t *testing.T) {
 			Balance: node,
 		},
 	}
+<<<<<<< HEAD
 	step, err := vm.runBalance(taskNode)
+=======
+	step, err := vm.runBalance("balance-node-1", taskNode)
+>>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	if err == nil {
 		t.Error("expected error for invalid address but got none")
@@ -615,7 +619,11 @@ func TestBalanceNode_MissingAddress(t *testing.T) {
 			Balance: node,
 		},
 	}
+<<<<<<< HEAD
 	step, err := vm.runBalance(taskNode)
+=======
+	step, err := vm.runBalance("balance-node-1", taskNode)
+>>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	if err == nil {
 		t.Error("expected error for missing address but got none")
@@ -641,7 +649,11 @@ func TestBalanceNode_MissingChain(t *testing.T) {
 			Balance: node,
 		},
 	}
+<<<<<<< HEAD
 	step, err := vm.runBalance(taskNode)
+=======
+	step, err := vm.runBalance("balance-node-1", taskNode)
+>>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	if err == nil {
 		t.Error("expected error for missing chain but got none")
@@ -668,7 +680,11 @@ func TestBalanceNode_NegativeMinUsdValue(t *testing.T) {
 			Balance: node,
 		},
 	}
+<<<<<<< HEAD
 	step, err := vm.runBalance(taskNode)
+=======
+	step, err := vm.runBalance("balance-node-1", taskNode)
+>>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	if err == nil {
 		t.Error("expected error for negative minUsdValue but got none")
@@ -830,7 +846,11 @@ func TestBalanceNode_MissingAPIKey(t *testing.T) {
 		t.Fatalf("failed to create VM: %v", err)
 	}
 
+<<<<<<< HEAD
 	step, err := vm.runBalance(taskNode)
+=======
+	step, err := vm.runBalance("balance-node-1", taskNode)
+>>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	if err == nil {
 		t.Error("expected error for missing API key but got none")
@@ -960,7 +980,11 @@ func TestBalanceNode_TokenAddressesWithTemplateVariables(t *testing.T) {
 
 	// Execute the balance node - this will resolve template variables internally
 	balanceTaskNode := vm.TaskNodes["balance-node-1"]
+<<<<<<< HEAD
 	step, err := vm.runBalance(balanceTaskNode)
+=======
+	step, err := vm.runBalance("balance-node-1", balanceTaskNode)
+>>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 	if err != nil {
 		t.Fatalf("runBalance failed: %v", err)
@@ -1227,7 +1251,11 @@ func TestBalanceNode_ExtractAddressFromObject(t *testing.T) {
 
 			// Execute the balance node
 			balanceTaskNode := vm.TaskNodes["balance-node-1"]
+<<<<<<< HEAD
 			step, err := vm.runBalance(balanceTaskNode)
+=======
+			step, err := vm.runBalance("balance-node-1", balanceTaskNode)
+>>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 
 			if tc.shouldSucceed {
 				if err != nil {

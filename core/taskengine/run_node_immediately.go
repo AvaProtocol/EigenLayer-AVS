@@ -1486,7 +1486,11 @@ func (n *Engine) executeMethodCallForSimulation(ctx context.Context, methodCall 
 	// Use the same ID style as real nodes for consistency
 	tempStepID := model.GenerateID()
 	tempTaskNode := &avsproto.TaskNode{Id: tempStepID, Type: avsproto.NodeType_NODE_TYPE_CONTRACT_READ, TaskType: &avsproto.TaskNode_ContractRead{ContractRead: contractReadNode}}
+<<<<<<< HEAD
 	executionStep, err := tempVM.runContractRead(tempTaskNode)
+=======
+	executionStep, err := tempVM.runContractRead(tempStepID, tempTaskNode, contractReadNode)
+>>>>>>> e934d5c (refactor: remove redundant nodeValue parameter from runX functions)
 	if err != nil {
 		return nil, fmt.Errorf("contract read failed: %v", err)
 	}
