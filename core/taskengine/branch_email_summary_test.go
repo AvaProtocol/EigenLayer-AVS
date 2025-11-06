@@ -76,6 +76,17 @@ func TestBranchNode_EmailSummaryGeneration(t *testing.T) {
 		},
 	}
 
+	// Create TaskNode wrapper for the branch node
+	taskNode := &avsproto.TaskNode{
+		Id:   "branch1",
+		Name: "branch1",
+		Type: avsproto.NodeType_NODE_TYPE_BRANCH,
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: branchNode,
+		},
+	}
+	processor.CommonProcessor.SetTaskNode(taskNode)
+
 	// Execute the branch node
 	step, _, err := processor.Execute("branch1", branchNode)
 	assert.NoError(t, err, "Branch execution should not error")
@@ -223,6 +234,17 @@ func TestBranchNode_TrueConditionLogging(t *testing.T) {
 			},
 		},
 	}
+
+	// Create TaskNode wrapper for the branch node
+	taskNode := &avsproto.TaskNode{
+		Id:   "branch1",
+		Name: "branch1",
+		Type: avsproto.NodeType_NODE_TYPE_BRANCH,
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: branchNode,
+		},
+	}
+	processor.CommonProcessor.SetTaskNode(taskNode)
 
 	// Execute the branch node
 	step, _, err := processor.Execute("branch1", branchNode)

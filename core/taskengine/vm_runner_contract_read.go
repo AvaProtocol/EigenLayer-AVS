@@ -383,7 +383,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	}
 
 	// Use shared function to create execution step
-	s := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_CONTRACT_READ, r.vm)
+	s := CreateNodeExecutionStep(stepID, r.GetTaskNode(), r.vm)
 
 	var log strings.Builder
 	log.WriteString(formatNodeExecutionLogHeader(s))

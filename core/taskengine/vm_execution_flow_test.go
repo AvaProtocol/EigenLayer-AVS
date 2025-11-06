@@ -30,7 +30,7 @@ func TestVM_EthTransfer_BasicExecution(t *testing.T) {
 		},
 	}
 
-	executionStep, err := vm.runEthTransfer("test_eth_transfer", node)
+	executionStep, err := vm.runEthTransfer(&avsproto.TaskNode{Id: "test_eth_transfer", Type: avsproto.NodeType_NODE_TYPE_ETH_TRANSFER, TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: node}})
 
 	// ETH transfer will likely fail in test environment, but should handle gracefully
 	assert.NotNil(t, executionStep)
@@ -95,7 +95,7 @@ func TestVM_EthTransfer_ErrorHandling(t *testing.T) {
 			vm.WithLogger(testutil.GetLogger())
 			tt.setupVM(vm)
 
-			executionStep, _ := vm.runEthTransfer("test_eth_transfer_error", tt.node)
+			executionStep, _ := vm.runEthTransfer(&avsproto.TaskNode{Id: "test_eth_transfer_error", Type: avsproto.NodeType_NODE_TYPE_ETH_TRANSFER, TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: tt.node}})
 
 			assert.NotNil(t, executionStep)
 			assert.Equal(t, "test_eth_transfer_error", executionStep.Id)

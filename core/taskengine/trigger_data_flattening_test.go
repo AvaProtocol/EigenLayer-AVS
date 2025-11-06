@@ -320,6 +320,7 @@ func TestCamelCaseVariableResolutionConsistency(t *testing.T) {
 			{
 				Id:   "node1",
 				Name: "testCustomCode",
+				Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
 				TaskType: &avsproto.TaskNode_CustomCode{
 					CustomCode: &avsproto.CustomCodeNode{
 						Config: &avsproto.CustomCodeNode_Config{
