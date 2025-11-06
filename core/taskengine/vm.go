@@ -1613,7 +1613,8 @@ func (v *VM) runLoop(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, err
 		return nil, fmt.Errorf("taskNode does not contain a LoopNode")
 	}
 	stepID := taskNode.Id
-	// Use the new queue-based execution instead of the old recursive approach
+	// Use the queue-based execution (newer implementation) instead of LoopProcessor (older)
+	// executeLoopWithQueue provides better performance with worker pools
 	executionLog, err := v.executeLoopWithQueue(stepID, taskNode, nodeValue)
 
 	v.mu.Lock()
