@@ -31,6 +31,9 @@ func NewGraphqlQueryProcessor(vm *VM) (*GraphqlQueryProcessor, error) {
 	}, nil
 }
 
+// Execute runs the GraphQL query node.
+// IMPORTANT: SetTaskNode() must be called on the processor before calling Execute()
+// to ensure proper node type identification in the execution step.
 func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, any, error) {
 	ctx := context.Background()
 

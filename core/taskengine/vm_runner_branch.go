@@ -89,6 +89,9 @@ func (r *BranchProcessor) Validate(node *avsproto.BranchNode) error {
 	return nil
 }
 
+// Execute evaluates branch conditions and returns the selected path.
+// IMPORTANT: SetTaskNode() must be called on the processor before calling Execute()
+// to ensure proper node type identification in the execution step.
 func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*avsproto.Execution_Step, *Step, error) {
 	// Use shared function to create execution step
 	executionStep := CreateNodeExecutionStep(stepID, r.GetTaskNode(), r.vm)
