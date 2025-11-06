@@ -12,8 +12,6 @@ import (
 // This file contains shared helper functions for loop execution.
 // These functions support template variable substitution, nested node creation, and
 // input variable resolution for loop iterations in VM.executeLoopWithQueue.
-// These functions handle template variable substitution, nested node creation, and
-// input variable resolution for loop iterations.
 
 // substituteTemplateVariables replaces template variables like {{value}} and {{index}} with actual values.
 // This is a pure function with no VM dependency.
