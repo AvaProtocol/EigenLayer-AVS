@@ -1613,8 +1613,7 @@ func (v *VM) runLoop(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, err
 		return nil, fmt.Errorf("taskNode does not contain a LoopNode")
 	}
 	stepID := taskNode.Id
-	// Use the queue-based execution (newer implementation) instead of LoopProcessor (older)
-	// executeLoopWithQueue provides better performance with worker pools
+	// Use the queue-based execution with worker pools for better performance
 	executionLog, err := v.executeLoopWithQueue(stepID, taskNode, nodeValue)
 
 	v.mu.Lock()
@@ -4471,7 +4470,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				}
 
 				iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, iterationIndex)
-				nestedNode := v.createNestedNodeFromLoop(node, iterationStepID, iterInputs)
+				nestedNode := createNestedNodeFromLoop(node, iterationStepID, iterInputs, v)
 
 				// Debug: Log what variables are being set for this iteration
 				if v.logger != nil {
@@ -4540,7 +4539,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 			}
 
 			iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, i)
-			nestedNode := v.createNestedNodeFromLoop(node, iterationStepID, iterInputs)
+			nestedNode := createNestedNodeFromLoop(node, iterationStepID, iterInputs, v)
 
 			resultChannel := make(chan *ExecutionResult, 1)
 			task := &ExecutionTask{
@@ -4623,165 +4622,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	return s, nil
 }
 
-// createNestedNodeFromLoop creates a nested node for loop iteration
-func (v *VM) createNestedNodeFromLoop(loopNodeDef *avsproto.LoopNode, iterationStepID string, iterInputs map[string]interface{}) *avsproto.TaskNode {
-	nodeName := fmt.Sprintf("loop_iteration_%s", iterationStepID)
-
-	if ethTransfer := loopNodeDef.GetEthTransfer(); ethTransfer != nil {
-		return &avsproto.TaskNode{
-			Id:       iterationStepID,
-			Name:     nodeName,
-			Type:     avsproto.NodeType_NODE_TYPE_ETH_TRANSFER,
-			TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: ethTransfer},
-		}
-	} else if contractWrite := loopNodeDef.GetContractWrite(); contractWrite != nil {
-		// Apply template variable substitution
-		processedContractWrite := v.processContractWriteTemplates(contractWrite, iterInputs)
-		return &avsproto.TaskNode{
-			Id:       iterationStepID,
-			Name:     nodeName,
-			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE,
-			TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: processedContractWrite},
-		}
-	} else if contractRead := loopNodeDef.GetContractRead(); contractRead != nil {
-		processedContractRead := v.processContractReadTemplates(contractRead, iterInputs)
-		return &avsproto.TaskNode{
-			Id:       iterationStepID,
-			Name:     nodeName,
-			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_READ,
-			TaskType: &avsproto.TaskNode_ContractRead{ContractRead: processedContractRead},
-		}
-	} else if graphqlQuery := loopNodeDef.GetGraphqlDataQuery(); graphqlQuery != nil {
-		return &avsproto.TaskNode{
-			Id:       iterationStepID,
-			Name:     nodeName,
-			Type:     avsproto.NodeType_NODE_TYPE_GRAPHQL_QUERY,
-			TaskType: &avsproto.TaskNode_GraphqlQuery{GraphqlQuery: graphqlQuery},
-		}
-	} else if restApi := loopNodeDef.GetRestApi(); restApi != nil {
-		processedRestApi := v.processRestApiTemplates(restApi, iterInputs)
-		return &avsproto.TaskNode{
-			Id:       iterationStepID,
-			Name:     nodeName,
-			Type:     avsproto.NodeType_NODE_TYPE_REST_API,
-			TaskType: &avsproto.TaskNode_RestApi{RestApi: processedRestApi},
-		}
-	} else if customCode := loopNodeDef.GetCustomCode(); customCode != nil {
-		return &avsproto.TaskNode{
-			Id:       iterationStepID,
-			Name:     nodeName,
-			Type:     avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
-			TaskType: &avsproto.TaskNode_CustomCode{CustomCode: customCode},
-		}
-	}
-
-	return nil
-}
-
-// Helper methods for template processing (these need to be moved from LoopProcessor)
-func (v *VM) processContractWriteTemplates(contractWrite *avsproto.ContractWriteNode, iterInputs map[string]interface{}) *avsproto.ContractWriteNode {
-	// Create a copy of the contract write configuration
-	processed := &avsproto.ContractWriteNode{
-		Config: &avsproto.ContractWriteNode_Config{
-			ContractAddress: v.substituteTemplateVariables(contractWrite.Config.ContractAddress, iterInputs),
-			ContractAbi:     contractWrite.Config.ContractAbi, // ⚠️ CRITICAL: ABI is NEVER subject to template substitution
-			CallData:        v.substituteTemplateVariables(contractWrite.Config.CallData, iterInputs),
-		},
-	}
-
-	// Process method calls
-	for _, methodCall := range contractWrite.Config.MethodCalls {
-		var processedCallData *string
-		if methodCall.CallData != nil {
-			// Use callData as-is without template substitution (callData should be literal hex string)
-			processedCallData = methodCall.CallData
-		}
-		processedMethodCall := &avsproto.ContractWriteNode_MethodCall{
-			CallData:     processedCallData,
-			MethodName:   v.substituteTemplateVariables(methodCall.MethodName, iterInputs),
-			MethodParams: SubstituteTemplateVariablesArray(methodCall.MethodParams, iterInputs, v.substituteTemplateVariables),
-		}
-
-		processed.Config.MethodCalls = append(processed.Config.MethodCalls, processedMethodCall)
-	}
-
-	return processed
-}
-
-func (v *VM) processContractReadTemplates(contractRead *avsproto.ContractReadNode, iterInputs map[string]interface{}) *avsproto.ContractReadNode {
-	// Create a copy of the contract read configuration
-	processed := &avsproto.ContractReadNode{
-		Config: &avsproto.ContractReadNode_Config{
-			ContractAddress: v.substituteTemplateVariables(contractRead.Config.ContractAddress, iterInputs),
-			ContractAbi:     contractRead.Config.ContractAbi, // ⚠️ CRITICAL: ABI is NEVER subject to template substitution
-		},
-	}
-
-	// Process method calls
-	for _, methodCall := range contractRead.Config.MethodCalls {
-		var processedCallData *string
-		if methodCall.CallData != nil {
-			// Use callData as-is without template substitution (callData should be literal hex string)
-			processedCallData = methodCall.CallData
-		}
-		processedMethodCall := &avsproto.ContractReadNode_MethodCall{
-			CallData:      processedCallData,
-			MethodName:    v.substituteTemplateVariables(methodCall.MethodName, iterInputs),
-			MethodParams:  SubstituteTemplateVariablesArray(methodCall.MethodParams, iterInputs, v.substituteTemplateVariables),
-			ApplyToFields: make([]string, len(methodCall.ApplyToFields)),
-		}
-
-		// Copy applyToFields (no template substitution needed for field names)
-		copy(processedMethodCall.ApplyToFields, methodCall.ApplyToFields)
-
-		processed.Config.MethodCalls = append(processed.Config.MethodCalls, processedMethodCall)
-	}
-
-	return processed
-}
-
-func (v *VM) processRestApiTemplates(restApi *avsproto.RestAPINode, iterInputs map[string]interface{}) *avsproto.RestAPINode {
-	// Create a copy of the REST API configuration
-	processed := &avsproto.RestAPINode{
-		Config: &avsproto.RestAPINode_Config{
-			Url:    v.substituteTemplateVariables(restApi.Config.Url, iterInputs),
-			Method: v.substituteTemplateVariables(restApi.Config.Method, iterInputs),
-			Body:   v.substituteTemplateVariables(restApi.Config.Body, iterInputs),
-		},
-	}
-
-	// Process headers
-	if restApi.Config.Headers != nil {
-		processed.Config.Headers = make(map[string]string)
-		for key, value := range restApi.Config.Headers {
-			processedKey := v.substituteTemplateVariables(key, iterInputs)
-			processedValue := v.substituteTemplateVariables(value, iterInputs)
-			processed.Config.Headers[processedKey] = processedValue
-		}
-	}
-
-	return processed
-}
-
-// substituteTemplateVariables replaces template variables like {{value}} and {{index}} with actual values
-func (v *VM) substituteTemplateVariables(text string, iterInputs map[string]interface{}) string {
-	if text == "" {
-		return text
-	}
-
-	// Simple template variable substitution
-	// Replace {{value}} with the current iteration value
-	// Replace {{index}} with the current iteration index
-	result := text
-
-	for varName, varValue := range iterInputs {
-		placeholder := fmt.Sprintf("{{%s}}", varName)
-		replacement := fmt.Sprintf("%v", varValue)
-		result = strings.ReplaceAll(result, placeholder, replacement)
-	}
-
-	return result
-}
+// Loop helper methods moved to loop_helpers.go for shared use
 
 // getStatusText returns the standard HTTP status text for a given status code
 func getStatusText(statusCode int) string {
