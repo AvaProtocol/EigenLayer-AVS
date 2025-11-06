@@ -27,15 +27,18 @@ func NewGraphqlQueryProcessor(vm *VM) (*GraphqlQueryProcessor, error) {
 		sb:     sb,
 		url:    nil, // Will be set when we have the URL from Config
 
-		CommonProcessor: &CommonProcessor{vm},
+		CommonProcessor: &CommonProcessor{vm: vm},
 	}, nil
 }
 
+// Execute runs the GraphQL query node.
+// IMPORTANT: SetTaskNode() must be called on the processor before calling Execute()
+// to ensure proper node type identification in the execution step.
 func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, any, error) {
 	ctx := context.Background()
 
 	// Use shared function to create execution step
-	step := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_GRAPHQL_QUERY, r.vm)
+	step := CreateNodeExecutionStep(stepID, r.GetTaskNode(), r.vm)
 
 	// Add standardized log header
 	r.sb.WriteString(formatNodeExecutionLogHeader(step))

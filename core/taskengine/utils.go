@@ -1,18 +1,20 @@
 package taskengine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math/big"
 	"reflect"
+	"strconv"
 	"strings"
-
-	"bytes"
+	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/modules"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/dop251/goja"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -277,7 +279,7 @@ func processSingleContractReadResult(methodResult interface{}, result map[string
 
 // SubstituteTemplateVariablesArray is a shared utility function that replaces template variables
 // in each element of a string array using the provided substitution function.
-// This eliminates code duplication between VM and LoopProcessor implementations.
+// Used by loop execution for processing method parameters with template substitution.
 func SubstituteTemplateVariablesArray(arr []string, iterInputs map[string]interface{}, substituteFunc func(string, map[string]interface{}) string) []string {
 	if len(arr) == 0 {
 		return arr
@@ -288,6 +290,180 @@ func SubstituteTemplateVariablesArray(arr []string, iterInputs map[string]interf
 		result[i] = substituteFunc(item, iterInputs)
 	}
 	return result
+}
+
+// convertToJSONCompatible converts complex types (like protobuf) to JSON-compatible structures.
+// This function handles time.Time, pointers, protobuf types, and reflection-based conversion.
+// Used by loop execution to ensure iteration results can be serialized to JSON.
+func convertToJSONCompatible(data interface{}) interface{} {
+	if data == nil {
+		return nil
+	}
+
+	// Use reflection to handle time.Time and other specific types
+	rv := reflect.ValueOf(data)
+	rt := reflect.TypeOf(data)
+
+	// Handle time.Time specifically
+	if rt == reflect.TypeOf(time.Time{}) {
+		if timeVal, ok := data.(time.Time); ok {
+			return timeVal.Format(time.RFC3339)
+		}
+	}
+
+	// Handle pointers
+	if rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return nil
+		}
+		return convertToJSONCompatible(rv.Elem().Interface())
+	}
+
+	switch v := data.(type) {
+	case map[string]interface{}:
+		// Already JSON-compatible, but recursively convert nested values
+		result := make(map[string]interface{})
+		for key, value := range v {
+			result[key] = convertToJSONCompatible(value)
+		}
+		return result
+	case []interface{}:
+		// Already JSON-compatible, but recursively convert nested values
+		result := make([]interface{}, len(v))
+		for i, value := range v {
+			result[i] = convertToJSONCompatible(value)
+		}
+		return result
+	case *structpb.Value:
+		// Convert protobuf Value to native Go type
+		return convertToJSONCompatible(v.AsInterface())
+	case *structpb.Struct:
+		// Convert protobuf Struct to map
+		return convertToJSONCompatible(v.AsMap())
+	case *structpb.ListValue:
+		// Convert protobuf ListValue to slice
+		values := v.GetValues()
+		result := make([]interface{}, len(values))
+		for i, value := range values {
+			result[i] = convertToJSONCompatible(value)
+		}
+		return result
+	case string, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, bool:
+		// Basic JSON-compatible types
+		return data
+	default:
+		// For complex types that might not be JSON-compatible, try to convert them
+		// Check if it implements json.Marshaler
+		if marshaler, ok := data.(json.Marshaler); ok {
+			if jsonBytes, err := marshaler.MarshalJSON(); err == nil {
+				var result interface{}
+				if err := json.Unmarshal(jsonBytes, &result); err == nil {
+					return result
+				}
+			}
+		}
+
+		// For other types, try reflection-based conversion
+		if rv.Kind() == reflect.Struct {
+			result := make(map[string]interface{})
+			for i := 0; i < rv.NumField(); i++ {
+				field := rt.Field(i)
+				if field.IsExported() {
+					fieldValue := rv.Field(i)
+					if fieldValue.CanInterface() {
+						result[field.Name] = convertToJSONCompatible(fieldValue.Interface())
+					}
+				}
+			}
+			return result
+		}
+
+		if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+			result := make([]interface{}, rv.Len())
+			for i := 0; i < rv.Len(); i++ {
+				result[i] = convertToJSONCompatible(rv.Index(i).Interface())
+			}
+			return result
+		}
+
+		if rv.Kind() == reflect.Map {
+			result := make(map[string]interface{})
+			for _, key := range rv.MapKeys() {
+				keyStr := fmt.Sprintf("%v", key.Interface())
+				result[keyStr] = convertToJSONCompatible(rv.MapIndex(key).Interface())
+			}
+			return result
+		}
+
+		// Fallback: convert to string
+		return fmt.Sprintf("%v", data)
+	}
+}
+
+// convertProtoFieldsToMap converts protobuf fields to a map.
+// Used for contract read result processing in loop iterations.
+func convertProtoFieldsToMap(fields []*avsproto.ContractReadNode_MethodResult_StructuredField) map[string]interface{} {
+	result := make(map[string]interface{})
+	for _, field := range fields {
+		result[field.GetName()] = field.GetValue()
+	}
+	return result
+}
+
+// parseGoMapString attempts to parse Go map string representation into a structured object.
+// This is used as a fallback serialization method when JSON marshaling fails.
+// Basic Go map string parsing for simple cases like "map[key:value]".
+func parseGoMapString(s string) interface{} {
+	// Handle empty cases
+	if s == "" || s == "<nil>" || s == "null" {
+		return nil
+	}
+
+	// Try to detect and parse simple map[key:value] patterns
+	if strings.HasPrefix(s, "map[") && strings.HasSuffix(s, "]") {
+		// Extract content between map[ and ]
+		content := s[4 : len(s)-1]
+
+		// Simple key:value parser
+		result := make(map[string]interface{})
+
+		// Split by spaces, but be careful with nested structures
+		parts := strings.Fields(content)
+		for _, part := range parts {
+			if colonIdx := strings.Index(part, ":"); colonIdx > 0 {
+				key := part[:colonIdx]
+				value := part[colonIdx+1:]
+
+				// Try to convert value to appropriate type
+				if value == "true" {
+					result[key] = true
+				} else if value == "false" {
+					result[key] = false
+				} else if strings.Contains(value, ".") {
+					// Try to parse as float
+					if f, err := strconv.ParseFloat(value, 64); err == nil {
+						result[key] = f
+					} else {
+						result[key] = value
+					}
+				} else {
+					// Try to parse as int
+					if i, err := strconv.Atoi(value); err == nil {
+						result[key] = i
+					} else {
+						result[key] = value
+					}
+				}
+			}
+		}
+
+		if len(result) > 0 {
+			return result
+		}
+	}
+
+	// If parsing fails, return nil so caller can use string representation
+	return nil
 }
 
 // ConvertContractAbiToReader converts []*structpb.Value to *bytes.Reader

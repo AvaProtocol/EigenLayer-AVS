@@ -35,7 +35,7 @@ func NewETHTransferProcessor(vm *VM, ethClient *ethclient.Client, smartWalletCon
 
 func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransferNode) (*avsproto.Execution_Step, error) {
 	// Use shared function to create execution step
-	executionLog := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_ETH_TRANSFER, p.vm)
+	executionLog := CreateNodeExecutionStep(stepID, p.GetTaskNode(), p.vm)
 
 	// Initially assume failure until we succeed
 	executionLog.Success = false
