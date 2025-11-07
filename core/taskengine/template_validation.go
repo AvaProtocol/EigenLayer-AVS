@@ -37,32 +37,26 @@ func ValidateTemplateVariableResolution(resolvedValue, originalValue string, vm 
 		return fmt.Errorf("%s contains 'undefined': %s", contextName, resolvedValue)
 	}
 
-	// Build list of failed variable names
-	var failedVarStrs []string
-	for varName, varValue := range failedVars {
-		failedVarStrs = append(failedVarStrs, fmt.Sprintf("%s=%s", varName, varValue))
+	// Extract the first failed variable name for cleaner error message
+	var firstFailedVar string
+	for varName := range failedVars {
+		firstFailedVar = varName
+		break
 	}
 
-	// Extract node names from failed variables (e.g., "get_quote" from "get_quote.data.field")
-	var missingNodeNames []string
-	for varName := range failedVars {
-		parts := strings.Split(varName, ".")
-		if len(parts) > 0 {
-			nodeName := parts[0]
-			// Skip system variables
-			if !isSystemVariable(nodeName) {
-				missingNodeNames = append(missingNodeNames, nodeName)
-			}
+	// Extract node name from the failed variable (e.g., "get_quote" from "get_quote.data.field")
+	parts := strings.Split(firstFailedVar, ".")
+	if len(parts) > 0 {
+		nodeName := parts[0]
+		// If it's a node dependency (not a system variable), provide helpful suggestion
+		if !isSystemVariable(nodeName) {
+			return fmt.Errorf("could not resolve variable %s in %s. Make sure to run the '%s' node first",
+				firstFailedVar, contextName, nodeName)
 		}
 	}
 
-	// Build error message
-	if len(missingNodeNames) > 0 {
-		return fmt.Errorf("could not resolve template variable in %s: %s. Make sure to run the '%s' node first and include its output data in inputVariables",
-			contextName, strings.Join(failedVarStrs, ", "), missingNodeNames[0])
-	}
-
-	return fmt.Errorf("could not resolve template variable in %s: %s", contextName, strings.Join(failedVarStrs, ", "))
+	// Fallback for system variables or other cases
+	return fmt.Errorf("could not resolve variable %s in %s", firstFailedVar, contextName)
 }
 
 // isSystemVariable checks if a variable name is a system variable (not a node dependency)
@@ -87,8 +81,8 @@ func ValidateResolvedParams(resolvedParams []string, originalParams []string, vm
 				originalParam = originalParams[i]
 			}
 
-			contextName := fmt.Sprintf("parameter %d in %s", i, nodeName)
-			if err := ValidateTemplateVariableResolution(resolvedParam, originalParam, vm, contextName); err != nil {
+			// Use nodeName directly without parameter index for cleaner message
+			if err := ValidateTemplateVariableResolution(resolvedParam, originalParam, vm, nodeName); err != nil {
 				return err
 			}
 		}
