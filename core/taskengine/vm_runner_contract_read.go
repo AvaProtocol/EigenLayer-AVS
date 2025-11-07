@@ -220,11 +220,11 @@ func (r *ContractReadProcessor) executeMethodCallWithoutFormatting(ctx context.C
 					// Method has inputs, generate calldata from methodParams
 					// Parse method parameters from the protobuf and preprocess template variables
 					var methodParams []string
-					for i, param := range methodCall.GetMethodParams() {
+					for _, param := range methodCall.GetMethodParams() {
 						// Preprocess template variables in each parameter
 						preprocessedParam := r.vm.preprocessTextWithVariableMapping(param)
 						// Validate template variable resolution
-						contextName := fmt.Sprintf("methodParams[%d] in method '%s'", i, methodName)
+						contextName := fmt.Sprintf("method '%s'", methodName)
 						if err := ValidateTemplateVariableResolution(preprocessedParam, param, r.vm, contextName); err != nil {
 							return &avsproto.ContractReadNode_MethodResult{
 								Success:    false,
