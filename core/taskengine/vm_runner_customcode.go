@@ -275,6 +275,12 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	// Preprocess source for template variables
 	sourceStr = r.vm.preprocessTextWithVariableMapping(sourceStr)
 
+	// Validate template variable resolution
+	if err = ValidateTemplateVariableResolution(sourceStr, node.Config.Source, r.vm, "source"); err != nil {
+		sb.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		return executionStep, err
+	}
+
 	sb.WriteString(" Lang: ")
 	sb.WriteString(langStr)
 

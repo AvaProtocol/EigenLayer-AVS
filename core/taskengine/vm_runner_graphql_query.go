@@ -72,12 +72,25 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 	endpoint = r.vm.preprocessTextWithVariableMapping(endpoint)
 	queryStr = r.vm.preprocessTextWithVariableMapping(queryStr)
 
+	// Validate template variable resolution
+	if err = ValidateTemplateVariableResolution(endpoint, node.Config.Url, r.vm, "url"); err != nil {
+		return step, nil, err
+	}
+	if err = ValidateTemplateVariableResolution(queryStr, node.Config.Query, r.vm, "query"); err != nil {
+		return step, nil, err
+	}
+
 	// Process GraphQL variables from Config
 	variables := make(map[string]interface{})
 	if node.Config.GetVariables() != nil {
 		for key, value := range node.Config.GetVariables() {
 			// Preprocess each variable value for template variables
 			processedValue := r.vm.preprocessTextWithVariableMapping(value)
+			// Validate template variable resolution
+			contextName := fmt.Sprintf("variable '%s'", key)
+			if err = ValidateTemplateVariableResolution(processedValue, value, r.vm, contextName); err != nil {
+				return step, nil, err
+			}
 			variables[key] = processedValue
 		}
 	}

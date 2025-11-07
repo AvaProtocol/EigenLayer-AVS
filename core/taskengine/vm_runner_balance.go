@@ -164,10 +164,28 @@ func (v *VM) runBalance(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, 
 	address := v.preprocessTextWithVariableMapping(config.Address)
 	chain := v.preprocessTextWithVariableMapping(config.Chain)
 
+	// Validate template variable resolution for address and chain
+	if err = ValidateTemplateVariableResolution(address, config.Address, v, "address"); err != nil {
+		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
+		return executionLogStep, err
+	}
+	if err = ValidateTemplateVariableResolution(chain, config.Chain, v, "chain"); err != nil {
+		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
+		return executionLogStep, err
+	}
+
 	// Resolve template variables in tokenAddresses array
 	resolvedTokenAddresses := make([]string, len(config.TokenAddresses))
 	for i, tokenAddr := range config.TokenAddresses {
 		resolved := v.preprocessTextWithVariableMapping(tokenAddr)
+
+		// Validate template variable resolution for each token address
+		contextName := fmt.Sprintf("tokenAddresses[%d]", i)
+		if validateErr := ValidateTemplateVariableResolution(resolved, tokenAddr, v, contextName); validateErr != nil {
+			logBuilder.WriteString(fmt.Sprintf("Error: %v\n", validateErr))
+			err = validateErr
+			return executionLogStep, err
+		}
 
 		// If the resolved value is a JSON object (e.g., {"id":"0x...","symbol":"WETH"}),
 		// extract the address from the 'id' or 'address' field
