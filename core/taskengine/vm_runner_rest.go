@@ -516,13 +516,33 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		r.vm.logger.Debug("REST API URL before template processing", "url", url)
 	}
 
+	originalURL := url
 	url = r.vm.preprocessTextWithVariableMapping(url)
+
+	// Validate URL template variable resolution
+	if err = ValidateTemplateVariableResolution(url, originalURL, r.vm, "url"); err != nil {
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		return executionLogStep, err
+	}
 
 	// Preprocess headers first so we can check content type
 	processedHeaders := make(map[string]string)
 	for key, value := range headers {
 		processedKey := r.vm.preprocessTextWithVariableMapping(key)
 		processedValue := r.vm.preprocessTextWithVariableMapping(value)
+
+		// Validate header template variable resolution
+		if validateErr := ValidateTemplateVariableResolution(processedKey, key, r.vm, fmt.Sprintf("header key '%s'", key)); validateErr != nil {
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", validateErr.Error()))
+			err = validateErr
+			return executionLogStep, err
+		}
+		if validateErr := ValidateTemplateVariableResolution(processedValue, value, r.vm, fmt.Sprintf("header value for '%s'", key)); validateErr != nil {
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", validateErr.Error()))
+			err = validateErr
+			return executionLogStep, err
+		}
+
 		processedHeaders[processedKey] = processedValue
 	}
 
@@ -576,12 +596,20 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		}
 	}
 
+	originalBody := body
 	if isJSONContent {
 		// Apply JSON-aware preprocessing for JSON content
 		body = r.preprocessJSONWithVariableMapping(body)
 	} else {
 		// Use regular text preprocessing for non-JSON content
 		body = r.vm.preprocessTextWithVariableMapping(body)
+	}
+
+	// Validate body template variable resolution
+	if validateErr := ValidateTemplateVariableResolution(body, originalBody, r.vm, "body"); validateErr != nil {
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", validateErr.Error()))
+		err = validateErr
+		return executionLogStep, err
 	}
 
 	if r.vm.logger != nil {

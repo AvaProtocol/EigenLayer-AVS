@@ -3344,13 +3344,19 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		}, nil
 	}
 
-	// Simulation mode is determined per-node (e.g., contractWrite.config.is_simulated).
-	// No top-level is_simulated handling here.
+	// Extract isSimulated from node config (defaults to true if not specified)
+	// The runNodeImmediately simulation mode should solely depend on the node input
+	useSimulation := true // Default to simulation mode
+	if isSimulatedVal, ok := nodeConfig["isSimulated"]; ok {
+		if isSimBool, ok := isSimulatedVal.(bool); ok {
+			useSimulation = isSimBool
+		}
+	}
 
 	// Execute the node immediately with authenticated user
 	// NOTE: lang field conversion for CustomCode is handled by ParseLanguageFromConfig
-	// Defer simulation/real decision to per-node config (e.g., contractWrite.config.is_simulated)
-	result, err := n.RunNodeImmediately(nodeTypeStr, nodeConfig, inputVariables, user)
+	// Pass the isSimulated flag from node config to control simulation/real execution
+	result, err := n.RunNodeImmediately(nodeTypeStr, nodeConfig, inputVariables, user, useSimulation)
 	if err != nil {
 		if n.logger != nil {
 			if isExpectedValidationError(err) {

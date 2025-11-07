@@ -3448,6 +3448,11 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				config["gasLimit"] = *contractWrite.Config.GasLimit
 			}
 
+			// Extract optional isSimulated field (simulation vs real execution)
+			if contractWrite.Config.IsSimulated != nil {
+				config["isSimulated"] = *contractWrite.Config.IsSimulated
+			}
+
 			// Handle method calls - extract fields to simple map for protobuf compatibility
 			if len(contractWrite.Config.MethodCalls) > 0 {
 				methodCallsArray := make([]interface{}, len(contractWrite.Config.MethodCalls))

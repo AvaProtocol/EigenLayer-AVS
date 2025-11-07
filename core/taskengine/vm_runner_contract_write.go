@@ -179,32 +179,21 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	for i, param := range methodCall.MethodParams {
 		resolvedMethodParams[i] = r.vm.preprocessTextWithVariableMapping(param)
 
-		// Validate that template resolution didn't produce "undefined" values
-		if resolvedMethodParams[i] == "undefined" {
-			failedVars := extractFailedVariables(param, r.vm)
-			var errorMsg string
-			if len(failedVars) > 0 {
-				var failedVarStrs []string
-				for varName, varValue := range failedVars {
-					failedVarStrs = append(failedVarStrs, fmt.Sprintf("%s=%s", varName, varValue))
-				}
-				errorMsg = fmt.Sprintf("could not resolve template variable in method '%s': %s", methodCall.MethodName, strings.Join(failedVarStrs, ", "))
-			} else {
-				errorMsg = fmt.Sprintf("template variable resolution failed in method '%s': '%s' resolved to '%s'", methodCall.MethodName, param, resolvedMethodParams[i])
-			}
-
+		// Validate that template resolution didn't produce "undefined" values using common utility
+		contextName := fmt.Sprintf("method '%s' parameter %d", methodCall.MethodName, i)
+		if err := ValidateTemplateVariableResolution(resolvedMethodParams[i], param, r.vm, contextName); err != nil {
 			if r.vm != nil && r.vm.logger != nil {
 				r.vm.logger.Error("❌ CONTRACT WRITE - Template variable failed to resolve",
 					"method", methodCall.MethodName,
+					"param_index", i,
 					"original_param", param,
 					"resolved_param", resolvedMethodParams[i],
-					"failed_variables", failedVars,
-					"explanation", "This may be due to an undefined variable, incorrect template syntax, or unsupported variable names (e.g., variables with hyphens are not supported; use snake_case such as 'recipient_address' instead of 'recipient-address').")
+					"error", err.Error())
 			}
 			return &avsproto.ContractWriteNode_MethodResult{
 				MethodName: methodCall.MethodName,
 				Success:    false,
-				Error:      errorMsg,
+				Error:      err.Error(),
 			}
 		}
 	}
@@ -285,6 +274,21 @@ func (r *ContractWriteProcessor) executeMethodCall(
 					}
 				}
 			}
+		}
+	}
+
+	// After JSON array expansion, validate that no expanded parameters contain "undefined"
+	// This catches cases where template variables inside JSON array strings failed to resolve
+	if err := ValidateResolvedParams(resolvedMethodParams, methodCall.MethodParams, r.vm, fmt.Sprintf("method '%s'", methodCall.MethodName)); err != nil {
+		if r.vm != nil && r.vm.logger != nil {
+			r.vm.logger.Error("❌ CONTRACT WRITE - Template variable failed to resolve in expanded parameters",
+				"method", methodCall.MethodName,
+				"error", err.Error())
+		}
+		return &avsproto.ContractWriteNode_MethodResult{
+			MethodName: methodCall.MethodName,
+			Success:    false,
+			Error:      err.Error(),
 		}
 	}
 
@@ -2527,32 +2531,4 @@ func (r *ContractWriteProcessor) getUserOpHashOrPending(receipt *types.Receipt) 
 		return receipt.TxHash.Hex()
 	}
 	return "pending"
-}
-
-// templateVarRegex is compiled once at package level for performance
-var templateVarRegex = regexp.MustCompile(`\{\{([^}]+)\}\}`)
-
-// extractFailedVariables extracts template variables from a parameter string and identifies which ones resolved to "undefined"
-func extractFailedVariables(originalParam string, vm *VM) map[string]string {
-	failedVars := make(map[string]string)
-
-	// Find all template variables: {{variable.path}}
-	matches := templateVarRegex.FindAllStringSubmatch(originalParam, -1)
-
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		varExpr := strings.TrimSpace(match[1])
-		varTemplate := match[0] // Full template including {{ }}
-
-		// Resolve just this variable to check if it becomes "undefined"
-		resolved := vm.preprocessTextWithVariableMapping(varTemplate)
-
-		if resolved == "undefined" {
-			failedVars[varExpr] = "undefined"
-		}
-	}
-
-	return failedVars
 }
