@@ -23,7 +23,7 @@ func CreateAdminKey(configPath string, opt CreateApiKeyOption) error {
 
 	aggregator, err := NewAggregator(nodeConfig)
 	if err != nil {
-		return fmt.Errorf("cannot initialize aggregrator from config: %w", err)
+		return fmt.Errorf("cannot initialize aggregator from config: %w", err)
 	}
 
 	if opt.Subject == "" {

@@ -15,7 +15,7 @@ var (
 		Long: `OAK CLI to run and interact with EigenLayer service.
 Each sub command can be use for a single service
 
-Such as "ap-avs run-operator" or "ap-avs run-aggregrator" and so on 
+Such as "ap-avs run-operator" or "ap-avs run-aggregator" and so on 
 `,
 	}
 )
