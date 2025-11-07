@@ -838,6 +838,9 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 					} else {
 						result.Error = &ContractWriteErrorData{Code: "SIMULATION_REVERTED", Message: "simulation status false"}
 					}
+					// Discard any decoded return data since the transaction reverted
+					result.ReturnData = nil
+					tc.logger.Info("🗑️ Cleared return data due to simulation failure")
 				}
 			}
 			// Check transaction.status
@@ -873,6 +876,9 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 					if result.Error == nil {
 						result.Error = &ContractWriteErrorData{Code: "SIMULATION_REVERTED", Message: errorMsg}
 					}
+					// Discard any decoded return data since the transaction reverted
+					result.ReturnData = nil
+					tc.logger.Info("🗑️ Cleared return data due to transaction failure")
 				}
 			}
 		}
