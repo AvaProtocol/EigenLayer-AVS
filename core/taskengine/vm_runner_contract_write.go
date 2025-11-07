@@ -180,7 +180,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		resolvedMethodParams[i] = r.vm.preprocessTextWithVariableMapping(param)
 
 		// Validate that template resolution didn't produce "undefined" values using common utility
-		contextName := fmt.Sprintf("method '%s' parameter %d", methodCall.MethodName, i)
+		contextName := fmt.Sprintf("method '%s'", methodCall.MethodName)
 		if err := ValidateTemplateVariableResolution(resolvedMethodParams[i], param, r.vm, contextName); err != nil {
 			if r.vm != nil && r.vm.logger != nil {
 				r.vm.logger.Error("❌ CONTRACT WRITE - Template variable failed to resolve",
@@ -867,10 +867,9 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	// Create result from real transaction
 	result := r.createRealTransactionResult(methodName, contractAddress.Hex(), callData, parsedABI, userOp, receipt)
 
-	// If result has additional error information, append our detailed logs
-	if result != nil && !result.Success && result.Error != "" {
-		result.Error = result.Error + "\n" + executionLogBuilder.String()
-	}
+	// Error field should contain only the summary (first sentence)
+	// Detailed logs are already in the execution log (log field)
+	// Do NOT append executionLogBuilder to the error field
 
 	return result
 }
