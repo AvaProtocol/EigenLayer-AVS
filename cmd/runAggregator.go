@@ -20,6 +20,6 @@ Use --config=path-to-your-config-file. default is=./config/aggregator.yaml `,
 )
 
 func init() {
-	runAggregatorCmd.Flags().StringVar(&config, "config", "./config/aggregator.yaml", "path to aggregrator config file")
+	runAggregatorCmd.Flags().StringVar(&config, "config", "./config/aggregator.yaml", "path to aggregator config file")
 	rootCmd.AddCommand(runAggregatorCmd)
 }

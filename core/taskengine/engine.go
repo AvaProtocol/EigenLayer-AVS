@@ -245,7 +245,7 @@ type Engine struct {
 	notificationTicker   *time.Ticker
 }
 
-// create a new task engine using given storage, config and queueu
+// create a new task engine using given storage, config and queue
 func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger sdklogging.Logger) *Engine {
 	e := Engine{
 		db:     db,

@@ -63,7 +63,7 @@ func RunWithConfig(configPath string) error {
 
 	aggregator, err := NewAggregator(nodeConfig)
 	if err != nil {
-		panic(fmt.Errorf("Cannot initialize aggregrator from config: %w", err))
+		panic(fmt.Errorf("Cannot initialize aggregator from config: %w", err))
 	}
 
 	return aggregator.Start(context.Background())
