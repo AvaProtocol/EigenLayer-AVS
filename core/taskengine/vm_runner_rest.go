@@ -532,12 +532,12 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		processedValue := r.vm.preprocessTextWithVariableMapping(value)
 
 		// Validate header template variable resolution
-		if validateErr := ValidateTemplateVariableResolution(processedKey, key, r.vm, fmt.Sprintf("header key '%s'", key)); validateErr != nil {
+		if validateErr := ValidateTemplateVariableResolution(processedKey, key, r.vm, "header key"); validateErr != nil {
 			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", validateErr.Error()))
 			err = validateErr
 			return executionLogStep, err
 		}
-		if validateErr := ValidateTemplateVariableResolution(processedValue, value, r.vm, fmt.Sprintf("header value for '%s'", key)); validateErr != nil {
+		if validateErr := ValidateTemplateVariableResolution(processedValue, value, r.vm, "header value"); validateErr != nil {
 			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", validateErr.Error()))
 			err = validateErr
 			return executionLogStep, err

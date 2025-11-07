@@ -1,7 +1,6 @@
 package taskengine
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
@@ -32,8 +31,10 @@ func TestValidateTemplateVariableResolution(t *testing.T) {
 		resolved := "undefined"
 		err := ValidateTemplateVariableResolution(resolved, original, vm, "test field")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "missing_node")
+		assert.Contains(t, err.Error(), "missing_node.data")
 		assert.Contains(t, err.Error(), "Make sure to run the 'missing_node' node first")
+		// Should not contain "=undefined"
+		assert.NotContains(t, err.Error(), "=undefined")
 	})
 
 	t.Run("Undefined in JSON array string", func(t *testing.T) {
@@ -41,8 +42,10 @@ func TestValidateTemplateVariableResolution(t *testing.T) {
 		resolved := `["0x1234", "1000", "undefined"]`
 		err := ValidateTemplateVariableResolution(resolved, original, vm, "methodParams")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "get_quote")
+		assert.Contains(t, err.Error(), "get_quote.data.amountOut")
 		assert.Contains(t, err.Error(), "Make sure to run the 'get_quote' node first")
+		// Should not contain "=undefined"
+		assert.NotContains(t, err.Error(), "=undefined")
 	})
 
 	t.Run("Undefined in middle of string", func(t *testing.T) {
@@ -50,7 +53,10 @@ func TestValidateTemplateVariableResolution(t *testing.T) {
 		resolved := "The value is: undefined"
 		err := ValidateTemplateVariableResolution(resolved, original, vm, "body")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "missing")
+		assert.Contains(t, err.Error(), "missing.value")
+		assert.Contains(t, err.Error(), "Make sure to run the 'missing' node first")
+		// Should not contain "=undefined"
+		assert.NotContains(t, err.Error(), "=undefined")
 	})
 
 	t.Run("System variable doesn't trigger error", func(t *testing.T) {
@@ -84,8 +90,11 @@ func TestValidateResolvedParams(t *testing.T) {
 		original := []string{"{{settings.token0}}", "{{node_b.data.token}}", "3000"}
 		err := ValidateResolvedParams(resolved, original, vm, "exactInputSingle")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "node_b")
-		assert.Contains(t, strings.ToLower(err.Error()), "parameter 1")
+		assert.Contains(t, err.Error(), "node_b.data.token")
+		assert.Contains(t, err.Error(), "Make sure to run the 'node_b' node first")
+		// Should not contain parameter index or "=undefined"
+		assert.NotContains(t, err.Error(), "parameter 1")
+		assert.NotContains(t, err.Error(), "=undefined")
 	})
 
 	t.Run("Undefined substring in param", func(t *testing.T) {
@@ -93,6 +102,9 @@ func TestValidateResolvedParams(t *testing.T) {
 		original := []string{"{{settings.token0}}", "value_{{missing.field}}_end", "3000"}
 		err := ValidateResolvedParams(resolved, original, vm, "method")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "missing")
+		assert.Contains(t, err.Error(), "missing.field")
+		assert.Contains(t, err.Error(), "Make sure to run the 'missing' node first")
+		// Should not contain "=undefined"
+		assert.NotContains(t, err.Error(), "=undefined")
 	})
 }

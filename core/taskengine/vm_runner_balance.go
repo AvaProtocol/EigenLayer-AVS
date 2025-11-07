@@ -180,7 +180,7 @@ func (v *VM) runBalance(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, 
 		resolved := v.preprocessTextWithVariableMapping(tokenAddr)
 
 		// Validate template variable resolution for each token address
-		contextName := fmt.Sprintf("tokenAddresses[%d]", i)
+		contextName := "tokenAddresses"
 		if validateErr := ValidateTemplateVariableResolution(resolved, tokenAddr, v, contextName); validateErr != nil {
 			logBuilder.WriteString(fmt.Sprintf("Error: %v\n", validateErr))
 			err = validateErr
