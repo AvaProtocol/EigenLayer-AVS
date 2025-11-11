@@ -778,42 +778,41 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 
 	var body string
 	if failed {
-		// Failure body: include runner/owner and any completed on-chain actions before failure
-		body = fmt.Sprintf(
-			"The workflow failed at step \"%s\". Reason: %s\nRunner smart wallet: %s (owner EOA: %s)\n",
-			failedName, firstLine(failedReason), smartWallet, ownerEOA,
-		)
-		if len(actionLines) > 0 {
-			body += "On-chain actions completed before failure:\n" + strings.Join(actionLines, "\n")
+		// Failure body: include runner/owner, what executed successfully, and what didn't run
+		successfulSteps := buildStepsOverview(vm)
+
+		if strings.TrimSpace(successfulSteps) != "" {
+			// Include steps that succeeded before failure
+			body = fmt.Sprintf(
+				"Smart wallet %s (owner %s) started workflow execution but encountered a failure.\n\n<strong>What Executed Successfully</strong>\n%s\n\n<strong>What Didn't Run</strong>\nFailed at step '%s': %s",
+				smartWallet, ownerEOA, successfulSteps, failedName, firstLine(failedReason),
+			)
 		} else {
-			body += "No on-chain actions were completed before the failure."
+			// No successful steps before failure
+			body = fmt.Sprintf(
+				"Smart wallet %s (owner %s) started workflow execution but encountered a failure.\n\nNo on-chain contract writes were completed before the failure.\n\n<strong>What Didn't Run</strong>\nFailed at step '%s': %s",
+				smartWallet, ownerEOA, failedName, firstLine(failedReason),
+			)
 		}
 	} else {
-		// Success body using concise narrative per PRD
+		// Success body with What Executed Successfully format (matching AI summarizer output)
 		chainName := resolveChainName(vm)
-		narrative := buildNarrativeFromLogs(vm)
-		if strings.TrimSpace(narrative) != "" {
+		actionCount := countActionsInLogs(vm)
+
+		// Build What Executed Successfully section with checkmarks for each successful contract write
+		successfulSteps := buildStepsOverview(vm)
+
+		if strings.TrimSpace(successfulSteps) != "" {
 			body = fmt.Sprintf(
-				"Smart wallet %s (owner %s) executed %d on-chain actions.\n\n%s\n\nAll steps completed on %s. Last step: %s.",
-				smartWallet, ownerEOA, countActionsInLogs(vm), narrative, chainName, lastName,
+				"Smart wallet %s (owner %s) executed %d on-chain actions.\n\n<strong>What Executed Successfully</strong>\n%s\n\nAll steps completed on %s.",
+				smartWallet, ownerEOA, actionCount, successfulSteps, chainName,
 			)
 		} else {
-			// Fallback to previous list format
+			// Fallback when no contract writes are found
 			body = fmt.Sprintf(
-				"Workflow '%s' completed successfully with %d out of %d steps.\nRunner smart wallet: %s (owner EOA: %s)\n",
-				workflowName, executedSteps, totalWorkflowSteps, smartWallet, ownerEOA,
+				"Smart wallet %s (owner %s) completed workflow execution.\n\nNo on-chain contract writes were recorded. This may have been a read-only workflow or all steps were simulated.\n\nAll steps completed on %s.",
+				smartWallet, ownerEOA, chainName,
 			)
-			if len(actionLines) > 0 {
-				body += "On-chain actions:\n" + strings.Join(actionLines, "\n")
-				if executedSteps == 0 {
-					body += "\nSingle-node execution using prior outputs. A full step-by-step summary will be sent after this workflow is deployed and run end-to-end."
-				}
-			} else {
-				if executedSteps == 0 {
-					body += "Single-node execution. A full step-by-step summary will be sent after this workflow is deployed and run end-to-end.\n"
-				}
-				body += fmt.Sprintf("Finished %s.", lastName)
-			}
 		}
 	}
 
@@ -912,6 +911,140 @@ func countActionsInLogs(vm *VM) int {
 		return 1
 	}
 	return count
+}
+
+// buildStepsOverview generates a checkmark-prefixed list of successful contract write steps
+func buildStepsOverview(vm *VM) string {
+	if vm == nil {
+		return ""
+	}
+
+	var steps []string
+	for _, st := range vm.ExecutionLogs {
+		if !st.GetSuccess() {
+			continue
+		}
+
+		t := strings.ToUpper(st.GetType())
+		if !strings.Contains(t, "CONTRACT_WRITE") {
+			continue
+		}
+
+		// Generate human-readable description for this step
+		stepName := st.GetName()
+		if stepName == "" {
+			stepName = st.GetId()
+		}
+
+		methodName := ""
+		contractAddr := ""
+		if st.GetConfig() != nil {
+			if cfg, ok := st.GetConfig().AsInterface().(map[string]interface{}); ok {
+				if addr, ok := cfg["contractAddress"].(string); ok {
+					contractAddr = addr
+				}
+				if mcs, ok := cfg["methodCalls"].([]interface{}); ok && len(mcs) > 0 {
+					if call, ok := mcs[0].(map[string]interface{}); ok {
+						if mn, ok := call["methodName"].(string); ok {
+							methodName = strings.ToLower(mn)
+						}
+					}
+				}
+			}
+		}
+
+		// Generate description based on method type
+		description := ""
+		switch methodName {
+		case "approve":
+			if st.GetContractWrite() != nil && st.GetContractWrite().Data != nil {
+				if m, ok := st.GetContractWrite().Data.AsInterface().(map[string]interface{}); ok {
+					if ev, ok := m["Approval"].(map[string]interface{}); ok {
+						value := ""
+						spender := ""
+						if v, ok := ev["value"].(string); ok {
+							value = v
+						}
+						if sp, ok := ev["spender"].(string); ok {
+							spender = sp
+						}
+						if value != "" {
+							description = fmt.Sprintf("Approved %s to %s for trading", value, shortHexAddr(spender))
+						}
+					}
+				}
+			}
+			if description == "" {
+				description = fmt.Sprintf("Approved token to %s", shortHexAddr(contractAddr))
+			}
+
+		case "exactinputsingle":
+			amountOut := ""
+			if st.Metadata != nil {
+				if meta := st.Metadata.AsInterface(); meta != nil {
+					if arr, ok := meta.([]interface{}); ok && len(arr) > 0 {
+						if first, ok := arr[0].(map[string]interface{}); ok {
+							if val, ok := first["value"].(map[string]interface{}); ok {
+								if amt, ok := val["amountOut"].(string); ok {
+									amountOut = amt
+								}
+							} else if amtStr, ok := first["value"].(string); ok {
+								amountOut = amtStr
+							}
+						}
+					}
+				}
+			}
+			if amountOut != "" {
+				description = fmt.Sprintf("Swapped for ~%s via Uniswap V3 (exactInputSingle)", amountOut)
+			} else {
+				description = "Swapped via Uniswap V3 (exactInputSingle)"
+			}
+
+		case "transfer":
+			if st.GetContractWrite() != nil && st.GetContractWrite().Data != nil {
+				if m, ok := st.GetContractWrite().Data.AsInterface().(map[string]interface{}); ok {
+					if ev, ok := m["Transfer"].(map[string]interface{}); ok {
+						value := ""
+						to := ""
+						if v, ok := ev["value"].(string); ok {
+							value = v
+						}
+						if t, ok := ev["to"].(string); ok {
+							to = t
+						}
+						if value != "" && to != "" {
+							description = fmt.Sprintf("Transferred %s to %s for settlement", value, shortHexAddr(to))
+						}
+					}
+				}
+			}
+			if description == "" {
+				description = fmt.Sprintf("Transferred to %s", shortHexAddr(contractAddr))
+			}
+
+		default:
+			// Generic description for other methods
+			description = fmt.Sprintf("Called %s on %s", methodName, shortHexAddr(contractAddr))
+		}
+
+		// Add checkmark prefix
+		steps = append(steps, fmt.Sprintf("✓ %s", description))
+	}
+
+	return strings.Join(steps, "\n")
+}
+
+// shortHexAddr formats an address as 0xABCD...WXYZ for compact display
+func shortHexAddr(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return ""
+	}
+	if strings.HasPrefix(addr, "0x") && len(addr) > 10 {
+		return addr[:6] + "..." + addr[len(addr)-4:]
+	}
+	return addr
 }
 
 func buildNarrativeFromLogs(vm *VM) string {
