@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -23,6 +24,24 @@ import (
 // and return concise content suitable for email/IM notifications.
 type Summarizer interface {
 	Summarize(ctx context.Context, vm *VM, currentStepName string) (Summary, error)
+}
+
+// stepDigest represents a single step's summary data for AI digest generation
+type stepDigest struct {
+	Name            string                 `json:"name"`
+	ID              string                 `json:"id"`
+	Type            string                 `json:"type"`
+	Success         bool                   `json:"success"`
+	Error           string                 `json:"error,omitempty"`
+	StartAt         int64                  `json:"start_at,omitempty"`
+	EndAt           int64                  `json:"end_at,omitempty"`
+	DurationMs      int64                  `json:"duration_ms,omitempty"`
+	ContractAddr    string                 `json:"contract_address,omitempty"`
+	MethodName      string                 `json:"method_name,omitempty"`
+	MethodParams    map[string]interface{} `json:"method_params,omitempty"`
+	OutputData      interface{}            `json:"output_data,omitempty"`
+	Metadata        interface{}            `json:"metadata,omitempty"`
+	StepDescription string                 `json:"step_description,omitempty"` // Human-readable description of what happened
 }
 
 var globalSummarizer Summarizer
@@ -187,41 +206,52 @@ func (o *OpenAISummarizer) Summarize(ctx context.Context, vm *VM, currentStepNam
 Your summary must include:
 1. Workflow name and execution status (executed_steps out of total_steps)
 2. Smart wallet address that executed the transactions and the owner EOA address it belongs to
-3. Clear description of on-chain actions (contract address, method name, what happened)
-4. For swaps: token symbols and formatted amounts (e.g., "swapped 0.10 WETH → ~300 USDC via Uniswap")
-5. For approvals: token symbol, formatted amount, and spender/contract
-6. If the digest indicates a failure (Failed: true), you MUST explicitly state where it failed and the root cause:
-   - Include a clear line like: "Failure at {FailedStep}: {Reason}"
-   - If Reason is empty, look up the first step with success=false in Steps and use its Error field (first line)
-   - Keep the failure explanation short and factual, with the failed step name
-7. If multiple steps failed (some branches can allow later steps to succeed, then fail again), include a short bullet list of ALL failed steps:
-   - Start a new paragraph with "Failures:" then add one bullet (-) per failed step
-   - Bullet format: "- {step_name_or_id}: {first_line_of_error}"
-   - Use the 'failures' array from the digest when present; otherwise, derive from Steps where success=false
-   - Limit to the first 8 failed steps if there are many
-8. Include a bullet list of all SUCCESSFUL contractWrite operations (these change wallet state):
-   - Start a new paragraph with "Writes:" then add one bullet (-) per successful write
-   - Bullet format: "- {step_name_or_id}: {method} @ {contract_address}{simulated_suffix}"
-   - Use the 'writes' array from the digest. If writes[i].simulated is true, append " (Simulated)" to that bullet
+3. A "What Executed Successfully" section with a checkmark-prefixed bullet list showing actual on-chain outcomes:
+   - Use the 'step_description' field from each successful contractWrite step in the digest
+   - Format each step with a green checkmark: "✓ {step_description}"
+   - Example: "✓ Approved 1.0 USDT to Uniswap V3 router 0xE592... for trading."
+   - Example: "✓ Swapped 0.10 WETH for ~ 300 USDT via Uniswap V3 (exactInputSingle)."
+   - Example: "✓ Then, transferred 0.5 USDT to 0x1234...abcd for settlement."
+   - Include ALL successful contractWrite steps with their step_description
+4. For failures or skipped steps, add a "What Didn't Run" section:
+   - If the digest indicates a failure (Failed: true), list the failure
+   - If nodes were skipped due to branching, mention them
+   - Use the 'failures' array and 'skipped_steps' from the digest
 
 Use ONLY the provided data. Do not speculate. Redact secrets. Return strict JSON with keys: subject, body.
 
 Subject format: "{workflow_name}: {status} ({executed_steps} out of {total_steps} steps)" - Keep subject under 80 characters.
-Body: 1–2 short, focused paragraphs. Be concise since summaries may be used in chat channels.
-- First paragraph: Smart wallet, owner EOA, and key on-chain actions in human-readable terms
-- Second paragraph (if needed): Additional context or failure details
+
+Body format:
+Regardless of success or failure, structure the body as follows:
+
+Paragraph 1: High-level summary
+"Smart wallet {smart_wallet} (owner {owner_eoa}) executed {n} on-chain actions."
+
+Paragraph 2: What Executed Successfully (use double newline before, with HTML secondary section title)
+Format the section title as: "<strong>What Executed Successfully</strong>"
+Then list each successful contractWrite with checkmark:
+"✓ {step_description from digest}"
+
+Paragraph 3 (if applicable): What Didn't Run section (with HTML secondary section title)
+If there are failures or skipped steps, format the section title as: "<strong>What Didn't Run</strong>"
+Then describe what was skipped or failed.
+
+Paragraph 4 (final): Completion status
+"All steps completed on {chain_name}." OR "Failed at {step}: {reason}"
 
 Formatting rules:
-- Insert a blank line between sentences (double newline) for email readability
-- Keep total body under 400 characters when possible for chat channel compatibility
-- If the 'actions' array is empty or lacks recognizable actions, include: "No specific on-chain actions were recorded; this may have been a simulation or a step encountered an error."
-
-Prefer the normalized 'actions' array when present.
+- Use double newlines (\n\n) to separate paragraphs for email readability
+- Section titles must use <strong> HTML tags to match "Summary" styling
+- Keep step descriptions concise - use the step_description field directly from the digest
+- If step_description is empty for a step, use: "✓ {step_name}: {method_name} on {contract_address}"
 
 IMPORTANT RULES:
-- Never declare the workflow failed unless the 'Failed' flag is true in the digest.
-- A Branch node is NOT a failure. It indicates which path was selected. Use 'branch_selections' and 'executed_steps/total_steps' to explain that some nodes were skipped due to branching when applicable.
-- If total_steps > executed_steps, mention that some nodes were skipped due to branching/conditions.
+- ALWAYS include the "What Executed Successfully" section with checkmarks for successful contractWrite steps
+- Section titles (What Executed Successfully, What Didn't Run) must be wrapped in <strong> tags
+- Never declare the workflow failed unless the 'Failed' flag is true in the digest
+- A Branch node is NOT a failure. It indicates path selection.
+- If total_steps > executed_steps, mention skipped nodes in the "What Didn't Run" section
 `},
 			{"role": "user", "content": digest},
 		},
@@ -365,21 +395,6 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 	}
 
 	// Build digest structure with contract call details
-	type stepDigest struct {
-		Name         string                 `json:"name"`
-		ID           string                 `json:"id"`
-		Type         string                 `json:"type"`
-		Success      bool                   `json:"success"`
-		Error        string                 `json:"error,omitempty"`
-		StartAt      int64                  `json:"start_at,omitempty"`
-		EndAt        int64                  `json:"end_at,omitempty"`
-		DurationMs   int64                  `json:"duration_ms,omitempty"`
-		ContractAddr string                 `json:"contract_address,omitempty"`
-		MethodName   string                 `json:"method_name,omitempty"`
-		MethodParams map[string]interface{} `json:"method_params,omitempty"`
-		OutputData   interface{}            `json:"output_data,omitempty"`
-		Metadata     interface{}            `json:"metadata,omitempty"`
-	}
 	d := struct {
 		Workflow         string                   `json:"workflow"`
 		SmartWallet      string                   `json:"smart_wallet,omitempty"`
@@ -530,6 +545,12 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 					sd.Metadata = st.Metadata.AsInterface()
 				}
 			}
+
+			// Generate human-readable step description for successful contract writes
+			if isWrite && st.GetSuccess() {
+				sd.StepDescription = generateStepDescription(st, sd)
+			}
+
 			// Build normalized actions for the model
 			lowerMethod := strings.ToLower(sd.MethodName)
 			switch lowerMethod {
@@ -625,6 +646,115 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 	enc.SetEscapeHTML(true)
 	_ = enc.Encode(d)
 	return strings.TrimSpace(b.String())
+}
+
+// generateStepDescription creates a human-readable description of what happened in a contract write step
+func generateStepDescription(st *avsproto.Execution_Step, sd stepDigest) string {
+	if st == nil {
+		return ""
+	}
+
+	methodName := strings.ToLower(sd.MethodName)
+
+	switch methodName {
+	case "approve":
+		// Extract token amount and spender from Approval event
+		if st.GetContractWrite() != nil && st.GetContractWrite().Data != nil {
+			if m, ok := st.GetContractWrite().Data.AsInterface().(map[string]interface{}); ok {
+				if ev, ok := m["Approval"].(map[string]interface{}); ok {
+					value := ""
+					spender := ""
+					if v, ok := ev["value"].(string); ok {
+						value = v
+					}
+					if sp, ok := ev["spender"].(string); ok {
+						spender = sp
+					}
+					if value != "" {
+						// Format amount assuming common token decimals
+						return fmt.Sprintf("Approved %s to %s for trading", value, shortAddr(spender))
+					}
+				}
+			}
+		}
+		return fmt.Sprintf("Approved token to %s", shortAddr(sd.ContractAddr))
+
+	case "exactinputsingle":
+		// Extract swap details from metadata or output
+		amountOut := ""
+		if st.Metadata != nil {
+			if meta := st.Metadata.AsInterface(); meta != nil {
+				if arr, ok := meta.([]interface{}); ok && len(arr) > 0 {
+					if first, ok := arr[0].(map[string]interface{}); ok {
+						if val, ok := first["value"].(map[string]interface{}); ok {
+							if amt, ok := val["amountOut"].(string); ok {
+								amountOut = amt
+							}
+						} else if amtStr, ok := first["value"].(string); ok {
+							amountOut = amtStr
+						}
+					}
+				}
+			}
+		}
+		if amountOut != "" {
+			return fmt.Sprintf("Swapped for ~%s via Uniswap V3 (exactInputSingle)", amountOut)
+		}
+		return "Swapped via Uniswap V3 (exactInputSingle)"
+
+	case "transfer":
+		// Extract transfer details from Transfer event
+		if st.GetContractWrite() != nil && st.GetContractWrite().Data != nil {
+			if m, ok := st.GetContractWrite().Data.AsInterface().(map[string]interface{}); ok {
+				if ev, ok := m["Transfer"].(map[string]interface{}); ok {
+					value := ""
+					to := ""
+					if v, ok := ev["value"].(string); ok {
+						value = v
+					}
+					if t, ok := ev["to"].(string); ok {
+						to = t
+					}
+					if value != "" && to != "" {
+						return fmt.Sprintf("Transferred %s to %s for settlement", value, shortAddr(to))
+					}
+				}
+			}
+		}
+		return fmt.Sprintf("Transferred to %s", shortAddr(sd.ContractAddr))
+
+	case "quoteexactinputsingle":
+		// Extract quote amount
+		if st.GetContractRead() != nil && st.GetContractRead().Data != nil {
+			if m, ok := st.GetContractRead().Data.AsInterface().(map[string]interface{}); ok {
+				if q, ok := m["quoteExactInputSingle"].(map[string]interface{}); ok {
+					if amt, ok := q["amountOut"].(string); ok && amt != "" {
+						return fmt.Sprintf("Quoted ~%s via Uniswap V3", amt)
+					}
+				}
+			}
+		}
+		return "Got quote via Uniswap V3"
+
+	default:
+		// Generic description for other methods
+		if sd.ContractAddr != "" {
+			return fmt.Sprintf("Called %s on %s", methodName, shortAddr(sd.ContractAddr))
+		}
+		return fmt.Sprintf("Called %s", methodName)
+	}
+}
+
+// shortAddr formats an address as 0xABCD...WXYZ for compact display
+func shortAddr(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return ""
+	}
+	if strings.HasPrefix(addr, "0x") && len(addr) > 10 {
+		return addr[:6] + "..." + addr[len(addr)-4:]
+	}
+	return addr
 }
 
 func stripCodeFences(s string) string {
