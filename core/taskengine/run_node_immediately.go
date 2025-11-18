@@ -2985,6 +2985,7 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 					return nil, fmt.Errorf("failed to list wallets for owner %s: %w", vm.TaskOwner.Hex(), err)
 				}
 				var chosenSender common.Address
+				var matchedSalt *big.Int // Track matched salt for debug logging
 				walletExists := false
 				for _, w := range resp.GetItems() {
 					if strings.EqualFold(w.GetAddress(), runnerStr) {
@@ -3010,7 +3011,6 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 					}
 
 					// Check salts 0-4 (we allow up to 5 smart wallets per EOA)
-					var matchedSalt *big.Int
 					for salt := int64(0); salt < 5; salt++ {
 						derivedAddr, err := aa.GetSenderAddress(client, vm.TaskOwner, big.NewInt(salt))
 						if err != nil {
@@ -3050,9 +3050,6 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 				}
 
 				vm.AddVar("aa_sender", chosenSender.Hex())
-				if n.logger != nil {
-					n.logger.Info("RunNodeImmediately: AA sender resolved from settings", "sender", chosenSender.Hex())
-				}
 			} else {
 				return nil, fmt.Errorf("settings must be an object for contractWrite")
 			}
