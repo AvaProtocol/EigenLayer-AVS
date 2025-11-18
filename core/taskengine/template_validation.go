@@ -24,17 +24,24 @@ var templateVarRegex = regexp.MustCompile(`\{\{([^}]+)\}\}`)
 // Returns:
 //   - error: nil if no undefined values found, otherwise an error with helpful message
 func ValidateTemplateVariableResolution(resolvedValue, originalValue string, vm *VM, contextName string) error {
-	// Check if the resolved value contains "undefined"
-	if resolvedValue != "undefined" && !strings.Contains(resolvedValue, "undefined") {
-		return nil // All template variables resolved successfully
+	// First, check if there are any template variables in the original string
+	hasTemplateVars := templateVarRegex.MatchString(originalValue)
+
+	// If there are no template variables, then any "undefined" in the string is legitimate code
+	// (e.g., JavaScript "return undefined;" is valid and should not be flagged)
+	if !hasTemplateVars {
+		return nil // No template variables to validate, allow literal "undefined" in code
 	}
 
+	// If there are template variables, check if any of them failed to resolve
 	// Extract failed variables from the original template string
 	failedVars := extractFailedVariables(originalValue, vm)
 
 	if len(failedVars) == 0 {
-		// No specific failed variables found, but "undefined" is present
-		return fmt.Errorf("%s contains 'undefined': %s", contextName, resolvedValue)
+		// Template variables exist and all resolved successfully
+		// Note: resolvedValue might still contain "undefined" as literal code, but that's OK
+		// since we verified no template variables resolved to "undefined"
+		return nil
 	}
 
 	// Extract the first failed variable name for cleaner error message
