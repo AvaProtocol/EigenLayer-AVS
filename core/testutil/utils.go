@@ -250,6 +250,7 @@ func MustGetTestOwnerAddress() (*common.Address, bool) {
 // GetTestControllerPrivateKey returns the controller private key for tests from aggregator config
 // Panics if config is not loaded or SmartWallet is nil or ControllerPrivateKey is nil
 func GetTestControllerPrivateKey() string {
+	loadTestConfigOnce()
 	if testConfig == nil {
 		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}
