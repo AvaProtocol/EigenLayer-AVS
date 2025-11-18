@@ -118,7 +118,7 @@ func TestGetNativeTokenMetadata(t *testing.T) {
 	metadata := getNativeTokenMetadata()
 
 	assert.NotNil(t, metadata)
-	assert.Equal(t, NativeTokenAddress, metadata.Address)
+	assert.Equal(t, NativeTokenAddress, metadata.Id)
 	assert.Equal(t, "Ether", metadata.Name)
 	assert.Equal(t, "ETH", metadata.Symbol)
 	assert.Equal(t, uint32(18), metadata.Decimals)

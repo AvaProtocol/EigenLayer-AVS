@@ -3714,7 +3714,7 @@ func (n *Engine) GetTokenMetadata(user *model.User, payload *avsproto.GetTokenMe
 		Found:  true,
 		Source: source,
 		Token: &avsproto.TokenMetadata{
-			Address:  metadata.Address,
+			Id:       metadata.Id,
 			Name:     metadata.Name,
 			Symbol:   metadata.Symbol,
 			Decimals: metadata.Decimals,

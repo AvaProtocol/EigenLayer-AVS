@@ -47,7 +47,7 @@ enum ExecutionMode {
 
 // TokenMetadata represents ERC20 token information
 message TokenMetadata {
-  string address = 1;    // Contract address (lowercase, normalized)
+  string id = 1;         // Contract address (lowercase, normalized)
   string name = 2;       // Token name (e.g., "USD Coin")
   string symbol = 3;     // Token symbol (e.g., "USDC")
   uint32 decimals = 4;   // Number of decimal places
