@@ -21,9 +21,17 @@ func buildTriggerVariableData(trigger *avsproto.TaskTrigger, triggerDataMap map[
 	}
 
 	// For manual triggers, use the actual user data from triggerInputData
+	// Also include headers and pathParams directly for template access (e.g., ManualTrigger.pathParams.endpoint)
 	if trigger.GetType() == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
 		if inputData, exists := triggerInputData["data"]; exists {
 			triggerVarData["data"] = inputData
+		}
+		// Add headers and pathParams directly for template access
+		if headers, exists := triggerInputData["headers"]; exists {
+			triggerVarData["headers"] = headers
+		}
+		if pathParams, exists := triggerInputData["pathParams"]; exists {
+			triggerVarData["pathParams"] = pathParams
 		}
 		triggerVarData["input"] = triggerInputData
 	} else {
@@ -43,6 +51,23 @@ func updateTriggerVariableInVM(vm *VM, triggerVarName string, triggerVarData map
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
+	// Debug logging for troubleshooting stepInput.test.ts PartialSuccess issue
+	if vm.logger != nil {
+		hasHeaders := false
+		hasPathParams := false
+		if _, ok := triggerVarData["headers"]; ok {
+			hasHeaders = true
+		}
+		if _, ok := triggerVarData["pathParams"]; ok {
+			hasPathParams = true
+		}
+		vm.logger.Info("🔍 updateTriggerVariableInVM DEBUG - Updating trigger variable",
+			"triggerVarName", triggerVarName,
+			"triggerVarDataKeys", GetMapKeys(triggerVarData),
+			"hasHeaders", hasHeaders,
+			"hasPathParams", hasPathParams)
+	}
+
 	existingTriggerVar := vm.vars[triggerVarName]
 	if existingMap, ok := existingTriggerVar.(map[string]interface{}); ok {
 		// Merge with existing trigger variable data
@@ -50,9 +75,19 @@ func updateTriggerVariableInVM(vm *VM, triggerVarName string, triggerVarData map
 			existingMap[key] = value
 		}
 		vm.vars[triggerVarName] = existingMap
+		if vm.logger != nil {
+			vm.logger.Info("🔍 updateTriggerVariableInVM DEBUG - Merged with existing trigger variable",
+				"triggerVarName", triggerVarName,
+				"finalKeys", GetMapKeys(existingMap))
+		}
 	} else {
 		// Create new trigger variable
 		vm.vars[triggerVarName] = triggerVarData
+		if vm.logger != nil {
+			vm.logger.Info("🔍 updateTriggerVariableInVM DEBUG - Created new trigger variable",
+				"triggerVarName", triggerVarName,
+				"finalKeys", GetMapKeys(triggerVarData))
+		}
 	}
 }
 

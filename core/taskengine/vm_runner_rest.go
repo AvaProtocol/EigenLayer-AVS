@@ -84,6 +84,7 @@ func NewMockHTTPExecutor() *MockHTTPExecutor {
 }
 
 func (m *MockHTTPExecutor) ExecuteRequest(method, url, body string, headers map[string]string) (*resty.Response, error) {
+
 	// Create a temporary mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// Set content type to JSON by default
@@ -1001,13 +1002,12 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	// Determine which executor to use based on URL
 	var executor HTTPRequestExecutor
-	if strings.HasPrefix(url, MockAPIEndpoint+"/") || url == MockAPIEndpoint {
+	isMockEndpoint := strings.HasPrefix(url, MockAPIEndpoint+"/") || url == MockAPIEndpoint
+	if isMockEndpoint {
 		executor = NewMockHTTPExecutor()
 	} else {
 		executor = r.executor
 	}
-
-	// Execute request using the appropriate executor
 	response, err = executor.ExecuteRequest(method, url, body, processedHeaders)
 
 	if err != nil {
@@ -1109,15 +1109,9 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		stepSuccess = false
 		errorMessage = fmt.Sprintf("HTTP %d: %s", response.StatusCode(), http.StatusText(response.StatusCode()))
 		logBuilder.WriteString(fmt.Sprintf("HTTP Status Error: %s\n", errorMessage))
-		if r.vm.logger != nil {
-			r.vm.logger.Warn("REST API returned error status code", "stepID", stepID, "statusCode", response.StatusCode(), "status", http.StatusText(response.StatusCode()))
-		}
 	} else {
 		stepSuccess = true
 		errorMessage = ""
-		if r.vm.logger != nil {
-			r.vm.logger.Info("REST API request executed successfully", "stepID", stepID, "method", method, "url", url, "statusCode", response.StatusCode())
-		}
 	}
 
 	// Defer will finalize the execution step
@@ -1258,8 +1252,8 @@ func (r *RestProcessor) preprocessJSONWithVariableMapping(text string) string {
 			continue
 		}
 
-		// Try to resolve the variable with fallback to camelCase (same as VM)
-		exportedValue, resolved := r.vm.resolveVariableWithFallback(jsvm, expr, currentVars)
+		// Try to resolve the variable path (same as VM)
+		exportedValue, resolved := r.vm.resolveVariablePath(jsvm, expr, currentVars)
 		if !resolved {
 			// Replace with "undefined" instead of removing the expression for JSON compatibility
 			if r.vm.logger != nil {

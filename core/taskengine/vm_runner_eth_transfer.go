@@ -44,8 +44,11 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	logBuilder.WriteString(formatNodeExecutionLogHeader(executionLog))
 
 	var err error
+	var finalized bool // Track if step was already finalized
 	defer func() {
-		finalizeStep(executionLog, err == nil, err, "", logBuilder.String())
+		if !finalized {
+			finalizeStep(executionLog, err == nil, err, "", logBuilder.String())
+		}
 	}()
 
 	// Get configuration
@@ -96,7 +99,7 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 			"destination", destination,
 			"amount", amountStr)
 
-		return p.executeRealETHTransfer(stepID, destination, amountStr, executionLog)
+		return p.executeRealETHTransfer(stepID, destination, amountStr, executionLog, &finalized)
 	}
 
 	// Simulation path for ETH transfers (SimulateTask / RunNodeImmediately)
@@ -149,13 +152,14 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	logMessage := fmt.Sprintf("Simulated ETH transfer of %s wei to %s (tx: %s)", amountStr, destination, txHash)
 
 	// Use shared function to finalize execution step
+	finalized = true // Mark as finalized to prevent defer from overwriting
 	finalizeStep(executionLog, true, nil, "", logMessage)
 
 	return executionLog, nil
 }
 
 // executeRealETHTransfer executes a real UserOp transaction for ETH transfers
-func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amountStr string, executionLog *avsproto.Execution_Step) (*avsproto.Execution_Step, error) {
+func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amountStr string, executionLog *avsproto.Execution_Step, finalized *bool) (*avsproto.Execution_Step, error) {
 	p.vm.logger.Info("🔍 REAL ETH TRANSFER DEBUG - Starting real UserOp ETH transfer execution",
 		"destination", destination,
 		"amount", amountStr)
@@ -234,7 +238,8 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 			"amount", amountStr)
 
 		// Return error result - deployed workflows must fail if bundler is unavailable
-		finalizeStep(executionLog, false, nil, fmt.Sprintf("Bundler failed - ETH transfer UserOp transaction could not be sent: %v", err), "")
+		*finalized = true // Mark as finalized to prevent defer from overwriting
+		finalizeStep(executionLog, false, err, fmt.Sprintf("Bundler failed - ETH transfer UserOp transaction could not be sent: %v", err), "")
 		return executionLog, err
 	}
 
@@ -315,6 +320,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	}
 
 	// Use shared function to finalize execution step
+	*finalized = true // Mark as finalized to prevent defer from overwriting
 	finalizeStep(executionLog, true, nil, "", logMessage)
 
 	return executionLog, nil
