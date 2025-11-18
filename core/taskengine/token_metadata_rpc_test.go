@@ -45,7 +45,7 @@ func TestGetTokenMetadataRPC(t *testing.T) {
 		t.Logf("  Found: %v", resp.Found)
 		t.Logf("  Source: %s", resp.Source)
 		if resp.Token != nil {
-			t.Logf("  Address: %s", resp.Token.Address)
+			t.Logf("  Id: %s", resp.Token.Id)
 			t.Logf("  Name: %s", resp.Token.Name)
 			t.Logf("  Symbol: %s", resp.Token.Symbol)
 			t.Logf("  Decimals: %d", resp.Token.Decimals)
@@ -57,7 +57,7 @@ func TestGetTokenMetadataRPC(t *testing.T) {
 		if resp.Token != nil {
 			// Use case-insensitive comparison for Ethereum addresses
 			assert.Equal(t, strings.ToLower("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"),
-				strings.ToLower(resp.Token.Address), "Address should match (case-insensitive)")
+				strings.ToLower(resp.Token.Id), "Id should match (case-insensitive)")
 			assert.Equal(t, "USDC", resp.Token.Symbol) // Should be either "USDC" or "USD Coin"
 			assert.Equal(t, uint32(6), resp.Token.Decimals)
 			assert.Contains(t, []string{"whitelist", "rpc", "cache"}, resp.Source)

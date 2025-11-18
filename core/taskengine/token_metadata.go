@@ -21,7 +21,7 @@ import (
 
 // TokenMetadata represents ERC20 token information
 type TokenMetadata struct {
-	Address  string `json:"address"`
+	Id       string `json:"id"`
 	Name     string `json:"name"`
 	Symbol   string `json:"symbol"`
 	Decimals uint32 `json:"decimals"`
@@ -88,7 +88,7 @@ func isNativeToken(address string) bool {
 // Same metadata across all Ethereum-based chains
 func getNativeTokenMetadata() *TokenMetadata {
 	return &TokenMetadata{
-		Address:  NativeTokenAddress,
+		Id:       NativeTokenAddress,
 		Name:     "Ether",
 		Symbol:   "ETH",
 		Decimals: 18,
@@ -187,9 +187,9 @@ func (t *TokenEnrichmentService) LoadWhitelist() error {
 	// Load tokens into cache (normalize addresses to lowercase)
 	t.cacheMux.Lock()
 	for _, token := range tokens {
-		normalizedAddr := strings.ToLower(token.Address)
+		normalizedAddr := strings.ToLower(token.Id)
 		t.cache[normalizedAddr] = &TokenMetadata{
-			Address:  normalizedAddr,
+			Id:       normalizedAddr,
 			Name:     token.Name,
 			Symbol:   token.Symbol,
 			Decimals: token.Decimals,
@@ -272,8 +272,8 @@ func (t *TokenEnrichmentService) fetchTokenMetadataFromRPC(contractAddress strin
 	contract := bind.NewBoundContract(addr, t.erc20ABI, t.rpcClient, t.rpcClient, t.rpcClient)
 
 	metadata := &TokenMetadata{
-		Address: strings.ToLower(contractAddress),
-		Source:  "rpc",
+		Id:     strings.ToLower(contractAddress),
+		Source: "rpc",
 	}
 
 	// Call name() method
