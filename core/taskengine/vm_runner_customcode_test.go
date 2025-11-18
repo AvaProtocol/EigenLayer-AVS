@@ -90,6 +90,20 @@ func assertStructpbValueIsString(t *testing.T, val *structpb.Value, expectedStri
 	}
 }
 
+func assertStructpbValueIsNull(t *testing.T, val *structpb.Value, msgAndArgs ...interface{}) {
+	t.Helper()
+	if val == nil {
+		t.Fatalf("assertStructpbValueIsNull: value is nil. %s", fmt.Sprint(msgAndArgs...))
+	}
+	nullValue, ok := val.GetKind().(*structpb.Value_NullValue)
+	if !ok {
+		t.Fatalf("assertStructpbValueIsNull: expected null, got %T. Original value: %s. %s", val.GetKind(), val.String(), fmt.Sprint(msgAndArgs...))
+	}
+	if nullValue.NullValue != 0 { // 0 is NULL_VALUE enum
+		t.Errorf("assertStructpbValueIsNull: expected null value, got %d. %s", nullValue.NullValue, fmt.Sprint(msgAndArgs...))
+	}
+}
+
 func TestRunJavaScript(t *testing.T) {
 	node := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
@@ -504,4 +518,78 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 	if step2Log.Error != "" {
 		t.Errorf("REST node step log error should be empty, got %q", step2Log.Error)
 	}
+}
+
+// TestRunJavaScriptReturnUndefined tests that when JavaScript code returns undefined,
+// it should succeed and convert to null (due to protobuf limitation - protobuf cannot represent undefined, only null)
+func TestRunJavaScriptReturnUndefined(t *testing.T) {
+	node := &avsproto.CustomCodeNode{
+		Config: &avsproto.CustomCodeNode_Config{
+			Lang:   avsproto.Lang_LANG_JAVASCRIPT,
+			Source: "return undefined;",
+		},
+	}
+
+	nodes := []*avsproto.TaskNode{
+		{
+			Id:   "test_custom_code_undefined",
+			Name: "custom_code_undefined_test",
+			Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
+			TaskType: &avsproto.TaskNode_CustomCode{
+				CustomCode: node,
+			},
+		},
+	}
+
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+
+	edges := []*avsproto.TaskEdge{
+		{
+			Id:     "e1",
+			Source: trigger.Id,
+			Target: "test_custom_code_undefined",
+		},
+	}
+
+	vm, err := NewVMWithData(&model.Task{
+		Task: &avsproto.Task{
+			Id:      "test_undefined",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
+	if err != nil {
+		t.Fatalf("NewVMWithData should not error: %v", err)
+	}
+
+	n := NewJSProcessor(vm)
+
+	step, err := n.Execute("test_custom_code_undefined", node)
+
+	// Should succeed (not fail)
+	if err != nil {
+		t.Fatalf("Execute should succeed but got error: %v", err)
+	}
+
+	if !step.Success {
+		t.Fatalf("Step should be successful but got success=%v, error=%q", step.Success, step.Error)
+	}
+
+	// Check that the output is null (not undefined)
+	customCodeOutput := step.GetCustomCode()
+	if customCodeOutput == nil {
+		t.Fatalf("CustomCode output should not be nil")
+	}
+
+	if customCodeOutput.Data == nil {
+		t.Fatalf("CustomCode output data should not be nil (should be null Value)")
+	}
+
+	// Verify that undefined was converted to null
+	assertStructpbValueIsNull(t, customCodeOutput.Data, "JavaScript undefined should be converted to null")
 }
