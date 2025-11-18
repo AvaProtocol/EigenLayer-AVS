@@ -63,7 +63,7 @@ func TestEngine_GetTokenMetadata(t *testing.T) {
 		require.Contains(t, []string{"whitelist", "rpc"}, resp.Source)
 
 		// Validate token structure
-		require.NotEmpty(t, resp.Token.Address)
+		require.NotEmpty(t, resp.Token.Id)
 		require.NotEmpty(t, resp.Token.Name)
 		require.NotEmpty(t, resp.Token.Symbol)
 		require.GreaterOrEqual(t, resp.Token.Decimals, uint32(0))
@@ -119,9 +119,9 @@ func TestEngine_GetTokenMetadata(t *testing.T) {
 			require.Equal(t, respLower.Token.Name, respUpper.Token.Name)
 			require.Equal(t, respLower.Token.Symbol, respUpper.Token.Symbol)
 			require.Equal(t, respLower.Token.Decimals, respUpper.Token.Decimals)
-			// Address should always be returned in lowercase
-			require.Equal(t, strings.ToLower(respLower.Token.Address), respLower.Token.Address)
-			require.Equal(t, strings.ToLower(respUpper.Token.Address), respUpper.Token.Address)
+			// Id should always be returned in lowercase
+			require.Equal(t, strings.ToLower(respLower.Token.Id), respLower.Token.Id)
+			require.Equal(t, strings.ToLower(respUpper.Token.Id), respUpper.Token.Id)
 		}
 	})
 
