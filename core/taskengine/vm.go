@@ -1224,9 +1224,29 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 	var executionLogForNode *avsproto.Execution_Step // To capture log from methods that return it
 
 	if node.GetRestApi() != nil {
+		if v.logger != nil {
+			v.logger.Info("🔍 executeNode DEBUG - Running REST API node",
+				"nodeID", node.Id,
+				"nodeName", node.Name,
+				"taskID", v.GetTaskId(),
+				"currentExecutionLogsCount", len(v.ExecutionLogs))
+		}
 		executionLogForNode, err = v.runRestApi(node)
 		if executionLogForNode != nil {
+			if v.logger != nil {
+				v.logger.Info("🔍 executeNode DEBUG - REST API node completed, adding to logs",
+					"nodeID", node.Id,
+					"stepID", executionLogForNode.Id,
+					"stepSuccess", executionLogForNode.Success,
+					"stepError", executionLogForNode.Error)
+			}
 			v.addExecutionLog(executionLogForNode)
+		} else {
+			if v.logger != nil {
+				v.logger.Warn("🔍 executeNode DEBUG - REST API node returned nil executionLog",
+					"nodeID", node.Id,
+					"error", err)
+			}
 		}
 	} else if node.GetBranch() != nil {
 		var branchLog *avsproto.Execution_Step
@@ -1327,6 +1347,7 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 func (v *VM) addExecutionLog(log *avsproto.Execution_Step) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+
 	v.ExecutionLogs = append(v.ExecutionLogs, log)
 }
 
@@ -1698,8 +1719,9 @@ func isSimpleVariablePath(expr string) bool {
 	return true
 }
 
-// resolveVariableWithFallback tries to resolve a variable path
-func (v *VM) resolveVariableWithFallback(jsvm *goja.Runtime, varPath string, currentVars map[string]any) (interface{}, bool) {
+// resolveVariablePath resolves a variable path by validating security, transforming hyphenated properties
+// to bracket notation, and evaluating the path in a JavaScript VM.
+func (v *VM) resolveVariablePath(jsvm *goja.Runtime, varPath string, currentVars map[string]any) (interface{}, bool) {
 	// SECURITY: Validate variable path using centralized security validation
 	validationResult := ValidateCodeInjection(varPath)
 	if !validationResult.Valid {
@@ -1710,7 +1732,47 @@ func (v *VM) resolveVariableWithFallback(jsvm *goja.Runtime, varPath string, cur
 	}
 
 	// Try to resolve the variable path
-	script := fmt.Sprintf(`(() => { try { return %s; } catch(e) { return undefined; } })()`, varPath)
+	// Handle properties with hyphens by converting dot notation to bracket notation
+	// e.g., headers.X-Trigger-Version -> headers["X-Trigger-Version"]
+	script := varPath
+	if strings.Contains(varPath, ".") {
+		parts := strings.Split(varPath, ".")
+		if len(parts) > 1 {
+			// Check if any part after the first contains hyphens
+			for i := 1; i < len(parts); i++ {
+				if strings.Contains(parts[i], "-") {
+					// Convert to bracket notation for properties with hyphens
+					basePath := parts[0]
+					for j := 1; j < i; j++ {
+						basePath += "." + parts[j]
+					}
+					// Use bracket notation for the hyphenated property
+					propertyName := parts[i]
+					// Handle remaining parts - they might also need bracket notation if they contain hyphens
+					remainingParts := ""
+					if i+1 < len(parts) {
+						remainingParts = "." + strings.Join(parts[i+1:], ".")
+						// Recursively handle remaining parts if they contain hyphens
+						if strings.Contains(remainingParts, "-") {
+							remainingPartsParts := parts[i+1:]
+							remainingParts = ""
+							for _, part := range remainingPartsParts {
+								if strings.Contains(part, "-") {
+									remainingParts += `["` + part + `"]`
+								} else {
+									remainingParts += "." + part
+								}
+							}
+						}
+					}
+					script = fmt.Sprintf(`%s["%s"]%s`, basePath, propertyName, remainingParts)
+					break
+				}
+			}
+		}
+	}
+
+	script = fmt.Sprintf(`(() => { try { return %s; } catch(e) { return undefined; } })()`, script)
 
 	if evaluated, err := jsvm.RunString(script); err == nil {
 		exportedValue := evaluated.Export()
@@ -1783,18 +1845,28 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 		// - String literals: "hello-world"
 		// - Mathematical expressions: some_var - 10
 		// - Array indexing: array[index-1]
+		// - Property names after dots: headers.X-Trigger-Version (header names can have hyphens)
 		// Reject hyphens in:
-		// - Variable names: settings.uniswap-pool (should be settings.uniswap_pool)
+		// - Top-level variable names: some-var (should be some_var)
+		// - Property names without dots: settings.uniswap-pool (should be settings.uniswap_pool)
 		if isSimpleVariablePath(expr) && strings.Contains(expr, "-") {
-			if v.logger != nil {
-				v.logger.Warn("Template variable path contains invalid character (hyphen) - use snake_case for simple variable paths", "expression", expr, "help", "Hyphens are only invalid in simple variable paths like 'settings.field-name'. Use 'settings.field_name' instead. Hyphens are allowed in complex expressions, string literals, and array indexing.")
+			// Check if hyphen is in a property name (after a dot) - these are allowed (e.g., headers.X-Trigger-Version)
+			// Only reject if hyphen is in the first segment (top-level variable name) or in a property name that should use snake_case
+			parts := strings.Split(expr, ".")
+			hasHyphenInFirstPart := len(parts) > 0 && strings.Contains(parts[0], "-")
+			// Allow hyphens in property names (after first dot) - these are often header names or API field names
+			if hasHyphenInFirstPart {
+				if v.logger != nil {
+					v.logger.Warn("Template variable path contains invalid character (hyphen) - use snake_case for variable names", "expression", expr, "help", "Hyphens are only invalid in top-level variable names like 'some-var'. Use 'some_var' instead. Hyphens are allowed in property names (e.g., headers.X-Trigger-Version), complex expressions, string literals, and array indexing.")
+				}
+				result = result[:start] + "undefined" + result[end+2:]
+				continue
 			}
-			result = result[:start] + "undefined" + result[end+2:]
-			continue
+			// Hyphen is in a property name (after dot) - allow it (e.g., headers.X-Trigger-Version is valid)
 		}
 
-		// Try to resolve the variable with fallback to camelCase
-		exportedValue, resolved := v.resolveVariableWithFallback(jsvm, expr, currentVars)
+		// Try to resolve the variable path
+		exportedValue, resolved := v.resolveVariablePath(jsvm, expr, currentVars)
 		if !resolved {
 			// Replace with "undefined" instead of removing the expression
 			// This helps maintain valid JSON structure and makes debugging easier
@@ -2148,6 +2220,16 @@ func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 					if _, hasInput := valueMap["input"]; hasInput {
 						inputKey := fmt.Sprintf("%s.input", k)
 						inputKeys = append(inputKeys, inputKey)
+					}
+					// Check for .headers field (for ManualTrigger variables)
+					if _, hasHeaders := valueMap["headers"]; hasHeaders {
+						headersKey := fmt.Sprintf("%s.headers", k)
+						inputKeys = append(inputKeys, headersKey)
+					}
+					// Check for .pathParams field (for ManualTrigger variables)
+					if _, hasPathParams := valueMap["pathParams"]; hasPathParams {
+						pathParamsKey := fmt.Sprintf("%s.pathParams", k)
+						inputKeys = append(inputKeys, pathParamsKey)
 					}
 
 					// Special case: ManualTrigger variables may have flattened data (no .data field)
