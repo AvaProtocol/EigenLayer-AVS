@@ -67,6 +67,24 @@ func TestValidateTemplateVariableResolution(t *testing.T) {
 		// Should NOT suggest running 'settings' node since it's a system variable
 		assert.NotContains(t, err.Error(), "Make sure to run the 'settings' node first")
 	})
+
+	t.Run("Literal undefined in code (no template variables) should be allowed", func(t *testing.T) {
+		// This tests that literal "undefined" in JavaScript code (like "return undefined;")
+		// should not be flagged as an error when there are no template variables
+		original := "return undefined;"
+		resolved := "return undefined;" // No template variables, so resolved equals original
+		err := ValidateTemplateVariableResolution(resolved, original, vm, "source")
+		assert.NoError(t, err, "Literal 'undefined' in code without template variables should be allowed")
+	})
+
+	t.Run("Literal undefined with valid template variables should be allowed", func(t *testing.T) {
+		// This tests that literal "undefined" in code is allowed even when there are
+		// valid template variables that resolve successfully
+		original := "if ({{settings.amount}} > 0) { return undefined; }"
+		resolved := "if (1000 > 0) { return undefined; }"
+		err := ValidateTemplateVariableResolution(resolved, original, vm, "source")
+		assert.NoError(t, err, "Literal 'undefined' should be allowed when template variables resolve successfully")
+	})
 }
 
 func TestValidateResolvedParams(t *testing.T) {
