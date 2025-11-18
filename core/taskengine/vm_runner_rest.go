@@ -809,110 +809,112 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 					// Compose deterministic branch/skip summary strings
 					// When branches/skips are present, use the structured summary as the primary analysisHtml
 					// Pass currentNodeName so BuildBranchAndSkippedSummary uses the same calculation logic
-					if text, html := BuildBranchAndSkippedSummary(r.vm, currentNodeName); strings.TrimSpace(html) != "" {
-						// Replace analysisHtml with the structured branch summary
-						// The old analysisHtml (from Summary.Body) often duplicates this information
-						dynamicData["analysisHtml"] = html
-						dynamicData["branchSummaryHtml"] = html
+					if !isSingleNodeImmediate(r.vm) {
+						if text, html := BuildBranchAndSkippedSummary(r.vm, currentNodeName); strings.TrimSpace(html) != "" {
+							// Replace analysisHtml with the structured branch summary
+							// The old analysisHtml (from Summary.Body) often duplicates this information
+							dynamicData["analysisHtml"] = html
+							dynamicData["branchSummaryHtml"] = html
 
-						// Compute and set status, statusHtml, subject, and summary (deterministic)
-						executedSteps := len(r.vm.ExecutionLogs)
+							// Compute and set status, statusHtml, subject, and summary (deterministic)
+							executedSteps := len(r.vm.ExecutionLogs)
 
-						// Count actual skipped nodes by name (not by alternate branch paths)
-						// vm.TaskNodes includes nodes on ALL branch paths, but only one path is taken
-						skippedCount := len(skippedNodes) // Use actual skipped node names count
+							// Count actual skipped nodes by name (not by alternate branch paths)
+							// vm.TaskNodes includes nodes on ALL branch paths, but only one path is taken
+							skippedCount := len(skippedNodes) // Use actual skipped node names count
 
-						// For summary display, use executedSteps as total if nothing was truly skipped
-						totalSteps := executedSteps
-						if skippedCount > 0 {
-							totalSteps = executedSteps + skippedCount
-						}
-
-						failed, failedName, failedReason := findEarliestFailure(r.vm)
-
-						// Use ExecutionResultStatus enum
-						var resultStatus ExecutionResultStatus
-						var statusText, statusBgColor, statusTextColor string
-						if failed {
-							resultStatus = ExecutionFailure
-							statusText = fmt.Sprintf("but ultimately failed at the '%s' step due to %s.", safeName(failedName), firstLine(failedReason))
-							statusBgColor = "#FEE2E2"   // light red
-							statusTextColor = "#991B1B" // dark red
-						} else if skippedCount > 0 {
-							resultStatus = ExecutionPartialSuccess
-							statusText = fmt.Sprintf("but %d nodes were skipped due to Branch condition.", skippedCount)
-							statusBgColor = "#FEF3C7"   // light yellow
-							statusTextColor = "#92400E" // dark yellow/amber
-						} else {
-							resultStatus = ExecutionSuccess
-							statusText = "All steps completed successfully"
-							statusBgColor = "#D1FAE5"   // light green
-							statusTextColor = "#065F46" // dark green
-						}
-
-						// Generate status badge HTML with colors for the badge itself
-						iconSvg := ""
-						switch resultStatus {
-						case ExecutionSuccess:
-							iconSvg = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#10B981"/><path d="M11 6L7 10L5 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
-						case ExecutionPartialSuccess:
-							iconSvg = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#F59E0B"/><circle cx="8" cy="5" r="1" fill="white"/><rect x="7.5" y="7" width="1" height="4" rx="0.5" fill="white"/></svg>`
-						case ExecutionFailure:
-							iconSvg = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#EF4444"/><path d="M10 6L6 10M6 6L10 10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`
-						}
-						statusHtml := fmt.Sprintf(
-							`<div style="display:inline-block; padding:8px 16px; background-color:%s; color:%s; border-radius:8px; font-weight:500; margin:8px 0">%s%s</div>`,
-							statusBgColor,
-							statusTextColor,
-							iconSvg,
-							statusText,
-						)
-
-						workflowName := resolveWorkflowName(r.vm)
-						summaryLine := fmt.Sprintf("Your workflow '%s' executed %d out of %d total steps", workflowName, executedSteps, totalSteps)
-
-						// Update subject based on status
-						var subjectStatusText string
-						switch resultStatus {
-						case ExecutionSuccess:
-							subjectStatusText = "successfully completed"
-						case ExecutionPartialSuccess:
-							subjectStatusText = "partially executed"
-						case ExecutionFailure:
-							subjectStatusText = "failed to execute"
-						}
-
-						// Build subject with appropriate prefix
-						var newSubject string
-						if r.vm.IsSimulation {
-							// Simulation: workflow_name status
-							newSubject = fmt.Sprintf("Simulation: %s %s", workflowName, subjectStatusText)
-							if r.vm.logger != nil {
-								r.vm.logger.Info("Using Simulation prefix for email subject", "subject", newSubject, "isSimulation", r.vm.IsSimulation)
+							// For summary display, use executedSteps as total if nothing was truly skipped
+							totalSteps := executedSteps
+							if skippedCount > 0 {
+								totalSteps = executedSteps + skippedCount
 							}
-						} else {
-							// Deployed run: Run #X: workflow_name status
-							if executionIndex >= 0 {
-								newSubject = fmt.Sprintf("Run #%d: %s %s", executionIndex+1, workflowName, subjectStatusText) // +1 for 1-based display
+
+							failed, failedName, failedReason := findEarliestFailure(r.vm)
+
+							// Use ExecutionResultStatus enum
+							var resultStatus ExecutionResultStatus
+							var statusText, statusBgColor, statusTextColor string
+							if failed {
+								resultStatus = ExecutionFailure
+								statusText = fmt.Sprintf("but ultimately failed at the '%s' step due to %s.", safeName(failedName), firstLine(failedReason))
+								statusBgColor = "#FEE2E2"   // light red
+								statusTextColor = "#991B1B" // dark red
+							} else if skippedCount > 0 {
+								resultStatus = ExecutionPartialSuccess
+								statusText = fmt.Sprintf("but %d nodes were skipped due to Branch condition.", skippedCount)
+								statusBgColor = "#FEF3C7"   // light yellow
+								statusTextColor = "#92400E" // dark yellow/amber
+							} else {
+								resultStatus = ExecutionSuccess
+								statusText = "All steps completed successfully"
+								statusBgColor = "#D1FAE5"   // light green
+								statusTextColor = "#065F46" // dark green
+							}
+
+							// Generate status badge HTML with colors for the badge itself
+							iconSvg := ""
+							switch resultStatus {
+							case ExecutionSuccess:
+								iconSvg = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#10B981"/><path d="M11 6L7 10L5 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+							case ExecutionPartialSuccess:
+								iconSvg = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#F59E0B"/><circle cx="8" cy="5" r="1" fill="white"/><rect x="7.5" y="7" width="1" height="4" rx="0.5" fill="white"/></svg>`
+							case ExecutionFailure:
+								iconSvg = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#EF4444"/><path d="M10 6L6 10M6 6L10 10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`
+							}
+							statusHtml := fmt.Sprintf(
+								`<div style="display:inline-block; padding:8px 16px; background-color:%s; color:%s; border-radius:8px; font-weight:500; margin:8px 0">%s%s</div>`,
+								statusBgColor,
+								statusTextColor,
+								iconSvg,
+								statusText,
+							)
+
+							workflowName := resolveWorkflowName(r.vm)
+							summaryLine := fmt.Sprintf("Your workflow '%s' executed %d out of %d total steps", workflowName, executedSteps, totalSteps)
+
+							// Update subject based on status
+							var subjectStatusText string
+							switch resultStatus {
+							case ExecutionSuccess:
+								subjectStatusText = "successfully completed"
+							case ExecutionPartialSuccess:
+								subjectStatusText = "partially executed"
+							case ExecutionFailure:
+								subjectStatusText = "failed to execute"
+							}
+
+							// Build subject with appropriate prefix
+							var newSubject string
+							if r.vm.IsSimulation {
+								// Simulation: workflow_name status
+								newSubject = fmt.Sprintf("Simulation: %s %s", workflowName, subjectStatusText)
 								if r.vm.logger != nil {
-									r.vm.logger.Info("Using Run # prefix for email subject", "subject", newSubject, "executionIndex", executionIndex, "displayIndex", executionIndex+1)
+									r.vm.logger.Info("Using Simulation prefix for email subject", "subject", newSubject, "isSimulation", r.vm.IsSimulation)
 								}
 							} else {
-								// Fallback if execution index not available
-								newSubject = fmt.Sprintf("%s %s", workflowName, subjectStatusText)
-								if r.vm.logger != nil {
-									r.vm.logger.Warn("Execution index not available, using basic subject format", "subject", newSubject)
+								// Deployed run: Run #X: workflow_name status
+								if executionIndex >= 0 {
+									newSubject = fmt.Sprintf("Run #%d: %s %s", executionIndex+1, workflowName, subjectStatusText) // +1 for 1-based display
+									if r.vm.logger != nil {
+										r.vm.logger.Info("Using Run # prefix for email subject", "subject", newSubject, "executionIndex", executionIndex, "displayIndex", executionIndex+1)
+									}
+								} else {
+									// Fallback if execution index not available
+									newSubject = fmt.Sprintf("%s %s", workflowName, subjectStatusText)
+									if r.vm.logger != nil {
+										r.vm.logger.Warn("Execution index not available, using basic subject format", "subject", newSubject)
+									}
 								}
 							}
+
+							dynamicData["statusHtml"] = statusHtml
+							dynamicData["summary"] = summaryLine
+							dynamicData["subject"] = newSubject
+
+							// Set preheader from deterministic summary line (fallback to subject)
+							preheader := extractPreheaderFromSummaryText(text, newSubject)
+							dynamicData["preheader"] = preheader
 						}
-
-						dynamicData["statusHtml"] = statusHtml
-						dynamicData["summary"] = summaryLine
-						dynamicData["subject"] = newSubject
-
-						// Set preheader from deterministic summary line (fallback to subject)
-						preheader := extractPreheaderFromSummaryText(text, newSubject)
-						dynamicData["preheader"] = preheader
 					}
 
 					// Ensure 'from' object includes a display name for better inbox rendering
@@ -1049,43 +1051,22 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		// surface the composed summary in the server response so clients have subject/body to display.
 		// For single-node notification calls, derive success from the HTTP response status.
 		if summaryForClient != nil {
-			workflowName := resolveWorkflowName(r.vm)
 			// Build a summary for clients based on HTTP response status
 			var subj string
 			var bod string
 			if statusSuccess {
-				subj = fmt.Sprintf("%s: succeeded (%d steps)", workflowName, 1)
-				// Provide a concise success body for notification-only steps
-				runner := ""
-				owner := ""
-				r.vm.mu.Lock()
-				if settings, ok := r.vm.vars["settings"].(map[string]interface{}); ok {
-					if rr, ok := settings["runner"].(string); ok {
-						runner = rr
-					}
-				}
-				if wc, ok := r.vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
-					if rr, ok := wc["runner"].(string); ok && runner == "" {
-						runner = rr
-					}
-					if ow, ok := wc["owner"].(string); ok {
-						owner = ow
-					}
-					if eoa, ok := wc["eoaAddress"].(string); ok && owner == "" {
-						owner = eoa
-					}
-				}
-				r.vm.mu.Unlock()
-				bod = fmt.Sprintf(
-					"Smart wallet %s (owner %s) executed 1 notification step.\n\nThe email was sent successfully via SendGrid.\n\nAll steps completed on %s.",
-					runner, owner, resolveChainName(r.vm),
-				)
+				subj = summaryForClient.Subject
+				bod = summaryForClient.Body
 			} else {
-				subj = fmt.Sprintf("%s: failed (%d steps)", workflowName, 1)
-				bod = fmt.Sprintf(
-					"Smart wallet executed 1 notification step, but the provider returned HTTP %d.\n\nThe email could not be sent.",
-					response.StatusCode(),
-				)
+				subj = summaryForClient.Subject
+				if strings.TrimSpace(summaryForClient.Body) != "" {
+					bod = summaryForClient.Body
+				} else {
+					bod = fmt.Sprintf(
+						"Smart wallet executed 1 notification step, but the provider returned HTTP %d.\n\nThe email could not be sent.",
+						response.StatusCode(),
+					)
+				}
 			}
 			bodyData = map[string]interface{}{
 				"subject": subj,
@@ -1269,7 +1250,7 @@ func (r *RestProcessor) preprocessJSONWithVariableMapping(text string) string {
 			continue
 		}
 		// Simple check for nested, though might not be perfect for all cases.
-		if strings.Index(expr, "{{") != -1 || strings.Index(expr, "}}") != -1 {
+		if strings.Contains(expr, "{{") || strings.Contains(expr, "}}") {
 			if r.vm.logger != nil {
 				r.vm.logger.Warn("Nested expression detected in JSON preprocessing, replacing with empty string", "expression", expr)
 			}

@@ -4,9 +4,13 @@ import (
 	"fmt"
 	"html"
 	"math/big"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
+
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 // Summary represents composed notification content
@@ -196,7 +200,7 @@ func BuildBranchAndSkippedSummary(vm *VM, currentNodeName ...string) (string, st
 		}
 	}
 
-	if len(skipped) == 0 && len(branches) == 0 && successfulRealWrites == 0 && failedWrites == 0 && successfulSimulatedWrites == 0 {
+	if len(branches) == 0 {
 		return "", ""
 	}
 
@@ -563,14 +567,20 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 	executedSteps := len(vm.ExecutionLogs)
 
 	// Build subject up-front to support richer failure bodies
-	subject := fmt.Sprintf("%s: succeeded (%d out of %d steps)", workflowName, executedSteps, totalWorkflowSteps)
-	if failed {
-		subject = fmt.Sprintf("%s: failed at %s (%d out of %d steps)", workflowName, failedName, executedSteps, totalWorkflowSteps)
-	}
+	singleNode := isSingleNodeImmediate(vm)
 
-	lastName := findLastSuccessStepName(vm)
-	if lastName == "" {
-		lastName = safeName(currentStepName)
+	var subject string
+	if singleNode {
+		if failed {
+			subject = fmt.Sprintf("Run Node: %s failed at %s", workflowName, safeName(failedName))
+		} else {
+			subject = fmt.Sprintf("Run Node: %s succeeded", workflowName)
+		}
+	} else {
+		subject = fmt.Sprintf("%s: succeeded (%d out of %d steps)", workflowName, executedSteps, totalWorkflowSteps)
+		if failed {
+			subject = fmt.Sprintf("%s: failed at %s (%d out of %d steps)", workflowName, failedName, executedSteps, totalWorkflowSteps)
+		}
 	}
 
 	// Extract runner smart wallet and owner EOA (best-effort, no panics)
@@ -785,13 +795,13 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 			// Include steps that succeeded before failure
 			body = fmt.Sprintf(
 				"Smart wallet %s (owner %s) started workflow execution but encountered a failure.\n\n<strong>What Executed Successfully</strong>\n%s\n\n<strong>What Didn't Run</strong>\nFailed at step '%s': %s",
-				smartWallet, ownerEOA, successfulSteps, failedName, firstLine(failedReason),
+				smartWallet, ownerEOA, successfulSteps, safeName(failedName), firstLine(failedReason),
 			)
 		} else {
 			// No successful steps before failure
 			body = fmt.Sprintf(
 				"Smart wallet %s (owner %s) started workflow execution but encountered a failure.\n\nNo on-chain contract writes were completed before the failure.\n\n<strong>What Didn't Run</strong>\nFailed at step '%s': %s",
-				smartWallet, ownerEOA, failedName, firstLine(failedReason),
+				smartWallet, ownerEOA, safeName(failedName), firstLine(failedReason),
 			)
 		}
 	} else {
@@ -802,17 +812,31 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 		// Build What Executed Successfully section with checkmarks for each successful contract write
 		successfulSteps := buildStepsOverview(vm)
 
-		if strings.TrimSpace(successfulSteps) != "" {
-			body = fmt.Sprintf(
-				"Smart wallet %s (owner %s) executed %d on-chain actions.\n\n<strong>What Executed Successfully</strong>\n%s\n\nAll steps completed on %s.",
-				smartWallet, ownerEOA, actionCount, successfulSteps, chainName,
-			)
+		if singleNode {
+			body = composeSingleNodeSuccessBody(vm, smartWallet, ownerEOA, chainName, successfulSteps, actionLines, actionCount, currentStepName)
 		} else {
-			// Fallback when no contract writes are found
-			body = fmt.Sprintf(
-				"Smart wallet %s (owner %s) completed workflow execution.\n\nNo on-chain contract writes were recorded. This may have been a read-only workflow or all steps were simulated.\n\nAll steps completed on %s.",
-				smartWallet, ownerEOA, chainName,
-			)
+			if strings.TrimSpace(successfulSteps) != "" {
+				body = fmt.Sprintf(
+					"Smart wallet %s (owner %s) executed %d on-chain actions.\n\n<strong>What Executed Successfully</strong>\n%s\n\nAll steps completed on %s.",
+					smartWallet, ownerEOA, actionCount, successfulSteps, chainName,
+				)
+			} else {
+				// Fallback when no contract writes are found
+				body = fmt.Sprintf(
+					"Smart wallet %s (owner %s) completed workflow execution.\n\nNo on-chain contract writes were recorded. This may have been a read-only workflow or all steps were simulated.\n\nAll steps completed on %s.",
+					smartWallet, ownerEOA, chainName,
+				)
+			}
+		}
+	}
+
+	if !failed {
+		if narrative := strings.TrimSpace(buildNarrativeFromLogs(vm)); narrative != "" {
+			if strings.TrimSpace(body) != "" {
+				body += "\n\n" + narrative
+			} else {
+				body = narrative
+			}
 		}
 	}
 
@@ -820,6 +844,93 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 		Subject: subject,
 		Body:    body,
 	}
+}
+
+func composeSingleNodeSuccessBody(vm *VM, smartWallet, ownerEOA, chainName string, successfulSteps string, actionLines []string, actionCount int, fallbackStepName string) string {
+	trimmedSteps := strings.TrimSpace(successfulSteps)
+	if trimmedSteps != "" {
+		return fmt.Sprintf(
+			"Smart wallet %s (owner %s) executed %d on-chain action(s).\n\n<strong>What Executed Successfully</strong>\n%s\n\nAll steps completed on %s.",
+			displayOrUnknown(smartWallet), displayOrUnknown(ownerEOA), actionCount, trimmedSteps, chainName,
+		)
+	}
+
+	if summary := buildSingleNodeRestSummary(vm, smartWallet, ownerEOA, chainName, fallbackStepName); summary != "" {
+		return summary
+	}
+
+	if len(actionLines) > 0 {
+		return fmt.Sprintf(
+			"Smart wallet %s (owner %s) executed the node with the following activity:\n\n%s\n\nAll steps completed on %s.",
+			displayOrUnknown(smartWallet),
+			displayOrUnknown(ownerEOA),
+			strings.Join(actionLines, "\n"),
+			chainName,
+		)
+	}
+
+	description := "node execution"
+	if strings.TrimSpace(fallbackStepName) != "" {
+		description = fmt.Sprintf("the '%s' node", safeName(fallbackStepName))
+	}
+
+	return fmt.Sprintf(
+		"Smart wallet %s (owner %s) completed %s.\n\nAll steps completed on %s.",
+		displayOrUnknown(smartWallet),
+		displayOrUnknown(ownerEOA),
+		description,
+		chainName,
+	)
+}
+
+func buildSingleNodeRestSummary(vm *VM, smartWallet, ownerEOA, chainName string, fallbackStepName string) string {
+	step := findLastSuccessStep(vm)
+	if step == nil {
+		return ""
+	}
+
+	stepType := strings.ToUpper(step.GetType())
+	if !strings.Contains(stepType, "REST_API") {
+		return ""
+	}
+
+	status, statusText, requestURL := extractRestStepInfo(step)
+
+	statusSummary := ""
+	if status != 0 {
+		statusSummary = fmt.Sprintf("HTTP %d", status)
+		if strings.TrimSpace(statusText) != "" {
+			statusSummary += " " + strings.TrimSpace(statusText)
+		}
+	} else if strings.TrimSpace(statusText) != "" {
+		statusSummary = strings.TrimSpace(statusText)
+	} else {
+		statusSummary = "Notification provider responded"
+	}
+
+	if strings.TrimSpace(requestURL) != "" {
+		provider := providerDisplayName(detectNotificationProvider(requestURL))
+		if provider == "" {
+			provider = shortURLHost(requestURL)
+		}
+		if provider != "" {
+			statusSummary += fmt.Sprintf(" from %s", provider)
+		}
+	}
+
+	stepName := step.GetName()
+	if strings.TrimSpace(stepName) == "" {
+		stepName = fallbackStepName
+	}
+	stepName = safeName(stepName)
+	return fmt.Sprintf(
+		"Smart wallet %s (owner %s) executed the '%s' REST API node.\n\n%s.\n\nAll steps completed on %s.",
+		displayOrUnknown(smartWallet),
+		displayOrUnknown(ownerEOA),
+		stepName,
+		statusSummary,
+		chainName,
+	)
 }
 
 // isSingleNodeImmediate returns true if the VM looks like a temp VM used for a
@@ -833,6 +944,86 @@ func isSingleNodeImmediate(vm *VM) bool {
 	count := len(vm.TaskNodes)
 	vm.mu.Unlock()
 	return vm.GetTaskId() == "" && count == 1
+}
+
+func extractRestStepInfo(step *avsproto.Execution_Step) (int, string, string) {
+	if step == nil {
+		return 0, "", ""
+	}
+	rest := step.GetRestApi()
+	if rest == nil || rest.Data == nil {
+		return 0, "", ""
+	}
+
+	if dataMap, ok := rest.Data.AsInterface().(map[string]interface{}); ok {
+		status := convertInterfaceToInt(dataMap["status"])
+		statusText := asString(dataMap["statusText"])
+		requestURL := asString(dataMap["url"])
+		return status, statusText, requestURL
+	}
+
+	return 0, "", ""
+}
+
+func convertInterfaceToInt(val interface{}) int {
+	switch v := val.(type) {
+	case int:
+		return v
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	case float32:
+		return int(v)
+	case float64:
+		return int(v)
+	case string:
+		if i, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			return i
+		}
+	}
+	return 0
+}
+
+func providerDisplayName(provider string) string {
+	switch strings.ToLower(provider) {
+	case "sendgrid":
+		return "SendGrid"
+	case "telegram":
+		return "Telegram"
+	default:
+		return ""
+	}
+}
+
+func shortURLHost(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	host := parsed.Host
+	if host == "" {
+		return raw
+	}
+	path := strings.Trim(parsed.Path, "/")
+	if path != "" {
+		host = host + "/" + path
+	}
+	if len(host) > 64 {
+		return host[:61] + "..."
+	}
+	return host
+}
+
+func displayOrUnknown(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "unknown"
+	}
+	return value
 }
 
 // getTotalWorkflowSteps returns the total number of steps in a workflow,
@@ -928,12 +1119,6 @@ func buildStepsOverview(vm *VM) string {
 		t := strings.ToUpper(st.GetType())
 		if !strings.Contains(t, "CONTRACT_WRITE") {
 			continue
-		}
-
-		// Generate human-readable description for this step
-		stepName := st.GetName()
-		if stepName == "" {
-			stepName = st.GetId()
 		}
 
 		methodName := ""
@@ -1240,18 +1425,29 @@ func findEarliestFailure(vm *VM) (bool, string, string) {
 	return false, "", ""
 }
 
-func findLastSuccessStepName(vm *VM) string {
+func findLastSuccessStep(vm *VM) *avsproto.Execution_Step {
+	if vm == nil {
+		return nil
+	}
 	steps := vm.ExecutionLogs
 	for i := len(steps) - 1; i >= 0; i-- {
 		if steps[i].GetSuccess() {
-			name := steps[i].GetName()
-			if name == "" {
-				name = steps[i].GetId()
-			}
-			return safeName(name)
+			return steps[i]
 		}
 	}
-	return ""
+	return nil
+}
+
+func findLastSuccessStepName(vm *VM) string {
+	step := findLastSuccessStep(vm)
+	if step == nil {
+		return ""
+	}
+	name := step.GetName()
+	if name == "" {
+		name = step.GetId()
+	}
+	return safeName(name)
 }
 
 func firstLine(s string) string {
