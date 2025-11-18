@@ -70,17 +70,6 @@ The fee payment process follows ERC4337 architecture:
    - Immediately transfers funds to EntryPoint
    - Used for sponsored transactions
 
-### Pre-fund Requirements
-
-| Network      | Pre-fund (ETH) | Sample Transaction                                                                                         |
-| ------------ | -------------- | ---------------------------------------------------------------------------------------------------------- |
-| Ethereum     | 0.4            | TBD                                                                                                        |
-| Sepolia      | 0.4            | [View](https://sepolia.etherscan.io/tx/0xee325c48e6a6a35b91642b2483acd860255283aded8cb949a9594a8ab19c7f69) |
-| Base         | 0.001          | TBD                                                                                                        |
-| Base Sepolia | 0.00005        | [View](https://sepolia.basescan.org/tx/0x946e7b6e48fd1421d17263e9b89e329e264cb37de511077844e925f414be8851) |
-| Soneium      | TBD            | TBD                                                                                                        |
-| Minato       | TBD            | TBD                                                                                                        |
-
 ### Sponsored Transactions
 
 For tasks where we cover the fee:
