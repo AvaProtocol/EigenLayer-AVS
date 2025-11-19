@@ -24,6 +24,18 @@ var templateVarRegex = regexp.MustCompile(`\{\{([^}]+)\}\}`)
 // Returns:
 //   - error: nil if no undefined values found, otherwise an error with helpful message
 func ValidateTemplateVariableResolution(resolvedValue, originalValue string, vm *VM, contextName string) error {
+	// Skip validation for immediate execution (RunNodeImmediately) - allow undefined values
+	// VMs created for immediate execution have task == nil
+	if vm != nil {
+		vm.mu.Lock()
+		hasTask := vm.task != nil
+		vm.mu.Unlock()
+		if !hasTask {
+			// This is an immediate execution, allow undefined values
+			return nil
+		}
+	}
+
 	// First, check if there are any template variables in the original string
 	hasTemplateVars := templateVarRegex.MatchString(originalValue)
 

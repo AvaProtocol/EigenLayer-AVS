@@ -13,7 +13,7 @@ func TestRunNodeImmediately_RestAPIWithTemplates(t *testing.T) {
 	nodeConfig := map[string]interface{}{
 		"url":    "https://httpbin.org/post",
 		"method": "POST",
-		"body":   `{"message": "{{trigger.test_value}}", "timestamp": "{{date.now}}"}`,
+		"body":   `{"message": "{{test_value}}", "timestamp": "{{date.now}}"}`,
 		"headersMap": [][]string{
 			{"Content-Type", "application/json"},
 		},
@@ -92,7 +92,7 @@ func TestRunNodeImmediately_ClientInputDebug(t *testing.T) {
 	nodeConfig := map[string]interface{}{
 		"url":    "https://httpbin.org/post",
 		"method": "POST",
-		"body":   `{"client_input": "{{trigger.client_data}}"}`,
+		"body":   `{"client_input": "{{client_data}}"}`,
 		"headersMap": [][]string{
 			{"Content-Type", "application/json"},
 		},
@@ -125,7 +125,7 @@ func TestRunNodeImmediately_TemplateProcessingDebug(t *testing.T) {
 	nodeConfig := map[string]interface{}{
 		"url":    "https://httpbin.org/post",
 		"method": "POST",
-		"body":   `{"nested": "{{trigger.nested.value}}", "array": "{{trigger.array.0}}"}`,
+		"body":   `{"nested": "{{nested.value}}", "array": "{{array.0}}"}`,
 		"headersMap": [][]string{
 			{"Content-Type", "application/json"},
 		},
@@ -155,7 +155,7 @@ func TestRunNodeImmediately_MissingTemplateVariable(t *testing.T) {
 	nodeConfig := map[string]interface{}{
 		"url":    "https://httpbin.org/post",
 		"method": "POST",
-		"body":   `{"message": "{{trigger.missing_field}}", "fallback": "default_value"}`,
+		"body":   `{"message": "{{missing_field}}", "fallback": "default_value"}`,
 		"headersMap": [][]string{
 			{"Content-Type", "application/json"},
 		},
@@ -182,7 +182,7 @@ func TestRunNodeImmediately_UndefinedVariableReplacement(t *testing.T) {
 	nodeConfig := map[string]interface{}{
 		"url":    "https://httpbin.org/post",
 		"method": "POST",
-		"body":   `{"defined": "{{trigger.defined_value}}", "undefined": "{{trigger.undefined_value}}", "mixed": "prefix_{{trigger.another_undefined}}_suffix"}`,
+		"body":   `{"defined": "{{defined_value}}", "undefined": "{{undefined_value}}", "mixed": "prefix_{{another_undefined}}_suffix"}`,
 		"headersMap": [][]string{
 			{"Content-Type", "application/json"},
 		},
@@ -209,7 +209,7 @@ func TestRunNodeImmediately_MalformedTemplateDetection(t *testing.T) {
 	nodeConfig := map[string]interface{}{
 		"url":    "https://httpbin.org/post",
 		"method": "POST",
-		"body":   `{"malformed1": "{{trigger.value", "malformed2": "trigger.value}}", "correct": "{{trigger.value}}"}`,
+		"body":   `{"malformed1": "{{value", "malformed2": "value}}", "correct": "{{value}}"}`,
 		"headersMap": [][]string{
 			{"Content-Type", "application/json"},
 		},
@@ -238,7 +238,7 @@ func TestRunNodeImmediately_ValidTemplateAfterFix(t *testing.T) {
 	nodeConfig := map[string]interface{}{
 		"url":    "https://httpbin.org/post",
 		"method": "POST",
-		"body":   `{"message": "{{trigger.message}}", "timestamp": "{{date.now}}"}`,
+		"body":   `{"message": "{{message}}", "timestamp": "{{date.now}}"}`,
 		"headersMap": [][]string{
 			{"Content-Type", "application/json"},
 		},

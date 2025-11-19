@@ -82,12 +82,12 @@ func TestTaskRunLogicAndTemplateVariables(t *testing.T) {
 					"url":    "https://httpbin.org/post",
 					"method": "POST",
 					"body": `{
-						"user_id": "{{trigger.user.id}}",
-						"user_name": "{{trigger.user.name}}",
-						"theme": "{{trigger.user.preferences.theme}}",
-						"transaction_hash": "{{trigger.transaction.hash}}",
-						"amount": "{{trigger.transaction.amount}}",
-						"missing_field": "{{trigger.user.missing.field}}"
+						"user_id": "{{user.id}}",
+						"user_name": "{{user.name}}",
+						"theme": "{{user.preferences.theme}}",
+						"transaction_hash": "{{transaction.hash}}",
+						"amount": "{{transaction.amount}}",
+						"missing_field": "{{user.missing.field}}"
 					}`,
 					"headersMap": [][]string{
 						{"Content-Type", "application/json"},
@@ -99,8 +99,8 @@ func TestTaskRunLogicAndTemplateVariables(t *testing.T) {
 					"lang": avsproto.Lang_LANG_JAVASCRIPT,
 					"source": `
 						function main() {
-							const inputValue = {{trigger.input_value}};
-							const multiplier = {{trigger.multiplier}};
+							const inputValue = {{input_value}};
+							const multiplier = {{multiplier}};
 							return {
 								result: inputValue * multiplier,
 								message: "Calculation completed"
@@ -140,10 +140,10 @@ func TestSmartTriggerDataFallback(t *testing.T) {
 		"url":    "https://httpbin.org/post",
 		"method": "POST",
 		"body": `{
-			"camelCase": "{{trigger.camelCaseValue}}",
-			"snake_case": "{{trigger.snake_case_value}}",
-			"fallback_camel": "{{trigger.fallbackCamelValue}}",
-			"fallback_snake": "{{trigger.fallback_snake_value}}"
+			"camelCase": "{{camelCaseValue}}",
+			"snake_case": "{{snake_case_value}}",
+			"fallback_camel": "{{fallbackCamelValue}}",
+			"fallback_snake": "{{fallback_snake_value}}"
 		}`,
 		"headersMap": [][]string{
 			{"Content-Type", "application/json"},
