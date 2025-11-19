@@ -313,10 +313,12 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req *avsproto.GetSig
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid Ethereum wallet address format")
 	}
 
-	chainId := GetGlobalChainID()
-	if chainId == nil {
+	// Use smart wallet chain ID (r.chainID) instead of global EigenLayer chain ID
+	// This ensures authentication uses the correct chain for smart wallet operations
+	if r.chainID == nil {
 		return nil, status.Errorf(codes.Internal, "Chain ID not available. Aggregator not fully initialized.")
 	}
+	chainId := r.chainID
 
 	issuedAt := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	expiredAt := time.Now().Add(TokenExpirationDuration).UTC().Format("2006-01-02T15:04:05.000Z")
