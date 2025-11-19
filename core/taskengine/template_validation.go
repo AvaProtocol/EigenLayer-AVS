@@ -25,13 +25,15 @@ var templateVarRegex = regexp.MustCompile(`\{\{([^}]+)\}\}`)
 //   - error: nil if no undefined values found, otherwise an error with helpful message
 func ValidateTemplateVariableResolution(resolvedValue, originalValue string, vm *VM, contextName string) error {
 	// Skip validation for immediate execution (RunNodeImmediately) - allow undefined values
-	// VMs created for immediate execution have task == nil
+	// VMs created for immediate execution have task == nil but TaskNodes set (via RunNodeWithInputs)
+	// Test VMs also have task == nil but typically don't set TaskNodes, so we check both conditions
 	if vm != nil {
 		vm.mu.Lock()
 		hasTask := vm.task != nil
+		hasTaskNodes := len(vm.TaskNodes) > 0
 		vm.mu.Unlock()
-		if !hasTask {
-			// This is an immediate execution, allow undefined values
+		if !hasTask && hasTaskNodes {
+			// This is an immediate execution (has nodes but no task), allow undefined values
 			return nil
 		}
 	}
