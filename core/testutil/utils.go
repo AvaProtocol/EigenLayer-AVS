@@ -183,6 +183,7 @@ func GetTestBundlerRPC() string {
 // GetTestTenderlyAccount returns the Tenderly account for tests from aggregator config
 // Panics if config is not loaded or TenderlyAccount is empty
 func GetTestTenderlyAccount() string {
+	loadTestConfigOnce()
 	if testConfig == nil {
 		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}
@@ -195,6 +196,7 @@ func GetTestTenderlyAccount() string {
 // GetTestTenderlyProject returns the Tenderly project for tests from aggregator config
 // Panics if config is not loaded or TenderlyProject is empty
 func GetTestTenderlyProject() string {
+	loadTestConfigOnce()
 	if testConfig == nil {
 		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}
@@ -207,6 +209,7 @@ func GetTestTenderlyProject() string {
 // GetTestTenderlyAccessKey returns the Tenderly access key for tests from aggregator config
 // Panics if config is not loaded or TenderlyAccessKey is empty
 func GetTestTenderlyAccessKey() string {
+	loadTestConfigOnce()
 	if testConfig == nil {
 		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}

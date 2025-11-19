@@ -32,9 +32,7 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
-	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
-	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
-
+	// Factory address will be set automatically when engine is created
 	// Use an ERC20 contract deployed on Sepolia to match default test chain
 	// USDC (Sepolia): 0x1c7d4b196cb0c7b01d743fbc6116a902379c7238
 	sepoliaUsdcAddress := common.HexToAddress("0x1c7d4b196cb0c7b01d743fbc6116a902379c7238")
@@ -94,11 +92,10 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 			t.Skip("Owner EOA address not set, skipping simulation test")
 		}
 		ownerEOA := *ownerAddr
-		factory := testutil.GetAggregatorConfig().SmartWallet.FactoryAddress
+		// Factory address is automatically set by engine.New() from config.SmartWallet.FactoryAddress
+		factory := config.SmartWallet.FactoryAddress
 
 		// Derive actual salt:0 smart wallet address (no mock needed)
-		aa.SetFactoryAddress(factory)
-
 		// Connect to RPC to derive address
 		client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
 		require.NoError(t, err, "Failed to connect to RPC")
@@ -155,9 +152,7 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 
 		config := testutil.GetAggregatorConfig()
 		engine := New(db, config, nil, testutil.GetLogger())
-
-		smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
-		aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+		// Factory address is automatically set by engine.New() from config.SmartWallet.FactoryAddress
 
 		// Get owner EOA from environment and derive salt:0 smart wallet
 		ownerAddr, ok := testutil.MustGetTestOwnerAddress()
@@ -165,7 +160,7 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 			t.Skip("Owner EOA address not set, skipping simulation test")
 		}
 		ownerEOA := *ownerAddr
-		factory := smartWalletConfig.FactoryAddress
+		factory := config.SmartWallet.FactoryAddress
 
 		// Derive actual salt:0 smart wallet address (need ethclient)
 		client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
@@ -283,9 +278,7 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 
 		config := testutil.GetAggregatorConfig()
 		engine := New(db, config, nil, testutil.GetLogger())
-
-		smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
-		aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+		// Factory address is automatically set by engine.New() from config.SmartWallet.FactoryAddress
 
 		// Get owner EOA from environment
 		ownerAddr, ok := testutil.MustGetTestOwnerAddress()
@@ -297,17 +290,17 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		amount := "1000000"
 
 		// Derive runner using salt:0 via factory on chain
-		rpcURL := smartWalletConfig.EthRpcUrl
+		rpcURL := config.SmartWallet.EthRpcUrl
 		if rpcURL == "" {
 			t.Fatal("RPC URL not configured in config/aggregator.yaml")
 		}
 		ethc, err := ethclient.Dial(rpcURL)
 		require.NoError(t, err, "Failed to connect RPC for derivation")
+		factory := config.SmartWallet.FactoryAddress
 		derivedRunner, derr := aa.GetSenderAddress(ethc, ownerEOA, big.NewInt(0))
 		require.NoError(t, derr, "Failed to derive runner")
 
 		// Seed wallet for validation
-		factory := smartWalletConfig.FactoryAddress
 		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: derivedRunner, Factory: &factory, Salt: big.NewInt(0)})
 
 		// Minimal ABI for transfer(address,uint256)
