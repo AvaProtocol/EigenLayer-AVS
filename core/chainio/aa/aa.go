@@ -5,12 +5,17 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+
 	// "github.com/ethereum/go-ethereum/accounts/abi/bind"
+
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 )
 
 //go:embed account.abi
@@ -22,11 +27,32 @@ var (
 
 	simpleAccountABI  *abi.ABI
 	EntrypointAddress = common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789")
-	factoryAddress    common.Address
+
+	// factoryAddress is set via SetFactoryAddress() from config
+	// It uses the default from config.DefaultFactoryProxyAddressHex if not overridden in YAML
+	factoryAddress   common.Address
+	factoryAddressMu sync.RWMutex
 )
 
+// SetFactoryAddress sets the factory proxy address from config
+// This should be called during initialization with the value from config.SmartWallet.FactoryAddress
+// which already handles default value and YAML override
 func SetFactoryAddress(address common.Address) {
+	factoryAddressMu.Lock()
+	defer factoryAddressMu.Unlock()
 	factoryAddress = address
+}
+
+// getFactoryAddress returns the current factory address, with fallback to default from config
+func getFactoryAddress() common.Address {
+	factoryAddressMu.RLock()
+	defer factoryAddressMu.RUnlock()
+	if factoryAddress != (common.Address{}) {
+		return factoryAddress
+	}
+	// Fallback to default if not set (shouldn't happen in normal operation)
+	// This uses the default from config package, which can be overridden in YAML
+	return common.HexToAddress(config.DefaultFactoryProxyAddressHex)
 }
 
 func SetEntrypointAddress(address common.Address) {
@@ -37,12 +63,18 @@ func buildFactoryABI() {
 	var err error
 	factoryABI, err = abi.JSON(strings.NewReader(SimpleFactoryMetaData.ABI))
 	if err != nil {
-		panic(fmt.Errorf("Invalid factory ABI: %w", err))
+		panic(fmt.Errorf("invalid factory ABI: %w", err))
 	}
 }
 
-// Get InitCode returns initcode for a given address with a given salt
+// GetInitCode returns initcode for a given address with a given salt using the factory address from config
 func GetInitCode(ownerAddress string, salt *big.Int) (string, error) {
+	return GetInitCodeForFactory(ownerAddress, getFactoryAddress(), salt)
+}
+
+// GetInitCodeForFactory returns initcode for a given address with a given salt
+// factoryAddress should be the factory proxy address
+func GetInitCodeForFactory(ownerAddress string, factoryAddress common.Address, salt *big.Int) (string, error) {
 	var err error
 
 	buildFactoryABI()
@@ -62,34 +94,55 @@ func GetInitCode(ownerAddress string, salt *big.Int) (string, error) {
 	//return common.Bytes2Hex(data), nil
 }
 
-func GetSenderAddress(conn *ethclient.Client, ownerAddress common.Address, salt *big.Int) (*common.Address, error) {
-	// Check if factory address is set
-	if (factoryAddress == common.Address{}) {
-		return nil, fmt.Errorf("factory address not initialized - call aa.SetFactoryAddress() first")
-	}
+// computeSmartWalletAddress computes the smart wallet address using the factory proxy address as a stable key
+// This ensures addresses remain stable across factory implementation upgrades
+// Uses: keccak256(factoryProxyAddress || ownerAddress || salt)[12:] for deterministic address derivation
+func computeSmartWalletAddress(factoryAddr common.Address, ownerAddress common.Address, salt *big.Int) (common.Address, error) {
+	// Convert salt to bytes32
+	saltBytes := make([]byte, 32)
+	salt.FillBytes(saltBytes)
 
-	simpleFactory, err := NewSimpleFactory(factoryAddress, conn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create factory instance at %s: %w", factoryAddress.Hex(), err)
-	}
+	// Use factory proxy address + owner + salt for deterministic address derivation
+	// This ensures addresses remain stable even when factory implementation changes
+	hash := crypto.Keccak256(
+		factoryAddr.Bytes(),
+		ownerAddress.Bytes(),
+		saltBytes,
+	)
 
-	sender, err := simpleFactory.GetAddress(nil, ownerAddress, salt)
-	if err != nil {
-		return nil, fmt.Errorf("failed to derive wallet address from factory %s for owner %s with salt %s: %w",
-			factoryAddress.Hex(), ownerAddress.Hex(), salt.String(), err)
-	}
-	return &sender, err
+	// Take last 20 bytes for address
+	return common.BytesToAddress(hash[12:]), nil
 }
 
-// Compute smart wallet address for a particular factory
-func GetSenderAddressForFactory(conn *ethclient.Client, ownerAddress common.Address, customFactoryAddress common.Address, salt *big.Int) (*common.Address, error) {
-	simpleFactory, err := NewSimpleFactory(customFactoryAddress, conn)
-	if err != nil {
-		return nil, err
-	}
+// GetSenderAddress is a wrapper that uses the factory address from config
+// It calls GetSenderAddressForFactory with the factory address set via SetFactoryAddress()
+// which reads from config (with default value and YAML override support)
+func GetSenderAddress(conn *ethclient.Client, ownerAddress common.Address, salt *big.Int) (*common.Address, error) {
+	return GetSenderAddressForFactory(conn, ownerAddress, getFactoryAddress(), salt)
+}
 
-	sender, err := simpleFactory.GetAddress(nil, ownerAddress, salt)
-	return &sender, err
+// GetSenderAddressForFactory computes the smart wallet address using the factory proxy address
+// Callers should pass the default factory address from config.DefaultFactoryProxyAddressHex
+// or a custom factory address if needed.
+func GetSenderAddressForFactory(conn *ethclient.Client, ownerAddress common.Address, factoryAddress common.Address, salt *big.Int) (*common.Address, error) {
+	// Use factory proxy address (stable constant) + owner + salt for deterministic address derivation
+	// This ensures addresses remain stable across factory implementation upgrades
+	addr, err := computeSmartWalletAddress(factoryAddress, ownerAddress, salt)
+	if err != nil {
+		// Fallback to on-chain call if local calculation fails
+		simpleFactory, err2 := NewSimpleFactory(factoryAddress, conn)
+		if err2 != nil {
+			return nil, fmt.Errorf("failed to create factory instance at %s: %w", factoryAddress.Hex(), err2)
+		}
+
+		sender, err2 := simpleFactory.GetAddress(nil, ownerAddress, salt)
+		if err2 != nil {
+			return nil, fmt.Errorf("failed to derive wallet address from factory %s for owner %s with salt %s: %w (local calc error: %v)",
+				factoryAddress.Hex(), ownerAddress.Hex(), salt.String(), err2, err)
+		}
+		return &sender, err2
+	}
+	return &addr, nil
 }
 
 func GetNonce(conn *ethclient.Client, ownerAddress common.Address, salt *big.Int) (*big.Int, error) {
