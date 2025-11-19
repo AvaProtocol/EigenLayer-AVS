@@ -822,9 +822,20 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 				)
 			} else {
 				// Fallback when no contract writes are found
+				// Include workflow name and step names for better context
+				stepNames := make([]string, 0)
+				for _, st := range vm.ExecutionLogs {
+					if st.GetSuccess() && st.GetName() != "" {
+						stepNames = append(stepNames, st.GetName())
+					}
+				}
+				stepInfo := ""
+				if len(stepNames) > 0 {
+					stepInfo = fmt.Sprintf(" Steps executed: %s.", strings.Join(stepNames, ", "))
+				}
 				body = fmt.Sprintf(
-					"Smart wallet %s (owner %s) completed workflow execution.\n\nNo on-chain contract writes were recorded. This may have been a read-only workflow or all steps were simulated.\n\nAll steps completed on %s.",
-					smartWallet, ownerEOA, chainName,
+					"Smart wallet %s (owner %s) completed workflow execution for '%s'.\n\nNo on-chain contract writes were recorded. This may have been a read-only workflow or all steps were simulated.%s\n\nAll steps completed on %s.",
+					smartWallet, ownerEOA, workflowName, stepInfo, chainName,
 				)
 			}
 		}
