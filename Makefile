@@ -173,7 +173,7 @@ aggregator-base-sepolia: build
 	@echo "📝 Logs will be written to aggregator-base-sepolia.log"
 	./out/ap aggregator --config=config/aggregator-base-sepolia.yaml 2>&1 | tee aggregator-base-sepolia.log
 ## operator: show usage for operator commands
-.PHONY: operator operator-sepolia operator-ethereum operator-base
+.PHONY: operator operator-sepolia operator-ethereum operator-base operator-base-sepolia
 operator:
 	@echo "Usage: make operator-<chain>"
 	@echo ""
@@ -181,6 +181,7 @@ operator:
 	@echo "  make operator-sepolia          - Start operator with Sepolia config"
 	@echo "  make operator-ethereum         - Start operator with Ethereum config"
 	@echo "  make operator-base             - Start operator with Base config"
+	@echo "  make operator-base-sepolia     - Start operator with Base Sepolia config"
 	@echo "  make operator-default          - Start operator with default config"
 
 operator-sepolia: build
@@ -197,6 +198,11 @@ operator-base: build
 	@echo "🔧 Starting operator with Base configuration..."
 	@echo "📝 Logs will be written to operator-base.log"
 	./out/ap operator --config=config/operator-base.yaml 2>&1 | tee operator-base.log
+
+operator-base-sepolia: build
+	@echo "🔧 Starting operator with Base Sepolia configuration..."
+	@echo "📝 Logs will be written to operator-base-sepolia.log"
+	./out/ap operator --config=config/operator-base-sepolia.yaml 2>&1 | tee operator-base-sepolia.log
 
 operator-default: build
 	@echo "🔧 Starting operator with default configuration..."
