@@ -11,6 +11,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/signer"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum"
@@ -18,6 +19,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/golang-jwt/jwt/v5"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -238,14 +240,43 @@ func TestCrossChainJWTValidation(t *testing.T) {
 func TestGetSignatureFormat(t *testing.T) {
 	logger, _ := sdklogging.NewZapLogger("development")
 
-	SetGlobalChainID(big.NewInt(1))
+	// Load test config to get VM's config
+	// Trigger config loading by calling a function that calls loadTestConfigOnce()
+	_ = testutil.GetTestRPC() // This triggers loadTestConfigOnce()
+	testConfig := testutil.GetTestConfig()
+	if testConfig == nil {
+		t.Fatal("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
+	}
+
+	if testConfig.SmartWallet == nil {
+		t.Fatal("SmartWallet config is nil in test config")
+	}
+
+	// Get chainID from smart wallet RPC (same way as rpc_server.go does)
+	smartWalletRpcUrl := testConfig.SmartWallet.EthRpcUrl
+	if smartWalletRpcUrl == "" {
+		t.Fatal("SmartWallet.EthRpcUrl is empty in test config")
+	}
+
+	smartWalletClient, err := ethclient.Dial(smartWalletRpcUrl)
+	if err != nil {
+		t.Fatalf("failed to connect to smart wallet RPC: %v", err)
+	}
+	defer smartWalletClient.Close()
+
+	chainID, err := smartWalletClient.ChainID(context.Background())
+	if err != nil {
+		t.Fatalf("failed to get chainID from smart wallet RPC: %v", err)
+	}
+
+	SetGlobalChainID(chainID)
 
 	r := RpcServer{
 		config: &config.Config{
 			JwtSecret: []byte("test123"),
 			Logger:    logger,
 		},
-		ethrpc: nil, // Using nil ethrpc will default to chainId = 1
+		chainID: chainID,
 	}
 
 	walletAddress := "0x1234567890123456789012345678901234567890"
@@ -256,11 +287,11 @@ func TestGetSignatureFormat(t *testing.T) {
 	resp, err := r.GetSignatureFormat(context.Background(), req)
 
 	if err != nil {
-		t.Errorf("expected GetSignatureFormat to succeed but got error: %s", err)
+		t.Fatalf("expected GetSignatureFormat to succeed but got error: %s", err)
 	}
 
 	if resp == nil {
-		t.Errorf("expected non-nil response but got nil")
+		t.Fatal("expected non-nil response but got nil")
 	}
 
 	message := resp.Message
@@ -272,7 +303,8 @@ func TestGetSignatureFormat(t *testing.T) {
 		t.Errorf("expected message to contain wallet address %s but got %s", walletAddress, message)
 	}
 
-	if !strings.Contains(message, "Chain ID: 1") {
-		t.Errorf("expected message to contain Chain ID: 1 but got %s", message)
+	expectedChainIDStr := fmt.Sprintf("Chain ID: %d", chainID.Int64())
+	if !strings.Contains(message, expectedChainIDStr) {
+		t.Errorf("expected message to contain %s but got %s", expectedChainIDStr, message)
 	}
 }
