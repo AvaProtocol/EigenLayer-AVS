@@ -407,6 +407,26 @@ func (n *Engine) MustStart() error {
 	return nil
 }
 
+// storeDefaultWalletForListWallets creates and stores the default wallet (salt:0) for ListWallets.
+// Returns the stored wallet model if successful, or nil if storage failed (but logs the error).
+func (n *Engine) storeDefaultWalletForListWallets(owner common.Address, defaultDerivedAddress *common.Address, defaultSystemFactory common.Address, defaultSalt *big.Int) *model.SmartWallet {
+	n.logger.Info("Default wallet not found in DB for ListWallets, storing it", "owner", owner.Hex(), "walletAddress", defaultDerivedAddress.Hex())
+	newModelWallet := &model.SmartWallet{
+		Owner:    &owner,
+		Address:  defaultDerivedAddress,
+		Factory:  &defaultSystemFactory,
+		Salt:     defaultSalt,
+		IsHidden: false,
+	}
+	if storeErr := StoreWallet(n.db, owner, newModelWallet); storeErr != nil {
+		n.logger.Error("Error storing default wallet to DB for ListWallets", "owner", owner.Hex(), "walletAddress", defaultDerivedAddress.Hex(), "error", storeErr)
+		// Continue and return the wallet anyway, but log the error
+		return nil
+	}
+	// Successfully stored, return the wallet model
+	return newModelWallet
+}
+
 // ListWallets corresponds to the ListWallets RPC.
 func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletReq) (*avsproto.ListWalletResp, error) {
 	walletsToReturnProto := []*avsproto.SmartWallet{}
@@ -480,38 +500,14 @@ func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletR
 							n.logger.Warn("Max wallet count reached for owner in ListWallets, but storing default wallet anyway since it's always returned", "owner", owner.Hex(), "limit", maxAllowed, "currentCount", len(unique))
 						}
 						// Store the default wallet since we're returning it to the client
-						n.logger.Info("Default wallet not found in DB for ListWallets, storing it", "owner", owner.Hex(), "walletAddress", defaultDerivedAddress.Hex())
-						newModelWallet := &model.SmartWallet{
-							Owner:    &owner,
-							Address:  defaultDerivedAddress,
-							Factory:  &defaultSystemFactory,
-							Salt:     defaultSalt,
-							IsHidden: false,
-						}
-						if storeErr := StoreWallet(n.db, owner, newModelWallet); storeErr != nil {
-							n.logger.Error("Error storing default wallet to DB for ListWallets", "owner", owner.Hex(), "walletAddress", defaultDerivedAddress.Hex(), "error", storeErr)
-							// Continue and return the wallet anyway, but log the error
-						} else {
-							// Successfully stored, update modelWallet for response
-							modelWallet = newModelWallet
+						if storedWallet := n.storeDefaultWalletForListWallets(owner, defaultDerivedAddress, defaultSystemFactory, defaultSalt); storedWallet != nil {
+							modelWallet = storedWallet
 						}
 					}
 				} else {
 					// No config but wallet not in DB - store it anyway
-					n.logger.Info("Default wallet not found in DB for ListWallets, storing it", "owner", owner.Hex(), "walletAddress", defaultDerivedAddress.Hex())
-					newModelWallet := &model.SmartWallet{
-						Owner:    &owner,
-						Address:  defaultDerivedAddress,
-						Factory:  &defaultSystemFactory,
-						Salt:     defaultSalt,
-						IsHidden: false,
-					}
-					if storeErr := StoreWallet(n.db, owner, newModelWallet); storeErr != nil {
-						n.logger.Error("Error storing default wallet to DB for ListWallets", "owner", owner.Hex(), "walletAddress", defaultDerivedAddress.Hex(), "error", storeErr)
-						// Continue and return the wallet anyway, but log the error
-					} else {
-						// Successfully stored, update modelWallet for response
-						modelWallet = newModelWallet
+					if storedWallet := n.storeDefaultWalletForListWallets(owner, defaultDerivedAddress, defaultSystemFactory, defaultSalt); storedWallet != nil {
+						modelWallet = storedWallet
 					}
 				}
 			} else {
