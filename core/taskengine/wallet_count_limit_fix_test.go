@@ -91,8 +91,17 @@ func TestWalletCountLimitDoesNotBlockExistingWalletAccess(t *testing.T) {
 		// to access the existing wallet.
 
 		// Reset the database to have just 1 wallet initially
-		// Remove the second wallet created in the setup
-		db.Delete([]byte(WalletStorageKey(user.Address, addr2.Hex())))
+		// Clean up any wallets that might have been created by previous subtests (e.g., ListWallets)
+		// by deleting all wallets and recreating just wallet1
+		dbItems, err := db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+		require.NoError(t, err)
+		for _, item := range dbItems {
+			db.Delete(item.Key)
+		}
+
+		// Recreate wallet1 to ensure clean state
+		err = StoreWallet(db, user.Address, wallet1)
+		require.NoError(t, err)
 
 		// Now we have 1 wallet (limit=2), so we can create one more
 		// First, call GetWallet to create a wallet with salt=999 (this should succeed)
