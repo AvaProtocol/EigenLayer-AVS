@@ -140,7 +140,7 @@ func GetSenderAddressForFactory(conn *ethclient.Client, ownerAddress common.Addr
 			return nil, fmt.Errorf("failed to derive wallet address from factory %s for owner %s with salt %s: %w (local calc error: %v)",
 				factoryAddress.Hex(), ownerAddress.Hex(), salt.String(), err2, err)
 		}
-		return &sender, err2
+		return &sender, nil
 	}
 	return &addr, nil
 }
