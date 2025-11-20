@@ -94,21 +94,31 @@ func GetInitCodeForFactory(ownerAddress string, factoryAddress common.Address, s
 	//return common.Bytes2Hex(data), nil
 }
 
-// computeSmartWalletAddress computes the smart wallet address using the factory proxy address as a stable key
-// This ensures addresses remain stable across factory implementation upgrades
-// Uses: keccak256(factoryProxyAddress || ownerAddress || salt)[12:] for deterministic address derivation
+// computeSmartWalletAddress computes the smart wallet address using the standard CREATE2 formula:
+// keccak256(0xff || factoryAddr || salt || keccak256(initCode))[12:]
 func computeSmartWalletAddress(factoryAddr common.Address, ownerAddress common.Address, salt *big.Int) (common.Address, error) {
 	// Convert salt to bytes32
 	saltBytes := make([]byte, 32)
 	salt.FillBytes(saltBytes)
 
-	// Use factory proxy address + owner + salt for deterministic address derivation
-	// This ensures addresses remain stable even when factory implementation changes
-	hash := crypto.Keccak256(
-		factoryAddr.Bytes(),
-		ownerAddress.Bytes(),
-		saltBytes,
-	)
+	// Get the init code for the wallet (factory + calldata)
+	initCodeHex, err := GetInitCodeForFactory(ownerAddress.Hex(), factoryAddr, salt)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("failed to get init code: %w", err)
+	}
+	initCodeBytes, err := hexutil.Decode(initCodeHex)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("failed to decode init code: %w", err)
+	}
+	initCodeHash := crypto.Keccak256(initCodeBytes)
+
+	// CREATE2 formula: keccak256(0xff || factoryAddr || salt || keccak256(initCode))[12:]
+	var b []byte
+	b = append(b, 0xff)
+	b = append(b, factoryAddr.Bytes()...)
+	b = append(b, saltBytes...)
+	b = append(b, initCodeHash...)
+	hash := crypto.Keccak256(b)
 
 	// Take last 20 bytes for address
 	return common.BytesToAddress(hash[12:]), nil
