@@ -226,8 +226,8 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 	if params.SmartWalletAddress == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "smart wallet address is required - must be obtained from getWallet() call first")
 	}
-	// Validate that the provided address belongs to the authenticated user by checking wallet database
-	validationErr := r.validateSmartWalletOwnership(user.Address, *params.SmartWalletAddress)
+	// Validate that the provided address belongs to the authenticated user and is deployed on-chain
+	validationErr := r.validateSmartWalletOwnershipAndDeployment(user.Address, *params.SmartWalletAddress)
 	if validationErr != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid smart wallet address: %v", validationErr)
 	}
@@ -494,24 +494,25 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 	return resp, nil
 }
 
-// validateSmartWalletOwnership validates that the smart wallet address belongs to the specified owner and is deployed
+// validateSmartWalletOwnership validates that the smart wallet address belongs to the specified owner in the database
 func (r *RpcServer) validateSmartWalletOwnership(owner common.Address, smartWalletAddress common.Address) error {
-	// TEMPORARILY DISABLED: Salt check (database validation) for old smart wallet addresses
-	// This allows withdrawals from old smart wallet addresses that may not pass the address-salt pair check
-	// TODO: Re-enable this check after smart wallet migration is complete
-	//
 	// Validate wallet exists in database and belongs to owner
-	// modelWallet, err := r.engine.GetWalletFromDB(owner, smartWalletAddress.Hex())
-	// if err != nil {
-	// 	return fmt.Errorf("smart wallet address %s not found for owner %s: %w", smartWalletAddress.Hex(), owner.Hex(), err)
-	// }
-	//
-	// // Validate ownership using direct address comparison for consistency
-	// if modelWallet.Owner == nil || *modelWallet.Owner != owner {
-	// 	return fmt.Errorf("smart wallet address %s does not belong to owner %s", smartWalletAddress.Hex(), owner.Hex())
-	// }
+	modelWallet, err := r.engine.GetWalletFromDB(owner, smartWalletAddress.Hex())
+	if err != nil {
+		return fmt.Errorf("smart wallet address %s not found for owner %s: %w", smartWalletAddress.Hex(), owner.Hex(), err)
+	}
 
-	// Validate wallet is deployed on-chain (still required for security)
+	// Validate ownership using direct address comparison for consistency
+	if modelWallet.Owner == nil || *modelWallet.Owner != owner {
+		return fmt.Errorf("smart wallet address %s does not belong to owner %s", smartWalletAddress.Hex(), owner.Hex())
+	}
+
+	return nil
+}
+
+// validateSmartWalletDeployment validates that the smart wallet is deployed on-chain
+func (r *RpcServer) validateSmartWalletDeployment(smartWalletAddress common.Address) error {
+	// Validate wallet is deployed on-chain (required for executing transactions)
 	code, err := r.smartWalletRpc.CodeAt(context.Background(), smartWalletAddress, nil)
 	if err != nil {
 		return fmt.Errorf("failed to check if smart wallet is deployed: %w", err)
@@ -520,6 +521,17 @@ func (r *RpcServer) validateSmartWalletOwnership(owner common.Address, smartWall
 		return fmt.Errorf("smart wallet %s is not deployed yet - please deploy it first by making a transaction", smartWalletAddress.Hex())
 	}
 
+	return nil
+}
+
+// validateSmartWalletOwnershipAndDeployment validates both ownership and on-chain deployment
+func (r *RpcServer) validateSmartWalletOwnershipAndDeployment(owner common.Address, smartWalletAddress common.Address) error {
+	if err := r.validateSmartWalletOwnership(owner, smartWalletAddress); err != nil {
+		return err
+	}
+	if err := r.validateSmartWalletDeployment(smartWalletAddress); err != nil {
+		return err
+	}
 	return nil
 }
 
