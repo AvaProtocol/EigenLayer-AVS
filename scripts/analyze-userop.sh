@@ -276,10 +276,11 @@ if echo "$TX_RESPONSE" | grep -q '"result"'; then
                                 -H "Content-Type: application/json" \
                                 -d "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getBalance\",\"params\":[\"$SENDER_CLEAN\",\"latest\"],\"id\":1}")
                             CURRENT_BALANCE_HEX=$(echo "$BALANCE_RESPONSE" | jq -r '.result // "0x0"')
-                            CURRENT_BALANCE_DEC=$((CURRENT_BALANCE_HEX))
+                            # Convert hex string to decimal (strip 0x prefix and convert)
+                            CURRENT_BALANCE_DEC=$((0x${CURRENT_BALANCE_HEX#0x}))
                         else
                             BALANCE_RESPONSE=$(curl -s "${EXPLORER_API_URL}/api?module=account&action=balance&address=$SENDER_CLEAN&tag=latest&apikey=$API_KEY")
-                            CURRENT_BALANCE_DEC=$((echo "$BALANCE_RESPONSE" | jq -r '.result // "0"'))
+                            CURRENT_BALANCE_DEC=$(echo "$BALANCE_RESPONSE" | jq -r '.result // "0"')
                         fi
                         
                         echo "  Current Balance: $CURRENT_BALANCE_DEC wei"
