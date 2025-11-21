@@ -916,6 +916,8 @@ message WithdrawFundsReq {
   string recipient_address = 1;
   
   // The amount to withdraw in wei for ETH or smallest token unit for ERC20
+  // Use "max" (case-insensitive) to withdraw the maximum available balance
+  // (after accounting for gas reimbursement for ETH withdrawals)
   string amount = 2;
   
   // Token type: "ETH" for native ETH, or contract address for ERC20 tokens

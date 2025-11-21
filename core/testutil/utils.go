@@ -5,20 +5,25 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
+	"math/big"
+
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/allegro/bigcache/v3"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -702,6 +707,125 @@ func GetTestSecrets() map[string]string {
 	return map[string]string{
 		"my_awesome_secret": "my_awesome_secret_value",
 	}
+}
+
+// CheckBundlerAvailability checks if the bundler is available and returns an error if not.
+// This is useful for integration tests that need to skip if the bundler is not running.
+// It performs a simple JSON-RPC call (eth_chainId) to verify connectivity.
+func CheckBundlerAvailability(bundlerURL string) error {
+	if bundlerURL == "" {
+		return fmt.Errorf("bundler URL is empty")
+	}
+
+	// Use HTTP client to check basic connectivity
+	client := &http.Client{Timeout: 5 * time.Second}
+	reqBody := `{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}`
+	resp, err := client.Post(bundlerURL, "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		return fmt.Errorf("bundler not reachable at %s: %w (is the bundler running?)", bundlerURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("bundler returned HTTP error status %d", resp.StatusCode)
+	}
+
+	// If we got here, bundler is available
+	return nil
+}
+
+// EnsureWalletDeployed ensures that a smart wallet is deployed for the given owner and salt.
+// If the wallet is already deployed, it returns immediately. Otherwise, it deploys it using
+// a regular transaction (not a UserOp) via the factory contract.
+// This is useful for integration tests that need wallets to be deployed before testing UserOp execution.
+// It uses GetSenderAddress to compute the wallet address, which is what the system actually uses.
+func EnsureWalletDeployed(client *ethclient.Client, factoryAddress common.Address, ownerAddress common.Address, salt *big.Int, controllerPrivateKey string) error {
+	// Set factory address so GetSenderAddress uses the correct factory
+	aa.SetFactoryAddress(factoryAddress)
+
+	// Get expected wallet address using GetSenderAddress (this is what the system uses)
+	expectedWalletPtr, err := aa.GetSenderAddress(client, ownerAddress, salt)
+	if err != nil {
+		return fmt.Errorf("failed to get address from GetSenderAddress: %w", err)
+	}
+	expectedWallet := *expectedWalletPtr
+
+	// Create factory binding for deployment
+	factory, err := aa.NewSimpleFactory(factoryAddress, client)
+	if err != nil {
+		return fmt.Errorf("failed to create factory binding: %w", err)
+	}
+
+	// Check if already deployed
+	code, err := client.CodeAt(context.Background(), expectedWallet, nil)
+	if err != nil {
+		return fmt.Errorf("failed to check wallet code: %w", err)
+	}
+
+	if len(code) > 0 {
+		// Wallet is already deployed
+		return nil
+	}
+
+	// Wallet needs to be deployed - use factory.createAccount() via regular transaction
+	chainID, err := client.ChainID(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to get chain ID: %w", err)
+	}
+
+	// Create auth from controller private key
+	privateKey, err := crypto.HexToECDSA(controllerPrivateKey)
+	if err != nil {
+		return fmt.Errorf("invalid controller private key: %w", err)
+	}
+
+	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
+	if err != nil {
+		return fmt.Errorf("failed to create transactor: %w", err)
+	}
+
+	// Deploy wallet
+	tx, err := factory.CreateAccount(auth, ownerAddress, salt)
+	if err != nil {
+		return fmt.Errorf("failed to create account transaction: %w", err)
+	}
+
+	// Wait for transaction with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	receipt, err := bind.WaitMined(ctx, client, tx)
+	if err != nil {
+		return fmt.Errorf("failed to wait for transaction: %w", err)
+	}
+
+	if receipt.Status == 0 {
+		return fmt.Errorf("wallet deployment transaction failed: tx %s", tx.Hash().Hex())
+	}
+
+	// Wait a bit for state to propagate (some RPC nodes may have slight delay)
+	time.Sleep(2 * time.Second)
+
+	// Verify deployment - try multiple times with increasing delays
+	var codeAfter []byte
+	for i := 0; i < 3; i++ {
+		codeAfter, err = client.CodeAt(context.Background(), expectedWallet, nil)
+		if err != nil {
+			return fmt.Errorf("failed to verify deployment: %w", err)
+		}
+		if len(codeAfter) > 0 {
+			break
+		}
+		if i < 2 {
+			time.Sleep(1 * time.Second)
+		}
+	}
+
+	if len(codeAfter) == 0 {
+		return fmt.Errorf("wallet deployment failed - no code at address %s after transaction %s (status: %d, gasUsed: %d)",
+			expectedWallet.Hex(), tx.Hash().Hex(), receipt.Status, receipt.GasUsed)
+	}
+
+	return nil
 }
 
 func GetTestEventTriggerData() *TriggerData {
