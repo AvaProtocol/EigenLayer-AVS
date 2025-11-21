@@ -53,6 +53,9 @@ _aggregator-*.txt
 _operator-*.txt
 *.zip
 
+# PR comment output files
+pr-comments-*.json
+
 # Environment files
 .env.test
 .env.local

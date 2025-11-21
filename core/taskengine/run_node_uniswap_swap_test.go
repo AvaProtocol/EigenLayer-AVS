@@ -153,6 +153,13 @@ func setupUniswapSwapTest(t *testing.T) *uniswapSwapTestSetup {
 		t.Skipf("Test requires %s network connection (current chain ID: %d, expected: %d)", chain.name, chainID.Int64(), chain.chainID)
 	}
 
+	// Check bundler availability before proceeding
+	if aggregatorCfg.SmartWallet.BundlerURL != "" {
+		if err := testutil.CheckBundlerAvailability(aggregatorCfg.SmartWallet.BundlerURL); err != nil {
+			t.Skipf("Skipping Uniswap swap test: bundler not available: %v\n   Hint: Start the bundler or configure a remote bundler URL in config", err)
+		}
+	}
+
 	// Architecture: The smart wallet address is derived from the OWNER's EOA address
 	// but the UserOperation is SIGNED by the CONTROLLER's private key (from config)
 	// This allows the controller to automate transactions on behalf of the owner's smart wallet
