@@ -1,6 +1,7 @@
 package aggregator
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 // ERC20 transfer function signature: transfer(address,uint256)
@@ -87,4 +89,29 @@ func buildERC20WithdrawalCalldata(tokenAddress, recipient common.Address, amount
 	// - value: 0 (no ETH transfer needed for ERC20)
 	// - data: transfer function calldata
 	return aa.PackExecute(tokenAddress, big.NewInt(0), transferCalldata)
+}
+
+// CalculateMaxWithdrawableAmount calculates the maximum amount that can be withdrawn
+// by subtracting the estimated gas reimbursement from the wallet balance.
+// This ensures the wallet has enough balance to cover both withdrawal and reimbursement.
+func CalculateMaxWithdrawableAmount(
+	ctx context.Context,
+	client *ethclient.Client,
+	smartWalletAddress common.Address,
+	estimatedReimbursement *big.Int,
+) (*big.Int, error) {
+	// Get current wallet balance
+	balance, err := client.BalanceAt(ctx, smartWalletAddress, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get wallet balance: %w", err)
+	}
+
+	// Calculate max withdrawable: balance - reimbursement
+	// If balance is less than reimbursement, return 0
+	maxWithdrawable := new(big.Int).Sub(balance, estimatedReimbursement)
+	if maxWithdrawable.Cmp(big.NewInt(0)) < 0 {
+		return big.NewInt(0), nil
+	}
+
+	return maxWithdrawable, nil
 }

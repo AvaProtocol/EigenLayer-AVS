@@ -37,6 +37,13 @@ func TestExecuteTask_SequentialContractWrites_Sepolia(t *testing.T) {
 	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
 	require.NoError(t, err, "Failed to load aggregator config")
 
+	// Check bundler availability before proceeding
+	if cfg.SmartWallet.BundlerURL != "" {
+		if err := testutil.CheckBundlerAvailability(cfg.SmartWallet.BundlerURL); err != nil {
+			t.Skipf("Skipping Sequential Contract Writes test: bundler not available: %v\n   Hint: Start the bundler or configure a remote bundler URL in config", err)
+		}
+	}
+
 	t.Logf("📋 Sepolia Sequential Contract Writes Execution Test:")
 	t.Logf("   Owner EOA (derives wallet address): %s", ownerAddress.Hex())
 	t.Logf("   Factory: %s", cfg.SmartWallet.FactoryAddress.Hex())

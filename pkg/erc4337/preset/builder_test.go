@@ -20,6 +20,7 @@ import (
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/ethclient/gethclient"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -36,6 +37,9 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 		panic("SmartWallet config or ControllerPrivateKey not set in aggregator config")
 	}
 
+	// Derive controller address from private key (same as config.NewConfig does)
+	controllerAddress := crypto.PubkeyToAddress(cfg.SmartWallet.ControllerPrivateKey.PublicKey)
+
 	// Use centralized test config
 	return &config.SmartWalletConfig{
 		EthRpcUrl:            testutil.GetTestRPC(),
@@ -44,6 +48,7 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 		FactoryAddress:       common.HexToAddress(testutil.GetTestFactoryAddress()),
 		EntrypointAddress:    common.HexToAddress(config.DefaultEntrypointAddressHex),
 		ControllerPrivateKey: cfg.SmartWallet.ControllerPrivateKey, // Use controller key from config
+		ControllerAddress:    controllerAddress,                    // Derive address from private key
 		PaymasterAddress:     common.HexToAddress(config.DefaultPaymasterAddressHex),
 		WhitelistAddresses:   []common.Address{},
 	}
@@ -61,6 +66,11 @@ func TestSendUserOp(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(smartWalletConfig.BundlerURL), "sepolia") || !strings.Contains(strings.ToLower(smartWalletConfig.EthRpcUrl), "sepolia") {
 		t.Skip("Skipping TestSendUserOp: configured endpoints are not Sepolia")
+	}
+
+	// Check bundler availability before proceeding
+	if err := testutil.CheckBundlerAvailability(smartWalletConfig.BundlerURL); err != nil {
+		t.Skipf("Skipping TestSendUserOp: bundler not available: %v\n   Hint: Start the bundler or configure a remote bundler URL in config", err)
 	}
 
 	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
@@ -260,6 +270,12 @@ func mustBigInt(s string, base int) *big.Int {
 
 func TestBuildUserOpWithPaymasterErrors(t *testing.T) {
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
+
+	// Check bundler availability before proceeding
+	if err := testutil.CheckBundlerAvailability(smartWalletConfig.BundlerURL); err != nil {
+		t.Skipf("Skipping TestBuildUserOpWithPaymasterErrors: bundler not available: %v\n   Hint: Start the bundler or configure a remote bundler URL in config", err)
+	}
+
 	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
 	if err != nil {
 		t.Fatalf("Failed to connect to the client: %v", err)

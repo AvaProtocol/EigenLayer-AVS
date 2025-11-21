@@ -1,11 +1,12 @@
 #!/bin/bash
 
 # UserOp Analysis Script
-# Usage: ./analyze-userop.sh <userop-hash-or-tx-hash>
+# Usage: ./analyze-userop.sh <userop-hash-or-tx-hash> [chain]
+#   chain: base, sepolia, mainnet (default: base)
 #
 # Required environment variables (set in .env file):
-# - SEPOLIA_BUNDLER_RPC: Sepolia bundler RPC URL with API key
-# - ETHERSCAN_API_KEY: API key for Etherscan API
+# - BASE_BUNDLER_RPC or SEPOLIA_BUNDLER_RPC: Bundler RPC URL with API key
+# - ETHERSCAN_API_KEY or BASESCAN_API_KEY: API key for Etherscan/Basescan API
 
 # Load environment variables from .env file
 if [ -f ".env" ]; then
@@ -17,35 +18,60 @@ fi
 
 if [ $# -eq 0 ]; then
     echo "❌ Error: UserOp hash or transaction hash is required"
-    echo "Usage: $0 <userop-hash-or-tx-hash>"
-    echo "Example: $0 0xaa6b1771d3ca23a4650a3a3d15dd3ab4351b12a8273e71a1db529b4bd3f71f51"
-    exit 1
-fi
-
-# Validate required environment variables
-if [ -z "$SEPOLIA_BUNDLER_RPC" ]; then
-    echo "❌ Error: SEPOLIA_BUNDLER_RPC is required"
-    echo "Please set SEPOLIA_BUNDLER_RPC in your .env file"
-    echo "Example: SEPOLIA_BUNDLER_RPC=https://bundler-sepolia.avaprotocol.org/rpc?apikey=your-api-key"
-    exit 1
-fi
-
-if [ -z "$ETHERSCAN_API_KEY" ]; then
-    echo "❌ Error: ETHERSCAN_API_KEY is required"
-    echo "Please set ETHERSCAN_API_KEY in your .env file"
+    echo "Usage: $0 <userop-hash-or-tx-hash> [chain]"
+    echo "  chain: base, sepolia, mainnet (default: base)"
+    echo "Example: $0 0xaa6b1771d3ca23a4650a3a3d15dd3ab4351b12a8273e71a1db529b4bd3f71f51 base"
     exit 1
 fi
 
 HASH=$1
-BUNDLER_URL="$SEPOLIA_BUNDLER_RPC"
-ETHERSCAN_URL="https://api-sepolia.etherscan.io"
+CHAIN=${2:-base}
+
+# Set network-specific URLs and variables
+case "$CHAIN" in
+    base)
+        BUNDLER_URL="${BASE_BUNDLER_RPC:-http://localhost:4440/rpc}"
+        EXPLORER_API_URL="https://api.basescan.org"
+        EXPLORER_WEB_URL="https://basescan.org"
+        API_KEY_VAR="BASESCAN_API_KEY"
+        API_KEY="${BASESCAN_API_KEY:-${ETHERSCAN_API_KEY}}"
+        ;;
+    sepolia)
+        BUNDLER_URL="${SEPOLIA_BUNDLER_RPC:-http://localhost:4440/rpc}"
+        EXPLORER_API_URL="https://api-sepolia.etherscan.io"
+        EXPLORER_WEB_URL="https://sepolia.etherscan.io"
+        API_KEY_VAR="ETHERSCAN_API_KEY"
+        API_KEY="${ETHERSCAN_API_KEY}"
+        ;;
+    mainnet)
+        BUNDLER_URL="${MAINNET_BUNDLER_RPC:-http://localhost:4440/rpc}"
+        EXPLORER_API_URL="https://api.etherscan.io"
+        EXPLORER_WEB_URL="https://etherscan.io"
+        API_KEY_VAR="ETHERSCAN_API_KEY"
+        API_KEY="${ETHERSCAN_API_KEY}"
+        ;;
+    *)
+        echo "❌ Error: Unsupported chain: $CHAIN"
+        echo "Supported chains: base, sepolia, mainnet"
+        exit 1
+        ;;
+esac
+
+# Validate required environment variables
+if [ -z "$API_KEY" ]; then
+    echo "❌ Error: $API_KEY_VAR is required for $CHAIN"
+    echo "Please set $API_KEY_VAR in your .env file"
+    exit 1
+fi
 
 echo "🔍 Analyzing UserOp/Transaction: $HASH"
 echo "=================================================="
 echo "🔧 Configuration:"
+echo "  Chain: $CHAIN"
 echo "  Bundler URL: $BUNDLER_URL"
-echo "  Etherscan URL: $ETHERSCAN_URL"
-echo "  Etherscan API Key: ${ETHERSCAN_API_KEY:0:10}..." # Show first 10 chars only
+echo "  Explorer API: $EXPLORER_API_URL"
+echo "  Explorer Web: $EXPLORER_WEB_URL"
+echo "  API Key: ${API_KEY:0:10}..." # Show first 10 chars only
 echo ""
 
 # Check if it's a UserOp hash or transaction hash by querying bundler first
@@ -77,24 +103,42 @@ else
 fi
 
 echo ""
-echo "📡 Step 2: Analyzing transaction on Etherscan..."
-echo "🔍 Etherscan request: ${ETHERSCAN_URL}/api?module=proxy&action=eth_getTransactionByHash&txhash=$HASH_TO_ANALYZE&apikey=${ETHERSCAN_API_KEY:0:10}..."
-
-# Get transaction details from Etherscan
-TX_RESPONSE=$(curl -s "${ETHERSCAN_URL}/api?module=proxy&action=eth_getTransactionByHash&txhash=$HASH_TO_ANALYZE&apikey=$ETHERSCAN_API_KEY")
+echo "📡 Step 2: Analyzing transaction..."
+# Use public RPC for Base, REST API for Etherscan
+if [ "$CHAIN" = "base" ]; then
+    BASE_RPC="https://mainnet.base.org"
+    echo "🔍 Using Base RPC: $BASE_RPC"
+    TX_RESPONSE=$(curl -s -X POST "$BASE_RPC" \
+        -H "Content-Type: application/json" \
+        -d "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getTransactionByHash\",\"params\":[\"$HASH_TO_ANALYZE\"],\"id\":1}")
+else
+    echo "🔍 Explorer request: ${EXPLORER_API_URL}/api?module=proxy&action=eth_getTransactionByHash&txhash=$HASH_TO_ANALYZE&apikey=${API_KEY:0:10}..."
+    TX_RESPONSE=$(curl -s "${EXPLORER_API_URL}/api?module=proxy&action=eth_getTransactionByHash&txhash=$HASH_TO_ANALYZE&apikey=$API_KEY")
+fi
 
 echo "🔍 Raw Etherscan response: $TX_RESPONSE"
 
+# Handle both JSON-RPC (Basescan) and REST API (Etherscan) responses
 if echo "$TX_RESPONSE" | grep -q '"result"'; then
-    echo "✅ Transaction found on Etherscan"
+    echo "✅ Transaction found on explorer"
     
-    # Extract key transaction details
-    STATUS=$(echo "$TX_RESPONSE" | jq -r '.result.status // "unknown"')
-    FROM=$(echo "$TX_RESPONSE" | jq -r '.result.from // "unknown"')
-    TO=$(echo "$TX_RESPONSE" | jq -r '.result.to // "unknown"')
-    VALUE=$(echo "$TX_RESPONSE" | jq -r '.result.value // "0"')
-    GAS_USED=$(echo "$TX_RESPONSE" | jq -r '.result.gas // "unknown"')
-    GAS_PRICE=$(echo "$TX_RESPONSE" | jq -r '.result.gasPrice // "unknown"')
+    # Extract key transaction details (works for both JSON-RPC and REST API)
+    if echo "$TX_RESPONSE" | jq -e '.result' > /dev/null 2>&1; then
+        STATUS=$(echo "$TX_RESPONSE" | jq -r '.result.status // "unknown"')
+        FROM=$(echo "$TX_RESPONSE" | jq -r '.result.from // "unknown"')
+        TO=$(echo "$TX_RESPONSE" | jq -r '.result.to // "unknown"')
+        VALUE=$(echo "$TX_RESPONSE" | jq -r '.result.value // "0"')
+        GAS_USED=$(echo "$TX_RESPONSE" | jq -r '.result.gas // "unknown"')
+        GAS_PRICE=$(echo "$TX_RESPONSE" | jq -r '.result.gasPrice // "unknown"')
+    else
+        echo "⚠️ Could not parse transaction response"
+        STATUS="unknown"
+        FROM="unknown"
+        TO="unknown"
+        VALUE="0"
+        GAS_USED="unknown"
+        GAS_PRICE="unknown"
+    fi
     
     echo "📊 Transaction Details:"
     echo "  Status: $STATUS"
@@ -107,7 +151,15 @@ if echo "$TX_RESPONSE" | grep -q '"result"'; then
     # Get transaction receipt for more details
     echo ""
     echo "📡 Step 3: Getting transaction receipt..."
-    RECEIPT_RESPONSE=$(curl -s "${ETHERSCAN_URL}/api?module=proxy&action=eth_getTransactionReceipt&txhash=$HASH_TO_ANALYZE&apikey=$ETHERSCAN_API_KEY")
+    # Use public RPC for Base, REST API for Etherscan
+    if [ "$CHAIN" = "base" ]; then
+        BASE_RPC="https://mainnet.base.org"
+        RECEIPT_RESPONSE=$(curl -s -X POST "$BASE_RPC" \
+            -H "Content-Type: application/json" \
+            -d "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getTransactionReceipt\",\"params\":[\"$HASH_TO_ANALYZE\"],\"id\":1}")
+    else
+        RECEIPT_RESPONSE=$(curl -s "${EXPLORER_API_URL}/api?module=proxy&action=eth_getTransactionReceipt&txhash=$HASH_TO_ANALYZE&apikey=$API_KEY")
+    fi
     echo "🔍 Raw receipt response: $RECEIPT_RESPONSE"
     
     if echo "$RECEIPT_RESPONSE" | grep -q '"result"'; then
@@ -217,9 +269,18 @@ if echo "$TX_RESPONSE" | grep -q '"result"'; then
                         
                         # Get smart wallet balance after transaction
                         echo "  Checking smart wallet balance..."
-                        BALANCE_RESPONSE=$(curl -s "${ETHERSCAN_URL}/api?module=account&action=balance&address=$SENDER_CLEAN&tag=latest&apikey=$ETHERSCAN_API_KEY")
-                        CURRENT_BALANCE=$(echo "$BALANCE_RESPONSE" | jq -r '.result // "0"')
-                        CURRENT_BALANCE_DEC=$((CURRENT_BALANCE))
+                        # Use public RPC for Base, REST API for Etherscan
+                        if [ "$CHAIN" = "base" ]; then
+                            BASE_RPC="https://mainnet.base.org"
+                            BALANCE_RESPONSE=$(curl -s -X POST "$BASE_RPC" \
+                                -H "Content-Type: application/json" \
+                                -d "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getBalance\",\"params\":[\"$SENDER_CLEAN\",\"latest\"],\"id\":1}")
+                            CURRENT_BALANCE_HEX=$(echo "$BALANCE_RESPONSE" | jq -r '.result // "0x0"')
+                            CURRENT_BALANCE_DEC=$((CURRENT_BALANCE_HEX))
+                        else
+                            BALANCE_RESPONSE=$(curl -s "${EXPLORER_API_URL}/api?module=account&action=balance&address=$SENDER_CLEAN&tag=latest&apikey=$API_KEY")
+                            CURRENT_BALANCE_DEC=$((echo "$BALANCE_RESPONSE" | jq -r '.result // "0"'))
+                        fi
                         
                         echo "  Current Balance: $CURRENT_BALANCE_DEC wei"
                         
@@ -262,14 +323,14 @@ if echo "$TX_RESPONSE" | grep -q '"result"'; then
     fi
     
     echo ""
-    echo "🔗 View on Etherscan: https://sepolia.etherscan.io/tx/$HASH_TO_ANALYZE"
+    echo "🔗 View on explorer: ${EXPLORER_WEB_URL}/tx/$HASH_TO_ANALYZE"
     
 else
-    echo "❌ Transaction not found on Etherscan"
+    echo "❌ Transaction not found on explorer"
     echo "Possible reasons:"
     echo "  1. Transaction hash is incorrect"
     echo "  2. Transaction is too recent (not indexed yet)"
-    echo "  3. Wrong network (this script checks Sepolia)"
+    echo "  3. Wrong network (this script checks $CHAIN)"
 fi
 
 echo ""

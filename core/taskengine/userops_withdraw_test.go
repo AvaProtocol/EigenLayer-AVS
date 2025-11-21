@@ -59,6 +59,13 @@ func setupUserOpWithdrawalTest(t *testing.T) (*config.Config, common.Address, *c
 	require.NoError(t, err, "Failed to connect to RPC")
 	t.Cleanup(func() { client.Close() })
 
+	// Check bundler availability before proceeding
+	if cfg.SmartWallet.BundlerURL != "" {
+		if err := testutil.CheckBundlerAvailability(cfg.SmartWallet.BundlerURL); err != nil {
+			t.Skipf("Skipping UserOp withdrawal test: bundler not available: %v\n   Hint: Start the bundler or configure a remote bundler URL in config", err)
+		}
+	}
+
 	// Set factory address for smart wallet derivation
 	aa.SetFactoryAddress(cfg.SmartWallet.FactoryAddress)
 
@@ -429,4 +436,201 @@ func TestUserOpEntryPointWithdrawalWithPaymaster(t *testing.T) {
 	}
 
 	t.Logf("🎉 EntryPoint deposit withdrawal completed!")
+}
+
+// TestUserOpETHWithdrawal_Sepolia tests a fixed-amount ETH withdrawal on Sepolia
+// This test withdraws exactly 0.001 ETH from the smart wallet using paymaster sponsorship
+func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
+	// Try to load Sepolia config first (default test config)
+	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
+	if err != nil {
+		// Fallback to explicit path if GetConfigPath fails
+		cfg, err = config.NewConfig("../../config/aggregator-sepolia.yaml")
+		if err != nil {
+			t.Skipf("Failed to load aggregator-sepolia.yaml: %v", err)
+		}
+	}
+
+	// Connect to RPC to determine the actual chain
+	tempClient, err := ethclient.Dial(cfg.SmartWallet.EthRpcUrl)
+	if err != nil {
+		t.Skipf("Cannot connect to RPC: %v", err)
+	}
+	chainID, err := tempClient.ChainID(context.Background())
+	tempClient.Close()
+	if err != nil {
+		t.Skipf("Cannot get chain ID from RPC: %v", err)
+	}
+
+	// Skip if not running on Sepolia (chain ID 11155111)
+	sepoliaChainID := int64(11155111)
+	if chainID.Int64() != sepoliaChainID {
+		t.Skipf("Test requires Sepolia network connection (current chain ID: %d, expected: %d)", chainID.Int64(), sepoliaChainID)
+	}
+
+	// Use explicit Owner EOA for automation (controller signs the UserOp)
+	ownerEOAHex := os.Getenv("OWNER_EOA")
+	if ownerEOAHex == "" {
+		t.Skip("OWNER_EOA environment variable not set")
+	}
+	ownerAddress := common.HexToAddress(ownerEOAHex)
+
+	// Destination address - defaults to owner EOA, but can be overridden with RECIPIENT_ADDRESS
+	var destinationAddress common.Address
+	recipientAddressHex := os.Getenv("RECIPIENT_ADDRESS")
+	if recipientAddressHex != "" {
+		if !common.IsHexAddress(recipientAddressHex) {
+			t.Fatalf("RECIPIENT_ADDRESS is not a valid hex address: %s", recipientAddressHex)
+		}
+		destinationAddress = common.HexToAddress(recipientAddressHex)
+		t.Logf("📮 Using custom RECIPIENT_ADDRESS: %s", destinationAddress.Hex())
+	} else {
+		// Default to owner EOA if no custom recipient specified
+		destinationAddress = ownerAddress
+		t.Logf("📮 Using default destination (owner EOA): %s", destinationAddress.Hex())
+	}
+
+	// Connect to RPC first
+	client, err := ethclient.Dial(cfg.SmartWallet.EthRpcUrl)
+	require.NoError(t, err, "Failed to connect to RPC")
+	t.Cleanup(func() { client.Close() })
+
+	// Check bundler availability before proceeding
+	if cfg.SmartWallet.BundlerURL != "" {
+		if err := testutil.CheckBundlerAvailability(cfg.SmartWallet.BundlerURL); err != nil {
+			t.Skipf("Skipping UserOp withdrawal test: bundler not available: %v\n   Hint: Start the bundler or configure a remote bundler URL in config", err)
+		}
+	}
+
+	// Set factory address for smart wallet derivation
+	aa.SetFactoryAddress(cfg.SmartWallet.FactoryAddress)
+	t.Logf("🔧 Set factory address: %s", cfg.SmartWallet.FactoryAddress.Hex())
+
+	// Always derive smart wallet address from owner + salt:0
+	smartWalletAddress, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(0))
+	require.NoError(t, err, "Failed to derive smart wallet address")
+
+	t.Logf("🔑 Owner EOA: %s", ownerAddress.Hex())
+	t.Logf("💼 Smart Wallet (salt:0): %s", smartWalletAddress.Hex())
+	t.Logf("💰 Destination: %s", destinationAddress.Hex())
+
+	// Check if wallet is deployed, and deploy it if needed
+	code, err := client.CodeAt(context.Background(), *smartWalletAddress, nil)
+	require.NoError(t, err, "Failed to check wallet deployment status")
+	if len(code) == 0 {
+		t.Logf("⚠️  Wallet not deployed, deploying it first...")
+		controllerPrivateKey := testutil.GetTestControllerPrivateKey()
+		err = testutil.EnsureWalletDeployed(client, cfg.SmartWallet.FactoryAddress, ownerAddress, big.NewInt(0), controllerPrivateKey)
+		if err != nil {
+			t.Fatalf("Failed to deploy wallet: %v\n   Hint: The wallet needs to be deployed before testing withdrawals. Ensure the controller has sufficient funds to deploy.", err)
+		}
+		t.Logf("✅ Wallet deployed successfully")
+	} else {
+		t.Logf("✅ Wallet is already deployed (code length: %d bytes)", len(code))
+	}
+
+	// Check smart wallet ETH balance
+	smartWalletBalance, err := client.BalanceAt(context.Background(), *smartWalletAddress, nil)
+	require.NoError(t, err, "Failed to get smart wallet balance")
+	t.Logf("💰 Smart Wallet ETH Balance: %s wei (%.9f ETH)", smartWalletBalance.String(), float64(smartWalletBalance.Int64())/1e18)
+
+	// Fixed withdrawal amount: 0.001 ETH
+	withdrawalAmount := big.NewInt(1000000000000000) // 0.001 ETH in wei
+
+	// Skip if balance is insufficient
+	if smartWalletBalance.Cmp(withdrawalAmount) < 0 {
+		t.Skipf("Insufficient ETH balance: have %.9f ETH, need %.9f ETH",
+			float64(smartWalletBalance.Int64())/1e18,
+			float64(withdrawalAmount.Int64())/1e18)
+	}
+
+	t.Logf("💸 Withdrawing %s wei (%.9f ETH) to %s", withdrawalAmount.String(), float64(withdrawalAmount.Int64())/1e18, destinationAddress.Hex())
+	t.Logf("   (Using ethTransfer node type with paymaster sponsorship)")
+
+	// Create engine for RunNodeImmediately execution
+	db := testutil.TestMustDB()
+	t.Cleanup(func() {
+		storage.Destroy(db.(*storage.BadgerStorage))
+	})
+
+	engine := New(db, cfg, nil, testutil.GetLogger())
+	t.Cleanup(func() {
+		engine.Stop()
+	})
+
+	// Create user model
+	user := &model.User{
+		Address:             ownerAddress,
+		SmartAccountAddress: smartWalletAddress,
+	}
+
+	// Register the smart wallet in the database
+	err = StoreWallet(db, ownerAddress, &model.SmartWallet{
+		Owner:   &ownerAddress,
+		Address: smartWalletAddress,
+		Salt:    big.NewInt(0),
+	})
+	require.NoError(t, err, "Failed to store wallet in database")
+
+	// ETHTransfer node configuration
+	ethTransferConfig := map[string]interface{}{
+		"destination": destinationAddress.Hex(),
+		"amount":      withdrawalAmount.String(),
+	}
+
+	settings := map[string]interface{}{
+		"runner":      smartWalletAddress.Hex(),
+		"smartWallet": smartWalletAddress.Hex(),
+		"chain_id":    int64(11155111), // Sepolia chain ID
+	}
+
+	inputVars := map[string]interface{}{
+		"settings": settings,
+	}
+
+	// Execute withdrawal with paymaster sponsorship (automatic)
+	t.Logf("   Executing withdrawal with paymaster sponsorship...")
+	transferResult, err := engine.RunNodeImmediately("ethTransfer", ethTransferConfig, inputVars, user, false)
+
+	require.NoError(t, err, "ETH withdrawal RunNodeImmediately should not return error")
+	require.NotNil(t, transferResult, "ETH withdrawal result should not be nil")
+
+	// Check if the execution succeeded
+	if successVal, ok := transferResult["success"]; ok {
+		if success, isBool := successVal.(bool); isBool && !success {
+			if errorVal, hasError := transferResult["error"]; hasError {
+				if errorStr, isString := errorVal.(string); isString {
+					t.Fatalf("❌ ETH withdrawal execution failed: %s", errorStr)
+				}
+			}
+			t.Fatalf("❌ ETH withdrawal execution failed with success=false")
+		}
+	}
+
+	t.Logf("✅ Withdrawal request successful")
+	if txHash, ok := transferResult["transactionHash"].(string); ok {
+		t.Logf("   Transaction Hash: %s", txHash)
+
+		// Verify the transaction was included on-chain
+		receipt, err := client.TransactionReceipt(context.Background(), common.HexToHash(txHash))
+		if err == nil && receipt != nil {
+			t.Logf("📦 Transaction confirmed in block: %d", receipt.BlockNumber.Uint64())
+			t.Logf("   Gas Used: %d", receipt.GasUsed)
+			require.Equal(t, uint64(1), receipt.Status, "Transaction should succeed")
+		}
+	}
+
+	// Verify ETH was transferred
+	newBalance, err := client.BalanceAt(context.Background(), *smartWalletAddress, nil)
+	if err == nil {
+		t.Logf("📊 Remaining Smart Wallet Balance: %s wei (%.9f ETH)", newBalance.String(), float64(newBalance.Int64())/1e18)
+	}
+
+	// Check destination received funds
+	destinationBalance, err := client.BalanceAt(context.Background(), destinationAddress, nil)
+	if err == nil {
+		t.Logf("💰 Destination Balance: %s wei (%.9f ETH)", destinationBalance.String(), float64(destinationBalance.Int64())/1e18)
+	}
+
+	t.Logf("🎉 Fixed-amount ETH withdrawal test completed successfully!")
 }

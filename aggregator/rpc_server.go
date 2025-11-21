@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/allegro/bigcache/v3"
@@ -26,6 +27,8 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/services"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -183,16 +186,30 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 		return nil, status.Errorf(codes.InvalidArgument, "invalid recipient address format")
 	}
 
-	// Parse amount
-	amount, success := new(big.Int).SetString(payload.Amount, 10)
-	if !success || amount == nil || amount.Cmp(big.NewInt(0)) <= 0 {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid amount: must be a positive integer")
+	// Parse amount - support "max" (case-insensitive) for "withdraw all"
+	amountStr := strings.TrimSpace(strings.ToLower(payload.Amount))
+	withdrawAll := amountStr == "max"
+
+	var requestedAmount *big.Int
+	if withdrawAll {
+		// Will be calculated later based on balance and gas reimbursement
+		requestedAmount = nil // Use nil to indicate it needs to be calculated
+	} else {
+		var success bool
+		requestedAmount, success = new(big.Int).SetString(payload.Amount, 10)
+		if !success || requestedAmount == nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid amount: must be a positive integer or 'max'")
+		}
+		// Validate that numeric amount must be positive (not zero)
+		if requestedAmount.Cmp(big.NewInt(0)) <= 0 {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid amount: must be a positive integer or 'max'")
+		}
 	}
 
-	// Build withdrawal parameters
+	// Build withdrawal parameters (amount will be adjusted if "withdraw all" is requested)
 	params := &WithdrawalParams{
 		RecipientAddress: common.HexToAddress(payload.RecipientAddress),
-		Amount:           amount,
+		Amount:           requestedAmount,
 		Token:            payload.Token,
 	}
 
@@ -217,12 +234,6 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 
 	smartWalletAddress := params.SmartWalletAddress
 
-	// Build withdrawal calldata
-	callData, err := BuildWithdrawalCalldata(params)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "failed to build withdrawal calldata: %v", err)
-	}
-
 	// Check if smart wallet config is available
 	if r.config.SmartWallet == nil {
 		return nil, status.Errorf(codes.Internal, "smart wallet configuration not available")
@@ -233,6 +244,179 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 		r.config.SmartWallet.PaymasterAddress,
 		15*time.Minute,
 	)
+
+	// Pre-flight: Estimate gas and validate balance before building calldata
+	// This allows us to calculate max withdrawable amount for "withdraw all" requests
+	var finalAmount *big.Int
+	if strings.ToUpper(payload.Token) == "ETH" {
+		// For ETH withdrawals, we need to estimate gas reimbursement first
+		// Build a temporary calldata with a placeholder amount to estimate gas
+		// (we'll recalculate with the actual amount after gas estimation)
+		tempAmount := requestedAmount
+		if withdrawAll {
+			// Use a placeholder amount for gas estimation (will be recalculated)
+			// Small value is fine since it's only used for gas estimation, not actual withdrawal
+			tempAmount = big.NewInt(10000000000000) // 0.00001 ETH placeholder (10^13 wei)
+		}
+		tempParams := &WithdrawalParams{
+			RecipientAddress:   params.RecipientAddress,
+			Amount:             tempAmount,
+			Token:              params.Token,
+			SmartWalletAddress: params.SmartWalletAddress,
+		}
+		tempCallData, err := BuildWithdrawalCalldata(tempParams)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "failed to build temporary withdrawal calldata: %v", err)
+		}
+
+		// Estimate gas using bundler (this will give us accurate reimbursement estimate)
+		bundlerClient, bundlerErr := bundler.NewBundlerClient(r.config.SmartWallet.BundlerURL)
+		if bundlerErr != nil {
+			return nil, status.Errorf(codes.Internal, "failed to create bundler client: %v", bundlerErr)
+		}
+		// IMPORTANT: Pass very small values for callGasLimit and verificationGasLimit to force bundler to actually estimate
+		// (Bundler only estimates when input values are 0 or very small, otherwise it just echoes them back)
+		// However, we can't use 0 because the bundler's simulation fails with UserOperationReverted error
+		// Using MIN_CALL_GAS_LIMIT (21,000) as a lower bound that allows simulation to succeed
+		tempUserOp, tempErr := preset.BuildUserOpWithPaymaster(
+			r.config.SmartWallet,
+			r.smartWalletRpc,
+			bundlerClient,
+			user.Address,
+			tempCallData,
+			paymasterReq.PaymasterAddress,
+			paymasterReq.ValidUntil,
+			paymasterReq.ValidAfter,
+			smartWalletAddress,
+			nil,                // nonceOverride
+			big.NewInt(21000),  // callGasLimit: MIN_CALL_GAS_LIMIT to allow simulation (bundler will estimate)
+			big.NewInt(100000), // verificationGasLimit: small value to allow simulation (bundler will estimate)
+			big.NewInt(50000),  // preVerificationGas: non-zero for simulation (bundler will recalculate)
+		)
+		if tempErr != nil {
+			r.config.Logger.Warn("Failed to build temp UserOp for gas estimation",
+				"error", tempErr)
+			if withdrawAll {
+				return nil, status.Errorf(codes.Internal, "failed to build UserOp for gas estimation: %v", tempErr)
+			}
+			finalAmount = requestedAmount
+		} else {
+			// Estimate gas using bundler
+			gasEstimate, gasErr := bundlerClient.EstimateUserOperationGas(
+				ctx,
+				*tempUserOp,
+				r.config.SmartWallet.EntrypointAddress,
+				map[string]any{},
+			)
+			if gasErr != nil {
+				r.config.Logger.Warn("Gas estimation failed",
+					"error", gasErr)
+				if withdrawAll {
+					return nil, status.Errorf(codes.Internal, "gas estimation failed: %v", gasErr)
+				}
+				finalAmount = requestedAmount
+			} else {
+				// Calculate estimated reimbursement
+				reimbursement, reimbErr := preset.EstimateGasReimbursementAmount(r.smartWalletRpc, gasEstimate)
+				if reimbErr != nil {
+					r.config.Logger.Warn("Failed to estimate reimbursement",
+						"error", reimbErr)
+					if withdrawAll {
+						return nil, status.Errorf(codes.Internal, "failed to estimate reimbursement: %v", reimbErr)
+					}
+					finalAmount = requestedAmount
+				} else {
+					// If "withdraw all" is requested, calculate max withdrawable
+					if withdrawAll {
+						maxWithdrawable, maxErr := CalculateMaxWithdrawableAmount(
+							ctx,
+							r.smartWalletRpc,
+							*smartWalletAddress,
+							reimbursement,
+						)
+						if maxErr != nil {
+							return nil, status.Errorf(codes.Internal, "failed to calculate max withdrawable amount: %v", maxErr)
+						}
+						if maxWithdrawable.Cmp(big.NewInt(0)) == 0 {
+							return nil, status.Errorf(codes.InvalidArgument, "insufficient balance: wallet balance is less than estimated gas reimbursement")
+						}
+						finalAmount = maxWithdrawable
+						r.config.Logger.Info("withdraw all requested, calculated max withdrawable",
+							"maxWithdrawable", finalAmount.String(),
+							"estimatedReimbursement", reimbursement.String())
+					} else {
+						// Validate that requested amount + reimbursement doesn't exceed balance
+						balance, balanceErr := r.smartWalletRpc.BalanceAt(ctx, *smartWalletAddress, nil)
+						if balanceErr != nil {
+							return nil, status.Errorf(codes.Internal, "failed to get wallet balance: %v", balanceErr)
+						}
+						requiredTotal := new(big.Int).Add(requestedAmount, reimbursement)
+						if requiredTotal.Cmp(balance) > 0 {
+							maxWithdrawable := new(big.Int).Sub(balance, reimbursement)
+							if maxWithdrawable.Cmp(big.NewInt(0)) <= 0 {
+								return nil, status.Errorf(codes.InvalidArgument,
+									"insufficient balance: wallet balance (%s wei) is less than estimated gas reimbursement (%s wei)",
+									balance.String(), reimbursement.String())
+							}
+							return nil, status.Errorf(codes.InvalidArgument,
+								"insufficient balance: requested %s wei + reimbursement %s wei = %s wei, but wallet has %s wei. Maximum withdrawable: %s wei",
+								requestedAmount.String(), reimbursement.String(), requiredTotal.String(),
+								balance.String(), maxWithdrawable.String())
+						}
+						finalAmount = requestedAmount
+					}
+				}
+			}
+		}
+	} else {
+		// For ERC20 tokens, no gas reimbursement needed (paymaster covers it)
+		// Just validate the token balance
+		if withdrawAll {
+			// "Withdraw all" for ERC20 - get token balance
+			tokenAddress := common.HexToAddress(payload.Token)
+			tokenContract, err := erc20.NewErc20(tokenAddress, r.smartWalletRpc)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to create token contract: %v", err)
+			}
+			tokenBalance, err := tokenContract.BalanceOf(nil, *smartWalletAddress)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to get token balance: %v", err)
+			}
+			if tokenBalance.Cmp(big.NewInt(0)) == 0 {
+				return nil, status.Errorf(codes.InvalidArgument, "token balance is zero")
+			}
+			finalAmount = tokenBalance
+			r.config.Logger.Info("withdraw all requested for ERC20, using full balance",
+				"token", payload.Token,
+				"balance", finalAmount.String())
+		} else {
+			// Validate token balance
+			tokenAddress := common.HexToAddress(payload.Token)
+			tokenContract, err := erc20.NewErc20(tokenAddress, r.smartWalletRpc)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to create token contract: %v", err)
+			}
+			tokenBalance, err := tokenContract.BalanceOf(nil, *smartWalletAddress)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to get token balance: %v", err)
+			}
+			if requestedAmount.Cmp(tokenBalance) > 0 {
+				return nil, status.Errorf(codes.InvalidArgument,
+					"insufficient token balance: requested %s, but wallet has %s",
+					requestedAmount.String(), tokenBalance.String())
+			}
+			finalAmount = requestedAmount
+		}
+	}
+
+	// Update params with final amount
+	params.Amount = finalAmount
+
+	// Build withdrawal calldata with final amount
+	callData, err := BuildWithdrawalCalldata(params)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to build withdrawal calldata: %v", err)
+	}
 
 	r.config.Logger.Info("processing withdrawal with paymaster sponsorship",
 		"user", user.Address.String(),
@@ -312,18 +496,22 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 
 // validateSmartWalletOwnership validates that the smart wallet address belongs to the specified owner and is deployed
 func (r *RpcServer) validateSmartWalletOwnership(owner common.Address, smartWalletAddress common.Address) error {
+	// TEMPORARILY DISABLED: Salt check (database validation) for old smart wallet addresses
+	// This allows withdrawals from old smart wallet addresses that may not pass the address-salt pair check
+	// TODO: Re-enable this check after smart wallet migration is complete
+	//
 	// Validate wallet exists in database and belongs to owner
-	modelWallet, err := r.engine.GetWalletFromDB(owner, smartWalletAddress.Hex())
-	if err != nil {
-		return fmt.Errorf("smart wallet address %s not found for owner %s: %w", smartWalletAddress.Hex(), owner.Hex(), err)
-	}
+	// modelWallet, err := r.engine.GetWalletFromDB(owner, smartWalletAddress.Hex())
+	// if err != nil {
+	// 	return fmt.Errorf("smart wallet address %s not found for owner %s: %w", smartWalletAddress.Hex(), owner.Hex(), err)
+	// }
+	//
+	// // Validate ownership using direct address comparison for consistency
+	// if modelWallet.Owner == nil || *modelWallet.Owner != owner {
+	// 	return fmt.Errorf("smart wallet address %s does not belong to owner %s", smartWalletAddress.Hex(), owner.Hex())
+	// }
 
-	// Validate ownership using direct address comparison for consistency
-	if modelWallet.Owner == nil || *modelWallet.Owner != owner {
-		return fmt.Errorf("smart wallet address %s does not belong to owner %s", smartWalletAddress.Hex(), owner.Hex())
-	}
-
-	// Validate wallet is deployed on-chain
+	// Validate wallet is deployed on-chain (still required for security)
 	code, err := r.smartWalletRpc.CodeAt(context.Background(), smartWalletAddress, nil)
 	if err != nil {
 		return fmt.Errorf("failed to check if smart wallet is deployed: %w", err)

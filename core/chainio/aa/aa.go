@@ -134,25 +134,27 @@ func GetSenderAddress(conn *ethclient.Client, ownerAddress common.Address, salt 
 // GetSenderAddressForFactory computes the smart wallet address using the factory proxy address
 // Callers should pass the default factory address from config.DefaultFactoryProxyAddressHex
 // or a custom factory address if needed.
+//
+// NOTE: This function always uses the on-chain factory.getAddress() method as the source of truth,
+// because the factory contract uses CREATE2 with ERC1967Proxy creation code, which is different
+// from the init code format used in UserOps (factory address + calldata). The factory's getAddress
+// method correctly calculates the address that will actually be deployed.
 func GetSenderAddressForFactory(conn *ethclient.Client, ownerAddress common.Address, factoryAddress common.Address, salt *big.Int) (*common.Address, error) {
-	// Use factory proxy address (stable constant) + owner + salt for deterministic address derivation
-	// This ensures addresses remain stable across factory implementation upgrades
-	addr, err := computeSmartWalletAddress(factoryAddress, ownerAddress, salt)
+	// Always use on-chain factory.getAddress() as the source of truth
+	// The factory contract's getAddress method uses CREATE2 with ERC1967Proxy creation code,
+	// which is different from the init code format (factory address + calldata) used in UserOps.
+	// This ensures we get the correct address that will actually be deployed.
+	simpleFactory, err := NewSimpleFactory(factoryAddress, conn)
 	if err != nil {
-		// Fallback to on-chain call if local calculation fails
-		simpleFactory, err2 := NewSimpleFactory(factoryAddress, conn)
-		if err2 != nil {
-			return nil, fmt.Errorf("failed to create factory instance at %s: %w", factoryAddress.Hex(), err2)
-		}
-
-		sender, err2 := simpleFactory.GetAddress(nil, ownerAddress, salt)
-		if err2 != nil {
-			return nil, fmt.Errorf("failed to derive wallet address from factory %s for owner %s with salt %s: %w (local calc error: %v)",
-				factoryAddress.Hex(), ownerAddress.Hex(), salt.String(), err2, err)
-		}
-		return &sender, nil
+		return nil, fmt.Errorf("failed to create factory instance at %s: %w", factoryAddress.Hex(), err)
 	}
-	return &addr, nil
+
+	sender, err := simpleFactory.GetAddress(nil, ownerAddress, salt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive wallet address from factory %s for owner %s with salt %s: %w",
+			factoryAddress.Hex(), ownerAddress.Hex(), salt.String(), err)
+	}
+	return &sender, nil
 }
 
 func GetNonce(conn *ethclient.Client, ownerAddress common.Address, salt *big.Int) (*big.Int, error) {
