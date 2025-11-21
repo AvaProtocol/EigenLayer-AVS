@@ -20,8 +20,7 @@ type JSProcessor struct {
 }
 
 var (
-	importRegex  = regexp.MustCompile(`(?m)^\s*import\s+(?:(\w+)|(?:\*\s+as\s+(\w+))|(?:{\s*([^}]+)\s*}))\s+from\s+['"]([^'"]+)['"];?\s*$`)
-	requireRegex = regexp.MustCompile(`\brequire\s*\(\s*['"]`)
+	importRegex = regexp.MustCompile(`(?m)^\s*import\s+(?:(\w+)|(?:\*\s+as\s+(\w+))|(?:{\s*([^}]+)\s*}))\s+from\s+['"]([^'"]+)['"];?\s*$`)
 )
 
 func NewJSProcessor(vm *VM) *JSProcessor {
