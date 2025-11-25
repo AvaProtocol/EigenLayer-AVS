@@ -1,13 +1,11 @@
 package taskengine
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -203,25 +201,4 @@ func TestContractWriteNode_UniswapV3Quote(t *testing.T) {
 		// Log the swap output
 		t.Logf("Swap output: %v", contractWrite.ContractWrite.Data.AsInterface())
 	}
-}
-
-// Helper function to calculate ERC20 storage slots for state overrides
-// This demonstrates how to calculate storage slots for Tenderly state overrides
-func calculateERC20StorageSlots(owner, spender, tokenAddress common.Address, balanceSlot, allowanceSlot uint64) (balanceStorageSlot, allowanceStorageSlot string) {
-	// Balance slot: keccak256(abi.encode(owner, balanceSlot))
-	ownerPadded := common.LeftPadBytes(owner.Bytes(), 32)
-	balanceSlotPadded := common.LeftPadBytes(big.NewInt(int64(balanceSlot)).Bytes(), 32)
-	balanceData := append(ownerPadded, balanceSlotPadded...)
-	balanceHash := crypto.Keccak256Hash(balanceData)
-
-	// Allowance slot: keccak256(abi.encode(spender, keccak256(abi.encode(owner, allowanceSlot))))
-	allowanceSlotPadded := common.LeftPadBytes(big.NewInt(int64(allowanceSlot)).Bytes(), 32)
-	innerData := append(ownerPadded, allowanceSlotPadded...)
-	innerHash := crypto.Keccak256Hash(innerData)
-
-	spenderPadded := common.LeftPadBytes(spender.Bytes(), 32)
-	outerData := append(spenderPadded, innerHash.Bytes()...)
-	allowanceHash := crypto.Keccak256Hash(outerData)
-
-	return balanceHash.Hex(), allowanceHash.Hex()
 }
