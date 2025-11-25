@@ -47,7 +47,7 @@ Where:
 
 ## Go Implementation
 
-See `calculateERC20StorageSlots()` in `vm_runner_contract_write_uniswap_test.go` for a working example:
+Example implementation for calculating ERC20 storage slots:
 
 ```go
 func calculateERC20StorageSlots(owner, spender, tokenAddress common.Address, balanceSlot, allowanceSlot uint64) (balanceStorageSlot, allowanceStorageSlot string) {
