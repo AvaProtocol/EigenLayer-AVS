@@ -837,7 +837,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 							var statusText, statusBgColor, statusTextColor string
 							if failed {
 								resultStatus = ExecutionFailure
-								statusText = fmt.Sprintf("but ultimately failed at the '%s' step due to %s.", safeName(failedName), firstLine(failedReason))
+								statusText = fmt.Sprintf("but failed at the '%s' step due to %s.", safeName(failedName), firstLine(failedReason))
 								statusBgColor = "#FEE2E2"   // light red
 								statusTextColor = "#991B1B" // dark red
 							} else if skippedCount > 0 {

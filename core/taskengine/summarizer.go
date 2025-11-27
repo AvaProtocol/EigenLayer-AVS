@@ -200,7 +200,34 @@ func BuildBranchAndSkippedSummary(vm *VM, currentNodeName ...string) (string, st
 		}
 	}
 
-	if len(branches) == 0 {
+	// Build "What Executed Successfully" section with checkmarks for successful contract writes
+	successfulStepsOverview := buildStepsOverview(vm)
+
+	// Build "What Went Wrong" section for failed steps
+	failedStepsOverview := buildFailedStepsOverview(vm)
+
+	// Count failed nodes and check if there are any failures
+	failedNodeCount := 0
+	hasFailures := false
+	for _, st := range vm.ExecutionLogs {
+		if !st.GetSuccess() {
+			hasFailures = true
+			failedNodeCount++
+		}
+	}
+
+	// Calculate total workflow steps consistently with vm_runner_rest.go
+	// Use executedSteps + skippedCount instead of getTotalWorkflowSteps(vm)
+	// because vm.TaskNodes includes nodes from ALL branch paths, not just the executed path
+	executedSteps := len(vm.ExecutionLogs)
+	skippedCount := len(skipped)
+	totalWorkflowSteps := executedSteps
+	if skippedCount > 0 {
+		totalWorkflowSteps = executedSteps + skippedCount
+	}
+
+	// If there are no branches, no successful steps, and no failures, return empty
+	if len(branches) == 0 && strings.TrimSpace(successfulStepsOverview) == "" && !hasFailures {
 		return "", ""
 	}
 
@@ -209,7 +236,9 @@ func BuildBranchAndSkippedSummary(vm *VM, currentNodeName ...string) (string, st
 	// Add Summary heading and one-line narrative
 	tb = append(tb, "Summary")
 	summaryLine := ""
-	if len(skipped) > 0 {
+	if hasFailures {
+		summaryLine = fmt.Sprintf("%d out of %d nodes failed during execution.", failedNodeCount, totalWorkflowSteps)
+	} else if len(skipped) > 0 {
 		summaryLine = "The workflow did not fully execute. Some nodes were skipped due to branching conditions."
 	} else {
 		summaryLine = "All nodes were executed successfully."
@@ -219,7 +248,13 @@ func BuildBranchAndSkippedSummary(vm *VM, currentNodeName ...string) (string, st
 	// On-chain clause on separate line
 	onchainLine := ""
 	if successfulRealWrites > 0 {
-		onchainLine = fmt.Sprintf("Executed %d on-chain transaction(s).", successfulRealWrites)
+		if successfulSimulatedWrites > 0 {
+			// Both real and simulated transactions
+			onchainLine = fmt.Sprintf("Executed %d on-chain transaction(s) and %d simulated transaction(s).", successfulRealWrites, successfulSimulatedWrites)
+		} else {
+			// Only real transactions
+			onchainLine = fmt.Sprintf("Executed %d on-chain transaction(s).", successfulRealWrites)
+		}
 	} else if successfulSimulatedWrites > 0 {
 		// Include simulated node names with proper grammar
 		if len(simulatedWriteNames) > 0 {
@@ -229,7 +264,7 @@ func BuildBranchAndSkippedSummary(vm *VM, currentNodeName ...string) (string, st
 			onchainLine = "No on-chain transactions were sent, as all contract write nodes ran in simulation mode."
 		}
 	} else if failedWrites > 0 {
-		onchainLine = "No on-chain transactions executed; contract writes failed."
+		onchainLine = "No on-chain transactions executed."
 	} else if successfulRealWrites == 0 && successfulSimulatedWrites == 0 {
 		onchainLine = "No on-chain transactions executed."
 	}
@@ -237,8 +272,32 @@ func BuildBranchAndSkippedSummary(vm *VM, currentNodeName ...string) (string, st
 		tb = append(tb, onchainLine)
 	}
 
-	tb = append(tb, "") // blank line before Skipped nodes
+	// Add "What Went Wrong" section if there are failures
+	if strings.TrimSpace(failedStepsOverview) != "" {
+		tb = append(tb, "What Went Wrong")
+		// Split by newlines to add each step as a separate line
+		steps := strings.Split(failedStepsOverview, "\n")
+		for _, step := range steps {
+			if strings.TrimSpace(step) != "" {
+				tb = append(tb, step)
+			}
+		}
+	}
+
+	// Add "What Executed Successfully" section if there are successful contract writes
+	if strings.TrimSpace(successfulStepsOverview) != "" {
+		tb = append(tb, "What Executed Successfully")
+		// Split by newlines to add each step as a separate line
+		steps := strings.Split(successfulStepsOverview, "\n")
+		for _, step := range steps {
+			if strings.TrimSpace(step) != "" {
+				tb = append(tb, step)
+			}
+		}
+	}
+
 	if len(skipped) > 0 {
+		tb = append(tb, "") // blank line before Skipped nodes
 		tb = append(tb, "The below nodes were skipped due to branching conditions")
 		for _, n := range skipped {
 			tb = append(tb, "- "+n)
@@ -296,8 +355,39 @@ func BuildBranchAndSkippedSummary(vm *VM, currentNodeName ...string) (string, st
 	if onchainLine != "" {
 		hb = append(hb, "<p style=\"margin:0 0 8px\">"+html.EscapeString(onchainLine)+"</p>")
 	}
-	// Spacer before Skipped nodes
-	hb = append(hb, "<div style=\"height:8px\"></div>")
+
+	// Add "What Went Wrong" section if there are failures
+	if strings.TrimSpace(failedStepsOverview) != "" {
+		hb = append(hb, "<div style=\"font-weight:600; margin:8px 0 4px\">What Went Wrong</div>")
+		// Split by newlines to add each step as a separate paragraph
+		steps := strings.Split(failedStepsOverview, "\n")
+		for _, step := range steps {
+			if strings.TrimSpace(step) != "" {
+				// Escape HTML but preserve the X mark character
+				escapedStep := html.EscapeString(step)
+				hb = append(hb, "<p style=\"margin:0 0 4px\">"+escapedStep+"</p>")
+			}
+		}
+	}
+
+	// Add "What Executed Successfully" section if there are successful contract writes
+	if strings.TrimSpace(successfulStepsOverview) != "" {
+		hb = append(hb, "<div style=\"font-weight:600; margin:8px 0 4px\">What Executed Successfully</div>")
+		// Split by newlines to add each step as a separate paragraph
+		steps := strings.Split(successfulStepsOverview, "\n")
+		for _, step := range steps {
+			if strings.TrimSpace(step) != "" {
+				// Escape HTML but preserve the checkmark character
+				escapedStep := html.EscapeString(step)
+				hb = append(hb, "<p style=\"margin:0 0 4px\">"+escapedStep+"</p>")
+			}
+		}
+	}
+
+	// Spacer before Skipped nodes (only if there are skipped nodes or branches)
+	if len(skipped) > 0 || len(branches) > 0 {
+		hb = append(hb, "<div style=\"height:8px\"></div>")
+	}
 	if len(skipped) > 0 {
 		hb = append(hb, "<div style=\"font-weight:600; margin:8px 0 4px\">The below nodes were skipped due to branching conditions</div>")
 		hb = append(hb, "<ul style=\"margin:0 0 12px 20px; padding:0\">")
@@ -1121,6 +1211,56 @@ func buildStepsOverview(vm *VM) string {
 		return ""
 	}
 
+	// Extract token context from settings (pool tokens and known contracts)
+	vm.mu.Lock()
+	var settings map[string]interface{}
+	if m, ok := vm.vars["settings"].(map[string]interface{}); ok {
+		settings = m
+	}
+	vm.mu.Unlock()
+
+	token0Sym, token0Dec := "", 18
+	token1Sym, token1Dec := "", 18
+	var routerAddr string
+	if settings != nil {
+		if pool, ok := settings["uniswapv3_pool"].(map[string]interface{}); ok {
+			if t0, ok := pool["token0"].(map[string]interface{}); ok {
+				if s, ok := t0["symbol"].(string); ok {
+					token0Sym = s
+					token0Dec = defaultDecimalsForSymbol(s)
+				}
+			}
+			if t1, ok := pool["token1"].(map[string]interface{}); ok {
+				if s, ok := t1["symbol"].(string); ok {
+					token1Sym = s
+					token1Dec = defaultDecimalsForSymbol(s)
+				}
+			}
+		}
+		if contracts, ok := settings["uniswapv3_contracts"].(map[string]interface{}); ok {
+			if a, ok := contracts["swapRouter02"].(string); ok {
+				routerAddr = a
+			}
+		}
+		// Debug logging
+		if vm.logger != nil {
+			vm.logger.Debug("buildStepsOverview: token context", "token0Sym", token0Sym, "token1Sym", token1Sym, "routerAddr", routerAddr)
+		}
+	}
+
+	// Helper function to detect contract name from address
+	detectContractName := func(addr string) string {
+		if addr == "" {
+			return ""
+		}
+		// Normalize addresses for comparison
+		addrLower := strings.ToLower(strings.TrimSpace(addr))
+		if routerAddr != "" && strings.ToLower(strings.TrimSpace(routerAddr)) == addrLower {
+			return "Uniswap V3 router"
+		}
+		return ""
+	}
+
 	var steps []string
 	for _, st := range vm.ExecutionLogs {
 		if !st.GetSuccess() {
@@ -1132,12 +1272,23 @@ func buildStepsOverview(vm *VM) string {
 			continue
 		}
 
+		// Check if this is a simulated transaction
+		isSimulated := false
 		methodName := ""
 		contractAddr := ""
 		if st.GetConfig() != nil {
 			if cfg, ok := st.GetConfig().AsInterface().(map[string]interface{}); ok {
 				if addr, ok := cfg["contractAddress"].(string); ok {
 					contractAddr = addr
+				}
+				// Check isSimulated flag
+				if sim, ok := cfg["isSimulated"]; ok {
+					switch v := sim.(type) {
+					case bool:
+						isSimulated = v
+					case string:
+						isSimulated = strings.EqualFold(strings.TrimSpace(v), "true")
+					}
 				}
 				if mcs, ok := cfg["methodCalls"].([]interface{}); ok && len(mcs) > 0 {
 					if call, ok := mcs[0].(map[string]interface{}); ok {
@@ -1153,25 +1304,55 @@ func buildStepsOverview(vm *VM) string {
 		description := ""
 		switch methodName {
 		case "approve":
+			value := ""
+			spender := ""
+			tokenAddr := ""
 			if st.GetContractWrite() != nil && st.GetContractWrite().Data != nil {
 				if m, ok := st.GetContractWrite().Data.AsInterface().(map[string]interface{}); ok {
 					if ev, ok := m["Approval"].(map[string]interface{}); ok {
-						value := ""
-						spender := ""
 						if v, ok := ev["value"].(string); ok {
 							value = v
 						}
 						if sp, ok := ev["spender"].(string); ok {
 							spender = sp
 						}
-						if value != "" {
-							description = fmt.Sprintf("Approved %s to %s for trading", value, shortHexAddr(spender))
+						// Get token address from owner field in Approval event
+						if owner, ok := ev["owner"].(string); ok && owner != "" {
+							tokenAddr = owner
 						}
 					}
 				}
 			}
-			if description == "" {
-				description = fmt.Sprintf("Approved token to %s", shortHexAddr(contractAddr))
+			// Use contractAddr as token address if not found in event, but skip if it's a template variable
+			if tokenAddr == "" && contractAddr != "" && !strings.HasPrefix(contractAddr, "{{") {
+				tokenAddr = contractAddr
+			}
+			// Fallback to routerAddr if spender not found in event
+			if spender == "" {
+				spender = routerAddr // Use router address as default spender
+			}
+			// Debug logging
+			if vm.logger != nil {
+				vm.logger.Debug("buildStepsOverview: approve step", "contractAddr", contractAddr, "spender", spender, "value", value, "token1Sym", token1Sym, "token1Dec", token1Dec)
+			}
+			// Detect contract name
+			contractName := detectContractName(spender)
+			spenderDisplay := contractName
+			if spenderDisplay == "" {
+				spenderDisplay = shortHexAddr(spender)
+			} else {
+				spenderDisplay = spenderDisplay + " " + shortHexAddr(spender)
+			}
+			// Format amount with token symbol
+			if value != "" && token1Sym != "" {
+				formattedAmount := formatAmount(value, token1Dec)
+				description = fmt.Sprintf("Approved %s %s to %s", formattedAmount, token1Sym, spenderDisplay)
+			} else if value != "" {
+				description = fmt.Sprintf("Approved %s to %s", value, spenderDisplay)
+			} else if token1Sym != "" {
+				description = fmt.Sprintf("Approved %s to %s", token1Sym, spenderDisplay)
+			} else {
+				description = fmt.Sprintf("Approved token to %s", spenderDisplay)
 			}
 
 		case "exactinputsingle":
@@ -1191,10 +1372,34 @@ func buildStepsOverview(vm *VM) string {
 					}
 				}
 			}
+			// Also check return value from contract write output
+			if amountOut == "" && st.GetContractWrite() != nil && st.GetContractWrite().Data != nil {
+				if m, ok := st.GetContractWrite().Data.AsInterface().(map[string]interface{}); ok {
+					if exactInput, ok := m["exactInputSingle"].(map[string]interface{}); ok {
+						if amt, ok := exactInput["amountOut"].(string); ok {
+							amountOut = amt
+						}
+					}
+				}
+			}
+			// Format amountOut with token symbol and decimal formatting
 			if amountOut != "" {
-				description = fmt.Sprintf("Swapped for ~%s via Uniswap V3 (exactInputSingle)", amountOut)
+				formattedAmount := formatAmount(amountOut, token0Dec)
+				if vm.logger != nil {
+					vm.logger.Info("buildStepsOverview: formatting amountOut", "amountOut", amountOut, "token0Sym", token0Sym, "token0Dec", token0Dec, "formattedAmount", formattedAmount)
+				}
+				if token0Sym != "" {
+					description = fmt.Sprintf("Swapped for ~%s %s via Uniswap V3 (exactInputSingle)", formattedAmount, token0Sym)
+				} else {
+					// Fallback: try to format without symbol if we have decimals
+					description = fmt.Sprintf("Swapped for ~%s via Uniswap V3 (exactInputSingle)", formattedAmount)
+				}
 			} else {
 				description = "Swapped via Uniswap V3 (exactInputSingle)"
+			}
+			// Debug logging
+			if vm.logger != nil {
+				vm.logger.Debug("buildStepsOverview: exactInputSingle step", "amountOut", amountOut, "token0Sym", token0Sym, "token0Dec", token0Dec, "isSimulated", isSimulated)
 			}
 
 		case "transfer":
@@ -1224,8 +1429,49 @@ func buildStepsOverview(vm *VM) string {
 			description = fmt.Sprintf("Called %s on %s", methodName, shortHexAddr(contractAddr))
 		}
 
+		// Add "(Simulated)" prefix if this is a simulated transaction
+		if isSimulated {
+			description = "(Simulated) " + description
+			if vm.logger != nil {
+				vm.logger.Info("buildStepsOverview: added Simulated prefix", "methodName", methodName, "description", description)
+			}
+		}
+
 		// Add checkmark prefix
 		steps = append(steps, fmt.Sprintf("✓ %s", description))
+	}
+
+	return strings.Join(steps, "\n")
+}
+
+// buildFailedStepsOverview generates an X-prefixed list of failed steps with error messages
+func buildFailedStepsOverview(vm *VM) string {
+	if vm == nil {
+		return ""
+	}
+
+	var steps []string
+	for _, st := range vm.ExecutionLogs {
+		if st.GetSuccess() {
+			continue // Skip successful steps
+		}
+
+		name := st.GetName()
+		if name == "" {
+			name = st.GetId()
+		}
+		if name == "" {
+			continue
+		}
+
+		errorMsg := st.GetError()
+		if errorMsg == "" {
+			errorMsg = "unknown error"
+		}
+
+		// Format: "✗ StepName: error message"
+		description := fmt.Sprintf("✗ %s: %s", safeName(name), firstLine(errorMsg))
+		steps = append(steps, description)
 	}
 
 	return strings.Join(steps, "\n")
