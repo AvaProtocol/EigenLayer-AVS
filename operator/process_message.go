@@ -45,7 +45,7 @@ func isValidTaskIDFormat(id string) bool {
 
 func (o *Operator) processMessage(resp *avspb.SyncMessagesResp) {
 	switch resp.Op {
-	case avspb.MessageOp_CancelTask, avspb.MessageOp_DeleteTask:
+	case avspb.MessageOp_DeactivateTask, avspb.MessageOp_DeleteTask:
 		// Get task ID from either TaskMetadata or message ID
 		var taskID string
 		if resp.TaskMetadata != nil {

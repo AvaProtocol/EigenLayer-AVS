@@ -9,8 +9,8 @@ import (
 // TaskStatusToStorageKey converts a task status enum to its storage key prefix
 // c: completed - task is completed and no longer being checked for trigger anymore
 // f: failed - task failed to execute, and no longer being checked for trigger anymore
-// x: executing - task is being executed currently
-// l: cancelled - task is cancelled by user, no longer being checked for trigger
+// x: running - task is currently executing
+// i: inactive - task is turned off by user, no longer being checked for trigger
 // a: active - task is active, and will be checked for triggering. task may have executed zero or more times depending on repeatable or not
 func TaskStatusToStorageKey(v avsproto.TaskStatus) string {
 	switch v {
@@ -18,9 +18,9 @@ func TaskStatusToStorageKey(v avsproto.TaskStatus) string {
 		return "c"
 	case avsproto.TaskStatus_Failed:
 		return "f"
-	case avsproto.TaskStatus_Canceled:
-		return "l"
-	case avsproto.TaskStatus_Executing:
+	case avsproto.TaskStatus_Inactive:
+		return "i"
+	case avsproto.TaskStatus_Running:
 		return "x"
 	case avsproto.TaskStatus_Active:
 		return "a"

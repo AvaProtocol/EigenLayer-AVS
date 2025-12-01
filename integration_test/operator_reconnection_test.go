@@ -115,10 +115,10 @@ func TestOperatorReconnectionFlow(t *testing.T) {
 						Queries: []*avsproto.EventTrigger_Query{
 							{
 								Addresses: []string{"0xA0b86a33E6441d476c1bd0a4dc53dFEB3F81E76C"},
-								Topics: []*avsproto.EventTrigger_Topics{
-									{Values: []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"}}, // Transfer signature
-									{Values: []string{""}}, // from - any address (empty means wildcard)
-									{Values: []string{"0x000000000000000000000000" + user.Address.Hex()[2:]}}, // to - specific address (padded)
+								Topics: []string{
+									"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer signature
+									"", // from - wildcard
+									"0x000000000000000000000000" + user.Address.Hex()[2:], // to - padded address
 								},
 							},
 						},
@@ -129,7 +129,7 @@ func TestOperatorReconnectionFlow(t *testing.T) {
 		Nodes: []*avsproto.TaskNode{
 			{
 				Id:   "log_node",
-				Name: "Log Transfer",
+				Name: "Log_Transfer",
 				TaskType: &avsproto.TaskNode_CustomCode{
 					CustomCode: &avsproto.CustomCodeNode{
 						Config: &avsproto.CustomCodeNode_Config{
@@ -312,8 +312,8 @@ func TestOperatorReconnectionRaceCondition(t *testing.T) {
 						Queries: []*avsproto.EventTrigger_Query{
 							{
 								Addresses: []string{"0xA0b86a33E6441d476c1bd0a4dc53dFEB3F81E76C"},
-								Topics: []*avsproto.EventTrigger_Topics{
-									{Values: []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"}}, // Transfer signature
+								Topics: []string{
+									"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 								},
 							},
 						},
@@ -324,7 +324,7 @@ func TestOperatorReconnectionRaceCondition(t *testing.T) {
 		Nodes: []*avsproto.TaskNode{
 			{
 				Id:   "log_node",
-				Name: "Log Transfer",
+				Name: "Log_Transfer",
 				TaskType: &avsproto.TaskNode_CustomCode{
 					CustomCode: &avsproto.CustomCodeNode{
 						Config: &avsproto.CustomCodeNode_Config{

@@ -37,8 +37,8 @@ func (svc *StatService) GetTaskCount(smartWalletAddress *model.SmartWallet) (*mo
 			stat.Completed += 1
 		case avsproto.TaskStatus_Failed:
 			stat.Failed += 1
-		case avsproto.TaskStatus_Canceled:
-			stat.Canceled += 1
+		case avsproto.TaskStatus_Inactive:
+			stat.Inactive += 1
 		}
 	}
 

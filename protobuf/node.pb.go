@@ -28,7 +28,7 @@ type MessageOp int32
 const (
 	MessageOp_Unset              MessageOp = 0
 	MessageOp_MonitorTaskTrigger MessageOp = 1
-	MessageOp_CancelTask         MessageOp = 2
+	MessageOp_DeactivateTask     MessageOp = 2
 	MessageOp_DeleteTask         MessageOp = 3
 	MessageOp_CompletedTask      MessageOp = 4
 	MessageOp_ImmediateTrigger   MessageOp = 5
@@ -39,7 +39,7 @@ var (
 	MessageOp_name = map[int32]string{
 		0: "Unset",
 		1: "MonitorTaskTrigger",
-		2: "CancelTask",
+		2: "DeactivateTask",
 		3: "DeleteTask",
 		4: "CompletedTask",
 		5: "ImmediateTrigger",
@@ -47,7 +47,7 @@ var (
 	MessageOp_value = map[string]int32{
 		"Unset":              0,
 		"MonitorTaskTrigger": 1,
-		"CancelTask":         2,
+		"DeactivateTask":     2,
 		"DeleteTask":         3,
 		"CompletedTask":      4,
 		"ImmediateTrigger":   5,
@@ -585,7 +585,7 @@ type NotifyTriggersResp struct {
 	// Task execution state information
 	RemainingExecutions int64  `protobuf:"varint,2,opt,name=remaining_executions,json=remainingExecutions,proto3" json:"remaining_executions,omitempty"` // How many executions are left for this task
 	TaskStillActive     bool   `protobuf:"varint,3,opt,name=task_still_active,json=taskStillActive,proto3" json:"task_still_active,omitempty"`           // Whether the task is still active and should be monitored
-	Status              string `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`                                                       // Task status: "active", "exhausted", "cancelled", "expired", etc.
+	Status              string `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`                                                       // Task status: "active", "exhausted", "inactive", "expired", etc.
 	Message             string `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`                                                     // Optional message for debugging/logging
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
@@ -1210,12 +1210,11 @@ const file_node_proto_rawDesc = "" +
 	"\x13HealthCheckResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1c\n" +
-	"\ttimestamp\x18\x03 \x01(\x04R\ttimestamp*w\n" +
+	"\ttimestamp\x18\x03 \x01(\x04R\ttimestamp*{\n" +
 	"\tMessageOp\x12\t\n" +
 	"\x05Unset\x10\x00\x12\x16\n" +
-	"\x12MonitorTaskTrigger\x10\x01\x12\x0e\n" +
-	"\n" +
-	"CancelTask\x10\x02\x12\x0e\n" +
+	"\x12MonitorTaskTrigger\x10\x01\x12\x12\n" +
+	"\x0eDeactivateTask\x10\x02\x12\x0e\n" +
 	"\n" +
 	"DeleteTask\x10\x03\x12\x11\n" +
 	"\rCompletedTask\x10\x04\x12\x14\n" +
