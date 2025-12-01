@@ -117,7 +117,7 @@ func TestNotifyOperatorsTaskOperation_DeleteTask(t *testing.T) {
 	assert.Equal(t, task.Id, messages[0].Id, "Notification should contain correct task ID")
 }
 
-func TestNotifyOperatorsTaskOperation_CancelTask(t *testing.T) {
+func TestNotifyOperatorsTaskOperation_DeactivateTask(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
@@ -154,10 +154,11 @@ func TestNotifyOperatorsTaskOperation_CancelTask(t *testing.T) {
 	engine.trackSyncedTasks[operatorAddr].TaskID[task.Id] = true
 	engine.lock.Unlock()
 
-	// Cancel the task (this should trigger notification)
-	cancelled, err := engine.CancelTaskByUser(user, task.Id)
+	// Deactivate the task (this should trigger notification)
+	resp, err := engine.SetTaskActiveByUser(user, task.Id, false)
 	assert.NoError(t, err)
-	assert.True(t, cancelled.Success)
+	assert.True(t, resp.Success)
+	assert.Equal(t, "inactive", resp.Status)
 
 	// Manually trigger batch processing for immediate testing
 	engine.sendBatchedNotifications()
@@ -170,7 +171,7 @@ func TestNotifyOperatorsTaskOperation_CancelTask(t *testing.T) {
 	messageTypes := mockStream.GetMessageTypes()
 
 	assert.Len(t, messages, 1, "Should have received exactly one notification")
-	assert.Equal(t, avsproto.MessageOp_CancelTask, messageTypes[0], "Should have received CancelTask notification")
+	assert.Equal(t, avsproto.MessageOp_DeactivateTask, messageTypes[0], "Should have received DeactivateTask notification")
 	assert.Equal(t, task.Id, messages[0].Id, "Notification should contain correct task ID")
 }
 
@@ -335,7 +336,7 @@ func TestDeleteTaskRespFields(t *testing.T) {
 	assert.Equal(t, "Active", resp.PreviousStatus) // Task is active before deletion
 }
 
-func TestCancelTaskRespFields(t *testing.T) {
+func TestSetTaskActiveRespFields(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
@@ -349,12 +350,22 @@ func TestCancelTaskRespFields(t *testing.T) {
 	task, err := engine.CreateTask(user, taskReq)
 	assert.NoError(t, err)
 
-	resp, err := engine.CancelTaskByUser(user, task.Id)
+	// Deactivate
+	resp, err := engine.SetTaskActiveByUser(user, task.Id, false)
 	assert.NoError(t, err)
 	assert.True(t, resp.Success)
-	assert.Equal(t, "cancelled", resp.Status)
+	assert.Equal(t, "inactive", resp.Status)
 	assert.Equal(t, task.Id, resp.Id)
 	assert.NotEmpty(t, resp.Message)
-	assert.NotZero(t, resp.CancelledAt)
-	assert.Equal(t, "Active", resp.PreviousStatus) // Task is active before cancellation
+	assert.NotZero(t, resp.UpdatedAt)
+	assert.Equal(t, "Active", resp.PreviousStatus) // Task is active before deactivation
+
+	// Activate
+	resp2, err := engine.SetTaskActiveByUser(user, task.Id, true)
+	assert.NoError(t, err)
+	assert.True(t, resp2.Success)
+	assert.Equal(t, "active", resp2.Status)
+	assert.Equal(t, task.Id, resp2.Id)
+	assert.NotEmpty(t, resp2.Message)
+	assert.NotZero(t, resp2.UpdatedAt)
 }

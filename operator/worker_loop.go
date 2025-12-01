@@ -716,7 +716,7 @@ func (o *Operator) StreamMessages() {
 			}
 
 			switch resp.Op {
-			case avspb.MessageOp_CancelTask, avspb.MessageOp_DeleteTask:
+			case avspb.MessageOp_DeactivateTask, avspb.MessageOp_DeleteTask:
 				o.processMessage(resp)
 			case avspb.MessageOp_MonitorTaskTrigger:
 				// Add nil check to prevent segmentation fault

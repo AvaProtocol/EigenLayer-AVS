@@ -55,5 +55,5 @@ type SmartWalletTaskStat struct {
 	Active    uint64
 	Completed uint64
 	Failed    uint64
-	Canceled  uint64
+	Inactive  uint64
 }

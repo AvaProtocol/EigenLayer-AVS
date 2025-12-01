@@ -122,7 +122,7 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 
 	db.Set(TaskUserKey(task1), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)))
 	db.Set(TaskUserKey(task2), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Failed)))
-	db.Set(TaskUserKey(task3), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Canceled)))
+	db.Set(TaskUserKey(task3), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Inactive)))
 	db.Set(TaskUserKey(task4), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Active)))
 
 	statSvc := NewStatService(db)
@@ -134,9 +134,9 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 			Active:    1,
 			Completed: 1,
 			Failed:    1,
-			Canceled:  1,
+			Inactive:  1,
 		}) {
-		t.Errorf("expect task total=4, active=1, completed=1, failed=1, canceled=1, but got %v", result)
+		t.Errorf("expect task total=4, active=1, completed=1, failed=1, inactive=1, but got %v", result)
 	}
 
 }
