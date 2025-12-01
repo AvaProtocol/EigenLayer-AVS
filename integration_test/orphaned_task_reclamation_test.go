@@ -57,8 +57,8 @@ func TestOrphanedTaskReclamation(t *testing.T) {
 							Queries: []*avsproto.EventTrigger_Query{
 								{
 									Addresses: []string{"0xA0b86a33E6441d476c1bd0a4dc53dFEB3F81E76C"},
-									Topics: []*avsproto.EventTrigger_Topics{
-										{Values: []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"}},
+									Topics: []string{
+										"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 									},
 								},
 							},
@@ -282,8 +282,8 @@ func TestMonotonicClockTaskReset(t *testing.T) {
 							Queries: []*avsproto.EventTrigger_Query{
 								{
 									Addresses: []string{"0xA0b86a33E6441d476c1bd0a4dc53dFEB3F81E76C"},
-									Topics: []*avsproto.EventTrigger_Topics{
-										{Values: []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"}},
+									Topics: []string{
+										"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 									},
 								},
 							},

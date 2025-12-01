@@ -344,7 +344,7 @@ type TestOperator struct {
 
 func (o *TestOperator) processMessage(resp *avspb.SyncMessagesResp) {
 	switch resp.Op {
-	case avspb.MessageOp_CancelTask, avspb.MessageOp_DeleteTask:
+	case avspb.MessageOp_DeactivateTask, avspb.MessageOp_DeleteTask:
 		o.logger.Info("removing task from all triggers", "task_id", resp.TaskMetadata.TaskId, "operation", resp.Op)
 		o.eventTrigger.RemoveCheck(resp.TaskMetadata.TaskId)
 		o.blockTrigger.RemoveCheck(resp.TaskMetadata.TaskId)
@@ -371,8 +371,8 @@ func TestTaskRemovalFromAllTriggers(t *testing.T) {
 		expectRemoval bool
 	}{
 		{
-			name:          "Cancel Task",
-			op:            avspb.MessageOp_CancelTask,
+			name:          "Deactivate Task",
+			op:            avspb.MessageOp_DeactivateTask,
 			taskID:        "task-123",
 			expectRemoval: true,
 		},

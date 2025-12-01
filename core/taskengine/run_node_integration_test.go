@@ -79,7 +79,7 @@ func TestTaskRunLogicAndTemplateVariables(t *testing.T) {
 			case avsproto.NodeType_NODE_TYPE_REST_API:
 				nodeType = "restAPI"
 				nodeConfig = map[string]interface{}{
-					"url":    "https://httpbin.org/post",
+					"url":    MockAPIEndpoint + "/post",
 					"method": "POST",
 					"body": `{
 						"user_id": "{{user.id}}",
@@ -137,7 +137,7 @@ func TestSmartTriggerDataFallback(t *testing.T) {
 	defer storage.Destroy(engine.db.(*storage.BadgerStorage))
 
 	nodeConfig := map[string]interface{}{
-		"url":    "https://httpbin.org/post",
+		"url":    MockAPIEndpoint + "/post",
 		"method": "POST",
 		"body": `{
 			"camelCase": "{{camelCaseValue}}",

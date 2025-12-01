@@ -2,8 +2,10 @@
 
 # GitHub Job Log Fetcher
 # Fetches logs from GitHub Actions jobs for debugging purposes
-# Usage: ./scripts/gh_job_logs.sh --job-id <JOB_ID>
-#        ./scripts/gh_job_logs.sh --run-id <RUN_ID> [--job-name <JOB_NAME>]
+# Usage:
+#   ./scripts/gh_job_logs.sh <JOB_ID>
+#   ./scripts/gh_job_logs.sh --job-id <JOB_ID>
+#   ./scripts/gh_job_logs.sh --run-id <RUN_ID> [--job-name <JOB_NAME>]
 
 set -euo pipefail
 
@@ -13,7 +15,13 @@ RUN_ID=""
 JOB_NAME=""
 REPO="AvaProtocol/EigenLayer-AVS"
 
-# Parse command line arguments
+# If first arg is a bare numeric ID, treat it as JOB_ID (positional)
+if [[ $# -ge 1 && "$1" =~ ^[0-9]+$ ]]; then
+  JOB_ID="$1"
+  shift
+fi
+
+# Parse remaining command line arguments
 while [[ $# -gt 0 ]]; do
   case $1 in
     --job-id)
@@ -33,8 +41,10 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      echo "Usage: $0 --job-id <JOB_ID>"
-      echo "       $0 --run-id <RUN_ID> [--job-name <JOB_NAME>]"
+      echo "Usage:"
+      echo "  $0 <JOB_ID>"
+      echo "  $0 --job-id <JOB_ID>"
+      echo "  $0 --run-id <RUN_ID> [--job-name <JOB_NAME>]"
       echo ""
       echo "Options:"
       echo "  --job-id <ID>     Fetch logs for specific job ID"

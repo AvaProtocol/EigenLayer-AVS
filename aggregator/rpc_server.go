@@ -567,18 +567,19 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 	}
 }
 
-func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*avsproto.CancelTaskResp, error) {
+func (r *RpcServer) SetTaskActive(ctx context.Context, req *avsproto.SetTaskActiveReq) (*avsproto.SetTaskActiveResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
-	r.config.Logger.Info("process cancel task",
+	r.config.Logger.Info("process set task active",
 		"user", user.Address.String(),
-		"task_id", taskID.Id,
+		"task_id", req.Id,
+		"active", req.Active,
 	)
 
-	result, err := r.engine.CancelTaskByUser(user, string(taskID.Id))
+	result, err := r.engine.SetTaskActiveByUser(user, string(req.Id), req.Active)
 
 	if err != nil {
 		return nil, err
@@ -998,33 +999,33 @@ func (r *RpcServer) ReportEventOverload(ctx context.Context, alert *avsproto.Eve
 		"query_index", alert.QueryIndex,
 		"details", alert.Details)
 
-	// Cancel the overloaded task immediately
-	cancelled, err := r.engine.CancelTask(alert.TaskId)
+	// Deactivate the overloaded task immediately
+	deactivated, err := r.engine.DeactivateTask(alert.TaskId)
 	if err != nil {
-		r.config.Logger.Error("❌ Failed to cancel overloaded task",
+		r.config.Logger.Error("❌ Failed to deactivate overloaded task",
 			"task_id", alert.TaskId,
 			"error", err)
 		return &avsproto.EventOverloadResponse{
 			TaskCancelled: false,
-			Message:       fmt.Sprintf("Failed to cancel task: %v", err),
+			Message:       fmt.Sprintf("Failed to deactivate task: %v", err),
 			Timestamp:     uint64(time.Now().UnixMilli()),
 		}, nil
 	}
 
-	responseMessage := "Task cancelled due to event overload"
-	if !cancelled {
-		responseMessage = "Task was already cancelled or not found"
+	responseMessage := "Task deactivated due to event overload"
+	if !deactivated {
+		responseMessage = "Task was already inactive or not found"
 	}
 
 	// Capture a message in Sentry for visibility
 	sentry.CaptureMessage(fmt.Sprintf("Event overload detected for task %s: %s", alert.TaskId, alert.Details))
 
-	r.config.Logger.Info("🛑 Task cancelled due to event overload",
+	r.config.Logger.Info("🛑 Task deactivated due to event overload",
 		"task_id", alert.TaskId,
-		"cancelled", cancelled)
+		"deactivated", deactivated)
 
 	return &avsproto.EventOverloadResponse{
-		TaskCancelled: cancelled,
+		TaskCancelled: deactivated,
 		Message:       responseMessage,
 		Timestamp:     uint64(time.Now().UnixMilli()),
 	}, nil

@@ -327,8 +327,8 @@ enum TaskStatus {
   // Task is completed when it reaches its max_execution count or its expiration time
   Completed = 1;
   Failed    = 2;
-  Canceled  = 3;
-  Executing = 4;
+  Running   = 4;
+  Inactive  = 5;
 }
 
 // Execution Status re-present a run of the task
@@ -899,7 +899,7 @@ message GetWalletResp {
   uint64 active_task_count = 6;
   uint64 completed_task_count = 7;
   uint64 failed_task_count = 8;
-  uint64 canceled_task_count = 9;
+  uint64 inactive_task_count = 9;
 }
 
 message SetWalletReq {
@@ -1102,14 +1102,19 @@ message DeleteTaskResp {
   string previous_status = 6;          // Previous status of the task before deletion
 }
 
-// Response message for CancelTask operation  
-message CancelTaskResp {
-  bool success = 1;                    // Whether the operation completed successfully
-  string status = 2;                   // Status description: "cancelled", "not_found", "already_cancelled", "cannot_cancel"
-  string message = 3;                  // Human-readable message about what happened
-  int64 cancelled_at = 4;              // Unix timestamp when the task was cancelled (if applicable)
-  string id = 5;                  // ID of the task that was affected
-  string previous_status = 6;          // Previous status of the task before cancellation
+// Toggle task active state
+message SetTaskActiveReq {
+  string id = 1;
+  bool active = 2;
+}
+
+message SetTaskActiveResp {
+  bool success = 1;
+  string status = 2;           // "active" | "inactive" | "not_found" | "error"
+  string message = 3;
+  string id = 4;
+  string previous_status = 5;
+  int64 updated_at = 6;        // ms
 }
 
 service Aggregator {
@@ -1138,7 +1143,7 @@ service Aggregator {
   rpc GetExecution(ExecutionReq)     returns (Execution) {};
   rpc GetExecutionStatus(ExecutionReq)     returns (ExecutionStatusResp) {};
 
-  rpc CancelTask(IdReq)                 returns (CancelTaskResp) {};
+  rpc SetTaskActive(SetTaskActiveReq)  returns (SetTaskActiveResp) {};
   rpc DeleteTask(IdReq)                 returns (DeleteTaskResp) {};
   rpc TriggerTask(TriggerTaskReq)   returns (TriggerTaskResp) {};
 

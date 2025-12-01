@@ -237,7 +237,16 @@ func TestBalanceNode_BasicFetch(t *testing.T) {
 }
 
 func TestBalanceNode_TokenAddressFilter(t *testing.T) {
-	// Use real Moralis API (no mock server)
+	// Use mock Moralis server to avoid external dependency
+	mockServer := createMockMoralisServer(t, mockTokenBalances)
+	defer mockServer.Close()
+
+	// Set test API base URL to use mock server
+	testMoralisAPIBaseURL = mockServer.URL
+	defer func() {
+		testMoralisAPIBaseURL = "" // Reset after test
+	}()
+
 	testAddress := "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
 
 	// Filter for only WETH and USDC
@@ -248,7 +257,7 @@ func TestBalanceNode_TokenAddressFilter(t *testing.T) {
 
 	config := &avsproto.BalanceNode_Config{
 		Address:             testAddress,
-		Chain:               "ethereum",
+		Chain:               "sepolia",
 		TokenAddresses:      tokenAddresses,
 		IncludeSpam:         false,
 		IncludeZeroBalances: true, // Include zero balances for this test
@@ -257,16 +266,8 @@ func TestBalanceNode_TokenAddressFilter(t *testing.T) {
 
 	vm, _ := setupBalanceVM(t, config)
 
-	// Get real Moralis API key from macro secrets (already set in setupBalanceVM)
-	moralisAPIKey := ""
-	if macroSecrets != nil {
-		moralisAPIKey = macroSecrets["moralis_api_key"]
-	}
-	if moralisAPIKey == "" || moralisAPIKey == "test-api-key" {
-		t.Skip("real moralis API key not configured in macros.secrets - skipping real API test")
-	}
-
-	balances, err := vm.fetchMoralisBalancesWithFiltering(testAddress, "eth", moralisAPIKey, config)
+	// Use test API key with mock server
+	balances, err := vm.fetchMoralisBalancesWithFiltering(testAddress, "sepolia", "test-api-key", config)
 
 	if err != nil {
 		t.Fatalf("expected successful balance fetch but got error: %v", err)

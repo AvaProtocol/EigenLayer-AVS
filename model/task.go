@@ -293,9 +293,8 @@ func (t *Task) SetFailed() {
 	t.Task.CompletedAt = time.Now().UnixMilli()
 }
 
-func (t *Task) SetCanceled() {
-	t.Task.Status = avsproto.TaskStatus_Canceled
-	t.Task.CompletedAt = time.Now().UnixMilli()
+func (t *Task) SetInactive() {
+	t.Task.Status = avsproto.TaskStatus_Inactive
 }
 
 // Check whether the task own by the given address
