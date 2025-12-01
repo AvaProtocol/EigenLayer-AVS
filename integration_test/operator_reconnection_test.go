@@ -129,7 +129,7 @@ func TestOperatorReconnectionFlow(t *testing.T) {
 		Nodes: []*avsproto.TaskNode{
 			{
 				Id:   "log_node",
-				Name: "Log_Transfer",
+				Name: "LogTransfer",
 				TaskType: &avsproto.TaskNode_CustomCode{
 					CustomCode: &avsproto.CustomCodeNode{
 						Config: &avsproto.CustomCodeNode_Config{
@@ -324,7 +324,7 @@ func TestOperatorReconnectionRaceCondition(t *testing.T) {
 		Nodes: []*avsproto.TaskNode{
 			{
 				Id:   "log_node",
-				Name: "Log_Transfer",
+				Name: "LogTransfer",
 				TaskType: &avsproto.TaskNode_CustomCode{
 					CustomCode: &avsproto.CustomCodeNode{
 						Config: &avsproto.CustomCodeNode_Config{

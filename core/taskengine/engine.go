@@ -3056,6 +3056,27 @@ func (n *Engine) SetTaskActiveByUser(user *model.User, taskID string, active boo
 		}, nil
 	}
 
+	// Running guard: do not alter status; treat active=true as idempotent and active=false as disallowed
+	if oldStatus == avsproto.TaskStatus_Running {
+		if active {
+			return &avsproto.SetTaskActiveResp{
+				Success:        true,
+				Status:         "active",
+				Message:        "Task is already running",
+				Id:             taskID,
+				PreviousStatus: getTaskStatusString(oldStatus),
+				UpdatedAt:      time.Now().UnixMilli(),
+			}, nil
+		}
+		return &avsproto.SetTaskActiveResp{
+			Success:        false,
+			Status:         "error",
+			Message:        "Cannot deactivate a running task",
+			Id:             taskID,
+			PreviousStatus: getTaskStatusString(oldStatus),
+		}, nil
+	}
+
 	// Idempotent responses
 	if active && oldStatus == avsproto.TaskStatus_Active {
 		return &avsproto.SetTaskActiveResp{
@@ -3083,16 +3104,6 @@ func (n *Engine) SetTaskActiveByUser(user *model.User, taskID string, active boo
 	if active {
 		task.SetActive()
 	} else {
-		// Disallow deactivation while running
-		if oldStatus == avsproto.TaskStatus_Running {
-			return &avsproto.SetTaskActiveResp{
-				Success:        false,
-				Status:         "error",
-				Message:        "Cannot deactivate a running task",
-				Id:             taskID,
-				PreviousStatus: getTaskStatusString(oldStatus),
-			}, nil
-		}
 		task.SetInactive()
 	}
 
