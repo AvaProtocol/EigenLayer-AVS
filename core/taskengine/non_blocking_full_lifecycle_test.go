@@ -34,7 +34,7 @@ func TestNonBlockingExecutionFullLifecycle(t *testing.T) {
 		Task: &avsproto.Task{
 			Id:             "test-task-lifecycle",
 			Owner:          "", // Empty owner to skip wallet validation
-			Status:         avsproto.TaskStatus_Active,
+			Status:         avsproto.TaskStatus_Enabled,
 			Name:           "Test Full Lifecycle Index",
 			ExecutionCount: 0, // Start with 0 executions
 			Trigger: &avsproto.TaskTrigger{

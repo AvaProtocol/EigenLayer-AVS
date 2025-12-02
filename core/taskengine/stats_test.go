@@ -122,8 +122,8 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 
 	db.Set(TaskUserKey(task1), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)))
 	db.Set(TaskUserKey(task2), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Failed)))
-	db.Set(TaskUserKey(task3), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Inactive)))
-	db.Set(TaskUserKey(task4), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Active)))
+	db.Set(TaskUserKey(task3), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Disabled)))
+	db.Set(TaskUserKey(task4), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Enabled)))
 
 	statSvc := NewStatService(db)
 	result, _ := statSvc.GetTaskCount(user1.ToSmartWallet())

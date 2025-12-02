@@ -49,7 +49,7 @@ func TestOrphanedTaskReclamation(t *testing.T) {
 			Id:           "test-task-001",
 			Name:         "Test Orphaned Task",
 			MaxExecution: 100,
-			Status:       avsproto.TaskStatus_Active,
+			Status:       avsproto.TaskStatus_Enabled,
 			Trigger: &avsproto.TaskTrigger{
 				TriggerType: &avsproto.TaskTrigger_Event{
 					Event: &avsproto.EventTrigger{
@@ -274,7 +274,7 @@ func TestMonotonicClockTaskReset(t *testing.T) {
 			Id:           "monotonic-test-task",
 			Name:         "MonotonicClock Test Task",
 			MaxExecution: 100,
-			Status:       avsproto.TaskStatus_Active,
+			Status:       avsproto.TaskStatus_Enabled,
 			Trigger: &avsproto.TaskTrigger{
 				TriggerType: &avsproto.TaskTrigger_Event{
 					Event: &avsproto.EventTrigger{

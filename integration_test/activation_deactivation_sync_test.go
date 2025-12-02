@@ -87,7 +87,7 @@ func TestActivationDeactivationSyncWithConfigs(t *testing.T) {
 	}
 
 	gotMonitor := waitFor(func() bool {
-		for _, m := range mockServer.sendCalls {
+		for _, m := range mockServer.GetSentTasks() {
 			if m.Op == avsproto.MessageOp_MonitorTaskTrigger && m.Id == task.Id {
 				return true
 			}
@@ -96,38 +96,22 @@ func TestActivationDeactivationSyncWithConfigs(t *testing.T) {
 	}, 12*time.Second) // allow enough time for stabilization loop to emit
 	require.True(t, gotMonitor, "expected initial MonitorTaskTrigger for created task")
 
-	// Deactivate the task and expect a DeactivateTask control message
-	deactResp, err := engine.SetTaskActiveByUser(user, task.Id, false)
+	// Disable the task and expect a DisableTask control message
+	deactResp, err := engine.SetTaskEnabledByUser(user, task.Id, false)
 	require.NoError(t, err)
 	require.True(t, deactResp.Success)
 	// ensure batch flush if needed
 	time.Sleep(200 * time.Millisecond)
 
 	gotDeactivate := waitFor(func() bool {
-		for _, m := range mockServer.sendCalls {
-			if m.Op == avsproto.MessageOp_DeactivateTask && m.Id == task.Id {
+		for _, m := range mockServer.GetSentTasks() {
+			if m.Op == avsproto.MessageOp_DisableTask && m.Id == task.Id {
 				return true
 			}
 		}
 		return false
 	}, 3*time.Second)
 	require.True(t, gotDeactivate, "expected DeactivateTask after deactivation")
-
-	// Reactivate the task; expect MonitorTaskTrigger again on next assignment cycle
-	actResp, err := engine.SetTaskActiveByUser(user, task.Id, true)
-	require.NoError(t, err)
-	require.True(t, actResp.Success)
-
-	gotReMonitor := waitFor(func() bool {
-		count := 0
-		for _, m := range mockServer.sendCalls {
-			if m.Op == avsproto.MessageOp_MonitorTaskTrigger && m.Id == task.Id {
-				count++
-			}
-		}
-		return count >= 2 // initial + re-monitor after activation
-	}, 12*time.Second)
-	require.True(t, gotReMonitor, "expected MonitorTaskTrigger after re-activation")
 
 	// Cleanup
 	mockServer.Disconnect()

@@ -36,7 +36,7 @@ var (
 			defer db.Close()
 
 			// Check active tasks from database
-			kvs, err := db.GetByPrefix(taskengine.TaskByStatusStoragePrefix(avsproto.TaskStatus_Active))
+			kvs, err := db.GetByPrefix(taskengine.TaskByStatusStoragePrefix(avsproto.TaskStatus_Enabled))
 			if err != nil && err != badger.ErrKeyNotFound {
 				fmt.Printf("❌ Failed to query active tasks: %v\n", err)
 				os.Exit(1)

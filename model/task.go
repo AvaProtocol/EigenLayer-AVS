@@ -98,7 +98,7 @@ func GenerateTaskID() string {
 func NewTask() *Task {
 	return &Task{
 		Task: &avsproto.Task{
-			Status: avsproto.TaskStatus_Active, // Initialize with default status
+			Status: avsproto.TaskStatus_Enabled, // Initialize with default status
 		},
 	}
 }
@@ -144,7 +144,7 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 			InputVariables: body.InputVariables, // Store input variables with the task
 
 			// initial state for task
-			Status: avsproto.TaskStatus_Active,
+			Status: avsproto.TaskStatus_Enabled,
 			//Executions: []*avsproto.Execution{},
 		},
 	}
@@ -284,8 +284,8 @@ func (t *Task) SetCompleted() {
 	t.Task.CompletedAt = time.Now().UnixMilli()
 }
 
-func (t *Task) SetActive() {
-	t.Task.Status = avsproto.TaskStatus_Active
+func (t *Task) SetEnabled() {
+	t.Task.Status = avsproto.TaskStatus_Enabled
 }
 
 func (t *Task) SetFailed() {
@@ -293,8 +293,8 @@ func (t *Task) SetFailed() {
 	t.Task.CompletedAt = time.Now().UnixMilli()
 }
 
-func (t *Task) SetInactive() {
-	t.Task.Status = avsproto.TaskStatus_Inactive
+func (t *Task) SetDisabled() {
+	t.Task.Status = avsproto.TaskStatus_Disabled
 }
 
 // Check whether the task own by the given address

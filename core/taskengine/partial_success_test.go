@@ -204,7 +204,7 @@ func TestGetExecutionStatus_PartialSuccess(t *testing.T) {
 		Task: &avsproto.Task{
 			Id:     "test-task-id",
 			Owner:  user.Address.Hex(),
-			Status: avsproto.TaskStatus_Active,
+			Status: avsproto.TaskStatus_Enabled,
 			Name:   "Test Task",
 		},
 	}
@@ -292,7 +292,7 @@ func TestGetExecutionStatus_FullSuccess(t *testing.T) {
 		Task: &avsproto.Task{
 			Id:     "test-task-id",
 			Owner:  user.Address.Hex(),
-			Status: avsproto.TaskStatus_Active,
+			Status: avsproto.TaskStatus_Enabled,
 			Name:   "Test Task",
 		},
 	}
@@ -374,7 +374,7 @@ func TestGetExecutionStatus_FullFailure(t *testing.T) {
 		Task: &avsproto.Task{
 			Id:     "test-task-id",
 			Owner:  user.Address.Hex(),
-			Status: avsproto.TaskStatus_Active,
+			Status: avsproto.TaskStatus_Enabled,
 			Name:   "Test Task",
 		},
 	}

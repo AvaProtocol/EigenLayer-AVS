@@ -194,7 +194,7 @@ func TestInputVariables_DeployedTask(t *testing.T) {
 		Task: &avsproto.Task{
 			Id:             "test-task-input-vars",
 			Owner:          "", // Empty owner to skip wallet validation
-			Status:         avsproto.TaskStatus_Active,
+			Status:         avsproto.TaskStatus_Enabled,
 			Name:           "Test Input Variables",
 			ExecutionCount: 0,
 			InputVariables: inputVarsProto, // Store input variables with the task

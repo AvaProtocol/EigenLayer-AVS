@@ -14,8 +14,8 @@ type TriggerData struct {
 // ExecutionState contains information about task execution state returned to operators
 type ExecutionState struct {
 	RemainingExecutions int64  // How many executions are left for this task
-	TaskStillActive     bool   // Whether the task is still active and should be monitored
-	Status              string // Task status: "active", "exhausted", "cancelled", "expired", etc.
+	TaskStillEnabled    bool   // Whether the task is still enabled and should be monitored
+	Status              string // Task status: "enabled", "exhausted", "disabled", "expired", etc.
 	Message             string // Optional message for debugging/logging
 }
 

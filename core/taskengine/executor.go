@@ -105,7 +105,7 @@ func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
 	task := &model.Task{
 		Task: &avsproto.Task{},
 	}
-	storageKey := storageschema.TaskStorageKey(id, avsproto.TaskStatus_Active)
+	storageKey := storageschema.TaskStorageKey(id, avsproto.TaskStatus_Enabled)
 	item, err := x.db.GetKey(storageKey)
 
 	if err != nil {

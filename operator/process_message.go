@@ -45,7 +45,7 @@ func isValidTaskIDFormat(id string) bool {
 
 func (o *Operator) processMessage(resp *avspb.SyncMessagesResp) {
 	switch resp.Op {
-	case avspb.MessageOp_DeactivateTask, avspb.MessageOp_DeleteTask:
+	case avspb.MessageOp_DisableTask, avspb.MessageOp_DeleteTask:
 		// Get task ID from either TaskMetadata or message ID
 		var taskID string
 		if resp.TaskMetadata != nil {
@@ -180,7 +180,7 @@ func (o *Operator) executeImmediateBlockTrigger(taskID string) {
 			"task_id", taskID,
 			"block_number", blockNumber,
 			"remaining_executions", resp.RemainingExecutions,
-			"task_still_active", resp.TaskStillActive,
+			"task_still_enabled", resp.TaskStillEnabled,
 			"status", resp.Status)
 	} else {
 		o.logger.Error("❌ Failed to execute immediate block trigger",
@@ -251,7 +251,7 @@ func (o *Operator) executeImmediateTimeTrigger(taskID string, triggerType avspb.
 			"task_id", taskID,
 			"timestamp", timestampNanos,
 			"remaining_executions", resp.RemainingExecutions,
-			"task_still_active", resp.TaskStillActive,
+			"task_still_enabled", resp.TaskStillEnabled,
 			"status", resp.Status)
 	} else {
 		o.logger.Error("❌ Failed to execute immediate time trigger",

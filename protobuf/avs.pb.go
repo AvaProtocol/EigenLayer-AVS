@@ -435,29 +435,29 @@ func (ErrorCode) EnumDescriptor() ([]byte, []int) {
 type TaskStatus int32
 
 const (
-	TaskStatus_Active TaskStatus = 0
+	TaskStatus_Enabled TaskStatus = 0
 	// Task is completed when it reaches its max_execution count or its expiration time
 	TaskStatus_Completed TaskStatus = 1
 	TaskStatus_Failed    TaskStatus = 2
 	TaskStatus_Running   TaskStatus = 4
-	TaskStatus_Inactive  TaskStatus = 5
+	TaskStatus_Disabled  TaskStatus = 5
 )
 
 // Enum value maps for TaskStatus.
 var (
 	TaskStatus_name = map[int32]string{
-		0: "Active",
+		0: "Enabled",
 		1: "Completed",
 		2: "Failed",
 		4: "Running",
-		5: "Inactive",
+		5: "Disabled",
 	}
 	TaskStatus_value = map[string]int32{
-		"Active":    0,
+		"Enabled":   0,
 		"Completed": 1,
 		"Failed":    2,
 		"Running":   4,
-		"Inactive":  5,
+		"Disabled":  5,
 	}
 )
 
@@ -2266,7 +2266,7 @@ func (x *Task) GetStatus() TaskStatus {
 	if x != nil {
 		return x.Status
 	}
-	return TaskStatus_Active
+	return TaskStatus_Enabled
 }
 
 func (x *Task) GetTrigger() *TaskTrigger {
@@ -3252,10 +3252,10 @@ type GetWalletResp struct {
 	FactoryAddress     string                 `protobuf:"bytes,3,opt,name=factory_address,json=factoryAddress,proto3" json:"factory_address,omitempty"`
 	IsHidden           bool                   `protobuf:"varint,4,opt,name=is_hidden,json=isHidden,proto3" json:"is_hidden,omitempty"`
 	TotalTaskCount     uint64                 `protobuf:"varint,5,opt,name=total_task_count,json=totalTaskCount,proto3" json:"total_task_count,omitempty"`
-	ActiveTaskCount    uint64                 `protobuf:"varint,6,opt,name=active_task_count,json=activeTaskCount,proto3" json:"active_task_count,omitempty"`
+	EnabledTaskCount   uint64                 `protobuf:"varint,6,opt,name=enabled_task_count,json=enabledTaskCount,proto3" json:"enabled_task_count,omitempty"`
 	CompletedTaskCount uint64                 `protobuf:"varint,7,opt,name=completed_task_count,json=completedTaskCount,proto3" json:"completed_task_count,omitempty"`
 	FailedTaskCount    uint64                 `protobuf:"varint,8,opt,name=failed_task_count,json=failedTaskCount,proto3" json:"failed_task_count,omitempty"`
-	InactiveTaskCount  uint64                 `protobuf:"varint,9,opt,name=inactive_task_count,json=inactiveTaskCount,proto3" json:"inactive_task_count,omitempty"`
+	DisabledTaskCount  uint64                 `protobuf:"varint,9,opt,name=disabled_task_count,json=disabledTaskCount,proto3" json:"disabled_task_count,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -3325,9 +3325,9 @@ func (x *GetWalletResp) GetTotalTaskCount() uint64 {
 	return 0
 }
 
-func (x *GetWalletResp) GetActiveTaskCount() uint64 {
+func (x *GetWalletResp) GetEnabledTaskCount() uint64 {
 	if x != nil {
-		return x.ActiveTaskCount
+		return x.EnabledTaskCount
 	}
 	return 0
 }
@@ -3346,9 +3346,9 @@ func (x *GetWalletResp) GetFailedTaskCount() uint64 {
 	return 0
 }
 
-func (x *GetWalletResp) GetInactiveTaskCount() uint64 {
+func (x *GetWalletResp) GetDisabledTaskCount() uint64 {
 	if x != nil {
-		return x.InactiveTaskCount
+		return x.DisabledTaskCount
 	}
 	return 0
 }
@@ -4762,29 +4762,29 @@ func (x *DeleteTaskResp) GetPreviousStatus() string {
 	return ""
 }
 
-// Toggle task active state
-type SetTaskActiveReq struct {
+// Toggle task enabled state
+type SetTaskEnabledReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Active        bool                   `protobuf:"varint,2,opt,name=active,proto3" json:"active,omitempty"`
+	Enabled       bool                   `protobuf:"varint,2,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SetTaskActiveReq) Reset() {
-	*x = SetTaskActiveReq{}
+func (x *SetTaskEnabledReq) Reset() {
+	*x = SetTaskEnabledReq{}
 	mi := &file_avs_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SetTaskActiveReq) String() string {
+func (x *SetTaskEnabledReq) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SetTaskActiveReq) ProtoMessage() {}
+func (*SetTaskEnabledReq) ProtoMessage() {}
 
-func (x *SetTaskActiveReq) ProtoReflect() protoreflect.Message {
+func (x *SetTaskEnabledReq) ProtoReflect() protoreflect.Message {
 	mi := &file_avs_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4796,29 +4796,29 @@ func (x *SetTaskActiveReq) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SetTaskActiveReq.ProtoReflect.Descriptor instead.
-func (*SetTaskActiveReq) Descriptor() ([]byte, []int) {
+// Deprecated: Use SetTaskEnabledReq.ProtoReflect.Descriptor instead.
+func (*SetTaskEnabledReq) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{58}
 }
 
-func (x *SetTaskActiveReq) GetId() string {
+func (x *SetTaskEnabledReq) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *SetTaskActiveReq) GetActive() bool {
+func (x *SetTaskEnabledReq) GetEnabled() bool {
 	if x != nil {
-		return x.Active
+		return x.Enabled
 	}
 	return false
 }
 
-type SetTaskActiveResp struct {
+type SetTaskEnabledResp struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Success        bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Status         string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"` // "active" | "inactive" | "not_found" | "error"
+	Status         string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"` // "enabled" | "disabled" | "not_found" | "error"
 	Message        string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
 	Id             string                 `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
 	PreviousStatus string                 `protobuf:"bytes,5,opt,name=previous_status,json=previousStatus,proto3" json:"previous_status,omitempty"`
@@ -4827,20 +4827,20 @@ type SetTaskActiveResp struct {
 	sizeCache      protoimpl.SizeCache
 }
 
-func (x *SetTaskActiveResp) Reset() {
-	*x = SetTaskActiveResp{}
+func (x *SetTaskEnabledResp) Reset() {
+	*x = SetTaskEnabledResp{}
 	mi := &file_avs_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SetTaskActiveResp) String() string {
+func (x *SetTaskEnabledResp) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SetTaskActiveResp) ProtoMessage() {}
+func (*SetTaskEnabledResp) ProtoMessage() {}
 
-func (x *SetTaskActiveResp) ProtoReflect() protoreflect.Message {
+func (x *SetTaskEnabledResp) ProtoReflect() protoreflect.Message {
 	mi := &file_avs_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4852,47 +4852,47 @@ func (x *SetTaskActiveResp) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SetTaskActiveResp.ProtoReflect.Descriptor instead.
-func (*SetTaskActiveResp) Descriptor() ([]byte, []int) {
+// Deprecated: Use SetTaskEnabledResp.ProtoReflect.Descriptor instead.
+func (*SetTaskEnabledResp) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{59}
 }
 
-func (x *SetTaskActiveResp) GetSuccess() bool {
+func (x *SetTaskEnabledResp) GetSuccess() bool {
 	if x != nil {
 		return x.Success
 	}
 	return false
 }
 
-func (x *SetTaskActiveResp) GetStatus() string {
+func (x *SetTaskEnabledResp) GetStatus() string {
 	if x != nil {
 		return x.Status
 	}
 	return ""
 }
 
-func (x *SetTaskActiveResp) GetMessage() string {
+func (x *SetTaskEnabledResp) GetMessage() string {
 	if x != nil {
 		return x.Message
 	}
 	return ""
 }
 
-func (x *SetTaskActiveResp) GetId() string {
+func (x *SetTaskEnabledResp) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *SetTaskActiveResp) GetPreviousStatus() string {
+func (x *SetTaskEnabledResp) GetPreviousStatus() string {
 	if x != nil {
 		return x.PreviousStatus
 	}
 	return ""
 }
 
-func (x *SetTaskActiveResp) GetUpdatedAt() int64 {
+func (x *SetTaskEnabledResp) GetUpdatedAt() int64 {
 	if x != nil {
 		return x.UpdatedAt
 	}
@@ -9677,17 +9677,17 @@ const file_avs_proto_rawDesc = "" +
 	"\x06expiry\x18\x04 \x01(\x04R\x06expiry\"K\n" +
 	"\fGetWalletReq\x12\x12\n" +
 	"\x04salt\x18\x01 \x01(\tR\x04salt\x12'\n" +
-	"\x0ffactory_address\x18\x02 \x01(\tR\x0efactoryAddress\"\xe7\x02\n" +
+	"\x0ffactory_address\x18\x02 \x01(\tR\x0efactoryAddress\"\xe9\x02\n" +
 	"\rGetWalletResp\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
 	"\x04salt\x18\x02 \x01(\tR\x04salt\x12'\n" +
 	"\x0ffactory_address\x18\x03 \x01(\tR\x0efactoryAddress\x12\x1b\n" +
 	"\tis_hidden\x18\x04 \x01(\bR\bisHidden\x12(\n" +
-	"\x10total_task_count\x18\x05 \x01(\x04R\x0etotalTaskCount\x12*\n" +
-	"\x11active_task_count\x18\x06 \x01(\x04R\x0factiveTaskCount\x120\n" +
+	"\x10total_task_count\x18\x05 \x01(\x04R\x0etotalTaskCount\x12,\n" +
+	"\x12enabled_task_count\x18\x06 \x01(\x04R\x10enabledTaskCount\x120\n" +
 	"\x14completed_task_count\x18\a \x01(\x04R\x12completedTaskCount\x12*\n" +
 	"\x11failed_task_count\x18\b \x01(\x04R\x0ffailedTaskCount\x12.\n" +
-	"\x13inactive_task_count\x18\t \x01(\x04R\x11inactiveTaskCount\"h\n" +
+	"\x13disabled_task_count\x18\t \x01(\x04R\x11disabledTaskCount\"h\n" +
 	"\fSetWalletReq\x12\x12\n" +
 	"\x04salt\x18\x01 \x01(\tR\x04salt\x12'\n" +
 	"\x0ffactory_address\x18\x02 \x01(\tR\x0efactoryAddress\x12\x1b\n" +
@@ -9817,11 +9817,11 @@ const file_avs_proto_rawDesc = "" +
 	"\n" +
 	"deleted_at\x18\x04 \x01(\x03R\tdeletedAt\x12\x0e\n" +
 	"\x02id\x18\x05 \x01(\tR\x02id\x12'\n" +
-	"\x0fprevious_status\x18\x06 \x01(\tR\x0epreviousStatus\":\n" +
-	"\x10SetTaskActiveReq\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
-	"\x06active\x18\x02 \x01(\bR\x06active\"\xb7\x01\n" +
-	"\x11SetTaskActiveResp\x12\x18\n" +
+	"\x0fprevious_status\x18\x06 \x01(\tR\x0epreviousStatus\"=\n" +
+	"\x11SetTaskEnabledReq\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
+	"\aenabled\x18\x02 \x01(\bR\aenabled\"\xb8\x01\n" +
+	"\x12SetTaskEnabledResp\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12\x0e\n" +
@@ -10053,22 +10053,21 @@ const file_avs_proto_rawDesc = "" +
 	"\x16SMART_WALLET_RPC_ERROR\x10\xc0>\x12\x1b\n" +
 	"\x16SMART_WALLET_NOT_FOUND\x10\xc1>\x12\"\n" +
 	"\x1dSMART_WALLET_DEPLOYMENT_ERROR\x10\xc2>\x12\x19\n" +
-	"\x14INSUFFICIENT_BALANCE\x10\xc3>*N\n" +
+	"\x14INSUFFICIENT_BALANCE\x10\xc3>*O\n" +
 	"\n" +
-	"TaskStatus\x12\n" +
-	"\n" +
-	"\x06Active\x10\x00\x12\r\n" +
+	"TaskStatus\x12\v\n" +
+	"\aEnabled\x10\x00\x12\r\n" +
 	"\tCompleted\x10\x01\x12\n" +
 	"\n" +
 	"\x06Failed\x10\x02\x12\v\n" +
 	"\aRunning\x10\x04\x12\f\n" +
-	"\bInactive\x10\x05*\xb2\x01\n" +
+	"\bDisabled\x10\x05*\xb2\x01\n" +
 	"\x0fExecutionStatus\x12 \n" +
 	"\x1cEXECUTION_STATUS_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18EXECUTION_STATUS_PENDING\x10\x01\x12\x1c\n" +
 	"\x18EXECUTION_STATUS_SUCCESS\x10\x02\x12\x1b\n" +
 	"\x17EXECUTION_STATUS_FAILED\x10\x03\x12$\n" +
-	" EXECUTION_STATUS_PARTIAL_SUCCESS\x10\x042\xd2\x10\n" +
+	" EXECUTION_STATUS_PARTIAL_SUCCESS\x10\x042\xd5\x10\n" +
 	"\n" +
 	"Aggregator\x126\n" +
 	"\x06GetKey\x12\x15.aggregator.GetKeyReq\x1a\x13.aggregator.KeyResp\"\x00\x12]\n" +
@@ -10084,8 +10083,8 @@ const file_avs_proto_rawDesc = "" +
 	"\aGetTask\x12\x11.aggregator.IdReq\x1a\x10.aggregator.Task\"\x00\x12Q\n" +
 	"\x0eListExecutions\x12\x1d.aggregator.ListExecutionsReq\x1a\x1e.aggregator.ListExecutionsResp\"\x00\x12A\n" +
 	"\fGetExecution\x12\x18.aggregator.ExecutionReq\x1a\x15.aggregator.Execution\"\x00\x12Q\n" +
-	"\x12GetExecutionStatus\x12\x18.aggregator.ExecutionReq\x1a\x1f.aggregator.ExecutionStatusResp\"\x00\x12N\n" +
-	"\rSetTaskActive\x12\x1c.aggregator.SetTaskActiveReq\x1a\x1d.aggregator.SetTaskActiveResp\"\x00\x12=\n" +
+	"\x12GetExecutionStatus\x12\x18.aggregator.ExecutionReq\x1a\x1f.aggregator.ExecutionStatusResp\"\x00\x12Q\n" +
+	"\x0eSetTaskEnabled\x12\x1d.aggregator.SetTaskEnabledReq\x1a\x1e.aggregator.SetTaskEnabledResp\"\x00\x12=\n" +
 	"\n" +
 	"DeleteTask\x12\x11.aggregator.IdReq\x1a\x1a.aggregator.DeleteTaskResp\"\x00\x12H\n" +
 	"\vTriggerTask\x12\x1a.aggregator.TriggerTaskReq\x1a\x1b.aggregator.TriggerTaskResp\"\x00\x12S\n" +
@@ -10184,8 +10183,8 @@ var file_avs_proto_goTypes = []any{
 	(*CreateSecretResp)(nil),                              // 62: aggregator.CreateSecretResp
 	(*UpdateSecretResp)(nil),                              // 63: aggregator.UpdateSecretResp
 	(*DeleteTaskResp)(nil),                                // 64: aggregator.DeleteTaskResp
-	(*SetTaskActiveReq)(nil),                              // 65: aggregator.SetTaskActiveReq
-	(*SetTaskActiveResp)(nil),                             // 66: aggregator.SetTaskActiveResp
+	(*SetTaskEnabledReq)(nil),                             // 65: aggregator.SetTaskEnabledReq
+	(*SetTaskEnabledResp)(nil),                            // 66: aggregator.SetTaskEnabledResp
 	(*GetWorkflowCountReq)(nil),                           // 67: aggregator.GetWorkflowCountReq
 	(*GetWorkflowCountResp)(nil),                          // 68: aggregator.GetWorkflowCountResp
 	(*GetExecutionCountReq)(nil),                          // 69: aggregator.GetExecutionCountReq
@@ -10452,7 +10451,7 @@ var file_avs_proto_depIdxs = []int32{
 	40,  // 190: aggregator.Aggregator.ListExecutions:input_type -> aggregator.ListExecutionsReq
 	42,  // 191: aggregator.Aggregator.GetExecution:input_type -> aggregator.ExecutionReq
 	42,  // 192: aggregator.Aggregator.GetExecutionStatus:input_type -> aggregator.ExecutionReq
-	65,  // 193: aggregator.Aggregator.SetTaskActive:input_type -> aggregator.SetTaskActiveReq
+	65,  // 193: aggregator.Aggregator.SetTaskEnabled:input_type -> aggregator.SetTaskEnabledReq
 	10,  // 194: aggregator.Aggregator.DeleteTask:input_type -> aggregator.IdReq
 	51,  // 195: aggregator.Aggregator.TriggerTask:input_type -> aggregator.TriggerTaskReq
 	53,  // 196: aggregator.Aggregator.CreateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
@@ -10480,7 +10479,7 @@ var file_avs_proto_depIdxs = []int32{
 	41,  // 218: aggregator.Aggregator.ListExecutions:output_type -> aggregator.ListExecutionsResp
 	29,  // 219: aggregator.Aggregator.GetExecution:output_type -> aggregator.Execution
 	43,  // 220: aggregator.Aggregator.GetExecutionStatus:output_type -> aggregator.ExecutionStatusResp
-	66,  // 221: aggregator.Aggregator.SetTaskActive:output_type -> aggregator.SetTaskActiveResp
+	66,  // 221: aggregator.Aggregator.SetTaskEnabled:output_type -> aggregator.SetTaskEnabledResp
 	64,  // 222: aggregator.Aggregator.DeleteTask:output_type -> aggregator.DeleteTaskResp
 	52,  // 223: aggregator.Aggregator.TriggerTask:output_type -> aggregator.TriggerTaskResp
 	62,  // 224: aggregator.Aggregator.CreateSecret:output_type -> aggregator.CreateSecretResp
