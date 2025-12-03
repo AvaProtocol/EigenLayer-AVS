@@ -32,21 +32,13 @@ func (svc *StatService) GetTaskCount(smartWalletAddress *model.SmartWallet) (*mo
 		stat.Total += 1
 		switch avsproto.TaskStatus(taskStatus) {
 		case avsproto.TaskStatus_Enabled:
-<<<<<<< HEAD
 			stat.Enabled += 1
-=======
-			stat.Active += 1
->>>>>>> 2cb4f82 (fix: migrate to enabled/disabled; harden engine concurrency; update tests/docs)
 		case avsproto.TaskStatus_Completed:
 			stat.Completed += 1
 		case avsproto.TaskStatus_Failed:
 			stat.Failed += 1
 		case avsproto.TaskStatus_Disabled:
-<<<<<<< HEAD
 			stat.Disabled += 1
-=======
-			stat.Inactive += 1
->>>>>>> 2cb4f82 (fix: migrate to enabled/disabled; harden engine concurrency; update tests/docs)
 		}
 	}
 
