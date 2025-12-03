@@ -567,19 +567,19 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 	}
 }
 
-func (r *RpcServer) SetTaskActive(ctx context.Context, req *avsproto.SetTaskActiveReq) (*avsproto.SetTaskActiveResp, error) {
+func (r *RpcServer) SetTaskEnabled(ctx context.Context, req *avsproto.SetTaskEnabledReq) (*avsproto.SetTaskEnabledResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
-	r.config.Logger.Info("process set task active",
+	r.config.Logger.Info("process set task enabled",
 		"user", user.Address.String(),
 		"task_id", req.Id,
-		"active", req.Active,
+		"enabled", req.Enabled,
 	)
 
-	result, err := r.engine.SetTaskActiveByUser(user, string(req.Id), req.Active)
+	result, err := r.engine.SetTaskEnabledByUser(user, string(req.Id), req.Enabled)
 
 	if err != nil {
 		return nil, err
@@ -999,28 +999,28 @@ func (r *RpcServer) ReportEventOverload(ctx context.Context, alert *avsproto.Eve
 		"query_index", alert.QueryIndex,
 		"details", alert.Details)
 
-	// Deactivate the overloaded task immediately
-	deactivated, err := r.engine.DeactivateTask(alert.TaskId)
+	// Disable the overloaded task immediately
+	deactivated, err := r.engine.DisableTask(alert.TaskId)
 	if err != nil {
-		r.config.Logger.Error("❌ Failed to deactivate overloaded task",
+		r.config.Logger.Error("❌ Failed to disable overloaded task",
 			"task_id", alert.TaskId,
 			"error", err)
 		return &avsproto.EventOverloadResponse{
 			TaskCancelled: false,
-			Message:       fmt.Sprintf("Failed to deactivate task: %v", err),
+			Message:       fmt.Sprintf("Failed to disable task: %v", err),
 			Timestamp:     uint64(time.Now().UnixMilli()),
 		}, nil
 	}
 
-	responseMessage := "Task deactivated due to event overload"
+	responseMessage := "Task disabled due to event overload"
 	if !deactivated {
-		responseMessage = "Task was already inactive or not found"
+		responseMessage = "Task was already disabled or not found"
 	}
 
 	// Capture a message in Sentry for visibility
 	sentry.CaptureMessage(fmt.Sprintf("Event overload detected for task %s: %s", alert.TaskId, alert.Details))
 
-	r.config.Logger.Info("🛑 Task deactivated due to event overload",
+	r.config.Logger.Info("🛑 Task disabled due to event overload",
 		"task_id", alert.TaskId,
 		"deactivated", deactivated)
 
@@ -1117,12 +1117,12 @@ func (r *RpcServer) NotifyTriggers(ctx context.Context, payload *avsproto.Notify
 		"task_id", payload.TaskId,
 		"status", executionState.Status,
 		"remaining_executions", executionState.RemainingExecutions,
-		"task_still_active", executionState.TaskStillActive)
+		"task_still_enabled", executionState.TaskStillEnabled)
 
 	return &avsproto.NotifyTriggersResp{
 		UpdatedAt:           timestamppb.Now(),
 		RemainingExecutions: executionState.RemainingExecutions,
-		TaskStillActive:     executionState.TaskStillActive,
+		TaskStillEnabled:    executionState.TaskStillEnabled,
 		Status:              executionState.Status,
 		Message:             executionState.Message,
 	}, nil

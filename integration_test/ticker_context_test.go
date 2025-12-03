@@ -5,6 +5,7 @@ package integration_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 // SimpleMockServer simulates an operator connection for testing ticker context
 type SimpleMockServer struct {
 	grpc.ServerStream
+	mu           sync.Mutex
 	sendCalls    []*avsproto.SyncMessagesResp
 	disconnected bool
 	ctx          context.Context
@@ -39,6 +41,8 @@ func NewSimpleMockServer() *SimpleMockServer {
 }
 
 func (m *SimpleMockServer) Send(resp *avsproto.SyncMessagesResp) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.disconnected {
 		return status.Errorf(codes.Unavailable, "transport is closing")
 	}
@@ -51,8 +55,19 @@ func (m *SimpleMockServer) Context() context.Context {
 }
 
 func (m *SimpleMockServer) Disconnect() {
+	m.mu.Lock()
 	m.disconnected = true
+	m.mu.Unlock()
 	m.cancelFunc()
+}
+
+// GetSentTasks returns a COPY of sent calls for safe concurrent reads
+func (m *SimpleMockServer) GetSentTasks() []*avsproto.SyncMessagesResp {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*avsproto.SyncMessagesResp, len(m.sendCalls))
+	copy(out, m.sendCalls)
+	return out
 }
 
 // TestTickerContextRaceCondition tests the specific ticker context race condition fix

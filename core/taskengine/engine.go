@@ -212,6 +212,8 @@ type Engine struct {
 	// operator stream management for real-time notifications
 	operatorStreams map[string]avsproto.Node_SyncMessagesServer
 	streamsMutex    *sync.RWMutex
+	// lifecycle tracking for active operator streams
+	streamsWG sync.WaitGroup
 
 	// Round-robin task assignment
 	taskAssignments      map[string]string // taskID -> operatorAddress mapping
@@ -341,7 +343,24 @@ func (n *Engine) Stop() {
 			n.logger.Error("failed to release sequence", "error", err)
 		}
 	}
+	// mark shutdown and collect cancels without holding locks during cancel
+	var cancels []context.CancelFunc
+	n.lock.Lock()
 	n.shutdown = true
+	for _, state := range n.trackSyncedTasks {
+		if state != nil && state.TickerCancel != nil {
+			cancels = append(cancels, state.TickerCancel)
+		}
+	}
+	n.lock.Unlock()
+
+	// cancel all operator tickers to stop their stream loops
+	for _, cancel := range cancels {
+		cancel()
+	}
+
+	// wait for all StreamCheckToOperator goroutines to exit
+	n.streamsWG.Wait()
 
 	// Send any remaining notifications before shutting down
 	if n.notificationTicker != nil {
@@ -365,8 +384,8 @@ func (n *Engine) MustStart() error {
 		panic(err)
 	}
 
-	// Upon booting we will get all the active tasks to sync to operator
-	kvs, e := n.db.GetByPrefix(TaskByStatusStoragePrefix(avsproto.TaskStatus_Active))
+	// Upon booting we will get all the enabled tasks to sync to operator
+	kvs, e := n.db.GetByPrefix(TaskByStatusStoragePrefix(avsproto.TaskStatus_Enabled))
 	if e != nil {
 		panic(e)
 	}
@@ -704,10 +723,10 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		n.logger.Warn("Failed to get task count for GetWallet response", "walletAddress", dbModelWallet.Address.Hex(), "error", statErr)
 	}
 	resp.TotalTaskCount = stat.Total
-	resp.ActiveTaskCount = stat.Active
+	resp.EnabledTaskCount = stat.Enabled
 	resp.CompletedTaskCount = stat.Completed
 	resp.FailedTaskCount = stat.Failed
-	resp.InactiveTaskCount = stat.Inactive
+	resp.DisabledTaskCount = stat.Disabled
 
 	return resp, nil
 }
@@ -782,10 +801,10 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 		n.logger.Warn("Failed to get task count for SetWallet response", "walletAddress", updatedModelWallet.Address.Hex(), "error", statErr)
 	}
 	resp.TotalTaskCount = stat.Total
-	resp.ActiveTaskCount = stat.Active
+	resp.EnabledTaskCount = stat.Enabled
 	resp.CompletedTaskCount = stat.Completed
 	resp.FailedTaskCount = stat.Failed
-	resp.InactiveTaskCount = stat.Inactive
+	resp.DisabledTaskCount = stat.Disabled
 
 	return resp, nil
 }
@@ -884,7 +903,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 	}
 
 	updates[string(TaskStorageKey(task.Id, task.Status))] = taskJSON
-	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Active))
+	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Enabled))
 
 	if err = n.db.BatchWrite(updates); err != nil {
 		return nil, err
@@ -912,6 +931,9 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 }
 
 func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv avsproto.Node_SyncMessagesServer) error {
+	// track active stream lifecycle for graceful shutdown
+	n.streamsWG.Add(1)
+	defer n.streamsWG.Done()
 	address := payload.Address
 	connectionStartTime := time.Now()
 	streamID := fmt.Sprintf("%s-%d", address[len(address)-6:], connectionStartTime.UnixNano()%10000)
@@ -930,8 +952,9 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 	// Create context for this connection's ticker
 	tickerCtx, tickerCancel := context.WithCancel(context.Background())
 
+	// Access and modify trackSyncedTasks under lock to avoid concurrent map access
+	n.lock.Lock()
 	if _, ok := n.trackSyncedTasks[address]; !ok {
-		n.lock.Lock()
 		n.trackSyncedTasks[address] = &operatorState{
 			MonotonicClock: payload.MonotonicClock,
 			TaskID:         map[string]bool{},
@@ -940,7 +963,6 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			TickerCancel:   tickerCancel,
 		}
 		n.lock.Unlock()
-
 		n.logger.Info("🔗 New operator connected with capabilities",
 			"operator", address,
 			"event_monitoring", payload.Capabilities.GetEventMonitoring(),
@@ -948,8 +970,6 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			"time_monitoring", payload.Capabilities.GetTimeMonitoring())
 	} else {
 		// The operator has reconnected, cancel any existing ticker and reset state
-		n.lock.Lock()
-
 		// Cancel old ticker if it exists
 		if n.trackSyncedTasks[address].TickerCancel != nil {
 			n.logger.Info("🔄 Canceling old ticker for reconnected operator",
@@ -1064,7 +1084,10 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 				"connection_start_time", connectionStartTime.Format("15:04:05.000"),
 				"connection_age", connectionAge.String())
 
-			if n.shutdown {
+			n.lock.Lock()
+			isShutdown := n.shutdown
+			n.lock.Unlock()
+			if isShutdown {
 				return nil
 			}
 
@@ -1144,8 +1167,20 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			}
 			n.lock.Unlock()
 
+			// snapshot currently tracked task IDs for this operator under lock
+			n.lock.Lock()
+			tracked := make(map[string]bool)
+			if state, exists := n.trackSyncedTasks[address]; exists && state != nil {
+				for id, present := range state.TaskID {
+					if present {
+						tracked[id] = true
+					}
+				}
+			}
+			n.lock.Unlock()
+
 			for _, task := range snapshot {
-				if _, ok := n.trackSyncedTasks[address].TaskID[task.Id]; ok {
+				if _, ok := tracked[task.Id]; ok {
 					continue
 				}
 
@@ -1343,23 +1378,29 @@ func (n *Engine) notifyOperatorsTaskOperation(taskID string, operation avsproto.
 		return
 	}
 
-	n.notificationMutex.Lock()
-	defer n.notificationMutex.Unlock()
-
-	// Find operators that were tracking this task
+	// Take a snapshot of operators tracking this task under lock
+	targetOperators := make([]string, 0)
+	n.lock.Lock()
 	for operatorAddr, operatorState := range n.trackSyncedTasks {
 		if operatorState != nil {
 			if _, wasTracked := operatorState.TaskID[taskID]; wasTracked {
-				// Add to pending notifications for this operator
-				notification := PendingNotification{
-					TaskID:    taskID,
-					Operation: operation,
-					Timestamp: time.Now(),
-				}
-				n.pendingNotifications[operatorAddr] = append(n.pendingNotifications[operatorAddr], notification)
+				targetOperators = append(targetOperators, operatorAddr)
 			}
 		}
 	}
+	n.lock.Unlock()
+
+	// Queue notifications without holding the engine lock
+	n.notificationMutex.Lock()
+	for _, operatorAddr := range targetOperators {
+		notification := PendingNotification{
+			TaskID:    taskID,
+			Operation: operation,
+			Timestamp: time.Now(),
+		}
+		n.pendingNotifications[operatorAddr] = append(n.pendingNotifications[operatorAddr], notification)
+	}
+	n.notificationMutex.Unlock()
 
 	n.logger.Debug("📢 Queued notification for batching", "task_id", taskID, "operation", operation.String())
 }
@@ -1373,7 +1414,10 @@ func (n *Engine) processBatchedNotifications() {
 		case <-n.notificationTicker.C:
 			n.sendBatchedNotifications()
 		case <-time.After(1 * time.Minute): // Safety check for shutdown
-			if n.shutdown {
+			n.lock.Lock()
+			shuttingDown := n.shutdown
+			n.lock.Unlock()
+			if shuttingDown {
 				n.logger.Info("🔄 Batch notification processor shutting down")
 				return
 			}
@@ -1466,12 +1510,14 @@ func (n *Engine) sendBatchedNotifications() {
 								operatorOperations[notification.Operation.String()],
 								notification.TaskID)
 
-							// Remove the task from the operator's tracking state for delete/deactivate operations
-							if notification.Operation == avsproto.MessageOp_DeactivateTask ||
+							// Remove the task from the operator's tracking state for delete/disable operations
+							if notification.Operation == avsproto.MessageOp_DisableTask ||
 								notification.Operation == avsproto.MessageOp_DeleteTask {
-								if state, exists := n.trackSyncedTasks[addr]; exists {
+								n.lock.Lock()
+								if state, exists := n.trackSyncedTasks[addr]; exists && state != nil {
 									delete(state.TaskID, notification.TaskID)
 								}
+								n.lock.Unlock()
 							}
 						}
 					case <-time.After(500 * time.Millisecond):
@@ -1564,7 +1610,7 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 
 			return &ExecutionState{
 				RemainingExecutions: 0,
-				TaskStillActive:     false,
+				TaskStillEnabled:    false,
 				Status:              "not_found",
 				Message:             "Task no longer exists - operator should stop monitoring",
 			}, nil // Return nil error to avoid spam
@@ -1612,7 +1658,7 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 
 		return &ExecutionState{
 			RemainingExecutions: remainingExecutions,
-			TaskStillActive:     false,
+			TaskStillEnabled:    false,
 			Status:              status,
 			Message:             message,
 		}, nil
@@ -1716,7 +1762,7 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 		n.logger.Error("error serialize trigger to json", err)
 		return &ExecutionState{
 			RemainingExecutions: 0,
-			TaskStillActive:     false,
+			TaskStillEnabled:    false,
 			Status:              "error",
 			Message:             "Failed to process trigger",
 		}, err
@@ -1726,7 +1772,7 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 		n.logger.Error("failed to enqueue task", "error", err, "task_id", payload.TaskId)
 		return &ExecutionState{
 			RemainingExecutions: 0,
-			TaskStillActive:     false,
+			TaskStillEnabled:    false,
 			Status:              "error",
 			Message:             "Failed to queue execution",
 		}, err
@@ -1749,8 +1795,8 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 
 	return &ExecutionState{
 		RemainingExecutions: remainingExecutions,
-		TaskStillActive:     true,
-		Status:              "active",
+		TaskStillEnabled:    true,
+		Status:              "enabled",
 		Message:             "Trigger processed successfully",
 	}, nil
 }
@@ -2251,7 +2297,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 			Trigger: trigger,
 			Nodes:   nodes,
 			Edges:   edges,
-			Status:  avsproto.TaskStatus_Active, // Set as active for simulation
+			Status:  avsproto.TaskStatus_Enabled, // Set as enabled for simulation
 		},
 	}
 
@@ -3032,10 +3078,10 @@ func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (*avsproto.De
 	}, nil
 }
 
-func (n *Engine) SetTaskActiveByUser(user *model.User, taskID string, active bool) (*avsproto.SetTaskActiveResp, error) {
+func (n *Engine) SetTaskEnabledByUser(user *model.User, taskID string, enabled bool) (*avsproto.SetTaskEnabledResp, error) {
 	task, err := n.GetTask(user, taskID)
 	if err != nil {
-		return &avsproto.SetTaskActiveResp{
+		return &avsproto.SetTaskEnabledResp{
 			Success: false,
 			Status:  "not_found",
 			Message: "Task not found",
@@ -3047,7 +3093,7 @@ func (n *Engine) SetTaskActiveByUser(user *model.User, taskID string, active boo
 
 	// Terminal states cannot be toggled
 	if oldStatus == avsproto.TaskStatus_Completed || oldStatus == avsproto.TaskStatus_Failed {
-		return &avsproto.SetTaskActiveResp{
+		return &avsproto.SetTaskEnabledResp{
 			Success:        false,
 			Status:         "error",
 			Message:        fmt.Sprintf("Cannot toggle task from terminal status: %s", getTaskStatusString(oldStatus)),
@@ -3058,41 +3104,41 @@ func (n *Engine) SetTaskActiveByUser(user *model.User, taskID string, active boo
 
 	// Running guard: do not alter status; treat active=true as idempotent and active=false as disallowed
 	if oldStatus == avsproto.TaskStatus_Running {
-		if active {
-			return &avsproto.SetTaskActiveResp{
+		if enabled {
+			return &avsproto.SetTaskEnabledResp{
 				Success:        true,
-				Status:         "active",
+				Status:         "enabled",
 				Message:        "Task is already running",
 				Id:             taskID,
 				PreviousStatus: getTaskStatusString(oldStatus),
 				UpdatedAt:      time.Now().UnixMilli(),
 			}, nil
 		}
-		return &avsproto.SetTaskActiveResp{
+		return &avsproto.SetTaskEnabledResp{
 			Success:        false,
 			Status:         "error",
-			Message:        "Cannot deactivate a running task",
+			Message:        "Cannot disable a running task",
 			Id:             taskID,
 			PreviousStatus: getTaskStatusString(oldStatus),
 		}, nil
 	}
 
 	// Idempotent responses
-	if active && oldStatus == avsproto.TaskStatus_Active {
-		return &avsproto.SetTaskActiveResp{
+	if enabled && oldStatus == avsproto.TaskStatus_Enabled {
+		return &avsproto.SetTaskEnabledResp{
 			Success:        true,
-			Status:         "active",
-			Message:        "Task is already active",
+			Status:         "enabled",
+			Message:        "Task is already enabled",
 			Id:             taskID,
 			PreviousStatus: getTaskStatusString(oldStatus),
 			UpdatedAt:      time.Now().UnixMilli(),
 		}, nil
 	}
-	if !active && oldStatus == avsproto.TaskStatus_Inactive {
-		return &avsproto.SetTaskActiveResp{
+	if !enabled && oldStatus == avsproto.TaskStatus_Disabled {
+		return &avsproto.SetTaskEnabledResp{
 			Success:        true,
-			Status:         "inactive",
-			Message:        "Task is already inactive",
+			Status:         "disabled",
+			Message:        "Task is already disabled",
 			Id:             taskID,
 			PreviousStatus: getTaskStatusString(oldStatus),
 			UpdatedAt:      time.Now().UnixMilli(),
@@ -3101,16 +3147,16 @@ func (n *Engine) SetTaskActiveByUser(user *model.User, taskID string, active boo
 
 	updates := map[string][]byte{}
 
-	if active {
-		task.SetActive()
+	if enabled {
+		task.SetEnabled()
 	} else {
-		task.SetInactive()
+		task.SetDisabled()
 	}
 
 	// Serialize and persist
 	taskJSON, err := task.ToJSON()
 	if err != nil {
-		return &avsproto.SetTaskActiveResp{
+		return &avsproto.SetTaskEnabledResp{
 			Success:        false,
 			Status:         "error",
 			Message:        fmt.Sprintf("Failed to serialize task: %v", err),
@@ -3122,7 +3168,7 @@ func (n *Engine) SetTaskActiveByUser(user *model.User, taskID string, active boo
 	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 	if err = n.db.BatchWrite(updates); err != nil {
-		return &avsproto.SetTaskActiveResp{
+		return &avsproto.SetTaskEnabledResp{
 			Success:        false,
 			Status:         "error",
 			Message:        fmt.Sprintf("Failed to update task status: %v", err),
@@ -3139,7 +3185,7 @@ func (n *Engine) SetTaskActiveByUser(user *model.User, taskID string, active boo
 	}
 
 	// Update in-memory tracking
-	if active {
+	if enabled {
 		n.lock.Lock()
 		n.tasks[task.Id] = task
 		n.lock.Unlock()
@@ -3148,17 +3194,17 @@ func (n *Engine) SetTaskActiveByUser(user *model.User, taskID string, active boo
 		delete(n.tasks, task.Id)
 		n.lock.Unlock()
 		// Notify operators to remove checks immediately
-		n.notifyOperatorsTaskOperation(taskID, avsproto.MessageOp_DeactivateTask)
+		n.notifyOperatorsTaskOperation(taskID, avsproto.MessageOp_DisableTask)
 	}
 
-	statusStr := "inactive"
-	messageStr := "Task deactivated successfully"
-	if active {
-		statusStr = "active"
-		messageStr = "Task activated successfully"
+	statusStr := "disabled"
+	messageStr := "Task disabled successfully"
+	if enabled {
+		statusStr = "enabled"
+		messageStr = "Task enabled successfully"
 	}
 
-	return &avsproto.SetTaskActiveResp{
+	return &avsproto.SetTaskEnabledResp{
 		Success:        true,
 		Status:         statusStr,
 		Message:        messageStr,
@@ -3168,29 +3214,29 @@ func (n *Engine) SetTaskActiveByUser(user *model.User, taskID string, active boo
 	}, nil
 }
 
-// DeactivateTask turns off a task without user authentication (for internal use like overload alerts)
-func (n *Engine) DeactivateTask(taskID string) (bool, error) {
+// DisableTask turns off a task without user authentication (for internal use like overload alerts)
+func (n *Engine) DisableTask(taskID string) (bool, error) {
 	n.lock.Lock()
 	task, exists := n.tasks[taskID]
 	n.lock.Unlock()
 
 	if !exists {
-		n.logger.Warn("Task not found for deactivation", "task_id", taskID)
+		n.logger.Warn("Task not found for disabling", "task_id", taskID)
 		return false, nil
 	}
 
-	if task.Status != avsproto.TaskStatus_Active {
-		n.logger.Info("Task is not active, cannot deactivate", "task_id", taskID, "status", task.Status)
+	if task.Status != avsproto.TaskStatus_Enabled {
+		n.logger.Info("Task is not enabled, cannot disable", "task_id", taskID, "status", task.Status)
 		return false, nil
 	}
 
 	updates := map[string][]byte{}
 	oldStatus := task.Status
-	task.SetInactive()
+	task.SetDisabled()
 
 	taskJSON, err := task.ToJSON()
 	if err != nil {
-		return false, fmt.Errorf("failed to serialize task during deactivation: %w", err)
+		return false, fmt.Errorf("failed to serialize task during disabling: %w", err)
 	}
 
 	updates[string(TaskStorageKey(task.Id, task.Status))] = taskJSON
@@ -3212,8 +3258,8 @@ func (n *Engine) DeactivateTask(taskID string) (bool, error) {
 		return false, err
 	}
 
-	n.notifyOperatorsTaskOperation(taskID, avsproto.MessageOp_DeactivateTask)
-	n.logger.Info("Task deactivated due to system alert", "task_id", taskID)
+	n.notifyOperatorsTaskOperation(taskID, avsproto.MessageOp_DisableTask)
+	n.logger.Info("Task disabled due to system alert", "task_id", taskID)
 
 	return true, nil
 }

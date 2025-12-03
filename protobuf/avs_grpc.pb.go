@@ -32,7 +32,7 @@ const (
 	Aggregator_ListExecutions_FullMethodName     = "/aggregator.Aggregator/ListExecutions"
 	Aggregator_GetExecution_FullMethodName       = "/aggregator.Aggregator/GetExecution"
 	Aggregator_GetExecutionStatus_FullMethodName = "/aggregator.Aggregator/GetExecutionStatus"
-	Aggregator_SetTaskActive_FullMethodName      = "/aggregator.Aggregator/SetTaskActive"
+	Aggregator_SetTaskEnabled_FullMethodName     = "/aggregator.Aggregator/SetTaskEnabled"
 	Aggregator_DeleteTask_FullMethodName         = "/aggregator.Aggregator/DeleteTask"
 	Aggregator_TriggerTask_FullMethodName        = "/aggregator.Aggregator/TriggerTask"
 	Aggregator_CreateSecret_FullMethodName       = "/aggregator.Aggregator/CreateSecret"
@@ -71,7 +71,7 @@ type AggregatorClient interface {
 	ListExecutions(ctx context.Context, in *ListExecutionsReq, opts ...grpc.CallOption) (*ListExecutionsResp, error)
 	GetExecution(ctx context.Context, in *ExecutionReq, opts ...grpc.CallOption) (*Execution, error)
 	GetExecutionStatus(ctx context.Context, in *ExecutionReq, opts ...grpc.CallOption) (*ExecutionStatusResp, error)
-	SetTaskActive(ctx context.Context, in *SetTaskActiveReq, opts ...grpc.CallOption) (*SetTaskActiveResp, error)
+	SetTaskEnabled(ctx context.Context, in *SetTaskEnabledReq, opts ...grpc.CallOption) (*SetTaskEnabledResp, error)
 	DeleteTask(ctx context.Context, in *IdReq, opts ...grpc.CallOption) (*DeleteTaskResp, error)
 	TriggerTask(ctx context.Context, in *TriggerTaskReq, opts ...grpc.CallOption) (*TriggerTaskResp, error)
 	// CreateSecret allow you to define a secret to be used in your tasks. The secret can be used with a special syntax of ${{secrets.name }}.
@@ -253,10 +253,10 @@ func (c *aggregatorClient) GetExecutionStatus(ctx context.Context, in *Execution
 	return out, nil
 }
 
-func (c *aggregatorClient) SetTaskActive(ctx context.Context, in *SetTaskActiveReq, opts ...grpc.CallOption) (*SetTaskActiveResp, error) {
+func (c *aggregatorClient) SetTaskEnabled(ctx context.Context, in *SetTaskEnabledReq, opts ...grpc.CallOption) (*SetTaskEnabledResp, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SetTaskActiveResp)
-	err := c.cc.Invoke(ctx, Aggregator_SetTaskActive_FullMethodName, in, out, cOpts...)
+	out := new(SetTaskEnabledResp)
+	err := c.cc.Invoke(ctx, Aggregator_SetTaskEnabled_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +425,7 @@ type AggregatorServer interface {
 	ListExecutions(context.Context, *ListExecutionsReq) (*ListExecutionsResp, error)
 	GetExecution(context.Context, *ExecutionReq) (*Execution, error)
 	GetExecutionStatus(context.Context, *ExecutionReq) (*ExecutionStatusResp, error)
-	SetTaskActive(context.Context, *SetTaskActiveReq) (*SetTaskActiveResp, error)
+	SetTaskEnabled(context.Context, *SetTaskEnabledReq) (*SetTaskEnabledResp, error)
 	DeleteTask(context.Context, *IdReq) (*DeleteTaskResp, error)
 	TriggerTask(context.Context, *TriggerTaskReq) (*TriggerTaskResp, error)
 	// CreateSecret allow you to define a secret to be used in your tasks. The secret can be used with a special syntax of ${{secrets.name }}.
@@ -516,8 +516,8 @@ func (UnimplementedAggregatorServer) GetExecution(context.Context, *ExecutionReq
 func (UnimplementedAggregatorServer) GetExecutionStatus(context.Context, *ExecutionReq) (*ExecutionStatusResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetExecutionStatus not implemented")
 }
-func (UnimplementedAggregatorServer) SetTaskActive(context.Context, *SetTaskActiveReq) (*SetTaskActiveResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SetTaskActive not implemented")
+func (UnimplementedAggregatorServer) SetTaskEnabled(context.Context, *SetTaskEnabledReq) (*SetTaskEnabledResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetTaskEnabled not implemented")
 }
 func (UnimplementedAggregatorServer) DeleteTask(context.Context, *IdReq) (*DeleteTaskResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteTask not implemented")
@@ -816,20 +816,20 @@ func _Aggregator_GetExecutionStatus_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Aggregator_SetTaskActive_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SetTaskActiveReq)
+func _Aggregator_SetTaskEnabled_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetTaskEnabledReq)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AggregatorServer).SetTaskActive(ctx, in)
+		return srv.(AggregatorServer).SetTaskEnabled(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Aggregator_SetTaskActive_FullMethodName,
+		FullMethod: Aggregator_SetTaskEnabled_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AggregatorServer).SetTaskActive(ctx, req.(*SetTaskActiveReq))
+		return srv.(AggregatorServer).SetTaskEnabled(ctx, req.(*SetTaskEnabledReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1146,8 +1146,8 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Aggregator_GetExecutionStatus_Handler,
 		},
 		{
-			MethodName: "SetTaskActive",
-			Handler:    _Aggregator_SetTaskActive_Handler,
+			MethodName: "SetTaskEnabled",
+			Handler:    _Aggregator_SetTaskEnabled_Handler,
 		},
 		{
 			MethodName: "DeleteTask",

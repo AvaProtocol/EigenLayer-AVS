@@ -52,8 +52,8 @@ func (w *SmartWallet) FromStorageData(body []byte) error {
 
 type SmartWalletTaskStat struct {
 	Total     uint64
-	Active    uint64
+	Enabled   uint64
 	Completed uint64
 	Failed    uint64
-	Inactive  uint64
+	Disabled  uint64
 }
