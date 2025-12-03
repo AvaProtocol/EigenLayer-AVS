@@ -105,7 +105,7 @@ func TestExecutionCountPersistence(t *testing.T) {
 				StartAt:        time.Now().Add(-time.Hour).UnixMilli(),
 				MaxExecution:   5,
 				ExecutionCount: 0,
-				Status:         avsproto.TaskStatus_Active,
+				Status:         avsproto.TaskStatus_Enabled,
 			},
 		}
 
@@ -133,7 +133,7 @@ func TestExecutionCountPersistence(t *testing.T) {
 				StartAt:        time.Now().Add(-time.Hour).UnixMilli(),
 				MaxExecution:   5,
 				ExecutionCount: 0,
-				Status:         avsproto.TaskStatus_Active,
+				Status:         avsproto.TaskStatus_Enabled,
 			},
 		}
 
@@ -157,7 +157,7 @@ func TestExecutionCountPersistence(t *testing.T) {
 				StartAt:        time.Now().Add(-time.Hour).UnixMilli(),
 				MaxExecution:   2,
 				ExecutionCount: 1,
-				Status:         avsproto.TaskStatus_Active,
+				Status:         avsproto.TaskStatus_Enabled,
 			},
 		}
 
@@ -186,13 +186,13 @@ func TestEnsureInitialized(t *testing.T) {
 				Id:                 "test-task-id",
 				Owner:              "0x1234567890123456789012345678901234567890",
 				SmartWalletAddress: "0x0987654321098765432109876543210987654321",
-				Status:             avsproto.TaskStatus_Active, // Valid status
+				Status:             avsproto.TaskStatus_Enabled, // Valid status
 			},
 		}
 
 		err := task.EnsureInitialized()
 		assert.NoError(t, err, "EnsureInitialized should not error")
-		assert.Equal(t, avsproto.TaskStatus_Active, task.Status, "Status should remain Active")
+		assert.Equal(t, avsproto.TaskStatus_Enabled, task.Status, "Status should remain Enabled")
 	})
 
 	t.Run("should preserve existing valid Status", func(t *testing.T) {
@@ -215,7 +215,7 @@ func TestEnsureInitialized(t *testing.T) {
 			Task: &avsproto.Task{
 				Id:     "", // Missing ID - this is critical for storage and logging
 				Owner:  "0x1234567890123456789012345678901234567890",
-				Status: avsproto.TaskStatus_Active,
+				Status: avsproto.TaskStatus_Enabled,
 			},
 		}
 
@@ -243,7 +243,7 @@ func TestFromStorageDataWithValidation(t *testing.T) {
 				Id:                 "test-task-id",
 				Owner:              "0x1234567890123456789012345678901234567890",
 				SmartWalletAddress: "0x0987654321098765432109876543210987654321",
-				Status:             avsproto.TaskStatus_Active,
+				Status:             avsproto.TaskStatus_Enabled,
 				StartAt:            time.Now().UnixMilli(),
 				MaxExecution:       1,
 			},
@@ -258,7 +258,7 @@ func TestFromStorageDataWithValidation(t *testing.T) {
 		loadedTask := NewTask()
 		err = loadedTask.FromStorageData(jsonData)
 		assert.NoError(t, err, "FromStorageData should not error")
-		assert.Equal(t, avsproto.TaskStatus_Active, loadedTask.Status, "Status should be properly initialized")
+		assert.Equal(t, avsproto.TaskStatus_Enabled, loadedTask.Status, "Status should be properly initialized")
 		assert.Equal(t, originalTask.Id, loadedTask.Id, "ID should be preserved")
 		assert.Equal(t, originalTask.Owner, loadedTask.Owner, "Owner should be preserved")
 	})

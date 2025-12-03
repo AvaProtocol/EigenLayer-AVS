@@ -216,11 +216,11 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				o.logger.Debug("Successfully notify aggregator for task hit",
 					"taskid", triggerItem.TaskID,
 					"remaining_executions", resp.RemainingExecutions,
-					"task_still_active", resp.TaskStillActive,
+					"task_still_enabled", resp.TaskStillEnabled,
 					"status", resp.Status)
 
 				// Check if task should stop being monitored
-				if !resp.TaskStillActive || resp.RemainingExecutions == 0 {
+				if !resp.TaskStillEnabled || resp.RemainingExecutions == 0 {
 					o.logger.Info("🛑 Task exhausted, requesting stop monitoring",
 						"task_id", triggerItem.TaskID,
 						"remaining_executions", resp.RemainingExecutions,
@@ -335,11 +335,11 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				o.logger.Debug("Successfully notify aggregator for task hit",
 					"taskid", triggerItem.TaskID,
 					"remaining_executions", resp.RemainingExecutions,
-					"task_still_active", resp.TaskStillActive,
+					"task_still_enabled", resp.TaskStillEnabled,
 					"status", resp.Status)
 
 				// Check if task should stop being monitored
-				if !resp.TaskStillActive || resp.RemainingExecutions == 0 {
+				if !resp.TaskStillEnabled || resp.RemainingExecutions == 0 {
 					o.logger.Info("🛑 Task exhausted, requesting stop monitoring",
 						"task_id", triggerItem.TaskID,
 						"remaining_executions", resp.RemainingExecutions,
@@ -441,11 +441,11 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				o.logger.Debug("Successfully notify aggregator for task hit",
 					"taskid", triggerItem.TaskID,
 					"remaining_executions", resp.RemainingExecutions,
-					"task_still_active", resp.TaskStillActive,
+					"task_still_enabled", resp.TaskStillEnabled,
 					"status", resp.Status)
 
 				// Check if task should stop being monitored
-				if !resp.TaskStillActive || resp.RemainingExecutions == 0 {
+				if !resp.TaskStillEnabled || resp.RemainingExecutions == 0 {
 					o.logger.Info("🛑 Task exhausted, requesting stop monitoring",
 						"task_id", triggerItem.TaskID,
 						"remaining_executions", resp.RemainingExecutions,
@@ -716,7 +716,7 @@ func (o *Operator) StreamMessages() {
 			}
 
 			switch resp.Op {
-			case avspb.MessageOp_DeactivateTask, avspb.MessageOp_DeleteTask:
+			case avspb.MessageOp_DisableTask, avspb.MessageOp_DeleteTask:
 				o.processMessage(resp)
 			case avspb.MessageOp_MonitorTaskTrigger:
 				// Add nil check to prevent segmentation fault

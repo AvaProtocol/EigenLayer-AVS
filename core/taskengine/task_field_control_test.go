@@ -58,7 +58,7 @@ func TestListTasksFieldControl(t *testing.T) {
 		assert.Empty(t, task.Edges, "Edges should be empty when not requested")
 
 		// Basic fields should be populated
-		assert.Equal(t, avsproto.TaskStatus_Active, task.Status) // Should be Active when created
+		assert.Equal(t, avsproto.TaskStatus_Enabled, task.Status) // Should be Enabled when created
 		assert.NotNil(t, task.Trigger)
 	})
 

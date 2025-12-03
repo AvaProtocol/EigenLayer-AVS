@@ -5,6 +5,7 @@ package integration_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,6 +31,7 @@ type MockSyncMessagesServer struct {
 	disconnected bool
 	ctx          context.Context
 	cancelFunc   context.CancelFunc
+	mu           sync.Mutex
 }
 
 func NewMockSyncMessagesServer() *MockSyncMessagesServer {
@@ -43,6 +45,8 @@ func NewMockSyncMessagesServer() *MockSyncMessagesServer {
 }
 
 func (m *MockSyncMessagesServer) Send(resp *avsproto.SyncMessagesResp) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.disconnected {
 		return status.Errorf(codes.Unavailable, "transport is closing")
 	}
@@ -55,11 +59,15 @@ func (m *MockSyncMessagesServer) Context() context.Context {
 }
 
 func (m *MockSyncMessagesServer) Disconnect() {
+	m.mu.Lock()
 	m.disconnected = true
+	m.mu.Unlock()
 	m.cancelFunc()
 }
 
 func (m *MockSyncMessagesServer) GetSentTasks() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var taskIds []string
 	for _, call := range m.sendCalls {
 		if call.Op == avsproto.MessageOp_MonitorTaskTrigger {
@@ -70,9 +78,11 @@ func (m *MockSyncMessagesServer) GetSentTasks() []string {
 }
 
 func (m *MockSyncMessagesServer) Reset() {
+	m.mu.Lock()
 	m.sendCalls = make([]*avsproto.SyncMessagesResp, 0)
 	m.sendErrors = make([]error, 0)
 	m.disconnected = false
+	m.mu.Unlock()
 	m.ctx, m.cancelFunc = context.WithCancel(context.Background())
 }
 

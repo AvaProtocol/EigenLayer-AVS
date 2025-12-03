@@ -31,7 +31,7 @@ func TestMixedExecutionIndexing(t *testing.T) {
 		Task: &avsproto.Task{
 			Id:             "test-mixed-execution-indexing",
 			Owner:          "", // Empty owner to skip wallet validation
-			Status:         avsproto.TaskStatus_Active,
+			Status:         avsproto.TaskStatus_Enabled,
 			Name:           "Test Mixed Execution Indexing",
 			ExecutionCount: 0, // Start with 0 executions
 			Trigger: &avsproto.TaskTrigger{

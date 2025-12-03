@@ -49,12 +49,12 @@ func (q *Queue) CleanupOrphanedJobs() (*CleanupStats, error) {
 			}
 
 			// Check if task exists in any status
-			// Tasks can be in: active (a), completed (c), failed (f), inactive (i), running (x)
+			// Tasks can be in: enabled (a), completed (c), failed (f), disabled (i), running (x)
 			taskStatuses := []avsproto.TaskStatus{
-				avsproto.TaskStatus_Active,
+				avsproto.TaskStatus_Enabled,
 				avsproto.TaskStatus_Completed,
 				avsproto.TaskStatus_Failed,
-				avsproto.TaskStatus_Inactive,
+				avsproto.TaskStatus_Disabled,
 				avsproto.TaskStatus_Running,
 			}
 

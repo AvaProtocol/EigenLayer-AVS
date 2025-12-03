@@ -36,7 +36,7 @@ func TestExecutionIndexIncrement(t *testing.T) {
 		Task: &avsproto.Task{
 			Id:             "test-task-increment",
 			Owner:          "", // Empty owner to skip wallet validation
-			Status:         avsproto.TaskStatus_Active,
+			Status:         avsproto.TaskStatus_Enabled,
 			Name:           "Test Execution Index Increment",
 			ExecutionCount: 0, // Start with 0 executions
 			Trigger: &avsproto.TaskTrigger{
@@ -182,7 +182,7 @@ func TestExecutionIndexSimulation(t *testing.T) {
 		Task: &avsproto.Task{
 			Id:             "test-task-simulation",
 			Owner:          user.Address.Hex(),
-			Status:         avsproto.TaskStatus_Active,
+			Status:         avsproto.TaskStatus_Enabled,
 			Name:           "Test Simulation Index",
 			ExecutionCount: 0, // Start with 0 executions
 			Trigger: &avsproto.TaskTrigger{

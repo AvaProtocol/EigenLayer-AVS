@@ -50,7 +50,7 @@ message SyncMessagesReq {
 enum MessageOp {
   Unset              = 0;
   MonitorTaskTrigger = 1;
-  DeactivateTask     = 2;
+  DisableTask        = 2;
   DeleteTask         = 3;
   CompletedTask      = 4;
   ImmediateTrigger   = 5;
@@ -102,8 +102,8 @@ message NotifyTriggersResp {
   
   // Task execution state information
   int64 remaining_executions = 2;      // How many executions are left for this task
-  bool task_still_active = 3;          // Whether the task is still active and should be monitored
-  string status = 4;                   // Task status: "active", "exhausted", "inactive", "expired", etc.
+  bool task_still_enabled = 3;         // Whether the task is still enabled and should be monitored
+  string status = 4;                   // Task status: "enabled", "exhausted", "disabled", "expired", etc.
   string message = 5;                  // Optional message for debugging/logging
 }
 

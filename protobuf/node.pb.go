@@ -28,7 +28,7 @@ type MessageOp int32
 const (
 	MessageOp_Unset              MessageOp = 0
 	MessageOp_MonitorTaskTrigger MessageOp = 1
-	MessageOp_DeactivateTask     MessageOp = 2
+	MessageOp_DisableTask        MessageOp = 2
 	MessageOp_DeleteTask         MessageOp = 3
 	MessageOp_CompletedTask      MessageOp = 4
 	MessageOp_ImmediateTrigger   MessageOp = 5
@@ -39,7 +39,7 @@ var (
 	MessageOp_name = map[int32]string{
 		0: "Unset",
 		1: "MonitorTaskTrigger",
-		2: "DeactivateTask",
+		2: "DisableTask",
 		3: "DeleteTask",
 		4: "CompletedTask",
 		5: "ImmediateTrigger",
@@ -47,7 +47,7 @@ var (
 	MessageOp_value = map[string]int32{
 		"Unset":              0,
 		"MonitorTaskTrigger": 1,
-		"DeactivateTask":     2,
+		"DisableTask":        2,
 		"DeleteTask":         3,
 		"CompletedTask":      4,
 		"ImmediateTrigger":   5,
@@ -584,8 +584,8 @@ type NotifyTriggersResp struct {
 	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	// Task execution state information
 	RemainingExecutions int64  `protobuf:"varint,2,opt,name=remaining_executions,json=remainingExecutions,proto3" json:"remaining_executions,omitempty"` // How many executions are left for this task
-	TaskStillActive     bool   `protobuf:"varint,3,opt,name=task_still_active,json=taskStillActive,proto3" json:"task_still_active,omitempty"`           // Whether the task is still active and should be monitored
-	Status              string `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`                                                       // Task status: "active", "exhausted", "inactive", "expired", etc.
+	TaskStillEnabled    bool   `protobuf:"varint,3,opt,name=task_still_enabled,json=taskStillEnabled,proto3" json:"task_still_enabled,omitempty"`        // Whether the task is still enabled and should be monitored
+	Status              string `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`                                                       // Task status: "enabled", "exhausted", "disabled", "expired", etc.
 	Message             string `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`                                                     // Optional message for debugging/logging
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
@@ -635,9 +635,9 @@ func (x *NotifyTriggersResp) GetRemainingExecutions() int64 {
 	return 0
 }
 
-func (x *NotifyTriggersResp) GetTaskStillActive() bool {
+func (x *NotifyTriggersResp) GetTaskStillEnabled() bool {
 	if x != nil {
-		return x.TaskStillActive
+		return x.TaskStillEnabled
 	}
 	return false
 }
@@ -1183,12 +1183,12 @@ const file_node_proto_rawDesc = "" +
 	"\fcron_trigger\x18\a \x01(\v2\x1e.aggregator.CronTrigger.OutputH\x00R\vcronTrigger\x12F\n" +
 	"\revent_trigger\x18\b \x01(\v2\x1f.aggregator.EventTrigger.OutputH\x00R\feventTrigger\x12I\n" +
 	"\x0emanual_trigger\x18\t \x01(\v2 .aggregator.ManualTrigger.OutputH\x00R\rmanualTriggerB\x10\n" +
-	"\x0etrigger_output\"\xe0\x01\n" +
+	"\x0etrigger_output\"\xe2\x01\n" +
 	"\x12NotifyTriggersResp\x129\n" +
 	"\n" +
 	"updated_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x121\n" +
-	"\x14remaining_executions\x18\x02 \x01(\x03R\x13remainingExecutions\x12*\n" +
-	"\x11task_still_active\x18\x03 \x01(\bR\x0ftaskStillActive\x12\x16\n" +
+	"\x14remaining_executions\x18\x02 \x01(\x03R\x13remainingExecutions\x12,\n" +
+	"\x12task_still_enabled\x18\x03 \x01(\bR\x10taskStillEnabled\x12\x16\n" +
 	"\x06status\x18\x04 \x01(\tR\x06status\x12\x18\n" +
 	"\amessage\x18\x05 \x01(\tR\amessage\"\xa0\x02\n" +
 	"\x12EventOverloadAlert\x12\x17\n" +
@@ -1210,11 +1210,11 @@ const file_node_proto_rawDesc = "" +
 	"\x13HealthCheckResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1c\n" +
-	"\ttimestamp\x18\x03 \x01(\x04R\ttimestamp*{\n" +
+	"\ttimestamp\x18\x03 \x01(\x04R\ttimestamp*x\n" +
 	"\tMessageOp\x12\t\n" +
 	"\x05Unset\x10\x00\x12\x16\n" +
-	"\x12MonitorTaskTrigger\x10\x01\x12\x12\n" +
-	"\x0eDeactivateTask\x10\x02\x12\x0e\n" +
+	"\x12MonitorTaskTrigger\x10\x01\x12\x0f\n" +
+	"\vDisableTask\x10\x02\x12\x0e\n" +
 	"\n" +
 	"DeleteTask\x10\x03\x12\x11\n" +
 	"\rCompletedTask\x10\x04\x12\x14\n" +
