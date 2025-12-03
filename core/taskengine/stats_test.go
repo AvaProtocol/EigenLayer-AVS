@@ -46,8 +46,8 @@ func TestTaskStatCount(t *testing.T) {
 
 	if !reflect.DeepEqual(
 		result, &model.SmartWalletTaskStat{
-			Total:  1,
-			Active: 1,
+			Total:   1,
+			Enabled: 1,
 		}) {
 		t.Errorf("expect task total is 1, but got %v", result)
 	}
@@ -75,7 +75,7 @@ func TestTaskStatCountCompleted(t *testing.T) {
 	if !reflect.DeepEqual(
 		result, &model.SmartWalletTaskStat{
 			Total:     1,
-			Active:    0,
+			Enabled:   0,
 			Completed: 1,
 		}) {
 		t.Errorf("expect task total is 1, completed is 1 but got %v", result)
@@ -131,12 +131,12 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 	if !reflect.DeepEqual(
 		result, &model.SmartWalletTaskStat{
 			Total:     4,
-			Active:    1,
+			Enabled:   1,
 			Completed: 1,
 			Failed:    1,
-			Inactive:  1,
+			Disabled:  1,
 		}) {
-		t.Errorf("expect task total=4, active=1, completed=1, failed=1, inactive=1, but got %v", result)
+		t.Errorf("expect task total=4, enabled=1, completed=1, failed=1, disabled=1, but got %v", result)
 	}
 
 }

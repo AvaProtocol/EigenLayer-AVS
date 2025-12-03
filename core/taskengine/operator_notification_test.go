@@ -336,7 +336,7 @@ func TestDeleteTaskRespFields(t *testing.T) {
 	assert.Equal(t, "Enabled", resp.PreviousStatus) // Task is enabled before deletion
 }
 
-func TestSetTaskActiveRespFields(t *testing.T) {
+func TestSetTaskEnabledRespFields(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 

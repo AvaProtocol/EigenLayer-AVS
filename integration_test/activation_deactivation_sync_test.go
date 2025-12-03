@@ -97,13 +97,13 @@ func TestActivationDeactivationSyncWithConfigs(t *testing.T) {
 	require.True(t, gotMonitor, "expected initial MonitorTaskTrigger for created task")
 
 	// Disable the task and expect a DisableTask control message
-	deactResp, err := engine.SetTaskEnabledByUser(user, task.Id, false)
+	disableResp, err := engine.SetTaskEnabledByUser(user, task.Id, false)
 	require.NoError(t, err)
-	require.True(t, deactResp.Success)
+	require.True(t, disableResp.Success)
 	// ensure batch flush if needed
 	time.Sleep(200 * time.Millisecond)
 
-	gotDeactivate := waitFor(func() bool {
+	gotDisable := waitFor(func() bool {
 		for _, m := range mockServer.GetSentTasks() {
 			if m.Op == avsproto.MessageOp_DisableTask && m.Id == task.Id {
 				return true
@@ -111,7 +111,7 @@ func TestActivationDeactivationSyncWithConfigs(t *testing.T) {
 		}
 		return false
 	}, 3*time.Second)
-	require.True(t, gotDeactivate, "expected DeactivateTask after deactivation")
+	require.True(t, gotDisable, "expected DisableTask after disabling")
 
 	// Cleanup
 	mockServer.Disconnect()

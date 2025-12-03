@@ -384,7 +384,7 @@ func (n *Engine) MustStart() error {
 		panic(err)
 	}
 
-	// Upon booting we will get all the active tasks to sync to operator
+	// Upon booting we will get all the enabled tasks to sync to operator
 	kvs, e := n.db.GetByPrefix(TaskByStatusStoragePrefix(avsproto.TaskStatus_Enabled))
 	if e != nil {
 		panic(e)
@@ -723,10 +723,10 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		n.logger.Warn("Failed to get task count for GetWallet response", "walletAddress", dbModelWallet.Address.Hex(), "error", statErr)
 	}
 	resp.TotalTaskCount = stat.Total
-	resp.EnabledTaskCount = stat.Active
+	resp.EnabledTaskCount = stat.Enabled
 	resp.CompletedTaskCount = stat.Completed
 	resp.FailedTaskCount = stat.Failed
-	resp.DisabledTaskCount = stat.Inactive
+	resp.DisabledTaskCount = stat.Disabled
 
 	return resp, nil
 }
@@ -801,10 +801,10 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 		n.logger.Warn("Failed to get task count for SetWallet response", "walletAddress", updatedModelWallet.Address.Hex(), "error", statErr)
 	}
 	resp.TotalTaskCount = stat.Total
-	resp.EnabledTaskCount = stat.Active
+	resp.EnabledTaskCount = stat.Enabled
 	resp.CompletedTaskCount = stat.Completed
 	resp.FailedTaskCount = stat.Failed
-	resp.DisabledTaskCount = stat.Inactive
+	resp.DisabledTaskCount = stat.Disabled
 
 	return resp, nil
 }
