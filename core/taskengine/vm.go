@@ -41,18 +41,17 @@ const (
 	MaxExecutionDepth                 = 50 // Maximum depth for nested workflow execution
 
 	// BigInt math precision constants
-	bigIntPrecisionScale     = int64(100000) // 5 decimal places precision
-	bigIntRoundingScale      = int64(1000)   // 3 decimal places for rounding
-	bigIntRoundingOffset     = float64(0.5)  // Rounding offset
-	maxBigIntMathDepth       = 10            // Maximum recursion depth for BigInt math
-	jsSafeIntegerMaxDigits   = 15            // JavaScript safe integer max digits
-	bigIntDetectionMinDigits = 10            // Minimum digits to consider as BigInt
+	bigIntDecimalPrecisionScale = int64(100000) // 5 decimal places precision (fixed-point scaling factor)
+	bigIntRoundingScale         = int64(1000)   // 3 decimal places for rounding
+	bigIntRoundingOffset        = float64(0.5)  // Rounding offset
+	maxBigIntMathDepth          = 10            // Maximum recursion depth for BigInt math
+	jsSafeIntegerMaxDigits      = 15            // JavaScript safe integer max digits
+	bigIntDetectionMinDigits    = 10            // Minimum digits to consider as BigInt
 )
 
 var (
 	// Pre-compiled regex patterns for BigInt math
-	bigIntMathSubtractionRegex = regexp.MustCompile(`\s-\s`)
-	bigIntStringRegex          = regexp.MustCompile(`^-?\d+$`)
+	bigIntStringRegex = regexp.MustCompile(`^-?\d+$`)
 )
 
 // ExecutionTask represents a single task in the execution queue
@@ -1744,7 +1743,8 @@ func detectMathematicalOperation(expr string) bool {
 		}
 	}
 	// Check for subtraction with spaces around it (to avoid matching hyphens in variable names)
-	if bigIntMathSubtractionRegex.MatchString(expr) {
+	// Use string-based check instead of regex for better performance
+	if strings.Contains(expr, " - ") {
 		return true
 	}
 	return false
@@ -1831,7 +1831,18 @@ func isBigIntString(value interface{}) bool {
 
 // evaluateBigIntMath performs BigInt-safe mathematical operations
 // Returns the result as a string to preserve precision
+// This is a convenience wrapper that calls evaluateBigIntMathWithDepth with depth 0
 func evaluateBigIntMath(leftStr string, operator string, rightValue interface{}, jsvm *goja.Runtime, currentVars map[string]any) (string, error) {
+	return evaluateBigIntMathWithDepth(leftStr, operator, rightValue, jsvm, currentVars, 0)
+}
+
+// evaluateBigIntMathWithDepth performs BigInt-safe mathematical operations with recursion depth tracking
+// Returns the result as a string to preserve precision
+func evaluateBigIntMathWithDepth(leftStr string, operator string, rightValue interface{}, jsvm *goja.Runtime, currentVars map[string]any, depth int) (string, error) {
+	// Prevent infinite recursion
+	if depth > maxBigIntMathDepth {
+		return "", fmt.Errorf("maximum recursion depth (%d) exceeded for BigInt math", maxBigIntMathDepth)
+	}
 	// Parse left operand as BigInt
 	leftBigInt := new(big.Int)
 	if _, ok := leftBigInt.SetString(leftStr, 10); !ok {
@@ -1872,9 +1883,9 @@ func evaluateBigIntMath(leftStr string, operator string, rightValue interface{},
 	default:
 		// Try to resolve as variable path
 		if jsvm != nil {
-			// Try to evaluate right operand as a variable path
+			// Try to evaluate right operand as a variable path (with depth tracking)
 			if resolved, ok := evaluateVariablePath(jsvm, fmt.Sprintf("%v", rightValue), currentVars); ok {
-				return evaluateBigIntMath(leftStr, operator, resolved, jsvm, currentVars)
+				return evaluateBigIntMathWithDepth(leftStr, operator, resolved, jsvm, currentVars, depth+1)
 			}
 		}
 		return "", fmt.Errorf("unsupported right operand type: %T", rightValue)
@@ -1908,12 +1919,12 @@ func evaluateBigIntMath(leftStr string, operator string, rightValue interface{},
 				multiplier = 95000
 			} else {
 				// For other values, use general calculation with higher precision
-				multiplierFloat := rightFloat * float64(bigIntPrecisionScale)
+				multiplierFloat := rightFloat * float64(bigIntDecimalPrecisionScale)
 				multiplier = int64(multiplierFloat + bigIntRoundingOffset) // Round to nearest
 			}
 
 			result = new(big.Int).Mul(leftBigInt, big.NewInt(multiplier))
-			result = new(big.Int).Div(result, big.NewInt(bigIntPrecisionScale))
+			result = new(big.Int).Div(result, big.NewInt(bigIntDecimalPrecisionScale))
 		} else {
 			result = new(big.Int).Mul(leftBigInt, rightBigInt)
 		}
@@ -1925,12 +1936,12 @@ func evaluateBigIntMath(leftStr string, operator string, rightValue interface{},
 			}
 			// For float division, convert to integer math
 			// Use higher precision to avoid rounding errors
-			divisorFloat := rightFloat * float64(bigIntPrecisionScale)
+			divisorFloat := rightFloat * float64(bigIntDecimalPrecisionScale)
 			divisor := int64(divisorFloat + bigIntRoundingOffset) // Round to nearest
 			if divisor == 0 {
 				return "", fmt.Errorf("division by zero")
 			}
-			result = new(big.Int).Mul(leftBigInt, big.NewInt(bigIntPrecisionScale))
+			result = new(big.Int).Mul(leftBigInt, big.NewInt(bigIntDecimalPrecisionScale))
 			result = new(big.Int).Div(result, big.NewInt(divisor))
 		} else {
 			if rightBigInt.Sign() == 0 {
@@ -1941,7 +1952,7 @@ func evaluateBigIntMath(leftStr string, operator string, rightValue interface{},
 	case "+":
 		if isFloat {
 			// For float addition, scale both operands to maintain precision
-			scale := bigIntPrecisionScale
+			scale := bigIntDecimalPrecisionScale
 			leftScaled := new(big.Int).Mul(leftBigInt, big.NewInt(scale))
 			rightScaled := int64(rightFloat*float64(scale) + bigIntRoundingOffset) // round to nearest
 			sum := new(big.Int).Add(leftScaled, big.NewInt(rightScaled))
@@ -1952,7 +1963,7 @@ func evaluateBigIntMath(leftStr string, operator string, rightValue interface{},
 	case "-":
 		if isFloat {
 			// For float subtraction, scale both operands to maintain precision
-			scale := bigIntPrecisionScale
+			scale := bigIntDecimalPrecisionScale
 			leftScaled := new(big.Int).Mul(leftBigInt, big.NewInt(scale))
 			rightScaled := int64(rightFloat*float64(scale) + bigIntRoundingOffset) // round to nearest
 			diff := new(big.Int).Sub(leftScaled, big.NewInt(rightScaled))
@@ -2059,10 +2070,19 @@ func (v *VM) resolveVariablePathWithDepth(jsvm *goja.Runtime, varPath string, cu
 
 			// Check if left operand is a BigInt string
 			if isBigIntString(leftValue) {
+				// SECURITY: Validate rightOperand before evaluation to prevent code injection
+				validationResult := ValidateCodeInjection(rightOperand)
+				if !validationResult.Valid {
+					if v.logger != nil {
+						v.logger.Warn("Dangerous right operand detected in BigInt math", "rightOperand", rightOperand, "error", validationResult.Error)
+					}
+					return nil, false
+				}
+
 				// Resolve right operand
 				rightValue, rightResolved := evaluateVariablePath(jsvm, rightOperand, currentVars)
 				if !rightResolved {
-					// Try parsing right operand as a literal number
+					// Try parsing right operand as a literal number (already validated above)
 					if f, err := strconv.ParseFloat(rightOperand, 64); err == nil {
 						rightValue = f
 						rightResolved = true
@@ -2087,15 +2107,22 @@ func (v *VM) resolveVariablePathWithDepth(jsvm *goja.Runtime, varPath string, cu
 						// Preserve as int for BigInt operations (will be handled in evaluateBigIntMath)
 						rightValue = val
 					case string:
-						// Try parsing as float
-						if f, err := strconv.ParseFloat(val, 64); err == nil {
-							rightValue = f
+						// Check if it's a BigInt string first to avoid precision loss
+						// Only convert to float64 if it's not a BigInt string
+						if isBigIntString(val) {
+							// Keep as string - evaluateBigIntMath will handle it correctly
+							rightValue = val
+						} else {
+							// Try parsing as float for non-BigInt strings
+							if f, err := strconv.ParseFloat(val, 64); err == nil {
+								rightValue = f
+							}
 						}
 					}
 				}
 
-				// Perform BigInt-safe math
-				result, err := evaluateBigIntMath(leftValue.(string), operator, rightValue, jsvm, currentVars)
+				// Perform BigInt-safe math (with depth tracking)
+				result, err := evaluateBigIntMathWithDepth(leftValue.(string), operator, rightValue, jsvm, currentVars, depth+1)
 				if err != nil {
 					if v.logger != nil {
 						v.logger.Debug("BigInt math evaluation failed, falling back to normal evaluation", "error", err)

@@ -227,25 +227,34 @@ func TestBigIntTemplateMath_Division(t *testing.T) {
 		expr := "{{contractRead1.data.amountOut / settings.divisor}}"
 
 		// Use recover to catch panic from division by zero
+		panicked := false
 		defer func() {
 			if r := recover(); r != nil {
+				panicked = true
 				// Division by zero should be caught and handled, not panic
-				// If we get here, the error handling needs improvement
-				t.Logf("Division by zero caused panic (expected to be handled): %v", r)
+				t.Errorf("Division by zero caused panic (expected to be handled gracefully): %v", r)
 			}
 		}()
 
 		result := vm.preprocessTextWithVariableMapping(expr)
 
-		// Should handle gracefully (either error or fallback to normal evaluation)
-		// The result should not be a valid number or should be empty/undefined
-		if result != "" && result != "undefined" {
-			// If it returns something, verify it's not a valid calculation
-			resultBig := new(big.Int)
-			if _, ok := resultBig.SetString(result, 10); ok {
-				// If it parsed as a number, that's unexpected for division by zero
-				t.Logf("Division by zero returned a number: %s (this may be expected if falling back to JS evaluation)", result)
-			}
+		// Verify no panic occurred
+		if panicked {
+			return // Error already logged in defer
+		}
+
+		// Division by zero should return empty string, "undefined", or keep the expression unchanged
+		// It should NOT return a valid number
+		if result == "" || result == "undefined" || result == expr {
+			// Acceptable: empty string, undefined, or expression unchanged (fallback)
+			return
+		}
+
+		// If it returns something else, verify it's not a valid number
+		resultBig := new(big.Int)
+		if _, ok := resultBig.SetString(result, 10); ok {
+			// If it parsed as a number, that's unexpected for division by zero
+			t.Errorf("Division by zero returned a valid number: %s (expected empty string, 'undefined', or unchanged expression)", result)
 		}
 	})
 }
