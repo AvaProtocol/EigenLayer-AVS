@@ -48,9 +48,9 @@ func TestBigIntTemplateMath_Multiplication(t *testing.T) {
 		result := vm.preprocessTextWithVariableMapping(expr)
 
 		// Expected: 3030137700988171 * 0.999 = 3027104563287162.829
-		// With integer math (100000 precision): (3030137700988171 * 99900) / 100000 = 3027104563287162
-		// Note: Due to floating point precision, the result may vary slightly
-		// The important thing is that it's less than the original (slippage applied)
+		// With fixed-point integer math (scale 100000): (3030137700988171 * 99900) / 100000 = 3027104563287162
+		// Note: The implementation uses fixed-point arithmetic, so the result is truncated towards zero (rounded down).
+		// The important thing is that the result is less than the original (slippage applied), as expected due to truncation.
 		expected := "3027104563287162"
 		if result != expected {
 			// Check if result is within acceptable range (within 0.1% of expected)
