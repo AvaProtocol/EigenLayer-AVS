@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,19 @@ const (
 	APContextConfigVarsPath           = APContextVarName + "." + ConfigVarsPath
 	DataSuffix                        = "data"
 	MaxExecutionDepth                 = 50 // Maximum depth for nested workflow execution
+
+	// BigInt math precision constants
+	bigIntDecimalPrecisionScale = int64(100000) // 5 decimal places precision (fixed-point scaling factor)
+	bigIntRoundingScale         = int64(1000)   // 3 decimal places for rounding
+	bigIntRoundingOffset        = float64(0.5)  // Rounding offset
+	maxBigIntMathDepth          = 10            // Maximum recursion depth for BigInt math
+	jsSafeIntegerMaxDigits      = 15            // JavaScript safe integer max digits
+	bigIntDetectionMinDigits    = 10            // Minimum digits to consider as BigInt
+)
+
+var (
+	// Pre-compiled regex patterns for BigInt math
+	bigIntStringRegex = regexp.MustCompile(`^-?\d+$`)
 )
 
 // ExecutionTask represents a single task in the execution queue
@@ -1719,9 +1733,322 @@ func isSimpleVariablePath(expr string) bool {
 	return true
 }
 
+// detectMathematicalOperation checks if an expression contains mathematical operations
+func detectMathematicalOperation(expr string) bool {
+	// Check for mathematical operators (excluding "-" which might be in variable names)
+	operators := []string{"*", "/", "+"}
+	for _, op := range operators {
+		if strings.Contains(expr, op) {
+			return true
+		}
+	}
+	// Check for subtraction with spaces around it (to avoid matching hyphens in variable names)
+	// Use string-based check instead of regex for better performance
+	if strings.Contains(expr, " - ") {
+		return true
+	}
+	return false
+}
+
+// findOperator finds the rightmost operator outside parentheses with correct precedence
+// Returns the index and operator string, or -1 and empty string if not found
+func findOperator(expr string, ops []string) (int, string) {
+	depth := 0
+	for i := len(expr) - 1; i >= 0; i-- {
+		switch expr[i] {
+		case ')':
+			depth++
+		case '(':
+			depth--
+		default:
+			if depth == 0 {
+				for _, op := range ops {
+					if string(expr[i]) == op {
+						// For '-', check if surrounded by spaces (to avoid hyphens in variable names)
+						if op == "-" {
+							if i > 0 && i < len(expr)-1 && expr[i-1] == ' ' && expr[i+1] == ' ' {
+								return i, op
+							}
+						} else {
+							return i, op
+						}
+					}
+				}
+			}
+		}
+	}
+	return -1, ""
+}
+
+// parseMathExpression parses a mathematical expression into left operand, operator, and right operand
+// Handles operator precedence correctly: * and / have higher precedence than + and -
+// Returns empty strings if parsing fails
+func parseMathExpression(expr string) (leftOperand, operator, rightOperand string) {
+	expr = strings.TrimSpace(expr)
+
+	// First, look for lowest precedence: + and - (subtraction only with spaces)
+	if idx, op := findOperator(expr, []string{"+", "-"}); idx != -1 {
+		return strings.TrimSpace(expr[:idx]), op, strings.TrimSpace(expr[idx+1:])
+	}
+	// Then, look for higher precedence: * and /
+	if idx, op := findOperator(expr, []string{"*", "/"}); idx != -1 {
+		return strings.TrimSpace(expr[:idx]), op, strings.TrimSpace(expr[idx+1:])
+	}
+
+	return "", "", ""
+}
+
+// isBigIntString checks if a value is a string representing a large integer (BigInt)
+func isBigIntString(value interface{}) bool {
+	str, ok := value.(string)
+	if !ok {
+		return false
+	}
+
+	// Check if string contains only digits (and optional leading minus sign)
+	if !bigIntStringRegex.MatchString(str) {
+		return false
+	}
+
+	// Check if it's longer than JavaScript safe integer length
+	// This indicates it should be treated as BigInt
+	if len(strings.TrimPrefix(str, "-")) > jsSafeIntegerMaxDigits {
+		return true
+	}
+
+	// Also check if it's a very large number even if within safe integer range
+	// This helps catch cases where we want to preserve precision
+	if len(strings.TrimPrefix(str, "-")) > bigIntDetectionMinDigits {
+		// Try parsing as big.Int to verify it's a valid integer
+		bi := new(big.Int)
+		if _, ok := bi.SetString(str, 10); ok {
+			return true
+		}
+	}
+
+	return false
+}
+
+// evaluateBigIntMath performs BigInt-safe mathematical operations
+// Returns the result as a string to preserve precision
+// This is a convenience wrapper that calls evaluateBigIntMathWithDepth with depth 0
+func evaluateBigIntMath(leftStr string, operator string, rightValue interface{}, jsvm *goja.Runtime, currentVars map[string]any) (string, error) {
+	return evaluateBigIntMathWithDepth(leftStr, operator, rightValue, jsvm, currentVars, 0)
+}
+
+// evaluateBigIntMathWithDepth performs BigInt-safe mathematical operations with recursion depth tracking
+// Returns the result as a string to preserve precision
+func evaluateBigIntMathWithDepth(leftStr string, operator string, rightValue interface{}, jsvm *goja.Runtime, currentVars map[string]any, depth int) (string, error) {
+	// Prevent infinite recursion
+	if depth > maxBigIntMathDepth {
+		return "", fmt.Errorf("maximum recursion depth (%d) exceeded for BigInt math", maxBigIntMathDepth)
+	}
+	// Parse left operand as BigInt
+	leftBigInt := new(big.Int)
+	if _, ok := leftBigInt.SetString(leftStr, 10); !ok {
+		return "", fmt.Errorf("failed to parse left operand as BigInt: %s", leftStr)
+	}
+
+	// Handle right operand based on type
+	var rightBigInt *big.Int
+	var rightFloat float64
+	var isFloat bool
+
+	switch v := rightValue.(type) {
+	case string:
+		// Try parsing as BigInt first
+		bi := new(big.Int)
+		if _, ok := bi.SetString(v, 10); ok {
+			rightBigInt = bi
+		} else {
+			// Try parsing as float
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				rightFloat = f
+				isFloat = true
+			} else {
+				return "", fmt.Errorf("failed to parse right operand: %s", v)
+			}
+		}
+	case float64:
+		rightFloat = v
+		isFloat = true
+	case int64:
+		// Preserve as BigInt to avoid precision loss for large integers (>2^53)
+		rightBigInt = big.NewInt(v)
+	case int:
+		// Preserve as BigInt to avoid precision loss for large integers (>2^53)
+		rightBigInt = big.NewInt(int64(v))
+	case *big.Int:
+		rightBigInt = v
+	default:
+		// Try to resolve as variable path
+		if jsvm != nil {
+			// Try to evaluate right operand as a variable path (with depth tracking)
+			if resolved, ok := evaluateVariablePath(jsvm, fmt.Sprintf("%v", rightValue), currentVars); ok {
+				return evaluateBigIntMathWithDepth(leftStr, operator, resolved, jsvm, currentVars, depth+1)
+			}
+		}
+		return "", fmt.Errorf("unsupported right operand type: %T", rightValue)
+	}
+
+	// Perform operation
+	var result *big.Int
+
+	switch operator {
+	case "*":
+		if isFloat {
+			// For float multiplication (e.g., 0.995), convert to integer math
+			// Handle common slippage values as exact fractions to avoid floating point errors
+			var multiplier int64
+
+			// Round to 3 decimal places first to handle floating point precision issues
+			rounded := float64(int64(rightFloat*float64(bigIntRoundingScale)+bigIntRoundingOffset)) / float64(bigIntRoundingScale)
+
+			// Check for common slippage values (exact match after rounding)
+			if rounded == 0.999 {
+				// 0.1% slippage: 0.999
+				multiplier = 99900
+			} else if rounded == 0.995 {
+				// 0.5% slippage: 0.995
+				multiplier = 99500
+			} else if rounded == 0.99 {
+				// 1% slippage: 0.99
+				multiplier = 99000
+			} else if rounded == 0.95 {
+				// 5% slippage: 0.95
+				multiplier = 95000
+			} else {
+				// For other values, use general calculation with higher precision
+				multiplierFloat := rightFloat * float64(bigIntDecimalPrecisionScale)
+				multiplier = int64(multiplierFloat + bigIntRoundingOffset) // Round to nearest
+			}
+
+			result = new(big.Int).Mul(leftBigInt, big.NewInt(multiplier))
+			result = new(big.Int).Div(result, big.NewInt(bigIntDecimalPrecisionScale))
+		} else {
+			result = new(big.Int).Mul(leftBigInt, rightBigInt)
+		}
+	case "/":
+		if isFloat {
+			// Check for division by zero
+			if rightFloat == 0 {
+				return "", fmt.Errorf("division by zero")
+			}
+			// For float division, convert to integer math
+			// Use higher precision to avoid rounding errors
+			divisorFloat := rightFloat * float64(bigIntDecimalPrecisionScale)
+			divisor := int64(divisorFloat + bigIntRoundingOffset) // Round to nearest
+			if divisor == 0 {
+				return "", fmt.Errorf("division by zero")
+			}
+			result = new(big.Int).Mul(leftBigInt, big.NewInt(bigIntDecimalPrecisionScale))
+			result = new(big.Int).Div(result, big.NewInt(divisor))
+		} else {
+			if rightBigInt.Sign() == 0 {
+				return "", fmt.Errorf("division by zero")
+			}
+			result = new(big.Int).Div(leftBigInt, rightBigInt)
+		}
+	case "+":
+		if isFloat {
+			// For float addition, scale both operands to maintain precision
+			scale := bigIntDecimalPrecisionScale
+			leftScaled := new(big.Int).Mul(leftBigInt, big.NewInt(scale))
+			rightScaled := int64(rightFloat*float64(scale) + bigIntRoundingOffset) // round to nearest
+			sum := new(big.Int).Add(leftScaled, big.NewInt(rightScaled))
+			result = new(big.Int).Div(sum, big.NewInt(scale))
+		} else {
+			result = new(big.Int).Add(leftBigInt, rightBigInt)
+		}
+	case "-":
+		if isFloat {
+			// For float subtraction, scale both operands to maintain precision
+			scale := bigIntDecimalPrecisionScale
+			leftScaled := new(big.Int).Mul(leftBigInt, big.NewInt(scale))
+			rightScaled := int64(rightFloat*float64(scale) + bigIntRoundingOffset) // round to nearest
+			diff := new(big.Int).Sub(leftScaled, big.NewInt(rightScaled))
+			result = new(big.Int).Div(diff, big.NewInt(scale))
+		} else {
+			result = new(big.Int).Sub(leftBigInt, rightBigInt)
+		}
+	default:
+		return "", fmt.Errorf("unsupported operator: %s", operator)
+	}
+
+	return result.String(), nil
+}
+
+// evaluateVariablePath is a helper to evaluate a variable path (used recursively)
+// SECURITY: Always validate to prevent code injection through resolved variable paths
+func evaluateVariablePath(jsvm *goja.Runtime, varPath string, currentVars map[string]any) (interface{}, bool) {
+	// SECURITY: Validate variable path to prevent code injection
+	validationResult := ValidateCodeInjection(varPath)
+	if !validationResult.Valid {
+		return nil, false
+	}
+
+	script := varPath
+	if strings.Contains(varPath, ".") {
+		parts := strings.Split(varPath, ".")
+		if len(parts) > 1 {
+			for i := 1; i < len(parts); i++ {
+				if strings.Contains(parts[i], "-") {
+					basePath := parts[0]
+					for j := 1; j < i; j++ {
+						basePath += "." + parts[j]
+					}
+					propertyName := parts[i]
+					remainingParts := ""
+					if i+1 < len(parts) {
+						remainingParts = "." + strings.Join(parts[i+1:], ".")
+						if strings.Contains(remainingParts, "-") {
+							remainingPartsParts := parts[i+1:]
+							remainingParts = ""
+							for _, part := range remainingPartsParts {
+								if strings.Contains(part, "-") {
+									remainingParts += `["` + part + `"]`
+								} else {
+									remainingParts += "." + part
+								}
+							}
+						}
+					}
+					script = fmt.Sprintf(`%s["%s"]%s`, basePath, propertyName, remainingParts)
+					break
+				}
+			}
+		}
+	}
+
+	script = fmt.Sprintf(`(() => { try { return %s; } catch(e) { return undefined; } })()`, script)
+
+	if evaluated, err := jsvm.RunString(script); err == nil {
+		exportedValue := evaluated.Export()
+		if exportedValue != nil && fmt.Sprintf("%v", exportedValue) != "undefined" {
+			return exportedValue, true
+		}
+	}
+
+	return nil, false
+}
+
 // resolveVariablePath resolves a variable path by validating security, transforming hyphenated properties
 // to bracket notation, and evaluating the path in a JavaScript VM.
+// It also handles BigInt-aware mathematical operations for slippage calculations.
 func (v *VM) resolveVariablePath(jsvm *goja.Runtime, varPath string, currentVars map[string]any) (interface{}, bool) {
+	return v.resolveVariablePathWithDepth(jsvm, varPath, currentVars, 0)
+}
+
+// resolveVariablePathWithDepth resolves a variable path with recursion depth tracking
+func (v *VM) resolveVariablePathWithDepth(jsvm *goja.Runtime, varPath string, currentVars map[string]any, depth int) (interface{}, bool) {
+	// Prevent infinite recursion
+	if depth > maxBigIntMathDepth {
+		if v.logger != nil {
+			v.logger.Warn("Maximum recursion depth exceeded for variable path", "path", varPath, "depth", depth)
+		}
+		return nil, false
+	}
+
 	// SECURITY: Validate variable path using centralized security validation
 	validationResult := ValidateCodeInjection(varPath)
 	if !validationResult.Valid {
@@ -1729,6 +2056,84 @@ func (v *VM) resolveVariablePath(jsvm *goja.Runtime, varPath string, currentVars
 			v.logger.Warn("Dangerous variable path detected", "path", varPath, "error", validationResult.Error)
 		}
 		return nil, false
+	}
+
+	// Check if this is a mathematical operation
+	if detectMathematicalOperation(varPath) {
+		leftOperand, operator, rightOperand := parseMathExpression(varPath)
+		if leftOperand != "" && operator != "" && rightOperand != "" {
+			// Resolve left operand (increment depth)
+			leftValue, leftResolved := v.resolveVariablePathWithDepth(jsvm, leftOperand, currentVars, depth+1)
+			if !leftResolved {
+				return nil, false
+			}
+
+			// Check if left operand is a BigInt string
+			if isBigIntString(leftValue) {
+				// SECURITY: Validate rightOperand before evaluation to prevent code injection
+				validationResult := ValidateCodeInjection(rightOperand)
+				if !validationResult.Valid {
+					if v.logger != nil {
+						v.logger.Warn("Dangerous right operand detected in BigInt math", "rightOperand", rightOperand, "error", validationResult.Error)
+					}
+					return nil, false
+				}
+
+				// Resolve right operand
+				rightValue, rightResolved := evaluateVariablePath(jsvm, rightOperand, currentVars)
+				if !rightResolved {
+					// Try parsing right operand as a literal number (already validated above)
+					if f, err := strconv.ParseFloat(rightOperand, 64); err == nil {
+						rightValue = f
+						rightResolved = true
+					} else {
+						return nil, false
+					}
+				}
+
+				// Ensure rightValue is properly typed (handle interface{} conversions)
+				if rightResolved {
+					// Convert interface{} to proper type if needed
+					// Note: For BigInt operations, we preserve int64/int as BigInt to avoid precision loss
+					switch val := rightValue.(type) {
+					case float64:
+						// Already correct type
+					case float32:
+						rightValue = float64(val)
+					case int64:
+						// Preserve as int64 for BigInt operations (will be handled in evaluateBigIntMath)
+						rightValue = val
+					case int:
+						// Preserve as int for BigInt operations (will be handled in evaluateBigIntMath)
+						rightValue = val
+					case string:
+						// Check if it's a BigInt string first to avoid precision loss
+						// Only convert to float64 if it's not a BigInt string
+						if isBigIntString(val) {
+							// Keep as string - evaluateBigIntMath will handle it correctly
+							rightValue = val
+						} else {
+							// Try parsing as float for non-BigInt strings
+							if f, err := strconv.ParseFloat(val, 64); err == nil {
+								rightValue = f
+							}
+						}
+					}
+				}
+
+				// Perform BigInt-safe math (with depth tracking)
+				result, err := evaluateBigIntMathWithDepth(leftValue.(string), operator, rightValue, jsvm, currentVars, depth+1)
+				if err != nil {
+					if v.logger != nil {
+						v.logger.Debug("BigInt math evaluation failed, falling back to normal evaluation", "error", err)
+					}
+					// Fall through to normal evaluation
+				} else {
+					return result, true
+				}
+			}
+			// If not BigInt, fall through to normal evaluation
+		}
 	}
 
 	// Try to resolve the variable path
