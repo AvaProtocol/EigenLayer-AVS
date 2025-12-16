@@ -31,8 +31,9 @@ type TaskEntry struct {
 
 // EventTaskData contains event trigger specific information
 type EventTaskData struct {
-	Queries    []*avsproto.EventTrigger_Query
-	ParsedABIs map[int]*abi.ABI // queryIndex -> parsed ABI
+	Queries         []*avsproto.EventTrigger_Query
+	ParsedABIs      map[int]*abi.ABI // queryIndex -> parsed ABI
+	CooldownSeconds uint32           // Cooldown period in seconds (0 = no cooldown)
 }
 
 // BlockTaskData contains block trigger specific information
@@ -225,8 +226,9 @@ func (r *TaskRegistry) ConvertFromSyncMap(oldChecks *sync.Map) {
 
 		// Convert to new format
 		eventData := &EventTaskData{
-			Queries:    check.Queries,
-			ParsedABIs: check.ParsedABIs,
+			Queries:         check.Queries,
+			ParsedABIs:      check.ParsedABIs,
+			CooldownSeconds: 0, // Legacy format doesn't have cooldown
 		}
 
 		now := time.Now()

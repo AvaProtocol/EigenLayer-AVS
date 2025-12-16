@@ -197,6 +197,13 @@ message EventTrigger {
     // Array of RPC filter queries. Each query creates a separate subscription.
     // For FROM-OR-TO scenarios, provide two queries: one for FROM, one for TO.
     repeated Query queries = 1;
+    
+    // Cooldown period in seconds. After a trigger fires, wait this many seconds before
+    // allowing the same task to trigger again. This prevents repeated firing when
+    // conditions remain true (e.g., price > threshold fires every block).
+    // Default: 300 (5 minutes cooldown - prevents repeated firing when conditions remain true)
+    // Set to 0 to disable cooldown (triggers fire immediately when conditions match)
+    optional uint32 cooldown_seconds = 2;
   }
   
   message Output {

@@ -3,6 +3,7 @@ package trigger
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"strconv"
 	"strings"
@@ -756,4 +757,187 @@ func TestSpecificTOTransaction(t *testing.T) {
 	} else {
 		t.Logf("✅ TO transaction correctly matches TO filter")
 	}
+}
+
+func TestEventTriggerCooldown(t *testing.T) {
+	// Create a mock event trigger with proper initialization
+	trigger := &EventTrigger{
+		registry:   NewTaskRegistry(),
+		checks:     sync.Map{},
+		legacyMode: false,
+		CommonTrigger: &CommonTrigger{
+			done:      make(chan bool),
+			shutdown:  false,
+			rpcOption: &RpcOption{},
+			logger:    &MockLogger{},
+		},
+		triggerCh:                make(chan TriggerMetadata[EventMark], 10),
+		subscriptions:            make([]SubscriptionInfo, 0),
+		updateSubsCh:             make(chan struct{}, 1),
+		eventCounts:              make(map[string]map[uint64]uint32),
+		defaultMaxEventsPerQuery: 100,
+		defaultMaxTotalEvents:    1000,
+		processedEvents:          make(map[string]bool),
+		lastTriggerTime:          make(map[string]time.Time),
+	}
+
+	t.Run("DefaultCooldownApplied", func(t *testing.T) {
+		// Test that default cooldown (300 seconds) is applied when cooldown_seconds is not set
+		taskID := "test-task-default"
+		cooldownSeconds := DefaultEventTriggerCooldownSeconds // Default value
+
+		// First trigger should be allowed (no previous trigger)
+		now := time.Now()
+		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, now), "First trigger should not be in cooldown")
+
+		// Update timestamp to simulate a trigger
+		trigger.updateCooldownTimestamp(taskID, cooldownSeconds, now)
+
+		// Immediately after trigger, should be in cooldown
+		assert.True(t, trigger.isInCooldown(taskID, cooldownSeconds, now), "Should be in cooldown immediately after trigger")
+
+		// After 299 seconds, should still be in cooldown
+		after299s := now.Add(299 * time.Second)
+		assert.True(t, trigger.isInCooldown(taskID, cooldownSeconds, after299s), "Should still be in cooldown after 299 seconds")
+
+		// After 300 seconds, should not be in cooldown
+		after300s := now.Add(300 * time.Second)
+		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, after300s), "Should not be in cooldown after 300 seconds")
+
+		// After 301 seconds, should not be in cooldown
+		after301s := now.Add(301 * time.Second)
+		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, after301s), "Should not be in cooldown after 301 seconds")
+	})
+
+	t.Run("CooldownDisabled", func(t *testing.T) {
+		// Test that cooldown is disabled when cooldown_seconds is 0
+		taskID := "test-task-no-cooldown"
+		cooldownSeconds := uint32(0)
+
+		now := time.Now()
+
+		// First trigger should be allowed
+		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, now), "Should not be in cooldown when disabled")
+
+		// Update timestamp (even though cooldown is disabled)
+		trigger.updateCooldownTimestamp(taskID, cooldownSeconds, now)
+
+		// Even after updating timestamp, should not be in cooldown
+		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, now), "Should not be in cooldown when disabled, even after trigger")
+
+		// Immediately after should still not be in cooldown
+		immediatelyAfter := now.Add(1 * time.Second)
+		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, immediatelyAfter), "Should not be in cooldown when disabled")
+	})
+
+	t.Run("CustomCooldown", func(t *testing.T) {
+		// Test custom cooldown values
+		taskID := "test-task-custom"
+		cooldownSeconds := uint32(60) // 1 minute custom cooldown
+
+		now := time.Now()
+
+		// First trigger should be allowed
+		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, now), "First trigger should not be in cooldown")
+
+		// Update timestamp to simulate a trigger
+		trigger.updateCooldownTimestamp(taskID, cooldownSeconds, now)
+
+		// Immediately after trigger, should be in cooldown
+		assert.True(t, trigger.isInCooldown(taskID, cooldownSeconds, now), "Should be in cooldown immediately after trigger")
+
+		// After 59 seconds, should still be in cooldown
+		after59s := now.Add(59 * time.Second)
+		assert.True(t, trigger.isInCooldown(taskID, cooldownSeconds, after59s), "Should still be in cooldown after 59 seconds")
+
+		// After 60 seconds, should not be in cooldown
+		after60s := now.Add(60 * time.Second)
+		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, after60s), "Should not be in cooldown after 60 seconds")
+	})
+
+	t.Run("MultipleTasksIndependentCooldown", func(t *testing.T) {
+		// Test that different tasks have independent cooldown periods
+		taskID1 := "test-task-1"
+		taskID2 := "test-task-2"
+		cooldownSeconds := uint32(60)
+
+		now := time.Now()
+
+		// Trigger task 1
+		trigger.updateCooldownTimestamp(taskID1, cooldownSeconds, now)
+
+		// Task 1 should be in cooldown
+		assert.True(t, trigger.isInCooldown(taskID1, cooldownSeconds, now), "Task 1 should be in cooldown")
+
+		// Task 2 should not be in cooldown (never triggered)
+		assert.False(t, trigger.isInCooldown(taskID2, cooldownSeconds, now), "Task 2 should not be in cooldown")
+
+		// Trigger task 2 at a later time
+		now2 := now.Add(5 * time.Second)
+		trigger.updateCooldownTimestamp(taskID2, cooldownSeconds, now2)
+
+		// Both should be in cooldown now
+		checkTime := now2
+		assert.True(t, trigger.isInCooldown(taskID1, cooldownSeconds, checkTime), "Task 1 should still be in cooldown")
+		assert.True(t, trigger.isInCooldown(taskID2, cooldownSeconds, checkTime), "Task 2 should be in cooldown")
+
+		// After cooldown expires for task 1 (triggered at now), task 2 should still be in cooldown (triggered at now2)
+		after61s := now.Add(61 * time.Second) // 61 seconds after task 1 was triggered
+		assert.False(t, trigger.isInCooldown(taskID1, cooldownSeconds, after61s), "Task 1 should not be in cooldown after expiration")
+		// Task 2 was triggered 5 seconds later, so at after61s it's only been 56 seconds since its trigger
+		assert.True(t, trigger.isInCooldown(taskID2, cooldownSeconds, after61s), "Task 2 should still be in cooldown (triggered 5s later)")
+	})
+
+	t.Run("CooldownPreventsRepeatedTriggers", func(t *testing.T) {
+		// Test that cooldown prevents repeated triggers when conditions remain true
+		taskID := "test-task-repeated"
+		cooldownSeconds := DefaultEventTriggerCooldownSeconds // 5 minutes default
+
+		now := time.Now()
+
+		// First trigger - should be allowed
+		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, now), "First trigger should be allowed")
+		trigger.updateCooldownTimestamp(taskID, cooldownSeconds, now)
+
+		// Second trigger immediately after - should be blocked
+		immediatelyAfter := now.Add(1 * time.Second)
+		assert.True(t, trigger.isInCooldown(taskID, cooldownSeconds, immediatelyAfter), "Second trigger immediately after should be blocked")
+
+		// Third trigger after 1 minute - should still be blocked
+		after1min := now.Add(1 * time.Minute)
+		assert.True(t, trigger.isInCooldown(taskID, cooldownSeconds, after1min), "Third trigger after 1 minute should still be blocked")
+
+		// Fourth trigger after 5 minutes - should be allowed
+		after5min := now.Add(5 * time.Minute)
+		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, after5min), "Fourth trigger after 5 minutes should be allowed")
+	})
+
+	t.Run("CooldownTimestampUpdate", func(t *testing.T) {
+		// Test that cooldown timestamp is updated correctly
+		taskID := "test-task-timestamp"
+		cooldownSeconds := uint32(60)
+
+		now1 := time.Now()
+		trigger.updateCooldownTimestamp(taskID, cooldownSeconds, now1)
+
+		// Check that timestamp was recorded
+		trigger.cooldownMutex.RLock()
+		lastTrigger, exists := trigger.lastTriggerTime[taskID]
+		trigger.cooldownMutex.RUnlock()
+
+		assert.True(t, exists, "Timestamp should be recorded")
+		assert.Equal(t, now1.Unix(), lastTrigger.Unix(), "Timestamp should match")
+
+		// Update timestamp again
+		now2 := now1.Add(10 * time.Second)
+		trigger.updateCooldownTimestamp(taskID, cooldownSeconds, now2)
+
+		// Check that timestamp was updated
+		trigger.cooldownMutex.RLock()
+		lastTrigger2, exists2 := trigger.lastTriggerTime[taskID]
+		trigger.cooldownMutex.RUnlock()
+
+		assert.True(t, exists2, "Timestamp should still exist")
+		assert.Equal(t, now2.Unix(), lastTrigger2.Unix(), "Timestamp should be updated")
+	})
 }

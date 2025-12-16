@@ -58,6 +58,14 @@ var (
 // The system now only subscribes to events that registered tasks actually need
 )
 
+const (
+	// DefaultEventTriggerCooldownSeconds is the default cooldown period in seconds for event triggers.
+	// After a trigger fires, the system waits this many seconds before allowing the same task to trigger again.
+	// This prevents repeated firing when conditions remain true (e.g., price > threshold fires every block).
+	// Default: 300 seconds (5 minutes)
+	DefaultEventTriggerCooldownSeconds uint32 = 300
+)
+
 type EventMark struct {
 	BlockNumber uint64
 	LogIndex    uint
@@ -119,6 +127,10 @@ type EventTrigger struct {
 	processedEventsMutex sync.RWMutex
 	processedEvents      map[string]bool // key: "blockNumber-txHash-logIndex"
 
+	// Cooldown tracking: taskID -> last trigger time
+	cooldownMutex   sync.RWMutex
+	lastTriggerTime map[string]time.Time // taskID -> last trigger timestamp
+
 	// Token enrichment service for enriching Transfer events
 	tokenEnrichmentService *taskengine.TokenEnrichmentService
 }
@@ -152,6 +164,7 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 		defaultMaxEventsPerQuery: maxEventsPerQuery,
 		defaultMaxTotalEvents:    maxTotalEvents,
 		processedEvents:          make(map[string]bool),
+		lastTriggerTime:          make(map[string]time.Time),
 	}
 
 	b.ethClient, err = ethclient.Dial(o.RpcURL)
@@ -247,16 +260,24 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 	}
 
 	taskID := check.TaskId
-	queries := evt.GetConfig().GetQueries()
+	config := evt.GetConfig()
+	queries := config.GetQueries()
 
 	if len(queries) == 0 {
 		return fmt.Errorf("no queries found in event trigger config for task %s", taskID)
 	}
 
+	// Extract cooldown_seconds from config (defaults to DefaultEventTriggerCooldownSeconds if not set)
+	cooldownSeconds := DefaultEventTriggerCooldownSeconds
+	if config.CooldownSeconds != nil {
+		cooldownSeconds = *config.CooldownSeconds
+	}
+
 	// Create EventTaskData for the new registry
 	eventData := &EventTaskData{
-		Queries:    queries,
-		ParsedABIs: make(map[int]*abi.ABI),
+		Queries:         queries,
+		ParsedABIs:      make(map[int]*abi.ABI),
+		CooldownSeconds: cooldownSeconds,
 	}
 
 	// Pre-parse ABIs for queries that have conditions to avoid repeated parsing
@@ -292,7 +313,8 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 
 	t.logger.Info("🔍 Task added with queries-based EventTrigger",
 		"task_id", taskID,
-		"queries_count", len(queries))
+		"queries_count", len(queries),
+		"cooldown_seconds", cooldownSeconds)
 
 	// Log query details
 	for i, query := range queries {
@@ -749,14 +771,68 @@ func (t *EventTrigger) processLog(log types.Log) error {
 	return t.processLogInternal(log)
 }
 
+// isInCooldown checks if a task is currently in its cooldown period
+// Returns true if task is in cooldown (should skip trigger), false if trigger is allowed
+// This method is extracted for easy unit testing
+func (t *EventTrigger) isInCooldown(taskID string, cooldownSeconds uint32, now time.Time) bool {
+	if cooldownSeconds == 0 {
+		return false // No cooldown configured
+	}
+
+	t.cooldownMutex.RLock()
+	lastTrigger, hasLastTrigger := t.lastTriggerTime[taskID]
+	t.cooldownMutex.RUnlock()
+
+	if !hasLastTrigger {
+		return false // Never triggered before, allow trigger
+	}
+
+	cooldownDuration := time.Duration(cooldownSeconds) * time.Second
+	timeSinceLastTrigger := now.Sub(lastTrigger)
+	return timeSinceLastTrigger < cooldownDuration
+}
+
+// updateCooldownTimestamp updates the last trigger time for a task
+// This method is extracted for easy unit testing
+func (t *EventTrigger) updateCooldownTimestamp(taskID string, cooldownSeconds uint32, now time.Time) {
+	if cooldownSeconds == 0 {
+		return // No cooldown configured, no need to track
+	}
+
+	t.cooldownMutex.Lock()
+	t.lastTriggerTime[taskID] = now
+	t.cooldownMutex.Unlock()
+}
+
 // processLogInternal processes an individual log and triggers matching tasks
 // Note: Deduplication should be handled by caller before calling this function
 func (t *EventTrigger) processLogInternal(log types.Log) error {
 	var triggeredTasks []string
+	now := time.Now()
 
 	// Check all registered tasks to see which ones match this log
 	t.registry.RangeEventTasks(func(taskID string, entry *TaskEntry) bool {
 		if t.logMatchesTaskEntry(log, entry) {
+			// Check cooldown period if configured
+			if entry.EventData != nil {
+				cooldownSeconds := entry.EventData.CooldownSeconds
+				if t.isInCooldown(taskID, cooldownSeconds, now) {
+					cooldownDuration := time.Duration(cooldownSeconds) * time.Second
+					t.cooldownMutex.RLock()
+					lastTrigger := t.lastTriggerTime[taskID]
+					t.cooldownMutex.RUnlock()
+					timeSinceLastTrigger := now.Sub(lastTrigger)
+					remainingCooldown := cooldownDuration - timeSinceLastTrigger
+					t.logger.Debug("⏳ Task in cooldown period, skipping trigger",
+						"task_id", taskID,
+						"cooldown_seconds", cooldownSeconds,
+						"time_since_last_trigger", timeSinceLastTrigger,
+						"remaining_cooldown", remainingCooldown,
+						"block", log.BlockNumber)
+					return true // Continue to next task
+				}
+			}
+
 			triggeredTasks = append(triggeredTasks, taskID)
 
 			// Try to enrich the event data using shared enrichment logic
@@ -769,6 +845,11 @@ func (t *EventTrigger) processLogInternal(log types.Log) error {
 
 			select {
 			case t.triggerCh <- triggerMeta:
+				// Update last trigger time after successfully sending to channel
+				if entry.EventData != nil {
+					t.updateCooldownTimestamp(taskID, entry.EventData.CooldownSeconds, now)
+				}
+
 				hasEnrichedData := marker.EnrichedData != nil
 				t.logger.Info("🎯 Task triggered with enriched data",
 					"task_id", taskID,
@@ -869,8 +950,9 @@ func (t *EventTrigger) logMatchesTaskEntry(log types.Log, entry *TaskEntry) bool
 func (t *EventTrigger) logMatchesTask(log types.Log, check *Check) bool {
 	// Convert to EventTaskData for compatibility
 	eventData := &EventTaskData{
-		Queries:    check.Queries,
-		ParsedABIs: check.ParsedABIs,
+		Queries:         check.Queries,
+		ParsedABIs:      check.ParsedABIs,
+		CooldownSeconds: 0, // Legacy format doesn't have cooldown
 	}
 
 	for i, query := range check.Queries {
