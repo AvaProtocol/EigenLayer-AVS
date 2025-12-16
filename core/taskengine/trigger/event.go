@@ -268,9 +268,14 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 	}
 
 	// Extract cooldown_seconds from config (defaults to DefaultEventTriggerCooldownSeconds if not set)
-	cooldownSeconds := DefaultEventTriggerCooldownSeconds
+	// If cooldown_seconds is not set (nil), use the default value
+	// If explicitly set to 0, respect it (no cooldown)
+	// This ensures old tasks without cooldown_seconds get the default cooldown behavior
+	var cooldownSeconds uint32
 	if config.CooldownSeconds != nil {
 		cooldownSeconds = *config.CooldownSeconds
+	} else {
+		cooldownSeconds = DefaultEventTriggerCooldownSeconds
 	}
 
 	// Create EventTaskData for the new registry
@@ -772,11 +777,14 @@ func (t *EventTrigger) processLog(log types.Log) error {
 }
 
 // isInCooldown checks if a task is currently in its cooldown period
-// Returns true if task is in cooldown (should skip trigger), false if trigger is allowed
-// This method is extracted for easy unit testing
-func (t *EventTrigger) isInCooldown(taskID string, cooldownSeconds uint32, now time.Time) bool {
+// Returns (inCooldown bool, lastTrigger time.Time, hasLastTrigger bool)
+// - inCooldown: true if task is in cooldown (should skip trigger), false if trigger is allowed
+// - lastTrigger: the last trigger time (valid only if hasLastTrigger is true)
+// - hasLastTrigger: whether the task has been triggered before
+// This method is extracted for easy unit testing and to avoid redundant lock acquisition
+func (t *EventTrigger) isInCooldown(taskID string, cooldownSeconds uint32, now time.Time) (bool, time.Time, bool) {
 	if cooldownSeconds == 0 {
-		return false // No cooldown configured
+		return false, time.Time{}, false // No cooldown configured
 	}
 
 	t.cooldownMutex.RLock()
@@ -784,12 +792,13 @@ func (t *EventTrigger) isInCooldown(taskID string, cooldownSeconds uint32, now t
 	t.cooldownMutex.RUnlock()
 
 	if !hasLastTrigger {
-		return false // Never triggered before, allow trigger
+		return false, time.Time{}, false // Never triggered before, allow trigger
 	}
 
 	cooldownDuration := time.Duration(cooldownSeconds) * time.Second
 	timeSinceLastTrigger := now.Sub(lastTrigger)
-	return timeSinceLastTrigger < cooldownDuration
+	inCooldown := timeSinceLastTrigger < cooldownDuration
+	return inCooldown, lastTrigger, true
 }
 
 // updateCooldownTimestamp updates the last trigger time for a task
@@ -816,11 +825,9 @@ func (t *EventTrigger) processLogInternal(log types.Log) error {
 			// Check cooldown period if configured
 			if entry.EventData != nil {
 				cooldownSeconds := entry.EventData.CooldownSeconds
-				if t.isInCooldown(taskID, cooldownSeconds, now) {
+				inCooldown, lastTrigger, _ := t.isInCooldown(taskID, cooldownSeconds, now)
+				if inCooldown {
 					cooldownDuration := time.Duration(cooldownSeconds) * time.Second
-					t.cooldownMutex.RLock()
-					lastTrigger := t.lastTriggerTime[taskID]
-					t.cooldownMutex.RUnlock()
 					timeSinceLastTrigger := now.Sub(lastTrigger)
 					remainingCooldown := cooldownDuration - timeSinceLastTrigger
 					t.logger.Debug("⏳ Task in cooldown period, skipping trigger",
@@ -946,23 +953,6 @@ func (t *EventTrigger) logMatchesTaskEntry(log types.Log, entry *TaskEntry) bool
 	return false
 }
 
-// logMatchesTask checks if a log matches a task check (legacy format - kept for compatibility)
-func (t *EventTrigger) logMatchesTask(log types.Log, check *Check) bool {
-	// Convert to EventTaskData for compatibility
-	eventData := &EventTaskData{
-		Queries:         check.Queries,
-		ParsedABIs:      check.ParsedABIs,
-		CooldownSeconds: 0, // Legacy format doesn't have cooldown
-	}
-
-	for i, query := range check.Queries {
-		if t.logMatchesEventQuery(log, query, eventData, i) {
-			return true
-		}
-	}
-	return false
-}
-
 // logMatchesEventQuery checks if a log matches a specific EventTrigger_Query
 // logMatchesEventQuery checks if a log matches a specific event query (works with both old and new formats)
 func (t *EventTrigger) logMatchesEventQuery(log types.Log, query *avsproto.EventTrigger_Query, eventData *EventTaskData, queryIndex int) bool {
@@ -1039,34 +1029,7 @@ func (t *EventTrigger) evaluateEventConditionsWithEventData(log types.Log, query
 	return t.evaluateEventConditionsCommon(log, query, conditions, contractABI, queryIndex)
 }
 
-// evaluateEventConditions checks if a log matches the provided ABI-based conditions (legacy format)
-func (t *EventTrigger) evaluateEventConditions(log types.Log, query *avsproto.EventTrigger_Query, conditions []*avsproto.EventCondition, check *Check, queryIndex int) bool {
-	// Use cached ABI if available, otherwise parse it (fallback for backward compatibility)
-	var contractABI *abi.ABI
-	if cachedABI, exists := check.ParsedABIs[queryIndex]; exists && cachedABI != nil {
-		contractABI = cachedABI
-		t.logger.Debug("🚀 Using cached ABI for conditional filtering", "query_index", queryIndex)
-	} else {
-		// Fallback: parse ABI on-demand (this should rarely happen with the new caching)
-		abiValues := query.GetContractAbi()
-		if len(abiValues) > 0 {
-			if parsedABI, err := parseABIOptimized(abiValues); err != nil {
-				t.logger.Error("❌ Failed to parse contract ABI for conditional filtering", "error", err)
-				return false
-			} else {
-				contractABI = parsedABI
-				t.logger.Debug("⚠️ Parsed ABI on-demand using shared optimized function (consider pre-parsing for better performance)", "query_index", queryIndex)
-			}
-		} else {
-			t.logger.Warn("🚫 Conditional filtering requires contract ABI but none provided")
-			return false
-		}
-	}
-
-	return t.evaluateEventConditionsCommon(log, query, conditions, contractABI, queryIndex)
-}
-
-// evaluateEventConditionsCommon contains the shared logic for both legacy and new formats
+// evaluateEventConditionsCommon contains the shared logic for condition evaluation
 func (t *EventTrigger) evaluateEventConditionsCommon(log types.Log, query *avsproto.EventTrigger_Query, conditions []*avsproto.EventCondition, contractABI *abi.ABI, queryIndex int) bool {
 	// Find the matching event in ABI using the first topic (event signature)
 	if len(log.Topics) == 0 {

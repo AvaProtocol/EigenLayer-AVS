@@ -788,25 +788,30 @@ func TestEventTriggerCooldown(t *testing.T) {
 
 		// First trigger should be allowed (no previous trigger)
 		now := time.Now()
-		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, now), "First trigger should not be in cooldown")
+		inCooldown, _, _ := trigger.isInCooldown(taskID, cooldownSeconds, now)
+		assert.False(t, inCooldown, "First trigger should not be in cooldown")
 
 		// Update timestamp to simulate a trigger
 		trigger.updateCooldownTimestamp(taskID, cooldownSeconds, now)
 
 		// Immediately after trigger, should be in cooldown
-		assert.True(t, trigger.isInCooldown(taskID, cooldownSeconds, now), "Should be in cooldown immediately after trigger")
+		inCooldown, _, _ = trigger.isInCooldown(taskID, cooldownSeconds, now)
+		assert.True(t, inCooldown, "Should be in cooldown immediately after trigger")
 
 		// After 299 seconds, should still be in cooldown
 		after299s := now.Add(299 * time.Second)
-		assert.True(t, trigger.isInCooldown(taskID, cooldownSeconds, after299s), "Should still be in cooldown after 299 seconds")
+		inCooldown, _, _ = trigger.isInCooldown(taskID, cooldownSeconds, after299s)
+		assert.True(t, inCooldown, "Should still be in cooldown after 299 seconds")
 
 		// After 300 seconds, should not be in cooldown
 		after300s := now.Add(300 * time.Second)
-		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, after300s), "Should not be in cooldown after 300 seconds")
+		inCooldown, _, _ = trigger.isInCooldown(taskID, cooldownSeconds, after300s)
+		assert.False(t, inCooldown, "Should not be in cooldown after 300 seconds")
 
 		// After 301 seconds, should not be in cooldown
 		after301s := now.Add(301 * time.Second)
-		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, after301s), "Should not be in cooldown after 301 seconds")
+		inCooldown, _, _ = trigger.isInCooldown(taskID, cooldownSeconds, after301s)
+		assert.False(t, inCooldown, "Should not be in cooldown after 301 seconds")
 	})
 
 	t.Run("CooldownDisabled", func(t *testing.T) {
@@ -817,17 +822,20 @@ func TestEventTriggerCooldown(t *testing.T) {
 		now := time.Now()
 
 		// First trigger should be allowed
-		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, now), "Should not be in cooldown when disabled")
+		inCooldown, _, _ := trigger.isInCooldown(taskID, cooldownSeconds, now)
+		assert.False(t, inCooldown, "Should not be in cooldown when disabled")
 
 		// Update timestamp (even though cooldown is disabled)
 		trigger.updateCooldownTimestamp(taskID, cooldownSeconds, now)
 
 		// Even after updating timestamp, should not be in cooldown
-		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, now), "Should not be in cooldown when disabled, even after trigger")
+		inCooldown, _, _ = trigger.isInCooldown(taskID, cooldownSeconds, now)
+		assert.False(t, inCooldown, "Should not be in cooldown when disabled, even after trigger")
 
 		// Immediately after should still not be in cooldown
 		immediatelyAfter := now.Add(1 * time.Second)
-		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, immediatelyAfter), "Should not be in cooldown when disabled")
+		inCooldown, _, _ = trigger.isInCooldown(taskID, cooldownSeconds, immediatelyAfter)
+		assert.False(t, inCooldown, "Should not be in cooldown when disabled")
 	})
 
 	t.Run("CustomCooldown", func(t *testing.T) {
@@ -838,21 +846,25 @@ func TestEventTriggerCooldown(t *testing.T) {
 		now := time.Now()
 
 		// First trigger should be allowed
-		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, now), "First trigger should not be in cooldown")
+		inCooldown, _, _ := trigger.isInCooldown(taskID, cooldownSeconds, now)
+		assert.False(t, inCooldown, "First trigger should not be in cooldown")
 
 		// Update timestamp to simulate a trigger
 		trigger.updateCooldownTimestamp(taskID, cooldownSeconds, now)
 
 		// Immediately after trigger, should be in cooldown
-		assert.True(t, trigger.isInCooldown(taskID, cooldownSeconds, now), "Should be in cooldown immediately after trigger")
+		inCooldown, _, _ = trigger.isInCooldown(taskID, cooldownSeconds, now)
+		assert.True(t, inCooldown, "Should be in cooldown immediately after trigger")
 
 		// After 59 seconds, should still be in cooldown
 		after59s := now.Add(59 * time.Second)
-		assert.True(t, trigger.isInCooldown(taskID, cooldownSeconds, after59s), "Should still be in cooldown after 59 seconds")
+		inCooldown, _, _ = trigger.isInCooldown(taskID, cooldownSeconds, after59s)
+		assert.True(t, inCooldown, "Should still be in cooldown after 59 seconds")
 
 		// After 60 seconds, should not be in cooldown
 		after60s := now.Add(60 * time.Second)
-		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, after60s), "Should not be in cooldown after 60 seconds")
+		inCooldown, _, _ = trigger.isInCooldown(taskID, cooldownSeconds, after60s)
+		assert.False(t, inCooldown, "Should not be in cooldown after 60 seconds")
 	})
 
 	t.Run("MultipleTasksIndependentCooldown", func(t *testing.T) {
@@ -867,10 +879,12 @@ func TestEventTriggerCooldown(t *testing.T) {
 		trigger.updateCooldownTimestamp(taskID1, cooldownSeconds, now)
 
 		// Task 1 should be in cooldown
-		assert.True(t, trigger.isInCooldown(taskID1, cooldownSeconds, now), "Task 1 should be in cooldown")
+		inCooldown, _, _ := trigger.isInCooldown(taskID1, cooldownSeconds, now)
+		assert.True(t, inCooldown, "Task 1 should be in cooldown")
 
 		// Task 2 should not be in cooldown (never triggered)
-		assert.False(t, trigger.isInCooldown(taskID2, cooldownSeconds, now), "Task 2 should not be in cooldown")
+		inCooldown, _, _ = trigger.isInCooldown(taskID2, cooldownSeconds, now)
+		assert.False(t, inCooldown, "Task 2 should not be in cooldown")
 
 		// Trigger task 2 at a later time
 		now2 := now.Add(5 * time.Second)
@@ -878,14 +892,18 @@ func TestEventTriggerCooldown(t *testing.T) {
 
 		// Both should be in cooldown now
 		checkTime := now2
-		assert.True(t, trigger.isInCooldown(taskID1, cooldownSeconds, checkTime), "Task 1 should still be in cooldown")
-		assert.True(t, trigger.isInCooldown(taskID2, cooldownSeconds, checkTime), "Task 2 should be in cooldown")
+		inCooldown, _, _ = trigger.isInCooldown(taskID1, cooldownSeconds, checkTime)
+		assert.True(t, inCooldown, "Task 1 should still be in cooldown")
+		inCooldown, _, _ = trigger.isInCooldown(taskID2, cooldownSeconds, checkTime)
+		assert.True(t, inCooldown, "Task 2 should be in cooldown")
 
 		// After cooldown expires for task 1 (triggered at now), task 2 should still be in cooldown (triggered at now2)
 		after61s := now.Add(61 * time.Second) // 61 seconds after task 1 was triggered
-		assert.False(t, trigger.isInCooldown(taskID1, cooldownSeconds, after61s), "Task 1 should not be in cooldown after expiration")
+		inCooldown, _, _ = trigger.isInCooldown(taskID1, cooldownSeconds, after61s)
+		assert.False(t, inCooldown, "Task 1 should not be in cooldown after expiration")
 		// Task 2 was triggered 5 seconds later, so at after61s it's only been 56 seconds since its trigger
-		assert.True(t, trigger.isInCooldown(taskID2, cooldownSeconds, after61s), "Task 2 should still be in cooldown (triggered 5s later)")
+		inCooldown, _, _ = trigger.isInCooldown(taskID2, cooldownSeconds, after61s)
+		assert.True(t, inCooldown, "Task 2 should still be in cooldown (triggered 5s later)")
 	})
 
 	t.Run("CooldownPreventsRepeatedTriggers", func(t *testing.T) {
@@ -896,20 +914,24 @@ func TestEventTriggerCooldown(t *testing.T) {
 		now := time.Now()
 
 		// First trigger - should be allowed
-		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, now), "First trigger should be allowed")
+		inCooldown, _, _ := trigger.isInCooldown(taskID, cooldownSeconds, now)
+		assert.False(t, inCooldown, "First trigger should be allowed")
 		trigger.updateCooldownTimestamp(taskID, cooldownSeconds, now)
 
 		// Second trigger immediately after - should be blocked
 		immediatelyAfter := now.Add(1 * time.Second)
-		assert.True(t, trigger.isInCooldown(taskID, cooldownSeconds, immediatelyAfter), "Second trigger immediately after should be blocked")
+		inCooldown, _, _ = trigger.isInCooldown(taskID, cooldownSeconds, immediatelyAfter)
+		assert.True(t, inCooldown, "Second trigger immediately after should be blocked")
 
 		// Third trigger after 1 minute - should still be blocked
 		after1min := now.Add(1 * time.Minute)
-		assert.True(t, trigger.isInCooldown(taskID, cooldownSeconds, after1min), "Third trigger after 1 minute should still be blocked")
+		inCooldown, _, _ = trigger.isInCooldown(taskID, cooldownSeconds, after1min)
+		assert.True(t, inCooldown, "Third trigger after 1 minute should still be blocked")
 
 		// Fourth trigger after 5 minutes - should be allowed
 		after5min := now.Add(5 * time.Minute)
-		assert.False(t, trigger.isInCooldown(taskID, cooldownSeconds, after5min), "Fourth trigger after 5 minutes should be allowed")
+		inCooldown, _, _ = trigger.isInCooldown(taskID, cooldownSeconds, after5min)
+		assert.False(t, inCooldown, "Fourth trigger after 5 minutes should be allowed")
 	})
 
 	t.Run("CooldownTimestampUpdate", func(t *testing.T) {
