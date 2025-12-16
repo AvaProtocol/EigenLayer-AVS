@@ -779,6 +779,7 @@ func TestEventTriggerCooldown(t *testing.T) {
 		defaultMaxTotalEvents:    1000,
 		processedEvents:          make(map[string]bool),
 		lastTriggerTime:          make(map[string]time.Time),
+		cooldownMutex:            sync.RWMutex{},
 	}
 
 	t.Run("DefaultCooldownApplied", func(t *testing.T) {

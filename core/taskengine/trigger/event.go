@@ -782,6 +782,7 @@ func (t *EventTrigger) processLog(log types.Log) error {
 // - lastTrigger: the last trigger time (valid only if hasLastTrigger is true)
 // - hasLastTrigger: whether the task has been triggered before
 // This method is extracted for easy unit testing and to avoid redundant lock acquisition
+// NOTE: This method does NOT update the timestamp. For atomic check-and-update, use checkAndUpdateCooldown.
 func (t *EventTrigger) isInCooldown(taskID string, cooldownSeconds uint32, now time.Time) (bool, time.Time, bool) {
 	if cooldownSeconds == 0 {
 		return false, time.Time{}, false // No cooldown configured
@@ -801,8 +802,48 @@ func (t *EventTrigger) isInCooldown(taskID string, cooldownSeconds uint32, now t
 	return inCooldown, lastTrigger, true
 }
 
+// checkAndUpdateCooldown atomically checks if a task is in cooldown and updates the timestamp if not.
+// This prevents race conditions where multiple concurrent events could pass the cooldown check.
+// Returns (shouldSkip bool, lastTrigger time.Time, hasLastTrigger bool)
+// - shouldSkip: true if task is in cooldown (should skip trigger), false if trigger is allowed
+// - lastTrigger: the last trigger time before update (valid only if hasLastTrigger is true)
+// - hasLastTrigger: whether the task had been triggered before this call
+// This follows the same atomic pattern as the deduplication logic in processLog.
+// NOTE: This method updates the timestamp immediately if not in cooldown, before the trigger is sent.
+// This ensures atomicity and prevents duplicate triggers from concurrent events.
+func (t *EventTrigger) checkAndUpdateCooldown(taskID string, cooldownSeconds uint32, now time.Time) (bool, time.Time, bool) {
+	if cooldownSeconds == 0 {
+		return false, time.Time{}, false // No cooldown configured
+	}
+
+	t.cooldownMutex.Lock()
+	defer t.cooldownMutex.Unlock()
+
+	lastTrigger, hasLastTrigger := t.lastTriggerTime[taskID]
+
+	if !hasLastTrigger {
+		// Never triggered before, allow trigger and update timestamp atomically
+		t.lastTriggerTime[taskID] = now
+		return false, time.Time{}, false
+	}
+
+	cooldownDuration := time.Duration(cooldownSeconds) * time.Second
+	timeSinceLastTrigger := now.Sub(lastTrigger)
+	inCooldown := timeSinceLastTrigger < cooldownDuration
+
+	if !inCooldown {
+		// Not in cooldown, update timestamp atomically to prevent concurrent triggers
+		// This "reserves" the trigger slot even before sending to channel, preventing
+		// race conditions where multiple goroutines could pass the cooldown check
+		t.lastTriggerTime[taskID] = now
+	}
+
+	return inCooldown, lastTrigger, true
+}
+
 // updateCooldownTimestamp updates the last trigger time for a task
 // This method is extracted for easy unit testing
+// NOTE: For production code, prefer checkAndUpdateCooldown for atomic check-and-update.
 func (t *EventTrigger) updateCooldownTimestamp(taskID string, cooldownSeconds uint32, now time.Time) {
 	if cooldownSeconds == 0 {
 		return // No cooldown configured, no need to track
@@ -822,13 +863,17 @@ func (t *EventTrigger) processLogInternal(log types.Log) error {
 	// Check all registered tasks to see which ones match this log
 	t.registry.RangeEventTasks(func(taskID string, entry *TaskEntry) bool {
 		if t.logMatchesTaskEntry(log, entry) {
-			// Check cooldown period if configured
+			// Atomically check cooldown period and update timestamp if trigger is allowed
+			// This prevents race conditions where multiple concurrent events could pass the cooldown check
 			if entry.EventData != nil {
 				cooldownSeconds := entry.EventData.CooldownSeconds
-				inCooldown, lastTrigger, _ := t.isInCooldown(taskID, cooldownSeconds, now)
-				if inCooldown {
+				shouldSkip, lastTrigger, hasLastTrigger := t.checkAndUpdateCooldown(taskID, cooldownSeconds, now)
+				if shouldSkip {
 					cooldownDuration := time.Duration(cooldownSeconds) * time.Second
-					timeSinceLastTrigger := now.Sub(lastTrigger)
+					var timeSinceLastTrigger time.Duration
+					if hasLastTrigger {
+						timeSinceLastTrigger = now.Sub(lastTrigger)
+					}
 					remainingCooldown := cooldownDuration - timeSinceLastTrigger
 					t.logger.Debug("⏳ Task in cooldown period, skipping trigger",
 						"task_id", taskID,
@@ -838,6 +883,7 @@ func (t *EventTrigger) processLogInternal(log types.Log) error {
 						"block", log.BlockNumber)
 					return true // Continue to next task
 				}
+				// Note: Timestamp was already updated atomically in checkAndUpdateCooldown
 			}
 
 			triggeredTasks = append(triggeredTasks, taskID)
@@ -852,11 +898,6 @@ func (t *EventTrigger) processLogInternal(log types.Log) error {
 
 			select {
 			case t.triggerCh <- triggerMeta:
-				// Update last trigger time after successfully sending to channel
-				if entry.EventData != nil {
-					t.updateCooldownTimestamp(taskID, entry.EventData.CooldownSeconds, now)
-				}
-
 				hasEnrichedData := marker.EnrichedData != nil
 				t.logger.Info("🎯 Task triggered with enriched data",
 					"task_id", taskID,
