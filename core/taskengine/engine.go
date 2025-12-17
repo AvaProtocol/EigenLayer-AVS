@@ -970,13 +970,8 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			"time_monitoring", payload.Capabilities.GetTimeMonitoring())
 	} else {
 		// The operator has reconnected, cancel any existing ticker and reset state
-		// Cancel old ticker if it exists
-		if n.trackSyncedTasks[address].TickerCancel != nil {
-			n.logger.Info("🔄 Canceling old ticker for reconnected operator",
-				"operator", address,
-				"old_stream", "existing")
-			n.trackSyncedTasks[address].TickerCancel()
-		}
+		// Cancel old ticker if it exists (must do this while holding lock to avoid race)
+		oldTickerCancel := n.trackSyncedTasks[address].TickerCancel
 
 		if payload.MonotonicClock > n.trackSyncedTasks[address].MonotonicClock {
 			n.logger.Info("🔄 Operator reconnected with newer MonotonicClock - resetting task tracking",
@@ -1020,6 +1015,14 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			n.trackSyncedTasks[address].TickerCancel = tickerCancel
 		}
 		n.lock.Unlock()
+
+		// Cancel old ticker AFTER releasing lock to avoid holding lock during cancellation
+		if oldTickerCancel != nil {
+			n.logger.Info("🔄 Canceling old ticker for reconnected operator",
+				"operator", address,
+				"old_stream", "existing")
+			oldTickerCancel()
+		}
 	}
 
 	// Create ticker for this connection

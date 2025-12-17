@@ -3222,6 +3222,10 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 	if executionStep.Error != "" {
 		result["error"] = executionStep.Error
 	}
+	// Preserve error code from step if available
+	if executionStep.ErrorCode != avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED {
+		result["errorCode"] = executionStep.ErrorCode
+	}
 
 	// Preserve executionContext from step if available
 	if executionStep.ExecutionContext != nil {
@@ -3392,9 +3396,10 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 	// Convert result to the appropriate protobuf output type
 	// Success/Error are already encoded inside 'result' for immediate execution path
 
-	// Extract success/error from result (now consistently populated by extractExecutionResult for all node types)
+	// Extract success/error/errorCode from result (now consistently populated by extractExecutionResult for all node types)
 	var responseSuccess bool = true
 	var responseError string = ""
+	var responseErrorCode avsproto.ErrorCode = avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED
 
 	if result != nil {
 		if successVal, ok := result["success"]; ok {
@@ -3407,13 +3412,24 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				responseError = errorStr
 			}
 		}
-
+		// Extract error code from result if available
+		if errorCodeVal, hasErrorCode := result["errorCode"]; hasErrorCode {
+			if errorCode, ok := errorCodeVal.(avsproto.ErrorCode); ok {
+				responseErrorCode = errorCode
+			} else if errorCodeInt, ok := errorCodeVal.(int32); ok {
+				// Handle case where error code is stored as int32 (from protobuf enum)
+				responseErrorCode = avsproto.ErrorCode(errorCodeInt)
+			} else if errorCodeInt, ok := errorCodeVal.(int); ok {
+				// Handle case where error code is stored as int
+				responseErrorCode = avsproto.ErrorCode(errorCodeInt)
+			}
+		}
 	}
 
 	resp := &avsproto.RunNodeWithInputsResp{
 		Success:   responseSuccess,
 		Error:     responseError,
-		ErrorCode: avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED, // Default for successful operations
+		ErrorCode: responseErrorCode,
 	}
 
 	// Use handler to convert result to protobuf output
@@ -3437,26 +3453,9 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		}
 	}
 
-	// Special handling for ContractWrite: align top-level success with method outcomes
-	if nodeTypeStr == NodeTypeContractWrite && resp.Metadata != nil {
-		meta := resp.Metadata.AsInterface()
-		if metaArr, ok := meta.([]interface{}); ok {
-			for _, item := range metaArr {
-				if m, ok := item.(map[string]interface{}); ok {
-					if succ, ok := m["success"].(bool); ok && !succ {
-						resp.Success = false
-						break
-					}
-					if rec, ok := m["receipt"].(map[string]interface{}); ok {
-						if status, ok := rec["status"].(string); ok && strings.EqualFold(status, "0x0") {
-							resp.Success = false
-							break
-						}
-					}
-				}
-			}
-		}
-	}
+	// Note: ContractWrite step success is already determined by computeWriteStepSuccess
+	// and set via finalizeStep. No need to re-check metadata here - rely on step.Success
+	// as the single source of truth.
 
 	// Attach execution_context from step if available, otherwise use defaults
 	// Skip for EventTrigger since it provides its own executionContext in metadata
@@ -3488,6 +3487,9 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			}
 		}
 	}
+
+	// Note: Success value is already correctly set by finalizeStep in processor Execute methods.
+	// No need for additional safeguards - rely on step.Success as the single source of truth.
 
 	// For failed operations, set error code based on failure type
 	if !resp.Success {
