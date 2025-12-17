@@ -241,7 +241,7 @@ func (r *ContractReadProcessor) executeMethodCallWithoutFormatting(ctx context.C
 					if err != nil {
 						return &avsproto.ContractReadNode_MethodResult{
 							Success:    false,
-							Error:      fmt.Sprintf("failed to generate calldata: %v", err),
+							Error:      err.Error(),
 							MethodName: methodName,
 							Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
 						}
@@ -399,9 +399,8 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	log.WriteString(formatNodeExecutionLogHeader(s))
 
 	var err error
-	defer func() {
-		finalizeStep(s, err == nil, err, "", log.String())
-	}()
+	// Note: finalizeStep is called explicitly at the end with proper error message extraction
+	// No need for defer here as it would overwrite the error message
 
 	// Get configuration from node config
 	if err = validateNodeConfig(node.Config, "ContractReadNode"); err != nil {
@@ -501,9 +500,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 			log.WriteString(fmt.Sprintf("Method %s executed successfully\n", result.MethodName))
 		} else {
 			log.WriteString(fmt.Sprintf("Method %s failed: %s\n", result.MethodName, result.Error))
-			if result.Error != "" {
-				err = fmt.Errorf("method call failed: %s", result.Error)
-			}
+			// Note: Error is already in result.Error and will be extracted by computeReadStepSuccess
 		}
 	}
 
@@ -783,7 +780,17 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	}
 
 	// Determine step success from method results: any method with Success == false marks step as failed
-	stepSuccess, stepErrorMsg := computeReadStepSuccess(results)
+	// Use methodResults (from first pass) directly to ensure we capture all errors
+	// The second pass may filter or modify results, so we need the original raw results
+	stepSuccess, stepErrorMsg := computeReadStepSuccess(methodResults)
+	// Fallback to rawResultsForMetadata if methodResults is empty (shouldn't happen, but defensive)
+	if stepErrorMsg == "" && len(methodResults) == 0 && len(rawResultsForMetadata) > 0 {
+		stepSuccess, stepErrorMsg = computeReadStepSuccess(rawResultsForMetadata)
+	}
+	// Final fallback to results if both are empty (shouldn't happen, but defensive)
+	if stepErrorMsg == "" && len(methodResults) == 0 && len(rawResultsForMetadata) == 0 && len(results) > 0 {
+		stepSuccess, stepErrorMsg = computeReadStepSuccess(results)
+	}
 	finalizeStep(s, stepSuccess, nil, stepErrorMsg, log.String())
 
 	return s, nil
