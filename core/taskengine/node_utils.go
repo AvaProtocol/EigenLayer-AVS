@@ -177,9 +177,11 @@ func setNodeOutputData(processor *CommonProcessor, stepID string, outputData int
 // finalizeStep is the single unified finalizer for both success and error paths.
 // It sets end time, success flag, error message/code (when err != nil), and log content.
 func finalizeStep(step *avsproto.Execution_Step, success bool, err error, errorMessage string, logContent string) {
-	// If no explicit error provided but step failed and an errorMessage exists, wrap it
+	// If no explicit error provided but step failed and an errorMessage exists, create a structured error
 	if err == nil && !success && strings.TrimSpace(errorMessage) != "" {
-		err = fmt.Errorf("%s", errorMessage)
+		// Create a structured error with INVALID_REQUEST code for validation errors
+		// This ensures proper error code propagation to the response
+		err = NewInvalidRequestError(errorMessage)
 	}
 
 	step.EndAt = time.Now().UnixMilli()
@@ -187,6 +189,18 @@ func finalizeStep(step *avsproto.Execution_Step, success bool, err error, errorM
 	if err != nil {
 		step.Error = err.Error()
 		step.ErrorCode = GetErrorCode(err)
+	} else if !success {
+		// If step failed but no error was provided, use errorMessage directly
+		// This ensures error message is always set when step fails
+		if strings.TrimSpace(errorMessage) != "" {
+			step.Error = errorMessage
+			step.ErrorCode = avsproto.ErrorCode_INVALID_REQUEST
+		} else {
+			// Ensure error is cleared on success/falsy err
+			if step.Error != "" {
+				step.Error = ""
+			}
+		}
 	} else {
 		// Ensure error is cleared on success/falsy err
 		if step.Error != "" {
@@ -271,8 +285,13 @@ func computeReadStepSuccess(results []*avsproto.ContractReadNode_MethodResult) (
 		}
 		if !mr.Success {
 			stepSuccess = false
-			if stepErrorMsg == "" && mr.Error != "" {
-				stepErrorMsg = mr.Error
+			if stepErrorMsg == "" {
+				if mr.Error != "" {
+					stepErrorMsg = mr.Error
+				} else {
+					// Fallback: if method failed but no error message, provide a generic one
+					stepErrorMsg = fmt.Sprintf("method %s failed", mr.MethodName)
+				}
 			}
 		}
 	}

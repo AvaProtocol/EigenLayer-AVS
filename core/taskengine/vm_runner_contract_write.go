@@ -309,7 +309,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		}
 		return &avsproto.ContractWriteNode_MethodResult{
 			Success:    false,
-			Error:      fmt.Sprintf("failed to get/generate calldata: %v", err),
+			Error:      err.Error(),
 			MethodName: methodCall.MethodName,
 		}
 	}

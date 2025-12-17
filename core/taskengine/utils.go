@@ -580,10 +580,22 @@ func GenerateCallData(methodName string, methodParams []string, contractAbi *abi
 	for i, param := range methodParams {
 		input := method.Inputs[i]
 
+		// Get parameter name for better error messages
+		paramName := fmt.Sprintf("parameter[%d]", i)
+		if input.Name != "" {
+			paramName = input.Name
+		}
+
 		// Parse parameter based on its ABI type
 		parsedArg, err := parseABIParameter(param, input.Type)
 		if err != nil {
-			return "", fmt.Errorf("failed to parse parameter %d (%s): %v", i, param, err)
+			// For tuple parameters, the error already includes field names, so return it directly
+			// For simple parameters, we need to include the parameter name
+			if input.Type.T == abi.TupleTy {
+				return "", err
+			}
+			// For simple parameters, include parameter name in the error
+			return "", fmt.Errorf("failed to parse %s (%s): %v", paramName, input.Type.String(), err)
 		}
 
 		args = append(args, parsedArg)
@@ -678,8 +690,10 @@ func GenerateOrUseCallData(methodName string, callData string, methodParams []st
 
 // parseABIParameter parses a string parameter into the appropriate Go type based on ABI type
 func parseABIParameter(param string, abiType abi.Type) (interface{}, error) {
-	// Handle empty parameters for methods with no inputs
-	if param == "" && abiType.String() == "" {
+	// Handle empty parameters for methods with no inputs when the ABI type is truly unspecified/zero-value
+	// Note: We check abiType.T == 0 to detect unspecified/zero-value types (when no type is defined);
+	// incomplete types still have a valid non-zero T
+	if param == "" && abiType.T == 0 {
 		return nil, nil
 	}
 
@@ -692,12 +706,25 @@ func parseABIParameter(param string, abiType abi.Type) (interface{}, error) {
 
 	case abi.UintTy, abi.IntTy:
 		// Handle big integers
-		value := new(big.Int)
-		if strings.HasPrefix(param, "0x") {
-			value.SetString(param[2:], 16)
-		} else {
-			value.SetString(param, 10)
+		// Validate that the parameter is a valid number
+		paramTrimmed := strings.TrimSpace(param)
+		if paramTrimmed == "" {
+			return nil, fmt.Errorf("expected numeric value, got ''")
 		}
+
+		value := new(big.Int)
+		var ok bool
+		if strings.HasPrefix(paramTrimmed, "0x") {
+			_, ok = value.SetString(paramTrimmed[2:], 16)
+		} else {
+			// Check if it's a valid decimal number (allows digits, optional negative sign)
+			_, ok = value.SetString(paramTrimmed, 10)
+		}
+
+		if !ok {
+			return nil, fmt.Errorf("expected numeric value, got '%s'", paramTrimmed)
+		}
+
 		return value, nil
 
 	case abi.BoolTy:
@@ -763,9 +790,15 @@ func parseABIParameter(param string, abiType abi.Type) (interface{}, error) {
 					elementStr = fmt.Sprintf("%v", element)
 				}
 
+				// Get field name for better error messages
+				fieldName := fmt.Sprintf("element[%d]", i)
+				if i < len(abiType.TupleRawNames) && abiType.TupleRawNames[i] != "" {
+					fieldName = abiType.TupleRawNames[i]
+				}
+
 				parsedElement, err := parseABIParameter(elementStr, *abiType.TupleElems[i])
 				if err != nil {
-					return nil, fmt.Errorf("failed to parse tuple element %d: %v", i, err)
+					return nil, fmt.Errorf("failed to parse tuple %s (%s): %v", fieldName, abiType.TupleElems[i].String(), err)
 				}
 				tupleElements = append(tupleElements, parsedElement)
 			}
