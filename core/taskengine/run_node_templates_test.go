@@ -207,7 +207,7 @@ func TestRunNodeImmediately_MalformedTemplateDetection(t *testing.T) {
 	defer storage.Destroy(engine.db.(*storage.BadgerStorage))
 
 	nodeConfig := map[string]interface{}{
-		"url":    "https://httpbin.org/post",
+		"url":    MockAPIEndpoint + "/post",
 		"method": "POST",
 		"body":   `{"malformed1": "{{value", "malformed2": "value}}", "correct": "{{value}}"}`,
 		"headersMap": [][]string{
@@ -236,7 +236,7 @@ func TestRunNodeImmediately_ValidTemplateAfterFix(t *testing.T) {
 	defer storage.Destroy(engine.db.(*storage.BadgerStorage))
 
 	nodeConfig := map[string]interface{}{
-		"url":    "https://httpbin.org/post",
+		"url":    MockAPIEndpoint + "/post",
 		"method": "POST",
 		"body":   `{"message": "{{message}}", "timestamp": "{{date.now}}"}`,
 		"headersMap": [][]string{
