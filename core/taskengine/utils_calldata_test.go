@@ -2,13 +2,16 @@ package taskengine
 
 import (
 	"bytes"
+	"math/big"
 	"testing"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -331,6 +334,168 @@ func TestContractRead_InvalidNumericValue_ResponseStructure(t *testing.T) {
 			"settings": structpb.NewStructValue(&structpb.Struct{
 				Fields: map[string]*structpb.Value{
 					"chain_id": structpb.NewNumberValue(11155111),
+				},
+			}),
+		},
+	}
+
+	// Execute via RPC
+	result, err := engine.RunNodeImmediatelyRPC(user, req)
+
+	// Verify no system error occurred
+	require.NoError(t, err, "RunNodeImmediatelyRPC should not return system error")
+	require.NotNil(t, result, "Response should not be nil")
+
+	// Debug: Print actual response values
+	t.Logf("Response Success: %v", result.Success)
+	t.Logf("Response Error: %q", result.Error)
+	t.Logf("Response ErrorCode: %v", result.ErrorCode)
+
+	// Verify response structure for error case
+	assert.False(t, result.Success, "Success should be false when error occurs")
+	assert.NotEmpty(t, result.Error, "Error message should not be empty")
+	assert.Contains(t, result.Error, "failed to parse tuple amountIn", "Error should contain parsing error")
+	assert.Contains(t, result.Error, "expected numeric value", "Error should indicate invalid numeric value")
+	assert.Contains(t, result.Error, "got 'MAX'", "Error should show the actual invalid value")
+	assert.Equal(t, avsproto.ErrorCode_INVALID_REQUEST, result.ErrorCode, "Error code should be INVALID_REQUEST (3000)")
+}
+
+// TestContractWrite_InvalidNumericValue_ResponseStructure tests that invalid numeric values
+// result in a response with success=false, non-empty error, and proper error code
+func TestContractWrite_InvalidNumericValue_ResponseStructure(t *testing.T) {
+	// Setup test environment
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	engine := New(db, config, nil, testutil.GetLogger())
+
+	// Create test user
+	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+	if !ok {
+		t.Skip("Owner EOA address not set, skipping test")
+	}
+	ownerEOA := *ownerAddr
+	user := &model.User{Address: ownerEOA}
+
+	// Get smart wallet address for settings
+	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
+	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+
+	client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
+	require.NoError(t, err, "Failed to connect to RPC")
+	defer client.Close()
+
+	runnerAddr, err := aa.GetSenderAddress(client, ownerEOA, big.NewInt(0))
+	require.NoError(t, err, "Failed to derive smart wallet address")
+
+	// Seed wallet in DB for validation
+	_ = StoreWallet(db, ownerEOA, &model.SmartWallet{
+		Owner:   &ownerEOA,
+		Address: runnerAddr,
+		Factory: &smartWalletConfig.FactoryAddress,
+		Salt:    big.NewInt(0),
+	})
+
+	// Create ContractWrite node with MAX value in tuple (should fail)
+	contractAbi := []*structpb.Value{
+		structpb.NewStructValue(&structpb.Struct{
+			Fields: map[string]*structpb.Value{
+				"inputs": structpb.NewListValue(&structpb.ListValue{
+					Values: []*structpb.Value{
+						structpb.NewStructValue(&structpb.Struct{
+							Fields: map[string]*structpb.Value{
+								"name": structpb.NewStringValue("params"),
+								"type": structpb.NewStringValue("tuple"),
+								"components": structpb.NewListValue(&structpb.ListValue{
+									Values: []*structpb.Value{
+										structpb.NewStructValue(&structpb.Struct{
+											Fields: map[string]*structpb.Value{
+												"name": structpb.NewStringValue("tokenIn"),
+												"type": structpb.NewStringValue("address"),
+											},
+										}),
+										structpb.NewStructValue(&structpb.Struct{
+											Fields: map[string]*structpb.Value{
+												"name": structpb.NewStringValue("tokenOut"),
+												"type": structpb.NewStringValue("address"),
+											},
+										}),
+										structpb.NewStructValue(&structpb.Struct{
+											Fields: map[string]*structpb.Value{
+												"name": structpb.NewStringValue("amountIn"),
+												"type": structpb.NewStringValue("uint256"),
+											},
+										}),
+										structpb.NewStructValue(&structpb.Struct{
+											Fields: map[string]*structpb.Value{
+												"name": structpb.NewStringValue("fee"),
+												"type": structpb.NewStringValue("uint24"),
+											},
+										}),
+										structpb.NewStructValue(&structpb.Struct{
+											Fields: map[string]*structpb.Value{
+												"name": structpb.NewStringValue("sqrtPriceLimitX96"),
+												"type": structpb.NewStringValue("uint160"),
+											},
+										}),
+									},
+								}),
+							},
+						}),
+					},
+				}),
+				"name": structpb.NewStringValue("swapExactInputSingle"),
+				"outputs": structpb.NewListValue(&structpb.ListValue{
+					Values: []*structpb.Value{
+						structpb.NewStructValue(&structpb.Struct{
+							Fields: map[string]*structpb.Value{
+								"name": structpb.NewStringValue("amountOut"),
+								"type": structpb.NewStringValue("uint256"),
+							},
+						}),
+					},
+				}),
+				"stateMutability": structpb.NewStringValue("nonpayable"),
+				"type":            structpb.NewStringValue("function"),
+			},
+		}),
+	}
+
+	isSimulated := true
+	value := "0"
+
+	contractWriteNode := &avsproto.TaskNode{
+		Id:   "test-contract-write",
+		Name: "swapExactInputSingle",
+		Type: avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE,
+		TaskType: &avsproto.TaskNode_ContractWrite{
+			ContractWrite: &avsproto.ContractWriteNode{
+				Config: &avsproto.ContractWriteNode_Config{
+					ContractAddress: "0xA0b86a33E6441d0be3c7bb50e65Eb42d5E0b2b4b",
+					ContractAbi:     contractAbi,
+					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
+						{
+							MethodName: "swapExactInputSingle",
+							MethodParams: []string{
+								`["0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", "0xfff9976782d46cc05630d1f6ebab18b2324d6b14", "MAX", "3000", 0]`,
+							},
+						},
+					},
+					IsSimulated: &isSimulated,
+					Value:       &value,
+				},
+			},
+		},
+	}
+
+	req := &avsproto.RunNodeWithInputsReq{
+		Node: contractWriteNode,
+		InputVariables: map[string]*structpb.Value{
+			"settings": structpb.NewStructValue(&structpb.Struct{
+				Fields: map[string]*structpb.Value{
+					"chain_id": structpb.NewNumberValue(11155111),
+					"runner":   structpb.NewStringValue(runnerAddr.Hex()),
 				},
 			}),
 		},
