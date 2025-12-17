@@ -690,8 +690,9 @@ func GenerateOrUseCallData(methodName string, callData string, methodParams []st
 
 // parseABIParameter parses a string parameter into the appropriate Go type based on ABI type
 func parseABIParameter(param string, abiType abi.Type) (interface{}, error) {
-	// Handle empty parameters for methods with no inputs (only when type is truly unspecified)
-	// Note: We check abiType.T == 0 instead of String() == "" because String() might return empty for incomplete types
+	// Handle empty parameters for methods with no inputs when the ABI type is truly unspecified/zero-value
+	// Note: We check abiType.T == 0 to detect unspecified/zero-value types (when no type is defined);
+	// incomplete types still have a valid non-zero T
 	if param == "" && abiType.T == 0 {
 		return nil, nil
 	}

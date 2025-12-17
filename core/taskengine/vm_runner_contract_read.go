@@ -786,17 +786,9 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	}
 
 	// Determine step success from method results: any method with Success == false marks step as failed
-	// Use methodResults (from first pass) directly to ensure we capture all errors
-	// The second pass may filter or modify results, so we need the original raw results
+	// Use methodResults (from first pass) directly - this contains all errors before any formatting
+	// Note: rawResultsForMetadata and results are derived from methodResults, so they contain the same error info
 	stepSuccess, stepErrorMsg := computeReadStepSuccess(methodResults)
-	// Fallback to rawResultsForMetadata if methodResults is empty (shouldn't happen, but defensive)
-	if stepErrorMsg == "" && len(methodResults) == 0 && len(rawResultsForMetadata) > 0 {
-		stepSuccess, stepErrorMsg = computeReadStepSuccess(rawResultsForMetadata)
-	}
-	// Final fallback to results if both are empty (shouldn't happen, but defensive)
-	if stepErrorMsg == "" && len(methodResults) == 0 && len(rawResultsForMetadata) == 0 && len(results) > 0 {
-		stepSuccess, stepErrorMsg = computeReadStepSuccess(results)
-	}
 	finalizeStep(s, stepSuccess, nil, stepErrorMsg, log.String())
 
 	return s, nil
