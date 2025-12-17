@@ -405,6 +405,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	// Get configuration from node config
 	if err = validateNodeConfig(node.Config, "ContractReadNode"); err != nil {
 		log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		finalizeStep(s, false, err, err.Error(), log.String())
 		return s, err
 	}
 
@@ -412,10 +413,14 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	// Note: ABI is handled directly from protobuf Values using optimized parsing
 	if config.ContractAddress == "" {
 		err = NewMissingRequiredFieldError("contractAddress")
+		log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		finalizeStep(s, false, err, err.Error(), log.String())
 		return s, err
 	}
 	if len(config.ContractAbi) == 0 {
 		err = NewMissingRequiredFieldError("contractAbi")
+		log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		finalizeStep(s, false, err, err.Error(), log.String())
 		return s, err
 	}
 
@@ -425,12 +430,16 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	// Validate contract address after template resolution
 	if !common.IsHexAddress(contractAddress) {
 		err = NewInvalidAddressError(contractAddress)
+		log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		finalizeStep(s, false, err, err.Error(), log.String())
 		return s, err
 	}
 	// Note: ABI is never subject to template variable substitution
 
 	if len(config.MethodCalls) == 0 {
 		err = NewMissingRequiredFieldError("methodCalls")
+		log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		finalizeStep(s, false, err, err.Error(), log.String())
 		return s, err
 	}
 
@@ -441,10 +450,14 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 			parsedABI = optimizedParsedABI
 		} else {
 			err = fmt.Errorf("failed to parse ABI: %v", parseErr)
+			log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+			finalizeStep(s, false, err, err.Error(), log.String())
 			return s, err
 		}
 	} else {
 		err = NewMissingRequiredFieldError("contractAbi")
+		log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		finalizeStep(s, false, err, err.Error(), log.String())
 		return s, err
 	}
 

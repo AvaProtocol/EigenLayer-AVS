@@ -3424,11 +3424,6 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				responseErrorCode = avsproto.ErrorCode(errorCodeInt)
 			}
 		}
-
-		// Ensure success is false if error code is set (even if error message is empty)
-		if responseErrorCode != avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED {
-			responseSuccess = false
-		}
 	}
 
 	resp := &avsproto.RunNodeWithInputsResp{
@@ -3458,26 +3453,9 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		}
 	}
 
-	// Special handling for ContractWrite: align top-level success with method outcomes
-	if nodeTypeStr == NodeTypeContractWrite && resp.Metadata != nil {
-		meta := resp.Metadata.AsInterface()
-		if metaArr, ok := meta.([]interface{}); ok {
-			for _, item := range metaArr {
-				if m, ok := item.(map[string]interface{}); ok {
-					if succ, ok := m["success"].(bool); ok && !succ {
-						resp.Success = false
-						break
-					}
-					if rec, ok := m["receipt"].(map[string]interface{}); ok {
-						if status, ok := rec["status"].(string); ok && strings.EqualFold(status, "0x0") {
-							resp.Success = false
-							break
-						}
-					}
-				}
-			}
-		}
-	}
+	// Note: ContractWrite step success is already determined by computeWriteStepSuccess
+	// and set via finalizeStep. No need to re-check metadata here - rely on step.Success
+	// as the single source of truth.
 
 	// Attach execution_context from step if available, otherwise use defaults
 	// Skip for EventTrigger since it provides its own executionContext in metadata
@@ -3510,10 +3488,8 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		}
 	}
 
-	// Ensure success is false if error is present (safeguard)
-	if resp.Error != "" && resp.Success {
-		resp.Success = false
-	}
+	// Note: Success value is already correctly set by finalizeStep in processor Execute methods.
+	// No need for additional safeguards - rely on step.Success as the single source of truth.
 
 	// For failed operations, set error code based on failure type
 	if !resp.Success {
