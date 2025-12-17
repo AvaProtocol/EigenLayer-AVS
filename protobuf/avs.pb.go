@@ -7090,9 +7090,15 @@ type EventTrigger_Config struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Array of RPC filter queries. Each query creates a separate subscription.
 	// For FROM-OR-TO scenarios, provide two queries: one for FROM, one for TO.
-	Queries       []*EventTrigger_Query `protobuf:"bytes,1,rep,name=queries,proto3" json:"queries,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Queries []*EventTrigger_Query `protobuf:"bytes,1,rep,name=queries,proto3" json:"queries,omitempty"`
+	// Cooldown period in seconds. After a trigger fires, wait this many seconds before
+	// allowing the same task to trigger again. This prevents repeated firing when
+	// conditions remain true (e.g., price > threshold fires every block).
+	// Default: 300 (5 minutes cooldown - prevents repeated firing when conditions remain true)
+	// Set to 0 to disable cooldown (triggers fire immediately when conditions match)
+	CooldownSeconds *uint32 `protobuf:"varint,2,opt,name=cooldown_seconds,json=cooldownSeconds,proto3,oneof" json:"cooldown_seconds,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *EventTrigger_Config) Reset() {
@@ -7130,6 +7136,13 @@ func (x *EventTrigger_Config) GetQueries() []*EventTrigger_Query {
 		return x.Queries
 	}
 	return nil
+}
+
+func (x *EventTrigger_Config) GetCooldownSeconds() uint32 {
+	if x != nil && x.CooldownSeconds != nil {
+		return *x.CooldownSeconds
+	}
+	return 0
 }
 
 type EventTrigger_Output struct {
@@ -9316,7 +9329,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x06Config\x12\x1a\n" +
 	"\binterval\x18\x01 \x01(\x03R\binterval\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xbc\x05\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\x82\x06\n" +
 	"\fEventTrigger\x127\n" +
 	"\x06config\x18\x01 \x01(\v2\x1f.aggregator.EventTrigger.ConfigR\x06config\x1a\xcb\x02\n" +
 	"\x05Query\x12\x1c\n" +
@@ -9337,9 +9350,11 @@ const file_avs_proto_rawDesc = "" +
 	"\x0fapply_to_fields\x18\x03 \x03(\tR\rapplyToFields\x12#\n" +
 	"\rmethod_params\x18\x04 \x03(\tR\fmethodParamsB\f\n" +
 	"\n" +
-	"_call_data\x1aB\n" +
+	"_call_data\x1a\x87\x01\n" +
 	"\x06Config\x128\n" +
-	"\aqueries\x18\x01 \x03(\v2\x1e.aggregator.EventTrigger.QueryR\aqueries\x1a4\n" +
+	"\aqueries\x18\x01 \x03(\v2\x1e.aggregator.EventTrigger.QueryR\aqueries\x12.\n" +
+	"\x10cooldown_seconds\x18\x02 \x01(\rH\x00R\x0fcooldownSeconds\x88\x01\x01B\x13\n" +
+	"\x11_cooldown_seconds\x1a4\n" +
 	"\x06Output\x12*\n" +
 	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xf2\x03\n" +
 	"\rManualTrigger\x128\n" +
@@ -10562,6 +10577,7 @@ func file_avs_proto_init() {
 	}
 	file_avs_proto_msgTypes[86].OneofWrappers = []any{}
 	file_avs_proto_msgTypes[87].OneofWrappers = []any{}
+	file_avs_proto_msgTypes[88].OneofWrappers = []any{}
 	file_avs_proto_msgTypes[96].OneofWrappers = []any{}
 	file_avs_proto_msgTypes[97].OneofWrappers = []any{}
 	file_avs_proto_msgTypes[99].OneofWrappers = []any{}

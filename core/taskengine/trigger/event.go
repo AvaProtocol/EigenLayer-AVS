@@ -58,6 +58,14 @@ var (
 // The system now only subscribes to events that registered tasks actually need
 )
 
+const (
+	// DefaultEventTriggerCooldownSeconds is the default cooldown period in seconds for event triggers.
+	// After a trigger fires, the system waits this many seconds before allowing the same task to trigger again.
+	// This prevents repeated firing when conditions remain true (e.g., price > threshold fires every block).
+	// Default: 300 seconds (5 minutes)
+	DefaultEventTriggerCooldownSeconds uint32 = 300
+)
+
 type EventMark struct {
 	BlockNumber uint64
 	LogIndex    uint
@@ -119,6 +127,10 @@ type EventTrigger struct {
 	processedEventsMutex sync.RWMutex
 	processedEvents      map[string]bool // key: "blockNumber-txHash-logIndex"
 
+	// Cooldown tracking: taskID -> last trigger time
+	cooldownMutex   sync.RWMutex
+	lastTriggerTime map[string]time.Time // taskID -> last trigger timestamp
+
 	// Token enrichment service for enriching Transfer events
 	tokenEnrichmentService *taskengine.TokenEnrichmentService
 }
@@ -152,6 +164,7 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 		defaultMaxEventsPerQuery: maxEventsPerQuery,
 		defaultMaxTotalEvents:    maxTotalEvents,
 		processedEvents:          make(map[string]bool),
+		lastTriggerTime:          make(map[string]time.Time),
 	}
 
 	b.ethClient, err = ethclient.Dial(o.RpcURL)
@@ -247,16 +260,29 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 	}
 
 	taskID := check.TaskId
-	queries := evt.GetConfig().GetQueries()
+	config := evt.GetConfig()
+	queries := config.GetQueries()
 
 	if len(queries) == 0 {
 		return fmt.Errorf("no queries found in event trigger config for task %s", taskID)
 	}
 
+	// Extract cooldown_seconds from config (defaults to DefaultEventTriggerCooldownSeconds if not set)
+	// If cooldown_seconds is not set (nil), use the default value
+	// If explicitly set to 0, respect it (no cooldown)
+	// This ensures old tasks without cooldown_seconds get the default cooldown behavior
+	var cooldownSeconds uint32
+	if config.CooldownSeconds != nil {
+		cooldownSeconds = *config.CooldownSeconds
+	} else {
+		cooldownSeconds = DefaultEventTriggerCooldownSeconds
+	}
+
 	// Create EventTaskData for the new registry
 	eventData := &EventTaskData{
-		Queries:    queries,
-		ParsedABIs: make(map[int]*abi.ABI),
+		Queries:         queries,
+		ParsedABIs:      make(map[int]*abi.ABI),
+		CooldownSeconds: cooldownSeconds,
 	}
 
 	// Pre-parse ABIs for queries that have conditions to avoid repeated parsing
@@ -292,7 +318,8 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 
 	t.logger.Info("🔍 Task added with queries-based EventTrigger",
 		"task_id", taskID,
-		"queries_count", len(queries))
+		"queries_count", len(queries),
+		"cooldown_seconds", cooldownSeconds)
 
 	// Log query details
 	for i, query := range queries {
@@ -749,14 +776,116 @@ func (t *EventTrigger) processLog(log types.Log) error {
 	return t.processLogInternal(log)
 }
 
+// isInCooldown checks if a task is currently in its cooldown period
+// Returns (inCooldown bool, lastTrigger time.Time, hasLastTrigger bool)
+// - inCooldown: true if task is in cooldown (should skip trigger), false if trigger is allowed
+// - lastTrigger: the last trigger time (valid only if hasLastTrigger is true)
+// - hasLastTrigger: whether the task has been triggered before
+// This method is extracted for easy unit testing and to avoid redundant lock acquisition
+// NOTE: This method does NOT update the timestamp. For atomic check-and-update, use checkAndUpdateCooldown.
+func (t *EventTrigger) isInCooldown(taskID string, cooldownSeconds uint32, now time.Time) (bool, time.Time, bool) {
+	if cooldownSeconds == 0 {
+		return false, time.Time{}, false // No cooldown configured
+	}
+
+	t.cooldownMutex.RLock()
+	lastTrigger, hasLastTrigger := t.lastTriggerTime[taskID]
+	t.cooldownMutex.RUnlock()
+
+	if !hasLastTrigger {
+		return false, time.Time{}, false // Never triggered before, allow trigger
+	}
+
+	cooldownDuration := time.Duration(cooldownSeconds) * time.Second
+	timeSinceLastTrigger := now.Sub(lastTrigger)
+	inCooldown := timeSinceLastTrigger < cooldownDuration
+	return inCooldown, lastTrigger, true
+}
+
+// checkAndUpdateCooldown atomically checks if a task is in cooldown and updates the timestamp if not.
+// This prevents race conditions where multiple concurrent events could pass the cooldown check.
+// Returns (shouldSkip bool, lastTrigger time.Time, hasLastTrigger bool)
+// - shouldSkip: true if task is in cooldown (should skip trigger), false if trigger is allowed
+// - lastTrigger: the last trigger time before update (valid only if hasLastTrigger is true)
+// - hasLastTrigger: whether the task had been triggered before this call
+// This follows the same atomic pattern as the deduplication logic in processLog.
+// NOTE: This method updates the timestamp immediately if not in cooldown, before the trigger is sent.
+// This ensures atomicity and prevents duplicate triggers from concurrent events.
+func (t *EventTrigger) checkAndUpdateCooldown(taskID string, cooldownSeconds uint32, now time.Time) (bool, time.Time, bool) {
+	if cooldownSeconds == 0 {
+		return false, time.Time{}, false // No cooldown configured
+	}
+
+	t.cooldownMutex.Lock()
+	defer t.cooldownMutex.Unlock()
+
+	lastTrigger, hasLastTrigger := t.lastTriggerTime[taskID]
+
+	if !hasLastTrigger {
+		// Never triggered before, allow trigger and update timestamp atomically
+		t.lastTriggerTime[taskID] = now
+		return false, time.Time{}, false
+	}
+
+	cooldownDuration := time.Duration(cooldownSeconds) * time.Second
+	timeSinceLastTrigger := now.Sub(lastTrigger)
+	inCooldown := timeSinceLastTrigger < cooldownDuration
+
+	if !inCooldown {
+		// Not in cooldown, update timestamp atomically to prevent concurrent triggers
+		// This "reserves" the trigger slot even before sending to channel, preventing
+		// race conditions where multiple goroutines could pass the cooldown check
+		t.lastTriggerTime[taskID] = now
+	}
+
+	return inCooldown, lastTrigger, true
+}
+
+// updateCooldownTimestamp updates the last trigger time for a task
+// This method is extracted for easy unit testing
+// NOTE: For production code, prefer checkAndUpdateCooldown for atomic check-and-update.
+func (t *EventTrigger) updateCooldownTimestamp(taskID string, cooldownSeconds uint32, now time.Time) {
+	if cooldownSeconds == 0 {
+		return // No cooldown configured, no need to track
+	}
+
+	t.cooldownMutex.Lock()
+	t.lastTriggerTime[taskID] = now
+	t.cooldownMutex.Unlock()
+}
+
 // processLogInternal processes an individual log and triggers matching tasks
 // Note: Deduplication should be handled by caller before calling this function
 func (t *EventTrigger) processLogInternal(log types.Log) error {
 	var triggeredTasks []string
+	now := time.Now()
 
 	// Check all registered tasks to see which ones match this log
 	t.registry.RangeEventTasks(func(taskID string, entry *TaskEntry) bool {
 		if t.logMatchesTaskEntry(log, entry) {
+			// Atomically check cooldown period and update timestamp if trigger is allowed
+			// This prevents race conditions where multiple concurrent events could pass the cooldown check
+			if entry.EventData != nil {
+				cooldownSeconds := entry.EventData.CooldownSeconds
+				shouldSkip, lastTrigger, hasLastTrigger := t.checkAndUpdateCooldown(taskID, cooldownSeconds, now)
+				if shouldSkip {
+					cooldownDuration := time.Duration(cooldownSeconds) * time.Second
+					var timeSinceLastTrigger time.Duration
+					if hasLastTrigger {
+						timeSinceLastTrigger = now.Sub(lastTrigger)
+					}
+					remainingCooldown := cooldownDuration - timeSinceLastTrigger
+					t.logger.Debug("⏳ Task in cooldown period, skipping trigger",
+						"task_id", taskID,
+						"cooldown_seconds", cooldownSeconds,
+						"time_since_last_trigger", timeSinceLastTrigger,
+						"remaining_cooldown", remainingCooldown,
+						"block", log.BlockNumber)
+					return true // Continue to next task
+				}
+				// Note: Timestamp was already updated atomically in checkAndUpdateCooldown
+			}
+
 			triggeredTasks = append(triggeredTasks, taskID)
 
 			// Try to enrich the event data using shared enrichment logic
@@ -865,22 +994,6 @@ func (t *EventTrigger) logMatchesTaskEntry(log types.Log, entry *TaskEntry) bool
 	return false
 }
 
-// logMatchesTask checks if a log matches a task check (legacy format - kept for compatibility)
-func (t *EventTrigger) logMatchesTask(log types.Log, check *Check) bool {
-	// Convert to EventTaskData for compatibility
-	eventData := &EventTaskData{
-		Queries:    check.Queries,
-		ParsedABIs: check.ParsedABIs,
-	}
-
-	for i, query := range check.Queries {
-		if t.logMatchesEventQuery(log, query, eventData, i) {
-			return true
-		}
-	}
-	return false
-}
-
 // logMatchesEventQuery checks if a log matches a specific EventTrigger_Query
 // logMatchesEventQuery checks if a log matches a specific event query (works with both old and new formats)
 func (t *EventTrigger) logMatchesEventQuery(log types.Log, query *avsproto.EventTrigger_Query, eventData *EventTaskData, queryIndex int) bool {
@@ -957,34 +1070,7 @@ func (t *EventTrigger) evaluateEventConditionsWithEventData(log types.Log, query
 	return t.evaluateEventConditionsCommon(log, query, conditions, contractABI, queryIndex)
 }
 
-// evaluateEventConditions checks if a log matches the provided ABI-based conditions (legacy format)
-func (t *EventTrigger) evaluateEventConditions(log types.Log, query *avsproto.EventTrigger_Query, conditions []*avsproto.EventCondition, check *Check, queryIndex int) bool {
-	// Use cached ABI if available, otherwise parse it (fallback for backward compatibility)
-	var contractABI *abi.ABI
-	if cachedABI, exists := check.ParsedABIs[queryIndex]; exists && cachedABI != nil {
-		contractABI = cachedABI
-		t.logger.Debug("🚀 Using cached ABI for conditional filtering", "query_index", queryIndex)
-	} else {
-		// Fallback: parse ABI on-demand (this should rarely happen with the new caching)
-		abiValues := query.GetContractAbi()
-		if len(abiValues) > 0 {
-			if parsedABI, err := parseABIOptimized(abiValues); err != nil {
-				t.logger.Error("❌ Failed to parse contract ABI for conditional filtering", "error", err)
-				return false
-			} else {
-				contractABI = parsedABI
-				t.logger.Debug("⚠️ Parsed ABI on-demand using shared optimized function (consider pre-parsing for better performance)", "query_index", queryIndex)
-			}
-		} else {
-			t.logger.Warn("🚫 Conditional filtering requires contract ABI but none provided")
-			return false
-		}
-	}
-
-	return t.evaluateEventConditionsCommon(log, query, conditions, contractABI, queryIndex)
-}
-
-// evaluateEventConditionsCommon contains the shared logic for both legacy and new formats
+// evaluateEventConditionsCommon contains the shared logic for condition evaluation
 func (t *EventTrigger) evaluateEventConditionsCommon(log types.Log, query *avsproto.EventTrigger_Query, conditions []*avsproto.EventCondition, contractABI *abi.ABI, queryIndex int) bool {
 	// Find the matching event in ABI using the first topic (event signature)
 	if len(log.Topics) == 0 {

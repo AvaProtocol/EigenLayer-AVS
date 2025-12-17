@@ -222,6 +222,10 @@ func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
 				}
 				triggerConfig["queries"] = queries
 			}
+			// Include cooldown_seconds if set
+			if eventTrigger.Config.CooldownSeconds != nil {
+				triggerConfig["cooldown_seconds"] = *eventTrigger.Config.CooldownSeconds
+			}
 		}
 	case *avsproto.TaskTrigger_Block:
 		blockTrigger := trigger.GetBlock()
