@@ -112,7 +112,11 @@ echo -e "${BLUE}Docker publishing:${NC}"
 echo -e "   • Will trigger Docker builds for latest release: ${LATEST_RELEASE}"
 echo -e "   • Dev image: avaprotocol/avs-dev:${LATEST_RELEASE}"
 echo -e "   • Prod image: avaprotocol/ap-avs:${LATEST_RELEASE}"
-echo -e "   • Both will be tagged as 'latest'"
+if [[ "$LATEST_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo -e "   • Both will be tagged as 'latest'"
+else
+    echo -e "   • ⚠️  Note: Pre-release detected, 'latest' tag will NOT be applied"
+fi
 echo
 
 # Confirm pre-release promotion if any exist
@@ -187,6 +191,12 @@ if [ "$SKIP_DOCKER" = false ]; then
     
     DOCKER_SUCCESS=true
     
+    # Determine if we should tag as 'latest' (only for production tags, not pre-releases)
+    TAG_LATEST="false"
+    if [[ "$LATEST_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        TAG_LATEST="true"
+    fi
+    
     # Trigger dev Docker workflow
     echo -e "${BLUE}   🐳 Dev Docker build...${NC}"
     gh workflow run "publish-dev-docker.yml" \
@@ -196,8 +206,12 @@ if [ "$SKIP_DOCKER" = false ]; then
         --field fast_build=false
     
     if [ $? -eq 0 ]; then
-        echo -e "${GREEN}   ✅ Dev Docker workflow triggered for ${LATEST_RELEASE}${NC}"
-        echo -e "      • Image: avaprotocol/avs-dev:${LATEST_RELEASE} (latest)"
+        LATEST_TAG_INFO=""
+        if [ "$TAG_LATEST" = "true" ]; then
+            LATEST_TAG_INFO=" (latest)"
+        fi
+        echo -e "${GREEN}   ✅ Dev Docker workflow triggered for ${LATEST_RELEASE}${LATEST_TAG_INFO}${NC}"
+        echo -e "      • Image: avaprotocol/avs-dev:${LATEST_RELEASE}${LATEST_TAG_INFO}"
     else
         echo -e "${RED}   ❌ Failed to trigger dev Docker workflow for ${LATEST_RELEASE}${NC}"
         DOCKER_SUCCESS=false
@@ -212,11 +226,15 @@ if [ "$SKIP_DOCKER" = false ]; then
         --repo "$REPO" \
         --field git_tag="$LATEST_RELEASE" \
         --field branch_name="main" \
-        --field tag_latest="true"
+        --field tag_latest="$TAG_LATEST"
     
     if [ $? -eq 0 ]; then
-        echo -e "${GREEN}   ✅ Production Docker workflow triggered for ${LATEST_RELEASE}${NC}"
-        echo -e "      • Image: avaprotocol/ap-avs:${LATEST_RELEASE} (latest)"
+        LATEST_TAG_INFO=""
+        if [ "$TAG_LATEST" = "true" ]; then
+            LATEST_TAG_INFO=" (latest)"
+        fi
+        echo -e "${GREEN}   ✅ Production Docker workflow triggered for ${LATEST_RELEASE}${LATEST_TAG_INFO}${NC}"
+        echo -e "      • Image: avaprotocol/ap-avs:${LATEST_RELEASE}${LATEST_TAG_INFO}"
     else
         echo -e "${RED}   ❌ Failed to trigger production Docker workflow for ${LATEST_RELEASE}${NC}"
         DOCKER_SUCCESS=false
@@ -243,9 +261,13 @@ if [ "$SKIP_PROMOTION" = false ] && [ $PRERELEASE_COUNT -gt 0 ]; then
 fi
 
 if [ "$SKIP_DOCKER" = false ]; then
+    LATEST_TAG_INFO=""
+    if [[ "$LATEST_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        LATEST_TAG_INFO=" (latest)"
+    fi
     echo -e "   • Docker workflows triggered for: ${LATEST_RELEASE}"
-    echo -e "   • Dev Docker image: avaprotocol/avs-dev:${LATEST_RELEASE} (latest)"
-    echo -e "   • Prod Docker image: avaprotocol/ap-avs:${LATEST_RELEASE} (latest)"
+    echo -e "   • Dev Docker image: avaprotocol/avs-dev:${LATEST_RELEASE}${LATEST_TAG_INFO}"
+    echo -e "   • Prod Docker image: avaprotocol/ap-avs:${LATEST_RELEASE}${LATEST_TAG_INFO}"
 fi
 
 if [ "$SKIP_PROMOTION" = true ] && [ "$SKIP_DOCKER" = true ]; then
