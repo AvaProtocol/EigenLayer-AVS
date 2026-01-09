@@ -15,24 +15,44 @@ import (
 
 // Summary represents composed notification content
 type Summary struct {
-	Subject string
-	Body    string
+	Subject      string
+	Body         string
+	SummaryLine  string // One-liner summary (e.g., "Your workflow 'Test Stoploss' executed 7 out of 7 total steps")
+	AnalysisHtml string // Pre-formatted HTML content with ✓ symbols (from context-memory)
+	StatusHtml   string // Status badge HTML (green/yellow/red badge with icon) - from context-memory
+	Status       string // Execution status: "success", "partial_success", "failure" - from context-memory
 }
 
 // SendGridDynamicData returns a dynamic_template_data map for SendGrid Dynamic Templates.
 // Decoupled design: provide minimal variables and let the template handle styling.
 // - subject: email subject line
-// - analysisHtml: minimal HTML (paragraphs and <br/>) derived from body
+// - analysisHtml: minimal HTML (paragraphs and <br/>) derived from body, or use pre-formatted AnalysisHtml if available
 // - preheader: short preview, reuse subject
 func (s Summary) SendGridDynamicData() map[string]interface{} {
-	// Remove runner/owner/status boilerplate; keep only the core analysis/narrative
-	clean := filterAnalysisTextForTemplate(s.Body)
-	bareHTML := buildBareHTMLFromText(clean)
-	return map[string]interface{}{
+	// If AnalysisHtml is provided (from context-memory), use it directly
+	// Otherwise, build from body using the deterministic method
+	var analysisHtml string
+	if s.AnalysisHtml != "" {
+		analysisHtml = s.AnalysisHtml
+	} else {
+		// Remove runner/owner/status boilerplate; keep only the core analysis/narrative
+		clean := filterAnalysisTextForTemplate(s.Body)
+		analysisHtml = buildBareHTMLFromText(clean)
+	}
+	data := map[string]interface{}{
 		"subject":      s.Subject,
-		"analysisHtml": bareHTML,
+		"analysisHtml": analysisHtml,
 		"preheader":    s.Subject,
 	}
+	// Include statusHtml from context-memory if available
+	if s.StatusHtml != "" {
+		data["statusHtml"] = s.StatusHtml
+	}
+	// Include summary line if available
+	if s.SummaryLine != "" {
+		data["summary"] = s.SummaryLine
+	}
+	return data
 }
 
 // BuildBranchAndSkippedSummary builds a deterministic summary (text and HTML)
@@ -535,20 +555,58 @@ func normalizeBranchType(t string) string {
 }
 
 // buildBareHTMLFromText converts plain text into minimal HTML paragraphs without global styles
+// Preserves safe HTML tags (<strong>, <em>, <br/>, etc.) while escaping potentially dangerous content
 func buildBareHTMLFromText(body string) string {
-	// Escape HTML to avoid injection
-	safe := html.EscapeString(body)
-	// Normalize newlines
-	safe = strings.ReplaceAll(safe, "\r\n", "\n")
+	// Normalize newlines first
+	normalized := strings.ReplaceAll(body, "\r\n", "\n")
+
+	// Check if body already contains HTML tags (from AI summaries)
+	// If it does, preserve safe HTML tags and only escape unsafe content
+	hasHTML := strings.Contains(normalized, "<") && strings.Contains(normalized, ">")
+
+	if hasHTML {
+		// Body already contains HTML - preserve safe tags and escape only unsafe content
+		// First, temporarily replace safe HTML tags with placeholders
+		safeTags := map[string]string{
+			"<strong>":  "___STRONG_OPEN___",
+			"</strong>": "___STRONG_CLOSE___",
+			"<em>":      "___EM_OPEN___",
+			"</em>":     "___EM_CLOSE___",
+			"<br/>":     "___BR___",
+			"<br>":      "___BR___",
+		}
+
+		// Replace safe tags with placeholders
+		withPlaceholders := normalized
+		for tag, placeholder := range safeTags {
+			withPlaceholders = strings.ReplaceAll(withPlaceholders, tag, placeholder)
+		}
+
+		// Escape all remaining HTML (potentially dangerous)
+		safe := html.EscapeString(withPlaceholders)
+
+		// Restore safe tags
+		for tag, placeholder := range safeTags {
+			safe = strings.ReplaceAll(safe, placeholder, tag)
+		}
+
+		normalized = safe
+	} else {
+		// Plain text - escape everything
+		normalized = html.EscapeString(normalized)
+	}
+
 	// Split by paragraphs (double newline)
-	parts := strings.Split(safe, "\n\n")
+	parts := strings.Split(normalized, "\n\n")
 	var paragraphs []string
 	for _, p := range parts {
 		if strings.TrimSpace(p) == "" {
 			continue
 		}
-		// Convert single newlines within a paragraph to <br/>
-		p = strings.ReplaceAll(p, "\n", "<br/>")
+		// Convert single newlines within a paragraph to <br/> (only if not already HTML)
+		if !hasHTML {
+			p = strings.ReplaceAll(p, "\n", "<br/>")
+		}
 		paragraphs = append(paragraphs, "<p>"+p+"</p>")
 	}
 	return strings.Join(paragraphs, "\n")
@@ -1130,7 +1188,9 @@ func displayOrUnknown(value string) string {
 // getTotalWorkflowSteps returns the total number of steps in a workflow,
 // including the trigger and all nodes. This represents the full workflow size,
 // not just the executed steps so far.
-func getTotalWorkflowSteps(vm *VM) int {
+// If currentNodeName is provided, notification nodes (email/telegram) are excluded
+// since they are the source of the summary, not part of the workflow logic.
+func getTotalWorkflowSteps(vm *VM, currentNodeName ...string) int {
 	if vm == nil {
 		return 0
 	}
@@ -1143,10 +1203,46 @@ func getTotalWorkflowSteps(vm *VM) int {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
-	// Count: 1 trigger + all nodes in TaskNodes
-	totalSteps := 1 + len(vm.TaskNodes)
+	// Count all nodes, excluding notification nodes (email/telegram REST API)
+	nodeCount := 0
+	for _, node := range vm.TaskNodes {
+		if node == nil {
+			continue
+		}
+		// Check if this is a notification node (REST API with sendgrid/telegram URL)
+		if isNotificationNode(node) {
+			continue
+		}
+		nodeCount++
+	}
+
+	// Count: 1 trigger + non-notification nodes
+	totalSteps := 1 + nodeCount
 
 	return totalSteps
+}
+
+// isNotificationNode checks if a task node is a notification endpoint (email/telegram)
+func isNotificationNode(node *avsproto.TaskNode) bool {
+	if node == nil {
+		return false
+	}
+	// Check if it's a REST API node
+	restAPI := node.GetRestApi()
+	if restAPI == nil || restAPI.Config == nil {
+		return false
+	}
+	// Check URL for notification providers
+	url := strings.ToLower(restAPI.Config.Url)
+	// SendGrid
+	if strings.Contains(url, "sendgrid") || strings.Contains(url, "/mail/send") {
+		return true
+	}
+	// Telegram
+	if strings.Contains(url, "telegram") || strings.Contains(url, "api.telegram.org") {
+		return true
+	}
+	return false
 }
 
 // ------- Helpers for concise narrative formatting -------
@@ -1273,22 +1369,28 @@ func buildStepsOverview(vm *VM) string {
 		}
 
 		// Check if this is a simulated transaction
+		// Use ExecutionContext (actual execution mode) instead of Config (node configuration)
 		isSimulated := false
-		methodName := ""
-		contractAddr := ""
-		if st.GetConfig() != nil {
-			if cfg, ok := st.GetConfig().AsInterface().(map[string]interface{}); ok {
-				if addr, ok := cfg["contractAddress"].(string); ok {
-					contractAddr = addr
-				}
-				// Check isSimulated flag
-				if sim, ok := cfg["isSimulated"]; ok {
+		if st.GetExecutionContext() != nil {
+			if ctx, ok := st.GetExecutionContext().AsInterface().(map[string]interface{}); ok {
+				if sim, ok := ctx["is_simulated"]; ok {
 					switch v := sim.(type) {
 					case bool:
 						isSimulated = v
 					case string:
 						isSimulated = strings.EqualFold(strings.TrimSpace(v), "true")
 					}
+				}
+			}
+		}
+
+		// Extract methodName and contractAddr from Config (still needed for description generation)
+		methodName := ""
+		contractAddr := ""
+		if st.GetConfig() != nil {
+			if cfg, ok := st.GetConfig().AsInterface().(map[string]interface{}); ok {
+				if addr, ok := cfg["contractAddress"].(string); ok {
+					contractAddr = addr
 				}
 				if mcs, ok := cfg["methodCalls"].([]interface{}); ok && len(mcs) > 0 {
 					if call, ok := mcs[0].(map[string]interface{}); ok {
@@ -1309,6 +1411,7 @@ func buildStepsOverview(vm *VM) string {
 			tokenAddr := ""
 			if st.GetContractWrite() != nil && st.GetContractWrite().Data != nil {
 				if m, ok := st.GetContractWrite().Data.AsInterface().(map[string]interface{}); ok {
+					// Check for "Approval" event (capital A) first
 					if ev, ok := m["Approval"].(map[string]interface{}); ok {
 						if v, ok := ev["value"].(string); ok {
 							value = v
@@ -1317,6 +1420,18 @@ func buildStepsOverview(vm *VM) string {
 							spender = sp
 						}
 						// Get token address from owner field in Approval event
+						if owner, ok := ev["owner"].(string); ok && owner != "" {
+							tokenAddr = owner
+						}
+					} else if ev, ok := m["approve"].(map[string]interface{}); ok {
+						// Fallback to "approve" output data (lowercase) if event not found
+						if v, ok := ev["value"].(string); ok {
+							value = v
+						}
+						if sp, ok := ev["spender"].(string); ok {
+							spender = sp
+						}
+						// Get token address from owner field in approve output
 						if owner, ok := ev["owner"].(string); ok && owner != "" {
 							tokenAddr = owner
 						}

@@ -145,6 +145,25 @@ func NewOpenAISummarizerFromAggregatorConfig(c *config.Config) Summarizer {
 	}
 }
 
+// NewContextMemorySummarizerFromAggregatorConfig creates a ContextMemorySummarizer from aggregator config
+func NewContextMemorySummarizerFromAggregatorConfig(c *config.Config) Summarizer {
+	if c == nil {
+		return nil
+	}
+	if !c.NotificationsSummary.Enabled || strings.ToLower(c.NotificationsSummary.Provider) != "context-memory" {
+		return nil
+	}
+	baseURL := c.NotificationsSummary.BaseURL
+	if strings.TrimSpace(baseURL) == "" {
+		return nil
+	}
+	authToken := c.NotificationsSummary.AuthToken
+	if strings.TrimSpace(authToken) == "" {
+		return nil
+	}
+	return NewContextMemorySummarizer(baseURL, authToken)
+}
+
 func (o *OpenAISummarizer) Summarize(ctx context.Context, vm *VM, currentStepName string) (Summary, error) {
 	if o == nil || o.hc == nil {
 		return Summary{}, errors.New("summarizer not initialized")

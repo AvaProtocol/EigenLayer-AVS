@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"strings"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 const (
@@ -24,15 +26,10 @@ type ContextMemorySummarizer struct {
 }
 
 // NewContextMemorySummarizer creates a new summarizer that calls context-memory API
-// baseURL defaults to ContextAPIURL (production) if empty, can be overridden via CONTEXT_MEMORY_URL env var
+// baseURL defaults to ContextAPIURL (production) if empty
 func NewContextMemorySummarizer(baseURL, authToken string) Summarizer {
 	if baseURL == "" {
-		// Check for env var override first, then default to production URL
-		if url := os.Getenv("CONTEXT_MEMORY_URL"); url != "" {
-			baseURL = url
-		} else {
-			baseURL = ContextAPIURL
-		}
+		baseURL = ContextAPIURL
 	}
 	return &ContextMemorySummarizer{
 		baseURL:    baseURL,
@@ -55,17 +52,18 @@ type contextMemorySummarizeRequest struct {
 }
 
 type contextMemoryStepDigest struct {
-	Name            string                 `json:"name"`
-	ID              string                 `json:"id"`
-	Type            string                 `json:"type"`
-	Success         bool                   `json:"success"`
-	Error           string                 `json:"error,omitempty"`
-	ContractAddress string                 `json:"contractAddress,omitempty"`
-	MethodName      string                 `json:"methodName,omitempty"`
-	MethodParams    map[string]interface{} `json:"methodParams,omitempty"`
-	OutputData      interface{}            `json:"outputData,omitempty"`
-	Metadata        interface{}            `json:"metadata,omitempty"`
-	StepDescription string                 `json:"stepDescription,omitempty"`
+	Name             string                 `json:"name"`
+	ID               string                 `json:"id"`
+	Type             string                 `json:"type"`
+	Success          bool                   `json:"success"`
+	Error            string                 `json:"error,omitempty"`
+	ContractAddress  string                 `json:"contractAddress,omitempty"`
+	MethodName       string                 `json:"methodName,omitempty"`
+	MethodParams     map[string]interface{} `json:"methodParams,omitempty"`
+	OutputData       interface{}            `json:"outputData,omitempty"`
+	Metadata         interface{}            `json:"metadata,omitempty"`
+	StepDescription  string                 `json:"stepDescription,omitempty"`
+	ExecutionContext interface{}            `json:"executionContext,omitempty"` // Actual execution mode (is_simulated, provider, chain_id)
 }
 
 type contextMemoryNodeDef struct {
@@ -82,7 +80,11 @@ type contextMemoryEdgeDef struct {
 // SummarizeResponse matches the TypeScript SummarizeResponse
 type contextMemorySummarizeResponse struct {
 	Subject       string `json:"subject"`
-	Body          string `json:"body"`
+	Summary       string `json:"summary"`      // One-liner summary
+	AnalysisHtml  string `json:"analysisHtml"` // Pre-formatted HTML with ✓ symbols
+	Body          string `json:"body"`         // Plain text body (for backward compatibility)
+	StatusHtml    string `json:"statusHtml"`   // Status badge HTML (green/yellow/red badge with icon)
+	Status        string `json:"status"`       // Execution status: "success", "partial_success", "failure"
 	PromptVersion string `json:"promptVersion"`
 	Cached        bool   `json:"cached,omitempty"`
 }
@@ -135,8 +137,12 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 	}
 
 	return Summary{
-		Subject: apiResp.Subject,
-		Body:    apiResp.Body,
+		Subject:      apiResp.Subject,
+		Body:         apiResp.Body,
+		SummaryLine:  apiResp.Summary,
+		AnalysisHtml: apiResp.AnalysisHtml,
+		StatusHtml:   apiResp.StatusHtml,
+		Status:       apiResp.Status,
 	}, nil
 }
 
@@ -153,12 +159,13 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 		if runner, ok := wfCtx["runner"].(string); ok {
 			smartWallet = runner
 		}
-		if name, ok := wfCtx["name"].(string); ok {
-			workflowName = name
+		if eoa, ok := wfCtx["eoaAddress"].(string); ok && eoa != "" && ownerEOA == "" {
+			ownerEOA = eoa
 		}
 	}
+	// Prioritize settings.name for workflow name (most accurate source)
 	if settings, ok := vm.vars["settings"].(map[string]interface{}); ok {
-		if name, ok := settings["name"].(string); ok && workflowName == "" {
+		if name, ok := settings["name"].(string); ok && strings.TrimSpace(name) != "" {
 			workflowName = name
 		}
 		if chain, ok := settings["chain"].(string); ok {
@@ -167,6 +174,16 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 		if runner, ok := settings["runner"].(string); ok && smartWallet == "" {
 			smartWallet = runner
 		}
+	}
+
+	// Fallback to TaskOwner if available (for single node executions)
+	if ownerEOA == "" && vm.TaskOwner != (common.Address{}) {
+		ownerEOA = vm.TaskOwner.Hex()
+	}
+
+	// Validate that workflow name is set (required - no fallbacks)
+	if workflowName == "" {
+		return nil, fmt.Errorf("workflow name is required in settings.name")
 	}
 
 	// Convert execution logs to steps
@@ -199,6 +216,10 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 		}
 		if log.GetMetadata() != nil {
 			step.Metadata = log.GetMetadata().AsInterface()
+		}
+		// Extract ExecutionContext (actual execution mode: is_simulated, provider, chain_id)
+		if log.GetExecutionContext() != nil {
+			step.ExecutionContext = log.GetExecutionContext().AsInterface()
 		}
 		steps = append(steps, step)
 	}
@@ -233,8 +254,17 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 
 	var settings map[string]interface{}
 	if s, ok := vm.vars["settings"].(map[string]interface{}); ok {
-		settings = s
+		// Make a copy to avoid modifying the original
+		settings = make(map[string]interface{})
+		for k, v := range s {
+			settings[k] = v
+		}
+	} else {
+		settings = make(map[string]interface{})
 	}
+
+	// Always include isSimulation flag from VM
+	settings["isSimulation"] = vm.IsSimulation
 
 	return &contextMemorySummarizeRequest{
 		OwnerEOA:        ownerEOA,

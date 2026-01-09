@@ -810,3 +810,225 @@ func TestBuildBranchAndSkippedSummary_WithSkippedNodes(t *testing.T) {
 		t.Fatalf("expected 'No on-chain transactions executed' message, got: %q", text)
 	}
 }
+
+// TestBuildStepsOverview_ApproveWithLowercaseKey tests the fix for extracting spender
+// from approve outputData when it uses lowercase "approve" key instead of "Approval" event key.
+// This test uses the real response structure from the terminal output.
+func TestBuildStepsOverview_ApproveWithLowercaseKey(t *testing.T) {
+	vm := NewVM()
+	vm.mu.Lock()
+	vm.vars["settings"] = map[string]interface{}{
+		"uniswapv3_pool": map[string]interface{}{
+			"tokens": map[string]interface{}{
+				"input": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", // USDC
+			},
+			"token1": map[string]interface{}{
+				"symbol": "USDC",
+			},
+		},
+		"uniswapv3_contracts": map[string]interface{}{
+			"swapRouter02": "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E",
+		},
+	}
+	vm.mu.Unlock()
+
+	// Create approve outputData with lowercase "approve" key (matching real response structure)
+	// This is the actual structure from the terminal output:
+	// "outputData": {
+	//   "approve": {
+	//     "owner": "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+	//     "spender": "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E",
+	//     "value": "20990000"
+	//   }
+	// }
+	approveOutputData, err := structpb.NewValue(map[string]interface{}{
+		"approve": map[string]interface{}{
+			"owner":   "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+			"spender": "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E",
+			"value":   "20990000", // 20.99 USDC (6 decimals)
+		},
+	})
+	require.NoError(t, err)
+
+	configValue, err := structpb.NewValue(map[string]interface{}{
+		"contractAddress": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", // USDC token address
+		"isSimulated":     false,
+		"methodCalls": []interface{}{
+			map[string]interface{}{
+				"methodName": "approve",
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	vm.ExecutionLogs = []*avsproto.Execution_Step{
+		{
+			Id:      "approve1",
+			Name:    "approve1",
+			Success: true,
+			Type:    avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
+			Config:  configValue,
+			OutputData: &avsproto.Execution_Step_ContractWrite{
+				ContractWrite: &avsproto.ContractWriteNode_Output{
+					Data: approveOutputData,
+				},
+			},
+		},
+	}
+
+	result := buildStepsOverview(vm)
+
+	// Verify that spender is correctly extracted and included in the description
+	// Before the fix, this would show "Approved token to " (missing spender)
+	// After the fix, it should show the spender address (shortened format)
+
+	// Verify that the description is complete (not truncated)
+	// Should NOT end with "Approved token to " (missing spender)
+	if strings.HasSuffix(strings.TrimSpace(result), "Approved token to") {
+		t.Fatalf("description should include spender address, got incomplete description: %q", result)
+	}
+
+	// Verify that the spender address appears in shortened format
+	// The shortHexAddr function formats addresses as "0x...last4chars"
+	// Check for either the shortened format or the contract name + shortened format
+	if !strings.Contains(result, "0x3bFA") && !strings.Contains(result, "0x3bfa") {
+		// If not found, check if it's using the contract name instead
+		if !strings.Contains(result, "Uniswap V3 router") {
+			t.Fatalf("expected spender address (shortened) or contract name in description, got: %q", result)
+		}
+	}
+
+	// Verify that the description contains "to" followed by something (the spender)
+	// This ensures the spender is present
+	if !strings.Contains(result, " to ") {
+		t.Fatalf("expected ' to ' in description (indicating spender is present), got: %q", result)
+	}
+
+	// Verify that value is included (20.99 USDC)
+	// The value "20990000" with 6 decimals should format to "20.99"
+	if !strings.Contains(result, "20.99") && !strings.Contains(result, "20.9900") {
+		t.Fatalf("expected formatted amount (20.99) in description, got: %q", result)
+	}
+
+	// Verify that token symbol is included if available
+	if strings.Contains(result, "USDC") {
+		// If USDC is present, verify the full description format
+		if !strings.Contains(result, "Approved") {
+			t.Fatalf("expected 'Approved' in description, got: %q", result)
+		}
+	}
+
+	// Verify checkmark prefix
+	if !strings.Contains(result, "✓") {
+		t.Fatalf("expected checkmark prefix, got: %q", result)
+	}
+
+	// Verify the description is not empty or just whitespace
+	if strings.TrimSpace(result) == "" {
+		t.Fatalf("expected non-empty description, got empty string")
+	}
+
+	// Log the result for debugging
+	t.Logf("Generated description: %q", result)
+
+	// Verify the exact format matches expected output
+	// Should be: "✓ Approved 20.9900 USDC to Uniswap V3 router 0x3bFA...e48E"
+	expectedParts := []string{
+		"✓ Approved",
+		"20.9900",
+		"USDC",
+		"to",
+		"Uniswap V3 router",
+		"0x3bFA",
+	}
+	for _, part := range expectedParts {
+		if !strings.Contains(result, part) {
+			t.Fatalf("expected description to contain %q, got: %q", part, result)
+		}
+	}
+}
+
+// TestBuildStepsOverview_ApproveWithBothKeys verifies that "Approval" event takes priority
+// over "approve" output data when both are present.
+func TestBuildStepsOverview_ApproveWithBothKeys(t *testing.T) {
+	vm := NewVM()
+	vm.mu.Lock()
+	vm.vars["settings"] = map[string]interface{}{
+		"uniswapv3_pool": map[string]interface{}{
+			"token1": map[string]interface{}{
+				"symbol": "USDT",
+			},
+		},
+		"uniswapv3_contracts": map[string]interface{}{
+			"swapRouter02": "0x3bfa4769fb09eefc5a80d6e87c3b9c650f7ae48e",
+		},
+	}
+	vm.mu.Unlock()
+
+	// Create outputData with BOTH "Approval" event and "approve" output data
+	// The "Approval" event should take priority
+	approveOutputData, err := structpb.NewValue(map[string]interface{}{
+		"Approval": map[string]interface{}{
+			"owner":   "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+			"spender": "0x3bfa4769fb09eefc5a80d6e87c3b9c650f7ae48e", // From Approval event (should be used)
+			"value":   "1000000",                                    // 1 USDT
+		},
+		"approve": map[string]interface{}{
+			"owner":   "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+			"spender": "0x0000000000000000000000000000000000000000", // Different spender (should be ignored)
+			"value":   "999999",                                     // Different value (should be ignored)
+		},
+	})
+	require.NoError(t, err)
+
+	configValue, err := structpb.NewValue(map[string]interface{}{
+		"contractAddress": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+		"isSimulated":     false,
+		"methodCalls": []interface{}{
+			map[string]interface{}{
+				"methodName": "approve",
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	vm.ExecutionLogs = []*avsproto.Execution_Step{
+		{
+			Id:      "approve1",
+			Name:    "approve1",
+			Success: true,
+			Type:    avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
+			Config:  configValue,
+			OutputData: &avsproto.Execution_Step_ContractWrite{
+				ContractWrite: &avsproto.ContractWriteNode_Output{
+					Data: approveOutputData,
+				},
+			},
+		},
+	}
+
+	result := buildStepsOverview(vm)
+
+	// Verify that the "Approval" event data is used (not the "approve" output data)
+	// Should contain "1.0" or "1.0000" (from Approval event value: 1000000)
+	if !strings.Contains(result, "1.0") && !strings.Contains(result, "1.0000") {
+		t.Fatalf("expected value from Approval event (1.0), got: %q", result)
+	}
+
+	// Should NOT contain the value from "approve" output data (999999)
+	if strings.Contains(result, "999999") {
+		t.Fatalf("should use Approval event value, not approve output value, got: %q", result)
+	}
+
+	// Should contain the spender from Approval event (Uniswap V3 router)
+	if !strings.Contains(result, "Uniswap V3 router") {
+		t.Fatalf("expected spender from Approval event, got: %q", result)
+	}
+
+	// Should NOT contain the zero address from "approve" output data
+	if strings.Contains(result, "0x0000") || strings.Contains(result, "0x0") {
+		t.Fatalf("should use Approval event spender, not approve output spender, got: %q", result)
+	}
+
+	t.Logf("Generated description (both keys present, Approval takes priority): %q", result)
+}
