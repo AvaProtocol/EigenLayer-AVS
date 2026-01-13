@@ -26,9 +26,7 @@ func TestTenderlyClient_TransactionRevert_Integration(t *testing.T) {
 	// Create a query with invalid contract address to trigger revert
 	query := &avsproto.EventTrigger_Query{
 		Addresses: []string{"0x0000000000000000000000000000000000000000"}, // Invalid address
-		Topics: []*avsproto.EventTrigger_Topics{
-			{Values: []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"}},
-		},
+		Topics:    []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"},
 		Conditions: []*avsproto.EventCondition{
 			{
 				FieldName: "current",
@@ -71,9 +69,7 @@ func TestTenderlyClient_InvalidContractCall_Integration(t *testing.T) {
 	// Create a query with a valid contract address but invalid chain ID
 	query := &avsproto.EventTrigger_Query{
 		Addresses: []string{"0x694AA1769357215DE4FAC081bf1f309aDC325306"}, // Valid Chainlink address
-		Topics: []*avsproto.EventTrigger_Topics{
-			{Values: []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"}},
-		},
+		Topics:    []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"},
 	}
 
 	ctx := context.Background()
@@ -105,9 +101,7 @@ func TestTenderlyClient_NetworkError_Integration(t *testing.T) {
 	// Create a valid query
 	query := &avsproto.EventTrigger_Query{
 		Addresses: []string{"0x694AA1769357215DE4FAC081bf1f309aDC325306"},
-		Topics: []*avsproto.EventTrigger_Topics{
-			{Values: []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"}},
-		},
+		Topics:    []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"},
 	}
 
 	// Use a cancelled context to simulate network timeout

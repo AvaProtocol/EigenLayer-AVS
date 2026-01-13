@@ -275,9 +275,22 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	}
 
 	// Initialize optional AI summarizer (global) from aggregator config
-	if s := NewOpenAISummarizerFromAggregatorConfig(config); s != nil {
+	var s Summarizer
+	switch strings.ToLower(config.NotificationsSummary.Provider) {
+	case "openai":
+		s = NewOpenAISummarizerFromAggregatorConfig(config)
+	case "context-memory":
+		s = NewContextMemorySummarizerFromAggregatorConfig(config)
+	default:
+		s = nil
+	}
+	if s != nil {
 		SetSummarizer(s)
-		logger.Info("AI summarizer initialized", "provider", config.NotificationsSummary.Provider, "model", config.NotificationsSummary.Model)
+		if config.NotificationsSummary.Provider == "openai" {
+			logger.Info("AI summarizer initialized", "provider", config.NotificationsSummary.Provider, "model", config.NotificationsSummary.Model)
+		} else {
+			logger.Info("AI summarizer initialized", "provider", config.NotificationsSummary.Provider, "base_url", config.NotificationsSummary.BaseURL)
+		}
 	} else {
 		// Leave summarizer unset; deterministic fallback will be used
 	}

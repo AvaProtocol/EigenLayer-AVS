@@ -140,20 +140,31 @@ type NotificationsSummaryConfig struct {
 	// Enabled determines whether AI summarization is active for notifications.
 	// Set to true to enable summarization, false to disable.
 	Enabled bool
-	// Provider specifies the AI service to use for summarization (e.g., "openai").
+	// Provider specifies the AI service to use for summarization (e.g., "openai", "context-memory").
 	Provider string
 	// Model specifies the model name or identifier to use with the provider (e.g., "gpt-3.5-turbo").
+	// Only used for OpenAI provider.
 	Model string
 	// MaxInputTokens sets the maximum number of input tokens allowed per summary request.
+	// Only used for OpenAI provider.
 	MaxInputTokens int
 	// MaxOutputTokens sets the maximum number of output tokens generated per summary.
+	// Only used for OpenAI provider.
 	MaxOutputTokens int
 	// Temperature controls the randomness of the AI output; valid range is 0.0 (deterministic) to 1.0 (most random).
+	// Only used for OpenAI provider.
 	Temperature float64
 	// TimeoutMs specifies the maximum time in milliseconds to wait for a summary response.
 	TimeoutMs int
 	// BudgetUSDPerSummary sets the maximum allowed cost in USD for generating a single summary.
+	// Only used for OpenAI provider.
 	BudgetUSDPerSummary float64
+	// BaseURL specifies the base URL for context-memory API (e.g., "http://localhost:3010" or "https://context-api.avaprotocol.org").
+	// Only used for context-memory provider.
+	BaseURL string
+	// AuthToken specifies the authentication token for context-memory API.
+	// Only used for context-memory provider.
+	AuthToken string
 }
 
 type SmartWalletConfig struct {
@@ -268,6 +279,8 @@ type ConfigRaw struct {
 			Temperature         float64 `yaml:"temperature"`
 			TimeoutMs           int     `yaml:"timeout_ms"`
 			BudgetUSDPerSummary float64 `yaml:"budget_usd_per_summary"`
+			BaseURL             string  `yaml:"base_url"`
+			AuthToken           string  `yaml:"auth_token"`
 		} `yaml:"summary"`
 	} `yaml:"notifications"`
 }
@@ -481,6 +494,8 @@ func NewConfig(configFilePath string) (*Config, error) {
 			Temperature:         configRaw.Notifications.Summary.Temperature,
 			TimeoutMs:           configRaw.Notifications.Summary.TimeoutMs,
 			BudgetUSDPerSummary: configRaw.Notifications.Summary.BudgetUSDPerSummary,
+			BaseURL:             configRaw.Notifications.Summary.BaseURL,
+			AuthToken:           getAuthTokenFromConfig(&configRaw),
 		},
 	}
 
@@ -528,6 +543,19 @@ func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if v != "" {
 			return v
+		}
+	}
+	return ""
+}
+
+// getAuthTokenFromConfig retrieves auth token from notifications.summary.auth_token or macros.secrets.context_memory_auth_token
+func getAuthTokenFromConfig(configRaw *ConfigRaw) string {
+	if configRaw.Notifications.Summary.AuthToken != "" {
+		return configRaw.Notifications.Summary.AuthToken
+	}
+	if secrets, ok := configRaw.Macros["secrets"]; ok {
+		if token, ok := secrets["context_memory_auth_token"]; ok {
+			return token
 		}
 	}
 	return ""
