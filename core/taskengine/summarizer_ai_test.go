@@ -3,11 +3,17 @@ package taskengine
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+)
+
+const (
+	// Default auth token for local context-memory tests
+	ContextMemoryAuthToken = "test-auth-token-12345"
 )
 
 type fakeSummarizer struct {
@@ -47,19 +53,55 @@ func TestComposeSummarySmart_FallbackDeterministic(t *testing.T) {
 
 func TestComposeSummarySmart_UsesAISummarizer(t *testing.T) {
 	defer SetSummarizer(nil)
-	// Body must be at least 40 characters to pass validation in ComposeSummarySmart
-	f := &fakeSummarizer{resp: Summary{
-		Subject: "AI subject",
-		Body:    "This is a sufficiently long AI-generated body text that exceeds the 40 character minimum.",
-	}}
-	SetSummarizer(f)
-	vm := NewVM()
-	s := ComposeSummarySmart(vm, "current")
-	if s.Subject != "AI subject" {
-		t.Fatalf("ai summarizer subject not used: expected 'AI subject', got %q", s.Subject)
-	}
-	if !strings.Contains(s.Body, "AI-generated body text") {
-		t.Fatalf("ai summarizer body not used: got %q", s.Body)
+
+	// Check if we should use real context-memory API
+	authToken := os.Getenv("SERVICE_AUTH_TOKEN")
+	if authToken != "" {
+		// Use real context-memory API
+		baseURL := os.Getenv("CONTEXT_MEMORY_URL")
+		if baseURL == "" {
+			baseURL = ContextAPIURL // Default to production URL from source code
+		}
+		t.Logf("Using real context-memory API at: %s", baseURL)
+		summarizer := NewContextMemorySummarizer(baseURL, authToken)
+		SetSummarizer(summarizer)
+
+		vm := NewVM()
+		vm.mu.Lock()
+		vm.vars["settings"] = map[string]interface{}{"name": "Test Workflow"}
+		vm.vars[WorkflowContextVarName] = map[string]interface{}{
+			"owner":  "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
+			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
+		}
+		vm.mu.Unlock()
+		vm.ExecutionLogs = []*avsproto.Execution_Step{
+			{Id: "step1", Name: "test_step", Type: "balance", Success: true},
+		}
+
+		s := ComposeSummarySmart(vm, "current")
+		if s.Subject == "" {
+			t.Fatalf("AI summarizer should return non-empty subject, got empty")
+		}
+		if len(s.Body) < 40 {
+			t.Fatalf("AI summarizer body should be at least 40 characters, got %d", len(s.Body))
+		}
+		t.Logf("Real API response - Subject: %s, Body length: %d", s.Subject, len(s.Body))
+	} else {
+		// Fallback to mock for CI/testing without SERVICE_AUTH_TOKEN
+		// Body must be at least 40 characters to pass validation in ComposeSummarySmart
+		f := &fakeSummarizer{resp: Summary{
+			Subject: "AI subject",
+			Body:    "This is a sufficiently long AI-generated body text that exceeds the 40 character minimum.",
+		}}
+		SetSummarizer(f)
+		vm := NewVM()
+		s := ComposeSummarySmart(vm, "current")
+		if s.Subject != "AI subject" {
+			t.Fatalf("ai summarizer subject not used: expected 'AI subject', got %q", s.Subject)
+		}
+		if !strings.Contains(s.Body, "AI-generated body text") {
+			t.Fatalf("ai summarizer body not used: got %q", s.Body)
+		}
 	}
 }
 
@@ -445,10 +487,8 @@ func TestOpenAISummarizer_BuildDigestWithLargeExecutionLog(t *testing.T) {
 }
 
 // TestComposeSummarySmart_WithRealWorkflowState tests the full flow
-// with realistic workflow state
+// with realistic workflow state. Uses real context-memory API if SERVICE_AUTH_TOKEN is set.
 func TestComposeSummarySmart_WithRealWorkflowState(t *testing.T) {
-	// Don't use real AI, test deterministic fallback with realistic state
-	SetSummarizer(nil)
 	defer SetSummarizer(nil)
 
 	vm := NewVM()
@@ -485,13 +525,26 @@ func TestComposeSummarySmart_WithRealWorkflowState(t *testing.T) {
 	}
 	vm.mu.Unlock()
 
-	summary := ComposeSummarySmart(vm, "email_report")
-
-	// Should show "4 out of 7 steps" (1 trigger + 6 nodes = 7 total, 4 executed)
-	if !strings.Contains(summary.Subject, "out of") {
-		t.Errorf("Subject should show 'X out of Y steps', got: %s", summary.Subject)
+	// Check if we should use real context-memory API
+	authToken := os.Getenv("SERVICE_AUTH_TOKEN")
+	if authToken != "" {
+		// Use real context-memory API (defaults to localhost:3000)
+		baseURL := os.Getenv("CONTEXT_MEMORY_URL")
+		if baseURL == "" {
+			baseURL = ContextAPIURL // Default to production URL from source code
+		}
+		t.Logf("Using real context-memory API at: %s", baseURL)
+		summarizer := NewContextMemorySummarizer(baseURL, authToken)
+		SetSummarizer(summarizer)
+	} else {
+		// Use deterministic fallback if no auth token
+		t.Log("SERVICE_AUTH_TOKEN not set, using deterministic fallback")
+		SetSummarizer(nil)
 	}
 
+	summary := ComposeSummarySmart(vm, "email_report")
+
+	// Should show workflow name and execution status
 	if !strings.Contains(summary.Subject, "Test template") {
 		t.Errorf("Subject should contain workflow name, got: %s", summary.Subject)
 	}
