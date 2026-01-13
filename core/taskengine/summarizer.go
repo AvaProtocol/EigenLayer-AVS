@@ -556,12 +556,20 @@ func normalizeBranchType(t string) string {
 
 // buildBareHTMLFromText converts plain text into minimal HTML paragraphs without global styles
 // Preserves safe HTML tags (<strong>, <em>, <br/>, etc.) while escaping potentially dangerous content
+//
+// SECURITY NOTE: This function uses a simple string replacement approach which has limitations.
+// It does not validate HTML attributes, so tags like <strong onclick="..."> would pass through.
+// For production use with untrusted input, consider using a proper HTML sanitizer library like
+// github.com/microcosm-cc/bluemonday. This current implementation is acceptable for trusted
+// AI-generated content from context-memory or OpenAI, but should be reviewed if processing
+// user-provided content.
 func buildBareHTMLFromText(body string) string {
 	// Normalize newlines first
 	normalized := strings.ReplaceAll(body, "\r\n", "\n")
 
 	// Check if body already contains HTML tags (from AI summaries)
 	// If it does, preserve safe HTML tags and only escape unsafe content
+	// Note: This check could be fooled by legitimate text containing comparison operators
 	hasHTML := strings.Contains(normalized, "<") && strings.Contains(normalized, ">")
 
 	if hasHTML {
@@ -1234,6 +1242,14 @@ func isNotificationNode(node *avsproto.TaskNode) bool {
 	}
 	// Check URL for notification providers
 	url := strings.ToLower(restAPI.Config.Url)
+	method := strings.ToUpper(restAPI.Config.Method)
+
+	// Only consider POST requests as notifications (GET requests are typically data queries)
+	// This helps avoid incorrectly classifying legitimate API nodes that query these services
+	if method != "POST" && method != "" {
+		return false
+	}
+
 	// SendGrid
 	if strings.Contains(url, "sendgrid") || strings.Contains(url, "/mail/send") {
 		return true
@@ -1373,7 +1389,7 @@ func buildStepsOverview(vm *VM) string {
 		isSimulated := false
 		if st.GetExecutionContext() != nil {
 			if ctx, ok := st.GetExecutionContext().AsInterface().(map[string]interface{}); ok {
-				if sim, ok := ctx["is_simulated"]; ok {
+				if sim, ok := ctx["isSimulated"]; ok {
 					switch v := sim.(type) {
 					case bool:
 						isSimulated = v

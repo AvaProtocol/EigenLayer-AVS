@@ -219,7 +219,11 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 		}
 		// Extract ExecutionContext (actual execution mode: is_simulated, provider, chain_id)
 		if log.GetExecutionContext() != nil {
-			step.ExecutionContext = log.GetExecutionContext().AsInterface()
+			if ctxInterface := log.GetExecutionContext().AsInterface(); ctxInterface != nil {
+				step.ExecutionContext = ctxInterface
+			}
+			// Note: If AsInterface() returns nil, we silently skip setting ExecutionContext
+			// This can happen if the ExecutionContext contains unsupported data types
 		}
 		steps = append(steps, step)
 	}

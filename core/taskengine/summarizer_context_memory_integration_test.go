@@ -533,8 +533,8 @@ func buildSummarizeRequestFromVM(vm *VM) SummarizeRequest {
 		if node == nil {
 			continue
 		}
-		// Skip branch condition pseudo-nodes
-		if strings.Contains(nodeID, ".") {
+		// Skip branch condition pseudo-nodes (IDs starting with '.')
+		if len(nodeID) > 0 && nodeID[0] == '.' {
 			continue
 		}
 		nodes = append(nodes, NodeDefinition{
@@ -572,7 +572,7 @@ func buildSummarizeRequestFromVM(vm *VM) SummarizeRequest {
 func getAuthTokenOrSkip(t *testing.T, baseURL string) string {
 	t.Helper()
 	// Check for SERVICE_AUTH_TOKEN override first (works for any URL)
-	if authToken := os.Getenv("SERVICE_AUTH_TOKEN"); authToken != "" {
+	if authToken := os.Getenv("SERVICE_AUTH_TOKEN"); authToken != "" && strings.TrimSpace(authToken) != "" {
 		return authToken
 	}
 	// For localhost URLs, use default local token if SERVICE_AUTH_TOKEN not set

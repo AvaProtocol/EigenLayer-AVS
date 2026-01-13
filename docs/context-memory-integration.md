@@ -29,9 +29,11 @@ The `SERVICE_AUTH_TOKEN` should be configured in the aggregator's environment or
    - You can find it in the Vercel dashboard under Environment Variables
 
 2. **API URL**: The tests can run against either:
-   - **Production**: `https://context-api.avaprotocol.org` (default)
+   - **Production**: `https://context-api.avaprotocol.org` (default, uses the exported `ContextAPIURL` constant from `summarizer_context_memory.go`)
    - **Local**: `http://localhost:3000` (set `CONTEXT_MEMORY_URL` env var)
    - **Custom**: Any URL via `CONTEXT_MEMORY_URL` env var
+   
+   Note: The default production URL comes from the `ContextAPIURL` constant exported from `core/taskengine/summarizer_context_memory.go`. The integration test file imports and uses this constant.
 
 ### Running Integration Tests
 

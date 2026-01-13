@@ -40,7 +40,6 @@ func TestBuildStepsOverview_SimulatedPrefix(t *testing.T) {
 
 	configValue, err := structpb.NewValue(map[string]interface{}{
 		"contractAddress": "0x3bfa4769fb09eefc5a80d6e87c3b9c650f7ae48e",
-		"isSimulated":     true,
 		"methodCalls": []interface{}{
 			map[string]interface{}{
 				"methodName": "exactInputSingle",
@@ -49,14 +48,22 @@ func TestBuildStepsOverview_SimulatedPrefix(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	executionContextValue, err := structpb.NewValue(map[string]interface{}{
+		"isSimulated": true,
+		"chainId":     11155111, // Sepolia
+		"provider":    "simulation",
+	})
+	require.NoError(t, err)
+
 	vm.ExecutionLogs = []*avsproto.Execution_Step{
 		{
-			Id:       "swap1",
-			Name:     "swap1",
-			Success:  true,
-			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
-			Config:   configValue,
-			Metadata: metadataValue,
+			Id:               "swap1",
+			Name:             "swap1",
+			Success:          true,
+			Type:             avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
+			Config:           configValue,
+			Metadata:         metadataValue,
+			ExecutionContext: executionContextValue,
 		},
 	}
 
@@ -192,12 +199,18 @@ func TestBuildStepsOverview_RealAndSimulatedTransactions(t *testing.T) {
 
 	approveConfig, err := structpb.NewValue(map[string]interface{}{
 		"contractAddress": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
-		"isSimulated":     false, // Real transaction
 		"methodCalls": []interface{}{
 			map[string]interface{}{
 				"methodName": "approve",
 			},
 		},
+	})
+	require.NoError(t, err)
+
+	approveExecutionContext, err := structpb.NewValue(map[string]interface{}{
+		"isSimulated": false,    // Real transaction
+		"chainId":     11155111, // Sepolia
+		"provider":    "bundler",
 	})
 	require.NoError(t, err)
 
@@ -213,7 +226,6 @@ func TestBuildStepsOverview_RealAndSimulatedTransactions(t *testing.T) {
 
 	swapConfig, err := structpb.NewValue(map[string]interface{}{
 		"contractAddress": "0x3bfa4769fb09eefc5a80d6e87c3b9c650f7ae48e",
-		"isSimulated":     true, // Simulated transaction
 		"methodCalls": []interface{}{
 			map[string]interface{}{
 				"methodName": "exactInputSingle",
@@ -222,13 +234,21 @@ func TestBuildStepsOverview_RealAndSimulatedTransactions(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	swapExecutionContext, err := structpb.NewValue(map[string]interface{}{
+		"isSimulated": true,     // Simulated transaction
+		"chainId":     11155111, // Sepolia
+		"provider":    "simulation",
+	})
+	require.NoError(t, err)
+
 	vm.ExecutionLogs = []*avsproto.Execution_Step{
 		{
-			Id:      "approve1",
-			Name:    "approve1",
-			Success: true,
-			Type:    avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
-			Config:  approveConfig,
+			Id:               "approve1",
+			Name:             "approve1",
+			Success:          true,
+			Type:             avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
+			Config:           approveConfig,
+			ExecutionContext: approveExecutionContext,
 			OutputData: &avsproto.Execution_Step_ContractWrite{
 				ContractWrite: &avsproto.ContractWriteNode_Output{
 					Data: approvalData,
@@ -236,12 +256,13 @@ func TestBuildStepsOverview_RealAndSimulatedTransactions(t *testing.T) {
 			},
 		},
 		{
-			Id:       "swap1",
-			Name:     "swap1",
-			Success:  true,
-			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
-			Config:   swapConfig,
-			Metadata: swapMetadata,
+			Id:               "swap1",
+			Name:             "swap1",
+			Success:          true,
+			Type:             avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
+			Config:           swapConfig,
+			Metadata:         swapMetadata,
+			ExecutionContext: swapExecutionContext,
 		},
 	}
 
@@ -333,7 +354,6 @@ func TestBuildBranchAndSkippedSummary_IncludesStepsOverview(t *testing.T) {
 
 	swapConfig, err := structpb.NewValue(map[string]interface{}{
 		"contractAddress": "0x3bfa4769fb09eefc5a80d6e87c3b9c650f7ae48e",
-		"isSimulated":     true,
 		"methodCalls": []interface{}{
 			map[string]interface{}{
 				"methodName": "exactInputSingle",
@@ -342,14 +362,22 @@ func TestBuildBranchAndSkippedSummary_IncludesStepsOverview(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	swapExecutionContext, err := structpb.NewValue(map[string]interface{}{
+		"isSimulated": true,
+		"chainId":     11155111, // Sepolia
+		"provider":    "simulation",
+	})
+	require.NoError(t, err)
+
 	vm.ExecutionLogs = []*avsproto.Execution_Step{
 		{
-			Id:       "swap1",
-			Name:     "swap1",
-			Success:  true,
-			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
-			Config:   swapConfig,
-			Metadata: swapMetadata,
+			Id:               "swap1",
+			Name:             "swap1",
+			Success:          true,
+			Type:             avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
+			Config:           swapConfig,
+			Metadata:         swapMetadata,
+			ExecutionContext: swapExecutionContext,
 		},
 	}
 

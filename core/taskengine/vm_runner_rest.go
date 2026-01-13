@@ -24,6 +24,14 @@ const (
 	SendGridSummaryTemplateID = "d-3b4b885af0fc45ad822024ebc72f169c"
 )
 
+// Status HTML templates for email notifications
+const (
+	// StatusHtmlFailedTemplate is the HTML template for failed workflow status badge
+	StatusHtmlFailedTemplate = `<div style="display:inline-block; padding:8px 16px; background-color:#FEE2E2; color:#991B1B; border-radius:8px; font-weight:500; margin:8px 0"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#EF4444"/><path d="M10 6L6 10M6 6L10 10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>Execution failed</div>`
+	// StatusHtmlSuccessTemplate is the HTML template for successful workflow status badge
+	StatusHtmlSuccessTemplate = `<div style="display:inline-block; padding:8px 16px; background-color:#D1FAE5; color:#065F46; border-radius:8px; font-weight:500; margin:8px 0"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#10B981"/><path d="M11 6L7 10L5 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>All steps completed successfully</div>`
+)
+
 // HTTPRequestExecutor interface for making HTTP requests
 type HTTPRequestExecutor interface {
 	ExecuteRequest(method, url, body string, headers map[string]string) (*resty.Response, error)
@@ -809,7 +817,8 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 					// Check if we have an AI summary (from context-memory or OpenAI)
 					// If so, use it as-is (pass-through) instead of overwriting with deterministic summary
-					hasAISummary := strings.TrimSpace(summaryForClient.Subject) != "" && strings.TrimSpace(summaryForClient.Body) != ""
+					// Check for Subject, AnalysisHtml, or Body to determine if we have an AI summary
+					hasAISummary := (strings.TrimSpace(summaryForClient.Subject) != "" || strings.TrimSpace(summaryForClient.AnalysisHtml) != "") && strings.TrimSpace(summaryForClient.Body) != ""
 
 					// Compose deterministic branch/skip summary strings
 					// When branches/skips are present, use the structured summary as the primary analysisHtml
@@ -935,13 +944,11 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 						} else {
 							// Fallback: Generate minimal statusHtml for email template (based on workflow success)
 							failed, _, _ := findEarliestFailure(r.vm)
-							var statusHtml string
 							if failed {
-								statusHtml = `<div style="display:inline-block; padding:8px 16px; background-color:#FEE2E2; color:#991B1B; border-radius:8px; font-weight:500; margin:8px 0"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#EF4444"/><path d="M10 6L6 10M6 6L10 10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>Execution failed</div>`
+								dynamicData["statusHtml"] = StatusHtmlFailedTemplate
 							} else {
-								statusHtml = `<div style="display:inline-block; padding:8px 16px; background-color:#D1FAE5; color:#065F46; border-radius:8px; font-weight:500; margin:8px 0"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#10B981"/><path d="M11 6L7 10L5 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>All steps completed successfully</div>`
+								dynamicData["statusHtml"] = StatusHtmlSuccessTemplate
 							}
-							dynamicData["statusHtml"] = statusHtml
 						}
 
 						// Use SummaryLine if available (from context-memory), otherwise extract from body
