@@ -275,6 +275,8 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	}
 
 	// Initialize optional AI summarizer (global) from aggregator config
+	// Provider name is case-insensitive: "openai", "OpenAI", "OPENAI" all work
+	// The factory functions also handle case-insensitive matching internally
 	var s Summarizer
 	switch strings.ToLower(config.NotificationsSummary.Provider) {
 	case "openai":
