@@ -16,7 +16,7 @@ REPO_OWNER="AvaProtocol"
 REPO_NAME="EigenLayer-AVS"
 REPO="$REPO_OWNER/$REPO_NAME"
 VERBOSE="${2:-false}"
-OUTPUT_FILE="eigenlayer-avs-pr-comments-${PR_NUMBER}.json"
+OUTPUT_FILE="pr-comments-${PR_NUMBER}.json"
 
 echo "Fetching newest Copilot and Claude comments from PR #$PR_NUMBER..."
 echo "Repository: $REPO"
