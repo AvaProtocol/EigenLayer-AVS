@@ -15,12 +15,14 @@ import (
 
 // Summary represents composed notification content
 type Summary struct {
-	Subject      string
-	Body         string
-	SummaryLine  string // One-liner summary (e.g., "Your workflow 'Test Stoploss' executed 7 out of 7 total steps")
-	AnalysisHtml string // Pre-formatted HTML content with ✓ symbols (from context-memory)
-	StatusHtml   string // Status badge HTML (green/yellow/red badge with icon) - from context-memory
-	Status       string // Execution status: "success", "partial_success", "failure" - from context-memory
+	Subject           string
+	Body              string
+	SummaryLine       string   // One-liner summary (e.g., "Your workflow 'Test Stoploss' executed 7 out of 7 total steps")
+	AnalysisHtml      string   // Pre-formatted HTML content with ✓ symbols (from context-memory)
+	StatusHtml        string   // Status badge HTML (green/yellow/red badge with icon) - from context-memory
+	Status            string   // Execution status: "success", "partial_success", "failure" - from context-memory
+	BranchSummaryHtml string   // HTML formatted branch summary (from context-memory) - for partial success scenarios
+	SkippedNodes      []string // List of skipped node names (from context-memory)
 }
 
 // SendGridDynamicData returns a dynamic_template_data map for SendGrid Dynamic Templates.
@@ -51,6 +53,14 @@ func (s Summary) SendGridDynamicData() map[string]interface{} {
 	// Include summary line if available
 	if s.SummaryLine != "" {
 		data["summary"] = s.SummaryLine
+	}
+	// Include branch summary HTML from context-memory if available (for partial success scenarios)
+	if s.BranchSummaryHtml != "" {
+		data["branchSummaryHtml"] = s.BranchSummaryHtml
+	}
+	// Include skipped nodes list from context-memory if available
+	if len(s.SkippedNodes) > 0 {
+		data["skippedNodes"] = s.SkippedNodes
 	}
 	return data
 }
@@ -366,53 +376,53 @@ func BuildBranchAndSkippedSummary(vm *VM, currentNodeName ...string) (string, st
 	}
 	text := strings.Join(tb, "\n")
 
-	// Compose minimal HTML (tight spacing, deterministic)
+	// Compose minimal HTML (improved spacing for readability)
 	var hb []string
 	// Summary heading and sentence
-	hb = append(hb, "<div style=\"font-weight:600; margin:8px 0 4px\">Summary</div>")
-	hb = append(hb, "<p style=\"margin:0 0 4px\">"+html.EscapeString(summaryLine)+"</p>")
+	hb = append(hb, "<div style=\"font-weight:600; margin:16px 0 8px\">Summary</div>")
+	hb = append(hb, "<p style=\"margin:8px 0\">"+html.EscapeString(summaryLine)+"</p>")
 	// On-chain line on separate paragraph
 	if onchainLine != "" {
-		hb = append(hb, "<p style=\"margin:0 0 8px\">"+html.EscapeString(onchainLine)+"</p>")
+		hb = append(hb, "<p style=\"margin:8px 0 12px\">"+html.EscapeString(onchainLine)+"</p>")
 	}
 
 	// Add "What Went Wrong" section if there are failures
 	if strings.TrimSpace(failedStepsOverview) != "" {
-		hb = append(hb, "<div style=\"font-weight:600; margin:8px 0 4px\">What Went Wrong</div>")
+		hb = append(hb, "<div style=\"font-weight:600; margin:16px 0 8px\">What Went Wrong</div>")
 		// Split by newlines to add each step as a separate paragraph
 		steps := strings.Split(failedStepsOverview, "\n")
 		for _, step := range steps {
 			if strings.TrimSpace(step) != "" {
 				// Escape HTML but preserve the X mark character
 				escapedStep := html.EscapeString(step)
-				hb = append(hb, "<p style=\"margin:0 0 4px\">"+escapedStep+"</p>")
+				hb = append(hb, "<p style=\"margin:8px 0\">"+escapedStep+"</p>")
 			}
 		}
 	}
 
 	// Add "What Executed Successfully" section if there are successful contract writes
 	if strings.TrimSpace(successfulStepsOverview) != "" {
-		hb = append(hb, "<div style=\"font-weight:600; margin:8px 0 4px\">What Executed Successfully</div>")
+		hb = append(hb, "<div style=\"font-weight:600; margin:16px 0 8px\">What Executed Successfully</div>")
 		// Split by newlines to add each step as a separate paragraph
 		steps := strings.Split(successfulStepsOverview, "\n")
 		for _, step := range steps {
 			if strings.TrimSpace(step) != "" {
 				// Escape HTML but preserve the checkmark character
 				escapedStep := html.EscapeString(step)
-				hb = append(hb, "<p style=\"margin:0 0 4px\">"+escapedStep+"</p>")
+				hb = append(hb, "<p style=\"margin:8px 0\">"+escapedStep+"</p>")
 			}
 		}
 	}
 
 	// Spacer before Skipped nodes (only if there are skipped nodes or branches)
 	if len(skipped) > 0 || len(branches) > 0 {
-		hb = append(hb, "<div style=\"height:8px\"></div>")
+		hb = append(hb, "<div style=\"height:12px\"></div>")
 	}
 	if len(skipped) > 0 {
-		hb = append(hb, "<div style=\"font-weight:600; margin:8px 0 4px\">The below nodes were skipped due to branching conditions</div>")
-		hb = append(hb, "<ul style=\"margin:0 0 12px 20px; padding:0\">")
+		hb = append(hb, "<div style=\"font-weight:600; margin:16px 0 8px\">The below nodes were skipped due to branching conditions</div>")
+		hb = append(hb, "<ul style=\"margin:0 0 16px 20px; padding:0; line-height:1.6\">")
 		for _, n := range skipped {
-			hb = append(hb, "<li>"+html.EscapeString(n)+"</li>")
+			hb = append(hb, "<li style=\"margin:4px 0\">"+html.EscapeString(n)+"</li>")
 		}
 		hb = append(hb, "</ul>")
 	}
@@ -427,7 +437,7 @@ func BuildBranchAndSkippedSummary(vm *VM, currentNodeName ...string) (string, st
 			} else {
 				headerText += " -> no next node"
 			}
-			hb = append(hb, fmt.Sprintf("<div style=\"font-weight:600; margin:8px 0 4px\">%s</div>", html.EscapeString(headerText)))
+			hb = append(hb, fmt.Sprintf("<div style=\"font-weight:600; margin:16px 0 8px\">%s</div>", html.EscapeString(headerText)))
 
 			// Use new structured evaluation data if available
 			if len(b.ConditionEvaluations) > 0 {
@@ -561,7 +571,7 @@ func normalizeBranchType(t string) string {
 // It does not validate HTML attributes, so tags like <strong onclick="..."> would pass through.
 // For production use with untrusted input, consider using a proper HTML sanitizer library like
 // github.com/microcosm-cc/bluemonday. This current implementation is acceptable for trusted
-// AI-generated content from context-memory or OpenAI, but should be reviewed if processing
+// AI-generated content from context-memory API, but should be reviewed if processing
 // user-provided content.
 func buildBareHTMLFromText(body string) string {
 	// Normalize newlines first
@@ -1824,18 +1834,6 @@ func findLastSuccessStep(vm *VM) *avsproto.Execution_Step {
 		}
 	}
 	return nil
-}
-
-func findLastSuccessStepName(vm *VM) string {
-	step := findLastSuccessStep(vm)
-	if step == nil {
-		return ""
-	}
-	name := step.GetName()
-	if name == "" {
-		name = step.GetId()
-	}
-	return safeName(name)
 }
 
 func firstLine(s string) string {

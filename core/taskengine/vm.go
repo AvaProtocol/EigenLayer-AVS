@@ -1297,6 +1297,15 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 							"nodeID", node.Id,
 							"userOpHash", userOpHash)
 
+						// Update execution log to reflect successful confirmation
+						// The step was initially marked as pending/failed because receipt was not available
+						// Now that confirmation is received, mark it as successful
+						executionLogForNode.Success = true
+						executionLogForNode.Error = ""
+						v.logger.Info("✅ Updated execution log success status after confirmation",
+							"nodeID", node.Id,
+							"success", executionLogForNode.Success)
+
 						// Add RPC propagation delay to ensure state is visible across all RPC nodes
 						v.addRPCPropagationDelay()
 					}
