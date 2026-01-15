@@ -36,20 +36,28 @@ type SummarizeRequest struct {
 	Edges           []EdgeDefinition       `json:"edges,omitempty"`
 	Settings        map[string]interface{} `json:"settings,omitempty"`
 	CurrentNodeName string                 `json:"currentNodeName,omitempty"`
+	TokenMetadata   map[string]TokenMeta   `json:"tokenMetadata,omitempty"` // All tokens involved, keyed by address (lowercase)
+}
+
+type TokenMeta struct {
+	Symbol   string `json:"symbol"`
+	Decimals int    `json:"decimals"`
+	Name     string `json:"name,omitempty"`
 }
 
 type StepDigest struct {
-	Name            string                 `json:"name"`
-	ID              string                 `json:"id"`
-	Type            string                 `json:"type"`
-	Success         bool                   `json:"success"`
-	Error           string                 `json:"error,omitempty"`
-	ContractAddress string                 `json:"contractAddress,omitempty"`
-	MethodName      string                 `json:"methodName,omitempty"`
-	MethodParams    map[string]interface{} `json:"methodParams,omitempty"`
-	OutputData      interface{}            `json:"outputData,omitempty"`
-	Metadata        interface{}            `json:"metadata,omitempty"`
-	StepDescription string                 `json:"stepDescription,omitempty"`
+	Name             string                 `json:"name"`
+	ID               string                 `json:"id"`
+	Type             string                 `json:"type"`
+	Success          bool                   `json:"success"`
+	Error            string                 `json:"error,omitempty"`
+	ContractAddress  string                 `json:"contractAddress,omitempty"`
+	MethodName       string                 `json:"methodName,omitempty"`
+	MethodParams     map[string]interface{} `json:"methodParams,omitempty"`
+	OutputData       interface{}            `json:"outputData,omitempty"`
+	Metadata         interface{}            `json:"metadata,omitempty"`
+	StepDescription  string                 `json:"stepDescription,omitempty"`
+	ExecutionContext map[string]interface{} `json:"executionContext,omitempty"` // Actual execution mode (is_simulated, provider, chain_id)
 }
 
 type NodeDefinition struct {
@@ -556,14 +564,39 @@ func buildSummarizeRequestFromVM(vm *VM) SummarizeRequest {
 		}
 	}
 
+	// Extract token metadata from settings if available
+	tokenMetadata := make(map[string]TokenMeta)
+	if settings, ok := vm.vars["settings"].(map[string]interface{}); ok {
+		if pool, ok := settings["uniswapv3_pool"].(map[string]interface{}); ok {
+			if tokens, ok := pool["tokens"].(map[string]interface{}); ok {
+				// For test purposes, we'll add placeholder metadata
+				// In production, this would come from TokenEnrichmentService
+				for _, tokenAddr := range tokens {
+					if addr, ok := tokenAddr.(string); ok && len(addr) > 0 {
+						addrLower := strings.ToLower(addr)
+						// Add placeholder metadata (tests can override if needed)
+						if _, exists := tokenMetadata[addrLower]; !exists {
+							tokenMetadata[addrLower] = TokenMeta{
+								Symbol:   "TOKEN",
+								Decimals: 18,
+								Name:     "Test Token",
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	return SummarizeRequest{
-		OwnerEOA:    ownerEOA,
-		Name:        workflowName,
-		SmartWallet: smartWallet,
-		Steps:       steps,
-		ChainName:   chainName,
-		Nodes:       nodes,
-		Edges:       edges,
+		OwnerEOA:      ownerEOA,
+		Name:          workflowName,
+		SmartWallet:   smartWallet,
+		Steps:         steps,
+		ChainName:     chainName,
+		Nodes:         nodes,
+		Edges:         edges,
+		TokenMetadata: tokenMetadata,
 	}
 }
 
@@ -599,4 +632,267 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// SummarizeResponse matches the TypeScript SummarizeResponse interface for /api/summarize
+type SummarizeResponse struct {
+	Subject       string `json:"subject"`
+	Summary       string `json:"summary"`
+	AnalysisHtml  string `json:"analysisHtml"`
+	Body          string `json:"body"`
+	StatusHtml    string `json:"statusHtml"`
+	Status        string `json:"status"`
+	PromptVersion string `json:"promptVersion"`
+	Cached        bool   `json:"cached,omitempty"`
+}
+
+// TestContextMemorySummarize_SimulatedPrefixBehavior verifies that the /api/summarize endpoint
+// correctly adds "(simulated)" prefix to steps with ExecutionContext.is_simulated = true
+// and does NOT add the prefix to steps with is_simulated = false (real on-chain transactions)
+func TestContextMemorySummarize_SimulatedPrefixBehavior(t *testing.T) {
+	baseURL = getContextMemoryURL()
+	authToken := getAuthTokenOrSkip(t, baseURL)
+	t.Logf("Testing against: %s", baseURL)
+
+	client := resty.New()
+	client.SetTimeout(30 * time.Second)
+
+	// Build request with mixed simulated/real steps
+	// This simulates a workflow where:
+	// - approve1: is_simulated=false (real on-chain transaction via bundler)
+	// - contractWrite1: is_simulated=true (simulated via Tenderly)
+	request := SummarizeRequest{
+		OwnerEOA:    "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
+		Name:        "Test Stoploss",
+		SmartWallet: "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+		ChainName:   "Sepolia",
+		Steps: []StepDigest{
+			{
+				Name:    "eventTrigger",
+				ID:      "trigger1",
+				Type:    "eventTrigger",
+				Success: true,
+				ExecutionContext: map[string]interface{}{
+					"is_simulated": false,
+					"provider":     "chain-rpc",
+					"chain_id":     11155111,
+				},
+			},
+			{
+				Name:            "approve1",
+				ID:              "step1",
+				Type:            "contractWrite",
+				Success:         true,
+				ContractAddress: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+				MethodName:      "approve",
+				OutputData: map[string]interface{}{
+					"approve": map[string]interface{}{
+						"owner":   "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+						"spender": "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E",
+						"value":   "20990000",
+					},
+				},
+				// REAL transaction - should NOT have (simulated) prefix
+				ExecutionContext: map[string]interface{}{
+					"is_simulated": false,
+					"provider":     "bundler",
+					"chain_id":     11155111,
+				},
+			},
+			{
+				Name:            "contractWrite1",
+				ID:              "step2",
+				Type:            "contractWrite",
+				Success:         true,
+				ContractAddress: "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E",
+				MethodName:      "exactInputSingle",
+				OutputData: map[string]interface{}{
+					"exactInputSingle": map[string]interface{}{
+						"amountOut": "2235380089399511",
+					},
+				},
+				// SIMULATED transaction - SHOULD have (simulated) prefix
+				ExecutionContext: map[string]interface{}{
+					"is_simulated": true,
+					"provider":     "tenderly",
+					"chain_id":     11155111,
+				},
+			},
+		},
+		Nodes: []NodeDefinition{
+			{ID: "node0", Name: "eventTrigger"},
+			{ID: "node1", Name: "approve1"},
+			{ID: "node2", Name: "contractWrite1"},
+		},
+		Edges: []EdgeDefinition{
+			{ID: "edge1", Source: "node0", Target: "node1"},
+			{ID: "edge2", Source: "node1", Target: "node2"},
+		},
+		Settings: map[string]interface{}{
+			"name":     "Test Stoploss",
+			"chain_id": 11155111,
+			"uniswapv3_pool": map[string]interface{}{
+				"tokens": map[string]interface{}{
+					"input":  "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+					"output": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
+				},
+			},
+		},
+		CurrentNodeName: "email1",
+		TokenMetadata: map[string]TokenMeta{
+			"0x1c7d4b196cb0c7b01d743fbc6116a902379c7238": {
+				Symbol:   "USDC",
+				Decimals: 6,
+				Name:     "USD Coin",
+			},
+			"0xfff9976782d46cc05630d1f6ebab18b2324d6b14": {
+				Symbol:   "WETH",
+				Decimals: 18,
+				Name:     "Wrapped Ether",
+			},
+		},
+	}
+
+	var response SummarizeResponse
+	url := baseURL + "/api/summarize"
+
+	// Log request details for debugging
+	requestJSON := mustMarshalJSON(request)
+	t.Logf("Making POST request to: %s", url)
+	t.Logf("Full request body:\n%s", requestJSON)
+
+	resp, err := client.R().
+		SetHeader("Authorization", "Bearer "+authToken).
+		SetHeader("Content-Type", "application/json").
+		SetBody(request).
+		SetResult(&response).
+		Post(url)
+
+	if err != nil {
+		t.Fatalf("HTTP request failed: %v", err)
+	}
+
+	// Always log the raw response body for debugging
+	t.Logf("Raw response body: %s", string(resp.Body()))
+
+	if resp.StatusCode() != 200 {
+		t.Logf("Response status: %d", resp.StatusCode())
+		t.Logf("Response headers: %v", resp.Header())
+		t.Logf("Full response body: %s", string(resp.Body()))
+		t.Fatalf("Expected status 200, got %d. Response body: %s", resp.StatusCode(), string(resp.Body()))
+	}
+
+	t.Logf("Response received:")
+	t.Logf("  Subject: %s", response.Subject)
+	t.Logf("  Body: %s", response.Body)
+	t.Logf("  AnalysisHtml: %s", response.AnalysisHtml)
+	t.Logf("  Status: %s", response.Status)
+
+	// Validate that the body/analysisHtml contains proper (simulated) markers
+	// The swap (contractWrite1) should have "(simulated)" but approve1 should NOT
+
+	// Check that approve1 does NOT have (simulated) prefix since is_simulated=false
+	if strings.Contains(response.Body, "Approved") && strings.Contains(response.Body, "(simulated)") {
+		// Need to check if the (simulated) is associated with Approved or Swapped
+		// This is a simplified check - ideally we'd parse the structure
+		t.Logf("WARNING: Body contains '(simulated)' - checking if it's correctly applied")
+	}
+
+	// Check that swap/exactInputSingle DOES have (Simulated) prefix since is_simulated=true
+	bodyLowerCheck := strings.ToLower(response.Body)
+	analysisLowerCheck := strings.ToLower(response.AnalysisHtml)
+	if strings.Contains(bodyLowerCheck, "swap") {
+		if !strings.Contains(bodyLowerCheck, "(simulated)") && !strings.Contains(analysisLowerCheck, "(simulated)") {
+			t.Errorf("Expected '(Simulated)' prefix for swap step (is_simulated=true), but not found in body or analysisHtml")
+			t.Logf("Body: %s", response.Body)
+			t.Logf("AnalysisHtml: %s", response.AnalysisHtml)
+		}
+	}
+
+	// More detailed check: The body should distinguish between real and simulated
+	// Real: "Approved 20.99 USDC to 0x3bFA...e48E for trading" (no prefix, formatted with symbol)
+	// Simulated: "(Simulated) Swapped for ~2.2354 WETH via Uniswap V3" (with prefix and symbol)
+	t.Logf("=== SIMULATED PREFIX BEHAVIOR VERIFICATION ===")
+	t.Logf("Expected behavior:")
+	t.Logf("  - approve1 (is_simulated=false): NO (simulated) prefix")
+	t.Logf("  - contractWrite1 (is_simulated=true): SHOULD have (simulated) prefix")
+	t.Logf("Actual body: %s", response.Body)
+	t.Logf("PromptVersion: %s", response.PromptVersion)
+
+	// If using fallback, the test can't verify the simulated prefix behavior
+	// Log a warning but don't fail - the real verification happens when AI is enabled
+	if response.PromptVersion == "fallback" {
+		t.Logf("WARNING: Context-memory returned fallback response (no AI summary)")
+		t.Logf("This test requires the full AI summary to verify (simulated) prefix behavior")
+		t.Logf("Ensure the context-memory service has AI summarization enabled")
+		// Don't fail the test - just skip the verification
+		t.Skip("Skipping simulated prefix verification - context-memory returned fallback")
+	}
+
+	// When AI summary is enabled, verify the (simulated) prefix behavior
+	// The body should contain "(Simulated)" only for steps with is_simulated=true
+	if response.Body != "" {
+		// The swap step (contractWrite1) has is_simulated=true, so it should have (Simulated) prefix
+		// Check if body mentions swap/exactInputSingle with (Simulated)
+		bodyLower := strings.ToLower(response.Body)
+		hasSwapMention := strings.Contains(bodyLower, "swap") || strings.Contains(bodyLower, "exactinputsingle")
+		hasSimulatedPrefix := strings.Contains(bodyLower, "(simulated)") // case-insensitive check
+
+		if hasSwapMention && !hasSimulatedPrefix {
+			t.Errorf("FAIL: Swap step (is_simulated=true) should have '(Simulated)' prefix but it's missing")
+			t.Logf("Body: %s", response.Body)
+		} else if hasSwapMention && hasSimulatedPrefix {
+			t.Logf("PASS: Swap step correctly has '(Simulated)' prefix")
+		}
+
+		// The approve step (approve1) has is_simulated=false, so it should NOT have (Simulated) prefix
+		// Check that "(Simulated)" doesn't appear on the same line as "Approved"
+		// Also verify that approve amount is formatted with token symbol (e.g., "20.99 USDC" not "20,990,000")
+		lines := strings.Split(response.Body, "\n")
+		for _, line := range lines {
+			lineLower := strings.ToLower(line)
+			if strings.Contains(lineLower, "approved") {
+				if strings.Contains(lineLower, "(simulated)") {
+					t.Errorf("FAIL: Approve step (is_simulated=false) should NOT have '(Simulated)' prefix")
+					t.Logf("Line: %s", line)
+				}
+				// Verify formatted amount with symbol (should contain "USDC" and a decimal number like "20.99")
+				if !strings.Contains(lineLower, "usdc") {
+					t.Errorf("FAIL: Approve step should include token symbol 'USDC' in formatted amount")
+					t.Logf("Line: %s", line)
+				}
+				// Should not contain raw amount like "20,990,000" or "20990000"
+				if strings.Contains(line, "20,990,000") || strings.Contains(line, "20990000") {
+					t.Errorf("FAIL: Approve step should show formatted amount (e.g., '20.99 USDC'), not raw amount")
+					t.Logf("Line: %s", line)
+				}
+			}
+		}
+
+		// Verify the exact expected behavior with consistent case handling:
+		// - Line with "approved" (case-insensitive) should NOT contain "(simulated)" (case-insensitive)
+		// - Line with "swap" (case-insensitive) should contain "(simulated)" (case-insensitive)
+		for _, line := range lines {
+			lineLower := strings.ToLower(line)
+			if strings.Contains(lineLower, "approved") {
+				if strings.Contains(lineLower, "(simulated)") {
+					t.Errorf("FAIL: Approve line incorrectly has (Simulated) prefix: %s", line)
+				} else {
+					t.Logf("PASS: Approve line correctly has NO (Simulated) prefix")
+				}
+			}
+			if strings.Contains(lineLower, "swap") {
+				if !strings.Contains(lineLower, "(simulated)") {
+					t.Errorf("FAIL: Swap line missing (Simulated) prefix: %s", line)
+				} else {
+					t.Logf("PASS: Swap line correctly has (Simulated) prefix")
+				}
+				// Verify swap includes output token symbol (should contain "weth" - case-insensitive)
+				if !strings.Contains(lineLower, "weth") {
+					t.Errorf("FAIL: Swap step should include output token symbol 'WETH'")
+					t.Logf("Line: %s", line)
+				}
+			}
+		}
+	}
 }

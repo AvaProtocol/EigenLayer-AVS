@@ -316,20 +316,6 @@ func GetTestMoralisApiKey() string {
 	return testConfig.MacroSecrets["moralis_api_key"]
 }
 
-// GetTestOpenAIApiKey returns the OpenAI API key for tests from aggregator config
-// Returns empty string if config is not loaded or key is not configured
-func GetTestOpenAIApiKey() string {
-	// Use loaded aggregator config (if available)
-	if testConfig != nil && testConfig.MacroSecrets != nil {
-		if v := testConfig.MacroSecrets["openai_api_key"]; v != "" {
-			return v
-		}
-	}
-
-	// Fallback to environment variable for local runs
-	return os.Getenv("OPENAI_API_KEY")
-}
-
 // TriggerData represents the flattened trigger information for testing
 type TriggerData struct {
 	Type   avsproto.TriggerType

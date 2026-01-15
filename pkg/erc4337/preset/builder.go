@@ -953,11 +953,33 @@ func sendUserOpCore(
 		if err == nil && txResult != "" {
 			log.Printf("UserOp sent (attempt %d/%d): hash=%s, nonce=%s, sender=%s", retry+1, maxRetries, txResult, userOp.Nonce.String(), userOp.Sender.Hex())
 
-			// Manually trigger bundling immediately (helps with development/testing)
+			// Brief delay to allow bundler to index the UserOp before checking mempool
+			time.Sleep(500 * time.Millisecond)
+
+			// Check for and flush stuck UserOps before triggering bundle for our new one.
+			// The bundler bundles in FIFO order and only bundles 1 UserOp at a time,
+			// so older stuck UserOps must be flushed first to allow our new one to be bundled.
+			log.Printf("🔍 Checking for stuck UserOps before bundling...")
+			flushedCount, flushErr := bundlerClient.FlushStuckUserOps(
+				context.Background(),
+				aa.EntrypointAddress,
+				userOp.Sender,
+				userOp.Nonce,
+			)
+			if flushErr != nil {
+				log.Printf("⚠️  Failed to flush stuck UserOps (non-fatal): %v", flushErr)
+				log.Printf("⚠️  Proceeding to bundle new UserOp without flushing older ones. If this UserOp is not mined, check bundler mempool for stuck UserOps with lower nonces that may be blocking it.")
+			} else if flushedCount > 0 {
+				log.Printf("✅ Flushed %d stuck UserOp(s), now bundling our new one", flushedCount)
+			}
+
+			// Manually trigger bundling for our new UserOp
 			// This is only needed for local bundlers that don't auto-bundle frequently
 			triggerErr := bundlerClient.SendBundleNow(context.Background())
 			if triggerErr != nil {
 				log.Printf("Manual bundle trigger failed (non-fatal): %v", triggerErr)
+			} else {
+				log.Printf("✅ Bundle triggered for UserOp hash=%s", txResult)
 			}
 
 			// Update NonceManager to track this pending UserOp

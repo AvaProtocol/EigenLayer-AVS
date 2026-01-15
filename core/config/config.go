@@ -135,35 +135,31 @@ type FeeRatesConfig struct {
 	EventTopicFeeUSDPerMinute   float64
 }
 
-// NotificationsSummaryConfig defines optional AI summarization settings for notifications
+// NotificationsSummaryConfig defines optional AI summarization settings for notifications.
+// Only the "context-memory" provider is supported. API credentials should be configured
+// via macros.secrets (context_api_endpoint and context_api_key).
 type NotificationsSummaryConfig struct {
 	// Enabled determines whether AI summarization is active for notifications.
 	// Set to true to enable summarization, false to disable.
 	Enabled bool
-	// Provider specifies the AI service to use for summarization (e.g., "openai", "context-memory").
+	// Provider specifies the AI service to use for summarization.
+	// Only "context-memory" is supported.
 	Provider string
-	// Model specifies the model name or identifier to use with the provider (e.g., "gpt-3.5-turbo").
-	// Only used for OpenAI provider.
+	// Model is deprecated and unused. Kept for config compatibility.
 	Model string
-	// MaxInputTokens sets the maximum number of input tokens allowed per summary request.
-	// Only used for OpenAI provider.
+	// MaxInputTokens is deprecated and unused. Kept for config compatibility.
 	MaxInputTokens int
-	// MaxOutputTokens sets the maximum number of output tokens generated per summary.
-	// Only used for OpenAI provider.
+	// MaxOutputTokens is deprecated and unused. Kept for config compatibility.
 	MaxOutputTokens int
-	// Temperature controls the randomness of the AI output; valid range is 0.0 (deterministic) to 1.0 (most random).
-	// Only used for OpenAI provider.
+	// Temperature is deprecated and unused. Kept for config compatibility.
 	Temperature float64
 	// TimeoutMs specifies the maximum time in milliseconds to wait for a summary response.
 	TimeoutMs int
-	// BudgetUSDPerSummary sets the maximum allowed cost in USD for generating a single summary.
-	// Only used for OpenAI provider.
+	// BudgetUSDPerSummary is deprecated and unused. Kept for config compatibility.
 	BudgetUSDPerSummary float64
-	// BaseURL specifies the base URL for context-memory API (e.g., "http://localhost:3010" or "https://context-api.avaprotocol.org").
-	// Only used for context-memory provider.
+	// BaseURL is deprecated. Use macros.secrets.context_api_endpoint instead.
 	BaseURL string
-	// AuthToken specifies the authentication token for context-memory API.
-	// Only used for context-memory provider.
+	// AuthToken is deprecated. Use macros.secrets.context_api_key instead.
 	AuthToken string
 }
 
@@ -548,13 +544,10 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// getAuthTokenFromConfig retrieves auth token from notifications.summary.auth_token or macros.secrets.context_memory_auth_token
+// getAuthTokenFromConfig retrieves auth token from macros.secrets.context_api_key
 func getAuthTokenFromConfig(configRaw *ConfigRaw) string {
-	if configRaw.Notifications.Summary.AuthToken != "" {
-		return configRaw.Notifications.Summary.AuthToken
-	}
 	if secrets, ok := configRaw.Macros["secrets"]; ok {
-		if token, ok := secrets["context_memory_auth_token"]; ok {
+		if token, ok := secrets["context_api_key"]; ok {
 			return token
 		}
 	}
