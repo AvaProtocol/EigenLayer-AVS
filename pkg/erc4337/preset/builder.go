@@ -968,6 +968,7 @@ func sendUserOpCore(
 			)
 			if flushErr != nil {
 				log.Printf("⚠️  Failed to flush stuck UserOps (non-fatal): %v", flushErr)
+				log.Printf("⚠️  Proceeding to bundle new UserOp without flushing older ones. If this UserOp is not mined, check bundler mempool for stuck UserOps with lower nonces that may be blocking it.")
 			} else if flushedCount > 0 {
 				log.Printf("✅ Flushed %d stuck UserOp(s), now bundling our new one", flushedCount)
 			}

@@ -138,9 +138,9 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 	// Send request
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		// Log INFO level message when context-memory API is not available (so it's visible in logs)
+		// Log DEBUG level for fallback operations (reduces log clutter in production)
 		if vm != nil && vm.logger != nil {
-			vm.logger.Info("Context-memory API not available: HTTP request failed", "error", err, "url", c.baseURL+"/api/summarize")
+			vm.logger.Debug("Context-memory API not available: HTTP request failed", "error", err, "url", c.baseURL+"/api/summarize")
 		}
 		return Summary{}, fmt.Errorf("HTTP request failed: %w", err)
 	}
@@ -148,9 +148,9 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		// Log INFO level message when context-memory API returns error (so it's visible in logs)
+		// Log DEBUG level for fallback operations (reduces log clutter in production)
 		if vm != nil && vm.logger != nil {
-			vm.logger.Info("Context-memory API not available: non-2xx response", "status_code", resp.StatusCode, "response_body", string(body), "url", c.baseURL+"/api/summarize")
+			vm.logger.Debug("Context-memory API not available: non-2xx response", "status_code", resp.StatusCode, "response_body", string(body), "url", c.baseURL+"/api/summarize")
 		}
 		return Summary{}, fmt.Errorf("non-2xx response (%d): %s", resp.StatusCode, string(body))
 	}
@@ -267,8 +267,8 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 		}
 
 		// Look up token metadata for the contract address (for ERC20 tokens only)
-		// Use the resolved address if available
-		if resolvedContractAddress != "" && !strings.Contains(resolvedContractAddress, "{{") && isERC20Method(step.MethodName) {
+		// Use the resolved address if available and validate it's a proper Ethereum address
+		if resolvedContractAddress != "" && !strings.Contains(resolvedContractAddress, "{{") && common.IsHexAddress(resolvedContractAddress) && isERC20Method(step.MethodName) {
 			if tokenService := GetTokenEnrichmentService(); tokenService != nil {
 				if metadata, err := tokenService.GetTokenMetadata(resolvedContractAddress); err == nil && metadata != nil {
 					step.TokenMetadata = &contextMemoryTokenMetadata{
@@ -399,6 +399,7 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 
 // isERC20Method returns true if the method name suggests this is an ERC20 token interaction
 // This is used to determine whether to fetch token metadata for a contract address
+// Note: Uses case-insensitive comparison, so method names in the array can be in any case
 func isERC20Method(methodName string) bool {
 	if methodName == "" {
 		return false
@@ -445,14 +446,13 @@ func extractResolvedContractAddress(log *avsproto.Execution_Step) string {
 		if resultsArray, ok := metadataInterface.([]interface{}); ok {
 			for _, result := range resultsArray {
 				if resultMap, ok := result.(map[string]interface{}); ok {
-					// Check receipt for "to" field (the actual contract address)
+					// Check receipt for both "to" field and event log addresses
 					if receipt, hasReceipt := resultMap["receipt"].(map[string]interface{}); hasReceipt {
+						// First, check for "to" field (the actual contract address)
 						if to, hasTo := receipt["to"].(string); hasTo && common.IsHexAddress(to) {
 							return to
 						}
-					}
-					// Also check logs for event addresses (for ERC20 events like Approval)
-					if receipt, hasReceipt := resultMap["receipt"].(map[string]interface{}); hasReceipt {
+						// Also check logs for event addresses (for ERC20 events like Approval)
 						if logs, hasLogs := receipt["logs"].([]interface{}); hasLogs && len(logs) > 0 {
 							// Find the first log with a valid address (likely the token contract)
 							for _, logEntry := range logs {

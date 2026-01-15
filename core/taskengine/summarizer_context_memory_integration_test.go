@@ -869,9 +869,9 @@ func TestContextMemorySummarize_SimulatedPrefixBehavior(t *testing.T) {
 			}
 		}
 
-		// Verify the exact expected behavior:
-		// - Line with "Approved" should NOT contain "(Simulated)"
-		// - Line with "Swap" should contain "(Simulated)"
+		// Verify the exact expected behavior with consistent case handling:
+		// - Line with "approved" (case-insensitive) should NOT contain "(simulated)" (case-insensitive)
+		// - Line with "swap" (case-insensitive) should contain "(simulated)" (case-insensitive)
 		for _, line := range lines {
 			lineLower := strings.ToLower(line)
 			if strings.Contains(lineLower, "approved") {
@@ -887,7 +887,7 @@ func TestContextMemorySummarize_SimulatedPrefixBehavior(t *testing.T) {
 				} else {
 					t.Logf("PASS: Swap line correctly has (Simulated) prefix")
 				}
-				// Verify swap includes output token symbol (should contain "WETH")
+				// Verify swap includes output token symbol (should contain "weth" - case-insensitive)
 				if !strings.Contains(lineLower, "weth") {
 					t.Errorf("FAIL: Swap step should include output token symbol 'WETH'")
 					t.Logf("Line: %s", line)
