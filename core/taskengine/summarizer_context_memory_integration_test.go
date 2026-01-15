@@ -36,6 +36,13 @@ type SummarizeRequest struct {
 	Edges           []EdgeDefinition       `json:"edges,omitempty"`
 	Settings        map[string]interface{} `json:"settings,omitempty"`
 	CurrentNodeName string                 `json:"currentNodeName,omitempty"`
+	TokenMetadata   map[string]TokenMeta   `json:"tokenMetadata,omitempty"` // All tokens involved, keyed by address (lowercase)
+}
+
+type TokenMeta struct {
+	Symbol   string `json:"symbol"`
+	Decimals int    `json:"decimals"`
+	Name     string `json:"name,omitempty"`
 }
 
 type StepDigest struct {
@@ -557,14 +564,39 @@ func buildSummarizeRequestFromVM(vm *VM) SummarizeRequest {
 		}
 	}
 
+	// Extract token metadata from settings if available
+	tokenMetadata := make(map[string]TokenMeta)
+	if settings, ok := vm.vars["settings"].(map[string]interface{}); ok {
+		if pool, ok := settings["uniswapv3_pool"].(map[string]interface{}); ok {
+			if tokens, ok := pool["tokens"].(map[string]interface{}); ok {
+				// For test purposes, we'll add placeholder metadata
+				// In production, this would come from TokenEnrichmentService
+				for _, tokenAddr := range tokens {
+					if addr, ok := tokenAddr.(string); ok && len(addr) > 0 {
+						addrLower := strings.ToLower(addr)
+						// Add placeholder metadata (tests can override if needed)
+						if _, exists := tokenMetadata[addrLower]; !exists {
+							tokenMetadata[addrLower] = TokenMeta{
+								Symbol:   "TOKEN",
+								Decimals: 18,
+								Name:     "Test Token",
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	return SummarizeRequest{
-		OwnerEOA:    ownerEOA,
-		Name:        workflowName,
-		SmartWallet: smartWallet,
-		Steps:       steps,
-		ChainName:   chainName,
-		Nodes:       nodes,
-		Edges:       edges,
+		OwnerEOA:      ownerEOA,
+		Name:          workflowName,
+		SmartWallet:   smartWallet,
+		Steps:         steps,
+		ChainName:     chainName,
+		Nodes:         nodes,
+		Edges:         edges,
+		TokenMetadata: tokenMetadata,
 	}
 }
 
@@ -699,8 +731,26 @@ func TestContextMemorySummarize_SimulatedPrefixBehavior(t *testing.T) {
 		Settings: map[string]interface{}{
 			"name":     "Test Stoploss",
 			"chain_id": 11155111,
+			"uniswapv3_pool": map[string]interface{}{
+				"tokens": map[string]interface{}{
+					"input":  "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+					"output": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
+				},
+			},
 		},
 		CurrentNodeName: "email1",
+		TokenMetadata: map[string]TokenMeta{
+			"0x1c7d4b196cb0c7b01d743fbc6116a902379c7238": {
+				Symbol:   "USDC",
+				Decimals: 6,
+				Name:     "USD Coin",
+			},
+			"0xfff9976782d46cc05630d1f6ebab18b2324d6b14": {
+				Symbol:   "WETH",
+				Decimals: 18,
+				Name:     "Wrapped Ether",
+			},
+		},
 	}
 
 	var response SummarizeResponse
@@ -760,8 +810,8 @@ func TestContextMemorySummarize_SimulatedPrefixBehavior(t *testing.T) {
 	}
 
 	// More detailed check: The body should distinguish between real and simulated
-	// Real: "Approved 20,990,000 to 0x3bFA...e48E for trading" (no prefix)
-	// Simulated: "(simulated) Swapped for ~2.2354 via Uniswap V3" (with prefix)
+	// Real: "Approved 20.99 USDC to 0x3bFA...e48E for trading" (no prefix, formatted with symbol)
+	// Simulated: "(Simulated) Swapped for ~2.2354 WETH via Uniswap V3" (with prefix and symbol)
 	t.Logf("=== SIMULATED PREFIX BEHAVIOR VERIFICATION ===")
 	t.Logf("Expected behavior:")
 	t.Logf("  - approve1 (is_simulated=false): NO (simulated) prefix")
@@ -797,12 +847,25 @@ func TestContextMemorySummarize_SimulatedPrefixBehavior(t *testing.T) {
 
 		// The approve step (approve1) has is_simulated=false, so it should NOT have (Simulated) prefix
 		// Check that "(Simulated)" doesn't appear on the same line as "Approved"
+		// Also verify that approve amount is formatted with token symbol (e.g., "20.99 USDC" not "20,990,000")
 		lines := strings.Split(response.Body, "\n")
 		for _, line := range lines {
 			lineLower := strings.ToLower(line)
-			if strings.Contains(lineLower, "approved") && strings.Contains(lineLower, "(simulated)") {
-				t.Errorf("FAIL: Approve step (is_simulated=false) should NOT have '(Simulated)' prefix")
-				t.Logf("Line: %s", line)
+			if strings.Contains(lineLower, "approved") {
+				if strings.Contains(lineLower, "(simulated)") {
+					t.Errorf("FAIL: Approve step (is_simulated=false) should NOT have '(Simulated)' prefix")
+					t.Logf("Line: %s", line)
+				}
+				// Verify formatted amount with symbol (should contain "USDC" and a decimal number like "20.99")
+				if !strings.Contains(lineLower, "usdc") {
+					t.Errorf("FAIL: Approve step should include token symbol 'USDC' in formatted amount")
+					t.Logf("Line: %s", line)
+				}
+				// Should not contain raw amount like "20,990,000" or "20990000"
+				if strings.Contains(line, "20,990,000") || strings.Contains(line, "20990000") {
+					t.Errorf("FAIL: Approve step should show formatted amount (e.g., '20.99 USDC'), not raw amount")
+					t.Logf("Line: %s", line)
+				}
 			}
 		}
 
@@ -823,6 +886,11 @@ func TestContextMemorySummarize_SimulatedPrefixBehavior(t *testing.T) {
 					t.Errorf("FAIL: Swap line missing (Simulated) prefix: %s", line)
 				} else {
 					t.Logf("PASS: Swap line correctly has (Simulated) prefix")
+				}
+				// Verify swap includes output token symbol (should contain "WETH")
+				if !strings.Contains(lineLower, "weth") {
+					t.Errorf("FAIL: Swap step should include output token symbol 'WETH'")
+					t.Logf("Line: %s", line)
 				}
 			}
 		}

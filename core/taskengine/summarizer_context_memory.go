@@ -41,15 +41,16 @@ func NewContextMemorySummarizer(baseURL, authToken string) Summarizer {
 
 // SummarizeRequest matches the TypeScript interface for /api/summarize
 type contextMemorySummarizeRequest struct {
-	OwnerEOA        string                    `json:"ownerEOA"`
-	Name            string                    `json:"name"`
-	SmartWallet     string                    `json:"smartWallet"`
-	Steps           []contextMemoryStepDigest `json:"steps"`
-	ChainName       string                    `json:"chainName,omitempty"`
-	Nodes           []contextMemoryNodeDef    `json:"nodes,omitempty"`
-	Edges           []contextMemoryEdgeDef    `json:"edges,omitempty"`
-	Settings        map[string]interface{}    `json:"settings,omitempty"`
-	CurrentNodeName string                    `json:"currentNodeName,omitempty"`
+	OwnerEOA        string                                 `json:"ownerEOA"`
+	Name            string                                 `json:"name"`
+	SmartWallet     string                                 `json:"smartWallet"`
+	Steps           []contextMemoryStepDigest              `json:"steps"`
+	ChainName       string                                 `json:"chainName,omitempty"`
+	Nodes           []contextMemoryNodeDef                 `json:"nodes,omitempty"`
+	Edges           []contextMemoryEdgeDef                 `json:"edges,omitempty"`
+	Settings        map[string]interface{}                 `json:"settings,omitempty"`
+	CurrentNodeName string                                 `json:"currentNodeName,omitempty"`
+	TokenMetadata   map[string]*contextMemoryTokenMetadata `json:"tokenMetadata,omitempty"` // All tokens involved, keyed by address (lowercase)
 }
 
 type contextMemoryStepDigest struct {
@@ -342,6 +343,43 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 	// Always include isSimulation flag from VM
 	settings["isSimulation"] = vm.IsSimulation
 
+	// Collect all token metadata into a request-level map (keyed by lowercase address)
+	tokenMetadataMap := make(map[string]*contextMemoryTokenMetadata)
+
+	// 1. Collect from per-step tokenMetadata (already populated above)
+	for _, step := range steps {
+		if step.TokenMetadata != nil && step.ContractAddress != "" {
+			addr := strings.ToLower(step.ContractAddress)
+			if !strings.Contains(addr, "{{") { // Skip template variables
+				tokenMetadataMap[addr] = step.TokenMetadata
+			}
+		}
+	}
+
+	// 2. Collect from settings.uniswapv3_pool.tokens (input, output, base, quote)
+	if pool, ok := settings["uniswapv3_pool"].(map[string]interface{}); ok {
+		if tokens, ok := pool["tokens"].(map[string]interface{}); ok {
+			tokenService := GetTokenEnrichmentService()
+			for _, tokenAddr := range tokens {
+				if addr, ok := tokenAddr.(string); ok && common.IsHexAddress(addr) {
+					addrLower := strings.ToLower(addr)
+					// Skip if already have metadata for this address
+					if _, exists := tokenMetadataMap[addrLower]; !exists {
+						if tokenService != nil {
+							if metadata, err := tokenService.GetTokenMetadata(addr); err == nil && metadata != nil {
+								tokenMetadataMap[addrLower] = &contextMemoryTokenMetadata{
+									Symbol:   metadata.Symbol,
+									Decimals: metadata.Decimals,
+									Name:     metadata.Name,
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	return &contextMemorySummarizeRequest{
 		OwnerEOA:        ownerEOA,
 		Name:            workflowName,
@@ -352,6 +390,7 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 		Edges:           edges,
 		Settings:        settings,
 		CurrentNodeName: currentStepName,
+		TokenMetadata:   tokenMetadataMap,
 	}, nil
 }
 
