@@ -350,7 +350,8 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 	for _, step := range steps {
 		if step.TokenMetadata != nil && step.ContractAddress != "" {
 			addr := strings.ToLower(step.ContractAddress)
-			if !strings.Contains(addr, "{{") { // Skip template variables
+			// Skip template variables and require valid Ethereum address
+			if !strings.Contains(addr, "{{") && common.IsHexAddress(step.ContractAddress) {
 				tokenMetadataMap[addr] = step.TokenMetadata
 			}
 		}
@@ -360,7 +361,7 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 	if pool, ok := settings["uniswapv3_pool"].(map[string]interface{}); ok {
 		if tokens, ok := pool["tokens"].(map[string]interface{}); ok {
 			tokenService := GetTokenEnrichmentService()
-			for _, tokenAddr := range tokens {
+			for tokenKey, tokenAddr := range tokens {
 				if addr, ok := tokenAddr.(string); ok && common.IsHexAddress(addr) {
 					addrLower := strings.ToLower(addr)
 					// Skip if already have metadata for this address
@@ -372,6 +373,8 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 									Decimals: metadata.Decimals,
 									Name:     metadata.Name,
 								}
+							} else if err != nil && vm != nil && vm.logger != nil {
+								vm.logger.Debug("Failed to fetch token metadata", "address", addr, "tokenKey", tokenKey, "error", err)
 							}
 						}
 					}
