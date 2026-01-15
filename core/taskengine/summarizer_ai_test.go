@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -283,4 +284,206 @@ func TestComposeSummarySmart_WithRealWorkflowState(t *testing.T) {
 
 	t.Logf("Subject: %s", summary.Subject)
 	t.Logf("Body length: %d", len(summary.Body))
+}
+
+// TestComposeSummary_SimulationSubjectFormat tests that simulation workflows
+// generate the correct subject format matching context-memory API expectations
+func TestComposeSummary_SimulationSubjectFormat(t *testing.T) {
+	tests := []struct {
+		name            string
+		workflowName    string
+		executedSteps   int
+		totalSteps      int
+		hasFailures     bool
+		hasSkippedNodes bool
+		isSimulation    bool
+		expectedSubject string
+		expectedSummary string
+	}{
+		{
+			name:            "simulation successfully completed",
+			workflowName:    "Test Stoploss",
+			executedSteps:   7,
+			totalSteps:      7,
+			hasFailures:     false,
+			hasSkippedNodes: false,
+			isSimulation:    true,
+			expectedSubject: "Simulation: Test Stoploss successfully completed",
+			expectedSummary: "Your workflow 'Test Stoploss' executed 7 out of 7 total steps",
+		},
+		{
+			name:            "simulation partially executed",
+			workflowName:    "Test Stoploss",
+			executedSteps:   5,
+			totalSteps:      8,
+			hasFailures:     false,
+			hasSkippedNodes: true,
+			isSimulation:    true,
+			expectedSubject: "Simulation: Test Stoploss partially executed",
+			expectedSummary: "Your workflow 'Test Stoploss' executed 5 out of 8 total steps",
+		},
+		{
+			name:            "simulation failed to execute",
+			workflowName:    "Test Stoploss",
+			executedSteps:   3,
+			totalSteps:      8,
+			hasFailures:     true,
+			hasSkippedNodes: false,
+			isSimulation:    true,
+			expectedSubject: "Simulation: Test Stoploss failed to execute",
+			expectedSummary: "Your workflow 'Test Stoploss' executed 3 out of 8 total steps",
+		},
+		{
+			name:            "deployed workflow succeeded",
+			workflowName:    "Test Stoploss",
+			executedSteps:   7,
+			totalSteps:      7,
+			hasFailures:     false,
+			hasSkippedNodes: false,
+			isSimulation:    false,
+			expectedSubject: "Test Stoploss: succeeded (7 out of 7 steps)",
+			expectedSummary: "Your workflow 'Test Stoploss' executed 7 out of 7 total steps",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vm := NewVM()
+			vm.IsSimulation = tt.isSimulation
+
+			// Set up workflow name
+			vm.mu.Lock()
+			vm.vars = map[string]interface{}{
+				"settings": map[string]interface{}{
+					"name":  tt.workflowName,
+					"chain": "Sepolia",
+				},
+			}
+
+			// Set up task nodes (for total steps calculation)
+			vm.TaskNodes = make(map[string]*avsproto.TaskNode)
+			for i := 0; i < tt.totalSteps-1; i++ { // -1 because trigger is counted separately
+				nodeID := fmt.Sprintf("node%d", i)
+				vm.TaskNodes[nodeID] = &avsproto.TaskNode{
+					Id:   nodeID,
+					Name: fmt.Sprintf("step%d", i),
+				}
+			}
+
+			// Set up execution logs
+			vm.ExecutionLogs = make([]*avsproto.Execution_Step, 0, tt.executedSteps)
+			// Add trigger (always first)
+			vm.ExecutionLogs = append(vm.ExecutionLogs, &avsproto.Execution_Step{
+				Id:      "trigger",
+				Name:    "eventTrigger",
+				Type:    "TRIGGER_TYPE_EVENT",
+				Success: true,
+			})
+
+			// Add executed steps
+			for i := 0; i < tt.executedSteps-1; i++ { // -1 because trigger is already added
+				stepName := fmt.Sprintf("step%d", i)
+				success := true
+				if tt.hasFailures && i == tt.executedSteps-2 { // Last step fails
+					success = false
+				}
+				vm.ExecutionLogs = append(vm.ExecutionLogs, &avsproto.Execution_Step{
+					Id:      fmt.Sprintf("step%d", i),
+					Name:    stepName,
+					Type:    "NODE_TYPE_BALANCE",
+					Success: success,
+					Error: func() string {
+						if !success {
+							return "test error"
+						}
+						return ""
+					}(),
+				})
+			}
+
+			// Mark some nodes as skipped if needed (by not including them in execution logs)
+			// The skipped count is calculated by comparing TaskNodes to ExecutionLogs
+			vm.mu.Unlock()
+
+			summary := ComposeSummary(vm, "email1")
+
+			// Verify subject format
+			if summary.Subject != tt.expectedSubject {
+				t.Errorf("Subject mismatch:\n  expected: %q\n  got:      %q", tt.expectedSubject, summary.Subject)
+			}
+
+			// Verify summary line format
+			if summary.SummaryLine != tt.expectedSummary {
+				t.Errorf("SummaryLine mismatch:\n  expected: %q\n  got:      %q", tt.expectedSummary, summary.SummaryLine)
+			}
+
+			// Note: "What Executed On-Chain" / "What Executed Successfully" sections only appear
+			// when there are successful contract writes. For workflows without contract writes,
+			// the body will have a different format. We only verify the subject and summary line here.
+		})
+	}
+}
+
+// TestComposeSummary_SimulationBodyFormat tests that simulation workflows
+// generate the correct subject and summary line format matching context-memory API expectations
+func TestComposeSummary_SimulationBodyFormat(t *testing.T) {
+	vm := NewVM()
+	vm.IsSimulation = true
+
+	vm.mu.Lock()
+	vm.vars = map[string]interface{}{
+		"settings": map[string]interface{}{
+			"name":  "Test Stoploss",
+			"chain": "Sepolia",
+		},
+		WorkflowContextVarName: map[string]interface{}{
+			"owner":  "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
+			"runner": "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+		},
+	}
+	vm.TaskNodes = map[string]*avsproto.TaskNode{
+		"node1": {Id: "node1", Name: "step1"},
+		"node2": {Id: "node2", Name: "step2"},
+	}
+	vm.mu.Unlock()
+
+	// Create execution logs
+	vm.ExecutionLogs = []*avsproto.Execution_Step{
+		{
+			Id:      "trigger",
+			Name:    "eventTrigger",
+			Type:    "TRIGGER_TYPE_EVENT",
+			Success: true,
+		},
+		{
+			Id:      "step1",
+			Name:    "step1",
+			Type:    "NODE_TYPE_BALANCE",
+			Success: true,
+		},
+		{
+			Id:      "step2",
+			Name:    "step2",
+			Type:    "NODE_TYPE_BALANCE",
+			Success: true,
+		},
+	}
+
+	summary := ComposeSummary(vm, "email1")
+
+	// Verify subject format matches context-memory API expectations
+	expectedSubject := "Simulation: Test Stoploss successfully completed"
+	if summary.Subject != expectedSubject {
+		t.Errorf("Subject mismatch:\n  expected: %q\n  got:      %q", expectedSubject, summary.Subject)
+	}
+
+	// Verify summary line format matches context-memory API expectations
+	expectedSummary := "Your workflow 'Test Stoploss' executed 3 out of 3 total steps"
+	if summary.SummaryLine != expectedSummary {
+		t.Errorf("SummaryLine mismatch:\n  expected: %q\n  got:      %q", expectedSummary, summary.SummaryLine)
+	}
+
+	t.Logf("Subject: %s", summary.Subject)
+	t.Logf("SummaryLine: %s", summary.SummaryLine)
+	t.Logf("Body: %s", summary.Body)
 }

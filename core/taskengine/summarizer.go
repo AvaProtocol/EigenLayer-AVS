@@ -732,21 +732,75 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 	totalWorkflowSteps := getTotalWorkflowSteps(vm)
 	executedSteps := len(vm.ExecutionLogs)
 
+	// Check for skipped nodes (for partial execution detection)
+	// Exclude notification nodes (email/telegram) from skipped count, similar to getTotalWorkflowSteps
+	vm.mu.Lock()
+	skippedCount := 0
+	executed := make(map[string]struct{})
+	for _, st := range vm.ExecutionLogs {
+		name := st.GetName()
+		if name == "" {
+			name = st.GetId()
+		}
+		if name != "" {
+			executed[name] = struct{}{}
+		}
+	}
+	for nodeID, n := range vm.TaskNodes {
+		if n == nil {
+			continue
+		}
+		// Skip branch condition nodes
+		if strings.Contains(nodeID, ".") {
+			continue
+		}
+		// Exclude notification nodes (email/telegram) from skipped count
+		if isNotificationNode(n) {
+			continue
+		}
+		if _, ok := executed[n.Name]; !ok {
+			skippedCount++
+		}
+	}
+	vm.mu.Unlock()
+
 	// Build subject up-front to support richer failure bodies
 	singleNode := isSingleNodeImmediate(vm)
 
 	var subject string
-	if singleNode {
+	var summaryLine string
+
+	// IsSimulation indicates entry via simulate_task (multi-node simulation)
+	// singleNode indicates entry via run_node_immediately (single-node, independent of simulation)
+	// These are independent entry points and should be checked separately
+	if vm.IsSimulation {
+		// simulate_task entry - multi-node simulation format
+		if failed {
+			subject = fmt.Sprintf("Simulation: %s failed to execute", workflowName)
+		} else if skippedCount > 0 {
+			subject = fmt.Sprintf("Simulation: %s partially executed", workflowName)
+		} else {
+			subject = fmt.Sprintf("Simulation: %s successfully completed", workflowName)
+		}
+		// Summary line format: "Your workflow 'Test Stoploss' executed 7 out of 7 total steps"
+		summaryLine = fmt.Sprintf("Your workflow '%s' executed %d out of %d total steps", workflowName, executedSteps, totalWorkflowSteps)
+	} else if singleNode {
+		// run_node_immediately entry - single-node format (regardless of simulation mode)
 		if failed {
 			subject = fmt.Sprintf("Run Node: %s failed at %s", workflowName, safeName(failedName))
 		} else {
 			subject = fmt.Sprintf("Run Node: %s succeeded", workflowName)
 		}
+		// Summary line for single-node workflows
+		summaryLine = fmt.Sprintf("Your workflow '%s' executed %d out of %d total steps", workflowName, executedSteps, totalWorkflowSteps)
 	} else {
+		// For deployed workflows, use the original format
 		subject = fmt.Sprintf("%s: succeeded (%d out of %d steps)", workflowName, executedSteps, totalWorkflowSteps)
 		if failed {
 			subject = fmt.Sprintf("%s: failed at %s (%d out of %d steps)", workflowName, failedName, executedSteps, totalWorkflowSteps)
 		}
+		// Summary line for deployed workflows
+		summaryLine = fmt.Sprintf("Your workflow '%s' executed %d out of %d total steps", workflowName, executedSteps, totalWorkflowSteps)
 	}
 
 	// Extract runner smart wallet and owner EOA (best-effort, no panics)
@@ -958,10 +1012,15 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 		successfulSteps := buildStepsOverview(vm)
 
 		if strings.TrimSpace(successfulSteps) != "" {
+			// Use "What Executed On-Chain" for simulations, "What Executed Successfully" for deployed workflows
+			sectionHeading := "What Executed Successfully"
+			if vm.IsSimulation {
+				sectionHeading = "What Executed On-Chain"
+			}
 			// Include steps that succeeded before failure
 			body = fmt.Sprintf(
-				"Smart wallet %s (owner %s) started workflow execution but encountered a failure.\n\n<strong>What Executed Successfully</strong>\n%s\n\n<strong>What Didn't Run</strong>\nFailed at step '%s': %s",
-				smartWallet, ownerEOA, successfulSteps, safeName(failedName), firstLine(failedReason),
+				"Smart wallet %s (owner %s) started workflow execution but encountered a failure.\n\n<strong>%s</strong>\n%s\n\n<strong>What Didn't Run</strong>\nFailed at step '%s': %s",
+				smartWallet, ownerEOA, sectionHeading, successfulSteps, safeName(failedName), firstLine(failedReason),
 			)
 		} else {
 			// No successful steps before failure
@@ -971,20 +1030,26 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 			)
 		}
 	} else {
-		// Success body with What Executed Successfully format (matching AI summarizer output)
+		// Success body with What Executed On-Chain format (matching AI summarizer output)
 		chainName := resolveChainName(vm)
 		actionCount := countActionsInLogs(vm)
 
-		// Build What Executed Successfully section with checkmarks for each successful contract write
+		// Build What Executed On-Chain section with checkmarks for each successful contract write
 		successfulSteps := buildStepsOverview(vm)
+
+		// Use "What Executed On-Chain" for simulations, "What Executed Successfully" for deployed workflows
+		sectionHeading := "What Executed Successfully"
+		if vm.IsSimulation {
+			sectionHeading = "What Executed On-Chain"
+		}
 
 		if singleNode {
 			body = composeSingleNodeSuccessBody(vm, smartWallet, ownerEOA, chainName, successfulSteps, actionLines, actionCount, currentStepName)
 		} else {
 			if strings.TrimSpace(successfulSteps) != "" {
 				body = fmt.Sprintf(
-					"Smart wallet %s (owner %s) executed %d on-chain actions.\n\n<strong>What Executed Successfully</strong>\n%s\n\nAll steps completed on %s.",
-					smartWallet, ownerEOA, actionCount, successfulSteps, chainName,
+					"Smart wallet %s (owner %s) executed %d on-chain actions.\n\n<strong>%s</strong>\n%s\n\nAll steps completed on %s.",
+					smartWallet, ownerEOA, actionCount, sectionHeading, successfulSteps, chainName,
 				)
 			} else {
 				// Fallback when no contract writes are found
@@ -1018,17 +1083,23 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 	}
 
 	return Summary{
-		Subject: subject,
-		Body:    body,
+		Subject:     subject,
+		Body:        body,
+		SummaryLine: summaryLine,
 	}
 }
 
 func composeSingleNodeSuccessBody(vm *VM, smartWallet, ownerEOA, chainName string, successfulSteps string, actionLines []string, actionCount int, fallbackStepName string) string {
 	trimmedSteps := strings.TrimSpace(successfulSteps)
 	if trimmedSteps != "" {
+		// Use "What Executed On-Chain" for simulations, "What Executed Successfully" for deployed workflows
+		sectionHeading := "What Executed Successfully"
+		if vm != nil && vm.IsSimulation {
+			sectionHeading = "What Executed On-Chain"
+		}
 		return fmt.Sprintf(
-			"Smart wallet %s (owner %s) executed %d on-chain action(s).\n\n<strong>What Executed Successfully</strong>\n%s\n\nAll steps completed on %s.",
-			displayOrUnknown(smartWallet), displayOrUnknown(ownerEOA), actionCount, trimmedSteps, chainName,
+			"Smart wallet %s (owner %s) executed %d on-chain action(s).\n\n<strong>%s</strong>\n%s\n\nAll steps completed on %s.",
+			displayOrUnknown(smartWallet), displayOrUnknown(ownerEOA), actionCount, sectionHeading, trimmedSteps, chainName,
 		)
 	}
 
