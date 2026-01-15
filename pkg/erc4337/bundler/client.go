@@ -486,3 +486,149 @@ func (bc *BundlerClient) SendBundleNow(ctx context.Context) error {
 	log.Printf("✅ debug_bundler_sendBundleNow returned: %+v", result)
 	return nil
 }
+
+// PendingUserOp represents a UserOperation in the bundler's mempool
+type PendingUserOp struct {
+	Sender               common.Address `json:"sender"`
+	Nonce                string         `json:"nonce"`
+	InitCode             string         `json:"initCode"`
+	CallData             string         `json:"callData"`
+	CallGasLimit         string         `json:"callGasLimit"`
+	VerificationGasLimit string         `json:"verificationGasLimit"`
+	PreVerificationGas   string         `json:"preVerificationGas"`
+	MaxFeePerGas         string         `json:"maxFeePerGas"`
+	MaxPriorityFeePerGas string         `json:"maxPriorityFeePerGas"`
+	PaymasterAndData     string         `json:"paymasterAndData"`
+	Signature            string         `json:"signature"`
+}
+
+// DumpMempool queries the bundler for all pending UserOps in its mempool.
+// This is a debug method (debug_bundler_dumpMempool) that returns all UserOps waiting to be bundled.
+// Use this to check for stuck UserOps before sending new ones.
+func (bc *BundlerClient) DumpMempool(ctx context.Context, entrypoint common.Address) ([]PendingUserOp, error) {
+	log.Printf("🔍 Calling debug_bundler_dumpMempool to query pending UserOps")
+
+	var result []PendingUserOp
+	err := bc.client.CallContext(ctx, &result, "debug_bundler_dumpMempool", entrypoint.Hex())
+	if err != nil {
+		return nil, fmt.Errorf("debug_bundler_dumpMempool failed: %w", err)
+	}
+
+	log.Printf("📋 debug_bundler_dumpMempool returned %d pending UserOp(s)", len(result))
+	return result, nil
+}
+
+// GetPendingUserOpsForSender returns pending UserOps for a specific sender address.
+// This filters the mempool to find UserOps that may be blocking new submissions.
+func (bc *BundlerClient) GetPendingUserOpsForSender(ctx context.Context, entrypoint common.Address, sender common.Address) ([]PendingUserOp, error) {
+	allPending, err := bc.DumpMempool(ctx, entrypoint)
+	if err != nil {
+		return nil, err
+	}
+
+	var senderOps []PendingUserOp
+	for _, op := range allPending {
+		if op.Sender == sender {
+			senderOps = append(senderOps, op)
+		}
+	}
+
+	if len(senderOps) > 0 {
+		log.Printf("⚠️  Found %d pending UserOp(s) for sender %s", len(senderOps), sender.Hex())
+		for i, op := range senderOps {
+			log.Printf("   [%d] nonce=%s", i+1, op.Nonce)
+		}
+	}
+
+	return senderOps, nil
+}
+
+// ClearState clears the bundler's mempool, dropping all pending UserOps.
+// This is a debug method (debug_bundler_clearState) that resets the bundler state.
+// Use this to clear stuck UserOps that are blocking new submissions.
+// WARNING: This clears ALL pending UserOps, not just for a specific sender.
+func (bc *BundlerClient) ClearState(ctx context.Context) error {
+	log.Printf("🗑️  Calling debug_bundler_clearState to clear bundler mempool")
+
+	var result interface{}
+	err := bc.client.CallContext(ctx, &result, "debug_bundler_clearState")
+	if err != nil {
+		return fmt.Errorf("debug_bundler_clearState failed: %w", err)
+	}
+
+	log.Printf("✅ debug_bundler_clearState returned: %+v", result)
+	return nil
+}
+
+// FlushStuckUserOps checks for pending UserOps for a sender and flushes those with lower nonces.
+// This handles the bundler bug where old UserOps get stuck and prevent new ones from being bundled correctly.
+// The bundler bundles in FIFO order and only bundles 1 UserOp at a time, so we need to flush older UserOps first.
+// This function will keep calling SendBundleNow until all stuck UserOps are processed.
+// Returns the number of stuck UserOps that were flushed.
+func (bc *BundlerClient) FlushStuckUserOps(ctx context.Context, entrypoint common.Address, sender common.Address, currentNonce *big.Int) (int, error) {
+	totalFlushed := 0
+	maxFlushAttempts := 10 // Safety limit to prevent infinite loops
+
+	for attempt := 0; attempt < maxFlushAttempts; attempt++ {
+		pendingOps, err := bc.GetPendingUserOpsForSender(ctx, entrypoint, sender)
+		if err != nil {
+			// Non-fatal: debug methods may not be available
+			log.Printf("⚠️  Could not query pending UserOps (debug methods may be disabled): %v", err)
+			return totalFlushed, nil
+		}
+
+		if len(pendingOps) == 0 {
+			if attempt == 0 {
+				log.Printf("✅ No pending UserOps for sender %s", sender.Hex())
+			}
+			break
+		}
+
+		// Check if any pending UserOps have lower nonces (stuck)
+		stuckCount := 0
+		for _, op := range pendingOps {
+			// Parse the nonce from hex string
+			nonceStr := op.Nonce
+			if len(nonceStr) > 2 && nonceStr[:2] == "0x" {
+				nonceStr = nonceStr[2:]
+			}
+			pendingNonce := new(big.Int)
+			// Validate that SetString succeeded (returns false if string is invalid)
+			if _, ok := pendingNonce.SetString(nonceStr, 16); !ok {
+				log.Printf("⚠️  Skipping UserOp with invalid nonce format: %q", op.Nonce)
+				continue
+			}
+
+			if pendingNonce.Cmp(currentNonce) < 0 {
+				stuckCount++
+				log.Printf("⚠️  Found stuck UserOp with nonce %s (current nonce is %s)", pendingNonce.String(), currentNonce.String())
+			}
+		}
+
+		if stuckCount == 0 {
+			// No more stuck UserOps with lower nonces
+			break
+		}
+
+		log.Printf("🔄 Flushing %d stuck UserOp(s) with lower nonces (attempt %d/%d)", stuckCount, attempt+1, maxFlushAttempts)
+
+		// Trigger bundling to process the stuck UserOps
+		if err := bc.SendBundleNow(ctx); err != nil {
+			log.Printf("⚠️  SendBundleNow failed during flush: %v", err)
+			// Continue anyway, the UserOp might still get bundled
+		}
+
+		totalFlushed += stuckCount
+
+		// Wait for the bundle to be processed before checking again
+		// The bundler needs time to mine the transaction
+		log.Printf("⏳ Waiting 3 seconds for bundle to be mined...")
+		time.Sleep(3 * time.Second)
+	}
+
+	if totalFlushed > 0 {
+		log.Printf("✅ Flushed %d stuck UserOp(s) total", totalFlushed)
+	}
+
+	return totalFlushed, nil
+}

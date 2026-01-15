@@ -274,25 +274,32 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 		logger: logger,
 	}
 
-	// Initialize optional AI summarizer (global) from aggregator config
-	var s Summarizer
-	switch strings.ToLower(config.NotificationsSummary.Provider) {
-	case "openai":
-		s = NewOpenAISummarizerFromAggregatorConfig(config)
-	case "context-memory":
-		s = NewContextMemorySummarizerFromAggregatorConfig(config)
-	default:
-		s = nil
-	}
-	if s != nil {
-		SetSummarizer(s)
-		if config.NotificationsSummary.Provider == "openai" {
-			logger.Info("AI summarizer initialized", "provider", config.NotificationsSummary.Provider, "model", config.NotificationsSummary.Model)
-		} else {
-			logger.Info("AI summarizer initialized", "provider", config.NotificationsSummary.Provider, "base_url", config.NotificationsSummary.BaseURL)
+	// Initialize AI summarizer (global) from aggregator config
+	// Only context-memory API is supported - all email content generation is delegated to context-memory
+	// The aggregator acts as a pass-through for the context-memory response to SendGrid
+	contextMemorySummarizer := NewContextMemorySummarizerFromAggregatorConfig(config)
+	if contextMemorySummarizer != nil {
+		SetSummarizer(contextMemorySummarizer)
+		baseURL := ""
+		if config.MacroSecrets != nil {
+			baseURL = config.MacroSecrets["context_api_endpoint"]
 		}
+		logger.Info("AI summarizer initialized", "provider", "context-memory", "base_url", baseURL)
 	} else {
-		// Leave summarizer unset; deterministic fallback will be used
+		// Log why context-memory is not available
+		if !config.NotificationsSummary.Enabled {
+			logger.Debug("Context-memory API not available: NotificationsSummary.Enabled is false")
+		} else if strings.ToLower(config.NotificationsSummary.Provider) != "context-memory" {
+			logger.Debug("Context-memory API not configured: provider is not 'context-memory'", "provider", config.NotificationsSummary.Provider)
+		} else if config.MacroSecrets == nil {
+			logger.Debug("Context-memory API not available: MacroSecrets is nil")
+		} else if strings.TrimSpace(config.MacroSecrets["context_api_endpoint"]) == "" {
+			logger.Debug("Context-memory API not available: context_api_endpoint not found in macros.secrets")
+		} else if strings.TrimSpace(config.MacroSecrets["context_api_key"]) == "" {
+			logger.Debug("Context-memory API not available: context_api_key not found in macros.secrets")
+		}
+		// No summarizer configured - deterministic fallback will be used
+		logger.Debug("Context-memory API not configured, will use deterministic fallback")
 	}
 
 	// Initialize global macro variables and secrets from config
