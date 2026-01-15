@@ -593,11 +593,7 @@ func (bc *BundlerClient) FlushStuckUserOps(ctx context.Context, entrypoint commo
 				nonceStr = nonceStr[2:]
 			}
 			pendingNonce := new(big.Int)
-			// Validate that SetString succeeded (returns false if string is invalid)
-			if _, ok := pendingNonce.SetString(nonceStr, 16); !ok {
-				log.Printf("⚠️  Skipping UserOp with invalid nonce format: %q", op.Nonce)
-				continue
-			}
+			pendingNonce.SetString(nonceStr, 16)
 
 			if pendingNonce.Cmp(currentNonce) < 0 {
 				stuckCount++

@@ -445,26 +445,26 @@ func extractResolvedContractAddress(log *avsproto.Execution_Step) string {
 		// Metadata is an array of method results for contract_write
 		if resultsArray, ok := metadataInterface.([]interface{}); ok {
 			for _, result := range resultsArray {
-				if resultMap, ok := result.(map[string]interface{}); ok {
-					// Check receipt for both "to" field and event log addresses
-					if receipt, hasReceipt := resultMap["receipt"].(map[string]interface{}); hasReceipt {
-						// First, check for "to" field (the actual contract address)
-						if to, hasTo := receipt["to"].(string); hasTo && common.IsHexAddress(to) {
-							return to
-						}
-						// Also check logs for event addresses (for ERC20 events like Approval)
-						if logs, hasLogs := receipt["logs"].([]interface{}); hasLogs && len(logs) > 0 {
-							// Find the first log with a valid address (likely the token contract)
-							for _, logEntry := range logs {
-								if logMap, ok := logEntry.(map[string]interface{}); ok {
-									if addr, hasAddr := logMap["address"].(string); hasAddr && common.IsHexAddress(addr) {
-										return addr
-									}
+			if resultMap, ok := result.(map[string]interface{}); ok {
+				// Check receipt for both "to" field and event log addresses
+				if receipt, hasReceipt := resultMap["receipt"].(map[string]interface{}); hasReceipt {
+					// First, check for "to" field (the actual contract address)
+					if to, hasTo := receipt["to"].(string); hasTo && common.IsHexAddress(to) {
+						return to
+					}
+					// Also check logs for event addresses (for ERC20 events like Approval)
+					if logs, hasLogs := receipt["logs"].([]interface{}); hasLogs && len(logs) > 0 {
+						// Find the first log with a valid address (likely the token contract)
+						for _, logEntry := range logs {
+							if logMap, ok := logEntry.(map[string]interface{}); ok {
+								if addr, hasAddr := logMap["address"].(string); hasAddr && common.IsHexAddress(addr) {
+									return addr
 								}
 							}
 						}
 					}
 				}
+			}
 			}
 		}
 	}

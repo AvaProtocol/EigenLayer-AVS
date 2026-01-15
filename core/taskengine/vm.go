@@ -1300,11 +1300,8 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 						// Update execution log to reflect successful confirmation
 						// The step was initially marked as pending/failed because receipt was not available
 						// Now that confirmation is received, mark it as successful
-						// Thread-safe: executionLogForNode is already in ExecutionLogs slice, protected by mutex
-						v.mu.Lock()
 						executionLogForNode.Success = true
 						executionLogForNode.Error = ""
-						v.mu.Unlock()
 						v.logger.Info("✅ Updated execution log success status after confirmation",
 							"nodeID", node.Id,
 							"success", executionLogForNode.Success)
