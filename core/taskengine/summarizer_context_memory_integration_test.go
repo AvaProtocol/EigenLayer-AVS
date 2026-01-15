@@ -855,6 +855,8 @@ func TestContextMemorySummarize_SimulatedPrefixBehavior(t *testing.T) {
 				if strings.Contains(lineLower, "(simulated)") {
 					t.Errorf("FAIL: Approve step (is_simulated=false) should NOT have '(Simulated)' prefix")
 					t.Logf("Line: %s", line)
+				} else {
+					t.Logf("PASS: Approve line correctly has NO (Simulated) prefix")
 				}
 				// Verify formatted amount with symbol (should contain "USDC" and a decimal number like "20.99")
 				if !strings.Contains(lineLower, "usdc") {
@@ -865,20 +867,6 @@ func TestContextMemorySummarize_SimulatedPrefixBehavior(t *testing.T) {
 				if strings.Contains(line, "20,990,000") || strings.Contains(line, "20990000") {
 					t.Errorf("FAIL: Approve step should show formatted amount (e.g., '20.99 USDC'), not raw amount")
 					t.Logf("Line: %s", line)
-				}
-			}
-		}
-
-		// Verify the exact expected behavior with consistent case handling:
-		// - Line with "approved" (case-insensitive) should NOT contain "(simulated)" (case-insensitive)
-		// - Line with "swap" (case-insensitive) should contain "(simulated)" (case-insensitive)
-		for _, line := range lines {
-			lineLower := strings.ToLower(line)
-			if strings.Contains(lineLower, "approved") {
-				if strings.Contains(lineLower, "(simulated)") {
-					t.Errorf("FAIL: Approve line incorrectly has (Simulated) prefix: %s", line)
-				} else {
-					t.Logf("PASS: Approve line correctly has NO (Simulated) prefix")
 				}
 			}
 			if strings.Contains(lineLower, "swap") {
