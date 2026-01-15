@@ -770,9 +770,11 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 	var subject string
 	var summaryLine string
 
-	// Check if this is a simulation
-	if vm.IsSimulation && !singleNode {
-		// For simulations, use the format expected by context-memory API tests
+	// IsSimulation indicates entry via simulate_task (multi-node simulation)
+	// singleNode indicates entry via run_node_immediately (single-node, independent of simulation)
+	// These are independent entry points and should be checked separately
+	if vm.IsSimulation {
+		// simulate_task entry - multi-node simulation format
 		if failed {
 			subject = fmt.Sprintf("Simulation: %s failed to execute", workflowName)
 		} else if skippedCount > 0 {
@@ -783,11 +785,14 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 		// Summary line format: "Your workflow 'Test Stoploss' executed 7 out of 7 total steps"
 		summaryLine = fmt.Sprintf("Your workflow '%s' executed %d out of %d total steps", workflowName, executedSteps, totalWorkflowSteps)
 	} else if singleNode {
+		// run_node_immediately entry - single-node format (regardless of simulation mode)
 		if failed {
 			subject = fmt.Sprintf("Run Node: %s failed at %s", workflowName, safeName(failedName))
 		} else {
 			subject = fmt.Sprintf("Run Node: %s succeeded", workflowName)
 		}
+		// Summary line for single-node workflows
+		summaryLine = fmt.Sprintf("Your workflow '%s' executed %d out of %d total steps", workflowName, executedSteps, totalWorkflowSteps)
 	} else {
 		// For deployed workflows, use the original format
 		subject = fmt.Sprintf("%s: succeeded (%d out of %d steps)", workflowName, executedSteps, totalWorkflowSteps)
