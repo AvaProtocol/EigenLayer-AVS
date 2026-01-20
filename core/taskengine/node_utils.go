@@ -335,3 +335,110 @@ func convertArrayOfObjectsToProtobufCompatible(input []interface{}) map[string]i
 
 	return result
 }
+
+// ---- Step Extraction Functions for Context-Memory API ----
+// These functions extract configuration and output data from execution steps
+// for use in the context-memory summarization API.
+
+// isTriggerStep checks if the step type is a trigger type
+func isTriggerStep(stepType string) bool {
+	upper := strings.ToUpper(stepType)
+	return strings.Contains(upper, "TRIGGER_TYPE_")
+}
+
+// ExtractStepConfig extracts the configuration for a step.
+// For trigger steps: returns trigger config from TaskTrigger definition
+// For node steps: returns full node config from TaskNodes
+//
+// Parameters:
+//   - step: The execution step
+//   - taskNodes: Map of node ID to TaskNode definition (from vm.TaskNodes)
+//   - trigger: The task trigger definition (from vm.task.Task.Trigger)
+func ExtractStepConfig(
+	step *avsproto.Execution_Step,
+	taskNodes map[string]*avsproto.TaskNode,
+	trigger *avsproto.TaskTrigger,
+) interface{} {
+	if step == nil {
+		return nil
+	}
+
+	// Check if this is a trigger step
+	if isTriggerStep(step.GetType()) {
+		// Use TaskTriggerToConfig for trigger definition
+		return TaskTriggerToConfig(trigger) // Reuse existing function!
+	}
+
+	// For node steps, use TaskNodes for complete definition
+	if taskNodes != nil {
+		if taskNode, exists := taskNodes[step.GetId()]; exists && taskNode != nil {
+			return ExtractNodeConfiguration(taskNode) // Reuse existing function!
+		}
+	}
+
+	// Fallback to step.Config (when TaskNode not available)
+	if step.GetConfig() != nil {
+		return step.GetConfig().AsInterface()
+	}
+
+	return nil
+}
+
+// ExtractStepOutput extracts the output data from an Execution_Step.
+// Handles all 15 output types (5 trigger + 10 node).
+func ExtractStepOutput(step *avsproto.Execution_Step) interface{} {
+	if step == nil {
+		return nil
+	}
+
+	// Handle trigger outputs (all use google.protobuf.Value data field)
+	if out := step.GetBlockTrigger(); out != nil && out.Data != nil {
+		return out.Data.AsInterface()
+	}
+	if out := step.GetFixedTimeTrigger(); out != nil && out.Data != nil {
+		return out.Data.AsInterface()
+	}
+	if out := step.GetCronTrigger(); out != nil && out.Data != nil {
+		return out.Data.AsInterface()
+	}
+	if out := step.GetEventTrigger(); out != nil && out.Data != nil {
+		return out.Data.AsInterface()
+	}
+	if out := step.GetManualTrigger(); out != nil && out.Data != nil {
+		return out.Data.AsInterface()
+	}
+
+	// Handle node outputs (all use google.protobuf.Value data field)
+	if out := step.GetContractRead(); out != nil && out.Data != nil {
+		return out.Data.AsInterface()
+	}
+	if out := step.GetContractWrite(); out != nil && out.Data != nil {
+		return out.Data.AsInterface()
+	}
+	if out := step.GetEthTransfer(); out != nil && out.Data != nil {
+		return out.Data.AsInterface()
+	}
+	if out := step.GetGraphql(); out != nil && out.Data != nil {
+		return out.Data.AsInterface()
+	}
+	if out := step.GetCustomCode(); out != nil && out.Data != nil {
+		return out.Data.AsInterface()
+	}
+	if out := step.GetRestApi(); out != nil && out.Data != nil {
+		return out.Data.AsInterface()
+	}
+	if out := step.GetBranch(); out != nil && out.Data != nil {
+		return out.Data.AsInterface()
+	}
+	if out := step.GetFilter(); out != nil && out.Data != nil {
+		return out.Data.AsInterface()
+	}
+	if out := step.GetLoop(); out != nil && out.Data != nil {
+		return out.Data.AsInterface()
+	}
+	if out := step.GetBalance(); out != nil && out.Data != nil {
+		return out.Data.AsInterface()
+	}
+
+	return nil
+}

@@ -612,3 +612,377 @@ buildRequest():
 ### Existing Test Reference
 
 Tests in `extract_node_config_test.go` cover `ExtractNodeConfiguration()` - this coverage is inherited by `ExtractStepConfig()` since it reuses that function.
+
+---
+
+## Context-Memory API Migration Guide
+
+### Breaking Changes in Step Schema
+
+The `StepDigest` structure has been updated to use a unified `config` field instead of partial extraction fields.
+
+**Old Schema (Deprecated)**:
+```typescript
+interface StepDigest {
+  name: string;
+  id: string;
+  type: string;
+  success: boolean;
+  error?: string;
+  contractAddress?: string;      // ❌ REMOVED
+  methodName?: string;           // ❌ REMOVED
+  methodParams?: Record<string, unknown>;  // ❌ REMOVED
+  triggerConfig?: unknown;       // ❌ REMOVED
+  stepDescription?: string;      // ❌ REMOVED
+  outputData?: unknown;
+  metadata?: unknown;
+  executionContext?: unknown;
+  tokenMetadata?: TokenMetadata;
+}
+```
+
+**New Schema**:
+```typescript
+interface StepDigest {
+  name: string;
+  id: string;
+  type: string;
+  success: boolean;
+  error?: string;
+  config?: unknown;              // ✅ NEW: Full config for ALL node/trigger types
+  outputData?: unknown;          // ✅ ENHANCED: Now includes all 15 output types
+  metadata?: unknown;
+  executionContext?: unknown;
+  tokenMetadata?: TokenMetadata;
+}
+```
+
+### Migration Instructions
+
+The context-memory API should update its TypeScript types and parsing logic:
+
+1. **Remove deprecated field handling**:
+   - `contractAddress`, `methodName`, `methodParams` → extract from `config.contractAddress`, `config.methodCalls[0].methodName`, etc.
+   - `triggerConfig` → now unified in `config` field for trigger steps
+
+2. **Update config extraction logic**:
+   - For trigger steps (`type` contains `TRIGGER_TYPE_`): `config` contains trigger definition (queries, intervals, schedules, etc.)
+   - For node steps: `config` contains full node configuration from `ExtractNodeConfiguration()`
+
+3. **Update output handling**:
+   - `outputData` now includes all 15 output types (was only ContractRead/ContractWrite before)
+   - Trigger outputs: block data, event data, cron/fixed-time epochs, manual trigger data
+   - Node outputs: contract results, REST API responses, GraphQL data, custom code results, etc.
+
+### Full Example Request
+
+Below is a complete example of the new request format with various step types:
+
+```json
+{
+  "ownerEOA": "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
+  "name": "Uniswap Token Swap Workflow",
+  "smartWallet": "0x1234567890123456789012345678901234567890",
+  "chainName": "ethereum",
+  "currentNodeName": "swap_tokens",
+  "settings": {
+    "name": "Uniswap Token Swap Workflow",
+    "chain": "ethereum",
+    "runner": "0x1234567890123456789012345678901234567890",
+    "isSimulation": false,
+    "uniswapv3_pool": {
+      "tokens": {
+        "input": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "output": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+      }
+    }
+  },
+  "nodes": [
+    {"id": "trigger", "name": "EventTrigger"},
+    {"id": "check_balance", "name": "CheckBalance"},
+    {"id": "approve_token", "name": "ApproveToken"},
+    {"id": "swap_tokens", "name": "SwapTokens"}
+  ],
+  "edges": [
+    {"id": "e1", "source": "trigger", "target": "check_balance"},
+    {"id": "e2", "source": "check_balance", "target": "approve_token"},
+    {"id": "e3", "source": "approve_token", "target": "swap_tokens"}
+  ],
+  "steps": [
+    {
+      "name": "EventTrigger",
+      "id": "trigger",
+      "type": "TRIGGER_TYPE_EVENT",
+      "success": true,
+      "config": {
+        "queries": [
+          {
+            "addresses": ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"],
+            "topics": [
+              ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]
+            ]
+          }
+        ],
+        "cooldown_seconds": 300
+      },
+      "outputData": {
+        "tx_hash": "0xabc123def456...",
+        "block_number": 18500000,
+        "events": [
+          {
+            "name": "Transfer",
+            "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+            "args": {
+              "from": "0x...",
+              "to": "0x...",
+              "value": "1000000000"
+            }
+          }
+        ]
+      },
+      "metadata": null,
+      "executionContext": {
+        "is_simulated": false,
+        "provider": "chainRPC"
+      }
+    },
+    {
+      "name": "CheckBalance",
+      "id": "check_balance",
+      "type": "NODE_TYPE_BALANCE",
+      "success": true,
+      "config": {
+        "address": "0x1234567890123456789012345678901234567890",
+        "chain": "ethereum",
+        "includeNativeBalance": true,
+        "tokenAddresses": ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"]
+      },
+      "outputData": {
+        "nativeBalance": "1500000000000000000",
+        "tokens": [
+          {
+            "tokenAddress": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+            "balance": "5000000000",
+            "symbol": "USDC",
+            "decimals": 6
+          }
+        ]
+      },
+      "metadata": null,
+      "executionContext": {
+        "is_simulated": false,
+        "provider": "chainRPC"
+      }
+    },
+    {
+      "name": "ApproveToken",
+      "id": "approve_token",
+      "type": "NODE_TYPE_CONTRACT_WRITE",
+      "success": true,
+      "config": {
+        "contractAddress": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "methodCalls": [
+          {
+            "methodName": "approve",
+            "methodParams": [
+              "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
+              "1000000000"
+            ]
+          }
+        ],
+        "contractAbi": [
+          {
+            "inputs": [
+              {"name": "spender", "type": "address"},
+              {"name": "amount", "type": "uint256"}
+            ],
+            "name": "approve",
+            "outputs": [{"name": "", "type": "bool"}],
+            "stateMutability": "nonpayable",
+            "type": "function"
+          }
+        ]
+      },
+      "outputData": {
+        "approve": {
+          "success": true,
+          "tx_hash": "0x789abc...",
+          "receipt": {
+            "status": "0x1",
+            "blockNumber": 18500001,
+            "gasUsed": "46000"
+          }
+        }
+      },
+      "metadata": [
+        {
+          "methodName": "approve",
+          "success": true,
+          "receipt": {
+            "status": "0x1",
+            "to": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+            "blockNumber": 18500001
+          }
+        }
+      ],
+      "executionContext": {
+        "is_simulated": false,
+        "provider": "chainRPC",
+        "chain_id": 1
+      },
+      "tokenMetadata": {
+        "symbol": "USDC",
+        "decimals": 6,
+        "name": "USD Coin"
+      }
+    },
+    {
+      "name": "SwapTokens",
+      "id": "swap_tokens",
+      "type": "NODE_TYPE_CONTRACT_WRITE",
+      "success": true,
+      "config": {
+        "contractAddress": "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
+        "methodCalls": [
+          {
+            "methodName": "exactInputSingle",
+            "methodParams": [
+              {
+                "tokenIn": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                "tokenOut": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+                "fee": 3000,
+                "recipient": "0x1234567890123456789012345678901234567890",
+                "amountIn": "1000000000",
+                "amountOutMinimum": "400000000000000000",
+                "sqrtPriceLimitX96": 0
+              }
+            ]
+          }
+        ],
+        "contractAbi": [
+          {
+            "inputs": [{"components": [/*...*/], "name": "params", "type": "tuple"}],
+            "name": "exactInputSingle",
+            "outputs": [{"name": "amountOut", "type": "uint256"}],
+            "stateMutability": "payable",
+            "type": "function"
+          }
+        ]
+      },
+      "outputData": {
+        "exactInputSingle": {
+          "success": true,
+          "tx_hash": "0xdef789...",
+          "amountOut": "450000000000000000",
+          "receipt": {
+            "status": "0x1",
+            "blockNumber": 18500002,
+            "gasUsed": "185000"
+          }
+        }
+      },
+      "metadata": [
+        {
+          "methodName": "exactInputSingle",
+          "success": true,
+          "receipt": {
+            "status": "0x1",
+            "to": "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
+            "blockNumber": 18500002
+          }
+        }
+      ],
+      "executionContext": {
+        "is_simulated": false,
+        "provider": "chainRPC",
+        "chain_id": 1
+      }
+    }
+  ],
+  "tokenMetadata": {
+    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+      "symbol": "USDC",
+      "decimals": 6,
+      "name": "USD Coin"
+    },
+    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": {
+      "symbol": "WETH",
+      "decimals": 18,
+      "name": "Wrapped Ether"
+    }
+  }
+}
+```
+
+### Config Structure by Step Type
+
+#### Trigger Steps (type contains `TRIGGER_TYPE_`)
+
+| Trigger Type | Config Structure |
+|--------------|------------------|
+| `TRIGGER_TYPE_EVENT` | `{ queries: [...], cooldown_seconds?: number }` |
+| `TRIGGER_TYPE_BLOCK` | `{ interval: number }` |
+| `TRIGGER_TYPE_CRON` | `{ schedules: string[] }` |
+| `TRIGGER_TYPE_FIXED_TIME` | `{ epochs: number[] }` |
+| `TRIGGER_TYPE_MANUAL` | `{ data?: any, headers?: object, pathParams?: object, lang?: string }` |
+
+#### Node Steps (type contains `NODE_TYPE_`)
+
+| Node Type | Config Structure |
+|-----------|------------------|
+| `NODE_TYPE_CONTRACT_READ` | `{ contractAddress, methodCalls: [...], contractAbi: [...] }` |
+| `NODE_TYPE_CONTRACT_WRITE` | `{ contractAddress, methodCalls: [...], contractAbi: [...], isSimulated? }` |
+| `NODE_TYPE_REST_API` | `{ url, method, headers?, body?, options? }` |
+| `NODE_TYPE_GRAPHQL_QUERY` | `{ url, query, variables? }` |
+| `NODE_TYPE_CUSTOM_CODE` | `{ lang, source }` |
+| `NODE_TYPE_ETH_TRANSFER` | `{ destination, amount }` |
+| `NODE_TYPE_BALANCE` | `{ address, chain, includeNativeBalance?, tokenAddresses? }` |
+| `NODE_TYPE_BRANCH` | `{ conditions: [{ id, type, expression }] }` |
+| `NODE_TYPE_FILTER` | `{ expression, inputNodeName }` |
+| `NODE_TYPE_LOOP` | `{ inputNodeName, iterVal, iterKey, executionMode, runner: {...} }` |
+
+### Extracting Contract Details (Migration Helper)
+
+If the context-memory API needs to extract contract details from the new unified `config` field:
+
+```typescript
+function extractContractDetails(step: StepDigest): {
+  contractAddress?: string;
+  methodName?: string;
+  methodParams?: unknown[];
+} {
+  const config = step.config as Record<string, unknown> | undefined;
+  if (!config) return {};
+
+  const contractAddress = config.contractAddress as string | undefined;
+
+  let methodName: string | undefined;
+  let methodParams: unknown[] | undefined;
+
+  const methodCalls = config.methodCalls as Array<Record<string, unknown>> | undefined;
+  if (methodCalls && methodCalls.length > 0) {
+    methodName = methodCalls[0].methodName as string;
+    methodParams = methodCalls[0].methodParams as unknown[];
+  }
+
+  return { contractAddress, methodName, methodParams };
+}
+```
+
+### Output Data by Step Type
+
+All step types now populate `outputData` with their execution results:
+
+| Step Type | OutputData Structure |
+|-----------|---------------------|
+| Triggers | Event data, block info, epoch timestamps, manual input data |
+| `CONTRACT_READ` | Decoded return values keyed by method name |
+| `CONTRACT_WRITE` | Transaction receipts, decoded events, return values |
+| `REST_API` | HTTP response body (parsed JSON or raw text) |
+| `GRAPHQL_QUERY` | GraphQL response data |
+| `CUSTOM_CODE` | Return value from JavaScript execution |
+| `BALANCE` | Native balance + token balances array |
+| `BRANCH` | Matched condition info |
+| `FILTER` | Filtered array of items |
+| `LOOP` | Aggregated results from all iterations |
+| `ETH_TRANSFER` | Transaction hash and receipt |
