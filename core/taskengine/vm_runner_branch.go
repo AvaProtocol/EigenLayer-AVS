@@ -762,7 +762,7 @@ func findTopLevelOperator(expr string, op string) int {
 }
 
 // formatComparisonForLog formats comparison operands for plain text execution logs
-// Uses shared formatValueConcise from summarizer.go
+// Uses shared formatValueConcise from summarizer_deterministic.go
 func formatComparisonForLog(operands ComparisonOperands) string {
 	if !operands.Valid {
 		return ""
