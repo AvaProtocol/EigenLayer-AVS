@@ -67,6 +67,7 @@ type contextMemoryStepDigest struct {
 	StepDescription  string                      `json:"stepDescription,omitempty"`
 	ExecutionContext interface{}                 `json:"executionContext,omitempty"` // Actual execution mode (is_simulated, provider, chain_id)
 	TokenMetadata    *contextMemoryTokenMetadata `json:"tokenMetadata,omitempty"`    // Token info for the contract (symbol, decimals)
+	TriggerConfig    interface{}                 `json:"triggerConfig,omitempty"`    // Trigger configuration (queries, conditions, etc.) for trigger steps
 }
 
 // contextMemoryTokenMetadata contains ERC20 token information for formatting
@@ -233,25 +234,39 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 		if log.GetError() != "" {
 			step.Error = log.GetError()
 		}
-		// Extract contract details from node config (available in log.Config)
-		// This includes contractAddress and methodParams for CONTRACT_READ and CONTRACT_WRITE nodes
+		// Extract config data from step (available in log.Config)
 		if configProto := log.GetConfig(); configProto != nil {
 			if configMap, ok := configProto.AsInterface().(map[string]interface{}); ok {
-				// Extract contractAddress
-				if contractAddr, ok := configMap["contractAddress"].(string); ok {
-					step.ContractAddress = contractAddr
-				}
+				// Check if this is a trigger step by examining the Type field
+				stepTypeUpper := strings.ToUpper(step.Type)
+				isTriggerStep := strings.Contains(stepTypeUpper, "TRIGGER_TYPE_EVENT") ||
+					strings.Contains(stepTypeUpper, "TRIGGER_TYPE_BLOCK") ||
+					strings.Contains(stepTypeUpper, "TRIGGER_TYPE_CRON") ||
+					strings.Contains(stepTypeUpper, "TRIGGER_TYPE_FIXED_TIME") ||
+					strings.Contains(stepTypeUpper, "TRIGGER_TYPE_MANUAL")
 
-				// Extract methodCalls[0].methodName and methodParams
-				if methodCalls, ok := configMap["methodCalls"].([]interface{}); ok && len(methodCalls) > 0 {
-					if firstCall, ok := methodCalls[0].(map[string]interface{}); ok {
-						if methodName, ok := firstCall["methodName"].(string); ok {
-							step.MethodName = methodName
-						}
-						if methodParams, ok := firstCall["methodParams"].([]interface{}); ok && len(methodParams) > 0 {
-							step.MethodParams = make(map[string]interface{})
-							for i, param := range methodParams {
-								step.MethodParams[fmt.Sprintf("param_%d", i)] = param
+				if isTriggerStep {
+					// For trigger steps, extract trigger configuration (queries, conditions, etc.)
+					// This includes event trigger queries, block intervals, cron schedules, etc.
+					step.TriggerConfig = configMap
+				} else {
+					// For non-trigger steps, extract contract details
+					// This includes contractAddress and methodParams for CONTRACT_READ and CONTRACT_WRITE nodes
+					if contractAddr, ok := configMap["contractAddress"].(string); ok {
+						step.ContractAddress = contractAddr
+					}
+
+					// Extract methodCalls[0].methodName and methodParams
+					if methodCalls, ok := configMap["methodCalls"].([]interface{}); ok && len(methodCalls) > 0 {
+						if firstCall, ok := methodCalls[0].(map[string]interface{}); ok {
+							if methodName, ok := firstCall["methodName"].(string); ok {
+								step.MethodName = methodName
+							}
+							if methodParams, ok := firstCall["methodParams"].([]interface{}); ok && len(methodParams) > 0 {
+								step.MethodParams = make(map[string]interface{})
+								for i, param := range methodParams {
+									step.MethodParams[fmt.Sprintf("param_%d", i)] = param
+								}
 							}
 						}
 					}
