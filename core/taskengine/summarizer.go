@@ -1009,7 +1009,8 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 	var body string
 	var analysisHtml string
 	if failed {
-		// Failure body: include runner/owner, what executed successfully, and what didn't run
+		// Failure body: start with summary line to match context-memory API format
+		// Then include what executed successfully (if any) and what didn't run
 		successfulSteps := buildStepsOverview(vm)
 
 		if strings.TrimSpace(successfulSteps) != "" {
@@ -1020,14 +1021,14 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 			}
 			// Include steps that succeeded before failure
 			body = fmt.Sprintf(
-				"Smart wallet %s (owner %s) started workflow execution but encountered a failure.\n\n<strong>%s</strong>\n%s\n\n<strong>What Didn't Run</strong>\nFailed at step '%s': %s",
-				smartWallet, ownerEOA, sectionHeading, successfulSteps, safeName(failedName), firstLine(failedReason),
+				"%s\n\nSmart wallet %s (owner %s) started workflow execution but encountered a failure.\n\n<strong>%s</strong>\n%s\n\n<strong>What Didn't Run</strong>\nFailed at step '%s': %s",
+				summaryLine, smartWallet, ownerEOA, sectionHeading, successfulSteps, safeName(failedName), firstLine(failedReason),
 			)
 		} else {
 			// No successful steps before failure
 			body = fmt.Sprintf(
-				"Smart wallet %s (owner %s) started workflow execution but encountered a failure.\n\nNo on-chain contract writes were completed before the failure.\n\n<strong>What Didn't Run</strong>\nFailed at step '%s': %s",
-				smartWallet, ownerEOA, safeName(failedName), firstLine(failedReason),
+				"%s\n\nSmart wallet %s (owner %s) started workflow execution but encountered a failure.\n\nNo on-chain contract writes were completed before the failure.\n\n<strong>What Didn't Run</strong>\nFailed at step '%s': %s",
+				summaryLine, smartWallet, ownerEOA, safeName(failedName), firstLine(failedReason),
 			)
 		}
 	} else {
@@ -1071,20 +1072,11 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 				)
 			} else {
 				// Fallback when no contract writes are found
-				// Include workflow name and step names for better context
-				stepNames := make([]string, 0)
-				for _, st := range vm.ExecutionLogs {
-					if st.GetSuccess() && st.GetName() != "" {
-						stepNames = append(stepNames, st.GetName())
-					}
-				}
-				stepInfo := ""
-				if len(stepNames) > 0 {
-					stepInfo = fmt.Sprintf(" Steps executed: %s.", strings.Join(stepNames, ", "))
-				}
+				// Body should start with summary line to match context-memory API format
+				// This ensures consistency when context API is unreachable
 				body = fmt.Sprintf(
-					"No on-chain contract writes were recorded. This may have been a read-only workflow or all steps were simulated.%s\n\nAll steps completed on %s.",
-					stepInfo, chainName,
+					"%s\n\nNo on-chain contract writes were recorded. This may have been a read-only workflow or all steps were simulated.\n\nAll steps completed on %s.",
+					summaryLine, chainName,
 				)
 			}
 		}
