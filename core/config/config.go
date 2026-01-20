@@ -145,22 +145,6 @@ type NotificationsSummaryConfig struct {
 	// Provider specifies the AI service to use for summarization.
 	// Only "context-memory" is supported.
 	Provider string
-	// Model is deprecated and unused. Kept for config compatibility.
-	Model string
-	// MaxInputTokens is deprecated and unused. Kept for config compatibility.
-	MaxInputTokens int
-	// MaxOutputTokens is deprecated and unused. Kept for config compatibility.
-	MaxOutputTokens int
-	// Temperature is deprecated and unused. Kept for config compatibility.
-	Temperature float64
-	// TimeoutMs specifies the maximum time in milliseconds to wait for a summary response.
-	TimeoutMs int
-	// BudgetUSDPerSummary is deprecated and unused. Kept for config compatibility.
-	BudgetUSDPerSummary float64
-	// BaseURL is deprecated. Use macros.secrets.context_api_endpoint instead.
-	BaseURL string
-	// AuthToken is deprecated. Use macros.secrets.context_api_key instead.
-	AuthToken string
 }
 
 type SmartWalletConfig struct {
@@ -267,16 +251,8 @@ type ConfigRaw struct {
 	// Notifications configuration block
 	Notifications struct {
 		Summary struct {
-			Enabled             bool    `yaml:"enabled"`
-			Provider            string  `yaml:"provider"`
-			Model               string  `yaml:"model"`
-			MaxInputTokens      int     `yaml:"max_input_tokens"`
-			MaxOutputTokens     int     `yaml:"max_output_tokens"`
-			Temperature         float64 `yaml:"temperature"`
-			TimeoutMs           int     `yaml:"timeout_ms"`
-			BudgetUSDPerSummary float64 `yaml:"budget_usd_per_summary"`
-			BaseURL             string  `yaml:"base_url"`
-			AuthToken           string  `yaml:"auth_token"`
+			Enabled  bool   `yaml:"enabled"`
+			Provider string `yaml:"provider"`
 		} `yaml:"summary"`
 	} `yaml:"notifications"`
 }
@@ -482,16 +458,8 @@ func NewConfig(configFilePath string) (*Config, error) {
 
 		// Initialize notifications summary configuration (optional)
 		NotificationsSummary: NotificationsSummaryConfig{
-			Enabled:             configRaw.Notifications.Summary.Enabled,
-			Provider:            configRaw.Notifications.Summary.Provider,
-			Model:               configRaw.Notifications.Summary.Model,
-			MaxInputTokens:      configRaw.Notifications.Summary.MaxInputTokens,
-			MaxOutputTokens:     configRaw.Notifications.Summary.MaxOutputTokens,
-			Temperature:         configRaw.Notifications.Summary.Temperature,
-			TimeoutMs:           configRaw.Notifications.Summary.TimeoutMs,
-			BudgetUSDPerSummary: configRaw.Notifications.Summary.BudgetUSDPerSummary,
-			BaseURL:             configRaw.Notifications.Summary.BaseURL,
-			AuthToken:           getAuthTokenFromConfig(&configRaw),
+			Enabled:  configRaw.Notifications.Summary.Enabled,
+			Provider: configRaw.Notifications.Summary.Provider,
 		},
 	}
 
@@ -539,16 +507,6 @@ func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if v != "" {
 			return v
-		}
-	}
-	return ""
-}
-
-// getAuthTokenFromConfig retrieves auth token from macros.secrets.context_api_key
-func getAuthTokenFromConfig(configRaw *ConfigRaw) string {
-	if secrets, ok := configRaw.Macros["secrets"]; ok {
-		if token, ok := secrets["context_api_key"]; ok {
-			return token
 		}
 	}
 	return ""
