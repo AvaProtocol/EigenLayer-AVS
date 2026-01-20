@@ -59,12 +59,9 @@ type contextMemoryStepDigest struct {
 	Type             string                      `json:"type"`
 	Success          bool                        `json:"success"`
 	Error            string                      `json:"error,omitempty"`
-	ContractAddress  string                      `json:"contractAddress,omitempty"`
-	MethodName       string                      `json:"methodName,omitempty"`
-	MethodParams     map[string]interface{}      `json:"methodParams,omitempty"`
-	OutputData       interface{}                 `json:"outputData,omitempty"`
+	Config           interface{}                 `json:"config,omitempty"`     // Full config (trigger or node) - unified field for all types
+	OutputData       interface{}                 `json:"outputData,omitempty"` // Full output (all 15 types)
 	Metadata         interface{}                 `json:"metadata,omitempty"`
-	StepDescription  string                      `json:"stepDescription,omitempty"`
 	ExecutionContext interface{}                 `json:"executionContext,omitempty"` // Actual execution mode (is_simulated, provider, chain_id)
 	TokenMetadata    *contextMemoryTokenMetadata `json:"tokenMetadata,omitempty"`    // Token info for the contract (symbol, decimals)
 }
@@ -221,83 +218,81 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 		return nil, fmt.Errorf("workflow name is required in settings.name")
 	}
 
-	// Convert execution logs to steps
+	// Get trigger definition for config extraction
+	var trigger *avsproto.TaskTrigger
+	if vm.task != nil && vm.task.Task != nil {
+		trigger = vm.task.Task.Trigger
+	}
+
+	// Convert execution logs to steps using the new extraction functions
 	steps := make([]contextMemoryStepDigest, 0, len(vm.ExecutionLogs))
 	for _, log := range vm.ExecutionLogs {
 		step := contextMemoryStepDigest{
-			Name:    log.GetName(),
-			ID:      log.GetId(),
-			Type:    log.GetType(),
-			Success: log.GetSuccess(),
+			Name:             log.GetName(),
+			ID:               log.GetId(),
+			Type:             log.GetType(),
+			Success:          log.GetSuccess(),
+			Config:           ExtractStepConfig(log, vm.TaskNodes, trigger), // Full config via extraction function
+			OutputData:       ExtractStepOutput(log),                        // All 15 output types via extraction function
+			Metadata:         nil,
+			ExecutionContext: nil,
 		}
 		if log.GetError() != "" {
 			step.Error = log.GetError()
 		}
-		// Extract contract details from node config (available in log.Config)
-		// This includes contractAddress and methodParams for CONTRACT_READ and CONTRACT_WRITE nodes
-		if configProto := log.GetConfig(); configProto != nil {
-			if configMap, ok := configProto.AsInterface().(map[string]interface{}); ok {
-				// Extract contractAddress
-				if contractAddr, ok := configMap["contractAddress"].(string); ok {
-					step.ContractAddress = contractAddr
-				}
 
-				// Extract methodCalls[0].methodName and methodParams
-				if methodCalls, ok := configMap["methodCalls"].([]interface{}); ok && len(methodCalls) > 0 {
-					if firstCall, ok := methodCalls[0].(map[string]interface{}); ok {
-						if methodName, ok := firstCall["methodName"].(string); ok {
-							step.MethodName = methodName
-						}
-						if methodParams, ok := firstCall["methodParams"].([]interface{}); ok && len(methodParams) > 0 {
-							step.MethodParams = make(map[string]interface{})
-							for i, param := range methodParams {
-								step.MethodParams[fmt.Sprintf("param_%d", i)] = param
-							}
-						}
-					}
-				}
-			}
-		}
-
-		// If contractAddress is a template variable, try to extract resolved address from metadata
-		// The metadata contains receipt data with the actual "to" address used in the transaction
-		resolvedContractAddress := step.ContractAddress
-		if strings.Contains(step.ContractAddress, "{{") || step.ContractAddress == "" {
-			resolvedContractAddress = extractResolvedContractAddress(log)
-		}
-
-		// Look up token metadata for the contract address (for ERC20 tokens only)
-		// Use the resolved address if available and validate it's a proper Ethereum address
-		if resolvedContractAddress != "" && !strings.Contains(resolvedContractAddress, "{{") && common.IsHexAddress(resolvedContractAddress) && isERC20Method(step.MethodName) {
-			if tokenService := GetTokenEnrichmentService(); tokenService != nil {
-				if metadata, err := tokenService.GetTokenMetadata(resolvedContractAddress); err == nil && metadata != nil {
-					step.TokenMetadata = &contextMemoryTokenMetadata{
-						Symbol:   metadata.Symbol,
-						Decimals: metadata.Decimals,
-						Name:     metadata.Name,
-					}
-				}
-			}
-		}
-
-		// Extract output data
-		if contractRead := log.GetContractRead(); contractRead != nil && contractRead.Data != nil {
-			step.OutputData = contractRead.Data.AsInterface()
-		}
-		if contractWrite := log.GetContractWrite(); contractWrite != nil && contractWrite.Data != nil {
-			step.OutputData = contractWrite.Data.AsInterface()
-		}
+		// Extract Metadata
 		if log.GetMetadata() != nil {
 			step.Metadata = log.GetMetadata().AsInterface()
 		}
+
 		// Extract ExecutionContext (actual execution mode: is_simulated, provider, chain_id)
 		if log.GetExecutionContext() != nil {
 			if ctxInterface := log.GetExecutionContext().AsInterface(); ctxInterface != nil {
 				step.ExecutionContext = ctxInterface
 			}
-			// Note: If AsInterface() returns nil, we silently skip setting ExecutionContext
-			// This can happen if the ExecutionContext contains unsupported data types
 		}
+
+		// Token metadata lookup for ERC20 contract interactions
+		// Extract contract address and method name from config for token lookup
+		if configMap, ok := step.Config.(map[string]interface{}); ok {
+			contractAddress := ""
+			methodName := ""
+
+			// Extract contractAddress from config
+			if addr, ok := configMap["contractAddress"].(string); ok {
+				contractAddress = addr
+			}
+
+			// Extract methodName from methodCalls[0] if present
+			if methodCalls, ok := configMap["methodCalls"].([]interface{}); ok && len(methodCalls) > 0 {
+				if firstCall, ok := methodCalls[0].(map[string]interface{}); ok {
+					if name, ok := firstCall["methodName"].(string); ok {
+						methodName = name
+					}
+				}
+			}
+
+			// If contractAddress is a template variable, try to extract resolved address from metadata
+			resolvedContractAddress := contractAddress
+			if strings.Contains(contractAddress, "{{") || contractAddress == "" {
+				resolvedContractAddress = extractResolvedContractAddress(log)
+			}
+
+			// Look up token metadata for the contract address (for ERC20 tokens only)
+			if resolvedContractAddress != "" && !strings.Contains(resolvedContractAddress, "{{") && common.IsHexAddress(resolvedContractAddress) && isERC20Method(methodName) {
+				if tokenService := GetTokenEnrichmentService(); tokenService != nil {
+					if metadata, err := tokenService.GetTokenMetadata(resolvedContractAddress); err == nil && metadata != nil {
+						step.TokenMetadata = &contextMemoryTokenMetadata{
+							Symbol:   metadata.Symbol,
+							Decimals: metadata.Decimals,
+							Name:     metadata.Name,
+						}
+					}
+				}
+			}
+		}
+
 		steps = append(steps, step)
 	}
 
@@ -349,18 +344,26 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 	// 1. Collect from per-step tokenMetadata (already populated above)
 	for _, step := range steps {
 		if step.TokenMetadata != nil {
-			// Use resolved address from metadata if step.ContractAddress is a template variable
+			// Extract contractAddress from step.Config
+			contractAddress := ""
+			if configMap, ok := step.Config.(map[string]interface{}); ok {
+				if addr, ok := configMap["contractAddress"].(string); ok {
+					contractAddress = addr
+				}
+			}
+
+			// Use resolved address from metadata if contractAddress is a template variable
 			// This ensures we use the actual contract address that was used in the transaction
-			resolvedAddr := step.ContractAddress
-			if strings.Contains(step.ContractAddress, "{{") || step.ContractAddress == "" {
+			resolvedAddr := contractAddress
+			if strings.Contains(contractAddress, "{{") || contractAddress == "" {
 				// Extract resolved address from step.Metadata (same data we used earlier)
 				resolvedAddr = extractResolvedContractAddressFromMetadata(step.Metadata)
 			}
 
-			// Use resolved address as key, fallback to step.ContractAddress if resolution failed
+			// Use resolved address as key, fallback to contractAddress if resolution failed
 			addr := resolvedAddr
 			if addr == "" {
-				addr = step.ContractAddress
+				addr = contractAddress
 			}
 
 			// Only add to map if we have a valid Ethereum address (not a template variable)

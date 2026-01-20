@@ -1007,8 +1007,10 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 	}
 
 	var body string
+	var analysisHtml string
 	if failed {
-		// Failure body: include runner/owner, what executed successfully, and what didn't run
+		// Failure body: start with summary line to match context-memory API format
+		// Then include what executed successfully (if any) and what didn't run
 		successfulSteps := buildStepsOverview(vm)
 
 		if strings.TrimSpace(successfulSteps) != "" {
@@ -1018,15 +1020,17 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 				sectionHeading = "What Executed On-Chain"
 			}
 			// Include steps that succeeded before failure
+			// Body is plain text (no HTML tags) to match context-memory API format
 			body = fmt.Sprintf(
-				"Smart wallet %s (owner %s) started workflow execution but encountered a failure.\n\n<strong>%s</strong>\n%s\n\n<strong>What Didn't Run</strong>\nFailed at step '%s': %s",
-				smartWallet, ownerEOA, sectionHeading, successfulSteps, safeName(failedName), firstLine(failedReason),
+				"%s\n\nSmart wallet %s (owner %s) started workflow execution but encountered a failure.\n\n%s\n%s\n\nWhat Didn't Run\nFailed at step '%s': %s",
+				summaryLine, smartWallet, ownerEOA, sectionHeading, successfulSteps, safeName(failedName), firstLine(failedReason),
 			)
 		} else {
 			// No successful steps before failure
+			// Body is plain text (no HTML tags) to match context-memory API format
 			body = fmt.Sprintf(
-				"Smart wallet %s (owner %s) started workflow execution but encountered a failure.\n\nNo on-chain contract writes were completed before the failure.\n\n<strong>What Didn't Run</strong>\nFailed at step '%s': %s",
-				smartWallet, ownerEOA, safeName(failedName), firstLine(failedReason),
+				"%s\n\nSmart wallet %s (owner %s) started workflow execution but encountered a failure.\n\nNo on-chain contract writes were completed before the failure.\n\nWhat Didn't Run\nFailed at step '%s': %s",
+				summaryLine, smartWallet, ownerEOA, safeName(failedName), firstLine(failedReason),
 			)
 		}
 	} else {
@@ -1047,26 +1051,34 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 			body = composeSingleNodeSuccessBody(vm, smartWallet, ownerEOA, chainName, successfulSteps, actionLines, actionCount, currentStepName)
 		} else {
 			if strings.TrimSpace(successfulSteps) != "" {
+				// Generate AnalysisHtml with proper margin styles matching TypeScript reference
+				// Format: <p style="margin-bottom:16px"><strong>What Executed On-Chain</strong></p>
+				//         <p style="margin:8px 0">✓ Step 1</p>
+				//         <p style="margin:8px 0">✓ Step 2</p>
+				analysisHtml = fmt.Sprintf(`<p style="margin-bottom:16px"><strong>%s</strong></p>`, html.EscapeString(sectionHeading))
+				// Split successfulSteps by newlines and wrap each step in <p> tag with margin:8px 0
+				steps := strings.Split(successfulSteps, "\n")
+				for _, step := range steps {
+					step = strings.TrimSpace(step)
+					if step != "" {
+						// Escape HTML in step description but preserve checkmark (already in step text)
+						escapedStep := html.EscapeString(step)
+						analysisHtml += fmt.Sprintf(`<p style="margin:8px 0">%s</p>`, escapedStep)
+					}
+				}
+
+				// Body format: plain text (no HTML tags) to match context-memory API format
 				body = fmt.Sprintf(
-					"Smart wallet %s (owner %s) executed %d on-chain actions.\n\n<strong>%s</strong>\n%s\n\nAll steps completed on %s.",
-					smartWallet, ownerEOA, actionCount, sectionHeading, successfulSteps, chainName,
+					"%s\n%s\n\nAll steps completed on %s.",
+					sectionHeading, successfulSteps, chainName,
 				)
 			} else {
 				// Fallback when no contract writes are found
-				// Include workflow name and step names for better context
-				stepNames := make([]string, 0)
-				for _, st := range vm.ExecutionLogs {
-					if st.GetSuccess() && st.GetName() != "" {
-						stepNames = append(stepNames, st.GetName())
-					}
-				}
-				stepInfo := ""
-				if len(stepNames) > 0 {
-					stepInfo = fmt.Sprintf(" Steps executed: %s.", strings.Join(stepNames, ", "))
-				}
+				// Body should start with summary line to match context-memory API format
+				// This ensures consistency when context API is unreachable
 				body = fmt.Sprintf(
-					"Smart wallet %s (owner %s) completed workflow execution for '%s'.\n\nNo on-chain contract writes were recorded. This may have been a read-only workflow or all steps were simulated.%s\n\nAll steps completed on %s.",
-					smartWallet, ownerEOA, workflowName, stepInfo, chainName,
+					"%s\n\nNo on-chain contract writes were recorded. This may have been a read-only workflow or all steps were simulated.\n\nAll steps completed on %s.",
+					summaryLine, chainName,
 				)
 			}
 		}
@@ -1083,9 +1095,10 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 	}
 
 	return Summary{
-		Subject:     subject,
-		Body:        body,
-		SummaryLine: summaryLine,
+		Subject:      subject,
+		Body:         body,
+		SummaryLine:  summaryLine,
+		AnalysisHtml: analysisHtml,
 	}
 }
 
@@ -1097,8 +1110,9 @@ func composeSingleNodeSuccessBody(vm *VM, smartWallet, ownerEOA, chainName strin
 		if vm != nil && vm.IsSimulation {
 			sectionHeading = "What Executed On-Chain"
 		}
+		// Body is plain text (no HTML tags) to match context-memory API format
 		return fmt.Sprintf(
-			"Smart wallet %s (owner %s) executed %d on-chain action(s).\n\n<strong>%s</strong>\n%s\n\nAll steps completed on %s.",
+			"Smart wallet %s (owner %s) executed %d on-chain action(s).\n\n%s\n%s\n\nAll steps completed on %s.",
 			displayOrUnknown(smartWallet), displayOrUnknown(ownerEOA), actionCount, sectionHeading, trimmedSteps, chainName,
 		)
 	}
