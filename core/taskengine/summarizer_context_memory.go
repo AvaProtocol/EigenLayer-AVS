@@ -348,11 +348,24 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 
 	// 1. Collect from per-step tokenMetadata (already populated above)
 	for _, step := range steps {
-		if step.TokenMetadata != nil && step.ContractAddress != "" {
-			addr := strings.ToLower(step.ContractAddress)
-			// Skip template variables and require valid Ethereum address
-			if !strings.Contains(addr, "{{") && common.IsHexAddress(step.ContractAddress) {
-				tokenMetadataMap[addr] = step.TokenMetadata
+		if step.TokenMetadata != nil {
+			// Use resolved address from metadata if step.ContractAddress is a template variable
+			// This ensures we use the actual contract address that was used in the transaction
+			resolvedAddr := step.ContractAddress
+			if strings.Contains(step.ContractAddress, "{{") || step.ContractAddress == "" {
+				// Extract resolved address from step.Metadata (same data we used earlier)
+				resolvedAddr = extractResolvedContractAddressFromMetadata(step.Metadata)
+			}
+
+			// Use resolved address as key, fallback to step.ContractAddress if resolution failed
+			addr := resolvedAddr
+			if addr == "" {
+				addr = step.ContractAddress
+			}
+
+			// Only add to map if we have a valid Ethereum address (not a template variable)
+			if addr != "" && !strings.Contains(addr, "{{") && common.IsHexAddress(addr) {
+				tokenMetadataMap[strings.ToLower(addr)] = step.TokenMetadata
 			}
 		}
 	}
@@ -434,32 +447,36 @@ func isERC20Method(methodName string) bool {
 // This is useful when the config contains a template variable like {{settings.token}}
 // but the metadata contains the resolved address from the actual transaction
 func extractResolvedContractAddress(log *avsproto.Execution_Step) string {
-	if log == nil {
+	if log == nil || log.GetMetadata() == nil {
+		return ""
+	}
+	return extractResolvedContractAddressFromMetadata(log.GetMetadata().AsInterface())
+}
+
+// extractResolvedContractAddressFromMetadata extracts the actual contract address from metadata interface
+// This is a helper for extracting resolved addresses when we only have the metadata interface (not the log)
+func extractResolvedContractAddressFromMetadata(metadataInterface interface{}) string {
+	if metadataInterface == nil {
 		return ""
 	}
 
-	// Try to extract from metadata (contains receipt data with "to" field)
-	if log.GetMetadata() != nil {
-		metadataInterface := log.GetMetadata().AsInterface()
-
-		// Metadata is an array of method results for contract_write
-		if resultsArray, ok := metadataInterface.([]interface{}); ok {
-			for _, result := range resultsArray {
-				if resultMap, ok := result.(map[string]interface{}); ok {
-					// Check receipt for both "to" field and event log addresses
-					if receipt, hasReceipt := resultMap["receipt"].(map[string]interface{}); hasReceipt {
-						// First, check for "to" field (the actual contract address)
-						if to, hasTo := receipt["to"].(string); hasTo && common.IsHexAddress(to) {
-							return to
-						}
-						// Also check logs for event addresses (for ERC20 events like Approval)
-						if logs, hasLogs := receipt["logs"].([]interface{}); hasLogs && len(logs) > 0 {
-							// Find the first log with a valid address (likely the token contract)
-							for _, logEntry := range logs {
-								if logMap, ok := logEntry.(map[string]interface{}); ok {
-									if addr, hasAddr := logMap["address"].(string); hasAddr && common.IsHexAddress(addr) {
-										return addr
-									}
+	// Metadata is an array of method results for contract_write
+	if resultsArray, ok := metadataInterface.([]interface{}); ok {
+		for _, result := range resultsArray {
+			if resultMap, ok := result.(map[string]interface{}); ok {
+				// Check receipt for both "to" field and event log addresses
+				if receipt, hasReceipt := resultMap["receipt"].(map[string]interface{}); hasReceipt {
+					// First, check for "to" field (the actual contract address)
+					if to, hasTo := receipt["to"].(string); hasTo && common.IsHexAddress(to) {
+						return to
+					}
+					// Also check logs for event addresses (for ERC20 events like Approval)
+					if logs, hasLogs := receipt["logs"].([]interface{}); hasLogs && len(logs) > 0 {
+						// Find the first log with a valid address (likely the token contract)
+						for _, logEntry := range logs {
+							if logMap, ok := logEntry.(map[string]interface{}); ok {
+								if addr, hasAddr := logMap["address"].(string); hasAddr && common.IsHexAddress(addr) {
+									return addr
 								}
 							}
 						}
