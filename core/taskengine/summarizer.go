@@ -1007,6 +1007,7 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 	}
 
 	var body string
+	var analysisHtml string
 	if failed {
 		// Failure body: include runner/owner, what executed successfully, and what didn't run
 		successfulSteps := buildStepsOverview(vm)
@@ -1047,9 +1048,26 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 			body = composeSingleNodeSuccessBody(vm, smartWallet, ownerEOA, chainName, successfulSteps, actionLines, actionCount, currentStepName)
 		} else {
 			if strings.TrimSpace(successfulSteps) != "" {
+				// Generate AnalysisHtml with proper margin styles matching TypeScript reference
+				// Format: <p style="margin-bottom:16px"><strong>What Executed On-Chain</strong></p>
+				//         <p style="margin:8px 0">✓ Step 1</p>
+				//         <p style="margin:8px 0">✓ Step 2</p>
+				analysisHtml = fmt.Sprintf(`<p style="margin-bottom:16px"><strong>%s</strong></p>`, html.EscapeString(sectionHeading))
+				// Split successfulSteps by newlines and wrap each step in <p> tag with margin:8px 0
+				steps := strings.Split(successfulSteps, "\n")
+				for _, step := range steps {
+					step = strings.TrimSpace(step)
+					if step != "" {
+						// Escape HTML in step description but preserve checkmark (already in step text)
+						escapedStep := html.EscapeString(step)
+						analysisHtml += fmt.Sprintf(`<p style="margin:8px 0">%s</p>`, escapedStep)
+					}
+				}
+
+				// Body format: just the section heading and steps (no prefix line)
 				body = fmt.Sprintf(
-					"Smart wallet %s (owner %s) executed %d on-chain actions.\n\n<strong>%s</strong>\n%s\n\nAll steps completed on %s.",
-					smartWallet, ownerEOA, actionCount, sectionHeading, successfulSteps, chainName,
+					"<strong>%s</strong>\n%s\n\nAll steps completed on %s.",
+					sectionHeading, successfulSteps, chainName,
 				)
 			} else {
 				// Fallback when no contract writes are found
@@ -1065,8 +1083,8 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 					stepInfo = fmt.Sprintf(" Steps executed: %s.", strings.Join(stepNames, ", "))
 				}
 				body = fmt.Sprintf(
-					"Smart wallet %s (owner %s) completed workflow execution for '%s'.\n\nNo on-chain contract writes were recorded. This may have been a read-only workflow or all steps were simulated.%s\n\nAll steps completed on %s.",
-					smartWallet, ownerEOA, workflowName, stepInfo, chainName,
+					"No on-chain contract writes were recorded. This may have been a read-only workflow or all steps were simulated.%s\n\nAll steps completed on %s.",
+					stepInfo, chainName,
 				)
 			}
 		}
@@ -1083,9 +1101,10 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 	}
 
 	return Summary{
-		Subject:     subject,
-		Body:        body,
-		SummaryLine: summaryLine,
+		Subject:      subject,
+		Body:         body,
+		SummaryLine:  summaryLine,
+		AnalysisHtml: analysisHtml,
 	}
 }
 
