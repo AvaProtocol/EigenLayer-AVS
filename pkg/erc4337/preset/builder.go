@@ -122,11 +122,14 @@ func waitForUserOpConfirmation(
 	logger := logger.EnsureLogger(lgr)
 
 	// Configuration for exponential backoff polling
+	// Increased timeout to 1 minute to account for slow chains (e.g., Sepolia) where bundle
+	// transactions may take longer to be mined. Bundlers typically process within 2-5s, but
+	// the actual on-chain confirmation depends on network block times.
 	const (
-		maxWaitTime     = 30 * time.Second // Maximum total wait time (bundler should process within 2-5s)
-		initialInterval = 1 * time.Second  // Start polling every 1 second
-		maxInterval     = 5 * time.Second  // Max polling interval (cap exponential growth)
-		backoffFactor   = 1.5              // Multiply interval by 1.5 each retry
+		maxWaitTime     = 1 * time.Minute // Maximum total wait time (increased from 30s to handle slow chains)
+		initialInterval = 1 * time.Second // Start polling every 1 second
+		maxInterval     = 5 * time.Second // Max polling interval (cap exponential growth)
+		backoffFactor   = 1.5             // Multiply interval by 1.5 each retry
 	)
 
 	// Try WebSocket subscription first (most efficient for real-time events)
@@ -288,7 +291,7 @@ func pollUserOpReceipt(
 	userOpHash string,
 ) (*UserOpReceiptResult, bool, error) {
 	// Query recent blocks for the UserOperationEvent
-	// We look back ~20 blocks (~5 minutes on most chains) to handle reorgs
+	// We look back ~50 blocks to handle reorgs and slow chains (e.g., Sepolia with ~12s block time = ~10 minutes)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -297,10 +300,11 @@ func pollUserOpReceipt(
 		return nil, false, fmt.Errorf("failed to get current block: %w", err)
 	}
 
-	// Look back 20 blocks (adjust based on chain's block time)
+	// Look back 50 blocks to handle slow chains and ensure we catch recently mined bundle transactions
+	// For Sepolia (12s blocks), this covers ~10 minutes of history
 	fromBlock := currentBlock
-	if currentBlock > 20 {
-		fromBlock = currentBlock - 20
+	if currentBlock > 50 {
+		fromBlock = currentBlock - 50
 	}
 
 	query := ethereum.FilterQuery{
