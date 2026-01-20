@@ -136,6 +136,66 @@ func TestExtractStepConfig_NodeStep_FallbackToStepConfig(t *testing.T) {
 	assert.Equal(t, "GET", configMap["method"], "Should have method from step.Config fallback")
 }
 
+func TestExtractStepConfig_NodeStep_NilTaskNodes(t *testing.T) {
+	// When taskNodes is nil (not just empty), should fallback to step.Config
+	stepID := "node-1"
+	configValue, _ := structpb.NewValue(map[string]interface{}{
+		"contractAddress": "0x1234567890123456789012345678901234567890",
+		"methodName":      "balanceOf",
+	})
+
+	step := &avsproto.Execution_Step{
+		Id:     stepID,
+		Type:   "NODE_TYPE_CONTRACT_READ",
+		Name:   "ReadBalance",
+		Config: configValue,
+	}
+
+	// nil taskNodes (different from empty map)
+	result := ExtractStepConfig(step, nil, nil)
+	require.NotNil(t, result, "ExtractStepConfig should fallback to step.Config when taskNodes is nil")
+
+	configMap, ok := result.(map[string]interface{})
+	require.True(t, ok, "Result should be a map")
+	assert.Equal(t, "0x1234567890123456789012345678901234567890", configMap["contractAddress"])
+	assert.Equal(t, "balanceOf", configMap["methodName"])
+}
+
+func TestExtractStepConfig_TriggerStep_NilTrigger_FallbackToStepConfig(t *testing.T) {
+	// When trigger is nil, should fallback to step.Config for trigger steps
+	configValue, _ := structpb.NewValue(map[string]interface{}{
+		"interval": float64(10),
+	})
+
+	step := &avsproto.Execution_Step{
+		Id:     "trigger-step",
+		Type:   "TRIGGER_TYPE_BLOCK",
+		Name:   "BlockTrigger",
+		Config: configValue,
+	}
+
+	// nil trigger - should fallback to step.Config
+	result := ExtractStepConfig(step, nil, nil)
+	require.NotNil(t, result, "ExtractStepConfig should fallback to step.Config when trigger is nil")
+
+	configMap, ok := result.(map[string]interface{})
+	require.True(t, ok, "Result should be a map")
+	assert.Equal(t, float64(10), configMap["interval"], "Should have interval from step.Config fallback")
+}
+
+func TestExtractStepConfig_TriggerStep_NilTrigger_NoStepConfig(t *testing.T) {
+	// When trigger is nil and step.Config is nil, should return nil
+	step := &avsproto.Execution_Step{
+		Id:   "trigger-step",
+		Type: "TRIGGER_TYPE_BLOCK",
+		Name: "BlockTrigger",
+		// No Config set
+	}
+
+	result := ExtractStepConfig(step, nil, nil)
+	assert.Nil(t, result, "ExtractStepConfig should return nil when trigger is nil and step.Config is nil")
+}
+
 func TestExtractStepConfig_ProtobufCompatibility(t *testing.T) {
 	// Test that extracted config can be converted to protobuf
 	// Using BlockTrigger which has simple types that are protobuf-compatible

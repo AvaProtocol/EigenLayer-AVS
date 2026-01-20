@@ -365,8 +365,18 @@ func ExtractStepConfig(
 
 	// Check if this is a trigger step
 	if isTriggerStep(step.GetType()) {
-		// Use TaskTriggerToConfig for trigger definition
-		return TaskTriggerToConfig(trigger) // Reuse existing function!
+		// For trigger steps, prefer the TaskTrigger definition when available
+		if trigger != nil {
+			return TaskTriggerToConfig(trigger) // Reuse existing function!
+		}
+
+		// Fallback to step.Config for trigger steps when TaskTrigger is not available
+		if step.GetConfig() != nil {
+			return step.GetConfig().AsInterface()
+		}
+
+		// No trigger definition and no step-level config
+		return nil
 	}
 
 	// For node steps, use TaskNodes for complete definition

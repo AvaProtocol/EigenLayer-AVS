@@ -1020,14 +1020,16 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 				sectionHeading = "What Executed On-Chain"
 			}
 			// Include steps that succeeded before failure
+			// Body is plain text (no HTML tags) to match context-memory API format
 			body = fmt.Sprintf(
-				"%s\n\nSmart wallet %s (owner %s) started workflow execution but encountered a failure.\n\n<strong>%s</strong>\n%s\n\n<strong>What Didn't Run</strong>\nFailed at step '%s': %s",
+				"%s\n\nSmart wallet %s (owner %s) started workflow execution but encountered a failure.\n\n%s\n%s\n\nWhat Didn't Run\nFailed at step '%s': %s",
 				summaryLine, smartWallet, ownerEOA, sectionHeading, successfulSteps, safeName(failedName), firstLine(failedReason),
 			)
 		} else {
 			// No successful steps before failure
+			// Body is plain text (no HTML tags) to match context-memory API format
 			body = fmt.Sprintf(
-				"%s\n\nSmart wallet %s (owner %s) started workflow execution but encountered a failure.\n\nNo on-chain contract writes were completed before the failure.\n\n<strong>What Didn't Run</strong>\nFailed at step '%s': %s",
+				"%s\n\nSmart wallet %s (owner %s) started workflow execution but encountered a failure.\n\nNo on-chain contract writes were completed before the failure.\n\nWhat Didn't Run\nFailed at step '%s': %s",
 				summaryLine, smartWallet, ownerEOA, safeName(failedName), firstLine(failedReason),
 			)
 		}
@@ -1065,9 +1067,9 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 					}
 				}
 
-				// Body format: just the section heading and steps (no prefix line)
+				// Body format: plain text (no HTML tags) to match context-memory API format
 				body = fmt.Sprintf(
-					"<strong>%s</strong>\n%s\n\nAll steps completed on %s.",
+					"%s\n%s\n\nAll steps completed on %s.",
 					sectionHeading, successfulSteps, chainName,
 				)
 			} else {
@@ -1108,8 +1110,9 @@ func composeSingleNodeSuccessBody(vm *VM, smartWallet, ownerEOA, chainName strin
 		if vm != nil && vm.IsSimulation {
 			sectionHeading = "What Executed On-Chain"
 		}
+		// Body is plain text (no HTML tags) to match context-memory API format
 		return fmt.Sprintf(
-			"Smart wallet %s (owner %s) executed %d on-chain action(s).\n\n<strong>%s</strong>\n%s\n\nAll steps completed on %s.",
+			"Smart wallet %s (owner %s) executed %d on-chain action(s).\n\n%s\n%s\n\nAll steps completed on %s.",
 			displayOrUnknown(smartWallet), displayOrUnknown(ownerEOA), actionCount, sectionHeading, trimmedSteps, chainName,
 		)
 	}
