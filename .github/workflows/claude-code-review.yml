@@ -12,13 +12,11 @@ on:
 
 jobs:
   claude-review:
-    # Only run on PRs targeting staging or main branch
-    if: |
-      github.event.pull_request.base.ref == 'staging' ||
-      github.event.pull_request.base.ref == 'main'
+    # Only run on PRs targeting the main branch
+    if: github.event.pull_request.base.ref == 'main'
     # Optional: Filter by PR author
     # if: |
-    #   (github.event.pull_request.base.ref == 'staging' || github.event.pull_request.base.ref == 'main') &&
+    #   github.event.pull_request.base.ref == 'main' &&
     #   (github.event.pull_request.user.login == 'external-contributor' ||
     #    github.event.pull_request.user.login == 'new-developer' ||
     #    github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR')
