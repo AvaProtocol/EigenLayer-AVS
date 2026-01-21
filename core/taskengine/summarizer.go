@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"html"
 	"strings"
 	"time"
 
@@ -134,20 +135,21 @@ func FormatForMessageChannels(s Summary, channel string, vm *VM) string {
 // formatTelegramFromStructured formats Summary into Telegram HTML using AI-generated strings
 // Uses the API response fields directly without composing additional text
 // Format: Subject (bold) as header, Smart Wallet, then trigger, executions, errors
+// All user-controlled content is HTML-escaped to prevent XSS attacks
 func formatTelegramFromStructured(s Summary) string {
 	var sb strings.Builder
 
 	// Subject as header (bold for Telegram HTML)
 	if s.Subject != "" {
 		sb.WriteString("<b>")
-		sb.WriteString(s.Subject)
+		sb.WriteString(html.EscapeString(s.Subject))
 		sb.WriteString("</b>\n")
 	}
 
 	// Smart Wallet line (right beneath title)
 	if s.SmartWallet != "" {
 		sb.WriteString("Smart Wallet: ")
-		sb.WriteString(s.SmartWallet)
+		sb.WriteString(html.EscapeString(s.SmartWallet))
 		sb.WriteString("\n")
 	}
 
@@ -158,7 +160,7 @@ func formatTelegramFromStructured(s Summary) string {
 
 	// Trigger (AI-generated text) with timestamp
 	if s.Trigger != "" {
-		sb.WriteString(s.Trigger)
+		sb.WriteString(html.EscapeString(s.Trigger))
 		// Append timestamp in format (2026-01-20 12:36)
 		if s.TriggeredAt != "" {
 			if ts := formatTimestampShort(s.TriggeredAt); ts != "" {
@@ -176,7 +178,7 @@ func formatTelegramFromStructured(s Summary) string {
 		}
 		for _, exec := range s.Executions {
 			sb.WriteString("• ")
-			sb.WriteString(exec)
+			sb.WriteString(html.EscapeString(exec))
 			sb.WriteString("\n")
 		}
 	}
@@ -188,7 +190,7 @@ func formatTelegramFromStructured(s Summary) string {
 		}
 		for _, err := range s.Errors {
 			sb.WriteString("• ")
-			sb.WriteString(err)
+			sb.WriteString(html.EscapeString(err))
 			sb.WriteString("\n")
 		}
 	}
@@ -214,7 +216,8 @@ func formatTimestampShort(isoTimestamp string) string {
 
 // formatDiscordFromStructured formats Summary into Discord markdown using AI-generated strings
 // Uses the API response fields directly without composing additional text
-// Format: Subject (bold) as header, then trigger, executions, errors
+// Format: Subject (bold) as header, Smart Wallet, then trigger, executions, errors
+// Note: Discord uses markdown (not HTML), so XSS is not a concern
 func formatDiscordFromStructured(s Summary) string {
 	var sb strings.Builder
 
@@ -222,7 +225,19 @@ func formatDiscordFromStructured(s Summary) string {
 	if s.Subject != "" {
 		sb.WriteString("**")
 		sb.WriteString(s.Subject)
-		sb.WriteString("**\n\n")
+		sb.WriteString("**\n")
+	}
+
+	// Smart Wallet line (right beneath title)
+	if s.SmartWallet != "" {
+		sb.WriteString("Smart Wallet: ")
+		sb.WriteString(s.SmartWallet)
+		sb.WriteString("\n")
+	}
+
+	// Add blank line before trigger if we have subject or smart wallet
+	if s.Subject != "" || s.SmartWallet != "" {
+		sb.WriteString("\n")
 	}
 
 	// Trigger (AI-generated text)
@@ -259,14 +274,26 @@ func formatDiscordFromStructured(s Summary) string {
 
 // formatPlainTextFromStructured formats Summary into plain text using AI-generated strings
 // Uses the API response fields directly without composing additional text
-// Format: Subject as header, then trigger, executions, errors
+// Format: Subject as header, Smart Wallet, then trigger, executions, errors
 func formatPlainTextFromStructured(s Summary) string {
 	var sb strings.Builder
 
 	// Subject as header
 	if s.Subject != "" {
 		sb.WriteString(s.Subject)
-		sb.WriteString("\n\n")
+		sb.WriteString("\n")
+	}
+
+	// Smart Wallet line (right beneath title)
+	if s.SmartWallet != "" {
+		sb.WriteString("Smart Wallet: ")
+		sb.WriteString(s.SmartWallet)
+		sb.WriteString("\n")
+	}
+
+	// Add blank line before trigger if we have subject or smart wallet
+	if s.Subject != "" || s.SmartWallet != "" {
+		sb.WriteString("\n")
 	}
 
 	// Trigger (AI-generated text)
