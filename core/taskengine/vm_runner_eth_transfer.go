@@ -129,11 +129,9 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	}
 	p.vm.mu.Unlock()
 
-	// Build result object for metadata (matching contract_write format)
+	// Build result object for metadata (only transactionHash - success/isSimulated are in response/executionContext)
 	resultObj := map[string]interface{}{
-		"success":         true,
 		"transactionHash": txHash,
-		"isSimulated":     true,
 	}
 
 	// Create output data: transfer object for data field, result for metadata
@@ -301,11 +299,9 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	}
 	p.vm.mu.Unlock()
 
-	// Build result object with transaction details (matching contract_write metadata format)
+	// Build result object for metadata (only transactionHash + gas info - success/isSimulated are in response/executionContext)
 	resultObj := map[string]interface{}{
-		"success":         true,
 		"transactionHash": txHash,
-		"isSimulated":     false,
 	}
 
 	// Extract gas information from receipt if available

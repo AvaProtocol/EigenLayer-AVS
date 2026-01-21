@@ -389,16 +389,16 @@ func TestRunNodeImmediatelyRPC(t *testing.T) {
 		t.Logf("   to: %v", transferMap["to"])
 		t.Logf("   value: %v", transferMap["value"])
 
-		// Verify metadata contains transaction details
-		if result.Metadata != nil {
-			metadataMap := result.Metadata.AsInterface()
-			if metaTyped, ok := metadataMap.(map[string]interface{}); ok {
-				t.Logf("✅ Metadata validated:")
-				t.Logf("   transactionHash: %v", metaTyped["transactionHash"])
-				t.Logf("   isSimulated: %v", metaTyped["isSimulated"])
-				t.Logf("   success: %v", metaTyped["success"])
-			}
-		}
+		// Verify metadata contains transactionHash (success/isSimulated are in response/executionContext, not metadata)
+		require.NotNil(t, result.Metadata, "Should have metadata")
+		metadataMap := result.Metadata.AsInterface()
+		metaTyped, ok := metadataMap.(map[string]interface{})
+		require.True(t, ok, "Metadata should be a map")
+		txHash, hasTxHash := metaTyped["transactionHash"]
+		require.True(t, hasTxHash, "Metadata should have transactionHash")
+		assert.NotEmpty(t, txHash, "transactionHash should not be empty")
+		t.Logf("✅ Metadata validated:")
+		t.Logf("   transactionHash: %v", txHash)
 
 		t.Logf("✅ ETHTransfer RPC test completed successfully")
 	})
