@@ -104,6 +104,11 @@ func NewContextMemorySummarizerFromAggregatorConfig(c *config.Config) Summarizer
 //
 // Note: Email is handled separately via SendGridDynamicData(), not this function.
 //
+// Thread-safety: This function reads from the Summary struct and VM object.
+// The Summary struct should not be modified after creation. The VM object is
+// accessed read-only (for transfer event extraction). If the Summary or VM
+// may be accessed concurrently, ensure proper synchronization at the caller level.
+//
 // Fallback order:
 // 1. AI-generated structured data from context-memory API
 // 2. Transfer event detection (for simple transfer notifications without API)
@@ -163,7 +168,8 @@ func formatTelegramFromStructured(s Summary) string {
 		sb.WriteString(html.EscapeString(s.Trigger))
 		// Append timestamp in format (2026-01-20 12:36)
 		if s.TriggeredAt != "" {
-			if ts := formatTimestampShort(s.TriggeredAt); ts != "" {
+			// Note: logger not available in this context, so pass nil
+			if ts := formatTimestampShort(s.TriggeredAt, nil); ts != "" {
 				sb.WriteString(" (")
 				sb.WriteString(ts)
 				sb.WriteString(")")
@@ -199,7 +205,8 @@ func formatTelegramFromStructured(s Summary) string {
 }
 
 // formatTimestampShort formats an ISO 8601 timestamp to "2006-01-02 15:04" format
-func formatTimestampShort(isoTimestamp string) string {
+// logger is optional and used for debug logging when timestamp parsing fails
+func formatTimestampShort(isoTimestamp string, logger interface{ Debug(string, ...interface{}) }) string {
 	if isoTimestamp == "" {
 		return ""
 	}
@@ -208,6 +215,9 @@ func formatTimestampShort(isoTimestamp string) string {
 		// Try parsing without timezone
 		t, err = time.Parse("2006-01-02T15:04:05", isoTimestamp)
 		if err != nil {
+			if logger != nil {
+				logger.Debug("Failed to parse timestamp in both RFC3339 and simplified format", "timestamp", isoTimestamp, "error", err)
+			}
 			return ""
 		}
 	}

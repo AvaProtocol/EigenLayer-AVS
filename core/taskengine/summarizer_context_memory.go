@@ -113,7 +113,8 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 	// Build request from VM
 	req, err := c.buildRequest(vm, currentStepName)
 	if err != nil {
-		return Summary{}, fmt.Errorf("failed to build request: %w", err)
+		// Include the specific validation error to help with debugging
+		return Summary{}, fmt.Errorf("failed to build request (validation error): %w", err)
 	}
 
 	// Marshal request

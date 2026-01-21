@@ -880,7 +880,7 @@ func computeExecutionStatus(vm *VM) string {
 
 // extractTriggerInfo extracts the trigger description and timestamp from ExecutionLogs
 // Returns (triggerDescription, triggeredAtISO8601)
-func extractTriggerInfo(vm *VM) (string, string) {
+func extractTriggerInfo(vm *VM) (triggerDesc, triggeredAt string) {
 	if vm == nil {
 		return "", ""
 	}
@@ -893,13 +893,12 @@ func extractTriggerInfo(vm *VM) (string, string) {
 		}
 
 		// Extract timestamp from trigger output
-		triggeredAt := ""
 		if st.GetStartAt() > 0 {
 			triggeredAt = time.UnixMilli(st.GetStartAt()).UTC().Format(time.RFC3339)
 		}
 
 		// Build trigger description based on trigger type
-		triggerDesc := buildTriggerDescription(st, vm)
+		triggerDesc = buildTriggerDescription(st, vm)
 		return triggerDesc, triggeredAt
 	}
 
@@ -2330,12 +2329,17 @@ func buildNarrativeFromLogs(vm *VM) string {
 	return strings.Join(sentences, "\n\n")
 }
 
+// defaultDecimalsForSymbol returns the default decimal count for a token symbol.
+// WARNING: This function assumes 18 decimals for all unknown tokens, which may be incorrect.
+// Many tokens use different decimal counts (e.g., USDC/USDT use 6, WBTC uses 8).
+// For accurate formatting, prefer querying the actual decimal count from the blockchain
+// or expanding this switch statement to include more known tokens.
 func defaultDecimalsForSymbol(sym string) int {
 	switch strings.ToUpper(sym) {
 	case "USDC", "USDT":
 		return 6
 	default:
-		return 18
+		return 18 // Assumes 18 decimals for all unknown tokens - may be incorrect
 	}
 }
 
