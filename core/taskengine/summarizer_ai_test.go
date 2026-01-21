@@ -174,7 +174,7 @@ func TestFormatSummaryForChannel_Telegram(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FormatSummaryForChannel(tt.summary, "telegram")
+			result := FormatSummaryForChannel(tt.summary, "telegram", nil)
 
 			// Check that result contains expected strings
 			for _, expected := range tt.expectedContain {
@@ -204,7 +204,7 @@ func TestFormatSummaryForChannel_Discord(t *testing.T) {
 		Body:    "Contract deployed to 0xabc on Base network.",
 	}
 
-	result := FormatSummaryForChannel(summary, "discord")
+	result := FormatSummaryForChannel(summary, "discord", nil)
 
 	// Discord should use markdown bold
 	if !strings.Contains(result, "**Deploy: succeeded (2 steps)**") {
@@ -212,6 +212,63 @@ func TestFormatSummaryForChannel_Discord(t *testing.T) {
 	}
 	if !strings.Contains(result, "Contract deployed to 0xabc") {
 		t.Errorf("discord message should contain body content, got: %s", result)
+	}
+}
+
+func TestFormatTransferMessage(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     *TransferEventData
+		expected string
+	}{
+		{
+			name: "sent_eth",
+			data: &TransferEventData{
+				Direction:      "sent",
+				FromAddress:    "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+				ToAddress:      "0x0000000000000000000000000000000000000002",
+				Value:          "1.5",
+				TokenSymbol:    "ETH",
+				TokenName:      "Ether",
+				BlockTimestamp: 1768943005000, // milliseconds
+				ChainName:      "Sepolia",
+			},
+			expected: "⬆️ Sent <b>1.5 ETH</b> to <code>0x0000000000000000000000000000000000000002</code> on <b>Sepolia</b>",
+		},
+		{
+			name: "received_usdc",
+			data: &TransferEventData{
+				Direction:      "received",
+				FromAddress:    "0x1234567890123456789012345678901234567890",
+				ToAddress:      "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+				Value:          "100.50",
+				TokenSymbol:    "USDC",
+				TokenName:      "USD Coin",
+				BlockTimestamp: 1768943005, // seconds
+				ChainName:      "Ethereum",
+			},
+			expected: "⬇️ Received <b>100.50 USDC</b> from <code>0x1234567890123456789012345678901234567890</code> on <b>Ethereum</b>",
+		},
+		{
+			name:     "nil_data",
+			data:     nil,
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FormatTransferMessage(tt.data)
+			if tt.expected == "" {
+				if result != "" {
+					t.Errorf("expected empty string, got: %s", result)
+				}
+				return
+			}
+			if !strings.Contains(result, tt.expected) {
+				t.Errorf("expected result to contain %q, got: %s", tt.expected, result)
+			}
+		})
 	}
 }
 
