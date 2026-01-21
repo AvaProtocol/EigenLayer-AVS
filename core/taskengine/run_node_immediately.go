@@ -2949,32 +2949,32 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 		}
 	}
 
-	// For contractWrite nodes, handle runner validation from settings only; simulation is resolved in the processor from typed config
-	if strings.EqualFold(nodeType, "contractWrite") {
+	// For contractWrite and ethTransfer nodes, handle runner validation from settings only; simulation is resolved in the processor from typed config
+	if strings.EqualFold(nodeType, "contractWrite") || strings.EqualFold(nodeType, "ethTransfer") {
 
 		// Require authenticated user (TaskOwner)
 		if (vm.TaskOwner == common.Address{}) {
 			if n.logger != nil {
-				n.logger.Warn("RunNodeImmediately: No authenticated user for contractWrite - refusing to simulate")
+				n.logger.Warn("RunNodeImmediately: No authenticated user for contractWrite/ethTransfer - refusing to simulate")
 			}
-			return nil, fmt.Errorf("authentication required for contractWrite")
+			return nil, fmt.Errorf("authentication required for %s", nodeType)
 		}
 
 		// Look for runner in settings instead of workflowContext
 		if settingsIface, ok := inputVariables["settings"]; ok {
 			if settings, ok := settingsIface.(map[string]interface{}); ok {
 				if n.logger != nil {
-					n.logger.Info("RunNodeImmediately: Found settings for contractWrite validation", "keys", GetMapKeys(settings))
+					n.logger.Info("RunNodeImmediately: Found settings for contractWrite/ethTransfer validation", "keys", GetMapKeys(settings))
 				}
 
 				// Require runner
 				runnerIface, ok := settings["runner"]
 				if !ok {
-					return nil, fmt.Errorf("settings.runner is required for contractWrite")
+					return nil, fmt.Errorf("settings.runner is required for %s", nodeType)
 				}
 				runnerStr, ok := runnerIface.(string)
 				if !ok || !common.IsHexAddress(runnerStr) {
-					return nil, fmt.Errorf("settings.runner must be a valid hex address for contractWrite")
+					return nil, fmt.Errorf("settings.runner must be a valid hex address for %s", nodeType)
 				}
 
 				// Validate runner belongs to owner
@@ -3051,10 +3051,10 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 
 				vm.AddVar("aa_sender", chosenSender.Hex())
 			} else {
-				return nil, fmt.Errorf("settings must be an object for contractWrite")
+				return nil, fmt.Errorf("settings must be an object for %s", nodeType)
 			}
 		} else {
-			return nil, fmt.Errorf("settings is required for contractWrite")
+			return nil, fmt.Errorf("settings is required for %s", nodeType)
 		}
 
 		// Final validation: ensure aa_sender was set
@@ -3063,9 +3063,9 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 		vm.mu.Unlock()
 		if !hasSender {
 			if n.logger != nil {
-				n.logger.Warn("RunNodeImmediately: Missing settings.runner for contractWrite - refusing to simulate without aa_sender")
+				n.logger.Warn("RunNodeImmediately: Missing settings.runner for contractWrite/ethTransfer - refusing to simulate without aa_sender")
 			}
-			return nil, fmt.Errorf("settings.runner is required for contractWrite")
+			return nil, fmt.Errorf("settings.runner is required for %s", nodeType)
 		}
 	}
 
