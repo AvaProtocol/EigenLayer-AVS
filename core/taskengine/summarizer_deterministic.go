@@ -2505,10 +2505,15 @@ type TransferEventData struct {
 
 // ExtractTransferEventData extracts transfer event data from the VM's execution logs.
 // Returns nil if no transfer event trigger is found.
+// Thread-safe: acquires VM mutex before accessing ExecutionLogs.
 func ExtractTransferEventData(vm *VM) *TransferEventData {
 	if vm == nil {
 		return nil
 	}
+
+	// Lock mutex while iterating over ExecutionLogs to prevent race conditions
+	vm.mu.Lock()
+	var transfer *TransferEventData
 
 	// Look for an event trigger step with Transfer event data
 	for _, st := range vm.ExecutionLogs {
@@ -2535,7 +2540,7 @@ func ExtractTransferEventData(vm *VM) *TransferEventData {
 		}
 
 		// Extract transfer data
-		transfer := &TransferEventData{}
+		transfer = &TransferEventData{}
 
 		if dir, ok := data["direction"].(string); ok {
 			transfer.Direction = dir
@@ -2563,17 +2568,23 @@ func ExtractTransferEventData(vm *VM) *TransferEventData {
 			transfer.BlockTimestamp = ts
 		}
 
-		// Get chain name from settings
-		transfer.ChainName = resolveChainName(vm)
+		break // Found transfer event, exit loop
+	}
+	vm.mu.Unlock()
 
-		return transfer
+	if transfer == nil {
+		return nil
 	}
 
-	return nil
+	// Get chain name from settings (resolveChainName acquires its own lock)
+	transfer.ChainName = resolveChainName(vm)
+
+	return transfer
 }
 
 // FormatTransferMessage formats a transfer event into an HTML notification message.
 // Format: ⬆️ Sent <b>1.5 ETH</b> to <code>0x00...02</code> on <b>Sepolia</b> (<i>2026-01-20 13:03</i>)
+// All user-controlled content is HTML-escaped to prevent XSS attacks
 func FormatTransferMessage(data *TransferEventData) string {
 	if data == nil {
 		return ""
@@ -2594,14 +2605,14 @@ func FormatTransferMessage(data *TransferEventData) string {
 		targetAddress = data.FromAddress
 	}
 
-	// Format amount with token symbol
-	amount := fmt.Sprintf("<b>%s %s</b>", data.Value, data.TokenSymbol)
+	// Format amount with token symbol (escaped)
+	amount := fmt.Sprintf("<b>%s %s</b>", html.EscapeString(data.Value), html.EscapeString(data.TokenSymbol))
 
-	// Format address (keep full address for code tag, it's monospace and scrollable)
-	addressDisplay := fmt.Sprintf("<code>%s</code>", targetAddress)
+	// Format address (keep full address for code tag, it's monospace and scrollable, escaped)
+	addressDisplay := fmt.Sprintf("<code>%s</code>", html.EscapeString(targetAddress))
 
-	// Format chain
-	chain := fmt.Sprintf("<b>%s</b>", data.ChainName)
+	// Format chain (escaped)
+	chain := fmt.Sprintf("<b>%s</b>", html.EscapeString(data.ChainName))
 
 	// Format timestamp
 	timestamp := ""

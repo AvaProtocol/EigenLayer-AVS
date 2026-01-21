@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -242,11 +243,16 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 		if eoa, ok := wfCtx["eoaAddress"].(string); ok && eoa != "" && ownerEOA == "" {
 			ownerEOA = eoa
 		}
-		// Extract execution count (0-based in workflow context, convert to 1-based for API)
+		// Extract execution count for API request
 		if count, ok := wfCtx["executionCount"].(int64); ok {
 			executionCount = count
 		} else if count, ok := wfCtx["executionCount"].(uint64); ok {
-			executionCount = int64(count)
+			// Overflow check: cap at MaxInt64 to prevent negative values
+			if count > math.MaxInt64 {
+				executionCount = math.MaxInt64
+			} else {
+				executionCount = int64(count)
+			}
 		}
 	}
 	// Prioritize settings.name for workflow name (most accurate source)

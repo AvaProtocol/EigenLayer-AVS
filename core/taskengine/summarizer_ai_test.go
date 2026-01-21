@@ -474,16 +474,11 @@ func TestComposeSummary_SimulationSubjectFormat(t *testing.T) {
 				t.Errorf("SummaryLine mismatch:\n  expected: %q\n  got:      %q", tt.expectedSummary, summary.SummaryLine)
 			}
 
-			// Verify body format matches TypeScript reference when context API is unreachable
-			// Body should start with "Your workflow 'X' executed Y out of Z total steps"
-			expectedBodyPrefix := fmt.Sprintf("Your workflow '%s' executed %d out of %d total steps", tt.workflowName, tt.executedSteps, tt.totalSteps)
-			if !strings.HasPrefix(summary.Body, expectedBodyPrefix) {
-				t.Errorf("Body format mismatch:\n  expected to start with: %q\n  got:                      %q", expectedBodyPrefix, summary.Body)
+			// Verify body format - with the new structured format, Body starts with "Trigger: ..."
+			// The "Your workflow..." summary is now in SummaryLine field
+			if !strings.HasPrefix(summary.Body, "Trigger: ") {
+				t.Errorf("Body format mismatch:\n  expected to start with: %q\n  got:                      %q", "Trigger: ", summary.Body)
 			}
-
-			// Note: "What Executed On-Chain" / "What Executed Successfully" sections only appear
-			// when there are successful contract writes. For workflows without contract writes,
-			// the body will have a different format. We verify the subject, summary line, and body prefix here.
 		})
 	}
 }
@@ -547,11 +542,16 @@ func TestComposeSummary_SimulationBodyFormat(t *testing.T) {
 		t.Errorf("SummaryLine mismatch:\n  expected: %q\n  got:      %q", expectedSummary, summary.SummaryLine)
 	}
 
-	// Verify body format matches TypeScript reference: should start with "Your workflow 'X' executed Y out of Z total steps"
-	// This is critical when context API is unreachable and fallback is used
-	expectedBodyPrefix := "Your workflow 'Test Stoploss' executed 3 out of 3 total steps"
-	if !strings.HasPrefix(summary.Body, expectedBodyPrefix) {
-		t.Errorf("Body format mismatch:\n  expected to start with: %q\n  got:                      %q", expectedBodyPrefix, summary.Body)
+	// Verify body format - with the new structured format, Body starts with "Trigger: ..."
+	// The "Your workflow..." summary is now in SummaryLine field
+	if !strings.HasPrefix(summary.Body, "Trigger: ") {
+		t.Errorf("Body format mismatch:\n  expected to start with: %q\n  got:                      %q", "Trigger: ", summary.Body)
+	}
+
+	// Verify SummaryLine contains the expected format
+	expectedSummaryLine := "Your workflow 'Test Stoploss' executed 3 out of 3 total steps"
+	if summary.SummaryLine != expectedSummaryLine {
+		t.Errorf("SummaryLine mismatch:\n  expected: %q\n  got:      %q", expectedSummaryLine, summary.SummaryLine)
 	}
 
 	t.Logf("Subject: %s", summary.Subject)
