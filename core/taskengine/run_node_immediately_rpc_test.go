@@ -257,4 +257,149 @@ func TestRunNodeImmediatelyRPC(t *testing.T) {
 
 		t.Logf("✅ BalanceNode RPC test completed successfully")
 	})
+
+	t.Run("ETHTransfer_ConfigViaInputVariables", func(t *testing.T) {
+		// Setup test environment
+		db := testutil.TestMustDB()
+		defer storage.Destroy(db.(*storage.BadgerStorage))
+
+		config := testutil.GetAggregatorConfig()
+		engine := New(db, config, nil, testutil.GetLogger())
+
+		smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
+		aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+
+		// Create test user (simulating authenticated user from JWT)
+		ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+		if !ok {
+			t.Skip("Owner EOA address not set, skipping RPC test")
+		}
+		ownerEOA := *ownerAddr
+		factory := testutil.GetAggregatorConfig().SmartWallet.FactoryAddress
+
+		// Connect to RPC client for GetSenderAddress
+		client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
+		require.NoError(t, err, "Failed to connect to RPC")
+		defer client.Close()
+
+		// Derive actual salt:0 smart wallet address
+		aa.SetFactoryAddress(factory)
+		runnerAddr, err := aa.GetSenderAddress(client, ownerEOA, big.NewInt(0))
+		require.NoError(t, err, "Failed to derive smart wallet address")
+
+		// Create authenticated user model
+		user := &model.User{
+			Address: ownerEOA,
+		}
+
+		// Seed wallet in DB for validation
+		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{
+			Owner:   &ownerEOA,
+			Address: runnerAddr,
+			Factory: &factory,
+			Salt:    big.NewInt(0),
+		})
+
+		// Destination address for ETH transfer
+		destinationAddr := "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6"
+		amount := "1000000000000000000" // 1 ETH in wei
+
+		// Create ETHTransfer node with config
+		ethTransferNode := &avsproto.TaskNode{
+			Id:   "test-eth-transfer",
+			Name: "transfer1",
+			Type: avsproto.NodeType_NODE_TYPE_ETH_TRANSFER,
+			TaskType: &avsproto.TaskNode_EthTransfer{
+				EthTransfer: &avsproto.ETHTransferNode{
+					Config: &avsproto.ETHTransferNode_Config{
+						Destination: destinationAddr,
+						Amount:      amount,
+					},
+				},
+			},
+		}
+
+		// Create protobuf request with the full TaskNode
+		req := &avsproto.RunNodeWithInputsReq{
+			Node: ethTransferNode,
+		}
+
+		// Settings for the workflow (including runner)
+		settingsData := map[string]interface{}{
+			"runner":   runnerAddr.Hex(),
+			"chain_id": 11155111, // Sepolia testnet
+		}
+
+		// Build inputVariables map with settings
+		req.InputVariables = make(map[string]*structpb.Value)
+
+		// Add settings
+		settingsVal, err := structpb.NewValue(settingsData)
+		require.NoError(t, err)
+		req.InputVariables["settings"] = settingsVal
+
+		t.Logf("🧪 Testing RunNodeImmediatelyRPC with ETHTransfer node:")
+		t.Logf("   User (from JWT): %s", user.Address.Hex())
+		t.Logf("   Runner (from settings): %s", runnerAddr.Hex())
+		t.Logf("   Destination: %s", destinationAddr)
+		t.Logf("   Amount: %s wei", amount)
+
+		// Execute via RPC layer
+		result, err := engine.RunNodeImmediatelyRPC(user, req)
+
+		// Assertions
+		require.NoError(t, err, "RunNodeImmediatelyRPC should succeed")
+		require.NotNil(t, result, "Should get response")
+		assert.True(t, result.Success, "ETH transfer should succeed in simulation")
+
+		// Verify ETH transfer output data
+		ethTransferOutput := result.GetEthTransfer()
+		require.NotNil(t, ethTransferOutput, "Should have ETH transfer output")
+		require.NotNil(t, ethTransferOutput.Data, "Should have ETH transfer data")
+
+		// Extract data map
+		dataMap := ethTransferOutput.Data.AsInterface()
+		require.NotNil(t, dataMap, "Data should be convertible to interface")
+
+		dataMapTyped, ok := dataMap.(map[string]interface{})
+		require.True(t, ok, "Data should be a map")
+
+		// Verify transfer object exists
+		transferObj, hasTransfer := dataMapTyped["transfer"]
+		require.True(t, hasTransfer, "Should have 'transfer' field in data")
+
+		transferMap, ok := transferObj.(map[string]interface{})
+		require.True(t, ok, "Transfer should be a map")
+
+		// Verify transfer fields - THIS IS THE KEY ASSERTION
+		// The 'from' field should be the runner (smart wallet) address
+		fromField, hasFrom := transferMap["from"]
+		require.True(t, hasFrom, "Transfer should have 'from' field")
+		fromStr, ok := fromField.(string)
+		require.True(t, ok, "From field should be a string")
+		assert.NotEmpty(t, fromStr, "From field should not be empty")
+		assert.Equal(t, runnerAddr.Hex(), fromStr, "From field should be the runner (smart wallet) address")
+
+		// Verify to and value fields
+		assert.Equal(t, destinationAddr, transferMap["to"], "To field should match destination")
+		assert.Equal(t, amount, transferMap["value"], "Value field should match amount")
+
+		t.Logf("✅ Transfer data validated:")
+		t.Logf("   from: %s", fromStr)
+		t.Logf("   to: %v", transferMap["to"])
+		t.Logf("   value: %v", transferMap["value"])
+
+		// Verify metadata contains transaction details
+		if result.Metadata != nil {
+			metadataMap := result.Metadata.AsInterface()
+			if metaTyped, ok := metadataMap.(map[string]interface{}); ok {
+				t.Logf("✅ Metadata validated:")
+				t.Logf("   transactionHash: %v", metaTyped["transactionHash"])
+				t.Logf("   isSimulated: %v", metaTyped["isSimulated"])
+				t.Logf("   success: %v", metaTyped["success"])
+			}
+		}
+
+		t.Logf("✅ ETHTransfer RPC test completed successfully")
+	})
 }
