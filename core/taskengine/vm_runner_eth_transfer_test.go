@@ -66,36 +66,22 @@ func TestETHTransferProcessor_Execute_Success(t *testing.T) {
 	}
 
 	// Check that output variables were set
-	// Note: SetOutputVarForStep stores data under nodeVar["data"], so we access via outputMap["data"]
+	// Note: GetOutputVar extracts nodeVar["data"], so we get the transfer object directly
 	outputVar := processor.GetOutputVar("test-step")
 	if outputVar == nil {
 		t.Fatal("Expected output variable to be set")
 	}
-
-	t.Logf("DEBUG: outputVar type: %T, value: %+v", outputVar, outputVar)
 
 	outputMap, ok := outputVar.(map[string]interface{})
 	if !ok {
 		t.Fatalf("Expected output variable to be a map, got %T", outputVar)
 	}
 
-	t.Logf("DEBUG: outputMap keys: %+v", outputMap)
-
-	// The data is stored under the "data" key by SetOutputVarForStep
-	dataField, hasData := outputMap["data"]
-	if !hasData {
-		t.Fatalf("Expected 'data' field in output, got keys: %+v", outputMap)
-	}
-
-	dataMap, ok := dataField.(map[string]interface{})
-	if !ok {
-		t.Fatal("Expected 'data' field to be a map")
-	}
-
 	// Check the transfer object that matches ERC20 transfer format
-	transferField, hasTransfer := dataMap["transfer"]
+	// GetOutputVar returns nodeVar["data"] directly, so transfer is at the top level
+	transferField, hasTransfer := outputMap["transfer"]
 	if !hasTransfer {
-		t.Error("Expected 'transfer' field in data")
+		t.Errorf("Expected 'transfer' field in output, got: %+v", outputMap)
 	} else {
 		transferMap, ok := transferField.(map[string]interface{})
 		if !ok {
