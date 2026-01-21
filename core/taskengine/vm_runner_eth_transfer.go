@@ -129,9 +129,8 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	}
 	p.vm.mu.Unlock()
 
-	// Create output data using standardized data field matching ERC20 transfer format
+	// Create output data matching ERC20 transfer format (no transactionHash in data, only transfer object)
 	ethData := map[string]interface{}{
-		"transactionHash": txHash,
 		"transfer": map[string]interface{}{
 			"from":  fromAddress,
 			"to":    destination,
@@ -293,9 +292,8 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	}
 	p.vm.mu.Unlock()
 
-	// Create output data matching ERC20 transfer format
+	// Create output data matching ERC20 transfer format (no transactionHash in data, only transfer object)
 	ethData := map[string]interface{}{
-		"transactionHash": txHash,
 		"transfer": map[string]interface{}{
 			"from":  fromAddress,
 			"to":    destination,
