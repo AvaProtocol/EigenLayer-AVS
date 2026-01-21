@@ -280,23 +280,17 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	contextMemorySummarizer := NewContextMemorySummarizerFromAggregatorConfig(config)
 	if contextMemorySummarizer != nil {
 		SetSummarizer(contextMemorySummarizer)
-		baseURL := ""
-		if config.MacroSecrets != nil {
-			baseURL = config.MacroSecrets["context_api_endpoint"]
-		}
-		logger.Info("AI summarizer initialized", "provider", "context-memory", "base_url", baseURL)
+		logger.Info("AI summarizer initialized", "provider", "context-memory", "base_url", config.NotificationsSummary.APIEndpoint)
 	} else {
 		// Log why context-memory is not available
 		if !config.NotificationsSummary.Enabled {
 			logger.Debug("Context-memory API not available: NotificationsSummary.Enabled is false")
 		} else if strings.ToLower(config.NotificationsSummary.Provider) != "context-memory" {
 			logger.Debug("Context-memory API not configured: provider is not 'context-memory'", "provider", config.NotificationsSummary.Provider)
-		} else if config.MacroSecrets == nil {
-			logger.Debug("Context-memory API not available: MacroSecrets is nil")
-		} else if strings.TrimSpace(config.MacroSecrets["context_api_endpoint"]) == "" {
-			logger.Debug("Context-memory API not available: context_api_endpoint not found in macros.secrets")
-		} else if strings.TrimSpace(config.MacroSecrets["context_api_key"]) == "" {
-			logger.Debug("Context-memory API not available: context_api_key not found in macros.secrets")
+		} else if strings.TrimSpace(config.NotificationsSummary.APIEndpoint) == "" {
+			logger.Debug("Context-memory API not available: api_endpoint not configured in notifications.summary")
+		} else if strings.TrimSpace(config.NotificationsSummary.APIKey) == "" {
+			logger.Debug("Context-memory API not available: api_key not configured in notifications.summary")
 		}
 		// No summarizer configured - deterministic fallback will be used
 		logger.Debug("Context-memory API not configured, will use deterministic fallback")
