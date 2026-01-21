@@ -1705,12 +1705,12 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 		var decimalsValue *big.Int
 
 		if n.logger != nil {
-			n.logger.Error("🔍 FORCE DEBUG: Decimal formatting logic executing",
+			n.logger.Debug("🔍 Decimal formatting logic executing",
 				"methodCallResultsKeys", GetMapKeys(methodCallResults),
 				"methodCallsCount", len(query.GetMethodCalls()))
 			// Debug: Print all method call results
 			for key, value := range methodCallResults {
-				n.logger.Info("🔍 DEBUG: Method call result",
+				n.logger.Debug("🔍 Method call result",
 					"key", key,
 					"value", value,
 					"type", fmt.Sprintf("%T", value))
@@ -1720,7 +1720,7 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 		// Find decimals method call and extract applyToFields
 		for _, methodCall := range query.GetMethodCalls() {
 			if n.logger != nil {
-				n.logger.Info("🔍 DEBUG: Processing method call",
+				n.logger.Debug("🔍 Processing method call",
 					"methodName", methodCall.GetMethodName(),
 					"hasApplyToFields", len(methodCall.GetApplyToFields()) > 0,
 					"applyToFields", methodCall.GetApplyToFields())
@@ -1792,15 +1792,15 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 
 	// DEBUG: Log the final parsedData structure
 	if n.logger != nil {
-		n.logger.Info("🔍 DEBUG: Final response data structure",
+		n.logger.Debug("🔍 Final response data structure",
 			"parsedDataKeys", GetMapKeys(parsedData))
 		for eventName, eventFields := range parsedData {
 			if eventFieldsMap, ok := eventFields.(map[string]interface{}); ok {
-				n.logger.Info("🔍 DEBUG: Event fields",
+				n.logger.Debug("🔍 Event fields",
 					"eventName", eventName,
 					"fields", GetMapKeys(eventFieldsMap))
 				if current, exists := eventFieldsMap["current"]; exists {
-					n.logger.Info("🔍 DEBUG: Current field value",
+					n.logger.Debug("🔍 Current field value",
 						"eventName", eventName,
 						"current", current,
 						"type", fmt.Sprintf("%T", current))

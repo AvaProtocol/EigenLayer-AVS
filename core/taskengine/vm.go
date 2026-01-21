@@ -3701,6 +3701,9 @@ func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeConfig
 			// For loop iteration step IDs, this is expected behavior - use debug level to avoid noise
 			if strings.Contains(stepID, "_iter_") {
 				v.logger.Debug("🔍 GetNodeDataForExecution: Loop iteration node (expected)", "stepID", stepID)
+			} else if v.IsSimulation {
+				// In simulation mode, temporary nodes may not be in TaskNodes map - this is expected
+				v.logger.Debug("🔍 GetNodeDataForExecution: Node not found (simulation mode, expected)", "stepID", stepID)
 			} else {
 				v.logger.Warn("🔍 GetNodeDataForExecution: Node not found", "stepID", stepID)
 			}
