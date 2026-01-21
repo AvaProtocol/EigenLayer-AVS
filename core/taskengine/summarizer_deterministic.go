@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 
@@ -15,54 +16,158 @@ import (
 
 // Summary represents composed notification content
 type Summary struct {
-	Subject           string
-	Body              string
-	SummaryLine       string   // One-liner summary (e.g., "Your workflow 'Test Stoploss' executed 7 out of 7 total steps")
-	AnalysisHtml      string   // Pre-formatted HTML content with ✓ symbols (from context-memory)
-	StatusHtml        string   // Status badge HTML (green/yellow/red badge with icon) - from context-memory
-	Status            string   // Execution status: "success", "partial_success", "failure" - from context-memory
-	BranchSummaryHtml string   // HTML formatted branch summary (from context-memory) - for partial success scenarios
-	SkippedNodes      []string // List of skipped node names (from context-memory)
+	Subject     string
+	Body        string
+	SummaryLine string // One-liner summary (e.g., "Your workflow 'Test Stoploss' executed 7 out of 7 total steps")
+	Status      string // Execution status: "success", "partial_success", "failure"
+
+	// Structured fields for rendering notifications
+	Trigger     string   // What triggered the workflow (text description)
+	TriggeredAt string   // ISO 8601 timestamp (from trigger output)
+	Executions  []string // On-chain operation descriptions
+	Errors      []string // Failed steps and skipped node descriptions
+	SmartWallet string   // Smart wallet address that executed the workflow
 }
 
 // SendGridDynamicData returns a dynamic_template_data map for SendGrid Dynamic Templates.
-// Decoupled design: provide minimal variables and let the template handle styling.
+// The template uses these variables to render the email:
 // - subject: email subject line
-// - analysisHtml: minimal HTML (paragraphs and <br/>) derived from body, or use pre-formatted AnalysisHtml if available
-// - preheader: short preview, reuse subject
+// - preheader: short preview text (reuses subject)
+// - summary: one-line execution summary
+// - status: execution status (success/partial_success/failure)
+// - status_color: color for status badge (green/yellow/red)
+// - trigger: what triggered the workflow
+// - triggered_at: formatted timestamp
+// - executions: array of on-chain operation descriptions
+// - has_executions: boolean for conditional rendering
+// - errors: array of error descriptions
+// - has_errors: boolean for conditional rendering
+// - analysisHtml: (legacy) pre-formatted HTML for backward compatibility
 func (s Summary) SendGridDynamicData() map[string]interface{} {
-	// If AnalysisHtml is provided (from context-memory), use it directly
-	// Otherwise, build from body using the deterministic method
-	var analysisHtml string
-	if s.AnalysisHtml != "" {
-		analysisHtml = s.AnalysisHtml
-	} else {
-		// Remove runner/owner/status boilerplate; keep only the core analysis/narrative
-		clean := filterAnalysisTextForTemplate(s.Body)
-		analysisHtml = buildBareHTMLFromText(clean)
-	}
 	data := map[string]interface{}{
-		"subject":      s.Subject,
-		"analysisHtml": analysisHtml,
-		"preheader":    s.Subject,
+		"subject":   s.Subject,
+		"preheader": s.Subject,
 	}
-	// Include statusHtml from context-memory if available
-	if s.StatusHtml != "" {
-		data["statusHtml"] = s.StatusHtml
-	}
-	// Include summary line if available
+
+	// New structured format (from context-memory API)
 	if s.SummaryLine != "" {
 		data["summary"] = s.SummaryLine
 	}
-	// Include branch summary HTML from context-memory if available (for partial success scenarios)
-	if s.BranchSummaryHtml != "" {
-		data["branchSummaryHtml"] = s.BranchSummaryHtml
+
+	if s.Status != "" {
+		data["status"] = s.Status
+		data["status_color"] = getStatusColor(s.Status)
 	}
-	// Include skipped nodes list from context-memory if available
-	if len(s.SkippedNodes) > 0 {
-		data["skippedNodes"] = s.SkippedNodes
+
+	if s.Trigger != "" {
+		data["trigger"] = s.Trigger
 	}
+
+	if s.TriggeredAt != "" {
+		data["triggered_at"] = formatTimestampForEmail(s.TriggeredAt)
+	}
+
+	if len(s.Executions) > 0 {
+		data["executions"] = s.Executions
+		data["has_executions"] = true
+	}
+
+	if len(s.Errors) > 0 {
+		data["errors"] = s.Errors
+		data["has_errors"] = true
+	}
+
+	// Build analysisHtml from structured data
+	var analysisHtml string
+	if len(s.Executions) > 0 || len(s.Errors) > 0 || s.Trigger != "" {
+		analysisHtml = buildAnalysisHtmlFromStructured(s)
+	} else {
+		// Fallback: build from plain text body
+		clean := filterAnalysisTextForTemplate(s.Body)
+		analysisHtml = buildBareHTMLFromText(clean)
+	}
+	data["analysisHtml"] = analysisHtml
+
 	return data
+}
+
+// getStatusColor returns the color for email status badge based on execution status
+func getStatusColor(status string) string {
+	switch status {
+	case "success":
+		return "green"
+	case "partial_success":
+		return "yellow"
+	case "failure":
+		return "red"
+	default:
+		return "gray"
+	}
+}
+
+// formatTimestampForEmail formats an ISO 8601 timestamp for email display
+func formatTimestampForEmail(isoTimestamp string) string {
+	t, err := time.Parse(time.RFC3339, isoTimestamp)
+	if err != nil {
+		// Try parsing without timezone
+		t, err = time.Parse("2006-01-02T15:04:05", isoTimestamp)
+		if err != nil {
+			return isoTimestamp // Return as-is if parsing fails
+		}
+	}
+	return t.Format("Jan 2, 2006 at 3:04 PM UTC")
+}
+
+// buildAnalysisHtmlFromStructured builds HTML content from the structured Summary fields
+// This provides backward compatibility for older email templates that expect analysisHtml
+// NOTE: Does NOT include summary line - use the separate {{summary}} template variable for that
+// Uses consistent section headers with margin-bottom formatting
+func buildAnalysisHtmlFromStructured(s Summary) string {
+	var sb strings.Builder
+
+	// Section 1: What Triggered This Workflow
+	if s.Trigger != "" {
+		sb.WriteString(`<div style="margin-bottom: 20px;">`)
+		sb.WriteString(`<h3 style="margin: 0 0 8px 0; font-size: 16px;">What Triggered This Workflow</h3>`)
+		sb.WriteString("<p style=\"margin: 0;\">✓ ")
+		sb.WriteString(html.EscapeString(s.Trigger))
+		sb.WriteString("</p>")
+		// Add timestamp row if available
+		if s.TriggeredAt != "" {
+			if ts := formatTimestampForEmail(s.TriggeredAt); ts != "" {
+				sb.WriteString("<p style=\"margin: 4px 0 0 18px; color: #666; font-size: 14px;\">")
+				sb.WriteString(html.EscapeString(ts))
+				sb.WriteString("</p>")
+			}
+		}
+		sb.WriteString("</div>")
+	}
+
+	// Section 2: What Executed On-Chain
+	if len(s.Executions) > 0 {
+		sb.WriteString(`<div style="margin-bottom: 20px;">`)
+		sb.WriteString(`<h3 style="margin: 0 0 8px 0; font-size: 16px;">What Executed On-Chain</h3>`)
+		for _, exec := range s.Executions {
+			sb.WriteString("<p style=\"margin: 0 0 4px 0;\">✓ ")
+			sb.WriteString(html.EscapeString(exec))
+			sb.WriteString("</p>")
+		}
+		sb.WriteString("</div>")
+	}
+
+	// Section 3: What Went Wrong (only show if there are errors)
+	if len(s.Errors) > 0 {
+		sb.WriteString(`<div style="margin-bottom: 20px;">`)
+		sb.WriteString(`<h3 style="margin: 0 0 8px 0; font-size: 16px;">What Went Wrong</h3>`)
+		for _, err := range s.Errors {
+			sb.WriteString("<p style=\"margin: 0 0 4px 0;\">✗ ")
+			sb.WriteString(html.EscapeString(err))
+			sb.WriteString("</p>")
+		}
+		sb.WriteString("</div>")
+	}
+
+	return sb.String()
 }
 
 // BuildBranchAndSkippedSummary builds a deterministic summary (text and HTML)
@@ -715,6 +820,388 @@ func buildStyledHTMLEmailForSummary(subject, body string) string {
 		"<body><div class=\"container\">" + content + "</div></body></html>"
 }
 
+// computeExecutionStatus determines the workflow execution status
+// Returns: "success", "partial_success", or "failure"
+func computeExecutionStatus(vm *VM) string {
+	if vm == nil {
+		return "failure"
+	}
+
+	// Check for any failed step
+	hasFailed := false
+	for _, st := range vm.ExecutionLogs {
+		if !st.GetSuccess() {
+			hasFailed = true
+			break
+		}
+	}
+
+	if hasFailed {
+		return "failure"
+	}
+
+	// Check for skipped nodes (partial success)
+	vm.mu.Lock()
+	executed := make(map[string]struct{})
+	for _, st := range vm.ExecutionLogs {
+		name := st.GetName()
+		if name == "" {
+			name = st.GetId()
+		}
+		if name != "" {
+			executed[name] = struct{}{}
+		}
+	}
+	skippedCount := 0
+	for nodeID, n := range vm.TaskNodes {
+		if n == nil {
+			continue
+		}
+		// Skip branch condition nodes
+		if strings.Contains(nodeID, ".") {
+			continue
+		}
+		// Exclude notification nodes
+		if isNotificationNode(n) {
+			continue
+		}
+		if _, ok := executed[n.Name]; !ok {
+			skippedCount++
+		}
+	}
+	vm.mu.Unlock()
+
+	if skippedCount > 0 {
+		return "partial_success"
+	}
+
+	return "success"
+}
+
+// extractTriggerInfo extracts the trigger description and timestamp from ExecutionLogs
+// Returns (triggerDescription, triggeredAtISO8601)
+func extractTriggerInfo(vm *VM) (string, string) {
+	if vm == nil {
+		return "", ""
+	}
+
+	// Find the trigger step (first step with TRIGGER in type)
+	for _, st := range vm.ExecutionLogs {
+		stepType := strings.ToUpper(st.GetType())
+		if !strings.Contains(stepType, "TRIGGER") {
+			continue
+		}
+
+		// Extract timestamp from trigger output
+		triggeredAt := ""
+		if st.GetStartAt() > 0 {
+			triggeredAt = time.UnixMilli(st.GetStartAt()).UTC().Format(time.RFC3339)
+		}
+
+		// Build trigger description based on trigger type
+		triggerDesc := buildTriggerDescription(st, vm)
+		return triggerDesc, triggeredAt
+	}
+
+	return "", ""
+}
+
+// buildTriggerDescription builds a human-readable trigger description
+func buildTriggerDescription(st *avsproto.Execution_Step, vm *VM) string {
+	stepType := strings.ToUpper(st.GetType())
+	isSimulated := vm != nil && vm.IsSimulation
+	prefix := ""
+	if isSimulated {
+		prefix = "(Simulated) "
+	}
+
+	chainName := ""
+	if vm != nil {
+		chainName = resolveChainName(vm)
+	}
+	chainSuffix := ""
+	if chainName != "" {
+		chainSuffix = " on " + chainName
+	}
+
+	// Event trigger (Transfer, etc.)
+	if strings.Contains(stepType, "EVENT") {
+		if eventTrigger := st.GetEventTrigger(); eventTrigger != nil && eventTrigger.Data != nil {
+			if data, ok := eventTrigger.Data.AsInterface().(map[string]interface{}); ok {
+				// Transfer event
+				if transfer, ok := data["Transfer"].(map[string]interface{}); ok {
+					to := shortHexAddr(fmt.Sprintf("%v", transfer["to"]))
+					value := fmt.Sprintf("%v", transfer["value"])
+					// TODO: Format value with token decimals when available
+					return fmt.Sprintf("%sTransfer event detected: sent %s to %s%s", prefix, value, to, chainSuffix)
+				}
+			}
+		}
+		return prefix + "Event trigger activated" + chainSuffix
+	}
+
+	// Block trigger
+	if strings.Contains(stepType, "BLOCK") {
+		if blockTrigger := st.GetBlockTrigger(); blockTrigger != nil && blockTrigger.Data != nil {
+			if data, ok := blockTrigger.Data.AsInterface().(map[string]interface{}); ok {
+				if blockNum, ok := data["blockNumber"].(float64); ok && blockNum > 0 {
+					return fmt.Sprintf("%sBlock %d was mined%s", prefix, int64(blockNum), chainSuffix)
+				}
+			}
+		}
+		return prefix + "Block trigger activated" + chainSuffix
+	}
+
+	// Cron trigger
+	if strings.Contains(stepType, "CRON") {
+		return prefix + "Scheduled task ran" + chainSuffix
+	}
+
+	// Fixed time trigger
+	if strings.Contains(stepType, "FIXED") {
+		return prefix + "Scheduled time was reached" + chainSuffix
+	}
+
+	// Manual trigger
+	if strings.Contains(stepType, "MANUAL") {
+		return prefix + "Workflow was manually triggered" + chainSuffix
+	}
+
+	return prefix + "Workflow triggered" + chainSuffix
+}
+
+// buildExecutionsArray builds an array of on-chain execution descriptions from successful CONTRACT_WRITE steps
+func buildExecutionsArray(vm *VM) []string {
+	if vm == nil {
+		return nil
+	}
+
+	var executions []string
+
+	// Get token context for formatting
+	vm.mu.Lock()
+	var settings map[string]interface{}
+	if m, ok := vm.vars["settings"].(map[string]interface{}); ok {
+		settings = m
+	}
+	vm.mu.Unlock()
+
+	token0Sym, token0Dec := "", 18
+	token1Sym, token1Dec := "", 18
+	if settings != nil {
+		if pool, ok := settings["uniswapv3_pool"].(map[string]interface{}); ok {
+			if t0, ok := pool["token0"].(map[string]interface{}); ok {
+				if s, ok := t0["symbol"].(string); ok {
+					token0Sym = s
+					token0Dec = defaultDecimalsForSymbol(s)
+				}
+			}
+			if t1, ok := pool["token1"].(map[string]interface{}); ok {
+				if s, ok := t1["symbol"].(string); ok {
+					token1Sym = s
+					token1Dec = defaultDecimalsForSymbol(s)
+				}
+			}
+		}
+	}
+
+	isSimulated := vm.IsSimulation
+	prefix := ""
+	if isSimulated {
+		prefix = "(Simulated) "
+	}
+
+	for _, st := range vm.ExecutionLogs {
+		if !st.GetSuccess() {
+			continue
+		}
+		stepType := strings.ToUpper(st.GetType())
+		if !strings.Contains(stepType, "CONTRACT_WRITE") {
+			continue
+		}
+
+		// Extract method name from config
+		methodName := ""
+		if st.GetConfig() != nil {
+			if cfg, ok := st.GetConfig().AsInterface().(map[string]interface{}); ok {
+				if mcs, ok := cfg["methodCalls"].([]interface{}); ok && len(mcs) > 0 {
+					if call, ok := mcs[0].(map[string]interface{}); ok {
+						if mn, ok := call["methodName"].(string); ok {
+							methodName = strings.ToLower(mn)
+						}
+					}
+				}
+			}
+		}
+
+		// Build execution description based on method
+		desc := buildContractWriteDescription(st, methodName, token0Sym, token0Dec, token1Sym, token1Dec, prefix)
+		if desc != "" {
+			executions = append(executions, desc)
+		}
+	}
+
+	return executions
+}
+
+// buildContractWriteDescription builds a human-readable description for a CONTRACT_WRITE step
+func buildContractWriteDescription(st *avsproto.Execution_Step, methodName string, token0Sym string, token0Dec int, token1Sym string, token1Dec int, prefix string) string {
+	// Extract spender for approve
+	if methodName == "approve" {
+		spender := ""
+		value := ""
+		if st.GetContractWrite() != nil && st.GetContractWrite().Data != nil {
+			if m, ok := st.GetContractWrite().Data.AsInterface().(map[string]interface{}); ok {
+				if ev, ok := m["Approval"].(map[string]interface{}); ok {
+					if v, ok := ev["value"].(string); ok {
+						value = v
+					}
+					if sp, ok := ev["spender"].(string); ok {
+						spender = sp
+					}
+				}
+			}
+		}
+		if value != "" && token1Sym != "" {
+			return fmt.Sprintf("%sApproved %s %s to %s for trading", prefix, formatAmount(value, token1Dec), token1Sym, shortHexAddr(spender))
+		}
+		return fmt.Sprintf("%sApproved tokens to %s", prefix, shortHexAddr(spender))
+	}
+
+	// Swap operations
+	if methodName == "exactinputsingle" || methodName == "exactoutputsingle" {
+		amountOut := ""
+		if st.Metadata != nil {
+			if meta := st.Metadata.AsInterface(); meta != nil {
+				if arr, ok := meta.([]interface{}); ok && len(arr) > 0 {
+					if first, ok := arr[0].(map[string]interface{}); ok {
+						if val, ok := first["value"].(map[string]interface{}); ok {
+							if amt, ok := val["amountOut"].(string); ok {
+								amountOut = amt
+							}
+						} else if amtStr, ok := first["value"].(string); ok {
+							amountOut = amtStr
+						}
+					}
+				}
+			}
+		}
+		if amountOut != "" && token0Sym != "" {
+			return fmt.Sprintf("%sSwapped for ~%s %s via Uniswap V3", prefix, formatAmount(amountOut, token0Dec), token0Sym)
+		}
+		return prefix + "Swapped tokens via Uniswap V3"
+	}
+
+	// Generic contract write
+	stepName := st.GetName()
+	if stepName == "" {
+		stepName = st.GetId()
+	}
+	if methodName != "" {
+		return fmt.Sprintf("%sExecuted %s on %s", prefix, methodName, stepName)
+	}
+	return fmt.Sprintf("%sExecuted contract write: %s", prefix, stepName)
+}
+
+// buildErrorsArray builds an array of error descriptions from failed steps and skipped nodes
+func buildErrorsArray(vm *VM, currentStepName string) []string {
+	if vm == nil {
+		return nil
+	}
+
+	var errors []string
+
+	// Add failed steps
+	for _, st := range vm.ExecutionLogs {
+		if st.GetSuccess() {
+			continue
+		}
+		name := st.GetName()
+		if name == "" {
+			name = st.GetId()
+		}
+		errorMsg := st.GetError()
+		if errorMsg == "" {
+			errorMsg = "unknown error"
+		}
+		errors = append(errors, fmt.Sprintf("%s: %s", safeName(name), firstLine(errorMsg)))
+	}
+
+	// Add skipped nodes
+	vm.mu.Lock()
+	executed := make(map[string]struct{})
+	for _, st := range vm.ExecutionLogs {
+		name := st.GetName()
+		if name == "" {
+			name = st.GetId()
+		}
+		if name != "" {
+			executed[name] = struct{}{}
+		}
+	}
+	// Include current step if provided
+	if currentStepName != "" {
+		executed[currentStepName] = struct{}{}
+	}
+
+	for nodeID, n := range vm.TaskNodes {
+		if n == nil {
+			continue
+		}
+		// Skip branch condition nodes
+		if strings.Contains(nodeID, ".") {
+			continue
+		}
+		// Exclude notification nodes from skipped count
+		if isNotificationNode(n) {
+			continue
+		}
+		if _, ok := executed[n.Name]; !ok {
+			errors = append(errors, fmt.Sprintf("%s - skipped due to branch condition", safeName(n.Name)))
+		}
+	}
+	vm.mu.Unlock()
+
+	return errors
+}
+
+// composePlainTextBodyFromStructured composes a plain text body from the structured fields
+func composePlainTextBodyFromStructured(trigger string, executions []string, errors []string, status string) string {
+	var sb strings.Builder
+
+	// Trigger
+	if trigger != "" {
+		sb.WriteString("Trigger: ")
+		sb.WriteString(trigger)
+		sb.WriteString("\n\n")
+	}
+
+	// Executions
+	if len(executions) > 0 {
+		sb.WriteString("What Executed On-Chain:\n")
+		for _, exec := range executions {
+			sb.WriteString("✓ ")
+			sb.WriteString(exec)
+			sb.WriteString("\n")
+		}
+	}
+
+	// Errors (only for failure status)
+	if status == "failure" && len(errors) > 0 {
+		if len(executions) > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("What Went Wrong:\n")
+		for _, err := range errors {
+			sb.WriteString("✗ ")
+			sb.WriteString(err)
+			sb.WriteString("\n")
+		}
+	}
+
+	return strings.TrimSpace(sb.String())
+}
+
 // ComposeSummary generates a conservative, deterministic summary based on the VM's
 // currently available execution context. It never panics and always returns a fallback.
 //
@@ -1007,7 +1494,6 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 	}
 
 	var body string
-	var analysisHtml string
 	if failed {
 		// Failure body: start with summary line to match context-memory API format
 		// Then include what executed successfully (if any) and what didn't run
@@ -1051,23 +1537,8 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 			body = composeSingleNodeSuccessBody(vm, smartWallet, ownerEOA, chainName, successfulSteps, actionLines, actionCount, currentStepName)
 		} else {
 			if strings.TrimSpace(successfulSteps) != "" {
-				// Generate AnalysisHtml with proper margin styles matching TypeScript reference
-				// Format: <p style="margin-bottom:16px"><strong>What Executed On-Chain</strong></p>
-				//         <p style="margin:8px 0">✓ Step 1</p>
-				//         <p style="margin:8px 0">✓ Step 2</p>
-				analysisHtml = fmt.Sprintf(`<p style="margin-bottom:16px"><strong>%s</strong></p>`, html.EscapeString(sectionHeading))
-				// Split successfulSteps by newlines and wrap each step in <p> tag with margin:8px 0
-				steps := strings.Split(successfulSteps, "\n")
-				for _, step := range steps {
-					step = strings.TrimSpace(step)
-					if step != "" {
-						// Escape HTML in step description but preserve checkmark (already in step text)
-						escapedStep := html.EscapeString(step)
-						analysisHtml += fmt.Sprintf(`<p style="margin:8px 0">%s</p>`, escapedStep)
-					}
-				}
-
 				// Body format: plain text (no HTML tags) to match context-memory API format
+				// AnalysisHtml is now generated by buildAnalysisHtmlFromStructured() in SendGridDynamicData()
 				body = fmt.Sprintf(
 					"%s\n%s\n\nAll steps completed on %s.",
 					sectionHeading, successfulSteps, chainName,
@@ -1094,11 +1565,31 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 		}
 	}
 
+	// Compute structured fields for consistent output with context-memory API
+	status := computeExecutionStatus(vm)
+	trigger, triggeredAt := extractTriggerInfo(vm)
+	executions := buildExecutionsArray(vm)
+	errors := buildErrorsArray(vm, currentStepName)
+
+	// If we have structured data, compose body from it for consistency
+	if trigger != "" || len(executions) > 0 || len(errors) > 0 {
+		structuredBody := composePlainTextBodyFromStructured(trigger, executions, errors, status)
+		if structuredBody != "" {
+			body = structuredBody
+		}
+	}
+
 	return Summary{
-		Subject:      subject,
-		Body:         body,
-		SummaryLine:  summaryLine,
-		AnalysisHtml: analysisHtml,
+		Subject:     subject,
+		Body:        body,
+		SummaryLine: summaryLine,
+		Status:      status,
+		Trigger:     trigger,
+		TriggeredAt: triggeredAt,
+		Executions:  executions,
+		Errors:      errors,
+		SmartWallet: smartWallet,
+		// AnalysisHtml is now generated by buildAnalysisHtmlFromStructured() in SendGridDynamicData()
 	}
 }
 
@@ -1998,4 +2489,137 @@ func formatValueConcise(v interface{}) string {
 		}
 		return s
 	}
+}
+
+// TransferEventData holds parsed data from an ERC20/ETH Transfer event trigger
+type TransferEventData struct {
+	Direction      string // "sent" or "received"
+	FromAddress    string
+	ToAddress      string
+	Value          string // Already formatted (e.g., "1.5")
+	TokenSymbol    string // e.g., "ETH", "USDC"
+	TokenName      string // e.g., "Ether", "USD Coin"
+	BlockTimestamp int64  // Unix timestamp in milliseconds
+	ChainName      string // e.g., "Sepolia"
+}
+
+// ExtractTransferEventData extracts transfer event data from the VM's execution logs.
+// Returns nil if no transfer event trigger is found.
+func ExtractTransferEventData(vm *VM) *TransferEventData {
+	if vm == nil {
+		return nil
+	}
+
+	// Look for an event trigger step with Transfer event data
+	for _, st := range vm.ExecutionLogs {
+		stepType := strings.ToUpper(st.GetType())
+		if !strings.Contains(stepType, "EVENT") && !strings.Contains(stepType, "TRIGGER") {
+			continue
+		}
+
+		// Check the event trigger output
+		eventTrigger := st.GetEventTrigger()
+		if eventTrigger == nil || eventTrigger.Data == nil {
+			continue
+		}
+
+		data, ok := eventTrigger.Data.AsInterface().(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Check if this is a Transfer event
+		eventName, _ := data["eventName"].(string)
+		if eventName != "Transfer" {
+			continue
+		}
+
+		// Extract transfer data
+		transfer := &TransferEventData{}
+
+		if dir, ok := data["direction"].(string); ok {
+			transfer.Direction = dir
+		}
+		if from, ok := data["fromAddress"].(string); ok {
+			transfer.FromAddress = from
+		}
+		if to, ok := data["toAddress"].(string); ok {
+			transfer.ToAddress = to
+		}
+		if val, ok := data["value"].(string); ok {
+			transfer.Value = val
+		}
+		if sym, ok := data["tokenSymbol"].(string); ok {
+			transfer.TokenSymbol = sym
+		}
+		if name, ok := data["tokenName"].(string); ok {
+			transfer.TokenName = name
+		}
+
+		// Block timestamp can be int64 or float64
+		if ts, ok := data["blockTimestamp"].(float64); ok {
+			transfer.BlockTimestamp = int64(ts)
+		} else if ts, ok := data["blockTimestamp"].(int64); ok {
+			transfer.BlockTimestamp = ts
+		}
+
+		// Get chain name from settings
+		transfer.ChainName = resolveChainName(vm)
+
+		return transfer
+	}
+
+	return nil
+}
+
+// FormatTransferMessage formats a transfer event into an HTML notification message.
+// Format: ⬆️ Sent <b>1.5 ETH</b> to <code>0x00...02</code> on <b>Sepolia</b> (<i>2026-01-20 13:03</i>)
+func FormatTransferMessage(data *TransferEventData) string {
+	if data == nil {
+		return ""
+	}
+
+	// Direction emoji and text
+	var directionPrefix string
+	var targetLabel string
+	var targetAddress string
+
+	if data.Direction == "sent" {
+		directionPrefix = "⬆️ Sent"
+		targetLabel = "to"
+		targetAddress = data.ToAddress
+	} else {
+		directionPrefix = "⬇️ Received"
+		targetLabel = "from"
+		targetAddress = data.FromAddress
+	}
+
+	// Format amount with token symbol
+	amount := fmt.Sprintf("<b>%s %s</b>", data.Value, data.TokenSymbol)
+
+	// Format address (keep full address for code tag, it's monospace and scrollable)
+	addressDisplay := fmt.Sprintf("<code>%s</code>", targetAddress)
+
+	// Format chain
+	chain := fmt.Sprintf("<b>%s</b>", data.ChainName)
+
+	// Format timestamp
+	timestamp := ""
+	if data.BlockTimestamp > 0 {
+		// Convert milliseconds to seconds if needed
+		ts := data.BlockTimestamp
+		if ts > 1e12 {
+			ts = ts / 1000
+		}
+		t := time.Unix(ts, 0)
+		timestamp = fmt.Sprintf("(<i>%s</i>)", t.Format("2006-01-02 15:04"))
+	}
+
+	// Compose message
+	msg := fmt.Sprintf("%s %s %s %s on %s", directionPrefix, amount, targetLabel, addressDisplay, chain)
+	if timestamp != "" {
+		msg += " " + timestamp
+	}
+
+	return msg
 }

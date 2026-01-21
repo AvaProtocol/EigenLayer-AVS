@@ -51,6 +51,7 @@ type contextMemorySummarizeRequest struct {
 	Settings        map[string]interface{}                 `json:"settings,omitempty"`
 	CurrentNodeName string                                 `json:"currentNodeName,omitempty"`
 	TokenMetadata   map[string]*contextMemoryTokenMetadata `json:"tokenMetadata,omitempty"` // All tokens involved, keyed by address (lowercase)
+	RunNumber       int64                                  `json:"runNumber,omitempty"`     // 1-based run number for real executions; ignored when isSimulation is true
 }
 
 type contextMemoryStepDigest struct {
@@ -84,18 +85,23 @@ type contextMemoryEdgeDef struct {
 	Target string `json:"target"`
 }
 
+// contextMemorySummarizeBody contains the structured workflow execution summary
+// The aggregator is responsible for rendering this into email HTML or Telegram format
+type contextMemorySummarizeBody struct {
+	Summary     string   `json:"summary"`     // One-line execution summary
+	Status      string   `json:"status"`      // "success", "partial_success", "failure"
+	Trigger     string   `json:"trigger"`     // What triggered the workflow (text description)
+	TriggeredAt string   `json:"triggeredAt"` // ISO 8601 timestamp (from trigger output)
+	Executions  []string `json:"executions"`  // On-chain operation descriptions
+	Errors      []string `json:"errors"`      // Failed steps and skipped node descriptions
+}
+
 // SummarizeResponse matches the TypeScript SummarizeResponse
 type contextMemorySummarizeResponse struct {
-	Subject           string   `json:"subject"`
-	Summary           string   `json:"summary"`      // One-liner summary
-	AnalysisHtml      string   `json:"analysisHtml"` // Pre-formatted HTML with ✓ symbols
-	Body              string   `json:"body"`         // Plain text body (for backward compatibility)
-	StatusHtml        string   `json:"statusHtml"`   // Status badge HTML (green/yellow/red badge with icon)
-	Status            string   `json:"status"`       // Execution status: "success", "partial_success", "failure"
-	PromptVersion     string   `json:"promptVersion"`
-	Cached            bool     `json:"cached,omitempty"`
-	BranchSummaryHtml string   `json:"branchSummaryHtml,omitempty"` // HTML formatted branch summary (when nodes are skipped)
-	SkippedNodes      []string `json:"skippedNodes,omitempty"`      // List of skipped node names
+	Subject       string                     `json:"subject"`
+	Body          contextMemorySummarizeBody `json:"body"`
+	PromptVersion string                     `json:"promptVersion"`
+	Cached        bool                       `json:"cached,omitempty"`
 }
 
 func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, currentStepName string) (Summary, error) {
@@ -163,19 +169,60 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 
 	// Log successful response
 	if vm != nil && vm.logger != nil {
-		vm.logger.Info("Context-memory API: received successful response", "subject", apiResp.Subject, "status", apiResp.Status)
+		vm.logger.Info("Context-memory API: received successful response", "subject", apiResp.Subject, "status", apiResp.Body.Status)
 	}
 
 	return Summary{
-		Subject:           apiResp.Subject,
-		Body:              apiResp.Body,
-		SummaryLine:       apiResp.Summary,
-		AnalysisHtml:      apiResp.AnalysisHtml,
-		StatusHtml:        apiResp.StatusHtml,
-		Status:            apiResp.Status,
-		BranchSummaryHtml: apiResp.BranchSummaryHtml,
-		SkippedNodes:      apiResp.SkippedNodes,
+		Subject:     apiResp.Subject,
+		Body:        composePlainTextBodyFromAPI(apiResp.Body),
+		SummaryLine: apiResp.Body.Summary,
+		Status:      apiResp.Body.Status,
+		Trigger:     apiResp.Body.Trigger,
+		TriggeredAt: apiResp.Body.TriggeredAt,
+		Executions:  apiResp.Body.Executions,
+		Errors:      apiResp.Body.Errors,
+		SmartWallet: req.SmartWallet,
+		// Legacy fields (AnalysisHtml, StatusHtml, etc.) default to empty - aggregator builds HTML from structured fields
 	}, nil
+}
+
+// composePlainTextBodyFromAPI creates a plain text body from the structured API response
+// This is used for backward compatibility with channels that expect plain text
+// NOTE: Does NOT include summary line - that's in the separate SummaryLine field
+func composePlainTextBodyFromAPI(body contextMemorySummarizeBody) string {
+	var sb strings.Builder
+
+	// Trigger (don't include summary - it's in SummaryLine field)
+	if body.Trigger != "" {
+		sb.WriteString("Trigger: ")
+		sb.WriteString(body.Trigger)
+		sb.WriteString("\n\n")
+	}
+
+	// Executions
+	if len(body.Executions) > 0 {
+		sb.WriteString("Executed:\n")
+		for _, exec := range body.Executions {
+			sb.WriteString("- ")
+			sb.WriteString(exec)
+			sb.WriteString("\n")
+		}
+		if len(body.Errors) > 0 {
+			sb.WriteString("\n")
+		}
+	}
+
+	// Errors
+	if len(body.Errors) > 0 {
+		sb.WriteString("Issues:\n")
+		for _, err := range body.Errors {
+			sb.WriteString("- ")
+			sb.WriteString(err)
+			sb.WriteString("\n")
+		}
+	}
+
+	return strings.TrimSpace(sb.String())
 }
 
 func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (*contextMemorySummarizeRequest, error) {
@@ -184,6 +231,7 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 
 	// Extract workflow context
 	var ownerEOA, smartWallet, workflowName, chainName string
+	var executionCount int64
 	if wfCtx, ok := vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
 		if owner, ok := wfCtx["owner"].(string); ok {
 			ownerEOA = owner
@@ -193,6 +241,12 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 		}
 		if eoa, ok := wfCtx["eoaAddress"].(string); ok && eoa != "" && ownerEOA == "" {
 			ownerEOA = eoa
+		}
+		// Extract execution count (0-based in workflow context, convert to 1-based for API)
+		if count, ok := wfCtx["executionCount"].(int64); ok {
+			executionCount = count
+		} else if count, ok := wfCtx["executionCount"].(uint64); ok {
+			executionCount = int64(count)
 		}
 	}
 	// Prioritize settings.name for workflow name (most accurate source)
@@ -410,6 +464,7 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 		Settings:        settings,
 		CurrentNodeName: currentStepName,
 		TokenMetadata:   tokenMetadataMap,
+		RunNumber:       executionCount, // 1-based for real executions; ignored when isSimulation is true
 	}, nil
 }
 

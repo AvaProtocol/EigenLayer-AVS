@@ -97,10 +97,206 @@ func NewContextMemorySummarizerFromAggregatorConfig(c *config.Config) Summarizer
 	return NewContextMemorySummarizer(baseURL, authToken)
 }
 
-// FormatSummaryForChannel converts an email-oriented Summary into a concise chat message
-// suitable for channels like Telegram or Discord. It keeps the most important facts in a
-// single short paragraph with appropriate formatting for the target channel.
-func FormatSummaryForChannel(s Summary, channel string) string {
+// FormatSummaryForChannel converts a Summary into a concise chat message
+// suitable for channels like Telegram or Discord. It prioritizes AI-generated
+// structured fields (Trigger, Executions, Errors) when available.
+//
+// Fallback order:
+// 1. AI-generated structured data from context-memory API
+// 2. Transfer event detection (for simple transfer notifications without API)
+// 3. Plain text body (legacy)
+func FormatSummaryForChannel(s Summary, channel string, vm *VM) string {
+	// Prioritize AI-generated structured format (from context-memory API)
+	if len(s.Executions) > 0 || len(s.Errors) > 0 || s.Trigger != "" {
+		switch strings.ToLower(channel) {
+		case "telegram":
+			return formatTelegramFromStructured(s)
+		case "discord":
+			return formatDiscordFromStructured(s)
+		default:
+			return formatPlainTextFromStructured(s)
+		}
+	}
+
+	// Fallback: Check for transfer event data (when API not available)
+	if vm != nil {
+		if transferData := ExtractTransferEventData(vm); transferData != nil {
+			return FormatTransferMessage(transferData)
+		}
+	}
+
+	// Legacy fallback: use plain text body
+	return formatChannelFromBody(s, channel)
+}
+
+// formatTelegramFromStructured formats Summary into Telegram HTML using AI-generated strings
+// Uses the API response fields directly without composing additional text
+// Format: Subject (bold) as header, Smart Wallet, then trigger, executions, errors
+func formatTelegramFromStructured(s Summary) string {
+	var sb strings.Builder
+
+	// Subject as header (bold for Telegram HTML)
+	if s.Subject != "" {
+		sb.WriteString("<b>")
+		sb.WriteString(s.Subject)
+		sb.WriteString("</b>\n")
+	}
+
+	// Smart Wallet line (right beneath title)
+	if s.SmartWallet != "" {
+		sb.WriteString("Smart Wallet: ")
+		sb.WriteString(s.SmartWallet)
+		sb.WriteString("\n")
+	}
+
+	// Add blank line before trigger if we have subject or smart wallet
+	if s.Subject != "" || s.SmartWallet != "" {
+		sb.WriteString("\n")
+	}
+
+	// Trigger (AI-generated text) with timestamp
+	if s.Trigger != "" {
+		sb.WriteString(s.Trigger)
+		// Append timestamp in format (2026-01-20 12:36)
+		if s.TriggeredAt != "" {
+			if ts := formatTimestampShort(s.TriggeredAt); ts != "" {
+				sb.WriteString(" (")
+				sb.WriteString(ts)
+				sb.WriteString(")")
+			}
+		}
+	}
+
+	// Executions (AI-generated descriptions)
+	if len(s.Executions) > 0 {
+		if s.Trigger != "" {
+			sb.WriteString("\n\n")
+		}
+		for _, exec := range s.Executions {
+			sb.WriteString("• ")
+			sb.WriteString(exec)
+			sb.WriteString("\n")
+		}
+	}
+
+	// Errors - only show if status is "failure" (not partial_success)
+	if s.Status == "failure" && len(s.Errors) > 0 {
+		if len(s.Executions) > 0 || s.Trigger != "" {
+			sb.WriteString("\n")
+		}
+		for _, err := range s.Errors {
+			sb.WriteString("• ")
+			sb.WriteString(err)
+			sb.WriteString("\n")
+		}
+	}
+
+	return strings.TrimSpace(sb.String())
+}
+
+// formatTimestampShort formats an ISO 8601 timestamp to "2006-01-02 15:04" format
+func formatTimestampShort(isoTimestamp string) string {
+	if isoTimestamp == "" {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339, isoTimestamp)
+	if err != nil {
+		// Try parsing without timezone
+		t, err = time.Parse("2006-01-02T15:04:05", isoTimestamp)
+		if err != nil {
+			return ""
+		}
+	}
+	return t.UTC().Format("2006-01-02 15:04")
+}
+
+// formatDiscordFromStructured formats Summary into Discord markdown using AI-generated strings
+// Uses the API response fields directly without composing additional text
+// Format: Subject (bold) as header, then trigger, executions, errors
+func formatDiscordFromStructured(s Summary) string {
+	var sb strings.Builder
+
+	// Subject as header (bold for Discord markdown)
+	if s.Subject != "" {
+		sb.WriteString("**")
+		sb.WriteString(s.Subject)
+		sb.WriteString("**\n\n")
+	}
+
+	// Trigger (AI-generated text)
+	if s.Trigger != "" {
+		sb.WriteString(s.Trigger)
+	}
+
+	// Executions (AI-generated descriptions)
+	if len(s.Executions) > 0 {
+		if s.Trigger != "" {
+			sb.WriteString("\n\n")
+		}
+		for _, exec := range s.Executions {
+			sb.WriteString("• ")
+			sb.WriteString(exec)
+			sb.WriteString("\n")
+		}
+	}
+
+	// Errors - only show if status is "failure" (not partial_success)
+	if s.Status == "failure" && len(s.Errors) > 0 {
+		if len(s.Executions) > 0 || s.Trigger != "" {
+			sb.WriteString("\n")
+		}
+		for _, err := range s.Errors {
+			sb.WriteString("• ")
+			sb.WriteString(err)
+			sb.WriteString("\n")
+		}
+	}
+
+	return strings.TrimSpace(sb.String())
+}
+
+// formatPlainTextFromStructured formats Summary into plain text using AI-generated strings
+// Uses the API response fields directly without composing additional text
+// Format: Subject as header, then trigger, executions, errors
+func formatPlainTextFromStructured(s Summary) string {
+	var sb strings.Builder
+
+	// Subject as header
+	if s.Subject != "" {
+		sb.WriteString(s.Subject)
+		sb.WriteString("\n\n")
+	}
+
+	// Trigger (AI-generated text)
+	if s.Trigger != "" {
+		sb.WriteString(s.Trigger)
+		sb.WriteString("\n\n")
+	}
+
+	// Executions (AI-generated descriptions)
+	for _, exec := range s.Executions {
+		sb.WriteString("- ")
+		sb.WriteString(exec)
+		sb.WriteString("\n")
+	}
+
+	// Errors - only show if status is "failure" (not partial_success)
+	if s.Status == "failure" && len(s.Errors) > 0 {
+		if len(s.Executions) > 0 {
+			sb.WriteString("\n")
+		}
+		for _, err := range s.Errors {
+			sb.WriteString("- ")
+			sb.WriteString(err)
+			sb.WriteString("\n")
+		}
+	}
+
+	return strings.TrimSpace(sb.String())
+}
+
+// formatChannelFromBody is the legacy formatter using plain text body
+func formatChannelFromBody(s Summary, channel string) string {
 	body := strings.TrimSpace(s.Body)
 	subject := strings.TrimSpace(s.Subject)
 	if body == "" {
@@ -126,14 +322,11 @@ func FormatSummaryForChannel(s Summary, channel string) string {
 	// Channel-specific formatting
 	switch strings.ToLower(channel) {
 	case "telegram":
-		// For Telegram, add bold subject line and preserve HTML-safe formatting
-		// The subject is already short (under 80 chars per AI prompt)
 		if subject != "" && !strings.Contains(msg, subject) {
 			return "<b>" + subject + "</b>\n" + msg
 		}
 		return msg
 	case "discord":
-		// For Discord, use markdown bold
 		if subject != "" && !strings.Contains(msg, subject) {
 			return "**" + subject + "**\n" + msg
 		}
