@@ -75,7 +75,7 @@ func ComposeSummarySmart(vm *VM, currentStepName string) Summary {
 }
 
 // NewContextMemorySummarizerFromAggregatorConfig creates a ContextMemorySummarizer from aggregator config
-// Reads context_api_endpoint and context_api_key from macros.secrets
+// Reads api_endpoint and api_key from notifications.summary section
 func NewContextMemorySummarizerFromAggregatorConfig(c *config.Config) Summarizer {
 	if c == nil {
 		return nil
@@ -83,15 +83,11 @@ func NewContextMemorySummarizerFromAggregatorConfig(c *config.Config) Summarizer
 	if !c.NotificationsSummary.Enabled || strings.ToLower(c.NotificationsSummary.Provider) != "context-memory" {
 		return nil
 	}
-	// Read from macros.secrets instead of notifications.summary
-	if c.MacroSecrets == nil {
-		return nil
-	}
-	baseURL := c.MacroSecrets["context_api_endpoint"]
+	baseURL := c.NotificationsSummary.APIEndpoint
 	if strings.TrimSpace(baseURL) == "" {
 		return nil
 	}
-	authToken := c.MacroSecrets["context_api_key"]
+	authToken := c.NotificationsSummary.APIKey
 	if strings.TrimSpace(authToken) == "" {
 		return nil
 	}

@@ -136,8 +136,7 @@ type FeeRatesConfig struct {
 }
 
 // NotificationsSummaryConfig defines optional AI summarization settings for notifications.
-// Only the "context-memory" provider is supported. API credentials should be configured
-// via macros.secrets (context_api_endpoint and context_api_key).
+// Only the "context-memory" provider is supported.
 type NotificationsSummaryConfig struct {
 	// Enabled determines whether AI summarization is active for notifications.
 	// Set to true to enable summarization, false to disable.
@@ -145,6 +144,10 @@ type NotificationsSummaryConfig struct {
 	// Provider specifies the AI service to use for summarization.
 	// Only "context-memory" is supported.
 	Provider string
+	// APIEndpoint is the URL of the context-memory API service.
+	APIEndpoint string
+	// APIKey is the authentication token for the context-memory API.
+	APIKey string
 }
 
 type SmartWalletConfig struct {
@@ -251,8 +254,10 @@ type ConfigRaw struct {
 	// Notifications configuration block
 	Notifications struct {
 		Summary struct {
-			Enabled  bool   `yaml:"enabled"`
-			Provider string `yaml:"provider"`
+			Enabled     bool   `yaml:"enabled"`
+			Provider    string `yaml:"provider"`
+			APIEndpoint string `yaml:"api_endpoint"`
+			APIKey      string `yaml:"api_key"`
 		} `yaml:"summary"`
 	} `yaml:"notifications"`
 }
@@ -458,8 +463,10 @@ func NewConfig(configFilePath string) (*Config, error) {
 
 		// Initialize notifications summary configuration (optional)
 		NotificationsSummary: NotificationsSummaryConfig{
-			Enabled:  configRaw.Notifications.Summary.Enabled,
-			Provider: configRaw.Notifications.Summary.Provider,
+			Enabled:     configRaw.Notifications.Summary.Enabled,
+			Provider:    configRaw.Notifications.Summary.Provider,
+			APIEndpoint: configRaw.Notifications.Summary.APIEndpoint,
+			APIKey:      configRaw.Notifications.Summary.APIKey,
 		},
 	}
 
