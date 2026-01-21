@@ -189,7 +189,7 @@ func TestRunNodeImmediately_ContractWrite_MissingNodeDependency(t *testing.T) {
 
 		require.Error(t, err, "Should return error for missing node_a")
 		assert.Contains(t, err.Error(), "node_a", "Error should mention node_a")
-		assert.Contains(t, strings.ToLower(err.Error()), "undefined", "Error should mention undefined value")
+		assert.Contains(t, strings.ToLower(err.Error()), "could not resolve", "Error should mention variable resolution failure")
 
 		t.Logf("✅ Multiple params error: %v", err)
 	})

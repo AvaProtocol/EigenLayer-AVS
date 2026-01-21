@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -167,7 +168,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	}
 
 	if conditions[0].Type != "if" {
-		err = fmt.Errorf("the first condition need to be an if but got: " + conditions[0].Type)
+		err = fmt.Errorf("the first condition need to be an if but got: %s", conditions[0].Type)
 		log.WriteString("Error: " + err.Error() + "\n")
 		return executionStep, nil, err
 	}
@@ -578,7 +579,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		log.WriteString(noConditionMetError + "\n")
 		storeMetadata()
 		finalizeStep(executionStep, false, nil, noConditionMetError, log.String())
-		return executionStep, nil, fmt.Errorf(noConditionMetError)
+		return executionStep, nil, errors.New(noConditionMetError)
 	} else if hasElseCondition {
 		// If there's an else condition but we reached here, it means the else condition failed to execute
 		// This should be an error because else conditions should always execute if reached
@@ -586,7 +587,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		log.WriteString(noConditionMetError + "\n")
 		storeMetadata()
 		finalizeStep(executionStep, false, nil, noConditionMetError, log.String())
-		return executionStep, nil, fmt.Errorf(noConditionMetError)
+		return executionStep, nil, errors.New(noConditionMetError)
 	} else {
 		// If there are only 'if' conditions and none matched, this is a valid "no-op" scenario
 		log.WriteString("No conditions matched and no else condition defined - this is a valid no-op.\n")

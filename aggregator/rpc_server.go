@@ -1247,7 +1247,7 @@ func (r *RpcServer) EstimateFees(ctx context.Context, req *avsproto.EstimateFees
 		default:
 			grpcCode = codes.Internal
 		}
-		return nil, status.Errorf(grpcCode, resp.Error)
+		return nil, status.Errorf(grpcCode, "%s", resp.Error)
 	}
 
 	r.config.Logger.Info("✅ fee estimation completed successfully",

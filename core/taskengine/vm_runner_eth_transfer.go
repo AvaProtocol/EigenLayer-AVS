@@ -119,9 +119,24 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	// Simulate transaction hash
 	txHash := fmt.Sprintf("0x%064d", time.Now().UnixNano())
 
-	// Create output data using standardized data field
+	// Get the sender (smart wallet) address for the transfer object
+	var fromAddress string
+	p.vm.mu.Lock()
+	if aaSenderVar, ok := p.vm.vars["aa_sender"]; ok {
+		if aaSenderStr, ok := aaSenderVar.(string); ok && aaSenderStr != "" {
+			fromAddress = aaSenderStr
+		}
+	}
+	p.vm.mu.Unlock()
+
+	// Create output data using standardized data field matching ERC20 transfer format
 	ethData := map[string]interface{}{
 		"transactionHash": txHash,
+		"transfer": map[string]interface{}{
+			"from":  fromAddress,
+			"to":    destination,
+			"value": amountStr,
+		},
 	}
 
 	// Convert to protobuf Value
@@ -141,11 +156,20 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	}
 
 	// Use shared function to set output variable for this step
+	// Use from/to/value to match ERC20 transfer format
 	setNodeOutputData(p.CommonProcessor, stepID, map[string]interface{}{
 		"transaction_hash": txHash,
-		"destination":      destination,
-		"amount":           amountStr,
+		"from":             fromAddress,
+		"to":               destination,
+		"value":            amountStr,
 		"success":          true,
+		"data": map[string]interface{}{
+			"transfer": map[string]interface{}{
+				"from":  fromAddress,
+				"to":    destination,
+				"value": amountStr,
+			},
+		},
 	})
 
 	// Create log message
@@ -259,9 +283,24 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		"destination", destination,
 		"amount", amountStr)
 
-	// Create output data
+	// Get the sender (smart wallet) address for the transfer object
+	var fromAddress string
+	p.vm.mu.Lock()
+	if aaSenderVar, ok := p.vm.vars["aa_sender"]; ok {
+		if aaSenderStr, ok := aaSenderVar.(string); ok && aaSenderStr != "" {
+			fromAddress = aaSenderStr
+		}
+	}
+	p.vm.mu.Unlock()
+
+	// Create output data matching ERC20 transfer format
 	ethData := map[string]interface{}{
 		"transactionHash": txHash,
+		"transfer": map[string]interface{}{
+			"from":  fromAddress,
+			"to":    destination,
+			"value": amountStr,
+		},
 	}
 
 	// Convert to protobuf Value
@@ -281,11 +320,20 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	}
 
 	// Use shared function to set output variable for this step
+	// Use from/to/value to match ERC20 transfer format
 	setNodeOutputData(p.CommonProcessor, stepID, map[string]interface{}{
 		"transaction_hash": txHash,
-		"destination":      destination,
-		"amount":           amountStr,
+		"from":             fromAddress,
+		"to":               destination,
+		"value":            amountStr,
 		"success":          true,
+		"data": map[string]interface{}{
+			"transfer": map[string]interface{}{
+				"from":  fromAddress,
+				"to":    destination,
+				"value": amountStr,
+			},
+		},
 	})
 
 	// Create log message

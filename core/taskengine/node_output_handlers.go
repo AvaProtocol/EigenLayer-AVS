@@ -532,6 +532,10 @@ func (h *ETHTransferOutputHandler) ExtractFromExecutionStep(step *avsproto.Execu
 				if txHash, ok := dataMap["transactionHash"]; ok {
 					result["txHash"] = txHash
 				}
+				// Extract transfer object to match ERC20 transfer format
+				if transfer, ok := dataMap["transfer"]; ok {
+					result["transfer"] = transfer
+				}
 			}
 		}
 		result["success"] = true
@@ -544,6 +548,10 @@ func (h *ETHTransferOutputHandler) ConvertToProtobuf(result map[string]interface
 	if result != nil {
 		if txHash, ok := result["txHash"].(string); ok {
 			ethData["transactionHash"] = txHash
+		}
+		// Include transfer object to match ERC20 transfer format
+		if transfer, ok := result["transfer"]; ok {
+			ethData["transfer"] = transfer
 		}
 	}
 
