@@ -529,12 +529,13 @@ func (h *ETHTransferOutputHandler) ExtractFromExecutionStep(step *avsproto.Execu
 	if ethTransfer := step.GetEthTransfer(); ethTransfer != nil {
 		if ethTransfer.GetData() != nil {
 			if dataMap := gow.ValueToMap(ethTransfer.GetData()); dataMap != nil {
-				if txHash, ok := dataMap["transactionHash"]; ok {
-					result["txHash"] = txHash
-				}
 				// Extract transfer object to match ERC20 transfer format
 				if transfer, ok := dataMap["transfer"]; ok {
 					result["transfer"] = transfer
+				}
+				// Extract result object for metadata (contains transactionHash, gasUsed, etc.)
+				if resultObj, ok := dataMap["result"]; ok {
+					result["result"] = resultObj
 				}
 			}
 		}
@@ -544,7 +545,7 @@ func (h *ETHTransferOutputHandler) ExtractFromExecutionStep(step *avsproto.Execu
 }
 
 func (h *ETHTransferOutputHandler) ConvertToProtobuf(result map[string]interface{}) (interface{}, *structpb.Value, error) {
-	// Only include transfer object in data to match ERC20 transfer format (no transactionHash)
+	// Only include transfer object in data to match ERC20 transfer format
 	ethData := map[string]interface{}{}
 	if result != nil {
 		if transfer, ok := result["transfer"]; ok {
@@ -557,10 +558,20 @@ func (h *ETHTransferOutputHandler) ConvertToProtobuf(result map[string]interface
 		dataValue, _ = structpb.NewValue(map[string]interface{}{})
 	}
 
+	// Extract result object for metadata (contains transactionHash, gasUsed, etc.)
+	var metadata *structpb.Value
+	if result != nil {
+		if resultObj, ok := result["result"]; ok {
+			if metadataValue, err := structpb.NewValue(resultObj); err == nil {
+				metadata = metadataValue
+			}
+		}
+	}
+
 	ethOutput := &avsproto.ETHTransferNode_Output{Data: dataValue}
 	outputData := &avsproto.RunNodeWithInputsResp_EthTransfer{EthTransfer: ethOutput}
 
-	return outputData, nil, nil
+	return outputData, metadata, nil
 }
 
 func (h *ETHTransferOutputHandler) CreateEmptyOutput() interface{} {

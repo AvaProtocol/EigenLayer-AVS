@@ -129,13 +129,21 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	}
 	p.vm.mu.Unlock()
 
-	// Create output data matching ERC20 transfer format (no transactionHash in data, only transfer object)
+	// Build result object for metadata (matching contract_write format)
+	resultObj := map[string]interface{}{
+		"success":         true,
+		"transactionHash": txHash,
+		"isSimulated":     true,
+	}
+
+	// Create output data: transfer object for data field, result for metadata
 	ethData := map[string]interface{}{
 		"transfer": map[string]interface{}{
 			"from":  fromAddress,
 			"to":    destination,
 			"value": amountStr,
 		},
+		"result": resultObj,
 	}
 
 	// Convert to protobuf Value
@@ -155,7 +163,7 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	}
 
 	// Use shared function to set output variable for this step
-	// Use from/to/value to match ERC20 transfer format
+	// Structure matches contract_write: data contains transfer event, result contains tx details
 	setNodeOutputData(p.CommonProcessor, stepID, map[string]interface{}{
 		"transaction_hash": txHash,
 		"from":             fromAddress,
@@ -169,6 +177,7 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 				"value": amountStr,
 			},
 		},
+		"result": resultObj,
 	})
 
 	// Create log message
@@ -292,13 +301,54 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	}
 	p.vm.mu.Unlock()
 
-	// Create output data matching ERC20 transfer format (no transactionHash in data, only transfer object)
+	// Build result object with transaction details (matching contract_write metadata format)
+	resultObj := map[string]interface{}{
+		"success":         true,
+		"transactionHash": txHash,
+		"isSimulated":     false,
+	}
+
+	// Extract gas information from receipt if available
+	if receipt != nil {
+		// Convert types.Receipt to gas cost information
+		gasUsed := receipt.GasUsed
+		gasPrice := receipt.EffectiveGasPrice
+
+		if gasUsed > 0 && gasPrice != nil && gasPrice.Cmp(big.NewInt(0)) > 0 {
+			// Calculate total gas cost: gasUsed * gasPrice
+			totalGasCost := new(big.Int).Mul(big.NewInt(int64(gasUsed)), gasPrice)
+
+			// Set gas cost fields in execution step
+			executionLog.GasUsed = big.NewInt(int64(gasUsed)).String()
+			executionLog.GasPrice = gasPrice.String()
+			executionLog.TotalGasCost = totalGasCost.String()
+
+			// Add gas info to result object for metadata
+			resultObj["gasUsed"] = executionLog.GasUsed
+			resultObj["gasPrice"] = executionLog.GasPrice
+			resultObj["totalGasCost"] = executionLog.TotalGasCost
+
+			p.vm.logger.Info("✅ Set gas cost information for ETH transfer",
+				"step_id", stepID,
+				"gas_used", executionLog.GasUsed,
+				"gas_price", executionLog.GasPrice,
+				"total_gas_cost", executionLog.TotalGasCost)
+		} else {
+			p.vm.logger.Debug("⚠️ No gas cost information available from ETH transfer receipt",
+				"step_id", stepID,
+				"gas_used", gasUsed,
+				"gas_price", gasPrice)
+		}
+	}
+
+	// Create output data: transfer object for data field, result for metadata
 	ethData := map[string]interface{}{
 		"transfer": map[string]interface{}{
 			"from":  fromAddress,
 			"to":    destination,
 			"value": amountStr,
 		},
+		"result": resultObj,
 	}
 
 	// Convert to protobuf Value
@@ -318,7 +368,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	}
 
 	// Use shared function to set output variable for this step
-	// Use from/to/value to match ERC20 transfer format
+	// Structure matches contract_write: data contains transfer event, result contains tx details
 	setNodeOutputData(p.CommonProcessor, stepID, map[string]interface{}{
 		"transaction_hash": txHash,
 		"from":             fromAddress,
@@ -332,38 +382,11 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 				"value": amountStr,
 			},
 		},
+		"result": resultObj,
 	})
 
 	// Create log message
 	logMessage := fmt.Sprintf("Real ETH transfer of %s wei to %s (tx: %s)", amountStr, destination, txHash)
-
-	// Extract gas information from receipt if available
-	if receipt != nil {
-		// Convert types.Receipt to gas cost information
-		gasUsed := receipt.GasUsed
-		gasPrice := receipt.EffectiveGasPrice
-
-		if gasUsed > 0 && gasPrice != nil && gasPrice.Cmp(big.NewInt(0)) > 0 {
-			// Calculate total gas cost: gasUsed * gasPrice
-			totalGasCost := new(big.Int).Mul(big.NewInt(int64(gasUsed)), gasPrice)
-
-			// Set gas cost fields in execution step
-			executionLog.GasUsed = big.NewInt(int64(gasUsed)).String()
-			executionLog.GasPrice = gasPrice.String()
-			executionLog.TotalGasCost = totalGasCost.String()
-
-			p.vm.logger.Info("✅ Set gas cost information for ETH transfer",
-				"step_id", stepID,
-				"gas_used", executionLog.GasUsed,
-				"gas_price", executionLog.GasPrice,
-				"total_gas_cost", executionLog.TotalGasCost)
-		} else {
-			p.vm.logger.Debug("⚠️ No gas cost information available from ETH transfer receipt",
-				"step_id", stepID,
-				"gas_used", gasUsed,
-				"gas_price", gasPrice)
-		}
-	}
 
 	// Use shared function to finalize execution step
 	*finalized = true // Mark as finalized to prevent defer from overwriting
