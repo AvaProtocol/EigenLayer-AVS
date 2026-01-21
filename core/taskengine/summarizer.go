@@ -97,15 +97,17 @@ func NewContextMemorySummarizerFromAggregatorConfig(c *config.Config) Summarizer
 	return NewContextMemorySummarizer(baseURL, authToken)
 }
 
-// FormatSummaryForChannel converts a Summary into a concise chat message
-// suitable for channels like Telegram or Discord. It prioritizes AI-generated
-// structured fields (Trigger, Executions, Errors) when available.
+// FormatForMessageChannels converts a Summary into a concise chat message
+// suitable for messaging channels like Telegram or Discord. It prioritizes
+// AI-generated structured fields (Trigger, Executions, Errors) when available.
+//
+// Note: Email is handled separately via SendGridDynamicData(), not this function.
 //
 // Fallback order:
 // 1. AI-generated structured data from context-memory API
 // 2. Transfer event detection (for simple transfer notifications without API)
 // 3. Plain text body (legacy)
-func FormatSummaryForChannel(s Summary, channel string, vm *VM) string {
+func FormatForMessageChannels(s Summary, channel string, vm *VM) string {
 	// Prioritize AI-generated structured format (from context-memory API)
 	if len(s.Executions) > 0 || len(s.Errors) > 0 || s.Trigger != "" {
 		switch strings.ToLower(channel) {

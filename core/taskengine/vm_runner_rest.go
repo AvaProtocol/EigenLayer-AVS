@@ -1004,7 +1004,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 				case "telegram":
 					// Format summary for Telegram: concise, chat-friendly message
 					// Pass VM so transfer events can be formatted as transfer notifications
-					telegramMsg := FormatSummaryForChannel(s, "telegram", r.vm)
+					telegramMsg := FormatForMessageChannels(s, "telegram", r.vm)
 					bodyObj["parse_mode"] = "HTML"
 					bodyObj["text"] = telegramMsg
 				}

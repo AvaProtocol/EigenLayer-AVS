@@ -123,7 +123,7 @@ func TestComposeSummarySmart_AIFailsFallback(t *testing.T) {
 	}
 }
 
-func TestFormatSummaryForChannel_Telegram(t *testing.T) {
+func TestFormatForMessageChannels_Telegram(t *testing.T) {
 	tests := []struct {
 		name            string
 		summary         Summary
@@ -174,7 +174,7 @@ func TestFormatSummaryForChannel_Telegram(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FormatSummaryForChannel(tt.summary, "telegram", nil)
+			result := FormatForMessageChannels(tt.summary, "telegram", nil)
 
 			// Check that result contains expected strings
 			for _, expected := range tt.expectedContain {
@@ -198,13 +198,13 @@ func TestFormatSummaryForChannel_Telegram(t *testing.T) {
 	}
 }
 
-func TestFormatSummaryForChannel_Discord(t *testing.T) {
+func TestFormatForMessageChannels_Discord(t *testing.T) {
 	summary := Summary{
 		Subject: "Deploy: succeeded (2 steps)",
 		Body:    "Contract deployed to 0xabc on Base network.",
 	}
 
-	result := FormatSummaryForChannel(summary, "discord", nil)
+	result := FormatForMessageChannels(summary, "discord", nil)
 
 	// Discord should use markdown bold
 	if !strings.Contains(result, "**Deploy: succeeded (2 steps)**") {

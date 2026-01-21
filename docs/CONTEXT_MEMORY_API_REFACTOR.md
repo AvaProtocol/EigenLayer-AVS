@@ -181,7 +181,7 @@ func getStatusColor(status string) string {
 
 ### Step 5: Implement Telegram Rendering
 
-**File:** `core/taskengine/summarizer.go` (in `FormatSummaryForChannel`)
+**File:** `core/taskengine/summarizer.go` (in `FormatForMessageChannels`)
 
 Update to render structured data into Telegram HTML format:
 
@@ -280,7 +280,7 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 |------|---------|
 | `summarizer_context_memory.go` | Update response struct, mapping logic |
 | `summarizer_deterministic.go` | Add new structured fields to Summary, update fallback |
-| `summarizer.go` | Update FormatSummaryForChannel for new format |
+| `summarizer.go` | Update FormatForMessageChannels for new format |
 | `vm_runner_rest.go` | Add email rendering function, update RestAPI handling |
 
 ## Migration Notes
