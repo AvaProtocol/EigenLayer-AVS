@@ -14,6 +14,40 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
+// TransferInfo contains structured data for a token transfer
+type TransferInfo struct {
+	StepName    string `json:"stepName"`    // Step name that produced this transfer
+	Type        string `json:"type"`        // Transfer type: "eth_transfer", "erc20_transfer", "contract_write"
+	From        string `json:"from"`        // Sender address
+	To          string `json:"to"`          // Recipient address
+	RawAmount   string `json:"rawAmount"`   // Raw amount (wei/smallest unit)
+	Amount      string `json:"amount"`      // Formatted amount (human-readable)
+	Symbol      string `json:"symbol"`      // Token symbol (e.g., "ETH", "USDC")
+	Decimals    int    `json:"decimals"`    // Token decimals
+	TxHash      string `json:"txHash"`      // Transaction hash (empty if simulated)
+	IsSimulated bool   `json:"isSimulated"` // Was this simulated?
+}
+
+// BalanceInfo contains structured data for a balance snapshot
+type BalanceInfo struct {
+	StepName         string `json:"stepName"`         // Step name that produced this balance
+	TokenAddress     string `json:"tokenAddress"`     // Token contract address
+	Symbol           string `json:"symbol"`           // Token symbol
+	Name             string `json:"name"`             // Token name
+	Balance          string `json:"balance"`          // Raw balance
+	BalanceFormatted string `json:"balanceFormatted"` // Formatted balance
+	Decimals         int    `json:"decimals"`         // Token decimals
+}
+
+// WorkflowInfo contains metadata about the workflow execution
+type WorkflowInfo struct {
+	Name         string `json:"name"`         // Workflow name
+	Chain        string `json:"chain"`        // Chain name (e.g., "Sepolia")
+	ChainID      int64  `json:"chainId"`      // Chain ID
+	IsSimulation bool   `json:"isSimulation"` // Was this a simulation?
+	RunNumber    *int64 `json:"runNumber"`    // Run number (nil for simulations)
+}
+
 // Summary represents composed notification content
 type Summary struct {
 	Subject     string
@@ -24,9 +58,15 @@ type Summary struct {
 	// Structured fields for rendering notifications
 	Trigger     string   // What triggered the workflow (text description)
 	TriggeredAt string   // ISO 8601 timestamp (from trigger output)
-	Executions  []string // On-chain operation descriptions
+	Executions  []string // On-chain operation descriptions (includes transfers)
 	Errors      []string // Failed steps and skipped node descriptions
 	SmartWallet string   // Smart wallet address that executed the workflow
+	Network     string   // Chain name (e.g., "Sepolia", "Ethereum") - from body.network
+
+	// Enhanced structured data for rich notifications (kept for potential future use)
+	Transfers []TransferInfo // Transfer details from ETH_TRANSFER and CONTRACT_WRITE steps
+	Balances  []BalanceInfo  // Balance snapshots from BALANCE steps
+	Workflow  *WorkflowInfo  // Workflow metadata
 }
 
 // SendGridDynamicData returns a dynamic_template_data map for SendGrid Dynamic Templates.
