@@ -135,41 +135,9 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 		httpReq.Header.Set("Authorization", "Bearer "+c.authToken)
 	}
 
-	// Log request details including headers
+	// Log request details
 	if vm != nil && vm.logger != nil {
-		authHeader := "not set"
-		if c.authToken != "" {
-			// Log first 10 chars + "..." for security, or full token if it's very short
-			if len(c.authToken) > 10 {
-				authHeader = "Bearer " + c.authToken[:10] + "..."
-			} else {
-				authHeader = "Bearer " + c.authToken
-			}
-		}
-		// Log all request headers for debugging
-		allHeaders := make(map[string]string)
-		for k, v := range httpReq.Header {
-			if len(v) > 0 {
-				if k == "Authorization" {
-					// Mask authorization header
-					if len(c.authToken) > 10 {
-						allHeaders[k] = "Bearer " + c.authToken[:10] + "..."
-					} else {
-						allHeaders[k] = "Bearer " + c.authToken
-					}
-				} else {
-					allHeaders[k] = v[0]
-				}
-			}
-		}
-		vm.logger.Info("Context-memory API: sending request",
-			"url", c.baseURL+"/api/summarize",
-			"request_size", len(reqBody),
-			"authorization_header", authHeader,
-			"base_url", c.baseURL,
-			"auth_token_length", len(c.authToken),
-			"auth_token_value", c.authToken, // Log full token for debugging (user requested to see actual request)
-			"all_headers", allHeaders)
+		vm.logger.Info("Context-memory API: sending request", "url", c.baseURL+"/api/summarize", "request_size", len(reqBody))
 	}
 
 	// Send request
