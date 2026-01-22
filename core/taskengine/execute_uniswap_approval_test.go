@@ -94,8 +94,8 @@ func TestExecuteTask_UniswapApprovalAndSwap_DifferentApprovalAmounts_Sepolia(t *
 			name:           "Equal approval and swap amount",
 			swapAmount:     "1000000", // 1 USDC in wei (6 decimals)
 			approvalAmount: "1000000", // Same as swap amount
-			expectSuccess:  false,
-			description:    "Should fail - approval exactly equals swap amount",
+			expectSuccess:  true,
+			description:    "Should succeed - ERC20 allowance check uses >= so equal approval works",
 		},
 		{
 			name:           "Higher approval than swap amount",

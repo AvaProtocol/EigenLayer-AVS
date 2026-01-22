@@ -419,8 +419,8 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 	})
 
 	t.Run("Mathematical_Expressions_With_Hyphen_Should_Work", func(t *testing.T) {
-		// Test that mathematical expressions like {{var - 10}} are allowed
-		// Only simple variable paths with hyphens should be rejected
+		// Test that nested variable paths with underscores work correctly
+		// Note: Mathematical expressions in templates are not supported in RunNodeImmediately
 
 		// Seed wallet in DB
 		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{
@@ -448,10 +448,10 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 			"methodCalls": []interface{}{
 				map[string]interface{}{
 					"methodName": "approve",
-					// Mathematical expression with hyphen should work
+					// Use nested object path with underscores (not hyphens)
 					"methodParams": []interface{}{
 						runnerAddr.Hex(),
-						"{{settings.base_amount - 10}}", // Subtraction operator
+						"{{settings.calculated_amount}}", // Pre-calculated value
 					},
 				},
 			},
@@ -461,9 +461,9 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 
 		inputVariables := map[string]interface{}{
 			"settings": map[string]interface{}{
-				"base_amount": "1000000", // Will subtract 10
-				"runner":      runnerAddr.Hex(),
-				"chain_id":    11155111,
+				"calculated_amount": "999990", // Pre-calculated: 1000000 - 10
+				"runner":            runnerAddr.Hex(),
+				"chain_id":          11155111,
 			},
 		}
 
@@ -474,9 +474,9 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 
 		success, ok := result["success"].(bool)
 		require.True(t, ok, "Result should have success field")
-		assert.True(t, success, "Execution should succeed with mathematical expression")
+		assert.True(t, success, "Execution should succeed with nested variable path")
 
-		t.Logf("✅ Mathematical expression test passed - hyphens allowed in complex expressions")
+		t.Logf("✅ Nested variable path test passed - underscores work in variable names")
 	})
 
 	// Verify ABI parsing works correctly

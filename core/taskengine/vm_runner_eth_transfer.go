@@ -119,9 +119,29 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	// Simulate transaction hash
 	txHash := fmt.Sprintf("0x%064d", time.Now().UnixNano())
 
-	// Create output data using standardized data field
-	ethData := map[string]interface{}{
+	// Get the sender (smart wallet) address for the transfer object
+	var fromAddress string
+	p.vm.mu.Lock()
+	if aaSenderVar, ok := p.vm.vars["aa_sender"]; ok {
+		if aaSenderStr, ok := aaSenderVar.(string); ok && aaSenderStr != "" {
+			fromAddress = aaSenderStr
+		}
+	}
+	p.vm.mu.Unlock()
+
+	// Build result object for metadata (only transactionHash - success/isSimulated are in response/executionContext)
+	resultObj := map[string]interface{}{
 		"transactionHash": txHash,
+	}
+
+	// Create output data: transfer object for data field, result for metadata
+	ethData := map[string]interface{}{
+		"transfer": map[string]interface{}{
+			"from":  fromAddress,
+			"to":    destination,
+			"value": amountStr,
+		},
+		"result": resultObj,
 	}
 
 	// Convert to protobuf Value
@@ -141,11 +161,21 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	}
 
 	// Use shared function to set output variable for this step
+	// Structure matches contract_write: data contains transfer event, result contains tx details
 	setNodeOutputData(p.CommonProcessor, stepID, map[string]interface{}{
 		"transaction_hash": txHash,
-		"destination":      destination,
-		"amount":           amountStr,
+		"from":             fromAddress,
+		"to":               destination,
+		"value":            amountStr,
 		"success":          true,
+		"data": map[string]interface{}{
+			"transfer": map[string]interface{}{
+				"from":  fromAddress,
+				"to":    destination,
+				"value": amountStr,
+			},
+		},
+		"result": resultObj,
 	})
 
 	// Create log message
@@ -259,9 +289,62 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		"destination", destination,
 		"amount", amountStr)
 
-	// Create output data
-	ethData := map[string]interface{}{
+	// Get the sender (smart wallet) address for the transfer object
+	var fromAddress string
+	p.vm.mu.Lock()
+	if aaSenderVar, ok := p.vm.vars["aa_sender"]; ok {
+		if aaSenderStr, ok := aaSenderVar.(string); ok && aaSenderStr != "" {
+			fromAddress = aaSenderStr
+		}
+	}
+	p.vm.mu.Unlock()
+
+	// Build result object for metadata (only transactionHash + gas info - success/isSimulated are in response/executionContext)
+	resultObj := map[string]interface{}{
 		"transactionHash": txHash,
+	}
+
+	// Extract gas information from receipt if available
+	if receipt != nil {
+		// Convert types.Receipt to gas cost information
+		gasUsed := receipt.GasUsed
+		gasPrice := receipt.EffectiveGasPrice
+
+		if gasUsed > 0 && gasPrice != nil && gasPrice.Cmp(big.NewInt(0)) > 0 {
+			// Calculate total gas cost: gasUsed * gasPrice
+			totalGasCost := new(big.Int).Mul(big.NewInt(int64(gasUsed)), gasPrice)
+
+			// Set gas cost fields in execution step
+			executionLog.GasUsed = big.NewInt(int64(gasUsed)).String()
+			executionLog.GasPrice = gasPrice.String()
+			executionLog.TotalGasCost = totalGasCost.String()
+
+			// Add gas info to result object for metadata
+			resultObj["gasUsed"] = executionLog.GasUsed
+			resultObj["gasPrice"] = executionLog.GasPrice
+			resultObj["totalGasCost"] = executionLog.TotalGasCost
+
+			p.vm.logger.Info("✅ Set gas cost information for ETH transfer",
+				"step_id", stepID,
+				"gas_used", executionLog.GasUsed,
+				"gas_price", executionLog.GasPrice,
+				"total_gas_cost", executionLog.TotalGasCost)
+		} else {
+			p.vm.logger.Debug("⚠️ No gas cost information available from ETH transfer receipt",
+				"step_id", stepID,
+				"gas_used", gasUsed,
+				"gas_price", gasPrice)
+		}
+	}
+
+	// Create output data: transfer object for data field, result for metadata
+	ethData := map[string]interface{}{
+		"transfer": map[string]interface{}{
+			"from":  fromAddress,
+			"to":    destination,
+			"value": amountStr,
+		},
+		"result": resultObj,
 	}
 
 	// Convert to protobuf Value
@@ -281,43 +364,25 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	}
 
 	// Use shared function to set output variable for this step
+	// Structure matches contract_write: data contains transfer event, result contains tx details
 	setNodeOutputData(p.CommonProcessor, stepID, map[string]interface{}{
 		"transaction_hash": txHash,
-		"destination":      destination,
-		"amount":           amountStr,
+		"from":             fromAddress,
+		"to":               destination,
+		"value":            amountStr,
 		"success":          true,
+		"data": map[string]interface{}{
+			"transfer": map[string]interface{}{
+				"from":  fromAddress,
+				"to":    destination,
+				"value": amountStr,
+			},
+		},
+		"result": resultObj,
 	})
 
 	// Create log message
 	logMessage := fmt.Sprintf("Real ETH transfer of %s wei to %s (tx: %s)", amountStr, destination, txHash)
-
-	// Extract gas information from receipt if available
-	if receipt != nil {
-		// Convert types.Receipt to gas cost information
-		gasUsed := receipt.GasUsed
-		gasPrice := receipt.EffectiveGasPrice
-
-		if gasUsed > 0 && gasPrice != nil && gasPrice.Cmp(big.NewInt(0)) > 0 {
-			// Calculate total gas cost: gasUsed * gasPrice
-			totalGasCost := new(big.Int).Mul(big.NewInt(int64(gasUsed)), gasPrice)
-
-			// Set gas cost fields in execution step
-			executionLog.GasUsed = big.NewInt(int64(gasUsed)).String()
-			executionLog.GasPrice = gasPrice.String()
-			executionLog.TotalGasCost = totalGasCost.String()
-
-			p.vm.logger.Info("✅ Set gas cost information for ETH transfer",
-				"step_id", stepID,
-				"gas_used", executionLog.GasUsed,
-				"gas_price", executionLog.GasPrice,
-				"total_gas_cost", executionLog.TotalGasCost)
-		} else {
-			p.vm.logger.Debug("⚠️ No gas cost information available from ETH transfer receipt",
-				"step_id", stepID,
-				"gas_used", gasUsed,
-				"gas_price", gasPrice)
-		}
-	}
 
 	// Use shared function to finalize execution step
 	*finalized = true // Mark as finalized to prevent defer from overwriting
