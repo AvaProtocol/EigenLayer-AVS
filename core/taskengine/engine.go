@@ -280,7 +280,19 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	contextMemorySummarizer := NewContextMemorySummarizerFromAggregatorConfig(config)
 	if contextMemorySummarizer != nil {
 		SetSummarizer(contextMemorySummarizer)
-		logger.Info("AI summarizer initialized", "provider", "context-memory", "base_url", config.NotificationsSummary.APIEndpoint)
+		// Log token info for debugging
+		apiKeyLen := len(config.NotificationsSummary.APIKey)
+		apiKeyPreview := ""
+		if apiKeyLen > 10 {
+			apiKeyPreview = config.NotificationsSummary.APIKey[:10] + "..."
+		} else if apiKeyLen > 0 {
+			apiKeyPreview = config.NotificationsSummary.APIKey
+		}
+		logger.Info("AI summarizer initialized",
+			"provider", "context-memory",
+			"base_url", config.NotificationsSummary.APIEndpoint,
+			"api_key_preview", apiKeyPreview,
+			"api_key_length", apiKeyLen)
 	} else {
 		// Log why context-memory is not available
 		if !config.NotificationsSummary.Enabled {
