@@ -3,6 +3,7 @@ package taskengine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -76,7 +77,7 @@ func (m *MockTenderlyClient) SetMockPrice(priceUSD float64) {
 // SimulateEventTrigger mocks the Tenderly simulation
 func (m *MockTenderlyClient) SimulateEventTrigger(ctx context.Context, query *avsproto.EventTrigger_Query, chainID int64) (*types.Log, error) {
 	if m.shouldReturnError {
-		return nil, fmt.Errorf(m.errorMessage)
+		return nil, errors.New(m.errorMessage)
 	}
 
 	if len(query.GetAddresses()) == 0 {

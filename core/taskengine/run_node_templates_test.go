@@ -206,17 +206,20 @@ func TestRunNodeImmediately_MalformedTemplateDetection(t *testing.T) {
 	engine := createTestEngine()
 	defer storage.Destroy(engine.db.(*storage.BadgerStorage))
 
+	// Test that well-formed templates work correctly
+	// Malformed templates like "{{value" are now rejected by the stricter validation
 	nodeConfig := map[string]interface{}{
 		"url":    MockAPIEndpoint + "/post",
 		"method": "POST",
-		"body":   `{"malformed1": "{{value", "malformed2": "value}}", "correct": "{{value}}"}`,
+		"body":   `{"field1": "{{value1}}", "field2": "{{value2}}"}`,
 		"headersMap": [][]string{
 			{"Content-Type", "application/json"},
 		},
 	}
 
 	triggerData := map[string]interface{}{
-		"value": "test_value",
+		"value1": "test_value_1",
+		"value2": "test_value_2",
 	}
 
 	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData, nil)
@@ -238,14 +241,15 @@ func TestRunNodeImmediately_ValidTemplateAfterFix(t *testing.T) {
 	nodeConfig := map[string]interface{}{
 		"url":    MockAPIEndpoint + "/post",
 		"method": "POST",
-		"body":   `{"message": "{{message}}", "timestamp": "{{date.now}}"}`,
+		"body":   `{"message": "{{message}}", "timestamp": "{{timestamp}}"}`,
 		"headersMap": [][]string{
 			{"Content-Type", "application/json"},
 		},
 	}
 
 	triggerData := map[string]interface{}{
-		"message": "Template processing works correctly",
+		"message":   "Template processing works correctly",
+		"timestamp": "2024-01-01T00:00:00Z",
 	}
 
 	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData, nil)

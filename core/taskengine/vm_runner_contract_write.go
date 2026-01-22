@@ -190,6 +190,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 					"resolved_param", resolvedMethodParams[i],
 					"error", err.Error())
 			}
+			// Return error result - validation failures should stop execution
 			return &avsproto.ContractWriteNode_MethodResult{
 				MethodName: methodCall.MethodName,
 				Success:    false,
@@ -285,6 +286,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 				"method", methodCall.MethodName,
 				"error", err.Error())
 		}
+		// Return error result - validation failures should stop execution
 		return &avsproto.ContractWriteNode_MethodResult{
 			MethodName: methodCall.MethodName,
 			Success:    false,
@@ -1563,6 +1565,20 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 				result.MethodName = fmt.Sprintf("method_%d", i+1)
 			}
 		}
+
+		// Check for validation errors - these should stop execution immediately
+		if !result.Success && result.Error != "" {
+			// Check if this is a validation error (template variable resolution failure)
+			if strings.Contains(result.Error, "could not resolve variable") ||
+				strings.Contains(result.Error, "Make sure to run") {
+				// Convert validation error to execution error
+				finalizeErrorMsg = result.Error
+				finalizeSuccess = false
+				err = fmt.Errorf("%s", result.Error)
+				return s, err
+			}
+		}
+
 		results = append(results, result)
 
 		if result.Success {

@@ -2643,6 +2643,20 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 		}
 
+		// Handle value field (ETH to send with transaction)
+		if v, ok := config["value"]; ok {
+			if valueStr, ok2 := v.(string); ok2 {
+				contractConfig.Value = &valueStr
+			}
+		}
+
+		// Handle gasLimit field (custom gas limit)
+		if v, ok := config["gasLimit"]; ok {
+			if gasLimitStr, ok2 := v.(string); ok2 {
+				contractConfig.GasLimit = &gasLimitStr
+			}
+		}
+
 		node.TaskType = &avsproto.TaskNode_ContractWrite{
 			ContractWrite: &avsproto.ContractWriteNode{
 				Config: contractConfig,

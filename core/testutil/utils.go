@@ -301,9 +301,11 @@ func GetTestPaymasterAddress() string {
 	if testConfig == nil {
 		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}
+
 	if testConfig.SmartWallet == nil {
 		panic("SmartWallet config is nil in aggregator-sepolia.yaml")
 	}
+
 	return testConfig.SmartWallet.PaymasterAddress.Hex()
 }
 

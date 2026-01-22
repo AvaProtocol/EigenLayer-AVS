@@ -21,6 +21,22 @@ func TestETHTransferProcessor_Execute_Success(t *testing.T) {
 		},
 	}
 
+	// Set up TaskNode for proper variable mapping
+	taskNode := &avsproto.TaskNode{
+		Id:   "test-step",
+		Name: "TestETHTransfer",
+		Type: avsproto.NodeType_NODE_TYPE_ETH_TRANSFER,
+		TaskType: &avsproto.TaskNode_EthTransfer{
+			EthTransfer: node,
+		},
+	}
+	processor.CommonProcessor.SetTaskNode(taskNode)
+
+	// Also add to VM's TaskNodes map for getNodeNameAsVarLocked to work
+	vm.TaskNodes = map[string]*avsproto.TaskNode{
+		"test-step": taskNode,
+	}
+
 	executionLog, err := processor.Execute("test-step", node)
 
 	if err != nil {
@@ -50,6 +66,7 @@ func TestETHTransferProcessor_Execute_Success(t *testing.T) {
 	}
 
 	// Check that output variables were set
+	// Note: GetOutputVar extracts nodeVar["data"], so we get the transfer object directly
 	outputVar := processor.GetOutputVar("test-step")
 	if outputVar == nil {
 		t.Fatal("Expected output variable to be set")
@@ -57,19 +74,26 @@ func TestETHTransferProcessor_Execute_Success(t *testing.T) {
 
 	outputMap, ok := outputVar.(map[string]interface{})
 	if !ok {
-		t.Fatal("Expected output variable to be a map")
+		t.Fatalf("Expected output variable to be a map, got %T", outputVar)
 	}
 
-	if outputMap["destination"] != "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6" {
-		t.Errorf("Expected destination in output, got: %v", outputMap["destination"])
-	}
-
-	if outputMap["amount"] != "1000000000000000000" {
-		t.Errorf("Expected amount in output, got: %v", outputMap["amount"])
-	}
-
-	if outputMap["success"] != true {
-		t.Errorf("Expected success=true in output, got: %v", outputMap["success"])
+	// Check the transfer object that matches ERC20 transfer format
+	// GetOutputVar returns nodeVar["data"] directly, so transfer is at the top level
+	transferField, hasTransfer := outputMap["transfer"]
+	if !hasTransfer {
+		t.Errorf("Expected 'transfer' field in output, got: %+v", outputMap)
+	} else {
+		transferMap, ok := transferField.(map[string]interface{})
+		if !ok {
+			t.Error("Expected 'transfer' field to be a map")
+		} else {
+			if transferMap["to"] != "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6" {
+				t.Errorf("Expected 'transfer.to' field, got: %v", transferMap["to"])
+			}
+			if transferMap["value"] != "1000000000000000000" {
+				t.Errorf("Expected 'transfer.value' field, got: %v", transferMap["value"])
+			}
+		}
 	}
 }
 

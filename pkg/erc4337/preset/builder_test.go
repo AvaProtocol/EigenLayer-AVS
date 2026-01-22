@@ -49,7 +49,7 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 		EntrypointAddress:    common.HexToAddress(config.DefaultEntrypointAddressHex),
 		ControllerPrivateKey: cfg.SmartWallet.ControllerPrivateKey, // Use controller key from config
 		ControllerAddress:    controllerAddress,                    // Derive address from private key
-		PaymasterAddress:     common.HexToAddress(config.DefaultPaymasterAddressHex),
+		PaymasterAddress:     common.HexToAddress(testutil.GetTestPaymasterAddress()),
 		WhitelistAddresses:   []common.Address{},
 	}
 }

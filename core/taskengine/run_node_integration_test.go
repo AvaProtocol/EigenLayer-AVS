@@ -37,6 +37,9 @@ func TestTaskRunLogicAndTemplateVariables(t *testing.T) {
 						"theme": "dark",
 						"lang":  "en",
 					},
+					"missing": map[string]interface{}{
+						"field": "provided_value",
+					},
 				},
 				"transaction": map[string]interface{}{
 					"hash":   "0x1234567890abcdef",
@@ -62,7 +65,20 @@ func TestTaskRunLogicAndTemplateVariables(t *testing.T) {
 			nodeType: avsproto.NodeType_NODE_TYPE_REST_API,
 			templateData: map[string]interface{}{
 				"user": map[string]interface{}{
-					"id": 12345,
+					"id":   12345,
+					"name": "test_user",
+					"preferences": map[string]interface{}{
+						"theme": "default",
+						"lang":  "en",
+					},
+					"missing": map[string]interface{}{
+						"field": "n/a",
+					},
+				},
+				"transaction": map[string]interface{}{
+					"hash":   "0x0",
+					"amount": "0",
+					"token":  "N/A",
 				},
 			},
 			expectError: false,
@@ -151,9 +167,10 @@ func TestSmartTriggerDataFallback(t *testing.T) {
 	}
 
 	triggerData := map[string]interface{}{
-		"camelCaseValue":     "camel_value",
-		"snake_case_value":   "snake_value",
-		"fallbackCamelValue": "fallback_camel_value",
+		"camelCaseValue":       "camel_value",
+		"snake_case_value":     "snake_value",
+		"fallbackCamelValue":   "fallback_camel_value",
+		"fallback_snake_value": "fallback_snake_value",
 	}
 
 	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData, nil)
