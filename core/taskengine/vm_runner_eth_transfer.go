@@ -162,6 +162,8 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	// Set step-level metadata (matches contract_write pattern)
 	if metadataValue, err := structpb.NewValue(resultObj); err == nil {
 		executionLog.Metadata = metadataValue
+	} else if p.vm != nil && p.vm.logger != nil {
+		p.vm.logger.Warn("Failed to create metadata value for ETH transfer", "error", err, "stepID", stepID)
 	}
 
 	// Use shared function to set output variable for this step
@@ -369,6 +371,8 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	// Set step-level metadata (matches contract_write pattern)
 	if metadataValue, err := structpb.NewValue(resultObj); err == nil {
 		executionLog.Metadata = metadataValue
+	} else if p.vm != nil && p.vm.logger != nil {
+		p.vm.logger.Warn("Failed to create metadata value for ETH transfer", "error", err, "stepID", stepID)
 	}
 
 	// Use shared function to set output variable for this step
