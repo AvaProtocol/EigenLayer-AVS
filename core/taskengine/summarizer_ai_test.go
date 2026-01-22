@@ -558,3 +558,330 @@ func TestComposeSummary_SimulationBodyFormat(t *testing.T) {
 	t.Logf("SummaryLine: %s", summary.SummaryLine)
 	t.Logf("Body: %s", summary.Body)
 }
+
+// TestFormatTelegramFromStructured_PRDFormat tests the PRD-based Telegram format
+// that uses body.network and body.executions array with emoji prepended by aggregator
+func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
+	tests := []struct {
+		name            string
+		summary         Summary
+		expectedContain []string
+		notContain      []string
+	}{
+		{
+			name: "simulation with transfer - PRD format",
+			summary: Summary{
+				Subject:     "Simulation: Recurring Payment successfully completed", // No emoji from API
+				Status:      "success",
+				Network:     "Sepolia",
+				Trigger:     "(Simulated) Your scheduled task (every 3 days at 11:00 PM) triggered on Sepolia.",
+				TriggeredAt: "2026-01-22T04:51:18.509Z",
+				Executions: []string{
+					"(Simulated) Transferred 0.01 ETH to 0xc60e...C788",
+				},
+			},
+			expectedContain: []string{
+				"✅ Simulation: <b>Recurring Payment</b> successfully completed", // Only workflow name is bold
+				"<b>Network:</b> Sepolia",
+				"<b>Time:</b> 2026-01-22T04:51:18.509Z",
+				"<b>Trigger:</b> (Simulated) Your scheduled task (every 3 days at 11:00 PM) triggered on Sepolia.",
+				"<b>Executed:</b>",
+				"• (Simulated) Transferred 0.01 ETH to 0xc60e...C788",
+			},
+			notContain: []string{},
+		},
+		{
+			name: "deployed run with transfer - PRD format",
+			summary: Summary{
+				Subject:     "Run #3: Recurring Payment successfully completed", // No emoji from API
+				Status:      "success",
+				Network:     "Sepolia",
+				TriggeredAt: "2026-01-22T04:51:18.509Z",
+				Executions: []string{
+					"Transferred 0.01 ETH to 0xc60e...C788",
+				},
+			},
+			expectedContain: []string{
+				"✅ Run #3: <b>Recurring Payment</b> successfully completed", // Only workflow name is bold
+				"<b>Network:</b> Sepolia",
+				"<b>Time:</b> 2026-01-22T04:51:18.509Z",
+				"<b>Executed:</b>",
+				"• Transferred 0.01 ETH to 0xc60e...C788",
+			},
+			notContain: []string{
+				"No on-chain transaction was executed", // No simulation notice for real runs
+			},
+		},
+		{
+			name: "failed run - PRD format",
+			summary: Summary{
+				Subject:     "Run #5: Recurring Payment failed to execute", // No emoji from API
+				Status:      "failure",
+				Network:     "Sepolia",
+				TriggeredAt: "2026-01-22T04:51:18.509Z",
+				Errors:      []string{"transfer1: Insufficient balance for transfer"},
+			},
+			expectedContain: []string{
+				"❌ Run #5: <b>Recurring Payment</b> failed to execute", // Only workflow name is bold
+				"<b>Network:</b> Sepolia",
+				"<b>Error:</b> transfer1: Insufficient balance for transfer",
+			},
+			notContain: []string{
+				"<b>Executed:</b>",
+			},
+		},
+		{
+			name: "partial success - PRD format",
+			summary: Summary{
+				Subject:     "Run #2: My Workflow partially executed", // No emoji from API
+				Status:      "partial_success",
+				Network:     "Ethereum",
+				TriggeredAt: "2026-01-22T04:51:18.509Z",
+				Executions: []string{
+					"Approved 100 USDC to router",
+				},
+			},
+			expectedContain: []string{
+				"⚠️ Run #2: <b>My Workflow</b> partially executed", // Only workflow name is bold
+				"<b>Network:</b> Ethereum",
+				"<b>Executed:</b>",
+				"• Approved 100 USDC to router",
+			},
+			notContain: []string{},
+		},
+		{
+			name: "network fallback from workflow.chain",
+			summary: Summary{
+				Subject: "Simulation: Test successfully completed",
+				Status:  "success",
+				Network: "", // Empty network from API
+				Workflow: &WorkflowInfo{
+					Chain:   "Base",
+					ChainID: 8453,
+				},
+				Executions: []string{"(Simulated) Test executed"},
+			},
+			expectedContain: []string{
+				"<b>Network:</b> Base", // Falls back to workflow.chain
+			},
+		},
+		{
+			name: "network fallback from chainID",
+			summary: Summary{
+				Subject: "Simulation: Test successfully completed",
+				Status:  "success",
+				Network: "", // Empty network from API
+				Workflow: &WorkflowInfo{
+					Chain:   "", // Empty chain name
+					ChainID: 11155111,
+				},
+				Executions: []string{"(Simulated) Test executed"},
+			},
+			expectedContain: []string{
+				"<b>Network:</b> Sepolia", // Derived from chainID
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FormatForMessageChannels(tt.summary, "telegram", nil)
+
+			// Check expected strings are present
+			for _, expected := range tt.expectedContain {
+				if !strings.Contains(result, expected) {
+					t.Errorf("expected result to contain %q\nGot:\n%s", expected, result)
+				}
+			}
+
+			// Check unwanted strings are not present
+			for _, notExpected := range tt.notContain {
+				if strings.Contains(result, notExpected) {
+					t.Errorf("result should NOT contain %q\nGot:\n%s", notExpected, result)
+				}
+			}
+		})
+	}
+}
+
+// TestTruncateAddress tests the address truncation helper function
+func TestTruncateAddress(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f", "0x5d814...434f"},
+		{"0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788", "0xc60e7...C788"},
+		{"0x1234567890abcdef1234567890abcdef12345678", "0x12345...5678"},
+		{"short", "short"}, // Too short to truncate
+		{"", ""},           // Empty string
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := truncateAddress(tt.input)
+			if result != tt.expected {
+				t.Errorf("truncateAddress(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestGetBlockExplorerURL tests the block explorer URL helper function
+func TestGetBlockExplorerURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		chain    string
+		chainID  int64
+		expected string
+	}{
+		// Test by chain ID (preferred)
+		{"chainID_ethereum", "", 1, "https://etherscan.io"},
+		{"chainID_sepolia", "", 11155111, "https://sepolia.etherscan.io"},
+		{"chainID_polygon", "", 137, "https://polygonscan.com"},
+		{"chainID_arbitrum", "", 42161, "https://arbiscan.io"},
+		{"chainID_optimism", "", 10, "https://optimistic.etherscan.io"},
+		{"chainID_base", "", 8453, "https://basescan.org"},
+		{"chainID_base_sepolia", "", 84532, "https://sepolia.basescan.org"},
+		{"chainID_bsc", "", 56, "https://bscscan.com"},
+		{"chainID_avalanche", "", 43114, "https://snowtrace.io"},
+
+		// Test by chain name fallback
+		{"name_mainnet", "Mainnet", 0, "https://etherscan.io"},
+		{"name_ethereum", "Ethereum", 0, "https://etherscan.io"},
+		{"name_sepolia", "Sepolia", 0, "https://sepolia.etherscan.io"},
+		{"name_polygon", "Polygon", 0, "https://polygonscan.com"},
+		{"name_arbitrum", "Arbitrum", 0, "https://arbiscan.io"},
+		{"name_arbitrum_one", "Arbitrum One", 0, "https://arbiscan.io"},
+		{"name_optimism", "Optimism", 0, "https://optimistic.etherscan.io"},
+		{"name_base", "Base", 0, "https://basescan.org"},
+		{"name_base_sepolia", "Base-Sepolia", 0, "https://sepolia.basescan.org"},
+		{"name_bsc", "BSC", 0, "https://bscscan.com"},
+		{"name_avalanche", "Avalanche", 0, "https://snowtrace.io"},
+		{"name_unknown", "Unknown", 0, "https://etherscan.io"}, // Default fallback
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getBlockExplorerURL(tt.chain, tt.chainID)
+			if result != tt.expected {
+				t.Errorf("getBlockExplorerURL(%q, %d) = %q, want %q", tt.chain, tt.chainID, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestGetChainDisplayName tests the chain ID to display name helper function
+func TestGetChainDisplayName(t *testing.T) {
+	tests := []struct {
+		chainID  int64
+		expected string
+	}{
+		{1, "Ethereum"},
+		{11155111, "Sepolia"},
+		{137, "Polygon"},
+		{42161, "Arbitrum One"},
+		{10, "Optimism"},
+		{8453, "Base"},
+		{84532, "Base Sepolia"},
+		{56, "BNB Chain"},
+		{43114, "Avalanche"},
+		{999999, ""}, // Unknown chain
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("chainID_%d", tt.chainID), func(t *testing.T) {
+			result := getChainDisplayName(tt.chainID)
+			if result != tt.expected {
+				t.Errorf("getChainDisplayName(%d) = %q, want %q", tt.chainID, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestGetStatusEmoji tests the status emoji helper function
+func TestGetStatusEmoji(t *testing.T) {
+	tests := []struct {
+		status   string
+		expected string
+	}{
+		{"success", "✅"},
+		{"failure", "❌"},
+		{"partial_success", "⚠️"},
+		{"unknown", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			result := getStatusEmoji(tt.status)
+			if result != tt.expected {
+				t.Errorf("getStatusEmoji(%q) = %q, want %q", tt.status, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestFormatSubjectWithBoldName tests the subject formatting with bold workflow name
+func TestFormatSubjectWithBoldName(t *testing.T) {
+	tests := []struct {
+		name     string
+		subject  string
+		expected string
+	}{
+		{
+			name:     "simulation success",
+			subject:  "Simulation: My Workflow successfully completed",
+			expected: "Simulation: <b>My Workflow</b> successfully completed",
+		},
+		{
+			name:     "simulation failure",
+			subject:  "Simulation: Test Workflow failed to execute",
+			expected: "Simulation: <b>Test Workflow</b> failed to execute",
+		},
+		{
+			name:     "simulation partial",
+			subject:  "Simulation: Another Workflow partially executed",
+			expected: "Simulation: <b>Another Workflow</b> partially executed",
+		},
+		{
+			name:     "run number success",
+			subject:  "Run #3: Payment Flow successfully completed",
+			expected: "Run #3: <b>Payment Flow</b> successfully completed",
+		},
+		{
+			name:     "run number failure",
+			subject:  "Run #15: Swap Workflow failed to execute",
+			expected: "Run #15: <b>Swap Workflow</b> failed to execute",
+		},
+		{
+			name:     "no prefix success",
+			subject:  "Simple Workflow successfully completed",
+			expected: "<b>Simple Workflow</b> successfully completed",
+		},
+		{
+			name:     "no prefix failure",
+			subject:  "Basic Task failed to execute",
+			expected: "<b>Basic Task</b> failed to execute",
+		},
+		{
+			name:     "workflow name with special chars",
+			subject:  "Simulation: Copy of Recurring Payment & Report successfully completed",
+			expected: "Simulation: <b>Copy of Recurring Payment &amp; Report</b> successfully completed",
+		},
+		{
+			name:     "unknown format - fallback to escaped",
+			subject:  "Some random subject",
+			expected: "Some random subject",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatSubjectWithBoldName(tt.subject)
+			if result != tt.expected {
+				t.Errorf("formatSubjectWithBoldName(%q)\n  got:  %q\n  want: %q", tt.subject, result, tt.expected)
+			}
+		})
+	}
+}
