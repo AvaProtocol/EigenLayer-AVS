@@ -134,14 +134,13 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 		"transactionHash": txHash,
 	}
 
-	// Create output data: transfer object for data field, result for metadata
+	// Create output data: only transfer object in data field (matches ERC20 format)
 	ethData := map[string]interface{}{
 		"transfer": map[string]interface{}{
 			"from":  fromAddress,
 			"to":    destination,
 			"value": amountStr,
 		},
-		"result": resultObj,
 	}
 
 	// Convert to protobuf Value
@@ -158,6 +157,11 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	// Set execution log output
 	executionLog.OutputData = &avsproto.Execution_Step_EthTransfer{
 		EthTransfer: outputData,
+	}
+
+	// Set step-level metadata (matches contract_write pattern)
+	if metadataValue, err := structpb.NewValue(resultObj); err == nil {
+		executionLog.Metadata = metadataValue
 	}
 
 	// Use shared function to set output variable for this step
@@ -337,14 +341,13 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		}
 	}
 
-	// Create output data: transfer object for data field, result for metadata
+	// Create output data: only transfer object in data field (matches ERC20 format)
 	ethData := map[string]interface{}{
 		"transfer": map[string]interface{}{
 			"from":  fromAddress,
 			"to":    destination,
 			"value": amountStr,
 		},
-		"result": resultObj,
 	}
 
 	// Convert to protobuf Value
@@ -361,6 +364,11 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	// Set execution log output
 	executionLog.OutputData = &avsproto.Execution_Step_EthTransfer{
 		EthTransfer: outputData,
+	}
+
+	// Set step-level metadata (matches contract_write pattern)
+	if metadataValue, err := structpb.NewValue(resultObj); err == nil {
+		executionLog.Metadata = metadataValue
 	}
 
 	// Use shared function to set output variable for this step
