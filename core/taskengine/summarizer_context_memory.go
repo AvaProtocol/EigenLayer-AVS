@@ -86,15 +86,55 @@ type contextMemoryEdgeDef struct {
 	Target string `json:"target"`
 }
 
+// contextMemoryTransferInfo matches the API response structure for transfers
+type contextMemoryTransferInfo struct {
+	StepName    string `json:"stepName"`
+	Type        string `json:"type"`
+	From        string `json:"from"`
+	To          string `json:"to"`
+	RawAmount   string `json:"rawAmount"`
+	Amount      string `json:"amount"`
+	Symbol      string `json:"symbol"`
+	Decimals    int    `json:"decimals"`
+	TxHash      string `json:"txHash"`
+	IsSimulated bool   `json:"isSimulated"`
+}
+
+// contextMemoryBalanceInfo matches the API response structure for balances
+type contextMemoryBalanceInfo struct {
+	StepName         string `json:"stepName"`
+	TokenAddress     string `json:"tokenAddress"`
+	Symbol           string `json:"symbol"`
+	Name             string `json:"name"`
+	Balance          string `json:"balance"`
+	BalanceFormatted string `json:"balanceFormatted"`
+	Decimals         int    `json:"decimals"`
+}
+
+// contextMemoryWorkflowInfo matches the API response structure for workflow metadata
+type contextMemoryWorkflowInfo struct {
+	Name         string `json:"name"`
+	Chain        string `json:"chain"`
+	ChainID      int64  `json:"chainId"`
+	IsSimulation bool   `json:"isSimulation"`
+	RunNumber    *int64 `json:"runNumber"`
+}
+
 // contextMemorySummarizeBody contains the structured workflow execution summary
 // The aggregator is responsible for rendering this into email HTML or Telegram format
 type contextMemorySummarizeBody struct {
 	Summary     string   `json:"summary"`     // One-line execution summary
 	Status      string   `json:"status"`      // "success", "partial_success", "failure"
+	Network     string   `json:"network"`     // Chain name (e.g., "Sepolia", "Ethereum")
 	Trigger     string   `json:"trigger"`     // What triggered the workflow (text description)
 	TriggeredAt string   `json:"triggeredAt"` // ISO 8601 timestamp (from trigger output)
-	Executions  []string `json:"executions"`  // On-chain operation descriptions
+	Executions  []string `json:"executions"`  // On-chain operation descriptions (includes transfers)
 	Errors      []string `json:"errors"`      // Failed steps and skipped node descriptions
+
+	// Enhanced structured data for rich notifications (kept for potential future use)
+	Transfers []contextMemoryTransferInfo `json:"transfers,omitempty"` // Transfer details
+	Balances  []contextMemoryBalanceInfo  `json:"balances,omitempty"`  // Balance snapshots
+	Workflow  *contextMemoryWorkflowInfo  `json:"workflow,omitempty"`  // Workflow metadata
 }
 
 // SummarizeResponse matches the TypeScript SummarizeResponse
@@ -174,17 +214,69 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 		vm.logger.Info("Context-memory API: received successful response", "subject", apiResp.Subject, "status", apiResp.Body.Status)
 	}
 
+	// Convert API response transfers to Summary transfers
+	var transfers []TransferInfo
+	if len(apiResp.Body.Transfers) > 0 {
+		transfers = make([]TransferInfo, len(apiResp.Body.Transfers))
+		for i, t := range apiResp.Body.Transfers {
+			transfers[i] = TransferInfo{
+				StepName:    t.StepName,
+				Type:        t.Type,
+				From:        t.From,
+				To:          t.To,
+				RawAmount:   t.RawAmount,
+				Amount:      t.Amount,
+				Symbol:      t.Symbol,
+				Decimals:    t.Decimals,
+				TxHash:      t.TxHash,
+				IsSimulated: t.IsSimulated,
+			}
+		}
+	}
+
+	// Convert API response balances to Summary balances
+	var balances []BalanceInfo
+	if len(apiResp.Body.Balances) > 0 {
+		balances = make([]BalanceInfo, len(apiResp.Body.Balances))
+		for i, b := range apiResp.Body.Balances {
+			balances[i] = BalanceInfo{
+				StepName:         b.StepName,
+				TokenAddress:     b.TokenAddress,
+				Symbol:           b.Symbol,
+				Name:             b.Name,
+				Balance:          b.Balance,
+				BalanceFormatted: b.BalanceFormatted,
+				Decimals:         b.Decimals,
+			}
+		}
+	}
+
+	// Convert API response workflow to Summary workflow
+	var workflow *WorkflowInfo
+	if apiResp.Body.Workflow != nil {
+		workflow = &WorkflowInfo{
+			Name:         apiResp.Body.Workflow.Name,
+			Chain:        apiResp.Body.Workflow.Chain,
+			ChainID:      apiResp.Body.Workflow.ChainID,
+			IsSimulation: apiResp.Body.Workflow.IsSimulation,
+			RunNumber:    apiResp.Body.Workflow.RunNumber,
+		}
+	}
+
 	return Summary{
 		Subject:     apiResp.Subject,
 		Body:        composePlainTextBodyFromAPI(apiResp.Body),
 		SummaryLine: apiResp.Body.Summary,
 		Status:      apiResp.Body.Status,
+		Network:     apiResp.Body.Network,
 		Trigger:     apiResp.Body.Trigger,
 		TriggeredAt: apiResp.Body.TriggeredAt,
 		Executions:  apiResp.Body.Executions,
 		Errors:      apiResp.Body.Errors,
 		SmartWallet: req.SmartWallet,
-		// Legacy fields (AnalysisHtml, StatusHtml, etc.) default to empty - aggregator builds HTML from structured fields
+		Transfers:   transfers,
+		Balances:    balances,
+		Workflow:    workflow,
 	}, nil
 }
 

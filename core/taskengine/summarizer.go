@@ -111,7 +111,9 @@ func NewContextMemorySummarizerFromAggregatorConfig(c *config.Config) Summarizer
 // 3. Plain text body (legacy)
 func FormatForMessageChannels(s Summary, channel string, vm *VM) string {
 	// Prioritize AI-generated structured format (from context-memory API)
-	if len(s.Executions) > 0 || len(s.Errors) > 0 || s.Trigger != "" {
+	// Check for new PRD format (transfers/workflow) or legacy format (executions/errors/trigger)
+	hasStructuredData := len(s.Transfers) > 0 || s.Workflow != nil || len(s.Executions) > 0 || len(s.Errors) > 0 || s.Trigger != ""
+	if hasStructuredData {
 		switch strings.ToLower(channel) {
 		case "telegram":
 			return formatTelegramFromStructured(s)
@@ -133,71 +135,166 @@ func FormatForMessageChannels(s Summary, channel string, vm *VM) string {
 	return formatChannelFromBody(s, channel)
 }
 
-// formatTelegramFromStructured formats Summary into Telegram HTML using AI-generated strings
-// Uses the API response fields directly without composing additional text
-// Format: Subject (bold) as header, Smart Wallet, then trigger, executions, errors
+// formatTelegramFromStructured formats Summary into Telegram HTML using structured data
+// Uses the PRD format: emoji + subject, network, time, executions list, footer
 // All user-controlled content is HTML-escaped to prevent XSS attacks
 func formatTelegramFromStructured(s Summary) string {
 	var sb strings.Builder
 
-	// Subject as header (bold for Telegram HTML)
+	// Get status emoji - API returns subject WITHOUT emoji, aggregator prepends it
+	statusEmoji := getStatusEmoji(s.Status)
+
+	// Subject as header with emoji prefix - only bold the workflow name
 	if s.Subject != "" {
-		sb.WriteString("<b>")
-		sb.WriteString(html.EscapeString(s.Subject))
-		sb.WriteString("</b>\n")
-	}
-
-	// Smart Wallet line (right beneath title)
-	if s.SmartWallet != "" {
-		sb.WriteString("Smart Wallet: ")
-		sb.WriteString(html.EscapeString(s.SmartWallet))
+		sb.WriteString(statusEmoji)
+		if statusEmoji != "" {
+			sb.WriteString(" ")
+		}
+		sb.WriteString(formatSubjectWithBoldName(s.Subject))
 		sb.WriteString("\n")
 	}
 
-	// Add blank line before trigger if we have subject or smart wallet
-	if s.Subject != "" || s.SmartWallet != "" {
-		sb.WriteString("\n")
+	// Network: use body.network field, fallback to workflow.chain or derive from chainID
+	network := s.Network
+	if network == "" && s.Workflow != nil {
+		network = s.Workflow.Chain
+		if network == "" && s.Workflow.ChainID > 0 {
+			network = getChainDisplayName(s.Workflow.ChainID)
+		}
 	}
 
-	// Trigger (AI-generated text) with timestamp
-	if s.Trigger != "" {
-		sb.WriteString(html.EscapeString(s.Trigger))
-		// Append timestamp in format (2026-01-20 12:36)
+	// Network and Time section
+	if network != "" || s.TriggeredAt != "" {
+		sb.WriteString("\n")
+		if network != "" {
+			sb.WriteString("<b>Network:</b> ")
+			sb.WriteString(html.EscapeString(network))
+			sb.WriteString("\n")
+		}
 		if s.TriggeredAt != "" {
-			// Note: logger not available in this context, so pass nil
-			if ts := formatTimestampShort(s.TriggeredAt, nil); ts != "" {
-				sb.WriteString(" (")
-				sb.WriteString(ts)
-				sb.WriteString(")")
-			}
+			sb.WriteString("<b>Time:</b> ")
+			sb.WriteString(html.EscapeString(s.TriggeredAt))
+			sb.WriteString("\n")
 		}
 	}
 
-	// Executions (AI-generated descriptions)
+	// Trigger section
+	if s.Trigger != "" {
+		sb.WriteString("\n<b>Trigger:</b> ")
+		sb.WriteString(html.EscapeString(s.Trigger))
+		sb.WriteString("\n")
+	}
+
+	// Display executions with "Executed:" header (PRD format)
 	if len(s.Executions) > 0 {
-		if s.Trigger != "" {
-			sb.WriteString("\n\n")
-		}
+		sb.WriteString("\n<b>Executed:</b>\n")
 		for _, exec := range s.Executions {
 			sb.WriteString("• ")
 			sb.WriteString(html.EscapeString(exec))
 			sb.WriteString("\n")
 		}
-	}
-
-	// Errors - only show if status is "failure" (not partial_success)
-	if s.Status == "failure" && len(s.Errors) > 0 {
-		if len(s.Executions) > 0 || s.Trigger != "" {
-			sb.WriteString("\n")
-		}
+	} else if s.Status == "failure" && len(s.Errors) > 0 {
+		// Error display for failed workflows
+		sb.WriteString("\n")
 		for _, err := range s.Errors {
-			sb.WriteString("• ")
+			sb.WriteString("<b>Error:</b> ")
 			sb.WriteString(html.EscapeString(err))
 			sb.WriteString("\n")
 		}
 	}
 
 	return strings.TrimSpace(sb.String())
+}
+
+// getStatusEmoji returns the emoji for a given status
+func getStatusEmoji(status string) string {
+	switch status {
+	case "success":
+		return "✅"
+	case "failure":
+		return "❌"
+	case "partial_success":
+		return "⚠️"
+	default:
+		return ""
+	}
+}
+
+// formatSubjectWithBoldName formats the subject with bold only around the workflow name
+// Subject patterns:
+//   - "Simulation: {name} successfully completed"
+//   - "Run #N: {name} successfully completed"
+//   - "{name} successfully completed"
+//   - And similar patterns for "failed to execute" and "partially executed"
+func formatSubjectWithBoldName(subject string) string {
+	// Suffixes to look for
+	suffixes := []string{
+		" successfully completed",
+		" failed to execute",
+		" partially executed",
+	}
+
+	// Prefixes to look for
+	prefixes := []string{
+		"Simulation: ",
+	}
+
+	// Check for "Run #N: " prefix pattern
+	runPrefix := ""
+	if strings.HasPrefix(subject, "Run #") {
+		// Find the ": " after "Run #N"
+		if idx := strings.Index(subject, ": "); idx > 0 {
+			runPrefix = subject[:idx+2]
+		}
+	}
+
+	// Find which suffix matches
+	var suffix string
+	var nameEnd int
+	for _, s := range suffixes {
+		if strings.HasSuffix(subject, s) {
+			suffix = s
+			nameEnd = len(subject) - len(s)
+			break
+		}
+	}
+
+	// If no suffix found, just escape and return
+	if suffix == "" {
+		return html.EscapeString(subject)
+	}
+
+	// Find the prefix and extract the name
+	var prefix string
+	nameStart := 0
+
+	if runPrefix != "" {
+		prefix = runPrefix
+		nameStart = len(runPrefix)
+	} else {
+		for _, p := range prefixes {
+			if strings.HasPrefix(subject, p) {
+				prefix = p
+				nameStart = len(p)
+				break
+			}
+		}
+	}
+
+	// Extract the workflow name
+	name := subject[nameStart:nameEnd]
+
+	// Build the formatted string: prefix + <b>name</b> + suffix
+	var sb strings.Builder
+	if prefix != "" {
+		sb.WriteString(html.EscapeString(prefix))
+	}
+	sb.WriteString("<b>")
+	sb.WriteString(html.EscapeString(name))
+	sb.WriteString("</b>")
+	sb.WriteString(html.EscapeString(suffix))
+
+	return sb.String()
 }
 
 // formatTimestampShort formats an ISO 8601 timestamp to "2006-01-02 15:04" format
@@ -218,6 +315,108 @@ func formatTimestampShort(isoTimestamp string, logger interface{ Debug(string, .
 		}
 	}
 	return t.UTC().Format("2006-01-02 15:04")
+}
+
+// truncateAddress truncates an Ethereum address to format "0x5d814...434f"
+func truncateAddress(addr string) string {
+	if len(addr) < 12 {
+		return addr
+	}
+	return addr[:7] + "..." + addr[len(addr)-4:]
+}
+
+// truncateTxHash truncates a transaction hash to format "0x1234...cdef"
+func truncateTxHash(hash string) string {
+	if len(hash) < 14 {
+		return hash
+	}
+	return hash[:6] + "..." + hash[len(hash)-4:]
+}
+
+// getBlockExplorerURL returns the block explorer URL for a chain (by name or ID)
+func getBlockExplorerURL(chainName string, chainID int64) string {
+	// First try by chain ID (more reliable)
+	switch chainID {
+	case 1:
+		return "https://etherscan.io"
+	case 11155111:
+		return "https://sepolia.etherscan.io"
+	case 137:
+		return "https://polygonscan.com"
+	case 42161:
+		return "https://arbiscan.io"
+	case 10:
+		return "https://optimistic.etherscan.io"
+	case 8453:
+		return "https://basescan.org"
+	case 84532:
+		return "https://sepolia.basescan.org"
+	case 56:
+		return "https://bscscan.com"
+	case 43114:
+		return "https://snowtrace.io"
+	}
+
+	// Fallback to chain name if chain ID not provided or unknown
+	switch strings.ToLower(chainName) {
+	case "mainnet", "ethereum":
+		return "https://etherscan.io"
+	case "sepolia":
+		return "https://sepolia.etherscan.io"
+	case "polygon":
+		return "https://polygonscan.com"
+	case "arbitrum", "arbitrum one":
+		return "https://arbiscan.io"
+	case "optimism":
+		return "https://optimistic.etherscan.io"
+	case "base":
+		return "https://basescan.org"
+	case "base-sepolia", "base sepolia":
+		return "https://sepolia.basescan.org"
+	case "bsc", "binance smart chain":
+		return "https://bscscan.com"
+	case "avalanche":
+		return "https://snowtrace.io"
+	default:
+		return "https://etherscan.io"
+	}
+}
+
+// getChainDisplayName returns a display-friendly chain name from chain ID
+// This provides a local fallback when the API doesn't return a chain name
+func getChainDisplayName(chainID int64) string {
+	switch chainID {
+	case 1:
+		return "Ethereum"
+	case 11155111:
+		return "Sepolia"
+	case 137:
+		return "Polygon"
+	case 80001:
+		return "Polygon Mumbai"
+	case 42161:
+		return "Arbitrum One"
+	case 421614:
+		return "Arbitrum Sepolia"
+	case 10:
+		return "Optimism"
+	case 11155420:
+		return "Optimism Sepolia"
+	case 8453:
+		return "Base"
+	case 84532:
+		return "Base Sepolia"
+	case 56:
+		return "BNB Chain"
+	case 97:
+		return "BNB Testnet"
+	case 43114:
+		return "Avalanche"
+	case 43113:
+		return "Avalanche Fuji"
+	default:
+		return ""
+	}
 }
 
 // formatDiscordFromStructured formats Summary into Discord markdown using AI-generated strings

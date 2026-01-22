@@ -533,12 +533,14 @@ func (h *ETHTransferOutputHandler) ExtractFromExecutionStep(step *avsproto.Execu
 				if transfer, ok := dataMap["transfer"]; ok {
 					result["transfer"] = transfer
 				}
-				// Extract result object for metadata (contains transactionHash, gasUsed, etc.)
-				if resultObj, ok := dataMap["result"]; ok {
-					result["result"] = resultObj
-				}
 			}
 		}
+
+		// Extract metadata from step-level metadata field (matches contract_write/contract_read pattern)
+		if step.Metadata != nil {
+			result["result"] = step.Metadata.AsInterface()
+		}
+
 		result["success"] = true
 	}
 	return result, nil
@@ -558,7 +560,7 @@ func (h *ETHTransferOutputHandler) ConvertToProtobuf(result map[string]interface
 		dataValue, _ = structpb.NewValue(map[string]interface{}{})
 	}
 
-	// Extract result object for metadata (contains transactionHash, gasUsed, etc.)
+	// Extract metadata from result (already extracted from step.Metadata in ExtractFromExecutionStep)
 	var metadata *structpb.Value
 	if result != nil {
 		if resultObj, ok := result["result"]; ok {
