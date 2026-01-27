@@ -33,17 +33,28 @@ echo -e "${GREEN}✅ GitHub CLI is installed and authenticated${NC}"
 REPO=$(gh repo view --json owner,name --jq '.owner.login + "/" + .name')
 echo -e "${BLUE}📦 Working with repository: ${REPO}${NC}"
 
-# Get the latest release to publish Docker images for (including pre-releases)
+# Get the latest release (could be pre-release or full release)
 echo -e "${BLUE}🔍 Finding latest release for Docker publishing...${NC}"
-LATEST_RELEASE=$(gh release list --repo "$REPO" --limit 1 --json tagName | \
-    jq -r '.[].tagName')
+LATEST_RELEASE_INFO=$(gh release list --repo "$REPO" --limit 1 --json tagName,isPrerelease | \
+    jq -r '.[] | "\(.tagName)|\(.isPrerelease)"')
 
-if [ -z "$LATEST_RELEASE" ]; then
+if [ -z "$LATEST_RELEASE_INFO" ]; then
     echo -e "${RED}❌ No releases found. Make sure a release exists.${NC}"
     exit 1
 fi
 
-echo -e "${GREEN}✅ Found latest release: ${LATEST_RELEASE}${NC}"
+LATEST_RELEASE=$(echo "$LATEST_RELEASE_INFO" | cut -d'|' -f1)
+LATEST_IS_PRERELEASE=$(echo "$LATEST_RELEASE_INFO" | cut -d'|' -f2)
+
+if [ "$LATEST_IS_PRERELEASE" = "true" ]; then
+    echo -e "${GREEN}✅ Found latest release: ${LATEST_RELEASE} (pre-release)${NC}"
+else
+    echo -e "${GREEN}✅ Found latest release: ${LATEST_RELEASE}${NC}"
+fi
+
+# Get the latest full release (non-pre-release) for Docker publishing
+LATEST_FULL_RELEASE=$(gh release list --repo "$REPO" --limit 50 --json tagName,isPrerelease | \
+    jq -r '.[] | select(.isPrerelease == false) | .tagName' | head -n 1)
 
 # Check if we should promote pre-releases too
 PRERELEASES=$(gh release list --repo "$REPO" --limit 50 --json tagName,isPrerelease,createdAt | \
@@ -52,7 +63,7 @@ PRERELEASES=$(gh release list --repo "$REPO" --limit 50 --json tagName,isPrerele
 if [ -n "$PRERELEASES" ]; then
     PRERELEASE_ARRAY=($PRERELEASES)
     PRERELEASE_COUNT=${#PRERELEASE_ARRAY[@]}
-    echo -e "${YELLOW}📋 Also found ${PRERELEASE_COUNT} pre-release(s) that could be promoted:${NC}"
+    echo -e "${YELLOW}📋 Found ${PRERELEASE_COUNT} pre-release(s) that could be promoted:${NC}"
     for release in "${PRERELEASE_ARRAY[@]}"; do
         echo -e "   • ${release}"
     done
@@ -60,6 +71,20 @@ else
     PRERELEASE_ARRAY=()
     PRERELEASE_COUNT=0
     echo -e "${BLUE}ℹ️  No pre-releases found to promote${NC}"
+fi
+
+# Determine which release to use for Docker publishing
+# Use the latest release overall (which could be a pre-release if it's newer)
+# This ensures we always publish the most recent version
+if [ "$LATEST_IS_PRERELEASE" = "true" ]; then
+    # Latest release is a pre-release, use it for Docker publishing
+    DOCKER_RELEASE="$LATEST_RELEASE"
+elif [ -n "$LATEST_FULL_RELEASE" ]; then
+    # Latest release is a full release, use it
+    DOCKER_RELEASE="$LATEST_FULL_RELEASE"
+else
+    # Fallback to latest release if no full release exists
+    DOCKER_RELEASE="$LATEST_RELEASE"
 fi
 
 # Validate version formats for pre-releases if any exist
@@ -80,11 +105,11 @@ if [ $PRERELEASE_COUNT -gt 0 ]; then
     done
 fi
 
-# Validate latest release version format
-echo -e "${BLUE}🔍 Validating latest release version format...${NC}"
-if [[ ! "$LATEST_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo -e "${YELLOW}⚠️  Warning: Latest release version format doesn't match expected pattern (v1.13.2)${NC}"
-    echo -e "${YELLOW}   Found: ${LATEST_RELEASE}${NC}"
+# Validate Docker release version format
+echo -e "${BLUE}🔍 Validating Docker release version format...${NC}"
+if [[ ! "$DOCKER_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo -e "${YELLOW}⚠️  Warning: Docker release version format doesn't match expected pattern (v1.13.2)${NC}"
+    echo -e "${YELLOW}   Found: ${DOCKER_RELEASE}${NC}"
     read -p "Continue anyway? (y/N): " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -98,21 +123,22 @@ echo
 echo -e "${YELLOW}📋 Summary of actions:${NC}"
 
 if [ $PRERELEASE_COUNT -gt 0 ]; then
+    LATEST_PRERELEASE="${PRERELEASE_ARRAY[$((${#PRERELEASE_ARRAY[@]} - 1))]}"
     echo -e "${BLUE}Pre-release promotion:${NC}"
     echo -e "   • Will promote ${PRERELEASE_COUNT} pre-release(s) to full release(s):"
     for release in "${PRERELEASE_ARRAY[@]}"; do
         echo -e "     - ${release}"
     done
-    echo -e "   • Latest pre-release (${PRERELEASE_ARRAY[$((${#PRERELEASE_ARRAY[@]} - 1))]}) will be marked as 'latest'"
+    echo -e "   • Latest pre-release (${LATEST_PRERELEASE}) will be marked as 'latest'"
 else
     echo -e "${BLUE}No pre-releases to promote${NC}"
 fi
 
 echo -e "${BLUE}Docker publishing:${NC}"
-echo -e "   • Will trigger Docker builds for latest release: ${LATEST_RELEASE}"
-echo -e "   • Dev image: avaprotocol/avs-dev:${LATEST_RELEASE}"
-echo -e "   • Prod image: avaprotocol/ap-avs:${LATEST_RELEASE}"
-if [[ "$LATEST_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+echo -e "   • Will trigger Docker builds for: ${DOCKER_RELEASE}"
+echo -e "   • Dev image: avaprotocol/avs-dev:${DOCKER_RELEASE}"
+echo -e "   • Prod image: avaprotocol/ap-avs:${DOCKER_RELEASE}"
+if [[ "$DOCKER_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo -e "   • Both will be tagged as 'latest'"
 else
     echo -e "   • ⚠️  Note: Pre-release detected, 'latest' tag will NOT be applied"
@@ -135,7 +161,7 @@ fi
 
 # Confirm Docker publishing
 echo
-read -p "Trigger Docker image publishing for ${LATEST_RELEASE}? (y/N): " -n 1 -r
+read -p "Trigger Docker image publishing for ${DOCKER_RELEASE}? (y/N): " -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo -e "${BLUE}👋 Skipping Docker publishing${NC}"
@@ -181,19 +207,25 @@ if [ "$SKIP_PROMOTION" = false ] && [ $PRERELEASE_COUNT -gt 0 ]; then
     
     # Wait a moment for GitHub to process the changes
     sleep 2
+    # Update Docker release to use the promoted pre-release
+    if [ $PRERELEASE_COUNT -gt 0 ]; then
+        LATEST_PRERELEASE="${PRERELEASE_ARRAY[$((${#PRERELEASE_ARRAY[@]} - 1))]}"
+        DOCKER_RELEASE="$LATEST_PRERELEASE"
+        echo -e "${BLUE}📦 Updated Docker release target to promoted release: ${DOCKER_RELEASE}${NC}"
+    fi
 else
     echo -e "${BLUE}⏭️  Skipping pre-release promotion${NC}"
 fi
 
 # Trigger Docker workflows for the latest release
 if [ "$SKIP_DOCKER" = false ]; then
-    echo -e "${BLUE}🐳 Triggering Docker build workflows for ${LATEST_RELEASE}...${NC}"
+    echo -e "${BLUE}🐳 Triggering Docker build workflows for ${DOCKER_RELEASE}...${NC}"
     
     DOCKER_SUCCESS=true
     
     # Determine if we should tag as 'latest' (only for production tags, not pre-releases)
     TAG_LATEST="false"
-    if [[ "$LATEST_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    if [[ "$DOCKER_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         TAG_LATEST="true"
     fi
     
@@ -201,7 +233,7 @@ if [ "$SKIP_DOCKER" = false ]; then
     echo -e "${BLUE}   🐳 Dev Docker build...${NC}"
     gh workflow run "publish-dev-docker.yml" \
         --repo "$REPO" \
-        --field git_tag="$LATEST_RELEASE" \
+        --field git_tag="$DOCKER_RELEASE" \
         --field branch_name="main" \
         --field fast_build=false
     
@@ -210,10 +242,10 @@ if [ "$SKIP_DOCKER" = false ]; then
         if [ "$TAG_LATEST" = "true" ]; then
             LATEST_TAG_INFO=" (latest)"
         fi
-        echo -e "${GREEN}   ✅ Dev Docker workflow triggered for ${LATEST_RELEASE}${LATEST_TAG_INFO}${NC}"
-        echo -e "      • Image: avaprotocol/avs-dev:${LATEST_RELEASE}${LATEST_TAG_INFO}"
+        echo -e "${GREEN}   ✅ Dev Docker workflow triggered for ${DOCKER_RELEASE}${LATEST_TAG_INFO}${NC}"
+        echo -e "      • Image: avaprotocol/avs-dev:${DOCKER_RELEASE}${LATEST_TAG_INFO}"
     else
-        echo -e "${RED}   ❌ Failed to trigger dev Docker workflow for ${LATEST_RELEASE}${NC}"
+        echo -e "${RED}   ❌ Failed to trigger dev Docker workflow for ${DOCKER_RELEASE}${NC}"
         DOCKER_SUCCESS=false
     fi
     
@@ -224,7 +256,7 @@ if [ "$SKIP_DOCKER" = false ]; then
     echo -e "${BLUE}   🏭 Production Docker build...${NC}"
     gh workflow run "publish-prod-docker.yml" \
         --repo "$REPO" \
-        --field git_tag="$LATEST_RELEASE" \
+        --field git_tag="$DOCKER_RELEASE" \
         --field branch_name="main" \
         --field tag_latest="$TAG_LATEST"
     
@@ -233,10 +265,10 @@ if [ "$SKIP_DOCKER" = false ]; then
         if [ "$TAG_LATEST" = "true" ]; then
             LATEST_TAG_INFO=" (latest)"
         fi
-        echo -e "${GREEN}   ✅ Production Docker workflow triggered for ${LATEST_RELEASE}${LATEST_TAG_INFO}${NC}"
-        echo -e "      • Image: avaprotocol/ap-avs:${LATEST_RELEASE}${LATEST_TAG_INFO}"
+        echo -e "${GREEN}   ✅ Production Docker workflow triggered for ${DOCKER_RELEASE}${LATEST_TAG_INFO}${NC}"
+        echo -e "      • Image: avaprotocol/ap-avs:${DOCKER_RELEASE}${LATEST_TAG_INFO}"
     else
-        echo -e "${RED}   ❌ Failed to trigger production Docker workflow for ${LATEST_RELEASE}${NC}"
+        echo -e "${RED}   ❌ Failed to trigger production Docker workflow for ${DOCKER_RELEASE}${NC}"
         DOCKER_SUCCESS=false
     fi
 else
@@ -262,12 +294,12 @@ fi
 
 if [ "$SKIP_DOCKER" = false ]; then
     LATEST_TAG_INFO=""
-    if [[ "$LATEST_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    if [[ "$DOCKER_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         LATEST_TAG_INFO=" (latest)"
     fi
-    echo -e "   • Docker workflows triggered for: ${LATEST_RELEASE}"
-    echo -e "   • Dev Docker image: avaprotocol/avs-dev:${LATEST_RELEASE}${LATEST_TAG_INFO}"
-    echo -e "   • Prod Docker image: avaprotocol/ap-avs:${LATEST_RELEASE}${LATEST_TAG_INFO}"
+    echo -e "   • Docker workflows triggered for: ${DOCKER_RELEASE}"
+    echo -e "   • Dev Docker image: avaprotocol/avs-dev:${DOCKER_RELEASE}${LATEST_TAG_INFO}"
+    echo -e "   • Prod Docker image: avaprotocol/ap-avs:${DOCKER_RELEASE}${LATEST_TAG_INFO}"
 fi
 
 if [ "$SKIP_PROMOTION" = true ] && [ "$SKIP_DOCKER" = true ]; then
