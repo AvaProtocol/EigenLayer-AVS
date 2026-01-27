@@ -343,6 +343,9 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 			// Overflow check: cap at MaxInt64 to prevent negative values
 			if count > math.MaxInt64 {
 				executionCount = math.MaxInt64
+				if vm != nil && vm.logger != nil {
+					vm.logger.Warn("executionCount exceeded MaxInt64, capped to avoid overflow", "count", count, "capped_to", executionCount)
+				}
 			} else {
 				executionCount = int64(count)
 			}

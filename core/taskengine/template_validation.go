@@ -15,6 +15,9 @@ var templateVarRegex = regexp.MustCompile(`\{\{([^}]+)\}\}`)
 // This function should be called after preprocessTextWithVariableMapping to validate that
 // all template variables were successfully resolved.
 //
+// Both SimulateTask and RunNodeImmediately use this validation with no special-case skip:
+// unresolved template variables cause validation to fail in both modes.
+//
 // Parameters:
 //   - resolvedValue: The string after template variable preprocessing
 //   - originalValue: The original string before preprocessing (used to extract failed variables)

@@ -10,6 +10,10 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// errNoConditionMetMsg is the static error message when no branch condition matches.
+// Used for logging and as the message for the returned error.
+const errNoConditionMetMsg = "no branch condition met"
+
 type BranchProcessor struct {
 	*CommonProcessor
 }
@@ -575,19 +579,17 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	// Check if we have any conditions at all
 	if len(conditions) == 0 {
 		// No conditions at all - this is an error
-		noConditionMetError := "no branch condition met"
-		log.WriteString(noConditionMetError + "\n")
+		log.WriteString(errNoConditionMetMsg + "\n")
 		storeMetadata()
-		finalizeStep(executionStep, false, nil, noConditionMetError, log.String())
-		return executionStep, nil, errors.New(noConditionMetError)
+		finalizeStep(executionStep, false, nil, errNoConditionMetMsg, log.String())
+		return executionStep, nil, errors.New(errNoConditionMetMsg)
 	} else if hasElseCondition {
 		// If there's an else condition but we reached here, it means the else condition failed to execute
 		// This should be an error because else conditions should always execute if reached
-		noConditionMetError := "no branch condition met"
-		log.WriteString(noConditionMetError + "\n")
+		log.WriteString(errNoConditionMetMsg + "\n")
 		storeMetadata()
-		finalizeStep(executionStep, false, nil, noConditionMetError, log.String())
-		return executionStep, nil, errors.New(noConditionMetError)
+		finalizeStep(executionStep, false, nil, errNoConditionMetMsg, log.String())
+		return executionStep, nil, errors.New(errNoConditionMetMsg)
 	} else {
 		// If there are only 'if' conditions and none matched, this is a valid "no-op" scenario
 		log.WriteString("No conditions matched and no else condition defined - this is a valid no-op.\n")
