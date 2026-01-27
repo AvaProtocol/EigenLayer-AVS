@@ -33,6 +33,33 @@ func NewETHTransferProcessor(vm *VM, ethClient *ethclient.Client, smartWalletCon
 	}
 }
 
+// getAASenderString returns the aa_sender variable from the VM as a string, or "" if not set/invalid.
+// Caller must not hold vm.mu.
+func getAASenderString(vm *VM) string {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	if v, ok := vm.vars["aa_sender"]; ok {
+		if s, ok := v.(string); ok && s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// getAASenderAddress returns the aa_sender variable as *common.Address if it is a valid hex address, or nil.
+// Caller must not hold vm.mu.
+func getAASenderAddress(vm *VM) *common.Address {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	if v, ok := vm.vars["aa_sender"]; ok {
+		if s, ok := v.(string); ok && common.IsHexAddress(s) {
+			addr := common.HexToAddress(s)
+			return &addr
+		}
+	}
+	return nil
+}
+
 func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransferNode) (*avsproto.Execution_Step, error) {
 	// Use shared function to create execution step
 	executionLog := CreateNodeExecutionStep(stepID, p.GetTaskNode(), p.vm)
@@ -120,14 +147,7 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	txHash := fmt.Sprintf("0x%064d", time.Now().UnixNano())
 
 	// Get the sender (smart wallet) address for the transfer object
-	var fromAddress string
-	p.vm.mu.Lock()
-	if aaSenderVar, ok := p.vm.vars["aa_sender"]; ok {
-		if aaSenderStr, ok := aaSenderVar.(string); ok && aaSenderStr != "" {
-			fromAddress = aaSenderStr
-		}
-	}
-	p.vm.mu.Unlock()
+	fromAddress := getAASenderString(p.vm)
 
 	// Build result object for metadata (only transactionHash - success/isSimulated are in response/executionContext)
 	resultObj := map[string]interface{}{
@@ -147,6 +167,9 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	dataValue, err := structpb.NewValue(ethData)
 	if err != nil {
 		// Fallback to empty data on error
+		if p.vm != nil && p.vm.logger != nil {
+			p.vm.logger.Warn("Failed to create ETH transfer output value (simulation), using empty fallback", "error", err, "stepID", stepID)
+		}
 		dataValue, _ = structpb.NewValue(map[string]interface{}{})
 	}
 
@@ -246,15 +269,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	}
 
 	// AA overrides from VM
-	var senderOverride *common.Address
-	p.vm.mu.Lock()
-	if v, ok := p.vm.vars["aa_sender"]; ok {
-		if s, ok2 := v.(string); ok2 && common.IsHexAddress(s) {
-			addr := common.HexToAddress(s)
-			senderOverride = &addr
-		}
-	}
-	p.vm.mu.Unlock()
+	senderOverride := getAASenderAddress(p.vm)
 
 	// Send UserOp transaction with overrides
 	userOp, receipt, err := preset.SendUserOp(
@@ -296,14 +311,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		"amount", amountStr)
 
 	// Get the sender (smart wallet) address for the transfer object
-	var fromAddress string
-	p.vm.mu.Lock()
-	if aaSenderVar, ok := p.vm.vars["aa_sender"]; ok {
-		if aaSenderStr, ok := aaSenderVar.(string); ok && aaSenderStr != "" {
-			fromAddress = aaSenderStr
-		}
-	}
-	p.vm.mu.Unlock()
+	fromAddress := getAASenderString(p.vm)
 
 	// Build result object for metadata (only transactionHash + gas info - success/isSimulated are in response/executionContext)
 	resultObj := map[string]interface{}{
@@ -317,11 +325,12 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		gasPrice := receipt.EffectiveGasPrice
 
 		if gasUsed > 0 && gasPrice != nil && gasPrice.Cmp(big.NewInt(0)) > 0 {
-			// Calculate total gas cost: gasUsed * gasPrice
-			totalGasCost := new(big.Int).Mul(big.NewInt(int64(gasUsed)), gasPrice)
+			// Calculate total gas cost: gasUsed * gasPrice (use SetUint64 to avoid int64 overflow)
+			gasUsedBig := new(big.Int).SetUint64(gasUsed)
+			totalGasCost := new(big.Int).Mul(gasUsedBig, gasPrice)
 
 			// Set gas cost fields in execution step
-			executionLog.GasUsed = big.NewInt(int64(gasUsed)).String()
+			executionLog.GasUsed = gasUsedBig.String()
 			executionLog.GasPrice = gasPrice.String()
 			executionLog.TotalGasCost = totalGasCost.String()
 
@@ -356,6 +365,9 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	dataValue, err := structpb.NewValue(ethData)
 	if err != nil {
 		// Fallback to empty data on error
+		if p.vm != nil && p.vm.logger != nil {
+			p.vm.logger.Warn("Failed to create ETH transfer output value (real), using empty fallback", "error", err, "stepID", stepID)
+		}
 		dataValue, _ = structpb.NewValue(map[string]interface{}{})
 	}
 
@@ -419,11 +431,4 @@ func (p *ETHTransferProcessor) shouldUsePaymaster() bool {
 	// If wallet can't reimburse, UserOp still completes (paymaster absorbs cost)
 	log.Printf("[ETHTransfer] Using paymaster for gas sponsorship (with automatic reimbursement)")
 	return true
-}
-
-// TODO: Remove this old function - replaced by executeRealETHTransfer
-func (p *ETHTransferProcessor) executeActualTransfer(destination common.Address, amount *big.Int) (string, error) {
-	// This would contain the actual smart wallet transaction logic
-	// For now, return a simulated transaction hash
-	return fmt.Sprintf("0x%064d", time.Now().UnixNano()), nil
 }
