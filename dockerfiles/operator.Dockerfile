@@ -1,4 +1,4 @@
-FROM golang:1.22.1-alpine AS builder
+FROM golang:1.24-alpine AS builder
 ARG RELEASE_TAG
 ARG COMMIT_SHA
 ARG TARGETARCH
