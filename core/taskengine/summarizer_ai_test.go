@@ -895,6 +895,26 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				"<b>Network:</b> Sepolia", // Derived from chainID
 			},
 		},
+		{
+			name: "no executions - shows example message",
+			summary: Summary{
+				Subject:     "Simulation: My Workflow successfully completed",
+				Status:      "success",
+				Network:     "Sepolia",
+				TriggeredAt: "2026-01-28T07:31:51Z",
+				Trigger:     "(Simulated) Scheduled task ran on Sepolia",
+				Executions:  []string{}, // Empty - no execution data
+			},
+			expectedContain: []string{
+				"✅ Simulation: <b>My Workflow</b> successfully completed",
+				"<b>Network:</b> Sepolia",
+				"<b>Trigger:</b> (Simulated) Scheduled task ran on Sepolia",
+				"<b>Executed:</b>",
+				"• (Simulated) On-chain transaction successfully completed",
+				"This is an example",
+			},
+			notContain: []string{},
+		},
 	}
 
 	for _, tt := range tests {
