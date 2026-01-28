@@ -2547,19 +2547,63 @@ type TransferEventData struct {
 	ChainName      string // e.g., "Sepolia"
 }
 
-// ExtractTransferEventData extracts transfer event data from the VM's execution logs.
-// Returns nil if no transfer event trigger is found.
-// Thread-safe: acquires VM mutex before accessing ExecutionLogs.
+// transferMonitorVarName is the key used for transfer event data in vm.vars
+// when passed via inputVariables (e.g., single-node Telegram notification runs)
+const transferMonitorVarName = "transfer_monitor"
+
+// transferEventDataFromMap builds a TransferEventData from a map containing transfer fields.
+// Returns nil if the map doesn't contain eventName == "Transfer".
+func transferEventDataFromMap(data map[string]interface{}) *TransferEventData {
+	eventName, _ := data["eventName"].(string)
+	if eventName != "Transfer" {
+		return nil
+	}
+
+	transfer := &TransferEventData{}
+
+	if dir, ok := data["direction"].(string); ok {
+		transfer.Direction = dir
+	}
+	if from, ok := data["fromAddress"].(string); ok {
+		transfer.FromAddress = from
+	}
+	if to, ok := data["toAddress"].(string); ok {
+		transfer.ToAddress = to
+	}
+	if val, ok := data["value"].(string); ok {
+		transfer.Value = val
+	}
+	if sym, ok := data["tokenSymbol"].(string); ok {
+		transfer.TokenSymbol = sym
+	}
+	if name, ok := data["tokenName"].(string); ok {
+		transfer.TokenName = name
+	}
+
+	// Block timestamp can be int64 or float64
+	if ts, ok := data["blockTimestamp"].(float64); ok {
+		transfer.BlockTimestamp = int64(ts)
+	} else if ts, ok := data["blockTimestamp"].(int64); ok {
+		transfer.BlockTimestamp = ts
+	}
+
+	return transfer
+}
+
+// ExtractTransferEventData extracts transfer event data from the VM's execution logs
+// or from vm.vars["transfer_monitor"] (for single-node runs with inputVariables).
+// Returns nil if no transfer event is found.
+// Thread-safe: acquires VM mutex before accessing ExecutionLogs and vars.
 func ExtractTransferEventData(vm *VM) *TransferEventData {
 	if vm == nil {
 		return nil
 	}
 
-	// Lock mutex while iterating over ExecutionLogs to prevent race conditions
+	// Lock mutex while iterating over ExecutionLogs and vars to prevent race conditions
 	vm.mu.Lock()
 	var transfer *TransferEventData
 
-	// Look for an event trigger step with Transfer event data
+	// First, look for an event trigger step with Transfer event data in ExecutionLogs
 	for _, st := range vm.ExecutionLogs {
 		stepType := strings.ToUpper(st.GetType())
 		if !strings.Contains(stepType, "EVENT") && !strings.Contains(stepType, "TRIGGER") {
@@ -2577,42 +2621,24 @@ func ExtractTransferEventData(vm *VM) *TransferEventData {
 			continue
 		}
 
-		// Check if this is a Transfer event
-		eventName, _ := data["eventName"].(string)
-		if eventName != "Transfer" {
-			continue
+		transfer = transferEventDataFromMap(data)
+		if transfer != nil {
+			break // Found transfer event, exit loop
 		}
+	}
 
-		// Extract transfer data
-		transfer = &TransferEventData{}
-
-		if dir, ok := data["direction"].(string); ok {
-			transfer.Direction = dir
+	// Fallback: check vm.vars["transfer_monitor"] for single-node runs
+	// where transfer data is passed via inputVariables instead of ExecutionLogs
+	if transfer == nil {
+		if tmRaw, ok := vm.vars[transferMonitorVarName]; ok {
+			if tmMap, ok := tmRaw.(map[string]interface{}); ok {
+				if dataRaw, ok := tmMap["data"]; ok {
+					if data, ok := dataRaw.(map[string]interface{}); ok {
+						transfer = transferEventDataFromMap(data)
+					}
+				}
+			}
 		}
-		if from, ok := data["fromAddress"].(string); ok {
-			transfer.FromAddress = from
-		}
-		if to, ok := data["toAddress"].(string); ok {
-			transfer.ToAddress = to
-		}
-		if val, ok := data["value"].(string); ok {
-			transfer.Value = val
-		}
-		if sym, ok := data["tokenSymbol"].(string); ok {
-			transfer.TokenSymbol = sym
-		}
-		if name, ok := data["tokenName"].(string); ok {
-			transfer.TokenName = name
-		}
-
-		// Block timestamp can be int64 or float64
-		if ts, ok := data["blockTimestamp"].(float64); ok {
-			transfer.BlockTimestamp = int64(ts)
-		} else if ts, ok := data["blockTimestamp"].(int64); ok {
-			transfer.BlockTimestamp = ts
-		}
-
-		break // Found transfer event, exit loop
 	}
 	vm.mu.Unlock()
 

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 const (
@@ -269,6 +270,135 @@ func TestFormatTransferMessage(t *testing.T) {
 				t.Errorf("expected result to contain %q, got: %s", tt.expected, result)
 			}
 		})
+	}
+}
+
+// TestExtractTransferEventData_FromVars tests that transfer data can be extracted
+// from vm.vars["transfer_monitor"] when ExecutionLogs has no Transfer event.
+// This covers the single-node Telegram notification use case.
+func TestExtractTransferEventData_FromVars(t *testing.T) {
+	vm := NewVM()
+	vm.mu.Lock()
+	vm.vars = map[string]any{
+		"transfer_monitor": map[string]interface{}{
+			"data": map[string]interface{}{
+				"eventName":      "Transfer",
+				"direction":      "sent",
+				"fromAddress":    "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+				"toAddress":      "0x0000000000000000000000000000000000000002",
+				"value":          "1.5",
+				"tokenSymbol":    "ETH",
+				"tokenName":      "Ether",
+				"blockTimestamp": int64(1768943005000),
+			},
+		},
+		"settings": map[string]interface{}{
+			"chain": "base",
+		},
+	}
+	vm.ExecutionLogs = []*avsproto.Execution_Step{} // Empty - no trigger step
+	vm.mu.Unlock()
+
+	got := ExtractTransferEventData(vm)
+	if got == nil {
+		t.Fatal("expected non-nil TransferEventData from vars, got nil")
+	}
+	if got.Direction != "sent" {
+		t.Errorf("expected Direction 'sent', got %q", got.Direction)
+	}
+	if got.Value != "1.5" {
+		t.Errorf("expected Value '1.5', got %q", got.Value)
+	}
+	if got.TokenSymbol != "ETH" {
+		t.Errorf("expected TokenSymbol 'ETH', got %q", got.TokenSymbol)
+	}
+	if got.FromAddress != "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f" {
+		t.Errorf("expected FromAddress, got %q", got.FromAddress)
+	}
+	if got.ToAddress != "0x0000000000000000000000000000000000000002" {
+		t.Errorf("expected ToAddress, got %q", got.ToAddress)
+	}
+	// ChainName should be resolved from settings (lowercase as stored)
+	if got.ChainName != "base" {
+		t.Errorf("expected ChainName 'base', got %q", got.ChainName)
+	}
+
+	// Verify FormatTransferMessage produces expected output
+	msg := FormatTransferMessage(got)
+	if !strings.Contains(msg, "1.5 ETH") {
+		t.Errorf("expected message to contain '1.5 ETH', got: %s", msg)
+	}
+	if !strings.Contains(msg, "Sent") {
+		t.Errorf("expected message to contain 'Sent', got: %s", msg)
+	}
+	if !strings.Contains(msg, "base") {
+		t.Errorf("expected message to contain 'base', got: %s", msg)
+	}
+}
+
+// TestExtractTransferEventData_ExecutionLogsTakesPrecedence verifies that
+// ExecutionLogs data is used when present, even if transfer_monitor is also set.
+func TestExtractTransferEventData_ExecutionLogsTakesPrecedence(t *testing.T) {
+	vm := NewVM()
+
+	// Create a protobuf struct for the event trigger data
+	eventData := map[string]interface{}{
+		"eventName":      "Transfer",
+		"direction":      "received",
+		"fromAddress":    "0x1111111111111111111111111111111111111111",
+		"toAddress":      "0x2222222222222222222222222222222222222222",
+		"value":          "99.0",
+		"tokenSymbol":    "USDC",
+		"tokenName":      "USD Coin",
+		"blockTimestamp": float64(1768943005000),
+	}
+
+	// Convert to structpb.Value
+	protoData, _ := structpb.NewValue(eventData)
+
+	vm.mu.Lock()
+	vm.ExecutionLogs = []*avsproto.Execution_Step{
+		{
+			Id:      "trigger",
+			Name:    "eventTrigger",
+			Type:    "eventTrigger",
+			Success: true,
+			OutputData: &avsproto.Execution_Step_EventTrigger{
+				EventTrigger: &avsproto.EventTrigger_Output{
+					Data: protoData,
+				},
+			},
+		},
+	}
+	// Also set transfer_monitor with different data
+	vm.vars = map[string]any{
+		"transfer_monitor": map[string]interface{}{
+			"data": map[string]interface{}{
+				"eventName":   "Transfer",
+				"direction":   "sent",
+				"value":       "1.5",
+				"tokenSymbol": "ETH",
+			},
+		},
+		"settings": map[string]interface{}{
+			"chain": "ethereum",
+		},
+	}
+	vm.mu.Unlock()
+
+	got := ExtractTransferEventData(vm)
+	if got == nil {
+		t.Fatal("expected non-nil TransferEventData, got nil")
+	}
+	// Should use ExecutionLogs data (received USDC), not transfer_monitor (sent ETH)
+	if got.Direction != "received" {
+		t.Errorf("expected Direction 'received' from ExecutionLogs, got %q", got.Direction)
+	}
+	if got.TokenSymbol != "USDC" {
+		t.Errorf("expected TokenSymbol 'USDC' from ExecutionLogs, got %q", got.TokenSymbol)
+	}
+	if got.Value != "99.0" {
+		t.Errorf("expected Value '99.0' from ExecutionLogs, got %q", got.Value)
 	}
 }
 
