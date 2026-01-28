@@ -1040,7 +1040,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 	}
 
 	// Create ticker for this connection
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
 
 	// Reset the state if the operator disconnect
@@ -1094,12 +1094,9 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			tickTime := time.Now()
 			connectionAge := time.Since(connectionStartTime)
 
-			n.logger.Info("📟 Ticker fired for operator",
+			n.logger.Info("📟 Ticker fired",
 				"operator", address,
-				"stream_id", streamID,
-				"tick_time", tickTime.Format("15:04:05.000"),
-				"connection_start_time", connectionStartTime.Format("15:04:05.000"),
-				"connection_age", connectionAge.String())
+				"stream_id", streamID)
 
 			n.lock.Lock()
 			isShutdown := n.shutdown
@@ -1126,12 +1123,9 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 				continue
 			}
 
-			n.logger.Info("✅ Connection stabilized, proceeding with task assignment",
+			n.logger.Info("✅ Checking task assignment",
 				"operator", address,
-				"stream_id", streamID,
-				"connection_age", connectionAge.String(),
-				"stabilization_complete", true,
-				"total_tasks_in_memory", len(n.tasks))
+				"tasks_count", len(n.tasks))
 
 			if !n.CanStreamCheck(address) {
 				// This isn't a consensus approval. It's a feature flag we control server side whether to stream data to the operator or not.
