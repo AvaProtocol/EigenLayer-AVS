@@ -206,6 +206,11 @@ func formatTelegramFromStructured(s Summary) string {
 			sb.WriteString(html.EscapeString(err))
 			sb.WriteString("\n")
 		}
+	} else if s.Status != "failure" {
+		// No executions available - show example message
+		sb.WriteString("\n<b>Executed:</b>\n")
+		sb.WriteString("• (Simulated) On-chain transaction successfully completed\n\n")
+		sb.WriteString("<i>This is an example. Actual execution details will appear when the workflow is simulated or triggered by a real event.</i>")
 	}
 
 	return strings.TrimSpace(sb.String())
@@ -465,6 +470,14 @@ func formatDiscordFromStructured(s Summary) string {
 			sb.WriteString(exec)
 			sb.WriteString("\n")
 		}
+	} else if s.Status != "failure" {
+		// No executions available - show example message
+		if s.Trigger != "" {
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString("**Executed:**\n")
+		sb.WriteString("• (Simulated) On-chain transaction successfully completed\n\n")
+		sb.WriteString("*This is an example. Actual execution details will appear when the workflow is simulated or triggered by a real event.*")
 	}
 
 	// Errors - only show if status is "failure" (not partial_success)
@@ -513,10 +526,17 @@ func formatPlainTextFromStructured(s Summary) string {
 	}
 
 	// Executions (AI-generated descriptions)
-	for _, exec := range s.Executions {
-		sb.WriteString("- ")
-		sb.WriteString(exec)
-		sb.WriteString("\n")
+	if len(s.Executions) > 0 {
+		for _, exec := range s.Executions {
+			sb.WriteString("- ")
+			sb.WriteString(exec)
+			sb.WriteString("\n")
+		}
+	} else if s.Status != "failure" {
+		// No executions available - show example message
+		sb.WriteString("Executed:\n")
+		sb.WriteString("- (Simulated) On-chain transaction successfully completed\n\n")
+		sb.WriteString("This is an example. Actual execution details will appear when the workflow is simulated or triggered by a real event.")
 	}
 
 	// Errors - only show if status is "failure" (not partial_success)
