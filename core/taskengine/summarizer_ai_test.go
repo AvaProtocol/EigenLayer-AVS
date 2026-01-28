@@ -834,7 +834,7 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				},
 			},
 			expectedContain: []string{
-				"✅ Simulation: <b>Recurring Payment</b> successfully completed", // Only workflow name is bold
+				"✅ Simulation: <code>Recurring Payment</code> successfully completed", // Only workflow name is code-wrapped
 				"<b>Network:</b> Sepolia",
 				"<b>Time:</b> 2026-01-22T04:51:18.509Z",
 				"<b>Trigger:</b> (Simulated) Your scheduled task (every 3 days at 11:00 PM) triggered on Sepolia.",
@@ -855,7 +855,7 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				},
 			},
 			expectedContain: []string{
-				"✅ Run #3: <b>Recurring Payment</b> successfully completed", // Only workflow name is bold
+				"✅ Run #3: <code>Recurring Payment</code> successfully completed", // Only workflow name is code-wrapped
 				"<b>Network:</b> Sepolia",
 				"<b>Time:</b> 2026-01-22T04:51:18.509Z",
 				"<b>Executed:</b>",
@@ -875,7 +875,7 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				Errors:      []string{"transfer1: Insufficient balance for transfer"},
 			},
 			expectedContain: []string{
-				"❌ Run #5: <b>Recurring Payment</b> failed to execute", // Only workflow name is bold
+				"❌ Run #5: <code>Recurring Payment</code> failed to execute", // Only workflow name is code-wrapped
 				"<b>Network:</b> Sepolia",
 				"<b>Error:</b> transfer1: Insufficient balance for transfer",
 			},
@@ -895,7 +895,7 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				},
 			},
 			expectedContain: []string{
-				"⚠️ Run #2: <b>My Workflow</b> partially executed", // Only workflow name is bold
+				"⚠️ Run #2: <code>My Workflow</code> partially executed", // Only workflow name is code-wrapped
 				"<b>Network:</b> Ethereum",
 				"<b>Executed:</b>",
 				"• Approved 100 USDC to router",
@@ -935,22 +935,22 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 			},
 		},
 		{
-			name: "no executions - shows example message",
+			name: "no on-chain executions - fallback populated by ComposeSummary",
 			summary: Summary{
 				Subject:     "Simulation: My Workflow successfully completed",
 				Status:      "success",
 				Network:     "Sepolia",
 				TriggeredAt: "2026-01-28T07:31:51Z",
 				Trigger:     "(Simulated) Scheduled task ran on Sepolia",
-				Executions:  []string{}, // Empty - no execution data
+				// ComposeSummary populates fallback execution entry when buildExecutionsArray returns empty
+				Executions: []string{"(Simulated) On-chain transaction successfully completed"},
 			},
 			expectedContain: []string{
-				"✅ Simulation: <b>My Workflow</b> successfully completed",
+				"✅ Simulation: <code>My Workflow</code> successfully completed",
 				"<b>Network:</b> Sepolia",
 				"<b>Trigger:</b> (Simulated) Scheduled task ran on Sepolia",
 				"<b>Executed:</b>",
 				"• (Simulated) On-chain transaction successfully completed",
-				"This is an example",
 			},
 			notContain: []string{},
 		},
@@ -975,6 +975,42 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestFormatTelegramFromStructured_Annotation tests that annotation renders in italic for Telegram
+func TestFormatTelegramFromStructured_Annotation(t *testing.T) {
+	summary := Summary{
+		Subject:    "Run Node: My Workflow succeeded",
+		Status:     "success",
+		Network:    "Sepolia",
+		Executions: []string{"Transferred 0.01 ETH"},
+		Annotation: "This is an example. Actual execution details will appear when the workflow is simulated or triggered by a real event.",
+	}
+
+	result := FormatForMessageChannels(summary, "telegram", nil)
+
+	// Should contain annotation in italic
+	if !strings.Contains(result, "<i>This is an example.") {
+		t.Errorf("expected Telegram output to contain italic annotation, got:\n%s", result)
+	}
+	if !strings.Contains(result, "</i>") {
+		t.Errorf("expected Telegram output to close italic tag, got:\n%s", result)
+	}
+
+	// Without annotation, no italic tag
+	summaryNoAnnotation := Summary{
+		Subject:    "Simulation: My Workflow successfully completed",
+		Status:     "success",
+		Network:    "Sepolia",
+		Executions: []string{"(Simulated) Transferred 0.01 ETH"},
+	}
+	resultNoAnnotation := FormatForMessageChannels(summaryNoAnnotation, "telegram", nil)
+	if strings.Contains(resultNoAnnotation, "<i>") {
+		t.Errorf("expected no italic tag when Annotation is empty, got:\n%s", resultNoAnnotation)
+	}
+
+	t.Logf("With annotation:\n%s", result)
+	t.Logf("Without annotation:\n%s", resultNoAnnotation)
 }
 
 // TestTruncateAddress tests the address truncation helper function
@@ -1095,7 +1131,7 @@ func TestGetStatusEmoji(t *testing.T) {
 	}
 }
 
-// TestFormatSubjectWithBoldName tests the subject formatting with bold workflow name
+// TestFormatSubjectWithBoldName tests the subject formatting with code-wrapped workflow name
 func TestFormatSubjectWithBoldName(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1105,42 +1141,52 @@ func TestFormatSubjectWithBoldName(t *testing.T) {
 		{
 			name:     "simulation success",
 			subject:  "Simulation: My Workflow successfully completed",
-			expected: "Simulation: <b>My Workflow</b> successfully completed",
+			expected: "Simulation: <code>My Workflow</code> successfully completed",
 		},
 		{
 			name:     "simulation failure",
 			subject:  "Simulation: Test Workflow failed to execute",
-			expected: "Simulation: <b>Test Workflow</b> failed to execute",
+			expected: "Simulation: <code>Test Workflow</code> failed to execute",
 		},
 		{
 			name:     "simulation partial",
 			subject:  "Simulation: Another Workflow partially executed",
-			expected: "Simulation: <b>Another Workflow</b> partially executed",
+			expected: "Simulation: <code>Another Workflow</code> partially executed",
 		},
 		{
 			name:     "run number success",
 			subject:  "Run #3: Payment Flow successfully completed",
-			expected: "Run #3: <b>Payment Flow</b> successfully completed",
+			expected: "Run #3: <code>Payment Flow</code> successfully completed",
 		},
 		{
 			name:     "run number failure",
 			subject:  "Run #15: Swap Workflow failed to execute",
-			expected: "Run #15: <b>Swap Workflow</b> failed to execute",
+			expected: "Run #15: <code>Swap Workflow</code> failed to execute",
 		},
 		{
 			name:     "no prefix success",
 			subject:  "Simple Workflow successfully completed",
-			expected: "<b>Simple Workflow</b> successfully completed",
+			expected: "<code>Simple Workflow</code> successfully completed",
 		},
 		{
 			name:     "no prefix failure",
 			subject:  "Basic Task failed to execute",
-			expected: "<b>Basic Task</b> failed to execute",
+			expected: "<code>Basic Task</code> failed to execute",
 		},
 		{
 			name:     "workflow name with special chars",
 			subject:  "Simulation: Copy of Recurring Payment & Report successfully completed",
-			expected: "Simulation: <b>Copy of Recurring Payment &amp; Report</b> successfully completed",
+			expected: "Simulation: <code>Copy of Recurring Payment &amp; Report</code> successfully completed",
+		},
+		{
+			name:     "run node success",
+			subject:  "Run Node: My Transfer succeeded",
+			expected: "Run Node: <code>My Transfer</code> succeeded",
+		},
+		{
+			name:     "run node failure",
+			subject:  "Run Node: My Transfer failed at transfer1",
+			expected: "Run Node: <code>My Transfer</code> failed at transfer1",
 		},
 		{
 			name:     "unknown format - fallback to escaped",
@@ -1157,4 +1203,248 @@ func TestFormatSubjectWithBoldName(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestComposeSummary_SimulateTaskFromClientPayload tests the deterministic path using
+// the exact client payload from a SimulateTask request with settings.name as canonical source.
+// Client payload:
+//
+//	inputVariables: {
+//	    transfer1: { data: {} },
+//	    balance1: { data: {} },
+//	    timeTrigger: { data: {} },
+//	    settings: {
+//	        name: 'Test settings.name',
+//	        chain: 'Sepolia',
+//	        runner: '0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f',
+//	        chain_id: 11155111,
+//	        recipient: '0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788',
+//	        token_amount: { amount: '10000000000000000', address: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', decimals: 18 }
+//	    }
+//	}
+func TestComposeSummary_SimulateTaskFromClientPayload(t *testing.T) {
+	vm := NewVM()
+	vm.IsSimulation = true
+
+	vm.mu.Lock()
+	vm.vars = map[string]interface{}{
+		"transfer1": map[string]interface{}{
+			"data": map[string]interface{}{},
+		},
+		"balance1": map[string]interface{}{
+			"data": map[string]interface{}{},
+		},
+		"timeTrigger": map[string]interface{}{
+			"data": map[string]interface{}{},
+		},
+		"settings": map[string]interface{}{
+			"name":      "Test settings.name",
+			"chain":     "Sepolia",
+			"runner":    "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+			"chain_id":  11155111,
+			"recipient": "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
+			"token_amount": map[string]interface{}{
+				"amount":   "10000000000000000",
+				"address":  "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+				"decimals": 18,
+			},
+		},
+	}
+
+	// Set up task nodes matching the workflow (trigger + 2 processing nodes + 1 notification node)
+	vm.TaskNodes = map[string]*avsproto.TaskNode{
+		"transfer1": {Id: "transfer1", Name: "transfer1"},
+		"balance1":  {Id: "balance1", Name: "balance1"},
+		"telegram_send": {
+			Id:   "telegram_send",
+			Name: "telegram_send",
+			Type: avsproto.NodeType_NODE_TYPE_REST_API,
+			TaskType: &avsproto.TaskNode_RestApi{
+				RestApi: &avsproto.RestAPINode{
+					Config: &avsproto.RestAPINode_Config{
+						Url:    "https://api.telegram.org/bot123/sendMessage",
+						Method: "POST",
+					},
+				},
+			},
+		},
+	}
+	vm.mu.Unlock()
+
+	// Set up execution logs: cron trigger + 2 processing steps + 1 notification step
+	// The notification step (telegram_send) should NOT inflate the executed count
+	startTime := int64(1738051035000) // 2025-01-28T07:57:15Z in ms
+	vm.ExecutionLogs = []*avsproto.Execution_Step{
+		{
+			Id:      "timeTrigger",
+			Name:    "timeTrigger",
+			Type:    "TRIGGER_TYPE_CRON",
+			Success: true,
+			StartAt: startTime,
+		},
+		{
+			Id:      "balance1",
+			Name:    "balance1",
+			Type:    "NODE_TYPE_BALANCE",
+			Success: true,
+		},
+		{
+			Id:      "transfer1",
+			Name:    "transfer1",
+			Type:    "NODE_TYPE_ETH_TRANSFER",
+			Success: true,
+		},
+		{
+			Id:      "telegram_send",
+			Name:    "telegram_send",
+			Type:    "NODE_TYPE_REST_API",
+			Success: true,
+		},
+	}
+
+	summary := ComposeSummary(vm, "transfer1")
+
+	// Verify subject uses settings.name with Simulation prefix (SimulateTask is multi-node)
+	expectedSubject := "Simulation: Test settings.name successfully completed"
+	if summary.Subject != expectedSubject {
+		t.Errorf("Subject mismatch:\n  expected: %q\n  got:      %q", expectedSubject, summary.Subject)
+	}
+	// Note: This is NOT a single-node execution (has 2+ TaskNodes), so it uses "Simulation:" prefix.
+	// Single-node RunNodeImmediately uses "Run Node:" prefix instead.
+
+	// Verify step count excludes notification nodes: 3 total (trigger + balance1 + transfer1),
+	// NOT 4 (which would incorrectly include telegram_send)
+	expectedSummaryLine := "Your workflow 'Test settings.name' executed 3 out of 3 total steps"
+	if summary.SummaryLine != expectedSummaryLine {
+		t.Errorf("SummaryLine mismatch:\n  expected: %q\n  got:      %q", expectedSummaryLine, summary.SummaryLine)
+	}
+
+	// Verify status
+	if summary.Status != "success" {
+		t.Errorf("Status: expected %q, got %q", "success", summary.Status)
+	}
+
+	// Verify Network is populated from settings.chain
+	if summary.Network != "Sepolia" {
+		t.Errorf("Network: expected %q, got %q", "Sepolia", summary.Network)
+	}
+
+	// Verify Trigger is set (cron trigger with simulation prefix)
+	if !strings.Contains(summary.Trigger, "(Simulated)") {
+		t.Errorf("Trigger should contain '(Simulated)', got: %q", summary.Trigger)
+	}
+	if !strings.Contains(summary.Trigger, "Scheduled task ran") {
+		t.Errorf("Trigger should contain 'Scheduled task ran', got: %q", summary.Trigger)
+	}
+	if !strings.Contains(summary.Trigger, "Sepolia") {
+		t.Errorf("Trigger should contain 'Sepolia', got: %q", summary.Trigger)
+	}
+
+	// Verify TriggeredAt is set from the trigger step's StartAt
+	if summary.TriggeredAt == "" {
+		t.Error("TriggeredAt should not be empty")
+	}
+
+	// Verify Executions fallback (no CONTRACT_WRITE steps, so fallback entry is added)
+	if len(summary.Executions) != 1 {
+		t.Fatalf("Executions: expected 1 fallback entry, got %d: %v", len(summary.Executions), summary.Executions)
+	}
+	if summary.Executions[0] != "(Simulated) On-chain transaction successfully completed" {
+		t.Errorf("Executions[0]: expected fallback entry, got: %q", summary.Executions[0])
+	}
+
+	// Annotation should be empty for simulate_task (multi-node) executions
+	if summary.Annotation != "" {
+		t.Errorf("Annotation should be empty for simulate_task, got: %q", summary.Annotation)
+	}
+
+	// Verify Telegram formatting
+	telegram := FormatForMessageChannels(summary, "telegram", nil)
+
+	expectedTelegramContents := []string{
+		"✅ Simulation: <code>Test settings.name</code> successfully completed",
+		"<b>Network:</b> Sepolia",
+		"<b>Time:</b>",
+		"<b>Trigger:</b> (Simulated) Scheduled task ran on Sepolia",
+		"<b>Executed:</b>",
+		"• (Simulated) On-chain transaction successfully completed",
+	}
+	for _, expected := range expectedTelegramContents {
+		if !strings.Contains(telegram, expected) {
+			t.Errorf("Telegram output missing %q\nFull output:\n%s", expected, telegram)
+		}
+	}
+
+	// Telegram should NOT contain annotation for simulate_task
+	if strings.Contains(telegram, "<i>") {
+		t.Errorf("Telegram output should not contain italic annotation for simulate_task\nFull output:\n%s", telegram)
+	}
+
+	t.Logf("Subject: %s", summary.Subject)
+	t.Logf("Status: %s", summary.Status)
+	t.Logf("Network: %s", summary.Network)
+	t.Logf("Trigger: %s", summary.Trigger)
+	t.Logf("TriggeredAt: %s", summary.TriggeredAt)
+	t.Logf("Executions: %v", summary.Executions)
+	t.Logf("Telegram:\n%s", telegram)
+}
+
+// TestComposeSummary_RunNodeImmediateSubjectPrefix tests that single-node
+// RunNodeImmediately executions use "Run Node:" prefix, not "Simulation:".
+func TestComposeSummary_RunNodeImmediateSubjectPrefix(t *testing.T) {
+	vm := NewVM()
+	// RunNodeImmediately: no TaskID, exactly one TaskNode
+	vm.mu.Lock()
+	vm.TaskNodes = map[string]*avsproto.TaskNode{
+		"transfer1": {Id: "transfer1", Name: "transfer1"},
+	}
+	vm.vars = map[string]interface{}{
+		"settings": map[string]interface{}{
+			"name":     "My Transfer Workflow",
+			"chain":    "Sepolia",
+			"chain_id": 11155111,
+		},
+	}
+	vm.mu.Unlock()
+
+	vm.ExecutionLogs = []*avsproto.Execution_Step{
+		{
+			Id:      "transfer1",
+			Name:    "transfer1",
+			Type:    "NODE_TYPE_ETH_TRANSFER",
+			Success: true,
+		},
+	}
+
+	summary := ComposeSummary(vm, "transfer1")
+
+	// Should use "Run Node:" prefix, not "Simulation:"
+	expectedSubject := "Run Node: My Transfer Workflow succeeded"
+	if summary.Subject != expectedSubject {
+		t.Errorf("Subject mismatch:\n  expected: %q\n  got:      %q", expectedSubject, summary.Subject)
+	}
+
+	// Network should be populated
+	if summary.Network != "Sepolia" {
+		t.Errorf("Network: expected %q, got %q", "Sepolia", summary.Network)
+	}
+
+	// SummaryLine should say "1 out of 1" (not "0 out of 1")
+	expectedSummaryLine := "Your workflow 'My Transfer Workflow' executed 1 out of 1 total steps"
+	if summary.SummaryLine != expectedSummaryLine {
+		t.Errorf("SummaryLine mismatch:\n  expected: %q\n  got:      %q", expectedSummaryLine, summary.SummaryLine)
+	}
+
+	// Annotation should be set for single-node runs
+	if summary.Annotation == "" {
+		t.Error("Annotation should be set for single-node RunNodeImmediately executions")
+	}
+	if !strings.Contains(summary.Annotation, "This is an example") {
+		t.Errorf("Annotation should contain example disclaimer, got: %q", summary.Annotation)
+	}
+
+	t.Logf("Subject: %s", summary.Subject)
+	t.Logf("Network: %s", summary.Network)
+	t.Logf("SummaryLine: %s", summary.SummaryLine)
+	t.Logf("Annotation: %s", summary.Annotation)
 }
