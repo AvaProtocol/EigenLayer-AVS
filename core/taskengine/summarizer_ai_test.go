@@ -486,6 +486,45 @@ func TestFormatForMessageChannels_SingleNodeExample_Discord(t *testing.T) {
 	t.Logf("Discord example message:\n%s", result)
 }
 
+// TestFormatForMessageChannels_SingleNodeExample_WorkflowContext tests that
+// workflowContext.name is used when settings.name is not available
+func TestFormatForMessageChannels_SingleNodeExample_WorkflowContext(t *testing.T) {
+	vm := NewVM()
+	vm.mu.Lock()
+	vm.TaskNodes = map[string]*avsproto.TaskNode{
+		"node1": {Id: "node1", Name: "singleNodeExecution_restApi"},
+	}
+	vm.vars = map[string]any{
+		// settings without name
+		"settings": map[string]interface{}{
+			"chain": "Sepolia",
+		},
+		// workflowContext with name
+		WorkflowContextVarName: map[string]interface{}{
+			"name":   "My Transfer Monitor",
+			"runner": "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+			"owner":  "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
+		},
+	}
+	vm.ExecutionLogs = []*avsproto.Execution_Step{}
+	vm.mu.Unlock()
+
+	summary := Summary{}
+	result := FormatForMessageChannels(summary, "telegram", vm)
+
+	// Should use workflowContext.name since settings.name is not set
+	if !strings.Contains(result, "My Transfer Monitor") {
+		t.Errorf("expected workflow name from workflowContext.name, got: %s", result)
+	}
+
+	// Should not show default "Workflow"
+	if strings.Contains(result, "<b>Workflow</b> completed") {
+		t.Errorf("should use workflowContext.name, not default 'Workflow', got: %s", result)
+	}
+
+	t.Logf("WorkflowContext example message:\n%s", result)
+}
+
 // TestComposeSummarySmart_WithRealWorkflowState tests the full flow
 // with realistic workflow state. Uses real context-memory API if SERVICE_AUTH_TOKEN is set.
 func TestComposeSummarySmart_WithRealWorkflowState(t *testing.T) {
