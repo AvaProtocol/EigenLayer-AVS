@@ -131,6 +131,11 @@ func FormatForMessageChannels(s Summary, channel string, vm *VM) string {
 		}
 	}
 
+	// Fallback: For single-node executions without meaningful data, show example message
+	if vm != nil && isSingleNodeImmediate(vm) {
+		return formatSingleNodeExampleMessage(vm, channel)
+	}
+
 	// Legacy fallback: use plain text body
 	return formatChannelFromBody(s, channel)
 }
@@ -568,4 +573,85 @@ func formatChannelFromBody(s Summary, channel string) string {
 	default:
 		return msg
 	}
+}
+
+// formatSingleNodeExampleMessage creates an example message for single-node executions
+// when no meaningful execution data (like transfer_monitor) is available.
+// This helps users understand what the notification format will look like.
+func formatSingleNodeExampleMessage(vm *VM, channel string) string {
+	workflowName := resolveWorkflowName(vm)
+	chainName := resolveChainName(vm)
+
+	switch strings.ToLower(channel) {
+	case "telegram":
+		return formatTelegramExampleMessage(workflowName, chainName)
+	case "discord":
+		return formatDiscordExampleMessage(workflowName, chainName)
+	default:
+		return formatPlainTextExampleMessage(workflowName, chainName)
+	}
+}
+
+func formatTelegramExampleMessage(workflowName, chainName string) string {
+	var sb strings.Builder
+
+	// Status line with emoji and workflow name
+	sb.WriteString("✅ <b>")
+	sb.WriteString(html.EscapeString(workflowName))
+	sb.WriteString("</b> completed\n\n")
+
+	// Network
+	sb.WriteString("<b>Network:</b> ")
+	sb.WriteString(html.EscapeString(chainName))
+	sb.WriteString("\n\n")
+
+	// Executed section with example
+	sb.WriteString("<b>Executed:</b>\n")
+	sb.WriteString("• (Simulated) On-chain transaction successfully completed\n\n")
+
+	// Example notice
+	sb.WriteString("<i>This is an example. Actual execution details will appear when the workflow is simulated or triggered by a real event.</i>")
+
+	return sb.String()
+}
+
+func formatDiscordExampleMessage(workflowName, chainName string) string {
+	var sb strings.Builder
+
+	// Status line with emoji and workflow name
+	sb.WriteString("✅ **")
+	sb.WriteString(workflowName)
+	sb.WriteString("** completed\n\n")
+
+	// Network
+	sb.WriteString("**Network:** ")
+	sb.WriteString(chainName)
+	sb.WriteString("\n\n")
+
+	// Executed section with example
+	sb.WriteString("**Executed:**\n")
+	sb.WriteString("• (Simulated) On-chain transaction successfully completed\n\n")
+
+	// Example notice
+	sb.WriteString("*This is an example. Actual execution details will appear when the workflow is simulated or triggered by a real event.*")
+
+	return sb.String()
+}
+
+func formatPlainTextExampleMessage(workflowName, chainName string) string {
+	var sb strings.Builder
+
+	sb.WriteString(workflowName)
+	sb.WriteString(" completed\n\n")
+
+	sb.WriteString("Network: ")
+	sb.WriteString(chainName)
+	sb.WriteString("\n\n")
+
+	sb.WriteString("Executed:\n")
+	sb.WriteString("• (Simulated) On-chain transaction successfully completed\n\n")
+
+	sb.WriteString("This is an example. Actual execution details will appear when the workflow is simulated or triggered by a real event.")
+
+	return sb.String()
 }

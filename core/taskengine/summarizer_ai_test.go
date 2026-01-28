@@ -402,6 +402,90 @@ func TestExtractTransferEventData_ExecutionLogsTakesPrecedence(t *testing.T) {
 	}
 }
 
+// TestFormatForMessageChannels_SingleNodeExample tests that single-node executions
+// without transfer data show an example message with real workflow name and chain.
+func TestFormatForMessageChannels_SingleNodeExample(t *testing.T) {
+	vm := NewVM()
+	vm.mu.Lock()
+	// Single node execution: no TaskID, exactly one TaskNode
+	vm.TaskNodes = map[string]*avsproto.TaskNode{
+		"node1": {Id: "node1", Name: "singleNodeExecution_restApi"},
+	}
+	vm.vars = map[string]any{
+		"settings": map[string]interface{}{
+			"name":  "My Transfer Monitor",
+			"chain": "Base",
+		},
+	}
+	// No transfer_monitor data - should trigger example message
+	vm.ExecutionLogs = []*avsproto.Execution_Step{}
+	vm.mu.Unlock()
+
+	// Empty summary - no structured data
+	summary := Summary{}
+
+	result := FormatForMessageChannels(summary, "telegram", vm)
+
+	// Should contain workflow name from settings
+	if !strings.Contains(result, "My Transfer Monitor") {
+		t.Errorf("expected result to contain workflow name 'My Transfer Monitor', got: %s", result)
+	}
+
+	// Should contain chain name from settings
+	if !strings.Contains(result, "Base") {
+		t.Errorf("expected result to contain chain name 'Base', got: %s", result)
+	}
+
+	// Should contain the example execution line
+	if !strings.Contains(result, "(Simulated) On-chain transaction successfully completed") {
+		t.Errorf("expected result to contain example execution line, got: %s", result)
+	}
+
+	// Should contain the example notice
+	if !strings.Contains(result, "This is an example") {
+		t.Errorf("expected result to contain example notice, got: %s", result)
+	}
+
+	// Should be formatted as Telegram HTML
+	if !strings.Contains(result, "<b>") {
+		t.Errorf("expected Telegram HTML formatting with <b> tags, got: %s", result)
+	}
+
+	t.Logf("Example message:\n%s", result)
+}
+
+// TestFormatForMessageChannels_SingleNodeExample_Discord tests Discord formatting
+func TestFormatForMessageChannels_SingleNodeExample_Discord(t *testing.T) {
+	vm := NewVM()
+	vm.mu.Lock()
+	vm.TaskNodes = map[string]*avsproto.TaskNode{
+		"node1": {Id: "node1", Name: "singleNodeExecution_restApi"},
+	}
+	vm.vars = map[string]any{
+		"settings": map[string]interface{}{
+			"name":     "Price Alert",
+			"chain_id": 8453, // Base chain ID
+		},
+	}
+	vm.ExecutionLogs = []*avsproto.Execution_Step{}
+	vm.mu.Unlock()
+
+	summary := Summary{}
+	result := FormatForMessageChannels(summary, "discord", vm)
+
+	// Should use Discord markdown formatting
+	if !strings.Contains(result, "**Price Alert**") {
+		t.Errorf("expected Discord markdown with **workflow name**, got: %s", result)
+	}
+
+	// Chain should be resolved from chain_id
+	if !strings.Contains(result, "Base") {
+		t.Errorf("expected chain name 'Base' resolved from chain_id, got: %s", result)
+	}
+
+	t.Logf("Discord example message:\n%s", result)
+}
+
 // TestComposeSummarySmart_WithRealWorkflowState tests the full flow
 // with realistic workflow state. Uses real context-memory API if SERVICE_AUTH_TOKEN is set.
 func TestComposeSummarySmart_WithRealWorkflowState(t *testing.T) {
