@@ -2300,10 +2300,20 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// Create a temporary task structure for simulation (not saved to storage)
 	simulationTaskID := model.GenerateID()
 
+	// Extract workflow name from inputVariables.settings.name (canonical source)
+	taskName := "Workflow"
+	if settingsIface, ok := inputVariables["settings"]; ok {
+		if settings, ok := settingsIface.(map[string]interface{}); ok {
+			if name, ok := settings["name"].(string); ok && strings.TrimSpace(name) != "" {
+				taskName = name
+			}
+		}
+	}
+
 	task := &model.Task{
 		Task: &avsproto.Task{
 			Id:      simulationTaskID,
-			Name:    "simulation", // Static name for simulation tasks
+			Name:    taskName,
 			Owner:   user.Address.Hex(),
 			Trigger: trigger,
 			Nodes:   nodes,
