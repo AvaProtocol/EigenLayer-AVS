@@ -72,9 +72,11 @@ func formatPlainTextExampleMessage(workflowName, chainName string) string {
 	sb.WriteString("\n\n")
 
 	sb.WriteString("Executed:\n")
-	sb.WriteString("• (Simulated) On-chain transaction successfully completed\n\n")
+	sb.WriteString("• (Simulated) ")
+	sb.WriteString(ExampleExecutionMessage)
+	sb.WriteString("\n\n")
 
-	sb.WriteString("This is an example. Actual execution details will appear when the workflow is simulated or triggered by a real event.")
+	sb.WriteString(ExampleExecutionAnnotation)
 
 	return sb.String()
 }

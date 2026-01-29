@@ -1061,7 +1061,7 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 
 	annotation := ""
 	if singleNode {
-		annotation = "This is an example. Actual execution details will appear when the workflow is simulated or triggered by a real event."
+		annotation = ExampleExecutionAnnotation
 	}
 
 	// Extract runner smart wallet and owner EOA (best-effort, no panics)
@@ -1353,17 +1353,18 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 		}
 	}
 
-	// Fallback: when no on-chain executions were recorded and status is not failure,
+	// Fallback: when no on-chain executions were recorded and status is success/partial_success,
 	// add a generic execution entry so the structured formatters always have data.
 	// This is added AFTER the body composition so it doesn't override detailed bodies
 	// (e.g., single-node REST API summaries), but the Executions field is still
 	// populated for the channel formatters (Telegram/Discord/plain text).
-	if len(executions) == 0 && status != "failure" {
+	// Only show example if there are no errors to avoid confusion.
+	if len(executions) == 0 && (status == "success" || status == "partial_success") && len(errors) == 0 {
 		prefix := ""
 		if vm.IsSimulation || isSingleNodeImmediate(vm) {
 			prefix = "(Simulated) "
 		}
-		executions = []string{prefix + "On-chain transaction successfully completed"}
+		executions = []string{prefix + ExampleExecutionMessage}
 	}
 
 	// For single-node runs with no execution logs (the notification node itself is
