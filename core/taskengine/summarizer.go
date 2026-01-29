@@ -8,6 +8,14 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 )
 
+// Constants for example execution messages shown when no executions are available
+const (
+	// ExampleExecutionMessage is the base message for example executions
+	ExampleExecutionMessage = "On-chain transaction successfully completed"
+	// ExampleExecutionAnnotation is the annotation text explaining that this is an example
+	ExampleExecutionAnnotation = "This is an example. Actual execution details will appear when the workflow is simulated or triggered by a real event."
+)
+
 // Summarizer defines an interface for generating human-readable summaries
 // from the current VM execution context. Implementations must be resilient
 // and return concise content suitable for email/IM notifications.

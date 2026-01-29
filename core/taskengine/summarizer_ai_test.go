@@ -1131,7 +1131,7 @@ func TestGetStatusEmoji(t *testing.T) {
 	}
 }
 
-// TestFormatSubjectWithBoldName tests the subject formatting with code-wrapped workflow name
+// TestFormatSubjectWithBoldName tests that formatSubjectWithBoldName wraps the workflow name in <code> tags
 func TestFormatSubjectWithBoldName(t *testing.T) {
 	tests := []struct {
 		name     string

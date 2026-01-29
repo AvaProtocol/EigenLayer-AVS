@@ -96,7 +96,7 @@ func getStatusEmoji(status string) string {
 	}
 }
 
-// formatSubjectWithBoldName formats the subject with bold only around the workflow name
+// formatSubjectWithBoldName formats the subject with <code> tags only around the workflow name
 // Subject patterns:
 //   - "Simulation: {name} successfully completed"
 //   - "Run Node: {name} succeeded"
@@ -201,10 +201,14 @@ func formatTelegramExampleMessage(workflowName, chainName string) string {
 
 	// Executed section with example
 	sb.WriteString("<b>Executed:</b>\n")
-	sb.WriteString("• (Simulated) On-chain transaction successfully completed\n\n")
+	sb.WriteString("• (Simulated) ")
+	sb.WriteString(ExampleExecutionMessage)
+	sb.WriteString("\n\n")
 
 	// Example notice
-	sb.WriteString("<i>This is an example. Actual execution details will appear when the workflow is simulated or triggered by a real event.</i>")
+	sb.WriteString("<i>")
+	sb.WriteString(ExampleExecutionAnnotation)
+	sb.WriteString("</i>")
 
 	return sb.String()
 }

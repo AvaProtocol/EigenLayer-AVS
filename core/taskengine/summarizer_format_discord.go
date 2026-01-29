@@ -81,10 +81,14 @@ func formatDiscordExampleMessage(workflowName, chainName string) string {
 
 	// Executed section with example
 	sb.WriteString("**Executed:**\n")
-	sb.WriteString("• (Simulated) On-chain transaction successfully completed\n\n")
+	sb.WriteString("• (Simulated) ")
+	sb.WriteString(ExampleExecutionMessage)
+	sb.WriteString("\n\n")
 
 	// Example notice
-	sb.WriteString("*This is an example. Actual execution details will appear when the workflow is simulated or triggered by a real event.*")
+	sb.WriteString("*")
+	sb.WriteString(ExampleExecutionAnnotation)
+	sb.WriteString("*")
 
 	return sb.String()
 }
