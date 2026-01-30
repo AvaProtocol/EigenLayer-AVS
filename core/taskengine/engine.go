@@ -1572,6 +1572,72 @@ func (n *Engine) sendBatchedNotifications() {
 	}
 }
 
+// sendMonitorTaskTriggerToOperators sends a MonitorTaskTrigger message with full
+// task metadata directly to connected operators. This is used when a task is
+// re-enabled so operators begin monitoring it immediately instead of waiting for
+// the next StreamCheckToOperator ticker cycle (up to 15 minutes).
+func (n *Engine) sendMonitorTaskTriggerToOperators(task *model.Task) {
+	// Snapshot operator streams under read lock
+	n.streamsMutex.RLock()
+	operatorStreams := make(map[string]avsproto.Node_SyncMessagesServer)
+	for addr, stream := range n.operatorStreams {
+		operatorStreams[addr] = stream
+	}
+	n.streamsMutex.RUnlock()
+
+	if len(operatorStreams) == 0 {
+		n.logger.Debug("No connected operators to notify about re-enabled task",
+			"task_id", task.Id)
+		return
+	}
+
+	resp := avsproto.SyncMessagesResp{
+		Id: task.Id,
+		Op: avsproto.MessageOp_MonitorTaskTrigger,
+		TaskMetadata: &avsproto.SyncMessagesResp_TaskMetadata{
+			TaskId:    task.Id,
+			Remain:    task.MaxExecution,
+			ExpiredAt: task.ExpiredAt,
+			Trigger:   task.Trigger,
+			StartAt:   task.StartAt,
+		},
+	}
+
+	successCount := 0
+	for operatorAddr, stream := range operatorStreams {
+		if !n.CanStreamCheck(operatorAddr) {
+			continue
+		}
+		if !n.supportsTaskTrigger(operatorAddr, task) {
+			continue
+		}
+
+		if err := stream.Send(&resp); err != nil {
+			n.logger.Warn("Failed to send MonitorTaskTrigger for re-enabled task",
+				"task_id", task.Id,
+				"operator", operatorAddr,
+				"error", err)
+			continue
+		}
+
+		successCount++
+		n.lock.Lock()
+		if state, exists := n.trackSyncedTasks[operatorAddr]; exists && state != nil {
+			state.TaskID[task.Id] = true
+		} else {
+			n.logger.Warn("trackSyncedTasks entry missing after successful send; task may be re-sent on next ticker cycle",
+				"task_id", task.Id,
+				"operator", operatorAddr)
+		}
+		n.lock.Unlock()
+	}
+
+	n.logger.Info("Notified operators about re-enabled task",
+		"task_id", task.Id,
+		"operators_notified", successCount,
+		"total_connected", len(operatorStreams))
+}
+
 // TODO: Merge and verify from multiple operators
 func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyTriggersReq) error {
 	_, err := n.AggregateChecksResultWithState(address, payload)
@@ -3205,11 +3271,14 @@ func (n *Engine) SetTaskEnabledByUser(user *model.User, taskID string, enabled b
 		}
 	}
 
-	// Update in-memory tracking
+	// Update in-memory tracking and notify operators
 	if enabled {
 		n.lock.Lock()
 		n.tasks[task.Id] = task
 		n.lock.Unlock()
+		// Notify operators to start monitoring the task immediately
+		// instead of waiting for the next StreamCheckToOperator ticker cycle
+		n.sendMonitorTaskTriggerToOperators(task)
 	} else {
 		n.lock.Lock()
 		delete(n.tasks, task.Id)

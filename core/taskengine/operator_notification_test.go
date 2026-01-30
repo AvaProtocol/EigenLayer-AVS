@@ -360,3 +360,285 @@ func TestSetTaskEnabledRespFields(t *testing.T) {
 	assert.NotZero(t, resp.UpdatedAt)
 	assert.Equal(t, "Enabled", resp.PreviousStatus) // Task is enabled before disabling
 }
+
+// TestReEnableTaskSendsMonitorNotification verifies that re-enabling a disabled task
+// sends a MonitorTaskTrigger notification to operators immediately instead of waiting
+// for the next StreamCheckToOperator ticker cycle.
+func TestReEnableTaskSendsMonitorNotification(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	engine := New(db, config, nil, testutil.GetLogger())
+	err := engine.MustStart()
+	assert.NoError(t, err)
+
+	user := testutil.TestUser1()
+
+	// Create a test task
+	taskReq := testutil.RestTask()
+	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	task, err := engine.CreateTask(user, taskReq)
+	assert.NoError(t, err)
+
+	// Use an approved operator address so CanStreamCheck returns true
+	operatorAddr := "0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d"
+	mockStream := &MockSyncMessagesServer{}
+
+	engine.streamsMutex.Lock()
+	engine.operatorStreams[operatorAddr] = mockStream
+	engine.streamsMutex.Unlock()
+
+	engine.lock.Lock()
+	engine.trackSyncedTasks[operatorAddr] = &operatorState{
+		TaskID: map[string]bool{task.Id: true},
+	}
+	engine.lock.Unlock()
+
+	// Step 1: Disable the task
+	disableResp, err := engine.SetTaskEnabledByUser(user, task.Id, false)
+	assert.NoError(t, err)
+	assert.True(t, disableResp.Success)
+	assert.Equal(t, "disabled", disableResp.Status)
+
+	// Flush batched disable notification
+	engine.sendBatchedNotifications()
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify DisableTask was sent
+	messages := mockStream.GetReceivedMessages()
+	assert.Len(t, messages, 1, "Should have received DisableTask notification")
+	assert.Equal(t, avsproto.MessageOp_DisableTask, messages[0].Op)
+	assert.Equal(t, task.Id, messages[0].Id)
+
+	// Step 2: Re-enable the task
+	enableResp, err := engine.SetTaskEnabledByUser(user, task.Id, true)
+	assert.NoError(t, err)
+	assert.True(t, enableResp.Success)
+	assert.Equal(t, "enabled", enableResp.Status)
+	assert.Equal(t, "Disabled", enableResp.PreviousStatus)
+
+	// Give the direct stream send time to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify MonitorTaskTrigger was sent immediately (without waiting for ticker)
+	messages = mockStream.GetReceivedMessages()
+	assert.Len(t, messages, 2, "Should have received DisableTask + MonitorTaskTrigger")
+	assert.Equal(t, avsproto.MessageOp_MonitorTaskTrigger, messages[1].Op)
+	assert.Equal(t, task.Id, messages[1].Id)
+	// Verify task metadata is populated
+	assert.NotNil(t, messages[1].TaskMetadata, "MonitorTaskTrigger should include TaskMetadata")
+	assert.Equal(t, task.Id, messages[1].TaskMetadata.TaskId)
+	assert.Equal(t, int64(1000), messages[1].TaskMetadata.Remain)
+}
+
+// TestReEnableTaskRoundTrip verifies that a task can go through the full
+// enable -> disable -> re-enable cycle and its data is preserved.
+func TestReEnableTaskRoundTrip(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	engine := New(db, config, nil, testutil.GetLogger())
+	err := engine.MustStart()
+	assert.NoError(t, err)
+
+	user := testutil.TestUser1()
+
+	// Create task
+	taskReq := testutil.RestTask()
+	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	task, err := engine.CreateTask(user, taskReq)
+	assert.NoError(t, err)
+	originalID := task.Id
+
+	// Disable
+	disableResp, err := engine.SetTaskEnabledByUser(user, originalID, false)
+	assert.NoError(t, err)
+	assert.True(t, disableResp.Success)
+	assert.Equal(t, "disabled", disableResp.Status)
+
+	// Verify task is no longer in active tasks map
+	engine.lock.Lock()
+	_, existsWhileDisabled := engine.tasks[originalID]
+	engine.lock.Unlock()
+	assert.False(t, existsWhileDisabled, "Disabled task should not be in active tasks map")
+
+	// Verify task is still retrievable from storage
+	retrievedTask, err := engine.GetTask(user, originalID)
+	assert.NoError(t, err)
+	assert.Equal(t, avsproto.TaskStatus_Disabled, retrievedTask.Status)
+
+	// Re-enable
+	enableResp, err := engine.SetTaskEnabledByUser(user, originalID, true)
+	assert.NoError(t, err)
+	assert.True(t, enableResp.Success)
+	assert.Equal(t, "enabled", enableResp.Status)
+
+	// Verify task is back in active tasks map
+	engine.lock.Lock()
+	_, existsAfterReEnable := engine.tasks[originalID]
+	engine.lock.Unlock()
+	assert.True(t, existsAfterReEnable, "Re-enabled task should be in active tasks map")
+
+	// Verify task data is preserved
+	reEnabledTask, err := engine.GetTask(user, originalID)
+	assert.NoError(t, err)
+	assert.Equal(t, avsproto.TaskStatus_Enabled, reEnabledTask.Status)
+	assert.Equal(t, originalID, reEnabledTask.Id)
+	assert.NotNil(t, reEnabledTask.Trigger)
+	assert.NotNil(t, reEnabledTask.Trigger.GetBlock(), "Trigger config should be preserved after round-trip")
+}
+
+// TestReEnableIdempotent verifies that enabling an already-enabled task
+// is idempotent and doesn't send duplicate notifications.
+func TestReEnableIdempotent(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	engine := New(db, config, nil, testutil.GetLogger())
+	err := engine.MustStart()
+	assert.NoError(t, err)
+
+	user := testutil.TestUser1()
+
+	// Create a task (starts as Enabled)
+	taskReq := testutil.RestTask()
+	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	task, err := engine.CreateTask(user, taskReq)
+	assert.NoError(t, err)
+
+	// Set up mock stream
+	operatorAddr := "0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d"
+	mockStream := &MockSyncMessagesServer{}
+
+	engine.streamsMutex.Lock()
+	engine.operatorStreams[operatorAddr] = mockStream
+	engine.streamsMutex.Unlock()
+
+	engine.lock.Lock()
+	engine.trackSyncedTasks[operatorAddr] = &operatorState{
+		TaskID: map[string]bool{task.Id: true},
+	}
+	engine.lock.Unlock()
+
+	// Try to enable an already-enabled task
+	resp, err := engine.SetTaskEnabledByUser(user, task.Id, true)
+	assert.NoError(t, err)
+	assert.True(t, resp.Success)
+	assert.Equal(t, "enabled", resp.Status)
+	assert.Equal(t, "Task is already enabled", resp.Message)
+
+	// No notifications should have been sent
+	time.Sleep(100 * time.Millisecond)
+	messages := mockStream.GetReceivedMessages()
+	assert.Len(t, messages, 0, "Idempotent enable should not send any notification")
+}
+
+// TestDisableIdempotent verifies that disabling an already-disabled task
+// is idempotent and doesn't send duplicate notifications.
+func TestDisableIdempotent(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	engine := New(db, config, nil, testutil.GetLogger())
+	err := engine.MustStart()
+	assert.NoError(t, err)
+
+	user := testutil.TestUser1()
+
+	// Create and disable a task
+	taskReq := testutil.RestTask()
+	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	task, err := engine.CreateTask(user, taskReq)
+	assert.NoError(t, err)
+
+	_, err = engine.SetTaskEnabledByUser(user, task.Id, false)
+	assert.NoError(t, err)
+
+	// Set up mock stream
+	operatorAddr := "0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d"
+	mockStream := &MockSyncMessagesServer{}
+
+	engine.streamsMutex.Lock()
+	engine.operatorStreams[operatorAddr] = mockStream
+	engine.streamsMutex.Unlock()
+
+	engine.lock.Lock()
+	engine.trackSyncedTasks[operatorAddr] = &operatorState{
+		TaskID: make(map[string]bool),
+	}
+	engine.lock.Unlock()
+
+	// Try to disable an already-disabled task
+	resp, err := engine.SetTaskEnabledByUser(user, task.Id, false)
+	assert.NoError(t, err)
+	assert.True(t, resp.Success)
+	assert.Equal(t, "disabled", resp.Status)
+	assert.Equal(t, "Task is already disabled", resp.Message)
+
+	// No notifications should have been sent
+	engine.sendBatchedNotifications()
+	time.Sleep(100 * time.Millisecond)
+	messages := mockStream.GetReceivedMessages()
+	assert.Len(t, messages, 0, "Idempotent disable should not send any notification")
+}
+
+// TestTerminalStatesCannotBeToggled verifies that completed and failed tasks
+// cannot be enabled or disabled.
+func TestTerminalStatesCannotBeToggled(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	engine := New(db, config, nil, testutil.GetLogger())
+	err := engine.MustStart()
+	assert.NoError(t, err)
+
+	user := testutil.TestUser1()
+
+	// Create a task and manually set it to Completed status
+	taskReq := testutil.RestTask()
+	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	task, err := engine.CreateTask(user, taskReq)
+	assert.NoError(t, err)
+
+	// Manually force the task to Completed status in storage
+	taskObj, err := engine.GetTask(user, task.Id)
+	assert.NoError(t, err)
+
+	oldStatus := taskObj.Status
+	taskObj.Task.Status = avsproto.TaskStatus_Completed
+	taskJSON, err := taskObj.ToJSON()
+	assert.NoError(t, err)
+
+	updates := map[string][]byte{
+		string(TaskStorageKey(taskObj.Id, avsproto.TaskStatus_Completed)): taskJSON,
+		string(TaskUserKey(taskObj)):                                      []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)),
+	}
+	err = engine.db.BatchWrite(updates)
+	assert.NoError(t, err)
+	// Delete old key
+	_ = engine.db.Delete(TaskStorageKey(taskObj.Id, oldStatus))
+
+	// Remove from active tasks
+	engine.lock.Lock()
+	delete(engine.tasks, taskObj.Id)
+	engine.lock.Unlock()
+
+	// Try to enable a completed task
+	enableResp, err := engine.SetTaskEnabledByUser(user, task.Id, true)
+	assert.NoError(t, err)
+	assert.False(t, enableResp.Success)
+	assert.Equal(t, "error", enableResp.Status)
+	assert.Contains(t, enableResp.Message, "terminal status")
+
+	// Try to disable a completed task
+	disableResp, err := engine.SetTaskEnabledByUser(user, task.Id, false)
+	assert.NoError(t, err)
+	assert.False(t, disableResp.Success)
+	assert.Equal(t, "error", disableResp.Status)
+	assert.Contains(t, disableResp.Message, "terminal status")
+}
