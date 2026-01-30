@@ -292,7 +292,7 @@ const (
 	// 4000-4999: Resource State errors
 	ErrorCode_TASK_ALREADY_EXISTS    ErrorCode = 4000 // Task with same ID already exists
 	ErrorCode_TASK_ALREADY_COMPLETED ErrorCode = 4001 // Cannot modify completed task
-	ErrorCode_TASK_ALREADY_CANCELLED ErrorCode = 4002 // Cannot modify cancelled task
+	ErrorCode_TASK_ALREADY_CANCELLED ErrorCode = 4002 // Deprecated: cancelled state no longer exists; will be removed on next protoc-gen
 	ErrorCode_EXECUTION_IN_PROGRESS  ErrorCode = 4003 // Operation not allowed during execution
 	ErrorCode_WALLET_ALREADY_EXISTS  ErrorCode = 4004 // Wallet already exists for salt
 	ErrorCode_SECRET_ALREADY_EXISTS  ErrorCode = 4005 // Secret with same name exists
