@@ -1612,31 +1612,24 @@ func (n *Engine) sendMonitorTaskTriggerToOperators(task *model.Task) {
 			continue
 		}
 
-		done := make(chan error, 1)
-		go func(s avsproto.Node_SyncMessagesServer) {
-			done <- s.Send(&resp)
-		}(stream)
+		if err := stream.Send(&resp); err != nil {
+			n.logger.Warn("Failed to send MonitorTaskTrigger for re-enabled task",
+				"task_id", task.Id,
+				"operator", operatorAddr,
+				"error", err)
+			continue
+		}
 
-		select {
-		case err := <-done:
-			if err != nil {
-				n.logger.Warn("Failed to send MonitorTaskTrigger for re-enabled task",
-					"task_id", task.Id,
-					"operator", operatorAddr,
-					"error", err)
-			} else {
-				successCount++
-				n.lock.Lock()
-				if state, exists := n.trackSyncedTasks[operatorAddr]; exists && state != nil {
-					state.TaskID[task.Id] = true
-				}
-				n.lock.Unlock()
-			}
-		case <-time.After(2 * time.Second):
-			n.logger.Warn("Timeout sending MonitorTaskTrigger for re-enabled task",
+		successCount++
+		n.lock.Lock()
+		if state, exists := n.trackSyncedTasks[operatorAddr]; exists && state != nil {
+			state.TaskID[task.Id] = true
+		} else {
+			n.logger.Warn("trackSyncedTasks entry missing after successful send; task may be re-sent on next ticker cycle",
 				"task_id", task.Id,
 				"operator", operatorAddr)
 		}
+		n.lock.Unlock()
 	}
 
 	n.logger.Info("Notified operators about re-enabled task",

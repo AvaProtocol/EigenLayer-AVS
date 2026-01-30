@@ -616,7 +616,7 @@ func TestTerminalStatesCannotBeToggled(t *testing.T) {
 
 	updates := map[string][]byte{
 		string(TaskStorageKey(taskObj.Id, avsproto.TaskStatus_Completed)): taskJSON,
-		string(TaskUserKey(taskObj)): []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)),
+		string(TaskUserKey(taskObj)):                                      []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)),
 	}
 	err = engine.db.BatchWrite(updates)
 	assert.NoError(t, err)

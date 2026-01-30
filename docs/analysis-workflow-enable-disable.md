@@ -13,7 +13,7 @@ monitoring queues, and re-enabling sends it back.
 
 The codebase has **already been migrated** from permanent cancellation to a
 toggleable Enabled/Disabled model. The protobuf `TaskStatus` enum
-(`protobuf/avs.proto:331-339`) no longer contains a `Canceled` value:
+(`protobuf/avs.proto`, `enum TaskStatus`) no longer contains a `Canceled` value:
 
 ```protobuf
 enum TaskStatus {
@@ -25,9 +25,9 @@ enum TaskStatus {
 }
 ```
 
-The `SetTaskEnabled` gRPC RPC (`protobuf/avs.proto`, `aggregator/rpc_server.go:570-589`)
+The `SetTaskEnabled` gRPC RPC (`protobuf/avs.proto`, `aggregator/rpc_server.go`)
 accepts a boolean `enabled` flag and delegates to `Engine.SetTaskEnabledByUser`
-(`core/taskengine/engine.go:3102-3236`), which handles both directions:
+(`core/taskengine/engine.go`), which handles both directions:
 
 | From State   | To Enabled            | To Disabled           |
 |--------------|-----------------------|-----------------------|
@@ -39,25 +39,24 @@ accepts a boolean `enabled` flag and delegates to `Engine.SetTaskEnabledByUser`
 
 ### How Disable Works (Complete Path)
 
-1. `SetTaskEnabledByUser(user, id, false)` — `engine.go:3174`
-2. Task status set to `Disabled` — `model/task.go:297`
+1. `SetTaskEnabledByUser(user, id, false)` — `engine.go`, in `SetTaskEnabledByUser`
+2. Task status set to `Disabled` — `model/task.go`, `SetDisabled()`
 3. Persisted to storage as `t:i:<taskId>` — `storage/schema/task.go` (i = inactive)
 4. Old storage key `t:a:<taskId>` deleted
-5. Task removed from in-memory `n.tasks` map — `engine.go:3214-3215`
-6. `MessageOp_DisableTask` queued via batched notification — `engine.go:3218`
+5. Task removed from in-memory `n.tasks` map
+6. `MessageOp_DisableTask` queued via batched notification
 7. Operator receives message, calls `RemoveCheck(taskID)` on all trigger monitors
-   (event, block, time) — `operator/process_message.go:46-121`
+   (event, block, time) — `operator/process_message.go`
 
 ### How Re-Enable Works (Current Implementation)
 
-1. `SetTaskEnabledByUser(user, id, true)` — `engine.go:3172`
-2. Task status set to `Enabled` — `model/task.go:292`
+1. `SetTaskEnabledByUser(user, id, true)` — `engine.go`, in `SetTaskEnabledByUser`
+2. Task status set to `Enabled` — `model/task.go`, `SetEnabled()`
 3. Persisted to storage as `t:a:<taskId>`
 4. Old storage key `t:i:<taskId>` deleted
-5. Task added back to in-memory `n.tasks` map — `engine.go:3210-3212`
-6. **No immediate operator notification** — the 15-minute `StreamCheckToOperator`
-   ticker loop eventually detects the untracked task and sends
-   `MonitorTaskTrigger` to operators — `engine.go:1086-1377`
+5. Task added back to in-memory `n.tasks` map
+6. `sendMonitorTaskTriggerToOperators(task)` sends `MonitorTaskTrigger` to all
+   connected operators immediately — `engine.go`, in `sendMonitorTaskTriggerToOperators`
 
 ## Identified Gap: Re-Enable Notification Latency
 
@@ -66,18 +65,21 @@ accepts a boolean `enabled` flag and delegates to `Engine.SetTaskEnabledByUser`
 | **Disable**  | Seconds (batched notification flush) |
 | **Re-Enable**| **Up to 15 minutes** (next ticker cycle) |
 
-When a task is re-enabled, only the in-memory map is updated (`engine.go:3208-3212`):
+When a task is re-enabled, the in-memory map is updated and operators are
+notified immediately (in `SetTaskEnabledByUser`):
 
 ```go
 if enabled {
     n.lock.Lock()
     n.tasks[task.Id] = task
     n.lock.Unlock()
-    // No operator notification! Relies on 15-min ticker.
+
+    // Send MonitorTaskTrigger directly to operators
+    n.sendMonitorTaskTriggerToOperators(task)
 }
 ```
 
-Versus the disable path (`engine.go:3213-3218`):
+The disable path (also in `SetTaskEnabledByUser`):
 
 ```go
 } else {
@@ -95,11 +97,11 @@ Versus the disable path (`engine.go:3213-3218`):
 After re-enabling a task and adding it to the in-memory map, send a
 `MonitorTaskTrigger` message directly to connected operators with full task
 metadata. This mirrors the pattern already used by
-`instructOperatorImmediateTrigger` (`engine.go:2002-2068`).
+`instructOperatorImmediateTrigger` (in `engine.go`).
 
 **File**: `core/taskengine/engine.go`
 
-In `SetTaskEnabledByUser`, after the enable branch at line 3209:
+In `SetTaskEnabledByUser`, after the enable branch:
 
 ```go
 if enabled {
@@ -128,10 +130,10 @@ This function would be callable from both the ticker loop and
 
 ### Step 3: Clean Up Legacy References
 
-- Remove dead error code `TASK_ALREADY_CANCELLED = 4002` from
-  `protobuf/avs.proto:298` — canceled is no longer a valid state
+- Deprecate error code `TASK_ALREADY_CANCELLED = 4002` in
+  `protobuf/avs.proto` — cancelled state replaced by Disabled
 - Resolve merge conflicts in
-  `integration_test/activation_deactivation_sync_test.go` (lines 100-126)
+  `integration_test/activation_deactivation_sync_test.go`
 
 ### Summary of Files to Modify
 
