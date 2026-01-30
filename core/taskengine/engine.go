@@ -1043,6 +1043,17 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
 
+	// Channel to trigger immediate task sending for new/reconnected operators
+	immediateSendCh := make(chan struct{}, 1)
+	// Schedule immediate send after stability period
+	go func() {
+		time.Sleep(10 * time.Second) // Wait for connection stability
+		select {
+		case immediateSendCh <- struct{}{}:
+		default:
+		}
+	}()
+
 	// Reset the state if the operator disconnect
 	defer func() {
 		n.logger.Info("🔌 Operator disconnecting, cleaning up state",
@@ -1090,6 +1101,24 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 				"operator", address,
 				"stream_id", streamID)
 			return nil
+		case <-immediateSendCh:
+			// Immediate send triggered on reconnect
+			n.logger.Info("🚀 Immediate task send triggered for reconnected operator",
+				"operator", address,
+				"stream_id", streamID)
+
+			n.lock.Lock()
+			isShutdown := n.shutdown
+			n.lock.Unlock()
+			if isShutdown {
+				return nil
+			}
+
+			if n.tasks == nil {
+				n.logger.Debug("📭 No tasks available",
+					"operator", address)
+				continue
+			}
 		case <-ticker.C:
 			tickTime := time.Now()
 			connectionAge := time.Since(connectionStartTime)
@@ -1126,251 +1155,252 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			n.logger.Info("✅ Checking task assignment",
 				"operator", address,
 				"tasks_count", len(n.tasks))
+		}
 
-			if !n.CanStreamCheck(address) {
-				// This isn't a consensus approval. It's a feature flag we control server side whether to stream data to the operator or not.
-				// TODO: Remove this flag when we measure performance impact on all operator
+		// Send tasks to operator (shared between immediate send and ticker)
+		if !n.CanStreamCheck(address) {
+			// This isn't a consensus approval. It's a feature flag we control server side whether to stream data to the operator or not.
+			// TODO: Remove this flag when we measure performance impact on all operator
 
-				// Use debounced logging to prevent spam (only log every 3 minutes per operator)
-				if n.shouldLogApprovalMessage(address) {
-					// Build dynamic approved operators list for logging
-					var approvedList []string
-					if len(n.config.ApprovedOperators) == 0 {
-						// Use hardcoded list if no configuration
-						approvedList = []string{"0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d", "0xc6b87cc9e85b07365b6abefff061f237f7cf7dc3", "0xa026265a0f01a6e1a19b04655519429df0a57c4e"}
-					} else {
-						// Use configured list
-						for _, addr := range n.config.ApprovedOperators {
-							approvedList = append(approvedList, addr.Hex())
-						}
+			// Use debounced logging to prevent spam (only log every 3 minutes per operator)
+			if n.shouldLogApprovalMessage(address) {
+				// Build dynamic approved operators list for logging
+				var approvedList []string
+				if len(n.config.ApprovedOperators) == 0 {
+					// Use hardcoded list if no configuration
+					approvedList = []string{"0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d", "0xc6b87cc9e85b07365b6abefff061f237f7cf7dc3", "0xa026265a0f01a6e1a19b04655519429df0a57c4e"}
+				} else {
+					// Use configured list
+					for _, addr := range n.config.ApprovedOperators {
+						approvedList = append(approvedList, addr.Hex())
 					}
-
-					n.logger.Info("operator has not been approved to process task",
-						"operator", address,
-						"approved_operators", approvedList,
-						"next_log_in", "3 minutes if still not approved")
 				}
+
+				n.logger.Info("operator has not been approved to process task",
+					"operator", address,
+					"approved_operators", approvedList,
+					"next_log_in", "3 minutes if still not approved")
+			}
+			continue
+		}
+
+		// Removed excessive debug logging that was happening every 5 seconds
+		// Only log when there are actual tasks to send or state changes
+
+		// Reassign orphaned tasks when operators connect/disconnect
+		// IMPORTANT: Only after connection has stabilized to prevent premature assignment
+		n.reassignOrphanedTasks()
+
+		// Aggregate tasks for this operator to reduce logging and improve efficiency
+		var tasksToStream []*model.Task
+		var tasksByTriggerType = make(map[string]int) // Count tasks by trigger type
+		var newAssignments []string                   // Track new task assignments for this operator
+		var orphanedTasksReclaimed []string           // Track orphaned tasks being reclaimed
+
+		n.logger.Debug("🔍 Processing tasks for operator assignment",
+			"operator", address,
+			"total_tasks_in_memory", len(n.tasks))
+
+		// Iterate over a snapshot to avoid concurrent map iteration/write panics
+		n.lock.Lock()
+		snapshot := make([]*model.Task, 0, len(n.tasks))
+		for _, t := range n.tasks {
+			snapshot = append(snapshot, t)
+		}
+		n.lock.Unlock()
+
+		// snapshot currently tracked task IDs for this operator under lock
+		n.lock.Lock()
+		tracked := make(map[string]bool)
+		if state, exists := n.trackSyncedTasks[address]; exists && state != nil {
+			for id, present := range state.TaskID {
+				if present {
+					tracked[id] = true
+				}
+			}
+		}
+		n.lock.Unlock()
+
+		for _, task := range snapshot {
+			if _, ok := tracked[task.Id]; ok {
 				continue
 			}
 
-			// Removed excessive debug logging that was happening every 5 seconds
-			// Only log when there are actual tasks to send or state changes
+			// CRITICAL FIX: Check for orphaned tasks (assigned to empty string) and reclaim them
+			n.assignmentMutex.RLock()
+			currentAssignment, isAssigned := n.taskAssignments[task.Id]
+			n.assignmentMutex.RUnlock()
 
-			// Reassign orphaned tasks when operators connect/disconnect
-			// IMPORTANT: Only after connection has stabilized to prevent premature assignment
-			n.reassignOrphanedTasks()
-
-			// Aggregate tasks for this operator to reduce logging and improve efficiency
-			var tasksToStream []*model.Task
-			var tasksByTriggerType = make(map[string]int) // Count tasks by trigger type
-			var newAssignments []string                   // Track new task assignments for this operator
-			var orphanedTasksReclaimed []string           // Track orphaned tasks being reclaimed
-
-			n.logger.Debug("🔍 Processing tasks for operator assignment",
+			n.logger.Debug("🔍 Checking task assignment status",
 				"operator", address,
-				"total_tasks_in_memory", len(n.tasks))
+				"task_id", task.Id,
+				"is_assigned", isAssigned,
+				"current_assignment", currentAssignment)
 
-			// Iterate over a snapshot to avoid concurrent map iteration/write panics
-			n.lock.Lock()
-			snapshot := make([]*model.Task, 0, len(n.tasks))
-			for _, t := range n.tasks {
-				snapshot = append(snapshot, t)
-			}
-			n.lock.Unlock()
+			var wasReclaimed bool
+			if (isAssigned && currentAssignment == "") || !isAssigned {
+				// This task is orphaned (assigned to empty string) OR has no assignment at all
+				// Both cases mean we should reclaim it for this reconnecting operator
+				n.assignmentMutex.Lock()
+				n.taskAssignments[task.Id] = address
+				n.assignmentMutex.Unlock()
 
-			// snapshot currently tracked task IDs for this operator under lock
-			n.lock.Lock()
-			tracked := make(map[string]bool)
-			if state, exists := n.trackSyncedTasks[address]; exists && state != nil {
-				for id, present := range state.TaskID {
-					if present {
-						tracked[id] = true
-					}
-				}
-			}
-			n.lock.Unlock()
+				orphanedTasksReclaimed = append(orphanedTasksReclaimed, task.Id)
+				wasReclaimed = true
 
-			for _, task := range snapshot {
-				if _, ok := tracked[task.Id]; ok {
-					continue
+				previousAssignment := "empty_string"
+				if !isAssigned {
+					previousAssignment = "no_assignment"
 				}
 
-				// CRITICAL FIX: Check for orphaned tasks (assigned to empty string) and reclaim them
-				n.assignmentMutex.RLock()
-				currentAssignment, isAssigned := n.taskAssignments[task.Id]
-				n.assignmentMutex.RUnlock()
+				n.logger.Info("🔄 Reclaimed orphaned task for operator",
+					"task_id", task.Id,
+					"operator", address,
+					"previous_assignment", previousAssignment)
+			}
 
-				n.logger.Debug("🔍 Checking task assignment status",
+			// Check if this operator is assigned to handle this task
+			// CRITICAL FIX: Don't call assignTaskToOperator if we just reclaimed the task
+			var assignedOperator string
+			if wasReclaimed {
+				assignedOperator = address // We just assigned it to this operator
+			} else {
+				assignedOperator = n.assignTaskToOperator(task)
+			}
+
+			if assignedOperator != address {
+				// This task is assigned to a different operator
+				n.logger.Debug("⏭️ Skipping task - assigned to different operator",
 					"operator", address,
 					"task_id", task.Id,
-					"is_assigned", isAssigned,
-					"current_assignment", currentAssignment)
-
-				var wasReclaimed bool
-				if (isAssigned && currentAssignment == "") || !isAssigned {
-					// This task is orphaned (assigned to empty string) OR has no assignment at all
-					// Both cases mean we should reclaim it for this reconnecting operator
-					n.assignmentMutex.Lock()
-					n.taskAssignments[task.Id] = address
-					n.assignmentMutex.Unlock()
-
-					orphanedTasksReclaimed = append(orphanedTasksReclaimed, task.Id)
-					wasReclaimed = true
-
-					previousAssignment := "empty_string"
-					if !isAssigned {
-						previousAssignment = "no_assignment"
-					}
-
-					n.logger.Info("🔄 Reclaimed orphaned task for operator",
-						"task_id", task.Id,
-						"operator", address,
-						"previous_assignment", previousAssignment)
-				}
-
-				// Check if this operator is assigned to handle this task
-				// CRITICAL FIX: Don't call assignTaskToOperator if we just reclaimed the task
-				var assignedOperator string
-				if wasReclaimed {
-					assignedOperator = address // We just assigned it to this operator
-				} else {
-					assignedOperator = n.assignTaskToOperator(task)
-				}
-
-				if assignedOperator != address {
-					// This task is assigned to a different operator
-					n.logger.Debug("⏭️ Skipping task - assigned to different operator",
-						"operator", address,
-						"task_id", task.Id,
-						"assigned_to", assignedOperator)
-					continue
-				}
-
-				// Track this as a new assignment (unless it was a reclaimed orphan)
-				isReclaimed := false
-				for _, orphanedId := range orphanedTasksReclaimed {
-					if orphanedId == task.Id {
-						isReclaimed = true
-						break
-					}
-				}
-				if !isReclaimed {
-					newAssignments = append(newAssignments, task.Id)
-				}
-
-				// Check if operator supports this trigger type
-				if !n.supportsTaskTrigger(address, task) {
-					n.logger.Info("⚠️ Skipping task - operator doesn't support trigger type",
-						"task_id", task.Id,
-						"operator", address,
-						"trigger_type", task.Trigger.String())
-					continue
-				}
-
-				tasksToStream = append(tasksToStream, task)
-				triggerTypeName := task.Trigger.String()
-				tasksByTriggerType[triggerTypeName]++
+					"assigned_to", assignedOperator)
+				continue
 			}
 
-			// Log task processing results
-			n.logger.Debug("🔍 Task processing completed for operator",
-				"operator", address,
-				"tasks_to_stream", len(tasksToStream),
-				"new_assignments", len(newAssignments),
-				"orphaned_reclaimed", len(orphanedTasksReclaimed))
+			// Track this as a new assignment (unless it was a reclaimed orphan)
+			isReclaimed := false
+			for _, orphanedId := range orphanedTasksReclaimed {
+				if orphanedId == task.Id {
+					isReclaimed = true
+					break
+				}
+			}
+			if !isReclaimed {
+				newAssignments = append(newAssignments, task.Id)
+			}
 
-			// Log aggregated task assignments per operator
-			if len(newAssignments) > 0 || len(orphanedTasksReclaimed) > 0 {
-				n.logger.Info("🔄 Task assignments for operator",
+			// Check if operator supports this trigger type
+			if !n.supportsTaskTrigger(address, task) {
+				n.logger.Info("⚠️ Skipping task - operator doesn't support trigger type",
+					"task_id", task.Id,
 					"operator", address,
-					"stream_id", streamID,
-					"operation", "MonitorTaskTrigger",
-					"assigned_task_ids", newAssignments,
-					"total_assignments", len(newAssignments),
-					"orphaned_tasks_reclaimed", orphanedTasksReclaimed,
-					"total_reclaimed", len(orphanedTasksReclaimed))
+					"trigger_type", task.Trigger.String())
+				continue
 			}
 
-			// Stream all tasks and log aggregated results
-			if len(tasksToStream) > 0 {
-				successCount := 0
-				failedCount := 0
-				var firstError error
+			tasksToStream = append(tasksToStream, task)
+			triggerTypeName := task.Trigger.String()
+			tasksByTriggerType[triggerTypeName]++
+		}
 
-				for _, task := range tasksToStream {
-					resp := avsproto.SyncMessagesResp{
-						Id: task.Id,
-						Op: avsproto.MessageOp_MonitorTaskTrigger,
+		// Log task processing results
+		n.logger.Debug("🔍 Task processing completed for operator",
+			"operator", address,
+			"tasks_to_stream", len(tasksToStream),
+			"new_assignments", len(newAssignments),
+			"orphaned_reclaimed", len(orphanedTasksReclaimed))
 
-						TaskMetadata: &avsproto.SyncMessagesResp_TaskMetadata{
-							TaskId:    task.Id,
-							Remain:    task.MaxExecution,
-							ExpiredAt: task.ExpiredAt,
-							Trigger:   task.Trigger,
-							StartAt:   task.StartAt,
-						},
-					}
+		// Log aggregated task assignments per operator
+		if len(newAssignments) > 0 || len(orphanedTasksReclaimed) > 0 {
+			n.logger.Info("🔄 Task assignments for operator",
+				"operator", address,
+				"stream_id", streamID,
+				"operation", "MonitorTaskTrigger",
+				"assigned_task_ids", newAssignments,
+				"total_assignments", len(newAssignments),
+				"orphaned_tasks_reclaimed", orphanedTasksReclaimed,
+				"total_reclaimed", len(orphanedTasksReclaimed))
+		}
 
-					// Add timeout wrapper for send operation to prevent hanging
-					sendError := make(chan error, 1)
-					go func() {
-						sendError <- srv.Send(&resp)
-					}()
+		// Stream all tasks and log aggregated results
+		if len(tasksToStream) > 0 {
+			successCount := 0
+			failedCount := 0
+			var firstError error
 
-					select {
-					case err := <-sendError:
-						if err != nil {
-							failedCount++
-							if firstError == nil {
-								firstError = err
-							}
-							n.logger.Warn("⚠️ Failed to send task to operator (will retry next cycle)",
-								"task_id", task.Id,
-								"operator", payload.Address,
-								"error", err,
-								"error_type", fmt.Sprintf("%T", err),
-								"grpc_status", status.Code(err).String())
+			for _, task := range tasksToStream {
+				resp := avsproto.SyncMessagesResp{
+					Id: task.Id,
+					Op: avsproto.MessageOp_MonitorTaskTrigger,
 
-							// Check if this is a connection-level error that requires reconnection
-							grpcCode := status.Code(err)
-							if grpcCode == codes.Unavailable || grpcCode == codes.Canceled || grpcCode == codes.DeadlineExceeded {
-								n.logger.Error("🔥 Connection-level error detected, operator needs to reconnect",
-									"operator", payload.Address,
-									"error", err,
-									"grpc_code", grpcCode.String())
-								return fmt.Errorf("connection-level error, operator must reconnect: %w", err)
-							}
-						} else {
-							n.lock.Lock()
-							n.trackSyncedTasks[address].TaskID[task.Id] = true
-							n.lock.Unlock()
-							successCount++
-						}
-					case <-time.After(2 * time.Second):
+					TaskMetadata: &avsproto.SyncMessagesResp_TaskMetadata{
+						TaskId:    task.Id,
+						Remain:    task.MaxExecution,
+						ExpiredAt: task.ExpiredAt,
+						Trigger:   task.Trigger,
+						StartAt:   task.StartAt,
+					},
+				}
+
+				// Add timeout wrapper for send operation to prevent hanging
+				sendError := make(chan error, 1)
+				go func() {
+					sendError <- srv.Send(&resp)
+				}()
+
+				select {
+				case err := <-sendError:
+					if err != nil {
 						failedCount++
-						n.logger.Warn("⏰ Timeout sending task to operator (will retry next cycle)",
+						if firstError == nil {
+							firstError = err
+						}
+						n.logger.Warn("⚠️ Failed to send task to operator (will retry next cycle)",
 							"task_id", task.Id,
 							"operator", payload.Address,
-							"timeout", "2s")
-					}
-				}
+							"error", err,
+							"error_type", fmt.Sprintf("%T", err),
+							"grpc_status", status.Code(err).String())
 
-				// Log aggregated results instead of individual tasks
-				if successCount > 0 || failedCount > 0 {
-					n.logger.Info("📤 Streamed tasks to operator",
+						// Check if this is a connection-level error that requires reconnection
+						grpcCode := status.Code(err)
+						if grpcCode == codes.Unavailable || grpcCode == codes.Canceled || grpcCode == codes.DeadlineExceeded {
+							n.logger.Error("🔥 Connection-level error detected, operator needs to reconnect",
+								"operator", payload.Address,
+								"error", err,
+								"grpc_code", grpcCode.String())
+							return fmt.Errorf("connection-level error, operator must reconnect: %w", err)
+						}
+					} else {
+						n.lock.Lock()
+						n.trackSyncedTasks[address].TaskID[task.Id] = true
+						n.lock.Unlock()
+						successCount++
+					}
+				case <-time.After(2 * time.Second):
+					failedCount++
+					n.logger.Warn("⏰ Timeout sending task to operator (will retry next cycle)",
+						"task_id", task.Id,
 						"operator", payload.Address,
-						"total_tasks", len(tasksToStream),
-						"successful", successCount,
-						"failed", failedCount,
-						"task_breakdown", tasksByTriggerType)
+						"timeout", "2s")
 				}
+			}
 
-				// If all tasks failed with connection errors, return error to trigger reconnection
-				if failedCount > 0 && successCount == 0 && firstError != nil {
-					grpcCode := status.Code(firstError)
-					if grpcCode == codes.Unavailable || grpcCode == codes.Canceled || grpcCode == codes.DeadlineExceeded {
-						return fmt.Errorf("all task sends failed with connection error: %w", firstError)
-					}
+			// Log aggregated results instead of individual tasks
+			if successCount > 0 || failedCount > 0 {
+				n.logger.Info("📤 Streamed tasks to operator",
+					"operator", payload.Address,
+					"total_tasks", len(tasksToStream),
+					"successful", successCount,
+					"failed", failedCount,
+					"task_breakdown", tasksByTriggerType)
+			}
+
+			// If all tasks failed with connection errors, return error to trigger reconnection
+			if failedCount > 0 && successCount == 0 && firstError != nil {
+				grpcCode := status.Code(firstError)
+				if grpcCode == codes.Unavailable || grpcCode == codes.Canceled || grpcCode == codes.DeadlineExceeded {
+					return fmt.Errorf("all task sends failed with connection error: %w", firstError)
 				}
 			}
 		}
