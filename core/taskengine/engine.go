@@ -1043,16 +1043,10 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
 
-	// Channel to trigger immediate task sending for new/reconnected operators
-	immediateSendCh := make(chan struct{}, 1)
-	// Schedule immediate send after stability period
-	go func() {
-		time.Sleep(10 * time.Second) // Wait for connection stability
-		select {
-		case immediateSendCh <- struct{}{}:
-		default:
-		}
-	}()
+	// Timer to trigger immediate task sending after connection stabilizes
+	connectionStabilityPeriod := 10 * time.Second
+	immediateSendTimer := time.NewTimer(connectionStabilityPeriod)
+	defer immediateSendTimer.Stop()
 
 	// Reset the state if the operator disconnect
 	defer func() {
@@ -1101,20 +1095,21 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 				"operator", address,
 				"stream_id", streamID)
 			return nil
-		case <-immediateSendCh:
-			// Immediate send triggered on reconnect
-			n.logger.Info("🚀 Immediate task send triggered for reconnected operator",
+		case <-immediateSendTimer.C:
+			// Immediate send triggered after connection stability period
+			n.logger.Info("🚀 Immediate task send triggered for operator connection",
 				"operator", address,
 				"stream_id", streamID)
 
 			n.lock.Lock()
 			isShutdown := n.shutdown
+			hasNoTasks := n.tasks == nil
 			n.lock.Unlock()
 			if isShutdown {
 				return nil
 			}
 
-			if n.tasks == nil {
+			if hasNoTasks {
 				n.logger.Debug("📭 No tasks available",
 					"operator", address)
 				continue
@@ -1129,32 +1124,34 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 
 			n.lock.Lock()
 			isShutdown := n.shutdown
+			hasNoTasks := n.tasks == nil
+			tasksCount := len(n.tasks)
 			n.lock.Unlock()
 			if isShutdown {
 				return nil
 			}
 
-			if n.tasks == nil {
+			if hasNoTasks {
 				n.logger.Debug("📭 No tasks available",
 					"operator", address)
 				continue
 			}
 
 			// Add connection stability grace period to prevent race conditions
-			if connectionAge < 10*time.Second {
+			if connectionAge < connectionStabilityPeriod {
 				n.logger.Info("⏳ Waiting for connection to stabilize before sending tasks",
 					"operator", address,
 					"stream_id", streamID,
 					"connection_age", connectionAge.String(),
 					"min_required", "10s",
-					"remaining_wait", (10*time.Second - connectionAge).String(),
+					"remaining_wait", (connectionStabilityPeriod - connectionAge).String(),
 					"tick_time", tickTime.Format("15:04:05.000"))
 				continue
 			}
 
 			n.logger.Info("✅ Checking task assignment",
 				"operator", address,
-				"tasks_count", len(n.tasks))
+				"tasks_count", tasksCount)
 		}
 
 		// Send tasks to operator (shared between immediate send and ticker)
@@ -3768,8 +3765,8 @@ func (n *Engine) assignTaskToOperator(task *model.Task) string {
 
 // reassignOrphanedTasks reassigns tasks from disconnected operators
 func (n *Engine) reassignOrphanedTasks() {
+	// Phase 1: Find and remove orphaned task assignments
 	n.assignmentMutex.Lock()
-	defer n.assignmentMutex.Unlock()
 
 	n.streamsMutex.RLock()
 	activeOperators := make(map[string]bool)
@@ -3786,39 +3783,49 @@ func (n *Engine) reassignOrphanedTasks() {
 		}
 	}
 
-	if len(orphanedTasks) > 0 {
-		n.logger.Info("🔄 Reassigning orphaned tasks",
-			"orphaned_count", len(orphanedTasks),
-			"active_operators", len(activeOperators))
+	n.assignmentMutex.Unlock()
 
-		if len(activeOperators) == 0 {
-			// No active operators to reassign to - leave tasks unassigned for now
-			// They will be reclaimed when operators reconnect
-			n.logger.Info("⏸️ No active operators available - orphaned tasks will be reclaimed on operator reconnection",
-				"orphaned_count", len(orphanedTasks))
-			return
+	if len(orphanedTasks) == 0 {
+		return
+	}
+
+	n.logger.Info("🔄 Reassigning orphaned tasks",
+		"orphaned_count", len(orphanedTasks),
+		"active_operators", len(activeOperators))
+
+	if len(activeOperators) == 0 {
+		// No active operators to reassign to - leave tasks unassigned for now
+		// They will be reclaimed when operators reconnect
+		n.logger.Info("⏸️ No active operators available - orphaned tasks will be reclaimed on operator reconnection",
+			"orphaned_count", len(orphanedTasks))
+		return
+	}
+
+	// Phase 2: Snapshot needed tasks under n.lock (maintains lock ordering: lock -> assignmentMutex)
+	n.lock.Lock()
+	taskSnapshot := make(map[string]*model.Task, len(orphanedTasks))
+	for _, taskID := range orphanedTasks {
+		if task, exists := n.tasks[taskID]; exists {
+			taskSnapshot[taskID] = task
 		}
+	}
+	n.lock.Unlock()
 
-		// Track reassignments by operator
-		reassignmentsByOperator := make(map[string][]string)
-
-		// Reassign orphaned tasks
-		for _, taskID := range orphanedTasks {
-			if task, exists := n.tasks[taskID]; exists {
-				assignedOperator := n.assignTaskToOperator(task)
-				if assignedOperator != "" {
-					reassignmentsByOperator[assignedOperator] = append(reassignmentsByOperator[assignedOperator], taskID)
-				}
-			}
+	// Phase 3: Reassign orphaned tasks (assignTaskToOperator handles its own locking)
+	reassignmentsByOperator := make(map[string][]string)
+	for taskID, task := range taskSnapshot {
+		assignedOperator := n.assignTaskToOperator(task)
+		if assignedOperator != "" {
+			reassignmentsByOperator[assignedOperator] = append(reassignmentsByOperator[assignedOperator], taskID)
 		}
+	}
 
-		// Log aggregated reassignments per operator
-		for operatorAddr, taskIDs := range reassignmentsByOperator {
-			n.logger.Info("🔄 Reassigned tasks to operator",
-				"operator", operatorAddr,
-				"operation", "MonitorTaskTrigger",
-				"total_reassignments", len(taskIDs))
-		}
+	// Log aggregated reassignments per operator
+	for operatorAddr, taskIDs := range reassignmentsByOperator {
+		n.logger.Info("🔄 Reassigned tasks to operator",
+			"operator", operatorAddr,
+			"operation", "MonitorTaskTrigger",
+			"total_reassignments", len(taskIDs))
 	}
 }
 
