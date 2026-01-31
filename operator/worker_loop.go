@@ -645,7 +645,11 @@ func (o *Operator) StreamMessages() {
 		for {
 			resp, err := stream.Recv()
 			if err == io.EOF {
-				return
+				o.logger.Info("📡 Stream closed by aggregator (EOF) - will reconnect",
+					"aggregator_address", o.config.AggregatorServerIpPortAddress,
+					"operator", o.config.OperatorAddress,
+					"solution", "Stream closed normally, retrying connection")
+				break // Break out of inner loop to retry connection in outer loop
 			}
 			if err != nil {
 				var errorType string
