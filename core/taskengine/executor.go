@@ -554,6 +554,10 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	execution.Error = executionError                          // Comprehensive error message from failed steps
 	execution.Steps = vm.ExecutionLogs                        // Contains all steps including failed ones
 	execution.TotalGasCost = totalGasCost                     // Total gas cost for the entire workflow
+	execution.AutomationFee = &avsproto.FeeAmount{
+		NativeTokenAmount: "0",
+		UsdAmount:         "0",
+	}
 
 	// Ensure no NaN/Inf sneak into protobuf Values (which reject them)
 	sanitizeExecutionForPersistence(execution)
