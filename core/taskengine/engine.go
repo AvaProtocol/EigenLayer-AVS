@@ -2750,6 +2750,11 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Steps:        vm.ExecutionLogs,                       // Now contains both trigger and node steps (including failed ones)
 		Index:        task.ExecutionCount,                    // Use current execution count for simulation (0-based)
 		TotalGasCost: totalGasCost,                           // Total gas cost for the entire workflow
+		AutomationFee: &avsproto.FeeAmount{
+			NativeTokenAmount: "0",
+			NativeTokenSymbol: "", // Zero fee; symbol not applicable until automation fees are enabled
+			UsdAmount:         "0",
+		},
 	}
 
 	// Log execution status based on result type
@@ -3055,6 +3060,11 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 		StartAt: time.Now().UnixMilli(),       // Approximate start time
 		Steps:   []*avsproto.Execution_Step{}, // Empty steps for pending
 		Index:   pendingIndex,                 // Use pre-assigned or newly assigned index
+		AutomationFee: &avsproto.FeeAmount{
+			NativeTokenAmount: "0",
+			NativeTokenSymbol: "", // Zero fee; symbol not applicable until automation fees are enabled
+			UsdAmount:         "0",
+		},
 	}, nil
 }
 

@@ -687,6 +687,10 @@ message Execution {
   // Units are in wei. Use string for large numbers to avoid overflow.
   string total_gas_cost = 7;
 
+  // Automation fee charged for monitoring and executing this workflow.
+  // Currently hard-coded to zero; will be populated when automation fees are enabled.
+  FeeAmount automation_fee = 9;
+
   message Step {
     string id = 1;
     

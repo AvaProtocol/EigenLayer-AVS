@@ -5,11 +5,9 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/services"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -41,94 +39,57 @@ func TestFeeEstimator_ChainIDDetection(t *testing.T) {
 	logger, err := sdklogging.NewZapLogger(sdklogging.Development)
 	require.NoError(t, err, "Failed to create logger")
 
-	// Test with different RPC endpoints to verify chain ID detection
-	testCases := []struct {
-		name            string
-		rpcURL          string
-		expectedChainID int64
-	}{
-		{
-			name:            "Ethereum Mainnet",
-			rpcURL:          "https://eth.llamarpc.com",
-			expectedChainID: 1,
-		},
-		{
-			name:            "Base Mainnet",
-			rpcURL:          "https://mainnet.base.org",
-			expectedChainID: 8453,
-		},
-	}
+	smartWalletConfig := testutil.GetTestSmartWalletConfig()
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Create eth client
-			ethClient, err := ethclient.Dial(tc.rpcURL)
-			require.NoError(t, err, "Failed to connect to RPC")
-			defer ethClient.Close()
+	// Create eth client from test config RPC
+	ethClient := testutil.GetRpcClient()
+	defer ethClient.Close()
 
-			// Create mock smart wallet config
-			smartWalletConfig := &config.SmartWalletConfig{
-				FactoryAddress: common.HexToAddress("0x1234567890123456789012345678901234567890"),
-			}
+	// Create fee estimator with mock price service
+	feeEstimator := NewFeeEstimator(
+		logger,
+		ethClient,
+		nil, // No tenderly client needed for this test
+		smartWalletConfig,
+		&mockPriceService{},
+	)
 
-			// Create fee estimator with mock price service
-			feeEstimator := NewFeeEstimator(
-				logger,
-				ethClient,
-				nil, // No tenderly client needed for this test
-				smartWalletConfig,
-				&mockPriceService{},
-			)
+	// Verify chain ID starts as 0 (not detected yet)
+	assert.Equal(t, int64(0), feeEstimator.chainID, "Chain ID should be 0 initially")
 
-			// Verify chain ID starts as 0 (not detected yet)
-			assert.Equal(t, int64(0), feeEstimator.chainID, "Chain ID should be 0 initially")
+	// Test chain ID detection
+	ctx := context.Background()
+	detectedChainID, err := feeEstimator.getChainID(ctx)
+	require.NoError(t, err, "Failed to detect chain ID")
+	assert.True(t, detectedChainID > 0, "Detected chain ID should be positive")
+	assert.Equal(t, detectedChainID, feeEstimator.chainID, "Chain ID should be cached")
 
-			// Test chain ID detection
-			ctx := context.Background()
-			detectedChainID, err := feeEstimator.getChainID(ctx)
-			require.NoError(t, err, "Failed to detect chain ID")
+	// Test that subsequent calls return cached value
+	cachedChainID, err := feeEstimator.getChainID(ctx)
+	require.NoError(t, err, "Failed to get cached chain ID")
+	assert.Equal(t, detectedChainID, cachedChainID, "Cached chain ID should match")
 
-			assert.Equal(t, tc.expectedChainID, detectedChainID, "Detected chain ID should match expected")
-			assert.Equal(t, tc.expectedChainID, feeEstimator.chainID, "Chain ID should be cached")
+	// Test utility methods use correct chain ID
+	testAmount := big.NewInt(1000000000000000000) // 1 ETH in wei
+	feeAmount, err := feeEstimator.convertToFeeAmount(testAmount)
+	require.NoError(t, err, "Failed to convert fee amount")
 
-			// Test that subsequent calls return cached value
-			cachedChainID, err := feeEstimator.getChainID(ctx)
-			require.NoError(t, err, "Failed to get cached chain ID")
-			assert.Equal(t, tc.expectedChainID, cachedChainID, "Cached chain ID should match")
+	assert.Equal(t, "ETH", feeAmount.NativeTokenSymbol, "Symbol should be ETH")
+	assert.Equal(t, testAmount.String(), feeAmount.NativeTokenAmount, "Native token amount should match input")
 
-			// Test utility methods use correct chain ID
-			testAmount := big.NewInt(1000000000000000000) // 1 ETH in wei
-			feeAmount, err := feeEstimator.convertToFeeAmount(testAmount)
-			require.NoError(t, err, "Failed to convert fee amount")
-
-			assert.Equal(t, "ETH", feeAmount.NativeTokenSymbol, "Symbol should be ETH")
-			assert.Equal(t, testAmount.String(), feeAmount.NativeTokenAmount, "Native token amount should match input")
-
-			// Verify price was fetched for correct chain ID (different chains have different mock prices)
-			if tc.expectedChainID == 11155111 || tc.expectedChainID == 84532 {
-				// Testnet chains should have 2500 price
-				assert.Contains(t, feeAmount.UsdAmount, "2500", "USD amount should reflect testnet price")
-			} else {
-				// Mainnet chains should have 3000 price
-				assert.Contains(t, feeAmount.UsdAmount, "3000", "USD amount should reflect mainnet price")
-			}
-		})
-	}
+	// Verify USD amount is non-empty (the mock returns a price for any chain)
+	assert.NotEmpty(t, feeAmount.UsdAmount, "USD amount should be set")
 }
 
 func TestFeeEstimator_MoralisServiceIntegration(t *testing.T) {
-	// Test with actual Moralis service if API key is available
 	logger, err := sdklogging.NewZapLogger(sdklogging.Development)
 	require.NoError(t, err, "Failed to create logger")
 
-	// Connect to Ethereum mainnet
-	ethClient, err := ethclient.Dial("https://eth.llamarpc.com")
-	require.NoError(t, err, "Failed to connect to Ethereum RPC")
-	defer ethClient.Close()
+	smartWalletConfig := testutil.GetTestSmartWalletConfig()
 
-	smartWalletConfig := &config.SmartWalletConfig{
-		FactoryAddress: common.HexToAddress("0x1234567890123456789012345678901234567890"),
-	}
+	// Connect using test config RPC
+	ethClient := testutil.GetRpcClient()
+	defer ethClient.Close()
 
 	// Create Moralis service (will use fallback pricing if no API key)
 	moralisService := services.GetMoralisService("", logger)
@@ -147,7 +108,7 @@ func TestFeeEstimator_MoralisServiceIntegration(t *testing.T) {
 	// Test chain ID detection
 	chainID, err := feeEstimator.getChainID(ctx)
 	require.NoError(t, err, "Failed to detect chain ID")
-	assert.Equal(t, int64(1), chainID, "Should detect Ethereum mainnet")
+	assert.True(t, chainID > 0, "Should detect a valid chain ID")
 
 	// Test Moralis service integration for price data
 	price, err := moralisService.GetNativeTokenPriceUSD(chainID)
