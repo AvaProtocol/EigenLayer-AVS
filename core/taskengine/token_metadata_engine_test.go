@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/common"
@@ -23,13 +23,8 @@ func TestEngine_GetTokenMetadata(t *testing.T) {
 	err := os.Chdir("../..")
 	require.NoError(t, err)
 
-	// Create a mock config with a valid RPC URL
-	cfg := &config.Config{
-		SmartWallet: &config.SmartWalletConfig{
-			EthRpcUrl:      "https://eth.llamarpc.com", // Valid RPC URL for testing
-			FactoryAddress: common.HexToAddress("0x1234567890123456789012345678901234567890"),
-		},
-	}
+	// Load config from test config (aggregator-sepolia.yaml)
+	cfg := testutil.GetAggregatorConfig()
 
 	// Create engine with nil storage and queue (we only need token service for this test)
 	logger := &MockLogger{}
