@@ -556,6 +556,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	execution.TotalGasCost = totalGasCost                     // Total gas cost for the entire workflow
 	execution.AutomationFee = &avsproto.FeeAmount{
 		NativeTokenAmount: "0",
+		NativeTokenSymbol: "", // Zero fee; symbol not applicable until automation fees are enabled
 		UsdAmount:         "0",
 	}
 

@@ -2752,6 +2752,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		TotalGasCost: totalGasCost,                           // Total gas cost for the entire workflow
 		AutomationFee: &avsproto.FeeAmount{
 			NativeTokenAmount: "0",
+			NativeTokenSymbol: "", // Zero fee; symbol not applicable until automation fees are enabled
 			UsdAmount:         "0",
 		},
 	}
@@ -3061,6 +3062,7 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 		Index:   pendingIndex,                 // Use pre-assigned or newly assigned index
 		AutomationFee: &avsproto.FeeAmount{
 			NativeTokenAmount: "0",
+			NativeTokenSymbol: "", // Zero fee; symbol not applicable until automation fees are enabled
 			UsdAmount:         "0",
 		},
 	}, nil
