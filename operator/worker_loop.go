@@ -21,6 +21,7 @@ import (
 	triggerengine "github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/trigger"
 	avspb "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
+	"github.com/ethereum/go-ethereum/core/types"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -292,7 +293,22 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 
 			// Try to fetch full block data from RPC using shared targetEthClient
 			if o.targetEthClient != nil {
-				if header, err := o.targetEthClient.HeaderByNumber(ctx, big.NewInt(triggerItem.Marker)); err == nil {
+				var header *types.Header
+				var fetchErr error
+				const blockFetchRetries = 3
+				const blockFetchRetryDelay = 150 * time.Millisecond
+				for attempt := 0; attempt < blockFetchRetries; attempt++ {
+					h, err := o.targetEthClient.HeaderByNumber(ctx, big.NewInt(triggerItem.Marker))
+					if err == nil && h != nil {
+						header = h
+						break
+					}
+					fetchErr = err
+					if attempt < blockFetchRetries-1 {
+						time.Sleep(blockFetchRetryDelay)
+					}
+				}
+				if header != nil {
 					// Populate with real blockchain data
 					blockData["blockHash"] = header.Hash().Hex()
 					blockData["timestamp"] = header.Time
@@ -307,10 +323,15 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 						"block_hash", header.Hash().Hex(),
 						"timestamp", header.Time)
 				} else {
-					o.logger.Warn("⚠️ Failed to fetch block header, using minimal block data",
+					// RPC propagation lag: block not yet available - expected, handled with fallback
+					errStr := "nil"
+					if fetchErr != nil {
+						errStr = fetchErr.Error()
+					}
+					o.logger.Debug("Block header not available from RPC (propagation lag), using minimal block data",
 						"task_id", triggerItem.TaskID,
 						"block_number", triggerItem.Marker,
-						"error", err)
+						"error", errStr)
 				}
 			} else {
 				o.logger.Warn("⚠️ Target RPC client not available, using minimal block data",
