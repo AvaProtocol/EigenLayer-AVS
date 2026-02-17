@@ -219,16 +219,6 @@ func PackExecuteBatch(targetAddresses []common.Address, calldataArray [][]byte) 
 // Supports atomic batching of operations with different ETH amounts (e.g., contract call + paymaster reimbursement)
 // Uses manual ABI encoding to bypass Go's ABI encoder bug with empty []byte slices
 func PackExecuteBatchWithValues(targetAddresses []common.Address, values []*big.Int, calldataArray [][]byte) ([]byte, error) {
-	// Debug logging to track what we're packing
-	fmt.Printf("🔍 PackExecuteBatchWithValues INPUT DEBUG:\n")
-	fmt.Printf("   Targets: %d\n", len(targetAddresses))
-	fmt.Printf("   Values: %d\n", len(values))
-	fmt.Printf("   Calldatas: %d\n", len(calldataArray))
-	for i, cd := range calldataArray {
-		fmt.Printf("   calldataArray[%d]: len=%d, cap=%d, isNil=%v, value=%v\n",
-			i, len(cd), cap(cd), cd == nil, cd)
-	}
-
 	// Manual ABI encoding to bypass Go's ABI encoder bug
 	// Function selector: executeBatchWithValues(address[],uint256[],bytes[])
 	selector := []byte{0xc3, 0xff, 0x72, 0xfc}
@@ -278,7 +268,6 @@ func PackExecuteBatchWithValues(targetAddresses []common.Address, values []*big.
 	relativeOffsets := make([]int, len(calldataArray))
 	for i, calldata := range calldataArray {
 		relativeOffsets[i] = calldataContentStart
-		fmt.Printf("   Func[%d] will be at relative offset: %d bytes\n", i, calldataContentStart)
 		// Move to next calldata element position
 		calldataContentStart += 32 // length field
 		if len(calldata) > 0 {
@@ -289,17 +278,14 @@ func PackExecuteBatchWithValues(targetAddresses []common.Address, values []*big.
 	}
 
 	// Add the offsets (each offset is relative to the start of data section)
-	fmt.Printf("   Writing %d offset pointers:\n", len(relativeOffsets))
-	for i, offset := range relativeOffsets {
+	for _, offset := range relativeOffsets {
 		offsetBytes := common.LeftPadBytes(big.NewInt(int64(offset)).Bytes(), 32)
-		fmt.Printf("   Offset[%d]: %d bytes -> %x\n", i, offset, offsetBytes)
 		result = append(result, offsetBytes...)
 	}
 
 	// Add actual calldata contents
-	for i, calldata := range calldataArray {
+	for _, calldata := range calldataArray {
 		lengthBytes := common.LeftPadBytes(big.NewInt(int64(len(calldata))).Bytes(), 32)
-		fmt.Printf("   calldataArray[%d] length bytes: %x (length: %d)\n", i, lengthBytes, len(calldata))
 		result = append(result, lengthBytes...)
 
 		if len(calldata) > 0 {
@@ -308,13 +294,7 @@ func PackExecuteBatchWithValues(targetAddresses []common.Address, values []*big.
 			padded := make([]byte, paddedLength)
 			copy(padded, calldata)
 			result = append(result, padded...)
-			fmt.Printf("   calldataArray[%d] data bytes: %x (padded to %d bytes)\n", i, padded, paddedLength)
-		} else {
-			fmt.Printf("   calldataArray[%d] is empty - no data appended after length\n", i)
 		}
 	}
-
-	fmt.Printf("   Packed result: %d bytes\n", len(result))
-	fmt.Printf("   Full packed calldata: %x\n", result)
 	return result, nil
 }

@@ -23,7 +23,7 @@ func (q *Queue) CleanupOrphanedJobs() (*CleanupStats, error) {
 	startTime := time.Now()
 	stats := &CleanupStats{}
 
-	q.logger.Info("starting orphaned jobs cleanup")
+	q.logger.Debug("starting orphaned jobs cleanup")
 
 	// Get all jobs from different queues
 	for _, status := range []jobStatus{jobPending, jobInProgress, jobFailed} {

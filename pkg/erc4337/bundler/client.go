@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math/big"
 	"net/http"
 	"time"
@@ -25,17 +24,6 @@ const (
 	// Reference: https://github.com/eth-infinitism/account-abstraction/blob/develop/deployments.json
 	EntryPointV06Address = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
 )
-
-// safePreview returns a truncated preview of s with ellipsis when longer than n
-func safePreview(s string, n int) string {
-	if n <= 0 {
-		return ""
-	}
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
-}
 
 // BundlerClient defines a client for interacting with an EIP-4337 bundler RPC endpoint.
 type BundlerClient struct {
@@ -77,10 +65,6 @@ func (bc *BundlerClient) SimulateUserOperation(
 		return fmt.Errorf("failed to marshal simulate request: %w", err)
 	}
 
-	log.Printf("🔍 HTTP SIMULATE REQUEST DEBUG")
-	log.Printf("  URL: %s", bc.url)
-	log.Printf("  Request Body: %s", string(body))
-
 	hreq, err := http.NewRequestWithContext(ctx, "POST", bc.url, bytes.NewBuffer(body))
 	if err != nil {
 		return fmt.Errorf("failed to create simulate HTTP request: %w", err)
@@ -94,9 +78,6 @@ func (bc *BundlerClient) SimulateUserOperation(
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
-	log.Printf("🔍 HTTP SIMULATE RESPONSE DEBUG")
-	log.Printf("  Status Code: %d", resp.StatusCode)
-	log.Printf("  Response Body: %s", string(respBody))
 
 	// Parse JSON-RPC generically to be resilient to bundlers that use string/null ids
 	var generic map[string]interface{}
@@ -109,7 +90,6 @@ func (bc *BundlerClient) SimulateUserOperation(
 		msg, _ := errObj["message"].(string)
 		// If method is not supported (-32601), treat as non-fatal and continue.
 		if int(code) == -32601 || msg == "Method not found" {
-			log.Printf("eth_simulateUserOperation not supported by bundler (continuing): %v", msg)
 			return nil
 		}
 		return fmt.Errorf("JSON-RPC error %d: %s", int(code), msg)
@@ -142,7 +122,6 @@ func (bc *BundlerClient) SendUserOperation(
 	// Try HTTP method first (similar to gas estimation fix)
 	txHash, err := bc.sendUserOperationHTTP(ctx, userOp, entrypoint)
 	if err != nil {
-		log.Printf("⚠️ HTTP SendUserOperation failed, trying RPC fallback: %v", err)
 		// Fallback to RPC method
 		return bc.sendUserOperationRPC(ctx, userOp, entrypoint)
 	}
@@ -169,17 +148,6 @@ func (bc *BundlerClient) sendUserOperationHTTP(
 		Signature:            fmt.Sprintf("0x%x", userOp.Signature),
 	}
 
-	log.Printf("🔍 BUNDLER SEND DEBUG - eth_sendUserOperation")
-	log.Printf("  Method: eth_sendUserOperation")
-	log.Printf("  Entrypoint: %s", entrypoint.Hex())
-	log.Printf("  UserOp Structure:")
-	log.Printf("    sender: %s", uo.Sender)
-	log.Printf("    nonce: %s", uo.Nonce)
-	log.Printf("    initCode: %s", safePreview(uo.InitCode, 50))
-	log.Printf("    callData: %s", safePreview(uo.CallData, 50))
-	log.Printf("    signature: %s", safePreview(uo.Signature, 50))
-	log.Printf("🔍 END BUNDLER SEND DEBUG")
-
 	// Create JSON-RPC request
 	// IMPORTANT: Some bundlers require EIP-55 checksummed addresses for EntryPoint
 	reqData := map[string]interface{}{
@@ -193,11 +161,6 @@ func (bc *BundlerClient) sendUserOperationHTTP(
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal JSON-RPC request: %w", err)
 	}
-
-	log.Printf("🔍 HTTP SEND REQUEST DEBUG")
-	log.Printf("  URL: %s", bc.url)
-	log.Printf("  Request Body: %s", string(reqBody))
-	log.Printf("🔍 END HTTP SEND REQUEST DEBUG")
 
 	// Create HTTP request
 	req, err := http.NewRequestWithContext(ctx, "POST", bc.url, bytes.NewBuffer(reqBody))
@@ -219,11 +182,6 @@ func (bc *BundlerClient) sendUserOperationHTTP(
 	if err != nil {
 		return "", fmt.Errorf("failed to read response body: %w", err)
 	}
-
-	log.Printf("🔍 HTTP SEND RESPONSE DEBUG")
-	log.Printf("  Status Code: %d", resp.StatusCode)
-	log.Printf("  Response Body: %s", string(respBody))
-	log.Printf("🔍 END HTTP SEND RESPONSE DEBUG")
 
 	// Check for HTTP errors
 	if resp.StatusCode != 200 {
@@ -318,28 +276,6 @@ func (bc *BundlerClient) EstimateUserOperationGas(
 		Signature:            fmt.Sprintf("0x%x", userOp.Signature),
 	}
 
-	// 🔍 DEBUG: Log the complete bundler request details
-	log.Printf("🔍 BUNDLER REQUEST DEBUG - eth_estimateUserOperationGas")
-	log.Printf("  Method: eth_estimateUserOperationGas")
-	log.Printf("  Entrypoint: %s", entrypoint.Hex())
-	log.Printf("  UserOp Structure:")
-	log.Printf("    sender: %s", uo.Sender.Hex())
-	log.Printf("    nonce: %s", uo.Nonce)
-	log.Printf("    initCode: %s", uo.InitCode)
-	log.Printf("    callData: %s", uo.CallData)
-	log.Printf("    callGasLimit: %s", uo.CallGasLimit)
-	log.Printf("    verificationGasLimit: %s", uo.VerificationGasLimit)
-	log.Printf("    preVerificationGas: %s", uo.PreVerificationGas)
-	log.Printf("    maxFeePerGas: %s", uo.MaxFeePerGas)
-	log.Printf("    maxPriorityFeePerGas: %s", uo.MaxPriorityFeePerGas)
-	log.Printf("    paymasterAndData: %s", uo.PaymasterAndData)
-	log.Printf("    signature: %s", uo.Signature)
-	log.Printf("  Full JSON-RPC Call Parameters:")
-	log.Printf("    [0] UserOp: %+v", uo)
-	log.Printf("    [1] Entrypoint: %s", entrypoint.Hex())
-	log.Printf("    [2] Override: %+v", map[string]string{})
-	log.Printf("🔍 END BUNDLER REQUEST DEBUG")
-
 	// Use direct HTTP request instead of RPC client for better compatibility
 	gasResult, err := bc.estimateUserOperationGasHTTP(ctx, uo, entrypoint)
 	if err != nil {
@@ -389,11 +325,6 @@ func (bc *BundlerClient) estimateUserOperationGasHTTP(ctx context.Context, uo Us
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	log.Printf("🔍 HTTP REQUEST DEBUG")
-	log.Printf("  URL: %s", bc.url)
-	log.Printf("  Request Body: %s", string(requestBody))
-	log.Printf("🔍 END HTTP REQUEST DEBUG")
-
 	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", bc.url, bytes.NewBuffer(requestBody))
 	if err != nil {
@@ -415,11 +346,6 @@ func (bc *BundlerClient) estimateUserOperationGasHTTP(ctx context.Context, uo Us
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
-
-	log.Printf("🔍 HTTP RESPONSE DEBUG")
-	log.Printf("  Status Code: %d", resp.StatusCode)
-	log.Printf("  Response Body: %s", string(respBody))
-	log.Printf("🔍 END HTTP RESPONSE DEBUG")
 
 	// Check for HTTP errors
 	if resp.StatusCode != 200 {
@@ -475,15 +401,12 @@ func (bc *BundlerClient) GetUserOperationReceipt(ctx context.Context, hash strin
 // This is a debug method (debug_bundler_sendBundleNow) that forces the bundler to create and send a bundle immediately
 // instead of waiting for the configured bundle interval or other auto-bundling conditions.
 func (bc *BundlerClient) SendBundleNow(ctx context.Context) error {
-	log.Printf("🔨 Calling debug_bundler_sendBundleNow to trigger immediate bundling")
-
 	var result interface{}
 	err := bc.client.CallContext(ctx, &result, "debug_bundler_sendBundleNow")
 	if err != nil {
 		return fmt.Errorf("debug_bundler_sendBundleNow failed: %w", err)
 	}
 
-	log.Printf("✅ debug_bundler_sendBundleNow returned: %+v", result)
 	return nil
 }
 
@@ -506,15 +429,12 @@ type PendingUserOp struct {
 // This is a debug method (debug_bundler_dumpMempool) that returns all UserOps waiting to be bundled.
 // Use this to check for stuck UserOps before sending new ones.
 func (bc *BundlerClient) DumpMempool(ctx context.Context, entrypoint common.Address) ([]PendingUserOp, error) {
-	log.Printf("🔍 Calling debug_bundler_dumpMempool to query pending UserOps")
-
 	var result []PendingUserOp
 	err := bc.client.CallContext(ctx, &result, "debug_bundler_dumpMempool", entrypoint.Hex())
 	if err != nil {
 		return nil, fmt.Errorf("debug_bundler_dumpMempool failed: %w", err)
 	}
 
-	log.Printf("📋 debug_bundler_dumpMempool returned %d pending UserOp(s)", len(result))
 	return result, nil
 }
 
@@ -533,13 +453,6 @@ func (bc *BundlerClient) GetPendingUserOpsForSender(ctx context.Context, entrypo
 		}
 	}
 
-	if len(senderOps) > 0 {
-		log.Printf("⚠️  Found %d pending UserOp(s) for sender %s", len(senderOps), sender.Hex())
-		for i, op := range senderOps {
-			log.Printf("   [%d] nonce=%s", i+1, op.Nonce)
-		}
-	}
-
 	return senderOps, nil
 }
 
@@ -548,15 +461,12 @@ func (bc *BundlerClient) GetPendingUserOpsForSender(ctx context.Context, entrypo
 // Use this to clear stuck UserOps that are blocking new submissions.
 // WARNING: This clears ALL pending UserOps, not just for a specific sender.
 func (bc *BundlerClient) ClearState(ctx context.Context) error {
-	log.Printf("🗑️  Calling debug_bundler_clearState to clear bundler mempool")
-
 	var result interface{}
 	err := bc.client.CallContext(ctx, &result, "debug_bundler_clearState")
 	if err != nil {
 		return fmt.Errorf("debug_bundler_clearState failed: %w", err)
 	}
 
-	log.Printf("✅ debug_bundler_clearState returned: %+v", result)
 	return nil
 }
 
@@ -573,14 +483,10 @@ func (bc *BundlerClient) FlushStuckUserOps(ctx context.Context, entrypoint commo
 		pendingOps, err := bc.GetPendingUserOpsForSender(ctx, entrypoint, sender)
 		if err != nil {
 			// Non-fatal: debug methods may not be available
-			log.Printf("⚠️  Could not query pending UserOps (debug methods may be disabled): %v", err)
 			return totalFlushed, nil
 		}
 
 		if len(pendingOps) == 0 {
-			if attempt == 0 {
-				log.Printf("✅ No pending UserOps for sender %s", sender.Hex())
-			}
 			break
 		}
 
@@ -595,13 +501,11 @@ func (bc *BundlerClient) FlushStuckUserOps(ctx context.Context, entrypoint commo
 			pendingNonce := new(big.Int)
 			// Validate that SetString succeeded (returns false if string is invalid)
 			if _, ok := pendingNonce.SetString(nonceStr, 16); !ok {
-				log.Printf("⚠️  Skipping UserOp with invalid nonce format: %q", op.Nonce)
 				continue
 			}
 
 			if pendingNonce.Cmp(currentNonce) < 0 {
 				stuckCount++
-				log.Printf("⚠️  Found stuck UserOp with nonce %s (current nonce is %s)", pendingNonce.String(), currentNonce.String())
 			}
 		}
 
@@ -610,11 +514,8 @@ func (bc *BundlerClient) FlushStuckUserOps(ctx context.Context, entrypoint commo
 			break
 		}
 
-		log.Printf("🔄 Flushing %d stuck UserOp(s) with lower nonces (attempt %d/%d)", stuckCount, attempt+1, maxFlushAttempts)
-
 		// Trigger bundling to process the stuck UserOps
 		if err := bc.SendBundleNow(ctx); err != nil {
-			log.Printf("⚠️  SendBundleNow failed during flush: %v", err)
 			// Continue anyway, the UserOp might still get bundled
 		}
 
@@ -622,12 +523,7 @@ func (bc *BundlerClient) FlushStuckUserOps(ctx context.Context, entrypoint commo
 
 		// Wait for the bundle to be processed before checking again
 		// The bundler needs time to mine the transaction
-		log.Printf("⏳ Waiting 3 seconds for bundle to be mined...")
 		time.Sleep(3 * time.Second)
-	}
-
-	if totalFlushed > 0 {
-		log.Printf("✅ Flushed %d stuck UserOp(s) total", totalFlushed)
 	}
 
 	return totalFlushed, nil

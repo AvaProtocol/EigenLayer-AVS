@@ -40,7 +40,7 @@ Wallet: %s`
 func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*avsproto.KeyResp, error) {
 	message := payload.Message
 
-	r.config.Logger.Info("process getkey with message",
+	r.config.Logger.Debug("process getkey with message",
 		"message", message,
 	)
 
@@ -225,13 +225,6 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 
 		expectedChainIdStr := fmt.Sprintf("%d", r.chainID) // e.g., "11155111"
 		aud, err := token.Claims.GetAudience()
-
-		// Log the details
-		r.config.Logger.Info("Verifying JWT audience",
-			"expectedServerChainIdStr", expectedChainIdStr,
-			"audienceFromToken", aud,
-			"errorGettingAudience", err,
-		)
 
 		if err != nil || len(aud) == 0 {
 			return nil, fmt.Errorf("%s: error getting audience or audience is empty", auth.InvalidAuthenticationKey)
