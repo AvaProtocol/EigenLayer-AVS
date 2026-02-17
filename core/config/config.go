@@ -22,6 +22,7 @@ import (
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	rpccalls "github.com/Layr-Labs/eigensdk-go/metrics/collectors/rpc_calls"
 	"github.com/Layr-Labs/eigensdk-go/signerv2"
+	"go.uber.org/zap"
 
 	sdkutils "github.com/Layr-Labs/eigensdk-go/utils"
 )
@@ -283,7 +284,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 		}
 	}
 
-	logger, err := sdklogging.NewZapLogger(configRaw.Environment)
+	logger, err := newLogger(configRaw.Environment)
 	if err != nil {
 		return nil, err
 	}
@@ -507,6 +508,20 @@ func (c *Config) validate() {
 	if c.AutomationRegistryCoordinatorAddr == common.HexToAddress("") {
 		panic("Config: AutomationRegistryCoordinatorAddr is required")
 	}
+}
+
+// newLogger creates a zap logger that only prints stack traces at ERROR level.
+// By default, zap's development config prints stack traces at WARN, which is noisy
+// for transient errors like RPC 500s. We override to ERROR-only.
+func newLogger(env sdklogging.LogLevel) (sdklogging.Logger, error) {
+	var cfg zap.Config
+	if env == sdklogging.Production {
+		cfg = zap.NewProductionConfig()
+	} else {
+		cfg = zap.NewDevelopmentConfig()
+	}
+	cfg.DisableStacktrace = true
+	return sdklogging.NewZapLoggerByConfig(cfg, zap.AddCallerSkip(1), zap.AddStacktrace(zap.ErrorLevel))
 }
 
 // firstNonEmpty returns the first non-empty string among the arguments.

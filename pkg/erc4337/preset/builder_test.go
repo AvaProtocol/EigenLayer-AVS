@@ -321,6 +321,7 @@ func TestBuildUserOpWithPaymasterErrors(t *testing.T) {
 		nil, // callGasOverride
 		nil, // verificationGasOverride
 		nil, // preVerificationGasOverride
+		nil, // logger
 	)
 
 	if err == nil {

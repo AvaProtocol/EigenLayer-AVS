@@ -226,8 +226,10 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 	if params.SmartWalletAddress == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "smart wallet address is required - must be obtained from getWallet() call first")
 	}
-	// Validate that the provided address belongs to the authenticated user and is deployed on-chain
-	validationErr := r.validateSmartWalletOwnershipAndDeployment(user.Address, *params.SmartWalletAddress)
+	// Validate that the provided address belongs to the authenticated user.
+	// We intentionally skip the on-chain deployment check here because BuildUserOp
+	// will include initCode to deploy the wallet atomically as part of the UserOp.
+	validationErr := r.validateSmartWalletOwnership(user.Address, *params.SmartWalletAddress)
 	if validationErr != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid smart wallet address: %v", validationErr)
 	}
@@ -240,130 +242,146 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 	}
 
 	// Enable paymaster for gas sponsorship (15 minute validity)
+	// Skip reimbursement for withdrawals — the paymaster absorbs gas costs so users
+	// can withdraw their full balance without reserving ETH for gas reimbursement.
 	paymasterReq := preset.GetVerifyingPaymasterRequestForDuration(
 		r.config.SmartWallet.PaymasterAddress,
 		15*time.Minute,
 	)
+	paymasterReq.SkipReimbursement = true
 
 	// Pre-flight: Estimate gas and validate balance before building calldata
 	// This allows us to calculate max withdrawable amount for "withdraw all" requests
 	var finalAmount *big.Int
 	if strings.ToUpper(payload.Token) == "ETH" {
-		// For ETH withdrawals, we need to estimate gas reimbursement first
-		// Build a temporary calldata with a placeholder amount to estimate gas
-		// (we'll recalculate with the actual amount after gas estimation)
-		tempAmount := requestedAmount
-		if withdrawAll {
-			// Use a placeholder amount for gas estimation (will be recalculated)
-			// Small value is fine since it's only used for gas estimation, not actual withdrawal
-			tempAmount = big.NewInt(10000000000000) // 0.00001 ETH placeholder (10^13 wei)
-		}
-		tempParams := &WithdrawalParams{
-			RecipientAddress:   params.RecipientAddress,
-			Amount:             tempAmount,
-			Token:              params.Token,
-			SmartWalletAddress: params.SmartWalletAddress,
-		}
-		tempCallData, err := BuildWithdrawalCalldata(tempParams)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "failed to build temporary withdrawal calldata: %v", err)
-		}
-
-		// Estimate gas using bundler (this will give us accurate reimbursement estimate)
-		bundlerClient, bundlerErr := bundler.NewBundlerClient(r.config.SmartWallet.BundlerURL)
-		if bundlerErr != nil {
-			return nil, status.Errorf(codes.Internal, "failed to create bundler client: %v", bundlerErr)
-		}
-		// IMPORTANT: Pass very small values for callGasLimit and verificationGasLimit to force bundler to actually estimate
-		// (Bundler only estimates when input values are 0 or very small, otherwise it just echoes them back)
-		// However, we can't use 0 because the bundler's simulation fails with UserOperationReverted error
-		// Using MIN_CALL_GAS_LIMIT (21,000) as a lower bound that allows simulation to succeed
-		tempUserOp, tempErr := preset.BuildUserOpWithPaymaster(
-			r.config.SmartWallet,
-			r.smartWalletRpc,
-			bundlerClient,
-			user.Address,
-			tempCallData,
-			paymasterReq.PaymasterAddress,
-			paymasterReq.ValidUntil,
-			paymasterReq.ValidAfter,
-			smartWalletAddress,
-			nil,                // nonceOverride
-			big.NewInt(21000),  // callGasLimit: MIN_CALL_GAS_LIMIT to allow simulation (bundler will estimate)
-			big.NewInt(100000), // verificationGasLimit: small value to allow simulation (bundler will estimate)
-			big.NewInt(50000),  // preVerificationGas: non-zero for simulation (bundler will recalculate)
-		)
-		if tempErr != nil {
-			r.config.Logger.Warn("Failed to build temp UserOp for gas estimation",
-				"error", tempErr)
-			if withdrawAll {
-				return nil, status.Errorf(codes.Internal, "failed to build UserOp for gas estimation: %v", tempErr)
+		if paymasterReq != nil && paymasterReq.SkipReimbursement {
+			// Paymaster absorbs gas costs — no reimbursement deduction needed.
+			// Just validate the wallet has enough ETH for the withdrawal amount.
+			balance, balanceErr := r.smartWalletRpc.BalanceAt(ctx, *smartWalletAddress, nil)
+			if balanceErr != nil {
+				return nil, status.Errorf(codes.Internal, "failed to get wallet balance: %v", balanceErr)
 			}
-			finalAmount = requestedAmount
+			if withdrawAll {
+				if balance.Cmp(big.NewInt(0)) == 0 {
+					return nil, status.Errorf(codes.InvalidArgument, "wallet has zero balance")
+				}
+				finalAmount = balance
+				r.config.Logger.Info("withdraw all requested (no reimbursement)",
+					"balance", balance.String())
+			} else {
+				if requestedAmount.Cmp(balance) > 0 {
+					return nil, status.Errorf(codes.InvalidArgument,
+						"insufficient balance: requested %s wei but wallet has %s wei",
+						requestedAmount.String(), balance.String())
+				}
+				finalAmount = requestedAmount
+			}
 		} else {
-			// Estimate gas using bundler
-			gasEstimate, gasErr := bundlerClient.EstimateUserOperationGas(
-				ctx,
-				*tempUserOp,
-				r.config.SmartWallet.EntrypointAddress,
-				map[string]any{},
+			// Gas reimbursement enabled — estimate gas and validate balance covers
+			// both the withdrawal amount and the reimbursement.
+			tempAmount := requestedAmount
+			if withdrawAll {
+				tempAmount = big.NewInt(10000000000000) // 0.00001 ETH placeholder for gas estimation
+			}
+			tempParams := &WithdrawalParams{
+				RecipientAddress:   params.RecipientAddress,
+				Amount:             tempAmount,
+				Token:              params.Token,
+				SmartWalletAddress: params.SmartWalletAddress,
+			}
+			tempCallData, err := BuildWithdrawalCalldata(tempParams)
+			if err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "failed to build temporary withdrawal calldata: %v", err)
+			}
+
+			bundlerClient, bundlerErr := bundler.NewBundlerClient(r.config.SmartWallet.BundlerURL)
+			if bundlerErr != nil {
+				return nil, status.Errorf(codes.Internal, "failed to create bundler client: %v", bundlerErr)
+			}
+			tempUserOp, tempErr := preset.BuildUserOpWithPaymaster(
+				r.config.SmartWallet,
+				r.smartWalletRpc,
+				bundlerClient,
+				user.Address,
+				tempCallData,
+				paymasterReq.PaymasterAddress,
+				paymasterReq.ValidUntil,
+				paymasterReq.ValidAfter,
+				smartWalletAddress,
+				nil,                // nonceOverride
+				big.NewInt(21000),  // callGasLimit
+				big.NewInt(100000), // verificationGasLimit
+				big.NewInt(50000),  // preVerificationGas
+				r.config.Logger,
 			)
-			if gasErr != nil {
-				r.config.Logger.Warn("Gas estimation failed",
-					"error", gasErr)
+			if tempErr != nil {
+				r.config.Logger.Warn("Failed to build temp UserOp for gas estimation",
+					"error", tempErr)
 				if withdrawAll {
-					return nil, status.Errorf(codes.Internal, "gas estimation failed: %v", gasErr)
+					return nil, status.Errorf(codes.Internal, "failed to build UserOp for gas estimation: %v", tempErr)
 				}
 				finalAmount = requestedAmount
 			} else {
-				// Calculate estimated reimbursement
-				reimbursement, reimbErr := preset.EstimateGasReimbursementAmount(r.smartWalletRpc, gasEstimate)
-				if reimbErr != nil {
-					r.config.Logger.Warn("Failed to estimate reimbursement",
-						"error", reimbErr)
+				gasEstimate, gasErr := bundlerClient.EstimateUserOperationGas(
+					ctx,
+					*tempUserOp,
+					r.config.SmartWallet.EntrypointAddress,
+					map[string]any{},
+				)
+				if gasErr != nil {
+					r.config.Logger.Warn("Gas estimation failed",
+						"error", gasErr)
 					if withdrawAll {
-						return nil, status.Errorf(codes.Internal, "failed to estimate reimbursement: %v", reimbErr)
+						return nil, status.Errorf(codes.Internal, "gas estimation failed: %v", gasErr)
 					}
 					finalAmount = requestedAmount
 				} else {
-					// If "withdraw all" is requested, calculate max withdrawable
-					if withdrawAll {
-						maxWithdrawable, maxErr := CalculateMaxWithdrawableAmount(
-							ctx,
-							r.smartWalletRpc,
-							*smartWalletAddress,
-							reimbursement,
-						)
-						if maxErr != nil {
-							return nil, status.Errorf(codes.Internal, "failed to calculate max withdrawable amount: %v", maxErr)
-						}
-						if maxWithdrawable.Cmp(big.NewInt(0)) == 0 {
-							return nil, status.Errorf(codes.InvalidArgument, "insufficient balance: wallet balance is less than estimated gas reimbursement")
-						}
-						finalAmount = maxWithdrawable
-						r.config.Logger.Info("withdraw all requested, calculated max withdrawable",
-							"maxWithdrawable", finalAmount.String(),
-							"estimatedReimbursement", reimbursement.String())
-					} else {
-						// Validate that requested amount + reimbursement doesn't exceed balance
-						balance, balanceErr := r.smartWalletRpc.BalanceAt(ctx, *smartWalletAddress, nil)
-						if balanceErr != nil {
-							return nil, status.Errorf(codes.Internal, "failed to get wallet balance: %v", balanceErr)
-						}
-						requiredTotal := new(big.Int).Add(requestedAmount, reimbursement)
-						if requiredTotal.Cmp(balance) > 0 {
-							maxWithdrawable := new(big.Int).Sub(balance, reimbursement)
-							if maxWithdrawable.Cmp(big.NewInt(0)) <= 0 {
-								return nil, status.Errorf(codes.InvalidArgument,
-									"insufficient balance: wallet balance (%s wei) is less than estimated gas reimbursement (%s wei)",
-									balance.String(), reimbursement.String())
-							}
-							return nil, status.Errorf(codes.InvalidArgument,
-								"insufficient balance: requested %s wei + reimbursement %s wei = %s wei, but wallet has %s wei. Maximum withdrawable: %s wei",
-								requestedAmount.String(), reimbursement.String(), requiredTotal.String(),
-								balance.String(), maxWithdrawable.String())
+					reimbursement, reimbErr := preset.EstimateGasReimbursementAmount(r.smartWalletRpc, gasEstimate)
+					if reimbErr != nil {
+						r.config.Logger.Warn("Failed to estimate reimbursement",
+							"error", reimbErr)
+						if withdrawAll {
+							return nil, status.Errorf(codes.Internal, "failed to estimate reimbursement: %v", reimbErr)
 						}
 						finalAmount = requestedAmount
+					} else {
+						if withdrawAll {
+							maxWithdrawable, maxErr := CalculateMaxWithdrawableAmount(
+								ctx,
+								r.smartWalletRpc,
+								*smartWalletAddress,
+								reimbursement,
+							)
+							if maxErr != nil {
+								return nil, status.Errorf(codes.Internal, "failed to calculate max withdrawable amount: %v", maxErr)
+							}
+							if maxWithdrawable.Cmp(big.NewInt(0)) == 0 {
+								return nil, status.Errorf(codes.InvalidArgument, "insufficient balance: wallet balance is less than estimated gas reimbursement")
+							}
+							finalAmount = maxWithdrawable
+							r.config.Logger.Info("withdraw all requested, calculated max withdrawable",
+								"maxWithdrawable", finalAmount.String(),
+								"estimatedReimbursement", reimbursement.String())
+						} else {
+							balance, balanceErr := r.smartWalletRpc.BalanceAt(ctx, *smartWalletAddress, nil)
+							if balanceErr != nil {
+								return nil, status.Errorf(codes.Internal, "failed to get wallet balance: %v", balanceErr)
+							}
+							requiredTotal := new(big.Int).Add(requestedAmount, reimbursement)
+							if requiredTotal.Cmp(balance) > 0 {
+								maxWithdrawable := new(big.Int).Sub(balance, reimbursement)
+								if maxWithdrawable.Cmp(big.NewInt(0)) <= 0 {
+									return nil, status.Errorf(codes.InvalidArgument,
+										"insufficient balance: wallet balance (%s wei) is less than estimated gas reimbursement (%s wei)",
+										balance.String(), reimbursement.String())
+								}
+								return nil, status.Errorf(codes.InvalidArgument,
+									"insufficient balance: requested %s wei + reimbursement %s wei = %s wei, but wallet has %s wei. Maximum withdrawable: %s wei",
+									requestedAmount.String(), reimbursement.String(), requiredTotal.String(),
+									balance.String(), maxWithdrawable.String())
+							}
+							finalAmount = requestedAmount
+						}
 					}
 				}
 			}
@@ -507,31 +525,6 @@ func (r *RpcServer) validateSmartWalletOwnership(owner common.Address, smartWall
 		return fmt.Errorf("smart wallet address %s does not belong to owner %s", smartWalletAddress.Hex(), owner.Hex())
 	}
 
-	return nil
-}
-
-// validateSmartWalletDeployment validates that the smart wallet is deployed on-chain
-func (r *RpcServer) validateSmartWalletDeployment(smartWalletAddress common.Address) error {
-	// Validate wallet is deployed on-chain (required for executing transactions)
-	code, err := r.smartWalletRpc.CodeAt(context.Background(), smartWalletAddress, nil)
-	if err != nil {
-		return fmt.Errorf("failed to check if smart wallet is deployed: %w", err)
-	}
-	if len(code) == 0 {
-		return fmt.Errorf("smart wallet %s is not deployed yet - please deploy it first by making a transaction", smartWalletAddress.Hex())
-	}
-
-	return nil
-}
-
-// validateSmartWalletOwnershipAndDeployment validates both ownership and on-chain deployment
-func (r *RpcServer) validateSmartWalletOwnershipAndDeployment(owner common.Address, smartWalletAddress common.Address) error {
-	if err := r.validateSmartWalletOwnership(owner, smartWalletAddress); err != nil {
-		return err
-	}
-	if err := r.validateSmartWalletDeployment(smartWalletAddress); err != nil {
-		return err
-	}
 	return nil
 }
 
