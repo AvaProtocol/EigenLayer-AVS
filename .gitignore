@@ -60,5 +60,8 @@ pr-comments-*.json
 .env.test
 .env.local
 
+# Claude Code local settings (user-specific permissions)
+.claude/settings.local.json
+
 # Ignore the file/folder that is constantly added by Cursor
 EigenLayer-AVS
