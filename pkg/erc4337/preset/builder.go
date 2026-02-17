@@ -92,11 +92,15 @@ func GetVerifyingPaymasterRequestForDuration(address common.Address, duration ti
 	return &VerifyingPaymasterRequest{
 		PaymasterAddress: address,
 		ValidUntil:       big.NewInt(validUntil),
-		// validAfter=0 means "valid immediately". This avoids clock drift issues between
-		// the aggregator's wall clock and the bundler's block.timestamp, which can differ
-		// by tens of minutes (especially with archive RPC nodes). The paymaster signature
-		// is already bound to this specific UserOp (sender, nonce, calldata), so validAfter
-		// adds no meaningful replay protection beyond what nonce already provides.
+		// validAfter=0 means "valid from genesis, therefore valid immediately". This avoids
+		// clock drift between the aggregator's wall clock and the bundler's block.timestamp,
+		// which can differ by tens of minutes (especially with archive RPC nodes).
+		//
+		// Security: The paymaster signature is bound to this specific UserOp (sender, nonce,
+		// calldata, paymasterAndData), so once included on-chain, nonce prevents replay.
+		// If a signed UserOp is leaked before submission, it could be submitted by anyone
+		// until validUntil expires. The replay window is controlled by `duration`, so callers
+		// should use a short duration (minutes, not hours) to limit pre-submission exposure.
 		ValidAfter: big.NewInt(0),
 	}
 }
@@ -347,11 +351,8 @@ func pollUserOpReceipt(
 // Formula: (bundler's estimated gas OR fallback gas + ETH transfer) × 20% buffer × maxFeePerGas
 // This uses the bundler's accurate gas estimation when available, otherwise uses conservative fallbacks.
 // This function is exported so it can be used by the aggregator for pre-flight balance validation.
-func EstimateGasReimbursementAmount(client *ethclient.Client, gasEstimate *bundler.GasEstimation, lgr ...logger.Logger) (*big.Int, error) {
-	l := logger.EnsureLogger(nil)
-	if len(lgr) > 0 {
-		l = logger.EnsureLogger(lgr[0])
-	}
+func EstimateGasReimbursementAmount(client *ethclient.Client, gasEstimate *bundler.GasEstimation, lgr logger.Logger) (*big.Int, error) {
+	l := logger.EnsureLogger(lgr)
 
 	maxFeePerGas, _, err := eip1559.SuggestFee(client)
 	if err != nil {
