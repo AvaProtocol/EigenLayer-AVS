@@ -336,7 +336,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 					}
 					finalAmount = requestedAmount
 				} else {
-					reimbursement, reimbErr := preset.EstimateGasReimbursementAmount(r.smartWalletRpc, gasEstimate)
+					reimbursement, reimbErr := preset.EstimateGasReimbursementAmount(r.smartWalletRpc, gasEstimate, r.config.Logger)
 					if reimbErr != nil {
 						r.config.Logger.Warn("Failed to estimate reimbursement",
 							"error", reimbErr)

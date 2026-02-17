@@ -303,7 +303,11 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 						header = h
 						break
 					}
-					fetchErr = err
+					if err != nil {
+						fetchErr = err
+					} else {
+						fetchErr = fmt.Errorf("header is nil for block %d", triggerItem.Marker)
+					}
 					if attempt < blockFetchRetries-1 {
 						time.Sleep(blockFetchRetryDelay)
 					}
