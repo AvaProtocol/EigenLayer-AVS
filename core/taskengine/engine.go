@@ -205,6 +205,12 @@ type Engine struct {
 
 	// maintain a list of active job that we have to synced to operators
 	// only task triggers are sent to operator
+	//
+	// Lock ordering (acquire outer before inner to avoid deadlock):
+	//   assignmentMutex (outer) → streamsMutex (middle) → lock (inner)
+	// Never acquire an outer lock while holding an inner lock.
+	// lock is a leaf lock: critical sections must only do map reads/writes,
+	// never call functions that acquire streamsMutex or assignmentMutex.
 	tasks            map[string]*model.Task
 	lock             *sync.Mutex
 	trackSyncedTasks map[string]*operatorState
@@ -3811,7 +3817,7 @@ func (n *Engine) reassignOrphanedTasks() {
 		return
 	}
 
-	// Phase 2: Snapshot needed tasks under n.lock (maintains lock ordering: lock -> assignmentMutex)
+	// Phase 2: Snapshot needed tasks under n.lock (lock is the innermost lock, safe to acquire alone)
 	n.lock.Lock()
 	taskSnapshot := make(map[string]*model.Task, len(orphanedTasks))
 	for _, taskID := range orphanedTasks {
