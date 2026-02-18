@@ -984,6 +984,9 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 						}
 					}
 
+					// Set SendGrid category for filtering in Activity Feed and Stats
+					bodyObj["categories"] = []string{"workflow-summary"}
+
 					// Provide dynamic_template_data both at top-level and per-personalization to satisfy API variants
 					bodyObj["dynamic_template_data"] = dynamicData
 
