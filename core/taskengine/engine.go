@@ -1607,8 +1607,11 @@ func (n *Engine) sendBatchedNotifications() {
 
 // sendMonitorTaskTriggerToOperators sends a MonitorTaskTrigger message with full
 // task metadata directly to connected operators. This is used when a task is
-// re-enabled so operators begin monitoring it immediately instead of waiting for
-// the next StreamCheckToOperator ticker cycle (up to 15 minutes).
+// newly created or re-enabled so operators begin monitoring it immediately
+// instead of waiting for the next StreamCheckToOperator ticker cycle (up to 15 minutes).
+// Note: operators must handle duplicate MonitorTaskTrigger messages idempotently,
+// as the StreamCheckToOperator ticker may also send the same task before
+// trackSyncedTasks is updated.
 func (n *Engine) sendMonitorTaskTriggerToOperators(task *model.Task) {
 	// Snapshot operator streams under read lock
 	n.streamsMutex.RLock()
@@ -1645,11 +1648,23 @@ func (n *Engine) sendMonitorTaskTriggerToOperators(task *model.Task) {
 			continue
 		}
 
-		if err := stream.Send(&resp); err != nil {
-			n.logger.Warn("Failed to send MonitorTaskTrigger to operator",
+		// Use timeout to prevent a stalled operator stream from blocking callers
+		// (CreateTask is a user-facing gRPC call). Matches StreamCheckToOperator pattern.
+		sendErr := make(chan error, 1)
+		go func() { sendErr <- stream.Send(&resp) }()
+		select {
+		case err := <-sendErr:
+			if err != nil {
+				n.logger.Warn("Failed to send MonitorTaskTrigger to operator",
+					"task_id", task.Id,
+					"operator", operatorAddr,
+					"error", err)
+				continue
+			}
+		case <-time.After(2 * time.Second):
+			n.logger.Warn("Timeout sending MonitorTaskTrigger to operator",
 				"task_id", task.Id,
-				"operator", operatorAddr,
-				"error", err)
+				"operator", operatorAddr)
 			continue
 		}
 
