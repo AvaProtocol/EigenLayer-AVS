@@ -933,9 +933,9 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 	n.tasks[task.Id] = task
 	n.lock.Unlock()
 
-	// Note: MonitorTaskTrigger notifications are handled by StreamCheckToOperator
-	// which sends complete task metadata. The batched notification system is only
-	// for CancelTask/DeleteTask operations that don't need complete metadata.
+	// Notify operators immediately so they can start monitoring the task
+	// without waiting for the next StreamCheckToOperator ticker cycle.
+	n.sendMonitorTaskTriggerToOperators(task)
 
 	// Log successful task creation with final counts
 	n.logger.Info("✅ CreateTask completed successfully",
@@ -1619,7 +1619,7 @@ func (n *Engine) sendMonitorTaskTriggerToOperators(task *model.Task) {
 	n.streamsMutex.RUnlock()
 
 	if len(operatorStreams) == 0 {
-		n.logger.Debug("No connected operators to notify about re-enabled task",
+		n.logger.Debug("No connected operators to notify about task",
 			"task_id", task.Id)
 		return
 	}
@@ -1646,7 +1646,7 @@ func (n *Engine) sendMonitorTaskTriggerToOperators(task *model.Task) {
 		}
 
 		if err := stream.Send(&resp); err != nil {
-			n.logger.Warn("Failed to send MonitorTaskTrigger for re-enabled task",
+			n.logger.Warn("Failed to send MonitorTaskTrigger to operator",
 				"task_id", task.Id,
 				"operator", operatorAddr,
 				"error", err)
@@ -1665,7 +1665,7 @@ func (n *Engine) sendMonitorTaskTriggerToOperators(task *model.Task) {
 		n.lock.Unlock()
 	}
 
-	n.logger.Info("Notified operators about re-enabled task",
+	n.logger.Info("📤 Notified operators about task",
 		"task_id", task.Id,
 		"operators_notified", successCount,
 		"total_connected", len(operatorStreams))
