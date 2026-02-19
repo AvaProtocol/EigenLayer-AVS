@@ -355,10 +355,6 @@ SEPOLIA_BUNDLER_RPC=https://your-sepolia-bundler-endpoint
 3. Set the `OWNER_EOA` environment variable or add it to your config
 4. Ensure the key has sufficient balance for test transactions
 
-## Troubleshooting
-
-For production troubleshooting and debugging workflows, see [docs/Troubleshooting.md](docs/Troubleshooting.md)
-
 ## Testing
 
 ### Standard Tests
