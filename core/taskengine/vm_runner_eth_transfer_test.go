@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
@@ -256,5 +257,139 @@ func TestETHTransferProcessor_Execute_EmptyAmount(t *testing.T) {
 
 	if executionLog.Error == "" {
 		t.Error("Expected error message to be set")
+	}
+}
+
+func TestETHTransferProcessor_Execute_MaxAmountNoEthClient(t *testing.T) {
+	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
+
+	testUserAddress := testutil.TestUser1().Address
+	// Pass nil ethClient — MAX resolution should fail with clear error
+	processor := NewETHTransferProcessor(vm, nil, nil, &testUserAddress)
+
+	// Set aa_sender so we get past the first check
+	vm.AddVar("aa_sender", "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6")
+
+	node := &avsproto.ETHTransferNode{
+		Config: &avsproto.ETHTransferNode_Config{
+			Destination: "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
+			Amount:      "MAX",
+		},
+	}
+
+	executionLog, err := processor.Execute("test-step", node)
+
+	if err == nil {
+		t.Fatal("Expected error for MAX amount with nil ethClient")
+	}
+
+	if !strings.Contains(err.Error(), "no RPC client available") {
+		t.Errorf("Expected 'no RPC client available' error, got: %v", err)
+	}
+
+	if executionLog.Success {
+		t.Error("Expected success=false")
+	}
+
+	// Verify log contains the resolved values and error
+	if !strings.Contains(executionLog.Log, "Resolved: destination=") {
+		t.Error("Expected log to contain resolved config values")
+	}
+	if !strings.Contains(executionLog.Log, "amount=MAX") {
+		t.Error("Expected log to show amount=MAX before resolution")
+	}
+	if !strings.Contains(executionLog.Log, "Error:") {
+		t.Error("Expected log to contain error details")
+	}
+}
+
+func TestETHTransferProcessor_Execute_MaxAmountNoAASender(t *testing.T) {
+	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
+
+	testUserAddress := testutil.TestUser1().Address
+	processor := NewETHTransferProcessor(vm, nil, nil, &testUserAddress)
+
+	// Do NOT set aa_sender — MAX resolution should fail
+	node := &avsproto.ETHTransferNode{
+		Config: &avsproto.ETHTransferNode_Config{
+			Destination: "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
+			Amount:      "MAX",
+		},
+	}
+
+	executionLog, err := processor.Execute("test-step", node)
+
+	if err == nil {
+		t.Fatal("Expected error for MAX amount without aa_sender")
+	}
+
+	if !strings.Contains(err.Error(), "smart wallet address not available") {
+		t.Errorf("Expected 'smart wallet address not available' error, got: %v", err)
+	}
+
+	if executionLog.Success {
+		t.Error("Expected success=false")
+	}
+}
+
+func TestETHTransferProcessor_Execute_MaxAmountCaseInsensitive(t *testing.T) {
+	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
+
+	testUserAddress := testutil.TestUser1().Address
+	processor := NewETHTransferProcessor(vm, nil, nil, &testUserAddress)
+
+	vm.AddVar("aa_sender", "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6")
+
+	// Test lowercase "max"
+	for _, amount := range []string{"max", "Max", "MAX"} {
+		node := &avsproto.ETHTransferNode{
+			Config: &avsproto.ETHTransferNode_Config{
+				Destination: "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
+				Amount:      amount,
+			},
+		}
+
+		_, err := processor.Execute("test-step", node)
+
+		if err == nil {
+			t.Fatalf("Expected error for amount=%q with nil ethClient", amount)
+		}
+
+		// All variants should reach the ethClient check (past the aa_sender check)
+		if !strings.Contains(err.Error(), "no RPC client available") {
+			t.Errorf("amount=%q: expected 'no RPC client available' error, got: %v", amount, err)
+		}
+	}
+}
+
+func TestETHTransferProcessor_Execute_LogEnrichment(t *testing.T) {
+	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
+
+	testUserAddress := testutil.TestUser1().Address
+	processor := NewETHTransferProcessor(vm, nil, nil, &testUserAddress)
+
+	node := &avsproto.ETHTransferNode{
+		Config: &avsproto.ETHTransferNode_Config{
+			Destination: "not-an-address",
+			Amount:      "1000",
+		},
+	}
+
+	executionLog, err := processor.Execute("test-step", node)
+
+	if err == nil {
+		t.Fatal("Expected error for invalid destination")
+	}
+
+	// Verify log contains resolved values AND the error
+	if !strings.Contains(executionLog.Log, "Resolved: destination=not-an-address, amount=1000") {
+		t.Errorf("Expected log to show resolved values, got: %s", executionLog.Log)
+	}
+	if !strings.Contains(executionLog.Log, "Error: invalid destination address") {
+		t.Errorf("Expected log to contain error details, got: %s", executionLog.Log)
 	}
 }

@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math/big"
@@ -74,6 +75,9 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	var finalized bool // Track if step was already finalized
 	defer func() {
 		if !finalized {
+			if err != nil {
+				logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+			}
 			finalizeStep(executionLog, err == nil, err, "", logBuilder.String())
 		}
 	}()
@@ -81,13 +85,41 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	// Get configuration
 	config := node.GetConfig()
 	if err = validateNodeConfig(config, "ETHTransferNode"); err != nil {
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
 		return executionLog, err
 	}
 
 	// Preprocess template variables in configuration
 	destination := p.vm.preprocessTextWithVariableMapping(config.GetDestination())
 	amountStr := p.vm.preprocessTextWithVariableMapping(config.GetAmount())
+
+	// Log resolved config values for debugging
+	logBuilder.WriteString(fmt.Sprintf("Resolved: destination=%s, amount=%s\n", destination, amountStr))
+
+	// Resolve "MAX" (case-insensitive) to smart wallet's full ETH balance
+	isMaxTransfer := false
+	if strings.EqualFold(amountStr, "MAX") {
+		senderAddr := getAASenderAddress(p.vm)
+		if senderAddr == nil {
+			err = fmt.Errorf("cannot resolve MAX amount: smart wallet address not available")
+			return executionLog, err
+		}
+		if p.ethClient == nil {
+			err = fmt.Errorf("cannot resolve MAX amount: no RPC client available")
+			return executionLog, err
+		}
+		balance, balErr := p.ethClient.BalanceAt(context.Background(), *senderAddr, nil)
+		if balErr != nil {
+			err = fmt.Errorf("cannot resolve MAX amount: failed to get balance: %v", balErr)
+			return executionLog, err
+		}
+		if balance.Cmp(big.NewInt(0)) == 0 {
+			err = fmt.Errorf("cannot resolve MAX amount: wallet balance is zero")
+			return executionLog, err
+		}
+		amountStr = balance.String()
+		isMaxTransfer = true
+		logBuilder.WriteString(fmt.Sprintf("MAX resolved to %s wei (wallet: %s)\n", amountStr, senderAddr.Hex()))
+	}
 
 	// Validate template variable resolution
 	if err = ValidateTemplateVariableResolution(destination, config.GetDestination(), p.vm, "destination"); err != nil {
@@ -126,7 +158,7 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 			"destination", destination,
 			"amount", amountStr)
 
-		return p.executeRealETHTransfer(stepID, destination, amountStr, executionLog, &finalized)
+		return p.executeRealETHTransfer(stepID, destination, amountStr, isMaxTransfer, executionLog, &finalized)
 	}
 
 	// Simulation path for ETH transfers (SimulateTask / RunNodeImmediately)
@@ -218,7 +250,7 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 }
 
 // executeRealETHTransfer executes a real UserOp transaction for ETH transfers
-func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amountStr string, executionLog *avsproto.Execution_Step, finalized *bool) (*avsproto.Execution_Step, error) {
+func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amountStr string, isMaxTransfer bool, executionLog *avsproto.Execution_Step, finalized *bool) (*avsproto.Execution_Step, error) {
 	p.vm.logger.Info("🔍 REAL ETH TRANSFER DEBUG - Starting real UserOp ETH transfer execution",
 		"destination", destination,
 		"amount", amountStr)

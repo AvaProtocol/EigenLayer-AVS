@@ -1690,11 +1690,17 @@ func (v *VM) runEthTransfer(taskNode *avsproto.TaskNode) (*avsproto.Execution_St
 		return executionLog, err
 	}
 
-	// For now, we don't need an actual ETH client connection for simulation
-	// In the future, this would use the actual ETH RPC client
-	processor := NewETHTransferProcessor(v, nil, v.smartWalletConfig, &v.TaskOwner)
+	rpcClient, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
+	if err != nil {
+		executionLog = v.createExecutionStep(stepID, false, fmt.Sprintf("failed to dial ETH RPC: %v", err), "", time.Now().UnixMilli())
+		executionLog.EndAt = time.Now().UnixMilli()
+		return executionLog, err
+	}
+	defer rpcClient.Close()
+
+	processor := NewETHTransferProcessor(v, rpcClient, v.smartWalletConfig, &v.TaskOwner)
 	processor.CommonProcessor.SetTaskNode(taskNode)
-	executionLog, err := processor.Execute(stepID, node)
+	executionLog, err = processor.Execute(stepID, node)
 	v.mu.Lock()
 	if executionLog != nil {
 		executionLog.Inputs = v.collectInputKeysForLog(stepID)
