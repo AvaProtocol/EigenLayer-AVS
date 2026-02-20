@@ -335,16 +335,17 @@ func TestETHTransferProcessor_Execute_MaxAmountNoAASender(t *testing.T) {
 }
 
 func TestETHTransferProcessor_Execute_MaxAmountCaseInsensitive(t *testing.T) {
-	vm := NewVM()
-	vm.WithLogger(testutil.GetLogger())
-
 	testUserAddress := testutil.TestUser1().Address
-	processor := NewETHTransferProcessor(vm, nil, nil, &testUserAddress)
 
-	vm.AddVar("aa_sender", "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6")
-
-	// Test lowercase "max"
+	// Test all case variants of "max"
 	for _, amount := range []string{"max", "Max", "MAX"} {
+		// Use fresh VM and processor per iteration to avoid state leakage
+		vm := NewVM()
+		vm.WithLogger(testutil.GetLogger())
+		vm.AddVar("aa_sender", "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6")
+
+		processor := NewETHTransferProcessor(vm, nil, nil, &testUserAddress)
+
 		node := &avsproto.ETHTransferNode{
 			Config: &avsproto.ETHTransferNode_Config{
 				Destination: "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
