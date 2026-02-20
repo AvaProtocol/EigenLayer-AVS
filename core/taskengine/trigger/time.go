@@ -124,9 +124,10 @@ func (t *TimeTrigger) calculateNextCronTime(cronExpr string, startAt int64) (tim
 	}
 
 	// Use the later of startAt and now as the reference time.
-	// - For new tasks: startAt ≈ now, so the next tick is a full interval away.
+	// schedule.Next(ref) returns the next cron-aligned time strictly after ref.
+	// - For new tasks: startAt ≈ now, so the next tick is at the next cron boundary.
 	// - For re-enabled tasks: startAt is in the past, so now is used,
-	//   ensuring the timer resets and the user gets a full interval.
+	//   ensuring the next tick is the next cron-aligned time after now.
 	// - For future-scheduled tasks: startAt > now, so the future time is respected.
 	var referenceTime time.Time
 	now := time.Now()
@@ -174,13 +175,14 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 	// Clean up any existing jobs for this task to prevent orphaned scheduler
 	// jobs when AddCheck is called without a preceding RemoveCheck (e.g.
 	// duplicate MonitorTaskTrigger messages or direct re-enable).
-	if existing, exists := t.registry.GetTask(taskID); exists && existing != nil &&
-		existing.TimeData != nil && len(existing.TimeData.Jobs) > 0 {
-		for _, job := range existing.TimeData.Jobs {
-			if job != nil {
-				if err := t.scheduler.RemoveJob(job.ID()); err != nil {
-					t.logger.Debug("failed to remove existing job during AddCheck cleanup",
-						"task_id", taskID, "error", err)
+	if existing, exists := t.registry.GetTask(taskID); exists {
+		if existing.TimeData != nil {
+			for _, job := range existing.TimeData.Jobs {
+				if job != nil {
+					if err := t.scheduler.RemoveJob(job.ID()); err != nil {
+						t.logger.Warn("failed to remove existing job during AddCheck cleanup",
+							"task_id", taskID, "error", err)
+					}
 				}
 			}
 		}
