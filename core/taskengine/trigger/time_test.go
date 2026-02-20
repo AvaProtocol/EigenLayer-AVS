@@ -402,6 +402,58 @@ func TestTimeTrigger_DisableEnableResetsTimer(t *testing.T) {
 		nextTime, time.Until(nextTime))
 }
 
+// TestTimeTrigger_AddCheckTwiceNoJobLeak verifies that calling AddCheck twice
+// for the same task without an intervening RemoveCheck does not leak gocron
+// jobs. The old jobs should be cleaned up before new ones are created.
+func TestTimeTrigger_AddCheckTwiceNoJobLeak(t *testing.T) {
+	triggerCh := make(chan TriggerMetadata[uint64], 10)
+	logger := testutil.GetLogger()
+	timeTrigger := NewTimeTrigger(triggerCh, logger)
+
+	cronConfig := &avsproto.CronTrigger_Config{
+		Schedules: []string{"*/10 * * * *"},
+	}
+	cronTrigger := &avsproto.CronTrigger{
+		Config: cronConfig,
+	}
+	trigger := &avsproto.TaskTrigger{
+		TriggerType: &avsproto.TaskTrigger_Cron{
+			Cron: cronTrigger,
+		},
+	}
+
+	taskMetadata := &avsproto.SyncMessagesResp_TaskMetadata{
+		TaskId:  "test-duplicate-add",
+		Trigger: trigger,
+	}
+
+	// First AddCheck
+	err := timeTrigger.AddCheck(taskMetadata)
+	require.NoError(t, err)
+	assert.Equal(t, 1, timeTrigger.registry.GetTimeTaskCount())
+
+	task1, _ := timeTrigger.registry.GetTask("test-duplicate-add")
+	require.NotNil(t, task1.TimeData)
+	firstJobCount := len(task1.TimeData.Jobs)
+	assert.Equal(t, 1, firstJobCount, "should have exactly 1 job after first AddCheck")
+
+	// Second AddCheck without RemoveCheck — should NOT leak the first job
+	err = timeTrigger.AddCheck(taskMetadata)
+	require.NoError(t, err)
+	assert.Equal(t, 1, timeTrigger.registry.GetTimeTaskCount(),
+		"registry should still have exactly 1 task")
+
+	task2, _ := timeTrigger.registry.GetTask("test-duplicate-add")
+	require.NotNil(t, task2.TimeData)
+	assert.Equal(t, 1, len(task2.TimeData.Jobs),
+		"should still have exactly 1 job, not 2 (no leak)")
+
+	// Cleanup should work without errors
+	err = timeTrigger.RemoveCheck("test-duplicate-add")
+	require.NoError(t, err)
+	assert.Equal(t, 0, timeTrigger.registry.GetTimeTaskCount())
+}
+
 func TestTimeTrigger_EpochToCron(t *testing.T) {
 	triggerCh := make(chan TriggerMetadata[uint64], 10)
 	logger := testutil.GetLogger()

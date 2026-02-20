@@ -171,6 +171,23 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 
 	taskID := check.TaskId
 
+	// Clean up any existing jobs for this task to prevent orphaned scheduler
+	// jobs when AddCheck is called without a preceding RemoveCheck (e.g.
+	// duplicate MonitorTaskTrigger messages or direct re-enable).
+	if existing, exists := t.registry.GetTask(taskID); exists && existing != nil &&
+		existing.TimeData != nil && len(existing.TimeData.Jobs) > 0 {
+		for _, job := range existing.TimeData.Jobs {
+			if job != nil {
+				if err := t.scheduler.RemoveJob(job.ID()); err != nil {
+					t.logger.Debug("failed to remove existing job during AddCheck cleanup",
+						"task_id", taskID, "error", err)
+				}
+			}
+		}
+		t.registry.RemoveTask(taskID)
+		t.logger.Debug("cleaned up existing task before re-adding", "task_id", taskID)
+	}
+
 	// Function to be executed when trigger fires
 	triggerFunc := func() {
 		currentTime := time.Now().UnixMilli()
