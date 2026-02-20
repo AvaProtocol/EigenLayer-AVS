@@ -123,14 +123,22 @@ func (t *TimeTrigger) calculateNextCronTime(cronExpr string, startAt int64) (tim
 		return time.Time{}, fmt.Errorf("failed to parse cron expression %s: %w", cronExpr, err)
 	}
 
-	// Use startAt as the reference time for cron calculation
-	// This ensures cron schedules respect the workflow's submission time
+	// Use the later of startAt and now as the reference time.
+	// - For new tasks: startAt ≈ now, so the next tick is a full interval away.
+	// - For re-enabled tasks: startAt is in the past, so now is used,
+	//   ensuring the timer resets and the user gets a full interval.
+	// - For future-scheduled tasks: startAt > now, so the future time is respected.
 	var referenceTime time.Time
+	now := time.Now()
 	if startAt > 0 {
-		referenceTime = time.UnixMilli(startAt)
+		startTime := time.UnixMilli(startAt)
+		if startTime.After(now) {
+			referenceTime = startTime
+		} else {
+			referenceTime = now
+		}
 	} else {
-		// Fallback to current time for backward compatibility
-		referenceTime = time.Now()
+		referenceTime = now
 		t.logger.Warn("startAt not provided, using current time as reference", "cron", cronExpr)
 	}
 
