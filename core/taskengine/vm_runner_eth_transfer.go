@@ -154,6 +154,12 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 
 	// Real transactions only when not in simulation context
 	if p.smartWalletConfig != nil && !p.vm.IsSimulation {
+		// MAX transfers require paymaster to cover gas, since the full balance is being sent
+		if isMaxTransfer && !p.shouldUsePaymaster() {
+			err = fmt.Errorf("cannot use MAX amount without paymaster: wallet needs gas reserve for self-funded transactions")
+			return executionLog, err
+		}
+
 		p.vm.logger.Info("🚀 ETH TRANSFER DEBUG - Using real UserOp transaction path",
 			"destination", destination,
 			"amount", amountStr)
@@ -292,9 +298,15 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 			p.smartWalletConfig.PaymasterAddress,
 			15*time.Minute, // 15 minute validity window
 		)
+		// For MAX transfers, skip reimbursement so the full balance can be sent.
+		// Paymaster absorbs gas costs, matching the withdrawal RPC behavior.
+		if isMaxTransfer {
+			paymasterReq.SkipReimbursement = true
+		}
 		p.vm.logger.Info("🎫 Using paymaster for sponsored ETH transfer",
 			"paymaster", p.smartWalletConfig.PaymasterAddress.Hex(),
-			"owner", p.taskOwner.Hex())
+			"owner", p.taskOwner.Hex(),
+			"skipReimbursement", isMaxTransfer)
 	} else {
 		p.vm.logger.Info("💰 Using regular ETH transfer (no paymaster)",
 			"owner", p.taskOwner.Hex())

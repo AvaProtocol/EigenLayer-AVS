@@ -1683,8 +1683,8 @@ func (v *VM) runEthTransfer(taskNode *avsproto.TaskNode) (*avsproto.Execution_St
 	}
 	stepID := taskNode.Id
 	var executionLog *avsproto.Execution_Step
-	if v.smartWalletConfig == nil {
-		err := fmt.Errorf("smart wallet config not set for ETH transfer")
+	if v.smartWalletConfig == nil || v.smartWalletConfig.EthRpcUrl == "" {
+		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for ETH transfer")
 		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
 		return executionLog, err
