@@ -287,6 +287,121 @@ func TestTimeTrigger_RangeTimeTasks(t *testing.T) {
 	assert.Contains(t, taskIDs, "task-2")
 }
 
+// TestTimeTrigger_calculateNextCronTime_PastStartAt verifies that when startAt
+// is in the past (e.g. task re-enabled after disable), the reference time falls
+// back to now so the user gets a full interval before the next trigger.
+func TestTimeTrigger_calculateNextCronTime_PastStartAt(t *testing.T) {
+	triggerCh := make(chan TriggerMetadata[uint64], 10)
+	logger := testutil.GetLogger()
+	timeTrigger := NewTimeTrigger(triggerCh, logger)
+
+	// startAt is 5 minutes ago — simulates a re-enabled task whose
+	// original creation time is in the past.
+	pastStartAt := time.Now().Add(-5 * time.Minute).UnixMilli()
+
+	// Every 10 minutes: the cron library aligns to :00, :10, :20 etc.
+	nextTime, err := timeTrigger.calculateNextCronTime("*/10 * * * *", pastStartAt)
+	require.NoError(t, err)
+
+	// The next trigger must be in the future and at least 1 minute away,
+	// because the reference is now(), not the past startAt.
+	assert.True(t, nextTime.After(time.Now()),
+		"next trigger should be in the future, got %s", nextTime)
+	assert.True(t, nextTime.Sub(time.Now()) >= 1*time.Minute,
+		"next trigger should be at least 1 minute away, got %s from now", time.Until(nextTime))
+}
+
+// TestTimeTrigger_calculateNextCronTime_FutureStartAt verifies that when
+// startAt is in the future, it is used as the reference time so the trigger
+// respects the scheduled future start.
+func TestTimeTrigger_calculateNextCronTime_FutureStartAt(t *testing.T) {
+	triggerCh := make(chan TriggerMetadata[uint64], 10)
+	logger := testutil.GetLogger()
+	timeTrigger := NewTimeTrigger(triggerCh, logger)
+
+	// startAt is 30 minutes in the future
+	futureStartAt := time.Now().Add(30 * time.Minute).UnixMilli()
+
+	nextTime, err := timeTrigger.calculateNextCronTime("*/10 * * * *", futureStartAt)
+	require.NoError(t, err)
+
+	// The next trigger must be after the future startAt
+	futureTime := time.UnixMilli(futureStartAt)
+	assert.True(t, nextTime.After(futureTime) || nextTime.Equal(futureTime),
+		"next trigger (%s) should be at or after futureStartAt (%s)", nextTime, futureTime)
+}
+
+// TestTimeTrigger_calculateNextCronTime_ZeroStartAt verifies that when startAt
+// is 0 (not provided), the reference time falls back to now.
+func TestTimeTrigger_calculateNextCronTime_ZeroStartAt(t *testing.T) {
+	triggerCh := make(chan TriggerMetadata[uint64], 10)
+	logger := testutil.GetLogger()
+	timeTrigger := NewTimeTrigger(triggerCh, logger)
+
+	nextTime, err := timeTrigger.calculateNextCronTime("*/10 * * * *", 0)
+	require.NoError(t, err)
+
+	assert.True(t, nextTime.After(time.Now()),
+		"next trigger should be in the future, got %s", nextTime)
+}
+
+// TestTimeTrigger_DisableEnableResetsTimer tests the full disable → enable
+// cycle and verifies the cron timer resets so the next trigger is a full
+// interval from the re-enable moment rather than from the original startAt.
+func TestTimeTrigger_DisableEnableResetsTimer(t *testing.T) {
+	triggerCh := make(chan TriggerMetadata[uint64], 10)
+	logger := testutil.GetLogger()
+	timeTrigger := NewTimeTrigger(triggerCh, logger)
+
+	// Task was originally created 5 minutes ago with a 10-minute interval
+	pastStartAt := time.Now().Add(-5 * time.Minute).UnixMilli()
+
+	cronConfig := &avsproto.CronTrigger_Config{
+		Schedules: []string{"*/10 * * * *"},
+	}
+	cronTrigger := &avsproto.CronTrigger{
+		Config: cronConfig,
+	}
+	trigger := &avsproto.TaskTrigger{
+		TriggerType: &avsproto.TaskTrigger_Cron{
+			Cron: cronTrigger,
+		},
+	}
+
+	taskMetadata := &avsproto.SyncMessagesResp_TaskMetadata{
+		TaskId:  "test-disable-enable",
+		Trigger: trigger,
+		StartAt: pastStartAt,
+	}
+
+	// Step 1: Add the task (simulates initial creation or re-enable)
+	err := timeTrigger.AddCheck(taskMetadata)
+	require.NoError(t, err)
+	assert.Equal(t, 1, timeTrigger.registry.GetTimeTaskCount())
+
+	// Step 2: Disable — removes the task from scheduling
+	err = timeTrigger.RemoveCheck("test-disable-enable")
+	require.NoError(t, err)
+	assert.Equal(t, 0, timeTrigger.registry.GetTimeTaskCount())
+
+	// Step 3: Re-enable — adds the task back; startAt is still in the past
+	err = timeTrigger.AddCheck(taskMetadata)
+	require.NoError(t, err)
+	assert.Equal(t, 1, timeTrigger.registry.GetTimeTaskCount())
+
+	// Verify via calculateNextCronTime: with a past startAt, the next trigger
+	// should be computed from now, giving at least 1 minute before firing.
+	// Without the fix, startAt (5 min ago) + */10 alignment could produce a
+	// next tick only seconds away.
+	nextTime, err := timeTrigger.calculateNextCronTime("*/10 * * * *", pastStartAt)
+	require.NoError(t, err)
+	assert.True(t, nextTime.After(time.Now()),
+		"after re-enable, next trigger should be in the future, got %s", nextTime)
+	assert.True(t, time.Until(nextTime) >= 1*time.Minute,
+		"after re-enable, next trigger should be at least 1 min away, got %s (in %s)",
+		nextTime, time.Until(nextTime))
+}
+
 func TestTimeTrigger_EpochToCron(t *testing.T) {
 	triggerCh := make(chan TriggerMetadata[uint64], 10)
 	logger := testutil.GetLogger()
