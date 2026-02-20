@@ -289,7 +289,7 @@ func TestTimeTrigger_RangeTimeTasks(t *testing.T) {
 
 // TestTimeTrigger_calculateNextCronTime_PastStartAt verifies that when startAt
 // is in the past (e.g. task re-enabled after disable), the reference time falls
-// back to now so the user gets a full interval before the next trigger.
+// back to now so the next trigger is at the next cron-aligned time after now.
 func TestTimeTrigger_calculateNextCronTime_PastStartAt(t *testing.T) {
 	triggerCh := make(chan TriggerMetadata[uint64], 10)
 	logger := testutil.GetLogger()
@@ -299,16 +299,17 @@ func TestTimeTrigger_calculateNextCronTime_PastStartAt(t *testing.T) {
 	// original creation time is in the past.
 	pastStartAt := time.Now().Add(-5 * time.Minute).UnixMilli()
 
+	now := time.Now()
 	// Every 10 minutes: the cron library aligns to :00, :10, :20 etc.
 	nextTime, err := timeTrigger.calculateNextCronTime("*/10 * * * *", pastStartAt)
 	require.NoError(t, err)
 
-	// The next trigger must be in the future and at least 1 minute away,
-	// because the reference is now(), not the past startAt.
-	assert.True(t, nextTime.After(time.Now()),
+	// The next trigger must be in the future (after the reference = now,
+	// not the past startAt) and at most 10 minutes away (the cron interval).
+	assert.True(t, nextTime.After(now),
 		"next trigger should be in the future, got %s", nextTime)
-	assert.True(t, nextTime.Sub(time.Now()) >= 1*time.Minute,
-		"next trigger should be at least 1 minute away, got %s from now", time.Until(nextTime))
+	assert.True(t, nextTime.Sub(now) <= 10*time.Minute,
+		"next trigger should be within one interval (10 min), got %s from now", nextTime.Sub(now))
 }
 
 // TestTimeTrigger_calculateNextCronTime_FutureStartAt verifies that when
@@ -325,10 +326,11 @@ func TestTimeTrigger_calculateNextCronTime_FutureStartAt(t *testing.T) {
 	nextTime, err := timeTrigger.calculateNextCronTime("*/10 * * * *", futureStartAt)
 	require.NoError(t, err)
 
-	// The next trigger must be after the future startAt
+	// schedule.Next() returns the next occurrence strictly after the reference,
+	// so the next trigger must be after futureStartAt.
 	futureTime := time.UnixMilli(futureStartAt)
-	assert.True(t, nextTime.After(futureTime) || nextTime.Equal(futureTime),
-		"next trigger (%s) should be at or after futureStartAt (%s)", nextTime, futureTime)
+	assert.True(t, nextTime.After(futureTime),
+		"next trigger (%s) should be after futureStartAt (%s)", nextTime, futureTime)
 }
 
 // TestTimeTrigger_calculateNextCronTime_ZeroStartAt verifies that when startAt
@@ -390,16 +392,17 @@ func TestTimeTrigger_DisableEnableResetsTimer(t *testing.T) {
 	assert.Equal(t, 1, timeTrigger.registry.GetTimeTaskCount())
 
 	// Verify via calculateNextCronTime: with a past startAt, the next trigger
-	// should be computed from now, giving at least 1 minute before firing.
-	// Without the fix, startAt (5 min ago) + */10 alignment could produce a
-	// next tick only seconds away.
+	// should be computed from now (next cron-aligned time), not from the
+	// stale startAt. Without the fix, startAt (5 min ago) + */10 alignment
+	// could produce a next tick only seconds away.
+	now := time.Now()
 	nextTime, err := timeTrigger.calculateNextCronTime("*/10 * * * *", pastStartAt)
 	require.NoError(t, err)
-	assert.True(t, nextTime.After(time.Now()),
+	assert.True(t, nextTime.After(now),
 		"after re-enable, next trigger should be in the future, got %s", nextTime)
-	assert.True(t, time.Until(nextTime) >= 1*time.Minute,
-		"after re-enable, next trigger should be at least 1 min away, got %s (in %s)",
-		nextTime, time.Until(nextTime))
+	assert.True(t, nextTime.Sub(now) <= 10*time.Minute,
+		"after re-enable, next trigger should be within one interval (10 min), got %s from now",
+		nextTime.Sub(now))
 }
 
 // TestTimeTrigger_AddCheckTwiceNoJobLeak verifies that calling AddCheck twice
