@@ -829,8 +829,8 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				Network:     "Sepolia",
 				Trigger:     "(Simulated) Your scheduled task (every 3 days at 11:00 PM) triggered on Sepolia.",
 				TriggeredAt: "2026-01-22T04:51:18.509Z",
-				Executions: []string{
-					"(Simulated) Transferred 0.01 ETH to 0xc60e...C788",
+				Executions: []ExecutionEntry{
+					{Description: "(Simulated) Transferred 0.01 ETH to 0xc60e...C788"},
 				},
 			},
 			expectedContain: []string{
@@ -850,8 +850,8 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				Status:      "success",
 				Network:     "Sepolia",
 				TriggeredAt: "2026-01-22T04:51:18.509Z",
-				Executions: []string{
-					"Transferred 0.01 ETH to 0xc60e...C788",
+				Executions: []ExecutionEntry{
+					{Description: "Transferred 0.01 ETH to 0xc60e...C788"},
 				},
 			},
 			expectedContain: []string{
@@ -890,8 +890,8 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				Status:      "partial_success",
 				Network:     "Ethereum",
 				TriggeredAt: "2026-01-22T04:51:18.509Z",
-				Executions: []string{
-					"Approved 100 USDC to router",
+				Executions: []ExecutionEntry{
+					{Description: "Approved 100 USDC to router"},
 				},
 			},
 			expectedContain: []string{
@@ -912,7 +912,7 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 					Chain:   "Base",
 					ChainID: 8453,
 				},
-				Executions: []string{"(Simulated) Test executed"},
+				Executions: []ExecutionEntry{{Description: "(Simulated) Test executed"}},
 			},
 			expectedContain: []string{
 				"<b>Network:</b> Base", // Falls back to workflow.chain
@@ -928,7 +928,7 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 					Chain:   "", // Empty chain name
 					ChainID: 11155111,
 				},
-				Executions: []string{"(Simulated) Test executed"},
+				Executions: []ExecutionEntry{{Description: "(Simulated) Test executed"}},
 			},
 			expectedContain: []string{
 				"<b>Network:</b> Sepolia", // Derived from chainID
@@ -943,7 +943,7 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				TriggeredAt: "2026-01-28T07:31:51Z",
 				Trigger:     "(Simulated) Scheduled task ran on Sepolia",
 				// ComposeSummary populates fallback execution entry when buildExecutionsArray returns empty
-				Executions: []string{"(Simulated) On-chain transaction successfully completed"},
+				Executions: []ExecutionEntry{{Description: "(Simulated) On-chain transaction successfully completed"}},
 			},
 			expectedContain: []string{
 				"✅ Simulation: <code>My Workflow</code> successfully completed",
@@ -983,7 +983,7 @@ func TestFormatTelegramFromStructured_Annotation(t *testing.T) {
 		Subject:    "Run Node: My Workflow succeeded",
 		Status:     "success",
 		Network:    "Sepolia",
-		Executions: []string{"Transferred 0.01 ETH"},
+		Executions: []ExecutionEntry{{Description: "Transferred 0.01 ETH"}},
 		Annotation: "This is an example. Actual execution details will appear when the workflow is simulated or triggered by a real event.",
 	}
 
@@ -1002,7 +1002,7 @@ func TestFormatTelegramFromStructured_Annotation(t *testing.T) {
 		Subject:    "Simulation: My Workflow successfully completed",
 		Status:     "success",
 		Network:    "Sepolia",
-		Executions: []string{"(Simulated) Transferred 0.01 ETH"},
+		Executions: []ExecutionEntry{{Description: "(Simulated) Transferred 0.01 ETH"}},
 	}
 	resultNoAnnotation := FormatForMessageChannels(summaryNoAnnotation, "telegram", nil)
 	if strings.Contains(resultNoAnnotation, "<i>") {
@@ -1040,41 +1040,59 @@ func TestTruncateAddress(t *testing.T) {
 func TestGetBlockExplorerURL(t *testing.T) {
 	tests := []struct {
 		name     string
-		chain    string
 		chainID  int64
 		expected string
 	}{
-		// Test by chain ID (preferred)
-		{"chainID_ethereum", "", 1, "https://etherscan.io"},
-		{"chainID_sepolia", "", 11155111, "https://sepolia.etherscan.io"},
-		{"chainID_polygon", "", 137, "https://polygonscan.com"},
-		{"chainID_arbitrum", "", 42161, "https://arbiscan.io"},
-		{"chainID_optimism", "", 10, "https://optimistic.etherscan.io"},
-		{"chainID_base", "", 8453, "https://basescan.org"},
-		{"chainID_base_sepolia", "", 84532, "https://sepolia.basescan.org"},
-		{"chainID_bsc", "", 56, "https://bscscan.com"},
-		{"chainID_avalanche", "", 43114, "https://snowtrace.io"},
-
-		// Test by chain name fallback
-		{"name_mainnet", "Mainnet", 0, "https://etherscan.io"},
-		{"name_ethereum", "Ethereum", 0, "https://etherscan.io"},
-		{"name_sepolia", "Sepolia", 0, "https://sepolia.etherscan.io"},
-		{"name_polygon", "Polygon", 0, "https://polygonscan.com"},
-		{"name_arbitrum", "Arbitrum", 0, "https://arbiscan.io"},
-		{"name_arbitrum_one", "Arbitrum One", 0, "https://arbiscan.io"},
-		{"name_optimism", "Optimism", 0, "https://optimistic.etherscan.io"},
-		{"name_base", "Base", 0, "https://basescan.org"},
-		{"name_base_sepolia", "Base-Sepolia", 0, "https://sepolia.basescan.org"},
-		{"name_bsc", "BSC", 0, "https://bscscan.com"},
-		{"name_avalanche", "Avalanche", 0, "https://snowtrace.io"},
-		{"name_unknown", "Unknown", 0, "https://etherscan.io"}, // Default fallback
+		{"ethereum", 1, "https://etherscan.io"},
+		{"sepolia", 11155111, "https://sepolia.etherscan.io"},
+		{"polygon", 137, "https://polygonscan.com"},
+		{"arbitrum", 42161, "https://arbiscan.io"},
+		{"optimism", 10, "https://optimistic.etherscan.io"},
+		{"base", 8453, "https://basescan.org"},
+		{"base_sepolia", 84532, "https://sepolia.basescan.org"},
+		{"bsc", 56, "https://bscscan.com"},
+		{"avalanche", 43114, "https://snowtrace.io"},
+		{"unknown", 999999, ""},
+		{"zero", 0, ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := getBlockExplorerURL(tt.chain, tt.chainID)
+			result := getBlockExplorerURL(tt.chainID)
 			if result != tt.expected {
-				t.Errorf("getBlockExplorerURL(%q, %d) = %q, want %q", tt.chain, tt.chainID, result, tt.expected)
+				t.Errorf("getBlockExplorerURL(%d) = %q, want %q", tt.chainID, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestMapNameToChainID tests the chain name to chain ID reverse mapping
+func TestMapNameToChainID(t *testing.T) {
+	tests := []struct {
+		name     string
+		expected int64
+	}{
+		{"Mainnet", 1},
+		{"Ethereum", 1},
+		{"Sepolia", 11155111},
+		{"Polygon", 137},
+		{"Arbitrum", 42161},
+		{"Arbitrum One", 42161},
+		{"Optimism", 10},
+		{"Base", 8453},
+		{"Base-Sepolia", 84532},
+		{"BSC", 56},
+		{"BNB Chain", 56},
+		{"Avalanche", 43114},
+		{"Unknown", 0},
+		{"", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mapNameToChainID(tt.name)
+			if result != tt.expected {
+				t.Errorf("mapNameToChainID(%q) = %d, want %d", tt.name, result, tt.expected)
 			}
 		})
 	}
@@ -1349,8 +1367,8 @@ func TestComposeSummary_SimulateTaskFromClientPayload(t *testing.T) {
 	if len(summary.Executions) != 1 {
 		t.Fatalf("Executions: expected 1 fallback entry, got %d: %v", len(summary.Executions), summary.Executions)
 	}
-	if summary.Executions[0] != "(Simulated) On-chain transaction successfully completed" {
-		t.Errorf("Executions[0]: expected fallback entry, got: %q", summary.Executions[0])
+	if summary.Executions[0].Description != "(Simulated) On-chain transaction successfully completed" {
+		t.Errorf("Executions[0]: expected fallback entry, got: %q", summary.Executions[0].Description)
 	}
 
 	// Annotation should be empty for simulate_task (multi-node) executions
@@ -1447,4 +1465,189 @@ func TestComposeSummary_RunNodeImmediateSubjectPrefix(t *testing.T) {
 	t.Logf("Network: %s", summary.Network)
 	t.Logf("SummaryLine: %s", summary.SummaryLine)
 	t.Logf("Annotation: %s", summary.Annotation)
+}
+
+// TestIsValidTxHash tests the Ethereum tx hash validation helper
+func TestIsValidTxHash(t *testing.T) {
+	tests := []struct {
+		name     string
+		hash     string
+		expected bool
+	}{
+		{"valid_hash", "0xdef456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0", true},
+		{"valid_hash_uppercase", "0xDEF456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0", true},
+		{"valid_hash_mixed", "0xAbCdEf0123456789abcdef0123456789AbCdEf0123456789abcdef0123456789", true},
+		{"empty", "", false},
+		{"no_prefix", "def456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0a", false},
+		{"too_short", "0x1234", false},
+		{"too_long", "0xdef456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0a", false},
+		{"non_hex_chars", "0xggg456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0", false},
+		{"bigint_simulation_id", "0x0000000000000000000000000000000000000000000001769651703156844000", true}, // 64 hex chars, format-valid (caught by isStepSimulated instead)
+		{"just_0x", "0x", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isValidTxHash(tt.hash)
+			if result != tt.expected {
+				t.Errorf("isValidTxHash(%q) = %v, want %v (len=%d)", tt.hash, result, tt.expected, len(tt.hash))
+			}
+		})
+	}
+}
+
+// TestIsStepSimulated tests the per-step simulation detection helper
+func TestIsStepSimulated(t *testing.T) {
+	// Helper to create ExecutionContext structpb.Value
+	makeCtx := func(m map[string]interface{}) *structpb.Value {
+		v, _ := structpb.NewValue(m)
+		return v
+	}
+
+	tests := []struct {
+		name     string
+		step     *avsproto.Execution_Step
+		expected bool
+	}{
+		{
+			"nil_context",
+			&avsproto.Execution_Step{},
+			false,
+		},
+		{
+			"snake_case_true",
+			&avsproto.Execution_Step{
+				ExecutionContext: makeCtx(map[string]interface{}{
+					"is_simulated": true,
+					"provider":     "tenderly",
+				}),
+			},
+			true,
+		},
+		{
+			"snake_case_false",
+			&avsproto.Execution_Step{
+				ExecutionContext: makeCtx(map[string]interface{}{
+					"is_simulated": false,
+					"provider":     "chain_rpc",
+				}),
+			},
+			false,
+		},
+		{
+			"camel_case_true",
+			&avsproto.Execution_Step{
+				ExecutionContext: makeCtx(map[string]interface{}{
+					"isSimulated": true,
+					"provider":    "tenderly",
+				}),
+			},
+			true,
+		},
+		{
+			"camel_case_false",
+			&avsproto.Execution_Step{
+				ExecutionContext: makeCtx(map[string]interface{}{
+					"isSimulated": false,
+					"provider":    "chain_rpc",
+				}),
+			},
+			false,
+		},
+		{
+			"no_simulated_key",
+			&avsproto.Execution_Step{
+				ExecutionContext: makeCtx(map[string]interface{}{
+					"provider": "chain_rpc",
+				}),
+			},
+			false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isStepSimulated(tt.step)
+			if result != tt.expected {
+				t.Errorf("isStepSimulated() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestBuildExecutionsArray_SkipsSimulatedTxHash verifies that buildExecutionsArray
+// does not attach txHash for simulated steps or invalid tx hashes
+func TestBuildExecutionsArray_SkipsSimulatedTxHash(t *testing.T) {
+	makeCtx := func(isSimulated bool) *structpb.Value {
+		v, _ := structpb.NewValue(map[string]interface{}{
+			"is_simulated": isSimulated,
+			"provider":     "tenderly",
+		})
+		return v
+	}
+
+	validTxHash := "0xdef456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0"
+	malformedHash := "0x1234" // too short to be valid
+
+	// Metadata with valid tx hash
+	validMeta, _ := structpb.NewValue(map[string]interface{}{
+		"transactionHash": validTxHash,
+	})
+	// Metadata with malformed hash (wrong length)
+	malformedMeta, _ := structpb.NewValue(map[string]interface{}{
+		"transactionHash": malformedHash,
+	})
+
+	// Contract write config with callData
+	writeConfig, _ := structpb.NewValue(map[string]interface{}{
+		"contractAddress": "0x1234567890abcdef1234567890abcdef12345678",
+		"callData":        "transfer(address,uint256)",
+	})
+
+	vm := NewVM()
+	vm.IsSimulation = true
+	vm.ExecutionLogs = []*avsproto.Execution_Step{
+		{
+			Id: "step1", Name: "transfer_real", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
+			Success:          true,
+			Config:           writeConfig,
+			Metadata:         validMeta,
+			ExecutionContext: makeCtx(false), // real execution
+		},
+		{
+			Id: "step2", Name: "transfer_simulated", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
+			Success:          true,
+			Config:           writeConfig,
+			Metadata:         validMeta,
+			ExecutionContext: makeCtx(true), // simulated — should skip txHash
+		},
+		{
+			Id: "step3", Name: "transfer_malformed_hash", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
+			Success:          true,
+			Config:           writeConfig,
+			Metadata:         malformedMeta,
+			ExecutionContext: makeCtx(false), // real but malformed hash — should skip txHash
+		},
+	}
+
+	executions := buildExecutionsArray(vm)
+
+	if len(executions) != 3 {
+		t.Fatalf("Expected 3 executions, got %d", len(executions))
+	}
+
+	// Step 1: real execution, valid hash → should have txHash
+	if executions[0].TxHash != validTxHash {
+		t.Errorf("Step 1 (real, valid hash): expected txHash=%q, got %q", validTxHash, executions[0].TxHash)
+	}
+
+	// Step 2: simulated → should NOT have txHash
+	if executions[1].TxHash != "" {
+		t.Errorf("Step 2 (simulated): expected empty txHash, got %q", executions[1].TxHash)
+	}
+
+	// Step 3: real but malformed hash → should NOT have txHash
+	if executions[2].TxHash != "" {
+		t.Errorf("Step 3 (real, malformed hash): expected empty txHash, got %q", executions[2].TxHash)
+	}
 }

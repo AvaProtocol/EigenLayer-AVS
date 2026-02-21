@@ -3432,8 +3432,7 @@ type WithdrawFundsReq struct {
 	// The recipient address to send funds to
 	RecipientAddress string `protobuf:"bytes,1,opt,name=recipient_address,json=recipientAddress,proto3" json:"recipient_address,omitempty"`
 	// The amount to withdraw in wei for ETH or smallest token unit for ERC20
-	// Use "max" (case-insensitive) to withdraw the maximum available balance
-	// (after accounting for gas reimbursement for ETH withdrawals)
+	// Use "max" (case-insensitive) to withdraw the entire available balance
 	Amount string `protobuf:"bytes,2,opt,name=amount,proto3" json:"amount,omitempty"`
 	// Token type: "ETH" for native ETH, or contract address for ERC20 tokens
 	Token string `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`

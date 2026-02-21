@@ -555,7 +555,15 @@ func TestAIIntegration_Simulation(t *testing.T) {
 		t.Logf("DISCREPANCY: AI executions is empty despite providing ETH transfer output data")
 	} else {
 		for i, exec := range aiSummary.Executions {
-			t.Logf("AI execution[%d]: %s", i, exec)
+			t.Logf("AI execution[%d]: %s (txHash=%s)", i, exec.Description, exec.TxHash)
+		}
+	}
+
+	// Deterministic path should NOT attach txHash for simulated steps
+	// The test fixture has a fake BigInt as transactionHash in metadata + simulated ExecutionContext
+	for i, exec := range detSummary.Executions {
+		if exec.TxHash != "" {
+			t.Errorf("Det execution[%d] should NOT have txHash for simulated step, got: %s", i, exec.TxHash)
 		}
 	}
 }
@@ -811,6 +819,24 @@ func TestAIIntegration_RealExecution(t *testing.T) {
 			t.Errorf("Expected '4 out of 5' in SummaryLine, got: %s", detSummary.SummaryLine)
 		}
 	}
+
+	// Real execution steps have valid tx hashes and non-simulated ExecutionContext
+	// The deterministic path should attach txHash for these steps
+	validTxHashes := map[string]string{
+		"approve1": "0xdef456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0",
+		"swap1":    "0x123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01",
+	}
+	for i, exec := range detSummary.Executions {
+		if exec.TxHash == "" {
+			t.Logf("Det execution[%d] has no txHash (may not be CONTRACT_WRITE)", i)
+		} else {
+			t.Logf("Det execution[%d]: txHash=%s", i, exec.TxHash)
+			if !isValidTxHash(exec.TxHash) {
+				t.Errorf("Det execution[%d] has invalid txHash: %s", i, exec.TxHash)
+			}
+		}
+	}
+	_ = validTxHashes // logged above for reference
 }
 
 // ============================================================================

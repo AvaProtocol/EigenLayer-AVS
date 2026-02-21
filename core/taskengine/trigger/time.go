@@ -29,6 +29,11 @@ type TimeTrigger struct {
 
 	// channel that we will push the trigger information back
 	triggerCh chan TriggerMetadata[uint64]
+
+	// Deduplication: track last fired marker per task to collapse
+	// duplicate gocron fires that can occur when AddCheck is called
+	// multiple times without proper cleanup (e.g. aggregator restart).
+	lastFiredMarker map[string]uint64
 }
 
 func NewTimeTrigger(triggerCh chan TriggerMetadata[uint64], logger sdklogging.Logger) *TimeTrigger {
@@ -45,11 +50,12 @@ func NewTimeTrigger(triggerCh chan TriggerMetadata[uint64], logger sdklogging.Lo
 			logger:   logger,
 			mu:       sync.Mutex{},
 		},
-		registry:   NewTaskRegistry(),
-		scheduler:  scheduler,
-		jobs:       make(map[string]gocron.Job),
-		legacyMode: false, // Start in new mode
-		triggerCh:  triggerCh,
+		registry:        NewTaskRegistry(),
+		scheduler:       scheduler,
+		jobs:            make(map[string]gocron.Job),
+		legacyMode:      false, // Start in new mode
+		triggerCh:       triggerCh,
+		lastFiredMarker: make(map[string]uint64),
 	}
 
 	return &t
@@ -190,13 +196,26 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 		t.logger.Debug("cleaned up existing task before re-adding", "task_id", taskID)
 	}
 
-	// Function to be executed when trigger fires
+	// Function to be executed when trigger fires.
+	// Multiple gocron jobs can exist for the same task if AddCheck is called
+	// again before the old job is fully removed (e.g. aggregator restart).
+	// Dedup by marker: only the first fire per millisecond goes through.
 	triggerFunc := func() {
-		currentTime := time.Now().UnixMilli()
-		t.logger.Info("time trigger fired", "task_id", taskID, "time", currentTime)
+		marker := uint64(time.Now().UnixMilli())
+
+		t.mu.Lock()
+		if last, ok := t.lastFiredMarker[taskID]; ok && last == marker {
+			t.mu.Unlock()
+			t.logger.Debug("skipping duplicate trigger fire", "task_id", taskID, "marker", marker)
+			return
+		}
+		t.lastFiredMarker[taskID] = marker
+		t.mu.Unlock()
+
+		t.logger.Info("time trigger fired", "task_id", taskID, "time", marker)
 		t.triggerCh <- TriggerMetadata[uint64]{
 			TaskID: taskID,
-			Marker: uint64(currentTime),
+			Marker: marker,
 		}
 	}
 

@@ -196,11 +196,13 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		case triggerItem := <-timeTriggerCh:
 			o.logger.Info("time trigger", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
 
+			triggerRequestID := fmt.Sprintf("%s:%d", triggerItem.TaskID, triggerItem.Marker)
 			if resp, err := o.nodeRpcClient.NotifyTriggers(ctx, &avspb.NotifyTriggersReq{
-				Address:     o.config.OperatorAddress,
-				Signature:   "pending",
-				TaskId:      triggerItem.TaskID,
-				TriggerType: avspb.TriggerType_TRIGGER_TYPE_CRON,
+				Address:          o.config.OperatorAddress,
+				Signature:        "pending",
+				TaskId:           triggerItem.TaskID,
+				TriggerType:      avspb.TriggerType_TRIGGER_TYPE_CRON,
+				TriggerRequestId: triggerRequestID,
 				TriggerOutput: &avspb.NotifyTriggersReq_CronTrigger{
 					CronTrigger: &avspb.CronTrigger_Output{
 						Data: func() *structpb.Value {
@@ -343,11 +345,13 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 					"block_number", triggerItem.Marker)
 			}
 
+			blockTriggerRequestID := fmt.Sprintf("%s:%d", triggerItem.TaskID, triggerItem.Marker)
 			if resp, err := o.nodeRpcClient.NotifyTriggers(ctx, &avspb.NotifyTriggersReq{
-				Address:     o.config.OperatorAddress,
-				Signature:   "pending",
-				TaskId:      triggerItem.TaskID,
-				TriggerType: avspb.TriggerType_TRIGGER_TYPE_BLOCK,
+				Address:          o.config.OperatorAddress,
+				Signature:        "pending",
+				TaskId:           triggerItem.TaskID,
+				TriggerType:      avspb.TriggerType_TRIGGER_TYPE_BLOCK,
+				TriggerRequestId: blockTriggerRequestID,
 				TriggerOutput: &avspb.NotifyTriggersReq_BlockTrigger{
 					BlockTrigger: &avspb.BlockTrigger_Output{
 						Data: func() *structpb.Value {
@@ -452,11 +456,13 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				continue
 			}
 
+			eventTriggerRequestID := fmt.Sprintf("%s:%s:%d", triggerItem.TaskID, triggerItem.Marker.TxHash, triggerItem.Marker.LogIndex)
 			if resp, err := o.nodeRpcClient.NotifyTriggers(ctx, &avspb.NotifyTriggersReq{
-				Address:     o.config.OperatorAddress,
-				Signature:   "pending",
-				TaskId:      triggerItem.TaskID,
-				TriggerType: avspb.TriggerType_TRIGGER_TYPE_EVENT,
+				Address:          o.config.OperatorAddress,
+				Signature:        "pending",
+				TaskId:           triggerItem.TaskID,
+				TriggerType:      avspb.TriggerType_TRIGGER_TYPE_EVENT,
+				TriggerRequestId: eventTriggerRequestID,
 				TriggerOutput: &avspb.NotifyTriggersReq_EventTrigger{
 					EventTrigger: &avspb.EventTrigger_Output{
 						Data: structpb.NewStructValue(eventData),

@@ -355,12 +355,16 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		executionIndex = newIndex
 	}
 
-	// Add execution index to workflowContext for email subject formatting
+	// Add execution index and updated execution count to workflowContext for email subject formatting.
+	// executionCount was already incremented above (task.ExecutionCount += 1) but the VM's
+	// workflowContext still has the pre-increment value from vm.go. Update it so the
+	// summarizer sees the correct 1-based run number.
 	if wc, ok := vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
 		wc["executionIndex"] = executionIndex
+		wc["executionCount"] = task.ExecutionCount
 		vm.AddVar(WorkflowContextVarName, wc)
 		if x.logger != nil {
-			x.logger.Debug("Added execution index to workflowContext", "executionIndex", executionIndex)
+			x.logger.Debug("Added execution index to workflowContext", "executionIndex", executionIndex, "executionCount", task.ExecutionCount)
 		}
 	}
 
