@@ -287,7 +287,8 @@ go test -v -tags=integration -count=1 ./core/taskengine -run TestContextMemoryEx
 
 ### Test Files
 
-- **`summarizer_ai_test.go`**: Tests `ComposeSummarySmart()` with real API or mocks (note: test file name may be updated in future)
+- **`summarizer_format_test.go`**: Tests `ComposeSummarySmart()` with real API or mocks
+- **`summarizer_format_integration_test.go`**: Integration tests comparing context-memory API vs deterministic formatting (requires `-tags=integration`)
 - **`summarizer_context_memory_integration_test.go`**: Integration tests against real API (requires `-tags=integration`)
 - **`summarizer_run_node_test.go`**: Tests deterministic `ComposeSummary()` fallback
 

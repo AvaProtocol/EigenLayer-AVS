@@ -120,16 +120,23 @@ type contextMemoryWorkflowInfo struct {
 	RunNumber    *int64 `json:"runNumber"`
 }
 
+// contextMemoryExecutionEntry matches the API response structure for execution entries.
+// Each entry has a description and an optional txHash for on-chain transactions.
+type contextMemoryExecutionEntry struct {
+	Description string `json:"description"`
+	TxHash      string `json:"txHash,omitempty"`
+}
+
 // contextMemorySummarizeBody contains the structured workflow execution summary
 // The aggregator is responsible for rendering this into email HTML or Telegram format
 type contextMemorySummarizeBody struct {
-	Summary     string   `json:"summary"`     // One-line execution summary
-	Status      string   `json:"status"`      // "success", "partial_success", "failure"
-	Network     string   `json:"network"`     // Chain name (e.g., "Sepolia", "Ethereum")
-	Trigger     string   `json:"trigger"`     // What triggered the workflow (text description)
-	TriggeredAt string   `json:"triggeredAt"` // ISO 8601 timestamp (from trigger output)
-	Executions  []string `json:"executions"`  // On-chain operation descriptions (includes transfers)
-	Errors      []string `json:"errors"`      // Failed steps and skipped node descriptions
+	Summary     string                        `json:"summary"`     // One-line execution summary
+	Status      string                        `json:"status"`      // "success", "partial_success", "failure"
+	Network     string                        `json:"network"`     // Chain name (e.g., "Sepolia", "Ethereum")
+	Trigger     string                        `json:"trigger"`     // What triggered the workflow (text description)
+	TriggeredAt string                        `json:"triggeredAt"` // ISO 8601 timestamp (from trigger output)
+	Executions  []contextMemoryExecutionEntry `json:"executions"`  // On-chain operation descriptions with optional tx hashes
+	Errors      []string                      `json:"errors"`      // Failed steps and skipped node descriptions
 
 	// Enhanced structured data for rich notifications (kept for potential future use)
 	Transfers []contextMemoryTransferInfo `json:"transfers,omitempty"` // Transfer details
@@ -263,6 +270,15 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 		}
 	}
 
+	// Convert API execution entries to Summary execution entries
+	var executions []ExecutionEntry
+	for _, e := range apiResp.Body.Executions {
+		executions = append(executions, ExecutionEntry{
+			Description: e.Description,
+			TxHash:      e.TxHash,
+		})
+	}
+
 	return Summary{
 		Subject:     apiResp.Subject,
 		Body:        composePlainTextBodyFromAPI(apiResp.Body),
@@ -271,7 +287,7 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 		Network:     apiResp.Body.Network,
 		Trigger:     apiResp.Body.Trigger,
 		TriggeredAt: apiResp.Body.TriggeredAt,
-		Executions:  apiResp.Body.Executions,
+		Executions:  executions,
 		Errors:      apiResp.Body.Errors,
 		SmartWallet: req.SmartWallet,
 		Transfers:   transfers,
@@ -298,7 +314,7 @@ func composePlainTextBodyFromAPI(body contextMemorySummarizeBody) string {
 		sb.WriteString("Executed:\n")
 		for _, exec := range body.Executions {
 			sb.WriteString("- ")
-			sb.WriteString(exec)
+			sb.WriteString(exec.Description)
 			sb.WriteString("\n")
 		}
 		if len(body.Errors) > 0 {

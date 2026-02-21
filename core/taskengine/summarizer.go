@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 )
 
@@ -161,6 +163,64 @@ func truncateTxHash(hash string) string {
 		return hash
 	}
 	return hash[:6] + "..." + hash[len(hash)-4:]
+}
+
+// isValidTxHash checks if a string is a valid Ethereum transaction hash (0x + 64 hex chars).
+// This filters out fake hashes like raw BigInt values from Tenderly simulation IDs.
+func isValidTxHash(hash string) bool {
+	if len(hash) != 66 || !strings.HasPrefix(hash, "0x") {
+		return false
+	}
+	for _, c := range hash[2:] {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+// isStepSimulated checks whether an execution step was run in simulation mode
+// by reading the ExecutionContext attached to the step.
+// Handles both naming conventions: "is_simulated" (snake_case from engine.go/node_utils.go)
+// and "isSimulated" (camelCase from execution_providers.go).
+func isStepSimulated(st *avsproto.Execution_Step) bool {
+	if st.GetExecutionContext() == nil {
+		return false
+	}
+	ctx, ok := st.GetExecutionContext().AsInterface().(map[string]interface{})
+	if !ok {
+		return false
+	}
+	for _, key := range []string{"is_simulated", "isSimulated"} {
+		if sim, exists := ctx[key]; exists {
+			switch v := sim.(type) {
+			case bool:
+				if v {
+					return true
+				}
+			case string:
+				if strings.EqualFold(strings.TrimSpace(v), "true") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// buildTxExplorerURL constructs a full block explorer transaction URL from a Summary and tx hash.
+// It uses the chain info available on the Summary (Workflow.ChainID, Network) to pick the right explorer.
+func buildTxExplorerURL(s Summary, txHash string) string {
+	var chainID int64
+	var chainName string
+	if s.Workflow != nil {
+		chainID = s.Workflow.ChainID
+		chainName = s.Workflow.Chain
+	}
+	if chainName == "" {
+		chainName = s.Network
+	}
+	return getBlockExplorerURL(chainName, chainID) + "/tx/" + txHash
 }
 
 // getBlockExplorerURL returns the block explorer URL for a chain (by name or ID)

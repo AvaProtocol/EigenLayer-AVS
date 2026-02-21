@@ -36,7 +36,12 @@ func formatPlainTextFromStructured(s Summary) string {
 	if len(s.Executions) > 0 {
 		for _, exec := range s.Executions {
 			sb.WriteString("- ")
-			sb.WriteString(exec)
+			sb.WriteString(exec.Description)
+			if exec.TxHash != "" {
+				sb.WriteString(" (")
+				sb.WriteString(buildTxExplorerURL(s, exec.TxHash))
+				sb.WriteString(")")
+			}
 			sb.WriteString("\n")
 		}
 	}

@@ -40,7 +40,13 @@ func formatDiscordFromStructured(s Summary) string {
 		}
 		for _, exec := range s.Executions {
 			sb.WriteString("• ")
-			sb.WriteString(exec)
+			sb.WriteString(exec.Description)
+			if exec.TxHash != "" {
+				explorerURL := buildTxExplorerURL(s, exec.TxHash)
+				sb.WriteString(" ([tx](")
+				sb.WriteString(explorerURL)
+				sb.WriteString("))")
+			}
 			sb.WriteString("\n")
 		}
 	}

@@ -49,6 +49,13 @@ type WorkflowInfo struct {
 }
 
 // Summary represents composed notification content
+// ExecutionEntry represents a single on-chain execution step with an optional transaction hash.
+// When TxHash is non-empty, formatters render it as a clickable explorer link.
+type ExecutionEntry struct {
+	Description string // Human-readable execution description
+	TxHash      string // On-chain transaction hash (empty for non-tx steps)
+}
+
 type Summary struct {
 	Subject     string
 	Body        string
@@ -56,13 +63,13 @@ type Summary struct {
 	Status      string // Execution status: "success", "partial_success", "failure"
 
 	// Structured fields for rendering notifications
-	Trigger     string   // What triggered the workflow (text description)
-	TriggeredAt string   // ISO 8601 timestamp (from trigger output)
-	Executions  []string // On-chain operation descriptions (includes transfers)
-	Errors      []string // Failed steps and skipped node descriptions
-	SmartWallet string   // Smart wallet address that executed the workflow
-	Network     string   // Chain name (e.g., "Sepolia", "Ethereum") - from body.network
-	Annotation  string   // Optional italic footnote (e.g., run-node disclaimer)
+	Trigger     string           // What triggered the workflow (text description)
+	TriggeredAt string           // ISO 8601 timestamp (from trigger output)
+	Executions  []ExecutionEntry // On-chain operation descriptions with optional tx hashes
+	Errors      []string         // Failed steps and skipped node descriptions
+	SmartWallet string           // Smart wallet address that executed the workflow
+	Network     string           // Chain name (e.g., "Sepolia", "Ethereum") - from body.network
+	Annotation  string           // Optional italic footnote (e.g., run-node disclaimer)
 
 	// Enhanced structured data for rich notifications (kept for potential future use)
 	Transfers []TransferInfo // Transfer details from ETH_TRANSFER and CONTRACT_WRITE steps
@@ -718,13 +725,13 @@ func buildTriggerDescription(st *avsproto.Execution_Step, vm *VM) string {
 	return prefix + "Workflow triggered" + chainSuffix
 }
 
-// buildExecutionsArray builds an array of on-chain execution descriptions from successful CONTRACT_WRITE steps
-func buildExecutionsArray(vm *VM) []string {
+// buildExecutionsArray builds an array of on-chain execution entries from successful CONTRACT_WRITE steps
+func buildExecutionsArray(vm *VM) []ExecutionEntry {
 	if vm == nil {
 		return nil
 	}
 
-	var executions []string
+	var executions []ExecutionEntry
 
 	// Get token context for formatting
 	vm.mu.Lock()
@@ -785,7 +792,24 @@ func buildExecutionsArray(vm *VM) []string {
 		// Build execution description based on method
 		desc := buildContractWriteDescription(st, methodName, token0Sym, token0Dec, token1Sym, token1Dec, prefix)
 		if desc != "" {
-			executions = append(executions, desc)
+			entry := ExecutionEntry{Description: desc}
+			// Only attach txHash for real (non-simulated) steps with valid tx hashes.
+			// Simulated steps (Tenderly forks) produce raw BigInt values as "transactionHash"
+			// which aren't real tx hashes and would generate broken explorer links.
+			if !isStepSimulated(st) && st.GetMetadata() != nil {
+				if meta, ok := st.GetMetadata().AsInterface().(map[string]interface{}); ok {
+					if txHash, ok := meta["transactionHash"].(string); ok && isValidTxHash(txHash) {
+						entry.TxHash = txHash
+					}
+				} else if metaArr, ok := st.GetMetadata().AsInterface().([]interface{}); ok && len(metaArr) > 0 {
+					if first, ok := metaArr[0].(map[string]interface{}); ok {
+						if txHash, ok := first["transactionHash"].(string); ok && isValidTxHash(txHash) {
+							entry.TxHash = txHash
+						}
+					}
+				}
+			}
+			executions = append(executions, entry)
 		}
 	}
 
@@ -914,7 +938,7 @@ func buildErrorsArray(vm *VM, currentStepName string) []string {
 }
 
 // composePlainTextBodyFromStructured composes a plain text body from the structured fields
-func composePlainTextBodyFromStructured(trigger string, executions []string, errors []string, status string) string {
+func composePlainTextBodyFromStructured(trigger string, executions []ExecutionEntry, errors []string, status string) string {
 	var sb strings.Builder
 
 	// Trigger
@@ -929,7 +953,7 @@ func composePlainTextBodyFromStructured(trigger string, executions []string, err
 		sb.WriteString("What Executed On-Chain:\n")
 		for _, exec := range executions {
 			sb.WriteString("✓ ")
-			sb.WriteString(exec)
+			sb.WriteString(exec.Description)
 			sb.WriteString("\n")
 		}
 	}
@@ -1364,7 +1388,7 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 		if vm.IsSimulation || isSingleNodeImmediate(vm) {
 			prefix = "(Simulated) "
 		}
-		executions = []string{prefix + ExampleExecutionMessage}
+		executions = []ExecutionEntry{{Description: prefix + ExampleExecutionMessage}}
 	}
 
 	// For single-node runs with no execution logs (the notification node itself is
@@ -1772,20 +1796,8 @@ func buildStepsOverview(vm *VM) string {
 		}
 
 		// Check if this is a simulated transaction
-		// Use ExecutionContext (actual execution mode) instead of Config (node configuration)
-		isSimulated := false
-		if st.GetExecutionContext() != nil {
-			if ctx, ok := st.GetExecutionContext().AsInterface().(map[string]interface{}); ok {
-				if sim, ok := ctx["isSimulated"]; ok {
-					switch v := sim.(type) {
-					case bool:
-						isSimulated = v
-					case string:
-						isSimulated = strings.EqualFold(strings.TrimSpace(v), "true")
-					}
-				}
-			}
-		}
+		// Uses isStepSimulated() which handles both "is_simulated" (snake_case) and "isSimulated" (camelCase)
+		isSimulated := isStepSimulated(st)
 
 		// Extract methodName and contractAddr from Config (still needed for description generation)
 		methodName := ""
