@@ -1775,9 +1775,10 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 	n.logger.Debug("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
 
 	// Deduplicate trigger notifications using the trigger_request_id.
-	// The operator sends the same trigger_request_id (format: "taskID:marker")
-	// for the same triggering event. If two gocron jobs fire at the same
-	// millisecond, they produce identical IDs, so the second one is dropped.
+	// The operator reuses the same trigger_request_id for the same triggering event.
+	// Formats: "taskID:millis" (time/cron), "taskID:blockNum" (block),
+	// "taskID:txHash:logIndex" (event). The aggregator treats it as an opaque key;
+	// if two notifications carry the same ID, the later one is dropped.
 	if payload.TriggerRequestId != "" {
 		n.triggerDedupLock.Lock()
 
@@ -1794,9 +1795,15 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 				"task_id", payload.TaskId,
 				"operator", address,
 				"trigger_request_id", payload.TriggerRequestId)
+
+			// Return actual task state so the operator gets correct remaining/enabled info
+			remaining := task.MaxExecution - task.ExecutionCount
+			if remaining < 0 {
+				remaining = 0
+			}
 			return &ExecutionState{
-				RemainingExecutions: 1,
-				TaskStillEnabled:    true,
+				RemainingExecutions: remaining,
+				TaskStillEnabled:    task.IsRunable(),
 				Status:              "deduplicated",
 				Message:             "Duplicate trigger suppressed",
 			}, nil

@@ -271,14 +271,16 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 	}
 
 	// Convert API execution entries to Summary execution entries
-	// Trust the API response — the context-memory API is responsible for filtering
-	// out fake tx hashes (e.g., simulation IDs) before returning them
+	// Validate txHash at ingestion: only keep hashes that look like real
+	// Ethereum tx hashes (0x + 64 hex chars). This filters out Tenderly
+	// simulation IDs and other non-hash values the API may return.
 	var executions []ExecutionEntry
 	for _, e := range apiResp.Body.Executions {
-		executions = append(executions, ExecutionEntry{
-			Description: e.Description,
-			TxHash:      e.TxHash,
-		})
+		entry := ExecutionEntry{Description: e.Description}
+		if isValidTxHash(e.TxHash) {
+			entry.TxHash = e.TxHash
+		}
+		executions = append(executions, entry)
 	}
 
 	return Summary{

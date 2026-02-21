@@ -43,12 +43,13 @@ func formatDiscordFromStructured(s Summary) string {
 			sb.WriteString(exec.Description)
 			sb.WriteString("\n")
 			if exec.TxHash != "" {
-				explorerURL := buildTxExplorerURL(s, exec.TxHash)
-				sb.WriteString("  Transaction: [")
-				sb.WriteString(truncateTxHash(exec.TxHash))
-				sb.WriteString("](")
-				sb.WriteString(explorerURL)
-				sb.WriteString(")\n")
+				if explorerURL := buildTxExplorerURL(s, exec.TxHash); explorerURL != "" {
+					sb.WriteString("  Transaction: [")
+					sb.WriteString(truncateTxHash(exec.TxHash))
+					sb.WriteString("](")
+					sb.WriteString(explorerURL)
+					sb.WriteString(")\n")
+				}
 			}
 		}
 	}

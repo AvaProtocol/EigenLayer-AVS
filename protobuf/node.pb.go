@@ -432,8 +432,13 @@ type NotifyTriggersReq struct {
 	//	*NotifyTriggersReq_ManualTrigger
 	TriggerOutput isNotifyTriggersReq_TriggerOutput `protobuf_oneof:"trigger_output"`
 	// Unique identifier for this trigger event, used for deduplication.
-	// Format: "task_id:marker_timestamp" — the same trigger event produces
-	// the same ID so duplicate notifications can be collapsed on the aggregator.
+	// General format: "task_id:<marker>". The <marker> depends on trigger_type:
+	//   - Time / cron triggers: millisecond timestamp of the scheduled fire time.
+	//   - Block triggers: block number.
+	//   - Event triggers: "<tx_hash>:<log_index>" identifying the specific log.
+	//
+	// The same logical trigger event must produce the same ID so duplicate
+	// notifications can be safely collapsed on the aggregator.
 	TriggerRequestId string `protobuf:"bytes,10,opt,name=trigger_request_id,json=triggerRequestId,proto3" json:"trigger_request_id,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache

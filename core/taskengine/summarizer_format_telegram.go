@@ -63,12 +63,13 @@ func formatTelegramFromStructured(s Summary) string {
 			sb.WriteString(html.EscapeString(exec.Description))
 			sb.WriteString("\n")
 			if exec.TxHash != "" {
-				explorerURL := buildTxExplorerURL(s, exec.TxHash)
-				sb.WriteString("  Transaction: <a href=\"")
-				sb.WriteString(explorerURL)
-				sb.WriteString("\">")
-				sb.WriteString(html.EscapeString(truncateTxHash(exec.TxHash)))
-				sb.WriteString("</a>\n")
+				if explorerURL := buildTxExplorerURL(s, exec.TxHash); explorerURL != "" {
+					sb.WriteString("  Transaction: <a href=\"")
+					sb.WriteString(html.EscapeString(explorerURL))
+					sb.WriteString("\">")
+					sb.WriteString(html.EscapeString(truncateTxHash(exec.TxHash)))
+					sb.WriteString("</a>\n")
+				}
 			}
 		}
 	} else if s.Status == "failure" && len(s.Errors) > 0 {
