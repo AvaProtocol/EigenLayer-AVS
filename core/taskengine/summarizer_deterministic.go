@@ -48,7 +48,6 @@ type WorkflowInfo struct {
 	RunNumber    *int64 `json:"runNumber"`    // Run number (nil for simulations)
 }
 
-// Summary represents composed notification content
 // ExecutionEntry represents a single on-chain execution step with an optional transaction hash.
 // When TxHash is non-empty, formatters render it as a clickable explorer link.
 type ExecutionEntry struct {
@@ -56,6 +55,7 @@ type ExecutionEntry struct {
 	TxHash      string // On-chain transaction hash (empty for non-tx steps)
 }
 
+// Summary represents composed notification content
 type Summary struct {
 	Subject     string
 	Body        string
