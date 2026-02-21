@@ -456,7 +456,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				continue
 			}
 
-			eventTriggerRequestID := fmt.Sprintf("%s:%s", triggerItem.TaskID, triggerItem.Marker.TxHash)
+			eventTriggerRequestID := fmt.Sprintf("%s:%s:%d", triggerItem.TaskID, triggerItem.Marker.TxHash, triggerItem.Marker.LogIndex)
 			if resp, err := o.nodeRpcClient.NotifyTriggers(ctx, &avspb.NotifyTriggersReq{
 				Address:          o.config.OperatorAddress,
 				Signature:        "pending",

@@ -1040,41 +1040,59 @@ func TestTruncateAddress(t *testing.T) {
 func TestGetBlockExplorerURL(t *testing.T) {
 	tests := []struct {
 		name     string
-		chain    string
 		chainID  int64
 		expected string
 	}{
-		// Test by chain ID (preferred)
-		{"chainID_ethereum", "", 1, "https://etherscan.io"},
-		{"chainID_sepolia", "", 11155111, "https://sepolia.etherscan.io"},
-		{"chainID_polygon", "", 137, "https://polygonscan.com"},
-		{"chainID_arbitrum", "", 42161, "https://arbiscan.io"},
-		{"chainID_optimism", "", 10, "https://optimistic.etherscan.io"},
-		{"chainID_base", "", 8453, "https://basescan.org"},
-		{"chainID_base_sepolia", "", 84532, "https://sepolia.basescan.org"},
-		{"chainID_bsc", "", 56, "https://bscscan.com"},
-		{"chainID_avalanche", "", 43114, "https://snowtrace.io"},
-
-		// Test by chain name fallback
-		{"name_mainnet", "Mainnet", 0, "https://etherscan.io"},
-		{"name_ethereum", "Ethereum", 0, "https://etherscan.io"},
-		{"name_sepolia", "Sepolia", 0, "https://sepolia.etherscan.io"},
-		{"name_polygon", "Polygon", 0, "https://polygonscan.com"},
-		{"name_arbitrum", "Arbitrum", 0, "https://arbiscan.io"},
-		{"name_arbitrum_one", "Arbitrum One", 0, "https://arbiscan.io"},
-		{"name_optimism", "Optimism", 0, "https://optimistic.etherscan.io"},
-		{"name_base", "Base", 0, "https://basescan.org"},
-		{"name_base_sepolia", "Base-Sepolia", 0, "https://sepolia.basescan.org"},
-		{"name_bsc", "BSC", 0, "https://bscscan.com"},
-		{"name_avalanche", "Avalanche", 0, "https://snowtrace.io"},
-		{"name_unknown", "Unknown", 0, "https://etherscan.io"}, // Default fallback
+		{"ethereum", 1, "https://etherscan.io"},
+		{"sepolia", 11155111, "https://sepolia.etherscan.io"},
+		{"polygon", 137, "https://polygonscan.com"},
+		{"arbitrum", 42161, "https://arbiscan.io"},
+		{"optimism", 10, "https://optimistic.etherscan.io"},
+		{"base", 8453, "https://basescan.org"},
+		{"base_sepolia", 84532, "https://sepolia.basescan.org"},
+		{"bsc", 56, "https://bscscan.com"},
+		{"avalanche", 43114, "https://snowtrace.io"},
+		{"unknown", 999999, ""},
+		{"zero", 0, ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := getBlockExplorerURL(tt.chain, tt.chainID)
+			result := getBlockExplorerURL(tt.chainID)
 			if result != tt.expected {
-				t.Errorf("getBlockExplorerURL(%q, %d) = %q, want %q", tt.chain, tt.chainID, result, tt.expected)
+				t.Errorf("getBlockExplorerURL(%d) = %q, want %q", tt.chainID, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestMapNameToChainID tests the chain name to chain ID reverse mapping
+func TestMapNameToChainID(t *testing.T) {
+	tests := []struct {
+		name     string
+		expected int64
+	}{
+		{"Mainnet", 1},
+		{"Ethereum", 1},
+		{"Sepolia", 11155111},
+		{"Polygon", 137},
+		{"Arbitrum", 42161},
+		{"Arbitrum One", 42161},
+		{"Optimism", 10},
+		{"Base", 8453},
+		{"Base-Sepolia", 84532},
+		{"BSC", 56},
+		{"BNB Chain", 56},
+		{"Avalanche", 43114},
+		{"Unknown", 0},
+		{"", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mapNameToChainID(tt.name)
+			if result != tt.expected {
+				t.Errorf("mapNameToChainID(%q) = %d, want %d", tt.name, result, tt.expected)
 			}
 		})
 	}
