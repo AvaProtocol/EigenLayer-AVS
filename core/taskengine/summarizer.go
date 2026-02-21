@@ -210,7 +210,11 @@ func isStepSimulated(st *avsproto.Execution_Step) bool {
 
 // buildTxExplorerURL constructs a full block explorer transaction URL from a Summary and tx hash.
 // It resolves chainID from Workflow.ChainID first, then falls back to reverse-mapping the Network name.
+// Returns "" if the txHash is not a valid Ethereum transaction hash or the chain is unknown.
 func buildTxExplorerURL(s Summary, txHash string) string {
+	if !isValidTxHash(txHash) {
+		return ""
+	}
 	var chainID int64
 	if s.Workflow != nil {
 		chainID = s.Workflow.ChainID

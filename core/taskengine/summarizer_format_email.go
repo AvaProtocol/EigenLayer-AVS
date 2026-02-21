@@ -143,12 +143,13 @@ func buildAnalysisHtmlFromStructured(s Summary) string {
 			sb.WriteString(html.EscapeString(exec.Description))
 			sb.WriteString("</p>")
 			if exec.TxHash != "" {
-				explorerURL := buildTxExplorerURL(s, exec.TxHash)
-				sb.WriteString("<p style=\"margin: 4px 0 0 18px; color: #666; font-size: 14px;\">Transaction: <a href=\"")
-				sb.WriteString(explorerURL)
-				sb.WriteString("\" style=\"color: #8B5CF6;\">")
-				sb.WriteString(html.EscapeString(truncateTxHash(exec.TxHash)))
-				sb.WriteString("</a></p>")
+				if explorerURL := buildTxExplorerURL(s, exec.TxHash); explorerURL != "" {
+					sb.WriteString("<p style=\"margin: 4px 0 0 18px; color: #666; font-size: 14px;\">Transaction: <a href=\"")
+					sb.WriteString(html.EscapeString(explorerURL))
+					sb.WriteString("\" style=\"color: #8B5CF6;\">")
+					sb.WriteString(html.EscapeString(truncateTxHash(exec.TxHash)))
+					sb.WriteString("</a></p>")
+				}
 			}
 		}
 		sb.WriteString("</div>")

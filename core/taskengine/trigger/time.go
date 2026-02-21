@@ -354,6 +354,9 @@ func (t *TimeTrigger) RemoveCheck(taskID string) error {
 	// Remove from registry
 	t.registry.RemoveTask(taskID)
 
+	// Clean up dedup marker to prevent memory leak for deleted tasks
+	delete(t.lastFiredMarker, taskID)
+
 	t.logger.Debug("✅ Removed time task from registry", "task_id", taskID)
 
 	return nil

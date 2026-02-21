@@ -97,8 +97,12 @@ message NotifyTriggersReq {
   }
 
   // Unique identifier for this trigger event, used for deduplication.
-  // Format: "task_id:marker_timestamp" — the same trigger event produces
-  // the same ID so duplicate notifications can be collapsed on the aggregator.
+  // General format: "task_id:<marker>". The <marker> depends on trigger_type:
+  //   - Time / cron triggers: millisecond timestamp of the scheduled fire time.
+  //   - Block triggers: block number.
+  //   - Event triggers: "<tx_hash>:<log_index>" identifying the specific log.
+  // The same logical trigger event must produce the same ID so duplicate
+  // notifications can be safely collapsed on the aggregator.
   string trigger_request_id = 10;
 }
 

@@ -39,9 +39,11 @@ func formatPlainTextFromStructured(s Summary) string {
 			sb.WriteString(exec.Description)
 			sb.WriteString("\n")
 			if exec.TxHash != "" {
-				sb.WriteString("  Transaction: ")
-				sb.WriteString(buildTxExplorerURL(s, exec.TxHash))
-				sb.WriteString("\n")
+				if url := buildTxExplorerURL(s, exec.TxHash); url != "" {
+					sb.WriteString("  Transaction: ")
+					sb.WriteString(url)
+					sb.WriteString("\n")
+				}
 			}
 		}
 	}
