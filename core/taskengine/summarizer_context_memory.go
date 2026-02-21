@@ -271,6 +271,8 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 	}
 
 	// Convert API execution entries to Summary execution entries
+	// Trust the API response — the context-memory API is responsible for filtering
+	// out fake tx hashes (e.g., simulation IDs) before returning them
 	var executions []ExecutionEntry
 	for _, e := range apiResp.Body.Executions {
 		executions = append(executions, ExecutionEntry{

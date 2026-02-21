@@ -61,13 +61,15 @@ func formatTelegramFromStructured(s Summary) string {
 		for _, exec := range s.Executions {
 			sb.WriteString("• ")
 			sb.WriteString(html.EscapeString(exec.Description))
+			sb.WriteString("\n")
 			if exec.TxHash != "" {
 				explorerURL := buildTxExplorerURL(s, exec.TxHash)
-				sb.WriteString(" (<a href=\"")
+				sb.WriteString("  Transaction: <a href=\"")
 				sb.WriteString(explorerURL)
-				sb.WriteString("\">tx</a>)")
+				sb.WriteString("\">")
+				sb.WriteString(html.EscapeString(truncateTxHash(exec.TxHash)))
+				sb.WriteString("</a>\n")
 			}
-			sb.WriteString("\n")
 		}
 	} else if s.Status == "failure" && len(s.Errors) > 0 {
 		// Error display for failed workflows
