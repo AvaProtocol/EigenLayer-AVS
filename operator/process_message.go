@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"time"
 
@@ -163,10 +164,11 @@ func (o *Operator) executeImmediateBlockTrigger(taskID string) {
 
 	// Send trigger notification to aggregator
 	if resp, err := o.nodeRpcClient.NotifyTriggers(ctx, &avspb.NotifyTriggersReq{
-		Address:     o.config.OperatorAddress,
-		Signature:   "pending",
-		TaskId:      taskID,
-		TriggerType: avspb.TriggerType_TRIGGER_TYPE_BLOCK,
+		Address:          o.config.OperatorAddress,
+		Signature:        "pending",
+		TaskId:           taskID,
+		TriggerType:      avspb.TriggerType_TRIGGER_TYPE_BLOCK,
+		TriggerRequestId: fmt.Sprintf("%s:%d", taskID, blockNumber),
 		TriggerOutput: &avspb.NotifyTriggersReq_BlockTrigger{
 			BlockTrigger: &avspb.BlockTrigger_Output{
 				Data: func() *structpb.Value {
@@ -212,13 +214,15 @@ func (o *Operator) executeImmediateTimeTrigger(taskID string, triggerType avspb.
 		"timestamp_iso", currentTime.UTC().Format("2006-01-02T15:04:05.000Z"))
 
 	// Create the NotifyTriggersReq with appropriate trigger output based on the trigger type
+	triggerRequestID := fmt.Sprintf("%s:%d", taskID, timestampNanos)
 	var notifyReq *avspb.NotifyTriggersReq
 	if triggerType == avspb.TriggerType_TRIGGER_TYPE_CRON {
 		notifyReq = &avspb.NotifyTriggersReq{
-			Address:     o.config.OperatorAddress,
-			Signature:   "pending",
-			TaskId:      taskID,
-			TriggerType: triggerType,
+			Address:          o.config.OperatorAddress,
+			Signature:        "pending",
+			TaskId:           taskID,
+			TriggerType:      triggerType,
+			TriggerRequestId: triggerRequestID,
 			TriggerOutput: &avspb.NotifyTriggersReq_CronTrigger{
 				CronTrigger: &avspb.CronTrigger_Output{
 					Data: func() *structpb.Value {
@@ -230,10 +234,11 @@ func (o *Operator) executeImmediateTimeTrigger(taskID string, triggerType avspb.
 		}
 	} else {
 		notifyReq = &avspb.NotifyTriggersReq{
-			Address:     o.config.OperatorAddress,
-			Signature:   "pending",
-			TaskId:      taskID,
-			TriggerType: triggerType,
+			Address:          o.config.OperatorAddress,
+			Signature:        "pending",
+			TaskId:           taskID,
+			TriggerType:      triggerType,
+			TriggerRequestId: triggerRequestID,
 			TriggerOutput: &avspb.NotifyTriggersReq_FixedTimeTrigger{
 				FixedTimeTrigger: &avspb.FixedTimeTrigger_Output{
 					Data: func() *structpb.Value {

@@ -83,7 +83,7 @@ message NotifyTriggersReq {
   string signature = 2;
 
   string task_id = 3;
-  
+
   // Flattened from TriggerReason: Use the top-level TriggerType enum for consistency
   TriggerType trigger_type = 4;
 
@@ -95,6 +95,11 @@ message NotifyTriggersReq {
     EventTrigger.Output event_trigger = 8;
     ManualTrigger.Output manual_trigger = 9;
   }
+
+  // Unique identifier for this trigger event, used for deduplication.
+  // Format: "task_id:marker_timestamp" — the same trigger event produces
+  // the same ID so duplicate notifications can be collapsed on the aggregator.
+  string trigger_request_id = 10;
 }
 
 message NotifyTriggersResp {

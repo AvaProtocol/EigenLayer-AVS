@@ -431,8 +431,12 @@ type NotifyTriggersReq struct {
 	//	*NotifyTriggersReq_EventTrigger
 	//	*NotifyTriggersReq_ManualTrigger
 	TriggerOutput isNotifyTriggersReq_TriggerOutput `protobuf_oneof:"trigger_output"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Unique identifier for this trigger event, used for deduplication.
+	// Format: "task_id:marker_timestamp" — the same trigger event produces
+	// the same ID so duplicate notifications can be collapsed on the aggregator.
+	TriggerRequestId string `protobuf:"bytes,10,opt,name=trigger_request_id,json=triggerRequestId,proto3" json:"trigger_request_id,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *NotifyTriggersReq) Reset() {
@@ -543,6 +547,13 @@ func (x *NotifyTriggersReq) GetManualTrigger() *ManualTrigger_Output {
 		}
 	}
 	return nil
+}
+
+func (x *NotifyTriggersReq) GetTriggerRequestId() string {
+	if x != nil {
+		return x.TriggerRequestId
+	}
+	return ""
 }
 
 type isNotifyTriggersReq_TriggerOutput interface {
@@ -1172,7 +1183,7 @@ const file_node_proto_rawDesc = "" +
 	"\atrigger\x18\x04 \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\x12\x19\n" +
 	"\bstart_at\x18\x05 \x01(\x03R\astartAt\"\x1f\n" +
 	"\rAckMessageReq\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\xa7\x04\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\xd5\x04\n" +
 	"\x11NotifyTriggersReq\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x1c\n" +
 	"\tsignature\x18\x02 \x01(\tR\tsignature\x12\x17\n" +
@@ -1182,7 +1193,9 @@ const file_node_proto_rawDesc = "" +
 	"\x12fixed_time_trigger\x18\x06 \x01(\v2#.aggregator.FixedTimeTrigger.OutputH\x00R\x10fixedTimeTrigger\x12C\n" +
 	"\fcron_trigger\x18\a \x01(\v2\x1e.aggregator.CronTrigger.OutputH\x00R\vcronTrigger\x12F\n" +
 	"\revent_trigger\x18\b \x01(\v2\x1f.aggregator.EventTrigger.OutputH\x00R\feventTrigger\x12I\n" +
-	"\x0emanual_trigger\x18\t \x01(\v2 .aggregator.ManualTrigger.OutputH\x00R\rmanualTriggerB\x10\n" +
+	"\x0emanual_trigger\x18\t \x01(\v2 .aggregator.ManualTrigger.OutputH\x00R\rmanualTrigger\x12,\n" +
+	"\x12trigger_request_id\x18\n" +
+	" \x01(\tR\x10triggerRequestIdB\x10\n" +
 	"\x0etrigger_output\"\xe2\x01\n" +
 	"\x12NotifyTriggersResp\x129\n" +
 	"\n" +
