@@ -247,6 +247,11 @@ type Engine struct {
 	lastApprovalLogTime map[string]time.Time
 	approvalLogMutex    *sync.RWMutex
 
+	// Deduplication for operator trigger notifications (prevents double-firing)
+	// Maps trigger_request_id -> time when it was processed (for TTL cleanup)
+	processedTriggerIDs map[string]time.Time
+	triggerDedupLock    *sync.Mutex
+
 	// Batched operator notifications
 	pendingNotifications map[string][]PendingNotification // operatorAddr -> list of notifications
 	notificationMutex    *sync.RWMutex
@@ -269,6 +274,8 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 		assignmentMutex:     &sync.RWMutex{},
 		lastApprovalLogTime: make(map[string]time.Time),
 		approvalLogMutex:    &sync.RWMutex{},
+		processedTriggerIDs: make(map[string]time.Time),
+		triggerDedupLock:    &sync.Mutex{},
 		smartWalletConfig:   config.SmartWallet,
 		shutdown:            false,
 
@@ -1733,6 +1740,15 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 			}
 			n.lock.Unlock()
 
+			// Clean up dedup entries for deleted tasks
+			n.triggerDedupLock.Lock()
+			for id := range n.processedTriggerIDs {
+				if strings.HasPrefix(id, payload.TaskId+":") {
+					delete(n.processedTriggerIDs, id)
+				}
+			}
+			n.triggerDedupLock.Unlock()
+
 			return &ExecutionState{
 				RemainingExecutions: 0,
 				TaskStillEnabled:    false,
@@ -1757,6 +1773,37 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 	}
 
 	n.logger.Debug("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
+
+	// Deduplicate trigger notifications using the trigger_request_id.
+	// The operator sends the same trigger_request_id (format: "taskID:marker")
+	// for the same triggering event. If two gocron jobs fire at the same
+	// millisecond, they produce identical IDs, so the second one is dropped.
+	if payload.TriggerRequestId != "" {
+		n.triggerDedupLock.Lock()
+
+		// Evict stale entries older than 5 minutes to prevent unbounded growth
+		for id, seenAt := range n.processedTriggerIDs {
+			if time.Since(seenAt) > 5*time.Minute {
+				delete(n.processedTriggerIDs, id)
+			}
+		}
+
+		if _, seen := n.processedTriggerIDs[payload.TriggerRequestId]; seen {
+			n.triggerDedupLock.Unlock()
+			n.logger.Info("Skipping duplicate trigger notification",
+				"task_id", payload.TaskId,
+				"operator", address,
+				"trigger_request_id", payload.TriggerRequestId)
+			return &ExecutionState{
+				RemainingExecutions: 1,
+				TaskStillEnabled:    true,
+				Status:              "deduplicated",
+				Message:             "Duplicate trigger suppressed",
+			}, nil
+		}
+		n.processedTriggerIDs[payload.TriggerRequestId] = time.Now()
+		n.triggerDedupLock.Unlock()
+	}
 
 	// Check if task is still runnable
 	if !task.IsRunable() {

@@ -45,7 +45,17 @@ func (s Summary) SendGridDynamicData() map[string]interface{} {
 	}
 
 	if len(s.Executions) > 0 {
-		data["executions"] = s.Executions
+		// Convert ExecutionEntry to maps for SendGrid template compatibility
+		execMaps := make([]map[string]string, len(s.Executions))
+		for i, e := range s.Executions {
+			m := map[string]string{"description": e.Description}
+			if e.TxHash != "" {
+				m["txHash"] = e.TxHash
+				m["txUrl"] = buildTxExplorerURL(s, e.TxHash)
+			}
+			execMaps[i] = m
+		}
+		data["executions"] = execMaps
 		data["has_executions"] = true
 	}
 
@@ -130,8 +140,16 @@ func buildAnalysisHtmlFromStructured(s Summary) string {
 		sb.WriteString(`<h3 style="margin: 0 0 8px 0; font-size: 16px;">What Executed On-Chain</h3>`)
 		for _, exec := range s.Executions {
 			sb.WriteString("<p style=\"margin: 0 0 4px 0;\">✓ ")
-			sb.WriteString(html.EscapeString(exec))
+			sb.WriteString(html.EscapeString(exec.Description))
 			sb.WriteString("</p>")
+			if exec.TxHash != "" {
+				explorerURL := buildTxExplorerURL(s, exec.TxHash)
+				sb.WriteString("<p style=\"margin: 4px 0 0 18px; color: #666; font-size: 14px;\">Transaction: <a href=\"")
+				sb.WriteString(explorerURL)
+				sb.WriteString("\" style=\"color: #8B5CF6;\">")
+				sb.WriteString(html.EscapeString(truncateTxHash(exec.TxHash)))
+				sb.WriteString("</a></p>")
+			}
 		}
 		sb.WriteString("</div>")
 	}
