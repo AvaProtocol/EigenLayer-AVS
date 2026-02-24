@@ -58,6 +58,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	triggerengine "github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/trigger"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/ipfetcher"
+	pkglogger "github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/timekeeper"
 )
 
@@ -264,10 +265,11 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		}
 	}
 
-	logger, err := sdklogging.NewZapLogger(logLevel)
+	zapLogger, err := sdklogging.NewZapLogger(logLevel)
 	if err != nil {
 		return nil, err
 	}
+	logger := pkglogger.NewSentryLogger(zapLogger, "operator")
 
 	// Initialize Sentry if DSN provided
 	if c.SentryDsn != "" {
@@ -281,7 +283,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 			ServerName:       serverName,
 			Environment:      env,
 			AttachStacktrace: true,
-			TracesSampleRate: 0.0,
+			TracesSampleRate: 1.0,
 		}); err != nil {
 			logger.Errorf("Sentry initialization failed: %v", err)
 		} else {

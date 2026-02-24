@@ -25,6 +25,8 @@ import (
 	"go.uber.org/zap"
 
 	sdkutils "github.com/Layr-Labs/eigensdk-go/utils"
+
+	pkglogger "github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 )
 
 // DefaultMaxWalletsPerOwner defines the default cap used when the YAML config omits
@@ -284,7 +286,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 		}
 	}
 
-	logger, err := newLogger(configRaw.Environment)
+	logger, err := newLogger(configRaw.Environment, "aggregator")
 	if err != nil {
 		return nil, err
 	}
@@ -510,10 +512,12 @@ func (c *Config) validate() {
 	}
 }
 
-// newLogger creates a zap logger that only prints stack traces at ERROR level.
+// newLogger creates a zap logger that only prints stack traces at ERROR level,
+// wrapped with SentryLogger to forward Error/Fatal calls to Sentry.
 // By default, zap's development config prints stack traces at WARN, which is noisy
 // for transient errors like RPC 500s. We override to ERROR-only.
-func newLogger(env sdklogging.LogLevel) (sdklogging.Logger, error) {
+// AddCallerSkip(2) accounts for both the sdklogging wrapper and the SentryLogger wrapper.
+func newLogger(env sdklogging.LogLevel, serviceName string) (sdklogging.Logger, error) {
 	var cfg zap.Config
 	if env == sdklogging.Production {
 		cfg = zap.NewProductionConfig()
@@ -521,7 +525,11 @@ func newLogger(env sdklogging.LogLevel) (sdklogging.Logger, error) {
 		cfg = zap.NewDevelopmentConfig()
 	}
 	cfg.DisableStacktrace = true
-	return sdklogging.NewZapLoggerByConfig(cfg, zap.AddCallerSkip(1), zap.AddStacktrace(zap.ErrorLevel))
+	zapLogger, err := sdklogging.NewZapLoggerByConfig(cfg, zap.AddCallerSkip(2), zap.AddStacktrace(zap.ErrorLevel))
+	if err != nil {
+		return nil, err
+	}
+	return pkglogger.NewSentryLogger(zapLogger, serviceName), nil
 }
 
 // firstNonEmpty returns the first non-empty string among the arguments.
