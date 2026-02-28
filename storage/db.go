@@ -372,7 +372,7 @@ func (a *BadgerStorage) ListKeys(prefix string) ([]string, error) {
 	return nil, err
 }
 
-// ListKeys from multiple suffix. This is similar to a join in RDBMS
+// ListKeysMulti from multiple suffix. This is similar to a join in RDBMS
 func (a *BadgerStorage) ListKeysMulti(prefixes []string) ([]string, error) {
 	var keys []string
 
@@ -441,7 +441,7 @@ func (a *BadgerStorage) GetCounter(key []byte, defaultValue ...uint64) (uint64, 
 	return counter, nil
 }
 
-// IncrementCounter increments a counter value for a given key by 1.
+// IncCounter increments a counter value for a given key by 1.
 // If the key doesn't exist and defaultValue is provided, it sets the counter to defaultValue + 1.
 // If the key doesn't exist and no defaultValue is provided, it sets the counter to 1.
 func (a *BadgerStorage) IncCounter(key []byte, defaultValue ...uint64) (uint64, error) {
