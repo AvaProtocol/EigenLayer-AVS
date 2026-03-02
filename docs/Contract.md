@@ -26,6 +26,14 @@ We use a consistent contract address across six networks:
 | **Factory Implementation** | `0x8d2c0e4ace9e674d6066b0681ce1af95e5e19864` (Sepolia), `0x50CcaD1dAAd3e2Aac91d5a9c7425f9cA3a119b13` (Base Sepolia, Base, Ethereum), `0x5692D03FC5922b806F382E4F1A620479A14c96c2` (others) | [View](https://sepolia.basescan.org/address/0x50CcaD1dAAd3e2Aac91d5a9c7425f9cA3a119b13) | [View](https://basescan.org/address/0x50CcaD1dAAd3e2Aac91d5a9c7425f9cA3a119b13) | [View](https://sepolia.etherscan.io/address/0x8d2c0e4ace9e674d6066b0681ce1af95e5e19864) | [View](https://etherscan.io/address/0x50CcaD1dAAd3e2Aac91d5a9c7425f9cA3a119b13) | [View](https://soneium.blockscout.com/address/0x5692D03FC5922b806F382E4F1A620479A14c96c2) | [View](https://soneium-minato.blockscout.com/address/0x5692D03FC5922b806F382E4F1A620479A14c96c2) |
 | **Paymaster Contract**     | `0xd856f532F7C032e6b30d76F19187F25A068D6d92` (Sepolia, Base Sepolia), `0xf023eA291F5bEDA4Bf59BbDC9004F1d18be19D6f` (Ethereum, Base) | [View](https://sepolia.basescan.org/address/0xd856f532F7C032e6b30d76F19187F25A068D6d92) | [View](https://basescan.org/address/0xf023eA291F5bEDA4Bf59BbDC9004F1d18be19D6f) | [View](https://sepolia.etherscan.io/address/0xd856f532F7C032e6b30d76F19187F25A068D6d92) | [View](https://etherscan.io/address/0xf023eA291F5bEDA4Bf59BbDC9004F1d18be19D6f) | [View](https://soneium.blockscout.com/address/0xf023eA291F5bEDA4Bf59BbDC9004F1d18be19D6f) | [View](https://soneium-minato.blockscout.com/address/0xf023eA291F5bEDA4Bf59BbDC9004F1d18be19D6f) |
 
+### Controller Addresses (Paymaster Verifying Signer)
+
+The controller is the EOA that signs paymaster approvals for UserOperations. Each paymaster contract's on-chain `verifyingSigner` must match the aggregator's configured `controller_private_key`.
+
+| Network              | Address                                      |
+| -------------------- | -------------------------------------------- |
+| Sepolia, Base Sepolia | `0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB` |
+
 ### Bundler Addresses
 
 | Network       | Address                                      | Chain ID | Type | Notes                            |
