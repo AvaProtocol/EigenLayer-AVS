@@ -83,12 +83,12 @@ func (l *SentryLogger) captureToSentry(msg string, tags []any) {
 		if err, ok := value.(error); ok && sentryErr == nil {
 			sentryErr = err
 		}
-		extras[key] = fmt.Sprintf("%v", value)
+		extras[key] = value
 	}
 
 	// Handle odd trailing tag
 	if len(tags)%2 != 0 {
-		extras["unpaired_tag"] = fmt.Sprintf("%v", tags[len(tags)-1])
+		extras["unpaired_tag"] = tags[len(tags)-1]
 	}
 
 	if sentryErr == nil {
