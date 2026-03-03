@@ -1,0 +1,29 @@
+# Worker configuration for Base Sepolia (chain 84532)
+# Handles chain-specific execution: UserOps, contract writes, token enrichment
+# Stateless — no local DB (gateway owns storage)
+environment: development
+
+chain_id: 84532
+chain_name: base-sepolia
+
+# Internal gRPC listen address (gateway connects here)
+# In production (Railway): worker-base-sepolia.railway.internal:50051
+listen_address: "0.0.0.0:50052"
+
+# Health check endpoint (Railway requires HTTP health checks)
+health_address: "0.0.0.0:8091"
+
+# Gateway address (worker registers with gateway on startup)
+gateway_address: "127.0.0.1:2206"
+
+# Chain RPC endpoints (Base Sepolia)
+eth_rpc_url: https://api-base-sepolia-archive.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+eth_ws_url: wss://api-base-sepolia-archive.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+
+# Third-party bundler endpoint (no self-hosted bundler)
+bundler_url: https://api.pimlico.io/v2/84532/rpc?apikey=pim_bXfMSiGBPRrDdmjGdoSBxn
+
+# Smart wallet / account abstraction config
+smart_wallet:
+  controller_private_key: 30c525b5608ea9cbfd7266fd6251d422f5b958e44ae9c49008f97907cc752601
+  paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92

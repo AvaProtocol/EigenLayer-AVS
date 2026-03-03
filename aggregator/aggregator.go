@@ -103,6 +103,10 @@ type Aggregator struct {
 
 	backup   *backup.Service
 	migrator *migrator.Migrator
+
+	// chainRegistry manages connections to per-chain workers in gateway mode.
+	// nil when running in single-chain aggregator mode.
+	chainRegistry *ChainRegistry
 }
 
 // NewAggregator creates a new Aggregator with the provided config.
@@ -236,7 +240,7 @@ func (agg *Aggregator) init() {
 		panic(err)
 	}
 
-	SetGlobalChainID(agg.chainID)
+	SetEigenLayerChainID(agg.chainID)
 
 	if agg.chainID.Cmp(config.MainnetChainID) == 0 {
 		config.CurrentChainEnv = config.EthereumEnv
@@ -280,6 +284,19 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 
 	agg.migrate()
 
+	// In gateway mode, create chain registry and connect to workers
+	if agg.config.IsGateway {
+		agg.chainRegistry = NewChainRegistry(
+			agg.config.Chains,
+			agg.config.DefaultChainID,
+			agg.logger,
+		)
+		agg.logger.Info("Connecting to chain workers...")
+		if err := agg.chainRegistry.Connect(ctx); err != nil {
+			return fmt.Errorf("connecting to chain workers: %w", err)
+		}
+	}
+
 	agg.logger.Infof("Starting Task engine")
 	agg.startTaskEngine(ctx)
 
@@ -312,6 +329,10 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.status = shutdownStatus
 	agg.stopRepl()
 	agg.stopTaskEngine()
+
+	if agg.chainRegistry != nil {
+		agg.chainRegistry.Close()
+	}
 
 	agg.db.Close()
 

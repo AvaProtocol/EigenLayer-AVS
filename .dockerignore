@@ -1,3 +1,5 @@
-config/*
 dockerfiles/*
 .env*
+out/
+*.log
+contracts/

@@ -69,6 +69,9 @@ message SyncMessagesResp {
     TaskTrigger trigger = 4;
     // task won't be checked before this (timestamp in milliseconds)
     int64 start_at = 5;
+    // Target chain for this task's triggers (e.g., 11155111 for Sepolia).
+    // Operators use this to route the task to the correct chain trigger engine.
+    int64 chain_id = 6;
   };
 
   TaskMetadata task_metadata = 3;
@@ -104,6 +107,10 @@ message NotifyTriggersReq {
   // The same logical trigger event must produce the same ID so duplicate
   // notifications can be safely collapsed on the aggregator.
   string trigger_request_id = 10;
+
+  // Chain where the trigger was detected (e.g., 11155111 for Sepolia).
+  // 0 means the operator's default/only chain (backward compatible).
+  int64 chain_id = 11;
 }
 
 message NotifyTriggersResp {

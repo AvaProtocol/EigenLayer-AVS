@@ -38,3 +38,16 @@ func TaskStorageKey(id string, status avsproto.TaskStatus) []byte {
 func TaskByStatusStoragePrefix(status avsproto.TaskStatus) []byte {
 	return []byte(fmt.Sprintf("t:%s:", TaskStatusToStorageKey(status)))
 }
+
+// Chain-scoped variants for gateway mode.
+// These prefix keys with chain_id to prevent collisions when multiple chains share one DB.
+
+// ChainTaskStorageKey constructs a chain-scoped task storage key.
+func ChainTaskStorageKey(chainID int64, id string, status avsproto.TaskStatus) []byte {
+	return []byte(fmt.Sprintf("t:%d:%s:%s", chainID, TaskStatusToStorageKey(status), id))
+}
+
+// ChainTaskByStatusStoragePrefix returns the chain-scoped storage prefix for tasks with the given status.
+func ChainTaskByStatusStoragePrefix(chainID int64, status avsproto.TaskStatus) []byte {
+	return []byte(fmt.Sprintf("t:%d:%s:", chainID, TaskStatusToStorageKey(status)))
+}
