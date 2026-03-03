@@ -987,6 +987,9 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 				"reconnecting too fast, wait %s (last connect was %s ago)",
 				operatorReconnectCooldown.String(), timeSinceLastConnect.String())
 		}
+		// Update timestamp under the same lock so concurrent reconnects
+		// from the same operator cannot both pass the cooldown check.
+		existing.LastConnectTime = connectionStartTime
 	}
 	n.lock.Unlock()
 

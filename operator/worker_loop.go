@@ -22,6 +22,8 @@ import (
 	avspb "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
 	"github.com/ethereum/go-ethereum/core/types"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -591,7 +593,8 @@ func (o *Operator) StreamMessages() {
 			var shouldLog bool
 
 			// Categorize and debounce stream error logging - check more specific patterns first
-			if strings.Contains(err.Error(), "ResourceExhausted") {
+			grpcCode := status.Code(err)
+			if grpcCode == codes.ResourceExhausted {
 				errorType = "stream_rate_limited"
 				shouldLog = o.shouldLogError(errorType, true)
 				if shouldLog {
@@ -633,7 +636,7 @@ func (o *Operator) StreamMessages() {
 						"operator", o.config.OperatorAddress)
 					continue
 				}
-			} else if strings.Contains(err.Error(), "Unavailable") {
+			} else if grpcCode == codes.Unavailable {
 				errorType = "stream_service_unavailable"
 				shouldLog = o.shouldLogError(errorType, true)
 				if shouldLog {
@@ -659,7 +662,7 @@ func (o *Operator) StreamMessages() {
 						"operator", o.config.OperatorAddress)
 					continue
 				}
-			} else if strings.Contains(err.Error(), "Canceled") || strings.Contains(err.Error(), "connection is closing") {
+			} else if grpcCode == codes.Canceled || strings.Contains(err.Error(), "connection is closing") {
 				errorType = "stream_connection_closing"
 				shouldLog = o.shouldLogError(errorType, true)
 				if shouldLog {
@@ -703,7 +706,6 @@ func (o *Operator) StreamMessages() {
 			continue
 		}
 
-		defer stream.CloseSend()
 		for {
 			resp, err := stream.Recv()
 			if err == io.EOF {
@@ -713,6 +715,7 @@ func (o *Operator) StreamMessages() {
 					"backoff", eofBackoff.String(),
 					"solution", "Stream closed normally, backing off before retry")
 
+				stream.CloseSend()
 				time.Sleep(eofBackoff)
 				eofBackoff = time.Duration(float64(eofBackoff) * eofBackoffMultiplier)
 				if eofBackoff > eofBackoffMax {
@@ -726,7 +729,8 @@ func (o *Operator) StreamMessages() {
 				var shouldLog bool
 
 				// Categorize and debounce stream receive error logging
-				if strings.Contains(err.Error(), "connection") {
+				recvCode := status.Code(err)
+				if recvCode == codes.Unavailable || strings.Contains(err.Error(), "connection") {
 					errorType = "stream_lost_connection"
 					shouldLog = o.shouldLogError(errorType, true)
 					if shouldLog {
@@ -738,7 +742,7 @@ func (o *Operator) StreamMessages() {
 							"next_log_in", "3 minutes if error persists",
 							"raw_error", fmt.Sprintf("%v", err))
 					}
-				} else if strings.Contains(err.Error(), "Canceled") || strings.Contains(err.Error(), "connection is closing") {
+				} else if recvCode == codes.Canceled || strings.Contains(err.Error(), "connection is closing") {
 					errorType = "stream_receive_connection_closing"
 					shouldLog = o.shouldLogError(errorType, true)
 					if shouldLog {
@@ -771,6 +775,7 @@ func (o *Operator) StreamMessages() {
 							"raw_error", fmt.Sprintf("%v", err))
 					}
 				}
+				stream.CloseSend()
 				time.Sleep(time.Duration(retryIntervalSecond) * time.Second)
 				break
 			}
