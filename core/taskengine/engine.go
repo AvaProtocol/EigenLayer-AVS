@@ -178,6 +178,10 @@ func retryWsRpc() error {
 	}
 }
 
+// Minimum interval between successive connections from the same operator.
+// Connections arriving faster than this are rejected with ResourceExhausted.
+const operatorReconnectCooldown = 5 * time.Second
+
 type operatorState struct {
 	// list of task id that we had synced to this operator
 	TaskID         map[string]bool
@@ -189,6 +193,9 @@ type operatorState struct {
 	// Context cancellation for managing ticker lifecycle
 	TickerCancel context.CancelFunc
 	TickerCtx    context.Context
+
+	// Rate limiting: track when the operator last connected
+	LastConnectTime time.Time
 }
 
 type PendingNotification struct {
@@ -965,6 +972,24 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 	connectionStartTime := time.Now()
 	streamID := fmt.Sprintf("%s-%d", address[len(address)-6:], connectionStartTime.UnixNano()%10000)
 
+	// Rate limiting: reject connections that arrive too fast from the same operator
+	n.lock.Lock()
+	if existing, ok := n.trackSyncedTasks[address]; ok {
+		timeSinceLastConnect := connectionStartTime.Sub(existing.LastConnectTime)
+		if timeSinceLastConnect < operatorReconnectCooldown {
+			n.lock.Unlock()
+			n.logger.Warn("⏳ Rate limiting operator reconnection - too fast",
+				"operator", address,
+				"stream_id", streamID,
+				"time_since_last_connect", timeSinceLastConnect.String(),
+				"cooldown", operatorReconnectCooldown.String())
+			return status.Errorf(codes.ResourceExhausted,
+				"reconnecting too fast, wait %s (last connect was %s ago)",
+				operatorReconnectCooldown.String(), timeSinceLastConnect.String())
+		}
+	}
+	n.lock.Unlock()
+
 	n.logger.Info("open channel to stream check to operator",
 		"operator", address,
 		"stream_id", streamID,
@@ -983,11 +1008,12 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 	n.lock.Lock()
 	if _, ok := n.trackSyncedTasks[address]; !ok {
 		n.trackSyncedTasks[address] = &operatorState{
-			MonotonicClock: payload.MonotonicClock,
-			TaskID:         map[string]bool{},
-			Capabilities:   payload.Capabilities,
-			TickerCtx:      tickerCtx,
-			TickerCancel:   tickerCancel,
+			MonotonicClock:  payload.MonotonicClock,
+			TaskID:          map[string]bool{},
+			Capabilities:    payload.Capabilities,
+			TickerCtx:       tickerCtx,
+			TickerCancel:    tickerCancel,
+			LastConnectTime: connectionStartTime,
 		}
 		n.lock.Unlock()
 		n.logger.Info("🔗 New operator connected with capabilities",
@@ -1010,6 +1036,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			n.trackSyncedTasks[address].TaskID = map[string]bool{}
 			n.trackSyncedTasks[address].MonotonicClock = payload.MonotonicClock
 			n.trackSyncedTasks[address].Capabilities = payload.Capabilities
+			n.trackSyncedTasks[address].LastConnectTime = connectionStartTime
 
 			// Set new ticker context for this connection
 			n.trackSyncedTasks[address].TickerCtx = tickerCtx
@@ -1036,6 +1063,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 
 			n.trackSyncedTasks[address].TaskID = map[string]bool{}
 			n.trackSyncedTasks[address].Capabilities = payload.Capabilities
+			n.trackSyncedTasks[address].LastConnectTime = connectionStartTime
 
 			// Set new ticker context for this connection
 			n.trackSyncedTasks[address].TickerCtx = tickerCtx
@@ -1087,13 +1115,21 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 		}
 		n.lock.Unlock()
 
-		// Unregister the operator's stream
+		// Only unregister the operator's stream if it's still ours
+		// (a newer connection may have already replaced it)
 		n.streamsMutex.Lock()
-		delete(n.operatorStreams, address)
-		n.streamsMutex.Unlock()
+		if n.operatorStreams[address] == srv {
+			delete(n.operatorStreams, address)
+			n.streamsMutex.Unlock()
 
-		// Reassign tasks that were assigned to this operator
-		n.reassignOrphanedTasks()
+			// Only reassign tasks if we actually removed the stream
+			n.reassignOrphanedTasks()
+		} else {
+			n.streamsMutex.Unlock()
+			n.logger.Info("🔄 Skipping stream cleanup - newer connection already registered",
+				"operator", address,
+				"stream_id", streamID)
+		}
 
 		n.logger.Info("✅ Operator cleanup completed",
 			"operator", address,

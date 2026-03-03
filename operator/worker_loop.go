@@ -28,6 +28,12 @@ import (
 const (
 	retryIntervalSecond      = 60
 	errorLogDebounceInterval = 3 * time.Minute // Only log same error type every 3 minutes
+
+	// Exponential backoff for EOF reconnection to prevent reconnection storms
+	eofBackoffInitial    = 1 * time.Second
+	eofBackoffMax        = 60 * time.Second
+	eofBackoffMultiplier = 2.0
+	eofBackoffResetAfter = 2 * time.Minute // Reset backoff after healthy connection
 )
 
 // shouldLogError determines if we should log an error based on debouncing rules
@@ -545,7 +551,16 @@ func (o *Operator) StreamMessages() {
 	ctx := context.Background()
 	o.logger.Info("Subscribe to aggregator to get check")
 
+	// Exponential backoff state for EOF/rate-limit reconnections
+	eofBackoff := eofBackoffInitial
+	var lastConnectTime time.Time
+
 	for {
+		// Reset backoff if previous connection was healthy for long enough
+		if !lastConnectTime.IsZero() && time.Since(lastConnectTime) >= eofBackoffResetAfter {
+			eofBackoff = eofBackoffInitial
+		}
+		lastConnectTime = time.Now()
 		epoch := time.Now().Unix()
 		blsSignature, err := o.GetSignature(ctx, []byte(fmt.Sprintf("operator connection: %s %s %d", o.config.OperatorAddress, id, epoch)))
 		if err != nil {
@@ -576,7 +591,23 @@ func (o *Operator) StreamMessages() {
 			var shouldLog bool
 
 			// Categorize and debounce stream error logging - check more specific patterns first
-			if strings.Contains(err.Error(), "connection refused") {
+			if strings.Contains(err.Error(), "ResourceExhausted") {
+				errorType = "stream_rate_limited"
+				shouldLog = o.shouldLogError(errorType, true)
+				if shouldLog {
+					o.logger.Info("⏳ Aggregator rate-limited this connection - backing off",
+						"aggregator_address", o.config.AggregatorServerIpPortAddress,
+						"operator", o.config.OperatorAddress,
+						"backoff", eofBackoff.String(),
+						"solution", "Reconnecting too fast, waiting before retry")
+				}
+				time.Sleep(eofBackoff)
+				eofBackoff = time.Duration(float64(eofBackoff) * eofBackoffMultiplier)
+				if eofBackoff > eofBackoffMax {
+					eofBackoff = eofBackoffMax
+				}
+				continue
+			} else if strings.Contains(err.Error(), "connection refused") {
 				errorType = "stream_connection_refused"
 				shouldLog = o.shouldLogError(errorType, true)
 				if shouldLog {
@@ -679,7 +710,15 @@ func (o *Operator) StreamMessages() {
 				o.logger.Info("📡 Stream closed by aggregator (EOF) - will reconnect",
 					"aggregator_address", o.config.AggregatorServerIpPortAddress,
 					"operator", o.config.OperatorAddress,
-					"solution", "Stream closed normally, retrying connection")
+					"backoff", eofBackoff.String(),
+					"solution", "Stream closed normally, backing off before retry")
+
+				time.Sleep(eofBackoff)
+				eofBackoff = time.Duration(float64(eofBackoff) * eofBackoffMultiplier)
+				if eofBackoff > eofBackoffMax {
+					eofBackoff = eofBackoffMax
+				}
+
 				break // Break out of inner loop to retry connection in outer loop
 			}
 			if err != nil {
