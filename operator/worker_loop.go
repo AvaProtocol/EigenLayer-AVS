@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"math/rand"
 	"os"
 	"runtime/debug"
 	"sort"
@@ -37,6 +38,13 @@ const (
 	eofBackoffMultiplier = 2.0
 	eofBackoffResetAfter = 2 * time.Minute // Reset backoff after healthy connection
 )
+
+// backoffWithJitter adds up to 25% random jitter to a duration to prevent
+// synchronized reconnection bursts (thundering herd).
+func backoffWithJitter(d time.Duration) time.Duration {
+	jitter := time.Duration(rand.Int63n(int64(d) / 4))
+	return d + jitter
+}
 
 // shouldLogError determines if we should log an error based on debouncing rules
 // Returns true if we should log, false if we should skip to reduce spam
@@ -604,7 +612,7 @@ func (o *Operator) StreamMessages() {
 						"backoff", eofBackoff.String(),
 						"solution", "Reconnecting too fast, waiting before retry")
 				}
-				time.Sleep(eofBackoff)
+				time.Sleep(backoffWithJitter(eofBackoff))
 				eofBackoff = time.Duration(float64(eofBackoff) * eofBackoffMultiplier)
 				if eofBackoff > eofBackoffMax {
 					eofBackoff = eofBackoffMax
@@ -716,7 +724,7 @@ func (o *Operator) StreamMessages() {
 					"solution", "Stream closed normally, backing off before retry")
 
 				stream.CloseSend()
-				time.Sleep(eofBackoff)
+				time.Sleep(backoffWithJitter(eofBackoff))
 				eofBackoff = time.Duration(float64(eofBackoff) * eofBackoffMultiplier)
 				if eofBackoff > eofBackoffMax {
 					eofBackoff = eofBackoffMax

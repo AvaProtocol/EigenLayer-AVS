@@ -97,6 +97,7 @@ func (l *SentryLogger) captureToSentry(msg string, tags []any) {
 
 	sentry.WithScope(func(scope *sentry.Scope) {
 		scope.SetTag("service", l.serviceName)
+		scope.SetExtra("log_message", msg)
 		scope.SetExtras(extras)
 		sentry.CaptureException(sentryErr)
 	})

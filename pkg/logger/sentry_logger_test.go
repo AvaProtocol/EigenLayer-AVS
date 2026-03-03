@@ -124,6 +124,7 @@ func TestSentryLogger_ErrorCapturesSentryEvent(t *testing.T) {
 	testErr := errors.New("connection refused")
 	sl.Error("rpc failed", "url", "http://localhost:8545", "err", testErr)
 
+	sentry.Flush(2 * time.Second)
 	events := transport.Events()
 	if len(events) != 1 {
 		t.Fatalf("expected 1 sentry event, got %d", len(events))
@@ -157,6 +158,7 @@ func TestSentryLogger_ErrorfCapturesSentryEvent(t *testing.T) {
 
 	sl.Errorf("request failed with status %d", 500)
 
+	sentry.Flush(2 * time.Second)
 	events := transport.Events()
 	if len(events) != 1 {
 		t.Fatalf("expected 1 sentry event, got %d", len(events))
@@ -181,6 +183,7 @@ func TestSentryLogger_ErrorWithoutErrorValue(t *testing.T) {
 
 	sl.Error("something went wrong", "code", 42)
 
+	sentry.Flush(2 * time.Second)
 	events := transport.Events()
 	if len(events) != 1 {
 		t.Fatalf("expected 1 sentry event, got %d", len(events))
@@ -203,6 +206,7 @@ func TestSentryLogger_ErrorfWithErrorArg(t *testing.T) {
 	testErr := errors.New("timeout")
 	sl.Errorf("operation failed: %v", testErr)
 
+	sentry.Flush(2 * time.Second)
 	events := transport.Events()
 	if len(events) != 1 {
 		t.Fatalf("expected 1 sentry event, got %d", len(events))
