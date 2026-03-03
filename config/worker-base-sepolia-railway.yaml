@@ -1,0 +1,23 @@
+# Worker configuration for Base Sepolia on Railway (chain 84532)
+environment: production
+
+chain_id: 84532
+chain_name: base-sepolia
+
+# Internal gRPC — Railway private networking
+listen_address: "0.0.0.0:50051"
+
+# Railway health check endpoint
+health_address: "0.0.0.0:8080"
+
+# Chain RPC endpoints (Base Sepolia)
+eth_rpc_url: https://api-base-sepolia-archive.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+eth_ws_url: wss://api-base-sepolia-archive.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+
+# Third-party bundler
+bundler_url: https://api.pimlico.io/v2/84532/rpc?apikey=pim_bXfMSiGBPRrDdmjGdoSBxn
+
+# Smart wallet config
+smart_wallet:
+  controller_private_key: 30c525b5608ea9cbfd7266fd6251d422f5b958e44ae9c49008f97907cc752601
+  paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92

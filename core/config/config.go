@@ -113,6 +113,22 @@ type Config struct {
 
 	// NotificationsSummary contains optional AI summarization settings for notifications
 	NotificationsSummary NotificationsSummaryConfig
+
+	// Gateway mode fields — set when chains[] is present in config.
+	// When IsGateway is true, the aggregator acts as a multi-chain gateway
+	// that routes chain-specific operations to per-chain workers via gRPC.
+	IsGateway      bool
+	DefaultChainID int64
+	Chains         []*ChainConfig
+}
+
+// ChainConfig holds per-chain configuration for gateway mode.
+// Each chain has a worker address for gRPC delegation and its own SmartWalletConfig.
+type ChainConfig struct {
+	ChainID     int64
+	Name        string
+	WorkerAddr  string
+	SmartWallet *SmartWalletConfig
 }
 
 // FeeRatesConfig defines configurable pricing for different trigger types and operations
@@ -179,6 +195,28 @@ type BackupConfig struct {
 	BackupDir       string // Directory to store backups
 }
 
+// SmartWalletConfigRaw represents the raw YAML config for smart wallet operations.
+// Used both in the top-level aggregator config and in per-chain gateway configs.
+type SmartWalletConfigRaw struct {
+	EthRpcUrl            string   `yaml:"eth_rpc_url"`
+	EthWsUrl             string   `yaml:"eth_ws_url"`
+	BundlerURL           string   `yaml:"bundler_url"`
+	FactoryAddress       string   `yaml:"factory_address"`
+	EntrypointAddress    string   `yaml:"entrypoint_address"`
+	ControllerPrivateKey string   `yaml:"controller_private_key"`
+	PaymasterAddress     string   `yaml:"paymaster_address"`
+	WhitelistAddresses   []string `yaml:"whitelist_addresses"`
+	MaxWalletsPerOwner   int      `yaml:"max_wallets_per_owner"`
+}
+
+// ChainConfigRaw represents a per-chain entry in the gateway's chains[] config.
+type ChainConfigRaw struct {
+	ChainID     int64                `yaml:"chain_id"`
+	Name        string               `yaml:"name"`
+	WorkerAddr  string               `yaml:"worker_addr"`
+	SmartWallet SmartWalletConfigRaw `yaml:"smart_wallet"`
+}
+
 // These are read from configPath
 type ConfigRaw struct {
 	EcdsaPrivateKey string              `yaml:"ecdsa_private_key"`
@@ -198,17 +236,7 @@ type ConfigRaw struct {
 	BackupDir string `yaml:"backup_dir"`
 	JwtSecret string `yaml:"jwt_secret"`
 
-	SmartWallet struct {
-		EthRpcUrl            string   `yaml:"eth_rpc_url"`
-		EthWsUrl             string   `yaml:"eth_ws_url"`
-		BundlerURL           string   `yaml:"bundler_url"`
-		FactoryAddress       string   `yaml:"factory_address"`
-		EntrypointAddress    string   `yaml:"entrypoint_address"`
-		ControllerPrivateKey string   `yaml:"controller_private_key"`
-		PaymasterAddress     string   `yaml:"paymaster_address"`
-		WhitelistAddresses   []string `yaml:"whitelist_addresses"`
-		MaxWalletsPerOwner   int      `yaml:"max_wallets_per_owner"`
-	} `yaml:"smart_wallet"`
+	SmartWallet SmartWalletConfigRaw `yaml:"smart_wallet"`
 
 	Backup struct {
 		Enabled         bool   `yaml:"enabled"`
@@ -263,6 +291,9 @@ type ConfigRaw struct {
 			APIKey      string `yaml:"api_key"`
 		} `yaml:"summary"`
 	} `yaml:"notifications"`
+
+	// Gateway mode: per-chain worker configs. When present, aggregator runs as gateway.
+	Chains []ChainConfigRaw `yaml:"chains"`
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
@@ -337,6 +368,18 @@ func NewConfig(configFilePath string) (*Config, error) {
 	if err != nil {
 		logger.Error("Cannot get operator address", "err", err)
 		return nil, err
+	}
+
+	// Gateway mode: if chains[] is present and top-level smart_wallet is empty,
+	// populate it from the first chain's config for backward compatibility.
+	isGateway := len(configRaw.Chains) > 0
+	if isGateway && configRaw.SmartWallet.EthRpcUrl == "" {
+		if len(configRaw.Chains) > 0 {
+			configRaw.SmartWallet = configRaw.Chains[0].SmartWallet
+			logger.Info("Gateway mode: using first chain's smart_wallet config as default",
+				"chain_id", configRaw.Chains[0].ChainID,
+				"chain_name", configRaw.Chains[0].Name)
+		}
 	}
 
 	// Validate that smart wallet RPC URL is configured - this is critical for contract operations
@@ -495,6 +538,25 @@ func NewConfig(configFilePath string) (*Config, error) {
 			config.SmartWallet.PaymasterOwnerAddress = paymasterOwner
 			logger.Info("Paymaster owner address loaded", "paymaster", config.SmartWallet.PaymasterAddress, "owner", paymasterOwner.Hex())
 		}
+	}
+
+	// Gateway mode: parse per-chain configs
+	if isGateway {
+		config.IsGateway = true
+		config.DefaultChainID = configRaw.Chains[0].ChainID
+
+		for _, chainRaw := range configRaw.Chains {
+			chainCfg, err := parseChainConfig(chainRaw, logger)
+			if err != nil {
+				return nil, fmt.Errorf("parsing chain config for %s (chain_id=%d): %w",
+					chainRaw.Name, chainRaw.ChainID, err)
+			}
+			config.Chains = append(config.Chains, chainCfg)
+		}
+
+		logger.Info("Gateway mode enabled",
+			"num_chains", len(config.Chains),
+			"default_chain_id", config.DefaultChainID)
 	}
 
 	// If HttpBindAddress is empty, HTTP server will be disabled (startup code will skip starting it)
@@ -673,4 +735,60 @@ func fetchPaymasterOwner(client *eth.InstrumentedClient, paymasterAddress common
 	}
 
 	return owner, nil
+}
+
+// parseChainConfig converts a raw YAML chain config into a runtime ChainConfig.
+// Unlike the top-level SmartWalletConfig, we don't connect to the chain RPC here —
+// that's the worker's responsibility. We just parse and validate the config fields.
+func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfig, error) {
+	if raw.ChainID <= 0 {
+		return nil, fmt.Errorf("chain_id must be positive")
+	}
+	if raw.WorkerAddr == "" {
+		return nil, fmt.Errorf("worker_addr is required")
+	}
+
+	sw := raw.SmartWallet
+
+	// Parse controller private key
+	controllerPrivateKey, err := crypto.HexToECDSA(sw.ControllerPrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("parsing controller_private_key: %w", err)
+	}
+
+	// Enforce sane defaults for max wallets per owner
+	maxWallets := sw.MaxWalletsPerOwner
+	if maxWallets <= 0 {
+		maxWallets = DefaultMaxWalletsPerOwner
+	}
+	if maxWallets > HardMaxWalletsPerOwner {
+		maxWallets = HardMaxWalletsPerOwner
+	}
+
+	chainCfg := &ChainConfig{
+		ChainID:    raw.ChainID,
+		Name:       raw.Name,
+		WorkerAddr: raw.WorkerAddr,
+		SmartWallet: &SmartWalletConfig{
+			EthRpcUrl:            sw.EthRpcUrl,
+			EthWsUrl:             sw.EthWsUrl,
+			BundlerURL:           sw.BundlerURL,
+			FactoryAddress:       common.HexToAddress(firstNonEmpty(sw.FactoryAddress, DefaultFactoryProxyAddressHex)),
+			EntrypointAddress:    common.HexToAddress(firstNonEmpty(sw.EntrypointAddress, DefaultEntrypointAddressHex)),
+			ChainID:              raw.ChainID,
+			ControllerPrivateKey: controllerPrivateKey,
+			ControllerAddress:    crypto.PubkeyToAddress(controllerPrivateKey.PublicKey),
+			PaymasterAddress:     common.HexToAddress(firstNonEmpty(sw.PaymasterAddress, DefaultPaymasterAddressHex)),
+			WhitelistAddresses:   convertToAddressSlice(sw.WhitelistAddresses),
+			MaxWalletsPerOwner:   maxWallets,
+		},
+	}
+
+	logger.Info("Parsed chain config",
+		"chain_id", chainCfg.ChainID,
+		"name", chainCfg.Name,
+		"worker_addr", chainCfg.WorkerAddr,
+		"controller", chainCfg.SmartWallet.ControllerAddress.Hex())
+
+	return chainCfg, nil
 }

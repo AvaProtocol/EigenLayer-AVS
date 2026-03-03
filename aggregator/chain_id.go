@@ -6,18 +6,18 @@ import (
 )
 
 var (
-	globalChainID     *big.Int
-	globalChainIDLock sync.RWMutex
+	eigenLayerChainID     *big.Int
+	eigenLayerChainIDLock sync.RWMutex
 )
 
-func SetGlobalChainID(chainID *big.Int) {
-	globalChainIDLock.Lock()
-	defer globalChainIDLock.Unlock()
-	globalChainID = chainID
+func SetEigenLayerChainID(chainID *big.Int) {
+	eigenLayerChainIDLock.Lock()
+	defer eigenLayerChainIDLock.Unlock()
+	eigenLayerChainID = chainID
 }
 
-func GetGlobalChainID() *big.Int {
-	globalChainIDLock.RLock()
-	defer globalChainIDLock.RUnlock()
-	return globalChainID
+func GetEigenLayerChainID() *big.Int {
+	eigenLayerChainIDLock.RLock()
+	defer eigenLayerChainIDLock.RUnlock()
+	return eigenLayerChainID
 }

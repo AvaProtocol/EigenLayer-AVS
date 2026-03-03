@@ -776,6 +776,10 @@ message Task {
   // These variables are available globally to all nodes during execution
   // and can be referenced using JavaScript template syntax like ${variableName}
   map<string, google.protobuf.Value> input_variables = 15;
+
+  // Target chain for this task's execution (e.g., 11155111 for Sepolia, 84532 for Base Sepolia).
+  // 0 means use the aggregator's default chain (backward compatible with single-chain mode).
+  int64 chain_id = 16;
 }
 
 
@@ -799,6 +803,10 @@ message CreateTaskReq {
   // These variables will be available globally to all nodes during execution
   // and can be referenced using JavaScript template syntax like ${variableName}
   map<string, google.protobuf.Value> input_variables = 9;
+
+  // Target chain for execution (e.g., 11155111 for Sepolia, 84532 for Base Sepolia).
+  // 0 means use the aggregator's default chain (backward compatible with single-chain mode).
+  int64 chain_id = 10;
 }
 
 message CreateTaskResp {

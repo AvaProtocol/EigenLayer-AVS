@@ -113,7 +113,7 @@ protoc-gen:
 		--go_opt=paths=source_relative \
     	--go-grpc_out=./protobuf \
 		--go-grpc_opt=paths=source_relative \
-    	protobuf/avs.proto protobuf/node.proto
+    	protobuf/avs.proto protobuf/node.proto protobuf/worker.proto
 	@echo "Protobuf Go generation complete. Files should be in ./protobuf/ and declare package avsproto."
 
 ## up: bring up docker compose stack

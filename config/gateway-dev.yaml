@@ -1,0 +1,70 @@
+# Gateway configuration for local development
+# Replaces per-chain aggregator configs (aggregator-sepolia.yaml, aggregator-base-sepolia.yaml)
+# Routes tasks to chain workers based on chain_id
+environment: development
+
+# Single DB for all chains — keys are chain-scoped (t:{chain_id}:{status}:{task_id})
+db_path: /tmp/ap-avs/gateway
+backup_dir: /tmp/ap-avs-gateway-backup
+
+ecdsa_private_key: f6dc500a34373d7e8af2a4b0b2635253ce1bd92077ed86c24393fb01298abc1d
+
+# EigenLayer contracts live on Sepolia (the AVS registration chain)
+eth_rpc_url: https://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+eth_ws_url: wss://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+
+# Single gRPC + HTTP endpoint for all chains
+rpc_bind_address: "0.0.0.0:2206"
+http_bind_address: "0.0.0.0:8080"
+
+avs_registry_coordinator_address: 0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD
+operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
+
+jwt_secret: 1b7db1c64236d92de3b3ed32e5d6bf56
+
+server_name: "gateway-dev"
+sentry_dsn: https://d304c8708d5097f7787eeb664e4098c6@o1156669.ingest.us.sentry.io/4509386759733248
+
+tenderly_account: "chrisli"
+tenderly_project: "default"
+tenderly_access_key: "G4dRTRaPOVXNWonadqt2OkUGmY0fsXwZ"
+
+# Chain worker registry — gateway routes tasks to workers by chain_id
+# In production (Railway): worker-sepolia.railway.internal:50051
+# Locally: workers run on different localhost ports
+chains:
+  - chain_id: 11155111
+    name: sepolia
+    worker_addr: "127.0.0.1:50051"
+    smart_wallet:
+      eth_rpc_url: https://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+      eth_ws_url: wss://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+      bundler_url: https://api.pimlico.io/v2/11155111/rpc?apikey=pim_bXfMSiGBPRrDdmjGdoSBxn
+      controller_private_key: 30c525b5608ea9cbfd7266fd6251d422f5b958e44ae9c49008f97907cc752601
+      paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92
+      max_wallets_per_owner: 2000
+
+  - chain_id: 84532
+    name: base-sepolia
+    worker_addr: "127.0.0.1:50052"
+    smart_wallet:
+      eth_rpc_url: https://api-base-sepolia-archive.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+      eth_ws_url: wss://api-base-sepolia-archive.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+      bundler_url: https://api.pimlico.io/v2/84532/rpc?apikey=pim_bXfMSiGBPRrDdmjGdoSBxn
+      controller_private_key: 30c525b5608ea9cbfd7266fd6251d422f5b958e44ae9c49008f97907cc752601
+      paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92
+      max_wallets_per_owner: 3
+
+macros:
+  secrets:
+    ap_notify_bot_token: "7771086042:AAG7UvbAyN8_8OrS-MjRfwz8WpWDKf4Yw8U"
+    sendgrid_key: "" # Set via environment or secrets management
+    thegraph_api_key: "a0f31c80efa0620c1824266adc1c30d7"
+    moralis_api_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6ImY1NTFlMmFjLTMwZDctNDY4ZC1iNDliLTIxZGRjMWFhOGQ5OCIsIm9yZ0lkIjoiNDEyNjUzIiwidXNlcklkIjoiNDI0MDY0IiwidHlwZUlkIjoiZGY4NjUwNWItOGZiMy00YzExLThjYjAtOTM4N2JiZDlmMTY4IiwidHlwZSI6IlBST0pFQ1QiLCJpYXQiOjE3Mjk0NTMxOTYsImV4cCI6NDg4NTIxMzE5Nn0.RqxahrtbzlBI3xX8baswx4w0G7ONw9WaZbkjWvNn1DU"
+
+notifications:
+  summary:
+    enabled: true
+    provider: context-memory
+    api_endpoint: "http://localhost:3010"
+    api_key: "test-auth-token-12345"

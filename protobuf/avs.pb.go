@@ -2169,8 +2169,11 @@ type Task struct {
 	// These variables are available globally to all nodes during execution
 	// and can be referenced using JavaScript template syntax like ${variableName}
 	InputVariables map[string]*structpb.Value `protobuf:"bytes,15,rep,name=input_variables,json=inputVariables,proto3" json:"input_variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Target chain for this task's execution (e.g., 11155111 for Sepolia, 84532 for Base Sepolia).
+	// 0 means use the aggregator's default chain (backward compatible with single-chain mode).
+	ChainId       int64 `protobuf:"varint,16,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Task) Reset() {
@@ -2308,6 +2311,13 @@ func (x *Task) GetInputVariables() map[string]*structpb.Value {
 	return nil
 }
 
+func (x *Task) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
+}
+
 type CreateTaskReq struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	Trigger      *TaskTrigger           `protobuf:"bytes,1,opt,name=trigger,proto3" json:"trigger,omitempty"`
@@ -2324,8 +2334,11 @@ type CreateTaskReq struct {
 	// These variables will be available globally to all nodes during execution
 	// and can be referenced using JavaScript template syntax like ${variableName}
 	InputVariables map[string]*structpb.Value `protobuf:"bytes,9,rep,name=input_variables,json=inputVariables,proto3" json:"input_variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Target chain for execution (e.g., 11155111 for Sepolia, 84532 for Base Sepolia).
+	// 0 means use the aggregator's default chain (backward compatible with single-chain mode).
+	ChainId       int64 `protobuf:"varint,10,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CreateTaskReq) Reset() {
@@ -2419,6 +2432,13 @@ func (x *CreateTaskReq) GetInputVariables() map[string]*structpb.Value {
 		return x.InputVariables
 	}
 	return nil
+}
+
+func (x *CreateTaskReq) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
 }
 
 type CreateTaskResp struct {
@@ -9618,7 +9638,7 @@ const file_avs_proto_rawDesc = "" +
 	"\abalance\x18\x1e \x01(\v2\x1e.aggregator.BalanceNode.OutputH\x00R\abalance\x12\x19\n" +
 	"\bstart_at\x18\x0e \x01(\x03R\astartAt\x12\x15\n" +
 	"\x06end_at\x18\x0f \x01(\x03R\x05endAtB\r\n" +
-	"\voutput_data\"\xa2\x05\n" +
+	"\voutput_data\"\xbd\x05\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05owner\x18\x02 \x01(\tR\x05owner\x120\n" +
@@ -9636,10 +9656,11 @@ const file_avs_proto_rawDesc = "" +
 	"\atrigger\x18\f \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\x12*\n" +
 	"\x05nodes\x18\r \x03(\v2\x14.aggregator.TaskNodeR\x05nodes\x12*\n" +
 	"\x05edges\x18\x0e \x03(\v2\x14.aggregator.TaskEdgeR\x05edges\x12M\n" +
-	"\x0finput_variables\x18\x0f \x03(\v2$.aggregator.Task.InputVariablesEntryR\x0einputVariables\x1aY\n" +
+	"\x0finput_variables\x18\x0f \x03(\v2$.aggregator.Task.InputVariablesEntryR\x0einputVariables\x12\x19\n" +
+	"\bchain_id\x18\x10 \x01(\x03R\achainId\x1aY\n" +
 	"\x13InputVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
-	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"\xf2\x03\n" +
+	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"\x8d\x04\n" +
 	"\rCreateTaskReq\x121\n" +
 	"\atrigger\x18\x01 \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\x12\x19\n" +
 	"\bstart_at\x18\x02 \x01(\x03R\astartAt\x12\x1d\n" +
@@ -9650,7 +9671,9 @@ const file_avs_proto_rawDesc = "" +
 	"\x04name\x18\x06 \x01(\tR\x04name\x12*\n" +
 	"\x05nodes\x18\a \x03(\v2\x14.aggregator.TaskNodeR\x05nodes\x12*\n" +
 	"\x05edges\x18\b \x03(\v2\x14.aggregator.TaskEdgeR\x05edges\x12V\n" +
-	"\x0finput_variables\x18\t \x03(\v2-.aggregator.CreateTaskReq.InputVariablesEntryR\x0einputVariables\x1aY\n" +
+	"\x0finput_variables\x18\t \x03(\v2-.aggregator.CreateTaskReq.InputVariablesEntryR\x0einputVariables\x12\x19\n" +
+	"\bchain_id\x18\n" +
+	" \x01(\x03R\achainId\x1aY\n" +
 	"\x13InputVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
 	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\" \n" +

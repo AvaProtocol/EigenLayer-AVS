@@ -234,6 +234,9 @@ type Engine struct {
 	assignmentMutex      *sync.RWMutex     // protects task assignments
 
 	smartWalletConfig *config.SmartWalletConfig
+	// chainConfigs maps chain_id to ChainConfig in gateway mode.
+	// nil in single-chain mode.
+	chainConfigs map[int64]*config.ChainConfig
 	// when shutdown is true, our engine will perform the shutdown
 	// pending execution will be pushed out before the shutdown completely
 	// to force shutdown, one can type ctrl+c twice
@@ -284,6 +287,7 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 		processedTriggerIDs: make(map[string]time.Time),
 		triggerDedupLock:    &sync.Mutex{},
 		smartWalletConfig:   config.SmartWallet,
+		chainConfigs:        buildChainConfigMap(config),
 		shutdown:            false,
 
 		// Initialize batched notifications
@@ -364,6 +368,31 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	logger.Info("TenderlyClient initialized", "ready", e.tenderlyClient != nil)
 
 	return &e
+}
+
+// buildChainConfigMap creates a map of chain_id -> ChainConfig from the gateway config.
+// Returns nil if not in gateway mode.
+func buildChainConfigMap(cfg *config.Config) map[int64]*config.ChainConfig {
+	if !cfg.IsGateway || len(cfg.Chains) == 0 {
+		return nil
+	}
+	m := make(map[int64]*config.ChainConfig, len(cfg.Chains))
+	for _, chain := range cfg.Chains {
+		m[chain.ChainID] = chain
+	}
+	return m
+}
+
+// ResolveSmartWalletConfig returns the SmartWalletConfig for a given chain_id.
+// In gateway mode, it looks up the per-chain config. In single-chain mode,
+// it always returns the default config.
+func (n *Engine) ResolveSmartWalletConfig(chainID int64) *config.SmartWalletConfig {
+	if n.chainConfigs != nil && chainID > 0 {
+		if chainCfg, ok := n.chainConfigs[chainID]; ok {
+			return chainCfg.SmartWallet
+		}
+	}
+	return n.smartWalletConfig
 }
 
 // GetTenderlyClient returns the shared Tenderly client for fee estimation and simulation
@@ -922,6 +951,11 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "%s", err.Error())
+	}
+
+	// Default chain_id to the aggregator's SmartWallet chain when not specified
+	if task.ChainId == 0 && n.config.SmartWallet != nil {
+		task.ChainId = n.config.SmartWallet.ChainID
 	}
 
 	// Validate all node names for JavaScript compatibility
@@ -1682,6 +1716,7 @@ func (n *Engine) sendMonitorTaskTriggerToOperators(task *model.Task) {
 			ExpiredAt: task.ExpiredAt,
 			Trigger:   task.Trigger,
 			StartAt:   task.StartAt,
+			ChainId:   task.ChainId,
 		},
 	}
 
@@ -2263,6 +2298,7 @@ func (n *Engine) instructOperatorImmediateTrigger(taskID string) error {
 					ExpiredAt: task.ExpiredAt,
 					Trigger:   task.Trigger,
 					StartAt:   task.StartAt,
+					ChainId:   task.ChainId,
 				},
 			}
 
@@ -2431,7 +2467,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 	}
 
 	if payload.IsBlocking {
-		executor := NewExecutor(n.smartWalletConfig, n.db, n.logger, n)
+		executor := NewExecutor(n.ResolveSmartWalletConfig(task.ChainId), n.db, n.logger, n)
 		execution, runErr := executor.RunTask(task, &queueTaskData)
 		if runErr != nil {
 			n.logger.Error("failed to run blocking task", runErr)
@@ -2636,7 +2672,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Step 5: Create VM with simulated trigger data (similar to RunTask)
 	triggerReason := GetTriggerReasonOrDefault(queueData, task.Id, n.logger)
-	vm, err := NewVMWithData(task, triggerReason, n.smartWalletConfig, secrets)
+	vm, err := NewVMWithData(task, triggerReason, n.ResolveSmartWalletConfig(task.ChainId), secrets)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VM for simulation: %w", err)
 	}

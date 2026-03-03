@@ -52,6 +52,10 @@ type RpcServer struct {
 	smartWalletRpc   *ethclient.Client
 	smartWalletWsRpc *ethclient.Client // Global WebSocket client for transaction monitoring
 	chainID          *big.Int
+
+	// chainRegistry is set in gateway mode to route chain-specific operations to workers.
+	// nil in single-chain aggregator mode.
+	chainRegistry *ChainRegistry
 }
 
 // FallbackPriceService provides hardcoded fallback prices when Moralis is unavailable
@@ -132,6 +136,24 @@ func (r *RpcServer) SetWallet(ctx context.Context, payload *avsproto.SetWalletRe
 
 // Get nonce of an existing smart wallet of a given owner
 func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest) (*avsproto.NonceResp, error) {
+	// Gateway mode: route to the appropriate chain worker
+	if r.chainRegistry != nil {
+		worker, err := r.chainRegistry.GetWorker(0) // default chain (TODO: chain_id from request)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "no worker available: %v", err)
+		}
+		resp, err := worker.Client.GetNonce(ctx, &avsproto.WorkerGetNonceReq{
+			Owner: payload.Owner,
+			Salt:  0,
+		})
+		if err != nil {
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_SMART_WALLET_RPC_ERROR),
+				"worker GetNonce failed: %v", err)
+		}
+		return &avsproto.NonceResp{Nonce: resp.Nonce}, nil
+	}
+
+	// Single-chain mode: direct RPC call
 	ownerAddress := common.HexToAddress(payload.Owner)
 
 	nonce, err := aa.GetNonce(r.smartWalletRpc, ownerAddress, big.NewInt(0))
@@ -528,13 +550,19 @@ func (r *RpcServer) validateSmartWalletOwnership(owner common.Address, smartWall
 	return nil
 }
 
-// sendUserOpWithGlobalWs sends a UserOp using the global WebSocket client for efficient transaction monitoring
+// sendUserOpWithGlobalWs sends a UserOp using the global WebSocket client for efficient transaction monitoring.
+// In gateway mode, it delegates to the appropriate chain worker instead.
 func (r *RpcServer) sendUserOpWithGlobalWs(
 	owner common.Address,
 	callData []byte,
 	smartWalletAddress *common.Address,
 	paymasterReq *preset.VerifyingPaymasterRequest,
 ) (*userop.UserOperation, *types.Receipt, error) {
+	// Gateway mode: route to worker
+	if r.chainRegistry != nil {
+		return r.sendUserOpViaWorker(owner, callData, smartWalletAddress, paymasterReq, 0)
+	}
+
 	// Use global WebSocket client if available, otherwise fall back to creating new connection
 	if r.smartWalletWsRpc != nil {
 		return preset.SendUserOpWithWsClient(
@@ -558,6 +586,52 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 			r.config.Logger, // Pass logger for debug/verbose logging
 		)
 	}
+}
+
+// sendUserOpViaWorker delegates UserOp execution to a chain worker in gateway mode.
+// It converts the worker response into the same types returned by preset.SendUserOp.
+func (r *RpcServer) sendUserOpViaWorker(
+	owner common.Address,
+	callData []byte,
+	smartWalletAddress *common.Address,
+	paymasterReq *preset.VerifyingPaymasterRequest,
+	chainID int64,
+) (*userop.UserOperation, *types.Receipt, error) {
+	worker, err := r.chainRegistry.GetWorker(chainID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("no worker for chain %d: %w", chainID, err)
+	}
+
+	req := &avsproto.ExecuteUserOpReq{
+		Owner:        owner.Hex(),
+		CallData:     callData,
+		UsePaymaster: paymasterReq != nil,
+	}
+	if smartWalletAddress != nil {
+		req.SmartWalletAddress = smartWalletAddress.Hex()
+	}
+
+	resp, err := worker.Client.ExecuteUserOp(context.Background(), req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("worker ExecuteUserOp failed: %w", err)
+	}
+	if !resp.Success {
+		return nil, nil, fmt.Errorf("worker ExecuteUserOp error: %s", resp.Error)
+	}
+
+	// Convert worker response to local types for caller compatibility
+	receipt := &types.Receipt{
+		TxHash:  common.HexToHash(resp.TxHash),
+		GasUsed: resp.GasUsed,
+	}
+	if resp.GasCostWei != "" {
+		gasCost, ok := new(big.Int).SetString(resp.GasCostWei, 10)
+		if ok && resp.GasUsed > 0 {
+			receipt.EffectiveGasPrice = new(big.Int).Div(gasCost, new(big.Int).SetUint64(resp.GasUsed))
+		}
+	}
+
+	return nil, receipt, nil
 }
 
 func (r *RpcServer) SetTaskEnabled(ctx context.Context, req *avsproto.SetTaskEnabledReq) (*avsproto.SetTaskEnabledResp, error) {
@@ -1295,9 +1369,10 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		smartWalletRpc:   smartwalletClient,
 		smartWalletWsRpc: smartwalletWsClient,
 
-		config:       agg.config,
-		operatorPool: agg.operatorPool,
-		chainID:      smartWalletChainID,
+		config:        agg.config,
+		operatorPool:  agg.operatorPool,
+		chainID:       smartWalletChainID,
+		chainRegistry: agg.chainRegistry,
 	}
 
 	// TODO: split node and aggregator

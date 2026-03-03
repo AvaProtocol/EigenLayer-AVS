@@ -1,0 +1,85 @@
+syntax = "proto3";
+package aggregator;
+
+option go_package = "./avsproto";
+
+// ChainWorker is the internal gRPC service running on each chain worker.
+// The gateway connects to workers by chain_id using addresses from config.
+// Workers handle chain-specific operations: UserOp execution, nonce queries,
+// smart wallet derivation, token enrichment, and gas estimation.
+service ChainWorker {
+  // Health check - gateway verifies worker connectivity and chain status
+  rpc WorkerHealthCheck(WorkerHealthCheckReq) returns (WorkerHealthCheckResp);
+
+  // Execute a UserOp on this chain via the bundler
+  rpc ExecuteUserOp(ExecuteUserOpReq) returns (ExecuteUserOpResp);
+
+  // Get the nonce for a smart wallet on this chain
+  rpc GetNonce(WorkerGetNonceReq) returns (WorkerGetNonceResp);
+
+  // Get the smart wallet address for an owner on this chain
+  rpc GetSmartWalletAddress(WorkerGetSmartWalletAddressReq) returns (WorkerGetSmartWalletAddressResp);
+
+  // Get token metadata (enrichment) for a contract address on this chain
+  rpc GetTokenMetadata(WorkerGetTokenMetadataReq) returns (WorkerGetTokenMetadataResp);
+}
+
+// Health check
+message WorkerHealthCheckReq {}
+
+message WorkerHealthCheckResp {
+  string status = 1;        // "OK", "DEGRADED", etc.
+  int64 chain_id = 2;
+  string chain_name = 3;
+  int64 latest_block = 4;   // Latest block number from chain RPC
+}
+
+// UserOp execution
+message ExecuteUserOpReq {
+  string owner = 1;                 // Owner EOA address (hex)
+  bytes call_data = 2;              // Encoded calldata for execute/executeBatch
+  string smart_wallet_address = 3;  // Smart wallet address override (hex, optional)
+  bool use_paymaster = 4;           // Whether to use paymaster for gas sponsorship
+}
+
+message ExecuteUserOpResp {
+  bool success = 1;
+  string tx_hash = 2;          // On-chain transaction hash
+  string error = 3;            // Error message if failed
+  string user_op_hash = 4;     // ERC-4337 UserOp hash
+  uint64 gas_used = 5;
+  string gas_cost_wei = 6;     // Total gas cost in wei (big.Int as string)
+}
+
+// Nonce query
+message WorkerGetNonceReq {
+  string owner = 1;    // Owner EOA address (hex)
+  int64 salt = 2;      // Key/salt for nonce space
+}
+
+message WorkerGetNonceResp {
+  string nonce = 1;    // big.Int as string
+}
+
+// Smart wallet address derivation
+message WorkerGetSmartWalletAddressReq {
+  string owner = 1;    // Owner EOA address (hex)
+  int64 salt = 2;      // Salt for CREATE2 derivation
+}
+
+message WorkerGetSmartWalletAddressResp {
+  string address = 1;  // Derived smart wallet address (hex)
+}
+
+// Token metadata enrichment
+message WorkerGetTokenMetadataReq {
+  string contract_address = 1;  // ERC20 token contract address (hex)
+}
+
+message WorkerGetTokenMetadataResp {
+  string name = 1;
+  string symbol = 2;
+  uint32 decimals = 3;
+  bool found = 4;       // Whether the token was found
+  string source = 5;    // "whitelist", "rpc", or "native"
+}

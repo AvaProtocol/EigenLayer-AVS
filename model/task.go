@@ -142,6 +142,7 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 			StartAt:        body.StartAt,
 			MaxExecution:   body.MaxExecution,
 			InputVariables: body.InputVariables, // Store input variables with the task
+			ChainId:        body.ChainId,        // Propagate chain_id from request (0 = default chain)
 
 			// initial state for task
 			Status: avsproto.TaskStatus_Enabled,

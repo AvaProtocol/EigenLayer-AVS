@@ -440,8 +440,11 @@ type NotifyTriggersReq struct {
 	// The same logical trigger event must produce the same ID so duplicate
 	// notifications can be safely collapsed on the aggregator.
 	TriggerRequestId string `protobuf:"bytes,10,opt,name=trigger_request_id,json=triggerRequestId,proto3" json:"trigger_request_id,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Chain where the trigger was detected (e.g., 11155111 for Sepolia).
+	// 0 means the operator's default/only chain (backward compatible).
+	ChainId       int64 `protobuf:"varint,11,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *NotifyTriggersReq) Reset() {
@@ -559,6 +562,13 @@ func (x *NotifyTriggersReq) GetTriggerRequestId() string {
 		return x.TriggerRequestId
 	}
 	return ""
+}
+
+func (x *NotifyTriggersReq) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
 }
 
 type isNotifyTriggersReq_TriggerOutput interface {
@@ -1069,7 +1079,10 @@ type SyncMessagesResp_TaskMetadata struct {
 	ExpiredAt int64        `protobuf:"varint,3,opt,name=expired_at,json=expiredAt,proto3" json:"expired_at,omitempty"`
 	Trigger   *TaskTrigger `protobuf:"bytes,4,opt,name=trigger,proto3" json:"trigger,omitempty"`
 	// task won't be checked before this (timestamp in milliseconds)
-	StartAt       int64 `protobuf:"varint,5,opt,name=start_at,json=startAt,proto3" json:"start_at,omitempty"`
+	StartAt int64 `protobuf:"varint,5,opt,name=start_at,json=startAt,proto3" json:"start_at,omitempty"`
+	// Target chain for this task's triggers (e.g., 11155111 for Sepolia).
+	// Operators use this to route the task to the correct chain trigger engine.
+	ChainId       int64 `protobuf:"varint,6,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1139,6 +1152,13 @@ func (x *SyncMessagesResp_TaskMetadata) GetStartAt() int64 {
 	return 0
 }
 
+func (x *SyncMessagesResp_TaskMetadata) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
+}
+
 var File_node_proto protoreflect.FileDescriptor
 
 const file_node_proto_rawDesc = "" +
@@ -1175,20 +1195,21 @@ const file_node_proto_rawDesc = "" +
 	"\fCapabilities\x12)\n" +
 	"\x10event_monitoring\x18\x01 \x01(\bR\x0feventMonitoring\x12)\n" +
 	"\x10block_monitoring\x18\x02 \x01(\bR\x0fblockMonitoring\x12'\n" +
-	"\x0ftime_monitoring\x18\x03 \x01(\bR\x0etimeMonitoring\"\xc8\x02\n" +
+	"\x0ftime_monitoring\x18\x03 \x01(\bR\x0etimeMonitoring\"\xe3\x02\n" +
 	"\x10SyncMessagesResp\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12%\n" +
 	"\x02op\x18\x02 \x01(\x0e2\x15.aggregator.MessageOpR\x02op\x12N\n" +
-	"\rtask_metadata\x18\x03 \x01(\v2).aggregator.SyncMessagesResp.TaskMetadataR\ftaskMetadata\x1a\xac\x01\n" +
+	"\rtask_metadata\x18\x03 \x01(\v2).aggregator.SyncMessagesResp.TaskMetadataR\ftaskMetadata\x1a\xc7\x01\n" +
 	"\fTaskMetadata\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x16\n" +
 	"\x06remain\x18\x02 \x01(\x03R\x06remain\x12\x1d\n" +
 	"\n" +
 	"expired_at\x18\x03 \x01(\x03R\texpiredAt\x121\n" +
 	"\atrigger\x18\x04 \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\x12\x19\n" +
-	"\bstart_at\x18\x05 \x01(\x03R\astartAt\"\x1f\n" +
+	"\bstart_at\x18\x05 \x01(\x03R\astartAt\x12\x19\n" +
+	"\bchain_id\x18\x06 \x01(\x03R\achainId\"\x1f\n" +
 	"\rAckMessageReq\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\xd5\x04\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\xf0\x04\n" +
 	"\x11NotifyTriggersReq\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x1c\n" +
 	"\tsignature\x18\x02 \x01(\tR\tsignature\x12\x17\n" +
@@ -1200,7 +1221,8 @@ const file_node_proto_rawDesc = "" +
 	"\revent_trigger\x18\b \x01(\v2\x1f.aggregator.EventTrigger.OutputH\x00R\feventTrigger\x12I\n" +
 	"\x0emanual_trigger\x18\t \x01(\v2 .aggregator.ManualTrigger.OutputH\x00R\rmanualTrigger\x12,\n" +
 	"\x12trigger_request_id\x18\n" +
-	" \x01(\tR\x10triggerRequestIdB\x10\n" +
+	" \x01(\tR\x10triggerRequestId\x12\x19\n" +
+	"\bchain_id\x18\v \x01(\x03R\achainIdB\x10\n" +
 	"\x0etrigger_output\"\xe2\x01\n" +
 	"\x12NotifyTriggersResp\x129\n" +
 	"\n" +

@@ -90,6 +90,57 @@ func TaskExecutionKey(t *model.Task, executionID string) []byte {
 	))
 }
 
+// Chain-scoped storage key variants for gateway mode.
+// These prefix keys with chain_id to prevent collisions when multiple chains share one DB.
+
+func ChainTaskStorageKey(chainID int64, id string, status avsproto.TaskStatus) []byte {
+	return storageschema.ChainTaskStorageKey(chainID, id, status)
+}
+
+func ChainTaskByStatusStoragePrefix(chainID int64, status avsproto.TaskStatus) []byte {
+	return storageschema.ChainTaskByStatusStoragePrefix(chainID, status)
+}
+
+func ChainTaskUserKey(chainID int64, t *model.Task) []byte {
+	return []byte(fmt.Sprintf(
+		"u:%d:%s:%s:%s",
+		chainID,
+		strings.ToLower(t.Owner),
+		strings.ToLower(t.SmartWalletAddress),
+		t.Key(),
+	))
+}
+
+func ChainTaskExecutionPrefix(chainID int64, taskID string) []byte {
+	return []byte(fmt.Sprintf("history:%d:%s", chainID, taskID))
+}
+
+func ChainTaskExecutionKey(chainID int64, t *model.Task, executionID string) []byte {
+	return []byte(fmt.Sprintf(
+		"history:%d:%s:%s",
+		chainID,
+		t.Id,
+		executionID,
+	))
+}
+
+func ChainWalletStorageKey(chainID int64, owner common.Address, smartWalletAddress string) string {
+	return fmt.Sprintf(
+		"w:%d:%s:%s",
+		chainID,
+		strings.ToLower(owner.Hex()),
+		strings.ToLower(smartWalletAddress),
+	)
+}
+
+func ChainWalletByOwnerPrefix(chainID int64, owner common.Address) []byte {
+	return []byte(fmt.Sprintf(
+		"w:%d:%s",
+		chainID,
+		strings.ToLower(owner.String()),
+	))
+}
+
 func TaskTriggerKey(t *model.Task, executionID string) []byte {
 	return []byte(fmt.Sprintf(
 		"trigger:%s:%s",

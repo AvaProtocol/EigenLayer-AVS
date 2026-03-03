@@ -217,8 +217,13 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		}
 	}
 
-	// Create VM with trigger reason data
-	vm, err := NewVMWithData(task, triggerReason, x.smartWalletConfig, secrets)
+	// Create VM with trigger reason data.
+	// In gateway mode, resolve the SmartWalletConfig for the task's target chain.
+	swConfig := x.smartWalletConfig
+	if x.engine != nil {
+		swConfig = x.engine.ResolveSmartWalletConfig(task.ChainId)
+	}
+	vm, err := NewVMWithData(task, triggerReason, swConfig, secrets)
 	if err != nil {
 		return nil, err
 	}
