@@ -1010,9 +1010,9 @@ func (v *VM) runKahnScheduler() error {
 				if err != nil {
 					// Downgrade user script errors to Warn to avoid noisy Sentry alerts
 					if node.Type == avsproto.NodeType_NODE_TYPE_CUSTOM_CODE {
-						v.logger.Warn("Error executing node %s: %v", node.Id, err)
+						v.logger.Warnf("Error executing node %s: %v", node.Id, err)
 					} else {
-						v.logger.Error("Error executing node %s: %v", node.Id, err)
+						v.logger.Errorf("Error executing node %s: %v", node.Id, err)
 					}
 				}
 			}

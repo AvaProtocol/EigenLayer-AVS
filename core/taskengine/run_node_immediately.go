@@ -3566,7 +3566,7 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 				// Expected validation errors - log at WARN level without stack traces
 				n.logger.Warn("RunTriggerRPC: Validation failed", "triggerType", triggerTypeStr, "error", err.Error())
 			} else {
-				// Unexpected system errors - log at ERROR level without stack traces for cleaner output
+				// Unexpected system errors - log at WARN level to avoid noisy Sentry alerts from test RPCs
 				n.logger.Warn("RunTriggerRPC: System error during execution", "triggerType", triggerTypeStr, "error", err.Error())
 			}
 		}
