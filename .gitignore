@@ -61,6 +61,7 @@ pr-comments-*.json
 .env.local
 
 # Claude Code local settings (user-specific permissions)
+.claude/settings.json
 .claude/settings.local.json
 
 # Ignore the file/folder that is constantly added by Cursor
