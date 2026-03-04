@@ -329,7 +329,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 							// Validate resolved topic format
 							if err := validateTopicHexFormat(resolvedValue); err != nil {
 								if n.logger != nil {
-									n.logger.Warn("❌ EventTrigger: Invalid topic format after template resolution",
+									n.logger.Warn("EventTrigger: Invalid topic format after template resolution",
 										"queryIndex", queryIdx,
 										"topicIndex", i,
 										"original", topicStr,
@@ -1590,7 +1590,7 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	// Simulate the event using Tenderly (gets real current data)
 	simulatedLog, err := tenderlyClient.SimulateEventTrigger(ctx, query, chainID)
 	if err != nil {
-		n.logger.Warn("🚫 Tenderly simulation failed", "error", err)
+		n.logger.Warn("Tenderly simulation failed", "error", err)
 		return nil, fmt.Errorf("tenderly event simulation failed: %w", err)
 	}
 
@@ -1918,7 +1918,7 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 				callData, err := GenerateOrUseCallData(methodCall.GetMethodName(), existingCallData, methodCall.GetMethodParams(), contractABI)
 				if err != nil {
 					if n.logger != nil {
-						n.logger.Warn("❌ Failed to generate callData for decimals method",
+						n.logger.Warn("Failed to generate callData for decimals method",
 							"methodName", methodCall.GetMethodName(),
 							"providedCallData", methodCall.GetCallData(),
 							"methodParams", methodCall.GetMethodParams(),
