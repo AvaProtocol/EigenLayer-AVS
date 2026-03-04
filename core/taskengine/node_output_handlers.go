@@ -93,6 +93,11 @@ func convertProtobufValueToPlain(v interface{}) interface{} {
 	if pbValue, ok := v.(*structpb.Value); ok {
 		return pbValue.AsInterface()
 	}
+	// Convert protobuf enum types (e.g., avsproto.ErrorCode) to their numeric value
+	// so structpb.NewValue can serialize them
+	if ec, ok := v.(avsproto.ErrorCode); ok {
+		return int32(ec)
+	}
 	if m, ok := v.(map[string]interface{}); ok {
 		result := make(map[string]interface{})
 		for key, val := range m {
