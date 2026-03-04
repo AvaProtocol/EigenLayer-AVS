@@ -194,7 +194,7 @@ resolve_issue() {
   if [[ "$release" == "next" ]]; then
     body='{"status":"resolved","statusDetails":{"inNextRelease":true}}'
   else
-    body="{\"status\":\"resolved\",\"statusDetails\":{\"inRelease\":\"$release\"}}"
+    body=$(jq -cn --arg release "$release" '{"status":"resolved","statusDetails":{"inRelease":$release}}')
   fi
 
   local response
