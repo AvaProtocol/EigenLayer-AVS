@@ -685,6 +685,9 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		if !ok {
 			return nil, status.Errorf(codes.InvalidArgument, "%s: %s", InvalidSmartAccountSaltError, payload.GetSalt())
 		}
+		if saltBig.Sign() < 0 {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid salt: must be a non-negative integer, got %s", payload.GetSalt())
+		}
 	}
 
 	factoryAddr := n.smartWalletConfig.FactoryAddress
