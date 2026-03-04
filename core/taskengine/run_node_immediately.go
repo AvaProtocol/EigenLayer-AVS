@@ -329,7 +329,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 							// Validate resolved topic format
 							if err := validateTopicHexFormat(resolvedValue); err != nil {
 								if n.logger != nil {
-									n.logger.Error("❌ EventTrigger: Invalid topic format after template resolution",
+									n.logger.Warn("❌ EventTrigger: Invalid topic format after template resolution",
 										"queryIndex", queryIdx,
 										"topicIndex", i,
 										"original", topicStr,
@@ -1590,7 +1590,7 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	// Simulate the event using Tenderly (gets real current data)
 	simulatedLog, err := tenderlyClient.SimulateEventTrigger(ctx, query, chainID)
 	if err != nil {
-		n.logger.Error("🚫 Tenderly simulation failed", "error", err)
+		n.logger.Warn("🚫 Tenderly simulation failed", "error", err)
 		return nil, fmt.Errorf("tenderly event simulation failed: %w", err)
 	}
 
@@ -1918,7 +1918,7 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 				callData, err := GenerateOrUseCallData(methodCall.GetMethodName(), existingCallData, methodCall.GetMethodParams(), contractABI)
 				if err != nil {
 					if n.logger != nil {
-						n.logger.Error("❌ Failed to generate callData for decimals method",
+						n.logger.Warn("❌ Failed to generate callData for decimals method",
 							"methodName", methodCall.GetMethodName(),
 							"providedCallData", methodCall.GetCallData(),
 							"methodParams", methodCall.GetMethodParams(),
@@ -3363,7 +3363,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			if isExpectedValidationError(err) {
 				n.logger.Warn("RunNodeImmediatelyRPC: Validation failed", "nodeType", nodeTypeStr, "error", err.Error())
 			} else {
-				n.logger.Error("RunNodeImmediatelyRPC: System error during execution", "nodeType", nodeTypeStr, "error", err.Error())
+				n.logger.Warn("RunNodeImmediatelyRPC: System error during execution", "nodeType", nodeTypeStr, "error", err.Error())
 			}
 		}
 
@@ -3567,7 +3567,7 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 				n.logger.Warn("RunTriggerRPC: Validation failed", "triggerType", triggerTypeStr, "error", err.Error())
 			} else {
 				// Unexpected system errors - log at ERROR level without stack traces for cleaner output
-				n.logger.Error("RunTriggerRPC: System error during execution", "triggerType", triggerTypeStr, "error", err.Error())
+				n.logger.Warn("RunTriggerRPC: System error during execution", "triggerType", triggerTypeStr, "error", err.Error())
 			}
 		}
 
@@ -3716,7 +3716,7 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 				if metadataValue, err := structpb.NewValue(compatibleMetadata); err == nil {
 					resp.Metadata = metadataValue
 				} else if n.logger != nil {
-					n.logger.Error("Failed to convert metadata to protobuf", "error", err)
+					n.logger.Warn("Failed to convert metadata to protobuf", "error", err)
 				}
 			}
 		}
