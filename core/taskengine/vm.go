@@ -1761,9 +1761,9 @@ func (v *VM) resolveVariablePath(jsvm *goja.Runtime, varPath string, currentVars
 	if strings.Contains(varPath, ".") {
 		parts := strings.Split(varPath, ".")
 		if len(parts) > 1 {
-			// Check if any part after the first contains hyphens
+			// Check if any part after the first contains hyphens (actual property names, not math expressions)
 			for i := 1; i < len(parts); i++ {
-				if strings.Contains(parts[i], "-") {
+				if strings.Contains(parts[i], "-") && !strings.Contains(parts[i], " ") {
 					// Convert to bracket notation for properties with hyphens
 					basePath := parts[0]
 					for j := 1; j < i; j++ {

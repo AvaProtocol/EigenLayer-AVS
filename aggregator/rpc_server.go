@@ -270,7 +270,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 					"balance", balance.String())
 			} else {
 				if requestedAmount.Cmp(balance) > 0 {
-					return nil, status.Errorf(codes.InvalidArgument,
+					return nil, status.Errorf(codes.FailedPrecondition,
 						"insufficient balance: requested %s wei but wallet has %s wei",
 						requestedAmount.String(), balance.String())
 				}
@@ -356,7 +356,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 								return nil, status.Errorf(codes.Internal, "failed to calculate max withdrawable amount: %v", maxErr)
 							}
 							if maxWithdrawable.Cmp(big.NewInt(0)) == 0 {
-								return nil, status.Errorf(codes.InvalidArgument, "insufficient balance: wallet balance is less than estimated gas reimbursement")
+								return nil, status.Errorf(codes.FailedPrecondition, "insufficient balance: wallet balance is less than estimated gas reimbursement")
 							}
 							finalAmount = maxWithdrawable
 							r.config.Logger.Info("withdraw all requested, calculated max withdrawable",
@@ -371,11 +371,11 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 							if requiredTotal.Cmp(balance) > 0 {
 								maxWithdrawable := new(big.Int).Sub(balance, reimbursement)
 								if maxWithdrawable.Cmp(big.NewInt(0)) <= 0 {
-									return nil, status.Errorf(codes.InvalidArgument,
+									return nil, status.Errorf(codes.FailedPrecondition,
 										"insufficient balance: wallet balance (%s wei) is less than estimated gas reimbursement (%s wei)",
 										balance.String(), reimbursement.String())
 								}
-								return nil, status.Errorf(codes.InvalidArgument,
+								return nil, status.Errorf(codes.FailedPrecondition,
 									"insufficient balance: requested %s wei + reimbursement %s wei = %s wei, but wallet has %s wei. Maximum withdrawable: %s wei",
 									requestedAmount.String(), reimbursement.String(), requiredTotal.String(),
 									balance.String(), maxWithdrawable.String())
