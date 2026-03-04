@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 
@@ -56,7 +57,7 @@ func (s *Server) ExecuteUserOp(ctx context.Context, req *avsproto.ExecuteUserOpR
 	if req.UsePaymaster && s.worker.smartWalletCfg.PaymasterAddress != (common.Address{}) {
 		paymasterReq = preset.GetVerifyingPaymasterRequestForDuration(
 			s.worker.smartWalletCfg.PaymasterAddress,
-			15*60, // 15 minutes in seconds
+			15*time.Minute,
 		)
 	}
 
