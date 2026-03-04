@@ -1008,7 +1008,12 @@ func (v *VM) runKahnScheduler() error {
 				var err error
 				selected, err = v.executeNode(node) // non-nil when a branch selects a condition path
 				if err != nil {
-					v.logger.Error("Error executing node %s: %v", node.Id, err)
+					// Downgrade user script errors to Warn to avoid noisy Sentry alerts
+					if node.Type == avsproto.NodeType_NODE_TYPE_CUSTOM_CODE {
+						v.logger.Warn("Error executing node %s: %v", node.Id, err)
+					} else {
+						v.logger.Error("Error executing node %s: %v", node.Id, err)
+					}
 				}
 			}
 

@@ -39,8 +39,8 @@ operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605 # Y
 jwt_secret:
 
 # Optional: Monitoring and telemetry
-server_name: "aggregator-your-name"
-sentry_dsn: https://your_sentry_dsn_here@sentry.io/project_id
+# server_name: "aggregator-your-name"
+# sentry_dsn: https://your_sentry_dsn_here@sentry.io/project_id
 
 # Optional: Tenderly integration for simulation
 tenderly_account:
