@@ -292,9 +292,7 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 			agg.logger,
 		)
 		agg.logger.Info("Connecting to chain workers...")
-		if err := agg.chainRegistry.Connect(ctx); err != nil {
-			return fmt.Errorf("connecting to chain workers: %w", err)
-		}
+		agg.chainRegistry.Connect(ctx)
 	}
 
 	agg.logger.Infof("Starting Task engine")
