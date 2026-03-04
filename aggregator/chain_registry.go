@@ -46,23 +46,75 @@ func NewChainRegistry(chains []*config.ChainConfig, defaultChainID int64, logger
 	return registry
 }
 
-// Connect establishes gRPC connections to all registered workers.
-func (r *ChainRegistry) Connect(ctx context.Context) error {
+// Connect attempts to establish gRPC connections to all registered workers.
+// Connections that fail are retried in the background — this method never
+// returns an error so that the gateway can finish startup and serve health
+// checks even when workers are not yet available.
+func (r *ChainRegistry) Connect(ctx context.Context) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	for chainID, entry := range r.chains {
 		if err := r.connectEntry(ctx, entry); err != nil {
-			return fmt.Errorf("connecting to worker for chain %d (%s): %w",
-				chainID, entry.Config.Name, err)
+			r.logger.Warn("Worker not ready, will retry in background",
+				"chain_id", chainID,
+				"chain_name", entry.Config.Name,
+				"worker_addr", entry.Config.WorkerAddr,
+				"error", err)
+		} else {
+			r.logger.Info("Connected to chain worker",
+				"chain_id", chainID,
+				"chain_name", entry.Config.Name,
+				"worker_addr", entry.Config.WorkerAddr)
 		}
-		r.logger.Info("Connected to chain worker",
-			"chain_id", chainID,
-			"chain_name", entry.Config.Name,
-			"worker_addr", entry.Config.WorkerAddr)
 	}
 
-	return nil
+	r.mu.Unlock()
+
+	// Start background reconnection loop for any workers that failed.
+	go r.reconnectLoop(ctx)
+}
+
+// reconnectLoop periodically retries connections for workers that are not
+// yet connected. It stops when all workers are connected or the context
+// is cancelled (gateway shutdown).
+func (r *ChainRegistry) reconnectLoop(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		r.mu.Lock()
+		allConnected := true
+		for chainID, entry := range r.chains {
+			if entry.Client != nil {
+				continue
+			}
+			allConnected = false
+
+			if err := r.connectEntry(ctx, entry); err != nil {
+				r.logger.Warn("Worker reconnect failed, will retry",
+					"chain_id", chainID,
+					"chain_name", entry.Config.Name,
+					"error", err)
+			} else {
+				r.logger.Info("Connected to chain worker (retry)",
+					"chain_id", chainID,
+					"chain_name", entry.Config.Name,
+					"worker_addr", entry.Config.WorkerAddr)
+			}
+		}
+		r.mu.Unlock()
+
+		if allConnected {
+			r.logger.Info("All chain workers connected")
+			return
+		}
+	}
 }
 
 func (r *ChainRegistry) connectEntry(ctx context.Context, entry *ChainEntry) error {
