@@ -1,0 +1,39 @@
+# Operator configuration for Railway deployment (testnet)
+# Connects to gateway over Railway private networking
+environment: production
+
+operator_address: 0x997E5D40a32c44a3D93E59fC55C4Fd20b7d2d49D
+
+# Sepolia AVS contracts
+avs_registry_coordinator_address: 0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD
+operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
+
+# EigenLayer chain RPC (Sepolia)
+eth_rpc_url: https://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+eth_ws_url: wss://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+
+# Key files — written at startup by scripts/operator-entrypoint.sh
+# Set ECDSA_KEY_JSON and BLS_KEY_JSON env vars in Railway
+ecdsa_private_key_store_path: /app/keys/ecdsa.key.json
+bls_private_key_store_path: /app/keys/bls.key.json
+
+# Gateway address — Railway private networking
+aggregator_server_ip_port_address: "gateway.railway.internal:2206"
+
+# Metrics
+eigen_metrics_ip_port_address: 0.0.0.0:9090
+enable_metrics: true
+node_api_ip_port_address: 0.0.0.0:9010
+enable_node_api: true
+
+# Sentry
+sentry_dsn: https://d304c8708d5097f7787eeb664e4098c6@o1156669.ingest.us.sentry.io/4509386759733248
+server_name: "operator-railway"
+
+# Destination chain - Sepolia
+target_chain:
+  eth_rpc_url: https://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+  eth_ws_url: wss://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+
+enabled_features:
+  event_trigger: true

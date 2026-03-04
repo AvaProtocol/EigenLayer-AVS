@@ -31,5 +31,6 @@ WORKDIR /app
 COPY --from=builder /app/ap .
 COPY --from=builder /app/config ./config
 COPY --from=builder /app/token_whitelist ./token_whitelist
+COPY --from=builder /app/scripts/operator-entrypoint.sh ./scripts/
 
 ENTRYPOINT ["./ap"]
