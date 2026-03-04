@@ -857,7 +857,7 @@ func (r *RpcServer) RunNodeWithInputs(ctx context.Context, req *avsproto.RunNode
 	// Call the immediate execution function directly
 	result, err := r.engine.RunNodeImmediatelyRPC(user, req)
 	if err != nil {
-		r.config.Logger.Error("run node with inputs failed",
+		r.config.Logger.Warn("run node with inputs failed",
 			"user", user.Address.String(),
 			"error", err.Error(),
 		)
@@ -894,7 +894,7 @@ func (r *RpcServer) RunTrigger(ctx context.Context, req *avsproto.RunTriggerReq)
 	// Call the trigger execution function directly
 	result, err := r.engine.RunTriggerRPC(user, req)
 	if err != nil {
-		r.config.Logger.Error("run trigger failed",
+		r.config.Logger.Warn("run trigger failed",
 			"user", user.Address.String(),
 			"error", err.Error(),
 		)
