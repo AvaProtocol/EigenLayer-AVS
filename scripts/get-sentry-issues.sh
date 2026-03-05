@@ -60,13 +60,13 @@ if ! command -v jq &>/dev/null; then
 fi
 
 sentry_get() {
-  curl -s -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" \
+  curl -fsS -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" \
        -H "Content-Type: application/json" \
        "$SENTRY_BASE$1"
 }
 
 sentry_put() {
-  curl -s -X PUT \
+  curl -fsS -X PUT \
        -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" \
        -H "Content-Type: application/json" \
        -d "$2" \
