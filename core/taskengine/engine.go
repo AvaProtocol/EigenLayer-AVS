@@ -657,7 +657,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 			return nil, status.Errorf(codes.InvalidArgument, "%s: %s", InvalidSmartAccountSaltError, payload.GetSalt())
 		}
 		if saltBig.Sign() < 0 {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid salt: must be a non-negative integer, got %s", payload.GetSalt())
+			return nil, status.Errorf(codes.InvalidArgument, "%s: must be a non-negative integer, got %s", InvalidSmartAccountSaltError, payload.GetSalt())
 		}
 	}
 

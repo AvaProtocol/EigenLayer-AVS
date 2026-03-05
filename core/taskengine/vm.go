@@ -1757,13 +1757,15 @@ func (v *VM) resolveVariablePath(jsvm *goja.Runtime, varPath string, currentVars
 	// Try to resolve the variable path
 	// Handle properties with hyphens by converting dot notation to bracket notation
 	// e.g., headers.X-Trigger-Version -> headers["X-Trigger-Version"]
+	// Only rewrite simple variable paths — complex expressions (e.g., a.b-1, x.y - 10)
+	// are passed through to the JS VM as-is.
 	script := varPath
-	if strings.Contains(varPath, ".") {
+	if isSimpleVariablePath(varPath) && strings.Contains(varPath, ".") {
 		parts := strings.Split(varPath, ".")
 		if len(parts) > 1 {
-			// Check if any part after the first contains hyphens (actual property names, not math expressions)
+			// Check if any part after the first contains hyphens (property names like X-Trigger-Version)
 			for i := 1; i < len(parts); i++ {
-				if strings.Contains(parts[i], "-") && !strings.Contains(parts[i], " ") {
+				if strings.Contains(parts[i], "-") {
 					// Convert to bracket notation for properties with hyphens
 					basePath := parts[0]
 					for j := 1; j < i; j++ {
