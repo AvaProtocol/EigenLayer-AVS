@@ -2,12 +2,15 @@ package taskengine
 
 import (
 	"encoding/json"
+	"math/big"
 	"testing"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -45,9 +48,23 @@ func TestEventTriggerContractStateAAVEHealthFactor(t *testing.T) {
 
 	// AAVE V3 Pool on Sepolia
 	aavePoolAddress := "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951"
-	// A known address that has AAVE positions on Sepolia (use a well-known test address)
-	// For the test we use a valid address; if it has no AAVE position, healthFactor will be max uint256
-	testUserAddress := "0x0000000000000000000000000000000000000001"
+
+	// Derive the test user's smart wallet address from OWNER_EOA (set in .env).
+	// This is a real Sepolia wallet with balance, consistent with other integration tests.
+	// For an address with no AAVE position, getUserAccountData returns all zeros
+	// except healthFactor = type(uint256).max (no debt = infinite health).
+	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+	if !ok {
+		t.Skip("OWNER_EOA or TEST_PRIVATE_KEY not set, skipping AAVE integration test")
+	}
+	smartWalletConfig := config.SmartWallet
+	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
+	require.NoError(t, err, "Failed to connect to RPC")
+	defer client.Close()
+	smartWalletAddr, err := aa.GetSenderAddress(client, *ownerAddr, big.NewInt(0))
+	require.NoError(t, err, "Failed to derive smart wallet address")
+	testUserAddress := smartWalletAddr.Hex()
 
 	t.Run("DirectCallWithMethodParams", func(t *testing.T) {
 		// This tests the core contract state trigger flow:
