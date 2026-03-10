@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"strconv"
 	"strings"
@@ -4124,6 +4125,12 @@ func (n *Engine) evaluateInt256Condition(actualValue interface{}, operator, expe
 	case int64:
 		actualBig = big.NewInt(v)
 	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return false
+		}
+		if v != math.Trunc(v) || v > math.MaxInt64 || v < math.MinInt64 {
+			return false
+		}
 		actualBig = new(big.Int).SetInt64(int64(v))
 	case *big.Int:
 		actualBig = v

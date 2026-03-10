@@ -38,6 +38,10 @@ var aavePoolABI = []interface{}{
 // This test exercises the ContractRead node with the AAVE V3 Pool contract, which is the
 // core building block for the deployed monitoring workflow.
 func TestAAVEHealthFactorContractRead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping AAVE integration test in short mode")
+	}
+
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 

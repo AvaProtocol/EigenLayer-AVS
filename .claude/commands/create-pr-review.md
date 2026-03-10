@@ -15,10 +15,10 @@ Execute the following steps for the current branch's PR:
    Capture the PR number from the output.
 
 3. **Request Copilot Review**
-   Run: `gh api repos/AvaProtocol/studio/pulls/<PR_NUMBER>/requested_reviewers -f 'reviewers[]=copilot-pull-request-reviewer[bot]' --method POST`
+   Run: `gh api repos/AvaProtocol/EigenLayer-AVS/pulls/<PR_NUMBER>/requested_reviewers -f 'reviewers[]=copilot-pull-request-reviewer[bot]' --method POST`
 
 4. **Wait for Copilot review to complete**
-   Run: `sh scripts/wait-for-copilot-review.sh <PR_NUMBER>`
+   Run: `bash scripts/wait-for-copilot-review.sh <PR_NUMBER>`
    This polls every 30s (up to 10 min) until Copilot's review state is no longer PENDING.
 
 5. **Download PR comments**
