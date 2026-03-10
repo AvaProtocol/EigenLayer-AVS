@@ -5,9 +5,12 @@ import (
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // AAVE V3 Pool ABI for getUserAccountData
@@ -385,4 +388,170 @@ func TestEventTriggerContractStateConditionEvaluation(t *testing.T) {
 			assert.Equal(t, tc.expected, result, "condition evaluation mismatch for: %s", tc.name)
 		})
 	}
+}
+
+func TestResolveMethodParamsForSync(t *testing.T) {
+	SetRpc(testutil.GetTestRPCURL())
+	SetCache(testutil.GetDefaultCache())
+
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	engine := New(db, config, nil, testutil.GetLogger())
+
+	t.Run("resolves settings.runner template", func(t *testing.T) {
+		smartWallet := "0x1234567890abcdef1234567890abcdef12345678"
+
+		task := &model.Task{
+			Task: &avsproto.Task{
+				Id:                 "test-task-1",
+				SmartWalletAddress: smartWallet,
+				Trigger: &avsproto.TaskTrigger{
+					TriggerType: &avsproto.TaskTrigger_Event{
+						Event: &avsproto.EventTrigger{
+							Config: &avsproto.EventTrigger_Config{
+								Queries: []*avsproto.EventTrigger_Query{
+									{
+										Addresses: []string{"0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951"},
+										MethodCalls: []*avsproto.EventTrigger_MethodCall{
+											{
+												MethodName:   "getUserAccountData",
+												MethodParams: []string{"{{settings.runner}}"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		engine.resolveMethodParamsForSync(task)
+
+		// Verify the template was resolved
+		queries := task.Trigger.GetEvent().GetConfig().GetQueries()
+		require.Len(t, queries, 1)
+		methodCalls := queries[0].GetMethodCalls()
+		require.Len(t, methodCalls, 1)
+		assert.Equal(t, smartWallet, methodCalls[0].MethodParams[0],
+			"{{settings.runner}} should resolve to SmartWalletAddress")
+	})
+
+	t.Run("resolves from InputVariables", func(t *testing.T) {
+		userAddr := "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
+
+		settingsValue, _ := structpb.NewValue(map[string]interface{}{
+			"runner": userAddr,
+			"pool":   "0x1111111111111111111111111111111111111111",
+		})
+
+		task := &model.Task{
+			Task: &avsproto.Task{
+				Id: "test-task-2",
+				InputVariables: map[string]*structpb.Value{
+					"settings": settingsValue,
+				},
+				Trigger: &avsproto.TaskTrigger{
+					TriggerType: &avsproto.TaskTrigger_Event{
+						Event: &avsproto.EventTrigger{
+							Config: &avsproto.EventTrigger_Config{
+								Queries: []*avsproto.EventTrigger_Query{
+									{
+										Addresses: []string{"0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951"},
+										MethodCalls: []*avsproto.EventTrigger_MethodCall{
+											{
+												MethodName:   "getUserAccountData",
+												MethodParams: []string{"{{settings.runner}}"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		engine.resolveMethodParamsForSync(task)
+
+		queries := task.Trigger.GetEvent().GetConfig().GetQueries()
+		methodCalls := queries[0].GetMethodCalls()
+		assert.Equal(t, userAddr, methodCalls[0].MethodParams[0],
+			"{{settings.runner}} should resolve from InputVariables")
+	})
+
+	t.Run("no-op when no templates", func(t *testing.T) {
+		literalAddr := "0x0000000000000000000000000000000000000001"
+
+		task := &model.Task{
+			Task: &avsproto.Task{
+				Id: "test-task-3",
+				Trigger: &avsproto.TaskTrigger{
+					TriggerType: &avsproto.TaskTrigger_Event{
+						Event: &avsproto.EventTrigger{
+							Config: &avsproto.EventTrigger_Config{
+								Queries: []*avsproto.EventTrigger_Query{
+									{
+										Addresses: []string{"0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951"},
+										MethodCalls: []*avsproto.EventTrigger_MethodCall{
+											{
+												MethodName:   "getUserAccountData",
+												MethodParams: []string{literalAddr},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		engine.resolveMethodParamsForSync(task)
+
+		queries := task.Trigger.GetEvent().GetConfig().GetQueries()
+		methodCalls := queries[0].GetMethodCalls()
+		assert.Equal(t, literalAddr, methodCalls[0].MethodParams[0],
+			"Literal addresses should not be modified")
+	})
+
+	t.Run("no-op when no method calls", func(t *testing.T) {
+		task := &model.Task{
+			Task: &avsproto.Task{
+				Id: "test-task-4",
+				Trigger: &avsproto.TaskTrigger{
+					TriggerType: &avsproto.TaskTrigger_Event{
+						Event: &avsproto.EventTrigger{
+							Config: &avsproto.EventTrigger_Config{
+								Queries: []*avsproto.EventTrigger_Query{
+									{
+										Addresses: []string{"0x694AA1769357215DE4FAC081bf1f309aDC325306"},
+										Topics:    []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Should not panic or modify anything
+		engine.resolveMethodParamsForSync(task)
+	})
+
+	t.Run("no-op when trigger is nil", func(t *testing.T) {
+		task := &model.Task{
+			Task: &avsproto.Task{
+				Id: "test-task-5",
+			},
+		}
+		// Should not panic
+		engine.resolveMethodParamsForSync(task)
+	})
 }
