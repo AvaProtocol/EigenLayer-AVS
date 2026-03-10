@@ -70,7 +70,7 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 		description        string
 	}{
 		{
-			name: "Oracle direct call - no conditions (always success)",
+			name: "Oracle AnswerUpdated event - no conditions (always success)",
 			methodCalls: []map[string]interface{}{
 				{
 					"methodName":   "decimals",
@@ -79,11 +79,11 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 			},
 			conditions:         []map[string]interface{}{},
 			expectedSuccess:    true,
-			expectedDataFields: []string{"decimals"},
+			expectedDataFields: []string{"current", "roundId", "updatedAt"}, // AnswerUpdated event fields (eventName is now the key)
 			description:        "Should always succeed when no conditions are specified",
 		},
 		{
-			name: "Oracle direct call - conditions met (price < $50000)",
+			name: "Oracle AnswerUpdated event - conditions met (price < 5000)",
 			methodCalls: []map[string]interface{}{
 				{
 					"methodName":   "decimals",
@@ -96,18 +96,18 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 			},
 			conditions: []map[string]interface{}{
 				{
-					"fieldName": "latestRoundData.answer",
+					"fieldName": "current", // AnswerUpdated event field (current price)
 					"operator":  "lt",
-					"value":     "5000000000000", // $50000 * 10^8 (8 decimals)
+					"value":     "500000000000", // 5000 * 10^8 (assuming 8 decimals)
 					"fieldType": "int256",
 				},
 			},
-			expectedSuccess:    true,
-			expectedDataFields: []string{"latestRoundData"},
+			expectedSuccess:    true,                                        // Assuming current ETH price < $5000
+			expectedDataFields: []string{"current", "roundId", "updatedAt"}, // AnswerUpdated event fields (eventName is now the key)
 			description:        "Should succeed when price is below threshold",
 		},
 		{
-			name: "Oracle direct call - conditions NOT met (price < $10)",
+			name: "Oracle AnswerUpdated event - conditions NOT met (price < 1000)",
 			methodCalls: []map[string]interface{}{
 				{
 					"methodName":   "decimals",
@@ -120,18 +120,18 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 			},
 			conditions: []map[string]interface{}{
 				{
-					"fieldName": "latestRoundData.answer",
+					"fieldName": "current", // AnswerUpdated event field (current price)
 					"operator":  "lt",
-					"value":     "1000000000", // $10 * 10^8
+					"value":     "1000", // Much smaller value to ensure condition fails
 					"fieldType": "int256",
 				},
 			},
-			expectedSuccess:    false,
-			expectedDataFields: []string{"latestRoundData"},
-			description:        "Should fail when price is above threshold",
+			expectedSuccess:    false,                                       // Assuming current ETH price > $1000
+			expectedDataFields: []string{"current", "roundId", "updatedAt"}, // AnswerUpdated event fields (eventName is now the key)
+			description:        "Should fail when price is above threshold, but data should be in error",
 		},
 		{
-			name: "Oracle direct call - multiple conditions",
+			name: "Oracle AnswerUpdated event - multiple conditions",
 			methodCalls: []map[string]interface{}{
 				{
 					"methodName":   "decimals",
@@ -144,20 +144,20 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 			},
 			conditions: []map[string]interface{}{
 				{
-					"fieldName": "latestRoundData.answer",
+					"fieldName": "current", // AnswerUpdated event field (current price)
 					"operator":  "gt",
-					"value":     "100000000000", // $1000 * 10^8
+					"value":     "100000000000", // $1000 * 10^8 (with 8 decimals)
 					"fieldType": "int256",
 				},
 				{
-					"fieldName": "latestRoundData.roundId",
+					"fieldName": "roundId", // AnswerUpdated event field
 					"operator":  "gt",
 					"value":     "0",
 					"fieldType": "uint256",
 				},
 			},
-			expectedSuccess:    true,
-			expectedDataFields: []string{"latestRoundData"},
+			expectedSuccess:    true,                                        // Assuming price > $1000 and roundId > 0
+			expectedDataFields: []string{"current", "roundId", "updatedAt"}, // AnswerUpdated event fields (eventName is now the key)
 			description:        "Should succeed when both conditions are met",
 		},
 	}
@@ -201,12 +201,18 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 				assert.Contains(t, result, "error", "Response should have error field")
 				assert.Equal(t, "", result["error"], "Error should be empty on success")
 
-				// Verify data contains expected method result keys
+				// Verify data contains expected fields in structured format
 				data, ok := result["data"].(map[string]interface{})
 				require.True(t, ok, "data should be a map")
 
-				for _, expectedField := range tc.expectedDataFields {
-					assert.Contains(t, data, expectedField, "data should contain %s", expectedField)
+				// Check for AnswerUpdated event structure
+				answerUpdatedData, exists := data["AnswerUpdated"].(map[string]interface{})
+				require.True(t, exists, "data should contain AnswerUpdated event")
+
+				// Verify expected fields exist in the AnswerUpdated structure
+				expectedEventFields := []string{"current", "roundId", "updatedAt"} // Remove eventName as it's now the key
+				for _, expectedField := range expectedEventFields {
+					assert.Contains(t, answerUpdatedData, expectedField, "AnswerUpdated should contain %s field", expectedField)
 				}
 
 				// Verify executionContext
@@ -214,7 +220,7 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 				require.True(t, ok, "executionContext should be a map")
 				assert.Contains(t, execCtx, "chainId", "executionContext should have chainId")
 				assert.Contains(t, execCtx, "isSimulated", "executionContext should have isSimulated")
-				assert.Equal(t, false, execCtx["isSimulated"], "Direct contract calls should have isSimulated=false")
+				assert.Equal(t, true, execCtx["isSimulated"], "Simulated event calls should have isSimulated=true")
 
 			} else {
 				// FAILURE CASE: Conditions not met
@@ -222,14 +228,18 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 				assert.Contains(t, result, "error", "Failure response should have error field")
 				assert.NotEmpty(t, result["error"], "Error should not be empty on failure")
 
+				// Verify error contains data as JSON
 				errorMsg, ok := result["error"].(string)
 				require.True(t, ok, "error should be a string")
 				assert.Contains(t, errorMsg, "Conditions not met", "Error should mention conditions not met")
 
+				// Note: After security fix, error messages no longer contain full data/conditions
+				// to prevent sensitive information leakage. Only failed reason descriptions are included.
+
 				// Verify executionContext is still present
 				execCtx, ok := result["executionContext"].(map[string]interface{})
 				require.True(t, ok, "executionContext should be present even on failure")
-				assert.Equal(t, false, execCtx["isSimulated"], "Direct contract calls should have isSimulated=false")
+				assert.Equal(t, true, execCtx["isSimulated"], "Simulated event calls should have isSimulated=true")
 			}
 
 			t.Logf("✅ Test passed: %s", tc.name)

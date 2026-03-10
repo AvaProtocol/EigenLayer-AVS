@@ -1784,37 +1784,28 @@ func (n *Engine) resolveMethodParamsForSync(task *model.Task) {
 		return
 	}
 
-	// Build a variable map from InputVariables and SmartWalletAddress
-	vars := make(map[string]interface{})
-
-	if task.InputVariables != nil {
-		for key, protoValue := range task.InputVariables {
-			vars[key] = protoValue.AsInterface()
-		}
-	}
-
-	// Also add smart wallet address as settings.runner if not already set
-	if task.SmartWalletAddress != "" {
-		if _, exists := vars["settings"]; !exists {
-			vars["settings"] = map[string]interface{}{
-				"runner": task.SmartWalletAddress,
-			}
-		} else if settingsMap, ok := vars["settings"].(map[string]interface{}); ok {
-			if _, hasRunner := settingsMap["runner"]; !hasRunner {
-				settingsMap["runner"] = task.SmartWalletAddress
-			}
-		}
-	}
-
-	if len(vars) == 0 {
-		return
-	}
-
-	// Create a temporary VM to resolve templates using existing preprocessor
+	// Create a lightweight VM solely for template resolution.
+	// We only need InputVariables and the SmartWalletAddress fallback —
+	// NewVMWithData is not used here because it requires trigger name,
+	// smartWalletConfig, and sets up task nodes, secrets, trigger data,
+	// etc. that are unnecessary for resolving sync-time templates.
 	tempVM := NewVM()
 	tempVM.logger = n.logger
-	for key, value := range vars {
-		tempVM.AddVar(key, value)
+
+	// Add input variables from task definition (same logic as vm.go lines 413-419)
+	if task.InputVariables != nil {
+		for key, protoValue := range task.InputVariables {
+			tempVM.AddVar(key, protoValue.AsInterface())
+		}
+	}
+
+	// Fallback: set settings.runner from SmartWalletAddress when not in InputVariables
+	if task.SmartWalletAddress != "" {
+		if task.InputVariables == nil || task.InputVariables["settings"] == nil {
+			tempVM.AddVar("settings", map[string]interface{}{
+				"runner": task.SmartWalletAddress,
+			})
+		}
 	}
 
 	// Resolve template variables in each methodCall's params
