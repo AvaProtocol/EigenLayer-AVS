@@ -34,6 +34,7 @@ type EventTaskData struct {
 	Queries         []*avsproto.EventTrigger_Query
 	ParsedABIs      map[int]*abi.ABI // queryIndex -> parsed ABI
 	CooldownSeconds uint32           // Cooldown period in seconds (default: DefaultEventTriggerCooldownSeconds)
+	IsPollingTask   bool             // true when queries have methodCalls but no topics (contract state polling)
 }
 
 // BlockTaskData contains block trigger specific information

@@ -278,11 +278,15 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 		cooldownSeconds = DefaultEventTriggerCooldownSeconds
 	}
 
+	// Detect if this is a polling task (methodCalls without topics = contract state monitoring)
+	isPolling := isPollingQuery(queries)
+
 	// Create EventTaskData for the new registry
 	eventData := &EventTaskData{
 		Queries:         queries,
 		ParsedABIs:      make(map[int]*abi.ABI),
 		CooldownSeconds: cooldownSeconds,
+		IsPollingTask:   isPolling,
 	}
 
 	// Pre-parse ABIs for queries that have conditions to avoid repeated parsing
@@ -316,10 +320,11 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 	t.eventCounts[taskID] = make(map[uint64]uint32)
 	t.eventCountsMutex.Unlock()
 
-	t.logger.Info("🔍 Task added with queries-based EventTrigger",
+	t.logger.Info("Task added with queries-based EventTrigger",
 		"task_id", taskID,
 		"queries_count", len(queries),
-		"cooldown_seconds", cooldownSeconds)
+		"cooldown_seconds", cooldownSeconds,
+		"is_polling_task", isPolling)
 
 	// Log query details
 	for i, query := range queries {
@@ -453,6 +458,9 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 			}
 		}
 	}()
+
+	// Start the contract state polling loop for tasks that use methodCalls without topics
+	go t.runContractStatePollingLoop(ctx)
 
 	// Start the main event loop - this should ALWAYS run, even with no initial subscriptions
 	go func() {
@@ -1448,6 +1456,11 @@ func (t *EventTrigger) buildFilterQueries() []QueryInfo {
 	t.ensureLegacyConversion()
 
 	t.registry.RangeEventTasks(func(taskID string, entry *TaskEntry) bool {
+		// Skip polling tasks - they don't need WebSocket subscriptions
+		if entry.EventData != nil && entry.EventData.IsPollingTask {
+			t.logger.Debug("Skipping polling task in buildFilterQueries", "task_id", taskID)
+			return true
+		}
 
 		// Group queries by their filter criteria to identify duplicates/overlaps
 		queryGroups := make(map[string][]int) // queryKey -> []queryIndex
@@ -1680,6 +1693,423 @@ func (t *EventTrigger) cleanupOldProcessedEvents(maxEvents uint64) {
 			"remaining", len(t.processedEvents),
 			"note", "Using simple cleanup since txHash-logIndex keys don't contain timestamps")
 	}
+}
+
+// runContractStatePollingLoop runs a periodic polling loop for contract state monitoring tasks.
+// These are tasks with methodCalls but no topics - they poll view functions via RPC instead
+// of subscribing to WebSocket events.
+func (t *EventTrigger) runContractStatePollingLoop(ctx context.Context) {
+	const pollingInterval = 30 * time.Second
+
+	ticker := time.NewTicker(pollingInterval)
+	defer ticker.Stop()
+
+	t.logger.Info("Contract state polling loop started", "interval", pollingInterval)
+
+	for {
+		select {
+		case <-ctx.Done():
+			t.logger.Info("Contract state polling loop stopped (context cancelled)")
+			return
+		case <-t.done:
+			t.logger.Info("Contract state polling loop stopped (shutdown)")
+			return
+		case <-ticker.C:
+			t.pollAllContractStateTasks(ctx)
+		}
+	}
+}
+
+// pollAllContractStateTasks iterates over all polling tasks and executes their method calls.
+func (t *EventTrigger) pollAllContractStateTasks(ctx context.Context) {
+	t.registry.RangeEventTasks(func(taskID string, entry *TaskEntry) bool {
+		if entry.EventData == nil || !entry.EventData.IsPollingTask {
+			return true // Skip non-polling tasks
+		}
+
+		t.pollContractStateForTask(ctx, taskID, entry)
+		return true
+	})
+}
+
+// pollContractStateForTask executes method calls for a single polling task,
+// evaluates conditions, and fires the trigger if conditions are met.
+func (t *EventTrigger) pollContractStateForTask(ctx context.Context, taskID string, entry *TaskEntry) {
+	eventData := entry.EventData
+	now := time.Now()
+
+	// Check cooldown before doing any RPC work
+	shouldSkip, lastTrigger, hasLastTrigger := t.isInCooldown(taskID, eventData.CooldownSeconds, now)
+	if shouldSkip {
+		cooldownDuration := time.Duration(eventData.CooldownSeconds) * time.Second
+		var remaining time.Duration
+		if hasLastTrigger {
+			remaining = cooldownDuration - now.Sub(lastTrigger)
+		}
+		t.logger.Debug("Polling task in cooldown, skipping",
+			"task_id", taskID,
+			"remaining_cooldown", remaining)
+		return
+	}
+
+	for queryIdx, query := range eventData.Queries {
+		methodCalls := query.GetMethodCalls()
+		if len(methodCalls) == 0 {
+			continue
+		}
+
+		addresses := query.GetAddresses()
+		if len(addresses) == 0 {
+			t.logger.Warn("Polling task has no addresses", "task_id", taskID, "query_index", queryIdx)
+			continue
+		}
+
+		contractAddress := common.HexToAddress(addresses[0])
+
+		// Get or parse ABI for this query
+		parsedABI := eventData.ParsedABIs[queryIdx]
+		if parsedABI == nil {
+			abiValues := query.GetContractAbi()
+			if len(abiValues) == 0 {
+				t.logger.Warn("Polling task has no ABI", "task_id", taskID, "query_index", queryIdx)
+				continue
+			}
+			var err error
+			parsedABI, err = parseABIOptimized(abiValues)
+			if err != nil {
+				t.logger.Error("Failed to parse ABI for polling task",
+					"task_id", taskID, "query_index", queryIdx, "error", err)
+				continue
+			}
+			// Cache for next time
+			eventData.ParsedABIs[queryIdx] = parsedABI
+		}
+
+		// Execute each method call and collect results
+		combinedData := make(map[string]interface{})
+		allSucceeded := true
+
+		for _, mc := range methodCalls {
+			methodName := mc.GetMethodName()
+			method, exists := parsedABI.Methods[methodName]
+			if !exists {
+				t.logger.Error("Method not found in ABI",
+					"task_id", taskID, "method", methodName)
+				allSucceeded = false
+				break
+			}
+
+			// Pack the call
+			var calldata []byte
+			var err error
+			methodParams := mc.GetMethodParams()
+			if len(methodParams) == 0 {
+				calldata, err = parsedABI.Pack(methodName)
+			} else {
+				calldata, err = t.packMethodCallWithParams(parsedABI, methodName, methodParams)
+			}
+			if err != nil {
+				t.logger.Error("Failed to pack method call",
+					"task_id", taskID, "method", methodName, "error", err)
+				allSucceeded = false
+				break
+			}
+
+			// Execute the RPC call
+			result, err := t.ethClient.CallContract(ctx, ethereum.CallMsg{
+				To:   &contractAddress,
+				Data: calldata,
+			}, nil) // nil = latest block
+			if err != nil {
+				t.logger.Error("Contract call failed",
+					"task_id", taskID, "method", methodName, "error", err)
+				allSucceeded = false
+				break
+			}
+
+			// Unpack the result
+			unpacked, err := method.Outputs.Unpack(result)
+			if err != nil {
+				t.logger.Error("Failed to unpack result",
+					"task_id", taskID, "method", methodName, "error", err)
+				allSucceeded = false
+				break
+			}
+
+			// Build structured result: {methodName: {field1: val1, ...}} for multi-output
+			// or {methodName: val} for single-output
+			if len(method.Outputs) > 1 {
+				fieldMap := make(map[string]interface{})
+				for i, output := range method.Outputs {
+					name := output.Name
+					if name == "" {
+						name = fmt.Sprintf("output%d", i)
+					}
+					if i < len(unpacked) {
+						fieldMap[name] = formatOutputValue(unpacked[i])
+					}
+				}
+				combinedData[methodName] = fieldMap
+			} else if len(unpacked) == 1 {
+				combinedData[methodName] = formatOutputValue(unpacked[0])
+			}
+		}
+
+		if !allSucceeded {
+			continue
+		}
+
+		// Evaluate conditions if present
+		conditions := query.GetConditions()
+		if len(conditions) > 0 {
+			if !t.evaluatePollingConditions(combinedData, conditions) {
+				t.logger.Debug("Polling conditions not met",
+					"task_id", taskID, "query_index", queryIdx)
+				continue
+			}
+		}
+
+		// Conditions met (or no conditions) - atomically check and update cooldown
+		shouldSkip, _, _ = t.checkAndUpdateCooldown(taskID, eventData.CooldownSeconds, now)
+		if shouldSkip {
+			// Another goroutine/event claimed the cooldown slot between our check and now
+			t.logger.Debug("Polling task lost cooldown race", "task_id", taskID)
+			continue
+		}
+
+		// Fire the trigger
+		t.logger.Info("Contract state polling conditions met, firing trigger",
+			"task_id", taskID,
+			"query_index", queryIdx,
+			"data_keys", getMapKeys(combinedData))
+
+		marker := EventMark{
+			BlockNumber:  0, // No specific block for polling
+			LogIndex:     0,
+			TxHash:       "",
+			EnrichedData: combinedData,
+		}
+
+		select {
+		case t.triggerCh <- TriggerMetadata[EventMark]{
+			TaskID: taskID,
+			Marker: marker,
+		}:
+			t.logger.Info("Polling trigger sent successfully", "task_id", taskID)
+		default:
+			t.logger.Warn("Trigger channel full, dropping polling trigger", "task_id", taskID)
+		}
+	}
+}
+
+// packMethodCallWithParams packs a method call with string parameters using ABI type conversion.
+func (t *EventTrigger) packMethodCallWithParams(parsedABI *abi.ABI, methodName string, params []string) ([]byte, error) {
+	method, exists := parsedABI.Methods[methodName]
+	if !exists {
+		return nil, fmt.Errorf("method %s not found in ABI", methodName)
+	}
+
+	if len(params) != len(method.Inputs) {
+		return nil, fmt.Errorf("method %s expects %d params, got %d", methodName, len(method.Inputs), len(params))
+	}
+
+	args := make([]interface{}, len(params))
+	for i, param := range params {
+		input := method.Inputs[i]
+		parsed, err := t.parseABIParam(param, input.Type)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse param %d (%s): %v", i, input.Name, err)
+		}
+		args[i] = parsed
+	}
+
+	return parsedABI.Pack(methodName, args...)
+}
+
+// parseABIParam converts a string parameter to the correct Go type based on ABI type.
+func (t *EventTrigger) parseABIParam(param string, abiType abi.Type) (interface{}, error) {
+	switch abiType.T {
+	case abi.AddressTy:
+		if !common.IsHexAddress(param) {
+			return nil, fmt.Errorf("invalid address: %s", param)
+		}
+		return common.HexToAddress(param), nil
+	case abi.UintTy, abi.IntTy:
+		n := new(big.Int)
+		if _, ok := n.SetString(param, 0); !ok {
+			return nil, fmt.Errorf("invalid integer: %s", param)
+		}
+		return n, nil
+	case abi.BoolTy:
+		return param == "true" || param == "1", nil
+	case abi.StringTy:
+		return param, nil
+	case abi.BytesTy:
+		return common.FromHex(param), nil
+	case abi.FixedBytesTy:
+		b := common.FromHex(param)
+		// Pad or truncate to fixed size
+		fixed := make([]byte, abiType.Size)
+		copy(fixed, b)
+		return fixed, nil
+	default:
+		return nil, fmt.Errorf("unsupported ABI type: %v", abiType)
+	}
+}
+
+// evaluatePollingConditions evaluates conditions against method call results from polling.
+// Data shape: {methodName: {field1: val1, ...}} - conditions use dot notation "methodName.fieldName".
+func (t *EventTrigger) evaluatePollingConditions(data map[string]interface{}, conditions []*avsproto.EventCondition) bool {
+	for _, condition := range conditions {
+		fieldName := condition.GetFieldName()
+		parts := strings.Split(fieldName, ".")
+
+		var fieldValue interface{}
+		var found bool
+
+		if len(parts) == 2 {
+			// methodName.fieldName format
+			if methodData, ok := data[parts[0]]; ok {
+				if fieldMap, ok := methodData.(map[string]interface{}); ok {
+					fieldValue, found = fieldMap[parts[1]]
+				}
+			}
+		} else if len(parts) == 1 {
+			// Direct field name (single-output method)
+			fieldValue, found = data[parts[0]]
+		}
+
+		if !found {
+			t.logger.Debug("Condition field not found in polling data",
+				"field", fieldName, "available_data", getMapKeys(data))
+			return false
+		}
+
+		// Use the existing condition evaluation logic
+		fieldType := condition.GetFieldType()
+		operator := condition.GetOperator()
+		expectedValue := condition.GetValue()
+
+		// Convert string values to big.Int for numeric comparisons
+		var result bool
+		switch fieldType {
+		case "uint256", "uint128", "uint64", "uint32", "uint16", "uint8":
+			result = t.evaluatePollingNumericCondition(fieldValue, operator, expectedValue, false)
+		case "int256", "int128", "int64", "int32", "int16", "int8":
+			result = t.evaluatePollingNumericCondition(fieldValue, operator, expectedValue, true)
+		default:
+			t.logger.Warn("Unsupported field type in polling condition", "type", fieldType)
+			return false
+		}
+
+		if !result {
+			return false
+		}
+	}
+	return true
+}
+
+// evaluatePollingNumericCondition evaluates a numeric condition for polling data.
+// Polling data values are typically strings (from formatOutputValue), so we parse them.
+func (t *EventTrigger) evaluatePollingNumericCondition(fieldValue interface{}, operator, expectedValue string, signed bool) bool {
+	// Convert field value to big.Int
+	var actual *big.Int
+	switch v := fieldValue.(type) {
+	case string:
+		actual = new(big.Int)
+		if _, ok := actual.SetString(v, 10); !ok {
+			// Try hex
+			if _, ok := actual.SetString(strings.TrimPrefix(v, "0x"), 16); !ok {
+				t.logger.Error("Cannot parse polling field value", "value", v)
+				return false
+			}
+		}
+	case *big.Int:
+		actual = v
+	case float64:
+		actual = new(big.Int).SetInt64(int64(v))
+	case int64:
+		actual = big.NewInt(v)
+	case uint64:
+		actual = new(big.Int).SetUint64(v)
+	default:
+		t.logger.Error("Unsupported polling field value type", "type", fmt.Sprintf("%T", v))
+		return false
+	}
+
+	expected, ok := new(big.Int).SetString(expectedValue, 10)
+	if !ok {
+		t.logger.Error("Cannot parse expected value", "value", expectedValue)
+		return false
+	}
+
+	cmp := actual.Cmp(expected)
+	switch operator {
+	case "gt":
+		return cmp > 0
+	case "gte":
+		return cmp >= 0
+	case "lt":
+		return cmp < 0
+	case "lte":
+		return cmp <= 0
+	case "eq":
+		return cmp == 0
+	case "ne":
+		return cmp != 0
+	default:
+		t.logger.Error("Unsupported operator", "operator", operator)
+		return false
+	}
+}
+
+// formatOutputValue converts an ABI output value to a string representation suitable for conditions.
+func formatOutputValue(v interface{}) interface{} {
+	switch val := v.(type) {
+	case *big.Int:
+		return val.String()
+	case common.Address:
+		return val.Hex()
+	case []byte:
+		return fmt.Sprintf("0x%x", val)
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	default:
+		return fmt.Sprintf("%v", val)
+	}
+}
+
+// getMapKeys returns the keys of a map as a slice (local helper to avoid import cycle).
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// isPollingQuery checks if all queries use methodCalls without topics (contract state polling).
+// Returns true when all queries have methodCalls but no topics, indicating this task should
+// be polled periodically via RPC rather than monitored via WebSocket log subscriptions.
+func isPollingQuery(queries []*avsproto.EventTrigger_Query) bool {
+	if len(queries) == 0 {
+		return false
+	}
+
+	for _, query := range queries {
+		// If any query has topics, it's an event-based query (not polling)
+		if len(query.GetTopics()) > 0 {
+			return false
+		}
+		// Must have at least one method call to be a polling query
+		if len(query.GetMethodCalls()) == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // padAddressIfNeeded checks if a topic string looks like an Ethereum address and pads it to 32 bytes if needed
