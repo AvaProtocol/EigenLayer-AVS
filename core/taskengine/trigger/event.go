@@ -316,7 +316,7 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 	t.eventCounts[taskID] = make(map[uint64]uint32)
 	t.eventCountsMutex.Unlock()
 
-	t.logger.Info("🔍 Task added with queries-based EventTrigger",
+	t.logger.Info("Task added with queries-based EventTrigger",
 		"task_id", taskID,
 		"queries_count", len(queries),
 		"cooldown_seconds", cooldownSeconds)
@@ -1448,7 +1448,6 @@ func (t *EventTrigger) buildFilterQueries() []QueryInfo {
 	t.ensureLegacyConversion()
 
 	t.registry.RangeEventTasks(func(taskID string, entry *TaskEntry) bool {
-
 		// Group queries by their filter criteria to identify duplicates/overlaps
 		queryGroups := make(map[string][]int) // queryKey -> []queryIndex
 
