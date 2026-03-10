@@ -1381,9 +1381,6 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			var firstError error
 
 			for _, task := range tasksToStream {
-				// Resolve template variables in methodCall params before syncing
-				n.resolveMethodParamsForSync(task)
-
 				resp := avsproto.SyncMessagesResp{
 					Id: task.Id,
 					Op: avsproto.MessageOp_MonitorTaskTrigger,
@@ -1679,9 +1676,6 @@ func (n *Engine) sendMonitorTaskTriggerToOperators(task *model.Task) {
 		return
 	}
 
-	// Resolve template variables in methodCall params before syncing
-	n.resolveMethodParamsForSync(task)
-
 	resp := avsproto.SyncMessagesResp{
 		Id: task.Id,
 		Op: avsproto.MessageOp_MonitorTaskTrigger,
@@ -1739,98 +1733,6 @@ func (n *Engine) sendMonitorTaskTriggerToOperators(task *model.Task) {
 		"task_id", task.Id,
 		"operators_notified", successCount,
 		"total_connected", len(operatorStreams))
-}
-
-// resolveMethodParamsForSync resolves template variables (e.g., {{settings.runner}})
-// in event trigger methodCall params before syncing to operators.
-// This is called at sync time so operators receive ready-to-use parameter values
-// and don't need access to the task's InputVariables or a JS VM.
-// Modifies the trigger in-place since resolved values are deterministic.
-func (n *Engine) resolveMethodParamsForSync(task *model.Task) {
-	if task.Trigger == nil {
-		return
-	}
-
-	evt := task.Trigger.GetEvent()
-	if evt == nil || evt.GetConfig() == nil {
-		return
-	}
-
-	queries := evt.GetConfig().GetQueries()
-	if len(queries) == 0 {
-		return
-	}
-
-	// Check if any methodCall params contain template variables
-	hasTemplates := false
-	for _, query := range queries {
-		for _, mc := range query.GetMethodCalls() {
-			for _, param := range mc.GetMethodParams() {
-				if strings.Contains(param, "{{") && strings.Contains(param, "}}") {
-					hasTemplates = true
-					break
-				}
-			}
-			if hasTemplates {
-				break
-			}
-		}
-		if hasTemplates {
-			break
-		}
-	}
-
-	if !hasTemplates {
-		return
-	}
-
-	// Create a lightweight VM solely for template resolution.
-	// We only need InputVariables and the SmartWalletAddress fallback —
-	// NewVMWithData is not used here because it requires trigger name,
-	// smartWalletConfig, and sets up task nodes, secrets, trigger data,
-	// etc. that are unnecessary for resolving sync-time templates.
-	tempVM := NewVM()
-	tempVM.logger = n.logger
-
-	// Add input variables from task definition (same logic as vm.go lines 413-419)
-	if task.InputVariables != nil {
-		for key, protoValue := range task.InputVariables {
-			tempVM.AddVar(key, protoValue.AsInterface())
-		}
-	}
-
-	// Fallback: set settings.runner from SmartWalletAddress when not in InputVariables
-	if task.SmartWalletAddress != "" {
-		if task.InputVariables == nil || task.InputVariables["settings"] == nil {
-			tempVM.AddVar("settings", map[string]interface{}{
-				"runner": task.SmartWalletAddress,
-			})
-		}
-	}
-
-	// Resolve template variables in each methodCall's params
-	for _, query := range queries {
-		for _, mc := range query.GetMethodCalls() {
-			params := mc.GetMethodParams()
-			resolved := false
-			for i, param := range params {
-				if strings.Contains(param, "{{") && strings.Contains(param, "}}") {
-					newParam := tempVM.preprocessTextWithVariableMapping(param)
-					if newParam != param {
-						params[i] = newParam
-						resolved = true
-					}
-				}
-			}
-			if resolved {
-				mc.MethodParams = params
-				n.logger.Debug("Resolved template variables in methodCall params for sync",
-					"task_id", task.Id,
-					"method", mc.GetMethodName(),
-					"resolved_params", params)
-			}
-		}
-	}
 }
 
 // TODO: Merge and verify from multiple operators
