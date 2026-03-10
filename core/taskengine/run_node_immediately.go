@@ -347,6 +347,39 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 					queryMap["topics"] = resolvedTopics
 				}
 			}
+
+			// Resolve template variables in methodCalls[].methodParams
+			if methodCallsInterface, exists := queryMap["methodCalls"]; exists {
+				if methodCallsArray, ok := methodCallsInterface.([]interface{}); ok {
+					for mcIdx, methodCallInterface := range methodCallsArray {
+						if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
+							if methodParamsInterface, exists := methodCallMap["methodParams"]; exists {
+								if methodParamsArray, ok := methodParamsInterface.([]interface{}); ok {
+									resolvedParams := make([]interface{}, len(methodParamsArray))
+									for i, paramInterface := range methodParamsArray {
+										if paramStr, ok := paramInterface.(string); ok {
+											resolvedParam := tempVM.preprocessTextWithVariableMapping(paramStr)
+											resolvedParams[i] = resolvedParam
+
+											if paramStr != resolvedParam && n.logger != nil {
+												n.logger.Info("EventTrigger: Resolved template in methodParams",
+													"queryIndex", queryIdx,
+													"methodCallIndex", mcIdx,
+													"paramIndex", i,
+													"original", paramStr,
+													"resolved", resolvedParam)
+											}
+										} else {
+											resolvedParams[i] = paramInterface
+										}
+									}
+									methodCallMap["methodParams"] = resolvedParams
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -509,39 +542,24 @@ func (n *Engine) shouldUseDirectCalls(queriesArray []interface{}) bool {
 	return false
 }
 
-// runEventTriggerWithDirectCalls executes eventTrigger by creating simulated AnswerUpdated events for oracle reading
-// This ensures consistency with deployed tasks and simulate workflow by returning event data instead of method call results
+// runEventTriggerWithDirectCalls executes eventTrigger by calling contract view functions directly
+// This is used for contract state monitoring (e.g., AAVE Health Factor, oracle prices)
+// where the trigger polls a view function and checks conditions against return values.
 func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArray []interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	if n.logger != nil {
-		n.logger.Debug("🔍 TRACE: DIRECT CALLS path executing")
-		n.logger.Info("🎯 EventTrigger: Creating simulated AnswerUpdated events for consistency",
+		n.logger.Debug("TRACE: DIRECT CALLS path executing")
+		n.logger.Info("EventTrigger: Executing direct contract calls",
 			"queriesCount", len(queriesArray))
 	}
 
-	// Process the first query (for now, handle single query)
+	// Process the first query
 	if len(queriesArray) == 0 {
-		return nil, fmt.Errorf("no queries provided for simulated events")
+		return nil, fmt.Errorf("no queries provided for direct calls")
 	}
 
 	queryMap, ok := queriesArray[0].(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("invalid query format")
-	}
-
-	// Extract contract address
-	addressesInterface, exists := queryMap["addresses"]
-	if !exists {
-		return nil, NewMissingRequiredFieldError("addresses")
-	}
-
-	addressesArray, ok := addressesInterface.([]interface{})
-	if !ok || len(addressesArray) == 0 {
-		return nil, NewInvalidNodeConfigError("invalid addresses format")
-	}
-
-	contractAddressStr, ok := addressesArray[0].(string)
-	if !ok {
-		return nil, NewInvalidAddressError("invalid contract address format")
 	}
 
 	// Get chain ID for response context
@@ -550,170 +568,108 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 		chainID = int64(n.tokenEnrichmentService.GetChainID())
 	}
 
-	// Create simulated AnswerUpdated event using the same logic as TenderlyClient
-	simulatedLog := n.createSimulatedAnswerUpdatedLog(contractAddressStr, chainID)
+	// Extract method calls from the query
+	methodCallsInterface, hasMethodCalls := queryMap["methodCalls"]
+	if !hasMethodCalls {
+		return nil, NewMissingRequiredFieldError("methodCalls")
+	}
 
-	// Parse contract ABI for enrichment (if available)
-	var contractABI []interface{}
-	if contractAbiInterface, exists := queryMap["contractAbi"]; exists {
-		if abiArray, ok := contractAbiInterface.([]interface{}); ok {
-			// Validate total ABI size with short-circuit optimization
-			totalABISize := 0
-			for i, abiItem := range abiArray {
-				var itemSize int
-				if abiStr, ok := abiItem.(string); ok {
-					itemSize = len(abiStr)
-					// Validate individual ABI item size
-					if itemSize > MaxEventTriggerABIItemSize {
-						return nil, NewStructuredError(
-							avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
-							fmt.Sprintf("%s at index %d: %d bytes (max: %d bytes)", ValidationErrorMessages.EventTriggerABIItemTooLarge, i, itemSize, MaxEventTriggerABIItemSize),
-							map[string]interface{}{
-								"field":   "contractAbi",
-								"issue":   "ABI item size limit exceeded",
-								"index":   i,
-								"size":    itemSize,
-								"maxSize": MaxEventTriggerABIItemSize,
-							},
-						)
-					}
-				} else if abiMap, ok := abiItem.(map[string]interface{}); ok {
-					// Estimate size for map by marshaling to JSON
-					if jsonBytes, err := json.Marshal(abiMap); err == nil {
-						itemSize = len(jsonBytes)
+	// Normalize methodCalls to []interface{}
+	var methodCallsArray []interface{}
+	switch mc := methodCallsInterface.(type) {
+	case []interface{}:
+		methodCallsArray = mc
+	case []map[string]interface{}:
+		methodCallsArray = make([]interface{}, len(mc))
+		for i, m := range mc {
+			methodCallsArray[i] = m
+		}
+	default:
+		return nil, NewInvalidNodeConfigError("invalid methodCalls format")
+	}
+
+	if len(methodCallsArray) == 0 {
+		return nil, NewInvalidNodeConfigError("methodCalls must be a non-empty array")
+	}
+
+	// Execute each method call and collect results
+	// Results are structured as {methodName: {field1: val1, field2: val2, ...}}
+	// This shape allows condition evaluation using dot notation (e.g., getUserAccountData.healthFactor)
+	combinedData := make(map[string]interface{})
+	var methodCallOutputs []map[string]interface{}
+
+	for _, methodCallInterface := range methodCallsArray {
+		methodCallMap, ok := methodCallInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Convert map to protobuf MethodCall
+		protoMethodCall := &avsproto.EventTrigger_MethodCall{}
+		if methodName, ok := methodCallMap["methodName"].(string); ok {
+			protoMethodCall.MethodName = methodName
+		}
+		if callData, ok := methodCallMap["callData"].(string); ok {
+			protoMethodCall.CallData = &callData
+		}
+		if methodParamsInterface, ok := methodCallMap["methodParams"]; ok {
+			if methodParamsArray, ok := methodParamsInterface.([]interface{}); ok {
+				methodParams := make([]string, len(methodParamsArray))
+				for i, param := range methodParamsArray {
+					if paramStr, ok := param.(string); ok {
+						methodParams[i] = paramStr
 					}
 				}
-				totalABISize += itemSize
-
-				// Short-circuit: stop processing once total exceeds limit
-				if totalABISize > MaxContractABISize {
-					return nil, NewStructuredError(
-						avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
-						fmt.Sprintf("%s: %d bytes (max: %d bytes)", ValidationErrorMessages.ContractABITooLarge, totalABISize, MaxContractABISize),
-						map[string]interface{}{
-							"field":   "contractAbi",
-							"issue":   "total ABI size limit exceeded",
-							"size":    totalABISize,
-							"maxSize": MaxContractABISize,
-							"items":   len(abiArray),
-						},
-					)
-				}
+				protoMethodCall.MethodParams = methodParams
 			}
+		}
 
-			contractABI = abiArray
+		// Execute the method call via ContractReadNode (handles ABI packing, RPC call, unpacking)
+		results, err := n.executeMethodCallForSimulation(ctx, protoMethodCall, queryMap, chainID)
+		if err != nil {
+			return nil, fmt.Errorf("method call '%s' failed: %w", protoMethodCall.MethodName, err)
+		}
+
+		// Merge results into combined data
+		// executeMethodCallForSimulation returns {methodName: {field: value}} for multi-output
+		// or {methodName: value} for single-output methods
+		for key, value := range results {
+			combinedData[key] = value
+		}
+
+		// Build raw output entry for metadata
+		methodOutput := map[string]interface{}{
+			"methodName": protoMethodCall.MethodName,
+		}
+		if result, exists := results[protoMethodCall.MethodName]; exists {
+			if resultMap, ok := result.(map[string]interface{}); ok {
+				// Multi-output: collect ordered values
+				resultValues := make([]interface{}, 0, len(resultMap))
+				for _, v := range resultMap {
+					resultValues = append(resultValues, v)
+				}
+				methodOutput["result"] = resultValues
+			} else {
+				methodOutput["result"] = []interface{}{result}
+			}
+		}
+		methodCallOutputs = append(methodCallOutputs, methodOutput)
+
+		if n.logger != nil {
+			n.logger.Info("EventTrigger: Method call executed successfully",
+				"methodName", protoMethodCall.MethodName,
+				"resultKeys", GetMapKeys(results))
 		}
 	}
 
-	// Use the shared enrichment function to process the simulated log
-	enrichmentParams := SharedEventEnrichmentParams{
-		EventLog:               simulatedLog,
-		ContractABI:            nil, // Will be converted from contractABI below
-		TokenEnrichmentService: n.tokenEnrichmentService,
-		RpcClient:              rpcConn, // Use global RPC connection
-		Logger:                 n.logger,
-		ChainID:                chainID,
-	}
-
-	// Convert contractABI to protobuf Values for enrichment
-	if len(contractABI) > 0 {
-		abiValues := make([]*structpb.Value, len(contractABI))
-		for i, abiItem := range contractABI {
-			if abiStr, ok := abiItem.(string); ok {
-				// ABI item is a JSON string, parse it to map first
-				var abiMap map[string]interface{}
-				if err := json.Unmarshal([]byte(abiStr), &abiMap); err == nil {
-					if val, err := structpb.NewValue(abiMap); err == nil {
-						abiValues[i] = val
-					}
-				}
-			} else if abiMap, ok := abiItem.(map[string]interface{}); ok {
-				// ABI item is already a map, convert directly to protobuf Value
-				if val, err := structpb.NewValue(abiMap); err == nil {
-					abiValues[i] = val
-				}
-			}
-		}
-		enrichmentParams.ContractABI = abiValues
-	}
-
-	// Enrich the simulated event data
-	enrichmentResult, err := EnrichEventWithTokenMetadata(enrichmentParams)
-	if err != nil {
-		n.logger.Warn("Failed to enrich simulated event data, using basic metadata",
-			"error", err)
-		// Create basic event response without enrichment
-		return n.createBasicSimulatedEventResponse(simulatedLog, chainID), nil
-	}
-
-	// Process method calls to extract decimal formatting information
-	var formattingContext *DecimalFormattingContext
-	if methodCallsInterface, hasMethodCalls := queryMap["methodCalls"]; hasMethodCalls {
-		if methodCallsArray, ok := methodCallsInterface.([]interface{}); ok {
-			// Look for decimals method with apply_to_fields
-			for _, methodCallInterface := range methodCallsArray {
-				if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
-					if methodName, ok := methodCallMap["methodName"].(string); ok && methodName == "decimals" {
-						// Extract applyToFields
-						if applyToFieldsInterface, hasApplyToFields := methodCallMap["applyToFields"]; hasApplyToFields {
-							if applyToFieldsArray, ok := applyToFieldsInterface.([]interface{}); ok {
-								fieldsToFormat := make([]string, 0, len(applyToFieldsArray))
-								for _, fieldInterface := range applyToFieldsArray {
-									if fieldStr, ok := fieldInterface.(string); ok {
-										fieldsToFormat = append(fieldsToFormat, fieldStr)
-									}
-								}
-
-								if len(fieldsToFormat) > 0 {
-									// Simulate decimals() call - for ETH/USD price feeds, typically 8 decimals
-									decimalsValue := big.NewInt(8)
-									formattingContext = NewDecimalFormattingContext(decimalsValue, fieldsToFormat, "decimals")
-
-									if n.logger != nil {
-										n.logger.Info("✅ Created decimal formatting context for direct calls",
-											"decimalsValue", decimalsValue.String(),
-											"fieldsToFormat", fieldsToFormat)
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Apply decimal formatting to enriched event data if needed
-	parsedData := enrichmentResult.ParsedData
-	if formattingContext != nil {
-		// Apply decimal formatting to each event in the parsed data
-		for eventName, eventFields := range parsedData {
-			if eventFieldsMap, ok := eventFields.(map[string]interface{}); ok {
-				// Apply formatting using shared utility
-				formattingContext.ApplyDecimalFormattingToEventData(eventFieldsMap, eventName, n.logger)
-			}
-		}
-	}
-
-	// Create response with enriched event data (same format as deployed tasks and simulate workflow)
-	response := make(map[string]interface{})
-
-	// Add the parsed ABI fields as flattened data (like Transfer event format)
-	response["data"] = parsedData
-
-	// Add raw event log fields as metadata (no execution context in metadata)
-	response["metadata"] = enrichmentResult.RawEventData
-
-	// Evaluate conditions if present
+	// Evaluate conditions against the combined method call results
 	conditionsMet := true
 	errorMessage := ""
 	if conditionsInterface, hasConditions := queryMap["conditions"]; hasConditions {
-		// Handle both []interface{} and []map[string]interface{} types
 		var conditionsArray []interface{}
 		if conditionsInterfaceArray, ok := conditionsInterface.([]interface{}); ok {
 			conditionsArray = conditionsInterfaceArray
 		} else if conditionsMapArray, ok := conditionsInterface.([]map[string]interface{}); ok {
-			// Convert []map[string]interface{} to []interface{}
 			conditionsArray = make([]interface{}, len(conditionsMapArray))
 			for i, condMap := range conditionsMapArray {
 				conditionsArray[i] = condMap
@@ -721,31 +677,29 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 		}
 
 		if len(conditionsArray) > 0 {
-			// Use decimal formatting context for consistent condition evaluation
-			if formattingContext != nil {
-				conditionsMet = n.evaluateConditionsAgainstEventDataWithDecimalContext(parsedData, conditionsArray, formattingContext)
-			} else {
-				conditionsMet = n.evaluateConditionsAgainstEventData(parsedData, conditionsArray)
-			}
+			conditionsMet = n.evaluateConditionsAgainstEventData(combinedData, conditionsArray)
 			if !conditionsMet {
-				errorMessage = "Conditions not met for simulated event"
+				errorMessage = "Conditions not met"
 			}
 		}
 	}
 
-	// Set success based on condition evaluation
-	response["success"] = conditionsMet
-	response["error"] = errorMessage
+	// Build response
+	response := map[string]interface{}{
+		"success": conditionsMet,
+		"error":   errorMessage,
+		"data":    combinedData,
+		"metadata": map[string]interface{}{
+			"methodCalls": methodCallOutputs,
+		},
+		"executionContext": GetExecutionContext(chainID, false), // false = real RPC call, not simulated
+	}
 
-	// Add execution context (chainId, isSimulated, provider)
-	response["executionContext"] = GetExecutionContext(chainID, true) // true = isSimulation
-
-	if conditionsMet && n.logger != nil {
-		n.logger.Info("✅ Simulated AnswerUpdated event created successfully",
-			"contract", contractAddressStr,
-			"chainId", chainID,
-			"eventName", enrichmentResult.EventName,
-			"hasEnrichedData", enrichmentResult.ParsedData != nil)
+	if n.logger != nil {
+		n.logger.Info("EventTrigger: Direct calls completed",
+			"conditionsMet", conditionsMet,
+			"methodCallsExecuted", len(methodCallOutputs),
+			"chainId", chainID)
 	}
 
 	return response, nil
@@ -4123,6 +4077,8 @@ func (n *Engine) evaluateInt256Condition(actualValue interface{}, operator, expe
 		actualBig, _ = new(big.Int).SetString(v, 10)
 	case int64:
 		actualBig = big.NewInt(v)
+	case float64:
+		actualBig = new(big.Int).SetInt64(int64(v))
 	case *big.Int:
 		actualBig = v
 	default:

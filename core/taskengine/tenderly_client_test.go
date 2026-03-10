@@ -1500,16 +1500,15 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 	})
 
 	t.Run("ChainlinkPriceFeed_WithApplyToFieldsAndDecimalConditions", func(t *testing.T) {
-		// Test the exact scenario from the user's request: applyToFields + decimal conditions
-		// This replicates the failing case where latestRoundData.answer with decimal formatting fails condition evaluation
+		// Test direct contract calls with conditions against real Chainlink data
+		// With the direct calls path, data is returned as {methodName: {field: value}}
 		triggerConfig := map[string]interface{}{
 			"simulationMode": true,
 			"queries": []interface{}{
 				map[string]interface{}{
 					"addresses": []interface{}{TENDERLY_SEPOLIA_ETH_USD_FEED},
-					"topics":    []interface{}{}, // Empty topics - will match AnswerUpdated events
+					"topics":    []interface{}{}, // Empty topics = direct calls path
 					"contractAbi": []interface{}{
-						// decimals function
 						map[string]interface{}{
 							"inputs":          []interface{}{},
 							"name":            "decimals",
@@ -1517,7 +1516,6 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 							"stateMutability": "view",
 							"type":            "function",
 						},
-						// latestRoundData function
 						map[string]interface{}{
 							"inputs": []interface{}{},
 							"name":   "latestRoundData",
@@ -1531,23 +1529,11 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 							"stateMutability": "view",
 							"type":            "function",
 						},
-						// AnswerUpdated event
-						map[string]interface{}{
-							"anonymous": false,
-							"inputs": []interface{}{
-								map[string]interface{}{"indexed": true, "internalType": "int256", "name": "current", "type": "int256"},
-								map[string]interface{}{"indexed": true, "internalType": "uint256", "name": "roundId", "type": "uint256"},
-								map[string]interface{}{"indexed": false, "internalType": "uint256", "name": "updatedAt", "type": "uint256"},
-							},
-							"name": "AnswerUpdated",
-							"type": "event",
-						},
 					},
 					"methodCalls": []interface{}{
 						map[string]interface{}{
-							"methodName":    "decimals",
-							"methodParams":  []interface{}{},
-							"applyToFields": []interface{}{"AnswerUpdated.current"}, // Apply decimals to AnswerUpdated.current
+							"methodName":   "decimals",
+							"methodParams": []interface{}{},
 						},
 						map[string]interface{}{
 							"methodName":   "latestRoundData",
@@ -1556,10 +1542,10 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 					},
 					"conditions": []interface{}{
 						map[string]interface{}{
-							"fieldName": "AnswerUpdated.current", // Use structured format: eventName.fieldName
+							"fieldName": "latestRoundData.answer",
 							"operator":  "gt",
-							"value":     "2000", // $2000 - should pass since simulated price is ~$2500
-							"fieldType": "decimal",
+							"value":     "100000000000", // $1000 * 10^8 - should pass since ETH > $1000
+							"fieldType": "int256",
 						},
 					},
 					"maxEventsPerBlock": 5,
@@ -1567,59 +1553,38 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 			},
 		}
 
-		t.Logf("🧪 Testing exact user scenario: applyToFields + decimal conditions")
-		t.Logf("📍 Configuration: decimals() applyToFields AnswerUpdated.current")
-		t.Logf("🎯 Condition: AnswerUpdated.current > 2000 (decimal)")
-		t.Logf("💰 Expected: 250000000000 (raw) = $2500 (formatted) > $2000 = TRUE")
+		t.Logf("Testing: latestRoundData.answer > $1000 (raw: 100000000000)")
 
 		result, err := engine.runEventTriggerImmediately(triggerConfig, map[string]interface{}{})
 
 		require.NoError(t, err, "Should not error")
 		require.NotNil(t, result, "Should get result")
 
-		// Debug the result structure
-		t.Logf("📊 Result: %+v", result)
+		t.Logf("Result: %+v", result)
 
 		if eventData, ok := result["data"].(map[string]interface{}); ok {
-			t.Logf("📈 Event Data Structure: %v", GetMapKeys(eventData))
-			if answerUpdatedData, exists := eventData["AnswerUpdated"].(map[string]interface{}); exists {
-				t.Logf("📈 AnswerUpdated Fields: %v", GetMapKeys(answerUpdatedData))
-				if current, exists := answerUpdatedData["current"]; exists {
-					t.Logf("💰 Current price (raw): %v", current)
-				}
-				if answer, exists := answerUpdatedData["answer"]; exists {
-					t.Logf("💰 Answer field (if exists): %v", answer)
-				}
+			t.Logf("Data keys: %v", GetMapKeys(eventData))
+			if roundData, exists := eventData["latestRoundData"].(map[string]interface{}); exists {
+				t.Logf("latestRoundData.answer: %v", roundData["answer"])
 			}
 		}
 
-		// The key test: This should succeed since 2500 > 2000
 		success, ok := result["success"].(bool)
 		require.True(t, ok, "Should have success field")
-
-		if !success {
-			if errorMsg, exists := result["error"]; exists {
-				t.Logf("❌ Condition failed: %v", errorMsg)
-				t.Logf("🔍 This indicates the decimal condition evaluation issue")
-			}
-		}
-
-		// This assertion will help us identify the bug
-		assert.True(t, success, "Condition 2500 > 2000 should pass - if this fails, there's a bug in decimal condition evaluation")
+		assert.True(t, success, "Condition latestRoundData.answer > $1000 should pass")
 	})
 
 	t.Run("ChainlinkPriceFeed_DecimalConditionDebugging", func(t *testing.T) {
-		// Test multiple condition values to debug the decimal formatting issue
-		// Current ETH price is $2500 (250000000000 raw with 8 decimals)
+		// Test multiple condition values against real latestRoundData.answer
+		// The answer is returned as raw int256 (e.g., 204897284400 = $2048.97 with 8 decimals)
 		testCases := []struct {
 			conditionValue  string
 			expectedSuccess bool
 			description     string
 		}{
-			{"2400", true, "2500 > 2400 should be TRUE"},
-			{"2600", false, "2500 > 2600 should be FALSE"},
-			{"250000000000", false, "2500 > 250000000000 should be FALSE (if comparing formatted vs raw)"},
-			{"249999999999", true, "250000000000 > 249999999999 should be TRUE (if comparing raw vs raw)"},
+			{"100000000000", true, "answer > $1000*10^8 should be TRUE (ETH > $1000)"},
+			{"5000000000000", false, "answer > $50000*10^8 should be FALSE (ETH < $50000)"},
+			{"0", true, "answer > 0 should be TRUE"},
 		}
 
 		for _, tc := range testCases {
@@ -1631,7 +1596,6 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 							"addresses": []interface{}{TENDERLY_SEPOLIA_ETH_USD_FEED},
 							"topics":    []interface{}{},
 							"contractAbi": []interface{}{
-								// decimals function
 								map[string]interface{}{
 									"inputs":          []interface{}{},
 									"name":            "decimals",
@@ -1639,7 +1603,6 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 									"stateMutability": "view",
 									"type":            "function",
 								},
-								// latestRoundData function
 								map[string]interface{}{
 									"inputs": []interface{}{},
 									"name":   "latestRoundData",
@@ -1653,23 +1616,11 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 									"stateMutability": "view",
 									"type":            "function",
 								},
-								// AnswerUpdated event
-								map[string]interface{}{
-									"anonymous": false,
-									"inputs": []interface{}{
-										map[string]interface{}{"indexed": true, "internalType": "int256", "name": "current", "type": "int256"},
-										map[string]interface{}{"indexed": true, "internalType": "uint256", "name": "roundId", "type": "uint256"},
-										map[string]interface{}{"indexed": false, "internalType": "uint256", "name": "updatedAt", "type": "uint256"},
-									},
-									"name": "AnswerUpdated",
-									"type": "event",
-								},
 							},
 							"methodCalls": []interface{}{
 								map[string]interface{}{
-									"methodName":    "decimals",
-									"methodParams":  []interface{}{},
-									"applyToFields": []interface{}{"AnswerUpdated.current"},
+									"methodName":   "decimals",
+									"methodParams": []interface{}{},
 								},
 								map[string]interface{}{
 									"methodName":   "latestRoundData",
@@ -1678,10 +1629,10 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 							},
 							"conditions": []interface{}{
 								map[string]interface{}{
-									"fieldName": "AnswerUpdated.current",
+									"fieldName": "latestRoundData.answer",
 									"operator":  "gt",
 									"value":     tc.conditionValue,
-									"fieldType": "decimal",
+									"fieldType": "int256",
 								},
 							},
 							"maxEventsPerBlock": 5,
@@ -1696,26 +1647,10 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 				success, ok := result["success"].(bool)
 				require.True(t, ok, "Should have success field")
 
-				t.Logf("🧪 Testing condition: AnswerUpdated.current > %s", tc.conditionValue)
-				t.Logf("💰 Current price: 250000000000 (raw) = $2500 (formatted)")
-				t.Logf("🎯 Expected: %t, Actual: %t", tc.expectedSuccess, success)
+				t.Logf("Testing condition: latestRoundData.answer > %s", tc.conditionValue)
+				t.Logf("Expected: %t, Actual: %t", tc.expectedSuccess, success)
 
-				if success != tc.expectedSuccess {
-					t.Logf("❌ DECIMAL CONDITION BUG DETECTED:")
-					t.Logf("   Raw price: 250000000000")
-					t.Logf("   Formatted price: $2500")
-					t.Logf("   Condition: > %s", tc.conditionValue)
-					t.Logf("   Expected: %t, Got: %t", tc.expectedSuccess, success)
-
-					if eventData, ok := result["data"].(map[string]interface{}); ok {
-						if answerData, exists := eventData["AnswerUpdated"].(map[string]interface{}); exists {
-							t.Logf("   Event data: %+v", answerData)
-						}
-					}
-				}
-
-				// Don't assert here - just log the results for debugging
-				// assert.Equal(t, tc.expectedSuccess, success, tc.description)
+				assert.Equal(t, tc.expectedSuccess, success, tc.description)
 			})
 		}
 	})
