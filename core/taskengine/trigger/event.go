@@ -1883,10 +1883,15 @@ func (t *EventTrigger) pollContractStateForTask(ctx context.Context, taskID stri
 			"query_index", queryIdx,
 			"data_keys", getMapKeys(combinedData))
 
+		// Use a unique TxHash for deduplication at the aggregator.
+		// Format: "poll-<unix_nanos>" ensures each poll cycle has a unique ID
+		// since the dedup key is "taskID:txHash:logIndex".
+		pollTxHash := fmt.Sprintf("poll-%d", now.UnixNano())
+
 		marker := EventMark{
 			BlockNumber:  0, // No specific block for polling
 			LogIndex:     0,
-			TxHash:       "",
+			TxHash:       pollTxHash,
 			EnrichedData: combinedData,
 		}
 
