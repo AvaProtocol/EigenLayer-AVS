@@ -523,6 +523,12 @@ func sendUserOpShared(
 
 	// Step 0: Estimate gas for UNWRAPPED calldata first (only needed for reimbursement wrapping)
 	// Skip entirely when SkipReimbursement is set — the result is only used in Step 0.5
+	//
+	// NOTE on nonce safety: BuildUserOpWithPaymaster calls GetNextNonce internally, which is
+	// a read-only operation on the NonceManager cache (it does NOT call IncrementNonce or
+	// SetNonce). These temporary UserOps are never sent, so the cache is not polluted by
+	// gas estimation calls. Only a successful send (IncrementNonce at line ~959) advances
+	// the cached nonce.
 	var unwrappedGasEstimate *bundler.GasEstimation
 	if paymasterReq != nil && !paymasterReq.SkipReimbursement {
 		// Build a temporary UserOp with unwrapped calldata to get accurate gas estimate
@@ -974,39 +980,51 @@ func sendUserOpCore(
 			if retry < maxRetries-1 {
 				l.Warn("Nonce conflict detected", "nonce", userOp.Nonce.String(), "error", err)
 
-				// Reset NonceManager cache to force fresh on-chain query
-				globalNonceManager.ResetNonce(userOp.Sender)
-				l.Debug("Reset nonce cache", "sender", userOp.Sender.Hex())
+				// DO NOT call ResetNonce here. Resetting destroys the cached pending nonce,
+				// forcing GetNextNonce to fall back to on-chain state only. If a previous
+				// UserOp is still pending (not yet mined), the on-chain nonce hasn't advanced,
+				// so polling would return the same stale nonce and the retry would fail.
+				// Instead, consult GetNextNonce which returns max(on-chain, cached).
 
-				// Poll for fresh nonce with timeout (similar to transaction waiting pattern)
-				startTime := time.Now()
-				timeout := 15 * time.Second
-				pollInterval := 500 * time.Millisecond
-
-				for time.Since(startTime) < timeout {
-					time.Sleep(pollInterval)
-
-					// Get fresh nonce through NonceManager (will fetch from chain since we just reset)
-					freshNonce, nonceErr := globalNonceManager.GetNextNonce(client, userOp.Sender, func() (*big.Int, error) {
-						return aa.GetNonce(client, userOp.Sender, accountSalt)
-					})
-					if nonceErr != nil {
-						l.Debug("Failed to fetch fresh nonce", "error", nonceErr)
-						continue
-					}
-
-					// Check if nonce has actually changed from what we had
-					if userOp.Nonce == nil || freshNonce.Cmp(userOp.Nonce) > 0 {
-						userOp.Nonce = freshNonce
-						l.Debug("Updated nonce", "nonce", freshNonce.String(), "elapsed", time.Since(startTime).String())
-						break
-					}
+				freshNonce, nonceErr := globalNonceManager.GetNextNonce(client, userOp.Sender, func() (*big.Int, error) {
+					return aa.GetNonce(client, userOp.Sender, accountSalt)
+				})
+				if nonceErr != nil {
+					l.Warn("Failed to fetch nonce for retry", "error", nonceErr)
+					continue
 				}
 
-				if time.Since(startTime) >= timeout {
-					l.Warn("Nonce polling timeout", "timeout", timeout, "nonce", userOp.Nonce.String())
+				if freshNonce.Cmp(userOp.Nonce) > 0 {
+					// On-chain or cache has advanced past our nonce — use the new value
+					l.Debug("Nonce advanced", "old_nonce", userOp.Nonce.String(), "new_nonce", freshNonce.String())
+				} else {
+					// GetNextNonce returned the same nonce we already tried. This means a UserOp
+					// is pending at this nonce (submitted by us or another concurrent flow).
+					// Increment by 1 so we use the next slot.
+					freshNonce = new(big.Int).Add(userOp.Nonce, big.NewInt(1))
+					l.Debug("Nonce unchanged, incrementing past pending UserOp",
+						"old_nonce", userOp.Nonce.String(), "new_nonce", freshNonce.String())
+					// Update the cache so subsequent UserOps also see this pending nonce
+					globalNonceManager.SetNonce(userOp.Sender, new(big.Int).Add(freshNonce, big.NewInt(1)))
 				}
 
+				// For paymaster UserOps, we cannot simply update the nonce because the
+				// paymaster signature is bound to the original nonce. Changing the nonce
+				// would require rebuilding the entire UserOp (new paymaster hash, new
+				// paymaster signature, new UserOp signature), which is not possible in
+				// this retry loop. Log a clear message and skip the retry.
+				hasPaymaster := len(userOp.PaymasterAndData) > 0
+				if hasPaymaster {
+					l.Warn("Cannot retry paymaster UserOp with new nonce: paymaster signature is bound to original nonce",
+						"sender", userOp.Sender.Hex(),
+						"original_nonce", userOp.Nonce.String(),
+						"would_need_nonce", freshNonce.String())
+					// Do not update userOp.Nonce — it would break the paymaster signature.
+					// The cache is still intact so other concurrent UserOps benefit from it.
+					break
+				}
+
+				userOp.Nonce = freshNonce
 				continue
 			}
 		}
