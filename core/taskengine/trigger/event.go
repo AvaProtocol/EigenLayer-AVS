@@ -109,6 +109,9 @@ type EventTrigger struct {
 	subscriptions []SubscriptionInfo
 	subsMutex     sync.RWMutex
 
+	// Track subscriptions by query key for incremental updates
+	querySubscriptions map[string]*managedSubscription
+
 	// Channel to signal subscription updates
 	updateSubsCh chan struct{}
 
@@ -143,6 +146,14 @@ type SubscriptionInfo struct {
 	queryIndex   int
 }
 
+type managedSubscription struct {
+	subscription ethereum.Subscription
+	query        ethereum.FilterQuery
+	description  string
+	taskIDs      map[string]bool // tasks sharing this subscription
+	queryIndex   int
+}
+
 func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], logger sdklogging.Logger, maxEventsPerQuery uint32, maxTotalEvents uint32) *EventTrigger {
 	var err error
 
@@ -159,6 +170,7 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 		checks:                   sync.Map{},
 		legacyMode:               false, // Start in new mode
 		subscriptions:            make([]SubscriptionInfo, 0),
+		querySubscriptions:       make(map[string]*managedSubscription),
 		updateSubsCh:             make(chan struct{}, 1),
 		eventCounts:              make(map[string]map[uint64]uint32),
 		defaultMaxEventsPerQuery: maxEventsPerQuery,
@@ -199,6 +211,49 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 	b.tokenEnrichmentService = taskengine.GetTokenEnrichmentService()
 
 	return &b
+}
+
+// rebuildSubscriptionSlice derives the flat t.subscriptions slice from t.querySubscriptions.
+// Must be called with subsMutex held.
+func (t *EventTrigger) rebuildSubscriptionSlice() {
+	t.subscriptions = make([]SubscriptionInfo, 0, len(t.querySubscriptions))
+	for _, ms := range t.querySubscriptions {
+		for taskID := range ms.taskIDs {
+			t.subscriptions = append(t.subscriptions, SubscriptionInfo{
+				subscription: ms.subscription,
+				query:        ms.query,
+				description:  ms.description,
+				taskID:       taskID,
+				queryIndex:   ms.queryIndex,
+			})
+		}
+	}
+}
+
+// populateQuerySubscriptions rebuilds querySubscriptions from a set of queries and active subscriptions.
+// Must be called with subsMutex held. Used after full rebuilds (initial setup, reconnection).
+// When multiple subscription instances exist for the same query key, duplicates are unsubscribed
+// to prevent resource leaks.
+func (t *EventTrigger) populateQuerySubscriptions(queries []QueryInfo) {
+	t.querySubscriptions = make(map[string]*managedSubscription)
+	for _, subInfo := range t.subscriptions {
+		key := t.createQueryKey(subInfo.query)
+		if ms, exists := t.querySubscriptions[key]; exists {
+			ms.taskIDs[subInfo.taskID] = true
+			// If this entry has a different subscription instance, unsubscribe the duplicate
+			if subInfo.subscription != ms.subscription {
+				subInfo.subscription.Unsubscribe()
+			}
+		} else {
+			t.querySubscriptions[key] = &managedSubscription{
+				subscription: subInfo.subscription,
+				query:        subInfo.query,
+				description:  subInfo.description,
+				taskIDs:      map[string]bool{subInfo.taskID: true},
+				queryIndex:   subInfo.queryIndex,
+			}
+		}
+	}
 }
 
 // SetOverloadAlertCallback sets the callback function for when event overload is detected
@@ -418,6 +473,7 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 				"topics", queryInfo.Query.Topics)
 		}
 	}
+	t.populateQuerySubscriptions(queries)
 	t.subsMutex.Unlock()
 
 	// Create error channel that collects errors from all subscriptions
@@ -521,60 +577,111 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 				}
 
 			case <-t.updateSubsCh:
-				t.logger.Info("🔄 Subscription update requested")
+				t.logger.Info("🔄 Subscription update requested - debouncing")
 
-				// Rebuild queries
+				// Debounce: drain additional signals for 500ms
+				debounceTimer := time.NewTimer(500 * time.Millisecond)
+			drainLoop:
+				for {
+					select {
+					case <-t.updateSubsCh:
+						// Drain queued signals
+					case <-debounceTimer.C:
+						break drainLoop
+					case <-ctx.Done():
+						debounceTimer.Stop()
+						return
+					}
+				}
+
+				// Build desired state
 				newQueries := t.buildFilterQueries()
 
-				// Stop all existing subscriptions
-				t.subsMutex.Lock()
-				for _, subInfo := range t.subscriptions {
-					subInfo.subscription.Unsubscribe()
+				// Build desiredByKey: queryKey -> []QueryInfo
+				desiredByKey := make(map[string][]QueryInfo)
+				for _, qi := range newQueries {
+					key := t.createQueryKey(qi.Query)
+					desiredByKey[key] = append(desiredByKey[key], qi)
 				}
-				t.subscriptions = make([]SubscriptionInfo, 0, len(newQueries))
 
-				if len(newQueries) == 0 {
-					t.logger.Info("🚫 No tasks require monitoring - all subscriptions stopped")
-				} else {
-					// Create new subscriptions
-					for i, queryInfo := range newQueries {
-						// Use timeout context to prevent indefinite blocking during updates
-						timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-						sub, subErr := t.wsEthClient.SubscribeFilterLogs(timeoutCtx, queryInfo.Query, logs)
-						cancel() // Clean up timeout context
+				t.subsMutex.Lock()
+
+				// REMOVE: subscriptions no longer needed
+				for key, ms := range t.querySubscriptions {
+					if _, wanted := desiredByKey[key]; !wanted {
+						t.logger.Info("🗑️ Removing stale subscription",
+							"key", key,
+							"description", ms.description,
+							"task_ids", ms.taskIDs)
+						ms.subscription.Unsubscribe()
+						delete(t.querySubscriptions, key)
+					}
+				}
+
+				// ADD: new subscriptions needed
+				for key, queryInfos := range desiredByKey {
+					if _, exists := t.querySubscriptions[key]; !exists {
+						// Use the first queryInfo for the subscription
+						qi := queryInfos[0]
+						timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+						sub, subErr := t.wsEthClient.SubscribeFilterLogs(timeoutCtx, qi.Query, logs)
+						cancel()
 						if subErr != nil {
-							t.logger.Error("❌ Failed to create new subscription during update", "index", i, "error", subErr)
+							t.logger.Error("❌ Failed to create subscription during incremental update",
+								"key", key,
+								"description", qi.Description,
+								"error", subErr)
 							continue
 						}
 
-						t.subscriptions = append(t.subscriptions, SubscriptionInfo{
-							subscription: sub,
-							query:        queryInfo.Query,
-							description:  queryInfo.Description,
-							taskID:       queryInfo.TaskID,
-							queryIndex:   queryInfo.QueryIndex,
-						})
+						taskIDs := make(map[string]bool)
+						for _, q := range queryInfos {
+							taskIDs[q.TaskID] = true
+						}
 
-						t.logger.Info("✅ Created new subscription during update",
-							"index", i,
-							"task_id", queryInfo.TaskID,
-							"description", queryInfo.Description,
-							"addresses", queryInfo.Query.Addresses,
-							"topics", queryInfo.Query.Topics,
-							"warning", "Multiple subscriptions for same task may cause duplicate events")
+						t.querySubscriptions[key] = &managedSubscription{
+							subscription: sub,
+							query:        qi.Query,
+							description:  qi.Description,
+							taskIDs:      taskIDs,
+							queryIndex:   qi.QueryIndex,
+						}
+
+						t.logger.Info("✅ Created new subscription during incremental update",
+							"key", key,
+							"description", qi.Description,
+							"task_ids", taskIDs,
+							"addresses", qi.Query.Addresses,
+							"topics", qi.Query.Topics)
 
 						// Start error monitoring for new subscription
-						go func(idx int, s ethereum.Subscription, d string) {
+						go func(s ethereum.Subscription, d string) {
 							errSub := <-s.Err()
 							if errSub != nil {
 								errorCh <- errSub
 							}
-						}(i, sub, queryInfo.Description)
+						}(sub, qi.Description)
 					}
 				}
+
+				// UPDATE taskIDs: refresh task sets for existing subscriptions
+				for key, queryInfos := range desiredByKey {
+					if ms, exists := t.querySubscriptions[key]; exists {
+						ms.taskIDs = make(map[string]bool)
+						for _, q := range queryInfos {
+							ms.taskIDs[q.TaskID] = true
+						}
+					}
+				}
+
+				// Rebuild flat subscriptions slice for backward compatibility
+				t.rebuildSubscriptionSlice()
+				activeCount := len(t.querySubscriptions)
 				t.subsMutex.Unlock()
 
-				t.logger.Info("🔄 Subscription update completed", "active_subscriptions", len(newQueries))
+				t.logger.Info("🔄 Incremental subscription update completed",
+					"active_subscriptions", activeCount,
+					"desired_queries", len(newQueries))
 
 			case err := <-errorCh:
 				if err == nil {
@@ -593,16 +700,17 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 				newQueries := t.buildFilterQueries()
 
 				t.subsMutex.Lock()
-				// Clean up old subscriptions
-				for _, subInfo := range t.subscriptions {
-					subInfo.subscription.Unsubscribe()
+				// Clean up old managed subscriptions
+				for _, ms := range t.querySubscriptions {
+					ms.subscription.Unsubscribe()
 				}
+				t.querySubscriptions = make(map[string]*managedSubscription)
 				t.subscriptions = make([]SubscriptionInfo, 0, len(newQueries))
 
 				// Create new subscriptions
 				for i, queryInfo := range newQueries {
 					// Use timeout context to prevent indefinite blocking during reconnection
-					timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 					sub, subErr := t.wsEthClient.SubscribeFilterLogs(timeoutCtx, queryInfo.Query, logs)
 					cancel() // Clean up timeout context
 					if subErr != nil {
@@ -626,6 +734,8 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 						}
 					}(i, sub, queryInfo.Description)
 				}
+				// Rebuild querySubscriptions from the new flat subscriptions
+				t.populateQuerySubscriptions(newQueries)
 				t.subsMutex.Unlock()
 
 				t.logger.Info("🔌 Reconnection completed", "active_subscriptions", len(newQueries))
