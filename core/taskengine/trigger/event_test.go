@@ -1005,33 +1005,34 @@ func TestIncrementalAdd_OnlyNewSubsCreated(t *testing.T) {
 	trigger := newTestEventTrigger()
 
 	// Simulate an existing managed subscription
-	existingKey := "addrs:[0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984]|topic[0]:0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+	existingQuery := ethereum.FilterQuery{
+		Addresses: []common.Address{common.HexToAddress("0x1f9840a85d5af5bf1d1762f925bdaddc4201f984")},
+		Topics:    [][]common.Hash{{common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")}},
+	}
+	existingKey := trigger.createQueryKey(existingQuery)
 	existingSub := newMockSubscription()
 	trigger.querySubscriptions[existingKey] = &managedSubscription{
 		subscription: existingSub,
-		query: ethereum.FilterQuery{
-			Addresses: []common.Address{common.HexToAddress("0x1f9840a85d5af5bf1d1762f925bdaddc4201f984")},
-			Topics:    [][]common.Hash{{common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")}},
-		},
-		description: "existing-sub",
-		taskIDs:     map[string]bool{"task-1": true},
-		queryIndex:  0,
+		query:        existingQuery,
+		description:  "existing-sub",
+		taskIDs:      map[string]bool{"task-1": true},
+		queryIndex:   0,
 	}
+
+	newQuery := ethereum.FilterQuery{
+		Addresses: []common.Address{common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")},
+		Topics:    [][]common.Hash{{common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")}},
+	}
+	newKey := trigger.createQueryKey(newQuery)
 
 	// Desired state includes the existing subscription plus a new one
 	desiredByKey := map[string][]QueryInfo{
 		existingKey: {{
-			Query: ethereum.FilterQuery{
-				Addresses: []common.Address{common.HexToAddress("0x1f9840a85d5af5bf1d1762f925bdaddc4201f984")},
-				Topics:    [][]common.Hash{{common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")}},
-			},
+			Query:  existingQuery,
 			TaskID: "task-1",
 		}},
-		"new-key": {{
-			Query: ethereum.FilterQuery{
-				Addresses: []common.Address{common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")},
-				Topics:    [][]common.Hash{{common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")}},
-			},
+		newKey: {{
+			Query:  newQuery,
 			TaskID: "task-2",
 		}},
 	}
@@ -1050,7 +1051,7 @@ func TestIncrementalAdd_OnlyNewSubsCreated(t *testing.T) {
 	assert.Contains(t, trigger.querySubscriptions, existingKey, "Existing subscription should still be in map")
 
 	// Verify that only the new key is missing (would need to be added)
-	_, existsNew := trigger.querySubscriptions["new-key"]
+	_, existsNew := trigger.querySubscriptions[newKey]
 	assert.False(t, existsNew, "New key should not exist yet (would be added in ADD phase)")
 }
 
@@ -1186,8 +1187,9 @@ func TestRebuildSubscriptionSlice(t *testing.T) {
 func TestPopulateQuerySubscriptions(t *testing.T) {
 	trigger := newTestEventTrigger()
 
-	sub1 := newMockSubscription()
-	sub2 := newMockSubscription()
+	sub1a := newMockSubscription() // First subscription for query1 (task-1)
+	sub1b := newMockSubscription() // Duplicate subscription for query1 (task-2)
+	sub2 := newMockSubscription()  // Subscription for query2 (task-3)
 
 	query1 := ethereum.FilterQuery{
 		Addresses: []common.Address{common.HexToAddress("0x1f9840a85d5af5bf1d1762f925bdaddc4201f984")},
@@ -1198,10 +1200,10 @@ func TestPopulateQuerySubscriptions(t *testing.T) {
 		Topics:    [][]common.Hash{{common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")}},
 	}
 
-	// Two tasks share query1, one task uses query2
+	// Two tasks share query1 but have different subscription instances (as in production)
 	trigger.subscriptions = []SubscriptionInfo{
-		{subscription: sub1, query: query1, description: "d1", taskID: "task-1", queryIndex: 0},
-		{subscription: sub1, query: query1, description: "d1", taskID: "task-2", queryIndex: 0},
+		{subscription: sub1a, query: query1, description: "d1", taskID: "task-1", queryIndex: 0},
+		{subscription: sub1b, query: query1, description: "d1", taskID: "task-2", queryIndex: 0},
 		{subscription: sub2, query: query2, description: "d2", taskID: "task-3", queryIndex: 1},
 	}
 
@@ -1217,9 +1219,14 @@ func TestPopulateQuerySubscriptions(t *testing.T) {
 	assert.True(t, ms1.taskIDs["task-1"])
 	assert.True(t, ms1.taskIDs["task-2"])
 
+	// The duplicate subscription for query1 should have been unsubscribed
+	assert.True(t, sub1b.unsubscribed, "Duplicate subscription for same query should be unsubscribed")
+	assert.False(t, sub1a.unsubscribed, "Kept subscription should NOT be unsubscribed")
+
 	ms2, ok := trigger.querySubscriptions[key2]
 	assert.True(t, ok)
 	assert.True(t, ms2.taskIDs["task-3"])
+	assert.False(t, sub2.unsubscribed, "Unique subscription should NOT be unsubscribed")
 }
 
 func TestDebounce_DrainMultipleSignals(t *testing.T) {

@@ -232,12 +232,18 @@ func (t *EventTrigger) rebuildSubscriptionSlice() {
 
 // populateQuerySubscriptions rebuilds querySubscriptions from a set of queries and active subscriptions.
 // Must be called with subsMutex held. Used after full rebuilds (initial setup, reconnection).
+// When multiple subscription instances exist for the same query key, duplicates are unsubscribed
+// to prevent resource leaks.
 func (t *EventTrigger) populateQuerySubscriptions(queries []QueryInfo) {
 	t.querySubscriptions = make(map[string]*managedSubscription)
 	for _, subInfo := range t.subscriptions {
 		key := t.createQueryKey(subInfo.query)
 		if ms, exists := t.querySubscriptions[key]; exists {
 			ms.taskIDs[subInfo.taskID] = true
+			// If this entry has a different subscription instance, unsubscribe the duplicate
+			if subInfo.subscription != ms.subscription {
+				subInfo.subscription.Unsubscribe()
+			}
 		} else {
 			t.querySubscriptions[key] = &managedSubscription{
 				subscription: subInfo.subscription,
@@ -617,7 +623,7 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 					if _, exists := t.querySubscriptions[key]; !exists {
 						// Use the first queryInfo for the subscription
 						qi := queryInfos[0]
-						timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+						timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 						sub, subErr := t.wsEthClient.SubscribeFilterLogs(timeoutCtx, qi.Query, logs)
 						cancel()
 						if subErr != nil {
@@ -704,7 +710,7 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 				// Create new subscriptions
 				for i, queryInfo := range newQueries {
 					// Use timeout context to prevent indefinite blocking during reconnection
-					timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 					sub, subErr := t.wsEthClient.SubscribeFilterLogs(timeoutCtx, queryInfo.Query, logs)
 					cancel() // Clean up timeout context
 					if subErr != nil {
