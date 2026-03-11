@@ -1207,6 +1207,16 @@ func TestFormatSubjectWithBoldName(t *testing.T) {
 			expected: "Run Node: <code>My Transfer</code> failed at transfer1",
 		},
 		{
+			name:     "deployed workflow success",
+			subject:  "My AAVE Workflow: succeeded (3 out of 3 steps)",
+			expected: "<code>My AAVE Workflow</code>: succeeded (3 out of 3 steps)",
+		},
+		{
+			name:     "deployed workflow failure",
+			subject:  "My AAVE Workflow: failed at transfer1 (2 out of 3 steps)",
+			expected: "<code>My AAVE Workflow</code>: failed at transfer1 (2 out of 3 steps)",
+		},
+		{
 			name:     "unknown format - fallback to escaped",
 			subject:  "Some random subject",
 			expected: "Some random subject",
