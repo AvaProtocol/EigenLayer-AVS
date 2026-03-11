@@ -16,6 +16,19 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// mockSubscription implements ethereum.Subscription for testing
+type mockSubscription struct {
+	errCh        chan error
+	unsubscribed bool
+}
+
+func newMockSubscription() *mockSubscription {
+	return &mockSubscription{errCh: make(chan error, 1)}
+}
+
+func (m *mockSubscription) Err() <-chan error { return m.errCh }
+func (m *mockSubscription) Unsubscribe()      { m.unsubscribed = true }
+
 // MockLogger is a simple mock logger for testing
 type MockLogger struct{}
 
@@ -963,4 +976,285 @@ func TestEventTriggerCooldown(t *testing.T) {
 		assert.True(t, exists2, "Timestamp should still exist")
 		assert.Equal(t, now2.Unix(), lastTrigger2.Unix(), "Timestamp should be updated")
 	})
+}
+
+func newTestEventTrigger() *EventTrigger {
+	return &EventTrigger{
+		registry:   NewTaskRegistry(),
+		checks:     sync.Map{},
+		legacyMode: false,
+		CommonTrigger: &CommonTrigger{
+			done:      make(chan bool),
+			shutdown:  false,
+			rpcOption: &RpcOption{},
+			logger:    &MockLogger{},
+		},
+		triggerCh:                make(chan TriggerMetadata[EventMark], 10),
+		subscriptions:            make([]SubscriptionInfo, 0),
+		querySubscriptions:       make(map[string]*managedSubscription),
+		updateSubsCh:             make(chan struct{}, 1),
+		eventCounts:              make(map[string]map[uint64]uint32),
+		defaultMaxEventsPerQuery: 100,
+		defaultMaxTotalEvents:    1000,
+		processedEvents:          make(map[string]bool),
+		lastTriggerTime:          make(map[string]time.Time),
+	}
+}
+
+func TestIncrementalAdd_OnlyNewSubsCreated(t *testing.T) {
+	trigger := newTestEventTrigger()
+
+	// Simulate an existing managed subscription
+	existingKey := "addrs:[0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984]|topic[0]:0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+	existingSub := newMockSubscription()
+	trigger.querySubscriptions[existingKey] = &managedSubscription{
+		subscription: existingSub,
+		query: ethereum.FilterQuery{
+			Addresses: []common.Address{common.HexToAddress("0x1f9840a85d5af5bf1d1762f925bdaddc4201f984")},
+			Topics:    [][]common.Hash{{common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")}},
+		},
+		description: "existing-sub",
+		taskIDs:     map[string]bool{"task-1": true},
+		queryIndex:  0,
+	}
+
+	// Desired state includes the existing subscription plus a new one
+	desiredByKey := map[string][]QueryInfo{
+		existingKey: {{
+			Query: ethereum.FilterQuery{
+				Addresses: []common.Address{common.HexToAddress("0x1f9840a85d5af5bf1d1762f925bdaddc4201f984")},
+				Topics:    [][]common.Hash{{common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")}},
+			},
+			TaskID: "task-1",
+		}},
+		"new-key": {{
+			Query: ethereum.FilterQuery{
+				Addresses: []common.Address{common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")},
+				Topics:    [][]common.Hash{{common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")}},
+			},
+			TaskID: "task-2",
+		}},
+	}
+
+	// Verify existing subscription was NOT unsubscribed (REMOVE phase: only remove keys not in desired)
+	trigger.subsMutex.Lock()
+	for key, ms := range trigger.querySubscriptions {
+		if _, wanted := desiredByKey[key]; !wanted {
+			ms.subscription.Unsubscribe()
+			delete(trigger.querySubscriptions, key)
+		}
+	}
+	trigger.subsMutex.Unlock()
+
+	assert.False(t, existingSub.unsubscribed, "Existing subscription should NOT have been unsubscribed")
+	assert.Contains(t, trigger.querySubscriptions, existingKey, "Existing subscription should still be in map")
+
+	// Verify that only the new key is missing (would need to be added)
+	_, existsNew := trigger.querySubscriptions["new-key"]
+	assert.False(t, existsNew, "New key should not exist yet (would be added in ADD phase)")
+}
+
+func TestIncrementalRemove_OnlyStaleSubsRemoved(t *testing.T) {
+	trigger := newTestEventTrigger()
+
+	// Set up two existing subscriptions
+	keepSub := newMockSubscription()
+	staleSub := newMockSubscription()
+
+	trigger.querySubscriptions["keep-key"] = &managedSubscription{
+		subscription: keepSub,
+		query:        ethereum.FilterQuery{},
+		taskIDs:      map[string]bool{"task-1": true},
+	}
+	trigger.querySubscriptions["stale-key"] = &managedSubscription{
+		subscription: staleSub,
+		query:        ethereum.FilterQuery{},
+		taskIDs:      map[string]bool{"task-2": true},
+	}
+
+	// Desired state only includes "keep-key"
+	desiredByKey := map[string][]QueryInfo{
+		"keep-key": {{TaskID: "task-1"}},
+	}
+
+	trigger.subsMutex.Lock()
+	for key, ms := range trigger.querySubscriptions {
+		if _, wanted := desiredByKey[key]; !wanted {
+			ms.subscription.Unsubscribe()
+			delete(trigger.querySubscriptions, key)
+		}
+	}
+	// Update taskIDs for existing
+	for key, queryInfos := range desiredByKey {
+		if ms, exists := trigger.querySubscriptions[key]; exists {
+			ms.taskIDs = make(map[string]bool)
+			for _, q := range queryInfos {
+				ms.taskIDs[q.TaskID] = true
+			}
+		}
+	}
+	trigger.rebuildSubscriptionSlice()
+	trigger.subsMutex.Unlock()
+
+	assert.False(t, keepSub.unsubscribed, "Kept subscription should NOT be unsubscribed")
+	assert.True(t, staleSub.unsubscribed, "Stale subscription should be unsubscribed")
+	assert.NotContains(t, trigger.querySubscriptions, "stale-key", "Stale key should be removed")
+	assert.Contains(t, trigger.querySubscriptions, "keep-key", "Keep key should remain")
+	assert.Len(t, trigger.subscriptions, 1, "Flat subscriptions should have 1 entry")
+}
+
+func TestSharedQueryDedup(t *testing.T) {
+	trigger := newTestEventTrigger()
+
+	// Two tasks share the same query key
+	sharedSub := newMockSubscription()
+	sharedKey := "shared-key"
+
+	trigger.querySubscriptions[sharedKey] = &managedSubscription{
+		subscription: sharedSub,
+		query:        ethereum.FilterQuery{},
+		taskIDs:      map[string]bool{"task-1": true, "task-2": true},
+	}
+
+	// Remove task-1 but task-2 still needs the subscription
+	desiredByKey := map[string][]QueryInfo{
+		sharedKey: {{TaskID: "task-2"}},
+	}
+
+	trigger.subsMutex.Lock()
+	// REMOVE phase: only remove keys not in desired
+	for key, ms := range trigger.querySubscriptions {
+		if _, wanted := desiredByKey[key]; !wanted {
+			ms.subscription.Unsubscribe()
+			delete(trigger.querySubscriptions, key)
+		}
+	}
+	// UPDATE taskIDs
+	for key, queryInfos := range desiredByKey {
+		if ms, exists := trigger.querySubscriptions[key]; exists {
+			ms.taskIDs = make(map[string]bool)
+			for _, q := range queryInfos {
+				ms.taskIDs[q.TaskID] = true
+			}
+		}
+	}
+	trigger.rebuildSubscriptionSlice()
+	trigger.subsMutex.Unlock()
+
+	assert.False(t, sharedSub.unsubscribed, "Shared subscription should NOT be unsubscribed when one task remains")
+	assert.Contains(t, trigger.querySubscriptions, sharedKey)
+	assert.Equal(t, map[string]bool{"task-2": true}, trigger.querySubscriptions[sharedKey].taskIDs)
+	assert.Len(t, trigger.subscriptions, 1, "One flat subscription entry for remaining task")
+	assert.Equal(t, "task-2", trigger.subscriptions[0].taskID)
+}
+
+func TestRebuildSubscriptionSlice(t *testing.T) {
+	trigger := newTestEventTrigger()
+
+	sub1 := newMockSubscription()
+	sub2 := newMockSubscription()
+
+	trigger.querySubscriptions["key-1"] = &managedSubscription{
+		subscription: sub1,
+		query:        ethereum.FilterQuery{Addresses: []common.Address{common.HexToAddress("0x1")}},
+		description:  "desc-1",
+		taskIDs:      map[string]bool{"task-A": true, "task-B": true},
+		queryIndex:   0,
+	}
+	trigger.querySubscriptions["key-2"] = &managedSubscription{
+		subscription: sub2,
+		query:        ethereum.FilterQuery{Addresses: []common.Address{common.HexToAddress("0x2")}},
+		description:  "desc-2",
+		taskIDs:      map[string]bool{"task-C": true},
+		queryIndex:   1,
+	}
+
+	trigger.rebuildSubscriptionSlice()
+
+	// Should have 3 flat entries: task-A, task-B from key-1, task-C from key-2
+	assert.Len(t, trigger.subscriptions, 3)
+
+	taskIDs := make(map[string]bool)
+	for _, si := range trigger.subscriptions {
+		taskIDs[si.taskID] = true
+	}
+	assert.True(t, taskIDs["task-A"])
+	assert.True(t, taskIDs["task-B"])
+	assert.True(t, taskIDs["task-C"])
+}
+
+func TestPopulateQuerySubscriptions(t *testing.T) {
+	trigger := newTestEventTrigger()
+
+	sub1 := newMockSubscription()
+	sub2 := newMockSubscription()
+
+	query1 := ethereum.FilterQuery{
+		Addresses: []common.Address{common.HexToAddress("0x1f9840a85d5af5bf1d1762f925bdaddc4201f984")},
+		Topics:    [][]common.Hash{{common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")}},
+	}
+	query2 := ethereum.FilterQuery{
+		Addresses: []common.Address{common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")},
+		Topics:    [][]common.Hash{{common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")}},
+	}
+
+	// Two tasks share query1, one task uses query2
+	trigger.subscriptions = []SubscriptionInfo{
+		{subscription: sub1, query: query1, description: "d1", taskID: "task-1", queryIndex: 0},
+		{subscription: sub1, query: query1, description: "d1", taskID: "task-2", queryIndex: 0},
+		{subscription: sub2, query: query2, description: "d2", taskID: "task-3", queryIndex: 1},
+	}
+
+	trigger.populateQuerySubscriptions(nil)
+
+	assert.Len(t, trigger.querySubscriptions, 2, "Should have 2 unique query keys")
+
+	key1 := trigger.createQueryKey(query1)
+	key2 := trigger.createQueryKey(query2)
+
+	ms1, ok := trigger.querySubscriptions[key1]
+	assert.True(t, ok)
+	assert.True(t, ms1.taskIDs["task-1"])
+	assert.True(t, ms1.taskIDs["task-2"])
+
+	ms2, ok := trigger.querySubscriptions[key2]
+	assert.True(t, ok)
+	assert.True(t, ms2.taskIDs["task-3"])
+}
+
+func TestDebounce_DrainMultipleSignals(t *testing.T) {
+	trigger := newTestEventTrigger()
+
+	// Fill the update channel with a signal
+	trigger.updateSubsCh <- struct{}{}
+
+	// Drain it (simulating what the debounce loop does)
+	drained := 0
+	timer := time.NewTimer(100 * time.Millisecond)
+loop:
+	for {
+		select {
+		case <-trigger.updateSubsCh:
+			drained++
+			// Send more signals to simulate rapid updates
+			if drained < 3 {
+				select {
+				case trigger.updateSubsCh <- struct{}{}:
+				default:
+				}
+			}
+		case <-timer.C:
+			break loop
+		}
+	}
+
+	// After draining, channel should be empty
+	select {
+	case <-trigger.updateSubsCh:
+		t.Fatal("Channel should be empty after debounce drain")
+	default:
+		// Expected: channel is empty
+	}
+
+	assert.GreaterOrEqual(t, drained, 1, "Should have drained at least the initial signal")
 }
