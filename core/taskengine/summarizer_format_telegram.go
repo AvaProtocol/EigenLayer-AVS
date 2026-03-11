@@ -147,6 +147,18 @@ func formatSubjectWithBoldName(subject string) string {
 		}
 	}
 
+	// Check for deployed workflow format: "{name}: succeeded (...)" or "{name}: failed at ..."
+	// Must be checked before the generic " failed at " pattern to avoid splitting at the wrong point.
+	if suffix == "" {
+		for _, marker := range []string{": succeeded (", ": failed at "} {
+			if idx := strings.Index(subject, marker); idx > 0 {
+				suffix = subject[idx:]
+				nameEnd = idx
+				break
+			}
+		}
+	}
+
 	// Check for "failed at <stepName>" suffix (Run Node failure format)
 	if suffix == "" && strings.Contains(subject, " failed at ") {
 		idx := strings.LastIndex(subject, " failed at ")
