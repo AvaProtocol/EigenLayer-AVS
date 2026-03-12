@@ -27,10 +27,10 @@ func TestEventTriggerEndToEndRPC(t *testing.T) {
 	t.Log("=== Testing EventTrigger End-to-End RPC Call (Enhanced) ===")
 
 	// Test the specific expression from the user's input
-	expression := "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef&&0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9"
+	expression := "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef&&0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557"
 
 	t.Logf("Testing with expression: %s", expression)
-	t.Logf("This should find the most recent Transfer event involving address: 0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9")
+	t.Logf("This should find the most recent Transfer event involving address: 0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
 	t.Logf("New implementation searches without block limitations to find historical events")
 
 	// Test 1: Direct immediate execution
@@ -247,7 +247,7 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 
 	t.Log("=== Testing Queries-Based EventTrigger with Multiple Scenarios ===")
 
-	targetAddress := "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9"
+	targetAddress := "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557"
 
 	// Sepolia testnet contract addresses for testing
 	sepoliaUSDC := "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" // Example Sepolia USDC
@@ -705,7 +705,7 @@ func TestEventTriggerQueriesBasedUserScenario(t *testing.T) {
 	t.Log("=== Testing User's Specific Request: USDC+USDT transfers FROM/TO address using Queries ===")
 
 	// The user's address
-	userAddress := "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9"
+	userAddress := "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557"
 
 	// Real mainnet USDC and USDT addresses
 	mainnetUSDC := "0xA0b86a33E6441E654cF7A6E88ac73EB3a7fA88d8" // USDC
