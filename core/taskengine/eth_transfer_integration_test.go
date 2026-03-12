@@ -39,8 +39,8 @@ func TestETHTransferTaskIntegration(t *testing.T) {
 
 	// Create an ETH transfer task
 	tr := &avsproto.CreateTaskReq{
-		Name:               "ETH Transfer Test",
 		SmartWalletAddress: smartWalletAddress,
+		InputVariables:     testutil.TestSettingsInputVariables("ETH Transfer Test", smartWalletAddress),
 		Trigger: &avsproto.TaskTrigger{
 			Id:          "manual_trigger",
 			Name:        "manual",
@@ -189,8 +189,8 @@ func TestETHTransferTaskWithInvalidConfig(t *testing.T) {
 
 	// Create an ETH transfer task with invalid destination
 	tr := &avsproto.CreateTaskReq{
-		Name:               "Invalid ETH Transfer Test",
 		SmartWalletAddress: smartWalletAddress,
+		InputVariables:     testutil.TestSettingsInputVariables("Invalid ETH Transfer Test", smartWalletAddress),
 		Trigger: &avsproto.TaskTrigger{
 			Id:          "manual_trigger",
 			Name:        "manual",

@@ -30,9 +30,8 @@ func TestTaskStatCount(t *testing.T) {
 
 	// Populate task
 	tr1 := testutil.RestTask()
-	tr1.Name = "t1"
+	testutil.SetTaskSettings(tr1, "t1", smartWalletAddress)
 	tr1.MaxExecution = 1
-	tr1.SmartWalletAddress = smartWalletAddress
 	n.CreateTask(testutil.TestUser1(), tr1)
 
 	statSvc := NewStatService(db)

@@ -327,8 +327,8 @@ func TestInputVariables_CreateTask(t *testing.T) {
 	engine := New(db, config, nil, testutil.GetLogger())
 	user := testutil.TestUser1()
 
-	// Create input variables using protobuf Values
-	inputVarsProto := make(map[string]*structpb.Value)
+	// Start with settings (required) and add custom input variables
+	inputVarsProto := testutil.TestSettingsInputVariables("Test Task with Input Variables", user.SmartAccountAddress.Hex())
 
 	userTokenValue, _ := structpb.NewValue("0x1234567890abcdef")
 	inputVarsProto["userToken"] = userTokenValue
@@ -371,7 +371,6 @@ func TestInputVariables_CreateTask(t *testing.T) {
 				Target: "customcode1",
 			},
 		},
-		Name:           "Test Task with Input Variables",
 		MaxExecution:   10,
 		InputVariables: inputVarsProto, // Include input variables in creation request
 	}
@@ -383,7 +382,7 @@ func TestInputVariables_CreateTask(t *testing.T) {
 
 	// Verify input variables were stored with the task
 	assert.NotNil(t, task.InputVariables)
-	assert.Len(t, task.InputVariables, 2)
+	assert.Len(t, task.InputVariables, 3) // settings + userToken + amount
 
 	// Verify the values were stored correctly
 	storedToken := task.InputVariables["userToken"]

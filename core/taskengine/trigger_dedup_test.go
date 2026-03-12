@@ -39,7 +39,7 @@ func TestTriggerRequestIdDedup(t *testing.T) {
 
 	// Create a task with high max execution so it stays runnable
 	taskReq := testutil.RestTask()
-	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	taskReq.MaxExecution = 100
 	task, err := engine.CreateTask(user, taskReq)
 	require.NoError(t, err)
@@ -88,7 +88,7 @@ func TestTriggerRequestIdDedup_DifferentIdsNotDeduplicated(t *testing.T) {
 	user := testutil.TestUser1()
 
 	taskReq := testutil.RestTask()
-	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	taskReq.MaxExecution = 100
 	task, err := engine.CreateTask(user, taskReq)
 	require.NoError(t, err)
@@ -137,7 +137,7 @@ func TestTriggerRequestIdDedup_EmptyIdSkipsDedup(t *testing.T) {
 	user := testutil.TestUser1()
 
 	taskReq := testutil.RestTask()
-	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	taskReq.MaxExecution = 100
 	task, err := engine.CreateTask(user, taskReq)
 	require.NoError(t, err)
