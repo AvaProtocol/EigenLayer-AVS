@@ -183,25 +183,15 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 		return nil, fmt.Errorf("%s", ErrEmptyNodesField)
 	}
 
-	// Extract and validate settings from inputVariables
-	settings, err := extractSettings(body.InputVariables)
-	if err != nil {
-		return nil, fmt.Errorf("invalid task argument: %w", err)
+	// Validate inputVariables.settings (shared with SimulateTask)
+	if err := ValidateInputVariablesSettings(body.InputVariables); err != nil {
+		return nil, fmt.Errorf("invalid task argument: %s", err.Error())
 	}
 
+	// Extract the validated settings for enrichment and field copying
+	settings, _ := extractSettings(body.InputVariables) // safe: already validated above
 	name, _ := settings["name"].(string)
-	if strings.TrimSpace(name) == "" {
-		return nil, fmt.Errorf("invalid task argument: inputVariables.settings.name is required")
-	}
-
 	runner, _ := settings["runner"].(string)
-	if strings.TrimSpace(runner) == "" {
-		return nil, fmt.Errorf("invalid task argument: inputVariables.settings.runner is required")
-	}
-
-	if !common.IsHexAddress(runner) {
-		return nil, fmt.Errorf("invalid task argument: inputVariables.settings.runner must be a valid hex address")
-	}
 
 	taskID := GenerateTaskID()
 
