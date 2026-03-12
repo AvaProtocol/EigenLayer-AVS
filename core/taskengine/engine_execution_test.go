@@ -29,8 +29,7 @@ func TestGetExecution(t *testing.T) {
 	smartWalletAddress := walletResp.Address
 
 	tr1 := testutil.RestTask()
-	tr1.Name = "t1"
-	tr1.SmartWalletAddress = smartWalletAddress
+	testutil.SetTaskSettings(tr1, "t1", smartWalletAddress)
 	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
 
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.TriggerTaskReq{
@@ -152,8 +151,7 @@ func TestTriggerSync(t *testing.T) {
 	smartWalletAddress := walletResp.Address
 
 	tr1 := testutil.RestTask()
-	tr1.Name = "t1"
-	tr1.SmartWalletAddress = smartWalletAddress
+	testutil.SetTaskSettings(tr1, "t1", smartWalletAddress)
 	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
 
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.TriggerTaskReq{
@@ -275,8 +273,7 @@ func TestTriggerAsync(t *testing.T) {
 	smartWalletAddress := walletResp.Address
 
 	tr1 := testutil.RestTask()
-	tr1.Name = "t1"
-	tr1.SmartWalletAddress = smartWalletAddress
+	testutil.SetTaskSettings(tr1, "t1", smartWalletAddress)
 	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
 
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.TriggerTaskReq{
@@ -398,9 +395,8 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 	smartWalletAddress := walletResp.Address
 
 	tr1 := testutil.RestTask()
-	tr1.Name = "t1"
+	testutil.SetTaskSettings(tr1, "t1", smartWalletAddress)
 	tr1.MaxExecution = 1
-	tr1.SmartWalletAddress = smartWalletAddress
 	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
 
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.TriggerTaskReq{

@@ -70,7 +70,7 @@ func TestPaginationEmptyParameters(t *testing.T) {
 	}
 
 	tr := testutil.JsFastTask()
-	tr.SmartWalletAddress = smartWalletAddress
+	testutil.SetTaskSettings(tr, "jsfast_task", smartWalletAddress)
 	task, _ := n.CreateTask(user, tr)
 
 	execResult, err := n.ListExecutions(user, &avsproto.ListExecutionsReq{

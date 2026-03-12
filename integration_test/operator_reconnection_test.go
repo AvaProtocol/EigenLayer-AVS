@@ -118,6 +118,7 @@ func TestOperatorReconnectionFlow(t *testing.T) {
 
 	taskReq := &avsproto.CreateTaskReq{
 		SmartWalletAddress: user.Address.Hex(),
+		InputVariables:     testutil.TestSettingsInputVariables("Operator Reconnection Test", user.Address.Hex()),
 		Trigger: &avsproto.TaskTrigger{
 			TriggerType: &avsproto.TaskTrigger_Event{
 				Event: &avsproto.EventTrigger{
@@ -315,6 +316,7 @@ func TestOperatorReconnectionRaceCondition(t *testing.T) {
 
 	taskReq := &avsproto.CreateTaskReq{
 		SmartWalletAddress: user.Address.Hex(),
+		InputVariables:     testutil.TestSettingsInputVariables("Rapid Reconnection Test", user.Address.Hex()),
 		Trigger: &avsproto.TaskTrigger{
 			TriggerType: &avsproto.TaskTrigger_Event{
 				Event: &avsproto.EventTrigger{

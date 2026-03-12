@@ -1088,25 +1088,20 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 		annotation = ExampleExecutionAnnotation
 	}
 
-	// Extract runner smart wallet and owner EOA (best-effort, no panics)
-	vm.mu.Lock()
+	// Extract runner smart wallet and owner EOA from vm.task directly.
 	smartWallet := ""
 	ownerEOA := ""
-	if aaSender, ok := vm.vars["aa_sender"].(string); ok && aaSender != "" {
-		smartWallet = aaSender
+	if vm.task != nil && vm.task.Task != nil {
+		smartWallet = vm.task.SmartWalletAddress
+		ownerEOA = vm.task.Owner
 	}
-	if wc, ok := vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
-		if runner, ok := wc["runner"].(string); ok && runner != "" && smartWallet == "" {
-			smartWallet = runner
-		}
-		if owner, ok := wc["owner"].(string); ok && owner != "" {
-			ownerEOA = owner
-		}
-		if eoa, ok := wc["eoaAddress"].(string); ok && eoa != "" && ownerEOA == "" {
-			ownerEOA = eoa
+	// Fallback for single-node executions where vm.task may be nil
+	vm.mu.Lock()
+	if smartWallet == "" {
+		if aaSender, ok := vm.vars["aa_sender"].(string); ok && aaSender != "" {
+			smartWallet = aaSender
 		}
 	}
-	// Also check settings.runner for single-node executions
 	if smartWallet == "" {
 		if settings, ok := vm.vars["settings"].(map[string]interface{}); ok {
 			if runner, ok := settings["runner"].(string); ok && strings.TrimSpace(runner) != "" {
@@ -1114,7 +1109,6 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 			}
 		}
 	}
-	// Fallback to TaskOwner if available
 	if ownerEOA == "" && vm.TaskOwner != (common.Address{}) {
 		ownerEOA = vm.TaskOwner.Hex()
 	}
@@ -2187,7 +2181,11 @@ func formatAmount(raw string, decimals int) string {
 }
 
 func resolveWorkflowName(vm *VM) string {
-	// Try settings.name
+	// Read directly from vm.task
+	if vm.task != nil && vm.task.Task != nil && strings.TrimSpace(vm.task.Name) != "" {
+		return vm.task.Name
+	}
+	// Fallback for single-node executions: try settings.name
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 	if settings, ok := vm.vars["settings"].(map[string]interface{}); ok {
@@ -2195,6 +2193,7 @@ func resolveWorkflowName(vm *VM) string {
 			return n
 		}
 	}
+	// Backward-compat fallback: try workflowContext.name
 	if wc, ok := vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
 		if n, okn := wc["name"].(string); okn && strings.TrimSpace(n) != "" {
 			return n

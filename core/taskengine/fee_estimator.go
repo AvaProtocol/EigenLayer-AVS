@@ -252,12 +252,12 @@ func (fe *FeeEstimator) estimateSmartWalletCreation(ctx context.Context, req *av
 		}
 		runnerAddress = common.HexToAddress(req.Runner)
 	} else {
-		// Try to extract from input_variables.workflowContext.runner
-		if workflowCtx, ok := req.InputVariables["workflowContext"]; ok {
-			if ctxMap, ok := workflowCtx.AsInterface().(map[string]interface{}); ok {
-				if runner, ok := ctxMap["runner"].(string); ok && runner != "" {
+		// Try to extract from input_variables.settings.runner
+		if settingsVal, ok := req.InputVariables["settings"]; ok {
+			if settingsMap, ok := settingsVal.AsInterface().(map[string]interface{}); ok {
+				if runner, ok := settingsMap["runner"].(string); ok && runner != "" {
 					if !common.IsHexAddress(runner) {
-						return common.Address{}, nil, fmt.Errorf("invalid runner address in workflowContext: %s", runner)
+						return common.Address{}, nil, fmt.Errorf("invalid runner address in settings: %s", runner)
 					}
 					runnerAddress = common.HexToAddress(runner)
 				}

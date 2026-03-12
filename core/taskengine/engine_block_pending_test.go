@@ -25,7 +25,7 @@ func TestTriggerTask_NonBlockingBlock_PersistsPendingAndReturnsId(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Failed to get wallet: %v", err)
 	}
-	tr.SmartWalletAddress = walletResp.Address
+	testutil.SetTaskSettings(tr, "rest_task", walletResp.Address)
 
 	created, err := n.CreateTask(testutil.TestUser1(), tr)
 	if err != nil {

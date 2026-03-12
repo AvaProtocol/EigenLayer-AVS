@@ -71,7 +71,7 @@ func ValidateTemplateVariableResolution(resolvedValue, originalValue string, vm 
 
 // isSystemVariable checks if a variable name is a system variable (not a node dependency)
 func isSystemVariable(varName string) bool {
-	systemVars := []string{"settings", "trigger", "workflowContext", "apContext", "secrets", "env"}
+	systemVars := []string{"settings", "trigger", "context", "workflowContext", "apContext", "secrets", "env"}
 	for _, sysVar := range systemVars {
 		if varName == sysVar {
 			return true

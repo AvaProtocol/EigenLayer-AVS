@@ -33,8 +33,7 @@ func TestListTasksByUserPaginationWithBeforeAfter(t *testing.T) {
 
 	for i := 0; i < totalTestTasks; i++ {
 		task := testutil.RestTask()
-		task.Name = fmt.Sprintf("task%d", i)
-		task.SmartWalletAddress = wallet.Address
+		testutil.SetTaskSettings(task, fmt.Sprintf("task%d", i), wallet.Address)
 		_, err := n.CreateTask(user, task)
 		if err != nil {
 			t.Fatalf("Failed to create task: %v", err)
