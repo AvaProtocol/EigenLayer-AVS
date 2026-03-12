@@ -27,6 +27,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/services"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
@@ -929,6 +930,11 @@ func (r *RpcServer) SimulateTask(ctx context.Context, req *avsproto.SimulateTask
 	}
 	if len(req.Nodes) == 0 {
 		return nil, status.Errorf(codes.InvalidArgument, "at least one node is required for task simulation")
+	}
+
+	// Validate inputVariables.settings (same requirements as CreateTask)
+	if err := model.ValidateInputVariablesSettings(req.InputVariables); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid task argument: %s", err.Error())
 	}
 
 	// Convert protobuf input variables to Go native types

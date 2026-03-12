@@ -122,6 +122,32 @@ func extractSettings(inputVariables map[string]*structpb.Value) (map[string]inte
 	return settings, nil
 }
 
+// ValidateInputVariablesSettings validates that inputVariables contains a valid
+// settings object with required name and runner fields. Used by both CreateTask
+// and SimulateTask to enforce consistent validation.
+func ValidateInputVariablesSettings(inputVariables map[string]*structpb.Value) error {
+	settings, err := extractSettings(inputVariables)
+	if err != nil {
+		return err
+	}
+
+	name, _ := settings["name"].(string)
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("inputVariables.settings.name is required")
+	}
+
+	runner, _ := settings["runner"].(string)
+	if strings.TrimSpace(runner) == "" {
+		return fmt.Errorf("inputVariables.settings.runner is required")
+	}
+
+	if !common.IsHexAddress(runner) {
+		return fmt.Errorf("inputVariables.settings.runner must be a valid hex address")
+	}
+
+	return nil
+}
+
 // enrichSettings adds server-generated immutable fields to the settings map
 // and writes the enriched settings back to inputVariables.
 func enrichSettings(inputVariables map[string]*structpb.Value, settings map[string]interface{}, taskID string, owner common.Address, body *avsproto.CreateTaskReq) error {

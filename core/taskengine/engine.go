@@ -2506,28 +2506,37 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 // This is useful for testing tasks without waiting for actual trigger conditions.
 // The task definition is provided in the request, so no storage persistence is required.
 func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, inputVariables map[string]interface{}) (*avsproto.Execution, error) {
+	// Validate inputVariables.settings (same requirements as CreateTask)
+	settingsIface, ok := inputVariables["settings"]
+	if !ok {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid task argument: inputVariables.settings is required")
+	}
+	settings, ok := settingsIface.(map[string]interface{})
+	if !ok {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid task argument: inputVariables.settings must be an object")
+	}
+	taskName, _ := settings["name"].(string)
+	if strings.TrimSpace(taskName) == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid task argument: inputVariables.settings.name is required")
+	}
+	smartWalletAddress, _ := settings["runner"].(string)
+	if strings.TrimSpace(smartWalletAddress) == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid task argument: inputVariables.settings.runner is required")
+	}
+
 	// Create a temporary task structure for simulation (not saved to storage)
 	simulationTaskID := model.GenerateID()
 
-	// Extract workflow name from inputVariables.settings.name (canonical source)
-	taskName := "Workflow"
-	if settingsIface, ok := inputVariables["settings"]; ok {
-		if settings, ok := settingsIface.(map[string]interface{}); ok {
-			if name, ok := settings["name"].(string); ok && strings.TrimSpace(name) != "" {
-				taskName = name
-			}
-		}
-	}
-
 	task := &model.Task{
 		Task: &avsproto.Task{
-			Id:      simulationTaskID,
-			Name:    taskName,
-			Owner:   user.Address.Hex(),
-			Trigger: trigger,
-			Nodes:   nodes,
-			Edges:   edges,
-			Status:  avsproto.TaskStatus_Enabled, // Set as enabled for simulation
+			Id:                 simulationTaskID,
+			Name:               taskName,
+			Owner:              user.Address.Hex(),
+			SmartWalletAddress: smartWalletAddress,
+			Trigger:            trigger,
+			Nodes:              nodes,
+			Edges:              edges,
+			Status:             avsproto.TaskStatus_Enabled, // Set as enabled for simulation
 		},
 	}
 

@@ -22,6 +22,10 @@ func TestInputVariables_UsageExamples(t *testing.T) {
 
 	// Define input variables that will be used in nodes
 	inputVariables := map[string]interface{}{
+		"settings": map[string]interface{}{
+			"name":   "Input Variables Usage Examples",
+			"runner": "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6",
+		},
 		// Simple variables
 		"contractAddress": "0xA0b86a33E6441e4EF45bAcfCaAd5C7f899342E38",
 		"recipient":       "0x742d35Cc6634C0532925a3b8D2C0e3e0C8C8E1c7",
