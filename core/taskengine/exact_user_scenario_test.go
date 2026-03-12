@@ -31,12 +31,9 @@ func TestExactUserScenarioLoopBehavior(t *testing.T) {
 				"pathParams": []interface{}{map[string]interface{}{"key": "pathKey", "value": "pathValue"}},
 			},
 		},
-		"workflowContext": map[string]interface{}{
-			"id":         "b11e5165-be36-4b97-a36a-52ac8c2c67ca",
-			"chainId":    nil,
-			"name":       "Jul 11, 2025 5:04 PM",
-			"userId":     "03396f6d-9fb7-49f9-96a5-9025c4998e40",
-			"eoaAddress": "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9",
+		"settings": map[string]interface{}{
+			"name":   "Jul 11, 2025 5:04 PM",
+			"runner": "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
 		},
 	}
 

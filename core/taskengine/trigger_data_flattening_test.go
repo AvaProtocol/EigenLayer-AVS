@@ -33,7 +33,7 @@ func TestBuildTriggerDataMapEventTriggerFlattening(t *testing.T) {
 			"blockNumber":      uint64(8560047),
 			"blockTimestamp":   uint64(1750061412000),
 			"fromAddress":      "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-			"toAddress":        "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9",
+			"toAddress":        "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
 			"value":            "0x00000000000000000000000000000000000000000000000000000000004c4b40",
 			"valueFormatted":   "5",
 			"transactionIndex": uint32(63),
@@ -53,7 +53,7 @@ func TestBuildTriggerDataMapEventTriggerFlattening(t *testing.T) {
 	assert.Equal(t, uint64(8560047), result["blockNumber"], "blockNumber should be at top level")
 	assert.Equal(t, uint64(1750061412000), result["blockTimestamp"], "blockTimestamp should be at top level")
 	assert.Equal(t, "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788", result["fromAddress"], "fromAddress should be at top level")
-	assert.Equal(t, "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9", result["toAddress"], "toAddress should be at top level")
+	assert.Equal(t, "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557", result["toAddress"], "toAddress should be at top level")
 	assert.Equal(t, "0x00000000000000000000000000000000000000000000000000000000004c4b40", result["value"], "value should be at top level")
 	assert.Equal(t, "5", result["valueFormatted"], "valueFormatted should be at top level")
 	assert.Equal(t, uint32(63), result["transactionIndex"], "transactionIndex should be at top level")
@@ -88,7 +88,7 @@ func TestBuildTriggerDataMapFromProtobufConsistency(t *testing.T) {
 		"blockNumber":      8560047,
 		"blockTimestamp":   1750061412000,
 		"fromAddress":      "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-		"toAddress":        "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9",
+		"toAddress":        "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
 		"value":            "0x00000000000000000000000000000000000000000000000000000000004c4b40",
 		"valueFormatted":   "5",
 		"transactionIndex": 63,
@@ -198,7 +198,7 @@ func TestJavaScriptFieldAccessPattern(t *testing.T) {
 			"tokenSymbol":    "USDC",
 			"valueFormatted": "5",
 			"fromAddress":    "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-			"toAddress":      "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9",
+			"toAddress":      "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
 			"blockTimestamp": uint64(1750061412000),
 		},
 	}
@@ -223,7 +223,7 @@ func TestJavaScriptFieldAccessPattern(t *testing.T) {
 	assert.Equal(t, "USDC", tokenSymbol, "tokenSymbol should not be undefined")
 	assert.Equal(t, "5", valueFormatted, "valueFormatted should not be undefined")
 	assert.Equal(t, "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788", fromAddress, "fromAddress should not be undefined")
-	assert.Equal(t, "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9", toAddress, "toAddress should not be undefined")
+	assert.Equal(t, "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557", toAddress, "toAddress should not be undefined")
 	assert.Equal(t, uint64(1750061412000), blockTimestamp, "blockTimestamp should not be NaN")
 
 	t.Logf("✅ All JavaScript destructuring fields are available:")

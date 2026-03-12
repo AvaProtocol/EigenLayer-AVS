@@ -150,7 +150,7 @@ func TestBuildFilterQueriesDistinguishFromTo(t *testing.T) {
 	// Create a task with FROM and TO transfer queries (different queries)
 	taskID := "test-task-from-to"
 	maxEvents := uint32(100)
-	coreAddress := "0xfe66125343aabda4a330da667431ec1acb7bbda9"
+	coreAddress := "0x804e49e8c4edb560ae7c48b554f6d2e27bb81557"
 
 	// Query 1: Transfer FROM core.address (topic[1] = coreAddress, topic[2] = wildcard)
 	query1 := &avsproto.EventTrigger_Query{
@@ -322,7 +322,7 @@ func TestEventTriggerQueryDeduplication(t *testing.T) {
 	}
 
 	// Test address
-	targetAddress := "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9"
+	targetAddress := "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557"
 
 	// Create FROM and TO queries
 	fromQuery := &avsproto.EventTrigger_Query{
@@ -409,7 +409,7 @@ func TestConvertToFilterQueryClientFormat(t *testing.T) {
 	}
 
 	// Test address
-	targetAddress := "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9"
+	targetAddress := "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557"
 
 	// Create FROM query in client format (flat topics array)
 	fromQuery := &avsproto.EventTrigger_Query{
@@ -482,7 +482,7 @@ func TestTOSubscriptionFilter(t *testing.T) {
 		Topics: []string{
 			"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer signature
 			"", // Any FROM address (wildcard)
-			"0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9", // TO address
+			"0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557", // TO address
 		},
 	}
 
@@ -542,7 +542,7 @@ func TestTOSubscriptionFilter(t *testing.T) {
 		t.Errorf("Topic 2 should have 1 value (TO address), got %d", len(ethQuery.Topics[2]))
 	}
 
-	expectedTOAddr := common.HexToAddress("0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9")
+	expectedTOAddr := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
 	if ethQuery.Topics[2][0] != common.HexToHash(expectedTOAddr.Hex()) {
 		t.Errorf("Topic 2 should contain TO address %s, got %s", expectedTOAddr.Hex(), ethQuery.Topics[2][0].Hex())
 	}
@@ -552,7 +552,7 @@ func TestTOSubscriptionFilter(t *testing.T) {
 
 func TestTOAddressFormat(t *testing.T) {
 	// Test the exact format of the TO address in the filter
-	targetAddress := "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9"
+	targetAddress := "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557"
 
 	// Convert to the format used in the filter
 	addr := common.HexToAddress(targetAddress)
@@ -571,8 +571,8 @@ func TestTOAddressFormat(t *testing.T) {
 	}
 
 	// Test the actual event data from the transaction
-	// From the transaction: To: 0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9
-	eventToAddr := common.HexToAddress("0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9")
+	// From the transaction: To: 0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557
+	eventToAddr := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
 	eventToHash := common.HexToHash(eventToAddr.Hex())
 
 	t.Logf("Event TO address: %s", eventToAddr.Hex())
@@ -590,7 +590,7 @@ func TestExactTransactionMatch(t *testing.T) {
 	// Test the exact transaction from Etherscan: 0x2e52c134f543a5930b104dc6ffb572595d98d29d70be765c405a58ce27331cf4
 	// Block: 8559161, Contract: 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238
 	// From: 0x274888BaB7Cf5191b17E54618F5F2822dF76b05F
-	// To: 0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9
+	// To: 0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557
 
 	// Create the exact log from the transaction
 	log := types.Log{
@@ -630,7 +630,7 @@ func TestExactTransactionMatch(t *testing.T) {
 	t.Logf("  Contract: %s", log.Address.Hex())
 	t.Logf("  From: %s", common.HexToAddress(log.Topics[1].Hex()).Hex())
 	t.Logf("  To: %s", common.HexToAddress(log.Topics[2].Hex()).Hex())
-	t.Logf("  Target: %s", "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9")
+	t.Logf("  Target: %s", "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
 
 	t.Logf("TO Filter details:")
 	t.Logf("  Addresses: %v", toFilter.Addresses)
@@ -683,7 +683,7 @@ func TestSpecificTOTransaction(t *testing.T) {
 	// Test the specific TO transaction that wasn't detected: 0xe5bdbc6ed533549b35e4a8259df818188b359e5f727db8e4d712593c235dc793
 	// Block: 8559239, Contract: 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238
 	// From: 0x274888BaB7Cf5191b17E54618F5F2822dF76b05F
-	// To: 0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9
+	// To: 0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557
 
 	// Create the exact log from the transaction
 	log := types.Log{
@@ -723,7 +723,7 @@ func TestSpecificTOTransaction(t *testing.T) {
 	t.Logf("  Contract: %s", log.Address.Hex())
 	t.Logf("  From: %s", common.HexToAddress(log.Topics[1].Hex()).Hex())
 	t.Logf("  To: %s", common.HexToAddress(log.Topics[2].Hex()).Hex())
-	t.Logf("  Target: %s", "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9")
+	t.Logf("  Target: %s", "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
 
 	t.Logf("TO Filter details:")
 	t.Logf("  Addresses: %v", toFilter.Addresses)
