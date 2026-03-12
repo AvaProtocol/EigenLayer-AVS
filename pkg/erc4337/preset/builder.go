@@ -527,8 +527,8 @@ func sendUserOpShared(
 	// NOTE on nonce safety: BuildUserOpWithPaymaster calls GetNextNonce internally, which is
 	// a read-only operation on the NonceManager cache (it does NOT call IncrementNonce or
 	// SetNonce). These temporary UserOps are never sent, so the cache is not polluted by
-	// gas estimation calls. Only a successful send (IncrementNonce at line ~959) advances
-	// the cached nonce.
+	// gas estimation calls. The cached nonce is only advanced when IncrementNonce is invoked
+	// after a successful send.
 	var unwrappedGasEstimate *bundler.GasEstimation
 	if paymasterReq != nil && !paymasterReq.SkipReimbursement {
 		// Build a temporary UserOp with unwrapped calldata to get accurate gas estimate
@@ -1004,8 +1004,6 @@ func sendUserOpCore(
 					freshNonce = new(big.Int).Add(userOp.Nonce, big.NewInt(1))
 					l.Debug("Nonce unchanged, incrementing past pending UserOp",
 						"old_nonce", userOp.Nonce.String(), "new_nonce", freshNonce.String())
-					// Update the cache so subsequent UserOps also see this pending nonce
-					globalNonceManager.SetNonce(userOp.Sender, new(big.Int).Add(freshNonce, big.NewInt(1)))
 				}
 
 				// For paymaster UserOps, we cannot simply update the nonce because the
@@ -1013,17 +1011,21 @@ func sendUserOpCore(
 				// would require rebuilding the entire UserOp (new paymaster hash, new
 				// paymaster signature, new UserOp signature), which is not possible in
 				// this retry loop. Log a clear message and skip the retry.
-				hasPaymaster := len(userOp.PaymasterAndData) > 0
+				// Check this BEFORE updating the cache to avoid advancing past an unsent nonce.
+				hasPaymaster = len(userOp.PaymasterAndData) > 0
 				if hasPaymaster {
 					l.Warn("Cannot retry paymaster UserOp with new nonce: paymaster signature is bound to original nonce",
 						"sender", userOp.Sender.Hex(),
 						"original_nonce", userOp.Nonce.String(),
 						"would_need_nonce", freshNonce.String())
 					// Do not update userOp.Nonce — it would break the paymaster signature.
-					// The cache is still intact so other concurrent UserOps benefit from it.
+					// Do not update the cache either — we didn't send at this nonce.
 					break
 				}
 
+				// Update the cache to the nonce we are about to use; further advancement
+				// should only happen after a successful send (via IncrementNonce).
+				globalNonceManager.SetNonce(userOp.Sender, freshNonce)
 				userOp.Nonce = freshNonce
 				continue
 			}
