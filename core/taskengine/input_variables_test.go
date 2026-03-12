@@ -583,10 +583,10 @@ func TestInputVariables_EmptyInputVariables(t *testing.T) {
 		},
 	}
 
-	// SimulateTask should reject nil inputVariables (settings is required)
+	// SimulateTask should reject nil inputVariables
 	_, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "inputVariables.settings is required")
+	assert.Contains(t, err.Error(), "inputVariables is required")
 
 	t.Logf("✅ Empty input variables test completed successfully")
 }

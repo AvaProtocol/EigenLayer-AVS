@@ -102,12 +102,21 @@ Note: `executionIndex` is NOT a Task-level field. It belongs on the `Execution` 
 
 **Summary**: ListTasks response is fully backward-compatible. No changes.
 
-### Simulation (RunNodeWithInputs / TriggerTask) — what changes
+### Simulation (SimulateTask / simulateWorkflow) — what changes
 
 | Aspect | Current behavior | New behavior | SDK action |
 |---|---|---|---|
-| `input_variables.settings` | Client sends `name`, `runner`, `chain`, `chain_id` | **Same — no change** | No change (simulation already uses settings) |
+| `input_variables.settings` | Optional — aggregator fell back to `taskName := "Workflow"` if missing | **REQUIRED — same as CreateTask.** Aggregator validates `settings.name` and `settings.runner` via shared `ValidateInputVariablesSettings()`. Rejects with `InvalidArgument` if missing. | SDK must always pass `inputVariables.settings` with `name` and `runner` |
+| `input_variables.settings.name` | Ignored (hardcoded to `"Workflow"`) | **REQUIRED.** Used as `task.Name` on the simulation task object | Pass workflow name in `settings.name` |
+| `input_variables.settings.runner` | Ignored (not set on simulation task) | **REQUIRED.** Used as `task.SmartWalletAddress` on the simulation task object | Pass smart wallet address in `settings.runner` |
+| Validation | No validation — any or no inputVariables accepted | **Dual-layer validation**: RPC layer (`rpc_server.go`) validates protobuf, engine layer (`engine.go`) validates Go native types | No SDK change needed (server rejects bad requests) |
 | `workflowContext` | Not available in simulation | Replaced by `context` (also not available in simulation) | No change |
+
+### RunNodeWithInputs — what changes
+
+| Aspect | Current behavior | New behavior | SDK action |
+|---|---|---|---|
+| `input_variables.settings` | Client sends `runner`, `chain`, `chain_id` | **Same — no change** | No change (already uses settings for runner context) |
 
 ### JS variable access in workflow nodes — what changes
 
@@ -168,15 +177,25 @@ VM (at execution time)
 
 ## 5. Implementation Phases
 
-### Phase 1: Aggregator — require settings, enrich, and copy to Task fields
+### Phase 1: Aggregator — require settings, enrich, and copy to Task fields ✅
 
-**File: `model/task.go` (`NewTaskFromProtobuf`)**
+**File: `model/task.go`**
 
-- Validate `inputVariables.settings` exists with `name` and `runner`
-- Enrich settings with `id`, `owner`, `startAt`, `expiredAt`, `maxExecution`
-- Write enriched settings back to `inputVariables`
-- Copy `settings.name` → `task.Name`, `settings.runner` → `task.SmartWalletAddress`
-- Ignore `body.Name` and `body.SmartWalletAddress`
+- `ValidateInputVariablesSettings()` — shared validation for both CreateTask and SimulateTask: requires `settings.name` (non-empty) and `settings.runner` (valid hex address)
+- `NewTaskFromProtobuf()` — validates, enriches settings with `id`, `owner`, `startAt`, `expiredAt`, `maxExecution`, copies to Task fields
+- `enrichSettings()` — writes server fields back into `inputVariables.settings`
+- `body.Name` and `body.SmartWalletAddress` are **ignored** — all reads come from `settings`
+
+**File: `aggregator/rpc_server.go` (`SimulateTask`)**
+
+- Calls `model.ValidateInputVariablesSettings(req.InputVariables)` before processing — same validation as CreateTask
+- Rejects with `InvalidArgument` if `settings.name` or `settings.runner` is missing
+
+**File: `core/taskengine/engine.go` (`SimulateTask`)**
+
+- Engine-level validation of `inputVariables["settings"]` with `name` and `runner` (for Go unit tests that call engine directly)
+- Sets `task.Name` and `task.SmartWalletAddress` from settings on the simulation task object
+- No more `"Workflow"` fallback name
 
 ### Phase 2: Aggregator — Go code reads vm.task directly
 
@@ -208,12 +227,14 @@ v.AddVar("context", context)
 
 `settings` is already loaded from `task.InputVariables` at vm.go:413-418.
 
-### Phase 4: Client and SDK updates
+### Phase 4: Client and SDK updates ✅
 
 **SDK (ava-sdk-js):**
-- `Workflow.toRequest()`: populate `inputVariables.settings` with `name` and `runner`
-- Stop sending `body.Name` and `body.SmartWalletAddress` as top-level fields
-- Tests: use `inputVariables.settings` as the primary way to set workflow metadata
+- `Workflow.toRequest()`: passes `inputVariables` transparently (callers provide `settings` with `name` and `runner`)
+- `toRequest()` no longer calls `setName()` or `setSmartWalletAddress()` on CreateTaskReq
+- `simulateWorkflow()`: all calls now pass `inputVariables.settings` with `name` and `runner`
+- Test helpers: `getSettings(runner, name)` returns `{ name, runner, chain_id, chain }`; `getInputVariables(name, runner)` wraps in `{ settings: ... }`
+- All tests updated to use `inputVariables.settings` as the primary way to set workflow metadata
 
 **Next.js Studio:**
 - WorkflowSettings node: already sends settings — no change needed

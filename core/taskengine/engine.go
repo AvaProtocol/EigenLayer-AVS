@@ -2507,6 +2507,9 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 // The task definition is provided in the request, so no storage persistence is required.
 func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, inputVariables map[string]interface{}) (*avsproto.Execution, error) {
 	// Validate inputVariables.settings (same requirements as CreateTask)
+	if inputVariables == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid task argument: inputVariables is required")
+	}
 	settingsIface, ok := inputVariables["settings"]
 	if !ok {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid task argument: inputVariables.settings is required")
@@ -2523,6 +2526,13 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	if strings.TrimSpace(smartWalletAddress) == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid task argument: inputVariables.settings.runner is required")
 	}
+	if !common.IsHexAddress(smartWalletAddress) {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid task argument: inputVariables.settings.runner must be a valid hex address")
+	}
+
+	// Note: SimulateTask intentionally skips ValidWalletOwner. Simulations are
+	// allowed against any valid address so users can test workflows before
+	// deploying smart wallets. Ownership is enforced only on CreateTask.
 
 	// Create a temporary task structure for simulation (not saved to storage)
 	simulationTaskID := model.GenerateID()
