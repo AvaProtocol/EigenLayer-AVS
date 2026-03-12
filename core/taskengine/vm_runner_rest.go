@@ -10,6 +10,7 @@ import (
 	"time"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-resty/resty/v2"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -681,7 +682,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 							}
 						}
 					}
-					if ownerEOA == "" && r.vm.TaskOwner.Hex() != "0x0000000000000000000000000000000000000000" {
+					if ownerEOA == "" && r.vm.TaskOwner != (common.Address{}) {
 						ownerEOA = r.vm.TaskOwner.Hex()
 					}
 					r.vm.mu.Unlock()

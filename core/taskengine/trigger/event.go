@@ -234,7 +234,7 @@ func (t *EventTrigger) rebuildSubscriptionSlice() {
 // Must be called with subsMutex held. Used after full rebuilds (initial setup, reconnection).
 // When multiple subscription instances exist for the same query key, duplicates are unsubscribed
 // to prevent resource leaks.
-func (t *EventTrigger) populateQuerySubscriptions(queries []QueryInfo) {
+func (t *EventTrigger) populateQuerySubscriptions() {
 	t.querySubscriptions = make(map[string]*managedSubscription)
 	for _, subInfo := range t.subscriptions {
 		key := t.createQueryKey(subInfo.query)
@@ -473,7 +473,7 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 				"topics", queryInfo.Query.Topics)
 		}
 	}
-	t.populateQuerySubscriptions(queries)
+	t.populateQuerySubscriptions()
 	t.subsMutex.Unlock()
 
 	// Create error channel that collects errors from all subscriptions
@@ -735,7 +735,7 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 					}(i, sub, queryInfo.Description)
 				}
 				// Rebuild querySubscriptions from the new flat subscriptions
-				t.populateQuerySubscriptions(newQueries)
+				t.populateQuerySubscriptions()
 				t.subsMutex.Unlock()
 
 				t.logger.Info("🔌 Reconnection completed", "active_subscriptions", len(newQueries))
