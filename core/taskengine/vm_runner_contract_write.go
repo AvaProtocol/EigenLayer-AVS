@@ -630,25 +630,20 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	aa.SetFactoryAddress(r.smartWalletConfig.FactoryAddress)
 	aa.SetEntrypointAddress(r.smartWalletConfig.EntrypointAddress)
 
-	// Optional runner validation: if workflowContext.runner is provided, ensure it matches
+	// Optional runner validation: if task.SmartWalletAddress is set, ensure it matches
 	// one of the owner EOA's known smart wallets (authoritative). If wallet list cannot be checked,
 	// fall back to checking the derived salt:0 address as a best-effort sanity check.
-	if wfCtxIface, ok := r.vm.vars[WorkflowContextVarName]; ok {
-		if wfCtx, ok := wfCtxIface.(map[string]interface{}); ok {
-			if runnerIface, ok := wfCtx["runner"]; ok {
-				if runnerStr, ok := runnerIface.(string); ok && runnerStr != "" {
-					client, err := ethclient.Dial(r.smartWalletConfig.EthRpcUrl)
-					if err == nil {
-						// derive sender at salt:0
-						sender, derr := aa.GetSenderAddress(client, r.owner, big.NewInt(0))
-						client.Close()
-						if derr == nil && sender != nil {
-							if !strings.EqualFold(sender.Hex(), runnerStr) {
-								// Do not fail solely on derived salt:0 mismatch; authoritative check is the wallet list in run_node path
-								r.vm.logger.Warn("runner does not match derived salt:0; proceeding (wallet list validation applies in run_node)", "expected", sender.Hex(), "runner", runnerStr)
-							}
-						}
-					}
+	if r.vm.task != nil && r.vm.task.Task != nil && r.vm.task.SmartWalletAddress != "" {
+		runnerStr := r.vm.task.SmartWalletAddress
+		client, err := ethclient.Dial(r.smartWalletConfig.EthRpcUrl)
+		if err == nil {
+			// derive sender at salt:0
+			sender, derr := aa.GetSenderAddress(client, r.owner, big.NewInt(0))
+			client.Close()
+			if derr == nil && sender != nil {
+				if !strings.EqualFold(sender.Hex(), runnerStr) {
+					// Do not fail solely on derived salt:0 mismatch; authoritative check is the wallet list in run_node path
+					r.vm.logger.Warn("runner does not match derived salt:0; proceeding (wallet list validation applies in run_node)", "expected", sender.Hex(), "runner", runnerStr)
 				}
 			}
 		}

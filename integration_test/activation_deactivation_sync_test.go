@@ -70,7 +70,7 @@ func TestActivationDeactivationSyncWithConfigs(t *testing.T) {
 	// Create a task (initially Active)
 	user := testutil.TestUser1()
 	taskReq := testutil.RestTask()
-	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	task, err := engine.CreateTask(user, taskReq)
 	require.NoError(t, err)
 

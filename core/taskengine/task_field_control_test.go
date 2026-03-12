@@ -29,8 +29,7 @@ func TestListTasksFieldControl(t *testing.T) {
 
 	// Create a test task with nodes and edges
 	taskReq := testutil.RestTask()
-	taskReq.Name = "test_task_field_control"
-	taskReq.SmartWalletAddress = smartWalletAddress
+	testutil.SetTaskSettings(taskReq, "test_task_field_control", smartWalletAddress)
 
 	// Ensure the task has nodes and edges for testing
 	assert.NotEmpty(t, taskReq.Nodes, "Test task should have nodes")
@@ -123,8 +122,7 @@ func TestListTasksFieldControl(t *testing.T) {
 		// Create additional tasks for pagination testing
 		for i := 1; i <= 3; i++ {
 			additionalTask := testutil.RestTask()
-			additionalTask.Name = fmt.Sprintf("task_%d", i)
-			additionalTask.SmartWalletAddress = smartWalletAddress
+			testutil.SetTaskSettings(additionalTask, fmt.Sprintf("task_%d", i), smartWalletAddress)
 			_, err := n.CreateTask(user, additionalTask)
 			assert.NoError(t, err)
 		}
@@ -172,8 +170,7 @@ func TestTaskFieldControlPerformance(t *testing.T) {
 	numTasks := 5
 	for i := 0; i < numTasks; i++ {
 		taskReq := testutil.RestTask()
-		taskReq.Name = fmt.Sprintf("perf_task_%d", i)
-		taskReq.SmartWalletAddress = smartWalletAddress
+		testutil.SetTaskSettings(taskReq, fmt.Sprintf("perf_task_%d", i), smartWalletAddress)
 		_, err := n.CreateTask(user, taskReq)
 		assert.NoError(t, err)
 	}
@@ -241,8 +238,7 @@ func TestTaskFieldControlConsistency(t *testing.T) {
 
 	// Create a test task
 	taskReq := testutil.RestTask()
-	taskReq.Name = "consistency_test_task"
-	taskReq.SmartWalletAddress = smartWalletAddress
+	testutil.SetTaskSettings(taskReq, "consistency_test_task", smartWalletAddress)
 
 	createdTask, err := n.CreateTask(user, taskReq)
 	assert.NoError(t, err)

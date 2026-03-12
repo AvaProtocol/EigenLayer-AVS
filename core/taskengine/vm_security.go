@@ -45,7 +45,7 @@ func DefaultSecurityConfig() *SecurityConfig {
 			"address", "amount", "balance", "symbol", "decimals", "price", "total",
 			"from", "to", "hash", "receipt", "success", "error", "message",
 			// Node context
-			"apContext", "configVars", "workflowContext",
+			"apContext", "configVars", "context", "workflowContext",
 			// Filter and iteration context
 			"item", "index", "current", "previous", "next",
 			// Common object properties

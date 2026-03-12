@@ -75,7 +75,7 @@ func TestNotifyOperatorsTaskOperation_DeleteTask(t *testing.T) {
 
 	// Create a test task
 	taskReq := testutil.RestTask()
-	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	task, err := engine.CreateTask(user, taskReq)
 	assert.NoError(t, err)
 
@@ -132,7 +132,7 @@ func TestNotifyOperatorsTaskOperation_DeactivateTask(t *testing.T) {
 
 	// Create a test task
 	taskReq := testutil.RestTask()
-	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	task, err := engine.CreateTask(user, taskReq)
 	assert.NoError(t, err)
 
@@ -190,7 +190,7 @@ func TestNotifyOperatorsTaskOperation_OnlyNotifiesTrackingOperators(t *testing.T
 
 	// Create a test task
 	taskReq := testutil.RestTask()
-	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	task, err := engine.CreateTask(user, taskReq)
 	assert.NoError(t, err)
 
@@ -322,7 +322,7 @@ func TestDeleteTaskRespFields(t *testing.T) {
 	user := testutil.TestUser1()
 
 	taskReq := testutil.RestTask()
-	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	task, err := engine.CreateTask(user, taskReq)
 	assert.NoError(t, err)
 
@@ -346,7 +346,7 @@ func TestSetTaskEnabledRespFields(t *testing.T) {
 	user := testutil.TestUser1()
 
 	taskReq := testutil.RestTask()
-	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	task, err := engine.CreateTask(user, taskReq)
 	assert.NoError(t, err)
 
@@ -377,7 +377,7 @@ func TestReEnableTaskSendsMonitorNotification(t *testing.T) {
 
 	// Create a test task
 	taskReq := testutil.RestTask()
-	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	task, err := engine.CreateTask(user, taskReq)
 	assert.NoError(t, err)
 
@@ -447,7 +447,7 @@ func TestReEnableTaskRoundTrip(t *testing.T) {
 
 	// Create task
 	taskReq := testutil.RestTask()
-	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	task, err := engine.CreateTask(user, taskReq)
 	assert.NoError(t, err)
 	originalID := task.Id
@@ -505,7 +505,7 @@ func TestReEnableIdempotent(t *testing.T) {
 
 	// Create a task (starts as Enabled)
 	taskReq := testutil.RestTask()
-	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	task, err := engine.CreateTask(user, taskReq)
 	assert.NoError(t, err)
 
@@ -551,7 +551,7 @@ func TestDisableIdempotent(t *testing.T) {
 
 	// Create and disable a task
 	taskReq := testutil.RestTask()
-	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	task, err := engine.CreateTask(user, taskReq)
 	assert.NoError(t, err)
 
@@ -601,7 +601,7 @@ func TestTerminalStatesCannotBeToggled(t *testing.T) {
 
 	// Create a task and manually set it to Completed status
 	taskReq := testutil.RestTask()
-	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	task, err := engine.CreateTask(user, taskReq)
 	assert.NoError(t, err)
 

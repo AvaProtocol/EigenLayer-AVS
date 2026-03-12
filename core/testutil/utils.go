@@ -534,6 +534,68 @@ func GetDefaultCache() *bigcache.BigCache {
 	return cache
 }
 
+// TestSettingsInputVariables creates an inputVariables map with a valid settings object
+// for use in CreateTaskReq. The runner should be a valid hex address (e.g. smart wallet address).
+// SetTaskSettings updates the settings.name and settings.runner in a CreateTaskReq's InputVariables.
+// Use this when tests need to override the default name/runner from RestTask() or JsFastTask().
+func SetTaskSettings(req *avsproto.CreateTaskReq, name, runner string) {
+	if req.InputVariables == nil {
+		req.InputVariables = TestSettingsInputVariables(name, runner)
+		return
+	}
+	settingsVal, ok := req.InputVariables["settings"]
+	if !ok || settingsVal == nil {
+		// Preserve existing keys, only add/replace "settings"
+		settings := map[string]interface{}{
+			"name":   name,
+			"runner": runner,
+		}
+		newVal, err := structpb.NewValue(settings)
+		if err != nil {
+			panic(fmt.Sprintf("failed to create settings: %v", err))
+		}
+		req.InputVariables["settings"] = newVal
+		return
+	}
+	settings, ok := settingsVal.AsInterface().(map[string]interface{})
+	if !ok {
+		// Preserve existing keys, only add/replace "settings"
+		settings := map[string]interface{}{
+			"name":   name,
+			"runner": runner,
+		}
+		newVal, err := structpb.NewValue(settings)
+		if err != nil {
+			panic(fmt.Sprintf("failed to create settings: %v", err))
+		}
+		req.InputVariables["settings"] = newVal
+		return
+	}
+	settings["name"] = name
+	settings["runner"] = runner
+	newVal, err := structpb.NewValue(settings)
+	if err != nil {
+		panic(fmt.Sprintf("failed to update settings: %v", err))
+	}
+	req.InputVariables["settings"] = newVal
+}
+
+func TestSettingsInputVariables(name, runner string) map[string]*structpb.Value {
+	settings := map[string]interface{}{
+		"name":     name,
+		"runner":   runner,
+		"chain":    "sepolia",
+		"chain_id": float64(11155111),
+	}
+	settingsValue, err := structpb.NewValue(settings)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create settings value: %v", err))
+	}
+	return map[string]*structpb.Value{
+		"settings": settingsValue,
+	}
+}
+
 func RestTask() *avsproto.CreateTaskReq {
 	node := &avsproto.TaskNode{
 		Id:   "ping1",
@@ -565,9 +627,10 @@ func RestTask() *avsproto.CreateTaskReq {
 				},
 			},
 		},
-		MaxExecution: 1000,
-		Nodes:        []*avsproto.TaskNode{node},
-		Edges:        []*avsproto.TaskEdge{edge},
+		MaxExecution:   1000,
+		Nodes:          []*avsproto.TaskNode{node},
+		Edges:          []*avsproto.TaskEdge{edge},
+		InputVariables: TestSettingsInputVariables("rest_task", TestUser1().SmartAccountAddress.Hex()),
 	}
 	return &tr1
 }
@@ -602,9 +665,10 @@ func JsFastTask() *avsproto.CreateTaskReq {
 				},
 			},
 		},
-		MaxExecution: 1000,
-		Nodes:        []*avsproto.TaskNode{node},
-		Edges:        []*avsproto.TaskEdge{edge},
+		MaxExecution:   1000,
+		Nodes:          []*avsproto.TaskNode{node},
+		Edges:          []*avsproto.TaskEdge{edge},
+		InputVariables: TestSettingsInputVariables("jsfast_task", TestUser1().SmartAccountAddress.Hex()),
 	}
 	return &tr1
 }

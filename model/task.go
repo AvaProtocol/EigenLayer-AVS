@@ -1,16 +1,15 @@
 package model
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
-
-	"google.golang.org/protobuf/encoding/protojson"
-
-	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/oklog/ulid/v2"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -103,6 +102,45 @@ func NewTask() *Task {
 	}
 }
 
+// extractSettings extracts and validates the settings map from inputVariables.
+// Returns the settings map or an error if settings is missing or invalid.
+func extractSettings(inputVariables map[string]*structpb.Value) (map[string]interface{}, error) {
+	if inputVariables == nil {
+		return nil, fmt.Errorf("inputVariables is required")
+	}
+
+	settingsVal, ok := inputVariables["settings"]
+	if !ok || settingsVal == nil {
+		return nil, fmt.Errorf("inputVariables.settings is required")
+	}
+
+	settings, ok := settingsVal.AsInterface().(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("inputVariables.settings must be an object")
+	}
+
+	return settings, nil
+}
+
+// enrichSettings adds server-generated immutable fields to the settings map
+// and writes the enriched settings back to inputVariables.
+func enrichSettings(inputVariables map[string]*structpb.Value, settings map[string]interface{}, taskID string, owner common.Address, body *avsproto.CreateTaskReq) error {
+	settings["id"] = taskID
+	settings["owner"] = owner.Hex()
+	settings["startAt"] = body.StartAt
+	settings["expiredAt"] = body.ExpiredAt
+	settings["maxExecution"] = body.MaxExecution
+
+	// Write enriched settings back to inputVariables
+	enrichedValue, err := structpb.NewValue(settings)
+	if err != nil {
+		return fmt.Errorf("failed to serialize enriched settings: %w", err)
+	}
+	inputVariables["settings"] = enrichedValue
+
+	return nil
+}
+
 // Populate a task structure from proto payload
 func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error) {
 	if body == nil {
@@ -110,13 +148,6 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 	}
 
 	owner := user.Address
-	aaAddress := *user.SmartAccountAddress
-
-	if body.SmartWalletAddress != "" {
-		aaAddress = common.HexToAddress(body.SmartWalletAddress)
-	}
-
-	taskID := GenerateTaskID()
 
 	if len(body.Edges) == 0 {
 		return nil, fmt.Errorf("%s", ErrEmptyEdgesField)
@@ -126,26 +157,52 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 		return nil, fmt.Errorf("%s", ErrEmptyNodesField)
 	}
 
+	// Extract and validate settings from inputVariables
+	settings, err := extractSettings(body.InputVariables)
+	if err != nil {
+		return nil, fmt.Errorf("invalid task argument: %w", err)
+	}
+
+	name, _ := settings["name"].(string)
+	if strings.TrimSpace(name) == "" {
+		return nil, fmt.Errorf("invalid task argument: inputVariables.settings.name is required")
+	}
+
+	runner, _ := settings["runner"].(string)
+	if strings.TrimSpace(runner) == "" {
+		return nil, fmt.Errorf("invalid task argument: inputVariables.settings.runner is required")
+	}
+
+	if !common.IsHexAddress(runner) {
+		return nil, fmt.Errorf("invalid task argument: inputVariables.settings.runner must be a valid hex address")
+	}
+
+	taskID := GenerateTaskID()
+
+	// Enrich settings with server-generated immutable fields
+	if err := enrichSettings(body.InputVariables, settings, taskID, owner, body); err != nil {
+		return nil, fmt.Errorf("invalid task argument: %w", err)
+	}
+
 	t := &Task{
 		Task: &avsproto.Task{
 			Id: taskID,
 
-			// convert back to string with EIP55-compliant
+			// Derive storage/API fields from settings
 			Owner:              owner.Hex(),
-			SmartWalletAddress: aaAddress.Hex(),
+			SmartWalletAddress: common.HexToAddress(runner).Hex(),
+			Name:               name,
 
 			Trigger:        body.Trigger,
 			Nodes:          body.Nodes,
 			Edges:          body.Edges,
-			Name:           body.Name,
 			ExpiredAt:      body.ExpiredAt,
 			StartAt:        body.StartAt,
 			MaxExecution:   body.MaxExecution,
-			InputVariables: body.InputVariables, // Store input variables with the task
+			InputVariables: body.InputVariables, // Contains enriched settings
 
 			// initial state for task
 			Status: avsproto.TaskStatus_Enabled,
-			//Executions: []*avsproto.Execution{},
 		},
 	}
 

@@ -73,7 +73,7 @@ func TestNonBlockingExecutionStability(t *testing.T) {
 		StartAt:            time.Now().UnixMilli(),
 		ExpiredAt:          time.Now().Add(24 * time.Hour).UnixMilli(),
 		MaxExecution:       0, // Unlimited executions
-		Name:               "Non-blocking Stability Test",
+		InputVariables:     testutil.TestSettingsInputVariables("Non-blocking Stability Test", walletResp.Address),
 	}
 
 	// Create the task

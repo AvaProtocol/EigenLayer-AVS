@@ -154,18 +154,15 @@ func TestListTasks(t *testing.T) {
 	smartWallet3Address := wallet3Resp.Address
 
 	tr1 := testutil.RestTask()
-	tr1.Name = "t1"
-	tr1.SmartWalletAddress = smartWallet1Address
+	testutil.SetTaskSettings(tr1, "t1", smartWallet1Address)
 	n.CreateTask(testutil.TestUser1(), tr1)
 
 	tr2 := testutil.RestTask()
-	tr2.Name = "t2"
-	tr2.SmartWalletAddress = smartWallet2Address
+	testutil.SetTaskSettings(tr2, "t2", smartWallet2Address)
 	n.CreateTask(testutil.TestUser1(), tr2)
 
 	tr3 := testutil.RestTask()
-	tr3.Name = "t3"
-	tr3.SmartWalletAddress = smartWallet3Address
+	testutil.SetTaskSettings(tr3, "t3", smartWallet3Address)
 	n.CreateTask(testutil.TestUser1(), tr3)
 
 	result, err := n.ListTasksByUser(testutil.TestUser1(), &avsproto.ListTasksReq{
