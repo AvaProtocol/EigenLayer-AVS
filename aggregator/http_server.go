@@ -60,7 +60,9 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 
 	agg.logger.Infof("Sentry DSN from config: %s", sentryDsn)
 
-	if sentryDsn != "" {
+	// Skip Sentry in development environment to avoid noisy alerts from dev instances
+	isDev := agg.config != nil && agg.config.Environment == sdklogging.Development
+	if sentryDsn != "" && !isDev {
 		serverName := ""
 		if agg.config != nil {
 			serverName = agg.config.ServerName
@@ -68,32 +70,22 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 
 		agg.logger.Infof("Sentry ServerName from config: %s", serverName)
 
-		env := "production"
-		if agg.config != nil && agg.config.Environment == sdklogging.Development {
-			env = "development"
-		}
-
 		release := fmt.Sprintf("%s@%s", version.Get(), version.GetRevision())
 
 		// To initialize Sentry's handler, you need to initialize Sentry itself beforehand
 		if err := sentry.Init(sentry.ClientOptions{
 			Dsn:              sentryDsn,
 			ServerName:       serverName,
-			Environment:      env,
+			Environment:      "production",
 			Release:          release,
 			AttachStacktrace: true,
-			Debug:            env == "development",
-			EnableTracing:    env == "development",
-			// Set TracesSampleRate to 1.0 to capture 100%
-			// of transactions for tracing.
-			// We recommend adjusting this value in production.
 			TracesSampleRate: 1.0,
-			// Adds request headers and IP for users,
-			// visit: https://docs.sentry.io/platforms/go/data-management/data-collected/ for more info
-			SendDefaultPII: true,
+			SendDefaultPII:   true,
 		}); err != nil {
 			agg.logger.Errorf("Sentry initialization failed: %v", err)
 		}
+	} else if isDev && sentryDsn != "" {
+		agg.logger.Info("Sentry disabled in development environment")
 	}
 
 	e := echo.New()
