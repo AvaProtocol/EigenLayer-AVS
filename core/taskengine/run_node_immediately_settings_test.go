@@ -81,7 +81,7 @@ func TestContractWrite_WithSettingsAndUserAuth(t *testing.T) {
 			"gasLimit": "210000",
 		}
 
-		// Input variables using NEW settings format (not workflowContext)
+		// Input variables with settings
 		inputVariables := map[string]interface{}{
 			"settings": map[string]interface{}{
 				"runner":   runnerAddr.Hex(),

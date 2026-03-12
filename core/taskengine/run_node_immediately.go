@@ -2961,7 +2961,7 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 			return nil, fmt.Errorf("authentication required for %s", nodeType)
 		}
 
-		// Look for runner in settings instead of workflowContext
+		// Look for runner in settings
 		if settingsIface, ok := inputVariables["settings"]; ok {
 			if settings, ok := settingsIface.(map[string]interface{}); ok {
 				if n.logger != nil {

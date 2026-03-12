@@ -28,7 +28,7 @@ import (
 //
 // SCOPE:
 // - Only applies to node_name.data patterns (workflow node outputs)
-// - Other variables like {{workflowContext.user_id}} remain unchanged
+// - Other variables like {{settings.user_id}} remain unchanged
 // - Works for nested paths: {{node.data.response.api_key}} -> {{node.data.response.apiKey}}
 func TestConsistentCamelCaseResolution(t *testing.T) {
 	engine := createTestEngineForSmartResolution(t)
@@ -203,20 +203,20 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 	t.Run("NonNodeDataVariablesUnchanged", func(t *testing.T) {
 		// DEMONSTRATES: Smart resolution only applies to node_name.data patterns
 		// {{apContext.configVars.api_token}} -> no conversion (not a node.data pattern)
-		// {{workflowContext.user_id}} -> no conversion (not a node.data pattern)
+		// {{manualTrigger.user_id}} -> no conversion (not a node.data pattern)
 		// Only workflow node outputs need snake_case -> camelCase fallback
 
 		config := map[string]interface{}{
 			"url":    mockServer.URL + "/post",
 			"method": "POST",
-			"body":   `{"token": "{{apContext.configVars.api_token}}", "user": "{{workflowContext.user_id}}"}`,
+			"body":   `{"token": "{{apContext.configVars.api_token}}", "user": "{{manualTrigger.user_id}}"}`,
 			"headersMap": [][]string{
 				{"Content-Type", "application/json"},
 			},
 		}
 
 		inputVariables := map[string]interface{}{
-			"workflowContext": map[string]interface{}{
+			"manualTrigger": map[string]interface{}{
 				"user_id": "test_user_123", // snake_case should remain as-is
 			},
 		}

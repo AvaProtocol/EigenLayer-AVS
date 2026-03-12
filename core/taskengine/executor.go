@@ -259,7 +259,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		}
 	}
 
-	// Add chain name to workflowContext - extract chainId from enriched event data first, fallback to tokenEnrichmentService
+	// Extract chainId from enriched event data first, fallback to tokenEnrichmentService
 	var chainId uint64
 	var chainIdSource string
 
@@ -364,11 +364,6 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	vm.mu.Lock()
 	if ctx, ok := vm.vars[ContextVarName].(map[string]interface{}); ok {
 		ctx["executionCount"] = task.ExecutionCount
-	}
-	// Also update backward-compat workflowContext
-	if wc, ok := vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
-		wc["executionIndex"] = executionIndex
-		wc["executionCount"] = task.ExecutionCount
 	}
 	vm.mu.Unlock()
 

@@ -262,11 +262,6 @@ func TestAIIntegration_RunNodeImmediately(t *testing.T) {
 			"chain":  "Sepolia",
 			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
 		},
-		WorkflowContextVarName: map[string]interface{}{
-			"name":   "Test RunNode Workflow",
-			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
-			"owner":  "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-		},
 	}
 	vm.mu.Unlock()
 
@@ -480,11 +475,6 @@ func TestAIIntegration_Simulation(t *testing.T) {
 				"address":  "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 				"decimals": float64(18),
 			},
-		},
-		WorkflowContextVarName: map[string]interface{}{
-			"name":   "Test settings.name",
-			"runner": "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
-			"owner":  "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
 		},
 	}
 	vm.mu.Unlock()
@@ -748,12 +738,6 @@ func TestAIIntegration_RealExecution(t *testing.T) {
 			"runner":   "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
 			"chain_id": float64(11155111),
 		},
-		WorkflowContextVarName: map[string]interface{}{
-			"name":           "Stoploss USDC->WETH",
-			"runner":         "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
-			"owner":          "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-			"executionCount": int64(5),
-		},
 	}
 	vm.mu.Unlock()
 
@@ -959,11 +943,6 @@ func TestAIIntegration_FormatConsistency(t *testing.T) {
 			"chain":  "Sepolia",
 			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
 		},
-		WorkflowContextVarName: map[string]interface{}{
-			"name":   "Format Test Workflow",
-			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
-			"owner":  "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-		},
 	}
 	vm.mu.Unlock()
 
@@ -1078,11 +1057,6 @@ func TestAIIntegration_ComposeSummarySmart(t *testing.T) {
 			"name":   "Smart Test Workflow",
 			"chain":  "Sepolia",
 			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
-		},
-		WorkflowContextVarName: map[string]interface{}{
-			"name":   "Smart Test Workflow",
-			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
-			"owner":  "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
 		},
 	}
 	vm.mu.Unlock()

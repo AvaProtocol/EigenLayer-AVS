@@ -1327,12 +1327,11 @@ message EstimateFeesReq {
   int64 expire_at = 5;             // Timestamp when workflow will expire (milliseconds)
   int64 max_execution = 6;         // Maximum number of executions allowed
   
-  // Smart wallet runner (optional - if not provided, extracted from input_variables)
-  // This is kept for backward compatibility, but input_variables.workflowContext.runner is preferred
+  // Smart wallet runner (optional - if not provided, extracted from input_variables.settings.runner)
   string runner = 7;               // Smart wallet address to use for gas estimation
-  
+
   // Input variables for workflow execution simulation
-  // Expected to contain workflowContext with runner, chainId, and other execution context
+  // Must contain settings with runner, name, and other execution context
   map<string, google.protobuf.Value> input_variables = 8;
 }
 

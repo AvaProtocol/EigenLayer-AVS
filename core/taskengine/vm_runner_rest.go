@@ -661,7 +661,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 					dynamicData := s.SendGridDynamicData()
 
 					// Enrich with runner/eoaAddress for template usage.
-					// Read from vm.task directly instead of workflowContext maps.
+					// Read from vm.task directly.
 					smartWallet := ""
 					ownerEOA := ""
 					if r.vm.task != nil && r.vm.task.Task != nil {
