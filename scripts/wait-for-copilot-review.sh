@@ -10,6 +10,12 @@ if [ -z "${BASH_VERSION:-}" ]; then
     exit 1
 fi
 
+# Ensure gh CLI is available and authenticated.
+if ! command -v gh >/dev/null 2>&1; then
+    echo "Error: gh CLI is not installed. Install from https://cli.github.com/" >&2
+    exit 1
+fi
+
 if [ -z "$1" ]; then
     echo "Error: PR number is required" >&2
     echo "Usage: $0 <pr_number> [timeout_seconds]" >&2
