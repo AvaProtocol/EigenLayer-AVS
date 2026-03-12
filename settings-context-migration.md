@@ -16,8 +16,8 @@
 |---|---|---|
 | `settings.name` | Client (REQUIRED) | Workflow name |
 | `settings.runner` | Client (REQUIRED) | Smart wallet address |
-| `settings.chain` | Client (REQUIRED) | Chain name (e.g. "sepolia") |
-| `settings.chain_id` | Client (REQUIRED) | Chain ID (e.g. 11155111) |
+| `settings.chain` | Client (recommended) | Chain name (e.g. "sepolia") — not yet enforced by server |
+| `settings.chain_id` | Client (recommended) | Chain ID (e.g. 11155111) — not yet enforced by server |
 | `settings.isSimulation` | Client (optional) | Simulation flag |
 | `settings.uniswapv3_pool` | Client (optional) | Domain-specific config |
 | `settings.uniswapv3_contracts` | Client (optional) | Domain-specific config |
@@ -52,7 +52,7 @@ Note: `executionIndex` is NOT a Task-level field. It belongs on the `Execution` 
 | `trigger` (field 12) | Client sends | **No change** | No change |
 | `nodes` (field 13) | Client sends | **No change** | No change |
 | `edges` (field 14) | Client sends | **No change** | No change |
-| `input_variables` (field 15) | Client sends (optional) | **MUST include `settings` key** with `name`, `runner`, `chain`, `chain_id` | Ensure `settings` is always populated |
+| `input_variables` (field 15) | Client sends (optional) | **MUST include `settings` key** with `name`, `runner` (required); `chain`, `chain_id` (recommended) | Ensure `settings` is always populated |
 
 ### GetTask response — what changes
 
@@ -135,8 +135,8 @@ Client (Next.js / SDK)
   └─ CreateTaskReq
        ├─ input_variables.settings.name        ← REQUIRED
        ├─ input_variables.settings.runner       ← REQUIRED
-       ├─ input_variables.settings.chain        ← REQUIRED
-       ├─ input_variables.settings.chain_id     ← REQUIRED
+       ├─ input_variables.settings.chain        ← recommended (not yet enforced)
+       ├─ input_variables.settings.chain_id     ← recommended (not yet enforced)
        ├─ input_variables.settings.*            ← optional client fields
        ├─ start_at, expired_at, max_execution   ← top-level scheduling fields
        ├─ trigger, nodes, edges                 ← workflow definition

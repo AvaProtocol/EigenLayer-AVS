@@ -545,12 +545,30 @@ func SetTaskSettings(req *avsproto.CreateTaskReq, name, runner string) {
 	}
 	settingsVal, ok := req.InputVariables["settings"]
 	if !ok || settingsVal == nil {
-		req.InputVariables = TestSettingsInputVariables(name, runner)
+		// Preserve existing keys, only add/replace "settings"
+		settings := map[string]interface{}{
+			"name":   name,
+			"runner": runner,
+		}
+		newVal, err := structpb.NewValue(settings)
+		if err != nil {
+			panic(fmt.Sprintf("failed to create settings: %v", err))
+		}
+		req.InputVariables["settings"] = newVal
 		return
 	}
 	settings, ok := settingsVal.AsInterface().(map[string]interface{})
 	if !ok {
-		req.InputVariables = TestSettingsInputVariables(name, runner)
+		// Preserve existing keys, only add/replace "settings"
+		settings := map[string]interface{}{
+			"name":   name,
+			"runner": runner,
+		}
+		newVal, err := structpb.NewValue(settings)
+		if err != nil {
+			panic(fmt.Sprintf("failed to create settings: %v", err))
+		}
+		req.InputVariables["settings"] = newVal
 		return
 	}
 	settings["name"] = name

@@ -361,16 +361,16 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	// Update the context var with the post-increment executionCount.
 	// executionCount was already incremented above (task.ExecutionCount += 1) but the VM's
 	// context still has the pre-increment value from vm.go.
+	vm.mu.Lock()
 	if ctx, ok := vm.vars[ContextVarName].(map[string]interface{}); ok {
 		ctx["executionCount"] = task.ExecutionCount
-		vm.AddVar(ContextVarName, ctx)
 	}
 	// Also update backward-compat workflowContext
 	if wc, ok := vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
 		wc["executionIndex"] = executionIndex
 		wc["executionCount"] = task.ExecutionCount
-		vm.AddVar(WorkflowContextVarName, wc)
 	}
+	vm.mu.Unlock()
 
 	// Create execution record immediately - this ensures we have a record even if validation fails
 	execution := &avsproto.Execution{
