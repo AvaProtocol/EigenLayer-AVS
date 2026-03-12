@@ -33,7 +33,6 @@ const (
 	VMStateCompleted          VMState = "vm_completed"
 	VMMaxPreprocessIterations         = 100
 	APContextVarName                  = "apContext"
-	WorkflowContextVarName            = "workflowContext" // Deprecated: use ContextVarName
 	ContextVarName                    = "context"
 	ConfigVarsPath                    = "configVars"
 	APContextConfigVarsPath           = APContextVarName + "." + ConfigVarsPath
@@ -404,26 +403,6 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 			"completedAt":    task.CompletedAt,
 		}
 		v.AddVar(ContextVarName, taskContext)
-
-		// Backward-compat: populate workflowContext so existing workflows that reference
-		// {{workflowContext.name}} etc. continue to work until users re-create them.
-		workflowContext := map[string]interface{}{
-			"id":                 task.Id,
-			"name":               task.Name,
-			"owner":              task.Owner,
-			"smartWalletAddress": task.SmartWalletAddress,
-			"runner":             task.SmartWalletAddress,
-			"eoaAddress":         task.Owner,
-			"startAt":            task.StartAt,
-			"expiredAt":          task.ExpiredAt,
-			"completedAt":        task.CompletedAt,
-			"maxExecution":       task.MaxExecution,
-			"executionCount":     task.ExecutionCount,
-			"lastRanAt":          task.LastRanAt,
-			"status":             getTaskStatusString(task.Status),
-			"chain":              "Unknown",
-		}
-		v.AddVar(WorkflowContextVarName, workflowContext)
 
 		// Add input variables from task definition to VM
 		// These variables were defined during workflow creation and are now available globally
@@ -2182,7 +2161,6 @@ func (v *VM) looksLikeVariableReference(content string) bool {
 	// 2. Starts with common variable names
 	commonVarPrefixes := []string{
 		"trigger",
-		"workflowContext",
 		"apContext",
 		"taskContext",
 		"env",
@@ -2239,8 +2217,6 @@ func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 			// Skip system variables that shouldn't appear as inputs
 			if k == APContextVarName {
 				inputKeys = append(inputKeys, APContextConfigVarsPath)
-			} else if k == WorkflowContextVarName {
-				inputKeys = append(inputKeys, WorkflowContextVarName) // Use as-is, no .data suffix
 			} else if k == "triggerConfig" {
 				// Skip triggerConfig system variable - it shouldn't appear in inputsList
 				continue
@@ -2308,8 +2284,6 @@ func (v *VM) CollectInputs() map[string]string {
 		varname := key
 		if varname == APContextVarName {
 			varname = APContextConfigVarsPath
-		} else if varname == WorkflowContextVarName {
-			varname = WorkflowContextVarName // Use as-is, no .data suffix
 		} else {
 			// Check if this is a map variable with .data field
 			if valueMap, ok := value.(map[string]any); ok {

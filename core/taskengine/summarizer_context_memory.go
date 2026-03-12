@@ -342,7 +342,7 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
-	// Read task fields directly from vm.task instead of workflowContext maps.
+	// Read task fields directly from vm.task.
 	var ownerEOA, smartWallet, workflowName, chainName string
 	var executionCount int64
 

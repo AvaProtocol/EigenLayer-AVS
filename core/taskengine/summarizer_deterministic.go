@@ -981,7 +981,7 @@ func composePlainTextBodyFromStructured(trigger string, executions []ExecutionEn
 //   - If any prior step failed, subject: "{workflowName}: failed at {stepName}",
 //     body: "The workflow failed at step \"{stepName}\". Reason: {first line of error}" (truncated internally)
 //   - Otherwise, subject: "{workflowName}: succeeded", body: "Finished {lastStepName}."
-//   - workflowName: settings.name || workflowContext.name || "Workflow"
+//   - workflowName: settings.name || "Workflow"
 //   - step selection: earliest failure; else last successful step if any; else currentStepName fallback
 func ComposeSummary(vm *VM, currentStepName string) Summary {
 	workflowName := resolveWorkflowName(vm)
@@ -2190,12 +2190,6 @@ func resolveWorkflowName(vm *VM) string {
 	defer vm.mu.Unlock()
 	if settings, ok := vm.vars["settings"].(map[string]interface{}); ok {
 		if n, okn := settings["name"].(string); okn && strings.TrimSpace(n) != "" {
-			return n
-		}
-	}
-	// Backward-compat fallback: try workflowContext.name
-	if wc, ok := vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
-		if n, okn := wc["name"].(string); okn && strings.TrimSpace(n) != "" {
 			return n
 		}
 	}

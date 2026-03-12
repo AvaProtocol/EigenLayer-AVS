@@ -165,15 +165,6 @@ func TestSendGridEmailWithContextMemoryResponse(t *testing.T) {
 		"isSimulation": true,
 		"runner":       "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
 	}
-	if wc, ok := vm.vars["workflowContext"].(map[string]interface{}); ok {
-		wc["owner"] = "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788"
-		wc["eoaAddress"] = "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788"
-	} else {
-		vm.vars["workflowContext"] = map[string]interface{}{
-			"owner":      "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-			"eoaAddress": "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-		}
-	}
 	vm.mu.Unlock()
 
 	// Add some execution logs to simulate a workflow execution

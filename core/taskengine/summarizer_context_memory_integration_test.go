@@ -406,11 +406,6 @@ func TestContextMemoryExecutionSummary_FromVM(t *testing.T) {
 			"chain":  "Sepolia",
 			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
 		},
-		WorkflowContextVarName: map[string]interface{}{
-			"name":   "Test template",
-			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
-			"owner":  "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-		},
 	}
 	vm.mu.Unlock()
 
@@ -495,27 +490,16 @@ func buildSummarizeRequestFromVM(vm *VM) SummarizeRequest {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
-	// Extract workflow context
+	// Extract from settings
 	var ownerEOA, smartWallet, workflowName, chainName string
-	if wfCtx, ok := vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
-		if owner, ok := wfCtx["owner"].(string); ok {
-			ownerEOA = owner
-		}
-		if runner, ok := wfCtx["runner"].(string); ok {
-			smartWallet = runner
-		}
-		if name, ok := wfCtx["name"].(string); ok {
-			workflowName = name
-		}
-	}
 	if settings, ok := vm.vars["settings"].(map[string]interface{}); ok {
-		if name, ok := settings["name"].(string); ok && workflowName == "" {
+		if name, ok := settings["name"].(string); ok {
 			workflowName = name
 		}
 		if chain, ok := settings["chain"].(string); ok {
 			chainName = chain
 		}
-		if runner, ok := settings["runner"].(string); ok && smartWallet == "" {
+		if runner, ok := settings["runner"].(string); ok {
 			smartWallet = runner
 		}
 	}
