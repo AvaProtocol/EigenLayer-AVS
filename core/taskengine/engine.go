@@ -896,16 +896,6 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 			"edge_details", edgeDetails)
 	}
 
-	if taskPayload.SmartWalletAddress != "" {
-		if !common.IsHexAddress(taskPayload.SmartWalletAddress) {
-			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
-		}
-
-		if valid, _ := ValidWalletOwner(n.db, user, common.HexToAddress(taskPayload.SmartWalletAddress)); !valid {
-			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
-		}
-	}
-
 	// Validate task expiration date - must be at least 1 hour from now
 	if taskPayload.ExpiredAt > 0 {
 		now := time.Now().Unix() * 1000 // Convert to milliseconds for consistency with frontend
@@ -925,6 +915,15 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "%s", err.Error())
+	}
+
+	// Validate smart wallet ownership. The runner address comes from
+	// inputVariables.settings.runner (via NewTaskFromProtobuf) and is stored
+	// as task.SmartWalletAddress. We must verify the caller owns this wallet.
+	if task.SmartWalletAddress != "" {
+		if valid, _ := ValidWalletOwner(n.db, user, common.HexToAddress(task.SmartWalletAddress)); !valid {
+			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
+		}
 	}
 
 	// Validate all node names for JavaScript compatibility
