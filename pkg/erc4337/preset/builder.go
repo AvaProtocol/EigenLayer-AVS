@@ -2,6 +2,7 @@ package preset
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -76,6 +77,17 @@ var (
 	// to prevent conflicts with transactions pending in the bundler's mempool
 	globalNonceManager = bundler.NewNonceManager(nil)
 )
+
+// ErrPaymasterNonceConflict is returned by sendUserOpCore when a paymaster UserOp
+// hits an AA25 nonce conflict. The paymaster signature is bound to the original nonce,
+// so the entire UserOp must be rebuilt at the sendUserOpShared level with the correct nonce.
+type ErrPaymasterNonceConflict struct {
+	Nonce *big.Int // The correct nonce to use for the rebuild
+}
+
+func (e *ErrPaymasterNonceConflict) Error() string {
+	return fmt.Sprintf("paymaster nonce conflict: rebuild required with nonce %s", e.Nonce.String())
+}
 
 // VerifyingPaymasterRequest contains the parameters needed for paymaster functionality. This use the reference from https://github.com/eth-optimism/paymaster-reference
 type VerifyingPaymasterRequest struct {
@@ -751,9 +763,80 @@ func sendUserOpShared(
 		}
 	}
 
-	// Send the UserOp to the bundler using the existing sendUserOpCore function
-	txResult, err := sendUserOpCore(smartWalletConfig, userOp, client, bundlerClient, l)
-	if err != nil {
+	// Send the UserOp to the bundler using the existing sendUserOpCore function.
+	// If a paymaster nonce conflict occurs, rebuild the entire UserOp with the correct nonce
+	// (new nonce → new paymaster hash → new paymaster signature → new UserOp signature).
+	maxPaymasterRetries := 3
+	var txResult string
+	for paymasterRetry := 0; paymasterRetry < maxPaymasterRetries; paymasterRetry++ {
+		txResult, err = sendUserOpCore(smartWalletConfig, userOp, client, bundlerClient, l)
+		if err == nil {
+			break
+		}
+
+		// Check for paymaster nonce conflict — requires full UserOp rebuild
+		var nonceConflict *ErrPaymasterNonceConflict
+		if errors.As(err, &nonceConflict) && paymasterReq != nil {
+			if paymasterRetry >= maxPaymasterRetries-1 {
+				l.Error("Paymaster nonce conflict retries exhausted",
+					"retries", maxPaymasterRetries,
+					"last_nonce", nonceConflict.Nonce.String())
+				return userOp, nil, fmt.Errorf("paymaster nonce conflict after %d rebuilds: %w", maxPaymasterRetries, err)
+			}
+
+			// After sendUserOpCore flushed stuck UserOps, the flushed UserOps may still
+			// be pending on-chain (not yet mined). Poll until the on-chain nonce advances
+			// to at least the nonce we need, so the rebuilt UserOp won't hit AA25 again.
+			targetNonce := nonceConflict.Nonce
+			l.Info("Waiting for on-chain nonce to advance after flush",
+				"target_nonce", targetNonce.String())
+
+			deadline := time.Now().Add(60 * time.Second)
+			for time.Now().Before(deadline) {
+				freshOnChain, nonceErr := aa.GetNonce(client, userOp.Sender, accountSalt)
+				if nonceErr == nil && freshOnChain.Cmp(targetNonce) >= 0 {
+					l.Info("On-chain nonce advanced, proceeding with rebuild",
+						"on_chain_nonce", freshOnChain.String(),
+						"target_nonce", targetNonce.String())
+					targetNonce = freshOnChain
+					break
+				}
+				l.Debug("On-chain nonce not yet advanced, polling...",
+					"current", freshOnChain,
+					"target", targetNonce.String())
+				time.Sleep(3 * time.Second)
+			}
+
+			// Update the cache with the latest nonce
+			globalNonceManager.SetNonce(userOp.Sender, targetNonce)
+
+			l.Info("Rebuilding paymaster UserOp with correct nonce",
+				"retry", paymasterRetry+1,
+				"nonce", targetNonce.String())
+
+			userOp, err = BuildUserOpWithPaymaster(
+				smartWalletConfig,
+				client,
+				bundlerClient,
+				owner,
+				callData,
+				paymasterReq.PaymasterAddress,
+				paymasterReq.ValidUntil,
+				paymasterReq.ValidAfter,
+				senderOverride,
+				targetNonce,
+				estimatedCallGas,
+				estimatedVerificationGas,
+				estimatedPreVerificationGas,
+				l,
+			)
+			if err != nil {
+				l.Error("Failed to rebuild paymaster UserOp", "error", err)
+				return nil, nil, fmt.Errorf("failed to rebuild paymaster UserOp after nonce conflict: %w", err)
+			}
+			continue
+		}
+
 		// Fallback: if paymaster path failed with invalid params, retry without paymaster (self-funded)
 		if paymasterReq != nil && (strings.Contains(strings.ToLower(err.Error()), "invalid useroperation") || strings.Contains(err.Error(), "-32602")) {
 			l.Warn("Paymaster send failed with invalid params, retrying without paymaster")
@@ -772,6 +855,7 @@ func sendUserOpShared(
 		} else {
 			return userOp, nil, err
 		}
+		break // non-nonce-conflict errors don't loop
 	}
 
 	// Wait for UserOp confirmation using exponential backoff polling
@@ -853,6 +937,30 @@ func sendUserOpCore(
 	chainID, err := client.ChainID(context.Background())
 	if err != nil {
 		return "", fmt.Errorf("failed to get chain ID: %w", err)
+	}
+
+	entrypoint := smartWalletConfig.EntrypointAddress
+
+	// Log bundler mempool and nonce state for diagnostics
+	if pendingOps, mempoolErr := bundlerClient.GetPendingUserOpsForSender(context.Background(), entrypoint, userOp.Sender); mempoolErr == nil && len(pendingOps) > 0 {
+		l.Debug("Bundler mempool has pending UserOps for sender",
+			"sender", userOp.Sender.Hex(),
+			"pending_count", len(pendingOps))
+		for i, op := range pendingOps {
+			l.Debug("Pending UserOp in mempool",
+				"index", i,
+				"nonce", op.Nonce,
+				"sender", op.Sender.Hex())
+		}
+	}
+	if onChainNonce, onChainErr := aa.GetNonce(client, userOp.Sender, accountSalt); onChainErr == nil {
+		cachedNonce, hasCached := globalNonceManager.GetCachedNonce(userOp.Sender)
+		l.Debug("Nonce state at sendUserOpCore entry",
+			"sender", userOp.Sender.Hex(),
+			"on_chain_nonce", onChainNonce.String(),
+			"cached_nonce_exists", hasCached,
+			"cached_nonce", fmt.Sprintf("%v", cachedNonce),
+			"userOp_nonce", fmt.Sprintf("%v", userOp.Nonce))
 	}
 
 	// Fetch nonce before entering the retry loop
@@ -1014,13 +1122,30 @@ func sendUserOpCore(
 				// Check this BEFORE updating the cache to avoid advancing past an unsent nonce.
 				hasPaymaster = len(userOp.PaymasterAndData) > 0
 				if hasPaymaster {
-					l.Warn("Cannot retry paymaster UserOp with new nonce: paymaster signature is bound to original nonce",
+					// Flush any stuck UserOps from the bundler mempool that may be blocking us.
+					// The bundler processes in FIFO order, so stale UserOps at lower nonces
+					// prevent new ones from being accepted.
+					flushed, flushErr := bundlerClient.FlushStuckUserOps(context.Background(), entrypoint, userOp.Sender, freshNonce)
+					if flushErr != nil {
+						l.Warn("Failed to flush stuck UserOps", "error", flushErr)
+					} else if flushed > 0 {
+						l.Info("Flushed stuck UserOps from bundler mempool",
+							"sender", userOp.Sender.Hex(),
+							"flushed_count", flushed)
+					}
+
+					// Update the nonce cache so the rebuild uses the correct nonce.
+					globalNonceManager.SetNonce(userOp.Sender, freshNonce)
+
+					l.Info("Paymaster nonce conflict: returning to caller for full UserOp rebuild",
 						"sender", userOp.Sender.Hex(),
 						"original_nonce", userOp.Nonce.String(),
-						"would_need_nonce", freshNonce.String())
-					// Do not update userOp.Nonce — it would break the paymaster signature.
-					// Do not update the cache either — we didn't send at this nonce.
-					break
+						"rebuild_nonce", freshNonce.String())
+
+					// Return a sentinel error so sendUserOpShared can rebuild the entire
+					// UserOp (new nonce → new paymaster hash → new paymaster signature →
+					// new UserOp signature) and retry.
+					return "", &ErrPaymasterNonceConflict{Nonce: freshNonce}
 				}
 
 				// Update the cache to the nonce we are about to use; further advancement
