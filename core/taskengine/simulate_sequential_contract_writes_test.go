@@ -217,6 +217,7 @@ func TestSimulateTask_SequentialContractWrites_Sepolia(t *testing.T) {
 	// Input variables
 	inputVariables := map[string]interface{}{
 		"settings": map[string]interface{}{
+			"name":     "Sequential Contract Writes Test",
 			"runner":   smartWalletAddr.Hex(),
 			"chain_id": int64(11155111), // Sepolia
 		},

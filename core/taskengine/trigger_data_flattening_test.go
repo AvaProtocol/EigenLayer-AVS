@@ -258,6 +258,10 @@ func TestCamelCaseVariableResolutionConsistency(t *testing.T) {
 
 	// Create input variables that include a node with camelCase data
 	inputVariables := map[string]interface{}{
+		"settings": map[string]interface{}{
+			"name":   "CamelCase Variable Resolution Test",
+			"runner": "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6",
+		},
 		"eventTrigger": map[string]interface{}{
 			"data": testData,
 		},

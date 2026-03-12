@@ -24,6 +24,10 @@ func TestInputVariables_SimulateTask(t *testing.T) {
 
 	// Create input variables
 	inputVariables := map[string]interface{}{
+		"settings": map[string]interface{}{
+			"name":   "Input Variables Test",
+			"runner": "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6",
+		},
 		"userToken": "0x1234567890abcdef",
 		"amount":    1000000,
 		"recipient": "0xabcdef1234567890",
@@ -409,6 +413,10 @@ func TestInputVariables_TemplateResolution(t *testing.T) {
 
 	// Create input variables with template-style usage
 	inputVariables := map[string]interface{}{
+		"settings": map[string]interface{}{
+			"name":   "Template Resolution Test",
+			"runner": "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6",
+		},
 		"contractAddress": "0x1234567890abcdef",
 		"methodName":      "transfer",
 		"recipient":       "0xabcdef1234567890",
@@ -521,7 +529,7 @@ func TestInputVariables_TemplateResolution(t *testing.T) {
 	t.Logf("✅ Template resolution with input variables completed successfully")
 }
 
-// TestInputVariables_EmptyInputVariables tests behavior when no input variables are provided
+// TestInputVariables_EmptyInputVariables tests that SimulateTask rejects nil inputVariables
 func TestInputVariables_EmptyInputVariables(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
@@ -541,13 +549,7 @@ func TestInputVariables_EmptyInputVariables(t *testing.T) {
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
-						Source: `
-							// Should work without input variables
-							return {
-								message: "No input variables needed",
-								success: true
-							};
-						`,
+						Source: `return { message: "No input variables needed" };`,
 					},
 				},
 			},
@@ -581,14 +583,10 @@ func TestInputVariables_EmptyInputVariables(t *testing.T) {
 		},
 	}
 
-	// Execute SimulateTask with no input variables
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
-	require.NoError(t, err)
-	require.NotNil(t, execution)
-
-	// Verify execution was successful even without input variables
-	assert.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS, execution.Status)
-	assert.Empty(t, execution.Error)
+	// SimulateTask should reject nil inputVariables (settings is required)
+	_, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "inputVariables.settings is required")
 
 	t.Logf("✅ Empty input variables test completed successfully")
 }

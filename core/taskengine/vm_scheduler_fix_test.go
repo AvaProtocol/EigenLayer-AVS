@@ -90,7 +90,12 @@ func TestSchedulerExecutesAllNodesInSequence(t *testing.T) {
 	user := testutil.TestUser1()
 
 	// Execute simulation
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, map[string]interface{}{})
+	execution, err := engine.SimulateTask(user, trigger, nodes, edges, map[string]interface{}{
+		"settings": map[string]interface{}{
+			"name":   "Scheduler Test",
+			"runner": "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6",
+		},
+	})
 	require.NoError(t, err)
 	require.NotNil(t, execution)
 
@@ -232,7 +237,12 @@ func TestSchedulerExecutesNodeAfterBranch(t *testing.T) {
 	user := testutil.TestUser1()
 
 	// Execute simulation
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, map[string]interface{}{})
+	execution, err := engine.SimulateTask(user, trigger, nodes, edges, map[string]interface{}{
+		"settings": map[string]interface{}{
+			"name":   "Scheduler Test",
+			"runner": "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6",
+		},
+	})
 	require.NoError(t, err)
 	require.NotNil(t, execution)
 
@@ -369,7 +379,12 @@ func TestSchedulerNodeWithMixedEdges(t *testing.T) {
 	user := testutil.TestUser1()
 
 	// Execute simulation
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, map[string]interface{}{})
+	execution, err := engine.SimulateTask(user, trigger, nodes, edges, map[string]interface{}{
+		"settings": map[string]interface{}{
+			"name":   "Scheduler Test",
+			"runner": "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6",
+		},
+	})
 	require.NoError(t, err)
 	require.NotNil(t, execution)
 
