@@ -659,35 +659,19 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 					// Get dynamic template data from summary (subject/title/analysis...)
 					dynamicData := s.SendGridDynamicData()
 
-					// Enrich with runner/eoaAddress for template usage
+					// Enrich with runner/eoaAddress for template usage.
+					// Read from vm.task directly instead of workflowContext maps.
 					smartWallet := ""
 					ownerEOA := ""
-					r.vm.mu.Lock()
-					if aaSender, ok := r.vm.vars["aa_sender"].(string); ok && aaSender != "" {
-						smartWallet = aaSender
+					if r.vm.task != nil && r.vm.task.Task != nil {
+						smartWallet = r.vm.task.SmartWalletAddress
+						ownerEOA = r.vm.task.Owner
 					}
-					// Get execution index for "Run #X:" prefix
-					executionIndex := int64(-1)
-					if wc, ok := r.vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
-						if runner, ok := wc["runner"].(string); ok && runner != "" && smartWallet == "" {
-							smartWallet = runner
-						}
-						if owner, ok := wc["owner"].(string); ok && owner != "" {
-							ownerEOA = owner
-						}
-						if eoa, ok := wc["eoaAddress"].(string); ok && eoa != "" && ownerEOA == "" {
-							ownerEOA = eoa
-						}
-						// Try to get execution index from workflow context (it may be populated for deployed workflows)
-						if idx, ok := wc["executionIndex"]; ok {
-							switch v := idx.(type) {
-							case int64:
-								executionIndex = v
-							case float64:
-								executionIndex = int64(v)
-							case int:
-								executionIndex = int64(v)
-							}
+					// Fallback to aa_sender or settings if task not available
+					r.vm.mu.Lock()
+					if smartWallet == "" {
+						if aaSender, ok := r.vm.vars["aa_sender"].(string); ok && aaSender != "" {
+							smartWallet = aaSender
 						}
 					}
 					if smartWallet == "" {
@@ -697,7 +681,12 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 							}
 						}
 					}
+					if ownerEOA == "" && r.vm.TaskOwner.Hex() != "0x0000000000000000000000000000000000000000" {
+						ownerEOA = r.vm.TaskOwner.Hex()
+					}
 					r.vm.mu.Unlock()
+					// Get execution index from VM field (set by executor)
+					executionIndex := r.vm.ExecutionIndex
 					dynamicData["runner"] = smartWallet
 					dynamicData["eoaAddress"] = shortHex(ownerEOA)
 					dynamicData["year"] = fmt.Sprintf("%d", time.Now().Year()) // Current year for email footer

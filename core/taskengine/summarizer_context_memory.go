@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -343,48 +342,36 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
-	// Extract workflow context
+	// Read task fields directly from vm.task instead of workflowContext maps.
 	var ownerEOA, smartWallet, workflowName, chainName string
 	var executionCount int64
-	if wfCtx, ok := vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
-		if owner, ok := wfCtx["owner"].(string); ok {
-			ownerEOA = owner
-		}
-		if runner, ok := wfCtx["runner"].(string); ok {
-			smartWallet = runner
-		}
-		if eoa, ok := wfCtx["eoaAddress"].(string); ok && eoa != "" && ownerEOA == "" {
-			ownerEOA = eoa
-		}
-		// Extract execution count for API request
-		if count, ok := wfCtx["executionCount"].(int64); ok {
-			executionCount = count
-		} else if count, ok := wfCtx["executionCount"].(uint64); ok {
-			// Overflow check: cap at MaxInt64 to prevent negative values
-			if count > math.MaxInt64 {
-				executionCount = math.MaxInt64
-				if vm != nil && vm.logger != nil {
-					vm.logger.Warn("executionCount exceeded MaxInt64, capped to avoid overflow", "count", count, "capped_to", executionCount)
-				}
-			} else {
-				executionCount = int64(count)
-			}
-		}
+
+	if vm.task != nil && vm.task.Task != nil {
+		ownerEOA = vm.task.Owner
+		smartWallet = vm.task.SmartWalletAddress
+		workflowName = vm.task.Name
+		executionCount = int64(vm.task.ExecutionCount)
 	}
-	// Prioritize settings.name for workflow name (most accurate source)
+
+	// Fallback: read chain from settings (chain is not on Task protobuf)
 	if settings, ok := vm.vars["settings"].(map[string]interface{}); ok {
-		if name, ok := settings["name"].(string); ok && strings.TrimSpace(name) != "" {
-			workflowName = name
-		}
 		if chain, ok := settings["chain"].(string); ok {
 			chainName = chain
 		}
-		if runner, ok := settings["runner"].(string); ok && smartWallet == "" {
-			smartWallet = runner
+		// Fallback for single-node executions (RunNodeImmediately) where vm.task may be nil
+		if workflowName == "" {
+			if name, ok := settings["name"].(string); ok && strings.TrimSpace(name) != "" {
+				workflowName = name
+			}
+		}
+		if smartWallet == "" {
+			if runner, ok := settings["runner"].(string); ok && strings.TrimSpace(runner) != "" {
+				smartWallet = runner
+			}
 		}
 	}
 
-	// Fallback to TaskOwner if available (for single node executions)
+	// Fallback to TaskOwner if available
 	if ownerEOA == "" && vm.TaskOwner != (common.Address{}) {
 		ownerEOA = vm.TaskOwner.Hex()
 	}

@@ -33,7 +33,8 @@ const (
 	VMStateCompleted          VMState = "vm_completed"
 	VMMaxPreprocessIterations         = 100
 	APContextVarName                  = "apContext"
-	WorkflowContextVarName            = "workflowContext"
+	WorkflowContextVarName            = "workflowContext" // Deprecated: use ContextVarName
+	ContextVarName                    = "context"
 	ConfigVarsPath                    = "configVars"
 	APContextConfigVarsPath           = APContextVarName + "." + ConfigVarsPath
 	DataSuffix                        = "data"
@@ -244,6 +245,10 @@ type VM struct {
 	// send real transactions and should use Tenderly or mock paths instead.
 	IsSimulation bool
 
+	// ExecutionIndex is the 0-based sequential counter for this execution within the task.
+	// Set by executor before node execution begins. Used for email subject formatting ("Run #X:").
+	ExecutionIndex int64
+
 	// Shared clients
 	tenderlyClient *TenderlyClient
 }
@@ -389,14 +394,26 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 		}
 		v.mu.Unlock()
 
-		// Add workflowContext variable with task metadata
+		// Add context variable with mutable Task-level runtime state only.
+		// Immutable definition fields (id, name, owner, runner, chain, etc.) live in
+		// inputVariables.settings, which is loaded below.
+		taskContext := map[string]interface{}{
+			"status":         getTaskStatusString(task.Status),
+			"executionCount": task.ExecutionCount,
+			"lastRanAt":      task.LastRanAt,
+			"completedAt":    task.CompletedAt,
+		}
+		v.AddVar(ContextVarName, taskContext)
+
+		// Backward-compat: populate workflowContext so existing workflows that reference
+		// {{workflowContext.name}} etc. continue to work until users re-create them.
 		workflowContext := map[string]interface{}{
 			"id":                 task.Id,
 			"name":               task.Name,
 			"owner":              task.Owner,
 			"smartWalletAddress": task.SmartWalletAddress,
-			"runner":             task.SmartWalletAddress, // Alias for smartWalletAddress
-			"eoaAddress":         task.Owner,              // Alias for owner
+			"runner":             task.SmartWalletAddress,
+			"eoaAddress":         task.Owner,
 			"startAt":            task.StartAt,
 			"expiredAt":          task.ExpiredAt,
 			"completedAt":        task.CompletedAt,
@@ -404,7 +421,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 			"executionCount":     task.ExecutionCount,
 			"lastRanAt":          task.LastRanAt,
 			"status":             getTaskStatusString(task.Status),
-			"chain":              "Unknown", // Default value, will be updated if chainId is available
+			"chain":              "Unknown",
 		}
 		v.AddVar(WorkflowContextVarName, workflowContext)
 
@@ -1502,19 +1519,13 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		v.logger.Warn("⚠️ VM DEBUG - Smart wallet config is NIL in VM!")
 	}
 
-	// For contract write, extract and set aa_sender from workflowContext.runner if available
-	if wfCtxIface, ok := v.vars[WorkflowContextVarName]; ok {
-		if wfCtx, ok := wfCtxIface.(map[string]interface{}); ok {
-			if runnerIface, ok := wfCtx["runner"]; ok {
-				if runnerStr, ok := runnerIface.(string); ok && common.IsHexAddress(runnerStr) {
-					v.AddVar("aa_sender", runnerStr)
-					if v.logger != nil {
-						v.logger.Info("🔄 VM DEBUG - Set aa_sender from workflowContext.runner",
-							"runner", runnerStr,
-							"owner", v.TaskOwner.Hex())
-					}
-				}
-			}
+	// For contract write, set aa_sender from vm.task.SmartWalletAddress
+	if v.task != nil && v.task.Task != nil && common.IsHexAddress(v.task.SmartWalletAddress) {
+		v.AddVar("aa_sender", v.task.SmartWalletAddress)
+		if v.logger != nil {
+			v.logger.Info("Set aa_sender from task.SmartWalletAddress",
+				"runner", v.task.SmartWalletAddress,
+				"owner", v.TaskOwner.Hex())
 		}
 	}
 
