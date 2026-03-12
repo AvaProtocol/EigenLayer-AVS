@@ -448,7 +448,7 @@ func TestConvertToFilterQueryClientFormat(t *testing.T) {
 	if len(fromEthQuery.Topics[0]) != 1 || fromEthQuery.Topics[0][0].Hex() != "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" {
 		t.Errorf("FROM query topic[0] should contain Transfer signature")
 	}
-	if len(fromEthQuery.Topics[1]) != 1 || fromEthQuery.Topics[1][0].Hex() != "0x000000000000000000000000fe66125343aabda4a330da667431ec1acb7bbda9" {
+	if len(fromEthQuery.Topics[1]) != 1 || fromEthQuery.Topics[1][0].Hex() != "0x000000000000000000000000804e49e8c4edb560ae7c48b554f6d2e27bb81557" {
 		t.Errorf("FROM query topic[1] should contain FROM address")
 	}
 	if fromEthQuery.Topics[2] != nil {
@@ -462,7 +462,7 @@ func TestConvertToFilterQueryClientFormat(t *testing.T) {
 	if toEthQuery.Topics[1] != nil {
 		t.Errorf("TO query topic[1] should be nil (wildcard)")
 	}
-	if len(toEthQuery.Topics[2]) != 1 || toEthQuery.Topics[2][0].Hex() != "0x000000000000000000000000fe66125343aabda4a330da667431ec1acb7bbda9" {
+	if len(toEthQuery.Topics[2]) != 1 || toEthQuery.Topics[2][0].Hex() != "0x000000000000000000000000804e49e8c4edb560ae7c48b554f6d2e27bb81557" {
 		t.Errorf("TO query topic[2] should contain TO address")
 	}
 
@@ -562,7 +562,7 @@ func TestTOAddressFormat(t *testing.T) {
 	t.Logf("Address hash: %s", addrHash.Hex())
 
 	// This should match the format in the filter
-	expectedFilterFormat := "0x000000000000000000000000fe66125343aabda4a330da667431ec1acb7bbda9"
+	expectedFilterFormat := "0x000000000000000000000000804e49e8c4edb560ae7c48b554f6d2e27bb81557"
 
 	if addrHash.Hex() != expectedFilterFormat {
 		t.Errorf("Address format mismatch. Expected: %s, Got: %s", expectedFilterFormat, addrHash.Hex())
@@ -598,7 +598,7 @@ func TestExactTransactionMatch(t *testing.T) {
 		Topics: []common.Hash{
 			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"), // Transfer event
 			common.HexToHash("0x000000000000000000000000274888bab7cf5191b17e54618f5f2822df76b05f"), // from
-			common.HexToHash("0x000000000000000000000000fe66125343aabda4a330da667431ec1acb7bbda9"), // to
+			common.HexToHash("0x000000000000000000000000804e49e8c4edb560ae7c48b554f6d2e27bb81557"), // to
 		},
 		BlockNumber: 8559161,
 		TxHash:      common.HexToHash("0x2e52c134f543a5930b104dc6ffb572595d98d29d70be765c405a58ce27331cf4"),
@@ -615,7 +615,7 @@ func TestExactTransactionMatch(t *testing.T) {
 		Topics: [][]common.Hash{
 			{common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")}, // Transfer event
 			nil, // any from address
-			{common.HexToHash("0x000000000000000000000000fe66125343aabda4a330da667431ec1acb7bbda9")}, // to address
+			{common.HexToHash("0x000000000000000000000000804e49e8c4edb560ae7c48b554f6d2e27bb81557")}, // to address
 		},
 	}
 
@@ -691,7 +691,7 @@ func TestSpecificTOTransaction(t *testing.T) {
 		Topics: []common.Hash{
 			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"), // Transfer event
 			common.HexToHash("0x000000000000000000000000274888bab7cf5191b17e54618f5f2822df76b05f"), // from
-			common.HexToHash("0x000000000000000000000000fe66125343aabda4a330da667431ec1acb7bbda9"), // to
+			common.HexToHash("0x000000000000000000000000804e49e8c4edb560ae7c48b554f6d2e27bb81557"), // to
 		},
 		BlockNumber: 8559239,
 		TxHash:      common.HexToHash("0xe5bdbc6ed533549b35e4a8259df818188b359e5f727db8e4d712593c235dc793"),
@@ -708,7 +708,7 @@ func TestSpecificTOTransaction(t *testing.T) {
 		Topics: [][]common.Hash{
 			{common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")}, // Transfer event
 			nil, // any from address
-			{common.HexToHash("0x000000000000000000000000fe66125343aabda4a330da667431ec1acb7bbda9")}, // to address
+			{common.HexToHash("0x000000000000000000000000804e49e8c4edb560ae7c48b554f6d2e27bb81557")}, // to address
 		},
 	}
 
