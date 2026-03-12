@@ -1207,7 +1207,7 @@ func TestPopulateQuerySubscriptions(t *testing.T) {
 		{subscription: sub2, query: query2, description: "d2", taskID: "task-3", queryIndex: 1},
 	}
 
-	trigger.populateQuerySubscriptions(nil)
+	trigger.populateQuerySubscriptions()
 
 	assert.Len(t, trigger.querySubscriptions, 2, "Should have 2 unique query keys")
 

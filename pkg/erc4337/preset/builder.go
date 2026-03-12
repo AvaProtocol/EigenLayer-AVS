@@ -1114,9 +1114,12 @@ func sendUserOpCore(
 					// The nonce itself is correct — we just need to wait for prior UserOps to
 					// mine. Do NOT increment, as that creates an unfillable nonce gap.
 					freshNonce = new(big.Int).Set(userOp.Nonce)
-					l.Debug("On-chain nonce behind, retrying same nonce after prior UserOps mine",
+					l.Debug("On-chain nonce behind, waiting for prior UserOps to mine before retry",
 						"on_chain_nonce", onChainNonce.String(),
 						"userOp_nonce", userOp.Nonce.String())
+					// Wait briefly for prior UserOps to mine; without this delay
+					// the retry loop burns through attempts in milliseconds.
+					time.Sleep(2 * time.Second)
 				} else {
 					// GetNextNonce returned the same nonce we already tried and on-chain has
 					// reached this nonce. A UserOp is pending at this nonce in the mempool.
