@@ -271,9 +271,8 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	}
 	logger := pkglogger.NewSentryLogger(zapLogger, "operator")
 
-	// Initialize Sentry if DSN provided
-	if c.SentryDsn != "" {
-		env := string(logLevel)
+	// Initialize Sentry if DSN provided, but skip in development environment
+	if c.SentryDsn != "" && logLevel != sdklogging.Development {
 		serverName := c.OperatorAddress
 		if c.ServerName != "" {
 			serverName = c.ServerName
@@ -281,7 +280,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		if err := sentry.Init(sentry.ClientOptions{
 			Dsn:              c.SentryDsn,
 			ServerName:       serverName,
-			Environment:      env,
+			Environment:      "production",
 			AttachStacktrace: true,
 			TracesSampleRate: 1.0,
 		}); err != nil {
@@ -289,6 +288,8 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		} else {
 			logger.Infof("Sentry initialized for operator: %s", serverName)
 		}
+	} else if c.SentryDsn != "" {
+		logger.Info("Sentry disabled in development environment")
 	}
 
 	// Log concise configuration for startup
