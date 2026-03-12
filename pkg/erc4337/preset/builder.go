@@ -1088,14 +1088,17 @@ func sendUserOpCore(
 			if retry < maxRetries-1 {
 				l.Warn("Nonce conflict detected", "nonce", userOp.Nonce.String(), "error", err)
 
-				// DO NOT call ResetNonce here. Resetting destroys the cached pending nonce,
-				// forcing GetNextNonce to fall back to on-chain state only. If a previous
-				// UserOp is still pending (not yet mined), the on-chain nonce hasn't advanced,
-				// so polling would return the same stale nonce and the retry would fail.
-				// Instead, consult GetNextNonce which returns max(on-chain, cached).
+				// Fetch the raw on-chain nonce to distinguish between:
+				// 1. Prior UserOps not yet mined (on-chain < userOp.Nonce) — retry same nonce
+				// 2. Our nonce slot taken in mempool (on-chain >= userOp.Nonce) — increment
+				onChainNonce, onChainErr := aa.GetNonce(client, userOp.Sender, accountSalt)
+				if onChainErr != nil {
+					l.Warn("Failed to fetch on-chain nonce for retry", "error", onChainErr)
+					continue
+				}
 
 				freshNonce, nonceErr := globalNonceManager.GetNextNonce(client, userOp.Sender, func() (*big.Int, error) {
-					return aa.GetNonce(client, userOp.Sender, accountSalt)
+					return new(big.Int).Set(onChainNonce), nil // reuse already-fetched value
 				})
 				if nonceErr != nil {
 					l.Warn("Failed to fetch nonce for retry", "error", nonceErr)
@@ -1105,9 +1108,18 @@ func sendUserOpCore(
 				if freshNonce.Cmp(userOp.Nonce) > 0 {
 					// On-chain or cache has advanced past our nonce — use the new value
 					l.Debug("Nonce advanced", "old_nonce", userOp.Nonce.String(), "new_nonce", freshNonce.String())
+				} else if onChainNonce.Cmp(userOp.Nonce) < 0 {
+					// On-chain nonce is behind our attempted nonce. Prior UserOps (at lower
+					// nonces) haven't mined yet, causing the bundler to reject ours with AA25.
+					// The nonce itself is correct — we just need to wait for prior UserOps to
+					// mine. Do NOT increment, as that creates an unfillable nonce gap.
+					freshNonce = new(big.Int).Set(userOp.Nonce)
+					l.Debug("On-chain nonce behind, retrying same nonce after prior UserOps mine",
+						"on_chain_nonce", onChainNonce.String(),
+						"userOp_nonce", userOp.Nonce.String())
 				} else {
-					// GetNextNonce returned the same nonce we already tried. This means a UserOp
-					// is pending at this nonce (submitted by us or another concurrent flow).
+					// GetNextNonce returned the same nonce we already tried and on-chain has
+					// reached this nonce. A UserOp is pending at this nonce in the mempool.
 					// Increment by 1 so we use the next slot.
 					freshNonce = new(big.Int).Add(userOp.Nonce, big.NewInt(1))
 					l.Debug("Nonce unchanged, incrementing past pending UserOp",
