@@ -1331,7 +1331,7 @@ message EstimateFeesReq {
   string runner = 7;               // Smart wallet address to use for gas estimation
 
   // Input variables for workflow execution simulation
-  // Must contain settings with runner, name, and other execution context
+  // Should contain settings with at least runner for fee estimation
   map<string, google.protobuf.Value> input_variables = 8;
 }
 

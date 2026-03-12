@@ -97,7 +97,7 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 	// With Recover outer and Sentry inner, panics hit Sentry first, then repanic to Recover.
 	e.Use(middleware.Recover())
 
-	if sentryDsn != "" {
+	if sentryDsn != "" && !isDev {
 		e.Use(sentryecho.New(sentryecho.Options{
 			Repanic:         true,
 			WaitForDelivery: false, // Don't block HTTP responses waiting for Sentry delivery

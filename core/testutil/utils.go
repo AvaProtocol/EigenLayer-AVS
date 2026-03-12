@@ -534,8 +534,6 @@ func GetDefaultCache() *bigcache.BigCache {
 	return cache
 }
 
-// TestSettingsInputVariables creates an inputVariables map with a valid settings object
-// for use in CreateTaskReq. The runner should be a valid hex address (e.g. smart wallet address).
 // SetTaskSettings updates the settings.name and settings.runner in a CreateTaskReq's InputVariables.
 // Use this when tests need to override the default name/runner from RestTask() or JsFastTask().
 func SetTaskSettings(req *avsproto.CreateTaskReq, name, runner string) {
@@ -580,6 +578,8 @@ func SetTaskSettings(req *avsproto.CreateTaskReq, name, runner string) {
 	req.InputVariables["settings"] = newVal
 }
 
+// TestSettingsInputVariables creates an inputVariables map with a valid settings object
+// for use in CreateTaskReq. The runner should be a valid hex address (e.g. smart wallet address).
 func TestSettingsInputVariables(name, runner string) map[string]*structpb.Value {
 	settings := map[string]interface{}{
 		"name":     name,
