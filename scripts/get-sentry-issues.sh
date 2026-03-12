@@ -7,8 +7,7 @@
 #   ./scripts/get-sentry-issues.sh list [resolved|all]      # List issues by status
 #   ./scripts/get-sentry-issues.sh <ISSUE_ID>               # Fetch latest event details
 #   ./scripts/get-sentry-issues.sh <ISSUE_ID> <EVENT_INDEX> # Fetch specific event
-#   ./scripts/get-sentry-issues.sh <ISSUE_ID> resolve next  # Resolve in next release
-#   ./scripts/get-sentry-issues.sh <ISSUE_ID> resolve <VER> # Resolve in specific release
+#   ./scripts/get-sentry-issues.sh <ISSUE_ID> resolve <COMMIT> # Resolve by commit
 #
 # Env (in .env at repo root):
 #   SENTRY_AUTH_TOKEN  - Sentry API bearer token (required)
@@ -188,14 +187,15 @@ fetch_issue_details() {
 
 resolve_issue() {
   local issue_id="$1"
-  local release="${2:-next}"
+  local commit="$2"
+
+  if [[ -z "$commit" ]]; then
+    echo "Usage: $0 <ISSUE_ID> resolve <COMMIT_HASH>"
+    exit 1
+  fi
 
   local body
-  if [[ "$release" == "next" ]]; then
-    body='{"status":"resolved","statusDetails":{"inNextRelease":true}}'
-  else
-    body=$(jq -cn --arg release "$release" '{"status":"resolved","statusDetails":{"inRelease":$release}}')
-  fi
+  body=$(jq -cn --arg commit "$commit" '{"status":"resolved","statusDetails":{"inCommit":{"commit":$commit,"repository":"AvaProtocol/EigenLayer-AVS"}}}')
 
   local response
   response=$(sentry_put "/issues/$issue_id/" "$body")
@@ -203,11 +203,7 @@ resolve_issue() {
   local status
   status=$(echo "$response" | jq -r '.status // "unknown"')
 
-  if [[ "$release" == "next" ]]; then
-    echo "Resolved issue $issue_id in next release. (status: $status)"
-  else
-    echo "Resolved issue $issue_id in release $release. (status: $status)"
-  fi
+  echo "Resolved issue $issue_id by commit $commit. (status: $status)"
 }
 
 # --- Main ---
@@ -231,8 +227,7 @@ case "$CMD" in
 
     case "$MODE" in
       resolve)
-        RELEASE="${3:-next}"
-        resolve_issue "$ISSUE_ID" "$RELEASE"
+        resolve_issue "$ISSUE_ID" "${3:-}"
         ;;
       [0-9]*)
         fetch_issue_details "$ISSUE_ID" "$MODE"
@@ -248,8 +243,7 @@ case "$CMD" in
     echo "  $0 list [resolved|all]      # List issues by status"
     echo "  $0 <ISSUE_ID>               # Fetch latest event details"
     echo "  $0 <ISSUE_ID> <EVENT_INDEX> # Fetch specific event"
-    echo "  $0 <ISSUE_ID> resolve next  # Resolve in next release"
-    echo "  $0 <ISSUE_ID> resolve <VER> # Resolve in specific release"
+    echo "  $0 <ISSUE_ID> resolve <COMMIT> # Resolve by commit"
     exit 1
     ;;
 esac
