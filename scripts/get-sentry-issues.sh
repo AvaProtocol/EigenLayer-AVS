@@ -194,11 +194,25 @@ resolve_issue() {
     exit 1
   fi
 
+  # Try resolving with commit link first; fall back to plain resolve if the
+  # commit isn't known to Sentry yet (e.g. not pushed to GitHub).
   local body
   body=$(jq -cn --arg commit "$commit" '{"status":"resolved","statusDetails":{"inCommit":{"commit":$commit,"repository":"AvaProtocol/EigenLayer-AVS"}}}')
 
-  local response
-  response=$(sentry_put "/issues/$issue_id/" "$body")
+  local response http_code
+  response=$(curl -sS -w "\n%{http_code}" -X PUT \
+    -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$body" \
+    "$SENTRY_BASE/issues/$issue_id/")
+  http_code=$(echo "$response" | tail -1)
+  response=$(echo "$response" | sed '$d')
+
+  if [[ "$http_code" -ge 400 ]]; then
+    echo "Commit link failed (HTTP $http_code) — resolving without commit reference..."
+    body='{"status":"resolved"}'
+    response=$(sentry_put "/issues/$issue_id/" "$body")
+  fi
 
   local status
   status=$(echo "$response" | jq -r '.status // "unknown"')
