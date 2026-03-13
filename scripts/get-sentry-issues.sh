@@ -39,7 +39,7 @@ if [[ -f "$REPO_ROOT/.env" ]]; then
 fi
 
 SENTRY_AUTH_TOKEN="${SENTRY_AUTH_TOKEN:-}"
-SENTRY_ORG="${SENTRY_ORG:-ava-protocol-public}"
+SENTRY_ORG="${SENTRY_ORG:-ava-protocol}"
 SENTRY_PROJECT="${SENTRY_PROJECT:-eigenlayer-avs}"
 
 if [[ -z "$SENTRY_AUTH_TOKEN" ]]; then
