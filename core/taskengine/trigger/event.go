@@ -485,7 +485,7 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 		go func(index int, sub ethereum.Subscription, desc string) {
 			err := <-sub.Err()
 			if err != nil {
-				t.logger.Error("🔥 Subscription error", "index", index, "description", desc, "error", err)
+				t.logger.Warn("🔥 Subscription error", "index", index, "description", desc, "error", err)
 				errorCh <- err
 			}
 		}(i, subInfo.subscription, subInfo.description)
@@ -687,7 +687,7 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 				if err == nil {
 					continue
 				}
-				t.logger.Error("🔥 Subscription error, attempting reconnection", "error", err)
+				t.logger.Warn("🔥 Subscription error, attempting reconnection", "error", err)
 
 				// Attempt to reconnect
 				if err := t.retryConnectToRpc(); err != nil {
