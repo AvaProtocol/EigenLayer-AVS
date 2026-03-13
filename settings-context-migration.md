@@ -19,6 +19,7 @@
 | `settings.chain` | Client (recommended) | Chain name (e.g. "sepolia") — not yet enforced by server |
 | `settings.chain_id` | Client (recommended) | Chain ID (e.g. 11155111) — not yet enforced by server |
 | `settings.isSimulation` | Client (optional) | Simulation flag |
+| `settings.tokens` | Client (recommended) | Array of token contract addresses used by this workflow (see §7) |
 | `settings.uniswapv3_pool` | Client (optional) | Domain-specific config |
 | `settings.uniswapv3_contracts` | Client (optional) | Domain-specific config |
 | `settings.id` | Aggregator (on create) | Task ID |
@@ -255,3 +256,98 @@ Old tasks without enriched `settings` will not be migrated. Users re-create thei
 | **Per-execution** | `vm.ExecutionIndex` | Execution.index (0-based sequential counter) | Scoped to single execution, not Task-level |
 | **Deprecated** | `workflowContext` | All 13 fields | Replaced by `settings` + `context` |
 | **Storage/API** | Task protobuf | All fields (copied from settings at creation, context at runtime) | Backward-compatible — no protobuf schema change |
+
+## 7. `settings.tokens` — Token Metadata for Formatting
+
+### Purpose
+
+When a workflow interacts with ERC20 tokens, the aggregator needs to know each token's `symbol` and `decimals` so that context-memory can format raw on-chain values into human-readable amounts (e.g., `1500000000` → `1,500 USDC`).
+
+The client declares the token contract addresses it uses via `settings.tokens`. The aggregator reads this list, calls `GetTokenMetadata()` for each address, and includes the results in the `tokenMetadata` field of the context-memory summarize request.
+
+### Field Definition
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `settings.tokens` | `string[]` | Recommended | Array of ERC20 token contract addresses used by this workflow |
+
+### When to Include
+
+Include `settings.tokens` whenever your workflow interacts with ERC20 tokens:
+- Event triggers watching Transfer/Approval events on token contracts
+- ContractWrite nodes calling `approve`, `transfer`, etc.
+- ContractRead nodes reading `balanceOf`, `allowance`, etc.
+- Uniswap swap workflows (input/output tokens)
+
+Without `settings.tokens`, context-memory falls back to default 18 decimals, which produces incorrect formatting for tokens like USDC (6 decimals) or WBTC (8 decimals).
+
+### Examples
+
+**Event trigger watching USDC transfers:**
+
+```json
+{
+  "inputVariables": {
+    "settings": {
+      "name": "USDC Transfer Alert",
+      "runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
+      "chain": "sepolia",
+      "chain_id": 11155111,
+      "tokens": [
+        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+      ]
+    }
+  }
+}
+```
+
+**Uniswap swap with two tokens:**
+
+```json
+{
+  "inputVariables": {
+    "settings": {
+      "name": "Stoploss USDC->WETH",
+      "runner": "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+      "chain": "ethereum",
+      "chain_id": 1,
+      "tokens": [
+        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+      ]
+    }
+  }
+}
+```
+
+**Multiple tokens in a DeFi workflow (AAVE health factor alert):**
+
+```json
+{
+  "inputVariables": {
+    "settings": {
+      "name": "AAVE Health Factor Alert",
+      "runner": "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+      "chain": "ethereum",
+      "chain_id": 1,
+      "tokens": [
+        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+        "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"
+      ]
+    }
+  }
+}
+```
+
+### Aggregator Behavior
+
+In `buildRequest()` (`summarizer_context_memory.go`), the aggregator:
+
+1. Reads `settings.tokens` from `vm.vars["settings"]`
+2. For each address, calls `TokenEnrichmentService.GetTokenMetadata(addr)`
+3. Adds results to the request-level `tokenMetadata` map (keyed by lowercase address)
+4. Skips addresses already resolved from per-step inference (deduplication)
+5. Silently skips if `TokenEnrichmentService` is unavailable (no error)
+
+This supplements — not replaces — the existing per-step token metadata inference (from CONTRACT_WRITE configs and `uniswapv3_pool.tokens`). `settings.tokens` is the preferred explicit mechanism; per-step inference remains as a fallback for older workflows.
