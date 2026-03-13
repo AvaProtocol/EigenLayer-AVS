@@ -682,14 +682,6 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 							}
 						}
 					}
-					// Fallback: settings.owner is enriched at task creation with the EOA address
-					if ownerEOA == "" {
-						if settings, ok := r.vm.vars["settings"].(map[string]interface{}); ok {
-							if owner, ok := settings["owner"].(string); ok && strings.TrimSpace(owner) != "" {
-								ownerEOA = owner
-							}
-						}
-					}
 					if ownerEOA == "" && r.vm.TaskOwner != (common.Address{}) {
 						ownerEOA = r.vm.TaskOwner.Hex()
 					}

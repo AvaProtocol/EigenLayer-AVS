@@ -369,12 +369,6 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 				smartWallet = runner
 			}
 		}
-		// Fallback: settings.owner is enriched at task creation with the EOA address
-		if ownerEOA == "" {
-			if owner, ok := settings["owner"].(string); ok && strings.TrimSpace(owner) != "" {
-				ownerEOA = owner
-			}
-		}
 	}
 
 	// Fallback to TaskOwner if available

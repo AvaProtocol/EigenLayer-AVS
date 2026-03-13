@@ -977,8 +977,8 @@ func TestRestSummarizeTelegramHTML(t *testing.T) {
 		t.Fatalf("failed to create VM: %v", err)
 	}
 
-	// Provide settings.name, settings.owner and a last successful step
-	vm.AddVar("settings", map[string]interface{}{"name": expectedWorkflowName, "owner": "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557"})
+	// Provide settings.name and a last successful step
+	vm.AddVar("settings", map[string]interface{}{"name": expectedWorkflowName})
 	vm.ExecutionLogs = append(vm.ExecutionLogs, &avsproto.Execution_Step{Name: "run_swap", Success: true})
 
 	processor := NewRestProcessor(vm)

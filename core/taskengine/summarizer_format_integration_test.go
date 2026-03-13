@@ -261,7 +261,6 @@ func TestAIIntegration_RunNodeImmediately(t *testing.T) {
 			"name":   "Test RunNode Workflow",
 			"chain":  "Sepolia",
 			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
-			"owner":  "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
 		},
 	}
 	vm.mu.Unlock()
@@ -945,7 +944,6 @@ func TestAIIntegration_FormatConsistency(t *testing.T) {
 			"name":   "Format Test Workflow",
 			"chain":  "Sepolia",
 			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
-			"owner":  "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
 		},
 	}
 	vm.mu.Unlock()
@@ -1061,7 +1059,6 @@ func TestAIIntegration_ComposeSummarySmart(t *testing.T) {
 			"name":   "Smart Test Workflow",
 			"chain":  "Sepolia",
 			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
-			"owner":  "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
 		},
 	}
 	vm.mu.Unlock()
