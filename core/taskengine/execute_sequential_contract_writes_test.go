@@ -97,8 +97,8 @@ func TestExecuteTask_SequentialContractWrites_Sepolia(t *testing.T) {
 	// 2. Swap USDC for WETH
 	// ========================================
 
-	approveAmount := "100000" // 0.1 USDC (6 decimals)
-	swapAmount := "100000"    // 0.1 USDC
+	approveAmount := "100" // 0.0001 USDC (6 decimals) — minimal for testing
+	swapAmount := "100"    // 0.0001 USDC
 
 	// Build nodes
 	nodes := []*avsproto.TaskNode{

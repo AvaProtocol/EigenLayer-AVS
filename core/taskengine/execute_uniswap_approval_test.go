@@ -62,7 +62,7 @@ func TestExecuteTask_UniswapApprovalAndSwap_DifferentApprovalAmounts_Sepolia(t *
 	t.Logf("🏦 Smart Wallet Address for funding: %s", smartWalletAddress)
 	t.Logf("Please fund this address with:")
 	t.Logf("- USDC on Sepolia: 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
-	t.Logf("- At least 15 USDC for testing (you have this amount)")
+	t.Logf("- At least 0.01 USDC for testing")
 
 	// Uniswap V3 contracts and pool on Sepolia
 	uniswapV3Contracts := map[string]interface{}{
@@ -92,22 +92,22 @@ func TestExecuteTask_UniswapApprovalAndSwap_DifferentApprovalAmounts_Sepolia(t *
 	}{
 		{
 			name:           "Equal approval and swap amount",
-			swapAmount:     "1000000", // 1 USDC in wei (6 decimals)
-			approvalAmount: "1000000", // Same as swap amount
+			swapAmount:     "100", // 0.0001 USDC (6 decimals) — minimal for testing
+			approvalAmount: "100", // Same as swap amount
 			expectSuccess:  true,
 			description:    "Should succeed - ERC20 allowance check uses >= so equal approval works",
 		},
 		{
 			name:           "Higher approval than swap amount",
-			swapAmount:     "1000000", // 1 USDC in wei
-			approvalAmount: "5000000", // 5 USDC in wei (5x more)
+			swapAmount:     "100", // 0.0001 USDC
+			approvalAmount: "500", // 0.0005 USDC (5x more)
 			expectSuccess:  true,
 			description:    "Should succeed - approval is higher than swap amount",
 		},
 		{
 			name:           "Much higher approval",
-			swapAmount:     "1000000",  // 1 USDC in wei
-			approvalAmount: "10000000", // 10 USDC in wei (10x more)
+			swapAmount:     "100",  // 0.0001 USDC
+			approvalAmount: "1000", // 0.001 USDC (10x more)
 			expectSuccess:  true,
 			description:    "Should succeed - very high approval amount",
 		},

@@ -129,8 +129,8 @@ func setupSequentialContractWritesTest(t *testing.T) *sequentialContractWritesTe
 
 // buildSequentialContractWritesWorkflow creates the task with approve + swap nodes
 func buildSequentialContractWritesWorkflow(smartWalletAddr *common.Address, ownerAddress common.Address) *model.Task {
-	// Use small amount for repeated testing (0.01 USDC)
-	// Matches BASE_SWAP_AMOUNT constant defined in run_node_uniswap_swap_base_test.go
+	// Use minimal amount for repeated testing (0.0001 USDC)
+	// Matches BASE_SWAP_AMOUNT constant defined in run_node_uniswap_swap_test.go
 
 	// Build nodes
 	nodes := []*avsproto.TaskNode{
@@ -284,7 +284,7 @@ func TestExecuteTask_SequentialContractWrites_Base_SelfFunded(t *testing.T) {
 	usdcBalance, err := usdcContract.BalanceOf(nil, *setup.smartWalletAddr)
 	require.NoError(t, err, "Failed to get USDC balance")
 
-	requiredAmount := big.NewInt(10000) // 0.01 USDC (6 decimals) - tiny amount for repeated testing
+	requiredAmount := big.NewInt(100) // 0.0001 USDC (6 decimals) - minimal for testing
 	require.True(t, usdcBalance.Cmp(requiredAmount) >= 0,
 		"wallet %s needs at least 0.01 USDC (10000 raw) before swap; have %s",
 		setup.smartWalletAddr.Hex(), usdcBalance.String())

@@ -27,7 +27,7 @@ const (
 	BASE_QUOTER      = "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a" // QuoterV2
 	BASE_ENTRYPOINT  = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789" // EntryPoint v0.6
 	BASE_FACTORY     = "0xB99BC2E399e06CddCF5E725c0ea341E8f0322834" // SimpleAccountFactory
-	BASE_SWAP_AMOUNT = "10000"                                      // 0.01 USDC (6 decimals) - tiny amount for repeated testing
+	BASE_SWAP_AMOUNT = "100"                                        // 0.0001 USDC (6 decimals) - minimal for testing
 	BASE_FEE_TIER    = 3000                                         // 0.3%
 	BASE_CHAIN_ID    = 8453                                         // Base mainnet chain ID
 )
@@ -40,7 +40,7 @@ const (
 	SEPOLIA_QUOTER      = "0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3"
 	SEPOLIA_ENTRYPOINT  = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
 	SEPOLIA_FACTORY     = "0xB99BC2E399e06CddCF5E725c0ea341E8f0322834"
-	SEPOLIA_SWAP_AMOUNT = "10000"  // 0.01 USDC (6 decimals) - tiny amount for repeated testing
+	SEPOLIA_SWAP_AMOUNT = "100"    // 0.0001 USDC (6 decimals) - minimal for testing
 	SEPOLIA_FEE_TIER    = 500      // 0.05%
 	SEPOLIA_CHAIN_ID    = 11155111 // Sepolia testnet chain ID
 )
@@ -272,7 +272,7 @@ func shouldUsePaymasterAutoDecision(t *testing.T, setup *uniswapSwapTestSetup) b
 
 	// Check USDC balance
 	usdcBalance := checkUSDCBalance(t, setup)
-	requiredAmount := big.NewInt(10000) // 0.01 USDC (6 decimals)
+	requiredAmount := big.NewInt(100) // 0.0001 USDC (6 decimals)
 
 	if usdcBalance.Cmp(requiredAmount) < 0 {
 		t.Logf("💳 Insufficient USDC balance (%.6f < 0.01) - using paymaster", float64(usdcBalance.Int64())/1e6)
@@ -293,7 +293,7 @@ func TestRunNodeImmediately_UniswapSwap_Base(t *testing.T) {
 	// Step 0: Check current allowance using contract read
 	t.Logf("🔍 Step 0: Checking current USDC allowance...")
 	currentAllowance := checkUSDCAllowance(t, setup)
-	requiredAmount := big.NewInt(10000) // 0.01 USDC (6 decimals)
+	requiredAmount := big.NewInt(100) // 0.0001 USDC (6 decimals)
 
 	// Step 1: Auto-decision for paymaster vs self-fund
 	t.Logf("🤖 Step 1: Auto-deciding paymaster vs self-fund...")
@@ -407,7 +407,7 @@ func TestRunNodeImmediately_UniswapSwap_Base(t *testing.T) {
 	// allowance (wallet, router) >= 10000 (this is the one I expect to be 0 in your failing run)
 	// If allowance == 0, the approve didn't apply to the exact (owner=wallet, spender=router) pair that the swap path uses.
 
-	requiredAmountForSwap := big.NewInt(10000) // 0.01 USDC (6 decimals)
+	requiredAmountForSwap := big.NewInt(100) // 0.0001 USDC (6 decimals)
 	if allow.Cmp(requiredAmountForSwap) < 0 {
 		t.Logf("❌ ALLOWANCE ISSUE DETECTED: allowance(wallet, router) = %s < %s", allow.String(), requiredAmountForSwap.String())
 		t.Logf("   This explains the TRANSFER_FROM_FAILED error!")
@@ -569,7 +569,7 @@ func TestRunNodeImmediately_UniswapSwap_Base(t *testing.T) {
 	t.Logf("     tokenIn: %s (USDC)", setup.chain.usdc)
 	t.Logf("     tokenOut: %s (WETH)", setup.chain.weth)
 	t.Logf("     fee: %d", setup.chain.feeTier)
-	t.Logf("     amountIn: %s (0.01 USDC)", setup.chain.swapAmount)
+	t.Logf("     amountIn: %s (0.0001 USDC)", setup.chain.swapAmount)
 	t.Logf("     amountOutMinimum: %s", minOutput)
 	t.Logf("     funding: %s", map[bool]string{true: "paymaster-sponsored", false: "self-funded"}[usePaymaster])
 
@@ -612,7 +612,7 @@ func TestRunNodeImmediately_UniswapSwap_Base_SelfFunded(t *testing.T) {
 	// Step 0: Check current allowance using contract read
 	t.Logf("🔍 Step 0: Checking current USDC allowance...")
 	currentAllowance := checkUSDCAllowance(t, setup)
-	requiredAmount := big.NewInt(10000) // 0.01 USDC (6 decimals)
+	requiredAmount := big.NewInt(100) // 0.0001 USDC (6 decimals)
 
 	// Step 1: Force self-funding (no paymaster)
 	t.Logf("💰 Step 1: Forcing self-funding (no paymaster override)...")
@@ -732,7 +732,7 @@ func TestRunNodeImmediately_UniswapSwap_Base_SelfFunded(t *testing.T) {
 	// allowance (wallet, router) >= 10000 (this is the one I expect to be 0 in your failing run)
 	// If allowance == 0, the approve didn't apply to the exact (owner=wallet, spender=router) pair that the swap path uses.
 
-	requiredAmountForSwap := big.NewInt(10000) // 0.01 USDC (6 decimals)
+	requiredAmountForSwap := big.NewInt(100) // 0.0001 USDC (6 decimals)
 	if allow.Cmp(requiredAmountForSwap) < 0 {
 		t.Logf("❌ ALLOWANCE ISSUE DETECTED: allowance(wallet, router) = %s < %s", allow.String(), requiredAmountForSwap.String())
 		t.Logf("   This explains the TRANSFER_FROM_FAILED error!")
@@ -796,7 +796,7 @@ func TestRunNodeImmediately_UniswapSwap_Base_SelfFunded(t *testing.T) {
 	t.Logf("     tokenIn: %s (USDC)", setup.chain.usdc)
 	t.Logf("     tokenOut: %s (WETH)", setup.chain.weth)
 	t.Logf("     fee: %d", setup.chain.feeTier)
-	t.Logf("     amountIn: %s (0.01 USDC)", setup.chain.swapAmount)
+	t.Logf("     amountIn: %s (0.0001 USDC)", setup.chain.swapAmount)
 	t.Logf("     amountOutMinimum: %s", minOutput)
 	t.Logf("     funding: self-funded (no paymaster)")
 
@@ -839,7 +839,7 @@ func TestRunNodeImmediately_UniswapSwap_Base_WithQuoter(t *testing.T) {
 	// Step 0: Check current allowance using contract read
 	t.Logf("🔍 Step 0: Checking current USDC allowance...")
 	currentAllowance := checkUSDCAllowance(t, setup)
-	requiredAmount := big.NewInt(10000) // 0.01 USDC (6 decimals)
+	requiredAmount := big.NewInt(100) // 0.0001 USDC (6 decimals)
 
 	// Step 1: Auto-decision for paymaster vs self-fund
 	t.Logf("🤖 Step 1: Auto-deciding paymaster vs self-fund...")
@@ -1085,7 +1085,7 @@ func TestRunNodeImmediately_UniswapSwap_Base_WithQuoter(t *testing.T) {
 	t.Logf("     tokenIn: %s (USDC)", setup.chain.usdc)
 	t.Logf("     tokenOut: %s (WETH)", setup.chain.weth)
 	t.Logf("     fee: %d", setup.chain.feeTier)
-	t.Logf("     amountIn: %s (0.01 USDC)", setup.chain.swapAmount)
+	t.Logf("     amountIn: %s (0.0001 USDC)", setup.chain.swapAmount)
 	t.Logf("     amountOutMinimum: %s (from QuoterV2)", minOutput)
 	t.Logf("     funding: %s", map[bool]string{true: "paymaster-sponsored", false: "self-funded"}[usePaymaster])
 
@@ -1127,8 +1127,8 @@ func TestRunNodeImmediately_UniswapSwap_Base_CheckSpender(t *testing.T) {
 
 	// Step 0: Check current allowance using contract read
 	t.Logf("🔍 Step 0: Checking current USDC allowance...")
-	_ = checkUSDCAllowance(t, setup)    // We'll always do belt-and-suspenders regardless
-	requiredAmount := big.NewInt(10000) // 0.01 USDC (6 decimals)
+	_ = checkUSDCAllowance(t, setup)  // We'll always do belt-and-suspenders regardless
+	requiredAmount := big.NewInt(100) // 0.0001 USDC (6 decimals)
 
 	// Step 1: Auto-decision for paymaster vs self-fund
 	t.Logf("🤖 Step 1: Auto-deciding paymaster vs self-fund...")
@@ -1296,7 +1296,7 @@ func TestRunNodeImmediately_UniswapSwap_Base_CheckSpender(t *testing.T) {
 	t.Logf("🔎 USDC.allowance(wallet, permit2) = %s", allowP.String())
 
 	// Interpretation based on the diagnostic results
-	requiredAmountForDiagnostic := big.NewInt(10000) // 0.01 USDC (6 decimals)
+	requiredAmountForDiagnostic := big.NewInt(100) // 0.0001 USDC (6 decimals)
 	if allowR.Cmp(requiredAmountForDiagnostic) < 0 {
 		t.Logf("❌ DIAGNOSTIC RESULT: allowance(wallet, router) = %s < %s", allowR.String(), requiredAmountForDiagnostic.String())
 		t.Logf("   → Your approve didn't actually target the same (token, owner, spender, chain) the swap uses")
@@ -1364,7 +1364,7 @@ func TestRunNodeImmediately_UniswapSwap_Base_CheckSpender(t *testing.T) {
 	t.Logf("     tokenIn: %s (USDC)", setup.chain.usdc)
 	t.Logf("     tokenOut: %s (WETH)", setup.chain.weth)
 	t.Logf("     fee: %d", setup.chain.feeTier)
-	t.Logf("     amountIn: %s (0.01 USDC)", setup.chain.swapAmount)
+	t.Logf("     amountIn: %s (0.0001 USDC)", setup.chain.swapAmount)
 	t.Logf("     amountOutMinimum: %s (realistic minimum)", minOutput)
 	t.Logf("     funding: %s", map[bool]string{true: "paymaster-sponsored", false: "self-funded"}[usePaymaster])
 

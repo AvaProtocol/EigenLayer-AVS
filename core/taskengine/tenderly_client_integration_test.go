@@ -120,5 +120,7 @@ func TestTenderlyClient_NetworkError_Integration(t *testing.T) {
 	// Verify error handling
 	assert.Error(t, err, "Should return error for cancelled context")
 	assert.Nil(t, log, "Should return nil log on error")
-	fmt.Printf("✅ Error correctly returned: %s\n", err.Error())
+	if err != nil {
+		fmt.Printf("✅ Error correctly returned: %s\n", err.Error())
+	}
 }
