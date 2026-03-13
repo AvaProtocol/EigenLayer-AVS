@@ -648,12 +648,12 @@ func (o *Operator) retryConnect() error {
 	o.aggregatorConn, err = grpc.NewClient(o.config.AggregatorServerIpPortAddress, opts...)
 	if err != nil {
 		if strings.Contains(err.Error(), "connection refused") {
-			o.logger.Error("❌ Cannot create gRPC client for aggregator",
+			o.logger.Warn("❌ Cannot create gRPC client for aggregator",
 				"aggregator_address", o.config.AggregatorServerIpPortAddress,
 				"operator", o.config.OperatorAddress,
 				"raw_error", err)
 		} else {
-			o.logger.Error("❌ Failed to create gRPC client for aggregator",
+			o.logger.Warn("❌ Failed to create gRPC client for aggregator",
 				"aggregator_address", o.config.AggregatorServerIpPortAddress,
 				"operator", o.config.OperatorAddress,
 				"raw_error", err)
@@ -673,17 +673,17 @@ func (o *Operator) retryConnect() error {
 
 	if healthErr != nil {
 		if strings.Contains(healthErr.Error(), "connection refused") {
-			o.logger.Error("❌ Cannot connect to aggregator - service appears to be down",
+			o.logger.Warn("❌ Cannot connect to aggregator - service appears to be down",
 				"aggregator_address", o.config.AggregatorServerIpPortAddress,
 				"operator", o.config.OperatorAddress,
 				"raw_error", healthErr)
 		} else if strings.Contains(healthErr.Error(), "no such host") || strings.Contains(healthErr.Error(), "name resolution") {
-			o.logger.Error("❌ Cannot resolve aggregator hostname",
+			o.logger.Warn("❌ Cannot resolve aggregator hostname",
 				"aggregator_address", o.config.AggregatorServerIpPortAddress,
 				"operator", o.config.OperatorAddress,
 				"raw_error", healthErr)
 		} else {
-			o.logger.Error("❌ Failed to establish connection to aggregator",
+			o.logger.Warn("❌ Failed to establish connection to aggregator",
 				"aggregator_address", o.config.AggregatorServerIpPortAddress,
 				"operator", o.config.OperatorAddress,
 				"raw_error", healthErr)
@@ -814,7 +814,7 @@ func (o *Operator) recreateGrpcConnection() error {
 	var err error
 	o.aggregatorConn, err = grpc.NewClient(o.config.AggregatorServerIpPortAddress, opts...)
 	if err != nil {
-		o.logger.Error("❌ Failed to recreate gRPC client for aggregator",
+		o.logger.Warn("❌ Failed to recreate gRPC client for aggregator",
 			"aggregator_address", o.config.AggregatorServerIpPortAddress,
 			"operator", o.config.OperatorAddress,
 			"raw_error", err)
@@ -832,7 +832,7 @@ func (o *Operator) recreateGrpcConnection() error {
 	})
 
 	if healthErr != nil {
-		o.logger.Error("❌ Health check failed after recreating gRPC connection",
+		o.logger.Warn("❌ Health check failed after recreating gRPC connection",
 			"aggregator_address", o.config.AggregatorServerIpPortAddress,
 			"operator", o.config.OperatorAddress,
 			"raw_error", healthErr)

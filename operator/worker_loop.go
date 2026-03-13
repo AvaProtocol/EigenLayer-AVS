@@ -685,7 +685,7 @@ func (o *Operator) StreamMessages() {
 
 				// Recreate the gRPC connection when it's in closing state
 				if recreateErr := o.recreateGrpcConnection(); recreateErr != nil {
-					o.logger.Error("❌ Failed to recreate gRPC connection",
+					o.logger.Warn("❌ Failed to recreate gRPC connection",
 						"aggregator_address", o.config.AggregatorServerIpPortAddress,
 						"operator", o.config.OperatorAddress,
 						"raw_error", recreateErr)
