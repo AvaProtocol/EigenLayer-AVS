@@ -98,10 +98,13 @@ func TestBuildRequest_SettingsTokensNilService(t *testing.T) {
 }
 
 // TestBuildRequest_SettingsTokensDeduplication verifies that tokens already resolved
-// from step-level metadata are not fetched again from settings.tokens.
+// from step-level metadata (CONTRACT_WRITE) are not overwritten by settings.tokens.
 func TestBuildRequest_SettingsTokensDeduplication(t *testing.T) {
 	usdcAddr := "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
 
+	// The enrichment service returns "USDC" with 6 decimals.
+	// The step-level metadata (section 1) will populate this first.
+	// settings.tokens (section 3) should NOT overwrite it.
 	oldService := GetTokenEnrichmentService()
 	service := &TokenEnrichmentService{
 		cache: map[string]*TokenMetadata{
@@ -118,15 +121,32 @@ func TestBuildRequest_SettingsTokensDeduplication(t *testing.T) {
 			"name":   "Transfer Alert",
 			"chain":  "Ethereum",
 			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
-			"owner":  "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
 			"tokens": []interface{}{usdcAddr},
 		},
 	}
+
+	// Set up a CONTRACT_WRITE node targeting USDC with an ERC20 "transfer" method.
+	// This causes section 1 of buildRequest to populate tokenMetadataMap first.
 	vm.TaskNodes = map[string]*avsproto.TaskNode{
-		"node0": {Id: "node0", Name: "trigger"},
+		"trigger0": {Id: "trigger0", Name: "trigger"},
+		"node1": {
+			Id:   "node1",
+			Name: "transferUSDC",
+			TaskType: &avsproto.TaskNode_ContractWrite{
+				ContractWrite: &avsproto.ContractWriteNode{
+					Config: &avsproto.ContractWriteNode_Config{
+						ContractAddress: usdcAddr,
+						MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
+							{MethodName: "transfer"},
+						},
+					},
+				},
+			},
+		},
 	}
 	vm.ExecutionLogs = []*avsproto.Execution_Step{
-		{Id: "node0", Name: "trigger", Type: "eventTrigger", Success: true},
+		{Id: "trigger0", Name: "trigger", Type: "eventTrigger", Success: true},
+		{Id: "node1", Name: "transferUSDC", Type: "contractWrite", Success: true},
 	}
 	vm.mu.Unlock()
 
@@ -134,7 +154,10 @@ func TestBuildRequest_SettingsTokensDeduplication(t *testing.T) {
 	req, err := summarizer.buildRequest(vm, "trigger")
 	require.NoError(t, err)
 
-	// Should have exactly 1 entry (no duplicates)
+	// Should have exactly 1 entry — step-level resolved it, settings.tokens should skip it.
 	assert.Len(t, req.TokenMetadata, 1, "should have exactly 1 token, no duplicates")
-	assert.NotNil(t, req.TokenMetadata[strings.ToLower(usdcAddr)])
+	usdcMeta := req.TokenMetadata[strings.ToLower(usdcAddr)]
+	require.NotNil(t, usdcMeta, "USDC metadata should be present")
+	assert.Equal(t, "USDC", usdcMeta.Symbol)
+	assert.Equal(t, uint32(6), usdcMeta.Decimals)
 }

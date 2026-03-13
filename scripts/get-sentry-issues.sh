@@ -11,7 +11,7 @@
 #
 # Env (in .env at repo root):
 #   SENTRY_AUTH_TOKEN  - Sentry API bearer token (required)
-#   SENTRY_ORG         - Sentry organization slug (default: ava-protocol-public)
+#   SENTRY_ORG         - Sentry organization slug (default: ava-protocol)
 #   SENTRY_PROJECT     - Sentry project slug (default: eigenlayer-avs)
 
 set -euo pipefail
@@ -208,16 +208,22 @@ resolve_issue() {
   http_code=$(echo "$response" | tail -1)
   response=$(echo "$response" | sed '$d')
 
+  local resolved_with_commit=true
   if [[ "$http_code" -ge 400 ]]; then
     echo "Commit link failed (HTTP $http_code) — resolving without commit reference..."
     body='{"status":"resolved"}'
     response=$(sentry_put "/issues/$issue_id/" "$body")
+    resolved_with_commit=false
   fi
 
   local status
   status=$(echo "$response" | jq -r '.status // "unknown"')
 
-  echo "Resolved issue $issue_id by commit $commit. (status: $status)"
+  if [[ "$resolved_with_commit" == true ]]; then
+    echo "Resolved issue $issue_id by commit $commit. (status: $status)"
+  else
+    echo "Resolved issue $issue_id without commit reference. (status: $status)"
+  fi
 }
 
 # --- Main ---
