@@ -261,6 +261,7 @@ func TestAIIntegration_RunNodeImmediately(t *testing.T) {
 			"name":   "Test RunNode Workflow",
 			"chain":  "Sepolia",
 			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
+			"owner":  "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
 		},
 	}
 	vm.mu.Unlock()
@@ -468,6 +469,7 @@ func TestAIIntegration_Simulation(t *testing.T) {
 			"name":      "Test settings.name",
 			"chain":     "Sepolia",
 			"runner":    "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+			"owner":     "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
 			"chain_id":  float64(11155111),
 			"recipient": "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
 			"token_amount": map[string]interface{}{
@@ -736,6 +738,7 @@ func TestAIIntegration_RealExecution(t *testing.T) {
 			"name":     "Stoploss USDC->WETH",
 			"chain":    "Sepolia",
 			"runner":   "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+			"owner":    "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
 			"chain_id": float64(11155111),
 		},
 	}
@@ -942,6 +945,7 @@ func TestAIIntegration_FormatConsistency(t *testing.T) {
 			"name":   "Format Test Workflow",
 			"chain":  "Sepolia",
 			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
+			"owner":  "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
 		},
 	}
 	vm.mu.Unlock()
@@ -1057,6 +1061,7 @@ func TestAIIntegration_ComposeSummarySmart(t *testing.T) {
 			"name":   "Smart Test Workflow",
 			"chain":  "Sepolia",
 			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
+			"owner":  "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
 		},
 	}
 	vm.mu.Unlock()
