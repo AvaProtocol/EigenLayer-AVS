@@ -57,7 +57,7 @@ test/integration:
 	go clean -cache
 	go mod tidy
 	go build $(shell go list ./... | grep -v '/scripts$$')
-	go test -v -race -buildvcs -tags=integration ./integration_test/
+	go test -v -race -buildvcs -tags=integration ./integration_test/ ./core/taskengine/...
 
 
 ## test/package: run tests for a specific package (usage: make test/package PKG=./core/taskengine)

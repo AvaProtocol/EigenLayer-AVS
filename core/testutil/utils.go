@@ -136,6 +136,7 @@ func GetConfigPath(configFileName string) string {
 
 // GetTestConfig returns the loaded test configuration
 func GetTestConfig() *config.Config {
+	loadTestConfigOnce()
 	return testConfig
 }
 
@@ -464,6 +465,8 @@ func TestUser2() *model.User {
 }
 
 func GetAggregatorConfig() *config.Config {
+	loadTestConfigOnce()
+
 	// Include MacroSecrets from loaded config if available
 	var macroSecrets map[string]string
 	if testConfig != nil && testConfig.MacroSecrets != nil {

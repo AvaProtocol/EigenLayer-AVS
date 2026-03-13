@@ -90,6 +90,10 @@ func NewTenderlyClient(cfg *config.Config, logger sdklogging.Logger) *TenderlyCl
 
 // SimulateEventTrigger simulates transactions to generate realistic event data
 func (tc *TenderlyClient) SimulateEventTrigger(ctx context.Context, query *avsproto.EventTrigger_Query, chainID int64) (*types.Log, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context error before simulation: %w", err)
+	}
+
 	if len(query.GetAddresses()) == 0 {
 		return nil, fmt.Errorf("no contract addresses provided for simulation")
 	}
