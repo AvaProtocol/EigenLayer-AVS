@@ -568,6 +568,31 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 		}
 	}
 
+	// 3. Collect from settings.tokens — explicit list of token addresses declared by the workflow.
+	// This is the preferred way for workflows to declare which tokens they interact with,
+	// ensuring context-memory always has the metadata needed for decimal formatting.
+	if tokens, ok := settings["tokens"].([]interface{}); ok {
+		tokenService := GetTokenEnrichmentService()
+		if tokenService != nil {
+			for _, t := range tokens {
+				if addr, ok := t.(string); ok && common.IsHexAddress(addr) {
+					addrLower := strings.ToLower(addr)
+					if _, exists := tokenMetadataMap[addrLower]; !exists {
+						if metadata, err := tokenService.GetTokenMetadata(addr); err == nil && metadata != nil {
+							tokenMetadataMap[addrLower] = &contextMemoryTokenMetadata{
+								Symbol:   metadata.Symbol,
+								Decimals: metadata.Decimals,
+								Name:     metadata.Name,
+							}
+						} else if err != nil && vm != nil && vm.logger != nil {
+							vm.logger.Debug("Failed to fetch token metadata from settings.tokens", "address", addr, "error", err)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	return &contextMemorySummarizeRequest{
 		OwnerEOA:        ownerEOA,
 		Name:            workflowName,
