@@ -509,6 +509,7 @@ func sendUserOpShared(
 	callData []byte,
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
+	saltOverride *big.Int,
 	wsClient *ethclient.Client,
 	lgr logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error) {
@@ -554,6 +555,7 @@ func sendUserOpShared(
 			paymasterReq.ValidUntil,
 			paymasterReq.ValidAfter,
 			senderOverride,
+			saltOverride,
 			nil,                         // nonceOverride - fetch from chain
 			big.NewInt(0),               // callGasLimit: 0 to force bundler estimation
 			big.NewInt(0),               // verificationGasLimit: 0 to force bundler estimation
@@ -662,6 +664,7 @@ func sendUserOpShared(
 				paymasterReq.ValidUntil,
 				paymasterReq.ValidAfter,
 				senderOverride,
+				saltOverride,
 				nil,                         // nonceOverride - fetch from chain
 				big.NewInt(0),               // callGasLimit: 0 to force bundler estimation (works for unwrapped)
 				big.NewInt(0),               // verificationGasLimit: 0 to force bundler estimation (works for unwrapped)
@@ -713,7 +716,7 @@ func sendUserOpShared(
 	// Build the userOp based on whether paymaster is requested or not
 	if paymasterReq == nil {
 		// Standard UserOp without paymaster
-		userOp, err = BuildUserOp(smartWalletConfig, client, bundlerClient, owner, callData, senderOverride, l)
+		userOp, err = BuildUserOp(smartWalletConfig, client, bundlerClient, owner, callData, senderOverride, saltOverride, l)
 	} else {
 		// UserOp with paymaster support - use estimated gas limits
 		userOp, err = BuildUserOpWithPaymaster(
@@ -726,6 +729,7 @@ func sendUserOpShared(
 			paymasterReq.ValidUntil,
 			paymasterReq.ValidAfter,
 			senderOverride,
+			saltOverride,
 			nil,                         // nonceOverride - let it fetch from chain
 			estimatedCallGas,            // Use estimated gas
 			estimatedVerificationGas,    // Use estimated gas
@@ -824,6 +828,7 @@ func sendUserOpShared(
 				paymasterReq.ValidUntil,
 				paymasterReq.ValidAfter,
 				senderOverride,
+				saltOverride,
 				targetNonce,
 				estimatedCallGas,
 				estimatedVerificationGas,
@@ -841,7 +846,7 @@ func sendUserOpShared(
 		if paymasterReq != nil && (strings.Contains(strings.ToLower(err.Error()), "invalid useroperation") || strings.Contains(err.Error(), "-32602")) {
 			l.Warn("Paymaster send failed with invalid params, retrying without paymaster")
 			// Rebuild WITHOUT paymaster and WITHOUT reimbursement wrapping
-			userOpNoPM, buildErr := BuildUserOp(smartWalletConfig, client, bundlerClient, owner, originalCallData, senderOverride, l)
+			userOpNoPM, buildErr := BuildUserOp(smartWalletConfig, client, bundlerClient, owner, originalCallData, senderOverride, saltOverride, l)
 			if buildErr != nil {
 				l.Error("Fallback UserOp build without paymaster failed", "error", buildErr)
 				return userOp, nil, err
@@ -894,6 +899,7 @@ func SendUserOp(
 	callData []byte,
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
+	saltOverride *big.Int,
 	lgr logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	l := logger.EnsureLogger(lgr)
@@ -916,7 +922,7 @@ func SendUserOp(
 	}
 
 	// Use the shared logic for the main UserOp processing
-	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient, lgr)
+	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, saltOverride, wsClient, lgr)
 }
 
 // sendUserOpCore contains the shared retry loop logic for sending UserOps to the bundler.
@@ -1189,6 +1195,8 @@ func sendUserOpCore(
 
 // BuildUserOp builds a UserOperation with the given parameters.
 // The client and bundlerClient are used for blockchain interaction.
+// saltOverride: if provided, use this salt for address derivation and initCode generation
+// instead of the default salt (0). This enables auto-deployment of wallets created with non-zero salts.
 func BuildUserOp(
 	smartWalletConfig *config.SmartWalletConfig,
 	client *ethclient.Client,
@@ -1196,12 +1204,21 @@ func BuildUserOp(
 	owner common.Address,
 	callData []byte,
 	senderOverride *common.Address,
+	saltOverride *big.Int,
 	lgr logger.Logger,
 ) (*userop.UserOperation, error) {
 	l := logger.EnsureLogger(lgr)
-	// Resolve sender by deriving from owner (salt:0). If an override is provided, it must match
-	// the derived address; if not deployed, we will include initCode to auto-deploy instead of erroring.
-	derivedSender, err := aa.GetSenderAddress(client, owner, accountSalt)
+
+	// Use saltOverride if provided, otherwise default to salt=0
+	effectiveSalt := accountSalt
+	if saltOverride != nil {
+		effectiveSalt = saltOverride
+	}
+
+	// Resolve sender by deriving from owner with the effective salt.
+	// If an override is provided and matches the derived address, use it directly.
+	// If not deployed, we will include initCode to auto-deploy.
+	derivedSender, err := aa.GetSenderAddress(client, owner, effectiveSalt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive sender address: %w", err)
 	}
@@ -1209,13 +1226,14 @@ func BuildUserOp(
 	if senderOverride != nil {
 		so := *senderOverride
 		if !strings.EqualFold(so.Hex(), derivedSender.Hex()) {
-			// Allow override if it's already deployed; otherwise require derived address for initCode path
+			// Override doesn't match derived address — allow if already deployed on-chain
 			codeAtOverride, err := client.CodeAt(context.Background(), so, nil)
 			if err != nil {
 				return nil, fmt.Errorf("failed to check override sender code: %w", err)
 			}
 			if len(codeAtOverride) == 0 {
-				return nil, fmt.Errorf("sender override %s does not match derived sender %s and override is not deployed", so.Hex(), derivedSender.Hex())
+				return nil, fmt.Errorf("sender override %s does not match derived sender %s (salt=%s) and override is not deployed",
+					so.Hex(), derivedSender.Hex(), effectiveSalt.String())
 			}
 			sender = &so
 		}
@@ -1228,10 +1246,10 @@ func BuildUserOp(
 		return nil, err
 	}
 
-	// account not initialized, feed in init code
+	// account not initialized, feed in init code with the correct salt
 	if len(code) == 0 {
-		initCode, _ = aa.GetInitCode(owner.Hex(), accountSalt)
-		l.Debug("Wallet not deployed, generating initCode", "sender", sender.Hex())
+		initCode, _ = aa.GetInitCode(owner.Hex(), effectiveSalt)
+		l.Debug("Wallet not deployed, generating initCode", "sender", sender.Hex(), "salt", effectiveSalt.String())
 	}
 
 	maxFeePerGas, maxPriorityFeePerGas, err := eip1559.SuggestFee(client)
@@ -1283,6 +1301,7 @@ func SendUserOpWithWsClient(
 	callData []byte,
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
+	saltOverride *big.Int,
 	wsClient *ethclient.Client,
 	lgr logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error) {
@@ -1293,11 +1312,11 @@ func SendUserOpWithWsClient(
 	if wsClient == nil {
 		l.Warn("No WebSocket client provided, falling back to SendUserOp")
 		// Fall back to SendUserOp which will create its own WebSocket client if needed
-		return SendUserOp(smartWalletConfig, owner, callData, paymasterReq, senderOverride, lgr)
+		return SendUserOp(smartWalletConfig, owner, callData, paymasterReq, senderOverride, saltOverride, lgr)
 	}
 
 	// Use the shared logic for the main UserOp processing
-	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient, lgr)
+	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, saltOverride, wsClient, lgr)
 }
 
 // BuildUserOpWithPaymaster creates a UserOperation with paymaster support.
@@ -1317,6 +1336,7 @@ func BuildUserOpWithPaymaster(
 	validUntil *big.Int,
 	validAfter *big.Int,
 	senderOverride *common.Address,
+	saltOverride *big.Int,
 	nonceOverride *big.Int,
 	callGasOverride *big.Int,
 	verificationGasOverride *big.Int,
@@ -1326,7 +1346,7 @@ func BuildUserOpWithPaymaster(
 	l := logger.EnsureLogger(lgr)
 	// First build the basic user operation (auto-deploy if needed). If override is provided,
 	// it must match the derived sender from owner.
-	userOp, err := BuildUserOp(smartWalletConfig, client, bundlerClient, owner, callData, senderOverride, l)
+	userOp, err := BuildUserOp(smartWalletConfig, client, bundlerClient, owner, callData, senderOverride, saltOverride, l)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build base UserOp: %w", err)
 	}

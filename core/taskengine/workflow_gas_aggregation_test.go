@@ -16,7 +16,7 @@ func TestAdvancedGasCostAggregation(t *testing.T) {
 		// Add mock execution steps with gas costs
 		step1 := &avsproto.Execution_Step{
 			Id:           "step1",
-			Type:         "CONTRACT_WRITE",
+			Type:         avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
 			Success:      true,
 			GasUsed:      "100000",           // 100k gas
 			GasPrice:     "20000000000",      // 20 gwei
@@ -24,7 +24,7 @@ func TestAdvancedGasCostAggregation(t *testing.T) {
 		}
 		step2 := &avsproto.Execution_Step{
 			Id:           "step2",
-			Type:         "CONTRACT_WRITE",
+			Type:         avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
 			Success:      true,
 			GasUsed:      "150000",           // 150k gas
 			GasPrice:     "25000000000",      // 25 gwei
@@ -32,7 +32,7 @@ func TestAdvancedGasCostAggregation(t *testing.T) {
 		}
 		step3 := &avsproto.Execution_Step{
 			Id:           "step3",
-			Type:         "ETH_TRANSFER",
+			Type:         avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String(),
 			Success:      true,
 			GasUsed:      "21000",           // Standard ETH transfer
 			GasPrice:     "30000000000",     // 30 gwei
@@ -41,7 +41,7 @@ func TestAdvancedGasCostAggregation(t *testing.T) {
 		// Add a step without gas costs (should not affect aggregation)
 		step4 := &avsproto.Execution_Step{
 			Id:      "step4",
-			Type:    "CUSTOM_CODE",
+			Type:    avsproto.NodeType_NODE_TYPE_CUSTOM_CODE.String(),
 			Success: true,
 			// No gas fields set
 		}
@@ -64,7 +64,7 @@ func TestAdvancedGasCostAggregation(t *testing.T) {
 		// Contract write step with gas
 		contractStep := &avsproto.Execution_Step{
 			Id:           "contract1",
-			Type:         "CONTRACT_WRITE",
+			Type:         avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
 			Success:      true,
 			GasUsed:      "200000",
 			GasPrice:     "15000000000",      // 15 gwei
@@ -74,7 +74,7 @@ func TestAdvancedGasCostAggregation(t *testing.T) {
 		// ETH transfer step with gas
 		ethStep := &avsproto.Execution_Step{
 			Id:           "eth1",
-			Type:         "ETH_TRANSFER",
+			Type:         avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String(),
 			Success:      true,
 			GasUsed:      "21000",
 			GasPrice:     "15000000000",     // 15 gwei
@@ -84,7 +84,7 @@ func TestAdvancedGasCostAggregation(t *testing.T) {
 		// Custom code step (no gas)
 		codeStep := &avsproto.Execution_Step{
 			Id:      "code1",
-			Type:    "CUSTOM_CODE",
+			Type:    avsproto.NodeType_NODE_TYPE_CUSTOM_CODE.String(),
 			Success: true,
 		}
 
@@ -106,7 +106,7 @@ func TestAdvancedGasCostAggregation(t *testing.T) {
 		// Step with valid gas data
 		validStep := &avsproto.Execution_Step{
 			Id:           "valid",
-			Type:         "CONTRACT_WRITE",
+			Type:         avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
 			Success:      true,
 			GasUsed:      "50000",
 			GasPrice:     "10000000000",
@@ -116,7 +116,7 @@ func TestAdvancedGasCostAggregation(t *testing.T) {
 		// Step with empty gas data (should be ignored)
 		emptyStep := &avsproto.Execution_Step{
 			Id:           "empty",
-			Type:         "CONTRACT_WRITE",
+			Type:         avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
 			Success:      true,
 			GasUsed:      "",
 			GasPrice:     "",
@@ -126,7 +126,7 @@ func TestAdvancedGasCostAggregation(t *testing.T) {
 		// Step with zero gas cost (should be ignored)
 		zeroStep := &avsproto.Execution_Step{
 			Id:           "zero",
-			Type:         "ETH_TRANSFER",
+			Type:         avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String(),
 			Success:      true,
 			GasUsed:      "0",
 			GasPrice:     "10000000000",
@@ -136,7 +136,7 @@ func TestAdvancedGasCostAggregation(t *testing.T) {
 		// Non-blockchain step (should be ignored)
 		nonBlockchainStep := &avsproto.Execution_Step{
 			Id:      "custom",
-			Type:    "CUSTOM_CODE",
+			Type:    avsproto.NodeType_NODE_TYPE_CUSTOM_CODE.String(),
 			Success: true,
 			// Gas fields should be ignored even if set
 			GasUsed:      "100000",
@@ -158,12 +158,12 @@ func TestAdvancedGasCostAggregation(t *testing.T) {
 		// Only non-blockchain steps
 		step1 := &avsproto.Execution_Step{
 			Id:      "custom1",
-			Type:    "CUSTOM_CODE",
+			Type:    avsproto.NodeType_NODE_TYPE_CUSTOM_CODE.String(),
 			Success: true,
 		}
 		step2 := &avsproto.Execution_Step{
 			Id:      "contract_read1",
-			Type:    "CONTRACT_READ",
+			Type:    avsproto.NodeType_NODE_TYPE_CONTRACT_READ.String(),
 			Success: true,
 		}
 
@@ -184,23 +184,23 @@ func TestStepTypeFiltering(t *testing.T) {
 
 		steps := []*avsproto.Execution_Step{
 			{
-				Id: "contract_write", Type: "CONTRACT_WRITE", Success: true,
+				Id: "contract_write", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(), Success: true,
 				GasUsed: "100000", GasPrice: "10000000000", TotalGasCost: gasCost,
 			},
 			{
-				Id: "eth_transfer", Type: "ETH_TRANSFER", Success: true,
+				Id: "eth_transfer", Type: avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String(), Success: true,
 				GasUsed: "21000", GasPrice: "10000000000", TotalGasCost: "210000000000000",
 			},
 			{
-				Id: "contract_read", Type: "CONTRACT_READ", Success: true,
+				Id: "contract_read", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_READ.String(), Success: true,
 				GasUsed: "50000", GasPrice: "10000000000", TotalGasCost: gasCost, // Should be ignored
 			},
 			{
-				Id: "custom_code", Type: "CUSTOM_CODE", Success: true,
+				Id: "custom_code", Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE.String(), Success: true,
 				GasUsed: "0", GasPrice: "10000000000", TotalGasCost: gasCost, // Should be ignored
 			},
 			{
-				Id: "graphql_query", Type: "GRAPHQL_QUERY", Success: true,
+				Id: "graphql_query", Type: avsproto.NodeType_NODE_TYPE_GRAPHQL_QUERY.String(), Success: true,
 				GasUsed: "75000", GasPrice: "10000000000", TotalGasCost: gasCost, // Should be ignored
 			},
 		}

@@ -1498,13 +1498,22 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		v.logger.Warn("⚠️ VM DEBUG - Smart wallet config is NIL in VM!")
 	}
 
-	// For contract write, set aa_sender from vm.task.SmartWalletAddress
+	// For contract write, set aa_sender and aa_salt from vm.task.SmartWalletAddress
 	if v.task != nil && v.task.Task != nil && common.IsHexAddress(v.task.SmartWalletAddress) {
 		v.AddVar("aa_sender", v.task.SmartWalletAddress)
 		if v.logger != nil {
 			v.logger.Info("Set aa_sender from task.SmartWalletAddress",
 				"runner", v.task.SmartWalletAddress,
 				"owner", v.TaskOwner.Hex())
+		}
+		// Look up salt from DB if not already set
+		v.mu.Lock()
+		_, hasSalt := v.vars["aa_salt"]
+		v.mu.Unlock()
+		if !hasSalt && v.db != nil {
+			if wallet, err := GetWallet(v.db, v.TaskOwner, v.task.SmartWalletAddress); err == nil && wallet != nil && wallet.Salt != nil {
+				v.AddVar("aa_salt", wallet.Salt)
+			}
 		}
 	}
 
@@ -2387,7 +2396,7 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 		tempVM.vars[APContextVarName] = apContextValue
 	}
 
-	// Copy aa_sender if it exists (required for contractWrite nodes)
+	// Copy aa_sender and aa_salt if they exist (required for contractWrite/ethTransfer nodes)
 	if aaSenderValue, ok := v.vars["aa_sender"]; ok {
 		if tempVM.vars == nil { // Ensure tempVM.vars is initialized
 			tempVM.vars = make(map[string]any)
@@ -2396,6 +2405,12 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 		if v.logger != nil {
 			v.logger.Info("Copied aa_sender to temporary VM for contractWrite execution", "aa_sender", aaSenderValue)
 		}
+	}
+	if aaSaltValue, ok := v.vars["aa_salt"]; ok {
+		if tempVM.vars == nil {
+			tempVM.vars = make(map[string]any)
+		}
+		tempVM.vars["aa_salt"] = aaSaltValue
 	}
 
 	v.mu.Unlock()
@@ -3271,7 +3286,8 @@ func (v *VM) CalculateTotalGasCost() string {
 
 	for _, step := range v.ExecutionLogs {
 		// Only consider blockchain operations that might have gas costs
-		if step.Type == "CONTRACT_WRITE" || step.Type == "ETH_TRANSFER" {
+		// step.Type is set from node.Type.String() which returns the full protobuf enum name
+		if step.Type == avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String() || step.Type == avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String() {
 			if step.TotalGasCost != "" && step.TotalGasCost != "0" {
 				if stepGasCost, ok := new(big.Int).SetString(step.TotalGasCost, 10); ok {
 					totalGasCost.Add(totalGasCost, stepGasCost)

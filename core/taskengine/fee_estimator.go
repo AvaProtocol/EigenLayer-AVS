@@ -7,10 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/services"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
@@ -327,21 +329,57 @@ func (fe *FeeEstimator) estimateSmartWalletCreation(ctx context.Context, req *av
 }
 
 // estimateWalletCreationGas estimates gas needed for smart wallet creation
+// by calling eth_estimateGas against the factory's createAccount method.
 func (fe *FeeEstimator) estimateWalletCreationGas(ctx context.Context, walletAddress common.Address) (*big.Int, *big.Int, error) {
-	// TODO: Implement actual gas estimation for factory.createAccount()
-	// For now, use conservative estimates
+	const fallbackCreationGas = int64(500000) // Conservative fallback for ERC-6900 wallet deployment
 
 	// Get current gas price
 	gasPrice, err := fe.ethClient.SuggestGasPrice(ctx)
 	if err != nil {
-		fe.logger.Warn("Failed to get current gas price", "error", err)
+		fe.logger.Warn("Failed to get current gas price for wallet creation", "error", err)
 		gasPrice = big.NewInt(int64(DefaultGasPrice))
 	}
 
-	// Conservative estimate for smart wallet creation
-	creationGas := big.NewInt(200000)
+	// Build createAccount calldata using the factory ABI.
+	// We use walletAddress as a dummy owner with salt=0 to simulate a fresh deployment.
+	// The actual gas cost is dominated by proxy deployment and is constant regardless of owner/salt,
+	// as long as the resulting address has no deployed code (which we've already verified).
+	factoryAddress := fe.smartWalletConfig.FactoryAddress
+	initCodeHex, err := aa.GetInitCodeForFactory(walletAddress.Hex(), factoryAddress, big.NewInt(0))
+	if err != nil {
+		fe.logger.Warn("Failed to build createAccount calldata, using fallback gas estimate",
+			"error", err, "fallback_gas", fallbackCreationGas)
+		return big.NewInt(fallbackCreationGas), gasPrice, nil
+	}
 
-	return creationGas, gasPrice, nil
+	// initCode = factoryAddress (20 bytes) + calldata, so strip the factory address prefix
+	initCodeBytes := common.FromHex(initCodeHex)
+	if len(initCodeBytes) <= 20 {
+		fe.logger.Warn("InitCode too short, using fallback gas estimate", "fallback_gas", fallbackCreationGas)
+		return big.NewInt(fallbackCreationGas), gasPrice, nil
+	}
+	calldata := initCodeBytes[20:]
+
+	// Estimate gas via eth_estimateGas against the factory contract
+	estimatedGas, err := fe.ethClient.EstimateGas(ctx, ethereum.CallMsg{
+		To:   &factoryAddress,
+		Data: calldata,
+	})
+	if err != nil {
+		fe.logger.Warn("eth_estimateGas for factory.createAccount failed, using fallback",
+			"error", err, "factory", factoryAddress.Hex(), "fallback_gas", fallbackCreationGas)
+		return big.NewInt(fallbackCreationGas), gasPrice, nil
+	}
+
+	// Add 20% buffer to account for estimation variance
+	bufferedGas := new(big.Int).SetUint64(estimatedGas)
+	buffer := new(big.Int).Div(bufferedGas, big.NewInt(5)) // 20%
+	bufferedGas.Add(bufferedGas, buffer)
+
+	fe.logger.Info("Estimated wallet creation gas via eth_estimateGas",
+		"raw_gas", estimatedGas, "buffered_gas", bufferedGas, "factory", factoryAddress.Hex())
+
+	return bufferedGas, gasPrice, nil
 }
 
 // estimateGasFees estimates gas costs for all blockchain operations in the workflow
