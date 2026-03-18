@@ -4,31 +4,54 @@ Execute the following steps for the current branch's PR:
 
 ## Steps
 
-1. **Determine base branch**
+1. **Ensure branch is pushed to remote**
+   Run: `git push -u origin $(git branch --show-current)`
+   This ensures the local branch and all commits are synced to the remote before any PR operations.
+
+2. **Check if PR already exists**
+   Run: `gh pr view --json number,url 2>/dev/null`
+
+   - If a PR already exists, capture the PR number and **skip to step 4**.
+   - If no PR exists, continue to step 3.
+
+3. **Create PR on GitHub**
+   Determine the base branch:
    Run: `git branch --show-current`
 
    - If the current branch is `staging`, the base branch is `main`
    - Otherwise, the base branch is `staging`
 
-2. **Create PR on GitHub**
    Run: `gh pr create --fill --base <BASE_BRANCH>`
    Capture the PR number from the output.
 
-3. **Request Copilot Review**
+4. **Capture baseline timestamp**
+   Run: `sh scripts/get-pr-comments.sh <PR_NUMBER>`
+   Record the `created_at` timestamp of the newest Copilot review comment from `pr-comments-<PR_NUMBER>.json` — this is the **baseline timestamp**. If there are no Copilot comments yet, the baseline is empty (any comment after the review will be new).
+   Run: `jq -r '.copilot.review_comments[-1].created_at // empty' pr-comments-<PR_NUMBER>.json`
+
+   Also capture the latest Copilot **review** `submitted_at` timestamp (used to wait for the new review):
+   Run: `gh api repos/AvaProtocol/EigenLayer-AVS/pulls/<PR_NUMBER>/reviews --jq '[.[] | select(.user.login == "copilot-pull-request-reviewer[bot]")] | sort_by(.submitted_at) | last | .submitted_at'`
+
+5. **Request Copilot Review**
    Run: `gh api repos/AvaProtocol/EigenLayer-AVS/pulls/<PR_NUMBER>/requested_reviewers -f 'reviewers[]=copilot-pull-request-reviewer[bot]' --method POST`
 
-4. **Wait for Copilot review to complete**
-   Run: `bash scripts/wait-for-copilot-review.sh <PR_NUMBER>`
-   This polls every 30s (up to 10 min) until Copilot's review state is no longer PENDING.
+6. **Wait for Copilot review to complete**
+   Pass the baseline review timestamp so the script waits for a **new** review, not the old one:
+   Run: `sh scripts/wait-for-copilot-review.sh <PR_NUMBER> 600 <BASELINE_REVIEW_TIMESTAMP>`
+   This polls every 30s (up to 10 min) until a new Copilot review with a terminal state appears.
 
-5. **Download PR comments**
+7. **Wait for new comments to appear**
+   After the review state changes, poll until a comment newer than the baseline appears:
    Run: `sh scripts/get-pr-comments.sh <PR_NUMBER>`
-   This fetches unresolved Copilot and Claude review comments and saves them to `pr-comments-<PR_NUMBER>.json`.
+   Then check: `jq -r '.copilot.review_comments[-1].created_at // empty' pr-comments-<PR_NUMBER>.json`
+   If the newest `created_at` is the same as (or older than) the baseline comment timestamp from step 4, wait 15s and re-run. Repeat up to 10 times. If no newer comment appears after all retries, proceed anyway (Copilot may have approved with no comments).
 
-6. **Evaluate comments**
-   Read `pr-comments-<PR_NUMBER>.json` and for each comment, decide:
+8. **Evaluate comments**
+   Read `pr-comments-<PR_NUMBER>.json` and evaluate only comments with `created_at` **newer than** the baseline timestamp from step 4. For each new comment, decide:
 
-   - If it's a clear bug or style issue → apply the fix directly
-   - If it's subjective or you disagree → output a SKIP decision with reasoning
+   - If it's a clear bug, correctness issue, or style issue → **FIX** it directly
+   - If it's subjective or you disagree → **SKIP** with reasoning
 
-   Present a summary table of all comments with FIX/SKIP status before making changes.
+   Present a summary table of all new comments with FIX/SKIP status before making changes.
+
+   After applying fixes: lint, commit, and push.
