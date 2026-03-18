@@ -41,7 +41,7 @@ Execute the following steps for the current branch's PR:
 
 7. **Wait for Copilot review to complete**
    Pass the baseline review timestamp so the script waits for a **new** review, not the old one:
-   Run: `sh scripts/wait-for-copilot-review.sh <PR_NUMBER> 600 <BASELINE_REVIEW_TIMESTAMP>`
+   Run: `bash scripts/wait-for-copilot-review.sh <PR_NUMBER> 600 <BASELINE_REVIEW_TIMESTAMP>`
    This polls every 30s (up to 10 min) until a new Copilot review with a terminal state appears.
 
 8. **Wait for new comments to appear**
