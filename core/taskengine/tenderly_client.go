@@ -354,9 +354,11 @@ func (tc *TenderlyClient) simulateTransferEvent(ctx context.Context, contractAdd
 	return simulatedLog, nil
 }
 
-// simulateGenericEvent creates a generic simulated log for arbitrary event signatures/topics
+// simulateGenericEvent creates a generic simulated log for arbitrary event signatures/topics.
+// It parses the contract ABI from the query to properly ABI-encode non-indexed parameters
+// in the Data field, so downstream ABI decoders can unpack the event into named fields.
 func (tc *TenderlyClient) simulateGenericEvent(ctx context.Context, contractAddress string, query *avsproto.EventTrigger_Query, chainID int64) (*types.Log, error) {
-	tc.logger.Info("🔮 Simulating generic event via Tenderly fallback",
+	tc.logger.Info("🔮 Simulating generic event",
 		"contract", contractAddress,
 		"chain_id", chainID,
 		"topics_count", len(query.GetTopics()))
@@ -375,8 +377,8 @@ func (tc *TenderlyClient) simulateGenericEvent(ctx context.Context, contractAddr
 		topics = []common.Hash{common.Hash{}}
 	}
 
-	// Use zeroed 32-byte data by default
-	data := make([]byte, 32)
+	// Try to ABI-encode non-indexed parameters from the contract ABI
+	data := tc.buildABIEncodedEventData(query, topics)
 
 	// Realistic identifiers
 	txHash := common.HexToHash(fmt.Sprintf("0x%064x", time.Now().UnixNano()))
@@ -396,9 +398,179 @@ func (tc *TenderlyClient) simulateGenericEvent(ctx context.Context, contractAddr
 
 	tc.logger.Info("✅ Generic event simulation completed",
 		"block", blockNumber,
-		"tx", txHash.Hex())
+		"tx", txHash.Hex(),
+		"data_len", len(data))
 
 	return log, nil
+}
+
+// buildABIEncodedEventData parses the contract ABI to find the matching event by topic[0]
+// and generates properly ABI-encoded sample data for non-indexed parameters.
+// Returns zeroed 32 bytes as fallback if ABI parsing fails.
+func (tc *TenderlyClient) buildABIEncodedEventData(query *avsproto.EventTrigger_Query, topics []common.Hash) []byte {
+	abiValues := query.GetContractAbi()
+	if len(abiValues) == 0 || len(topics) == 0 {
+		return make([]byte, 32) // Fallback: no ABI provided
+	}
+
+	// Parse the ABI
+	contractABI, err := ParseABIOptimized(abiValues)
+	if err != nil {
+		tc.logger.Warn("Failed to parse ABI for generic event simulation, using empty data", "error", err)
+		return make([]byte, 32)
+	}
+
+	// Match event by topic[0] (event signature)
+	eventSig := topics[0]
+	var matchingEvent *abi.Event
+	for _, event := range contractABI.Events {
+		if event.ID == eventSig {
+			matchingEvent = &event
+			break
+		}
+	}
+
+	if matchingEvent == nil {
+		tc.logger.Warn("No matching event in ABI for topic signature, using empty data",
+			"signature", eventSig.Hex())
+		return make([]byte, 32)
+	}
+
+	tc.logger.Info("🔍 Found matching event in ABI for simulation",
+		"event_name", matchingEvent.Name,
+		"inputs_count", len(matchingEvent.Inputs))
+
+	// Collect sample values for non-indexed parameters (these go into Data)
+	var nonIndexedArgs []interface{}
+	var nonIndexedInputs abi.Arguments
+	for _, input := range matchingEvent.Inputs {
+		if !input.Indexed {
+			sampleValue := generateSampleValue(input.Type)
+			nonIndexedArgs = append(nonIndexedArgs, sampleValue)
+			nonIndexedInputs = append(nonIndexedInputs, input)
+			tc.logger.Debug("Generated sample value for non-indexed param",
+				"name", input.Name,
+				"type", input.Type.String(),
+				"value", fmt.Sprintf("%v", sampleValue))
+		}
+	}
+
+	if len(nonIndexedArgs) == 0 {
+		// All parameters are indexed — Data should be empty
+		return []byte{}
+	}
+
+	// ABI-encode the non-indexed parameters
+	packed, err := nonIndexedInputs.Pack(nonIndexedArgs...)
+	if err != nil {
+		tc.logger.Warn("Failed to ABI-encode sample event data, using empty data",
+			"event", matchingEvent.Name,
+			"error", err)
+		return make([]byte, 32)
+	}
+
+	tc.logger.Info("✅ ABI-encoded sample data for generic event simulation",
+		"event", matchingEvent.Name,
+		"non_indexed_params", len(nonIndexedArgs),
+		"data_bytes", len(packed))
+
+	return packed
+}
+
+// generateSampleValue creates a realistic sample value for a given ABI type.
+// Used to populate non-indexed event parameters in simulated logs.
+func generateSampleValue(abiType abi.Type) interface{} {
+	switch abiType.T {
+	case abi.UintTy:
+		switch abiType.Size {
+		case 8:
+			return uint8(1)
+		case 16:
+			return uint16(100)
+		case 32:
+			return uint32(100000)
+		case 64:
+			return uint64(1000000)
+		default:
+			// uint256, uint128, etc. — use big.Int
+			val := new(big.Int)
+			val.SetString("1000000000000000000", 10) // 1e18
+			return val
+		}
+	case abi.IntTy:
+		switch abiType.Size {
+		case 8:
+			return int8(1)
+		case 16:
+			return int16(100)
+		case 32:
+			return int32(100000)
+		case 64:
+			return int64(1000000)
+		default:
+			// int256, int128, etc. — use big.Int
+			return big.NewInt(1000000000000000000) // 1e18
+		}
+	case abi.AddressTy:
+		// Use a recognizable sample address
+		return common.HexToAddress("0x0000000000000000000000000000000000000001")
+	case abi.BoolTy:
+		return true
+	case abi.StringTy:
+		return "sample"
+	case abi.BytesTy:
+		return []byte{0x00}
+	case abi.FixedBytesTy:
+		b := make([]byte, abiType.Size)
+		return toFixedBytes(b, abiType.Size)
+	case abi.ArrayTy, abi.SliceTy:
+		// Return empty slice of the element type
+		return []interface{}{}
+	case abi.TupleTy:
+		// Tuples are complex — return empty bytes as fallback
+		return []byte{}
+	default:
+		// Fallback to zero-padded 32 bytes
+		return big.NewInt(0)
+	}
+}
+
+// toFixedBytes converts a byte slice to a fixed-size byte array type that the ABI encoder expects.
+func toFixedBytes(b []byte, size int) interface{} {
+	switch size {
+	case 1:
+		var arr [1]byte
+		copy(arr[:], b)
+		return arr
+	case 2:
+		var arr [2]byte
+		copy(arr[:], b)
+		return arr
+	case 4:
+		var arr [4]byte
+		copy(arr[:], b)
+		return arr
+	case 8:
+		var arr [8]byte
+		copy(arr[:], b)
+		return arr
+	case 16:
+		var arr [16]byte
+		copy(arr[:], b)
+		return arr
+	case 20:
+		var arr [20]byte
+		copy(arr[:], b)
+		return arr
+	case 32:
+		var arr [32]byte
+		copy(arr[:], b)
+		return arr
+	default:
+		var arr [32]byte
+		copy(arr[:], b)
+		return arr
+	}
 }
 
 // createMockTransferLog creates a mock ERC20 Transfer event log with realistic block number
