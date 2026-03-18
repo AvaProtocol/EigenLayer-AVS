@@ -200,13 +200,15 @@ resolve_issue() {
   body=$(jq -cn --arg commit "$commit" '{"status":"resolved","statusDetails":{"inCommit":{"commit":$commit,"repository":"AvaProtocol/EigenLayer-AVS"}}}')
 
   local response http_code
-  response=$(curl -sS -w "\n%{http_code}" -X PUT \
+  local tmp_body
+  tmp_body=$(mktemp)
+  http_code=$(curl -sS -o "$tmp_body" -w "%{http_code}" -X PUT \
     -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$body" \
     "$SENTRY_BASE/issues/$issue_id/")
-  http_code=$(echo "$response" | tail -1)
-  response=$(echo "$response" | sed '$d')
+  response=$(cat "$tmp_body")
+  rm -f "$tmp_body"
 
   local resolved_with_commit=true
   if [[ "$http_code" -ge 400 ]]; then
