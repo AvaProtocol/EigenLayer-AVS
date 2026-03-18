@@ -413,10 +413,12 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		}
 
 		// Look up the wallet's salt from DB for auto-deployment of non-salt-0 wallets
-		if wallet, walletErr := GetWallet(x.db, owner, task.SmartWalletAddress); walletErr == nil && wallet != nil && wallet.Salt != nil {
-			vm.AddVar("aa_salt", wallet.Salt)
-			if x.logger != nil {
-				x.logger.Info("Executor: AA salt resolved from wallet DB", "salt", wallet.Salt.String(), "wallet", task.SmartWalletAddress)
+		if x.db != nil {
+			if wallet, walletErr := GetWallet(x.db, owner, task.SmartWalletAddress); walletErr == nil && wallet != nil && wallet.Salt != nil {
+				vm.AddVar("aa_salt", wallet.Salt)
+				if x.logger != nil {
+					x.logger.Info("Executor: AA salt resolved from wallet DB", "salt", wallet.Salt.String(), "wallet", task.SmartWalletAddress)
+				}
 			}
 		}
 	}

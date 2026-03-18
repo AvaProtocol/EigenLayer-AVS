@@ -65,9 +65,8 @@ while true; do
     # control character parse errors that occur when piping to external jq
     if [ -n "$BASELINE_REVIEW_TS" ]; then
         # Wait for a review NEWER than the baseline timestamp
-        REVIEW_DATA=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" \
-            --jq "[.[] | select(.user.login == \"$BOT_LOGIN\" and .submitted_at > \"$BASELINE_REVIEW_TS\")] | sort_by(.submitted_at) | last | {state: .state, submitted_at: .submitted_at}" 2>/dev/null)
-        STATE=$(echo "$REVIEW_DATA" | jq -r '.state // empty' 2>/dev/null)
+        STATE=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" \
+            --jq "[.[] | select(.user.login == \"$BOT_LOGIN\" and .submitted_at > \"$BASELINE_REVIEW_TS\")] | sort_by(.submitted_at) | last | .state // empty" 2>/dev/null)
     else
         STATE=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" \
             --jq "[.[] | select(.user.login == \"$BOT_LOGIN\")] | sort_by(.submitted_at) | last | .state" 2>/dev/null)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"reflect"
 	"strings"
 	"time"
 
@@ -524,8 +525,9 @@ func generateSampleValue(abiType abi.Type) interface{} {
 		b := make([]byte, abiType.Size)
 		return toFixedBytes(b, abiType.Size)
 	case abi.ArrayTy, abi.SliceTy:
-		// Return empty slice of the element type
-		return []interface{}{}
+		// Build a correctly typed empty slice using reflection so abi.Pack succeeds
+		sliceType := reflect.SliceOf(abiType.Elem.GetType())
+		return reflect.MakeSlice(sliceType, 0, 0).Interface()
 	case abi.TupleTy:
 		// Tuples are complex — return empty bytes as fallback
 		return []byte{}
@@ -536,41 +538,14 @@ func generateSampleValue(abiType abi.Type) interface{} {
 }
 
 // toFixedBytes converts a byte slice to a fixed-size byte array type that the ABI encoder expects.
+// Uses reflection to construct [N]byte for any N, avoiding hardcoded size cases.
 func toFixedBytes(b []byte, size int) interface{} {
-	switch size {
-	case 1:
-		var arr [1]byte
-		copy(arr[:], b)
-		return arr
-	case 2:
-		var arr [2]byte
-		copy(arr[:], b)
-		return arr
-	case 4:
-		var arr [4]byte
-		copy(arr[:], b)
-		return arr
-	case 8:
-		var arr [8]byte
-		copy(arr[:], b)
-		return arr
-	case 16:
-		var arr [16]byte
-		copy(arr[:], b)
-		return arr
-	case 20:
-		var arr [20]byte
-		copy(arr[:], b)
-		return arr
-	case 32:
-		var arr [32]byte
-		copy(arr[:], b)
-		return arr
-	default:
-		var arr [32]byte
-		copy(arr[:], b)
-		return arr
+	arrType := reflect.ArrayOf(size, reflect.TypeOf(byte(0)))
+	arr := reflect.New(arrType).Elem()
+	for i := 0; i < len(b) && i < size; i++ {
+		arr.Index(i).SetUint(uint64(b[i]))
 	}
+	return arr.Interface()
 }
 
 // createMockTransferLog creates a mock ERC20 Transfer event log with realistic block number
