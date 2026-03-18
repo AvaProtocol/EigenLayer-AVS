@@ -3718,6 +3718,23 @@ func (n *Engine) DeleteSecret(user *model.User, payload *avsproto.DeleteSecretRe
 		}, err
 	}
 
+	// If the exact key wasn't found and no specific scope was requested,
+	// scan the user's secrets to find a matching key by name.
+	// This handles the case where a workflow-scoped secret is deleted
+	// without passing the workflowId (e.g. from the Secret Settings page).
+	if !exists && payload.WorkflowId == "" && payload.OrgId == "" {
+		foundKey, foundScope := n.findSecretKeyByName(user, payload.Name)
+		if foundKey != "" {
+			key = foundKey
+			exists = true
+			// Update scope info from the found key
+			if foundScope != nil {
+				payload.WorkflowId = foundScope.WorkflowID
+				payload.OrgId = foundScope.OrgID
+			}
+		}
+	}
+
 	if !exists {
 		return &avsproto.DeleteSecretResp{
 			Success:    true,
@@ -3754,6 +3771,28 @@ func (n *Engine) DeleteSecret(user *model.User, payload *avsproto.DeleteSecretRe
 		SecretName: payload.Name,
 		Scope:      scope,
 	}, nil
+}
+
+// findSecretKeyByName scans the user's secret keys to find a secret by name,
+// regardless of scope. Returns the full storage key and the parsed secret metadata.
+func (n *Engine) findSecretKeyByName(user *model.User, name string) (string, *model.Secret) {
+	prefixes := []string{
+		SecretStoragePrefix(user),
+	}
+
+	secretKeys, err := n.db.ListKeysMulti(prefixes)
+	if err != nil {
+		return "", nil
+	}
+
+	for _, k := range secretKeys {
+		secretMeta := SecretNameFromKey(k)
+		if secretMeta.Name == name {
+			return k, secretMeta
+		}
+	}
+
+	return "", nil
 }
 
 // A global counter for the task engine

@@ -189,6 +189,46 @@ func TestDeleteSecret(t *testing.T) {
 	})
 }
 
+// TestDeleteWorkflowSecretWithoutWorkflowId verifies that a workflow-scoped
+// secret can be deleted even when the caller does not pass the workflowId.
+// This is the bug described in https://github.com/AvaProtocol/EigenLayer-AVS/issues/772
+func TestDeleteWorkflowSecretWithoutWorkflowId(t *testing.T) {
+	engine := createSecretTestEngine(t)
+	user := testutil.TestUser1()
+
+	workflowId := "wf_test_772"
+	secretName := "workflow_secret_772"
+
+	// Create a workflow-scoped secret
+	_, err := engine.CreateSecret(user, &avsproto.CreateOrUpdateSecretReq{
+		Name:       secretName,
+		Secret:     "secret_value",
+		WorkflowId: workflowId,
+	})
+	assert.NoError(t, err)
+
+	// Verify the secret exists
+	listResp, err := engine.ListSecrets(user, &avsproto.ListSecretsReq{})
+	assert.NoError(t, err)
+	assert.Len(t, listResp.Items, 1)
+	assert.Equal(t, secretName, listResp.Items[0].Name)
+	assert.Equal(t, workflowId, listResp.Items[0].WorkflowId)
+
+	// Delete WITHOUT passing workflowId — this was the bug
+	resp, err := engine.DeleteSecret(user, &avsproto.DeleteSecretReq{
+		Name: secretName,
+	})
+	assert.NoError(t, err)
+	assert.True(t, resp.Success)
+	assert.Equal(t, "deleted", resp.Status)
+	assert.Equal(t, "workflow", resp.Scope)
+
+	// Verify the secret is actually gone
+	listResp, err = engine.ListSecrets(user, &avsproto.ListSecretsReq{})
+	assert.NoError(t, err)
+	assert.Len(t, listResp.Items, 0)
+}
+
 func TestSecretCRUDIntegration(t *testing.T) {
 	engine := createSecretTestEngine(t)
 	user := testutil.TestUser1()
