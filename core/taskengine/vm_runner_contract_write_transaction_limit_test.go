@@ -1,9 +1,12 @@
 package taskengine
 
 import (
+	"math/big"
+
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
@@ -17,6 +20,8 @@ func mockSendUserOp(
 	callData []byte,
 	paymasterReq *preset.VerifyingPaymasterRequest,
 	senderOverride *common.Address,
+	saltOverride *big.Int,
+	lgr logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	capturedPaymasterRequest = paymasterReq
 	return &userop.UserOperation{}, &types.Receipt{}, nil

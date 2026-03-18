@@ -309,6 +309,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 				paymasterReq.ValidUntil,
 				paymasterReq.ValidAfter,
 				smartWalletAddress,
+				nil,                // saltOverride - not needed for already-deployed wallets
 				nil,                // nonceOverride
 				big.NewInt(21000),  // callGasLimit
 				big.NewInt(100000), // verificationGasLimit
@@ -537,6 +538,7 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 	paymasterReq *preset.VerifyingPaymasterRequest,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	// Use global WebSocket client if available, otherwise fall back to creating new connection
+	// Note: salt=nil here because rpc_server callers (e.g. WithdrawFunds) operate on already-deployed wallets
 	if r.smartWalletWsRpc != nil {
 		return preset.SendUserOpWithWsClient(
 			r.config.SmartWallet,
@@ -544,6 +546,7 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 			callData,
 			paymasterReq, // Use provided paymaster request
 			smartWalletAddress,
+			nil,                // saltOverride - not needed for already-deployed wallets
 			r.smartWalletWsRpc, // Use global WebSocket client
 			r.config.Logger,    // Pass logger for debug/verbose logging
 		)
@@ -556,6 +559,7 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 			callData,
 			paymasterReq, // Use provided paymaster request
 			smartWalletAddress,
+			nil,             // saltOverride - not needed for already-deployed wallets
 			r.config.Logger, // Pass logger for debug/verbose logging
 		)
 	}

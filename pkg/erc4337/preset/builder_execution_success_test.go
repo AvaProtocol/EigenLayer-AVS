@@ -140,6 +140,7 @@ func TestUserOpExecutionFailureInsufficientBalance(t *testing.T) {
 		calldata,
 		paymasterRequest,
 		&smartWalletAddress, // Use factory's address as sender override
+		nil,                 // No salt override
 		nil,                 // No logger
 	)
 
@@ -279,6 +280,7 @@ func TestUserOpExecutionFailureExcessiveTransfer(t *testing.T) {
 		calldata,
 		nil,                 // No paymaster
 		&smartWalletAddress, // Use factory's address as sender override
+		nil,                 // No salt override
 		nil,                 // No logger
 	)
 
@@ -404,6 +406,7 @@ func TestUserOpExecutionSuccessWithPaymaster(t *testing.T) {
 		calldata,
 		paymasterRequest,
 		&smartWalletAddress, // Use factory's address as sender override
+		nil,                 // No salt override
 		nil,                 // No logger
 	)
 

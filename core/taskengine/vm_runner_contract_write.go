@@ -36,6 +36,7 @@ type SendUserOpFunc func(
 	callData []byte,
 	paymasterReq *preset.VerifyingPaymasterRequest,
 	senderOverride *common.Address,
+	saltOverride *big.Int,
 	lgr logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error)
 
@@ -664,8 +665,9 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 			"owner", r.owner.Hex())
 	}
 
-	// Determine AA overrides from VM vars: get smart wallet address for senderOverride
+	// Determine AA overrides from VM vars: get smart wallet address and salt for senderOverride
 	var senderOverride *common.Address
+	var saltOverride *big.Int
 	r.vm.mu.Lock()
 	if v, ok := r.vm.vars["aa_sender"]; ok {
 		if s, ok2 := v.(string); ok2 && common.IsHexAddress(s) {
@@ -675,6 +677,11 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 				"owner_eoaAddress", r.owner.Hex(),
 				"senderOverride_smartWallet", addr.Hex(),
 				"aa_sender_var", s)
+		}
+	}
+	if v, ok := r.vm.vars["aa_salt"]; ok {
+		if s, ok2 := v.(*big.Int); ok2 {
+			saltOverride = s
 		}
 	}
 	r.vm.mu.Unlock()
@@ -740,6 +747,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		smartWalletCallData,
 		paymasterReq,   // Use paymaster for wallet creation/sponsorship if shouldUsePaymaster() returned true
 		senderOverride, // Smart wallet address from aa_sender
+		saltOverride,   // Salt for wallet auto-deployment (from aa_salt VM var)
 		r.vm.logger,    // Pass logger for debug/verbose logging
 	)
 

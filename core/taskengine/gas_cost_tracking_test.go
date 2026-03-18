@@ -18,7 +18,7 @@ func TestGasCostTracking(t *testing.T) {
 			ExecutionLogs: []*avsproto.Execution_Step{
 				{
 					Id:           "step1",
-					Type:         "CONTRACT_WRITE",
+					Type:         avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
 					Success:      true,
 					GasUsed:      "21000",          // 21k gas
 					GasPrice:     "1000000000",     // 1 gwei
@@ -26,7 +26,7 @@ func TestGasCostTracking(t *testing.T) {
 				},
 				{
 					Id:           "step2",
-					Type:         "CONTRACT_WRITE",
+					Type:         avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
 					Success:      true,
 					GasUsed:      "50000",           // 50k gas
 					GasPrice:     "2000000000",      // 2 gwei
@@ -61,12 +61,12 @@ func TestGasCostTracking(t *testing.T) {
 			ExecutionLogs: []*avsproto.Execution_Step{
 				{
 					Id:      "step1",
-					Type:    "CUSTOM_CODE",
+					Type:    avsproto.NodeType_NODE_TYPE_CUSTOM_CODE.String(),
 					Success: true,
 				},
 				{
 					Id:      "step2",
-					Type:    "REST_API",
+					Type:    avsproto.NodeType_NODE_TYPE_REST_API.String(),
 					Success: true,
 				},
 			},
@@ -82,7 +82,7 @@ func TestGasCostTracking(t *testing.T) {
 			ExecutionLogs: []*avsproto.Execution_Step{
 				{
 					Id:           "transfer1",
-					Type:         "ETH_TRANSFER",
+					Type:         avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String(),
 					Success:      true,
 					GasUsed:      "21000",
 					GasPrice:     "1500000000",     // 1.5 gwei
@@ -98,7 +98,7 @@ func TestGasCostTracking(t *testing.T) {
 	t.Run("Gas cost fields in protobuf step", func(t *testing.T) {
 		step := &avsproto.Execution_Step{
 			Id:           "test_step",
-			Type:         "CONTRACT_WRITE",
+			Type:         avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
 			Success:      true,
 			GasUsed:      "75000",
 			GasPrice:     "2500000000",      // 2.5 gwei
@@ -193,12 +193,12 @@ func TestWorkflowLevelGasCostAggregation(t *testing.T) {
 			Steps: []*avsproto.Execution_Step{
 				{
 					Id:           "step1",
-					Type:         "CONTRACT_WRITE",
+					Type:         avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
 					TotalGasCost: "150000000000000",
 				},
 				{
 					Id:           "step2",
-					Type:         "ETH_TRANSFER",
+					Type:         avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String(),
 					TotalGasCost: "100000000000000",
 				},
 			},

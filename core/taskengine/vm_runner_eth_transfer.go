@@ -314,6 +314,14 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 
 	// AA overrides from VM
 	senderOverride := getAASenderAddress(p.vm)
+	var saltOverride *big.Int
+	p.vm.mu.Lock()
+	if v, ok := p.vm.vars["aa_salt"]; ok {
+		if s, ok2 := v.(*big.Int); ok2 {
+			saltOverride = s
+		}
+	}
+	p.vm.mu.Unlock()
 
 	// Send UserOp transaction with overrides
 	userOp, receipt, err := preset.SendUserOp(
@@ -322,6 +330,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		smartWalletCallData,
 		paymasterReq,
 		senderOverride,
+		saltOverride,
 		p.vm.logger,
 	)
 
