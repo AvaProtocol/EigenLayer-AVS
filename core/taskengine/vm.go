@@ -2829,6 +2829,9 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		// float64 from JSON, uint32 from ExtractNodeConfiguration
 		switch v := config["iterationTimeout"].(type) {
 		case float64:
+			if v < 0 || v > float64(^uint32(0)) {
+				return nil, fmt.Errorf("iterationTimeout must be between 0 and %d, got %v", ^uint32(0), v)
+			}
 			loopConfig.IterationTimeout = uint32(v)
 		case uint32:
 			loopConfig.IterationTimeout = v
