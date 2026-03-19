@@ -2826,8 +2826,12 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		}
 
 		// Handle iterationTimeout parameter (seconds)
-		if timeout, ok := config["iterationTimeout"].(float64); ok {
-			loopConfig.IterationTimeout = uint32(timeout)
+		// float64 from JSON, uint32 from ExtractNodeConfiguration
+		switch v := config["iterationTimeout"].(type) {
+		case float64:
+			loopConfig.IterationTimeout = uint32(v)
+		case uint32:
+			loopConfig.IterationTimeout = v
 		}
 
 		// Handle the nested runner configuration (CustomCode, RestAPI, etc.)
