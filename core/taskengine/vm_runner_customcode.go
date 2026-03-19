@@ -367,7 +367,7 @@ func sanitizeGojaExportForProtobuf(val interface{}) interface{} {
 	switch v := val.(type) {
 	case *big.Int:
 		if v == nil {
-			return "0"
+			return nil
 		}
 		return v.String()
 	case big.Int:
@@ -405,9 +405,15 @@ func sanitizeGojaExportForProtobuf(val interface{}) interface{} {
 			}
 			return result
 		}
-		// Functions, Promises, and other non-serializable types → nil
-		if rv.IsValid() && (rv.Kind() == reflect.Func || rv.Kind() == reflect.Ptr) {
+		// Functions are not serializable → nil
+		if rv.IsValid() && rv.Kind() == reflect.Func {
 			return nil
+		}
+		// Handle specific known unsupported pointer types (e.g., *goja.Promise)
+		if rv.IsValid() && rv.Kind() == reflect.Ptr {
+			if _, ok := val.(*goja.Promise); ok {
+				return nil
+			}
 		}
 		return val
 	}

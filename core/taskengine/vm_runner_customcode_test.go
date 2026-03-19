@@ -808,8 +808,11 @@ return { callback: function() {}, value: 42 }
 	data := customCodeOutput.Data.GetStructValue()
 	require.NotNil(t, data)
 
-	// Function should be converted to null
-	assert.Equal(t, float64(0), data.Fields["callback"].GetNumberValue())
+	// Function should be converted to protobuf null
+	callbackVal, ok := data.Fields["callback"]
+	require.True(t, ok, "expected 'callback' field in custom code output")
+	_, isNull := callbackVal.Kind.(*structpb.Value_NullValue)
+	assert.True(t, isNull, "expected 'callback' field to be protobuf null")
 	// Normal value should be preserved
 	assert.Equal(t, float64(42), data.Fields["value"].GetNumberValue())
 }
