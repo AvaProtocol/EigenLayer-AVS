@@ -14,6 +14,7 @@ import (
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRunTaskWithMultipleConditions(t *testing.T) {
@@ -1111,4 +1112,122 @@ func TestBranchNodeSafety(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestBranchBigIntComparison verifies that branch conditions can compare BigInt
+// values (common for wei amount checks) and that the metadata serialization
+// doesn't fail when operands are BigInt.
+func TestBranchBigIntComparison(t *testing.T) {
+	node := &avsproto.TaskNode{
+		Id:   "branchBigInt",
+		Name: "branch",
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: []*avsproto.BranchNode_Condition{
+						{
+							Id:         "c1",
+							Type:       "if",
+							Expression: "BigInt(code1.balance) >= BigInt(code1.totalNeeded)",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(node, map[string]interface{}{
+		"code1": map[string]interface{}{
+			"balance":     "90864223405041968",
+			"totalNeeded": "2000000000000000",
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, step)
+	assert.True(t, step.Success)
+
+	branchOutput := step.GetBranch()
+	require.NotNil(t, branchOutput)
+	require.NotNil(t, branchOutput.Data)
+
+	// Metadata should also serialize without error (operands are BigInt values)
+	// The metadata is set even if we don't check it — the test would fail at
+	// require.NoError above if sanitization didn't convert *big.Int to string.
+}
+
+// TestBranchBigIntComparisonFalse verifies that BigInt comparisons correctly
+// evaluate to false when the condition is not met.
+func TestBranchBigIntComparisonFalse(t *testing.T) {
+	node := &avsproto.TaskNode{
+		Id:   "branchBigIntFalse",
+		Name: "branch",
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: []*avsproto.BranchNode_Condition{
+						{
+							Id:         "c1",
+							Type:       "if",
+							Expression: "BigInt(code1.balance) >= BigInt(code1.totalNeeded)",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(node, map[string]interface{}{
+		"code1": map[string]interface{}{
+			"balance":     "1000000000000000",
+			"totalNeeded": "90864223405041968",
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, step)
+
+	// Condition is false (balance < totalNeeded), so success is true but no branch taken
+	assert.True(t, step.Success)
+	assert.Nil(t, step.GetBranch(), "no branch action taken when condition is false")
+
+	// Metadata should still be serialized (contains BigInt operand values).
+	// This verifies that sanitizeGojaExportForProtobuf converted the BigInt
+	// operands to strings, allowing metadata serialization to succeed.
+	assert.NotNil(t, step.Metadata, "metadata should be present with condition evaluation details")
+}
+
+// TestBranchDateComparison verifies that branch conditions using Date objects
+// don't cause metadata serialization failures.
+func TestBranchDateComparison(t *testing.T) {
+	node := &avsproto.TaskNode{
+		Id:   "branchDate",
+		Name: "branch",
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: []*avsproto.BranchNode_Condition{
+						{
+							Id:         "c1",
+							Type:       "if",
+							Expression: "new Date('2026-01-15') < new Date('2026-12-31')",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(node, map[string]interface{}{})
+
+	require.NoError(t, err)
+	require.NotNil(t, step)
+	assert.True(t, step.Success)
+
+	branchOutput := step.GetBranch()
+	require.NotNil(t, branchOutput)
+	require.NotNil(t, branchOutput.Data)
 }
