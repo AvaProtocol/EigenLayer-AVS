@@ -2,8 +2,11 @@ package taskengine
 
 import (
 	"fmt"
+	"math/big"
+	"reflect"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/dop251/goja"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -322,6 +325,10 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 
 	// Convert the result to a protobuf struct
 	exportedVal := result.Export()
+	// Sanitize BigInt values: Goja exports JS BigInt as Go *big.Int,
+	// which structpb.NewValue does not support. Convert them to strings
+	// to preserve full precision (standard for wei amounts).
+	exportedVal = sanitizeGojaExportForProtobuf(exportedVal)
 	outputStruct, err := structpb.NewValue(exportedVal)
 	if err != nil {
 		sb.WriteString(fmt.Sprintf("\nError converting execution result to Value: %s", err.Error()))
@@ -344,4 +351,70 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	finalizeStep(executionStep, true, nil, "", sb.String())
 
 	return executionStep, nil
+}
+
+// sanitizeGojaExportForProtobuf recursively walks an exported Goja value and
+// converts types that structpb.NewValue does not support into compatible ones.
+//
+// Goja's Export() can return Go types that have no structpb equivalent:
+//   - *big.Int / big.Int  (JS BigInt)        → string (preserves full precision)
+//   - time.Time           (JS Date)          → ISO 8601 string
+//   - [][2]interface{}    (JS Map)           → map[string]interface{}
+//   - typed arrays        ([]int32 etc.)     → []interface{} of numbers
+//   - goja.ArrayBuffer                       → base64 string via []byte
+//   - functions, Promises                    → nil (not serializable)
+func sanitizeGojaExportForProtobuf(val interface{}) interface{} {
+	switch v := val.(type) {
+	case *big.Int:
+		if v == nil {
+			return nil
+		}
+		return v.String()
+	case big.Int:
+		return v.String()
+	case time.Time:
+		return v.UTC().Format(time.RFC3339Nano)
+	case map[string]interface{}:
+		for k, item := range v {
+			v[k] = sanitizeGojaExportForProtobuf(item)
+		}
+		return v
+	case []interface{}:
+		for i, item := range v {
+			v[i] = sanitizeGojaExportForProtobuf(item)
+		}
+		return v
+	case [][2]interface{}:
+		// JS Map exports as array of [key, value] pairs; convert to object
+		m := make(map[string]interface{}, len(v))
+		for _, pair := range v {
+			key := fmt.Sprintf("%v", pair[0])
+			m[key] = sanitizeGojaExportForProtobuf(pair[1])
+		}
+		return m
+	case goja.ArrayBuffer:
+		return v.Bytes()
+	default:
+		// Handle typed arrays ([]int32, []float64, []int64, etc.) via reflection.
+		// Also catches functions/promises by falling through to nil.
+		rv := reflect.ValueOf(val)
+		if rv.IsValid() && rv.Kind() == reflect.Slice {
+			result := make([]interface{}, rv.Len())
+			for i := 0; i < rv.Len(); i++ {
+				result[i] = sanitizeGojaExportForProtobuf(rv.Index(i).Interface())
+			}
+			return result
+		}
+		// Functions are not serializable → nil
+		if rv.IsValid() && rv.Kind() == reflect.Func {
+			return nil
+		}
+		// Handle specific known unsupported pointer types (e.g., *goja.Promise)
+		if rv.IsValid() && rv.Kind() == reflect.Ptr {
+			if _, ok := val.(*goja.Promise); ok {
+				return nil
+			}
+		}
+		return val
+	}
 }

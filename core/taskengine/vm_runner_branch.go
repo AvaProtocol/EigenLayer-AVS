@@ -667,12 +667,12 @@ func parseComparisonExpression(expr string, jsvm *goja.Runtime) ComparisonOperan
 
 			// Evaluate left operand
 			if leftVal, err := jsvm.RunString(fmt.Sprintf("(%s)", result.LeftExpr)); err == nil {
-				result.Left = leftVal.Export()
+				result.Left = sanitizeGojaExportForProtobuf(leftVal.Export())
 			}
 
 			// Evaluate right operand
 			if rightVal, err := jsvm.RunString(fmt.Sprintf("(%s)", result.RightExpr)); err == nil {
-				result.Right = rightVal.Export()
+				result.Right = sanitizeGojaExportForProtobuf(rightVal.Export())
 			}
 
 			result.Valid = true
