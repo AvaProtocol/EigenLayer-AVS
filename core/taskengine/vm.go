@@ -4489,13 +4489,10 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	iterKey := node.Config.IterKey
 	executionMode := node.Config.ExecutionMode
 
-	// Per-iteration timeout from config (required, set by client)
+	// Per-iteration timeout from config; default to 30s when unset (per proto docs)
 	iterationTimeoutSec := node.Config.IterationTimeout
 	if iterationTimeoutSec == 0 {
-		err := fmt.Errorf("LoopNode iterationTimeout is required (seconds)")
-		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		finalizeStep(s, false, nil, err.Error(), log.String())
-		return s, err
+		iterationTimeoutSec = 30
 	}
 	iterationTimeout := time.Duration(iterationTimeoutSec) * time.Second
 
