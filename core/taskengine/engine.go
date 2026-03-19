@@ -3785,10 +3785,25 @@ func (n *Engine) findSecretKeyByName(user *model.User, name string) (string, *mo
 		return "", nil
 	}
 
+	var matches []string
+	var matchMeta *model.Secret
 	for _, k := range secretKeys {
 		secretMeta := SecretNameFromKey(k)
 		if secretMeta.Name == name {
-			return k, secretMeta
+			matches = append(matches, k)
+			matchMeta = secretMeta
+		}
+	}
+
+	if len(matches) == 1 {
+		return matches[0], matchMeta
+	}
+
+	// Multiple matches or none: prefer user-scoped secret (no workflow, no org)
+	for _, k := range matches {
+		meta := SecretNameFromKey(k)
+		if meta.WorkflowID == "" && meta.OrgID == "" {
+			return k, meta
 		}
 	}
 
