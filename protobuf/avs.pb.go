@@ -5832,11 +5832,10 @@ type EstimateFeesReq struct {
 	CreatedAt    int64 `protobuf:"varint,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`          // Timestamp when workflow will be created (milliseconds)
 	ExpireAt     int64 `protobuf:"varint,5,opt,name=expire_at,json=expireAt,proto3" json:"expire_at,omitempty"`             // Timestamp when workflow will expire (milliseconds)
 	MaxExecution int64 `protobuf:"varint,6,opt,name=max_execution,json=maxExecution,proto3" json:"max_execution,omitempty"` // Maximum number of executions allowed
-	// Smart wallet runner (optional - if not provided, extracted from input_variables)
-	// This is kept for backward compatibility, but input_variables.workflowContext.runner is preferred
+	// Smart wallet runner (optional - if not provided, extracted from input_variables.settings.runner)
 	Runner string `protobuf:"bytes,7,opt,name=runner,proto3" json:"runner,omitempty"` // Smart wallet address to use for gas estimation
 	// Input variables for workflow execution simulation
-	// Expected to contain workflowContext with runner, chainId, and other execution context
+	// Should contain settings with at least runner for fee estimation
 	InputVariables map[string]*structpb.Value `protobuf:"bytes,8,rep,name=input_variables,json=inputVariables,proto3" json:"input_variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -8662,9 +8661,9 @@ type FilterNode_Config struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Filter node acts like .select or .filter to pluck out element in an array that evaluate the expression to true
 	Expression string `protobuf:"bytes,1,opt,name=expression,proto3" json:"expression,omitempty"`
-	// The name of the input node whose output data will be filtered.
-	// The data should be iterable (array, object, etc.). Runtime validation will check compatibility.
-	InputNodeName string `protobuf:"bytes,2,opt,name=input_node_name,json=inputNodeName,proto3" json:"input_node_name,omitempty"`
+	// Template variable that resolves to the array to filter.
+	// e.g., "{{custom_code1.data}}", "{{settings.items}}"
+	InputVariable string `protobuf:"bytes,2,opt,name=input_variable,json=inputVariable,proto3" json:"input_variable,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8706,9 +8705,9 @@ func (x *FilterNode_Config) GetExpression() string {
 	return ""
 }
 
-func (x *FilterNode_Config) GetInputNodeName() string {
+func (x *FilterNode_Config) GetInputVariable() string {
 	if x != nil {
-		return x.InputNodeName
+		return x.InputVariable
 	}
 	return ""
 }
@@ -8760,8 +8759,9 @@ func (x *FilterNode_Output) GetData() *structpb.Value {
 
 type LoopNode_Config struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The name of the input node whose output data will be iterated over.
-	InputNodeName string `protobuf:"bytes,1,opt,name=input_node_name,json=inputNodeName,proto3" json:"input_node_name,omitempty"`
+	// Template variable that resolves to the array to iterate over.
+	// e.g., "{{settings.address_list}}", "{{custom_code1.data}}"
+	InputVariable string `protobuf:"bytes,1,opt,name=input_variable,json=inputVariable,proto3" json:"input_variable,omitempty"`
 	// iter_val is the variable name that will hold the current value during each iteration
 	IterVal string `protobuf:"bytes,2,opt,name=iter_val,json=iterVal,proto3" json:"iter_val,omitempty"`
 	// iter_key is the variable name that will hold the current key/index during each iteration
@@ -8769,8 +8769,11 @@ type LoopNode_Config struct {
 	// execution_mode determines whether iterations run in parallel or sequentially
 	// Note: ContractWrite operations always run sequentially regardless of this setting
 	ExecutionMode ExecutionMode `protobuf:"varint,4,opt,name=execution_mode,json=executionMode,proto3,enum=aggregator.ExecutionMode" json:"execution_mode,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Per-iteration timeout in seconds. If an iteration does not complete within
+	// this duration, it is marked as failed. Default: 30 seconds.
+	IterationTimeout uint32 `protobuf:"varint,5,opt,name=iteration_timeout,json=iterationTimeout,proto3" json:"iteration_timeout,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *LoopNode_Config) Reset() {
@@ -8803,9 +8806,9 @@ func (*LoopNode_Config) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{19, 0}
 }
 
-func (x *LoopNode_Config) GetInputNodeName() string {
+func (x *LoopNode_Config) GetInputVariable() string {
 	if x != nil {
-		return x.InputNodeName
+		return x.InputVariable
 	}
 	return ""
 }
@@ -8829,6 +8832,13 @@ func (x *LoopNode_Config) GetExecutionMode() ExecutionMode {
 		return x.ExecutionMode
 	}
 	return ExecutionMode_EXECUTION_MODE_SEQUENTIAL
+}
+
+func (x *LoopNode_Config) GetIterationTimeout() uint32 {
+	if x != nil {
+		return x.IterationTimeout
+	}
+	return 0
 }
 
 type LoopNode_Output struct {
@@ -9523,17 +9533,17 @@ const file_avs_proto_rawDesc = "" +
 	"conditions\x18\x01 \x03(\v2 .aggregator.BranchNode.ConditionR\n" +
 	"conditions\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xcb\x01\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xca\x01\n" +
 	"\n" +
 	"FilterNode\x125\n" +
-	"\x06config\x18\x01 \x01(\v2\x1d.aggregator.FilterNode.ConfigR\x06config\x1aP\n" +
+	"\x06config\x18\x01 \x01(\v2\x1d.aggregator.FilterNode.ConfigR\x06config\x1aO\n" +
 	"\x06Config\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x01 \x01(\tR\n" +
-	"expression\x12&\n" +
-	"\x0finput_node_name\x18\x02 \x01(\tR\rinputNodeName\x1a4\n" +
+	"expression\x12%\n" +
+	"\x0einput_variable\x18\x02 \x01(\tR\rinputVariable\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xbc\x05\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xe8\x05\n" +
 	"\bLoopNode\x12@\n" +
 	"\feth_transfer\x18\n" +
 	" \x01(\v2\x1b.aggregator.ETHTransferNodeH\x00R\vethTransfer\x12F\n" +
@@ -9543,12 +9553,13 @@ const file_avs_proto_rawDesc = "" +
 	"\brest_api\x18\x0e \x01(\v2\x17.aggregator.RestAPINodeH\x00R\arestApi\x12=\n" +
 	"\vcustom_code\x18\x0f \x01(\v2\x1a.aggregator.CustomCodeNodeH\x00R\n" +
 	"customCode\x123\n" +
-	"\x06config\x18\x01 \x01(\v2\x1b.aggregator.LoopNode.ConfigR\x06config\x1a\xa8\x01\n" +
-	"\x06Config\x12&\n" +
-	"\x0finput_node_name\x18\x01 \x01(\tR\rinputNodeName\x12\x19\n" +
+	"\x06config\x18\x01 \x01(\v2\x1b.aggregator.LoopNode.ConfigR\x06config\x1a\xd4\x01\n" +
+	"\x06Config\x12%\n" +
+	"\x0einput_variable\x18\x01 \x01(\tR\rinputVariable\x12\x19\n" +
 	"\biter_val\x18\x02 \x01(\tR\aiterVal\x12\x19\n" +
 	"\biter_key\x18\x03 \x01(\tR\aiterKey\x12@\n" +
-	"\x0eexecution_mode\x18\x04 \x01(\x0e2\x19.aggregator.ExecutionModeR\rexecutionMode\x1a4\n" +
+	"\x0eexecution_mode\x18\x04 \x01(\x0e2\x19.aggregator.ExecutionModeR\rexecutionMode\x12+\n" +
+	"\x11iteration_timeout\x18\x05 \x01(\rR\x10iterationTimeout\x1a4\n" +
 	"\x06Output\x12*\n" +
 	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04dataB\b\n" +
 	"\x06runner\"J\n" +

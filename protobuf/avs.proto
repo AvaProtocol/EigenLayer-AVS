@@ -579,10 +579,10 @@ message FilterNode {
   message Config {
     // Filter node acts like .select or .filter to pluck out element in an array that evaluate the expression to true
     string expression = 1;
-    
-    // The name of the input node whose output data will be filtered.
-    // The data should be iterable (array, object, etc.). Runtime validation will check compatibility.
-    string input_node_name = 2;
+
+    // Template variable that resolves to the array to filter.
+    // e.g., "{{custom_code1.data}}", "{{settings.items}}"
+    string input_variable = 2;
   }
 
   message Output {
@@ -597,8 +597,9 @@ message FilterNode {
 // LoopNode currently not support, but we pre-defined to reverse the field id
 message LoopNode {
   message Config {
-    // The name of the input node whose output data will be iterated over.
-    string input_node_name = 1;
+    // Template variable that resolves to the array to iterate over.
+    // e.g., "{{settings.address_list}}", "{{custom_code1.data}}"
+    string input_variable = 1;
     // iter_val is the variable name that will hold the current value during each iteration
     string iter_val = 2;
     // iter_key is the variable name that will hold the current key/index during each iteration
@@ -606,6 +607,9 @@ message LoopNode {
     // execution_mode determines whether iterations run in parallel or sequentially
     // Note: ContractWrite operations always run sequentially regardless of this setting
     ExecutionMode execution_mode = 4;
+    // Per-iteration timeout in seconds. If an iteration does not complete within
+    // this duration, it is marked as failed. Default: 30 seconds.
+    uint32 iteration_timeout = 5;
   }
 
   // inside the runner, it can access to the current value of the loop iteration through the iter_val/iter_key above

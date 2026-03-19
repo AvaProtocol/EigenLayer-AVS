@@ -3795,7 +3795,7 @@ func isExpectedValidationError(err error) bool {
 		"contractAddress is required",                       // Contract address validation
 		"contractAbi is required",                           // Contract ABI validation
 		"methodCalls is required",                           // Method calls validation
-		"inputNodeName is required",                         // Loop node input validation
+		"inputVariable is required",                         // Loop node input validation
 		"iterVal is required",                               // Loop node iteration variable validation
 		"url is required",                                   // REST API/GraphQL URL validation
 		"query is required",                                 // GraphQL query validation

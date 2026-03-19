@@ -111,33 +111,41 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		return executionLogStep, err
 	}
 
-	inputNodeName := node.Config.InputNodeName
-	if inputNodeName == "" {
-		err = fmt.Errorf("FilterNode inputNodeName is empty")
+	inputVariable := node.Config.InputVariable
+	if inputVariable == "" {
+		err = fmt.Errorf("FilterNode inputVariable is empty")
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
 		return executionLogStep, err
 	}
 
-	// Determine the variable name to use in JavaScript BEFORE locking mutex
-	inputVarName := r.vm.GetNodeNameAsVar(inputNodeName)
+	// Resolve the template variable to get the input variable name
+	// Strip {{ }} if present to get the raw variable path for JS VM lookup
+	inputVarName := inputVariable
+	if strings.HasPrefix(inputVarName, "{{") && strings.HasSuffix(inputVarName, "}}") {
+		inputVarName = strings.TrimSpace(inputVarName[2 : len(inputVarName)-2])
+	}
 
 	// Clean the expression for processing
 	cleanExpression := r.processExpression(expression)
 
 	// Add the expected log format for the tests
-	logBuilder.WriteString(fmt.Sprintf("Input node name: '%s', Variable name: '%s', Original Expression: '%s', Clean Expression: '%s'\n",
-		inputNodeName, inputVarName, expression, cleanExpression))
+	logBuilder.WriteString(fmt.Sprintf("Input variable: '%s', Variable path: '%s', Original Expression: '%s', Clean Expression: '%s'\n",
+		inputVariable, inputVarName, expression, cleanExpression))
 
-	logBuilder.WriteString(fmt.Sprintf("Filter configuration - input_node_name: %s, expression: %s\n", inputNodeName, expression))
-	logBuilder.WriteString(fmt.Sprintf("Using input variable: %s (from source: %s)\n", inputVarName, inputNodeName))
+	logBuilder.WriteString(fmt.Sprintf("Filter configuration - input_variable: %s, expression: %s\n", inputVariable, expression))
+	logBuilder.WriteString(fmt.Sprintf("Using input variable path: %s\n", inputVarName))
 
-	// Get the input data to filter
+	// Resolve the variable via Goja JS VM (supports dot notation like "custom_code1.data")
+	jsResolver := NewGojaVM()
 	r.vm.mu.Lock()
-	inputVar, exists := r.vm.vars[inputVarName]
+	for key, value := range r.vm.vars {
+		jsResolver.Set(key, value)
+	}
 	r.vm.mu.Unlock()
 
-	if !exists {
-		err = fmt.Errorf("input variable for source '%s' not found", inputNodeName)
+	resolved, ok := r.vm.resolveVariablePath(jsResolver, inputVarName, nil)
+	if !ok {
+		err = fmt.Errorf("input variable '%s' could not be resolved", inputVariable)
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
 		return executionLogStep, err
 	}
@@ -168,18 +176,8 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 	}
 	r.vm.mu.Unlock()
 
-	// Unwrap the data if it's in a map with 'data' key (from previous node output)
-	var actualDataToFilter interface{}
-	if dataMap, ok := inputVar.(map[string]interface{}); ok {
-		if dataValue, exists := dataMap["data"]; exists {
-			actualDataToFilter = dataValue
-			logBuilder.WriteString("Unwrapped input data from 'data' key\n")
-		} else {
-			actualDataToFilter = inputVar
-		}
-	} else {
-		actualDataToFilter = inputVar
-	}
+	// The resolved value is the data to filter (template variable specifies the full path)
+	actualDataToFilter := resolved
 
 	logBuilder.WriteString(fmt.Sprintf("Data to filter type: %T, content: %s\n", actualDataToFilter, FormatAsJSON(actualDataToFilter)))
 

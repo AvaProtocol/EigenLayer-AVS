@@ -253,70 +253,57 @@ func buildIterInputs(parentVars map[string]interface{}, iterVal string, iterKey 
 }
 
 // resolveLoopInputVariable resolves and validates the loop input variable.
-// This function handles the complexity of different input variable formats and wrapping.
 //
-// The function tries two approaches:
-// 1. Resolve as node ID (workflow execution): node_name → output variable
-// 2. Resolve as direct variable name (immediate execution): variable_name → value
-//
-// It also handles wrapped data fields (common for trigger variables):
-// - If the variable is a map with a "data" field, extract the array from that field
-// - Supports both []interface{} and []any types
+// inputNodeName is a template expression (e.g., "{{settings.address_list}}" or
+// "{{custom_code1.data}}"). The expression is resolved against vm.vars using the
+// Goja JS VM. The resolved value must be an array.
 //
 // Returns:
 //   - []interface{}: The resolved input array
-//   - string: The actual variable name that was used
-//   - error: Error if variable not found, not an array, or invalid format
+//   - string: The template expression that was resolved
+//   - error: Error if expression is invalid, value not found, or not an array
 func resolveLoopInputVariable(vm *VM, inputNodeName string) ([]interface{}, string, error) {
-	var inputVarName string
-	var inputVar interface{}
-	var exists bool
+	// Extract the expression from {{ }} delimiters
+	expr := strings.TrimSpace(inputNodeName)
+	if strings.HasPrefix(expr, "{{") && strings.HasSuffix(expr, "}}") {
+		expr = strings.TrimSpace(expr[2 : len(expr)-2])
+	}
 
-	// First try: resolve as node ID (workflow execution)
-	inputVarName = vm.GetNodeNameAsVar(inputNodeName)
+	if expr == "" {
+		return nil, inputNodeName, fmt.Errorf("loop input expression is empty")
+	}
+
+	// Resolve the expression via Goja JS VM
+	jsvm := NewGojaVM()
 	vm.mu.Lock()
-	inputVar, exists = vm.vars[inputVarName]
+	currentVars := make(map[string]any, len(vm.vars))
+	for k, val := range vm.vars {
+		currentVars[k] = val
+	}
 	vm.mu.Unlock()
 
-	// Second try: use inputNodeName directly as variable name (immediate execution)
-	if !exists {
-		inputVarName = inputNodeName
-		vm.mu.Lock()
-		inputVar, exists = vm.vars[inputVarName]
-		vm.mu.Unlock()
-	}
-
-	if !exists {
-		return nil, "", fmt.Errorf("input variable %s not found (tried both as node name and direct variable)", inputVarName)
-	}
-
-	// Try to convert directly to array
-	inputArray, ok := inputVar.([]interface{})
-	if !ok {
-		// Try to extract from data field if wrapped (common for trigger variables)
-		if dataMap, ok := inputVar.(map[string]interface{}); ok {
-			if dataValue, hasData := dataMap["data"]; hasData {
-				// Try different array types that might be present
-				if dataArray, ok := dataValue.([]interface{}); ok {
-					inputArray = dataArray
-				} else if dataSlice, ok := dataValue.([]any); ok {
-					// Handle []any type
-					inputArray = make([]interface{}, len(dataSlice))
-					for i, v := range dataSlice {
-						inputArray[i] = v
-					}
-				} else {
-					// Data field exists but is not an array
-					return nil, inputVarName, fmt.Errorf("input variable %s.data is type %T, expected array", inputVarName, dataValue)
-				}
-			} else {
-				// No data field found
-				return nil, inputVarName, fmt.Errorf("input variable %s is not an array and has no 'data' field (available keys: %v)", inputVarName, GetMapKeys(dataMap))
+	for key, value := range currentVars {
+		if err := jsvm.Set(key, value); err != nil {
+			if vm.logger != nil {
+				vm.logger.Error("failed to set variable in JS VM for loop input resolution", "key", key, "error", err)
 			}
-		} else {
-			return nil, inputVarName, fmt.Errorf("input variable %s is type %T, expected array or object with 'data' field", inputVarName, inputVar)
 		}
 	}
 
-	return inputArray, inputVarName, nil
+	resolved, ok := vm.resolveVariablePath(jsvm, expr, currentVars)
+	if !ok {
+		return nil, inputNodeName, fmt.Errorf("loop input expression {{%s}} could not be resolved", expr)
+	}
+
+	// Convert resolved value to []interface{}
+	return toInterfaceSlice(resolved, inputNodeName)
+}
+
+// toInterfaceSlice converts a resolved value to []interface{}, returning
+// a descriptive error if the value is not an array.
+func toInterfaceSlice(value interface{}, label string) ([]interface{}, string, error) {
+	if arr, ok := value.([]interface{}); ok {
+		return arr, label, nil
+	}
+	return nil, label, fmt.Errorf("loop input %s resolved to %T, expected array", label, value)
 }

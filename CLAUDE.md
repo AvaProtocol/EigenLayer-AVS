@@ -90,6 +90,13 @@ cd contracts && forge test    # Run contract tests
 - Critical errors reported to Sentry in production
 - Use `testutil` package for common test setup
 - Integration tests excluded from regular runs due to instability
+
+### Go Test Standards for Node Execution
+
+- **Never use `vm.AddVar()` to inject test data directly** — this bypasses the real execution path and hides bugs.
+- **Single-node tests**: Use `vm.RunNodeWithInputs(node, inputVariables)` to test a node in isolation. Pass input data via the `inputVariables` map, which mirrors how the SDK's `runNodeWithInputs` API works.
+- **Workflow tests**: Build a proper task with preceding nodes (e.g., a CustomCode node that outputs test data), connect them with edges, and execute the full workflow. This tests the real data flow between nodes.
+- **Template variables**: Loop and Filter nodes use `inputVariable` with `{{variable.path}}` syntax (e.g., `"{{settings.address_list}}"`, `"{{custom_code1.data}}"`). Tests must use this format, not bare variable names.
 - Macro variables in tasks use `{{variableName}}` syntax
 - Operator notifications are batched every 3 seconds
 
