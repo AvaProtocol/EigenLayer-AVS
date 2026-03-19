@@ -2755,8 +2755,8 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			filterConfig.Expression = expression
 		}
 		// Use camelCase only for consistency with JavaScript SDK
-		if inputNodeName, ok := config["inputNodeName"].(string); ok {
-			filterConfig.InputNodeName = inputNodeName
+		if inputVariable, ok := config["inputVariable"].(string); ok {
+			filterConfig.InputVariable = inputVariable
 		}
 
 		node.TaskType = &avsproto.TaskNode_Filter{
@@ -2792,10 +2792,10 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		loopConfig := &avsproto.LoopNode_Config{}
 
 		// Extract required configuration fields (camelCase only)
-		if inputNodeName, ok := config["inputNodeName"].(string); ok {
-			loopConfig.InputNodeName = inputNodeName
+		if inputVariable, ok := config["inputVariable"].(string); ok {
+			loopConfig.InputVariable = inputVariable
 		} else {
-			return nil, fmt.Errorf("loop node requires 'inputNodeName' field")
+			return nil, fmt.Errorf("loop node requires 'inputVariable' field")
 		}
 
 		if iterVal, ok := config["iterVal"].(string); ok {
@@ -2823,6 +2823,11 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		} else {
 			// Default to sequential if not specified (safer default)
 			loopConfig.ExecutionMode = avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL
+		}
+
+		// Handle iterationTimeout parameter (seconds)
+		if timeout, ok := config["iterationTimeout"].(float64); ok {
+			loopConfig.IterationTimeout = uint32(timeout)
 		}
 
 		// Handle the nested runner configuration (CustomCode, RestAPI, etc.)
@@ -3440,9 +3445,10 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 		if loop != nil {
 			if loop.Config != nil {
 				config := map[string]interface{}{
-					"inputNodeName": loop.Config.InputNodeName,
-					"iterVal":       loop.Config.IterVal,
-					"iterKey":       loop.Config.IterKey,
+					"inputVariable":    loop.Config.InputVariable,
+					"iterVal":          loop.Config.IterVal,
+					"iterKey":          loop.Config.IterKey,
+					"iterationTimeout": loop.Config.IterationTimeout,
 				}
 
 				// Add execution mode (always include it)
@@ -3610,7 +3616,7 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 		if filter != nil && filter.Config != nil {
 			config := map[string]interface{}{
 				"expression":    filter.Config.Expression,
-				"inputNodeName": filter.Config.InputNodeName,
+				"inputVariable": filter.Config.InputVariable,
 			}
 
 			// Clean up complex protobuf types before returning
@@ -4471,75 +4477,27 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 		return s, err
 	}
 
-	inputNodeName := node.Config.InputNodeName
+	inputNodeName := node.Config.InputVariable
 	iterVal := node.Config.IterVal
 	iterKey := node.Config.IterKey
 	executionMode := node.Config.ExecutionMode
 
-	// Resolve input variable
-	var inputVarName string
-	var inputVar interface{}
-	var exists bool
-
-	inputVarName = v.GetNodeNameAsVar(inputNodeName)
-	v.mu.Lock()
-	inputVar, exists = v.vars[inputVarName]
-	v.mu.Unlock()
-
-	if !exists {
-		inputVarName = inputNodeName
-		v.mu.Lock()
-		inputVar, exists = v.vars[inputVarName]
-		v.mu.Unlock()
-	}
-
-	if !exists {
-		err := fmt.Errorf("input variable %s not found", inputVarName)
+	// Per-iteration timeout from config (required, set by client)
+	iterationTimeoutSec := node.Config.IterationTimeout
+	if iterationTimeoutSec == 0 {
+		err := fmt.Errorf("LoopNode iterationTimeout is required (seconds)")
 		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
 		finalizeStep(s, false, nil, err.Error(), log.String())
 		return s, err
 	}
+	iterationTimeout := time.Duration(iterationTimeoutSec) * time.Second
 
-	inputArray, ok := inputVar.([]interface{})
-	if !ok {
-		// Try to extract from data field if wrapped (common for trigger variables)
-		if dataMap, ok := inputVar.(map[string]interface{}); ok {
-			log.WriteString(fmt.Sprintf("\nInput variable is a map with keys: %v", GetMapKeys(dataMap)))
-
-			if dataValue, hasData := dataMap["data"]; hasData {
-				log.WriteString(fmt.Sprintf("\nFound 'data' field of type: %T", dataValue))
-
-				// Try different array types that might be present
-				if dataArray, ok := dataValue.([]interface{}); ok {
-					inputArray = dataArray
-					log.WriteString(fmt.Sprintf("\nExtracted array from 'data' field: %d items", len(inputArray)))
-				} else if dataSlice, ok := dataValue.([]any); ok {
-					// Handle []any type
-					inputArray = make([]interface{}, len(dataSlice))
-					for i, v := range dataSlice {
-						inputArray[i] = v
-					}
-					log.WriteString(fmt.Sprintf("\nExtracted []any array from 'data' field: %d items", len(inputArray)))
-				} else {
-					// Data field exists but is not an array
-					err := fmt.Errorf("input variable %s.data is type %T, expected array", inputVarName, dataValue)
-					log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-					finalizeStep(s, false, nil, err.Error(), log.String())
-					return s, err
-				}
-			} else {
-				// No data field found
-				err := fmt.Errorf("input variable %s is not an array and has no 'data' field (available keys: %v)", inputVarName, GetMapKeys(dataMap))
-				log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-				finalizeStep(s, false, nil, err.Error(), log.String())
-				return s, err
-			}
-		} else {
-			err := fmt.Errorf("input variable %s is type %T, expected array or object with 'data' field", inputVarName, inputVar)
-			log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-			finalizeStep(s, false, nil, err.Error(), log.String())
-			return s, err
-		}
+	// Resolve input variable from template expression (e.g., "{{settings.address_list}}")
+	inputArray, _, resolveErr := resolveLoopInputVariable(v, inputNodeName)
+	if resolveErr != nil {
+		log.WriteString(fmt.Sprintf("\nError: %s", resolveErr.Error()))
+		finalizeStep(s, false, nil, resolveErr.Error(), log.String())
+		return s, resolveErr
 	}
 
 	// Determine execution mode
@@ -4648,9 +4606,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 					results[i] = result.Data
 				}
 				close(resultChannel)
-			case <-time.After(30 * time.Second): // Timeout for each iteration
+			case <-time.After(iterationTimeout):
 				success = false
-				err := fmt.Errorf("iteration %d timed out", i)
+				err := fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
 				if firstError == nil {
 					firstError = err
 				}
@@ -4703,9 +4661,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 					results[i] = result.Data
 				}
 				close(resultChannel)
-			case <-time.After(30 * time.Second):
+			case <-time.After(iterationTimeout):
 				success = false
-				err := fmt.Errorf("iteration %d timed out", i)
+				err := fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
 				if firstError == nil {
 					firstError = err
 				}

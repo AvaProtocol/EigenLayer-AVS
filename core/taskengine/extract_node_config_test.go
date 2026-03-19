@@ -36,10 +36,11 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 					TaskType: &avsproto.TaskNode_Loop{
 						Loop: &avsproto.LoopNode{
 							Config: &avsproto.LoopNode_Config{
-								InputNodeName: "source-node-id",
-								IterVal:       "value",
-								IterKey:       "index",
-								ExecutionMode: avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL,
+								InputVariable:    "{{source_node.data}}",
+								IterVal:          "value",
+								IterKey:          "index",
+								ExecutionMode:    avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL,
+								IterationTimeout: 30,
 							},
 							Runner: &avsproto.LoopNode_RestApi{
 								RestApi: &avsproto.RestAPINode{
@@ -61,7 +62,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 			},
 			expectedErr: false,
 			validate: func(t *testing.T, config map[string]interface{}) {
-				assert.Equal(t, "source-node-id", config["inputNodeName"])
+				assert.Equal(t, "{{source_node.data}}", config["inputVariable"])
 				assert.Equal(t, "value", config["iterVal"])
 				assert.Equal(t, "index", config["iterKey"])
 				assert.Equal(t, "EXECUTION_MODE_PARALLEL", config["executionMode"])
@@ -91,10 +92,11 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 					TaskType: &avsproto.TaskNode_Loop{
 						Loop: &avsproto.LoopNode{
 							Config: &avsproto.LoopNode_Config{
-								InputNodeName: "source-node-id",
-								IterVal:       "item",
-								IterKey:       "idx",
-								ExecutionMode: avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL,
+								InputVariable:    "{{source_node.data}}",
+								IterVal:          "item",
+								IterKey:          "idx",
+								ExecutionMode:    avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL,
+								IterationTimeout: 30,
 							},
 							Runner: &avsproto.LoopNode_GraphqlDataQuery{
 								GraphqlDataQuery: &avsproto.GraphQLQueryNode{
@@ -115,7 +117,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 			},
 			expectedErr: false,
 			validate: func(t *testing.T, config map[string]interface{}) {
-				assert.Equal(t, "source-node-id", config["inputNodeName"])
+				assert.Equal(t, "{{source_node.data}}", config["inputVariable"])
 				assert.Equal(t, "item", config["iterVal"])
 				assert.Equal(t, "idx", config["iterKey"])
 				assert.Equal(t, "EXECUTION_MODE_SEQUENTIAL", config["executionMode"])
@@ -144,10 +146,11 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 					TaskType: &avsproto.TaskNode_Loop{
 						Loop: &avsproto.LoopNode{
 							Config: &avsproto.LoopNode_Config{
-								InputNodeName: "source-node-id",
-								IterVal:       "address",
-								IterKey:       "index",
-								ExecutionMode: avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL,
+								InputVariable:    "{{source_node.data}}",
+								IterVal:          "address",
+								IterKey:          "index",
+								ExecutionMode:    avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL,
+								IterationTimeout: 30,
 							},
 							Runner: &avsproto.LoopNode_ContractRead{
 								ContractRead: &avsproto.ContractReadNode{
@@ -175,7 +178,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 			},
 			expectedErr: false,
 			validate: func(t *testing.T, config map[string]interface{}) {
-				assert.Equal(t, "source-node-id", config["inputNodeName"])
+				assert.Equal(t, "{{source_node.data}}", config["inputVariable"])
 				assert.Equal(t, "address", config["iterVal"])
 				assert.Equal(t, "index", config["iterKey"])
 				assert.Equal(t, "EXECUTION_MODE_PARALLEL", config["executionMode"])
@@ -206,10 +209,11 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 					TaskType: &avsproto.TaskNode_Loop{
 						Loop: &avsproto.LoopNode{
 							Config: &avsproto.LoopNode_Config{
-								InputNodeName: "source-node-id",
-								IterVal:       "recipient",
-								IterKey:       "index",
-								ExecutionMode: avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL,
+								InputVariable:    "{{source_node.data}}",
+								IterVal:          "recipient",
+								IterKey:          "index",
+								ExecutionMode:    avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL,
+								IterationTimeout: 30,
 							},
 							Runner: &avsproto.LoopNode_ContractWrite{
 								ContractWrite: &avsproto.ContractWriteNode{
@@ -231,7 +235,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 			},
 			expectedErr: false,
 			validate: func(t *testing.T, config map[string]interface{}) {
-				assert.Equal(t, "source-node-id", config["inputNodeName"])
+				assert.Equal(t, "{{source_node.data}}", config["inputVariable"])
 				assert.Equal(t, "recipient", config["iterVal"])
 				assert.Equal(t, "index", config["iterKey"])
 				assert.Equal(t, "EXECUTION_MODE_SEQUENTIAL", config["executionMode"])
@@ -268,10 +272,11 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 					TaskType: &avsproto.TaskNode_Loop{
 						Loop: &avsproto.LoopNode{
 							Config: &avsproto.LoopNode_Config{
-								InputNodeName: "source-node-id",
-								IterVal:       "data",
-								IterKey:       "i",
-								ExecutionMode: avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL,
+								InputVariable:    "{{source_node.data}}",
+								IterVal:          "data",
+								IterKey:          "i",
+								ExecutionMode:    avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL,
+								IterationTimeout: 30,
 							},
 							Runner: &avsproto.LoopNode_CustomCode{
 								CustomCode: &avsproto.CustomCodeNode{
@@ -287,7 +292,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 			},
 			expectedErr: false,
 			validate: func(t *testing.T, config map[string]interface{}) {
-				assert.Equal(t, "source-node-id", config["inputNodeName"])
+				assert.Equal(t, "{{source_node.data}}", config["inputVariable"])
 				assert.Equal(t, "data", config["iterVal"])
 				assert.Equal(t, "i", config["iterKey"])
 				assert.Equal(t, "EXECUTION_MODE_PARALLEL", config["executionMode"])
@@ -310,10 +315,11 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 					TaskType: &avsproto.TaskNode_Loop{
 						Loop: &avsproto.LoopNode{
 							Config: &avsproto.LoopNode_Config{
-								InputNodeName: "source-node-id",
-								IterVal:       "recipient",
-								IterKey:       "index",
-								ExecutionMode: avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL,
+								InputVariable:    "{{source_node.data}}",
+								IterVal:          "recipient",
+								IterKey:          "index",
+								ExecutionMode:    avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL,
+								IterationTimeout: 30,
 							},
 							Runner: &avsproto.LoopNode_EthTransfer{
 								EthTransfer: &avsproto.ETHTransferNode{
@@ -329,7 +335,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 			},
 			expectedErr: false,
 			validate: func(t *testing.T, config map[string]interface{}) {
-				assert.Equal(t, "source-node-id", config["inputNodeName"])
+				assert.Equal(t, "{{source_node.data}}", config["inputVariable"])
 				assert.Equal(t, "recipient", config["iterVal"])
 				assert.Equal(t, "index", config["iterKey"])
 				assert.Equal(t, "EXECUTION_MODE_SEQUENTIAL", config["executionMode"])
@@ -372,7 +378,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 				// Verify the structure is preserved
 				configMapTyped, ok := configMap.(map[string]interface{})
 				require.True(t, ok, "Converted config should be a map[string]interface{}")
-				assert.Equal(t, config["inputNodeName"], configMapTyped["inputNodeName"])
+				assert.Equal(t, config["inputVariable"], configMapTyped["inputVariable"])
 				assert.Equal(t, config["iterVal"], configMapTyped["iterVal"])
 				assert.Equal(t, config["iterKey"], configMapTyped["iterKey"])
 			}
@@ -398,9 +404,10 @@ func TestExtractNodeConfiguration_ProtobufCompatibility(t *testing.T) {
 					TaskType: &avsproto.TaskNode_Loop{
 						Loop: &avsproto.LoopNode{
 							Config: &avsproto.LoopNode_Config{
-								InputNodeName: "test-source",
-								IterVal:       "value",
-								IterKey:       "key",
+								InputVariable:    "{{test_source.data}}",
+								IterVal:          "value",
+								IterKey:          "key",
+								IterationTimeout: 30,
 							},
 							Runner: &avsproto.LoopNode_RestApi{
 								RestApi: &avsproto.RestAPINode{
@@ -429,9 +436,10 @@ func TestExtractNodeConfiguration_ProtobufCompatibility(t *testing.T) {
 					TaskType: &avsproto.TaskNode_Loop{
 						Loop: &avsproto.LoopNode{
 							Config: &avsproto.LoopNode_Config{
-								InputNodeName: "test-source",
-								IterVal:       "value",
-								IterKey:       "key",
+								InputVariable:    "{{test_source.data}}",
+								IterVal:          "value",
+								IterKey:          "key",
+								IterationTimeout: 30,
 							},
 							Runner: &avsproto.LoopNode_GraphqlDataQuery{
 								GraphqlDataQuery: &avsproto.GraphQLQueryNode{

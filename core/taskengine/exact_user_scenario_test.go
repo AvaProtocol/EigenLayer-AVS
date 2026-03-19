@@ -39,10 +39,11 @@ func TestExactUserScenarioLoopBehavior(t *testing.T) {
 
 	// NEW loop configuration with methodParams structure (backend will handle callData generation)
 	nodeConfig := map[string]interface{}{
-		"inputNodeName": "manualTrigger",
-		"iterVal":       "value",
-		"iterKey":       "index",
-		"executionMode": "sequential",
+		"inputVariable":    "manualTrigger",
+		"iterVal":          "value",
+		"iterKey":          "index",
+		"iterationTimeout": float64(30),
+		"executionMode":    "sequential",
 		"runner": map[string]interface{}{
 			"type": "contractRead",
 			"config": map[string]interface{}{

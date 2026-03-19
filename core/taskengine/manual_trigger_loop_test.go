@@ -10,7 +10,7 @@ import (
 )
 
 func TestLoopNode_ManualTriggerDataAccess(t *testing.T) {
-	t.Run("should access ManualTrigger.data automatically", func(t *testing.T) {
+	t.Run("should access ManualTrigger.data via template expression", func(t *testing.T) {
 		// Create VM
 		vm := NewVM()
 		if vm == nil {
@@ -40,12 +40,13 @@ func TestLoopNode_ManualTriggerDataAccess(t *testing.T) {
 			},
 		}
 
-		// Create the exact loop node configuration from the user's example
+		// inputNodeName uses template expression to access .data directly
 		nodeConfig := map[string]interface{}{
-			"inputNodeName": "manualTrigger", // This should automatically access .data
-			"iterVal":       "value",
-			"iterKey":       "index",
-			"executionMode": "sequential",
+			"inputVariable":    "{{manualTrigger.data}}",
+			"iterVal":          "value",
+			"iterKey":          "index",
+			"iterationTimeout": float64(30),
+			"executionMode":    "sequential",
 			"runner": map[string]interface{}{
 				"type": "customCode",
 				"config": map[string]interface{}{
@@ -63,8 +64,8 @@ func TestLoopNode_ManualTriggerDataAccess(t *testing.T) {
 		// Set a valid JavaScript identifier name
 		node.Name = "testLoopNode"
 
-		t.Logf("🧪 Testing loop node with inputNodeName: %s", nodeConfig["inputNodeName"])
-		t.Logf("📥 Input data structure: %+v", inputVariables["manualTrigger"])
+		t.Logf("Testing loop node with inputNodeName: %s", nodeConfig["inputVariable"])
+		t.Logf("Input data structure: %+v", inputVariables["manualTrigger"])
 
 		// Execute the loop node with the input variables
 		executionStep, err := vm.RunNodeWithInputs(node, inputVariables)
@@ -118,10 +119,11 @@ func TestLoopNode_ManualTriggerDataAccess(t *testing.T) {
 		}
 
 		nodeConfig := map[string]interface{}{
-			"inputNodeName": "manualTrigger",
-			"iterVal":       "value",
-			"iterKey":       "index",
-			"executionMode": "sequential",
+			"inputVariable":    "{{manualTrigger.data}}",
+			"iterVal":          "value",
+			"iterKey":          "index",
+			"iterationTimeout": float64(30),
+			"executionMode":    "sequential",
 			"runner": map[string]interface{}{
 				"type": "customCode",
 				"config": map[string]interface{}{
@@ -157,7 +159,7 @@ func TestLoopNode_ManualTriggerDataAccess(t *testing.T) {
 			t.Fatal("Failed to create VM")
 		}
 
-		// Test with missing data field
+		// Test with missing data field — expression references a field that doesn't exist
 		inputVariables := map[string]interface{}{
 			"manualTrigger": map[string]interface{}{
 				"input": map[string]interface{}{
@@ -168,10 +170,11 @@ func TestLoopNode_ManualTriggerDataAccess(t *testing.T) {
 		}
 
 		nodeConfig := map[string]interface{}{
-			"inputNodeName": "manualTrigger",
-			"iterVal":       "value",
-			"iterKey":       "index",
-			"executionMode": "sequential",
+			"inputVariable":    "{{manualTrigger.data}}",
+			"iterVal":          "value",
+			"iterKey":          "index",
+			"iterationTimeout": float64(30),
+			"executionMode":    "sequential",
 			"runner": map[string]interface{}{
 				"type": "customCode",
 				"config": map[string]interface{}{
@@ -185,21 +188,70 @@ func TestLoopNode_ManualTriggerDataAccess(t *testing.T) {
 		require.NoError(t, err)
 		node.Name = "testLoopNode"
 
-		// Execute the loop node - this should fail with a clear error message
+		// Execute the loop node - this should fail because manualTrigger.data doesn't exist
 		executionStep, err := vm.RunNodeWithInputs(node, inputVariables)
 
 		if err != nil {
-			// Error returned directly from RunNodeWithInputs
-			assert.Contains(t, err.Error(), "no 'data' field", "Error message should indicate missing data field")
-			t.Logf("✅ Correctly handled missing data field with error: %s", err.Error())
+			assert.Contains(t, err.Error(), "could not be resolved", "Error message should indicate resolution failure")
+			t.Logf("Correctly handled missing data field with error: %s", err.Error())
 		} else {
-			// Error in execution step
 			require.NotNil(t, executionStep, "Execution step should not be nil")
 			assert.False(t, executionStep.Success, "Loop node execution should fail")
-			assert.Contains(t, executionStep.Error, "no 'data' field", "Error message should indicate missing data field")
-			t.Logf("✅ Correctly handled missing data field with error: %s", executionStep.Error)
+			assert.Contains(t, executionStep.Error, "could not be resolved", "Error message should indicate resolution failure")
+			t.Logf("Correctly handled missing data field with error: %s", executionStep.Error)
 		}
 	})
+}
+
+func TestLoopNode_SettingsAddressList(t *testing.T) {
+	// Test the multi-recipient payment use case: loop iterates over settings.address_list
+	vm := NewVM()
+	require.NotNil(t, vm)
+
+	inputVariables := map[string]interface{}{
+		"settings": map[string]interface{}{
+			"name":         "Monthly Payroll",
+			"runner":       "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
+			"address_list": []interface{}{"0xAddr1", "0xAddr2", "0xAddr3"},
+			"token_amount": "1.0",
+		},
+	}
+
+	nodeConfig := map[string]interface{}{
+		"inputVariable":    "{{settings.address_list}}",
+		"iterVal":          "value",
+		"iterKey":          "index",
+		"iterationTimeout": float64(30),
+		"executionMode":    "sequential",
+		"runner": map[string]interface{}{
+			"type": "customCode",
+			"config": map[string]interface{}{
+				"lang":   avsproto.Lang_LANG_JAVASCRIPT,
+				"source": "return value;",
+			},
+		},
+	}
+
+	node, err := CreateNodeFromType("loop", nodeConfig, "")
+	require.NoError(t, err)
+	node.Name = "testLoopSettingsAddressList"
+
+	step, err := vm.RunNodeWithInputs(node, inputVariables)
+	require.NoError(t, err)
+	require.NotNil(t, step)
+	assert.True(t, step.Success, "execution failed: %s", step.Error)
+
+	loopOutput := step.GetLoop()
+	require.NotNil(t, loopOutput)
+	require.NotNil(t, loopOutput.Data)
+
+	results := loopOutput.Data.AsInterface()
+	arr, ok := results.([]interface{})
+	require.True(t, ok, "expected array, got %T", results)
+	require.Len(t, arr, 3)
+	assert.Equal(t, "0xAddr1", arr[0])
+	assert.Equal(t, "0xAddr2", arr[1])
+	assert.Equal(t, "0xAddr3", arr[2])
 }
 
 func TestLoopNode_ContractWrite_Approve_PerIterationData(t *testing.T) {
@@ -240,10 +292,11 @@ func TestLoopNode_ContractWrite_Approve_PerIterationData(t *testing.T) {
 
 	// Build loop node with ContractWrite runner (USDC approve signature)
 	nodeConfig := map[string]interface{}{
-		"inputNodeName": "writeParams",
-		"iterVal":       "value",
-		"iterKey":       "index",
-		"executionMode": "sequential",
+		"inputVariable":    "{{writeParams}}",
+		"iterVal":          "value",
+		"iterKey":          "index",
+		"iterationTimeout": float64(30),
+		"executionMode":    "sequential",
 		"runner": map[string]interface{}{
 			"type": "contractWrite",
 			"config": map[string]interface{}{
@@ -335,10 +388,11 @@ func TestRestApiStandardFormat(t *testing.T) {
 
 	// Create a loop node with REST API runner to test standard format
 	loopNode, err := CreateNodeFromType("loop", map[string]interface{}{
-		"inputNodeName": "manualTrigger",
-		"iterVal":       "value",
-		"iterKey":       "index",
-		"executionMode": "sequential",
+		"inputVariable":    "{{manualTrigger.data}}",
+		"iterVal":          "value",
+		"iterKey":          "index",
+		"iterationTimeout": float64(30),
+		"executionMode":    "sequential",
 		"runner": map[string]interface{}{
 			"type": "restApi",
 			"config": map[string]interface{}{
