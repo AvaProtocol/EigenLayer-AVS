@@ -382,10 +382,6 @@ func TestRestApiStandardFormat(t *testing.T) {
 		},
 	}
 
-	for key, value := range inputVariables {
-		vm.AddVar(key, value)
-	}
-
 	// Create a loop node with REST API runner to test standard format
 	loopNode, err := CreateNodeFromType("loop", map[string]interface{}{
 		"inputVariable":    "{{manualTrigger.data}}",

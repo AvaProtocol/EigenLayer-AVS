@@ -3,8 +3,6 @@ package taskengine
 import (
 	"testing"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
-	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -12,9 +10,6 @@ import (
 // TestExactUserScenarioLoopBehavior replicates the user's exact scenario
 // to understand why there are 2 results for 1 method call, and test the new methodParams structure
 func TestExactUserScenarioLoopBehavior(t *testing.T) {
-	db := testutil.TestMustDB()
-	defer storage.Destroy(db.(*storage.BadgerStorage))
-
 	// EXACT input from user's log - modified to include address in each item
 	inputVariables := map[string]interface{}{
 		"manualTrigger": map[string]interface{}{
@@ -39,7 +34,7 @@ func TestExactUserScenarioLoopBehavior(t *testing.T) {
 
 	// NEW loop configuration with methodParams structure (backend will handle callData generation)
 	nodeConfig := map[string]interface{}{
-		"inputVariable":    "manualTrigger",
+		"inputVariable":    "{{manualTrigger}}",
 		"iterVal":          "value",
 		"iterKey":          "index",
 		"iterationTimeout": float64(30),
@@ -74,16 +69,6 @@ func TestExactUserScenarioLoopBehavior(t *testing.T) {
 	t.Logf("   - manualTrigger.data has %d items", len(inputVariables["manualTrigger"].(map[string]interface{})["data"].([]interface{})))
 	t.Logf("   - methodCalls uses methodParams: {{value.address}} for dynamic parameter injection")
 	t.Logf("   - Backend will handle callData generation separately using ABI + methodName + methodParams")
-
-	// Create VM for testing
-	vm := NewVM()
-	vm.WithDb(db)
-	vm.WithLogger(testutil.GetLogger())
-
-	// Add input variables to VM
-	for key, value := range inputVariables {
-		vm.AddVar(key, value)
-	}
 
 	// Create the loop node using CreateNodeFromType
 	node, err := CreateNodeFromType("loop", nodeConfig, "test-methodparams-scenario")

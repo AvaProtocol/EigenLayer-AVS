@@ -10,9 +10,6 @@ import (
 // TestBranchNode_DetailedExecutionLogs tests the execution logs with real scenario data
 // Based on aggregator-sepolia.log where balance is 0 and the else condition is taken
 func TestBranchNode_DetailedExecutionLogs(t *testing.T) {
-	vm := NewVM()
-	processor := NewBranchProcessor(vm)
-
 	// Set up the real scenario from the log:
 	// balance1.data contains tokens with balance 0
 	balance1Data := []interface{}{
@@ -44,11 +41,6 @@ func TestBranchNode_DetailedExecutionLogs(t *testing.T) {
 		},
 	}
 
-	vm.AddVar("balance1", map[string]interface{}{
-		"data": balance1Data,
-	})
-	vm.AddVar("settings", settings)
-
 	// The real branch conditions from the log
 	branchNode := &avsproto.BranchNode{
 		Config: &avsproto.BranchNode_Config{
@@ -67,21 +59,33 @@ func TestBranchNode_DetailedExecutionLogs(t *testing.T) {
 		},
 	}
 
-	// Execute the branch node
-	step, nextStep, err := processor.Execute("branch1", branchNode)
+	branchTaskNode := &avsproto.TaskNode{
+		Id:   "branch1",
+		Name: "branch",
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: branchNode,
+		},
+	}
+
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(branchTaskNode, map[string]interface{}{
+		"balance1": map[string]interface{}{
+			"data": balance1Data,
+		},
+		"settings": settings,
+	})
 
 	// Assertions
 	assert.NoError(t, err, "Branch execution should not error")
 	assert.NotNil(t, step, "Execution step should not be nil")
 	assert.True(t, step.Success, "Branch should succeed by taking the else path")
-	assert.NotNil(t, nextStep, "Next step should be set for else condition")
 
 	// Check the log format
 	log := step.Log
 	t.Logf("Execution log:\n%s", log)
 
 	// Verify log structure and content
-	assert.Contains(t, log, "Executing 'branch1'", "Log should show node execution header")
+	assert.Contains(t, log, "Executing 'branch'", "Log should show node execution header")
 
 	// The If condition should show as "resolved to false" with comparison operands
 	assert.Contains(t, log, "If condition resolved to false", "Log should show 'If condition resolved to false'")
@@ -93,7 +97,7 @@ func TestBranchNode_DetailedExecutionLogs(t *testing.T) {
 	assert.NotContains(t, log, "Processed: false", "Log should NOT show redundant 'Processed: false' line")
 
 	// The Else condition should be logged with next node information
-	assert.Contains(t, log, "BranchNode 'branch1' resolved to Else condition", "Log should clearly state branch resolution")
+	assert.Contains(t, log, "BranchNode 'branch' resolved to Else condition", "Log should clearly state branch resolution")
 	assert.Contains(t, log, "no next node", "Log should indicate no next node for simple test")
 
 	// Verify step output data
@@ -109,9 +113,6 @@ func TestBranchNode_DetailedExecutionLogs(t *testing.T) {
 
 // TestBranchNode_IfConditionTrue tests when the If condition evaluates to true
 func TestBranchNode_IfConditionTrue(t *testing.T) {
-	vm := NewVM()
-	processor := NewBranchProcessor(vm)
-
 	// Set up scenario where balance is greater than amount
 	balance1Data := []interface{}{
 		map[string]interface{}{
@@ -134,11 +135,6 @@ func TestBranchNode_IfConditionTrue(t *testing.T) {
 		},
 	}
 
-	vm.AddVar("balance1", map[string]interface{}{
-		"data": balance1Data,
-	})
-	vm.AddVar("settings", settings)
-
 	branchNode := &avsproto.BranchNode{
 		Config: &avsproto.BranchNode_Config{
 			Conditions: []*avsproto.BranchNode_Condition{
@@ -156,24 +152,36 @@ func TestBranchNode_IfConditionTrue(t *testing.T) {
 		},
 	}
 
-	// Execute the branch node
-	step, nextStep, err := processor.Execute("branch1", branchNode)
+	branchTaskNode := &avsproto.TaskNode{
+		Id:   "branch1",
+		Name: "branch",
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: branchNode,
+		},
+	}
+
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(branchTaskNode, map[string]interface{}{
+		"balance1": map[string]interface{}{
+			"data": balance1Data,
+		},
+		"settings": settings,
+	})
 
 	// Assertions
 	assert.NoError(t, err, "Branch execution should not error")
 	assert.NotNil(t, step, "Execution step should not be nil")
 	assert.True(t, step.Success, "Branch should succeed by taking the if path")
-	assert.NotNil(t, nextStep, "Next step should be set for if condition")
 
 	// Check the log format
 	log := step.Log
 	t.Logf("Execution log:\n%s", log)
 
 	// Verify log structure and content
-	assert.Contains(t, log, "Executing 'branch1'", "Log should show node execution header")
+	assert.Contains(t, log, "Executing 'branch'", "Log should show node execution header")
 
 	// The If condition should show evaluation result - since it's true, we should see resolution message
-	assert.Contains(t, log, "BranchNode 'branch1' resolved to If condition", "Log should clearly state branch resolution")
+	assert.Contains(t, log, "BranchNode 'branch' resolved to If condition", "Log should clearly state branch resolution")
 	assert.Contains(t, log, "no next node", "Log should indicate no next node for simple test")
 
 	// Verify step output data

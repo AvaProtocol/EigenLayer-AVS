@@ -91,23 +91,27 @@ func TestBranchNodePreprocessing(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			vm := NewVM()
-			processor := NewBranchProcessor(vm)
-
-			vm.AddVar("trigger", map[string]interface{}{
-				"data": tc.triggerData,
-			})
-
-			node := &avsproto.BranchNode{
-				Config: &avsproto.BranchNode_Config{
-					Conditions: []*avsproto.BranchNode_Condition{
-						{Id: "condition1", Type: "if", Expression: tc.expression},
-						{Id: "condition2", Type: "else"},
+			taskNode := &avsproto.TaskNode{
+				Id:   "test1",
+				Name: "branch",
+				TaskType: &avsproto.TaskNode_Branch{
+					Branch: &avsproto.BranchNode{
+						Config: &avsproto.BranchNode_Config{
+							Conditions: []*avsproto.BranchNode_Condition{
+								{Id: "condition1", Type: "if", Expression: tc.expression},
+								{Id: "condition2", Type: "else"},
+							},
+						},
 					},
 				},
 			}
 
-			executionLog, nextStep, err := processor.Execute("test1", node)
+			vm := NewVM()
+			step, err := vm.RunNodeWithInputs(taskNode, map[string]interface{}{
+				"trigger": map[string]interface{}{
+					"data": tc.triggerData,
+				},
+			})
 
 			if tc.expectError {
 				if err == nil {
@@ -121,35 +125,57 @@ func TestBranchNodePreprocessing(t *testing.T) {
 				return
 			}
 
+			if step == nil {
+				t.Errorf("expected step but got none")
+				return
+			}
+
+			branchOutput := step.GetBranch()
+
 			if tc.expectedResult {
-				if nextStep == nil {
-					t.Errorf("expected next step but got none")
-					return
-				}
-				if nextStep.NodeID != "test1.condition1" {
-					t.Errorf("expected condition1 path but got %s", nextStep.NodeID)
-				}
-				if executionLog.GetBranch() == nil {
+				if branchOutput == nil {
 					t.Errorf("expected branch output but got none")
 					return
 				}
-				if executionLog.GetBranch().Data == nil {
+				if branchOutput.Data == nil {
 					t.Errorf("expected branch data but got none")
+					return
+				}
+				// Check that condition1 (the "if" branch) was matched
+				dataMap := branchOutput.Data.AsInterface()
+				if m, ok := dataMap.(map[string]interface{}); ok {
+					if conditionId, exists := m["conditionId"]; exists {
+						if conditionId != "test1.condition1" {
+							t.Errorf("expected condition1 path but got %s", conditionId)
+						}
+					} else {
+						t.Errorf("expected conditionId in branch data but not found")
+					}
+				} else {
+					t.Errorf("expected branch data to be a map")
 				}
 			} else {
-				if nextStep == nil {
-					t.Errorf("expected next step but got none")
-					return
-				}
-				if nextStep.NodeID != "test1.condition2" {
-					t.Errorf("expected condition2 (else) path but got %s", nextStep.NodeID)
-				}
-				if executionLog.GetBranch() == nil {
+				// When the "if" condition is false, the "else" branch should be taken
+				if branchOutput == nil {
 					t.Errorf("expected branch output but got none")
 					return
 				}
-				if executionLog.GetBranch().Data == nil {
+				if branchOutput.Data == nil {
 					t.Errorf("expected branch data but got none")
+					return
+				}
+				// Check that condition2 (the "else" branch) was matched
+				dataMap := branchOutput.Data.AsInterface()
+				if m, ok := dataMap.(map[string]interface{}); ok {
+					if conditionId, exists := m["conditionId"]; exists {
+						if conditionId != "test1.condition2" {
+							t.Errorf("expected condition2 (else) path but got %s", conditionId)
+						}
+					} else {
+						t.Errorf("expected conditionId in branch data but not found")
+					}
+				} else {
+					t.Errorf("expected branch data to be a map")
 				}
 			}
 		})
@@ -191,23 +217,27 @@ func TestBranchNodePreprocessingEdgeCases(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			vm := NewVM()
-			processor := NewBranchProcessor(vm)
-
-			vm.AddVar("trigger", map[string]interface{}{
-				"data": tc.triggerData,
-			})
-
-			node := &avsproto.BranchNode{
-				Config: &avsproto.BranchNode_Config{
-					Conditions: []*avsproto.BranchNode_Condition{
-						{Id: "condition1", Type: "if", Expression: tc.expression},
-						{Id: "condition2", Type: "else"},
+			taskNode := &avsproto.TaskNode{
+				Id:   "test1",
+				Name: "branch",
+				TaskType: &avsproto.TaskNode_Branch{
+					Branch: &avsproto.BranchNode{
+						Config: &avsproto.BranchNode_Config{
+							Conditions: []*avsproto.BranchNode_Condition{
+								{Id: "condition1", Type: "if", Expression: tc.expression},
+								{Id: "condition2", Type: "else"},
+							},
+						},
 					},
 				},
 			}
 
-			executionLog, nextStep, err := processor.Execute("test1", node)
+			vm := NewVM()
+			step, err := vm.RunNodeWithInputs(taskNode, map[string]interface{}{
+				"trigger": map[string]interface{}{
+					"data": tc.triggerData,
+				},
+			})
 
 			if tc.expectError {
 				if err == nil {
@@ -221,11 +251,11 @@ func TestBranchNodePreprocessingEdgeCases(t *testing.T) {
 				return
 			}
 
-			if executionLog == nil {
-				t.Errorf("expected execution log but got none")
+			if step == nil {
+				t.Errorf("expected step but got none")
 			}
-			if nextStep == nil {
-				t.Errorf("expected next step but got none")
+			if step.GetBranch() == nil {
+				t.Errorf("expected branch output but got none")
 			}
 		})
 	}

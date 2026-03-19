@@ -52,45 +52,41 @@ func TestBranchNode_EmailSummaryGeneration(t *testing.T) {
 		},
 	}
 
-	vm.AddVar("balance1", map[string]interface{}{
-		"data": balance1Data,
-	})
-	vm.AddVar("settings", settings)
-
-	processor := NewBranchProcessor(vm)
-
-	branchNode := &avsproto.BranchNode{
-		Config: &avsproto.BranchNode_Config{
-			Conditions: []*avsproto.BranchNode_Condition{
-				{
-					Id:         "0",
-					Type:       "if",
-					Expression: "{{balance1.data.find(token => token?.tokenAddress?.toLowerCase() === settings.uniswapv3_pool.token1.id.toLowerCase()).balance > Number(settings.amount)}}",
-				},
-				{
-					Id:         "1",
-					Type:       "else",
-					Expression: "",
+	// Create branch TaskNode
+	branchTaskNode := &avsproto.TaskNode{
+		Id:   "branch1",
+		Name: "branch1",
+		Type: avsproto.NodeType_NODE_TYPE_BRANCH,
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: []*avsproto.BranchNode_Condition{
+						{
+							Id:         "0",
+							Type:       "if",
+							Expression: "{{balance1.data.find(token => token?.tokenAddress?.toLowerCase() === settings.uniswapv3_pool.token1.id.toLowerCase()).balance > Number(settings.amount)}}",
+						},
+						{
+							Id:         "1",
+							Type:       "else",
+							Expression: "",
+						},
+					},
 				},
 			},
 		},
 	}
 
-	// Create TaskNode wrapper for the branch node
-	taskNode := &avsproto.TaskNode{
-		Id:   "branch1",
-		Name: "branch1",
-		Type: avsproto.NodeType_NODE_TYPE_BRANCH,
-		TaskType: &avsproto.TaskNode_Branch{
-			Branch: branchNode,
-		},
-	}
-	processor.CommonProcessor.SetTaskNode(taskNode)
-
-	// Execute the branch node
-	step, _, err := processor.Execute("branch1", branchNode)
+	// Execute using RunNodeWithInputs
+	step, err := vm.RunNodeWithInputs(branchTaskNode, map[string]interface{}{
+		"balance1": map[string]interface{}{"data": balance1Data},
+		"settings": settings,
+	})
 	assert.NoError(t, err, "Branch execution should not error")
 	assert.True(t, step.Success, "Branch should succeed")
+
+	// Add step to outer VM for summary generation
+	vm.ExecutionLogs = append(vm.ExecutionLogs, step)
 
 	// Verify metadata contains evaluation details
 	assert.NotNil(t, step.Metadata, "Metadata should be set")
@@ -121,26 +117,26 @@ func TestBranchNode_EmailSummaryGeneration(t *testing.T) {
 		if leftExpr, ok := varVals["leftExpr"].(string); ok {
 			assert.NotEmpty(t, leftExpr, "leftExpr should not be empty")
 			assert.Contains(t, leftExpr, "balance1.data.find", "leftExpr should contain the left side of comparison")
-			t.Logf("✅ leftExpr: %s", leftExpr)
+			t.Logf("leftExpr: %s", leftExpr)
 		}
 		if rightExpr, ok := varVals["rightExpr"].(string); ok {
 			assert.NotEmpty(t, rightExpr, "rightExpr should not be empty")
 			assert.Contains(t, rightExpr, "settings.amount", "rightExpr should contain the right side of comparison")
-			t.Logf("✅ rightExpr: %s", rightExpr)
+			t.Logf("rightExpr: %s", rightExpr)
 		}
 		if operator, ok := varVals["operator"].(string); ok {
 			assert.Equal(t, ">", operator, "operator should be '>'")
-			t.Logf("✅ operator: %s", operator)
+			t.Logf("operator: %s", operator)
 		}
 		// Check evaluated values
 		if left := varVals["left"]; left != nil {
-			t.Logf("✅ left operand value: %v", left)
+			t.Logf("left operand value: %v", left)
 		}
 		if right := varVals["right"]; right != nil {
-			t.Logf("✅ right operand value: %v", right)
+			t.Logf("right operand value: %v", right)
 		}
 	} else {
-		t.Error("❌ variableValues is empty - comparison operands were not extracted!")
+		t.Error("variableValues is empty - comparison operands were not extracted!")
 	}
 
 	// Check second evaluation (Else: taken)
@@ -149,9 +145,6 @@ func TestBranchNode_EmailSummaryGeneration(t *testing.T) {
 	assert.Equal(t, "Else", eval1["label"], "Second condition should be labeled 'Else'")
 	assert.Equal(t, true, eval1["result"], "Else condition should result in true")
 	assert.Equal(t, true, eval1["taken"], "Else condition should be taken")
-
-	// Add step to VM execution logs
-	vm.ExecutionLogs = append(vm.ExecutionLogs, step)
 
 	// Generate email summary HTML
 	text, html := BuildBranchAndSkippedSummary(vm)
@@ -211,47 +204,40 @@ func TestBranchNode_TrueConditionLogging(t *testing.T) {
 		},
 	}
 
-	vm.AddVar("balance1", map[string]interface{}{
-		"data": balance1Data,
-	})
-	vm.AddVar("settings", settings)
-
-	processor := NewBranchProcessor(vm)
-
-	branchNode := &avsproto.BranchNode{
-		Config: &avsproto.BranchNode_Config{
-			Conditions: []*avsproto.BranchNode_Condition{
-				{
-					Id:         "0",
-					Type:       "if",
-					Expression: "{{balance1.data.find(token => token?.tokenAddress?.toLowerCase() === settings.uniswapv3_pool.token1.id.toLowerCase()).balance > Number(settings.amount)}}",
-				},
-				{
-					Id:         "1",
-					Type:       "else",
-					Expression: "",
+	// Create branch TaskNode
+	branchTaskNode := &avsproto.TaskNode{
+		Id:   "branch1",
+		Name: "branch1",
+		Type: avsproto.NodeType_NODE_TYPE_BRANCH,
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: []*avsproto.BranchNode_Condition{
+						{
+							Id:         "0",
+							Type:       "if",
+							Expression: "{{balance1.data.find(token => token?.tokenAddress?.toLowerCase() === settings.uniswapv3_pool.token1.id.toLowerCase()).balance > Number(settings.amount)}}",
+						},
+						{
+							Id:         "1",
+							Type:       "else",
+							Expression: "",
+						},
+					},
 				},
 			},
 		},
 	}
 
-	// Create TaskNode wrapper for the branch node
-	taskNode := &avsproto.TaskNode{
-		Id:   "branch1",
-		Name: "branch1",
-		Type: avsproto.NodeType_NODE_TYPE_BRANCH,
-		TaskType: &avsproto.TaskNode_Branch{
-			Branch: branchNode,
-		},
-	}
-	processor.CommonProcessor.SetTaskNode(taskNode)
-
-	// Execute the branch node
-	step, _, err := processor.Execute("branch1", branchNode)
+	// Execute using RunNodeWithInputs
+	step, err := vm.RunNodeWithInputs(branchTaskNode, map[string]interface{}{
+		"balance1": map[string]interface{}{"data": balance1Data},
+		"settings": settings,
+	})
 	assert.NoError(t, err, "Branch execution should not error")
 	assert.True(t, step.Success, "Branch should succeed")
 
-	// Add the step to ExecutionLogs so BuildBranchAndSkippedSummary can find it
+	// Add step to outer VM for summary generation
 	vm.ExecutionLogs = append(vm.ExecutionLogs, step)
 
 	// Verify metadata contains evaluation details with operand values
@@ -286,7 +272,7 @@ func TestBranchNode_TrueConditionLogging(t *testing.T) {
 		assert.Contains(t, rightExpr, "settings.amount", "rightExpr should contain settings.amount")
 		assert.Equal(t, ">", operator, "operator should be '>'")
 
-		t.Logf("✅ True condition operands - left: %v, right: %v", varVals["left"], varVals["right"])
+		t.Logf("True condition operands - left: %v, right: %v", varVals["left"], varVals["right"])
 	}
 
 	// Verify execution log shows comparison details for TRUE conditions

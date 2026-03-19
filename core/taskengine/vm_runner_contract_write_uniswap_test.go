@@ -45,8 +45,11 @@ func TestContractWriteNode_UniswapV3Quote(t *testing.T) {
 	vm.SetSimulation(true)
 	vm.TaskOwner = common.HexToAddress("0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788")
 
-	// Create input variables matching the Uniswap V3 quote scenario
+	// Create input variables matching the Uniswap V3 quote scenario.
+	// aa_sender is required for contract write nodes and is passed via inputVariables
+	// so that RunNodeWithInputs populates it in the temporary VM.
 	inputVars := map[string]interface{}{
+		"aa_sender": "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
 		"settings": map[string]interface{}{
 			"chain":    "Sepolia",
 			"amount":   "10",
@@ -70,14 +73,6 @@ func TestContractWriteNode_UniswapV3Quote(t *testing.T) {
 			},
 		},
 	}
-
-	// Set input variables in VM
-	for key, value := range inputVars {
-		vm.AddVar(key, value)
-	}
-
-	// Set aa_sender since it's required for contract write
-	vm.AddVar("aa_sender", "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e")
 
 	// Create node config
 	// Convert ABI to protobuf Value
