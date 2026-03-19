@@ -246,7 +246,7 @@ func TestRestRequestRenderVars(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	node := &avsproto.RestAPINode{
+	restNode := &avsproto.RestAPINode{
 		Config: &avsproto.RestAPINode_Config{
 			Url: ts.URL,
 			Headers: map[string]string{
@@ -257,46 +257,22 @@ func TestRestRequestRenderVars(t *testing.T) {
 		},
 	}
 
-	nodes := []*avsproto.TaskNode{
-		{
-			Id:   "123abc",
-			Name: "restApi",
-			TaskType: &avsproto.TaskNode_RestApi{
-				RestApi: node,
+	taskNode := &avsproto.TaskNode{
+		Id:   "123abc",
+		Name: "restApi",
+		TaskType: &avsproto.TaskNode_RestApi{
+			RestApi: restNode,
+		},
+	}
+
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(taskNode, map[string]interface{}{
+		"myNode": map[string]interface{}{
+			"data": map[string]interface{}{
+				"name": "unit test",
 			},
 		},
-	}
-
-	trigger := &avsproto.TaskTrigger{
-		Id:   "triggertest",
-		Name: "triggertest",
-	}
-	edges := []*avsproto.TaskEdge{
-		{
-			Id:     "e1",
-			Source: trigger.Id,
-			Target: "123abc",
-		},
-	}
-
-	vm, err := NewVMWithData(&model.Task{
-		Task: &avsproto.Task{
-			Id:      "123abc",
-			Nodes:   nodes,
-			Edges:   edges,
-			Trigger: trigger,
-		},
-	}, nil, testutil.GetTestSmartWalletConfig(), nil)
-
-	vm.AddVar("myNode", map[string]map[string]string{
-		"data": map[string]string{
-			"name": "unit test",
-		},
 	})
-
-	n := NewRestProcessor(vm)
-
-	step, err := n.Execute("123abc", node)
 
 	if err != nil {
 		t.Errorf("expected rest node run successful but got error: %v", err)
@@ -331,7 +307,7 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 		"X-Name":       "{{myNode.data.name}}",
 	}
 
-	node := &avsproto.RestAPINode{
+	restNode := &avsproto.RestAPINode{
 		Config: &avsproto.RestAPINode_Config{
 			Url:     originalUrl,
 			Headers: originalHeaders,
@@ -340,46 +316,23 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 		},
 	}
 
-	nodes := []*avsproto.TaskNode{
-		{
-			Id:   "123abc",
-			Name: "restApi",
-			TaskType: &avsproto.TaskNode_RestApi{
-				RestApi: node,
-			},
+	taskNode := &avsproto.TaskNode{
+		Id:   "123abc",
+		Name: "restApi",
+		TaskType: &avsproto.TaskNode_RestApi{
+			RestApi: restNode,
 		},
 	}
-
-	trigger := &avsproto.TaskTrigger{
-		Id:   "triggertest",
-		Name: "triggertest",
-	}
-	edges := []*avsproto.TaskEdge{
-		{
-			Id:     "e1",
-			Source: trigger.Id,
-			Target: "123abc",
-		},
-	}
-
-	vm, err := NewVMWithData(&model.Task{
-		Task: &avsproto.Task{
-			Id:      "123abc",
-			Nodes:   nodes,
-			Edges:   edges,
-			Trigger: trigger,
-		},
-	}, nil, testutil.GetTestSmartWalletConfig(), nil)
 
 	// First execution with first value
-	vm.AddVar("myNode", map[string]map[string]string{
-		"data": {
-			"name": "first",
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(taskNode, map[string]interface{}{
+		"myNode": map[string]interface{}{
+			"data": map[string]interface{}{
+				"name": "first",
+			},
 		},
 	})
-
-	n := NewRestProcessor(vm)
-	step, err := n.Execute("123abc", node)
 
 	if err != nil {
 		t.Errorf("expected rest node run successful but got error: %v", err)
@@ -393,34 +346,35 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 	}
 
 	// Second execution with different value
-	vm.AddVar("myNode", map[string]map[string]string{
-		"data": {
-			"name": "second",
+	vm2 := NewVM()
+	step2, err := vm2.RunNodeWithInputs(taskNode, map[string]interface{}{
+		"myNode": map[string]interface{}{
+			"data": map[string]interface{}{
+				"name": "second",
+			},
 		},
 	})
-
-	step, err = n.Execute("123abc", node)
 
 	if err != nil {
 		t.Errorf("expected rest node run successful but got error: %v", err)
 	}
-	if !step.Success {
+	if !step2.Success {
 		t.Errorf("expected rest node run successfully but failed")
 	}
-	responseData2 := gow.ValueToMap(step.GetRestApi().Data)
+	responseData2 := gow.ValueToMap(step2.GetRestApi().Data)
 	if responseData2["data"].(string) != "my name is second" {
 		t.Errorf("expected response to be 'my name is second', got: %s", responseData2["data"])
 	}
 
 	// Verify original node values remain unchanged
-	if node.Config.Url != originalUrl {
-		t.Errorf("expected URL to be %s, got %s", originalUrl, node.Config.Url)
+	if restNode.Config.Url != originalUrl {
+		t.Errorf("expected URL to be %s, got %s", originalUrl, restNode.Config.Url)
 	}
-	if node.Config.Body != originalBody {
-		t.Errorf("expected Body to be %s, got %s", originalBody, node.Config.Body)
+	if restNode.Config.Body != originalBody {
+		t.Errorf("expected Body to be %s, got %s", originalBody, restNode.Config.Body)
 	}
-	if !reflect.DeepEqual(node.Config.Headers, originalHeaders) {
-		t.Errorf("expected Headers to be %v, got %v", originalHeaders, node.Config.Headers)
+	if !reflect.DeepEqual(restNode.Config.Headers, originalHeaders) {
+		t.Errorf("expected Headers to be %v, got %v", originalHeaders, restNode.Config.Headers)
 	}
 }
 

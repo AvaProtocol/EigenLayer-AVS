@@ -2,7 +2,6 @@ package taskengine
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -258,25 +257,26 @@ func TestBranchConditionSuccesfulCase(t *testing.T) {
 		{"a = 1", 1, "test1.condition3", false},
 	}
 
-	// Define conditions
-	conditions := []*avsproto.BranchNode_Condition{
-		{Id: "condition1", Type: "if", Expression: "a > 10"},
-		{Id: "condition2", Type: "if", Expression: "a > 3"},
-		{Id: "condition3", Type: "else"},
-	}
-
 	// Iterate over test cases
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			vm := NewVM()
-			processor := NewBranchProcessor(vm)
-
-			vm.AddVar("a", tc.aValue)
-			stepResult, _, err := processor.Execute("test1", &avsproto.BranchNode{
-				Config: &avsproto.BranchNode_Config{
-					Conditions: conditions,
+			node := &avsproto.TaskNode{
+				Id:   "test1",
+				Name: "branch",
+				TaskType: &avsproto.TaskNode_Branch{
+					Branch: &avsproto.BranchNode{
+						Config: &avsproto.BranchNode_Config{
+							Conditions: []*avsproto.BranchNode_Condition{
+								{Id: "condition1", Type: "if", Expression: "a > 10"},
+								{Id: "condition2", Type: "if", Expression: "a > 3"},
+								{Id: "condition3", Type: "else"},
+							},
+						},
+					},
 				},
-			})
+			}
+			vm := NewVM()
+			step, err := vm.RunNodeWithInputs(node, map[string]interface{}{"a": tc.aValue})
 
 			if tc.expectError {
 				if err == nil {
@@ -290,7 +290,7 @@ func TestBranchConditionSuccesfulCase(t *testing.T) {
 				return
 			}
 
-			if stepResult.GetBranch().Data == nil {
+			if step.GetBranch().Data == nil {
 				t.Errorf("expected branch data but got none")
 			}
 		})
@@ -315,27 +315,28 @@ func TestBranchConditionDiscardAnythingAfterElse(t *testing.T) {
 		{"a = 4", 1, "test1.condition2", false},
 	}
 
-	// Define conditions
-	conditions := []*avsproto.BranchNode_Condition{
-		{Id: "condition1", Type: "if", Expression: "a > 10"},
-		{Id: "condition2", Type: "else"},
-		{Id: "discard1", Type: "if", Expression: "a>3"},
-		{Id: "discard2", Type: "if", Expression: "a>3"},
-		{Id: "discard3", Type: "if", Expression: "a>4"},
-	}
-
 	// Iterate over test cases
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			vm := NewVM()
-			processor := NewBranchProcessor(vm)
-
-			vm.AddVar("a", tc.aValue)
-			stepResult, _, err := processor.Execute("test1", &avsproto.BranchNode{
-				Config: &avsproto.BranchNode_Config{
-					Conditions: conditions,
+			node := &avsproto.TaskNode{
+				Id:   "test1",
+				Name: "branch",
+				TaskType: &avsproto.TaskNode_Branch{
+					Branch: &avsproto.BranchNode{
+						Config: &avsproto.BranchNode_Config{
+							Conditions: []*avsproto.BranchNode_Condition{
+								{Id: "condition1", Type: "if", Expression: "a > 10"},
+								{Id: "condition2", Type: "else"},
+								{Id: "discard1", Type: "if", Expression: "a>3"},
+								{Id: "discard2", Type: "if", Expression: "a>3"},
+								{Id: "discard3", Type: "if", Expression: "a>4"},
+							},
+						},
+					},
 				},
-			})
+			}
+			vm := NewVM()
+			step, err := vm.RunNodeWithInputs(node, map[string]interface{}{"a": tc.aValue})
 
 			if tc.expectError {
 				if err == nil {
@@ -349,7 +350,7 @@ func TestBranchConditionDiscardAnythingAfterElse(t *testing.T) {
 				return
 			}
 
-			if stepResult.GetBranch().Data == nil {
+			if step.GetBranch().Data == nil {
 				t.Errorf("expected branch data but got none")
 			}
 		})
@@ -367,24 +368,25 @@ func TestBranchConditionInvalidCase(t *testing.T) {
 		{"a = 5", 5, "", true},
 	}
 
-	// Define conditions
-	conditions := []*avsproto.BranchNode_Condition{
-		{Id: "condition2", Type: "else"},
-		{Id: "condition1", Type: "if", Expression: "a > 10"},
-	}
-
 	// Iterate over test cases
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			vm := NewVM()
-			processor := NewBranchProcessor(vm)
-
-			vm.AddVar("a", tc.aValue)
-			stepResult, _, err := processor.Execute("test1", &avsproto.BranchNode{
-				Config: &avsproto.BranchNode_Config{
-					Conditions: conditions,
+			node := &avsproto.TaskNode{
+				Id:   "test1",
+				Name: "branch",
+				TaskType: &avsproto.TaskNode_Branch{
+					Branch: &avsproto.BranchNode{
+						Config: &avsproto.BranchNode_Config{
+							Conditions: []*avsproto.BranchNode_Condition{
+								{Id: "condition2", Type: "else"},
+								{Id: "condition1", Type: "if", Expression: "a > 10"},
+							},
+						},
+					},
 				},
-			})
+			}
+			vm := NewVM()
+			step, err := vm.RunNodeWithInputs(node, map[string]interface{}{"a": tc.aValue})
 
 			if tc.expectError {
 				if err == nil {
@@ -398,7 +400,7 @@ func TestBranchConditionInvalidCase(t *testing.T) {
 				return
 			}
 
-			if stepResult != nil && stepResult.GetBranch() != nil && stepResult.GetBranch().Data == nil {
+			if step != nil && step.GetBranch() != nil && step.GetBranch().Data == nil {
 				t.Errorf("expected branch data but got none")
 			}
 		})
@@ -422,23 +424,25 @@ func TestBranchNodeEvaluateTypeof(t *testing.T) {
 		{"data is defined", map[string]interface{}{"data": "name"}, "test1.condition2", false},
 	}
 
-	conditions := []*avsproto.BranchNode_Condition{
-		{Id: "condition1", Type: "if", Expression: `typeof mytrigger.data == "undefined"`},
-		{Id: "condition2", Type: "else"},
-	}
-
 	// Iterate over test cases
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			vm := NewVM()
-			processor := NewBranchProcessor(vm)
-			vm.AddVar("mytrigger", tc.dataValue)
-
-			stepResult, _, err := processor.Execute("test1", &avsproto.BranchNode{
-				Config: &avsproto.BranchNode_Config{
-					Conditions: conditions,
+			node := &avsproto.TaskNode{
+				Id:   "test1",
+				Name: "branch",
+				TaskType: &avsproto.TaskNode_Branch{
+					Branch: &avsproto.BranchNode{
+						Config: &avsproto.BranchNode_Config{
+							Conditions: []*avsproto.BranchNode_Condition{
+								{Id: "condition1", Type: "if", Expression: `typeof mytrigger.data == "undefined"`},
+								{Id: "condition2", Type: "else"},
+							},
+						},
+					},
 				},
-			})
+			}
+			vm := NewVM()
+			step, err := vm.RunNodeWithInputs(node, map[string]interface{}{"mytrigger": tc.dataValue})
 
 			if tc.expectError {
 				if err == nil {
@@ -452,7 +456,7 @@ func TestBranchNodeEvaluateTypeof(t *testing.T) {
 				return
 			}
 
-			if stepResult.GetBranch().Data == nil {
+			if step.GetBranch().Data == nil {
 				t.Errorf("expected branch data but got none")
 			}
 		})
@@ -472,23 +476,25 @@ func TestBranchNodeEmptyConditionIsAPass(t *testing.T) {
 		{"expression is many newline", "\t\t\n\n", "test1.condition2", false},
 	}
 
-	conditions := []*avsproto.BranchNode_Condition{
-		{Id: "condition1", Type: "if", Expression: "\t\n"},
-		{Id: "condition2", Type: "else"},
-	}
-
 	// Iterate over test cases
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			vm := NewVM()
-			processor := NewBranchProcessor(vm)
-			vm.AddVar("mytrigger", tc.dataValue)
-
-			stepResult, _, err := processor.Execute("test1", &avsproto.BranchNode{
-				Config: &avsproto.BranchNode_Config{
-					Conditions: conditions,
+			node := &avsproto.TaskNode{
+				Id:   "test1",
+				Name: "branch",
+				TaskType: &avsproto.TaskNode_Branch{
+					Branch: &avsproto.BranchNode{
+						Config: &avsproto.BranchNode_Config{
+							Conditions: []*avsproto.BranchNode_Condition{
+								{Id: "condition1", Type: "if", Expression: "\t\n"},
+								{Id: "condition2", Type: "else"},
+							},
+						},
+					},
 				},
-			})
+			}
+			vm := NewVM()
+			step, err := vm.RunNodeWithInputs(node, map[string]interface{}{"mytrigger": tc.dataValue})
 
 			if tc.expectError {
 				if err == nil {
@@ -502,7 +508,7 @@ func TestBranchNodeEmptyConditionIsAPass(t *testing.T) {
 				return
 			}
 
-			if stepResult.GetBranch().Data == nil {
+			if step.GetBranch().Data == nil {
 				t.Errorf("expected branch data but got none")
 			}
 		})
@@ -527,24 +533,25 @@ func TestBranchNodeExpressionWithJavaScript(t *testing.T) {
 		{"String comparison not matched", "cod1.data == 'alice'", "bob", "test1.condition2", false},
 	}
 
-	conditions := []*avsproto.BranchNode_Condition{
-		{Id: "condition1", Type: "if", Expression: ""},
-		{Id: "condition2", Type: "else"},
-	}
-
 	// Iterate over test cases
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			vm := NewVM()
-			processor := NewBranchProcessor(vm)
-			vm.AddVar("cod1", map[string]interface{}{"data": tc.dataValue})
-
-			conditions[0].Expression = tc.expression
-			stepResult, _, err := processor.Execute("test1", &avsproto.BranchNode{
-				Config: &avsproto.BranchNode_Config{
-					Conditions: conditions,
+			node := &avsproto.TaskNode{
+				Id:   "test1",
+				Name: "branch",
+				TaskType: &avsproto.TaskNode_Branch{
+					Branch: &avsproto.BranchNode{
+						Config: &avsproto.BranchNode_Config{
+							Conditions: []*avsproto.BranchNode_Condition{
+								{Id: "condition1", Type: "if", Expression: tc.expression},
+								{Id: "condition2", Type: "else"},
+							},
+						},
+					},
 				},
-			})
+			}
+			vm := NewVM()
+			step, err := vm.RunNodeWithInputs(node, map[string]interface{}{"cod1": map[string]interface{}{"data": tc.dataValue}})
 
 			if tc.expectError {
 				if err == nil {
@@ -558,7 +565,7 @@ func TestBranchNodeExpressionWithJavaScript(t *testing.T) {
 				return
 			}
 
-			if stepResult.GetBranch().Data == nil {
+			if step.GetBranch().Data == nil {
 				t.Errorf("expected branch data but got none")
 			}
 		})
@@ -577,23 +584,24 @@ func TestBranchNodeNoElseSkip(t *testing.T) {
 		{"cod1.data == 'alice'", "bob", false},
 	}
 
-	conditions := []*avsproto.BranchNode_Condition{
-		{Id: "condition1", Type: "if", Expression: ""},
-	}
-
 	// Iterate over test cases
 	for _, tc := range testCases {
 		t.Run(tc.expression, func(t *testing.T) {
-			vm := NewVM()
-			processor := NewBranchProcessor(vm)
-			vm.AddVar("cod1", map[string]interface{}{"data": tc.dataValue})
-
-			conditions[0].Expression = tc.expression
-			stepResult, _, err := processor.Execute("test1", &avsproto.BranchNode{
-				Config: &avsproto.BranchNode_Config{
-					Conditions: conditions,
+			node := &avsproto.TaskNode{
+				Id:   "test1",
+				Name: "branch",
+				TaskType: &avsproto.TaskNode_Branch{
+					Branch: &avsproto.BranchNode{
+						Config: &avsproto.BranchNode_Config{
+							Conditions: []*avsproto.BranchNode_Condition{
+								{Id: "condition1", Type: "if", Expression: tc.expression},
+							},
+						},
+					},
 				},
-			})
+			}
+			vm := NewVM()
+			step, err := vm.RunNodeWithInputs(node, map[string]interface{}{"cod1": map[string]interface{}{"data": tc.dataValue}})
 
 			if tc.expectError {
 				if err == nil {
@@ -607,8 +615,8 @@ func TestBranchNodeNoElseSkip(t *testing.T) {
 				return
 			}
 
-			if stepResult.GetBranch() != nil {
-				t.Errorf("expected no action but got %s", stepResult.OutputData)
+			if step.GetBranch() != nil {
+				t.Errorf("expected no action but got %s", step.OutputData)
 			}
 		})
 	}
@@ -732,163 +740,169 @@ func TestBranchProcessor_Execute_NoConditions(t *testing.T) {
 }
 
 func TestBranchProcessor_Execute_ConditionMet(t *testing.T) {
-	vm := NewVM()
-	vm.AddVar("myVar", 123)
-
-	node := &avsproto.BranchNode{
-		Config: &avsproto.BranchNode_Config{
-			Conditions: []*avsproto.BranchNode_Condition{
-				{
-					Id:         "cond1",
-					Type:       "if",
-					Expression: "myVar == 123",
+	stepID := "testStep"
+	node := &avsproto.TaskNode{
+		Id:   stepID,
+		Name: "branch",
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: []*avsproto.BranchNode_Condition{
+						{
+							Id:         "cond1",
+							Type:       "if",
+							Expression: "myVar == 123",
+						},
+					},
 				},
 			},
 		},
 	}
-	processor := NewBranchProcessor(vm)
-	stepID := "testStep"
-
-	executionLog, nextStep, err := processor.Execute(stepID, node)
+	vm := NewVM()
+	executionLog, err := vm.RunNodeWithInputs(node, map[string]interface{}{"myVar": 123})
 
 	assert.Nil(t, err)
 	assert.NotNil(t, executionLog)
 	assert.True(t, executionLog.Success)
-	assert.NotNil(t, nextStep)
-	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "cond1"), nextStep.NodeID)
 	branchOutput := executionLog.GetBranch()
 	assert.NotNil(t, branchOutput)
 	assert.NotNil(t, branchOutput.Data)
 }
 
 func TestBranchProcessor_Execute_NoConditionMet(t *testing.T) {
-	vm := NewVM()
-	vm.AddVar("myVar", 456)
-
-	node := &avsproto.BranchNode{
-		Config: &avsproto.BranchNode_Config{
-			Conditions: []*avsproto.BranchNode_Condition{
-				{
-					Id:         "cond1",
-					Type:       "if",
-					Expression: "myVar == 123", // This will be false
+	stepID := "testStepNoMatch"
+	node := &avsproto.TaskNode{
+		Id:   stepID,
+		Name: "branch",
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: []*avsproto.BranchNode_Condition{
+						{
+							Id:         "cond1",
+							Type:       "if",
+							Expression: "myVar == 123", // This will be false
+						},
+					},
 				},
 			},
 		},
 	}
-	processor := NewBranchProcessor(vm)
-	stepID := "testStepNoMatch"
-
-	executionLog, nextStep, err := processor.Execute(stepID, node)
+	vm := NewVM()
+	executionLog, err := vm.RunNodeWithInputs(node, map[string]interface{}{"myVar": 456})
 
 	// Updated expectation: when only if conditions exist and none match, it should be a valid no-op
 	assert.Nil(t, err)
-	assert.Nil(t, nextStep)
 	assert.NotNil(t, executionLog)
 	assert.True(t, executionLog.Success)
 	assert.Nil(t, executionLog.GetBranch()) // No branch action taken
 }
 
 func TestBranchProcessor_Execute_ErrorInExpression(t *testing.T) {
-	vm := NewVM()
-	vm.AddVar("myVar", 123)
-
-	node := &avsproto.BranchNode{
-		Config: &avsproto.BranchNode_Config{
-			Conditions: []*avsproto.BranchNode_Condition{
-				{
-					Id:         "cond1",
-					Type:       "if",
-					Expression: "myVar + ", // Invalid expression
+	stepID := "testStepErrorExpr"
+	node := &avsproto.TaskNode{
+		Id:   stepID,
+		Name: "branch",
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: []*avsproto.BranchNode_Condition{
+						{
+							Id:         "cond1",
+							Type:       "if",
+							Expression: "myVar + ", // Invalid expression
+						},
+					},
 				},
 			},
 		},
 	}
-	processor := NewBranchProcessor(vm)
-	stepID := "testStepErrorExpr"
-
-	executionLog, nextStep, err := processor.Execute(stepID, node)
+	vm := NewVM()
+	executionLog, err := vm.RunNodeWithInputs(node, map[string]interface{}{"myVar": 123})
 
 	// Now expects silent failure - no error returned, condition treated as false
 	assert.Nil(t, err)
-	assert.Nil(t, nextStep) // No condition matched, no else condition, so no next step
 	assert.NotNil(t, executionLog)
 	assert.True(t, executionLog.Success) // Success with no branch action taken
 	assert.Empty(t, executionLog.Error)  // No error in execution log
 }
 
 func TestBranchProcessor_Execute_MultipleConditions_FirstMatch(t *testing.T) {
-	vm := NewVM()
-	vm.AddVar("val", 10)
-
-	node := &avsproto.BranchNode{
-		Config: &avsproto.BranchNode_Config{
-			Conditions: []*avsproto.BranchNode_Condition{
-				{Id: "c1", Type: "if", Expression: "val == 10"}, // Match
-				{Id: "c2", Type: "if", Expression: "val == 20"},
+	stepID := "multiCondFirst"
+	node := &avsproto.TaskNode{
+		Id:   stepID,
+		Name: "branch",
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: []*avsproto.BranchNode_Condition{
+						{Id: "c1", Type: "if", Expression: "val == 10"}, // Match
+						{Id: "c2", Type: "if", Expression: "val == 20"},
+					},
+				},
 			},
 		},
 	}
-	processor := NewBranchProcessor(vm)
-	stepID := "multiCondFirst"
-	executionLog, nextStep, err := processor.Execute(stepID, node)
+	vm := NewVM()
+	executionLog, err := vm.RunNodeWithInputs(node, map[string]interface{}{"val": 10})
 
 	assert.Nil(t, err)
 	assert.NotNil(t, executionLog)
 	assert.True(t, executionLog.Success)
-	assert.NotNil(t, nextStep)
-	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c1"), nextStep.NodeID)
 	branchOutput := executionLog.GetBranch()
 	assert.NotNil(t, branchOutput)
 	assert.NotNil(t, branchOutput.Data)
 }
 
 func TestBranchProcessor_Execute_MultipleConditions_SecondMatch(t *testing.T) {
-	vm := NewVM()
-	vm.AddVar("val", 20)
-	node := &avsproto.BranchNode{
-		Config: &avsproto.BranchNode_Config{
-			Conditions: []*avsproto.BranchNode_Condition{
-				{Id: "c1", Type: "if", Expression: "val == 10"},
-				{Id: "c2", Type: "if", Expression: "val == 20"}, // Match
+	stepID := "multiCondSecond"
+	node := &avsproto.TaskNode{
+		Id:   stepID,
+		Name: "branch",
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: []*avsproto.BranchNode_Condition{
+						{Id: "c1", Type: "if", Expression: "val == 10"},
+						{Id: "c2", Type: "if", Expression: "val == 20"}, // Match
+					},
+				},
 			},
 		},
 	}
-	processor := NewBranchProcessor(vm)
-	stepID := "multiCondSecond"
-	executionLog, nextStep, err := processor.Execute(stepID, node)
+	vm := NewVM()
+	executionLog, err := vm.RunNodeWithInputs(node, map[string]interface{}{"val": 20})
 
 	assert.Nil(t, err)
 	assert.NotNil(t, executionLog)
 	assert.True(t, executionLog.Success)
-	assert.NotNil(t, nextStep)
-	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c2"), nextStep.NodeID)
 	branchOutput := executionLog.GetBranch()
 	assert.NotNil(t, branchOutput)
 	assert.NotNil(t, branchOutput.Data)
 }
 
 func TestBranchProcessor_Execute_ComplexVariableAccess(t *testing.T) {
-	vm := NewVM()
-	data := map[string]interface{}{"level1": map[string]interface{}{"level2": "found_me"}}
-	vm.AddVar("complexVar", data)
-
-	node := &avsproto.BranchNode{
-		Config: &avsproto.BranchNode_Config{
-			Conditions: []*avsproto.BranchNode_Condition{
-				{Id: "c1", Type: "if", Expression: "complexVar.level1.level2 == 'found_me'"},
+	stepID := "complexVarAccess"
+	node := &avsproto.TaskNode{
+		Id:   stepID,
+		Name: "branch",
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: []*avsproto.BranchNode_Condition{
+						{Id: "c1", Type: "if", Expression: "complexVar.level1.level2 == 'found_me'"},
+					},
+				},
 			},
 		},
 	}
-	processor := NewBranchProcessor(vm)
-	stepID := "complexVarAccess"
-	executionLog, nextStep, err := processor.Execute(stepID, node)
+	vm := NewVM()
+	data := map[string]interface{}{"level1": map[string]interface{}{"level2": "found_me"}}
+	executionLog, err := vm.RunNodeWithInputs(node, map[string]interface{}{"complexVar": data})
 
 	assert.Nil(t, err)
 	assert.NotNil(t, executionLog)
 	assert.True(t, executionLog.Success)
-	assert.NotNil(t, nextStep)
-	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c1"), nextStep.NodeID)
 	branchOutput := executionLog.GetBranch()
 	assert.NotNil(t, branchOutput)
 	assert.NotNil(t, branchOutput.Data)
@@ -939,34 +953,11 @@ func TestBranchProcessor_Execute_InvalidScriptSyntax(t *testing.T) {
 
 // TestBranchNodeSecurity tests that dangerous expressions are blocked
 func TestBranchNodeSecurity(t *testing.T) {
-	// Create a simple VM for testing
-	vm, err := NewVMWithData(&model.Task{
-		Task: &avsproto.Task{
-			Id: "test-task",
-			Trigger: &avsproto.TaskTrigger{
-				Id:   "test-trigger",
-				Name: "test",
-				TriggerType: &avsproto.TaskTrigger_Manual{
-					Manual: &avsproto.ManualTrigger{
-						Config: &avsproto.ManualTrigger_Config{},
-					},
-				},
-			},
-		},
-	}, nil, testutil.GetTestSmartWalletConfig(), nil)
-
-	if err != nil {
-		t.Fatalf("Failed to create VM: %v", err)
-	}
-
 	// Set up sample data
 	testData := map[string]interface{}{
 		"age":  25,
 		"name": "Alice",
 	}
-	vm.AddVar("data", testData)
-
-	processor := NewBranchProcessor(vm)
 
 	dangerousExpressions := []struct {
 		name       string
@@ -1000,21 +991,26 @@ func TestBranchNodeSecurity(t *testing.T) {
 
 	for _, test := range dangerousExpressions {
 		t.Run(test.name, func(t *testing.T) {
-			// Create a branch node with dangerous expression
-			branchNode := &avsproto.BranchNode{
-				Config: &avsproto.BranchNode_Config{
-					Conditions: []*avsproto.BranchNode_Condition{
-						{
-							Id:         "dangerous",
-							Type:       "if",
-							Expression: test.expression,
+			node := &avsproto.TaskNode{
+				Id:   "test-branch",
+				Name: "branch",
+				TaskType: &avsproto.TaskNode_Branch{
+					Branch: &avsproto.BranchNode{
+						Config: &avsproto.BranchNode_Config{
+							Conditions: []*avsproto.BranchNode_Condition{
+								{
+									Id:         "dangerous",
+									Type:       "if",
+									Expression: test.expression,
+								},
+							},
 						},
 					},
 				},
 			}
 
-			// Execute the branch node
-			result, _, err := processor.Execute("test-branch", branchNode)
+			vm := NewVM()
+			result, err := vm.RunNodeWithInputs(node, map[string]interface{}{"data": testData})
 
 			// The execution should succeed but skip the dangerous condition
 			if err != nil {
@@ -1045,34 +1041,11 @@ func TestBranchNodeSecurity(t *testing.T) {
 
 // TestBranchNodeSafety tests that legitimate expressions still work
 func TestBranchNodeSafety(t *testing.T) {
-	// Create a simple VM for testing
-	vm, err := NewVMWithData(&model.Task{
-		Task: &avsproto.Task{
-			Id: "test-task",
-			Trigger: &avsproto.TaskTrigger{
-				Id:   "test-trigger",
-				Name: "test",
-				TriggerType: &avsproto.TaskTrigger_Manual{
-					Manual: &avsproto.ManualTrigger{
-						Config: &avsproto.ManualTrigger_Config{},
-					},
-				},
-			},
-		},
-	}, nil, testutil.GetTestSmartWalletConfig(), nil)
-
-	if err != nil {
-		t.Fatalf("Failed to create VM: %v", err)
-	}
-
 	// Set up sample data
 	testData := map[string]interface{}{
 		"age":  25,
 		"name": "Alice",
 	}
-	vm.AddVar("data", testData)
-
-	processor := NewBranchProcessor(vm)
 
 	safeExpressions := []struct {
 		name       string
@@ -1098,21 +1071,26 @@ func TestBranchNodeSafety(t *testing.T) {
 
 	for _, test := range safeExpressions {
 		t.Run(test.name, func(t *testing.T) {
-			// Create a branch node with safe expression
-			branchNode := &avsproto.BranchNode{
-				Config: &avsproto.BranchNode_Config{
-					Conditions: []*avsproto.BranchNode_Condition{
-						{
-							Id:         "safe",
-							Type:       "if",
-							Expression: test.expression,
+			node := &avsproto.TaskNode{
+				Id:   "test-branch",
+				Name: "branch",
+				TaskType: &avsproto.TaskNode_Branch{
+					Branch: &avsproto.BranchNode{
+						Config: &avsproto.BranchNode_Config{
+							Conditions: []*avsproto.BranchNode_Condition{
+								{
+									Id:         "safe",
+									Type:       "if",
+									Expression: test.expression,
+								},
+							},
 						},
 					},
 				},
 			}
 
-			// Execute the branch node
-			result, _, err := processor.Execute("test-branch", branchNode)
+			vm := NewVM()
+			result, err := vm.RunNodeWithInputs(node, map[string]interface{}{"data": testData})
 
 			// The execution should succeed
 			if err != nil {

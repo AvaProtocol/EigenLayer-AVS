@@ -924,44 +924,39 @@ func TestBalanceNode_TokenAddressesWithTemplateVariables(t *testing.T) {
 		"moralis_api_key": moralisAPIKey,
 	})
 
-	// Set up the input variables that match the client request
-	// This includes the nested settings.uniswap_v3_pool structure
-	// Add each top-level variable to the VM using AddVar
-	vm.AddVar("eventTrigger", map[string]interface{}{
-		"data": map[string]interface{}{},
-	})
-
-	vm.AddVar("settings", map[string]interface{}{
-		"chain":    "Sepolia",
-		"amount":   "10",
-		"runner":   testAddress,
-		"chain_id": 11155111,
-		"uniswap_v3_pool": map[string]interface{}{
-			"id": "0xee8027d8430344ba3419f844ba858ac7f1a92095",
-			"token0": map[string]interface{}{
-				"id":     "0x019d3c1576190e5396db92e987e5631fbb318aeb", // WETH on Sepolia
-				"symbol": "WETH",
-			},
-			"token1": map[string]interface{}{
-				"id":     "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", // USDC on Sepolia
-				"symbol": "USDC",
-			},
-			"feeTier": "3000",
-		},
-		"uniswap_v3_contracts": map[string]interface{}{
-			"quoterV2":     "0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3",
-			"swapRouter02": "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E",
-		},
-	})
-
 	t.Log("Running BalanceNode with template variables in tokenAddresses...")
 	t.Logf("Template 1 (object): %s", tokenAddressTemplates[0])
 	t.Logf("Template 2 (object): %s", tokenAddressTemplates[1])
 	t.Log("Backend should extract 'id' or 'address' field from resolved objects")
 
-	// Execute the balance node - this will resolve template variables internally
-	balanceTaskNode := vm.TaskNodes["balance-node-1"]
-	step, err := vm.runBalance(balanceTaskNode)
+	// Execute the balance node with input variables passed through RunNodeWithInputs
+	step, err := vm.RunNodeWithInputs(nodes[0], map[string]interface{}{
+		"eventTrigger": map[string]interface{}{
+			"data": map[string]interface{}{},
+		},
+		"settings": map[string]interface{}{
+			"chain":    "Sepolia",
+			"amount":   "10",
+			"runner":   testAddress,
+			"chain_id": 11155111,
+			"uniswap_v3_pool": map[string]interface{}{
+				"id": "0xee8027d8430344ba3419f844ba858ac7f1a92095",
+				"token0": map[string]interface{}{
+					"id":     "0x019d3c1576190e5396db92e987e5631fbb318aeb", // WETH on Sepolia
+					"symbol": "WETH",
+				},
+				"token1": map[string]interface{}{
+					"id":     "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", // USDC on Sepolia
+					"symbol": "USDC",
+				},
+				"feeTier": "3000",
+			},
+			"uniswap_v3_contracts": map[string]interface{}{
+				"quoterV2":     "0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3",
+				"swapRouter02": "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E",
+			},
+		},
+	})
 
 	if err != nil {
 		t.Fatalf("runBalance failed: %v", err)
@@ -1214,9 +1209,6 @@ func TestBalanceNode_ExtractAddressFromObject(t *testing.T) {
 				"moralis_api_key": "test-api-key",
 			})
 
-			// Add the input variable
-			vm.AddVar("myToken", tc.inputVar)
-
 			// Create mock Moralis server
 			mockServer := createMockMoralisServer(t, mockTokenBalances)
 			defer mockServer.Close()
@@ -1226,9 +1218,10 @@ func TestBalanceNode_ExtractAddressFromObject(t *testing.T) {
 				testMoralisAPIBaseURL = ""
 			}()
 
-			// Execute the balance node
-			balanceTaskNode := vm.TaskNodes["balance-node-1"]
-			step, err := vm.runBalance(balanceTaskNode)
+			// Execute the balance node with input variables passed through RunNodeWithInputs
+			step, err := vm.RunNodeWithInputs(nodes[0], map[string]interface{}{
+				"myToken": tc.inputVar,
+			})
 
 			if tc.shouldSucceed {
 				if err != nil {

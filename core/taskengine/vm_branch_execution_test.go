@@ -8,6 +8,16 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
+// branchTestInputVars is the common set of input variables used by the
+// branch-node single-node tests (FindExpression, CaseInsensitive, NumericComparison).
+func branchTestInputVars(balance1Data, settingsData map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"balance1":     balance1Data,
+		"settings":     settingsData,
+		"eventTrigger": map[string]interface{}{"data": map[string]interface{}{}},
+	}
+}
+
 func TestRunTaskWithBranchNode(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
 		{
@@ -270,51 +280,17 @@ func TestBranchNode_FindExpression(t *testing.T) {
 		},
 	}
 
-	nodes := []*avsproto.TaskNode{
-		{
-			Id:   "branch-node-1",
-			Name: "branchNode",
-			TaskType: &avsproto.TaskNode_Branch{
-				Branch: branchNode,
-			},
+	branchTaskNode := &avsproto.TaskNode{
+		Id:   "branch-node-1",
+		Name: "branchNode",
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: branchNode,
 		},
 	}
 
-	trigger := &avsproto.TaskTrigger{
-		Id:   "trigger-1",
-		Name: "trigger-1",
-	}
-
-	edges := []*avsproto.TaskEdge{
-		{
-			Id:     "e1",
-			Source: trigger.Id,
-			Target: "branch-node-1",
-		},
-	}
-
-	// Create VM
-	vm, err := NewVMWithData(&model.Task{
-		Task: &avsproto.Task{
-			Id:      "test-task",
-			Nodes:   nodes,
-			Edges:   edges,
-			Trigger: trigger,
-		},
-	}, nil, testutil.GetTestSmartWalletConfig(), nil)
-
-	if err != nil {
-		t.Fatalf("failed to create VM: %v", err)
-	}
-
-	// Add variables to VM
-	vm.AddVar("balance1", balance1Data)
-	vm.AddVar("settings", settingsData)
-	vm.AddVar("eventTrigger", map[string]interface{}{"data": map[string]interface{}{}})
-
-	// Execute branch node
-	processor := NewBranchProcessor(vm)
-	step, nextStep, err := processor.Execute("branch-node-1", branchNode)
+	// Execute branch node using RunNodeWithInputs
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(branchTaskNode, branchTestInputVars(balance1Data, settingsData))
 
 	t.Logf("Execution log:\n%s", step.Log)
 
@@ -342,18 +318,14 @@ func TestBranchNode_FindExpression(t *testing.T) {
 	// - settings token1.id:     "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" (checksummed)
 	// The === comparison is case-sensitive, so .find() returns undefined
 	if conditionId != "branch-node-1.1" {
-		t.Errorf("❌ Expected branch to take condition 1 (else) because .find() returns undefined due to case mismatch, but took: %s", conditionId)
+		t.Errorf("Expected branch to take condition 1 (else) because .find() returns undefined due to case mismatch, but took: %s", conditionId)
 	} else {
-		t.Log("✅ Branch correctly took the else condition")
+		t.Log("Branch correctly took the else condition")
 		t.Log("   Issue: .find() returns undefined because addresses have different casing:")
 		t.Log("   - balance tokenAddress: 0x1c7d4b196... (lowercase)")
 		t.Log("   - settings token1.id:   0x1c7D4B196... (checksummed)")
 		t.Log("   Fix: Use case-insensitive comparison with null check:")
 		t.Log("   {{balance1.data.find(token => token.tokenAddress && token.tokenAddress.toLowerCase() === settings.uniswap_v3_pool.token1.id.toLowerCase()).balance > 0}}")
-	}
-
-	if nextStep != nil {
-		t.Logf("Next step: %s", nextStep.NodeID)
 	}
 }
 
@@ -436,51 +408,17 @@ func TestBranchNode_FindExpression_CaseInsensitive(t *testing.T) {
 		},
 	}
 
-	nodes := []*avsproto.TaskNode{
-		{
-			Id:   "branch-node-1",
-			Name: "branchNode",
-			TaskType: &avsproto.TaskNode_Branch{
-				Branch: branchNode,
-			},
+	branchTaskNode := &avsproto.TaskNode{
+		Id:   "branch-node-1",
+		Name: "branchNode",
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: branchNode,
 		},
 	}
 
-	trigger := &avsproto.TaskTrigger{
-		Id:   "trigger-1",
-		Name: "trigger-1",
-	}
-
-	edges := []*avsproto.TaskEdge{
-		{
-			Id:     "e1",
-			Source: trigger.Id,
-			Target: "branch-node-1",
-		},
-	}
-
-	// Create VM
-	vm, err := NewVMWithData(&model.Task{
-		Task: &avsproto.Task{
-			Id:      "test-task",
-			Nodes:   nodes,
-			Edges:   edges,
-			Trigger: trigger,
-		},
-	}, nil, testutil.GetTestSmartWalletConfig(), nil)
-
-	if err != nil {
-		t.Fatalf("failed to create VM: %v", err)
-	}
-
-	// Add variables to VM
-	vm.AddVar("balance1", balance1Data)
-	vm.AddVar("settings", settingsData)
-	vm.AddVar("eventTrigger", map[string]interface{}{"data": map[string]interface{}{}})
-
-	// Execute branch node
-	processor := NewBranchProcessor(vm)
-	step, nextStep, err := processor.Execute("branch-node-1", branchNode)
+	// Execute branch node using RunNodeWithInputs
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(branchTaskNode, branchTestInputVars(balance1Data, settingsData))
 
 	t.Logf("Execution log:\n%s", step.Log)
 
@@ -505,15 +443,11 @@ func TestBranchNode_FindExpression_CaseInsensitive(t *testing.T) {
 
 	// With case-insensitive comparison, it should find USDC and take the if condition
 	if conditionId != "branch-node-1.0" {
-		t.Errorf("❌ Expected branch to take condition 0 (if) with case-insensitive comparison, but took: %s", conditionId)
+		t.Errorf("Expected branch to take condition 0 (if) with case-insensitive comparison, but took: %s", conditionId)
 	} else {
-		t.Log("✅ Branch correctly took the if condition")
+		t.Log("Branch correctly took the if condition")
 		t.Log("   With .toLowerCase() on both sides, the addresses match correctly")
 		t.Log("   Expression evaluated to: true (USDC balance 535124566 > 0)")
-	}
-
-	if nextStep != nil {
-		t.Logf("Next step: %s", nextStep.NodeID)
 	}
 }
 
@@ -592,48 +526,17 @@ func TestBranchNode_NumericComparison(t *testing.T) {
 		},
 	}
 
-	nodes := []*avsproto.TaskNode{
-		{
-			Id:   "branch-node-1",
-			Name: "branchNode",
-			TaskType: &avsproto.TaskNode_Branch{
-				Branch: branchNode,
-			},
+	branchTaskNode := &avsproto.TaskNode{
+		Id:   "branch-node-1",
+		Name: "branchNode",
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: branchNode,
 		},
 	}
 
-	trigger := &avsproto.TaskTrigger{
-		Id:   "trigger-1",
-		Name: "trigger-1",
-	}
-
-	edges := []*avsproto.TaskEdge{
-		{
-			Id:     "e1",
-			Source: trigger.Id,
-			Target: "branch-node-1",
-		},
-	}
-
-	vm, err := NewVMWithData(&model.Task{
-		Task: &avsproto.Task{
-			Id:      "test-task",
-			Nodes:   nodes,
-			Edges:   edges,
-			Trigger: trigger,
-		},
-	}, nil, testutil.GetTestSmartWalletConfig(), nil)
-
-	if err != nil {
-		t.Fatalf("failed to create VM: %v", err)
-	}
-
-	vm.AddVar("balance1", balance1Data)
-	vm.AddVar("settings", settingsData)
-	vm.AddVar("eventTrigger", map[string]interface{}{"data": map[string]interface{}{}})
-
-	processor := NewBranchProcessor(vm)
-	step, nextStep, err := processor.Execute("branch-node-1", branchNode)
+	// Execute branch node using RunNodeWithInputs
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(branchTaskNode, branchTestInputVars(balance1Data, settingsData))
 
 	t.Logf("Execution log:\n%s", step.Log)
 
@@ -657,14 +560,10 @@ func TestBranchNode_NumericComparison(t *testing.T) {
 
 	// USDC balance is 535.124566, which is > 10, so should take if condition
 	if conditionId != "branch-node-1.0" {
-		t.Errorf("❌ Expected branch to take condition 0 (if) because 535.124566 > 10, but took: %s", conditionId)
+		t.Errorf("Expected branch to take condition 0 (if) because 535.124566 > 10, but took: %s", conditionId)
 	} else {
-		t.Log("✅ Branch correctly took the if condition")
+		t.Log("Branch correctly took the if condition")
 		t.Log("   Comparison: 535.124566 (USDC balance) > 10 (settings.amount)")
 		t.Log("   Used Number() conversion to handle string-to-number comparison")
-	}
-
-	if nextStep != nil {
-		t.Logf("Next step: %s", nextStep.NodeID)
 	}
 }
