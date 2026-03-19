@@ -90,3 +90,73 @@ func TestFilterComplexLogic(t *testing.T) {
 			data[2].(map[string]any)["name"].(string),
 		}), "expected names second, third, sixth but got: %v", data)
 }
+
+// TestFilterWithBigIntValues verifies that filtering items containing BigInt
+// string values (typical for wei amounts from CustomCode nodes) works correctly
+// and doesn't fail at protobuf serialization.
+func TestFilterWithBigIntValues(t *testing.T) {
+	nodeConfig := map[string]interface{}{
+		"expression":    "BigInt(value.balance) > BigInt('1000000000000000')",
+		"inputVariable": "{{tokens}}",
+	}
+
+	node, err := CreateNodeFromType("filter", nodeConfig, "")
+	require.NoError(t, err)
+	node.Name = "filterNode"
+
+	inputVariables := map[string]interface{}{
+		"tokens": []interface{}{
+			map[string]interface{}{"symbol": "ETH", "balance": "90864223405041968"},
+			map[string]interface{}{"symbol": "USDC", "balance": "500000"},
+			map[string]interface{}{"symbol": "WETH", "balance": "5000000000000000000"},
+		},
+	}
+
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(node, inputVariables)
+	require.NoError(t, err)
+	require.True(t, step.Success, "expected success, got error: %s", step.Error)
+
+	filterOutput := step.GetFilter()
+	require.NotNil(t, filterOutput)
+	require.NotNil(t, filterOutput.Data)
+
+	data := gow.ValueToSlice(filterOutput.Data)
+	require.Len(t, data, 2, "expect 2 tokens with balance > 1e15")
+
+	assert.Equal(t, "ETH", data[0].(map[string]interface{})["symbol"].(string))
+	assert.Equal(t, "WETH", data[1].(map[string]interface{})["symbol"].(string))
+}
+
+// TestFilterWithDateValues verifies that filtering items containing Date-like
+// fields works and the result serializes correctly.
+func TestFilterWithDateValues(t *testing.T) {
+	nodeConfig := map[string]interface{}{
+		"expression":    "new Date(value.timestamp) > new Date('2026-06-01')",
+		"inputVariable": "{{events}}",
+	}
+
+	node, err := CreateNodeFromType("filter", nodeConfig, "")
+	require.NoError(t, err)
+	node.Name = "filterNode"
+
+	inputVariables := map[string]interface{}{
+		"events": []interface{}{
+			map[string]interface{}{"name": "early", "timestamp": "2026-03-01T00:00:00Z"},
+			map[string]interface{}{"name": "late", "timestamp": "2026-09-15T00:00:00Z"},
+		},
+	}
+
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(node, inputVariables)
+	require.NoError(t, err)
+	require.True(t, step.Success, "expected success, got error: %s", step.Error)
+
+	filterOutput := step.GetFilter()
+	require.NotNil(t, filterOutput)
+	require.NotNil(t, filterOutput.Data)
+
+	data := gow.ValueToSlice(filterOutput.Data)
+	require.Len(t, data, 1, "expect 1 event after June 2026")
+	assert.Equal(t, "late", data[0].(map[string]interface{})["name"].(string))
+}

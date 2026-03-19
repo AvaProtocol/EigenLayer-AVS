@@ -13,6 +13,8 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -592,4 +594,222 @@ func TestRunJavaScriptReturnUndefined(t *testing.T) {
 
 	// Verify that undefined was converted to null
 	assertStructpbValueIsNull(t, customCodeOutput.Data, "JavaScript undefined should be converted to null")
+}
+
+// TestCustomCodeBigIntSupport verifies that BigInt values in CustomCode JS are
+// converted to strings so they can be serialized over protobuf. This is the
+// typical pattern for calculating wei amounts in workflows.
+func TestCustomCodeBigIntSupport(t *testing.T) {
+	nodeConfig := map[string]interface{}{
+		"lang": "javascript",
+		"source": `
+const totalNeeded = BigInt(settings.token_amount.amount) * BigInt(settings.recipients.length);
+const balance = BigInt(balance1.data[0].balance);
+return { balance: balance.toString(), totalNeeded: totalNeeded.toString() }
+`,
+	}
+
+	node, err := CreateNodeFromType("customCode", nodeConfig, "")
+	require.NoError(t, err)
+	node.Name = "code1"
+
+	inputVariables := map[string]interface{}{
+		"balance1": map[string]interface{}{
+			"data": []interface{}{
+				map[string]interface{}{
+					"balance": "90864223405041968",
+				},
+			},
+		},
+		"settings": map[string]interface{}{
+			"recipients": []interface{}{
+				"0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9",
+				"0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
+			},
+			"token_amount": map[string]interface{}{
+				"amount": "1000000000000000",
+			},
+		},
+	}
+
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(node, inputVariables)
+	require.NoError(t, err)
+	require.True(t, step.Success, "expected success, got error: %s", step.Error)
+
+	customCodeOutput := step.GetCustomCode()
+	require.NotNil(t, customCodeOutput)
+	require.NotNil(t, customCodeOutput.Data)
+
+	data := customCodeOutput.Data.GetStructValue()
+	require.NotNil(t, data, "expected struct output")
+
+	assert.Equal(t, "90864223405041968", data.Fields["balance"].GetStringValue())
+	assert.Equal(t, "2000000000000000", data.Fields["totalNeeded"].GetStringValue())
+}
+
+// TestCustomCodeBigIntReturnedDirectly verifies that BigInt values returned
+// directly (not via .toString()) are automatically converted to strings by the
+// sanitizer, so users don't have to manually call .toString().
+func TestCustomCodeBigIntReturnedDirectly(t *testing.T) {
+	nodeConfig := map[string]interface{}{
+		"lang": "javascript",
+		"source": `
+const a = BigInt("1000000000000000000");
+const b = BigInt(2);
+return { result: a * b, items: [a, b, "hello"] }
+`,
+	}
+
+	node, err := CreateNodeFromType("customCode", nodeConfig, "")
+	require.NoError(t, err)
+	node.Name = "code1"
+
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(node, map[string]interface{}{})
+	require.NoError(t, err)
+	require.True(t, step.Success, "expected success, got error: %s", step.Error)
+
+	customCodeOutput := step.GetCustomCode()
+	require.NotNil(t, customCodeOutput)
+	require.NotNil(t, customCodeOutput.Data)
+
+	data := customCodeOutput.Data.GetStructValue()
+	require.NotNil(t, data, "expected struct output")
+
+	// BigInt values should be converted to their string representation
+	assert.Equal(t, "2000000000000000000", data.Fields["result"].GetStringValue())
+
+	// Array with mixed BigInt and string values
+	items := data.Fields["items"].GetListValue().GetValues()
+	require.Len(t, items, 3)
+	assert.Equal(t, "1000000000000000000", items[0].GetStringValue())
+	assert.Equal(t, "2", items[1].GetStringValue())
+	assert.Equal(t, "hello", items[2].GetStringValue())
+}
+
+// TestCustomCodeDateSupport verifies that JS Date objects are converted to
+// ISO 8601 strings instead of failing with "proto: invalid type: time.Time".
+func TestCustomCodeDateSupport(t *testing.T) {
+	nodeConfig := map[string]interface{}{
+		"lang": "javascript",
+		"source": `
+const d = new Date("2026-01-15T10:30:00Z");
+return { timestamp: d, label: "created" }
+`,
+	}
+
+	node, err := CreateNodeFromType("customCode", nodeConfig, "")
+	require.NoError(t, err)
+	node.Name = "code1"
+
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(node, map[string]interface{}{})
+	require.NoError(t, err)
+	require.True(t, step.Success, "expected success, got error: %s", step.Error)
+
+	customCodeOutput := step.GetCustomCode()
+	require.NotNil(t, customCodeOutput)
+
+	data := customCodeOutput.Data.GetStructValue()
+	require.NotNil(t, data)
+
+	assert.Equal(t, "2026-01-15T10:30:00Z", data.Fields["timestamp"].GetStringValue())
+	assert.Equal(t, "created", data.Fields["label"].GetStringValue())
+}
+
+// TestCustomCodeMapSupport verifies that JS Map objects are converted to
+// plain objects instead of failing with "proto: invalid type: [][2]interface {}".
+func TestCustomCodeMapSupport(t *testing.T) {
+	nodeConfig := map[string]interface{}{
+		"lang": "javascript",
+		"source": `
+const m = new Map();
+m.set("token", "ETH");
+m.set("amount", 1000);
+return m;
+`,
+	}
+
+	node, err := CreateNodeFromType("customCode", nodeConfig, "")
+	require.NoError(t, err)
+	node.Name = "code1"
+
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(node, map[string]interface{}{})
+	require.NoError(t, err)
+	require.True(t, step.Success, "expected success, got error: %s", step.Error)
+
+	customCodeOutput := step.GetCustomCode()
+	require.NotNil(t, customCodeOutput)
+
+	data := customCodeOutput.Data.GetStructValue()
+	require.NotNil(t, data)
+
+	assert.Equal(t, "ETH", data.Fields["token"].GetStringValue())
+	assert.Equal(t, float64(1000), data.Fields["amount"].GetNumberValue())
+}
+
+// TestCustomCodeTypedArraySupport verifies that JS typed arrays (Int32Array,
+// Float64Array, etc.) are converted to regular arrays.
+func TestCustomCodeTypedArraySupport(t *testing.T) {
+	nodeConfig := map[string]interface{}{
+		"lang": "javascript",
+		"source": `
+const arr = new Int32Array([10, 20, 30]);
+return { values: arr }
+`,
+	}
+
+	node, err := CreateNodeFromType("customCode", nodeConfig, "")
+	require.NoError(t, err)
+	node.Name = "code1"
+
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(node, map[string]interface{}{})
+	require.NoError(t, err)
+	require.True(t, step.Success, "expected success, got error: %s", step.Error)
+
+	customCodeOutput := step.GetCustomCode()
+	require.NotNil(t, customCodeOutput)
+
+	data := customCodeOutput.Data.GetStructValue()
+	require.NotNil(t, data)
+
+	items := data.Fields["values"].GetListValue().GetValues()
+	require.Len(t, items, 3)
+	assert.Equal(t, float64(10), items[0].GetNumberValue())
+	assert.Equal(t, float64(20), items[1].GetNumberValue())
+	assert.Equal(t, float64(30), items[2].GetNumberValue())
+}
+
+// TestCustomCodeFunctionReturnHandled verifies that accidentally returning a
+// function doesn't crash — it gets converted to null.
+func TestCustomCodeFunctionReturnHandled(t *testing.T) {
+	nodeConfig := map[string]interface{}{
+		"lang": "javascript",
+		"source": `
+return { callback: function() {}, value: 42 }
+`,
+	}
+
+	node, err := CreateNodeFromType("customCode", nodeConfig, "")
+	require.NoError(t, err)
+	node.Name = "code1"
+
+	vm := NewVM()
+	step, err := vm.RunNodeWithInputs(node, map[string]interface{}{})
+	require.NoError(t, err)
+	require.True(t, step.Success, "expected success, got error: %s", step.Error)
+
+	customCodeOutput := step.GetCustomCode()
+	require.NotNil(t, customCodeOutput)
+
+	data := customCodeOutput.Data.GetStructValue()
+	require.NotNil(t, data)
+
+	// Function should be converted to null
+	assert.Equal(t, float64(0), data.Fields["callback"].GetNumberValue())
+	// Normal value should be preserved
+	assert.Equal(t, float64(42), data.Fields["value"].GetNumberValue())
 }
