@@ -4214,6 +4214,18 @@ func (eq *ExecutionQueue) executeTask(task *ExecutionTask) *ExecutionResult {
 	// Execute the node with temporary variables to avoid race conditions in parallel execution
 	step, err := eq.vm.executeNodeDirectWithVars(task.Node, task.StepID, task.InputVariables)
 
+	// If the step failed (Success=false) but no Go error was returned, synthesize an
+	// error so the loop properly detects the iteration failure. Without this, processors
+	// like ContractWrite that embed failures in step.Success (returning nil error) would
+	// silently leave the loop marked as success.
+	if err == nil && step != nil && !step.Success {
+		errMsg := step.Error
+		if errMsg == "" {
+			errMsg = "step execution failed"
+		}
+		err = fmt.Errorf("%s", errMsg)
+	}
+
 	// Extract result data for loops
 	var resultData interface{}
 	if step != nil && step.Success {
