@@ -2668,20 +2668,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// (contractWrite or ethTransfer, including loop nodes with these runners).
 	// For non-AA workflows (e.g., CustomCode), skip this requirement.
 	{
-		requiresAA := false
-		for _, tn := range task.Nodes {
-			if tn.GetContractWrite() != nil || tn.GetEthTransfer() != nil {
-				requiresAA = true
-				break
-			}
-			// Check loop nodes whose runner is ethTransfer or contractWrite
-			if loopNode := tn.GetLoop(); loopNode != nil {
-				if loopNode.GetEthTransfer() != nil || loopNode.GetContractWrite() != nil {
-					requiresAA = true
-					break
-				}
-			}
-		}
+		requiresAA := taskNodesRequireAASender(task.Nodes)
 
 		if requiresAA {
 			owner := user.Address
