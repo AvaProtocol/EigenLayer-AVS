@@ -361,7 +361,7 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 //   - time.Time           (JS Date)          → ISO 8601 string
 //   - [][2]interface{}    (JS Map)           → map[string]interface{}
 //   - typed arrays        ([]int32 etc.)     → []interface{} of numbers
-//   - goja.ArrayBuffer                       → base64 string via []byte
+//   - goja.ArrayBuffer                       → []interface{} of numeric byte values
 //   - functions, Promises                    → nil (not serializable)
 func sanitizeGojaExportForProtobuf(val interface{}) interface{} {
 	switch v := val.(type) {
@@ -393,7 +393,12 @@ func sanitizeGojaExportForProtobuf(val interface{}) interface{} {
 		}
 		return m
 	case goja.ArrayBuffer:
-		return v.Bytes()
+		raw := v.Bytes()
+		result := make([]interface{}, len(raw))
+		for i, b := range raw {
+			result[i] = int64(b)
+		}
+		return result
 	default:
 		// Handle typed arrays ([]int32, []float64, []int64, etc.) via reflection.
 		// Also catches functions/promises by falling through to nil.
