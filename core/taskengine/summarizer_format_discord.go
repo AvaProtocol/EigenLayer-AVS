@@ -54,11 +54,9 @@ func formatDiscordFromStructured(s Summary) string {
 		}
 	}
 
-	// Errors - only show if status is "failure" (not partial_success)
-	if s.Status == "failure" && len(s.Errors) > 0 {
-		if len(s.Executions) > 0 || s.Trigger != "" {
-			sb.WriteString("\n")
-		}
+	// "What Went Wrong" section — consistent with email
+	if len(s.Errors) > 0 {
+		sb.WriteString("\n**What Went Wrong:**\n")
 		for _, err := range s.Errors {
 			sb.WriteString("• ")
 			sb.WriteString(err)
