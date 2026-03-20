@@ -107,7 +107,7 @@ func getStatusDisplayText(status string) string {
 	case "partial_success":
 		return "Some steps were skipped"
 	case "failure":
-		return "Workflow failed"
+		return "Execution failed"
 	default:
 		return "Completed"
 	}
@@ -159,7 +159,7 @@ func formatTimestampHumanReadable(isoTimestamp string) string {
 			return isoTimestamp // Return as-is if parsing fails
 		}
 	}
-	return t.Format("Jan 2, 2006 at 3:04 PM UTC")
+	return t.UTC().Format("Jan 2, 2006 at 3:04 PM UTC")
 }
 
 // formatBackticksToHTML converts backtick-delimited segments in a string to <code> tags.
