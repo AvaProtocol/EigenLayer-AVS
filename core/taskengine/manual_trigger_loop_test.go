@@ -256,13 +256,6 @@ func TestLoopNode_SettingsAddressList(t *testing.T) {
 
 func TestLoopNode_ContractWrite_Approve_PerIterationData(t *testing.T) {
 	// Fast, isolated test: simulate a loop over two approve calls and assert per-iteration data is populated
-	vm := NewVM()
-	require.NotNil(t, vm)
-
-	// Force simulation path for contract write
-	vm.SetSimulation(true)
-
-	// Minimal Tenderly client stub is required by processor; use real initializer with test config
 	logger := testutil.GetLogger()
 	testConfig := testutil.GetTestConfig()
 	require.NotNil(t, testConfig)
@@ -270,10 +263,9 @@ func TestLoopNode_ContractWrite_Approve_PerIterationData(t *testing.T) {
 	require.NotNil(t, tenderlyClient)
 	// Initialize VM with smart wallet config
 	smartWalletConfig := testutil.GetTestSmartWalletConfig()
-	vmWithCfg, err := NewVMWithData(nil, nil, smartWalletConfig, nil)
+	vm, err := NewVMWithData(nil, nil, smartWalletConfig, nil)
 	require.NoError(t, err)
-	require.NotNil(t, vmWithCfg)
-	vm = vmWithCfg
+	require.NotNil(t, vm)
 	vm.tenderlyClient = tenderlyClient
 	vm.SetSimulation(true)
 
@@ -358,6 +350,101 @@ func TestLoopNode_ContractWrite_Approve_PerIterationData(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestLoopNode_ContractWrite_InvalidAddress_PartialFailure(t *testing.T) {
+	// Regression test: when a loop iteration fails (e.g. empty address in transfer),
+	// the loop step must report Success=false. Previously the loop only checked the
+	// returned Go error (nil for contractWrite) and missed step.Success=false,
+	// causing the loop to report success even when an iteration failed.
+	vm := NewVM()
+	require.NotNil(t, vm)
+
+	vm.SetSimulation(true)
+
+	logger := testutil.GetLogger()
+	testConfig := testutil.GetTestConfig()
+	require.NotNil(t, testConfig)
+	tenderlyClient := NewTenderlyClient(testConfig, logger)
+	require.NotNil(t, tenderlyClient)
+	smartWalletConfig := testutil.GetTestSmartWalletConfig()
+	vmWithCfg, err := NewVMWithData(nil, nil, smartWalletConfig, nil)
+	require.NoError(t, err)
+	require.NotNil(t, vmWithCfg)
+	vm = vmWithCfg
+	vm.tenderlyClient = tenderlyClient
+	vm.SetSimulation(true)
+
+	// Two recipients: one valid, one empty string (invalid address)
+	inputVariables := map[string]interface{}{
+		"recipients": []interface{}{
+			"0x0000000000000000000000000000000000000001",
+			"", // empty address — should fail calldata generation
+		},
+		"settings": map[string]interface{}{
+			"runner":   "0x5a8A8a79DdF433756D4D97DCCE33334D9E218856",
+			"chain_id": int64(11155111),
+			"chain":    "sepolia",
+		},
+	}
+
+	nodeConfig := map[string]interface{}{
+		"inputVariable":    "{{recipients}}",
+		"iterVal":          "value",
+		"iterKey":          "index",
+		"iterationTimeout": float64(30),
+		"executionMode":    "sequential",
+		"runner": map[string]interface{}{
+			"type": "contractWrite",
+			"config": map[string]interface{}{
+				"contractAddress": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+				"contractAbi": []interface{}{
+					map[string]interface{}{
+						"type":            "function",
+						"name":            "transfer",
+						"stateMutability": "nonpayable",
+						"inputs": []interface{}{
+							map[string]interface{}{"name": "to", "type": "address"},
+							map[string]interface{}{"name": "value", "type": "uint256"},
+						},
+						"outputs": []interface{}{map[string]interface{}{"name": "", "type": "bool"}},
+					},
+				},
+				"methodCalls": []interface{}{
+					map[string]interface{}{
+						"methodName":   "transfer",
+						"methodParams": []interface{}{"{{value}}", "100000"},
+					},
+				},
+			},
+		},
+	}
+
+	node, err := CreateNodeFromType("loop", nodeConfig, "")
+	require.NoError(t, err)
+	require.NotNil(t, node)
+	node.Name = "loopTransfer"
+
+	step, err := vm.RunNodeWithInputs(node, inputVariables)
+
+	// The loop should report failure because the second iteration failed
+	require.NotNil(t, step, "Execution step should not be nil")
+	assert.False(t, step.Success, "Loop should report failure when an iteration fails")
+	assert.Contains(t, step.Error, "invalid address", "Error should mention invalid address")
+
+	// The output should still contain results (first iteration data, second nil)
+	loopOutput := step.GetLoop()
+	require.NotNil(t, loopOutput)
+	require.NotNil(t, loopOutput.Data)
+	arr, ok := loopOutput.Data.AsInterface().([]interface{})
+	require.True(t, ok, "expected array, got %T", loopOutput.Data.AsInterface())
+	require.Len(t, arr, 2, "Should have 2 entries (one per iteration)")
+
+	// First iteration should have data (valid address)
+	assert.NotNil(t, arr[0], "First iteration should have data")
+
+	// Second iteration should be nil (invalid address)
+	assert.Nil(t, arr[1], "Second iteration should be nil (failed)")
 }
 
 func TestRestApiStandardFormat(t *testing.T) {
