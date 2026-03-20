@@ -1703,12 +1703,13 @@ func TestFormatBackticksToHTML(t *testing.T) {
 
 func TestFormatBackticksForChannel(t *testing.T) {
 	input := "condition: `x >= y` failed"
+	expectedHTML := "condition: <code>x &gt;= y</code> failed"
 
-	// Telegram and email should convert backticks to <code>
+	// Telegram and email should convert backticks to <code> with proper escaping
 	for _, ch := range []string{"telegram", "email"} {
 		got := formatBackticksForChannel(input, ch)
-		if !strings.Contains(got, "<code>") {
-			t.Errorf("channel %q: expected <code> tags, got %q", ch, got)
+		if got != expectedHTML {
+			t.Errorf("channel %q:\n  got:  %q\n  want: %q", ch, got, expectedHTML)
 		}
 	}
 
@@ -1718,5 +1719,29 @@ func TestFormatBackticksForChannel(t *testing.T) {
 		if got != input {
 			t.Errorf("channel %q: expected pass-through, got %q", ch, got)
 		}
+	}
+}
+
+func TestBuildStatusHtml(t *testing.T) {
+	tests := []struct {
+		status    string
+		wantColor string
+		wantText  string
+	}{
+		{"success", "#D1FAE5", "All steps completed successfully"},
+		{"partial_success", "#FEF3C7", "Some steps were skipped"},
+		{"failure", "#FEE2E2", "Execution failed"},
+		{"", "#D1FAE5", "Completed"}, // default for unknown status
+	}
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			html := buildStatusHtml(tt.status)
+			if !strings.Contains(html, tt.wantColor) {
+				t.Errorf("buildStatusHtml(%q): expected color %q in output:\n%s", tt.status, tt.wantColor, html)
+			}
+			if !strings.Contains(html, tt.wantText) {
+				t.Errorf("buildStatusHtml(%q): expected text %q in output:\n%s", tt.status, tt.wantText, html)
+			}
+		})
 	}
 }
