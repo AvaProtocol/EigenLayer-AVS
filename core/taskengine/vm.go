@@ -3,6 +3,7 @@ package taskengine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"regexp"
@@ -4223,7 +4224,7 @@ func (eq *ExecutionQueue) executeTask(task *ExecutionTask) *ExecutionResult {
 		if errMsg == "" {
 			errMsg = "step execution failed"
 		}
-		err = fmt.Errorf("%s", errMsg)
+		err = errors.New(errMsg)
 	}
 
 	// Extract result data for loops

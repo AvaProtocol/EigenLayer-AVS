@@ -256,13 +256,6 @@ func TestLoopNode_SettingsAddressList(t *testing.T) {
 
 func TestLoopNode_ContractWrite_Approve_PerIterationData(t *testing.T) {
 	// Fast, isolated test: simulate a loop over two approve calls and assert per-iteration data is populated
-	vm := NewVM()
-	require.NotNil(t, vm)
-
-	// Force simulation path for contract write
-	vm.SetSimulation(true)
-
-	// Minimal Tenderly client stub is required by processor; use real initializer with test config
 	logger := testutil.GetLogger()
 	testConfig := testutil.GetTestConfig()
 	require.NotNil(t, testConfig)
@@ -270,10 +263,9 @@ func TestLoopNode_ContractWrite_Approve_PerIterationData(t *testing.T) {
 	require.NotNil(t, tenderlyClient)
 	// Initialize VM with smart wallet config
 	smartWalletConfig := testutil.GetTestSmartWalletConfig()
-	vmWithCfg, err := NewVMWithData(nil, nil, smartWalletConfig, nil)
+	vm, err := NewVMWithData(nil, nil, smartWalletConfig, nil)
 	require.NoError(t, err)
-	require.NotNil(t, vmWithCfg)
-	vm = vmWithCfg
+	require.NotNil(t, vm)
 	vm.tenderlyClient = tenderlyClient
 	vm.SetSimulation(true)
 
