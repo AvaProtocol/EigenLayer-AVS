@@ -60,7 +60,7 @@ func formatTelegramFromStructured(s Summary) string {
 		sb.WriteString("\n<b>Executed:</b>\n")
 		for _, exec := range s.Executions {
 			sb.WriteString("• ")
-			sb.WriteString(html.EscapeString(exec.Description))
+			sb.WriteString(formatBackticksForChannel(exec.Description, "telegram"))
 			sb.WriteString("\n")
 			if exec.TxHash != "" {
 				if explorerURL := buildTxExplorerURL(s, exec.TxHash); explorerURL != "" {

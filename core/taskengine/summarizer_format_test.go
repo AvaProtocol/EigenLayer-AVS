@@ -905,6 +905,27 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 			},
 		},
 		{
+			name: "execution descriptions with backtick method names",
+			summary: Summary{
+				Subject: "Run #1: DeFi Bot successfully completed",
+				Status:  "success",
+				Network: "Ethereum",
+				Executions: []ExecutionEntry{
+					{Description: "Called `approve` on 0xC364...42a0"},
+					{Description: "`getUserAccountData` returned healthFactor: 1.85"},
+				},
+			},
+			expectedContain: []string{
+				"<b>Executed:</b>",
+				"• Called <code>approve</code> on 0xC364...42a0",
+				"• <code>getUserAccountData</code> returned healthFactor: 1.85",
+			},
+			notContain: []string{
+				"`approve`", // backticks should be converted
+				"`getUserAccountData`",
+			},
+		},
+		{
 			name: "no on-chain executions - fallback populated by ComposeSummary",
 			summary: Summary{
 				Subject:     "Simulation: My Workflow successfully completed",
