@@ -36,24 +36,23 @@ const (
 // The status string comes from context-memory API ("success", "partial_success", "failure")
 // or from the deterministic summarizer.
 func buildStatusHtml(status string) string {
-	var iconSvg, text, bgColor, textColor string
+	var iconSvg, bgColor, textColor string
 	switch status {
 	case "partial_success":
 		iconSvg = statusIconPartialSuccess
-		text = "Some steps were skipped"
 		bgColor = "#FEF3C7"   // light yellow
 		textColor = "#92400E" // dark amber
 	case "failure":
 		iconSvg = statusIconFailure
-		text = "Execution failed"
 		bgColor = "#FEE2E2"   // light red
 		textColor = "#991B1B" // dark red
 	default: // "success" and unknown
 		iconSvg = statusIconSuccess
-		text = "All steps completed successfully"
 		bgColor = "#D1FAE5"   // light green
 		textColor = "#065F46" // dark green
 	}
+	// Use getStatusDisplayText for consistent wording across all email variables
+	text := getStatusDisplayText(status)
 	return fmt.Sprintf(
 		`<div style="display:inline-block; padding:8px 16px; background-color:%s; color:%s; border-radius:8px; font-weight:500; margin:8px 0">%s%s</div>`,
 		bgColor, textColor, iconSvg, text,
