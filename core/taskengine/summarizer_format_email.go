@@ -34,6 +34,7 @@ func (s Summary) SendGridDynamicData() map[string]interface{} {
 	if s.Status != "" {
 		data["status"] = s.Status
 		data["status_color"] = getStatusColor(s.Status)
+		data["status_text"] = getStatusDisplayText(s.Status)
 	}
 
 	if s.Trigger != "" {
@@ -93,6 +94,22 @@ func getStatusColor(status string) string {
 		return "red"
 	default:
 		return "gray"
+	}
+}
+
+// getStatusDisplayText returns a human-readable label for the workflow status.
+// Used as the "status_text" SendGrid template variable so the email template
+// can display the correct badge text instead of hardcoding it.
+func getStatusDisplayText(status string) string {
+	switch status {
+	case "success":
+		return "All steps completed successfully"
+	case "partial_success":
+		return "Some steps were skipped"
+	case "failure":
+		return "Workflow failed"
+	default:
+		return "Completed"
 	}
 }
 
