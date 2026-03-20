@@ -2950,8 +2950,19 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 		}
 	}
 
-	// For contractWrite and ethTransfer nodes, handle runner validation from settings only; simulation is resolved in the processor from typed config
-	if strings.EqualFold(nodeType, "contractWrite") || strings.EqualFold(nodeType, "ethTransfer") {
+	// Determine if this node needs aa_sender (smart wallet address) setup.
+	// This applies to contractWrite/ethTransfer nodes directly, and also to
+	// loop nodes whose runner is contractWrite or ethTransfer.
+	needsAASender := strings.EqualFold(nodeType, "contractWrite") || strings.EqualFold(nodeType, "ethTransfer")
+	if !needsAASender && strings.EqualFold(nodeType, "loop") {
+		if runner, ok := nodeConfig["runner"].(map[string]interface{}); ok {
+			if runnerType, ok := runner["type"].(string); ok {
+				needsAASender = strings.EqualFold(runnerType, "ethTransfer") || strings.EqualFold(runnerType, "contractWrite")
+			}
+		}
+	}
+
+	if needsAASender {
 
 		// Require authenticated user (TaskOwner)
 		if (vm.TaskOwner == common.Address{}) {
