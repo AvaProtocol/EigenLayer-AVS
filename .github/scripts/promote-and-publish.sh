@@ -130,6 +130,19 @@ if [ $PRERELEASE_COUNT -gt 0 ]; then
         echo -e "     - ${release}"
     done
     echo -e "   • Latest pre-release (${LATEST_PRERELEASE}) will be marked as 'latest'"
+
+    # Print release notes for each pre-release
+    echo
+    for release in "${PRERELEASE_ARRAY[@]}"; do
+        RELEASE_BODY=$(gh release view "$release" --repo "$REPO" --json body --jq '.body')
+        echo -e "${YELLOW}── ${release} ──${NC}"
+        if [ -n "$RELEASE_BODY" ]; then
+            echo "$RELEASE_BODY"
+        else
+            echo -e "   (no release notes)"
+        fi
+        echo
+    done
 else
     echo -e "${BLUE}No pre-releases to promote${NC}"
 fi
