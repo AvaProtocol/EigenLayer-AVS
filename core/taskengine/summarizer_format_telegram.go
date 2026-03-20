@@ -79,7 +79,7 @@ func formatTelegramFromStructured(s Summary) string {
 		sb.WriteString("\n<b>What Went Wrong:</b>\n")
 		for _, err := range s.Errors {
 			sb.WriteString("• ")
-			sb.WriteString(html.EscapeString(err))
+			sb.WriteString(formatBackticksForChannel(err, "telegram"))
 			sb.WriteString("\n")
 		}
 	}
