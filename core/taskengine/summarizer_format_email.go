@@ -233,7 +233,7 @@ func buildAnalysisHtmlFromStructured(s Summary) string {
 		sb.WriteString(`<h3 style="margin: 0 0 8px 0; font-size: 16px;">What Executed On-Chain</h3>`)
 		for _, exec := range s.Executions {
 			sb.WriteString("<p style=\"margin: 0 0 4px 0;\">✓ ")
-			sb.WriteString(html.EscapeString(exec.Description))
+			sb.WriteString(formatBackticksForChannel(exec.Description, "email"))
 			sb.WriteString("</p>")
 			if exec.TxHash != "" {
 				if explorerURL := buildTxExplorerURL(s, exec.TxHash); explorerURL != "" {
