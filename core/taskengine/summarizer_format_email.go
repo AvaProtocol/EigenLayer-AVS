@@ -41,7 +41,7 @@ func (s Summary) SendGridDynamicData() map[string]interface{} {
 	}
 
 	if s.TriggeredAt != "" {
-		data["triggered_at"] = formatTimestampForEmail(s.TriggeredAt)
+		data["triggered_at"] = formatTimestampHumanReadable(s.TriggeredAt)
 	}
 
 	if len(s.Executions) > 0 {
@@ -96,8 +96,9 @@ func getStatusColor(status string) string {
 	}
 }
 
-// formatTimestampForEmail formats an ISO 8601 timestamp for email display
-func formatTimestampForEmail(isoTimestamp string) string {
+// formatTimestampHumanReadable formats an ISO 8601 timestamp into a human-readable string.
+// Used by all notification channels (email, telegram, discord) for consistent display.
+func formatTimestampHumanReadable(isoTimestamp string) string {
 	t, err := time.Parse(time.RFC3339, isoTimestamp)
 	if err != nil {
 		// Try parsing without timezone
@@ -125,7 +126,7 @@ func buildAnalysisHtmlFromStructured(s Summary) string {
 		sb.WriteString("</p>")
 		// Add timestamp row if available
 		if s.TriggeredAt != "" {
-			if ts := formatTimestampForEmail(s.TriggeredAt); ts != "" {
+			if ts := formatTimestampHumanReadable(s.TriggeredAt); ts != "" {
 				sb.WriteString("<p style=\"margin: 4px 0 0 18px; color: #666; font-size: 14px;\">")
 				sb.WriteString(html.EscapeString(ts))
 				sb.WriteString("</p>")

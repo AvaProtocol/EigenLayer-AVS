@@ -784,7 +784,7 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 			expectedContain: []string{
 				"✅ Simulation: <code>Recurring Payment</code> successfully completed", // Only workflow name is code-wrapped
 				"<b>Network:</b> Sepolia",
-				"<b>Time:</b> 2026-01-22T04:51:18.509Z",
+				"<b>Time:</b> Jan 22, 2026 at 4:51 AM UTC",
 				"<b>Trigger:</b> (Simulated) Your scheduled task (every 3 days at 11:00 PM) triggered on Sepolia.",
 				"<b>Executed:</b>",
 				"• (Simulated) Transferred 0.01 ETH to 0xc60e...C788",
@@ -805,7 +805,7 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 			expectedContain: []string{
 				"✅ Run #3: <code>Recurring Payment</code> successfully completed", // Only workflow name is code-wrapped
 				"<b>Network:</b> Sepolia",
-				"<b>Time:</b> 2026-01-22T04:51:18.509Z",
+				"<b>Time:</b> Jan 22, 2026 at 4:51 AM UTC",
 				"<b>Executed:</b>",
 				"• Transferred 0.01 ETH to 0xc60e...C788",
 			},

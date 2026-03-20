@@ -43,7 +43,7 @@ func formatTelegramFromStructured(s Summary) string {
 		}
 		if s.TriggeredAt != "" {
 			sb.WriteString("<b>Time:</b> ")
-			sb.WriteString(html.EscapeString(s.TriggeredAt))
+			sb.WriteString(html.EscapeString(formatTimestampHumanReadable(s.TriggeredAt)))
 			sb.WriteString("\n")
 		}
 	}
