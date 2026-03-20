@@ -972,8 +972,18 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 							dynamicData["body"] = summaryForClient.Body
 						}
 
-						// Generate statusHtml from the context-memory API status
-						dynamicData["statusHtml"] = buildStatusHtml(summaryForClient.Status)
+						// Generate statusHtml from the context-memory API status.
+						// If status is empty (API didn't set it), fall back to VM inspection.
+						if summaryForClient.Status != "" {
+							dynamicData["statusHtml"] = buildStatusHtml(summaryForClient.Status)
+						} else {
+							failed, _, _ := findEarliestFailure(r.vm)
+							if failed {
+								dynamicData["statusHtml"] = buildStatusHtml("failure")
+							} else {
+								dynamicData["statusHtml"] = buildStatusHtml("success")
+							}
+						}
 
 						// Use SummaryLine if available, otherwise extract from body
 						summaryLine := summaryForClient.SummaryLine
