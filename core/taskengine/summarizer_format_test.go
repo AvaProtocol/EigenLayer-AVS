@@ -852,23 +852,24 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 			notContain: []string{},
 		},
 		{
-			name: "partial success with errors - branch skipped nodes",
+			name: "partial success with errors - branch skipped nodes with backtick expression",
 			summary: Summary{
 				Subject:     "Simulation: Copy of Test Recurring Batch Send partially executed",
 				Status:      "partial_success",
 				Network:     "Sepolia",
 				TriggeredAt: "2026-01-22T04:51:18.509Z",
 				Trigger:     "(Simulated) Your scheduled task (every 3 minutes) triggered on Sepolia.",
-				Errors:      []string{"loop1 - skipped due to branch condition"},
+				Errors:      []string{"loop1 - skipped due to condition not met: `code1.data.balance >= code1.data.totalNeeded` evaluated to false"},
 			},
 			expectedContain: []string{
 				"⚠️ Simulation: <code>Copy of Test Recurring Batch Send</code> partially executed",
 				"<b>Network:</b> Sepolia",
 				"<b>What Went Wrong:</b>",
-				"• loop1 - skipped due to branch condition",
+				"• loop1 - skipped due to condition not met: <code>code1.data.balance &gt;= code1.data.totalNeeded</code> evaluated to false",
 			},
 			notContain: []string{
 				"<b>Executed:</b>",
+				"`", // backticks should be converted to <code> tags
 			},
 		},
 		{
@@ -1628,5 +1629,73 @@ func TestBuildExecutionsArray_SkipsSimulatedTxHash(t *testing.T) {
 	// Step 3: real but malformed hash → should NOT have txHash
 	if executions[2].TxHash != "" {
 		t.Errorf("Step 3 (real, malformed hash): expected empty txHash, got %q", executions[2].TxHash)
+	}
+}
+
+func TestFormatBackticksToHTML(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "no backticks",
+			input:    "loop1 - skipped due to branch condition",
+			expected: "loop1 - skipped due to branch condition",
+		},
+		{
+			name:     "single backtick expression",
+			input:    "condition not met: `balance >= totalNeeded` evaluated to false",
+			expected: "condition not met: <code>balance &gt;= totalNeeded</code> evaluated to false",
+		},
+		{
+			name:     "multiple backtick expressions",
+			input:    "`code1.data.balance` is less than `code1.data.totalNeeded`",
+			expected: "<code>code1.data.balance</code> is less than <code>code1.data.totalNeeded</code>",
+		},
+		{
+			name:     "unclosed backtick passes through",
+			input:    "missing closing `backtick",
+			expected: "missing closing `backtick",
+		},
+		{
+			name:     "HTML chars outside backticks are escaped",
+			input:    "value <foo> with `expr >= 0` end",
+			expected: "value &lt;foo&gt; with <code>expr &gt;= 0</code> end",
+		},
+		{
+			name:     "empty backticks",
+			input:    "empty `` expression",
+			expected: "empty <code></code> expression",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatBackticksToHTML(tt.input)
+			if got != tt.expected {
+				t.Errorf("formatBackticksToHTML(%q)\n  got:  %q\n  want: %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFormatBackticksForChannel(t *testing.T) {
+	input := "condition: `x >= y` failed"
+
+	// Telegram and email should convert backticks to <code>
+	for _, ch := range []string{"telegram", "email"} {
+		got := formatBackticksForChannel(input, ch)
+		if !strings.Contains(got, "<code>") {
+			t.Errorf("channel %q: expected <code> tags, got %q", ch, got)
+		}
+	}
+
+	// Discord and plaintext should pass through as-is
+	for _, ch := range []string{"discord", "plaintext", ""} {
+		got := formatBackticksForChannel(input, ch)
+		if got != input {
+			t.Errorf("channel %q: expected pass-through, got %q", ch, got)
+		}
 	}
 }

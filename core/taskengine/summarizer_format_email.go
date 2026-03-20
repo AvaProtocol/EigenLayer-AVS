@@ -96,6 +96,41 @@ func getStatusColor(status string) string {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Shared formatting helpers for all notification channels
+// ---------------------------------------------------------------------------
+//
+// These helpers ensure consistent rendering across email, Telegram, Discord,
+// and plain-text channels. When adding a new notification channel, follow
+// the rules below for each field type.
+//
+// ## Context-memory API string conventions
+//
+// The context-memory API returns structured data that the aggregator formats
+// per-channel. Two conventions apply to string fields:
+//
+//   - Backtick-delimited code: expressions or variable names are wrapped in
+//     backticks (e.g., `code1.data.balance >= code1.data.totalNeeded`).
+//     Use formatBackticksForChannel to render them appropriately.
+//
+//   - ISO 8601 timestamps: the triggeredAt field is in RFC 3339 format.
+//     Use formatTimestampHumanReadable to convert to display format.
+//
+// ## Per-channel rendering rules
+//
+//   Field         | Telegram (HTML)         | Email (HTML)            | Discord (Markdown)  | Plaintext
+//   --------------|-------------------------|-------------------------|---------------------|----------
+//   Subject       | <code>name</code>       | template variable       | **bold**            | as-is
+//   Network       | <b>Network:</b> value   | template variable       | plain text          | plain text
+//   Time          | <b>Time:</b> formatted  | template variable       | —                   | —
+//   Trigger       | <b>Trigger:</b> value   | template variable       | plain text          | plain text
+//   Executions    | <b>Executed:</b> • list  | template variable       | • list              | - list
+//   Errors        | <b>What Went Wrong:</b> | "What Went Wrong" <h3>  | **What Went Wrong:**| What Went Wrong:
+//   Backticks     | → <code>...</code>      | → <code>...</code>      | native (pass-thru)  | pass-thru
+//   Timestamps    | formatTimestampHumanReadable                                             | (same for all)
+//   Annotation    | <i>text</i>             | italic styled           | *text*              | plain text
+// ---------------------------------------------------------------------------
+
 // formatTimestampHumanReadable formats an ISO 8601 timestamp into a human-readable string.
 // Used by all notification channels (email, telegram, discord) for consistent display.
 func formatTimestampHumanReadable(isoTimestamp string) string {
@@ -108,6 +143,63 @@ func formatTimestampHumanReadable(isoTimestamp string) string {
 		}
 	}
 	return t.Format("Jan 2, 2006 at 3:04 PM UTC")
+}
+
+// formatBackticksToHTML converts backtick-delimited segments in a string to <code> tags.
+// Used by Telegram and email formatters to render inline code from context-memory API errors.
+// Non-backticked portions are HTML-escaped; backticked portions are wrapped in <code> tags.
+//
+// Context-memory API convention:
+//
+//	The context-memory API uses backticks to delimit code expressions in error messages.
+//	Example input:  "loop1 - condition not met: `balance >= totalNeeded` evaluated to false"
+//	Example output: "loop1 - condition not met: <code>balance &gt;= totalNeeded</code> evaluated to false"
+//
+// See formatBackticksForChannel for the channel-routing wrapper.
+func formatBackticksToHTML(s string) string {
+	var sb strings.Builder
+	for {
+		start := strings.Index(s, "`")
+		if start < 0 {
+			sb.WriteString(html.EscapeString(s))
+			break
+		}
+		end := strings.Index(s[start+1:], "`")
+		if end < 0 {
+			// No closing backtick — escape the rest as-is
+			sb.WriteString(html.EscapeString(s))
+			break
+		}
+		end += start + 1 // absolute index of closing backtick
+
+		sb.WriteString(html.EscapeString(s[:start]))
+		sb.WriteString("<code>")
+		sb.WriteString(html.EscapeString(s[start+1 : end]))
+		sb.WriteString("</code>")
+		s = s[end+1:]
+	}
+	return sb.String()
+}
+
+// formatBackticksForChannel converts backtick-delimited code segments for the target channel.
+//
+// Channel formatting rules for context-memory API strings:
+//
+//   - Telegram: backticks → <code>...</code> (Telegram HTML parse mode)
+//   - Email:    backticks → <code>...</code> (HTML email)
+//   - Discord:  pass through as-is (Discord natively renders backticks as inline code)
+//   - Plaintext: pass through as-is (backticks are readable in plain text)
+//
+// When adding a new notification channel, decide whether it supports inline code
+// markup and add a case here. Default is pass-through.
+func formatBackticksForChannel(s string, channel string) string {
+	switch channel {
+	case "telegram", "email":
+		return formatBackticksToHTML(s)
+	default:
+		// Discord, plaintext, and future channels that handle backticks natively
+		return s
+	}
 }
 
 // buildAnalysisHtmlFromStructured builds HTML content from the structured Summary fields
@@ -162,7 +254,7 @@ func buildAnalysisHtmlFromStructured(s Summary) string {
 		sb.WriteString(`<h3 style="margin: 0 0 8px 0; font-size: 16px;">What Went Wrong</h3>`)
 		for _, err := range s.Errors {
 			sb.WriteString("<p style=\"margin: 0 0 4px 0;\">✗ ")
-			sb.WriteString(html.EscapeString(err))
+			sb.WriteString(formatBackticksForChannel(err, "email"))
 			sb.WriteString("</p>")
 		}
 		sb.WriteString("</div>")
