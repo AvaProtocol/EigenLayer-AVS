@@ -898,3 +898,21 @@ func FormatStringListWithAnd(items []string) string {
 		return fmt.Sprintf("%s, and %s nodes", otherItems, lastItem)
 	}
 }
+
+// taskNodesRequireAASender checks whether any node in the list requires
+// aa_sender (smart wallet address) to be set. This is true for direct
+// ethTransfer/contractWrite nodes and for loop nodes whose runner is
+// ethTransfer or contractWrite.
+func taskNodesRequireAASender(nodes []*avsproto.TaskNode) bool {
+	for _, tn := range nodes {
+		if tn.GetContractWrite() != nil || tn.GetEthTransfer() != nil {
+			return true
+		}
+		if loopNode := tn.GetLoop(); loopNode != nil {
+			if loopNode.GetEthTransfer() != nil || loopNode.GetContractWrite() != nil {
+				return true
+			}
+		}
+	}
+	return false
+}
