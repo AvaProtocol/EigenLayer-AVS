@@ -2665,13 +2665,21 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	vm.WithLogger(n.logger).WithDb(n.db).SetSimulation(true)
 	// Resolve AA sender for simulation ONLY if the workflow contains AA-relevant nodes
-	// (contractWrite or ethTransfer). For non-AA workflows (e.g., CustomCode), skip this requirement.
+	// (contractWrite or ethTransfer, including loop nodes with these runners).
+	// For non-AA workflows (e.g., CustomCode), skip this requirement.
 	{
 		requiresAA := false
 		for _, tn := range task.Nodes {
 			if tn.GetContractWrite() != nil || tn.GetEthTransfer() != nil {
 				requiresAA = true
 				break
+			}
+			// Check loop nodes whose runner is ethTransfer or contractWrite
+			if loopNode := tn.GetLoop(); loopNode != nil {
+				if loopNode.GetEthTransfer() != nil || loopNode.GetContractWrite() != nil {
+					requiresAA = true
+					break
+				}
 			}
 		}
 
