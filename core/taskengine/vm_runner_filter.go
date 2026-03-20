@@ -215,7 +215,7 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 	// We need to create a Value that contains a ListValue for AnyToSlice to work properly
 	listValue := &structpb.ListValue{}
 	for _, item := range filteredResult {
-		// Sanitize items that may contain Goja-exported types (e.g., *big.Int
+		// Sanitize items that may contain Goja-exported types (e.g., *big.Int)
 		// from a preceding CustomCode node) before protobuf conversion.
 		item = sanitizeGojaExportForProtobuf(item)
 		itemValue, itemErr := structpb.NewValue(item)
