@@ -28,10 +28,14 @@ Execute the following steps for the current branch's PR:
    Run: `gh pr create --fill --base <BASE_BRANCH>`
    Capture the PR number from the output.
 
-5. **Capture baseline timestamp**
+5. **Capture baseline timestamps**
    Run: `sh scripts/get-pr-comments.sh <PR_NUMBER>`
    Record the `created_at` timestamp of the newest Copilot review comment from `pr-comments-<PR_NUMBER>.json` — this is the **baseline timestamp**. If there are no Copilot comments yet, the baseline is empty (any comment after the review will be new).
    Run: `jq -r '.copilot.review_comments[-1].created_at // empty' pr-comments-<PR_NUMBER>.json`
+
+   Also capture the baseline for Claude comments:
+   Run: `jq -r '.claude.review_comments[-1].created_at // empty' pr-comments-<PR_NUMBER>.json`
+   Run: `jq -r '.claude.issue_comments[-1].created_at // empty' pr-comments-<PR_NUMBER>.json`
 
    Also capture the latest Copilot **review** `submitted_at` timestamp (used to wait for the new review):
    Run: `gh api repos/AvaProtocol/EigenLayer-AVS/pulls/<PR_NUMBER>/reviews --jq '[.[] | select(.user.login == "copilot-pull-request-reviewer[bot]")] | sort_by(.submitted_at) | last | .submitted_at'`
@@ -50,12 +54,27 @@ Execute the following steps for the current branch's PR:
    Then check: `jq -r '.copilot.review_comments[-1].created_at // empty' pr-comments-<PR_NUMBER>.json`
    If the newest `created_at` is the same as (or older than) the baseline comment timestamp from step 5, wait 15s and re-run. Repeat up to 10 times. If no newer comment appears after all retries, proceed anyway (Copilot may have approved with no comments).
 
-9. **Evaluate comments**
-   Read `pr-comments-<PR_NUMBER>.json` and evaluate only comments with `created_at` **newer than** the baseline timestamp from step 5. For each new comment, decide:
+9. **Check CI status checks**
+   Run: `gh pr checks <PR_NUMBER> --json name,state,conclusion`
+   If any checks have failed:
+   - Investigate the failure by reading the check logs: `gh run view <RUN_ID> --log-failed`
+   - If the failure is caused by code in this PR → **FIX** it, commit, and push
+   - If the failure is a flaky test or infrastructure issue unrelated to this PR → note it and proceed
+   - Re-run this step after pushing fixes to confirm checks pass
+
+10. **Evaluate comments from ALL reviewers**
+   Read `pr-comments-<PR_NUMBER>.json` and evaluate comments from **both** Copilot and Claude that have `created_at` **newer than** their respective baseline timestamps from step 5.
+
+   Sources to check:
+   - `.copilot.review_comments[]` — Copilot inline review comments
+   - `.claude.review_comments[]` — Claude inline review comments
+   - `.claude.issue_comments[]` — Claude PR-level comments (often contain the full review)
+
+   For each new comment, decide:
 
    - If it's a clear bug, correctness issue, or style issue → **FIX** it directly
    - If it's subjective or you disagree → **SKIP** with reasoning
 
-   Present a summary table of all new comments with FIX/SKIP status before making changes.
+   Present a summary table of all new comments (from all reviewers) with FIX/SKIP status before making changes.
 
    After applying fixes: lint, commit, and push.
