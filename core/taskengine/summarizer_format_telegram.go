@@ -72,11 +72,13 @@ func formatTelegramFromStructured(s Summary) string {
 				}
 			}
 		}
-	} else if s.Status == "failure" && len(s.Errors) > 0 {
-		// Error display for failed workflows
-		sb.WriteString("\n")
+	}
+
+	// "What Went Wrong" section — consistent with email
+	if len(s.Errors) > 0 {
+		sb.WriteString("\n<b>What Went Wrong:</b>\n")
 		for _, err := range s.Errors {
-			sb.WriteString("<b>Error:</b> ")
+			sb.WriteString("• ")
 			sb.WriteString(html.EscapeString(err))
 			sb.WriteString("\n")
 		}

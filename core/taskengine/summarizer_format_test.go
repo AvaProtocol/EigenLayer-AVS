@@ -825,7 +825,8 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 			expectedContain: []string{
 				"❌ Run #5: <code>Recurring Payment</code> failed to execute", // Only workflow name is code-wrapped
 				"<b>Network:</b> Sepolia",
-				"<b>Error:</b> transfer1: Insufficient balance for transfer",
+				"<b>What Went Wrong:</b>",
+				"• transfer1: Insufficient balance for transfer",
 			},
 			notContain: []string{
 				"<b>Executed:</b>",
@@ -849,6 +850,26 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				"• Approved 100 USDC to router",
 			},
 			notContain: []string{},
+		},
+		{
+			name: "partial success with errors - branch skipped nodes",
+			summary: Summary{
+				Subject:     "Simulation: Copy of Test Recurring Batch Send partially executed",
+				Status:      "partial_success",
+				Network:     "Sepolia",
+				TriggeredAt: "2026-01-22T04:51:18.509Z",
+				Trigger:     "(Simulated) Your scheduled task (every 3 minutes) triggered on Sepolia.",
+				Errors:      []string{"loop1 - skipped due to branch condition"},
+			},
+			expectedContain: []string{
+				"⚠️ Simulation: <code>Copy of Test Recurring Batch Send</code> partially executed",
+				"<b>Network:</b> Sepolia",
+				"<b>What Went Wrong:</b>",
+				"• loop1 - skipped due to branch condition",
+			},
+			notContain: []string{
+				"<b>Executed:</b>",
+			},
 		},
 		{
 			name: "network fallback from workflow.chain",
