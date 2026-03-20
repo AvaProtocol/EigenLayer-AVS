@@ -2987,6 +2987,34 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			loopNode.Runner = &avsproto.LoopNode_ContractRead{
 				ContractRead: &avsproto.ContractReadNode{Config: crConfig},
 			}
+		case "ethTransfer":
+			etConfig := &avsproto.ETHTransferNode_Config{}
+			if destination, ok := runnerConfig["destination"].(string); ok {
+				etConfig.Destination = destination
+			}
+			if amount, ok := runnerConfig["amount"].(string); ok {
+				etConfig.Amount = amount
+			}
+			loopNode.Runner = &avsproto.LoopNode_EthTransfer{
+				EthTransfer: &avsproto.ETHTransferNode{Config: etConfig},
+			}
+		case "graphqlDataQuery":
+			gqlConfig := &avsproto.GraphQLQueryNode_Config{}
+			if url, ok := runnerConfig["url"].(string); ok {
+				gqlConfig.Url = url
+			}
+			if query, ok := runnerConfig["query"].(string); ok {
+				gqlConfig.Query = query
+			}
+			if variables, ok := runnerConfig["variables"].(map[string]interface{}); ok {
+				gqlConfig.Variables = make(map[string]string, len(variables))
+				for k, v := range variables {
+					gqlConfig.Variables[k] = fmt.Sprintf("%v", v)
+				}
+			}
+			loopNode.Runner = &avsproto.LoopNode_GraphqlDataQuery{
+				GraphqlDataQuery: &avsproto.GraphQLQueryNode{Config: gqlConfig},
+			}
 		case "contractWrite":
 			cwConfig := &avsproto.ContractWriteNode_Config{}
 

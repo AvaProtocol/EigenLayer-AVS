@@ -360,3 +360,73 @@ func TestCreateNodeFromType_LoopExecutionMode_CamelCaseFields(t *testing.T) {
 	assert.Equal(t, "index", loopNode.Config.IterKey)
 	assert.Equal(t, avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL, loopNode.Config.ExecutionMode)
 }
+
+func TestCreateNodeFromType_LoopWithEthTransferRunner(t *testing.T) {
+	config := map[string]interface{}{
+		"inputVariable":    "{{settings.recipients}}",
+		"iterVal":          "value",
+		"iterKey":          "index",
+		"iterationTimeout": float64(60),
+		"executionMode":    "sequential",
+		"runner": map[string]interface{}{
+			"type": "ethTransfer",
+			"config": map[string]interface{}{
+				"destination": "{{value}}",
+				"amount":      "{{settings.token_amount.amount}}",
+			},
+		},
+	}
+
+	node, err := CreateNodeFromType(NodeTypeLoop, config, "test-loop-eth")
+
+	require.NoError(t, err)
+	require.NotNil(t, node)
+
+	loopNode := node.GetLoop()
+	require.NotNil(t, loopNode)
+	require.NotNil(t, loopNode.Config)
+
+	assert.Equal(t, avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL, loopNode.Config.ExecutionMode)
+
+	ethRunner := loopNode.GetEthTransfer()
+	require.NotNil(t, ethRunner, "expected ethTransfer runner")
+	require.NotNil(t, ethRunner.Config)
+	assert.Equal(t, "{{value}}", ethRunner.Config.Destination)
+	assert.Equal(t, "{{settings.token_amount.amount}}", ethRunner.Config.Amount)
+}
+
+func TestCreateNodeFromType_LoopWithGraphqlRunner(t *testing.T) {
+	config := map[string]interface{}{
+		"inputVariable":    "{{addresses}}",
+		"iterVal":          "value",
+		"iterKey":          "index",
+		"iterationTimeout": float64(30),
+		"executionMode":    "sequential",
+		"runner": map[string]interface{}{
+			"type": "graphqlDataQuery",
+			"config": map[string]interface{}{
+				"url":   "https://api.thegraph.com/subgraphs/name/test",
+				"query": "{ account(id: \"{{value}}\") { balance } }",
+				"variables": map[string]interface{}{
+					"first": "10",
+				},
+			},
+		},
+	}
+
+	node, err := CreateNodeFromType(NodeTypeLoop, config, "test-loop-gql")
+
+	require.NoError(t, err)
+	require.NotNil(t, node)
+
+	loopNode := node.GetLoop()
+	require.NotNil(t, loopNode)
+	require.NotNil(t, loopNode.Config)
+
+	gqlRunner := loopNode.GetGraphqlDataQuery()
+	require.NotNil(t, gqlRunner, "expected graphqlDataQuery runner")
+	require.NotNil(t, gqlRunner.Config)
+	assert.Equal(t, "https://api.thegraph.com/subgraphs/name/test", gqlRunner.Config.Url)
+	assert.Contains(t, gqlRunner.Config.Query, "account")
+	assert.Equal(t, "10", gqlRunner.Config.Variables["first"])
+}

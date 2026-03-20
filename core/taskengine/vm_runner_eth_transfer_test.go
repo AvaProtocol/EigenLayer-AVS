@@ -394,3 +394,44 @@ func TestETHTransferProcessor_Execute_LogEnrichment(t *testing.T) {
 		t.Errorf("Expected log to contain error details, got: %s", executionLog.Log)
 	}
 }
+
+// TestRunNodeWithInputs_PropagatesAASenderToChildVM verifies that aa_sender
+// set on the parent VM (by RunNodeImmediately) is correctly propagated to the
+// temporary VM created by RunNodeWithInputs. This is the mechanism that
+// populates the "from" field in ethTransfer/contractWrite simulations.
+func TestRunNodeWithInputs_PropagatesAASenderToChildVM(t *testing.T) {
+	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
+
+	// Simulate what RunNodeImmediately does: validate and set aa_sender on parent VM
+	vm.AddVar("aa_sender", "0x50f9Cc9B21b4Bb5bB6c9ff685a63665c13E85FfC")
+
+	// Create a customCode node that reads aa_sender to verify propagation
+	nodeConfig := map[string]interface{}{
+		"lang":   "javascript",
+		"source": "return { sender: aa_sender }",
+	}
+	node, err := CreateNodeFromType("customCode", nodeConfig, "")
+	if err != nil {
+		t.Fatalf("CreateNodeFromType failed: %v", err)
+	}
+	node.Name = "code1"
+
+	step, err := vm.RunNodeWithInputs(node, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("RunNodeWithInputs failed: %v", err)
+	}
+	if !step.Success {
+		t.Fatalf("expected success, got error: %s", step.Error)
+	}
+
+	data := step.GetCustomCode().Data.GetStructValue()
+	if data == nil {
+		t.Fatal("expected struct output")
+	}
+
+	sender := data.Fields["sender"].GetStringValue()
+	if sender != "0x50f9Cc9B21b4Bb5bB6c9ff685a63665c13E85FfC" {
+		t.Errorf("expected aa_sender to be propagated from parent VM, got: %q", sender)
+	}
+}
