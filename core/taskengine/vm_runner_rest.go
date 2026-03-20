@@ -25,11 +25,44 @@ const (
 	SendGridSummaryTemplateID = "d-3b4b885af0fc45ad822024ebc72f169c"
 )
 
-// Status HTML templates for email notifications
+// Status HTML badge SVG icons for email notifications
 const (
-	// StatusHtmlFailedTemplate is the HTML template for failed workflow status badge
-	StatusHtmlFailedTemplate = `<div style="display:inline-block; padding:8px 16px; background-color:#FEE2E2; color:#991B1B; border-radius:8px; font-weight:500; margin:8px 0"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#EF4444"/><path d="M10 6L6 10M6 6L10 10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>Execution failed</div>`
-	// StatusHtmlSuccessTemplate is the HTML template for successful workflow status badge
+	statusIconSuccess        = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#10B981"/><path d="M11 6L7 10L5 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+	statusIconPartialSuccess = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#F59E0B"/><circle cx="8" cy="5" r="1" fill="white"/><rect x="7.5" y="7" width="1" height="4" rx="0.5" fill="white"/></svg>`
+	statusIconFailure        = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#EF4444"/><path d="M10 6L6 10M6 6L10 10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`
+)
+
+// buildStatusHtml generates the status badge HTML for email notifications.
+// The status string comes from context-memory API ("success", "partial_success", "failure")
+// or from the deterministic summarizer.
+func buildStatusHtml(status string) string {
+	var iconSvg, text, bgColor, textColor string
+	switch status {
+	case "partial_success":
+		iconSvg = statusIconPartialSuccess
+		text = "Some steps were skipped"
+		bgColor = "#FEF3C7"   // light yellow
+		textColor = "#92400E" // dark amber
+	case "failure":
+		iconSvg = statusIconFailure
+		text = "Execution failed"
+		bgColor = "#FEE2E2"   // light red
+		textColor = "#991B1B" // dark red
+	default: // "success" and unknown
+		iconSvg = statusIconSuccess
+		text = "All steps completed successfully"
+		bgColor = "#D1FAE5"   // light green
+		textColor = "#065F46" // dark green
+	}
+	return fmt.Sprintf(
+		`<div style="display:inline-block; padding:8px 16px; background-color:%s; color:%s; border-radius:8px; font-weight:500; margin:8px 0">%s%s</div>`,
+		bgColor, textColor, iconSvg, text,
+	)
+}
+
+// Legacy constants kept for backward compatibility with any external references
+const (
+	StatusHtmlFailedTemplate  = `<div style="display:inline-block; padding:8px 16px; background-color:#FEE2E2; color:#991B1B; border-radius:8px; font-weight:500; margin:8px 0"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#EF4444"/><path d="M10 6L6 10M6 6L10 10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>Execution failed</div>`
 	StatusHtmlSuccessTemplate = `<div style="display:inline-block; padding:8px 16px; background-color:#D1FAE5; color:#065F46; border-radius:8px; font-weight:500; margin:8px 0"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#10B981"/><path d="M11 6L7 10L5 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>All steps completed successfully</div>`
 )
 
@@ -940,13 +973,8 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 							dynamicData["body"] = summaryForClient.Body
 						}
 
-						// Generate statusHtml based on workflow status
-						failed, _, _ := findEarliestFailure(r.vm)
-						if failed {
-							dynamicData["statusHtml"] = StatusHtmlFailedTemplate
-						} else {
-							dynamicData["statusHtml"] = StatusHtmlSuccessTemplate
-						}
+						// Generate statusHtml from the context-memory API status
+						dynamicData["statusHtml"] = buildStatusHtml(summaryForClient.Status)
 
 						// Use SummaryLine if available, otherwise extract from body
 						summaryLine := summaryForClient.SummaryLine
