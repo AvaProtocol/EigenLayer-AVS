@@ -1277,9 +1277,9 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 			v.addExecutionLog(executionLogForNode)
 
 			// Wait for on-chain confirmation if this is a real UserOp (not simulated).
-			// Uses the consolidated waitForOnChainConfirmationIfNeeded which handles
-			// both contractWrite (pending receipt) and ethTransfer (nil receipt) steps.
-			v.waitForOnChainConfirmationIfNeeded(executionLogForNode)
+			if err == nil {
+				v.waitForOnChainConfirmationIfNeeded(executionLogForNode)
+			}
 		}
 	} else if node.GetLoop() != nil {
 		executionLogForNode, err = v.runLoop(node)
@@ -1297,7 +1297,9 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 			v.addExecutionLog(executionLogForNode)
 
 			// Wait for on-chain confirmation (same as contractWrite).
-			v.waitForOnChainConfirmationIfNeeded(executionLogForNode)
+			if err == nil {
+				v.waitForOnChainConfirmationIfNeeded(executionLogForNode)
+			}
 		}
 	} else if node.GetBalance() != nil {
 		executionLogForNode, err = v.runBalance(node)
@@ -4574,16 +4576,22 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	iterKey := node.Config.IterKey
 	executionMode := node.Config.ExecutionMode
 
+	// Detect on-chain operations (contractWrite, ethTransfer) for timeout and mode decisions
+	isContractWrite := node.GetContractWrite() != nil
+	isEthTransfer := node.GetEthTransfer() != nil
+	isOnChainOp := isContractWrite || isEthTransfer
+
 	// Per-iteration timeout from config; default depends on operation type and chain.
-	// On-chain operations need longer timeouts to accommodate receipt waiting:
-	// - Ethereum mainnet (chain 1): 3 minutes (blocks ~12s, but bundler + confirmation can take 60-90s)
-	// - Other chains / non-on-chain ops: 30s default
-	hasOnChainRunner := node.GetContractWrite() != nil || node.GetEthTransfer() != nil
+	// On-chain operations need longer timeouts to accommodate receipt confirmation polling
+	// (waitForUserOpConfirmation has a 5-minute internal timeout):
+	// - Ethereum mainnet (chain 1): 6 min (covers 5-min confirmation + RPC propagation delay)
+	// - Other chains with on-chain ops: 1 min (faster block times)
+	// - Non-on-chain ops: 30s
 	iterationTimeoutSec := node.Config.IterationTimeout
 	if iterationTimeoutSec == 0 {
-		if hasOnChainRunner && v.smartWalletConfig != nil && v.smartWalletConfig.ChainID == 1 {
-			iterationTimeoutSec = 180 // 3 minutes for Ethereum mainnet on-chain ops
-		} else if hasOnChainRunner {
+		if isOnChainOp && v.smartWalletConfig != nil && v.smartWalletConfig.ChainID == 1 {
+			iterationTimeoutSec = 360 // 6 minutes for Ethereum mainnet on-chain ops
+		} else if isOnChainOp {
 			iterationTimeoutSec = 60 // 1 minute for other chains
 		} else {
 			iterationTimeoutSec = 30
@@ -4601,9 +4609,6 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 
 	// Determine execution mode
 	concurrent := false
-	isContractWrite := node.GetContractWrite() != nil
-	isEthTransfer := node.GetEthTransfer() != nil
-	isOnChainOp := isContractWrite || isEthTransfer
 	var executionModeLog string
 
 	if isOnChainOp {

@@ -225,30 +225,31 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 	}
 
 	// ETH transfer: SendUserOp may have timed out with a nil receipt.
-	// If the step succeeded but the receipt wasn't available (fallback txHash),
-	// we still need to wait for confirmation before the next iteration uses nonce+1.
-	// Check if this is an ethTransfer step with a UserOp-derived hash (0x0000... pattern from fallback).
+	// The ethTransfer processor stores receiptStatus="pending" and userOpHash in metadata
+	// when the receipt was not available. Poll for confirmation the same way as contractWrite.
 	if step.GetEthTransfer() != nil && step.Success && step.Metadata != nil {
 		meta := step.Metadata.AsInterface()
 		if metaMap, ok := meta.(map[string]interface{}); ok {
-			txHash, _ := metaMap["transactionHash"].(string)
-			// Fallback hashes from UserOp.GetUserOpHash are 0x-prefixed 64-char hex.
-			// Real receipt hashes are also 0x + 64 hex. We can't distinguish them here,
-			// but we CAN check if the gasUsed field is missing (no receipt was available).
-			if txHash != "" {
-				if _, hasGas := metaMap["gasUsed"]; !hasGas {
-					// No gasUsed means SendUserOp returned nil receipt (timed out).
-					// The tx is still pending on-chain. We need to wait.
-					v.logger.Info("⏳ On-chain confirmation needed (ethTransfer receipt pending)",
-						"stepID", step.Id,
-						"txHash", txHash)
+			status, _ := metaMap["receiptStatus"].(string)
+			userOpHash, _ := metaMap["userOpHash"].(string)
+			if status == "pending" && userOpHash != "" {
+				v.logger.Info("⏳ On-chain confirmation needed (ethTransfer pending)",
+					"stepID", step.Id,
+					"userOpHash", userOpHash)
 
-					// For ethTransfer, we don't have a userOpHash in metadata.
-					// Use addRPCPropagationDelay as a conservative wait since
-					// SendUserOp already waited up to 1 minute internally.
+				waitErr := v.waitForUserOpConfirmation(userOpHash)
+				if waitErr != nil {
+					v.logger.Error("❌ Failed to wait for ethTransfer confirmation",
+						"stepID", step.Id,
+						"userOpHash", userOpHash,
+						"error", waitErr)
+				} else {
+					v.logger.Info("✅ ethTransfer confirmed on-chain",
+						"stepID", step.Id,
+						"userOpHash", userOpHash)
 					v.addRPCPropagationDelay()
-					return true
 				}
+				return true
 			}
 		}
 	}
