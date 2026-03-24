@@ -4281,23 +4281,100 @@ func (eq *ExecutionQueue) extractResultData(step *avsproto.Execution_Step) inter
 		return rawData
 	}
 	if contractWriteOutput := step.GetContractWrite(); contractWriteOutput != nil {
-		// Return the child's data as-is; allow nils when no data
+		// Extract the decoded event data
+		var resultData interface{}
 		if contractWriteOutput.Data != nil {
 			rawData := contractWriteOutput.Data.AsInterface()
 			if dataArray, ok := rawData.([]interface{}); ok {
 				if len(dataArray) == 1 {
-					return dataArray[0]
+					resultData = dataArray[0]
+				} else {
+					resultData = dataArray
 				}
-				return dataArray
+			} else {
+				resultData = rawData
 			}
-			return rawData
 		}
-		return nil
+
+		// Extract transactionHash from step.Metadata (results array with receipts)
+		// and attach it so loop iteration output includes metadata for the summarizer.
+		txHash := extractTxHashFromMetadata(step.Metadata)
+		if txHash != "" {
+			resultMap := make(map[string]interface{})
+			// Merge existing data fields into the result map
+			if dataMap, ok := resultData.(map[string]interface{}); ok {
+				for k, v := range dataMap {
+					resultMap[k] = v
+				}
+			} else if resultData != nil {
+				resultMap["data"] = resultData
+			}
+			resultMap["metadata"] = map[string]interface{}{
+				"transactionHash": txHash,
+			}
+			return resultMap
+		}
+
+		return resultData
 	}
 	if ethTransferOutput := step.GetEthTransfer(); ethTransferOutput != nil && ethTransferOutput.Data != nil {
-		return ethTransferOutput.Data.AsInterface()
+		resultData := ethTransferOutput.Data.AsInterface()
+		// ETH transfer metadata is a flat object: {transactionHash: "0x..."}
+		txHash := extractTxHashFromFlatMetadata(step.Metadata)
+		if txHash != "" {
+			resultMap := make(map[string]interface{})
+			if dataMap, ok := resultData.(map[string]interface{}); ok {
+				for k, v := range dataMap {
+					resultMap[k] = v
+				}
+			} else if resultData != nil {
+				resultMap["data"] = resultData
+			}
+			resultMap["metadata"] = map[string]interface{}{
+				"transactionHash": txHash,
+			}
+			return resultMap
+		}
+		return resultData
 	}
 	return nil
+}
+
+// extractTxHashFromMetadata extracts the first transactionHash from a contractWrite step's
+// Metadata field, which contains the results array with receipt objects.
+func extractTxHashFromMetadata(metadata *structpb.Value) string {
+	if metadata == nil {
+		return ""
+	}
+	// Metadata is an array of method results: [{receipt: {transactionHash: "0x..."}, ...}]
+	if listVal := metadata.GetListValue(); listVal != nil {
+		for _, item := range listVal.GetValues() {
+			if m := item.GetStructValue(); m != nil {
+				if receiptVal := m.Fields["receipt"]; receiptVal != nil {
+					if receiptStruct := receiptVal.GetStructValue(); receiptStruct != nil {
+						if hashVal := receiptStruct.Fields["transactionHash"]; hashVal != nil {
+							return hashVal.GetStringValue()
+						}
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// extractTxHashFromFlatMetadata extracts transactionHash from a flat metadata object
+// (used by ethTransfer steps where metadata is {transactionHash: "0x...", ...}).
+func extractTxHashFromFlatMetadata(metadata *structpb.Value) string {
+	if metadata == nil {
+		return ""
+	}
+	if m := metadata.GetStructValue(); m != nil {
+		if hashVal := m.Fields["transactionHash"]; hashVal != nil {
+			return hashVal.GetStringValue()
+		}
+	}
+	return ""
 }
 
 // executeNodeDirectWithVars executes a node directly with isolated variables without modifying shared VM state
