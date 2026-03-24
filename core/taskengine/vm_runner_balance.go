@@ -54,7 +54,7 @@ type SimplifiedTokenBalance struct {
 	Balance          string   `json:"balance"`
 	BalanceFormatted string   `json:"balanceFormatted"`
 	Decimals         int      `json:"decimals"`
-	TokenAddress     *string  `json:"tokenAddress,omitempty"` // Only for non-native tokens
+	TokenAddress     *string  `json:"tokenAddress,omitempty"` // ERC-20: contract address, Native: 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
 	USDPrice         *float64 `json:"usdPrice,omitempty"`
 	USDValue         *float64 `json:"usdValue,omitempty"`
 }
@@ -403,14 +403,14 @@ func (vm *VM) fetchMoralisBalancesWithFiltering(
 			continue
 		}
 
-		// Check if this is a native token (native tokens don't have the tokenAddress field)
-		// The fetchMoralisBalances function only adds tokenAddress for non-native tokens
+		// Check if this is a native token (sentinel address 0xEeee...EEeE)
 		tokenAddr, hasTokenAddr := token["tokenAddress"].(string)
 
-		if !hasTokenAddr {
-			// Native token (no tokenAddress field) - always include it
+		if !hasTokenAddr || strings.EqualFold(tokenAddr, NativeTokenAddressChecksummed) {
+			// Native token - always include it
 			result = append(result, bal)
 			foundAddrs["native"] = true
+			foundAddrs[NativeTokenAddress] = true // prevent duplicate if sentinel is in requestedAddrs
 			continue
 		}
 
@@ -577,8 +577,14 @@ func (vm *VM) fetchMoralisBalances(
 			Decimals:         token.Decimals,
 		}
 
-		// Only include tokenAddress for non-native tokens
-		if !token.NativeToken {
+		// Include tokenAddress for all tokens:
+		// - ERC-20 tokens: use their contract address from Moralis
+		// - Native tokens: use the well-known 0xeee...eee sentinel address
+		//   so client-side code can uniformly look up by tokenAddress
+		if token.NativeToken {
+			nativeAddr := NativeTokenAddressChecksummed
+			simpleToken.TokenAddress = &nativeAddr
+		} else {
 			simpleToken.TokenAddress = &token.TokenAddress
 		}
 

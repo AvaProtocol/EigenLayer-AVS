@@ -8462,8 +8462,9 @@ func (x *BalanceNode_Config) GetTokenAddresses() []string {
 type BalanceNode_Output struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Returns an array of token balance objects
-	// Native tokens (ETH, MATIC, etc.) will not have tokenAddress field
-	// Non-native tokens (ERC20) will include tokenAddress field
+	// All tokens include a tokenAddress field:
+	// - Native tokens (ETH, BNB, etc.): 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
+	// - Non-native tokens (ERC20): their contract address
 	Data          *structpb.Value `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

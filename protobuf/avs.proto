@@ -544,8 +544,9 @@ message BalanceNode {
 
   message Output {
     // Returns an array of token balance objects
-    // Native tokens (ETH, MATIC, etc.) will not have tokenAddress field
-    // Non-native tokens (ERC20) will include tokenAddress field
+    // All tokens include a tokenAddress field:
+    // - Native tokens (ETH, BNB, etc.): 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
+    // - Non-native tokens (ERC20): their contract address
     google.protobuf.Value data = 1;
   }
 

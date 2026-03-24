@@ -1034,9 +1034,9 @@ func TestBalanceNode_TokenAddressesWithTemplateVariables(t *testing.T) {
 
 		if symbol == "ETH" {
 			hasETH = true
-			// Native ETH should not have tokenAddress field
-			if hasAddr && tokenAddr != "" {
-				t.Errorf("ETH (native token) should not have tokenAddress field")
+			// Native ETH should have the well-known sentinel tokenAddress
+			if !hasAddr || !strings.EqualFold(tokenAddr, "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE") {
+				t.Errorf("ETH should have tokenAddress 0xEeee...EEeE sentinel, got %q", tokenAddr)
 			}
 		}
 
@@ -1316,9 +1316,13 @@ func TestBalanceNode_MultipleTokenAddresses(t *testing.T) {
 		if symbol == "ETH" {
 			hasETH = true
 			t.Logf("✅ Found ETH (native token)")
-			// Check if it has tokenAddress (it shouldn't)
-			if _, hasAddr := token["tokenAddress"]; hasAddr {
-				t.Errorf("❌ ETH should NOT have tokenAddress field")
+			// Native ETH should have the well-known sentinel tokenAddress
+			if addr, hasAddr := token["tokenAddress"].(string); hasAddr {
+				if !strings.EqualFold(addr, "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE") {
+					t.Errorf("❌ ETH tokenAddress should be 0xEeee...EEeE sentinel, got %s", addr)
+				}
+			} else {
+				t.Errorf("❌ ETH should have tokenAddress field (0xEeee...EEeE sentinel)")
 			}
 		}
 
