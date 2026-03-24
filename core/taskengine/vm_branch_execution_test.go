@@ -391,8 +391,8 @@ func TestBranchNode_FindExpression_CaseInsensitive(t *testing.T) {
 		{
 			Id:   "0",
 			Type: "if",
-			// CORRECT expression with case-insensitive comparison
-			// Need to check if tokenAddress exists first (ETH doesn't have tokenAddress)
+			// Case-insensitive comparison to find token by address
+			// All tokens (native and ERC-20) now have tokenAddress field
 			Expression: "{{balance1.data.find(token => token.tokenAddress && token.tokenAddress.toLowerCase() === settings.uniswap_v3_pool.token1.id.toLowerCase()).balance > 0}}",
 		},
 		{

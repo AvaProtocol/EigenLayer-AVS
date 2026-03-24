@@ -16,7 +16,7 @@ The Balance Node abstracts away provider-specific implementation details (Morali
 
 - ✅ **Simplified Response Format** - Only essential fields, no logos/thumbnails/percentages
 - ✅ **Automatic Spam Filtering** - Unverified tokens excluded by default
-- ✅ **Native Token Handling** - ETH, BNB, etc. identified by absence of `tokenAddress` field
+- ✅ **Native Token Handling** - ETH, BNB, etc. use sentinel `tokenAddress` `0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE`
 - ✅ **Multi-Chain Support** - Ethereum, Base, BSC, Sepolia, Base Sepolia, and more
 - ✅ **Flexible Filtering** - By USD value, zero balances, specific token addresses
 - ✅ **Centralized API Management** - Aggregator handles Moralis credentials
@@ -130,9 +130,7 @@ The Balance Node returns a **direct array** of token objects (not wrapped in an 
 
 ### Native Token vs ERC20 Token
 
-**The ONLY way to identify a native token is by the absence of the `tokenAddress` field.**
-
-**Technical Note**: Internally, Moralis returns native tokens with a placeholder address (`0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee`). The aggregator automatically removes this field during response processing to provide a cleaner API for clients.
+**Native tokens use the well-known sentinel address `0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE` as their `tokenAddress`.** All tokens (native and ERC-20) include the `tokenAddress` field, so client code can uniformly look up tokens by address without special-casing.
 
 ```typescript
 // TypeScript example
@@ -142,17 +140,18 @@ interface TokenBalance {
   balance: string;
   balanceFormatted: string;
   decimals: number;
-  tokenAddress?: string;  // ⚠️ ONLY present for ERC20 tokens
+  tokenAddress: string;   // ERC-20: contract address, Native: 0xEeee...EEeE sentinel
   usdPrice?: number;      // Optional - omitted if unavailable
   usdValue?: number;      // Optional - omitted if unavailable
 }
 
 // Identifying token type
+const NATIVE_TOKEN_ADDRESS = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 function isNativeToken(token: TokenBalance): boolean {
-  return token.tokenAddress === undefined;
+  return token.tokenAddress.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase();
 }
 
-// Usage
+// Usage — uniform lookup by tokenAddress works for all tokens
 const tokens: TokenBalance[] = await balanceNode.execute();
 const nativeTokens = tokens.filter(isNativeToken);
 const erc20Tokens = tokens.filter(t => !isNativeToken(t));
@@ -167,24 +166,17 @@ const erc20Tokens = tokens.filter(t => !isNativeToken(t));
 | `balance` | ✅ Yes | Raw balance as string |
 | `balanceFormatted` | ✅ Yes | Human-readable balance |
 | `decimals` | ✅ Yes | Token decimals |
-| `tokenAddress` | ❌ **No** | **Only for ERC20 tokens** |
+| `tokenAddress` | ✅ Yes | ERC-20: contract address, Native: `0xEeee...EEeE` sentinel |
 | `usdPrice` | ❌ No | **Only if price data available** |
 | `usdValue` | ❌ No | **Only if price data available** |
 
 ### Important Guarantees
 
-1. **Native tokens NEVER have `tokenAddress` field**
-   - Not set to `null`
-   - Not set to empty string `""`
-   - Not set to placeholder `0xeeee...`
-   - **The field is simply omitted**
+1. **All tokens have a `tokenAddress` field**
+   - Native tokens: `0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE`
+   - ERC-20 tokens: their contract address (checksummed)
 
-2. **ERC20 tokens ALWAYS have `tokenAddress` field**
-   - Always a valid 40-character hex address
-   - Always checksummed format
-   - Never a placeholder value
-
-3. **USD fields are omitted when unavailable**
+2. **USD fields are omitted when unavailable**
    - Not set to `null`
    - Not set to `0`
    - **The fields are simply omitted**
@@ -450,7 +442,7 @@ The Balance Node filters out these Moralis fields to provide a cleaner interface
 - `total_supply`, `total_supply_formatted` - Rarely needed
 - `verified_contract` - All returned tokens are verified
 - `block_number`, `cursor`, `page`, `page_size` - Pagination (max 100 items)
-- `native_token` - Replaced by absence of `tokenAddress` field
+- `native_token` - Native tokens use sentinel `tokenAddress` (`0xEeee...EEeE`)
 
 ---
 
@@ -584,15 +576,14 @@ yarn test tests/nodes/balanceNode.test.ts
 ### DO ✅
 - Use `tokenAddresses` to filter for **specific ERC20 contracts**
 - Omit `tokenAddresses` or use `[]` to get **all tokens**
-- Check for **absence of `tokenAddress` field** to identify native tokens
+- Use `tokenAddress` field to look up any token (works uniformly for native and ERC-20)
+- Check for sentinel `0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE` to identify native tokens
 - Expect `usdPrice` and `usdValue` to be **omitted** when unavailable
 - Use supported chain identifiers (name, decimal ID, or hex ID)
 - Set `minUsdValue` in dollars (e.g., 1.0 = $1.00)
 
 ### DON'T ❌
-- Include `0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee` in `tokenAddresses`
-- Assume native tokens have a `tokenAddress` field
-- Check for `tokenAddress === null` (field is omitted, not null)
+- Include `0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee` in `tokenAddresses` filter (native is always included)
 - Expect `usdPrice` or `usdValue` to always be present
 - Use unsupported chain identifiers
 - Set `minUsdValue` in cents (backend handles conversion)
