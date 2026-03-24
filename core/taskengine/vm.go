@@ -4299,45 +4299,35 @@ func (eq *ExecutionQueue) extractResultData(step *avsproto.Execution_Step) inter
 		// Extract transactionHash from step.Metadata (results array with receipts)
 		// and attach it so loop iteration output includes metadata for the summarizer.
 		txHash := extractTxHashFromMetadata(step.Metadata)
-		if txHash != "" {
-			resultMap := make(map[string]interface{})
-			// Merge existing data fields into the result map
-			if dataMap, ok := resultData.(map[string]interface{}); ok {
-				for k, v := range dataMap {
-					resultMap[k] = v
-				}
-			} else if resultData != nil {
-				resultMap["data"] = resultData
-			}
-			resultMap["metadata"] = map[string]interface{}{
-				"transactionHash": txHash,
-			}
-			return resultMap
-		}
-
-		return resultData
+		return wrapResultWithTxHash(resultData, txHash)
 	}
 	if ethTransferOutput := step.GetEthTransfer(); ethTransferOutput != nil && ethTransferOutput.Data != nil {
 		resultData := ethTransferOutput.Data.AsInterface()
 		// ETH transfer metadata is a flat object: {transactionHash: "0x..."}
 		txHash := extractTxHashFromFlatMetadata(step.Metadata)
-		if txHash != "" {
-			resultMap := make(map[string]interface{})
-			if dataMap, ok := resultData.(map[string]interface{}); ok {
-				for k, v := range dataMap {
-					resultMap[k] = v
-				}
-			} else if resultData != nil {
-				resultMap["data"] = resultData
-			}
-			resultMap["metadata"] = map[string]interface{}{
-				"transactionHash": txHash,
-			}
-			return resultMap
-		}
-		return resultData
+		return wrapResultWithTxHash(resultData, txHash)
 	}
 	return nil
+}
+
+// wrapResultWithTxHash attaches a transactionHash to the result data under a metadata key.
+// If txHash is empty, the original resultData is returned unchanged.
+func wrapResultWithTxHash(resultData interface{}, txHash string) interface{} {
+	if txHash == "" {
+		return resultData
+	}
+	resultMap := make(map[string]interface{})
+	if dataMap, ok := resultData.(map[string]interface{}); ok {
+		for k, v := range dataMap {
+			resultMap[k] = v
+		}
+	} else if resultData != nil {
+		resultMap["data"] = resultData
+	}
+	resultMap["metadata"] = map[string]interface{}{
+		"transactionHash": txHash,
+	}
+	return resultMap
 }
 
 // extractTxHashFromMetadata extracts the first transactionHash from a contractWrite step's
