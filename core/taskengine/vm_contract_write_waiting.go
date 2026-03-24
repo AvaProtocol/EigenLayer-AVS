@@ -182,6 +182,80 @@ func (v *VM) getReceiptByUserOpHash(userOpHash string) (*types.Receipt, error) {
 	return nil, fmt.Errorf("receipt not found (use bundler.GetUserOperationReceipt instead)")
 }
 
+// waitForOnChainConfirmationIfNeeded is the single entry point for receipt-waiting logic.
+// It handles both contractWrite (array metadata with pending status) and ethTransfer
+// (flat metadata) steps. Called from both the main execution path and loop iterations.
+//
+// Returns true if confirmation was attempted (regardless of success/failure).
+func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) bool {
+	if v.IsSimulation || step == nil {
+		return false
+	}
+
+	// Contract write: check for pending status in metadata array
+	if shouldWaitForContractWriteConfirmation(step, false) {
+		userOpHash := extractUserOpHashFromStep(step)
+		if userOpHash == "" {
+			return false
+		}
+
+		v.logger.Info("⏳ On-chain confirmation needed (contractWrite pending)",
+			"stepID", step.Id,
+			"userOpHash", userOpHash)
+
+		waitErr := v.waitForUserOpConfirmation(userOpHash)
+		if waitErr != nil {
+			v.logger.Error("❌ Failed to wait for on-chain confirmation",
+				"stepID", step.Id,
+				"userOpHash", userOpHash,
+				"error", waitErr)
+		} else {
+			v.logger.Info("✅ On-chain confirmation received",
+				"stepID", step.Id,
+				"userOpHash", userOpHash)
+
+			v.mu.Lock()
+			step.Success = true
+			step.Error = ""
+			v.mu.Unlock()
+
+			v.addRPCPropagationDelay()
+		}
+		return true
+	}
+
+	// ETH transfer: SendUserOp may have timed out with a nil receipt.
+	// If the step succeeded but the receipt wasn't available (fallback txHash),
+	// we still need to wait for confirmation before the next iteration uses nonce+1.
+	// Check if this is an ethTransfer step with a UserOp-derived hash (0x0000... pattern from fallback).
+	if step.GetEthTransfer() != nil && step.Success && step.Metadata != nil {
+		meta := step.Metadata.AsInterface()
+		if metaMap, ok := meta.(map[string]interface{}); ok {
+			txHash, _ := metaMap["transactionHash"].(string)
+			// Fallback hashes from UserOp.GetUserOpHash are 0x-prefixed 64-char hex.
+			// Real receipt hashes are also 0x + 64 hex. We can't distinguish them here,
+			// but we CAN check if the gasUsed field is missing (no receipt was available).
+			if txHash != "" {
+				if _, hasGas := metaMap["gasUsed"]; !hasGas {
+					// No gasUsed means SendUserOp returned nil receipt (timed out).
+					// The tx is still pending on-chain. We need to wait.
+					v.logger.Info("⏳ On-chain confirmation needed (ethTransfer receipt pending)",
+						"stepID", step.Id,
+						"txHash", txHash)
+
+					// For ethTransfer, we don't have a userOpHash in metadata.
+					// Use addRPCPropagationDelay as a conservative wait since
+					// SendUserOp already waited up to 1 minute internally.
+					v.addRPCPropagationDelay()
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
 // addRPCPropagationDelay adds a delay to ensure RPC nodes have propagated the latest state
 // This prevents issues where dependent transactions fail because the RPC node hasn't seen
 // the previous transaction's state changes yet

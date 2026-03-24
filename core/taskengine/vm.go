@@ -1276,46 +1276,10 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 
-			// NEW: Wait for on-chain confirmation if this is a real UserOp (not simulated)
-			// This ensures sequential contract writes work correctly (e.g., approve → swap)
-			if shouldWaitForContractWriteConfirmation(executionLogForNode, v.IsSimulation) {
-				userOpHash := extractUserOpHashFromStep(executionLogForNode)
-				if userOpHash != "" {
-					v.logger.Info("⏳ Contract write pending - waiting for on-chain confirmation",
-						"nodeID", node.Id,
-						"userOpHash", userOpHash)
-
-					// Wait for confirmation using exponential backoff polling
-					waitErr := v.waitForUserOpConfirmation(userOpHash)
-					if waitErr != nil {
-						v.logger.Error("❌ Failed to wait for contract write confirmation",
-							"nodeID", node.Id,
-							"userOpHash", userOpHash,
-							"error", waitErr)
-						// Don't fail the entire execution, but log the error
-						// The UserOp may still be processing
-					} else {
-						v.logger.Info("✅ Contract write confirmed on-chain",
-							"nodeID", node.Id,
-							"userOpHash", userOpHash)
-
-						// Update execution log to reflect successful confirmation
-						// The step was initially marked as pending/failed because receipt was not available
-						// Now that confirmation is received, mark it as successful
-						// Thread-safe: executionLogForNode is already in ExecutionLogs slice, protected by mutex
-						v.mu.Lock()
-						executionLogForNode.Success = true
-						executionLogForNode.Error = ""
-						v.mu.Unlock()
-						v.logger.Info("✅ Updated execution log success status after confirmation",
-							"nodeID", node.Id,
-							"success", executionLogForNode.Success)
-
-						// Add RPC propagation delay to ensure state is visible across all RPC nodes
-						v.addRPCPropagationDelay()
-					}
-				}
-			}
+			// Wait for on-chain confirmation if this is a real UserOp (not simulated).
+			// Uses the consolidated waitForOnChainConfirmationIfNeeded which handles
+			// both contractWrite (pending receipt) and ethTransfer (nil receipt) steps.
+			v.waitForOnChainConfirmationIfNeeded(executionLogForNode)
 		}
 	} else if node.GetLoop() != nil {
 		executionLogForNode, err = v.runLoop(node)
@@ -1331,6 +1295,9 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		executionLogForNode, err = v.runEthTransfer(node)
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
+
+			// Wait for on-chain confirmation (same as contractWrite).
+			v.waitForOnChainConfirmationIfNeeded(executionLogForNode)
 		}
 	} else if node.GetBalance() != nil {
 		executionLogForNode, err = v.runBalance(node)
@@ -4467,10 +4434,20 @@ func (v *VM) executeNodeWithIsolatedVars(node *avsproto.TaskNode, stepID string,
 		executionLogForNode, err = v.runContractRead(node)
 	} else if node.GetContractWrite() != nil {
 		executionLogForNode, err = v.runContractWrite(node)
+		// Wait for on-chain confirmation before returning to the loop,
+		// so the next iteration can safely use nonce+1.
+		if executionLogForNode != nil && err == nil {
+			v.waitForOnChainConfirmationIfNeeded(executionLogForNode)
+		}
 	} else if node.GetFilter() != nil {
 		executionLogForNode, err = v.runFilter(node)
 	} else if node.GetEthTransfer() != nil {
 		executionLogForNode, err = v.runEthTransfer(node)
+		// Same receipt-waiting as contractWrite: ensure the tx is confirmed
+		// before the next loop iteration submits with nonce+1.
+		if executionLogForNode != nil && err == nil {
+			v.waitForOnChainConfirmationIfNeeded(executionLogForNode)
+		}
 	} else if node.GetLoop() != nil {
 		// For loop nodes, use the execution queue
 		loopNode := node.GetLoop()
@@ -4597,10 +4574,20 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	iterKey := node.Config.IterKey
 	executionMode := node.Config.ExecutionMode
 
-	// Per-iteration timeout from config; default to 30s when unset (per proto docs)
+	// Per-iteration timeout from config; default depends on operation type and chain.
+	// On-chain operations need longer timeouts to accommodate receipt waiting:
+	// - Ethereum mainnet (chain 1): 3 minutes (blocks ~12s, but bundler + confirmation can take 60-90s)
+	// - Other chains / non-on-chain ops: 30s default
+	hasOnChainRunner := node.GetContractWrite() != nil || node.GetEthTransfer() != nil
 	iterationTimeoutSec := node.Config.IterationTimeout
 	if iterationTimeoutSec == 0 {
-		iterationTimeoutSec = 30
+		if hasOnChainRunner && v.smartWalletConfig != nil && v.smartWalletConfig.ChainID == 1 {
+			iterationTimeoutSec = 180 // 3 minutes for Ethereum mainnet on-chain ops
+		} else if hasOnChainRunner {
+			iterationTimeoutSec = 60 // 1 minute for other chains
+		} else {
+			iterationTimeoutSec = 30
+		}
 	}
 	iterationTimeout := time.Duration(iterationTimeoutSec) * time.Second
 
@@ -4615,11 +4602,13 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	// Determine execution mode
 	concurrent := false
 	isContractWrite := node.GetContractWrite() != nil
+	isEthTransfer := node.GetEthTransfer() != nil
+	isOnChainOp := isContractWrite || isEthTransfer
 	var executionModeLog string
 
-	if isContractWrite {
+	if isOnChainOp {
 		concurrent = false
-		executionModeLog = "sequentially due to contract write operation (security requirement)"
+		executionModeLog = "sequentially due to on-chain operation (nonce ordering requirement)"
 	} else {
 		switch executionMode {
 		case avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL:
