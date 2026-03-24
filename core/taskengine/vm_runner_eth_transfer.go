@@ -366,9 +366,16 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	// Get the sender (smart wallet) address for the transfer object
 	fromAddress := getAASenderString(p.vm)
 
-	// Build result object for metadata (only transactionHash + gas info - success/isSimulated are in response/executionContext)
+	// Build result object for metadata (transactionHash + receipt status + gas info)
 	resultObj := map[string]interface{}{
 		"transactionHash": txHash,
+	}
+
+	// If SendUserOp returned without a receipt (timed out), mark as pending
+	// and include the userOpHash so waitForOnChainConfirmationIfNeeded can poll for it.
+	if receipt == nil && userOp != nil {
+		resultObj["receiptStatus"] = "pending"
+		resultObj["userOpHash"] = fmt.Sprintf("0x%064x", userOp.GetUserOpHash(aa.EntrypointAddress, big.NewInt(p.smartWalletConfig.ChainID)))
 	}
 
 	// Extract gas information from receipt if available
