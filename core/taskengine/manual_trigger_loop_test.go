@@ -447,6 +447,158 @@ func TestLoopNode_ContractWrite_InvalidAddress_PartialFailure(t *testing.T) {
 	assert.Nil(t, arr[1], "Second iteration should be nil (failed)")
 }
 
+func TestLoopNode_ContractWrite_MetadataTransactionHash(t *testing.T) {
+	// Integration test: verify that loop iteration output includes
+	// metadata.transactionHash extracted from the contractWrite step's metadata.
+	logger := testutil.GetLogger()
+	testConfig := testutil.GetTestConfig()
+	require.NotNil(t, testConfig)
+	tenderlyClient := NewTenderlyClient(testConfig, logger)
+	require.NotNil(t, tenderlyClient)
+
+	smartWalletConfig := testutil.GetTestSmartWalletConfig()
+	vm, err := NewVMWithData(nil, nil, smartWalletConfig, nil)
+	require.NoError(t, err)
+	require.NotNil(t, vm)
+	vm.tenderlyClient = tenderlyClient
+	vm.SetSimulation(true)
+
+	inputVariables := map[string]interface{}{
+		"writeParams": []interface{}{
+			map[string]interface{}{"spender": "0x0000000000000000000000000000000000000001", "amount": "0"},
+		},
+		"settings": map[string]interface{}{
+			"runner":   "0x5a8A8a79DdF433756D4D97DCCE33334D9E218856",
+			"chain_id": int64(11155111),
+			"chain":    "sepolia",
+		},
+	}
+
+	nodeConfig := map[string]interface{}{
+		"inputVariable":    "{{writeParams}}",
+		"iterVal":          "value",
+		"iterKey":          "index",
+		"iterationTimeout": float64(30),
+		"executionMode":    "sequential",
+		"runner": map[string]interface{}{
+			"type": "contractWrite",
+			"config": map[string]interface{}{
+				"contractAddress": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+				"contractAbi": []interface{}{
+					map[string]interface{}{
+						"type":            "function",
+						"name":            "approve",
+						"stateMutability": "nonpayable",
+						"inputs": []interface{}{
+							map[string]interface{}{"name": "spender", "type": "address"},
+							map[string]interface{}{"name": "amount", "type": "uint256"},
+						},
+						"outputs": []interface{}{map[string]interface{}{"name": "", "type": "bool"}},
+					},
+				},
+				"methodCalls": []interface{}{
+					map[string]interface{}{
+						"methodName":   "approve",
+						"methodParams": []interface{}{"{{value.spender}}", "{{value.amount}}"},
+					},
+				},
+			},
+		},
+	}
+
+	node, err := CreateNodeFromType("loop", nodeConfig, "")
+	require.NoError(t, err)
+	node.Name = "testLoopContractWriteTxHash"
+
+	step, err := vm.RunNodeWithInputs(node, inputVariables)
+	require.NoError(t, err)
+	require.NotNil(t, step)
+	require.True(t, step.Success, "execution failed: %s", step.Error)
+
+	loopOutput := step.GetLoop()
+	require.NotNil(t, loopOutput)
+	require.NotNil(t, loopOutput.Data)
+
+	arr, ok := loopOutput.Data.AsInterface().([]interface{})
+	require.True(t, ok, "expected array, got %T", loopOutput.Data.AsInterface())
+	require.Len(t, arr, 1)
+
+	iterMap, ok := arr[0].(map[string]interface{})
+	require.True(t, ok, "expected map for iteration result, got %T", arr[0])
+
+	meta, ok := iterMap["metadata"].(map[string]interface{})
+	require.True(t, ok, "expected metadata map in iteration result, got keys: %v", iterMap)
+
+	txHash, ok := meta["transactionHash"].(string)
+	require.True(t, ok, "expected transactionHash string in metadata")
+	assert.True(t, len(txHash) > 0, "transactionHash should not be empty")
+	assert.True(t, txHash[:2] == "0x", "transactionHash should start with 0x, got: %s", txHash)
+}
+
+func TestLoopNode_EthTransfer_MetadataTransactionHash(t *testing.T) {
+	// Integration test: verify that loop iteration output includes
+	// metadata.transactionHash extracted from the ethTransfer step's metadata.
+	smartWalletConfig := testutil.GetTestSmartWalletConfig()
+	vm, err := NewVMWithData(nil, nil, smartWalletConfig, nil)
+	require.NoError(t, err)
+	require.NotNil(t, vm)
+	vm.SetSimulation(true)
+
+	inputVariables := map[string]interface{}{
+		"recipients": []interface{}{
+			"0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
+		},
+		"settings": map[string]interface{}{
+			"runner":   "0x5a8A8a79DdF433756D4D97DCCE33334D9E218856",
+			"chain_id": int64(11155111),
+			"chain":    "sepolia",
+		},
+	}
+
+	nodeConfig := map[string]interface{}{
+		"inputVariable":    "{{recipients}}",
+		"iterVal":          "value",
+		"iterKey":          "index",
+		"iterationTimeout": float64(30),
+		"executionMode":    "sequential",
+		"runner": map[string]interface{}{
+			"type": "ethTransfer",
+			"config": map[string]interface{}{
+				"destination": "{{value}}",
+				"amount":      "1000000000000000", // 0.001 ETH
+			},
+		},
+	}
+
+	node, err := CreateNodeFromType("loop", nodeConfig, "")
+	require.NoError(t, err)
+	node.Name = "testLoopEthTransferTxHash"
+
+	step, err := vm.RunNodeWithInputs(node, inputVariables)
+	require.NoError(t, err)
+	require.NotNil(t, step)
+	require.True(t, step.Success, "execution failed: %s", step.Error)
+
+	loopOutput := step.GetLoop()
+	require.NotNil(t, loopOutput)
+	require.NotNil(t, loopOutput.Data)
+
+	arr, ok := loopOutput.Data.AsInterface().([]interface{})
+	require.True(t, ok, "expected array, got %T", loopOutput.Data.AsInterface())
+	require.Len(t, arr, 1)
+
+	iterMap, ok := arr[0].(map[string]interface{})
+	require.True(t, ok, "expected map for iteration result, got %T", arr[0])
+
+	meta, ok := iterMap["metadata"].(map[string]interface{})
+	require.True(t, ok, "expected metadata map in iteration result, got keys: %v", iterMap)
+
+	txHash, ok := meta["transactionHash"].(string)
+	require.True(t, ok, "expected transactionHash string in metadata")
+	assert.True(t, len(txHash) > 0, "transactionHash should not be empty")
+	assert.True(t, txHash[:2] == "0x", "transactionHash should start with 0x, got: %s", txHash)
+}
+
 func TestRestApiStandardFormat(t *testing.T) {
 	// Create VM
 	vm := NewVM()
