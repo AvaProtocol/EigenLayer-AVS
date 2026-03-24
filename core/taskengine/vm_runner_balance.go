@@ -406,10 +406,11 @@ func (vm *VM) fetchMoralisBalancesWithFiltering(
 		// Check if this is a native token (sentinel address 0xEeee...EEeE)
 		tokenAddr, hasTokenAddr := token["tokenAddress"].(string)
 
-		if !hasTokenAddr || strings.EqualFold(tokenAddr, "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE") {
+		if !hasTokenAddr || strings.EqualFold(tokenAddr, NativeTokenAddressChecksummed) {
 			// Native token - always include it
 			result = append(result, bal)
 			foundAddrs["native"] = true
+			foundAddrs[NativeTokenAddress] = true // prevent duplicate if sentinel is in requestedAddrs
 			continue
 		}
 
@@ -581,7 +582,7 @@ func (vm *VM) fetchMoralisBalances(
 		// - Native tokens: use the well-known 0xeee...eee sentinel address
 		//   so client-side code can uniformly look up by tokenAddress
 		if token.NativeToken {
-			nativeAddr := "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
+			nativeAddr := NativeTokenAddressChecksummed
 			simpleToken.TokenAddress = &nativeAddr
 		} else {
 			simpleToken.TokenAddress = &token.TokenAddress

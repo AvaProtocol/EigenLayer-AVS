@@ -112,6 +112,7 @@ The Balance Node returns a **direct array** of token objects (not wrapped in an 
     "balance": "1234567890000000000",
     "balanceFormatted": "1.23456789",
     "decimals": 18,
+    "tokenAddress": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
     "usdPrice": 4528.12,
     "usdValue": 5591.23
   },

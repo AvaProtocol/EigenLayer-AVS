@@ -214,6 +214,7 @@ func TestBranchNode_FindExpression(t *testing.T) {
 				"decimals":         float64(18),
 				"name":             "Ether",
 				"symbol":           "ETH",
+				"tokenAddress":     NativeTokenAddressChecksummed,
 			},
 			map[string]interface{}{
 				"balance":          "1000000000000000",
@@ -342,6 +343,7 @@ func TestBranchNode_FindExpression_CaseInsensitive(t *testing.T) {
 				"decimals":         float64(18),
 				"name":             "Ether",
 				"symbol":           "ETH",
+				"tokenAddress":     NativeTokenAddressChecksummed,
 			},
 			map[string]interface{}{
 				"balance":          "1000000000000000",
@@ -463,6 +465,7 @@ func TestBranchNode_NumericComparison(t *testing.T) {
 				"decimals":         float64(18),
 				"name":             "Ether",
 				"symbol":           "ETH",
+				"tokenAddress":     NativeTokenAddressChecksummed,
 			},
 			map[string]interface{}{
 				"balance":          "1000000000000000",

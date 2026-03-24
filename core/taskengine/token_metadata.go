@@ -79,6 +79,10 @@ const (
 // to represent native ETH across all chains
 const NativeTokenAddress = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
+// NativeTokenAddressChecksummed is the EIP-55 checksummed form of the sentinel,
+// used in balance node output so clients can match it case-insensitively.
+const NativeTokenAddressChecksummed = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
+
 // isNativeToken checks if the given address is the native token sentinel
 func isNativeToken(address string) bool {
 	return strings.ToLower(address) == NativeTokenAddress
