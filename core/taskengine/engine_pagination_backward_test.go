@@ -13,7 +13,7 @@ import (
 )
 
 // setupTasksEngine creates an engine with the given number of tasks and returns
-// the engine, user, and wallet address for use in pagination tests.
+// the engine, wallet response, and a cleanup function for use in pagination tests.
 func setupTasksEngine(t *testing.T, totalTasks int) (*Engine, *avsproto.GetWalletResp, func()) {
 	t.Helper()
 	db := testutil.TestMustDB()
@@ -74,7 +74,7 @@ func setupExecutionsEngine(t *testing.T, totalExecutions int) (*Engine, string, 
 	return n, task.Id, cleanup
 }
 
-// collectAllIds fetches a single page of all items to get the canonical order.
+// collectAllTaskIds fetches a single page of all tasks to get the canonical order of task IDs.
 func collectAllTaskIds(t *testing.T, n *Engine, walletAddr string, total int) []string {
 	t.Helper()
 	user := testutil.TestUser1()
@@ -120,9 +120,8 @@ func TestTasksPaginationForwardThreePagesThenBackward(t *testing.T) {
 	user := testutil.TestUser1()
 
 	allIds := collectAllTaskIds(t, n, wallet.Address, totalTasks)
-	// allIds is newest-first: [14, 13, ..., 0]
 
-	// Page 1: no cursor → [14, 13, 12, 11, 10]
+	// Page 1: no cursor → newest 5 items
 	page1, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		Limit:              pageSize,
@@ -135,7 +134,7 @@ func TestTasksPaginationForwardThreePagesThenBackward(t *testing.T) {
 		assert.Equal(t, allIds[i], page1.Items[i].Id, "page1 item %d", i)
 	}
 
-	// Page 2: after endCursor of page 1 → [9, 8, 7, 6, 5]
+	// Page 2: after endCursor of page 1 → next 5 items
 	page2, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		After:              page1.PageInfo.EndCursor,
@@ -149,7 +148,7 @@ func TestTasksPaginationForwardThreePagesThenBackward(t *testing.T) {
 		assert.Equal(t, allIds[pageSize+i], page2.Items[i].Id, "page2 item %d", i)
 	}
 
-	// Page 3: after endCursor of page 2 → last 3 items
+	// Page 3: after endCursor of page 2 → remaining 3 items
 	page3, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		After:              page2.PageInfo.EndCursor,
@@ -196,8 +195,9 @@ func TestTasksPaginationFullRoundTrip(t *testing.T) {
 
 	allIds := collectAllTaskIds(t, n, wallet.Address, totalTasks)
 
-	// Navigate forward, collecting all pages
+	// Navigate forward, collecting all pages and their startCursors
 	forwardPages := make([][]*avsproto.Task, 0, numPages)
+	forwardStartCursors := make([]string, 0, numPages)
 	var afterCursor string
 
 	for p := 0; p < numPages; p++ {
@@ -211,6 +211,7 @@ func TestTasksPaginationFullRoundTrip(t *testing.T) {
 		page, err := n.ListTasksByUser(user, req)
 		require.NoError(t, err, "forward page %d", p)
 		forwardPages = append(forwardPages, page.Items)
+		forwardStartCursors = append(forwardStartCursors, page.PageInfo.StartCursor)
 
 		// Verify items match canonical order
 		for i, item := range page.Items {
@@ -221,23 +222,6 @@ func TestTasksPaginationFullRoundTrip(t *testing.T) {
 		if p < numPages-1 {
 			assert.True(t, page.PageInfo.HasNextPage, "forward page %d should have next", p)
 		}
-	}
-
-	// Collect startCursors during a second forward pass for backward navigation
-	forwardStartCursors := make([]string, 0, numPages)
-	afterCursor = ""
-	for p := 0; p < numPages; p++ {
-		req := &avsproto.ListTasksReq{
-			SmartWalletAddress: []string{wallet.Address},
-			Limit:              pageSize,
-		}
-		if afterCursor != "" {
-			req.After = afterCursor
-		}
-		page, err := n.ListTasksByUser(user, req)
-		require.NoError(t, err)
-		forwardStartCursors = append(forwardStartCursors, page.PageInfo.StartCursor)
-		afterCursor = page.PageInfo.EndCursor
 	}
 
 	// Navigate backward from last page to first

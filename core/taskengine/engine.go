@@ -2136,7 +2136,10 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	if !cursor.IsZero() && cursor.Direction == CursorDirectionPrevious {
 		// Backward pagination: iterate oldest-to-newest to find items
 		// immediately newer than the cursor, then reverse for display order.
-		cursorUlid, _ := ulid.Parse(cursor.Position)
+		cursorUlid, err := ulid.Parse(cursor.Position)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
+		}
 		for i := 0; i < len(taskKeys); i++ {
 			key := taskKeys[i]
 			taskID := string(model.TaskKeyToId(([]byte(key[2:]))))
@@ -2201,6 +2204,8 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		taskResp.PageInfo.EndCursor = CreateNextCursor(lastItem.Id)
 
 		if !cursor.IsZero() && cursor.Direction == CursorDirectionPrevious {
+			// We reached this page via backward navigation, so the cursor position
+			// and everything older always forms at least one next page.
 			taskResp.PageInfo.HasNextPage = true
 			taskResp.PageInfo.HasPreviousPage = hasMoreItems
 		} else {
@@ -3097,7 +3102,10 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	if !cursor.IsZero() && cursor.Direction == CursorDirectionPrevious {
 		// Backward pagination: iterate oldest-to-newest to find items
 		// immediately newer than the cursor, then reverse for display order.
-		cursorUlid, _ := ulid.Parse(cursor.Position)
+		cursorUlid, err := ulid.Parse(cursor.Position)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
+		}
 		for i := 0; i < len(executionKeys); i++ {
 			key := executionKeys[i]
 			executionUlid := ulid.MustParse(ExecutionIdFromStorageKey([]byte(key)))
@@ -3174,7 +3182,8 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 		executioResp.PageInfo.EndCursor = CreateNextCursor(lastExecutionId)
 
 		if !cursor.IsZero() && cursor.Direction == CursorDirectionPrevious {
-			// Backward pagination: always has next (older) items since we came from there
+			// We reached this page via backward navigation, so the cursor position
+			// and everything older always forms at least one next page.
 			executioResp.PageInfo.HasNextPage = true
 			executioResp.PageInfo.HasPreviousPage = hasMoreItems
 		} else {
