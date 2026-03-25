@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -338,5 +340,64 @@ func TestCalculateTotalGasCostWithLoopSteps(t *testing.T) {
 
 		totalGasCost := vm.CalculateTotalGasCost()
 		assert.Equal(t, "50000000000000", totalGasCost, "Loop with no gas should not affect total")
+	})
+}
+
+func TestUpdateStepGasCostFromReceipt(t *testing.T) {
+	t.Run("sets gas fields from valid receipt", func(t *testing.T) {
+		step := &avsproto.Execution_Step{Id: "step1"}
+		receipt := &types.Receipt{
+			GasUsed:           75000,
+			EffectiveGasPrice: big.NewInt(2000000000), // 2 gwei
+			TxHash:            common.HexToHash("0xabc"),
+		}
+
+		updateStepGasCostFromReceipt(step, receipt, nil)
+
+		assert.Equal(t, "75000", step.GasUsed)
+		assert.Equal(t, "2000000000", step.GasPrice)
+		// 75000 * 2000000000 = 150000000000000
+		assert.Equal(t, "150000000000000", step.TotalGasCost)
+	})
+
+	t.Run("no-op when GasUsed is zero", func(t *testing.T) {
+		step := &avsproto.Execution_Step{Id: "step1"}
+		receipt := &types.Receipt{
+			GasUsed:           0,
+			EffectiveGasPrice: big.NewInt(2000000000),
+		}
+
+		updateStepGasCostFromReceipt(step, receipt, nil)
+
+		assert.Equal(t, "", step.GasUsed)
+		assert.Equal(t, "", step.TotalGasCost)
+	})
+
+	t.Run("no-op when EffectiveGasPrice is nil", func(t *testing.T) {
+		step := &avsproto.Execution_Step{Id: "step1"}
+		receipt := &types.Receipt{
+			GasUsed:           75000,
+			EffectiveGasPrice: nil,
+		}
+
+		updateStepGasCostFromReceipt(step, receipt, nil)
+
+		assert.Equal(t, "", step.GasUsed)
+		assert.Equal(t, "", step.TotalGasCost)
+	})
+
+	t.Run("no-op when step is nil", func(t *testing.T) {
+		receipt := &types.Receipt{
+			GasUsed:           75000,
+			EffectiveGasPrice: big.NewInt(2000000000),
+		}
+		// Should not panic
+		updateStepGasCostFromReceipt(nil, receipt, nil)
+	})
+
+	t.Run("no-op when receipt is nil", func(t *testing.T) {
+		step := &avsproto.Execution_Step{Id: "step1"}
+		updateStepGasCostFromReceipt(step, nil, nil)
+		assert.Equal(t, "", step.GasUsed)
 	})
 }

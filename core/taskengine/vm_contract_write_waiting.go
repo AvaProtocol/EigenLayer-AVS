@@ -138,10 +138,13 @@ func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirm
 				"txHash", txHash,
 				"elapsed", time.Since(startTime))
 
-			// Fetch the actual on-chain receipt to get gas data
+			// Fetch the actual on-chain receipt to get gas data.
+			// Use a bounded context so a slow/unresponsive RPC node cannot block indefinitely.
 			result := &waitForUserOpConfirmationResult{TxHash: txHash}
 			if txHash != "" {
-				onChainReceipt, receiptErr := client.TransactionReceipt(context.Background(), common.HexToHash(txHash))
+				receiptCtx, receiptCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				onChainReceipt, receiptErr := client.TransactionReceipt(receiptCtx, common.HexToHash(txHash))
+				receiptCancel()
 				if receiptErr == nil && onChainReceipt != nil {
 					result.Receipt = onChainReceipt
 				} else if v.logger != nil {

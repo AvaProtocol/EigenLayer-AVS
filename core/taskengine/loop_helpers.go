@@ -321,7 +321,7 @@ func aggregateIterationGasCosts(parentStep *avsproto.Execution_Step, iterSteps [
 	totalGasUsed := new(big.Int)
 	totalGasCost := new(big.Int)
 	var lastGasPrice *big.Int
-	found := false
+	iterationsWithGas := 0
 
 	for _, step := range iterSteps {
 		if step.TotalGasCost == "" || step.TotalGasCost == "0" {
@@ -332,7 +332,7 @@ func aggregateIterationGasCosts(parentStep *avsproto.Execution_Step, iterSteps [
 			continue
 		}
 		totalGasCost.Add(totalGasCost, stepCost)
-		found = true
+		iterationsWithGas++
 
 		if step.GasUsed != "" {
 			if gu, ok := new(big.Int).SetString(step.GasUsed, 10); ok {
@@ -346,7 +346,7 @@ func aggregateIterationGasCosts(parentStep *avsproto.Execution_Step, iterSteps [
 		}
 	}
 
-	if !found {
+	if iterationsWithGas == 0 {
 		return
 	}
 
@@ -366,15 +366,7 @@ func aggregateIterationGasCosts(parentStep *avsproto.Execution_Step, iterSteps [
 	if vm != nil && vm.logger != nil {
 		vm.logger.Info("Aggregated gas costs from loop iterations",
 			"step_id", parentStep.Id,
-			"iterations_with_gas", func() int {
-				count := 0
-				for _, step := range iterSteps {
-					if step.TotalGasCost != "" && step.TotalGasCost != "0" {
-						count++
-					}
-				}
-				return count
-			}(),
+			"iterations_with_gas", iterationsWithGas,
 			"total_gas_used", parentStep.GasUsed,
 			"total_gas_cost", parentStep.TotalGasCost)
 	}
