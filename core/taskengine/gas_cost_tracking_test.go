@@ -73,7 +73,7 @@ func TestGasCostTracking(t *testing.T) {
 		}
 
 		totalGasCost := vm.CalculateTotalGasCost()
-		assert.Equal(t, "0", totalGasCost, "Should return 0 when no gas-consuming steps are present")
+		assert.Equal(t, "", totalGasCost, "Should return empty string when no gas-consuming steps are present")
 	})
 
 	t.Run("CalculateTotalGasCost with ETH_TRANSFER steps", func(t *testing.T) {
@@ -219,5 +219,123 @@ func TestWorkflowLevelGasCostAggregation(t *testing.T) {
 		require.True(t, ok, "Should parse total gas cost")
 
 		assert.Equal(t, totalFromSteps.String(), actualTotal.String(), "Total gas cost should equal sum of step costs")
+	})
+}
+
+func TestAggregateIterationGasCosts(t *testing.T) {
+	t.Run("aggregates gas from iteration steps into parent loop step", func(t *testing.T) {
+		parentStep := &avsproto.Execution_Step{
+			Id:   "loop1",
+			Type: avsproto.NodeType_NODE_TYPE_LOOP.String(),
+		}
+
+		iterSteps := []*avsproto.Execution_Step{
+			{
+				Id:           "loop1_iter_0",
+				GasUsed:      "50000",
+				GasPrice:     "1000000000",
+				TotalGasCost: "50000000000000",
+			},
+			{
+				Id:           "loop1_iter_1",
+				GasUsed:      "60000",
+				GasPrice:     "1000000000",
+				TotalGasCost: "60000000000000",
+			},
+			{
+				Id:           "loop1_iter_2",
+				GasUsed:      "55000",
+				GasPrice:     "1200000000",
+				TotalGasCost: "66000000000000",
+			},
+		}
+
+		aggregateIterationGasCosts(parentStep, iterSteps, nil)
+
+		assert.Equal(t, "165000", parentStep.GasUsed, "GasUsed should be sum of all iterations")
+		assert.Equal(t, "176000000000000", parentStep.TotalGasCost, "TotalGasCost should be sum of all iterations")
+		assert.Equal(t, "1200000000", parentStep.GasPrice, "GasPrice should be last non-empty price")
+	})
+
+	t.Run("skips iterations without gas costs", func(t *testing.T) {
+		parentStep := &avsproto.Execution_Step{Id: "loop1"}
+
+		iterSteps := []*avsproto.Execution_Step{
+			{Id: "iter_0", TotalGasCost: "0"},
+			{Id: "iter_1", TotalGasCost: ""},
+			{Id: "iter_2", GasUsed: "21000", GasPrice: "1000000000", TotalGasCost: "21000000000000"},
+		}
+
+		aggregateIterationGasCosts(parentStep, iterSteps, nil)
+
+		assert.Equal(t, "21000", parentStep.GasUsed)
+		assert.Equal(t, "21000000000000", parentStep.TotalGasCost)
+	})
+
+	t.Run("no-op with empty iteration steps", func(t *testing.T) {
+		parentStep := &avsproto.Execution_Step{Id: "loop1"}
+		aggregateIterationGasCosts(parentStep, nil, nil)
+		assert.Equal(t, "", parentStep.TotalGasCost)
+		assert.Equal(t, "", parentStep.GasUsed)
+	})
+}
+
+func TestCalculateTotalGasCostWithLoopSteps(t *testing.T) {
+	t.Run("includes LOOP steps with aggregated gas costs", func(t *testing.T) {
+		vm := &VM{
+			mu: &sync.Mutex{},
+			ExecutionLogs: []*avsproto.Execution_Step{
+				{
+					Id:      "trigger",
+					Type:    "manualTrigger",
+					Success: true,
+				},
+				{
+					Id:           "contractWrite1",
+					Type:         avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
+					Success:      true,
+					GasUsed:      "30000",
+					GasPrice:     "1000000000",
+					TotalGasCost: "30000000000000",
+				},
+				{
+					// Loop step with aggregated gas from iterations
+					Id:           "loopTransfer",
+					Type:         avsproto.NodeType_NODE_TYPE_LOOP.String(),
+					Success:      true,
+					GasUsed:      "110000",
+					GasPrice:     "1000000000",
+					TotalGasCost: "110000000000000",
+				},
+			},
+		}
+
+		totalGasCost := vm.CalculateTotalGasCost()
+
+		// Expected: 30000000000000 + 110000000000000 = 140000000000000
+		assert.Equal(t, "140000000000000", totalGasCost, "Should include both CONTRACT_WRITE and LOOP steps")
+	})
+
+	t.Run("LOOP step with zero gas is excluded", func(t *testing.T) {
+		vm := &VM{
+			mu: &sync.Mutex{},
+			ExecutionLogs: []*avsproto.Execution_Step{
+				{
+					Id:           "contractWrite1",
+					Type:         avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
+					Success:      true,
+					TotalGasCost: "50000000000000",
+				},
+				{
+					// Loop with non-on-chain iterations (e.g., customCode) — no gas
+					Id:      "loopCustomCode",
+					Type:    avsproto.NodeType_NODE_TYPE_LOOP.String(),
+					Success: true,
+				},
+			},
+		}
+
+		totalGasCost := vm.CalculateTotalGasCost()
+		assert.Equal(t, "50000000000000", totalGasCost, "Loop with no gas should not affect total")
 	})
 }

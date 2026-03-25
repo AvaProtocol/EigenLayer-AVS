@@ -3293,9 +3293,9 @@ func (v *VM) CalculateTotalGasCost() string {
 	gasCostFound := false
 
 	for _, step := range v.ExecutionLogs {
-		// Only consider blockchain operations that might have gas costs
+		// Consider blockchain operations and loop steps (which may contain on-chain iterations)
 		// step.Type is set from node.Type.String() which returns the full protobuf enum name
-		if step.Type == avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String() || step.Type == avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String() {
+		if step.Type == avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String() || step.Type == avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String() || step.Type == avsproto.NodeType_NODE_TYPE_LOOP.String() {
 			if step.TotalGasCost != "" && step.TotalGasCost != "0" {
 				if stepGasCost, ok := new(big.Int).SetString(step.TotalGasCost, 10); ok {
 					totalGasCost.Add(totalGasCost, stepGasCost)
@@ -3312,7 +3312,12 @@ func (v *VM) CalculateTotalGasCost() string {
 	}
 
 	if !gasCostFound {
-		return "0"
+		// Return empty string, NOT "0", when no gas data exists.
+		// This lets clients distinguish "no gas data computed" (empty) from
+		// "actually zero cost" (which never happens for real transactions).
+		// The JS SDK sees empty string as undefined via getFieldWithDefault,
+		// while "0" looks like a real value from protobuf's perspective.
+		return ""
 	}
 
 	totalGasCostStr := totalGasCost.String()
@@ -4642,6 +4647,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	defer eq.Stop()
 
 	results := make([]interface{}, len(inputArray))
+	iterationSteps := make([]*avsproto.Execution_Step, 0, len(inputArray)) // Collect iteration steps for gas aggregation
 	success := true
 	var firstError error
 
@@ -4711,6 +4717,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				} else {
 					results[i] = result.Data
 				}
+				if result.Step != nil {
+					iterationSteps = append(iterationSteps, result.Step)
+				}
 			case <-time.After(iterationTimeout):
 				success = false
 				err := fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
@@ -4767,6 +4776,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				} else {
 					results[i] = result.Data
 				}
+				if result.Step != nil {
+					iterationSteps = append(iterationSteps, result.Step)
+				}
 			case <-time.After(iterationTimeout):
 				success = false
 				err := fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
@@ -4780,6 +4792,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 			}
 		}
 	}
+
+	// Aggregate gas costs from iteration steps into the parent loop step
+	aggregateIterationGasCosts(s, iterationSteps, v)
 
 	// Set output variable for this step
 	processor := &CommonProcessor{vm: v}

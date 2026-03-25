@@ -2040,6 +2040,10 @@ type Execution struct {
 	Index int64 `protobuf:"varint,6,opt,name=index,proto3" json:"index,omitempty"`
 	// Total gas cost for the entire workflow execution (sum of all blockchain operations)
 	// Units are in wei. Use string for large numbers to avoid overflow.
+	//
+	// Empty string means gas data was not computed (e.g., workflow has no on-chain steps,
+	// or receipt was unavailable). Clients should treat both "" and "0" as "no data"
+	// since real on-chain transactions always cost gas.
 	TotalGasCost string `protobuf:"bytes,7,opt,name=total_gas_cost,json=totalGasCost,proto3" json:"total_gas_cost,omitempty"`
 	// Automation fee charged for monitoring and executing this workflow.
 	// Currently hard-coded to zero; will be populated when automation fees are enabled.
@@ -8903,8 +8907,10 @@ type Execution_Step struct {
 	Metadata *structpb.Value `protobuf:"bytes,25,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	// Optional execution context for runtime flags and extra info (e.g., is_simulated)
 	ExecutionContext *structpb.Value `protobuf:"bytes,26,opt,name=execution_context,json=executionContext,proto3" json:"execution_context,omitempty"`
-	// Gas cost tracking fields for blockchain operations (contract_write, eth_transfer)
-	// Units are in wei for precision. Use string for large numbers to avoid overflow.
+	// Gas cost tracking fields for blockchain operations (contract_write, eth_transfer,
+	// and loop nodes containing on-chain runners). Units are in wei for precision.
+	// Empty string means gas data was not available (e.g., receipt unavailable, or
+	// non-on-chain step). For loop steps, these are aggregated from all iterations.
 	GasUsed      string `protobuf:"bytes,27,opt,name=gas_used,json=gasUsed,proto3" json:"gas_used,omitempty"`                  // Amount of gas consumed by the transaction
 	GasPrice     string `protobuf:"bytes,28,opt,name=gas_price,json=gasPrice,proto3" json:"gas_price,omitempty"`               // Gas price in wei per gas unit
 	TotalGasCost string `protobuf:"bytes,29,opt,name=total_gas_cost,json=totalGasCost,proto3" json:"total_gas_cost,omitempty"` // Total cost (gas_used * gas_price) in wei

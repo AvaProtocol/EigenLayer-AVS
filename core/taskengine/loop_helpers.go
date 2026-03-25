@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"fmt"
+	"math/big"
 	"strings"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -306,4 +307,68 @@ func toInterfaceSlice(value interface{}, label string) ([]interface{}, string, e
 		return arr, label, nil
 	}
 	return nil, label, fmt.Errorf("loop input %s resolved to %T, expected array", label, value)
+}
+
+// aggregateIterationGasCosts sums gas costs from loop iteration steps and sets
+// them on the parent loop step. This ensures that on-chain operations executed
+// inside a loop (contractWrite, ethTransfer) have their gas costs propagated
+// to the workflow-level aggregation in CalculateTotalGasCost.
+func aggregateIterationGasCosts(parentStep *avsproto.Execution_Step, iterSteps []*avsproto.Execution_Step, vm *VM) {
+	if parentStep == nil || len(iterSteps) == 0 {
+		return
+	}
+
+	totalGasUsed := new(big.Int)
+	totalGasCost := new(big.Int)
+	var lastGasPrice *big.Int
+	found := false
+
+	for _, step := range iterSteps {
+		if step.TotalGasCost == "" || step.TotalGasCost == "0" {
+			continue
+		}
+		stepCost, ok := new(big.Int).SetString(step.TotalGasCost, 10)
+		if !ok {
+			continue
+		}
+		totalGasCost.Add(totalGasCost, stepCost)
+		found = true
+
+		if step.GasUsed != "" {
+			if gu, ok := new(big.Int).SetString(step.GasUsed, 10); ok {
+				totalGasUsed.Add(totalGasUsed, gu)
+			}
+		}
+		if step.GasPrice != "" {
+			if gp, ok := new(big.Int).SetString(step.GasPrice, 10); ok {
+				lastGasPrice = gp
+			}
+		}
+	}
+
+	if !found {
+		return
+	}
+
+	parentStep.GasUsed = totalGasUsed.String()
+	parentStep.TotalGasCost = totalGasCost.String()
+	if lastGasPrice != nil {
+		parentStep.GasPrice = lastGasPrice.String()
+	}
+
+	if vm != nil && vm.logger != nil {
+		vm.logger.Info("Aggregated gas costs from loop iterations",
+			"step_id", parentStep.Id,
+			"iterations_with_gas", func() int {
+				count := 0
+				for _, step := range iterSteps {
+					if step.TotalGasCost != "" && step.TotalGasCost != "0" {
+						count++
+					}
+				}
+				return count
+			}(),
+			"total_gas_used", parentStep.GasUsed,
+			"total_gas_cost", parentStep.TotalGasCost)
+	}
 }
