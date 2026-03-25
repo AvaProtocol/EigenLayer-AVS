@@ -247,12 +247,12 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 			v.mu.Lock()
 			step.Success = true
 			step.Error = ""
-			v.mu.Unlock()
-
-			// Update gas cost fields from the on-chain receipt if the step doesn't already have them
+			// Update gas cost fields from the on-chain receipt if the step doesn't already have them.
+			// Done under v.mu to avoid data races with readers of ExecutionLogs.
 			if result != nil && result.Receipt != nil && (step.TotalGasCost == "" || step.TotalGasCost == "0") {
 				updateStepGasCostFromReceipt(step, result.Receipt, v)
 			}
+			v.mu.Unlock()
 
 			v.addRPCPropagationDelay()
 		}
@@ -283,10 +283,12 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 						"stepID", step.Id,
 						"userOpHash", userOpHash)
 
-					// Update gas cost fields from the on-chain receipt if the step doesn't already have them
+					// Update gas cost fields under v.mu to avoid data races with readers of ExecutionLogs
+					v.mu.Lock()
 					if result != nil && result.Receipt != nil && (step.TotalGasCost == "" || step.TotalGasCost == "0") {
 						updateStepGasCostFromReceipt(step, result.Receipt, v)
 					}
+					v.mu.Unlock()
 
 					v.addRPCPropagationDelay()
 				}

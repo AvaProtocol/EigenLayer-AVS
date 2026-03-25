@@ -352,7 +352,14 @@ func aggregateIterationGasCosts(parentStep *avsproto.Execution_Step, iterSteps [
 
 	parentStep.GasUsed = totalGasUsed.String()
 	parentStep.TotalGasCost = totalGasCost.String()
-	if lastGasPrice != nil {
+	// Compute implied gas price (totalGasCost / totalGasUsed) so that
+	// GasUsed * GasPrice == TotalGasCost holds for the aggregated step.
+	// Using last iteration's price would break the invariant when
+	// iterations have different gas prices.
+	if totalGasUsed.Sign() > 0 {
+		impliedPrice := new(big.Int).Div(totalGasCost, totalGasUsed)
+		parentStep.GasPrice = impliedPrice.String()
+	} else if lastGasPrice != nil {
 		parentStep.GasPrice = lastGasPrice.String()
 	}
 

@@ -254,7 +254,8 @@ func TestAggregateIterationGasCosts(t *testing.T) {
 
 		assert.Equal(t, "165000", parentStep.GasUsed, "GasUsed should be sum of all iterations")
 		assert.Equal(t, "176000000000000", parentStep.TotalGasCost, "TotalGasCost should be sum of all iterations")
-		assert.Equal(t, "1200000000", parentStep.GasPrice, "GasPrice should be last non-empty price")
+		// Implied price = totalGasCost / totalGasUsed = 176000000000000 / 165000 = 1066666666 (integer div)
+		assert.Equal(t, "1066666666", parentStep.GasPrice, "GasPrice should be implied average (totalCost/totalUsed)")
 	})
 
 	t.Run("skips iterations without gas costs", func(t *testing.T) {
