@@ -1005,12 +1005,10 @@ func (v *VM) runKahnScheduler() error {
 				var err error
 				selected, err = v.executeNode(node) // non-nil when a branch selects a condition path
 				if err != nil {
-					// Downgrade user script errors to Warn to avoid noisy Sentry alerts
-					if node.Type == avsproto.NodeType_NODE_TYPE_CUSTOM_CODE {
-						v.logger.Warnf("Error executing node %s: %v", node.Id, err)
-					} else {
-						v.logger.Errorf("Error executing node %s: %v", node.Id, err)
-					}
+					// Use Warn to avoid duplicate Sentry alerts; the node runner
+					// (ETHTransfer, ContractWrite, etc.) already reports to Sentry
+					// with full context at the point of failure.
+					v.logger.Warnf("Error executing node %s: %v", node.Id, err)
 				}
 			}
 
