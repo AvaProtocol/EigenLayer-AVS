@@ -170,8 +170,8 @@ func TestAdvancedGasCostAggregation(t *testing.T) {
 		vm.ExecutionLogs = []*avsproto.Execution_Step{step1, step2}
 
 		totalGasCost := vm.CalculateTotalGasCost()
-		assert.Equal(t, "0", totalGasCost,
-			"Should return zero when no blockchain operations with gas costs are present")
+		assert.Equal(t, "", totalGasCost,
+			"Should return empty string when no blockchain operations with gas costs are present")
 	})
 }
 

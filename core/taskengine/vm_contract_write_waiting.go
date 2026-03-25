@@ -3,10 +3,12 @@ package taskengine
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
@@ -73,22 +75,28 @@ func extractUserOpHashFromStep(step *avsproto.Execution_Step) string {
 
 // waitForUserOpConfirmation waits for a UserOperation to be confirmed on-chain using exponential backoff polling
 // This is similar to the polling logic in pkg/erc4337/preset/builder.go
-func (v *VM) waitForUserOpConfirmation(userOpHash string) error {
+// waitForUserOpConfirmationResult holds the confirmation result including the on-chain receipt.
+type waitForUserOpConfirmationResult struct {
+	TxHash  string
+	Receipt *types.Receipt // Actual on-chain receipt (may be nil if only bundler receipt was available)
+}
+
+func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirmationResult, error) {
 	if v.smartWalletConfig == nil {
-		return fmt.Errorf("smart wallet config not available for UserOp confirmation")
+		return nil, fmt.Errorf("smart wallet config not available for UserOp confirmation")
 	}
 
 	// Create eth client
 	client, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
 	if err != nil {
-		return fmt.Errorf("failed to connect to RPC: %w", err)
+		return nil, fmt.Errorf("failed to connect to RPC: %w", err)
 	}
 	defer client.Close()
 
 	// Create bundler client
 	bundlerClient, err := bundler.NewBundlerClient(v.smartWalletConfig.BundlerURL)
 	if err != nil {
-		return fmt.Errorf("failed to create bundler client: %w", err)
+		return nil, fmt.Errorf("failed to create bundler client: %w", err)
 	}
 
 	entrypoint := v.smartWalletConfig.EntrypointAddress
@@ -107,7 +115,7 @@ func (v *VM) waitForUserOpConfirmation(userOpHash string) error {
 	for {
 		// Check if timeout reached
 		if time.Since(startTime) > timeout {
-			return fmt.Errorf("timeout waiting for UserOp confirmation after %v", timeout)
+			return nil, fmt.Errorf("timeout waiting for UserOp confirmation after %v", timeout)
 		}
 
 		// Try to get receipt from bundler
@@ -129,7 +137,23 @@ func (v *VM) waitForUserOpConfirmation(userOpHash string) error {
 				"blockNumber", blockNumber,
 				"txHash", txHash,
 				"elapsed", time.Since(startTime))
-			return nil
+
+			// Fetch the actual on-chain receipt to get gas data.
+			// Use a bounded context so a slow/unresponsive RPC node cannot block indefinitely.
+			result := &waitForUserOpConfirmationResult{TxHash: txHash}
+			if txHash != "" {
+				receiptCtx, receiptCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				onChainReceipt, receiptErr := client.TransactionReceipt(receiptCtx, common.HexToHash(txHash))
+				receiptCancel()
+				if receiptErr == nil && onChainReceipt != nil {
+					result.Receipt = onChainReceipt
+				} else if v.logger != nil {
+					v.logger.Warn("Failed to fetch on-chain receipt for gas data",
+						"txHash", txHash, "error", receiptErr)
+				}
+			}
+
+			return result, nil
 		}
 
 		// Determine current interval (use last interval if we've exceeded the array)
@@ -186,6 +210,15 @@ func (v *VM) getReceiptByUserOpHash(userOpHash string) (*types.Receipt, error) {
 // It handles both contractWrite (array metadata with pending status) and ethTransfer
 // (flat metadata) steps. Called from both the main execution path and loop iterations.
 //
+// Gas cost tracking: When SendUserOp times out (returns nil receipt, nil error),
+// the node processor cannot extract gas data. This function polls for the on-chain
+// receipt and backfills GasUsed/GasPrice/TotalGasCost on the step.
+//
+// Known limitation (double-timeout edge case): If SendUserOp times out (~1 min)
+// AND this confirmation waiter also times out (~5 min), gas costs are permanently
+// lost for that step even though the transaction may eventually confirm on-chain.
+// This is a ~6 min total window; on a healthy network it should not occur.
+//
 // Returns true if confirmation was attempted (regardless of success/failure).
 func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) bool {
 	if v.IsSimulation || step == nil {
@@ -203,7 +236,7 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 			"stepID", step.Id,
 			"userOpHash", userOpHash)
 
-		waitErr := v.waitForUserOpConfirmation(userOpHash)
+		result, waitErr := v.waitForUserOpConfirmation(userOpHash)
 		if waitErr != nil {
 			v.logger.Error("❌ Failed to wait for on-chain confirmation",
 				"stepID", step.Id,
@@ -217,6 +250,11 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 			v.mu.Lock()
 			step.Success = true
 			step.Error = ""
+			// Update gas cost fields from the on-chain receipt if the step doesn't already have them.
+			// Done under v.mu to avoid data races with readers of ExecutionLogs.
+			if result != nil && result.Receipt != nil && (step.TotalGasCost == "" || step.TotalGasCost == "0") {
+				updateStepGasCostFromReceipt(step, result.Receipt, v)
+			}
 			v.mu.Unlock()
 
 			v.addRPCPropagationDelay()
@@ -237,7 +275,7 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 					"stepID", step.Id,
 					"userOpHash", userOpHash)
 
-				waitErr := v.waitForUserOpConfirmation(userOpHash)
+				result, waitErr := v.waitForUserOpConfirmation(userOpHash)
 				if waitErr != nil {
 					v.logger.Error("❌ Failed to wait for ethTransfer confirmation",
 						"stepID", step.Id,
@@ -247,6 +285,14 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 					v.logger.Info("✅ ethTransfer confirmed on-chain",
 						"stepID", step.Id,
 						"userOpHash", userOpHash)
+
+					// Update gas cost fields under v.mu to avoid data races with readers of ExecutionLogs
+					v.mu.Lock()
+					if result != nil && result.Receipt != nil && (step.TotalGasCost == "" || step.TotalGasCost == "0") {
+						updateStepGasCostFromReceipt(step, result.Receipt, v)
+					}
+					v.mu.Unlock()
+
 					v.addRPCPropagationDelay()
 				}
 				return true
@@ -255,6 +301,38 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 	}
 
 	return false
+}
+
+// updateStepGasCostFromReceipt extracts gas cost information from an on-chain receipt
+// and sets it on the execution step. Called when the initial SendUserOp timed out
+// (nil receipt) but the subsequent confirmation poll retrieved the actual receipt.
+func updateStepGasCostFromReceipt(step *avsproto.Execution_Step, receipt *types.Receipt, vm *VM) {
+	if step == nil || receipt == nil {
+		return
+	}
+
+	gasUsed := receipt.GasUsed
+	gasPrice := receipt.EffectiveGasPrice
+
+	if gasUsed == 0 || gasPrice == nil || gasPrice.Sign() <= 0 {
+		return
+	}
+
+	gasUsedBig := new(big.Int).SetUint64(gasUsed)
+	totalGasCost := new(big.Int).Mul(gasUsedBig, gasPrice)
+
+	step.GasUsed = gasUsedBig.String()
+	step.GasPrice = gasPrice.String()
+	step.TotalGasCost = totalGasCost.String()
+
+	if vm != nil && vm.logger != nil {
+		vm.logger.Info("Updated gas cost from on-chain receipt",
+			"step_id", step.Id,
+			"gas_used", step.GasUsed,
+			"gas_price", step.GasPrice,
+			"total_gas_cost", step.TotalGasCost,
+			"tx_hash", receipt.TxHash.Hex())
+	}
 }
 
 // addRPCPropagationDelay adds a delay to ensure RPC nodes have propagated the latest state

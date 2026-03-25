@@ -690,6 +690,10 @@ message Execution {
   
   // Total gas cost for the entire workflow execution (sum of all blockchain operations)
   // Units are in wei. Use string for large numbers to avoid overflow.
+  //
+  // Empty string means gas data was not computed (e.g., workflow has no on-chain steps,
+  // or receipt was unavailable). Clients should treat both "" and "0" as "no data"
+  // since real on-chain transactions always cost gas.
   string total_gas_cost = 7;
 
   // Automation fee charged for monitoring and executing this workflow.
@@ -714,8 +718,10 @@ message Execution {
     // Optional execution context for runtime flags and extra info (e.g., is_simulated)
     google.protobuf.Value execution_context = 26;
     
-    // Gas cost tracking fields for blockchain operations (contract_write, eth_transfer)
-    // Units are in wei for precision. Use string for large numbers to avoid overflow.
+    // Gas cost tracking fields for blockchain operations (contract_write, eth_transfer,
+    // and loop nodes containing on-chain runners). Units are in wei for precision.
+    // Empty string means gas data was not available (e.g., receipt unavailable, or
+    // non-on-chain step). For loop steps, these are aggregated from all iterations.
     string gas_used = 27;       // Amount of gas consumed by the transaction
     string gas_price = 28;      // Gas price in wei per gas unit
     string total_gas_cost = 29; // Total cost (gas_used * gas_price) in wei
