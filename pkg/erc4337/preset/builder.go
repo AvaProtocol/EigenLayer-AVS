@@ -849,7 +849,7 @@ func sendUserOpShared(
 			userOpNoPM, buildErr := BuildUserOp(smartWalletConfig, client, bundlerClient, owner, originalCallData, senderOverride, saltOverride, l)
 			if buildErr != nil {
 				l.Warn("Fallback UserOp build without paymaster failed", "error", buildErr)
-				return userOp, nil, err
+				return userOp, nil, fmt.Errorf("failed to build fallback UserOp without paymaster: %w", buildErr)
 			}
 			// Try to send self-funded userOp
 			txResult, err = sendUserOpCore(smartWalletConfig, userOpNoPM, client, bundlerClient, l)
@@ -1186,6 +1186,9 @@ func sendUserOpCore(
 	}
 
 	if err != nil || txResult == "" {
+		if txResult == "" && err == nil {
+			err = errors.New("bundler returned empty transaction result")
+		}
 		l.Warn("Failed to send UserOp to bundler", "retries", maxRetries, "error", err)
 		return "", fmt.Errorf("error sending transaction to bundler: %w", err)
 	}
