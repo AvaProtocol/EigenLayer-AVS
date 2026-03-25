@@ -971,6 +971,10 @@ func (o *Operator) PingServer() {
 			errorType = "ping_connection_refused"
 		} else if strings.Contains(err.Error(), "context deadline exceeded") || strings.Contains(err.Error(), "timeout") {
 			errorType = "ping_timeout"
+		} else if strings.Contains(err.Error(), "name resolver error") {
+			// DNS/name resolution failures indicate the gRPC target address
+			// cannot be resolved — recreate the connection to re-trigger resolution.
+			errorType = "ping_connection_closing"
 		} else if strings.Contains(err.Error(), "Unavailable") {
 			errorType = "ping_service_unavailable"
 		} else if strings.Contains(err.Error(), "Canceled") || strings.Contains(err.Error(), "connection is closing") {
