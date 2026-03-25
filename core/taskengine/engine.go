@@ -2083,35 +2083,26 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	total := 0
 	var hasMoreItems bool
 
-	for i := len(taskKeys) - 1; i >= 0; i-- {
-		key := taskKeys[i]
+	// Helper to load and append a task item
+	appendTask := func(key string) error {
 		taskID := string(model.TaskKeyToId(([]byte(key[2:]))))
 		statusValue, err := n.db.GetKey([]byte(key))
 		if err != nil {
-			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), StorageUnavailableError)
+			return err
 		}
-		status, _ := strconv.Atoi(string(statusValue))
+		statusInt, _ := strconv.Atoi(string(statusValue))
 
-		taskIDUlid := model.UlidFromTaskId(taskID)
-		if !cursor.IsZero() {
-			if (cursor.Direction == CursorDirectionNext && cursor.LessThanOrEqualUlid(taskIDUlid)) ||
-				(cursor.Direction == CursorDirectionPrevious && !cursor.LessThanUlid(taskIDUlid)) {
-				continue
-			}
-		}
-
-		taskRawByte, err := n.db.GetKey(TaskStorageKey(taskID, avsproto.TaskStatus(status)))
+		taskRawByte, err := n.db.GetKey(TaskStorageKey(taskID, avsproto.TaskStatus(statusInt)))
 		if err != nil {
-			continue
+			return nil // skip silently
 		}
 		task := model.NewTask()
 		if err := task.FromStorageData(taskRawByte); err != nil {
-			continue
+			return nil // skip silently
 		}
 		task.Id = taskID
 
 		if t, err := task.ToProtoBuf(); err == nil {
-			// Apply field control - conditionally populate expensive fields
 			taskItem := &avsproto.Task{
 				Id:                 t.Id,
 				Owner:              t.Owner,
@@ -2127,7 +2118,6 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 				Trigger:            t.Trigger,
 			}
 
-			// Conditionally populate expensive fields based on request parameters
 			if payload != nil {
 				if payload.IncludeNodes {
 					taskItem.Nodes = t.Nodes
@@ -2140,11 +2130,68 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 			taskResp.Items = append(taskResp.Items, taskItem)
 			total += 1
 		}
+		return nil
+	}
 
-		// If we've processed more than the limit, we know there are more items
-		if total >= limit {
+	if !cursor.IsZero() && cursor.Direction == CursorDirectionPrevious {
+		// Backward pagination: iterate oldest-to-newest to find items
+		// immediately newer than the cursor, then reverse for display order.
+		cursorUlid, err := ulid.Parse(cursor.Position)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
+		}
+		for i := 0; i < len(taskKeys); i++ {
+			key := taskKeys[i]
+			taskID := string(model.TaskKeyToId(([]byte(key[2:]))))
+			taskIDUlid := model.UlidFromTaskId(taskID)
+
+			// Skip items at or before the cursor position
+			if taskIDUlid.Compare(cursorUlid) <= 0 {
+				continue
+			}
+
+			if err := appendTask(key); err != nil {
+				return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), StorageUnavailableError)
+			}
+			// Collect one extra to detect if more items exist
+			if total > limit {
+				break
+			}
+		}
+		// If we collected more than limit, trim the extra and mark hasMoreItems
+		if len(taskResp.Items) > limit {
+			taskResp.Items = taskResp.Items[:limit]
 			hasMoreItems = true
-			break
+		}
+		// Reverse to newest-first display order
+		for i, j := 0, len(taskResp.Items)-1; i < j; i, j = i+1, j-1 {
+			taskResp.Items[i], taskResp.Items[j] = taskResp.Items[j], taskResp.Items[i]
+		}
+	} else {
+		// Forward pagination (or no cursor): iterate newest-to-oldest
+		for i := len(taskKeys) - 1; i >= 0; i-- {
+			key := taskKeys[i]
+			taskID := string(model.TaskKeyToId(([]byte(key[2:]))))
+			taskIDUlid := model.UlidFromTaskId(taskID)
+
+			if !cursor.IsZero() {
+				if cursor.LessThanOrEqualUlid(taskIDUlid) {
+					continue
+				}
+			}
+
+			if err := appendTask(key); err != nil {
+				return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), StorageUnavailableError)
+			}
+			// Collect one extra to detect if more items exist
+			if total > limit {
+				break
+			}
+		}
+		// If we collected more than limit, trim the extra and mark hasMoreItems
+		if len(taskResp.Items) > limit {
+			taskResp.Items = taskResp.Items[:limit]
+			hasMoreItems = true
 		}
 	}
 
@@ -2153,22 +2200,17 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		firstItem := taskResp.Items[0]
 		lastItem := taskResp.Items[len(taskResp.Items)-1]
 
-		// Always set cursors for the current page (GraphQL PageInfo convention)
 		taskResp.PageInfo.StartCursor = CreateNextCursor(firstItem.Id)
 		taskResp.PageInfo.EndCursor = CreateNextCursor(lastItem.Id)
 
-		// Check if there are more items after the current page
-		taskResp.PageInfo.HasNextPage = hasMoreItems
-
-		// Check if there are items before the current page
-		// This is true if we have a cursor and we're not at the beginning
-		taskResp.PageInfo.HasPreviousPage = !cursor.IsZero() && cursor.Direction == CursorDirectionNext
-
-		// For backward pagination, we need to check if there are items after
-		if cursor.Direction == CursorDirectionPrevious {
-			taskResp.PageInfo.HasNextPage = true // There are items after since we're going backwards
-			// Check if there are more items before
+		if !cursor.IsZero() && cursor.Direction == CursorDirectionPrevious {
+			// We reached this page via backward navigation, so the cursor position
+			// and everything older always forms at least one next page.
+			taskResp.PageInfo.HasNextPage = true
 			taskResp.PageInfo.HasPreviousPage = hasMoreItems
+		} else {
+			taskResp.PageInfo.HasNextPage = hasMoreItems
+			taskResp.PageInfo.HasPreviousPage = !cursor.IsZero()
 		}
 	}
 
@@ -3056,58 +3098,97 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	total := 0
 	var firstExecutionId, lastExecutionId string
 	var hasMoreItems bool
-	for i := len(executionKeys) - 1; i >= 0; i-- {
-		key := executionKeys[i]
 
-		executionUlid := ulid.MustParse(ExecutionIdFromStorageKey([]byte(key)))
-		if !cursor.IsZero() {
-			if (cursor.Direction == CursorDirectionNext && cursor.LessThanOrEqualUlid(executionUlid)) ||
-				(cursor.Direction == CursorDirectionPrevious && cursor.LessThanUlid(executionUlid)) {
+	if !cursor.IsZero() && cursor.Direction == CursorDirectionPrevious {
+		// Backward pagination: iterate oldest-to-newest to find items
+		// immediately newer than the cursor, then reverse for display order.
+		cursorUlid, err := ulid.Parse(cursor.Position)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
+		}
+		for i := 0; i < len(executionKeys); i++ {
+			key := executionKeys[i]
+			executionUlid := ulid.MustParse(ExecutionIdFromStorageKey([]byte(key)))
+
+			// Skip items at or before the cursor position
+			if executionUlid.Compare(cursorUlid) <= 0 {
 				continue
 			}
-		}
 
-		executionValue, err := n.db.GetKey([]byte(key))
-		if err != nil {
-			continue
-		}
-
-		exec := &avsproto.Execution{}
-		if err := protojson.Unmarshal(executionValue, exec); err == nil {
-			// No longer need trigger type at execution level - it's in the first step
-			executioResp.Items = append(executioResp.Items, exec)
-
-			if total == 0 {
-				firstExecutionId = exec.Id
+			executionValue, err := n.db.GetKey([]byte(key))
+			if err != nil {
+				continue
 			}
-			lastExecutionId = exec.Id
-			total += 1
+
+			exec := &avsproto.Execution{}
+			if err := protojson.Unmarshal(executionValue, exec); err == nil {
+				executioResp.Items = append(executioResp.Items, exec)
+				total += 1
+			}
+			// Collect one extra to detect if more items exist
+			if total > limit {
+				break
+			}
 		}
-		// If we've processed more than the limit, we know there are more items
-		if total >= limit {
+		// If we collected more than limit, trim the extra and mark hasMoreItems
+		if len(executioResp.Items) > limit {
+			executioResp.Items = executioResp.Items[:limit]
 			hasMoreItems = true
-			break
+		}
+		// Reverse to newest-first display order
+		for i, j := 0, len(executioResp.Items)-1; i < j; i, j = i+1, j-1 {
+			executioResp.Items[i], executioResp.Items[j] = executioResp.Items[j], executioResp.Items[i]
+		}
+	} else {
+		// Forward pagination (or no cursor): iterate newest-to-oldest
+		for i := len(executionKeys) - 1; i >= 0; i-- {
+			key := executionKeys[i]
+
+			executionUlid := ulid.MustParse(ExecutionIdFromStorageKey([]byte(key)))
+			if !cursor.IsZero() {
+				if cursor.LessThanOrEqualUlid(executionUlid) {
+					continue
+				}
+			}
+
+			executionValue, err := n.db.GetKey([]byte(key))
+			if err != nil {
+				continue
+			}
+
+			exec := &avsproto.Execution{}
+			if err := protojson.Unmarshal(executionValue, exec); err == nil {
+				executioResp.Items = append(executioResp.Items, exec)
+				total += 1
+			}
+			// Collect one extra to detect if more items exist
+			if total > limit {
+				break
+			}
+		}
+		// If we collected more than limit, trim the extra and mark hasMoreItems
+		if len(executioResp.Items) > limit {
+			executioResp.Items = executioResp.Items[:limit]
+			hasMoreItems = true
 		}
 	}
 
 	// Set pagination info
 	if len(executioResp.Items) > 0 {
-		// Always set cursors for the current page (GraphQL PageInfo convention)
+		firstExecutionId = executioResp.Items[0].Id
+		lastExecutionId = executioResp.Items[len(executioResp.Items)-1].Id
+
 		executioResp.PageInfo.StartCursor = CreateNextCursor(firstExecutionId)
 		executioResp.PageInfo.EndCursor = CreateNextCursor(lastExecutionId)
 
-		// Check if there are more items after the current page
-		executioResp.PageInfo.HasNextPage = hasMoreItems
-
-		// Check if there are items before the current page
-		// This is true if we have a cursor and we're not at the beginning
-		executioResp.PageInfo.HasPreviousPage = !cursor.IsZero() && cursor.Direction == CursorDirectionNext
-
-		// For backward pagination, we need to check if there are items after
-		if cursor.Direction == CursorDirectionPrevious {
-			executioResp.PageInfo.HasNextPage = true // There are items after since we're going backwards
-			// Check if there are more items before
+		if !cursor.IsZero() && cursor.Direction == CursorDirectionPrevious {
+			// We reached this page via backward navigation, so the cursor position
+			// and everything older always forms at least one next page.
+			executioResp.PageInfo.HasNextPage = true
 			executioResp.PageInfo.HasPreviousPage = hasMoreItems
+		} else {
+			executioResp.PageInfo.HasNextPage = hasMoreItems
+			executioResp.PageInfo.HasPreviousPage = !cursor.IsZero()
 		}
 	}
 	return executioResp, nil

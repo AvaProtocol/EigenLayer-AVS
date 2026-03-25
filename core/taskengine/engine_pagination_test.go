@@ -85,9 +85,10 @@ func TestListTasksByUserPaginationWithBeforeAfter(t *testing.T) {
 		assert.False(t, firstPageIds[item.Id], "Found duplicate task ID %s in second page", item.Id)
 	}
 
+	// Use startCursor of secondPage to navigate backward (items before the first item on page 2)
 	previousPage, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
-		Before:             secondPage.PageInfo.EndCursor,
+		Before:             secondPage.PageInfo.StartCursor,
 		Limit:              pageSize,
 	})
 	if err != nil {
@@ -102,14 +103,16 @@ func TestListTasksByUserPaginationWithBeforeAfter(t *testing.T) {
 		if err != nil {
 			t.Errorf("Failed to decode cursor: %v", err)
 		} else {
-			// In the new PageInfo structure, cursors always use "next" direction
-			// The direction indicates how to use the cursor, not the pagination direction that created it
 			assert.Equal(t, CursorDirectionNext, cursor.Direction, "Expected cursor direction to be 'next' in PageInfo structure")
 		}
 	}
 
-	assert.Equal(t, pageSize, len(previousPage.Items), "Expected %d items in previous page", pageSize)
+	// Backward page should return the same items as the first page
+	for i, item := range previousPage.Items {
+		assert.Equal(t, firstPage.Items[i].Id, item.Id, "Backward navigation should return the first page items")
+	}
 
+	// No overlap between previous page and second page
 	secondPageIds := make(map[string]bool)
 	for _, item := range secondPage.Items {
 		secondPageIds[item.Id] = true
