@@ -78,6 +78,25 @@ func (o *Operator) shouldLogError(errorType string, isStreamError bool) bool {
 	return false
 }
 
+// categorizePingError maps a PingServer error to a category used for debouncing and
+// deciding whether to recreate the gRPC connection. Exported for testing.
+func categorizePingError(errMsg string) string {
+	if strings.Contains(errMsg, "connection refused") {
+		return "ping_connection_refused"
+	} else if strings.Contains(errMsg, "context deadline exceeded") || strings.Contains(errMsg, "timeout") {
+		return "ping_timeout"
+	} else if strings.Contains(errMsg, "name resolver error") {
+		// DNS/name resolution failures indicate the gRPC target address
+		// cannot be resolved — recreate the connection to re-trigger resolution.
+		return "ping_connection_closing"
+	} else if strings.Contains(errMsg, "Unavailable") {
+		return "ping_service_unavailable"
+	} else if strings.Contains(errMsg, "Canceled") || strings.Contains(errMsg, "connection is closing") {
+		return "ping_connection_closing"
+	}
+	return "ping_other_error"
+}
+
 // runWorkLoop is main entrypoint where we sync data with aggregator. It performs these op
 //   - subscribe to server to receive update. act on these update to update local storage
 //   - spawn a loop to check triggering condition
@@ -966,18 +985,7 @@ func (o *Operator) PingServer() {
 		var errorType string
 		var shouldLog bool
 
-		// Categorize and debounce error logging - check more specific patterns first
-		if strings.Contains(err.Error(), "connection refused") {
-			errorType = "ping_connection_refused"
-		} else if strings.Contains(err.Error(), "context deadline exceeded") || strings.Contains(err.Error(), "timeout") {
-			errorType = "ping_timeout"
-		} else if strings.Contains(err.Error(), "Unavailable") {
-			errorType = "ping_service_unavailable"
-		} else if strings.Contains(err.Error(), "Canceled") || strings.Contains(err.Error(), "connection is closing") {
-			errorType = "ping_connection_closing"
-		} else {
-			errorType = "ping_other_error"
-		}
+		errorType = categorizePingError(err.Error())
 
 		shouldLog = o.shouldLogError(errorType, false)
 		if shouldLog {

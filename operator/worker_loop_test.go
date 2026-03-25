@@ -420,6 +420,64 @@ func TestTaskRemovalFromAllTriggers(t *testing.T) {
 	}
 }
 
+func TestCategorizePingError(t *testing.T) {
+	tests := []struct {
+		name     string
+		errMsg   string
+		wantType string
+	}{
+		{
+			name:     "connection refused",
+			errMsg:   "dial tcp 127.0.0.1:8090: connect: connection refused",
+			wantType: "ping_connection_refused",
+		},
+		{
+			name:     "context deadline exceeded",
+			errMsg:   "rpc error: code = DeadlineExceeded desc = context deadline exceeded",
+			wantType: "ping_timeout",
+		},
+		{
+			name:     "timeout",
+			errMsg:   "rpc error: code = Unavailable desc = connection timeout",
+			wantType: "ping_timeout",
+		},
+		{
+			name:     "name resolver error produces zero addresses",
+			errMsg:   "rpc error: code = Unavailable desc = name resolver error: produced zero addresses",
+			wantType: "ping_connection_closing",
+		},
+		{
+			name:     "service unavailable without name resolver",
+			errMsg:   "rpc error: code = Unavailable desc = service temporarily unavailable",
+			wantType: "ping_service_unavailable",
+		},
+		{
+			name:     "connection is closing",
+			errMsg:   "rpc error: code = Canceled desc = transport: connection is closing",
+			wantType: "ping_connection_closing",
+		},
+		{
+			name:     "canceled",
+			errMsg:   "rpc error: code = Canceled desc = context canceled",
+			wantType: "ping_connection_closing",
+		},
+		{
+			name:     "unknown error",
+			errMsg:   "rpc error: code = Internal desc = something unexpected",
+			wantType: "ping_other_error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := categorizePingError(tt.errMsg)
+			if got != tt.wantType {
+				t.Errorf("categorizePingError(%q) = %q, want %q", tt.errMsg, got, tt.wantType)
+			}
+		})
+	}
+}
+
 func TestTaskRemovalFromAllTriggersIntegration(t *testing.T) {
 	t.Skip("Integration test requires complex setup with mocked gRPC streams")
 }

@@ -760,7 +760,7 @@ func sendUserOpShared(
 				recovered := crypto.PubkeyToAddress(*pub)
 				ctrl := smartWalletConfig.ControllerAddress
 				if (ctrl != common.Address{}) && !strings.EqualFold(recovered.Hex(), ctrl.Hex()) {
-					l.Error("Signature check failed", "recovered", recovered.Hex(), "controller", ctrl.Hex())
+					l.Warn("Signature check failed", "recovered", recovered.Hex(), "controller", ctrl.Hex())
 					return userOp, nil, fmt.Errorf("local signature check failed: recovered %s != controller %s", recovered.Hex(), ctrl.Hex())
 				}
 			}
@@ -782,7 +782,7 @@ func sendUserOpShared(
 		var nonceConflict *ErrPaymasterNonceConflict
 		if errors.As(err, &nonceConflict) && paymasterReq != nil {
 			if paymasterRetry >= maxPaymasterRetries-1 {
-				l.Error("Paymaster nonce conflict retries exhausted",
+				l.Warn("Paymaster nonce conflict retries exhausted",
 					"retries", maxPaymasterRetries,
 					"last_nonce", nonceConflict.Nonce.String())
 				return userOp, nil, fmt.Errorf("paymaster nonce conflict after %d rebuilds: %w", maxPaymasterRetries, err)
@@ -836,7 +836,7 @@ func sendUserOpShared(
 				l,
 			)
 			if err != nil {
-				l.Error("Failed to rebuild paymaster UserOp", "error", err)
+				l.Warn("Failed to rebuild paymaster UserOp", "error", err)
 				return nil, nil, fmt.Errorf("failed to rebuild paymaster UserOp after nonce conflict: %w", err)
 			}
 			continue
@@ -848,8 +848,8 @@ func sendUserOpShared(
 			// Rebuild WITHOUT paymaster and WITHOUT reimbursement wrapping
 			userOpNoPM, buildErr := BuildUserOp(smartWalletConfig, client, bundlerClient, owner, originalCallData, senderOverride, saltOverride, l)
 			if buildErr != nil {
-				l.Error("Fallback UserOp build without paymaster failed", "error", buildErr)
-				return userOp, nil, err
+				l.Warn("Fallback UserOp build without paymaster failed", "error", buildErr)
+				return userOp, nil, fmt.Errorf("failed to build fallback UserOp without paymaster: %w", buildErr)
 			}
 			// Try to send self-funded userOp
 			txResult, err = sendUserOpCore(smartWalletConfig, userOpNoPM, client, bundlerClient, l)
@@ -869,7 +869,7 @@ func sendUserOpShared(
 	if err != nil {
 		// Check if this is a UserOp execution failure (not just a timeout)
 		if strings.Contains(err.Error(), "UserOp execution failed") {
-			l.Error("UserOp execution failed", "hash", txResult, "error", err)
+			l.Warn("UserOp execution failed", "hash", txResult, "error", err)
 			return userOp, nil, fmt.Errorf("UserOp execution failed: %w", err)
 		}
 		// For other errors (timeout, network issues), return nil receipt but no error
@@ -1180,13 +1180,16 @@ func sendUserOpCore(
 		// For other errors, don't retry unless it's a transient network error or nonce conflict
 		if err != nil && !isNonceConflict &&
 			!strings.Contains(err.Error(), "timeout") && !strings.Contains(err.Error(), "connection") {
-			l.Error("Non-retryable bundler error", "error", err)
+			l.Warn("Non-retryable bundler error", "error", err)
 			break
 		}
 	}
 
 	if err != nil || txResult == "" {
-		l.Error("Failed to send UserOp to bundler", "retries", maxRetries, "error", err)
+		if txResult == "" && err == nil {
+			err = errors.New("bundler returned empty transaction result")
+		}
+		l.Warn("Failed to send UserOp to bundler", "retries", maxRetries, "error", err)
 		return "", fmt.Errorf("error sending transaction to bundler: %w", err)
 	}
 

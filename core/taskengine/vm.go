@@ -1005,12 +1005,10 @@ func (v *VM) runKahnScheduler() error {
 				var err error
 				selected, err = v.executeNode(node) // non-nil when a branch selects a condition path
 				if err != nil {
-					// Downgrade user script errors to Warn to avoid noisy Sentry alerts
-					if node.Type == avsproto.NodeType_NODE_TYPE_CUSTOM_CODE {
-						v.logger.Warnf("Error executing node %s: %v", node.Id, err)
-					} else {
-						v.logger.Errorf("Error executing node %s: %v", node.Id, err)
-					}
+					// Use Warn to avoid duplicate Sentry alerts; the node runner
+					// (ETHTransfer, ContractWrite, etc.) already reports to Sentry
+					// with full context at the point of failure.
+					v.logger.Warnf("Error executing node %s: %v", node.Id, err)
 				}
 			}
 
@@ -4582,17 +4580,19 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	isOnChainOp := isContractWrite || isEthTransfer
 
 	// Per-iteration timeout from config; default depends on operation type and chain.
-	// On-chain operations need longer timeouts to accommodate receipt confirmation polling
-	// (waitForUserOpConfirmation has a 5-minute internal timeout):
+	// On-chain operations need longer timeouts to accommodate:
+	// - UserOp nonce conflict retries (3 retries × up to 60s nonce polling each)
+	// - Receipt confirmation polling (waitForUserOpConfirmation has a 5-min internal timeout)
+	// Defaults:
 	// - Ethereum mainnet (chain 1): 6 min (covers 5-min confirmation + RPC propagation delay)
-	// - Other chains with on-chain ops: 1 min (faster block times)
+	// - Other chains with on-chain ops: 4 min (covers retry budget + faster confirmation)
 	// - Non-on-chain ops: 30s
 	iterationTimeoutSec := node.Config.IterationTimeout
 	if iterationTimeoutSec == 0 {
 		if isOnChainOp && v.smartWalletConfig != nil && v.smartWalletConfig.ChainID == 1 {
 			iterationTimeoutSec = 360 // 6 minutes for Ethereum mainnet on-chain ops
 		} else if isOnChainOp {
-			iterationTimeoutSec = 60 // 1 minute for other chains
+			iterationTimeoutSec = 240 // 4 minutes for other chains (covers 3 paymaster retries)
 		} else {
 			iterationTimeoutSec = 30
 		}
@@ -4711,7 +4711,6 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				} else {
 					results[i] = result.Data
 				}
-				close(resultChannel)
 			case <-time.After(iterationTimeout):
 				success = false
 				err := fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
@@ -4719,7 +4718,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 					firstError = err
 				}
 				log.WriteString(fmt.Sprintf("\nTimeout in iteration %d", i))
-				close(resultChannel)
+				// Do NOT close the channel here — the worker goroutine may still
+				// send to it. The buffered channel will be GC'd once both sides
+				// drop their references.
 			}
 		}
 	} else {
@@ -4766,7 +4767,6 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				} else {
 					results[i] = result.Data
 				}
-				close(resultChannel)
 			case <-time.After(iterationTimeout):
 				success = false
 				err := fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
@@ -4774,7 +4774,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 					firstError = err
 				}
 				log.WriteString(fmt.Sprintf("\nTimeout in iteration %d", i))
-				close(resultChannel)
+				// Do NOT close the channel here — the worker goroutine may still
+				// send to it. The buffered channel will be GC'd once both sides
+				// drop their references.
 			}
 		}
 	}
