@@ -1117,8 +1117,20 @@ func (n *Engine) getNestedFieldValue(data map[string]interface{}, fieldName stri
 
 	if len(parts) == 1 {
 		// Direct field access
-		value, exists := data[fieldName]
-		return value, exists
+		if value, exists := data[fieldName]; exists {
+			return value, true
+		}
+		// If not found at top level, search one level deep into nested maps.
+		// This handles event trigger data where fields like "current" are
+		// wrapped under an event name key (e.g., {"AnswerUpdated": {"current": ...}}).
+		for _, v := range data {
+			if nestedMap, ok := v.(map[string]interface{}); ok {
+				if value, exists := nestedMap[fieldName]; exists {
+					return value, true
+				}
+			}
+		}
+		return nil, false
 	}
 
 	// For eventName.fieldName format (e.g., "AnswerUpdated.current"), try just the field name
