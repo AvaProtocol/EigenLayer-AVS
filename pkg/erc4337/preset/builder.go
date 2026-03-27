@@ -78,23 +78,18 @@ var (
 	// to prevent conflicts with transactions pending in the bundler's mempool
 	globalNonceManager = bundler.NewNonceManager(nil)
 
-	// senderLocks serializes UserOp processing per sender address to prevent
-	// concurrent executions from racing on the same nonce
-	senderLocks   = make(map[common.Address]*sync.Mutex)
-	senderLocksMu sync.Mutex
+	// senderLockStripesArr provides a bounded set of mutexes used to serialize
+	// UserOp processing per sender address. The sender address is deterministically
+	// mapped to one of these locks to avoid unbounded growth of a per-sender map.
+	senderLockStripesArr [256]sync.Mutex
 )
 
-// getSenderLock returns a per-sender mutex, creating one if it doesn't exist.
-// This serializes UserOp processing for the same sender to prevent nonce races.
+// getSenderLock returns a mutex for the given sender address using a striped
+// locking strategy. This serializes UserOp processing for a given sender
+// while keeping the total number of locks bounded.
 func getSenderLock(sender common.Address) *sync.Mutex {
-	senderLocksMu.Lock()
-	defer senderLocksMu.Unlock()
-	if mu, exists := senderLocks[sender]; exists {
-		return mu
-	}
-	mu := &sync.Mutex{}
-	senderLocks[sender] = mu
-	return mu
+	idx := int(sender[common.AddressLength-1]) % len(senderLockStripesArr)
+	return &senderLockStripesArr[idx]
 }
 
 // ErrPaymasterNonceConflict is returned by sendUserOpCore when a paymaster UserOp

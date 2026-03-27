@@ -889,14 +889,16 @@ func (n *Engine) buildEventTriggerResponseWithSimulation(methodCallData map[stri
 		response["metadata"] = metadata
 	}
 
-	// Always evaluate conditions so we can include details in the response
-	conditionResults, _ := n.evaluateConditionsWithDetails(methodCallData, queryMap)
+	// Always evaluate conditions so we can include details in the response.
+	// Use the computed result as the authoritative conditionsMet value to
+	// ensure consistency between conditionsMet and matchedConditions.
+	conditionResults, evaluatedConditionsMet := n.evaluateConditionsWithDetails(methodCallData, queryMap)
 
-	response["success"] = allConditionsMet
-	response["conditionsMet"] = allConditionsMet
+	response["success"] = evaluatedConditionsMet
+	response["conditionsMet"] = evaluatedConditionsMet
 	response["matchedConditions"] = conditionResults
 
-	if allConditionsMet {
+	if evaluatedConditionsMet {
 		response["error"] = ""
 	} else {
 		// Build detailed error message from failed conditions
@@ -1359,14 +1361,16 @@ func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}
 		response["metadata"] = []interface{}{}
 	}
 
-	// Always evaluate conditions so we can include details in the response
-	conditionResults, _ := n.evaluateConditionsWithDetails(methodCallData, queryMap)
+	// Always evaluate conditions so we can include details in the response.
+	// Use the computed result as the authoritative conditionsMet value to
+	// ensure consistency between conditionsMet and matchedConditions.
+	conditionResults, evaluatedConditionsMet := n.evaluateConditionsWithDetails(methodCallData, queryMap)
 
-	response["success"] = allConditionsMet
-	response["conditionsMet"] = allConditionsMet
+	response["success"] = evaluatedConditionsMet
+	response["conditionsMet"] = evaluatedConditionsMet
 	response["matchedConditions"] = conditionResults
 
-	if allConditionsMet {
+	if evaluatedConditionsMet {
 		response["error"] = ""
 	} else {
 		// Build detailed error message from failed conditions
