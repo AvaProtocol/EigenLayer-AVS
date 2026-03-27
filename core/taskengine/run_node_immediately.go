@@ -889,18 +889,17 @@ func (n *Engine) buildEventTriggerResponseWithSimulation(methodCallData map[stri
 		response["metadata"] = metadata
 	}
 
+	// Always evaluate conditions so we can include details in the response
+	conditionResults, _ := n.evaluateConditionsWithDetails(methodCallData, queryMap)
+
+	response["success"] = allConditionsMet
+	response["conditionsMet"] = allConditionsMet
+	response["matchedConditions"] = conditionResults
+
 	if allConditionsMet {
-		// Success case: conditions met
-		response["success"] = true
 		response["error"] = ""
 	} else {
-		// Failure case: conditions not met - need to evaluate conditions to get detailed error
-		response["success"] = false
-
-		// Get the actual condition evaluation to build a detailed error message
-		conditionResults, _ := n.evaluateConditionsWithDetails(methodCallData, queryMap)
-
-		// Build detailed error message
+		// Build detailed error message from failed conditions
 		var failedReasons []string
 		for _, condition := range conditionResults {
 			if !condition.Passed {
@@ -909,7 +908,6 @@ func (n *Engine) buildEventTriggerResponseWithSimulation(methodCallData map[stri
 		}
 
 		if len(failedReasons) > 0 {
-			// Only include failed reasons in error message to avoid leaking sensitive data
 			response["error"] = fmt.Sprintf("Conditions not met: %s",
 				strings.Join(failedReasons, "; "))
 		} else {
@@ -1361,18 +1359,17 @@ func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}
 		response["metadata"] = []interface{}{}
 	}
 
+	// Always evaluate conditions so we can include details in the response
+	conditionResults, _ := n.evaluateConditionsWithDetails(methodCallData, queryMap)
+
+	response["success"] = allConditionsMet
+	response["conditionsMet"] = allConditionsMet
+	response["matchedConditions"] = conditionResults
+
 	if allConditionsMet {
-		// Success case: conditions met
-		response["success"] = true
 		response["error"] = ""
 	} else {
-		// Failure case: conditions not met - need to evaluate conditions to get detailed error
-		response["success"] = false
-
-		// Get the actual condition evaluation to build a detailed error message
-		conditionResults, _ := n.evaluateConditionsWithDetails(methodCallData, queryMap)
-
-		// Build detailed error message
+		// Build detailed error message from failed conditions
 		var failedReasons []string
 		for _, condition := range conditionResults {
 			if !condition.Passed {
@@ -1381,7 +1378,6 @@ func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}
 		}
 
 		if len(failedReasons) > 0 {
-			// Only include failed reasons in error message to avoid leaking sensitive data
 			response["error"] = fmt.Sprintf("Conditions not met: %s",
 				strings.Join(failedReasons, "; "))
 		} else {
