@@ -705,38 +705,24 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 	// Add raw event log fields as metadata (no execution context in metadata)
 	response["metadata"] = enrichmentResult.RawEventData
 
-	// Evaluate conditions if present
-	conditionsMet := true
-	errorMessage := ""
-	if conditionsInterface, hasConditions := queryMap["conditions"]; hasConditions {
-		// Handle both []interface{} and []map[string]interface{} types
-		var conditionsArray []interface{}
-		if conditionsInterfaceArray, ok := conditionsInterface.([]interface{}); ok {
-			conditionsArray = conditionsInterfaceArray
-		} else if conditionsMapArray, ok := conditionsInterface.([]map[string]interface{}); ok {
-			// Convert []map[string]interface{} to []interface{}
-			conditionsArray = make([]interface{}, len(conditionsMapArray))
-			for i, condMap := range conditionsMapArray {
-				conditionsArray[i] = condMap
-			}
-		}
-
-		if len(conditionsArray) > 0 {
-			// Use decimal formatting context for consistent condition evaluation
-			if formattingContext != nil {
-				conditionsMet = n.evaluateConditionsAgainstEventDataWithDecimalContext(parsedData, conditionsArray, formattingContext)
-			} else {
-				conditionsMet = n.evaluateConditionsAgainstEventData(parsedData, conditionsArray)
-			}
-			if !conditionsMet {
-				errorMessage = "Conditions not met for simulated event"
-			}
-		}
+	// Evaluate conditions with details for enhanced response
+	var conditionResults []ConditionResult
+	var conditionsMet bool = true
+	if formattingContext != nil {
+		conditionResults, conditionsMet = n.evaluateConditionsWithDetailsAndDecimalContext(parsedData, queryMap, formattingContext)
+	} else {
+		conditionResults, conditionsMet = n.evaluateConditionsWithDetails(parsedData, queryMap)
 	}
 
 	// Set success based on condition evaluation
 	response["success"] = conditionsMet
-	response["error"] = errorMessage
+	response["conditionsMet"] = conditionsMet
+	response["matchedConditions"] = conditionResults
+	if !conditionsMet {
+		response["error"] = "Conditions not met for simulated event"
+	} else {
+		response["error"] = ""
+	}
 
 	// Add execution context (chainId, isSimulated, provider)
 	response["executionContext"] = GetExecutionContext(chainID, true) // true = isSimulation
@@ -850,7 +836,7 @@ func (n *Engine) createBasicSimulatedEventResponse(log *types.Log, chainID int64
 }
 
 // buildEventTriggerResponseWithSimulation builds an event trigger response with optional simulation flag
-func (n *Engine) buildEventTriggerResponseWithSimulation(methodCallData map[string]interface{}, allConditionsMet bool, chainID int64, rawContractMetadata []interface{}, queryMap map[string]interface{}, isSimulation bool) map[string]interface{} {
+func (n *Engine) buildEventTriggerResponseWithSimulation(methodCallData map[string]interface{}, chainID int64, rawContractMetadata []interface{}, queryMap map[string]interface{}, isSimulation bool) map[string]interface{} {
 	response := make(map[string]interface{})
 
 	// Always include the contract read data in the data field
@@ -1333,7 +1319,7 @@ func (n *Engine) formatValueForDisplay(value interface{}) string {
 }
 
 // buildEventTriggerResponse builds the enhanced response structure
-func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}, allConditionsMet bool, chainID int64, rawContractMetadata []interface{}, queryMap map[string]interface{}) map[string]interface{} {
+func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}, chainID int64, rawContractMetadata []interface{}, queryMap map[string]interface{}) map[string]interface{} {
 	response := make(map[string]interface{})
 
 	// Always include the contract read data in the data field
@@ -1391,16 +1377,6 @@ func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}
 
 	// Add executionContext for EventTrigger direct calls (real RPC calls, not simulated)
 	response["executionContext"] = GetExecutionContext(chainID, false)
-
-	// Add debug trace info
-	debugResponse := map[string]interface{}{
-		"debug_trace":     "runEventTriggerWithDirectCalls_COMPLETED",
-		"debug_timestamp": time.Now().Unix(),
-	}
-	for key, value := range debugResponse {
-		response[key] = value
-	}
-	response["debug_path"] = "DIRECT_CALLS"
 
 	return response
 }
@@ -1779,10 +1755,11 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	methodCallResults["chainId"] = chainID
 
 	// Evaluate conditions with details for enhanced response
+	var conditionResults []ConditionResult
 	var allConditionsMet bool = true
 	if hasConditions {
 		// Use the structured parsedData for condition evaluation with decimal formatting context
-		_, allConditionsMet = n.evaluateConditionsWithDetailsAndDecimalContext(parsedData, queryMap, formattingContext)
+		conditionResults, allConditionsMet = n.evaluateConditionsWithDetailsAndDecimalContext(parsedData, queryMap, formattingContext)
 	}
 
 	// Create response following the same pattern as runEventTriggerWithDirectCalls
@@ -1791,30 +1768,13 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	// Add the parsed ABI fields in structured format
 	response["data"] = parsedData
 
-	// DEBUG: Log the final parsedData structure
-	if n.logger != nil {
-		n.logger.Debug("🔍 Final response data structure",
-			"parsedDataKeys", GetMapKeys(parsedData))
-		for eventName, eventFields := range parsedData {
-			if eventFieldsMap, ok := eventFields.(map[string]interface{}); ok {
-				n.logger.Debug("🔍 Event fields",
-					"eventName", eventName,
-					"fields", GetMapKeys(eventFieldsMap))
-				if current, exists := eventFieldsMap["current"]; exists {
-					n.logger.Debug("🔍 Current field value",
-						"eventName", eventName,
-						"current", current,
-						"type", fmt.Sprintf("%T", current))
-				}
-			}
-		}
-	}
-
 	// Add raw event log fields as metadata (direct format for backward compatibility)
 	response["metadata"] = enrichmentResult.RawEventData
 
 	// Set success based on condition evaluation
 	response["success"] = allConditionsMet
+	response["conditionsMet"] = allConditionsMet
+	response["matchedConditions"] = conditionResults
 	if !allConditionsMet {
 		response["error"] = "Conditions not met for simulated event"
 	} else {
@@ -1824,17 +1784,7 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	// Add execution context (chainId, isSimulated, provider)
 	response["executionContext"] = GetExecutionContext(chainID, true) // true = isSimulation
 
-	// Add debug trace info
-	debugResponse := map[string]interface{}{
-		"debug_trace":     "runEventTriggerWithTenderlySimulation_COMPLETED",
-		"debug_timestamp": time.Now().Unix(),
-	}
-	for key, value := range debugResponse {
-		response[key] = value
-	}
-	response["debug_path"] = "TENDERLY_SIMULATION"
-
-	n.logger.Info("✅ EventTrigger simulation: Returning enhanced response format",
+	n.logger.Info("EventTrigger simulation: Returning enhanced response format",
 		"contract", simulatedLog.Address.Hex(),
 		"hasConditions", hasConditions,
 		"allConditionsMet", allConditionsMet,

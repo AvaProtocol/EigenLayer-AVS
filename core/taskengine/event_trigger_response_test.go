@@ -37,7 +37,7 @@ func TestBuildEventTriggerResponse_ConditionsMetFields(t *testing.T) {
 	}
 
 	t.Run("conditions not met includes conditionsMet=false and matchedConditions", func(t *testing.T) {
-		resp := engine.buildEventTriggerResponse(methodCallData, false, 1, nil, queryMap)
+		resp := engine.buildEventTriggerResponse(methodCallData, 1, nil, queryMap)
 
 		assert.Equal(t, false, resp["success"])
 		assert.Equal(t, false, resp["conditionsMet"])
@@ -62,7 +62,7 @@ func TestBuildEventTriggerResponse_ConditionsMetFields(t *testing.T) {
 			},
 		}
 
-		resp := engine.buildEventTriggerResponse(methodCallData, true, 1, nil, metQueryMap)
+		resp := engine.buildEventTriggerResponse(methodCallData, 1, nil, metQueryMap)
 
 		assert.Equal(t, true, resp["success"])
 		assert.Equal(t, true, resp["conditionsMet"])
@@ -75,7 +75,7 @@ func TestBuildEventTriggerResponse_ConditionsMetFields(t *testing.T) {
 	})
 
 	t.Run("simulation variant also includes conditionsMet and matchedConditions", func(t *testing.T) {
-		resp := engine.buildEventTriggerResponseWithSimulation(methodCallData, false, 1, nil, queryMap, true)
+		resp := engine.buildEventTriggerResponseWithSimulation(methodCallData, 1, nil, queryMap, true)
 
 		assert.Equal(t, false, resp["conditionsMet"])
 		conditions, ok := resp["matchedConditions"].([]ConditionResult)
@@ -87,7 +87,7 @@ func TestBuildEventTriggerResponse_ConditionsMetFields(t *testing.T) {
 	t.Run("no conditions returns empty matchedConditions and conditionsMet=true", func(t *testing.T) {
 		emptyQueryMap := map[string]interface{}{}
 
-		resp := engine.buildEventTriggerResponse(methodCallData, true, 1, nil, emptyQueryMap)
+		resp := engine.buildEventTriggerResponse(methodCallData, 1, nil, emptyQueryMap)
 
 		assert.Equal(t, true, resp["conditionsMet"])
 		conditions, ok := resp["matchedConditions"].([]ConditionResult)
