@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	ethereum "github.com/ethereum/go-ethereum"
@@ -76,7 +77,20 @@ var (
 	// globalNonceManager tracks pending nonces across all UserOp submissions
 	// to prevent conflicts with transactions pending in the bundler's mempool
 	globalNonceManager = bundler.NewNonceManager(nil)
+
+	// senderLockStripesArr provides a bounded set of mutexes used to serialize
+	// UserOp processing per sender address. The sender address is deterministically
+	// mapped to one of these locks to avoid unbounded growth of a per-sender map.
+	senderLockStripesArr [256]sync.Mutex
 )
+
+// getSenderLock returns a mutex for the given sender address using a striped
+// locking strategy. This serializes UserOp processing for a given sender
+// while keeping the total number of locks bounded.
+func getSenderLock(sender common.Address) *sync.Mutex {
+	idx := int(sender[common.AddressLength-1]) % len(senderLockStripesArr)
+	return &senderLockStripesArr[idx]
+}
 
 // ErrPaymasterNonceConflict is returned by sendUserOpCore when a paymaster UserOp
 // hits an AA25 nonce conflict. The paymaster signature is bound to the original nonce,
@@ -514,6 +528,17 @@ func sendUserOpShared(
 	lgr logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	l := logger.EnsureLogger(lgr)
+
+	// Serialize UserOp processing per sender to prevent concurrent nonce races.
+	// The effective sender is the senderOverride (if provided) or the owner.
+	lockAddr := owner
+	if senderOverride != nil {
+		lockAddr = *senderOverride
+	}
+	senderLock := getSenderLock(lockAddr)
+	senderLock.Lock()
+	defer senderLock.Unlock()
+
 	var userOp *userop.UserOperation
 	var err error
 	entrypoint := smartWalletConfig.EntrypointAddress

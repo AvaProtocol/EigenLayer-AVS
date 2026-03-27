@@ -1,5 +1,7 @@
 # Feature: Role-Based Admin Authentication
 
+> **Status**: Not yet implemented. JWT role extraction exists in `core/auth/user.go` but roles are not stored in the User model and the zero-address hack is still used for admin detection in `core/taskengine/engine.go`.
+
 ## **Problem**
 Currently, the system uses a hack to identify admin users by checking if `user.Address == common.Address{}` (zero address). This approach is:
 - ❌ Unclear and confusing (zero address has semantic meaning in Ethereum as burn address)

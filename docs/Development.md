@@ -176,7 +176,7 @@ This command is currently under development and not fully implemented.
 
 ## Resetting Storage
 
-During development, you may need to reset storage to erase bad data due to schema changes. In the future, we will implement migration to properly migrate storage. For now, to wipe out storage, run:
+During development, you may need to reset storage to erase bad data due to schema changes. A migration script exists at `scripts/migration/create_migration.go` and breaking changes can be detected with `scripts/compare_storage_structure.go`, but full automatic runtime migrations are not yet implemented. To wipe out storage, run:
 
 ```bash
 make clean

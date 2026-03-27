@@ -141,7 +141,7 @@ func ValidateHandlebarsFormat(data interface{}) error {
 }
 ```
 
-**Note**: Handlebars validation infrastructure is ready, but enforcement in nodes is tracked in issue #409.
+**Note**: Handlebars validation infrastructure is ready, but enforcement in nodes is tracked in issue #484.
 
 ## Size Limits
 
@@ -176,9 +176,9 @@ const (
 | **FilterNode** | JavaScript | `Config.Expression` | Size (100KB) | ✅ Done |
 | **BranchNode** | JavaScript | `Condition.Expression` | Size (100KB) | ✅ Done |
 | **GraphQLQueryNode** | GraphQL | `Config.Query` | Size (100KB) | ✅ Done |
-| **ContractReadNode** | Handlebars | `MethodCall.MethodParams` | Ready | 🔜 Issue #409 |
-| **ContractWriteNode** | Handlebars | `MethodCall.MethodParams` | Ready | 🔜 Issue #409 |
-| **EmailNode** | Handlebars | Template fields | Ready | 🔜 Issue #409 |
+| **ContractReadNode** | Handlebars | `MethodCall.MethodParams` | Ready | 🔜 Issue #484 |
+| **ContractWriteNode** | Handlebars | `MethodCall.MethodParams` | Ready | 🔜 Issue #484 |
+| **EmailNode** | Handlebars | Template fields | Ready | 🔜 Issue #484 |
 
 ## Implementation Examples
 
@@ -363,7 +363,7 @@ func ValidateJavaScriptFormat(data interface{}) error {
 
 ### Next Steps
 
-🔜 **Issue #409**: Add Handlebars validation to remaining nodes  
+🔜 **Issue #484**: Add Handlebars validation to remaining nodes
 🔜 **Syntax validation**: Pre-validate code syntax  
 🔜 **Complexity limits**: Prevent overly complex code  
 

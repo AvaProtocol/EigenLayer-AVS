@@ -337,6 +337,5 @@ function executeBatch(address[] dest, bytes[] func) external;
 
 ---
 
-**Status**: 🚧 **In Development**  
-**Version**: 1.0.0-alpha  
-**Last Updated**: August 15, 2025
+**Status**: Phase 1 (core `PackExecuteBatch` infrastructure) complete. Phases 2-4 (multi-contract detection, batch mode toggle, testing, docs) not yet implemented.
+**Last Updated**: March 27, 2026
