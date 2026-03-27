@@ -295,12 +295,12 @@ if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
 - [x] Add size limits for large user inputs (DoS prevention) ✅ **COMPLETED 2025-10-05**
 - [x] Add explicit JSON validation for RestAPI body when Content-Type is JSON ✅ **COMPLETED 2025-10-05**
 
-### Short Term (Recommended within 1-2 sprints)
-- [ ] Add ABI format validation with structured errors (Partially done - size limits added)
+### Short Term
+- [ ] Add ABI format validation with structured errors (partially done - size limits added)
 - [ ] Consider SSRF protection for RestAPI URLs (block private IPs)
-- [ ] Add metrics for validation errors to monitor attack patterns
 
-### Long Term (Nice to have)
+### Long Term
+- [ ] Add metrics for validation errors to monitor attack patterns
 - [ ] Add configurable size limits per user tier
 - [ ] Add rate limiting at input validation layer
 
