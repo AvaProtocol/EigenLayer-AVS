@@ -81,6 +81,22 @@ cd contracts && forge test    # Run contract tests
 - **BigCache**: In-memory caching layer
 - **Migrations**: Versioned database migrations for schema changes
 
+## Code Style
+
+### Go Naming Conventions
+- Local variables use `lowerCamelCase`. Never start a local variable or function parameter with an uppercase letter — in Go, uppercase means exported.
+- When renaming something, review each change site individually. Don't blindly find-and-replace all substring matches — internal variables that happen to share a substring with an API field are separate concerns.
+
+### Protobuf and API Changes
+- Renaming a proto field changes the JSON wire name (e.g., `trigger_input` → `input_variables` changes JSON from `"triggerInput"` to `"inputVariables"`). Treat this as a **breaking API change** — coordinate with SDK/client consumers and document the migration path.
+- When renaming a proto field, only update the `.proto` definition and code that directly references the generated Go accessor (e.g., `payload.TriggerInput` → `payload.InputVariables`). Do not rename unrelated internal variables that happen to share a name substring.
+- If `make protoc-gen` produces unrelated diffs from a toolchain version change (e.g., `protoc` or `protoc-gen-go` upgrade), split that into a separate commit or PR to keep diffs reviewable.
+
+## Branching and Pull Requests
+- All feature branches and PRs must target `staging`, never `main` directly.
+- The `main` branch is updated only by merging `staging` → `main` after migration checks pass.
+- Before merging to `main`, run `go run scripts/compare_storage_structure.go main` to check for breaking storage changes.
+
 ## Development Guidelines
 
 - After modifying `.proto` files, always run `make protoc-gen`

@@ -228,6 +228,10 @@ https://aggregator-sepolia.avaprotocol.org/telemetry
 
 https://aggregator.avaprotocol.org/telemetry
 
+## Branching Strategy
+
+All feature branches and pull requests must target the `staging` branch. The `main` branch is only updated by merging `staging` → `main` after migration checks pass. Never open a PR directly against `main`.
+
 ## Migration Guide
 
 Before merging changes from `staging` to `main`, ensure any storage structure changes are properly migrated:
