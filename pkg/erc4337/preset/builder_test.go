@@ -47,6 +47,16 @@ func TestSendUserOp(t *testing.T) {
 	}
 	owner := *ownerAddr
 
+	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
+	require.NoError(t, err, "Failed to connect to RPC")
+	defer client.Close()
+
+	// Ensure wallet is deployed with the current controller key
+	controllerPrivateKey := testutil.GetTestControllerPrivateKey()
+	salt := big.NewInt(0)
+	err = testutil.EnsureWalletDeployed(client, smartWalletConfig.FactoryAddress, owner, salt, controllerPrivateKey)
+	require.NoError(t, err, "Failed to ensure wallet is deployed")
+
 	calldata, err := aa.PackExecute(
 		common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"), // Sepolia USDC
 		big.NewInt(0),
