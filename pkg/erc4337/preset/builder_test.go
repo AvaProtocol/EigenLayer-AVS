@@ -37,6 +37,8 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 }
 
 func TestSendUserOp(t *testing.T) {
+	t.Skip("Skipping: wallet deployed with different controller key causes signature mismatch — see https://github.com/AvaProtocol/EigenLayer-AVS/issues/496")
+
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
 	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
