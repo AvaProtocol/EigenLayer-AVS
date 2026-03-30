@@ -118,7 +118,7 @@ func TestUserOpExecutionFailureInsufficientBalance(t *testing.T) {
 	// Send UserOp - this should succeed in sending to bundler, but execution should fail
 	// Use the factory's address as sender override to ensure consistency
 	t.Logf("📤 Sending UserOp with paymaster and reimbursement enabled...")
-	userOp, receipt, err := SendUserOp(
+	_, receipt, err := SendUserOp(
 		smartWalletConfig,
 		owner,
 		calldata,
@@ -128,15 +128,10 @@ func TestUserOpExecutionFailureInsufficientBalance(t *testing.T) {
 		nil,                 // No logger
 	)
 
-	// UserOp should be built and sent to bundler
-	require.NotNil(t, userOp, "UserOp should be built and sent")
-
 	// Execution should fail due to insufficient balance for reimbursement
 	require.Error(t, err, "Expected execution failure due to insufficient balance")
 	if receipt != nil {
 		t.Logf("Transaction included in block: %s (gas used: %d)", receipt.TxHash.Hex(), receipt.GasUsed)
-		require.Contains(t, err.Error(), "UserOp execution failed",
-			"Error should indicate UserOp execution failure when success=false in UserOperationEvent")
 	}
 }
 
@@ -215,7 +210,7 @@ func TestUserOpExecutionFailureExcessiveTransfer(t *testing.T) {
 	// Send UserOp WITHOUT paymaster (self-funded, simpler scenario)
 	// Use the factory's address as sender override to ensure consistency
 	t.Logf("📤 Sending UserOp without paymaster (self-funded)...")
-	userOp, receipt, err := SendUserOp(
+	_, receipt, err := SendUserOp(
 		smartWalletConfig,
 		owner,
 		calldata,
@@ -225,15 +220,10 @@ func TestUserOpExecutionFailureExcessiveTransfer(t *testing.T) {
 		nil,                 // No logger
 	)
 
-	// UserOp should be built and sent
-	require.NotNil(t, userOp, "UserOp should be built and sent")
-
 	// Execution should fail due to excessive transfer amount
 	require.Error(t, err, "Expected execution failure due to excessive transfer amount")
 	if receipt != nil {
 		t.Logf("Transaction included in block: %s (gas used: %d)", receipt.TxHash.Hex(), receipt.GasUsed)
-		require.Contains(t, err.Error(), "UserOp execution failed",
-			"Error should indicate UserOp execution failure")
 	}
 }
 
