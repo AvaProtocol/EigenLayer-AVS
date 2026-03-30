@@ -158,6 +158,8 @@ jobs:
           moralis-api-key: ${{ secrets.MORALIS_API_KEY }}
 
       - name: Run Go test
+        env:
+          OWNER_EOA: ${{ vars.OWNER_EOA }}
         run: |
           cd ./${{ matrix.test }}
           go test . -v -short

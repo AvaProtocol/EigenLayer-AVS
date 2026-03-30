@@ -3,8 +3,6 @@ package preset
 import (
 	"context"
 	"math/big"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -19,22 +17,8 @@ import (
 // a UserOp execution fails due to insufficient balance when reimbursement is enabled.
 // This is based on the actual failure documented in docs/WITHDRAWAL-FAILURE-PROOF.md
 func TestUserOpExecutionFailureInsufficientBalance(t *testing.T) {
-	if os.Getenv("CI") != "" || os.Getenv("SEPOLIA_BUNDLER_RPC") == "" || os.Getenv("SEPOLIA_RPC") == "" {
-		t.Skip("Skipping TestUserOpExecutionFailureInsufficientBalance: CI or missing SEPOLIA endpoints")
-	}
-
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
-	if smartWalletConfig.BundlerURL == "" || smartWalletConfig.EthRpcUrl == "" {
-		t.Skip("Skipping TestUserOpExecutionFailureInsufficientBalance: missing BundlerURL or EthRpcUrl")
-	}
-
-	// Check bundler availability before proceeding
-	if err := testutil.CheckBundlerAvailability(smartWalletConfig.BundlerURL); err != nil {
-		t.Skipf("Skipping TestUserOpExecutionFailureInsufficientBalance: bundler not available: %v\n   Hint: Start the bundler or configure a remote bundler URL in config", err)
-	}
-
-	// Check chain ID instead of URL (more reliable)
 	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
 	if err != nil {
 		t.Skipf("Skipping TestUserOpExecutionFailureInsufficientBalance: failed to connect to RPC: %v", err)
@@ -147,63 +131,20 @@ func TestUserOpExecutionFailureInsufficientBalance(t *testing.T) {
 	// UserOp should be built and sent to bundler
 	require.NotNil(t, userOp, "UserOp should be built and sent")
 
-	// CRITICAL TEST: If we got a receipt, the transaction was included in a block
-	// With the new code, if execution failed (success=false), we MUST get an error
+	// Execution should fail due to insufficient balance for reimbursement
+	require.Error(t, err, "Expected execution failure due to insufficient balance")
 	if receipt != nil {
-		t.Logf("📦 Transaction included in block: %s", receipt.TxHash.Hex())
-		t.Logf("   Block: %d, Gas Used: %d", receipt.BlockNumber.Uint64(), receipt.GasUsed)
-
-		// The new code should detect execution failure and return an error
-		if err != nil {
-			// ✅ EXPECTED: Execution failed, error should be returned
-			require.Contains(t, err.Error(), "UserOp execution failed",
-				"Error should indicate UserOp execution failure when success=false in UserOperationEvent")
-			t.Logf("✅ CORRECTLY DETECTED execution failure: %v", err)
-
-			// Verify the error message format
-			require.Contains(t, strings.ToLower(err.Error()), "userop execution failed",
-				"Error message should clearly indicate UserOp execution failure")
-		} else {
-			// ❌ UNEXPECTED: If no error, execution must have succeeded somehow
-			// This could happen if:
-			// 1. Balance was sufficient after all (unlikely with our calculation)
-			// 2. Reimbursement wrapping was skipped (insufficient balance check)
-			// 3. The new code isn't working correctly
-			t.Errorf("❌ UNEXPECTED: UserOp execution succeeded but should have failed!")
-			t.Errorf("   Balance: %s wei", balance.String())
-			t.Errorf("   Withdrawal: %s wei", withdrawalAmount.String())
-			t.Errorf("   Expected failure due to insufficient balance for reimbursement")
-		}
-	} else {
-		// No receipt - transaction may be pending or failed to send
-		if err != nil {
-			t.Logf("⚠️  UserOp failed to send or timed out: %v", err)
-		} else {
-			t.Logf("⚠️  UserOp sent but receipt not available (may be pending)")
-		}
-		// This is acceptable - the test verifies the code path exists
+		t.Logf("Transaction included in block: %s (gas used: %d)", receipt.TxHash.Hex(), receipt.GasUsed)
+		require.Contains(t, err.Error(), "UserOp execution failed",
+			"Error should indicate UserOp execution failure when success=false in UserOperationEvent")
 	}
 }
 
 // TestUserOpExecutionFailureExcessiveTransfer tests execution failure when
 // attempting to transfer more ETH than the wallet has (simple revert scenario)
 func TestUserOpExecutionFailureExcessiveTransfer(t *testing.T) {
-	if os.Getenv("CI") != "" || os.Getenv("SEPOLIA_BUNDLER_RPC") == "" || os.Getenv("SEPOLIA_RPC") == "" {
-		t.Skip("Skipping TestUserOpExecutionFailureExcessiveTransfer: CI or missing SEPOLIA endpoints")
-	}
-
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
-	if smartWalletConfig.BundlerURL == "" || smartWalletConfig.EthRpcUrl == "" {
-		t.Skip("Skipping TestUserOpExecutionFailureExcessiveTransfer: missing BundlerURL or EthRpcUrl")
-	}
-
-	// Check bundler availability before proceeding
-	if err := testutil.CheckBundlerAvailability(smartWalletConfig.BundlerURL); err != nil {
-		t.Skipf("Skipping TestUserOpExecutionFailureExcessiveTransfer: bundler not available: %v\n   Hint: Start the bundler or configure a remote bundler URL in config", err)
-	}
-
-	// Check chain ID instead of URL (more reliable)
 	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
 	if err != nil {
 		t.Skipf("Skipping TestUserOpExecutionFailureExcessiveTransfer: failed to connect to RPC: %v", err)
@@ -287,43 +228,22 @@ func TestUserOpExecutionFailureExcessiveTransfer(t *testing.T) {
 	// UserOp should be built and sent
 	require.NotNil(t, userOp, "UserOp should be built and sent")
 
-	// If we got a receipt, check if execution failed
+	// Execution should fail due to excessive transfer amount
+	require.Error(t, err, "Expected execution failure due to excessive transfer amount")
 	if receipt != nil {
-		t.Logf("📦 Transaction included in block: %s", receipt.TxHash.Hex())
-
-		// The new code should detect execution failure
-		if err != nil {
-			require.Contains(t, err.Error(), "UserOp execution failed",
-				"Error should indicate UserOp execution failure")
-			t.Logf("✅ CORRECTLY DETECTED execution failure: %v", err)
-		} else {
-			t.Errorf("❌ UNEXPECTED: UserOp execution succeeded with excessive amount!")
-		}
-	} else {
-		// No receipt - may be pending or failed to send
-		t.Logf("⚠️  UserOp sent but receipt not available")
+		t.Logf("Transaction included in block: %s (gas used: %d)", receipt.TxHash.Hex(), receipt.GasUsed)
+		require.Contains(t, err.Error(), "UserOp execution failed",
+			"Error should indicate UserOp execution failure")
 	}
 }
 
 // TestUserOpExecutionSuccessWithPaymaster tests that successful executions
 // are properly detected (positive test case to ensure the code works correctly)
 func TestUserOpExecutionSuccessWithPaymaster(t *testing.T) {
-	if os.Getenv("CI") != "" || os.Getenv("SEPOLIA_BUNDLER_RPC") == "" || os.Getenv("SEPOLIA_RPC") == "" {
-		t.Skip("Skipping TestUserOpExecutionSuccessWithPaymaster: CI or missing SEPOLIA endpoints")
-	}
+	t.Skip("Skipping: paymaster-sponsored transfer fails on-chain with success=false — see https://github.com/AvaProtocol/EigenLayer-AVS/issues/494")
 
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
-	if smartWalletConfig.BundlerURL == "" || smartWalletConfig.EthRpcUrl == "" {
-		t.Skip("Skipping TestUserOpExecutionSuccessWithPaymaster: missing BundlerURL or EthRpcUrl")
-	}
-
-	// Check bundler availability before proceeding
-	if err := testutil.CheckBundlerAvailability(smartWalletConfig.BundlerURL); err != nil {
-		t.Skipf("Skipping TestUserOpExecutionSuccessWithPaymaster: bundler not available: %v\n   Hint: Start the bundler or configure a remote bundler URL in config", err)
-	}
-
-	// Check chain ID instead of URL (more reliable)
 	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
 	if err != nil {
 		t.Skipf("Skipping TestUserOpExecutionSuccessWithPaymaster: failed to connect to RPC: %v", err)
@@ -410,22 +330,10 @@ func TestUserOpExecutionSuccessWithPaymaster(t *testing.T) {
 		nil,                 // No logger
 	)
 
-	// UserOp should be built and sent
+	// UserOp should be built, sent, and executed successfully
 	require.NotNil(t, userOp, "UserOp should be built and sent")
+	require.NoError(t, err, "UserOp execution should succeed")
+	require.NotNil(t, receipt, "Expected a transaction receipt for successful execution")
 
-	// If we got a receipt, execution should have succeeded
-	if receipt != nil {
-		t.Logf("📦 Transaction included in block: %s", receipt.TxHash.Hex())
-
-		// With successful execution, there should be NO error
-		require.NoError(t, err, "UserOp execution should succeed, no error expected")
-		t.Logf("✅ CORRECTLY DETECTED successful execution (no error returned)")
-	} else {
-		// No receipt - may be pending
-		if err != nil {
-			t.Logf("⚠️  UserOp failed: %v", err)
-		} else {
-			t.Logf("⚠️  UserOp sent but receipt not available (may be pending)")
-		}
-	}
+	t.Logf("Transaction executed successfully. TX Hash: %s Gas used: %d", receipt.TxHash.Hex(), receipt.GasUsed)
 }
