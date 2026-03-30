@@ -27,31 +27,14 @@ import (
 )
 
 func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
-	// Load aggregator config to get the CONTROLLER private key (used for signing UserOps)
-	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
-	if err != nil {
-		panic(fmt.Sprintf("Failed to load aggregator config: %v", err))
+	swCfg := testutil.GetTestSmartWalletConfig()
+
+	// Derive controller address from private key when available
+	if swCfg.ControllerPrivateKey != nil {
+		swCfg.ControllerAddress = crypto.PubkeyToAddress(swCfg.ControllerPrivateKey.PublicKey)
 	}
 
-	if cfg.SmartWallet == nil || cfg.SmartWallet.ControllerPrivateKey == nil {
-		panic("SmartWallet config or ControllerPrivateKey not set in aggregator config")
-	}
-
-	// Derive controller address from private key (same as config.NewConfig does)
-	controllerAddress := crypto.PubkeyToAddress(cfg.SmartWallet.ControllerPrivateKey.PublicKey)
-
-	// Use centralized test config
-	return &config.SmartWalletConfig{
-		EthRpcUrl:            testutil.GetTestRPC(),
-		BundlerURL:           testutil.GetTestBundlerRPC(),
-		EthWsUrl:             testutil.GetTestWsRPC(),
-		FactoryAddress:       common.HexToAddress(testutil.GetTestFactoryAddress()),
-		EntrypointAddress:    common.HexToAddress(config.DefaultEntrypointAddressHex),
-		ControllerPrivateKey: cfg.SmartWallet.ControllerPrivateKey, // Use controller key from config
-		ControllerAddress:    controllerAddress,                    // Derive address from private key
-		PaymasterAddress:     common.HexToAddress(testutil.GetTestPaymasterAddress()),
-		WhitelistAddresses:   []common.Address{},
-	}
+	return swCfg
 }
 
 func TestSendUserOp(t *testing.T) {
@@ -196,6 +179,10 @@ func mustBigInt(s string, base int) *big.Int {
 }
 
 func TestBuildUserOpWithPaymasterErrors(t *testing.T) {
+	if os.Getenv("CI") != "" || os.Getenv("SEPOLIA_BUNDLER_RPC") == "" || os.Getenv("SEPOLIA_RPC") == "" {
+		t.Skip("Skipping TestBuildUserOpWithPaymasterErrors: CI or missing SEPOLIA endpoints")
+	}
+
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
 	// Check bundler availability before proceeding
@@ -258,6 +245,10 @@ func TestBuildUserOpWithPaymasterErrors(t *testing.T) {
 }
 
 func TestPaymasterTimeValidation(t *testing.T) {
+	if os.Getenv("CI") != "" || os.Getenv("SEPOLIA_RPC") == "" {
+		t.Skip("Skipping TestPaymasterTimeValidation: CI or missing SEPOLIA endpoints")
+	}
+
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
 	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
