@@ -24,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa/paymaster"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -705,16 +706,35 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 		}
 	}
 
-	return &config.SmartWalletConfig{
+	paymasterAddress := common.HexToAddress(GetTestPaymasterAddress())
+
+	smartWalletConfig := &config.SmartWalletConfig{
 		EthRpcUrl:            GetTestRPC(),
 		BundlerURL:           GetTestBundlerRPC(),
 		EthWsUrl:             GetTestWsRPC(),
 		FactoryAddress:       common.HexToAddress(GetTestFactoryAddress()),
 		EntrypointAddress:    common.HexToAddress(GetTestEntrypointAddress()),
 		ControllerPrivateKey: controllerPrivateKey,
-		PaymasterAddress:     common.HexToAddress(GetTestPaymasterAddress()),
+		PaymasterAddress:     paymasterAddress,
 		WhitelistAddresses:   []common.Address{},
 	}
+
+	// Fetch paymaster owner address by calling owner() on the paymaster contract.
+	// Reimbursement sends ETH to the owner EOA, not the paymaster contract itself.
+	if paymasterAddress != (common.Address{}) {
+		client, dialErr := ethclient.Dial(GetTestRPC())
+		if dialErr == nil {
+			defer client.Close()
+			paymasterContract, bindErr := paymaster.NewPayMaster(paymasterAddress, client)
+			if bindErr == nil {
+				if ownerAddr, callErr := paymasterContract.Owner(nil); callErr == nil {
+					smartWalletConfig.PaymasterOwnerAddress = ownerAddr
+				}
+			}
+		}
+	}
+
+	return smartWalletConfig
 }
 
 // Get smart wallet config for base

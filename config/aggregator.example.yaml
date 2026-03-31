@@ -61,6 +61,11 @@ smart_wallet:
   # master key to generate and sign userops for any wallet
   controller_private_key:
 
+  # Paymaster contract address for sponsored transactions
+  # Sepolia/Base Sepolia: 0xd856f532F7C032e6b30d76F19187F25A068D6d92
+  # Ethereum/Base: 0xf023eA291F5bEDA4Bf59BbDC9004F1d18be19D6f
+  paymaster_address:
+
   max_wallets_per_owner: 3
 
 # List of approved operator addresses that can process tasks

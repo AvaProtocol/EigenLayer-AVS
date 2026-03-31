@@ -59,13 +59,6 @@ func setupUserOpWithdrawalTest(t *testing.T) (*config.Config, common.Address, *c
 	require.NoError(t, err, "Failed to connect to RPC")
 	t.Cleanup(func() { client.Close() })
 
-	// Check bundler availability before proceeding
-	if cfg.SmartWallet.BundlerURL != "" {
-		if err := testutil.CheckBundlerAvailability(cfg.SmartWallet.BundlerURL); err != nil {
-			t.Skipf("Skipping UserOp withdrawal test: bundler not available: %v\n   Hint: Start the bundler or configure a remote bundler URL in config", err)
-		}
-	}
-
 	// Set factory address for smart wallet derivation
 	aa.SetFactoryAddress(cfg.SmartWallet.FactoryAddress)
 
@@ -494,13 +487,6 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 	client, err := ethclient.Dial(cfg.SmartWallet.EthRpcUrl)
 	require.NoError(t, err, "Failed to connect to RPC")
 	t.Cleanup(func() { client.Close() })
-
-	// Check bundler availability before proceeding
-	if cfg.SmartWallet.BundlerURL != "" {
-		if err := testutil.CheckBundlerAvailability(cfg.SmartWallet.BundlerURL); err != nil {
-			t.Skipf("Skipping UserOp withdrawal test: bundler not available: %v\n   Hint: Start the bundler or configure a remote bundler URL in config", err)
-		}
-	}
 
 	// Set factory address for smart wallet derivation
 	aa.SetFactoryAddress(cfg.SmartWallet.FactoryAddress)

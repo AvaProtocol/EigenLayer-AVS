@@ -2,10 +2,8 @@ package preset
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/big"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +14,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
+	"github.com/stretchr/testify/require"
 
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -27,104 +26,56 @@ import (
 )
 
 func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
-	// Load aggregator config to get the CONTROLLER private key (used for signing UserOps)
-	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
-	if err != nil {
-		panic(fmt.Sprintf("Failed to load aggregator config: %v", err))
+	smartWalletConfig := testutil.GetTestSmartWalletConfig()
+
+	// Derive controller address from private key when available
+	if smartWalletConfig.ControllerPrivateKey != nil {
+		smartWalletConfig.ControllerAddress = crypto.PubkeyToAddress(smartWalletConfig.ControllerPrivateKey.PublicKey)
 	}
 
-	if cfg.SmartWallet == nil || cfg.SmartWallet.ControllerPrivateKey == nil {
-		panic("SmartWallet config or ControllerPrivateKey not set in aggregator config")
-	}
-
-	// Derive controller address from private key (same as config.NewConfig does)
-	controllerAddress := crypto.PubkeyToAddress(cfg.SmartWallet.ControllerPrivateKey.PublicKey)
-
-	// Use centralized test config
-	return &config.SmartWalletConfig{
-		EthRpcUrl:            testutil.GetTestRPC(),
-		BundlerURL:           testutil.GetTestBundlerRPC(),
-		EthWsUrl:             testutil.GetTestWsRPC(),
-		FactoryAddress:       common.HexToAddress(testutil.GetTestFactoryAddress()),
-		EntrypointAddress:    common.HexToAddress(config.DefaultEntrypointAddressHex),
-		ControllerPrivateKey: cfg.SmartWallet.ControllerPrivateKey, // Use controller key from config
-		ControllerAddress:    controllerAddress,                    // Derive address from private key
-		PaymasterAddress:     common.HexToAddress(testutil.GetTestPaymasterAddress()),
-		WhitelistAddresses:   []common.Address{},
-	}
+	return smartWalletConfig
 }
 
 func TestSendUserOp(t *testing.T) {
-	if os.Getenv("CI") != "" || os.Getenv("SEPOLIA_BUNDLER_RPC") == "" || os.Getenv("SEPOLIA_RPC") == "" {
-		t.Skip("Skipping TestSendUserOp: CI or missing SEPOLIA endpoints")
-	}
-
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
-
-	if smartWalletConfig.BundlerURL == "" || smartWalletConfig.EthRpcUrl == "" {
-		t.Skip("Skipping TestSendUserOp: missing BundlerURL or EthRpcUrl for Sepolia")
-	}
-	if !strings.Contains(strings.ToLower(smartWalletConfig.BundlerURL), "sepolia") || !strings.Contains(strings.ToLower(smartWalletConfig.EthRpcUrl), "sepolia") {
-		t.Skip("Skipping TestSendUserOp: configured endpoints are not Sepolia")
-	}
-
-	// Check bundler availability before proceeding
-	if err := testutil.CheckBundlerAvailability(smartWalletConfig.BundlerURL); err != nil {
-		t.Skipf("Skipping TestSendUserOp: bundler not available: %v\n   Hint: Start the bundler or configure a remote bundler URL in config", err)
-	}
 
 	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
 
-	// Because we used the  master key to signed, the address cannot be calculate from that key and need to set explicitly
-	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")
+	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+	if !ok {
+		t.Fatal("OWNER_EOA or TEST_PRIVATE_KEY environment variable not set")
+	}
+	owner := *ownerAddr
 
-	//calldata := common.FromHex("b61d27f600000000000000000000000069256ca54e6296e460dec7b29b7dcd97b81a3d55000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044a9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a0000000000000000000000000000000000000000000000001bc16d674ec8000000000000000000000000000000000000000000000000000000000000")
+	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
+	require.NoError(t, err, "Failed to connect to RPC")
+	defer client.Close()
 
-	//calldata := common.FromHex("0xb61d27f600000000000000000000000069256ca54e6296e460dec7b29b7dcd97b81a3d55000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044a9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000001b094132bda00000000000000000000000000000000000000000000000000000000000")
+	// Ensure wallet is deployed with the current controller key
+	controllerPrivateKey := testutil.GetTestControllerPrivateKey()
+	salt := big.NewInt(0)
+	err = testutil.EnsureWalletDeployed(client, smartWalletConfig.FactoryAddress, owner, salt, controllerPrivateKey)
+	require.NoError(t, err, "Failed to ensure wallet is deployed")
 
 	calldata, err := aa.PackExecute(
-		// Sepolia Network example
-		// For test token on base sepolia
-		// these test token can be minted by anyone to help us run these transfer test
-		// This can be any contract/token as long as we have enough token to fund the AA wallet to perform real test
-		// Example result on seplia:       https://sepolia.etherscan.io/tx/0xb438f9583a0a505806fa756e1950430e6060c8b4662807c6c40b9f2dec9d726f
-		// common.HexToAddress("0x69256ca54e6296e460dec7b29b7dcd97b81a3d55"),
-		// big.NewInt(0),
-		// common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8"),
-
-		// Base Sepolia Network example
-		// Transferring of 0.00761 the test token
-		// Example result on base sepolia:
-		// https://sepolia.basescan.org/tx/0x812290f4a588cb62bd4a46698ece51d576a75729af5dda497badb0ef8f8cddfa
-		// https://sepolia.basescan.org/tx/0xef607557e727ae1602c6e74a625cffc57aa7108c4d470d38b96cfd4539ee978f
-		//common.HexToAddress("0x0a0c037267a690e9792f4660c29989babec9cffb"),
 		common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"), // Sepolia USDC
 		big.NewInt(0),
+		// Transfer 1000 units of USDC to test destination
 		common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8"),
-		// common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000001b125981304000"),
-		//common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000001b134255d55000"),
 	)
 
-	if err != nil {
-		t.Errorf("expect pack userop successfully but got error: %v", err)
-	}
+	require.NoError(t, err, "Failed to pack execute calldata")
 
-	userop, receipt, err := SendUserOp(smartWalletConfig, owner, calldata, nil, nil, nil, nil)
-	if err != nil || userop == nil {
-		t.Errorf("UserOp failed to send; error %v", err)
-	}
+	paymasterRequest := GetVerifyingPaymasterRequestForDuration(
+		smartWalletConfig.PaymasterAddress,
+		15*time.Minute,
+	)
 
-	if err != nil {
-		a, _ := json.Marshal(receipt)
-		b, _ := json.Marshal(userop)
-		//t.Logf("UserOp submit successfully. tx: %s userop: %s", a, b)
-		t.Logf("UserOp submit failed. userop: %s tx: %s err: %v", a, b, err)
-		return
-	}
-
+	userOp, receipt, err := SendUserOp(smartWalletConfig, owner, calldata, paymasterRequest, nil, nil, nil)
+	require.NoError(t, err, "UserOp failed to send")
+	require.NotNil(t, userOp, "UserOp should not be nil")
 	if receipt == nil {
-		t.Logf("Transaction submitted successfully but receipt is not available yet")
-		return
+		t.Skip("UserOp sent but receipt not available (confirmation timeout)")
 	}
 
 	t.Logf("Transaction executed successfully. TX Hash: %s Gas used: %d", receipt.TxHash.Hex(), receipt.GasUsed)
@@ -198,11 +149,6 @@ func mustBigInt(s string, base int) *big.Int {
 func TestBuildUserOpWithPaymasterErrors(t *testing.T) {
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
-	// Check bundler availability before proceeding
-	if err := testutil.CheckBundlerAvailability(smartWalletConfig.BundlerURL); err != nil {
-		t.Skipf("Skipping TestBuildUserOpWithPaymasterErrors: bundler not available: %v\n   Hint: Start the bundler or configure a remote bundler URL in config", err)
-	}
-
 	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
 	if err != nil {
 		t.Fatalf("Failed to connect to the client: %v", err)
@@ -221,7 +167,11 @@ func TestBuildUserOpWithPaymasterErrors(t *testing.T) {
 	}
 
 	invalidPaymasterAddress := common.HexToAddress("0x0000000000000000000000000000000000000000")
-	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")
+	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+	if !ok {
+		t.Fatal("OWNER_EOA or TEST_PRIVATE_KEY environment variable not set")
+	}
+	owner := *ownerAddr
 	validUntil := big.NewInt(0)
 	validAfter := big.NewInt(0)
 
