@@ -124,6 +124,7 @@ jobs:
     if: needs.check-changes.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         test:
           - aggregator
