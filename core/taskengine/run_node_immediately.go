@@ -3509,7 +3509,7 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		return resp, nil
 	}
 
-	// Extract trigger input data from the request
+	// Map from RunTriggerReq.trigger_input (JSON key triggerInput); field name unchanged for API compatibility.
 	triggerInput := make(map[string]interface{})
 	for k, v := range req.TriggerInput {
 		triggerInput[k] = v.AsInterface()
