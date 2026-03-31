@@ -21,6 +21,7 @@ sed -i "s|eth_ws_url:.*|eth_ws_url: ${CHAIN_WS}|g" config/aggregator-sepolia.yam
 sed -i "s|ecdsa_private_key:.*|ecdsa_private_key: ${CONTROLLER_PRIVATE_KEY}|g" config/aggregator-sepolia.yaml
 sed -i "s|bundler_url:.*|bundler_url: ${BUNDLER_RPC}|g" config/aggregator-sepolia.yaml
 sed -i "s|controller_private_key:.*|controller_private_key: ${CONTROLLER_PRIVATE_KEY}|g" config/aggregator-sepolia.yaml
+sed -i "s|paymaster_address:.*|paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92|g" config/aggregator-sepolia.yaml
 sed -i "s|tenderly_account:.*|tenderly_account: ${TENDERLY_ACCOUNT}|g" config/aggregator-sepolia.yaml
 sed -i "s|tenderly_project:.*|tenderly_project: ${TENDERLY_PROJECT}|g" config/aggregator-sepolia.yaml
 sed -i "s|tenderly_access_key:.*|tenderly_access_key: ${TENDERLY_ACCESS_KEY}|g" config/aggregator-sepolia.yaml
