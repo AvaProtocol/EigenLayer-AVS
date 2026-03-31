@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"testing"
 	"time"
 
 	"math/big"
@@ -22,6 +23,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/stretchr/testify/require"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa/paymaster"
@@ -901,6 +903,22 @@ func EnsureWalletDeployed(client *ethclient.Client, factoryAddress common.Addres
 	}
 
 	return nil
+}
+
+// GetTestSmartWalletAddress returns the smart wallet address for the given owner and salt,
+// ensuring the wallet is deployed. This is useful for tests that need a secondary wallet
+// (e.g., with a different salt) to send funds between wallets without draining to an EOA.
+func GetTestSmartWalletAddress(t *testing.T, client *ethclient.Client, factoryAddress common.Address, owner common.Address, salt *big.Int) common.Address {
+	t.Helper()
+
+	controllerPrivateKey := GetTestControllerPrivateKey()
+	err := EnsureWalletDeployed(client, factoryAddress, owner, salt, controllerPrivateKey)
+	require.NoError(t, err, "Failed to ensure wallet is deployed for salt %s", salt.String())
+
+	walletAddress, err := aa.GetSenderAddress(client, owner, salt)
+	require.NoError(t, err, "Failed to get wallet address for salt %s", salt.String())
+
+	return *walletAddress
 }
 
 func GetTestEventTriggerData() *TriggerData {
