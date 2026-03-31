@@ -13,126 +13,69 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUserOpExecutionFailureInsufficientBalance tests the real-world scenario where
-// a UserOp execution fails due to insufficient balance when reimbursement is enabled.
-// This is based on the actual failure documented in docs/WITHDRAWAL-FAILURE-PROOF.md
-func TestUserOpExecutionFailureInsufficientBalance(t *testing.T) {
+// TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient tests that when
+// the wallet balance can't cover both withdrawal + reimbursement, the system
+// gracefully skips reimbursement and still completes the withdrawal.
+func TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient(t *testing.T) {
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
 	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
-	if err != nil {
-		t.Skipf("Skipping TestUserOpExecutionFailureInsufficientBalance: failed to connect to RPC: %v", err)
-	}
+	require.NoError(t, err, "Failed to connect to RPC")
 	defer client.Close()
-
-	chainID, err := client.ChainID(context.Background())
-	if err != nil {
-		t.Skipf("Skipping TestUserOpExecutionFailureInsufficientBalance: failed to get chain ID: %v", err)
-	}
-	// Sepolia chain ID is 11155111
-	if chainID.Uint64() != 11155111 {
-		t.Skipf("Skipping TestUserOpExecutionFailureInsufficientBalance: chain ID %d is not Sepolia (11155111)", chainID.Uint64())
-	}
 
 	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
 
-	// Get owner EOA from environment variable (OWNER_EOA or TEST_PRIVATE_KEY)
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
 	if !ok {
-		t.Skip("OWNER_EOA or TEST_PRIVATE_KEY environment variable not set")
+		t.Fatal("OWNER_EOA or TEST_PRIVATE_KEY environment variable not set")
 	}
 	owner := *ownerAddr
 
-	// Ensure wallet is deployed before testing
 	controllerPrivateKey := testutil.GetTestControllerPrivateKey()
-	salt := big.NewInt(0) // Fixed salt for consistent test wallet
-	t.Logf("🔧 Ensuring wallet is deployed (owner: %s, salt: %s)...", owner.Hex(), salt.String())
+	salt := big.NewInt(0)
 	err = testutil.EnsureWalletDeployed(client, smartWalletConfig.FactoryAddress, owner, salt, controllerPrivateKey)
 	require.NoError(t, err, "Failed to ensure wallet is deployed")
 
-	// Get smart wallet address from factory (same method used in EnsureWalletDeployed)
 	factory, err := aa.NewSimpleFactory(smartWalletConfig.FactoryAddress, client)
 	require.NoError(t, err, "Failed to create factory binding")
 	smartWalletAddress, err := factory.GetAddress(&bind.CallOpts{Context: context.Background()}, owner, salt)
 	require.NoError(t, err, "Failed to get wallet address from factory")
 
-	// Get current balance
 	balance, err := client.BalanceAt(context.Background(), smartWalletAddress, nil)
 	require.NoError(t, err, "Failed to get wallet balance")
 
-	t.Logf("💰 Smart Wallet Balance: %s wei (%.6f ETH)", balance.String(), float64(balance.Int64())/1e18)
-	t.Logf("📍 Smart Wallet Address: %s", smartWalletAddress.Hex())
-	t.Logf("📍 Owner Address: %s", owner.Hex())
-	t.Logf("📍 Salt: 0 (fixed for consistent test wallet)")
+	t.Logf("Smart Wallet: %s, Balance: %s wei (%.6f ETH)", smartWalletAddress.Hex(), balance.String(), float64(balance.Int64())/1e18)
 
-	// Test insufficient balance scenario
-	// If balance is 0, we'll attempt a withdrawal which will fail
-	// If balance > 0, we'll attempt withdrawal + reimbursement that exceeds balance
-	var withdrawalAmount *big.Int
-	reimbursementEstimate := big.NewInt(4000000000000000) // 0.004 ETH estimate
-
-	if balance.Cmp(big.NewInt(0)) == 0 {
-		// Zero balance scenario: attempt any withdrawal will fail
-		withdrawalAmount = big.NewInt(1000000000000000) // 0.001 ETH (any amount will fail)
-		t.Logf("💸 Testing ZERO BALANCE scenario - attempting withdrawal: %s wei (%.6f ETH)", withdrawalAmount.String(), float64(withdrawalAmount.Int64())/1e18)
-		t.Logf("   Expected: Execution failure due to insufficient balance")
-	} else {
-		// Non-zero balance: create withdrawal that exceeds balance when combined with reimbursement
-		minRequiredForReimbursement := big.NewInt(1000000000000000) // 0.001 ETH minimum
-		withdrawalAmount = new(big.Int).Sub(balance, minRequiredForReimbursement)
-
-		// Ensure withdrawal amount is positive
-		if withdrawalAmount.Cmp(big.NewInt(0)) <= 0 {
-			// Balance is too low, use a small amount that will still fail
-			withdrawalAmount = big.NewInt(1000000000000000) // 0.001 ETH
-		}
-		t.Logf("💸 Attempting withdrawal: %s wei (%.6f ETH)", withdrawalAmount.String(), float64(withdrawalAmount.Int64())/1e18)
-		t.Logf("   Estimated reimbursement: %s wei (%.6f ETH)", reimbursementEstimate.String(), float64(reimbursementEstimate.Int64())/1e18)
-		t.Logf("   Total needed: %s wei (%.6f ETH)", new(big.Int).Add(withdrawalAmount, reimbursementEstimate).String(),
-			float64(new(big.Int).Add(withdrawalAmount, reimbursementEstimate).Int64())/1e18)
-		t.Logf("   Available: %s wei (%.6f ETH)", balance.String(), float64(balance.Int64())/1e18)
+	// Withdraw most of the balance so there's not enough left for reimbursement.
+	// The system should skip reimbursement wrapping and send unwrapped.
+	withdrawalAmount := new(big.Int).Sub(balance, big.NewInt(1000000000000000)) // balance - 0.001 ETH
+	if withdrawalAmount.Cmp(big.NewInt(0)) <= 0 {
+		withdrawalAmount = big.NewInt(100000000000000) // 0.0001 ETH fallback
 	}
 
-	t.Logf("💸 Attempting withdrawal: %s wei (%.6f ETH)", withdrawalAmount.String(), float64(withdrawalAmount.Int64())/1e18)
-	t.Logf("   Estimated reimbursement: %s wei (%.6f ETH)", reimbursementEstimate.String(), float64(reimbursementEstimate.Int64())/1e18)
-	t.Logf("   Total needed: %s wei (%.6f ETH)", new(big.Int).Add(withdrawalAmount, reimbursementEstimate).String(),
-		float64(new(big.Int).Add(withdrawalAmount, reimbursementEstimate).Int64())/1e18)
-	t.Logf("   Available: %s wei (%.6f ETH)", balance.String(), float64(balance.Int64())/1e18)
-
-	// Create calldata for ETH transfer (withdrawal)
-	destination := owner // Transfer back to owner
-	calldata, err := aa.PackExecute(
-		destination,
-		withdrawalAmount,
-		[]byte{},
-	)
+	calldata, err := aa.PackExecute(owner, withdrawalAmount, []byte{})
 	require.NoError(t, err, "Failed to pack execute calldata")
 
-	// Enable paymaster reimbursement (this will wrap with executeBatchWithValues)
-	// This is the scenario that causes the failure
 	paymasterRequest := GetVerifyingPaymasterRequestForDuration(
 		smartWalletConfig.PaymasterAddress,
 		15*time.Minute,
 	)
 
-	// Send UserOp - this should succeed in sending to bundler, but execution should fail
-	// Use the factory's address as sender override to ensure consistency
-	t.Logf("📤 Sending UserOp with paymaster and reimbursement enabled...")
-	_, receipt, err := SendUserOp(
+	// Withdrawal should succeed — system skips reimbursement when balance is insufficient
+	userOp, receipt, err := SendUserOp(
 		smartWalletConfig,
 		owner,
 		calldata,
 		paymasterRequest,
-		&smartWalletAddress, // Use factory's address as sender override
-		nil,                 // No salt override
-		nil,                 // No logger
+		&smartWalletAddress,
+		nil,
+		nil,
 	)
+	require.NoError(t, err, "Withdrawal should succeed even without reimbursement")
+	require.NotNil(t, userOp, "UserOp should be built")
+	require.NotNil(t, receipt, "Expected a transaction receipt")
 
-	// Execution should fail due to insufficient balance for reimbursement
-	require.Error(t, err, "Expected execution failure due to insufficient balance")
-	if receipt != nil {
-		t.Logf("Transaction included in block: %s (gas used: %d)", receipt.TxHash.Hex(), receipt.GasUsed)
-	}
+	t.Logf("Transaction executed successfully. TX Hash: %s Gas used: %d", receipt.TxHash.Hex(), receipt.GasUsed)
 }
 
 // TestUserOpExecutionFailureExcessiveTransfer tests execution failure when

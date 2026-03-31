@@ -66,7 +66,12 @@ func TestSendUserOp(t *testing.T) {
 
 	require.NoError(t, err, "Failed to pack execute calldata")
 
-	userOp, receipt, err := SendUserOp(smartWalletConfig, owner, calldata, nil, nil, nil, nil)
+	paymasterRequest := GetVerifyingPaymasterRequestForDuration(
+		smartWalletConfig.PaymasterAddress,
+		15*time.Minute,
+	)
+
+	userOp, receipt, err := SendUserOp(smartWalletConfig, owner, calldata, paymasterRequest, nil, nil, nil)
 	require.NoError(t, err, "UserOp failed to send")
 	require.NotNil(t, userOp, "UserOp should not be nil")
 	require.NotNil(t, receipt, "Expected a transaction receipt")
