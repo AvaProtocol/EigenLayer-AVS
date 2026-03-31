@@ -48,11 +48,7 @@ func TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient(t *testing.T)
 
 	// Withdraw most of the balance so there's not enough left for reimbursement.
 	// The system should skip reimbursement wrapping and send unwrapped.
-	// Keep 0.0001 ETH as reserve for gas; if balance is too low, skip the test.
 	reserve := big.NewInt(100000000000000) // 0.0001 ETH
-	if balance.Cmp(reserve) <= 0 {
-		t.Skipf("Wallet balance too low for withdrawal test: %s wei (need > 0.0001 ETH)", balance.String())
-	}
 	withdrawalAmount := new(big.Int).Sub(balance, reserve)
 
 	calldata, err := aa.PackExecute(owner, withdrawalAmount, []byte{})
