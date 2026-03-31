@@ -43,6 +43,35 @@ func TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient(t *testing.T)
 	secondarySalt := big.NewInt(1)
 	secondaryWallet := testutil.GetTestSmartWalletAddress(t, client, smartWalletConfig.FactoryAddress, owner, secondarySalt)
 
+	// Recover any leftover funds in the secondary wallet from a previous run.
+	// This handles the case where a prior CI run drained primary → secondary but
+	// the return transfer didn't complete (e.g., timeout or CI cancellation).
+	secondaryPreBalance, err := client.BalanceAt(context.Background(), secondaryWallet, nil)
+	require.NoError(t, err, "Failed to get secondary wallet pre-balance")
+	if secondaryPreBalance.Cmp(big.NewInt(0)) > 0 {
+		t.Logf("Recovering %s wei from secondary wallet (leftover from previous run)", secondaryPreBalance.String())
+		recoverCalldata, err := aa.PackExecute(primaryWallet, secondaryPreBalance, []byte{})
+		require.NoError(t, err, "Failed to pack recover calldata")
+
+		recoverPaymaster := GetVerifyingPaymasterRequestForDuration(
+			smartWalletConfig.PaymasterAddress,
+			15*time.Minute,
+		)
+		_, recoverReceipt, err := SendUserOp(
+			smartWalletConfig,
+			owner,
+			recoverCalldata,
+			recoverPaymaster,
+			&secondaryWallet,
+			secondarySalt,
+			nil,
+		)
+		require.NoError(t, err, "Recovery transfer should succeed")
+		if recoverReceipt != nil {
+			t.Logf("Recovery succeeded. TX Hash: %s Gas used: %d", recoverReceipt.TxHash.Hex(), recoverReceipt.GasUsed)
+		}
+	}
+
 	balance, err := client.BalanceAt(context.Background(), primaryWallet, nil)
 	require.NoError(t, err, "Failed to get wallet balance")
 
