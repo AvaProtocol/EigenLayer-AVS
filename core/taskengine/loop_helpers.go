@@ -77,7 +77,8 @@ func processContractWriteTemplates(vm *VM, contractWrite *avsproto.ContractWrite
 		for i, param := range methodCall.MethodParams {
 			// LANGUAGE ENFORCEMENT: Validate Handlebars template size before preprocessing
 			if err := ValidateInputByLanguage(param, avsproto.Lang_LANG_HANDLEBARS); err != nil {
-				// Skip invalid params — validation error will surface at execution time
+				// Preserve original param — validation error will surface at execution time
+				processedMethodParams[i] = param
 				continue
 			}
 			// First apply loop-specific template substitution ({{value}}, {{index}})
@@ -125,6 +126,7 @@ func processContractReadTemplates(vm *VM, contractRead *avsproto.ContractReadNod
 		for i, param := range methodCall.MethodParams {
 			// LANGUAGE ENFORCEMENT: Validate Handlebars template size before preprocessing
 			if err := ValidateInputByLanguage(param, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+				processedMethodParams[i] = param
 				continue
 			}
 			// First apply loop-specific template substitution ({{value}}, {{index}})

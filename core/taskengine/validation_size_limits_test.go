@@ -95,9 +95,10 @@ func TestRestAPI_SizeLimit(t *testing.T) {
 	})
 
 	t.Run("Invalid size - exceeds limit", func(t *testing.T) {
-		// Create a body that exceeds MaxCustomCodeSourceSize (100KB Handlebars limit).
-		// Handlebars template validation fires before the REST-specific 10MB body check.
-		largeBody := `{"data": "` + strings.Repeat("x", MaxCustomCodeSourceSize) + `"}`
+		// Create a body that exceeds MaxRestAPIBodySize (10MB)
+		// This body has no {{ template delimiters, so the Handlebars check is skipped
+		// and the REST-specific body size limit applies.
+		largeBody := `{"data": "` + strings.Repeat("x", MaxRestAPIBodySize) + `"}`
 
 		nodeConfig := map[string]interface{}{
 			"url":    "https://mock-api.ap-aggregator.local/test",
@@ -110,13 +111,13 @@ func TestRestAPI_SizeLimit(t *testing.T) {
 		require.Error(t, err, "Should fail with oversized body")
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "exceeds maximum size limit")
-		assert.Contains(t, err.Error(), "Handlebars template")
+		assert.Contains(t, err.Error(), "REST API request body")
 
 		// Check if it's a structured error with correct error code
 		if structuredErr, ok := err.(*StructuredError); ok {
 			assert.Equal(t, avsproto.ErrorCode_INVALID_NODE_CONFIG, structuredErr.Code)
 			assert.Equal(t, "size limit exceeded", structuredErr.Details["issue"])
-			assert.Equal(t, MaxCustomCodeSourceSize, structuredErr.Details["maxSize"])
+			assert.Equal(t, MaxRestAPIBodySize, structuredErr.Details["maxSize"])
 		}
 	})
 }
