@@ -16,6 +16,10 @@ import (
 // TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient tests that when
 // the wallet balance can't cover both withdrawal + reimbursement, the system
 // gracefully skips reimbursement and still completes the withdrawal.
+//
+// To avoid draining the primary test wallet (salt=0) across CI runs, this test:
+// 1. Withdraws from the primary wallet to a secondary wallet (salt=1)
+// 2. Sends the funds back from the secondary wallet to the primary wallet
 func TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient(t *testing.T) {
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
@@ -31,27 +35,26 @@ func TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient(t *testing.T)
 	}
 	owner := *ownerAddr
 
-	controllerPrivateKey := testutil.GetTestControllerPrivateKey()
-	salt := big.NewInt(0)
-	err = testutil.EnsureWalletDeployed(client, smartWalletConfig.FactoryAddress, owner, salt, controllerPrivateKey)
-	require.NoError(t, err, "Failed to ensure wallet is deployed")
+	// Primary wallet (salt=0) — the main test wallet
+	primarySalt := big.NewInt(0)
+	primaryWallet := testutil.GetTestSmartWalletAddress(t, client, smartWalletConfig.FactoryAddress, owner, primarySalt)
 
-	factory, err := aa.NewSimpleFactory(smartWalletConfig.FactoryAddress, client)
-	require.NoError(t, err, "Failed to create factory binding")
-	smartWalletAddress, err := factory.GetAddress(&bind.CallOpts{Context: context.Background()}, owner, salt)
-	require.NoError(t, err, "Failed to get wallet address from factory")
+	// Secondary wallet (salt=1) — temporary recipient for withdrawn funds
+	secondarySalt := big.NewInt(1)
+	secondaryWallet := testutil.GetTestSmartWalletAddress(t, client, smartWalletConfig.FactoryAddress, owner, secondarySalt)
 
-	balance, err := client.BalanceAt(context.Background(), smartWalletAddress, nil)
+	balance, err := client.BalanceAt(context.Background(), primaryWallet, nil)
 	require.NoError(t, err, "Failed to get wallet balance")
 
-	t.Logf("Smart Wallet: %s, Balance: %s wei (%.6f ETH)", smartWalletAddress.Hex(), balance.String(), float64(balance.Int64())/1e18)
+	t.Logf("Primary Wallet: %s, Balance: %s wei (%.6f ETH)", primaryWallet.Hex(), balance.String(), float64(balance.Int64())/1e18)
+	t.Logf("Secondary Wallet: %s (recipient for withdrawal)", secondaryWallet.Hex())
 
-	// Withdraw most of the balance so there's not enough left for reimbursement.
-	// The system should skip reimbursement wrapping and send unwrapped.
+	// Withdraw most of the balance to the secondary wallet so there's not enough
+	// left for reimbursement. The system should skip reimbursement wrapping.
 	reserve := big.NewInt(100000000000000) // 0.0001 ETH
 	withdrawalAmount := new(big.Int).Sub(balance, reserve)
 
-	calldata, err := aa.PackExecute(owner, withdrawalAmount, []byte{})
+	calldata, err := aa.PackExecute(secondaryWallet, withdrawalAmount, []byte{})
 	require.NoError(t, err, "Failed to pack execute calldata")
 
 	paymasterRequest := GetVerifyingPaymasterRequestForDuration(
@@ -65,7 +68,7 @@ func TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient(t *testing.T)
 		owner,
 		calldata,
 		paymasterRequest,
-		&smartWalletAddress,
+		&primaryWallet,
 		nil,
 		nil,
 	)
@@ -74,8 +77,36 @@ func TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient(t *testing.T)
 	if receipt == nil {
 		t.Skip("UserOp sent but receipt not available (confirmation timeout)")
 	}
+	t.Logf("Withdrawal succeeded. TX Hash: %s Gas used: %d", receipt.TxHash.Hex(), receipt.GasUsed)
 
-	t.Logf("Transaction executed successfully. TX Hash: %s Gas used: %d", receipt.TxHash.Hex(), receipt.GasUsed)
+	// Send the funds back from the secondary wallet to the primary wallet
+	secondaryBalance, err := client.BalanceAt(context.Background(), secondaryWallet, nil)
+	require.NoError(t, err, "Failed to get secondary wallet balance")
+	t.Logf("Secondary Wallet Balance after withdrawal: %s wei (%.6f ETH)", secondaryBalance.String(), float64(secondaryBalance.Int64())/1e18)
+
+	if secondaryBalance.Cmp(big.NewInt(0)) > 0 {
+		returnCalldata, err := aa.PackExecute(primaryWallet, secondaryBalance, []byte{})
+		require.NoError(t, err, "Failed to pack return calldata")
+
+		returnPaymasterRequest := GetVerifyingPaymasterRequestForDuration(
+			smartWalletConfig.PaymasterAddress,
+			15*time.Minute,
+		)
+
+		_, returnReceipt, err := SendUserOp(
+			smartWalletConfig,
+			owner,
+			returnCalldata,
+			returnPaymasterRequest,
+			&secondaryWallet,
+			secondarySalt,
+			nil,
+		)
+		require.NoError(t, err, "Return transfer should succeed")
+		if returnReceipt != nil {
+			t.Logf("Funds returned to primary wallet. TX Hash: %s Gas used: %d", returnReceipt.TxHash.Hex(), returnReceipt.GasUsed)
+		}
+	}
 }
 
 // TestUserOpExecutionFailureExcessiveTransfer tests execution failure when
