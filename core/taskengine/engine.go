@@ -2446,7 +2446,8 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 		}
 	}
 
-	// Extract input variables from trigger_input protobuf map
+	// RPC input map from TriggerTaskReq: proto/json field remains trigger_input (JSON key triggerInput)
+	// for backward compatibility; semantically same role as input_variables on SimulateTaskReq.
 	var inputVariables map[string]interface{}
 	if len(payload.TriggerInput) > 0 {
 		inputVariables = make(map[string]interface{})
@@ -2805,10 +2806,10 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	}
 
 	// Step 8: Create and add a trigger execution step with ACTUAL timing
-	// Convert inputVariables keys to trigger inputs
-	triggerInputs := make([]string, 0, len(inputVariables))
+	// Keys of the simulation input map (template variables), for execution step metadata.
+	inputVariableKeys := make([]string, 0, len(inputVariables))
 	for key := range inputVariables {
-		triggerInputs = append(triggerInputs, key)
+		inputVariableKeys = append(inputVariableKeys, key)
 	}
 
 	// Use the trigger config data for the execution step's Config field (includes data, headers, pathParams for ManualTrigger)
@@ -2850,7 +2851,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		StartAt: triggerStartTime.UnixMilli(), // Use actual trigger start time
 		EndAt:   triggerEndTime.UnixMilli(),   // Use actual trigger end time
 		Log:     triggerLogMessage,
-		Inputs:  triggerInputs,                  // Use inputVariables keys as trigger inputs
+		Inputs:  inputVariableKeys,             // Keys from simulation inputVariables map
 		Type:    queueData.TriggerType.String(), // Use trigger type as string
 		Name:    task.Trigger.Name,              // Use new 'name' field
 		Config:  triggerConfigProto,             // Include trigger configuration data for debugging
