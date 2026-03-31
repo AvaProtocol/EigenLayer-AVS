@@ -21,6 +21,7 @@ func TestNewBundlerClient(t *testing.T) {
 		client, err := NewBundlerClient("http://localhost:8545")
 		require.NoError(t, err)
 		require.NotNil(t, client)
+		defer client.Close()
 		require.Equal(t, "http://localhost:8545", client.url)
 	})
 
@@ -112,7 +113,7 @@ func TestSimulateUserOperation(t *testing.T) {
 	}
 }
 
-func TestEstimateUserOperationGasHTTP(t *testing.T) {
+func TestEstimateUserOperationGas(t *testing.T) {
 	entrypoint := common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789")
 	dummyUserOp := userop.UserOperation{
 		Sender: common.HexToAddress("0x123"),
