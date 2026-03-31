@@ -221,6 +221,15 @@ func (r *ContractReadProcessor) executeMethodCallWithoutFormatting(ctx context.C
 					// Parse method parameters from the protobuf and preprocess template variables
 					var methodParams []string
 					for _, param := range methodCall.GetMethodParams() {
+						// LANGUAGE ENFORCEMENT: Validate Handlebars template size before preprocessing
+						if err := ValidateInputByLanguage(param, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+							return &avsproto.ContractReadNode_MethodResult{
+								Success:    false,
+								Error:      err.Error(),
+								MethodName: methodName,
+								Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+							}
+						}
 						// Preprocess template variables in each parameter
 						preprocessedParam := r.vm.preprocessTextWithVariableMapping(param)
 						// Validate template variable resolution
@@ -892,6 +901,15 @@ func (r *ContractReadProcessor) executeMethodCallWithDecimalFormatting(ctx conte
 		// Parse method parameters from the protobuf and preprocess template variables
 		var methodParams []interface{}
 		for _, param := range methodCall.GetMethodParams() {
+			// LANGUAGE ENFORCEMENT: Validate Handlebars template size before preprocessing
+			if err := ValidateInputByLanguage(param, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+				return &avsproto.ContractReadNode_MethodResult{
+					Success:    false,
+					Error:      err.Error(),
+					MethodName: methodName,
+					Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+				}
+			}
 			// Preprocess template variables in each parameter
 			preprocessedParam := r.vm.preprocessTextWithVariableMapping(param)
 			methodParams = append(methodParams, preprocessedParam)

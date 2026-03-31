@@ -75,6 +75,12 @@ func processContractWriteTemplates(vm *VM, contractWrite *avsproto.ContractWrite
 		// This supports dot notation like {{value.address}} in addition to simple {{value}} substitution
 		processedMethodParams := make([]string, len(methodCall.MethodParams))
 		for i, param := range methodCall.MethodParams {
+			// LANGUAGE ENFORCEMENT: Validate Handlebars template size before preprocessing
+			if err := ValidateInputByLanguage(param, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+				// Preserve original param — validation error will surface at execution time
+				processedMethodParams[i] = param
+				continue
+			}
 			// First apply loop-specific template substitution ({{value}}, {{index}})
 			paramWithLoopVars := substituteTemplateVariables(param, iterInputs)
 			// Then apply advanced preprocessing for dot notation and other VM variables
@@ -118,6 +124,11 @@ func processContractReadTemplates(vm *VM, contractRead *avsproto.ContractReadNod
 		// This supports dot notation like {{value.address}} in addition to simple {{value}} substitution
 		processedMethodParams := make([]string, len(methodCall.MethodParams))
 		for i, param := range methodCall.MethodParams {
+			// LANGUAGE ENFORCEMENT: Validate Handlebars template size before preprocessing
+			if err := ValidateInputByLanguage(param, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+				processedMethodParams[i] = param
+				continue
+			}
 			// First apply loop-specific template substitution ({{value}}, {{index}})
 			paramWithLoopVars := substituteTemplateVariables(param, iterInputs)
 			// Then apply advanced preprocessing for dot notation and other VM variables

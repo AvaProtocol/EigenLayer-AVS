@@ -553,6 +553,36 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		return executionLogStep, err
 	}
 
+	// LANGUAGE ENFORCEMENT: Validate Handlebars template size for fields that contain template delimiters.
+	// Only apply when {{ is present to avoid reducing the REST body size limit (10MB) to the
+	// Handlebars template limit (100KB) for non-template content.
+	if strings.Contains(url, "{{") {
+		if err = ValidateInputByLanguage(url, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+			return executionLogStep, err
+		}
+	}
+	if strings.Contains(body, "{{") {
+		if err = ValidateInputByLanguage(body, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+			return executionLogStep, err
+		}
+	}
+	for key, value := range headers {
+		if strings.Contains(key, "{{") {
+			if err = ValidateInputByLanguage(key, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+				logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+				return executionLogStep, err
+			}
+		}
+		if strings.Contains(value, "{{") {
+			if err = ValidateInputByLanguage(value, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+				logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+				return executionLogStep, err
+			}
+		}
+	}
+
 	// Preprocess URL, body, and headers for template variables
 	if r.vm.logger != nil {
 		r.vm.logger.Debug("REST API URL before template processing", "url", url)
