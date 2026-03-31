@@ -48,7 +48,7 @@ func TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient(t *testing.T)
 
 	// Withdraw most of the balance so there's not enough left for reimbursement.
 	// The system should skip reimbursement wrapping and send unwrapped.
-	withdrawalAmount := new(big.Int).Sub(balance, big.NewInt(1000000000000000)) // balance - 0.001 ETH
+	withdrawalAmount := new(big.Int).Sub(balance, big.NewInt(100000000000000)) // balance - 0.0001 ETH
 	if withdrawalAmount.Cmp(big.NewInt(0)) <= 0 {
 		withdrawalAmount = big.NewInt(100000000000000) // 0.0001 ETH fallback
 	}
