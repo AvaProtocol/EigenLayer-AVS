@@ -553,6 +553,26 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		return executionLogStep, err
 	}
 
+	// LANGUAGE ENFORCEMENT: Validate Handlebars template size for URL, body, and headers
+	if err = ValidateInputByLanguage(url, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		return executionLogStep, err
+	}
+	if err = ValidateInputByLanguage(body, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		return executionLogStep, err
+	}
+	for key, value := range headers {
+		if err = ValidateInputByLanguage(key, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+			return executionLogStep, err
+		}
+		if err = ValidateInputByLanguage(value, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+			return executionLogStep, err
+		}
+	}
+
 	// Preprocess URL, body, and headers for template variables
 	if r.vm.logger != nil {
 		r.vm.logger.Debug("REST API URL before template processing", "url", url)
