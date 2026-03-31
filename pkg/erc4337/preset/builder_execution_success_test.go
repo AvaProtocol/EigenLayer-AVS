@@ -16,6 +16,10 @@ import (
 // TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient tests that when
 // the wallet balance can't cover both withdrawal + reimbursement, the system
 // gracefully skips reimbursement and still completes the withdrawal.
+//
+// To avoid draining the primary test wallet (salt=0) across CI runs, this test:
+// 1. Withdraws from the primary wallet to a secondary wallet (salt=1)
+// 2. Sends the funds back from the secondary wallet to the primary wallet
 func TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient(t *testing.T) {
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
@@ -103,8 +107,6 @@ func TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient(t *testing.T)
 			t.Logf("Funds returned to primary wallet. TX Hash: %s Gas used: %d", returnReceipt.TxHash.Hex(), returnReceipt.GasUsed)
 		}
 	}
-
-	t.Logf("Transaction executed successfully. TX Hash: %s Gas used: %d", receipt.TxHash.Hex(), receipt.GasUsed)
 }
 
 // TestUserOpExecutionFailureExcessiveTransfer tests execution failure when

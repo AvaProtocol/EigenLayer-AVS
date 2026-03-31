@@ -2851,7 +2851,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		StartAt: triggerStartTime.UnixMilli(), // Use actual trigger start time
 		EndAt:   triggerEndTime.UnixMilli(),   // Use actual trigger end time
 		Log:     triggerLogMessage,
-		Inputs:  inputVariableKeys,             // Keys from simulation inputVariables map
+		Inputs:  inputVariableKeys,              // Keys from simulation inputVariables map
 		Type:    queueData.TriggerType.String(), // Use trigger type as string
 		Name:    task.Trigger.Name,              // Use new 'name' field
 		Config:  triggerConfigProto,             // Include trigger configuration data for debugging
