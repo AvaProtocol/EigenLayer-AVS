@@ -134,6 +134,7 @@ jobs:
           - pkg/graphql
           - pkg/byte4
           - pkg/erc4337/preset
+          - pkg/erc4337/bundler
           - core/backup
           - core/migrator
           - migrations
