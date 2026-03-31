@@ -16,6 +16,29 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 )
 
+type jsonRPCRequest struct {
+	JSONRPC string        `json:"jsonrpc"`
+	Method  string        `json:"method"`
+	Params  []interface{} `json:"params"`
+	ID      interface{}   `json:"id"`
+}
+
+func makeDummyUserOp() userop.UserOperation {
+	return userop.UserOperation{
+		Sender:               common.HexToAddress("0x123"),
+		Nonce:                big.NewInt(1),
+		InitCode:             common.FromHex("0x"),
+		CallData:             common.FromHex("0x"),
+		CallGasLimit:         big.NewInt(0),
+		VerificationGasLimit: big.NewInt(0),
+		PreVerificationGas:   big.NewInt(0),
+		MaxFeePerGas:         big.NewInt(0),
+		MaxPriorityFeePerGas: big.NewInt(0),
+		PaymasterAndData:     common.FromHex("0x"),
+		Signature:            common.FromHex("0x"),
+	}
+}
+
 func TestNewBundlerClient(t *testing.T) {
 	t.Run("Valid URL", func(t *testing.T) {
 		client, err := NewBundlerClient("http://localhost:8545")
@@ -34,10 +57,7 @@ func TestNewBundlerClient(t *testing.T) {
 
 func TestSimulateUserOperation(t *testing.T) {
 	entrypoint := common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789")
-	dummyUserOp := userop.UserOperation{
-		Sender: common.HexToAddress("0x123"),
-		Nonce:  big.NewInt(1),
-	}
+	dummyUserOp := makeDummyUserOp()
 
 	tests := []struct {
 		name          string
@@ -89,8 +109,23 @@ func TestSimulateUserOperation(t *testing.T) {
 				assert.Equal(t, "POST", r.Method)
 				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
+				var req jsonRPCRequest
+				err := json.NewDecoder(r.Body).Decode(&req)
+				require.NoError(t, err, "failed to decode JSON-RPC request body")
+				assert.Equal(t, "2.0", req.JSONRPC)
+				assert.Equal(t, "eth_simulateUserOperation", req.Method)
+				require.Len(t, req.Params, 3, "expected params: userOp, entrypoint, latest")
+
+				entrypointParam, ok := req.Params[1].(string)
+				require.True(t, ok, "entrypoint param must be a string")
+				assert.Equal(t, entrypoint.Hex(), entrypointParam)
+
+				blockTagParam, ok := req.Params[2].(string)
+				require.True(t, ok, "block tag param must be a string")
+				assert.Equal(t, "latest", blockTagParam)
+
 				w.WriteHeader(tt.mockStatus)
-				json.NewEncoder(w).Encode(tt.mockResponse)
+				_ = json.NewEncoder(w).Encode(tt.mockResponse)
 			}))
 			defer server.Close()
 
@@ -115,10 +150,7 @@ func TestSimulateUserOperation(t *testing.T) {
 
 func TestEstimateUserOperationGas(t *testing.T) {
 	entrypoint := common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789")
-	dummyUserOp := userop.UserOperation{
-		Sender: common.HexToAddress("0x123"),
-		Nonce:  big.NewInt(1),
-	}
+	dummyUserOp := makeDummyUserOp()
 
 	tests := []struct {
 		name          string
@@ -141,7 +173,7 @@ func TestEstimateUserOperationGas(t *testing.T) {
 			expectedError: "",
 		},
 		{
-			name: "HTTP Error Status",
+			name:          "HTTP Error Status",
 			mockResponse:  nil,
 			mockStatus:    http.StatusInternalServerError,
 			expectedError: "500 Internal Server Error",
@@ -164,9 +196,26 @@ func TestEstimateUserOperationGas(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "POST", r.Method)
+				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+				var req jsonRPCRequest
+				err := json.NewDecoder(r.Body).Decode(&req)
+				require.NoError(t, err, "failed to decode JSON-RPC request body")
+				assert.Equal(t, "2.0", req.JSONRPC)
+				assert.Equal(t, "eth_estimateUserOperationGas", req.Method)
+				require.Len(t, req.Params, 3, "expected params: userOp, entrypoint, override")
+
+				entrypointParam, ok := req.Params[1].(string)
+				require.True(t, ok, "entrypoint param must be a string")
+				assert.Equal(t, entrypoint.Hex(), entrypointParam)
+
+				_, ok = req.Params[2].(map[string]interface{})
+				require.True(t, ok, "override param must be an object")
+
 				w.WriteHeader(tt.mockStatus)
 				if tt.mockResponse != nil {
-					json.NewEncoder(w).Encode(tt.mockResponse)
+					_ = json.NewEncoder(w).Encode(tt.mockResponse)
 				}
 			}))
 			defer server.Close()
