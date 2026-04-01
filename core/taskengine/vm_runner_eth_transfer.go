@@ -88,16 +88,12 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 		return executionLog, err
 	}
 
-	// LANGUAGE ENFORCEMENT: Validate Handlebars template size before preprocessing
-	if strings.Contains(config.GetDestination(), "{{") {
-		if err = ValidateInputByLanguage(config.GetDestination(), avsproto.Lang_LANG_HANDLEBARS); err != nil {
-			return executionLog, err
-		}
+	// Validate Handlebars template size before preprocessing
+	if err = validateHandlebarsIfTemplate(config.GetDestination()); err != nil {
+		return executionLog, err
 	}
-	if strings.Contains(config.GetAmount(), "{{") {
-		if err = ValidateInputByLanguage(config.GetAmount(), avsproto.Lang_LANG_HANDLEBARS); err != nil {
-			return executionLog, err
-		}
+	if err = validateHandlebarsIfTemplate(config.GetAmount()); err != nil {
+		return executionLog, err
 	}
 
 	// Preprocess template variables in configuration
