@@ -6,6 +6,8 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestETHTransferProcessor_Execute_Success(t *testing.T) {
@@ -434,4 +436,44 @@ func TestRunNodeWithInputs_PropagatesAASenderToChildVM(t *testing.T) {
 	if sender != "0x50f9Cc9B21b4Bb5bB6c9ff685a63665c13E85FfC" {
 		t.Errorf("expected aa_sender to be propagated from parent VM, got: %q", sender)
 	}
+}
+
+func TestETHTransferProcessor_Execute_OversizedHandlebarsTemplate(t *testing.T) {
+	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
+
+	testUserAddress := testutil.TestUser1().Address
+	processor := NewETHTransferProcessor(vm, nil, nil, &testUserAddress)
+
+	oversizedTemplate := "{{" + strings.Repeat("x", MaxCustomCodeSourceSize) + "}}"
+
+	t.Run("oversized destination template is rejected", func(t *testing.T) {
+		node := &avsproto.ETHTransferNode{
+			Config: &avsproto.ETHTransferNode_Config{
+				Destination: oversizedTemplate,
+				Amount:      "1000",
+			},
+		}
+
+		executionLog, err := processor.Execute("test-step", node)
+
+		require.Error(t, err, "Should reject oversized Handlebars template in destination")
+		assert.Contains(t, err.Error(), "Handlebars template exceeds maximum size limit")
+		require.NotNil(t, executionLog)
+	})
+
+	t.Run("oversized amount template is rejected", func(t *testing.T) {
+		node := &avsproto.ETHTransferNode{
+			Config: &avsproto.ETHTransferNode_Config{
+				Destination: "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
+				Amount:      oversizedTemplate,
+			},
+		}
+
+		executionLog, err := processor.Execute("test-step", node)
+
+		require.Error(t, err, "Should reject oversized Handlebars template in amount")
+		assert.Contains(t, err.Error(), "Handlebars template exceeds maximum size limit")
+		require.NotNil(t, executionLog)
+	})
 }

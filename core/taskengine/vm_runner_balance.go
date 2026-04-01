@@ -160,6 +160,16 @@ func (v *VM) runBalance(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, 
 		return executionLogStep, err
 	}
 
+	// Validate Handlebars template size before preprocessing
+	if err = validateHandlebarsIfTemplate(config.Address); err != nil {
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		return executionLogStep, err
+	}
+	if err = validateHandlebarsIfTemplate(config.Chain); err != nil {
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		return executionLogStep, err
+	}
+
 	// Resolve template variables in config
 	address := v.preprocessTextWithVariableMapping(config.Address)
 	chain := v.preprocessTextWithVariableMapping(config.Chain)
@@ -177,6 +187,11 @@ func (v *VM) runBalance(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, 
 	// Resolve template variables in tokenAddresses array
 	resolvedTokenAddresses := make([]string, len(config.TokenAddresses))
 	for i, tokenAddr := range config.TokenAddresses {
+		// Validate Handlebars template size before preprocessing
+		if err = validateHandlebarsIfTemplate(tokenAddr); err != nil {
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+			return executionLogStep, err
+		}
 		resolved := v.preprocessTextWithVariableMapping(tokenAddr)
 
 		// Validate template variable resolution for each token address

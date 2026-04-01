@@ -88,6 +88,14 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 		return executionLog, err
 	}
 
+	// Validate Handlebars template size before preprocessing
+	if err = validateHandlebarsIfTemplate(config.GetDestination()); err != nil {
+		return executionLog, err
+	}
+	if err = validateHandlebarsIfTemplate(config.GetAmount()); err != nil {
+		return executionLog, err
+	}
+
 	// Preprocess template variables in configuration
 	destination := p.vm.preprocessTextWithVariableMapping(config.GetDestination())
 	amountStr := p.vm.preprocessTextWithVariableMapping(config.GetAmount())

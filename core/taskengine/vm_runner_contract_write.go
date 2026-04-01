@@ -178,6 +178,14 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	// Use preprocessTextWithVariableMapping for each parameter to support dot notation like {{value.address}}
 	resolvedMethodParams := make([]string, len(methodCall.MethodParams))
 	for i, param := range methodCall.MethodParams {
+		// LANGUAGE ENFORCEMENT: Validate Handlebars template size before preprocessing
+		if err := ValidateInputByLanguage(param, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+			return &avsproto.ContractWriteNode_MethodResult{
+				MethodName: methodCall.MethodName,
+				Success:    false,
+				Error:      err.Error(),
+			}
+		}
 		resolvedMethodParams[i] = r.vm.preprocessTextWithVariableMapping(param)
 
 		// Validate that template resolution didn't produce "undefined" values using common utility

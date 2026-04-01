@@ -96,6 +96,8 @@ func TestRestAPI_SizeLimit(t *testing.T) {
 
 	t.Run("Invalid size - exceeds limit", func(t *testing.T) {
 		// Create a body that exceeds MaxRestAPIBodySize (10MB)
+		// This body has no {{ template delimiters, so the Handlebars check is skipped
+		// and the REST-specific body size limit applies.
 		largeBody := `{"data": "` + strings.Repeat("x", MaxRestAPIBodySize) + `"}`
 
 		nodeConfig := map[string]interface{}{
@@ -245,5 +247,126 @@ func TestValidationConstants(t *testing.T) {
 		assert.NotEmpty(t, ValidationErrorMessages.ContractABITooLarge)
 		assert.NotEmpty(t, ValidationErrorMessages.EventTriggerABIItemTooLarge)
 		assert.NotEmpty(t, ValidationErrorMessages.RestAPIBodyInvalidJSON)
+	})
+}
+
+// TestHandlebarsValidation_RestAPI tests that oversized Handlebars templates in REST API
+// fields are rejected, while non-template large bodies still use the REST-specific 10MB limit.
+func TestHandlebarsValidation_RestAPI(t *testing.T) {
+	engine := createTestEngine()
+	defer storage.Destroy(engine.db.(*storage.BadgerStorage))
+
+	t.Run("Oversized Handlebars template in body is rejected", func(t *testing.T) {
+		// Body contains {{ template delimiters and exceeds 100KB Handlebars limit
+		largeTemplate := "{{" + strings.Repeat("x", MaxCustomCodeSourceSize) + "}}"
+		nodeConfig := map[string]interface{}{
+			"url":    "https://mock-api.ap-aggregator.local/test",
+			"method": "POST",
+			"body":   largeTemplate,
+		}
+
+		result, err := engine.RunNodeImmediately("restAPI", nodeConfig, map[string]interface{}{}, nil)
+
+		require.Error(t, err, "Should reject oversized Handlebars template")
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "Handlebars template exceeds maximum size limit")
+
+		if structuredErr, ok := err.(*StructuredError); ok {
+			assert.Equal(t, avsproto.ErrorCode_INVALID_NODE_CONFIG, structuredErr.Code)
+			assert.Equal(t, "Handlebars", structuredErr.Details["language"])
+		}
+	})
+
+	t.Run("Oversized Handlebars template in URL is rejected", func(t *testing.T) {
+		largeURL := "https://example.com/{{" + strings.Repeat("x", MaxCustomCodeSourceSize) + "}}"
+		nodeConfig := map[string]interface{}{
+			"url":    largeURL,
+			"method": "GET",
+		}
+
+		result, err := engine.RunNodeImmediately("restAPI", nodeConfig, map[string]interface{}{}, nil)
+
+		require.Error(t, err, "Should reject oversized Handlebars template in URL")
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "Handlebars template exceeds maximum size limit")
+	})
+
+	t.Run("Non-template large body uses REST 10MB limit", func(t *testing.T) {
+		// Body has no {{ delimiters — should NOT trigger Handlebars validation
+		// This body is under 10MB so it should pass the REST size check
+		largeBody := strings.Repeat("x", MaxCustomCodeSourceSize+1) // > 100KB but < 10MB, no templates
+		nodeConfig := map[string]interface{}{
+			"url":    "https://mock-api.ap-aggregator.local/test",
+			"method": "POST",
+			"body":   largeBody,
+		}
+
+		result, err := engine.RunNodeImmediately("restAPI", nodeConfig, map[string]interface{}{}, nil)
+
+		// Should NOT fail with Handlebars error — body has no template delimiters
+		if err != nil {
+			assert.NotContains(t, err.Error(), "Handlebars", "Non-template body should not trigger Handlebars validation")
+		} else {
+			require.NotNil(t, result)
+		}
+	})
+
+	t.Run("Oversized Handlebars template in header is rejected", func(t *testing.T) {
+		largeHeaderValue := "Bearer {{" + strings.Repeat("x", MaxCustomCodeSourceSize) + "}}"
+		nodeConfig := map[string]interface{}{
+			"url":    "https://mock-api.ap-aggregator.local/test",
+			"method": "GET",
+			"headers": map[string]interface{}{
+				"Authorization": largeHeaderValue,
+			},
+		}
+
+		result, err := engine.RunNodeImmediately("restAPI", nodeConfig, map[string]interface{}{}, nil)
+
+		require.Error(t, err, "Should reject oversized Handlebars template in header")
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "Handlebars template exceeds maximum size limit")
+	})
+}
+
+// TestHandlebarsValidation_Direct tests the Handlebars validation function directly
+// to verify that oversized templates are rejected for fields used by ContractRead,
+// ContractWrite, GraphQL, Balance, ETHTransfer, and Branch nodes. Direct node tests
+// for some of these require complex setup (ABI parsing, chain config, authentication)
+// that fires before the Handlebars check, so we validate the function itself.
+// See also: TestETHTransferProcessor_Execute_OversizedHandlebarsTemplate,
+// TestBranchProcessor_Execute_OversizedHandlebarsTemplate for end-to-end node tests.
+func TestHandlebarsValidation_Direct(t *testing.T) {
+	t.Run("Oversized Handlebars template is rejected", func(t *testing.T) {
+		largeParam := "{{" + strings.Repeat("x", MaxCustomCodeSourceSize) + "}}"
+
+		err := ValidateInputByLanguage(largeParam, avsproto.Lang_LANG_HANDLEBARS)
+
+		require.Error(t, err, "Should reject oversized Handlebars template")
+		assert.Contains(t, err.Error(), "Handlebars template exceeds maximum size limit")
+
+		if structuredErr, ok := err.(*StructuredError); ok {
+			assert.Equal(t, avsproto.ErrorCode_INVALID_NODE_CONFIG, structuredErr.Code)
+			assert.Equal(t, "size limit exceeded", structuredErr.Details["issue"])
+			assert.Equal(t, "Handlebars", structuredErr.Details["language"])
+			assert.Equal(t, MaxCustomCodeSourceSize, structuredErr.Details["maxSize"])
+		}
+	})
+
+	t.Run("Template under limit passes", func(t *testing.T) {
+		normalParam := "{{trigger.data.address}}"
+
+		err := ValidateInputByLanguage(normalParam, avsproto.Lang_LANG_HANDLEBARS)
+		require.NoError(t, err, "Normal-sized template should pass validation")
+	})
+
+	t.Run("Empty string passes", func(t *testing.T) {
+		err := ValidateInputByLanguage("", avsproto.Lang_LANG_HANDLEBARS)
+		require.NoError(t, err, "Empty string should pass validation")
+	})
+
+	t.Run("Nil passes", func(t *testing.T) {
+		err := ValidateInputByLanguage(nil, avsproto.Lang_LANG_HANDLEBARS)
+		require.NoError(t, err, "Nil should pass validation")
 	})
 }

@@ -340,6 +340,11 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 			continue
 		}
 
+		// Validate Handlebars template size before preprocessing
+		if err = validateHandlebarsIfTemplate(expression); err != nil {
+			return executionStep, nil, err
+		}
+
 		// Preprocess the expression for template variables
 		processedExpression := r.vm.preprocessTextWithVariableMapping(expression)
 

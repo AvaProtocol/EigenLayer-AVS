@@ -49,7 +49,7 @@ func substituteTemplateVariables(text string, iterInputs map[string]interface{})
 //
 // The function supports advanced preprocessing for dot notation (e.g., {{value.address}})
 // by first applying loop-specific substitution, then VM variable preprocessing.
-func processContractWriteTemplates(vm *VM, contractWrite *avsproto.ContractWriteNode, iterInputs map[string]interface{}) *avsproto.ContractWriteNode {
+func processContractWriteTemplates(vm *VM, contractWrite *avsproto.ContractWriteNode, iterInputs map[string]interface{}) (*avsproto.ContractWriteNode, error) {
 	// Create a copy of the contract write configuration
 	processed := &avsproto.ContractWriteNode{
 		Config: &avsproto.ContractWriteNode_Config{
@@ -75,6 +75,9 @@ func processContractWriteTemplates(vm *VM, contractWrite *avsproto.ContractWrite
 		// This supports dot notation like {{value.address}} in addition to simple {{value}} substitution
 		processedMethodParams := make([]string, len(methodCall.MethodParams))
 		for i, param := range methodCall.MethodParams {
+			if err := validateHandlebarsIfTemplate(param); err != nil {
+				return nil, err
+			}
 			// First apply loop-specific template substitution ({{value}}, {{index}})
 			paramWithLoopVars := substituteTemplateVariables(param, iterInputs)
 			// Then apply advanced preprocessing for dot notation and other VM variables
@@ -85,14 +88,14 @@ func processContractWriteTemplates(vm *VM, contractWrite *avsproto.ContractWrite
 		processed.Config.MethodCalls = append(processed.Config.MethodCalls, processedMethodCall)
 	}
 
-	return processed
+	return processed, nil
 }
 
 // processContractReadTemplates processes template variables in contract read configuration.
 // Similar to processContractWriteTemplates but includes support for applyToFields copying.
 //
 // CRITICAL: ABI is NEVER subject to template substitution for security reasons.
-func processContractReadTemplates(vm *VM, contractRead *avsproto.ContractReadNode, iterInputs map[string]interface{}) *avsproto.ContractReadNode {
+func processContractReadTemplates(vm *VM, contractRead *avsproto.ContractReadNode, iterInputs map[string]interface{}) (*avsproto.ContractReadNode, error) {
 	// Create a copy of the contract read configuration
 	processed := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
@@ -118,6 +121,9 @@ func processContractReadTemplates(vm *VM, contractRead *avsproto.ContractReadNod
 		// This supports dot notation like {{value.address}} in addition to simple {{value}} substitution
 		processedMethodParams := make([]string, len(methodCall.MethodParams))
 		for i, param := range methodCall.MethodParams {
+			if err := validateHandlebarsIfTemplate(param); err != nil {
+				return nil, err
+			}
 			// First apply loop-specific template substitution ({{value}}, {{index}})
 			paramWithLoopVars := substituteTemplateVariables(param, iterInputs)
 			// Then apply advanced preprocessing for dot notation and other VM variables
@@ -131,7 +137,7 @@ func processContractReadTemplates(vm *VM, contractRead *avsproto.ContractReadNod
 		processed.Config.MethodCalls = append(processed.Config.MethodCalls, processedMethodCall)
 	}
 
-	return processed
+	return processed, nil
 }
 
 // processRestApiTemplates processes template variables in REST API configuration.

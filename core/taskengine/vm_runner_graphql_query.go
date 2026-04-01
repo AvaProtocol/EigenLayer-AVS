@@ -84,6 +84,10 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 	variables := make(map[string]interface{})
 	if node.Config.GetVariables() != nil {
 		for key, value := range node.Config.GetVariables() {
+			// LANGUAGE ENFORCEMENT: Validate Handlebars template size before preprocessing
+			if err = ValidateInputByLanguage(value, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+				return step, nil, err
+			}
 			// Preprocess each variable value for template variables
 			processedValue := r.vm.preprocessTextWithVariableMapping(value)
 			// Validate template variable resolution

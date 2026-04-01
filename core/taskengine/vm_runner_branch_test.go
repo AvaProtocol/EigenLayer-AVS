@@ -1231,3 +1231,24 @@ func TestBranchDateComparison(t *testing.T) {
 	require.NotNil(t, branchOutput)
 	require.NotNil(t, branchOutput.Data)
 }
+
+func TestBranchProcessor_Execute_OversizedHandlebarsTemplate(t *testing.T) {
+	oversizedTemplate := "{{" + strings.Repeat("x", MaxCustomCodeSourceSize) + "}}"
+
+	vm := NewVM()
+	node := &avsproto.BranchNode{
+		Config: &avsproto.BranchNode_Config{
+			Conditions: []*avsproto.BranchNode_Condition{
+				{Id: "condition1", Type: "if", Expression: oversizedTemplate},
+			},
+		},
+	}
+	processor := NewBranchProcessor(vm)
+
+	executionLog, nextStep, err := processor.Execute("test-step", node)
+
+	require.Error(t, err, "Should reject oversized Handlebars template in branch expression")
+	assert.Contains(t, err.Error(), "Handlebars template exceeds maximum size limit")
+	assert.Nil(t, nextStep)
+	assert.NotNil(t, executionLog)
+}
