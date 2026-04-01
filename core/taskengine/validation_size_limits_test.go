@@ -331,9 +331,11 @@ func TestHandlebarsValidation_RestAPI(t *testing.T) {
 
 // TestHandlebarsValidation_Direct tests the Handlebars validation function directly
 // to verify that oversized templates are rejected for fields used by ContractRead,
-// ContractWrite, and GraphQL nodes. Direct node tests for these require complex setup
-// (ABI parsing, authentication) that fires before the Handlebars check, so we validate
-// the function itself.
+// ContractWrite, GraphQL, Balance, ETHTransfer, and Branch nodes. Direct node tests
+// for some of these require complex setup (ABI parsing, chain config, authentication)
+// that fires before the Handlebars check, so we validate the function itself.
+// See also: TestETHTransferProcessor_Execute_OversizedHandlebarsTemplate,
+// TestBranchProcessor_Execute_OversizedHandlebarsTemplate for end-to-end node tests.
 func TestHandlebarsValidation_Direct(t *testing.T) {
 	t.Run("Oversized Handlebars template is rejected", func(t *testing.T) {
 		largeParam := "{{" + strings.Repeat("x", MaxCustomCodeSourceSize) + "}}"

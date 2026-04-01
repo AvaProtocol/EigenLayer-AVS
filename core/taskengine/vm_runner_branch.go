@@ -342,7 +342,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 
 		// LANGUAGE ENFORCEMENT: Validate Handlebars template size before preprocessing
 		if strings.Contains(expression, "{{") {
-			if err := ValidateInputByLanguage(expression, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+			if err = ValidateInputByLanguage(expression, avsproto.Lang_LANG_HANDLEBARS); err != nil {
 				return executionStep, nil, err
 			}
 		}
