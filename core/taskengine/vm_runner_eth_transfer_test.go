@@ -435,3 +435,55 @@ func TestRunNodeWithInputs_PropagatesAASenderToChildVM(t *testing.T) {
 		t.Errorf("expected aa_sender to be propagated from parent VM, got: %q", sender)
 	}
 }
+
+func TestETHTransferProcessor_Execute_OversizedHandlebarsTemplate(t *testing.T) {
+	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
+
+	testUserAddress := testutil.TestUser1().Address
+	processor := NewETHTransferProcessor(vm, nil, nil, &testUserAddress)
+
+	oversizedTemplate := "{{" + strings.Repeat("x", MaxCustomCodeSourceSize) + "}}"
+
+	t.Run("oversized destination template is rejected", func(t *testing.T) {
+		node := &avsproto.ETHTransferNode{
+			Config: &avsproto.ETHTransferNode_Config{
+				Destination: oversizedTemplate,
+				Amount:      "1000",
+			},
+		}
+
+		executionLog, err := processor.Execute("test-step", node)
+
+		if err == nil {
+			t.Fatal("Expected error for oversized Handlebars template in destination")
+		}
+		if !strings.Contains(err.Error(), "Handlebars template exceeds maximum size limit") {
+			t.Errorf("Expected Handlebars size error, got: %v", err)
+		}
+		if executionLog == nil {
+			t.Fatal("Expected execution log even on error")
+		}
+	})
+
+	t.Run("oversized amount template is rejected", func(t *testing.T) {
+		node := &avsproto.ETHTransferNode{
+			Config: &avsproto.ETHTransferNode_Config{
+				Destination: "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
+				Amount:      oversizedTemplate,
+			},
+		}
+
+		executionLog, err := processor.Execute("test-step", node)
+
+		if err == nil {
+			t.Fatal("Expected error for oversized Handlebars template in amount")
+		}
+		if !strings.Contains(err.Error(), "Handlebars template exceeds maximum size limit") {
+			t.Errorf("Expected Handlebars size error, got: %v", err)
+		}
+		if executionLog == nil {
+			t.Fatal("Expected execution log even on error")
+		}
+	})
+}

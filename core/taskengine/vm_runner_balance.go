@@ -160,6 +160,20 @@ func (v *VM) runBalance(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, 
 		return executionLogStep, err
 	}
 
+	// LANGUAGE ENFORCEMENT: Validate Handlebars template size before preprocessing
+	if strings.Contains(config.Address, "{{") {
+		if err = ValidateInputByLanguage(config.Address, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+			return executionLogStep, err
+		}
+	}
+	if strings.Contains(config.Chain, "{{") {
+		if err = ValidateInputByLanguage(config.Chain, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+			return executionLogStep, err
+		}
+	}
+
 	// Resolve template variables in config
 	address := v.preprocessTextWithVariableMapping(config.Address)
 	chain := v.preprocessTextWithVariableMapping(config.Chain)
@@ -177,6 +191,13 @@ func (v *VM) runBalance(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, 
 	// Resolve template variables in tokenAddresses array
 	resolvedTokenAddresses := make([]string, len(config.TokenAddresses))
 	for i, tokenAddr := range config.TokenAddresses {
+		// LANGUAGE ENFORCEMENT: Validate Handlebars template size before preprocessing
+		if strings.Contains(tokenAddr, "{{") {
+			if err = ValidateInputByLanguage(tokenAddr, avsproto.Lang_LANG_HANDLEBARS); err != nil {
+				logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+				return executionLogStep, err
+			}
+		}
 		resolved := v.preprocessTextWithVariableMapping(tokenAddr)
 
 		// Validate template variable resolution for each token address
