@@ -329,6 +329,16 @@ func ValidateGraphQLFormat(data interface{}) error {
 	return nil
 }
 
+// validateHandlebarsIfTemplate validates Handlebars template size only when the
+// string contains template delimiters ({{). This avoids applying the 100KB template
+// limit to non-template values like addresses or amounts.
+func validateHandlebarsIfTemplate(s string) error {
+	if !strings.Contains(s, "{{") {
+		return nil
+	}
+	return ValidateInputByLanguage(s, avsproto.Lang_LANG_HANDLEBARS)
+}
+
 // ValidateHandlebarsFormat validates Handlebars template size.
 // This ensures ALL Handlebars templates have size limits for DoS protection.
 func ValidateHandlebarsFormat(data interface{}) error {

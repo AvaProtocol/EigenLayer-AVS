@@ -6,6 +6,8 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestETHTransferProcessor_Execute_Success(t *testing.T) {
@@ -455,15 +457,9 @@ func TestETHTransferProcessor_Execute_OversizedHandlebarsTemplate(t *testing.T) 
 
 		executionLog, err := processor.Execute("test-step", node)
 
-		if err == nil {
-			t.Fatal("Expected error for oversized Handlebars template in destination")
-		}
-		if !strings.Contains(err.Error(), "Handlebars template exceeds maximum size limit") {
-			t.Errorf("Expected Handlebars size error, got: %v", err)
-		}
-		if executionLog == nil {
-			t.Fatal("Expected execution log even on error")
-		}
+		require.Error(t, err, "Should reject oversized Handlebars template in destination")
+		assert.Contains(t, err.Error(), "Handlebars template exceeds maximum size limit")
+		require.NotNil(t, executionLog)
 	})
 
 	t.Run("oversized amount template is rejected", func(t *testing.T) {
@@ -476,14 +472,8 @@ func TestETHTransferProcessor_Execute_OversizedHandlebarsTemplate(t *testing.T) 
 
 		executionLog, err := processor.Execute("test-step", node)
 
-		if err == nil {
-			t.Fatal("Expected error for oversized Handlebars template in amount")
-		}
-		if !strings.Contains(err.Error(), "Handlebars template exceeds maximum size limit") {
-			t.Errorf("Expected Handlebars size error, got: %v", err)
-		}
-		if executionLog == nil {
-			t.Fatal("Expected execution log even on error")
-		}
+		require.Error(t, err, "Should reject oversized Handlebars template in amount")
+		assert.Contains(t, err.Error(), "Handlebars template exceeds maximum size limit")
+		require.NotNil(t, executionLog)
 	})
 }
