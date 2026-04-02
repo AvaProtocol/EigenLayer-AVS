@@ -189,6 +189,13 @@ type CaliburConfig struct {
 	HookAddress common.Address
 	// RPC endpoint for submitting direct transactions
 	EthRpcUrl string
+	// ChainID of the network (derived at runtime from RPC)
+	ChainID int64
+	// SenderPrivateKey signs the outer Ethereum transaction (pays gas).
+	// This is the aggregator's infrastructure wallet key.
+	SenderPrivateKey *ecdsa.PrivateKey
+	// SenderAddress derived from SenderPrivateKey
+	SenderAddress common.Address
 }
 
 type BackupConfig struct {
@@ -229,9 +236,10 @@ type ConfigRaw struct {
 	} `yaml:"smart_wallet"`
 
 	Calibur struct {
-		CaliburAddress string `yaml:"calibur_address"`
-		HookAddress    string `yaml:"hook_address"`
-		EthRpcUrl      string `yaml:"eth_rpc_url"`
+		CaliburAddress   string `yaml:"calibur_address"`
+		HookAddress      string `yaml:"hook_address"`
+		EthRpcUrl        string `yaml:"eth_rpc_url"`
+		SenderPrivateKey string `yaml:"sender_private_key"` // Optional; defaults to controller_private_key
 	} `yaml:"calibur"`
 
 	Backup struct {
@@ -500,14 +508,35 @@ func NewConfig(configFilePath string) (*Config, error) {
 	// Parse optional Calibur (EIP-7702) config — nil if calibur section is omitted from YAML
 	if configRaw.Calibur.CaliburAddress != "" || configRaw.Calibur.EthRpcUrl != "" {
 		caliburAddress := common.HexToAddress(firstNonEmpty(configRaw.Calibur.CaliburAddress, DefaultCaliburAddressHex))
+		caliburRpcUrl := firstNonEmpty(configRaw.Calibur.EthRpcUrl, configRaw.SmartWallet.EthRpcUrl)
+
 		config.Calibur = &CaliburConfig{
 			CaliburAddress: caliburAddress,
 			HookAddress:    common.HexToAddress(configRaw.Calibur.HookAddress),
-			EthRpcUrl:      firstNonEmpty(configRaw.Calibur.EthRpcUrl, configRaw.SmartWallet.EthRpcUrl),
+			EthRpcUrl:      caliburRpcUrl,
 		}
+
+		// Derive chainID for Calibur from the smart wallet config (same chain)
+		if config.SmartWallet != nil {
+			config.Calibur.ChainID = config.SmartWallet.ChainID
+		}
+
+		// Parse sender private key — defaults to controller key if not specified
+		senderKeyHex := firstNonEmpty(configRaw.Calibur.SenderPrivateKey, configRaw.SmartWallet.ControllerPrivateKey)
+		if senderKeyHex != "" {
+			senderKey, senderErr := crypto.HexToECDSA(senderKeyHex)
+			if senderErr != nil {
+				logger.Warn("Failed to parse Calibur sender private key", "error", senderErr)
+			} else {
+				config.Calibur.SenderPrivateKey = senderKey
+				config.Calibur.SenderAddress = crypto.PubkeyToAddress(senderKey.PublicKey)
+			}
+		}
+
 		logger.Info("Calibur (EIP-7702) wallet support enabled",
 			"calibur_address", caliburAddress.Hex(),
 			"hook_address", configRaw.Calibur.HookAddress,
+			"sender_address", config.Calibur.SenderAddress.Hex(),
 		)
 	}
 

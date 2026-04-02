@@ -9,11 +9,13 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	caliburpkg "github.com/AvaProtocol/EigenLayer-AVS/pkg/calibur"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -265,6 +267,11 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 
 // executeRealETHTransfer executes a real UserOp transaction for ETH transfers
 func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amountStr string, isMaxTransfer bool, executionLog *avsproto.Execution_Step, finalized *bool) (*avsproto.Execution_Step, error) {
+	// Branch: Calibur wallets use direct signed transactions
+	if p.vm.walletType == int32(avsproto.WalletType_WALLET_TYPE_CALIBUR) {
+		return p.executeCaliburETHTransfer(destination, amountStr, executionLog, finalized)
+	}
+
 	p.vm.logger.Info("🔍 REAL ETH TRANSFER DEBUG - Starting real UserOp ETH transfer execution",
 		"destination", destination,
 		"amount", amountStr)
@@ -330,9 +337,6 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		}
 	}
 	p.vm.mu.Unlock()
-
-	// TODO(calibur): When vm.walletType == CALIBUR, build a calibur.Call for the
-	// ETH transfer and submit via calibur.Client.SendSignedBatchedCall() — no bundler/paymaster.
 
 	// Send UserOp transaction with overrides
 	userOp, receipt, err := preset.SendUserOp(
@@ -502,4 +506,116 @@ func (p *ETHTransferProcessor) shouldUsePaymaster() bool {
 	// If wallet can't reimburse, UserOp still completes (paymaster absorbs cost)
 	log.Printf("[ETHTransfer] Using paymaster for gas sponsorship (with automatic reimbursement)")
 	return true
+}
+
+// executeCaliburETHTransfer executes an ETH transfer via the Calibur direct transaction path.
+func (p *ETHTransferProcessor) executeCaliburETHTransfer(destination, amountStr string, executionLog *avsproto.Execution_Step, finalized *bool) (*avsproto.Execution_Step, error) {
+	p.vm.logger.Info("Calibur ETH transfer",
+		"destination", destination,
+		"amount", amountStr,
+		"owner", p.taskOwner.Hex())
+
+	amount, ok := new(big.Int).SetString(amountStr, 10)
+	if !ok {
+		err := fmt.Errorf("failed to parse amount: %s", amountStr)
+		finalizeStep(executionLog, false, nil, err.Error(), "")
+		return executionLog, err
+	}
+
+	if p.vm.caliburConfig == nil || p.vm.caliburKeyInfo == nil {
+		err := fmt.Errorf("Calibur config or key info not available")
+		finalizeStep(executionLog, false, nil, err.Error(), "")
+		return executionLog, err
+	}
+
+	if p.vm.caliburKeyInfo.Status != "active" {
+		err := fmt.Errorf("Calibur sub-key is %s, not active", p.vm.caliburKeyInfo.Status)
+		finalizeStep(executionLog, false, nil, err.Error(), "")
+		return executionLog, err
+	}
+
+	if p.vm.caliburConfig.SenderPrivateKey == nil {
+		err := fmt.Errorf("Calibur sender private key not configured")
+		finalizeStep(executionLog, false, nil, err.Error(), "")
+		return executionLog, err
+	}
+
+	subKeyPrivate, err := crypto.HexToECDSA(p.vm.caliburKeyInfo.PrivateKey)
+	if err != nil {
+		err = fmt.Errorf("failed to decode Calibur sub-key: %w", err)
+		finalizeStep(executionLog, false, nil, err.Error(), "")
+		return executionLog, err
+	}
+
+	destinationAddr := common.HexToAddress(destination)
+
+	calls := []caliburpkg.Call{
+		{
+			To:    destinationAddr,
+			Value: amount,
+			Data:  []byte{}, // empty data for pure ETH transfer
+		},
+	}
+
+	caliburClient, err := caliburpkg.NewClient(
+		p.vm.caliburConfig.EthRpcUrl,
+		p.vm.caliburConfig.ChainID,
+		p.vm.caliburConfig.CaliburAddress,
+	)
+	if err != nil {
+		err = fmt.Errorf("failed to create Calibur client: %w", err)
+		finalizeStep(executionLog, false, nil, err.Error(), "")
+		return executionLog, err
+	}
+
+	ctx := context.Background()
+	receipt, err := caliburClient.SendSignedBatchedCall(
+		ctx,
+		*p.taskOwner,
+		calls,
+		true, // revertOnFailure
+		subKeyPrivate,
+		p.vm.caliburConfig.SenderPrivateKey,
+		big.NewInt(0), // no deadline
+	)
+
+	if err != nil {
+		p.vm.logger.Error("Calibur ETH transfer failed",
+			"error", err,
+			"destination", destination,
+			"amount", amountStr)
+		finalizeStep(executionLog, false, nil, fmt.Sprintf("Calibur transaction failed: %v", err), "")
+		return executionLog, err
+	}
+
+	if receipt.Status == 0 {
+		err = fmt.Errorf("transaction reverted on-chain")
+		finalizeStep(executionLog, false, nil, err.Error(), "")
+		return executionLog, err
+	}
+
+	p.vm.logger.Info("Calibur ETH transfer confirmed",
+		"tx_hash", receipt.TxHash.Hex(),
+		"gas_used", receipt.GasUsed,
+		"block", receipt.BlockNumber.String())
+
+	*finalized = true
+
+	txHash := receipt.TxHash.Hex()
+	resultObj := map[string]interface{}{
+		"transaction_hash": txHash,
+		"block_number":     fmt.Sprintf("%d", receipt.BlockNumber.Uint64()),
+		"gas_used":         fmt.Sprintf("%d", receipt.GasUsed),
+		"status":           "confirmed",
+	}
+
+	dataValue, _ := structpb.NewValue(resultObj)
+	executionLog.OutputData = &avsproto.Execution_Step_EthTransfer{
+		EthTransfer: &avsproto.ETHTransferNode_Output{
+			Data: dataValue,
+		},
+	}
+
+	finalizeStep(executionLog, true, nil, "", txHash)
+	return executionLog, nil
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
+	caliburpkg "github.com/AvaProtocol/EigenLayer-AVS/pkg/calibur"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
@@ -574,8 +575,14 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	return r.executeRealUserOpTransaction(ctx, contractAddress, callData, methodName, parsedABI, t0)
 }
 
-// executeRealUserOpTransaction executes a real UserOp transaction for contract writes
+// executeRealUserOpTransaction executes a real UserOp transaction for contract writes.
+// If the VM's wallet type is CALIBUR, this routes through the Calibur direct tx path instead.
 func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Context, contractAddress common.Address, callData string, methodName string, parsedABI *abi.ABI, startTime time.Time) *avsproto.ContractWriteNode_MethodResult {
+	// Branch: Calibur wallets use direct signed transactions, not ERC-4337 UserOps
+	if r.vm.walletType == int32(avsproto.WalletType_WALLET_TYPE_CALIBUR) {
+		return r.executeCaliburTransaction(ctx, contractAddress, callData, methodName, startTime)
+	}
+
 	r.vm.logger.Info("🔍 REAL USEROP DEBUG - Starting real UserOp transaction execution",
 		"contract_address", contractAddress.Hex(),
 		"method_name", methodName,
@@ -743,14 +750,6 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 			}
 		}
 	}
-
-	// TODO(calibur): When vm.walletType == CALIBUR, use calibur.Client.SendSignedBatchedCall()
-	// instead of sendUserOpFunc. The Calibur path:
-	//   1. Builds a calibur.Call from (contractAddr, value, callData)
-	//   2. Signs with the sub-key from vm.caliburKeyInfo
-	//   3. Submits as a direct eth_sendRawTransaction (no bundler, no paymaster)
-	//   4. Returns (*types.Receipt, error) instead of (*UserOperation, *types.Receipt, error)
-	// For now, all executions go through the existing ERC-4337 UserOp path.
 
 	executionLogBuilder.WriteString("Sending packed User Operation to bundler\n")
 
@@ -2565,4 +2564,135 @@ func (r *ContractWriteProcessor) getUserOpHashOrPending(receipt *types.Receipt) 
 		return receipt.TxHash.Hex()
 	}
 	return "pending"
+}
+
+// executeCaliburTransaction executes a contract write via the Calibur direct transaction path.
+// No bundler, no paymaster, no EntryPoint — submits as a regular eth_sendRawTransaction.
+func (r *ContractWriteProcessor) executeCaliburTransaction(ctx context.Context, contractAddress common.Address, callData string, methodName string, startTime time.Time) *avsproto.ContractWriteNode_MethodResult {
+	r.vm.logger.Info("Calibur contract write execution",
+		"contract", contractAddress.Hex(),
+		"method", methodName,
+		"owner", r.owner.Hex())
+
+	if r.vm.caliburConfig == nil || r.vm.caliburKeyInfo == nil {
+		return &avsproto.ContractWriteNode_MethodResult{
+			Success: false,
+			Error:   "Calibur config or key info not available",
+		}
+	}
+
+	if r.vm.caliburKeyInfo.Status != "active" {
+		return &avsproto.ContractWriteNode_MethodResult{
+			Success: false,
+			Error:   fmt.Sprintf("Calibur sub-key is %s, not active", r.vm.caliburKeyInfo.Status),
+		}
+	}
+
+	if r.vm.caliburConfig.SenderPrivateKey == nil {
+		return &avsproto.ContractWriteNode_MethodResult{
+			Success: false,
+			Error:   "Calibur sender private key not configured",
+		}
+	}
+
+	// Decode the sub-key private key from hex
+	subKeyPrivate, err := crypto.HexToECDSA(r.vm.caliburKeyInfo.PrivateKey)
+	if err != nil {
+		return &avsproto.ContractWriteNode_MethodResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to decode Calibur sub-key: %v", err),
+		}
+	}
+
+	// Decode the contract method calldata from hex
+	callDataBytes := common.FromHex(callData)
+
+	// Build Calibur call
+	calls := []caliburpkg.Call{
+		{
+			To:    contractAddress,
+			Value: big.NewInt(0),
+			Data:  callDataBytes,
+		},
+	}
+
+	// Create Calibur client
+	caliburClient, err := caliburpkg.NewClient(
+		r.vm.caliburConfig.EthRpcUrl,
+		r.vm.caliburConfig.ChainID,
+		r.vm.caliburConfig.CaliburAddress,
+	)
+	if err != nil {
+		return &avsproto.ContractWriteNode_MethodResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to create Calibur client: %v", err),
+		}
+	}
+
+	// Execute via Calibur signed relay path
+	// - eoaAddress = r.owner (the user's EOA, which IS the Calibur wallet)
+	// - signerKey = sub-key (signs the SignedBatchedCall)
+	// - senderKey = aggregator infra wallet (pays tx gas)
+	// - deadline = 0 (no expiry)
+	receipt, err := caliburClient.SendSignedBatchedCall(
+		ctx,
+		r.owner,
+		calls,
+		true, // revertOnFailure
+		subKeyPrivate,
+		r.vm.caliburConfig.SenderPrivateKey,
+		big.NewInt(0), // no deadline
+	)
+
+	// Increment transaction counter
+	if r.vm.db != nil {
+		counterKey := ContractWriteCounterKey(r.owner)
+		if _, counterErr := r.vm.db.IncCounter(counterKey, 0); counterErr != nil {
+			r.vm.logger.Warn("Failed to increment transaction counter", "error", counterErr)
+		}
+	}
+
+	if err != nil {
+		r.vm.logger.Error("Calibur transaction failed",
+			"error", err,
+			"contract", contractAddress.Hex(),
+			"method", methodName)
+		return &avsproto.ContractWriteNode_MethodResult{
+			Success: false,
+			Error:   fmt.Sprintf("Calibur transaction failed: %v", err),
+		}
+	}
+
+	if receipt.Status == 0 {
+		r.vm.logger.Error("Calibur transaction reverted",
+			"tx_hash", receipt.TxHash.Hex(),
+			"contract", contractAddress.Hex())
+		return &avsproto.ContractWriteNode_MethodResult{
+			Success:    false,
+			Error:      "Transaction reverted on-chain",
+			MethodName: methodName,
+		}
+	}
+
+	r.vm.logger.Info("Calibur transaction confirmed",
+		"tx_hash", receipt.TxHash.Hex(),
+		"gas_used", receipt.GasUsed,
+		"block", receipt.BlockNumber.String())
+
+	// Build receipt as structpb.Value (same format as basic wallet results)
+	blockNum := receipt.BlockNumber.Uint64()
+	receiptMap := map[string]interface{}{
+		"transactionHash": receipt.TxHash.Hex(),
+		"gasUsed":         fmt.Sprintf("%d", receipt.GasUsed),
+		"blockNumber":     fmt.Sprintf("%d", blockNum),
+		"status":          fmt.Sprintf("%d", receipt.Status),
+	}
+	receiptValue, _ := structpb.NewValue(receiptMap)
+
+	return &avsproto.ContractWriteNode_MethodResult{
+		Success:     true,
+		MethodName:  methodName,
+		Receipt:     receiptValue,
+		BlockNumber: &blockNum,
+	}
 }
