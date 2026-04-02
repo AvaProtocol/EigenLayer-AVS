@@ -238,6 +238,9 @@ type VM struct {
 	entrypoint        string
 	instructionCount  int64
 	smartWalletConfig *config.SmartWalletConfig
+	caliburConfig     *config.CaliburConfig
+	walletType        int32                 // 0/1=basic, 2=calibur
+	caliburKeyInfo    *model.CaliburKeyInfo // non-nil when walletType == CALIBUR
 	logger            logger.Logger
 	db                storage.Storage
 	// IsSimulation indicates whether this VM is executing in a simulation context

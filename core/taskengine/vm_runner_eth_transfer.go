@@ -331,6 +331,9 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	}
 	p.vm.mu.Unlock()
 
+	// TODO(calibur): When vm.walletType == CALIBUR, build a calibur.Call for the
+	// ETH transfer and submit via calibur.Client.SendSignedBatchedCall() — no bundler/paymaster.
+
 	// Send UserOp transaction with overrides
 	userOp, receipt, err := preset.SendUserOp(
 		p.smartWalletConfig,

@@ -744,6 +744,14 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		}
 	}
 
+	// TODO(calibur): When vm.walletType == CALIBUR, use calibur.Client.SendSignedBatchedCall()
+	// instead of sendUserOpFunc. The Calibur path:
+	//   1. Builds a calibur.Call from (contractAddr, value, callData)
+	//   2. Signs with the sub-key from vm.caliburKeyInfo
+	//   3. Submits as a direct eth_sendRawTransaction (no bundler, no paymaster)
+	//   4. Returns (*types.Receipt, error) instead of (*UserOperation, *types.Receipt, error)
+	// For now, all executions go through the existing ERC-4337 UserOp path.
+
 	executionLogBuilder.WriteString("Sending packed User Operation to bundler\n")
 
 	// Send UserOp transaction with correct parameters:

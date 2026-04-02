@@ -155,6 +155,44 @@ func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalle
 	return r.engine.ListWallets(user.Address, payload)
 }
 
+// RegisterCaliburWallet registers the user's EOA as a Calibur (EIP-7702) wallet.
+func (r *RpcServer) RegisterCaliburWallet(ctx context.Context, payload *avsproto.RegisterCaliburWalletReq) (*avsproto.RegisterCaliburWalletResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process register calibur wallet",
+		"user", user.Address.String(),
+	)
+
+	return r.engine.RegisterCaliburWallet(user, payload)
+}
+
+// GetCaliburWallet retrieves the Calibur wallet and key status for a user.
+func (r *RpcServer) GetCaliburWallet(ctx context.Context, payload *avsproto.GetCaliburWalletReq) (*avsproto.GetCaliburWalletResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	return r.engine.GetCaliburWallet(user, payload)
+}
+
+// RevokeCaliburKey revokes the aggregator's sub-key for a Calibur wallet.
+func (r *RpcServer) RevokeCaliburKey(ctx context.Context, payload *avsproto.RevokeCaliburKeyReq) (*avsproto.RevokeCaliburKeyResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process revoke calibur key",
+		"user", user.Address.String(),
+	)
+
+	return r.engine.RevokeCaliburKey(user, payload)
+}
+
 // WithdrawFunds handles withdrawal of funds from a smart wallet using UserOp
 func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.WithdrawFundsReq) (*avsproto.WithdrawFundsResp, error) {
 	// Authenticate the user

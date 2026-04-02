@@ -53,6 +53,10 @@ const DefaultEntrypointAddressHex = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
 // value will be used.
 const DefaultPaymasterAddressHex = "0xf023eA291F5bEDA4Bf59BbDC9004F1d18be19D6f"
 
+// DefaultCaliburAddressHex is the Calibur singleton contract address deployed
+// by Uniswap at the same address across all supported chains.
+const DefaultCaliburAddressHex = "0x000000009B1D0aF20D8C6d0A44e162d11F9b8f00"
+
 // Config contains all of the configuration information for a credible squaring aggregators and challengers.
 // Operators use a separate config. (see config-files/operator.anvil.yaml)
 type Config struct {
@@ -86,6 +90,9 @@ type Config struct {
 
 	// Account abstraction config
 	SmartWallet *SmartWalletConfig
+
+	// Calibur (EIP-7702) wallet config — nil means Calibur features are disabled
+	Calibur *CaliburConfig
 
 	BackupConfig BackupConfig
 
@@ -173,6 +180,17 @@ type SmartWalletConfig struct {
 	MaxWalletsPerOwner int
 }
 
+// CaliburConfig holds configuration for EIP-7702 Calibur smart wallet support.
+// When nil in the main Config, all Calibur RPCs are disabled.
+type CaliburConfig struct {
+	// Calibur singleton address (same on all chains)
+	CaliburAddress common.Address
+	// Permission hook contract address (deployed per chain by us)
+	HookAddress common.Address
+	// RPC endpoint for submitting direct transactions
+	EthRpcUrl string
+}
+
 type BackupConfig struct {
 	Enabled         bool   // Whether periodic backups are enabled
 	IntervalMinutes int    // Interval between backups in minutes
@@ -209,6 +227,12 @@ type ConfigRaw struct {
 		WhitelistAddresses   []string `yaml:"whitelist_addresses"`
 		MaxWalletsPerOwner   int      `yaml:"max_wallets_per_owner"`
 	} `yaml:"smart_wallet"`
+
+	Calibur struct {
+		CaliburAddress string `yaml:"calibur_address"`
+		HookAddress    string `yaml:"hook_address"`
+		EthRpcUrl      string `yaml:"eth_rpc_url"`
+	} `yaml:"calibur"`
 
 	Backup struct {
 		Enabled         bool   `yaml:"enabled"`
@@ -471,6 +495,20 @@ func NewConfig(configFilePath string) (*Config, error) {
 			APIEndpoint: configRaw.Notifications.Summary.APIEndpoint,
 			APIKey:      configRaw.Notifications.Summary.APIKey,
 		},
+	}
+
+	// Parse optional Calibur (EIP-7702) config — nil if calibur section is omitted from YAML
+	if configRaw.Calibur.CaliburAddress != "" || configRaw.Calibur.EthRpcUrl != "" {
+		caliburAddress := common.HexToAddress(firstNonEmpty(configRaw.Calibur.CaliburAddress, DefaultCaliburAddressHex))
+		config.Calibur = &CaliburConfig{
+			CaliburAddress: caliburAddress,
+			HookAddress:    common.HexToAddress(configRaw.Calibur.HookAddress),
+			EthRpcUrl:      firstNonEmpty(configRaw.Calibur.EthRpcUrl, configRaw.SmartWallet.EthRpcUrl),
+		}
+		logger.Info("Calibur (EIP-7702) wallet support enabled",
+			"calibur_address", caliburAddress.Hex(),
+			"hook_address", configRaw.Calibur.HookAddress,
+		)
 	}
 
 	if config.SocketPath == "" {

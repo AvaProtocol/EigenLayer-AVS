@@ -53,6 +53,37 @@ func GetWallet(db storage.Storage, owner common.Address, smartWalletAddress stri
 	return &walletModel, nil
 }
 
+// CaliburKeyStorageKey returns the storage key for a Calibur sub-key.
+// One key per owner (one Calibur wallet per EOA).
+func CaliburKeyStorageKey(owner common.Address) string {
+	return fmt.Sprintf("calibur_key:%s", strings.ToLower(owner.Hex()))
+}
+
+// GetCaliburKey retrieves the Calibur sub-key info for an owner.
+func GetCaliburKey(db storage.Storage, owner common.Address) (*model.CaliburKeyInfo, error) {
+	key := CaliburKeyStorageKey(owner)
+	data, err := db.GetKey([]byte(key))
+	if err != nil {
+		return nil, err
+	}
+
+	var keyInfo model.CaliburKeyInfo
+	if err := keyInfo.FromStorageData(data); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal calibur key for %s: %w", owner.Hex(), err)
+	}
+	return &keyInfo, nil
+}
+
+// StoreCaliburKey persists the Calibur sub-key info for an owner.
+func StoreCaliburKey(db storage.Storage, owner common.Address, keyInfo *model.CaliburKeyInfo) error {
+	key := CaliburKeyStorageKey(owner)
+	data, err := keyInfo.ToJSON()
+	if err != nil {
+		return fmt.Errorf("failed to marshal calibur key for %s: %w", owner.Hex(), err)
+	}
+	return db.Set([]byte(key), data)
+}
+
 func StoreWallet(db storage.Storage, owner common.Address, wallet *model.SmartWallet) error {
 	if wallet.Address == nil {
 		return fmt.Errorf("cannot store wallet with nil address")

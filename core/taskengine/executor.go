@@ -223,6 +223,22 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		return nil, err
 	}
 
+	// Resolve wallet type for execution pipeline branching (basic vs Calibur)
+	if task.SmartWalletAddress != "" && x.engine != nil && x.engine.config.Calibur != nil {
+		walletModel, walletErr := GetWallet(x.db, common.HexToAddress(task.Owner), task.SmartWalletAddress)
+		if walletErr == nil && walletModel.WalletType == int32(avsproto.WalletType_WALLET_TYPE_CALIBUR) {
+			vm.walletType = walletModel.WalletType
+			vm.caliburConfig = x.engine.config.Calibur
+
+			keyInfo, keyErr := GetCaliburKey(x.db, common.HexToAddress(task.Owner))
+			if keyErr == nil {
+				vm.caliburKeyInfo = keyInfo
+			} else if x.logger != nil {
+				x.logger.Warn("Calibur wallet found but key info missing", "task_id", task.Id, "owner", task.Owner)
+			}
+		}
+	}
+
 	// Merge input variables from trigger execution (overrides task-level input variables)
 	if queueData != nil && len(queueData.InputVariables) > 0 {
 		if x.logger != nil {

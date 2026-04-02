@@ -20,6 +20,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/calibur"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
@@ -576,12 +577,17 @@ func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletR
 				}
 			}
 
-			walletsToReturnProto = append(walletsToReturnProto, &avsproto.SmartWallet{
-				Address:  defaultDerivedAddress.Hex(),
-				Salt:     actualSalt,
-				Factory:  actualFactory,
-				IsHidden: isHidden,
-			})
+			// Apply wallet_type filter — default derived wallet is always BASIC
+			filterType := payload.GetWalletType()
+			if filterType == avsproto.WalletType_WALLET_TYPE_UNSPECIFIED || filterType == avsproto.WalletType_WALLET_TYPE_BASIC {
+				walletsToReturnProto = append(walletsToReturnProto, &avsproto.SmartWallet{
+					Address:    defaultDerivedAddress.Hex(),
+					Salt:       actualSalt,
+					Factory:    actualFactory,
+					IsHidden:   isHidden,
+					WalletType: avsproto.WalletType_WALLET_TYPE_BASIC,
+				})
+			}
 			processedAddresses[strings.ToLower(defaultDerivedAddress.Hex())] = true
 		}
 	}
@@ -617,15 +623,32 @@ func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletR
 			}
 		}
 
+		// Determine wallet type for this stored wallet
+		storedWalletType := avsproto.WalletType_WALLET_TYPE_BASIC
+		if storedModelWallet.WalletType == int32(avsproto.WalletType_WALLET_TYPE_CALIBUR) {
+			storedWalletType = avsproto.WalletType_WALLET_TYPE_CALIBUR
+		}
+
+		// Apply wallet_type filter
+		filterType := payload.GetWalletType()
+		if filterType != avsproto.WalletType_WALLET_TYPE_UNSPECIFIED && filterType != storedWalletType {
+			continue
+		}
+
 		factoryString := ""
 		if storedModelWallet.Factory != nil {
 			factoryString = storedModelWallet.Factory.Hex()
 		}
+		saltString := ""
+		if storedModelWallet.Salt != nil {
+			saltString = storedModelWallet.Salt.String()
+		}
 		walletsToReturnProto = append(walletsToReturnProto, &avsproto.SmartWallet{
-			Address:  storedModelWallet.Address.Hex(),
-			Salt:     storedModelWallet.Salt.String(),
-			Factory:  factoryString,
-			IsHidden: storedModelWallet.IsHidden,
+			Address:    storedModelWallet.Address.Hex(),
+			Salt:       saltString,
+			Factory:    factoryString,
+			IsHidden:   storedModelWallet.IsHidden,
+			WalletType: storedWalletType,
 		})
 	}
 	return &avsproto.ListWalletResp{Items: walletsToReturnProto}, nil
@@ -844,6 +867,185 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 	resp.DisabledTaskCount = stat.Disabled
 
 	return resp, nil
+}
+
+// RegisterCaliburWallet registers the user's EOA as a Calibur (EIP-7702) wallet.
+// Preconditions: user has delegated their EOA to Calibur on-chain.
+func (n *Engine) RegisterCaliburWallet(user *model.User, payload *avsproto.RegisterCaliburWalletReq) (*avsproto.RegisterCaliburWalletResp, error) {
+	if n.config.Calibur == nil {
+		return nil, status.Errorf(codes.Unavailable, "Calibur wallet support is not enabled")
+	}
+
+	ownerAddress := user.Address
+
+	// Check if a Calibur wallet already exists for this owner
+	_, err := GetCaliburKey(n.db, ownerAddress)
+	if err == nil {
+		return nil, status.Errorf(codes.Code(avsproto.ErrorCode_CALIBUR_WALLET_ALREADY_EXISTS), "Calibur wallet already registered for %s", ownerAddress.Hex())
+	}
+	if err != badger.ErrKeyNotFound {
+		return nil, status.Errorf(codes.Internal, "failed to check existing Calibur key: %v", err)
+	}
+
+	// Verify on-chain delegation
+	if rpcConn != nil {
+		delegated, err := calibur.CheckDelegation(context.Background(), rpcConn, ownerAddress, n.config.Calibur.CaliburAddress)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to check delegation status: %v", err)
+		}
+		if !delegated {
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_CALIBUR_NOT_DELEGATED),
+				"EOA %s has not delegated to Calibur. Please sign an EIP-7702 delegation first.", ownerAddress.Hex())
+		}
+	} else {
+		n.logger.Warn("Skipping on-chain delegation check (no RPC connection)", "owner", ownerAddress.Hex())
+	}
+
+	// Generate a sub-key
+	subKey, err := calibur.GenerateSubKey()
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to generate sub-key: %v", err)
+	}
+
+	pubKeyBytes := crypto.FromECDSAPub(&subKey.PublicKey)
+	keyHash := calibur.ComputeKeyHash(&subKey.PublicKey)
+
+	hookAddress := ""
+	if n.config.Calibur.HookAddress != (common.Address{}) {
+		hookAddress = n.config.Calibur.HookAddress.Hex()
+	}
+
+	// Store the key info
+	keyInfo := &model.CaliburKeyInfo{
+		PublicKey:   common.Bytes2Hex(pubKeyBytes),
+		PrivateKey:  common.Bytes2Hex(crypto.FromECDSA(subKey)),
+		KeyHash:     common.Bytes2Hex(keyHash[:]),
+		HookAddress: hookAddress,
+		Expiry:      0,
+		Status:      "active",
+	}
+
+	if err := StoreCaliburKey(n.db, ownerAddress, keyInfo); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to store Calibur key: %v", err)
+	}
+
+	// Store the wallet record (address = owner EOA)
+	wallet := &model.SmartWallet{
+		Owner:      &ownerAddress,
+		Address:    &ownerAddress,
+		WalletType: int32(avsproto.WalletType_WALLET_TYPE_CALIBUR),
+	}
+	if err := StoreWallet(n.db, ownerAddress, wallet); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to store Calibur wallet: %v", err)
+	}
+
+	n.logger.Info("Calibur wallet registered",
+		"owner", ownerAddress.Hex(),
+		"keyHash", common.Bytes2Hex(keyHash[:]),
+	)
+
+	return &avsproto.RegisterCaliburWalletResp{
+		Address:    ownerAddress.Hex(),
+		WalletType: avsproto.WalletType_WALLET_TYPE_CALIBUR,
+		KeyInfo: &avsproto.CaliburKeyRegistration{
+			PublicKey:   common.Bytes2Hex(pubKeyBytes),
+			KeyHash:     common.Bytes2Hex(keyHash[:]),
+			HookAddress: hookAddress,
+			Expiry:      0,
+			Status:      "active",
+		},
+	}, nil
+}
+
+// GetCaliburWallet retrieves the Calibur wallet and key registration status for a user.
+func (n *Engine) GetCaliburWallet(user *model.User, payload *avsproto.GetCaliburWalletReq) (*avsproto.GetCaliburWalletResp, error) {
+	if n.config.Calibur == nil {
+		return nil, status.Errorf(codes.Unavailable, "Calibur wallet support is not enabled")
+	}
+
+	ownerAddress := user.Address
+
+	keyInfo, err := GetCaliburKey(n.db, ownerAddress)
+	if err != nil {
+		if err == badger.ErrKeyNotFound {
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_CALIBUR_KEY_NOT_FOUND), "No Calibur wallet registered for %s", ownerAddress.Hex())
+		}
+		return nil, status.Errorf(codes.Internal, "failed to retrieve Calibur key: %v", err)
+	}
+
+	// Check on-chain delegation status
+	isDelegated := false
+	if rpcConn != nil {
+		delegated, err := calibur.CheckDelegation(context.Background(), rpcConn, ownerAddress, n.config.Calibur.CaliburAddress)
+		if err != nil {
+			n.logger.Warn("Failed to check delegation status", "owner", ownerAddress.Hex(), "error", err)
+		} else {
+			isDelegated = delegated
+		}
+	}
+
+	// Get task stats
+	caliburWallet := &model.SmartWallet{
+		Owner:   &ownerAddress,
+		Address: &ownerAddress,
+	}
+	statSvc := NewStatService(n.db)
+	stat, statErr := statSvc.GetTaskCount(caliburWallet)
+	if statErr != nil {
+		n.logger.Warn("Failed to get task count for Calibur wallet", "owner", ownerAddress.Hex(), "error", statErr)
+	}
+
+	return &avsproto.GetCaliburWalletResp{
+		Address:     ownerAddress.Hex(),
+		IsDelegated: isDelegated,
+		WalletType:  avsproto.WalletType_WALLET_TYPE_CALIBUR,
+		KeyInfo: &avsproto.CaliburKeyRegistration{
+			PublicKey:   keyInfo.PublicKey,
+			KeyHash:     keyInfo.KeyHash,
+			HookAddress: keyInfo.HookAddress,
+			Expiry:      uint64(keyInfo.Expiry),
+			Status:      keyInfo.Status,
+		},
+		TotalTaskCount:     stat.Total,
+		EnabledTaskCount:   stat.Enabled,
+		CompletedTaskCount: stat.Completed,
+		FailedTaskCount:    stat.Failed,
+		DisabledTaskCount:  stat.Disabled,
+	}, nil
+}
+
+// RevokeCaliburKey marks the aggregator's sub-key as revoked for a Calibur wallet.
+// Note: on-chain key revocation is the user's responsibility.
+func (n *Engine) RevokeCaliburKey(user *model.User, payload *avsproto.RevokeCaliburKeyReq) (*avsproto.RevokeCaliburKeyResp, error) {
+	if n.config.Calibur == nil {
+		return nil, status.Errorf(codes.Unavailable, "Calibur wallet support is not enabled")
+	}
+
+	ownerAddress := user.Address
+
+	keyInfo, err := GetCaliburKey(n.db, ownerAddress)
+	if err != nil {
+		if err == badger.ErrKeyNotFound {
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_CALIBUR_KEY_NOT_FOUND), "No Calibur key found for %s", ownerAddress.Hex())
+		}
+		return nil, status.Errorf(codes.Internal, "failed to retrieve Calibur key: %v", err)
+	}
+
+	if keyInfo.Status == "revoked" {
+		return nil, status.Errorf(codes.Code(avsproto.ErrorCode_CALIBUR_KEY_REVOKED), "Calibur key already revoked for %s", ownerAddress.Hex())
+	}
+
+	keyInfo.Status = "revoked"
+	if err := StoreCaliburKey(n.db, ownerAddress, keyInfo); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to update Calibur key status: %v", err)
+	}
+
+	n.logger.Info("Calibur key revoked", "owner", ownerAddress.Hex(), "keyHash", keyInfo.KeyHash)
+
+	return &avsproto.RevokeCaliburKeyResp{
+		Success: true,
+		Message: "Calibur key revoked. Please also revoke the key on-chain via Calibur.revoke().",
+	}, nil
 }
 
 // CreateTask records submission data

@@ -324,9 +324,24 @@ enum ErrorCode {
   SMART_WALLET_DEPLOYMENT_ERROR = 8002; // Failed to deploy smart wallet
   INSUFFICIENT_BALANCE = 8003;      // Insufficient balance for operation
   
+  // 8100-8199: Calibur (EIP-7702) specific errors
+  CALIBUR_NOT_DELEGATED = 8100;          // EOA has not delegated to Calibur contract
+  CALIBUR_KEY_ALREADY_REGISTERED = 8101; // Aggregator sub-key already exists for this wallet
+  CALIBUR_KEY_NOT_FOUND = 8102;          // No aggregator sub-key registered
+  CALIBUR_KEY_EXPIRED = 8103;            // Sub-key has expired
+  CALIBUR_KEY_REVOKED = 8104;            // Sub-key has been revoked
+  CALIBUR_HOOK_VALIDATION_FAILED = 8105; // Hook rejected the operation
+  CALIBUR_WALLET_ALREADY_EXISTS = 8106;  // User already has a Calibur wallet registered
+
   // 9000-9999: Reserved for future use
 }
 
+// WalletType distinguishes between smart wallet implementations
+enum WalletType {
+  WALLET_TYPE_UNSPECIFIED = 0; // Treated as BASIC for backward compatibility
+  WALLET_TYPE_BASIC = 1;      // Salt-derived SimpleAccount (ERC-4337 v0.6)
+  WALLET_TYPE_CALIBUR = 2;    // EIP-7702 delegated EOA via Calibur
+}
 
 // TaskStatus represents status of the task. The transition is as follow
 enum TaskStatus {
@@ -829,13 +844,16 @@ message ListWalletReq {
   // otherwise return all the wallet
   string factory_address = 1; // TODO: Consider renaming to factoryAddress for consistency if this is used as a filter key matching SmartWallet.factoryAddress
   string salt            = 2;
+  // Optional filter by wallet type; UNSPECIFIED (0) returns all types
+  WalletType wallet_type = 3;
 }
 
 message SmartWallet {
   string address = 1;
-  string salt = 2;
-  string factory = 3;
-  bool is_hidden = 4;  // Whether the wallet is hidden
+  string salt = 2;        // Basic wallets only; empty for Calibur
+  string factory = 3;     // Basic wallets only; empty for Calibur
+  bool is_hidden = 4;     // Whether the wallet is hidden
+  WalletType wallet_type = 5;
 }
 
 message ListWalletResp {
@@ -960,6 +978,57 @@ message WithdrawFundsResp {
   string recipient_address = 8;        // Recipient address
   string amount = 9;                   // Amount withdrawn
   string token = 10;                   // Token type (ETH or contract address)
+}
+
+// ============================================================================
+// CALIBUR (EIP-7702) WALLET MESSAGES
+// ============================================================================
+
+// Tracks the sub-key that the aggregator registered on the user's Calibur wallet.
+message CaliburKeyRegistration {
+  string public_key = 1;       // Aggregator's sub-key public key (hex-encoded)
+  string key_hash = 2;         // Calibur keyHash for this key (hex-encoded bytes32)
+  string hook_address = 3;     // Permission hook contract address
+  uint64 expiry = 4;           // Key expiry (unix timestamp, 0 = no expiry)
+  string status = 5;           // "pending_delegation", "pending_key_registration", "active", "revoked"
+}
+
+// Register user's EOA as a Calibur wallet.
+// Precondition: user has already delegated their EOA to Calibur via EIP-7702.
+// The owner EOA is extracted from the auth context.
+message RegisterCaliburWalletReq {
+}
+
+message RegisterCaliburWalletResp {
+  string address = 1;                       // The user's EOA (= wallet address)
+  CaliburKeyRegistration key_info = 2;      // Sub-key registration details
+  WalletType wallet_type = 3;               // Always WALLET_TYPE_CALIBUR
+}
+
+// Check Calibur delegation and key status for user's EOA.
+message GetCaliburWalletReq {
+}
+
+message GetCaliburWalletResp {
+  string address = 1;                       // User's EOA
+  bool is_delegated = 2;                    // Whether EOA has active 7702 delegation to Calibur
+  CaliburKeyRegistration key_info = 3;      // Sub-key status (nil if no key registered)
+  WalletType wallet_type = 4;
+  bool is_hidden = 5;
+  uint64 total_task_count = 6;
+  uint64 enabled_task_count = 7;
+  uint64 completed_task_count = 8;
+  uint64 failed_task_count = 9;
+  uint64 disabled_task_count = 10;
+}
+
+// Revoke the aggregator's sub-key from the user's Calibur wallet.
+message RevokeCaliburKeyReq {
+}
+
+message RevokeCaliburKeyResp {
+  bool success = 1;
+  string message = 2;
 }
 
 message TriggerTaskReq {
@@ -1153,6 +1222,11 @@ service Aggregator {
   
   // Withdraw funds from a smart wallet using UserOp
   rpc WithdrawFunds(WithdrawFundsReq) returns (WithdrawFundsResp) {};
+
+  // Calibur (EIP-7702) wallet management
+  rpc RegisterCaliburWallet(RegisterCaliburWalletReq) returns (RegisterCaliburWalletResp) {};
+  rpc GetCaliburWallet(GetCaliburWalletReq) returns (GetCaliburWalletResp) {};
+  rpc RevokeCaliburKey(RevokeCaliburKeyReq) returns (RevokeCaliburKeyResp) {};
 
   
   // Task Management Operation

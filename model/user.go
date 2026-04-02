@@ -33,11 +33,32 @@ func (u *User) ToSmartWallet() *SmartWallet {
 }
 
 type SmartWallet struct {
-	Owner    *common.Address `json:"owner"`
-	Address  *common.Address `json:"address"`
-	Factory  *common.Address `json:"factory,omitempty"`
-	Salt     *big.Int        `json:"salt"`
-	IsHidden bool            `json:"is_hidden,omitempty"`
+	Owner      *common.Address `json:"owner"`
+	Address    *common.Address `json:"address"`
+	Factory    *common.Address `json:"factory,omitempty"`
+	Salt       *big.Int        `json:"salt"`
+	IsHidden   bool            `json:"is_hidden,omitempty"`
+	WalletType int32           `json:"wallet_type,omitempty"` // 0/1=basic, 2=calibur
+}
+
+// CaliburKeyInfo stores the aggregator's sub-key credentials for a Calibur wallet.
+// Stored separately from the wallet record because it has a different lifecycle
+// (registration/revocation) and contains sensitive key material.
+type CaliburKeyInfo struct {
+	PublicKey   string `json:"public_key"`   // Hex-encoded secp256k1 public key
+	PrivateKey  string `json:"private_key"`  // Hex-encoded secp256k1 private key
+	KeyHash     string `json:"key_hash"`     // Hex-encoded Calibur keyHash (bytes32)
+	HookAddress string `json:"hook_address"` // Permission hook contract address
+	Expiry      int64  `json:"expiry"`       // Unix timestamp, 0 = no expiry
+	Status      string `json:"status"`       // "active", "revoked"
+}
+
+func (k *CaliburKeyInfo) ToJSON() ([]byte, error) {
+	return json.Marshal(k)
+}
+
+func (k *CaliburKeyInfo) FromStorageData(body []byte) error {
+	return json.Unmarshal(body, k)
 }
 
 func (w *SmartWallet) ToJSON() ([]byte, error) {

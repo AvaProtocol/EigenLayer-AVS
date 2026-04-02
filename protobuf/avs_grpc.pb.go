@@ -19,34 +19,37 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Aggregator_GetKey_FullMethodName             = "/aggregator.Aggregator/GetKey"
-	Aggregator_GetSignatureFormat_FullMethodName = "/aggregator.Aggregator/GetSignatureFormat"
-	Aggregator_GetNonce_FullMethodName           = "/aggregator.Aggregator/GetNonce"
-	Aggregator_GetWallet_FullMethodName          = "/aggregator.Aggregator/GetWallet"
-	Aggregator_SetWallet_FullMethodName          = "/aggregator.Aggregator/SetWallet"
-	Aggregator_ListWallets_FullMethodName        = "/aggregator.Aggregator/ListWallets"
-	Aggregator_WithdrawFunds_FullMethodName      = "/aggregator.Aggregator/WithdrawFunds"
-	Aggregator_CreateTask_FullMethodName         = "/aggregator.Aggregator/CreateTask"
-	Aggregator_ListTasks_FullMethodName          = "/aggregator.Aggregator/ListTasks"
-	Aggregator_GetTask_FullMethodName            = "/aggregator.Aggregator/GetTask"
-	Aggregator_ListExecutions_FullMethodName     = "/aggregator.Aggregator/ListExecutions"
-	Aggregator_GetExecution_FullMethodName       = "/aggregator.Aggregator/GetExecution"
-	Aggregator_GetExecutionStatus_FullMethodName = "/aggregator.Aggregator/GetExecutionStatus"
-	Aggregator_SetTaskEnabled_FullMethodName     = "/aggregator.Aggregator/SetTaskEnabled"
-	Aggregator_DeleteTask_FullMethodName         = "/aggregator.Aggregator/DeleteTask"
-	Aggregator_TriggerTask_FullMethodName        = "/aggregator.Aggregator/TriggerTask"
-	Aggregator_CreateSecret_FullMethodName       = "/aggregator.Aggregator/CreateSecret"
-	Aggregator_DeleteSecret_FullMethodName       = "/aggregator.Aggregator/DeleteSecret"
-	Aggregator_ListSecrets_FullMethodName        = "/aggregator.Aggregator/ListSecrets"
-	Aggregator_UpdateSecret_FullMethodName       = "/aggregator.Aggregator/UpdateSecret"
-	Aggregator_GetWorkflowCount_FullMethodName   = "/aggregator.Aggregator/GetWorkflowCount"
-	Aggregator_GetExecutionCount_FullMethodName  = "/aggregator.Aggregator/GetExecutionCount"
-	Aggregator_GetExecutionStats_FullMethodName  = "/aggregator.Aggregator/GetExecutionStats"
-	Aggregator_RunNodeWithInputs_FullMethodName  = "/aggregator.Aggregator/RunNodeWithInputs"
-	Aggregator_RunTrigger_FullMethodName         = "/aggregator.Aggregator/RunTrigger"
-	Aggregator_SimulateTask_FullMethodName       = "/aggregator.Aggregator/SimulateTask"
-	Aggregator_GetTokenMetadata_FullMethodName   = "/aggregator.Aggregator/GetTokenMetadata"
-	Aggregator_EstimateFees_FullMethodName       = "/aggregator.Aggregator/EstimateFees"
+	Aggregator_GetKey_FullMethodName                = "/aggregator.Aggregator/GetKey"
+	Aggregator_GetSignatureFormat_FullMethodName    = "/aggregator.Aggregator/GetSignatureFormat"
+	Aggregator_GetNonce_FullMethodName              = "/aggregator.Aggregator/GetNonce"
+	Aggregator_GetWallet_FullMethodName             = "/aggregator.Aggregator/GetWallet"
+	Aggregator_SetWallet_FullMethodName             = "/aggregator.Aggregator/SetWallet"
+	Aggregator_ListWallets_FullMethodName           = "/aggregator.Aggregator/ListWallets"
+	Aggregator_WithdrawFunds_FullMethodName         = "/aggregator.Aggregator/WithdrawFunds"
+	Aggregator_RegisterCaliburWallet_FullMethodName = "/aggregator.Aggregator/RegisterCaliburWallet"
+	Aggregator_GetCaliburWallet_FullMethodName      = "/aggregator.Aggregator/GetCaliburWallet"
+	Aggregator_RevokeCaliburKey_FullMethodName      = "/aggregator.Aggregator/RevokeCaliburKey"
+	Aggregator_CreateTask_FullMethodName            = "/aggregator.Aggregator/CreateTask"
+	Aggregator_ListTasks_FullMethodName             = "/aggregator.Aggregator/ListTasks"
+	Aggregator_GetTask_FullMethodName               = "/aggregator.Aggregator/GetTask"
+	Aggregator_ListExecutions_FullMethodName        = "/aggregator.Aggregator/ListExecutions"
+	Aggregator_GetExecution_FullMethodName          = "/aggregator.Aggregator/GetExecution"
+	Aggregator_GetExecutionStatus_FullMethodName    = "/aggregator.Aggregator/GetExecutionStatus"
+	Aggregator_SetTaskEnabled_FullMethodName        = "/aggregator.Aggregator/SetTaskEnabled"
+	Aggregator_DeleteTask_FullMethodName            = "/aggregator.Aggregator/DeleteTask"
+	Aggregator_TriggerTask_FullMethodName           = "/aggregator.Aggregator/TriggerTask"
+	Aggregator_CreateSecret_FullMethodName          = "/aggregator.Aggregator/CreateSecret"
+	Aggregator_DeleteSecret_FullMethodName          = "/aggregator.Aggregator/DeleteSecret"
+	Aggregator_ListSecrets_FullMethodName           = "/aggregator.Aggregator/ListSecrets"
+	Aggregator_UpdateSecret_FullMethodName          = "/aggregator.Aggregator/UpdateSecret"
+	Aggregator_GetWorkflowCount_FullMethodName      = "/aggregator.Aggregator/GetWorkflowCount"
+	Aggregator_GetExecutionCount_FullMethodName     = "/aggregator.Aggregator/GetExecutionCount"
+	Aggregator_GetExecutionStats_FullMethodName     = "/aggregator.Aggregator/GetExecutionStats"
+	Aggregator_RunNodeWithInputs_FullMethodName     = "/aggregator.Aggregator/RunNodeWithInputs"
+	Aggregator_RunTrigger_FullMethodName            = "/aggregator.Aggregator/RunTrigger"
+	Aggregator_SimulateTask_FullMethodName          = "/aggregator.Aggregator/SimulateTask"
+	Aggregator_GetTokenMetadata_FullMethodName      = "/aggregator.Aggregator/GetTokenMetadata"
+	Aggregator_EstimateFees_FullMethodName          = "/aggregator.Aggregator/EstimateFees"
 )
 
 // AggregatorClient is the client API for Aggregator service.
@@ -64,6 +67,10 @@ type AggregatorClient interface {
 	ListWallets(ctx context.Context, in *ListWalletReq, opts ...grpc.CallOption) (*ListWalletResp, error)
 	// Withdraw funds from a smart wallet using UserOp
 	WithdrawFunds(ctx context.Context, in *WithdrawFundsReq, opts ...grpc.CallOption) (*WithdrawFundsResp, error)
+	// Calibur (EIP-7702) wallet management
+	RegisterCaliburWallet(ctx context.Context, in *RegisterCaliburWalletReq, opts ...grpc.CallOption) (*RegisterCaliburWalletResp, error)
+	GetCaliburWallet(ctx context.Context, in *GetCaliburWalletReq, opts ...grpc.CallOption) (*GetCaliburWalletResp, error)
+	RevokeCaliburKey(ctx context.Context, in *RevokeCaliburKeyReq, opts ...grpc.CallOption) (*RevokeCaliburKeyResp, error)
 	// Task Management Operation
 	CreateTask(ctx context.Context, in *CreateTaskReq, opts ...grpc.CallOption) (*CreateTaskResp, error)
 	ListTasks(ctx context.Context, in *ListTasksReq, opts ...grpc.CallOption) (*ListTasksResp, error)
@@ -187,6 +194,36 @@ func (c *aggregatorClient) WithdrawFunds(ctx context.Context, in *WithdrawFundsR
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WithdrawFundsResp)
 	err := c.cc.Invoke(ctx, Aggregator_WithdrawFunds_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aggregatorClient) RegisterCaliburWallet(ctx context.Context, in *RegisterCaliburWalletReq, opts ...grpc.CallOption) (*RegisterCaliburWalletResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterCaliburWalletResp)
+	err := c.cc.Invoke(ctx, Aggregator_RegisterCaliburWallet_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aggregatorClient) GetCaliburWallet(ctx context.Context, in *GetCaliburWalletReq, opts ...grpc.CallOption) (*GetCaliburWalletResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetCaliburWalletResp)
+	err := c.cc.Invoke(ctx, Aggregator_GetCaliburWallet_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aggregatorClient) RevokeCaliburKey(ctx context.Context, in *RevokeCaliburKeyReq, opts ...grpc.CallOption) (*RevokeCaliburKeyResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RevokeCaliburKeyResp)
+	err := c.cc.Invoke(ctx, Aggregator_RevokeCaliburKey_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -418,6 +455,10 @@ type AggregatorServer interface {
 	ListWallets(context.Context, *ListWalletReq) (*ListWalletResp, error)
 	// Withdraw funds from a smart wallet using UserOp
 	WithdrawFunds(context.Context, *WithdrawFundsReq) (*WithdrawFundsResp, error)
+	// Calibur (EIP-7702) wallet management
+	RegisterCaliburWallet(context.Context, *RegisterCaliburWalletReq) (*RegisterCaliburWalletResp, error)
+	GetCaliburWallet(context.Context, *GetCaliburWalletReq) (*GetCaliburWalletResp, error)
+	RevokeCaliburKey(context.Context, *RevokeCaliburKeyReq) (*RevokeCaliburKeyResp, error)
 	// Task Management Operation
 	CreateTask(context.Context, *CreateTaskReq) (*CreateTaskResp, error)
 	ListTasks(context.Context, *ListTasksReq) (*ListTasksResp, error)
@@ -497,6 +538,15 @@ func (UnimplementedAggregatorServer) ListWallets(context.Context, *ListWalletReq
 }
 func (UnimplementedAggregatorServer) WithdrawFunds(context.Context, *WithdrawFundsReq) (*WithdrawFundsResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method WithdrawFunds not implemented")
+}
+func (UnimplementedAggregatorServer) RegisterCaliburWallet(context.Context, *RegisterCaliburWalletReq) (*RegisterCaliburWalletResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RegisterCaliburWallet not implemented")
+}
+func (UnimplementedAggregatorServer) GetCaliburWallet(context.Context, *GetCaliburWalletReq) (*GetCaliburWalletResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetCaliburWallet not implemented")
+}
+func (UnimplementedAggregatorServer) RevokeCaliburKey(context.Context, *RevokeCaliburKeyReq) (*RevokeCaliburKeyResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RevokeCaliburKey not implemented")
 }
 func (UnimplementedAggregatorServer) CreateTask(context.Context, *CreateTaskReq) (*CreateTaskResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateTask not implemented")
@@ -704,6 +754,60 @@ func _Aggregator_WithdrawFunds_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AggregatorServer).WithdrawFunds(ctx, req.(*WithdrawFundsReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Aggregator_RegisterCaliburWallet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterCaliburWalletReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).RegisterCaliburWallet(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Aggregator_RegisterCaliburWallet_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).RegisterCaliburWallet(ctx, req.(*RegisterCaliburWalletReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Aggregator_GetCaliburWallet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCaliburWalletReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).GetCaliburWallet(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Aggregator_GetCaliburWallet_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).GetCaliburWallet(ctx, req.(*GetCaliburWalletReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Aggregator_RevokeCaliburKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeCaliburKeyReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).RevokeCaliburKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Aggregator_RevokeCaliburKey_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).RevokeCaliburKey(ctx, req.(*RevokeCaliburKeyReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1120,6 +1224,18 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "WithdrawFunds",
 			Handler:    _Aggregator_WithdrawFunds_Handler,
+		},
+		{
+			MethodName: "RegisterCaliburWallet",
+			Handler:    _Aggregator_RegisterCaliburWallet_Handler,
+		},
+		{
+			MethodName: "GetCaliburWallet",
+			Handler:    _Aggregator_GetCaliburWallet_Handler,
+		},
+		{
+			MethodName: "RevokeCaliburKey",
+			Handler:    _Aggregator_RevokeCaliburKey_Handler,
 		},
 		{
 			MethodName: "CreateTask",
