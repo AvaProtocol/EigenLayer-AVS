@@ -78,9 +78,19 @@ func TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient(t *testing.T)
 	t.Logf("Primary Wallet: %s, Balance: %s wei (%.6f ETH)", primaryWallet.Hex(), balance.String(), float64(balance.Int64())/1e18)
 	t.Logf("Secondary Wallet: %s (recipient for withdrawal)", secondaryWallet.Hex())
 
+	// The wallet needs enough balance to cover the withdrawal value + gas overhead.
+	// The EntryPoint debits gas from the wallet before execute() runs, so the wallet
+	// must hold withdrawal_amount + gas_cost at transaction time.
+	minBalanceForTest := big.NewInt(5000000000000000) // 0.005 ETH minimum
+	if balance.Cmp(minBalanceForTest) < 0 {
+		t.Skipf("Skipping: primary wallet balance too low (%s wei). Fund %s on Sepolia with >= 0.5 ETH",
+			balance.String(), primaryWallet.Hex())
+	}
+
 	// Withdraw most of the balance to the secondary wallet so there's not enough
 	// left for reimbursement. The system should skip reimbursement wrapping.
-	reserve := big.NewInt(100000000000000) // 0.0001 ETH
+	// Reserve enough for gas overhead (EntryPoint verification + execution gas).
+	reserve := big.NewInt(3000000000000000) // 0.003 ETH — covers gas for UserOp execution
 	withdrawalAmount := new(big.Int).Sub(balance, reserve)
 
 	calldata, err := aa.PackExecute(secondaryWallet, withdrawalAmount, []byte{})

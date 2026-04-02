@@ -40,6 +40,11 @@ const (
 
 var testConfig *config.Config
 
+// cachedSmartWalletConfig avoids repeated RPC calls to paymaster.Owner() across
+// the 68+ tests that call GetTestSmartWalletConfig(). Each call previously dialed
+// a new Sepolia connection and queried on-chain, causing the test suite to timeout.
+var cachedSmartWalletConfig *config.SmartWalletConfig
+
 // LoadDotEnv loads environment variables from .env file in the repository root.
 // This allows tests to access OWNER_EOA and other secrets from .env
 func LoadDotEnv() error {
@@ -680,11 +685,15 @@ func JsFastTask() *avsproto.CreateTaskReq {
 }
 
 func GetTestSmartWalletConfig() *config.SmartWalletConfig {
+	if cachedSmartWalletConfig != nil {
+		return cachedSmartWalletConfig
+	}
+
 	controllerKeyHex := GetTestControllerPrivateKey()
 	// In CI or local without key, return a minimal config that avoids panicking; tests that need
 	// real ERC-4337 will be gated and skipped.
 	if controllerKeyHex == "" {
-		return &config.SmartWalletConfig{
+		cachedSmartWalletConfig = &config.SmartWalletConfig{
 			EthRpcUrl:          GetTestRPC(),
 			BundlerURL:         GetTestBundlerRPC(),
 			EthWsUrl:           GetTestWsRPC(),
@@ -693,11 +702,12 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 			PaymasterAddress:   common.HexToAddress(GetTestPaymasterAddress()),
 			WhitelistAddresses: []common.Address{},
 		}
+		return cachedSmartWalletConfig
 	}
 	controllerPrivateKey, err := crypto.HexToECDSA(controllerKeyHex)
 	if err != nil {
 		// Fallback to non-panicking minimal config
-		return &config.SmartWalletConfig{
+		cachedSmartWalletConfig = &config.SmartWalletConfig{
 			EthRpcUrl:          GetTestRPC(),
 			BundlerURL:         GetTestBundlerRPC(),
 			EthWsUrl:           GetTestWsRPC(),
@@ -706,6 +716,7 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 			PaymasterAddress:   common.HexToAddress(GetTestPaymasterAddress()),
 			WhitelistAddresses: []common.Address{},
 		}
+		return cachedSmartWalletConfig
 	}
 
 	paymasterAddress := common.HexToAddress(GetTestPaymasterAddress())
@@ -723,6 +734,7 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 
 	// Fetch paymaster owner address by calling owner() on the paymaster contract.
 	// Reimbursement sends ETH to the owner EOA, not the paymaster contract itself.
+	// This RPC call is cached so it only happens once across all tests.
 	if paymasterAddress != (common.Address{}) {
 		client, dialErr := ethclient.Dial(GetTestRPC())
 		if dialErr == nil {
@@ -736,7 +748,8 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 		}
 	}
 
-	return smartWalletConfig
+	cachedSmartWalletConfig = smartWalletConfig
+	return cachedSmartWalletConfig
 }
 
 // Get smart wallet config for base
