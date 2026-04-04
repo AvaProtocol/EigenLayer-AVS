@@ -5,8 +5,10 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/services"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,112 +17,288 @@ import (
 // mockPriceService implements PriceService interface for testing
 type mockPriceService struct{}
 
-func (m *mockPriceService) GetNativeTokenPriceUSD(chainID int64) (*big.Float, error) {
-	// Return different prices based on chain ID to verify it's being passed correctly
+func (mock *mockPriceService) GetNativeTokenPriceUSD(chainID int64) (*big.Float, error) {
 	switch chainID {
-	case 1: // Ethereum mainnet
+	case 1:
 		return big.NewFloat(3000.0), nil
-	case 11155111: // Sepolia
+	case 11155111:
 		return big.NewFloat(2500.0), nil
-	case 8453: // Base mainnet
+	case 8453:
 		return big.NewFloat(3000.0), nil
-	case 84532: // Base Sepolia
+	case 84532:
 		return big.NewFloat(2500.0), nil
 	default:
-		return big.NewFloat(2000.0), nil // Fallback
+		return big.NewFloat(2000.0), nil
 	}
 }
 
-func (m *mockPriceService) GetNativeTokenSymbol(chainID int64) string {
-	return "ETH" // All supported chains use ETH
+func (mock *mockPriceService) GetNativeTokenSymbol(chainID int64) string {
+	return "ETH"
 }
 
 func TestFeeEstimator_ChainIDDetection(t *testing.T) {
 	logger, err := sdklogging.NewZapLogger(sdklogging.Development)
-	require.NoError(t, err, "Failed to create logger")
+	require.NoError(t, err)
 
 	smartWalletConfig := testutil.GetTestSmartWalletConfig()
-
-	// Create eth client from test config RPC
 	ethClient := testutil.GetRpcClient()
 	defer ethClient.Close()
 
-	// Create fee estimator with mock price service
-	feeEstimator := NewFeeEstimator(
-		logger,
-		ethClient,
-		nil, // No tenderly client needed for this test
-		smartWalletConfig,
-		&mockPriceService{},
-	)
+	feeEstimator := NewFeeEstimator(logger, ethClient, nil, smartWalletConfig, &mockPriceService{})
 
-	// Verify chain ID starts as 0 (not detected yet)
-	assert.Equal(t, int64(0), feeEstimator.chainID, "Chain ID should be 0 initially")
+	assert.Equal(t, int64(0), feeEstimator.chainID)
 
-	// Test chain ID detection
 	ctx := context.Background()
 	detectedChainID, err := feeEstimator.getChainID(ctx)
-	require.NoError(t, err, "Failed to detect chain ID")
-	assert.True(t, detectedChainID > 0, "Detected chain ID should be positive")
-	assert.Equal(t, detectedChainID, feeEstimator.chainID, "Chain ID should be cached")
+	require.NoError(t, err)
+	assert.True(t, detectedChainID > 0)
+	assert.Equal(t, detectedChainID, feeEstimator.chainID)
 
-	// Test that subsequent calls return cached value
 	cachedChainID, err := feeEstimator.getChainID(ctx)
-	require.NoError(t, err, "Failed to get cached chain ID")
-	assert.Equal(t, detectedChainID, cachedChainID, "Cached chain ID should match")
+	require.NoError(t, err)
+	assert.Equal(t, detectedChainID, cachedChainID)
 
-	// Test utility methods use correct chain ID
 	testAmount := big.NewInt(1000000000000000000) // 1 ETH in wei
 	feeAmount, err := feeEstimator.convertToFeeAmount(testAmount)
-	require.NoError(t, err, "Failed to convert fee amount")
-
-	assert.Equal(t, "ETH", feeAmount.NativeTokenSymbol, "Symbol should be ETH")
-	assert.Equal(t, testAmount.String(), feeAmount.NativeTokenAmount, "Native token amount should match input")
-
-	// Verify USD amount is non-empty (the mock returns a price for any chain)
-	assert.NotEmpty(t, feeAmount.UsdAmount, "USD amount should be set")
+	require.NoError(t, err)
+	assert.Equal(t, "ETH", feeAmount.NativeTokenSymbol)
+	assert.Equal(t, testAmount.String(), feeAmount.NativeTokenAmount)
+	assert.NotEmpty(t, feeAmount.UsdAmount)
 }
 
 func TestFeeEstimator_MoralisServiceIntegration(t *testing.T) {
 	logger, err := sdklogging.NewZapLogger(sdklogging.Development)
-	require.NoError(t, err, "Failed to create logger")
+	require.NoError(t, err)
 
 	smartWalletConfig := testutil.GetTestSmartWalletConfig()
-
-	// Connect using test config RPC
 	ethClient := testutil.GetRpcClient()
 	defer ethClient.Close()
 
-	// Create Moralis service (will use fallback pricing if no API key)
 	moralisService := services.GetMoralisService("", logger)
 
-	// Create fee estimator
-	feeEstimator := NewFeeEstimator(
-		logger,
-		ethClient,
-		nil,
-		smartWalletConfig,
-		moralisService,
-	)
+	feeEstimator := NewFeeEstimator(logger, ethClient, nil, smartWalletConfig, moralisService)
 
 	ctx := context.Background()
-
-	// Test chain ID detection
 	chainID, err := feeEstimator.getChainID(ctx)
-	require.NoError(t, err, "Failed to detect chain ID")
-	assert.True(t, chainID > 0, "Should detect a valid chain ID")
+	require.NoError(t, err)
+	assert.True(t, chainID > 0)
 
-	// Test Moralis service integration for price data
 	price, err := moralisService.GetNativeTokenPriceUSD(chainID)
-	require.NoError(t, err, "Failed to get ETH price")
-	assert.True(t, price.Cmp(big.NewFloat(0)) > 0, "Price should be positive")
+	require.NoError(t, err)
+	assert.True(t, price.Cmp(big.NewFloat(0)) > 0)
 
 	symbol := moralisService.GetNativeTokenSymbol(chainID)
-	assert.Equal(t, "ETH", symbol, "Symbol should be ETH")
+	assert.Equal(t, "ETH", symbol)
 
-	// Test supported chains
 	supportedChains := moralisService.GetSupportedChains()
-	assert.Contains(t, supportedChains, int64(1), "Should support Ethereum mainnet")
-	assert.Contains(t, supportedChains, int64(8453), "Should support Base mainnet")
-	assert.Len(t, supportedChains, 4, "Should support exactly 4 chains (ETH + Base mainnet/testnet)")
+	assert.Contains(t, supportedChains, int64(1))
+	assert.Contains(t, supportedChains, int64(8453))
+	assert.Len(t, supportedChains, 4)
+}
+
+func TestIsOnChainNode(t *testing.T) {
+	assert.True(t, isOnChainNode(&avsproto.TaskNode{TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: &avsproto.ETHTransferNode{}}}))
+	assert.True(t, isOnChainNode(&avsproto.TaskNode{TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{}}}))
+	assert.True(t, isOnChainNode(&avsproto.TaskNode{TaskType: &avsproto.TaskNode_Loop{Loop: &avsproto.LoopNode{}}}))
+
+	assert.False(t, isOnChainNode(&avsproto.TaskNode{TaskType: &avsproto.TaskNode_ContractRead{ContractRead: &avsproto.ContractReadNode{}}}))
+	assert.False(t, isOnChainNode(&avsproto.TaskNode{TaskType: &avsproto.TaskNode_RestApi{RestApi: &avsproto.RestAPINode{}}}))
+	assert.False(t, isOnChainNode(&avsproto.TaskNode{TaskType: &avsproto.TaskNode_Branch{Branch: &avsproto.BranchNode{}}}))
+	assert.False(t, isOnChainNode(&avsproto.TaskNode{TaskType: &avsproto.TaskNode_Filter{Filter: &avsproto.FilterNode{}}}))
+	assert.False(t, isOnChainNode(&avsproto.TaskNode{}))
+}
+
+func TestDefaultFeeRates(t *testing.T) {
+	rates := getDefaultFeeRates()
+
+	assert.Equal(t, 0.02, rates.ExecutionFeeUSD, "Execution fee should be $0.02")
+	assert.Equal(t, 0.03, rates.Tier1FeePercentage, "Tier 1 should be 0.03%")
+	assert.Equal(t, 0.09, rates.Tier2FeePercentage, "Tier 2 should be 0.09%")
+	assert.Equal(t, 0.18, rates.Tier3FeePercentage, "Tier 3 should be 0.18%")
+}
+
+func TestConvertFeeRatesConfig(t *testing.T) {
+	t.Run("nil config returns defaults", func(t *testing.T) {
+		rates := convertFeeRatesConfig(nil)
+		defaults := getDefaultFeeRates()
+		assert.Equal(t, defaults, rates)
+	})
+
+	t.Run("custom config is applied", func(t *testing.T) {
+		customConfig := &config.FeeRatesConfig{
+			ExecutionFeeUSD:    0.05,
+			Tier1FeePercentage: 0.10,
+			Tier2FeePercentage: 0.20,
+			Tier3FeePercentage: 0.50,
+		}
+		rates := convertFeeRatesConfig(customConfig)
+		assert.Equal(t, 0.05, rates.ExecutionFeeUSD)
+		assert.Equal(t, 0.10, rates.Tier1FeePercentage)
+		assert.Equal(t, 0.20, rates.Tier2FeePercentage)
+		assert.Equal(t, 0.50, rates.Tier3FeePercentage)
+	})
+}
+
+func TestClassifyWorkflowValue_WithOnChainNodes(t *testing.T) {
+	logger, err := sdklogging.NewZapLogger(sdklogging.Development)
+	require.NoError(t, err)
+
+	smartWalletConfig := testutil.GetTestSmartWalletConfig()
+	ethClient := testutil.GetRpcClient()
+	defer ethClient.Close()
+
+	feeEstimator := NewFeeEstimator(logger, ethClient, nil, smartWalletConfig, &mockPriceService{})
+
+	req := &avsproto.EstimateFeesReq{
+		Nodes: []*avsproto.TaskNode{
+			{Id: "read1", TaskType: &avsproto.TaskNode_ContractRead{ContractRead: &avsproto.ContractReadNode{}}},
+			{Id: "write1", TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{}}},
+		},
+	}
+
+	valueFee := feeEstimator.classifyWorkflowValue(req)
+
+	assert.Equal(t, avsproto.ExecutionTier_EXECUTION_TIER_1, valueFee.Tier)
+	assert.Equal(t, float32(0.03), valueFee.FeePercentage)
+	assert.Equal(t, "rule_based", valueFee.ClassificationMethod)
+	assert.Equal(t, float32(1.0), valueFee.Confidence)
+	assert.NotEmpty(t, valueFee.Reason)
+}
+
+func TestClassifyWorkflowValue_NoOnChainNodes(t *testing.T) {
+	logger, err := sdklogging.NewZapLogger(sdklogging.Development)
+	require.NoError(t, err)
+
+	smartWalletConfig := testutil.GetTestSmartWalletConfig()
+	ethClient := testutil.GetRpcClient()
+	defer ethClient.Close()
+
+	feeEstimator := NewFeeEstimator(logger, ethClient, nil, smartWalletConfig, &mockPriceService{})
+
+	req := &avsproto.EstimateFeesReq{
+		Nodes: []*avsproto.TaskNode{
+			{Id: "read1", TaskType: &avsproto.TaskNode_ContractRead{ContractRead: &avsproto.ContractReadNode{}}},
+			{Id: "branch1", TaskType: &avsproto.TaskNode_Branch{Branch: &avsproto.BranchNode{}}},
+			{Id: "api1", TaskType: &avsproto.TaskNode_RestApi{RestApi: &avsproto.RestAPINode{}}},
+		},
+	}
+
+	valueFee := feeEstimator.classifyWorkflowValue(req)
+
+	assert.Equal(t, avsproto.ExecutionTier_EXECUTION_TIER_UNSPECIFIED, valueFee.Tier)
+	assert.Equal(t, float32(0), valueFee.FeePercentage)
+	assert.Contains(t, valueFee.Reason, "no on-chain")
+}
+
+func TestEstimateCOGS_MixedNodes(t *testing.T) {
+	logger, err := sdklogging.NewZapLogger(sdklogging.Development)
+	require.NoError(t, err)
+
+	smartWalletConfig := testutil.GetTestSmartWalletConfig()
+	ethClient := testutil.GetRpcClient()
+	defer ethClient.Close()
+
+	feeEstimator := NewFeeEstimator(logger, ethClient, nil, smartWalletConfig, &mockPriceService{})
+
+	req := &avsproto.EstimateFeesReq{
+		Nodes: []*avsproto.TaskNode{
+			{Id: "read1", Name: "Read Price", TaskType: &avsproto.TaskNode_ContractRead{ContractRead: &avsproto.ContractReadNode{}}},
+			{Id: "branch1", Name: "Check", TaskType: &avsproto.TaskNode_Branch{Branch: &avsproto.BranchNode{}}},
+			{Id: "write1", Name: "Swap", TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{}}},
+			{Id: "transfer1", Name: "Send", TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: &avsproto.ETHTransferNode{}}},
+		},
+	}
+
+	// Need to detect chain ID first
+	_, err = feeEstimator.getChainID(context.Background())
+	require.NoError(t, err)
+
+	runnerAddr := testutil.GetTestSmartWalletConfig().ControllerAddress
+	cogs, totalCogsWei, err := feeEstimator.estimateCOGS(context.Background(), req, runnerAddr)
+	require.NoError(t, err)
+
+	// Only on-chain nodes (write1, transfer1) should have COGS entries
+	assert.Len(t, cogs, 2, "Only on-chain nodes should have COGS")
+	assert.Equal(t, "write1", cogs[0].NodeId)
+	assert.Equal(t, "gas", cogs[0].CostType)
+	assert.Equal(t, "transfer1", cogs[1].NodeId)
+	assert.True(t, totalCogsWei.Cmp(big.NewInt(0)) > 0, "Total COGS should be non-zero")
+}
+
+func TestEstimateExecutionCount(t *testing.T) {
+	logger, err := sdklogging.NewZapLogger(sdklogging.Development)
+	require.NoError(t, err)
+
+	smartWalletConfig := testutil.GetTestSmartWalletConfig()
+	ethClient := testutil.GetRpcClient()
+	defer ethClient.Close()
+
+	feeEstimator := NewFeeEstimator(logger, ethClient, nil, smartWalletConfig, &mockPriceService{})
+
+	t.Run("manual trigger defaults to 1", func(t *testing.T) {
+		count := feeEstimator.estimateExecutionCount(
+			&avsproto.TaskTrigger{Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL}, 1440, 0)
+		assert.Equal(t, int64(1), count)
+	})
+
+	t.Run("manual trigger respects maxExecution", func(t *testing.T) {
+		count := feeEstimator.estimateExecutionCount(
+			&avsproto.TaskTrigger{Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL}, 1440, 5)
+		assert.Equal(t, int64(5), count)
+	})
+
+	t.Run("fixed_time is always 1", func(t *testing.T) {
+		count := feeEstimator.estimateExecutionCount(
+			&avsproto.TaskTrigger{Type: avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME}, 1440, 0)
+		assert.Equal(t, int64(1), count)
+	})
+
+	t.Run("cron estimates hourly over 24h", func(t *testing.T) {
+		count := feeEstimator.estimateExecutionCount(
+			&avsproto.TaskTrigger{Type: avsproto.TriggerType_TRIGGER_TYPE_CRON}, 1440, 0)
+		assert.Equal(t, int64(24), count)
+	})
+
+	t.Run("cron respects maxExecution cap", func(t *testing.T) {
+		count := feeEstimator.estimateExecutionCount(
+			&avsproto.TaskTrigger{Type: avsproto.TriggerType_TRIGGER_TYPE_CRON}, 1440, 10)
+		assert.Equal(t, int64(10), count)
+	})
+
+	t.Run("event defaults to at least 1", func(t *testing.T) {
+		count := feeEstimator.estimateExecutionCount(
+			&avsproto.TaskTrigger{Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT}, 60, 0)
+		assert.Equal(t, int64(1), count)
+	})
+}
+
+func TestCustomConfig_AffectsAllFees(t *testing.T) {
+	logger, err := sdklogging.NewZapLogger(sdklogging.Development)
+	require.NoError(t, err)
+
+	smartWalletConfig := testutil.GetTestSmartWalletConfig()
+	ethClient := testutil.GetRpcClient()
+	defer ethClient.Close()
+
+	customConfig := &config.FeeRatesConfig{
+		ExecutionFeeUSD:    0.05,
+		Tier1FeePercentage: 0.10,
+		Tier2FeePercentage: 0.20,
+		Tier3FeePercentage: 0.50,
+	}
+
+	feeEstimator := NewFeeEstimatorWithConfig(logger, ethClient, nil, smartWalletConfig, &mockPriceService{}, customConfig)
+
+	// Verify execution fee uses custom rate
+	execFee, _ := feeEstimator.convertUSDToFeeAmount(feeEstimator.feeRates.ExecutionFeeUSD)
+	assert.NotEqual(t, "0", execFee.NativeTokenAmount)
+
+	// Verify value fee uses custom tier rate
+	req := &avsproto.EstimateFeesReq{
+		Nodes: []*avsproto.TaskNode{
+			{Id: "w1", TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{}}},
+		},
+	}
+	valueFee := feeEstimator.classifyWorkflowValue(req)
+	assert.Equal(t, float32(0.10), valueFee.FeePercentage, "Should use custom Tier 1 rate")
 }

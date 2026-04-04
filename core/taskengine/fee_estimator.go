@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"strings"
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
@@ -28,9 +27,9 @@ type FeeEstimator struct {
 	// Price service for USD conversion
 	priceService PriceService
 
-	// Fee configuration
-	automationRates *AutomationFeeRates
-	discountRules   *DiscountRules
+	// Node-tier fee configuration
+	feeRates      *FeeRates
+	discountRules *DiscountRules
 }
 
 // PriceService interface for getting token prices
@@ -39,27 +38,17 @@ type PriceService interface {
 	GetNativeTokenSymbol(chainID int64) string
 }
 
-// AutomationFeeRates defines pricing for different trigger types
-type AutomationFeeRates struct {
-	// Base fees (one-time per workflow)
-	BaseFeeUSD float64 // $0.00 initially
+// FeeRates holds the fee configuration for the estimator.
+// Three components: execution_fee (flat) + COGS (per-node) + value_fee (workflow-level tier %).
+type FeeRates struct {
+	// Flat per-execution platform fee
+	ExecutionFeeUSD float64 // Default: $0.02
 
-	// Monitoring fees (per minute)
-	ManualMonitoringFeeUSDPerMinute    float64 // $0.00
-	FixedTimeMonitoringFeeUSDPerMinute float64 // $0.000017 (~$0.01/day)
-	CronMonitoringFeeUSDPerMinute      float64 // $0.000033 (~$0.02/day)
-	BlockMonitoringFeeUSDPerMinute     float64 // $0.000033 (~$0.02/day)
-	EventMonitoringFeeUSDPerMinute     float64 // $0.000083 (~$0.05/day base)
-
-	// Per-execution fees
-	ManualExecutionFeeUSD    float64 // $0.00
-	ScheduledExecutionFeeUSD float64 // $0.005
-	BlockExecutionFeeUSD     float64 // $0.01
-	EventExecutionFeeUSD     float64 // $0.01
-
-	// Event monitoring scaling factors
-	EventAddressFeeUSDPerMinute float64 // $0.000008 (~$0.005/day per address)
-	EventTopicFeeUSDPerMinute   float64 // $0.000003 (~$0.002/day per topic group)
+	// Value-capture tier percentages (applied at workflow level, not per-node)
+	// Decision rule: failure → loss → Tier 3 | improves outcome → Tier 2 | simple → Tier 1
+	Tier1FeePercentage float64 // Default: 0.03%
+	Tier2FeePercentage float64 // Default: 0.09%
+	Tier3FeePercentage float64 // Default: 0.18%
 }
 
 // DiscountRules defines promotional discount rules
@@ -106,7 +95,7 @@ func NewFeeEstimator(
 		smartWalletConfig: smartWalletConfig,
 		chainID:           0, // Will be detected on first use
 		priceService:      priceService,
-		automationRates:   getDefaultAutomationRates(),
+		feeRates:          getDefaultFeeRates(),
 		discountRules:     getDefaultDiscountRules(),
 	}
 }
@@ -128,7 +117,7 @@ func NewFeeEstimatorWithConfig(
 		smartWalletConfig: smartWalletConfig,
 		chainID:           0, // Will be detected on first use
 		priceService:      priceService,
-		automationRates:   convertFeeRatesConfigToAutomationRates(feeRatesConfig),
+		feeRates:          convertFeeRatesConfig(feeRatesConfig),
 		discountRules:     getDefaultDiscountRules(),
 	}
 }
@@ -153,9 +142,9 @@ func (fe *FeeEstimator) getChainID(ctx context.Context) (int64, error) {
 	return fe.chainID, nil
 }
 
-// EstimateFees provides comprehensive fee estimation for a workflow
+// EstimateFees provides comprehensive fee estimation for a workflow.
+// Response structure: execution_fee + cogs[] + value_fee = total
 func (fe *FeeEstimator) EstimateFees(ctx context.Context, req *avsproto.EstimateFeesReq) (*avsproto.EstimateFeesResp, error) {
-	// Detect chain ID first
 	chainID, err := fe.getChainID(ctx)
 	if err != nil {
 		return &avsproto.EstimateFeesResp{
@@ -165,14 +154,14 @@ func (fe *FeeEstimator) EstimateFees(ctx context.Context, req *avsproto.Estimate
 		}, nil
 	}
 
-	fe.logger.Info("🔍 Starting comprehensive fee estimation",
+	fe.logger.Info("🔍 Starting fee estimation",
 		"trigger_type", req.Trigger.Type.String(),
 		"nodes_count", len(req.Nodes),
 		"runner", req.Runner,
 		"chain_id", chainID)
 
-	// Step 1: Resolve runner address and detect smart wallet creation needs
-	runnerAddress, smartWalletFee, err := fe.estimateSmartWalletCreation(ctx, req)
+	// Step 1: Smart wallet creation check
+	runnerAddress, creationFees, err := fe.estimateSmartWalletCreation(ctx, req)
 	if err != nil {
 		return &avsproto.EstimateFeesResp{
 			Success:   false,
@@ -181,71 +170,78 @@ func (fe *FeeEstimator) EstimateFees(ctx context.Context, req *avsproto.Estimate
 		}, nil
 	}
 
-	// Step 2: Estimate gas costs for all blockchain operations
-	gasFees, err := fe.estimateGasFees(ctx, req, runnerAddress)
+	// Step 2: Flat per-execution platform fee
+	executionFee, _ := fe.convertUSDToFeeAmount(fe.feeRates.ExecutionFeeUSD)
+
+	// Step 3: COGS — per-node operational costs (gas for on-chain, future: API costs)
+	cogs, totalCogsWei, err := fe.estimateCOGS(ctx, req, runnerAddress)
 	if err != nil {
 		return &avsproto.EstimateFeesResp{
 			Success:   false,
-			Error:     fmt.Sprintf("Failed to estimate gas fees: %v", err),
+			Error:     fmt.Sprintf("Failed to estimate COGS: %v", err),
 			ErrorCode: avsproto.ErrorCode_SIMULATION_ERROR,
 		}, nil
 	}
 
-	// Step 3: Calculate automation fees based on trigger type and duration
-	automationFee, err := fe.calculateAutomationFees(req)
-	if err != nil {
-		return &avsproto.EstimateFeesResp{
-			Success:   false,
-			Error:     fmt.Sprintf("Failed to calculate automation fees: %v", err),
-			ErrorCode: avsproto.ErrorCode_INVALID_REQUEST,
-		}, nil
+	// Step 4: Value fee — workflow-level classification (V1: rule-based)
+	durationMinutes := int64(0)
+	if req.ExpireAt > req.CreatedAt {
+		durationMinutes = (req.ExpireAt - req.CreatedAt) / (1000 * 60)
 	}
+	estimatedExecutions := fe.estimateExecutionCount(req.Trigger, durationMinutes, req.MaxExecution)
+	valueFee := fe.classifyWorkflowValue(req)
 
-	// Step 4: Calculate total fees
-	totalFees := fe.calculateTotalFees(gasFees, automationFee, smartWalletFee)
+	// Step 5: Calculate total (execution_fee + COGS + creation; value_fee is % at execution time)
+	totalWei := new(big.Int).Set(totalCogsWei)
+	if execWei, ok := new(big.Int).SetString(executionFee.NativeTokenAmount, 10); ok {
+		totalWei.Add(totalWei, execWei)
+	}
+	if creationFees != nil && creationFees.CreationFee != nil {
+		if createWei, ok := new(big.Int).SetString(creationFees.CreationFee.NativeTokenAmount, 10); ok {
+			totalWei.Add(totalWei, createWei)
+		}
+	}
+	totalFees, _ := fe.convertToFeeAmount(totalWei)
 
-	// Step 5: Apply discounts and promotions
-	discounts, totalDiscounts, finalTotal := fe.applyDiscounts(gasFees, automationFee, smartWalletFee, totalFees)
-
-	// Step 6: Get price data metadata
+	// Step 6: Price data metadata
 	priceDataSource := "moralis"
 	priceDataAge := int64(0)
-
-	// Get price data age if available
 	if moralisService, ok := fe.priceService.(*services.MoralisService); ok {
 		priceDataAge = moralisService.GetPriceDataAge(chainID)
-		priceDataSource = "moralis"
 	} else {
 		priceDataSource = "fallback"
 	}
 
-	fe.logger.Info("✅ Fee estimation completed successfully",
-		"total_gas_cost_wei", totalFees.NativeTokenAmount,
-		"total_usd", totalFees.UsdAmount,
-		"final_total_usd", finalTotal.UsdAmount)
+	fe.logger.Info("✅ Fee estimation completed",
+		"execution_fee_usd", executionFee.UsdAmount,
+		"cogs_count", len(cogs),
+		"value_fee_tier", valueFee.Tier.String(),
+		"total_usd", totalFees.UsdAmount)
 
 	return &avsproto.EstimateFeesResp{
 		Success:             true,
-		GasFees:             gasFees,
-		AutomationFees:      automationFee,
-		CreationFees:        smartWalletFee,
+		ExecutionFee:        executionFee,
+		Cogs:                cogs,
+		ValueFee:            valueFee,
+		CreationFees:        creationFees,
 		TotalFees:           totalFees,
-		Discounts:           discounts,
-		TotalDiscounts:      totalDiscounts,
-		FinalTotal:          finalTotal,
+		Discounts:           nil, // TODO: re-implement discounts for new structure
+		TotalDiscounts:      nil,
+		FinalTotal:          totalFees, // No discounts applied yet
+		EstimatedExecutions: estimatedExecutions,
 		EstimatedAt:         time.Now().UnixMilli(),
 		ChainId:             fmt.Sprintf("%d", chainID),
 		PriceDataSource:     priceDataSource,
 		PriceDataAgeSeconds: priceDataAge,
-		Warnings:            fe.generateWarnings(gasFees),
-		Recommendations:     fe.generateRecommendations(req, gasFees, automationFee),
+		Warnings:            fe.generateWarnings(cogs),
+		Recommendations:     nil,
+		PricingModel:        "v1",
 	}, nil
 }
 
 // estimateSmartWalletCreation determines if smart wallet creation is needed and estimates costs
 func (fe *FeeEstimator) estimateSmartWalletCreation(ctx context.Context, req *avsproto.EstimateFeesReq) (common.Address, *avsproto.SmartWalletCreationFee, error) {
 	var runnerAddress common.Address
-	var err error
 
 	// Try to get runner from request field first, then from input_variables
 	if req.Runner != "" {
@@ -341,9 +337,6 @@ func (fe *FeeEstimator) estimateWalletCreationGas(ctx context.Context, walletAdd
 	}
 
 	// Build createAccount calldata using the factory ABI.
-	// We use walletAddress as a dummy owner with salt=0 to simulate a fresh deployment.
-	// The actual gas cost is dominated by proxy deployment and is constant regardless of owner/salt,
-	// as long as the resulting address has no deployed code (which we've already verified).
 	factoryAddress := fe.smartWalletConfig.FactoryAddress
 	initCodeHex, err := aa.GetInitCodeForFactory(walletAddress.Hex(), factoryAddress, big.NewInt(0))
 	if err != nil {
@@ -382,26 +375,22 @@ func (fe *FeeEstimator) estimateWalletCreationGas(ctx context.Context, walletAdd
 	return bufferedGas, gasPrice, nil
 }
 
-// estimateGasFees estimates gas costs for all blockchain operations in the workflow
-func (fe *FeeEstimator) estimateGasFees(ctx context.Context, req *avsproto.EstimateFeesReq, runnerAddress common.Address) (*avsproto.GasFeeBreakdown, error) {
-	fe.logger.Info("🔍 Estimating gas fees for workflow operations", "runner", runnerAddress.Hex())
+// estimateCOGS estimates cost of goods sold — per-node operational costs.
+// Gas for on-chain nodes (contract_write, eth_transfer, loop).
+// Future: external API costs for REST API nodes calling paid services.
+func (fe *FeeEstimator) estimateCOGS(ctx context.Context, req *avsproto.EstimateFeesReq, runnerAddress common.Address) ([]*avsproto.NodeCOGS, *big.Int, error) {
+	fe.logger.Info("🔍 Estimating COGS for workflow", "runner", runnerAddress.Hex())
 
-	var operations []*avsproto.GasOperationFee
-	totalGasUnits := big.NewInt(0)
-	totalGasCostWei := big.NewInt(0)
-	estimationAccurate := true
-	estimationMethod := "rpc_estimate"
+	var cogsList []*avsproto.NodeCOGS
+	totalCostWei := big.NewInt(0)
 
 	// Get current gas price
 	gasPrice, err := fe.ethClient.SuggestGasPrice(ctx)
 	if err != nil {
 		fe.logger.Warn("Failed to get current gas price, using fallback", "error", err)
 		gasPrice = big.NewInt(int64(DefaultGasPrice))
-		estimationAccurate = false
-		estimationMethod = "fallback"
 	}
 
-	// Estimate gas for each node that requires blockchain operations
 	for _, node := range req.Nodes {
 		var gasResult *GasEstimationResult
 
@@ -411,66 +400,36 @@ func (fe *FeeEstimator) estimateGasFees(ctx context.Context, req *avsproto.Estim
 		case node.GetEthTransfer() != nil:
 			gasResult = fe.estimateETHTransferGas(ctx, node, runnerAddress, gasPrice)
 		case node.GetLoop() != nil:
-			// Handle loop nodes that might contain contract writes
 			gasResult = fe.estimateLoopGas(ctx, node, runnerAddress, gasPrice)
 		default:
-			// Skip nodes that don't require gas
+			// Non on-chain nodes have no COGS (in V1)
+			// Future: estimate external API costs for rest_api nodes
 			continue
 		}
 
 		if gasResult != nil {
-			if !gasResult.Success {
-				estimationAccurate = false
-				if gasResult.EstimationMethod != "rpc_estimate" {
-					estimationMethod = gasResult.EstimationMethod
-				}
-			}
-
-			// Convert to FeeAmount
-			feeAmount, err := fe.convertToFeeAmount(gasResult.TotalCost)
+			cost, err := fe.convertToFeeAmount(gasResult.TotalCost)
 			if err != nil {
-				fe.logger.Warn("Failed to convert gas cost to fee amount", "error", err)
+				fe.logger.Warn("Failed to convert COGS", "error", err)
 				continue
 			}
 
-			operation := &avsproto.GasOperationFee{
-				OperationType: gasResult.OperationType,
-				NodeId:        gasResult.NodeID,
-				MethodName:    gasResult.MethodName,
-				Fee:           feeAmount,
-				GasUnits:      gasResult.GasUnits.String(),
-			}
-
-			operations = append(operations, operation)
-			totalGasUnits.Add(totalGasUnits, gasResult.GasUnits)
-			totalGasCostWei.Add(totalGasCostWei, gasResult.TotalCost)
+			cogsList = append(cogsList, &avsproto.NodeCOGS{
+				NodeId:   gasResult.NodeID,
+				NodeName: node.Name,
+				CostType: "gas",
+				Cost:     cost,
+				GasUnits: gasResult.GasUnits.String(),
+			})
+			totalCostWei.Add(totalCostWei, gasResult.TotalCost)
 		}
 	}
 
-	// Convert total gas cost to FeeAmount
-	totalGasFees, err := fe.convertToFeeAmount(totalGasCostWei)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert total gas fees: %w", err)
-	}
-
-	// Convert gas price to Gwei for display
-	gasPriceGwei := new(big.Float).Quo(new(big.Float).SetInt(gasPrice), big.NewFloat(1e9))
-
-	return &avsproto.GasFeeBreakdown{
-		TotalGasFees:       totalGasFees,
-		Operations:         operations,
-		GasPriceGwei:       fmt.Sprintf("%.2f", gasPriceGwei),
-		TotalGasUnits:      totalGasUnits.String(),
-		EstimationAccurate: estimationAccurate,
-		EstimationMethod:   estimationMethod,
-	}, nil
+	return cogsList, totalCostWei, nil
 }
 
-// Placeholder implementations for gas estimation methods
+// Gas estimation methods for individual node types
 func (fe *FeeEstimator) estimateContractWriteGas(ctx context.Context, node *avsproto.TaskNode, runnerAddress common.Address, gasPrice *big.Int) *GasEstimationResult {
-	// TODO: Implement RPC-first gas estimation with Tenderly fallback
-	// For now, use conservative estimates
-
 	contractWrite := node.GetContractWrite()
 	if contractWrite == nil {
 		return nil
@@ -480,7 +439,7 @@ func (fe *FeeEstimator) estimateContractWriteGas(ctx context.Context, node *avsp
 	totalCost := new(big.Int).Mul(estimatedGas, gasPrice)
 
 	methodName := "unknown"
-	if len(contractWrite.Config.MethodCalls) > 0 {
+	if contractWrite.Config != nil && len(contractWrite.Config.MethodCalls) > 0 {
 		methodName = contractWrite.Config.MethodCalls[0].MethodName
 	}
 
@@ -497,7 +456,6 @@ func (fe *FeeEstimator) estimateContractWriteGas(ctx context.Context, node *avsp
 }
 
 func (fe *FeeEstimator) estimateETHTransferGas(ctx context.Context, node *avsproto.TaskNode, runnerAddress common.Address, gasPrice *big.Int) *GasEstimationResult {
-	// ETH transfers through smart wallets typically use more gas than direct transfers
 	estimatedGas := big.NewInt(50000) // Conservative estimate for smart wallet ETH transfer
 	totalCost := new(big.Int).Mul(estimatedGas, gasPrice)
 
@@ -514,8 +472,6 @@ func (fe *FeeEstimator) estimateETHTransferGas(ctx context.Context, node *avspro
 }
 
 func (fe *FeeEstimator) estimateLoopGas(ctx context.Context, node *avsproto.TaskNode, runnerAddress common.Address, gasPrice *big.Int) *GasEstimationResult {
-	// TODO: Implement loop gas estimation based on loop contents
-	// For now, use a multiplier of the base contract write cost
 	estimatedGas := big.NewInt(300000) // Conservative estimate for loop operations
 	totalCost := new(big.Int).Mul(estimatedGas, gasPrice)
 
@@ -531,69 +487,67 @@ func (fe *FeeEstimator) estimateLoopGas(ctx context.Context, node *avsproto.Task
 	}
 }
 
-// calculateAutomationFees calculates automation fees based on trigger type and duration
-func (fe *FeeEstimator) calculateAutomationFees(req *avsproto.EstimateFeesReq) (*avsproto.AutomationFee, error) {
-	trigger := req.Trigger
-	triggerType := trigger.Type.String()
-
-	// Calculate workflow duration in minutes
-	durationMinutes := int64(0)
-	if req.ExpireAt > req.CreatedAt {
-		durationMinutes = (req.ExpireAt - req.CreatedAt) / (1000 * 60) // Convert milliseconds to minutes
+// classifyWorkflowValue determines the value-capture tier for the entire workflow.
+// This is a single workflow-level classification, not per-node.
+//
+// Decision rule: "If this workflow fails or is delayed, does the user lose money immediately?"
+//   - YES → Tier 3
+//   - NO but improves outcome → Tier 2
+//   - Simple execution → Tier 1
+//
+// V1: rule-based, defaults to Tier 1 if workflow has on-chain nodes, UNSPECIFIED otherwise.
+// V2: LLM-based classification analyzing workflow purpose and node composition.
+func (fe *FeeEstimator) classifyWorkflowValue(req *avsproto.EstimateFeesReq) *avsproto.ValueFee {
+	hasOnChainNodes := false
+	for _, node := range req.Nodes {
+		if isOnChainNode(node) {
+			hasOnChainNodes = true
+			break
+		}
 	}
 
-	// Estimate number of executions based on trigger type
-	estimatedExecutions := fe.estimateExecutionCount(trigger, durationMinutes, req.MaxExecution)
-
-	// Calculate fees
-	baseFeeUSD := fe.automationRates.BaseFeeUSD
-	monitoringFeeUSD := fe.calculateMonitoringFee(trigger, durationMinutes)
-	executionFeeUSD := fe.calculateExecutionFee(trigger, estimatedExecutions)
-
-	// Convert USD amounts to native token
-	baseFee, err := fe.convertUSDToFeeAmount(baseFeeUSD)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert base fee: %w", err)
+	if !hasOnChainNodes {
+		return &avsproto.ValueFee{
+			Tier:                 avsproto.ExecutionTier_EXECUTION_TIER_UNSPECIFIED,
+			FeePercentage:        0,
+			ClassificationMethod: "rule_based",
+			Confidence:           1.0,
+			Reason:               "Workflow has no on-chain execution nodes — no value-capture fee",
+		}
 	}
 
-	monitoringFee, err := fe.convertUSDToFeeAmount(monitoringFeeUSD)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert monitoring fee: %w", err)
+	// V1: all workflows with on-chain nodes default to Tier 1
+	// V2: LLM will analyze workflow purpose (e.g., AAVE repay → Tier 3)
+	return &avsproto.ValueFee{
+		Tier:                 avsproto.ExecutionTier_EXECUTION_TIER_1,
+		FeePercentage:        float32(fe.feeRates.Tier1FeePercentage),
+		ClassificationMethod: "rule_based",
+		Confidence:           1.0,
+		Reason:               "V1 default: workflow contains on-chain execution nodes",
 	}
-
-	executionFee, err := fe.convertUSDToFeeAmount(executionFeeUSD)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert execution fee: %w", err)
-	}
-
-	feeCalculationMethod := fe.buildFeeCalculationDescription(trigger, durationMinutes, estimatedExecutions)
-
-	return &avsproto.AutomationFee{
-		BaseFee:              baseFee,
-		MonitoringFee:        monitoringFee,
-		ExecutionFee:         executionFee,
-		TriggerType:          triggerType,
-		EstimatedExecutions:  estimatedExecutions,
-		DurationMinutes:      durationMinutes,
-		FeeCalculationMethod: feeCalculationMethod,
-	}, nil
 }
 
-// Helper methods for automation fee calculation
+// isOnChainNode returns true if the node performs on-chain transactions
+func isOnChainNode(node *avsproto.TaskNode) bool {
+	return node.GetEthTransfer() != nil ||
+		node.GetContractWrite() != nil ||
+		node.GetLoop() != nil
+}
+
+// estimateExecutionCount estimates how many times the workflow will execute
 func (fe *FeeEstimator) estimateExecutionCount(trigger *avsproto.TaskTrigger, durationMinutes, maxExecution int64) int64 {
 	switch trigger.Type {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
 		if maxExecution > 0 {
 			return maxExecution
 		}
-		return 1 // Default assumption for manual triggers
+		return 1
 
 	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
-		return 1 // Fixed time triggers execute once
+		return 1
 
 	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
 		// TODO: Parse cron expression to calculate execution frequency
-		// For now, assume every hour as default
 		executions := durationMinutes / 60
 		if maxExecution > 0 && executions > maxExecution {
 			return maxExecution
@@ -601,8 +555,7 @@ func (fe *FeeEstimator) estimateExecutionCount(trigger *avsproto.TaskTrigger, du
 		return executions
 
 	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
-		// TODO: Calculate based on block interval
-		// For now, assume every 10 blocks (approximately every 2 minutes for 12s block time)
+		// Assume every 10 blocks (~2 minutes for 12s block time)
 		executions := durationMinutes / 2
 		if maxExecution > 0 && executions > maxExecution {
 			return maxExecution
@@ -610,8 +563,7 @@ func (fe *FeeEstimator) estimateExecutionCount(trigger *avsproto.TaskTrigger, du
 		return executions
 
 	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
-		// Event triggers are unpredictable, use conservative estimate
-		// Assume 1 execution per day as default
+		// Conservative: 1 execution per day
 		executions := durationMinutes / (24 * 60)
 		if executions < 1 {
 			executions = 1
@@ -626,326 +578,72 @@ func (fe *FeeEstimator) estimateExecutionCount(trigger *avsproto.TaskTrigger, du
 	}
 }
 
-func (fe *FeeEstimator) calculateMonitoringFee(trigger *avsproto.TaskTrigger, durationMinutes int64) float64 {
-	rates := fe.automationRates
-
-	switch trigger.Type {
-	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
-		return float64(durationMinutes) * rates.ManualMonitoringFeeUSDPerMinute
-
-	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
-		return float64(durationMinutes) * rates.FixedTimeMonitoringFeeUSDPerMinute
-
-	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
-		return float64(durationMinutes) * rates.CronMonitoringFeeUSDPerMinute
-
-	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
-		return float64(durationMinutes) * rates.BlockMonitoringFeeUSDPerMinute
-
-	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
-		baseFee := float64(durationMinutes) * rates.EventMonitoringFeeUSDPerMinute
-
-		// Add scaling fees based on addresses and topics
-		if eventTrigger := trigger.GetEvent(); eventTrigger != nil {
-			// Add fee per query configuration
-			if config := eventTrigger.GetConfig(); config != nil {
-				for _, query := range config.GetQueries() {
-					// Add fee per address
-					addressCount := len(query.GetAddresses())
-					addressFee := float64(durationMinutes) * rates.EventAddressFeeUSDPerMinute * float64(addressCount)
-					baseFee += addressFee
-
-					// Add fee per topic group
-					topicGroups := len(query.GetTopics())
-					topicFee := float64(durationMinutes) * rates.EventTopicFeeUSDPerMinute * float64(topicGroups)
-					baseFee += topicFee
-				}
-			}
-		}
-
-		return baseFee
-
-	default:
-		return 0.0
-	}
-}
-
-func (fe *FeeEstimator) calculateExecutionFee(trigger *avsproto.TaskTrigger, estimatedExecutions int64) float64 {
-	rates := fe.automationRates
-
-	switch trigger.Type {
-	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
-		return float64(estimatedExecutions) * rates.ManualExecutionFeeUSD
-
-	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME, avsproto.TriggerType_TRIGGER_TYPE_CRON:
-		return float64(estimatedExecutions) * rates.ScheduledExecutionFeeUSD
-
-	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
-		return float64(estimatedExecutions) * rates.BlockExecutionFeeUSD
-
-	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
-		return float64(estimatedExecutions) * rates.EventExecutionFeeUSD
-
-	default:
-		return 0.0
-	}
-}
-
-func (fe *FeeEstimator) buildFeeCalculationDescription(trigger *avsproto.TaskTrigger, durationMinutes, estimatedExecutions int64) string {
-	triggerType := strings.ToLower(trigger.Type.String()[13:]) // Remove "TRIGGER_TYPE_" prefix
-
-	return fmt.Sprintf("Calculated for %s trigger over %d minutes with %d estimated executions",
-		triggerType, durationMinutes, estimatedExecutions)
-}
-
-// calculateTotalFees sums all fee components
-func (fe *FeeEstimator) calculateTotalFees(gasFees *avsproto.GasFeeBreakdown, automationFee *avsproto.AutomationFee, smartWalletFee *avsproto.SmartWalletCreationFee) *avsproto.FeeAmount {
-	// Sum all fee components in wei
-	totalWei := big.NewInt(0)
-
-	// Add gas fees
-	if gasFees != nil && gasFees.TotalGasFees != nil {
-		if gasWei, ok := new(big.Int).SetString(gasFees.TotalGasFees.NativeTokenAmount, 10); ok {
-			totalWei.Add(totalWei, gasWei)
-		}
-	}
-
-	// Add automation fees
-	if automationFee != nil {
-		if automationFee.BaseFee != nil {
-			if baseWei, ok := new(big.Int).SetString(automationFee.BaseFee.NativeTokenAmount, 10); ok {
-				totalWei.Add(totalWei, baseWei)
-			}
-		}
-		if automationFee.MonitoringFee != nil {
-			if monitoringWei, ok := new(big.Int).SetString(automationFee.MonitoringFee.NativeTokenAmount, 10); ok {
-				totalWei.Add(totalWei, monitoringWei)
-			}
-		}
-		if automationFee.ExecutionFee != nil {
-			if executionWei, ok := new(big.Int).SetString(automationFee.ExecutionFee.NativeTokenAmount, 10); ok {
-				totalWei.Add(totalWei, executionWei)
-			}
-		}
-	}
-
-	// Add smart wallet creation fees
-	if smartWalletFee != nil && smartWalletFee.CreationFee != nil {
-		if creationWei, ok := new(big.Int).SetString(smartWalletFee.CreationFee.NativeTokenAmount, 10); ok {
-			totalWei.Add(totalWei, creationWei)
-		}
-	}
-
-	// Convert to FeeAmount
-	totalFees, err := fe.convertToFeeAmount(totalWei)
-	if err != nil {
-		fe.logger.Warn("Failed to convert total fees", "error", err)
-		// Return zero fees on error
-		zeroFees, _ := fe.convertToFeeAmount(big.NewInt(0))
-		return zeroFees
-	}
-
-	return totalFees
-}
-
-// applyDiscounts applies promotional discounts to the calculated fees
-func (fe *FeeEstimator) applyDiscounts(gasFees *avsproto.GasFeeBreakdown, automationFee *avsproto.AutomationFee, smartWalletFee *avsproto.SmartWalletCreationFee, totalFees *avsproto.FeeAmount) ([]*avsproto.FeeDiscount, *avsproto.FeeAmount, *avsproto.FeeAmount) {
-	var discounts []*avsproto.FeeDiscount
-	totalDiscountUSD := 0.0
-
-	// Apply beta program discount (100% off automation fees)
-	if fe.discountRules.BetaProgramAutomationDiscount > 0 {
-		automationDiscountUSD := 0.0
-		if automationFee != nil {
-			// Sum automation fee components
-			if automationFee.BaseFee != nil {
-				if baseUSD, err := parseFloat(automationFee.BaseFee.UsdAmount); err == nil {
-					automationDiscountUSD += baseUSD
-				}
-			}
-			if automationFee.MonitoringFee != nil {
-				if monitoringUSD, err := parseFloat(automationFee.MonitoringFee.UsdAmount); err == nil {
-					automationDiscountUSD += monitoringUSD
-				}
-			}
-			if automationFee.ExecutionFee != nil {
-				if executionUSD, err := parseFloat(automationFee.ExecutionFee.UsdAmount); err == nil {
-					automationDiscountUSD += executionUSD
-				}
-			}
-		}
-
-		if automationDiscountUSD > 0 {
-			discountAmount := automationDiscountUSD * fe.discountRules.BetaProgramAutomationDiscount
-			totalDiscountUSD += discountAmount
-
-			discountFeeAmount, err := fe.convertUSDToFeeAmount(discountAmount)
-			if err == nil {
-				discounts = append(discounts, &avsproto.FeeDiscount{
-					DiscountType:       "beta_program",
-					DiscountName:       "Beta Program Launch Discount",
-					AppliesTo:          "automation_fees",
-					DiscountPercentage: float32(fe.discountRules.BetaProgramAutomationDiscount * 100),
-					DiscountAmount:     discountFeeAmount,
-					ExpiryDate:         "2025-12-31T23:59:59Z", // TODO: Make configurable
-					Terms:              "100% off automation fees during beta program",
-				})
-			}
-		}
-	}
-
-	// Convert total discounts to FeeAmount
-	totalDiscounts, err := fe.convertUSDToFeeAmount(totalDiscountUSD)
-	if err != nil {
-		fe.logger.Warn("Failed to convert total discounts", "error", err)
-		totalDiscounts, _ = fe.convertToFeeAmount(big.NewInt(0))
-	}
-
-	// Calculate final total (total fees - discounts)
-	totalFeesWei, _ := new(big.Int).SetString(totalFees.NativeTokenAmount, 10)
-	totalDiscountsWei, _ := new(big.Int).SetString(totalDiscounts.NativeTokenAmount, 10)
-	finalTotalWei := new(big.Int).Sub(totalFeesWei, totalDiscountsWei)
-
-	// Ensure final total is not negative
-	if finalTotalWei.Cmp(big.NewInt(0)) < 0 {
-		finalTotalWei = big.NewInt(0)
-	}
-
-	finalTotal, err := fe.convertToFeeAmount(finalTotalWei)
-	if err != nil {
-		fe.logger.Warn("Failed to convert final total", "error", err)
-		finalTotal = totalFees // Fallback to original total
-	}
-
-	return discounts, totalDiscounts, finalTotal
-}
-
-// Helper method to parse float from string
-func parseFloat(s string) (float64, error) {
-	// Remove any currency formatting and parse
-	cleaned := strings.ReplaceAll(s, "$", "")
-	cleaned = strings.ReplaceAll(cleaned, ",", "")
-	var result float64
-	n, err := fmt.Sscanf(cleaned, "%f", &result)
-	if err != nil {
-		return 0, err
-	}
-	if n != 1 {
-		return 0, fmt.Errorf("unable to parse float from string: %s", s)
-	}
-	return result, nil
-}
-
 // generateWarnings generates warnings about fee estimation accuracy
-func (fe *FeeEstimator) generateWarnings(gasFees *avsproto.GasFeeBreakdown) []string {
+func (fe *FeeEstimator) generateWarnings(cogs []*avsproto.NodeCOGS) []string {
 	var warnings []string
 
-	if gasFees != nil && !gasFees.EstimationAccurate {
-		warnings = append(warnings, "Gas estimation used fallback values due to RPC unavailability. Actual costs may vary.")
-	}
-
-	if gasFees != nil && gasFees.EstimationMethod == "fallback" {
-		warnings = append(warnings, "Conservative gas estimates used. Consider testing with smaller amounts first.")
+	if len(cogs) > 0 {
+		warnings = append(warnings, "Gas estimates use conservative fallback values. Actual costs may vary.")
 	}
 
 	return warnings
 }
 
-// generateRecommendations generates cost optimization recommendations
-func (fe *FeeEstimator) generateRecommendations(req *avsproto.EstimateFeesReq, gasFees *avsproto.GasFeeBreakdown, automationFee *avsproto.AutomationFee) []string {
-	var recommendations []string
-
-	// Check if workflow duration is very long
-	if req.ExpireAt > req.CreatedAt {
-		durationMinutes := (req.ExpireAt - req.CreatedAt) / (1000 * 60)
-		if durationMinutes > 30*24*60 { // More than 30 days
-			recommendations = append(recommendations, "Consider shorter workflow durations to reduce monitoring costs.")
-		}
-	}
-
-	// Check for high execution count
-	if automationFee != nil && automationFee.EstimatedExecutions > 1000 {
-		recommendations = append(recommendations, "High execution count detected. Consider optimizing trigger conditions to reduce costs.")
-	}
-
-	// Check trigger type optimization
-	if req.Trigger.Type == avsproto.TriggerType_TRIGGER_TYPE_EVENT {
-		recommendations = append(recommendations, "Event triggers have higher monitoring costs. Consider manual triggers if suitable for your use case.")
-	}
-
-	return recommendations
-}
-
 // Utility methods for fee conversion
 func (fe *FeeEstimator) convertToFeeAmount(weiAmount *big.Int) (*avsproto.FeeAmount, error) {
-	// Use cached chain ID if available, otherwise detect it
 	chainID := fe.chainID
 	if chainID == 0 {
-		// Try to detect chain ID, but don't fail if context is not available
-		// This is a fallback for cases where convertToFeeAmount is called without context
 		chainIDResult, err := fe.ethClient.ChainID(context.Background())
 		if err == nil {
 			chainID = chainIDResult.Int64()
-			fe.chainID = chainID // Cache for next time
+			fe.chainID = chainID
 		} else {
-			// Use a reasonable default
 			chainID = 1 // Ethereum mainnet as fallback
 		}
 	}
 
 	nativeTokenSymbol := fe.priceService.GetNativeTokenSymbol(chainID)
 
-	// Convert wei to USD
 	nativeTokenPriceUSD, err := fe.priceService.GetNativeTokenPriceUSD(chainID)
 	if err != nil {
 		fe.logger.Warn("Failed to get native token price", "error", err)
-		nativeTokenPriceUSD = big.NewFloat(2500) // Fallback price
+		nativeTokenPriceUSD = big.NewFloat(2500)
 	}
 
-	// Convert wei to token amount (divide by 10^18)
 	weiFloat := new(big.Float).SetInt(weiAmount)
 	tokenAmount := new(big.Float).Quo(weiFloat, big.NewFloat(1e18))
-
-	// Calculate USD amount
 	usdAmount := new(big.Float).Mul(tokenAmount, nativeTokenPriceUSD)
 
 	return &avsproto.FeeAmount{
 		NativeTokenAmount: weiAmount.String(),
 		NativeTokenSymbol: nativeTokenSymbol,
 		UsdAmount:         fmt.Sprintf("%.6f", usdAmount),
-		ApTokenAmount:     "0", // TODO: Implement AP token conversion
+		ApTokenAmount:     "0",
 	}, nil
 }
 
 func (fe *FeeEstimator) convertUSDToFeeAmount(usdAmount float64) (*avsproto.FeeAmount, error) {
-	// Use cached chain ID if available, otherwise detect it
 	chainID := fe.chainID
 	if chainID == 0 {
-		// Try to detect chain ID, but don't fail if context is not available
 		chainIDResult, err := fe.ethClient.ChainID(context.Background())
 		if err == nil {
 			chainID = chainIDResult.Int64()
-			fe.chainID = chainID // Cache for next time
+			fe.chainID = chainID
 		} else {
-			// Use a reasonable default
-			chainID = 1 // Ethereum mainnet as fallback
+			chainID = 1
 		}
 	}
 
 	nativeTokenSymbol := fe.priceService.GetNativeTokenSymbol(chainID)
 
-	// Get native token price
 	nativeTokenPriceUSD, err := fe.priceService.GetNativeTokenPriceUSD(chainID)
 	if err != nil {
 		fe.logger.Warn("Failed to get native token price", "error", err)
-		nativeTokenPriceUSD = big.NewFloat(2500) // Fallback price
+		nativeTokenPriceUSD = big.NewFloat(2500)
 	}
 
-	// Convert USD to token amount
 	usdFloat := big.NewFloat(usdAmount)
 	tokenAmount := new(big.Float).Quo(usdFloat, nativeTokenPriceUSD)
-
-	// Convert to wei (multiply by 10^18)
 	weiFloat := new(big.Float).Mul(tokenAmount, big.NewFloat(1e18))
 	weiAmount, _ := weiFloat.Int(nil)
 
@@ -953,28 +651,17 @@ func (fe *FeeEstimator) convertUSDToFeeAmount(usdAmount float64) (*avsproto.FeeA
 		NativeTokenAmount: weiAmount.String(),
 		NativeTokenSymbol: nativeTokenSymbol,
 		UsdAmount:         fmt.Sprintf("%.6f", usdAmount),
-		ApTokenAmount:     "0", // TODO: Implement AP token conversion
+		ApTokenAmount:     "0",
 	}, nil
 }
 
 // Default configuration
-func getDefaultAutomationRates() *AutomationFeeRates {
-	return &AutomationFeeRates{
-		BaseFeeUSD: 0.0,
-
-		ManualMonitoringFeeUSDPerMinute:    0.0,
-		FixedTimeMonitoringFeeUSDPerMinute: 0.000017, // ~$0.01/day
-		CronMonitoringFeeUSDPerMinute:      0.000033, // ~$0.02/day
-		BlockMonitoringFeeUSDPerMinute:     0.000033, // ~$0.02/day
-		EventMonitoringFeeUSDPerMinute:     0.000083, // ~$0.05/day base
-
-		ManualExecutionFeeUSD:    0.0,
-		ScheduledExecutionFeeUSD: 0.005,
-		BlockExecutionFeeUSD:     0.01,
-		EventExecutionFeeUSD:     0.01,
-
-		EventAddressFeeUSDPerMinute: 0.000008, // ~$0.005/day per address
-		EventTopicFeeUSDPerMinute:   0.000003, // ~$0.002/day per topic group
+func getDefaultFeeRates() *FeeRates {
+	return &FeeRates{
+		ExecutionFeeUSD:    0.02,
+		Tier1FeePercentage: 0.03,
+		Tier2FeePercentage: 0.09,
+		Tier3FeePercentage: 0.18,
 	}
 }
 
@@ -991,32 +678,16 @@ func getDefaultDiscountRules() *DiscountRules {
 	}
 }
 
-// convertFeeRatesConfigToAutomationRates converts configuration-based fee rates to internal automation rates
-func convertFeeRatesConfigToAutomationRates(configRates *config.FeeRatesConfig) *AutomationFeeRates {
+// convertFeeRatesConfig converts configuration-based fee rates to internal tier rates
+func convertFeeRatesConfig(configRates *config.FeeRatesConfig) *FeeRates {
 	if configRates == nil {
-		// Fallback to defaults if no configuration provided
-		return getDefaultAutomationRates()
+		return getDefaultFeeRates()
 	}
 
-	return &AutomationFeeRates{
-		// Base fees
-		BaseFeeUSD: configRates.BaseFeeUSD,
-
-		// Monitoring fees (per minute)
-		ManualMonitoringFeeUSDPerMinute:    configRates.ManualMonitoringFeeUSDPerMinute,
-		FixedTimeMonitoringFeeUSDPerMinute: configRates.FixedTimeMonitoringFeeUSDPerMinute,
-		CronMonitoringFeeUSDPerMinute:      configRates.CronMonitoringFeeUSDPerMinute,
-		BlockMonitoringFeeUSDPerMinute:     configRates.BlockMonitoringFeeUSDPerMinute,
-		EventMonitoringFeeUSDPerMinute:     configRates.EventMonitoringFeeUSDPerMinute,
-
-		// Per-execution fees
-		ManualExecutionFeeUSD:    configRates.ManualExecutionFeeUSD,
-		ScheduledExecutionFeeUSD: configRates.ScheduledExecutionFeeUSD,
-		BlockExecutionFeeUSD:     configRates.BlockExecutionFeeUSD,
-		EventExecutionFeeUSD:     configRates.EventExecutionFeeUSD,
-
-		// Event monitoring scaling factors
-		EventAddressFeeUSDPerMinute: configRates.EventAddressFeeUSDPerMinute,
-		EventTopicFeeUSDPerMinute:   configRates.EventTopicFeeUSDPerMinute,
+	return &FeeRates{
+		ExecutionFeeUSD:    configRates.ExecutionFeeUSD,
+		Tier1FeePercentage: configRates.Tier1FeePercentage,
+		Tier2FeePercentage: configRates.Tier2FeePercentage,
+		Tier3FeePercentage: configRates.Tier3FeePercentage,
 	}
 }

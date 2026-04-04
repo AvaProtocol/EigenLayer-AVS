@@ -1256,7 +1256,7 @@ func (r *RpcServer) EstimateFees(ctx context.Context, req *avsproto.EstimateFees
 	r.config.Logger.Info("✅ fee estimation completed successfully",
 		"user", user.Address.String(),
 		"final_total_usd", resp.FinalTotal.UsdAmount,
-		"estimation_method", resp.GasFees.EstimationMethod)
+		"pricing_model", resp.PricingModel)
 
 	return resp, nil
 }
