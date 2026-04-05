@@ -98,15 +98,15 @@ fee_rates:
 
 ## Billing & Settlement
 
-All fees are denominated in **native token (ETH)**, not USD. USD amounts in the API response are display-only. Settlement uses ETH price at execution time.
+The API returns fees in mixed units: `execution_fee` in **USD**, `cogs` in **WEI**, `value_fee` in **PERCENTAGE**. Each field is self-describing via its `unit`. At settlement time, USD amounts are converted to native token (ETH) using the oracle price.
 
 ### Enforcement split
 
-| Component | Enforcement | Rationale |
-|-----------|-------------|-----------|
-| `execution_fee` | **Atomic in UserOp** — included in the transaction | Operational cost — if wallet can't cover it, UserOp reverts on-chain |
-| `cogs` (gas, API) | **Atomic in UserOp** — included in the transaction | Real cost — blockchain rejects if insufficient balance |
-| `value_fee` | **Post-paid** — tracked off-chain after execution | Value-capture revenue — user experiences value first, pays after |
+| Component | Unit | Enforcement | Rationale |
+|-----------|------|-------------|-----------|
+| `execution_fee` | USD | **Converted to ETH and included in UserOp** | Operational cost — converted at execution time, reverts if insufficient |
+| `cogs` (gas, API) | WEI | **Atomic in UserOp** — native token cost | Real cost — blockchain rejects if insufficient balance |
+| `value_fee` | PERCENTAGE | **Post-paid** — tracked off-chain after execution | Value-capture revenue — user experiences value first, pays after |
 
 No account balance system or prepaid deposits. The blockchain is the enforcement layer for hard costs — if the user's smart wallet doesn't have enough ETH, the UserOp reverts automatically.
 
@@ -164,12 +164,15 @@ EstimateFees(req)
 ### Response structure
 
 `EstimateFeesResp` (flat, not nested):
-- `execution_fee` — flat per-run platform fee
-- `cogs[]` — per-node operational costs (gas, future: API costs)
-- `value_fee` — single workflow-level object: tier, percentage, classification method, confidence, reason
-- `total_fees` — sum of execution_fee + COGS + creation_fees (excludes post-paid value_fee)
-- `estimated_executions` — how many times the workflow will fire
+- `chain_id`, `native_token` — chain context
+- `execution_fee` — `Fee{amount, unit: "USD"}` flat per-run platform fee
+- `cogs[]` — `NodeCOGS{fee: Fee{amount, unit: "WEI"}}` per-node operational costs
+- `value_fee` — `ValueFee{fee: Fee{amount, unit: "PERCENTAGE"}}` workflow-level value capture
+- `discounts[]` — any applied fee discounts
 - `pricing_model` — `"v1"`
+- `warnings` — non-fatal estimation notes
+
+No totals — client computes. No `estimated_executions` — all fees are per-execution.
 
 ### Total workflow fee formula
 

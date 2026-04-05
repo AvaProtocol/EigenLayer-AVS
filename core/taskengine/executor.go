@@ -562,12 +562,12 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	// Update the execution record we created earlier with the final results
 	execution.EndAt = t1.UnixMilli()
-	execution.Status = convertToExecutionStatus(resultStatus)                                    // Based on analysis of all steps
-	execution.Error = executionError                                                             // Comprehensive error message from failed steps
-	execution.Steps = vm.ExecutionLogs                                                           // Contains all steps including failed ones
-	execution.ExecutionFee = &avsproto.Fee{Amount: "0", Unit: "USD"}                             // TODO: populate with actual execution fee
-	execution.Cogs = buildCOGSFromSteps(vm.ExecutionLogs)                                        // Build COGS from step-level gas data
-	execution.ValueFee = &avsproto.ValueFee{Fee: &avsproto.Fee{Amount: "0", Unit: "PERCENTAGE"}} // TODO: populate with actual value fee
+	execution.Status = convertToExecutionStatus(resultStatus) // Based on analysis of all steps
+	execution.Error = executionError                          // Comprehensive error message from failed steps
+	execution.Steps = vm.ExecutionLogs                        // Contains all steps including failed ones
+	execution.ExecutionFee = nil                              // Populated when execution fee billing is implemented
+	execution.Cogs = buildCOGSFromSteps(vm.ExecutionLogs)     // Actual COGS from step-level gas receipts
+	execution.ValueFee = nil                                  // Populated when value fee billing is implemented
 
 	// Ensure no NaN/Inf sneak into protobuf Values (which reject them)
 	sanitizeExecutionForPersistence(execution)

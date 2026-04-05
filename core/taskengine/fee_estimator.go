@@ -247,8 +247,7 @@ func (fe *FeeEstimator) resolveRunnerAndWalletCreation(ctx context.Context, req 
 	// Check if smart wallet already exists
 	code, err := fe.ethClient.CodeAt(ctx, runnerAddress, nil)
 	if err != nil {
-		fe.logger.Warn("Failed to check smart wallet deployment status", "address", runnerAddress.Hex(), "error", err)
-		return runnerAddress, false, nil, nil
+		return runnerAddress, false, nil, fmt.Errorf("failed to check smart wallet deployment status for %s: %w", runnerAddress.Hex(), err)
 	}
 
 	if len(code) > 0 {

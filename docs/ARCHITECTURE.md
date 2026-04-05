@@ -195,7 +195,7 @@ Location: `core/taskengine/fee_estimator.go`
 Fees have two independent components:
 
 **1. Operational costs (estimated separately):**
-- **Gas fees** — estimated per on-chain node (contract_write, eth_transfer, loop). Handled by `estimateGasFees()`.
+- **Gas fees** — estimated per on-chain node (contract_write, eth_transfer, loop). Handled by `estimateCOGS()`, which returns `NodeCOGS` entries.
 - **External API costs** — estimated per REST API node calling paid services (future). Estimated like gas.
 - Non-execution nodes (logic, reads) have zero operational cost.
 
