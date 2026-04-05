@@ -2,137 +2,114 @@
 
 ## Overview
 
-Workflow fees have two independent components:
+Workflow fees have three components, each with its own unit:
 
-1. **Operational costs** — gas fees for on-chain nodes, external API costs for paid services. These are estimated upfront and cover the cost of execution.
-2. **Value-capture fees** — a percentage of transaction value on on-chain execution nodes. This is the revenue model, based on urgency/importance of the action.
+| Component | Unit | Purpose |
+|-----------|------|---------|
+| `execution_fee` | USD | Flat per-run platform fee |
+| `cogs[]` | WEI | Per-node operational costs (gas, future: external API) |
+| `value_fee` | PERCENTAGE | Workflow-level value capture (% of tx value) |
 
-Non-execution nodes (logic, reads, API calls) have **no fees**. We do not charge for logical computation.
+Every fee field uses the `Fee{amount, unit}` structure — self-describing, no implicit units. Non-execution nodes (logic, reads, API calls) have **no fees**.
 
 ## Value-Capture Tiers
 
-Only on-chain execution nodes (`contract_write`, `eth_transfer`, `loop`) have value-capture fees. Tiers are pure pricing groups — meaning comes from classification logic, not the label.
+Tiers are pure pricing groups — meaning comes from classification logic, not the label.
 
 ### Decision rule
 
-> If this action **fails or is delayed**, does the user **lose money immediately**?
+> If this workflow **fails or is delayed**, does the user **lose money immediately**?
 >
-> **YES** → Tier 3
-> **NO, but improves outcome** → Tier 2
-> **Simple execution** → Tier 1
+> **YES** → Tier 3 &nbsp;|&nbsp; **NO, but improves outcome** → Tier 2 &nbsp;|&nbsp; **Simple execution** → Tier 1
 
 ### Tier definitions
 
 | Tier | Default % | Classification criteria | Examples |
 |------|-----------|----------------------|----------|
 | Tier 1 | 0.03% | Simple execution — user could do manually | ETH transfers, simple swaps |
-| Tier 2 | 0.09% | Optimization/convenience — nice to have, delay doesn't cause major loss | Rebalancing, DCA, scheduled swaps |
-| Tier 3 | 0.18% | Risk/urgency — must execute or user loses money, time-sensitive | Liquidation prevention, auto-repay, stop-loss, emergency exits |
+| Tier 2 | 0.09% | Optimization/convenience — delay doesn't cause major loss | Rebalancing, DCA, scheduled swaps |
+| Tier 3 | 0.18% | Risk/urgency — must execute or user loses money | Liquidation prevention, auto-repay, stop-loss |
 
 ### V1 vs V2 classification
 
-- **V1 (current):** All on-chain nodes default to Tier 1. Classification by protocol + action is not yet implemented.
-- **V2 (future):** Classify by protocol + action type. For example:
-  - `Uniswap.swap()` → Tier 1
-  - `AAVE.repay()` → Tier 3
-  - Rebalancing workflows → Tier 2
+- **V1 (current):** Rule-based. All workflows with on-chain nodes default to Tier 1.
+- **V2 (future):** LLM-based classification analyzing workflow purpose. e.g., `AAVE.repay()` → Tier 3, `Uniswap.swap()` → Tier 1.
 
 ## What has no fee
 
 | Node type | Fee | Reason |
 |-----------|-----|--------|
 | `contract_read` | Free | Read-only, no capital touched |
-| `rest_api` | Free (value-capture), but may incur external API costs | Off-chain call |
+| `rest_api` | Free (value-capture), but may incur external API COGS | Off-chain call |
 | `graphql_query` | Free | Off-chain query |
 | `custom_code` | Free | Logic/computation only |
 | `branch` | Free | Control flow |
 | `filter` | Free | Data filtering |
 | `balance` | Free | Read-only check |
 
-## Operational costs (estimated separately)
+## Operational costs (COGS)
 
-### Gas fees
+Gas costs are estimated per on-chain node via `estimateCOGS()`, returned as `NodeCOGS` entries with `Fee{amount, unit: "WEI"}`. Gas estimation is independent of the value-capture tier.
 
-Gas costs are estimated per on-chain node via `estimateCOGS()`, which returns a `NodeCOGS` entry per node. This covers the blockchain execution cost (EntryPoint, bundler, smart wallet operations). Gas estimation is independent of the value-capture tier.
+Default gas estimates:
+- `contract_write` — 150,000 gas units
+- `eth_transfer` — 50,000 gas units
+- `loop` — 300,000 gas units
 
-Nodes that incur gas:
-- `contract_write` — 150,000 gas estimate (conservative)
-- `eth_transfer` — 50,000 gas estimate (smart wallet transfer)
-- `loop` — 300,000 gas estimate (may contain contract writes)
+Smart wallet creation (if the user's wallet doesn't exist yet) is included as a COGS entry with `cost_type: "wallet_creation"`.
 
-### External API costs (future)
-
-When a workflow calls a paid external API (e.g., X/Twitter search API at $0.01/request), that cost is our COGS. This will be estimated upfront like gas — the cost is passed through to the user. Not yet implemented.
+**External API costs (future):** When a workflow calls a paid external API (e.g., X/Twitter search), that COGS will be estimated and included in the `cogs[]` array.
 
 ## Configuration
 
-Fee rates are optional. When not configured, hardcoded defaults are used.
+Fee rates are optional. Pointer-based YAML parsing: omitted fields use defaults, explicit `0.0` configures free tiers.
 
 ```yaml
-# In aggregator YAML config
 fee_rates:
+  execution_fee_usd: 0.02   # Flat per-execution platform fee
   tiers:
-    tier_1: 0.03     # Default pricing group
-    tier_2: 0.09     # Mid pricing group
-    tier_3: 0.18     # High pricing group
+    tier_1: 0.03             # Value-capture group 1
+    tier_2: 0.09             # Value-capture group 2
+    tier_3: 0.18             # Value-capture group 3
 ```
 
-### Pricing strategies
-
-**Beta (free execution):**
+**Beta (free):**
 ```yaml
 fee_rates:
+  execution_fee_usd: 0.0
   tiers:
     tier_1: 0.0
     tier_2: 0.0
     tier_3: 0.0
 ```
 
-**Premium (higher rates):**
-```yaml
-fee_rates:
-  tiers:
-    tier_1: 0.05
-    tier_3: 0.25
-```
-
 ## Billing & Settlement
 
-The API returns fees in mixed units: `execution_fee` in **USD**, `cogs` in **WEI**, `value_fee` in **PERCENTAGE**. Each field is self-describing via its `unit`. At settlement time, USD amounts are converted to native token (ETH) using the oracle price.
+The API returns fees in mixed units — each field is self-describing via `Fee.unit`.
 
 ### Enforcement split
 
 | Component | Unit | Enforcement | Rationale |
 |-----------|------|-------------|-----------|
-| `execution_fee` | USD | **Converted to ETH and included in UserOp** | Operational cost — converted at execution time, reverts if insufficient |
-| `cogs` (gas, API) | WEI | **Atomic in UserOp** — native token cost | Real cost — blockchain rejects if insufficient balance |
-| `value_fee` | PERCENTAGE | **Post-paid** — tracked off-chain after execution | Value-capture revenue — user experiences value first, pays after |
+| `execution_fee` | USD | **Converted to ETH at execution time, included in UserOp** | Reverts if insufficient balance |
+| `cogs` (gas, API) | WEI | **Atomic in UserOp** — native token cost | Blockchain rejects if insufficient |
+| `value_fee` | PERCENTAGE | **Post-paid** — tracked off-chain after execution | User experiences value first |
 
-No account balance system or prepaid deposits. The blockchain is the enforcement layer for hard costs — if the user's smart wallet doesn't have enough ETH, the UserOp reverts automatically.
-
-### How atomic fees work
-
-The `execution_fee` and `cogs` are packaged into the UserOp alongside the workflow's contract calls. The smart wallet must have enough ETH to cover all of it. If not, the entire transaction is rejected by the blockchain — no execution happens, no cost to Ava.
-
-### Why post-paid value fees?
-
-1. **UX** — User gets value first, pays after. Critical for urgent workflows (liquidation protection).
-2. **Bounded risk** — Ava only exposes margin (value_fee), never operational costs (gas/infra).
-3. **Effective free trial** — Worst case is one unpaid value_fee per user, which is a customer acquisition cost.
+No account balance system or prepaid deposits. The blockchain enforces hard costs — if the smart wallet doesn't have enough ETH, the UserOp reverts automatically.
 
 ### Settlement flow
 
 ```
 1. Build UserOp:
-   - Include workflow contract calls (swap, repay, transfer, etc.)
-   - Include execution_fee + COGS transfer to Ava's address
+   - Include workflow contract calls
+   - Include execution_fee (converted USD→ETH) + COGS transfer to Ava
 
-2. Submit UserOp to bundler:
-   - Wallet has enough ETH → executes → fees collected atomically
-   - Wallet doesn't have enough ETH → reverts → nothing happens
+2. Submit to bundler:
+   - Sufficient balance → executes → fees collected atomically
+   - Insufficient balance → reverts → nothing happens
 
-3. After successful execution, calculate value_fee:
-   - value_fee_eth = (tier_percentage × tx_value) / eth_price_at_execution
+3. After execution, calculate value_fee:
+   - value_fee_eth = (tier_percentage × tx_value) / eth_price
    - Track as outstanding balance (may go negative)
 
 4. If outstanding value_fee not repaid:
@@ -145,40 +122,164 @@ The `execution_fee` and `cogs` are packaged into the UserOp alongside the workfl
 
 | File | Purpose |
 |------|---------|
-| `core/taskengine/fee_estimator.go` | Fee estimation: COGS, value classification, execution fee |
-| `core/config/config.go` | `FeeRatesConfig` struct, YAML parsing, defaults |
-| `protobuf/avs.proto` | `EstimateFeesResp`, `NodeCOGS`, `ValueFee`, `ExecutionTier` |
+| `core/taskengine/fee_estimator.go` | `EstimateFees()`, `estimateCOGS()`, `classifyWorkflowValue()`, `buildCOGSFromSteps()` |
+| `core/config/config.go` | `FeeRatesConfig` struct, YAML parsing with pointer fields |
+| `protobuf/avs.proto` | `Fee`, `NativeToken`, `NodeCOGS`, `ValueFee`, `EstimateFeesResp`, `Execution` |
 | `config/aggregator.example.yaml` | Reference YAML with fee config |
 
 ### Fee estimation flow
 
 ```
 EstimateFees(req)
-  ├─ estimateSmartWalletCreation()   → wallet deployment gas (if needed)
-  ├─ execution_fee                   → flat per-run platform fee ($0.02)
-  ├─ estimateCOGS()                  → per-node gas costs (contract_write, eth_transfer, loop)
-  ├─ classifyWorkflowValue()         → workflow-level tier classification (V1: rule-based)
-  └─ total                           → execution_fee + COGS (value_fee settled post-execution)
+  ├─ resolveRunnerAndWalletCreation() → runner address + wallet creation COGS (if needed)
+  ├─ execution_fee                    → Fee{amount: "0.02", unit: "USD"}
+  ├─ estimateCOGS()                   → NodeCOGS[] with Fee{amount, unit: "WEI"} per on-chain node
+  ├─ classifyWorkflowValue()          → ValueFee{fee: Fee{amount, unit: "PERCENTAGE"}, tier, ...}
+  └─ response                         → flat EstimateFeesResp (no totals, client computes)
 ```
 
-### Response structure
+### Proto messages
 
-`EstimateFeesResp` (flat, not nested):
-- `chain_id`, `native_token` — chain context
-- `execution_fee` — `Fee{amount, unit: "USD"}` flat per-run platform fee
-- `cogs[]` — `NodeCOGS{fee: Fee{amount, unit: "WEI"}}` per-node operational costs
-- `value_fee` — `ValueFee{fee: Fee{amount, unit: "PERCENTAGE"}}` workflow-level value capture
-- `discounts[]` — any applied fee discounts
-- `pricing_model` — `"v1"`
-- `warnings` — non-fatal estimation notes
+```protobuf
+message Fee {
+  string amount = 1;    // Numeric value as string
+  string unit = 2;      // "USD", "WEI", "PERCENTAGE"
+}
 
-No totals — client computes. No `estimated_executions` — all fees are per-execution.
+message NativeToken {
+  string symbol = 1;    // e.g., "ETH"
+  int32 decimals = 2;   // e.g., 18
+}
 
-### Total workflow fee formula
+message NodeCOGS {
+  string node_id = 1;
+  string cost_type = 2; // "gas", "external_api", "wallet_creation"
+  Fee fee = 3;           // {amount: "150000000000000", unit: "WEI"}
+  string gas_units = 4;
+}
+
+message ValueFee {
+  Fee fee = 1;                       // {amount: "0.03", unit: "PERCENTAGE"}
+  ExecutionTier tier = 2;
+  string value_base = 3;            // "input_token_value"
+  string classification_method = 4; // "rule_based" or "llm"
+  float confidence = 5;
+  string reason = 6;
+}
+```
+
+### EstimateFeesResp example responses
+
+**Workflow 1: Alert-only** (contract_read → branch → rest_api)
+```json
+{
+  "success": true,
+  "chain_id": "11155111",
+  "native_token": { "symbol": "ETH", "decimals": 18 },
+  "execution_fee": { "amount": "0.020000", "unit": "USD" },
+  "cogs": [],
+  "value_fee": {
+    "fee": { "amount": "0", "unit": "PERCENTAGE" },
+    "tier": "EXECUTION_TIER_UNSPECIFIED",
+    "value_base": "",
+    "classification_method": "rule_based",
+    "confidence": 1.0,
+    "reason": "Workflow has no on-chain execution nodes — no value-capture fee"
+  },
+  "discounts": [],
+  "pricing_model": "v1"
+}
+```
+
+**Workflow 2: Simple swap** (contract_read → branch → contract_write)
+```json
+{
+  "success": true,
+  "chain_id": "11155111",
+  "native_token": { "symbol": "ETH", "decimals": 18 },
+  "execution_fee": { "amount": "0.020000", "unit": "USD" },
+  "cogs": [
+    {
+      "node_id": "write1",
+      "cost_type": "gas",
+      "fee": { "amount": "2575744500000", "unit": "WEI" },
+      "gas_units": "150000"
+    }
+  ],
+  "value_fee": {
+    "fee": { "amount": "0.03", "unit": "PERCENTAGE" },
+    "tier": "EXECUTION_TIER_1",
+    "value_base": "input_token_value",
+    "classification_method": "rule_based",
+    "confidence": 1.0,
+    "reason": "V1 default: workflow contains on-chain execution nodes"
+  },
+  "discounts": [],
+  "pricing_model": "v1"
+}
+```
+
+**Workflow 3: Liquidation protection** (contract_read → branch → contract_write → eth_transfer, new wallet)
+```json
+{
+  "success": true,
+  "chain_id": "11155111",
+  "native_token": { "symbol": "ETH", "decimals": 18 },
+  "execution_fee": { "amount": "0.020000", "unit": "USD" },
+  "cogs": [
+    {
+      "node_id": "repay1",
+      "cost_type": "gas",
+      "fee": { "amount": "2575744500000", "unit": "WEI" },
+      "gas_units": "150000"
+    },
+    {
+      "node_id": "transfer1",
+      "cost_type": "gas",
+      "fee": { "amount": "858581500000", "unit": "WEI" },
+      "gas_units": "50000"
+    },
+    {
+      "node_id": "_wallet_creation",
+      "cost_type": "wallet_creation",
+      "fee": { "amount": "6730592094800", "unit": "WEI" }
+    }
+  ],
+  "value_fee": {
+    "fee": { "amount": "0.03", "unit": "PERCENTAGE" },
+    "tier": "EXECUTION_TIER_1",
+    "value_base": "input_token_value",
+    "classification_method": "rule_based",
+    "confidence": 1.0,
+    "reason": "V1 default: workflow contains on-chain execution nodes"
+  },
+  "discounts": [],
+  "pricing_model": "v1",
+  "warnings": ["Gas estimates use conservative fallback values. Actual costs may vary."]
+}
+```
+
+### Execution response (after task runs)
+
+The `Execution` message uses the same `Fee`/`NodeCOGS`/`ValueFee` structure:
+
+```protobuf
+message Execution {
+  Fee execution_fee = 7;            // nil until billing implemented
+  repeated NodeCOGS cogs = 9;      // Actual gas from step receipts (via buildCOGSFromSteps)
+  ValueFee value_fee = 10;         // nil until billing implemented
+}
+```
+
+- `execution_fee` and `value_fee` are `nil` until the billing system is implemented (nil = "not computed", not "free")
+- `cogs[]` is populated from actual step-level gas receipts after execution — these are real costs, not estimates
+- Step-level gas tracking (`gas_used`, `gas_price`, `total_gas_cost` per step) is preserved as raw execution data
+
+### Total fee formula
 
 ```
-Total per execution = execution_fee + Σ(cogs) + (tier_percentage × tx_value)
-                      |____________atomic_____________|   |___post-paid___|
+Total per execution = execution_fee + Σ(cogs) + (value_fee.percentage × tx_value)
+                      |_______atomic (in UserOp)_______|   |____post-paid____|
 ```
 
-`execution_fee` and `cogs` are known at estimation time. `value_fee` depends on actual transaction value at execution time.
+`execution_fee` and `cogs` are known at estimation time. `value_fee` depends on actual transaction value at execution time. No totals in the API — client computes.

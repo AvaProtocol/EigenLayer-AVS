@@ -192,32 +192,26 @@ Uses ERC-6900 modular accounts with ERC-4337 account abstraction:
 
 Location: `core/taskengine/fee_estimator.go`
 
-Fees have two independent components:
+Three fee components, each with its own unit via `Fee{amount, unit}`:
 
-**1. Operational costs (estimated separately):**
-- **Gas fees** — estimated per on-chain node (contract_write, eth_transfer, loop). Handled by `estimateCOGS()`, which returns `NodeCOGS` entries.
-- **External API costs** — estimated per REST API node calling paid services (future). Estimated like gas.
-- Non-execution nodes (logic, reads) have zero operational cost.
+| Component | Unit | Purpose |
+|-----------|------|---------|
+| `execution_fee` | USD | Flat $0.02 per-run platform fee |
+| `cogs[]` | WEI | Per-node gas costs via `estimateCOGS()` |
+| `value_fee` | PERCENTAGE | Workflow-level value capture via `classifyWorkflowValue()` |
 
-**2. Value-capture fees (tier-based % of transaction value):**
+Value-capture tiers (pure pricing groups, V1 defaults all to Tier 1):
 
-Only on-chain execution nodes have value-capture fees. Tiers are based on urgency/importance of the action:
+| Tier | Default % | Criteria |
+|------|-----------|----------|
+| Tier 1 | 0.03% | Simple execution |
+| Tier 2 | 0.09% | Optimization/convenience |
+| Tier 3 | 0.18% | Risk/urgency — must execute or user loses money |
 
-| Tier | Criteria | Default % |
-|------|----------|-----------|
-| Tier 1 | Simple execution — user could do manually | 0.03% |
-| Tier 2 | Optimization/convenience — nice to have, delay doesn't cause loss | 0.09% |
-| Tier 3 | Risk/urgency — must execute or user loses money | 0.18% |
+Hard costs (`execution_fee` + `cogs`) enforced atomically in UserOp. `value_fee` is post-paid.
+Non-execution nodes are free. Both `EstimateFeesResp` and `Execution` use the same `Fee`/`NodeCOGS`/`ValueFee` structure.
 
-**Decision rule:** "If this action fails or is delayed, does the user lose money immediately?" YES → Tier 3. NO but improves outcome → Tier 2. Simple → Tier 1. Tiers are pure pricing groups — meaning comes from classification logic, not the label.
-
-Non-execution nodes (contract_read, rest_api, branch, filter, custom_code, balance, graphql) have **no fees** — they are free.
-
-V1: all on-chain nodes default to Tier 1. V2 will classify by protocol + action (e.g., AAVE.repay → Tier 3, Uniswap.swap → Tier 1).
-
-See [docs/FEE_ESTIMATION.md](FEE_ESTIMATION.md) for full details.
-
-Total workflow fee = execution_fee + COGS (gas + API costs) + value_fee (tier % of tx value). Hard costs (execution_fee + COGS) are enforced atomically in the UserOp; value_fee is post-paid.
+See [docs/FEE_ESTIMATION.md](FEE_ESTIMATION.md) for full details, simulated responses, and billing design.
 
 ## Communication Protocol
 
