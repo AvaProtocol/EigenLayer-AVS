@@ -565,9 +565,9 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	execution.Status = convertToExecutionStatus(resultStatus) // Based on analysis of all steps
 	execution.Error = executionError                          // Comprehensive error message from failed steps
 	execution.Steps = vm.ExecutionLogs                        // Contains all steps including failed ones
-	execution.ExecutionFee = nil                              // Populated when execution fee billing is implemented
-	execution.Cogs = buildCOGSFromSteps(vm.ExecutionLogs)     // Actual COGS from step-level gas receipts
-	execution.ValueFee = nil                                  // Populated when value fee billing is implemented
+	execution.ExecutionFee = buildExecutionFee(x.engine.config.FeeRates)
+	execution.Cogs = buildCOGSFromSteps(vm.ExecutionLogs)
+	execution.ValueFee = buildValueFee(vm.ExecutionLogs, x.engine.config.FeeRates)
 
 	// Ensure no NaN/Inf sneak into protobuf Values (which reject them)
 	sanitizeExecutionForPersistence(execution)

@@ -265,14 +265,15 @@ The `Execution` message uses the same `Fee`/`NodeCOGS`/`ValueFee` structure:
 
 ```protobuf
 message Execution {
-  Fee execution_fee = 7;            // nil until billing implemented
+  Fee execution_fee = 7;            // Fee{amount: "0.020000", unit: "USD"}
   repeated NodeCOGS cogs = 9;      // Actual gas from step receipts (via buildCOGSFromSteps)
-  ValueFee value_fee = 10;         // nil until billing implemented
+  ValueFee value_fee = 10;         // Workflow-level value fee (via buildValueFee)
 }
 ```
 
-- `execution_fee` and `value_fee` are `nil` until the billing system is implemented (nil = "not computed", not "free")
-- `cogs[]` is populated from actual step-level gas receipts after execution — these are real costs, not estimates
+- `execution_fee` — always populated from config (known upfront)
+- `cogs[]` — populated from actual step-level gas receipts after execution (real costs, not estimates)
+- `value_fee` — populated after execution based on step composition (nil for pending executions where steps are unknown)
 - Step-level gas tracking (`gas_used`, `gas_price`, `total_gas_cost` per step) is preserved as raw execution data
 
 ### Total fee formula

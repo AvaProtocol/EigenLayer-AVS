@@ -501,6 +501,51 @@ func getDefaultDiscountRules() *DiscountRules {
 	}
 }
 
+// buildExecutionFee returns the execution fee from config (or default).
+func buildExecutionFee(feeRatesConfig *config.FeeRatesConfig) *avsproto.Fee {
+	rates := convertFeeRatesConfig(feeRatesConfig)
+	return &avsproto.Fee{
+		Amount: fmt.Sprintf("%.6f", rates.ExecutionFeeUSD),
+		Unit:   "USD",
+	}
+}
+
+// buildValueFee classifies the workflow and returns the value fee.
+// Uses the task's nodes to determine if on-chain execution is present.
+func buildValueFee(steps []*avsproto.Execution_Step, feeRatesConfig *config.FeeRatesConfig) *avsproto.ValueFee {
+	rates := convertFeeRatesConfig(feeRatesConfig)
+
+	hasOnChainSteps := false
+	for _, step := range steps {
+		stepType := step.Type
+		if stepType == avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String() ||
+			stepType == avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String() ||
+			stepType == avsproto.NodeType_NODE_TYPE_LOOP.String() {
+			hasOnChainSteps = true
+			break
+		}
+	}
+
+	if !hasOnChainSteps {
+		return &avsproto.ValueFee{
+			Fee:                  &avsproto.Fee{Amount: "0", Unit: "PERCENTAGE"},
+			Tier:                 avsproto.ExecutionTier_EXECUTION_TIER_UNSPECIFIED,
+			ClassificationMethod: "rule_based",
+			Confidence:           1.0,
+			Reason:               "Workflow has no on-chain execution nodes",
+		}
+	}
+
+	return &avsproto.ValueFee{
+		Fee:                  &avsproto.Fee{Amount: fmt.Sprintf("%.2f", rates.Tier1FeePercentage), Unit: "PERCENTAGE"},
+		Tier:                 avsproto.ExecutionTier_EXECUTION_TIER_1,
+		ValueBase:            "input_token_value",
+		ClassificationMethod: "rule_based",
+		Confidence:           1.0,
+		Reason:               "V1 default: workflow contains on-chain execution nodes",
+	}
+}
+
 // buildCOGSFromSteps converts per-step gas data from execution logs into NodeCOGS entries.
 // This is used after execution to build the actual COGS from real gas receipts.
 func buildCOGSFromSteps(steps []*avsproto.Execution_Step) []*avsproto.NodeCOGS {

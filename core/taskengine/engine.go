@@ -2921,9 +2921,9 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Error:        executionError,                         // Comprehensive error message from failed steps
 		Steps:        vm.ExecutionLogs,                       // Now contains both trigger and node steps (including failed ones)
 		Index:        task.ExecutionCount,                    // Use current execution count for simulation (0-based)
-		ExecutionFee: nil,                                    // Populated when execution fee billing is implemented
-		Cogs:         buildCOGSFromSteps(vm.ExecutionLogs),   // Actual COGS from step-level gas receipts
-		ValueFee:     nil,                                    // Populated when value fee billing is implemented
+		ExecutionFee: buildExecutionFee(n.config.FeeRates),
+		Cogs:         buildCOGSFromSteps(vm.ExecutionLogs),
+		ValueFee:     buildValueFee(vm.ExecutionLogs, n.config.FeeRates),
 	}
 
 	// Log execution status based on result type
@@ -3265,12 +3265,12 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 	return &avsproto.Execution{
 		Id:           payload.ExecutionId,
 		Status:       *execStatus,
-		StartAt:      time.Now().UnixMilli(),       // Approximate start time
-		Steps:        []*avsproto.Execution_Step{}, // Empty steps for pending
-		Index:        pendingIndex,                 // Use pre-assigned or newly assigned index
-		ExecutionFee: nil,                          // Unknown until execution completes
-		Cogs:         []*avsproto.NodeCOGS{},
-		ValueFee:     nil, // Unknown until execution completes
+		StartAt:      time.Now().UnixMilli(),               // Approximate start time
+		Steps:        []*avsproto.Execution_Step{},         // Empty steps for pending
+		Index:        pendingIndex,                         // Use pre-assigned or newly assigned index
+		ExecutionFee: buildExecutionFee(n.config.FeeRates), // Known upfront
+		Cogs:         []*avsproto.NodeCOGS{},               // Unknown until execution completes
+		ValueFee:     nil,                                  // Unknown until execution completes
 	}, nil
 }
 
