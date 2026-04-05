@@ -6556,11 +6556,11 @@ type EstimateFeesResp struct {
 	ValueFee *ValueFee `protobuf:"bytes,6,opt,name=value_fee,json=valueFee,proto3" json:"value_fee,omitempty"`
 	// Smart wallet creation (one-time, if needed)
 	CreationFees *SmartWalletCreationFee `protobuf:"bytes,8,opt,name=creation_fees,json=creationFees,proto3" json:"creation_fees,omitempty"`
-	// Totals
-	TotalFees      *FeeAmount     `protobuf:"bytes,9,opt,name=total_fees,json=totalFees,proto3" json:"total_fees,omitempty"` // Sum of execution_fee + total_cogs + value_fee
+	// Totals (upfront estimated charges only — excludes post-paid value_fee)
+	TotalFees      *FeeAmount     `protobuf:"bytes,9,opt,name=total_fees,json=totalFees,proto3" json:"total_fees,omitempty"` // Sum of execution_fee + cogs + creation_fees
 	Discounts      []*FeeDiscount `protobuf:"bytes,10,rep,name=discounts,proto3" json:"discounts,omitempty"`
 	TotalDiscounts *FeeAmount     `protobuf:"bytes,11,opt,name=total_discounts,json=totalDiscounts,proto3" json:"total_discounts,omitempty"`
-	FinalTotal     *FeeAmount     `protobuf:"bytes,12,opt,name=final_total,json=finalTotal,proto3" json:"final_total,omitempty"` // After discounts
+	FinalTotal     *FeeAmount     `protobuf:"bytes,12,opt,name=final_total,json=finalTotal,proto3" json:"final_total,omitempty"` // total_fees after discounts (still excludes value_fee)
 	// Estimation metadata
 	EstimatedExecutions int64    `protobuf:"varint,13,opt,name=estimated_executions,json=estimatedExecutions,proto3" json:"estimated_executions,omitempty"` // How many times the workflow will fire
 	EstimatedAt         int64    `protobuf:"varint,14,opt,name=estimated_at,json=estimatedAt,proto3" json:"estimated_at,omitempty"`

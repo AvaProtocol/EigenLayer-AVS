@@ -1449,11 +1449,11 @@ message EstimateFeesResp {
   // Smart wallet creation (one-time, if needed)
   SmartWalletCreationFee creation_fees = 8;
 
-  // Totals
-  FeeAmount total_fees = 9;                    // Sum of execution_fee + total_cogs + value_fee
+  // Totals (upfront estimated charges only — excludes post-paid value_fee)
+  FeeAmount total_fees = 9;                    // Sum of execution_fee + cogs + creation_fees
   repeated FeeDiscount discounts = 10;
   FeeAmount total_discounts = 11;
-  FeeAmount final_total = 12;                  // After discounts
+  FeeAmount final_total = 12;                  // total_fees after discounts (still excludes value_fee)
 
   // Estimation metadata
   int64 estimated_executions = 13;             // How many times the workflow will fire

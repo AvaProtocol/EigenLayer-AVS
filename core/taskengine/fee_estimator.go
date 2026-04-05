@@ -202,6 +202,7 @@ func (fe *FeeEstimator) EstimateFees(ctx context.Context, req *avsproto.Estimate
 		}
 	}
 	totalFees, _ := fe.convertToFeeAmount(totalWei)
+	zeroFee, _ := fe.convertUSDToFeeAmount(0)
 
 	// Step 6: Price data metadata
 	priceDataSource := "moralis"
@@ -225,8 +226,8 @@ func (fe *FeeEstimator) EstimateFees(ctx context.Context, req *avsproto.Estimate
 		ValueFee:            valueFee,
 		CreationFees:        creationFees,
 		TotalFees:           totalFees,
-		Discounts:           nil, // TODO: re-implement discounts for new structure
-		TotalDiscounts:      nil,
+		Discounts:           []*avsproto.FeeDiscount{}, // TODO: re-implement discounts for new structure
+		TotalDiscounts:      zeroFee,
 		FinalTotal:          totalFees, // No discounts applied yet
 		EstimatedExecutions: estimatedExecutions,
 		EstimatedAt:         time.Now().UnixMilli(),

@@ -217,7 +217,7 @@ V1: all on-chain nodes default to Tier 1. V2 will classify by protocol + action 
 
 See [docs/FEE_ESTIMATION.md](FEE_ESTIMATION.md) for full details.
 
-Total workflow fee = gas costs + sum of value-capture fees on executed on-chain nodes.
+Total workflow fee = execution_fee + COGS (gas + API costs) + value_fee (tier % of tx value). Hard costs (execution_fee + COGS) are enforced atomically in the UserOp; value_fee is post-paid.
 
 ## Communication Protocol
 

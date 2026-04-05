@@ -53,7 +53,7 @@ Only on-chain execution nodes (`contract_write`, `eth_transfer`, `loop`) have va
 
 ### Gas fees
 
-Gas costs are estimated per on-chain node via `estimateGasFees()`. This covers the blockchain execution cost (EntryPoint, bundler, smart wallet operations). Gas estimation is independent of the value-capture tier.
+Gas costs are estimated per on-chain node via `estimateCOGS()`, which returns a `NodeCOGS` entry per node. This covers the blockchain execution cost (EntryPoint, bundler, smart wallet operations). Gas estimation is independent of the value-capture tier.
 
 Nodes that incur gas:
 - `contract_write` — 150,000 gas estimate (conservative)
@@ -167,7 +167,7 @@ EstimateFees(req)
 - `execution_fee` — flat per-run platform fee
 - `cogs[]` — per-node operational costs (gas, future: API costs)
 - `value_fee` — single workflow-level object: tier, percentage, classification method, confidence, reason
-- `total_fees` — sum of execution_fee + COGS (value_fee is % at execution time, not included)
+- `total_fees` — sum of execution_fee + COGS + creation_fees (excludes post-paid value_fee)
 - `estimated_executions` — how many times the workflow will fire
 - `pricing_model` — `"v1"`
 

@@ -221,12 +221,13 @@ type ConfigRaw struct {
 	MoralisApiKey string `yaml:"moralis_api_key"`
 
 	// Fee structure: execution_fee + COGS + value tiers
+	// Pointer fields: nil = use default, explicit 0.0 = free tier
 	FeeRates struct {
-		ExecutionFeeUSD float64 `yaml:"execution_fee_usd"` // $0.02 default
+		ExecutionFeeUSD *float64 `yaml:"execution_fee_usd"` // $0.02 default
 		Tiers           struct {
-			Tier1 float64 `yaml:"tier_1"` // 0.03% default
-			Tier2 float64 `yaml:"tier_2"` // 0.09% default
-			Tier3 float64 `yaml:"tier_3"` // 0.18% default
+			Tier1 *float64 `yaml:"tier_1"` // 0.03% default
+			Tier2 *float64 `yaml:"tier_2"` // 0.09% default
+			Tier3 *float64 `yaml:"tier_3"` // 0.18% default
 		} `yaml:"tiers"`
 	} `yaml:"fee_rates"`
 
@@ -535,18 +536,19 @@ func ReadYamlConfig(path string, o interface{}) error {
 	return nil
 }
 
-// loadFeeRatesFromConfig loads fee config from YAML with fallback to defaults
+// loadFeeRatesFromConfig loads fee config from YAML with fallback to defaults.
+// Pointer fields distinguish "missing" (nil → use default) from explicit zero (0.0 → free tier).
 func loadFeeRatesFromConfig(configRates struct {
-	ExecutionFeeUSD float64 `yaml:"execution_fee_usd"`
+	ExecutionFeeUSD *float64 `yaml:"execution_fee_usd"`
 	Tiers           struct {
-		Tier1 float64 `yaml:"tier_1"`
-		Tier2 float64 `yaml:"tier_2"`
-		Tier3 float64 `yaml:"tier_3"`
+		Tier1 *float64 `yaml:"tier_1"`
+		Tier2 *float64 `yaml:"tier_2"`
+		Tier3 *float64 `yaml:"tier_3"`
 	} `yaml:"tiers"`
 }) *FeeRatesConfig {
-	getFloat64 := func(configValue, hardcodedDefault float64) float64 {
-		if configValue != 0.0 {
-			return configValue
+	getFloat64 := func(configValue *float64, hardcodedDefault float64) float64 {
+		if configValue != nil {
+			return *configValue
 		}
 		return hardcodedDefault
 	}
