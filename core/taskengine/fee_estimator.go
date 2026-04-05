@@ -4,11 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
-	"github.com/AvaProtocol/EigenLayer-AVS/core/services"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	ethereum "github.com/ethereum/go-ethereum"
@@ -142,8 +140,9 @@ func (fe *FeeEstimator) getChainID(ctx context.Context) (int64, error) {
 	return fe.chainID, nil
 }
 
-// EstimateFees provides comprehensive fee estimation for a workflow.
-// Response structure: execution_fee + cogs[] + value_fee = total
+// EstimateFees provides per-execution fee estimation for a workflow.
+// Response: execution_fee (USD) + cogs[] (WEI) + value_fee (PERCENTAGE)
+// No totals — client computes. All fees are per-execution.
 func (fe *FeeEstimator) EstimateFees(ctx context.Context, req *avsproto.EstimateFeesReq) (*avsproto.EstimateFeesResp, error) {
 	chainID, err := fe.getChainID(ctx)
 	if err != nil {
@@ -160,8 +159,8 @@ func (fe *FeeEstimator) EstimateFees(ctx context.Context, req *avsproto.Estimate
 		"runner", req.Runner,
 		"chain_id", chainID)
 
-	// Step 1: Smart wallet creation check
-	runnerAddress, creationFees, err := fe.estimateSmartWalletCreation(ctx, req)
+	// Step 1: Resolve runner address for gas estimation
+	runnerAddress, walletCreationNeeded, walletCreationGasWei, err := fe.resolveRunnerAndWalletCreation(ctx, req)
 	if err != nil {
 		return &avsproto.EstimateFeesResp{
 			Success:   false,
@@ -170,11 +169,8 @@ func (fe *FeeEstimator) EstimateFees(ctx context.Context, req *avsproto.Estimate
 		}, nil
 	}
 
-	// Step 2: Flat per-execution platform fee
-	executionFee, _ := fe.convertUSDToFeeAmount(fe.feeRates.ExecutionFeeUSD)
-
-	// Step 3: COGS — per-node operational costs (gas for on-chain, future: API costs)
-	cogs, totalCogsWei, err := fe.estimateCOGS(ctx, req, runnerAddress)
+	// Step 2: COGS — per-node operational costs
+	cogs, err := fe.estimateCOGS(ctx, req, runnerAddress)
 	if err != nil {
 		return &avsproto.EstimateFeesResp{
 			Success:   false,
@@ -183,80 +179,60 @@ func (fe *FeeEstimator) EstimateFees(ctx context.Context, req *avsproto.Estimate
 		}, nil
 	}
 
-	// Step 4: Value fee — workflow-level classification (V1: rule-based)
-	durationMinutes := int64(0)
-	if req.ExpireAt > req.CreatedAt {
-		durationMinutes = (req.ExpireAt - req.CreatedAt) / (1000 * 60)
+	// Add wallet creation as a COGS entry if needed
+	if walletCreationNeeded {
+		cogs = append(cogs, &avsproto.NodeCOGS{
+			NodeId:   "_wallet_creation",
+			CostType: "wallet_creation",
+			Fee:      &avsproto.Fee{Amount: walletCreationGasWei.String(), Unit: "WEI"},
+		})
 	}
-	estimatedExecutions := fe.estimateExecutionCount(req.Trigger, durationMinutes, req.MaxExecution)
+
+	// Step 3: Value fee — workflow-level classification
 	valueFee := fe.classifyWorkflowValue(req)
 
-	// Step 5: Calculate total (execution_fee + COGS + creation; value_fee is % at execution time)
-	totalWei := new(big.Int).Set(totalCogsWei)
-	if execWei, ok := new(big.Int).SetString(executionFee.NativeTokenAmount, 10); ok {
-		totalWei.Add(totalWei, execWei)
-	}
-	if creationFees != nil && creationFees.CreationFee != nil {
-		if createWei, ok := new(big.Int).SetString(creationFees.CreationFee.NativeTokenAmount, 10); ok {
-			totalWei.Add(totalWei, createWei)
-		}
-	}
-	totalFees, _ := fe.convertToFeeAmount(totalWei)
-	zeroFee, _ := fe.convertUSDToFeeAmount(0)
-
-	// Step 6: Price data metadata
-	priceDataSource := "moralis"
-	priceDataAge := int64(0)
-	if moralisService, ok := fe.priceService.(*services.MoralisService); ok {
-		priceDataAge = moralisService.GetPriceDataAge(chainID)
-	} else {
-		priceDataSource = "fallback"
-	}
+	nativeTokenSymbol := fe.priceService.GetNativeTokenSymbol(chainID)
 
 	fe.logger.Info("✅ Fee estimation completed",
-		"execution_fee_usd", executionFee.UsdAmount,
+		"execution_fee_usd", fe.feeRates.ExecutionFeeUSD,
 		"cogs_count", len(cogs),
-		"value_fee_tier", valueFee.Tier.String(),
-		"total_usd", totalFees.UsdAmount)
+		"value_fee_tier", valueFee.Tier.String())
 
 	return &avsproto.EstimateFeesResp{
-		Success:             true,
-		ExecutionFee:        executionFee,
-		Cogs:                cogs,
-		ValueFee:            valueFee,
-		CreationFees:        creationFees,
-		TotalFees:           totalFees,
-		Discounts:           []*avsproto.FeeDiscount{}, // TODO: re-implement discounts for new structure
-		TotalDiscounts:      zeroFee,
-		FinalTotal:          totalFees, // No discounts applied yet
-		EstimatedExecutions: estimatedExecutions,
-		EstimatedAt:         time.Now().UnixMilli(),
-		ChainId:             fmt.Sprintf("%d", chainID),
-		PriceDataSource:     priceDataSource,
-		PriceDataAgeSeconds: priceDataAge,
-		Warnings:            fe.generateWarnings(cogs),
-		Recommendations:     nil,
-		PricingModel:        "v1",
+		Success: true,
+		ChainId: fmt.Sprintf("%d", chainID),
+		NativeToken: &avsproto.NativeToken{
+			Symbol:   nativeTokenSymbol,
+			Decimals: 18,
+		},
+		ExecutionFee: &avsproto.Fee{
+			Amount: fmt.Sprintf("%.6f", fe.feeRates.ExecutionFeeUSD),
+			Unit:   "USD",
+		},
+		Cogs:         cogs,
+		ValueFee:     valueFee,
+		Discounts:    []*avsproto.FeeDiscount{},
+		PricingModel: "v1",
+		Warnings:     fe.generateWarnings(cogs),
 	}, nil
 }
 
-// estimateSmartWalletCreation determines if smart wallet creation is needed and estimates costs
-func (fe *FeeEstimator) estimateSmartWalletCreation(ctx context.Context, req *avsproto.EstimateFeesReq) (common.Address, *avsproto.SmartWalletCreationFee, error) {
+// resolveRunnerAndWalletCreation resolves the runner address and checks if wallet creation is needed.
+// Returns the runner address, whether creation is needed, and the estimated creation gas cost in wei.
+func (fe *FeeEstimator) resolveRunnerAndWalletCreation(ctx context.Context, req *avsproto.EstimateFeesReq) (common.Address, bool, *big.Int, error) {
 	var runnerAddress common.Address
 
-	// Try to get runner from request field first, then from input_variables
 	if req.Runner != "" {
 		if !common.IsHexAddress(req.Runner) {
-			return common.Address{}, nil, fmt.Errorf("invalid runner address format: %s", req.Runner)
+			return common.Address{}, false, nil, fmt.Errorf("invalid runner address format: %s", req.Runner)
 		}
 		runnerAddress = common.HexToAddress(req.Runner)
 	} else {
-		// Try to extract from input_variables.settings.runner
 		if settingsVal, ok := req.InputVariables["settings"]; ok {
 			if settingsMap, ok := settingsVal.AsInterface().(map[string]interface{}); ok {
 				if runner, ok := settingsMap["runner"].(string); ok && runner != "" {
 					if !common.IsHexAddress(runner) {
-						return common.Address{}, nil, fmt.Errorf("invalid runner address in settings: %s", runner)
+						return common.Address{}, false, nil, fmt.Errorf("invalid runner address in settings: %s", runner)
 					}
 					runnerAddress = common.HexToAddress(runner)
 				}
@@ -264,65 +240,32 @@ func (fe *FeeEstimator) estimateSmartWalletCreation(ctx context.Context, req *av
 		}
 	}
 
-	// If no runner found, return error as we need it for gas estimation
 	if (runnerAddress == common.Address{}) {
-		return common.Address{}, nil, fmt.Errorf("runner address not found in request or input_variables")
+		return common.Address{}, false, nil, fmt.Errorf("runner address not found in request or input_variables")
 	}
 
 	// Check if smart wallet already exists
 	code, err := fe.ethClient.CodeAt(ctx, runnerAddress, nil)
 	if err != nil {
 		fe.logger.Warn("Failed to check smart wallet deployment status", "address", runnerAddress.Hex(), "error", err)
-		// Continue with assumption that wallet exists to avoid blocking fee estimation
-		return runnerAddress, &avsproto.SmartWalletCreationFee{
-			CreationRequired: false,
-			WalletAddress:    runnerAddress.Hex(),
-		}, nil
+		return runnerAddress, false, nil, nil
 	}
 
-	creationRequired := len(code) == 0
-	smartWalletFee := &avsproto.SmartWalletCreationFee{
-		CreationRequired: creationRequired,
-		WalletAddress:    runnerAddress.Hex(),
+	if len(code) > 0 {
+		return runnerAddress, false, nil, nil
 	}
 
-	if creationRequired {
-		fe.logger.Info("Smart wallet creation required", "address", runnerAddress.Hex())
-
-		// Estimate gas for smart wallet creation
-		creationGas, gasPrice, err := fe.estimateWalletCreationGas(ctx, runnerAddress)
-		if err != nil {
-			fe.logger.Warn("Failed to estimate wallet creation gas", "error", err)
-			// Use fallback values
-			creationGas = big.NewInt(200000) // Conservative estimate
-			gasPrice = big.NewInt(int64(DefaultGasPrice))
-		}
-
-		creationCostWei := new(big.Int).Mul(creationGas, gasPrice)
-		creationFee, err := fe.convertToFeeAmount(creationCostWei)
-		if err != nil {
-			return common.Address{}, nil, fmt.Errorf("failed to convert creation fee: %w", err)
-		}
-
-		// Recommend initial funding (creation cost + buffer for first execution)
-		fundingAmountWei := new(big.Int).Mul(creationCostWei, big.NewInt(2)) // 2x buffer
-		initialFunding, err := fe.convertToFeeAmount(fundingAmountWei)
-		if err != nil {
-			return common.Address{}, nil, fmt.Errorf("failed to convert initial funding amount: %w", err)
-		}
-
-		smartWalletFee.CreationFee = creationFee
-		smartWalletFee.InitialFunding = initialFunding
-	} else {
-		fe.logger.Info("Smart wallet already exists", "address", runnerAddress.Hex())
-
-		// No creation needed, set zero fees
-		zeroFee, _ := fe.convertToFeeAmount(big.NewInt(0))
-		smartWalletFee.CreationFee = zeroFee
-		smartWalletFee.InitialFunding = zeroFee
+	// Wallet creation needed — estimate gas
+	fe.logger.Info("Smart wallet creation required", "address", runnerAddress.Hex())
+	creationGas, gasPrice, err := fe.estimateWalletCreationGas(ctx, runnerAddress)
+	if err != nil {
+		fe.logger.Warn("Failed to estimate wallet creation gas", "error", err)
+		creationGas = big.NewInt(200000)
+		gasPrice = big.NewInt(int64(DefaultGasPrice))
 	}
 
-	return runnerAddress, smartWalletFee, nil
+	creationCostWei := new(big.Int).Mul(creationGas, gasPrice)
+	return runnerAddress, true, creationCostWei, nil
 }
 
 // estimateWalletCreationGas estimates gas needed for smart wallet creation
@@ -379,13 +322,11 @@ func (fe *FeeEstimator) estimateWalletCreationGas(ctx context.Context, walletAdd
 // estimateCOGS estimates cost of goods sold — per-node operational costs.
 // Gas for on-chain nodes (contract_write, eth_transfer, loop).
 // Future: external API costs for REST API nodes calling paid services.
-func (fe *FeeEstimator) estimateCOGS(ctx context.Context, req *avsproto.EstimateFeesReq, runnerAddress common.Address) ([]*avsproto.NodeCOGS, *big.Int, error) {
+func (fe *FeeEstimator) estimateCOGS(ctx context.Context, req *avsproto.EstimateFeesReq, runnerAddress common.Address) ([]*avsproto.NodeCOGS, error) {
 	fe.logger.Info("🔍 Estimating COGS for workflow", "runner", runnerAddress.Hex())
 
 	var cogsList []*avsproto.NodeCOGS
-	totalCostWei := big.NewInt(0)
 
-	// Get current gas price
 	gasPrice, err := fe.ethClient.SuggestGasPrice(ctx)
 	if err != nil {
 		fe.logger.Warn("Failed to get current gas price, using fallback", "error", err)
@@ -403,30 +344,20 @@ func (fe *FeeEstimator) estimateCOGS(ctx context.Context, req *avsproto.Estimate
 		case node.GetLoop() != nil:
 			gasResult = fe.estimateLoopGas(ctx, node, runnerAddress, gasPrice)
 		default:
-			// Non on-chain nodes have no COGS (in V1)
-			// Future: estimate external API costs for rest_api nodes
 			continue
 		}
 
 		if gasResult != nil {
-			cost, err := fe.convertToFeeAmount(gasResult.TotalCost)
-			if err != nil {
-				fe.logger.Warn("Failed to convert COGS", "error", err)
-				continue
-			}
-
 			cogsList = append(cogsList, &avsproto.NodeCOGS{
 				NodeId:   gasResult.NodeID,
-				NodeName: node.Name,
 				CostType: "gas",
-				Cost:     cost,
+				Fee:      &avsproto.Fee{Amount: gasResult.TotalCost.String(), Unit: "WEI"},
 				GasUnits: gasResult.GasUnits.String(),
 			})
-			totalCostWei.Add(totalCostWei, gasResult.TotalCost)
 		}
 	}
 
-	return cogsList, totalCostWei, nil
+	return cogsList, nil
 }
 
 // Gas estimation methods for individual node types
@@ -509,8 +440,9 @@ func (fe *FeeEstimator) classifyWorkflowValue(req *avsproto.EstimateFeesReq) *av
 
 	if !hasOnChainNodes {
 		return &avsproto.ValueFee{
+			Fee:                  &avsproto.Fee{Amount: "0", Unit: "PERCENTAGE"},
 			Tier:                 avsproto.ExecutionTier_EXECUTION_TIER_UNSPECIFIED,
-			FeePercentage:        0,
+			ValueBase:            "",
 			ClassificationMethod: "rule_based",
 			Confidence:           1.0,
 			Reason:               "Workflow has no on-chain execution nodes — no value-capture fee",
@@ -520,8 +452,9 @@ func (fe *FeeEstimator) classifyWorkflowValue(req *avsproto.EstimateFeesReq) *av
 	// V1: all workflows with on-chain nodes default to Tier 1
 	// V2: LLM will analyze workflow purpose (e.g., AAVE repay → Tier 3)
 	return &avsproto.ValueFee{
+		Fee:                  &avsproto.Fee{Amount: fmt.Sprintf("%.2f", fe.feeRates.Tier1FeePercentage), Unit: "PERCENTAGE"},
 		Tier:                 avsproto.ExecutionTier_EXECUTION_TIER_1,
-		FeePercentage:        float32(fe.feeRates.Tier1FeePercentage),
+		ValueBase:            "input_token_value",
 		ClassificationMethod: "rule_based",
 		Confidence:           1.0,
 		Reason:               "V1 default: workflow contains on-chain execution nodes",
@@ -535,50 +468,6 @@ func isOnChainNode(node *avsproto.TaskNode) bool {
 		node.GetLoop() != nil
 }
 
-// estimateExecutionCount estimates how many times the workflow will execute
-func (fe *FeeEstimator) estimateExecutionCount(trigger *avsproto.TaskTrigger, durationMinutes, maxExecution int64) int64 {
-	switch trigger.Type {
-	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
-		if maxExecution > 0 {
-			return maxExecution
-		}
-		return 1
-
-	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
-		return 1
-
-	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
-		// TODO: Parse cron expression to calculate execution frequency
-		executions := durationMinutes / 60
-		if maxExecution > 0 && executions > maxExecution {
-			return maxExecution
-		}
-		return executions
-
-	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
-		// Assume every 10 blocks (~2 minutes for 12s block time)
-		executions := durationMinutes / 2
-		if maxExecution > 0 && executions > maxExecution {
-			return maxExecution
-		}
-		return executions
-
-	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
-		// Conservative: 1 execution per day
-		executions := durationMinutes / (24 * 60)
-		if executions < 1 {
-			executions = 1
-		}
-		if maxExecution > 0 && executions > maxExecution {
-			return maxExecution
-		}
-		return executions
-
-	default:
-		return 1
-	}
-}
-
 // generateWarnings generates warnings about fee estimation accuracy
 func (fe *FeeEstimator) generateWarnings(cogs []*avsproto.NodeCOGS) []string {
 	var warnings []string
@@ -588,72 +477,6 @@ func (fe *FeeEstimator) generateWarnings(cogs []*avsproto.NodeCOGS) []string {
 	}
 
 	return warnings
-}
-
-// Utility methods for fee conversion
-func (fe *FeeEstimator) convertToFeeAmount(weiAmount *big.Int) (*avsproto.FeeAmount, error) {
-	chainID := fe.chainID
-	if chainID == 0 {
-		chainIDResult, err := fe.ethClient.ChainID(context.Background())
-		if err == nil {
-			chainID = chainIDResult.Int64()
-			fe.chainID = chainID
-		} else {
-			chainID = 1 // Ethereum mainnet as fallback
-		}
-	}
-
-	nativeTokenSymbol := fe.priceService.GetNativeTokenSymbol(chainID)
-
-	nativeTokenPriceUSD, err := fe.priceService.GetNativeTokenPriceUSD(chainID)
-	if err != nil {
-		fe.logger.Warn("Failed to get native token price", "error", err)
-		nativeTokenPriceUSD = big.NewFloat(2500)
-	}
-
-	weiFloat := new(big.Float).SetInt(weiAmount)
-	tokenAmount := new(big.Float).Quo(weiFloat, big.NewFloat(1e18))
-	usdAmount := new(big.Float).Mul(tokenAmount, nativeTokenPriceUSD)
-
-	return &avsproto.FeeAmount{
-		NativeTokenAmount: weiAmount.String(),
-		NativeTokenSymbol: nativeTokenSymbol,
-		UsdAmount:         fmt.Sprintf("%.6f", usdAmount),
-		ApTokenAmount:     "0",
-	}, nil
-}
-
-func (fe *FeeEstimator) convertUSDToFeeAmount(usdAmount float64) (*avsproto.FeeAmount, error) {
-	chainID := fe.chainID
-	if chainID == 0 {
-		chainIDResult, err := fe.ethClient.ChainID(context.Background())
-		if err == nil {
-			chainID = chainIDResult.Int64()
-			fe.chainID = chainID
-		} else {
-			chainID = 1
-		}
-	}
-
-	nativeTokenSymbol := fe.priceService.GetNativeTokenSymbol(chainID)
-
-	nativeTokenPriceUSD, err := fe.priceService.GetNativeTokenPriceUSD(chainID)
-	if err != nil {
-		fe.logger.Warn("Failed to get native token price", "error", err)
-		nativeTokenPriceUSD = big.NewFloat(2500)
-	}
-
-	usdFloat := big.NewFloat(usdAmount)
-	tokenAmount := new(big.Float).Quo(usdFloat, nativeTokenPriceUSD)
-	weiFloat := new(big.Float).Mul(tokenAmount, big.NewFloat(1e18))
-	weiAmount, _ := weiFloat.Int(nil)
-
-	return &avsproto.FeeAmount{
-		NativeTokenAmount: weiAmount.String(),
-		NativeTokenSymbol: nativeTokenSymbol,
-		UsdAmount:         fmt.Sprintf("%.6f", usdAmount),
-		ApTokenAmount:     "0",
-	}, nil
 }
 
 // Default configuration

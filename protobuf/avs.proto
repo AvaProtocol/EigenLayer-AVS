@@ -1395,75 +1395,74 @@ message SmartWalletCreationFee {
   string wallet_address = 4;         // Predicted or existing wallet address
 }
 
+// Unit-safe fee value. Every monetary field is self-describing.
+// Units: "USD" (fiat), "WEI" (native token smallest unit), "PERCENTAGE" (0.03 = 0.03%)
+message Fee {
+  string amount = 1;                 // Numeric value as string (precision-safe)
+  string unit = 2;                   // "USD", "WEI", "PERCENTAGE"
+}
+
+// Native token metadata for the chain
+message NativeToken {
+  string symbol = 1;                 // e.g., "ETH"
+  int32 decimals = 2;               // e.g., 18
+}
+
 // Per-node cost of goods sold (gas, external API costs, etc.)
-// Each node that incurs operational costs gets an entry.
 message NodeCOGS {
-  string node_id = 1;                // Associated node ID
-  string node_name = 2;              // Human-readable node name
-  string cost_type = 3;              // "gas", "external_api", etc.
-  FeeAmount cost = 4;                // Estimated cost for this node
-  string gas_units = 5;              // Gas units (for gas costs only)
+  string node_id = 1;
+  string cost_type = 2;             // "gas", "external_api", "wallet_creation"
+  Fee fee = 3;                       // Cost in WEI
+  string gas_units = 4;             // Gas units (for gas costs only)
 }
 
 // Workflow-level value-capture fee.
-// A single fee for the entire workflow based on what it does (not per-node).
-// Classification determines which pricing tier applies.
+// Single fee for the entire workflow based on what it does (not per-node).
 message ValueFee {
-  ExecutionTier tier = 1;            // Pricing group (TIER_1, TIER_2, TIER_3)
-  float fee_percentage = 2;          // Percentage of tx value (e.g., 0.03 = 0.03%)
-  string classification_method = 3;  // "rule_based" (V1) or "llm" (V2)
-  float confidence = 4;              // Classification confidence (0.0–1.0)
-  string reason = 5;                 // Why this tier was assigned
+  Fee fee = 1;                       // { amount: "0.03", unit: "PERCENTAGE" }
+  ExecutionTier tier = 2;            // Pricing group (TIER_1, TIER_2, TIER_3)
+  string value_base = 3;            // What the percentage applies to (e.g., "input_token_value")
+  string classification_method = 4;  // "rule_based" (V1) or "llm" (V2)
+  float confidence = 5;              // Classification confidence (0.0–1.0)
+  string reason = 6;                 // Why this tier was assigned
 }
 
-// Promotional discounts and fee reductions
+// Promotional discount
 message FeeDiscount {
-  string discount_type = 1;          // "new_user", "volume", "promotional", "beta_program"
-  string discount_name = 2;          // Human-readable discount name
-  string applies_to = 3;             // "gas_fees", "automation_fees", "creation_fees", "all"
-  float discount_percentage = 4;     // Discount percentage (0.0 to 100.0)
-  FeeAmount discount_amount = 5;     // Absolute discount amount
-  string expiry_date = 6;           // When discount expires (ISO 8601 format)
-  string terms = 7;                  // Terms and conditions for discount
+  string discount_type = 1;         // "new_user", "volume", "promotional", "beta_program"
+  string discount_name = 2;
+  Fee discount = 3;                  // Discount amount or percentage
+  string expiry_date = 4;
+  string terms = 5;
 }
 
 // Response message for EstimateFees
-// Fee structure: execution_fee + cogs[] + value_fee = total
-// - execution_fee: flat per-run platform fee
-// - cogs: per-node operational costs (gas, external API)
-// - value_fee: single workflow-level value capture (tier-based)
+// All fees are per-execution. No totals — client computes.
+// Components: execution_fee (USD) + cogs[] (WEI) + value_fee (PERCENTAGE)
 message EstimateFeesResp {
   bool success = 1;
   string error = 2;
   ErrorCode error_code = 3;
 
-  // Flat per-execution platform fee (charged every time the workflow runs)
-  FeeAmount execution_fee = 4;
+  // Chain and token context
+  string chain_id = 4;
+  NativeToken native_token = 5;
 
-  // Cost of goods sold — per-node operational costs (gas, external API costs)
-  repeated NodeCOGS cogs = 5;
+  // Flat per-execution platform fee
+  Fee execution_fee = 6;
+
+  // Cost of goods sold — per-node operational costs (gas, external API)
+  repeated NodeCOGS cogs = 7;
 
   // Workflow-level value-capture fee (single, not per-node)
-  ValueFee value_fee = 6;
+  ValueFee value_fee = 8;
 
-  // Smart wallet creation (one-time, if needed)
-  SmartWalletCreationFee creation_fees = 8;
+  // Discounts (client sums if needed)
+  repeated FeeDiscount discounts = 9;
 
-  // Totals (upfront estimated charges only — excludes post-paid value_fee)
-  FeeAmount total_fees = 9;                    // Sum of execution_fee + cogs + creation_fees
-  repeated FeeDiscount discounts = 10;
-  FeeAmount total_discounts = 11;
-  FeeAmount final_total = 12;                  // total_fees after discounts (still excludes value_fee)
-
-  // Estimation metadata
-  int64 estimated_executions = 13;             // How many times the workflow will fire
-  int64 estimated_at = 14;
-  string chain_id = 15;
-  string price_data_source = 16;
-  int64 price_data_age_seconds = 17;
-  repeated string warnings = 18;
-  repeated string recommendations = 19;
-  string pricing_model = 20;                   // "v1"
+  // Pricing metadata
+  string pricing_model = 10;        // "v1"
+  repeated string warnings = 11;
 }
 
 // EventCondition represents a condition to evaluate on decoded event data
