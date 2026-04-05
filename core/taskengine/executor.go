@@ -559,19 +559,15 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	_, executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
 
 	// Calculate total gas cost for the workflow
-	totalGasCost := vm.CalculateTotalGasCost()
 
 	// Update the execution record we created earlier with the final results
 	execution.EndAt = t1.UnixMilli()
-	execution.Status = convertToExecutionStatus(resultStatus) // Based on analysis of all steps
-	execution.Error = executionError                          // Comprehensive error message from failed steps
-	execution.Steps = vm.ExecutionLogs                        // Contains all steps including failed ones
-	execution.TotalGasCost = totalGasCost                     // Total gas cost for the entire workflow
-	execution.AutomationFee = &avsproto.FeeAmount{
-		NativeTokenAmount: "0",
-		NativeTokenSymbol: "", // Zero fee; symbol not applicable until automation fees are enabled
-		UsdAmount:         "0",
-	}
+	execution.Status = convertToExecutionStatus(resultStatus)                                    // Based on analysis of all steps
+	execution.Error = executionError                                                             // Comprehensive error message from failed steps
+	execution.Steps = vm.ExecutionLogs                                                           // Contains all steps including failed ones
+	execution.ExecutionFee = &avsproto.Fee{Amount: "0", Unit: "USD"}                             // TODO: populate with actual execution fee
+	execution.Cogs = buildCOGSFromSteps(vm.ExecutionLogs)                                        // Build COGS from step-level gas data
+	execution.ValueFee = &avsproto.ValueFee{Fee: &avsproto.Fee{Amount: "0", Unit: "PERCENTAGE"}} // TODO: populate with actual value fee
 
 	// Ensure no NaN/Inf sneak into protobuf Values (which reject them)
 	sanitizeExecutionForPersistence(execution)

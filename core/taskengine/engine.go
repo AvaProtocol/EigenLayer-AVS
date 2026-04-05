@@ -2911,23 +2911,19 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	_, executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
 
 	// Step 11: Calculate total gas cost for the workflow
-	totalGasCost := vm.CalculateTotalGasCost()
 
 	// Create execution result with proper status/error analysis
 	execution := &avsproto.Execution{
 		Id:           simulationID,
-		StartAt:      triggerStartTime.UnixMilli(),           // Start with trigger start time
-		EndAt:        nodeEndTime.UnixMilli(),                // End with node completion time
-		Status:       convertToExecutionStatus(resultStatus), // Use enum status instead of boolean
-		Error:        executionError,                         // Comprehensive error message from failed steps
-		Steps:        vm.ExecutionLogs,                       // Now contains both trigger and node steps (including failed ones)
-		Index:        task.ExecutionCount,                    // Use current execution count for simulation (0-based)
-		TotalGasCost: totalGasCost,                           // Total gas cost for the entire workflow
-		AutomationFee: &avsproto.FeeAmount{
-			NativeTokenAmount: "0",
-			NativeTokenSymbol: "", // Zero fee; symbol not applicable until automation fees are enabled
-			UsdAmount:         "0",
-		},
+		StartAt:      triggerStartTime.UnixMilli(),                                            // Start with trigger start time
+		EndAt:        nodeEndTime.UnixMilli(),                                                 // End with node completion time
+		Status:       convertToExecutionStatus(resultStatus),                                  // Use enum status instead of boolean
+		Error:        executionError,                                                          // Comprehensive error message from failed steps
+		Steps:        vm.ExecutionLogs,                                                        // Now contains both trigger and node steps (including failed ones)
+		Index:        task.ExecutionCount,                                                     // Use current execution count for simulation (0-based)
+		ExecutionFee: &avsproto.Fee{Amount: "0", Unit: "USD"},                                 // TODO: populate with actual execution fee
+		Cogs:         buildCOGSFromSteps(vm.ExecutionLogs),                                    // Build COGS from step-level gas data
+		ValueFee:     &avsproto.ValueFee{Fee: &avsproto.Fee{Amount: "0", Unit: "PERCENTAGE"}}, // TODO: populate with actual value fee
 	}
 
 	// Log execution status based on result type
@@ -3267,16 +3263,14 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 
 	n.logger.Debug("🗂️ Returning pending execution", "task_id", payload.TaskId, "execution_id", payload.ExecutionId, "status", *execStatus, "index", pendingIndex)
 	return &avsproto.Execution{
-		Id:      payload.ExecutionId,
-		Status:  *execStatus,
-		StartAt: time.Now().UnixMilli(),       // Approximate start time
-		Steps:   []*avsproto.Execution_Step{}, // Empty steps for pending
-		Index:   pendingIndex,                 // Use pre-assigned or newly assigned index
-		AutomationFee: &avsproto.FeeAmount{
-			NativeTokenAmount: "0",
-			NativeTokenSymbol: "", // Zero fee; symbol not applicable until automation fees are enabled
-			UsdAmount:         "0",
-		},
+		Id:           payload.ExecutionId,
+		Status:       *execStatus,
+		StartAt:      time.Now().UnixMilli(),       // Approximate start time
+		Steps:        []*avsproto.Execution_Step{}, // Empty steps for pending
+		Index:        pendingIndex,                 // Use pre-assigned or newly assigned index
+		ExecutionFee: &avsproto.Fee{Amount: "0", Unit: "USD"},
+		Cogs:         []*avsproto.NodeCOGS{},
+		ValueFee:     &avsproto.ValueFee{Fee: &avsproto.Fee{Amount: "0", Unit: "PERCENTAGE"}},
 	}, nil
 }
 

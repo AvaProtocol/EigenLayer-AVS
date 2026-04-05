@@ -502,6 +502,35 @@ func getDefaultDiscountRules() *DiscountRules {
 	}
 }
 
+// buildCOGSFromSteps converts per-step gas data from execution logs into NodeCOGS entries.
+// This is used after execution to build the actual COGS from real gas receipts.
+func buildCOGSFromSteps(steps []*avsproto.Execution_Step) []*avsproto.NodeCOGS {
+	var cogsList []*avsproto.NodeCOGS
+
+	for _, step := range steps {
+		// Only on-chain steps have gas data
+		if step.TotalGasCost == "" || step.TotalGasCost == "0" {
+			continue
+		}
+
+		stepType := step.Type
+		if stepType != avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String() &&
+			stepType != avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String() &&
+			stepType != avsproto.NodeType_NODE_TYPE_LOOP.String() {
+			continue
+		}
+
+		cogsList = append(cogsList, &avsproto.NodeCOGS{
+			NodeId:   step.Id,
+			CostType: "gas",
+			Fee:      &avsproto.Fee{Amount: step.TotalGasCost, Unit: "WEI"},
+			GasUnits: step.GasUsed,
+		})
+	}
+
+	return cogsList
+}
+
 // convertFeeRatesConfig converts configuration-based fee rates to internal tier rates
 func convertFeeRatesConfig(configRates *config.FeeRatesConfig) *FeeRates {
 	if configRates == nil {
