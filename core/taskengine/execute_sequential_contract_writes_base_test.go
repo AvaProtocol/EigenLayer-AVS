@@ -115,7 +115,7 @@ func setupSequentialContractWritesTest(t *testing.T) *sequentialContractWritesTe
 
 	// Create task engine and executor with engine reference for atomic indexing
 	engine := New(db, baseAggregatorCfg, nil, testutil.GetLogger())
-	executor := NewExecutor(baseAggregatorCfg.SmartWallet, db, testutil.GetLogger(), engine)
+	executor := NewExecutor(baseAggregatorCfg.SmartWallet, db, testutil.GetLogger(), engine, nil)
 
 	return &sequentialContractWritesTestSetup{
 		cfg:               baseAggregatorCfg,

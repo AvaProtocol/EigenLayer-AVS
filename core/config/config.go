@@ -125,6 +125,10 @@ type FeeRatesConfig struct {
 	Tier1FeePercentage float64 // Default: 0.03%
 	Tier2FeePercentage float64 // Default: 0.09%
 	Tier3FeePercentage float64 // Default: 0.18%
+
+	// Maximum outstanding value fee balance (USD) before blocking execution.
+	// Default 0 = block as soon as any value fee is outstanding (zero tolerance).
+	CreditLimitUSD float64
 }
 
 // NotificationsSummaryConfig defines optional AI summarization settings for notifications.
@@ -224,6 +228,7 @@ type ConfigRaw struct {
 	// Pointer fields: nil = use default, explicit 0.0 = free tier
 	FeeRates struct {
 		ExecutionFeeUSD *float64 `yaml:"execution_fee_usd"` // $0.02 default
+		CreditLimitUSD  *float64 `yaml:"credit_limit_usd"`  // $20 default
 		Tiers           struct {
 			Tier1 *float64 `yaml:"tier_1"` // 0.03% default
 			Tier2 *float64 `yaml:"tier_2"` // 0.09% default
@@ -540,6 +545,7 @@ func ReadYamlConfig(path string, o interface{}) error {
 // Pointer fields distinguish "missing" (nil → use default) from explicit zero (0.0 → free tier).
 func loadFeeRatesFromConfig(configRates struct {
 	ExecutionFeeUSD *float64 `yaml:"execution_fee_usd"`
+	CreditLimitUSD  *float64 `yaml:"credit_limit_usd"`
 	Tiers           struct {
 		Tier1 *float64 `yaml:"tier_1"`
 		Tier2 *float64 `yaml:"tier_2"`
@@ -558,6 +564,7 @@ func loadFeeRatesFromConfig(configRates struct {
 		Tier1FeePercentage: getFloat64(configRates.Tiers.Tier1, 0.03),
 		Tier2FeePercentage: getFloat64(configRates.Tiers.Tier2, 0.09),
 		Tier3FeePercentage: getFloat64(configRates.Tiers.Tier3, 0.18),
+		CreditLimitUSD:     getFloat64(configRates.CreditLimitUSD, 0.0),
 	}
 }
 
@@ -568,6 +575,7 @@ func GetDefaultFeeRatesConfig() *FeeRatesConfig {
 		Tier1FeePercentage: 0.03,
 		Tier2FeePercentage: 0.09,
 		Tier3FeePercentage: 0.18,
+		CreditLimitUSD:     0.0, // Zero = block as soon as any value fee is outstanding
 	}
 }
 

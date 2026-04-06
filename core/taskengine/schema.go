@@ -236,3 +236,22 @@ func SetWalletHiddenStatus(db storage.Storage, owner common.Address, smartWallet
 	wallet.IsHidden = hidden
 	return StoreWallet(db, owner, wallet)
 }
+
+// Fee ledger storage keys
+
+// FeeLedgerKey returns the key for a user's outstanding value fee balance.
+// Format: "fl:<owner_hex>" → JSON-encoded FeeLedgerEntry
+func FeeLedgerKey(owner common.Address) []byte {
+	return []byte(fmt.Sprintf("fl:%s", strings.ToLower(owner.Hex())))
+}
+
+// FeeRecordKey returns the key for an individual fee record (audit trail).
+// Format: "fr:<owner_hex>:<execution_id>" → JSON-encoded FeeRecord
+func FeeRecordKey(owner common.Address, executionID string) []byte {
+	return []byte(fmt.Sprintf("fr:%s:%s", strings.ToLower(owner.Hex()), executionID))
+}
+
+// FeeRecordPrefix returns the prefix for all fee records for an owner.
+func FeeRecordPrefix(owner common.Address) []byte {
+	return []byte(fmt.Sprintf("fr:%s:", strings.ToLower(owner.Hex())))
+}

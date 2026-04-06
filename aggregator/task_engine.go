@@ -45,6 +45,7 @@ import (
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/services"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
@@ -96,8 +97,19 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		agg.logger,
 	)
 
+	// Create price service for fee conversion (USD → ETH)
+	var priceService taskengine.PriceService
+	if agg.config.MoralisApiKey != "" {
+		priceService = services.GetMoralisService(agg.config.MoralisApiKey, agg.logger)
+	} else {
+		priceService = newFallbackPriceService()
+	}
+
+	// Store price service on engine for use in simulation path
+	agg.engine.SetPriceService(priceService)
+
 	// Create executor with engine reference for atomic execution indexing
-	taskExecutor := taskengine.NewExecutor(agg.config.SmartWallet, agg.db, agg.logger, agg.engine)
+	taskExecutor := taskengine.NewExecutor(agg.config.SmartWallet, agg.db, agg.logger, agg.engine, priceService)
 	taskengine.SetCache(agg.cache)
 	macros.SetRpc(agg.config.SmartWallet.EthRpcUrl)
 

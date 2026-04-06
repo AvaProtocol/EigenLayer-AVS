@@ -333,7 +333,8 @@ enum ErrorCode {
   SMART_WALLET_NOT_FOUND = 8001;    // Smart wallet address not found
   SMART_WALLET_DEPLOYMENT_ERROR = 8002; // Failed to deploy smart wallet
   INSUFFICIENT_BALANCE = 8003;      // Insufficient balance for operation
-  
+  INSUFFICIENT_CREDIT = 8004;       // Outstanding value fees exceed credit limit
+
   // 9000-9999: Reserved for future use
 }
 

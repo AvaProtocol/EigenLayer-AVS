@@ -249,6 +249,7 @@ type Engine struct {
 
 	// Shared clients
 	tenderlyClient *TenderlyClient
+	priceService   PriceService
 
 	// Debouncing for operator approval logging
 	lastApprovalLogTime map[string]time.Time
@@ -369,6 +370,10 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 // GetTenderlyClient returns the shared Tenderly client for fee estimation and simulation
 func (n *Engine) GetTenderlyClient() *TenderlyClient {
 	return n.tenderlyClient
+}
+
+func (n *Engine) SetPriceService(priceService PriceService) {
+	n.priceService = priceService
 }
 
 func (n *Engine) Stop() {
@@ -2476,7 +2481,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 	}
 
 	if payload.IsBlocking {
-		executor := NewExecutor(n.smartWalletConfig, n.db, n.logger, n)
+		executor := NewExecutor(n.smartWalletConfig, n.db, n.logger, n, n.priceService)
 		execution, runErr := executor.RunTask(task, &queueTaskData)
 		if runErr != nil {
 			n.logger.Error("failed to run blocking task", runErr)

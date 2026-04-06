@@ -251,6 +251,10 @@ type VM struct {
 
 	// Shared clients
 	tenderlyClient *TenderlyClient
+
+	// executionFeeWei is the platform fee (converted from USD to WEI) to be collected
+	// atomically in the UserOp. Set by executor before node execution. Nil = no fee.
+	executionFeeWei *big.Int
 }
 
 func NewVM() *VM {
