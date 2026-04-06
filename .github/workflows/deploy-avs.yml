@@ -15,7 +15,7 @@ on:
 
 jobs:
   aggregator:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: 
       name: ${{ inputs.environment }}
 
@@ -36,7 +36,7 @@ jobs:
           docker compose up -d --force-recreate 
 
   operator:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: 
       name: ${{ inputs.environment }}
 
