@@ -115,27 +115,20 @@ type Config struct {
 	NotificationsSummary NotificationsSummaryConfig
 }
 
-// FeeRatesConfig defines configurable pricing for different trigger types and operations
+// FeeRatesConfig defines the fee structure for workflow execution.
+// Three components: execution_fee (flat) + COGS (per-node) + value_fee (workflow-level tier %).
 type FeeRatesConfig struct {
-	// Base fees (one-time per workflow)
-	BaseFeeUSD float64
+	// Flat per-execution platform fee (charged every run)
+	ExecutionFeeUSD float64 // Default: $0.02
 
-	// Monitoring fees (per minute)
-	ManualMonitoringFeeUSDPerMinute    float64
-	FixedTimeMonitoringFeeUSDPerMinute float64
-	CronMonitoringFeeUSDPerMinute      float64
-	BlockMonitoringFeeUSDPerMinute     float64
-	EventMonitoringFeeUSDPerMinute     float64
+	// Value-capture tier percentages (% of tx value, workflow-level)
+	Tier1FeePercentage float64 // Default: 0.03%
+	Tier2FeePercentage float64 // Default: 0.09%
+	Tier3FeePercentage float64 // Default: 0.18%
 
-	// Per-execution fees
-	ManualExecutionFeeUSD    float64
-	ScheduledExecutionFeeUSD float64
-	BlockExecutionFeeUSD     float64
-	EventExecutionFeeUSD     float64
-
-	// Event monitoring scaling factors
-	EventAddressFeeUSDPerMinute float64
-	EventTopicFeeUSDPerMinute   float64
+	// Maximum outstanding value fee balance (USD) before blocking execution.
+	// Default 0 = block as soon as any value fee is outstanding (zero tolerance).
+	CreditLimitUSD float64
 }
 
 // NotificationsSummaryConfig defines optional AI summarization settings for notifications.
@@ -231,27 +224,16 @@ type ConfigRaw struct {
 	// Moralis Web3 Data API key for token price lookup (optional)
 	MoralisApiKey string `yaml:"moralis_api_key"`
 
-	// Fee rates configuration for task execution pricing
+	// Fee structure: execution_fee + COGS + value tiers
+	// Pointer fields: nil = use default, explicit 0.0 = free tier
 	FeeRates struct {
-		// Base fees (one-time per workflow)
-		BaseFeeUSD float64 `yaml:"base_fee_usd"`
-
-		// Monitoring fees (per minute)
-		ManualMonitoringFeeUSDPerMinute    float64 `yaml:"manual_monitoring_fee_usd_per_minute"`
-		FixedTimeMonitoringFeeUSDPerMinute float64 `yaml:"fixed_time_monitoring_fee_usd_per_minute"`
-		CronMonitoringFeeUSDPerMinute      float64 `yaml:"cron_monitoring_fee_usd_per_minute"`
-		BlockMonitoringFeeUSDPerMinute     float64 `yaml:"block_monitoring_fee_usd_per_minute"`
-		EventMonitoringFeeUSDPerMinute     float64 `yaml:"event_monitoring_fee_usd_per_minute"`
-
-		// Per-execution fees
-		ManualExecutionFeeUSD    float64 `yaml:"manual_execution_fee_usd"`
-		ScheduledExecutionFeeUSD float64 `yaml:"scheduled_execution_fee_usd"`
-		BlockExecutionFeeUSD     float64 `yaml:"block_execution_fee_usd"`
-		EventExecutionFeeUSD     float64 `yaml:"event_execution_fee_usd"`
-
-		// Event monitoring scaling factors
-		EventAddressFeeUSDPerMinute float64 `yaml:"event_address_fee_usd_per_minute"`
-		EventTopicFeeUSDPerMinute   float64 `yaml:"event_topic_fee_usd_per_minute"`
+		ExecutionFeeUSD *float64 `yaml:"execution_fee_usd"` // $0.02 default
+		CreditLimitUSD  *float64 `yaml:"credit_limit_usd"`  // $20 default
+		Tiers           struct {
+			Tier1 *float64 `yaml:"tier_1"` // 0.03% default
+			Tier2 *float64 `yaml:"tier_2"` // 0.09% default
+			Tier3 *float64 `yaml:"tier_3"` // 0.18% default
+		} `yaml:"tiers"`
 	} `yaml:"fee_rates"`
 
 	// Notifications configuration block
@@ -559,81 +541,41 @@ func ReadYamlConfig(path string, o interface{}) error {
 	return nil
 }
 
-// loadFeeRatesFromConfig loads fee rates from configuration with fallback to hardcoded defaults
-// This function works completely without YAML configuration - all fields are optional
-// The hardcoded defaults match exactly what was previously in getDefaultAutomationRates()
+// loadFeeRatesFromConfig loads fee config from YAML with fallback to defaults.
+// Pointer fields distinguish "missing" (nil → use default) from explicit zero (0.0 → free tier).
 func loadFeeRatesFromConfig(configRates struct {
-	// Base fees (one-time per workflow)
-	BaseFeeUSD float64 `yaml:"base_fee_usd"`
-
-	// Monitoring fees (per minute)
-	ManualMonitoringFeeUSDPerMinute    float64 `yaml:"manual_monitoring_fee_usd_per_minute"`
-	FixedTimeMonitoringFeeUSDPerMinute float64 `yaml:"fixed_time_monitoring_fee_usd_per_minute"`
-	CronMonitoringFeeUSDPerMinute      float64 `yaml:"cron_monitoring_fee_usd_per_minute"`
-	BlockMonitoringFeeUSDPerMinute     float64 `yaml:"block_monitoring_fee_usd_per_minute"`
-	EventMonitoringFeeUSDPerMinute     float64 `yaml:"event_monitoring_fee_usd_per_minute"`
-
-	// Per-execution fees
-	ManualExecutionFeeUSD    float64 `yaml:"manual_execution_fee_usd"`
-	ScheduledExecutionFeeUSD float64 `yaml:"scheduled_execution_fee_usd"`
-	BlockExecutionFeeUSD     float64 `yaml:"block_execution_fee_usd"`
-	EventExecutionFeeUSD     float64 `yaml:"event_execution_fee_usd"`
-
-	// Event monitoring scaling factors
-	EventAddressFeeUSDPerMinute float64 `yaml:"event_address_fee_usd_per_minute"`
-	EventTopicFeeUSDPerMinute   float64 `yaml:"event_topic_fee_usd_per_minute"`
+	ExecutionFeeUSD *float64 `yaml:"execution_fee_usd"`
+	CreditLimitUSD  *float64 `yaml:"credit_limit_usd"`
+	Tiers           struct {
+		Tier1 *float64 `yaml:"tier_1"`
+		Tier2 *float64 `yaml:"tier_2"`
+		Tier3 *float64 `yaml:"tier_3"`
+	} `yaml:"tiers"`
 }) *FeeRatesConfig {
-	// Helper function to get float64 from config with hardcoded default
-	// Uses the exact same defaults that were hardcoded in getDefaultAutomationRates()
-	getFloat64 := func(configValue, hardcodedDefault float64) float64 {
-		if configValue != 0.0 {
-			return configValue // Use YAML value if provided
+	getFloat64 := func(configValue *float64, hardcodedDefault float64) float64 {
+		if configValue != nil {
+			return *configValue
 		}
-		return hardcodedDefault // Use hardcoded default (same as before)
+		return hardcodedDefault
 	}
 
 	return &FeeRatesConfig{
-		// Base fees - exactly as before
-		BaseFeeUSD: getFloat64(configRates.BaseFeeUSD, 0.0),
-
-		// Monitoring fees (per minute) - exactly as before
-		ManualMonitoringFeeUSDPerMinute:    getFloat64(configRates.ManualMonitoringFeeUSDPerMinute, 0.0),
-		FixedTimeMonitoringFeeUSDPerMinute: getFloat64(configRates.FixedTimeMonitoringFeeUSDPerMinute, 0.000017), // ~$0.01/day
-		CronMonitoringFeeUSDPerMinute:      getFloat64(configRates.CronMonitoringFeeUSDPerMinute, 0.000033),      // ~$0.02/day
-		BlockMonitoringFeeUSDPerMinute:     getFloat64(configRates.BlockMonitoringFeeUSDPerMinute, 0.000033),     // ~$0.02/day
-		EventMonitoringFeeUSDPerMinute:     getFloat64(configRates.EventMonitoringFeeUSDPerMinute, 0.000083),     // ~$0.05/day base
-
-		// Per-execution fees - exactly as before
-		ManualExecutionFeeUSD:    getFloat64(configRates.ManualExecutionFeeUSD, 0.0),
-		ScheduledExecutionFeeUSD: getFloat64(configRates.ScheduledExecutionFeeUSD, 0.005),
-		BlockExecutionFeeUSD:     getFloat64(configRates.BlockExecutionFeeUSD, 0.01),
-		EventExecutionFeeUSD:     getFloat64(configRates.EventExecutionFeeUSD, 0.01),
-
-		// Event monitoring scaling factors - exactly as before
-		EventAddressFeeUSDPerMinute: getFloat64(configRates.EventAddressFeeUSDPerMinute, 0.000008), // ~$0.005/day per address
-		EventTopicFeeUSDPerMinute:   getFloat64(configRates.EventTopicFeeUSDPerMinute, 0.000003),   // ~$0.002/day per topic group
+		ExecutionFeeUSD:    getFloat64(configRates.ExecutionFeeUSD, 0.02),
+		Tier1FeePercentage: getFloat64(configRates.Tiers.Tier1, 0.03),
+		Tier2FeePercentage: getFloat64(configRates.Tiers.Tier2, 0.09),
+		Tier3FeePercentage: getFloat64(configRates.Tiers.Tier3, 0.18),
+		CreditLimitUSD:     getFloat64(configRates.CreditLimitUSD, 0.0),
 	}
 }
 
-// GetDefaultFeeRatesConfig returns the default fee rates configuration
-// This is useful for tests and as a reference for expected values
+// GetDefaultFeeRatesConfig returns the default fee rates
 func GetDefaultFeeRatesConfig() *FeeRatesConfig {
 	return &FeeRatesConfig{
-		BaseFeeUSD: 0.0,
-
-		ManualMonitoringFeeUSDPerMinute:    0.0,
-		FixedTimeMonitoringFeeUSDPerMinute: 0.000017, // ~$0.01/day
-		CronMonitoringFeeUSDPerMinute:      0.000033, // ~$0.02/day
-		BlockMonitoringFeeUSDPerMinute:     0.000033, // ~$0.02/day
-		EventMonitoringFeeUSDPerMinute:     0.000083, // ~$0.05/day base
-
-		ManualExecutionFeeUSD:    0.0,
-		ScheduledExecutionFeeUSD: 0.005,
-		BlockExecutionFeeUSD:     0.01,
-		EventExecutionFeeUSD:     0.01,
-
-		EventAddressFeeUSDPerMinute: 0.000008, // ~$0.005/day per address
-		EventTopicFeeUSDPerMinute:   0.000003, // ~$0.002/day per topic group
+		ExecutionFeeUSD:    0.02,
+		Tier1FeePercentage: 0.03,
+		Tier2FeePercentage: 0.09,
+		Tier3FeePercentage: 0.18,
+		CreditLimitUSD:     0.0, // Zero = block as soon as any value fee is outstanding
 	}
 }
 

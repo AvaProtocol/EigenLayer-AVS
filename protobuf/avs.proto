@@ -36,6 +36,16 @@ enum NodeType {
   NODE_TYPE_BALANCE = 10;        // Balance node for retrieving wallet token balances
 }
 
+// ExecutionTier defines value-capture pricing groups for on-chain execution nodes.
+// Tiers are pure pricing buckets — meaning comes from classification logic, not the label.
+// Non-execution nodes use UNSPECIFIED (no fee).
+enum ExecutionTier {
+  EXECUTION_TIER_UNSPECIFIED = 0;  // No value-capture fee (non-execution nodes)
+  EXECUTION_TIER_1 = 1;           // Pricing group 1 (default: 0.03% of tx value)
+  EXECUTION_TIER_2 = 2;           // Pricing group 2 (default: 0.09% of tx value)
+  EXECUTION_TIER_3 = 3;           // Pricing group 3 (default: 0.18% of tx value)
+}
+
 enum ExecutionMode {
   EXECUTION_MODE_SEQUENTIAL = 0;  // Run iterations sequentially (default for safety)
   EXECUTION_MODE_PARALLEL = 1;    // Run iterations in parallel
@@ -323,7 +333,8 @@ enum ErrorCode {
   SMART_WALLET_NOT_FOUND = 8001;    // Smart wallet address not found
   SMART_WALLET_DEPLOYMENT_ERROR = 8002; // Failed to deploy smart wallet
   INSUFFICIENT_BALANCE = 8003;      // Insufficient balance for operation
-  
+  INSUFFICIENT_CREDIT = 8004;       // Outstanding value fees exceed credit limit
+
   // 9000-9999: Reserved for future use
 }
 
@@ -688,17 +699,10 @@ message Execution {
   // This helps clients understand execution order without calculating based on timestamps
   int64 index = 6;
   
-  // Total gas cost for the entire workflow execution (sum of all blockchain operations)
-  // Units are in wei. Use string for large numbers to avoid overflow.
-  //
-  // Empty string means gas data was not computed (e.g., workflow has no on-chain steps,
-  // or receipt was unavailable). Clients should treat both "" and "0" as "no data"
-  // since real on-chain transactions always cost gas.
-  string total_gas_cost = 7;
-
-  // Automation fee charged for monitoring and executing this workflow.
-  // Currently hard-coded to zero; will be populated when automation fees are enabled.
-  FeeAmount automation_fee = 9;
+  // Fees actually charged for this execution (matches EstimateFeesResp format)
+  Fee execution_fee = 7;            // Flat platform fee charged {amount, unit: "USD"}
+  repeated NodeCOGS cogs = 9;      // Per-node actual gas/API costs {fee: {amount, unit: "WEI"}}
+  ValueFee value_fee = 10;         // Value-capture fee charged (post-paid) {fee: {amount, unit: "PERCENTAGE"}}
 
   message Step {
     string id = 1;
@@ -1385,58 +1389,74 @@ message SmartWalletCreationFee {
   string wallet_address = 4;         // Predicted or existing wallet address
 }
 
-// Automation fee structure based on trigger type and duration
-message AutomationFee {
-  FeeAmount base_fee = 1;            // Base automation fee
-  FeeAmount monitoring_fee = 2;      // Ongoing monitoring cost (for time/event triggers)
-  FeeAmount execution_fee = 3;       // Per-execution fee
-  
-  // Fee calculation details
-  string trigger_type = 4;           // "manual", "cron", "event", "block", "fixed_time"
-  int64 estimated_executions = 5;    // Estimated number of executions over workflow lifetime
-  int64 duration_minutes = 6;        // How long monitoring will run (minutes)
-  string fee_calculation_method = 7;  // Description of how fee was calculated
+// Unit-safe fee value. Every monetary field is self-describing.
+// Units: "USD" (fiat), "WEI" (native token smallest unit), "PERCENTAGE" (0.03 = 0.03%)
+message Fee {
+  string amount = 1;                 // Numeric value as string (precision-safe)
+  string unit = 2;                   // "USD", "WEI", "PERCENTAGE"
 }
 
-// Promotional discounts and fee reductions
+// Native token metadata for the chain
+message NativeToken {
+  string symbol = 1;                 // e.g., "ETH"
+  int32 decimals = 2;               // e.g., 18
+}
+
+// Per-node cost of goods sold (gas, external API costs, etc.)
+message NodeCOGS {
+  string node_id = 1;
+  string cost_type = 2;             // "gas", "external_api", "wallet_creation"
+  Fee fee = 3;                       // Cost in WEI
+  string gas_units = 4;             // Gas units (for gas costs only)
+}
+
+// Workflow-level value-capture fee.
+// Single fee for the entire workflow based on what it does (not per-node).
+message ValueFee {
+  Fee fee = 1;                       // { amount: "0.03", unit: "PERCENTAGE" }
+  ExecutionTier tier = 2;            // Pricing group (TIER_1, TIER_2, TIER_3)
+  string value_base = 3;            // What the percentage applies to (e.g., "input_token_value")
+  string classification_method = 4;  // "rule_based" (V1) or "llm" (V2)
+  float confidence = 5;              // Classification confidence (0.0–1.0)
+  string reason = 6;                 // Why this tier was assigned
+}
+
+// Promotional discount
 message FeeDiscount {
-  string discount_type = 1;          // "new_user", "volume", "promotional", "beta_program"
-  string discount_name = 2;          // Human-readable discount name
-  string applies_to = 3;             // "gas_fees", "automation_fees", "creation_fees", "all"
-  float discount_percentage = 4;     // Discount percentage (0.0 to 100.0)
-  FeeAmount discount_amount = 5;     // Absolute discount amount
-  string expiry_date = 6;           // When discount expires (ISO 8601 format)
-  string terms = 7;                  // Terms and conditions for discount
+  string discount_type = 1;         // "new_user", "volume", "promotional", "beta_program"
+  string discount_name = 2;
+  Fee discount = 3;                  // Discount amount or percentage
+  string expiry_date = 4;
+  string terms = 5;
 }
 
 // Response message for EstimateFees
+// All fees are per-execution. No totals — client computes.
+// Components: execution_fee (USD) + cogs[] (WEI) + value_fee (PERCENTAGE)
 message EstimateFeesResp {
-  bool success = 1;                  // Whether fee estimation was successful
-  string error = 2;                  // Error message if estimation failed
-  ErrorCode error_code = 3;          // Structured error code
-  
-  // Fee breakdown
-  GasFeeBreakdown gas_fees = 4;               // Estimated gas fees
-  AutomationFee automation_fees = 5;          // Automation and monitoring fees
-  SmartWalletCreationFee creation_fees = 6;   // Smart wallet creation fees (if needed)
-  
-  // Total fees
-  FeeAmount total_fees = 7;          // Sum of all fees
-  
-  // Discounts and promotions
-  repeated FeeDiscount discounts = 8; // Applied discounts
-  FeeAmount total_discounts = 9;     // Total discount amount
-  FeeAmount final_total = 10;        // Final total after discounts
-  
-  // Estimation metadata
-  int64 estimated_at = 11;           // Timestamp when estimation was performed
-  string chain_id = 12;              // Blockchain chain ID
-  string price_data_source = 13;     // Source of price data ("coingecko", "chainlink", "cached")
-  int64 price_data_age_seconds = 14; // Age of price data in seconds
-  
-  // Warnings and recommendations
-  repeated string warnings = 15;      // Warnings about fee estimation
-  repeated string recommendations = 16; // Recommendations for cost optimization
+  bool success = 1;
+  string error = 2;
+  ErrorCode error_code = 3;
+
+  // Chain and token context
+  string chain_id = 4;
+  NativeToken native_token = 5;
+
+  // Flat per-execution platform fee
+  Fee execution_fee = 6;
+
+  // Cost of goods sold — per-node operational costs (gas, external API)
+  repeated NodeCOGS cogs = 7;
+
+  // Workflow-level value-capture fee (single, not per-node)
+  ValueFee value_fee = 8;
+
+  // Discounts (client sums if needed)
+  repeated FeeDiscount discounts = 9;
+
+  // Pricing metadata
+  string pricing_model = 10;        // "v1"
+  repeated string warnings = 11;
 }
 
 // EventCondition represents a condition to evaluate on decoded event data

@@ -71,7 +71,7 @@ func TestSendUserOp(t *testing.T) {
 		15*time.Minute,
 	)
 
-	userOp, receipt, err := SendUserOp(smartWalletConfig, owner, calldata, paymasterRequest, nil, nil, nil)
+	userOp, receipt, err := SendUserOp(smartWalletConfig, owner, calldata, paymasterRequest, nil, nil, nil, nil)
 	require.NoError(t, err, "UserOp failed to send")
 	require.NotNil(t, userOp, "UserOp should not be nil")
 	if receipt == nil {
@@ -114,7 +114,10 @@ func TestPaymaster(t *testing.T) {
 		calldata,
 		paymasterRequest,
 		nil, // senderOverride
-		)
+		nil, // saltOverride
+		nil, // executionFeeWei
+		nil, // logger
+	)
 
 	if err != nil {
 		t.Errorf("Failed to send user operation with paymaster: %v", err)

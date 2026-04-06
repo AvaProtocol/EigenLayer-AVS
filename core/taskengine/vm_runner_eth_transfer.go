@@ -339,6 +339,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		paymasterReq,
 		senderOverride,
 		saltOverride,
+		p.vm.executionFeeWei, // Execution fee in Wei (nil = no fee)
 		p.vm.logger,
 	)
 

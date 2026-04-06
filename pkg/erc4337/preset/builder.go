@@ -429,13 +429,17 @@ func EstimateGasReimbursementAmount(client *ethclient.Client, gasEstimate *bundl
 	return reimbursement, nil
 }
 
-// wrapWithReimbursement wraps original SimpleAccount.execute() calldata with executeBatchWithValues
-// to add a second step that transfers reimbursement ETH to the reimbursement recipient (paymaster owner or paymaster), atomically.
+// wrapWithReimbursement wraps original SimpleAccount.execute() calldata with
+// executeBatchWithValues to add reimbursement transfers atomically. It appends a
+// transfer of reimbursement ETH to the reimbursement recipient (paymaster owner),
+// and if executionFeeWei is non-nil and > 0, it also adds a transfer of the
+// execution fee to the same recipient.
 func wrapWithReimbursement(
 	client *ethclient.Client,
 	originalCallData []byte,
 	reimbursementRecipient common.Address,
 	gasEstimate *bundler.GasEstimation,
+	executionFeeWei *big.Int,
 	lgr logger.Logger,
 ) (wrappedCalldata []byte, reimbursementAmount *big.Int, outgoingValue *big.Int, err error) {
 	l := logger.EnsureLogger(lgr)
@@ -486,17 +490,20 @@ func wrapWithReimbursement(
 	// Create batch arrays for executeBatchWithValues
 	// [0] = original operation (e.g., withdrawal)
 	// [1] = reimbursement to paymaster owner (to compensate for gas paid by paymaster)
+	// [2] = execution fee to fee recipient (optional, only if executionFeeWei > 0)
 	targets := []common.Address{dest, reimbursementRecipient}
 	values := []*big.Int{value, reimbursementAmount}
-
-	// Preserve the original call's calldata for the first step and use an empty
-	// bytes for the reimbursement step. This ensures the intended contract
-	// method is actually executed (e.g., ERC20 transfer), while the second step
-	// simply transfers ETH to reimburse gas costs.
-	// CRITICAL: Use make([]byte, 0) to avoid Go's ABI encoder padding bug for empty bytes
 	calldatas := [][]byte{data, make([]byte, 0)}
 
-	l.Debug("Reimbursement wrapping", "dest", dest.Hex(), "value", value.String(), "reimburse", reimbursementAmount.String(), "recipient", reimbursementRecipient.Hex())
+	// Add execution fee as 3rd batch operation if specified
+	if executionFeeWei != nil && executionFeeWei.Sign() > 0 {
+		targets = append(targets, reimbursementRecipient)
+		values = append(values, executionFeeWei)
+		calldatas = append(calldatas, make([]byte, 0))
+		l.Debug("Execution fee added to batch", "fee_wei", executionFeeWei.String(), "recipient", reimbursementRecipient.Hex())
+	}
+
+	l.Debug("Reimbursement wrapping", "dest", dest.Hex(), "value", value.String(), "reimburse", reimbursementAmount.String(), "recipient", reimbursementRecipient.Hex(), "batch_ops", len(targets))
 
 	// Use manual ABI encoding to bypass Go's ABI encoder bug with empty []byte slices
 	wrappedCalldata, err = aa.PackExecuteBatchWithValues(targets, values, calldatas)
@@ -506,7 +513,13 @@ func wrapWithReimbursement(
 
 	l.Debug("Calldata manually encoded", "bytes", len(wrappedCalldata))
 
-	return wrappedCalldata, reimbursementAmount, value, nil
+	// outgoingValue = original value + execution fee (reimbursement is added by caller)
+	totalValue := new(big.Int).Set(value)
+	if executionFeeWei != nil && executionFeeWei.Sign() > 0 {
+		totalValue.Add(totalValue, executionFeeWei)
+	}
+
+	return wrappedCalldata, reimbursementAmount, totalValue, nil
 }
 
 // SendUserOp builds, signs, and sends a UserOperation to be executed.
@@ -525,6 +538,7 @@ func sendUserOpShared(
 	senderOverride *common.Address,
 	saltOverride *big.Int,
 	wsClient *ethclient.Client,
+	executionFeeWei *big.Int,
 	lgr logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	l := logger.EnsureLogger(lgr)
@@ -614,7 +628,7 @@ func sendUserOpShared(
 
 		// Prepare wrapped candidate using the gas estimate from unwrapped calldata
 		// This ensures consistent reimbursement calculation
-		wrappedCandidate, initialReimb, opValue, wrapErr := wrapWithReimbursement(client, callData, reimbursementRecipient, unwrappedGasEstimate, l)
+		wrappedCandidate, initialReimb, opValue, wrapErr := wrapWithReimbursement(client, callData, reimbursementRecipient, unwrappedGasEstimate, executionFeeWei, l)
 		if wrapErr != nil {
 			l.Warn("Failed to prepare reimbursement wrapping, paymaster absorbs gas costs", "error", wrapErr)
 		} else {
@@ -925,6 +939,7 @@ func SendUserOp(
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
 	saltOverride *big.Int,
+	executionFeeWei *big.Int,
 	lgr logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	l := logger.EnsureLogger(lgr)
@@ -947,7 +962,7 @@ func SendUserOp(
 	}
 
 	// Use the shared logic for the main UserOp processing
-	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, saltOverride, wsClient, lgr)
+	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, saltOverride, wsClient, executionFeeWei, lgr)
 }
 
 // sendUserOpCore contains the shared retry loop logic for sending UserOps to the bundler.
@@ -1331,6 +1346,7 @@ func SendUserOpWithWsClient(
 	senderOverride *common.Address,
 	saltOverride *big.Int,
 	wsClient *ethclient.Client,
+	executionFeeWei *big.Int,
 	lgr logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	l := logger.EnsureLogger(lgr)
@@ -1339,12 +1355,11 @@ func SendUserOpWithWsClient(
 	// Use provided WebSocket client (no defer close - managed globally)
 	if wsClient == nil {
 		l.Warn("No WebSocket client provided, falling back to SendUserOp")
-		// Fall back to SendUserOp which will create its own WebSocket client if needed
-		return SendUserOp(smartWalletConfig, owner, callData, paymasterReq, senderOverride, saltOverride, lgr)
+		return SendUserOp(smartWalletConfig, owner, callData, paymasterReq, senderOverride, saltOverride, executionFeeWei, lgr)
 	}
 
 	// Use the shared logic for the main UserOp processing
-	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, saltOverride, wsClient, lgr)
+	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, saltOverride, wsClient, executionFeeWei, lgr)
 }
 
 // BuildUserOpWithPaymaster creates a UserOperation with paymaster support.

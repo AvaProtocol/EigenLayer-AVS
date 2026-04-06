@@ -548,6 +548,7 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 			smartWalletAddress,
 			nil,                // saltOverride - not needed for already-deployed wallets
 			r.smartWalletWsRpc, // Use global WebSocket client
+			nil,                // executionFeeWei - no platform fee for direct RPC calls (e.g., WithdrawFunds)
 			r.config.Logger,    // Pass logger for debug/verbose logging
 		)
 	} else {
@@ -560,6 +561,7 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 			paymasterReq, // Use provided paymaster request
 			smartWalletAddress,
 			nil,             // saltOverride - not needed for already-deployed wallets
+			nil,             // executionFeeWei - no platform fee for direct RPC calls
 			r.config.Logger, // Pass logger for debug/verbose logging
 		)
 	}
@@ -1255,8 +1257,7 @@ func (r *RpcServer) EstimateFees(ctx context.Context, req *avsproto.EstimateFees
 
 	r.config.Logger.Info("✅ fee estimation completed successfully",
 		"user", user.Address.String(),
-		"final_total_usd", resp.FinalTotal.UsdAmount,
-		"estimation_method", resp.GasFees.EstimationMethod)
+		"pricing_model", resp.PricingModel)
 
 	return resp, nil
 }

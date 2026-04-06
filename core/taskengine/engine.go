@@ -249,6 +249,7 @@ type Engine struct {
 
 	// Shared clients
 	tenderlyClient *TenderlyClient
+	priceService   PriceService
 
 	// Debouncing for operator approval logging
 	lastApprovalLogTime map[string]time.Time
@@ -369,6 +370,10 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 // GetTenderlyClient returns the shared Tenderly client for fee estimation and simulation
 func (n *Engine) GetTenderlyClient() *TenderlyClient {
 	return n.tenderlyClient
+}
+
+func (n *Engine) SetPriceService(priceService PriceService) {
+	n.priceService = priceService
 }
 
 func (n *Engine) Stop() {
@@ -2476,7 +2481,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 	}
 
 	if payload.IsBlocking {
-		executor := NewExecutor(n.smartWalletConfig, n.db, n.logger, n)
+		executor := NewExecutor(n.smartWalletConfig, n.db, n.logger, n, n.priceService)
 		execution, runErr := executor.RunTask(task, &queueTaskData)
 		if runErr != nil {
 			n.logger.Error("failed to run blocking task", runErr)
@@ -2911,7 +2916,6 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	_, executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
 
 	// Step 11: Calculate total gas cost for the workflow
-	totalGasCost := vm.CalculateTotalGasCost()
 
 	// Create execution result with proper status/error analysis
 	execution := &avsproto.Execution{
@@ -2922,12 +2926,9 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Error:        executionError,                         // Comprehensive error message from failed steps
 		Steps:        vm.ExecutionLogs,                       // Now contains both trigger and node steps (including failed ones)
 		Index:        task.ExecutionCount,                    // Use current execution count for simulation (0-based)
-		TotalGasCost: totalGasCost,                           // Total gas cost for the entire workflow
-		AutomationFee: &avsproto.FeeAmount{
-			NativeTokenAmount: "0",
-			NativeTokenSymbol: "", // Zero fee; symbol not applicable until automation fees are enabled
-			UsdAmount:         "0",
-		},
+		ExecutionFee: buildExecutionFee(n.config.FeeRates),
+		Cogs:         buildCOGSFromSteps(vm.ExecutionLogs),
+		ValueFee:     buildValueFee(vm.ExecutionLogs, n.config.FeeRates),
 	}
 
 	// Log execution status based on result type
@@ -3267,16 +3268,14 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 
 	n.logger.Debug("🗂️ Returning pending execution", "task_id", payload.TaskId, "execution_id", payload.ExecutionId, "status", *execStatus, "index", pendingIndex)
 	return &avsproto.Execution{
-		Id:      payload.ExecutionId,
-		Status:  *execStatus,
-		StartAt: time.Now().UnixMilli(),       // Approximate start time
-		Steps:   []*avsproto.Execution_Step{}, // Empty steps for pending
-		Index:   pendingIndex,                 // Use pre-assigned or newly assigned index
-		AutomationFee: &avsproto.FeeAmount{
-			NativeTokenAmount: "0",
-			NativeTokenSymbol: "", // Zero fee; symbol not applicable until automation fees are enabled
-			UsdAmount:         "0",
-		},
+		Id:           payload.ExecutionId,
+		Status:       *execStatus,
+		StartAt:      time.Now().UnixMilli(),               // Approximate start time
+		Steps:        []*avsproto.Execution_Step{},         // Empty steps for pending
+		Index:        pendingIndex,                         // Use pre-assigned or newly assigned index
+		ExecutionFee: buildExecutionFee(n.config.FeeRates), // Known upfront
+		Cogs:         []*avsproto.NodeCOGS{},               // Unknown until execution completes
+		ValueFee:     nil,                                  // Unknown until execution completes
 	}, nil
 }
 
