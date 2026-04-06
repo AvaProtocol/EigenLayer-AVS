@@ -21,6 +21,7 @@ func mockSendUserOp(
 	paymasterReq *preset.VerifyingPaymasterRequest,
 	senderOverride *common.Address,
 	saltOverride *big.Int,
+	executionFeeWei *big.Int,
 	lgr logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	capturedPaymasterRequest = paymasterReq

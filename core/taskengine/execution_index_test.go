@@ -29,7 +29,7 @@ func TestExecutionIndexIncrement(t *testing.T) {
 	// Create engine with proper configuration for atomic indexing
 	config := testutil.GetAggregatorConfig()
 	engine := New(db, config, nil, testutil.GetLogger())
-	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger(), engine)
+	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger(), engine, nil)
 
 	// Create a simple task with manual trigger and custom code node
 	task := &model.Task{

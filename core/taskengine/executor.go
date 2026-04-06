@@ -60,14 +60,20 @@ func reconstructTriggerOutputData(m map[string]interface{}, logger sdklogging.Lo
 	return nil
 }
 
-func NewExecutor(config *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger, engine *Engine) *TaskExecutor {
-	return &TaskExecutor{
+func NewExecutor(swConfig *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger, engine *Engine, priceService PriceService) *TaskExecutor {
+	executor := &TaskExecutor{
 		db:                     db,
 		logger:                 logger,
-		smartWalletConfig:      config,
+		smartWalletConfig:      swConfig,
 		tokenEnrichmentService: GetTokenEnrichmentService(),
 		engine:                 engine,
+		priceService:           priceService,
 	}
+
+	// Initialize fee ledger for value fee tracking
+	executor.feeLedger = NewFeeLedger(db, logger)
+
+	return executor
 }
 
 // Creates a TaskExecutor with nil engine for testing purposes
@@ -92,6 +98,8 @@ type TaskExecutor struct {
 	smartWalletConfig      *config.SmartWalletConfig
 	tokenEnrichmentService *TokenEnrichmentService
 	engine                 *Engine
+	feeLedger              *FeeLedger
+	priceService           PriceService
 }
 
 type QueueExecutionData struct {
@@ -309,6 +317,20 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	vm.WithLogger(x.logger).WithDb(x.db)
 
+	// Convert execution fee (USD) → Wei and set on VM for UserOp injection
+	if x.priceService != nil && x.engine.config.FeeRates != nil {
+		chainID := int64(0)
+		if x.smartWalletConfig != nil {
+			chainID = x.smartWalletConfig.ChainID
+		}
+		if feeWei, convErr := ConvertUSDToWei(x.engine.config.FeeRates.ExecutionFeeUSD, x.priceService, chainID); convErr == nil {
+			vm.executionFeeWei = feeWei
+			x.logger.Debug("Execution fee set on VM", "fee_wei", feeWei.String(), "fee_usd", x.engine.config.FeeRates.ExecutionFeeUSD)
+		} else {
+			x.logger.Warn("Failed to convert execution fee to Wei, proceeding without fee", "error", convErr)
+		}
+	}
+
 	// Initialize timing and execution record BEFORE validation to ensure we always have a record
 	t0 := time.Now()
 	task.ExecutionCount += 1
@@ -448,6 +470,31 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		return execution, nil // Return execution record with failure details
 	}
 
+	// Pre-execution credit check: block if outstanding value fees exceed credit limit
+	if x.feeLedger != nil && x.priceService != nil && x.engine.config.FeeRates != nil {
+		creditLimitUSD := x.engine.config.FeeRates.CreditLimitUSD
+		if creditLimitUSD <= 0 {
+			creditLimitUSD = 20.0
+		}
+		chainID := int64(0)
+		if x.smartWalletConfig != nil {
+			chainID = x.smartWalletConfig.ChainID
+		}
+		if creditLimitWei, convErr := ConvertUSDToWei(creditLimitUSD, x.priceService, chainID); convErr == nil {
+			taskOwner := common.HexToAddress(task.Owner)
+			withinLimit, outstanding, checkErr := x.feeLedger.CheckCreditLimit(taskOwner, creditLimitWei)
+			if checkErr != nil {
+				x.logger.Warn("Fee ledger check failed, proceeding with execution", "error", checkErr)
+			} else if !withinLimit {
+				execution.EndAt = time.Now().UnixMilli()
+				execution.Error = fmt.Sprintf("outstanding value fees (%s wei) exceed credit limit", outstanding.String())
+				execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
+				x.persistFailedExecution(task, execution, initialTaskStatus)
+				return execution, nil
+			}
+		}
+	}
+
 	var runTaskErr error = nil
 	if err = vm.Compile(); err != nil {
 		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger metadata", queueData)
@@ -568,6 +615,49 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	execution.ExecutionFee = buildExecutionFee(x.engine.config.FeeRates)
 	execution.Cogs = buildCOGSFromSteps(vm.ExecutionLogs)
 	execution.ValueFee = buildValueFee(vm.ExecutionLogs, x.engine.config.FeeRates)
+
+	// Record value fee in ledger after successful execution
+	if x.feeLedger != nil && resultStatus == ExecutionSuccess && execution.ValueFee != nil &&
+		execution.ValueFee.Fee != nil && execution.ValueFee.Fee.Amount != "0" {
+		// For V1, record value fee based on COGS as a proxy for tx value
+		// (actual tx value extraction from step data will be implemented in V2)
+		for _, cogsEntry := range execution.Cogs {
+			if cogsEntry.Fee != nil && cogsEntry.Fee.Unit == "WEI" {
+				txValueWei, ok := new(big.Int).SetString(cogsEntry.Fee.Amount, 10)
+				if !ok || txValueWei.Sign() <= 0 {
+					continue
+				}
+
+				// fee = txValue * tierPercentage / 100
+				tierPct, _ := new(big.Float).SetString(execution.ValueFee.Fee.Amount)
+				if tierPct == nil {
+					continue
+				}
+				feeFloat := new(big.Float).Mul(
+					new(big.Float).SetInt(txValueWei),
+					new(big.Float).Quo(tierPct, big.NewFloat(100)),
+				)
+				feeWei, _ := feeFloat.Int(nil)
+
+				if feeWei.Sign() > 0 {
+					feeRecord := &FeeRecord{
+						ExecutionID:    execution.Id,
+						TaskID:         task.Id,
+						Owner:          task.Owner,
+						Tier:           execution.ValueFee.Tier.String(),
+						TierPercentage: execution.ValueFee.Fee.Amount,
+						TxValueWei:     txValueWei.String(),
+						FeeAmountWei:   feeWei.String(),
+						Timestamp:      t1.UnixMilli(),
+						ChainID:        x.smartWalletConfig.ChainID,
+					}
+					if recordErr := x.feeLedger.RecordValueFee(feeRecord); recordErr != nil {
+						x.logger.Error("Failed to record value fee", "error", recordErr, "execution_id", execution.Id)
+					}
+				}
+			}
+		}
+	}
 
 	// Ensure no NaN/Inf sneak into protobuf Values (which reject them)
 	sanitizeExecutionForPersistence(execution)

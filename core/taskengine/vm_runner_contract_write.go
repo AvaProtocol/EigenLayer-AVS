@@ -37,6 +37,7 @@ type SendUserOpFunc func(
 	paymasterReq *preset.VerifyingPaymasterRequest,
 	senderOverride *common.Address,
 	saltOverride *big.Int,
+	executionFeeWei *big.Int,
 	lgr logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error)
 
@@ -753,10 +754,11 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		r.smartWalletConfig,
 		r.owner, // Use EOA address (owner) for smart wallet derivation
 		smartWalletCallData,
-		paymasterReq,   // Use paymaster for wallet creation/sponsorship if shouldUsePaymaster() returned true
-		senderOverride, // Smart wallet address from aa_sender
-		saltOverride,   // Salt for wallet auto-deployment (from aa_salt VM var)
-		r.vm.logger,    // Pass logger for debug/verbose logging
+		paymasterReq,         // Use paymaster for wallet creation/sponsorship if shouldUsePaymaster() returned true
+		senderOverride,       // Smart wallet address from aa_sender
+		saltOverride,         // Salt for wallet auto-deployment (from aa_salt VM var)
+		r.vm.executionFeeWei, // Execution fee in Wei (nil = no fee)
+		r.vm.logger,          // Pass logger for debug/verbose logging
 	)
 
 	// Increment transaction counter for this address (regardless of success/failure)
