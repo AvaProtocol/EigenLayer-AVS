@@ -83,6 +83,7 @@ approved_operators:
 # All fields optional — unset values use defaults shown below.
 fee_rates:
   execution_fee_usd: 0.02   # Flat per-execution platform fee ($0.02 default)
+  credit_limit_usd: 20.0    # Max outstanding value fees before blocking execution ($20 default)
   tiers:
     tier_1: 0.03             # Value-capture group 1 (0.03% of tx value)
     tier_2: 0.09             # Value-capture group 2 (0.09% of tx value)

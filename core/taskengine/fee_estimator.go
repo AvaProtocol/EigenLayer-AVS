@@ -478,6 +478,22 @@ func (fe *FeeEstimator) generateWarnings(cogs []*avsproto.NodeCOGS) []string {
 	return warnings
 }
 
+// ConvertUSDToWei converts a USD amount to Wei using the price service.
+// Used by the billing system to convert execution_fee (USD) to native token at execution time.
+func ConvertUSDToWei(usdAmount float64, priceService PriceService, chainID int64) (*big.Int, error) {
+	ethPrice, err := priceService.GetNativeTokenPriceUSD(chainID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get native token price: %w", err)
+	}
+
+	usdFloat := big.NewFloat(usdAmount)
+	ethAmount := new(big.Float).Quo(usdFloat, ethPrice)
+	weiFloat := new(big.Float).Mul(ethAmount, big.NewFloat(1e18))
+	weiAmount, _ := weiFloat.Int(nil)
+
+	return weiAmount, nil
+}
+
 // Default configuration
 func getDefaultFeeRates() *FeeRates {
 	return &FeeRates{

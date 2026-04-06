@@ -372,6 +372,7 @@ const (
 	ErrorCode_SMART_WALLET_NOT_FOUND        ErrorCode = 8001 // Smart wallet address not found
 	ErrorCode_SMART_WALLET_DEPLOYMENT_ERROR ErrorCode = 8002 // Failed to deploy smart wallet
 	ErrorCode_INSUFFICIENT_BALANCE          ErrorCode = 8003 // Insufficient balance for operation
+	ErrorCode_INSUFFICIENT_CREDIT           ErrorCode = 8004 // Outstanding value fees exceed credit limit
 )
 
 // Enum value maps for ErrorCode.
@@ -416,6 +417,7 @@ var (
 		8001: "SMART_WALLET_NOT_FOUND",
 		8002: "SMART_WALLET_DEPLOYMENT_ERROR",
 		8003: "INSUFFICIENT_BALANCE",
+		8004: "INSUFFICIENT_CREDIT",
 	}
 	ErrorCode_value = map[string]int32{
 		"ERROR_CODE_UNSPECIFIED":        0,
@@ -457,6 +459,7 @@ var (
 		"SMART_WALLET_NOT_FOUND":        8001,
 		"SMART_WALLET_DEPLOYMENT_ERROR": 8002,
 		"INSUFFICIENT_BALANCE":          8003,
+		"INSUFFICIENT_CREDIT":           8004,
 	}
 )
 
@@ -10238,7 +10241,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x0fLANG_JAVASCRIPT\x10\x01\x12\r\n" +
 	"\tLANG_JSON\x10\x02\x12\x10\n" +
 	"\fLANG_GRAPHQL\x10\x03\x12\x13\n" +
-	"\x0fLANG_HANDLEBARS\x10\x04*\xf6\a\n" +
+	"\x0fLANG_HANDLEBARS\x10\x04*\x90\b\n" +
 	"\tErrorCode\x12\x1a\n" +
 	"\x16ERROR_CODE_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\fUNAUTHORIZED\x10\xe8\a\x12\x0e\n" +
@@ -10278,7 +10281,8 @@ const file_avs_proto_rawDesc = "" +
 	"\x16SMART_WALLET_RPC_ERROR\x10\xc0>\x12\x1b\n" +
 	"\x16SMART_WALLET_NOT_FOUND\x10\xc1>\x12\"\n" +
 	"\x1dSMART_WALLET_DEPLOYMENT_ERROR\x10\xc2>\x12\x19\n" +
-	"\x14INSUFFICIENT_BALANCE\x10\xc3>*O\n" +
+	"\x14INSUFFICIENT_BALANCE\x10\xc3>\x12\x18\n" +
+	"\x13INSUFFICIENT_CREDIT\x10\xc4>*O\n" +
 	"\n" +
 	"TaskStatus\x12\v\n" +
 	"\aEnabled\x10\x00\x12\r\n" +
