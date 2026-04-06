@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"sync"
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -18,6 +19,7 @@ import (
 type FeeLedger struct {
 	db     storage.Storage
 	logger sdklogging.Logger
+	mu     sync.Mutex // Guards read-then-write sequences in RecordValueFee
 }
 
 // FeeLedgerEntry stores the running balance for a user's outstanding value fees.
@@ -93,8 +95,12 @@ func (fl *FeeLedger) CheckCreditLimit(owner common.Address, creditLimitWei *big.
 }
 
 // RecordValueFee records a value fee after successful execution.
-// Atomically updates the ledger entry and stores the individual fee record.
+// The mutex serializes the read-check-write sequence to prevent double-recording
+// when concurrent calls arrive with the same ExecutionID.
 func (fl *FeeLedger) RecordValueFee(record *FeeRecord) error {
+	fl.mu.Lock()
+	defer fl.mu.Unlock()
+
 	owner := common.HexToAddress(record.Owner)
 
 	// Idempotency check: skip if this execution's fee was already recorded

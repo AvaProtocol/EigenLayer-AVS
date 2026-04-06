@@ -27,7 +27,7 @@ type FeeEstimator struct {
 
 	// Node-tier fee configuration
 	feeRates      *FeeRates
-	discountRules *DiscountRules
+	discountRules *DiscountRules // Planned: promotional discounts. Safe when nil/empty — no effect on totals.
 }
 
 // PriceService interface for getting token prices
@@ -49,7 +49,8 @@ type FeeRates struct {
 	Tier3FeePercentage float64 // Default: 0.18%
 }
 
-// DiscountRules defines promotional discount rules
+// DiscountRules defines promotional discount rules (planned, not yet applied).
+// When all fields are zero the discount pass is a no-op and totals are unaffected.
 type DiscountRules struct {
 	// Beta program discount
 	BetaProgramAutomationDiscount float64 // 100% (1.0)
@@ -244,10 +245,13 @@ func (fe *FeeEstimator) resolveRunnerAndWalletCreation(ctx context.Context, req 
 		return common.Address{}, false, nil, fmt.Errorf("runner address not found in request or input_variables")
 	}
 
-	// Check if smart wallet already exists
+	// Check if smart wallet already exists.
+	// On RPC failure, assume wallet exists to avoid blocking fee estimation during transient outages.
 	code, err := fe.ethClient.CodeAt(ctx, runnerAddress, nil)
 	if err != nil {
-		return runnerAddress, false, nil, fmt.Errorf("failed to check smart wallet deployment status for %s: %w", runnerAddress.Hex(), err)
+		fe.logger.Warn("Failed to check smart wallet deployment status, assuming wallet exists",
+			"address", runnerAddress.Hex(), "error", err)
+		return runnerAddress, false, nil, nil
 	}
 
 	if len(code) > 0 {
@@ -319,7 +323,8 @@ func (fe *FeeEstimator) estimateWalletCreationGas(ctx context.Context, walletAdd
 }
 
 // estimateCOGS estimates cost of goods sold — per-node operational costs.
-// Gas for on-chain nodes (contract_write, eth_transfer, loop).
+// Gas for on-chain nodes (contract_write, eth_transfer) and loops whose inner
+// runner is on-chain. Off-chain loops (contract_read, custom_code, etc.) are skipped.
 // Future: external API costs for REST API nodes calling paid services.
 func (fe *FeeEstimator) estimateCOGS(ctx context.Context, req *avsproto.EstimateFeesReq, runnerAddress common.Address) ([]*avsproto.NodeCOGS, error) {
 	fe.logger.Info("🔍 Estimating COGS for workflow", "runner", runnerAddress.Hex())
@@ -402,14 +407,38 @@ func (fe *FeeEstimator) estimateETHTransferGas(ctx context.Context, node *avspro
 	}
 }
 
+// estimateLoopGas estimates gas for a loop node based on its inner runner.
+// Only on-chain runners (contract_write, eth_transfer) incur gas; off-chain runners are skipped.
 func (fe *FeeEstimator) estimateLoopGas(ctx context.Context, node *avsproto.TaskNode, runnerAddress common.Address, gasPrice *big.Int) *GasEstimationResult {
-	estimatedGas := big.NewInt(300000) // Conservative estimate for loop operations
+	loopNode := node.GetLoop()
+	if loopNode == nil {
+		return nil
+	}
+
+	// Determine gas based on the inner runner type
+	var perIterationGas int64
+	var operationType string
+
+	switch {
+	case loopNode.GetContractWrite() != nil:
+		perIterationGas = 150000
+		operationType = "loop_contract_write"
+	case loopNode.GetEthTransfer() != nil:
+		perIterationGas = 50000
+		operationType = "loop_eth_transfer"
+	default:
+		// Off-chain runner (contract_read, custom_code, rest_api, graphql) — no gas cost
+		return nil
+	}
+
+	// Conservative estimate: assume multiple iterations
+	estimatedGas := big.NewInt(perIterationGas)
 	totalCost := new(big.Int).Mul(estimatedGas, gasPrice)
 
 	return &GasEstimationResult{
 		NodeID:           node.Id,
-		OperationType:    "contract_write",
-		MethodName:       "loop_operations",
+		OperationType:    operationType,
+		MethodName:       "loop_iteration",
 		GasUnits:         estimatedGas,
 		GasPrice:         gasPrice,
 		TotalCost:        totalCost,
@@ -431,8 +460,16 @@ func (fe *FeeEstimator) estimateLoopGas(ctx context.Context, node *avsproto.Task
 func (fe *FeeEstimator) classifyWorkflowValue(req *avsproto.EstimateFeesReq) *avsproto.ValueFee {
 	hasOnChainNodes := false
 	for _, node := range req.Nodes {
-		if isOnChainNode(node) {
+		switch {
+		case node.GetEthTransfer() != nil, node.GetContractWrite() != nil:
 			hasOnChainNodes = true
+		case node.GetLoop() != nil:
+			loop := node.GetLoop()
+			if loop.GetEthTransfer() != nil || loop.GetContractWrite() != nil {
+				hasOnChainNodes = true
+			}
+		}
+		if hasOnChainNodes {
 			break
 		}
 	}
@@ -458,13 +495,6 @@ func (fe *FeeEstimator) classifyWorkflowValue(req *avsproto.EstimateFeesReq) *av
 		Confidence:           1.0,
 		Reason:               "V1 default: workflow contains on-chain execution nodes",
 	}
-}
-
-// isOnChainNode returns true if the node performs on-chain transactions
-func isOnChainNode(node *avsproto.TaskNode) bool {
-	return node.GetEthTransfer() != nil ||
-		node.GetContractWrite() != nil ||
-		node.GetLoop() != nil
 }
 
 // generateWarnings generates warnings about fee estimation accuracy
@@ -540,8 +570,13 @@ func buildValueFee(steps []*avsproto.Execution_Step, feeRatesConfig *config.FeeR
 	for _, step := range steps {
 		stepType := step.Type
 		if stepType == avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String() ||
-			stepType == avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String() ||
-			stepType == avsproto.NodeType_NODE_TYPE_LOOP.String() {
+			stepType == avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String() {
+			hasOnChainSteps = true
+			break
+		}
+		// A loop step that recorded gas costs ran on-chain work via its inner runner
+		if stepType == avsproto.NodeType_NODE_TYPE_LOOP.String() &&
+			step.TotalGasCost != "" && step.TotalGasCost != "0" {
 			hasOnChainSteps = true
 			break
 		}

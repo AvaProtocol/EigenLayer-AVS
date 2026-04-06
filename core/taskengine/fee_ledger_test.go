@@ -2,34 +2,18 @@ package taskengine
 
 import (
 	"math/big"
-	"os"
 	"testing"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func setupTestDB(t *testing.T) (storage.Storage, func()) {
-	t.Helper()
-	dir, err := os.MkdirTemp("", "fee_ledger_test")
-	require.NoError(t, err)
-
-	store, err := storage.NewWithPath(dir)
-	require.NoError(t, err)
-
-	cleanup := func() {
-		store.Close()
-		os.RemoveAll(dir)
-	}
-	return store, cleanup
-}
-
 func TestFeeLedger_GetOutstandingBalance_Empty(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
+	db := testutil.TestMustDB()
 
 	logger, _ := sdklogging.NewZapLogger(sdklogging.Development)
 	ledger := NewFeeLedger(db, logger)
@@ -41,8 +25,7 @@ func TestFeeLedger_GetOutstandingBalance_Empty(t *testing.T) {
 }
 
 func TestFeeLedger_RecordValueFee(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
+	db := testutil.TestMustDB()
 
 	logger, _ := sdklogging.NewZapLogger(sdklogging.Development)
 	ledger := NewFeeLedger(db, logger)
@@ -53,7 +36,7 @@ func TestFeeLedger_RecordValueFee(t *testing.T) {
 		ExecutionID:    "exec_001",
 		TaskID:         "task_001",
 		Owner:          owner.Hex(),
-		Tier:           "EXECUTION_TIER_1",
+		Tier:           avsproto.ExecutionTier_EXECUTION_TIER_1.String(),
 		TierPercentage: "0.03",
 		TxValueWei:     "1000000000000000000", // 1 ETH
 		FeeAmountWei:   "300000000000000",     // 0.0003 ETH (0.03%)
@@ -73,8 +56,7 @@ func TestFeeLedger_RecordValueFee(t *testing.T) {
 }
 
 func TestFeeLedger_RecordMultipleFees(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
+	db := testutil.TestMustDB()
 
 	logger, _ := sdklogging.NewZapLogger(sdklogging.Development)
 	ledger := NewFeeLedger(db, logger)
@@ -108,8 +90,7 @@ func TestFeeLedger_RecordMultipleFees(t *testing.T) {
 }
 
 func TestFeeLedger_CheckCreditLimit(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
+	db := testutil.TestMustDB()
 
 	logger, _ := sdklogging.NewZapLogger(sdklogging.Development)
 	ledger := NewFeeLedger(db, logger)
@@ -154,8 +135,7 @@ func TestFeeLedger_CheckCreditLimit(t *testing.T) {
 }
 
 func TestFeeLedger_SeparateOwners(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
+	db := testutil.TestMustDB()
 
 	logger, _ := sdklogging.NewZapLogger(sdklogging.Development)
 	ledger := NewFeeLedger(db, logger)

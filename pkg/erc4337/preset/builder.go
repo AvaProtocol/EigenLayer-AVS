@@ -429,8 +429,6 @@ func EstimateGasReimbursementAmount(client *ethclient.Client, gasEstimate *bundl
 	return reimbursement, nil
 }
 
-// wrapWithReimbursement wraps original SimpleAccount.execute() calldata with executeBatchWithValues
-// to add a second step that transfers reimbursement ETH to the reimbursement recipient (paymaster owner or paymaster), atomically.
 // wrapWithReimbursement wraps original SimpleAccount.execute() calldata with
 // executeBatchWithValues to add reimbursement transfers atomically. It appends a
 // transfer of reimbursement ETH to the reimbursement recipient (paymaster owner),

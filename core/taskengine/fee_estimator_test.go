@@ -47,15 +47,67 @@ func TestFeeEstimator_ChainIDDetection(t *testing.T) {
 	assert.Equal(t, detectedChainID, feeEstimator.chainID)
 }
 
-func TestIsOnChainNode(t *testing.T) {
-	assert.True(t, isOnChainNode(&avsproto.TaskNode{TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: &avsproto.ETHTransferNode{}}}))
-	assert.True(t, isOnChainNode(&avsproto.TaskNode{TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{}}}))
-	assert.True(t, isOnChainNode(&avsproto.TaskNode{TaskType: &avsproto.TaskNode_Loop{Loop: &avsproto.LoopNode{}}}))
+func TestClassifyWorkflowValue_OnChainDetection(t *testing.T) {
+	logger, _ := sdklogging.NewZapLogger(sdklogging.Development)
+	fe := &FeeEstimator{logger: logger, feeRates: getDefaultFeeRates()}
 
-	assert.False(t, isOnChainNode(&avsproto.TaskNode{TaskType: &avsproto.TaskNode_ContractRead{ContractRead: &avsproto.ContractReadNode{}}}))
-	assert.False(t, isOnChainNode(&avsproto.TaskNode{TaskType: &avsproto.TaskNode_RestApi{RestApi: &avsproto.RestAPINode{}}}))
-	assert.False(t, isOnChainNode(&avsproto.TaskNode{TaskType: &avsproto.TaskNode_Branch{Branch: &avsproto.BranchNode{}}}))
-	assert.False(t, isOnChainNode(&avsproto.TaskNode{}))
+	// Direct on-chain nodes → Tier 1
+	resp := fe.classifyWorkflowValue(&avsproto.EstimateFeesReq{
+		Nodes: []*avsproto.TaskNode{
+			{TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: &avsproto.ETHTransferNode{}}},
+		},
+	})
+	assert.Equal(t, avsproto.ExecutionTier_EXECUTION_TIER_1, resp.Tier, "ETHTransfer should be on-chain")
+
+	resp = fe.classifyWorkflowValue(&avsproto.EstimateFeesReq{
+		Nodes: []*avsproto.TaskNode{
+			{TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{}}},
+		},
+	})
+	assert.Equal(t, avsproto.ExecutionTier_EXECUTION_TIER_1, resp.Tier, "ContractWrite should be on-chain")
+
+	// Loop with on-chain inner runner → Tier 1
+	resp = fe.classifyWorkflowValue(&avsproto.EstimateFeesReq{
+		Nodes: []*avsproto.TaskNode{
+			{TaskType: &avsproto.TaskNode_Loop{Loop: &avsproto.LoopNode{
+				Runner: &avsproto.LoopNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{}},
+			}}},
+		},
+	})
+	assert.Equal(t, avsproto.ExecutionTier_EXECUTION_TIER_1, resp.Tier, "Loop with ContractWrite runner should be on-chain")
+
+	// Loop with off-chain inner runner → UNSPECIFIED
+	resp = fe.classifyWorkflowValue(&avsproto.EstimateFeesReq{
+		Nodes: []*avsproto.TaskNode{
+			{TaskType: &avsproto.TaskNode_Loop{Loop: &avsproto.LoopNode{
+				Runner: &avsproto.LoopNode_CustomCode{CustomCode: &avsproto.CustomCodeNode{}},
+			}}},
+		},
+	})
+	assert.Equal(t, avsproto.ExecutionTier_EXECUTION_TIER_UNSPECIFIED, resp.Tier, "Loop with CustomCode runner should not be on-chain")
+
+	// Loop with no runner set → UNSPECIFIED
+	resp = fe.classifyWorkflowValue(&avsproto.EstimateFeesReq{
+		Nodes: []*avsproto.TaskNode{
+			{TaskType: &avsproto.TaskNode_Loop{Loop: &avsproto.LoopNode{}}},
+		},
+	})
+	assert.Equal(t, avsproto.ExecutionTier_EXECUTION_TIER_UNSPECIFIED, resp.Tier, "Loop with no runner should not be on-chain")
+
+	// Pure off-chain nodes → UNSPECIFIED
+	resp = fe.classifyWorkflowValue(&avsproto.EstimateFeesReq{
+		Nodes: []*avsproto.TaskNode{
+			{TaskType: &avsproto.TaskNode_ContractRead{ContractRead: &avsproto.ContractReadNode{}}},
+			{TaskType: &avsproto.TaskNode_RestApi{RestApi: &avsproto.RestAPINode{}}},
+		},
+	})
+	assert.Equal(t, avsproto.ExecutionTier_EXECUTION_TIER_UNSPECIFIED, resp.Tier, "Off-chain only workflow should be UNSPECIFIED")
+
+	// Empty node → UNSPECIFIED
+	resp = fe.classifyWorkflowValue(&avsproto.EstimateFeesReq{
+		Nodes: []*avsproto.TaskNode{{}},
+	})
+	assert.Equal(t, avsproto.ExecutionTier_EXECUTION_TIER_UNSPECIFIED, resp.Tier, "Empty node should be UNSPECIFIED")
 }
 
 func TestDefaultFeeRates(t *testing.T) {

@@ -470,7 +470,11 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		return execution, nil // Return execution record with failure details
 	}
 
-	// Pre-execution credit check: block if outstanding value fees exceed credit limit
+	// Pre-execution credit check: block if outstanding value fees exceed credit limit.
+	// NOTE: Known TOCTOU gap — no lock is held between reading the outstanding balance
+	// and recording a new fee after execution. Two concurrent executions for the same
+	// owner can both pass this check before either records its fee. Acceptable for V1
+	// where value fees are not auto-recorded; needs per-owner locking when V2 lands.
 	if x.feeLedger != nil && x.priceService != nil && x.engine.config.FeeRates != nil {
 		creditLimitUSD := x.engine.config.FeeRates.CreditLimitUSD
 		chainID := int64(0)
