@@ -197,7 +197,11 @@ func TestConvertUSDToWei(t *testing.T) {
 	weiAmount, err := ConvertUSDToWei(0.02, priceService, 11155111)
 	require.NoError(t, err)
 
-	// $0.02 at $2500/ETH = 0.000008 ETH = 8000000000000 Wei
+	// $0.02 at $2500/ETH = 0.000008 ETH ≈ 8000000000000 Wei
+	// Allow ±1 wei for floating point precision
 	expectedWei, _ := new(big.Int).SetString("8000000000000", 10)
-	assert.Equal(t, expectedWei, weiAmount, "$0.02 at $2500/ETH should be 8000000000000 Wei")
+	diff := new(big.Int).Sub(expectedWei, weiAmount)
+	diff.Abs(diff)
+	assert.True(t, diff.Cmp(big.NewInt(1)) <= 0,
+		"$0.02 at $2500/ETH should be ~8000000000000 Wei, got %s", weiAmount.String())
 }

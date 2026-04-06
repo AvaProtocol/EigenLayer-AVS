@@ -486,9 +486,14 @@ func ConvertUSDToWei(usdAmount float64, priceService PriceService, chainID int64
 		return nil, fmt.Errorf("failed to get native token price: %w", err)
 	}
 
+	if ethPrice == nil || ethPrice.Sign() <= 0 {
+		return nil, fmt.Errorf("invalid native token price: must be greater than zero")
+	}
+
 	usdFloat := big.NewFloat(usdAmount)
 	ethAmount := new(big.Float).Quo(usdFloat, ethPrice)
-	weiFloat := new(big.Float).Mul(ethAmount, big.NewFloat(1e18))
+	weiMultiplier := new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	weiFloat := new(big.Float).Mul(ethAmount, weiMultiplier)
 	weiAmount, _ := weiFloat.Int(nil)
 
 	return weiAmount, nil

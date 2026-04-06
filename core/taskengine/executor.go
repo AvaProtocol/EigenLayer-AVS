@@ -487,7 +487,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 				x.logger.Warn("Fee ledger check failed, proceeding with execution", "error", checkErr)
 			} else if !withinLimit {
 				execution.EndAt = time.Now().UnixMilli()
-				execution.Error = fmt.Sprintf("outstanding value fees (%s wei) exceed credit limit", outstanding.String())
+				execution.Error = fmt.Sprintf("[INSUFFICIENT_CREDIT] outstanding value fees (%s wei) exceed credit limit", outstanding.String())
 				execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
 				x.persistFailedExecution(task, execution, initialTaskStatus)
 				return execution, nil
@@ -616,47 +616,18 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	execution.Cogs = buildCOGSFromSteps(vm.ExecutionLogs)
 	execution.ValueFee = buildValueFee(vm.ExecutionLogs, x.engine.config.FeeRates)
 
-	// Record value fee in ledger after successful execution
+	// Value fee recording placeholder.
+	// V1: value fees are not recorded because actual transaction value (the base for
+	// percentage calculation) is not available from step/receipt data yet.
+	// V2 will extract on-chain transferred value from execution receipts and compute
+	// value_fee = tier_percentage × tx_value, then record via FeeLedger.RecordValueFee().
 	if x.feeLedger != nil && resultStatus == ExecutionSuccess && execution.ValueFee != nil &&
 		execution.ValueFee.Fee != nil && execution.ValueFee.Fee.Amount != "0" {
-		// For V1, record value fee based on COGS as a proxy for tx value
-		// (actual tx value extraction from step data will be implemented in V2)
-		for _, cogsEntry := range execution.Cogs {
-			if cogsEntry.Fee != nil && cogsEntry.Fee.Unit == "WEI" {
-				txValueWei, ok := new(big.Int).SetString(cogsEntry.Fee.Amount, 10)
-				if !ok || txValueWei.Sign() <= 0 {
-					continue
-				}
-
-				// fee = txValue * tierPercentage / 100
-				tierPct, _ := new(big.Float).SetString(execution.ValueFee.Fee.Amount)
-				if tierPct == nil {
-					continue
-				}
-				feeFloat := new(big.Float).Mul(
-					new(big.Float).SetInt(txValueWei),
-					new(big.Float).Quo(tierPct, big.NewFloat(100)),
-				)
-				feeWei, _ := feeFloat.Int(nil)
-
-				if feeWei.Sign() > 0 {
-					feeRecord := &FeeRecord{
-						ExecutionID:    execution.Id,
-						TaskID:         task.Id,
-						Owner:          task.Owner,
-						Tier:           execution.ValueFee.Tier.String(),
-						TierPercentage: execution.ValueFee.Fee.Amount,
-						TxValueWei:     txValueWei.String(),
-						FeeAmountWei:   feeWei.String(),
-						Timestamp:      t1.UnixMilli(),
-						ChainID:        x.smartWalletConfig.ChainID,
-					}
-					if recordErr := x.feeLedger.RecordValueFee(feeRecord); recordErr != nil {
-						x.logger.Error("Failed to record value fee", "error", recordErr, "execution_id", execution.Id)
-					}
-				}
-			}
-		}
+		x.logger.Info("Value fee applicable but not recorded (V1: tx value extraction not implemented)",
+			"execution_id", execution.Id,
+			"task_id", task.Id,
+			"tier", execution.ValueFee.Tier.String(),
+			"tier_percentage", execution.ValueFee.Fee.Amount)
 	}
 
 	// Ensure no NaN/Inf sneak into protobuf Values (which reject them)

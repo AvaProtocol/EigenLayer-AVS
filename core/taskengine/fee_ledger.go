@@ -78,6 +78,10 @@ func (fl *FeeLedger) GetOutstandingBalance(owner common.Address) (*big.Int, erro
 // CheckCreditLimit returns whether the owner is within their credit limit.
 // Returns (withinLimit, outstandingBalance, error).
 func (fl *FeeLedger) CheckCreditLimit(owner common.Address, creditLimitWei *big.Int) (bool, *big.Int, error) {
+	if creditLimitWei == nil {
+		return true, big.NewInt(0), nil // No limit configured — always within limit
+	}
+
 	outstanding, err := fl.GetOutstandingBalance(owner)
 	if err != nil {
 		return false, nil, fmt.Errorf("failed to get outstanding balance: %w", err)
@@ -92,6 +96,13 @@ func (fl *FeeLedger) CheckCreditLimit(owner common.Address, creditLimitWei *big.
 // Atomically updates the ledger entry and stores the individual fee record.
 func (fl *FeeLedger) RecordValueFee(record *FeeRecord) error {
 	owner := common.HexToAddress(record.Owner)
+
+	// Idempotency check: skip if this execution's fee was already recorded
+	existingRecord, _ := fl.db.GetKey(FeeRecordKey(owner, record.ExecutionID))
+	if existingRecord != nil {
+		fl.logger.Debug("Fee record already exists, skipping", "execution_id", record.ExecutionID)
+		return nil
+	}
 
 	feeAmount, ok := new(big.Int).SetString(record.FeeAmountWei, 10)
 	if !ok {

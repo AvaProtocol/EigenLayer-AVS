@@ -64,8 +64,8 @@ func TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient(t *testing.T)
 			recoverPaymaster,
 			&secondaryWallet,
 			secondarySalt,
-			nil,
 			nil, // executionFeeWei
+			nil, // logger
 		)
 		require.NoError(t, err, "Recovery transfer should succeed")
 		if recoverReceipt != nil {
@@ -131,8 +131,8 @@ func TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient(t *testing.T)
 			returnPaymasterRequest,
 			&secondaryWallet,
 			secondarySalt,
-			nil,
 			nil, // executionFeeWei
+			nil, // logger
 		)
 		require.NoError(t, err, "Return transfer should succeed")
 		if returnReceipt != nil {

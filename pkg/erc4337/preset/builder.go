@@ -431,10 +431,11 @@ func EstimateGasReimbursementAmount(client *ethclient.Client, gasEstimate *bundl
 
 // wrapWithReimbursement wraps original SimpleAccount.execute() calldata with executeBatchWithValues
 // to add a second step that transfers reimbursement ETH to the reimbursement recipient (paymaster owner or paymaster), atomically.
-// wrapWithReimbursement wraps original SimpleAccount.execute() calldata with executeBatchWithValues
-// to add reimbursement + optional execution fee transfers, atomically.
-// If executionFeeWei is non-nil and > 0, a third batch operation is added to transfer the fee
-// to the feeRecipient (same as reimbursement recipient).
+// wrapWithReimbursement wraps original SimpleAccount.execute() calldata with
+// executeBatchWithValues to add reimbursement transfers atomically. It appends a
+// transfer of reimbursement ETH to the reimbursement recipient (paymaster owner),
+// and if executionFeeWei is non-nil and > 0, it also adds a transfer of the
+// execution fee to the same recipient.
 func wrapWithReimbursement(
 	client *ethclient.Client,
 	originalCallData []byte,
