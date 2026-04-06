@@ -2911,7 +2911,6 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	_, executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
 
 	// Step 11: Calculate total gas cost for the workflow
-	totalGasCost := vm.CalculateTotalGasCost()
 
 	// Create execution result with proper status/error analysis
 	execution := &avsproto.Execution{
@@ -2922,12 +2921,9 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Error:        executionError,                         // Comprehensive error message from failed steps
 		Steps:        vm.ExecutionLogs,                       // Now contains both trigger and node steps (including failed ones)
 		Index:        task.ExecutionCount,                    // Use current execution count for simulation (0-based)
-		TotalGasCost: totalGasCost,                           // Total gas cost for the entire workflow
-		AutomationFee: &avsproto.FeeAmount{
-			NativeTokenAmount: "0",
-			NativeTokenSymbol: "", // Zero fee; symbol not applicable until automation fees are enabled
-			UsdAmount:         "0",
-		},
+		ExecutionFee: buildExecutionFee(n.config.FeeRates),
+		Cogs:         buildCOGSFromSteps(vm.ExecutionLogs),
+		ValueFee:     buildValueFee(vm.ExecutionLogs, n.config.FeeRates),
 	}
 
 	// Log execution status based on result type
@@ -3267,16 +3263,14 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 
 	n.logger.Debug("🗂️ Returning pending execution", "task_id", payload.TaskId, "execution_id", payload.ExecutionId, "status", *execStatus, "index", pendingIndex)
 	return &avsproto.Execution{
-		Id:      payload.ExecutionId,
-		Status:  *execStatus,
-		StartAt: time.Now().UnixMilli(),       // Approximate start time
-		Steps:   []*avsproto.Execution_Step{}, // Empty steps for pending
-		Index:   pendingIndex,                 // Use pre-assigned or newly assigned index
-		AutomationFee: &avsproto.FeeAmount{
-			NativeTokenAmount: "0",
-			NativeTokenSymbol: "", // Zero fee; symbol not applicable until automation fees are enabled
-			UsdAmount:         "0",
-		},
+		Id:           payload.ExecutionId,
+		Status:       *execStatus,
+		StartAt:      time.Now().UnixMilli(),               // Approximate start time
+		Steps:        []*avsproto.Execution_Step{},         // Empty steps for pending
+		Index:        pendingIndex,                         // Use pre-assigned or newly assigned index
+		ExecutionFee: buildExecutionFee(n.config.FeeRates), // Known upfront
+		Cogs:         []*avsproto.NodeCOGS{},               // Unknown until execution completes
+		ValueFee:     nil,                                  // Unknown until execution completes
 	}, nil
 }
 

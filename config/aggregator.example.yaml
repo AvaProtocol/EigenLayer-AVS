@@ -76,28 +76,17 @@ approved_operators:
   - "0xc6b87cc9e85b07365b6abefff061f237f7cf7dc3" # Operator 2
   - "0xa026265a0f01a6e1a19b04655519429df0a57c4e" # Operator 3 (newly added)
 
-# 🆕 CONFIGURABLE FEE RATES
-# All fields are optional - only specify ones you want to override
+# FEE STRUCTURE: execution_fee + COGS + value_fee
+# - execution_fee: flat per-run platform fee
+# - COGS: per-node operational costs (gas, external APIs) — estimated automatically
+# - value_fee: workflow-level % of tx value, classified by urgency/importance
+# All fields optional — unset values use defaults shown below.
 fee_rates:
-  # Base fees (one-time per workflow) - defaults to 0.0
-  base_fee_usd: 0.0
-
-  # Monitoring fees (per minute) - cost to monitor triggers
-  manual_monitoring_fee_usd_per_minute: 0.0 # Manual triggers free (default)
-  fixed_time_monitoring_fee_usd_per_minute: 0.000017 # ~$0.01/day (default)
-  cron_monitoring_fee_usd_per_minute: 0.000033 # ~$0.02/day (default)
-  block_monitoring_fee_usd_per_minute: 0.000033 # ~$0.02/day (default)
-  event_monitoring_fee_usd_per_minute: 0.000083 # ~$0.05/day (default)
-
-  # Per-execution fees - cost for each trigger activation
-  manual_execution_fee_usd: 0.0 # Manual executions free (default)
-  scheduled_execution_fee_usd: 0.005 # $0.005 per scheduled execution (default)
-  block_execution_fee_usd: 0.01 # $0.01 per block trigger (default)
-  event_execution_fee_usd: 0.01 # $0.01 per event trigger (default)
-
-  # Event monitoring scaling factors - additional costs for complex event monitoring
-  event_address_fee_usd_per_minute: 0.000008 # ~$0.005/day per address (default)
-  event_topic_fee_usd_per_minute: 0.000003 # ~$0.002/day per topic (default)
+  execution_fee_usd: 0.02   # Flat per-execution platform fee ($0.02 default)
+  tiers:
+    tier_1: 0.03             # Value-capture group 1 (0.03% of tx value)
+    tier_2: 0.09             # Value-capture group 2 (0.09% of tx value)
+    tier_3: 0.18             # Value-capture group 3 (0.18% of tx value)
 
 # Macro variables and secrets - Available globally to ALL workflows at runtime
 # Access in workflows via template syntax: {{apContext.configVars.SECRET_NAME}}

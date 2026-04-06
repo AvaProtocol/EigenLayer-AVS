@@ -187,40 +187,40 @@ func TestGasCostExtractionFromTenderly(t *testing.T) {
 	})
 }
 
-func TestWorkflowLevelGasCostAggregation(t *testing.T) {
-	t.Run("Execution message should have TotalGasCost field", func(t *testing.T) {
-		execution := &avsproto.Execution{
-			Id:           "execution_123",
-			TotalGasCost: "250000000000000", // Total gas cost for workflow
-			Steps: []*avsproto.Execution_Step{
-				{
-					Id:           "step1",
-					Type:         avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
-					TotalGasCost: "150000000000000",
-				},
-				{
-					Id:           "step2",
-					Type:         avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String(),
-					TotalGasCost: "100000000000000",
-				},
+func TestBuildCOGSFromSteps(t *testing.T) {
+	t.Run("builds COGS from step-level gas data", func(t *testing.T) {
+		steps := []*avsproto.Execution_Step{
+			{
+				Id:           "step1",
+				Type:         avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
+				GasUsed:      "100000",
+				TotalGasCost: "150000000000000",
+			},
+			{
+				Id:           "step2",
+				Type:         avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String(),
+				GasUsed:      "50000",
+				TotalGasCost: "100000000000000",
+			},
+			{
+				Id:           "step3",
+				Type:         avsproto.NodeType_NODE_TYPE_CONTRACT_READ.String(),
+				TotalGasCost: "", // Non on-chain — no gas
 			},
 		}
 
-		// Verify the total matches the sum of steps
-		totalFromSteps := new(big.Int)
-		for _, step := range execution.Steps {
-			if step.TotalGasCost != "" {
-				stepCost, ok := new(big.Int).SetString(step.TotalGasCost, 10)
-				if ok {
-					totalFromSteps.Add(totalFromSteps, stepCost)
-				}
-			}
-		}
+		cogs := buildCOGSFromSteps(steps)
 
-		actualTotal, ok := new(big.Int).SetString(execution.TotalGasCost, 10)
-		require.True(t, ok, "Should parse total gas cost")
+		// Only on-chain steps with gas data should produce COGS
+		assert.Len(t, cogs, 2)
+		assert.Equal(t, "step1", cogs[0].NodeId)
+		assert.Equal(t, "gas", cogs[0].CostType)
+		assert.Equal(t, "150000000000000", cogs[0].Fee.Amount)
+		assert.Equal(t, "WEI", cogs[0].Fee.Unit)
+		assert.Equal(t, "100000", cogs[0].GasUnits)
 
-		assert.Equal(t, totalFromSteps.String(), actualTotal.String(), "Total gas cost should equal sum of step costs")
+		assert.Equal(t, "step2", cogs[1].NodeId)
+		assert.Equal(t, "100000000000000", cogs[1].Fee.Amount)
 	})
 }
 
