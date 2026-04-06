@@ -473,14 +473,25 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	// Pre-execution credit check: block if outstanding value fees exceed credit limit
 	if x.feeLedger != nil && x.priceService != nil && x.engine.config.FeeRates != nil {
 		creditLimitUSD := x.engine.config.FeeRates.CreditLimitUSD
-		if creditLimitUSD <= 0 {
-			creditLimitUSD = 20.0
-		}
 		chainID := int64(0)
 		if x.smartWalletConfig != nil {
 			chainID = x.smartWalletConfig.ChainID
 		}
-		if creditLimitWei, convErr := ConvertUSDToWei(creditLimitUSD, x.priceService, chainID); convErr == nil {
+
+		// Convert credit limit to Wei. If 0 (default), creditLimitWei = 0 → block on any outstanding.
+		var creditLimitWei *big.Int
+		if creditLimitUSD > 0 {
+			var convErr error
+			creditLimitWei, convErr = ConvertUSDToWei(creditLimitUSD, x.priceService, chainID)
+			if convErr != nil {
+				x.logger.Warn("Failed to convert credit limit to Wei, skipping check", "error", convErr)
+				creditLimitWei = nil
+			}
+		} else {
+			creditLimitWei = big.NewInt(0) // Zero tolerance: block on any outstanding balance
+		}
+
+		if creditLimitWei != nil {
 			taskOwner := common.HexToAddress(task.Owner)
 			withinLimit, outstanding, checkErr := x.feeLedger.CheckCreditLimit(taskOwner, creditLimitWei)
 			if checkErr != nil {

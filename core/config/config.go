@@ -126,8 +126,9 @@ type FeeRatesConfig struct {
 	Tier2FeePercentage float64 // Default: 0.09%
 	Tier3FeePercentage float64 // Default: 0.18%
 
-	// Maximum outstanding value fee balance (USD) before blocking execution
-	CreditLimitUSD float64 // Default: $20
+	// Maximum outstanding value fee balance (USD) before blocking execution.
+	// Default 0 = block as soon as any value fee is outstanding (zero tolerance).
+	CreditLimitUSD float64
 }
 
 // NotificationsSummaryConfig defines optional AI summarization settings for notifications.
@@ -563,7 +564,7 @@ func loadFeeRatesFromConfig(configRates struct {
 		Tier1FeePercentage: getFloat64(configRates.Tiers.Tier1, 0.03),
 		Tier2FeePercentage: getFloat64(configRates.Tiers.Tier2, 0.09),
 		Tier3FeePercentage: getFloat64(configRates.Tiers.Tier3, 0.18),
-		CreditLimitUSD:     getFloat64(configRates.CreditLimitUSD, 20.0),
+		CreditLimitUSD:     getFloat64(configRates.CreditLimitUSD, 0.0),
 	}
 }
 
@@ -574,7 +575,7 @@ func GetDefaultFeeRatesConfig() *FeeRatesConfig {
 		Tier1FeePercentage: 0.03,
 		Tier2FeePercentage: 0.09,
 		Tier3FeePercentage: 0.18,
-		CreditLimitUSD:     20.0,
+		CreditLimitUSD:     0.0, // Zero = block as soon as any value fee is outstanding
 	}
 }
 
