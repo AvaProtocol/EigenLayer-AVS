@@ -629,7 +629,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	execution.Steps = vm.ExecutionLogs                        // Contains all steps including failed ones
 	execution.ExecutionFee = buildExecutionFee(x.engine.config.FeeRates)
 	execution.Cogs = buildCOGSFromSteps(vm.ExecutionLogs)
-	execution.ValueFee = buildValueFee(vm.ExecutionLogs, x.engine.config.FeeRates)
+	execution.ValueFee = buildValueFee(task.Nodes, x.engine.config.FeeRates)
 
 	// Value fee recording placeholder.
 	// V1: value fees are not recorded because actual transaction value (the base for
