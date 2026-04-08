@@ -89,8 +89,21 @@ func NewTenderlyClient(cfg *config.Config, logger sdklogging.Logger) *TenderlyCl
 	return tc
 }
 
-// SimulateEventTrigger simulates transactions to generate realistic event data
+// SimulateEventTrigger simulates transactions to generate realistic event data.
+// For Transfer events, the default synthetic amount assumes 18 decimals; callers
+// that know the token's actual decimals should use SimulateEventTriggerWithDecimals
+// so the synthetic value scales correctly (e.g., USDC with 6 decimals).
 func (tc *TenderlyClient) SimulateEventTrigger(ctx context.Context, query *avsproto.EventTrigger_Query, chainID int64) (*types.Log, error) {
+	return tc.SimulateEventTriggerWithDecimals(ctx, query, chainID, nil)
+}
+
+// SimulateEventTriggerWithDecimals is like SimulateEventTrigger but lets callers
+// pass the token's decimals so simulated Transfer amounts represent ~1.5 tokens
+// regardless of the token's decimal precision. Pass nil if the token's decimals
+// are unknown — the simulator will fall back to an 18-decimal assumption. Note
+// that 0 is a legitimate decimals value (some ERC20s have it), so a pointer is
+// used to disambiguate "unknown" from "zero".
+func (tc *TenderlyClient) SimulateEventTriggerWithDecimals(ctx context.Context, query *avsproto.EventTrigger_Query, chainID int64, tokenDecimals *uint32) (*types.Log, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context error before simulation: %w", err)
 	}
@@ -112,7 +125,7 @@ func (tc *TenderlyClient) SimulateEventTrigger(ctx context.Context, query *avspr
 	}
 
 	if isTransferEvent {
-		return tc.simulateTransferEvent(ctx, contractAddress, query, chainID)
+		return tc.simulateTransferEvent(ctx, contractAddress, query, chainID, tokenDecimals)
 	}
 
 	// Generic simulation for other event types: build a plausible log from input
@@ -275,8 +288,11 @@ func (tc *TenderlyClient) createMockAnswerUpdatedLog(contractAddress string, pri
 	}
 }
 
-// simulateTransferEvent simulates an actual ERC20 transfer transaction using Tenderly simulation API
-func (tc *TenderlyClient) simulateTransferEvent(ctx context.Context, contractAddress string, query *avsproto.EventTrigger_Query, chainID int64) (*types.Log, error) {
+// simulateTransferEvent simulates an actual ERC20 transfer transaction using Tenderly simulation API.
+// tokenDecimals scales the synthetic default amount (1.5 tokens) to the token's decimal precision.
+// Pass nil for unknown decimals — the simulator falls back to 18. Pointer is used so that 0 (a
+// legitimate ERC20 decimals value) is not conflated with "unknown".
+func (tc *TenderlyClient) simulateTransferEvent(ctx context.Context, contractAddress string, query *avsproto.EventTrigger_Query, chainID int64, tokenDecimals *uint32) (*types.Log, error) {
 	tc.logger.Info("🔮 Simulating ERC20 Transfer transaction via Tenderly API",
 		"contract", contractAddress,
 		"chain_id", chainID)
@@ -322,8 +338,31 @@ func (tc *TenderlyClient) simulateTransferEvent(ctx context.Context, contractAdd
 		toAddress = common.HexToAddress("0x0000000000000000000000000000000000000002")
 	}
 
-	// Extract transfer amount from query conditions (optional)
-	transferAmount := big.NewInt(1500000000000000000) // Default 1.5 tokens for simulation
+	// Default synthetic amount: ~1.5 tokens, scaled to the token's actual decimals.
+	// Without scaling, an 18-decimal default (1.5e18) becomes 1.5 trillion units for
+	// a 6-decimal token like USDC, which then dwarfs any realistic wallet balance and
+	// causes downstream Tenderly transfer simulations to revert with "exceeds balance".
+	//
+	// Decimal handling:
+	//   - tokenDecimals == nil   → unknown, fall back to 18-decimal assumption
+	//   - tokenDecimals == 0     → real 0-decimal token (e.g. some governance tokens);
+	//                              fractional amounts aren't representable, use 1 unit
+	//   - tokenDecimals > 0      → represent 1.5 tokens as 15 * 10^(decimals-1)
+	var transferAmount *big.Int
+	switch {
+	case tokenDecimals == nil:
+		transferAmount = new(big.Int).Mul(
+			big.NewInt(15),
+			new(big.Int).Exp(big.NewInt(10), big.NewInt(17), nil), // 1.5 * 10^18
+		)
+	case *tokenDecimals == 0:
+		transferAmount = big.NewInt(1)
+	default:
+		transferAmount = new(big.Int).Mul(
+			big.NewInt(15),
+			new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(*tokenDecimals)-1), nil),
+		)
+	}
 
 	for _, condition := range query.GetConditions() {
 		if condition.GetFieldName() == "value" || condition.GetFieldName() == "amount" {
