@@ -889,12 +889,15 @@ func resolveEventTriggerTemplates(trigger *avsproto.TaskTrigger, inputVariables 
 			if !strings.Contains(addr, "{{") {
 				continue
 			}
+			// Resolve and always validate. If preprocessTextWithVariableMapping
+			// cannot resolve the template (e.g. inputVariables is missing the
+			// referenced key), it returns the original "{{...}}" string. That
+			// fails IsHexAddress and triggers the error below — preventing the
+			// no-op silent passthrough that would reintroduce the operator
+			// wildcard bug.
 			resolved := tempVM.preprocessTextWithVariableMapping(addr)
-			if resolved == addr {
-				continue
-			}
 			if !common.IsHexAddress(resolved) {
-				return fmt.Errorf("query[%d].addresses[%d]: resolved address is not a valid Ethereum address: %s (original: %s)", queryIdx, i, resolved, addr)
+				return fmt.Errorf("query[%d].addresses[%d]: template did not resolve to a valid Ethereum address: %s (original: %s)", queryIdx, i, resolved, addr)
 			}
 			q.Addresses[i] = resolved
 			if logger != nil {
@@ -906,10 +909,10 @@ func resolveEventTriggerTemplates(trigger *avsproto.TaskTrigger, inputVariables 
 			if !strings.Contains(topic, "{{") {
 				continue
 			}
+			// Same rationale: an unresolved "{{...}}" literal will not pass
+			// validateTopicHexFormat, so a no-op resolution becomes a hard error
+			// rather than a silently-broken topic filter.
 			resolved := tempVM.preprocessTextWithVariableMapping(topic)
-			if resolved == topic {
-				continue
-			}
 			if err := validateTopicHexFormat(resolved); err != nil {
 				return fmt.Errorf("query[%d].topics[%d]: %w (original: %s, resolved: %s)", queryIdx, i, err, topic, resolved)
 			}

@@ -81,3 +81,62 @@ func TestResolveEventTriggerTemplates_NilTrigger(t *testing.T) {
 		t.Errorf("expected no error for nil trigger, got: %v", err)
 	}
 }
+
+// TestResolveEventTriggerTemplates_UnresolvedTopicErrors verifies that a topic
+// containing a template literal which cannot be resolved (e.g. inputVariables
+// is missing the referenced key) produces a hard error rather than silently
+// persisting the unresolved literal. Regression for the Copilot review concern
+// that no-op resolution would reintroduce the operator wildcard bug.
+func TestResolveEventTriggerTemplates_UnresolvedTopicErrors(t *testing.T) {
+	const transferSig = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+	trigger := &avsproto.TaskTrigger{
+		TriggerType: &avsproto.TaskTrigger_Event{
+			Event: &avsproto.EventTrigger{
+				Config: &avsproto.EventTrigger_Config{
+					Queries: []*avsproto.EventTrigger_Query{
+						{
+							Addresses: []string{"0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"},
+							Topics: []string{
+								transferSig,
+								"",
+								"{{settings.does_not_exist}}",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// inputVariables is empty, so the template cannot be resolved.
+	err := resolveEventTriggerTemplates(trigger, map[string]*structpb.Value{}, nil)
+	if err == nil {
+		t.Fatal("expected error for unresolved topic template, got nil")
+	}
+}
+
+// TestResolveEventTriggerTemplates_UnresolvedAddressErrors is the address-side
+// counterpart: an unresolved address template must error rather than silently
+// passing the literal through.
+func TestResolveEventTriggerTemplates_UnresolvedAddressErrors(t *testing.T) {
+	trigger := &avsproto.TaskTrigger{
+		TriggerType: &avsproto.TaskTrigger_Event{
+			Event: &avsproto.EventTrigger{
+				Config: &avsproto.EventTrigger_Config{
+					Queries: []*avsproto.EventTrigger_Query{
+						{
+							Addresses: []string{"{{settings.does_not_exist}}"},
+							Topics:    []string{},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := resolveEventTriggerTemplates(trigger, map[string]*structpb.Value{}, nil)
+	if err == nil {
+		t.Fatal("expected error for unresolved address template, got nil")
+	}
+}

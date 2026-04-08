@@ -251,7 +251,7 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 
 		subject, _ := claims["sub"].(string)
 		if !common.IsHexAddress(subject) {
-			r.config.Logger.Error("API key has non-address subject; refusing to derive smart wallet for zero address",
+			r.config.Logger.Error("API key has invalid/non-address subject; refusing to derive smart wallet",
 				"subject", subject)
 			return nil, fmt.Errorf("%s: subject must be a valid EOA address", auth.InvalidAuthenticationKey)
 		}

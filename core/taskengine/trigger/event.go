@@ -677,10 +677,15 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 							"addresses", qi.Query.Addresses,
 							"topics", qi.Query.Topics)
 
-						// DIAGNOSTIC: Cross-check the WS subscription against a
-						// one-shot historical FilterLogs over the last ~50 blocks
-						// via the HTTP RPC client. If FilterLogs returns >0 events
-						// but the WS subscription delivers 0 (heartbeat shows 0
+						// DIAGNOSTIC: one-shot historical FilterLogs cross-check
+						// of the WS subscription against the last ~50 blocks via
+						// the HTTP RPC client. This goroutine fires ONCE per
+						// newly created subscription (not per event, not on a
+						// timer), so the cost is bounded by subscription churn
+						// rather than chain throughput. It runs when a task is
+						// added or after an error-driven resubscribe — not on
+						// every block. If FilterLogs returns >0 events but the
+						// WS subscription delivers 0 (heartbeat shows 0
 						// received), the WS layer is the problem, not the filter.
 						go func(q ethereum.FilterQuery, desc string) {
 							headerCtx, headerCancel := context.WithTimeout(ctx, 5*time.Second)

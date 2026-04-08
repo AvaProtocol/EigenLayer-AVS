@@ -460,6 +460,11 @@ func (fe *FeeEstimator) estimateLoopGas(ctx context.Context, node *avsproto.Task
 // itself an on-chain node (ETHTransfer or ContractWrite). Used by both
 // classifyWorkflowValue (pre-flight EstimateFees) and buildValueFee
 // (post-execution simulate/run) so the two paths cannot drift.
+//
+// Note: this only inspects the immediate Loop runner, not nested Loops. The
+// current proto definition does not allow a Loop's runner to be another Loop,
+// so this is sufficient today. If nesting becomes possible in the future, this
+// function must recurse or it will silently under-charge nested-loop workflows.
 func hasOnChainNodes(nodes []*avsproto.TaskNode) bool {
 	for _, node := range nodes {
 		switch {

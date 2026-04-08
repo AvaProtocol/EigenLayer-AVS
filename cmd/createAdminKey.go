@@ -13,7 +13,7 @@ var (
 	apiKeyOption = aggregator.CreateApiKeyOption{}
 	createApiKey = &cobra.Command{
 		Use:   "create-api-key",
-		Short: "Create a long live JWT key to interact with userdata of AVS",
+		Short: "Create a long-lived JWT key to interact with user data of AVS",
 		Long: `Create a JWT key that allows one to manage user tasks. This key cannot control operator aspect, only user storage such as tasks management.
 
 The --subject flag must be a 0x-prefixed EOA address. The auth layer treats the JWT subject as the owner address and derives a smart wallet from it (see aggregator/auth.go), so any non-address subject will fail authentication.`,

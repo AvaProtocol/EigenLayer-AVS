@@ -86,7 +86,7 @@ cd contracts && forge test    # Run contract tests
 To read the live aggregator's stored task/execution state (e.g. the actual EventTrigger topics array as persisted, not the high-level CreateTask log summary), use the `examples/example.ts` CLI in the `ava-sdk-js` repo. It speaks the gRPC API against whatever endpoint the loaded `.env` points at (`localhost:2206` for the local `dev` aggregator).
 
 ```bash
-cd /Users/mikasa/Code/ava-sdk-js/examples
+cd <path-to-ava-sdk-js>/examples
 yarn start getWorkflow <task_id>     # full task: trigger queries, nodes, edges, inputVariables
 yarn start getExecution <task_id> <execution_id>
 yarn start listWorkflows
