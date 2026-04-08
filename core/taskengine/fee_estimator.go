@@ -455,26 +455,35 @@ func (fe *FeeEstimator) estimateLoopGas(ctx context.Context, node *avsproto.Task
 //   - NO but improves outcome → Tier 2
 //   - Simple execution → Tier 1
 //
-// V1: rule-based, defaults to Tier 1 if workflow has on-chain nodes, UNSPECIFIED otherwise.
-// V2: LLM-based classification analyzing workflow purpose and node composition.
-func (fe *FeeEstimator) classifyWorkflowValue(req *avsproto.EstimateFeesReq) *avsproto.ValueFee {
-	hasOnChainNodes := false
-	for _, node := range req.Nodes {
+// hasOnChainNodes reports whether the workflow definition contains any node
+// that performs on-chain execution. A Loop counts when its inner runner is
+// itself an on-chain node (ETHTransfer or ContractWrite). Used by both
+// classifyWorkflowValue (pre-flight EstimateFees) and buildValueFee
+// (post-execution simulate/run) so the two paths cannot drift.
+//
+// Note: this only inspects the immediate Loop runner, not nested Loops. The
+// current proto definition does not allow a Loop's runner to be another Loop,
+// so this is sufficient today. If nesting becomes possible in the future, this
+// function must recurse or it will silently under-charge nested-loop workflows.
+func hasOnChainNodes(nodes []*avsproto.TaskNode) bool {
+	for _, node := range nodes {
 		switch {
 		case node.GetEthTransfer() != nil, node.GetContractWrite() != nil:
-			hasOnChainNodes = true
+			return true
 		case node.GetLoop() != nil:
 			loop := node.GetLoop()
 			if loop.GetEthTransfer() != nil || loop.GetContractWrite() != nil {
-				hasOnChainNodes = true
+				return true
 			}
 		}
-		if hasOnChainNodes {
-			break
-		}
 	}
+	return false
+}
 
-	if !hasOnChainNodes {
+// V1: rule-based, defaults to Tier 1 if workflow has on-chain nodes, UNSPECIFIED otherwise.
+// V2: LLM-based classification analyzing workflow purpose and node composition.
+func (fe *FeeEstimator) classifyWorkflowValue(req *avsproto.EstimateFeesReq) *avsproto.ValueFee {
+	if !hasOnChainNodes(req.Nodes) {
 		return &avsproto.ValueFee{
 			Fee:                  &avsproto.Fee{Amount: "0", Unit: "PERCENTAGE"},
 			Tier:                 avsproto.ExecutionTier_EXECUTION_TIER_UNSPECIFIED,
@@ -562,27 +571,13 @@ func buildExecutionFee(feeRatesConfig *config.FeeRatesConfig) *avsproto.Fee {
 }
 
 // buildValueFee classifies the workflow and returns the value fee.
-// Uses the task's nodes to determine if on-chain execution is present.
-func buildValueFee(steps []*avsproto.Execution_Step, feeRatesConfig *config.FeeRatesConfig) *avsproto.ValueFee {
+// Classification is based on the workflow definition (nodes), not on runtime
+// gas presence — otherwise simulation runs (Tenderly, no real gas) would be
+// classified differently from production runs of the same workflow.
+func buildValueFee(nodes []*avsproto.TaskNode, feeRatesConfig *config.FeeRatesConfig) *avsproto.ValueFee {
 	rates := convertFeeRatesConfig(feeRatesConfig)
 
-	hasOnChainSteps := false
-	for _, step := range steps {
-		stepType := step.Type
-		if stepType == avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String() ||
-			stepType == avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String() {
-			hasOnChainSteps = true
-			break
-		}
-		// A loop step that recorded gas costs ran on-chain work via its inner runner
-		if stepType == avsproto.NodeType_NODE_TYPE_LOOP.String() &&
-			step.TotalGasCost != "" && step.TotalGasCost != "0" {
-			hasOnChainSteps = true
-			break
-		}
-	}
-
-	if !hasOnChainSteps {
+	if !hasOnChainNodes(nodes) {
 		return &avsproto.ValueFee{
 			Fee:                  &avsproto.Fee{Amount: "0", Unit: "PERCENTAGE"},
 			Tier:                 avsproto.ExecutionTier_EXECUTION_TIER_UNSPECIFIED,

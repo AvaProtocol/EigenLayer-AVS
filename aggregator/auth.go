@@ -249,8 +249,15 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 			return nil, fmt.Errorf("%s: invalid chainId in audience", auth.InvalidAuthenticationKey)
 		}
 
+		subject, _ := claims["sub"].(string)
+		if !common.IsHexAddress(subject) {
+			r.config.Logger.Error("API key has invalid/non-address subject; refusing to derive smart wallet",
+				"subject", subject)
+			return nil, fmt.Errorf("%s: subject must be a valid EOA address", auth.InvalidAuthenticationKey)
+		}
+
 		user := model.User{
-			Address: common.HexToAddress(claims["sub"].(string)),
+			Address: common.HexToAddress(subject),
 		}
 
 		// caching to reduce hitting eth rpc node

@@ -101,7 +101,7 @@ func (w *Worker) ProcessSignal(jid uint64) {
 				"job_id", jid,
 				"task_id", job.Name,
 				"job_type", job.Type,
-				"error", err.Error())
+				"error", err)
 		}
 	}
 }

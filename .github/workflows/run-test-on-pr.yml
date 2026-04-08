@@ -88,8 +88,8 @@ jobs:
       - name: Setup test configuration
         uses: ./.github/actions/setup-test-config
         with:
-          chain-endpoint: ${{ vars.CHAIN_ENDPOINT }}
-          bundler-rpc: ${{ vars.BUNDLER_RPC }}
+          chain-endpoint: ${{ secrets.CHAIN_ENDPOINT }}
+          bundler-rpc: ${{ secrets.BUNDLER_RPC }}
           tenderly-account: ${{ vars.TENDERLY_ACCOUNT }}
           tenderly-project: ${{ vars.TENDERLY_PROJECT }}
           controller-private-key: ${{ secrets.CONTROLLER_PRIVATE_KEY }}
@@ -150,8 +150,8 @@ jobs:
       - name: Setup test configuration
         uses: ./.github/actions/setup-test-config
         with:
-          chain-endpoint: ${{ vars.CHAIN_ENDPOINT }}
-          bundler-rpc: ${{ vars.BUNDLER_RPC }}
+          chain-endpoint: ${{ secrets.CHAIN_ENDPOINT }}
+          bundler-rpc: ${{ secrets.BUNDLER_RPC }}
           tenderly-account: ${{ vars.TENDERLY_ACCOUNT }}
           tenderly-project: ${{ vars.TENDERLY_PROJECT }}
           controller-private-key: ${{ secrets.CONTROLLER_PRIVATE_KEY }}

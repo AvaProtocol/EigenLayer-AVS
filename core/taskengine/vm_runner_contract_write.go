@@ -198,7 +198,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 					"param_index", i,
 					"original_param", param,
 					"resolved_param", resolvedMethodParams[i],
-					"error", err.Error())
+					"error", err)
 			}
 			// Return error result - validation failures should stop execution
 			return &avsproto.ContractWriteNode_MethodResult{
@@ -294,7 +294,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		if r.vm != nil && r.vm.logger != nil {
 			r.vm.logger.Error("❌ CONTRACT WRITE - Template variable failed to resolve in expanded parameters",
 				"method", methodCall.MethodName,
-				"error", err.Error())
+				"error", err)
 		}
 		// Return error result - validation failures should stop execution
 		return &avsproto.ContractWriteNode_MethodResult{

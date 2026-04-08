@@ -962,7 +962,7 @@ func (r *RpcServer) SimulateTask(ctx context.Context, req *avsproto.SimulateTask
 		r.config.Logger.Error("simulate task failed",
 			"user", user.Address.String(),
 			"trigger_name", req.Trigger.Name,
-			"error", err.Error(),
+			"error", err,
 		)
 		return nil, status.Errorf(codes.Internal, "simulation failed: %v", err)
 	}
@@ -1080,7 +1080,7 @@ func (r *RpcServer) handlePaginationError(err error, methodName string, userAddr
 	// Prepare logging fields for non-pagination errors
 	logFields := []interface{}{
 		"user", userAddr,
-		"error", err.Error(),
+		"error", err,
 	}
 
 	// Add context-specific fields
@@ -1233,7 +1233,7 @@ func (r *RpcServer) EstimateFees(ctx context.Context, req *avsproto.EstimateFees
 	resp, err := feeEstimator.EstimateFees(ctx, req)
 	if err != nil {
 		r.config.Logger.Error("failed to estimate fees",
-			"error", err.Error(),
+			"error", err,
 			"user", user.Address.String(),
 			"trigger_type", req.Trigger.Type.String())
 		return nil, status.Errorf(codes.Internal, "failed to estimate fees: %v", err)
@@ -1326,7 +1326,7 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 
 	goSafe(func() {
 		if err := s.Serve(lis); err != nil {
-			agg.logger.Error("gRPC server failed to serve", "error", err.Error())
+			agg.logger.Error("gRPC server failed to serve", "error", err)
 		}
 	})
 	return nil

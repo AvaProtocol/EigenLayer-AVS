@@ -264,30 +264,36 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 		}
 	}
 
-	// Populate token metadata if available
+	// Always populate the raw value from the parsed event, regardless of whether
+	// token metadata is available. The new schema contract is that `value` is the
+	// raw uint256 base-units string — clients depend on this for BigInt math even
+	// when metadata lookup fails (token not in whitelist, RPC error, etc.).
+	// `valueFormatted` is only computed when we know the decimals.
+	var rawValueStr string
+	if transferEventData != nil {
+		if rawValue, ok := transferEventData["value"]; ok {
+			switch v := rawValue.(type) {
+			case *big.Int:
+				rawValueStr = v.String()
+			case string:
+				rawValueStr = v
+			default:
+				rawValueStr = fmt.Sprintf("%v", v)
+			}
+		}
+	}
+	if rawValueStr != "" {
+		transferResponse.Value = rawValueStr
+	}
+
+	// Populate token metadata and the formatted value if available
 	if tokenMetadata != nil {
 		transferResponse.TokenName = tokenMetadata.Name
 		transferResponse.TokenSymbol = tokenMetadata.Symbol
 		transferResponse.TokenDecimals = tokenMetadata.Decimals
 
-		// Format the value using token metadata
-		if transferEventData != nil {
-			if rawValue, ok := transferEventData["value"]; ok {
-				var valueStr string
-
-				// Handle different value types (big.Int, string, etc.)
-				switch v := rawValue.(type) {
-				case *big.Int:
-					valueStr = v.String()
-				case string:
-					valueStr = v
-				default:
-					valueStr = fmt.Sprintf("%v", v)
-				}
-
-				formattedValue := tokenService.FormatTokenValue(valueStr, tokenMetadata.Decimals)
-				transferResponse.Value = formattedValue
-			}
+		if rawValueStr != "" {
+			transferResponse.ValueFormatted = tokenService.FormatTokenValue(rawValueStr, tokenMetadata.Decimals)
 		}
 
 		if logger != nil {
@@ -295,7 +301,8 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 				"tokenSymbol", tokenMetadata.Symbol,
 				"tokenName", tokenMetadata.Name,
 				"decimals", tokenMetadata.Decimals,
-				"value", transferResponse.Value)
+				"value", transferResponse.Value,
+				"valueFormatted", transferResponse.ValueFormatted)
 		}
 	}
 
@@ -327,7 +334,8 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 		"blockTimestamp":  transferResponse.BlockTimestamp,
 		"fromAddress":     transferResponse.FromAddress,
 		"toAddress":       transferResponse.ToAddress,
-		"value":           transferResponse.Value,
+		"value":           transferResponse.Value,          // Raw uint256 base units (for math)
+		"valueFormatted":  transferResponse.ValueFormatted, // Decimal-adjusted (for display)
 		"eventName":       "Transfer",
 		"direction":       direction,                 // New field indicating "sent" or "received"
 		"walletAddress":   userWalletAddress,         // New field with detected user wallet

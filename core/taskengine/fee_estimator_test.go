@@ -110,6 +110,46 @@ func TestClassifyWorkflowValue_OnChainDetection(t *testing.T) {
 	assert.Equal(t, avsproto.ExecutionTier_EXECUTION_TIER_UNSPECIFIED, resp.Tier, "Empty node should be UNSPECIFIED")
 }
 
+// TestBuildValueFee_ClassifiesByDefinitionNotGas asserts that the post-execution
+// value-fee classifier looks at the workflow definition (task.Nodes), not at
+// runtime gas presence in the execution logs. Without this, simulation runs
+// (Tenderly, no real gas) get classified as "no on-chain execution nodes" while
+// production runs of the same workflow get Tier 1, causing fee divergence.
+func TestBuildValueFee_ClassifiesByDefinitionNotGas(t *testing.T) {
+	// Revenue-splitter shape: customCode (split) -> loop(contractWrite).
+	// In simulation the loop step has no TotalGasCost, but it must still be
+	// classified as on-chain because the workflow definition says so.
+	splitterNodes := []*avsproto.TaskNode{
+		{TaskType: &avsproto.TaskNode_CustomCode{CustomCode: &avsproto.CustomCodeNode{}}},
+		{TaskType: &avsproto.TaskNode_Loop{Loop: &avsproto.LoopNode{
+			Runner: &avsproto.LoopNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{}},
+		}}},
+	}
+
+	vf := buildValueFee(splitterNodes, nil)
+	require.NotNil(t, vf)
+	assert.Equal(t, avsproto.ExecutionTier_EXECUTION_TIER_1, vf.Tier,
+		"loop(contractWrite) workflow must be Tier 1 even when simulation reports zero gas")
+	assert.Equal(t, "0.03", vf.Fee.Amount)
+	assert.Equal(t, "PERCENTAGE", vf.Fee.Unit)
+
+	// Pure off-chain workflow stays UNSPECIFIED / 0%.
+	offChainNodes := []*avsproto.TaskNode{
+		{TaskType: &avsproto.TaskNode_CustomCode{CustomCode: &avsproto.CustomCodeNode{}}},
+		{TaskType: &avsproto.TaskNode_RestApi{RestApi: &avsproto.RestAPINode{}}},
+	}
+	vfOff := buildValueFee(offChainNodes, nil)
+	assert.Equal(t, avsproto.ExecutionTier_EXECUTION_TIER_UNSPECIFIED, vfOff.Tier)
+	assert.Equal(t, "0", vfOff.Fee.Amount)
+
+	// Direct contractWrite (no loop) classifies as on-chain.
+	directNodes := []*avsproto.TaskNode{
+		{TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{}}},
+	}
+	vfDirect := buildValueFee(directNodes, nil)
+	assert.Equal(t, avsproto.ExecutionTier_EXECUTION_TIER_1, vfDirect.Tier)
+}
+
 func TestDefaultFeeRates(t *testing.T) {
 	rates := getDefaultFeeRates()
 

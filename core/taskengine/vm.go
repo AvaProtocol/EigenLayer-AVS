@@ -4800,6 +4800,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	// Aggregate gas costs from iteration steps into the parent loop step
 	aggregateIterationGasCosts(s, iterationSteps, v)
 
+	// Propagate ExecutionContext from inner iteration steps up to the parent loop step.
+	propagateLoopExecutionContext(s, iterationSteps)
+
 	// Set output variable for this step
 	processor := &CommonProcessor{vm: v}
 	setNodeOutputData(processor, stepID, results)

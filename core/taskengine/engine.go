@@ -851,6 +851,81 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 	return resp, nil
 }
 
+// resolveEventTriggerTemplates substitutes {{settings.*}} template literals in
+// the EventTrigger queries' addresses and topics, mutating the trigger in place.
+//
+// Background: the operator subscribes to event filters at task-deploy time using
+// the topics/addresses array verbatim from the stored task. It does not run the
+// template resolver. If a topic slot contains an unresolved literal like
+// "{{settings.runner}}", the operator cannot pad it as an address, the slot
+// degenerates to a wildcard, and the filter matches any event on the contract
+// instead of the intended `to=runner` constraint. This caused tasks to fire on
+// unrelated transfers and exhaust their max_execution budget on noise.
+//
+// The simulate path (runEventTriggerImmediately in run_node_immediately.go) does
+// the same resolution against a temp VM seeded with inputVariables. This helper
+// is the equivalent for the persistence path used by CreateTask.
+func resolveEventTriggerTemplates(trigger *avsproto.TaskTrigger, inputVariables map[string]*structpb.Value, logger sdklogging.Logger) error {
+	if trigger == nil {
+		return nil
+	}
+	eventTrigger := trigger.GetEvent()
+	if eventTrigger == nil || eventTrigger.GetConfig() == nil {
+		return nil
+	}
+	queries := eventTrigger.GetConfig().GetQueries()
+	if len(queries) == 0 {
+		return nil
+	}
+
+	tempVM := NewVM()
+	tempVM.logger = logger
+	for k, v := range inputVariables {
+		tempVM.AddVar(k, v.AsInterface())
+	}
+
+	for queryIdx, q := range queries {
+		for i, addr := range q.Addresses {
+			if !strings.Contains(addr, "{{") {
+				continue
+			}
+			// Resolve and always validate. If preprocessTextWithVariableMapping
+			// cannot resolve the template (e.g. inputVariables is missing the
+			// referenced key), it returns the original "{{...}}" string. That
+			// fails IsHexAddress and triggers the error below — preventing the
+			// no-op silent passthrough that would reintroduce the operator
+			// wildcard bug.
+			resolved := tempVM.preprocessTextWithVariableMapping(addr)
+			if !common.IsHexAddress(resolved) {
+				return fmt.Errorf("query[%d].addresses[%d]: template did not resolve to a valid Ethereum address: %s (original: %s)", queryIdx, i, resolved, addr)
+			}
+			q.Addresses[i] = resolved
+			if logger != nil {
+				logger.Info("EventTrigger: Resolved template in address (CreateTask)",
+					"original", addr, "resolved", resolved)
+			}
+		}
+		for i, topic := range q.Topics {
+			if !strings.Contains(topic, "{{") {
+				continue
+			}
+			// Same rationale: an unresolved "{{...}}" literal will not pass
+			// validateTopicHexFormat, so a no-op resolution becomes a hard error
+			// rather than a silently-broken topic filter.
+			resolved := tempVM.preprocessTextWithVariableMapping(topic)
+			if err := validateTopicHexFormat(resolved); err != nil {
+				return fmt.Errorf("query[%d].topics[%d]: %w (original: %s, resolved: %s)", queryIdx, i, err, topic, resolved)
+			}
+			q.Topics[i] = resolved
+			if logger != nil {
+				logger.Info("EventTrigger: Resolved template in topic value (CreateTask)",
+					"original", topic, "resolved", resolved)
+			}
+		}
+	}
+	return nil
+}
+
 // CreateTask records submission data
 func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskReq) (*model.Task, error) {
 	var err error
@@ -920,6 +995,16 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "%s", err.Error())
+	}
+
+	// Resolve {{settings.*}} template literals in EventTrigger query topics and
+	// addresses against the task's inputVariables. The operator subscribes to
+	// these filters at deploy time and cannot resolve templates itself, so an
+	// unresolved literal like "{{settings.runner}}" would degrade the filter to
+	// a wildcard and cause the task to fire on unrelated events. The simulate
+	// path (run_node_immediately.go) does this resolution; CreateTask must too.
+	if err := resolveEventTriggerTemplates(task.Trigger, task.InputVariables, n.logger); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "EventTrigger template resolution failed: %v", err)
 	}
 
 	// Validate smart wallet ownership. The runner address comes from
@@ -2928,7 +3013,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Index:        task.ExecutionCount,                    // Use current execution count for simulation (0-based)
 		ExecutionFee: buildExecutionFee(n.config.FeeRates),
 		Cogs:         buildCOGSFromSteps(vm.ExecutionLogs),
-		ValueFee:     buildValueFee(vm.ExecutionLogs, n.config.FeeRates),
+		ValueFee:     buildValueFee(task.Nodes, n.config.FeeRates),
 	}
 
 	// Log execution status based on result type

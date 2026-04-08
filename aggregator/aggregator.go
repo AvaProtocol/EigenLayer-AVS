@@ -253,7 +253,7 @@ func (agg *Aggregator) migrate() {
 	agg.backup = backup.NewService(agg.logger, agg.db, agg.config.BackupDir)
 	agg.migrator = migrator.NewMigrator(agg.db, agg.backup, migrations.Migrations)
 	if err := agg.migrator.Run(); err != nil {
-		agg.logger.Error("Failed to run database migrations", "error", err.Error())
+		agg.logger.Error("Failed to run database migrations", "error", err)
 		panic("database migration failed - cannot continue")
 	}
 }

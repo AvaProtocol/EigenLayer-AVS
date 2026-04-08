@@ -8,9 +8,15 @@ echo "Generating test config files from example template..."
 
 mkdir -p config
 
-# Prepend protocols to CHAIN_ENDPOINT (which is just the domain)
-CHAIN_RPC="https://${CHAIN_ENDPOINT}"
-CHAIN_WS="wss://${CHAIN_ENDPOINT}"
+# Strip any leading scheme (https://, http://, wss://, ws://) so we can
+# safely prepend the right one. The Test-environment secret may store
+# either a hostname-only form or a full URL depending on how it was set.
+CHAIN_HOST="${CHAIN_ENDPOINT#https://}"
+CHAIN_HOST="${CHAIN_HOST#http://}"
+CHAIN_HOST="${CHAIN_HOST#wss://}"
+CHAIN_HOST="${CHAIN_HOST#ws://}"
+CHAIN_RPC="https://${CHAIN_HOST}"
+CHAIN_WS="wss://${CHAIN_HOST}"
 
 # Copy example file as base
 cp config/aggregator.example.yaml config/aggregator-sepolia.yaml
