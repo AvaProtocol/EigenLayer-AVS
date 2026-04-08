@@ -4801,16 +4801,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	aggregateIterationGasCosts(s, iterationSteps, v)
 
 	// Propagate ExecutionContext from inner iteration steps up to the parent loop step.
-	// CreateNodeExecutionStep can't infer this for loops because the simulation flag lives
-	// on the inner runner (contractWrite/ethTransfer), not the loop itself. Without this,
-	// a loop wrapping Tenderly-simulated contract writes would mislabel itself as
-	// is_simulated=false, provider=chain_rpc.
-	for _, iterStep := range iterationSteps {
-		if iterStep != nil && iterStep.ExecutionContext != nil {
-			s.ExecutionContext = iterStep.ExecutionContext
-			break
-		}
-	}
+	propagateLoopExecutionContext(s, iterationSteps)
 
 	// Set output variable for this step
 	processor := &CommonProcessor{vm: v}

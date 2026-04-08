@@ -1599,10 +1599,12 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	// the default synthetic value dwarfs realistic wallet balances and downstream
 	// Tenderly transfer simulations revert with "ERC20: transfer amount exceeds balance".
 	// Cached after first lookup, so subsequent simulations are free.
-	var simulatedTokenDecimals uint32
+	// nil = unknown (fall back to 18); a real 0 is preserved (legitimate ERC20 case).
+	var simulatedTokenDecimals *uint32
 	if n.tokenEnrichmentService != nil && len(query.GetAddresses()) > 0 {
 		if md, mdErr := n.tokenEnrichmentService.GetTokenMetadata(query.GetAddresses()[0]); mdErr == nil && md != nil {
-			simulatedTokenDecimals = md.Decimals
+			d := md.Decimals
+			simulatedTokenDecimals = &d
 		}
 	}
 

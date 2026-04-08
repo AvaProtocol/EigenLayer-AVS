@@ -14,6 +14,29 @@ import (
 // These functions support template variable substitution, nested node creation, and
 // input variable resolution for loop iterations in VM.executeLoopWithQueue.
 
+// propagateLoopExecutionContext copies the ExecutionContext from the first iteration
+// step that has one set onto the parent loop step. This is needed because
+// CreateNodeExecutionStep can't infer the simulation mode for loops — the simulation
+// flag lives on the inner runner (contractWrite, ethTransfer), not the loop itself.
+// Without this, a loop wrapping Tenderly-simulated contract writes would mislabel
+// itself as is_simulated=false, provider=chain_rpc.
+//
+// We pick the first non-nil iteration context (rather than e.g. validating all
+// match) because all iterations of a loop run through the same runner and therefore
+// share the same simulation mode by construction. If iterationSteps is empty or all
+// entries lack ExecutionContext, the parent step is left untouched.
+func propagateLoopExecutionContext(parent *avsproto.Execution_Step, iterationSteps []*avsproto.Execution_Step) {
+	if parent == nil {
+		return
+	}
+	for _, iterStep := range iterationSteps {
+		if iterStep != nil && iterStep.ExecutionContext != nil {
+			parent.ExecutionContext = iterStep.ExecutionContext
+			return
+		}
+	}
+}
+
 // substituteTemplateVariables replaces template variables like {{value}} and {{index}} with actual values.
 // This is a pure function with no VM dependency.
 //

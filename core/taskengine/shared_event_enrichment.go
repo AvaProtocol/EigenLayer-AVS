@@ -264,34 +264,36 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 		}
 	}
 
-	// Populate token metadata if available
+	// Always populate the raw value from the parsed event, regardless of whether
+	// token metadata is available. The new schema contract is that `value` is the
+	// raw uint256 base-units string — clients depend on this for BigInt math even
+	// when metadata lookup fails (token not in whitelist, RPC error, etc.).
+	// `valueFormatted` is only computed when we know the decimals.
+	var rawValueStr string
+	if transferEventData != nil {
+		if rawValue, ok := transferEventData["value"]; ok {
+			switch v := rawValue.(type) {
+			case *big.Int:
+				rawValueStr = v.String()
+			case string:
+				rawValueStr = v
+			default:
+				rawValueStr = fmt.Sprintf("%v", v)
+			}
+		}
+	}
+	if rawValueStr != "" {
+		transferResponse.Value = rawValueStr
+	}
+
+	// Populate token metadata and the formatted value if available
 	if tokenMetadata != nil {
 		transferResponse.TokenName = tokenMetadata.Name
 		transferResponse.TokenSymbol = tokenMetadata.Symbol
 		transferResponse.TokenDecimals = tokenMetadata.Decimals
 
-		// Populate both raw and formatted value:
-		//   - value          → raw uint256 base-units string (for on-chain math, e.g. BigInt())
-		//   - valueFormatted → human-readable decimal-adjusted string (for display)
-		// This matches Moralis / Etherscan / subgraph conventions and avoids the
-		// foot-gun where downstream BigInt() consumers receive "1.5" and crash.
-		if transferEventData != nil {
-			if rawValue, ok := transferEventData["value"]; ok {
-				var valueStr string
-
-				// Handle different value types (big.Int, string, etc.)
-				switch v := rawValue.(type) {
-				case *big.Int:
-					valueStr = v.String()
-				case string:
-					valueStr = v
-				default:
-					valueStr = fmt.Sprintf("%v", v)
-				}
-
-				transferResponse.Value = valueStr
-				transferResponse.ValueFormatted = tokenService.FormatTokenValue(valueStr, tokenMetadata.Decimals)
-			}
+		if rawValueStr != "" {
+			transferResponse.ValueFormatted = tokenService.FormatTokenValue(rawValueStr, tokenMetadata.Decimals)
 		}
 
 		if logger != nil {
