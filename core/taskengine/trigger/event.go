@@ -521,6 +521,16 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 			t.subsMutex.RUnlock()
 		}()
 
+		t.logger.Info("🟢 EventTrigger main loop started",
+			"buffered_logs_capacity", cap(logs))
+
+		// Heartbeat: every 60s, log how many events we've seen.
+		// If this stays at 0 while subscriptions exist, the WS log stream is silent.
+		var logsReceivedTotal uint64
+		var logsReceivedSinceHeartbeat uint64
+		heartbeat := time.NewTicker(60 * time.Second)
+		defer heartbeat.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -529,7 +539,20 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 			case <-t.done:
 				t.logger.Info("🛑 Event trigger shutdown signal received")
 				return
+			case <-heartbeat.C:
+				t.subsMutex.RLock()
+				activeSubs := len(t.querySubscriptions)
+				t.subsMutex.RUnlock()
+				t.logger.Info("💓 EventTrigger heartbeat",
+					"active_subscriptions", activeSubs,
+					"logs_received_last_60s", logsReceivedSinceHeartbeat,
+					"logs_received_total", logsReceivedTotal,
+					"logs_chan_buffered", len(logs),
+					"logs_chan_capacity", cap(logs))
+				logsReceivedSinceHeartbeat = 0
 			case log := <-logs:
+				logsReceivedTotal++
+				logsReceivedSinceHeartbeat++
 				t.logger.Debug("📨 Received log",
 					"block", log.BlockNumber,
 					"tx", log.TxHash.Hex(),
@@ -653,6 +676,43 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 							"task_ids", taskIDs,
 							"addresses", qi.Query.Addresses,
 							"topics", qi.Query.Topics)
+
+						// DIAGNOSTIC: Cross-check the WS subscription against a
+						// one-shot historical FilterLogs over the last ~50 blocks
+						// via the HTTP RPC client. If FilterLogs returns >0 events
+						// but the WS subscription delivers 0 (heartbeat shows 0
+						// received), the WS layer is the problem, not the filter.
+						go func(q ethereum.FilterQuery, desc string) {
+							headerCtx, headerCancel := context.WithTimeout(ctx, 5*time.Second)
+							defer headerCancel()
+							header, herr := t.ethClient.HeaderByNumber(headerCtx, nil)
+							if herr != nil || header == nil {
+								t.logger.Warn("🩺 FilterLogs cross-check: failed to get latest block",
+									"description", desc, "error", herr)
+								return
+							}
+							latest := header.Number.Uint64()
+							var from uint64
+							if latest > 50 {
+								from = latest - 50
+							}
+							q.FromBlock = new(big.Int).SetUint64(from)
+							q.ToBlock = new(big.Int).SetUint64(latest)
+							filterCtx, filterCancel := context.WithTimeout(ctx, 10*time.Second)
+							defer filterCancel()
+							matches, ferr := t.ethClient.FilterLogs(filterCtx, q)
+							if ferr != nil {
+								t.logger.Warn("🩺 FilterLogs cross-check: query failed",
+									"description", desc,
+									"from_block", from, "to_block", latest,
+									"error", ferr)
+								return
+							}
+							t.logger.Info("🩺 FilterLogs cross-check completed",
+								"description", desc,
+								"from_block", from, "to_block", latest,
+								"historical_matches", len(matches))
+						}(qi.Query, qi.Description)
 
 						// Start error monitoring for new subscription
 						go func(s ethereum.Subscription, d string) {
