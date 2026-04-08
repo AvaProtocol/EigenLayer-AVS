@@ -455,26 +455,30 @@ func (fe *FeeEstimator) estimateLoopGas(ctx context.Context, node *avsproto.Task
 //   - NO but improves outcome → Tier 2
 //   - Simple execution → Tier 1
 //
-// V1: rule-based, defaults to Tier 1 if workflow has on-chain nodes, UNSPECIFIED otherwise.
-// V2: LLM-based classification analyzing workflow purpose and node composition.
-func (fe *FeeEstimator) classifyWorkflowValue(req *avsproto.EstimateFeesReq) *avsproto.ValueFee {
-	hasOnChainNodes := false
-	for _, node := range req.Nodes {
+// hasOnChainNodes reports whether the workflow definition contains any node
+// that performs on-chain execution. A Loop counts when its inner runner is
+// itself an on-chain node (ETHTransfer or ContractWrite). Used by both
+// classifyWorkflowValue (pre-flight EstimateFees) and buildValueFee
+// (post-execution simulate/run) so the two paths cannot drift.
+func hasOnChainNodes(nodes []*avsproto.TaskNode) bool {
+	for _, node := range nodes {
 		switch {
 		case node.GetEthTransfer() != nil, node.GetContractWrite() != nil:
-			hasOnChainNodes = true
+			return true
 		case node.GetLoop() != nil:
 			loop := node.GetLoop()
 			if loop.GetEthTransfer() != nil || loop.GetContractWrite() != nil {
-				hasOnChainNodes = true
+				return true
 			}
 		}
-		if hasOnChainNodes {
-			break
-		}
 	}
+	return false
+}
 
-	if !hasOnChainNodes {
+// V1: rule-based, defaults to Tier 1 if workflow has on-chain nodes, UNSPECIFIED otherwise.
+// V2: LLM-based classification analyzing workflow purpose and node composition.
+func (fe *FeeEstimator) classifyWorkflowValue(req *avsproto.EstimateFeesReq) *avsproto.ValueFee {
+	if !hasOnChainNodes(req.Nodes) {
 		return &avsproto.ValueFee{
 			Fee:                  &avsproto.Fee{Amount: "0", Unit: "PERCENTAGE"},
 			Tier:                 avsproto.ExecutionTier_EXECUTION_TIER_UNSPECIFIED,
@@ -568,23 +572,7 @@ func buildExecutionFee(feeRatesConfig *config.FeeRatesConfig) *avsproto.Fee {
 func buildValueFee(nodes []*avsproto.TaskNode, feeRatesConfig *config.FeeRatesConfig) *avsproto.ValueFee {
 	rates := convertFeeRatesConfig(feeRatesConfig)
 
-	hasOnChainSteps := false
-	for _, node := range nodes {
-		switch {
-		case node.GetEthTransfer() != nil, node.GetContractWrite() != nil:
-			hasOnChainSteps = true
-		case node.GetLoop() != nil:
-			loop := node.GetLoop()
-			if loop.GetEthTransfer() != nil || loop.GetContractWrite() != nil {
-				hasOnChainSteps = true
-			}
-		}
-		if hasOnChainSteps {
-			break
-		}
-	}
-
-	if !hasOnChainSteps {
+	if !hasOnChainNodes(nodes) {
 		return &avsproto.ValueFee{
 			Fee:                  &avsproto.Fee{Amount: "0", Unit: "PERCENTAGE"},
 			Tier:                 avsproto.ExecutionTier_EXECUTION_TIER_UNSPECIFIED,
