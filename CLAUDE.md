@@ -81,6 +81,19 @@ cd contracts && forge test    # Run contract tests
 - **BigCache**: In-memory caching layer
 - **Migrations**: Versioned database migrations for schema changes
 
+### Inspecting Aggregator Data (BadgerDB)
+
+To read the live aggregator's stored task/execution state (e.g. the actual EventTrigger topics array as persisted, not the high-level CreateTask log summary), use the `examples/example.ts` CLI in the `ava-sdk-js` repo. It speaks the gRPC API against whatever endpoint the loaded `.env` points at (`localhost:2206` for the local `dev` aggregator).
+
+```bash
+cd /Users/mikasa/Code/ava-sdk-js/examples
+yarn start getWorkflow <task_id>     # full task: trigger queries, nodes, edges, inputVariables
+yarn start getExecution <task_id> <execution_id>
+yarn start listWorkflows
+```
+
+The `getWorkflow` output is the ground truth — it shows the trigger's `topics`, `addresses`, and `inputVariables` exactly as stored. Prefer this over inferring state from log lines, since `engine.CreateTask` does not dump the full trigger payload to the aggregator log.
+
 ## Code Style
 
 ### Go Naming Conventions
