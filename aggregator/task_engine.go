@@ -117,15 +117,15 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		taskengine.JobTypeExecuteTask,
 		taskExecutor,
 	); err != nil {
-		agg.logger.Error("failed to register task processor", "error", err.Error())
+		agg.logger.Error("failed to register task processor", "error", err)
 	}
 	if err := agg.engine.MustStart(); err != nil {
-		agg.logger.Error("failed to start task engine", "error", err.Error())
+		agg.logger.Error("failed to start task engine", "error", err)
 	}
 
 	queueErr := agg.queue.MustStart()
 	if queueErr != nil {
-		agg.logger.Error("failed to start task queue", "error", queueErr.Error())
+		agg.logger.Error("failed to start task queue", "error", queueErr)
 	}
 
 	// Start periodic cleanup with environment-specific intervals
