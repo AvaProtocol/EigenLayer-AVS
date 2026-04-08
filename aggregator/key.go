@@ -6,6 +6,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -28,6 +29,10 @@ func CreateAdminKey(configPath string, opt CreateApiKeyOption) error {
 
 	if opt.Subject == "" {
 		return fmt.Errorf("error: subject cannot be empty")
+	}
+
+	if !common.IsHexAddress(opt.Subject) {
+		return fmt.Errorf("error: subject must be a valid 0x-prefixed EOA address (got %q). The subject is used as the owner identity bound to this API key.", opt.Subject)
 	}
 
 	if len(opt.Roles) < 1 {
