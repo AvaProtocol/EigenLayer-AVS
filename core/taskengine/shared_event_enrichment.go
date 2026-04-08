@@ -270,7 +270,11 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 		transferResponse.TokenSymbol = tokenMetadata.Symbol
 		transferResponse.TokenDecimals = tokenMetadata.Decimals
 
-		// Format the value using token metadata
+		// Populate both raw and formatted value:
+		//   - value          → raw uint256 base-units string (for on-chain math, e.g. BigInt())
+		//   - valueFormatted → human-readable decimal-adjusted string (for display)
+		// This matches Moralis / Etherscan / subgraph conventions and avoids the
+		// foot-gun where downstream BigInt() consumers receive "1.5" and crash.
 		if transferEventData != nil {
 			if rawValue, ok := transferEventData["value"]; ok {
 				var valueStr string
@@ -285,8 +289,8 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 					valueStr = fmt.Sprintf("%v", v)
 				}
 
-				formattedValue := tokenService.FormatTokenValue(valueStr, tokenMetadata.Decimals)
-				transferResponse.Value = formattedValue
+				transferResponse.Value = valueStr
+				transferResponse.ValueFormatted = tokenService.FormatTokenValue(valueStr, tokenMetadata.Decimals)
 			}
 		}
 
@@ -295,7 +299,8 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 				"tokenSymbol", tokenMetadata.Symbol,
 				"tokenName", tokenMetadata.Name,
 				"decimals", tokenMetadata.Decimals,
-				"value", transferResponse.Value)
+				"value", transferResponse.Value,
+				"valueFormatted", transferResponse.ValueFormatted)
 		}
 	}
 
@@ -327,7 +332,8 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 		"blockTimestamp":  transferResponse.BlockTimestamp,
 		"fromAddress":     transferResponse.FromAddress,
 		"toAddress":       transferResponse.ToAddress,
-		"value":           transferResponse.Value,
+		"value":           transferResponse.Value,          // Raw uint256 base units (for math)
+		"valueFormatted":  transferResponse.ValueFormatted, // Decimal-adjusted (for display)
 		"eventName":       "Transfer",
 		"direction":       direction,                 // New field indicating "sent" or "received"
 		"walletAddress":   userWalletAddress,         // New field with detected user wallet

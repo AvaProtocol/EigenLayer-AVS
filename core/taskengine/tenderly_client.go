@@ -89,8 +89,18 @@ func NewTenderlyClient(cfg *config.Config, logger sdklogging.Logger) *TenderlyCl
 	return tc
 }
 
-// SimulateEventTrigger simulates transactions to generate realistic event data
+// SimulateEventTrigger simulates transactions to generate realistic event data.
+// For Transfer events, the default synthetic amount assumes 18 decimals; callers
+// that know the token's actual decimals should use SimulateEventTriggerWithDecimals
+// so the synthetic value scales correctly (e.g., USDC with 6 decimals).
 func (tc *TenderlyClient) SimulateEventTrigger(ctx context.Context, query *avsproto.EventTrigger_Query, chainID int64) (*types.Log, error) {
+	return tc.SimulateEventTriggerWithDecimals(ctx, query, chainID, 0)
+}
+
+// SimulateEventTriggerWithDecimals is like SimulateEventTrigger but lets callers
+// pass the token's decimals so simulated Transfer amounts represent ~1.5 tokens
+// regardless of the token's decimal precision. Pass 0 to use the 18-decimal default.
+func (tc *TenderlyClient) SimulateEventTriggerWithDecimals(ctx context.Context, query *avsproto.EventTrigger_Query, chainID int64, tokenDecimals uint32) (*types.Log, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context error before simulation: %w", err)
 	}
@@ -112,7 +122,7 @@ func (tc *TenderlyClient) SimulateEventTrigger(ctx context.Context, query *avspr
 	}
 
 	if isTransferEvent {
-		return tc.simulateTransferEvent(ctx, contractAddress, query, chainID)
+		return tc.simulateTransferEvent(ctx, contractAddress, query, chainID, tokenDecimals)
 	}
 
 	// Generic simulation for other event types: build a plausible log from input
@@ -275,8 +285,10 @@ func (tc *TenderlyClient) createMockAnswerUpdatedLog(contractAddress string, pri
 	}
 }
 
-// simulateTransferEvent simulates an actual ERC20 transfer transaction using Tenderly simulation API
-func (tc *TenderlyClient) simulateTransferEvent(ctx context.Context, contractAddress string, query *avsproto.EventTrigger_Query, chainID int64) (*types.Log, error) {
+// simulateTransferEvent simulates an actual ERC20 transfer transaction using Tenderly simulation API.
+// tokenDecimals scales the synthetic default amount (1.5 tokens) to the token's decimal precision;
+// pass 0 to default to 18 decimals.
+func (tc *TenderlyClient) simulateTransferEvent(ctx context.Context, contractAddress string, query *avsproto.EventTrigger_Query, chainID int64, tokenDecimals uint32) (*types.Log, error) {
 	tc.logger.Info("🔮 Simulating ERC20 Transfer transaction via Tenderly API",
 		"contract", contractAddress,
 		"chain_id", chainID)
@@ -322,8 +334,19 @@ func (tc *TenderlyClient) simulateTransferEvent(ctx context.Context, contractAdd
 		toAddress = common.HexToAddress("0x0000000000000000000000000000000000000002")
 	}
 
-	// Extract transfer amount from query conditions (optional)
-	transferAmount := big.NewInt(1500000000000000000) // Default 1.5 tokens for simulation
+	// Default synthetic amount: 1.5 tokens, scaled to the token's actual decimals.
+	// Without scaling, an 18-decimal default (1.5e18) becomes 1.5 trillion units for
+	// a 6-decimal token like USDC, which then dwarfs any realistic wallet balance and
+	// causes downstream Tenderly transfer simulations to revert with "exceeds balance".
+	decimalsForScale := tokenDecimals
+	if decimalsForScale == 0 {
+		decimalsForScale = 18
+	}
+	// transferAmount = 15 * 10^(decimalsForScale-1)  → represents 1.5 tokens
+	transferAmount := new(big.Int).Mul(
+		big.NewInt(15),
+		new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimalsForScale)-1), nil),
+	)
 
 	for _, condition := range query.GetConditions() {
 		if condition.GetFieldName() == "value" || condition.GetFieldName() == "amount" {

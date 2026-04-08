@@ -25,7 +25,15 @@ type TransferEventResponse struct {
 	// Transfer-specific data
 	FromAddress string `json:"fromAddress"` // Sender address
 	ToAddress   string `json:"toAddress"`   // Recipient address
-	Value       string `json:"value"`       // Formatted token amount (decimals applied if requested)
+	// Value is the RAW uint256 transfer amount as a decimal string in base units
+	// (e.g. "1500000" for 1.5 USDC). This is the on-chain-native form and is what
+	// downstream BigInt math (split nodes, contract writes, etc.) should consume.
+	// Convention follows Moralis / Etherscan / The Graph — clients format if needed.
+	Value string `json:"value"`
+	// ValueFormatted is the human-readable decimal-adjusted amount as a string
+	// (e.g. "1.5" for 1.5 USDC). Populated whenever token decimals are known so
+	// UI/notification nodes can display it without re-computing. Never used for math.
+	ValueFormatted string `json:"valueFormatted"`
 }
 
 // GetSampleTransferAmount returns an appropriate sample transfer amount based on token decimals

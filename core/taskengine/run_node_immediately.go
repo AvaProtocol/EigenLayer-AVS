@@ -1576,8 +1576,38 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 			"methodCallsCount", methodCallsCount)
 	}
 
+	// Deprecation notice: applyDecimalsTo on Transfer.value is now a no-op.
+	// The enricher unconditionally emits both `value` (raw uint256 base units) and
+	// `valueFormatted` (decimal-adjusted) for every Transfer event, so the hint is
+	// redundant. Kept honored silently for non-Transfer fields where it's still
+	// meaningful (e.g. Uniswap Swap.amountIn). SDK clients should drop the hint
+	// from Transfer triggers.
+	if n.logger != nil && query != nil {
+		for _, mc := range query.GetMethodCalls() {
+			for _, field := range mc.GetApplyToFields() {
+				if strings.HasPrefix(strings.ToLower(field), "transfer.") {
+					n.logger.Warn("⚠️ DEPRECATED: applyDecimalsTo on Transfer fields is a no-op; the response always contains both 'value' (raw) and 'valueFormatted'. Drop this hint from Transfer triggers.",
+						"field", field,
+						"methodName", mc.GetMethodName())
+				}
+			}
+		}
+	}
+
+	// Pre-resolve token decimals so the synthetic Transfer amount represents ~1.5 tokens
+	// regardless of decimal precision (USDC has 6, most ERC20s have 18). Without this,
+	// the default synthetic value dwarfs realistic wallet balances and downstream
+	// Tenderly transfer simulations revert with "ERC20: transfer amount exceeds balance".
+	// Cached after first lookup, so subsequent simulations are free.
+	var simulatedTokenDecimals uint32
+	if n.tokenEnrichmentService != nil && len(query.GetAddresses()) > 0 {
+		if md, mdErr := n.tokenEnrichmentService.GetTokenMetadata(query.GetAddresses()[0]); mdErr == nil && md != nil {
+			simulatedTokenDecimals = md.Decimals
+		}
+	}
+
 	// Simulate the event using Tenderly (gets real current data)
-	simulatedLog, err := tenderlyClient.SimulateEventTrigger(ctx, query, chainID)
+	simulatedLog, err := tenderlyClient.SimulateEventTriggerWithDecimals(ctx, query, chainID, simulatedTokenDecimals)
 	if err != nil {
 		n.logger.Warn("Tenderly simulation failed", "error", err)
 		return nil, fmt.Errorf("tenderly event simulation failed: %w", err)
@@ -2129,21 +2159,29 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 			transferResponse.ToAddress = toAddr
 		}
 
+		// Resolve raw value once. Prefer "valueRaw" (ABI parser stores the unmodified
+		// uint256 there); fall back to "value" if the ABI parser hasn't formatted it.
+		// transferResponse.Value MUST always be the raw base-units string so downstream
+		// BigInt() math works. valueFormatted gets the human-readable string when we
+		// know the decimals.
+		var rawValueStr string
+		if rv, ok := eventFields["valueRaw"].(string); ok && rv != "" {
+			rawValueStr = rv
+		} else if v, ok := eventFields["value"].(string); ok {
+			rawValueStr = v
+		}
+		if rawValueStr != "" {
+			transferResponse.Value = rawValueStr
+		}
+
 		// Populate token metadata if available
 		if tokenMetadata != nil {
 			transferResponse.TokenName = tokenMetadata.Name
 			transferResponse.TokenSymbol = tokenMetadata.Symbol
 			transferResponse.TokenDecimals = tokenMetadata.Decimals
 
-			// Use the formatted value from ABI parsing if available, otherwise format using token metadata
-			if formattedValue, hasFormatted := eventFields["value"]; hasFormatted {
-				if valueStr, ok := formattedValue.(string); ok {
-					transferResponse.Value = valueStr
-				}
-			} else if rawValue, ok := eventFields["valueRaw"].(string); ok {
-				// Fallback: format using token metadata if ABI didn't format it
-				formattedValue := n.tokenEnrichmentService.FormatTokenValue(rawValue, tokenMetadata.Decimals)
-				transferResponse.Value = formattedValue
+			if rawValueStr != "" && n.tokenEnrichmentService != nil {
+				transferResponse.ValueFormatted = n.tokenEnrichmentService.FormatTokenValue(rawValueStr, tokenMetadata.Decimals)
 			}
 
 			if n.logger != nil {
@@ -2151,7 +2189,8 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 					"tokenSymbol", tokenMetadata.Symbol,
 					"tokenName", tokenMetadata.Name,
 					"decimals", tokenMetadata.Decimals,
-					"value", transferResponse.Value)
+					"value", transferResponse.Value,
+					"valueFormatted", transferResponse.ValueFormatted)
 			}
 		} else {
 			// Even without token metadata, try to format using decimals from method call
@@ -2159,17 +2198,8 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 				decimalsUint32 := uint32(decimalsValue.Uint64())
 				transferResponse.TokenDecimals = decimalsUint32
 
-				// Use the formatted value from ABI parsing if available, otherwise format using method call decimals
-				if formattedValue, hasFormatted := eventFields["value"]; hasFormatted {
-					if valueStr, ok := formattedValue.(string); ok {
-						transferResponse.Value = valueStr
-					}
-				} else if rawValue, ok := eventFields["valueRaw"].(string); ok {
-					// Fallback: format using method call decimals if ABI didn't format it
-					if n.tokenEnrichmentService != nil {
-						formattedValue := n.tokenEnrichmentService.FormatTokenValue(rawValue, decimalsUint32)
-						transferResponse.Value = formattedValue
-					}
+				if rawValueStr != "" && n.tokenEnrichmentService != nil {
+					transferResponse.ValueFormatted = n.tokenEnrichmentService.FormatTokenValue(rawValueStr, decimalsUint32)
 				}
 			}
 
@@ -2207,7 +2237,8 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 			"blockTimestamp":  transferResponse.BlockTimestamp,
 			"fromAddress":     transferResponse.FromAddress,
 			"toAddress":       transferResponse.ToAddress,
-			"value":           transferResponse.Value,
+			"value":           transferResponse.Value,          // Raw uint256 base units (for math)
+			"valueFormatted":  transferResponse.ValueFormatted, // Decimal-adjusted (for display)
 		}
 
 		// Return structured format for Transfer events too
