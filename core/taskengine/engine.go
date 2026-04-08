@@ -2928,7 +2928,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Index:        task.ExecutionCount,                    // Use current execution count for simulation (0-based)
 		ExecutionFee: buildExecutionFee(n.config.FeeRates),
 		Cogs:         buildCOGSFromSteps(vm.ExecutionLogs),
-		ValueFee:     buildValueFee(vm.ExecutionLogs, n.config.FeeRates),
+		ValueFee:     buildValueFee(task.Nodes, n.config.FeeRates),
 	}
 
 	// Log execution status based on result type
