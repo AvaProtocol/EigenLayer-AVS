@@ -109,6 +109,7 @@ The `getWorkflow` output is the ground truth — it shows the trigger's `topics`
 - All feature branches and PRs must target `staging`, never `main` directly.
 - The `main` branch is updated only by merging `staging` → `main` after migration checks pass.
 - Before merging to `main`, run `go run scripts/compare_storage_structure.go main` to check for breaking storage changes.
+- **PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/) / semantic-release format** (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `ci:`, `perf:`, `BREAKING CHANGE:` footer for majors). Squash merges use the PR title as the commit subject, and `.github/workflows/release-on-pr-close.yml` runs `go-semantic-release` against it to compute the next version. A non-conforming title (e.g. `release: staging → main ...`) yields no version bump and no release. For staging→main release PRs, pick the highest-impact prefix across the bundled changes (e.g. `feat:` if any feature is included).
 
 ## Development Guidelines
 

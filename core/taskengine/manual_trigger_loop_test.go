@@ -427,10 +427,13 @@ func TestLoopNode_ContractWrite_InvalidAddress_PartialFailure(t *testing.T) {
 
 	step, err := vm.RunNodeWithInputs(node, inputVariables)
 
-	// The loop should report failure because the second iteration failed
+	// Per AvaProtocol/EigenLayer-AVS#511, per-iteration runner failures do not
+	// fail the loop step. The loop ran to completion, so step.Success is true
+	// and the per-iteration outcomes are reflected in the data array (nil for
+	// failed iterations).
 	require.NotNil(t, step, "Execution step should not be nil")
-	assert.False(t, step.Success, "Loop should report failure when an iteration fails")
-	assert.Contains(t, step.Error, "invalid address", "Error should mention invalid address")
+	assert.True(t, step.Success, "Loop step should succeed when it ran to completion, even if an iteration failed")
+	assert.Empty(t, step.Error, "Loop step error should be empty when loop ran to completion")
 
 	// The output should still contain results (first iteration data, second nil)
 	loopOutput := step.GetLoop()
