@@ -4653,6 +4653,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	results := make([]interface{}, len(inputArray))
 	iterationSteps := make([]*avsproto.Execution_Step, 0, len(inputArray)) // Collect iteration steps for gas aggregation
 	success := true
+	infraFailure := false
 	var firstError error
 
 	if concurrent {
@@ -4701,6 +4702,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				if err := eq.Submit(task); err != nil {
 					log.WriteString(fmt.Sprintf("\nError submitting iteration %d: %s", iterationIndex, err.Error()))
 					success = false
+					infraFailure = true
 					if firstError == nil {
 						firstError = err
 					}
@@ -4713,11 +4715,13 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 			select {
 			case result := <-resultChannel:
 				if result.Error != nil {
-					success = false
 					if firstError == nil {
 						firstError = result.Error
 					}
 					log.WriteString(fmt.Sprintf("\nError in iteration %d: %s", i, result.Error.Error()))
+					// Per-iteration runner failure: leave results[i] = nil as a
+					// partial-success placeholder. Do NOT mark the loop as failed —
+					// the per-iteration outcome is reflected in the data array.
 				} else {
 					results[i] = result.Data
 				}
@@ -4726,6 +4730,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				}
 			case <-time.After(iterationTimeout):
 				success = false
+				infraFailure = true
 				err := fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
 				if firstError == nil {
 					firstError = err
@@ -4761,6 +4766,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 
 			if err := eq.Submit(task); err != nil {
 				success = false
+				infraFailure = true
 				if firstError == nil {
 					firstError = err
 				}
@@ -4772,11 +4778,12 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 			select {
 			case result := <-resultChannel:
 				if result.Error != nil {
-					success = false
 					if firstError == nil {
 						firstError = result.Error
 					}
 					log.WriteString(fmt.Sprintf("\nError in iteration %d: %s", i, result.Error.Error()))
+					// Per-iteration runner failure: leave results[i] = nil as a
+					// partial-success placeholder. Do NOT mark the loop as failed.
 				} else {
 					results[i] = result.Data
 				}
@@ -4785,6 +4792,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				}
 			case <-time.After(iterationTimeout):
 				success = false
+				infraFailure = true
 				err := fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
 				if firstError == nil {
 					firstError = err
@@ -4831,12 +4839,18 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 		Loop: loopOutput,
 	}
 
-	if !success && firstError != nil {
+	// Only treat infrastructure failures (queue submit errors, iteration timeouts)
+	// as a hard step failure. Per-iteration runner errors (e.g. a contract call
+	// reverting in one iteration of a Loop > ContractRead) are reflected as nil
+	// entries in the results array — the loop ran to completion, so we preserve
+	// OutputData and return success so the client can inspect partial results.
+	// See AvaProtocol/EigenLayer-AVS#511.
+	if infraFailure && firstError != nil {
 		finalizeStep(s, false, nil, firstError.Error(), log.String())
 		return s, firstError
 	}
 
-	finalizeStep(s, true, nil, "", log.String())
+	finalizeStep(s, success, nil, "", log.String())
 	return s, nil
 }
 
