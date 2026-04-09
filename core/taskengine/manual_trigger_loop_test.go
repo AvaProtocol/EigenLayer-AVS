@@ -433,6 +433,7 @@ func TestLoopNode_ContractWrite_InvalidAddress_PartialFailure(t *testing.T) {
 	// failed iterations).
 	require.NotNil(t, step, "Execution step should not be nil")
 	assert.True(t, step.Success, "Loop step should succeed when it ran to completion, even if an iteration failed")
+	assert.Empty(t, step.Error, "Loop step error should be empty when loop ran to completion")
 
 	// The output should still contain results (first iteration data, second nil)
 	loopOutput := step.GetLoop()

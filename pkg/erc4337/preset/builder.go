@@ -1165,15 +1165,21 @@ func sendUserOpCore(
 					// Distinguish the two by inspecting the bundler mempool. If no predecessor
 					// UserOp exists for this sender at a nonce in [on_chain, userOp.Nonce),
 					// then case (b) holds — rewind the cache to the on-chain nonce.
+					// Bound the mempool RPC so a hung bundler can't stall the retry loop.
+					mempoolCtx, cancelMempool := context.WithTimeout(context.Background(), 5*time.Second)
+					pendingOps, mempoolErr := bundlerClient.GetPendingUserOpsForSender(mempoolCtx, entrypoint, userOp.Sender)
+					cancelMempool()
+
 					predecessorPending := false
-					if pendingOps, mempoolErr := bundlerClient.GetPendingUserOpsForSender(context.Background(), entrypoint, userOp.Sender); mempoolErr == nil {
+					if mempoolErr == nil {
 						for _, op := range pendingOps {
+							// EIP-4337 bundlers return nonces as "0x..." hex strings.
 							opNonce := new(big.Int)
-							if _, ok := opNonce.SetString(strings.TrimPrefix(op.Nonce, "0x"), 16); !ok {
-								// Fall back to decimal parse
-								if _, ok := opNonce.SetString(op.Nonce, 10); !ok {
-									continue
-								}
+							nonceStr := strings.TrimPrefix(op.Nonce, "0x")
+							if _, ok := opNonce.SetString(nonceStr, 16); !ok {
+								l.Debug("Failed to parse pending op nonce, skipping",
+									"nonce", op.Nonce, "sender", userOp.Sender.Hex())
+								continue
 							}
 							if opNonce.Cmp(onChainNonce) >= 0 && opNonce.Cmp(userOp.Nonce) < 0 {
 								predecessorPending = true
