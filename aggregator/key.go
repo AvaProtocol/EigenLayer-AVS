@@ -2,6 +2,7 @@ package aggregator
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
@@ -44,11 +45,24 @@ func CreateAdminKey(configPath string, opt CreateApiKeyOption) error {
 		roles[i] = auth.ApiRole(v)
 	}
 
+	// The verifier (aggregator/auth.go::verifyAuth) requires the JWT to have an
+	// `aud` claim containing the smart wallet chain ID. r.chainID in the
+	// verifier is sourced from the smart wallet RPC (see rpc_server.go), not
+	// the EigenLayer RPC, so we must use SmartWallet.ChainID here too — using
+	// the EigenLayer chain ID would silently break cross-chain configs (e.g.
+	// EigenLayer on Ethereum + SmartWallet on Base). config.NewConfig already
+	// populated SmartWallet.ChainID at startup, so no extra RPC dial is needed.
+	if nodeConfig.SmartWallet == nil || nodeConfig.SmartWallet.ChainID == 0 {
+		return fmt.Errorf("smart wallet chain ID not populated in config; cannot build audience claim")
+	}
+	audienceChainID := strconv.FormatInt(nodeConfig.SmartWallet.ChainID, 10)
+
 	claims := &auth.APIClaim{
 		RegisteredClaims: &jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24 * 365 * 10)),
-			Issuer:    "AvaProtocol",
+			Issuer:    auth.Issuer,
 			Subject:   opt.Subject,
+			Audience:  jwt.ClaimStrings{audienceChainID},
 		},
 		Roles: roles,
 	}
