@@ -1155,17 +1155,56 @@ func sendUserOpCore(
 					// On-chain or cache has advanced past our nonce — use the new value
 					l.Debug("Nonce advanced", "old_nonce", userOp.Nonce.String(), "new_nonce", freshNonce.String())
 				} else if onChainNonce.Cmp(userOp.Nonce) < 0 {
-					// On-chain nonce is behind our attempted nonce. Prior UserOps (at lower
-					// nonces) haven't mined yet, causing the bundler to reject ours with AA25.
-					// The nonce itself is correct — we just need to wait for prior UserOps to
-					// mine. Do NOT increment, as that creates an unfillable nonce gap.
-					freshNonce = new(big.Int).Set(userOp.Nonce)
-					l.Debug("On-chain nonce behind, waiting for prior UserOps to mine before retry",
-						"on_chain_nonce", onChainNonce.String(),
-						"userOp_nonce", userOp.Nonce.String())
-					// Wait briefly for prior UserOps to mine; without this delay
-					// the retry loop burns through attempts in milliseconds.
-					time.Sleep(2 * time.Second)
+					// On-chain nonce is behind our attempted nonce. Two possibilities:
+					//   (a) Prior UserOps at lower nonces are genuinely pending in the bundler
+					//       mempool and just haven't mined yet → wait for them.
+					//   (b) The cache is stale: a previous UserOp was dropped from the bundler
+					//       mempool without the cache being invalidated, so there is nothing
+					//       at on_chain..userOp.Nonce-1 to ever mine. Waiting is futile and
+					//       leads to the stuck loop described in issue #510.
+					// Distinguish the two by inspecting the bundler mempool. If no predecessor
+					// UserOp exists for this sender at a nonce in [on_chain, userOp.Nonce),
+					// then case (b) holds — rewind the cache to the on-chain nonce.
+					predecessorPending := false
+					if pendingOps, mempoolErr := bundlerClient.GetPendingUserOpsForSender(context.Background(), entrypoint, userOp.Sender); mempoolErr == nil {
+						for _, op := range pendingOps {
+							opNonce := new(big.Int)
+							if _, ok := opNonce.SetString(strings.TrimPrefix(op.Nonce, "0x"), 16); !ok {
+								// Fall back to decimal parse
+								if _, ok := opNonce.SetString(op.Nonce, 10); !ok {
+									continue
+								}
+							}
+							if opNonce.Cmp(onChainNonce) >= 0 && opNonce.Cmp(userOp.Nonce) < 0 {
+								predecessorPending = true
+								break
+							}
+						}
+					} else {
+						l.Warn("Failed to inspect bundler mempool while diagnosing nonce conflict; assuming predecessor pending",
+							"error", mempoolErr)
+						predecessorPending = true
+					}
+
+					if !predecessorPending {
+						// Stale cache: nothing in the mempool can ever mine to bridge the gap.
+						// Rewind to the on-chain nonce so the rebuild uses a value the
+						// EntryPoint will accept.
+						l.Warn("Nonce cache desync detected: no predecessor UserOp pending in bundler mempool, rewinding cache to on-chain nonce",
+							"sender", userOp.Sender.Hex(),
+							"on_chain_nonce", onChainNonce.String(),
+							"stale_cached_nonce", userOp.Nonce.String())
+						globalNonceManager.ResetNonce(userOp.Sender)
+						freshNonce = new(big.Int).Set(onChainNonce)
+					} else {
+						freshNonce = new(big.Int).Set(userOp.Nonce)
+						l.Debug("On-chain nonce behind, waiting for prior UserOps to mine before retry",
+							"on_chain_nonce", onChainNonce.String(),
+							"userOp_nonce", userOp.Nonce.String())
+						// Wait briefly for prior UserOps to mine; without this delay
+						// the retry loop burns through attempts in milliseconds.
+						time.Sleep(2 * time.Second)
+					}
 				} else {
 					// GetNextNonce returned the same nonce we already tried and on-chain has
 					// reached this nonce. A UserOp is pending at this nonce in the mempool.
