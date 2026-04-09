@@ -85,10 +85,25 @@ func VerifyJwtKeyForUser(secret []byte, key string, userWallet common.Address) (
 			return true, nil
 		}
 
+		// EOA-subject JWTs (issued by `create-api-key` since #509). Two valid cases:
+		//   1. The JWT carries an admin role → it can manage any wallet.
+		//   2. The JWT subject equals the requesting userWallet → per-wallet key.
 		claimAddress := common.HexToAddress(sub)
+
+		if rolesVal, hasRoles := claims["roles"]; hasRoles {
+			if rolesArray, ok := rolesVal.([]any); ok {
+				for _, v := range rolesArray {
+					if roleStr, ok := v.(string); ok && ApiRole(roleStr) == "admin" {
+						return true, nil
+					}
+				}
+			}
+		}
+
 		if claimAddress != userWallet {
 			return false, fmt.Errorf("Invalid Subject")
 		}
+		return true, nil
 	}
 
 	return false, fmt.Errorf("Malform JWT Key Claim")
