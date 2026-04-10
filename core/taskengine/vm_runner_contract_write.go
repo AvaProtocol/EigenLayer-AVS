@@ -468,6 +468,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			chainID,
 			senderAddress.Hex(), // Use runner (smart wallet) address for simulation
 			transactionValue,    // Pass the transaction value
+			r.vm.simulationState,
 		)
 
 		if err != nil {
@@ -478,6 +479,15 @@ func (r *ContractWriteProcessor) executeMethodCall(
 				Success:    false,
 				Error:      fmt.Sprintf("tenderly simulation failed: %v", err),
 			}
+		}
+
+		// Merge state diffs from this simulation into the accumulated state map
+		// so subsequent simulation steps see a consistent view of on-chain state.
+		if r.vm.simulationState != nil && simulationResult != nil && simulationResult.Success && len(simulationResult.RawStateDiff) > 0 {
+			r.vm.simulationState.MergeRawStateDiff(simulationResult.RawStateDiff)
+			r.vm.logger.Debug("Merged simulation state diff into accumulator",
+				"method", methodName,
+				"diffEntries", len(simulationResult.RawStateDiff))
 		}
 
 		// Convert Tenderly simulation result to legacy protobuf format

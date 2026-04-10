@@ -252,6 +252,11 @@ type VM struct {
 	// Shared clients
 	tenderlyClient *TenderlyClient
 
+	// simulationState accumulates on-chain state overrides during workflow simulation.
+	// Each Tenderly simulation's state diffs are merged here so subsequent steps
+	// see a consistent view. Nil when not in simulation mode.
+	simulationState *SimulationStateMap
+
 	// executionFeeWei is the platform fee (converted from USD to WEI) to be collected
 	// atomically in the UserOp. Set by executor before node execution. Nil = no fee.
 	executionFeeWei *big.Int
@@ -277,6 +282,11 @@ func NewVM() *VM {
 // SetSimulation sets whether this VM is executing in simulation context.
 func (v *VM) SetSimulation(isSimulation bool) *VM {
 	v.IsSimulation = isSimulation
+	if isSimulation {
+		v.simulationState = NewSimulationStateMap(v.logger)
+	} else {
+		v.simulationState = nil
+	}
 	return v
 }
 
@@ -4272,10 +4282,11 @@ func (eq *ExecutionQueue) extractResultData(step *avsproto.Execution_Step) inter
 			}
 		}
 
-		// Extract transactionHash from step.Metadata (results array with receipts)
-		// and attach it so loop iteration output includes metadata for the summarizer.
+		// Extract transactionHash and contractAddress from step.Metadata (results array with receipts)
+		// and attach them so loop iteration output includes metadata for the summarizer.
 		txHash := extractTxHashFromMetadata(step.Metadata)
-		return wrapResultWithTxHash(resultData, txHash)
+		contractAddr := extractContractAddressFromMetadata(step.Metadata)
+		return wrapResultWithMetadata(resultData, txHash, contractAddr)
 	}
 	if ethTransferOutput := step.GetEthTransfer(); ethTransferOutput != nil && ethTransferOutput.Data != nil {
 		resultData := ethTransferOutput.Data.AsInterface()
@@ -4289,7 +4300,13 @@ func (eq *ExecutionQueue) extractResultData(step *avsproto.Execution_Step) inter
 // wrapResultWithTxHash attaches a transactionHash to the result data under a metadata key.
 // If txHash is empty, the original resultData is returned unchanged.
 func wrapResultWithTxHash(resultData interface{}, txHash string) interface{} {
-	if txHash == "" {
+	return wrapResultWithMetadata(resultData, txHash, "")
+}
+
+// wrapResultWithMetadata attaches transactionHash and contractAddress to the result data
+// under a metadata key. If both are empty, the original resultData is returned unchanged.
+func wrapResultWithMetadata(resultData interface{}, txHash string, contractAddress string) interface{} {
+	if txHash == "" && contractAddress == "" {
 		return resultData
 	}
 	resultMap := make(map[string]interface{})
@@ -4300,9 +4317,14 @@ func wrapResultWithTxHash(resultData interface{}, txHash string) interface{} {
 	} else if resultData != nil {
 		resultMap["data"] = resultData
 	}
-	resultMap["metadata"] = map[string]interface{}{
-		"transactionHash": txHash,
+	meta := map[string]interface{}{}
+	if txHash != "" {
+		meta["transactionHash"] = txHash
 	}
+	if contractAddress != "" {
+		meta["contractAddress"] = contractAddress
+	}
+	resultMap["metadata"] = meta
 	return resultMap
 }
 
@@ -4320,6 +4342,30 @@ func extractTxHashFromMetadata(metadata *structpb.Value) string {
 					if receiptStruct := receiptVal.GetStructValue(); receiptStruct != nil {
 						if hashVal := receiptStruct.Fields["transactionHash"]; hashVal != nil {
 							return hashVal.GetStringValue()
+						}
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// extractContractAddressFromMetadata extracts the contract address (receipt.to) from
+// a contractWrite step's Metadata field. Used to propagate the resolved contract address
+// into loop iteration output so the summarizer can identify the token.
+func extractContractAddressFromMetadata(metadata *structpb.Value) string {
+	if metadata == nil {
+		return ""
+	}
+	// Metadata is an array of method results: [{receipt: {to: "0x..."}, ...}]
+	if listVal := metadata.GetListValue(); listVal != nil {
+		for _, item := range listVal.GetValues() {
+			if m := item.GetStructValue(); m != nil {
+				if receiptVal := m.Fields["receipt"]; receiptVal != nil {
+					if receiptStruct := receiptVal.GetStructValue(); receiptStruct != nil {
+						if toVal := receiptStruct.Fields["to"]; toVal != nil {
+							return toVal.GetStringValue()
 						}
 					}
 				}

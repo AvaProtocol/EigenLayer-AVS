@@ -436,10 +436,35 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 				}
 			}
 
+			// Fallback for LOOP steps: check runner.config for contractAddress and methodName
+			if contractAddress == "" && methodName == "" {
+				if runner, ok := configMap["runner"].(map[string]interface{}); ok {
+					if runnerConfig, ok := runner["config"].(map[string]interface{}); ok {
+						if addr, ok := runnerConfig["contractAddress"].(string); ok {
+							contractAddress = addr
+						}
+						if methodCalls, ok := runnerConfig["methodCalls"].([]interface{}); ok && len(methodCalls) > 0 {
+							if firstCall, ok := methodCalls[0].(map[string]interface{}); ok {
+								if name, ok := firstCall["methodName"].(string); ok {
+									methodName = name
+								}
+							}
+						}
+					}
+				}
+			}
+
 			// If contractAddress is a template variable, try to extract resolved address from metadata
 			resolvedContractAddress := contractAddress
 			if strings.Contains(contractAddress, "{{") || contractAddress == "" {
 				resolvedContractAddress = extractResolvedContractAddress(log)
+
+				// Fallback for LOOP steps: step-level metadata is nil, but the
+				// iteration output may contain metadata with the resolved address.
+				// Loop output is []interface{} where each element has a "metadata" key.
+				if resolvedContractAddress == "" {
+					resolvedContractAddress = extractResolvedContractAddressFromLoopOutput(log)
+				}
 			}
 
 			// Look up token metadata for the contract address (for ERC20 tokens only)
@@ -674,6 +699,43 @@ func extractResolvedContractAddressFromMetadata(metadataInterface interface{}) s
 						}
 					}
 				}
+			}
+		}
+	}
+
+	return ""
+}
+
+// extractResolvedContractAddressFromLoopOutput extracts the resolved contract address
+// from a LOOP step's output data. Loop iterations store metadata.contractAddress
+// (propagated from the iteration's receipt.to during execution).
+func extractResolvedContractAddressFromLoopOutput(log *avsproto.Execution_Step) string {
+	if log == nil {
+		return ""
+	}
+
+	// Loop output is stored as the Loop output type
+	loopOutput := log.GetLoop()
+	if loopOutput == nil || loopOutput.Data == nil {
+		return ""
+	}
+
+	// Loop output data is an array of iteration results
+	outputInterface := loopOutput.Data.AsInterface()
+	iterations, ok := outputInterface.([]interface{})
+	if !ok || len(iterations) == 0 {
+		return ""
+	}
+
+	// Check the first successful iteration for metadata.contractAddress
+	for _, iter := range iterations {
+		iterMap, ok := iter.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if meta, ok := iterMap["metadata"].(map[string]interface{}); ok {
+			if addr, ok := meta["contractAddress"].(string); ok && common.IsHexAddress(addr) {
+				return addr
 			}
 		}
 	}
