@@ -252,6 +252,11 @@ type VM struct {
 	// Shared clients
 	tenderlyClient *TenderlyClient
 
+	// simulationState accumulates on-chain state overrides during workflow simulation.
+	// Each Tenderly simulation's state diffs are merged here so subsequent steps
+	// see a consistent view. Nil when not in simulation mode.
+	simulationState *SimulationStateMap
+
 	// executionFeeWei is the platform fee (converted from USD to WEI) to be collected
 	// atomically in the UserOp. Set by executor before node execution. Nil = no fee.
 	executionFeeWei *big.Int
@@ -277,6 +282,9 @@ func NewVM() *VM {
 // SetSimulation sets whether this VM is executing in simulation context.
 func (v *VM) SetSimulation(isSimulation bool) *VM {
 	v.IsSimulation = isSimulation
+	if isSimulation {
+		v.simulationState = NewSimulationStateMap(v.logger)
+	}
 	return v
 }
 

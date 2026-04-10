@@ -2173,6 +2173,7 @@ func TestContractWriteWithValueParameter(t *testing.T) {
 					11155111,
 					runnerAddress,
 					tc.value,
+					nil, // no simulation state overrides
 				)
 
 				if tc.expectedError {
