@@ -4840,14 +4840,33 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	}
 
 	// Only treat infrastructure failures (queue submit errors, iteration timeouts)
-	// as a hard step failure. Per-iteration runner errors (e.g. a contract call
-	// reverting in one iteration of a Loop > ContractRead) are reflected as nil
-	// entries in the results array — the loop ran to completion, so we preserve
-	// OutputData and return success so the client can inspect partial results.
-	// See AvaProtocol/EigenLayer-AVS#511.
+	// as a hard step failure.
 	if infraFailure && firstError != nil {
 		finalizeStep(s, false, nil, firstError.Error(), log.String())
 		return s, firstError
+	}
+
+	// Count successful vs failed iterations to determine step status.
+	// Per-iteration runner errors (e.g. a contract call reverting) are reflected
+	// as nil entries in the results array. The loop ran to completion, so we
+	// always preserve OutputData for the client to inspect partial results.
+	// See AvaProtocol/EigenLayer-AVS#511.
+	iterationSuccessCount := 0
+	iterationFailCount := 0
+	for _, result := range results {
+		if result != nil {
+			iterationSuccessCount++
+		} else {
+			iterationFailCount++
+		}
+	}
+
+	if iterationFailCount > 0 && firstError != nil {
+		// Some or all iterations failed — mark the loop step as failed so
+		// AnalyzeExecutionResult can detect partial_success at the execution level.
+		errorMsg := fmt.Sprintf("%d of %d iterations failed: %s", iterationFailCount, len(results), firstError.Error())
+		finalizeStep(s, false, nil, errorMsg, log.String())
+		return s, nil // return nil error: the loop itself ran to completion
 	}
 
 	finalizeStep(s, success, nil, "", log.String())
