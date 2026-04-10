@@ -215,8 +215,9 @@ func (s *SimulationStateMap) ProbeERC20BalanceSlot(
 					"slot", candidateSlot,
 					"balance", expectedBalance.String())
 			}
-			s.cacheSlotResult(tokenKey, &candidateSlot)
-			return candidateSlot, nil
+			discoveredSlot := candidateSlot
+			s.cacheSlotResult(tokenKey, &discoveredSlot)
+			return discoveredSlot, nil
 		}
 	}
 

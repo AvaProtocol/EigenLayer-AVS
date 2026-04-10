@@ -284,6 +284,8 @@ func (v *VM) SetSimulation(isSimulation bool) *VM {
 	v.IsSimulation = isSimulation
 	if isSimulation {
 		v.simulationState = NewSimulationStateMap(v.logger)
+	} else {
+		v.simulationState = nil
 	}
 	return v
 }

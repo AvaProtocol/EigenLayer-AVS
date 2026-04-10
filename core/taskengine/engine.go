@@ -3119,9 +3119,11 @@ func (n *Engine) injectTransferEventState(data map[string]interface{}, vm *VM) {
 		return
 	}
 
-	// Determine direction: if the wallet is the recipient, balance increases; otherwise decreases
+	// Determine direction: if the wallet is the sender, balance decreases.
+	// Event enrichment uses "sent"/"received"; older paths may use "outgoing"/"incoming".
 	direction, _ := data["direction"].(string)
-	if direction == "outgoing" {
+	switch strings.ToLower(direction) {
+	case "outgoing", "sent":
 		transferAmount = new(big.Int).Neg(transferAmount)
 	}
 
