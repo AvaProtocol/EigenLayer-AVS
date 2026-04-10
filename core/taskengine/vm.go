@@ -4851,12 +4851,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	// as nil entries in the results array. The loop ran to completion, so we
 	// always preserve OutputData for the client to inspect partial results.
 	// See AvaProtocol/EigenLayer-AVS#511.
-	iterationSuccessCount := 0
 	iterationFailCount := 0
 	for _, result := range results {
-		if result != nil {
-			iterationSuccessCount++
-		} else {
+		if result == nil {
 			iterationFailCount++
 		}
 	}
@@ -4868,7 +4865,15 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 		// finalizeStep uses err.Error() directly without wrapping it in
 		// NewInvalidRequestError which adds an "invalid request: " prefix.
 		innerMsg := strings.TrimPrefix(firstError.Error(), "invalid request: ")
-		loopErr := fmt.Errorf("%d of %d iterations failed: %s", iterationFailCount, len(results), innerMsg)
+		errorMsg := fmt.Sprintf("%d of %d iterations failed: %s", iterationFailCount, len(results), innerMsg)
+		loopErr := NewStructuredError(
+			avsproto.ErrorCode_INVALID_REQUEST,
+			errorMsg,
+			map[string]interface{}{
+				"failed_iterations": iterationFailCount,
+				"total_iterations":  len(results),
+			},
+		)
 		finalizeStep(s, false, loopErr, "", log.String())
 		return s, nil // return nil error: the loop itself ran to completion
 	}

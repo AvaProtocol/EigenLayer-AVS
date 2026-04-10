@@ -426,6 +426,7 @@ func TestLoopNode_ContractWrite_InvalidAddress_PartialFailure(t *testing.T) {
 	node.Name = "loopTransfer"
 
 	step, err := vm.RunNodeWithInputs(node, inputVariables)
+	require.NoError(t, err, "loop infrastructure should not fail")
 
 	// When some iterations fail, the loop step reports success=false with a
 	// descriptive error so that AnalyzeExecutionResult detects partial_success.
