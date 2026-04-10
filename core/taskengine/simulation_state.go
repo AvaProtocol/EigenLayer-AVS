@@ -221,15 +221,60 @@ func (s *SimulationStateMap) ProbeERC20BalanceSlot(
 		}
 	}
 
-	// If balance is 0, any empty slot would match — try a known holder approach.
-	// For zero balances, we can't distinguish slots. Fall back to common defaults
-	// based on known token patterns.
+	// If balance is 0, any empty slot would match. Try to find a reference
+	// holder with non-zero balance by checking well-known addresses that often
+	// receive tokens (e.g. address(1) from test mints, the contract itself).
 	if expectedBalance.Sign() == 0 {
-		// For zero balance, we can't probe reliably. Try the most common slot (0)
-		// and cache it. This is a best-effort fallback.
-		defaultSlot := int64(0)
 		if s.logger != nil {
-			s.logger.Warn("Cannot probe balance slot for zero-balance holder, using default slot 0",
+			s.logger.Info("Holder has zero balance, probing with reference addresses",
+				"token", tokenContract.Hex(),
+				"holder", holder.Hex())
+		}
+
+		referenceAddresses := []common.Address{
+			common.HexToAddress("0x0000000000000000000000000000000000000001"),
+			common.HexToAddress("0x0000000000000000000000000000000000000002"),
+		}
+
+		for _, refAddr := range referenceAddresses {
+			refCallData := append(crypto.Keccak256([]byte("balanceOf(address)"))[:4], common.LeftPadBytes(refAddr.Bytes(), 32)...)
+			refResult, err := client.CallContract(ctx, ethereum.CallMsg{To: &tokenContract, Data: refCallData}, nil)
+			if err != nil {
+				continue
+			}
+			refBalance := new(big.Int).SetBytes(refResult)
+			if refBalance.Sign() == 0 {
+				continue
+			}
+
+			// Found a reference holder with balance — probe slots against it
+			for _, candidateSlot := range commonBalanceSlots {
+				slotHash := erc20BalanceSlot(refAddr, candidateSlot)
+				storageValue, err := client.StorageAt(ctx, tokenContract, slotHash, nil)
+				if err != nil {
+					continue
+				}
+				storedBalance := new(big.Int).SetBytes(storageValue)
+				if storedBalance.Cmp(refBalance) == 0 {
+					if s.logger != nil {
+						s.logger.Info("Discovered ERC20 balance storage slot via reference holder",
+							"token", tokenContract.Hex(),
+							"referenceHolder", refAddr.Hex(),
+							"slot", candidateSlot,
+							"refBalance", refBalance.String())
+					}
+					discoveredSlot := candidateSlot
+					s.cacheSlotResult(tokenKey, &discoveredSlot)
+					return discoveredSlot, nil
+				}
+			}
+		}
+
+		// Last resort: default to slot 9 (USDC-like) since it's the most common
+		// ERC20 proxy pattern and slot 0 rarely works for proxy contracts.
+		defaultSlot := int64(9)
+		if s.logger != nil {
+			s.logger.Warn("Could not discover balance slot via reference holders, using default slot 9",
 				"token", tokenContract.Hex(),
 				"holder", holder.Hex())
 		}
