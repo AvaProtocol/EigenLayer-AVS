@@ -227,9 +227,9 @@ func (s *SimulationStateMap) ProbeERC20BalanceSlot(
 		// Non-zero balance but no slot matched — fall through to reference-holder probe
 	}
 
-	// Balance is 0 or no slot matched. Try to find a reference
-	// holder with non-zero balance by checking well-known addresses that often
-	// receive tokens (e.g. address(1) from test mints, the contract itself).
+	// Holder balance is 0: every empty storage slot reads as 0 and would
+	// false-match. Try to find a reference holder with non-zero balance by
+	// checking well-known addresses (e.g. address(1) from test mints).
 	if expectedBalance.Sign() == 0 {
 		if s.logger != nil {
 			s.logger.Info("Holder has zero balance, probing with reference addresses",

@@ -734,9 +734,19 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		if slug == "invalid_state_storage" {
 			tc.logger.Info("🔄 Retrying Tenderly simulation without storage overrides due to invalid_state_storage error")
 
-			// Remove the storage overrides and try again
+			// Strip all storage overrides from state_objects but keep ETH
+			// balance overrides (needed for gas). The invalid override may be
+			// on any address (e.g. an ERC20 token), not just the target contract.
 			if stateObjects, ok := body["state_objects"].(map[string]interface{}); ok {
-				delete(stateObjects, strings.ToLower(contractAddress))
+				for addr, obj := range stateObjects {
+					if addrObj, ok := obj.(map[string]interface{}); ok {
+						delete(addrObj, "storage")
+						// Remove the address entry entirely if only storage was set
+						if len(addrObj) == 0 {
+							delete(stateObjects, addr)
+						}
+					}
+				}
 			}
 
 			// Retry the HTTP request without storage overrides
