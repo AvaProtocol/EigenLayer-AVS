@@ -154,6 +154,8 @@ func erc20BalanceSlot(holder common.Address, mappingSlot int64) common.Hash {
 }
 
 // Common ERC20 balance mapping slot indices across different implementations.
+// 0: standard OpenZeppelin ERC20, 1-3: various token implementations,
+// 9: USDC (FiatTokenV2 proxy), 51: Compound cToken-style contracts.
 var commonBalanceSlots = []int64{0, 1, 2, 3, 9, 51}
 
 // ProbeERC20BalanceSlot discovers which storage slot a token contract uses for
