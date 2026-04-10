@@ -199,29 +199,35 @@ func (s *SimulationStateMap) ProbeERC20BalanceSlot(
 
 	expectedBalance := new(big.Int).SetBytes(result)
 
-	// Try each candidate slot
-	for _, candidateSlot := range commonBalanceSlots {
-		slotHash := erc20BalanceSlot(holder, candidateSlot)
-		storageValue, err := client.StorageAt(ctx, tokenContract, slotHash, nil)
-		if err != nil {
-			continue
+	// Only probe with the target holder if they have a non-zero balance.
+	// When balance is 0, every empty storage slot reads as 0 and would
+	// false-match, so we skip straight to the reference-holder approach.
+	if expectedBalance.Sign() > 0 {
+		for _, candidateSlot := range commonBalanceSlots {
+			slotHash := erc20BalanceSlot(holder, candidateSlot)
+			storageValue, err := client.StorageAt(ctx, tokenContract, slotHash, nil)
+			if err != nil {
+				continue
+			}
+
+			storedBalance := new(big.Int).SetBytes(storageValue)
+			if storedBalance.Cmp(expectedBalance) == 0 {
+				if s.logger != nil {
+					s.logger.Info("Discovered ERC20 balance storage slot",
+						"token", tokenContract.Hex(),
+						"slot", candidateSlot,
+						"balance", expectedBalance.String())
+				}
+				discoveredSlot := candidateSlot
+				s.cacheSlotResult(tokenKey, &discoveredSlot)
+				return discoveredSlot, nil
+			}
 		}
 
-		storedBalance := new(big.Int).SetBytes(storageValue)
-		if storedBalance.Cmp(expectedBalance) == 0 {
-			if s.logger != nil {
-				s.logger.Info("Discovered ERC20 balance storage slot",
-					"token", tokenContract.Hex(),
-					"slot", candidateSlot,
-					"balance", expectedBalance.String())
-			}
-			discoveredSlot := candidateSlot
-			s.cacheSlotResult(tokenKey, &discoveredSlot)
-			return discoveredSlot, nil
-		}
+		// Non-zero balance but no slot matched — fall through to reference-holder probe
 	}
 
-	// If balance is 0, any empty slot would match. Try to find a reference
+	// Balance is 0 or no slot matched. Try to find a reference
 	// holder with non-zero balance by checking well-known addresses that often
 	// receive tokens (e.g. address(1) from test mints, the contract itself).
 	if expectedBalance.Sign() == 0 {

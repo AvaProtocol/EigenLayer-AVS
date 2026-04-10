@@ -2989,6 +2989,10 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	if shouldContinue {
 		// Inject simulated state overrides so downstream Tenderly simulations see
 		// the balance changes implied by the trigger event.
+		n.logger.Info("SimulateTask: state override check",
+			"triggerType", triggerType,
+			"isEventTrigger", triggerType == avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+			"simulationStateNil", vm.simulationState == nil)
 		if triggerType == avsproto.TriggerType_TRIGGER_TYPE_EVENT && vm.simulationState != nil {
 			n.injectEventTriggerStateOverrides(triggerOutput, vm)
 		}
@@ -3074,42 +3078,60 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 // transfers it overrides the ETH balance.
 func (n *Engine) injectEventTriggerStateOverrides(triggerOutput map[string]interface{}, vm *VM) {
 	if vm.simulationState == nil {
+		n.logger.Warn("injectEventTriggerStateOverrides: simulationState is nil, skipping")
 		return
 	}
 
+	n.logger.Info("injectEventTriggerStateOverrides: called",
+		"triggerOutputKeys", GetMapKeys(triggerOutput),
+		"simulationStateEmpty", vm.simulationState.IsEmpty())
+
 	// Only process if there is parsed event data
-	data, _ := triggerOutput["data"].(map[string]interface{})
-	if data == nil {
+	rawData := triggerOutput["data"]
+	n.logger.Debug("injectEventTriggerStateOverrides: raw data field",
+		"type", fmt.Sprintf("%T", rawData),
+		"isNil", rawData == nil)
+
+	data, ok := rawData.(map[string]interface{})
+	if !ok || data == nil {
 		// Flat structure — some paths put fields at the top level
+		n.logger.Debug("injectEventTriggerStateOverrides: data field not a map, using triggerOutput directly")
 		data = triggerOutput
 	}
 
 	eventName, _ := data["eventName"].(string)
+	n.logger.Info("injectEventTriggerStateOverrides: resolved eventName",
+		"eventName", eventName,
+		"dataKeys", GetMapKeys(data))
 
 	switch eventName {
 	case "Transfer":
 		n.injectTransferEventState(data, vm)
 	default:
-		// For non-Transfer events we don't inject state overrides (yet).
-		if n.logger != nil {
-			n.logger.Debug("No simulation state injection for event type",
-				"eventName", eventName)
-		}
+		n.logger.Debug("No simulation state injection for event type",
+			"eventName", eventName)
 	}
 }
 
 // injectTransferEventState handles ERC20 Transfer events by computing the balance
 // change implied by the simulated transfer and injecting it as a storage override.
 func (n *Engine) injectTransferEventState(data map[string]interface{}, vm *VM) {
+	n.logger.Info("injectTransferEventState: called",
+		"dataKeys", GetMapKeys(data))
+
 	tokenAddr, _ := data["contractAddress"].(string)
 	walletAddr, _ := data["walletAddress"].(string)
 	valueStr, _ := data["value"].(string)
 
+	n.logger.Info("injectTransferEventState: extracted fields",
+		"tokenAddr", tokenAddr,
+		"walletAddr", walletAddr,
+		"value", valueStr,
+		"direction", data["direction"])
+
 	if tokenAddr == "" || walletAddr == "" || valueStr == "" {
-		if n.logger != nil {
-			n.logger.Debug("Transfer event missing fields for state injection",
-				"tokenAddr", tokenAddr, "walletAddr", walletAddr, "value", valueStr)
-		}
+		n.logger.Warn("Transfer event missing fields for state injection",
+			"tokenAddr", tokenAddr, "walletAddr", walletAddr, "value", valueStr)
 		return
 	}
 
