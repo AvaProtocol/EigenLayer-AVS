@@ -13,7 +13,7 @@ jobs:
     if: |
       github.event.pull_request.merged == true && 
       (github.event.pull_request.base.ref == 'main' || github.event.pull_request.base.ref == 'staging')
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     permissions:
       contents: write # Needed for go-semantic-release to create tags and releases
       packages: write # If you use GitHub Packages for Docker images (good to have)
