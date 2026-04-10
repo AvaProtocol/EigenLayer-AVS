@@ -2989,7 +2989,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	if shouldContinue {
 		// Inject simulated state overrides so downstream Tenderly simulations see
 		// the balance changes implied by the trigger event.
-		n.logger.Info("SimulateTask: state override check",
+		n.logger.Debug("SimulateTask: state override check",
 			"triggerType", triggerType,
 			"isEventTrigger", triggerType == avsproto.TriggerType_TRIGGER_TYPE_EVENT,
 			"simulationStateNil", vm.simulationState == nil)
@@ -3082,9 +3082,8 @@ func (n *Engine) injectEventTriggerStateOverrides(triggerOutput map[string]inter
 		return
 	}
 
-	n.logger.Info("injectEventTriggerStateOverrides: called",
-		"triggerOutputKeys", GetMapKeys(triggerOutput),
-		"simulationStateEmpty", vm.simulationState.IsEmpty())
+	n.logger.Debug("injectEventTriggerStateOverrides: called",
+		"triggerOutputKeys", GetMapKeys(triggerOutput))
 
 	// Only process if there is parsed event data
 	rawData := triggerOutput["data"]
@@ -3100,7 +3099,7 @@ func (n *Engine) injectEventTriggerStateOverrides(triggerOutput map[string]inter
 	}
 
 	eventName, _ := data["eventName"].(string)
-	n.logger.Info("injectEventTriggerStateOverrides: resolved eventName",
+	n.logger.Debug("injectEventTriggerStateOverrides: resolved eventName",
 		"eventName", eventName,
 		"dataKeys", GetMapKeys(data))
 
@@ -3166,6 +3165,11 @@ func (n *Engine) injectTransferEventState(data map[string]interface{}, vm *VM) {
 	}
 
 	// ERC20 transfer
+	if vm.smartWalletConfig == nil || vm.smartWalletConfig.EthRpcUrl == "" {
+		n.logger.Warn("No smart wallet config for ERC20 balance injection, skipping")
+		return
+	}
+
 	holderAddress := common.HexToAddress(walletAddr)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

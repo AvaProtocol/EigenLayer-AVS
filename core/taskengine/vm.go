@@ -4904,14 +4904,19 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 		}
 	}
 
-	if iterationFailCount > 0 && firstError != nil {
+	if iterationFailCount > 0 {
 		// Some or all iterations failed — mark the loop step as failed so
 		// AnalyzeExecutionResult can detect partial_success at the execution level.
 		// Pass the error via the `err` parameter (not `errorMessage`) so that
 		// finalizeStep uses err.Error() directly without wrapping it in
 		// NewInvalidRequestError which adds an "invalid request: " prefix.
-		innerMsg := strings.TrimPrefix(firstError.Error(), "invalid request: ")
-		errorMsg := fmt.Sprintf("%d of %d iterations failed: %s", iterationFailCount, len(results), innerMsg)
+		var errorMsg string
+		if firstError != nil {
+			innerMsg := strings.TrimPrefix(firstError.Error(), "invalid request: ")
+			errorMsg = fmt.Sprintf("%d of %d iterations failed: %s", iterationFailCount, len(results), innerMsg)
+		} else {
+			errorMsg = fmt.Sprintf("%d of %d iterations failed", iterationFailCount, len(results))
+		}
 		loopErr := NewStructuredError(
 			avsproto.ErrorCode_INVALID_REQUEST,
 			errorMsg,
