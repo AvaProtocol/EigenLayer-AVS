@@ -623,7 +623,7 @@ func (tc *TenderlyClient) createMockTransferLog(contractAddress string, from, to
 }
 
 // SimulateContractWrite simulates a contract write operation using Tenderly
-func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAddress string, callData string, contractABI string, methodName string, chainID int64, fromAddress string, value string) (*ContractWriteSimulationResult, error) {
+func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAddress string, callData string, contractABI string, methodName string, chainID int64, fromAddress string, value string, simulationState *SimulationStateMap) (*ContractWriteSimulationResult, error) {
 	tc.logger.Info("Simulating contract write via Tenderly",
 		"contract", contractAddress,
 		"method", methodName,
@@ -651,36 +651,42 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		apiValue = "0"
 	}
 
-	body := map[string]interface{}{
-		"network_id":      fmt.Sprintf("%d", chainID),
-		"from":            fromAddress,
-		"to":              contractAddress,
-		"gas":             8000000,
-		"gas_price":       0,
-		"value":           apiValue, // Use the provided value parameter, defaulting empty to "0"
-		"input":           callData,
-		"simulation_type": "full", // Use "full" instead of "quick" for more accurate state (ensures latest allowances are visible)
-		// Optional conveniences kept compatible
-		"state_objects": map[string]interface{}{
+	// Build state_objects: merge accumulated simulation state overrides with
+	// the mandatory sender ETH balance override so gas checks pass.
+	var stateObjects map[string]interface{}
+	if simulationState != nil && !simulationState.IsEmpty() {
+		stateObjects = simulationState.BuildStateObjects(fromAddress, balanceOverride)
+	} else {
+		stateObjects = map[string]interface{}{
 			strings.ToLower(fromAddress): map[string]interface{}{
 				"balance": balanceOverride,
 			},
-		},
+		}
 	}
 
-	// Set ETH balance for the sender so gas checks don't fail in simulation
-	// Tenderly uses the latest block state by default, which includes all on-chain approvals
-	// So we don't need to set token allowances here - they're already on-chain
+	// Ensure sender always has enough ETH for gas
 	if common.IsHexAddress(fromAddress) {
-		stateObjects := body["state_objects"].(map[string]interface{})
 		senderKey := strings.ToLower(fromAddress)
 		senderOverrides, ok := stateObjects[senderKey].(map[string]interface{})
 		if !ok || senderOverrides == nil {
 			senderOverrides = map[string]interface{}{}
 			stateObjects[senderKey] = senderOverrides
 		}
-		// Set 10 ETH balance (0x8AC7230489E80000 = 10 * 10^18)
-		senderOverrides["balance"] = "0x8AC7230489E80000"
+		if _, hasBalance := senderOverrides["balance"]; !hasBalance {
+			senderOverrides["balance"] = "0x8AC7230489E80000"
+		}
+	}
+
+	body := map[string]interface{}{
+		"network_id":      fmt.Sprintf("%d", chainID),
+		"from":            fromAddress,
+		"to":              contractAddress,
+		"gas":             8000000,
+		"gas_price":       0,
+		"value":           apiValue,
+		"input":           callData,
+		"simulation_type": "full",
+		"state_objects":   stateObjects,
 	}
 
 	tc.logger.Info("📡 Making Tenderly HTTP simulation call for contract write", "url", simURL)
@@ -728,9 +734,19 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		if slug == "invalid_state_storage" {
 			tc.logger.Info("🔄 Retrying Tenderly simulation without storage overrides due to invalid_state_storage error")
 
-			// Remove the storage overrides and try again
+			// Strip all storage overrides from state_objects but keep ETH
+			// balance overrides (needed for gas). The invalid override may be
+			// on any address (e.g. an ERC20 token), not just the target contract.
 			if stateObjects, ok := body["state_objects"].(map[string]interface{}); ok {
-				delete(stateObjects, strings.ToLower(contractAddress))
+				for addr, obj := range stateObjects {
+					if addrObj, ok := obj.(map[string]interface{}); ok {
+						delete(addrObj, "storage")
+						// Remove the address entry entirely if only storage was set
+						if len(addrObj) == 0 {
+							delete(stateObjects, addr)
+						}
+					}
+				}
 			}
 
 			// Retry the HTTP request without storage overrides
@@ -1011,6 +1027,20 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 			}
 		}
 
+		// Extract raw_state_diff for simulation state propagation.
+		// Lives at transaction.transaction_info.raw_state_diff in the Tenderly response.
+		if m, ok := resultForExtraction.(map[string]interface{}); ok {
+			if tx, ok := m["transaction"].(map[string]interface{}); ok {
+				if txInfo, ok := tx["transaction_info"].(map[string]interface{}); ok {
+					if rawSD, ok := txInfo["raw_state_diff"].([]interface{}); ok && len(rawSD) > 0 {
+						result.RawStateDiff = rawSD
+						tc.logger.Debug("Extracted raw_state_diff from Tenderly response",
+							"entries", len(rawSD))
+					}
+				}
+			}
+		}
+
 		// Propagate revert status from Tenderly into result.Success/Error
 		// Also extract detailed error messages from call traces for better debugging
 		if m, ok := resultForExtraction.(map[string]interface{}); ok {
@@ -1251,6 +1281,9 @@ type ContractWriteSimulationResult struct {
 	GasUsed      string `json:"gas_used,omitempty"`
 	GasPrice     string `json:"gas_price,omitempty"`
 	TotalGasCost string `json:"total_gas_cost,omitempty"`
+	// RawStateDiff contains the raw storage changes from the Tenderly simulation.
+	// Each entry has address, key, original, and dirty fields.
+	RawStateDiff []interface{} `json:"raw_state_diff,omitempty"`
 }
 
 // ContractWriteTransactionData represents transaction information for simulated writes
