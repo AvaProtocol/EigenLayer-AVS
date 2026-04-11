@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"fmt"
+	"math/big"
 	"strings"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
@@ -39,6 +40,46 @@ func WalletStorageKey(owner common.Address, smartWalletAddress string) string {
 	)
 }
 
+// WalletBySaltKey returns the secondary index key that maps a
+// (owner, factory, salt) tuple to its current canonical wallet address.
+//
+// The primary wallet record is keyed by the *derived* wallet address
+// (`w:<owner>:<address>`), which means that when a factory's account
+// implementation is upgraded and `factory.getAddress(owner, salt)` starts
+// returning a new address, the new address looks like a brand-new wallet
+// to the primary store and a fresh row gets inserted alongside the old
+// one. This index lets us cheaply ask "for this (owner, factory, salt)
+// triple, which derived address is currently canonical?" so that the write
+// path can detect the upgrade and mark the old row as stale instead of
+// silently accumulating zombies.
+//
+// Salt is encoded in decimal (matching `(*big.Int).String()`) so the key
+// is stable across encodings. The prefix is `wsalt:` (not `w:`) so it does
+// not collide with `WalletByOwnerPrefix`.
+func WalletBySaltKey(owner common.Address, factory common.Address, salt *big.Int) []byte {
+	saltStr := "0"
+	if salt != nil {
+		saltStr = salt.String()
+	}
+	return []byte(fmt.Sprintf(
+		"wsalt:%s:%s:%s",
+		strings.ToLower(owner.Hex()),
+		strings.ToLower(factory.Hex()),
+		saltStr,
+	))
+}
+
+// LookupCanonicalWalletAddress returns the wallet address currently
+// registered as canonical for the given (owner, factory, salt) triple, or
+// badger.ErrKeyNotFound if none has been recorded yet.
+func LookupCanonicalWalletAddress(db storage.Storage, owner common.Address, factory common.Address, salt *big.Int) (common.Address, error) {
+	raw, err := db.GetKey(WalletBySaltKey(owner, factory, salt))
+	if err != nil {
+		return common.Address{}, err
+	}
+	return common.HexToAddress(string(raw)), nil
+}
+
 func GetWallet(db storage.Storage, owner common.Address, smartWalletAddress string) (*model.SmartWallet, error) {
 	walletKey := WalletStorageKey(owner, smartWalletAddress)
 	walletData, err := db.GetKey([]byte(walletKey))
@@ -53,6 +94,15 @@ func GetWallet(db storage.Storage, owner common.Address, smartWalletAddress stri
 	return &walletModel, nil
 }
 
+// StoreWallet persists the wallet record under its primary key
+// (`w:<owner>:<address>`) and, when the wallet has a non-nil factory and
+// salt and is not flagged stale, also writes the `(owner, factory, salt)`
+// secondary index entry pointing at this wallet's address. Both writes
+// happen in a single BatchWrite so the index can never be left dangling.
+//
+// Stale records (StaleDerivation == true) only update the primary entry —
+// the secondary index intentionally continues to point at the new
+// canonical wallet for that triple, not the stale one.
 func StoreWallet(db storage.Storage, owner common.Address, wallet *model.SmartWallet) error {
 	if wallet.Address == nil {
 		return fmt.Errorf("cannot store wallet with nil address")
@@ -62,7 +112,33 @@ func StoreWallet(db storage.Storage, owner common.Address, wallet *model.SmartWa
 	if err != nil {
 		return fmt.Errorf("failed to marshal wallet for storage (key: %s): %w", walletKey, err)
 	}
-	return db.Set([]byte(walletKey), updatedWalletData)
+
+	// Fast path: no secondary index to update.
+	if wallet.StaleDerivation || wallet.Factory == nil || wallet.Salt == nil {
+		return db.Set([]byte(walletKey), updatedWalletData)
+	}
+
+	indexKey := WalletBySaltKey(owner, *wallet.Factory, wallet.Salt)
+	indexValue := []byte(strings.ToLower(wallet.Address.Hex()))
+	return db.BatchWrite(map[string][]byte{
+		walletKey:        updatedWalletData,
+		string(indexKey): indexValue,
+	})
+}
+
+// MarkWalletStale flips a wallet record's StaleDerivation and IsHidden
+// flags and re-persists it. The secondary index is intentionally NOT
+// updated by this call (StoreWallet skips the index for stale records),
+// so callers that want the index to point at a fresh canonical wallet
+// must call StoreWallet on the new wallet *after* this returns.
+func MarkWalletStale(db storage.Storage, owner common.Address, smartWalletAddress string) error {
+	wallet, err := GetWallet(db, owner, smartWalletAddress)
+	if err != nil {
+		return fmt.Errorf("failed to load wallet to mark stale (%s): %w", smartWalletAddress, err)
+	}
+	wallet.StaleDerivation = true
+	wallet.IsHidden = true
+	return StoreWallet(db, owner, wallet)
 }
 
 func TaskStorageKey(id string, status avsproto.TaskStatus) []byte {

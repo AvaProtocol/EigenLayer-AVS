@@ -1021,7 +1021,7 @@ func (o *Operator) PingServer() {
 
 				// Recreate the gRPC connection when ping detects closing state
 				if recreateErr := o.recreateGrpcConnection(); recreateErr != nil {
-					o.logger.Error("❌ Failed to recreate gRPC connection during ping",
+					o.logger.Warn("❌ Failed to recreate gRPC connection during ping",
 						"aggregator_address", o.config.AggregatorServerIpPortAddress,
 						"operator", o.config.OperatorAddress,
 						"raw_error", recreateErr)

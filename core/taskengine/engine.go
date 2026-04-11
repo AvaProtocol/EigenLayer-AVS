@@ -465,10 +465,43 @@ func (n *Engine) MustStart() error {
 	return nil
 }
 
+// markPreviousCanonicalStaleIfAny consults the (owner, factory, salt)
+// secondary index. If the index already points at a *different* wallet
+// address than the freshly derived one, that means the factory's account
+// implementation was upgraded between the previous record and now — the
+// previously canonical wallet is no longer derivable from this triple.
+// Mark the old record as stale so list responses hide it and future
+// writes can replace the index entry. Index lookup or marking failures
+// are logged but never block the fresh insertion path.
+func (n *Engine) markPreviousCanonicalStaleIfAny(owner common.Address, factoryAddr common.Address, salt *big.Int, freshAddress common.Address) {
+	previousAddr, err := LookupCanonicalWalletAddress(n.db, owner, factoryAddr, salt)
+	if err == badger.ErrKeyNotFound {
+		return
+	}
+	if err != nil {
+		n.logger.Warn("Failed to look up canonical wallet address by (owner, factory, salt)", "owner", owner.Hex(), "factory", factoryAddr.Hex(), "salt", salt.String(), "error", err)
+		return
+	}
+	if strings.EqualFold(previousAddr.Hex(), freshAddress.Hex()) {
+		return
+	}
+	n.logger.Error("Stale wallet derivation detected — factory implementation likely upgraded",
+		"owner", owner.Hex(),
+		"factory", factoryAddr.Hex(),
+		"salt", salt.String(),
+		"previousAddress", previousAddr.Hex(),
+		"newAddress", freshAddress.Hex(),
+	)
+	if markErr := MarkWalletStale(n.db, owner, previousAddr.Hex()); markErr != nil {
+		n.logger.Warn("Failed to mark previous canonical wallet as stale", "owner", owner.Hex(), "previousAddress", previousAddr.Hex(), "error", markErr)
+	}
+}
+
 // storeDefaultWalletForListWallets creates and stores the default wallet (salt:0) for ListWallets.
 // Returns the stored wallet model if successful, or nil if storage failed (but logs the error).
 func (n *Engine) storeDefaultWalletForListWallets(owner common.Address, defaultDerivedAddress *common.Address, defaultSystemFactory common.Address, defaultSalt *big.Int) *model.SmartWallet {
 	n.logger.Info("Default wallet not found in DB for ListWallets, storing it", "owner", owner.Hex(), "walletAddress", defaultDerivedAddress.Hex())
+	n.markPreviousCanonicalStaleIfAny(owner, defaultSystemFactory, defaultSalt, *defaultDerivedAddress)
 	newModelWallet := &model.SmartWallet{
 		Owner:    &owner,
 		Address:  defaultDerivedAddress,
@@ -606,6 +639,15 @@ func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletR
 			continue
 		}
 
+		// Hard-filter zombies left over from a factory account-implementation
+		// upgrade. The record is preserved on disk (the on-chain wallet may
+		// still hold assets), but it is no longer derivable from its
+		// (owner, factory, salt) and would otherwise show up as a phantom
+		// salt collision in the response.
+		if storedModelWallet.StaleDerivation {
+			continue
+		}
+
 		if processedAddresses[strings.ToLower(storedModelWallet.Address.Hex())] {
 			continue
 		}
@@ -738,6 +780,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		}
 
 		n.logger.Info("Wallet not found in DB for GetWallet, creating new entry", "owner", user.Address.Hex(), "walletAddress", derivedSenderAddress.Hex())
+		n.markPreviousCanonicalStaleIfAny(user.Address, factoryAddr, saltBig, *derivedSenderAddress)
 		newModelWallet := &model.SmartWallet{
 			Owner:    &user.Address,
 			Address:  derivedSenderAddress,
