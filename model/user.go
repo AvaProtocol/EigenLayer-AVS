@@ -33,11 +33,21 @@ func (u *User) ToSmartWallet() *SmartWallet {
 }
 
 type SmartWallet struct {
-	Owner    *common.Address `json:"owner"`
-	Address  *common.Address `json:"address"`
-	Factory  *common.Address `json:"factory,omitempty"`
-	Salt     *big.Int        `json:"salt"`
-	IsHidden bool            `json:"is_hidden,omitempty"`
+	Owner   *common.Address `json:"owner"`
+	Address *common.Address `json:"address"`
+	Factory *common.Address `json:"factory,omitempty"`
+	Salt    *big.Int        `json:"salt"`
+	// IsHidden is a user-toggleable flag controlling whether the wallet is
+	// surfaced in default ListWallets responses.
+	IsHidden bool `json:"is_hidden,omitempty"`
+	// StaleDerivation is a system-set flag indicating that this wallet's
+	// (owner, factory, salt) tuple no longer derives to this Address — i.e.
+	// the factory's account implementation was upgraded and a newer wallet
+	// address now claims the (owner, factory, salt) slot. Stale records are
+	// preserved (the on-chain wallet may still hold assets) but excluded
+	// from the (owner, factory, salt) secondary index and force-hidden in
+	// list responses.
+	StaleDerivation bool `json:"stale_derivation,omitempty"`
 }
 
 func (w *SmartWallet) ToJSON() ([]byte, error) {
