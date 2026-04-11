@@ -122,6 +122,13 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid wallet address format")
 	}
 	ownerAddress := common.HexToAddress(walletStr)
+	// Refuse to mint a token bound to the zero address. The two-step
+	// auth flow lets a caller request a JWT with sub = walletStr, so we
+	// must reject 0x0…0 here as well as in verifyAuth — defense-in-depth
+	// against the dummy-target-address bypass.
+	if ownerAddress == (common.Address{}) {
+		return nil, status.Errorf(codes.InvalidArgument, "Wallet address cannot be the zero address")
+	}
 
 	if strings.Contains(payload.Signature, ".") {
 		// API key directly
@@ -256,8 +263,21 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 			return nil, fmt.Errorf("%s: subject must be a valid EOA address", auth.InvalidAuthenticationKey)
 		}
 
+		// Defense-in-depth: refuse the zero address. common.IsHexAddress
+		// returns true for "0x0000…0000", and a buggy SDK that minted a
+		// JWT with the zero-address subject (e.g. via the
+		// dummy-target-address bypass) would otherwise pass validation
+		// and silently fail every w:<owner>:<wallet> lookup downstream.
+		// The zero address is never a real EOA — reject it explicitly.
+		subjectAddr := common.HexToAddress(subject)
+		if subjectAddr == (common.Address{}) {
+			r.config.Logger.Error("API key has zero-address subject; refusing authentication",
+				"subject", subject)
+			return nil, fmt.Errorf("%s: subject cannot be the zero address", auth.InvalidAuthenticationKey)
+		}
+
 		user := model.User{
-			Address: common.HexToAddress(subject),
+			Address: subjectAddr,
 		}
 
 		// caching to reduce hitting eth rpc node
@@ -311,6 +331,13 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req *avsproto.GetSig
 
 	if !common.IsHexAddress(walletAddress) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid Ethereum wallet address format")
+	}
+	// Refuse to issue a signature template for the zero address. This is
+	// the earliest point in the auth flow where we can stop a caller
+	// (typically a buggy SDK) from accidentally requesting a JWT bound
+	// to 0x0…0. See verifyAuth for the matching last-line defense.
+	if common.HexToAddress(walletAddress) == (common.Address{}) {
+		return nil, status.Errorf(codes.InvalidArgument, "Wallet address cannot be the zero address")
 	}
 
 	// Use smart wallet chain ID (r.chainID) instead of global EigenLayer chain ID
