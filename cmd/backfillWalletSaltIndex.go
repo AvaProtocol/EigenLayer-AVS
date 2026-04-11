@@ -75,7 +75,10 @@ func runBackfillWalletSaltIndex(configPath string) error {
 
 	fmt.Printf("Config:        %s\n", configPath)
 	fmt.Printf("DB path:       %s\n", nodeConfig.DbPath)
-	fmt.Printf("RPC URL:       %s\n", nodeConfig.SmartWallet.EthRpcUrl)
+	// Redact: RPC URLs from Tenderly/Alchemy/Infura embed API keys in
+	// the path or query — printing the raw URL leaks secrets to terminal
+	// scrollback and CI logs.
+	fmt.Printf("RPC URL:       %s\n", taskengine.RedactRPCURL(nodeConfig.SmartWallet.EthRpcUrl))
 	fmt.Printf("Mode:          %s\n", backfillModeLabel(backfillWalletSaltIndexDryRun))
 	fmt.Println()
 

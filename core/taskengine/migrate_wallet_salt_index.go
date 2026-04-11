@@ -3,12 +3,40 @@ package taskengine
 import (
 	"fmt"
 	"math/big"
+	"net/url"
 	"strings"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/common"
 )
+
+// RedactRPCURL returns a printable form of an RPC URL with any path,
+// query, or userinfo components elided. Many RPC providers (Tenderly,
+// Alchemy, Infura) embed API keys directly in the path or query string,
+// so the raw URL is sensitive — printing it to operator stdout dumps
+// secrets into terminal scrollback and CI artifacts. Use this whenever
+// surfacing an `eth_rpc_url` value to humans.
+//
+// Examples:
+//
+//	https://sepolia.gateway.tenderly.co/abc123 -> https://sepolia.gateway.tenderly.co/<redacted>
+//	https://mainnet.infura.io/v3/key           -> https://mainnet.infura.io/<redacted>
+//	http://localhost:4437/rpc                  -> http://localhost:4437/<redacted>
+//	https://example.com                        -> https://example.com  (nothing sensitive to hide)
+func RedactRPCURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "<unparseable>"
+	}
+	if (parsed.Path == "" || parsed.Path == "/") && parsed.RawQuery == "" && parsed.User == nil {
+		return raw
+	}
+	return fmt.Sprintf("%s://%s/<redacted>", parsed.Scheme, parsed.Host)
+}
 
 // WalletSaltIndexAddressDeriver returns the address that the given factory
 // currently derives for (owner, salt). The migration uses this instead of
@@ -131,6 +159,12 @@ func BackfillWalletSaltIndex(db storage.Storage, derive WalletSaltIndexAddressDe
 			if !opts.DryRun {
 				if setErr := db.Set(indexKey, []byte(strings.ToLower(wallet.Address.Hex()))); setErr != nil {
 					logf("  [err] write secondary index: %v", setErr)
+					// Fail-fast: a partial backfill would leave the
+					// secondary index inconsistent. The migration is
+					// idempotent, so the operator can fix the underlying
+					// storage issue and re-run from scratch.
+					return stats, fmt.Errorf("write secondary index for owner=%s factory=%s salt=%s address=%s: %w",
+						owner.Hex(), factory.Hex(), wallet.Salt.String(), wallet.Address.Hex(), setErr)
 				}
 			}
 			continue
@@ -153,6 +187,13 @@ func BackfillWalletSaltIndex(db storage.Storage, derive WalletSaltIndexAddressDe
 		if !opts.DryRun {
 			if markErr := MarkWalletStale(db, owner, wallet.Address.Hex()); markErr != nil {
 				logf("  [err] mark stale: %v", markErr)
+				// Fail-fast: a partially marked stale set would let
+				// zombie rows leak back into ListWallets responses
+				// for the (owner, factory, salt) we did process. The
+				// operator can fix the underlying storage issue and
+				// re-run; MarkWalletStale is idempotent.
+				return stats, fmt.Errorf("mark wallet stale for owner=%s wallet=%s: %w",
+					owner.Hex(), wallet.Address.Hex(), markErr)
 			}
 		}
 	}

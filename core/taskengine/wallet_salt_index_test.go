@@ -20,6 +20,7 @@
 package taskengine
 
 import (
+	"fmt"
 	"math/big"
 	"strings"
 	"testing"
@@ -460,3 +461,161 @@ func TestBackfillWalletSaltIndex_SkipsLegacyAndDeriveErrors(t *testing.T) {
 type assertAnError struct{}
 
 func (assertAnError) Error() string { return "rpc unavailable" }
+
+// ----------------------------------------------------------------------
+// RedactRPCURL — guards operator stdout from leaking provider API keys
+// embedded in the RPC URL path or query.
+// ----------------------------------------------------------------------
+
+func TestRedactRPCURL(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty", "", ""},
+		{
+			"tenderly key in path",
+			"https://sepolia.gateway.tenderly.co/7MB9UwJMIQmLyhNxSIMg3X",
+			"https://sepolia.gateway.tenderly.co/<redacted>",
+		},
+		{
+			"infura v3 key",
+			"https://mainnet.infura.io/v3/abc123def456",
+			"https://mainnet.infura.io/<redacted>",
+		},
+		{
+			"alchemy v2 key",
+			"https://eth-mainnet.g.alchemy.com/v2/abc123",
+			"https://eth-mainnet.g.alchemy.com/<redacted>",
+		},
+		{
+			"query string credentials",
+			"https://api.example.com?apikey=secret",
+			"https://api.example.com/<redacted>",
+		},
+		{
+			"userinfo credentials",
+			"https://user:password@example.com/",
+			"https://example.com/<redacted>",
+		},
+		{
+			"localhost SSH tunnel with rpc path",
+			"http://localhost:4437/rpc",
+			"http://localhost:4437/<redacted>",
+		},
+		{
+			"bare host (nothing to redact)",
+			"https://example.com",
+			"https://example.com",
+		},
+		{
+			"bare host with trailing slash",
+			"https://example.com/",
+			"https://example.com/",
+		},
+		{
+			"unparseable",
+			"not a url",
+			"<unparseable>",
+		},
+		{
+			"missing scheme",
+			"example.com/path",
+			"<unparseable>",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RedactRPCURL(tc.in)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// ----------------------------------------------------------------------
+// Failure paths — confirm BackfillWalletSaltIndex fails fast (returns
+// a non-nil error) when a write or stale-mark fails partway through,
+// instead of swallowing the error and reporting nominal success.
+// ----------------------------------------------------------------------
+
+// closingDB wraps a real BadgerStorage but starts returning ErrDBClosed
+// from Set() and BatchWrite() after a configurable number of successful
+// writes. This lets us simulate a mid-migration storage failure without
+// monkey-patching badger internals.
+type closingDB struct {
+	storage.Storage
+	successesAllowed int
+	writes           int
+}
+
+func (c *closingDB) Set(key, value []byte) error {
+	c.writes++
+	if c.writes > c.successesAllowed {
+		return fmt.Errorf("simulated storage failure")
+	}
+	return c.Storage.Set(key, value)
+}
+
+func (c *closingDB) BatchWrite(updates map[string][]byte) error {
+	c.writes++
+	if c.writes > c.successesAllowed {
+		return fmt.Errorf("simulated storage failure")
+	}
+	return c.Storage.BatchWrite(updates)
+}
+
+func TestBackfillWalletSaltIndex_FailsFastOnSetError(t *testing.T) {
+	inner := testutil.TestMustDB()
+	defer storage.Destroy(inner.(*storage.BadgerStorage))
+
+	owner := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	factory := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	addr := common.HexToAddress("0x3333333333333333333333333333333333333333")
+
+	// Seed the row directly so the secondary index is empty.
+	w := mkWallet(owner, factory, addr, 0)
+	body, err := w.ToJSON()
+	require.NoError(t, err)
+	require.NoError(t, inner.Set([]byte(WalletStorageKey(owner, addr.Hex())), body))
+
+	// Wrap the DB so the next Set() (the secondary index write) fails.
+	wrapped := &closingDB{Storage: inner, successesAllowed: 0}
+
+	deriver := newFakeDeriver()
+	deriver.set(owner, factory, big.NewInt(0), addr) // canonical match
+
+	stats, err := BackfillWalletSaltIndex(wrapped, deriver.derive, WalletSaltIndexBackfillOptions{})
+	require.Error(t, err, "BackfillWalletSaltIndex must surface storage errors instead of swallowing them")
+	assert.Contains(t, err.Error(), "write secondary index")
+	require.NotNil(t, stats, "stats should still be returned alongside the error for diagnostics")
+}
+
+func TestBackfillWalletSaltIndex_FailsFastOnMarkStaleError(t *testing.T) {
+	inner := testutil.TestMustDB()
+	defer storage.Destroy(inner.(*storage.BadgerStorage))
+
+	owner := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	factory := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	stored := common.HexToAddress("0xAAAAaaaaAAAAaaaaAAAAaaaaAAAAaaaaAAAAaaaa")
+	live := common.HexToAddress("0xBBBBbbbbBBBBbbbbBBBBbbbbBBBBbbbbBBBBbbbb")
+
+	w := mkWallet(owner, factory, stored, 0)
+	body, err := w.ToJSON()
+	require.NoError(t, err)
+	require.NoError(t, inner.Set([]byte(WalletStorageKey(owner, stored.Hex())), body))
+
+	// MarkWalletStale calls StoreWallet which calls db.Set (since the
+	// stale wallet is not eligible for the secondary index batch path).
+	// Allow zero successful writes so the very first Set in the stale
+	// branch fails.
+	wrapped := &closingDB{Storage: inner, successesAllowed: 0}
+
+	deriver := newFakeDeriver()
+	deriver.set(owner, factory, big.NewInt(0), live) // mismatch -> stale path
+
+	stats, err := BackfillWalletSaltIndex(wrapped, deriver.derive, WalletSaltIndexBackfillOptions{})
+	require.Error(t, err, "BackfillWalletSaltIndex must surface MarkWalletStale errors")
+	assert.Contains(t, err.Error(), "mark wallet stale")
+	require.NotNil(t, stats)
+}

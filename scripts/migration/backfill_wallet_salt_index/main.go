@@ -72,7 +72,10 @@ func main() {
 
 	fmt.Printf("Config:        %s\n", *configPath)
 	fmt.Printf("DB path:       %s\n", cfg.DbPath)
-	fmt.Printf("RPC URL:       %s\n", cfg.SmartWallet.EthRpcUrl)
+	// Redact: RPC URLs from Tenderly/Alchemy/Infura embed API keys in
+	// the path or query — printing the raw URL leaks secrets to terminal
+	// scrollback and CI logs.
+	fmt.Printf("RPC URL:       %s\n", taskengine.RedactRPCURL(cfg.SmartWallet.EthRpcUrl))
 	fmt.Printf("Mode:          %s\n", modeLabel(*dryRun))
 	fmt.Println()
 
