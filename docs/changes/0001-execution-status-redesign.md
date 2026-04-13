@@ -34,7 +34,7 @@ Three execution statuses, orthogonal to step count:
 | Some nodes failed               | `FAILED`  | any                               | `"N of M steps failed: node1, …"`  |
 | All nodes failed                | `FAILED`  | equal                             | `"N of N steps failed: node1, …"`  |
 | No steps executed               | `FAILED`  | zero                              | `"no execution steps found"`       |
-| System-level failure (VM crash) | `ERROR`   | zero                              | `"VM execution error: …"`          |
+| System-level failure (VM crash) | `ERROR`   | zero (or partial if crash mid-run) | `"VM execution error: …"`          |
 
 **How to determine what happened:**
 
