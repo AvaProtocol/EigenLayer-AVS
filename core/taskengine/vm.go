@@ -3208,12 +3208,12 @@ func (v *VM) createExecutionStep(nodeId string, success bool, errorMsg string, l
 type ExecutionResultStatus int
 
 const (
-	// ExecutionSuccess indicates all steps completed successfully
+	// ExecutionSuccess indicates all executed steps succeeded (includes branch/conditional skips)
 	ExecutionSuccess ExecutionResultStatus = iota
-	// ExecutionPartialSuccess indicates some steps succeeded but at least one failed
-	ExecutionPartialSuccess
-	// ExecutionFailure indicates execution failed (all steps failed or critical failure)
-	ExecutionFailure
+	// ExecutionFailed indicates one or more node-level steps failed during execution
+	ExecutionFailed
+	// ExecutionError indicates a system-level failure (VM could not run the workflow)
+	ExecutionError
 )
 
 // getStepDisplayName extracts the display name for a step, preferring the name over ID
@@ -3232,66 +3232,29 @@ func (v *VM) AnalyzeExecutionResult() (string, int, ExecutionResultStatus) {
 	defer v.mu.Unlock()
 
 	if len(v.ExecutionLogs) == 0 {
-		return "no execution steps found", 0, ExecutionFailure
+		return "no execution steps found", 0, ExecutionFailed
 	}
 
 	var failedStepNames []string
-	var successfulStepNames []string
-	var firstErrorMessage string
 
 	for _, step := range v.ExecutionLogs {
-		stepName := getStepDisplayName(step)
-
 		if !step.Success && step.Error != "" {
-			if firstErrorMessage == "" {
-				firstErrorMessage = step.Error
-			}
-			failedStepNames = append(failedStepNames, stepName)
-		} else if step.Success {
-			successfulStepNames = append(successfulStepNames, stepName)
+			failedStepNames = append(failedStepNames, getStepDisplayName(step))
 		}
 	}
 
 	failedCount := len(failedStepNames)
-	totalSteps := len(v.ExecutionLogs)
-
-	// Determine execution status
-	var resultStatus ExecutionResultStatus
-	var errorMessage string
 
 	if failedCount == 0 {
-		// All executed steps succeeded. However, if not all workflow steps executed
-		// (e.g., due to branch selections or conditional skips), report PARTIAL_SUCCESS
-		// to reflect that the workflow did not traverse all configured nodes.
-		executedCount := len(v.ExecutionLogs)
-		totalWorkflowSteps := 1 + len(v.TaskNodes) // 1 trigger + all nodes
-		if v.GetTaskId() == "" && len(v.TaskNodes) == 1 {
-			// single-node immediate execution
-			totalWorkflowSteps = 1
-		}
-
-		if executedCount < totalWorkflowSteps {
-			resultStatus = ExecutionPartialSuccess
-			errorMessage = fmt.Sprintf("Partial execution: %d out of %d steps executed (branch/conditional path)", executedCount, totalWorkflowSteps)
-		} else {
-			// All steps that exist in the workflow executed and succeeded
-			resultStatus = ExecutionSuccess
-			errorMessage = ""
-		}
-	} else if failedCount > 0 {
-		// Distinguish between all failed vs some failed (for internal status tracking)
-		if failedCount == totalSteps {
-			// All steps failed
-			resultStatus = ExecutionFailure
-		} else {
-			// Some steps succeeded, some failed - partial success for internal tracking
-			resultStatus = ExecutionPartialSuccess
-		}
-		// Use simple error message format (no prefix) for both cases
-		errorMessage = formatExecutionErrorMessage("", failedCount, totalSteps, failedStepNames)
+		// All executed steps succeeded. Branch/conditional skips are normal
+		// workflow behavior and count as SUCCESS — the workflow did what it
+		// was configured to do.
+		return "", 0, ExecutionSuccess
 	}
 
-	return errorMessage, failedCount, resultStatus
+	// One or more steps failed (covers both partial and total failure).
+	errorMessage := formatExecutionErrorMessage("", failedCount, len(v.ExecutionLogs), failedStepNames)
+	return errorMessage, failedCount, ExecutionFailed
 }
 
 // CalculateTotalGasCost sums up gas costs from all execution steps that involve blockchain operations
@@ -3362,10 +3325,10 @@ func convertToExecutionStatus(resultStatus ExecutionResultStatus) avsproto.Execu
 	switch resultStatus {
 	case ExecutionSuccess:
 		return avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS
-	case ExecutionPartialSuccess:
-		return avsproto.ExecutionStatus_EXECUTION_STATUS_PARTIAL_SUCCESS
-	case ExecutionFailure:
+	case ExecutionFailed:
 		return avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
+	case ExecutionError:
+		return avsproto.ExecutionStatus_EXECUTION_STATUS_ERROR
 	default:
 		return avsproto.ExecutionStatus_EXECUTION_STATUS_UNSPECIFIED
 	}

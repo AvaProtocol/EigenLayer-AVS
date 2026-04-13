@@ -547,15 +547,21 @@ func (TaskStatus) EnumDescriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{6}
 }
 
-// Execution Status re-present a run of the task
+// ExecutionStatus represents the outcome of a task execution.
+//
+//	SUCCESS – every executed step succeeded (includes branch/conditional skips).
+//	FAILED  – one or more node-level steps failed during execution.
+//	ERROR   – system-level failure; the VM could not run the workflow at all.
+//
+// Value 4 (formerly PARTIAL_SUCCESS) is reserved and must not be reused.
 type ExecutionStatus int32
 
 const (
-	ExecutionStatus_EXECUTION_STATUS_UNSPECIFIED     ExecutionStatus = 0
-	ExecutionStatus_EXECUTION_STATUS_PENDING         ExecutionStatus = 1
-	ExecutionStatus_EXECUTION_STATUS_SUCCESS         ExecutionStatus = 2
-	ExecutionStatus_EXECUTION_STATUS_FAILED          ExecutionStatus = 3
-	ExecutionStatus_EXECUTION_STATUS_PARTIAL_SUCCESS ExecutionStatus = 4
+	ExecutionStatus_EXECUTION_STATUS_UNSPECIFIED ExecutionStatus = 0
+	ExecutionStatus_EXECUTION_STATUS_PENDING     ExecutionStatus = 1
+	ExecutionStatus_EXECUTION_STATUS_SUCCESS     ExecutionStatus = 2
+	ExecutionStatus_EXECUTION_STATUS_FAILED      ExecutionStatus = 3
+	ExecutionStatus_EXECUTION_STATUS_ERROR       ExecutionStatus = 5
 )
 
 // Enum value maps for ExecutionStatus.
@@ -565,14 +571,14 @@ var (
 		1: "EXECUTION_STATUS_PENDING",
 		2: "EXECUTION_STATUS_SUCCESS",
 		3: "EXECUTION_STATUS_FAILED",
-		4: "EXECUTION_STATUS_PARTIAL_SUCCESS",
+		5: "EXECUTION_STATUS_ERROR",
 	}
 	ExecutionStatus_value = map[string]int32{
-		"EXECUTION_STATUS_UNSPECIFIED":     0,
-		"EXECUTION_STATUS_PENDING":         1,
-		"EXECUTION_STATUS_SUCCESS":         2,
-		"EXECUTION_STATUS_FAILED":          3,
-		"EXECUTION_STATUS_PARTIAL_SUCCESS": 4,
+		"EXECUTION_STATUS_UNSPECIFIED": 0,
+		"EXECUTION_STATUS_PENDING":     1,
+		"EXECUTION_STATUS_SUCCESS":     2,
+		"EXECUTION_STATUS_FAILED":      3,
+		"EXECUTION_STATUS_ERROR":       5,
 	}
 )
 
@@ -10290,13 +10296,13 @@ const file_avs_proto_rawDesc = "" +
 	"\n" +
 	"\x06Failed\x10\x02\x12\v\n" +
 	"\aRunning\x10\x04\x12\f\n" +
-	"\bDisabled\x10\x05*\xb2\x01\n" +
+	"\bDisabled\x10\x05*\xd0\x01\n" +
 	"\x0fExecutionStatus\x12 \n" +
 	"\x1cEXECUTION_STATUS_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18EXECUTION_STATUS_PENDING\x10\x01\x12\x1c\n" +
 	"\x18EXECUTION_STATUS_SUCCESS\x10\x02\x12\x1b\n" +
-	"\x17EXECUTION_STATUS_FAILED\x10\x03\x12$\n" +
-	" EXECUTION_STATUS_PARTIAL_SUCCESS\x10\x042\xd5\x10\n" +
+	"\x17EXECUTION_STATUS_FAILED\x10\x03\x12\x1a\n" +
+	"\x16EXECUTION_STATUS_ERROR\x10\x05\"\x04\b\x04\x10\x04* EXECUTION_STATUS_PARTIAL_SUCCESS2\xd5\x10\n" +
 	"\n" +
 	"Aggregator\x126\n" +
 	"\x06GetKey\x12\x15.aggregator.GetKeyReq\x1a\x13.aggregator.KeyResp\"\x00\x12]\n" +

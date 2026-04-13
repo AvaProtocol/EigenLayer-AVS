@@ -53,8 +53,8 @@ func TestAnalyzeExecutionResult_AllSuccess(t *testing.T) {
 	}
 }
 
-// TestAnalyzeExecutionResult_PartialSuccess tests the case where some steps succeed and some fail
-func TestAnalyzeExecutionResult_PartialSuccess(t *testing.T) {
+// TestAnalyzeExecutionResult_SomeStepsFailed tests the case where some steps succeed and some fail
+func TestAnalyzeExecutionResult_SomeStepsFailed(t *testing.T) {
 	vm := NewVM()
 	vm.logger = testutil.GetLogger()
 
@@ -95,8 +95,8 @@ func TestAnalyzeExecutionResult_PartialSuccess(t *testing.T) {
 	if failedCount != 1 {
 		t.Errorf("Expected failedCount=1, got failedCount=%d", failedCount)
 	}
-	if resultStatus != ExecutionPartialSuccess {
-		t.Errorf("Expected resultStatus=ExecutionPartialSuccess, got resultStatus=%v", resultStatus)
+	if resultStatus != ExecutionFailed {
+		t.Errorf("Expected resultStatus=ExecutionFailed, got resultStatus=%v", resultStatus)
 	}
 
 	// Check that error message contains failure information
@@ -142,8 +142,8 @@ func TestAnalyzeExecutionResult_AllFailure(t *testing.T) {
 	if failedCount != 3 {
 		t.Errorf("Expected failedCount=3, got failedCount=%d", failedCount)
 	}
-	if resultStatus != ExecutionFailure {
-		t.Errorf("Expected resultStatus=ExecutionFailure, got resultStatus=%v", resultStatus)
+	if resultStatus != ExecutionFailed {
+		t.Errorf("Expected resultStatus=ExecutionFailed, got resultStatus=%v", resultStatus)
 	}
 
 	// Check that error message contains failure information
@@ -170,13 +170,13 @@ func TestAnalyzeExecutionResult_NoSteps(t *testing.T) {
 	if failedCount != 0 {
 		t.Errorf("Expected failedCount=0 for no steps, got failedCount=%d", failedCount)
 	}
-	if resultStatus != ExecutionFailure {
-		t.Errorf("Expected resultStatus=ExecutionFailure for no steps, got resultStatus=%v", resultStatus)
+	if resultStatus != ExecutionFailed {
+		t.Errorf("Expected resultStatus=ExecutionFailed for no steps, got resultStatus=%v", resultStatus)
 	}
 }
 
-// TestGetExecutionStatus_PartialSuccess tests the GetExecutionStatus method for partial success
-func TestGetExecutionStatus_PartialSuccess(t *testing.T) {
+// TestGetExecutionStatus_StepFailures tests the GetExecutionStatus method when some steps fail
+func TestGetExecutionStatus_StepFailures(t *testing.T) {
 	// Set up test database and engine
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
@@ -197,13 +197,13 @@ func TestGetExecutionStatus_PartialSuccess(t *testing.T) {
 		},
 	}
 
-	// Create execution with partial success (some steps succeed, some fail)
+	// Create execution where some steps succeed and some fail
 	execution := &avsproto.Execution{
 		Id:      "test-execution-id",
 		StartAt: time.Now().UnixMilli(),
 		EndAt:   time.Now().UnixMilli(),
-		Status:  avsproto.ExecutionStatus_EXECUTION_STATUS_PARTIAL_SUCCESS, // Overall status is partial success
-		Error:   "Partial success: 1 of 3 steps failed: Database Query",
+		Status:  avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED,
+		Error:   "1 of 3 steps failed: Database Query",
 		Index:   0, // First execution
 		Steps: []*avsproto.Execution_Step{
 			{
@@ -257,9 +257,9 @@ func TestGetExecutionStatus_PartialSuccess(t *testing.T) {
 		t.Fatalf("GetExecutionStatus failed: %v", err)
 	}
 
-	// Verify that it returns PARTIAL_SUCCESS status
-	if statusResp.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_PARTIAL_SUCCESS {
-		t.Errorf("Expected EXECUTION_STATUS_PARTIAL_SUCCESS, got %v", statusResp.Status)
+	// Verify that it returns FAILED status (some steps failed)
+	if statusResp.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED {
+		t.Errorf("Expected EXECUTION_STATUS_FAILED, got %v", statusResp.Status)
 	}
 }
 
