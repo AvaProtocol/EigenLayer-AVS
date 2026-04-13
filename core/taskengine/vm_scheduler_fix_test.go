@@ -246,13 +246,11 @@ func TestSchedulerExecutesNodeAfterBranch(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, execution)
 
-	// Verify execution was partially successful (branch path means not all nodes executed)
-	// When a branch workflow executes, not all configured nodes run (only one branch path),
-	// which correctly results in PARTIAL_SUCCESS status
-	assert.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_PARTIAL_SUCCESS, execution.Status,
-		"Branch workflows should report PARTIAL_SUCCESS when not all nodes execute")
-	assert.Contains(t, execution.Error, "Partial execution", "Should report partial execution due to branch path")
-	assert.Contains(t, execution.Error, "6 out of 7 steps executed", "Should show correct step counts")
+	// Branch workflows with skipped nodes are SUCCESS — the workflow executed its
+	// chosen path correctly; skipping nodes due to branching is expected behavior.
+	assert.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS, execution.Status,
+		"Branch workflows should report SUCCESS even when not all nodes execute")
+	assert.Empty(t, execution.Error, "No error expected when all executed steps succeeded")
 
 	// Debug: print what executed
 	t.Logf("Executed %d steps:", len(execution.Steps))

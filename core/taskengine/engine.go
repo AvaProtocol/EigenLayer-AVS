@@ -3051,7 +3051,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	}
 
 	// Step 10: Analyze execution results from all steps
-	_, executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
+	executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
 
 	// Step 11: Calculate total gas cost for the workflow
 
@@ -3073,20 +3073,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	switch resultStatus {
 	case ExecutionSuccess:
 		n.logger.Info("workflow simulation completed successfully", "task_id", task.Id, "simulation_id", simulationID, "steps", len(execution.Steps))
-	case ExecutionPartialSuccess:
-		// Clean up error message to avoid stack traces in logs
-		cleanErrorMsg := executionError
-		stackTraceRegex := regexp.MustCompile(`(?m)^\s*at .*$`)
-		cleanErrorMsg = stackTraceRegex.ReplaceAllString(cleanErrorMsg, "")
-		cleanErrorMsg = strings.TrimSpace(cleanErrorMsg)
-
-		n.logger.Warn("workflow simulation completed with partial success",
-			"error", cleanErrorMsg,
-			"task_id", task.Id,
-			"simulation_id", simulationID,
-			"failed_steps", failedStepCount,
-			"total_steps", len(vm.ExecutionLogs))
-	case ExecutionFailure:
+	case ExecutionFailed:
 		// Clean up error message to avoid stack traces in logs
 		cleanErrorMsg := executionError
 		stackTraceRegex := regexp.MustCompile(`(?m)^\s*at .*$`)
@@ -3103,12 +3090,10 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Handle VM-level errors if they occurred
 	if runErr != nil {
-		// This should not happen if AnalyzeExecutionResult is working correctly,
-		// but handle it as a fallback for VM-level errors
 		n.logger.Error("workflow simulation had VM-level error", "vm_error", runErr, "task_id", task.Id, "simulation_id", simulationID)
 		if execution.Error == "" {
 			execution.Error = fmt.Sprintf("VM execution error: %s", runErr.Error())
-			execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
+			execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_ERROR
 		}
 	}
 
