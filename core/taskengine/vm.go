@@ -4188,6 +4188,8 @@ func (eq *ExecutionQueue) executeTask(task *ExecutionTask) *ExecutionResult {
 				nodeType = "customCode"
 			case step.GetRestApi() != nil:
 				nodeType = "restApi"
+			case step.GetGraphql() != nil:
+				nodeType = "graphql"
 			}
 			eq.vm.logger.Info("Loop iteration result extracted",
 				"step_id", task.StepID,
@@ -4252,6 +4254,9 @@ func (eq *ExecutionQueue) extractResultData(step *avsproto.Execution_Step) inter
 		// ETH transfer metadata is a flat object: {transactionHash: "0x..."}
 		txHash := extractTxHashFromFlatMetadata(step.Metadata)
 		return wrapResultWithTxHash(resultData, txHash)
+	}
+	if graphqlOutput := step.GetGraphql(); graphqlOutput != nil && graphqlOutput.Data != nil {
+		return graphqlOutput.Data.AsInterface()
 	}
 	return nil
 }

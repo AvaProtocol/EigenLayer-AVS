@@ -171,3 +171,92 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 		t.Errorf("decimals doesn't match. expected %d got %d", 6, output.Markets[1].InputToken.Decimals)
 	}
 }
+
+// Test that Loop node with GraphQL runner correctly extracts iteration results.
+// This is a regression test for https://github.com/AvaProtocol/EigenLayer-AVS/issues/523
+// where extractResultData was missing the GraphQL output case, causing all GraphQL
+// loop iterations to be counted as "failed" even though the HTTP requests succeeded.
+func TestLoopWithGraphQLRunner(t *testing.T) {
+	requestCount := 0
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"data": {
+				"country": {
+					"name": "TestCountry",
+					"code": "TC"
+				}
+			}
+		}`)
+	}))
+	defer mockServer.Close()
+
+	// Build a loop node with GraphQL runner
+	loopConfig := map[string]interface{}{
+		"inputVariable": "{{countryCodes}}",
+		"iterVal":       "value",
+		"iterKey":       "index",
+		"runner": map[string]interface{}{
+			"type": "graphqlDataQuery",
+			"config": map[string]interface{}{
+				"url":   mockServer.URL,
+				"query": `query { country(code: "{{value}}") { name code } }`,
+			},
+		},
+	}
+
+	node, err := CreateNodeFromType(NodeTypeLoop, loopConfig, "loop_graphql_test")
+	if err != nil {
+		t.Fatalf("failed to create loop node: %v", err)
+	}
+
+	inputVariables := map[string]interface{}{
+		"countryCodes": []interface{}{"US", "JP"},
+	}
+
+	vm, err := NewVMWithData(nil, nil, testutil.GetTestSmartWalletConfig(), nil)
+	if err != nil {
+		t.Fatalf("failed to create VM: %v", err)
+	}
+	vm.WithLogger(testutil.GetLogger())
+
+	step, err := vm.RunNodeWithInputs(node, inputVariables)
+	if err != nil {
+		t.Fatalf("expected loop to succeed but got error: %v", err)
+	}
+
+	if !step.Success {
+		t.Fatalf("expected loop step to succeed but got failure: %s", step.Error)
+	}
+
+	// Verify GraphQL HTTP requests were actually made
+	if requestCount != 2 {
+		t.Errorf("expected 2 GraphQL HTTP requests but got %d", requestCount)
+	}
+
+	// Verify loop output data contains results from both iterations
+	loopOutput := step.GetLoop()
+	if loopOutput == nil || loopOutput.Data == nil {
+		t.Fatal("expected loop output data but got nil")
+	}
+
+	outputArray, ok := loopOutput.Data.AsInterface().([]interface{})
+	if !ok {
+		t.Fatalf("expected loop output to be an array, got %T", loopOutput.Data.AsInterface())
+	}
+
+	if len(outputArray) != 2 {
+		t.Fatalf("expected 2 results but got %d", len(outputArray))
+	}
+
+	// Verify each iteration result is non-nil (the fix for issue #523)
+	for i, result := range outputArray {
+		if result == nil {
+			t.Errorf("iteration %d result is nil - extractResultData is not handling GraphQL output", i)
+		}
+	}
+}
