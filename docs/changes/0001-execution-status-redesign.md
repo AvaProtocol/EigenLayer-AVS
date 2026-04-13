@@ -82,6 +82,45 @@ enum ExecutionStatus {
 4. Treat `ERROR` as a system-level problem (not caused by the workflow
    configuration itself).
 
+## SDK Changes (ava-sdk-js)
+
+**PR**: https://github.com/AvaProtocol/ava-sdk-js/pull/212
+
+### TypeScript enum update
+
+```typescript
+// packages/types/src/enums.ts
+export enum ExecutionStatus {
+  Unspecified = "unspecified",
+  Pending = "pending",
+  Success = "success",
+  Failed = "failed",
+  Error = "error",       // NEW — replaces PartialSuccess
+}
+```
+
+### Backward compatibility
+
+The SDK conversion functions handle legacy proto value `4` (retired
+`PARTIAL_SUCCESS`) by mapping it to `ExecutionStatus.Failed`:
+
+```typescript
+case ProtobufExecutionStatus.EXECUTION_STATUS_FAILED:
+case 4 as ProtobufExecutionStatus: // legacy PARTIAL_SUCCESS
+  return ExecutionStatus.Failed;
+```
+
+This ensures stored executions written before the migration are
+displayed correctly without requiring a data migration.
+
+### Test updates (18 files)
+
+- All `ExecutionStatus.PartialSuccess` assertions replaced with
+  `ExecutionStatus.Failed` (step failures) or `ExecutionStatus.Success`
+  (branch skips)
+- `partialSuccess.test.ts` rewritten — test names and expectations
+  aligned with the new three-value model
+
 ## Consequences
 
 - Branch-skip workflows stop surfacing as warnings in the UI.
@@ -90,3 +129,5 @@ enum ExecutionStatus {
 - Email summaries for branch-skip workflows now show a green success
   badge with a note like "3 nodes skipped by Branch condition" instead
   of a yellow warning badge.
+- Legacy stored executions with proto value `4` are transparently
+  mapped to `Failed` by the SDK — no data migration required.
