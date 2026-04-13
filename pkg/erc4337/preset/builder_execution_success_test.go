@@ -113,7 +113,7 @@ func TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient(t *testing.T)
 		}
 		t.Logf("Withdrawal succeeded. TX Hash: %s Gas used: %d", receipt.TxHash.Hex(), receipt.GasUsed)
 	} else {
-		t.Logf("Balance already below reserve (%s < %s), skipping withdrawal", balance.String(), reserve.String())
+		t.Skipf("Balance already below reserve (%s < %s), withdrawal precondition already met", balance.String(), reserve.String())
 	}
 
 	// Send the funds back from the secondary wallet to the primary wallet

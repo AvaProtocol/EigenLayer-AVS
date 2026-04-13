@@ -3093,8 +3093,10 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		n.logger.Error("workflow simulation had VM-level error", "vm_error", runErr, "task_id", task.Id, "simulation_id", simulationID)
 		if execution.Error == "" {
 			execution.Error = fmt.Sprintf("VM execution error: %s", runErr.Error())
-			execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_ERROR
+		} else {
+			execution.Error = fmt.Sprintf("VM execution error: %s (step analysis: %s)", runErr.Error(), execution.Error)
 		}
+		execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_ERROR
 	}
 
 	return execution, nil

@@ -665,8 +665,10 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		x.logger.Error("task execution had VM-level error", "vm_error", runTaskErr, "task_id", task.Id, "execution_id", queueData.ExecutionID)
 		if execution.Error == "" {
 			execution.Error = fmt.Sprintf("VM execution error: %s", runTaskErr.Error())
-			execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_ERROR
+		} else {
+			execution.Error = fmt.Sprintf("VM execution error: %s (step analysis: %s)", runTaskErr.Error(), execution.Error)
 		}
+		execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_ERROR
 	}
 
 	// batch update storage for task + execution log
