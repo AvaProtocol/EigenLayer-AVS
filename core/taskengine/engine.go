@@ -3051,7 +3051,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	}
 
 	// Step 10: Analyze execution results from all steps
-	_, executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
+	executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
 
 	// Step 11: Calculate total gas cost for the workflow
 

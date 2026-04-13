@@ -3226,13 +3226,13 @@ func getStepDisplayName(step *avsproto.Execution_Step) string {
 }
 
 // AnalyzeExecutionResult examines all execution steps and determines overall success/failure/partial status
-// Returns (success, errorMessage, failedStepCount, resultStatus)
-func (v *VM) AnalyzeExecutionResult() (bool, string, int, ExecutionResultStatus) {
+// Returns (errorMessage, failedStepCount, resultStatus)
+func (v *VM) AnalyzeExecutionResult() (string, int, ExecutionResultStatus) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
 	if len(v.ExecutionLogs) == 0 {
-		return false, "no execution steps found", 0, ExecutionFailure
+		return "no execution steps found", 0, ExecutionFailure
 	}
 
 	var failedStepNames []string
@@ -3255,9 +3255,8 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int, ExecutionResultStatus)
 	failedCount := len(failedStepNames)
 	totalSteps := len(v.ExecutionLogs)
 
-	// Determine execution status and success flag
+	// Determine execution status
 	var resultStatus ExecutionResultStatus
-	var success bool
 	var errorMessage string
 
 	if failedCount == 0 {
@@ -3273,12 +3272,10 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int, ExecutionResultStatus)
 
 		if executedCount < totalWorkflowSteps {
 			resultStatus = ExecutionPartialSuccess
-			success = false // do not mark full success when nodes were skipped
 			errorMessage = fmt.Sprintf("Partial execution: %d out of %d steps executed (branch/conditional path)", executedCount, totalWorkflowSteps)
 		} else {
 			// All steps that exist in the workflow executed and succeeded
 			resultStatus = ExecutionSuccess
-			success = true
 			errorMessage = ""
 		}
 	} else if failedCount > 0 {
@@ -3290,12 +3287,11 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int, ExecutionResultStatus)
 			// Some steps succeeded, some failed - partial success for internal tracking
 			resultStatus = ExecutionPartialSuccess
 		}
-		success = false
 		// Use simple error message format (no prefix) for both cases
 		errorMessage = formatExecutionErrorMessage("", failedCount, totalSteps, failedStepNames)
 	}
 
-	return success, errorMessage, failedCount, resultStatus
+	return errorMessage, failedCount, resultStatus
 }
 
 // CalculateTotalGasCost sums up gas costs from all execution steps that involve blockchain operations

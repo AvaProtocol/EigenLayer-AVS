@@ -618,7 +618,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	// Analyze execution results from all steps (including failed ones)
-	_, executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
+	executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
 
 	// Calculate total gas cost for the workflow
 

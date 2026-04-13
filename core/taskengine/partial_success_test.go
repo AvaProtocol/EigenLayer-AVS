@@ -39,12 +39,9 @@ func TestAnalyzeExecutionResult_AllSuccess(t *testing.T) {
 		},
 	}
 
-	success, errorMessage, failedCount, resultStatus := vm.AnalyzeExecutionResult()
+	errorMessage, failedCount, resultStatus := vm.AnalyzeExecutionResult()
 
 	// Verify results
-	if !success {
-		t.Errorf("Expected success=true, got success=%v", success)
-	}
 	if errorMessage != "" {
 		t.Errorf("Expected empty error message, got: %s", errorMessage)
 	}
@@ -89,12 +86,9 @@ func TestAnalyzeExecutionResult_PartialSuccess(t *testing.T) {
 		},
 	}
 
-	success, errorMessage, failedCount, resultStatus := vm.AnalyzeExecutionResult()
+	errorMessage, failedCount, resultStatus := vm.AnalyzeExecutionResult()
 
 	// Verify results
-	if success {
-		t.Errorf("Expected success=false for partial success, got success=%v", success)
-	}
 	if errorMessage == "" {
 		t.Errorf("Expected non-empty error message for partial success")
 	}
@@ -139,12 +133,9 @@ func TestAnalyzeExecutionResult_AllFailure(t *testing.T) {
 		},
 	}
 
-	success, errorMessage, failedCount, resultStatus := vm.AnalyzeExecutionResult()
+	errorMessage, failedCount, resultStatus := vm.AnalyzeExecutionResult()
 
 	// Verify results
-	if success {
-		t.Errorf("Expected success=false for all failures, got success=%v", success)
-	}
 	if errorMessage == "" {
 		t.Errorf("Expected non-empty error message for all failures")
 	}
@@ -170,12 +161,9 @@ func TestAnalyzeExecutionResult_NoSteps(t *testing.T) {
 	// No execution logs
 	vm.ExecutionLogs = []*avsproto.Execution_Step{}
 
-	success, errorMessage, failedCount, resultStatus := vm.AnalyzeExecutionResult()
+	errorMessage, failedCount, resultStatus := vm.AnalyzeExecutionResult()
 
 	// Verify results
-	if success {
-		t.Errorf("Expected success=false for no steps, got success=%v", success)
-	}
 	if errorMessage != "no execution steps found" {
 		t.Errorf("Expected specific error message for no steps, got: %s", errorMessage)
 	}
