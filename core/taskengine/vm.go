@@ -4190,6 +4190,8 @@ func (eq *ExecutionQueue) executeTask(task *ExecutionTask) *ExecutionResult {
 				nodeType = "restApi"
 			case step.GetGraphql() != nil:
 				nodeType = "graphql"
+			case step.GetEthTransfer() != nil:
+				nodeType = "ethTransfer"
 			}
 			eq.vm.logger.Info("Loop iteration result extracted",
 				"step_id", task.StepID,

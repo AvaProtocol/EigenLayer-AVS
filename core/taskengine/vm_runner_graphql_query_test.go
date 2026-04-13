@@ -180,9 +180,6 @@ func TestLoopWithGraphQLRunner(t *testing.T) {
 	requestCount := 0
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
-		var body map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&body)
-
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{
 			"data": {
