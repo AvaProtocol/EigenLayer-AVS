@@ -3225,7 +3225,7 @@ func getStepDisplayName(step *avsproto.Execution_Step) string {
 	return stepName
 }
 
-// AnalyzeExecutionResult examines all execution steps and determines overall success/failure/partial status
+// AnalyzeExecutionResult examines all execution steps and determines overall success/failure status.
 // Returns (errorMessage, failedStepCount, resultStatus)
 func (v *VM) AnalyzeExecutionResult() (string, int, ExecutionResultStatus) {
 	v.mu.Lock()
