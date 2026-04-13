@@ -90,7 +90,7 @@ func TestAnalyzeExecutionResult_SomeStepsFailed(t *testing.T) {
 
 	// Verify results
 	if errorMessage == "" {
-		t.Errorf("Expected non-empty error message for partial success")
+		t.Errorf("Expected non-empty error message when some steps failed")
 	}
 	if failedCount != 1 {
 		t.Errorf("Expected failedCount=1, got failedCount=%d", failedCount)
