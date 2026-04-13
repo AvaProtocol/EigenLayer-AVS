@@ -3,7 +3,6 @@ package taskengine
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -225,14 +224,15 @@ func TestExecutorRunTaskWithBranchSilentFailureBehavior(t *testing.T) {
 		t.Errorf("Expected no error with silent failure behavior, but got: %v", err)
 	}
 
-	// Branch workflows with skipped nodes should report PARTIAL_SUCCESS
-	if execution.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_PARTIAL_SUCCESS {
-		t.Errorf("Expected partial success status (branch path with skipped nodes), but got: %v with error: %s", execution.Status, execution.Error)
+	// Branch workflows with skipped nodes are SUCCESS — the workflow executed its
+	// chosen path correctly; skipping nodes due to branching is expected behavior.
+	if execution.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS {
+		t.Errorf("Expected success status (branch path with skipped nodes is normal), but got: %v with error: %s", execution.Status, execution.Error)
 	}
 
-	// Should have a partial execution message explaining the branching
-	if execution.Error == "" || !strings.Contains(execution.Error, "Partial execution") {
-		t.Errorf("Expected partial execution message, but got: %s", execution.Error)
+	// No error when all executed steps succeeded
+	if execution.Error != "" {
+		t.Errorf("Expected empty error for successful branch execution, but got: %s", execution.Error)
 	}
 
 	// Find the branch step regardless of ordering

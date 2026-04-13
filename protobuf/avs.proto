@@ -349,13 +349,21 @@ enum TaskStatus {
   Disabled  = 5;
 }
 
-// Execution Status re-present a run of the task
+// ExecutionStatus represents the outcome of a task execution.
+//
+//   SUCCESS – every executed step succeeded (includes branch/conditional skips).
+//   FAILED  – one or more node-level steps failed during execution.
+//   ERROR   – system-level failure; the VM could not run the workflow at all.
+//
+// Value 4 (formerly PARTIAL_SUCCESS) is reserved and must not be reused.
 enum ExecutionStatus {
   EXECUTION_STATUS_UNSPECIFIED = 0;
   EXECUTION_STATUS_PENDING = 1;
   EXECUTION_STATUS_SUCCESS = 2;
   EXECUTION_STATUS_FAILED = 3;
-  EXECUTION_STATUS_PARTIAL_SUCCESS = 4;
+  reserved 4;
+  reserved "EXECUTION_STATUS_PARTIAL_SUCCESS";
+  EXECUTION_STATUS_ERROR = 5;
 }
 
 

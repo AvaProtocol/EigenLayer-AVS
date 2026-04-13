@@ -902,18 +902,17 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 							var resultStatus ExecutionResultStatus
 							var statusText, statusBgColor, statusTextColor string
 							if failed {
-								resultStatus = ExecutionFailure
+								resultStatus = ExecutionFailed
 								statusText = fmt.Sprintf("but failed at the '%s' step due to %s.", safeName(failedName), firstLine(failedReason))
 								statusBgColor = "#FEE2E2"   // light red
 								statusTextColor = "#991B1B" // dark red
-							} else if skippedCount > 0 {
-								resultStatus = ExecutionPartialSuccess
-								statusText = fmt.Sprintf("but %d nodes were skipped due to Branch condition.", skippedCount)
-								statusBgColor = "#FEF3C7"   // light yellow
-								statusTextColor = "#92400E" // dark yellow/amber
 							} else {
 								resultStatus = ExecutionSuccess
-								statusText = "All steps completed successfully"
+								if skippedCount > 0 {
+									statusText = fmt.Sprintf("All steps completed successfully (%d nodes skipped by Branch condition).", skippedCount)
+								} else {
+									statusText = "All steps completed successfully"
+								}
 								statusBgColor = "#D1FAE5"   // light green
 								statusTextColor = "#065F46" // dark green
 							}
@@ -923,9 +922,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 							switch resultStatus {
 							case ExecutionSuccess:
 								iconSvg = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#10B981"/><path d="M11 6L7 10L5 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
-							case ExecutionPartialSuccess:
-								iconSvg = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#F59E0B"/><circle cx="8" cy="5" r="1" fill="white"/><rect x="7.5" y="7" width="1" height="4" rx="0.5" fill="white"/></svg>`
-							case ExecutionFailure:
+							case ExecutionFailed:
 								iconSvg = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#EF4444"/><path d="M10 6L6 10M6 6L10 10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`
 							}
 							statusHtml := fmt.Sprintf(
@@ -944,9 +941,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 							switch resultStatus {
 							case ExecutionSuccess:
 								subjectStatusText = "successfully completed"
-							case ExecutionPartialSuccess:
-								subjectStatusText = "partially executed"
-							case ExecutionFailure:
+							case ExecutionFailed:
 								subjectStatusText = "failed to execute"
 							}
 

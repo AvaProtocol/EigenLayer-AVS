@@ -618,7 +618,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	// Analyze execution results from all steps (including failed ones)
-	_, executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
+	executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
 
 	// Calculate total gas cost for the workflow
 
@@ -652,14 +652,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	switch resultStatus {
 	case ExecutionSuccess:
 		x.logger.Info("task execution completed successfully", "task_id", task.Id, "execution_id", queueData.ExecutionID, "total_steps", len(vm.ExecutionLogs))
-	case ExecutionPartialSuccess:
-		x.logger.Warn("task execution completed with partial success",
-			"error", executionError,
-			"task_id", task.Id,
-			"execution_id", queueData.ExecutionID,
-			"failed_steps", failedStepCount,
-			"total_steps", len(vm.ExecutionLogs))
-	case ExecutionFailure:
+	case ExecutionFailed:
 		x.logger.Error("task execution completed with failures",
 			"error", executionError,
 			"task_id", task.Id,
@@ -669,13 +662,13 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	if runTaskErr != nil {
-		// This should not happen if AnalyzeExecutionResult is working correctly,
-		// but handle it as a fallback for VM-level errors
 		x.logger.Error("task execution had VM-level error", "vm_error", runTaskErr, "task_id", task.Id, "execution_id", queueData.ExecutionID)
 		if execution.Error == "" {
 			execution.Error = fmt.Sprintf("VM execution error: %s", runTaskErr.Error())
-			execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
+		} else {
+			execution.Error = fmt.Sprintf("VM execution error: %s (step analysis: %s)", runTaskErr.Error(), execution.Error)
 		}
+		execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_ERROR
 	}
 
 	// batch update storage for task + execution log
@@ -732,10 +725,8 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	switch resultStatus {
 	case ExecutionSuccess:
 		x.logger.Info("successfully executing task", "task_id", task.Id, "triggermark", queueData)
-	case ExecutionPartialSuccess:
-		x.logger.Info("task execution completed with partial success", "task_id", task.Id, "failed_steps", failedStepCount, "triggermark", queueData)
-	default: // ExecutionFailure or other
-		x.logger.Warn("task execution completed with step failures", "task_id", task.Id, "failed_steps", failedStepCount)
+	case ExecutionFailed:
+		x.logger.Warn("task execution completed with step failures", "task_id", task.Id, "failed_steps", failedStepCount, "triggermark", queueData)
 	}
 
 	return execution, nil

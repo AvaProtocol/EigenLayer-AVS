@@ -22,6 +22,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/golang-jwt/jwt/v5"
 	"google.golang.org/grpc/codes"
+	grpcmetadata "google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -306,5 +307,128 @@ func TestGetSignatureFormat(t *testing.T) {
 	expectedChainIDStr := fmt.Sprintf("Chain ID: %d", chainID.Int64())
 	if !strings.Contains(message, expectedChainIDStr) {
 		t.Errorf("expected message to contain %s but got %s", expectedChainIDStr, message)
+	}
+}
+
+// Defense-in-depth tests: confirm the auth flow refuses the zero
+// address at all three points where it could otherwise sneak in
+// (GetSignatureFormat → GetKey → verifyAuth). Without these checks
+// a buggy SDK can request a JWT bound to 0x0…0 and silently fail every
+// w:<owner>:<wallet> ownership lookup downstream — see PR #520 fallout.
+
+func TestGetSignatureFormat_RejectsZeroAddress(t *testing.T) {
+	logger, _ := sdklogging.NewZapLogger("development")
+
+	r := RpcServer{
+		config: &config.Config{
+			JwtSecret: []byte("test123"),
+			Logger:    logger,
+		},
+		chainID: big.NewInt(11155111),
+	}
+
+	req := &avsproto.GetSignatureFormatReq{
+		Wallet: "0x0000000000000000000000000000000000000000",
+	}
+
+	_, err := r.GetSignatureFormat(context.Background(), req)
+	if err == nil {
+		t.Fatalf("expected GetSignatureFormat to reject zero address but it succeeded")
+	}
+	statusErr, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("expected gRPC status error, got: %v", err)
+	}
+	if statusErr.Code() != codes.InvalidArgument {
+		t.Errorf("expected InvalidArgument, got: %v", statusErr.Code())
+	}
+	if !strings.Contains(statusErr.Message(), "zero address") {
+		t.Errorf("expected error message to mention 'zero address', got: %q", statusErr.Message())
+	}
+}
+
+func TestGetKey_RejectsZeroAddressWallet(t *testing.T) {
+	logger, _ := sdklogging.NewZapLogger("development")
+
+	r := RpcServer{
+		config: &config.Config{
+			JwtSecret: []byte("test123"),
+			Logger:    logger,
+		},
+		chainID: big.NewInt(11155111),
+	}
+
+	chainID := int64(11155111)
+	issuedTs, _ := time.Parse(time.RFC3339, "2025-01-01T00:00:00Z")
+	expiredTs, _ := time.Parse(time.RFC3339, "2030-01-01T00:00:00Z")
+
+	// Build a valid-looking message but with the zero address as the
+	// wallet. We don't even need to sign it correctly — the zero-address
+	// check fires before the signature verification.
+	message := fmt.Sprintf(authTemplate,
+		chainID,
+		"1",
+		issuedTs.UTC().Format("2006-01-02T15:04:05.000Z"),
+		expiredTs.UTC().Format("2006-01-02T15:04:05.000Z"),
+		"0x0000000000000000000000000000000000000000")
+
+	payload := &avsproto.GetKeyReq{
+		Message:   message,
+		Signature: "0xdeadbeef", // doesn't matter, never reached
+	}
+
+	_, err := r.GetKey(context.Background(), payload)
+	if err == nil {
+		t.Fatalf("expected GetKey to reject zero address wallet but it succeeded")
+	}
+	statusErr, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("expected gRPC status error, got: %v", err)
+	}
+	if statusErr.Code() != codes.InvalidArgument {
+		t.Errorf("expected InvalidArgument, got: %v", statusErr.Code())
+	}
+	if !strings.Contains(statusErr.Message(), "zero address") {
+		t.Errorf("expected error message to mention 'zero address', got: %q", statusErr.Message())
+	}
+}
+
+func TestVerifyAuth_RejectsZeroAddressSubject(t *testing.T) {
+	logger, _ := sdklogging.NewZapLogger("development")
+
+	r := RpcServer{
+		config: &config.Config{
+			JwtSecret: []byte("test123"),
+			Logger:    logger,
+		},
+		chainID: big.NewInt(11155111),
+	}
+
+	// Manually mint a JWT with sub = 0x0…0 and the correct audience.
+	// This simulates the bypass we observed: the SDK had requested a
+	// re-minted token via the dummy-zero-address path, and an older
+	// build of the server happily accepted it.
+	claims := &jwt.RegisteredClaims{
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		Issuer:    auth.Issuer,
+		Subject:   "0x0000000000000000000000000000000000000000",
+		Audience:  jwt.ClaimStrings{"11155111"},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signedToken, signErr := token.SignedString(r.config.JwtSecret)
+	if signErr != nil {
+		t.Fatalf("failed to sign test token: %v", signErr)
+	}
+
+	// Build a metadata context the way grpc would for an inbound request.
+	md := grpcmetadata.New(map[string]string{"authkey": signedToken})
+	ctx := grpcmetadata.NewIncomingContext(context.Background(), md)
+
+	_, err := r.verifyAuth(ctx)
+	if err == nil {
+		t.Fatalf("expected verifyAuth to reject zero-address subject but it succeeded")
+	}
+	if !strings.Contains(err.Error(), "zero address") {
+		t.Errorf("expected error to mention 'zero address', got: %q", err.Error())
 	}
 }
