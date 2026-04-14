@@ -154,7 +154,7 @@ func waitForUserOpConfirmation(
 	// transactions may take longer to be mined. Bundlers typically process within 2-5s, but
 	// the actual on-chain confirmation depends on network block times.
 	const (
-		maxWaitTime     = 1 * time.Minute // Maximum total wait time (increased from 30s to handle slow chains)
+		maxWaitTime     = 2 * time.Minute // Maximum total wait time. Sepolia bundler+mining often exceeds 60s, so 120s matches the SDK's TimeoutPresets.SLOW.
 		initialInterval = 1 * time.Second // Start polling every 1 second
 		maxInterval     = 5 * time.Second // Max polling interval (cap exponential growth)
 		backoffFactor   = 1.5             // Multiply interval by 1.5 each retry
