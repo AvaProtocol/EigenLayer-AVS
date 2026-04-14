@@ -236,17 +236,26 @@ func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
 	case *avsproto.TaskTrigger_Cron:
 		cronTrigger := trigger.GetCron()
 		if cronTrigger != nil && cronTrigger.Config != nil {
-			// Direct field access - CronTrigger.Config only has schedules array
+			// Widen []string to []interface{} so structpb.NewValue accepts it
+			// downstream (proto repeated fields map to concrete typed slices).
 			if len(cronTrigger.Config.Schedules) > 0 {
-				triggerConfig["schedules"] = cronTrigger.Config.Schedules
+				schedules := make([]interface{}, len(cronTrigger.Config.Schedules))
+				for i, s := range cronTrigger.Config.Schedules {
+					schedules[i] = s
+				}
+				triggerConfig["schedules"] = schedules
 			}
 		}
 	case *avsproto.TaskTrigger_FixedTime:
 		fixedTimeTrigger := trigger.GetFixedTime()
 		if fixedTimeTrigger != nil && fixedTimeTrigger.Config != nil {
-			// Direct field access - FixedTimeTrigger.Config only has epochs array
+			// Widen []int64 to []interface{} for structpb.NewValue compatibility.
 			if len(fixedTimeTrigger.Config.Epochs) > 0 {
-				triggerConfig["epochs"] = fixedTimeTrigger.Config.Epochs
+				epochs := make([]interface{}, len(fixedTimeTrigger.Config.Epochs))
+				for i, e := range fixedTimeTrigger.Config.Epochs {
+					epochs[i] = e
+				}
+				triggerConfig["epochs"] = epochs
 			}
 		}
 	case *avsproto.TaskTrigger_Manual:
