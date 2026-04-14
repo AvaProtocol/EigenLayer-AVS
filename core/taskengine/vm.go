@@ -3334,6 +3334,21 @@ func convertToExecutionStatus(resultStatus ExecutionResultStatus) avsproto.Execu
 	}
 }
 
+// mapExecutionStatusToAPIString converts ExecutionResultStatus to the lowercase
+// string values expected by the context-memory /api/summarize contract.
+func mapExecutionStatusToAPIString(resultStatus ExecutionResultStatus) string {
+	switch resultStatus {
+	case ExecutionSuccess:
+		return "success"
+	case ExecutionFailed:
+		return "failed"
+	case ExecutionError:
+		return "error"
+	default:
+		return "error"
+	}
+}
+
 // ExtractTriggerConfigData extracts configuration data from a TaskTrigger protobuf message
 // This function now extracts from the Config field since the duplicate input field was removed
 // Uses direct field access instead of JSON roundtrip for better performance and type preservation

@@ -45,6 +45,8 @@ type contextMemorySummarizeRequest struct {
 	Name            string                                 `json:"name"`
 	SmartWallet     string                                 `json:"smartWallet"`
 	Steps           []contextMemoryStepDigest              `json:"steps"`
+	Status          string                                 `json:"status"`         // "success" | "failed" | "error" — aggregator's execution verdict
+	ExecutionError  string                                 `json:"executionError"` // Empty string on success; non-empty on failed/error
 	ChainName       string                                 `json:"chainName,omitempty"`
 	Nodes           []contextMemoryNodeDef                 `json:"nodes,omitempty"`
 	Edges           []contextMemoryEdgeDef                 `json:"edges,omitempty"`
@@ -130,7 +132,7 @@ type contextMemoryExecutionEntry struct {
 // The aggregator is responsible for rendering this into email HTML or Telegram format
 type contextMemorySummarizeBody struct {
 	Summary     string                        `json:"summary"`     // One-line execution summary
-	Status      string                        `json:"status"`      // "success", "partial_success", "failure"
+	Status      string                        `json:"status"`      // "success" | "failed" | "error"
 	Network     string                        `json:"network"`     // Chain name (e.g., "Sepolia", "Ethereum")
 	Trigger     string                        `json:"trigger"`     // What triggered the workflow (text description)
 	TriggeredAt string                        `json:"triggeredAt"` // ISO 8601 timestamp (from trigger output)
@@ -156,8 +158,13 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 		return Summary{}, fmt.Errorf("summarizer not initialized")
 	}
 
+	// Compute execution verdict BEFORE buildRequest acquires vm.mu — AnalyzeExecutionResult
+	// takes the same lock and sync.Mutex is not reentrant.
+	executionError, _, resultStatus := vm.AnalyzeExecutionResult()
+	status := mapExecutionStatusToAPIString(resultStatus)
+
 	// Build request from VM
-	req, err := c.buildRequest(vm, currentStepName)
+	req, err := c.buildRequest(vm, currentStepName, status, executionError)
 	if err != nil {
 		// Include the specific validation error to help with debugging
 		return Summary{}, fmt.Errorf("failed to build request (validation error): %w", err)
@@ -338,7 +345,7 @@ func composePlainTextBodyFromAPI(body contextMemorySummarizeBody) string {
 	return strings.TrimSpace(sb.String())
 }
 
-func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (*contextMemorySummarizeRequest, error) {
+func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, executionError string) (*contextMemorySummarizeRequest, error) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
@@ -617,6 +624,8 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 		Name:            workflowName,
 		SmartWallet:     smartWallet,
 		Steps:           steps,
+		Status:          status,
+		ExecutionError:  executionError,
 		ChainName:       chainName,
 		Nodes:           nodes,
 		Edges:           edges,

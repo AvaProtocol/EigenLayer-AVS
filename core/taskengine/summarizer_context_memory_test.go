@@ -47,7 +47,7 @@ func TestBuildRequest_SettingsTokens(t *testing.T) {
 	vm.mu.Unlock()
 
 	summarizer := &ContextMemorySummarizer{baseURL: "http://localhost", authToken: "test"}
-	req, err := summarizer.buildRequest(vm, "trigger")
+	req, err := summarizer.buildRequest(vm, "trigger", "success", "")
 	require.NoError(t, err)
 
 	// Both tokens should appear in the request-level tokenMetadata
@@ -91,7 +91,7 @@ func TestBuildRequest_SettingsTokensNilService(t *testing.T) {
 	vm.mu.Unlock()
 
 	summarizer := &ContextMemorySummarizer{baseURL: "http://localhost", authToken: "test"}
-	req, err := summarizer.buildRequest(vm, "trigger")
+	req, err := summarizer.buildRequest(vm, "trigger", "success", "")
 	require.NoError(t, err)
 
 	// No tokens should be resolved when service is nil
@@ -152,7 +152,7 @@ func TestBuildRequest_SettingsTokensDeduplication(t *testing.T) {
 	vm.mu.Unlock()
 
 	summarizer := &ContextMemorySummarizer{baseURL: "http://localhost", authToken: "test"}
-	req, err := summarizer.buildRequest(vm, "trigger")
+	req, err := summarizer.buildRequest(vm, "trigger", "success", "")
 	require.NoError(t, err)
 
 	// Should have exactly 1 entry — step-level resolved it, settings.tokens should skip it.
@@ -268,7 +268,7 @@ func TestBuildRequest_LoopNodeTokenMetadata(t *testing.T) {
 	vm.mu.Unlock()
 
 	summarizer := &ContextMemorySummarizer{baseURL: "http://localhost", authToken: "test"}
-	req, err := summarizer.buildRequest(vm, "telegram1")
+	req, err := summarizer.buildRequest(vm, "telegram1", "success", "")
 	require.NoError(t, err)
 
 	// The loop step (index 2) should have per-step tokenMetadata populated with USDC
@@ -356,7 +356,7 @@ func TestBuildRequest_LoopNodeTokenMetadata_NoMetadataFallback(t *testing.T) {
 	vm.mu.Unlock()
 
 	summarizer := &ContextMemorySummarizer{baseURL: "http://localhost", authToken: "test"}
-	req, err := summarizer.buildRequest(vm, "loop1")
+	req, err := summarizer.buildRequest(vm, "loop1", "success", "")
 	require.NoError(t, err)
 
 	// Loop step should NOT have per-step tokenMetadata (no metadata to resolve from)
