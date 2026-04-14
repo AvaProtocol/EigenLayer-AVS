@@ -12,7 +12,7 @@ func formatTelegramFromStructured(s Summary) string {
 	var sb strings.Builder
 
 	// Get status emoji - API returns subject WITHOUT emoji, aggregator prepends it
-	statusEmoji := getStatusEmoji(s.Status)
+	statusEmoji := getStatusEmoji(s)
 
 	// Subject as header with emoji prefix - only bold the workflow name
 	if s.Subject != "" {
@@ -22,6 +22,14 @@ func formatTelegramFromStructured(s Summary) string {
 		}
 		sb.WriteString(formatSubjectWithBoldName(s.Subject))
 		sb.WriteString("\n")
+	}
+
+	// Skipped note (success runs with branch-skipped steps) — surfaces why the
+	// header shows ⚠️ instead of ✅.
+	if s.SkippedNote != "" {
+		sb.WriteString("<i>")
+		sb.WriteString(html.EscapeString(s.SkippedNote))
+		sb.WriteString("</i>\n")
 	}
 
 	// Network: use body.network field, fallback to workflow.chain or derive from chainID
@@ -93,15 +101,18 @@ func formatTelegramFromStructured(s Summary) string {
 	return strings.TrimSpace(sb.String())
 }
 
-// getStatusEmoji returns the emoji for a given status
-func getStatusEmoji(status string) string {
-	switch status {
+// getStatusEmoji returns the emoji for the summary's status.
+// A success run with branch-skipped steps renders ⚠️ (warn) rather than ✅,
+// matching the yellow badge on email.
+func getStatusEmoji(s Summary) string {
+	switch s.Status {
 	case "success":
+		if s.SkippedSteps > 0 {
+			return "⚠️"
+		}
 		return "✅"
-	case "failure":
+	case "failed", "error":
 		return "❌"
-	case "partial_success":
-		return "⚠️"
 	default:
 		return ""
 	}

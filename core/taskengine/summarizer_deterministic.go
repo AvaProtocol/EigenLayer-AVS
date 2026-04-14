@@ -60,16 +60,22 @@ type Summary struct {
 	Subject     string
 	Body        string
 	SummaryLine string // One-liner summary (e.g., "Your workflow 'Test Stoploss' executed 7 out of 7 total steps")
-	Status      string // Execution status: "success", "partial_success", "failure"
+	Status      string // Execution status: "success" | "failed" | "error"
 
 	// Structured fields for rendering notifications
 	Trigger     string           // What triggered the workflow (text description)
 	TriggeredAt string           // ISO 8601 timestamp (from trigger output)
-	Executions  []ExecutionEntry // On-chain operation descriptions with optional tx hashes
+	Executions  []ExecutionEntry // On-chain operation descriptions (no BRANCH entries)
 	Errors      []string         // Failed steps and skipped node descriptions
 	SmartWallet string           // Smart wallet address that executed the workflow
 	Network     string           // Chain name (e.g., "Sepolia", "Ethereum") - from body.network
 	Annotation  string           // Optional italic footnote (e.g., run-node disclaimer)
+
+	// Step counts and skip reporting (present on every summary; populated from context-memory body)
+	SkippedNote   string // "1 node was skipped by Branch condition." — present only when Status=="success" && SkippedSteps>0
+	ExecutedSteps int    // Number of steps that actually executed
+	TotalSteps    int    // Executed + skipped-by-branch
+	SkippedSteps  int    // 0 when nothing was skipped
 
 	// Enhanced structured data for rich notifications (kept for potential future use)
 	Transfers []TransferInfo // Transfer details from ETH_TRANSFER and CONTRACT_WRITE steps
@@ -345,7 +351,7 @@ func BuildBranchAndSkippedSummary(vm *VM, currentNodeName ...string) (string, st
 			tb = append(tb, "- "+n)
 		}
 	}
-	// Only show branch details if there are skipped nodes (PartialSuccess scenario)
+	// Only show branch details if there are skipped nodes (branch-condition skip)
 	if len(skipped) > 0 {
 		for _, b := range branches {
 			path := normalizeBranchType(b.Path)
@@ -576,28 +582,30 @@ func normalizeBranchType(t string) string {
 	}
 }
 
-// computeExecutionStatus determines the workflow execution status
-// Returns: "success", "partial_success", or "failure"
+// computeExecutionStatus determines the workflow execution status.
+// Returns "success" or "failed" — the same triad the aggregator emits, with
+// the yellow "warn" state derived separately from Summary.SkippedSteps.
 func computeExecutionStatus(vm *VM) string {
 	if vm == nil {
-		return "failure"
+		return "failed"
 	}
 
-	// Check for any failed step
-	hasFailed := false
 	for _, st := range vm.ExecutionLogs {
 		if !st.GetSuccess() {
-			hasFailed = true
-			break
+			return "failed"
 		}
 	}
 
-	if hasFailed {
-		return "failure"
-	}
+	return "success"
+}
 
-	// Check for skipped nodes (partial success)
-	vm.mu.Lock()
+// computeSkippedStepCount returns how many branch-skipped nodes the VM observed.
+// Used by the deterministic summarizer to populate Summary.SkippedSteps so the
+// rendering layer can derive the yellow "warn" badge from (status, skippedSteps).
+func computeSkippedStepCount(vm *VM) int {
+	if vm == nil {
+		return 0
+	}
 	executed := make(map[string]struct{})
 	for _, st := range vm.ExecutionLogs {
 		name := st.GetName()
@@ -608,30 +616,24 @@ func computeExecutionStatus(vm *VM) string {
 			executed[name] = struct{}{}
 		}
 	}
-	skippedCount := 0
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	count := 0
 	for nodeID, n := range vm.TaskNodes {
 		if n == nil {
 			continue
 		}
-		// Skip branch condition nodes
 		if strings.Contains(nodeID, ".") {
 			continue
 		}
-		// Exclude notification nodes
 		if isNotificationNode(n) {
 			continue
 		}
 		if _, ok := executed[n.Name]; !ok {
-			skippedCount++
+			count++
 		}
 	}
-	vm.mu.Unlock()
-
-	if skippedCount > 0 {
-		return "partial_success"
-	}
-
-	return "success"
+	return count
 }
 
 // extractTriggerInfo extracts the trigger description and timestamp from ExecutionLogs
@@ -958,8 +960,8 @@ func composePlainTextBodyFromStructured(trigger string, executions []ExecutionEn
 		}
 	}
 
-	// Errors (only for failure status)
-	if status == "failure" && len(errors) > 0 {
+	// Errors (only for failed status)
+	if status == "failed" && len(errors) > 0 {
 		if len(executions) > 0 {
 			sb.WriteString("\n")
 		}
@@ -1371,13 +1373,13 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 		}
 	}
 
-	// Fallback: when no on-chain executions were recorded and status is success/partial_success,
+	// Fallback: when no on-chain executions were recorded and the run succeeded,
 	// add a generic execution entry so the structured formatters always have data.
 	// This is added AFTER the body composition so it doesn't override detailed bodies
 	// (e.g., single-node REST API summaries), but the Executions field is still
 	// populated for the channel formatters (Telegram/Discord/plain text).
 	// Only show example if there are no errors to avoid confusion.
-	if len(executions) == 0 && (status == "success" || status == "partial_success") && len(errors) == 0 {
+	if len(executions) == 0 && status == "success" && len(errors) == 0 {
 		prefix := ""
 		if vm.IsSimulation || isSingleNodeImmediate(vm) {
 			prefix = "(Simulated) "
@@ -1396,19 +1398,33 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 		}
 	}
 
+	skippedStepCount := computeSkippedStepCount(vm)
+	executedStepCount := len(vm.ExecutionLogs)
+	skippedNote := ""
+	if status == "success" && skippedStepCount > 0 {
+		noun, verb := "node", "was"
+		if skippedStepCount != 1 {
+			noun, verb = "nodes", "were"
+		}
+		skippedNote = fmt.Sprintf("%d %s %s skipped by Branch condition.", skippedStepCount, noun, verb)
+	}
+
 	return Summary{
-		Subject:     subject,
-		Body:        body,
-		SummaryLine: summaryLine,
-		Status:      status,
-		Trigger:     trigger,
-		TriggeredAt: triggeredAt,
-		Executions:  executions,
-		Errors:      errors,
-		SmartWallet: smartWallet,
-		Network:     resolveChainName(vm),
-		Annotation:  annotation,
-		// AnalysisHtml is now generated by buildAnalysisHtmlFromStructured() in SendGridDynamicData()
+		Subject:       subject,
+		Body:          body,
+		SummaryLine:   summaryLine,
+		Status:        status,
+		Trigger:       trigger,
+		TriggeredAt:   triggeredAt,
+		Executions:    executions,
+		Errors:        errors,
+		SmartWallet:   smartWallet,
+		Network:       resolveChainName(vm),
+		Annotation:    annotation,
+		SkippedNote:   skippedNote,
+		ExecutedSteps: executedStepCount,
+		TotalSteps:    executedStepCount + skippedStepCount,
+		SkippedSteps:  skippedStepCount,
 	}
 }
 

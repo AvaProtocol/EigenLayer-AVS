@@ -4887,7 +4887,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 
 	if iterationFailCount > 0 {
 		// Some or all iterations failed — mark the loop step as failed so
-		// AnalyzeExecutionResult can detect partial_success at the execution level.
+		// AnalyzeExecutionResult reports "failed" at the execution level.
 		// Pass the error via the `err` parameter (not `errorMessage`) so that
 		// finalizeStep uses err.Error() directly without wrapping it in
 		// NewInvalidRequestError which adds an "invalid request: " prefix.

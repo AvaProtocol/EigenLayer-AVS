@@ -169,8 +169,8 @@ func TestContextMemoryExecutionSummary_SuccessfulWorkflow(t *testing.T) {
 	if response.Status == "" {
 		t.Error("Response status should not be empty")
 	}
-	if response.Status != "success" && response.Status != "partial_success" && response.Status != "failure" {
-		t.Errorf("Invalid status value: %s (expected 'success', 'partial_success', or 'failure')", response.Status)
+	if response.Status != "success" && response.Status != "failed" && response.Status != "error" {
+		t.Errorf("Invalid status value: %s (expected 'success', 'failed', or 'error')", response.Status)
 	}
 
 	// branchSummary should always be present (even if empty string)

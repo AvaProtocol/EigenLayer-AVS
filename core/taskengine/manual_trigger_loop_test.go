@@ -429,7 +429,7 @@ func TestLoopNode_ContractWrite_InvalidAddress_PartialFailure(t *testing.T) {
 	require.NoError(t, err, "loop infrastructure should not fail")
 
 	// When some iterations fail, the loop step reports success=false with a
-	// descriptive error so that AnalyzeExecutionResult detects partial_success.
+	// descriptive error so that AnalyzeExecutionResult reports "failed".
 	// The loop still ran to completion and preserves OutputData with nil entries
 	// for failed iterations.
 	require.NotNil(t, step, "Execution step should not be nil")

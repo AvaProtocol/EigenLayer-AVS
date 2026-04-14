@@ -27,43 +27,36 @@ const (
 
 // Status HTML badge SVG icons for email notifications
 const (
-	statusIconSuccess        = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#10B981"/><path d="M11 6L7 10L5 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
-	statusIconPartialSuccess = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#F59E0B"/><circle cx="8" cy="5" r="1" fill="white"/><rect x="7.5" y="7" width="1" height="4" rx="0.5" fill="white"/></svg>`
-	statusIconFailure        = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#EF4444"/><path d="M10 6L6 10M6 6L10 10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`
+	statusIconSuccess = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#10B981"/><path d="M11 6L7 10L5 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+	statusIconWarn    = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#F59E0B"/><circle cx="8" cy="5" r="1" fill="white"/><rect x="7.5" y="7" width="1" height="4" rx="0.5" fill="white"/></svg>`
+	statusIconFailed  = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#EF4444"/><path d="M10 6L6 10M6 6L10 10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`
 )
 
 // buildStatusHtml generates the status badge HTML for email notifications.
-// The status string comes from context-memory API ("success", "partial_success", "failure")
-// or from the deterministic summarizer.
-func buildStatusHtml(status string) string {
+// The Summary carries the context-memory-supplied status ("success" | "failed" | "error")
+// plus step counts — a success run with SkippedSteps>0 renders yellow ("warn") and
+// uses s.SkippedNote as the badge text so the skip is visible.
+func buildStatusHtml(s Summary) string {
 	var iconSvg, bgColor, textColor string
-	switch status {
-	case "partial_success":
-		iconSvg = statusIconPartialSuccess
+	switch {
+	case s.Status == "success" && s.SkippedSteps > 0:
+		iconSvg = statusIconWarn
 		bgColor = "#FEF3C7"   // light yellow
 		textColor = "#92400E" // dark amber
-	case "failure":
-		iconSvg = statusIconFailure
+	case s.Status == "failed" || s.Status == "error":
+		iconSvg = statusIconFailed
 		bgColor = "#FEE2E2"   // light red
 		textColor = "#991B1B" // dark red
-	default: // "success" and unknown
+	default: // "success" without skipped steps, or unknown
 		iconSvg = statusIconSuccess
 		bgColor = "#D1FAE5"   // light green
 		textColor = "#065F46" // dark green
 	}
-	// Use getStatusDisplayText for consistent wording across all email variables
-	text := getStatusDisplayText(status)
 	return fmt.Sprintf(
 		`<div style="display:inline-block; padding:8px 16px; background-color:%s; color:%s; border-radius:8px; font-weight:500; margin:8px 0">%s%s</div>`,
-		bgColor, textColor, iconSvg, text,
+		bgColor, textColor, iconSvg, getStatusDisplayText(s),
 	)
 }
-
-// Legacy constants kept for backward compatibility with any external references
-const (
-	StatusHtmlFailedTemplate  = `<div style="display:inline-block; padding:8px 16px; background-color:#FEE2E2; color:#991B1B; border-radius:8px; font-weight:500; margin:8px 0"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#EF4444"/><path d="M10 6L6 10M6 6L10 10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>Execution failed</div>`
-	StatusHtmlSuccessTemplate = `<div style="display:inline-block; padding:8px 16px; background-color:#D1FAE5; color:#065F46; border-radius:8px; font-weight:500; margin:8px 0"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#10B981"/><path d="M11 6L7 10L5 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>All steps completed successfully</div>`
-)
 
 // HTTPRequestExecutor interface for making HTTP requests
 type HTTPRequestExecutor interface {
@@ -900,31 +893,37 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 							// Use ExecutionResultStatus enum
 							var resultStatus ExecutionResultStatus
-							var statusText, statusBgColor, statusTextColor string
+							var statusText, statusBgColor, statusTextColor, iconSvg string
+							skippedNote := ""
 							if failed {
 								resultStatus = ExecutionFailed
 								statusText = fmt.Sprintf("but failed at the '%s' step due to %s.", safeName(failedName), firstLine(failedReason))
-								statusBgColor = "#FEE2E2"   // light red
-								statusTextColor = "#991B1B" // dark red
+								statusBgColor = "#FEE2E2"
+								statusTextColor = "#991B1B"
+								iconSvg = statusIconFailed
+							} else if skippedCount > 0 {
+								resultStatus = ExecutionSuccess
+								// Per Studio: success with branch-skipped steps renders yellow "warn".
+								// The skip count lives in the badge, never appended to the title.
+								noun := "node"
+								verb := "was"
+								if skippedCount != 1 {
+									noun = "nodes"
+									verb = "were"
+								}
+								skippedNote = fmt.Sprintf("%d %s %s skipped by Branch condition.", skippedCount, noun, verb)
+								statusText = skippedNote
+								statusBgColor = "#FEF3C7"
+								statusTextColor = "#92400E"
+								iconSvg = statusIconWarn
 							} else {
 								resultStatus = ExecutionSuccess
-								if skippedCount > 0 {
-									statusText = fmt.Sprintf("All steps completed successfully (%d nodes skipped by Branch condition).", skippedCount)
-								} else {
-									statusText = "All steps completed successfully"
-								}
-								statusBgColor = "#D1FAE5"   // light green
-								statusTextColor = "#065F46" // dark green
+								statusText = "All steps completed successfully"
+								statusBgColor = "#D1FAE5"
+								statusTextColor = "#065F46"
+								iconSvg = statusIconSuccess
 							}
 
-							// Generate status badge HTML with colors for the badge itself
-							iconSvg := ""
-							switch resultStatus {
-							case ExecutionSuccess:
-								iconSvg = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#10B981"/><path d="M11 6L7 10L5 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
-							case ExecutionFailed:
-								iconSvg = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#EF4444"/><path d="M10 6L6 10M6 6L10 10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`
-							}
 							statusHtml := fmt.Sprintf(
 								`<div style="display:inline-block; padding:8px 16px; background-color:%s; color:%s; border-radius:8px; font-weight:500; margin:8px 0">%s%s</div>`,
 								statusBgColor,
@@ -932,6 +931,9 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 								iconSvg,
 								statusText,
 							)
+							if skippedNote != "" {
+								dynamicData["skipped_note"] = skippedNote
+							}
 
 							workflowName := resolveWorkflowName(r.vm)
 							summaryLine := fmt.Sprintf("Your workflow '%s' executed %d out of %d total steps", workflowName, executedSteps, totalSteps)
@@ -1000,14 +1002,16 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 						// Generate statusHtml from the context-memory API status.
 						// If status is empty (API didn't set it), fall back to VM inspection.
 						if summaryForClient.Status != "" {
-							dynamicData["statusHtml"] = buildStatusHtml(summaryForClient.Status)
+							dynamicData["statusHtml"] = buildStatusHtml(*summaryForClient)
 						} else {
 							failed, _, _ := findEarliestFailure(r.vm)
+							fallback := *summaryForClient
 							if failed {
-								dynamicData["statusHtml"] = buildStatusHtml("failure")
+								fallback.Status = "failed"
 							} else {
-								dynamicData["statusHtml"] = buildStatusHtml("success")
+								fallback.Status = "success"
 							}
+							dynamicData["statusHtml"] = buildStatusHtml(fallback)
 						}
 
 						// Use SummaryLine if available, otherwise extract from body

@@ -10,13 +10,16 @@ import (
 // The template uses these variables to render the email:
 // - subject: email subject line
 // - preheader: short preview text (reuses subject)
-// - summary: one-line execution summary
-// - status: execution status (success/partial_success/failure)
-// - status_color: color for status badge (green/yellow/red)
+// - summary: one-line execution summary (no skip-note suffix)
+// - status: execution status ("success" | "failed" | "error")
+// - status_color: color for status badge (green/yellow/red — yellow when success with skipped steps)
+// - status_text: badge text ("All steps completed successfully" | SkippedNote | "Execution failed" | "System error")
+// - skipped_note: "1 node was skipped by Branch condition." — present only when status=success && skippedSteps>0
+// - skipped_steps / executed_steps / total_steps: step counts
 // - trigger: what triggered the workflow
 // - triggered_at: formatted timestamp
 // - executions: array of on-chain operation descriptions
-// - has_executions: boolean for conditional rendering
+// - has_executions: boolean for conditional rendering (false when context-memory sends empty executions[])
 // - errors: array of error descriptions
 // - has_errors: boolean for conditional rendering
 // - analysisHtml: (legacy) pre-formatted HTML for backward compatibility
@@ -33,8 +36,17 @@ func (s Summary) SendGridDynamicData() map[string]interface{} {
 
 	if s.Status != "" {
 		data["status"] = s.Status
-		data["status_color"] = getStatusColor(s.Status)
-		data["status_text"] = getStatusDisplayText(s.Status)
+		data["status_color"] = getStatusColor(s)
+		data["status_text"] = getStatusDisplayText(s)
+	}
+
+	if s.SkippedNote != "" {
+		data["skipped_note"] = s.SkippedNote
+	}
+	if s.TotalSteps > 0 {
+		data["executed_steps"] = s.ExecutedSteps
+		data["total_steps"] = s.TotalSteps
+		data["skipped_steps"] = s.SkippedSteps
 	}
 
 	if s.Trigger != "" {
@@ -83,31 +95,37 @@ func (s Summary) SendGridDynamicData() map[string]interface{} {
 	return data
 }
 
-// getStatusColor returns the color for email status badge based on execution status
-func getStatusColor(status string) string {
-	switch status {
+// getStatusColor returns the color for the email status badge.
+// Per Studio, a `success` run with branch-skipped steps renders yellow ("warn"),
+// not green — the skip is worth user attention even though nothing failed.
+func getStatusColor(s Summary) string {
+	switch s.Status {
 	case "success":
+		if s.SkippedSteps > 0 {
+			return "yellow"
+		}
 		return "green"
-	case "partial_success":
-		return "yellow"
-	case "failure":
+	case "failed", "error":
 		return "red"
 	default:
 		return "gray"
 	}
 }
 
-// getStatusDisplayText returns a human-readable label for the workflow status.
-// Used as the "status_text" SendGrid template variable so the email template
-// can display the correct badge text instead of hardcoding it.
-func getStatusDisplayText(status string) string {
-	switch status {
+// getStatusDisplayText returns the badge text for the email.
+// For success-with-skipped, it surfaces the skip note (e.g. "1 node was skipped by
+// Branch condition.") so the badge explains why it turned yellow.
+func getStatusDisplayText(s Summary) string {
+	switch s.Status {
 	case "success":
+		if s.SkippedSteps > 0 && s.SkippedNote != "" {
+			return s.SkippedNote
+		}
 		return "All steps completed successfully"
-	case "partial_success":
-		return "Some steps were skipped"
-	case "failure":
+	case "failed":
 		return "Execution failed"
+	case "error":
+		return "System error"
 	default:
 		return "Completed"
 	}

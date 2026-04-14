@@ -131,13 +131,17 @@ type contextMemoryExecutionEntry struct {
 // contextMemorySummarizeBody contains the structured workflow execution summary
 // The aggregator is responsible for rendering this into email HTML or Telegram format
 type contextMemorySummarizeBody struct {
-	Summary     string                        `json:"summary"`     // One-line execution summary
-	Status      string                        `json:"status"`      // "success" | "failed" | "error"
-	Network     string                        `json:"network"`     // Chain name (e.g., "Sepolia", "Ethereum")
-	Trigger     string                        `json:"trigger"`     // What triggered the workflow (text description)
-	TriggeredAt string                        `json:"triggeredAt"` // ISO 8601 timestamp (from trigger output)
-	Executions  []contextMemoryExecutionEntry `json:"executions"`  // On-chain operation descriptions with optional tx hashes
-	Errors      []string                      `json:"errors"`      // Failed steps and skipped node descriptions
+	Summary       string                        `json:"summary"`               // One-line execution summary (no skip-note suffix)
+	Status        string                        `json:"status"`                // "success" | "failed" | "error"
+	Network       string                        `json:"network"`               // Chain name (e.g., "Sepolia", "Ethereum")
+	Trigger       string                        `json:"trigger"`               // What triggered the workflow (text description)
+	TriggeredAt   string                        `json:"triggeredAt"`           // ISO 8601 timestamp (from trigger output)
+	Executions    []contextMemoryExecutionEntry `json:"executions"`            // On-chain operations only (no BRANCH entries)
+	Errors        []string                      `json:"errors"`                // Failed steps and skipped node descriptions
+	SkippedNote   string                        `json:"skippedNote,omitempty"` // "1 node was skipped by Branch condition." — present only when status=success && skippedSteps>0
+	ExecutedSteps int                           `json:"executedSteps"`         // Number of steps that actually executed
+	TotalSteps    int                           `json:"totalSteps"`            // Executed + skipped-by-branch
+	SkippedSteps  int                           `json:"skippedSteps"`          // 0 when nothing was skipped
 
 	// Enhanced structured data for rich notifications (kept for potential future use)
 	Transfers []contextMemoryTransferInfo `json:"transfers,omitempty"` // Transfer details
@@ -290,19 +294,23 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 	}
 
 	return Summary{
-		Subject:     apiResp.Subject,
-		Body:        composePlainTextBodyFromAPI(apiResp.Body),
-		SummaryLine: apiResp.Body.Summary,
-		Status:      apiResp.Body.Status,
-		Network:     apiResp.Body.Network,
-		Trigger:     apiResp.Body.Trigger,
-		TriggeredAt: apiResp.Body.TriggeredAt,
-		Executions:  executions,
-		Errors:      apiResp.Body.Errors,
-		SmartWallet: req.SmartWallet,
-		Transfers:   transfers,
-		Balances:    balances,
-		Workflow:    workflow,
+		Subject:       apiResp.Subject,
+		Body:          composePlainTextBodyFromAPI(apiResp.Body),
+		SummaryLine:   apiResp.Body.Summary,
+		Status:        apiResp.Body.Status,
+		Network:       apiResp.Body.Network,
+		Trigger:       apiResp.Body.Trigger,
+		TriggeredAt:   apiResp.Body.TriggeredAt,
+		Executions:    executions,
+		Errors:        apiResp.Body.Errors,
+		SkippedNote:   apiResp.Body.SkippedNote,
+		ExecutedSteps: apiResp.Body.ExecutedSteps,
+		TotalSteps:    apiResp.Body.TotalSteps,
+		SkippedSteps:  apiResp.Body.SkippedSteps,
+		SmartWallet:   req.SmartWallet,
+		Transfers:     transfers,
+		Balances:      balances,
+		Workflow:      workflow,
 	}, nil
 }
 
