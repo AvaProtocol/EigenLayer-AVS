@@ -817,7 +817,7 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 			name: "failed run - PRD format",
 			summary: Summary{
 				Subject:     "Run #5: Recurring Payment failed to execute", // No emoji from API
-				Status:      "failure",
+				Status:      "failed",
 				Network:     "Sepolia",
 				TriggeredAt: "2026-01-22T04:51:18.509Z",
 				Errors:      []string{"transfer1: Insufficient balance for transfer"},
@@ -833,18 +833,21 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 			},
 		},
 		{
-			name: "partial success - PRD format",
+			name: "success with skipped nodes renders warn emoji and skippedNote",
 			summary: Summary{
-				Subject:     "Run #2: My Workflow partially executed", // No emoji from API
-				Status:      "partial_success",
-				Network:     "Ethereum",
-				TriggeredAt: "2026-01-22T04:51:18.509Z",
+				Subject:      "Run #2: My Workflow successfully completed",
+				Status:       "success",
+				SkippedSteps: 1,
+				SkippedNote:  "1 node was skipped by Branch condition.",
+				Network:      "Ethereum",
+				TriggeredAt:  "2026-01-22T04:51:18.509Z",
 				Executions: []ExecutionEntry{
 					{Description: "Approved 100 USDC to router"},
 				},
 			},
 			expectedContain: []string{
-				"⚠️ Run #2: <code>My Workflow</code> partially executed", // Only workflow name is code-wrapped
+				"⚠️ Run #2: <code>My Workflow</code> successfully completed",
+				"<i>1 node was skipped by Branch condition.</i>",
 				"<b>Network:</b> Ethereum",
 				"<b>Executed:</b>",
 				"• Approved 100 USDC to router",
@@ -852,17 +855,20 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 			notContain: []string{},
 		},
 		{
-			name: "partial success with errors - branch skipped nodes with backtick expression",
+			name: "success with branch-skipped errors and backtick expression",
 			summary: Summary{
-				Subject:     "Simulation: Copy of Test Recurring Batch Send partially executed",
-				Status:      "partial_success",
-				Network:     "Sepolia",
-				TriggeredAt: "2026-01-22T04:51:18.509Z",
-				Trigger:     "(Simulated) Your scheduled task (every 3 minutes) triggered on Sepolia.",
-				Errors:      []string{"loop1 - skipped due to condition not met: `code1.data.balance >= code1.data.totalNeeded` evaluated to false"},
+				Subject:      "Simulation: Copy of Test Recurring Batch Send successfully completed",
+				Status:       "success",
+				SkippedSteps: 1,
+				SkippedNote:  "1 node was skipped by Branch condition.",
+				Network:      "Sepolia",
+				TriggeredAt:  "2026-01-22T04:51:18.509Z",
+				Trigger:      "(Simulated) Your scheduled task (every 3 minutes) triggered on Sepolia.",
+				Errors:       []string{"loop1 - skipped due to condition not met: `code1.data.balance >= code1.data.totalNeeded` evaluated to false"},
 			},
 			expectedContain: []string{
-				"⚠️ Simulation: <code>Copy of Test Recurring Batch Send</code> partially executed",
+				"⚠️ Simulation: <code>Copy of Test Recurring Batch Send</code> successfully completed",
+				"<i>1 node was skipped by Branch condition.</i>",
 				"<b>Network:</b> Sepolia",
 				"<b>What Went Wrong:</b>",
 				"• loop1 - skipped due to condition not met: <code>code1.data.balance &gt;= code1.data.totalNeeded</code> evaluated to false",
@@ -1117,24 +1123,28 @@ func TestGetChainDisplayName(t *testing.T) {
 	}
 }
 
-// TestGetStatusEmoji tests the status emoji helper function
+// TestGetStatusEmoji tests the status emoji helper function.
+// The warn variant (⚠️) is derived from (Status="success", SkippedSteps>0), not
+// from a dedicated status string — that's the whole point of the new contract.
 func TestGetStatusEmoji(t *testing.T) {
 	tests := []struct {
-		status   string
+		name     string
+		summary  Summary
 		expected string
 	}{
-		{"success", "✅"},
-		{"failure", "❌"},
-		{"partial_success", "⚠️"},
-		{"unknown", ""},
-		{"", ""},
+		{"success clean", Summary{Status: "success"}, "✅"},
+		{"success with skipped", Summary{Status: "success", SkippedSteps: 1}, "⚠️"},
+		{"failed", Summary{Status: "failed"}, "❌"},
+		{"error", Summary{Status: "error"}, "❌"},
+		{"unknown", Summary{Status: "unknown"}, ""},
+		{"empty", Summary{}, ""},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.status, func(t *testing.T) {
-			result := getStatusEmoji(tt.status)
+		t.Run(tt.name, func(t *testing.T) {
+			result := getStatusEmoji(tt.summary)
 			if result != tt.expected {
-				t.Errorf("getStatusEmoji(%q) = %q, want %q", tt.status, result, tt.expected)
+				t.Errorf("getStatusEmoji(%+v) = %q, want %q", tt.summary, result, tt.expected)
 			}
 		})
 	}
@@ -1724,23 +1734,25 @@ func TestFormatBackticksForChannel(t *testing.T) {
 
 func TestBuildStatusHtml(t *testing.T) {
 	tests := []struct {
-		status    string
+		name      string
+		summary   Summary
 		wantColor string
 		wantText  string
 	}{
-		{"success", "#D1FAE5", "All steps completed successfully"},
-		{"partial_success", "#FEF3C7", "Some steps were skipped"},
-		{"failure", "#FEE2E2", "Execution failed"},
-		{"", "#D1FAE5", "Completed"}, // default for unknown status
+		{"success clean", Summary{Status: "success"}, "#D1FAE5", "All steps completed successfully"},
+		{"success with skipped uses skippedNote", Summary{Status: "success", SkippedSteps: 1, SkippedNote: "1 node was skipped by Branch condition."}, "#FEF3C7", "1 node was skipped by Branch condition."},
+		{"failed", Summary{Status: "failed"}, "#FEE2E2", "Execution failed"},
+		{"error", Summary{Status: "error"}, "#FEE2E2", "System error"},
+		{"default", Summary{}, "#D1FAE5", "Completed"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.status, func(t *testing.T) {
-			html := buildStatusHtml(tt.status)
+		t.Run(tt.name, func(t *testing.T) {
+			html := buildStatusHtml(tt.summary)
 			if !strings.Contains(html, tt.wantColor) {
-				t.Errorf("buildStatusHtml(%q): expected color %q in output:\n%s", tt.status, tt.wantColor, html)
+				t.Errorf("buildStatusHtml(%+v): expected color %q in output:\n%s", tt.summary, tt.wantColor, html)
 			}
 			if !strings.Contains(html, tt.wantText) {
-				t.Errorf("buildStatusHtml(%q): expected text %q in output:\n%s", tt.status, tt.wantText, html)
+				t.Errorf("buildStatusHtml(%+v): expected text %q in output:\n%s", tt.summary, tt.wantText, html)
 			}
 		})
 	}

@@ -523,10 +523,10 @@ func TestAIIntegration_Simulation(t *testing.T) {
 	if detSummary.Annotation != "" {
 		t.Errorf("Deterministic should NOT have Annotation for simulation, got: %s", detSummary.Annotation)
 	}
-	// Both should report success or partial_success
-	validStatuses := map[string]bool{"success": true, "partial_success": true}
-	if !validStatuses[aiSummary.Status] {
-		t.Errorf("AI status should be success/partial_success, got: %s", aiSummary.Status)
+	// AI should report "success" (yellow warn for branch-skips is derived from SkippedSteps>0,
+	// not a distinct status value).
+	if aiSummary.Status != "success" {
+		t.Errorf("AI status should be success, got: %s", aiSummary.Status)
 	}
 	// Subject should contain "Simulation:" prefix
 	if !strings.HasPrefix(detSummary.Subject, "Simulation:") {
@@ -785,14 +785,13 @@ func TestAIIntegration_RealExecution(t *testing.T) {
 	if detSummary.Annotation != "" {
 		t.Errorf("Deterministic should NOT have Annotation for real execution, got: %s", detSummary.Annotation)
 	}
-	// Note: With 4 executed out of 5 total (trigger node double-counted), status is partial_success
-	// The AI may report success or partial_success depending on its interpretation
-	validStatuses := map[string]bool{"success": true, "partial_success": true}
-	if !validStatuses[aiSummary.Status] {
+	// Status model: "success" | "failed" | "error". Branch-skips are reported via
+	// SkippedSteps > 0, not as a distinct status value.
+	if aiSummary.Status != "success" {
 		t.Logf("NOTE: AI status is %q", aiSummary.Status)
 	}
-	if !validStatuses[detSummary.Status] {
-		t.Errorf("Deterministic status should be success/partial_success, got: %s", detSummary.Status)
+	if detSummary.Status != "success" {
+		t.Errorf("Deterministic status should be success, got: %s", detSummary.Status)
 	}
 	// Notification nodes (telegram_send, email1) should NOT be counted in step totals.
 	// getTotalWorkflowSteps counts: 1 (trigger) + non-notification TaskNodes.

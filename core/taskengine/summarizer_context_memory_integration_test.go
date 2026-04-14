@@ -17,7 +17,7 @@ import (
 
 // ExecutionSummaryResponse matches the TypeScript ExecutionSummaryResponse interface
 type ExecutionSummaryResponse struct {
-	Status        string   `json:"status"`        // 'success' | 'partial_success' | 'failure'
+	Status        string   `json:"status"`        // "success" | "failed" | "error"
 	BranchSummary string   `json:"branchSummary"` // Plain text summary
 	SkippedNodes  []string `json:"skippedNodes"`  // Array of skipped node names
 	TotalSteps    int      `json:"totalSteps"`    // Total steps in workflow
@@ -31,6 +31,8 @@ type SummarizeRequest struct {
 	Name            string                 `json:"name"`
 	SmartWallet     string                 `json:"smartWallet"`
 	Steps           []StepDigest           `json:"steps"`
+	Status          string                 `json:"status"`         // "success" | "failed" | "error"
+	ExecutionError  string                 `json:"executionError"` // Empty string on success
 	ChainName       string                 `json:"chainName,omitempty"`
 	Nodes           []NodeDefinition       `json:"nodes,omitempty"`
 	Edges           []EdgeDefinition       `json:"edges,omitempty"`
@@ -93,10 +95,12 @@ func TestContextMemoryExecutionSummary_SuccessfulWorkflow(t *testing.T) {
 
 	// Build request from VM-like structure
 	request := SummarizeRequest{
-		OwnerEOA:    "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-		Name:        "Test Workflow",
-		SmartWallet: "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
-		ChainName:   "Sepolia",
+		OwnerEOA:       "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
+		Name:           "Test Workflow",
+		SmartWallet:    "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
+		Status:         "success",
+		ExecutionError: "",
+		ChainName:      "Sepolia",
 		Steps: []StepDigest{
 			{
 				Name:    "balance1",
@@ -165,8 +169,8 @@ func TestContextMemoryExecutionSummary_SuccessfulWorkflow(t *testing.T) {
 	if response.Status == "" {
 		t.Error("Response status should not be empty")
 	}
-	if response.Status != "success" && response.Status != "partial_success" && response.Status != "failure" {
-		t.Errorf("Invalid status value: %s (expected 'success', 'partial_success', or 'failure')", response.Status)
+	if response.Status != "success" && response.Status != "failed" && response.Status != "error" {
+		t.Errorf("Invalid status value: %s (expected 'success', 'failed', or 'error')", response.Status)
 	}
 
 	// branchSummary should always be present (even if empty string)
@@ -214,10 +218,12 @@ func TestContextMemoryExecutionSummary_FailedWorkflow(t *testing.T) {
 	client.SetTimeout(30 * time.Second)
 
 	request := SummarizeRequest{
-		OwnerEOA:    "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-		Name:        "Failed Workflow",
-		SmartWallet: "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
-		ChainName:   "Sepolia",
+		OwnerEOA:       "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
+		Name:           "Failed Workflow",
+		SmartWallet:    "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
+		Status:         "failed",
+		ExecutionError: "1 of 2 steps failed: swap_tokens",
+		ChainName:      "Sepolia",
 		Steps: []StepDigest{
 			{
 				Name:    "approve_token",
@@ -267,9 +273,9 @@ func TestContextMemoryExecutionSummary_FailedWorkflow(t *testing.T) {
 	t.Logf("Success! Response: status=%s, executedSteps=%d, totalSteps=%d",
 		response.Status, response.ExecutedSteps, response.TotalSteps)
 
-	// Validate failure status
-	if response.Status != "failure" {
-		t.Errorf("Expected status='failure', got %s", response.Status)
+	// Validate failed status
+	if response.Status != "failed" {
+		t.Errorf("Expected status='failed', got %s", response.Status)
 	}
 
 	// Validate metrics
@@ -288,10 +294,12 @@ func TestContextMemoryExecutionSummary_CompleteWorkflow(t *testing.T) {
 	client.SetTimeout(30 * time.Second)
 
 	request := SummarizeRequest{
-		OwnerEOA:    "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-		Name:        "Complete Workflow",
-		SmartWallet: "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
-		ChainName:   "Sepolia",
+		OwnerEOA:       "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
+		Name:           "Complete Workflow",
+		SmartWallet:    "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
+		Status:         "success",
+		ExecutionError: "",
+		ChainName:      "Sepolia",
 		Steps: []StepDigest{
 			{
 				Name:    "balance1",
@@ -487,6 +495,10 @@ func TestContextMemoryExecutionSummary_FromVM(t *testing.T) {
 // buildSummarizeRequestFromVM converts a VM to a SummarizeRequest
 // This mimics what the aggregator will do when integrating with context-memory
 func buildSummarizeRequestFromVM(vm *VM) SummarizeRequest {
+	// AnalyzeExecutionResult locks vm.mu, so compute the verdict before we take the lock.
+	executionError, _, resultStatus := vm.AnalyzeExecutionResult()
+	status := mapExecutionStatusToAPIString(resultStatus)
+
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
@@ -573,14 +585,16 @@ func buildSummarizeRequestFromVM(vm *VM) SummarizeRequest {
 	}
 
 	return SummarizeRequest{
-		OwnerEOA:      ownerEOA,
-		Name:          workflowName,
-		SmartWallet:   smartWallet,
-		Steps:         steps,
-		ChainName:     chainName,
-		Nodes:         nodes,
-		Edges:         edges,
-		TokenMetadata: tokenMetadata,
+		OwnerEOA:       ownerEOA,
+		Name:           workflowName,
+		SmartWallet:    smartWallet,
+		Steps:          steps,
+		Status:         status,
+		ExecutionError: executionError,
+		ChainName:      chainName,
+		Nodes:          nodes,
+		Edges:          edges,
+		TokenMetadata:  tokenMetadata,
 	}
 }
 
@@ -646,10 +660,12 @@ func TestContextMemorySummarize_SimulatedPrefixBehavior(t *testing.T) {
 	// - approve1: is_simulated=false (real on-chain transaction via bundler)
 	// - contractWrite1: is_simulated=true (simulated via Tenderly)
 	request := SummarizeRequest{
-		OwnerEOA:    "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-		Name:        "Test Stoploss",
-		SmartWallet: "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
-		ChainName:   "Sepolia",
+		OwnerEOA:       "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
+		Name:           "Test Stoploss",
+		SmartWallet:    "0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f",
+		Status:         "success",
+		ExecutionError: "",
+		ChainName:      "Sepolia",
 		Steps: []StepDigest{
 			{
 				Name:    "eventTrigger",

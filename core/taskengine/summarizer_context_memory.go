@@ -45,6 +45,8 @@ type contextMemorySummarizeRequest struct {
 	Name            string                                 `json:"name"`
 	SmartWallet     string                                 `json:"smartWallet"`
 	Steps           []contextMemoryStepDigest              `json:"steps"`
+	Status          string                                 `json:"status"`         // "success" | "failed" | "error" — aggregator's execution verdict
+	ExecutionError  string                                 `json:"executionError"` // Empty string on success; non-empty on failed/error
 	ChainName       string                                 `json:"chainName,omitempty"`
 	Nodes           []contextMemoryNodeDef                 `json:"nodes,omitempty"`
 	Edges           []contextMemoryEdgeDef                 `json:"edges,omitempty"`
@@ -129,13 +131,17 @@ type contextMemoryExecutionEntry struct {
 // contextMemorySummarizeBody contains the structured workflow execution summary
 // The aggregator is responsible for rendering this into email HTML or Telegram format
 type contextMemorySummarizeBody struct {
-	Summary     string                        `json:"summary"`     // One-line execution summary
-	Status      string                        `json:"status"`      // "success", "partial_success", "failure"
-	Network     string                        `json:"network"`     // Chain name (e.g., "Sepolia", "Ethereum")
-	Trigger     string                        `json:"trigger"`     // What triggered the workflow (text description)
-	TriggeredAt string                        `json:"triggeredAt"` // ISO 8601 timestamp (from trigger output)
-	Executions  []contextMemoryExecutionEntry `json:"executions"`  // On-chain operation descriptions with optional tx hashes
-	Errors      []string                      `json:"errors"`      // Failed steps and skipped node descriptions
+	Summary       string                        `json:"summary"`               // One-line execution summary (no skip-note suffix)
+	Status        string                        `json:"status"`                // "success" | "failed" | "error"
+	Network       string                        `json:"network"`               // Chain name (e.g., "Sepolia", "Ethereum")
+	Trigger       string                        `json:"trigger"`               // What triggered the workflow (text description)
+	TriggeredAt   string                        `json:"triggeredAt"`           // ISO 8601 timestamp (from trigger output)
+	Executions    []contextMemoryExecutionEntry `json:"executions"`            // On-chain operations only (no BRANCH entries)
+	Errors        []string                      `json:"errors"`                // Failed steps and skipped node descriptions
+	SkippedNote   string                        `json:"skippedNote,omitempty"` // "1 node was skipped by Branch condition." — present only when status=success && skippedSteps>0
+	ExecutedSteps int                           `json:"executedSteps"`         // Number of steps that actually executed
+	TotalSteps    int                           `json:"totalSteps"`            // Executed + skipped-by-branch
+	SkippedSteps  int                           `json:"skippedSteps"`          // 0 when nothing was skipped
 
 	// Enhanced structured data for rich notifications (kept for potential future use)
 	Transfers []contextMemoryTransferInfo `json:"transfers,omitempty"` // Transfer details
@@ -156,8 +162,26 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 		return Summary{}, fmt.Errorf("summarizer not initialized")
 	}
 
+	// Compute execution verdict BEFORE buildRequest acquires vm.mu — AnalyzeExecutionResult
+	// takes the same lock and sync.Mutex is not reentrant.
+	//
+	// Empty ExecutionLogs is the single-node RunNodeImmediately case: the only
+	// step is the notification node currently running and therefore not in
+	// ExecutionLogs yet. AnalyzeExecutionResult treats that as "no execution
+	// steps found" / ExecutionFailed, which would emit a bogus status=failed
+	// to context-memory. Mirror the deterministic path and treat empty logs as
+	// success — nothing has failed yet.
+	var status, executionError string
+	if len(vm.ExecutionLogs) == 0 {
+		status = "success"
+	} else {
+		var resultStatus ExecutionResultStatus
+		executionError, _, resultStatus = vm.AnalyzeExecutionResult()
+		status = mapExecutionStatusToAPIString(resultStatus)
+	}
+
 	// Build request from VM
-	req, err := c.buildRequest(vm, currentStepName)
+	req, err := c.buildRequest(vm, currentStepName, status, executionError)
 	if err != nil {
 		// Include the specific validation error to help with debugging
 		return Summary{}, fmt.Errorf("failed to build request (validation error): %w", err)
@@ -283,19 +307,23 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 	}
 
 	return Summary{
-		Subject:     apiResp.Subject,
-		Body:        composePlainTextBodyFromAPI(apiResp.Body),
-		SummaryLine: apiResp.Body.Summary,
-		Status:      apiResp.Body.Status,
-		Network:     apiResp.Body.Network,
-		Trigger:     apiResp.Body.Trigger,
-		TriggeredAt: apiResp.Body.TriggeredAt,
-		Executions:  executions,
-		Errors:      apiResp.Body.Errors,
-		SmartWallet: req.SmartWallet,
-		Transfers:   transfers,
-		Balances:    balances,
-		Workflow:    workflow,
+		Subject:       apiResp.Subject,
+		Body:          composePlainTextBodyFromAPI(apiResp.Body),
+		SummaryLine:   apiResp.Body.Summary,
+		Status:        apiResp.Body.Status,
+		Network:       apiResp.Body.Network,
+		Trigger:       apiResp.Body.Trigger,
+		TriggeredAt:   apiResp.Body.TriggeredAt,
+		Executions:    executions,
+		Errors:        apiResp.Body.Errors,
+		SkippedNote:   apiResp.Body.SkippedNote,
+		ExecutedSteps: apiResp.Body.ExecutedSteps,
+		TotalSteps:    apiResp.Body.TotalSteps,
+		SkippedSteps:  apiResp.Body.SkippedSteps,
+		SmartWallet:   req.SmartWallet,
+		Transfers:     transfers,
+		Balances:      balances,
+		Workflow:      workflow,
 	}, nil
 }
 
@@ -338,7 +366,7 @@ func composePlainTextBodyFromAPI(body contextMemorySummarizeBody) string {
 	return strings.TrimSpace(sb.String())
 }
 
-func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (*contextMemorySummarizeRequest, error) {
+func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, executionError string) (*contextMemorySummarizeRequest, error) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
@@ -617,6 +645,8 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName string) (
 		Name:            workflowName,
 		SmartWallet:     smartWallet,
 		Steps:           steps,
+		Status:          status,
+		ExecutionError:  executionError,
 		ChainName:       chainName,
 		Nodes:           nodes,
 		Edges:           edges,
