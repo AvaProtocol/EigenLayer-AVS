@@ -72,106 +72,97 @@ enum ExecutionStatus {
 - Enum value `4` is reserved and will not be reused.
 - New enum value `ERROR = 5` for system-level failures.
 
-## How the Client Should Interpret Execution Status
+## How the Client Interprets Execution Status
 
-### Current state (SDK still has `PartialSuccess`)
+### Final model (shipped in `@avaprotocol/sdk-js@2.17.0`)
 
-The SDK (`@avaprotocol/types`) still exposes four runtime statuses:
-`Success`, `PartialSuccess`, `Failed`, `Pending`. The backend returns
-`partialSuccess` for **both** conditional branch skips and actual step
-failures, so the client must disambiguate.
+The SDK exposes four runtime statuses, with `PartialSuccess` removed:
 
-**Decision tree for `PartialSuccess`:**
-
-```
-status === PartialSuccess
-  └─ steps.every(s => s.success) ?
-       ├─ YES → conditional skip (treat as success)
-       └─ NO  → real step failure (treat as error/warning)
+```ts
+export enum ExecutionStatus {
+  Unspecified = "unspecified",
+  Pending = "pending",
+  Success = "success",
+  Failed = "failed",
+  Error = "error",
+}
 ```
 
-**Full client interpretation table (current SDK):**
+**Client interpretation table:**
 
-| `status`         | `steps.every(s => s.success)` | Interpretation         | UI treatment                                 |
-|------------------|-------------------------------|------------------------|----------------------------------------------|
-| `Success`        | true                          | All nodes ran, all OK  | Green — "Simulation completed"               |
-| `PartialSuccess` | true                          | Branch skipped nodes   | Green — "Simulation completed — Some steps skipped by condition" |
-| `PartialSuccess` | false                         | Real step failure(s)   | Yellow — "Simulation completed with errors"  |
-| `Failed`         | false                         | All-or-nothing failure | Red — "Simulation completed with errors"     |
-| `Pending`        | n/a                           | Still running          | Neutral — loading state                      |
+| `status`  | Interpretation                                 | `steps.length` vs node count  | UI treatment                                             |
+|-----------|------------------------------------------------|-------------------------------|----------------------------------------------------------|
+| `Success` | All executed steps passed                      | equal                         | Green — "Simulation completed — No funds moved"          |
+| `Success` | All executed steps passed, branch skipped some | less than total               | Green — "Simulation completed — Some steps skipped by condition" |
+| `Failed`  | At least one step failed                       | any                           | Yellow — "Simulation completed with errors — No funds moved" |
+| `Error`   | System-level failure (VM crash, compilation)   | zero or partial               | Red — "Simulation failed — System error"                 |
+| `Pending` | Still running                                  | n/a                           | Neutral — loading state                                  |
 
-**Where this logic lives in Studio today:**
+**Key rule:** `status` alone answers "did it succeed?". Branch skip
+detection is derived from the `steps` array — compare `steps.length`
+against the workflow's total executable node count (excluding
+`workflowSettings`) and surface "N steps skipped by condition" as an
+informational note only.
+
+### Where this logic lives in Studio
 
 1. **Simulation status label** (`components/CanvasToolbarBottom/index.tsx`):
    ```ts
-   const isSuccess = simulationResult?.status === ExecutionStatus.Success;
-   const isFailed = simulationResult?.status === ExecutionStatus.Failed;
-   const isConditionalSkip =
-     simulationResult?.status === ExecutionStatus.PartialSuccess &&
-     simulationResult?.steps?.every((step: StepProps) => step.success);
-   const hasStepErrors = !isSuccess && !isConditionalSkip;
+   const status = simulationResult?.status;
+   const isSuccess = status === ExecutionStatus.Success;
+   const isSystemError = status === ExecutionStatus.Error;
+   const hasStepErrors = !isSuccess;
+   // Branch skip detection: Success with fewer executed steps than workflow nodes
+   const executionNodeCount = nodes.filter((n) => n.type !== NodeType.workflowSettings).length;
+   const executedStepCount = simulationResult?.steps?.length ?? 0;
+   const hasSkippedSteps = isSuccess && executedStepCount < executionNodeCount;
    ```
-   - `isConditionalSkip` → green label, normal "Deploy" button
-   - `hasStepErrors` → yellow/red label, "Deploy Anyway" button with caution tooltip
+   - `isSuccess + hasSkippedSteps` → green label "Some steps skipped by condition"
+   - `isSuccess` → green label "No funds moved"
+   - `isSystemError` → red label "System error"
+   - `Failed` → yellow label "Simulation completed with errors"
 
-2. **Simulation gate for deploy** (`app/types/simulation.ts`):
-   Only `ExecutionStatus.Success` passes the gate. `PartialSuccess` (even
-   conditional skips) currently fails the gate — this needs updating after
-   the SDK change so that the gate also passes for `Success` with skipped
-   steps.
+2. **Execution time color** (`getExecutionTimeDisplay` in the same file):
+   `Success` → green, `Failed`/`Error` → red, `Pending` → yellow.
 
-3. **Execution time display** (`CanvasToolbarBottom getExecutionTimeDisplay`):
-   Maps status to text color: `Success` → green, `PartialSuccess` → yellow,
-   `Failed` → red, `Pending` → yellow.
-
-4. **Execution history chips** (`components/workflows/StatusChips.tsx`):
+3. **Execution history chips** (`components/workflows/StatusChips.tsx`):
    - `Success` → "Completed" (green check)
-   - `PartialSuccess` → "Partial Success" (yellow alert)
    - `Failed` → "Has Error" (red X)
+   - `Error` → "System Error" (red triangle-alert)
 
-5. **Execution modal header** (`components/workflows/ExecutionModal.tsx`):
+4. **Execution modal header** (`components/workflows/ExecutionModal.tsx`):
    - `Success` → green "Success"
-   - `PartialSuccess` → yellow "Partial Success"
    - `Failed` → red "Has Error"
+   - `Error` → red "System Error"
 
-6. **Manual run callback** (`components/workflows/WorkflowControlButton.tsx`):
-   Treats both `Success` and `PartialSuccess` as a successful run for
-   the toast notification. This is the only place that already collapses
-   the two into a single positive path.
+5. **Manual run callback** (`components/workflows/WorkflowControlButton.tsx`):
+   Only `Success` triggers the success toast; `Failed` and `Error` both
+   route to the error callback.
 
-### Target state (after SDK upgrade)
+6. **Simulation gate for deploy** (`app/types/simulation.ts`):
+   Only `ExecutionStatus.Success` passes the gate. Branch skips now pass
+   because they return `Success` natively — no client workaround needed.
 
-Once the SDK ships the `SUCCESS`/`FAILED`/`ERROR` redesign:
+### Migration summary
 
-| `status`  | Interpretation                          | UI treatment                                |
-|-----------|-----------------------------------------|---------------------------------------------|
-| `Success` | All executed steps passed (skips OK)    | Green — "Simulation completed"              |
-| `Failed`  | At least one step failed                | Red — "Simulation completed with errors"    |
-| `Error`   | System-level failure (VM crash, etc.)   | Red — "Simulation failed — system error"    |
-| `Pending` | Still running                           | Neutral — loading state                     |
+The Studio migration from the `PartialSuccess` workaround to the final
+SDK model removed:
 
-**Branch skip detection** moves from status-level to the `steps` array:
-compare `steps.length` against the workflow's total node count. If
-`steps.length < nodeCount` and `status === Success`, display an
-informational note like "N steps skipped by condition".
+- The `isConditionalSkip` heuristic (`status === PartialSuccess &&
+  steps.every(s => s.success)`) — no longer needed because branch skips
+  return `Success` directly from the backend.
+- The `PartialSuccess` case branches in `StatusChips.tsx`,
+  `ExecutionModal.tsx`, `CanvasToolbarBottom getExecutionTimeDisplay()`,
+  and `WorkflowControlButton.tsx`.
 
-### SDK/Client Migration Checklist
+And added:
 
-After upgrading `@avaprotocol/types`:
-
-1. **Remove `isConditionalSkip` workaround** in `CanvasToolbarBottom` — `Success`
-   already covers this case.
-2. **Remove `PartialSuccess` branches** from `StatusChips.tsx`,
-   `ExecutionModal.tsx`, `getExecutionTimeDisplay()`.
-3. **Add `Error` handling** — new status for system-level failures.
-   Display distinctly from `Failed` (e.g., "System error — contact support"
-   vs "Execution failed — check step details").
-4. **Update simulation gate** (`app/types/simulation.ts`) — `Success` is the
-   only passing status (same as today, but no ambiguity).
-5. **Update `WorkflowControlButton`** — remove `PartialSuccess` from the
-   success path; add `Error` to the failure path.
-6. **Update Storybook mocks** — replace `ExecutionStatus.PartialSuccess`
-   references with `Failed` or `Success` as appropriate.
+- A new `Error` status branch in all four consumers, distinct from
+  `Failed` — `Failed` means the workflow ran but a step reverted;
+  `Error` means the VM could not run the workflow at all.
+- Branch-skip detection via `steps.length < executionNodeCount` in the
+  simulation status label, surfacing the skip count as a green
+  informational message rather than a warning.
 
 ## SDK Changes (ava-sdk-js)
 
