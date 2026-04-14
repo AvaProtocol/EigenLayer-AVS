@@ -905,13 +905,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 								resultStatus = ExecutionSuccess
 								// Per Studio: success with branch-skipped steps renders yellow "warn".
 								// The skip count lives in the badge, never appended to the title.
-								noun := "node"
-								verb := "was"
-								if skippedCount != 1 {
-									noun = "nodes"
-									verb = "were"
-								}
-								skippedNote = fmt.Sprintf("%d %s %s skipped by Branch condition.", skippedCount, noun, verb)
+								skippedNote = buildSkippedNote(skippedCount)
 								statusText = skippedNote
 								statusBgColor = "#FEF3C7"
 								statusTextColor = "#92400E"

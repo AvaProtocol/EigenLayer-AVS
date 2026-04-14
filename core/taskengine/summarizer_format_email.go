@@ -1,10 +1,22 @@
 package taskengine
 
 import (
+	"fmt"
 	"html"
 	"strings"
 	"time"
 )
+
+// buildSkippedNote returns the user-visible skip sentence rendered in the warn
+// badge and as the `skipped_note` template variable. Kept in one place so the
+// deterministic summarizer and the vm_runner_rest override can't drift.
+func buildSkippedNote(count int) string {
+	noun, verb := "node", "was"
+	if count != 1 {
+		noun, verb = "nodes", "were"
+	}
+	return fmt.Sprintf("%d %s %s skipped by Branch condition.", count, noun, verb)
+}
 
 // SendGridDynamicData returns a dynamic_template_data map for SendGrid Dynamic Templates.
 // The template uses these variables to render the email:

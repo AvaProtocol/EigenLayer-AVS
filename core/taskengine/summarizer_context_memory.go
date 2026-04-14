@@ -164,8 +164,21 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 
 	// Compute execution verdict BEFORE buildRequest acquires vm.mu — AnalyzeExecutionResult
 	// takes the same lock and sync.Mutex is not reentrant.
-	executionError, _, resultStatus := vm.AnalyzeExecutionResult()
-	status := mapExecutionStatusToAPIString(resultStatus)
+	//
+	// Empty ExecutionLogs is the single-node RunNodeImmediately case: the only
+	// step is the notification node currently running and therefore not in
+	// ExecutionLogs yet. AnalyzeExecutionResult treats that as "no execution
+	// steps found" / ExecutionFailed, which would emit a bogus status=failed
+	// to context-memory. Mirror the deterministic path and treat empty logs as
+	// success — nothing has failed yet.
+	var status, executionError string
+	if len(vm.ExecutionLogs) == 0 {
+		status = "success"
+	} else {
+		var resultStatus ExecutionResultStatus
+		executionError, _, resultStatus = vm.AnalyzeExecutionResult()
+		status = mapExecutionStatusToAPIString(resultStatus)
+	}
 
 	// Build request from VM
 	req, err := c.buildRequest(vm, currentStepName, status, executionError)

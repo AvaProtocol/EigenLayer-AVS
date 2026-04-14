@@ -582,9 +582,11 @@ func normalizeBranchType(t string) string {
 	}
 }
 
-// computeExecutionStatus determines the workflow execution status.
-// Returns "success" or "failed" — the same triad the aggregator emits, with
-// the yellow "warn" state derived separately from Summary.SkippedSteps.
+// computeExecutionStatus determines the workflow execution status for the
+// deterministic summarizer. Returns "success" or "failed" — "error" is
+// reserved for VM-level failures that prevent a Summary from being built at
+// all, so this function never emits it. The yellow "warn" badge is derived
+// separately by the renderer from (Status=="success" && SkippedSteps>0).
 func computeExecutionStatus(vm *VM) string {
 	if vm == nil {
 		return "failed"
@@ -597,43 +599,6 @@ func computeExecutionStatus(vm *VM) string {
 	}
 
 	return "success"
-}
-
-// computeSkippedStepCount returns how many branch-skipped nodes the VM observed.
-// Used by the deterministic summarizer to populate Summary.SkippedSteps so the
-// rendering layer can derive the yellow "warn" badge from (status, skippedSteps).
-func computeSkippedStepCount(vm *VM) int {
-	if vm == nil {
-		return 0
-	}
-	executed := make(map[string]struct{})
-	for _, st := range vm.ExecutionLogs {
-		name := st.GetName()
-		if name == "" {
-			name = st.GetId()
-		}
-		if name != "" {
-			executed[name] = struct{}{}
-		}
-	}
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
-	count := 0
-	for nodeID, n := range vm.TaskNodes {
-		if n == nil {
-			continue
-		}
-		if strings.Contains(nodeID, ".") {
-			continue
-		}
-		if isNotificationNode(n) {
-			continue
-		}
-		if _, ok := executed[n.Name]; !ok {
-			count++
-		}
-	}
-	return count
 }
 
 // extractTriggerInfo extracts the trigger description and timestamp from ExecutionLogs
@@ -1398,15 +1363,12 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 		}
 	}
 
-	skippedStepCount := computeSkippedStepCount(vm)
-	executedStepCount := len(vm.ExecutionLogs)
+	// Reuse the already-computed counts from earlier in ComposeSummary so the
+	// step counts on Summary match SummaryLine/subject (which exclude
+	// notification nodes via getTotalWorkflowSteps).
 	skippedNote := ""
-	if status == "success" && skippedStepCount > 0 {
-		noun, verb := "node", "was"
-		if skippedStepCount != 1 {
-			noun, verb = "nodes", "were"
-		}
-		skippedNote = fmt.Sprintf("%d %s %s skipped by Branch condition.", skippedStepCount, noun, verb)
+	if status == "success" && skippedCount > 0 {
+		skippedNote = buildSkippedNote(skippedCount)
 	}
 
 	return Summary{
@@ -1422,9 +1384,9 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 		Network:       resolveChainName(vm),
 		Annotation:    annotation,
 		SkippedNote:   skippedNote,
-		ExecutedSteps: executedStepCount,
-		TotalSteps:    executedStepCount + skippedStepCount,
-		SkippedSteps:  skippedStepCount,
+		ExecutedSteps: executedSteps,
+		TotalSteps:    totalWorkflowSteps,
+		SkippedSteps:  skippedCount,
 	}
 }
 
