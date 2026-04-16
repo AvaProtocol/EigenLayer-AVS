@@ -455,7 +455,11 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 	)
 
 	if err != nil {
-		r.config.Logger.Error("failed to send withdrawal UserOp",
+		// See preset.LogBundlerError: Warn on on-chain revert (user's withdrawal
+		// reverted — e.g. ERC20 transfer to blacklisted recipient, insufficient
+		// token balance after race), Error on infra/AA (bundler down, AA21, etc.).
+		preset.LogBundlerError(r.config.Logger, err,
+			"failed to send withdrawal UserOp",
 			"error", err,
 			"user", user.Address.String(),
 			"recipient", payload.RecipientAddress,

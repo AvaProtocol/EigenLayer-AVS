@@ -344,7 +344,9 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	)
 
 	if err != nil {
-		p.vm.logger.Error("🚫 BUNDLER FAILED - ETH transfer UserOp transaction failed",
+		// See preset.LogBundlerError: Warn on on-chain revert, Error on infra/AA.
+		preset.LogBundlerError(p.vm.logger, err,
+			"bundler: ETH transfer UserOp transaction failed",
 			"bundler_error", err,
 			"bundler_url", p.smartWalletConfig.BundlerURL,
 			"destination", destination,

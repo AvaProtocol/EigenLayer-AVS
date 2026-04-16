@@ -653,7 +653,10 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	case ExecutionSuccess:
 		x.logger.Info("task execution completed successfully", "task_id", task.Id, "execution_id", queueData.ExecutionID, "total_steps", len(vm.ExecutionLogs))
 	case ExecutionFailed:
-		x.logger.Error("task execution completed with failures",
+		// User-workflow failure: per-step errors are already logged at their sites
+		// and the ExecutionStatus_EXECUTION_STATUS_FAILED is persisted below. Log
+		// the summary at Warn so it stays out of Sentry error alerts.
+		x.logger.Warn("task execution completed with failures",
 			"error", executionError,
 			"task_id", task.Id,
 			"execution_id", queueData.ExecutionID,
