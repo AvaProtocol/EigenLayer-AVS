@@ -814,7 +814,15 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 			}
 		}
 
-		r.vm.logger.Error("🚫 BUNDLER FAILED - UserOp transaction failed, workflow execution FAILED",
+		// Distinguish on-chain revert (user's target contract failed post-sim) from
+		// real infra/AA failures. The former is an expected user-workflow outcome and
+		// should not page Sentry; the latter (bundler down, AA21/AA23/AA25, paymaster
+		// revert) is an operator-visible infra issue and keeps Error level.
+		bundlerLogFn := r.vm.logger.Error
+		if strings.Contains(err.Error(), "success=false in UserOperationEvent") {
+			bundlerLogFn = r.vm.logger.Warn
+		}
+		bundlerLogFn("bundler: UserOp transaction failed, workflow execution FAILED",
 			"bundler_error", err,
 			"bundler_url", r.smartWalletConfig.BundlerURL,
 			"method", methodName,
@@ -1209,43 +1217,35 @@ func (r *ContractWriteProcessor) convertTenderlyResultToFlexibleFormat(result *C
 
 	receipt, _ := structpb.NewValue(receiptMap)
 
-	// Extract return value from Tenderly response
+	// Extract return value from Tenderly response.
+	// ReturnData is nil when the provider did not return output data (e.g. simulation
+	// reverted — tenderly_client.go clears ReturnData in that case). That path leaves
+	// Value as nil, which is the expected behavior.
 	var returnValue *structpb.Value
 	if result.ReturnData != nil {
-		r.vm.logger.Info("🔍 CRITICAL DEBUG - ReturnData found",
-			"method", result.MethodName,
-			"returnData_name", result.ReturnData.Name,
-			"returnData_type", result.ReturnData.Type,
-			"returnData_value", result.ReturnData.Value)
-
 		// Parse the JSON value from ReturnData and convert to protobuf
 		var parsedValue interface{}
 		if err := json.Unmarshal([]byte(result.ReturnData.Value), &parsedValue); err == nil {
 			// Successfully parsed JSON, convert to protobuf
 			if valueProto, err := structpb.NewValue(parsedValue); err == nil {
 				returnValue = valueProto
-				r.vm.logger.Info("✅ CRITICAL DEBUG - Successfully created returnValue protobuf",
-					"method", result.MethodName,
-					"parsedValue", parsedValue)
 			} else {
-				r.vm.logger.Error("❌ CRITICAL DEBUG - Failed to create protobuf from parsedValue",
+				r.vm.logger.Debug("failed to create protobuf from parsed ReturnData",
 					"method", result.MethodName,
 					"error", err)
 			}
 		} else {
-			r.vm.logger.Error("❌ CRITICAL DEBUG - Failed to unmarshal JSON from ReturnData.Value",
+			// Non-JSON return types (bytes32, address, etc.) are expected; fall through
+			// to raw-string handling below.
+			r.vm.logger.Debug("ReturnData is not JSON, falling back to raw string",
 				"method", result.MethodName,
-				"error", err,
-				"raw_value", result.ReturnData.Value)
+				"error", err)
 
 			// Fallback: treat as raw string if JSON parsing fails
 			if valueProto, err := structpb.NewValue(result.ReturnData.Value); err == nil {
 				returnValue = valueProto
 			}
 		}
-	} else {
-		r.vm.logger.Error("❌ CRITICAL DEBUG - ReturnData is nil",
-			"method", result.MethodName)
 	}
 
 	// No fallback default value. If provider does not return output data, Value remains nil
@@ -1624,7 +1624,11 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 				}
 			}
 		} else {
-			r.vm.logger.Error("🚨 DEPLOYED WORKFLOW: Method execution failed",
+			// User-workflow failure: method returned success=false. The concrete
+			// cause is already logged by the upstream site (Tenderly simulation at
+			// tenderly_client.go, or bundler/AA at line ~817). Re-logging at Warn
+			// here keeps operator-visible context without paging Sentry.
+			r.vm.logger.Warn("deployed workflow: method execution failed",
 				"method_name", result.MethodName,
 				"error_message", result.Error,
 				"error_length", len(result.Error),

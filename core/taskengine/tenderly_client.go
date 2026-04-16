@@ -1049,7 +1049,10 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 				if status, ok := sim["status"].(bool); ok && !status {
 					result.Success = false
 					if em, ok := sim["error_message"].(string); ok && em != "" {
-						tc.logger.Error("❌ Tenderly simulation failed: simulation.status=false",
+						// Simulation catching a future revert is the feature working
+						// as intended — user-workflow failure, not infra. Log at Warn
+						// so it stays out of Sentry error alerts.
+						tc.logger.Warn("tenderly simulation failed: simulation.status=false",
 							"contract", contractAddress,
 							"method", methodName,
 							"error_message", em,
@@ -1081,7 +1084,9 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 								// Look for error in nested calls (like ERC20 transferFrom failures)
 								if errMsg, ok := callMap["error"].(string); ok && errMsg != "" {
 									errorMsg = errMsg
-									tc.logger.Error("❌ Tenderly simulation failed: transaction reverted",
+									// User-workflow revert caught by simulation — log at
+									// Warn to keep out of Sentry error alerts.
+									tc.logger.Warn("tenderly simulation failed: transaction reverted",
 										"contract", contractAddress,
 										"method", methodName,
 										"error_from_call_trace", errMsg,
