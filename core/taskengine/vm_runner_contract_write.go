@@ -814,15 +814,12 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 			}
 		}
 
-		// Distinguish on-chain revert (user's target contract failed post-sim) from
-		// real infra/AA failures. The former is an expected user-workflow outcome and
-		// should not page Sentry; the latter (bundler down, AA21/AA23/AA25, paymaster
-		// revert) is an operator-visible infra issue and keeps Error level.
-		bundlerLogFn := r.vm.logger.Error
-		if strings.Contains(err.Error(), "success=false in UserOperationEvent") {
-			bundlerLogFn = r.vm.logger.Warn
-		}
-		bundlerLogFn("bundler: UserOp transaction failed, workflow execution FAILED",
+		// preset.LogBundlerError picks Error vs Warn based on the error: on-chain
+		// reverts (expected user-workflow outcomes) log at Warn so they don't page
+		// Sentry; real infra/AA failures (bundler down, AA21/AA23/AA25, paymaster
+		// revert) stay at Error.
+		preset.LogBundlerError(r.vm.logger, err,
+			"bundler: UserOp transaction failed, workflow execution FAILED",
 			"bundler_error", err,
 			"bundler_url", r.smartWalletConfig.BundlerURL,
 			"method", methodName,

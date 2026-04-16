@@ -344,14 +344,9 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	)
 
 	if err != nil {
-		// Distinguish on-chain revert (user-workflow outcome) from real infra/AA
-		// failures. On-chain reverts log at Warn so they don't page Sentry; bundler
-		// unreachable / AA21 / AA23 / AA25 / paymaster reverts remain Error.
-		bundlerLogFn := p.vm.logger.Error
-		if strings.Contains(err.Error(), "success=false in UserOperationEvent") {
-			bundlerLogFn = p.vm.logger.Warn
-		}
-		bundlerLogFn("bundler: ETH transfer UserOp transaction failed",
+		// See preset.LogBundlerError: Warn on on-chain revert, Error on infra/AA.
+		preset.LogBundlerError(p.vm.logger, err,
+			"bundler: ETH transfer UserOp transaction failed",
 			"bundler_error", err,
 			"bundler_url", p.smartWalletConfig.BundlerURL,
 			"destination", destination,
