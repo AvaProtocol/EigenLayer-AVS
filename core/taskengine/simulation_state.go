@@ -153,10 +153,28 @@ func erc20BalanceSlot(holder common.Address, mappingSlot int64) common.Hash {
 	return crypto.Keccak256Hash(append(key, slot...))
 }
 
+// erc20AllowanceSlot computes the keccak256 storage slot for allowance[owner][spender]
+// given the mapping's base slot index in the contract's storage layout.
+// Formula: keccak256(abi.encode(spender, keccak256(abi.encode(owner, allowanceSlot))))
+func erc20AllowanceSlot(owner, spender common.Address, mappingSlot int64) common.Hash {
+	// Inner hash: keccak256(abi.encode(owner, allowanceSlot))
+	ownerPadded := common.LeftPadBytes(owner.Bytes(), 32)
+	slotPadded := common.LeftPadBytes(big.NewInt(mappingSlot).Bytes(), 32)
+	innerHash := crypto.Keccak256Hash(append(ownerPadded, slotPadded...))
+
+	// Outer hash: keccak256(abi.encode(spender, innerHash))
+	spenderPadded := common.LeftPadBytes(spender.Bytes(), 32)
+	return crypto.Keccak256Hash(append(spenderPadded, innerHash.Bytes()...))
+}
+
 // Common ERC20 balance mapping slot indices across different implementations.
 // 0: standard OpenZeppelin ERC20, 1-3: various token implementations,
 // 9: USDC (FiatTokenV2 proxy), 51: Compound cToken-style contracts.
 var commonBalanceSlots = []int64{0, 1, 2, 3, 9, 51}
+
+// Common ERC20 allowance mapping slot indices across different implementations.
+// 1: OpenZeppelin ERC20 v4/v5, 2-3: legacy implementations, 10: USDC FiatTokenV2.
+var commonAllowanceSlots = []int64{1, 2, 3, 10}
 
 // ProbeERC20BalanceSlot discovers which storage slot a token contract uses for
 // its _balances mapping by comparing eth_getStorageAt results against balanceOf.

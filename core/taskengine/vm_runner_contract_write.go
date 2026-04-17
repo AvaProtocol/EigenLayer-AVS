@@ -72,6 +72,13 @@ func (r *ContractWriteProcessor) resolveSimulationMode(node *avsproto.ContractWr
 	return vmDefault
 }
 
+// isMethodWithParams returns true when methodName matches target (case-insensitive)
+// and resolvedParams has at least minParams entries. Use this to gate post-simulation
+// state injection for specific ERC-20 methods (e.g. "approve" needs spender + amount).
+func isMethodWithParams(methodName, target string, resolvedParams []string, minParams int) bool {
+	return strings.EqualFold(methodName, target) && len(resolvedParams) >= minParams
+}
+
 func (r *ContractWriteProcessor) getInputData(node *avsproto.ContractWriteNode) (string, string, []*avsproto.ContractWriteNode_MethodCall, error) {
 	var contractAddress, callData string
 	var methodCalls []*avsproto.ContractWriteNode_MethodCall
@@ -481,13 +488,42 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			}
 		}
 
-		// Merge state diffs from this simulation into the accumulated state map
-		// so subsequent simulation steps see a consistent view of on-chain state.
-		if r.vm.simulationState != nil && simulationResult != nil && simulationResult.Success && len(simulationResult.RawStateDiff) > 0 {
+		// Propagate simulation state so subsequent nodes see this step's effects.
+		simSuccess := r.vm.simulationState != nil && simulationResult != nil && simulationResult.Success
+
+		// Merge raw state diffs returned by Tenderly (if any).
+		if simSuccess && len(simulationResult.RawStateDiff) > 0 {
 			r.vm.simulationState.MergeRawStateDiff(simulationResult.RawStateDiff)
 			r.vm.logger.Debug("Merged simulation state diff into accumulator",
 				"method", methodName,
 				"diffEntries", len(simulationResult.RawStateDiff))
+		}
+
+		// After a successful approve() simulation, explicitly inject the allowance
+		// storage slot so downstream nodes (e.g. swap) see it. Tenderly's HTTP
+		// simulate API returns raw_state_diff: null for approve calls, so the
+		// MergeRawStateDiff above is a no-op. We compute and set the
+		// allowance[owner][spender] slot directly.
+		if simSuccess && isMethodWithParams(methodName, "approve", resolvedMethodParams, 2) {
+			spender := common.HexToAddress(resolvedMethodParams[0])
+			// Base 0 auto-detects decimal, hex (0x...), and octal.
+			amount, ok := new(big.Int).SetString(resolvedMethodParams[1], 0)
+			if !ok || amount.Sign() < 0 {
+				r.vm.logger.Debug("Skipping allowance override: invalid or negative amount",
+					"raw", resolvedMethodParams[1])
+			} else {
+				valueHex := fmt.Sprintf("0x%064x", amount)
+				for _, candidateSlot := range commonAllowanceSlots {
+					slotHash := erc20AllowanceSlot(senderAddress, spender, candidateSlot)
+					r.vm.simulationState.SetStorageSlot(contractAddress.Hex(), slotHash.Hex(), valueHex)
+				}
+				r.vm.logger.Debug("Injected allowance override after approve simulation",
+					"token", contractAddress.Hex(),
+					"owner", senderAddress.Hex(),
+					"spender", spender.Hex(),
+					"amount", amount.String(),
+					"slots_set", len(commonAllowanceSlots))
+			}
 		}
 
 		// Convert Tenderly simulation result to legacy protobuf format
