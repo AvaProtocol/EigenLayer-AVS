@@ -17,7 +17,7 @@ Tenderly's HTTP `/simulate` endpoint (with `simulation_type: "full"`) returns `r
 
 ### Diagnosis path
 
-1. Wrote an integration test (`TestSimulateTask_UniswapApproveSwap_Sepolia`) using a salt:0 wallet with real Sepolia USDC balance but **zero** on-chain allowance to SwapRouter02. This made the test conclusive: swap can only succeed if the approve's allowance propagates.
+1. Wrote an integration test (`TestSimulateTask_StopLossWorkflow_Sepolia`) using a salt:0 wallet with real Sepolia USDC balance but **zero** on-chain allowance to SwapRouter02. This made the test conclusive: swap can only succeed if the approve's allowance propagates.
 2. Confirmed propagation failure: approve succeeded, swap failed with `ERC20: transfer amount exceeds allowance`.
 3. Added a raw Tenderly HTTP diagnostic test confirming `raw_state_diff` is `null` (not absent, not empty array — literally `null`).
 4. Verified the extraction path (`transaction.transaction_info.raw_state_diff`) is correct by inspecting all response keys — the code was looking in the right place, but there was no data to extract.

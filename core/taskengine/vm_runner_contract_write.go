@@ -506,23 +506,24 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		// allowance[owner][spender] slot directly.
 		if simSuccess && isMethodWithParams(methodName, "approve", resolvedMethodParams, 2) {
 			spender := common.HexToAddress(resolvedMethodParams[0])
-			amount := new(big.Int)
-			amount.SetString(resolvedMethodParams[1], 10)
-			if amount.Sign() < 0 {
-				amount.SetString(resolvedMethodParams[1], 0) // try hex
+			// Base 0 auto-detects decimal, hex (0x...), and octal.
+			amount, ok := new(big.Int).SetString(resolvedMethodParams[1], 0)
+			if !ok || amount.Sign() < 0 {
+				r.vm.logger.Debug("Skipping allowance override: invalid or negative amount",
+					"raw", resolvedMethodParams[1])
+			} else {
+				valueHex := fmt.Sprintf("0x%064x", amount)
+				for _, candidateSlot := range commonAllowanceSlots {
+					slotHash := erc20AllowanceSlot(senderAddress, spender, candidateSlot)
+					r.vm.simulationState.SetStorageSlot(contractAddress.Hex(), slotHash.Hex(), valueHex)
+				}
+				r.vm.logger.Debug("Injected allowance override after approve simulation",
+					"token", contractAddress.Hex(),
+					"owner", senderAddress.Hex(),
+					"spender", spender.Hex(),
+					"amount", amount.String(),
+					"slots_set", len(commonAllowanceSlots))
 			}
-			valueHex := fmt.Sprintf("0x%064x", amount)
-
-			for _, candidateSlot := range commonAllowanceSlots {
-				slotHash := erc20AllowanceSlot(senderAddress, spender, candidateSlot)
-				r.vm.simulationState.SetStorageSlot(contractAddress.Hex(), slotHash.Hex(), valueHex)
-			}
-			r.vm.logger.Debug("Injected allowance override after approve simulation",
-				"token", contractAddress.Hex(),
-				"owner", senderAddress.Hex(),
-				"spender", spender.Hex(),
-				"amount", amount.String(),
-				"slots_set", len(commonAllowanceSlots))
 		}
 
 		// Convert Tenderly simulation result to legacy protobuf format
