@@ -20,6 +20,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/bigint"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
@@ -70,6 +71,13 @@ func (r *ContractWriteProcessor) resolveSimulationMode(node *avsproto.ContractWr
 		return node.Config.GetIsSimulated()
 	}
 	return vmDefault
+}
+
+// isMethodWithParams returns true when methodName matches target (case-insensitive)
+// and resolvedParams has at least minParams entries. Use this to gate post-simulation
+// state injection for specific ERC-20 methods (e.g. "approve" needs spender + amount).
+func isMethodWithParams(methodName, target string, resolvedParams []string, minParams int) bool {
+	return strings.EqualFold(methodName, target) && len(resolvedParams) >= minParams
 }
 
 func (r *ContractWriteProcessor) getInputData(node *avsproto.ContractWriteNode) (string, string, []*avsproto.ContractWriteNode_MethodCall, error) {
@@ -481,13 +489,47 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			}
 		}
 
-		// Merge state diffs from this simulation into the accumulated state map
-		// so subsequent simulation steps see a consistent view of on-chain state.
-		if r.vm.simulationState != nil && simulationResult != nil && simulationResult.Success && len(simulationResult.RawStateDiff) > 0 {
+		// Propagate simulation state so subsequent nodes see this step's effects.
+		simSuccess := r.vm.simulationState != nil && simulationResult != nil && simulationResult.Success
+
+		// Merge raw state diffs returned by Tenderly (if any).
+		if simSuccess && len(simulationResult.RawStateDiff) > 0 {
 			r.vm.simulationState.MergeRawStateDiff(simulationResult.RawStateDiff)
 			r.vm.logger.Debug("Merged simulation state diff into accumulator",
 				"method", methodName,
 				"diffEntries", len(simulationResult.RawStateDiff))
+		}
+
+		// After a successful approve() simulation, explicitly inject the allowance
+		// storage slot so downstream nodes (e.g. swap) see it. Tenderly's HTTP
+		// simulate API returns raw_state_diff: null for approve calls, so the
+		// MergeRawStateDiff above is a no-op. We compute and set the
+		// allowance[owner][spender] slot directly.
+		if simSuccess && isMethodWithParams(methodName, "approve", resolvedMethodParams, 2) {
+			rawSpender := strings.TrimSpace(resolvedMethodParams[0])
+			if !common.IsHexAddress(rawSpender) {
+				r.vm.logger.Debug("Skipping allowance override: invalid spender address",
+					"raw", resolvedMethodParams[0])
+			} else {
+				spender := common.HexToAddress(rawSpender)
+				amount, parseErr := bigint.Parse(resolvedMethodParams[1])
+				if parseErr != nil || amount.Sign() < 0 {
+					r.vm.logger.Debug("Skipping allowance override: invalid or negative amount",
+						"raw", resolvedMethodParams[1])
+				} else {
+					valueHex := fmt.Sprintf("0x%064x", amount)
+					for _, candidateSlot := range commonAllowanceSlots {
+						slotHash := erc20AllowanceSlot(senderAddress, spender, candidateSlot)
+						r.vm.simulationState.SetStorageSlot(contractAddress.Hex(), slotHash.Hex(), valueHex)
+					}
+					r.vm.logger.Debug("Injected allowance override after approve simulation",
+						"token", contractAddress.Hex(),
+						"owner", senderAddress.Hex(),
+						"spender", spender.Hex(),
+						"amount", amount.String(),
+						"slots_set", len(commonAllowanceSlots))
+				}
+			}
 		}
 
 		// Convert Tenderly simulation result to legacy protobuf format
@@ -814,7 +856,12 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 			}
 		}
 
-		r.vm.logger.Error("🚫 BUNDLER FAILED - UserOp transaction failed, workflow execution FAILED",
+		// preset.LogBundlerError picks Error vs Warn based on the error: on-chain
+		// reverts (expected user-workflow outcomes) log at Warn so they don't page
+		// Sentry; real infra/AA failures (bundler down, AA21/AA23/AA25, paymaster
+		// revert) stay at Error.
+		preset.LogBundlerError(r.vm.logger, err,
+			"bundler: UserOp transaction failed, workflow execution FAILED",
 			"bundler_error", err,
 			"bundler_url", r.smartWalletConfig.BundlerURL,
 			"method", methodName,
@@ -1209,43 +1256,35 @@ func (r *ContractWriteProcessor) convertTenderlyResultToFlexibleFormat(result *C
 
 	receipt, _ := structpb.NewValue(receiptMap)
 
-	// Extract return value from Tenderly response
+	// Extract return value from Tenderly response.
+	// ReturnData is nil when the provider did not return output data (e.g. simulation
+	// reverted — tenderly_client.go clears ReturnData in that case). That path leaves
+	// Value as nil, which is the expected behavior.
 	var returnValue *structpb.Value
 	if result.ReturnData != nil {
-		r.vm.logger.Info("🔍 CRITICAL DEBUG - ReturnData found",
-			"method", result.MethodName,
-			"returnData_name", result.ReturnData.Name,
-			"returnData_type", result.ReturnData.Type,
-			"returnData_value", result.ReturnData.Value)
-
 		// Parse the JSON value from ReturnData and convert to protobuf
 		var parsedValue interface{}
 		if err := json.Unmarshal([]byte(result.ReturnData.Value), &parsedValue); err == nil {
 			// Successfully parsed JSON, convert to protobuf
 			if valueProto, err := structpb.NewValue(parsedValue); err == nil {
 				returnValue = valueProto
-				r.vm.logger.Info("✅ CRITICAL DEBUG - Successfully created returnValue protobuf",
-					"method", result.MethodName,
-					"parsedValue", parsedValue)
 			} else {
-				r.vm.logger.Error("❌ CRITICAL DEBUG - Failed to create protobuf from parsedValue",
+				r.vm.logger.Debug("failed to create protobuf from parsed ReturnData",
 					"method", result.MethodName,
 					"error", err)
 			}
 		} else {
-			r.vm.logger.Error("❌ CRITICAL DEBUG - Failed to unmarshal JSON from ReturnData.Value",
+			// Non-JSON return types (bytes32, address, etc.) are expected; fall through
+			// to raw-string handling below.
+			r.vm.logger.Debug("ReturnData is not JSON, falling back to raw string",
 				"method", result.MethodName,
-				"error", err,
-				"raw_value", result.ReturnData.Value)
+				"error", err)
 
 			// Fallback: treat as raw string if JSON parsing fails
 			if valueProto, err := structpb.NewValue(result.ReturnData.Value); err == nil {
 				returnValue = valueProto
 			}
 		}
-	} else {
-		r.vm.logger.Error("❌ CRITICAL DEBUG - ReturnData is nil",
-			"method", result.MethodName)
 	}
 
 	// No fallback default value. If provider does not return output data, Value remains nil
@@ -1624,7 +1663,11 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 				}
 			}
 		} else {
-			r.vm.logger.Error("🚨 DEPLOYED WORKFLOW: Method execution failed",
+			// User-workflow failure: method returned success=false. The concrete
+			// cause is already logged by the upstream site (Tenderly simulation at
+			// tenderly_client.go, or bundler/AA at line ~817). Re-logging at Warn
+			// here keeps operator-visible context without paging Sentry.
+			r.vm.logger.Warn("deployed workflow: method execution failed",
 				"method_name", result.MethodName,
 				"error_message", result.Error,
 				"error_length", len(result.Error),

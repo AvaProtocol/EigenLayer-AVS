@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/bigint"
 	"github.com/ethereum/go-ethereum/common"
 	validator "github.com/go-playground/validator/v10"
 	"github.com/mitchellh/mapstructure"
@@ -40,15 +41,13 @@ func decodeOpTypes(
 
 	// String to big.Int conversion
 	if f == reflect.String && t == reflect.Struct {
-		n := new(big.Int)
-		var ok bool
 		dataStr, ok := data.(string)
 		if !ok {
 			return nil, errors.New("expected string for bigInt conversion")
 		}
-		n, ok = n.SetString(dataStr, 0)
-		if !ok {
-			return nil, errors.New("bigInt conversion failed")
+		n, err := bigint.Parse(dataStr)
+		if err != nil {
+			return nil, fmt.Errorf("bigInt conversion failed: %w", err)
 		}
 		return n, nil
 	}

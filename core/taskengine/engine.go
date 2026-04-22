@@ -3080,7 +3080,10 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		cleanErrorMsg = stackTraceRegex.ReplaceAllString(cleanErrorMsg, "")
 		cleanErrorMsg = strings.TrimSpace(cleanErrorMsg)
 
-		n.logger.Error("workflow simulation completed with failures",
+		// User-workflow simulation failure: per-step errors are captured in the
+		// persisted execution steps. Log summary at Warn so it stays out of Sentry
+		// error alerts.
+		n.logger.Warn("workflow simulation completed with failures",
 			"error", cleanErrorMsg,
 			"task_id", task.Id,
 			"simulation_id", simulationID,
