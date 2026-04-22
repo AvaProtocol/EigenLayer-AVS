@@ -20,6 +20,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/bigint"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
@@ -506,20 +507,13 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		// allowance[owner][spender] slot directly.
 		if simSuccess && isMethodWithParams(methodName, "approve", resolvedMethodParams, 2) {
 			rawSpender := strings.TrimSpace(resolvedMethodParams[0])
-			rawAmount := strings.TrimSpace(resolvedMethodParams[1])
 			if !common.IsHexAddress(rawSpender) {
 				r.vm.logger.Debug("Skipping allowance override: invalid spender address",
 					"raw", resolvedMethodParams[0])
 			} else {
 				spender := common.HexToAddress(rawSpender)
-				// Default to base 10; honor 0x/0X prefix as hex. Avoid base 0 because
-				// it treats leading-zero strings (e.g. "010") as octal.
-				base := 10
-				if strings.HasPrefix(rawAmount, "0x") || strings.HasPrefix(rawAmount, "0X") {
-					base = 16
-				}
-				amount, ok := new(big.Int).SetString(rawAmount, base)
-				if !ok || amount.Sign() < 0 {
+				amount, parseErr := bigint.Parse(resolvedMethodParams[1])
+				if parseErr != nil || amount.Sign() < 0 {
 					r.vm.logger.Debug("Skipping allowance override: invalid or negative amount",
 						"raw", resolvedMethodParams[1])
 				} else {

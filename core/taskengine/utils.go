@@ -13,6 +13,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/modules"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/bigint"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/dop251/goja"
@@ -705,27 +706,7 @@ func parseABIParameter(param string, abiType abi.Type) (interface{}, error) {
 		return common.HexToAddress(param), nil
 
 	case abi.UintTy, abi.IntTy:
-		// Handle big integers
-		// Validate that the parameter is a valid number
-		paramTrimmed := strings.TrimSpace(param)
-		if paramTrimmed == "" {
-			return nil, fmt.Errorf("expected numeric value, got ''")
-		}
-
-		value := new(big.Int)
-		var ok bool
-		if strings.HasPrefix(paramTrimmed, "0x") {
-			_, ok = value.SetString(paramTrimmed[2:], 16)
-		} else {
-			// Check if it's a valid decimal number (allows digits, optional negative sign)
-			_, ok = value.SetString(paramTrimmed, 10)
-		}
-
-		if !ok {
-			return nil, fmt.Errorf("expected numeric value, got '%s'", paramTrimmed)
-		}
-
-		return value, nil
+		return bigint.Parse(param)
 
 	case abi.BoolTy:
 		switch strings.ToLower(param) {
