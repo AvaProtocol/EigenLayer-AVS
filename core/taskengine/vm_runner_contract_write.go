@@ -505,24 +505,36 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		// MergeRawStateDiff above is a no-op. We compute and set the
 		// allowance[owner][spender] slot directly.
 		if simSuccess && isMethodWithParams(methodName, "approve", resolvedMethodParams, 2) {
-			spender := common.HexToAddress(resolvedMethodParams[0])
-			// Base 0 auto-detects decimal, hex (0x...), and octal.
-			amount, ok := new(big.Int).SetString(resolvedMethodParams[1], 0)
-			if !ok || amount.Sign() < 0 {
-				r.vm.logger.Debug("Skipping allowance override: invalid or negative amount",
-					"raw", resolvedMethodParams[1])
+			rawSpender := strings.TrimSpace(resolvedMethodParams[0])
+			rawAmount := strings.TrimSpace(resolvedMethodParams[1])
+			if !common.IsHexAddress(rawSpender) {
+				r.vm.logger.Debug("Skipping allowance override: invalid spender address",
+					"raw", resolvedMethodParams[0])
 			} else {
-				valueHex := fmt.Sprintf("0x%064x", amount)
-				for _, candidateSlot := range commonAllowanceSlots {
-					slotHash := erc20AllowanceSlot(senderAddress, spender, candidateSlot)
-					r.vm.simulationState.SetStorageSlot(contractAddress.Hex(), slotHash.Hex(), valueHex)
+				spender := common.HexToAddress(rawSpender)
+				// Default to base 10; honor 0x/0X prefix as hex. Avoid base 0 because
+				// it treats leading-zero strings (e.g. "010") as octal.
+				base := 10
+				if strings.HasPrefix(rawAmount, "0x") || strings.HasPrefix(rawAmount, "0X") {
+					base = 16
 				}
-				r.vm.logger.Debug("Injected allowance override after approve simulation",
-					"token", contractAddress.Hex(),
-					"owner", senderAddress.Hex(),
-					"spender", spender.Hex(),
-					"amount", amount.String(),
-					"slots_set", len(commonAllowanceSlots))
+				amount, ok := new(big.Int).SetString(rawAmount, base)
+				if !ok || amount.Sign() < 0 {
+					r.vm.logger.Debug("Skipping allowance override: invalid or negative amount",
+						"raw", resolvedMethodParams[1])
+				} else {
+					valueHex := fmt.Sprintf("0x%064x", amount)
+					for _, candidateSlot := range commonAllowanceSlots {
+						slotHash := erc20AllowanceSlot(senderAddress, spender, candidateSlot)
+						r.vm.simulationState.SetStorageSlot(contractAddress.Hex(), slotHash.Hex(), valueHex)
+					}
+					r.vm.logger.Debug("Injected allowance override after approve simulation",
+						"token", contractAddress.Hex(),
+						"owner", senderAddress.Hex(),
+						"spender", spender.Hex(),
+						"amount", amount.String(),
+						"slots_set", len(commonAllowanceSlots))
+				}
 			}
 		}
 

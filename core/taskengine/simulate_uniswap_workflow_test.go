@@ -67,8 +67,9 @@ func TestSimulateTask_StopLossWorkflow_Sepolia(t *testing.T) {
 
 	usdcBalance := fetchERC20Balance(t, client, SEPOLIA_USDC, smartWalletAddr.Hex())
 	t.Logf("USDC balance: %s (6 decimals)", usdcBalance.String())
-	require.True(t, usdcBalance.Cmp(big.NewInt(2_000_000)) >= 0,
-		"wallet must hold at least 2 USDC; fund %s", smartWalletAddr.Hex())
+	if usdcBalance.Cmp(big.NewInt(2_000_000)) < 0 {
+		t.Skipf("smart wallet %s must hold at least 2 USDC to run this test", smartWalletAddr.Hex())
+	}
 
 	db := testutil.TestMustDB()
 	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
