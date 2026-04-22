@@ -45,9 +45,7 @@ func TestSimulateTask_StopLossWorkflow_Sepolia(t *testing.T) {
 	}
 
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
-	if !ok {
-		t.Skip("OWNER_EOA not set; skipping")
-	}
+	require.True(t, ok, "OWNER_EOA must be set to run this Sepolia integration test")
 	ownerAddress := *ownerAddr
 
 	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
@@ -67,9 +65,8 @@ func TestSimulateTask_StopLossWorkflow_Sepolia(t *testing.T) {
 
 	usdcBalance := fetchERC20Balance(t, client, SEPOLIA_USDC, smartWalletAddr.Hex())
 	t.Logf("USDC balance: %s (6 decimals)", usdcBalance.String())
-	if usdcBalance.Cmp(big.NewInt(2_000_000)) < 0 {
-		t.Skipf("smart wallet %s must hold at least 2 USDC to run this test", smartWalletAddr.Hex())
-	}
+	require.True(t, usdcBalance.Cmp(big.NewInt(2_000_000)) >= 0,
+		"wallet must hold at least 2 USDC; fund %s", smartWalletAddr.Hex())
 
 	db := testutil.TestMustDB()
 	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
