@@ -6,11 +6,8 @@
 environment: development
 
 ## Aggregator Server Configs
+# Migration backups are written to <db_path>-backup automatically.
 db_path: /tmp/ap-avs/db
-
-# Backup directory for manual backups (via REPL) and database migrations
-# Periodic automated backups are not currently implemented
-backup_dir: /tmp/ap-avs-backup
 
 ## Aggregator Address: Replace with your aggregator's address
 ecdsa_private_key:
