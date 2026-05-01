@@ -6,7 +6,7 @@
 environment: development
 
 ## Aggregator Server Configs
-# Migration backups are written to <db_path>-backup automatically.
+# Migration backups are written to <db_path>_backup automatically.
 db_path: /tmp/ap-avs/db
 
 ## Aggregator Address: Replace with your aggregator's address
