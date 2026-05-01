@@ -87,8 +87,6 @@ type Config struct {
 	// Account abstraction config
 	SmartWallet *SmartWalletConfig
 
-	BackupConfig BackupConfig
-
 	SocketPath  string
 	Environment sdklogging.LogLevel
 
@@ -166,12 +164,6 @@ type SmartWalletConfig struct {
 	MaxWalletsPerOwner int
 }
 
-type BackupConfig struct {
-	Enabled         bool   // Whether periodic backups are enabled
-	IntervalMinutes int    // Interval between backups in minutes
-	BackupDir       string // Directory to store backups
-}
-
 // These are read from configPath
 type ConfigRaw struct {
 	EcdsaPrivateKey string              `yaml:"ecdsa_private_key"`
@@ -188,7 +180,6 @@ type ConfigRaw struct {
 	AVSRegistryCoordinatorAddr string `yaml:"avs_registry_coordinator_address"`
 
 	DbPath    string `yaml:"db_path"`
-	BackupDir string `yaml:"backup_dir"`
 	JwtSecret string `yaml:"jwt_secret"`
 
 	SmartWallet struct {
@@ -202,12 +193,6 @@ type ConfigRaw struct {
 		WhitelistAddresses   []string `yaml:"whitelist_addresses"`
 		MaxWalletsPerOwner   int      `yaml:"max_wallets_per_owner"`
 	} `yaml:"smart_wallet"`
-
-	Backup struct {
-		Enabled         bool   `yaml:"enabled"`
-		IntervalMinutes int    `yaml:"interval_minutes"`
-		BackupDir       string `yaml:"backup_dir"`
-	} `yaml:"backup"`
 
 	SocketPath string `yaml:"socket_path"`
 
@@ -381,11 +366,6 @@ func NewConfig(configFilePath string) (*Config, error) {
 		configRaw.SmartWallet.MaxWalletsPerOwner = HardMaxWalletsPerOwner
 	}
 
-	if configRaw.BackupDir == "" {
-		// If backup dir is not set, use the default path, usually this path will be mount from our docker compose host
-		configRaw.BackupDir = "/tmp/ap-avs-backup"
-	}
-
 	config := &Config{
 		EcdsaPrivateKey: ecdsaPrivateKey,
 		Logger:          logger,
@@ -406,7 +386,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 		AggregatorAddress:                 aggregatorAddr,
 
 		DbPath:    configRaw.DbPath,
-		BackupDir: configRaw.BackupDir,
+		BackupDir: configRaw.DbPath + "_backup",
 		JwtSecret: []byte(configRaw.JwtSecret),
 
 		SmartWallet: &SmartWalletConfig{
@@ -421,12 +401,6 @@ func NewConfig(configFilePath string) (*Config, error) {
 			WhitelistAddresses:   convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
 			MaxWalletsPerOwner:   configRaw.SmartWallet.MaxWalletsPerOwner,
 			// PaymasterOwnerAddress will be populated below by calling owner() on the paymaster contract
-		},
-
-		BackupConfig: BackupConfig{
-			Enabled:         configRaw.Backup.Enabled,
-			IntervalMinutes: configRaw.Backup.IntervalMinutes,
-			BackupDir:       configRaw.Backup.BackupDir,
 		},
 
 		SocketPath:        configRaw.SocketPath,
