@@ -118,7 +118,8 @@ func getStatusEmoji(s Summary) string {
 	}
 }
 
-// formatSubjectWithBoldName formats the subject with <code> tags only around the workflow name
+// formatSubjectWithBoldName formats the subject with <code> tags around the
+// prefix + workflow name (everything except the trailing status suffix).
 // Subject patterns:
 //   - "Simulation: {name} successfully completed"
 //   - "Run Node: {name} succeeded"
@@ -206,13 +207,13 @@ func formatSubjectWithBoldName(subject string) string {
 	// Extract the workflow name
 	name := subject[nameStart:nameEnd]
 
-	// Build the formatted string: prefix + <code>name</code> + suffix
+	// Build the formatted string: <code>prefix + name</code> + suffix
 	// Using <code> prevents Telegram from auto-linking names that contain dots
 	var sb strings.Builder
+	sb.WriteString("<code>")
 	if prefix != "" {
 		sb.WriteString(html.EscapeString(prefix))
 	}
-	sb.WriteString("<code>")
 	sb.WriteString(html.EscapeString(name))
 	sb.WriteString("</code>")
 	sb.WriteString(html.EscapeString(suffix))

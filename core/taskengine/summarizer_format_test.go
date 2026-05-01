@@ -782,7 +782,7 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				},
 			},
 			expectedContain: []string{
-				"✅ Simulation: <code>Recurring Payment</code> successfully completed", // Only workflow name is code-wrapped
+				"✅ <code>Simulation: Recurring Payment</code> successfully completed", // Prefix + name code-wrapped
 				"<b>Network:</b> Sepolia",
 				"<b>Time:</b> Jan 22, 2026 at 4:51 AM UTC",
 				"<b>Trigger:</b> (Simulated) Your scheduled task (every 3 days at 11:00 PM) triggered on Sepolia.",
@@ -803,7 +803,7 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				},
 			},
 			expectedContain: []string{
-				"✅ Run #3: <code>Recurring Payment</code> successfully completed", // Only workflow name is code-wrapped
+				"✅ <code>Run #3: Recurring Payment</code> successfully completed", // Prefix + name code-wrapped
 				"<b>Network:</b> Sepolia",
 				"<b>Time:</b> Jan 22, 2026 at 4:51 AM UTC",
 				"<b>Executed:</b>",
@@ -823,7 +823,7 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				Errors:      []string{"transfer1: Insufficient balance for transfer"},
 			},
 			expectedContain: []string{
-				"❌ Run #5: <code>Recurring Payment</code> failed to execute", // Only workflow name is code-wrapped
+				"❌ <code>Run #5: Recurring Payment</code> failed to execute", // Prefix + name code-wrapped
 				"<b>Network:</b> Sepolia",
 				"<b>What Went Wrong:</b>",
 				"• transfer1: Insufficient balance for transfer",
@@ -846,7 +846,7 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				},
 			},
 			expectedContain: []string{
-				"⚠️ Run #2: <code>My Workflow</code> successfully completed",
+				"⚠️ <code>Run #2: My Workflow</code> successfully completed",
 				"<i>1 node was skipped by Branch condition.</i>",
 				"<b>Network:</b> Ethereum",
 				"<b>Executed:</b>",
@@ -867,7 +867,7 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				Errors:       []string{"loop1 - skipped due to condition not met: `code1.data.balance >= code1.data.totalNeeded` evaluated to false"},
 			},
 			expectedContain: []string{
-				"⚠️ Simulation: <code>Copy of Test Recurring Batch Send</code> successfully completed",
+				"⚠️ <code>Simulation: Copy of Test Recurring Batch Send</code> successfully completed",
 				"<i>1 node was skipped by Branch condition.</i>",
 				"<b>Network:</b> Sepolia",
 				"<b>What Went Wrong:</b>",
@@ -943,7 +943,7 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				Executions: []ExecutionEntry{{Description: "(Simulated) On-chain transaction successfully completed"}},
 			},
 			expectedContain: []string{
-				"✅ Simulation: <code>My Workflow</code> successfully completed",
+				"✅ <code>Simulation: My Workflow</code> successfully completed",
 				"<b>Network:</b> Sepolia",
 				"<b>Trigger:</b> (Simulated) Scheduled task ran on Sepolia",
 				"<b>Executed:</b>",
@@ -1160,27 +1160,27 @@ func TestFormatSubjectWithBoldName(t *testing.T) {
 		{
 			name:     "simulation success",
 			subject:  "Simulation: My Workflow successfully completed",
-			expected: "Simulation: <code>My Workflow</code> successfully completed",
+			expected: "<code>Simulation: My Workflow</code> successfully completed",
 		},
 		{
 			name:     "simulation failure",
 			subject:  "Simulation: Test Workflow failed to execute",
-			expected: "Simulation: <code>Test Workflow</code> failed to execute",
+			expected: "<code>Simulation: Test Workflow</code> failed to execute",
 		},
 		{
 			name:     "simulation partial",
 			subject:  "Simulation: Another Workflow partially executed",
-			expected: "Simulation: <code>Another Workflow</code> partially executed",
+			expected: "<code>Simulation: Another Workflow</code> partially executed",
 		},
 		{
 			name:     "run number success",
 			subject:  "Run #3: Payment Flow successfully completed",
-			expected: "Run #3: <code>Payment Flow</code> successfully completed",
+			expected: "<code>Run #3: Payment Flow</code> successfully completed",
 		},
 		{
 			name:     "run number failure",
 			subject:  "Run #15: Swap Workflow failed to execute",
-			expected: "Run #15: <code>Swap Workflow</code> failed to execute",
+			expected: "<code>Run #15: Swap Workflow</code> failed to execute",
 		},
 		{
 			name:     "no prefix success",
@@ -1195,17 +1195,17 @@ func TestFormatSubjectWithBoldName(t *testing.T) {
 		{
 			name:     "workflow name with special chars",
 			subject:  "Simulation: Copy of Recurring Payment & Report successfully completed",
-			expected: "Simulation: <code>Copy of Recurring Payment &amp; Report</code> successfully completed",
+			expected: "<code>Simulation: Copy of Recurring Payment &amp; Report</code> successfully completed",
 		},
 		{
 			name:     "run node success",
 			subject:  "Run Node: My Transfer succeeded",
-			expected: "Run Node: <code>My Transfer</code> succeeded",
+			expected: "<code>Run Node: My Transfer</code> succeeded",
 		},
 		{
 			name:     "run node failure",
 			subject:  "Run Node: My Transfer failed at transfer1",
-			expected: "Run Node: <code>My Transfer</code> failed at transfer1",
+			expected: "<code>Run Node: My Transfer</code> failed at transfer1",
 		},
 		{
 			name:     "deployed workflow success",
@@ -1391,7 +1391,7 @@ func TestComposeSummary_SimulateTaskFromClientPayload(t *testing.T) {
 	telegram := FormatForMessageChannels(summary, "telegram", nil)
 
 	expectedTelegramContents := []string{
-		"✅ Simulation: <code>Test settings.name</code> successfully completed",
+		"✅ <code>Simulation: Test settings.name</code> successfully completed",
 		"<b>Network:</b> Sepolia",
 		"<b>Time:</b>",
 		"<b>Trigger:</b> (Simulated) Scheduled task ran on Sepolia",
