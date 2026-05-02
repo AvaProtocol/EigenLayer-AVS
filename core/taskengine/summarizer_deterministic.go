@@ -81,6 +81,48 @@ type Summary struct {
 	Transfers []TransferInfo // Transfer details from ETH_TRANSFER and CONTRACT_WRITE steps
 	Balances  []BalanceInfo  // Balance snapshots from BALANCE steps
 	Workflow  *WorkflowInfo  // Workflow metadata
+
+	// Runner / Fees come from the context-memory API response (PRD: docs/changes
+	// 20260501-summary-runner-and-fees-sections.md). Renderers display a Runner
+	// block above the per-step list and a Cost/Estimated cost block below.
+	Runner *RunnerInfo
+	Fees   *FeesInfo
+}
+
+// RunnerInfo identifies who ran the workflow.
+type RunnerInfo struct {
+	SmartWallet string // 0x… AA wallet (the actual sender)
+	OwnerEOA    string // 0x… EOA that owns the smart wallet
+}
+
+// FeeAmount is a self-describing numeric value (mirror of avs.proto Fee).
+type FeeAmount struct {
+	Amount string // decimal string; precision-safe for uint256
+	Unit   string // "USD" | "WEI" | "PERCENTAGE"
+}
+
+// NodeCOGS is one per-node operational cost entry.
+type NodeCOGS struct {
+	NodeID   string
+	StepName string // joined from steps[]; empty for synthetic entries (e.g. _wallet_creation)
+	CostType string // "gas" | "external_api" | "wallet_creation"
+	Fee      *FeeAmount
+	GasUnits string // present when CostType == "gas"
+	TxHash   string // joined from steps[].outputData; deployed-gas only
+}
+
+// ValueFee is the workflow-level percentage of tx value.
+type ValueFee struct {
+	Fee    *FeeAmount
+	Tier   string // proto enum string: "EXECUTION_TIER_1" / "_2" / "_3" / "_UNSPECIFIED"
+	Reason string // human-readable classification reason
+}
+
+// FeesInfo is the per-execution fee breakdown returned by context-memory.
+type FeesInfo struct {
+	ExecutionFee *FeeAmount  // flat platform fee, USD
+	Cogs         []*NodeCOGS // per-node WEI cost
+	ValueFee     *ValueFee   // workflow-level percentage; nil when no on-chain nodes
 }
 
 // BuildBranchAndSkippedSummary builds a deterministic summary (text and HTML)

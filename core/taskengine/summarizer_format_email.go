@@ -3,6 +3,7 @@ package taskengine
 import (
 	"fmt"
 	"html"
+	"math/big"
 	"strings"
 	"time"
 )
@@ -256,7 +257,7 @@ func formatBackticksForChannel(s string, channel string) string {
 func buildAnalysisHtmlFromStructured(s Summary) string {
 	var sb strings.Builder
 
-	// Section 1: What Triggered This Workflow
+	// Section: What Triggered This Workflow
 	if s.Trigger != "" {
 		sb.WriteString(`<div style="margin-bottom: 20px;">`)
 		sb.WriteString(`<h3 style="margin: 0 0 8px 0; font-size: 16px;">What Triggered This Workflow</h3>`)
@@ -307,6 +308,13 @@ func buildAnalysisHtmlFromStructured(s Summary) string {
 		sb.WriteString("</div>")
 	}
 
+	// Section: Cost / Estimated cost — fee breakdown
+	if s.Fees != nil {
+		if costHTML := buildFeesSectionHTML(s); costHTML != "" {
+			sb.WriteString(costHTML)
+		}
+	}
+
 	if s.Annotation != "" {
 		sb.WriteString(`<div style="margin-top: 16px;">`)
 		sb.WriteString("<p style=\"margin: 0; font-style: italic; color: #666;\">")
@@ -314,6 +322,103 @@ func buildAnalysisHtmlFromStructured(s Summary) string {
 		sb.WriteString("</p></div>")
 	}
 
+	return sb.String()
+}
+
+// buildFeesSectionHTML renders the fee breakdown for HTML email. For simulation
+// runs we render only a placeholder ("⛽ (cost estimated at deploy)") since
+// sim gas prices are conservative chain defaults, not real network conditions.
+// Deployed runs show the full breakdown.
+func buildFeesSectionHTML(s Summary) string {
+	if s.Fees == nil {
+		return ""
+	}
+
+	if s.Workflow != nil && s.Workflow.IsSimulation {
+		return `<div style="margin-bottom: 20px;">` +
+			`<h3 style="margin: 0 0 8px 0; font-size: 16px;">Cost</h3>` +
+			`<p style="margin: 0; color: #666; font-style: italic;">⛽ (cost estimated at deploy)</p>` +
+			`</div>`
+	}
+
+	heading := "Cost"
+
+	totalWei := new(big.Int)
+	totalGas := new(big.Int)
+	gasCogs := make([]*NodeCOGS, 0, len(s.Fees.Cogs))
+	for _, c := range s.Fees.Cogs {
+		if c == nil {
+			continue
+		}
+		if c.Fee != nil {
+			if w, ok := new(big.Int).SetString(c.Fee.Amount, 10); ok {
+				totalWei.Add(totalWei, w)
+			}
+		}
+		if c.CostType == "gas" {
+			if c.GasUnits != "" {
+				if g, ok := new(big.Int).SetString(c.GasUnits, 10); ok {
+					totalGas.Add(totalGas, g)
+				}
+			}
+			gasCogs = append(gasCogs, c)
+		}
+	}
+
+	var headerParts []string
+	if totalWei.Sign() > 0 {
+		headerParts = append(headerParts, fmt.Sprintf("%s ETH", formatWeiAsEth(totalWei.String())))
+	}
+	if totalGas.Sign() > 0 {
+		headerParts = append(headerParts, fmt.Sprintf("(~%s gas)", formatGasUnits(totalGas.String())))
+	}
+	if s.Fees.ExecutionFee != nil && s.Fees.ExecutionFee.Amount != "" {
+		headerParts = append(headerParts, fmt.Sprintf("+ $%s platform fee", trimFractionalZeros(s.Fees.ExecutionFee.Amount)))
+	}
+	if len(headerParts) == 0 && (s.Fees.ValueFee == nil || s.Fees.ValueFee.Fee == nil) {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(`<div style="margin-bottom: 20px;">`)
+	sb.WriteString(fmt.Sprintf(`<h3 style="margin: 0 0 8px 0; font-size: 16px;">%s</h3>`, heading))
+	if len(headerParts) > 0 {
+		sb.WriteString(`<p style="margin: 0;">`)
+		sb.WriteString(html.EscapeString(strings.Join(headerParts, " ")))
+		sb.WriteString("</p>")
+	}
+	if len(gasCogs) > 1 {
+		for _, c := range gasCogs {
+			name := c.StepName
+			if name == "" {
+				name = c.NodeID
+			}
+			sb.WriteString(`<p style="margin: 4px 0 0 18px; color: #666; font-size: 14px;">• `)
+			sb.WriteString(html.EscapeString(name))
+			if c.GasUnits != "" {
+				sb.WriteString(fmt.Sprintf(" — %s gas", formatGasUnits(c.GasUnits)))
+			}
+			if c.Fee != nil && c.Fee.Amount != "" {
+				sb.WriteString(fmt.Sprintf(" (%s ETH)", formatWeiAsEth(c.Fee.Amount)))
+			}
+			sb.WriteString("</p>")
+		}
+	}
+	if s.Fees.ValueFee != nil && s.Fees.ValueFee.Fee != nil {
+		amount := strings.TrimSpace(s.Fees.ValueFee.Fee.Amount)
+		if amount != "" && amount != "0" && amount != "0.00" && amount != "0.0" {
+			sb.WriteString(`<p style="margin: 4px 0 0 0;">Value fee: `)
+			sb.WriteString(html.EscapeString(amount))
+			sb.WriteString("% of tx value")
+			if tier := tierShortLabel(s.Fees.ValueFee.Tier); tier != "" {
+				sb.WriteString(" (")
+				sb.WriteString(tier)
+				sb.WriteString(")")
+			}
+			sb.WriteString("</p>")
+		}
+	}
+	sb.WriteString("</div>")
 	return sb.String()
 }
 

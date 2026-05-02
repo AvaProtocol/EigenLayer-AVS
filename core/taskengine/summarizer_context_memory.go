@@ -172,6 +172,38 @@ type contextMemoryExecutionEntry struct {
 	TxHash      string `json:"txHash,omitempty"`
 }
 
+// contextMemoryRunnerResp matches the API response runner block (body.runner).
+// See docs/changes/20260501-summary-runner-and-fees-sections.md.
+type contextMemoryRunnerResp struct {
+	SmartWallet string `json:"smartWallet"`
+	OwnerEOA    string `json:"ownerEOA"`
+}
+
+// contextMemoryNodeCOGSResp mirrors a cogs[] entry on the response. Adds
+// stepName/txHash joins computed by context-memory from steps[].
+type contextMemoryNodeCOGSResp struct {
+	NodeID   string            `json:"nodeId"`
+	StepName string            `json:"stepName,omitempty"`
+	CostType string            `json:"costType"`
+	Fee      *contextMemoryFee `json:"fee"`
+	GasUnits string            `json:"gasUnits,omitempty"`
+	TxHash   string            `json:"txHash,omitempty"`
+}
+
+// contextMemoryValueFeeResp is the response-side ValueFee (diagnostic fields stripped).
+type contextMemoryValueFeeResp struct {
+	Fee    *contextMemoryFee `json:"fee"`
+	Tier   string            `json:"tier"`
+	Reason string            `json:"reason,omitempty"`
+}
+
+// contextMemoryFeesResp is the response-side fees block.
+type contextMemoryFeesResp struct {
+	ExecutionFee *contextMemoryFee            `json:"executionFee,omitempty"`
+	Cogs         []*contextMemoryNodeCOGSResp `json:"cogs"`
+	ValueFee     *contextMemoryValueFeeResp   `json:"valueFee,omitempty"`
+}
+
 // contextMemorySummarizeBody contains the structured workflow execution summary
 // The aggregator is responsible for rendering this into email HTML or Telegram format
 type contextMemorySummarizeBody struct {
@@ -191,6 +223,11 @@ type contextMemorySummarizeBody struct {
 	Transfers []contextMemoryTransferInfo `json:"transfers,omitempty"` // Transfer details
 	Balances  []contextMemoryBalanceInfo  `json:"balances,omitempty"`  // Balance snapshots
 	Workflow  *contextMemoryWorkflowInfo  `json:"workflow,omitempty"`  // Workflow metadata
+
+	// Runner and fees come from the structured response shape introduced in
+	// docs/changes/20260501-summary-runner-and-fees-sections.md (context-memory).
+	Runner *contextMemoryRunnerResp `json:"runner,omitempty"`
+	Fees   *contextMemoryFeesResp   `json:"fees,omitempty"`
 }
 
 // SummarizeResponse matches the TypeScript SummarizeResponse
@@ -350,6 +387,40 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 		executions = append(executions, entry)
 	}
 
+	// Convert Runner block (response carries it; renderer falls back to req on absence)
+	var runner *RunnerInfo
+	if apiResp.Body.Runner != nil {
+		runner = &RunnerInfo{
+			SmartWallet: apiResp.Body.Runner.SmartWallet,
+			OwnerEOA:    apiResp.Body.Runner.OwnerEOA,
+		}
+	}
+
+	// Convert Fees block from response
+	var fees *FeesInfo
+	if apiResp.Body.Fees != nil {
+		fees = &FeesInfo{
+			ExecutionFee: respFeeToFeeAmount(apiResp.Body.Fees.ExecutionFee),
+			ValueFee:     respValueFeeToValueFee(apiResp.Body.Fees.ValueFee),
+		}
+		if len(apiResp.Body.Fees.Cogs) > 0 {
+			fees.Cogs = make([]*NodeCOGS, 0, len(apiResp.Body.Fees.Cogs))
+			for _, c := range apiResp.Body.Fees.Cogs {
+				if c == nil {
+					continue
+				}
+				fees.Cogs = append(fees.Cogs, &NodeCOGS{
+					NodeID:   c.NodeID,
+					StepName: c.StepName,
+					CostType: c.CostType,
+					Fee:      respFeeToFeeAmount(c.Fee),
+					GasUnits: c.GasUnits,
+					TxHash:   c.TxHash,
+				})
+			}
+		}
+	}
+
 	return Summary{
 		Subject:       apiResp.Subject,
 		Body:          composePlainTextBodyFromAPI(apiResp.Body),
@@ -368,7 +439,27 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 		Transfers:     transfers,
 		Balances:      balances,
 		Workflow:      workflow,
+		Runner:        runner,
+		Fees:          fees,
 	}, nil
+}
+
+func respFeeToFeeAmount(f *contextMemoryFee) *FeeAmount {
+	if f == nil {
+		return nil
+	}
+	return &FeeAmount{Amount: f.Amount, Unit: f.Unit}
+}
+
+func respValueFeeToValueFee(v *contextMemoryValueFeeResp) *ValueFee {
+	if v == nil {
+		return nil
+	}
+	return &ValueFee{
+		Fee:    respFeeToFeeAmount(v.Fee),
+		Tier:   v.Tier,
+		Reason: v.Reason,
+	}
 }
 
 // composePlainTextBodyFromAPI creates a plain text body from the structured API response

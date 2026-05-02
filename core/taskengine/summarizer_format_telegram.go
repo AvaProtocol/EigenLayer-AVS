@@ -1,7 +1,9 @@
 package taskengine
 
 import (
+	"fmt"
 	"html"
+	"math/big"
 	"strings"
 )
 
@@ -41,8 +43,15 @@ func formatTelegramFromStructured(s Summary) string {
 		}
 	}
 
-	// Network and Time section
-	if network != "" || s.TriggeredAt != "" {
+	// Network / Time / Runner / Cost — metadata block. Cost line follows Runner
+	// so the "who and what it cost" pair stays adjacent. For simulations the
+	// Cost line is a placeholder ("⛽ (cost estimated at deploy)") — actual gas
+	// numbers only appear for deployed runs with real receipts.
+	// Runner addresses are intentionally NOT <code>-wrapped (hex addresses don't
+	// trigger Telegram auto-linking; the wrap adds visual noise).
+	hasRunner := s.Runner != nil && s.Runner.SmartWallet != ""
+	costLine := formatTelegramCostLine(s)
+	if network != "" || s.TriggeredAt != "" || hasRunner || costLine != "" {
 		sb.WriteString("\n")
 		if network != "" {
 			sb.WriteString("<b>Network:</b> ")
@@ -53,6 +62,14 @@ func formatTelegramFromStructured(s Summary) string {
 			sb.WriteString("<b>Time:</b> ")
 			sb.WriteString(html.EscapeString(formatTimestampHumanReadable(s.TriggeredAt)))
 			sb.WriteString("\n")
+		}
+		if hasRunner {
+			sb.WriteString("<b>Runner:</b> ")
+			sb.WriteString(html.EscapeString(truncateAddress(s.Runner.SmartWallet)))
+			sb.WriteString("\n")
+		}
+		if costLine != "" {
+			sb.WriteString(costLine)
 		}
 	}
 
@@ -219,6 +236,124 @@ func formatSubjectWithBoldName(subject string) string {
 	sb.WriteString(html.EscapeString(suffix))
 
 	return sb.String()
+}
+
+// formatTelegramCostLine renders a single Cost line for the metadata block.
+// Telegram is space-constrained, so this is one line — no per-step bullets,
+// no value-fee detail. For simulations we don't show specific numbers (sim
+// gas prices are conservative chain defaults, not real network conditions);
+// the line falls back to the "⛽ (cost estimated at deploy)" placeholder.
+// Returns "" when there are no fees to render at all.
+func formatTelegramCostLine(s Summary) string {
+	if s.Fees == nil {
+		return ""
+	}
+
+	if s.Workflow != nil && s.Workflow.IsSimulation {
+		return "⛽ <i>(cost estimated at deploy)</i>\n"
+	}
+
+	totalWei := new(big.Int)
+	totalGas := new(big.Int)
+	for _, c := range s.Fees.Cogs {
+		if c == nil {
+			continue
+		}
+		if c.Fee != nil {
+			if w, ok := new(big.Int).SetString(c.Fee.Amount, 10); ok {
+				totalWei.Add(totalWei, w)
+			}
+		}
+		if c.CostType == "gas" && c.GasUnits != "" {
+			if g, ok := new(big.Int).SetString(c.GasUnits, 10); ok {
+				totalGas.Add(totalGas, g)
+			}
+		}
+	}
+
+	var parts []string
+	if totalWei.Sign() > 0 {
+		parts = append(parts, fmt.Sprintf("%s ETH", formatWeiAsEth(totalWei.String())))
+	}
+	if totalGas.Sign() > 0 {
+		parts = append(parts, fmt.Sprintf("(~%s gas)", formatGasUnits(totalGas.String())))
+	}
+	if s.Fees.ExecutionFee != nil && s.Fees.ExecutionFee.Amount != "" {
+		parts = append(parts, fmt.Sprintf("+ $%s platform fee", trimFractionalZeros(s.Fees.ExecutionFee.Amount)))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "<b>Cost:</b> " + strings.Join(parts, " ") + "\n"
+}
+
+// tierShortLabel maps the proto enum string to a display label. Returns "" for
+// EXECUTION_TIER_UNSPECIFIED or unknown values so callers can omit the suffix.
+func tierShortLabel(tier string) string {
+	switch tier {
+	case "EXECUTION_TIER_1":
+		return "Tier 1"
+	case "EXECUTION_TIER_2":
+		return "Tier 2"
+	case "EXECUTION_TIER_3":
+		return "Tier 3"
+	default:
+		return ""
+	}
+}
+
+// formatWeiAsEth converts a wei decimal string to a human-readable ETH string
+// with up to 8 fractional digits, trailing zeros trimmed (min 2 retained).
+func formatWeiAsEth(weiStr string) string {
+	bi, ok := new(big.Int).SetString(weiStr, 10)
+	if !ok {
+		return weiStr
+	}
+	if bi.Sign() == 0 {
+		return "0"
+	}
+	denom := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+	intPart := new(big.Int).Div(bi, denom)
+	rem := new(big.Int).Mod(bi, denom)
+	scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(8), nil)
+	frac := new(big.Int).Mul(rem, scale)
+	frac.Div(frac, denom)
+	fracStr := frac.String()
+	for len(fracStr) < 8 {
+		fracStr = "0" + fracStr
+	}
+	fracStr = strings.TrimRight(fracStr, "0")
+	if len(fracStr) < 2 {
+		fracStr += strings.Repeat("0", 2-len(fracStr))
+	}
+	return fmt.Sprintf("%s.%s", intPart.String(), fracStr)
+}
+
+// formatGasUnits renders a decimal gas-unit string as "422 K" / "1.2 M" / raw.
+func formatGasUnits(gasStr string) string {
+	bi, ok := new(big.Int).SetString(gasStr, 10)
+	if !ok {
+		return gasStr
+	}
+	n := bi.Int64()
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1f M", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%d K", n/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
+// trimFractionalZeros strips trailing zeros after a decimal point. "0.020000" → "0.02".
+func trimFractionalZeros(s string) string {
+	if !strings.Contains(s, ".") {
+		return s
+	}
+	s = strings.TrimRight(s, "0")
+	s = strings.TrimRight(s, ".")
+	return s
 }
 
 func formatTelegramExampleMessage(workflowName, chainName string) string {

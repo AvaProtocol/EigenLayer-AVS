@@ -1010,6 +1010,159 @@ func TestFormatTelegramFromStructured_Annotation(t *testing.T) {
 	t.Logf("Without annotation:\n%s", resultNoAnnotation)
 }
 
+// TestFormatTelegramFromStructured_RunnerAndFees verifies the Runner and Cost
+// blocks render from Summary.Runner / Summary.Fees, mirroring what the
+// context-memory API now returns. Numbers come from the real Sepolia run
+// captured in aggregator-sepolia.log on 2026-05-02 (see PRD).
+func TestFormatTelegramFromStructured_RunnerAndFees(t *testing.T) {
+	summary := Summary{
+		Subject:     "Run #1: Automatically Split Incoming USDC Payments successfully completed",
+		Status:      "success",
+		Network:     "Sepolia",
+		Trigger:     "Transfer event detected: received 1 USDC from 0x804e...1557 on Sepolia",
+		TriggeredAt: "2026-05-02T04:05:29.526Z",
+		Executions: []ExecutionEntry{
+			{Description: "Transferred 0.2 USDC to 0x804e...1557"},
+			{Description: "Transferred 0.5 USDC to 0x25d9...321D"},
+			{Description: "Transferred 0.3 USDC to 0xfE66...bDA9"},
+		},
+		Workflow: &WorkflowInfo{IsSimulation: false},
+		Runner: &RunnerInfo{
+			SmartWallet: "0x8Ee38eB323c14a1752DABDA1cca9661AEE377017",
+			OwnerEOA:    "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
+		},
+		Fees: &FeesInfo{
+			ExecutionFee: &FeeAmount{Amount: "0.020000", Unit: "USD"},
+			Cogs: []*NodeCOGS{{
+				NodeID:   "01KNGW9XDTYKZBTWF9DDJ212V6",
+				StepName: "loop1",
+				CostType: "gas",
+				Fee:      &FeeAmount{Amount: "464554640724", Unit: "WEI"},
+				GasUnits: "422274",
+			}},
+			ValueFee: &ValueFee{
+				Fee:    &FeeAmount{Amount: "0.03", Unit: "PERCENTAGE"},
+				Tier:   "EXECUTION_TIER_1",
+				Reason: "V1 default: workflow contains on-chain execution nodes",
+			},
+		},
+	}
+
+	out := FormatForMessageChannels(summary, "telegram", nil)
+
+	// Runner block: smart wallet only (Owner intentionally omitted on Telegram —
+	// kept compact for the channel). Address is truncated via truncateAddress
+	// (7-char prefix + 4-char suffix), NOT <code>-wrapped (per PRD).
+	if !strings.Contains(out, "<b>Runner:</b> 0x8Ee38...7017") {
+		t.Errorf("missing Runner line in:\n%s", out)
+	}
+	if strings.Contains(out, "<b>Owner:</b>") {
+		t.Errorf("Owner line should NOT render on Telegram, got:\n%s", out)
+	}
+	if strings.Contains(out, "<code>0x8Ee3") {
+		t.Errorf("runner address should not be <code>-wrapped, got:\n%s", out)
+	}
+
+	// Cost line: deployed run shows the aggregated header. Telegram drops
+	// per-step bullets and value-fee detail (kept compact for the channel).
+	wantCost := []string{
+		"<b>Cost:</b>",
+		"0.00000046 ETH",
+		"(~422 K gas)",
+		"+ $0.02 platform fee",
+	}
+	for _, w := range wantCost {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing cost-line fragment %q in:\n%s", w, out)
+		}
+	}
+	if strings.Contains(out, "<b>Value fee:</b>") {
+		t.Errorf("Telegram should not render Value fee line, got:\n%s", out)
+	}
+	if strings.Contains(out, "(cost estimated at deploy)") {
+		t.Errorf("deployed run should not show simulation placeholder, got:\n%s", out)
+	}
+
+	// Cost line follows Runner directly inside the metadata block (no blank
+	// line between them).
+	if !strings.Contains(out, "<b>Runner:</b> 0x8Ee38...7017\n<b>Cost:</b> ") {
+		t.Errorf("Cost line should immediately follow Runner line, got:\n%s", out)
+	}
+
+	t.Logf("Telegram render:\n%s", out)
+}
+
+// TestFormatTelegramFromStructured_Simulation_PlaceholderCost confirms simulation
+// runs render the "(cost estimated at deploy)" placeholder instead of fake-precision
+// numbers. Sim gas prices are conservative chain defaults, so any specific ETH/gas
+// figure would mislead the user.
+func TestFormatTelegramFromStructured_Simulation_PlaceholderCost(t *testing.T) {
+	summary := Summary{
+		Subject:    "Simulation: Test Workflow successfully completed",
+		Status:     "success",
+		Network:    "Sepolia",
+		Executions: []ExecutionEntry{{Description: "(Simulated) Transferred 0.01 ETH"}},
+		Workflow:   &WorkflowInfo{IsSimulation: true},
+		Runner: &RunnerInfo{
+			SmartWallet: "0x8Ee38eB323c14a1752DABDA1cca9661AEE377017",
+			OwnerEOA:    "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
+		},
+		Fees: &FeesInfo{
+			ExecutionFee: &FeeAmount{Amount: "0.020000", Unit: "USD"},
+			Cogs: []*NodeCOGS{{
+				NodeID:   "transfer1",
+				StepName: "transfer1",
+				CostType: "gas",
+				Fee:      &FeeAmount{Amount: "10500000000000", Unit: "WEI"},
+				GasUnits: "21000",
+			}},
+		},
+	}
+
+	out := FormatForMessageChannels(summary, "telegram", nil)
+
+	if !strings.Contains(out, "⛽ <i>(cost estimated at deploy)</i>") {
+		t.Errorf("simulation should render the deploy-time placeholder, got:\n%s", out)
+	}
+	for _, banned := range []string{"<b>Cost:</b>", "0.0000105 ETH", "21 K gas", "platform fee"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("simulation should not render %q, got:\n%s", banned, out)
+		}
+	}
+}
+
+// TestFormatWeiAsEth verifies the wei→ETH formatter handles the realistic range.
+func TestFormatWeiAsEth(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"0", "0"},
+		{"1000000000000000000", "1.00"}, // 1 ETH
+		{"464554640724", "0.00000046"},  // realistic gas cost
+		{"10500000000000", "0.0000105"}, // 21K × 0.5 gwei
+		{"22500000000000", "0.0000225"}, // 45K × 0.5 gwei
+		{"5000000000000000000", "5.00"}, // 5 ETH
+	}
+	for _, c := range cases {
+		if got := formatWeiAsEth(c.in); got != c.want {
+			t.Errorf("formatWeiAsEth(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestFormatGasUnits verifies the gas-units formatter renders human-readable strings.
+func TestFormatGasUnits(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"500", "500"},
+		{"21000", "21 K"},
+		{"422274", "422 K"},
+		{"1500000", "1.5 M"},
+	}
+	for _, c := range cases {
+		if got := formatGasUnits(c.in); got != c.want {
+			t.Errorf("formatGasUnits(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // TestTruncateAddress tests the address truncation helper function
 func TestTruncateAddress(t *testing.T) {
 	tests := []struct {
