@@ -1429,6 +1429,93 @@ func ComposeSummary(vm *VM, currentStepName string) Summary {
 		ExecutedSteps: executedSteps,
 		TotalSteps:    totalWorkflowSteps,
 		SkippedSteps:  skippedCount,
+		Runner:        buildRunnerFromVM(vm),
+		Fees:          buildFeesFromVM(vm),
+		Workflow:      &WorkflowInfo{IsSimulation: vm != nil && vm.IsSimulation},
+	}
+}
+
+// buildRunnerFromVM extracts the smart wallet and owner EOA from the VM's task
+// state. Used by both ComposeSummary (deterministic) and ContextMemorySummarizer
+// so notifications and SendGrid template variables share one source of truth.
+// Falls back to settings.runner / vm.TaskOwner when task fields are absent.
+func buildRunnerFromVM(vm *VM) *RunnerInfo {
+	if vm == nil {
+		return nil
+	}
+	smartWallet := ""
+	ownerEOA := ""
+	if vm.task != nil && vm.task.Task != nil {
+		smartWallet = vm.task.SmartWalletAddress
+		ownerEOA = vm.task.Owner
+	}
+	vm.mu.Lock()
+	if smartWallet == "" {
+		if aaSender, ok := vm.vars["aa_sender"].(string); ok && aaSender != "" {
+			smartWallet = aaSender
+		}
+	}
+	if smartWallet == "" {
+		if settings, ok := vm.vars["settings"].(map[string]interface{}); ok {
+			if runner, ok := settings["runner"].(string); ok && strings.TrimSpace(runner) != "" {
+				smartWallet = runner
+			}
+		}
+	}
+	vm.mu.Unlock()
+	if ownerEOA == "" && vm.TaskOwner != (common.Address{}) {
+		ownerEOA = vm.TaskOwner.Hex()
+	}
+	if smartWallet == "" && ownerEOA == "" {
+		return nil
+	}
+	return &RunnerInfo{SmartWallet: smartWallet, OwnerEOA: ownerEOA}
+}
+
+// buildFeesFromVM computes the per-execution fee breakdown from VM state using
+// the same helpers (buildExecutionFee / buildCOGSFromSteps / buildValueFee)
+// that populate the persisted Execution.Fee — so notification fees match the
+// stored execution exactly. Reads globalFeeRates (set at engine startup);
+// nil falls back to GetDefaultFeeRatesConfig() defaults.
+func buildFeesFromVM(vm *VM) *FeesInfo {
+	if vm == nil {
+		return nil
+	}
+	var taskNodes []*avsproto.TaskNode
+	if vm.task != nil && vm.task.Task != nil {
+		taskNodes = vm.task.Task.Nodes
+	}
+
+	out := &FeesInfo{
+		ExecutionFee: protoFeeToFeeAmount(buildExecutionFee(globalFeeRates)),
+		ValueFee:     protoValueFeeToValueFee(buildValueFee(taskNodes, globalFeeRates)),
+	}
+	for _, c := range buildCOGSFromSteps(vm.ExecutionLogs) {
+		out.Cogs = append(out.Cogs, &NodeCOGS{
+			NodeID:   c.GetNodeId(),
+			CostType: c.GetCostType(),
+			Fee:      protoFeeToFeeAmount(c.GetFee()),
+			GasUnits: c.GetGasUnits(),
+		})
+	}
+	return out
+}
+
+func protoFeeToFeeAmount(f *avsproto.Fee) *FeeAmount {
+	if f == nil {
+		return nil
+	}
+	return &FeeAmount{Amount: f.GetAmount(), Unit: f.GetUnit()}
+}
+
+func protoValueFeeToValueFee(v *avsproto.ValueFee) *ValueFee {
+	if v == nil {
+		return nil
+	}
+	return &ValueFee{
+		Fee:    protoFeeToFeeAmount(v.GetFee()),
+		Tier:   v.GetTier().String(),
+		Reason: v.GetReason(),
 	}
 }
 

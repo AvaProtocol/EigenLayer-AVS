@@ -34,6 +34,18 @@ func SetSummarizer(s Summarizer) {
 	globalSummarizer = s
 }
 
+// globalFeeRates is the aggregator's fee config, set once at engine startup.
+// Used by Runner/Fees population helpers in both Summarize() and ComposeSummary()
+// so notifications surface the same fee numbers as EstimateFees() and the
+// persisted Execution.Fee — single source of truth.
+var globalFeeRates *config.FeeRatesConfig
+
+// SetFeeRates sets the global fee rates config used by Summary.Fees population.
+// Engine startup wires this from config.FeeRates. nil falls back to defaults.
+func SetFeeRates(rates *config.FeeRatesConfig) {
+	globalFeeRates = rates
+}
+
 // ComposeSummarySmart tries the configured summarizer (context-memory API) with strict timeout
 // and falls back to deterministic ComposeSummary on any failure. The summary is automatically
 // formatted for the appropriate channel (email or chat) by the REST API runner
@@ -108,7 +120,6 @@ func NewContextMemorySummarizerFromAggregatorConfig(c *config.Config) Summarizer
 		baseURL:    baseURL,
 		authToken:  authToken,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
-		feeRates:   c.FeeRates,
 	}
 }
 

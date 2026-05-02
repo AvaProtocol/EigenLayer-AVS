@@ -1050,11 +1050,17 @@ func TestFormatTelegramFromStructured_RunnerAndFees(t *testing.T) {
 
 	out := FormatForMessageChannels(summary, "telegram", nil)
 
-	// Runner block: smart wallet only (Owner intentionally omitted on Telegram —
-	// kept compact for the channel). Address is truncated via truncateAddress
-	// (7-char prefix + 4-char suffix), NOT <code>-wrapped (per PRD).
-	if !strings.Contains(out, "<b>Runner:</b> 0x8Ee38...7017") {
-		t.Errorf("missing Runner line in:\n%s", out)
+	// Runner line: smart wallet + chain qualifier on a single line ("Runner:
+	// 0x… on Sepolia"). Owner intentionally omitted on Telegram — kept compact
+	// for the channel. Address is truncated (7-char prefix + 4-char suffix),
+	// NOT <code>-wrapped (per PRD).
+	if !strings.Contains(out, "<b>Runner:</b> 0x8Ee38...7017 on Sepolia") {
+		t.Errorf("missing combined Runner+chain line in:\n%s", out)
+	}
+	// Standalone Network line should NOT render when Runner is present —
+	// chain is folded into the Runner line.
+	if strings.Contains(out, "<b>Network:</b>") {
+		t.Errorf("standalone Network line should not render when Runner is present, got:\n%s", out)
 	}
 	if strings.Contains(out, "<b>Owner:</b>") {
 		t.Errorf("Owner line should NOT render on Telegram, got:\n%s", out)
@@ -1085,7 +1091,7 @@ func TestFormatTelegramFromStructured_RunnerAndFees(t *testing.T) {
 
 	// Cost line follows Runner directly inside the metadata block (no blank
 	// line between them).
-	if !strings.Contains(out, "<b>Runner:</b> 0x8Ee38...7017\n<b>Cost:</b> ") {
+	if !strings.Contains(out, "<b>Runner:</b> 0x8Ee38...7017 on Sepolia\n<b>Cost:</b> ") {
 		t.Errorf("Cost line should immediately follow Runner line, got:\n%s", out)
 	}
 
@@ -1545,7 +1551,8 @@ func TestComposeSummary_SimulateTaskFromClientPayload(t *testing.T) {
 
 	expectedTelegramContents := []string{
 		"✅ <code>Simulation: Test settings.name</code> successfully completed",
-		"<b>Network:</b> Sepolia",
+		"<b>Runner:</b> ", // chain qualifier folded onto Runner line — see formatTelegramFromStructured
+		" on Sepolia",
 		"<b>Time:</b>",
 		"<b>Trigger:</b> (Simulated) Scheduled task ran on Sepolia",
 		"<b>Executed:</b>",
@@ -1557,9 +1564,14 @@ func TestComposeSummary_SimulateTaskFromClientPayload(t *testing.T) {
 		}
 	}
 
-	// Telegram should NOT contain annotation for simulate_task
-	if strings.Contains(telegram, "<i>") {
-		t.Errorf("Telegram output should not contain italic annotation for simulate_task\nFull output:\n%s", telegram)
+	// Standalone Network line should NOT render — chain is folded into Runner.
+	if strings.Contains(telegram, "<b>Network:</b>") {
+		t.Errorf("standalone Network line should not render when Runner is present, got:\n%s", telegram)
+	}
+
+	// The simulation Cost placeholder uses italic text; allow that but no other italics.
+	if strings.Contains(telegram, "<i>") && !strings.Contains(telegram, "<i>(cost estimated at deploy)</i>") {
+		t.Errorf("Telegram should not contain italic annotation other than the cost placeholder, got:\n%s", telegram)
 	}
 
 	t.Logf("Subject: %s", summary.Subject)

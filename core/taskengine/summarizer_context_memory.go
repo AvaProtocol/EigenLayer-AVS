@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -25,9 +24,6 @@ type ContextMemorySummarizer struct {
 	baseURL    string
 	authToken  string
 	httpClient *http.Client
-	// feeRates is the aggregator-level fee config used to populate the per-execution
-	// fee breakdown in summarize requests. nil falls back to GetDefaultFeeRatesConfig().
-	feeRates *config.FeeRatesConfig
 }
 
 // NewContextMemorySummarizer creates a new summarizer that calls context-memory API
@@ -58,7 +54,6 @@ type contextMemorySummarizeRequest struct {
 	CurrentNodeName string                                 `json:"currentNodeName,omitempty"`
 	TokenMetadata   map[string]*contextMemoryTokenMetadata `json:"tokenMetadata,omitempty"` // All tokens involved, keyed by address (lowercase)
 	RunNumber       int64                                  `json:"runNumber,omitempty"`     // 1-based run number for real executions; ignored when isSimulation is true
-	Fees            *contextMemoryFees                     `json:"fees"`                    // Per-execution fee breakdown (executionFee + cogs[] + valueFee). See FEE_ESTIMATION.md.
 }
 
 type contextMemoryStepDigest struct {
@@ -72,45 +67,6 @@ type contextMemoryStepDigest struct {
 	Metadata         interface{}                 `json:"metadata,omitempty"`
 	ExecutionContext interface{}                 `json:"executionContext,omitempty"` // Actual execution mode (is_simulated, provider, chain_id)
 	TokenMetadata    *contextMemoryTokenMetadata `json:"tokenMetadata,omitempty"`    // Token info for the contract (symbol, decimals)
-	GasUsed          string                      `json:"gasUsed,omitempty"`          // Decimal string, gas units consumed by this step's UserOp
-	GasPrice         string                      `json:"gasPrice,omitempty"`         // Decimal string, gas price in wei per gas unit
-	TotalGasCost     string                      `json:"totalGasCost,omitempty"`     // Decimal string, gas_used × gas_price in wei
-}
-
-// contextMemoryFee mirrors the avs.proto Fee shape with stable JSON keys.
-// Used inside contextMemoryFees so the request stays self-contained even if
-// the proto generator changes its JSON tags.
-type contextMemoryFee struct {
-	Amount string `json:"amount"` // Numeric value as decimal string (precision-safe)
-	Unit   string `json:"unit"`   // "USD" | "WEI" | "PERCENTAGE"
-}
-
-type contextMemoryNodeCOGS struct {
-	NodeID   string            `json:"nodeId"`
-	CostType string            `json:"costType"` // "gas" | "external_api" | "wallet_creation"
-	Fee      *contextMemoryFee `json:"fee"`
-	GasUnits string            `json:"gasUnits,omitempty"`
-}
-
-type contextMemoryValueFee struct {
-	Fee                  *contextMemoryFee `json:"fee"` // {amount, unit:"PERCENTAGE"}
-	Tier                 string            `json:"tier"`
-	ValueBase            string            `json:"valueBase,omitempty"`
-	ClassificationMethod string            `json:"classificationMethod,omitempty"`
-	Confidence           float32           `json:"confidence,omitempty"`
-	Reason               string            `json:"reason,omitempty"`
-}
-
-// contextMemoryFees is the per-execution fee breakdown shipped to context-memory.
-// Mirrors Execution.execution_fee / cogs[] / value_fee in avs.proto. For simulations
-// the values are forward-looking estimates; for deployed runs cogs[] is derived from
-// real receipts. The aggregator does NOT compute a total — context-memory sums:
-//
-//	total = executionFee + Σ(cogs[].fee) + (valueFee.fee × tx_value)
-type contextMemoryFees struct {
-	ExecutionFee *contextMemoryFee        `json:"executionFee,omitempty"` // Flat platform fee, USD
-	Cogs         []*contextMemoryNodeCOGS `json:"cogs"`                   // Per-node WEI cost (gas, external_api, wallet_creation)
-	ValueFee     *contextMemoryValueFee   `json:"valueFee,omitempty"`     // Workflow-level percentage of tx value
 }
 
 // contextMemoryTokenMetadata contains ERC20 token information for formatting
@@ -172,38 +128,6 @@ type contextMemoryExecutionEntry struct {
 	TxHash      string `json:"txHash,omitempty"`
 }
 
-// contextMemoryRunnerResp matches the API response runner block (body.runner).
-// See docs/changes/20260501-summary-runner-and-fees-sections.md.
-type contextMemoryRunnerResp struct {
-	SmartWallet string `json:"smartWallet"`
-	OwnerEOA    string `json:"ownerEOA"`
-}
-
-// contextMemoryNodeCOGSResp mirrors a cogs[] entry on the response. Adds
-// stepName/txHash joins computed by context-memory from steps[].
-type contextMemoryNodeCOGSResp struct {
-	NodeID   string            `json:"nodeId"`
-	StepName string            `json:"stepName,omitempty"`
-	CostType string            `json:"costType"`
-	Fee      *contextMemoryFee `json:"fee"`
-	GasUnits string            `json:"gasUnits,omitempty"`
-	TxHash   string            `json:"txHash,omitempty"`
-}
-
-// contextMemoryValueFeeResp is the response-side ValueFee (diagnostic fields stripped).
-type contextMemoryValueFeeResp struct {
-	Fee    *contextMemoryFee `json:"fee"`
-	Tier   string            `json:"tier"`
-	Reason string            `json:"reason,omitempty"`
-}
-
-// contextMemoryFeesResp is the response-side fees block.
-type contextMemoryFeesResp struct {
-	ExecutionFee *contextMemoryFee            `json:"executionFee,omitempty"`
-	Cogs         []*contextMemoryNodeCOGSResp `json:"cogs"`
-	ValueFee     *contextMemoryValueFeeResp   `json:"valueFee,omitempty"`
-}
-
 // contextMemorySummarizeBody contains the structured workflow execution summary
 // The aggregator is responsible for rendering this into email HTML or Telegram format
 type contextMemorySummarizeBody struct {
@@ -223,11 +147,6 @@ type contextMemorySummarizeBody struct {
 	Transfers []contextMemoryTransferInfo `json:"transfers,omitempty"` // Transfer details
 	Balances  []contextMemoryBalanceInfo  `json:"balances,omitempty"`  // Balance snapshots
 	Workflow  *contextMemoryWorkflowInfo  `json:"workflow,omitempty"`  // Workflow metadata
-
-	// Runner and fees come from the structured response shape introduced in
-	// docs/changes/20260501-summary-runner-and-fees-sections.md (context-memory).
-	Runner *contextMemoryRunnerResp `json:"runner,omitempty"`
-	Fees   *contextMemoryFeesResp   `json:"fees,omitempty"`
 }
 
 // SummarizeResponse matches the TypeScript SummarizeResponse
@@ -387,40 +306,10 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 		executions = append(executions, entry)
 	}
 
-	// Convert Runner block (response carries it; renderer falls back to req on absence)
-	var runner *RunnerInfo
-	if apiResp.Body.Runner != nil {
-		runner = &RunnerInfo{
-			SmartWallet: apiResp.Body.Runner.SmartWallet,
-			OwnerEOA:    apiResp.Body.Runner.OwnerEOA,
-		}
-	}
-
-	// Convert Fees block from response
-	var fees *FeesInfo
-	if apiResp.Body.Fees != nil {
-		fees = &FeesInfo{
-			ExecutionFee: respFeeToFeeAmount(apiResp.Body.Fees.ExecutionFee),
-			ValueFee:     respValueFeeToValueFee(apiResp.Body.Fees.ValueFee),
-		}
-		if len(apiResp.Body.Fees.Cogs) > 0 {
-			fees.Cogs = make([]*NodeCOGS, 0, len(apiResp.Body.Fees.Cogs))
-			for _, c := range apiResp.Body.Fees.Cogs {
-				if c == nil {
-					continue
-				}
-				fees.Cogs = append(fees.Cogs, &NodeCOGS{
-					NodeID:   c.NodeID,
-					StepName: c.StepName,
-					CostType: c.CostType,
-					Fee:      respFeeToFeeAmount(c.Fee),
-					GasUnits: c.GasUnits,
-					TxHash:   c.TxHash,
-				})
-			}
-		}
-	}
-
+	// Runner / Fees are aggregator-local (not from the API response). Both helpers
+	// read VM state directly so notifications surface the same fee numbers as
+	// EstimateFees() and the persisted Execution.Fee. See PRD:
+	// docs/changes/20260501-summary-runner-and-fees-sections.md.
 	return Summary{
 		Subject:       apiResp.Subject,
 		Body:          composePlainTextBodyFromAPI(apiResp.Body),
@@ -439,27 +328,9 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 		Transfers:     transfers,
 		Balances:      balances,
 		Workflow:      workflow,
-		Runner:        runner,
-		Fees:          fees,
+		Runner:        buildRunnerFromVM(vm),
+		Fees:          buildFeesFromVM(vm),
 	}, nil
-}
-
-func respFeeToFeeAmount(f *contextMemoryFee) *FeeAmount {
-	if f == nil {
-		return nil
-	}
-	return &FeeAmount{Amount: f.Amount, Unit: f.Unit}
-}
-
-func respValueFeeToValueFee(v *contextMemoryValueFeeResp) *ValueFee {
-	if v == nil {
-		return nil
-	}
-	return &ValueFee{
-		Fee:    respFeeToFeeAmount(v.Fee),
-		Tier:   v.Tier,
-		Reason: v.Reason,
-	}
 }
 
 // composePlainTextBodyFromAPI creates a plain text body from the structured API response
@@ -562,9 +433,6 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, 
 			OutputData:       ExtractStepOutput(log),                        // All 15 output types via extraction function
 			Metadata:         nil,
 			ExecutionContext: nil,
-			GasUsed:          log.GetGasUsed(),
-			GasPrice:         log.GetGasPrice(),
-			TotalGasCost:     log.GetTotalGasCost(),
 		}
 		if log.GetError() != "" {
 			step.Error = log.GetError()
@@ -778,11 +646,6 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, 
 		}
 	}
 
-	var taskNodes []*avsproto.TaskNode
-	if vm.task != nil && vm.task.Task != nil {
-		taskNodes = vm.task.Task.Nodes
-	}
-
 	return &contextMemorySummarizeRequest{
 		OwnerEOA:        ownerEOA,
 		Name:            workflowName,
@@ -797,49 +660,7 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, 
 		CurrentNodeName: currentStepName,
 		TokenMetadata:   tokenMetadataMap,
 		RunNumber:       executionCount, // 1-based for real executions; ignored when isSimulation is true
-		Fees:            buildContextMemoryFees(taskNodes, vm.ExecutionLogs, c.feeRates),
 	}, nil
-}
-
-// buildContextMemoryFees converts the aggregator's fee breakdown into the JSON
-// shape shipped to context-memory. feeRates may be nil — the underlying
-// builders fall back to GetDefaultFeeRatesConfig() defaults.
-func buildContextMemoryFees(nodes []*avsproto.TaskNode, steps []*avsproto.Execution_Step, feeRates *config.FeeRatesConfig) *contextMemoryFees {
-	out := &contextMemoryFees{
-		ExecutionFee: protoFeeToContextMemoryFee(buildExecutionFee(feeRates)),
-		Cogs:         make([]*contextMemoryNodeCOGS, 0),
-		ValueFee:     protoValueFeeToContextMemoryValueFee(buildValueFee(nodes, feeRates)),
-	}
-	for _, c := range buildCOGSFromSteps(steps) {
-		out.Cogs = append(out.Cogs, &contextMemoryNodeCOGS{
-			NodeID:   c.GetNodeId(),
-			CostType: c.GetCostType(),
-			Fee:      protoFeeToContextMemoryFee(c.GetFee()),
-			GasUnits: c.GetGasUnits(),
-		})
-	}
-	return out
-}
-
-func protoFeeToContextMemoryFee(f *avsproto.Fee) *contextMemoryFee {
-	if f == nil {
-		return nil
-	}
-	return &contextMemoryFee{Amount: f.GetAmount(), Unit: f.GetUnit()}
-}
-
-func protoValueFeeToContextMemoryValueFee(v *avsproto.ValueFee) *contextMemoryValueFee {
-	if v == nil {
-		return nil
-	}
-	return &contextMemoryValueFee{
-		Fee:                  protoFeeToContextMemoryFee(v.GetFee()),
-		Tier:                 v.GetTier().String(),
-		ValueBase:            v.GetValueBase(),
-		ClassificationMethod: v.GetClassificationMethod(),
-		Confidence:           v.GetConfidence(),
-		Reason:               v.GetReason(),
-	}
 }
 
 // isERC20Method returns true if the method name suggests this is an ERC20 token interaction
