@@ -55,49 +55,6 @@ type RpcServer struct {
 	chainID          *big.Int
 }
 
-// FallbackPriceService provides hardcoded fallback prices when Moralis is unavailable
-type FallbackPriceService struct{}
-
-func newFallbackPriceService() *FallbackPriceService {
-	return &FallbackPriceService{}
-}
-
-func (fps *FallbackPriceService) GetNativeTokenPriceUSD(chainID int64) (*big.Float, error) {
-	// Only include chains that the aggregator actually supports: Ethereum and Base
-	fallbackPrices := map[int64]float64{
-		1:        2500.0, // Ethereum Mainnet
-		11155111: 2500.0, // Ethereum Sepolia
-		8453:     2500.0, // Base Mainnet
-		84532:    2500.0, // Base Sepolia
-	}
-
-	if price, exists := fallbackPrices[chainID]; exists {
-		return big.NewFloat(price), nil
-	}
-	return big.NewFloat(2500.0), nil // Default ETH price
-}
-
-func (fps *FallbackPriceService) GetNativeTokenSymbol(chainID int64) string {
-	// Only include chains that the aggregator actually supports: Ethereum and Base
-	// All supported chains use ETH as the native token
-	tokenSymbols := map[int64]string{
-		1:        "ETH", // Ethereum Mainnet
-		11155111: "ETH", // Ethereum Sepolia
-		8453:     "ETH", // Base Mainnet
-		84532:    "ETH", // Base Sepolia
-	}
-
-	if symbol, exists := tokenSymbols[chainID]; exists {
-		return symbol
-	}
-	return "ETH"
-}
-
-// FallbackPriceInfo provides information about fallback pricing for logging
-func (fps *FallbackPriceService) FallbackPriceInfo() string {
-	return "using conservative ETH price of $2500"
-}
-
 // Get nonce of an existing smart wallet of a given owner
 func (r *RpcServer) GetWallet(ctx context.Context, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
 	user, err := r.verifyAuth(ctx)
@@ -1191,23 +1148,15 @@ func (r *RpcServer) EstimateFees(ctx context.Context, req *avsproto.EstimateFees
 		return nil, status.Errorf(codes.InvalidArgument, "expire_at must be after created_at")
 	}
 
-	// Create price service (Moralis if API key available, otherwise fallback)
+	// Price service is required for USD-equivalent fee numbers. When Moralis
+	// isn't configured, callers receive cogs (WEI) and executionFee (USD) as
+	// raw values without USD-equivalent conversions — and notifications render
+	// "$?" rather than a fabricated number.
 	var priceService taskengine.PriceService
 	if r.config.MoralisApiKey != "" {
 		priceService = services.GetMoralisService(r.config.MoralisApiKey, r.config.Logger)
 	} else {
-		priceService = newFallbackPriceService()
-		var fallbackPriceInfo string
-		// Try to extract fallback price info for logging
-		type fallbackPricer interface {
-			FallbackPriceInfo() string
-		}
-		if fp, ok := priceService.(fallbackPricer); ok {
-			fallbackPriceInfo = fp.FallbackPriceInfo()
-		} else {
-			fallbackPriceInfo = "unknown fallback price"
-		}
-		r.config.Logger.Warn(fmt.Sprintf("No Moralis API key configured, using fallback price service for fee estimation (%s)", fallbackPriceInfo))
+		r.config.Logger.Warn("No Moralis API key configured; fee estimates will lack USD-equivalent conversions and notifications will render $? for token totals")
 	}
 
 	// Create fee estimator - use configuration-aware version if fee rates are configured

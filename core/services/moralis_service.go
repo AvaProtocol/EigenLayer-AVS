@@ -193,6 +193,53 @@ func (ms *MoralisService) GetNativeTokenSymbol(chainID int64) string {
 	return "ETH" // Default fallback
 }
 
+// GetERC20PriceUSD fetches the USD price for an ERC20 contract on the given
+// chain. Returns an error when the price isn't available — callers render
+// "$?" rather than fabricate a number. No internal $1.00 / fallback.
+//
+// NOTE: Stablecoin shortcut (taskengine.LookupStablecoinSymbol → $1.00) is
+// applied at the caller layer in taskengine, not here, to keep the
+// services/taskengine dependency direction correct.
+func (ms *MoralisService) GetERC20PriceUSD(chainID int64, contractAddress string) (*big.Float, error) {
+	if contractAddress == "" {
+		return nil, fmt.Errorf("contract address required")
+	}
+
+	moralisChain := ms.chainIDToMoralisChain(chainID)
+	if moralisChain == "" {
+		return nil, fmt.Errorf("unsupported chain ID: %d", chainID)
+	}
+
+	cacheKey := fmt.Sprintf("erc20_%d_%s", chainID, contractAddress)
+	if cached := ms.getCachedPrice(cacheKey); cached != nil {
+		return cached.Price, nil
+	}
+
+	if ms.apiKey == "" {
+		return nil, fmt.Errorf("moralis API key not configured")
+	}
+
+	url := fmt.Sprintf("https://deep-index.moralis.io/api/v2.2/erc20/%s/price", contractAddress)
+	resp, err := ms.httpClient.R().
+		SetQueryParams(map[string]string{"chain": moralisChain}).
+		SetHeader("X-API-Key", ms.apiKey).
+		SetResult(&MoralisTokenPriceResponse{}).
+		Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("moralis ERC20 price request failed: %w", err)
+	}
+	if resp.StatusCode() != 200 {
+		return nil, fmt.Errorf("moralis ERC20 price returned status %d: %s", resp.StatusCode(), resp.String())
+	}
+	result := resp.Result().(*MoralisTokenPriceResponse)
+	if result.UsdPrice <= 0 {
+		return nil, fmt.Errorf("invalid ERC20 price from Moralis: %f", result.UsdPrice)
+	}
+	price := big.NewFloat(result.UsdPrice)
+	ms.setCachedPrice(cacheKey, price, "")
+	return price, nil
+}
+
 // GetPriceDataAge returns the age of cached price data in seconds
 func (ms *MoralisService) GetPriceDataAge(chainID int64) int64 {
 	cacheKey := fmt.Sprintf("chain_%d", chainID)

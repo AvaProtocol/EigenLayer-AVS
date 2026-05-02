@@ -1,5 +1,7 @@
 package taskengine
 
+import "strings"
+
 // Ethereum gas cost constants
 const (
 	// StandardGasCost represents the standard gas cost for a simple Ethereum transaction (21000 gas)
@@ -42,6 +44,75 @@ func GetDefaultGasPrice(chainID uint64) uint64 {
 		return v
 	}
 	return DefaultGasPrice
+}
+
+// StablecoinInfo carries the display symbol and ERC20 decimals for a stablecoin
+// hard-coded as $1.00. Decimals are required to format raw token amounts.
+type StablecoinInfo struct {
+	Symbol   string
+	Decimals uint32
+}
+
+// Stablecoins maps chain ID → lowercased contract address → StablecoinInfo
+// for fully-reserved or strongly-collateralized USD stablecoins. Lookups
+// treat each listed address as exactly $1.00 USD without a price-service
+// network hop — covers the bulk of real-world value-fee calculation cases.
+// Tokens not in this map fall through to PriceService.GetERC20PriceUSD; on
+// miss the renderer prints the "$?" placeholder.
+//
+// Inclusion criteria (high bar — incorrect ≈$1.00 assumptions miscompute fees):
+//   - Fully reserved by audited issuer (Circle, Paxos, Tether, PayPal, Ripple,
+//     First Digital, TrueUSD, Gemini), OR
+//   - Overcollateralized by crypto with strong peg history (DAI, USDS, LUSD,
+//     sDAI which redeems 1:1 against DAI).
+//
+// Algorithmic / synthetic / new-untested stablecoins (USDe, USDD, USD1, USDF,
+// FRAX) are deliberately excluded — they go through the price service like any
+// other ERC20 so a depeg event surfaces correctly.
+var Stablecoins = map[uint64]map[string]StablecoinInfo{
+	// Ethereum Mainnet
+	1: {
+		"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {"USDC", 6},
+		"0xdac17f958d2ee523a2206206994597c13d831ec7": {"USDT", 6},
+		"0x6b175474e89094c44da98b954eedeac495271d0f": {"DAI", 18},
+		"0xdc035d45d973e3ec169d2276ddab16f1e407384f": {"USDS", 18},
+		"0x6c3ea9036406852006290770bedfcaba0e23a0e8": {"PYUSD", 6},
+		"0x83f20f44975d03b1b09e64809b757c47f942beea": {"sDAI", 18},
+		"0xc5f0f7b66764f6ec8c8dff7ba683102295e16409": {"FDUSD", 18},
+		"0x0000000000085d4780b73119b644ae5ecd22b376": {"TUSD", 18},
+		"0x056fd409e1d7a124bd7017459dfea2f387b6d5cd": {"GUSD", 2},
+		"0x5f98805a4e8be255a32880fdec7f6728c6568ba0": {"LUSD", 18},
+		"0x8292bb45bf1ee4d140127049757c2e0ff06317ed": {"RLUSD", 18},
+		"0xe343167631d89b6ffc58b88d6b7fb0228795491d": {"USDG", 6},
+	},
+	// Base Mainnet
+	8453: {
+		"0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {"USDC", 6}, // Circle native
+		"0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca": {"USDC", 6}, // bridged (legacy)
+		"0xfde4c96c8593536e31f229ea8f37b2ada2699bb2": {"USDT", 6},
+		"0x50c5725949a6f0c72e6c4a641f24049a917db0cb": {"DAI", 18},
+	},
+	// Ethereum Sepolia (testnet)
+	11155111: {
+		"0x1c7d4b196cb0c7b01d743fbc6116a902379c7238": {"USDC", 6}, // Circle test deployment
+		"0xaa8e23fb1079ea71e0a56f48a2aa51851d8433d0": {"USDT", 6},
+	},
+	// Base Sepolia (testnet)
+	84532: {
+		"0x036cbd53842c5426634e7929541ec2318f3dcf7e": {"USDC", 6}, // Circle test deployment
+	},
+}
+
+// LookupStablecoin returns symbol+decimals for a stablecoin contract, or
+// (StablecoinInfo{}, false) if the address isn't in the chain's hard-coded
+// $1.00 list. Address matching is case-insensitive.
+func LookupStablecoin(chainID uint64, contractAddress string) (StablecoinInfo, bool) {
+	chainMap, ok := Stablecoins[chainID]
+	if !ok {
+		return StablecoinInfo{}, false
+	}
+	info, ok := chainMap[strings.ToLower(contractAddress)]
+	return info, ok
 }
 
 // Contract method constants

@@ -3,6 +3,7 @@ package taskengine
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"os"
 	"strings"
 	"testing"
@@ -1105,6 +1106,137 @@ func TestFormatTelegramFromStructured_MultiToken_USDPlaceholder(t *testing.T) {
 	if !strings.Contains(out, want) {
 		t.Errorf("missing multi-token Cost line %q in:\n%s", want, out)
 	}
+}
+
+// TestPercentOfRaw verifies the value-fee percentage math against raw amounts.
+func TestPercentOfRaw(t *testing.T) {
+	pct := func(s string) *big.Float {
+		v, _ := new(big.Float).SetString(s)
+		return v
+	}
+	cases := []struct {
+		name string
+		raw  string
+		pct  *big.Float
+		want string
+	}{
+		{"1 USDC × 0.03% = 300 raw (6 decimals)", "1000000", pct("0.0003"), "300"},
+		{"1000 USDC × 0.03%", "1000000000", pct("0.0003"), "300000"},
+		{"zero raw", "0", pct("0.0003"), ""},
+		{"zero pct", "1000000", pct("0"), ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rawInt, _ := new(big.Int).SetString(tc.raw, 10)
+			got := percentOfRaw(rawInt, tc.pct)
+			if tc.want == "" {
+				if got != nil && got.Sign() > 0 {
+					t.Errorf("expected nil/zero, got %s", got.String())
+				}
+				return
+			}
+			if got == nil || got.String() != tc.want {
+				t.Errorf("percentOfRaw(%s, %s) = %v, want %s", tc.raw, tc.pct.String(), got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTokenBucketToTokenTotal verifies stablecoin shortcut + zero-rounding.
+func TestTokenBucketToTokenTotal(t *testing.T) {
+	cases := []struct {
+		name       string
+		bucket     *tokenBucket
+		chainID    uint64
+		wantNil    bool
+		wantAmount string
+		wantUnit   string
+		wantUSD    string
+	}{
+		{
+			name: "USDC mainnet 1.0 token via stablecoin shortcut",
+			bucket: &tokenBucket{
+				contract: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+				symbol:   "USDC",
+				decimals: 6,
+				raw:      mustBigInt("1000000"),
+			},
+			chainID:    1,
+			wantAmount: "1",
+			wantUnit:   "USDC",
+			wantUSD:    "1",
+		},
+		{
+			name: "0.0003 USDC via stablecoin shortcut",
+			bucket: &tokenBucket{
+				contract: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+				symbol:   "USDC",
+				decimals: 6,
+				raw:      mustBigInt("300"),
+			},
+			chainID:    1,
+			wantAmount: "0.0003",
+			wantUnit:   "USDC",
+			wantUSD:    "0",
+		},
+		{
+			name: "below precision rounds to zero — omit",
+			bucket: &tokenBucket{
+				contract: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+				symbol:   "USDC",
+				decimals: 6,
+				raw:      mustBigInt("0"),
+			},
+			chainID: 1,
+			wantNil: true,
+		},
+		{
+			name: "unknown ERC20 with no price service → empty USD",
+			bucket: &tokenBucket{
+				contract: "0xff00000000000000000000000000000000000099",
+				symbol:   "?",
+				decimals: 18,
+				raw:      mustBigInt("1000000000000000000"),
+			},
+			chainID:    1,
+			wantAmount: "1",
+			wantUnit:   "?",
+			wantUSD:    "",
+		},
+	}
+	// Ensure no globalPriceService leaks into these tests.
+	prev := globalPriceService
+	globalPriceService = nil
+	t.Cleanup(func() { globalPriceService = prev })
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.bucket.toTokenTotal(tc.chainID)
+			if tc.wantNil {
+				if got != nil {
+					t.Errorf("expected nil, got %+v", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("expected non-nil")
+			}
+			if got.Amount != tc.wantAmount {
+				t.Errorf("Amount = %q, want %q", got.Amount, tc.wantAmount)
+			}
+			if got.Unit != tc.wantUnit {
+				t.Errorf("Unit = %q, want %q", got.Unit, tc.wantUnit)
+			}
+			if got.USD != tc.wantUSD {
+				t.Errorf("USD = %q, want %q", got.USD, tc.wantUSD)
+			}
+		})
+	}
+}
+
+func mustBigInt(s string) *big.Int {
+	v, _ := new(big.Int).SetString(s, 10)
+	return v
 }
 
 // TestFormatTelegramFromStructured_Simulation_PlaceholderCost confirms simulation

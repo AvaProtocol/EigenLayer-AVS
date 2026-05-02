@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -26,6 +27,11 @@ func (mock *mockPriceService) GetNativeTokenPriceUSD(chainID int64) (*big.Float,
 
 func (mock *mockPriceService) GetNativeTokenSymbol(chainID int64) string {
 	return "ETH"
+}
+
+func (mock *mockPriceService) GetERC20PriceUSD(chainID int64, contractAddress string) (*big.Float, error) {
+	// Test mock — no ERC20 price lookups needed for fee-estimator tests.
+	return nil, fmt.Errorf("ERC20 price lookup not supported in tests")
 }
 
 func TestFeeEstimator_ChainIDDetection(t *testing.T) {

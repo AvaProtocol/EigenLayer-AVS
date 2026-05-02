@@ -5,6 +5,7 @@ import (
 	"html"
 	"math/big"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1520,27 +1521,23 @@ func buildFeesFromVM(vm *VM) *FeesInfo {
 }
 
 // buildTotalsFromVM computes the per-token fee total surfaced in notifications.
+// Native token entry first (gas + executionFee + native value-fee), then
+// per-token entries for any ERC20 value-fee legs.
 //
-// V1 scope: a single native-token entry summing gas cogs + executionFee
-// (converted USD → ETH via globalPriceService). Value-fee legs per transferred
-// token are deferred — they need transfer extraction across loop iterations
-// which lands in a follow-up commit; for now the renderer shows just the
-// platform-paid leg, which is what the user sees in the persisted execution
-// receipt anyway.
-//
-// Native-token entry is always emitted (even if both gas and platform fee are
-// zero, so the renderer can still show "Cost: $0.00" instead of nothing). USD
-// is empty when globalPriceService is unset; renderers print "$?".
+// USD is populated when a price source is available (chain price service for
+// native; Stablecoins map or PriceService.GetERC20PriceUSD for ERC20s);
+// otherwise left empty so renderers print "$?". Zero-rounded entries are
+// omitted.
 func buildTotalsFromVM(vm *VM, fees *FeesInfo) []*TokenTotal {
 	if fees == nil {
 		return nil
 	}
 
 	chainID := chainIDFromVM(vm)
-	priceUSD := nativeTokenPriceUSD(chainID)
-	symbol := nativeTokenSymbol(chainID)
+	nativePriceUSD := nativeTokenPriceUSD(chainID)
+	nativeSymbol := nativeTokenSymbol(chainID)
 
-	// Sum all on-chain gas cogs in WEI.
+	// 1. Native-token bucket: gas cogs (WEI) + executionFee (USD → WEI).
 	gasWei := new(big.Int)
 	for _, c := range fees.Cogs {
 		if c == nil || c.Fee == nil {
@@ -1550,34 +1547,246 @@ func buildTotalsFromVM(vm *VM, fees *FeesInfo) []*TokenTotal {
 			gasWei.Add(gasWei, w)
 		}
 	}
-
-	// Convert WEI to ETH (big.Float) for the user-facing display.
-	ethWei := new(big.Float).SetInt(gasWei)
 	weiPerEth := new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
-	totalEth := new(big.Float).Quo(ethWei, weiPerEth)
-
-	// Add platform fee (USD) → ETH if we have a price.
-	if fees.ExecutionFee != nil && fees.ExecutionFee.Amount != "" && priceUSD != nil {
+	nativeEth := new(big.Float).Quo(new(big.Float).SetInt(gasWei), weiPerEth)
+	if fees.ExecutionFee != nil && fees.ExecutionFee.Amount != "" && nativePriceUSD != nil {
 		if usd, ok := new(big.Float).SetString(fees.ExecutionFee.Amount); ok {
-			ethEquiv := new(big.Float).Quo(usd, priceUSD)
-			totalEth.Add(totalEth, ethEquiv)
+			nativeEth.Add(nativeEth, new(big.Float).Quo(usd, nativePriceUSD))
 		}
 	}
 
-	// Render the native-token entry.
-	entry := &TokenTotal{
-		Amount: trimTrailingZeros(totalEth.Text('f', 9)),
-		Unit:   symbol,
+	// 2. Value-fee per-token aggregation. tier_percentage × tx_value in each
+	//    transferred token's units, summed across loop iterations.
+	valueFeePct := valueFeePercentage(fees)
+	transfers := extractOutgoingTransfers(vm)
+	erc20Buckets := make(map[string]*tokenBucket) // key = lowercased contract addr
+	for _, t := range transfers {
+		feeRaw := percentOfRaw(t.rawAmount, valueFeePct)
+		if feeRaw == nil || feeRaw.Sign() == 0 {
+			continue
+		}
+		if t.contractAddress == "" {
+			// Native ETH transfer's value-fee adds to the native bucket.
+			feeEth := new(big.Float).Quo(new(big.Float).SetInt(feeRaw), weiPerEth)
+			nativeEth.Add(nativeEth, feeEth)
+			continue
+		}
+		key := strings.ToLower(t.contractAddress)
+		bucket, ok := erc20Buckets[key]
+		if !ok {
+			bucket = &tokenBucket{contract: key, decimals: t.decimals, symbol: t.symbol, raw: new(big.Int)}
+			erc20Buckets[key] = bucket
+		}
+		bucket.raw.Add(bucket.raw, feeRaw)
 	}
-	if priceUSD != nil {
-		usdEquiv := new(big.Float).Mul(totalEth, priceUSD)
-		entry.USD = trimTrailingZeros(usdEquiv.Text('f', 2))
+
+	out := make([]*TokenTotal, 0, 1+len(erc20Buckets))
+
+	// Native-token entry (always first, when non-zero).
+	if nativeEth.Sign() > 0 {
+		entry := &TokenTotal{
+			Amount: trimTrailingZeros(nativeEth.Text('f', 9)),
+			Unit:   nativeSymbol,
+		}
+		if nativePriceUSD != nil {
+			entry.USD = trimTrailingZeros(new(big.Float).Mul(nativeEth, nativePriceUSD).Text('f', 2))
+		}
+		if entry.Amount != "" && entry.Amount != "0" {
+			out = append(out, entry)
+		}
 	}
-	if entry.Amount == "" || entry.Amount == "0" {
-		// No platform fee, no gas — nothing to render.
+
+	// ERC20 entries (sorted by symbol for deterministic order).
+	keys := make([]string, 0, len(erc20Buckets))
+	for k := range erc20Buckets {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return erc20Buckets[keys[i]].symbol < erc20Buckets[keys[j]].symbol
+	})
+	for _, k := range keys {
+		entry := erc20Buckets[k].toTokenTotal(uint64(chainID))
+		if entry == nil {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// tokenBucket accumulates raw token amounts during transfer aggregation.
+type tokenBucket struct {
+	contract string // lowercase
+	symbol   string
+	decimals uint32
+	raw      *big.Int
+}
+
+func (b *tokenBucket) toTokenTotal(chainID uint64) *TokenTotal {
+	if b == nil || b.raw == nil || b.raw.Sign() == 0 {
 		return nil
 	}
-	return []*TokenTotal{entry}
+	denom := new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(b.decimals)), nil))
+	amount := new(big.Float).Quo(new(big.Float).SetInt(b.raw), denom)
+	formatted := trimTrailingZeros(amount.Text('f', int(b.decimals)))
+	if formatted == "" || formatted == "0" {
+		// Below the token's display precision — omit per V2 directive.
+		return nil
+	}
+	entry := &TokenTotal{Amount: formatted, Unit: b.symbol}
+	// Stablecoin shortcut — $1.00 without a network call.
+	if _, ok := LookupStablecoin(chainID, b.contract); ok {
+		entry.USD = trimTrailingZeros(amount.Text('f', 2))
+		return entry
+	}
+	// Otherwise ask the price service. If unavailable, leave USD empty
+	// (renderer prints "$?").
+	if globalPriceService != nil {
+		if price, err := globalPriceService.GetERC20PriceUSD(int64(chainID), b.contract); err == nil && price != nil {
+			usd := new(big.Float).Mul(amount, price)
+			entry.USD = trimTrailingZeros(usd.Text('f', 2))
+		}
+	}
+	return entry
+}
+
+// outgoingTransfer is one transfer OUT of the smart wallet — input to the
+// value-fee leg calculation.
+type outgoingTransfer struct {
+	contractAddress string // lowercase; empty for native ETH
+	symbol          string // "ETH" / "USDC" / etc.
+	decimals        uint32 // 18 for ETH, ERC20-specific otherwise
+	rawAmount       *big.Int
+}
+
+// extractOutgoingTransfers walks ExecutionLogs and returns transfers where
+// `from == smartWallet`. Handles eth_transfer steps, single contractWrite
+// transfer outputs, and loop iterations whose children produced transfers.
+func extractOutgoingTransfers(vm *VM) []outgoingTransfer {
+	if vm == nil {
+		return nil
+	}
+	smartWallet := strings.ToLower(smartWalletAddressFromVM(vm))
+	if smartWallet == "" {
+		return nil
+	}
+	chainID := uint64(chainIDFromVM(vm))
+
+	out := make([]outgoingTransfer, 0)
+	for _, step := range vm.ExecutionLogs {
+		if eth := step.GetEthTransfer(); eth != nil && eth.Data != nil {
+			if m, ok := eth.Data.AsInterface().(map[string]interface{}); ok {
+				if t := readTransferRecord(m, smartWallet, "", chainID); t != nil {
+					out = append(out, *t)
+				}
+			}
+		}
+		if cw := step.GetContractWrite(); cw != nil && cw.Data != nil {
+			if m, ok := cw.Data.AsInterface().(map[string]interface{}); ok {
+				if t := readTransferRecord(m, smartWallet, "", chainID); t != nil {
+					out = append(out, *t)
+				}
+			}
+		}
+		if loop := step.GetLoop(); loop != nil && loop.Data != nil {
+			if arr, ok := loop.Data.AsInterface().([]interface{}); ok {
+				for _, iter := range arr {
+					if m, ok := iter.(map[string]interface{}); ok {
+						if t := readTransferRecord(m, smartWallet, "", chainID); t != nil {
+							out = append(out, *t)
+						}
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// readTransferRecord pulls a single outgoing-transfer record from an output
+// payload. Expects shape: {transfer: {from, to, value}, metadata?: {contractAddress}}.
+// Returns nil when the transfer is not from the smart wallet, or when the
+// shape doesn't match.
+func readTransferRecord(m map[string]interface{}, smartWallet, _ string, chainID uint64) *outgoingTransfer {
+	transfer, ok := m["transfer"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	from, _ := transfer["from"].(string)
+	if strings.ToLower(from) != smartWallet {
+		return nil
+	}
+	rawValue, _ := transfer["value"].(string)
+	rawInt, ok := new(big.Int).SetString(rawValue, 10)
+	if !ok || rawInt.Sign() == 0 {
+		return nil
+	}
+	// Native ETH transfer: no metadata.contractAddress; or contractAddress is empty.
+	contractAddr := ""
+	if meta, ok := m["metadata"].(map[string]interface{}); ok {
+		if c, ok := meta["contractAddress"].(string); ok {
+			contractAddr = strings.ToLower(c)
+		}
+	}
+	if contractAddr == "" {
+		return &outgoingTransfer{contractAddress: "", symbol: "ETH", decimals: 18, rawAmount: rawInt}
+	}
+	// ERC20: resolve symbol/decimals from Stablecoins map; fall back to "?".
+	if info, ok := LookupStablecoin(chainID, contractAddr); ok {
+		return &outgoingTransfer{contractAddress: contractAddr, symbol: info.Symbol, decimals: info.Decimals, rawAmount: rawInt}
+	}
+	// Unknown ERC20 — caller renders "$?" for USD; we still need decimals to
+	// format the raw amount. Default to 18 (most common). When tokenMetadata
+	// passes through from the request's settings.tokens, future code can
+	// replace this with a real lookup.
+	return &outgoingTransfer{contractAddress: contractAddr, symbol: "?", decimals: 18, rawAmount: rawInt}
+}
+
+// valueFeePercentage returns the tier percentage as a big.Float fraction
+// (e.g., 0.03 → 0.0003), or nil when no value fee applies.
+func valueFeePercentage(fees *FeesInfo) *big.Float {
+	if fees == nil || fees.ValueFee == nil || fees.ValueFee.Fee == nil {
+		return nil
+	}
+	pct, ok := new(big.Float).SetString(fees.ValueFee.Fee.Amount)
+	if !ok || pct.Sign() <= 0 {
+		return nil
+	}
+	return new(big.Float).Quo(pct, big.NewFloat(100))
+}
+
+// percentOfRaw returns floor(raw × pct) where pct is a fraction (0.0003 = 0.03%).
+// Returns nil when inputs are zero or invalid.
+func percentOfRaw(raw *big.Int, pct *big.Float) *big.Int {
+	if raw == nil || raw.Sign() == 0 || pct == nil || pct.Sign() <= 0 {
+		return nil
+	}
+	rawF := new(big.Float).SetInt(raw)
+	feeF := new(big.Float).Mul(rawF, pct)
+	feeI, _ := feeF.Int(nil)
+	return feeI
+}
+
+// smartWalletAddressFromVM extracts the smart wallet address using the same
+// fallback chain as buildRunnerFromVM but without constructing a RunnerInfo.
+func smartWalletAddressFromVM(vm *VM) string {
+	if vm == nil {
+		return ""
+	}
+	if vm.task != nil && vm.task.Task != nil && vm.task.SmartWalletAddress != "" {
+		return vm.task.SmartWalletAddress
+	}
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	if aaSender, ok := vm.vars["aa_sender"].(string); ok && aaSender != "" {
+		return aaSender
+	}
+	if settings, ok := vm.vars["settings"].(map[string]interface{}); ok {
+		if runner, ok := settings["runner"].(string); ok && strings.TrimSpace(runner) != "" {
+			return runner
+		}
+	}
+	return ""
 }
 
 // chainIDFromVM resolves the chain ID from VM state. Returns 0 when unknown,
