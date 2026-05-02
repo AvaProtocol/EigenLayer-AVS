@@ -46,6 +46,18 @@ func SetFeeRates(rates *config.FeeRatesConfig) {
 	globalFeeRates = rates
 }
 
+// globalPriceService is the chain price oracle used by Summary.Fees population
+// to convert USD platform fees and value-fee legs into native-token amounts.
+// Wired at engine startup via Engine.SetPriceService → SetPriceService.
+var globalPriceService PriceService
+
+// SetPriceService sets the global price service used by Summary.Fees population.
+// nil disables USD/native conversion — Total entries that need a price will be
+// emitted with empty USD amounts (formatter renders "$?" placeholder).
+func SetPriceService(svc PriceService) {
+	globalPriceService = svc
+}
+
 // ComposeSummarySmart tries the configured summarizer (context-memory API) with strict timeout
 // and falls back to deterministic ComposeSummary on any failure. The summary is automatically
 // formatted for the appropriate channel (email or chat) by the REST API runner

@@ -118,11 +118,28 @@ type ValueFee struct {
 	Reason string // human-readable classification reason
 }
 
-// FeesInfo is the per-execution fee breakdown returned by context-memory.
+// FeesInfo is the per-execution fee breakdown computed from VM state.
 type FeesInfo struct {
 	ExecutionFee *FeeAmount  // flat platform fee, USD
 	Cogs         []*NodeCOGS // per-node WEI cost
 	ValueFee     *ValueFee   // workflow-level percentage; nil when no on-chain nodes
+
+	// Total is the per-token fee breakdown surfaced in notifications. First
+	// entry is always the chain's native token (gas + executionFee converted to
+	// ETH); subsequent entries are per-token value-fee legs grouped by transfer
+	// token symbol. Empty when no on-chain steps ran. See PRD:
+	// docs/changes/20260501-summary-runner-and-fees-sections.md.
+	Total []*TokenTotal
+}
+
+// TokenTotal is a single token's contribution to the cost line. Self-describing:
+// Amount is in the token's native units (e.g. "0.000003" ETH, "1.2" USDC),
+// USD is the dollar equivalent ("0.01"); empty USD signals "price unknown" and
+// renderers print a "$?" placeholder.
+type TokenTotal struct {
+	Amount string // raw token amount, decimal string
+	Unit   string // token symbol ("ETH", "USDC", etc.)
+	USD    string // dollar equivalent; empty when unpriceable
 }
 
 // BuildBranchAndSkippedSummary builds a deterministic summary (text and HTML)
@@ -1498,7 +1515,129 @@ func buildFeesFromVM(vm *VM) *FeesInfo {
 			GasUnits: c.GetGasUnits(),
 		})
 	}
+	out.Total = buildTotalsFromVM(vm, out)
 	return out
+}
+
+// buildTotalsFromVM computes the per-token fee total surfaced in notifications.
+//
+// V1 scope: a single native-token entry summing gas cogs + executionFee
+// (converted USD → ETH via globalPriceService). Value-fee legs per transferred
+// token are deferred — they need transfer extraction across loop iterations
+// which lands in a follow-up commit; for now the renderer shows just the
+// platform-paid leg, which is what the user sees in the persisted execution
+// receipt anyway.
+//
+// Native-token entry is always emitted (even if both gas and platform fee are
+// zero, so the renderer can still show "Cost: $0.00" instead of nothing). USD
+// is empty when globalPriceService is unset; renderers print "$?".
+func buildTotalsFromVM(vm *VM, fees *FeesInfo) []*TokenTotal {
+	if fees == nil {
+		return nil
+	}
+
+	chainID := chainIDFromVM(vm)
+	priceUSD := nativeTokenPriceUSD(chainID)
+	symbol := nativeTokenSymbol(chainID)
+
+	// Sum all on-chain gas cogs in WEI.
+	gasWei := new(big.Int)
+	for _, c := range fees.Cogs {
+		if c == nil || c.Fee == nil {
+			continue
+		}
+		if w, ok := new(big.Int).SetString(c.Fee.Amount, 10); ok {
+			gasWei.Add(gasWei, w)
+		}
+	}
+
+	// Convert WEI to ETH (big.Float) for the user-facing display.
+	ethWei := new(big.Float).SetInt(gasWei)
+	weiPerEth := new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	totalEth := new(big.Float).Quo(ethWei, weiPerEth)
+
+	// Add platform fee (USD) → ETH if we have a price.
+	if fees.ExecutionFee != nil && fees.ExecutionFee.Amount != "" && priceUSD != nil {
+		if usd, ok := new(big.Float).SetString(fees.ExecutionFee.Amount); ok {
+			ethEquiv := new(big.Float).Quo(usd, priceUSD)
+			totalEth.Add(totalEth, ethEquiv)
+		}
+	}
+
+	// Render the native-token entry.
+	entry := &TokenTotal{
+		Amount: trimTrailingZeros(totalEth.Text('f', 9)),
+		Unit:   symbol,
+	}
+	if priceUSD != nil {
+		usdEquiv := new(big.Float).Mul(totalEth, priceUSD)
+		entry.USD = trimTrailingZeros(usdEquiv.Text('f', 2))
+	}
+	if entry.Amount == "" || entry.Amount == "0" {
+		// No platform fee, no gas — nothing to render.
+		return nil
+	}
+	return []*TokenTotal{entry}
+}
+
+// chainIDFromVM resolves the chain ID from VM state. Returns 0 when unknown,
+// in which case price-service lookups fall back to the unknown-chain default.
+func chainIDFromVM(vm *VM) int64 {
+	if vm == nil {
+		return 0
+	}
+	if vm.smartWalletConfig != nil && vm.smartWalletConfig.ChainID != 0 {
+		return vm.smartWalletConfig.ChainID
+	}
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	if settings, ok := vm.vars["settings"].(map[string]interface{}); ok {
+		if id, ok := settings["chain_id"].(int64); ok {
+			return id
+		}
+		if id, ok := settings["chain_id"].(float64); ok {
+			return int64(id)
+		}
+	}
+	return 0
+}
+
+// nativeTokenPriceUSD returns the chain's native token price in USD (big.Float),
+// or nil when the price service is unavailable.
+func nativeTokenPriceUSD(chainID int64) *big.Float {
+	if globalPriceService == nil || chainID == 0 {
+		return nil
+	}
+	price, err := globalPriceService.GetNativeTokenPriceUSD(chainID)
+	if err != nil || price == nil {
+		return nil
+	}
+	return price
+}
+
+// nativeTokenSymbol returns the chain's native token symbol (e.g., "ETH"),
+// falling back to "ETH" when the price service is unavailable.
+func nativeTokenSymbol(chainID int64) string {
+	if globalPriceService != nil && chainID != 0 {
+		if sym := globalPriceService.GetNativeTokenSymbol(chainID); sym != "" {
+			return sym
+		}
+	}
+	return "ETH"
+}
+
+// trimTrailingZeros strips trailing zeros after the decimal point. "0.020000" → "0.02".
+// Pure utility, kept here so the totals helper has a localized formatter.
+func trimTrailingZeros(s string) string {
+	if !strings.Contains(s, ".") {
+		return s
+	}
+	s = strings.TrimRight(s, "0")
+	s = strings.TrimRight(s, ".")
+	if s == "" {
+		return "0"
+	}
+	return s
 }
 
 func protoFeeToFeeAmount(f *avsproto.Fee) *FeeAmount {

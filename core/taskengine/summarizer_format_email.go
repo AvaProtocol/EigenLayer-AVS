@@ -3,7 +3,6 @@ package taskengine
 import (
 	"fmt"
 	"html"
-	"math/big"
 	"strings"
 	"time"
 )
@@ -325,10 +324,9 @@ func buildAnalysisHtmlFromStructured(s Summary) string {
 	return sb.String()
 }
 
-// buildFeesSectionHTML renders the fee breakdown for HTML email. For simulation
-// runs we render only a placeholder ("⛽ (cost estimated at deploy)") since
-// sim gas prices are conservative chain defaults, not real network conditions.
-// Deployed runs show the full breakdown.
+// buildFeesSectionHTML renders the Cost section from Summary.Fees.Total —
+// same multi-token format as Telegram, just wrapped in HTML. Simulations
+// render only the static placeholder. Returns "" when there's nothing to show.
 func buildFeesSectionHTML(s Summary) string {
 	if s.Fees == nil {
 		return ""
@@ -341,84 +339,29 @@ func buildFeesSectionHTML(s Summary) string {
 			`</div>`
 	}
 
-	heading := "Cost"
-
-	totalWei := new(big.Int)
-	totalGas := new(big.Int)
-	gasCogs := make([]*NodeCOGS, 0, len(s.Fees.Cogs))
-	for _, c := range s.Fees.Cogs {
-		if c == nil {
-			continue
-		}
-		if c.Fee != nil {
-			if w, ok := new(big.Int).SetString(c.Fee.Amount, 10); ok {
-				totalWei.Add(totalWei, w)
-			}
-		}
-		if c.CostType == "gas" {
-			if c.GasUnits != "" {
-				if g, ok := new(big.Int).SetString(c.GasUnits, 10); ok {
-					totalGas.Add(totalGas, g)
-				}
-			}
-			gasCogs = append(gasCogs, c)
-		}
-	}
-
-	var headerParts []string
-	if totalWei.Sign() > 0 {
-		headerParts = append(headerParts, fmt.Sprintf("%s ETH", formatWeiAsEth(totalWei.String())))
-	}
-	if totalGas.Sign() > 0 {
-		headerParts = append(headerParts, fmt.Sprintf("(~%s gas)", formatGasUnits(totalGas.String())))
-	}
-	if s.Fees.ExecutionFee != nil && s.Fees.ExecutionFee.Amount != "" {
-		headerParts = append(headerParts, fmt.Sprintf("+ $%s platform fee", trimFractionalZeros(s.Fees.ExecutionFee.Amount)))
-	}
-	if len(headerParts) == 0 && (s.Fees.ValueFee == nil || s.Fees.ValueFee.Fee == nil) {
+	if len(s.Fees.Total) == 0 {
 		return ""
 	}
-
+	parts := make([]string, 0, len(s.Fees.Total))
+	for _, t := range s.Fees.Total {
+		if t == nil || t.Amount == "" || t.Amount == "0" {
+			continue
+		}
+		usd := "$?"
+		if t.USD != "" {
+			usd = "$" + t.USD
+		}
+		parts = append(parts, fmt.Sprintf("%s %s (%s)", html.EscapeString(t.Amount), html.EscapeString(t.Unit), usd))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
 	var sb strings.Builder
 	sb.WriteString(`<div style="margin-bottom: 20px;">`)
-	sb.WriteString(fmt.Sprintf(`<h3 style="margin: 0 0 8px 0; font-size: 16px;">%s</h3>`, heading))
-	if len(headerParts) > 0 {
-		sb.WriteString(`<p style="margin: 0;">`)
-		sb.WriteString(html.EscapeString(strings.Join(headerParts, " ")))
-		sb.WriteString("</p>")
-	}
-	if len(gasCogs) > 1 {
-		for _, c := range gasCogs {
-			name := c.StepName
-			if name == "" {
-				name = c.NodeID
-			}
-			sb.WriteString(`<p style="margin: 4px 0 0 18px; color: #666; font-size: 14px;">• `)
-			sb.WriteString(html.EscapeString(name))
-			if c.GasUnits != "" {
-				sb.WriteString(fmt.Sprintf(" — %s gas", formatGasUnits(c.GasUnits)))
-			}
-			if c.Fee != nil && c.Fee.Amount != "" {
-				sb.WriteString(fmt.Sprintf(" (%s ETH)", formatWeiAsEth(c.Fee.Amount)))
-			}
-			sb.WriteString("</p>")
-		}
-	}
-	if s.Fees.ValueFee != nil && s.Fees.ValueFee.Fee != nil {
-		amount := strings.TrimSpace(s.Fees.ValueFee.Fee.Amount)
-		if amount != "" && amount != "0" && amount != "0.00" && amount != "0.0" {
-			sb.WriteString(`<p style="margin: 4px 0 0 0;">Value fee: `)
-			sb.WriteString(html.EscapeString(amount))
-			sb.WriteString("% of tx value")
-			if tier := tierShortLabel(s.Fees.ValueFee.Tier); tier != "" {
-				sb.WriteString(" (")
-				sb.WriteString(tier)
-				sb.WriteString(")")
-			}
-			sb.WriteString("</p>")
-		}
-	}
-	sb.WriteString("</div>")
+	sb.WriteString(`<h3 style="margin: 0 0 8px 0; font-size: 16px;">Cost</h3>`)
+	sb.WriteString(`<p style="margin: 0;">⛽ `)
+	sb.WriteString(strings.Join(parts, ", "))
+	sb.WriteString("</p></div>")
 	return sb.String()
 }
 

@@ -378,6 +378,10 @@ func (n *Engine) GetTenderlyClient() *TenderlyClient {
 
 func (n *Engine) SetPriceService(priceService PriceService) {
 	n.priceService = priceService
+	// Also wire as the package-level price service so Summary.Fees population
+	// (in both ComposeSummary and ContextMemorySummarizer.Summarize) can compute
+	// native-token totals from USD platform fees and value-fee legs.
+	SetPriceService(priceService)
 }
 
 func (n *Engine) Stop() {

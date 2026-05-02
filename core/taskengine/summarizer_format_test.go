@@ -1033,17 +1033,8 @@ func TestFormatTelegramFromStructured_RunnerAndFees(t *testing.T) {
 		},
 		Fees: &FeesInfo{
 			ExecutionFee: &FeeAmount{Amount: "0.020000", Unit: "USD"},
-			Cogs: []*NodeCOGS{{
-				NodeID:   "01KNGW9XDTYKZBTWF9DDJ212V6",
-				StepName: "loop1",
-				CostType: "gas",
-				Fee:      &FeeAmount{Amount: "464554640724", Unit: "WEI"},
-				GasUnits: "422274",
-			}},
-			ValueFee: &ValueFee{
-				Fee:    &FeeAmount{Amount: "0.03", Unit: "PERCENTAGE"},
-				Tier:   "EXECUTION_TIER_1",
-				Reason: "V1 default: workflow contains on-chain execution nodes",
+			Total: []*TokenTotal{
+				{Amount: "0.000011", Unit: "ETH", USD: "0.03"},
 			},
 		},
 	}
@@ -1069,21 +1060,12 @@ func TestFormatTelegramFromStructured_RunnerAndFees(t *testing.T) {
 		t.Errorf("runner address should not be <code>-wrapped, got:\n%s", out)
 	}
 
-	// Cost line: deployed run shows the aggregated header. Telegram drops
-	// per-step bullets and value-fee detail (kept compact for the channel).
-	wantCost := []string{
-		"<b>Cost:</b>",
-		"0.00000046 ETH",
-		"(~422 K gas)",
-		"+ $0.02 platform fee",
+	// Cost line: native-token first, USD parenthetical, ⛽ leading emoji.
+	if !strings.Contains(out, "⛽ <b>Cost:</b> 0.000011 ETH ($0.03)") {
+		t.Errorf("missing multi-token Cost line in:\n%s", out)
 	}
-	for _, w := range wantCost {
-		if !strings.Contains(out, w) {
-			t.Errorf("missing cost-line fragment %q in:\n%s", w, out)
-		}
-	}
-	if strings.Contains(out, "<b>Value fee:</b>") {
-		t.Errorf("Telegram should not render Value fee line, got:\n%s", out)
+	if strings.Contains(out, "(~") || strings.Contains(out, "platform fee") || strings.Contains(out, "<b>Value fee:</b>") {
+		t.Errorf("Telegram should not render gas-units / 'platform fee' / Value fee line, got:\n%s", out)
 	}
 	if strings.Contains(out, "(cost estimated at deploy)") {
 		t.Errorf("deployed run should not show simulation placeholder, got:\n%s", out)
@@ -1091,11 +1073,38 @@ func TestFormatTelegramFromStructured_RunnerAndFees(t *testing.T) {
 
 	// Cost line follows Runner directly inside the metadata block (no blank
 	// line between them).
-	if !strings.Contains(out, "<b>Runner:</b> 0x8Ee38...7017 on Sepolia\n<b>Cost:</b> ") {
+	if !strings.Contains(out, "<b>Runner:</b> 0x8Ee38...7017 on Sepolia\n⛽ <b>Cost:</b> ") {
 		t.Errorf("Cost line should immediately follow Runner line, got:\n%s", out)
 	}
 
 	t.Logf("Telegram render:\n%s", out)
+}
+
+// TestFormatTelegramFromStructured_MultiToken_USDPlaceholder verifies the
+// multi-token comma-separated render and the "$?" placeholder for unpriceable
+// entries. Mirror of the format spec in the PRD's Rendering section.
+func TestFormatTelegramFromStructured_MultiToken_USDPlaceholder(t *testing.T) {
+	summary := Summary{
+		Subject:    "Run #1: Multi-token Workflow successfully completed",
+		Status:     "success",
+		Network:    "Ethereum",
+		Executions: []ExecutionEntry{{Description: "Transferred 1.2 USDC"}},
+		Workflow:   &WorkflowInfo{IsSimulation: false},
+		Runner:     &RunnerInfo{SmartWallet: "0x8Ee38eB323c14a1752DABDA1cca9661AEE377017"},
+		Fees: &FeesInfo{
+			Total: []*TokenTotal{
+				{Amount: "0.01", Unit: "ETH", USD: "25.00"},
+				{Amount: "1.2", Unit: "USDC", USD: "1.20"},
+				{Amount: "0.005", Unit: "PEPE", USD: ""}, // unpriceable
+			},
+		},
+	}
+
+	out := FormatForMessageChannels(summary, "telegram", nil)
+	want := "⛽ <b>Cost:</b> 0.01 ETH ($25.00), 1.2 USDC ($1.20), 0.005 PEPE ($?)"
+	if !strings.Contains(out, want) {
+		t.Errorf("missing multi-token Cost line %q in:\n%s", want, out)
+	}
 }
 
 // TestFormatTelegramFromStructured_Simulation_PlaceholderCost confirms simulation
@@ -1133,38 +1142,6 @@ func TestFormatTelegramFromStructured_Simulation_PlaceholderCost(t *testing.T) {
 	for _, banned := range []string{"<b>Cost:</b>", "0.0000105 ETH", "21 K gas", "platform fee"} {
 		if strings.Contains(out, banned) {
 			t.Errorf("simulation should not render %q, got:\n%s", banned, out)
-		}
-	}
-}
-
-// TestFormatWeiAsEth verifies the wei→ETH formatter handles the realistic range.
-func TestFormatWeiAsEth(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"0", "0"},
-		{"1000000000000000000", "1.00"}, // 1 ETH
-		{"464554640724", "0.00000046"},  // realistic gas cost
-		{"10500000000000", "0.0000105"}, // 21K × 0.5 gwei
-		{"22500000000000", "0.0000225"}, // 45K × 0.5 gwei
-		{"5000000000000000000", "5.00"}, // 5 ETH
-	}
-	for _, c := range cases {
-		if got := formatWeiAsEth(c.in); got != c.want {
-			t.Errorf("formatWeiAsEth(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-// TestFormatGasUnits verifies the gas-units formatter renders human-readable strings.
-func TestFormatGasUnits(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"500", "500"},
-		{"21000", "21 K"},
-		{"422274", "422 K"},
-		{"1500000", "1.5 M"},
-	}
-	for _, c := range cases {
-		if got := formatGasUnits(c.in); got != c.want {
-			t.Errorf("formatGasUnits(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
