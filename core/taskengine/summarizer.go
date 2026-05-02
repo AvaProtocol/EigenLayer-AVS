@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"time"
 
@@ -100,7 +101,15 @@ func NewContextMemorySummarizerFromAggregatorConfig(c *config.Config) Summarizer
 	if strings.TrimSpace(authToken) == "" {
 		return nil
 	}
-	return NewContextMemorySummarizer(baseURL, authToken)
+	if baseURL == "" {
+		baseURL = ContextAPIURL
+	}
+	return &ContextMemorySummarizer{
+		baseURL:    baseURL,
+		authToken:  authToken,
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+		feeRates:   c.FeeRates,
+	}
 }
 
 // FormatForMessageChannels converts a Summary into a concise chat message
