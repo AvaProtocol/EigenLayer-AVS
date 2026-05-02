@@ -362,16 +362,16 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 		}
 	}
 
-	// Convert API response workflow to Summary workflow
-	var workflow *WorkflowInfo
+	// Workflow metadata: the aggregator owns IsSimulation since it ran the
+	// workflow — the API response's value (if any) is informational only.
+	// Always populate so renderers can rely on the flag without nil-checking
+	// against API response shape drift.
+	workflow := &WorkflowInfo{IsSimulation: vm.IsSimulation}
 	if apiResp.Body.Workflow != nil {
-		workflow = &WorkflowInfo{
-			Name:         apiResp.Body.Workflow.Name,
-			Chain:        apiResp.Body.Workflow.Chain,
-			ChainID:      apiResp.Body.Workflow.ChainID,
-			IsSimulation: apiResp.Body.Workflow.IsSimulation,
-			RunNumber:    apiResp.Body.Workflow.RunNumber,
-		}
+		workflow.Name = apiResp.Body.Workflow.Name
+		workflow.Chain = apiResp.Body.Workflow.Chain
+		workflow.ChainID = apiResp.Body.Workflow.ChainID
+		workflow.RunNumber = apiResp.Body.Workflow.RunNumber
 	}
 
 	// Convert API execution entries to Summary execution entries
