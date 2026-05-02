@@ -1549,11 +1549,12 @@ func buildTotalsFromVM(vm *VM, fees *FeesInfo) []*TokenTotal {
 	}
 	weiPerEth := new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
 	nativeEth := new(big.Float).Quo(new(big.Float).SetInt(gasWei), weiPerEth)
-	if fees.ExecutionFee != nil && fees.ExecutionFee.Amount != "" && nativePriceUSD != nil {
-		if usd, ok := new(big.Float).SetString(fees.ExecutionFee.Amount); ok {
-			nativeEth.Add(nativeEth, new(big.Float).Quo(usd, nativePriceUSD))
-		}
-	}
+	// Platform (execution) fee is rendered as its own USD entry below — NOT
+	// folded into the native-ETH amount. Keeping it separate ensures (a) the
+	// fee is shown even when no price service is configured, (b) read-only
+	// runs that paid only the platform fee don't display a misleading
+	// "0.00000X ETH" gas-equivalent line, and (c) attribution stays clear
+	// (this much was gas, this much was the platform charge).
 
 	// 2. Value-fee per-token aggregation. tier_percentage × tx_value in each
 	//    transferred token's units, summed across loop iterations.
@@ -1611,6 +1612,18 @@ func buildTotalsFromVM(vm *VM, fees *FeesInfo) []*TokenTotal {
 		}
 		out = append(out, entry)
 	}
+
+	// Platform (execution) fee — appended last as a USD-denominated entry.
+	// Renderer special-cases Unit=="USD" to emit "$X platform fee" instead of
+	// the standard token-amount format. Always shown when non-zero so the
+	// user sees what they paid even when no price service is configured.
+	if fees.ExecutionFee != nil {
+		amount := trimTrailingZeros(strings.TrimSpace(fees.ExecutionFee.Amount))
+		if amount != "" && amount != "0" {
+			out = append(out, &TokenTotal{Amount: amount, Unit: "USD", USD: amount})
+		}
+	}
+
 	return out
 }
 

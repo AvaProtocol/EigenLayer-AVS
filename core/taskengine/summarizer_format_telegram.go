@@ -264,6 +264,12 @@ func formatTelegramCostLine(s Summary) string {
 		if t == nil || t.Amount == "" || t.Amount == "0" {
 			continue
 		}
+		// USD-unit entries are the platform fee — render as "$X platform fee"
+		// (the dollar amount is already canonical; no need for the parenthetical).
+		if t.Unit == "USD" {
+			parts = append(parts, fmt.Sprintf("$%s platform fee", html.EscapeString(t.Amount)))
+			continue
+		}
 		usd := "$?"
 		if t.USD != "" {
 			usd = "$" + t.USD

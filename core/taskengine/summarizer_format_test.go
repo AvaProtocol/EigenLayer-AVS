@@ -1035,7 +1035,8 @@ func TestFormatTelegramFromStructured_RunnerAndFees(t *testing.T) {
 		Fees: &FeesInfo{
 			ExecutionFee: &FeeAmount{Amount: "0.020000", Unit: "USD"},
 			Total: []*TokenTotal{
-				{Amount: "0.000011", Unit: "ETH", USD: "0.03"},
+				{Amount: "0.000003", Unit: "ETH", USD: "0.01"},
+				{Amount: "0.02", Unit: "USD", USD: "0.02"}, // platform fee — renders as "$0.02 platform fee"
 			},
 		},
 	}
@@ -1061,12 +1062,12 @@ func TestFormatTelegramFromStructured_RunnerAndFees(t *testing.T) {
 		t.Errorf("runner address should not be <code>-wrapped, got:\n%s", out)
 	}
 
-	// Cost line: native-token first, USD parenthetical, ⛽ leading emoji.
-	if !strings.Contains(out, "⛽ <b>Cost:</b> 0.000011 ETH ($0.03)") {
-		t.Errorf("missing multi-token Cost line in:\n%s", out)
+	// Cost line: native gas first, then platform fee as a separate "$X platform fee".
+	if !strings.Contains(out, "⛽ <b>Cost:</b> 0.000003 ETH ($0.01), $0.02 platform fee") {
+		t.Errorf("missing combined gas+platform Cost line in:\n%s", out)
 	}
-	if strings.Contains(out, "(~") || strings.Contains(out, "platform fee") || strings.Contains(out, "<b>Value fee:</b>") {
-		t.Errorf("Telegram should not render gas-units / 'platform fee' / Value fee line, got:\n%s", out)
+	if strings.Contains(out, "(~") || strings.Contains(out, "<b>Value fee:</b>") {
+		t.Errorf("Telegram should not render gas-units detail or Value fee line, got:\n%s", out)
 	}
 	if strings.Contains(out, "(cost estimated at deploy)") {
 		t.Errorf("deployed run should not show simulation placeholder, got:\n%s", out)
@@ -1079,6 +1080,55 @@ func TestFormatTelegramFromStructured_RunnerAndFees(t *testing.T) {
 	}
 
 	t.Logf("Telegram render:\n%s", out)
+}
+
+// TestFormatTelegramFromStructured_PlatformFeeOnly covers the read-only path:
+// no on-chain steps, only the platform fee. Renders as "$0.02 platform fee"
+// with no gas-equivalent ETH line that could be misread as gas.
+func TestFormatTelegramFromStructured_PlatformFeeOnly(t *testing.T) {
+	summary := Summary{
+		Subject:  "Run #1: Read-Only Workflow successfully completed",
+		Status:   "success",
+		Network:  "Sepolia",
+		Workflow: &WorkflowInfo{IsSimulation: false},
+		Runner:   &RunnerInfo{SmartWallet: "0x8Ee38eB323c14a1752DABDA1cca9661AEE377017"},
+		Fees: &FeesInfo{
+			ExecutionFee: &FeeAmount{Amount: "0.02", Unit: "USD"},
+			Total: []*TokenTotal{
+				{Amount: "0.02", Unit: "USD", USD: "0.02"},
+			},
+		},
+	}
+	out := FormatForMessageChannels(summary, "telegram", nil)
+	if !strings.Contains(out, "⛽ <b>Cost:</b> $0.02 platform fee") {
+		t.Errorf("expected platform-fee-only Cost line, got:\n%s", out)
+	}
+	if strings.Contains(out, " ETH (") {
+		t.Errorf("read-only run should not render an ETH line, got:\n%s", out)
+	}
+}
+
+// TestFormatTelegramFromStructured_NoPriceService covers Moralis-not-configured:
+// gas renders with $? for USD; platform fee still shows as the canonical $X.
+func TestFormatTelegramFromStructured_NoPriceService(t *testing.T) {
+	summary := Summary{
+		Subject:  "Run #1: Workflow successfully completed",
+		Status:   "success",
+		Network:  "Sepolia",
+		Workflow: &WorkflowInfo{IsSimulation: false},
+		Runner:   &RunnerInfo{SmartWallet: "0x8Ee38eB323c14a1752DABDA1cca9661AEE377017"},
+		Fees: &FeesInfo{
+			ExecutionFee: &FeeAmount{Amount: "0.02", Unit: "USD"},
+			Total: []*TokenTotal{
+				{Amount: "0.000003", Unit: "ETH", USD: ""}, // unpriced — renders "$?"
+				{Amount: "0.02", Unit: "USD", USD: "0.02"},
+			},
+		},
+	}
+	out := FormatForMessageChannels(summary, "telegram", nil)
+	if !strings.Contains(out, "⛽ <b>Cost:</b> 0.000003 ETH ($?), $0.02 platform fee") {
+		t.Errorf("expected unpriced ETH + platform fee, got:\n%s", out)
+	}
 }
 
 // TestFormatTelegramFromStructured_MultiToken_USDPlaceholder verifies the
