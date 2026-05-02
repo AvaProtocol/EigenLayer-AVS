@@ -25,6 +25,25 @@ const (
 	DefaultGasPriceHex = "0x1dcd6500"
 )
 
+// DefaultGasPriceByChain provides per-chain conservative simulation gas prices (wei).
+// Chosen to lean slightly high so simulated cogs don't undershoot real costs.
+// Real-time gas pricing is a separate follow-up.
+var DefaultGasPriceByChain = map[uint64]uint64{
+	1:        5_000_000_000, // Ethereum Mainnet — 5 gwei
+	11155111: 500_000_000,   // Ethereum Sepolia — 0.5 gwei
+	8453:     50_000_000,    // Base — 0.05 gwei
+	84532:    10_000_000,    // Base Sepolia — 0.01 gwei
+}
+
+// GetDefaultGasPrice returns the per-chain default simulation gas price (wei),
+// falling back to DefaultGasPrice (0.5 gwei) for unknown chains.
+func GetDefaultGasPrice(chainID uint64) uint64 {
+	if v, ok := DefaultGasPriceByChain[chainID]; ok {
+		return v
+	}
+	return DefaultGasPrice
+}
+
 // Contract method constants
 const (
 	// UnknownMethodName represents a placeholder for contract method names that need to be resolved from ABI

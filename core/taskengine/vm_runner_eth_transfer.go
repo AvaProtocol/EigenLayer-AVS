@@ -195,9 +195,26 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	// Get the sender (smart wallet) address for the transfer object
 	fromAddress := getAASenderString(p.vm)
 
+	// Estimated gas for the simulated transfer; populates the same fields a real
+	// receipt would, so downstream cogs/fees handling treats sim and deployed
+	// runs identically.
+	var simChainID uint64
+	if p.smartWalletConfig != nil {
+		simChainID = uint64(p.smartWalletConfig.ChainID)
+	}
+	gasUsedBig := new(big.Int).SetUint64(StandardGasCost)
+	gasPriceBig := new(big.Int).SetUint64(GetDefaultGasPrice(simChainID))
+	totalGasCost := new(big.Int).Mul(gasUsedBig, gasPriceBig)
+	executionLog.GasUsed = gasUsedBig.String()
+	executionLog.GasPrice = gasPriceBig.String()
+	executionLog.TotalGasCost = totalGasCost.String()
+
 	// Build result object for metadata (only transactionHash - success/isSimulated are in response/executionContext)
 	resultObj := map[string]interface{}{
 		"transactionHash": txHash,
+		"gasUsed":         executionLog.GasUsed,
+		"gasPrice":        executionLog.GasPrice,
+		"totalGasCost":    executionLog.TotalGasCost,
 	}
 
 	// Create output data: only transfer object in data field (matches ERC20 format)

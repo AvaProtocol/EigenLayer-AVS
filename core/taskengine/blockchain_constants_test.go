@@ -150,3 +150,25 @@ func BenchmarkGetChainSearchRanges(b *testing.B) {
 		_ = GetChainSearchRanges(chainID)
 	}
 }
+
+func TestGetDefaultGasPrice(t *testing.T) {
+	cases := []struct {
+		name    string
+		chainID uint64
+		want    uint64
+	}{
+		{"Ethereum Mainnet", 1, 5_000_000_000},
+		{"Ethereum Sepolia", 11155111, 500_000_000},
+		{"Base", 8453, 50_000_000},
+		{"Base Sepolia", 84532, 10_000_000},
+		{"Unknown chain falls back to DefaultGasPrice", 99999, DefaultGasPrice},
+		{"Zero chain falls back to DefaultGasPrice", 0, DefaultGasPrice},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := GetDefaultGasPrice(tc.chainID); got != tc.want {
+				t.Errorf("GetDefaultGasPrice(%d) = %d, want %d", tc.chainID, got, tc.want)
+			}
+		})
+	}
+}

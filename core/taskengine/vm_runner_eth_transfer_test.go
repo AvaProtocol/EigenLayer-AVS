@@ -477,3 +477,40 @@ func TestETHTransferProcessor_Execute_OversizedHandlebarsTemplate(t *testing.T) 
 		require.NotNil(t, executionLog)
 	})
 }
+
+func TestETHTransferProcessor_Simulation_PopulatesGasFields(t *testing.T) {
+	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
+
+	testUserAddress := testutil.TestUser1().Address
+	processor := NewETHTransferProcessor(vm, nil, nil, &testUserAddress)
+
+	node := &avsproto.ETHTransferNode{
+		Config: &avsproto.ETHTransferNode_Config{
+			Destination: "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
+			Amount:      "1000000000000000000",
+		},
+	}
+	taskNode := &avsproto.TaskNode{
+		Id:       "test-step",
+		Name:     "TestETHTransfer",
+		Type:     avsproto.NodeType_NODE_TYPE_ETH_TRANSFER,
+		TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: node},
+	}
+	processor.CommonProcessor.SetTaskNode(taskNode)
+	vm.TaskNodes = map[string]*avsproto.TaskNode{"test-step": taskNode}
+
+	executionLog, err := processor.Execute("test-step", node)
+	require.NoError(t, err)
+	require.NotNil(t, executionLog)
+	require.True(t, executionLog.Success)
+
+	// Simulation path lands here when smartWalletConfig is nil. Chain falls back
+	// to GetDefaultGasPrice(0) == DefaultGasPrice (0.5 gwei).
+	wantGasUsed := "21000"
+	wantGasPrice := "500000000" // DefaultGasPrice = 0.5 gwei
+	wantTotal := "10500000000000"
+	assert.Equal(t, wantGasUsed, executionLog.GasUsed, "GasUsed should be StandardGasCost")
+	assert.Equal(t, wantGasPrice, executionLog.GasPrice, "GasPrice should fall back to DefaultGasPrice for unknown chain")
+	assert.Equal(t, wantTotal, executionLog.TotalGasCost, "TotalGasCost should be GasUsed × GasPrice")
+}
