@@ -1731,15 +1731,37 @@ func readTransferRecord(m map[string]interface{}, smartWallet, _ string, chainID
 	if contractAddr == "" {
 		return &outgoingTransfer{contractAddress: "", symbol: "ETH", decimals: 18, rawAmount: rawInt}
 	}
-	// ERC20: resolve symbol/decimals from Stablecoins map; fall back to "?".
-	if info, ok := LookupStablecoin(chainID, contractAddr); ok {
-		return &outgoingTransfer{contractAddress: contractAddr, symbol: info.Symbol, decimals: info.Decimals, rawAmount: rawInt}
+	symbol, decimals := resolveTokenInfo(chainID, contractAddr)
+	return &outgoingTransfer{contractAddress: contractAddr, symbol: symbol, decimals: decimals, rawAmount: rawInt}
+}
+
+// resolveTokenInfo returns (symbol, decimals) for an ERC20 contract using:
+//  1. The Stablecoins fast-path map (no network call).
+//  2. TokenEnrichmentService's metadata cache / RPC lookup — same source the
+//     /api/summarize request uses, so decimals here match what context-memory
+//     sees.
+//
+// Falls back to ("?", 18) when the address resolves to nothing — caller renders
+// "$?" for USD; the 18-decimal default at least keeps the amount in the right
+// order of magnitude for most tokens.
+func resolveTokenInfo(chainID uint64, contractAddress string) (string, uint32) {
+	if info, ok := LookupStablecoin(chainID, contractAddress); ok {
+		return info.Symbol, info.Decimals
 	}
-	// Unknown ERC20 — caller renders "$?" for USD; we still need decimals to
-	// format the raw amount. Default to 18 (most common). When tokenMetadata
-	// passes through from the request's settings.tokens, future code can
-	// replace this with a real lookup.
-	return &outgoingTransfer{contractAddress: contractAddr, symbol: "?", decimals: 18, rawAmount: rawInt}
+	if svc := GetTokenEnrichmentService(); svc != nil {
+		if meta, err := svc.GetTokenMetadata(contractAddress); err == nil && meta != nil {
+			symbol := meta.Symbol
+			if symbol == "" {
+				symbol = "?"
+			}
+			decimals := meta.Decimals
+			if decimals == 0 {
+				decimals = 18
+			}
+			return symbol, decimals
+		}
+	}
+	return "?", 18
 }
 
 // valueFeePercentage returns the tier percentage as a big.Float fraction
