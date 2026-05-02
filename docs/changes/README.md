@@ -4,8 +4,6 @@ Long-form notes for changes worth remembering after the PR merges. Format and ed
 
 Filename: `YYYYMMDD-kebab-case-title.md`. Each entry opens with a header block (Date, Status, Branch, Related) and a body adapted to the change (typically Problem / Decision / Alternatives / Verification). See existing entries for examples.
 
-Earlier entries (`0001-…`, `0002-…`) used a sequential four-digit prefix; those filenames are referenced from merged commits and stay as-is. New entries use the date prefix.
-
 ## Project-specific notes
 
 _None yet. Add things here that only apply to this repo: dashboards we cross-link to, tags or prefixes we use, runbooks worth pointing at._
