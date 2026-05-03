@@ -250,11 +250,11 @@ func formatSubjectWithBoldName(subject string) string {
 // Format: "⛽ <b>Cost:</b> 0.000003 ETH ($0.01), 1.2 USDC ($1.20)" — native
 // token first, comma-separated, USD parenthetical per token. Unpriceable
 // tokens render as "$?". For simulations the line collapses to the static
-// "⛽ (cost will show before deploy)" placeholder. Returns "" when there's
+// "⛽ (see cost estimate before deploy)" placeholder. Returns "" when there's
 // nothing to render.
 func formatTelegramCostLine(s Summary) string {
 	if s.Workflow != nil && s.Workflow.IsSimulation {
-		return "⛽ <i>(cost will show before deploy)</i>\n"
+		return "⛽ <i>(see cost estimate before deploy)</i>\n"
 	}
 	if s.Fees == nil || len(s.Fees.Total) == 0 {
 		return ""
