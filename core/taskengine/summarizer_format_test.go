@@ -1069,7 +1069,7 @@ func TestFormatTelegramFromStructured_RunnerAndFees(t *testing.T) {
 	if strings.Contains(out, "(~") || strings.Contains(out, "<b>Value fee:</b>") {
 		t.Errorf("Telegram should not render gas-units detail or Value fee line, got:\n%s", out)
 	}
-	if strings.Contains(out, "(cost estimated at deploy)") {
+	if strings.Contains(out, "(cost shown at the Deploy step)") {
 		t.Errorf("deployed run should not show simulation placeholder, got:\n%s", out)
 	}
 
@@ -1290,7 +1290,7 @@ func mustBigInt(s string) *big.Int {
 }
 
 // TestFormatTelegramFromStructured_Simulation_PlaceholderCost confirms simulation
-// runs render the "(cost estimated at deploy)" placeholder instead of fake-precision
+// runs render the "(cost shown at the Deploy step)" placeholder instead of fake-precision
 // numbers. Sim gas prices are conservative chain defaults, so any specific ETH/gas
 // figure would mislead the user.
 func TestFormatTelegramFromStructured_Simulation_PlaceholderCost(t *testing.T) {
@@ -1318,7 +1318,7 @@ func TestFormatTelegramFromStructured_Simulation_PlaceholderCost(t *testing.T) {
 
 	out := FormatForMessageChannels(summary, "telegram", nil)
 
-	if !strings.Contains(out, "⛽ <i>(cost estimated at deploy)</i>") {
+	if !strings.Contains(out, "⛽ <i>(cost shown at the Deploy step)</i>") {
 		t.Errorf("simulation should render the deploy-time placeholder, got:\n%s", out)
 	}
 	for _, banned := range []string{"<b>Cost:</b>", "0.0000105 ETH", "21 K gas", "platform fee"} {
@@ -1729,7 +1729,7 @@ func TestComposeSummary_SimulateTaskFromClientPayload(t *testing.T) {
 	}
 
 	// The simulation Cost placeholder uses italic text; allow that but no other italics.
-	if strings.Contains(telegram, "<i>") && !strings.Contains(telegram, "<i>(cost estimated at deploy)</i>") {
+	if strings.Contains(telegram, "<i>") && !strings.Contains(telegram, "<i>(cost shown at the Deploy step)</i>") {
 		t.Errorf("Telegram should not contain italic annotation other than the cost placeholder, got:\n%s", telegram)
 	}
 
