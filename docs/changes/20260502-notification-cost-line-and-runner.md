@@ -45,7 +45,7 @@ Single-line, multi-token, native unit first with USD parenthetical per token:
 | ETH gas + USDC value-fee | `⛽ Cost: 0.000003 ETH ($0.01), 1.2 USDC ($1.20)` |
 | Unpriceable ERC20 | `⛽ Cost: 0.000003 ETH ($0.01), 0.005 PEPE ($?)` |
 | Read-only deployed (no on-chain steps) | (line omitted) |
-| Simulation | `⛽ (cost shown at the Deploy step)` — static, no numbers |
+| Simulation | `⛽ (cost will show before deploy)` — static, no numbers |
 
 Telegram drops bullets, gas-units, and value-fee detail; email matches. Breakdowns live on the dashboard. Simulation collapses to the placeholder because sim gas prices are conservative chain defaults rather than real network conditions — any specific number would mislead.
 
@@ -83,7 +83,7 @@ To make simulation cogs[] non-empty in the first place, the Tenderly client now 
   - `TestPercentOfRaw` — value-fee percentage math against raw amounts.
   - `TestTokenBucketToTokenTotal` — stablecoin shortcut, zero-rounding omission, missing price service path.
   - `TestFormatTelegramFromStructured_RunnerAndFees` and `TestFormatTelegramFromStructured_MultiToken_USDPlaceholder` — end-to-end render assertions.
-- Production verification: the next deployed run on Sepolia after `cba1ac8` showed the Telegram block ordering with Runner-and-Network folded onto one line; the simulation summary correctly rendered `⛽ (cost shown at the Deploy step)` after `4f784c9` (`vm.IsSimulation` flowing through to the formatter).
+- Production verification: the next deployed run on Sepolia after `cba1ac8` showed the Telegram block ordering with Runner-and-Network folded onto one line; the simulation summary correctly rendered `⛽ (cost will show before deploy)` after `4f784c9` (`vm.IsSimulation` flowing through to the formatter).
 - The aggregator's existing tests pass with the price service possibly nil: executor (`executor.go:321,478`), fee estimator (`fee_estimator.go:195`), and the new `buildTotalsFromVM` all guard against `nil` rather than panicking.
 
 ## Cross-repo coordination
