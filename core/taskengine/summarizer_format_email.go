@@ -335,7 +335,7 @@ func buildFeesSectionHTML(s Summary) string {
 	if s.Workflow != nil && s.Workflow.IsSimulation {
 		// Heading omitted — the placeholder line carries enough context on its own.
 		return `<div style="margin-bottom: 20px;">` +
-			`<p style="margin: 0; color: #666; font-style: italic;">⛽ (cost estimated at deploy)</p>` +
+			`<p style="margin: 0; color: #666; font-style: italic;">⛽ (see cost estimate before deploy)</p>` +
 			`</div>`
 	}
 
