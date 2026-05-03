@@ -281,16 +281,16 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 		}
 	}
 
-	// Convert API response workflow to Summary workflow
-	var workflow *WorkflowInfo
+	// Workflow metadata: the aggregator owns IsSimulation since it ran the
+	// workflow — the API response's value (if any) is informational only.
+	// Always populate so renderers can rely on the flag without nil-checking
+	// against API response shape drift.
+	workflow := &WorkflowInfo{IsSimulation: vm.IsSimulation}
 	if apiResp.Body.Workflow != nil {
-		workflow = &WorkflowInfo{
-			Name:         apiResp.Body.Workflow.Name,
-			Chain:        apiResp.Body.Workflow.Chain,
-			ChainID:      apiResp.Body.Workflow.ChainID,
-			IsSimulation: apiResp.Body.Workflow.IsSimulation,
-			RunNumber:    apiResp.Body.Workflow.RunNumber,
-		}
+		workflow.Name = apiResp.Body.Workflow.Name
+		workflow.Chain = apiResp.Body.Workflow.Chain
+		workflow.ChainID = apiResp.Body.Workflow.ChainID
+		workflow.RunNumber = apiResp.Body.Workflow.RunNumber
 	}
 
 	// Convert API execution entries to Summary execution entries
@@ -306,6 +306,10 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 		executions = append(executions, entry)
 	}
 
+	// Runner / Fees are aggregator-local (not from the API response). Both helpers
+	// read VM state directly so notifications surface the same fee numbers as
+	// EstimateFees() and the persisted Execution.Fee. See PRD:
+	// docs/changes/20260501-summary-runner-and-fees-sections.md.
 	return Summary{
 		Subject:       apiResp.Subject,
 		Body:          composePlainTextBodyFromAPI(apiResp.Body),
@@ -324,6 +328,8 @@ func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, current
 		Transfers:     transfers,
 		Balances:      balances,
 		Workflow:      workflow,
+		Runner:        buildRunnerFromVM(vm),
+		Fees:          buildFeesFromVM(vm),
 	}, nil
 }
 

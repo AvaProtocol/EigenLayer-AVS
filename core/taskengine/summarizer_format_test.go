@@ -3,6 +3,7 @@ package taskengine
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"os"
 	"strings"
 	"testing"
@@ -1010,6 +1011,323 @@ func TestFormatTelegramFromStructured_Annotation(t *testing.T) {
 	t.Logf("Without annotation:\n%s", resultNoAnnotation)
 }
 
+// TestFormatTelegramFromStructured_RunnerAndFees verifies the Runner and Cost
+// blocks render from Summary.Runner / Summary.Fees, mirroring what the
+// context-memory API now returns. Numbers come from the real Sepolia run
+// captured in aggregator-sepolia.log on 2026-05-02 (see PRD).
+func TestFormatTelegramFromStructured_RunnerAndFees(t *testing.T) {
+	summary := Summary{
+		Subject:     "Run #1: Automatically Split Incoming USDC Payments successfully completed",
+		Status:      "success",
+		Network:     "Sepolia",
+		Trigger:     "Transfer event detected: received 1 USDC from 0x804e...1557 on Sepolia",
+		TriggeredAt: "2026-05-02T04:05:29.526Z",
+		Executions: []ExecutionEntry{
+			{Description: "Transferred 0.2 USDC to 0x804e...1557"},
+			{Description: "Transferred 0.5 USDC to 0x25d9...321D"},
+			{Description: "Transferred 0.3 USDC to 0xfE66...bDA9"},
+		},
+		Workflow: &WorkflowInfo{IsSimulation: false},
+		Runner: &RunnerInfo{
+			SmartWallet: "0x8Ee38eB323c14a1752DABDA1cca9661AEE377017",
+			OwnerEOA:    "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
+		},
+		Fees: &FeesInfo{
+			ExecutionFee: &FeeAmount{Amount: "0.020000", Unit: "USD"},
+			Total: []*TokenTotal{
+				{Amount: "0.000003", Unit: "ETH", USD: "0.01"},
+				{Amount: "0.02", Unit: "USD", USD: "0.02"}, // platform fee — renders as "$0.02 platform fee"
+			},
+		},
+	}
+
+	out := FormatForMessageChannels(summary, "telegram", nil)
+
+	// Runner line: smart wallet + chain qualifier on a single line ("Runner:
+	// 0x… on Sepolia"). Owner intentionally omitted on Telegram — kept compact
+	// for the channel. Address is truncated (7-char prefix + 4-char suffix),
+	// NOT <code>-wrapped (per PRD).
+	if !strings.Contains(out, "<b>Runner:</b> 0x8Ee38...7017 on Sepolia") {
+		t.Errorf("missing combined Runner+chain line in:\n%s", out)
+	}
+	// Standalone Network line should NOT render when Runner is present —
+	// chain is folded into the Runner line.
+	if strings.Contains(out, "<b>Network:</b>") {
+		t.Errorf("standalone Network line should not render when Runner is present, got:\n%s", out)
+	}
+	if strings.Contains(out, "<b>Owner:</b>") {
+		t.Errorf("Owner line should NOT render on Telegram, got:\n%s", out)
+	}
+	if strings.Contains(out, "<code>0x8Ee3") {
+		t.Errorf("runner address should not be <code>-wrapped, got:\n%s", out)
+	}
+
+	// Cost line: native gas first, then platform fee as a separate "$X platform fee".
+	if !strings.Contains(out, "⛽ <b>Cost:</b> 0.000003 ETH ($0.01), $0.02 platform fee") {
+		t.Errorf("missing combined gas+platform Cost line in:\n%s", out)
+	}
+	if strings.Contains(out, "(~") || strings.Contains(out, "<b>Value fee:</b>") {
+		t.Errorf("Telegram should not render gas-units detail or Value fee line, got:\n%s", out)
+	}
+	if strings.Contains(out, "(cost estimated at deploy)") {
+		t.Errorf("deployed run should not show simulation placeholder, got:\n%s", out)
+	}
+
+	// Cost line follows Runner directly inside the metadata block (no blank
+	// line between them).
+	if !strings.Contains(out, "<b>Runner:</b> 0x8Ee38...7017 on Sepolia\n⛽ <b>Cost:</b> ") {
+		t.Errorf("Cost line should immediately follow Runner line, got:\n%s", out)
+	}
+
+	t.Logf("Telegram render:\n%s", out)
+}
+
+// TestFormatTelegramFromStructured_PlatformFeeOnly covers the read-only path:
+// no on-chain steps, only the platform fee. Renders as "$0.02 platform fee"
+// with no gas-equivalent ETH line that could be misread as gas.
+func TestFormatTelegramFromStructured_PlatformFeeOnly(t *testing.T) {
+	summary := Summary{
+		Subject:  "Run #1: Read-Only Workflow successfully completed",
+		Status:   "success",
+		Network:  "Sepolia",
+		Workflow: &WorkflowInfo{IsSimulation: false},
+		Runner:   &RunnerInfo{SmartWallet: "0x8Ee38eB323c14a1752DABDA1cca9661AEE377017"},
+		Fees: &FeesInfo{
+			ExecutionFee: &FeeAmount{Amount: "0.02", Unit: "USD"},
+			Total: []*TokenTotal{
+				{Amount: "0.02", Unit: "USD", USD: "0.02"},
+			},
+		},
+	}
+	out := FormatForMessageChannels(summary, "telegram", nil)
+	if !strings.Contains(out, "⛽ <b>Cost:</b> $0.02 platform fee") {
+		t.Errorf("expected platform-fee-only Cost line, got:\n%s", out)
+	}
+	if strings.Contains(out, " ETH (") {
+		t.Errorf("read-only run should not render an ETH line, got:\n%s", out)
+	}
+}
+
+// TestFormatTelegramFromStructured_NoPriceService covers Moralis-not-configured:
+// gas renders with $? for USD; platform fee still shows as the canonical $X.
+func TestFormatTelegramFromStructured_NoPriceService(t *testing.T) {
+	summary := Summary{
+		Subject:  "Run #1: Workflow successfully completed",
+		Status:   "success",
+		Network:  "Sepolia",
+		Workflow: &WorkflowInfo{IsSimulation: false},
+		Runner:   &RunnerInfo{SmartWallet: "0x8Ee38eB323c14a1752DABDA1cca9661AEE377017"},
+		Fees: &FeesInfo{
+			ExecutionFee: &FeeAmount{Amount: "0.02", Unit: "USD"},
+			Total: []*TokenTotal{
+				{Amount: "0.000003", Unit: "ETH", USD: ""}, // unpriced — renders "$?"
+				{Amount: "0.02", Unit: "USD", USD: "0.02"},
+			},
+		},
+	}
+	out := FormatForMessageChannels(summary, "telegram", nil)
+	if !strings.Contains(out, "⛽ <b>Cost:</b> 0.000003 ETH ($?), $0.02 platform fee") {
+		t.Errorf("expected unpriced ETH + platform fee, got:\n%s", out)
+	}
+}
+
+// TestFormatTelegramFromStructured_MultiToken_USDPlaceholder verifies the
+// multi-token comma-separated render and the "$?" placeholder for unpriceable
+// entries. Mirror of the format spec in the PRD's Rendering section.
+func TestFormatTelegramFromStructured_MultiToken_USDPlaceholder(t *testing.T) {
+	summary := Summary{
+		Subject:    "Run #1: Multi-token Workflow successfully completed",
+		Status:     "success",
+		Network:    "Ethereum",
+		Executions: []ExecutionEntry{{Description: "Transferred 1.2 USDC"}},
+		Workflow:   &WorkflowInfo{IsSimulation: false},
+		Runner:     &RunnerInfo{SmartWallet: "0x8Ee38eB323c14a1752DABDA1cca9661AEE377017"},
+		Fees: &FeesInfo{
+			Total: []*TokenTotal{
+				{Amount: "0.01", Unit: "ETH", USD: "25.00"},
+				{Amount: "1.2", Unit: "USDC", USD: "1.20"},
+				{Amount: "0.005", Unit: "PEPE", USD: ""}, // unpriceable
+			},
+		},
+	}
+
+	out := FormatForMessageChannels(summary, "telegram", nil)
+	want := "⛽ <b>Cost:</b> 0.01 ETH ($25.00), 1.2 USDC ($1.20), 0.005 PEPE ($?)"
+	if !strings.Contains(out, want) {
+		t.Errorf("missing multi-token Cost line %q in:\n%s", want, out)
+	}
+}
+
+// TestPercentOfRaw verifies the value-fee percentage math against raw amounts.
+func TestPercentOfRaw(t *testing.T) {
+	pct := func(s string) *big.Float {
+		v, _ := new(big.Float).SetString(s)
+		return v
+	}
+	cases := []struct {
+		name string
+		raw  string
+		pct  *big.Float
+		want string
+	}{
+		{"1 USDC × 0.03% = 300 raw (6 decimals)", "1000000", pct("0.0003"), "300"},
+		{"1000 USDC × 0.03%", "1000000000", pct("0.0003"), "300000"},
+		{"zero raw", "0", pct("0.0003"), ""},
+		{"zero pct", "1000000", pct("0"), ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rawInt, _ := new(big.Int).SetString(tc.raw, 10)
+			got := percentOfRaw(rawInt, tc.pct)
+			if tc.want == "" {
+				if got != nil && got.Sign() > 0 {
+					t.Errorf("expected nil/zero, got %s", got.String())
+				}
+				return
+			}
+			if got == nil || got.String() != tc.want {
+				t.Errorf("percentOfRaw(%s, %s) = %v, want %s", tc.raw, tc.pct.String(), got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTokenBucketToTokenTotal verifies stablecoin shortcut + zero-rounding.
+func TestTokenBucketToTokenTotal(t *testing.T) {
+	cases := []struct {
+		name       string
+		bucket     *tokenBucket
+		chainID    uint64
+		wantNil    bool
+		wantAmount string
+		wantUnit   string
+		wantUSD    string
+	}{
+		{
+			name: "USDC mainnet 1.0 token via stablecoin shortcut",
+			bucket: &tokenBucket{
+				contract: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+				symbol:   "USDC",
+				decimals: 6,
+				raw:      mustBigInt("1000000"),
+			},
+			chainID:    1,
+			wantAmount: "1",
+			wantUnit:   "USDC",
+			wantUSD:    "1",
+		},
+		{
+			name: "0.0003 USDC via stablecoin shortcut",
+			bucket: &tokenBucket{
+				contract: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+				symbol:   "USDC",
+				decimals: 6,
+				raw:      mustBigInt("300"),
+			},
+			chainID:    1,
+			wantAmount: "0.0003",
+			wantUnit:   "USDC",
+			wantUSD:    "0",
+		},
+		{
+			name: "below precision rounds to zero — omit",
+			bucket: &tokenBucket{
+				contract: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+				symbol:   "USDC",
+				decimals: 6,
+				raw:      mustBigInt("0"),
+			},
+			chainID: 1,
+			wantNil: true,
+		},
+		{
+			name: "unknown ERC20 with no price service → empty USD",
+			bucket: &tokenBucket{
+				contract: "0xff00000000000000000000000000000000000099",
+				symbol:   "?",
+				decimals: 18,
+				raw:      mustBigInt("1000000000000000000"),
+			},
+			chainID:    1,
+			wantAmount: "1",
+			wantUnit:   "?",
+			wantUSD:    "",
+		},
+	}
+	// Ensure no globalPriceService leaks into these tests.
+	prev := globalPriceService
+	globalPriceService = nil
+	t.Cleanup(func() { globalPriceService = prev })
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.bucket.toTokenTotal(tc.chainID)
+			if tc.wantNil {
+				if got != nil {
+					t.Errorf("expected nil, got %+v", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("expected non-nil")
+			}
+			if got.Amount != tc.wantAmount {
+				t.Errorf("Amount = %q, want %q", got.Amount, tc.wantAmount)
+			}
+			if got.Unit != tc.wantUnit {
+				t.Errorf("Unit = %q, want %q", got.Unit, tc.wantUnit)
+			}
+			if got.USD != tc.wantUSD {
+				t.Errorf("USD = %q, want %q", got.USD, tc.wantUSD)
+			}
+		})
+	}
+}
+
+func mustBigInt(s string) *big.Int {
+	v, _ := new(big.Int).SetString(s, 10)
+	return v
+}
+
+// TestFormatTelegramFromStructured_Simulation_PlaceholderCost confirms simulation
+// runs render the "(cost estimated at deploy)" placeholder instead of fake-precision
+// numbers. Sim gas prices are conservative chain defaults, so any specific ETH/gas
+// figure would mislead the user.
+func TestFormatTelegramFromStructured_Simulation_PlaceholderCost(t *testing.T) {
+	summary := Summary{
+		Subject:    "Simulation: Test Workflow successfully completed",
+		Status:     "success",
+		Network:    "Sepolia",
+		Executions: []ExecutionEntry{{Description: "(Simulated) Transferred 0.01 ETH"}},
+		Workflow:   &WorkflowInfo{IsSimulation: true},
+		Runner: &RunnerInfo{
+			SmartWallet: "0x8Ee38eB323c14a1752DABDA1cca9661AEE377017",
+			OwnerEOA:    "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
+		},
+		Fees: &FeesInfo{
+			ExecutionFee: &FeeAmount{Amount: "0.020000", Unit: "USD"},
+			Cogs: []*NodeCOGS{{
+				NodeID:   "transfer1",
+				StepName: "transfer1",
+				CostType: "gas",
+				Fee:      &FeeAmount{Amount: "10500000000000", Unit: "WEI"},
+				GasUnits: "21000",
+			}},
+		},
+	}
+
+	out := FormatForMessageChannels(summary, "telegram", nil)
+
+	if !strings.Contains(out, "⛽ <i>(cost estimated at deploy)</i>") {
+		t.Errorf("simulation should render the deploy-time placeholder, got:\n%s", out)
+	}
+	for _, banned := range []string{"<b>Cost:</b>", "0.0000105 ETH", "21 K gas", "platform fee"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("simulation should not render %q, got:\n%s", banned, out)
+		}
+	}
+}
+
 // TestTruncateAddress tests the address truncation helper function
 func TestTruncateAddress(t *testing.T) {
 	tests := []struct {
@@ -1392,7 +1710,8 @@ func TestComposeSummary_SimulateTaskFromClientPayload(t *testing.T) {
 
 	expectedTelegramContents := []string{
 		"✅ <code>Simulation: Test settings.name</code> successfully completed",
-		"<b>Network:</b> Sepolia",
+		"<b>Runner:</b> ", // chain qualifier folded onto Runner line — see formatTelegramFromStructured
+		" on Sepolia",
 		"<b>Time:</b>",
 		"<b>Trigger:</b> (Simulated) Scheduled task ran on Sepolia",
 		"<b>Executed:</b>",
@@ -1404,9 +1723,14 @@ func TestComposeSummary_SimulateTaskFromClientPayload(t *testing.T) {
 		}
 	}
 
-	// Telegram should NOT contain annotation for simulate_task
-	if strings.Contains(telegram, "<i>") {
-		t.Errorf("Telegram output should not contain italic annotation for simulate_task\nFull output:\n%s", telegram)
+	// Standalone Network line should NOT render — chain is folded into Runner.
+	if strings.Contains(telegram, "<b>Network:</b>") {
+		t.Errorf("standalone Network line should not render when Runner is present, got:\n%s", telegram)
+	}
+
+	// The simulation Cost placeholder uses italic text; allow that but no other italics.
+	if strings.Contains(telegram, "<i>") && !strings.Contains(telegram, "<i>(cost estimated at deploy)</i>") {
+		t.Errorf("Telegram should not contain italic annotation other than the cost placeholder, got:\n%s", telegram)
 	}
 
 	t.Logf("Subject: %s", summary.Subject)

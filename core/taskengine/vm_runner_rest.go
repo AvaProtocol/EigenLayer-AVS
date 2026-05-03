@@ -10,7 +10,6 @@ import (
 	"time"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-resty/resty/v2"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -715,36 +714,15 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 					// Get dynamic template data from summary (subject/title/analysis...)
 					dynamicData := s.SendGridDynamicData()
 
-					// Enrich with runner/eoaAddress for template usage.
-					// Read from vm.task directly.
-					smartWallet := ""
-					ownerEOA := ""
-					if r.vm.task != nil && r.vm.task.Task != nil {
-						smartWallet = r.vm.task.SmartWalletAddress
-						ownerEOA = r.vm.task.Owner
+					// Single source of truth: the runner block returned by context-memory,
+					// shared with the Telegram render. SendGrid template variables keep
+					// their existing format — `runner` is full hex, `eoaAddress` is shortened.
+					if s.Runner != nil {
+						dynamicData["runner"] = s.Runner.SmartWallet
+						dynamicData["eoaAddress"] = shortHex(s.Runner.OwnerEOA)
 					}
-					// Fallback to aa_sender or settings if task not available
-					r.vm.mu.Lock()
-					if smartWallet == "" {
-						if aaSender, ok := r.vm.vars["aa_sender"].(string); ok && aaSender != "" {
-							smartWallet = aaSender
-						}
-					}
-					if smartWallet == "" {
-						if settings, ok := r.vm.vars["settings"].(map[string]interface{}); ok {
-							if runner, ok := settings["runner"].(string); ok && strings.TrimSpace(runner) != "" {
-								smartWallet = runner
-							}
-						}
-					}
-					if ownerEOA == "" && r.vm.TaskOwner != (common.Address{}) {
-						ownerEOA = r.vm.TaskOwner.Hex()
-					}
-					r.vm.mu.Unlock()
 					// Get execution index from VM field (set by executor)
 					executionIndex := r.vm.ExecutionIndex
-					dynamicData["runner"] = smartWallet
-					dynamicData["eoaAddress"] = shortHex(ownerEOA)
 					dynamicData["year"] = fmt.Sprintf("%d", time.Now().Year()) // Current year for email footer
 
 					// Compute skipped nodes (by name) = workflow nodes - executed step names

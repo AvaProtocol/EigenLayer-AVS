@@ -677,12 +677,13 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		}
 	}
 
+	sentGasPrice := GetDefaultGasPrice(uint64(chainID))
 	body := map[string]interface{}{
 		"network_id":      fmt.Sprintf("%d", chainID),
 		"from":            fromAddress,
 		"to":              contractAddress,
 		"gas":             8000000,
-		"gas_price":       0,
+		"gas_price":       sentGasPrice,
 		"value":           apiValue,
 		"input":           callData,
 		"simulation_type": "full",
@@ -996,32 +997,30 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 				}
 			}
 
-			// Calculate total gas cost if both gas_used and gas_price are available
-			if gasUsed != "" && gasPrice != "" {
-				// Convert strings to big.Int for accurate calculation
+			// Compute total gas cost when the simulation produced gas data. The
+			// simulate request always sends a non-zero gas_price (sentGasPrice),
+			// so a zero/missing gas_price in the response is a real anomaly —
+			// surface it as an error rather than silently substituting a default.
+			if gasUsed != "" {
 				gasUsedBig, gasUsedOk := new(big.Int).SetString(gasUsed, 10)
-				gasPriceBig, gasPriceOk := new(big.Int).SetString(gasPrice, 10)
-				if gasUsedOk && gasPriceOk {
-					totalGasCost := new(big.Int).Mul(gasUsedBig, gasPriceBig)
-					result.GasUsed = gasUsed
-					result.GasPrice = gasPrice
-					result.TotalGasCost = totalGasCost.String()
-					tc.logger.Info("✅ Extracted gas information from Tenderly",
-						"gas_used", gasUsed,
-						"gas_price", gasPrice,
-						"total_gas_cost", result.TotalGasCost)
-				} else {
-					tc.logger.Warn("Failed to parse gas values as big integers",
-						"gas_used", gasUsed,
-						"gas_price", gasPrice)
-					// Store individual values even if calculation failed
-					result.GasUsed = gasUsed
-					result.GasPrice = gasPrice
+				if !gasUsedOk {
+					return nil, fmt.Errorf("tenderly returned unparseable gas_used=%q (chain %d)", gasUsed, chainID)
 				}
-			} else if gasUsed != "" {
-				// Only gas used is available
+				gasPriceBig, gasPriceOk := new(big.Int).SetString(gasPrice, 10)
+				if !gasPriceOk || gasPriceBig.Sign() == 0 {
+					return nil, fmt.Errorf(
+						"tenderly returned gas_price=%q despite request sending %d (chain %d); refusing silent fallback",
+						gasPrice, sentGasPrice, chainID,
+					)
+				}
+				totalGasCost := new(big.Int).Mul(gasUsedBig, gasPriceBig)
 				result.GasUsed = gasUsed
-				tc.logger.Info("⚠️ Only gas_used available from Tenderly", "gas_used", gasUsed)
+				result.GasPrice = gasPrice
+				result.TotalGasCost = totalGasCost.String()
+				tc.logger.Info("✅ Extracted gas information from Tenderly",
+					"gas_used", gasUsed,
+					"gas_price", gasPrice,
+					"total_gas_cost", result.TotalGasCost)
 			} else {
 				tc.logger.Warn("⚠️ No gas information found in Tenderly response")
 			}

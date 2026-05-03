@@ -34,6 +34,12 @@ type FeeEstimator struct {
 type PriceService interface {
 	GetNativeTokenPriceUSD(chainID int64) (*big.Float, error)
 	GetNativeTokenSymbol(chainID int64) string
+	// GetERC20PriceUSD returns the USD price for an ERC20 contract on the
+	// given chain. Implementations should short-circuit hard-coded stablecoins
+	// (LookupStablecoinSymbol) before hitting the network. Returns an error
+	// when the price isn't available — callers render "$?" rather than
+	// fabricate a number.
+	GetERC20PriceUSD(chainID int64, contractAddress string) (*big.Float, error)
 }
 
 // FeeRates holds the fee configuration for the estimator.
@@ -192,7 +198,12 @@ func (fe *FeeEstimator) EstimateFees(ctx context.Context, req *avsproto.Estimate
 	// Step 3: Value fee — workflow-level classification
 	valueFee := fe.classifyWorkflowValue(req)
 
-	nativeTokenSymbol := fe.priceService.GetNativeTokenSymbol(chainID)
+	nativeTokenSymbol := "ETH"
+	if fe.priceService != nil {
+		if sym := fe.priceService.GetNativeTokenSymbol(chainID); sym != "" {
+			nativeTokenSymbol = sym
+		}
+	}
 
 	fe.logger.Info("✅ Fee estimation completed",
 		"execution_fee_usd", fe.feeRates.ExecutionFeeUSD,

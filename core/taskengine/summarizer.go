@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"time"
 
@@ -31,6 +32,30 @@ var globalSummarizer Summarizer
 // Pass nil to disable AI summarization and use deterministic fallback only.
 func SetSummarizer(s Summarizer) {
 	globalSummarizer = s
+}
+
+// globalFeeRates is the aggregator's fee config, set once at engine startup.
+// Used by Runner/Fees population helpers in both Summarize() and ComposeSummary()
+// so notifications surface the same fee numbers as EstimateFees() and the
+// persisted Execution.Fee — single source of truth.
+var globalFeeRates *config.FeeRatesConfig
+
+// SetFeeRates sets the global fee rates config used by Summary.Fees population.
+// Engine startup wires this from config.FeeRates. nil falls back to defaults.
+func SetFeeRates(rates *config.FeeRatesConfig) {
+	globalFeeRates = rates
+}
+
+// globalPriceService is the chain price oracle used by Summary.Fees population
+// to convert USD platform fees and value-fee legs into native-token amounts.
+// Wired at engine startup via Engine.SetPriceService → SetPriceService.
+var globalPriceService PriceService
+
+// SetPriceService sets the global price service used by Summary.Fees population.
+// nil disables USD/native conversion — Total entries that need a price will be
+// emitted with empty USD amounts (formatter renders "$?" placeholder).
+func SetPriceService(svc PriceService) {
+	globalPriceService = svc
 }
 
 // ComposeSummarySmart tries the configured summarizer (context-memory API) with strict timeout
@@ -100,7 +125,14 @@ func NewContextMemorySummarizerFromAggregatorConfig(c *config.Config) Summarizer
 	if strings.TrimSpace(authToken) == "" {
 		return nil
 	}
-	return NewContextMemorySummarizer(baseURL, authToken)
+	if baseURL == "" {
+		baseURL = ContextAPIURL
+	}
+	return &ContextMemorySummarizer{
+		baseURL:    baseURL,
+		authToken:  authToken,
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+	}
 }
 
 // FormatForMessageChannels converts a Summary into a concise chat message

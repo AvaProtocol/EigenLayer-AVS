@@ -97,15 +97,17 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		agg.logger,
 	)
 
-	// Create price service for fee conversion (USD → ETH)
+	// Price service for fee conversion (USD → ETH and ERC20 lookups). When
+	// Moralis isn't configured, it stays nil and callers gracefully degrade
+	// (notifications render "$?" for unknown prices).
 	var priceService taskengine.PriceService
 	if agg.config.MoralisApiKey != "" {
 		priceService = services.GetMoralisService(agg.config.MoralisApiKey, agg.logger)
 	} else {
-		priceService = newFallbackPriceService()
+		agg.logger.Warn("No Moralis API key configured; USD-equivalent fee numbers will be unavailable")
 	}
 
-	// Store price service on engine for use in simulation path
+	// Store price service on engine (nil-safe — engine and summarizer handle absence).
 	agg.engine.SetPriceService(priceService)
 
 	// Create executor with engine reference for atomic execution indexing

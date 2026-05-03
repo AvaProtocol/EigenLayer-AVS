@@ -256,7 +256,7 @@ func formatBackticksForChannel(s string, channel string) string {
 func buildAnalysisHtmlFromStructured(s Summary) string {
 	var sb strings.Builder
 
-	// Section 1: What Triggered This Workflow
+	// Section: What Triggered This Workflow
 	if s.Trigger != "" {
 		sb.WriteString(`<div style="margin-bottom: 20px;">`)
 		sb.WriteString(`<h3 style="margin: 0 0 8px 0; font-size: 16px;">What Triggered This Workflow</h3>`)
@@ -307,6 +307,13 @@ func buildAnalysisHtmlFromStructured(s Summary) string {
 		sb.WriteString("</div>")
 	}
 
+	// Section: Cost / Estimated cost — fee breakdown
+	if s.Fees != nil {
+		if costHTML := buildFeesSectionHTML(s); costHTML != "" {
+			sb.WriteString(costHTML)
+		}
+	}
+
 	if s.Annotation != "" {
 		sb.WriteString(`<div style="margin-top: 16px;">`)
 		sb.WriteString("<p style=\"margin: 0; font-style: italic; color: #666;\">")
@@ -314,6 +321,52 @@ func buildAnalysisHtmlFromStructured(s Summary) string {
 		sb.WriteString("</p></div>")
 	}
 
+	return sb.String()
+}
+
+// buildFeesSectionHTML renders the Cost section from Summary.Fees.Total —
+// same multi-token format as Telegram, just wrapped in HTML. Simulations
+// render only the static placeholder. Returns "" when there's nothing to show.
+func buildFeesSectionHTML(s Summary) string {
+	if s.Fees == nil {
+		return ""
+	}
+
+	if s.Workflow != nil && s.Workflow.IsSimulation {
+		// Heading omitted — the placeholder line carries enough context on its own.
+		return `<div style="margin-bottom: 20px;">` +
+			`<p style="margin: 0; color: #666; font-style: italic;">⛽ (cost estimated at deploy)</p>` +
+			`</div>`
+	}
+
+	if len(s.Fees.Total) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(s.Fees.Total))
+	for _, t := range s.Fees.Total {
+		if t == nil || t.Amount == "" || t.Amount == "0" {
+			continue
+		}
+		// USD-unit entries are the platform fee — render as "$X platform fee".
+		if t.Unit == "USD" {
+			parts = append(parts, fmt.Sprintf("$%s platform fee", html.EscapeString(t.Amount)))
+			continue
+		}
+		usd := "$?"
+		if t.USD != "" {
+			usd = "$" + t.USD
+		}
+		parts = append(parts, fmt.Sprintf("%s %s (%s)", html.EscapeString(t.Amount), html.EscapeString(t.Unit), usd))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(`<div style="margin-bottom: 20px;">`)
+	sb.WriteString(`<h3 style="margin: 0 0 8px 0; font-size: 16px;">Cost</h3>`)
+	sb.WriteString(`<p style="margin: 0;">⛽ `)
+	sb.WriteString(strings.Join(parts, ", "))
+	sb.WriteString("</p></div>")
 	return sb.String()
 }
 

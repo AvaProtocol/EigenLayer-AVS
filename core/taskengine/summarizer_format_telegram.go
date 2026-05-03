@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"fmt"
 	"html"
 	"strings"
 )
@@ -41,18 +42,42 @@ func formatTelegramFromStructured(s Summary) string {
 		}
 	}
 
-	// Network and Time section
-	if network != "" || s.TriggeredAt != "" {
+	// Time / Runner / Cost — metadata block. Network is folded into the Runner
+	// line ("Runner: 0x… on Sepolia") to save a line, since chain is contextual
+	// to the wallet that ran the workflow. When Runner is absent we keep
+	// Network as a standalone line so chain context isn't lost.
+	// Cost follows Runner so the "who and what it cost" pair stays adjacent.
+	// For simulations the Cost line is a placeholder ("⛽ (cost estimated at
+	// deploy)") — actual gas numbers only appear for deployed runs with real
+	// receipts. Runner addresses are intentionally NOT <code>-wrapped (hex
+	// addresses don't trigger Telegram auto-linking; the wrap adds noise).
+	hasRunner := s.Runner != nil && s.Runner.SmartWallet != ""
+	costLine := formatTelegramCostLine(s)
+	if network != "" || s.TriggeredAt != "" || hasRunner || costLine != "" {
 		sb.WriteString("\n")
-		if network != "" {
-			sb.WriteString("<b>Network:</b> ")
-			sb.WriteString(html.EscapeString(network))
-			sb.WriteString("\n")
-		}
 		if s.TriggeredAt != "" {
 			sb.WriteString("<b>Time:</b> ")
 			sb.WriteString(html.EscapeString(formatTimestampHumanReadable(s.TriggeredAt)))
 			sb.WriteString("\n")
+		}
+		switch {
+		case hasRunner && network != "":
+			sb.WriteString("<b>Runner:</b> ")
+			sb.WriteString(html.EscapeString(truncateAddress(s.Runner.SmartWallet)))
+			sb.WriteString(" on ")
+			sb.WriteString(html.EscapeString(network))
+			sb.WriteString("\n")
+		case hasRunner:
+			sb.WriteString("<b>Runner:</b> ")
+			sb.WriteString(html.EscapeString(truncateAddress(s.Runner.SmartWallet)))
+			sb.WriteString("\n")
+		case network != "":
+			sb.WriteString("<b>Network:</b> ")
+			sb.WriteString(html.EscapeString(network))
+			sb.WriteString("\n")
+		}
+		if costLine != "" {
+			sb.WriteString(costLine)
 		}
 	}
 
@@ -219,6 +244,42 @@ func formatSubjectWithBoldName(subject string) string {
 	sb.WriteString(html.EscapeString(suffix))
 
 	return sb.String()
+}
+
+// formatTelegramCostLine renders a single Cost line from Summary.Fees.Total.
+// Format: "⛽ <b>Cost:</b> 0.000003 ETH ($0.01), 1.2 USDC ($1.20)" — native
+// token first, comma-separated, USD parenthetical per token. Unpriceable
+// tokens render as "$?". For simulations the line collapses to the static
+// "⛽ (cost estimated at deploy)" placeholder. Returns "" when there's
+// nothing to render.
+func formatTelegramCostLine(s Summary) string {
+	if s.Workflow != nil && s.Workflow.IsSimulation {
+		return "⛽ <i>(cost estimated at deploy)</i>\n"
+	}
+	if s.Fees == nil || len(s.Fees.Total) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(s.Fees.Total))
+	for _, t := range s.Fees.Total {
+		if t == nil || t.Amount == "" || t.Amount == "0" {
+			continue
+		}
+		// USD-unit entries are the platform fee — render as "$X platform fee"
+		// (the dollar amount is already canonical; no need for the parenthetical).
+		if t.Unit == "USD" {
+			parts = append(parts, fmt.Sprintf("$%s platform fee", html.EscapeString(t.Amount)))
+			continue
+		}
+		usd := "$?"
+		if t.USD != "" {
+			usd = "$" + t.USD
+		}
+		parts = append(parts, fmt.Sprintf("%s %s (%s)", html.EscapeString(t.Amount), html.EscapeString(t.Unit), usd))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "⛽ <b>Cost:</b> " + strings.Join(parts, ", ") + "\n"
 }
 
 func formatTelegramExampleMessage(workflowName, chainName string) string {
