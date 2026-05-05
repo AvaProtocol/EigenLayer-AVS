@@ -188,10 +188,26 @@ func (t *TokenEnrichmentService) LoadWhitelist() error {
 		return fmt.Errorf("failed to parse whitelist file %s: %w", whitelistPath, err)
 	}
 
-	// Load tokens into cache (normalize addresses to lowercase)
+	// Load tokens into cache (normalize addresses to lowercase). Surface
+	// malformed entries (empty id, decimals=0) at startup rather than letting
+	// them silently degrade balance lookups — once cached, GetTokenMetadata
+	// short-circuits the RPC fallback that would otherwise fix the metadata.
 	t.cacheMux.Lock()
+	skipped := 0
 	for _, token := range tokens {
 		normalizedAddr := strings.ToLower(token.Id)
+		if normalizedAddr == "" {
+			skipped++
+			if t.logger != nil {
+				t.logger.Warn("Whitelist entry missing id, skipping",
+					"file", whitelistPath, "name", token.Name, "symbol", token.Symbol)
+			}
+			continue
+		}
+		if token.Decimals == 0 && t.logger != nil {
+			t.logger.Warn("Whitelist entry has decimals=0; balance lookups will use 0-decimal formatting unless populated",
+				"file", whitelistPath, "id", normalizedAddr, "symbol", token.Symbol)
+		}
 		t.cache[normalizedAddr] = &TokenMetadata{
 			Id:       normalizedAddr,
 			Name:     token.Name,
@@ -206,6 +222,8 @@ func (t *TokenEnrichmentService) LoadWhitelist() error {
 		t.logger.Debug("Loaded token whitelist",
 			"file", whitelistPath,
 			"tokenCount", len(tokens),
+			"loaded", len(tokens)-skipped,
+			"skipped", skipped,
 			"chainID", t.chainID)
 	}
 
