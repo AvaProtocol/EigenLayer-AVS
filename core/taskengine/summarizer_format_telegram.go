@@ -107,9 +107,15 @@ func formatTelegramFromStructured(s Summary) string {
 		}
 	}
 
-	// "What Went Wrong" section — consistent with email
+	// Errors section — heading depends on status. On a successful run the only
+	// entries here are branch-skipped nodes, so calling it "What Went Wrong"
+	// misleads the reader; use "Skipped Steps" instead.
 	if len(s.Errors) > 0 {
-		sb.WriteString("\n<b>What Went Wrong:</b>\n")
+		heading := "What Went Wrong"
+		if s.Status == "success" {
+			heading = "Skipped Steps"
+		}
+		sb.WriteString(fmt.Sprintf("\n<b>%s:</b>\n", heading))
 		for _, err := range s.Errors {
 			sb.WriteString("• ")
 			sb.WriteString(formatBackticksForChannel(err, "telegram"))

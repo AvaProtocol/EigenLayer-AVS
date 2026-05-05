@@ -1,6 +1,9 @@
 package taskengine
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // formatDiscordFromStructured formats Summary into Discord markdown using AI-generated strings
 // Uses the API response fields directly without composing additional text
@@ -54,9 +57,14 @@ func formatDiscordFromStructured(s Summary) string {
 		}
 	}
 
-	// "What Went Wrong" section — consistent with email
+	// Errors section — heading depends on status. On a successful run the only
+	// entries here are branch-skipped nodes, so use "Skipped Steps" instead.
 	if len(s.Errors) > 0 {
-		sb.WriteString("\n**What Went Wrong:**\n")
+		heading := "What Went Wrong"
+		if s.Status == "success" {
+			heading = "Skipped Steps"
+		}
+		sb.WriteString(fmt.Sprintf("\n**%s:**\n", heading))
 		for _, err := range s.Errors {
 			sb.WriteString("• ")
 			sb.WriteString(err)

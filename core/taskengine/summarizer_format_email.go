@@ -295,10 +295,16 @@ func buildAnalysisHtmlFromStructured(s Summary) string {
 		sb.WriteString("</div>")
 	}
 
-	// Section 3: What Went Wrong (only show if there are errors)
+	// Section 3: Errors / Skipped Steps — heading depends on status. On a
+	// successful run the only entries here are branch-skipped nodes, so calling
+	// it "What Went Wrong" misleads the reader.
 	if len(s.Errors) > 0 {
+		heading := "What Went Wrong"
+		if s.Status == "success" {
+			heading = "Skipped Steps"
+		}
 		sb.WriteString(`<div style="margin-bottom: 20px;">`)
-		sb.WriteString(`<h3 style="margin: 0 0 8px 0; font-size: 16px;">What Went Wrong</h3>`)
+		sb.WriteString(fmt.Sprintf(`<h3 style="margin: 0 0 8px 0; font-size: 16px;">%s</h3>`, heading))
 		for _, err := range s.Errors {
 			sb.WriteString("<p style=\"margin: 0 0 4px 0;\">✗ ")
 			sb.WriteString(formatBackticksForChannel(err, "email"))
