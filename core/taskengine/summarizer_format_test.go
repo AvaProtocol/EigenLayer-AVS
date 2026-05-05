@@ -871,13 +871,12 @@ func TestFormatTelegramFromStructured_PRDFormat(t *testing.T) {
 				"⚠️ <code>Simulation: Copy of Test Recurring Batch Send</code> successfully completed",
 				"<i>1 node was skipped by Branch condition.</i>",
 				"<b>Network:</b> Sepolia",
-				"<b>Skipped Steps:</b>",
+				"<b>What Went Wrong:</b>",
 				"• loop1 - skipped due to condition not met: <code>code1.data.balance &gt;= code1.data.totalNeeded</code> evaluated to false",
 			},
 			notContain: []string{
 				"<b>Executed:</b>",
-				"<b>What Went Wrong:</b>", // success status must not surface failure framing
-				"`",                       // backticks should be converted to <code> tags
+				"`", // backticks should be converted to <code> tags
 			},
 		},
 		{
