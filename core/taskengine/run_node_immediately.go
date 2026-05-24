@@ -2929,7 +2929,7 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 	vm.tenderlyClient = n.tenderlyClient
 
 	// Use the simulation mode parameter by default
-	vm.WithLogger(n.logger).WithDb(n.db).SetSimulation(useSimulation)
+	vm.WithLogger(n.logger).WithDb(n.db).WithChainConfigResolver(n.ResolveSmartWalletConfig).SetSimulation(useSimulation)
 
 	if n.logger != nil {
 		n.logger.Info("RunNodeImmediately: Execution mode set",

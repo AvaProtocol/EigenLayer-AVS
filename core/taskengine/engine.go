@@ -2883,7 +2883,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	}
 	vm.tenderlyClient = n.tenderlyClient
 
-	vm.WithLogger(n.logger).WithDb(n.db).SetSimulation(true)
+	vm.WithLogger(n.logger).WithDb(n.db).WithChainConfigResolver(n.ResolveSmartWalletConfig).SetSimulation(true)
 	// Resolve AA sender for simulation ONLY if the workflow contains AA-relevant nodes
 	// (contractWrite or ethTransfer, including loop nodes with these runners).
 	// For non-AA workflows (e.g., CustomCode), skip this requirement.

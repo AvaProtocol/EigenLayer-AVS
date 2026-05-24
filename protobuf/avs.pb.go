@@ -7036,8 +7036,10 @@ func (x *CronTrigger_Output) GetData() *structpb.Value {
 }
 
 type BlockTrigger_Config struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Interval      int64                  `protobuf:"varint,1,opt,name=interval,proto3" json:"interval,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Interval int64                  `protobuf:"varint,1,opt,name=interval,proto3" json:"interval,omitempty"`
+	// Chain to watch blocks on. 0 = inherit task's chain_id.
+	ChainId       int64 `protobuf:"varint,2,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7075,6 +7077,13 @@ func (*BlockTrigger_Config) Descriptor() ([]byte, []int) {
 func (x *BlockTrigger_Config) GetInterval() int64 {
 	if x != nil {
 		return x.Interval
+	}
+	return 0
+}
+
+func (x *BlockTrigger_Config) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
 	}
 	return 0
 }
@@ -7310,8 +7319,10 @@ type EventTrigger_Config struct {
 	// Default: 300 (5 minutes cooldown - prevents repeated firing when conditions remain true)
 	// Set to 0 to disable cooldown (triggers fire immediately when conditions match)
 	CooldownSeconds *uint32 `protobuf:"varint,2,opt,name=cooldown_seconds,json=cooldownSeconds,proto3,oneof" json:"cooldown_seconds,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Chain to watch events on. 0 = inherit task's chain_id.
+	ChainId       int64 `protobuf:"varint,3,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EventTrigger_Config) Reset() {
@@ -7354,6 +7365,13 @@ func (x *EventTrigger_Config) GetQueries() []*EventTrigger_Query {
 func (x *EventTrigger_Config) GetCooldownSeconds() uint32 {
 	if x != nil && x.CooldownSeconds != nil {
 		return *x.CooldownSeconds
+	}
+	return 0
+}
+
+func (x *EventTrigger_Config) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
 	}
 	return 0
 }
@@ -7521,9 +7539,11 @@ func (x *ManualTrigger_Output) GetData() *structpb.Value {
 }
 
 type ETHTransferNode_Config struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Destination   string                 `protobuf:"bytes,1,opt,name=destination,proto3" json:"destination,omitempty"`
-	Amount        string                 `protobuf:"bytes,2,opt,name=amount,proto3" json:"amount,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Destination string                 `protobuf:"bytes,1,opt,name=destination,proto3" json:"destination,omitempty"`
+	Amount      string                 `protobuf:"bytes,2,opt,name=amount,proto3" json:"amount,omitempty"`
+	// Chain to execute the transfer on. 0 = inherit task's chain_id.
+	ChainId       int64 `protobuf:"varint,3,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7570,6 +7590,13 @@ func (x *ETHTransferNode_Config) GetAmount() string {
 		return x.Amount
 	}
 	return ""
+}
+
+func (x *ETHTransferNode_Config) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
 }
 
 type ETHTransferNode_Output struct {
@@ -7629,7 +7656,9 @@ type ContractWriteNode_Config struct {
 	// ETH value to send with the transaction (in wei as string)
 	Value *string `protobuf:"bytes,6,opt,name=value,proto3,oneof" json:"value,omitempty"`
 	// Custom gas limit for the transaction (as string to handle large numbers)
-	GasLimit      *string `protobuf:"bytes,7,opt,name=gas_limit,json=gasLimit,proto3,oneof" json:"gas_limit,omitempty"`
+	GasLimit *string `protobuf:"bytes,7,opt,name=gas_limit,json=gasLimit,proto3,oneof" json:"gas_limit,omitempty"`
+	// Chain to execute the write on. 0 = inherit task's chain_id.
+	ChainId       int64 `protobuf:"varint,8,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7711,6 +7740,13 @@ func (x *ContractWriteNode_Config) GetGasLimit() string {
 		return *x.GasLimit
 	}
 	return ""
+}
+
+func (x *ContractWriteNode_Config) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
 }
 
 type ContractWriteNode_MethodCall struct {
@@ -7993,7 +8029,9 @@ type ContractReadNode_Config struct {
 	// The ABI as array of ABI elements
 	ContractAbi []*structpb.Value `protobuf:"bytes,2,rep,name=contract_abi,json=contractAbi,proto3" json:"contract_abi,omitempty"`
 	// Array of method calls to execute serially
-	MethodCalls   []*ContractReadNode_MethodCall `protobuf:"bytes,3,rep,name=method_calls,json=methodCalls,proto3" json:"method_calls,omitempty"`
+	MethodCalls []*ContractReadNode_MethodCall `protobuf:"bytes,3,rep,name=method_calls,json=methodCalls,proto3" json:"method_calls,omitempty"`
+	// Chain to read state from. 0 = inherit task's chain_id.
+	ChainId       int64 `protobuf:"varint,4,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8047,6 +8085,13 @@ func (x *ContractReadNode_Config) GetMethodCalls() []*ContractReadNode_MethodCal
 		return x.MethodCalls
 	}
 	return nil
+}
+
+func (x *ContractReadNode_Config) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
 }
 
 type ContractReadNode_MethodResult struct {
@@ -9550,13 +9595,14 @@ const file_avs_proto_rawDesc = "" +
 	"\x06Config\x12\x1c\n" +
 	"\tschedules\x18\x01 \x03(\tR\tschedules\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xa3\x01\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xbe\x01\n" +
 	"\fBlockTrigger\x127\n" +
-	"\x06config\x18\x01 \x01(\v2\x1f.aggregator.BlockTrigger.ConfigR\x06config\x1a$\n" +
+	"\x06config\x18\x01 \x01(\v2\x1f.aggregator.BlockTrigger.ConfigR\x06config\x1a?\n" +
 	"\x06Config\x12\x1a\n" +
-	"\binterval\x18\x01 \x01(\x03R\binterval\x1a4\n" +
+	"\binterval\x18\x01 \x01(\x03R\binterval\x12\x19\n" +
+	"\bchain_id\x18\x02 \x01(\x03R\achainId\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\x82\x06\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\x9d\x06\n" +
 	"\fEventTrigger\x127\n" +
 	"\x06config\x18\x01 \x01(\v2\x1f.aggregator.EventTrigger.ConfigR\x06config\x1a\xcb\x02\n" +
 	"\x05Query\x12\x1c\n" +
@@ -9577,10 +9623,11 @@ const file_avs_proto_rawDesc = "" +
 	"\x0fapply_to_fields\x18\x03 \x03(\tR\rapplyToFields\x12#\n" +
 	"\rmethod_params\x18\x04 \x03(\tR\fmethodParamsB\f\n" +
 	"\n" +
-	"_call_data\x1a\x87\x01\n" +
+	"_call_data\x1a\xa2\x01\n" +
 	"\x06Config\x128\n" +
 	"\aqueries\x18\x01 \x03(\v2\x1e.aggregator.EventTrigger.QueryR\aqueries\x12.\n" +
-	"\x10cooldown_seconds\x18\x02 \x01(\rH\x00R\x0fcooldownSeconds\x88\x01\x01B\x13\n" +
+	"\x10cooldown_seconds\x18\x02 \x01(\rH\x00R\x0fcooldownSeconds\x88\x01\x01\x12\x19\n" +
+	"\bchain_id\x18\x03 \x01(\x03R\achainIdB\x13\n" +
 	"\x11_cooldown_seconds\x1a4\n" +
 	"\x06Output\x12*\n" +
 	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xf2\x03\n" +
@@ -9611,16 +9658,17 @@ const file_avs_proto_rawDesc = "" +
 	"\x05block\x18\x05 \x01(\v2\x18.aggregator.BlockTriggerH\x00R\x05block\x120\n" +
 	"\x05event\x18\x06 \x01(\v2\x18.aggregator.EventTriggerH\x00R\x05event\x12\x0e\n" +
 	"\x02id\x18\a \x01(\tR\x02idB\x0e\n" +
-	"\ftrigger_type\"\xc7\x01\n" +
+	"\ftrigger_type\"\xe2\x01\n" +
 	"\x0fETHTransferNode\x12:\n" +
-	"\x06config\x18\x01 \x01(\v2\".aggregator.ETHTransferNode.ConfigR\x06config\x1aB\n" +
+	"\x06config\x18\x01 \x01(\v2\".aggregator.ETHTransferNode.ConfigR\x06config\x1a]\n" +
 	"\x06Config\x12 \n" +
 	"\vdestination\x18\x01 \x01(\tR\vdestination\x12\x16\n" +
-	"\x06amount\x18\x02 \x01(\tR\x06amount\x1a4\n" +
+	"\x06amount\x18\x02 \x01(\tR\x06amount\x12\x19\n" +
+	"\bchain_id\x18\x03 \x01(\x03R\achainId\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xcf\a\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xea\a\n" +
 	"\x11ContractWriteNode\x12<\n" +
-	"\x06config\x18\x01 \x01(\v2$.aggregator.ContractWriteNode.ConfigR\x06config\x1a\xe6\x02\n" +
+	"\x06config\x18\x01 \x01(\v2$.aggregator.ContractWriteNode.ConfigR\x06config\x1a\x81\x03\n" +
 	"\x06Config\x12)\n" +
 	"\x10contract_address\x18\x01 \x01(\tR\x0fcontractAddress\x12\x1b\n" +
 	"\tcall_data\x18\x02 \x01(\tR\bcallData\x129\n" +
@@ -9628,7 +9676,8 @@ const file_avs_proto_rawDesc = "" +
 	"\fmethod_calls\x18\x04 \x03(\v2(.aggregator.ContractWriteNode.MethodCallR\vmethodCalls\x12&\n" +
 	"\fis_simulated\x18\x05 \x01(\bH\x00R\visSimulated\x88\x01\x01\x12\x19\n" +
 	"\x05value\x18\x06 \x01(\tH\x01R\x05value\x88\x01\x01\x12 \n" +
-	"\tgas_limit\x18\a \x01(\tH\x02R\bgasLimit\x88\x01\x01B\x0f\n" +
+	"\tgas_limit\x18\a \x01(\tH\x02R\bgasLimit\x88\x01\x01\x12\x19\n" +
+	"\bchain_id\x18\b \x01(\x03R\achainIdB\x0f\n" +
 	"\r_is_simulatedB\b\n" +
 	"\x06_valueB\f\n" +
 	"\n" +
@@ -9654,7 +9703,7 @@ const file_avs_proto_rawDesc = "" +
 	"\areceipt\x18\x05 \x01(\v2\x16.google.protobuf.ValueR\areceipt\x12&\n" +
 	"\fblock_number\x18\x06 \x01(\x04H\x00R\vblockNumber\x88\x01\x01\x12,\n" +
 	"\x05value\x18\a \x01(\v2\x16.google.protobuf.ValueR\x05valueB\x0f\n" +
-	"\r_block_number\"\xf1\x05\n" +
+	"\r_block_number\"\x8c\x06\n" +
 	"\x10ContractReadNode\x12;\n" +
 	"\x06config\x18\x01 \x01(\v2#.aggregator.ContractReadNode.ConfigR\x06config\x1a\xaa\x01\n" +
 	"\n" +
@@ -9665,11 +9714,12 @@ const file_avs_proto_rawDesc = "" +
 	"\x0fapply_to_fields\x18\x03 \x03(\tR\rapplyToFields\x12#\n" +
 	"\rmethod_params\x18\x04 \x03(\tR\fmethodParamsB\f\n" +
 	"\n" +
-	"_call_data\x1a\xba\x01\n" +
+	"_call_data\x1a\xd5\x01\n" +
 	"\x06Config\x12)\n" +
 	"\x10contract_address\x18\x01 \x01(\tR\x0fcontractAddress\x129\n" +
 	"\fcontract_abi\x18\x02 \x03(\v2\x16.google.protobuf.ValueR\vcontractAbi\x12J\n" +
-	"\fmethod_calls\x18\x03 \x03(\v2'.aggregator.ContractReadNode.MethodCallR\vmethodCalls\x1a\xff\x01\n" +
+	"\fmethod_calls\x18\x03 \x03(\v2'.aggregator.ContractReadNode.MethodCallR\vmethodCalls\x12\x19\n" +
+	"\bchain_id\x18\x04 \x01(\x03R\achainId\x1a\xff\x01\n" +
 	"\fMethodResult\x12M\n" +
 	"\x04data\x18\x01 \x03(\v29.aggregator.ContractReadNode.MethodResult.StructuredFieldR\x04data\x12\x1f\n" +
 	"\vmethod_name\x18\x02 \x01(\tR\n" +

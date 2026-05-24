@@ -260,6 +260,12 @@ type VM struct {
 	// executionFeeWei is the platform fee (converted from USD to WEI) to be collected
 	// atomically in the UserOp. Set by executor before node execution. Nil = no fee.
 	executionFeeWei *big.Int
+
+	// chainConfigResolver returns the SmartWalletConfig for a given chain_id.
+	// Used by chain-specific node runners (ContractRead/Write, ETHTransfer) to honor
+	// per-node chain_id overrides. When nil or called with 0, callers fall back to
+	// v.smartWalletConfig. Set via WithChainConfigResolver after construction.
+	chainConfigResolver func(chainID int64) *config.SmartWalletConfig
 }
 
 func NewVM() *VM {
@@ -311,6 +317,27 @@ func (v *VM) WithLogger(lgr logger.Logger) *VM {
 func (v *VM) WithDb(db storage.Storage) *VM {
 	v.db = db
 	return v
+}
+
+// WithChainConfigResolver wires a function that maps a chain_id to the matching
+// SmartWalletConfig. Chain-specific node runners call this when their node config
+// specifies a non-zero chain_id; without a resolver, all nodes use v.smartWalletConfig.
+func (v *VM) WithChainConfigResolver(resolver func(chainID int64) *config.SmartWalletConfig) *VM {
+	v.chainConfigResolver = resolver
+	return v
+}
+
+// resolveSmartWalletForNode returns the SmartWalletConfig for a node-level chain_id
+// override, or the VM's default smart wallet config when the node leaves chain_id
+// unset (0) or no resolver is wired.
+func (v *VM) resolveSmartWalletForNode(nodeChainID int64) *config.SmartWalletConfig {
+	if nodeChainID == 0 || v.chainConfigResolver == nil {
+		return v.smartWalletConfig
+	}
+	if resolved := v.chainConfigResolver(nodeChainID); resolved != nil {
+		return resolved
+	}
+	return v.smartWalletConfig
 }
 
 func (v *VM) GetTriggerNameAsVar() (string, error) {
@@ -1414,18 +1441,17 @@ func (v *VM) runContractRead(taskNode *avsproto.TaskNode) (*avsproto.Execution_S
 		return executionLog, err
 	}
 
-	if v.smartWalletConfig == nil || v.smartWalletConfig.EthRpcUrl == "" {
-		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract read")
+	swConfig := v.resolveSmartWalletForNode(node.Config.GetChainId())
+	if swConfig == nil || swConfig.EthRpcUrl == "" {
+		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract read (chain_id=%d)", node.Config.GetChainId())
 		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
-		// v.addExecutionLog(logEntry)
 		return executionLog, err
 	}
-	rpcClient, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
+	rpcClient, err := ethclient.Dial(swConfig.EthRpcUrl)
 	if err != nil {
 		executionLog = v.createExecutionStep(stepID, false, fmt.Sprintf("failed to dial ETH RPC: %v", err), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
-		// v.addExecutionLog(logEntry)
 		return executionLog, err
 	}
 	defer rpcClient.Close()
@@ -1449,33 +1475,31 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 	}
 	stepID := taskNode.Id
 	var executionLog *avsproto.Execution_Step
-	if v.smartWalletConfig == nil || v.smartWalletConfig.EthRpcUrl == "" {
-		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract write")
+	swConfig := v.resolveSmartWalletForNode(node.Config.GetChainId())
+	if swConfig == nil || swConfig.EthRpcUrl == "" {
+		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract write (chain_id=%d)", node.Config.GetChainId())
 		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
-		// v.addExecutionLog(logEntry)
 		return executionLog, err
 	}
-	rpcClient, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
+	rpcClient, err := ethclient.Dial(swConfig.EthRpcUrl)
 	if err != nil {
 		executionLog = v.createExecutionStep(stepID, false, fmt.Sprintf("failed to dial ETH RPC: %v", err), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
-		// v.addExecutionLog(logEntry)
 		return executionLog, err
 	}
 	defer rpcClient.Close()
 
-	// 🔍 DEBUG: Log VM smart wallet config before creating processor
 	v.logger.Info("🔍 VM DEBUG - Smart wallet config for contract write",
-		"has_config", v.smartWalletConfig != nil,
+		"has_config", swConfig != nil,
 		"task_owner", v.TaskOwner.Hex())
 
-	if v.smartWalletConfig != nil {
+	if swConfig != nil {
 		v.logger.Info("🔍 VM DEBUG - Smart wallet config details",
-			"bundler_url", v.smartWalletConfig.BundlerURL,
-			"factory_address", v.smartWalletConfig.FactoryAddress,
-			"entrypoint_address", v.smartWalletConfig.EntrypointAddress,
-			"eth_rpc_url", v.smartWalletConfig.EthRpcUrl)
+			"bundler_url", swConfig.BundlerURL,
+			"factory_address", swConfig.FactoryAddress,
+			"entrypoint_address", swConfig.EntrypointAddress,
+			"eth_rpc_url", swConfig.EthRpcUrl)
 	} else {
 		v.logger.Warn("⚠️ VM DEBUG - Smart wallet config is NIL in VM!")
 	}
@@ -1499,7 +1523,7 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		}
 	}
 
-	processor := NewContractWriteProcessor(v, rpcClient, v.smartWalletConfig, v.TaskOwner)
+	processor := NewContractWriteProcessor(v, rpcClient, swConfig, v.TaskOwner)
 	processor.CommonProcessor.SetTaskNode(taskNode)
 	executionLog, err = processor.Execute(stepID, node)
 	v.mu.Lock()
@@ -1669,14 +1693,15 @@ func (v *VM) runEthTransfer(taskNode *avsproto.TaskNode) (*avsproto.Execution_St
 	}
 	stepID := taskNode.Id
 	var executionLog *avsproto.Execution_Step
-	if v.smartWalletConfig == nil || v.smartWalletConfig.EthRpcUrl == "" {
-		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for ETH transfer")
+	swConfig := v.resolveSmartWalletForNode(node.Config.GetChainId())
+	if swConfig == nil || swConfig.EthRpcUrl == "" {
+		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for ETH transfer (chain_id=%d)", node.Config.GetChainId())
 		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
 		return executionLog, err
 	}
 
-	rpcClient, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
+	rpcClient, err := ethclient.Dial(swConfig.EthRpcUrl)
 	if err != nil {
 		executionLog = v.createExecutionStep(stepID, false, fmt.Sprintf("failed to dial ETH RPC: %v", err), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
@@ -1684,7 +1709,7 @@ func (v *VM) runEthTransfer(taskNode *avsproto.TaskNode) (*avsproto.Execution_St
 	}
 	defer rpcClient.Close()
 
-	processor := NewETHTransferProcessor(v, rpcClient, v.smartWalletConfig, &v.TaskOwner)
+	processor := NewETHTransferProcessor(v, rpcClient, swConfig, &v.TaskOwner)
 	processor.CommonProcessor.SetTaskNode(taskNode)
 	executionLog, err = processor.Execute(stepID, node)
 	v.mu.Lock()

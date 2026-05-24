@@ -235,6 +235,9 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	if err != nil {
 		return nil, err
 	}
+	if x.engine != nil {
+		vm.WithChainConfigResolver(x.engine.ResolveSmartWalletConfig)
+	}
 
 	// Merge input variables from trigger execution (overrides task-level input variables)
 	if queueData != nil && len(queueData.InputVariables) > 0 {
