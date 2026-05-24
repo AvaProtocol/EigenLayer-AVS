@@ -270,8 +270,6 @@ func TestGetSignatureFormat(t *testing.T) {
 		t.Fatalf("failed to get chainID from smart wallet RPC: %v", err)
 	}
 
-	SetEigenLayerChainID(chainID)
-
 	r := RpcServer{
 		config: &config.Config{
 			JwtSecret: []byte("test123"),
