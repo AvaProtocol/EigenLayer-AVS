@@ -36,15 +36,21 @@ message SyncMessagesReq {
   string address = 2;
   bytes  signature = 3;
   int64  monotonic_clock = 4;
-  
+
   // Operator capabilities - what trigger types this operator supports
   message Capabilities {
     bool event_monitoring = 1;    // Supports event trigger monitoring
-    bool block_monitoring = 2;    // Supports block trigger monitoring  
+    bool block_monitoring = 2;    // Supports block trigger monitoring
     bool time_monitoring = 3;     // Supports time/cron trigger monitoring
   }
-  
+
   Capabilities capabilities = 5;
+
+  // Chain IDs this operator is configured to monitor. The aggregator/gateway
+  // uses this to route per-chain tasks only to operators that can handle
+  // them. Empty means "single-chain operator on the aggregator's default
+  // chain" (backward-compatible with pre-multi-chain operators).
+  repeated int64 supported_chain_ids = 6;
 }
 
 enum MessageOp {

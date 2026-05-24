@@ -172,20 +172,30 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		}
 	}
 
+	// Build the chain-scoped trigger map. D-1 (this commit) seeds it with one
+	// entry derived from EffectiveChains()[0] so behavior is unchanged from
+	// the legacy single-chain path. D-2 will loop EffectiveChains(), spin up
+	// per-chain block/event triggers with their own RPC clients, and fan-in
+	// their channels so a single dispatch loop can route by chain_id.
+	chains := o.config.EffectiveChains()
+	if len(chains) == 0 {
+		return fmt.Errorf("operator has no chains configured")
+	}
+	primaryChain := chains[0]
 	rpcConfig := triggerengine.RpcOption{
-		RpcURL:   o.config.TargetChain.EthRpcUrl,
-		WsRpcURL: o.config.TargetChain.EthWsUrl,
+		RpcURL:   primaryChain.EthRpcUrl,
+		WsRpcURL: primaryChain.EthWsUrl,
 	}
 
 	blockTriggerCh := make(chan triggerengine.TriggerMetadata[int64], 1000)
-	o.blockTrigger = triggerengine.NewBlockTrigger(&rpcConfig, blockTriggerCh, o.logger)
+	blockTrigger := triggerengine.NewBlockTrigger(&rpcConfig, blockTriggerCh, o.logger)
 
 	eventTriggerCh := make(chan triggerengine.TriggerMetadata[triggerengine.EventMark], 1000)
-	o.eventTrigger = triggerengine.NewEventTrigger(&rpcConfig, eventTriggerCh, o.logger,
+	eventTrigger := triggerengine.NewEventTrigger(&rpcConfig, eventTriggerCh, o.logger,
 		o.config.GetMaxEventsPerQueryPerBlock(), o.config.GetMaxTotalEventsPerBlock())
 
 	// Set up overload alert callback to notify aggregator
-	o.eventTrigger.SetOverloadAlertCallback(func(alert *avspb.EventOverloadAlert) {
+	eventTrigger.SetOverloadAlertCallback(func(alert *avspb.EventOverloadAlert) {
 		o.logger.Warn("🚨 Sending event overload alert to aggregator",
 			"task_id", alert.TaskId,
 			"events_detected", alert.EventsDetected,
@@ -205,19 +215,33 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	timeTriggerCh := make(chan triggerengine.TriggerMetadata[uint64], 1000)
 	o.timeTrigger = triggerengine.NewTimeTrigger(timeTriggerCh, o.logger)
 
+	// Register the (currently single) chain trigger set. Use the configured
+	// chain_id when provided, else the per-chain detected ID (TODO in D-2),
+	// else 0 as a wildcard placeholder for "the operator's only chain".
+	primaryChainID := primaryChain.ChainID
+	o.chainTriggers = map[int64]*ChainTriggerSet{
+		primaryChainID: {
+			ChainID:      primaryChainID,
+			Name:         primaryChain.Name,
+			BlockTrigger: blockTrigger,
+			EventTrigger: eventTrigger,
+		},
+	}
+	o.chainOrder = []int64{primaryChainID}
+
 	// Log consolidated monitoring status
 	eventStatus := "disabled"
 	if o.config.EnabledFeatures.EventTrigger {
 		eventStatus = "enabled"
 	}
-	o.logger.Infof("📊 Monitoring Status: Block ✅ | Time ✅ | Event %s", eventStatus)
+	o.logger.Infof("📊 Monitoring Status: Block ✅ | Time ✅ | Event %s | Chains: %d", eventStatus, len(o.chainTriggers))
 
-	o.blockTrigger.Run(ctx)
+	blockTrigger.Run(ctx)
 	o.timeTrigger.Run(ctx)
 
 	// Event trigger can be costly, so we require an opt-in
 	if o.config.EnabledFeatures.EventTrigger {
-		o.eventTrigger.Run(ctx)
+		eventTrigger.Run(ctx)
 	}
 
 	// Establish a connection with gRPC server where new task will be pushed automatically
@@ -410,16 +434,16 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 						"status", resp.Status,
 						"message", resp.Message)
 
-					// Remove task from block trigger monitoring
-					if o.blockTrigger != nil {
-						if err := o.blockTrigger.RemoveCheck(triggerItem.TaskID); err != nil {
-							o.logger.Warn("Failed to remove exhausted task from block monitoring",
-								"task_id", triggerItem.TaskID,
-								"error", err)
-						} else {
-							o.logger.Info("✅ Removed exhausted task from block monitoring",
-								"task_id", triggerItem.TaskID)
-						}
+					// Remove task from block trigger monitoring across every chain
+					// the operator monitors. Idempotent for chains that never
+					// registered this task.
+					if err := o.removeBlockCheck(triggerItem.TaskID); err != nil {
+						o.logger.Warn("Failed to remove exhausted task from block monitoring",
+							"task_id", triggerItem.TaskID,
+							"error", err)
+					} else {
+						o.logger.Info("✅ Removed exhausted task from block monitoring",
+							"task_id", triggerItem.TaskID)
 					}
 				}
 			} else {
@@ -518,16 +542,14 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 						"status", resp.Status,
 						"message", resp.Message)
 
-					// Remove task from event trigger monitoring
-					if o.eventTrigger != nil {
-						if err := o.eventTrigger.RemoveCheck(triggerItem.TaskID); err != nil {
-							o.logger.Warn("Failed to remove exhausted task from event monitoring",
-								"task_id", triggerItem.TaskID,
-								"error", err)
-						} else {
-							o.logger.Info("✅ Removed exhausted task from event monitoring",
-								"task_id", triggerItem.TaskID)
-						}
+					// Remove task from event trigger monitoring across every chain.
+					if err := o.removeEventCheck(triggerItem.TaskID); err != nil {
+						o.logger.Warn("Failed to remove exhausted task from event monitoring",
+							"task_id", triggerItem.TaskID,
+							"error", err)
+					} else {
+						o.logger.Info("✅ Removed exhausted task from event monitoring",
+							"task_id", triggerItem.TaskID)
 					}
 				}
 			} else {
@@ -612,6 +634,11 @@ func (o *Operator) StreamMessages() {
 				BlockMonitoring: true, // This operator supports block monitoring
 				TimeMonitoring:  true, // This operator supports time/cron monitoring
 			},
+			// Advertise which chains this operator can monitor so the
+			// gateway can filter per-chain task assignment. Empty list
+			// means "single-chain operator on the aggregator default chain"
+			// for backward compat with pre-multi-chain operators.
+			SupportedChainIds: o.supportedChainIDs(),
 		}
 
 		stream, err := o.nodeRpcClient.SyncMessages(ctx, req)
@@ -842,8 +869,18 @@ func (o *Operator) StreamMessages() {
 					continue
 				}
 
+				taskChainID := resp.TaskMetadata.GetChainId()
+
 				if trigger := triggerObj.GetEvent(); trigger != nil {
-					o.logger.Info("📥 Monitoring event trigger", "task_id", resp.Id)
+					o.logger.Info("📥 Monitoring event trigger", "task_id", resp.Id, "chain_id", taskChainID)
+
+					set, ok := o.triggersForChain(taskChainID)
+					if !ok {
+						o.logger.Warn("⚠️ Dropping event task — operator does not monitor this chain",
+							"task_id", resp.Id, "chain_id", taskChainID,
+							"supported", o.supportedChainIDs())
+						continue
+					}
 
 					// Safely call AddCheck with panic recovery
 					func() {
@@ -855,12 +892,20 @@ func (o *Operator) StreamMessages() {
 									"solution", "resp.TaskMetadata is corrupted - cannot add event trigger")
 							}
 						}()
-						if err := o.eventTrigger.AddCheck(resp.TaskMetadata); err != nil {
+						if err := set.EventTrigger.AddCheck(resp.TaskMetadata); err != nil {
 							o.logger.Info("❌ Failed to add event trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for events")
 						}
 					}()
 				} else if trigger := triggerObj.GetBlock(); trigger != nil {
-					o.logger.Info("📦 Monitoring block trigger", "task_id", resp.Id, "interval", trigger.Config.GetInterval())
+					o.logger.Info("📦 Monitoring block trigger", "task_id", resp.Id, "chain_id", taskChainID, "interval", trigger.Config.GetInterval())
+
+					set, ok := o.triggersForChain(taskChainID)
+					if !ok {
+						o.logger.Warn("⚠️ Dropping block task — operator does not monitor this chain",
+							"task_id", resp.Id, "chain_id", taskChainID,
+							"supported", o.supportedChainIDs())
+						continue
+					}
 
 					// Safely call AddCheck with panic recovery
 					func() {
@@ -872,7 +917,7 @@ func (o *Operator) StreamMessages() {
 									"solution", "resp.TaskMetadata is corrupted - cannot add block trigger")
 							}
 						}()
-						if err := o.blockTrigger.AddCheck(resp.TaskMetadata); err != nil {
+						if err := set.BlockTrigger.AddCheck(resp.TaskMetadata); err != nil {
 							o.logger.Info("❌ Failed to add block trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for blocks")
 						}
 					}()
@@ -977,8 +1022,8 @@ func (o *Operator) PingServer() {
 		Version:     version.Get(),
 		RemoteIP:    o.GetPublicIP(),
 		MetricsPort: o.config.GetPublicMetricPort(),
-		BlockNumber: o.blockTrigger.GetProgress(),
-		EventCount:  o.eventTrigger.GetProgress(),
+		BlockNumber: o.primaryBlockProgress(),
+		EventCount:  o.primaryEventProgress(),
 	})
 
 	if err != nil {

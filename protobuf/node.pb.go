@@ -240,8 +240,13 @@ type SyncMessagesReq struct {
 	Signature      []byte                        `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
 	MonotonicClock int64                         `protobuf:"varint,4,opt,name=monotonic_clock,json=monotonicClock,proto3" json:"monotonic_clock,omitempty"`
 	Capabilities   *SyncMessagesReq_Capabilities `protobuf:"bytes,5,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Chain IDs this operator is configured to monitor. The aggregator/gateway
+	// uses this to route per-chain tasks only to operators that can handle
+	// them. Empty means "single-chain operator on the aggregator's default
+	// chain" (backward-compatible with pre-multi-chain operators).
+	SupportedChainIds []int64 `protobuf:"varint,6,rep,packed,name=supported_chain_ids,json=supportedChainIds,proto3" json:"supported_chain_ids,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *SyncMessagesReq) Reset() {
@@ -305,6 +310,13 @@ func (x *SyncMessagesReq) GetMonotonicClock() int64 {
 func (x *SyncMessagesReq) GetCapabilities() *SyncMessagesReq_Capabilities {
 	if x != nil {
 		return x.Capabilities
+	}
+	return nil
+}
+
+func (x *SyncMessagesReq) GetSupportedChainIds() []int64 {
+	if x != nil {
+		return x.SupportedChainIds
 	}
 	return nil
 }
@@ -1185,13 +1197,14 @@ const file_node_proto_rawDesc = "" +
 	"\x0elast_heartbeat\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\rlastHeartbeat\"H\n" +
 	"\vCheckinResp\x129\n" +
 	"\n" +
-	"updated_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\xe0\x02\n" +
+	"updated_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\x90\x03\n" +
 	"\x0fSyncMessagesReq\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x1c\n" +
 	"\tsignature\x18\x03 \x01(\fR\tsignature\x12'\n" +
 	"\x0fmonotonic_clock\x18\x04 \x01(\x03R\x0emonotonicClock\x12L\n" +
-	"\fcapabilities\x18\x05 \x01(\v2(.aggregator.SyncMessagesReq.CapabilitiesR\fcapabilities\x1a\x8d\x01\n" +
+	"\fcapabilities\x18\x05 \x01(\v2(.aggregator.SyncMessagesReq.CapabilitiesR\fcapabilities\x12.\n" +
+	"\x13supported_chain_ids\x18\x06 \x03(\x03R\x11supportedChainIds\x1a\x8d\x01\n" +
 	"\fCapabilities\x12)\n" +
 	"\x10event_monitoring\x18\x01 \x01(\bR\x0feventMonitoring\x12)\n" +
 	"\x10block_monitoring\x18\x02 \x01(\bR\x0fblockMonitoring\x12'\n" +

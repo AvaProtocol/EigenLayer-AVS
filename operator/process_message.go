@@ -68,8 +68,11 @@ func (o *Operator) processMessage(resp *avspb.SyncMessagesResp) {
 		}
 
 		o.logger.Info("removing task from all triggers", "task_id", taskID, "operation", resp.Op)
-		o.eventTrigger.RemoveCheck(taskID)
-		o.blockTrigger.RemoveCheck(taskID)
+		// DisableTask / DeleteTask carry no chain context, so iterate every
+		// chain's trigger set and ask each to drop the task. Idempotent —
+		// chains that never registered this task return without error.
+		_ = o.removeEventCheck(taskID)
+		_ = o.removeBlockCheck(taskID)
 		o.timeTrigger.RemoveCheck(taskID)
 	case avspb.MessageOp_ImmediateTrigger:
 		// Get task ID from either TaskMetadata or message ID
