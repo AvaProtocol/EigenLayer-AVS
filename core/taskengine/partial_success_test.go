@@ -232,7 +232,7 @@ func TestGetExecutionStatus_StepFailures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to serialize task: %v", err)
 	}
-	err = db.Set(TaskStorageKey(task.Id, task.Status), taskJSON)
+	err = db.Set(ChainTaskStorageKey(task.ChainId, task.Id, task.Status), taskJSON)
 	if err != nil {
 		t.Fatalf("Failed to store task: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestGetExecutionStatus_StepFailures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to serialize execution: %v", err)
 	}
-	err = db.Set(TaskExecutionKey(task, execution.Id), executionJSON)
+	err = db.Set(ChainTaskExecutionKey(task.ChainId, task, execution.Id), executionJSON)
 	if err != nil {
 		t.Fatalf("Failed to store execution: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestGetExecutionStatus_FullSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to serialize task: %v", err)
 	}
-	err = db.Set(TaskStorageKey(task.Id, task.Status), taskJSON)
+	err = db.Set(ChainTaskStorageKey(task.ChainId, task.Id, task.Status), taskJSON)
 	if err != nil {
 		t.Fatalf("Failed to store task: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestGetExecutionStatus_FullSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to serialize execution: %v", err)
 	}
-	err = db.Set(TaskExecutionKey(task, execution.Id), executionJSON)
+	err = db.Set(ChainTaskExecutionKey(task.ChainId, task, execution.Id), executionJSON)
 	if err != nil {
 		t.Fatalf("Failed to store execution: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestGetExecutionStatus_FullFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to serialize task: %v", err)
 	}
-	err = db.Set(TaskStorageKey(task.Id, task.Status), taskJSON)
+	err = db.Set(ChainTaskStorageKey(task.ChainId, task.Id, task.Status), taskJSON)
 	if err != nil {
 		t.Fatalf("Failed to store task: %v", err)
 	}
@@ -406,7 +406,7 @@ func TestGetExecutionStatus_FullFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to serialize execution: %v", err)
 	}
-	err = db.Set(TaskExecutionKey(task, execution.Id), executionJSON)
+	err = db.Set(ChainTaskExecutionKey(task.ChainId, task, execution.Id), executionJSON)
 	if err != nil {
 		t.Fatalf("Failed to store execution: %v", err)
 	}

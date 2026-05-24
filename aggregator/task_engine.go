@@ -65,8 +65,28 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		"paymaster", agg.config.SmartWallet.PaymasterAddress,
 	)
 
+	// ChainIDs lets the cleanup loop locate tasks across every chain bucket
+	// in chain-scoped storage. Single-chain aggregator: just its own chain.
+	queueChainIDs := []int64{}
+	if agg.chainID != nil {
+		queueChainIDs = append(queueChainIDs, agg.chainID.Int64())
+	}
+	if agg.config.SmartWallet != nil && agg.config.SmartWallet.ChainID > 0 {
+		swChainID := agg.config.SmartWallet.ChainID
+		dup := false
+		for _, id := range queueChainIDs {
+			if id == swChainID {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			queueChainIDs = append(queueChainIDs, swChainID)
+		}
+	}
 	agg.queue = apqueue.New(agg.db, agg.logger, &apqueue.QueueOption{
-		Prefix: "default",
+		Prefix:   "default",
+		ChainIDs: queueChainIDs,
 	})
 	agg.worker = apqueue.NewWorker(agg.queue, agg.db)
 

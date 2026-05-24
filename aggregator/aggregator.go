@@ -253,7 +253,17 @@ func (agg *Aggregator) init() {
 
 func (agg *Aggregator) migrate() {
 	agg.backup = backup.NewService(agg.logger, agg.db, agg.config.BackupDir)
-	agg.migrator = migrator.NewMigrator(agg.db, agg.backup, migrations.Migrations)
+	// Build the migration list. Static migrations are registered first;
+	// chain-aware migrations are appended via closures so they have access
+	// to agg.chainID detected in init().
+	allMigrations := make([]migrator.Migration, 0, len(migrations.Migrations)+1)
+	allMigrations = append(allMigrations, migrations.Migrations...)
+	if agg.chainID != nil && agg.chainID.Int64() > 0 {
+		allMigrations = append(allMigrations, migrations.NewChainScopedKeysMigration(agg.chainID.Int64()))
+	} else {
+		agg.logger.Warn("Skipping chain-scoped key migration — aggregator chain_id is not set")
+	}
+	agg.migrator = migrator.NewMigrator(agg.db, agg.backup, allMigrations)
 	if err := agg.migrator.Run(); err != nil {
 		agg.logger.Error("Failed to run database migrations", "error", err)
 		panic("database migration failed - cannot continue")

@@ -62,16 +62,31 @@ func (q *Queue) CleanupOrphanedJobs() (*CleanupStats, error) {
 			var lastErr error
 			var checkedStatuses []string
 
+			// Check the task across every chain bucket. When ChainIDs is
+			// empty (legacy single-chain construction), fall back to the
+			// non-chain-scoped key so pre-migration callers keep working.
+			chainIDsToCheck := q.chainIDs
+			if len(chainIDsToCheck) == 0 {
+				chainIDsToCheck = []int64{0}
+			}
+
+		taskLookup:
 			for _, taskStatus := range taskStatuses {
-				taskKey := storageschema.TaskStorageKey(job.Name, taskStatus)
-				checkedStatuses = append(checkedStatuses, string(taskKey))
-				_, err := q.db.GetKey(taskKey)
-				if err == nil {
-					// Task exists in this status
-					taskExists = true
-					break
+				for _, chainID := range chainIDsToCheck {
+					var taskKey []byte
+					if chainID == 0 {
+						taskKey = storageschema.TaskStorageKey(job.Name, taskStatus)
+					} else {
+						taskKey = storageschema.ChainTaskStorageKey(chainID, job.Name, taskStatus)
+					}
+					checkedStatuses = append(checkedStatuses, string(taskKey))
+					_, err := q.db.GetKey(taskKey)
+					if err == nil {
+						taskExists = true
+						break taskLookup
+					}
+					lastErr = err
 				}
-				lastErr = err
 			}
 
 			if !taskExists {

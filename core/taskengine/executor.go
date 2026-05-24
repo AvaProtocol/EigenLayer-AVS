@@ -113,7 +113,15 @@ func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
 	task := &model.Task{
 		Task: &avsproto.Task{},
 	}
-	storageKey := storageschema.TaskStorageKey(id, avsproto.TaskStatus_Enabled)
+	// Lookup by task ID alone — search every known chain bucket. The engine
+	// reference is always set in production; tests that build a standalone
+	// TaskExecutor still fall back to the legacy single-chain key.
+	var storageKey []byte
+	if x.engine != nil {
+		storageKey = x.engine.findTaskKey(id, avsproto.TaskStatus_Enabled)
+	} else {
+		storageKey = storageschema.TaskStorageKey(id, avsproto.TaskStatus_Enabled)
+	}
 	item, err := x.db.GetKey(storageKey)
 
 	if err != nil {
@@ -684,8 +692,8 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	// batch update storage for task + execution log
 	updates := map[string][]byte{}
-	updates[string(TaskStorageKey(task.Id, task.Status))], err = task.ToJSON()
-	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
+	updates[string(ChainTaskStorageKey(task.ChainId, task.Id, task.Status))], err = task.ToJSON()
+	updates[string(ChainTaskUserKey(task.ChainId, task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 	// update execution log
 	var executionByte []byte
@@ -702,7 +710,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		}
 		if mErr == nil {
 			executionByte = b
-			key := string(TaskExecutionKey(task, execution.Id))
+			key := string(ChainTaskExecutionKey(task.ChainId, task, execution.Id))
 			updates[key] = executionByte
 			if x.logger != nil {
 				x.logger.Info("Executor: persisting execution", "task_id", task.Id, "execution_id", execution.Id, "key", key)
@@ -719,7 +727,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	// whenever a task change its status, we moved it, therefore we will need to clean up the old storage
 	if task.Status != initialTaskStatus {
-		if err = x.db.Delete(TaskStorageKey(task.Id, initialTaskStatus)); err != nil {
+		if err = x.db.Delete(ChainTaskStorageKey(task.ChainId, task.Id, initialTaskStatus)); err != nil {
 			x.logger.Errorf("error updating task status. %w", err, "task_id", task.Id)
 		}
 	}
@@ -924,8 +932,8 @@ func (x *TaskExecutor) persistFailedExecution(task *model.Task, execution *avspr
 
 	// Update task data
 	if taskJSON, err := task.ToJSON(); err == nil {
-		updates[string(TaskStorageKey(task.Id, task.Status))] = taskJSON
-		updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
+		updates[string(ChainTaskStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
+		updates[string(ChainTaskUserKey(task.ChainId, task))] = []byte(fmt.Sprintf("%d", task.Status))
 	} else {
 		x.logger.Error("Failed to serialize task for persistence", "task_id", task.Id, "error", err)
 	}
@@ -933,7 +941,7 @@ func (x *TaskExecutor) persistFailedExecution(task *model.Task, execution *avspr
 	// Update execution log
 	mo := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}
 	if executionByte, mErr := mo.Marshal(execution); mErr == nil {
-		key := string(TaskExecutionKey(task, execution.Id))
+		key := string(ChainTaskExecutionKey(task.ChainId, task, execution.Id))
 		updates[key] = executionByte
 		x.logger.Info("Executor: persisting failed execution", "task_id", task.Id, "execution_id", execution.Id, "key", key)
 	} else {
@@ -947,7 +955,7 @@ func (x *TaskExecutor) persistFailedExecution(task *model.Task, execution *avspr
 
 	// Clean up old task status if it changed
 	if task.Status != initialTaskStatus {
-		if err := x.db.Delete(TaskStorageKey(task.Id, initialTaskStatus)); err != nil {
+		if err := x.db.Delete(ChainTaskStorageKey(task.ChainId, task.Id, initialTaskStatus)); err != nil {
 			x.logger.Error("error cleaning up old task status", "task_id", task.Id, "error", err)
 		}
 	}

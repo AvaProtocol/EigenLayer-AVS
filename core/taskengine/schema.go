@@ -235,25 +235,44 @@ func PendingExecutionKey(t *model.Task, executionID string) []byte {
 	return []byte(fmt.Sprintf("pending:%s:%s", t.Id, executionID))
 }
 
+// ExecutionIdFromStorageKey extracts the execution id from either a legacy
+// (history:{taskID}:{executionID}) or chain-scoped
+// (history:{chainID}:{taskID}:{executionID}) history key.
 func ExecutionIdFromStorageKey(key []byte) string {
-	// key layout: history:01JG2FE5MDVKBPHEG0PEYSDKAC:01JG2FE5MFKTH0754RGF2DMVY7
-	return string(key[35:])
+	parsed, err := ParseExecutionKey(key)
+	if err != nil && err != ErrLegacyKey {
+		return ""
+	}
+	return parsed.ExecutionID
 }
 
+// ExecutionIdFromPendingKey parses a pending key. Format never gained a
+// chain prefix; kept on byte offsets.
 func ExecutionIdFromPendingKey(key []byte) string {
 	// key layout: pending:01JG2FE5MDVKBPHEG0PEYSDKAC:01JG2FE5MFKTH0754RGF2DMVY7
 	// "pending:" = 8 bytes, task id = 26 bytes, colon = 1 => start at 8+26+1 = 35
 	return string(key[35:])
 }
 
+// TaskIdFromExecutionStorageKey extracts the task id from either legacy or
+// chain-scoped history keys.
 func TaskIdFromExecutionStorageKey(key []byte) string {
-	// key layout: history:01JG2FE5MDVKBPHEG0PEYSDKAC:01JG2FE5MFKTH0754RGF2DMVY7
-	return string(key[8:34])
+	parsed, err := ParseExecutionKey(key)
+	if err != nil && err != ErrLegacyKey {
+		return ""
+	}
+	return parsed.TaskID
 }
 
+// TaskIdFromTaskStatusStorageKey extracts the task id from either legacy
+// (u:{owner}:{wallet}:{taskID}) or chain-scoped
+// (u:{chainID}:{owner}:{wallet}:{taskID}) user-task keys.
 func TaskIdFromTaskStatusStorageKey(key []byte) []byte {
-	// Exampley key u:0xd7050816337a3f8f690f8083b5ff8019d50c0e50:0x415f09526f25d6520d471890abf0953b0505313d:01JMN2JHAGXTNSY46KH0KYY0MZ
-	return key[88:114]
+	parsed, err := ParseUserTaskKey(key)
+	if err != nil && err != ErrLegacyKey {
+		return nil
+	}
+	return []byte(parsed.TaskID)
 }
 
 func SecretStorageKey(secret *model.Secret) (string, error) {

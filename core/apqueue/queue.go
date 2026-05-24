@@ -20,10 +20,17 @@ type Queue struct {
 
 	seq    storage.Sequence
 	logger sdklogging.Logger
+
+	// chainIDs is the list of chain ids this queue should consult when
+	// cleaning up orphaned jobs — each task can live under any chain's
+	// chain-scoped storage prefix. Empty/nil falls back to the legacy
+	// single-chain lookup for backward compat.
+	chainIDs []int64
 }
 
 type QueueOption struct {
-	Prefix string
+	Prefix   string
+	ChainIDs []int64
 }
 
 // newQueue creates new ueue
@@ -44,6 +51,7 @@ func New(db storage.Storage, logger sdklogging.Logger, opts *QueueOption) *Queue
 		} else {
 			q.prefix = opts.Prefix
 		}
+		q.chainIDs = opts.ChainIDs
 	}
 
 	return &q

@@ -35,35 +35,53 @@ var (
 			}
 			defer db.Close()
 
-			// Check enabled tasks from database
-			kvs, err := db.GetByPrefix(taskengine.TaskByStatusStoragePrefix(avsproto.TaskStatus_Enabled))
+			// Scan every task key (legacy "t:<status>:..." and chain-scoped
+			// "t:<chainID>:<status>:..."). The status CLI runs without an
+			// aggregator context so we cannot enumerate configured chains
+			// from anywhere — iterate the broad "t:" prefix and filter by
+			// parsing each key.
+			allTaskKvs, err := db.GetByPrefix([]byte("t:"))
 			if err != nil && err != badger.ErrKeyNotFound {
 				fmt.Printf("❌ Failed to query active tasks: %v\n", err)
 				os.Exit(1)
 			}
 
-			fmt.Printf("💾 Database Status:\n")
-			fmt.Printf("   Active tasks in database: %d\n\n", len(kvs))
+			var enabled []string
+			for _, item := range allTaskKvs {
+				parsed, perr := taskengine.ParseTaskStatusKey(item.Key)
+				// Treat both legacy (ErrLegacyKey) and chain-scoped keys as
+				// valid — both still populate parsed.Status. Hard parse
+				// errors mean the key is malformed and we skip it.
+				if perr != nil && perr != taskengine.ErrLegacyKey {
+					continue
+				}
+				if parsed.Status == avsproto.TaskStatus_Enabled {
+					enabled = append(enabled, string(item.Key))
+				}
+			}
 
-			if len(kvs) > 0 {
+			fmt.Printf("💾 Database Status:\n")
+			fmt.Printf("   Active tasks in database: %d\n\n", len(enabled))
+
+			if len(enabled) > 0 {
 				fmt.Printf("📋 Active Tasks:\n")
-				for i, item := range kvs {
+				for i, key := range enabled {
 					if i >= 10 {
-						fmt.Printf("   ... and %d more tasks\n", len(kvs)-10)
+						fmt.Printf("   ... and %d more tasks\n", len(enabled)-10)
 						break
 					}
-					fmt.Printf("   %d. %s\n", i+1, string(item.Key))
+					fmt.Printf("   %d. %s\n", i+1, key)
 				}
 				fmt.Printf("\n")
 			}
 
 			fmt.Printf("💡 Troubleshooting:\n")
-			if len(kvs) == 0 {
+			if len(enabled) == 0 {
 				fmt.Printf("   ❌ No active tasks found in database\n")
 				fmt.Printf("   ✅ Create a task using the web UI or API\n")
 				fmt.Printf("   ✅ Restart the aggregator to see task count logs\n")
 			} else {
-				fmt.Printf("   ✅ %d active tasks found in database\n", len(kvs))
+				fmt.Printf("   ✅ %d active tasks found in database\n", len(enabled))
 				fmt.Printf("   ✅ Tasks should be sent to operators when they connect\n")
 				fmt.Printf("   ✅ Restart the aggregator to see '🚀 Engine started successfully' with task count\n")
 			}
