@@ -67,6 +67,8 @@ func (s *Server) ExecuteUserOp(ctx context.Context, req *avsproto.ExecuteUserOpR
 		req.CallData,
 		paymasterReq,
 		senderOverride,
+		nil, // saltOverride: not exposed in ExecuteUserOpReq; sender override is used instead
+		nil, // executionFeeWei: value-capture fee not yet wired through worker RPC
 		s.worker.logger,
 	)
 	if err != nil {

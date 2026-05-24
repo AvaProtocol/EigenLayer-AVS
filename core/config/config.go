@@ -208,7 +208,6 @@ type ChainConfigRaw struct {
 	SmartWallet SmartWalletConfigRaw `yaml:"smart_wallet"`
 }
 
-
 // These are read from configPath
 type ConfigRaw struct {
 	EcdsaPrivateKey string              `yaml:"ecdsa_private_key"`
