@@ -160,11 +160,23 @@ func (fe *FeeEstimator) EstimateFees(ctx context.Context, req *avsproto.Estimate
 		}, nil
 	}
 
+	// Detected chain (from RPC) is authoritative for the fee estimation. If the
+	// caller specified a different chain_id, surface the mismatch via logs so
+	// the gateway can route the next iteration to the right worker (Phase 3).
+	requestedChainID := req.GetChainId()
+	if requestedChainID != 0 && requestedChainID != chainID {
+		fe.logger.Warn("EstimateFees chain_id mismatch",
+			"requested_chain_id", requestedChainID,
+			"detected_chain_id", chainID,
+			"note", "fee estimation uses the chain bound to this aggregator/worker")
+	}
+
 	fe.logger.Info("🔍 Starting fee estimation",
 		"trigger_type", req.Trigger.Type.String(),
 		"nodes_count", len(req.Nodes),
 		"runner", req.Runner,
-		"chain_id", chainID)
+		"chain_id", chainID,
+		"requested_chain_id", requestedChainID)
 
 	// Step 1: Resolve runner address for gas estimation
 	runnerAddress, walletCreationNeeded, walletCreationGasWei, err := fe.resolveRunnerAndWalletCreation(ctx, req)

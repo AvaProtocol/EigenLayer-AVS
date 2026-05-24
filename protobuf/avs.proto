@@ -66,6 +66,8 @@ message TokenMetadata {
 // GetTokenMetadataReq is the request for token metadata lookup
 message GetTokenMetadataReq {
   string address = 1;    // Contract address to look up
+  // Chain to look the token up on. 0 = aggregator default chain.
+  int64 chain_id = 2;
 }
 
 // GetTokenMetadataResp is the response containing token metadata
@@ -976,6 +978,9 @@ message WithdrawFundsReq {
   
   // Required: Smart wallet address to withdraw from (must be from user's getWallet() call)
   string smart_wallet_address = 4;
+
+  // Chain to execute the withdrawal on. 0 = aggregator default chain.
+  int64 chain_id = 5;
 }
 
 // Response message for WithdrawFunds operation
@@ -1015,6 +1020,9 @@ message TriggerTaskReq {
   // Input variables for template resolution in trigger configuration (e.g., settings: {runner, chain_id})
   // These variables are merged with the workflow's input_variables during execution
   map<string, google.protobuf.Value> trigger_input = 9;
+
+  // Chain to execute against. 0 = use the task's stored chain_id.
+  int64 chain_id = 10;
 }
 
 message TriggerTaskResp {
@@ -1290,6 +1298,9 @@ message RunNodeWithInputsReq {
   TaskNode node = 1; // Complete node definition with proper Config (consistent with SimulateTask)
   // Field 2 was node_config (removed in Jan 2025) - do not reuse
   map<string, google.protobuf.Value> input_variables = 3; // Input variables for the node
+  // Chain to run the node against. 0 = aggregator default chain.
+  // node.config.chain_id (if non-zero) takes precedence over this field.
+  int64 chain_id = 4;
 }
 
 // Response message for RunNodeWithInputs
@@ -1354,6 +1365,9 @@ message SimulateTaskReq {
   repeated TaskNode nodes = 2; // All workflow nodes
   repeated TaskEdge edges = 3; // All edges connecting the nodes
   map<string, google.protobuf.Value> input_variables = 6; // Input variables for the simulation
+  // Chain to simulate against. 0 = aggregator default chain.
+  // Per-node / per-trigger chain_id (if non-zero) takes precedence.
+  int64 chain_id = 7;
 }
 
 // Request message for EstimateFees
@@ -1374,6 +1388,9 @@ message EstimateFeesReq {
   // Input variables for workflow execution simulation
   // Should contain settings with at least runner for fee estimation
   map<string, google.protobuf.Value> input_variables = 8;
+
+  // Chain to estimate fees against. 0 = aggregator default chain.
+  int64 chain_id = 9;
 }
 
 // Fee amount in both native token and USD

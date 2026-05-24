@@ -142,13 +142,23 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
+	requestedChainID := payload.GetChainId()
 	r.config.Logger.Info("process withdraw funds",
 		"user", user.Address.String(),
 		"recipient", payload.RecipientAddress,
 		"amount", payload.Amount,
 		"token", payload.Token,
 		"smart_wallet", payload.SmartWalletAddress,
+		"requested_chain_id", requestedChainID,
 	)
+
+	// In single-chain aggregator mode (no chainRegistry), reject explicit chain_id
+	// that does not match the aggregator's chain. In gateway mode this will route
+	// to the matching worker — wiring lives in the gateway path, not here.
+	if r.chainRegistry == nil && requestedChainID != 0 && r.chainID != nil && requestedChainID != r.chainID.Int64() {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"chain_id %d does not match aggregator chain %d", requestedChainID, r.chainID.Int64())
+	}
 
 	// Validate required parameters
 	if payload.RecipientAddress == "" {
@@ -751,6 +761,7 @@ func (r *RpcServer) TriggerTask(ctx context.Context, payload *avsproto.TriggerTa
 	r.config.Logger.Info("process trigger task",
 		"user", user.Address.String(),
 		"task_id", payload.TaskId,
+		"requested_chain_id", payload.GetChainId(),
 	)
 
 	if payload.TaskId == "" {
@@ -894,6 +905,7 @@ func (r *RpcServer) RunNodeWithInputs(ctx context.Context, req *avsproto.RunNode
 	r.config.Logger.Info("process run node with inputs",
 		"user", user.Address.String(),
 		"node_type", nodeTypeForLogging,
+		"requested_chain_id", req.GetChainId(),
 	)
 
 	// Call the immediate execution function directly
@@ -963,6 +975,7 @@ func (r *RpcServer) SimulateTask(ctx context.Context, req *avsproto.SimulateTask
 		"trigger_type", req.Trigger.Type,
 		"nodes_count", len(req.Nodes),
 		"edges_count", len(req.Edges),
+		"requested_chain_id", req.GetChainId(),
 	)
 
 	// Basic validation
@@ -992,7 +1005,7 @@ func (r *RpcServer) SimulateTask(ctx context.Context, req *avsproto.SimulateTask
 	)
 
 	// Call the simulation function with the provided task definition (no need to extract triggerType and triggerConfig)
-	execution, err := r.engine.SimulateTask(user, req.Trigger, req.Nodes, req.Edges, inputVariables)
+	execution, err := r.engine.SimulateTask(user, req.Trigger, req.Nodes, req.Edges, inputVariables, req.GetChainId())
 	if err != nil {
 		r.config.Logger.Error("simulate task failed",
 			"user", user.Address.String(),
@@ -1023,6 +1036,7 @@ func (r *RpcServer) GetTokenMetadata(ctx context.Context, payload *avsproto.GetT
 	r.config.Logger.Info("process get token metadata",
 		"user", user.Address.String(),
 		"address", payload.Address,
+		"requested_chain_id", payload.GetChainId(),
 	)
 
 	return r.engine.GetTokenMetadata(user, payload)
@@ -1203,7 +1217,8 @@ func (r *RpcServer) EstimateFees(ctx context.Context, req *avsproto.EstimateFees
 		"user", user.Address.String(),
 		"trigger_type", req.Trigger.Type.String(),
 		"nodes_count", len(req.Nodes),
-		"runner", req.Runner)
+		"runner", req.Runner,
+		"requested_chain_id", req.GetChainId())
 
 	// Validate required fields
 	if req.Trigger == nil {

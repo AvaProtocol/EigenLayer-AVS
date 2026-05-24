@@ -2552,6 +2552,18 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 		return nil, status.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
+	// Allow caller to override the task's stored chain_id for this invocation.
+	// Useful for testing a task against a different chain without re-creating it.
+	if reqChainID := payload.GetChainId(); reqChainID != 0 && reqChainID != task.ChainId {
+		if n.logger != nil {
+			n.logger.Info("TriggerTask overriding task chain_id",
+				"task_id", task.Id,
+				"task_chain_id", task.ChainId,
+				"requested_chain_id", reqChainID)
+		}
+		task.ChainId = reqChainID
+	}
+
 	// Important business logic validation: Check if task is runnable
 	if !task.IsRunable() {
 		return nil, status.Errorf(codes.FailedPrecondition, TaskIsNotRunnable)
@@ -2725,7 +2737,16 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 // then executing the task nodes in sequence just like regular task execution.
 // This is useful for testing tasks without waiting for actual trigger conditions.
 // The task definition is provided in the request, so no storage persistence is required.
-func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, inputVariables map[string]interface{}) (*avsproto.Execution, error) {
+// SimulateTask runs a workflow without persisting it. The optional chainID
+// argument (variadic for backward compatibility with existing callers) sets
+// the workflow-level chain context; 0 or omitted means use the aggregator
+// default. Per-node / per-trigger chain_id (set on the node configs) takes
+// precedence over this value.
+func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, inputVariables map[string]interface{}, chainIDs ...int64) (*avsproto.Execution, error) {
+	var chainID int64
+	if len(chainIDs) > 0 {
+		chainID = chainIDs[0]
+	}
 	// Validate inputVariables.settings (same requirements as CreateTask)
 	if inputVariables == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid task argument: inputVariables is required")
@@ -2767,6 +2788,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 			Nodes:              nodes,
 			Edges:              edges,
 			Status:             avsproto.TaskStatus_Enabled, // Set as enabled for simulation
+			ChainId:            chainID,                     // Workflow-level chain override; 0 = aggregator default
 		},
 	}
 
@@ -4510,7 +4532,10 @@ func getStringMapKeys(m map[string]interface{}) []string {
 	return keys
 }
 
-// GetTokenMetadata handles the RPC for token metadata lookup
+// GetTokenMetadata handles the RPC for token metadata lookup.
+// payload.chain_id is currently informational: in single-chain aggregator mode
+// the enrichment service is bound to one chain at startup. Per-chain
+// enrichment services are wired through the gateway → worker RPC (Phase 3).
 func (n *Engine) GetTokenMetadata(user *model.User, payload *avsproto.GetTokenMetadataReq) (*avsproto.GetTokenMetadataResp, error) {
 	// Validate the address parameter
 	if payload.Address == "" {
@@ -4524,6 +4549,12 @@ func (n *Engine) GetTokenMetadata(user *model.User, payload *avsproto.GetTokenMe
 		return &avsproto.GetTokenMetadataResp{
 			Found: false,
 		}, status.Errorf(codes.InvalidArgument, "invalid token address format")
+	}
+
+	if reqChainID := payload.GetChainId(); reqChainID != 0 && n.logger != nil {
+		n.logger.Debug("GetTokenMetadata chain_id requested",
+			"address", payload.Address,
+			"requested_chain_id", reqChainID)
 	}
 
 	// Check if TokenEnrichmentService is available

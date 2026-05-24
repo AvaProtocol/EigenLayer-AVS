@@ -3322,6 +3322,15 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		inputVariables[k] = v.AsInterface()
 	}
 
+	// Workflow-level chain_id override for this isolated node run.
+	// node.Config.chain_id (when set) still takes precedence — that resolution
+	// happens inside the VM via WithChainConfigResolver (Phase 2 Track A).
+	if reqChainID := req.GetChainId(); reqChainID != 0 && n.logger != nil {
+		n.logger.Debug("RunNodeImmediatelyRPC chain_id requested",
+			"node_type", node.Type,
+			"requested_chain_id", reqChainID)
+	}
+
 	// Get node type string from the node's Type field
 	nodeTypeStr := NodeTypeToString(node.Type)
 	if nodeTypeStr == "" {
