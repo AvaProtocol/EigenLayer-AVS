@@ -190,6 +190,12 @@ type operatorState struct {
 	// Operator capabilities
 	Capabilities *avsproto.SyncMessagesReq_Capabilities
 
+	// Chains this operator advertises it can monitor. Empty means
+	// "single-chain operator on the aggregator default" (back-compat for
+	// pre-multi-chain operators). Set on every SyncMessages connect /
+	// reconnect from payload.SupportedChainIds.
+	SupportedChainIDs []int64
+
 	// Context cancellation for managing ticker lifecycle
 	TickerCancel context.CancelFunc
 	TickerCtx    context.Context
@@ -1188,12 +1194,13 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 	n.lock.Lock()
 	if _, ok := n.trackSyncedTasks[address]; !ok {
 		n.trackSyncedTasks[address] = &operatorState{
-			MonotonicClock:  payload.MonotonicClock,
-			TaskID:          map[string]bool{},
-			Capabilities:    payload.Capabilities,
-			TickerCtx:       tickerCtx,
-			TickerCancel:    tickerCancel,
-			LastConnectTime: connectionStartTime,
+			MonotonicClock:    payload.MonotonicClock,
+			TaskID:            map[string]bool{},
+			Capabilities:      payload.Capabilities,
+			SupportedChainIDs: payload.GetSupportedChainIds(),
+			TickerCtx:         tickerCtx,
+			TickerCancel:      tickerCancel,
+			LastConnectTime:   connectionStartTime,
 		}
 		n.lock.Unlock()
 		n.logger.Info("🔗 New operator connected with capabilities",
@@ -1216,6 +1223,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			n.trackSyncedTasks[address].TaskID = map[string]bool{}
 			n.trackSyncedTasks[address].MonotonicClock = payload.MonotonicClock
 			n.trackSyncedTasks[address].Capabilities = payload.Capabilities
+			n.trackSyncedTasks[address].SupportedChainIDs = payload.GetSupportedChainIds()
 			n.trackSyncedTasks[address].LastConnectTime = connectionStartTime
 
 			// Set new ticker context for this connection
@@ -1243,6 +1251,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 
 			n.trackSyncedTasks[address].TaskID = map[string]bool{}
 			n.trackSyncedTasks[address].Capabilities = payload.Capabilities
+			n.trackSyncedTasks[address].SupportedChainIDs = payload.GetSupportedChainIds()
 			n.trackSyncedTasks[address].LastConnectTime = connectionStartTime
 
 			// Set new ticker context for this connection
@@ -1524,6 +1533,18 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 				continue
 			}
 
+			// Skip tasks for chains this operator is not configured to monitor.
+			// Pre-multi-chain operators (empty SupportedChainIDs) accept all
+			// tasks for backward compatibility; tasks with chain_id=0 are
+			// treated as chain-agnostic and assigned regardless.
+			if !n.supportsTaskChain(address, task) {
+				n.logger.Debug("⏭️ Skipping task - operator does not monitor this chain",
+					"task_id", task.Id,
+					"operator", address,
+					"task_chain_id", task.ChainId)
+				continue
+			}
+
 			tasksToStream = append(tasksToStream, task)
 			triggerTypeName := task.Trigger.String()
 			tasksByTriggerType[triggerTypeName]++
@@ -1565,6 +1586,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 						ExpiredAt: task.ExpiredAt,
 						Trigger:   task.Trigger,
 						StartAt:   task.StartAt,
+						ChainId:   task.ChainId,
 					},
 				}
 
@@ -4263,6 +4285,32 @@ func (n *Engine) shouldLogApprovalMessage(address string) bool {
 }
 
 // supportsTaskTrigger checks if an operator supports a specific trigger type
+// supportsTaskChain reports whether an operator's advertised
+// supported_chain_ids match a task's chain_id. Pre-multi-chain operators
+// (empty list) accept everything for back-compat; tasks with chain_id=0
+// are chain-agnostic and accepted by every operator.
+func (n *Engine) supportsTaskChain(operatorAddr string, task *model.Task) bool {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	state, exists := n.trackSyncedTasks[operatorAddr]
+	if !exists {
+		return true
+	}
+	if len(state.SupportedChainIDs) == 0 {
+		return true
+	}
+	if task.ChainId == 0 {
+		return true
+	}
+	for _, id := range state.SupportedChainIDs {
+		if id == task.ChainId {
+			return true
+		}
+	}
+	return false
+}
+
 func (n *Engine) supportsTaskTrigger(operatorAddr string, task *model.Task) bool {
 	n.lock.Lock()
 	defer n.lock.Unlock()

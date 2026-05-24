@@ -25,6 +25,7 @@ import (
 	"github.com/Layr-Labs/eigensdk-go/signerv2"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 	gocron "github.com/go-co-op/gocron/v2"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -247,15 +248,36 @@ func (c *OperatorConfig) EffectiveChains() []OperatorChainConfig {
 }
 
 // ChainTriggerSet bundles the per-chain trigger engines and any chain-specific
-// state the operator needs to keep separate (RPC URLs are kept for logging).
-// Block and Event triggers each speak to a single chain's RPC; the operator
-// holds one ChainTriggerSet per supported chain and a single shared
-// TimeTrigger for cron/fixed-time tasks (which are chain-agnostic).
+// state the operator needs to keep separate. Block and Event triggers each
+// speak to a single chain's RPC; the operator holds one ChainTriggerSet per
+// supported chain and a single shared TimeTrigger for cron/fixed-time tasks
+// (which are chain-agnostic).
+//
+// EthClient is the per-chain HTTP RPC used by the trigger consumer loop when
+// it needs to fetch block details (e.g., HeaderByNumber for block-trigger
+// payload enrichment). Sharing a single targetEthClient across all chains
+// would silently route header fetches to the wrong chain.
 type ChainTriggerSet struct {
 	ChainID      int64
 	Name         string
 	BlockTrigger *triggerengine.BlockTrigger
 	EventTrigger *triggerengine.EventTrigger
+	EthClient    *ethclient.Client
+}
+
+// chainTaggedBlockEvent and chainTaggedEventEvent wrap a TriggerMetadata with
+// the chain_id it came from so the operator's shared consumer loops can
+// dispatch per-chain RPC fetches and per-chain NotifyTriggers correctly.
+// Fan-in goroutines (one per chain) populate these from each chain's raw
+// trigger channel.
+type chainTaggedBlockEvent struct {
+	chainID  int64
+	metadata triggerengine.TriggerMetadata[int64]
+}
+
+type chainTaggedEventEvent struct {
+	chainID  int64
+	metadata triggerengine.TriggerMetadata[triggerengine.EventMark]
 }
 
 type Operator struct {

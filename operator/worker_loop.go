@@ -23,6 +23,7 @@ import (
 	avspb "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -172,77 +173,140 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		}
 	}
 
-	// Build the chain-scoped trigger map. D-1 (this commit) seeds it with one
-	// entry derived from EffectiveChains()[0] so behavior is unchanged from
-	// the legacy single-chain path. D-2 will loop EffectiveChains(), spin up
-	// per-chain block/event triggers with their own RPC clients, and fan-in
-	// their channels so a single dispatch loop can route by chain_id.
+	// Build per-chain trigger engines from the resolved chains list. Each
+	// chain gets its own BlockTrigger and EventTrigger speaking to that
+	// chain's RPC + WS; their output channels are fanned-in (tagged with
+	// chain_id) to a shared consumer loop below.
 	chains := o.config.EffectiveChains()
 	if len(chains) == 0 {
 		return fmt.Errorf("operator has no chains configured")
 	}
-	primaryChain := chains[0]
-	rpcConfig := triggerengine.RpcOption{
-		RpcURL:   primaryChain.EthRpcUrl,
-		WsRpcURL: primaryChain.EthWsUrl,
-	}
 
-	blockTriggerCh := make(chan triggerengine.TriggerMetadata[int64], 1000)
-	blockTrigger := triggerengine.NewBlockTrigger(&rpcConfig, blockTriggerCh, o.logger)
+	sharedBlockCh := make(chan chainTaggedBlockEvent, 1000)
+	sharedEventCh := make(chan chainTaggedEventEvent, 1000)
 
-	eventTriggerCh := make(chan triggerengine.TriggerMetadata[triggerengine.EventMark], 1000)
-	eventTrigger := triggerengine.NewEventTrigger(&rpcConfig, eventTriggerCh, o.logger,
-		o.config.GetMaxEventsPerQueryPerBlock(), o.config.GetMaxTotalEventsPerBlock())
+	o.chainTriggers = make(map[int64]*ChainTriggerSet, len(chains))
+	o.chainOrder = make([]int64, 0, len(chains))
 
-	// Set up overload alert callback to notify aggregator
-	eventTrigger.SetOverloadAlertCallback(func(alert *avspb.EventOverloadAlert) {
-		o.logger.Warn("🚨 Sending event overload alert to aggregator",
-			"task_id", alert.TaskId,
-			"events_detected", alert.EventsDetected,
-			"safety_limit", alert.SafetyLimit)
-
-		// Use existing node client for internal overload alerts
-		if _, err := o.nodeRpcClient.ReportEventOverload(ctx, alert); err != nil {
-			o.logger.Error("❌ Failed to send overload alert to aggregator",
-				"task_id", alert.TaskId,
-				"error", err)
-		} else {
-			o.logger.Info("✅ Successfully sent overload alert to aggregator",
-				"task_id", alert.TaskId)
+	for i, chainCfg := range chains {
+		// Per-chain HTTP RPC client used for both chain_id detection and the
+		// consumer loop's header fetches (HeaderByNumber for block-trigger
+		// payload enrichment). Sharing a single client across chains would
+		// silently route header fetches to the wrong chain.
+		perChainEthClient, err := ethclient.Dial(chainCfg.EthRpcUrl)
+		if err != nil {
+			return fmt.Errorf("chain %d (%s): dial %s: %w", i, chainCfg.Name, chainCfg.EthRpcUrl, err)
 		}
-	})
+
+		// Detect the chain_id from RPC and validate against the config (when
+		// the config specified one). Mismatch means the RPC URL is pointing
+		// at a different chain than the operator thinks — fail fast rather
+		// than silently route tasks to the wrong chain.
+		detectChainCtx, detectCancel := context.WithTimeout(ctx, 10*time.Second)
+		detectedBig, err := perChainEthClient.ChainID(detectChainCtx)
+		detectCancel()
+		if err != nil {
+			perChainEthClient.Close()
+			return fmt.Errorf("chain %d (%s): detect chain_id: %w", i, chainCfg.Name, err)
+		}
+		detectedID := detectedBig.Int64()
+		if chainCfg.ChainID != 0 && chainCfg.ChainID != detectedID {
+			perChainEthClient.Close()
+			return fmt.Errorf("chain %d (%s): config chain_id=%d but RPC %s reports %d",
+				i, chainCfg.Name, chainCfg.ChainID, chainCfg.EthRpcUrl, detectedID)
+		}
+		if _, dup := o.chainTriggers[detectedID]; dup {
+			perChainEthClient.Close()
+			return fmt.Errorf("chain %d (%s): duplicate chain_id %d in operator chains[]",
+				i, chainCfg.Name, detectedID)
+		}
+
+		rpcOpt := triggerengine.RpcOption{
+			RpcURL:   chainCfg.EthRpcUrl,
+			WsRpcURL: chainCfg.EthWsUrl,
+		}
+
+		perChainBlockCh := make(chan triggerengine.TriggerMetadata[int64], 1000)
+		bt := triggerengine.NewBlockTrigger(&rpcOpt, perChainBlockCh, o.logger)
+
+		perChainEventCh := make(chan triggerengine.TriggerMetadata[triggerengine.EventMark], 1000)
+		et := triggerengine.NewEventTrigger(&rpcOpt, perChainEventCh, o.logger,
+			o.config.GetMaxEventsPerQueryPerBlock(), o.config.GetMaxTotalEventsPerBlock())
+		et.SetOverloadAlertCallback(func(alert *avspb.EventOverloadAlert) {
+			o.logger.Warn("🚨 Sending event overload alert to aggregator",
+				"task_id", alert.TaskId,
+				"chain_id", detectedID,
+				"events_detected", alert.EventsDetected,
+				"safety_limit", alert.SafetyLimit)
+			if _, err := o.nodeRpcClient.ReportEventOverload(ctx, alert); err != nil {
+				o.logger.Error("❌ Failed to send overload alert to aggregator",
+					"task_id", alert.TaskId, "chain_id", detectedID, "error", err)
+			} else {
+				o.logger.Info("✅ Successfully sent overload alert to aggregator",
+					"task_id", alert.TaskId, "chain_id", detectedID)
+			}
+		})
+
+		// Fan-in: stamp every event from this chain's raw channel with
+		// detectedID and forward to the shared channel the consumer loop
+		// reads. Exits when ctx is done (channel close is left to the
+		// trigger engines themselves on shutdown).
+		go func(chainID int64, in <-chan triggerengine.TriggerMetadata[int64]) {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case item, ok := <-in:
+					if !ok {
+						return
+					}
+					sharedBlockCh <- chainTaggedBlockEvent{chainID: chainID, metadata: item}
+				}
+			}
+		}(detectedID, perChainBlockCh)
+
+		go func(chainID int64, in <-chan triggerengine.TriggerMetadata[triggerengine.EventMark]) {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case item, ok := <-in:
+					if !ok {
+						return
+					}
+					sharedEventCh <- chainTaggedEventEvent{chainID: chainID, metadata: item}
+				}
+			}
+		}(detectedID, perChainEventCh)
+
+		o.chainTriggers[detectedID] = &ChainTriggerSet{
+			ChainID:      detectedID,
+			Name:         chainCfg.Name,
+			BlockTrigger: bt,
+			EventTrigger: et,
+			EthClient:    perChainEthClient,
+		}
+		o.chainOrder = append(o.chainOrder, detectedID)
+
+		o.logger.Info("🔗 Chain trigger engine ready",
+			"chain_id", detectedID, "name", chainCfg.Name, "rpc", chainCfg.EthRpcUrl)
+
+		bt.Run(ctx)
+		if o.config.EnabledFeatures.EventTrigger {
+			et.Run(ctx)
+		}
+	}
 
 	timeTriggerCh := make(chan triggerengine.TriggerMetadata[uint64], 1000)
 	o.timeTrigger = triggerengine.NewTimeTrigger(timeTriggerCh, o.logger)
+	o.timeTrigger.Run(ctx)
 
-	// Register the (currently single) chain trigger set. Use the configured
-	// chain_id when provided, else the per-chain detected ID (TODO in D-2),
-	// else 0 as a wildcard placeholder for "the operator's only chain".
-	primaryChainID := primaryChain.ChainID
-	o.chainTriggers = map[int64]*ChainTriggerSet{
-		primaryChainID: {
-			ChainID:      primaryChainID,
-			Name:         primaryChain.Name,
-			BlockTrigger: blockTrigger,
-			EventTrigger: eventTrigger,
-		},
-	}
-	o.chainOrder = []int64{primaryChainID}
-
-	// Log consolidated monitoring status
 	eventStatus := "disabled"
 	if o.config.EnabledFeatures.EventTrigger {
 		eventStatus = "enabled"
 	}
-	o.logger.Infof("📊 Monitoring Status: Block ✅ | Time ✅ | Event %s | Chains: %d", eventStatus, len(o.chainTriggers))
-
-	blockTrigger.Run(ctx)
-	o.timeTrigger.Run(ctx)
-
-	// Event trigger can be costly, so we require an opt-in
-	if o.config.EnabledFeatures.EventTrigger {
-		eventTrigger.Run(ctx)
-	}
+	o.logger.Infof("📊 Monitoring Status: Block ✅ | Time ✅ | Event %s | Chains: %v",
+		eventStatus, o.chainOrder)
 
 	// Establish a connection with gRPC server where new task will be pushed automatically
 	o.logger.Info("open channel to grpc to receive check")
@@ -322,8 +386,10 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 						"raw_error", fmt.Sprintf("%v", err))
 				}
 			}
-		case triggerItem := <-blockTriggerCh:
-			o.logger.Debug("block trigger details", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
+		case wrapped := <-sharedBlockCh:
+			triggerItem := wrapped.metadata
+			blockChainID := wrapped.chainID
+			o.logger.Debug("block trigger details", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker, "chain_id", blockChainID)
 
 			blockTasksMutex.Lock()
 			blockNum := triggerItem.Marker
@@ -334,7 +400,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 			threshold := 10
 			for threshold <= taskCount {
 				if taskCount == threshold {
-					o.logger.Info("block trigger summary", "block", blockNum, "task_count", taskCount)
+					o.logger.Info("block trigger summary", "block", blockNum, "task_count", taskCount, "chain_id", blockChainID)
 					break
 				}
 				threshold *= 2
@@ -352,14 +418,20 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				"gasUsed":     uint64(0),
 			}
 
-			// Try to fetch full block data from RPC using shared targetEthClient
-			if o.targetEthClient != nil {
+			// Fetch full block data using the per-chain RPC client. Sharing one
+			// client across chains would silently route the header fetch to the
+			// wrong chain.
+			var chainEthClient *ethclient.Client
+			if set, ok := o.triggersForChain(blockChainID); ok && set.EthClient != nil {
+				chainEthClient = set.EthClient
+			}
+			if chainEthClient != nil {
 				var header *types.Header
 				var fetchErr error
 				const blockFetchRetries = 3
 				const blockFetchRetryDelay = 150 * time.Millisecond
 				for attempt := 0; attempt < blockFetchRetries; attempt++ {
-					h, err := o.targetEthClient.HeaderByNumber(ctx, big.NewInt(triggerItem.Marker))
+					h, err := chainEthClient.HeaderByNumber(ctx, big.NewInt(triggerItem.Marker))
 					if err == nil && h != nil {
 						header = h
 						break
@@ -411,6 +483,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				TaskId:           triggerItem.TaskID,
 				TriggerType:      avspb.TriggerType_TRIGGER_TYPE_BLOCK,
 				TriggerRequestId: blockTriggerRequestID,
+				ChainId:          blockChainID,
 				TriggerOutput: &avspb.NotifyTriggersReq_BlockTrigger{
 					BlockTrigger: &avspb.BlockTrigger_Output{
 						Data: func() *structpb.Value {
@@ -469,10 +542,13 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				}
 			}
 
-		case triggerItem := <-eventTriggerCh:
+		case wrappedEvt := <-sharedEventCh:
+			triggerItem := wrappedEvt.metadata
+			eventChainID := wrappedEvt.chainID
 			hasEnrichedData := triggerItem.Marker.EnrichedData != nil
 			o.logger.Info("event trigger",
 				"task_id", triggerItem.TaskID,
+				"chain_id", eventChainID,
 				"marker", triggerItem.Marker,
 				"has_enriched_data", hasEnrichedData)
 
@@ -522,6 +598,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				TaskId:           triggerItem.TaskID,
 				TriggerType:      avspb.TriggerType_TRIGGER_TYPE_EVENT,
 				TriggerRequestId: eventTriggerRequestID,
+				ChainId:          eventChainID,
 				TriggerOutput: &avspb.NotifyTriggersReq_EventTrigger{
 					EventTrigger: &avspb.EventTrigger_Output{
 						Data: structpb.NewStructValue(eventData),
