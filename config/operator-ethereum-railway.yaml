@@ -1,0 +1,48 @@
+# Operator configuration for Ethereum mainnet on Railway
+#
+# Mirrors the bare-metal `terraform/environments/production/ethereum-operator.yaml`
+# layout but points at the Railway gateway over private networking.
+# Secrets are injected via Railway sealed environment variables — set
+# these on the `operator-ethereum` service:
+#   ETHEREUM_DWELLIR_RPC, ETHEREUM_DWELLIR_WS
+#   ECDSA_KEY_JSON, BLS_KEY_JSON  (operator-entrypoint.sh writes these
+#                                   to /app/.operator-keys/ at startup)
+environment: production
+
+operator_address: 0xc6B87cc9e85b07365b6aBEfff061F237F7cf7Dc3
+
+# Ethereum mainnet AVS contracts
+avs_registry_coordinator_address: 0x8DE3Ee0dE880161Aa0CD8Bf9F8F6a7AfEeB9A44B
+operator_state_retriever_address: 0xb3af70D5f72C04D1f490ff49e5aB189fA7122713
+
+# EigenLayer chain RPC (Ethereum mainnet)
+eth_rpc_url: ${ETHEREUM_DWELLIR_RPC}
+eth_ws_url: ${ETHEREUM_DWELLIR_WS}
+
+# Key files — written at startup by scripts/operator-entrypoint.sh
+ecdsa_private_key_store_path: /app/.operator-keys/operator.ecdsa.key.json
+bls_private_key_store_path: /app/.operator-keys/operator.bls.key.json
+
+# Gateway address — mainnet operator connects to the mainnet-family
+# gateway. The sepolia `operator` service connects to the sepolia
+# `gateway`; these are two parallel pipelines because each gateway
+# is registered against a different AVS coordinator.
+aggregator_server_ip_port_address: "gateway-ethereum.railway.internal:2206"
+
+# Metrics
+eigen_metrics_ip_port_address: 0.0.0.0:9090
+enable_metrics: true
+node_api_ip_port_address: 0.0.0.0:9010
+enable_node_api: true
+
+# Sentry
+sentry_dsn: https://d304c8708d5097f7787eeb664e4098c6@o1156669.ingest.us.sentry.io/4509386759733248
+server_name: "operator-ethereum-railway"
+
+# Destination chain — Ethereum mainnet
+target_chain:
+  eth_rpc_url: ${ETHEREUM_DWELLIR_RPC}
+  eth_ws_url: ${ETHEREUM_DWELLIR_WS}
+
+enabled_features:
+  event_trigger: true

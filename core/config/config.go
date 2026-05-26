@@ -588,8 +588,14 @@ func ReadYamlConfig(path string, o interface{}) error {
 		return err
 	}
 
-	err = yaml.Unmarshal(b, o)
-	if err != nil {
+	// Expand ${VAR} and $VAR references against the process environment
+	// before parsing. This lets us commit configs with secret placeholders
+	// (e.g. `controller_private_key: ${CONTROLLER_PRIVATE_KEY}`) and inject
+	// the real values via Railway sealed env vars at runtime — keeping
+	// production credentials out of the git repo.
+	expanded := os.ExpandEnv(string(b))
+
+	if err := yaml.Unmarshal([]byte(expanded), o); err != nil {
 		return fmt.Errorf("unable to parse file with error %#v", err)
 	}
 

@@ -23,10 +23,15 @@ node_modules
 operator.yaml
 metadata.json
 
-# Ignores yaml configuration files in the config directory
+# Ignores yaml configuration files in the config directory.
+# Whitelist the shared deployment configs that ship inside the Docker
+# image (Railway + local dev). Operator-specific or per-user configs
+# (e.g. `aggregator.yaml`, `operator.yaml`) stay ignored.
 config/*.yaml
 !config/aggregator.example.yaml
 !config/operator.example.yaml
+!config/*-dev.yaml
+!config/*-railway.yaml
 
 contracts/script/output*
 

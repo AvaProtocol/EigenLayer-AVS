@@ -1,0 +1,76 @@
+# Gateway configuration for Ethereum mainnet family on Railway
+#
+# This is the mainnet-family gateway. It registers against the
+# Ethereum mainnet AVS coordinator and routes tasks to the mainnet
+# chain workers (worker-ethereum, worker-base). The sepolia-family
+# `gateway` service handles testnet workers; the two families run
+# in parallel because they register against different AVS deployments.
+#
+# Required Railway sealed env vars on the `gateway-ethereum` service:
+#   GATEWAY_ETHEREUM_ECDSA_PRIVATE_KEY  — EigenLayer interaction key
+#   GATEWAY_ETHEREUM_JWT_SECRET         — HS256 signing key for client JWTs
+#   ETHEREUM_DWELLIR_RPC / ETHEREUM_DWELLIR_WS
+#   BASE_DWELLIR_RPC     / BASE_DWELLIR_WS
+#   ETHEREUM_BUNDLER_URL, BASE_BUNDLER_URL
+#   CONTROLLER_PRIVATE_KEY  (shared project-level)
+#   PAYMASTER_ADDRESS       (shared project-level)
+#   TENDERLY_ACCESS_KEY     (shared project-level)
+#   TELEGRAM_BOT_TOKEN, SENDGRID_KEY, THEGRAPH_API_KEY, MORALIS_API_KEY
+environment: production
+
+db_path: /data/gateway
+backup_dir: /data/gateway-backup
+
+ecdsa_private_key: ${GATEWAY_ETHEREUM_ECDSA_PRIVATE_KEY}
+
+# EigenLayer contracts live on Ethereum mainnet for this family.
+eth_rpc_url: ${ETHEREUM_DWELLIR_RPC}
+eth_ws_url: ${ETHEREUM_DWELLIR_WS}
+
+rpc_bind_address: "0.0.0.0:2206"
+http_bind_address: "0.0.0.0:8080"
+
+# Ethereum mainnet AVS contracts (Base mainnet uses the same — there is
+# no Base-native AVS deployment).
+avs_registry_coordinator_address: 0x8DE3Ee0dE880161Aa0CD8Bf9F8F6a7AfEeB9A44B
+operator_state_retriever_address: 0xb3af70D5f72C04D1f490ff49e5aB189fA7122713
+
+jwt_secret: ${GATEWAY_ETHEREUM_JWT_SECRET}
+
+server_name: "gateway-ethereum-railway"
+sentry_dsn: https://d304c8708d5097f7787eeb664e4098c6@o1156669.ingest.us.sentry.io/4509386759733248
+
+tenderly_account: "chrisli"
+tenderly_project: "default"
+tenderly_access_key: ${TENDERLY_ACCESS_KEY}
+
+# Chain workers — mainnet family only
+chains:
+  - chain_id: 1
+    name: ethereum
+    worker_addr: "worker-ethereum.railway.internal:50051"
+    smart_wallet:
+      eth_rpc_url: ${ETHEREUM_DWELLIR_RPC}
+      eth_ws_url: ${ETHEREUM_DWELLIR_WS}
+      bundler_url: ${ETHEREUM_BUNDLER_URL}
+      controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+      paymaster_address: ${PAYMASTER_ADDRESS}
+      max_wallets_per_owner: 3
+
+  - chain_id: 8453
+    name: base
+    worker_addr: "worker-base.railway.internal:50051"
+    smart_wallet:
+      eth_rpc_url: ${BASE_DWELLIR_RPC}
+      eth_ws_url: ${BASE_DWELLIR_WS}
+      bundler_url: ${BASE_BUNDLER_URL}
+      controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+      paymaster_address: ${PAYMASTER_ADDRESS}
+      max_wallets_per_owner: 3
+
+macros:
+  secrets:
+    ap_notify_bot_token: ${TELEGRAM_BOT_TOKEN}
+    sendgrid_key: ${SENDGRID_KEY}
+    thegraph_api_key: ${THEGRAPH_API_KEY}
+    moralis_api_key: ${MORALIS_API_KEY}
