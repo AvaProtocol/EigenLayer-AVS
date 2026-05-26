@@ -210,13 +210,6 @@ const (
 	TriggerTypeManual    TriggerType = "manual"
 )
 
-// Defines values for TriggerWorkflowResponseStatus.
-const (
-	TriggerWorkflowResponseStatusFailed    TriggerWorkflowResponseStatus = "failed"
-	TriggerWorkflowResponseStatusQueued    TriggerWorkflowResponseStatus = "queued"
-	TriggerWorkflowResponseStatusSucceeded TriggerWorkflowResponseStatus = "succeeded"
-)
-
 // Defines values for ValueFeeClassificationMethod.
 const (
 	Llm       ValueFeeClassificationMethod = "llm"
@@ -232,11 +225,11 @@ const (
 
 // Defines values for WorkflowStatus.
 const (
-	WorkflowStatusCompleted WorkflowStatus = "completed"
-	WorkflowStatusDisabled  WorkflowStatus = "disabled"
-	WorkflowStatusEnabled   WorkflowStatus = "enabled"
-	WorkflowStatusFailed    WorkflowStatus = "failed"
-	WorkflowStatusRunning   WorkflowStatus = "running"
+	Completed WorkflowStatus = "completed"
+	Disabled  WorkflowStatus = "disabled"
+	Enabled   WorkflowStatus = "enabled"
+	Failed    WorkflowStatus = "failed"
+	Running   WorkflowStatus = "running"
 )
 
 // AuthExchangeRequest defines model for AuthExchangeRequest.
@@ -1184,13 +1177,14 @@ type TriggerWorkflowResponse struct {
 	Error *string `json:"error,omitempty"`
 
 	// ExecutionId ULID identifier (26-char Crockford base32).
-	ExecutionId Ulid                          `json:"executionId"`
-	StartAt     *int64                        `json:"startAt,omitempty"`
-	Status      TriggerWorkflowResponseStatus `json:"status"`
-}
+	ExecutionId Ulid   `json:"executionId"`
+	StartAt     *int64 `json:"startAt,omitempty"`
 
-// TriggerWorkflowResponseStatus defines model for TriggerWorkflowResponse.Status.
-type TriggerWorkflowResponseStatus string
+	// Status Outcome of an execution. `pending` is in-flight; `success` is full
+	// success; `failed` is logical failure (e.g., a node returned an error);
+	// `error` is a system / infrastructure failure (e.g., RPC unreachable).
+	Status ExecutionStatus `json:"status"`
+}
 
 // Ulid ULID identifier (26-char Crockford base32).
 type Ulid = string

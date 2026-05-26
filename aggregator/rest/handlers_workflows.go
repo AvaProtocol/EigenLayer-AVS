@@ -250,7 +250,7 @@ func (s *Server) TriggerWorkflow(ctx echo.Context, id generated.Ulid) error {
 	// translate to a lowercase string.
 	out := generated.TriggerWorkflowResponse{
 		ExecutionId: generated.Ulid(resp.GetExecutionId()),
-		Status:      generated.TriggerWorkflowResponseStatus(protoExecStatusToOpenAPI(resp.GetStatus())),
+		Status:      generated.ExecutionStatus(protoExecStatusToOpenAPI(resp.GetStatus())),
 	}
 	if v := resp.GetStartAt(); v != 0 {
 		out.StartAt = &v

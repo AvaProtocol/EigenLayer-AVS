@@ -967,9 +967,12 @@ components:
       required: [executionId, status]
       properties:
         executionId: { $ref: '#/components/schemas/Ulid' }
-        status:
-          type: string
-          enum: [queued, succeeded, failed]
+        # status mirrors ExecutionStatus — the response describes the
+        # execution that the trigger kicked off. `pending` is returned
+        # when isBlocking=false (execution hasn't reached terminal
+        # state yet); `success`/`failed`/`error` are returned when
+        # isBlocking=true.
+        status: { $ref: '#/components/schemas/ExecutionStatus' }
         startAt: { type: integer, format: int64 }
         endAt: { type: integer, format: int64 }
         error: { type: string }

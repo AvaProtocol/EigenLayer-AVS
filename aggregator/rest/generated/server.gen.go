@@ -1333,13 +1333,20 @@ type PutSecretResponseObject interface {
 	VisitPutSecretResponse(w http.ResponseWriter) error
 }
 
-type PutSecret200JSONResponse Secret
+type PutSecret201Response struct {
+}
 
-func (response PutSecret200JSONResponse) VisitPutSecretResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
+func (response PutSecret201Response) VisitPutSecretResponse(w http.ResponseWriter) error {
+	w.WriteHeader(201)
+	return nil
+}
 
-	return json.NewEncoder(w).Encode(response)
+type PutSecret204Response struct {
+}
+
+func (response PutSecret204Response) VisitPutSecretResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
 }
 
 type PutSecret400ApplicationProblemPlusJSONResponse struct {
