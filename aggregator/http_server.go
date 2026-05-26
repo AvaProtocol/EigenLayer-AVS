@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest"
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/getsentry/sentry-go"
@@ -175,6 +176,18 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 			panic("manual sentry panic test from /_debug/sentry/panic")
 		})
 	}
+
+	// Mount the REST API surface (api/openapi.yaml). Adds /api/v1/**
+	// alongside the existing legacy routes — /up, /operator, /telemetry,
+	// and the _debug endpoints continue to serve until the gRPC public
+	// surface is removed and clients have migrated to the REST SDK.
+	//
+	// REST middleware (request id, sentry tagging, CORS, problem+json
+	// errors, JWT auth, rate limiting) is scoped to /api/v1 only; legacy
+	// routes keep their existing (empty) middleware stack so monitoring
+	// tools probing /up don't get a 401.
+	restServer := rest.NewServer(agg.engine, agg.logger, agg.config)
+	restServer.Mount(e)
 
 	addr := agg.config.HttpBindAddress
 	agg.logger.Info("HTTP server listening", "address", addr)
