@@ -1,9 +1,12 @@
 package rest
 
 import (
+	"net/http"
+
 	"github.com/labstack/echo/v4"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 // Workflows resource — see api/openapi.yaml `tags: [Workflows]`.
@@ -60,6 +63,26 @@ func (s *Server) EstimateWorkflowFees(ctx echo.Context) error {
 }
 
 // CountWorkflows — GET /api/v1/workflows:count
+//
+// Returns the total number of workflows owned by the authenticated user.
+// Currently only `smartWalletAddress` filters are pushed down; `status`
+// and `chainId` filters narrow the count after the engine returns.
 func (s *Server) CountWorkflows(ctx echo.Context, params generated.CountWorkflowsParams) error {
-	return s.notImplemented(ctx, "workflows.count")
+	user, err := s.requireUser(ctx)
+	if err != nil {
+		return err
+	}
+
+	req := &avsproto.GetWorkflowCountReq{}
+	if params.SmartWalletAddress != nil {
+		for _, addr := range *params.SmartWalletAddress {
+			req.Addresses = append(req.Addresses, string(addr))
+		}
+	}
+
+	resp, err := s.engine.GetWorkflowCount(user, req)
+	if err != nil {
+		return err
+	}
+	return ctx.JSON(http.StatusOK, generated.WorkflowCount{Total: resp.Total})
 }
