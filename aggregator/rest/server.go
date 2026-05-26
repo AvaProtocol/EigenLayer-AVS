@@ -12,6 +12,8 @@
 package rest
 
 import (
+	"strings"
+
 	"github.com/labstack/echo/v4"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
@@ -21,6 +23,16 @@ import (
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )
+
+// colonActionShim is the path prefix the rewriter swaps `:` for. Echo's
+// router treats `:id:pause` as a single parameter (named `id:pause`),
+// so a Google AIP-136 / Stripe-style action URL like
+// `/workflows/<id>:pause` can't bind `id` correctly when registered
+// directly. The middleware below rewrites these URLs to
+// `/workflows/<id>/__action__/pause` before routing, and shadow routes
+// matching that pattern delegate to the same handler the generated
+// router exposed. SDKs continue to send the colon form on the wire.
+const colonActionShim = "/__action__/"
 
 // Server implements the generated ServerInterface. Every handler family
 // (workflows, executions, wallets, secrets, tokens, nodes, triggers,
@@ -92,6 +104,11 @@ func (s *Server) Mount(e *echo.Echo) {
 	// turned into application/problem+json with a stable shape.
 	e.HTTPErrorHandler = restmw.ProblemErrorHandler(s.logger)
 
+	// Path rewriter for Google AIP-136 colon-suffix actions. Runs
+	// before routing so the actual matcher sees a path Echo can route.
+	// See colonActionShim above.
+	e.Pre(rewriteColonActions)
+
 	// Mount under a /api/v1 group so middleware applies only to the REST
 	// surface — the legacy /up + /operator + /telemetry routes keep their
 	// own (empty) middleware stack.
@@ -105,6 +122,86 @@ func (s *Server) Mount(e *echo.Echo) {
 	api.Use(restmw.RateLimit(restmw.DefaultRateLimit, restmw.NewInMemoryBackend()))
 
 	generated.RegisterHandlersWithBaseURL(api, s, "")
+	registerColonActionShimRoutes(api, s)
+}
+
+// rewriteColonActions is the Pre middleware that turns
+// `/workflows/<id>:pause` into `/workflows/<id>/__action__/pause` so
+// Echo's router can bind `:id` cleanly. Only rewrites when the colon
+// follows a non-empty segment and is preceded by another segment that
+// looks like a parameter (no colon at all means the route doesn't
+// need rewriting; e.g. `/workflows:count` is already fine because the
+// colon segment is the last and the wrapper has no path param to bind).
+func rewriteColonActions(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		req := c.Request()
+		path := req.URL.Path
+		// Walk path segments from right to left; rewrite the first
+		// segment that has a colon AND is preceded by another segment.
+		// (`/x:y` is fine — `/x/y:z` is the problematic case.)
+		idx := strings.LastIndex(path, "/")
+		if idx <= 0 {
+			return next(c)
+		}
+		lastSegment := path[idx+1:]
+		// Detect colon inside the segment but not at position 0
+		// (a leading colon would mean an empty id, which is malformed).
+		colon := strings.Index(lastSegment, ":")
+		if colon <= 0 {
+			return next(c)
+		}
+		// Bail if the parent path is the api root — `/auth:exchange`
+		// has no parameter before the colon and Echo handles it fine.
+		parent := path[:idx]
+		if parent == "" || parent == "/api/v1" {
+			return next(c)
+		}
+		id := lastSegment[:colon]
+		action := lastSegment[colon+1:]
+		newPath := parent + "/" + id + colonActionShim + action
+		req.URL.Path = newPath
+		c.SetRequest(req)
+		return next(c)
+	}
+}
+
+// registerColonActionShimRoutes wires the rewritten paths to the same
+// handler methods the generated wrapper would have called for the
+// original colon-suffix routes. The set is closed (one entry per
+// `/{id}:<verb>` or `/{address}:<verb>` route in api/openapi.yaml);
+// add to it when new actions land in the spec.
+func registerColonActionShimRoutes(api *echo.Group, s *Server) {
+	// Workflows
+	api.POST("/workflows/:id"+colonActionShim+"pause", func(c echo.Context) error {
+		return s.PauseWorkflow(c, generated.Ulid(c.Param("id")))
+	})
+	api.POST("/workflows/:id"+colonActionShim+"resume", func(c echo.Context) error {
+		return s.ResumeWorkflow(c, generated.Ulid(c.Param("id")))
+	})
+	api.POST("/workflows/:id"+colonActionShim+"trigger", func(c echo.Context) error {
+		return s.TriggerWorkflow(c, generated.Ulid(c.Param("id")))
+	})
+
+	// Wallets
+	api.POST("/wallets/:address"+colonActionShim+"withdraw", func(c echo.Context) error {
+		return s.WithdrawWallet(c, generated.EthereumAddress(c.Param("address")))
+	})
+	api.GET("/wallets/:address"+colonActionShim+"getNonce", func(c echo.Context) error {
+		return s.GetWalletNonce(c, generated.EthereumAddress(c.Param("address")))
+	})
+
+	// Executions
+	api.GET("/executions/:id"+colonActionShim+"getStatus", func(c echo.Context) error {
+		return s.GetExecutionStatus(c, generated.Ulid(c.Param("id")))
+	})
+	api.GET("/executions/:id"+colonActionShim+"stream", func(c echo.Context) error {
+		// StreamExecution takes a params struct (for the interval
+		// query). Build it from the request the same way the generated
+		// wrapper would.
+		var params generated.StreamExecutionParams
+		_ = (&echo.DefaultBinder{}).BindQueryParams(c, &params)
+		return s.StreamExecution(c, generated.Ulid(c.Param("id")), params)
+	})
 }
 
 // notImplemented is the common stub used by handlers that haven't been
