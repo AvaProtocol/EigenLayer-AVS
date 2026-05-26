@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"sort"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/labstack/echo/v4"
@@ -37,6 +38,12 @@ func (s *Server) ListWallets(ctx echo.Context) error {
 	for _, w := range resp.GetItems() {
 		out.Data = append(out.Data, protoSmartWalletToOpenAPI(w))
 	}
+	// Sort by salt lexicographically so list ordering is stable and
+	// predictable across calls (BadgerDB GetByPrefix doesn't guarantee
+	// any particular order).
+	sort.SliceStable(out.Data, func(i, j int) bool {
+		return out.Data[i].Salt < out.Data[j].Salt
+	})
 	return ctx.JSON(http.StatusOK, out)
 }
 
@@ -152,6 +159,29 @@ func (s *Server) WithdrawWallet(ctx echo.Context, address generated.EthereumAddr
 			"recipientAddress, amount, and token are all required.")
 	}
 
+	// Surface-level validation so obviously bad input fails as 400
+	// before it reaches the bundler/paymaster pipeline (which would
+	// otherwise propagate as an opaque 500).
+	if !common.IsHexAddress(string(body.RecipientAddress)) {
+		return badRequest("WITHDRAW_BAD_RECIPIENT", "Invalid recipient address",
+			"recipientAddress must be a valid 0x-prefixed hex address.")
+	}
+	if body.Token != "ETH" && !common.IsHexAddress(body.Token) {
+		return badRequest("WITHDRAW_BAD_TOKEN", "Invalid token",
+			"token must be the literal \"ETH\" or a valid 0x-prefixed ERC-20 address.")
+	}
+	if body.Amount != "max" {
+		amt, ok := new(big.Int).SetString(body.Amount, 10)
+		if !ok {
+			return badRequest("WITHDRAW_BAD_AMOUNT", "Invalid amount",
+				"amount must be a decimal integer string (wei) or the literal \"max\".")
+		}
+		if amt.Sign() <= 0 {
+			return badRequest("WITHDRAW_BAD_AMOUNT", "Invalid amount",
+				"amount must be a positive integer (got 0 or negative).")
+		}
+	}
+
 	req := WithdrawRequest{
 		Owner:              user.Address.Hex(),
 		SmartWalletAddress: string(address),
@@ -167,7 +197,23 @@ func (s *Server) WithdrawWallet(ctx echo.Context, address generated.EthereumAddr
 	if err != nil {
 		return err
 	}
-	out := generated.WithdrawResponse{Status: generated.WithdrawResponseStatus(result.Status)}
+	// Echo enough of the request back on the response that callers can
+	// correlate the result without needing to re-state it locally.
+	recipient := generated.EthereumAddress(body.RecipientAddress)
+	smartWallet := generated.EthereumAddress(address)
+	amount := body.Amount
+	token := body.Token
+	out := generated.WithdrawResponse{
+		Status:             generated.WithdrawResponseStatus(result.Status),
+		SmartWalletAddress: &smartWallet,
+		RecipientAddress:   &recipient,
+		Amount:             &amount,
+		Token:              &token,
+	}
+	if result.Message != "" {
+		m := result.Message
+		out.Message = &m
+	}
 	if result.UserOpHash != "" {
 		h := generated.Hex(result.UserOpHash)
 		out.UserOpHash = &h
@@ -175,6 +221,10 @@ func (s *Server) WithdrawWallet(ctx echo.Context, address generated.EthereumAddr
 	if result.TransactionHash != "" {
 		t := generated.Hex(result.TransactionHash)
 		out.TransactionHash = &t
+	}
+	if result.SubmittedAt > 0 {
+		ts := result.SubmittedAt
+		out.SubmittedAt = &ts
 	}
 	return ctx.JSON(http.StatusOK, out)
 }

@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )
@@ -32,6 +34,37 @@ type HTTPError struct {
 }
 
 func (e *HTTPError) Error() string { return e.Title }
+
+// httpStatusFromGRPCCode maps gRPC status codes to the closest HTTP
+// status. Based on the canonical table in google.golang.org/grpc/status
+// (also mirrored by grpc-gateway). Anything not in the table falls back
+// to 500.
+func httpStatusFromGRPCCode(c codes.Code) int {
+	switch c {
+	case codes.InvalidArgument, codes.FailedPrecondition, codes.OutOfRange:
+		return http.StatusBadRequest
+	case codes.Unauthenticated:
+		return http.StatusUnauthorized
+	case codes.PermissionDenied:
+		return http.StatusForbidden
+	case codes.NotFound:
+		return http.StatusNotFound
+	case codes.AlreadyExists, codes.Aborted:
+		return http.StatusConflict
+	case codes.ResourceExhausted:
+		return http.StatusTooManyRequests
+	case codes.Canceled:
+		return 499 // Echo doesn't expose a named const for "client closed request".
+	case codes.Unimplemented:
+		return http.StatusNotImplemented
+	case codes.Unavailable:
+		return http.StatusServiceUnavailable
+	case codes.DeadlineExceeded:
+		return http.StatusGatewayTimeout
+	default:
+		return http.StatusInternalServerError
+	}
+}
 
 // ProblemErrorHandler is the Echo HTTPErrorHandler that turns handler
 // errors into application/problem+json responses. Registered once at
@@ -62,9 +95,18 @@ func ProblemErrorHandler(logger sdklogging.Logger) echo.HTTPErrorHandler {
 				p.Detail = msg
 			}
 		default:
-			p.Status = http.StatusInternalServerError
-			p.Title = http.StatusText(http.StatusInternalServerError)
-			p.Detail = err.Error()
+			// Engine methods return gRPC status.Status errors; translate
+			// the well-known codes to HTTP so the REST surface returns
+			// 4xx for client errors rather than masking them as 500.
+			if st, ok := status.FromError(err); ok && st.Code() != codes.Unknown && st.Code() != codes.OK {
+				p.Status = httpStatusFromGRPCCode(st.Code())
+				p.Title = http.StatusText(p.Status)
+				p.Detail = st.Message()
+			} else {
+				p.Status = http.StatusInternalServerError
+				p.Title = http.StatusText(http.StatusInternalServerError)
+				p.Detail = err.Error()
+			}
 		}
 
 		if logger != nil && p.Status >= 500 {

@@ -22,6 +22,12 @@ operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
 
 jwt_secret: 1b7db1c64236d92de3b3ed32e5d6bf56
 
+# Dev REST rate limits — high enough that the full v4 test suite
+# (~80 requests in a couple seconds) doesn't trip the bucket.
+# Production uses the middleware defaults (10/s, burst 50).
+rest_rate_limit_per_second: 200
+rest_rate_limit_burst: 1000
+
 server_name: "gateway-dev"
 sentry_dsn: https://d304c8708d5097f7787eeb664e4098c6@o1156669.ingest.us.sentry.io/4509386759733248
 

@@ -105,6 +105,8 @@ type WithdrawResult struct {
 	UserOpHash      string
 	TransactionHash string
 	Status          string
+	Message         string
+	SubmittedAt     int64
 }
 
 // ServerDeps bundles the wiring dependencies so NewServer's signature
@@ -168,7 +170,7 @@ func (s *Server) Mount(e *echo.Echo) {
 	if s.config != nil && len(s.config.JwtSecret) > 0 {
 		api.Use(restmw.JWT(restmw.JWTConfig{SigningKey: s.config.JwtSecret}))
 	}
-	api.Use(restmw.RateLimit(restmw.DefaultRateLimit, restmw.NewInMemoryBackend()))
+	api.Use(restmw.RateLimit(s.rateLimitConfig(), restmw.NewInMemoryBackend()))
 
 	// Wrap the api group with a filter that drops route registrations
 	// whose path contains `/:<param>:<verb>` — Echo's router collapses
@@ -178,6 +180,18 @@ func (s *Server) Mount(e *echo.Echo) {
 	// those URLs via the path rewriter.
 	generated.RegisterHandlersWithBaseURL(filteringRouter{Group: api}, s, "")
 	registerColonActionShimRoutes(api, s)
+}
+
+// rateLimitConfig returns the rate-limit settings — config overrides
+// when both knobs are positive, the middleware default otherwise.
+func (s *Server) rateLimitConfig() restmw.RateLimitConfig {
+	if s.config != nil && s.config.RestRateLimitPerSecond > 0 && s.config.RestRateLimitBurst > 0 {
+		return restmw.RateLimitConfig{
+			RatePerSecond: s.config.RestRateLimitPerSecond,
+			Burst:         s.config.RestRateLimitBurst,
+		}
+	}
+	return restmw.DefaultRateLimit
 }
 
 // filteringRouter wraps an *echo.Group and skips route registrations

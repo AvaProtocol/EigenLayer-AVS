@@ -2172,11 +2172,10 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/PutSecretRequest' }
       responses:
-        '200':
-          description: Secret stored.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Secret' }
+        '201':
+          description: Secret created.
+        '204':
+          description: Secret replaced (already existed).
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
     delete:

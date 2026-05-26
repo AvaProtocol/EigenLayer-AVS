@@ -84,6 +84,12 @@ type Config struct {
 
 	JwtSecret []byte
 
+	// REST rate limit overrides. Nil/zero = use the middleware
+	// default (10 req/s, burst 50). Dev configs typically bump
+	// these so an end-to-end test suite doesn't trip the bucket.
+	RestRateLimitPerSecond float64
+	RestRateLimitBurst     int
+
 	// Account abstraction config
 	SmartWallet *SmartWalletConfig
 
@@ -225,6 +231,10 @@ type ConfigRaw struct {
 
 	DbPath    string `yaml:"db_path"`
 	JwtSecret string `yaml:"jwt_secret"`
+
+	// REST rate-limit overrides; see Config.RestRateLimitPerSecond.
+	RestRateLimitPerSecond float64 `yaml:"rest_rate_limit_per_second"`
+	RestRateLimitBurst     int     `yaml:"rest_rate_limit_burst"`
 
 	SmartWallet SmartWalletConfigRaw `yaml:"smart_wallet"`
 
@@ -437,6 +447,9 @@ func NewConfig(configFilePath string) (*Config, error) {
 		DbPath:    configRaw.DbPath,
 		BackupDir: configRaw.DbPath + "_backup",
 		JwtSecret: []byte(configRaw.JwtSecret),
+
+		RestRateLimitPerSecond: configRaw.RestRateLimitPerSecond,
+		RestRateLimitBurst:     configRaw.RestRateLimitBurst,
 
 		SmartWallet: &SmartWalletConfig{
 			EthRpcUrl:            configRaw.SmartWallet.EthRpcUrl,
