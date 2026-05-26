@@ -211,7 +211,7 @@ Value-capture tiers (pure pricing groups, V1 defaults all to Tier 1):
 Hard costs (`execution_fee` + `cogs`) enforced atomically in UserOp. `value_fee` is post-paid.
 Non-execution nodes are free. Both `EstimateFeesResp` and `Execution` use the same `Fee`/`NodeCOGS`/`ValueFee` structure.
 
-See [docs/FEE_ESTIMATION.md](FEE_ESTIMATION.md) for full details, simulated responses, and billing design.
+See [docs/2026-04-06-FEE_ESTIMATION.md](2026-04-06-FEE_ESTIMATION.md) for full details, simulated responses, and billing design.
 
 ## Communication Protocol
 
