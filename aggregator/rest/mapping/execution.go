@@ -30,7 +30,12 @@ func ProtoToOpenAPIExecution(in *avsproto.Execution, workflowID string) (generat
 	if v := in.GetEndAt(); v != 0 {
 		out.EndAt = &v
 	}
-	if v := in.GetIndex(); v != 0 {
+	// Always include the index — the first execution legitimately
+	// has index=0, and an `omitempty` int wouldn't survive the JSON
+	// marshal even if assigned. We use a pointer so omitempty only
+	// drops it when explicitly nil.
+	{
+		v := in.GetIndex()
 		out.Index = &v
 	}
 	if msg := in.GetError(); msg != "" {
