@@ -42,10 +42,12 @@ func (s *Server) ListWallets(ctx echo.Context) error {
 
 // CreateWallet — POST /api/v1/wallets
 //
-// Idempotent "ensure exists" — engine.SetWallet derives the CREATE2
+// Idempotent "ensure exists" — engine.GetWallet derives the CREATE2
 // address from (owner, salt, factory) and persists the wallet record
-// with IsHidden=false. POST (not GET) because it has a side effect even
-// if the address already existed.
+// when one doesn't already exist. POST (not GET) because it has a
+// side effect even when the address already existed. SetWallet is
+// distinct — it only flips isHidden on an existing record and 404s
+// on first use, so it's reserved for UpdateWallet.
 func (s *Server) CreateWallet(ctx echo.Context) error {
 	user, err := s.requireUser(ctx)
 	if err != nil {
@@ -60,15 +62,14 @@ func (s *Server) CreateWallet(ctx echo.Context) error {
 		return badRequest("WALLETS_BAD_SALT", "salt is required", "Wallet derivation needs a salt to compute the CREATE2 address.")
 	}
 
-	req := &avsproto.SetWalletReq{
-		Salt:     body.Salt,
-		IsHidden: false,
+	req := &avsproto.GetWalletReq{
+		Salt: body.Salt,
 	}
 	if body.FactoryAddress != nil {
 		req.FactoryAddress = string(*body.FactoryAddress)
 	}
 
-	resp, err := s.engine.SetWallet(user.Address, req)
+	resp, err := s.engine.GetWallet(user, req)
 	if err != nil {
 		return err
 	}
