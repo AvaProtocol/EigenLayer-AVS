@@ -127,9 +127,13 @@ func OpenAPIToProtoNode(in generated.Node) (*avsproto.TaskNode, error) {
 			return nil, fmt.Errorf("node %s: loop runner: %w", in.Id, err)
 		}
 		cfg := &avsproto.LoopNode_Config{}
+		iterVar := "value" // OpenAPI-documented default.
+		if v.Config.IterVar != nil && *v.Config.IterVar != "" {
+			iterVar = *v.Config.IterVar
+		}
 		shallow := loopConfigWithoutRunner{
 			InputVariable: v.Config.InputVariable,
-			IterVar:       v.Config.IterVar,
+			IterVar:       &iterVar,
 		}
 		if err := jsonRetargetProto(shallow, cfg); err != nil {
 			return nil, fmt.Errorf("node %s: %w", in.Id, err)
@@ -179,9 +183,16 @@ func OpenAPIToProtoNode(in generated.Node) (*avsproto.TaskNode, error) {
 // loopConfigWithoutRunner mirrors the JSON shape of LoopNodeConfig minus
 // the Runner field so the JSON roundtrip into LoopNode_Config doesn't
 // trip over the nested union.
+//
+// The JSON tag for the iter variable maps from the OpenAPI surface
+// name (`iterVar`) to the proto's JSON name (`iterVal`) — the
+// underlying proto field is `iter_val`, and protojson uses
+// lowerCamelCase of the proto field name. Without this aliasing
+// the field would silently drop on the wire and the runner's
+// reference to `value` would be undefined at execution time.
 type loopConfigWithoutRunner struct {
 	InputVariable string  `json:"inputVariable"`
-	IterVar       *string `json:"iterVar,omitempty"`
+	IterVar       *string `json:"iterVal,omitempty"`
 }
 
 // jsonRetargetProto serializes any JSON-marshalable Go value and unmarshals
