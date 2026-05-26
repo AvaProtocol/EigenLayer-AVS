@@ -106,13 +106,16 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 		}))
 	}
 
-	e.GET("/up", func(c echo.Context) error {
+	// Liveness/readiness probe. /health is the standard k8s+LB path; /up
+	// is kept as an alias because existing probes are wired to it.
+	healthProbe := func(c echo.Context) error {
 		if agg.status == runningStatus {
 			return c.String(http.StatusOK, "up")
 		}
-
 		return c.String(http.StatusServiceUnavailable, "pending...")
-	})
+	}
+	e.GET("/health", healthProbe)
+	e.GET("/up", healthProbe)
 
 	e.GET("/operator", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, &HttpJsonResp[[]*OperatorNode]{
