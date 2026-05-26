@@ -156,6 +156,54 @@ func TestPreprocessText(t *testing.T) {
 	}
 }
 
+// TestPreprocessText_CaseAliasing is the back-compat guarantee that the
+// REST migration carries: a workflow stored in the gRPC era references
+// `{{settings.chain_id}}`, but a v4 SDK client now writes
+// `inputVariables.settings = { chainId: ... }`. The VM resolver
+// expandCaseAliases bridges the gap so neither side has to rewrite the
+// other. See vm_template_compat.go for the helper.
+func TestPreprocessText_CaseAliasing(t *testing.T) {
+	vm, err := NewVMWithData(&model.Workflow{
+		Task: &avsproto.Task{
+			Id:      "sampletaskid1",
+			Trigger: &avsproto.TaskTrigger{Id: "trigger1", Name: "test_trigger"},
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+	if err != nil {
+		t.Fatalf("vm: %v", err)
+	}
+
+	// SDK v4 wrote the input variables in camelCase.
+	vm.vars["settings"] = map[string]interface{}{
+		"chainId":            int64(11155111),
+		"smartWalletAddress": "0xabc",
+	}
+
+	// Stored workflow still references the original snake_case names.
+	cases := map[string]string{
+		"chainId snake form": "chain={{settings.chain_id}}",
+		"camel form":         "chain={{settings.chainId}}",
+		"snake wallet":       "wallet={{settings.smart_wallet_address}}",
+		"camel wallet":       "wallet={{settings.smartWalletAddress}}",
+	}
+	expected := map[string]string{
+		"chainId snake form": "chain=11155111",
+		"camel form":         "chain=11155111",
+		"snake wallet":       "wallet=0xabc",
+		"camel wallet":       "wallet=0xabc",
+	}
+	for name, tmpl := range cases {
+		got := vm.preprocessText(tmpl)
+		if got != expected[name] {
+			t.Errorf("%s: expected %q, got %q", name, expected[name], got)
+		}
+		got2 := vm.preprocessTextWithVariableMapping(tmpl)
+		if got2 != expected[name] {
+			t.Errorf("%s (variable-mapping path): expected %q, got %q", name, expected[name], got2)
+		}
+	}
+}
+
 func TestPreprocessTextDate(t *testing.T) {
 	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{

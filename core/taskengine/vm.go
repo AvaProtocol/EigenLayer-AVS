@@ -1836,6 +1836,12 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 		currentVars[k] = val
 	}
 	v.mu.Unlock()
+	// REST migration back-compat: stored workflows reference variables
+	// in snake_case (`{{settings.chain_id}}`); v4 SDK callers write
+	// camelCase (`{{settings.chainId}}`). Aliasing both spellings on
+	// every map keeps both forms resolvable without a per-record
+	// migration. See vm_template_compat.go.
+	currentVars = expandCaseAliases(currentVars)
 
 	for key, value := range currentVars {
 		if err := jsvm.Set(key, value); err != nil {
@@ -1952,6 +1958,8 @@ func (v *VM) preprocessText(text string) string {
 		currentVars[k] = val
 	}
 	v.mu.Unlock()
+	// REST migration back-compat (see preprocessTextWithVariableMapping).
+	currentVars = expandCaseAliases(currentVars)
 
 	for key, value := range currentVars {
 		if err := jsvm.Set(key, value); err != nil {
