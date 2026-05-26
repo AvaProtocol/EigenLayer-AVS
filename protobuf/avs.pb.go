@@ -10438,40 +10438,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x18EXECUTION_STATUS_PENDING\x10\x01\x12\x1c\n" +
 	"\x18EXECUTION_STATUS_SUCCESS\x10\x02\x12\x1b\n" +
 	"\x17EXECUTION_STATUS_FAILED\x10\x03\x12\x1a\n" +
-	"\x16EXECUTION_STATUS_ERROR\x10\x05\"\x04\b\x04\x10\x04* EXECUTION_STATUS_PARTIAL_SUCCESS2\xd5\x10\n" +
-	"\n" +
-	"Aggregator\x126\n" +
-	"\x06GetKey\x12\x15.aggregator.GetKeyReq\x1a\x13.aggregator.KeyResp\"\x00\x12]\n" +
-	"\x12GetSignatureFormat\x12!.aggregator.GetSignatureFormatReq\x1a\".aggregator.GetSignatureFormatResp\"\x00\x12=\n" +
-	"\bGetNonce\x12\x18.aggregator.NonceRequest\x1a\x15.aggregator.NonceResp\"\x00\x12B\n" +
-	"\tGetWallet\x12\x18.aggregator.GetWalletReq\x1a\x19.aggregator.GetWalletResp\"\x00\x12B\n" +
-	"\tSetWallet\x12\x18.aggregator.SetWalletReq\x1a\x19.aggregator.GetWalletResp\"\x00\x12F\n" +
-	"\vListWallets\x12\x19.aggregator.ListWalletReq\x1a\x1a.aggregator.ListWalletResp\"\x00\x12N\n" +
-	"\rWithdrawFunds\x12\x1c.aggregator.WithdrawFundsReq\x1a\x1d.aggregator.WithdrawFundsResp\"\x00\x12E\n" +
-	"\n" +
-	"CreateTask\x12\x19.aggregator.CreateTaskReq\x1a\x1a.aggregator.CreateTaskResp\"\x00\x12B\n" +
-	"\tListTasks\x12\x18.aggregator.ListTasksReq\x1a\x19.aggregator.ListTasksResp\"\x00\x120\n" +
-	"\aGetTask\x12\x11.aggregator.IdReq\x1a\x10.aggregator.Task\"\x00\x12Q\n" +
-	"\x0eListExecutions\x12\x1d.aggregator.ListExecutionsReq\x1a\x1e.aggregator.ListExecutionsResp\"\x00\x12A\n" +
-	"\fGetExecution\x12\x18.aggregator.ExecutionReq\x1a\x15.aggregator.Execution\"\x00\x12Q\n" +
-	"\x12GetExecutionStatus\x12\x18.aggregator.ExecutionReq\x1a\x1f.aggregator.ExecutionStatusResp\"\x00\x12Q\n" +
-	"\x0eSetTaskEnabled\x12\x1d.aggregator.SetTaskEnabledReq\x1a\x1e.aggregator.SetTaskEnabledResp\"\x00\x12=\n" +
-	"\n" +
-	"DeleteTask\x12\x11.aggregator.IdReq\x1a\x1a.aggregator.DeleteTaskResp\"\x00\x12H\n" +
-	"\vTriggerTask\x12\x1a.aggregator.TriggerTaskReq\x1a\x1b.aggregator.TriggerTaskResp\"\x00\x12S\n" +
-	"\fCreateSecret\x12#.aggregator.CreateOrUpdateSecretReq\x1a\x1c.aggregator.CreateSecretResp\"\x00\x12K\n" +
-	"\fDeleteSecret\x12\x1b.aggregator.DeleteSecretReq\x1a\x1c.aggregator.DeleteSecretResp\"\x00\x12H\n" +
-	"\vListSecrets\x12\x1a.aggregator.ListSecretsReq\x1a\x1b.aggregator.ListSecretsResp\"\x00\x12S\n" +
-	"\fUpdateSecret\x12#.aggregator.CreateOrUpdateSecretReq\x1a\x1c.aggregator.UpdateSecretResp\"\x00\x12U\n" +
-	"\x10GetWorkflowCount\x12\x1f.aggregator.GetWorkflowCountReq\x1a .aggregator.GetWorkflowCountResp\x12X\n" +
-	"\x11GetExecutionCount\x12 .aggregator.GetExecutionCountReq\x1a!.aggregator.GetExecutionCountResp\x12X\n" +
-	"\x11GetExecutionStats\x12 .aggregator.GetExecutionStatsReq\x1a!.aggregator.GetExecutionStatsResp\x12X\n" +
-	"\x11RunNodeWithInputs\x12 .aggregator.RunNodeWithInputsReq\x1a!.aggregator.RunNodeWithInputsResp\x12C\n" +
-	"\n" +
-	"RunTrigger\x12\x19.aggregator.RunTriggerReq\x1a\x1a.aggregator.RunTriggerResp\x12B\n" +
-	"\fSimulateTask\x12\x1b.aggregator.SimulateTaskReq\x1a\x15.aggregator.Execution\x12U\n" +
-	"\x10GetTokenMetadata\x12\x1f.aggregator.GetTokenMetadataReq\x1a .aggregator.GetTokenMetadataResp\x12I\n" +
-	"\fEstimateFees\x12\x1b.aggregator.EstimateFeesReq\x1a\x1c.aggregator.EstimateFeesRespB\fZ\n" +
+	"\x16EXECUTION_STATUS_ERROR\x10\x05\"\x04\b\x04\x10\x04* EXECUTION_STATUS_PARTIAL_SUCCESSB\fZ\n" +
 	"./avsprotob\x06proto3"
 
 var (
@@ -10814,64 +10781,8 @@ var file_avs_proto_depIdxs = []int32{
 	141, // 178: aggregator.RunTriggerReq.TriggerInputEntry.value:type_name -> google.protobuf.Value
 	141, // 179: aggregator.SimulateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
 	141, // 180: aggregator.EstimateFeesReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	45,  // 181: aggregator.Aggregator.GetKey:input_type -> aggregator.GetKeyReq
-	61,  // 182: aggregator.Aggregator.GetSignatureFormat:input_type -> aggregator.GetSignatureFormatReq
-	34,  // 183: aggregator.Aggregator.GetNonce:input_type -> aggregator.NonceRequest
-	47,  // 184: aggregator.Aggregator.GetWallet:input_type -> aggregator.GetWalletReq
-	49,  // 185: aggregator.Aggregator.SetWallet:input_type -> aggregator.SetWalletReq
-	36,  // 186: aggregator.Aggregator.ListWallets:input_type -> aggregator.ListWalletReq
-	50,  // 187: aggregator.Aggregator.WithdrawFunds:input_type -> aggregator.WithdrawFundsReq
-	32,  // 188: aggregator.Aggregator.CreateTask:input_type -> aggregator.CreateTaskReq
-	39,  // 189: aggregator.Aggregator.ListTasks:input_type -> aggregator.ListTasksReq
-	11,  // 190: aggregator.Aggregator.GetTask:input_type -> aggregator.IdReq
-	41,  // 191: aggregator.Aggregator.ListExecutions:input_type -> aggregator.ListExecutionsReq
-	43,  // 192: aggregator.Aggregator.GetExecution:input_type -> aggregator.ExecutionReq
-	43,  // 193: aggregator.Aggregator.GetExecutionStatus:input_type -> aggregator.ExecutionReq
-	66,  // 194: aggregator.Aggregator.SetTaskEnabled:input_type -> aggregator.SetTaskEnabledReq
-	11,  // 195: aggregator.Aggregator.DeleteTask:input_type -> aggregator.IdReq
-	52,  // 196: aggregator.Aggregator.TriggerTask:input_type -> aggregator.TriggerTaskReq
-	54,  // 197: aggregator.Aggregator.CreateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
-	59,  // 198: aggregator.Aggregator.DeleteSecret:input_type -> aggregator.DeleteSecretReq
-	55,  // 199: aggregator.Aggregator.ListSecrets:input_type -> aggregator.ListSecretsReq
-	54,  // 200: aggregator.Aggregator.UpdateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
-	68,  // 201: aggregator.Aggregator.GetWorkflowCount:input_type -> aggregator.GetWorkflowCountReq
-	70,  // 202: aggregator.Aggregator.GetExecutionCount:input_type -> aggregator.GetExecutionCountReq
-	72,  // 203: aggregator.Aggregator.GetExecutionStats:input_type -> aggregator.GetExecutionStatsReq
-	74,  // 204: aggregator.Aggregator.RunNodeWithInputs:input_type -> aggregator.RunNodeWithInputsReq
-	76,  // 205: aggregator.Aggregator.RunTrigger:input_type -> aggregator.RunTriggerReq
-	78,  // 206: aggregator.Aggregator.SimulateTask:input_type -> aggregator.SimulateTaskReq
-	9,   // 207: aggregator.Aggregator.GetTokenMetadata:input_type -> aggregator.GetTokenMetadataReq
-	79,  // 208: aggregator.Aggregator.EstimateFees:input_type -> aggregator.EstimateFeesReq
-	46,  // 209: aggregator.Aggregator.GetKey:output_type -> aggregator.KeyResp
-	62,  // 210: aggregator.Aggregator.GetSignatureFormat:output_type -> aggregator.GetSignatureFormatResp
-	35,  // 211: aggregator.Aggregator.GetNonce:output_type -> aggregator.NonceResp
-	48,  // 212: aggregator.Aggregator.GetWallet:output_type -> aggregator.GetWalletResp
-	48,  // 213: aggregator.Aggregator.SetWallet:output_type -> aggregator.GetWalletResp
-	38,  // 214: aggregator.Aggregator.ListWallets:output_type -> aggregator.ListWalletResp
-	51,  // 215: aggregator.Aggregator.WithdrawFunds:output_type -> aggregator.WithdrawFundsResp
-	33,  // 216: aggregator.Aggregator.CreateTask:output_type -> aggregator.CreateTaskResp
-	40,  // 217: aggregator.Aggregator.ListTasks:output_type -> aggregator.ListTasksResp
-	31,  // 218: aggregator.Aggregator.GetTask:output_type -> aggregator.Task
-	42,  // 219: aggregator.Aggregator.ListExecutions:output_type -> aggregator.ListExecutionsResp
-	30,  // 220: aggregator.Aggregator.GetExecution:output_type -> aggregator.Execution
-	44,  // 221: aggregator.Aggregator.GetExecutionStatus:output_type -> aggregator.ExecutionStatusResp
-	67,  // 222: aggregator.Aggregator.SetTaskEnabled:output_type -> aggregator.SetTaskEnabledResp
-	65,  // 223: aggregator.Aggregator.DeleteTask:output_type -> aggregator.DeleteTaskResp
-	53,  // 224: aggregator.Aggregator.TriggerTask:output_type -> aggregator.TriggerTaskResp
-	63,  // 225: aggregator.Aggregator.CreateSecret:output_type -> aggregator.CreateSecretResp
-	60,  // 226: aggregator.Aggregator.DeleteSecret:output_type -> aggregator.DeleteSecretResp
-	58,  // 227: aggregator.Aggregator.ListSecrets:output_type -> aggregator.ListSecretsResp
-	64,  // 228: aggregator.Aggregator.UpdateSecret:output_type -> aggregator.UpdateSecretResp
-	69,  // 229: aggregator.Aggregator.GetWorkflowCount:output_type -> aggregator.GetWorkflowCountResp
-	71,  // 230: aggregator.Aggregator.GetExecutionCount:output_type -> aggregator.GetExecutionCountResp
-	73,  // 231: aggregator.Aggregator.GetExecutionStats:output_type -> aggregator.GetExecutionStatsResp
-	75,  // 232: aggregator.Aggregator.RunNodeWithInputs:output_type -> aggregator.RunNodeWithInputsResp
-	77,  // 233: aggregator.Aggregator.RunTrigger:output_type -> aggregator.RunTriggerResp
-	30,  // 234: aggregator.Aggregator.SimulateTask:output_type -> aggregator.Execution
-	10,  // 235: aggregator.Aggregator.GetTokenMetadata:output_type -> aggregator.GetTokenMetadataResp
-	89,  // 236: aggregator.Aggregator.EstimateFees:output_type -> aggregator.EstimateFeesResp
-	209, // [209:237] is the sub-list for method output_type
-	181, // [181:209] is the sub-list for method input_type
+	181, // [181:181] is the sub-list for method output_type
+	181, // [181:181] is the sub-list for method input_type
 	181, // [181:181] is the sub-list for extension type_name
 	181, // [181:181] is the sub-list for extension extendee
 	0,   // [0:181] is the sub-list for field type_name
@@ -10969,7 +10880,7 @@ func file_avs_proto_init() {
 			NumEnums:      8,
 			NumMessages:   133,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   0,
 		},
 		GoTypes:           file_avs_proto_goTypes,
 		DependencyIndexes: file_avs_proto_depIdxs,
