@@ -10,8 +10,8 @@ backup_dir: /tmp/ap-avs-gateway-backup
 ecdsa_private_key: f6dc500a34373d7e8af2a4b0b2635253ce1bd92077ed86c24393fb01298abc1d
 
 # EigenLayer contracts live on Sepolia (the AVS registration chain)
-eth_rpc_url: https://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
-eth_ws_url: wss://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+eth_rpc_url: https://sepolia.gateway.tenderly.co/7MB9UwJMIQmLyhNxSIMg3X
+eth_ws_url: wss://sepolia.gateway.tenderly.co/7MB9UwJMIQmLyhNxSIMg3X
 
 # Single gRPC + HTTP endpoint for all chains
 rpc_bind_address: "0.0.0.0:2206"
@@ -37,8 +37,8 @@ chains:
     name: sepolia
     worker_addr: "127.0.0.1:50051"
     smart_wallet:
-      eth_rpc_url: https://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
-      eth_ws_url: wss://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+      eth_rpc_url: https://sepolia.gateway.tenderly.co/7MB9UwJMIQmLyhNxSIMg3X
+      eth_ws_url: wss://sepolia.gateway.tenderly.co/7MB9UwJMIQmLyhNxSIMg3X
       bundler_url: https://api.pimlico.io/v2/11155111/rpc?apikey=pim_bXfMSiGBPRrDdmjGdoSBxn
       controller_private_key: 30c525b5608ea9cbfd7266fd6251d422f5b958e44ae9c49008f97907cc752601
       paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92
@@ -48,8 +48,8 @@ chains:
     name: base-sepolia
     worker_addr: "127.0.0.1:50052"
     smart_wallet:
-      eth_rpc_url: https://api-base-sepolia-archive.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
-      eth_ws_url: wss://api-base-sepolia-archive.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+      eth_rpc_url: https://api-base-sepolia-archive.n.dwellir.com/fe015a53-33df-40e2-9ebb-8cd8693c5430
+      eth_ws_url: wss://api-base-sepolia-archive.n.dwellir.com/fe015a53-33df-40e2-9ebb-8cd8693c5430
       bundler_url: https://api.pimlico.io/v2/84532/rpc?apikey=pim_bXfMSiGBPRrDdmjGdoSBxn
       controller_private_key: 30c525b5608ea9cbfd7266fd6251d422f5b958e44ae9c49008f97907cc752601
       paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92
