@@ -331,13 +331,14 @@ components:
     Lang:
       type: string
       enum:
-        - javaScript
-        - typeScript
-        - python
+        - javascript
         - json
-        - markdown
-        - plainText
-      description: Language/format of an inline payload (e.g., custom code source, manual trigger data).
+        - graphql
+        - handlebars
+      description: |
+        Language/format of an inline payload (e.g., custom code source,
+        manual trigger data). Mirrors the proto `Lang` enum minus the
+        `LANG_` prefix. Wire values are lowercase.
 
     # ---- Trigger configs ----
 
