@@ -12,8 +12,10 @@
 package rest
 
 import (
+	"context"
 	"strings"
 
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/labstack/echo/v4"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
@@ -44,10 +46,13 @@ const colonActionShim = "/__action__/"
 // result. Validation lives in a shared validators package (added alongside
 // handler bodies in a follow-up commit).
 type Server struct {
-	engine    *taskengine.Engine
-	logger    sdklogging.Logger
-	config    *config.Config
-	operators OperatorLister
+	engine         *taskengine.Engine
+	logger         sdklogging.Logger
+	config         *config.Config
+	operators      OperatorLister
+	smartWalletRpc *ethclient.Client
+	priceService   taskengine.PriceService
+	withdraws      WithdrawService
 }
 
 // OperatorLister is the minimal surface the REST package needs from the
@@ -71,15 +76,59 @@ type OperatorView struct {
 	SupportedChainIDs []int64
 }
 
+// WithdrawService abstracts the bundler-driven smart-wallet withdrawal
+// path the gRPC layer historically owned. The REST WithdrawWallet
+// handler depends on it; the aggregator package supplies the
+// implementation, which lets the REST package stay free of bundler /
+// paymaster / WebSocket plumbing.
+type WithdrawService interface {
+	Withdraw(ctx context.Context, req WithdrawRequest) (WithdrawResult, error)
+}
+
+// WithdrawRequest is the chain-agnostic shape the REST handler hands
+// to WithdrawService. Mirrors the OpenAPI WithdrawRequest, plus the
+// resolved owner address (from the JWT) and the smart wallet address
+// (path parameter on the REST route).
+type WithdrawRequest struct {
+	Owner              string
+	SmartWalletAddress string
+	RecipientAddress   string
+	Amount             string
+	Token              string
+	ChainID            int64
+}
+
+// WithdrawResult is what the WithdrawService returns once the UserOp
+// has been submitted (and optionally awaited). REST renders it into
+// the OpenAPI WithdrawResponse shape.
+type WithdrawResult struct {
+	UserOpHash      string
+	TransactionHash string
+	Status          string
+}
+
+// ServerDeps bundles the wiring dependencies so NewServer's signature
+// stays manageable as the REST surface grows. Each field is optional —
+// handlers that need a missing dependency return a structured 501.
+type ServerDeps struct {
+	Operators      OperatorLister
+	SmartWalletRpc *ethclient.Client
+	PriceService   taskengine.PriceService
+	WithdrawSvc    WithdrawService
+}
+
 // NewServer wires the REST handler with its dependencies. Constructed once
 // at aggregator startup and shared across all in-flight requests; the
 // Echo router handles request-level concurrency.
-func NewServer(engine *taskengine.Engine, logger sdklogging.Logger, cfg *config.Config, operators OperatorLister) *Server {
+func NewServer(engine *taskengine.Engine, logger sdklogging.Logger, cfg *config.Config, deps ServerDeps) *Server {
 	return &Server{
-		engine:    engine,
-		logger:    logger,
-		config:    cfg,
-		operators: operators,
+		engine:         engine,
+		logger:         logger,
+		config:         cfg,
+		operators:      deps.Operators,
+		smartWalletRpc: deps.SmartWalletRpc,
+		priceService:   deps.PriceService,
+		withdraws:      deps.WithdrawSvc,
 	}
 }
 
@@ -121,8 +170,105 @@ func (s *Server) Mount(e *echo.Echo) {
 	}
 	api.Use(restmw.RateLimit(restmw.DefaultRateLimit, restmw.NewInMemoryBackend()))
 
-	generated.RegisterHandlersWithBaseURL(api, s, "")
+	// Wrap the api group with a filter that drops route registrations
+	// whose path contains `/:<param>:<verb>` — Echo's router collapses
+	// `/x/:id`, `/x/:id:foo`, and `/x/:id:bar` into the same tree
+	// position and the last-registered route wins, hijacking the
+	// parameter binding. The shadow routes registered below handle
+	// those URLs via the path rewriter.
+	generated.RegisterHandlersWithBaseURL(filteringRouter{Group: api}, s, "")
 	registerColonActionShimRoutes(api, s)
+}
+
+// filteringRouter wraps an *echo.Group and skips route registrations
+// whose path contains `<param-segment>:<verb>` — those would shadow
+// the simpler `<param-segment>` route in Echo's radix tree. The
+// suppressed routes are re-registered by registerColonActionShimRoutes
+// using a path the router can disambiguate.
+type filteringRouter struct {
+	*echo.Group
+}
+
+// shouldDrop returns true if the path contains a `:` inside a parameter
+// segment (e.g., `/:id:pause`). Plain colon-suffix routes that don't
+// follow a parameter (e.g., `/auth:exchange`, `/workflows:count`)
+// don't trigger the same Echo collision and are left alone.
+func shouldDropRoute(path string) bool {
+	segments := strings.Split(path, "/")
+	for _, seg := range segments {
+		// Only segments that start with `:` and contain a SECOND `:`
+		// are the problematic case. A leading `:` declares a param
+		// name; the second `:` makes Echo treat the whole token as one
+		// parameter name (e.g., `id:pause`) which then shadows the
+		// simpler `:id` route.
+		if strings.HasPrefix(seg, ":") && strings.Count(seg, ":") > 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func (f filteringRouter) GET(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route {
+	if shouldDropRoute(path) {
+		return nil
+	}
+	return f.Group.GET(path, h, m...)
+}
+
+func (f filteringRouter) POST(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route {
+	if shouldDropRoute(path) {
+		return nil
+	}
+	return f.Group.POST(path, h, m...)
+}
+
+func (f filteringRouter) PUT(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route {
+	if shouldDropRoute(path) {
+		return nil
+	}
+	return f.Group.PUT(path, h, m...)
+}
+
+func (f filteringRouter) PATCH(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route {
+	if shouldDropRoute(path) {
+		return nil
+	}
+	return f.Group.PATCH(path, h, m...)
+}
+
+func (f filteringRouter) DELETE(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route {
+	if shouldDropRoute(path) {
+		return nil
+	}
+	return f.Group.DELETE(path, h, m...)
+}
+
+func (f filteringRouter) HEAD(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route {
+	if shouldDropRoute(path) {
+		return nil
+	}
+	return f.Group.HEAD(path, h, m...)
+}
+
+func (f filteringRouter) OPTIONS(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route {
+	if shouldDropRoute(path) {
+		return nil
+	}
+	return f.Group.OPTIONS(path, h, m...)
+}
+
+func (f filteringRouter) CONNECT(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route {
+	if shouldDropRoute(path) {
+		return nil
+	}
+	return f.Group.CONNECT(path, h, m...)
+}
+
+func (f filteringRouter) TRACE(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route {
+	if shouldDropRoute(path) {
+		return nil
+	}
+	return f.Group.TRACE(path, h, m...)
 }
 
 // rewriteColonActions is the Pre middleware that turns
@@ -192,14 +338,20 @@ func registerColonActionShimRoutes(api *echo.Group, s *Server) {
 
 	// Executions
 	api.GET("/executions/:id"+colonActionShim+"getStatus", func(c echo.Context) error {
-		return s.GetExecutionStatus(c, generated.Ulid(c.Param("id")))
+		var params generated.GetExecutionStatusParams
+		if err := (&echo.DefaultBinder{}).BindQueryParams(c, &params); err != nil {
+			return err
+		}
+		return s.GetExecutionStatus(c, generated.Ulid(c.Param("id")), params)
 	})
 	api.GET("/executions/:id"+colonActionShim+"stream", func(c echo.Context) error {
-		// StreamExecution takes a params struct (for the interval
-		// query). Build it from the request the same way the generated
-		// wrapper would.
+		// StreamExecution takes a params struct (for interval +
+		// workflowId). Build it from the request the same way the
+		// generated wrapper would.
 		var params generated.StreamExecutionParams
-		_ = (&echo.DefaultBinder{}).BindQueryParams(c, &params)
+		if err := (&echo.DefaultBinder{}).BindQueryParams(c, &params); err != nil {
+			return err
+		}
 		return s.StreamExecution(c, generated.Ulid(c.Param("id")), params)
 	})
 }

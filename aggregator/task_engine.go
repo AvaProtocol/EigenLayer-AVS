@@ -129,6 +129,8 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 
 	// Store price service on engine (nil-safe — engine and summarizer handle absence).
 	agg.engine.SetPriceService(priceService)
+	// Also expose it to the REST layer (estimateFees handler).
+	agg.priceService = priceService
 
 	// Create executor with engine reference for atomic execution indexing
 	taskExecutor := taskengine.NewExecutor(agg.config.SmartWallet, agg.db, agg.logger, agg.engine, priceService)

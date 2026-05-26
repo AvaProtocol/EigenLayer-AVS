@@ -9,6 +9,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/mapping"
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
@@ -323,8 +324,111 @@ func (s *Server) SimulateWorkflow(ctx echo.Context) error {
 }
 
 // EstimateWorkflowFees — POST /api/v1/workflows:estimateFees
+//
+// Constructs a fresh FeeEstimator per request — the dependencies
+// (smart-wallet RPC, tenderly client, configured rate table, price
+// service) are cheap to bundle and the estimator is stateless. SDK
+// callers hit this before CreateWorkflow to surface the per-execution
+// platform fee + per-node COGS + value-capture fee + any active
+// discount.
 func (s *Server) EstimateWorkflowFees(ctx echo.Context) error {
-	return s.notImplemented(ctx, "workflows.estimateFees")
+	user, err := s.requireUser(ctx)
+	if err != nil {
+		return err
+	}
+	if s.smartWalletRpc == nil {
+		return &restmw.HTTPError{
+			Status: http.StatusServiceUnavailable,
+			Code:   "FEES_UNAVAILABLE",
+			Title:  "Fee estimator not configured",
+			Detail: "This aggregator instance was started without a smart-wallet RPC client.",
+		}
+	}
+
+	var body generated.EstimateFeesRequest
+	if err := ctx.Bind(&body); err != nil {
+		return badRequest("FEES_BAD_REQUEST", "Invalid request body", err.Error())
+	}
+
+	trigger, err := mapping.OpenAPIToProtoTrigger(body.Trigger)
+	if err != nil {
+		return badRequest("FEES_BAD_TRIGGER", "Invalid trigger payload", err.Error())
+	}
+	nodes := make([]*avsproto.TaskNode, 0, len(body.Nodes))
+	for _, n := range body.Nodes {
+		pn, err := mapping.OpenAPIToProtoNode(n)
+		if err != nil {
+			return badRequest("FEES_BAD_NODE", "Invalid node payload", err.Error())
+		}
+		nodes = append(nodes, pn)
+	}
+	var edges []*avsproto.TaskEdge
+	if body.Edges != nil {
+		edges = make([]*avsproto.TaskEdge, 0, len(*body.Edges))
+		for _, e := range *body.Edges {
+			edges = append(edges, mapping.OpenAPIEdgeToProto(e))
+		}
+	}
+	inputVars, err := openAPIInputVarsOrNil(body.InputVariables)
+	if err != nil {
+		return badRequest("FEES_BAD_INPUT_VARS", "Invalid inputVariables payload", err.Error())
+	}
+
+	req := &avsproto.EstimateFeesReq{
+		Trigger:        trigger,
+		Nodes:          nodes,
+		Edges:          edges,
+		CreatedAt:      body.CreatedAt,
+		ExpireAt:       body.ExpireAt,
+		MaxExecution:   body.MaxExecution,
+		InputVariables: inputVars,
+	}
+	if body.Runner != nil {
+		req.Runner = string(*body.Runner)
+	}
+	if body.ChainId != nil {
+		req.ChainId = *body.ChainId
+	}
+
+	var estimator *taskengine.FeeEstimator
+	if s.config != nil && s.config.FeeRates != nil {
+		estimator = taskengine.NewFeeEstimatorWithConfig(
+			s.logger, s.smartWalletRpc, s.engine.GetTenderlyClient(),
+			s.config.SmartWallet, s.priceService, s.config.FeeRates,
+		)
+	} else {
+		estimator = taskengine.NewFeeEstimator(
+			s.logger, s.smartWalletRpc, s.engine.GetTenderlyClient(),
+			s.config.SmartWallet, s.priceService,
+		)
+	}
+
+	resp, err := estimator.EstimateFees(ctx.Request().Context(), req)
+	if err != nil {
+		s.logger.Error("estimate fees failed",
+			"user", user.Address.String(),
+			"error", err)
+		return err
+	}
+	if !resp.GetSuccess() {
+		return &restmw.HTTPError{
+			Status: http.StatusBadRequest,
+			Code:   "FEES_FAILED",
+			Title:  "Fee estimation failed",
+			Detail: resp.GetError(),
+		}
+	}
+	return ctx.JSON(http.StatusOK, mapping.ProtoToOpenAPIEstimateFees(resp))
+}
+
+// openAPIInputVarsOrNil is a small wrapper around openAPIInputVarsToProto
+// that returns (nil, nil) when the input pointer is unset, so handler
+// code doesn't have to repeat the nil check inline.
+func openAPIInputVarsOrNil(in *generated.InputVariables) (map[string]*structpb.Value, error) {
+	if in == nil {
+		return nil, nil
+	}
+	return openAPIInputVarsToProto(*in)
 }
 
 // CountWorkflows — GET /api/v1/workflows:count

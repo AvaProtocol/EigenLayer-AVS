@@ -141,7 +141,17 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
+	return r.ExecuteWithdraw(ctx, user, payload)
+}
 
+// ExecuteWithdraw is the auth-free body of WithdrawFunds — extracted
+// so the REST WithdrawWallet handler can reuse the bundler + paymaster
+// + balance pipeline without going through gRPC's metadata-based auth.
+// Callers (gRPC and REST) supply the already-resolved *model.User and
+// the same payload shape; the response is the same protobuf result
+// type and gets translated to the OpenAPI WithdrawResponse on the REST
+// side.
+func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, payload *avsproto.WithdrawFundsReq) (*avsproto.WithdrawFundsResp, error) {
 	requestedChainID := payload.GetChainId()
 	r.config.Logger.Info("process withdraw funds",
 		"user", user.Address.String(),
@@ -1353,6 +1363,15 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		chainID:       smartWalletChainID,
 		chainRegistry: agg.chainRegistry,
 	}
+
+	// Expose the smart-wallet clients + rpcServer to the rest of the
+	// aggregator (specifically the REST layer's WithdrawService /
+	// EstimateFees / GetWalletNonce handlers). startHttpServer runs
+	// after startRpcServer so these reads are always populated by the
+	// time the REST router is mounted.
+	agg.smartWalletRpc = smartwalletClient
+	agg.smartWalletWsRpc = smartwalletWsClient
+	agg.rpcServer = rpcServer
 
 	// The Aggregator service (public client surface) is no longer
 	// registered. Clients use the REST API at /api/v1 — see

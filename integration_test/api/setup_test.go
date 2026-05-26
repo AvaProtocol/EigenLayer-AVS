@@ -73,7 +73,11 @@ func newHarness(t *testing.T) *testHarness {
 	t.Cleanup(engine.Stop)
 
 	e := echo.New()
-	srv := rest.NewServer(engine, logger, cfg, nil)
+	// Tests run against an in-process engine — no operators registered,
+	// no smart-wallet RPC, no withdraw service. Handlers that need
+	// those deps return a structured 501; the lifecycle/auth tests
+	// don't touch them.
+	srv := rest.NewServer(engine, logger, cfg, rest.ServerDeps{})
 	srv.Mount(e)
 
 	httpServer := httptest.NewServer(e)

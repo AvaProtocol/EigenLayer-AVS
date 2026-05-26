@@ -1885,6 +1885,16 @@ paths:
         in: path
         required: true
         schema: { $ref: '#/components/schemas/Ulid' }
+      - name: workflowId
+        in: query
+        required: true
+        description: |
+          Workflow id the execution belongs to. Required because executions
+          are scoped to their parent workflow in the engine's storage
+          (`t:<chain>:<workflow_id>:<exec_id>` keys) — there is no global
+          execution index today. Use `GET /workflows/{id}/executions` if
+          you only know the workflow.
+        schema: { $ref: '#/components/schemas/Ulid' }
     get:
       tags: [Executions]
       summary: Retrieve an execution (full payload with steps)
@@ -1904,6 +1914,11 @@ paths:
         in: path
         required: true
         schema: { $ref: '#/components/schemas/Ulid' }
+      - name: workflowId
+        in: query
+        required: true
+        description: Workflow id the execution belongs to. See `getExecution`.
+        schema: { $ref: '#/components/schemas/Ulid' }
     get:
       tags: [Executions]
       summary: Get execution status (lightweight, no steps)
@@ -1922,6 +1937,11 @@ paths:
       - name: id
         in: path
         required: true
+        schema: { $ref: '#/components/schemas/Ulid' }
+      - name: workflowId
+        in: query
+        required: true
+        description: Workflow id the execution belongs to. See `getExecution`.
         schema: { $ref: '#/components/schemas/Ulid' }
     get:
       tags: [Executions]

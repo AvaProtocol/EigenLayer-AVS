@@ -1415,9 +1415,28 @@ type ListExecutionsParams struct {
 	Limit *PageLimit `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetExecutionParams defines parameters for GetExecution.
+type GetExecutionParams struct {
+	// WorkflowId Workflow id the execution belongs to. Required because executions
+	// are scoped to their parent workflow in the engine's storage
+	// (`t:<chain>:<workflow_id>:<exec_id>` keys) — there is no global
+	// execution index today. Use `GET /workflows/{id}/executions` if
+	// you only know the workflow.
+	WorkflowId Ulid `form:"workflowId" json:"workflowId"`
+}
+
+// GetExecutionStatusParams defines parameters for GetExecutionStatus.
+type GetExecutionStatusParams struct {
+	// WorkflowId Workflow id the execution belongs to. See `getExecution`.
+	WorkflowId Ulid `form:"workflowId" json:"workflowId"`
+}
+
 // StreamExecutionParams defines parameters for StreamExecution.
 type StreamExecutionParams struct {
 	Interval *string `form:"interval,omitempty" json:"interval,omitempty"`
+
+	// WorkflowId Workflow id the execution belongs to. See `getExecution`.
+	WorkflowId Ulid `form:"workflowId" json:"workflowId"`
 }
 
 // CountExecutionsParams defines parameters for CountExecutions.

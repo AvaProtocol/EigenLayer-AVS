@@ -1,7 +1,10 @@
 package rest
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -9,6 +12,17 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/mapping"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
+
+// streamMaxDuration caps the SSE stream lifetime so a runaway client
+// can't pin a goroutine indefinitely. Production callers are expected
+// to reconnect when the stream closes; the OpenAPI documents the
+// behavior.
+const streamMaxDuration = 10 * time.Minute
+
+// streamMinInterval is the floor for the configurable poll interval.
+// Without it a `?interval=1ms` client would DOS the engine's GetExecution
+// loop.
+const streamMinInterval = 250 * time.Millisecond
 
 // Executions resource — see api/openapi.yaml `tags: [Executions]`.
 //
@@ -61,28 +75,209 @@ func (s *Server) ListExecutionsForWorkflow(ctx echo.Context, id generated.Ulid, 
 	return ctx.JSON(http.StatusOK, executionsRespToOpenAPI(resp, string(id)))
 }
 
-// GetExecution — GET /api/v1/executions/{id}
+// GetExecution — GET /api/v1/executions/{id}?workflowId=...
 //
-// Standalone get is blocked on the same global-index gap as ListExecutions.
-// Clients should fetch through the workflow route until that lands.
-func (s *Server) GetExecution(ctx echo.Context, id generated.Ulid) error {
-	return s.notImplemented(ctx, "executions.retrieve (standalone — use workflows-nested lookup)")
+// The standalone route requires `workflowId` because executions are
+// stored under `t:<chain>:<workflow_id>:<exec_id>` — there is no
+// global index. Callers that already know the workflow can use the
+// nested form (`GET /workflows/{id}/executions`) too.
+func (s *Server) GetExecution(ctx echo.Context, id generated.Ulid, params generated.GetExecutionParams) error {
+	user, err := s.requireUser(ctx)
+	if err != nil {
+		return err
+	}
+	workflowID := string(params.WorkflowId)
+	exec, err := s.engine.GetExecution(user, &avsproto.ExecutionReq{
+		TaskId:      workflowID,
+		ExecutionId: string(id),
+	})
+	if err != nil {
+		return notFoundOrError(err)
+	}
+	resp, err := mapping.ProtoToOpenAPIExecution(exec, workflowID)
+	if err != nil {
+		return err
+	}
+	return ctx.JSON(http.StatusOK, resp)
 }
 
-// GetExecutionStatus — GET /api/v1/executions/{id}:getStatus
+// GetExecutionStatus — GET /api/v1/executions/{id}:getStatus?workflowId=...
 //
-// Lightweight summary endpoint; same workflow-scoping caveat as GetExecution.
-func (s *Server) GetExecutionStatus(ctx echo.Context, id generated.Ulid) error {
-	return s.notImplemented(ctx, "executions.getStatus (standalone)")
+// Lightweight summary — same scoping rule as GetExecution. Used by
+// clients polling for terminal state without paying the cost of
+// fetching the full execution record.
+func (s *Server) GetExecutionStatus(ctx echo.Context, id generated.Ulid, params generated.GetExecutionStatusParams) error {
+	user, err := s.requireUser(ctx)
+	if err != nil {
+		return err
+	}
+	workflowID := string(params.WorkflowId)
+	statusResp, err := s.engine.GetExecutionStatus(user, &avsproto.ExecutionReq{
+		TaskId:      workflowID,
+		ExecutionId: string(id),
+	})
+	if err != nil {
+		return notFoundOrError(err)
+	}
+	// engine.GetExecutionStatus returns just the enum; lift it into the
+	// summary envelope the OpenAPI schema documents. Start/end timestamps
+	// require the full Execution, which a polling caller can fetch on
+	// the terminal state via GetExecution.
+	out := generated.ExecutionStatusSummary{
+		Id:     id,
+		Status: generated.ExecutionStatus(executionStatusToWire(statusResp.GetStatus())),
+	}
+	wid := generated.Ulid(workflowID)
+	out.WorkflowId = &wid
+	return ctx.JSON(http.StatusOK, out)
 }
 
-// StreamExecution — GET /api/v1/executions/{id}:stream
+// StreamExecution — GET /api/v1/executions/{id}:stream?workflowId=...
 //
-// SSE stream of ExecutionStatusSummary events. Implementation polls the
-// engine at the configured interval and emits when status changes;
-// closes when the execution reaches a terminal state.
+// SSE stream of ExecutionStatusSummary events. Polls engine.GetExecution
+// on the configured interval (clamped to streamMinInterval) and emits
+// when the status changes. Closes on terminal status, after
+// streamMaxDuration, or when the client disconnects.
 func (s *Server) StreamExecution(ctx echo.Context, id generated.Ulid, params generated.StreamExecutionParams) error {
-	return s.notImplemented(ctx, "executions.stream")
+	user, err := s.requireUser(ctx)
+	if err != nil {
+		return err
+	}
+	workflowID := string(params.WorkflowId)
+
+	interval := time.Second
+	if params.Interval != nil && *params.Interval != "" {
+		if parsed, perr := time.ParseDuration(*params.Interval); perr == nil && parsed > 0 {
+			interval = parsed
+		}
+	}
+	if interval < streamMinInterval {
+		interval = streamMinInterval
+	}
+
+	w := ctx.Response().Writer
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // disable nginx/Cloudflare buffering
+	ctx.Response().WriteHeader(http.StatusOK)
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return fmt.Errorf("streaming unsupported: response writer is not a Flusher")
+	}
+
+	clientGone := ctx.Request().Context().Done()
+	deadline := time.After(streamMaxDuration)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	emit := func(status string, exec *avsproto.Execution) error {
+		summary := generated.ExecutionStatusSummary{
+			Id:     id,
+			Status: generated.ExecutionStatus(status),
+		}
+		wid := generated.Ulid(workflowID)
+		summary.WorkflowId = &wid
+		if exec != nil {
+			if v := exec.GetStartAt(); v != 0 {
+				summary.StartAt = &v
+			}
+			if v := exec.GetEndAt(); v != 0 {
+				summary.EndAt = &v
+			}
+			if msg := exec.GetError(); msg != "" {
+				summary.Error = &msg
+			}
+		}
+		raw, err := json.Marshal(summary)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", raw); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	}
+
+	lastStatus := ""
+	poll := func() (bool, error) {
+		// GetExecution returns the full record once the execution has
+		// reached a terminal state; before that it returns a pending
+		// stub via the queue path.
+		exec, err := s.engine.GetExecution(user, &avsproto.ExecutionReq{
+			TaskId:      workflowID,
+			ExecutionId: string(id),
+		})
+		if err != nil {
+			// Execution may not exist yet (created lazily by the
+			// trigger). Send a `pending` heartbeat so the client knows
+			// the stream is alive.
+			if lastStatus != "pending" {
+				if emitErr := emit("pending", nil); emitErr != nil {
+					return true, emitErr
+				}
+				lastStatus = "pending"
+			}
+			return false, nil
+		}
+		current := executionStatusToWire(exec.GetStatus())
+		if current != lastStatus {
+			if err := emit(current, exec); err != nil {
+				return true, err
+			}
+			lastStatus = current
+		}
+		// Terminal states close the stream — see ExecutionStatus comment
+		// in the OpenAPI schema.
+		switch current {
+		case "success", "failed", "error":
+			return true, nil
+		}
+		return false, nil
+	}
+
+	// Initial probe so the client gets an immediate frame instead of
+	// waiting one full interval.
+	if done, err := poll(); err != nil {
+		return err
+	} else if done {
+		return nil
+	}
+
+	for {
+		select {
+		case <-clientGone:
+			return nil
+		case <-deadline:
+			return nil
+		case <-ticker.C:
+			if done, err := poll(); err != nil {
+				return err
+			} else if done {
+				return nil
+			}
+		}
+	}
+}
+
+// executionStatusToWire mirrors the helper in the workflows handler
+// but lives here too because the executions package uses it on every
+// poll and the workflows file is already large.
+func executionStatusToWire(s avsproto.ExecutionStatus) string {
+	switch s {
+	case avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING:
+		return "pending"
+	case avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS:
+		return "success"
+	case avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED:
+		return "failed"
+	case avsproto.ExecutionStatus_EXECUTION_STATUS_ERROR:
+		return "error"
+	default:
+		return "pending"
+	}
 }
 
 // CountExecutions — GET /api/v1/executions:count

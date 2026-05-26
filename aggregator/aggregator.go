@@ -87,6 +87,17 @@ type Aggregator struct {
 	ethRpcClient *ethclient.Client
 	chainID      *big.Int
 
+	// smartWalletRpc / smartWalletWsRpc are dialed in startRpcServer
+	// and shared with the REST layer (estimateFees, getNonce,
+	// withdraw). priceService is similarly built once and shared.
+	// rpcServer is the legacy gRPC bag and currently still hosts the
+	// withdraw UserOp pipeline that the REST WithdrawWallet handler
+	// delegates to via the WithdrawService interface.
+	smartWalletRpc   *ethclient.Client
+	smartWalletWsRpc *ethclient.Client
+	priceService     taskengine.PriceService
+	rpcServer        *RpcServer
+
 	operatorPool *OperatorPool
 
 	// task engines handles trigger scheduling and send distribute checks to

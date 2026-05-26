@@ -1,12 +1,16 @@
 package rest
 
 import (
+	"fmt"
+	"math/big"
 	"net/http"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/labstack/echo/v4"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
@@ -121,20 +125,107 @@ func (s *Server) UpdateWallet(ctx echo.Context, address generated.EthereumAddres
 
 // WithdrawWallet — POST /api/v1/wallets/{address}:withdraw
 //
-// Withdraw uses the bundler + paymaster path and depends on the
-// smart-wallet RPC client held by the gRPC server, not on the engine
-// alone. Stubbed until those dependencies are threaded into the REST
-// Server (same plumbing change as EstimateWorkflowFees).
+// Routes through the WithdrawService dependency the aggregator wires
+// in at startup. The full UserOp + paymaster + balance-checking
+// pipeline lives in aggregator package — REST is a thin adapter.
 func (s *Server) WithdrawWallet(ctx echo.Context, address generated.EthereumAddress) error {
-	return s.notImplemented(ctx, "wallets.withdraw")
+	user, err := s.requireUser(ctx)
+	if err != nil {
+		return err
+	}
+	if s.withdraws == nil {
+		return &restmw.HTTPError{
+			Status: http.StatusServiceUnavailable,
+			Code:   "WITHDRAW_UNAVAILABLE",
+			Title:  "Withdraw service not configured",
+			Detail: "This aggregator instance was started without a withdraw service. Restart with the gRPC bag wired in.",
+		}
+	}
+
+	var body generated.WithdrawRequest
+	if err := ctx.Bind(&body); err != nil {
+		return badRequest("WITHDRAW_BAD_REQUEST", "Invalid request body", err.Error())
+	}
+	if body.RecipientAddress == "" || body.Amount == "" || body.Token == "" {
+		return badRequest("WITHDRAW_MISSING_FIELDS", "Missing required fields",
+			"recipientAddress, amount, and token are all required.")
+	}
+
+	req := WithdrawRequest{
+		Owner:              user.Address.Hex(),
+		SmartWalletAddress: string(address),
+		RecipientAddress:   string(body.RecipientAddress),
+		Amount:             body.Amount,
+		Token:              body.Token,
+	}
+	if body.ChainId != nil {
+		req.ChainID = *body.ChainId
+	}
+
+	result, err := s.withdraws.Withdraw(ctx.Request().Context(), req)
+	if err != nil {
+		return err
+	}
+	out := generated.WithdrawResponse{Status: generated.WithdrawResponseStatus(result.Status)}
+	if result.UserOpHash != "" {
+		h := generated.Hex(result.UserOpHash)
+		out.UserOpHash = &h
+	}
+	if result.TransactionHash != "" {
+		t := generated.Hex(result.TransactionHash)
+		out.TransactionHash = &t
+	}
+	return ctx.JSON(http.StatusOK, out)
 }
 
 // GetWalletNonce — GET /api/v1/wallets/{address}:getNonce
 //
-// Reading the smart wallet's nonce needs the smart-wallet RPC client;
-// same deferral as WithdrawWallet.
+// Reads the smart wallet's current nonce off-chain via the
+// entrypoint's getNonce(sender, key=0) call. Used by SDK callers
+// building UserOps client-side.
 func (s *Server) GetWalletNonce(ctx echo.Context, address generated.EthereumAddress) error {
-	return s.notImplemented(ctx, "wallets.getNonce")
+	user, err := s.requireUser(ctx)
+	if err != nil {
+		return err
+	}
+	if s.smartWalletRpc == nil {
+		return &restmw.HTTPError{
+			Status: http.StatusServiceUnavailable,
+			Code:   "NONCE_UNAVAILABLE",
+			Title:  "Smart wallet RPC not configured",
+			Detail: "This aggregator instance was started without a smart-wallet RPC client.",
+		}
+	}
+	if !common.IsHexAddress(string(address)) {
+		return badRequest("WALLETS_BAD_ADDRESS", "Invalid wallet address", "The {address} path parameter must be a valid 0x-prefixed hex address.")
+	}
+	walletAddr := common.HexToAddress(string(address))
+
+	// Ownership check — the engine's GetWalletFromDB lookup is the
+	// canonical source of truth that this wallet belongs to the
+	// authenticated user.
+	if stored, dbErr := s.engine.GetWalletFromDB(user.Address, walletAddr.Hex()); dbErr != nil || stored == nil {
+		return &restmw.HTTPError{
+			Status: http.StatusNotFound,
+			Code:   "WALLETS_NOT_FOUND",
+			Title:  "Wallet not found",
+			Detail: "No wallet record found for the authenticated user.",
+		}
+	}
+
+	if s.config == nil || s.config.SmartWallet == nil {
+		return &restmw.HTTPError{
+			Status: http.StatusInternalServerError,
+			Code:   "WALLETS_NO_CONFIG",
+			Title:  "Smart wallet config missing",
+			Detail: "Aggregator has no smart wallet config; nonce lookup unavailable.",
+		}
+	}
+	nonce, err := aa.GetNonce(s.smartWalletRpc, walletAddr, big.NewInt(0))
+	if err != nil {
+		return fmt.Errorf("entrypoint nonce read failed: %w", err)
+	}
+	return ctx.JSON(http.StatusOK, generated.NonceResponse{Nonce: nonce.String()})
 }
 
 // ---------------------------------------------------------------------

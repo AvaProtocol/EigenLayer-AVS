@@ -25,10 +25,10 @@ type ServerInterface interface {
 	ListExecutions(ctx echo.Context, params ListExecutionsParams) error
 	// Retrieve an execution (full payload with steps)
 	// (GET /executions/{id})
-	GetExecution(ctx echo.Context, id Ulid) error
+	GetExecution(ctx echo.Context, id Ulid, params GetExecutionParams) error
 	// Get execution status (lightweight, no steps)
 	// (GET /executions/{id}:getStatus)
-	GetExecutionStatus(ctx echo.Context, id Ulid) error
+	GetExecutionStatus(ctx echo.Context, id Ulid, params GetExecutionStatusParams) error
 	// Stream execution status changes (Server-Sent Events)
 	// (GET /executions/{id}:stream)
 	StreamExecution(ctx echo.Context, id Ulid, params StreamExecutionParams) error
@@ -187,8 +187,17 @@ func (w *ServerInterfaceWrapper) GetExecution(ctx echo.Context) error {
 
 	ctx.Set(BearerAuthScopes, []string{})
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetExecutionParams
+	// ------------- Required query parameter "workflowId" -------------
+
+	err = runtime.BindQueryParameter("form", true, true, "workflowId", ctx.QueryParams(), &params.WorkflowId)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter workflowId: %s", err))
+	}
+
 	// Invoke the callback with all the unmarshaled arguments
-	err = w.Handler.GetExecution(ctx, id)
+	err = w.Handler.GetExecution(ctx, id, params)
 	return err
 }
 
@@ -205,8 +214,17 @@ func (w *ServerInterfaceWrapper) GetExecutionStatus(ctx echo.Context) error {
 
 	ctx.Set(BearerAuthScopes, []string{})
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetExecutionStatusParams
+	// ------------- Required query parameter "workflowId" -------------
+
+	err = runtime.BindQueryParameter("form", true, true, "workflowId", ctx.QueryParams(), &params.WorkflowId)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter workflowId: %s", err))
+	}
+
 	// Invoke the callback with all the unmarshaled arguments
-	err = w.Handler.GetExecutionStatus(ctx, id)
+	err = w.Handler.GetExecutionStatus(ctx, id, params)
 	return err
 }
 
@@ -230,6 +248,13 @@ func (w *ServerInterfaceWrapper) StreamExecution(ctx echo.Context) error {
 	err = runtime.BindQueryParameter("form", true, false, "interval", ctx.QueryParams(), &params.Interval)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter interval: %s", err))
+	}
+
+	// ------------- Required query parameter "workflowId" -------------
+
+	err = runtime.BindQueryParameter("form", true, true, "workflowId", ctx.QueryParams(), &params.WorkflowId)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter workflowId: %s", err))
 	}
 
 	// Invoke the callback with all the unmarshaled arguments
@@ -956,7 +981,8 @@ func (response ListExecutions401ApplicationProblemPlusJSONResponse) VisitListExe
 }
 
 type GetExecutionRequestObject struct {
-	Id Ulid `json:"id"`
+	Id     Ulid `json:"id"`
+	Params GetExecutionParams
 }
 
 type GetExecutionResponseObject interface {
@@ -995,7 +1021,8 @@ func (response GetExecution404ApplicationProblemPlusJSONResponse) VisitGetExecut
 }
 
 type GetExecutionStatusRequestObject struct {
-	Id Ulid `json:"id"`
+	Id     Ulid `json:"id"`
+	Params GetExecutionStatusParams
 }
 
 type GetExecutionStatusResponseObject interface {
@@ -2279,10 +2306,11 @@ func (sh *strictHandler) ListExecutions(ctx echo.Context, params ListExecutionsP
 }
 
 // GetExecution operation middleware
-func (sh *strictHandler) GetExecution(ctx echo.Context, id Ulid) error {
+func (sh *strictHandler) GetExecution(ctx echo.Context, id Ulid, params GetExecutionParams) error {
 	var request GetExecutionRequestObject
 
 	request.Id = id
+	request.Params = params
 
 	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
 		return sh.ssi.GetExecution(ctx.Request().Context(), request.(GetExecutionRequestObject))
@@ -2304,10 +2332,11 @@ func (sh *strictHandler) GetExecution(ctx echo.Context, id Ulid) error {
 }
 
 // GetExecutionStatus operation middleware
-func (sh *strictHandler) GetExecutionStatus(ctx echo.Context, id Ulid) error {
+func (sh *strictHandler) GetExecutionStatus(ctx echo.Context, id Ulid, params GetExecutionStatusParams) error {
 	var request GetExecutionStatusRequestObject
 
 	request.Id = id
+	request.Params = params
 
 	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
 		return sh.ssi.GetExecutionStatus(ctx.Request().Context(), request.(GetExecutionStatusRequestObject))
