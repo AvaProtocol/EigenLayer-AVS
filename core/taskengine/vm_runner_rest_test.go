@@ -93,7 +93,7 @@ func TestRestRequest(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
@@ -208,7 +208,7 @@ func TestRestRequestHandleEmptyResponse(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
@@ -408,7 +408,7 @@ func TestRestRequestErrorHandling(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "error-test",
 			Nodes:   nodes,
@@ -572,7 +572,7 @@ func TestRestRequestTelegramMockServer(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "telegram-test",
 			Nodes:   nodes,
@@ -778,7 +778,7 @@ func TestRestRequestSendGridGlobalSecret(t *testing.T) {
 		"sendgrid_key": "SENDGRID_KEY_FOR_UNIT_TESTS",
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "sendgrid-test",
 			Nodes:   nodes,
@@ -926,7 +926,7 @@ func TestRestSummarizeTelegramHTML(t *testing.T) {
 	trigger := &avsproto.TaskTrigger{Id: "trig", Name: "trig"}
 	edges := []*avsproto.TaskEdge{{Id: "e1", Source: trigger.Id, Target: "tg-sum"}}
 
-	vm, err := NewVMWithData(&model.Task{Task: &avsproto.Task{Id: "tg-sum", Nodes: nodes, Edges: edges, Trigger: trigger}}, nil, testutil.GetTestSmartWalletConfig(), nil)
+	vm, err := NewVMWithData(&model.Workflow{Task: &avsproto.Task{Id: "tg-sum", Nodes: nodes, Edges: edges, Trigger: trigger}}, nil, testutil.GetTestSmartWalletConfig(), nil)
 	if err != nil {
 		t.Fatalf("failed to create VM: %v", err)
 	}
@@ -1060,7 +1060,7 @@ func TestRestSummarizeSendGridInjection(t *testing.T) {
 	nodes := []*avsproto.TaskNode{{Id: "sg-sum", Name: "restApi", TaskType: &avsproto.TaskNode_RestApi{RestApi: node}}}
 	trigger := &avsproto.TaskTrigger{Id: "trig", Name: "trig"}
 	edges := []*avsproto.TaskEdge{{Id: "e1", Source: trigger.Id, Target: "sg-sum"}}
-	vm, err := NewVMWithData(&model.Task{Task: &avsproto.Task{Id: "sg-sum", Nodes: nodes, Edges: edges, Trigger: trigger}}, nil, testutil.GetTestSmartWalletConfig(), nil)
+	vm, err := NewVMWithData(&model.Workflow{Task: &avsproto.Task{Id: "sg-sum", Nodes: nodes, Edges: edges, Trigger: trigger}}, nil, testutil.GetTestSmartWalletConfig(), nil)
 	if err != nil {
 		t.Fatalf("failed to create VM: %v", err)
 	}
@@ -1144,7 +1144,7 @@ func TestRestRequestArbitraryGlobalSecret(t *testing.T) {
 		arbitrarySecretName: arbitrarySecretValue, // Any name works!
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "arbitrary-secret-test",
 			Nodes:   nodes,

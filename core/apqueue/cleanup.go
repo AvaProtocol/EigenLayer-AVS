@@ -75,9 +75,9 @@ func (q *Queue) CleanupOrphanedJobs() (*CleanupStats, error) {
 				for _, chainID := range chainIDsToCheck {
 					var taskKey []byte
 					if chainID == 0 {
-						taskKey = storageschema.TaskStorageKey(job.Name, taskStatus)
+						taskKey = storageschema.WorkflowStorageKey(job.Name, taskStatus)
 					} else {
-						taskKey = storageschema.ChainTaskStorageKey(chainID, job.Name, taskStatus)
+						taskKey = storageschema.ChainWorkflowStorageKey(chainID, job.Name, taskStatus)
 					}
 					checkedStatuses = append(checkedStatuses, string(taskKey))
 					_, err := q.db.GetKey(taskKey)

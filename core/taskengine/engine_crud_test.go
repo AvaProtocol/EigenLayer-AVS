@@ -20,7 +20,7 @@ func TestCreateTaskReturnErrorWhenEmptyNodes(t *testing.T) {
 	tr1 := testutil.RestTask()
 	tr1.Nodes = []*avsproto.TaskNode{}
 
-	_, err := n.CreateTask(testutil.TestUser1(), tr1)
+	_, err := n.CreateWorkflow(testutil.TestUser1(), tr1)
 
 	if err == nil {
 		t.Errorf("expect error when creating task with empty nodes")
@@ -41,7 +41,7 @@ func TestCreateTaskReturnErrorWhenEmptyEdges(t *testing.T) {
 	tr1 := testutil.RestTask()
 	tr1.Edges = []*avsproto.TaskEdge{}
 
-	_, err := n.CreateTask(testutil.TestUser1(), tr1)
+	_, err := n.CreateWorkflow(testutil.TestUser1(), tr1)
 
 	if err == nil {
 		t.Errorf("expect error when creating task with empty edges")
@@ -77,7 +77,7 @@ func TestCreateTaskReturnErrorWhenInvalidBlockTriggerInterval(t *testing.T) {
 				},
 			}
 
-			_, err := n.CreateTask(testutil.TestUser1(), tr1)
+			_, err := n.CreateWorkflow(testutil.TestUser1(), tr1)
 
 			if !tt.wantErr && err != nil {
 				t.Errorf("CreateTask() unexpected error for interval %d: %v", tt.interval, err)
@@ -107,7 +107,7 @@ func TestCreateTaskReturnErrorWhenNilBlockTriggerConfig(t *testing.T) {
 		},
 	}
 
-	_, err := n.CreateTask(testutil.TestUser1(), tr1)
+	_, err := n.CreateWorkflow(testutil.TestUser1(), tr1)
 
 	if err == nil {
 		t.Error("CreateTask() expected error for nil block trigger config, but got none")
@@ -155,17 +155,17 @@ func TestListTasks(t *testing.T) {
 
 	tr1 := testutil.RestTask()
 	testutil.SetTaskSettings(tr1, "t1", smartWallet1Address)
-	n.CreateTask(testutil.TestUser1(), tr1)
+	n.CreateWorkflow(testutil.TestUser1(), tr1)
 
 	tr2 := testutil.RestTask()
 	testutil.SetTaskSettings(tr2, "t2", smartWallet2Address)
-	n.CreateTask(testutil.TestUser1(), tr2)
+	n.CreateWorkflow(testutil.TestUser1(), tr2)
 
 	tr3 := testutil.RestTask()
 	testutil.SetTaskSettings(tr3, "t3", smartWallet3Address)
-	n.CreateTask(testutil.TestUser1(), tr3)
+	n.CreateWorkflow(testutil.TestUser1(), tr3)
 
-	result, err := n.ListTasksByUser(testutil.TestUser1(), &avsproto.ListTasksReq{
+	result, err := n.ListWorkflowsByUser(testutil.TestUser1(), &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{smartWallet3Address},
 	})
 
@@ -188,7 +188,7 @@ func TestListTasks(t *testing.T) {
 		t.Errorf("list task return wrong. expect memo t1, got %s", result.Items[0].Name)
 	}
 
-	result, err = n.ListTasksByUser(testutil.TestUser1(), &avsproto.ListTasksReq{
+	result, err = n.ListWorkflowsByUser(testutil.TestUser1(), &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{
 			smartWallet1Address,
 			smartWallet2Address,
@@ -216,7 +216,7 @@ func TestCreateTaskReturnErrorWhenExpirationTooClose(t *testing.T) {
 	expiredAtTooClose := now.Add(30*time.Minute).Unix() * 1000 // 30 minutes from now in milliseconds
 	tr1.ExpiredAt = expiredAtTooClose
 
-	_, err := n.CreateTask(testutil.TestUser1(), tr1)
+	_, err := n.CreateWorkflow(testutil.TestUser1(), tr1)
 
 	if err == nil {
 		t.Errorf("expect error when creating task with expiration date too close to current time")
@@ -231,7 +231,7 @@ func TestCreateTaskReturnErrorWhenExpirationTooClose(t *testing.T) {
 	expiredAtValid := now.Add(2*time.Hour).Unix() * 1000 // 2 hours from now in milliseconds
 	tr2.ExpiredAt = expiredAtValid
 
-	_, err = n.CreateTask(testutil.TestUser1(), tr2)
+	_, err = n.CreateWorkflow(testutil.TestUser1(), tr2)
 
 	if err != nil {
 		t.Errorf("expect no error when creating task with valid expiration date, but got %s", err.Error())
@@ -241,7 +241,7 @@ func TestCreateTaskReturnErrorWhenExpirationTooClose(t *testing.T) {
 	tr3 := testutil.RestTask()
 	tr3.ExpiredAt = 0
 
-	_, err = n.CreateTask(testutil.TestUser1(), tr3)
+	_, err = n.CreateWorkflow(testutil.TestUser1(), tr3)
 
 	if err != nil {
 		t.Errorf("expect no error when creating task with no expiration date, but got %s", err.Error())

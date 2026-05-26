@@ -548,7 +548,7 @@ func buildSummarizeRequestFromVM(vm *VM) SummarizeRequest {
 	}
 
 	// Convert edges (if available)
-	// Note: vm.task is a *model.Task which contains the protobuf Task
+	// Note: vm.task is a *model.Workflow which contains the protobuf Task
 	edges := make([]EdgeDefinition, 0)
 	if vm.task != nil && vm.task.Task != nil && vm.task.Task.Edges != nil {
 		for _, edge := range vm.task.Task.Edges {

@@ -624,7 +624,7 @@ func (r *RpcServer) SetTaskEnabled(ctx context.Context, req *avsproto.SetTaskEna
 		"enabled", req.Enabled,
 	)
 
-	result, err := r.engine.SetTaskEnabledByUser(user, string(req.Id), req.Enabled)
+	result, err := r.engine.SetWorkflowEnabledByUser(user, string(req.Id), req.Enabled)
 
 	if err != nil {
 		return nil, err
@@ -644,7 +644,7 @@ func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.IdReq) (*av
 		"task_id", string(taskID.Id),
 	)
 
-	result, err := r.engine.DeleteTaskByUser(user, string(taskID.Id))
+	result, err := r.engine.DeleteWorkflowByUser(user, string(taskID.Id))
 
 	if err != nil {
 		return nil, err
@@ -659,7 +659,7 @@ func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.Create
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
 	}
 
-	task, err := r.engine.CreateTask(user, taskPayload)
+	task, err := r.engine.CreateWorkflow(user, taskPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -680,7 +680,7 @@ func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksRe
 	// 	"smart_wallet_address", payload.SmartWalletAddress,
 	// )
 
-	listTaskResp, err := r.engine.ListTasksByUser(user, payload)
+	listTaskResp, err := r.engine.ListWorkflowsByUser(user, payload)
 	if err != nil {
 		contextFields := map[string]interface{}{
 			"smart_wallet_address": payload.SmartWalletAddress,
@@ -742,7 +742,7 @@ func (r *RpcServer) GetTask(ctx context.Context, payload *avsproto.IdReq) (*avsp
 		return nil, status.Errorf(codes.InvalidArgument, taskengine.TaskIDMissing)
 	}
 
-	task, err := r.engine.GetTask(user, payload.Id)
+	task, err := r.engine.GetWorkflow(user, payload.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -768,7 +768,7 @@ func (r *RpcServer) TriggerTask(ctx context.Context, payload *avsproto.TriggerTa
 		return nil, status.Errorf(codes.InvalidArgument, taskengine.TaskIDMissing)
 	}
 
-	return r.engine.TriggerTask(user, payload)
+	return r.engine.TriggerWorkflow(user, payload)
 }
 
 func (r *RpcServer) CreateSecret(ctx context.Context, payload *avsproto.CreateOrUpdateSecretReq) (*avsproto.CreateSecretResp, error) {
@@ -1005,7 +1005,7 @@ func (r *RpcServer) SimulateTask(ctx context.Context, req *avsproto.SimulateTask
 	)
 
 	// Call the simulation function with the provided task definition (no need to extract triggerType and triggerConfig)
-	execution, err := r.engine.SimulateTask(user, req.Trigger, req.Nodes, req.Edges, inputVariables, req.GetChainId())
+	execution, err := r.engine.SimulateWorkflow(user, req.Trigger, req.Nodes, req.Edges, inputVariables, req.GetChainId())
 	if err != nil {
 		r.config.Logger.Error("simulate task failed",
 			"user", user.Address.String(),
@@ -1054,7 +1054,7 @@ func (r *RpcServer) ReportEventOverload(ctx context.Context, alert *avsproto.Eve
 		"details", alert.Details)
 
 	// Disable the overloaded task immediately
-	deactivated, err := r.engine.DisableTask(alert.TaskId)
+	deactivated, err := r.engine.DisableWorkflow(alert.TaskId)
 	if err != nil {
 		r.config.Logger.Error("❌ Failed to disable overloaded task",
 			"task_id", alert.TaskId,

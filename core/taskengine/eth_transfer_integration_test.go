@@ -70,7 +70,7 @@ func TestETHTransferTaskIntegration(t *testing.T) {
 	}
 
 	// Create the task
-	task, err := n.CreateTask(user, tr)
+	task, err := n.CreateWorkflow(user, tr)
 	if err != nil {
 		t.Fatalf("Failed to create ETH transfer task: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestETHTransferTaskIntegration(t *testing.T) {
 	}
 
 	// Trigger the task
-	triggerResult, err := n.TriggerTask(user, &avsproto.TriggerTaskReq{
+	triggerResult, err := n.TriggerWorkflow(user, &avsproto.TriggerTaskReq{
 		TaskId:      task.Id,
 		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		TriggerOutput: &avsproto.TriggerTaskReq_ManualTrigger{
@@ -220,13 +220,13 @@ func TestETHTransferTaskWithInvalidConfig(t *testing.T) {
 	}
 
 	// Create the task (should succeed - validation happens at execution time)
-	task, err := n.CreateTask(user, tr)
+	task, err := n.CreateWorkflow(user, tr)
 	if err != nil {
 		t.Fatalf("Failed to create ETH transfer task: %v", err)
 	}
 
 	// Trigger the task (should succeed as a call, but execution should fail)
-	triggerResult, err := n.TriggerTask(user, &avsproto.TriggerTaskReq{
+	triggerResult, err := n.TriggerWorkflow(user, &avsproto.TriggerTaskReq{
 		TaskId:      task.Id,
 		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		TriggerOutput: &avsproto.TriggerTaskReq_ManualTrigger{

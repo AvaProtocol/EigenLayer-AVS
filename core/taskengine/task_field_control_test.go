@@ -35,11 +35,11 @@ func TestListTasksFieldControl(t *testing.T) {
 	assert.NotEmpty(t, taskReq.Nodes, "Test task should have nodes")
 	assert.NotEmpty(t, taskReq.Edges, "Test task should have edges")
 
-	_, err = n.CreateTask(user, taskReq)
+	_, err = n.CreateWorkflow(user, taskReq)
 	assert.NoError(t, err)
 
 	t.Run("Default fields only (no nodes/edges)", func(t *testing.T) {
-		resp, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+		resp, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 			SmartWalletAddress: []string{smartWalletAddress},
 			// No field control flags set - should exclude expensive fields
 		})
@@ -62,7 +62,7 @@ func TestListTasksFieldControl(t *testing.T) {
 	})
 
 	t.Run("Include nodes only", func(t *testing.T) {
-		resp, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+		resp, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 			SmartWalletAddress: []string{smartWalletAddress},
 			IncludeNodes:       true,
 		})
@@ -80,7 +80,7 @@ func TestListTasksFieldControl(t *testing.T) {
 	})
 
 	t.Run("Include edges only", func(t *testing.T) {
-		resp, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+		resp, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 			SmartWalletAddress: []string{smartWalletAddress},
 			IncludeEdges:       true,
 		})
@@ -98,7 +98,7 @@ func TestListTasksFieldControl(t *testing.T) {
 	})
 
 	t.Run("Include both nodes and edges", func(t *testing.T) {
-		resp, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+		resp, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 			SmartWalletAddress: []string{smartWalletAddress},
 			IncludeNodes:       true,
 			IncludeEdges:       true,
@@ -123,11 +123,11 @@ func TestListTasksFieldControl(t *testing.T) {
 		for i := 1; i <= 3; i++ {
 			additionalTask := testutil.RestTask()
 			testutil.SetTaskSettings(additionalTask, fmt.Sprintf("task_%d", i), smartWalletAddress)
-			_, err := n.CreateTask(user, additionalTask)
+			_, err := n.CreateWorkflow(user, additionalTask)
 			assert.NoError(t, err)
 		}
 
-		resp, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+		resp, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 			SmartWalletAddress: []string{smartWalletAddress},
 			Limit:              2,
 			IncludeNodes:       true,
@@ -171,12 +171,12 @@ func TestTaskFieldControlPerformance(t *testing.T) {
 	for i := 0; i < numTasks; i++ {
 		taskReq := testutil.RestTask()
 		testutil.SetTaskSettings(taskReq, fmt.Sprintf("perf_task_%d", i), smartWalletAddress)
-		_, err := n.CreateTask(user, taskReq)
+		_, err := n.CreateWorkflow(user, taskReq)
 		assert.NoError(t, err)
 	}
 
 	t.Run("Minimal fields for performance", func(t *testing.T) {
-		resp, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+		resp, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 			SmartWalletAddress: []string{smartWalletAddress},
 			// No expensive fields - fastest response
 		})
@@ -197,7 +197,7 @@ func TestTaskFieldControlPerformance(t *testing.T) {
 	})
 
 	t.Run("All fields for detailed view", func(t *testing.T) {
-		resp, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+		resp, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 			SmartWalletAddress: []string{smartWalletAddress},
 			IncludeNodes:       true,
 			IncludeEdges:       true,
@@ -240,19 +240,19 @@ func TestTaskFieldControlConsistency(t *testing.T) {
 	taskReq := testutil.RestTask()
 	testutil.SetTaskSettings(taskReq, "consistency_test_task", smartWalletAddress)
 
-	createdTask, err := n.CreateTask(user, taskReq)
+	createdTask, err := n.CreateWorkflow(user, taskReq)
 	assert.NoError(t, err)
 
 	t.Run("ListTasks with full fields matches GetTask", func(t *testing.T) {
 		// Get the task via GetTask (which returns full Task message)
-		fullTask, err := n.GetTask(user, createdTask.Id)
+		fullTask, err := n.GetWorkflow(user, createdTask.Id)
 		assert.NoError(t, err)
 
 		fullTaskProto, err := fullTask.ToProtoBuf()
 		assert.NoError(t, err)
 
 		// Get the task via ListTasks with all fields included
-		listResp, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+		listResp, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 			SmartWalletAddress: []string{smartWalletAddress},
 			IncludeNodes:       true,
 			IncludeEdges:       true,
@@ -274,13 +274,13 @@ func TestTaskFieldControlConsistency(t *testing.T) {
 
 	t.Run("Field control doesn't affect basic fields", func(t *testing.T) {
 		// Get task with no expensive fields
-		minimalResp, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+		minimalResp, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 			SmartWalletAddress: []string{smartWalletAddress},
 		})
 		assert.NoError(t, err)
 
 		// Get task with all fields
-		fullResp, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+		fullResp, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 			SmartWalletAddress: []string{smartWalletAddress},
 			IncludeNodes:       true,
 			IncludeEdges:       true,

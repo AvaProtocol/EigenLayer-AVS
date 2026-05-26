@@ -344,7 +344,7 @@ func TestCamelCaseVariableResolutionConsistency(t *testing.T) {
 		}
 
 		user := testutil.TestUser1()
-		execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
+		execution, err := engine.SimulateWorkflow(user, trigger, nodes, edges, inputVariables)
 		assert.NoError(t, err)
 		assert.NotNil(t, execution)
 		if execution != nil {

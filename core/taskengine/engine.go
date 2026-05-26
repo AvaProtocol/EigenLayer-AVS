@@ -224,7 +224,7 @@ type Engine struct {
 	// Never acquire an outer lock while holding an inner lock.
 	// lock is a leaf lock: critical sections must only do map reads/writes,
 	// never call functions that acquire streamsMutex or assignmentMutex.
-	tasks            map[string]*model.Task
+	tasks            map[string]*model.Workflow
 	lock             *sync.Mutex
 	trackSyncedTasks map[string]*operatorState
 
@@ -283,7 +283,7 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 		queue:  queue,
 
 		lock:                &sync.Mutex{},
-		tasks:               make(map[string]*model.Task),
+		tasks:               make(map[string]*model.Workflow),
 		trackSyncedTasks:    make(map[string]*operatorState),
 		operatorStreams:     make(map[string]avsproto.Node_SyncMessagesServer),
 		streamsMutex:        &sync.RWMutex{},
@@ -452,12 +452,12 @@ func (n *Engine) knownChainIDs() []int64 {
 // whose chain_id might be 0 (legacy proto / unspecified). Falls back to
 // the aggregator default chain so writers never produce zero-prefixed
 // (and therefore never-readable) keys.
-func (n *Engine) chainScopedTaskKey(task *model.Task) []byte {
+func (n *Engine) chainScopedTaskKey(task *model.Workflow) []byte {
 	chainID := task.ChainId
 	if chainID == 0 {
 		chainID = n.defaultChainID()
 	}
-	return ChainTaskStorageKey(chainID, task.Id, task.Status)
+	return ChainWorkflowStorageKey(chainID, task.Id, task.Status)
 }
 
 // findTaskKey searches every known chain bucket for a task by id at the
@@ -467,14 +467,14 @@ func (n *Engine) chainScopedTaskKey(task *model.Task) []byte {
 // get a deterministic key to attempt the read with.
 func (n *Engine) findTaskKey(taskID string, status avsproto.TaskStatus) []byte {
 	for _, chainID := range n.knownChainIDs() {
-		key := ChainTaskStorageKey(chainID, taskID, status)
+		key := ChainWorkflowStorageKey(chainID, taskID, status)
 		if exists, err := n.db.Exist(key); err == nil && exists {
 			return key
 		}
 	}
 	// Not found — return a key for the default chain so the subsequent
 	// read produces a clean badger.ErrKeyNotFound the caller already handles.
-	return ChainTaskStorageKey(n.defaultChainID(), taskID, status)
+	return ChainWorkflowStorageKey(n.defaultChainID(), taskID, status)
 }
 
 // taskExecutionPrefixesBytes returns the execution-history prefix for taskID
@@ -566,7 +566,7 @@ func (n *Engine) Stop() {
 
 // AddTaskForTesting adds a task directly to the engine's task map for testing purposes
 // This bypasses database storage and validation - only use in tests
-func (n *Engine) AddTaskForTesting(task *model.Task) {
+func (n *Engine) AddWorkflowForTesting(task *model.Workflow) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 	n.tasks[task.Id] = task
@@ -584,12 +584,12 @@ func (n *Engine) MustStart() error {
 	// common prefix below "t:", so we must iterate each chain explicitly.
 	loadedCount := 0
 	for _, chainID := range n.knownChainIDs() {
-		kvs, e := n.db.GetByPrefix(ChainTaskByStatusStoragePrefix(chainID, avsproto.TaskStatus_Enabled))
+		kvs, e := n.db.GetByPrefix(ChainWorkflowByStatusStoragePrefix(chainID, avsproto.TaskStatus_Enabled))
 		if e != nil {
 			panic(e)
 		}
 		for _, item := range kvs {
-			task := &model.Task{
+			task := &model.Workflow{
 				Task: &avsproto.Task{},
 			}
 			err := protojson.Unmarshal(item.Value, task)
@@ -1128,7 +1128,7 @@ func resolveEventTriggerTemplates(trigger *avsproto.TaskTrigger, inputVariables 
 }
 
 // CreateTask records submission data
-func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskReq) (*model.Task, error) {
+func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTaskReq) (*model.Workflow, error) {
 	var err error
 	userAddr := user.Address.Hex()
 
@@ -1192,7 +1192,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 		}
 	}
 
-	task, err := model.NewTaskFromProtobuf(user, taskPayload)
+	task, err := model.NewWorkflowFromProtobuf(user, taskPayload)
 
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "%s", err.Error())
@@ -1234,7 +1234,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 		return nil, status.Errorf(codes.Internal, "Failed to serialize task: %v", err)
 	}
 
-	updates[string(ChainTaskStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
+	updates[string(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
 	updates[string(ChainTaskUserKey(task.ChainId, task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Enabled))
 
 	if err = n.db.BatchWrite(updates); err != nil {
@@ -1542,7 +1542,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 		n.reassignOrphanedTasks()
 
 		// Aggregate tasks for this operator to reduce logging and improve efficiency
-		var tasksToStream []*model.Task
+		var tasksToStream []*model.Workflow
 		var tasksByTriggerType = make(map[string]int) // Count tasks by trigger type
 		var newAssignments []string                   // Track new task assignments for this operator
 		var orphanedTasksReclaimed []string           // Track orphaned tasks being reclaimed
@@ -1553,7 +1553,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 
 		// Iterate over a snapshot to avoid concurrent map iteration/write panics
 		n.lock.Lock()
-		snapshot := make([]*model.Task, 0, len(n.tasks))
+		snapshot := make([]*model.Workflow, 0, len(n.tasks))
 		for _, t := range n.tasks {
 			snapshot = append(snapshot, t)
 		}
@@ -1972,7 +1972,7 @@ func (n *Engine) sendBatchedNotifications() {
 // Note: operators must handle duplicate MonitorTaskTrigger messages idempotently,
 // as the StreamCheckToOperator ticker may also send the same task before
 // trackSyncedTasks is updated.
-func (n *Engine) sendMonitorTaskTriggerToOperators(task *model.Task) {
+func (n *Engine) sendMonitorTaskTriggerToOperators(task *model.Workflow) {
 	// Snapshot operator streams under read lock
 	n.streamsMutex.RLock()
 	operatorStreams := make(map[string]avsproto.Node_SyncMessagesServer)
@@ -2075,7 +2075,7 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 		// Task not found in memory - try database lookup
 		n.lock.Unlock() // Release lock for database operation
 
-		dbTask, dbErr := n.GetTaskByID(payload.TaskId)
+		dbTask, dbErr := n.GetWorkflowByID(payload.TaskId)
 		if dbErr != nil {
 			// Task not found in database either - this is likely a stale operator notification
 			// Log at DEBUG level to reduce noise in production
@@ -2334,7 +2334,7 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 	}, nil
 }
 
-func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksReq) (*avsproto.ListTasksResp, error) {
+func (n *Engine) ListWorkflowsByUser(user *model.User, payload *avsproto.ListTasksReq) (*avsproto.ListTasksResp, error) {
 	if len(payload.SmartWalletAddress) == 0 {
 		return nil, status.Errorf(codes.InvalidArgument, MissingSmartWalletAddressError)
 	}
@@ -2425,7 +2425,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		if err != nil {
 			return nil // skip silently
 		}
-		task := model.NewTask()
+		task := model.NewWorkflow()
 		if err := task.FromStorageData(taskRawByte); err != nil {
 			return nil // skip silently
 		}
@@ -2472,7 +2472,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		for i := 0; i < len(taskKeys); i++ {
 			key := taskKeys[i]
 			taskID := taskIDFromKey(key)
-			taskIDUlid := model.UlidFromTaskId(taskID)
+			taskIDUlid := model.UlidFromWorkflowId(taskID)
 
 			// Skip items at or before the cursor position
 			if taskIDUlid.Compare(cursorUlid) <= 0 {
@@ -2501,7 +2501,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		for i := len(taskKeys) - 1; i >= 0; i-- {
 			key := taskKeys[i]
 			taskID := taskIDFromKey(key)
-			taskIDUlid := model.UlidFromTaskId(taskID)
+			taskIDUlid := model.UlidFromWorkflowId(taskID)
 
 			if !cursor.IsZero() {
 				if cursor.LessThanOrEqualUlid(taskIDUlid) {
@@ -2546,10 +2546,10 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	return taskResp, nil
 }
 
-func (n *Engine) GetTaskByID(taskID string) (*model.Task, error) {
+func (n *Engine) GetWorkflowByID(taskID string) (*model.Workflow, error) {
 	for statusInt := range avsproto.TaskStatus_name {
 		if rawTaskData, err := n.db.GetKey(n.findTaskKey(taskID, avsproto.TaskStatus(statusInt))); err == nil {
-			task := model.NewTask()
+			task := model.NewWorkflow()
 			err = task.FromStorageData(rawTaskData)
 
 			if err == nil {
@@ -2563,8 +2563,8 @@ func (n *Engine) GetTaskByID(taskID string) (*model.Task, error) {
 	return nil, status.Errorf(codes.NotFound, TaskNotFoundError)
 }
 
-func (n *Engine) GetTask(user *model.User, taskID string) (*model.Task, error) {
-	task, err := n.GetTaskByID(taskID)
+func (n *Engine) GetWorkflow(user *model.User, taskID string) (*model.Workflow, error) {
+	task, err := n.GetWorkflowByID(taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -2599,7 +2599,7 @@ func (n *Engine) instructOperatorImmediateTrigger(taskID string) error {
 	}
 
 	// Get the task to include proper metadata
-	task, err := n.GetTaskByID(taskID)
+	task, err := n.GetWorkflowByID(taskID)
 	if err != nil {
 		return fmt.Errorf("failed to get task for immediate trigger: %w", err)
 	}
@@ -2689,13 +2689,13 @@ func (n *Engine) instructOperatorImmediateTrigger(taskID string) error {
 	return nil
 }
 
-func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq) (*avsproto.TriggerTaskResp, error) {
+func (n *Engine) TriggerWorkflow(user *model.User, payload *avsproto.TriggerTaskReq) (*avsproto.TriggerTaskResp, error) {
 	// Validate task ID format first
 	if !ValidateTaskId(payload.TaskId) {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidTaskIdFormat)
 	}
 
-	task, err := n.GetTask(user, payload.TaskId)
+	task, err := n.GetWorkflow(user, payload.TaskId)
 	if err != nil {
 		return nil, err
 	}
@@ -2895,7 +2895,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 // the workflow-level chain context; 0 or omitted means use the aggregator
 // default. Per-node / per-trigger chain_id (set on the node configs) takes
 // precedence over this value.
-func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, inputVariables map[string]interface{}, chainIDs ...int64) (*avsproto.Execution, error) {
+func (n *Engine) SimulateWorkflow(user *model.User, trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, inputVariables map[string]interface{}, chainIDs ...int64) (*avsproto.Execution, error) {
 	var chainID int64
 	if len(chainIDs) > 0 {
 		chainID = chainIDs[0]
@@ -2931,7 +2931,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// Create a temporary task structure for simulation (not saved to storage)
 	simulationTaskID := model.GenerateID()
 
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:                 simulationTaskID,
 			Name:               taskName,
@@ -3476,10 +3476,10 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	// Validate all tasks own by the caller, if there are any tasks won't be owned by caller, we return permission error
 	// Admin users (authenticated with API key) use zero address and can access any task
 	isAdminUser := user.Address == (common.Address{})
-	tasks := make(map[string]*model.Task)
+	tasks := make(map[string]*model.Workflow)
 
 	for _, id := range payload.TaskIds {
-		task, err := n.GetTaskByID(id)
+		task, err := n.GetWorkflowByID(id)
 		if err != nil {
 			return nil, status.Errorf(codes.NotFound, TaskNotFoundError)
 		}
@@ -3658,12 +3658,12 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	return executioResp, nil
 }
 
-func (n *Engine) setExecutionStatusQueue(task *model.Task, executionID string) error {
+func (n *Engine) setExecutionStatusQueue(task *model.Workflow, executionID string) error {
 	status := strconv.Itoa(int(avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING))
 	return n.db.Set(TaskTriggerKey(task, executionID), []byte(status))
 }
 
-func (n *Engine) getExecutionStatusFromQueue(task *model.Task, executionID string) (*avsproto.ExecutionStatus, error) {
+func (n *Engine) getExecutionStatusFromQueue(task *model.Workflow, executionID string) (*avsproto.ExecutionStatus, error) {
 	status, err := n.db.GetKey(TaskTriggerKey(task, executionID))
 	if err != nil {
 		return nil, err
@@ -3679,7 +3679,7 @@ func (n *Engine) getExecutionStatusFromQueue(task *model.Task, executionID strin
 
 // GetExecution for a given task id and execution id
 func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) (*avsproto.Execution, error) {
-	task, err := n.GetTask(user, payload.TaskId)
+	task, err := n.GetWorkflow(user, payload.TaskId)
 	if err != nil {
 		return nil, err
 	}
@@ -3742,7 +3742,7 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 }
 
 func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.ExecutionReq) (*avsproto.ExecutionStatusResp, error) {
-	task, err := n.GetTask(user, payload.TaskId)
+	task, err := n.GetWorkflow(user, payload.TaskId)
 	if err != nil {
 		return nil, err
 	}
@@ -3820,10 +3820,10 @@ func (n *Engine) GetExecutionCount(user *model.User, payload *avsproto.GetExecut
 	}, nil
 }
 
-func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (*avsproto.DeleteTaskResp, error) {
+func (n *Engine) DeleteWorkflowByUser(user *model.User, taskID string) (*avsproto.DeleteTaskResp, error) {
 	n.logger.Info("🔄 Starting delete task operation", "task_id", taskID, "user", user.Address.String())
 
-	task, err := n.GetTask(user, taskID)
+	task, err := n.GetWorkflow(user, taskID)
 	if err != nil {
 		n.logger.Warn("❌ Task not found for deletion", "task_id", taskID, "error", err)
 		return &avsproto.DeleteTaskResp{
@@ -3851,7 +3851,7 @@ func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (*avsproto.De
 	deletedAt := time.Now().UnixMilli()
 
 	n.logger.Info("🗑️ Deleting task storage", "task_id", taskID)
-	if err := n.db.Delete(ChainTaskStorageKey(task.ChainId, task.Id, task.Status)); err != nil {
+	if err := n.db.Delete(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status)); err != nil {
 		n.logger.Error("failed to delete task storage", "error", err, "task_id", task.Id)
 		return &avsproto.DeleteTaskResp{
 			Success: false,
@@ -3886,8 +3886,8 @@ func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (*avsproto.De
 	}, nil
 }
 
-func (n *Engine) SetTaskEnabledByUser(user *model.User, taskID string, enabled bool) (*avsproto.SetTaskEnabledResp, error) {
-	task, err := n.GetTask(user, taskID)
+func (n *Engine) SetWorkflowEnabledByUser(user *model.User, taskID string, enabled bool) (*avsproto.SetTaskEnabledResp, error) {
+	task, err := n.GetWorkflow(user, taskID)
 	if err != nil {
 		return &avsproto.SetTaskEnabledResp{
 			Success: false,
@@ -3972,7 +3972,7 @@ func (n *Engine) SetTaskEnabledByUser(user *model.User, taskID string, enabled b
 			PreviousStatus: getTaskStatusString(oldStatus),
 		}, nil
 	}
-	updates[string(ChainTaskStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
+	updates[string(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
 	updates[string(ChainTaskUserKey(task.ChainId, task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 	if err = n.db.BatchWrite(updates); err != nil {
@@ -3987,7 +3987,7 @@ func (n *Engine) SetTaskEnabledByUser(user *model.User, taskID string, enabled b
 
 	// Delete old record if different status
 	if oldStatus != task.Status {
-		if delErr := n.db.Delete(ChainTaskStorageKey(task.ChainId, task.Id, oldStatus)); delErr != nil {
+		if delErr := n.db.Delete(ChainWorkflowStorageKey(task.ChainId, task.Id, oldStatus)); delErr != nil {
 			n.logger.Error("failed to delete old task status entry", "error", delErr, "task_id", task.Id, "old_status", oldStatus)
 		}
 	}
@@ -4026,7 +4026,7 @@ func (n *Engine) SetTaskEnabledByUser(user *model.User, taskID string, enabled b
 }
 
 // DisableTask turns off a task without user authentication (for internal use like overload alerts)
-func (n *Engine) DisableTask(taskID string) (bool, error) {
+func (n *Engine) DisableWorkflow(taskID string) (bool, error) {
 	n.lock.Lock()
 	task, exists := n.tasks[taskID]
 	n.lock.Unlock()
@@ -4050,13 +4050,13 @@ func (n *Engine) DisableTask(taskID string) (bool, error) {
 		return false, fmt.Errorf("failed to serialize task during disabling: %w", err)
 	}
 
-	updates[string(ChainTaskStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
+	updates[string(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
 	updates[string(ChainTaskUserKey(task.ChainId, task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 	if err = n.db.BatchWrite(updates); err == nil {
 		// Delete the old record
 		if oldStatus != task.Status {
-			if delErr := n.db.Delete(ChainTaskStorageKey(task.ChainId, task.Id, oldStatus)); delErr != nil {
+			if delErr := n.db.Delete(ChainWorkflowStorageKey(task.ChainId, task.Id, oldStatus)); delErr != nil {
 				n.logger.Error("failed to delete old task status entry", "error", delErr, "task_id", task.Id, "old_status", oldStatus)
 			}
 		}
@@ -4435,7 +4435,7 @@ func (n *Engine) shouldLogApprovalMessage(address string) bool {
 // supported_chain_ids match a task's chain_id. Pre-multi-chain operators
 // (empty list) accept everything for back-compat; tasks with chain_id=0
 // are chain-agnostic and accepted by every operator.
-func (n *Engine) supportsTaskChain(operatorAddr string, task *model.Task) bool {
+func (n *Engine) supportsTaskChain(operatorAddr string, task *model.Workflow) bool {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
@@ -4457,7 +4457,7 @@ func (n *Engine) supportsTaskChain(operatorAddr string, task *model.Task) bool {
 	return false
 }
 
-func (n *Engine) supportsTaskTrigger(operatorAddr string, task *model.Task) bool {
+func (n *Engine) supportsTaskTrigger(operatorAddr string, task *model.Workflow) bool {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
@@ -4485,7 +4485,7 @@ func (n *Engine) supportsTaskTrigger(operatorAddr string, task *model.Task) bool
 }
 
 // getEligibleOperators returns operators that support the given task's trigger type
-func (n *Engine) getEligibleOperators(task *model.Task) []string {
+func (n *Engine) getEligibleOperators(task *model.Workflow) []string {
 	n.streamsMutex.RLock()
 	defer n.streamsMutex.RUnlock()
 
@@ -4500,7 +4500,7 @@ func (n *Engine) getEligibleOperators(task *model.Task) []string {
 }
 
 // assignTaskToOperator assigns a task to an operator using round-robin
-func (n *Engine) assignTaskToOperator(task *model.Task) string {
+func (n *Engine) assignTaskToOperator(task *model.Workflow) string {
 	eligible := n.getEligibleOperators(task)
 	if len(eligible) == 0 {
 		return ""
@@ -4577,7 +4577,7 @@ func (n *Engine) reassignOrphanedTasks() {
 
 	// Phase 2: Snapshot needed tasks under n.lock (lock is the innermost lock, safe to acquire alone)
 	n.lock.Lock()
-	taskSnapshot := make(map[string]*model.Task, len(orphanedTasks))
+	taskSnapshot := make(map[string]*model.Workflow, len(orphanedTasks))
 	for _, taskID := range orphanedTasks {
 		if task, exists := n.tasks[taskID]; exists {
 			taskSnapshot[taskID] = task
@@ -5642,7 +5642,7 @@ func (n *Engine) DetectAndHandleInvalidTasks() error {
 			}
 
 			// Prepare the task status update in storage
-			updates[string(ChainTaskStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
+			updates[string(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
 			updates[string(ChainTaskUserKey(task.ChainId, task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Failed))
 		}
 	}

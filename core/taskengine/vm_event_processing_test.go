@@ -43,7 +43,7 @@ func TestEvaluateEvent(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id: "sampletaskid1",
 			Trigger: &avsproto.TaskTrigger{
@@ -101,7 +101,7 @@ func TestEvaluateEventEvmLog(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id: "sampletaskid1",
 			Trigger: &avsproto.TaskTrigger{
@@ -163,7 +163,7 @@ func TestEventTriggerDataAccessibility(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id: "sampletaskid1",
 			Trigger: &avsproto.TaskTrigger{
@@ -216,7 +216,7 @@ func TestEventTriggerDataAccessibility(t *testing.T) {
 		},
 	}
 
-	vm2, err := NewVMWithData(&model.Task{
+	vm2, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id: "sampletaskid2",
 			Trigger: &avsproto.TaskTrigger{

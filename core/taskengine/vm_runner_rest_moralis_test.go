@@ -74,7 +74,7 @@ func TestRestRequestMoralisWalletBalances(t *testing.T) {
 
 	t.Logf("✅ Loaded moralis_api_key from aggregator.yaml config: %s", moralisKey[:20]+"...")
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "moralis-test",
 			Nodes:   nodes,
@@ -210,7 +210,7 @@ func TestRestRequestMoralisSpecificTokens(t *testing.T) {
 
 	t.Logf("✅ Loaded moralis_api_key from aggregator.yaml config: %s", moralisKey[:20]+"...")
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "moralis-specific-test",
 			Nodes:   nodes,

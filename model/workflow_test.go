@@ -10,7 +10,7 @@ import (
 
 func TestIsRunable(t *testing.T) {
 	t.Run("task with future startAt should not be runable", func(t *testing.T) {
-		task := &Task{
+		task := &Workflow{
 			Task: &avsproto.Task{
 				StartAt:        time.Now().Add(time.Hour).UnixMilli(),
 				MaxExecution:   1,
@@ -22,7 +22,7 @@ func TestIsRunable(t *testing.T) {
 	})
 
 	t.Run("task with past startAt should be runable", func(t *testing.T) {
-		task := &Task{
+		task := &Workflow{
 			Task: &avsproto.Task{
 				StartAt:        time.Now().Add(-time.Hour).UnixMilli(),
 				MaxExecution:   1,
@@ -35,7 +35,7 @@ func TestIsRunable(t *testing.T) {
 
 	t.Run("task with startAt equal to current time should be runable", func(t *testing.T) {
 		now := time.Now().UnixMilli()
-		task := &Task{
+		task := &Workflow{
 			Task: &avsproto.Task{
 				StartAt:        now,
 				MaxExecution:   1,
@@ -47,7 +47,7 @@ func TestIsRunable(t *testing.T) {
 	})
 
 	t.Run("task with zero startAt should be runable", func(t *testing.T) {
-		task := &Task{
+		task := &Workflow{
 			Task: &avsproto.Task{
 				StartAt:        0,
 				MaxExecution:   1,
@@ -59,7 +59,7 @@ func TestIsRunable(t *testing.T) {
 	})
 
 	t.Run("task with maxExecution reached should not be runable", func(t *testing.T) {
-		task := &Task{
+		task := &Workflow{
 			Task: &avsproto.Task{
 				StartAt:        time.Now().Add(-time.Hour).UnixMilli(),
 				MaxExecution:   1,
@@ -71,7 +71,7 @@ func TestIsRunable(t *testing.T) {
 	})
 
 	t.Run("task with expiredAt in the past should not be runable", func(t *testing.T) {
-		task := &Task{
+		task := &Workflow{
 			Task: &avsproto.Task{
 				StartAt:        time.Now().Add(-2 * time.Hour).UnixMilli(),
 				ExpiredAt:      time.Now().Add(-time.Hour).UnixMilli(),
@@ -84,7 +84,7 @@ func TestIsRunable(t *testing.T) {
 	})
 
 	t.Run("task with all conditions met should be runable", func(t *testing.T) {
-		task := &Task{
+		task := &Workflow{
 			Task: &avsproto.Task{
 				StartAt:        time.Now().Add(-time.Hour).UnixMilli(),
 				ExpiredAt:      time.Now().Add(time.Hour).UnixMilli(),
@@ -99,7 +99,7 @@ func TestIsRunable(t *testing.T) {
 
 func TestExecutionCountPersistence(t *testing.T) {
 	t.Run("execution count should be incremented and persisted", func(t *testing.T) {
-		task := &Task{
+		task := &Workflow{
 			Task: &avsproto.Task{
 				Id:             "test-task-id",
 				StartAt:        time.Now().Add(-time.Hour).UnixMilli(),
@@ -116,7 +116,7 @@ func TestExecutionCountPersistence(t *testing.T) {
 		assert.NoError(t, err, "ToJSON should not error")
 		assert.NotNil(t, jsonData, "JSON data should not be nil")
 
-		newTask := NewTask()
+		newTask := NewWorkflow()
 		err = newTask.FromStorageData(jsonData)
 		assert.NoError(t, err, "FromStorageData should not error")
 		assert.Equal(t, int64(1), newTask.ExecutionCount, "ExecutionCount should be preserved after serialization/deserialization")
@@ -127,7 +127,7 @@ func TestExecutionCountPersistence(t *testing.T) {
 	})
 
 	t.Run("execution count should increment multiple times", func(t *testing.T) {
-		task := &Task{
+		task := &Workflow{
 			Task: &avsproto.Task{
 				Id:             "test-task-id-multi",
 				StartAt:        time.Now().Add(-time.Hour).UnixMilli(),
@@ -143,7 +143,7 @@ func TestExecutionCountPersistence(t *testing.T) {
 			jsonData, err := task.ToJSON()
 			assert.NoError(t, err, "ToJSON should not error")
 
-			newTask := NewTask()
+			newTask := NewWorkflow()
 			err = newTask.FromStorageData(jsonData)
 			assert.NoError(t, err, "FromStorageData should not error")
 			assert.Equal(t, int64(i), newTask.ExecutionCount, "ExecutionCount should be %d after %d executions", i, i)
@@ -151,7 +151,7 @@ func TestExecutionCountPersistence(t *testing.T) {
 	})
 
 	t.Run("execution count should work with max execution limit", func(t *testing.T) {
-		task := &Task{
+		task := &Workflow{
 			Task: &avsproto.Task{
 				Id:             "test-task-id-max",
 				StartAt:        time.Now().Add(-time.Hour).UnixMilli(),
@@ -171,7 +171,7 @@ func TestExecutionCountPersistence(t *testing.T) {
 		jsonData, err := task.ToJSON()
 		assert.NoError(t, err, "ToJSON should not error")
 
-		newTask := NewTask()
+		newTask := NewWorkflow()
 		err = newTask.FromStorageData(jsonData)
 		assert.NoError(t, err, "FromStorageData should not error")
 		assert.Equal(t, int64(2), newTask.ExecutionCount, "ExecutionCount should be preserved when task is completed")
@@ -181,7 +181,7 @@ func TestExecutionCountPersistence(t *testing.T) {
 
 func TestEnsureInitialized(t *testing.T) {
 	t.Run("should accept valid Status field", func(t *testing.T) {
-		task := &Task{
+		task := &Workflow{
 			Task: &avsproto.Task{
 				Id:                 "test-task-id",
 				Owner:              "0x1234567890123456789012345678901234567890",
@@ -196,7 +196,7 @@ func TestEnsureInitialized(t *testing.T) {
 	})
 
 	t.Run("should preserve existing valid Status", func(t *testing.T) {
-		task := &Task{
+		task := &Workflow{
 			Task: &avsproto.Task{
 				Id:                 "test-task-id",
 				Owner:              "0x1234567890123456789012345678901234567890",
@@ -211,7 +211,7 @@ func TestEnsureInitialized(t *testing.T) {
 	})
 
 	t.Run("should return error for missing critical fields", func(t *testing.T) {
-		task := &Task{
+		task := &Workflow{
 			Task: &avsproto.Task{
 				Id:     "", // Missing ID - this is critical for storage and logging
 				Owner:  "0x1234567890123456789012345678901234567890",
@@ -225,7 +225,7 @@ func TestEnsureInitialized(t *testing.T) {
 	})
 
 	t.Run("should return error for nil Task", func(t *testing.T) {
-		task := &Task{
+		task := &Workflow{
 			Task: nil,
 		}
 
@@ -238,7 +238,7 @@ func TestEnsureInitialized(t *testing.T) {
 func TestFromStorageDataWithValidation(t *testing.T) {
 	t.Run("should properly initialize task from valid storage data", func(t *testing.T) {
 		// Create a task with valid data
-		originalTask := &Task{
+		originalTask := &Workflow{
 			Task: &avsproto.Task{
 				Id:                 "test-task-id",
 				Owner:              "0x1234567890123456789012345678901234567890",
@@ -255,7 +255,7 @@ func TestFromStorageDataWithValidation(t *testing.T) {
 
 		// Simulate loading from storage with potential status corruption
 		// (In real scenarios, corrupt data might have missing/invalid Status)
-		loadedTask := NewTask()
+		loadedTask := NewWorkflow()
 		err = loadedTask.FromStorageData(jsonData)
 		assert.NoError(t, err, "FromStorageData should not error")
 		assert.Equal(t, avsproto.TaskStatus_Enabled, loadedTask.Status, "Status should be properly initialized")

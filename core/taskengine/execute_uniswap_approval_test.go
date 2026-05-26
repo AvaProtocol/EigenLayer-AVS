@@ -327,7 +327,7 @@ func TestExecuteTask_UniswapApprovalAndSwap_DifferentApprovalAmounts_Sepolia(t *
 			}
 
 			// Execute simulation
-			execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
+			execution, err := engine.SimulateWorkflow(user, trigger, nodes, edges, inputVariables)
 			require.NoError(t, err, "SimulateTask should not return an error")
 			require.NotNil(t, execution, "Execution should not be nil")
 

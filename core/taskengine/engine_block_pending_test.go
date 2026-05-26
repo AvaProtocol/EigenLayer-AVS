@@ -27,13 +27,13 @@ func TestTriggerTask_NonBlockingBlock_PersistsPendingAndReturnsId(t *testing.T) 
 	}
 	testutil.SetTaskSettings(tr, "rest_task", walletResp.Address)
 
-	created, err := n.CreateTask(testutil.TestUser1(), tr)
+	created, err := n.CreateWorkflow(testutil.TestUser1(), tr)
 	if err != nil {
 		t.Fatalf("CreateTask failed: %v", err)
 	}
 
 	// Trigger with non-blocking BLOCK
-	resp, err := n.TriggerTask(testutil.TestUser1(), &avsproto.TriggerTaskReq{
+	resp, err := n.TriggerWorkflow(testutil.TestUser1(), &avsproto.TriggerTaskReq{
 		TaskId:      created.Id,
 		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{

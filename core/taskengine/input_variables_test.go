@@ -110,7 +110,7 @@ func TestInputVariables_SimulateTask(t *testing.T) {
 	}
 
 	// Execute SimulateTask with input variables
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
+	execution, err := engine.SimulateWorkflow(user, trigger, nodes, edges, inputVariables)
 	require.NoError(t, err)
 	require.NotNil(t, execution)
 
@@ -194,7 +194,7 @@ func TestInputVariables_DeployedTask(t *testing.T) {
 	inputVarsProto["tokenList"] = tokenListValue
 
 	// Create a task with input variables
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:             "test-task-input-vars",
 			Owner:          "", // Empty owner to skip wallet validation
@@ -380,7 +380,7 @@ func TestInputVariables_CreateTask(t *testing.T) {
 	}
 
 	// Create the task
-	task, err := engine.CreateTask(user, createReq)
+	task, err := engine.CreateWorkflow(user, createReq)
 	require.NoError(t, err)
 	require.NotNil(t, task)
 
@@ -490,7 +490,7 @@ func TestInputVariables_TemplateResolution(t *testing.T) {
 	}
 
 	// Execute SimulateTask
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
+	execution, err := engine.SimulateWorkflow(user, trigger, nodes, edges, inputVariables)
 	require.NoError(t, err)
 	require.NotNil(t, execution)
 
@@ -584,7 +584,7 @@ func TestInputVariables_EmptyInputVariables(t *testing.T) {
 	}
 
 	// SimulateTask should reject nil inputVariables
-	_, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
+	_, err := engine.SimulateWorkflow(user, trigger, nodes, edges, inputVariables)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "inputVariables is required")
 

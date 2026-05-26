@@ -116,7 +116,7 @@ func TestSendGridEmailWithContextMemoryResponse(t *testing.T) {
 		Id:   "trigger1",
 		Name: "trigger1",
 	}
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "test-task",
 			Trigger: trigger,

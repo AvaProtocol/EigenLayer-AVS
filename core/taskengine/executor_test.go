@@ -79,7 +79,7 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 		},
 	}
 
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "TaskID123",
 			Nodes:   nodes,
@@ -202,7 +202,7 @@ func TestExecutorRunTaskWithBranchSilentFailureBehavior(t *testing.T) {
 		},
 	}
 
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "TaskID123",
 			Nodes:   nodes,
@@ -320,7 +320,7 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 		},
 	}
 
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "TaskID123",
 			Nodes:   nodes,
@@ -478,7 +478,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 		},
 	}
 
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "TaskID123",
 			Nodes:   nodes,

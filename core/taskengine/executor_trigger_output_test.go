@@ -175,7 +175,7 @@ func TestTriggerOutputDataSerializationFix(t *testing.T) {
 						},
 					}
 
-					task := &model.Task{
+					task := &model.Workflow{
 						Task: &avsproto.Task{
 							Id:      "test-task-" + tt.name + "-" + tc.name,
 							Nodes:   nodes,

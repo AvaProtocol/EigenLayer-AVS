@@ -88,7 +88,7 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,

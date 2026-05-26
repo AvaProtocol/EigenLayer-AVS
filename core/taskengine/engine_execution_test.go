@@ -30,9 +30,9 @@ func TestGetExecution(t *testing.T) {
 
 	tr1 := testutil.RestTask()
 	testutil.SetTaskSettings(tr1, "t1", smartWalletAddress)
-	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
+	result, _ := n.CreateWorkflow(testutil.TestUser1(), tr1)
 
-	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.TriggerTaskReq{
+	resultTrigger, err := n.TriggerWorkflow(testutil.TestUser1(), &avsproto.TriggerTaskReq{
 		TaskId:      result.Id,
 		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{
@@ -152,9 +152,9 @@ func TestTriggerSync(t *testing.T) {
 
 	tr1 := testutil.RestTask()
 	testutil.SetTaskSettings(tr1, "t1", smartWalletAddress)
-	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
+	result, _ := n.CreateWorkflow(testutil.TestUser1(), tr1)
 
-	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.TriggerTaskReq{
+	resultTrigger, err := n.TriggerWorkflow(testutil.TestUser1(), &avsproto.TriggerTaskReq{
 		TaskId:      result.Id,
 		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{
@@ -274,9 +274,9 @@ func TestTriggerAsync(t *testing.T) {
 
 	tr1 := testutil.RestTask()
 	testutil.SetTaskSettings(tr1, "t1", smartWalletAddress)
-	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
+	result, _ := n.CreateWorkflow(testutil.TestUser1(), tr1)
 
-	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.TriggerTaskReq{
+	resultTrigger, err := n.TriggerWorkflow(testutil.TestUser1(), &avsproto.TriggerTaskReq{
 		TaskId:      result.Id,
 		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{
@@ -397,9 +397,9 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 	tr1 := testutil.RestTask()
 	testutil.SetTaskSettings(tr1, "t1", smartWalletAddress)
 	tr1.MaxExecution = 1
-	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
+	result, _ := n.CreateWorkflow(testutil.TestUser1(), tr1)
 
-	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.TriggerTaskReq{
+	resultTrigger, err := n.TriggerWorkflow(testutil.TestUser1(), &avsproto.TriggerTaskReq{
 		TaskId:      result.Id,
 		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{
@@ -419,7 +419,7 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 		return
 	}
 
-	resultTrigger, err = n.TriggerTask(testutil.TestUser1(), &avsproto.TriggerTaskReq{
+	resultTrigger, err = n.TriggerWorkflow(testutil.TestUser1(), &avsproto.TriggerTaskReq{
 		TaskId:      result.Id,
 		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{

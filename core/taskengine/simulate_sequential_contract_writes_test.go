@@ -228,7 +228,7 @@ func TestSimulateTask_SequentialContractWrites_Sepolia(t *testing.T) {
 	t.Logf("   Node 2: Swap %s USDC for WETH", swapAmount)
 
 	// Run simulation (should NOT actually execute on-chain)
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
+	execution, err := engine.SimulateWorkflow(user, trigger, nodes, edges, inputVariables)
 
 	require.NoError(t, err, "SimulateTask should not return error")
 	require.NotNil(t, execution, "Simulation result should not be nil")

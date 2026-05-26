@@ -226,7 +226,7 @@ type VM struct {
 	TaskID            string
 	TaskNodes         map[string]*avsproto.TaskNode
 	TaskOwner         common.Address
-	task              *model.Task
+	task              *model.Workflow
 	triggerData       *TriggerData
 	parsedTriggerData *triggerDataType
 	ExecutionLogs     []*avsproto.Execution_Step
@@ -381,11 +381,11 @@ func (v *VM) getNodeNameAsVarLocked(nodeID string) string {
 	return sanitizeTriggerNameForJS(name)
 }
 
-func NewVMWithData(task *model.Task, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
+func NewVMWithData(task *model.Workflow, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
 	return NewVMWithDataAndTransferLog(task, triggerData, smartWalletConfig, secrets, nil)
 }
 
-func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog *structpb.Value) (*VM, error) {
+func NewVMWithDataAndTransferLog(task *model.Workflow, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog *structpb.Value) (*VM, error) {
 	// Add safety checks to prevent nil pointer dereferences
 	// Note: task and triggerData can be nil for testing utilities like runNodeWithInputs
 	if smartWalletConfig == nil {
@@ -3406,7 +3406,7 @@ func convertProtobufValueToMap(value *structpb.Value) map[string]interface{} {
 }
 
 // validateAllNodeNamesForJavaScript validates all node names in a task
-func validateAllNodeNamesForJavaScript(task *model.Task) error {
+func validateAllNodeNamesForJavaScript(task *model.Workflow) error {
 	if task == nil {
 		return nil
 	}

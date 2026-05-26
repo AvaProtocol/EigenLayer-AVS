@@ -41,7 +41,7 @@ func TestTriggerRequestIdDedup(t *testing.T) {
 	taskReq := testutil.RestTask()
 	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	taskReq.MaxExecution = 100
-	task, err := engine.CreateTask(user, taskReq)
+	task, err := engine.CreateWorkflow(user, taskReq)
 	require.NoError(t, err)
 
 	operatorAddr := "0x1234567890123456789012345678901234567890"
@@ -90,7 +90,7 @@ func TestTriggerRequestIdDedup_DifferentIdsNotDeduplicated(t *testing.T) {
 	taskReq := testutil.RestTask()
 	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	taskReq.MaxExecution = 100
-	task, err := engine.CreateTask(user, taskReq)
+	task, err := engine.CreateWorkflow(user, taskReq)
 	require.NoError(t, err)
 
 	operatorAddr := "0x1234567890123456789012345678901234567890"
@@ -139,7 +139,7 @@ func TestTriggerRequestIdDedup_EmptyIdSkipsDedup(t *testing.T) {
 	taskReq := testutil.RestTask()
 	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
 	taskReq.MaxExecution = 100
-	task, err := engine.CreateTask(user, taskReq)
+	task, err := engine.CreateWorkflow(user, taskReq)
 	require.NoError(t, err)
 
 	operatorAddr := "0x1234567890123456789012345678901234567890"

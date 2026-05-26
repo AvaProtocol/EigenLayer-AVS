@@ -30,7 +30,7 @@ func TestNonBlockingExecutionFullLifecycle(t *testing.T) {
 	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger(), engine, nil)
 
 	// Create a simple task with manual trigger and custom code node
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:             "test-task-lifecycle",
 			Owner:          "", // Empty owner to skip wallet validation

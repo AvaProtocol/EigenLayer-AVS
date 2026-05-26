@@ -51,7 +51,7 @@ func TestExecutorRunTaskWithNilReason(t *testing.T) {
 		},
 	}
 
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "ManualTaskID",
 			Nodes:   nodes,

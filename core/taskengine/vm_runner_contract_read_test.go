@@ -57,7 +57,7 @@ func TestContractReadSimpleReturn(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
@@ -162,7 +162,7 @@ func TestContractReadComplexReturn(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
@@ -298,7 +298,7 @@ func TestContractReadWithDecimalFormatting(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "123decimal",
 			Nodes:   nodes,

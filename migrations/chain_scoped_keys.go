@@ -46,7 +46,7 @@ func MigrateKeysToChainScoped(db storage.Storage, chainID int64) (int, error) {
 		avsproto.TaskStatus_Completed,
 		avsproto.TaskStatus_Failed,
 	} {
-		legacyPrefix := string(storageschema.TaskByStatusStoragePrefix(status))
+		legacyPrefix := string(storageschema.WorkflowByStatusStoragePrefix(status))
 		n, err := migrateTaskStatusBucket(db, chainID, legacyPrefix, status)
 		if err != nil {
 			return total, fmt.Errorf("task-status bucket %q: %w", legacyPrefix, err)
@@ -94,7 +94,7 @@ func migrateTaskStatusBucket(db storage.Storage, chainID int64, legacyPrefix str
 			return moved, fmt.Errorf("malformed legacy task-status key: %s", k)
 		}
 		taskID := parts[2]
-		dst := storageschema.ChainTaskStorageKey(chainID, taskID, status)
+		dst := storageschema.ChainWorkflowStorageKey(chainID, taskID, status)
 		if err := db.Move([]byte(k), dst); err != nil {
 			return moved, fmt.Errorf("moving %s → %s: %w", k, string(dst), err)
 		}

@@ -9,7 +9,7 @@ import (
 )
 
 func TestRenderString(t *testing.T) {
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id: "sampletaskid1",
 			Trigger: &avsproto.TaskTrigger{
@@ -38,7 +38,7 @@ func TestRenderString(t *testing.T) {
 }
 
 func TestPreprocessText(t *testing.T) {
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id: "sampletaskid1",
 			Trigger: &avsproto.TaskTrigger{
@@ -157,7 +157,7 @@ func TestPreprocessText(t *testing.T) {
 }
 
 func TestPreprocessTextDate(t *testing.T) {
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id: "sampletaskid1",
 			Trigger: &avsproto.TaskTrigger{

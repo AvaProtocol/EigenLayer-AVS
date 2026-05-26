@@ -60,8 +60,8 @@ func reconstructTriggerOutputData(m map[string]interface{}, logger sdklogging.Lo
 	return nil
 }
 
-func NewExecutor(swConfig *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger, engine *Engine, priceService PriceService) *TaskExecutor {
-	executor := &TaskExecutor{
+func NewExecutor(swConfig *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger, engine *Engine, priceService PriceService) *WorkflowExecutor {
+	executor := &WorkflowExecutor{
 		db:                     db,
 		logger:                 logger,
 		smartWalletConfig:      swConfig,
@@ -76,14 +76,14 @@ func NewExecutor(swConfig *config.SmartWalletConfig, db storage.Storage, logger 
 	return executor
 }
 
-// Creates a TaskExecutor with nil engine for testing purposes
+// Creates a WorkflowExecutor with nil engine for testing purposes
 // Tests should set up a mock engine or use this when atomic indexing is not needed
-func NewExecutorForTesting(swCfg *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger) *TaskExecutor {
+func NewExecutorForTesting(swCfg *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger) *WorkflowExecutor {
 	// Initialize a minimal Engine instance so tests exercise production code paths
 	// without requiring separate mocks or test-only fallbacks.
 	minimalCfg := &config.Config{SmartWallet: swCfg}
 	eng := New(db, minimalCfg, nil, logger)
-	return &TaskExecutor{
+	return &WorkflowExecutor{
 		db:                     db,
 		logger:                 logger,
 		smartWalletConfig:      swCfg,
@@ -92,7 +92,7 @@ func NewExecutorForTesting(swCfg *config.SmartWalletConfig, db storage.Storage, 
 	}
 }
 
-type TaskExecutor struct {
+type WorkflowExecutor struct {
 	db                     storage.Storage
 	logger                 sdklogging.Logger
 	smartWalletConfig      *config.SmartWalletConfig
@@ -109,18 +109,18 @@ type QueueExecutionData struct {
 	InputVariables map[string]interface{} // Input variables for template resolution (e.g., settings: {runner, chain_id})
 }
 
-func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
-	task := &model.Task{
+func (x *WorkflowExecutor) GetTask(id string) (*model.Workflow, error) {
+	task := &model.Workflow{
 		Task: &avsproto.Task{},
 	}
 	// Lookup by task ID alone — search every known chain bucket. The engine
 	// reference is always set in production; tests that build a standalone
-	// TaskExecutor still fall back to the legacy single-chain key.
+	// WorkflowExecutor still fall back to the legacy single-chain key.
 	var storageKey []byte
 	if x.engine != nil {
 		storageKey = x.engine.findTaskKey(id, avsproto.TaskStatus_Enabled)
 	} else {
-		storageKey = storageschema.TaskStorageKey(id, avsproto.TaskStatus_Enabled)
+		storageKey = storageschema.WorkflowStorageKey(id, avsproto.TaskStatus_Enabled)
 	}
 	item, err := x.db.GetKey(storageKey)
 
@@ -153,7 +153,7 @@ func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
 	return task, nil
 }
 
-func (x *TaskExecutor) Perform(job *apqueue.Job) error {
+func (x *WorkflowExecutor) Perform(job *apqueue.Job) error {
 	task, err := x.GetTask(job.Name)
 
 	if err != nil {
@@ -199,7 +199,7 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 	return runErr // Propagate the error from task execution
 }
 
-func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) (*avsproto.Execution, error) {
+func (x *WorkflowExecutor) RunTask(task *model.Workflow, queueData *QueueExecutionData) (*avsproto.Execution, error) {
 	// Load secrets for the task
 	secrets, err := LoadSecretForTask(x.db, task)
 	if err != nil {
@@ -692,7 +692,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	// batch update storage for task + execution log
 	updates := map[string][]byte{}
-	updates[string(ChainTaskStorageKey(task.ChainId, task.Id, task.Status))], err = task.ToJSON()
+	updates[string(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status))], err = task.ToJSON()
 	updates[string(ChainTaskUserKey(task.ChainId, task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 	// update execution log
@@ -727,7 +727,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	// whenever a task change its status, we moved it, therefore we will need to clean up the old storage
 	if task.Status != initialTaskStatus {
-		if err = x.db.Delete(ChainTaskStorageKey(task.ChainId, task.Id, initialTaskStatus)); err != nil {
+		if err = x.db.Delete(ChainWorkflowStorageKey(task.ChainId, task.Id, initialTaskStatus)); err != nil {
 			x.logger.Errorf("error updating task status. %w", err, "task_id", task.Id)
 		}
 	}
@@ -839,7 +839,7 @@ func sanitizeInterface(x interface{}) interface{} {
 
 // validateWalletOwnership performs comprehensive wallet ownership validation
 // This handles default wallets (salt:0), stored wallets, and legitimately derived wallets
-func (x *TaskExecutor) validateWalletOwnership(user *model.User, smartWalletAddr common.Address) (bool, error) {
+func (x *WorkflowExecutor) validateWalletOwnership(user *model.User, smartWalletAddr common.Address) (bool, error) {
 	// Step 1: Load the user's default smart wallet address (salt:0) for comparison
 	if x.smartWalletConfig != nil && x.smartWalletConfig.EthRpcUrl != "" {
 		if rpcClient, err := ethclient.Dial(x.smartWalletConfig.EthRpcUrl); err == nil {
@@ -878,7 +878,7 @@ func (x *TaskExecutor) validateWalletOwnership(user *model.User, smartWalletAddr
 
 // validateDerivedWallet checks if a wallet address can be legitimately derived
 // from the owner using the configured factory (for any salt value)
-func (x *TaskExecutor) validateDerivedWallet(owner common.Address, smartWalletAddr common.Address) (bool, error) {
+func (x *WorkflowExecutor) validateDerivedWallet(owner common.Address, smartWalletAddr common.Address) (bool, error) {
 	rpcClient, err := ethclient.Dial(x.smartWalletConfig.EthRpcUrl)
 	if err != nil {
 		return false, fmt.Errorf("failed to connect to RPC: %w", err)
@@ -916,7 +916,7 @@ func (x *TaskExecutor) validateDerivedWallet(owner common.Address, smartWalletAd
 
 // persistFailedExecution persists a failed execution record to the database
 // This ensures that failed executions (like wallet validation failures) are recorded for troubleshooting
-func (x *TaskExecutor) persistFailedExecution(task *model.Task, execution *avsproto.Execution, initialTaskStatus avsproto.TaskStatus) {
+func (x *WorkflowExecutor) persistFailedExecution(task *model.Workflow, execution *avsproto.Execution, initialTaskStatus avsproto.TaskStatus) {
 	// Log the failure for debugging
 	x.logger.Error("task execution failed during validation",
 		"error", execution.Error,
@@ -932,7 +932,7 @@ func (x *TaskExecutor) persistFailedExecution(task *model.Task, execution *avspr
 
 	// Update task data
 	if taskJSON, err := task.ToJSON(); err == nil {
-		updates[string(ChainTaskStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
+		updates[string(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
 		updates[string(ChainTaskUserKey(task.ChainId, task))] = []byte(fmt.Sprintf("%d", task.Status))
 	} else {
 		x.logger.Error("Failed to serialize task for persistence", "task_id", task.Id, "error", err)
@@ -955,7 +955,7 @@ func (x *TaskExecutor) persistFailedExecution(task *model.Task, execution *avspr
 
 	// Clean up old task status if it changed
 	if task.Status != initialTaskStatus {
-		if err := x.db.Delete(ChainTaskStorageKey(task.ChainId, task.Id, initialTaskStatus)); err != nil {
+		if err := x.db.Delete(ChainWorkflowStorageKey(task.ChainId, task.Id, initialTaskStatus)); err != nil {
 			x.logger.Error("error cleaning up old task status", "task_id", task.Id, "error", err)
 		}
 	}

@@ -14,7 +14,11 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
-type Task struct {
+// Workflow wraps the protobuf Task type with engine-side methods. The
+// embedded *avsproto.Task field is renamed to Workflow as part of the
+// gRPC public-surface removal (see API_REST_IMPLEMENTATION_PLAN.md); for
+// now the embedded type keeps its proto-generated name.
+type Workflow struct {
 	*avsproto.Task
 }
 
@@ -88,14 +92,14 @@ func GenerateID() string {
 	return strings.ToLower(ulid.Make().String())
 }
 
-// GenerateTaskID creates a new task ID using the centralized ID generation
-// Kept for backward compatibility, but internally uses GenerateID()
-func GenerateTaskID() string {
+// GenerateWorkflowID creates a new workflow ID using the centralized ID
+// generation. Workflow IDs are ULIDs to keep them sortable by creation time.
+func GenerateWorkflowID() string {
 	return GenerateID()
 }
 
-func NewTask() *Task {
-	return &Task{
+func NewWorkflow() *Workflow {
+	return &Workflow{
 		Task: &avsproto.Task{
 			Status: avsproto.TaskStatus_Enabled, // Initialize with default status
 		},
@@ -167,8 +171,9 @@ func enrichSettings(inputVariables map[string]*structpb.Value, settings map[stri
 	return nil
 }
 
-// Populate a task structure from proto payload
-func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error) {
+// NewWorkflowFromProtobuf populates a Workflow structure from the proto
+// CreateTask request payload.
+func NewWorkflowFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Workflow, error) {
 	if body == nil {
 		return nil, nil
 	}
@@ -193,14 +198,14 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 	name, _ := settings["name"].(string)
 	runner, _ := settings["runner"].(string)
 
-	taskID := GenerateTaskID()
+	taskID := GenerateWorkflowID()
 
 	// Enrich settings with server-generated immutable fields
 	if err := enrichSettings(body.InputVariables, settings, taskID, owner, body); err != nil {
 		return nil, fmt.Errorf("invalid task argument: %w", err)
 	}
 
-	t := &Task{
+	t := &Workflow{
 		Task: &avsproto.Task{
 			Id: taskID,
 
@@ -232,12 +237,12 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 }
 
 // Return a compact json ready to persist to storage
-func (t *Task) ToJSON() ([]byte, error) {
+func (t *Workflow) ToJSON() ([]byte, error) {
 	// return json.Marshal(t)
 	return protojson.Marshal(t.Task)
 }
 
-func (t *Task) FromStorageData(body []byte) error {
+func (t *Workflow) FromStorageData(body []byte) error {
 	// err := json.Unmarshal(body, t)
 	err := protojson.Unmarshal(body, t.Task)
 	if err != nil {
@@ -250,7 +255,7 @@ func (t *Task) FromStorageData(body []byte) error {
 
 // EnsureInitialized validates and fixes critical fields that must be set
 // This should be called after loading tasks from storage to ensure data integrity
-func (t *Task) EnsureInitialized() error {
+func (t *Workflow) EnsureInitialized() error {
 	if t.Task == nil {
 		return fmt.Errorf("task protobuf struct is nil")
 	}
@@ -274,12 +279,12 @@ func (t *Task) EnsureInitialized() error {
 }
 
 // Return a compact json ready to persist to storage
-func (t *Task) Validate() bool {
+func (t *Workflow) Validate() bool {
 	return t.ValidateWithError() == nil
 }
 
 // ValidateWithError returns detailed validation error messages
-func (t *Task) ValidateWithError() error {
+func (t *Workflow) ValidateWithError() error {
 	// Validate trigger name for JavaScript compatibility
 	if t.Task.Trigger != nil && t.Task.Trigger.Name != "" {
 		if err := ValidateNodeNameForJavaScript(t.Task.Trigger.Name); err != nil {
@@ -344,42 +349,42 @@ func (t *Task) ValidateWithError() error {
 	return nil
 }
 
-func (t *Task) ToProtoBuf() (*avsproto.Task, error) {
+func (t *Workflow) ToProtoBuf() (*avsproto.Task, error) {
 	return t.Task, nil
 }
 
 // Generate a global unique key for the task in our system
-func (t *Task) Key() []byte {
+func (t *Workflow) Key() []byte {
 	return []byte(t.Task.Id)
 }
 
-func (t *Task) SetCompleted() {
+func (t *Workflow) SetCompleted() {
 	t.Task.Status = avsproto.TaskStatus_Completed
 	t.Task.CompletedAt = time.Now().UnixMilli()
 }
 
-func (t *Task) SetEnabled() {
+func (t *Workflow) SetEnabled() {
 	t.Task.Status = avsproto.TaskStatus_Enabled
 }
 
-func (t *Task) SetFailed() {
+func (t *Workflow) SetFailed() {
 	t.Task.Status = avsproto.TaskStatus_Failed
 	t.Task.CompletedAt = time.Now().UnixMilli()
 }
 
-func (t *Task) SetDisabled() {
+func (t *Workflow) SetDisabled() {
 	t.Task.Status = avsproto.TaskStatus_Disabled
 }
 
 // Check whether the task own by the given address
-func (t *Task) OwnedBy(address common.Address) bool {
+func (t *Workflow) OwnedBy(address common.Address) bool {
 	return strings.EqualFold(t.Task.Owner, address.Hex())
 }
 
 // A task is runable when all of these conditions are matched
 //  1. Its max execution has not reached
 //  2. Its expiration time has not reached
-func (t *Task) IsRunable() bool {
+func (t *Workflow) IsRunable() bool {
 	// When MaxExecution is 0, it is unlimited run
 	reachedMaxRun := t.Task.MaxExecution > 0 && t.Task.ExecutionCount >= t.Task.MaxExecution
 
@@ -390,13 +395,14 @@ func (t *Task) IsRunable() bool {
 	return !reachedMaxRun && !reachedExpiredTime && !beforeStartTime
 }
 
-// Given a task key generated from Key(), extract the ID part
-func TaskKeyToId(key []byte) []byte {
-	// <43-byte>:<43-byte>:
-	// the first 43 bytes is owner address
+// WorkflowKeyToId extracts the workflow ID portion of a storage key
+// generated by Workflow.Key(). The first 86 bytes are
+// <43-byte owner>:<43-byte runner>:.
+func WorkflowKeyToId(key []byte) []byte {
 	return key[86:]
 }
 
-func UlidFromTaskId(taskID string) ulid.ULID {
-	return ulid.MustParse(taskID)
+// UlidFromWorkflowId parses a workflow ID string into its ULID value.
+func UlidFromWorkflowId(workflowID string) ulid.ULID {
+	return ulid.MustParse(workflowID)
 }

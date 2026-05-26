@@ -169,7 +169,7 @@ func IsChainScopedKey(key []byte) bool {
 	}
 }
 
-// storageKeyToTaskStatus is the inverse of schema.TaskStatusToStorageKey.
+// storageKeyToTaskStatus is the inverse of schema.WorkflowStatusToStorageKey.
 func storageKeyToTaskStatus(s string) avsproto.TaskStatus {
 	switch s {
 	case "c":

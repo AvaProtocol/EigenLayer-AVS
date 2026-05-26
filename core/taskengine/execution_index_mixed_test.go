@@ -27,7 +27,7 @@ func TestMixedExecutionIndexing(t *testing.T) {
 	engine := New(db, config, nil, testutil.GetLogger())
 
 	// Create a simple test task
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:             "test-mixed-execution-indexing",
 			Owner:          "", // Empty owner to skip wallet validation

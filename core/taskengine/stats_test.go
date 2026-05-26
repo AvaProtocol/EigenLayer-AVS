@@ -32,7 +32,7 @@ func TestTaskStatCount(t *testing.T) {
 	tr1 := testutil.RestTask()
 	testutil.SetTaskSettings(tr1, "t1", smartWalletAddress)
 	tr1.MaxExecution = 1
-	n.CreateTask(testutil.TestUser1(), tr1)
+	n.CreateWorkflow(testutil.TestUser1(), tr1)
 
 	statSvc := NewStatService(db)
 	// Query statistics using the same smart wallet address used for task creation
@@ -58,7 +58,7 @@ func TestTaskStatCountCompleted(t *testing.T) {
 
 	user1 := testutil.TestUser1()
 
-	task1 := &model.Task{
+	task1 := &model.Workflow{
 		Task: &avsproto.Task{
 			Owner:              user1.Address.Hex(),
 			SmartWalletAddress: user1.SmartAccountAddress.Hex(),
@@ -87,7 +87,7 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 
 	user1 := testutil.TestUser1()
 
-	task1 := &model.Task{
+	task1 := &model.Workflow{
 		Task: &avsproto.Task{
 			Owner:              user1.Address.Hex(),
 			SmartWalletAddress: user1.SmartAccountAddress.Hex(),
@@ -95,7 +95,7 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 		},
 	}
 
-	task2 := &model.Task{
+	task2 := &model.Workflow{
 		Task: &avsproto.Task{
 			Owner:              user1.Address.Hex(),
 			SmartWalletAddress: user1.SmartAccountAddress.Hex(),
@@ -103,7 +103,7 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 		},
 	}
 
-	task3 := &model.Task{
+	task3 := &model.Workflow{
 		Task: &avsproto.Task{
 			Owner:              user1.Address.Hex(),
 			SmartWalletAddress: user1.SmartAccountAddress.Hex(),
@@ -111,7 +111,7 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 		},
 	}
 
-	task4 := &model.Task{
+	task4 := &model.Workflow{
 		Task: &avsproto.Task{
 			Owner:              user1.Address.Hex(),
 			SmartWalletAddress: user1.SmartAccountAddress.Hex(),

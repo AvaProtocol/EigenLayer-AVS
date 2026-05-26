@@ -44,7 +44,7 @@ func TestOrphanedTaskReclamation(t *testing.T) {
 
 	// Step 1: Create a simple task (without the problematic smart wallet validation)
 	// We'll create the task directly in memory rather than through CreateTask
-	taskData := &model.Task{
+	taskData := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:           "test-task-001",
 			Name:         "Test Orphaned Task",
@@ -86,7 +86,7 @@ func TestOrphanedTaskReclamation(t *testing.T) {
 	}
 
 	// Manually add task to engine's task map (simulating loaded from database)
-	engine.AddTaskForTesting(taskData)
+	engine.AddWorkflowForTesting(taskData)
 
 	t.Logf("✅ Added task to engine: %s", taskData.Task.Id)
 
@@ -269,7 +269,7 @@ func TestMonotonicClockTaskReset(t *testing.T) {
 	defer engine.Stop()
 
 	// Add test task
-	taskData := &model.Task{
+	taskData := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:           "monotonic-test-task",
 			Name:         "MonotonicClock Test Task",
@@ -308,7 +308,7 @@ func TestMonotonicClockTaskReset(t *testing.T) {
 		},
 	}
 
-	engine.AddTaskForTesting(taskData)
+	engine.AddWorkflowForTesting(taskData)
 
 	operatorAddr := "0x997E5D40a32c44a3D93E59fC55C4Fd20b7d2d49D"
 	baseMonotonicClock := time.Now().UnixNano()

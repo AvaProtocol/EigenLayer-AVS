@@ -159,7 +159,7 @@ func TestOperatorReconnectionFlow(t *testing.T) {
 		},
 	}
 
-	task, err := engine.CreateTask(user, taskReq)
+	task, err := engine.CreateWorkflow(user, taskReq)
 	require.NoError(t, err)
 	require.NotNil(t, task)
 
@@ -349,7 +349,7 @@ func TestOperatorReconnectionRaceCondition(t *testing.T) {
 		Edges: []*avsproto.TaskEdge{{Id: "trigger_to_log", Source: "trigger", Target: "log_node"}},
 	}
 
-	_, err = engine.CreateTask(user, taskReq)
+	_, err = engine.CreateWorkflow(user, taskReq)
 	require.NoError(t, err)
 
 	operatorAddr := "0x997E5D40a32c44a3D93E59fC55C4Fd20b7d2d49D"
