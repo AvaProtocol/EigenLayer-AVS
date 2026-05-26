@@ -32,19 +32,42 @@ import (
 // result. Validation lives in a shared validators package (added alongside
 // handler bodies in a follow-up commit).
 type Server struct {
-	engine *taskengine.Engine
-	logger sdklogging.Logger
-	config *config.Config
+	engine    *taskengine.Engine
+	logger    sdklogging.Logger
+	config    *config.Config
+	operators OperatorLister
+}
+
+// OperatorLister is the minimal surface the REST package needs from the
+// aggregator's operator pool — kept as an interface so we don't import
+// the aggregator package (would cycle) and so tests can inject a fake.
+type OperatorLister interface {
+	List() []OperatorView
+}
+
+// OperatorView is the chain-agnostic shape the REST layer renders. The
+// aggregator package adapts its internal *OperatorNode into this shape
+// when constructing the Server so the proto/internal type stays
+// internal.
+type OperatorView struct {
+	Address           string
+	Name              string
+	Version           string
+	BlockNumber       int64
+	EventCount        int64
+	LastPingEpochMs   int64
+	SupportedChainIDs []int64
 }
 
 // NewServer wires the REST handler with its dependencies. Constructed once
 // at aggregator startup and shared across all in-flight requests; the
 // Echo router handles request-level concurrency.
-func NewServer(engine *taskengine.Engine, logger sdklogging.Logger, cfg *config.Config) *Server {
+func NewServer(engine *taskengine.Engine, logger sdklogging.Logger, cfg *config.Config, operators OperatorLister) *Server {
 	return &Server{
-		engine: engine,
-		logger: logger,
-		config: cfg,
+		engine:    engine,
+		logger:    logger,
+		config:    cfg,
+		operators: operators,
 	}
 }
 
