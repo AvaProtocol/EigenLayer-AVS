@@ -336,21 +336,26 @@ func registerColonActionShimRoutes(api *echo.Group, s *Server) {
 		return s.GetWalletNonce(c, generated.EthereumAddress(c.Param("address")))
 	})
 
-	// Executions
+	// Executions. Query params are read manually (rather than via
+	// echo.DefaultBinder.BindQueryParams) because Ulid is a type
+	// alias for string — the default binder silently skips fields
+	// whose Go type is a named alias rather than the bare primitive.
+	// The generated wrapper uses oapi-codegen's runtime.BindQueryParameter
+	// which understands aliases; reproducing it inline here would
+	// drag the runtime dep into the shim, so we just lift the
+	// strings directly.
 	api.GET("/executions/:id"+colonActionShim+"getStatus", func(c echo.Context) error {
-		var params generated.GetExecutionStatusParams
-		if err := (&echo.DefaultBinder{}).BindQueryParams(c, &params); err != nil {
-			return err
+		params := generated.GetExecutionStatusParams{
+			WorkflowId: generated.Ulid(c.QueryParam("workflowId")),
 		}
 		return s.GetExecutionStatus(c, generated.Ulid(c.Param("id")), params)
 	})
 	api.GET("/executions/:id"+colonActionShim+"stream", func(c echo.Context) error {
-		// StreamExecution takes a params struct (for interval +
-		// workflowId). Build it from the request the same way the
-		// generated wrapper would.
-		var params generated.StreamExecutionParams
-		if err := (&echo.DefaultBinder{}).BindQueryParams(c, &params); err != nil {
-			return err
+		params := generated.StreamExecutionParams{
+			WorkflowId: generated.Ulid(c.QueryParam("workflowId")),
+		}
+		if interval := c.QueryParam("interval"); interval != "" {
+			params.Interval = &interval
 		}
 		return s.StreamExecution(c, generated.Ulid(c.Param("id")), params)
 	})

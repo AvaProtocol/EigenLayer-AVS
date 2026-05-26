@@ -105,20 +105,129 @@ func ProtoExecutionToOpenAPISummary(in *avsproto.Execution, workflowID string) g
 }
 
 // protoExecutionStepToOpenAPI converts a single step. The step's per-type
-// Output oneof is flattened into the OpenAPI `output` map; the simplest
-// route is a protojson marshal of the entire step, then re-extracting
-// the fields we care about — this lets future proto additions to
-// Execution_Step show up in the response without changing this mapper.
+// Output oneof is flattened into the OpenAPI `output` map by marshalling
+// the proto via protojson and pulling the first known variant field
+// (mirrors how runNodeRespToOpenAPI handles RunNodeWithInputsResp).
+//
+// Scalars are hand-mapped rather than roundtripped through JSON because
+// protojson emits int64 fields as JSON strings (per the protobuf JSON
+// spec), which can't unmarshal into the generated `int64` slots on
+// ExecutionStep. Going field-by-field is also typesafe.
 func protoExecutionStepToOpenAPI(in *avsproto.Execution_Step) (generated.ExecutionStep, error) {
-	raw, err := (protojson.MarshalOptions{}).Marshal(in)
-	if err != nil {
-		return generated.ExecutionStep{}, err
+	out := generated.ExecutionStep{
+		Id:      in.GetId(),
+		Type:    normalizeStepType(in.GetType()),
+		Success: in.GetSuccess(),
 	}
-	var out generated.ExecutionStep
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return generated.ExecutionStep{}, err
+	if v := in.GetName(); v != "" {
+		out.Name = &v
+	}
+	if v := in.GetError(); v != "" {
+		out.Error = &v
+	}
+	if code := in.GetErrorCode().String(); code != "" && code != "ERROR_CODE_UNSPECIFIED" {
+		out.ErrorCode = &code
+	}
+	if v := in.GetLog(); v != "" {
+		out.Log = &v
+	}
+	if v := in.GetStartAt(); v != 0 {
+		out.StartAt = &v
+	}
+	if v := in.GetEndAt(); v != 0 {
+		out.EndAt = &v
+	}
+	if v := in.GetGasUsed(); v != "" {
+		out.GasUsed = &v
+	}
+	if v := in.GetGasPrice(); v != "" {
+		out.GasPrice = &v
+	}
+	if v := in.GetTotalGasCost(); v != "" {
+		out.TotalGasCost = &v
+	}
+	if inputs := in.GetInputs(); len(inputs) > 0 {
+		out.Inputs = &inputs
+	}
+	if cfg := in.GetConfig(); cfg != nil {
+		if m, ok := cfg.AsInterface().(map[string]interface{}); ok {
+			out.Config = &m
+		}
+	}
+	if md := in.GetMetadata(); md != nil {
+		if m, ok := md.AsInterface().(map[string]interface{}); ok {
+			out.Metadata = &m
+		}
+	}
+	if ec := in.GetExecutionContext(); ec != nil {
+		if m, ok := ec.AsInterface().(map[string]interface{}); ok {
+			out.ExecutionContext = &m
+		}
+	}
+	// Pull the per-variant OutputData payload via a protojson roundtrip
+	// into a generic map (only the oneof variant key is read, so int64
+	// quirks elsewhere don't matter).
+	if raw, err := (protojson.MarshalOptions{EmitUnpopulated: false}).Marshal(in); err == nil {
+		var envelope map[string]interface{}
+		if json.Unmarshal(raw, &envelope) == nil {
+			for _, key := range outputVariantKeys {
+				if v, ok := envelope[key].(map[string]interface{}); ok {
+					out.Output = &v
+					break
+				}
+			}
+		}
 	}
 	return out, nil
+}
+
+// outputVariantKeys mirrors the Execution_Step.OutputData oneof JSON
+// names emitted by protojson — same list as the trigger/node Output
+// types in the proto.
+var outputVariantKeys = []string{
+	"blockTrigger", "fixedTimeTrigger", "cronTrigger", "eventTrigger", "manualTrigger",
+	"ethTransfer", "graphql", "contractRead", "contractWrite", "customCode", "restApi",
+	"branch", "filter", "loop", "balance",
+}
+
+// normalizeStepType converts the engine's per-step type identifier
+// (e.g. "NODE_TYPE_CUSTOM_CODE" / "TRIGGER_TYPE_CRON") into the
+// lowercase camelCase form the OpenAPI spec uses (`customCode`,
+// `cron`). Bare names pass through unchanged.
+func normalizeStepType(t string) string {
+	switch t {
+	case "TRIGGER_TYPE_BLOCK":
+		return "block"
+	case "TRIGGER_TYPE_FIXED_TIME":
+		return "fixedTime"
+	case "TRIGGER_TYPE_CRON":
+		return "cron"
+	case "TRIGGER_TYPE_EVENT":
+		return "event"
+	case "TRIGGER_TYPE_MANUAL":
+		return "manual"
+	case "NODE_TYPE_ETH_TRANSFER":
+		return "ethTransfer"
+	case "NODE_TYPE_CONTRACT_WRITE":
+		return "contractWrite"
+	case "NODE_TYPE_CONTRACT_READ":
+		return "contractRead"
+	case "NODE_TYPE_GRAPHQL_QUERY":
+		return "graphqlQuery"
+	case "NODE_TYPE_REST_API":
+		return "restApi"
+	case "NODE_TYPE_BRANCH":
+		return "branch"
+	case "NODE_TYPE_FILTER":
+		return "filter"
+	case "NODE_TYPE_LOOP":
+		return "loop"
+	case "NODE_TYPE_CUSTOM_CODE":
+		return "customCode"
+	case "NODE_TYPE_BALANCE":
+		return "balance"
+	}
+	return t
 }
 
 // executionStatusProtoToWire normalizes ExecutionStatus enum names to the

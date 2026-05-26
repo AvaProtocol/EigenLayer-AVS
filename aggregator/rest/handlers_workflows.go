@@ -317,10 +317,15 @@ func (s *Server) SimulateWorkflow(ctx echo.Context) error {
 		return err
 	}
 
-	// Execution mapping isn't part of the mapping package yet — return
-	// the proto JSON form. The dedicated mapping.ProtoToOpenAPIExecution
-	// helper lands with the executions handlers in a follow-up commit.
-	return ctx.JSON(http.StatusOK, exec)
+	// Simulate produces a transient Execution with no persisted
+	// workflow — pass an empty workflowId so the mapper still emits
+	// the OpenAPI envelope (status strings, named trigger/node
+	// types) instead of the raw proto enums.
+	resp, mapErr := mapping.ProtoToOpenAPIExecution(exec, "")
+	if mapErr != nil {
+		return mapErr
+	}
+	return ctx.JSON(http.StatusOK, resp)
 }
 
 // EstimateWorkflowFees — POST /api/v1/workflows:estimateFees
