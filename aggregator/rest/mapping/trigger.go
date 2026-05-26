@@ -3,6 +3,8 @@ package mapping
 import (
 	"fmt"
 
+	"google.golang.org/protobuf/types/known/structpb"
+
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -208,12 +210,58 @@ func protoEventToOpenAPI(in *avsproto.EventTrigger) generated.EventTrigger {
 
 func openAPIManualToProto(in generated.ManualTrigger) *avsproto.ManualTrigger {
 	out := &avsproto.ManualTrigger{Config: &avsproto.ManualTrigger_Config{}}
-	// ManualTrigger_Config is empty in the current proto — webhook bodies
-	// flow through inputVariables, not the config object.
+	if in.Config == nil {
+		return out
+	}
+	if in.Config.Data != nil {
+		// Wrap the arbitrary JSON object in a structpb.Value so the
+		// engine can call .AsInterface() to recover the original
+		// structure (objects, arrays, primitives).
+		if v, err := structpb.NewValue(map[string]interface{}(*in.Config.Data)); err == nil {
+			out.Config.Data = v
+		}
+	}
+	// ManualTriggerConfig.Lang is a value type (not pointer) in the
+	// generated Go struct — translate any non-empty string straight
+	// through. Empty string falls back to the proto's UNSPECIFIED.
+	if in.Config.Lang != "" {
+		out.Config.Lang = openAPILangToProto(in.Config.Lang)
+	}
+	if in.Config.Headers != nil {
+		out.Config.Headers = map[string]string(*in.Config.Headers)
+	}
+	if in.Config.PathParams != nil {
+		out.Config.PathParams = map[string]string(*in.Config.PathParams)
+	}
 	return out
 }
 
 func protoManualToOpenAPI(in *avsproto.ManualTrigger) generated.ManualTrigger {
 	t := generated.Manual
-	return generated.ManualTrigger{Type: &t, Config: &generated.ManualTriggerConfig{}}
+	cfg := &generated.ManualTriggerConfig{}
+	if in != nil && in.Config != nil {
+		if in.Config.Data != nil {
+			if m, ok := in.Config.Data.AsInterface().(map[string]interface{}); ok {
+				cfg.Data = &m
+			}
+		}
+		if in.Config.Lang != avsproto.Lang_LANG_UNSPECIFIED {
+			cfg.Lang = protoLangToOpenAPI(in.Config.Lang)
+		}
+		if len(in.Config.Headers) > 0 {
+			h := map[string]string{}
+			for k, v := range in.Config.Headers {
+				h[k] = v
+			}
+			cfg.Headers = &h
+		}
+		if len(in.Config.PathParams) > 0 {
+			p := map[string]string{}
+			for k, v := range in.Config.PathParams {
+				p[k] = v
+			}
+			cfg.PathParams = &p
+		}
+	}
+	return generated.ManualTrigger{Type: &t, Config: cfg}
 }
