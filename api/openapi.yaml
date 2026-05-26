@@ -1,0 +1,401 @@
+openapi: 3.1.0
+
+# AVS Aggregator REST API — public partner-facing surface.
+#
+# Source of truth for the REST API: Go handler interfaces and SDK types are
+# generated from this spec via `make rest-gen`. See
+# avs-infra/API_REST_IMPLEMENTATION_PLAN.md for the full design rationale.
+#
+# Conventions:
+#   - All field names are camelCase (request bodies, response bodies, query
+#     parameters, template variables).
+#   - Resources are plural nouns; IDs in path; bodies in JSON.
+#   - Custom actions use colon-suffix routes (Google AIP-136):
+#       POST /workflows/{id}:pause, POST /workflows:simulate, etc.
+#   - Errors follow RFC 7807 (application/problem+json).
+#   - Pagination uses opaque cursors via `?before=` / `?after=` query params
+#     and a uniform `{ data, pageInfo }` envelope.
+
+info:
+  title: Ava Protocol AVS API
+  version: '1.0.0'
+  description: |
+    Public REST API for the Ava Protocol AVS aggregator. Exposes workflow
+    creation, execution monitoring, smart-wallet management, and related
+    operations.
+
+    Authentication is a single credential type — a JWT bearer token — obtained
+    either via the wallet-signing flow (`POST /auth:exchange`) or out-of-band
+    via the operator-run `create-api-key` CLI. Every request must include
+    `Authorization: Bearer <jwt>`.
+  contact:
+    name: Ava Protocol
+    url: https://avaprotocol.org
+  license:
+    name: MIT
+
+servers:
+  - url: https://gateway.avaprotocol.org/api/v1
+    description: Production gateway
+  - url: https://gateway-staging.avaprotocol.org/api/v1
+    description: Staging gateway
+  - url: http://localhost:8080/api/v1
+    description: Local dev
+
+# Health check lives at root, outside /api/v1/. Documented here so the spec is
+# self-describing; the actual route is mounted by the server above /api/v1/.
+tags:
+  - name: Health
+    description: Liveness / readiness probes
+  - name: Auth
+    description: Token issuance and credential management
+  - name: Workflows
+    description: Workflow CRUD and lifecycle actions
+  - name: Executions
+    description: Workflow execution history and status
+  - name: Wallets
+    description: Smart-wallet derivation and operations
+  - name: Secrets
+    description: User/workflow/org secret storage
+  - name: Tokens
+    description: ERC-20 metadata lookup
+  - name: Nodes
+    description: Stand-alone node execution
+  - name: Triggers
+    description: Stand-alone trigger evaluation
+  - name: Operators
+    description: Connected operator status (read-only)
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT bearer token. Obtained via `POST /auth:exchange` (wallet
+        signature flow) or via the operator-run `create-api-key` CLI
+        (long-lived, server-to-server). Send on every request as
+        `Authorization: Bearer <jwt>`.
+
+  parameters:
+    PageBefore:
+      name: before
+      in: query
+      description: Cursor — return items immediately before this position (backward pagination).
+      schema:
+        type: string
+    PageAfter:
+      name: after
+      in: query
+      description: Cursor — return items immediately after this position (forward pagination).
+      schema:
+        type: string
+    PageLimit:
+      name: limit
+      in: query
+      description: Max items to return. Default 20; server-enforced ceiling applies.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 200
+        default: 20
+    ChainIdQuery:
+      name: chainId
+      in: query
+      description: |
+        Chain ID filter. Omit to use the aggregator default chain. Repeat
+        the parameter to filter by multiple chains.
+      schema:
+        type: integer
+        format: int64
+
+  schemas:
+    # -------------------------------------------------------------------
+    # Common scalars
+    # -------------------------------------------------------------------
+
+    ChainId:
+      type: integer
+      format: int64
+      description: |
+        Numeric chain ID. `0` or omitted means "use the aggregator's default
+        chain" — typically only useful in single-chain deployments or for
+        chain-agnostic operations.
+      example: 11155111
+
+    EthereumAddress:
+      type: string
+      pattern: '^0x[a-fA-F0-9]{40}$'
+      description: Lowercase or checksummed hex EOA / contract address.
+      example: '0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB'
+
+    Hex:
+      type: string
+      pattern: '^0x[a-fA-F0-9]*$'
+      description: Arbitrary-length hex-encoded byte string.
+
+    Ulid:
+      type: string
+      pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+      description: ULID identifier (26-char Crockford base32).
+      example: '01JG2FE5MDVKBPHEG0PEYSDKAC'
+
+    Timestamp:
+      type: string
+      format: date-time
+      description: RFC 3339 timestamp.
+
+    # -------------------------------------------------------------------
+    # Pagination envelope (shared by every list endpoint)
+    # -------------------------------------------------------------------
+
+    PageInfo:
+      type: object
+      required:
+        - hasNextPage
+        - hasPreviousPage
+      properties:
+        hasNextPage:
+          type: boolean
+        hasPreviousPage:
+          type: boolean
+        startCursor:
+          type: string
+          description: Cursor for the first item in the current page; pass to `before` for the previous page.
+        endCursor:
+          type: string
+          description: Cursor for the last item in the current page; pass to `after` for the next page.
+
+    # -------------------------------------------------------------------
+    # RFC 7807 problem+json error shape
+    # -------------------------------------------------------------------
+
+    Problem:
+      type: object
+      description: |
+        RFC 7807 problem+json. Returned as `application/problem+json` on any
+        4xx/5xx response. `type` and `title` describe the error class; `detail`
+        is human-readable; `instance` is a per-request identifier suitable for
+        log correlation.
+      required:
+        - type
+        - title
+        - status
+      properties:
+        type:
+          type: string
+          format: uri
+          description: URI identifying the problem type.
+          example: 'https://docs.avaprotocol.org/errors/workflow-not-found'
+        title:
+          type: string
+          description: Short, human-readable summary.
+          example: 'Workflow not found'
+        status:
+          type: integer
+          format: int32
+          description: HTTP status code (echoed for clients that surface only the body).
+          example: 404
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence.
+          example: 'No workflow with id 01JG2FE5MDVKBPHEG0PEYSDKAC for owner 0xabc...'
+        instance:
+          type: string
+          description: URI / opaque ID identifying this specific occurrence (e.g., request id).
+          example: 'req_01JG2FE5MFKTH0754RGF2DMVY7'
+        code:
+          type: string
+          description: |
+            Machine-readable error code. Stable across releases; clients can
+            switch on this for programmatic handling. Mirrors the gRPC-era
+            ErrorCode enum vocabulary.
+          example: 'WORKFLOW_NOT_FOUND'
+
+    # -------------------------------------------------------------------
+    # Health
+    # -------------------------------------------------------------------
+
+    HealthStatus:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, starting]
+        version:
+          type: string
+          description: Aggregator binary version (e.g., `v1.9.6`).
+        chainId:
+          $ref: '#/components/schemas/ChainId'
+          description: EigenLayer registration chain ID.
+
+    # -------------------------------------------------------------------
+    # Auth
+    # -------------------------------------------------------------------
+
+    AuthExchangeRequest:
+      type: object
+      required:
+        - ownerAddress
+        - signature
+        - message
+      properties:
+        ownerAddress:
+          $ref: '#/components/schemas/EthereumAddress'
+        signature:
+          $ref: '#/components/schemas/Hex'
+          description: EIP-191 personal_sign signature of `message`.
+        message:
+          type: string
+          description: |
+            The plain-text message that was signed. Must use the canonical
+            format with the EigenLayer registration chain ID (NOT the workflow
+            target chain). SDKs generate this locally.
+
+    AuthExchangeResponse:
+      type: object
+      required:
+        - token
+        - expiresAt
+      properties:
+        token:
+          type: string
+          description: JWT bearer token.
+        expiresAt:
+          $ref: '#/components/schemas/Timestamp'
+        subject:
+          $ref: '#/components/schemas/EthereumAddress'
+          description: The EOA the token is bound to (echoed for clients).
+
+  responses:
+    BadRequest:
+      description: Request validation failed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Missing or invalid bearer token.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: Authenticated but not permitted.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Resource not found.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    RateLimited:
+      description: |
+        Rate limit exceeded. Inspect `X-RateLimit-Reset` for the next allowed
+        request time and `Retry-After` for the seconds to wait.
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+            description: Unix timestamp when the bucket refills.
+        Retry-After:
+          schema:
+            type: integer
+            description: Seconds to wait before retrying.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    ServerError:
+      description: Unhandled server error.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+paths:
+  # =====================================================================
+  # Health (mounted at root, outside /api/v1/)
+  # =====================================================================
+  #
+  # Documented here for completeness; the server mounts this at `/health`,
+  # not `/api/v1/health`. Health checks aren't versioned with the business
+  # API — monitoring tools expect them at a stable root path.
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      description: |
+        Returns the aggregator's current health. Used by load balancers, k8s
+        liveness/readiness probes, and external uptime monitoring.
+      security: []
+      responses:
+        '200':
+          description: Aggregator is up.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '503':
+          description: Aggregator is starting or degraded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+  # =====================================================================
+  # Auth
+  # =====================================================================
+
+  /auth:exchange:
+    post:
+      tags: [Auth]
+      summary: Exchange a wallet signature for a JWT bearer token
+      description: |
+        Verify an EIP-191 `personal_sign` signature and issue a JWT bound to
+        the signer's EOA. The signed message must use the canonical template
+        with the EigenLayer registration chain ID (not the workflow target
+        chain). SDKs construct the message locally — there is no
+        `GetSignatureFormat` endpoint.
+      operationId: authExchange
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthExchangeRequest'
+      responses:
+        '200':
+          description: Authentication succeeded; token issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthExchangeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+# Workflow, Execution, Wallet, Secret, Token, Node, Trigger, and Operator
+# resources are defined in subsequent commits — see the implementation
+# plan's sequencing section. This first commit lands the structural
+# foundation (auth, health, common schemas, error shape, pagination).
