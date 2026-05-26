@@ -1176,6 +1176,12 @@ message SetTaskEnabledResp {
   int64 updated_at = 6;        // ms
 }
 
+// DEPRECATED: The public client gRPC surface is removed as of the REST
+// migration — clients use /api/v1/* over HTTP/JSON instead. This service
+// definition is kept temporarily so generated message types stay
+// available; the handlers in aggregator/rpc_server.go that implemented
+// this interface are dead code and get deleted in a follow-up commit.
+// See API_REST_IMPLEMENTATION_PLAN.md.
 service Aggregator {
   // Exchange for an Auth Key to authenticate in subsequent request
   rpc GetKey(GetKeyReq) returns (KeyResp) {};

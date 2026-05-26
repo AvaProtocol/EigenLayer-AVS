@@ -1354,8 +1354,14 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		chainRegistry: agg.chainRegistry,
 	}
 
-	// TODO: split node and aggregator
-	avsproto.RegisterAggregatorServer(s, rpcServer)
+	// The Aggregator service (public client surface) is no longer
+	// registered. Clients use the REST API at /api/v1 — see
+	// aggregator/rest/ and api/openapi.yaml. The proto service is
+	// kept (marked DEPRECATED) so generated types stay available
+	// and old SDKs get a clear "Unimplemented" instead of a wire
+	// parse error. Handler methods on RpcServer that implemented
+	// the removed interface are dead code in this commit; they get
+	// deleted in a follow-up alongside the proto service block.
 	avsproto.RegisterNodeServer(s, rpcServer)
 
 	// Register reflection service on gRPC server.
