@@ -34,7 +34,7 @@ Note: The Ava Protocol team currently manages the aggregator, and the communicat
 
 ### Fee Estimation
 
-See [docs/changes/20260406-FEE_ESTIMATION.md](docs/changes/20260406-FEE_ESTIMATION.md) for the fee pricing model, configuration, and implementation details.
+See [docs/changes/20260406-fee-estimation.md](docs/changes/20260406-fee-estimation.md) for the fee pricing model, configuration, and implementation details.
 
 #### Benefits
 
