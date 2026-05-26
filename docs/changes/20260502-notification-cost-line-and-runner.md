@@ -5,7 +5,7 @@
 - **Branch**: `staging`
 - **Related**:
   - Context-memory PRD: [`context-memory/docs/changes/20260501-summary-runner-and-fees-sections.md`](../../../context-memory/docs/changes/20260501-summary-runner-and-fees-sections.md) — rendering format spec (kept after rollback to aggregator-local)
-  - Aggregator fee model: [`docs/FEE_ESTIMATION.md`](../FEE_ESTIMATION.md)
+  - Aggregator fee model: [`docs/changes/20260406-fee-estimation.md`](20260406-fee-estimation.md)
   - Proto: [`protobuf/avs.proto`](../../protobuf/avs.proto) — `Execution` (711-713), step gas (737-739), `Fee` / `NodeCOGS` / `ValueFee` (1402-1463)
   - Commits on PR #529: `cba1ac8` (rollback to aggregator-local), `53f01ed` (multi-token line + price service), `9bac118` (per-token value-fee + stablecoin shortcut), `937d1fd` (TokenEnrichmentService for arbitrary ERC20s)
 
