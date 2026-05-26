@@ -1,4 +1,4 @@
-openapi: 3.1.0
+openapi: 3.0.3
 
 # AVS Aggregator REST API — public partner-facing surface.
 #
@@ -413,7 +413,8 @@ components:
         topics:
           type: array
           items:
-            type: [string, 'null']
+            type: string
+            nullable: true
           description: |
             Topic filters (`topics[0]` is the event signature, `topics[1..]`
             are indexed parameter values). `null` means wildcard at that

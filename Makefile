@@ -116,6 +116,29 @@ protoc-gen:
     	protobuf/avs.proto protobuf/node.proto protobuf/worker.proto
 	@echo "Protobuf Go generation complete. Files should be in ./protobuf/ and declare package avsproto."
 
+## rest-gen: regenerate REST handler types + Echo ServerInterface from api/openapi.yaml
+##
+## Two outputs are produced under aggregator/rest/generated/:
+##   - types.gen.go    — Go type definitions for every schema in the spec
+##   - server.gen.go   — Echo ServerInterface (one method per spec operationId)
+##
+## REST handlers in aggregator/rest/handlers/ implement the ServerInterface;
+## the compiler enforces that every spec route has a matching handler and
+## that request/response types line up. Regenerate after editing the spec.
+.PHONY: rest-gen
+rest-gen:
+	@echo "Ensuring output directory ./aggregator/rest/generated exists..."
+	@mkdir -p ./aggregator/rest/generated
+	@echo "Deleting old generated files..."
+	@rm -f ./aggregator/rest/generated/*.gen.go
+	@echo "Generating Go types from api/openapi.yaml..."
+	@go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen \
+		-config api/oapi-codegen-types.yaml api/openapi.yaml
+	@echo "Generating Echo server interface from api/openapi.yaml..."
+	@go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen \
+		-config api/oapi-codegen-server.yaml api/openapi.yaml
+	@echo "REST generation complete. Generated files in ./aggregator/rest/generated/."
+
 ## up: bring up docker compose stack
 up:
 	docker compose up

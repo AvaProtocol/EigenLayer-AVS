@@ -1,0 +1,15 @@
+# oapi-codegen config — types only.
+#
+# Generates the Go type definitions corresponding to every OpenAPI schema
+# referenced by the spec. Used by both the REST handlers (server side) and
+# any Go consumer of the API spec (integration tests).
+#
+# Regenerate with: `make rest-gen`
+package: generated
+output: aggregator/rest/generated/types.gen.go
+generate:
+  models: true
+output-options:
+  # Skip type prefix on union variants — keeps generated names matching the
+  # OpenAPI schema names (e.g., `CronTrigger` not `WorkflowCronTrigger`).
+  skip-prune: true
