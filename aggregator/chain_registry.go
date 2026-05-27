@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Layr-Labs/eigensdk-go/logging"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -19,6 +20,39 @@ type ChainEntry struct {
 	Config *config.ChainConfig
 	conn   *grpc.ClientConn
 	Client avsproto.ChainWorkerClient
+
+	// rpc is lazily dialed by GetRPC. The gateway needs a chain-specific
+	// ethclient for direct on-chain reads (e.g. ERC-20 balance checks in
+	// the withdraw flow) — not every operation rides through the worker
+	// gRPC channel.
+	rpcOnce sync.Once
+	rpc     *ethclient.Client
+	rpcErr  error
+}
+
+// GetRPC returns a chain-specific ethclient for direct reads against
+// this chain's RPC. Dialed once and cached for the entry's lifetime.
+func (e *ChainEntry) GetRPC() (*ethclient.Client, error) {
+	e.rpcOnce.Do(func() {
+		if e.Config == nil || e.Config.SmartWallet == nil || e.Config.SmartWallet.EthRpcUrl == "" {
+			e.rpcErr = fmt.Errorf("chain %d has no eth_rpc_url configured", chainConfigID(e.Config))
+			return
+		}
+		client, err := ethclient.Dial(e.Config.SmartWallet.EthRpcUrl)
+		if err != nil {
+			e.rpcErr = fmt.Errorf("dial chain %d RPC: %w", chainConfigID(e.Config), err)
+			return
+		}
+		e.rpc = client
+	})
+	return e.rpc, e.rpcErr
+}
+
+func chainConfigID(c *config.ChainConfig) int64 {
+	if c == nil {
+		return 0
+	}
+	return c.ChainID
 }
 
 // ChainRegistry manages connections to per-chain workers in gateway mode.

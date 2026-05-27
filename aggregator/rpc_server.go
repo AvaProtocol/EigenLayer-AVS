@@ -54,6 +54,36 @@ type RpcServer struct {
 	chainRegistry *ChainRegistry
 }
 
+// resolveSmartWalletForChain returns the SmartWalletConfig + RPC client
+// for the requested chain. In single-chain mode (no chainRegistry) it
+// always returns the aggregator's defaults. In gateway mode, when
+// requestedChainID matches a registered chain, it returns that chain's
+// SmartWallet config and a lazily-dialed chain-specific RPC client —
+// without this, multi-chain operations that read on-chain state directly
+// from the aggregator (e.g. the ERC-20 balance check in ExecuteWithdraw)
+// always hit the default chain's RPC and miss tokens that only exist on
+// other chains.
+func (r *RpcServer) resolveSmartWalletForChain(requestedChainID int64) (*config.SmartWalletConfig, *ethclient.Client, error) {
+	if r.chainRegistry == nil || requestedChainID == 0 {
+		return r.config.SmartWallet, r.smartWalletRpc, nil
+	}
+	if r.config.SmartWallet != nil && requestedChainID == r.config.SmartWallet.ChainID {
+		return r.config.SmartWallet, r.smartWalletRpc, nil
+	}
+	entry, err := r.chainRegistry.GetWorker(requestedChainID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if entry.Config == nil || entry.Config.SmartWallet == nil {
+		return nil, nil, fmt.Errorf("chain %d has no smart_wallet config", requestedChainID)
+	}
+	rpc, err := entry.GetRPC()
+	if err != nil {
+		return nil, nil, err
+	}
+	return entry.Config.SmartWallet, rpc, nil
+}
+
 // ExecuteWithdraw is the auth-free body of the former WithdrawFunds
 // gRPC handler — extracted so the REST WithdrawWallet handler can
 // reuse the bundler + paymaster + balance pipeline without going
@@ -74,11 +104,17 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 	)
 
 	// In single-chain aggregator mode (no chainRegistry), reject explicit chain_id
-	// that does not match the aggregator's chain. In gateway mode this will route
-	// to the matching worker — wiring lives in the gateway path, not here.
+	// that does not match the aggregator's chain. In gateway mode this resolves
+	// to the matching chain's SmartWallet config + RPC client; everything below
+	// uses `swCfg` / `swRpc` instead of the aggregator defaults so a sepolia
+	// withdraw doesn't hit the mainnet RPC.
 	if r.chainRegistry == nil && requestedChainID != 0 && r.chainID != nil && requestedChainID != r.chainID.Int64() {
 		return nil, status.Errorf(codes.InvalidArgument,
 			"chain_id %d does not match aggregator chain %d", requestedChainID, r.chainID.Int64())
+	}
+	swCfg, swRpc, swErr := r.resolveSmartWalletForChain(requestedChainID)
+	if swErr != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "resolve chain %d: %v", requestedChainID, swErr)
 	}
 
 	// Validate required parameters
@@ -148,7 +184,7 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 	smartWalletAddress := params.SmartWalletAddress
 
 	// Check if smart wallet config is available
-	if r.config.SmartWallet == nil {
+	if swCfg == nil {
 		return nil, status.Errorf(codes.Internal, "smart wallet configuration not available")
 	}
 
@@ -156,7 +192,7 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 	// Skip reimbursement for withdrawals — the paymaster absorbs gas costs so users
 	// can withdraw their full balance without reserving ETH for gas reimbursement.
 	paymasterReq := preset.GetVerifyingPaymasterRequestForDuration(
-		r.config.SmartWallet.PaymasterAddress,
+		swCfg.PaymasterAddress,
 		15*time.Minute,
 	)
 	paymasterReq.SkipReimbursement = true
@@ -168,7 +204,7 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 		if paymasterReq != nil && paymasterReq.SkipReimbursement {
 			// Paymaster absorbs gas costs — no reimbursement deduction needed.
 			// Just validate the wallet has enough ETH for the withdrawal amount.
-			balance, balanceErr := r.smartWalletRpc.BalanceAt(ctx, *smartWalletAddress, nil)
+			balance, balanceErr := swRpc.BalanceAt(ctx, *smartWalletAddress, nil)
 			if balanceErr != nil {
 				return nil, status.Errorf(codes.Internal, "failed to get wallet balance: %v", balanceErr)
 			}
@@ -205,13 +241,13 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 				return nil, status.Errorf(codes.InvalidArgument, "failed to build temporary withdrawal calldata: %v", err)
 			}
 
-			bundlerClient, bundlerErr := bundler.NewBundlerClient(r.config.SmartWallet.BundlerURL)
+			bundlerClient, bundlerErr := bundler.NewBundlerClient(swCfg.BundlerURL)
 			if bundlerErr != nil {
 				return nil, status.Errorf(codes.Internal, "failed to create bundler client: %v", bundlerErr)
 			}
 			tempUserOp, tempErr := preset.BuildUserOpWithPaymaster(
-				r.config.SmartWallet,
-				r.smartWalletRpc,
+				swCfg,
+				swRpc,
 				bundlerClient,
 				user.Address,
 				tempCallData,
@@ -237,7 +273,7 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 				gasEstimate, gasErr := bundlerClient.EstimateUserOperationGas(
 					ctx,
 					*tempUserOp,
-					r.config.SmartWallet.EntrypointAddress,
+					swCfg.EntrypointAddress,
 					map[string]any{},
 				)
 				if gasErr != nil {
@@ -248,7 +284,7 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 					}
 					finalAmount = requestedAmount
 				} else {
-					reimbursement, reimbErr := preset.EstimateGasReimbursementAmount(r.smartWalletRpc, gasEstimate, r.config.Logger)
+					reimbursement, reimbErr := preset.EstimateGasReimbursementAmount(swRpc, gasEstimate, r.config.Logger)
 					if reimbErr != nil {
 						r.config.Logger.Warn("Failed to estimate reimbursement",
 							"error", reimbErr)
@@ -260,7 +296,7 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 						if withdrawAll {
 							maxWithdrawable, maxErr := CalculateMaxWithdrawableAmount(
 								ctx,
-								r.smartWalletRpc,
+								swRpc,
 								*smartWalletAddress,
 								reimbursement,
 							)
@@ -275,7 +311,7 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 								"maxWithdrawable", finalAmount.String(),
 								"estimatedReimbursement", reimbursement.String())
 						} else {
-							balance, balanceErr := r.smartWalletRpc.BalanceAt(ctx, *smartWalletAddress, nil)
+							balance, balanceErr := swRpc.BalanceAt(ctx, *smartWalletAddress, nil)
 							if balanceErr != nil {
 								return nil, status.Errorf(codes.Internal, "failed to get wallet balance: %v", balanceErr)
 							}
@@ -304,7 +340,7 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 		if withdrawAll {
 			// "Withdraw all" for ERC20 - get token balance
 			tokenAddress := common.HexToAddress(payload.Token)
-			tokenContract, err := erc20.NewErc20(tokenAddress, r.smartWalletRpc)
+			tokenContract, err := erc20.NewErc20(tokenAddress, swRpc)
 			if err != nil {
 				return nil, status.Errorf(codes.Internal, "failed to create token contract: %v", err)
 			}
@@ -322,7 +358,7 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 		} else {
 			// Validate token balance
 			tokenAddress := common.HexToAddress(payload.Token)
-			tokenContract, err := erc20.NewErc20(tokenAddress, r.smartWalletRpc)
+			tokenContract, err := erc20.NewErc20(tokenAddress, swRpc)
 			if err != nil {
 				return nil, status.Errorf(codes.Internal, "failed to create token contract: %v", err)
 			}
@@ -351,7 +387,7 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 	r.config.Logger.Info("processing withdrawal with paymaster sponsorship",
 		"user", user.Address.String(),
 		"smartWallet", smartWalletAddress.Hex(),
-		"paymaster", r.config.SmartWallet.PaymasterAddress.Hex(),
+		"paymaster", swCfg.PaymasterAddress.Hex(),
 		"amount", payload.Amount,
 		"token", payload.Token,
 	)
@@ -362,6 +398,7 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 		callData,
 		smartWalletAddress,
 		paymasterReq,
+		requestedChainID,
 	)
 
 	if err != nil {
@@ -398,8 +435,9 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 	}
 
 	if userOp != nil {
-		// Get UserOp hash
-		userOpHash := userOp.GetUserOpHash(r.config.SmartWallet.EntrypointAddress, big.NewInt(int64(r.config.SmartWallet.ChainID)))
+		// Get UserOp hash — sign against the chain we actually targeted
+		// so the hash matches what the bundler/paymaster validated.
+		userOpHash := userOp.GetUserOpHash(swCfg.EntrypointAddress, big.NewInt(swCfg.ChainID))
 		resp.UserOpHash = userOpHash.Hex()
 	}
 
@@ -446,15 +484,18 @@ func (r *RpcServer) validateSmartWalletOwnership(owner common.Address, smartWall
 
 // sendUserOpWithGlobalWs sends a UserOp using the global WebSocket client for efficient transaction monitoring.
 // In gateway mode, it delegates to the appropriate chain worker instead.
+// requestedChainID picks the worker in gateway mode; pass 0 to use the
+// gateway's default chain (single-chain mode ignores the argument).
 func (r *RpcServer) sendUserOpWithGlobalWs(
 	owner common.Address,
 	callData []byte,
 	smartWalletAddress *common.Address,
 	paymasterReq *preset.VerifyingPaymasterRequest,
+	requestedChainID int64,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	// Gateway mode: route to worker
 	if r.chainRegistry != nil {
-		return r.sendUserOpViaWorker(owner, callData, smartWalletAddress, paymasterReq, 0)
+		return r.sendUserOpViaWorker(owner, callData, smartWalletAddress, paymasterReq, requestedChainID)
 	}
 
 	// Use global WebSocket client if available, otherwise fall back to creating new connection
