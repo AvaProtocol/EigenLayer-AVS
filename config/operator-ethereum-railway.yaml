@@ -23,11 +23,15 @@ eth_ws_url: ${ETHEREUM_DWELLIR_WS}
 ecdsa_private_key_store_path: /app/.operator-keys/operator.ecdsa.key.json
 bls_private_key_store_path: /app/.operator-keys/operator.bls.key.json
 
-# Gateway address — mainnet operator connects to the mainnet-family
-# gateway. The sepolia `operator` service connects to the sepolia
-# `gateway`; these are two parallel pipelines because each gateway
-# is registered against a different AVS coordinator.
-aggregator_server_ip_port_address: "gateway-ethereum.railway.internal:2206"
+# Gateway address — set via Railway reference variable so the
+# topology is self-discovering. Set on the operator service:
+#   GATEWAY_ADDRESS=${{gateway.RAILWAY_PRIVATE_DOMAIN}}:2206
+# Both operators (sepolia + ethereum) connect to the single `gateway`
+# service. enforceAuth is currently false so the gateway's AVS
+# coordinator doesn't gate operator connections; when BLS aggregation
+# is turned on, this operator's mainnet AVS registration will
+# validate against whatever the gateway then registers against.
+aggregator_server_ip_port_address: ${GATEWAY_ADDRESS}
 
 # Metrics
 eigen_metrics_ip_port_address: 0.0.0.0:9090

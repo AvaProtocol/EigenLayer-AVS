@@ -18,10 +18,10 @@ listen_address: "0.0.0.0:50051"
 # Railway health check endpoint
 health_address: "0.0.0.0:8080"
 
-# Gateway address — mainnet workers register with `gateway-ethereum`
-# (separate from the sepolia `gateway` service because the two AVS
-# registrations cannot share). See RAILWAY_MIGRATION_PLAN.md.
-gateway_address: "gateway-ethereum.railway.internal:2206"
+# Note: workers do NOT dial the gateway. The gateway discovers worker
+# addresses from its WORKER_* env vars (set via Railway reference
+# variables, e.g. `${{worker-ethereum.RAILWAY_PRIVATE_DOMAIN}}:50051`)
+# and dials in. Workers only listen on `listen_address`.
 
 # Chain RPC endpoints (Ethereum mainnet)
 eth_rpc_url: ${ETHEREUM_DWELLIR_RPC}
