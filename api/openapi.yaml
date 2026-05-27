@@ -1298,7 +1298,12 @@ components:
       properties:
         status:
           type: string
-          enum: [pending, submitted, failed]
+          # `confirmed` is emitted when the bundler returned a receipt
+          # synchronously. `pending` means the UserOp was accepted but
+          # the receipt hasn't arrived yet. `failed` is a send-time
+          # error (the bundler rejected the op or it reverted before
+          # inclusion).
+          enum: [pending, confirmed, failed]
         message: { type: string }
         userOpHash: { $ref: '#/components/schemas/Hex' }
         transactionHash: { $ref: '#/components/schemas/Hex' }
