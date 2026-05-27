@@ -3,11 +3,9 @@ package worker
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"os"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	"gopkg.in/yaml.v2"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 )
@@ -34,14 +32,9 @@ type SmartWalletRaw struct {
 }
 
 func NewWorkerConfig(configPath string) (*WorkerConfig, error) {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("reading config file: %w", err)
-	}
-
 	var cfg WorkerConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing config file: %w", err)
+	if err := config.ReadYamlConfig(configPath, &cfg); err != nil {
+		return nil, fmt.Errorf("loading worker config: %w", err)
 	}
 
 	if cfg.ChainID == 0 {

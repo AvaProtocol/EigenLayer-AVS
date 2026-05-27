@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/AvaProtocol/EigenLayer-AVS/worker"
 	"github.com/spf13/cobra"
 )
@@ -17,7 +20,10 @@ and smart wallet address derivation.
 
 Use --config=path-to-your-config-file to specify the worker config.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			worker.RunWithConfig(config)
+			if err := worker.RunWithConfig(config); err != nil {
+				fmt.Fprintf(os.Stderr, "worker failed: %v\n", err)
+				os.Exit(1)
+			}
 		},
 	}
 )
