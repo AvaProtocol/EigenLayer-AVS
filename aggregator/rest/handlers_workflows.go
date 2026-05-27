@@ -310,6 +310,10 @@ func (s *Server) SimulateWorkflow(ctx echo.Context) error {
 	chainIDs := []int64{}
 	if body.ChainId != nil {
 		chainIDs = append(chainIDs, *body.ChainId)
+	} else if authed := restmw.UserFromContext(ctx); authed != nil && authed.ChainID != 0 {
+		// Fall back to the JWT's audience chain when the caller didn't
+		// pass one — same default used by RunNode for nodes:run.
+		chainIDs = append(chainIDs, authed.ChainID)
 	}
 
 	exec, err := s.engine.SimulateWorkflow(user, trigger, nodes, edges, inputVars, chainIDs...)

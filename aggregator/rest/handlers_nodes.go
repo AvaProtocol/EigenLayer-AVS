@@ -9,6 +9,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/mapping"
+	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
@@ -38,6 +39,13 @@ func (s *Server) RunNode(ctx echo.Context) error {
 	req := &avsproto.RunNodeWithInputsReq{Node: node}
 	if body.ChainId != nil {
 		req.ChainId = *body.ChainId
+	} else if authed := restmw.UserFromContext(ctx); authed != nil && authed.ChainID != 0 {
+		// Default to the JWT's audience chain when the caller didn't pass
+		// one explicitly. The audience is set at mint time to the chain
+		// the smart wallet lives on, which is the right default for the
+		// in-process node executor (and the existing
+		// extractSettingsChainID fallback in RunNodeImmediately).
+		req.ChainId = authed.ChainID
 	}
 	if body.InputVariables != nil {
 		converted, err := openAPIInputVarsToProto(*body.InputVariables)

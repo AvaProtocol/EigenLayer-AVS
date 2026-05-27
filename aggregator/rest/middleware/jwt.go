@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -23,6 +24,11 @@ type AuthenticatedUser struct {
 	Subject string
 	// Role is "user" (default) or "admin" (from CLI-issued JWTs).
 	Role string
+	// ChainID is the smart-wallet chain ID parsed from the JWT's first
+	// `aud` claim. 0 when the claim is absent or unparseable. Handlers
+	// use it as the default chain context when neither the request body
+	// nor inputVariables.settings carries one.
+	ChainID int64
 }
 
 // JWTConfig configures the JWT middleware. SigningKey is the same secret
@@ -85,6 +91,7 @@ func JWT(cfg JWTConfig) echo.MiddlewareFunc {
 			if role, ok := claims["role"].(string); ok {
 				user.Role = role
 			}
+			user.ChainID = audienceChainID(claims)
 			c.Set(contextKeyUser, user)
 			return next(c)
 		}
@@ -99,4 +106,38 @@ func UserFromContext(c echo.Context) *AuthenticatedUser {
 		return u
 	}
 	return nil
+}
+
+// audienceChainID extracts the first `aud` entry from the JWT claims
+// and parses it as a numeric chain ID. Returns 0 when the claim is
+// missing, empty, or not a number string. The token mint paths
+// (create-api-key + auth:exchange) always set aud to a single-element
+// list containing the smart-wallet chain ID, so taking the first entry
+// is correct for every token this gateway issues.
+func audienceChainID(claims jwt.MapClaims) int64 {
+	raw, ok := claims["aud"]
+	if !ok {
+		return 0
+	}
+	var first string
+	switch v := raw.(type) {
+	case string:
+		first = v
+	case []interface{}:
+		if len(v) == 0 {
+			return 0
+		}
+		s, ok := v[0].(string)
+		if !ok {
+			return 0
+		}
+		first = s
+	default:
+		return 0
+	}
+	parsed, err := strconv.ParseInt(first, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return parsed
 }
