@@ -191,6 +191,12 @@ func (s *Server) WithdrawWallet(ctx echo.Context, address generated.EthereumAddr
 	}
 	if body.ChainId != nil {
 		req.ChainID = *body.ChainId
+	} else if authed := restmw.UserFromContext(ctx); authed != nil && authed.ChainID != 0 {
+		// Default to the JWT's audience chain when the caller didn't pass
+		// one — same pattern as RunNode + SimulateWorkflow. Without this,
+		// the withdraw service falls through to the default chain and a
+		// sepolia ERC-20 token address returns "no contract code".
+		req.ChainID = authed.ChainID
 	}
 
 	result, err := s.withdraws.Withdraw(ctx.Request().Context(), req)
