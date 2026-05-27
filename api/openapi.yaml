@@ -28,11 +28,6 @@ info:
     either via the wallet-signing flow (`POST /auth:exchange`) or out-of-band
     via the operator-run `create-api-key` CLI. Every request must include
     `Authorization: Bearer <jwt>`.
-  contact:
-    name: Ava Protocol
-    url: https://avaprotocol.org
-  license:
-    name: MIT
 
 servers:
   - url: https://gateway.avaprotocol.org/api/v1
