@@ -8,9 +8,11 @@ operator_address: 0x997E5D40a32c44a3D93E59fC55C4Fd20b7d2d49D
 avs_registry_coordinator_address: 0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD
 operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
 
-# EigenLayer chain RPC (Sepolia)
-eth_rpc_url: https://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
-eth_ws_url: wss://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+# EigenLayer chain RPC (Sepolia) — driven by env var so the key can
+# be rotated without redeploying. Set on the operator service:
+#   SEPOLIA_DWELLIR_RPC, SEPOLIA_DWELLIR_WS
+eth_rpc_url: ${SEPOLIA_DWELLIR_RPC}
+eth_ws_url: ${SEPOLIA_DWELLIR_WS}
 
 # Key files — written at startup by scripts/operator-entrypoint.sh
 # Set ECDSA_KEY_JSON and BLS_KEY_JSON env vars in Railway
@@ -34,8 +36,8 @@ server_name: "operator-railway"
 
 # Destination chain - Sepolia
 target_chain:
-  eth_rpc_url: https://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
-  eth_ws_url: wss://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+  eth_rpc_url: ${SEPOLIA_DWELLIR_RPC}
+  eth_ws_url: ${SEPOLIA_DWELLIR_WS}
 
 enabled_features:
   event_trigger: true

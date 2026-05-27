@@ -1,4 +1,11 @@
-# Worker configuration for Sepolia on Railway (chain 11155111)
+# Worker configuration for Sepolia on Railway (chain 11155111).
+#
+# Secrets are injected via Railway sealed env vars and expanded at
+# startup. Set these on the `worker-sepolia` service:
+#   SEPOLIA_DWELLIR_RPC, SEPOLIA_DWELLIR_WS
+#   SEPOLIA_BUNDLER_URL
+#   CONTROLLER_PRIVATE_KEY
+#   PAYMASTER_ADDRESS
 environment: production
 
 chain_id: 11155111
@@ -10,14 +17,18 @@ listen_address: "0.0.0.0:50051"
 # Railway health check endpoint
 health_address: "0.0.0.0:8080"
 
-# Chain RPC endpoints
-eth_rpc_url: https://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
-eth_ws_url: wss://api-ethereum-sepolia.n.dwellir.com/b63aaa08-b251-4107-af4f-190b1b1ae3bc
+# Note: workers do NOT dial the gateway. The gateway discovers worker
+# addresses from its WORKER_* env vars and dials in. Workers only
+# listen on `listen_address`.
 
-# Third-party bundler
-bundler_url: https://bundler-sepolia.avaprotocol.org/rpc?apikey=kt8qTj8MtmAQGsj17Urz1ySn4R
+# Chain RPC endpoints
+eth_rpc_url: ${SEPOLIA_DWELLIR_RPC}
+eth_ws_url: ${SEPOLIA_DWELLIR_WS}
+
+# Third-party bundler (self-hosted Voltaire)
+bundler_url: ${SEPOLIA_BUNDLER_URL}
 
 # Smart wallet config
 smart_wallet:
-  controller_private_key: 30c525b5608ea9cbfd7266fd6251d422f5b958e44ae9c49008f97907cc752601
-  paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92
+  controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+  paymaster_address: ${PAYMASTER_ADDRESS}
