@@ -48,6 +48,13 @@ operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
 
 jwt_secret: ${GATEWAY_JWT_SECRET}
 
+# REST rate-limit overrides (default is 10/s, burst 50). Lifted on this
+# test branch so the v4 jest suite — which spreads ~90 requests across
+# parallel workers — doesn't get throttled into spurious "Try again in
+# 1s" failures. Production should keep the conservative default.
+rest_rate_limit_per_second: 200
+rest_rate_limit_burst: 500
+
 server_name: "gateway-railway"
 sentry_dsn: https://d304c8708d5097f7787eeb664e4098c6@o1156669.ingest.us.sentry.io/4509386759733248
 
