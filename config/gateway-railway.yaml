@@ -67,7 +67,10 @@ chains:
       bundler_url: ${ETHEREUM_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY}
       paymaster_address: ${PAYMASTER_ADDRESS}
-      max_wallets_per_owner: 3
+      # Mainnet production cap is 3; this branch (feature/rest-api-migration)
+      # only feeds the testing environment, so we lift the cap to match the
+      # testnet chains and let the v4 test suite churn through wallets.
+      max_wallets_per_owner: 2000
 
   - chain_id: 8453
     name: base
@@ -78,7 +81,8 @@ chains:
       bundler_url: ${BASE_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY}
       paymaster_address: ${PAYMASTER_ADDRESS}
-      max_wallets_per_owner: 3
+      # See chain 1 note above — relaxed for test-env churn only.
+      max_wallets_per_owner: 2000
 
   - chain_id: 11155111
     name: sepolia
