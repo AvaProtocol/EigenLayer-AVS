@@ -126,18 +126,21 @@ func extractSettings(inputVariables map[string]*structpb.Value) (map[string]inte
 	return settings, nil
 }
 
-// ValidateInputVariablesSettings validates that inputVariables contains a valid
-// settings object with required name and runner fields. Used by both CreateTask
-// and SimulateTask to enforce consistent validation.
+// ValidateInputVariablesSettings validates that inputVariables contains a
+// valid settings object. Currently the only mandatory field is `runner`
+// (a hex address — the smart wallet the engine validates ownership
+// against).
+//
+// `settings.name` used to be required here too, but the REST mapper now
+// mirrors the top-level CreateWorkflowRequest.name field into
+// settings["name"] before this runs, so the requirement moved to the
+// transport. SimulateTask doesn't have a top-level name field, and the
+// engine treats a nameless simulation as fine (the value is only used
+// for transient logging / notification fallbacks).
 func ValidateInputVariablesSettings(inputVariables map[string]*structpb.Value) error {
 	settings, err := extractSettings(inputVariables)
 	if err != nil {
 		return err
-	}
-
-	name, _ := settings["name"].(string)
-	if strings.TrimSpace(name) == "" {
-		return fmt.Errorf("inputVariables.settings.name is required")
 	}
 
 	runner, _ := settings["runner"].(string)

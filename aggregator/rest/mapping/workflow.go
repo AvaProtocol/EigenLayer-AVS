@@ -37,7 +37,17 @@ func OpenAPIToProtoCreateWorkflow(in generated.CreateWorkflowRequest) (*avsproto
 		}
 	}
 
-	vars, err := openAPIInputVariablesToProto(in.InputVariables)
+	// Mirror the top-level body.name (declared in the OpenAPI schema
+	// as the canonical workflow name) into inputVariables.settings.name
+	// before handing off to the engine. The engine's NewWorkflowFromProtobuf
+	// sources Task.Name exclusively from settings["name"] — a v3 carryover
+	// where the proto had a top-level Task.name but the persistence path
+	// was wired through the free-form input_variables map. Without this
+	// mirror, callers who pass only the documented body.name field get a
+	// workflow with no name. body.name wins when both are set and differ.
+	inputVars := injectNameIntoSettings(in.InputVariables, in.Name)
+
+	vars, err := openAPIInputVariablesToProto(inputVars)
 	if err != nil {
 		return nil, err
 	}
@@ -60,11 +70,44 @@ func OpenAPIToProtoCreateWorkflow(in generated.CreateWorkflowRequest) (*avsproto
 	if in.ChainId != nil {
 		out.ChainId = *in.ChainId
 	}
-	// Note: in.Name and in.SmartWalletAddress flow through
-	// inputVariables.settings (name + runner) per the existing
-	// engine contract — they are NOT direct fields on CreateTaskReq.
+	// Note: in.SmartWalletAddress still flows through
+	// inputVariables.settings.runner per the existing engine contract.
+	// in.Name is mirrored into settings.name above.
 
 	return out, nil
+}
+
+// injectNameIntoSettings copies the top-level workflow name into
+// inputVariables.settings.name when name is non-empty. Returns a new
+// *generated.InputVariables so the caller's map isn't mutated. If both
+// body.name and settings.name are set and they differ, body.name wins —
+// it's the documented top-level field per the OpenAPI schema.
+//
+// Pure helper, no error path: an unset name leaves settings untouched,
+// and the engine's validator still rejects a missing runner. The
+// "name is required" check was relaxed there because this mapper is
+// responsible for satisfying it.
+func injectNameIntoSettings(in *generated.InputVariables, name *string) *generated.InputVariables {
+	if name == nil || *name == "" {
+		return in
+	}
+
+	out := generated.InputVariables{}
+	if in != nil {
+		for k, v := range *in {
+			out[k] = v
+		}
+	}
+
+	settings := map[string]interface{}{}
+	if existing, ok := out["settings"].(map[string]interface{}); ok {
+		for k, v := range existing {
+			settings[k] = v
+		}
+	}
+	settings["name"] = *name
+	out["settings"] = settings
+	return &out
 }
 
 // ProtoToOpenAPIWorkflow turns a stored *avsproto.Task into the OpenAPI

@@ -2912,10 +2912,12 @@ func (n *Engine) SimulateWorkflow(user *model.User, trigger *avsproto.TaskTrigge
 	if !ok {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid task argument: inputVariables.settings must be an object")
 	}
+	// settings.name is optional — simulations don't have a persistence
+	// surface, and the REST mapper auto-mirrors CreateWorkflowRequest.name
+	// into settings.name for the create path. An empty name here just
+	// produces a transient simulation with no display label, which is
+	// fine for what-if checks.
 	taskName, _ := settings["name"].(string)
-	if strings.TrimSpace(taskName) == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid task argument: inputVariables.settings.name is required")
-	}
 	smartWalletAddress, _ := settings["runner"].(string)
 	if strings.TrimSpace(smartWalletAddress) == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid task argument: inputVariables.settings.runner is required")
