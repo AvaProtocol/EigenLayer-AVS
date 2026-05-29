@@ -119,3 +119,19 @@ macros:
     sendgrid_key: ${SENDGRID_KEY}
     thegraph_api_key: ${THEGRAPH_API_KEY}
     moralis_api_key: ${MORALIS_API_KEY}
+
+# Context-memory summarizer — enables `options.summarize: true` on
+# terminal restApi nodes (SendGrid / Telegram) to auto-inject an
+# AI-generated subject + body via the external context-memory service.
+# Without this block, ComposeSummarySmart falls back to the
+# deterministic summarizer (still useful, just no LLM polish).
+#
+# Set these on the `gateway` Railway service:
+#   CONTEXT_MEMORY_URL      — https://context-api.avaprotocol.org (or staging variant)
+#   CONTEXT_MEMORY_API_KEY  — bearer token issued by the context-memory deployment
+notifications:
+  summary:
+    enabled: true
+    provider: context-memory
+    api_endpoint: ${CONTEXT_MEMORY_URL}
+    api_key: ${CONTEXT_MEMORY_API_KEY}
