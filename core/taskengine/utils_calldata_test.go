@@ -2,7 +2,9 @@ package taskengine
 
 import (
 	"bytes"
+	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
@@ -221,6 +223,181 @@ func TestParseABIParameter_InvalidNumericValue(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestParseABIParameter_FixedSizeIntegerCoercion verifies that uint/int
+// parameters whose ABI Size is <= 64 bits are returned as native Go
+// types (uint8/uint16/.../int64), not as *big.Int. go-ethereum's ABI
+// encoder is type-strict and rejects *big.Int for fixed-size widths
+// with "abi: cannot use ptr as type uintN as argument". This test
+// pins the dispatch so that regression is caught at unit-test time
+// rather than at the contract-write runner boundary.
+func TestParseABIParameter_FixedSizeIntegerCoercion(t *testing.T) {
+	uintCases := []struct {
+		size     int
+		wantKind interface{}
+	}{
+		{8, uint8(0)},
+		{16, uint16(0)},
+		{32, uint32(0)},
+		{64, uint64(0)},
+	}
+	for _, tc := range uintCases {
+		t.Run(fmt.Sprintf("uint%d coerces to native type", tc.size), func(t *testing.T) {
+			got, err := parseABIParameter("42", abi.Type{T: abi.UintTy, Size: tc.size})
+			require.NoError(t, err)
+			require.IsType(t, tc.wantKind, got, "uint%d must coerce to %T, got %T", tc.size, tc.wantKind, got)
+		})
+	}
+
+	intCases := []struct {
+		size     int
+		wantKind interface{}
+	}{
+		{8, int8(0)},
+		{16, int16(0)},
+		{32, int32(0)},
+		{64, int64(0)},
+	}
+	for _, tc := range intCases {
+		t.Run(fmt.Sprintf("int%d coerces to native type", tc.size), func(t *testing.T) {
+			got, err := parseABIParameter("-7", abi.Type{T: abi.IntTy, Size: tc.size})
+			require.NoError(t, err)
+			require.IsType(t, tc.wantKind, got, "int%d must coerce to %T, got %T", tc.size, tc.wantKind, got)
+		})
+	}
+
+	// uint128, uint256, int128, int256 stay as *big.Int because
+	// go-ethereum doesn't define native Go types for those widths.
+	t.Run("uint256 stays *big.Int", func(t *testing.T) {
+		got, err := parseABIParameter("12345", abi.Type{T: abi.UintTy, Size: 256})
+		require.NoError(t, err)
+		require.IsType(t, (*big.Int)(nil), got)
+	})
+	t.Run("int256 stays *big.Int", func(t *testing.T) {
+		got, err := parseABIParameter("-12345", abi.Type{T: abi.IntTy, Size: 256})
+		require.NoError(t, err)
+		require.IsType(t, (*big.Int)(nil), got)
+	})
+
+	// Validate the actual integer values survive coercion.
+	t.Run("uint16 referralCode=0 round-trips", func(t *testing.T) {
+		got, err := parseABIParameter("0", abi.Type{T: abi.UintTy, Size: 16})
+		require.NoError(t, err)
+		require.Equal(t, uint16(0), got)
+	})
+	t.Run("uint16 boundary 65535 round-trips", func(t *testing.T) {
+		got, err := parseABIParameter("65535", abi.Type{T: abi.UintTy, Size: 16})
+		require.NoError(t, err)
+		require.Equal(t, uint16(65535), got)
+	})
+	t.Run("int16 boundary -32768 round-trips", func(t *testing.T) {
+		got, err := parseABIParameter("-32768", abi.Type{T: abi.IntTy, Size: 16})
+		require.NoError(t, err)
+		require.Equal(t, int16(-32768), got)
+	})
+	t.Run("int16 boundary 32767 round-trips", func(t *testing.T) {
+		got, err := parseABIParameter("32767", abi.Type{T: abi.IntTy, Size: 16})
+		require.NoError(t, err)
+		require.Equal(t, int16(32767), got)
+	})
+}
+
+// TestParseABIParameter_FixedSizeOverflow verifies that values
+// outside the representable range for a given ABI Size fail with a
+// clear error message instead of silently truncating.
+func TestParseABIParameter_FixedSizeOverflow(t *testing.T) {
+	overflowCases := []struct {
+		name        string
+		param       string
+		abiType     abi.Type
+		expectedErr string
+	}{
+		{
+			name:        "uint16 overflow",
+			param:       "65536",
+			abiType:     abi.Type{T: abi.UintTy, Size: 16},
+			expectedErr: "value 65536 overflows uint16",
+		},
+		{
+			name:        "uint8 overflow",
+			param:       "256",
+			abiType:     abi.Type{T: abi.UintTy, Size: 8},
+			expectedErr: "value 256 overflows uint8",
+		},
+		{
+			name:        "negative for uint",
+			param:       "-1",
+			abiType:     abi.Type{T: abi.UintTy, Size: 16},
+			expectedErr: "uint16 cannot be negative: -1",
+		},
+		{
+			name:        "int16 overflow positive",
+			param:       "32768",
+			abiType:     abi.Type{T: abi.IntTy, Size: 16},
+			expectedErr: "value 32768 overflows int16",
+		},
+		{
+			name:        "int16 overflow negative",
+			param:       "-32769",
+			abiType:     abi.Type{T: abi.IntTy, Size: 16},
+			expectedErr: "value -32769 overflows int16",
+		},
+	}
+	for _, tc := range overflowCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseABIParameter(tc.param, tc.abiType)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.expectedErr)
+		})
+	}
+}
+
+// TestGenerateCallData_AAVESupplyReferralCode is the end-to-end
+// repro of the bug reported by AvaProtocol/ava-sdk-js#213: the AAVE
+// V3 Pool.supply method has signature
+//
+//	supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)
+//
+// The uint16 referralCode passed as "0" used to fail with
+//
+//	failed to pack method call: abi: cannot use ptr as type uint16 as argument
+//
+// because parseABIParameter returned *big.Int for every UintTy
+// regardless of Size, and go-ethereum's encoder rejects *big.Int for
+// fixed-size widths <= 64 bits. This test pins the regression at the
+// GenerateCallData boundary so we'd catch a reintroduction without
+// needing to run the full contract-write runner.
+func TestGenerateCallData_AAVESupplyReferralCode(t *testing.T) {
+	supplyABI := `[
+		{
+			"name": "supply",
+			"type": "function",
+			"inputs": [
+				{"name": "asset", "type": "address"},
+				{"name": "amount", "type": "uint256"},
+				{"name": "onBehalfOf", "type": "address"},
+				{"name": "referralCode", "type": "uint16"}
+			],
+			"outputs": []
+		}
+	]`
+	contractABI, err := abi.JSON(bytes.NewReader([]byte(supplyABI)))
+	require.NoError(t, err)
+
+	calldata, err := GenerateCallData(
+		"supply",
+		[]string{
+			"0xf8Fb3713D459D7C1018BD0A49D19b4C44290EBE5", // LINK Sepolia
+			"100000000000000000",                         // 0.1 LINK
+			"0xedC0945A6e3AC235AfBCb408b0638117C3ba2940", // smart wallet
+			"0", // referralCode
+		},
+		&contractABI,
+	)
+	require.NoError(t, err, "AAVE Pool.supply must encode cleanly with referralCode=0")
+	require.NotEmpty(t, calldata)
+	require.True(t, strings.HasPrefix(calldata, "0x"), "calldata must be 0x-prefixed")
 }
 
 // TestContractRead_InvalidNumericValue_ResponseStructure tests that invalid numeric values
