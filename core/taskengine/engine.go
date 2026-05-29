@@ -99,9 +99,15 @@ func SetCache(c *bigcache.BigCache) {
 	cache = c
 }
 
-// SetTokenEnrichmentService sets the global token enrichment service
+// SetTokenEnrichmentService sets the global token enrichment service used as
+// the engine's default (single-chain mode, or the gateway's primary chain).
+// Also adds the service to the chain-keyed registry so chain-aware callers
+// can resolve it via GetTokenEnrichmentServiceForChain — this keeps the
+// single-chain path covered without forcing every caller to register
+// explicitly.
 func SetTokenEnrichmentService(service *TokenEnrichmentService) {
 	globalTokenService = service
+	RegisterTokenEnrichmentService(service)
 }
 
 // GetTokenEnrichmentService returns the global token enrichment service
@@ -4768,15 +4774,26 @@ func (n *Engine) GetTokenMetadata(user *model.User, payload *avsproto.GetTokenMe
 			"requested_chain_id", reqChainID)
 	}
 
-	// Check if TokenEnrichmentService is available
-	if n.tokenEnrichmentService == nil {
+	// Pick the per-chain TokenEnrichmentService. When the caller specifies a
+	// chain, route to that chain's registered service so a Sepolia USDC
+	// address is resolved against the Sepolia whitelist/RPC — not whichever
+	// chain the engine's default is bound to (chains[0] = mainnet in the
+	// production gateway). Falls back to the engine's default when no
+	// chain_id is set (single-chain callers / legacy clients).
+	tokenService := n.tokenEnrichmentService
+	if reqChainID := uint64(payload.GetChainId()); reqChainID != 0 {
+		if chainSvc := GetTokenEnrichmentServiceForChain(reqChainID); chainSvc != nil {
+			tokenService = chainSvc
+		}
+	}
+	if tokenService == nil {
 		return &avsproto.GetTokenMetadataResp{
 			Found: false,
 		}, status.Errorf(codes.Unavailable, "token enrichment service not available")
 	}
 
 	// Try to get token metadata using the enrichment service
-	metadata, err := n.tokenEnrichmentService.GetTokenMetadata(payload.Address)
+	metadata, err := tokenService.GetTokenMetadata(payload.Address)
 	if err != nil {
 		n.logger.Warn("Failed to get token metadata",
 			"address", payload.Address,

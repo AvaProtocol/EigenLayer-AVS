@@ -90,7 +90,42 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 	})
 	agg.worker = apqueue.NewWorker(agg.queue, agg.db)
 
-	// Initialize global TokenEnrichmentService if not already set
+	// Gateway mode: register one TokenEnrichmentService per configured chain
+	// so token metadata lookups during workflow summarization (and other
+	// chain-aware paths) hit the right whitelist + RPC. Without this, the
+	// single global service is bound to chains[0] (Ethereum mainnet) and a
+	// Sepolia USDC workflow falls back to symbol="UNKNOWN", decimals=18 —
+	// the email then renders "0.0000000000001 UNKNOWN" instead of "0.1 USDC".
+	if agg.config.IsGateway {
+		for _, chain := range agg.config.Chains {
+			if chain.SmartWallet == nil || chain.SmartWallet.EthRpcUrl == "" {
+				continue
+			}
+			chainRpc, err := ethclient.Dial(chain.SmartWallet.EthRpcUrl)
+			if err != nil {
+				agg.logger.Warn("Failed to dial chain RPC for TokenEnrichmentService",
+					"chain", chain.Name, "chain_id", chain.ChainID, "error", err)
+				continue
+			}
+			chainTokenService, err := taskengine.NewTokenEnrichmentService(chainRpc, agg.logger)
+			if err != nil {
+				agg.logger.Warn("Failed to initialize chain TokenEnrichmentService",
+					"chain", chain.Name, "chain_id", chain.ChainID, "error", err)
+				continue
+			}
+			taskengine.RegisterTokenEnrichmentService(chainTokenService)
+			agg.logger.Info("Chain TokenEnrichmentService registered",
+				"chain", chain.Name,
+				"chainID", chainTokenService.GetChainID(),
+				"whitelistTokens", chainTokenService.GetCacheSize())
+		}
+	}
+
+	// Initialize global TokenEnrichmentService (used as the engine's default
+	// when callers don't pass a chain ID — single-chain mode, or gateway mode
+	// for legacy code paths that haven't been migrated yet). In gateway mode
+	// this lands on chains[0] because config.go fills SmartWallet.EthRpcUrl
+	// from Chains[0].SmartWallet.
 	if taskengine.GetTokenEnrichmentService() == nil && agg.config.SmartWallet.EthRpcUrl != "" {
 		rpcClient, err := ethclient.Dial(agg.config.SmartWallet.EthRpcUrl)
 		if err != nil {
