@@ -480,19 +480,16 @@ func RegisterTokenEnrichmentService(svc *TokenEnrichmentService) {
 }
 
 // GetTokenEnrichmentServiceForChain returns the registered service for the
-// given chain ID, or nil when none is registered. Passing 0 returns the only
-// registered service when running in single-chain mode (registry size == 1);
-// nil otherwise — ambiguous calls in gateway mode must specify a chain.
+// given chain ID, or nil when none is registered. Returns nil for chainID 0;
+// callers wanting a "default" fallback should resolve to the legacy global
+// themselves. Avoiding an implicit registry-size-1 shortcut keeps tests
+// honest: SetTokenEnrichmentService(nil) for isolation won't silently get
+// back a service that some earlier test leaked into the registry.
 func GetTokenEnrichmentServiceForChain(chainID uint64) *TokenEnrichmentService {
+	if chainID == 0 {
+		return nil
+	}
 	tokenServiceRegistryMutex.RLock()
 	defer tokenServiceRegistryMutex.RUnlock()
-	if chainID != 0 {
-		return tokenServiceRegistry[chainID]
-	}
-	if len(tokenServiceRegistry) == 1 {
-		for _, svc := range tokenServiceRegistry {
-			return svc
-		}
-	}
-	return nil
+	return tokenServiceRegistry[chainID]
 }
