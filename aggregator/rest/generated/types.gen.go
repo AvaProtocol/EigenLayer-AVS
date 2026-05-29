@@ -218,9 +218,9 @@ const (
 
 // Defines values for WithdrawResponseStatus.
 const (
+	WithdrawResponseStatusConfirmed WithdrawResponseStatus = "confirmed"
 	WithdrawResponseStatusFailed    WithdrawResponseStatus = "failed"
 	WithdrawResponseStatusPending   WithdrawResponseStatus = "pending"
-	WithdrawResponseStatusSubmitted WithdrawResponseStatus = "submitted"
 )
 
 // Defines values for WorkflowStatus.
@@ -1013,11 +1013,38 @@ type RestAPINodeConfig struct {
 	Body    *string                 `json:"body,omitempty"`
 	Headers *map[string]string      `json:"headers,omitempty"`
 	Method  RestAPINodeConfigMethod `json:"method"`
-	Url     string                  `json:"url"`
+
+	// Options Generic options bag for backend features on terminal
+	// RestAPI nodes. `summarize: true` opts a SendGrid /v3/mail/send
+	// or Telegram /sendMessage node into the aggregator's
+	// context-memory summarizer, which composes a subject + HTML
+	// body from the workflow's execution context and injects them
+	// into the outgoing request. Without this field set, the
+	// aggregator falls back to the deterministic summarizer (no
+	// LLM polish).
+	Options *RestAPINodeConfig_Options `json:"options,omitempty"`
+	Url     string                     `json:"url"`
 }
 
 // RestAPINodeConfigMethod defines model for RestAPINodeConfig.Method.
 type RestAPINodeConfigMethod string
+
+// RestAPINodeConfig_Options Generic options bag for backend features on terminal
+// RestAPI nodes. `summarize: true` opts a SendGrid /v3/mail/send
+// or Telegram /sendMessage node into the aggregator's
+// context-memory summarizer, which composes a subject + HTML
+// body from the workflow's execution context and injects them
+// into the outgoing request. Without this field set, the
+// aggregator falls back to the deterministic summarizer (no
+// LLM polish).
+type RestAPINodeConfig_Options struct {
+	// Summarize When true on a terminal SendGrid or Telegram node,
+	// ComposeSummarySmart runs at execution time and fills
+	// in the empty content.value / text slot with an
+	// AI-generated body. No-op on non-notification URLs.
+	Summarize            *bool                  `json:"summarize,omitempty"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
 
 // RunNodeRequest defines model for RunNodeRequest.
 type RunNodeRequest struct {
@@ -1555,6 +1582,74 @@ type EstimateWorkflowFeesJSONRequestBody = EstimateFeesRequest
 
 // SimulateWorkflowJSONRequestBody defines body for SimulateWorkflow for application/json ContentType.
 type SimulateWorkflowJSONRequestBody = SimulateWorkflowRequest
+
+// Getter for additional properties for RestAPINodeConfig_Options. Returns the specified
+// element and whether it was found
+func (a RestAPINodeConfig_Options) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for RestAPINodeConfig_Options
+func (a *RestAPINodeConfig_Options) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for RestAPINodeConfig_Options to handle AdditionalProperties
+func (a *RestAPINodeConfig_Options) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["summarize"]; found {
+		err = json.Unmarshal(raw, &a.Summarize)
+		if err != nil {
+			return fmt.Errorf("error reading 'summarize': %w", err)
+		}
+		delete(object, "summarize")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for RestAPINodeConfig_Options to handle AdditionalProperties
+func (a RestAPINodeConfig_Options) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	if a.Summarize != nil {
+		object["summarize"], err = json.Marshal(a.Summarize)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'summarize': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
 
 // AsETHTransferNode returns the union data inside the Node as a ETHTransferNode
 func (t Node) AsETHTransferNode() (ETHTransferNode, error) {
