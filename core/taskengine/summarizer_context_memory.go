@@ -421,6 +421,25 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, 
 		trigger = vm.task.Task.Trigger
 	}
 
+	// Workflow-level chain ID — routes token metadata lookups to the correct
+	// chain's TokenEnrichmentService. Persisted task chain wins; the engine's
+	// resolved smart-wallet chain is the next-best signal; the SDK-provided
+	// settings.chain_id is the last fallback (e.g. RunNodeImmediately where
+	// vm.task is nil). vm.mu is already held — do not call chainIDFromVM,
+	// which re-locks.
+	var workflowChainID uint64
+	if vm.task != nil && vm.task.Task != nil && vm.task.Task.ChainId > 0 {
+		workflowChainID = uint64(vm.task.Task.ChainId)
+	}
+	if workflowChainID == 0 && vm.smartWalletConfig != nil && vm.smartWalletConfig.ChainID > 0 {
+		workflowChainID = uint64(vm.smartWalletConfig.ChainID)
+	}
+	if workflowChainID == 0 {
+		if rawSettings, ok := vm.vars["settings"].(map[string]interface{}); ok {
+			workflowChainID = chainIDFromSettingsValue(rawSettings["chain_id"])
+		}
+	}
+
 	// Convert execution logs to steps using the new extraction functions
 	steps := make([]contextMemoryStepDigest, 0, len(vm.ExecutionLogs))
 	for _, log := range vm.ExecutionLogs {
@@ -501,9 +520,20 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, 
 				}
 			}
 
-			// Look up token metadata for the contract address (for ERC20 tokens only)
+			// Look up token metadata for the contract address (for ERC20 tokens only).
+			// Resolve via the chain-keyed registry so a Sepolia USDC address is looked up
+			// against the Sepolia whitelist/RPC, not whichever chain the gateway happens
+			// to have as its default (chains[0] = Ethereum mainnet in production). The
+			// step's execution context is the authoritative chain source — it records
+			// the chain a step actually ran against — with the workflow chain as fallback.
+			// resolveTokenServiceForChain falls back to the legacy global when no chain
+			// service is registered (single-chain mode, or tests that bypass the registry).
 			if resolvedContractAddress != "" && !strings.Contains(resolvedContractAddress, "{{") && common.IsHexAddress(resolvedContractAddress) && isERC20Method(methodName) {
-				if tokenService := GetTokenEnrichmentService(); tokenService != nil {
+				stepChainID := chainIDFromExecutionContext(step.ExecutionContext)
+				if stepChainID == 0 {
+					stepChainID = workflowChainID
+				}
+				if tokenService := resolveTokenServiceForChain(stepChainID); tokenService != nil {
 					if metadata, err := tokenService.GetTokenMetadata(resolvedContractAddress); err == nil && metadata != nil {
 						step.TokenMetadata = &contextMemoryTokenMetadata{
 							Symbol:   metadata.Symbol,
@@ -598,7 +628,7 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, 
 	// 2. Collect from settings.uniswapv3_pool.tokens (input, output, base, quote)
 	if pool, ok := settings["uniswapv3_pool"].(map[string]interface{}); ok {
 		if tokens, ok := pool["tokens"].(map[string]interface{}); ok {
-			tokenService := GetTokenEnrichmentService()
+			tokenService := resolveTokenServiceForChain(workflowChainID)
 			for tokenKey, tokenAddr := range tokens {
 				if addr, ok := tokenAddr.(string); ok && common.IsHexAddress(addr) {
 					addrLower := strings.ToLower(addr)
@@ -625,7 +655,7 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, 
 	// This is the preferred way for workflows to declare which tokens they interact with,
 	// ensuring context-memory always has the metadata needed for decimal formatting.
 	if tokens, ok := settings["tokens"].([]interface{}); ok {
-		tokenService := GetTokenEnrichmentService()
+		tokenService := resolveTokenServiceForChain(workflowChainID)
 		if tokenService != nil {
 			for _, t := range tokens {
 				if addr, ok := t.(string); ok && common.IsHexAddress(addr) {
@@ -661,6 +691,91 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, 
 		TokenMetadata:   tokenMetadataMap,
 		RunNumber:       executionCount, // 1-based for real executions; ignored when isSimulation is true
 	}, nil
+}
+
+// resolveTokenServiceForChain prefers the per-chain registered service so
+// gateway mode picks the right whitelist/RPC, but falls back to the legacy
+// global service when none is registered for the chain. The fallback covers:
+//   - single-chain mode (registry has one entry whose chain matches by virtue
+//     of being the only one — and SetTokenEnrichmentService registers it)
+//   - tests that bypass the registry by calling SetTokenEnrichmentService
+//     directly with a service that has chainID=0
+//   - gateway mode for chains where init failed (RPC dial error)
+func resolveTokenServiceForChain(chainID uint64) *TokenEnrichmentService {
+	if svc := GetTokenEnrichmentServiceForChain(chainID); svc != nil {
+		return svc
+	}
+	return GetTokenEnrichmentService()
+}
+
+// chainIDFromSettingsValue parses a chain_id value from a settings map. The
+// concrete type depends on how the value arrived: JSON-decoded settings give
+// float64; protobuf-derived settings give int64; SDK string passthroughs give
+// string. Returns 0 when absent or unparseable.
+func chainIDFromSettingsValue(raw interface{}) uint64 {
+	switch v := raw.(type) {
+	case nil:
+		return 0
+	case uint64:
+		return v
+	case int64:
+		if v > 0 {
+			return uint64(v)
+		}
+	case int:
+		if v > 0 {
+			return uint64(v)
+		}
+	case float64:
+		if v > 0 {
+			return uint64(v)
+		}
+	case json.Number:
+		if n, err := v.Int64(); err == nil && n > 0 {
+			return uint64(n)
+		}
+	case string:
+		if n, err := parsePositiveUint(v); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+// chainIDFromExecutionContext extracts chain_id from a step's ExecutionContext.
+// The argument is the protobuf Value's AsInterface() — always a
+// map[string]interface{} when present. Step context is authoritative for
+// cross-chain workflows where a node may have run against a different chain
+// than the workflow's default.
+func chainIDFromExecutionContext(ec interface{}) uint64 {
+	if ec == nil {
+		return 0
+	}
+	m, ok := ec.(map[string]interface{})
+	if !ok {
+		return 0
+	}
+	return chainIDFromSettingsValue(m["chain_id"])
+}
+
+// parsePositiveUint is a tiny strconv.ParseUint replacement that returns an
+// error for non-positive values. Inlined to avoid pulling strconv into the
+// summarizer's import block for a single call site.
+func parsePositiveUint(s string) (uint64, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty string")
+	}
+	var out uint64
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0, fmt.Errorf("non-digit in %q", s)
+		}
+		out = out*10 + uint64(r-'0')
+	}
+	if out == 0 {
+		return 0, fmt.Errorf("non-positive: %q", s)
+	}
+	return out, nil
 }
 
 // isERC20Method returns true if the method name suggests this is an ERC20 token interaction
