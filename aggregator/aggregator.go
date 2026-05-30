@@ -95,8 +95,15 @@ type Aggregator struct {
 	// delegates to via the WithdrawService interface.
 	smartWalletRpc   *ethclient.Client
 	smartWalletWsRpc *ethclient.Client
-	priceService     taskengine.PriceService
-	rpcServer        *RpcServer
+	// smartWalletRpcByChain holds one *ethclient.Client per chain in
+	// gateway mode, keyed by chain ID. Lets per-request handlers
+	// (EstimateWorkflowFees, GetWalletNonce, WithdrawWallet) route to
+	// the correct chain's RPC instead of always landing on smartWalletRpc
+	// (which falls back to chains[0] = mainnet via config.go's gateway
+	// fallback). nil in single-chain mode.
+	smartWalletRpcByChain map[int64]*ethclient.Client
+	priceService          taskengine.PriceService
+	rpcServer             *RpcServer
 
 	operatorPool *OperatorPool
 

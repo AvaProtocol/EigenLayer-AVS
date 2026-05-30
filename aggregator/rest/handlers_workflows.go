@@ -345,18 +345,28 @@ func (s *Server) EstimateWorkflowFees(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if s.smartWalletRpc == nil {
+	var body generated.EstimateFeesRequest
+	if err := ctx.Bind(&body); err != nil {
+		return badRequest("FEES_BAD_REQUEST", "Invalid request body", err.Error())
+	}
+
+	// Route the fee estimator at the chain the request actually targets.
+	// In gateway mode the global smartWalletRpc lands on chains[0] = mainnet
+	// (see config.go's IsGateway fallback), so a Sepolia request would
+	// otherwise pull mainnet gas prices and check wallet bytecode on the
+	// wrong chain.
+	var reqChainID int64
+	if body.ChainId != nil {
+		reqChainID = *body.ChainId
+	}
+	rpc, smartWalletCfg := s.resolveSmartWalletForChain(reqChainID)
+	if rpc == nil {
 		return &restmw.HTTPError{
 			Status: http.StatusServiceUnavailable,
 			Code:   "FEES_UNAVAILABLE",
 			Title:  "Fee estimator not configured",
-			Detail: "This aggregator instance was started without a smart-wallet RPC client.",
+			Detail: "This aggregator instance was started without a smart-wallet RPC client for the requested chain.",
 		}
-	}
-
-	var body generated.EstimateFeesRequest
-	if err := ctx.Bind(&body); err != nil {
-		return badRequest("FEES_BAD_REQUEST", "Invalid request body", err.Error())
 	}
 
 	trigger, err := mapping.OpenAPIToProtoTrigger(body.Trigger)
@@ -402,13 +412,13 @@ func (s *Server) EstimateWorkflowFees(ctx echo.Context) error {
 	var estimator *taskengine.FeeEstimator
 	if s.config != nil && s.config.FeeRates != nil {
 		estimator = taskengine.NewFeeEstimatorWithConfig(
-			s.logger, s.smartWalletRpc, s.engine.GetTenderlyClient(),
-			s.config.SmartWallet, s.priceService, s.config.FeeRates,
+			s.logger, rpc, s.engine.GetTenderlyClient(),
+			smartWalletCfg, s.priceService, s.config.FeeRates,
 		)
 	} else {
 		estimator = taskengine.NewFeeEstimator(
-			s.logger, s.smartWalletRpc, s.engine.GetTenderlyClient(),
-			s.config.SmartWallet, s.priceService,
+			s.logger, rpc, s.engine.GetTenderlyClient(),
+			smartWalletCfg, s.priceService,
 		)
 	}
 

@@ -16,10 +16,11 @@ import (
 // agg.priceService, and agg.rpcServer.
 func (agg *Aggregator) buildRestDeps() rest.ServerDeps {
 	return rest.ServerDeps{
-		Operators:      &operatorPoolAdapter{pool: agg.operatorPool},
-		SmartWalletRpc: agg.smartWalletRpc,
-		PriceService:   agg.priceService,
-		WithdrawSvc:    &withdrawServiceAdapter{rpc: agg.rpcServer},
+		Operators:             &operatorPoolAdapter{pool: agg.operatorPool},
+		SmartWalletRpc:        agg.smartWalletRpc,
+		SmartWalletRpcByChain: agg.smartWalletRpcByChain,
+		PriceService:          agg.priceService,
+		WithdrawSvc:           &withdrawServiceAdapter{rpc: agg.rpcServer},
 	}
 }
 

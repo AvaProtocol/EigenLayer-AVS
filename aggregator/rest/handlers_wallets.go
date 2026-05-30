@@ -245,18 +245,29 @@ func (s *Server) GetWalletNonce(ctx echo.Context, address generated.EthereumAddr
 	if err != nil {
 		return err
 	}
-	if s.smartWalletRpc == nil {
-		return &restmw.HTTPError{
-			Status: http.StatusServiceUnavailable,
-			Code:   "NONCE_UNAVAILABLE",
-			Title:  "Smart wallet RPC not configured",
-			Detail: "This aggregator instance was started without a smart-wallet RPC client.",
-		}
-	}
 	if !common.IsHexAddress(string(address)) {
 		return badRequest("WALLETS_BAD_ADDRESS", "Invalid wallet address", "The {address} path parameter must be a valid 0x-prefixed hex address.")
 	}
 	walletAddr := common.HexToAddress(string(address))
+
+	// Pick the chain to read the nonce against. The endpoint has no
+	// chainId query param, so fall back to the JWT audience — same
+	// pattern as WithdrawWallet. Without this, gateway-mode requests
+	// from a Sepolia wallet would hit the chains[0]=mainnet RPC and
+	// return an empty nonce (no entrypoint deployed there).
+	chainID := int64(0)
+	if authed := restmw.UserFromContext(ctx); authed != nil {
+		chainID = authed.ChainID
+	}
+	rpc, _ := s.resolveSmartWalletForChain(chainID)
+	if rpc == nil {
+		return &restmw.HTTPError{
+			Status: http.StatusServiceUnavailable,
+			Code:   "NONCE_UNAVAILABLE",
+			Title:  "Smart wallet RPC not configured",
+			Detail: "This aggregator instance was started without a smart-wallet RPC client for the requested chain.",
+		}
+	}
 
 	// Ownership check — the engine's GetWalletFromDB lookup is the
 	// canonical source of truth that this wallet belongs to the
@@ -270,15 +281,7 @@ func (s *Server) GetWalletNonce(ctx echo.Context, address generated.EthereumAddr
 		}
 	}
 
-	if s.config == nil || s.config.SmartWallet == nil {
-		return &restmw.HTTPError{
-			Status: http.StatusInternalServerError,
-			Code:   "WALLETS_NO_CONFIG",
-			Title:  "Smart wallet config missing",
-			Detail: "Aggregator has no smart wallet config; nonce lookup unavailable.",
-		}
-	}
-	nonce, err := aa.GetNonce(s.smartWalletRpc, walletAddr, big.NewInt(0))
+	nonce, err := aa.GetNonce(rpc, walletAddr, big.NewInt(0))
 	if err != nil {
 		return fmt.Errorf("entrypoint nonce read failed: %w", err)
 	}

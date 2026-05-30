@@ -51,8 +51,13 @@ type Server struct {
 	config         *config.Config
 	operators      OperatorLister
 	smartWalletRpc *ethclient.Client
-	priceService   taskengine.PriceService
-	withdraws      WithdrawService
+	// smartWalletRpcByChain holds per-chain RPC clients in gateway mode,
+	// keyed by chain ID. Populated from the aggregator's
+	// agg.smartWalletRpcByChain map. nil in single-chain mode — callers
+	// fall back to smartWalletRpc. See resolveSmartWalletForChain.
+	smartWalletRpcByChain map[int64]*ethclient.Client
+	priceService          taskengine.PriceService
+	withdraws             WithdrawService
 }
 
 // OperatorLister is the minimal surface the REST package needs from the
@@ -115,8 +120,12 @@ type WithdrawResult struct {
 type ServerDeps struct {
 	Operators      OperatorLister
 	SmartWalletRpc *ethclient.Client
-	PriceService   taskengine.PriceService
-	WithdrawSvc    WithdrawService
+	// SmartWalletRpcByChain holds per-chain RPC clients in gateway mode.
+	// In single-chain mode, leave nil — REST handlers fall back to
+	// SmartWalletRpc.
+	SmartWalletRpcByChain map[int64]*ethclient.Client
+	PriceService          taskengine.PriceService
+	WithdrawSvc           WithdrawService
 }
 
 // NewServer wires the REST handler with its dependencies. Constructed once
@@ -124,14 +133,37 @@ type ServerDeps struct {
 // Echo router handles request-level concurrency.
 func NewServer(engine *taskengine.Engine, logger sdklogging.Logger, cfg *config.Config, deps ServerDeps) *Server {
 	return &Server{
-		engine:         engine,
-		logger:         logger,
-		config:         cfg,
-		operators:      deps.Operators,
-		smartWalletRpc: deps.SmartWalletRpc,
-		priceService:   deps.PriceService,
-		withdraws:      deps.WithdrawSvc,
+		engine:                engine,
+		logger:                logger,
+		config:                cfg,
+		operators:             deps.Operators,
+		smartWalletRpc:        deps.SmartWalletRpc,
+		smartWalletRpcByChain: deps.SmartWalletRpcByChain,
+		priceService:          deps.PriceService,
+		withdraws:             deps.WithdrawSvc,
 	}
+}
+
+// resolveSmartWalletForChain picks the (rpc, smart-wallet config) pair the
+// REST handlers should use for a given request chain ID. In gateway mode
+// each chain has its own ethclient (dialed at startup against
+// chain.SmartWallet.EthRpcUrl) and its own SmartWalletConfig (with the
+// chain-specific factory/paymaster); resolving both together keeps gas
+// estimates and wallet operations on the chain the caller actually
+// requested. Falls back to the engine's default pair when chainID is 0
+// or unknown — that covers single-chain mode and legacy callers.
+func (s *Server) resolveSmartWalletForChain(chainID int64) (*ethclient.Client, *config.SmartWalletConfig) {
+	rpc := s.smartWalletRpc
+	if chainID > 0 && s.smartWalletRpcByChain != nil {
+		if chainRpc, ok := s.smartWalletRpcByChain[chainID]; ok {
+			rpc = chainRpc
+		}
+	}
+	sw := s.engine.ResolveSmartWalletConfig(chainID)
+	if sw == nil {
+		sw = s.config.SmartWallet
+	}
+	return rpc, sw
 }
 
 // Mount registers every REST route on the supplied Echo instance under

@@ -90,23 +90,27 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 	})
 	agg.worker = apqueue.NewWorker(agg.queue, agg.db)
 
-	// Gateway mode: register one TokenEnrichmentService per configured chain
-	// so token metadata lookups during workflow summarization (and other
-	// chain-aware paths) hit the right whitelist + RPC. Without this, the
-	// single global service is bound to chains[0] (Ethereum mainnet) and a
-	// Sepolia USDC workflow falls back to symbol="UNKNOWN", decimals=18 —
-	// the email then renders "0.0000000000001 UNKNOWN" instead of "0.1 USDC".
+	// Gateway mode: dial one *ethclient.Client per Chains[] entry. The
+	// connection is shared between the TokenEnrichmentService (whose RPC
+	// fallback wants the right chain's contracts — see "0.1 USDC" vs
+	// "0.0000000000001 UNKNOWN") and the REST fee/wallet handlers (whose
+	// per-request chainId now routes through smartWalletRpcByChain instead
+	// of always landing on agg.smartWalletRpc — which the gateway-mode
+	// fallback in config.go binds to chains[0] = mainnet).
 	if agg.config.IsGateway {
+		agg.smartWalletRpcByChain = make(map[int64]*ethclient.Client, len(agg.config.Chains))
 		for _, chain := range agg.config.Chains {
 			if chain.SmartWallet == nil || chain.SmartWallet.EthRpcUrl == "" {
 				continue
 			}
 			chainRpc, err := ethclient.Dial(chain.SmartWallet.EthRpcUrl)
 			if err != nil {
-				agg.logger.Warn("Failed to dial chain RPC for TokenEnrichmentService",
+				agg.logger.Warn("Failed to dial chain RPC",
 					"chain", chain.Name, "chain_id", chain.ChainID, "error", err)
 				continue
 			}
+			agg.smartWalletRpcByChain[chain.ChainID] = chainRpc
+
 			chainTokenService, err := taskengine.NewTokenEnrichmentService(chainRpc, agg.logger)
 			if err != nil {
 				agg.logger.Warn("Failed to initialize chain TokenEnrichmentService",
@@ -114,7 +118,7 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 				continue
 			}
 			taskengine.RegisterTokenEnrichmentService(chainTokenService)
-			agg.logger.Info("Chain TokenEnrichmentService registered",
+			agg.logger.Info("Chain RPC + TokenEnrichmentService registered",
 				"chain", chain.Name,
 				"chainID", chainTokenService.GetChainID(),
 				"whitelistTokens", chainTokenService.GetCacheSize())
