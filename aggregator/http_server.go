@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest"
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/getsentry/sentry-go"
@@ -29,7 +28,7 @@ type HttpJsonResp[T any] struct {
 	Data T `json:"data"`
 }
 
-func (agg *Aggregator) startHttpServer(ctx context.Context) {
+func (agg *Aggregator) startHttpServer(ctx context.Context, extraMounts []HTTPMounter) {
 	// If http_bind_address is not set, skip HTTP server startup entirely
 	if agg.config == nil || agg.config.HttpBindAddress == "" {
 		agg.logger.Info("HTTP server disabled: no http_bind_address configured")
@@ -180,17 +179,18 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 		})
 	}
 
-	// Mount the REST API surface (api/openapi.yaml). Adds /api/v1/**
-	// alongside the existing legacy routes — /up, /operator, /telemetry,
-	// and the _debug endpoints continue to serve until the gRPC public
-	// surface is removed and clients have migrated to the REST SDK.
+	// Mount any extra HTTP surfaces injected via aggregator.WithHTTPMount.
+	// The REST API (aggregator/rest) is wired in this way from
+	// cmd/runAggregator.go so the aggregator package never imports REST
+	// directly — that's the boundary that lets aggregator/rest move to
+	// its own repo without dragging the aggregator core with it.
 	//
-	// REST middleware (request id, sentry tagging, CORS, problem+json
-	// errors, JWT auth, rate limiting) is scoped to /api/v1 only; legacy
-	// routes keep their existing (empty) middleware stack so monitoring
-	// tools probing /up don't get a 401.
-	restServer := rest.NewServer(agg.engine, agg.logger, agg.config, agg.AvsClientSurface())
-	restServer.Mount(e)
+	// Mounters run AFTER the built-in legacy routes (/up, /operator,
+	// /telemetry, /_debug/*) so they can rely on the engine, rpcServer,
+	// smartWalletRpc, and priceService being populated.
+	for _, mounter := range extraMounts {
+		mounter(agg, e)
+	}
 
 	addr := agg.config.HttpBindAddress
 	agg.logger.Info("HTTP server listening", "address", addr)

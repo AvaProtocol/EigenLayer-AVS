@@ -55,7 +55,7 @@ const (
 	shutdownStatus AggregatorStatus = "shutdown"
 )
 
-func RunWithConfig(configPath string) error {
+func RunWithConfig(configPath string, opts ...StartOption) error {
 	nodeConfig, err := config.NewConfig(configPath)
 	if err != nil {
 		panic(fmt.Errorf("Failed to parse config file: %s\nMake sure it is exist and a valid yaml file %w.", configPath, err))
@@ -66,7 +66,7 @@ func RunWithConfig(configPath string) error {
 		panic(fmt.Errorf("Cannot initialize aggregator from config: %w", err))
 	}
 
-	return aggregator.Start(context.Background())
+	return aggregator.Start(context.Background(), opts...)
 }
 
 // block number by calling the getOperatorState() function of the BLSOperatorStateRetriever.sol contract.
@@ -126,6 +126,21 @@ type Aggregator struct {
 	// nil when running in single-chain aggregator mode.
 	chainRegistry *ChainRegistry
 }
+
+// Engine returns the underlying task engine. Exposed so the cmd layer
+// (or any other consumer holding an *Aggregator) can pass it to
+// downstream constructors like rest.NewServer without the aggregator
+// package needing to import those packages.
+func (agg *Aggregator) Engine() *taskengine.Engine { return agg.engine }
+
+// Logger returns the structured logger the aggregator was built with.
+// Exposed for the same reason as Engine() — to let cmd-level wiring
+// pass the same logger into downstream consumers.
+func (agg *Aggregator) Logger() logging.Logger { return agg.logger }
+
+// Config returns the aggregator's loaded config. Exposed for cmd-level
+// wiring; the config is otherwise read-only after NewAggregator.
+func (agg *Aggregator) Config() *config.Config { return agg.config }
 
 // NewAggregator creates a new Aggregator with the provided config.
 func NewAggregator(c *config.Config) (*Aggregator, error) {
@@ -288,7 +303,12 @@ func (agg *Aggregator) migrate() {
 	}
 }
 
-func (agg *Aggregator) Start(ctx context.Context) error {
+func (agg *Aggregator) Start(ctx context.Context, opts ...StartOption) error {
+	startOpts := &startOptions{}
+	for _, opt := range opts {
+		opt(startOpts)
+	}
+
 	// Disable stack traces globally to reduce log noise
 	debug.SetTraceback("none")
 	os.Setenv("GOTRACEBACK", "none")
@@ -334,7 +354,7 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.startRepl()
 
 	agg.logger.Infof("Starting http server")
-	agg.startHttpServer(ctx)
+	agg.startHttpServer(ctx, startOpts.httpMounts)
 	agg.status = runningStatus
 
 	// Setup wait signal
