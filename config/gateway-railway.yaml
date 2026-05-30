@@ -25,8 +25,11 @@
 #   ETHEREUM_BUNDLER_URL, SEPOLIA_BUNDLER_URL,
 #   BASE_BUNDLER_URL,     BASE_SEPOLIA_BUNDLER_URL
 #   BNB_BUNDLER_URL      — optional; connectivity-only rollout leaves it unset
-#   CONTROLLER_PRIVATE_KEY  — paymaster controller, shared across chains
-#   PAYMASTER_ADDRESS
+#   CONTROLLER_PRIVATE_KEY      — paymaster controller, shared across chains
+#   PAYMASTER_ADDRESS_MAINNET   — VerifyingPaymaster on Ethereum + Base
+#   PAYMASTER_ADDRESS_TESTNET   — VerifyingPaymaster on Sepolia + Base-Sepolia
+#                                 (also used as a placeholder on BNB until its
+#                                  own paymaster is deployed; not called)
 #   TENDERLY_ACCESS_KEY
 #   TELEGRAM_BOT_TOKEN, SENDGRID_KEY, THEGRAPH_API_KEY, MORALIS_API_KEY
 environment: production
@@ -74,6 +77,13 @@ tenderly_access_key: ${TENDERLY_ACCESS_KEY}
 # Chain workers — worker_addr is set from WORKER_* env vars so adding
 # a chain is just "set another env var + add a row here".
 chains:
+  # Paymaster addresses are PER-NETWORK (different contract instance on
+  # mainnet vs testnet), so each chain references its network's env var.
+  # See docs/Contract.md for the deployed addresses.
+  #   PAYMASTER_ADDRESS_MAINNET  → 0xf023eA29… (Ethereum + Base)
+  #   PAYMASTER_ADDRESS_TESTNET  → 0xd856f532… (Sepolia + Base-Sepolia)
+  # Using a single shared PAYMASTER_ADDRESS broke Sepolia workflows for
+  # the duration of the previous deploy (Sentry EIGENLAYER-AVS-1N/1M).
   - chain_id: 1
     name: ethereum
     worker_addr: ${WORKER_ETHEREUM}
@@ -82,7 +92,7 @@ chains:
       eth_ws_url: ${ETHEREUM_DWELLIR_WS}
       bundler_url: ${ETHEREUM_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY}
-      paymaster_address: ${PAYMASTER_ADDRESS}
+      paymaster_address: ${PAYMASTER_ADDRESS_MAINNET}
       # Mainnet production cap is 3; this branch (feature/rest-api-migration)
       # only feeds the testing environment, so we lift the cap to match the
       # testnet chains and let the v4 test suite churn through wallets.
@@ -96,7 +106,7 @@ chains:
       eth_ws_url: ${BASE_DWELLIR_WS}
       bundler_url: ${BASE_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY}
-      paymaster_address: ${PAYMASTER_ADDRESS}
+      paymaster_address: ${PAYMASTER_ADDRESS_MAINNET}
       # See chain 1 note above — relaxed for test-env churn only.
       max_wallets_per_owner: 2000
 
@@ -108,7 +118,7 @@ chains:
       eth_ws_url: ${SEPOLIA_DWELLIR_WS}
       bundler_url: ${SEPOLIA_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY}
-      paymaster_address: ${PAYMASTER_ADDRESS}
+      paymaster_address: ${PAYMASTER_ADDRESS_TESTNET}
       max_wallets_per_owner: 2000
 
   - chain_id: 84532
@@ -119,14 +129,15 @@ chains:
       eth_ws_url: ${BASE_SEPOLIA_DWELLIR_WS}
       bundler_url: ${BASE_SEPOLIA_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY}
-      paymaster_address: ${PAYMASTER_ADDRESS}
+      paymaster_address: ${PAYMASTER_ADDRESS_TESTNET}
       max_wallets_per_owner: 2000
 
   # BNB Smart Chain mainnet — connectivity-only rollout. The chain
   # has no SmartWallet factory deployed yet (avs-contracts Phase 2
   # deferred per avs-infra/Adding_A_New_Chain.md Phase 0.5), so
   # wallet ops will fail at execution. Event triggers + contractRead
-  # work end-to-end.
+  # work end-to-end. paymaster_address is a placeholder until BNB's
+  # own paymaster is deployed; the value won't be called.
   - chain_id: 56
     name: bnb-mainnet
     worker_addr: ${WORKER_BNB}
@@ -135,7 +146,7 @@ chains:
       eth_ws_url: ${BNB_DWELLIR_WS}
       bundler_url: ${BNB_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY}
-      paymaster_address: ${PAYMASTER_ADDRESS}
+      paymaster_address: ${PAYMASTER_ADDRESS_TESTNET}
       max_wallets_per_owner: 2000
 
 macros:

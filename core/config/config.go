@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/prometheus/client_golang/prometheus"
 	"gopkg.in/yaml.v2"
 
@@ -511,17 +513,32 @@ func NewConfig(configFilePath string) (*Config, error) {
 		logger.Info("Controller address derived", "controller", config.SmartWallet.ControllerAddress.Hex())
 	}
 
-	// Fetch the paymaster owner address by calling owner() on the paymaster contract
-	// This is needed for gas reimbursement - we send ETH to the owner (EOA), not the contract itself
+	// Fetch the paymaster owner address by calling owner() on the paymaster contract.
+	// This is needed for gas reimbursement — we send ETH to the owner (EOA), not the
+	// contract itself.
+	//
+	// The probe doubles as a sanity check on the (RPC, paymaster_address) pairing:
+	// if the address has no contract code on the connected RPC, owner() returns an
+	// empty result and unpacking fails. Treat that as a fatal startup error rather
+	// than a warning — previously this was a logger.Warn that let the aggregator
+	// boot with a mismatched config, and every UserOp downstream failed at
+	// "no contract code at given address" (Sentry EIGENLAYER-AVS-1N/1M, user-reported
+	// failure 2026-05-30 01:55 UTC on Sepolia). Fail-fast surfaces the same problem
+	// at startup where it's diagnosable, not hours later on a real workflow.
 	if config.SmartWallet != nil && config.SmartWallet.PaymasterAddress != (common.Address{}) {
 		paymasterOwner, err := fetchPaymasterOwner(smartWalletRpcClient, config.SmartWallet.PaymasterAddress)
 		if err != nil {
-			logger.Warn("Failed to fetch paymaster owner address", "paymaster", config.SmartWallet.PaymasterAddress, "err", err)
-			logger.Warn("Gas reimbursement may fail without paymaster owner address configured")
-		} else {
-			config.SmartWallet.PaymasterOwnerAddress = paymasterOwner
-			logger.Info("Paymaster owner address loaded", "paymaster", config.SmartWallet.PaymasterAddress, "owner", paymasterOwner.Hex())
+			return nil, fmt.Errorf(
+				"paymaster %s is unreachable on RPC %s (owner() call failed: %w) — "+
+					"verify the paymaster address is deployed on this chain, and that the "+
+					"smart_wallet.eth_rpc_url points at the chain where the paymaster lives",
+				config.SmartWallet.PaymasterAddress.Hex(),
+				configRaw.SmartWallet.EthRpcUrl,
+				err,
+			)
 		}
+		config.SmartWallet.PaymasterOwnerAddress = paymasterOwner
+		logger.Info("Paymaster owner address loaded", "paymaster", config.SmartWallet.PaymasterAddress, "owner", paymasterOwner.Hex())
 	}
 
 	// Gateway mode: parse per-chain configs
@@ -651,7 +668,14 @@ func GetDefaultFeeRatesConfig() *FeeRatesConfig {
 
 // fetchPaymasterOwner calls owner() on the paymaster contract to get the owner address
 // This is used for gas reimbursement - ETH is sent to the owner (EOA), not the contract itself
-func fetchPaymasterOwner(client *eth.InstrumentedClient, paymasterAddress common.Address) (common.Address, error) {
+// paymasterOwnerCaller is the minimal contract-call surface needed to
+// probe a paymaster. Both *eth.InstrumentedClient (top-level smart
+// wallet) and *ethclient.Client (per-chain dials) satisfy it.
+type paymasterOwnerCaller interface {
+	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
+}
+
+func fetchPaymasterOwner(client paymasterOwnerCaller, paymasterAddress common.Address) (common.Address, error) {
 	// ABI for owner() function
 	ownerABI := `[{"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"}]`
 
@@ -734,11 +758,41 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 		},
 	}
 
+	// Probe paymaster on this chain's RPC. Catches mismatched
+	// paymaster/RPC pairings at startup instead of waiting for the
+	// first UserOp to fail (Sentry EIGENLAYER-AVS-1N/1M). Skip when
+	// bundler_url is empty: that signals a connectivity-only rollout
+	// (e.g. BNB Phase 0.5 in avs-infra/chains/), where wallet ops are
+	// intentionally disabled and the paymaster_address is a placeholder.
+	if chainCfg.SmartWallet.BundlerURL != "" && chainCfg.SmartWallet.EthRpcUrl != "" {
+		rpcClient, err := ethclient.Dial(chainCfg.SmartWallet.EthRpcUrl)
+		if err != nil {
+			return nil, fmt.Errorf("dial RPC %s for chain %s (chain_id=%d): %w",
+				chainCfg.SmartWallet.EthRpcUrl, raw.Name, raw.ChainID, err)
+		}
+		paymasterOwner, err := fetchPaymasterOwner(rpcClient, chainCfg.SmartWallet.PaymasterAddress)
+		rpcClient.Close()
+		if err != nil {
+			return nil, fmt.Errorf(
+				"chain %s (chain_id=%d): paymaster %s is unreachable on RPC %s "+
+					"(owner() call failed: %w) — verify the paymaster address is deployed "+
+					"on this chain, and that the chain's eth_rpc_url points at the same chain "+
+					"as the paymaster",
+				raw.Name, raw.ChainID,
+				chainCfg.SmartWallet.PaymasterAddress.Hex(),
+				chainCfg.SmartWallet.EthRpcUrl,
+				err,
+			)
+		}
+		chainCfg.SmartWallet.PaymasterOwnerAddress = paymasterOwner
+	}
+
 	logger.Info("Parsed chain config",
 		"chain_id", chainCfg.ChainID,
 		"name", chainCfg.Name,
 		"worker_addr", chainCfg.WorkerAddr,
-		"controller", chainCfg.SmartWallet.ControllerAddress.Hex())
+		"controller", chainCfg.SmartWallet.ControllerAddress.Hex(),
+		"paymaster_owner", chainCfg.SmartWallet.PaymasterOwnerAddress.Hex())
 
 	return chainCfg, nil
 }

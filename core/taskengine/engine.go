@@ -1223,9 +1223,25 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 		}
 	}
 
-	// Default chain_id to the aggregator's SmartWallet chain when not specified
-	if task.ChainId == 0 && n.config.SmartWallet != nil {
-		task.ChainId = n.config.SmartWallet.ChainID
+	// Default chain_id to the aggregator's SmartWallet chain when not specified.
+	// In gateway mode the top-level SmartWallet is populated from chains[0]
+	// (mainnet by convention), so a missing chain_id silently routes the task
+	// to mainnet — which is how the user-reported Sepolia failure on
+	// 2026-05-30 01:55 UTC ended up with the wrong paymaster/RPC pairing.
+	// In gateway mode, require the caller to specify chain_id explicitly so
+	// the task's intended chain is recorded with no ambiguity. Single-chain
+	// (non-gateway) deployments keep the legacy behavior — there's only one
+	// chain there, so the inference is unambiguous.
+	if task.ChainId == 0 {
+		if n.config != nil && n.config.IsGateway {
+			return nil, status.Errorf(codes.InvalidArgument,
+				"chain_id is required when running in gateway mode; the SDK / REST handler "+
+					"must populate it (e.g. from the JWT audience or an explicit request field) "+
+					"so the task is bound to the chain it should execute on")
+		}
+		if n.config != nil && n.config.SmartWallet != nil {
+			task.ChainId = n.config.SmartWallet.ChainID
+		}
 	}
 
 	// Validate all node names for JavaScript compatibility
