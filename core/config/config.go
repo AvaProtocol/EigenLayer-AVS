@@ -49,11 +49,13 @@ const DefaultFactoryProxyAddressHex = "0xB99BC2E399e06CddCF5E725c0ea341E8f032283
 // smart_wallet.entrypoint_address field, this value will be used.
 const DefaultEntrypointAddressHex = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
 
-// DefaultPaymasterAddressHex is the default VerifyingPaymaster address
-// controlled by us and deployed uniformly across supported chains. If the
-// aggregator config omits the smart_wallet.paymaster_address field, this
-// value will be used.
-const DefaultPaymasterAddressHex = "0xf023eA291F5bEDA4Bf59BbDC9004F1d18be19D6f"
+// NOTE: there is no DefaultPaymasterAddressHex. The paymaster contract
+// is deployed per network (mainnet and testnet have different addresses),
+// so silently defaulting any chain's paymaster to a single hardcoded
+// value silently misroutes that chain's UserOps. The YAML must specify
+// paymaster_address explicitly for every chain that wants sponsored
+// transactions; chains that omit it run without a paymaster and rely on
+// the smart wallet's own balance for gas.
 
 // Config contains all of the configuration information for a credible squaring aggregators and challengers.
 // Operators use a separate config. (see config-files/operator.anvil.yaml)
@@ -363,23 +365,28 @@ func NewConfig(configFilePath string) (*Config, error) {
 		return nil, err
 	}
 
-	// Gateway mode: if chains[] is present and top-level smart_wallet is empty,
-	// populate it from the first chain's config for backward compatibility.
+	// Validate that the top-level smart_wallet is configured. This block is
+	// shared by the aa package globals (factory + entrypoint addresses), the
+	// startup paymaster probe, and any code path that explicitly takes the
+	// aggregator's default chain context (e.g. cmd/backfillWalletSaltIndex).
+	//
+	// In gateway mode there is no implicit fallback to chains[0] — the
+	// operator picks which chain the top-level represents and sets it
+	// explicitly. The previous "use first chain" magic silently routed every
+	// top-level operation to mainnet (by chains[] convention) which made the
+	// startup probe + cmd tools talk to the wrong chain by default.
 	isGateway := len(configRaw.Chains) > 0
-	if isGateway && configRaw.SmartWallet.EthRpcUrl == "" {
-		if len(configRaw.Chains) > 0 {
-			configRaw.SmartWallet = configRaw.Chains[0].SmartWallet
-			logger.Info("Gateway mode: using first chain's smart_wallet config as default",
-				"chain_id", configRaw.Chains[0].ChainID,
-				"chain_name", configRaw.Chains[0].Name)
-		}
-	}
-
-	// Validate that smart wallet RPC URL is configured - this is critical for contract operations
 	if configRaw.SmartWallet.EthRpcUrl == "" {
-		logger.Error("smart_wallet.eth_rpc_url is required but not configured")
-		logger.Error("smart_wallet.eth_rpc_url is required but not configured. This RPC URL is critical for Base aggregator contract operations; without it, the aggregator cannot interact with the blockchain.")
-		return nil, fmt.Errorf("critical configuration error: smart_wallet.eth_rpc_url must be set because it is required for Base aggregator contract operations")
+		if isGateway {
+			return nil, fmt.Errorf(
+				"smart_wallet.eth_rpc_url is required at the top level even in gateway mode " +
+					"(used by the aa package, startup probes, and cmd tools). Set an explicit " +
+					"smart_wallet block — typically matching the chain you want as the aggregator's " +
+					"default context (e.g. the AVS chain)")
+		}
+		return nil, fmt.Errorf(
+			"smart_wallet.eth_rpc_url is required: this RPC URL is critical for aggregator " +
+				"contract operations; without it, the aggregator cannot interact with the blockchain")
 	}
 
 	// Create separate RPC client for smart wallet operations (contract read/write)
@@ -470,7 +477,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 			EntrypointAddress:    common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.EntrypointAddress, DefaultEntrypointAddressHex)),
 			ChainID:              smartWalletChainId.Int64(), // Use smart wallet chain ID, not EigenLayer chain ID (prevents cross-chain configuration errors for Base aggregator)
 			ControllerPrivateKey: controllerPrivateKey,
-			PaymasterAddress:     common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.PaymasterAddress, DefaultPaymasterAddressHex)),
+			PaymasterAddress:     common.HexToAddress(configRaw.SmartWallet.PaymasterAddress),
 			WhitelistAddresses:   convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
 			MaxWalletsPerOwner:   configRaw.SmartWallet.MaxWalletsPerOwner,
 			// PaymasterOwnerAddress will be populated below by calling owner() on the paymaster contract
@@ -752,7 +759,7 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 			ChainID:              raw.ChainID,
 			ControllerPrivateKey: controllerPrivateKey,
 			ControllerAddress:    crypto.PubkeyToAddress(controllerPrivateKey.PublicKey),
-			PaymasterAddress:     common.HexToAddress(firstNonEmpty(sw.PaymasterAddress, DefaultPaymasterAddressHex)),
+			PaymasterAddress:     common.HexToAddress(sw.PaymasterAddress),
 			WhitelistAddresses:   convertToAddressSlice(sw.WhitelistAddresses),
 			MaxWalletsPerOwner:   maxWallets,
 		},

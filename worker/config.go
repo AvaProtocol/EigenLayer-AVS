@@ -75,10 +75,10 @@ func (c *WorkerConfig) ToSmartWalletConfig() (*config.SmartWalletConfig, error) 
 		entrypointAddr = common.HexToAddress(c.SmartWallet.EntrypointAddress)
 	}
 
-	paymasterAddr := common.HexToAddress(config.DefaultPaymasterAddressHex)
-	if c.SmartWallet.PaymasterAddress != "" {
-		paymasterAddr = common.HexToAddress(c.SmartWallet.PaymasterAddress)
-	}
+	// paymaster_address must be specified explicitly per chain — see the
+	// note on the removed config.DefaultPaymasterAddressHex. An empty
+	// address means "no paymaster"; the smart wallet pays its own gas.
+	paymasterAddr := common.HexToAddress(c.SmartWallet.PaymasterAddress)
 
 	return &config.SmartWalletConfig{
 		EthRpcUrl:             c.EthRpcUrl,

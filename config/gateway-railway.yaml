@@ -74,6 +74,20 @@ tenderly_account: "chrisli"
 tenderly_project: "default"
 tenderly_access_key: ${TENDERLY_ACCESS_KEY}
 
+# Top-level smart_wallet — used by the aa package globals
+# (factory + entrypoint), the startup paymaster probe, and any cmd tool
+# that takes the aggregator's default chain context. In gateway mode
+# this is explicitly required (no implicit fallback to chains[0]); we
+# point it at Sepolia to match the AVS chain above. Per-workflow
+# execution still routes via chains[] below — the top-level only
+# matters for package-globals + tooling.
+smart_wallet:
+  eth_rpc_url: ${SEPOLIA_DWELLIR_RPC}
+  eth_ws_url: ${SEPOLIA_DWELLIR_WS}
+  bundler_url: ${SEPOLIA_BUNDLER_URL}
+  controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+  paymaster_address: ${PAYMASTER_ADDRESS_TESTNET}
+
 # Chain workers — worker_addr is set from WORKER_* env vars so adding
 # a chain is just "set another env var + add a row here".
 chains:
