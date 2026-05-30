@@ -11,7 +11,8 @@
 # Required env vars on the `gateway` Railway service:
 #   GATEWAY_ECDSA_PRIVATE_KEY  — EigenLayer interaction key
 #   GATEWAY_JWT_SECRET         — HS256 signing key for client JWTs
-#   WORKER_ETHEREUM, WORKER_BASE, WORKER_SEPOLIA, WORKER_BASE_SEPOLIA
+#   WORKER_ETHEREUM, WORKER_BASE, WORKER_SEPOLIA, WORKER_BASE_SEPOLIA,
+#   WORKER_BNB
 #       host:port of each chain worker. Use Railway reference
 #       variables so the topology auto-resolves and survives service
 #       renames, e.g.:
@@ -20,8 +21,10 @@
 #   SEPOLIA_DWELLIR_RPC  / SEPOLIA_DWELLIR_WS   — sepolia chain RPC
 #   BASE_DWELLIR_RPC     / BASE_DWELLIR_WS
 #   BASE_SEPOLIA_DWELLIR_RPC / BASE_SEPOLIA_DWELLIR_WS
+#   BNB_DWELLIR_RPC      / BNB_DWELLIR_WS       — BNB Smart Chain mainnet
 #   ETHEREUM_BUNDLER_URL, SEPOLIA_BUNDLER_URL,
 #   BASE_BUNDLER_URL,     BASE_SEPOLIA_BUNDLER_URL
+#   BNB_BUNDLER_URL      — optional; connectivity-only rollout leaves it unset
 #   CONTROLLER_PRIVATE_KEY  — paymaster controller, shared across chains
 #   PAYMASTER_ADDRESS
 #   TENDERLY_ACCESS_KEY
@@ -109,6 +112,22 @@ chains:
       eth_rpc_url: ${BASE_SEPOLIA_DWELLIR_RPC}
       eth_ws_url: ${BASE_SEPOLIA_DWELLIR_WS}
       bundler_url: ${BASE_SEPOLIA_BUNDLER_URL}
+      controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+      paymaster_address: ${PAYMASTER_ADDRESS}
+      max_wallets_per_owner: 2000
+
+  # BNB Smart Chain mainnet — connectivity-only rollout. The chain
+  # has no SmartWallet factory deployed yet (avs-contracts Phase 2
+  # deferred per avs-infra/Adding_A_New_Chain.md Phase 0.5), so
+  # wallet ops will fail at execution. Event triggers + contractRead
+  # work end-to-end.
+  - chain_id: 56
+    name: bnb-mainnet
+    worker_addr: ${WORKER_BNB}
+    smart_wallet:
+      eth_rpc_url: ${BNB_DWELLIR_RPC}
+      eth_ws_url: ${BNB_DWELLIR_WS}
+      bundler_url: ${BNB_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY}
       paymaster_address: ${PAYMASTER_ADDRESS}
       max_wallets_per_owner: 2000
