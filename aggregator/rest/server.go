@@ -203,21 +203,35 @@ type filteringRouter struct {
 	*echo.Group
 }
 
-// shouldDrop returns true if the path contains a `:` inside a parameter
-// segment (e.g., `/:id:pause`). Plain colon-suffix routes that don't
-// follow a parameter (e.g., `/auth:exchange`, `/workflows:count`)
-// don't trigger the same Echo collision and are left alone.
+// shouldDropRoute returns true for any path whose final segment contains a
+// `:`-suffixed action verb. Two collision classes both fall under this:
+//
+//   - Item-level: `/workflows/:id:pause` shadows the simpler `/workflows/:id`
+//     because Echo treats `id:pause` as a single parameter name.
+//   - Collection-level: `/workflows:simulate` and `/workflows:estimateFees`
+//     collapse into the same radix-tree node (same method + same `/workflows:`
+//     prefix), so the last-registered route silently wins for both URIs.
+//
+// Every dropped route gets re-registered by registerColonActionShimRoutes
+// under a disambiguated `/.../<__action__>/<verb>` path. The Pre middleware
+// rewriteColonActions rewrites the original URI at request time so SDK
+// clients keep using the spec-compliant `:verb` form on the wire.
 func shouldDropRoute(path string) bool {
 	segments := strings.Split(path, "/")
 	for _, seg := range segments {
-		// Only segments that start with `:` and contain a SECOND `:`
-		// are the problematic case. A leading `:` declares a param
-		// name; the second `:` makes Echo treat the whole token as one
-		// parameter name (e.g., `id:pause`) which then shadows the
-		// simpler `:id` route.
-		if strings.HasPrefix(seg, ":") && strings.Count(seg, ":") > 1 {
-			return true
+		if seg == "" {
+			continue
 		}
+		colon := strings.Index(seg, ":")
+		if colon < 0 {
+			continue
+		}
+		// A bare parameter segment like `:id` is fine (single leading colon).
+		// Anything else — `:id:pause` or `workflows:simulate` — collides.
+		if colon == 0 && strings.Count(seg, ":") == 1 {
+			continue
+		}
+		return true
 	}
 	return false
 }
@@ -285,53 +299,55 @@ func (f filteringRouter) TRACE(path string, h echo.HandlerFunc, m ...echo.Middle
 	return f.Group.TRACE(path, h, m...)
 }
 
-// rewriteColonActions is the Pre middleware that turns
-// `/workflows/<id>:pause` into `/workflows/<id>/__action__/pause` so
-// Echo's router can bind `:id` cleanly. Only rewrites when the colon
-// follows a non-empty segment and is preceded by another segment that
-// looks like a parameter (no colon at all means the route doesn't
-// need rewriting; e.g. `/workflows:count` is already fine because the
-// colon segment is the last and the wrapper has no path param to bind).
+// rewriteColonActions is the Pre middleware that turns any `<prefix>:<verb>`
+// URI into `<prefix>/__action__/<verb>` so Echo's router can disambiguate
+// sibling actions. Covers both:
+//
+//   - Item-level: `/workflows/<id>:pause` → `/workflows/<id>/__action__/pause`
+//   - Collection-level: `/workflows:simulate` → `/workflows/__action__/simulate`
+//
+// SDK clients keep using the OpenAPI-compliant `:verb` form on the wire; the
+// rewrite is invisible to them. registerColonActionShimRoutes re-registers
+// every dropped route under the shim path.
 func rewriteColonActions(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		req := c.Request()
 		path := req.URL.Path
-		// Walk path segments from right to left; rewrite the first
-		// segment that has a colon AND is preceded by another segment.
-		// (`/x:y` is fine — `/x/y:z` is the problematic case.)
 		idx := strings.LastIndex(path, "/")
-		if idx <= 0 {
+		if idx < 0 {
 			return next(c)
 		}
 		lastSegment := path[idx+1:]
-		// Detect colon inside the segment but not at position 0
-		// (a leading colon would mean an empty id, which is malformed).
+		// A leading colon means a parametric segment like `:id`, not an
+		// action verb — leave it alone.
 		colon := strings.Index(lastSegment, ":")
 		if colon <= 0 {
 			return next(c)
 		}
-		// Bail if the parent path is the api root — `/auth:exchange`
-		// has no parameter before the colon and Echo handles it fine.
 		parent := path[:idx]
-		if parent == "" || parent == "/api/v1" {
-			return next(c)
-		}
-		id := lastSegment[:colon]
+		prefix := lastSegment[:colon]
 		action := lastSegment[colon+1:]
-		newPath := parent + "/" + id + colonActionShim + action
-		req.URL.Path = newPath
+		req.URL.Path = parent + "/" + prefix + colonActionShim + action
 		c.SetRequest(req)
 		return next(c)
 	}
 }
 
-// registerColonActionShimRoutes wires the rewritten paths to the same
-// handler methods the generated wrapper would have called for the
-// original colon-suffix routes. The set is closed (one entry per
-// `/{id}:<verb>` or `/{address}:<verb>` route in api/openapi.yaml);
-// add to it when new actions land in the spec.
+// registerColonActionShimRoutes re-registers every `<prefix>:<verb>` route
+// under the disambiguated `<prefix>/__action__/<verb>` form that Echo's
+// radix tree can route. The Pre middleware rewriteColonActions rewrites
+// inbound URIs to match. The list mirrors every colon-suffix path in
+// api/openapi.yaml — extend both sides together when adding a new action.
+//
+// Collection-level routes (no path parameter) use the generated wrapper
+// so query-parameter binding stays consistent with the rest of the API.
+// Item-level routes (`:id`, `:address`) wrap the typed Server methods
+// directly because those Server methods take the ULID/address as a
+// separate argument and the shim has to pluck it out of the URL.
 func registerColonActionShimRoutes(api *echo.Group, s *Server) {
-	// Workflows
+	wrapper := generated.ServerInterfaceWrapper{Handler: s}
+
+	// Item-level actions
 	api.POST("/workflows/:id"+colonActionShim+"pause", func(c echo.Context) error {
 		return s.PauseWorkflow(c, generated.Ulid(c.Param("id")))
 	})
@@ -341,23 +357,14 @@ func registerColonActionShimRoutes(api *echo.Group, s *Server) {
 	api.POST("/workflows/:id"+colonActionShim+"trigger", func(c echo.Context) error {
 		return s.TriggerWorkflow(c, generated.Ulid(c.Param("id")))
 	})
-
-	// Wallets
 	api.POST("/wallets/:address"+colonActionShim+"withdraw", func(c echo.Context) error {
 		return s.WithdrawWallet(c, generated.EthereumAddress(c.Param("address")))
 	})
 	api.GET("/wallets/:address"+colonActionShim+"getNonce", func(c echo.Context) error {
 		return s.GetWalletNonce(c, generated.EthereumAddress(c.Param("address")))
 	})
-
-	// Executions. Query params are read manually (rather than via
-	// echo.DefaultBinder.BindQueryParams) because Ulid is a type
-	// alias for string — the default binder silently skips fields
-	// whose Go type is a named alias rather than the bare primitive.
-	// The generated wrapper uses oapi-codegen's runtime.BindQueryParameter
-	// which understands aliases; reproducing it inline here would
-	// drag the runtime dep into the shim, so we just lift the
-	// strings directly.
+	// Executions item-level: query params are read manually because Ulid
+	// is a string alias the default Echo binder silently skips.
 	api.GET("/executions/:id"+colonActionShim+"getStatus", func(c echo.Context) error {
 		params := generated.GetExecutionStatusParams{
 			WorkflowId: generated.Ulid(c.QueryParam("workflowId")),
@@ -373,6 +380,18 @@ func registerColonActionShimRoutes(api *echo.Group, s *Server) {
 		}
 		return s.StreamExecution(c, generated.Ulid(c.Param("id")), params)
 	})
+
+	// Collection-level actions. Routed via the generated wrapper so the
+	// oapi-codegen runtime handles query-param binding the same way the
+	// non-shim routes would.
+	api.POST("/auth"+colonActionShim+"exchange", wrapper.AuthExchange)
+	api.POST("/workflows"+colonActionShim+"simulate", wrapper.SimulateWorkflow)
+	api.POST("/workflows"+colonActionShim+"estimateFees", wrapper.EstimateWorkflowFees)
+	api.GET("/workflows"+colonActionShim+"count", wrapper.CountWorkflows)
+	api.GET("/executions"+colonActionShim+"count", wrapper.CountExecutions)
+	api.GET("/executions"+colonActionShim+"stats", wrapper.ExecutionStats)
+	api.POST("/nodes"+colonActionShim+"run", wrapper.RunNode)
+	api.POST("/triggers"+colonActionShim+"run", wrapper.RunTrigger)
 }
 
 // notImplemented is the common stub used by handlers that haven't been
