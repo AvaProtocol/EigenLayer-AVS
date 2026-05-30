@@ -42,6 +42,22 @@ func (s *Server) CreateWorkflow(ctx echo.Context) error {
 		return badRequest("WORKFLOWS_BAD_PAYLOAD", "Invalid workflow payload", err.Error())
 	}
 
+	// Fall back to the JWT's audience chain when the body omits chainId.
+	// Studio 4.0.0-dev.1 builds the CreateWorkflowRequest body without a
+	// chainId field even though the surrounding deploy flow already knows
+	// the target chain — without this fallback the task lands with
+	// ChainId=0 and engine.ResolveSmartWalletConfig(0) returns chains[0]
+	// (Ethereum mainnet via the IsGateway fallback in config.go). The
+	// deployed-execution VM then dials the mainnet RPC, queries the
+	// Sepolia paymaster on mainnet, and the bundler returns
+	// "failed to get paymaster hash: no contract code at given address".
+	// Same pattern as WithdrawWallet / SimulateWorkflow / RunNode.
+	if req.ChainId == 0 {
+		if authed := restmw.UserFromContext(ctx); authed != nil && authed.ChainID != 0 {
+			req.ChainId = authed.ChainID
+		}
+	}
+
 	workflow, err := s.engine.CreateWorkflow(user, req)
 	if err != nil {
 		return err
