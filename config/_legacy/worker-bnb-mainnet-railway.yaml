@@ -1,0 +1,49 @@
+# Worker configuration for BNB Smart Chain Mainnet on Railway (chain 56).
+#
+# Connectivity-only rollout: this worker watches BNB chain events and
+# can answer contractRead requests, but the chain has no SmartWallet
+# factory deployed yet (avs-contracts Phase 2 deferred per
+# avs-infra/Adding_A_New_Chain.md Phase 0.5). So:
+#   - Event triggers + contractRead work end-to-end
+#   - Smart-wallet ops (create, withdraw, contractWrite via UserOp)
+#     will fail at execution until the factory + paymaster are
+#     deployed and addresses wired up.
+#
+# Secrets are injected via Railway sealed env vars and expanded at
+# startup. Set these on the `worker-bnb-mainnet` service:
+#   BNB_DWELLIR_RPC, BNB_DWELLIR_WS
+#   BNB_BUNDLER_URL          — optional for connectivity-only; can be
+#                              left unset (the YAML expansion will
+#                              produce an empty string and bundler
+#                              calls would no-op)
+#   CONTROLLER_PRIVATE_KEY   — shared across chains
+#   PAYMASTER_ADDRESS        — shared (not used until paymaster
+#                              deploys on BNB)
+environment: production
+
+chain_id: 56
+chain_name: bnb-mainnet
+
+# Internal gRPC — Railway private networking
+listen_address: "0.0.0.0:50051"
+
+# Railway health check endpoint
+health_address: "0.0.0.0:8080"
+
+# Note: workers do NOT dial the gateway. The gateway discovers worker
+# addresses from its WORKER_* env vars and dials in. Workers only
+# listen on `listen_address`.
+
+# Chain RPC endpoints
+eth_rpc_url: ${BNB_DWELLIR_RPC}
+eth_ws_url: ${BNB_DWELLIR_WS}
+
+# Bundler — left as an env var expansion. Unset in connectivity-only
+# mode; populate once a 4337 bundler provider with BNB support is in
+# place.
+bundler_url: ${BNB_BUNDLER_URL}
+
+# Smart wallet config
+smart_wallet:
+  controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+  paymaster_address: ${PAYMASTER_ADDRESS}

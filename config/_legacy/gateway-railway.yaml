@@ -1,0 +1,156 @@
+# Gateway configuration for Railway deployment (all 4 chains).
+#
+# One gateway service handles all chains; per-chain workers are
+# discovered via Railway private DNS through the WORKER_* env vars
+# (matches the existing WORKER_SEPOLIA / WORKER_BASE_SEPOLIA pattern
+# already set on the gateway service).
+#
+# Secrets are injected via Railway sealed env vars and expanded at
+# startup (see core/config.ReadYamlConfig).
+#
+# Required env vars on the `gateway` Railway service:
+#   GATEWAY_ECDSA_PRIVATE_KEY  — EigenLayer interaction key
+#   GATEWAY_JWT_SECRET         — HS256 signing key for client JWTs
+#   WORKER_ETHEREUM, WORKER_BASE, WORKER_SEPOLIA, WORKER_BASE_SEPOLIA,
+#   WORKER_BNB
+#       host:port of each chain worker. Use Railway reference
+#       variables so the topology auto-resolves and survives service
+#       renames, e.g.:
+#         WORKER_ETHEREUM = ${{worker-ethereum.RAILWAY_PRIVATE_DOMAIN}}:50051
+#   ETHEREUM_DWELLIR_RPC / ETHEREUM_DWELLIR_WS  — AVS chain RPC
+#   SEPOLIA_DWELLIR_RPC  / SEPOLIA_DWELLIR_WS   — sepolia chain RPC
+#   BASE_DWELLIR_RPC     / BASE_DWELLIR_WS
+#   BASE_SEPOLIA_DWELLIR_RPC / BASE_SEPOLIA_DWELLIR_WS
+#   BNB_DWELLIR_RPC      / BNB_DWELLIR_WS       — BNB Smart Chain mainnet
+#   ETHEREUM_BUNDLER_URL, SEPOLIA_BUNDLER_URL,
+#   BASE_BUNDLER_URL,     BASE_SEPOLIA_BUNDLER_URL
+#   BNB_BUNDLER_URL      — optional; connectivity-only rollout leaves it unset
+#   CONTROLLER_PRIVATE_KEY  — paymaster controller, shared across chains
+#   PAYMASTER_ADDRESS
+#   TENDERLY_ACCESS_KEY
+#   TELEGRAM_BOT_TOKEN, SENDGRID_KEY, THEGRAPH_API_KEY, MORALIS_API_KEY
+environment: production
+
+db_path: /data/gateway
+backup_dir: /data/gateway-backup
+
+ecdsa_private_key: ${GATEWAY_ECDSA_PRIVATE_KEY}
+
+# AVS contracts. enforceAuth is currently false and BLS aggregation is
+# disabled, so one gateway can serve operators from any AVS chain. We
+# point this at Sepolia AVS to match the existing testnet operator;
+# flip to Ethereum mainnet AVS when enforceAuth is turned on.
+eth_rpc_url: ${SEPOLIA_DWELLIR_RPC}
+eth_ws_url: ${SEPOLIA_DWELLIR_WS}
+
+rpc_bind_address: "0.0.0.0:2206"
+http_bind_address: "0.0.0.0:8080"
+
+avs_registry_coordinator_address: 0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD
+operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
+
+jwt_secret: ${GATEWAY_JWT_SECRET}
+
+# REST rate-limit overrides (default is 10/s, burst 50). Lifted on this
+# test branch so the v4 jest suite — which spreads ~90 requests across
+# parallel workers — doesn't get throttled into spurious "Try again in
+# 1s" failures. Production should keep the conservative default.
+rest_rate_limit_per_second: 200
+rest_rate_limit_burst: 500
+
+server_name: "gateway-railway"
+sentry_dsn: https://d304c8708d5097f7787eeb664e4098c6@o1156669.ingest.us.sentry.io/4509386759733248
+
+tenderly_account: "chrisli"
+tenderly_project: "default"
+tenderly_access_key: ${TENDERLY_ACCESS_KEY}
+
+# Chain workers — worker_addr is set from WORKER_* env vars so adding
+# a chain is just "set another env var + add a row here".
+chains:
+  - chain_id: 1
+    name: ethereum
+    worker_addr: ${WORKER_ETHEREUM}
+    smart_wallet:
+      eth_rpc_url: ${ETHEREUM_DWELLIR_RPC}
+      eth_ws_url: ${ETHEREUM_DWELLIR_WS}
+      bundler_url: ${ETHEREUM_BUNDLER_URL}
+      controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+      paymaster_address: ${PAYMASTER_ADDRESS}
+      # Mainnet production cap is 3; this branch (feature/rest-api-migration)
+      # only feeds the testing environment, so we lift the cap to match the
+      # testnet chains and let the v4 test suite churn through wallets.
+      max_wallets_per_owner: 2000
+
+  - chain_id: 8453
+    name: base
+    worker_addr: ${WORKER_BASE}
+    smart_wallet:
+      eth_rpc_url: ${BASE_DWELLIR_RPC}
+      eth_ws_url: ${BASE_DWELLIR_WS}
+      bundler_url: ${BASE_BUNDLER_URL}
+      controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+      paymaster_address: ${PAYMASTER_ADDRESS}
+      # See chain 1 note above — relaxed for test-env churn only.
+      max_wallets_per_owner: 2000
+
+  - chain_id: 11155111
+    name: sepolia
+    worker_addr: ${WORKER_SEPOLIA}
+    smart_wallet:
+      eth_rpc_url: ${SEPOLIA_DWELLIR_RPC}
+      eth_ws_url: ${SEPOLIA_DWELLIR_WS}
+      bundler_url: ${SEPOLIA_BUNDLER_URL}
+      controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+      paymaster_address: ${PAYMASTER_ADDRESS}
+      max_wallets_per_owner: 2000
+
+  - chain_id: 84532
+    name: base-sepolia
+    worker_addr: ${WORKER_BASE_SEPOLIA}
+    smart_wallet:
+      eth_rpc_url: ${BASE_SEPOLIA_DWELLIR_RPC}
+      eth_ws_url: ${BASE_SEPOLIA_DWELLIR_WS}
+      bundler_url: ${BASE_SEPOLIA_BUNDLER_URL}
+      controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+      paymaster_address: ${PAYMASTER_ADDRESS}
+      max_wallets_per_owner: 2000
+
+  # BNB Smart Chain mainnet — connectivity-only rollout. The chain
+  # has no SmartWallet factory deployed yet (avs-contracts Phase 2
+  # deferred per avs-infra/Adding_A_New_Chain.md Phase 0.5), so
+  # wallet ops will fail at execution. Event triggers + contractRead
+  # work end-to-end.
+  - chain_id: 56
+    name: bnb-mainnet
+    worker_addr: ${WORKER_BNB}
+    smart_wallet:
+      eth_rpc_url: ${BNB_DWELLIR_RPC}
+      eth_ws_url: ${BNB_DWELLIR_WS}
+      bundler_url: ${BNB_BUNDLER_URL}
+      controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+      paymaster_address: ${PAYMASTER_ADDRESS}
+      max_wallets_per_owner: 2000
+
+macros:
+  secrets:
+    ap_notify_bot_token: ${TELEGRAM_BOT_TOKEN}
+    sendgrid_key: ${SENDGRID_KEY}
+    thegraph_api_key: ${THEGRAPH_API_KEY}
+    moralis_api_key: ${MORALIS_API_KEY}
+
+# Context-memory summarizer — enables `options.summarize: true` on
+# terminal restApi nodes (SendGrid / Telegram) to auto-inject an
+# AI-generated subject + body via the external context-memory service.
+# Without this block, ComposeSummarySmart falls back to the
+# deterministic summarizer (still useful, just no LLM polish).
+#
+# Set these on the `gateway` Railway service:
+#   CONTEXT_MEMORY_URL      — https://context-api.avaprotocol.org (or staging variant)
+#   CONTEXT_MEMORY_API_KEY  — bearer token issued by the context-memory deployment
+notifications:
+  summary:
+    enabled: true
+    provider: context-memory
+    api_endpoint: ${CONTEXT_MEMORY_URL}
+    api_key: ${CONTEXT_MEMORY_API_KEY}

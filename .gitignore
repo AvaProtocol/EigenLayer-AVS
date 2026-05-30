@@ -32,6 +32,9 @@ config/*.yaml
 !config/operator.example.yaml
 !config/*-dev.yaml
 !config/*-railway.yaml
+# Snapshot of tracked configs taken before any restructure; safety net.
+!config/_legacy/
+!config/_legacy/*.yaml
 
 contracts/script/output*
 
