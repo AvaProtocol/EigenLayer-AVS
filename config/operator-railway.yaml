@@ -32,6 +32,11 @@ enable_node_api: true
 
 # Sentry
 sentry_dsn: https://d304c8708d5097f7787eeb664e4098c6@o1156669.ingest.us.sentry.io/4509386759733248
+# Testnet/staging operator (Sepolia AVS). Default is "production", so we
+# set this explicitly to keep our events out of the production issue
+# board. operator-ethereum-railway (mainnet) stays unset → defaults to
+# production.
+sentry_environment: staging
 server_name: "operator-railway"
 
 # Destination chain - Sepolia

@@ -83,8 +83,14 @@ type OperatorConfig struct {
 	EnableNodeApi                 bool   `yaml:"enable_node_api"`
 
 	// Optional Sentry integration
-	SentryDsn  string `yaml:"sentry_dsn,omitempty"`
-	ServerName string `yaml:"server_name,omitempty"`
+	SentryDsn string `yaml:"sentry_dsn,omitempty"`
+	// SentryEnvironment is the value reported as the `environment` tag on
+	// every Sentry event. Defaults to "production" when unset so existing
+	// deployments keep their current bucket. Feature-branch or staging
+	// operators should set this to "staging" to keep their events out of
+	// the production issue board.
+	SentryEnvironment string `yaml:"sentry_environment,omitempty"`
+	ServerName        string `yaml:"server_name,omitempty"`
 
 	DbPath string `yaml:"db_path"`
 
@@ -446,16 +452,25 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		if c.ServerName != "" {
 			serverName = c.ServerName
 		}
+		// Sentry's `environment` tag is driven from config so that
+		// feature-branch / staging operators don't bucket into the
+		// production issue board. Default stays "production" so existing
+		// deployments that haven't set sentry_environment keep their
+		// historical bucket.
+		sentryEnv := "production"
+		if c.SentryEnvironment != "" {
+			sentryEnv = c.SentryEnvironment
+		}
 		if err := sentry.Init(sentry.ClientOptions{
 			Dsn:              c.SentryDsn,
 			ServerName:       serverName,
-			Environment:      "production",
+			Environment:      sentryEnv,
 			AttachStacktrace: true,
 			TracesSampleRate: 1.0,
 		}); err != nil {
 			logger.Errorf("Sentry initialization failed: %v", err)
 		} else {
-			logger.Infof("Sentry initialized for operator: %s", serverName)
+			logger.Infof("Sentry initialized for operator: %s (env: %s)", serverName, sentryEnv)
 		}
 	} else if c.SentryDsn != "" {
 		logger.Info("Sentry disabled in development environment")

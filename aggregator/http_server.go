@@ -72,11 +72,21 @@ func (agg *Aggregator) startHttpServer(ctx context.Context, extraMounts []HTTPMo
 
 		release := fmt.Sprintf("%s@%s", version.Get(), version.GetRevision())
 
+		// Sentry's `environment` tag is driven from config so that
+		// feature-branch / staging deployments don't bucket into the
+		// production issue board. Default stays "production" so existing
+		// deployments that haven't set sentry_environment keep their
+		// historical bucket.
+		sentryEnv := "production"
+		if agg.config.SentryEnvironment != "" {
+			sentryEnv = agg.config.SentryEnvironment
+		}
+
 		// To initialize Sentry's handler, you need to initialize Sentry itself beforehand
 		if err := sentry.Init(sentry.ClientOptions{
 			Dsn:              sentryDsn,
 			ServerName:       serverName,
-			Environment:      "production",
+			Environment:      sentryEnv,
 			Release:          release,
 			AttachStacktrace: true,
 			TracesSampleRate: 1.0,

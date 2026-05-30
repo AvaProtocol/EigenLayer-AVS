@@ -61,7 +61,14 @@ type Config struct {
 	Logger                    sdklogging.Logger
 	EigenMetricsIpPortAddress string
 	SentryDsn                 string
-	ServerName                string
+	// SentryEnvironment is the value reported as the `environment` tag on
+	// every Sentry event. Defaults to "production" when unset so existing
+	// deployments keep their current bucket. Feature-branch or staging
+	// deployments should set this to "staging" (or "feature:<name>") to
+	// keep their events out of the production issue board and to let
+	// Sentry alerts gate on environment.
+	SentryEnvironment string
+	ServerName        string
 
 	// we need the url for the eigensdk currently... eventually standardize api so as to
 	// only take an ethclient or an rpcUrl (and build the ethclient at each constructor site)
@@ -216,12 +223,13 @@ type ChainConfigRaw struct {
 
 // These are read from configPath
 type ConfigRaw struct {
-	EcdsaPrivateKey string              `yaml:"ecdsa_private_key"`
-	Environment     sdklogging.LogLevel `yaml:"environment"`
-	EthRpcUrl       string              `yaml:"eth_rpc_url"`
-	EthWsUrl        string              `yaml:"eth_ws_url"`
-	SentryDsn       string              `yaml:"sentry_dsn,omitempty"`
-	ServerName      string              `yaml:"server_name,omitempty"`
+	EcdsaPrivateKey   string              `yaml:"ecdsa_private_key"`
+	Environment       sdklogging.LogLevel `yaml:"environment"`
+	EthRpcUrl         string              `yaml:"eth_rpc_url"`
+	EthWsUrl          string              `yaml:"eth_ws_url"`
+	SentryDsn         string              `yaml:"sentry_dsn,omitempty"`
+	SentryEnvironment string              `yaml:"sentry_environment,omitempty"`
+	ServerName        string              `yaml:"server_name,omitempty"`
 
 	RpcBindAddress  string `yaml:"rpc_bind_address"`
 	HttpBindAddress string `yaml:"http_bind_address"`
@@ -426,14 +434,15 @@ func NewConfig(configFilePath string) (*Config, error) {
 	}
 
 	config := &Config{
-		EcdsaPrivateKey: ecdsaPrivateKey,
-		Logger:          logger,
-		SentryDsn:       configRaw.SentryDsn,
-		ServerName:      configRaw.ServerName,
-		EthWsRpcUrl:     configRaw.EthWsUrl,
-		EthHttpRpcUrl:   configRaw.EthRpcUrl,
-		EthHttpClient:   ethRpcClient,
-		EthWsClient:     ethWsClient,
+		EcdsaPrivateKey:   ecdsaPrivateKey,
+		Logger:            logger,
+		SentryDsn:         configRaw.SentryDsn,
+		SentryEnvironment: configRaw.SentryEnvironment,
+		ServerName:        configRaw.ServerName,
+		EthWsRpcUrl:       configRaw.EthWsUrl,
+		EthHttpRpcUrl:     configRaw.EthRpcUrl,
+		EthHttpClient:     ethRpcClient,
+		EthWsClient:       ethWsClient,
 
 		Environment:                       configRaw.Environment,
 		OperatorStateRetrieverAddr:        common.HexToAddress(configRaw.OperatorStateRetrieverAddr),
