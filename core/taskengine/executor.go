@@ -237,6 +237,19 @@ func (x *WorkflowExecutor) RunTask(task *model.Workflow, queueData *QueueExecuti
 	// In gateway mode, resolve the SmartWalletConfig for the task's target chain.
 	swConfig := x.smartWalletConfig
 	if x.engine != nil {
+		if task.ChainId == 0 {
+			// Legacy task without chain_id. ResolveSmartWalletConfig(0) returns
+			// the gateway's default smart_wallet config, which in gateway mode
+			// is populated from chains[0] (mainnet by convention; see
+			// core/config/config.go:367). For any task whose actual chain isn't
+			// chains[0], paymaster + bundler + RPC will be wrong and on-chain
+			// nodes (ETHTransfer, ContractWrite) will fail with
+			// "no contract code at given address". Log loudly so affected
+			// workflows are discoverable and can be migrated.
+			x.logger.Warn("task missing chain_id; falling back to gateway default chain",
+				"task_id", task.Id,
+				"workflow_name", task.Name)
+		}
 		swConfig = x.engine.ResolveSmartWalletConfig(task.ChainId)
 	}
 	vm, err := NewVMWithData(task, triggerReason, swConfig, secrets)

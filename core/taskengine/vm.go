@@ -327,17 +327,48 @@ func (v *VM) WithChainConfigResolver(resolver func(chainID int64) *config.SmartW
 	return v
 }
 
-// resolveSmartWalletForNode returns the SmartWalletConfig for a node-level chain_id
-// override, or the VM's default smart wallet config when the node leaves chain_id
-// unset (0) or no resolver is wired.
+// resolveSmartWalletForNode picks the SmartWalletConfig a node should
+// use, walking three sources in order:
+//
+//  1. The node's own chain_id override (set on Config when the SDK or
+//     UI threads it through explicitly).
+//  2. The task's ChainId (the workflow's target chain). Loop iterations
+//     create nested nodes via createNestedNodeFromLoop, which returns
+//     the inner node proto verbatim — those inner nodes don't carry a
+//     per-iteration chain_id, so without this fallback the resolver
+//     would land on v.smartWalletConfig. In gateway mode that default
+//     is populated from chains[0] (mainnet by convention; see
+//     core/config/config.go:367), causing paymaster ops for any other
+//     chain's workflow to dial the wrong RPC and surface as
+//     "no contract code at given address" (Sentry EIGENLAYER-AVS-1N/1M).
+//  3. v.smartWalletConfig as a last-resort default — correct in
+//     single-chain mode where chainConfigResolver is nil and the VM
+//     was constructed with the only smart_wallet config that exists.
 func (v *VM) resolveSmartWalletForNode(nodeChainID int64) *config.SmartWalletConfig {
-	if nodeChainID == 0 || v.chainConfigResolver == nil {
-		return v.smartWalletConfig
-	}
-	if resolved := v.chainConfigResolver(nodeChainID); resolved != nil {
-		return resolved
+	if v.chainConfigResolver != nil {
+		if nodeChainID > 0 {
+			if resolved := v.chainConfigResolver(nodeChainID); resolved != nil {
+				return resolved
+			}
+		}
+		if taskChainID := v.taskChainID(); taskChainID > 0 {
+			if resolved := v.chainConfigResolver(taskChainID); resolved != nil {
+				return resolved
+			}
+		}
 	}
 	return v.smartWalletConfig
+}
+
+// taskChainID returns the chain id of the workflow this VM is executing,
+// or 0 if the task wasn't set (e.g. RunNodeImmediately) or the task
+// itself has no chain_id stored (legacy workflows created before
+// per-task chain_id was required).
+func (v *VM) taskChainID() int64 {
+	if v.task == nil || v.task.Task == nil {
+		return 0
+	}
+	return v.task.Task.ChainId
 }
 
 func (v *VM) GetTriggerNameAsVar() (string, error) {
