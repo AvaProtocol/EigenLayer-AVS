@@ -189,7 +189,7 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 	// errors, JWT auth, rate limiting) is scoped to /api/v1 only; legacy
 	// routes keep their existing (empty) middleware stack so monitoring
 	// tools probing /up don't get a 401.
-	restServer := rest.NewServer(agg.engine, agg.logger, agg.config, agg.buildRestDeps())
+	restServer := rest.NewServer(agg.engine, agg.logger, agg.config, agg.AvsClientSurface())
 	restServer.Mount(e)
 
 	addr := agg.config.HttpBindAddress

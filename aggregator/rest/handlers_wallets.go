@@ -12,6 +12,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/avsclient"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
@@ -182,7 +183,7 @@ func (s *Server) WithdrawWallet(ctx echo.Context, address generated.EthereumAddr
 		}
 	}
 
-	req := WithdrawRequest{
+	req := avsclient.WithdrawRequest{
 		Owner:              user.Address.Hex(),
 		SmartWalletAddress: string(address),
 		RecipientAddress:   string(body.RecipientAddress),

@@ -34,6 +34,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/avsclient"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
@@ -77,7 +78,7 @@ func newHarness(t *testing.T) *testHarness {
 	// no smart-wallet RPC, no withdraw service. Handlers that need
 	// those deps return a structured 501; the lifecycle/auth tests
 	// don't touch them.
-	srv := rest.NewServer(engine, logger, cfg, rest.ServerDeps{})
+	srv := rest.NewServer(engine, logger, cfg, avsclient.Surface{})
 	srv.Mount(e)
 
 	httpServer := httptest.NewServer(e)

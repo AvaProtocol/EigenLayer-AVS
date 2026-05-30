@@ -12,7 +12,6 @@
 package rest
 
 import (
-	"context"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -22,6 +21,7 @@ import (
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/avsclient"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )
@@ -49,7 +49,7 @@ type Server struct {
 	engine         *taskengine.Engine
 	logger         sdklogging.Logger
 	config         *config.Config
-	operators      OperatorLister
+	operators      avsclient.OperatorLister
 	smartWalletRpc *ethclient.Client
 	// smartWalletRpcByChain holds per-chain RPC clients in gateway mode,
 	// keyed by chain ID. Populated from the aggregator's
@@ -57,90 +57,27 @@ type Server struct {
 	// fall back to smartWalletRpc. See resolveSmartWalletForChain.
 	smartWalletRpcByChain map[int64]*ethclient.Client
 	priceService          taskengine.PriceService
-	withdraws             WithdrawService
-}
-
-// OperatorLister is the minimal surface the REST package needs from the
-// aggregator's operator pool — kept as an interface so we don't import
-// the aggregator package (would cycle) and so tests can inject a fake.
-type OperatorLister interface {
-	List() []OperatorView
-}
-
-// OperatorView is the chain-agnostic shape the REST layer renders. The
-// aggregator package adapts its internal *OperatorNode into this shape
-// when constructing the Server so the proto/internal type stays
-// internal.
-type OperatorView struct {
-	Address           string
-	Name              string
-	Version           string
-	BlockNumber       int64
-	EventCount        int64
-	LastPingEpochMs   int64
-	SupportedChainIDs []int64
-}
-
-// WithdrawService abstracts the bundler-driven smart-wallet withdrawal
-// path the gRPC layer historically owned. The REST WithdrawWallet
-// handler depends on it; the aggregator package supplies the
-// implementation, which lets the REST package stay free of bundler /
-// paymaster / WebSocket plumbing.
-type WithdrawService interface {
-	Withdraw(ctx context.Context, req WithdrawRequest) (WithdrawResult, error)
-}
-
-// WithdrawRequest is the chain-agnostic shape the REST handler hands
-// to WithdrawService. Mirrors the OpenAPI WithdrawRequest, plus the
-// resolved owner address (from the JWT) and the smart wallet address
-// (path parameter on the REST route).
-type WithdrawRequest struct {
-	Owner              string
-	SmartWalletAddress string
-	RecipientAddress   string
-	Amount             string
-	Token              string
-	ChainID            int64
-}
-
-// WithdrawResult is what the WithdrawService returns once the UserOp
-// has been submitted (and optionally awaited). REST renders it into
-// the OpenAPI WithdrawResponse shape.
-type WithdrawResult struct {
-	UserOpHash      string
-	TransactionHash string
-	Status          string
-	Message         string
-	SubmittedAt     int64
-}
-
-// ServerDeps bundles the wiring dependencies so NewServer's signature
-// stays manageable as the REST surface grows. Each field is optional —
-// handlers that need a missing dependency return a structured 501.
-type ServerDeps struct {
-	Operators      OperatorLister
-	SmartWalletRpc *ethclient.Client
-	// SmartWalletRpcByChain holds per-chain RPC clients in gateway mode.
-	// In single-chain mode, leave nil — REST handlers fall back to
-	// SmartWalletRpc.
-	SmartWalletRpcByChain map[int64]*ethclient.Client
-	PriceService          taskengine.PriceService
-	WithdrawSvc           WithdrawService
+	withdraws             avsclient.WithdrawService
 }
 
 // NewServer wires the REST handler with its dependencies. Constructed once
 // at aggregator startup and shared across all in-flight requests; the
 // Echo router handles request-level concurrency.
-func NewServer(engine *taskengine.Engine, logger sdklogging.Logger, cfg *config.Config, deps ServerDeps) *Server {
+//
+// The Surface argument is the neutral contract any AVS consumer
+// satisfies; the aggregator package supplies a concrete implementation
+// (see aggregator/avsclient_adapter.go), but in principle anything that
+// produces an avsclient.Surface can mount the REST API.
+func NewServer(engine *taskengine.Engine, logger sdklogging.Logger, cfg *config.Config, surface avsclient.Surface) *Server {
 	return &Server{
 		engine:                engine,
 		logger:                logger,
 		config:                cfg,
-		operators:             deps.Operators,
-		smartWalletRpc:        deps.SmartWalletRpc,
-		smartWalletRpcByChain: deps.SmartWalletRpcByChain,
-		priceService:          deps.PriceService,
-		withdraws:             deps.WithdrawSvc,
+		operators:             surface.Operators,
+		smartWalletRpc:        surface.SmartWalletRpc,
+		smartWalletRpcByChain: surface.SmartWalletRpcByChain,
+		priceService:          surface.PriceService,
+		withdraws:             surface.WithdrawSvc,
 	}
 }
 
