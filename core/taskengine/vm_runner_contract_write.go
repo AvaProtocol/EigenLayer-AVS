@@ -320,12 +320,27 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	callData, err := GenerateOrUseCallData(methodCall.MethodName, existingCallData, resolvedMethodParams, parsedABI)
 	if err != nil {
 		if r.vm != nil && r.vm.logger != nil {
-			r.vm.logger.Error("❌ Failed to get/generate calldata for contract write",
-				"methodName", methodCall.MethodName,
-				"providedCallData", methodCall.CallData,
-				"rawMethodParams", methodCall.MethodParams,
-				"resolvedMethodParams", resolvedMethodParams,
-				"error", err)
+			// User-input errors (StructuredError — method not in ABI,
+			// parameter count mismatch) log at Warn so SentryLogger doesn't
+			// capture them as Sentry events. SentryLogger forwards every
+			// .Error() call with an error-typed tag to sentry.CaptureException,
+			// which is how methodName="nonexistent" filled up Sentry
+			// EIGENLAYER-AVS-1K. Real server faults (bad ABI parsing, encoder
+			// crashes, etc.) still surface as .Error() and reach Sentry.
+			if _, isStructured := IsStructuredError(err); isStructured {
+				r.vm.logger.Warn("contract write: invalid method/params (user-input error)",
+					"methodName", methodCall.MethodName,
+					"rawMethodParams", methodCall.MethodParams,
+					"resolvedMethodParams", resolvedMethodParams,
+					"error", err)
+			} else {
+				r.vm.logger.Error("❌ Failed to get/generate calldata for contract write",
+					"methodName", methodCall.MethodName,
+					"providedCallData", methodCall.CallData,
+					"rawMethodParams", methodCall.MethodParams,
+					"resolvedMethodParams", resolvedMethodParams,
+					"error", err)
+			}
 		}
 		return &avsproto.ContractWriteNode_MethodResult{
 			Success:    false,

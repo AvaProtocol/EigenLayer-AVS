@@ -565,15 +565,18 @@ func GenerateCallData(methodName string, methodParams []string, contractAbi *abi
 		return "", fmt.Errorf("contract ABI is required to generate calldata")
 	}
 
-	// Find the method in the ABI
+	// Find the method in the ABI. Method-not-found is a user-input error
+	// (client sent a methodName not present in the ABI), not a server fault —
+	// return a typed StructuredError so call sites can downgrade the log
+	// level and avoid spamming Sentry (EIGENLAYER-AVS-1K).
 	method, exists := contractAbi.Methods[methodName]
 	if !exists {
-		return "", fmt.Errorf("method '%s' not found in contract ABI", methodName)
+		return "", NewMethodNotFoundError(methodName)
 	}
 
-	// Validate parameter count
+	// Validate parameter count — also a user-input error.
 	if len(methodParams) != len(method.Inputs) {
-		return "", fmt.Errorf("method '%s' expects %d parameters, got %d", methodName, len(method.Inputs), len(methodParams))
+		return "", NewMethodParamCountError(methodName, len(method.Inputs), len(methodParams))
 	}
 
 	// Prepare arguments for ABI encoding
