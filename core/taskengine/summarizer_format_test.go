@@ -1035,8 +1035,8 @@ func TestFormatTelegramFromStructured_RunnerAndFees(t *testing.T) {
 		Fees: &FeesInfo{
 			ExecutionFee: &FeeAmount{Amount: "0.020000", Unit: "USD"},
 			Total: []*TokenTotal{
-				{Amount: "0.000003", Unit: "ETH", USD: "0.01"},
-				{Amount: "0.02", Unit: "USD", USD: "0.02"}, // platform fee — renders as "$0.02 platform fee"
+				{Amount: "0.000003", Unit: "ETH", USD: "0.01", IsGas: true},
+				{Amount: "0.02", Unit: "USD", USD: "0.02"}, // platform fee — hidden from notification (tracked for API consumers only)
 			},
 		},
 	}
@@ -1062,9 +1062,15 @@ func TestFormatTelegramFromStructured_RunnerAndFees(t *testing.T) {
 		t.Errorf("runner address should not be <code>-wrapped, got:\n%s", out)
 	}
 
-	// Cost line: native gas first, then platform fee as a separate "$X platform fee".
-	if !strings.Contains(out, "⛽ <b>Cost:</b> 0.000003 ETH ($0.01), $0.02 platform fee") {
-		t.Errorf("missing combined gas+platform Cost line in:\n%s", out)
+	// Gas line: only the native on-chain gas. Platform fee and value fees are
+	// tracked in Fees.Total for API consumers but intentionally hidden from
+	// the notification — grouping them under "⛽" misled users into reading
+	// them as gas.
+	if !strings.Contains(out, "⛽ <b>Gas:</b> 0.000003 ETH ($0.01)") {
+		t.Errorf("missing gas-only Gas line in:\n%s", out)
+	}
+	if strings.Contains(out, "platform fee") {
+		t.Errorf("platform fee should not render in the notification, got:\n%s", out)
 	}
 	if strings.Contains(out, "(~") || strings.Contains(out, "<b>Value fee:</b>") {
 		t.Errorf("Telegram should not render gas-units detail or Value fee line, got:\n%s", out)
@@ -1073,18 +1079,20 @@ func TestFormatTelegramFromStructured_RunnerAndFees(t *testing.T) {
 		t.Errorf("deployed run should not show simulation placeholder, got:\n%s", out)
 	}
 
-	// Cost line follows Runner directly inside the metadata block (no blank
+	// Gas line follows Runner directly inside the metadata block (no blank
 	// line between them).
-	if !strings.Contains(out, "<b>Runner:</b> 0x8Ee38...7017 on Sepolia\n⛽ <b>Cost:</b> ") {
-		t.Errorf("Cost line should immediately follow Runner line, got:\n%s", out)
+	if !strings.Contains(out, "<b>Runner:</b> 0x8Ee38...7017 on Sepolia\n⛽ <b>Gas:</b> ") {
+		t.Errorf("Gas line should immediately follow Runner line, got:\n%s", out)
 	}
 
 	t.Logf("Telegram render:\n%s", out)
 }
 
 // TestFormatTelegramFromStructured_PlatformFeeOnly covers the read-only path:
-// no on-chain steps, only the platform fee. Renders as "$0.02 platform fee"
-// with no gas-equivalent ETH line that could be misread as gas.
+// no on-chain steps, only the platform fee. With the gas-only notification
+// format, the Gas line is omitted entirely (there's no gas to report) —
+// the platform fee is still tracked in Fees.Total for billing but isn't
+// surfaced in the notification.
 func TestFormatTelegramFromStructured_PlatformFeeOnly(t *testing.T) {
 	summary := Summary{
 		Subject:  "Run #1: Read-Only Workflow successfully completed",
@@ -1100,8 +1108,11 @@ func TestFormatTelegramFromStructured_PlatformFeeOnly(t *testing.T) {
 		},
 	}
 	out := FormatForMessageChannels(summary, "telegram", nil)
-	if !strings.Contains(out, "⛽ <b>Cost:</b> $0.02 platform fee") {
-		t.Errorf("expected platform-fee-only Cost line, got:\n%s", out)
+	if strings.Contains(out, "⛽ <b>Gas:</b>") {
+		t.Errorf("read-only run has no gas — Gas line should be omitted, got:\n%s", out)
+	}
+	if strings.Contains(out, "platform fee") {
+		t.Errorf("platform fee should not render in the notification, got:\n%s", out)
 	}
 	if strings.Contains(out, " ETH (") {
 		t.Errorf("read-only run should not render an ETH line, got:\n%s", out)
@@ -1109,7 +1120,8 @@ func TestFormatTelegramFromStructured_PlatformFeeOnly(t *testing.T) {
 }
 
 // TestFormatTelegramFromStructured_NoPriceService covers Moralis-not-configured:
-// gas renders with $? for USD; platform fee still shows as the canonical $X.
+// gas renders with $? for USD. Platform fee is not rendered in the
+// notification under the gas-only format.
 func TestFormatTelegramFromStructured_NoPriceService(t *testing.T) {
 	summary := Summary{
 		Subject:  "Run #1: Workflow successfully completed",
@@ -1120,20 +1132,27 @@ func TestFormatTelegramFromStructured_NoPriceService(t *testing.T) {
 		Fees: &FeesInfo{
 			ExecutionFee: &FeeAmount{Amount: "0.02", Unit: "USD"},
 			Total: []*TokenTotal{
-				{Amount: "0.000003", Unit: "ETH", USD: ""}, // unpriced — renders "$?"
+				{Amount: "0.000003", Unit: "ETH", USD: "", IsGas: true}, // unpriced — renders "$?"
 				{Amount: "0.02", Unit: "USD", USD: "0.02"},
 			},
 		},
 	}
 	out := FormatForMessageChannels(summary, "telegram", nil)
-	if !strings.Contains(out, "⛽ <b>Cost:</b> 0.000003 ETH ($?), $0.02 platform fee") {
-		t.Errorf("expected unpriced ETH + platform fee, got:\n%s", out)
+	if !strings.Contains(out, "⛽ <b>Gas:</b> 0.000003 ETH ($?)") {
+		t.Errorf("expected unpriced ETH gas line, got:\n%s", out)
+	}
+	if strings.Contains(out, "platform fee") {
+		t.Errorf("platform fee should not render in the notification, got:\n%s", out)
 	}
 }
 
 // TestFormatTelegramFromStructured_MultiToken_USDPlaceholder verifies the
-// multi-token comma-separated render and the "$?" placeholder for unpriceable
-// entries. Mirror of the format spec in the PRD's Rendering section.
+// gas-only render isolates the native-token gas entry even when Fees.Total
+// also includes per-token value-fee entries (USDC, PEPE here). Only the
+// IsGas-marked native entry surfaces in the notification — the value-fee
+// rows are tracked in Fees.Total for API consumers but intentionally
+// hidden, because grouping them under "⛽" misleads users into reading
+// them as gas.
 func TestFormatTelegramFromStructured_MultiToken_USDPlaceholder(t *testing.T) {
 	summary := Summary{
 		Subject:    "Run #1: Multi-token Workflow successfully completed",
@@ -1144,17 +1163,26 @@ func TestFormatTelegramFromStructured_MultiToken_USDPlaceholder(t *testing.T) {
 		Runner:     &RunnerInfo{SmartWallet: "0x8Ee38eB323c14a1752DABDA1cca9661AEE377017"},
 		Fees: &FeesInfo{
 			Total: []*TokenTotal{
-				{Amount: "0.01", Unit: "ETH", USD: "25.00"},
+				{Amount: "0.01", Unit: "ETH", USD: "25.00", IsGas: true},
 				{Amount: "1.2", Unit: "USDC", USD: "1.20"},
-				{Amount: "0.005", Unit: "PEPE", USD: ""}, // unpriceable
+				{Amount: "0.005", Unit: "PEPE", USD: ""}, // value-fee, unpriceable
 			},
 		},
 	}
 
 	out := FormatForMessageChannels(summary, "telegram", nil)
-	want := "⛽ <b>Cost:</b> 0.01 ETH ($25.00), 1.2 USDC ($1.20), 0.005 PEPE ($?)"
+	want := "⛽ <b>Gas:</b> 0.01 ETH ($25.00)"
 	if !strings.Contains(out, want) {
-		t.Errorf("missing multi-token Cost line %q in:\n%s", want, out)
+		t.Errorf("missing gas-only line %q in:\n%s", want, out)
+	}
+	// The old multi-token cost format put value-fee tokens inline as
+	// "0.01 ETH ($25.00), 1.2 USDC ($1.20), 0.005 PEPE ($?)". Verify those
+	// fragments are gone — USDC may still appear in the Executed section
+	// for a USDC transfer, so we check on the specific cost-line shape.
+	for _, leak := range []string{"1.2 USDC ($1.20)", "0.005 PEPE", "$25.00),"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("value-fee token %q leaked into the Gas line, got:\n%s", leak, out)
+		}
 	}
 }
 
