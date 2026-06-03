@@ -21,7 +21,7 @@
     "name": "USD Coin",
     "symbol": "USDC",
     "decimals": 6,
-    "id": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+    "id": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238"
   },
   {
     "name": "Tether USD",
@@ -33,6 +33,6 @@
     "name": "Wrapped Ether",
     "symbol": "WETH",
     "decimals": 18,
-    "id": "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14"
+    "id": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14"
   }
 ]
