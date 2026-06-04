@@ -522,10 +522,13 @@ func (vm *VM) fetchMoralisBalances(
 	// Moralis excludes native tokens by default, so we must explicitly request them
 	request.SetQueryParam("exclude_native", "false")
 
-	// Add token_addresses parameter if specified (used for Phase 2 missing token fetching)
+	// Add token_addresses parameter if specified (used for Phase 2 missing token fetching).
+	// Moralis expects indexed-bracket form (`token_addresses[0]=…&token_addresses[1]=…`);
+	// a comma-joined single value is rejected with a 400 "not a valid hex address".
 	if len(tokenAddresses) > 0 {
-		tokenAddressesStr := strings.Join(tokenAddresses, ",")
-		request.SetQueryParam("token_addresses", tokenAddressesStr)
+		for i, addr := range tokenAddresses {
+			request.SetQueryParam(fmt.Sprintf("token_addresses[%d]", i), addr)
+		}
 	}
 
 	// Execute request
