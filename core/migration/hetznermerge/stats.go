@@ -1,7 +1,6 @@
-package main
+package hetznermerge
 
 import (
-	"fmt"
 	"sort"
 )
 
@@ -43,11 +42,11 @@ func (s *stats) forPrefix(prefix string) *prefixStats {
 	return v
 }
 
-func (s *stats) print(donorChainID int64, chainName string) {
-	fmt.Println("Summary")
-	fmt.Println("-------")
-	fmt.Printf("Donor chain: %d (%s)\n", donorChainID, chainName)
-	fmt.Println()
+func (s *stats) print(w Writer, donorChainID int64, chainName string) {
+	w.Println("Summary")
+	w.Println("-------")
+	w.Printf("Donor chain: %d (%s)\n", donorChainID, chainName)
+	w.Println()
 
 	// Sort prefixes by their order in prefixHandlers (the canonical layout)
 	// instead of alphabetical — keeps related rows together.
@@ -70,9 +69,9 @@ func (s *stats) print(donorChainID int64, chainName string) {
 	// CollRes is the subset of Copied that overwrote an existing gateway
 	// value (execution_index_counter: max-on-collision); brand-new keys
 	// show under Copied only.
-	fmt.Printf("%-30s %-50s %8s %8s %8s %8s %8s %8s %8s\n",
+	w.Printf("%-30s %-50s %8s %8s %8s %8s %8s %8s %8s\n",
 		"Prefix", "Policy", "Scanned", "Copied", "CollRes", "Stamped", "Existed", "Dropped", "Errors")
-	fmt.Println("----------------------------- " +
+	w.Println("----------------------------- " +
 		"-------------------------------------------------- " +
 		"-------- -------- -------- -------- -------- -------- --------")
 
@@ -82,7 +81,7 @@ func (s *stats) print(donorChainID int64, chainName string) {
 		if ps.scanned == 0 && ps.dropped == 0 && ps.errored == 0 {
 			continue // suppress zero rows for readability
 		}
-		fmt.Printf("%-30s %-50s %8d %8d %8d %8d %8d %8d %8d\n",
+		w.Printf("%-30s %-50s %8d %8d %8d %8d %8d %8d %8d\n",
 			ps.prefix, ps.policy,
 			ps.scanned, ps.copied, ps.collisionResolved, ps.stampedChain, ps.skippedExists, ps.dropped, ps.errored)
 		totals.scanned += ps.scanned
@@ -93,16 +92,16 @@ func (s *stats) print(donorChainID int64, chainName string) {
 		totals.dropped += ps.dropped
 		totals.errored += ps.errored
 	}
-	fmt.Println("----------------------------- " +
+	w.Println("----------------------------- " +
 		"-------------------------------------------------- " +
 		"-------- -------- -------- -------- -------- -------- --------")
-	fmt.Printf("%-30s %-50s %8d %8d %8d %8d %8d %8d %8d\n",
+	w.Printf("%-30s %-50s %8d %8d %8d %8d %8d %8d %8d\n",
 		"TOTAL", "",
 		totals.scanned, totals.copied, totals.collisionResolved, totals.stampedChain, totals.skippedExists, totals.dropped, totals.errored)
 
 	if totals.errored > 0 {
-		fmt.Println()
-		fmt.Printf("⚠️  %d errors occurred during merge — review the ERROR log lines above.\n", totals.errored)
+		w.Println()
+		w.Printf("⚠️  %d errors occurred during merge — review the ERROR log lines above.\n", totals.errored)
 	}
 }
 
