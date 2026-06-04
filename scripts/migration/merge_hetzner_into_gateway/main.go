@@ -122,7 +122,16 @@ func main() {
 	// Walk every prefix the dispatcher recognizes. Hard-fail when we see
 	// a key with an unknown prefix UNLESS --fail-on-unknown-prefix=false
 	// (which only emergency-recovery investigations should ever pass).
-	allPrefixes := knownPrefixes()
+	//
+	// Important: dedupe outer-loop prefixes to skip strict extensions of
+	// another known prefix (e.g. `t:seq` is covered by `t:`, `q:seq:` by
+	// `q:`). Without this, every t:seq key gets iterated twice: once via
+	// GetByPrefix("t:") and once via GetByPrefix("t:seq") — bloating the
+	// scanned count and confusingly attributing the second pass to the
+	// shorter-prefix row of the summary. The dispatch table inside
+	// handlers.go still has the more specific entries first, so the
+	// correct (drop) handler still fires.
+	allPrefixes := outerLoopPrefixes(knownPrefixes())
 	sort.Strings(allPrefixes) // deterministic output ordering
 
 	for _, prefix := range allPrefixes {
@@ -201,6 +210,30 @@ func scanForUnknownPrefixes(donor storage.Storage, knownPrefixes []string) (map[
 		return nil, err
 	}
 	return unknown, nil
+}
+
+// outerLoopPrefixes returns the subset of `all` that should drive the
+// outer GetByPrefix loop in main: for any two prefixes A and B in the
+// input where A is a strict prefix of B, only A is returned. This keeps
+// keys from being processed twice when the dispatch table contains
+// both a general and a more-specific entry for the same family (e.g.
+// `t:` and `t:seq`).
+func outerLoopPrefixes(all []string) []string {
+	out := make([]string, 0, len(all))
+nextCandidate:
+	for _, candidate := range all {
+		for _, other := range all {
+			if other == candidate {
+				continue
+			}
+			if len(other) < len(candidate) && candidate[:len(other)] == other {
+				// `other` is a strict prefix of `candidate` — skip `candidate`.
+				continue nextCandidate
+			}
+		}
+		out = append(out, candidate)
+	}
+	return out
 }
 
 func supportedChainList() string {

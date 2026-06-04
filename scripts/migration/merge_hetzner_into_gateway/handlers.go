@@ -1,13 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // handlerFunc processes a single donor key-value, writing zero or one
@@ -27,25 +30,52 @@ type prefixHandlerEntry struct {
 }
 
 // prefixHandlers is the dispatch table. The dispatcher walks it in order
-// and picks the first matching prefix — so put `ct:cw:` BEFORE `ct:` if
-// the latter is ever added (currently only `ct:cw:` exists).
+// and picks the first matching prefix — so the order matters when one
+// prefix is the prefix of another. In particular, `t:seq` (Badger
+// sequence counter) is listed BEFORE `t:` so the generic t-handler
+// doesn't try to chain-stamp the sequence-counter key, and `q:seq:`
+// before `q:` for the same reason.
 //
 // IMPORTANT: keep this table aligned with the per-prefix policy matrix in
 // `docs/changes/20260604-hetzner-data-restore-plan.md` (avs-infra).
 // Editing one without the other invites silent divergence.
 var prefixHandlers = []prefixHandlerEntry{
-	// Already chain-scoped on disk (MigrateKeysToChainScoped ran on every
-	// donor pre-merge). Validate embedded chain ID matches the donor.
-	{"t:", handleChainScopedPassThrough, "pass-through (chain-scoped)"},
-	{"u:", handleChainScopedPassThrough, "pass-through (chain-scoped)"},
-	{"history:", handleChainScopedPassThrough, "pass-through (chain-scoped)"},
+	// Per-DB Badger sequence counters. Per-aggregator operational state;
+	// the gateway maintains its own sequences. Must be matched BEFORE
+	// the generic `t:` / `q:` handlers below — otherwise handleStampChainID
+	// would corrupt them into `t:<chainID>:seq` etc.
+	{"t:seq", handleDrop, "drop (Badger sequence counter, per-aggregator)"},
+	{"q:seq:", handleDrop, "drop (Badger sequence counter, per-aggregator)"},
+
+	// Workflow + execution history. On every Hetzner donor (which predates
+	// chain-scoped storage) these are in legacy form (t:<status>:<task>,
+	// history:<task>:<execution>). We:
+	//
+	//   1. stamp the chain ID into the KEY (the equivalent of running
+	//      MigrateKeysToChainScoped on the donor, folded into the merge)
+	//   2. decode the VALUE with protojson DiscardUnknown:true to tolerate
+	//      proto fields that were renamed/removed over time
+	//      (expression/epochs/totalExecution/interval/input — surfaced by
+	//      the 2026-06-04 rehearsal where ~46% of mainnet tasks
+	//      would have failed strict decode)
+	//   3. set the body's chain_id field to the donor chain ID (Task
+	//      proto only) so subsequent updates don't default it to the
+	//      gateway's defaultChainID and silently re-key the task
+	//   4. re-marshal with the current proto schema, which drops the
+	//      unknown fields permanently — one-time data cleanup
+	//
+	// `u:` is just a status byte slice (no body to clean) and stays on
+	// the plain key-stamp handler.
+	{"t:", handleStampTaskBody, "stamp chain ID + clean Task body (drop unknown proto fields, set chain_id)"},
+	{"u:", handleStampChainID, "stamp chain ID (status byte slice, no body)"},
+	{"history:", handleStampExecutionBody, "stamp chain ID + clean Execution body (drop unknown proto fields)"},
 
 	// Chain-implicit on the donor. Stamp `--donor-chain-id` into the key
-	// when writing to gateway. Gateway read-path update ships separately.
+	// when writing to gateway.
 	{"w:", handleStampChainID, "stamp chain ID"},
 	{"wsalt:", handleStampChainID, "stamp chain ID (rebuild wsalt index post-merge)"},
 	{"fl:", handleStampChainID, "stamp chain ID"},
-	{"fr:", handleStampChainID, "stamp chain ID"},
+	{"fr:", handleStampFeeRecordBody, "stamp chain ID + set FeeRecord.ChainID"},
 
 	// Already user/org/workflow scoped — chain doesn't apply.
 	{"secret:", handleImportAsIs, "import as-is"},
@@ -54,10 +84,13 @@ var prefixHandlers = []prefixHandlerEntry{
 	// no chain stamping. On collision, keep the larger value.
 	{"execution_index_counter:", handleMaxOnCollision, "max-on-collision"},
 
-	// Drop policies — cosmetic, transient, or reconstructible.
+	// Drop policies — cosmetic, transient, reconstructible, or
+	// per-aggregator operational state.
 	{"ct:cw:", handleDrop, "drop (cosmetic)"},
 	{"pending:", handleDrop, "drop (transient)"},
 	{"trigger:", handleDrop, "drop (reconstructible from history)"},
+	{"operator:", handleDrop, "drop (per-aggregator operator pool registry)"},
+	{"q:", handleDrop, "drop (per-aggregator async execution queue)"},
 
 	// Donor migration markers describe the donor's history, not the
 	// gateway's — never import.
@@ -95,47 +128,185 @@ func hasPrefix(key []byte, prefix string) bool {
 // Handlers
 // -------------------------------------------------------------------------
 
-// handleChainScopedPassThrough copies a key that's already chain-scoped
-// on the donor (per MigrateKeysToChainScoped) straight into the gateway,
-// after validating the embedded chain ID matches --donor-chain-id.
+// stampedKey applies the same key-stamping rules handleStampChainID uses,
+// returning either the original kv.Key (when already chain-scoped on the
+// donor) or a new key with `<donorChainID>:` inserted after matchedPrefix
+// (when legacy). The bool says whether stamping happened (so callers can
+// increment stat.stampedChain only when the key actually changed).
 //
-// Layout: `<prefix><chainID>:<rest...>` — second `:`-delimited segment is
-// the chain ID. Legacy (unprefixed) form aborts the merge: the donor was
-// supposed to be migrated already.
-func handleChainScopedPassThrough(donor, gateway storage.Storage, donorChainID int64, _ string, kv *storage.KeyValueItem, stat *prefixStats, dryRun, verbose bool) error {
+// Returns a wrong-chain-mis-stamp error when the donor key is already
+// chain-scoped but with a chain ID that disagrees with --donor-chain-id.
+func stampedKey(donorChainID int64, matchedPrefix string, kv *storage.KeyValueItem) (newKey []byte, stamped bool, err error) {
+	if matchedPrefix == "" {
+		return nil, false, fmt.Errorf("internal: stampedKey called without a matched prefix for key %q", string(kv.Key))
+	}
 	embedded, parseErr := parseChainIDFromKey(kv.Key)
-	if errors.Is(parseErr, taskengine.ErrLegacyKey) {
-		return fmt.Errorf("donor key %q is in legacy (pre-chain-scoped) form — run the chain-scope migration on the donor before merging", string(kv.Key))
+	if parseErr == nil {
+		if embedded != donorChainID {
+			return nil, false, fmt.Errorf("donor key %q embeds chain ID %d but --donor-chain-id is %d — refuse to mis-stamp", string(kv.Key), embedded, donorChainID)
+		}
+		return kv.Key, false, nil
 	}
-	if parseErr != nil {
-		return fmt.Errorf("parse chain ID from %q: %w", string(kv.Key), parseErr)
+	if !errors.Is(parseErr, taskengine.ErrLegacyKey) {
+		return nil, false, fmt.Errorf("parse chain ID from %q: %w", string(kv.Key), parseErr)
 	}
-	if embedded != donorChainID {
-		return fmt.Errorf("donor key %q embeds chain ID %d but --donor-chain-id is %d — refuse to mis-stamp", string(kv.Key), embedded, donorChainID)
-	}
-
-	return setIfAbsent(gateway, kv.Key, kv.Value, stat, dryRun)
+	rest := string(kv.Key[len(matchedPrefix):])
+	return []byte(fmt.Sprintf("%s%d:%s", matchedPrefix, donorChainID, rest)), true, nil
 }
 
-// handleStampChainID stamps `--donor-chain-id` into the key. For prefix
-// `p:` the donor key is `p:<rest>` and the gateway key becomes
-// `p:<chainID>:<rest>`. Used for chain-implicit families (w:, wsalt:,
-// fl:, fr:) that don't have their own chain_scoped_keys-style migration
-// yet.
+// cleanTaskBody decodes a stored Task with DiscardUnknown=true so old
+// proto fields (renamed/removed: expression, epochs, totalExecution,
+// interval, input, …) don't reject the whole task, then sets the body's
+// chain_id field to donorChainID and re-marshals. Drops the unknown
+// fields permanently. Returns the cleaned body or an error if even the
+// loose decoder couldn't make sense of it (rare — a handful of
+// genuinely malformed rows out of 200-400 per chain).
+func cleanTaskBody(value []byte, donorChainID int64) ([]byte, error) {
+	var task avsproto.Task
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(value, &task); err != nil {
+		return nil, fmt.Errorf("decode task with DiscardUnknown: %w", err)
+	}
+	task.ChainId = donorChainID
+	out, err := protojson.Marshal(&task)
+	if err != nil {
+		return nil, fmt.Errorf("re-marshal cleaned task: %w", err)
+	}
+	return out, nil
+}
+
+// cleanExecutionBody mirrors cleanTaskBody for the Execution proto. The
+// Execution message has no chain_id field of its own (chain is implicit
+// in the history:<chainID>:<taskID>:<executionID> key), so this is
+// purely a re-serialize that drops unknown fields like "success" (which
+// got moved into Step) and others.
+func cleanExecutionBody(value []byte) ([]byte, error) {
+	var execution avsproto.Execution
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(value, &execution); err != nil {
+		return nil, fmt.Errorf("decode execution with DiscardUnknown: %w", err)
+	}
+	out, err := protojson.Marshal(&execution)
+	if err != nil {
+		return nil, fmt.Errorf("re-marshal cleaned execution: %w", err)
+	}
+	return out, nil
+}
+
+// cleanFeeRecordBody decodes the donor's FeeRecord (stdlib json), sets
+// ChainID to donorChainID (it may have been 0 on old donors since
+// FeeRecord.ChainID was added later), and re-marshals. RecordValueFee
+// now requires ChainID != 0 to write the chain-scoped fl:/fr: keys.
+func cleanFeeRecordBody(value []byte, donorChainID int64) ([]byte, error) {
+	// We intentionally use stdlib json (not protojson) because FeeRecord
+	// is a plain Go struct, not a proto message. stdlib json ignores
+	// unknown fields by default, which is the behavior we want here too.
+	var record taskengine.FeeRecord
+	if err := json.Unmarshal(value, &record); err != nil {
+		return nil, fmt.Errorf("decode fee record: %w", err)
+	}
+	record.ChainID = donorChainID
+	out, err := json.Marshal(&record)
+	if err != nil {
+		return nil, fmt.Errorf("re-marshal cleaned fee record: %w", err)
+	}
+	return out, nil
+}
+
+// handleStampTaskBody stamps the chain ID into the key AND rewrites the
+// stored Task body via cleanTaskBody (drops unknown proto fields + sets
+// task.chain_id = donorChainID). See the dispatch-table comment on
+// prefixHandlers for the rationale; see cleanTaskBody for what's
+// dropped.
+func handleStampTaskBody(donor, gateway storage.Storage, donorChainID int64, matchedPrefix string, kv *storage.KeyValueItem, stat *prefixStats, dryRun, verbose bool) error {
+	newKey, stamped, err := stampedKey(donorChainID, matchedPrefix, kv)
+	if err != nil {
+		return err
+	}
+	cleaned, err := cleanTaskBody(kv.Value, donorChainID)
+	if err != nil {
+		return err
+	}
+	if stamped {
+		stat.stampedChain++
+	}
+	return setIfAbsent(gateway, newKey, cleaned, stat, dryRun)
+}
+
+// handleStampExecutionBody is the Execution-body analogue.
+func handleStampExecutionBody(donor, gateway storage.Storage, donorChainID int64, matchedPrefix string, kv *storage.KeyValueItem, stat *prefixStats, dryRun, verbose bool) error {
+	newKey, stamped, err := stampedKey(donorChainID, matchedPrefix, kv)
+	if err != nil {
+		return err
+	}
+	cleaned, err := cleanExecutionBody(kv.Value)
+	if err != nil {
+		return err
+	}
+	if stamped {
+		stat.stampedChain++
+	}
+	return setIfAbsent(gateway, newKey, cleaned, stat, dryRun)
+}
+
+// handleStampFeeRecordBody is the FeeRecord-body analogue. fr: keys are
+// always chain-implicit on the donor (chain-scoped form didn't exist
+// before this rewrite), so the key is always stamped and the body's
+// ChainID is always populated.
+func handleStampFeeRecordBody(donor, gateway storage.Storage, donorChainID int64, matchedPrefix string, kv *storage.KeyValueItem, stat *prefixStats, dryRun, verbose bool) error {
+	newKey, stamped, err := stampedKey(donorChainID, matchedPrefix, kv)
+	if err != nil {
+		return err
+	}
+	cleaned, err := cleanFeeRecordBody(kv.Value, donorChainID)
+	if err != nil {
+		return err
+	}
+	if stamped {
+		stat.stampedChain++
+	}
+	return setIfAbsent(gateway, newKey, cleaned, stat, dryRun)
+}
+
+// handleStampChainID handles both legacy (chain-implicit) and already-
+// chain-scoped donor keys:
+//
+//   - If the second `:`-delimited segment parses as a numeric chain ID,
+//     the key is already chain-scoped. Validate it matches the donor's
+//     chain ID and pass it through untouched.
+//   - If the second segment is non-numeric (or absent), the key is in
+//     legacy form. Insert `<donorChainID>:` right after the matched
+//     prefix and write the stamped key.
+//
+// This is the equivalent of running MigrateKeysToChainScoped on the
+// donor — folded into the merge so we don't have to mutate donor data
+// before merging, and so donors that have a MIX of legacy and chain-
+// scoped keys (because an in-place migration ran partway) still merge
+// correctly.
+//
+// Wrong-chain mis-stamp protection: a donor key like `t:8453:c:taskID`
+// merged with --donor-chain-id=1 will hard-fail, not get re-stamped
+// into `t:1:8453:c:taskID`.
 func handleStampChainID(donor, gateway storage.Storage, donorChainID int64, matchedPrefix string, kv *storage.KeyValueItem, stat *prefixStats, dryRun, verbose bool) error {
 	if matchedPrefix == "" {
 		return fmt.Errorf("internal: handleStampChainID called without a matched prefix for key %q", string(kv.Key))
 	}
-	rest := string(kv.Key[len(matchedPrefix):])
 
-	// Safety: if the donor key is ALREADY stamped (rest starts with the
-	// chain ID followed by ':'), skip the additional stamp and treat as
-	// chain-scoped pass-through. This guards against double-running the
-	// tool or against donors that ran a future migration we don't know
-	// about.
-	if alreadyStamped(rest, donorChainID) {
+	embedded, parseErr := parseChainIDFromKey(kv.Key)
+	if parseErr == nil {
+		// Already chain-scoped. Refuse to merge a donor key whose
+		// embedded chain ID disagrees with --donor-chain-id (e.g.
+		// somebody pointed the wrong chain's DB at the wrong --donor-
+		// chain-id flag).
+		if embedded != donorChainID {
+			return fmt.Errorf("donor key %q embeds chain ID %d but --donor-chain-id is %d — refuse to mis-stamp", string(kv.Key), embedded, donorChainID)
+		}
 		return setIfAbsent(gateway, kv.Key, kv.Value, stat, dryRun)
 	}
+	if !errors.Is(parseErr, taskengine.ErrLegacyKey) {
+		return fmt.Errorf("parse chain ID from %q: %w", string(kv.Key), parseErr)
+	}
+
+	// Legacy form — stamp the donor chain ID inline.
+	rest := string(kv.Key[len(matchedPrefix):])
 	stamped := []byte(fmt.Sprintf("%s%d:%s", matchedPrefix, donorChainID, rest))
 	stat.stampedChain++
 	return setIfAbsent(gateway, stamped, kv.Value, stat, dryRun)
@@ -252,16 +423,6 @@ func parseChainIDFromKey(key []byte) (int64, error) {
 		return 0, taskengine.ErrLegacyKey
 	}
 	return id, nil
-}
-
-// alreadyStamped returns true when the donor key fragment (everything
-// after the matched prefix) appears to already be chain-stamped with the
-// given chain ID — i.e. it starts with `<chainID>:`. Used by
-// handleStampChainID to skip double-stamping if the donor ran a future
-// migration the tool doesn't know about.
-func alreadyStamped(rest string, donorChainID int64) bool {
-	prefix := strconv.FormatInt(donorChainID, 10) + ":"
-	return strings.HasPrefix(rest, prefix)
 }
 
 // isKeyNotFoundError lets us treat "key not present" as a non-error case

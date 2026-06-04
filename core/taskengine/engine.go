@@ -624,7 +624,14 @@ func (n *Engine) MustStart() error {
 			task := &model.Workflow{
 				Task: &avsproto.Task{},
 			}
-			err := protojson.Unmarshal(item.Value, task)
+			// DiscardUnknown: schema evolution over time has renamed/
+			// removed proto fields (e.g. `expression`, `epochs`,
+			// `totalExecution`, `interval`, `input`). Strict decode
+			// would silently skip any task whose body retains those
+			// old fields (the `if err == nil` branch below swallows
+			// errors). Tolerate unknowns at load — re-marshal on the
+			// next write drops them permanently.
+			err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(item.Value, task)
 			if err == nil {
 				if initErr := task.EnsureInitialized(); initErr != nil {
 					n.logger.Warn("Task failed initialization after loading from storage",
@@ -3677,7 +3684,11 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 			}
 
 			exec := &avsproto.Execution{}
-			if err := protojson.Unmarshal(executionValue, exec); err == nil {
+			// DiscardUnknown: tolerate proto fields renamed/removed
+			// since this execution was written. The merge tool re-
+			// serializes bodies on import so this matters mainly for
+			// data that was never touched by a merge run.
+			if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(executionValue, exec); err == nil {
 				executioResp.Items = append(executioResp.Items, exec)
 				total += 1
 			}
@@ -3713,7 +3724,11 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 			}
 
 			exec := &avsproto.Execution{}
-			if err := protojson.Unmarshal(executionValue, exec); err == nil {
+			// DiscardUnknown: tolerate proto fields renamed/removed
+			// since this execution was written. The merge tool re-
+			// serializes bodies on import so this matters mainly for
+			// data that was never touched by a merge run.
+			if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(executionValue, exec); err == nil {
 				executioResp.Items = append(executioResp.Items, exec)
 				total += 1
 			}
@@ -3780,7 +3795,10 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 	rawExecution, err := n.db.GetKey(ChainTaskExecutionKey(task.ChainId, task, payload.ExecutionId))
 	if err == nil {
 		exec := &avsproto.Execution{}
-		err = protojson.Unmarshal(rawExecution, exec)
+		// DiscardUnknown: tolerate proto fields renamed/removed since
+		// the execution was written; otherwise GetExecution/
+		// GetExecutionStatus would error 500 on any older row.
+		err = (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(rawExecution, exec)
 		if err != nil {
 			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
 		}
@@ -3843,7 +3861,10 @@ func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.Executio
 	rawExecution, err := n.db.GetKey(ChainTaskExecutionKey(task.ChainId, task, payload.ExecutionId))
 	if err == nil {
 		exec := &avsproto.Execution{}
-		err = protojson.Unmarshal(rawExecution, exec)
+		// DiscardUnknown: tolerate proto fields renamed/removed since
+		// the execution was written; otherwise GetExecution/
+		// GetExecutionStatus would error 500 on any older row.
+		err = (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(rawExecution, exec)
 		if err != nil {
 			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
 		}
@@ -4751,7 +4772,10 @@ func (n *Engine) GetExecutionStats(user *model.User, payload *avsproto.GetExecut
 
 		for _, item := range items {
 			execution := &avsproto.Execution{}
-			if err := protojson.Unmarshal(item.Value, execution); err != nil {
+			// DiscardUnknown: same rationale as elsewhere — tolerate
+			// proto fields renamed/removed since the execution was
+			// written.
+			if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(item.Value, execution); err != nil {
 				n.logger.Error("error unmarshalling execution", "error", err)
 				continue
 			}

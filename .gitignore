@@ -32,6 +32,7 @@ config/*.yaml
 !config/operator.example.yaml
 !config/*-dev.yaml
 !config/*-railway.yaml
+!config/*-rehearsal.yaml
 # Snapshot of tracked configs taken before any restructure; safety net.
 !config/_legacy/
 !config/_legacy/*.yaml
@@ -77,3 +78,13 @@ EigenLayer-AVS
 
 # VS Code workspace files
 *.code-workspace
+# Hetzner donor snapshots + rehearsal scratch gateway DB (local only)
+donors/
+tmp/rehearsal-gateway-db/
+tmp/rehearsal-gateway-backup/
+# Stale build artifacts at repo root from manual go run
+/dev
+/merge_hetzner_into_gateway
+
+# Local Claude Code agent state (session locks, project-local skills, etc.)
+.claude/
