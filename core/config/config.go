@@ -332,6 +332,21 @@ func NewConfig(configFilePath string) (*Config, error) {
 		}
 	}
 
+	// Derive eth_ws_url from eth_rpc_url when not explicitly set. Both
+	// endpoints typically live at the same host+path on every supported
+	// provider (Dwellir, Tenderly, Alchemy, …) — only the scheme
+	// differs. Letting one URL drive both halves the number of env
+	// vars an operator has to keep in sync and avoids the easy mistake
+	// of rotating one without the other. An explicit eth_ws_url still
+	// wins when set, for the rare case where the WS endpoint really
+	// is a separate URL.
+	if configRaw.EthWsUrl == "" {
+		configRaw.EthWsUrl = deriveWsURL(configRaw.EthRpcUrl)
+	}
+	if configRaw.SmartWallet.EthWsUrl == "" {
+		configRaw.SmartWallet.EthWsUrl = deriveWsURL(configRaw.SmartWallet.EthRpcUrl)
+	}
+
 	// Only create WebSocket client if URL is provided
 	var ethWsClient *eth.InstrumentedClient
 	if configRaw.EthWsUrl != "" {
@@ -602,6 +617,40 @@ func newLogger(env sdklogging.LogLevel, serviceName string) (sdklogging.Logger, 
 	return pkglogger.NewSentryLogger(zapLogger, serviceName), nil
 }
 
+// deriveWsURL turns an HTTP(S) RPC URL into the equivalent WebSocket URL
+// by flipping the scheme. Returns "" when given "" (so callers can use
+// it unconditionally — empty in, empty out, fall back to the existing
+// "no WebSocket" code path).
+//
+// Every RPC provider we ship configs for (Dwellir, Tenderly, Alchemy,
+// Infura, mainnet.base.org, etc.) serves HTTP and WebSocket from the
+// same host + path with only the scheme changing. So:
+//
+//	https://api-ethereum-mainnet.n.dwellir.com/<key>
+//	wss://api-ethereum-mainnet.n.dwellir.com/<key>
+//
+// are the same endpoint via different transports. Letting one URL drive
+// both halves the env-var count an operator manages, and makes it
+// impossible to rotate one without the other.
+//
+// If a provider ever splits the two (different host or different path
+// for WS), set eth_ws_url explicitly — that value still wins.
+func deriveWsURL(rpcURL string) string {
+	switch {
+	case rpcURL == "":
+		return ""
+	case strings.HasPrefix(rpcURL, "https://"):
+		return "wss://" + strings.TrimPrefix(rpcURL, "https://")
+	case strings.HasPrefix(rpcURL, "http://"):
+		return "ws://" + strings.TrimPrefix(rpcURL, "http://")
+	default:
+		// Not an http(s) URL — return as-is and let the WS client
+		// surface a clear "scheme not supported" error rather than
+		// silently mangling something we don't recognize.
+		return rpcURL
+	}
+}
+
 // firstNonEmpty returns the first non-empty string among the arguments.
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
@@ -746,13 +795,21 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 		maxWallets = HardMaxWalletsPerOwner
 	}
 
+	// Derive WS URL from RPC URL if not explicit (same provider, same
+	// path, scheme swap). See the top-level derivation block in
+	// NewConfig for rationale.
+	wsURL := sw.EthWsUrl
+	if wsURL == "" {
+		wsURL = deriveWsURL(sw.EthRpcUrl)
+	}
+
 	chainCfg := &ChainConfig{
 		ChainID:    raw.ChainID,
 		Name:       raw.Name,
 		WorkerAddr: raw.WorkerAddr,
 		SmartWallet: &SmartWalletConfig{
 			EthRpcUrl:            sw.EthRpcUrl,
-			EthWsUrl:             sw.EthWsUrl,
+			EthWsUrl:             wsURL,
 			BundlerURL:           sw.BundlerURL,
 			FactoryAddress:       common.HexToAddress(firstNonEmpty(sw.FactoryAddress, DefaultFactoryProxyAddressHex)),
 			EntrypointAddress:    common.HexToAddress(firstNonEmpty(sw.EntrypointAddress, DefaultEntrypointAddressHex)),
