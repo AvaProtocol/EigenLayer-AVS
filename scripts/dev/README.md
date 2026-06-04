@@ -105,7 +105,7 @@ yarn start getWorkflow <task-id-from-the-list>
 - Operator-side trigger evaluation (operators aren't part of the
   rehearsal stack)
 - The Railway gateway's actual storage volume — the rehearsal runs
-  against `/tmp/rehearsal-gateway-db` only. Promote to production by
+  against `./tmp/rehearsal-gateway-db` only. Promote to production by
   taking a fresh pre-merge backup of the Railway gateway volume, then
   running the same merge sequence in the production maintenance window.
 
@@ -113,7 +113,7 @@ yarn start getWorkflow <task-id-from-the-list>
 
 `make hetzner-snapshot` always pulls fresh and overwrites `./donors/`.
 The merge rehearsal is non-destructive to the donor data — only the
-scratch gateway DB at `/tmp/rehearsal-gateway-db` gets reset on each
+scratch gateway DB at `./tmp/rehearsal-gateway-db` gets reset on each
 `make migration-rehearse APPLY=1` run.
 
 So a tight iteration loop is:
@@ -137,7 +137,7 @@ make migration-rehearse CHAIN=sepolia APPLY=1
 | File | What |
 |---|---|
 | `snapshot-hetzner-donors.sh` | SSH + docker-stop + tarball each Hetzner aggregator. Extracts to `./donors/<chain>/db/`. |
-| `run-merge-rehearsal.sh` | Runs the merge tool sequentially per donor against `/tmp/rehearsal-gateway-db`. Calls `count-gateway-keys.go` at the end. |
+| `run-merge-rehearsal.sh` | Runs the merge tool sequentially per donor against `./tmp/rehearsal-gateway-db`. Calls `count-gateway-keys.go` at the end. |
 | `count-gateway-keys.go` | One-shot scan of the gateway DB that prints per-prefix per-chain key counts. Helps spot unexpected key distributions after the merge. |
 | `../../config/gateway-dev-rehearsal.yaml` | Gateway config pointing at the rehearsal scratch DB with all 4 chains registered. Used by `make dev-stack-rehearsal`. |
 
@@ -160,8 +160,8 @@ tight.
 
 ```bash
 rm -rf donors/                          # delete all snapshotted donor data
-rm -rf /tmp/rehearsal-gateway-db        # delete the scratch gateway DB
-rm -rf /tmp/rehearsal-gateway-backup    # and its backup dir
+rm -rf ./tmp/rehearsal-gateway-db        # delete the scratch gateway DB
+rm -rf ./tmp/rehearsal-gateway-backup    # and its backup dir
 ```
 
 ## Related

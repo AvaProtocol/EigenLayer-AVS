@@ -27,6 +27,12 @@ type prefixHandlerEntry struct {
 	prefix string
 	handle handlerFunc
 	policy string // short label that prints in summary
+	// dropOnly marks entries whose handler discards the value and
+	// returns immediately. Lets the outer scan loop use
+	// IterateKeysOnly (constant memory, no value fetch) instead of
+	// GetByPrefix (materializes every K/V into a slice). Critical for
+	// the q: family which has 7–10M entries on mainnet donors.
+	dropOnly bool
 }
 
 // prefixHandlers is the dispatch table. The dispatcher walks it in order
@@ -44,8 +50,8 @@ var prefixHandlers = []prefixHandlerEntry{
 	// the gateway maintains its own sequences. Must be matched BEFORE
 	// the generic `t:` / `q:` handlers below — otherwise handleStampChainID
 	// would corrupt them into `t:<chainID>:seq` etc.
-	{"t:seq", handleDrop, "drop (Badger sequence counter, per-aggregator)"},
-	{"q:seq:", handleDrop, "drop (Badger sequence counter, per-aggregator)"},
+	{"t:seq", handleDrop, "drop (Badger sequence counter, per-aggregator)", true},
+	{"q:seq:", handleDrop, "drop (Badger sequence counter, per-aggregator)", true},
 
 	// Workflow + execution history. On every Hetzner donor (which predates
 	// chain-scoped storage) these are in legacy form (t:<status>:<task>,
@@ -66,35 +72,51 @@ var prefixHandlers = []prefixHandlerEntry{
 	//
 	// `u:` is just a status byte slice (no body to clean) and stays on
 	// the plain key-stamp handler.
-	{"t:", handleStampTaskBody, "stamp chain ID + clean Task body (drop unknown proto fields, set chain_id)"},
-	{"u:", handleStampChainID, "stamp chain ID (status byte slice, no body)"},
-	{"history:", handleStampExecutionBody, "stamp chain ID + clean Execution body (drop unknown proto fields)"},
+	{"t:", handleStampTaskBody, "stamp chain ID + clean Task body (drop unknown proto fields, set chain_id)", false},
+	{"u:", handleStampChainID, "stamp chain ID (status byte slice, no body)", false},
+	{"history:", handleStampExecutionBody, "stamp chain ID + clean Execution body (drop unknown proto fields)", false},
 
 	// Chain-implicit on the donor. Stamp `--donor-chain-id` into the key
 	// when writing to gateway.
-	{"w:", handleStampChainID, "stamp chain ID"},
-	{"wsalt:", handleStampChainID, "stamp chain ID (rebuild wsalt index post-merge)"},
-	{"fl:", handleStampChainID, "stamp chain ID"},
-	{"fr:", handleStampFeeRecordBody, "stamp chain ID + set FeeRecord.ChainID"},
+	{"w:", handleStampChainID, "stamp chain ID", false},
+	{"wsalt:", handleStampChainID, "stamp chain ID (rebuild wsalt index post-merge)", false},
+	{"fl:", handleStampChainID, "stamp chain ID", false},
+	{"fr:", handleStampFeeRecordBody, "stamp chain ID + set FeeRecord.ChainID", false},
 
 	// Already user/org/workflow scoped — chain doesn't apply.
-	{"secret:", handleImportAsIs, "import as-is"},
+	{"secret:", handleImportAsIs, "import as-is", false},
 
 	// Monotonic counters keyed by taskID — taskID is globally unique, so
 	// no chain stamping. On collision, keep the larger value.
-	{"execution_index_counter:", handleMaxOnCollision, "max-on-collision"},
+	{"execution_index_counter:", handleMaxOnCollision, "max-on-collision", false},
 
 	// Drop policies — cosmetic, transient, reconstructible, or
-	// per-aggregator operational state.
-	{"ct:cw:", handleDrop, "drop (cosmetic)"},
-	{"pending:", handleDrop, "drop (transient)"},
-	{"trigger:", handleDrop, "drop (reconstructible from history)"},
-	{"operator:", handleDrop, "drop (per-aggregator operator pool registry)"},
-	{"q:", handleDrop, "drop (per-aggregator async execution queue)"},
+	// per-aggregator operational state. dropOnly=true lets the outer
+	// scan loop stream keys via IterateKeysOnly (constant memory)
+	// instead of materializing every K/V slice — critical for the
+	// q: family which has 7–10M entries on mainnet donors.
+	{"ct:cw:", handleDrop, "drop (cosmetic)", true},
+	{"pending:", handleDrop, "drop (transient)", true},
+	{"trigger:", handleDrop, "drop (reconstructible from history)", true},
+	{"operator:", handleDrop, "drop (per-aggregator operator pool registry)", true},
+	{"q:", handleDrop, "drop (per-aggregator async execution queue)", true},
 
 	// Donor migration markers describe the donor's history, not the
 	// gateway's — never import.
-	{"migration:", handleDrop, "drop (donor history not gateway's)"},
+	{"migration:", handleDrop, "drop (donor history not gateway's)", true},
+}
+
+// isDropOnly returns whether the dispatch entry for `prefix` is a
+// drop-only handler (no value needed, no write). Used by the outer
+// scan loop to switch from GetByPrefix (materializes K/V slice) to
+// IterateKeysOnly (constant memory).
+func isDropOnly(prefix string) bool {
+	for _, h := range prefixHandlers {
+		if h.prefix == prefix {
+			return h.dropOnly
+		}
+	}
+	return false
 }
 
 func knownPrefixes() []string {
@@ -367,6 +389,16 @@ func handleMaxOnCollision(donor, gateway storage.Storage, donorChainID int64, _ 
 
 // handleDrop ignores the donor key entirely. Used for cosmetic / transient /
 // gateway-own-history prefixes per the matrix.
+//
+// NOTE: dispatch() never actually calls handleDrop for prefixes that have
+// dropOnly: true in their dispatch table entry — the outer scan loop in
+// main.go takes a fast path via IterateKeysOnly for those, counting
+// stat.scanned++ / stat.dropped++ inline without invoking dispatch at
+// all (avoids materializing the full K/V slice for 10M+ q: keys per
+// mainnet donor). handleDrop is reached only if a future entry sets
+// handleDrop without dropOnly: true. If you add such an entry, make
+// sure either the outer loop or this handler does the accounting, not
+// both.
 func handleDrop(donor, gateway storage.Storage, donorChainID int64, _ string, kv *storage.KeyValueItem, stat *prefixStats, dryRun, verbose bool) error {
 	stat.dropped++
 	return nil

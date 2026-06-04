@@ -253,6 +253,36 @@ func (c *OperatorConfig) EffectiveChains() []OperatorChainConfig {
 	}}
 }
 
+// applyWsURLDerivation fills in c.EthWsUrl / c.TargetChain.EthWsUrl /
+// each c.Chains[i].EthWsUrl when they're left empty in the YAML, by
+// flipping the scheme of the matching eth_rpc_url via
+// core/config.DeriveWsURL.
+//
+// Mirrors the equivalent block in core/config for the aggregator/gateway
+// config: every supported RPC provider (Dwellir, Tenderly, Alchemy,
+// Infura, mainnet.base.org) serves HTTP and WS at the same host+path
+// with only the scheme differing, so letting one URL drive both halves
+// the env-var count operators maintain and prevents the
+// "rotate RPC but forget WS" failure mode.
+//
+// Extracted from NewOperatorFromConfig so derive_ws_url_test.go can
+// exercise the exact production code path rather than re-implementing
+// the rules in the test file (which would let the test pass even if
+// the production call site were accidentally removed).
+func applyWsURLDerivation(c *OperatorConfig) {
+	if c.EthWsUrl == "" {
+		c.EthWsUrl = config.DeriveWsURL(c.EthRpcUrl)
+	}
+	if c.TargetChain.EthWsUrl == "" {
+		c.TargetChain.EthWsUrl = config.DeriveWsURL(c.TargetChain.EthRpcUrl)
+	}
+	for i := range c.Chains {
+		if c.Chains[i].EthWsUrl == "" {
+			c.Chains[i].EthWsUrl = config.DeriveWsURL(c.Chains[i].EthRpcUrl)
+		}
+	}
+}
+
 // ChainTriggerSet bundles the per-chain trigger engines and any chain-specific
 // state the operator needs to keep separate. Block and Event triggers each
 // speak to a single chain's RPC; the operator holds one ChainTriggerSet per
@@ -422,23 +452,7 @@ func NewOperatorFromConfigFile(configPath string) (*Operator, error) {
 
 // take the config in core (which is shared with aggregator and challenger)
 func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
-	// Derive WebSocket URLs from their RPC counterparts when not set
-	// explicitly. Mirrors what core/config does for the aggregator/gateway
-	// config: every supported RPC provider serves HTTP and WS at the same
-	// host+path with only the scheme differing, so letting one URL drive
-	// both halves the env-var count and prevents the "rotate RPC but
-	// forget WS" mistake. See core/config.DeriveWsURL for the helper.
-	if c.EthWsUrl == "" {
-		c.EthWsUrl = config.DeriveWsURL(c.EthRpcUrl)
-	}
-	if c.TargetChain.EthWsUrl == "" {
-		c.TargetChain.EthWsUrl = config.DeriveWsURL(c.TargetChain.EthRpcUrl)
-	}
-	for i := range c.Chains {
-		if c.Chains[i].EthWsUrl == "" {
-			c.Chains[i].EthWsUrl = config.DeriveWsURL(c.Chains[i].EthRpcUrl)
-		}
-	}
+	applyWsURLDerivation(&c)
 
 	elapsing := timekeeper.NewElapsing()
 

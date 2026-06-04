@@ -51,6 +51,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"log"
@@ -136,6 +137,27 @@ func main() {
 
 	for _, prefix := range allPrefixes {
 		stat := mergeStats.forPrefix(prefix)
+
+		// Drop-only prefixes don't need values — stream keys via the
+		// constant-memory IterateKeysOnly to avoid materializing every
+		// K/V into a slice. The q: family alone has 7–10M entries per
+		// mainnet donor; loading all of them at once is ~GBs of value
+		// payload that gets thrown away by handleDrop anyway.
+		if isDropOnly(prefix) {
+			err := donor.IterateKeysOnly([]byte(prefix), func(key []byte) error {
+				stat.scanned++
+				stat.dropped++
+				if *verbose {
+					fmt.Printf("  [drop] %q\n", string(key))
+				}
+				return nil
+			})
+			if err != nil {
+				log.Fatalf("stream-scan donor prefix %q: %v", prefix, err)
+			}
+			continue
+		}
+
 		items, err := donor.GetByPrefix([]byte(prefix))
 		if err != nil {
 			log.Fatalf("scan donor prefix %q: %v", prefix, err)
@@ -187,15 +209,27 @@ func main() {
 // Returned label is everything up to and including the first ':' in the
 // unknown key (e.g. "newprefix:") — matches the schema's naming
 // convention. Keys without a colon are bucketed under the full key.
+//
+// Avoids `string(key)` on every key — that would allocate millions of
+// short strings just to immediately discard them when the key matches
+// a known prefix (which is the overwhelmingly common case). Compares
+// against pre-encoded []byte prefixes and only converts to string when
+// bucketing an actual unknown key.
 func scanForUnknownPrefixes(donor storage.Storage, knownPrefixes []string) (map[string]int, error) {
+	knownPrefixesBytes := make([][]byte, len(knownPrefixes))
+	for i, p := range knownPrefixes {
+		knownPrefixesBytes[i] = []byte(p)
+	}
+
 	unknown := map[string]int{}
 	err := donor.IterateKeysOnly([]byte(""), func(key []byte) error {
-		k := string(key)
-		for _, p := range knownPrefixes {
-			if len(k) >= len(p) && k[:len(p)] == p {
+		for _, pb := range knownPrefixesBytes {
+			if bytes.HasPrefix(key, pb) {
 				return nil
 			}
 		}
+		// Unknown — pay the string-alloc cost only for the bucketing label.
+		k := string(key)
 		label := k
 		for i := 0; i < len(k); i++ {
 			if k[i] == ':' {
