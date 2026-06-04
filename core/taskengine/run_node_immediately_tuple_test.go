@@ -85,7 +85,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 		// - Templates reference settings.uniswapv3-pool.token0.id etc.
 
 		// Seed wallet in DB for validation
-		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{
+		_ = StoreWallet(db, int64(1), ownerEOA, &model.SmartWallet{
 			Owner:   &ownerEOA,
 			Address: runnerAddr,
 			Factory: &factory,
@@ -208,7 +208,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 		// The backend will convert this to ordered array based on ABI
 
 		// Seed wallet in DB for validation
-		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{
+		_ = StoreWallet(db, int64(1), ownerEOA, &model.SmartWallet{
 			Owner:   &ownerEOA,
 			Address: runnerAddr,
 			Factory: &factory,
@@ -423,7 +423,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 		// Note: Mathematical expressions in templates are not supported in RunNodeImmediately
 
 		// Seed wallet in DB
-		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{
+		_ = StoreWallet(db, int64(1), ownerEOA, &model.SmartWallet{
 			Owner:   &ownerEOA,
 			Address: runnerAddr,
 			Factory: &factory,

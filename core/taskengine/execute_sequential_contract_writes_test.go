@@ -72,7 +72,7 @@ func TestExecuteTask_SequentialContractWrites_Sepolia(t *testing.T) {
 	})
 
 	// Register smart wallet in database
-	err = StoreWallet(db, ownerAddress, &model.SmartWallet{
+	err = StoreWallet(db, int64(1), ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddr,
 		Factory: &cfg.SmartWallet.FactoryAddress,

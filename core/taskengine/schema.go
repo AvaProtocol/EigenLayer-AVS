@@ -25,44 +25,54 @@ func WorkflowByStatusStoragePrefix(status avsproto.TaskStatus) []byte {
 	return storageschema.WorkflowByStatusStoragePrefix(status)
 }
 
-func WalletByOwnerPrefix(owner common.Address) []byte {
+// WalletByOwnerPrefix returns the storage prefix for all wallets owned by
+// `owner` on chain `chainID`. Used to list wallets for a given user.
+func WalletByOwnerPrefix(chainID int64, owner common.Address) []byte {
 	return []byte(fmt.Sprintf(
-		"w:%s",
+		"w:%d:%s",
+		chainID,
 		strings.ToLower(owner.String()),
 	))
 }
 
-func WalletStorageKey(owner common.Address, smartWalletAddress string) string {
+// WalletStorageKey returns the primary key for a wallet record. The
+// chain ID is the second segment so wallets on different chains
+// (different factory addresses, different derived addresses) never
+// collide in storage.
+func WalletStorageKey(chainID int64, owner common.Address, smartWalletAddress string) string {
 	return fmt.Sprintf(
-		"w:%s:%s",
+		"w:%d:%s:%s",
+		chainID,
 		strings.ToLower(owner.Hex()),
 		strings.ToLower(smartWalletAddress),
 	)
 }
 
 // WalletBySaltKey returns the secondary index key that maps a
-// (owner, factory, salt) tuple to its current canonical wallet address.
+// (chainID, owner, factory, salt) tuple to its current canonical wallet
+// address.
 //
 // The primary wallet record is keyed by the *derived* wallet address
-// (`w:<owner>:<address>`), which means that when a factory's account
-// implementation is upgraded and `factory.getAddress(owner, salt)` starts
-// returning a new address, the new address looks like a brand-new wallet
-// to the primary store and a fresh row gets inserted alongside the old
-// one. This index lets us cheaply ask "for this (owner, factory, salt)
-// triple, which derived address is currently canonical?" so that the write
-// path can detect the upgrade and mark the old row as stale instead of
-// silently accumulating zombies.
+// (`w:<chainID>:<owner>:<address>`), which means that when a factory's
+// account implementation is upgraded and `factory.getAddress(owner, salt)`
+// starts returning a new address, the new address looks like a brand-new
+// wallet to the primary store and a fresh row gets inserted alongside the
+// old one. This index lets us cheaply ask "for this (chainID, owner,
+// factory, salt) tuple, which derived address is currently canonical?"
+// so that the write path can detect the upgrade and mark the old row as
+// stale instead of silently accumulating zombies.
 //
 // Salt is encoded in decimal (matching `(*big.Int).String()`) so the key
 // is stable across encodings. The prefix is `wsalt:` (not `w:`) so it does
 // not collide with `WalletByOwnerPrefix`.
-func WalletBySaltKey(owner common.Address, factory common.Address, salt *big.Int) []byte {
+func WalletBySaltKey(chainID int64, owner common.Address, factory common.Address, salt *big.Int) []byte {
 	saltStr := "0"
 	if salt != nil {
 		saltStr = salt.String()
 	}
 	return []byte(fmt.Sprintf(
-		"wsalt:%s:%s:%s",
+		"wsalt:%d:%s:%s:%s",
+		chainID,
 		strings.ToLower(owner.Hex()),
 		strings.ToLower(factory.Hex()),
 		saltStr,
@@ -70,18 +80,18 @@ func WalletBySaltKey(owner common.Address, factory common.Address, salt *big.Int
 }
 
 // LookupCanonicalWalletAddress returns the wallet address currently
-// registered as canonical for the given (owner, factory, salt) triple, or
-// badger.ErrKeyNotFound if none has been recorded yet.
-func LookupCanonicalWalletAddress(db storage.Storage, owner common.Address, factory common.Address, salt *big.Int) (common.Address, error) {
-	raw, err := db.GetKey(WalletBySaltKey(owner, factory, salt))
+// registered as canonical for the given (chainID, owner, factory, salt)
+// tuple, or badger.ErrKeyNotFound if none has been recorded yet.
+func LookupCanonicalWalletAddress(db storage.Storage, chainID int64, owner common.Address, factory common.Address, salt *big.Int) (common.Address, error) {
+	raw, err := db.GetKey(WalletBySaltKey(chainID, owner, factory, salt))
 	if err != nil {
 		return common.Address{}, err
 	}
 	return common.HexToAddress(string(raw)), nil
 }
 
-func GetWallet(db storage.Storage, owner common.Address, smartWalletAddress string) (*model.SmartWallet, error) {
-	walletKey := WalletStorageKey(owner, smartWalletAddress)
+func GetWallet(db storage.Storage, chainID int64, owner common.Address, smartWalletAddress string) (*model.SmartWallet, error) {
+	walletKey := WalletStorageKey(chainID, owner, smartWalletAddress)
 	walletData, err := db.GetKey([]byte(walletKey))
 	if err != nil {
 		return nil, err // Includes badger.ErrKeyNotFound
@@ -95,19 +105,20 @@ func GetWallet(db storage.Storage, owner common.Address, smartWalletAddress stri
 }
 
 // StoreWallet persists the wallet record under its primary key
-// (`w:<owner>:<address>`) and, when the wallet has a non-nil factory and
-// salt and is not flagged stale, also writes the `(owner, factory, salt)`
-// secondary index entry pointing at this wallet's address. Both writes
-// happen in a single BatchWrite so the index can never be left dangling.
+// (`w:<chainID>:<owner>:<address>`) and, when the wallet has a non-nil
+// factory and salt and is not flagged stale, also writes the
+// `(chainID, owner, factory, salt)` secondary index entry pointing at
+// this wallet's address. Both writes happen in a single BatchWrite so
+// the index can never be left dangling.
 //
 // Stale records (StaleDerivation == true) only update the primary entry —
 // the secondary index intentionally continues to point at the new
-// canonical wallet for that triple, not the stale one.
-func StoreWallet(db storage.Storage, owner common.Address, wallet *model.SmartWallet) error {
+// canonical wallet for that tuple, not the stale one.
+func StoreWallet(db storage.Storage, chainID int64, owner common.Address, wallet *model.SmartWallet) error {
 	if wallet.Address == nil {
 		return fmt.Errorf("cannot store wallet with nil address")
 	}
-	walletKey := WalletStorageKey(owner, wallet.Address.String())
+	walletKey := WalletStorageKey(chainID, owner, wallet.Address.String())
 	updatedWalletData, err := wallet.ToJSON()
 	if err != nil {
 		return fmt.Errorf("failed to marshal wallet for storage (key: %s): %w", walletKey, err)
@@ -118,7 +129,7 @@ func StoreWallet(db storage.Storage, owner common.Address, wallet *model.SmartWa
 		return db.Set([]byte(walletKey), updatedWalletData)
 	}
 
-	indexKey := WalletBySaltKey(owner, *wallet.Factory, wallet.Salt)
+	indexKey := WalletBySaltKey(chainID, owner, *wallet.Factory, wallet.Salt)
 	indexValue := []byte(strings.ToLower(wallet.Address.Hex()))
 	return db.BatchWrite(map[string][]byte{
 		walletKey:        updatedWalletData,
@@ -131,14 +142,14 @@ func StoreWallet(db storage.Storage, owner common.Address, wallet *model.SmartWa
 // updated by this call (StoreWallet skips the index for stale records),
 // so callers that want the index to point at a fresh canonical wallet
 // must call StoreWallet on the new wallet *after* this returns.
-func MarkWalletStale(db storage.Storage, owner common.Address, smartWalletAddress string) error {
-	wallet, err := GetWallet(db, owner, smartWalletAddress)
+func MarkWalletStale(db storage.Storage, chainID int64, owner common.Address, smartWalletAddress string) error {
+	wallet, err := GetWallet(db, chainID, owner, smartWalletAddress)
 	if err != nil {
 		return fmt.Errorf("failed to load wallet to mark stale (%s): %w", smartWalletAddress, err)
 	}
 	wallet.StaleDerivation = true
 	wallet.IsHidden = true
-	return StoreWallet(db, owner, wallet)
+	return StoreWallet(db, chainID, owner, wallet)
 }
 
 func WorkflowStorageKey(id string, status avsproto.TaskStatus) []byte {
@@ -197,23 +208,6 @@ func ChainTaskExecutionKey(chainID int64, t *model.Workflow, executionID string)
 		chainID,
 		t.Id,
 		executionID,
-	))
-}
-
-func ChainWalletStorageKey(chainID int64, owner common.Address, smartWalletAddress string) string {
-	return fmt.Sprintf(
-		"w:%d:%s:%s",
-		chainID,
-		strings.ToLower(owner.Hex()),
-		strings.ToLower(smartWalletAddress),
-	)
-}
-
-func ChainWalletByOwnerPrefix(chainID int64, owner common.Address) []byte {
-	return []byte(fmt.Sprintf(
-		"w:%d:%s",
-		chainID,
-		strings.ToLower(owner.String()),
 	))
 }
 
@@ -348,8 +342,8 @@ func ContractWriteCounterKey(eoa common.Address) []byte {
 // IsWalletHidden checks if a wallet is marked as hidden.
 // It returns true if hidden, false otherwise. If the wallet is not found or an error occurs,
 // it returns false and the error (except for badger.ErrKeyNotFound where it still returns false for IsHidden).
-func IsWalletHidden(db storage.Storage, owner common.Address, smartWalletAddress string) (bool, error) {
-	wallet, err := GetWallet(db, owner, smartWalletAddress)
+func IsWalletHidden(db storage.Storage, chainID int64, owner common.Address, smartWalletAddress string) (bool, error) {
+	wallet, err := GetWallet(db, chainID, owner, smartWalletAddress)
 	if err != nil {
 		if err == badger.ErrKeyNotFound {
 			return false, nil // Wallet doesn't exist, so not hidden by our definition, no error to bubble up for this specific check.
@@ -363,8 +357,8 @@ func IsWalletHidden(db storage.Storage, owner common.Address, smartWalletAddress
 }
 
 // SetWalletHiddenStatus sets the hidden status of a specified wallet.
-func SetWalletHiddenStatus(db storage.Storage, owner common.Address, smartWalletAddress string, hidden bool) error {
-	wallet, err := GetWallet(db, owner, smartWalletAddress)
+func SetWalletHiddenStatus(db storage.Storage, chainID int64, owner common.Address, smartWalletAddress string, hidden bool) error {
+	wallet, err := GetWallet(db, chainID, owner, smartWalletAddress)
 	if err != nil {
 		// If wallet not found, and we intend to "unhide" (which is a no-op) or "hide" (which means creating it as hidden).
 		// For simplicity, let's assume for now that SetWalletHiddenStatus operates on existing wallets.
@@ -380,24 +374,27 @@ func SetWalletHiddenStatus(db storage.Storage, owner common.Address, smartWallet
 	}
 
 	wallet.IsHidden = hidden
-	return StoreWallet(db, owner, wallet)
+	return StoreWallet(db, chainID, owner, wallet)
 }
 
 // Fee ledger storage keys
 
-// FeeLedgerKey returns the key for a user's outstanding value fee balance.
-// Format: "fl:<owner_hex>" → JSON-encoded FeeLedgerEntry
-func FeeLedgerKey(owner common.Address) []byte {
-	return []byte(fmt.Sprintf("fl:%s", strings.ToLower(owner.Hex())))
+// FeeLedgerKey returns the key for a user's outstanding value fee balance on
+// a specific chain. Format: "fl:<chainID>:<owner_hex>" → JSON-encoded
+// FeeLedgerEntry. Each chain maintains its own ledger so per-chain billing
+// settlement is unambiguous.
+func FeeLedgerKey(chainID int64, owner common.Address) []byte {
+	return []byte(fmt.Sprintf("fl:%d:%s", chainID, strings.ToLower(owner.Hex())))
 }
 
 // FeeRecordKey returns the key for an individual fee record (audit trail).
-// Format: "fr:<owner_hex>:<execution_id>" → JSON-encoded FeeRecord
-func FeeRecordKey(owner common.Address, executionID string) []byte {
-	return []byte(fmt.Sprintf("fr:%s:%s", strings.ToLower(owner.Hex()), executionID))
+// Format: "fr:<chainID>:<owner_hex>:<execution_id>" → JSON-encoded FeeRecord.
+func FeeRecordKey(chainID int64, owner common.Address, executionID string) []byte {
+	return []byte(fmt.Sprintf("fr:%d:%s:%s", chainID, strings.ToLower(owner.Hex()), executionID))
 }
 
-// FeeRecordPrefix returns the prefix for all fee records for an owner.
-func FeeRecordPrefix(owner common.Address) []byte {
-	return []byte(fmt.Sprintf("fr:%s:", strings.ToLower(owner.Hex())))
+// FeeRecordPrefix returns the prefix for all fee records for an owner on
+// a specific chain.
+func FeeRecordPrefix(chainID int64, owner common.Address) []byte {
+	return []byte(fmt.Sprintf("fr:%d:%s:", chainID, strings.ToLower(owner.Hex())))
 }

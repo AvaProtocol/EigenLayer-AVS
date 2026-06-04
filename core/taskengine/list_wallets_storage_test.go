@@ -22,7 +22,7 @@ func TestListWalletsStoresDefaultWallet(t *testing.T) {
 	user := testutil.TestUser1()
 
 	// Verify database is empty initially
-	dbItems, err := db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+	dbItems, err := db.GetByPrefix(WalletByOwnerPrefix(int64(1), user.Address))
 	require.NoError(t, err)
 	assert.Equal(t, 0, len(dbItems), "Database should be empty initially")
 
@@ -42,7 +42,7 @@ func TestListWalletsStoresDefaultWallet(t *testing.T) {
 	require.NotNil(t, defaultWallet, "Default wallet (salt:0) should be in the response")
 
 	// Verify the wallet is now stored in the database
-	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(int64(1), user.Address))
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(dbItems), "Database should contain exactly 1 wallet after ListWallets")
 
@@ -74,7 +74,7 @@ func TestListWalletsDoesNotDuplicateExistingWallet(t *testing.T) {
 	defaultAddress := getResp.Address
 
 	// Verify the wallet is stored
-	dbItems, err := db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+	dbItems, err := db.GetByPrefix(WalletByOwnerPrefix(int64(1), user.Address))
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(dbItems), "Database should contain exactly 1 wallet after GetWallet")
 
@@ -83,7 +83,7 @@ func TestListWalletsDoesNotDuplicateExistingWallet(t *testing.T) {
 	require.NoError(t, err, "ListWallets should succeed")
 
 	// Verify the wallet is still only stored once
-	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(int64(1), user.Address))
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(dbItems), "Database should still contain exactly 1 wallet after ListWallets")
 
@@ -119,7 +119,7 @@ func TestListWalletsWithMultipleWallets(t *testing.T) {
 	require.NoError(t, err, "First ListWallets call should succeed")
 
 	// Verify salt:0 is stored
-	dbItems, err := db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+	dbItems, err := db.GetByPrefix(WalletByOwnerPrefix(int64(1), user.Address))
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(dbItems), "Should have 1 wallet (salt:0) after first ListWallets")
 
@@ -141,7 +141,7 @@ func TestListWalletsWithMultipleWallets(t *testing.T) {
 	require.NotEqual(t, salt0Address, salt1Address, "Salt:1 address should be different from salt:0")
 
 	// Verify we now have 2 wallets
-	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(int64(1), user.Address))
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(dbItems), "Should have 2 wallets (salt:0, salt:1) after GetWallet")
 
@@ -155,7 +155,7 @@ func TestListWalletsWithMultipleWallets(t *testing.T) {
 	require.NotEqual(t, salt1Address, salt2Address, "Salt:2 address should be different from salt:1")
 
 	// Verify we now have 3 wallets
-	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(int64(1), user.Address))
 	require.NoError(t, err)
 	assert.Equal(t, 3, len(dbItems), "Should have 3 wallets (salt:0, salt:1, salt:2) after second GetWallet")
 
@@ -164,7 +164,7 @@ func TestListWalletsWithMultipleWallets(t *testing.T) {
 	require.NoError(t, err, "Second ListWallets call should succeed")
 
 	// Verify we still have exactly 3 wallets (no duplicates)
-	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(int64(1), user.Address))
 	require.NoError(t, err)
 	assert.Equal(t, 3, len(dbItems), "Should still have exactly 3 wallets after second ListWallets")
 
@@ -211,7 +211,7 @@ func TestListWalletsBeforeAndAfterGetWallet(t *testing.T) {
 
 	// Phase 1: Owner with no wallets yet - call ListWallets
 	// This should create and store salt:0
-	dbItems, err := db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+	dbItems, err := db.GetByPrefix(WalletByOwnerPrefix(int64(1), user.Address))
 	require.NoError(t, err)
 	assert.Equal(t, 0, len(dbItems), "Database should be empty initially")
 
@@ -219,7 +219,7 @@ func TestListWalletsBeforeAndAfterGetWallet(t *testing.T) {
 	require.NoError(t, err, "ListWallets should succeed when owner has no wallets")
 
 	// Verify salt:0 is now stored
-	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(int64(1), user.Address))
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(dbItems), "Database should contain salt:0 after ListWallets")
 
@@ -233,7 +233,7 @@ func TestListWalletsBeforeAndAfterGetWallet(t *testing.T) {
 	require.NotEmpty(t, salt0FromList, "Salt:0 wallet should be in ListWallets response")
 
 	// Verify we can retrieve it directly from the database
-	retrievedWallet, err := GetWallet(db, user.Address, salt0FromList)
+	retrievedWallet, err := GetWallet(db, int64(1), user.Address, salt0FromList)
 	require.NoError(t, err, "Should be able to retrieve salt:0 wallet from database")
 	assert.Equal(t, "0", retrievedWallet.Salt.String(), "Retrieved wallet should have salt 0")
 
@@ -244,7 +244,7 @@ func TestListWalletsBeforeAndAfterGetWallet(t *testing.T) {
 	require.NoError(t, err, "GetWallet for salt:1 should succeed")
 
 	// Verify we now have 2 wallets
-	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(int64(1), user.Address))
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(dbItems), "Should have 2 wallets after GetWallet for salt:1")
 
@@ -255,7 +255,7 @@ func TestListWalletsBeforeAndAfterGetWallet(t *testing.T) {
 	require.NoError(t, err, "GetWallet for salt:2 should succeed")
 
 	// Verify we now have 3 wallets
-	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(int64(1), user.Address))
 	require.NoError(t, err)
 	assert.Equal(t, 3, len(dbItems), "Should have 3 wallets after GetWallet for salt:2")
 
@@ -273,18 +273,18 @@ func TestListWalletsBeforeAndAfterGetWallet(t *testing.T) {
 	assert.True(t, addressesInResponse[getResp2.Address], "Salt:2 wallet should be in response")
 
 	// Verify database still has exactly 3 wallets (no duplicates created)
-	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+	dbItems, err = db.GetByPrefix(WalletByOwnerPrefix(int64(1), user.Address))
 	require.NoError(t, err)
 	assert.Equal(t, 3, len(dbItems), "Should still have exactly 3 wallets after second ListWallets")
 
 	// Verify all wallets can be retrieved individually
-	_, err = GetWallet(db, user.Address, salt0FromList)
+	_, err = GetWallet(db, int64(1), user.Address, salt0FromList)
 	require.NoError(t, err, "Should be able to retrieve salt:0 from database")
 
-	_, err = GetWallet(db, user.Address, getResp1.Address)
+	_, err = GetWallet(db, int64(1), user.Address, getResp1.Address)
 	require.NoError(t, err, "Should be able to retrieve salt:1 from database")
 
-	_, err = GetWallet(db, user.Address, getResp2.Address)
+	_, err = GetWallet(db, int64(1), user.Address, getResp2.Address)
 	require.NoError(t, err, "Should be able to retrieve salt:2 from database")
 }
 
@@ -300,7 +300,7 @@ func TestListWalletsDatabaseStateVerification(t *testing.T) {
 
 	// Helper function to verify database state
 	verifyDatabaseState := func(t *testing.T, expectedCount int, description string) map[string]*model.SmartWallet {
-		dbItems, err := db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+		dbItems, err := db.GetByPrefix(WalletByOwnerPrefix(int64(1), user.Address))
 		require.NoError(t, err, "Failed to query database: %s", description)
 		assert.Equal(t, expectedCount, len(dbItems), "Database state check failed: %s (expected %d wallets, got %d)", description, expectedCount, len(dbItems))
 

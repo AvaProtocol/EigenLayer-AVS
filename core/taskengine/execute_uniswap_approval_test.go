@@ -49,7 +49,7 @@ func TestExecuteTask_UniswapApprovalAndSwap_DifferentApprovalAmounts_Sepolia(t *
 	}
 
 	// Register the smart wallet in the database
-	err = StoreWallet(db, ownerAddress, &model.SmartWallet{
+	err = StoreWallet(db, int64(1), ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddr,
 		Factory: &config.SmartWallet.FactoryAddress,

@@ -59,10 +59,10 @@ func NewFeeLedger(db storage.Storage, logger sdklogging.Logger) *FeeLedger {
 	}
 }
 
-// GetOutstandingBalance returns the current outstanding value fee balance for an owner.
-// Returns zero if no ledger entry exists.
-func (fl *FeeLedger) GetOutstandingBalance(owner common.Address) (*big.Int, error) {
-	entry, err := fl.getLedgerEntry(owner)
+// GetOutstandingBalance returns the current outstanding value fee balance for
+// an owner on the given chain. Returns zero if no ledger entry exists.
+func (fl *FeeLedger) GetOutstandingBalance(chainID int64, owner common.Address) (*big.Int, error) {
+	entry, err := fl.getLedgerEntry(chainID, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -77,14 +77,14 @@ func (fl *FeeLedger) GetOutstandingBalance(owner common.Address) (*big.Int, erro
 	return outstanding, nil
 }
 
-// CheckCreditLimit returns whether the owner is within their credit limit.
-// Returns (withinLimit, outstandingBalance, error).
-func (fl *FeeLedger) CheckCreditLimit(owner common.Address, creditLimitWei *big.Int) (bool, *big.Int, error) {
+// CheckCreditLimit returns whether the owner is within their credit limit on
+// the given chain. Returns (withinLimit, outstandingBalance, error).
+func (fl *FeeLedger) CheckCreditLimit(chainID int64, owner common.Address, creditLimitWei *big.Int) (bool, *big.Int, error) {
 	if creditLimitWei == nil {
 		return true, big.NewInt(0), nil // No limit configured — always within limit
 	}
 
-	outstanding, err := fl.GetOutstandingBalance(owner)
+	outstanding, err := fl.GetOutstandingBalance(chainID, owner)
 	if err != nil {
 		return false, nil, fmt.Errorf("failed to get outstanding balance: %w", err)
 	}
@@ -94,17 +94,21 @@ func (fl *FeeLedger) CheckCreditLimit(owner common.Address, creditLimitWei *big.
 	return withinLimit, outstanding, nil
 }
 
-// RecordValueFee records a value fee after successful execution.
-// The mutex serializes the read-check-write sequence to prevent double-recording
-// when concurrent calls arrive with the same ExecutionID.
+// RecordValueFee records a value fee after successful execution. The ledger
+// and fee record are written under the chain ID embedded in record.ChainID.
+// The mutex serializes the read-check-write sequence to prevent
+// double-recording when concurrent calls arrive with the same ExecutionID.
 func (fl *FeeLedger) RecordValueFee(record *FeeRecord) error {
 	fl.mu.Lock()
 	defer fl.mu.Unlock()
 
+	if record.ChainID == 0 {
+		return fmt.Errorf("fee record missing chain_id (owner=%s execution=%s)", record.Owner, record.ExecutionID)
+	}
 	owner := common.HexToAddress(record.Owner)
 
 	// Idempotency check: skip if this execution's fee was already recorded
-	existingRecord, _ := fl.db.GetKey(FeeRecordKey(owner, record.ExecutionID))
+	existingRecord, _ := fl.db.GetKey(FeeRecordKey(record.ChainID, owner, record.ExecutionID))
 	if existingRecord != nil {
 		fl.logger.Debug("Fee record already exists, skipping", "execution_id", record.ExecutionID)
 		return nil
@@ -116,7 +120,7 @@ func (fl *FeeLedger) RecordValueFee(record *FeeRecord) error {
 	}
 
 	// Get or create ledger entry
-	entry, err := fl.getLedgerEntry(owner)
+	entry, err := fl.getLedgerEntry(record.ChainID, owner)
 	if err != nil {
 		return fmt.Errorf("failed to get ledger entry: %w", err)
 	}
@@ -159,8 +163,8 @@ func (fl *FeeLedger) RecordValueFee(record *FeeRecord) error {
 	}
 
 	updates := map[string][]byte{
-		string(FeeLedgerKey(owner)):                     ledgerData,
-		string(FeeRecordKey(owner, record.ExecutionID)): recordData,
+		string(FeeLedgerKey(record.ChainID, owner)):                     ledgerData,
+		string(FeeRecordKey(record.ChainID, owner, record.ExecutionID)): recordData,
 	}
 
 	if err := fl.db.BatchWrite(updates); err != nil {
@@ -168,6 +172,7 @@ func (fl *FeeLedger) RecordValueFee(record *FeeRecord) error {
 	}
 
 	fl.logger.Info("Recorded value fee",
+		"chain_id", record.ChainID,
 		"owner", owner.Hex(),
 		"execution_id", record.ExecutionID,
 		"fee_wei", record.FeeAmountWei,
@@ -176,19 +181,20 @@ func (fl *FeeLedger) RecordValueFee(record *FeeRecord) error {
 	return nil
 }
 
-// getLedgerEntry reads the ledger entry for an owner. Returns nil if not found.
-func (fl *FeeLedger) getLedgerEntry(owner common.Address) (*FeeLedgerEntry, error) {
-	data, err := fl.db.GetKey(FeeLedgerKey(owner))
+// getLedgerEntry reads the ledger entry for an owner on the given chain.
+// Returns nil if not found.
+func (fl *FeeLedger) getLedgerEntry(chainID int64, owner common.Address) (*FeeLedgerEntry, error) {
+	data, err := fl.db.GetKey(FeeLedgerKey(chainID, owner))
 	if err != nil {
 		if err == badger.ErrKeyNotFound {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to read fee ledger for %s: %w", owner.Hex(), err)
+		return nil, fmt.Errorf("failed to read fee ledger for chain=%d owner=%s: %w", chainID, owner.Hex(), err)
 	}
 
 	var entry FeeLedgerEntry
 	if err := json.Unmarshal(data, &entry); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal fee ledger for %s: %w", owner.Hex(), err)
+		return nil, fmt.Errorf("failed to unmarshal fee ledger for chain=%d owner=%s: %w", chainID, owner.Hex(), err)
 	}
 	return &entry, nil
 }

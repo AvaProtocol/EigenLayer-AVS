@@ -424,6 +424,32 @@ func (n *Engine) defaultChainID() int64 {
 	return 0
 }
 
+// userOwnsWalletOnAnyChain reports whether the user owns the given smart
+// wallet on at least one of the chains this gateway hosts. Used by RPCs
+// that query data across chains (ListWorkflowsByUser, the workflow-count
+// path) — a user with tasks on multiple chains might own a wallet on only
+// one of them, and we want the validation check to succeed for any.
+//
+// Falls through to the default-wallet equality first (the default wallet
+// has the same derived address across chains when factories are aligned).
+// On the first non-nil DB error, returns (false, err) — callers can
+// distinguish "wallet not owned anywhere" from "DB problem."
+func (n *Engine) userOwnsWalletOnAnyChain(user *model.User, walletAddr common.Address) (bool, error) {
+	if user.SmartAccountAddress != nil && user.SmartAccountAddress.Hex() == walletAddr.Hex() {
+		return true, nil
+	}
+	for _, chainID := range n.knownChainIDs() {
+		ok, err := ValidWalletOwner(n.db, chainID, user, walletAddr)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // knownChainIDs returns every chain the aggregator hosts tasks for. In
 // single-chain mode that is the SmartWallet chain; in gateway mode it is
 // every chain registered in chainConfigs plus the SmartWallet default.
@@ -637,35 +663,36 @@ func (n *Engine) MustStart() error {
 // Mark the old record as stale so list responses hide it and future
 // writes can replace the index entry. Index lookup or marking failures
 // are logged but never block the fresh insertion path.
-func (n *Engine) markPreviousCanonicalStaleIfAny(owner common.Address, factoryAddr common.Address, salt *big.Int, freshAddress common.Address) {
-	previousAddr, err := LookupCanonicalWalletAddress(n.db, owner, factoryAddr, salt)
+func (n *Engine) markPreviousCanonicalStaleIfAny(chainID int64, owner common.Address, factoryAddr common.Address, salt *big.Int, freshAddress common.Address) {
+	previousAddr, err := LookupCanonicalWalletAddress(n.db, chainID, owner, factoryAddr, salt)
 	if err == badger.ErrKeyNotFound {
 		return
 	}
 	if err != nil {
-		n.logger.Warn("Failed to look up canonical wallet address by (owner, factory, salt)", "owner", owner.Hex(), "factory", factoryAddr.Hex(), "salt", salt.String(), "error", err)
+		n.logger.Warn("Failed to look up canonical wallet address by (chainID, owner, factory, salt)", "chainID", chainID, "owner", owner.Hex(), "factory", factoryAddr.Hex(), "salt", salt.String(), "error", err)
 		return
 	}
 	if strings.EqualFold(previousAddr.Hex(), freshAddress.Hex()) {
 		return
 	}
 	n.logger.Error("Stale wallet derivation detected — factory implementation likely upgraded",
+		"chainID", chainID,
 		"owner", owner.Hex(),
 		"factory", factoryAddr.Hex(),
 		"salt", salt.String(),
 		"previousAddress", previousAddr.Hex(),
 		"newAddress", freshAddress.Hex(),
 	)
-	if markErr := MarkWalletStale(n.db, owner, previousAddr.Hex()); markErr != nil {
-		n.logger.Warn("Failed to mark previous canonical wallet as stale", "owner", owner.Hex(), "previousAddress", previousAddr.Hex(), "error", markErr)
+	if markErr := MarkWalletStale(n.db, chainID, owner, previousAddr.Hex()); markErr != nil {
+		n.logger.Warn("Failed to mark previous canonical wallet as stale", "chainID", chainID, "owner", owner.Hex(), "previousAddress", previousAddr.Hex(), "error", markErr)
 	}
 }
 
 // storeDefaultWalletForListWallets creates and stores the default wallet (salt:0) for ListWallets.
 // Returns the stored wallet model if successful, or nil if storage failed (but logs the error).
-func (n *Engine) storeDefaultWalletForListWallets(owner common.Address, defaultDerivedAddress *common.Address, defaultSystemFactory common.Address, defaultSalt *big.Int) *model.SmartWallet {
-	n.logger.Info("Default wallet not found in DB for ListWallets, storing it", "owner", owner.Hex(), "walletAddress", defaultDerivedAddress.Hex())
-	n.markPreviousCanonicalStaleIfAny(owner, defaultSystemFactory, defaultSalt, *defaultDerivedAddress)
+func (n *Engine) storeDefaultWalletForListWallets(chainID int64, owner common.Address, defaultDerivedAddress *common.Address, defaultSystemFactory common.Address, defaultSalt *big.Int) *model.SmartWallet {
+	n.logger.Info("Default wallet not found in DB for ListWallets, storing it", "chainID", chainID, "owner", owner.Hex(), "walletAddress", defaultDerivedAddress.Hex())
+	n.markPreviousCanonicalStaleIfAny(chainID, owner, defaultSystemFactory, defaultSalt, *defaultDerivedAddress)
 	newModelWallet := &model.SmartWallet{
 		Owner:    &owner,
 		Address:  defaultDerivedAddress,
@@ -673,8 +700,8 @@ func (n *Engine) storeDefaultWalletForListWallets(owner common.Address, defaultD
 		Salt:     defaultSalt,
 		IsHidden: false,
 	}
-	if storeErr := StoreWallet(n.db, owner, newModelWallet); storeErr != nil {
-		n.logger.Error("Error storing default wallet to DB for ListWallets", "owner", owner.Hex(), "walletAddress", defaultDerivedAddress.Hex(), "error", storeErr)
+	if storeErr := StoreWallet(n.db, chainID, owner, newModelWallet); storeErr != nil {
+		n.logger.Error("Error storing default wallet to DB for ListWallets", "chainID", chainID, "owner", owner.Hex(), "walletAddress", defaultDerivedAddress.Hex(), "error", storeErr)
 		// Continue and return the wallet anyway, but log the error
 		return nil
 	}
@@ -683,7 +710,13 @@ func (n *Engine) storeDefaultWalletForListWallets(owner common.Address, defaultD
 }
 
 // ListWallets corresponds to the ListWallets RPC.
+//
+// Wallet records are chain-scoped. The ListWalletReq proto does not carry a
+// chain_id yet, so this handler queries the gateway's default chain only.
+// Adding multi-chain enumeration (or a chain_id field on ListWalletReq) is
+// a follow-up.
 func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletReq) (*avsproto.ListWalletResp, error) {
+	chainID := n.defaultChainID()
 	walletsToReturnProto := []*avsproto.SmartWallet{}
 	processedAddresses := make(map[string]bool)
 
@@ -716,7 +749,7 @@ func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletR
 		}
 
 		if includeThisDefault {
-			modelWallet, dbGetErr := GetWallet(n.db, owner, defaultDerivedAddress.Hex())
+			modelWallet, dbGetErr := GetWallet(n.db, chainID, owner, defaultDerivedAddress.Hex())
 
 			isHidden := false
 			actualSalt := defaultSalt.String()
@@ -740,7 +773,7 @@ func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletR
 						maxAllowed = config.HardMaxWalletsPerOwner
 					}
 					// Fetch all wallets for this owner and count unique addresses
-					dbItems, listErr := n.db.GetByPrefix(WalletByOwnerPrefix(owner))
+					dbItems, listErr := n.db.GetByPrefix(WalletByOwnerPrefix(chainID, owner))
 					if listErr == nil {
 						unique := make(map[string]struct{})
 						for _, item := range dbItems {
@@ -755,13 +788,13 @@ func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletR
 							n.logger.Warn("Max wallet count reached for owner in ListWallets, but storing default wallet anyway since it's always returned", "owner", owner.Hex(), "limit", maxAllowed, "currentCount", len(unique))
 						}
 						// Store the default wallet since we're returning it to the client
-						if storedWallet := n.storeDefaultWalletForListWallets(owner, defaultDerivedAddress, defaultSystemFactory, defaultSalt); storedWallet != nil {
+						if storedWallet := n.storeDefaultWalletForListWallets(chainID, owner, defaultDerivedAddress, defaultSystemFactory, defaultSalt); storedWallet != nil {
 							modelWallet = storedWallet
 						}
 					}
 				} else {
 					// No config but wallet not in DB - store it anyway
-					if storedWallet := n.storeDefaultWalletForListWallets(owner, defaultDerivedAddress, defaultSystemFactory, defaultSalt); storedWallet != nil {
+					if storedWallet := n.storeDefaultWalletForListWallets(chainID, owner, defaultDerivedAddress, defaultSystemFactory, defaultSalt); storedWallet != nil {
 						modelWallet = storedWallet
 					}
 				}
@@ -788,9 +821,9 @@ func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletR
 		}
 	}
 
-	dbItems, listErr := n.db.GetByPrefix(WalletByOwnerPrefix(owner))
+	dbItems, listErr := n.db.GetByPrefix(WalletByOwnerPrefix(chainID, owner))
 	if listErr != nil && listErr != badger.ErrKeyNotFound {
-		n.logger.Error("Error fetching wallets by owner prefix for ListWallets", "owner", owner.Hex(), "error", listErr)
+		n.logger.Error("Error fetching wallets by owner prefix for ListWallets", "owner", owner.Hex(), "chainID", chainID, "error", listErr)
 		if len(walletsToReturnProto) == 0 {
 			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), "Error fetching wallets by owner: %v", listErr)
 		}
@@ -854,7 +887,11 @@ func (n *Engine) validateNonZeroAddress(factoryAddr common.Address, methodName, 
 
 // GetWallet is the gRPC handler for the GetWallet RPC.
 // It uses the owner (from auth context), salt, and factory_address from payload to derive the wallet address.
+//
+// Wallet records are chain-scoped. The GetWalletReq proto does not carry a
+// chain_id yet, so this handler reads/writes the gateway's default chain only.
 func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
+	chainID := n.defaultChainID()
 	// Allow empty factory address (uses default), but validate non-empty ones
 	if payload.GetFactoryAddress() != "" && !common.IsHexAddress(payload.GetFactoryAddress()) {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidFactoryAddressError)
@@ -909,7 +946,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		return nil, status.Errorf(codes.InvalidArgument, "Failed to derive sender address or derived address is nil or zero. Error: %v", err)
 	}
 
-	dbModelWallet, err := GetWallet(n.db, user.Address, derivedSenderAddress.Hex())
+	dbModelWallet, err := GetWallet(n.db, chainID, user.Address, derivedSenderAddress.Hex())
 
 	if err != nil && err != badger.ErrKeyNotFound {
 		n.logger.Error("Error fetching wallet from DB for GetWallet", "owner", user.Address.Hex(), "wallet", derivedSenderAddress.Hex(), "error", err)
@@ -928,7 +965,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 				maxAllowed = config.HardMaxWalletsPerOwner
 			}
 			// Fetch all wallets for this owner and count unique addresses
-			dbItems, listErr := n.db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+			dbItems, listErr := n.db.GetByPrefix(WalletByOwnerPrefix(chainID, user.Address))
 			if listErr == nil {
 				unique := make(map[string]struct{})
 				for _, item := range dbItems {
@@ -944,7 +981,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		}
 
 		n.logger.Info("Wallet not found in DB for GetWallet, creating new entry", "owner", user.Address.Hex(), "walletAddress", derivedSenderAddress.Hex())
-		n.markPreviousCanonicalStaleIfAny(user.Address, factoryAddr, saltBig, *derivedSenderAddress)
+		n.markPreviousCanonicalStaleIfAny(chainID, user.Address, factoryAddr, saltBig, *derivedSenderAddress)
 		newModelWallet := &model.SmartWallet{
 			Owner:    &user.Address,
 			Address:  derivedSenderAddress,
@@ -952,7 +989,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 			Salt:     saltBig,
 			IsHidden: false,
 		}
-		if storeErr := StoreWallet(n.db, user.Address, newModelWallet); storeErr != nil {
+		if storeErr := StoreWallet(n.db, chainID, user.Address, newModelWallet); storeErr != nil {
 			n.logger.Error("Error storing new wallet to DB for GetWallet", "owner", user.Address.Hex(), "walletAddress", derivedSenderAddress.Hex(), "error", storeErr)
 			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_WRITE_ERROR), "Error storing new wallet: %v", storeErr)
 		}
@@ -980,9 +1017,11 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 	return resp, nil
 }
 
-// GetWalletFromDB retrieves wallet information from database for validation purposes
+// GetWalletFromDB retrieves wallet information from database for validation purposes.
+// Looks up the wallet on the gateway's default chain. Multi-chain wallet
+// validation is a follow-up.
 func (n *Engine) GetWalletFromDB(owner common.Address, smartWalletAddress string) (*model.SmartWallet, error) {
-	return GetWallet(n.db, owner, smartWalletAddress)
+	return GetWallet(n.db, n.defaultChainID(), owner, smartWalletAddress)
 }
 
 // SetWallet is the gRPC handler for the SetWallet RPC.
@@ -1018,7 +1057,7 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 		return nil, status.Errorf(codes.Internal, "Derived wallet address is nil or zero")
 	}
 
-	err = SetWalletHiddenStatus(n.db, owner, derivedWalletAddress.Hex(), payload.GetIsHidden())
+	err = SetWalletHiddenStatus(n.db, n.defaultChainID(), owner, derivedWalletAddress.Hex(), payload.GetIsHidden())
 	if err != nil {
 		if errors.Is(err, badger.ErrKeyNotFound) {
 			n.logger.Warn("Wallet not found for SetWallet", "owner", owner.Hex(), "derivedAddress", derivedWalletAddress.Hex(), "salt", payload.GetSalt(), "factory", payload.GetFactoryAddress())
@@ -1031,7 +1070,7 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 		return nil, status.Errorf(codes.Internal, "Failed to update wallet hidden status: %v", err)
 	}
 
-	updatedModelWallet, getErr := GetWallet(n.db, owner, derivedWalletAddress.Hex())
+	updatedModelWallet, getErr := GetWallet(n.db, n.defaultChainID(), owner, derivedWalletAddress.Hex())
 	if getErr != nil {
 		n.logger.Error("Failed to fetch wallet after SetWallet operation", "owner", owner.Hex(), "wallet", derivedWalletAddress.Hex(), "error", getErr)
 		return nil, status.Errorf(codes.Internal, "Failed to retrieve wallet details after update: %v", getErr)
@@ -1214,15 +1253,6 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 		return nil, status.Errorf(codes.InvalidArgument, "EventTrigger template resolution failed: %v", err)
 	}
 
-	// Validate smart wallet ownership. The runner address comes from
-	// inputVariables.settings.runner (via NewTaskFromProtobuf) and is stored
-	// as task.SmartWalletAddress. We must verify the caller owns this wallet.
-	if task.SmartWalletAddress != "" {
-		if valid, _ := ValidWalletOwner(n.db, user, common.HexToAddress(task.SmartWalletAddress)); !valid {
-			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
-		}
-	}
-
 	// Default chain_id to the aggregator's SmartWallet chain when not specified.
 	// In gateway mode the top-level SmartWallet is populated from chains[0]
 	// (mainnet by convention), so a missing chain_id silently routes the task
@@ -1232,6 +1262,10 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	// the task's intended chain is recorded with no ambiguity. Single-chain
 	// (non-gateway) deployments keep the legacy behavior — there's only one
 	// chain there, so the inference is unambiguous.
+	//
+	// Resolve chain_id BEFORE the wallet-ownership check below — that check
+	// reads `w:<chainID>:<owner>:<wallet>` and would miss the canonical row
+	// if it ran against task.ChainId == 0.
 	if task.ChainId == 0 {
 		if n.config != nil && n.config.IsGateway {
 			return nil, status.Errorf(codes.InvalidArgument,
@@ -1241,6 +1275,16 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 		}
 		if n.config != nil && n.config.SmartWallet != nil {
 			task.ChainId = n.config.SmartWallet.ChainID
+		}
+	}
+
+	// Validate smart wallet ownership. The runner address comes from
+	// inputVariables.settings.runner (via NewTaskFromProtobuf) and is stored
+	// as task.SmartWalletAddress. We must verify the caller owns this wallet
+	// on the chain this task targets.
+	if task.SmartWalletAddress != "" {
+		if valid, _ := ValidWalletOwner(n.db, task.ChainId, user, common.HexToAddress(task.SmartWalletAddress)); !valid {
+			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
 		}
 	}
 
@@ -2375,7 +2419,7 @@ func (n *Engine) ListWorkflowsByUser(user *model.User, payload *avsproto.ListTas
 			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
 		}
 
-		if valid, _ := ValidWalletOwner(n.db, user, common.HexToAddress(smartWalletAddress)); !valid {
+		if valid, _ := n.userOwnsWalletOnAnyChain(user, common.HexToAddress(smartWalletAddress)); !valid {
 			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
 		}
 
@@ -4735,7 +4779,7 @@ func (n *Engine) GetWorkflowCount(user *model.User, payload *avsproto.GetWorkflo
 
 		for _, address := range smartWalletAddresses {
 			smartWalletAddress := common.HexToAddress(address)
-			if ok, err := ValidWalletOwner(n.db, user, smartWalletAddress); !ok || err != nil {
+			if ok, err := n.userOwnsWalletOnAnyChain(user, smartWalletAddress); !ok || err != nil {
 				// skip if the address is not a valid smart wallet address or it isn't belong to this user
 				continue
 			}

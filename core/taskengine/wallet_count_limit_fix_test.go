@@ -41,7 +41,7 @@ func TestWalletCountLimitDoesNotBlockExistingWalletAccess(t *testing.T) {
 		Factory: &factoryAddr,
 		Salt:    big.NewInt(0),
 	}
-	err := StoreWallet(db, user.Address, wallet1)
+	err := StoreWallet(db, int64(1), user.Address, wallet1)
 	require.NoError(t, err)
 
 	addr2 := common.HexToAddress("0x2222222222222222222222222222222222222222")
@@ -51,16 +51,16 @@ func TestWalletCountLimitDoesNotBlockExistingWalletAccess(t *testing.T) {
 		Factory: &factoryAddr,
 		Salt:    big.NewInt(1),
 	}
-	err = StoreWallet(db, user.Address, wallet2)
+	err = StoreWallet(db, int64(1), user.Address, wallet2)
 	require.NoError(t, err)
 
 	t.Run("Direct database access to existing wallets should work at limit", func(t *testing.T) {
 		// This is what validateSmartWalletOwnership() does in withdrawFunds
-		retrievedWallet1, err := GetWallet(db, user.Address, wallet1.Address.Hex())
+		retrievedWallet1, err := GetWallet(db, int64(1), user.Address, wallet1.Address.Hex())
 		require.NoError(t, err)
 		assert.Equal(t, wallet1.Address.Hex(), retrievedWallet1.Address.Hex())
 
-		retrievedWallet2, err := GetWallet(db, user.Address, wallet2.Address.Hex())
+		retrievedWallet2, err := GetWallet(db, int64(1), user.Address, wallet2.Address.Hex())
 		require.NoError(t, err)
 		assert.Equal(t, wallet2.Address.Hex(), retrievedWallet2.Address.Hex())
 	})
@@ -93,14 +93,14 @@ func TestWalletCountLimitDoesNotBlockExistingWalletAccess(t *testing.T) {
 		// Reset the database to have just 1 wallet initially
 		// Clean up any wallets that might have been created by previous subtests (e.g., ListWallets)
 		// by deleting all wallets and recreating just wallet1
-		dbItems, err := db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+		dbItems, err := db.GetByPrefix(WalletByOwnerPrefix(int64(1), user.Address))
 		require.NoError(t, err)
 		for _, item := range dbItems {
 			db.Delete(item.Key)
 		}
 
 		// Recreate wallet1 to ensure clean state
-		err = StoreWallet(db, user.Address, wallet1)
+		err = StoreWallet(db, int64(1), user.Address, wallet1)
 		require.NoError(t, err)
 
 		// Now we have 1 wallet (limit=2), so we can create one more
@@ -115,7 +115,7 @@ func TestWalletCountLimitDoesNotBlockExistingWalletAccess(t *testing.T) {
 		t.Logf("DEBUG: Created wallet at address: %s", walletAddr)
 
 		// Now add the second wallet back to reach the limit
-		err2 := StoreWallet(db, user.Address, wallet2)
+		err2 := StoreWallet(db, int64(1), user.Address, wallet2)
 		require.NoError(t, err2)
 
 		// Now we have 3 wallets (limit=2), so we're over the limit
@@ -165,7 +165,7 @@ func TestWalletCountLimitReproducesOriginalWithdrawFundsBug(t *testing.T) {
 			Factory: &factoryAddr,
 			Salt:    big.NewInt(int64(i)),
 		}
-		err := StoreWallet(db, user.Address, wallet)
+		err := StoreWallet(db, int64(1), user.Address, wallet)
 		require.NoError(t, err)
 		wallets[i] = wallet
 	}
@@ -202,7 +202,7 @@ func TestWalletCountLimitReproducesOriginalWithdrawFundsBug(t *testing.T) {
 
 		// Access specific wallets
 		for _, wallet := range wallets {
-			retrievedWallet, err := GetWallet(db, user.Address, wallet.Address.Hex())
+			retrievedWallet, err := GetWallet(db, int64(1), user.Address, wallet.Address.Hex())
 			require.NoError(t, err)
 			assert.Equal(t, wallet.Address.Hex(), retrievedWallet.Address.Hex())
 		}
