@@ -341,10 +341,10 @@ func NewConfig(configFilePath string) (*Config, error) {
 	// wins when set, for the rare case where the WS endpoint really
 	// is a separate URL.
 	if configRaw.EthWsUrl == "" {
-		configRaw.EthWsUrl = deriveWsURL(configRaw.EthRpcUrl)
+		configRaw.EthWsUrl = DeriveWsURL(configRaw.EthRpcUrl)
 	}
 	if configRaw.SmartWallet.EthWsUrl == "" {
-		configRaw.SmartWallet.EthWsUrl = deriveWsURL(configRaw.SmartWallet.EthRpcUrl)
+		configRaw.SmartWallet.EthWsUrl = DeriveWsURL(configRaw.SmartWallet.EthRpcUrl)
 	}
 
 	// Only create WebSocket client if URL is provided
@@ -617,7 +617,7 @@ func newLogger(env sdklogging.LogLevel, serviceName string) (sdklogging.Logger, 
 	return pkglogger.NewSentryLogger(zapLogger, serviceName), nil
 }
 
-// deriveWsURL turns an HTTP(S) RPC URL into the equivalent WebSocket URL
+// DeriveWsURL turns an HTTP(S) RPC URL into the equivalent WebSocket URL
 // by flipping the scheme. Returns "" when given "" (so callers can use
 // it unconditionally — empty in, empty out, fall back to the existing
 // "no WebSocket" code path).
@@ -635,7 +635,7 @@ func newLogger(env sdklogging.LogLevel, serviceName string) (sdklogging.Logger, 
 //
 // If a provider ever splits the two (different host or different path
 // for WS), set eth_ws_url explicitly — that value still wins.
-func deriveWsURL(rpcURL string) string {
+func DeriveWsURL(rpcURL string) string {
 	switch {
 	case rpcURL == "":
 		return ""
@@ -800,7 +800,7 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 	// NewConfig for rationale.
 	wsURL := sw.EthWsUrl
 	if wsURL == "" {
-		wsURL = deriveWsURL(sw.EthRpcUrl)
+		wsURL = DeriveWsURL(sw.EthRpcUrl)
 	}
 
 	chainCfg := &ChainConfig{

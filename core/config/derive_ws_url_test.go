@@ -17,9 +17,9 @@ func TestDeriveWsURL(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := deriveWsURL(c.in)
+			got := DeriveWsURL(c.in)
 			if got != c.want {
-				t.Fatalf("deriveWsURL(%q) = %q, want %q", c.in, got, c.want)
+				t.Fatalf("DeriveWsURL(%q) = %q, want %q", c.in, got, c.want)
 			}
 		})
 	}
