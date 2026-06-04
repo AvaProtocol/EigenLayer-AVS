@@ -89,7 +89,7 @@ func setupUserOpWithdrawalTest(t *testing.T) (*config.Config, common.Address, *c
 	}
 
 	// Register the smart wallet in the database
-	err = StoreWallet(db, ownerAddress, &model.SmartWallet{
+	err = StoreWallet(db, int64(1), ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddress,
 		Salt:    big.NewInt(0),
@@ -551,7 +551,7 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 	}
 
 	// Register the smart wallet in the database
-	err = StoreWallet(db, ownerAddress, &model.SmartWallet{
+	err = StoreWallet(db, int64(1), ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddress,
 		Salt:    big.NewInt(0),

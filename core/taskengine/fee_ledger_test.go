@@ -19,7 +19,7 @@ func TestFeeLedger_GetOutstandingBalance_Empty(t *testing.T) {
 	ledger := NewFeeLedger(db, logger)
 
 	owner := common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")
-	balance, err := ledger.GetOutstandingBalance(owner)
+	balance, err := ledger.GetOutstandingBalance(int64(1), owner)
 	require.NoError(t, err)
 	assert.Equal(t, big.NewInt(0), balance, "Empty ledger should return zero balance")
 }
@@ -48,7 +48,7 @@ func TestFeeLedger_RecordValueFee(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check outstanding balance
-	balance, err := ledger.GetOutstandingBalance(owner)
+	balance, err := ledger.GetOutstandingBalance(int64(11155111), owner)
 	require.NoError(t, err)
 
 	expectedFee, _ := new(big.Int).SetString("300000000000000", 10)
@@ -69,6 +69,7 @@ func TestFeeLedger_RecordMultipleFees(t *testing.T) {
 		TaskID:       "task_001",
 		Owner:        owner.Hex(),
 		FeeAmountWei: "100000000000000", // 0.0001 ETH
+		ChainID:      int64(1),
 	})
 	require.NoError(t, err)
 
@@ -78,11 +79,12 @@ func TestFeeLedger_RecordMultipleFees(t *testing.T) {
 		TaskID:       "task_001",
 		Owner:        owner.Hex(),
 		FeeAmountWei: "200000000000000", // 0.0002 ETH
+		ChainID:      int64(1),
 	})
 	require.NoError(t, err)
 
 	// Balance should be sum of both
-	balance, err := ledger.GetOutstandingBalance(owner)
+	balance, err := ledger.GetOutstandingBalance(int64(1), owner)
 	require.NoError(t, err)
 
 	expectedTotal, _ := new(big.Int).SetString("300000000000000", 10)
@@ -101,7 +103,7 @@ func TestFeeLedger_CheckCreditLimit(t *testing.T) {
 	creditLimit, _ := new(big.Int).SetString("500000000000000", 10)
 
 	// No fees yet — within limit
-	withinLimit, outstanding, err := ledger.CheckCreditLimit(owner, creditLimit)
+	withinLimit, outstanding, err := ledger.CheckCreditLimit(int64(1), owner, creditLimit)
 	require.NoError(t, err)
 	assert.True(t, withinLimit, "Should be within limit when no fees owed")
 	assert.Equal(t, big.NewInt(0), outstanding)
@@ -111,10 +113,11 @@ func TestFeeLedger_CheckCreditLimit(t *testing.T) {
 		ExecutionID:  "exec_001",
 		Owner:        owner.Hex(),
 		FeeAmountWei: "300000000000000", // 0.0003 ETH — under 0.0005 limit
+		ChainID:      int64(1),
 	})
 	require.NoError(t, err)
 
-	withinLimit, outstanding, err = ledger.CheckCreditLimit(owner, creditLimit)
+	withinLimit, outstanding, err = ledger.CheckCreditLimit(int64(1), owner, creditLimit)
 	require.NoError(t, err)
 	assert.True(t, withinLimit, "Should be within limit when fees < credit limit")
 
@@ -123,10 +126,11 @@ func TestFeeLedger_CheckCreditLimit(t *testing.T) {
 		ExecutionID:  "exec_002",
 		Owner:        owner.Hex(),
 		FeeAmountWei: "300000000000000", // Total now 0.0006 ETH — over 0.0005 limit
+		ChainID:      int64(1),
 	})
 	require.NoError(t, err)
 
-	withinLimit, outstanding, err = ledger.CheckCreditLimit(owner, creditLimit)
+	withinLimit, outstanding, err = ledger.CheckCreditLimit(int64(1), owner, creditLimit)
 	require.NoError(t, err)
 	assert.False(t, withinLimit, "Should exceed credit limit")
 
@@ -148,6 +152,7 @@ func TestFeeLedger_SeparateOwners(t *testing.T) {
 		ExecutionID:  "exec_001",
 		Owner:        owner1.Hex(),
 		FeeAmountWei: "100000000000000",
+		ChainID:      int64(1),
 	})
 	require.NoError(t, err)
 
@@ -156,16 +161,17 @@ func TestFeeLedger_SeparateOwners(t *testing.T) {
 		ExecutionID:  "exec_002",
 		Owner:        owner2.Hex(),
 		FeeAmountWei: "200000000000000",
+		ChainID:      int64(1),
 	})
 	require.NoError(t, err)
 
 	// Balances should be separate
-	balance1, err := ledger.GetOutstandingBalance(owner1)
+	balance1, err := ledger.GetOutstandingBalance(int64(1), owner1)
 	require.NoError(t, err)
 	expected1, _ := new(big.Int).SetString("100000000000000", 10)
 	assert.Equal(t, expected1, balance1)
 
-	balance2, err := ledger.GetOutstandingBalance(owner2)
+	balance2, err := ledger.GetOutstandingBalance(int64(1), owner2)
 	require.NoError(t, err)
 	expected2, _ := new(big.Int).SetString("200000000000000", 10)
 	assert.Equal(t, expected2, balance2)

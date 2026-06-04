@@ -55,15 +55,15 @@ func TestStoreWallet_WritesPrimaryAndSecondaryIndex(t *testing.T) {
 	addr := common.HexToAddress("0x3333333333333333333333333333333333333333")
 	wallet := mkWallet(owner, factory, addr, 0)
 
-	require.NoError(t, StoreWallet(db, owner, wallet))
+	require.NoError(t, StoreWallet(db, int64(1), owner, wallet))
 
 	// Primary record present.
-	got, err := GetWallet(db, owner, addr.Hex())
+	got, err := GetWallet(db, int64(1), owner, addr.Hex())
 	require.NoError(t, err)
 	assert.Equal(t, addr.Hex(), got.Address.Hex())
 
 	// Secondary index points at the same address.
-	canonical, err := LookupCanonicalWalletAddress(db, owner, factory, big.NewInt(0))
+	canonical, err := LookupCanonicalWalletAddress(db, int64(1), owner, factory, big.NewInt(0))
 	require.NoError(t, err)
 	assert.True(t, strings.EqualFold(canonical.Hex(), addr.Hex()),
 		"secondary index should point at the canonical wallet address")
@@ -78,7 +78,7 @@ func TestStoreWallet_StaleRecordDoesNotUpdateSecondaryIndex(t *testing.T) {
 
 	// First, persist the canonical wallet — index should point at it.
 	canonicalAddr := common.HexToAddress("0x3333333333333333333333333333333333333333")
-	require.NoError(t, StoreWallet(db, owner, mkWallet(owner, factory, canonicalAddr, 0)))
+	require.NoError(t, StoreWallet(db, int64(1), owner, mkWallet(owner, factory, canonicalAddr, 0)))
 
 	// Now, write a stale wallet with the same (owner, factory, salt).
 	// The secondary index must continue to point at the canonical
@@ -87,15 +87,15 @@ func TestStoreWallet_StaleRecordDoesNotUpdateSecondaryIndex(t *testing.T) {
 	stale := mkWallet(owner, factory, staleAddr, 0)
 	stale.StaleDerivation = true
 	stale.IsHidden = true
-	require.NoError(t, StoreWallet(db, owner, stale))
+	require.NoError(t, StoreWallet(db, int64(1), owner, stale))
 
-	canonical, err := LookupCanonicalWalletAddress(db, owner, factory, big.NewInt(0))
+	canonical, err := LookupCanonicalWalletAddress(db, int64(1), owner, factory, big.NewInt(0))
 	require.NoError(t, err)
 	assert.True(t, strings.EqualFold(canonical.Hex(), canonicalAddr.Hex()),
 		"index must continue pointing at the canonical wallet, not the stale one")
 
 	// And the stale primary record is still readable.
-	got, err := GetWallet(db, owner, staleAddr.Hex())
+	got, err := GetWallet(db, int64(1), owner, staleAddr.Hex())
 	require.NoError(t, err)
 	assert.True(t, got.StaleDerivation)
 	assert.True(t, got.IsHidden)
@@ -114,9 +114,9 @@ func TestStoreWallet_MissingFactorySkipsSecondaryIndex(t *testing.T) {
 		Address: &addr,
 		Salt:    big.NewInt(0),
 	}
-	require.NoError(t, StoreWallet(db, owner, legacy))
+	require.NoError(t, StoreWallet(db, int64(1), owner, legacy))
 
-	got, err := GetWallet(db, owner, addr.Hex())
+	got, err := GetWallet(db, int64(1), owner, addr.Hex())
 	require.NoError(t, err)
 	assert.Equal(t, addr.Hex(), got.Address.Hex())
 
@@ -135,7 +135,7 @@ func TestLookupCanonicalWalletAddress_NotFound(t *testing.T) {
 	owner := common.HexToAddress("0x1111111111111111111111111111111111111111")
 	factory := common.HexToAddress("0x2222222222222222222222222222222222222222")
 
-	_, err := LookupCanonicalWalletAddress(db, owner, factory, big.NewInt(0))
+	_, err := LookupCanonicalWalletAddress(db, int64(1), owner, factory, big.NewInt(0))
 	assert.ErrorIs(t, err, badger.ErrKeyNotFound)
 }
 
@@ -146,11 +146,11 @@ func TestMarkWalletStale_FlipsFlagsAndPreservesIndex(t *testing.T) {
 	owner := common.HexToAddress("0x1111111111111111111111111111111111111111")
 	factory := common.HexToAddress("0x2222222222222222222222222222222222222222")
 	addr := common.HexToAddress("0x3333333333333333333333333333333333333333")
-	require.NoError(t, StoreWallet(db, owner, mkWallet(owner, factory, addr, 0)))
+	require.NoError(t, StoreWallet(db, int64(1), owner, mkWallet(owner, factory, addr, 0)))
 
-	require.NoError(t, MarkWalletStale(db, owner, addr.Hex()))
+	require.NoError(t, MarkWalletStale(db, int64(1), owner, addr.Hex()))
 
-	got, err := GetWallet(db, owner, addr.Hex())
+	got, err := GetWallet(db, int64(1), owner, addr.Hex())
 	require.NoError(t, err)
 	assert.True(t, got.StaleDerivation)
 	assert.True(t, got.IsHidden)
@@ -158,7 +158,7 @@ func TestMarkWalletStale_FlipsFlagsAndPreservesIndex(t *testing.T) {
 	// The secondary index was written before the wallet was marked
 	// stale, and MarkWalletStale must not erase it (a future fresh
 	// derivation will overwrite it via StoreWallet).
-	indexed, err := LookupCanonicalWalletAddress(db, owner, factory, big.NewInt(0))
+	indexed, err := LookupCanonicalWalletAddress(db, int64(1), owner, factory, big.NewInt(0))
 	require.NoError(t, err)
 	assert.True(t, strings.EqualFold(indexed.Hex(), addr.Hex()))
 }
@@ -172,6 +172,7 @@ func TestMarkPreviousCanonicalStaleIfAny_DetectsUpgrade(t *testing.T) {
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	cfg := testutil.GetAggregatorConfig()
+	cfg.SmartWallet.ChainID = int64(1)
 	engine := New(db, cfg, nil, testutil.GetLogger())
 
 	owner := common.HexToAddress("0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788")
@@ -180,10 +181,10 @@ func TestMarkPreviousCanonicalStaleIfAny_DetectsUpgrade(t *testing.T) {
 	// Era 1: store the wallet that was canonical when the factory
 	// implementation produced this address.
 	era1 := common.HexToAddress("0x5d814Cc9E94B2656f59Ee439D44AA1b6ca21434f")
-	require.NoError(t, StoreWallet(db, owner, mkWallet(owner, factory, era1, 0)))
+	require.NoError(t, StoreWallet(db, int64(1), owner, mkWallet(owner, factory, era1, 0)))
 
 	// Sanity: the index points at era1.
-	canonical, err := LookupCanonicalWalletAddress(db, owner, factory, big.NewInt(0))
+	canonical, err := LookupCanonicalWalletAddress(db, int64(1), owner, factory, big.NewInt(0))
 	require.NoError(t, err)
 	assert.True(t, strings.EqualFold(canonical.Hex(), era1.Hex()))
 
@@ -191,10 +192,10 @@ func TestMarkPreviousCanonicalStaleIfAny_DetectsUpgrade(t *testing.T) {
 	// a different address.
 	era2 := common.HexToAddress("0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e")
 
-	engine.markPreviousCanonicalStaleIfAny(owner, factory, big.NewInt(0), era2)
+	engine.markPreviousCanonicalStaleIfAny(int64(1), owner, factory, big.NewInt(0), era2)
 
 	// era1 must now be marked stale.
-	got, err := GetWallet(db, owner, era1.Hex())
+	got, err := GetWallet(db, int64(1), owner, era1.Hex())
 	require.NoError(t, err)
 	assert.True(t, got.StaleDerivation, "era1 wallet should be flagged as stale")
 	assert.True(t, got.IsHidden, "era1 wallet should be force-hidden")
@@ -202,15 +203,15 @@ func TestMarkPreviousCanonicalStaleIfAny_DetectsUpgrade(t *testing.T) {
 	// And the secondary index still points at era1 — until the caller
 	// follows up with StoreWallet on the era2 wallet, which is what
 	// the production GetWallet path does immediately after.
-	canonical, err = LookupCanonicalWalletAddress(db, owner, factory, big.NewInt(0))
+	canonical, err = LookupCanonicalWalletAddress(db, int64(1), owner, factory, big.NewInt(0))
 	require.NoError(t, err)
 	assert.True(t, strings.EqualFold(canonical.Hex(), era1.Hex()),
 		"index unchanged until the new canonical wallet is stored")
 
 	// Now simulate the StoreWallet that would follow in GetWallet's
 	// not-found branch and verify the index flips to era2.
-	require.NoError(t, StoreWallet(db, owner, mkWallet(owner, factory, era2, 0)))
-	canonical, err = LookupCanonicalWalletAddress(db, owner, factory, big.NewInt(0))
+	require.NoError(t, StoreWallet(db, int64(1), owner, mkWallet(owner, factory, era2, 0)))
+	canonical, err = LookupCanonicalWalletAddress(db, int64(1), owner, factory, big.NewInt(0))
 	require.NoError(t, err)
 	assert.True(t, strings.EqualFold(canonical.Hex(), era2.Hex()),
 		"index should now point at the new canonical wallet")
@@ -221,17 +222,18 @@ func TestMarkPreviousCanonicalStaleIfAny_NoOpWhenIndexMatches(t *testing.T) {
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	cfg := testutil.GetAggregatorConfig()
+	cfg.SmartWallet.ChainID = int64(1)
 	engine := New(db, cfg, nil, testutil.GetLogger())
 
 	owner := common.HexToAddress("0x1111111111111111111111111111111111111111")
 	factory := common.HexToAddress("0x2222222222222222222222222222222222222222")
 	addr := common.HexToAddress("0x3333333333333333333333333333333333333333")
-	require.NoError(t, StoreWallet(db, owner, mkWallet(owner, factory, addr, 0)))
+	require.NoError(t, StoreWallet(db, int64(1), owner, mkWallet(owner, factory, addr, 0)))
 
 	// Same address — no upgrade detected, nothing to mark stale.
-	engine.markPreviousCanonicalStaleIfAny(owner, factory, big.NewInt(0), addr)
+	engine.markPreviousCanonicalStaleIfAny(int64(1), owner, factory, big.NewInt(0), addr)
 
-	got, err := GetWallet(db, owner, addr.Hex())
+	got, err := GetWallet(db, int64(1), owner, addr.Hex())
 	require.NoError(t, err)
 	assert.False(t, got.StaleDerivation)
 	assert.False(t, got.IsHidden)
@@ -242,6 +244,7 @@ func TestListWallets_HardFiltersStaleRows(t *testing.T) {
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	cfg := testutil.GetAggregatorConfig()
+	cfg.SmartWallet.ChainID = int64(1)
 	engine := New(db, cfg, nil, testutil.GetLogger())
 
 	owner := common.HexToAddress("0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788")
@@ -251,11 +254,11 @@ func TestListWallets_HardFiltersStaleRows(t *testing.T) {
 	// it disappears from the list response entirely.
 	a := common.HexToAddress("0xAAAAaaaaAAAAaaaaAAAAaaaaAAAAaaaaAAAAaaaa")
 	b := common.HexToAddress("0xBBBBbbbbBBBBbbbbBBBBbbbbBBBBbbbbBBBBbbbb")
-	require.NoError(t, StoreWallet(db, owner, mkWallet(owner, factory, a, 100)))
-	require.NoError(t, StoreWallet(db, owner, mkWallet(owner, factory, b, 101)))
+	require.NoError(t, StoreWallet(db, int64(1), owner, mkWallet(owner, factory, a, 100)))
+	require.NoError(t, StoreWallet(db, int64(1), owner, mkWallet(owner, factory, b, 101)))
 
 	// Flag b as stale.
-	require.NoError(t, MarkWalletStale(db, owner, b.Hex()))
+	require.NoError(t, MarkWalletStale(db, int64(1), owner, b.Hex()))
 
 	resp, err := engine.ListWallets(owner, &avsproto.ListWalletReq{})
 	require.NoError(t, err)
@@ -321,12 +324,12 @@ func TestBackfillWalletSaltIndex_AllCanonical(t *testing.T) {
 	w := mkWallet(owner, factory, addr, 0)
 	body, err := w.ToJSON()
 	require.NoError(t, err)
-	require.NoError(t, db.Set([]byte(WalletStorageKey(owner, addr.Hex())), body))
+	require.NoError(t, db.Set([]byte(WalletStorageKey(int64(1), owner, addr.Hex())), body))
 
 	deriver := newFakeDeriver()
 	deriver.set(owner, factory, big.NewInt(0), addr)
 
-	stats, err := BackfillWalletSaltIndex(db, deriver.derive, WalletSaltIndexBackfillOptions{})
+	stats, err := BackfillWalletSaltIndex(db, int64(1), deriver.derive, WalletSaltIndexBackfillOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 1, stats.Total)
 	assert.Equal(t, 1, stats.CanonicalConfirmed)
@@ -334,7 +337,7 @@ func TestBackfillWalletSaltIndex_AllCanonical(t *testing.T) {
 	assert.Equal(t, 0, stats.NewlyMarkedStale)
 
 	// And the secondary index now exists.
-	canonical, err := LookupCanonicalWalletAddress(db, owner, factory, big.NewInt(0))
+	canonical, err := LookupCanonicalWalletAddress(db, int64(1), owner, factory, big.NewInt(0))
 	require.NoError(t, err)
 	assert.True(t, strings.EqualFold(canonical.Hex(), addr.Hex()))
 }
@@ -356,14 +359,14 @@ func TestBackfillWalletSaltIndex_DetectsAndMarksStale(t *testing.T) {
 		w := mkWallet(owner, factory, addr, 0)
 		body, err := w.ToJSON()
 		require.NoError(t, err)
-		require.NoError(t, db.Set([]byte(WalletStorageKey(owner, addr.Hex())), body))
+		require.NoError(t, db.Set([]byte(WalletStorageKey(int64(1), owner, addr.Hex())), body))
 	}
 
 	// Simulate today's factory implementation: salt 0 derives to era3.
 	deriver := newFakeDeriver()
 	deriver.set(owner, factory, big.NewInt(0), era3)
 
-	stats, err := BackfillWalletSaltIndex(db, deriver.derive, WalletSaltIndexBackfillOptions{})
+	stats, err := BackfillWalletSaltIndex(db, int64(1), deriver.derive, WalletSaltIndexBackfillOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 3, stats.Total)
 	assert.Equal(t, 1, stats.CanonicalConfirmed, "only the era3 row matches the live derivation")
@@ -372,18 +375,18 @@ func TestBackfillWalletSaltIndex_DetectsAndMarksStale(t *testing.T) {
 
 	// era1 and era2 are now stale.
 	for _, addr := range []common.Address{era1, era2} {
-		got, gerr := GetWallet(db, owner, addr.Hex())
+		got, gerr := GetWallet(db, int64(1), owner, addr.Hex())
 		require.NoError(t, gerr)
 		assert.True(t, got.StaleDerivation, "%s should be stale", addr.Hex())
 		assert.True(t, got.IsHidden, "%s should be hidden", addr.Hex())
 	}
 	// era3 is still canonical.
-	got, err := GetWallet(db, owner, era3.Hex())
+	got, err := GetWallet(db, int64(1), owner, era3.Hex())
 	require.NoError(t, err)
 	assert.False(t, got.StaleDerivation)
 
 	// Secondary index points at era3.
-	canonical, err := LookupCanonicalWalletAddress(db, owner, factory, big.NewInt(0))
+	canonical, err := LookupCanonicalWalletAddress(db, int64(1), owner, factory, big.NewInt(0))
 	require.NoError(t, err)
 	assert.True(t, strings.EqualFold(canonical.Hex(), era3.Hex()))
 }
@@ -402,23 +405,23 @@ func TestBackfillWalletSaltIndex_DryRunWritesNothing(t *testing.T) {
 	w := mkWallet(owner, factory, stored, 0)
 	body, err := w.ToJSON()
 	require.NoError(t, err)
-	require.NoError(t, db.Set([]byte(WalletStorageKey(owner, stored.Hex())), body))
+	require.NoError(t, db.Set([]byte(WalletStorageKey(int64(1), owner, stored.Hex())), body))
 
 	deriver := newFakeDeriver()
 	deriver.set(owner, factory, big.NewInt(0), live)
 
-	stats, err := BackfillWalletSaltIndex(db, deriver.derive, WalletSaltIndexBackfillOptions{DryRun: true})
+	stats, err := BackfillWalletSaltIndex(db, int64(1), deriver.derive, WalletSaltIndexBackfillOptions{DryRun: true})
 	require.NoError(t, err)
 	assert.Equal(t, 1, stats.NewlyMarkedStale, "dry-run should still report what it would do")
 
 	// But the actual record is unchanged.
-	got, err := GetWallet(db, owner, stored.Hex())
+	got, err := GetWallet(db, int64(1), owner, stored.Hex())
 	require.NoError(t, err)
 	assert.False(t, got.StaleDerivation, "dry-run must not flip the stale flag")
 	assert.False(t, got.IsHidden)
 
 	// And no secondary index entry was written.
-	_, err = LookupCanonicalWalletAddress(db, owner, factory, big.NewInt(0))
+	_, err = LookupCanonicalWalletAddress(db, int64(1), owner, factory, big.NewInt(0))
 	assert.ErrorIs(t, err, badger.ErrKeyNotFound)
 }
 
@@ -435,7 +438,7 @@ func TestBackfillWalletSaltIndex_SkipsLegacyAndDeriveErrors(t *testing.T) {
 	legacy := &model.SmartWallet{Owner: &owner, Address: &legacyAddr, Salt: big.NewInt(0)}
 	legacyBody, err := legacy.ToJSON()
 	require.NoError(t, err)
-	require.NoError(t, db.Set([]byte(WalletStorageKey(owner, legacyAddr.Hex())), legacyBody))
+	require.NoError(t, db.Set([]byte(WalletStorageKey(int64(1), owner, legacyAddr.Hex())), legacyBody))
 
 	// 2. Row whose deriver returns an error — should be counted as
 	//    SkippedDeriveError.
@@ -443,12 +446,12 @@ func TestBackfillWalletSaltIndex_SkipsLegacyAndDeriveErrors(t *testing.T) {
 	errWallet := mkWallet(owner, factory, errAddr, 7)
 	errBody, err := errWallet.ToJSON()
 	require.NoError(t, err)
-	require.NoError(t, db.Set([]byte(WalletStorageKey(owner, errAddr.Hex())), errBody))
+	require.NoError(t, db.Set([]byte(WalletStorageKey(int64(1), owner, errAddr.Hex())), errBody))
 
 	deriver := newFakeDeriver()
 	deriver.errors[deriver.key(owner, factory, big.NewInt(7))] = assertAnError{}
 
-	stats, err := BackfillWalletSaltIndex(db, deriver.derive, WalletSaltIndexBackfillOptions{})
+	stats, err := BackfillWalletSaltIndex(db, int64(1), deriver.derive, WalletSaltIndexBackfillOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 2, stats.Total)
 	assert.Equal(t, 1, stats.SkippedMissingFactory)
@@ -577,7 +580,7 @@ func TestBackfillWalletSaltIndex_FailsFastOnSetError(t *testing.T) {
 	w := mkWallet(owner, factory, addr, 0)
 	body, err := w.ToJSON()
 	require.NoError(t, err)
-	require.NoError(t, inner.Set([]byte(WalletStorageKey(owner, addr.Hex())), body))
+	require.NoError(t, inner.Set([]byte(WalletStorageKey(int64(1), owner, addr.Hex())), body))
 
 	// Wrap the DB so the next Set() (the secondary index write) fails.
 	wrapped := &closingDB{Storage: inner, successesAllowed: 0}
@@ -585,7 +588,7 @@ func TestBackfillWalletSaltIndex_FailsFastOnSetError(t *testing.T) {
 	deriver := newFakeDeriver()
 	deriver.set(owner, factory, big.NewInt(0), addr) // canonical match
 
-	stats, err := BackfillWalletSaltIndex(wrapped, deriver.derive, WalletSaltIndexBackfillOptions{})
+	stats, err := BackfillWalletSaltIndex(wrapped, int64(1), deriver.derive, WalletSaltIndexBackfillOptions{})
 	require.Error(t, err, "BackfillWalletSaltIndex must surface storage errors instead of swallowing them")
 	assert.Contains(t, err.Error(), "write secondary index")
 	require.NotNil(t, stats, "stats should still be returned alongside the error for diagnostics")
@@ -603,7 +606,7 @@ func TestBackfillWalletSaltIndex_FailsFastOnMarkStaleError(t *testing.T) {
 	w := mkWallet(owner, factory, stored, 0)
 	body, err := w.ToJSON()
 	require.NoError(t, err)
-	require.NoError(t, inner.Set([]byte(WalletStorageKey(owner, stored.Hex())), body))
+	require.NoError(t, inner.Set([]byte(WalletStorageKey(int64(1), owner, stored.Hex())), body))
 
 	// MarkWalletStale calls StoreWallet which calls db.Set (since the
 	// stale wallet is not eligible for the secondary index batch path).
@@ -614,7 +617,7 @@ func TestBackfillWalletSaltIndex_FailsFastOnMarkStaleError(t *testing.T) {
 	deriver := newFakeDeriver()
 	deriver.set(owner, factory, big.NewInt(0), live) // mismatch -> stale path
 
-	stats, err := BackfillWalletSaltIndex(wrapped, deriver.derive, WalletSaltIndexBackfillOptions{})
+	stats, err := BackfillWalletSaltIndex(wrapped, int64(1), deriver.derive, WalletSaltIndexBackfillOptions{})
 	require.Error(t, err, "BackfillWalletSaltIndex must surface MarkWalletStale errors")
 	assert.Contains(t, err.Error(), "mark wallet stale")
 	require.NotNil(t, stats)

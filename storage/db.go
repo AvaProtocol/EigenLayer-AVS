@@ -32,6 +32,19 @@ type Storage interface {
 	GetKeyHasPrefix(prefix []byte) ([][]byte, error)
 	FirstKVHasPrefix(prefix []byte) ([]byte, []byte, error)
 
+	// IterateKeysOnly walks every key whose name starts with `prefix`,
+	// invoking `visit` for each. Uses Badger's key-only iterator: values
+	// are NOT fetched. Constant-memory; safe for prefix=[]byte("") on
+	// large databases where GetByPrefix or ListKeys would OOM.
+	//
+	// The key bytes passed to `visit` are owned by Badger's iterator
+	// scratch space and MUST NOT be retained beyond the visitor's return.
+	// Use append([]byte{}, key...) if you need to keep them.
+	//
+	// A non-nil error from `visit` aborts the iteration and propagates
+	// out of IterateKeysOnly verbatim.
+	IterateKeysOnly(prefix []byte, visit func(key []byte) error) error
+
 	// A key only operation that returns key that has a prefix
 	ListKeys(prefix string) ([]string, error)
 	ListKeysMulti(prefixes []string) ([]string, error)
@@ -165,6 +178,29 @@ func (s *BadgerStorage) GetByPrefix(prefix []byte) ([]*KeyValueItem, error) {
 	}
 
 	return result, nil
+}
+
+// IterateKeysOnly walks every key whose name starts with `prefix`,
+// invoking `visit` for each. Uses Badger's KeysOnly iterator — values
+// are not fetched and no per-key slice is built, so memory stays
+// constant in the size of the database.
+//
+// The key bytes passed to `visit` are owned by the iterator and MUST
+// NOT be retained after the visitor returns. Copy with
+// append([]byte{}, key...) if you need to keep them.
+func (s *BadgerStorage) IterateKeysOnly(prefix []byte, visit func(key []byte) error) error {
+	return s.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			if err := visit(it.Item().Key()); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *BadgerStorage) GetKeyHasPrefix(prefix []byte) ([][]byte, error) {

@@ -10,9 +10,8 @@ operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
 
 # EigenLayer chain RPC (Sepolia) — driven by env var so the key can
 # be rotated without redeploying. Set on the operator service:
-#   SEPOLIA_DWELLIR_RPC, SEPOLIA_DWELLIR_WS
-eth_rpc_url: ${SEPOLIA_DWELLIR_RPC}
-eth_ws_url: ${SEPOLIA_DWELLIR_WS}
+#   SEPOLIA_RPC (HTTPS; WS derived in code)
+eth_rpc_url: ${SEPOLIA_RPC}
 
 # Key files — written at startup by scripts/operator-entrypoint.sh
 # Set ECDSA_KEY_JSON and BLS_KEY_JSON env vars in Railway
@@ -41,8 +40,7 @@ server_name: "operator-railway"
 
 # Destination chain - Sepolia
 target_chain:
-  eth_rpc_url: ${SEPOLIA_DWELLIR_RPC}
-  eth_ws_url: ${SEPOLIA_DWELLIR_WS}
+  eth_rpc_url: ${SEPOLIA_RPC}
 
 enabled_features:
   event_trigger: true

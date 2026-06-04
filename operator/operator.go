@@ -422,6 +422,24 @@ func NewOperatorFromConfigFile(configPath string) (*Operator, error) {
 
 // take the config in core (which is shared with aggregator and challenger)
 func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
+	// Derive WebSocket URLs from their RPC counterparts when not set
+	// explicitly. Mirrors what core/config does for the aggregator/gateway
+	// config: every supported RPC provider serves HTTP and WS at the same
+	// host+path with only the scheme differing, so letting one URL drive
+	// both halves the env-var count and prevents the "rotate RPC but
+	// forget WS" mistake. See core/config.DeriveWsURL for the helper.
+	if c.EthWsUrl == "" {
+		c.EthWsUrl = config.DeriveWsURL(c.EthRpcUrl)
+	}
+	if c.TargetChain.EthWsUrl == "" {
+		c.TargetChain.EthWsUrl = config.DeriveWsURL(c.TargetChain.EthRpcUrl)
+	}
+	for i := range c.Chains {
+		if c.Chains[i].EthWsUrl == "" {
+			c.Chains[i].EthWsUrl = config.DeriveWsURL(c.Chains[i].EthRpcUrl)
+		}
+	}
+
 	elapsing := timekeeper.NewElapsing()
 
 	// Backward compatibility: Handle old 'production' boolean field

@@ -17,6 +17,7 @@ import (
 var (
 	backfillWalletSaltIndexDryRun  bool
 	backfillWalletSaltIndexVerbose bool
+	backfillWalletSaltIndexChainID int64
 
 	backfillWalletSaltIndexCmd = &cobra.Command{
 		Use:   "backfill-wallet-salt-index",
@@ -58,10 +59,14 @@ Production usage (Docker):
 func init() {
 	backfillWalletSaltIndexCmd.Flags().BoolVar(&backfillWalletSaltIndexDryRun, "dry-run", false, "Print what would change without writing to BadgerDB")
 	backfillWalletSaltIndexCmd.Flags().BoolVar(&backfillWalletSaltIndexVerbose, "verbose", false, "Print one line per wallet processed")
+	backfillWalletSaltIndexCmd.Flags().Int64Var(&backfillWalletSaltIndexChainID, "chain-id", 0, "Chain ID to backfill. Required. Wallet keys are chain-scoped; run the command once per chain the gateway hosts (e.g. 1, 8453, 11155111, 84532).")
 	rootCmd.AddCommand(backfillWalletSaltIndexCmd)
 }
 
 func runBackfillWalletSaltIndex(configPath string) error {
+	if backfillWalletSaltIndexChainID <= 0 {
+		return fmt.Errorf("--chain-id is required (wallet keys are chain-scoped; pass the chain you want to backfill, e.g. 1, 8453, 11155111, 84532)")
+	}
 	nodeConfig, err := avsconfig.NewConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("parse config %s: %w", configPath, err)
@@ -74,6 +79,7 @@ func runBackfillWalletSaltIndex(configPath string) error {
 	}
 
 	fmt.Printf("Config:        %s\n", configPath)
+	fmt.Printf("Chain ID:      %d\n", backfillWalletSaltIndexChainID)
 	fmt.Printf("DB path:       %s\n", nodeConfig.DbPath)
 	// Redact: RPC URLs from Tenderly/Alchemy/Infura embed API keys in
 	// the path or query — printing the raw URL leaks secrets to terminal
@@ -105,7 +111,7 @@ func runBackfillWalletSaltIndex(configPath string) error {
 		return *addr, nil
 	}
 
-	stats, err := taskengine.BackfillWalletSaltIndex(db, deriver, taskengine.WalletSaltIndexBackfillOptions{
+	stats, err := taskengine.BackfillWalletSaltIndex(db, backfillWalletSaltIndexChainID, deriver, taskengine.WalletSaltIndexBackfillOptions{
 		DryRun:  backfillWalletSaltIndexDryRun,
 		Verbose: backfillWalletSaltIndexVerbose,
 		Logf: func(format string, args ...any) {

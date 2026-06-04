@@ -17,11 +17,15 @@
 #       variables so the topology auto-resolves and survives service
 #       renames, e.g.:
 #         WORKER_ETHEREUM = ${{worker-ethereum.RAILWAY_PRIVATE_DOMAIN}}:50051
-#   ETHEREUM_DWELLIR_RPC / ETHEREUM_DWELLIR_WS  — AVS chain RPC
-#   SEPOLIA_DWELLIR_RPC  / SEPOLIA_DWELLIR_WS   — sepolia chain RPC
-#   BASE_DWELLIR_RPC     / BASE_DWELLIR_WS
-#   BASE_SEPOLIA_DWELLIR_RPC / BASE_SEPOLIA_DWELLIR_WS
-#   BNB_DWELLIR_RPC      / BNB_DWELLIR_WS       — BNB Smart Chain mainnet
+#   ETHEREUM_RPC          — Ethereum mainnet HTTPS RPC (WS derived in code)
+#   SEPOLIA_RPC           — Sepolia HTTPS RPC
+#   BASE_RPC              — Base mainnet HTTPS RPC
+#   BASE_SEPOLIA_RPC      — Base-Sepolia HTTPS RPC
+#   BNB_RPC               — BNB Smart Chain mainnet HTTPS RPC
+# (WebSocket URLs are auto-derived from the HTTPS URL by core/config —
+# every supported provider serves both transports at the same host+path
+# with only the scheme differing. Set the explicit eth_ws_url in the
+# YAML only if a chain genuinely needs a separate WS endpoint.)
 #   ETHEREUM_BUNDLER_URL, SEPOLIA_BUNDLER_URL,
 #   BASE_BUNDLER_URL,     BASE_SEPOLIA_BUNDLER_URL
 #   BNB_BUNDLER_URL      — optional; connectivity-only rollout leaves it unset
@@ -43,8 +47,7 @@ ecdsa_private_key: ${GATEWAY_ECDSA_PRIVATE_KEY}
 # disabled, so one gateway can serve operators from any AVS chain. We
 # point this at Sepolia AVS to match the existing testnet operator;
 # flip to Ethereum mainnet AVS when enforceAuth is turned on.
-eth_rpc_url: ${SEPOLIA_DWELLIR_RPC}
-eth_ws_url: ${SEPOLIA_DWELLIR_WS}
+eth_rpc_url: ${SEPOLIA_RPC}
 
 rpc_bind_address: "0.0.0.0:2206"
 http_bind_address: "0.0.0.0:8080"
@@ -82,8 +85,7 @@ tenderly_access_key: ${TENDERLY_ACCESS_KEY}
 # execution still routes via chains[] below — the top-level only
 # matters for package-globals + tooling.
 smart_wallet:
-  eth_rpc_url: ${SEPOLIA_DWELLIR_RPC}
-  eth_ws_url: ${SEPOLIA_DWELLIR_WS}
+  eth_rpc_url: ${SEPOLIA_RPC}
   bundler_url: ${SEPOLIA_BUNDLER_URL}
   controller_private_key: ${CONTROLLER_PRIVATE_KEY}
   paymaster_address: ${PAYMASTER_ADDRESS_TESTNET}
@@ -102,8 +104,7 @@ chains:
     name: ethereum
     worker_addr: ${WORKER_ETHEREUM}
     smart_wallet:
-      eth_rpc_url: ${ETHEREUM_DWELLIR_RPC}
-      eth_ws_url: ${ETHEREUM_DWELLIR_WS}
+      eth_rpc_url: ${ETHEREUM_RPC}
       bundler_url: ${ETHEREUM_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY}
       paymaster_address: ${PAYMASTER_ADDRESS_MAINNET}
@@ -116,8 +117,7 @@ chains:
     name: base
     worker_addr: ${WORKER_BASE}
     smart_wallet:
-      eth_rpc_url: ${BASE_DWELLIR_RPC}
-      eth_ws_url: ${BASE_DWELLIR_WS}
+      eth_rpc_url: ${BASE_RPC}
       bundler_url: ${BASE_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY}
       paymaster_address: ${PAYMASTER_ADDRESS_MAINNET}
@@ -128,8 +128,7 @@ chains:
     name: sepolia
     worker_addr: ${WORKER_SEPOLIA}
     smart_wallet:
-      eth_rpc_url: ${SEPOLIA_DWELLIR_RPC}
-      eth_ws_url: ${SEPOLIA_DWELLIR_WS}
+      eth_rpc_url: ${SEPOLIA_RPC}
       bundler_url: ${SEPOLIA_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY}
       paymaster_address: ${PAYMASTER_ADDRESS_TESTNET}
@@ -139,8 +138,7 @@ chains:
     name: base-sepolia
     worker_addr: ${WORKER_BASE_SEPOLIA}
     smart_wallet:
-      eth_rpc_url: ${BASE_SEPOLIA_DWELLIR_RPC}
-      eth_ws_url: ${BASE_SEPOLIA_DWELLIR_WS}
+      eth_rpc_url: ${BASE_SEPOLIA_RPC}
       bundler_url: ${BASE_SEPOLIA_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY}
       paymaster_address: ${PAYMASTER_ADDRESS_TESTNET}
@@ -156,8 +154,7 @@ chains:
     name: bnb-mainnet
     worker_addr: ${WORKER_BNB}
     smart_wallet:
-      eth_rpc_url: ${BNB_DWELLIR_RPC}
-      eth_ws_url: ${BNB_DWELLIR_WS}
+      eth_rpc_url: ${BNB_RPC}
       bundler_url: ${BNB_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY}
       paymaster_address: ${PAYMASTER_ADDRESS_TESTNET}

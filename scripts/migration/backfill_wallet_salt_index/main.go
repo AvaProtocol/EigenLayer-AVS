@@ -49,12 +49,18 @@ type aggregatorYAML struct {
 
 func main() {
 	configPath := flag.String("config", "", "Path to aggregator YAML config (e.g. config/aggregator-base.yaml)")
+	chainID := flag.Int64("chain-id", 0, "Chain ID to backfill. Required. Wallet keys are chain-scoped; run once per chain (e.g. 1, 8453, 11155111, 84532).")
 	dryRun := flag.Bool("dry-run", false, "Print what would change without writing to BadgerDB")
 	verbose := flag.Bool("verbose", false, "Print one line per wallet processed")
 	flag.Parse()
 
 	if *configPath == "" {
 		fmt.Fprintln(os.Stderr, "--config is required")
+		flag.Usage()
+		os.Exit(2)
+	}
+	if *chainID <= 0 {
+		fmt.Fprintln(os.Stderr, "--chain-id is required")
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -71,6 +77,7 @@ func main() {
 	}
 
 	fmt.Printf("Config:        %s\n", *configPath)
+	fmt.Printf("Chain ID:      %d\n", *chainID)
 	fmt.Printf("DB path:       %s\n", cfg.DbPath)
 	// Redact: RPC URLs from Tenderly/Alchemy/Infura embed API keys in
 	// the path or query — printing the raw URL leaks secrets to terminal
@@ -102,7 +109,7 @@ func main() {
 		return *addr, nil
 	}
 
-	stats, err := taskengine.BackfillWalletSaltIndex(db, deriver, taskengine.WalletSaltIndexBackfillOptions{
+	stats, err := taskengine.BackfillWalletSaltIndex(db, *chainID, deriver, taskengine.WalletSaltIndexBackfillOptions{
 		DryRun:  *dryRun,
 		Verbose: *verbose,
 		Logf: func(format string, args ...any) {

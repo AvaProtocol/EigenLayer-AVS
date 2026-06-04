@@ -1,0 +1,130 @@
+# Gateway configuration for the Hetzner -> Railway migration rehearsal.
+#
+# Differs from gateway-dev.yaml in two ways:
+#
+#  1. db_path points at ./tmp/rehearsal-gateway-db -- the scratch DB the
+#     merge tool populates via `make migration-rehearse APPLY=1`. Path is
+#     relative to the project root so it lives inside the repo workspace
+#     (already in .gitignore) and matches the script in
+#     scripts/dev/run-merge-rehearsal.sh. Keeping this separate from
+#     /tmp/ap-avs/gateway (the normal dev DB) means you can flip between
+#     the two stacks without clobbering either.
+#
+#  2. All four production chains (sepolia, base-sepolia, base, ethereum)
+#     are registered. After a full-suite merge, the gateway can serve
+#     read queries for tasks/executions/wallets/secrets on any of them
+#     via the SDK's listWorkflows / getWorkflow / getExecution / etc.
+#
+# Workers: only sepolia + base-sepolia run locally by default (see
+# `make dev-stack-rehearsal`). Mainnet workers are listed below but not
+# expected to be reachable -- the rehearsal validates the gateway's
+# READ-path against the merged DB, not UserOp execution against
+# mainnet (which would cost real ETH and isn't the purpose here).
+# Triggering a task on a chain with no live worker returns
+# WORKER_UNAVAILABLE; that's expected.
+#
+# CREDENTIALS: Every secret in this file is `${VAR}` -- exported by your
+# shell or supplied via a `.env` file you keep locally. Nothing real
+# lives in git. The rehearsal does NOT execute UserOps, so all
+# controller / bundler / paymaster references are inert (the gateway
+# probes the paymaster's owner() function at startup but never signs);
+# the values below can stay as test-only placeholders unless you also
+# want to drive trigger->worker flows on testnets. See
+# scripts/dev/README.md for the env-var checklist.
+environment: development
+
+db_path: ./tmp/rehearsal-gateway-db
+backup_dir: ./tmp/rehearsal-gateway-backup
+
+ecdsa_private_key: ${REHEARSAL_ECDSA_PRIVATE_KEY}
+
+# EigenLayer contracts live on Sepolia (the AVS registration chain)
+eth_rpc_url: ${REHEARSAL_AVS_RPC}
+eth_ws_url: ${REHEARSAL_AVS_WS}
+
+# Top-level smart_wallet is required by the aa package + startup probes
+# even in gateway mode. Mirrors the AVS chain (sepolia) below.
+smart_wallet:
+  eth_rpc_url: ${REHEARSAL_SEPOLIA_RPC}
+  eth_ws_url: ${REHEARSAL_SEPOLIA_WS}
+  bundler_url: ${REHEARSAL_SEPOLIA_BUNDLER_URL}
+  controller_private_key: ${REHEARSAL_CONTROLLER_PRIVATE_KEY}
+  paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92
+  max_wallets_per_owner: 2000
+
+rpc_bind_address: "0.0.0.0:2206"
+http_bind_address: "0.0.0.0:8080"
+
+avs_registry_coordinator_address: 0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD
+operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
+
+jwt_secret: ${REHEARSAL_JWT_SECRET}
+
+rest_rate_limit_per_second: 200
+rest_rate_limit_burst: 1000
+
+server_name: "gateway-dev-rehearsal"
+sentry_dsn: ""  # rehearsal traffic shouldn't pollute Sentry
+
+tenderly_account: "chrisli"
+tenderly_project: "default"
+tenderly_access_key: ${REHEARSAL_TENDERLY_ACCESS_KEY}
+
+chains:
+  - chain_id: 11155111
+    name: sepolia
+    worker_addr: "127.0.0.1:50051"
+    smart_wallet:
+      eth_rpc_url: ${REHEARSAL_SEPOLIA_RPC}
+      eth_ws_url: ${REHEARSAL_SEPOLIA_WS}
+      bundler_url: ${REHEARSAL_SEPOLIA_BUNDLER_URL}
+      controller_private_key: ${REHEARSAL_CONTROLLER_PRIVATE_KEY}
+      paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92
+      max_wallets_per_owner: 2000
+
+  - chain_id: 84532
+    name: base-sepolia
+    worker_addr: "127.0.0.1:50052"
+    smart_wallet:
+      eth_rpc_url: ${REHEARSAL_BASE_SEPOLIA_RPC}
+      eth_ws_url: ${REHEARSAL_BASE_SEPOLIA_WS}
+      bundler_url: ${REHEARSAL_BASE_SEPOLIA_BUNDLER_URL}
+      controller_private_key: ${REHEARSAL_CONTROLLER_PRIVATE_KEY}
+      paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92
+      max_wallets_per_owner: 3
+
+  # Mainnet chains. Use the per-chain paymaster from docs/Contract.md
+  # (0xf023eA...19D6f is the mainnet paymaster; the testnet
+  # 0xd856f...d92 has no bytecode on either mainnet).
+  - chain_id: 1
+    name: ethereum
+    worker_addr: "127.0.0.1:50053"
+    smart_wallet:
+      eth_rpc_url: ${REHEARSAL_ETHEREUM_RPC}
+      eth_ws_url: ${REHEARSAL_ETHEREUM_WS}
+      bundler_url: ${REHEARSAL_ETHEREUM_BUNDLER_URL}
+      controller_private_key: ${REHEARSAL_CONTROLLER_PRIVATE_KEY}
+      paymaster_address: 0xf023eA291F5bEDA4Bf59BbDC9004F1d18be19D6f
+      max_wallets_per_owner: 3
+
+  - chain_id: 8453
+    name: base
+    worker_addr: "127.0.0.1:50054"
+    smart_wallet:
+      eth_rpc_url: ${REHEARSAL_BASE_RPC}
+      eth_ws_url: ${REHEARSAL_BASE_WS}
+      bundler_url: ${REHEARSAL_BASE_BUNDLER_URL}
+      controller_private_key: ${REHEARSAL_CONTROLLER_PRIVATE_KEY}
+      paymaster_address: 0xf023eA291F5bEDA4Bf59BbDC9004F1d18be19D6f
+      max_wallets_per_owner: 3
+
+macros:
+  secrets:
+    ap_notify_bot_token: ${REHEARSAL_TELEGRAM_BOT_TOKEN}
+    sendgrid_key: ""
+    thegraph_api_key: ${REHEARSAL_THEGRAPH_API_KEY}
+    moralis_api_key: ${REHEARSAL_MORALIS_API_KEY}
+
+notifications:
+  summary:
+    enabled: false  # rehearsal must not send real notifications

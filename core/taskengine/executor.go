@@ -127,7 +127,12 @@ func (x *WorkflowExecutor) GetTask(id string) (*model.Workflow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("storage access failed for key '%s': %w", string(storageKey), err)
 	}
-	err = protojson.Unmarshal(item, task)
+	// DiscardUnknown: tolerate proto fields renamed/removed since the
+	// task was written. Without this, any task whose body carries
+	// old fields like `expression`/`epochs`/`totalExecution` would
+	// fail strict decode here and the executor would falsely report
+	// the task as "data may be corrupted".
+	err = (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(item, task)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse task data from storage (data may be corrupted): %w", err)
 	}
@@ -443,7 +448,7 @@ func (x *WorkflowExecutor) RunTask(task *model.Workflow, queueData *QueueExecuti
 		smartWalletAddr := common.HexToAddress(task.SmartWalletAddress)
 
 		// Enhanced wallet validation that handles any legitimately derived wallet
-		isValid, err := x.validateWalletOwnership(user, smartWalletAddr)
+		isValid, err := x.validateWalletOwnership(task.ChainId, user, smartWalletAddr)
 		if err != nil {
 			execution.EndAt = time.Now().UnixMilli()
 			execution.Error = fmt.Sprintf("failed to validate wallet ownership for owner %s: %v", owner.Hex(), err)
@@ -465,7 +470,7 @@ func (x *WorkflowExecutor) RunTask(task *model.Workflow, queueData *QueueExecuti
 
 		// Look up the wallet's salt from DB for auto-deployment of non-salt-0 wallets
 		if x.db != nil {
-			if wallet, walletErr := GetWallet(x.db, owner, task.SmartWalletAddress); walletErr == nil && wallet != nil && wallet.Salt != nil {
+			if wallet, walletErr := GetWallet(x.db, task.ChainId, owner, task.SmartWalletAddress); walletErr == nil && wallet != nil && wallet.Salt != nil {
 				vm.AddVar("aa_salt", wallet.Salt)
 				if x.logger != nil {
 					x.logger.Info("Executor: AA salt resolved from wallet DB", "salt", wallet.Salt.String(), "wallet", task.SmartWalletAddress)
@@ -526,7 +531,7 @@ func (x *WorkflowExecutor) RunTask(task *model.Workflow, queueData *QueueExecuti
 
 		if creditLimitWei != nil {
 			taskOwner := common.HexToAddress(task.Owner)
-			withinLimit, outstanding, checkErr := x.feeLedger.CheckCreditLimit(taskOwner, creditLimitWei)
+			withinLimit, outstanding, checkErr := x.feeLedger.CheckCreditLimit(task.ChainId, taskOwner, creditLimitWei)
 			if checkErr != nil {
 				x.logger.Warn("Fee ledger check failed, proceeding with execution", "error", checkErr)
 			} else if !withinLimit {
@@ -852,7 +857,7 @@ func sanitizeInterface(x interface{}) interface{} {
 
 // validateWalletOwnership performs comprehensive wallet ownership validation
 // This handles default wallets (salt:0), stored wallets, and legitimately derived wallets
-func (x *WorkflowExecutor) validateWalletOwnership(user *model.User, smartWalletAddr common.Address) (bool, error) {
+func (x *WorkflowExecutor) validateWalletOwnership(chainID int64, user *model.User, smartWalletAddr common.Address) (bool, error) {
 	// Step 1: Load the user's default smart wallet address (salt:0) for comparison
 	if x.smartWalletConfig != nil && x.smartWalletConfig.EthRpcUrl != "" {
 		if rpcClient, err := ethclient.Dial(x.smartWalletConfig.EthRpcUrl); err == nil {
@@ -866,7 +871,7 @@ func (x *WorkflowExecutor) validateWalletOwnership(user *model.User, smartWallet
 	}
 
 	// Step 2: Use the standard ValidWalletOwner function (checks default + database)
-	if isValid, err := ValidWalletOwner(x.db, user, smartWalletAddr); err == nil && isValid {
+	if isValid, err := ValidWalletOwner(x.db, chainID, user, smartWalletAddr); err == nil && isValid {
 		return true, nil
 	} else if err != nil {
 		x.logger.Debug("ValidWalletOwner check failed", "owner", user.Address.Hex(),

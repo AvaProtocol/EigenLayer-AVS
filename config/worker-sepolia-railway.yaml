@@ -2,7 +2,7 @@
 #
 # Secrets are injected via Railway sealed env vars and expanded at
 # startup. Set these on the `worker-sepolia` service:
-#   SEPOLIA_DWELLIR_RPC, SEPOLIA_DWELLIR_WS
+#   SEPOLIA_RPC (HTTPS; WS derived in code)
 #   SEPOLIA_BUNDLER_URL
 #   CONTROLLER_PRIVATE_KEY
 #   PAYMASTER_ADDRESS
@@ -22,8 +22,7 @@ health_address: "0.0.0.0:8080"
 # listen on `listen_address`.
 
 # Chain RPC endpoints
-eth_rpc_url: ${SEPOLIA_DWELLIR_RPC}
-eth_ws_url: ${SEPOLIA_DWELLIR_WS}
+eth_rpc_url: ${SEPOLIA_RPC}
 
 # Third-party bundler (self-hosted Voltaire)
 bundler_url: ${SEPOLIA_BUNDLER_URL}

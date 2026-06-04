@@ -1,8 +1,12 @@
 package version
 
 var (
-	// Version can also be set through tag release at build time
-	semver   = "1.9.6"
+	// Bumped manually on each release to match the current main tag — see
+	// docs/Release.md. ldflags overrides this for properly-built Docker
+	// images (publish-prod-docker.yml), but Railway's source-build path
+	// does not pass -ldflags, so this default is what telemetry/health
+	// endpoints report for Railway-deployed services.
+	semver   = "3.0.0"
 	revision = "unknown"
 )
 

@@ -34,7 +34,10 @@ func TestTaskStatCount(t *testing.T) {
 	tr1.MaxExecution = 1
 	n.CreateWorkflow(testutil.TestUser1(), tr1)
 
-	statSvc := NewStatService(db)
+	// CreateWorkflow stamps the task with the engine's defaultChainID
+	// (config.SmartWallet.ChainID), so the stat service must scan that
+	// chain — the chain-0 default in NewStatService would miss it.
+	statSvc := NewStatServiceWithChains(db, []int64{config.SmartWallet.ChainID})
 	// Query statistics using the same smart wallet address used for task creation
 	addr := common.HexToAddress(smartWalletAddress)
 	owner := testutil.TestUser1().Address
