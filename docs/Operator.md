@@ -21,6 +21,14 @@ operator_address: <operator_address>
 avs_registry_coordinator_address: 0x8DE3Ee0dE880161Aa0CD8Bf9F8F6a7AfEeB9A44B
 operator_state_retriever_address: 0xb3af70D5f72C04D1f490ff49e5aB189fA7122713
 
+# Ethereum mainnet RPC. eth_ws_url is OPTIONAL — when omitted, the
+# operator derives it from eth_rpc_url by swapping the scheme
+# (https→wss, http→ws). Every supported RPC provider (Dwellir, Tenderly,
+# Alchemy, Infura) serves both transports at the same host+path with
+# only the scheme differing, so one URL is enough. Set eth_ws_url
+# explicitly only if your provider exposes WS at a different URL.
+eth_rpc_url: <your_ethereum_mainnet_rpc_url>
+
 ecdsa_private_key_store_path: <path_to_operator_ecdsa_key_json>
 bls_private_key_store_path: <path_to_operator_bls_key_json>
 
