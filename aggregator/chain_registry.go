@@ -25,27 +25,38 @@ type ChainEntry struct {
 	// ethclient for direct on-chain reads (e.g. ERC-20 balance checks in
 	// the withdraw flow) — not every operation rides through the worker
 	// gRPC channel.
-	rpcOnce sync.Once
-	rpc     *ethclient.Client
-	rpcErr  error
+	//
+	// rpcMu serializes the dial; once `rpc` is non-nil, GetRPC returns it
+	// without taking the lock-critical-section path. Dial failures are NOT
+	// cached: a transient error (RPC node briefly unreachable) leaves
+	// `rpc` nil so the next call retries, instead of permanently disabling
+	// the chain until a full gateway restart. This replaces a prior
+	// sync.Once that pinned the first error forever.
+	rpcMu sync.Mutex
+	rpc   *ethclient.Client
 }
 
 // GetRPC returns a chain-specific ethclient for direct reads against
-// this chain's RPC. Dialed once and cached for the entry's lifetime.
+// this chain's RPC. Successful dials are cached; failed dials are retried
+// on the next call so transient errors don't permanently disable the chain.
 func (e *ChainEntry) GetRPC() (*ethclient.Client, error) {
-	e.rpcOnce.Do(func() {
-		if e.Config == nil || e.Config.SmartWallet == nil || e.Config.SmartWallet.EthRpcUrl == "" {
-			e.rpcErr = fmt.Errorf("chain %d has no eth_rpc_url configured", chainConfigID(e.Config))
-			return
-		}
-		client, err := ethclient.Dial(e.Config.SmartWallet.EthRpcUrl)
-		if err != nil {
-			e.rpcErr = fmt.Errorf("dial chain %d RPC: %w", chainConfigID(e.Config), err)
-			return
-		}
-		e.rpc = client
-	})
-	return e.rpc, e.rpcErr
+	e.rpcMu.Lock()
+	defer e.rpcMu.Unlock()
+
+	if e.rpc != nil {
+		return e.rpc, nil
+	}
+
+	if e.Config == nil || e.Config.SmartWallet == nil || e.Config.SmartWallet.EthRpcUrl == "" {
+		return nil, fmt.Errorf("chain %d has no eth_rpc_url configured", chainConfigID(e.Config))
+	}
+
+	client, err := ethclient.Dial(e.Config.SmartWallet.EthRpcUrl)
+	if err != nil {
+		return nil, fmt.Errorf("dial chain %d RPC: %w", chainConfigID(e.Config), err)
+	}
+	e.rpc = client
+	return e.rpc, nil
 }
 
 func chainConfigID(c *config.ChainConfig) int64 {
@@ -111,6 +122,13 @@ func (r *ChainRegistry) Connect(ctx context.Context) {
 // reconnectLoop periodically retries connections for workers that are not
 // yet connected. It stops when all workers are connected or the context
 // is cancelled (gateway shutdown).
+//
+// Note: since the switch from grpc.DialContext (blocking) to grpc.NewClient
+// (non-blocking), connectEntry never returns a transient error for a
+// reachable URL — it only fails if the URL itself is invalid. The loop now
+// typically runs once, sees all clients populated, and exits. Real worker
+// reconnections are handled by gRPC's internal connection state machine.
+// Kept here for the case of explicit URL-level errors that need re-attempt.
 func (r *ChainRegistry) reconnectLoop(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -151,18 +169,20 @@ func (r *ChainRegistry) reconnectLoop(ctx context.Context) {
 	}
 }
 
-func (r *ChainRegistry) connectEntry(ctx context.Context, entry *ChainEntry) error {
-	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	conn, err := grpc.DialContext(
-		dialCtx,
+// connectEntry creates a non-blocking gRPC client for the worker. The actual
+// TCP connection is established lazily on the first RPC; transient worker
+// outages are handled by gRPC's internal connection state machine. This
+// returns essentially instantly so it is safe to call while holding the
+// registry's write lock (previously this dialed synchronously with
+// grpc.WithBlock() and a 10s timeout, stalling all GetWorker callers
+// waiting on the RLock for up to 10s × number-of-chains on startup).
+func (r *ChainRegistry) connectEntry(_ context.Context, entry *ChainEntry) error {
+	conn, err := grpc.NewClient(
 		entry.Config.WorkerAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	if err != nil {
-		return fmt.Errorf("dialing %s: %w", entry.Config.WorkerAddr, err)
+		return fmt.Errorf("creating client for %s: %w", entry.Config.WorkerAddr, err)
 	}
 
 	entry.conn = conn
