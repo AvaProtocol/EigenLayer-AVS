@@ -114,6 +114,46 @@ func TestIsNativeToken(t *testing.T) {
 	}
 }
 
+// warnCapturingLogger records Warn calls for assertions.
+type warnCapturingLogger struct {
+	MockLogger
+	warns []string
+}
+
+func (l *warnCapturingLogger) Warn(msg string, keysAndValues ...interface{}) {
+	l.warns = append(l.warns, msg)
+}
+
+func TestLoadTokensIntoCacheValidation(t *testing.T) {
+	logger := &warnCapturingLogger{}
+	service := &TokenEnrichmentService{
+		cache:  make(map[string]*TokenMetadata),
+		logger: logger,
+	}
+
+	tokens := []TokenMetadata{
+		{Id: "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", Name: "Valid", Symbol: "VAL", Decimals: 18},
+		{Id: "", Name: "MissingId", Symbol: "BAD", Decimals: 18},
+		{Id: "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", Name: "ZeroDec", Symbol: "ZD", Decimals: 0},
+	}
+
+	loaded, skipped := service.loadTokensIntoCache(tokens, "test.json")
+
+	assert.Equal(t, 2, loaded)
+	assert.Equal(t, 1, skipped)
+
+	// Empty-id entry skipped; the two valid entries are cached with lowercased ids.
+	assert.Len(t, service.cache, 2)
+	assert.Contains(t, service.cache, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	assert.Contains(t, service.cache, "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	assert.NotContains(t, service.cache, "")
+
+	// One warn for missing id, one for decimals=0.
+	require.Len(t, logger.warns, 2)
+	assert.Contains(t, logger.warns[0], "missing id")
+	assert.Contains(t, logger.warns[1], "decimals=0")
+}
+
 func TestGetNativeTokenMetadata(t *testing.T) {
 	metadata := getNativeTokenMetadata()
 

@@ -3,97 +3,97 @@
     "name": "Aave",
     "symbol": "AAVE",
     "decimals": 18,
-    "id": "0x63706e401c06ac8513145b7687A14804d17f814b"
+    "id": "0x63706e401c06ac8513145b7687a14804d17f814b"
   },
   {
     "name": "Aerodrome",
     "symbol": "AERO",
     "decimals": 18,
-    "id": "0x940181a94A35A4569E4529A3CDfB74e38FD98631"
+    "id": "0x940181a94a35a4569e4529a3cdfb74e38fd98631"
   },
   {
     "name": "Balancer",
     "symbol": "BAL",
     "decimals": 18,
-    "id": "0x7c6b91D9Be155A6Db01f749217d76fF02A7227F2"
+    "id": "0x7c6b91d9be155a6db01f749217d76ff02a7227f2"
   },
   {
     "name": "Brett",
     "symbol": "BRETT",
     "decimals": 18,
-    "id": "0x532f27101965dd16442E59d40670FaF5eBB142E4"
+    "id": "0x532f27101965dd16442e59d40670faf5ebb142e4"
   },
   {
     "name": "Dai",
     "symbol": "DAI",
     "decimals": 18,
-    "id": "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb"
+    "id": "0x50c5725949a6f0c72e6c4a641f24049a917db0cb"
   },
   {
     "name": "Degen",
     "symbol": "DEGEN",
     "decimals": 18,
-    "id": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed"
+    "id": "0x4ed4e862860bed51a9570b96d89af5e1b0efefed"
   },
   {
     "name": "Chainlink",
     "symbol": "LINK",
     "decimals": 18,
-    "id": "0x88Fb150BDc53A65fe94Dea0c9BA0a6dAf8C6e196"
+    "id": "0x88fb150bdc53a65fe94dea0c9ba0a6daf8c6e196"
   },
   {
     "name": "Morpho Token",
     "symbol": "MORPHO",
     "decimals": 18,
-    "id": "0xBAa5CC21fd487B8Fcc2F632f3F4E8D37262a0842"
+    "id": "0xbaa5cc21fd487b8fcc2f632f3f4e8d37262a0842"
   },
   {
     "name": "Reserve Rights",
     "symbol": "RSR",
     "decimals": 18,
-    "id": "0xaB36452DbAC151bE02b16Ca17d8919826072f64a"
+    "id": "0xab36452dbac151be02b16ca17d8919826072f64a"
   },
   {
     "name": "Toshi",
     "symbol": "TOSHI",
     "decimals": 18,
-    "id": "0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4"
+    "id": "0xac1bd2486aaf3b5c0fc3fd868558b082a531b2b4"
   },
   {
     "name": "Uniswap",
     "symbol": "UNI",
     "decimals": 18,
-    "id": "0xc3De830EA07524a0761646a6a4e4be0e114a3C83"
+    "id": "0xc3de830ea07524a0761646a6a4e4be0e114a3c83"
   },
   {
     "name": "USD Coin",
     "symbol": "USDC",
     "decimals": 6,
-    "id": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+    "id": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
   },
   {
     "name": "Bridged Tether USD",
     "symbol": "USDT",
     "decimals": 6,
-    "id": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2"
+    "id": "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2"
   },
   {
     "name": "USD Base Coin",
     "symbol": "USDbC",
     "decimals": 6,
-    "id": "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA"
+    "id": "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca"
   },
   {
     "name": "Virtual Protocol",
     "symbol": "VIRTUAL",
     "decimals": 18,
-    "id": "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b"
+    "id": "0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b"
   },
   {
     "name": "WELL",
     "symbol": "WELL",
     "decimals": 18,
-    "id": "0xA88594D404727625A9437C3f886C7643872296AE"
+    "id": "0xa88594d404727625a9437c3f886c7643872296ae"
   },
   {
     "name": "Wrapped Ether",
@@ -105,36 +105,36 @@
     "name": "yearn.finance",
     "symbol": "YFI",
     "decimals": 18,
-    "id": "0x9EaF8C1E34F05a589EDa6BAfdF391Cf6Ad3CB239"
+    "id": "0x9eaf8c1e34f05a589eda6bafdf391cf6ad3cb239"
   },
   {
     "name": "Axelar Wrapped USDC",
     "symbol": "axlUSDC",
     "decimals": 6,
-    "id": "0xEB466342C4d449BC9f53A865D5Cb90586f405215"
+    "id": "0xeb466342c4d449bc9f53a865d5cb90586f405215"
   },
   {
     "name": "Coinbase Wrapped BTC",
     "symbol": "cbBTC",
     "decimals": 8,
-    "id": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf"
+    "id": "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf"
   },
   {
     "name": "Coinbase Wrapped Staked ETH",
     "symbol": "cbETH",
     "decimals": 18,
-    "id": "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22"
+    "id": "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22"
   },
   {
     "name": "Rocket Pool ETH",
     "symbol": "rETH",
     "decimals": 18,
-    "id": "0xB6fe221Fe9EeF5aBa221c348bA20A1Bf5e73624c"
+    "id": "0xb6fe221fe9eef5aba221c348ba20a1bf5e73624c"
   },
   {
     "name": "Wrapped liquid staked Ether 2.0",
     "symbol": "wstETH",
     "decimals": 18,
-    "id": "0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452"
+    "id": "0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452"
   }
 ]
