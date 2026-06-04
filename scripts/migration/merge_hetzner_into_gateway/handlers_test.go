@@ -68,38 +68,49 @@ func TestSetIfAbsent_DryRunDoesNotWrite(t *testing.T) {
 }
 
 // -------------------------------------------------------------------------
-// handleChainScopedPassThrough — validates embedded chain ID.
+// handleStampChainID — handles both legacy (chain-implicit) and
+// already-chain-scoped donor keys. Validates mis-stamp protection.
 // -------------------------------------------------------------------------
 
-func TestHandleChainScopedPassThrough_ValidatesMatchingChainID(t *testing.T) {
+func TestHandleStampChainID_PassesThroughMatchingChainScoped(t *testing.T) {
 	donor := newTestDB(t)
 	gw := newTestDB(t)
 	stat := &prefixStats{}
 
-	err := handleChainScopedPassThrough(donor, gw, 1, "t:", kvItem("t:1:a:taskABC", "body"), stat, false, false)
+	// Donor key is already chain-scoped with the donor's chain ID — pass through.
+	err := handleStampChainID(donor, gw, 1, "t:", kvItem("t:1:a:taskABC", "body"), stat, false, false)
 	require.NoError(t, err)
 	assert.Equal(t, 1, stat.copied)
+	assert.Equal(t, 0, stat.stampedChain, "key was already chain-scoped — must not count as a new stamp")
 }
 
-func TestHandleChainScopedPassThrough_RejectsMismatchedChainID(t *testing.T) {
+func TestHandleStampChainID_RejectsWrongChainScoped(t *testing.T) {
 	donor := newTestDB(t)
 	gw := newTestDB(t)
 	stat := &prefixStats{}
 
-	err := handleChainScopedPassThrough(donor, gw, 1, "t:", kvItem("t:8453:a:taskABC", "body"), stat, false, false)
-	require.Error(t, err, "must refuse to import a key whose embedded chain ID doesn't match --donor-chain-id")
+	// Donor key embeds chain 8453 but we're merging as chain 1 — refuse
+	// to silently mis-stamp (would produce t:1:8453:a:taskABC, which
+	// would be wrong).
+	err := handleStampChainID(donor, gw, 1, "t:", kvItem("t:8453:a:taskABC", "body"), stat, false, false)
+	require.Error(t, err, "must refuse to mis-stamp a key whose embedded chain ID disagrees with --donor-chain-id")
 	assert.Contains(t, err.Error(), "embeds chain ID 8453")
 }
 
-func TestHandleChainScopedPassThrough_RejectsLegacyForm(t *testing.T) {
+func TestHandleStampChainID_StampsLegacyTaskStatusKey(t *testing.T) {
 	donor := newTestDB(t)
 	gw := newTestDB(t)
 	stat := &prefixStats{}
 
 	// Legacy form: `t:a:taskABC` (status code 'a', no numeric chain segment).
-	err := handleChainScopedPassThrough(donor, gw, 1, "t:", kvItem("t:a:taskABC", "body"), stat, false, false)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "legacy (pre-chain-scoped) form")
+	err := handleStampChainID(donor, gw, 11155111, "t:", kvItem("t:a:taskABC", "body"), stat, false, false)
+	require.NoError(t, err)
+	assert.Equal(t, 1, stat.copied)
+	assert.Equal(t, 1, stat.stampedChain)
+
+	got, err := gw.GetKey([]byte("t:11155111:a:taskABC"))
+	require.NoError(t, err)
+	assert.Equal(t, "body", string(got))
 }
 
 // -------------------------------------------------------------------------
@@ -235,19 +246,40 @@ func TestDispatch_RoutesEachPrefixToItsHandler(t *testing.T) {
 		key    string
 		value  string
 	}{
-		{"t:", "t:1:a:taskA", "task-body"},
+		// t:, history: now decode the body as proto JSON, so the test
+		// values need to be valid proto JSON for their respective
+		// messages (avsproto.Task / avsproto.Execution). The body
+		// cleaner re-marshals, so the exact contents don't matter
+		// beyond being decodable.
+		{"t:", "t:1:a:taskA", `{"id":"taskA"}`},
 		{"u:", "u:1:0xowner:0xwallet:taskA", "taskA"},
-		{"history:", "history:1:taskA:exec1", "exec-blob"},
+		{"history:", "history:1:taskA:exec1", `{"id":"exec1"}`},
 		{"w:", "w:0xowner:0xwallet", "wallet"},
 		{"wsalt:", "wsalt:0xowner:0xfactory:0", "0xwallet"},
 		{"fl:", "fl:0xowner", "balance-blob"},
-		{"fr:", "fr:0xowner:exec1", "fee-blob"},
+		// fr: now decodes the body as a FeeRecord struct (stdlib json)
+		// — needs valid JSON. Body cleaner sets ChainID from --donor-chain-id.
+		{"fr:", "fr:0xowner:exec1", `{"execution_id":"exec1","owner":"0xowner"}`},
 		{"secret:", "secret:_:0xowner:_:apikey", "supersecret"},
 		{"execution_index_counter:", "execution_index_counter:taskA", "1"},
 		{"ct:cw:", "ct:cw:0xeoa", "5"},
 		{"pending:", "pending:taskA:exec1", ""},
 		{"trigger:", "trigger:taskA:exec1", "status"},
 		{"migration:", "migration:foo", "1"},
+		// Per-aggregator operational state added when tonight's
+		// rehearsal surfaced 10M+ q: keys on the base donor — both
+		// must route to drop, not stamp.
+		{"operator:", "operator:0xoperator1", "registered"},
+		{"q:", "q:t:c:1:taskA", "queue-entry"},
+		// t:seq is a sequence-counter key that LOOKS like a t: row.
+		// Dispatch order is load-bearing: t:seq must match the t:seq
+		// drop handler BEFORE t: tries to stamp it. Without the right
+		// ordering in prefixHandlers, this key would get rewritten to
+		// `t:1:seq` and corrupt the Badger sequence semantics.
+		{"t:seq", "t:seq", "42"},
+		// q:seq: is the queue's sequence counter. Same ordering
+		// concern as t:seq — must match q:seq: drop before q:.
+		{"q:seq:", "q:seq:taskA", "7"},
 	}
 	for _, c := range cases {
 		stat := st.forPrefix(c.prefix)
@@ -265,30 +297,16 @@ func TestDispatch_RoutesEachPrefixToItsHandler(t *testing.T) {
 	assert.Equal(t, 1, st.perPrefix["pending:"].dropped)
 	assert.Equal(t, 1, st.perPrefix["trigger:"].dropped)
 	assert.Equal(t, 1, st.perPrefix["migration:"].dropped)
-}
-
-// -------------------------------------------------------------------------
-// alreadyStamped — small helper.
-// -------------------------------------------------------------------------
-
-func TestAlreadyStamped(t *testing.T) {
-	for _, c := range []struct {
-		rest    string
-		chainID int64
-		want    bool
-		desc    string
-	}{
-		{"1:0xowner:0xwallet", 1, true, "matches chain prefix"},
-		{"0xowner:0xwallet", 1, false, "no chain prefix"},
-		{"8453:0xowner:0xwallet", 1, false, "wrong chain prefix"},
-		{"", 1, false, "empty"},
-		{"1", 1, false, "chain ID without trailing colon"},
-	} {
-		t.Run(c.desc, func(t *testing.T) {
-			got := alreadyStamped(c.rest, c.chainID)
-			assert.Equal(t, c.want, got, "alreadyStamped(%q, %d)", c.rest, c.chainID)
-		})
-	}
+	assert.Equal(t, 1, st.perPrefix["operator:"].dropped)
+	assert.Equal(t, 1, st.perPrefix["q:"].dropped)
+	// t:seq must route to its own drop bucket, NOT t:'s stamp bucket.
+	// Confirms both that t:seq is in the dispatch table BEFORE t:
+	// AND that the t:seq handler is drop, not stamp.
+	assert.Equal(t, 1, st.perPrefix["t:seq"].dropped)
+	assert.Equal(t, 0, st.perPrefix["t:seq"].copied, "t:seq must never be copied — it's a Badger sequence counter")
+	assert.Equal(t, 0, st.perPrefix["t:seq"].stampedChain, "t:seq must never be stamped")
+	assert.Equal(t, 1, st.perPrefix["q:seq:"].dropped)
+	assert.Equal(t, 0, st.perPrefix["q:seq:"].copied)
 }
 
 // -------------------------------------------------------------------------

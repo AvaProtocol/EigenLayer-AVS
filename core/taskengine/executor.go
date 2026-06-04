@@ -127,7 +127,12 @@ func (x *WorkflowExecutor) GetTask(id string) (*model.Workflow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("storage access failed for key '%s': %w", string(storageKey), err)
 	}
-	err = protojson.Unmarshal(item, task)
+	// DiscardUnknown: tolerate proto fields renamed/removed since the
+	// task was written. Without this, any task whose body carries
+	// old fields like `expression`/`epochs`/`totalExecution` would
+	// fail strict decode here and the executor would falsely report
+	// the task as "data may be corrupted".
+	err = (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(item, task)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse task data from storage (data may be corrupted): %w", err)
 	}
