@@ -24,7 +24,9 @@ For each prefix it knows about, the tool walks every donor key and applies a per
 | `trigger:` | Drop (reconstructible from `history:`) |
 | `migration:` | Drop (donor's migration history, not gateway's) |
 
-**Every write is skip-if-exists.** The gateway has been accumulating its own data since deploy — the tool never overwrites anything already there. This is the load-bearing safety property; the test `TestSetIfAbsent_SkipsWhenKeyPresent` pins it.
+**Every write is skip-if-exists, with one documented exception.** The gateway has been accumulating its own data since deploy, so the tool's default write path is `setIfAbsent` — `Exist` check before every `Set`, gateway value preserved on collision. The test `TestSetIfAbsent_SkipsWhenKeyPresent` pins this.
+
+The one exception is `execution_index_counter:` (the max-on-collision row). If the donor's counter for a given `taskID` is strictly larger than the gateway's, the tool overwrites the gateway value — re-issuing already-consumed execution indices would be worse than overwriting one `uint64`. These overwrites are surfaced separately in the summary under the **CollRes** column. Brand-new keys (gateway had nothing) show under **Copied** only; CollRes is a subset of Copied so the totals reconcile.
 
 Any prefix the tool does not recognize causes a hard-fail by default. To inspect a problem donor without aborting, pass `--fail-on-unknown-prefix=false` — but be aware that those keys are silently dropped from the merge.
 
@@ -89,26 +91,26 @@ Summary
 -------
 Donor chain: 1 (ethereum)
 
-Prefix                          Policy                                              Scanned   Copied  Stamped  Existed  Dropped   Errors
------------------------------ -------------------------------------------------- -------- -------- -------- -------- -------- --------
-t:                              pass-through (chain-scoped)                            8421     8410        0       11        0        0
-u:                              pass-through (chain-scoped)                            8421     8410        0       11        0        0
-history:                        pass-through (chain-scoped)                           12734    12734        0        0        0        0
-w:                              stamp chain ID                                          184      184      184        0        0        0
-wsalt:                          stamp chain ID (rebuild wsalt index post-merge)         184      184      184        0        0        0
-fl:                             stamp chain ID                                          141      141      141        0        0        0
-fr:                             stamp chain ID                                         2104     2104     2104        0        0        0
-secret:                         import as-is                                            317      317        0        0        0        0
-execution_index_counter:        max-on-collision                                       8421     8410        0       11        0        0
-ct:cw:                          drop (cosmetic)                                          14        0        0        0       14        0
-pending:                        drop (transient)                                          3        0        0        0        3        0
-trigger:                        drop (reconstructible from history)                   12734        0        0        0    12734        0
-migration:                      drop (donor history not gateway's)                        4        0        0        0        4        0
------------------------------ -------------------------------------------------- -------- -------- -------- -------- -------- --------
-TOTAL                                                                                  53682    32494     2613       33    12759        0
+Prefix                          Policy                                              Scanned   Copied  CollRes  Stamped  Existed  Dropped   Errors
+----------------------------- -------------------------------------------------- -------- -------- -------- -------- -------- -------- --------
+t:                              pass-through (chain-scoped)                            8421     8410        0        0       11        0        0
+u:                              pass-through (chain-scoped)                            8421     8410        0        0       11        0        0
+history:                        pass-through (chain-scoped)                           12734    12734        0        0        0        0        0
+w:                              stamp chain ID                                          184      184        0      184        0        0        0
+wsalt:                          stamp chain ID (rebuild wsalt index post-merge)         184      184        0      184        0        0        0
+fl:                             stamp chain ID                                          141      141        0      141        0        0        0
+fr:                             stamp chain ID                                         2104     2104        0     2104        0        0        0
+secret:                         import as-is                                            317      317        0        0        0        0        0
+execution_index_counter:        max-on-collision                                       8421     8408        4        0       13        0        0
+ct:cw:                          drop (cosmetic)                                          14        0        0        0        0       14        0
+pending:                        drop (transient)                                          3        0        0        0        0        3        0
+trigger:                        drop (reconstructible from history)                   12734        0        0        0        0    12734        0
+migration:                      drop (donor history not gateway's)                        4        0        0        0        0        4        0
+----------------------------- -------------------------------------------------- -------- -------- -------- -------- -------- -------- --------
+TOTAL                                                                                  53682    32492        4     2613       35    12755        0
 ```
 
-(Made-up numbers, but the column shape is real.)
+(Made-up numbers, but the column shape is real.) **CollRes** is the subset of Copied that overwrote an existing gateway value (only ever non-zero for `execution_index_counter:`, when the donor counter exceeds the gateway counter). Sum reconciles: `Copied + Existed + Dropped + Errors = Scanned` for each row.
 
 ## Safety rules
 

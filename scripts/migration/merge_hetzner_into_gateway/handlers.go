@@ -156,15 +156,20 @@ func handleImportAsIs(donor, gateway storage.Storage, donorChainID int64, _ stri
 // taskID is globally unique across chains in our schema, so no chain
 // stamping is needed.
 func handleMaxOnCollision(donor, gateway storage.Storage, donorChainID int64, _ string, kv *storage.KeyValueItem, stat *prefixStats, dryRun, verbose bool) error {
+	exists, err := gateway.Exist(kv.Key)
+	if err != nil {
+		return fmt.Errorf("Exist check for %q: %w", string(kv.Key), err)
+	}
+	if !exists {
+		stat.copied++
+		if dryRun {
+			return nil
+		}
+		return gateway.Set(kv.Key, kv.Value)
+	}
+	// Both sides have it. Compare counters and take the larger.
 	existing, err := gateway.GetKey(kv.Key)
 	if err != nil {
-		if isKeyNotFoundError(err) {
-			stat.copied++
-			if dryRun {
-				return nil
-			}
-			return gateway.Set(kv.Key, kv.Value)
-		}
 		return fmt.Errorf("get gateway %q: %w", string(kv.Key), err)
 	}
 	donorVal, derr := strconv.ParseUint(string(kv.Value), 10, 64)
@@ -176,6 +181,9 @@ func handleMaxOnCollision(donor, gateway storage.Storage, donorChainID int64, _ 
 		return fmt.Errorf("parse gateway counter %q as uint64: %w", string(existing), gerr)
 	}
 	if donorVal > gwVal {
+		// Count as BOTH a write (CollRes is a subset of total writes) and
+		// a collision-resolved overwrite, so the summary totals reconcile.
+		stat.copied++
 		stat.collisionResolved++
 		if dryRun {
 			return nil
@@ -197,9 +205,17 @@ func handleDrop(donor, gateway storage.Storage, donorChainID int64, _ string, kv
 // Lower-level helpers
 // -------------------------------------------------------------------------
 
-// setIfAbsent is the ONLY write path in this tool. It guarantees that
-// nothing the gateway already has gets overwritten. Updates stats based
-// on the path taken.
+// setIfAbsent is the skip-if-exists write path used by every handler
+// EXCEPT handleMaxOnCollision. When this function writes, the gateway
+// definitely did not have the key beforehand — no overwrite is possible
+// through this path. handleMaxOnCollision is the one deliberate
+// exception: it calls gateway.Set directly when the donor counter is
+// larger than the gateway's, because re-issuing already-consumed
+// execution indices would be worse than overwriting one uint64.
+//
+// If you add a new handler, route writes through setIfAbsent unless you
+// have a documented reason for collision-overwrite semantics like
+// handleMaxOnCollision does.
 func setIfAbsent(gateway storage.Storage, key, value []byte, stat *prefixStats, dryRun bool) error {
 	exists, err := gateway.Exist(key)
 	if err != nil {

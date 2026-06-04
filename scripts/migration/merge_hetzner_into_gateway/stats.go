@@ -12,10 +12,10 @@ type prefixStats struct {
 	policy string
 
 	scanned           int // donor keys seen under this prefix
-	copied            int // written to gateway (or would be, in dry-run)
+	copied            int // written to gateway (or would be, in dry-run); includes collisionResolved
 	stampedChain      int // subset of copied where the key was rewritten with a chain prefix
 	skippedExists     int // gateway already had the key — preserved
-	collisionResolved int // execution_index_counter: gateway value was smaller, donor wins
+	collisionResolved int // subset of copied where an existing gateway value was overwritten (execution_index_counter: only, when donor counter > gateway counter)
 	dropped           int // explicit drop policy
 	errored           int // handler returned an error (logged separately)
 }
@@ -67,11 +67,14 @@ func (s *stats) print(donorChainID int64, chainName string) {
 	ordered = append(ordered, extras...)
 
 	// Column widths chosen by the longest values we know about.
-	fmt.Printf("%-30s %-50s %8s %8s %8s %8s %8s %8s\n",
-		"Prefix", "Policy", "Scanned", "Copied", "Stamped", "Existed", "Dropped", "Errors")
+	// CollRes is the subset of Copied that overwrote an existing gateway
+	// value (execution_index_counter: max-on-collision); brand-new keys
+	// show under Copied only.
+	fmt.Printf("%-30s %-50s %8s %8s %8s %8s %8s %8s %8s\n",
+		"Prefix", "Policy", "Scanned", "Copied", "CollRes", "Stamped", "Existed", "Dropped", "Errors")
 	fmt.Println("----------------------------- " +
 		"-------------------------------------------------- " +
-		"-------- -------- -------- -------- -------- --------")
+		"-------- -------- -------- -------- -------- -------- --------")
 
 	totals := prefixStats{}
 	for _, p := range ordered {
@@ -79,11 +82,12 @@ func (s *stats) print(donorChainID int64, chainName string) {
 		if ps.scanned == 0 && ps.dropped == 0 && ps.errored == 0 {
 			continue // suppress zero rows for readability
 		}
-		fmt.Printf("%-30s %-50s %8d %8d %8d %8d %8d %8d\n",
+		fmt.Printf("%-30s %-50s %8d %8d %8d %8d %8d %8d %8d\n",
 			ps.prefix, ps.policy,
-			ps.scanned, ps.copied, ps.stampedChain, ps.skippedExists, ps.dropped, ps.errored)
+			ps.scanned, ps.copied, ps.collisionResolved, ps.stampedChain, ps.skippedExists, ps.dropped, ps.errored)
 		totals.scanned += ps.scanned
 		totals.copied += ps.copied
+		totals.collisionResolved += ps.collisionResolved
 		totals.stampedChain += ps.stampedChain
 		totals.skippedExists += ps.skippedExists
 		totals.dropped += ps.dropped
@@ -91,10 +95,10 @@ func (s *stats) print(donorChainID int64, chainName string) {
 	}
 	fmt.Println("----------------------------- " +
 		"-------------------------------------------------- " +
-		"-------- -------- -------- -------- -------- --------")
-	fmt.Printf("%-30s %-50s %8d %8d %8d %8d %8d %8d\n",
+		"-------- -------- -------- -------- -------- -------- --------")
+	fmt.Printf("%-30s %-50s %8d %8d %8d %8d %8d %8d %8d\n",
 		"TOTAL", "",
-		totals.scanned, totals.copied, totals.stampedChain, totals.skippedExists, totals.dropped, totals.errored)
+		totals.scanned, totals.copied, totals.collisionResolved, totals.stampedChain, totals.skippedExists, totals.dropped, totals.errored)
 
 	if totals.errored > 0 {
 		fmt.Println()

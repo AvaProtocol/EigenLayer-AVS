@@ -30,9 +30,15 @@
 //     gateway DB. Inspect per-prefix counts and collisions before
 //     touching the real volume.
 //   - The tool uses skip-if-exists semantics: every Set is preceded by
-//     Exist; nothing the gateway has already written is ever overwritten.
-//     Do NOT replace this with storage.Storage.Load — Load is bulk upsert
-//     and will silently clobber live data.
+//     Exist; nothing the gateway has already written is ever overwritten,
+//     with ONE deliberate exception — `execution_index_counter:` uses a
+//     max-on-collision policy and will overwrite the gateway value when
+//     the donor counter is strictly larger (necessary so the gateway does
+//     not re-issue execution indices that the donor already consumed).
+//     Both kinds of writes are surfaced in the summary: brand-new keys
+//     show under "Copied", overwrites under "CollRes". Do NOT replace
+//     setIfAbsent with storage.Storage.Load — Load is bulk upsert and
+//     will silently clobber live data.
 //   - Take a fresh pre-merge backup of the gateway volume immediately
 //     before the merge runs. That backup is the only rollback target.
 //
@@ -107,7 +113,7 @@ func main() {
 
 	gateway, err := storage.NewWithPath(*gatewayPath)
 	if err != nil {
-		log.Fatalf("open gateway BadgerDB at %s: %v\n\nIs the Railway gateway still running? It must be stopped first for --dry-run=false.", *gatewayPath, err)
+		log.Fatalf("open gateway BadgerDB at %s: %v\n\nThe tool opens Badger in read-write mode (it needs the write lock even for --dry-run, since dry-run still acquires the lock to guarantee no other writer is racing it). If the Railway gateway service is still running against this volume, stop it before re-running.", *gatewayPath, err)
 	}
 	defer gateway.Close()
 
@@ -164,33 +170,23 @@ func main() {
 	}
 }
 
-// scanForUnknownPrefixes walks every key in the donor and bucketizes those
-// whose key does not start with any of the prefixes the dispatcher knows
-// about. Returns prefix → count of unknown keys (where "prefix" here is
-// the first 32 bytes of the unknown key, truncated for display).
+// scanForUnknownPrefixes walks every key in the donor via the storage
+// streaming iterator (KeysOnly — values are never fetched and no
+// per-key slice is built, so memory stays constant in the size of the
+// donor). Bucketizes any key whose prefix is not in `knownPrefixes`.
 //
-// Implementation: for each unknown key, take everything up to the first
-// ':' as the prefix label. This matches how the schema names its prefixes
-// (`t:`, `u:`, `history:`, etc.) and gives a useful aggregate without
-// printing every key.
+// Returned label is everything up to and including the first ':' in the
+// unknown key (e.g. "newprefix:") — matches the schema's naming
+// convention. Keys without a colon are bucketed under the full key.
 func scanForUnknownPrefixes(donor storage.Storage, knownPrefixes []string) (map[string]int, error) {
 	unknown := map[string]int{}
-	// GetByPrefix("") returns the whole DB.
-	items, err := donor.GetByPrefix([]byte(""))
-	if err != nil {
-		return nil, err
-	}
-items:
-	for _, kv := range items {
-		k := string(kv.Key)
+	err := donor.IterateKeysOnly([]byte(""), func(key []byte) error {
+		k := string(key)
 		for _, p := range knownPrefixes {
 			if len(k) >= len(p) && k[:len(p)] == p {
-				continue items
+				return nil
 			}
 		}
-		// Aggregate by everything up to (and including) the first colon
-		// — gives a useful label like "newprefix:" rather than printing
-		// the whole arbitrary key.
 		label := k
 		for i := 0; i < len(k); i++ {
 			if k[i] == ':' {
@@ -199,6 +195,10 @@ items:
 			}
 		}
 		unknown[label]++
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return unknown, nil
 }

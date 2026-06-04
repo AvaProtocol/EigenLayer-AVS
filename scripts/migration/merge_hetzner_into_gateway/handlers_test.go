@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strconv"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -165,6 +164,7 @@ func TestHandleMaxOnCollision_DonorLarger(t *testing.T) {
 	require.NoError(t, handleMaxOnCollision(donor, gw, 1, "execution_index_counter:", donorKV, stat, false, false))
 
 	assert.Equal(t, 1, stat.collisionResolved, "donor was larger — collision resolved")
+	assert.Equal(t, 1, stat.copied, "collision-resolved overwrites count toward Copied so summary totals reconcile (CollRes is a subset of Copied)")
 
 	got, err := gw.GetKey([]byte("execution_index_counter:taskA"))
 	require.NoError(t, err)
@@ -321,6 +321,3 @@ func TestSupportedChainList_IsDeterministic(t *testing.T) {
 		assert.Contains(t, first, want)
 	}
 }
-
-// strconv import keeps lint happy if we add numeric tests later.
-var _ = strconv.Itoa
