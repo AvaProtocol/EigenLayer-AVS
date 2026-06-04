@@ -94,10 +94,19 @@ func createMockMoralisServer(t *testing.T, tokens []MoralisTokenBalance) *httpte
 		// Filter tokens based on query parameters
 		filteredTokens := tokens
 
-		// Filter by token_addresses if provided
-		if tokenAddresses := r.URL.Query().Get("token_addresses"); tokenAddresses != "" {
+		// Filter by token_addresses if provided. Production code sends Moralis-style
+		// indexed brackets (`token_addresses[0]=…&token_addresses[1]=…`); the mock
+		// accepts both that and the legacy comma-joined form so older tests still pass.
+		var addressList []string
+		for key, vals := range r.URL.Query() {
+			if key == "token_addresses" || strings.HasPrefix(key, "token_addresses[") {
+				for _, v := range vals {
+					addressList = append(addressList, strings.Split(v, ",")...)
+				}
+			}
+		}
+		if len(addressList) > 0 {
 			var filtered []MoralisTokenBalance
-			addressList := strings.Split(tokenAddresses, ",")
 			for _, token := range tokens {
 				for _, addr := range addressList {
 					if strings.EqualFold(strings.TrimSpace(addr), token.TokenAddress) {

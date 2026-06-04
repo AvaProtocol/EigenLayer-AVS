@@ -188,12 +188,27 @@ func (t *TokenEnrichmentService) LoadWhitelist() error {
 		return fmt.Errorf("failed to parse whitelist file %s: %w", whitelistPath, err)
 	}
 
-	// Load tokens into cache (normalize addresses to lowercase). Surface
-	// malformed entries (empty id, decimals=0) at startup rather than letting
-	// them silently degrade balance lookups — once cached, GetTokenMetadata
-	// short-circuits the RPC fallback that would otherwise fix the metadata.
+	loaded, skipped := t.loadTokensIntoCache(tokens, whitelistPath)
+
+	if t.logger != nil {
+		t.logger.Debug("Loaded token whitelist",
+			"file", whitelistPath,
+			"loaded", loaded,
+			"skipped", skipped,
+			"chainID", t.chainID)
+	}
+
+	return nil
+}
+
+// loadTokensIntoCache copies parsed whitelist tokens into t.cache, lowercasing
+// addresses and surfacing malformed entries. Returns counts for caller logging.
+// decimals=0 is a heuristic — some legitimate ERC20s (e.g. WBTC variants) use
+// non-18 decimals and a handful intentionally use 0; the warning is
+// informational and does not skip the entry.
+func (t *TokenEnrichmentService) loadTokensIntoCache(tokens []TokenMetadata, whitelistPath string) (loaded, skipped int) {
 	t.cacheMux.Lock()
-	skipped := 0
+	defer t.cacheMux.Unlock()
 	for _, token := range tokens {
 		normalizedAddr := strings.ToLower(token.Id)
 		if normalizedAddr == "" {
@@ -204,9 +219,11 @@ func (t *TokenEnrichmentService) LoadWhitelist() error {
 			}
 			continue
 		}
-		if token.Decimals == 0 && t.logger != nil {
-			t.logger.Warn("Whitelist entry has decimals=0; balance lookups will use 0-decimal formatting unless populated",
-				"file", whitelistPath, "id", normalizedAddr, "symbol", token.Symbol)
+		if token.Decimals == 0 {
+			if t.logger != nil {
+				t.logger.Warn("Whitelist entry has decimals=0; balance lookups will use 0-decimal formatting unless populated",
+					"file", whitelistPath, "id", normalizedAddr, "symbol", token.Symbol)
+			}
 		}
 		t.cache[normalizedAddr] = &TokenMetadata{
 			Id:       normalizedAddr,
@@ -216,18 +233,7 @@ func (t *TokenEnrichmentService) LoadWhitelist() error {
 			Source:   "whitelist",
 		}
 	}
-	t.cacheMux.Unlock()
-
-	if t.logger != nil {
-		t.logger.Debug("Loaded token whitelist",
-			"file", whitelistPath,
-			"tokenCount", len(tokens),
-			"loaded", len(tokens)-skipped,
-			"skipped", skipped,
-			"chainID", t.chainID)
-	}
-
-	return nil
+	return len(tokens) - skipped, skipped
 }
 
 // GetTokenMetadata retrieves token metadata, checking cache first, then RPC
