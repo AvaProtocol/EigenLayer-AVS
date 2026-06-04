@@ -35,6 +35,16 @@ tenderly_account: "chrisli"
 tenderly_project: "default"
 tenderly_access_key: "G4dRTRaPOVXNWonadqt2OkUGmY0fsXwZ"
 
+# Top-level smart_wallet — required by the aa package globals (factory +
+# entrypoint), the startup paymaster probe, and any cmd tool that takes the
+# aggregator's default chain context. Points at Sepolia to match the AVS
+# chain above. Per-workflow execution still routes via chains[] below.
+smart_wallet:
+  eth_rpc_url: https://sepolia.gateway.tenderly.co/7MB9UwJMIQmLyhNxSIMg3X
+  bundler_url: ${SEPOLIA_BUNDLER_URL}
+  controller_private_key: 30c525b5608ea9cbfd7266fd6251d422f5b958e44ae9c49008f97907cc752601
+  paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92
+
 # Chain worker registry — gateway routes tasks to workers by chain_id
 # In production (Railway): worker-sepolia.railway.internal:50051
 # Locally: workers run on different localhost ports
@@ -45,7 +55,7 @@ chains:
     smart_wallet:
       eth_rpc_url: https://sepolia.gateway.tenderly.co/7MB9UwJMIQmLyhNxSIMg3X
       eth_ws_url: wss://sepolia.gateway.tenderly.co/7MB9UwJMIQmLyhNxSIMg3X
-      bundler_url: https://api.pimlico.io/v2/11155111/rpc?apikey=pim_bXfMSiGBPRrDdmjGdoSBxn
+      bundler_url: ${SEPOLIA_BUNDLER_URL}
       controller_private_key: 30c525b5608ea9cbfd7266fd6251d422f5b958e44ae9c49008f97907cc752601
       paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92
       max_wallets_per_owner: 2000
@@ -56,7 +66,7 @@ chains:
     smart_wallet:
       eth_rpc_url: https://api-base-sepolia-archive.n.dwellir.com/fe015a53-33df-40e2-9ebb-8cd8693c5430
       eth_ws_url: wss://api-base-sepolia-archive.n.dwellir.com/fe015a53-33df-40e2-9ebb-8cd8693c5430
-      bundler_url: https://api.pimlico.io/v2/84532/rpc?apikey=pim_bXfMSiGBPRrDdmjGdoSBxn
+      bundler_url: ${BASE_SEPOLIA_BUNDLER_URL}
       controller_private_key: 30c525b5608ea9cbfd7266fd6251d422f5b958e44ae9c49008f97907cc752601
       paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92
       max_wallets_per_owner: 3

@@ -21,7 +21,7 @@ eth_rpc_url: https://api-base-sepolia-archive.n.dwellir.com/fe015a53-33df-40e2-9
 eth_ws_url: wss://api-base-sepolia-archive.n.dwellir.com/fe015a53-33df-40e2-9ebb-8cd8693c5430
 
 # Third-party bundler endpoint (no self-hosted bundler)
-bundler_url: https://api.pimlico.io/v2/84532/rpc?apikey=pim_bXfMSiGBPRrDdmjGdoSBxn
+bundler_url: ${BASE_SEPOLIA_BUNDLER_URL}
 
 # Smart wallet / account abstraction config
 smart_wallet:

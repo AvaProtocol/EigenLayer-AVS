@@ -21,7 +21,7 @@ eth_rpc_url: https://sepolia.gateway.tenderly.co/7MB9UwJMIQmLyhNxSIMg3X
 eth_ws_url: wss://sepolia.gateway.tenderly.co/7MB9UwJMIQmLyhNxSIMg3X
 
 # Third-party bundler endpoint (no self-hosted bundler)
-bundler_url: https://api.pimlico.io/v2/11155111/rpc?apikey=pim_bXfMSiGBPRrDdmjGdoSBxn
+bundler_url: ${SEPOLIA_BUNDLER_URL}
 
 # Smart wallet / account abstraction config
 smart_wallet:
