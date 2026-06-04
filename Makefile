@@ -305,20 +305,20 @@ hetzner-snapshot:
 ## migration-rehearse: run the Hetzner->gateway merge tool sequentially
 ##                     against each donor in ./donors/, default dry-run.
 ##                     Pass APPLY=1 to actually write to the scratch
-##                     gateway DB at /tmp/rehearsal-gateway-db.
+##                     gateway DB at ./tmp/rehearsal-gateway-db.
 ##                     Pass CHAIN=sepolia (etc.) to limit scope.
 .PHONY: migration-rehearse
 migration-rehearse:
 	@scripts/dev/run-merge-rehearsal.sh $(if $(APPLY),--apply) $(CHAIN)
 
 ## dev-stack-rehearsal: start the dev gateway against the post-merge
-##                      scratch DB at /tmp/rehearsal-gateway-db. Use
+##                      scratch DB at ./tmp/rehearsal-gateway-db. Use
 ##                      after `make migration-rehearse APPLY=1` to
 ##                      validate read-path queries via the SDK.
 .PHONY: dev-stack-rehearsal
 dev-stack-rehearsal: build
 	@mkdir -p logs
-	@echo "🚀 Starting rehearsal gateway against /tmp/rehearsal-gateway-db"
+	@echo "🚀 Starting rehearsal gateway against ./tmp/rehearsal-gateway-db"
 	@echo "   gateway      → REST :8080, gRPC :2206  (logs/gateway-rehearsal.log)"
 	@echo "   worker:sep   → gRPC :50051            (logs/worker-sepolia.log)"
 	@echo "   worker:bsep  → gRPC :50052            (logs/worker-base-sepolia.log)"

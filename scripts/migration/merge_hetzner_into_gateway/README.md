@@ -64,8 +64,12 @@ go run ./scripts/migration/merge_hetzner_into_gateway \
 
 # 6. After all four merges, run BackfillWalletSaltIndex against the gateway
 #    to rebuild the wsalt: secondary index (the merge stamps the keys but
-#    doesn't re-derive the canonical pointers):
-go run ./scripts/migration/backfill_wallet_salt_index --config config/gateway-railway.yaml
+#    doesn't re-derive the canonical pointers). --chain-id is REQUIRED
+#    because wsalt: keys are chain-scoped; run once per chain.
+for chain in 1 8453 11155111 84532; do
+  go run ./scripts/migration/backfill_wallet_salt_index \
+    --config config/gateway-railway.yaml --chain-id "$chain"
+done
 
 # 7. Start the Railway gateway service. Smoke-test workflows + execution
 #    queries across all four chains.
