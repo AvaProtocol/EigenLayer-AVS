@@ -59,6 +59,10 @@ db_path: /tmp/ap-avs-operator
 # Optional: Error reporting (Sentry)
 # sentry_dsn: https://PUBLIC_KEY@oORG_ID.ingest.us.sentry.io/PROJECT_ID
 # server_name: operator-sepolia-1
+# Sentry `environment` tag (default: "production"). Set to "staging" on
+# testnet operators so events don't bucket into the production issue
+# board.
+# sentry_environment: staging
 
 # Destination chain configuration - where the tasks run
 # Replace with your actual target chain endpoints

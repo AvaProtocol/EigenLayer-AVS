@@ -43,7 +43,7 @@ func TestEventTriggerConfigExposure(t *testing.T) {
 		},
 	}
 
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "test_task_config",
 			Trigger: trigger,
@@ -250,7 +250,7 @@ func TestTriggerConfigAccessInJavaScript(t *testing.T) {
 		},
 	}
 
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "js_test_task",
 			Nodes:   nodes,

@@ -27,7 +27,7 @@ func setupTasksEngine(t *testing.T, totalTasks int) (*Engine, *avsproto.GetWalle
 	for i := 0; i < totalTasks; i++ {
 		task := testutil.RestTask()
 		testutil.SetTaskSettings(task, fmt.Sprintf("task%d", i), wallet.Address)
-		_, err := n.CreateTask(user, task)
+		_, err := n.CreateWorkflow(user, task)
 		require.NoError(t, err, "Failed to create task %d", i)
 	}
 
@@ -49,11 +49,11 @@ func setupExecutionsEngine(t *testing.T, totalExecutions int) (*Engine, string, 
 
 	tr := testutil.RestTask()
 	testutil.SetTaskSettings(tr, "exec_pagination_task", wallet.Address)
-	task, err := n.CreateTask(user, tr)
+	task, err := n.CreateWorkflow(user, tr)
 	require.NoError(t, err)
 
 	for i := 0; i < totalExecutions; i++ {
-		_, err := n.TriggerTask(user, &avsproto.TriggerTaskReq{
+		_, err := n.TriggerWorkflow(user, &avsproto.TriggerTaskReq{
 			TaskId:      task.Id,
 			TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 			TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{
@@ -78,7 +78,7 @@ func setupExecutionsEngine(t *testing.T, totalExecutions int) (*Engine, string, 
 func collectAllTaskIds(t *testing.T, n *Engine, walletAddr string, total int) []string {
 	t.Helper()
 	user := testutil.TestUser1()
-	all, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	all, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{walletAddr},
 		Limit:              int64(total),
 	})
@@ -122,7 +122,7 @@ func TestTasksPaginationForwardThreePagesThenBackward(t *testing.T) {
 	allIds := collectAllTaskIds(t, n, wallet.Address, totalTasks)
 
 	// Page 1: no cursor → newest 5 items
-	page1, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	page1, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		Limit:              pageSize,
 	})
@@ -135,7 +135,7 @@ func TestTasksPaginationForwardThreePagesThenBackward(t *testing.T) {
 	}
 
 	// Page 2: after endCursor of page 1 → next 5 items
-	page2, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	page2, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		After:              page1.PageInfo.EndCursor,
 		Limit:              pageSize,
@@ -149,7 +149,7 @@ func TestTasksPaginationForwardThreePagesThenBackward(t *testing.T) {
 	}
 
 	// Page 3: after endCursor of page 2 → remaining 3 items
-	page3, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	page3, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		After:              page2.PageInfo.EndCursor,
 		Limit:              pageSize,
@@ -164,7 +164,7 @@ func TestTasksPaginationForwardThreePagesThenBackward(t *testing.T) {
 	}
 
 	// THE BUG SCENARIO: before startCursor of page 3 → should get page 2
-	prevPage, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	prevPage, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		Before:             page3.PageInfo.StartCursor,
 		Limit:              pageSize,
@@ -208,7 +208,7 @@ func TestTasksPaginationFullRoundTrip(t *testing.T) {
 		if afterCursor != "" {
 			req.After = afterCursor
 		}
-		page, err := n.ListTasksByUser(user, req)
+		page, err := n.ListWorkflowsByUser(user, req)
 		require.NoError(t, err, "forward page %d", p)
 		forwardPages = append(forwardPages, page.Items)
 		forwardStartCursors = append(forwardStartCursors, page.PageInfo.StartCursor)
@@ -227,7 +227,7 @@ func TestTasksPaginationFullRoundTrip(t *testing.T) {
 	// Navigate backward from last page to first
 	beforeCursor := forwardStartCursors[numPages-1]
 	for p := numPages - 2; p >= 0; p-- {
-		page, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+		page, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 			SmartWalletAddress: []string{wallet.Address},
 			Before:             beforeCursor,
 			Limit:              pageSize,
@@ -266,13 +266,13 @@ func TestTasksPaginationBackwardFromLastPage(t *testing.T) {
 	allIds := collectAllTaskIds(t, n, wallet.Address, totalTasks)
 
 	// Forward to page 2 (last full page)
-	page1, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	page1, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		Limit:              pageSize,
 	})
 	require.NoError(t, err)
 
-	page2, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	page2, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		After:              page1.PageInfo.EndCursor,
 		Limit:              pageSize,
@@ -281,7 +281,7 @@ func TestTasksPaginationBackwardFromLastPage(t *testing.T) {
 	assert.Equal(t, pageSize, len(page2.Items))
 
 	// Forward to page 3 (partial page, 1 item)
-	page3, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	page3, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		After:              page2.PageInfo.EndCursor,
 		Limit:              pageSize,
@@ -292,7 +292,7 @@ func TestTasksPaginationBackwardFromLastPage(t *testing.T) {
 	assert.False(t, page3.PageInfo.HasNextPage)
 
 	// Backward from page 3: should get page 2
-	backPage, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	backPage, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		Before:             page3.PageInfo.StartCursor,
 		Limit:              pageSize,
@@ -328,7 +328,7 @@ func TestTasksPaginationSingleItemPages(t *testing.T) {
 		if afterCursor != "" {
 			req.After = afterCursor
 		}
-		page, err := n.ListTasksByUser(user, req)
+		page, err := n.ListWorkflowsByUser(user, req)
 		require.NoError(t, err)
 		assert.Equal(t, 1, len(page.Items))
 		assert.Equal(t, allIds[i], page.Items[0].Id, "forward item %d", i)
@@ -338,7 +338,7 @@ func TestTasksPaginationSingleItemPages(t *testing.T) {
 
 	// Navigate backward from item 4 (last) using startCursor
 	for i := totalTasks - 1; i > 0; i-- {
-		backPage, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+		backPage, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 			SmartWalletAddress: []string{wallet.Address},
 			Before:             pages[i].PageInfo.StartCursor,
 			Limit:              pageSize,

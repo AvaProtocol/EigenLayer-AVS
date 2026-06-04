@@ -65,12 +65,71 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		"paymaster", agg.config.SmartWallet.PaymasterAddress,
 	)
 
+	// ChainIDs lets the cleanup loop locate tasks across every chain bucket
+	// in chain-scoped storage. Single-chain aggregator: just its own chain.
+	queueChainIDs := []int64{}
+	if agg.chainID != nil {
+		queueChainIDs = append(queueChainIDs, agg.chainID.Int64())
+	}
+	if agg.config.SmartWallet != nil && agg.config.SmartWallet.ChainID > 0 {
+		swChainID := agg.config.SmartWallet.ChainID
+		dup := false
+		for _, id := range queueChainIDs {
+			if id == swChainID {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			queueChainIDs = append(queueChainIDs, swChainID)
+		}
+	}
 	agg.queue = apqueue.New(agg.db, agg.logger, &apqueue.QueueOption{
-		Prefix: "default",
+		Prefix:   "default",
+		ChainIDs: queueChainIDs,
 	})
 	agg.worker = apqueue.NewWorker(agg.queue, agg.db)
 
-	// Initialize global TokenEnrichmentService if not already set
+	// Gateway mode: dial one *ethclient.Client per Chains[] entry. The
+	// connection is shared between the TokenEnrichmentService (whose RPC
+	// fallback wants the right chain's contracts — see "0.1 USDC" vs
+	// "0.0000000000001 UNKNOWN") and the REST fee/wallet handlers (whose
+	// per-request chainId now routes through smartWalletRpcByChain instead
+	// of always landing on agg.smartWalletRpc — which the gateway-mode
+	// fallback in config.go binds to chains[0] = mainnet).
+	if agg.config.IsGateway {
+		agg.smartWalletRpcByChain = make(map[int64]*ethclient.Client, len(agg.config.Chains))
+		for _, chain := range agg.config.Chains {
+			if chain.SmartWallet == nil || chain.SmartWallet.EthRpcUrl == "" {
+				continue
+			}
+			chainRpc, err := ethclient.Dial(chain.SmartWallet.EthRpcUrl)
+			if err != nil {
+				agg.logger.Warn("Failed to dial chain RPC",
+					"chain", chain.Name, "chain_id", chain.ChainID, "error", err)
+				continue
+			}
+			agg.smartWalletRpcByChain[chain.ChainID] = chainRpc
+
+			chainTokenService, err := taskengine.NewTokenEnrichmentService(chainRpc, agg.logger)
+			if err != nil {
+				agg.logger.Warn("Failed to initialize chain TokenEnrichmentService",
+					"chain", chain.Name, "chain_id", chain.ChainID, "error", err)
+				continue
+			}
+			taskengine.RegisterTokenEnrichmentService(chainTokenService)
+			agg.logger.Info("Chain RPC + TokenEnrichmentService registered",
+				"chain", chain.Name,
+				"chainID", chainTokenService.GetChainID(),
+				"whitelistTokens", chainTokenService.GetCacheSize())
+		}
+	}
+
+	// Initialize global TokenEnrichmentService (used as the engine's default
+	// when callers don't pass a chain ID — single-chain mode, or gateway mode
+	// for legacy code paths that haven't been migrated yet). In gateway mode
+	// this lands on chains[0] because config.go fills SmartWallet.EthRpcUrl
+	// from Chains[0].SmartWallet.
 	if taskengine.GetTokenEnrichmentService() == nil && agg.config.SmartWallet.EthRpcUrl != "" {
 		rpcClient, err := ethclient.Dial(agg.config.SmartWallet.EthRpcUrl)
 		if err != nil {
@@ -109,6 +168,8 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 
 	// Store price service on engine (nil-safe — engine and summarizer handle absence).
 	agg.engine.SetPriceService(priceService)
+	// Also expose it to the REST layer (estimateFees handler).
+	agg.priceService = priceService
 
 	// Create executor with engine reference for atomic execution indexing
 	taskExecutor := taskengine.NewExecutor(agg.config.SmartWallet, agg.db, agg.logger, agg.engine, priceService)

@@ -13,7 +13,7 @@ import (
 // are properly stored in metadata and used to generate improved email HTML
 func TestBranchNode_EmailSummaryGeneration(t *testing.T) {
 	// Create VM with a branch node
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id: "test-task",
 			Trigger: &avsproto.TaskTrigger{
@@ -165,7 +165,7 @@ func TestBranchNode_EmailSummaryGeneration(t *testing.T) {
 // TestBranchNode_TrueConditionLogging tests that true conditions also log comparison operands
 func TestBranchNode_TrueConditionLogging(t *testing.T) {
 	// Create VM with a branch node
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id: "test-task",
 			Trigger: &avsproto.TaskTrigger{

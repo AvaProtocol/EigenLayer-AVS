@@ -1,5 +1,7 @@
 # Ava Protocol AVS — Architecture & Implementation Design
 
+> Scope: this document describes the **code architecture** of this Go repository — packages, subsystems, RPC schema, storage, and execution flow. Deployment topology (which services run where, public hostnames, operational runbooks) is maintained separately by the infrastructure team and is not covered here.
+
 ## Overview
 
 Ava Protocol AVS is a decentralized workflow automation system built on EigenLayer. Users define no-code workflows (trigger → nodes → actions) that execute automatically when on-chain or off-chain conditions are met. The system uses ERC-6900 modular smart wallets for on-chain execution and ERC-4337 account abstraction for gasless operation.

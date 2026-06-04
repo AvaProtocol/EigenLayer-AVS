@@ -38,6 +38,10 @@ jwt_secret:
 # Optional: Monitoring and telemetry
 # server_name: "aggregator-your-name"
 # sentry_dsn: https://your_sentry_dsn_here@sentry.io/project_id
+# Sentry `environment` tag (default: "production"). Set to "staging" or
+# "feature:<name>" on non-production deployments so events don't bucket
+# into the production issue board.
+# sentry_environment: staging
 
 # Optional: Tenderly integration for simulation
 tenderly_account:

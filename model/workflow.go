@@ -1,0 +1,411 @@
+package model
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/oklog/ulid/v2"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
+
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+)
+
+// Workflow wraps the protobuf Task type with engine-side methods. The
+// embedded *avsproto.Task field is renamed to Workflow as part of the
+// gRPC public-surface removal (see API_REST_IMPLEMENTATION_PLAN.md); for
+// now the embedded type keeps its proto-generated name.
+type Workflow struct {
+	*avsproto.Task
+}
+
+const (
+	ErrEmptyNodesField = "invalid: nodes field cannot be an empty array"
+	ErrEmptyEdgesField = "invalid: edges field cannot be an empty array"
+)
+
+var (
+	// JavaScript identifier validation regex
+	jsIdentifierRegex = regexp.MustCompile(`^[a-zA-Z_$][a-zA-Z0-9_$]*$`)
+
+	// JavaScript reserved words that cannot be used as identifiers
+	// Includes both lowercase and common case variations to avoid runtime string conversion
+	jsReservedWords = map[string]bool{
+		// Lowercase versions
+		"break": true, "case": true, "catch": true, "class": true, "const": true,
+		"continue": true, "debugger": true, "default": true, "delete": true,
+		"do": true, "else": true, "enum": true, "export": true, "extends": true,
+		"false": true, "finally": true, "for": true, "function": true, "if": true,
+		"import": true, "in": true, "instanceof": true, "let": true, "new": true,
+		"null": true, "return": true, "super": true, "switch": true, "this": true,
+		"throw": true, "true": true, "try": true, "typeof": true, "var": true,
+		"void": true, "while": true, "with": true, "yield": true,
+
+		// Common case variations to avoid runtime string conversion
+		"Break": true, "Case": true, "Catch": true, "Class": true, "Const": true,
+		"Continue": true, "Debugger": true, "Default": true, "Delete": true,
+		"Do": true, "Else": true, "Enum": true, "Export": true, "Extends": true,
+		"False": true, "Finally": true, "For": true, "Function": true, "If": true,
+		"Import": true, "In": true, "Instanceof": true, "Let": true, "New": true,
+		"Null": true, "Return": true, "Super": true, "Switch": true, "This": true,
+		"Throw": true, "True": true, "Try": true, "Typeof": true, "Var": true,
+		"Void": true, "While": true, "With": true, "Yield": true,
+
+		// All uppercase versions
+		"BREAK": true, "CASE": true, "CATCH": true, "CLASS": true, "CONST": true,
+		"CONTINUE": true, "DEBUGGER": true, "DEFAULT": true, "DELETE": true,
+		"DO": true, "ELSE": true, "ENUM": true, "EXPORT": true, "EXTENDS": true,
+		"FALSE": true, "FINALLY": true, "FOR": true, "FUNCTION": true, "IF": true,
+		"IMPORT": true, "IN": true, "INSTANCEOF": true, "LET": true, "NEW": true,
+		"NULL": true, "RETURN": true, "SUPER": true, "SWITCH": true, "THIS": true,
+		"THROW": true, "TRUE": true, "TRY": true, "TYPEOF": true, "VAR": true,
+		"VOID": true, "WHILE": true, "WITH": true, "YIELD": true,
+	}
+)
+
+// ValidateNodeNameForJavaScript checks if a node name is valid for use as a JavaScript variable
+// Node names must be valid JavaScript identifiers to be referenced in subsequent nodes
+func ValidateNodeNameForJavaScript(nodeName string) error {
+	if nodeName == "" {
+		return fmt.Errorf("node name cannot be empty")
+	}
+
+	// Check if it matches JavaScript identifier pattern
+	if !jsIdentifierRegex.MatchString(nodeName) {
+		return fmt.Errorf("node name '%s' is not a valid JavaScript identifier - must start with letter, underscore, or dollar sign and contain only letters, numbers, underscores, and dollar signs", nodeName)
+	}
+
+	// Check if it's a reserved word
+	if jsReservedWords[nodeName] {
+		return fmt.Errorf("node name '%s' is a JavaScript reserved word and cannot be used", nodeName)
+	}
+
+	return nil
+}
+
+// GenerateID creates a new ULID in lowercase format for better readability
+// This is the centralized function for all ID generation (task IDs, execution IDs, node IDs, etc.)
+func GenerateID() string {
+	return strings.ToLower(ulid.Make().String())
+}
+
+// GenerateWorkflowID creates a new workflow ID using the centralized ID
+// generation. Workflow IDs are ULIDs to keep them sortable by creation time.
+func GenerateWorkflowID() string {
+	return GenerateID()
+}
+
+func NewWorkflow() *Workflow {
+	return &Workflow{
+		Task: &avsproto.Task{
+			Status: avsproto.TaskStatus_Enabled, // Initialize with default status
+		},
+	}
+}
+
+// extractSettings extracts and validates the settings map from inputVariables.
+// Returns the settings map or an error if settings is missing or invalid.
+func extractSettings(inputVariables map[string]*structpb.Value) (map[string]interface{}, error) {
+	if inputVariables == nil {
+		return nil, fmt.Errorf("inputVariables is required")
+	}
+
+	settingsVal, ok := inputVariables["settings"]
+	if !ok || settingsVal == nil {
+		return nil, fmt.Errorf("inputVariables.settings is required")
+	}
+
+	settings, ok := settingsVal.AsInterface().(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("inputVariables.settings must be an object")
+	}
+
+	return settings, nil
+}
+
+// ValidateInputVariablesSettings validates that inputVariables contains a
+// valid settings object. Currently the only mandatory field is `runner`
+// (a hex address — the smart wallet the engine validates ownership
+// against).
+//
+// `settings.name` used to be required here too, but the REST mapper now
+// mirrors the top-level CreateWorkflowRequest.name field into
+// settings["name"] before this runs, so the requirement moved to the
+// transport. SimulateTask doesn't have a top-level name field, and the
+// engine treats a nameless simulation as fine (the value is only used
+// for transient logging / notification fallbacks).
+func ValidateInputVariablesSettings(inputVariables map[string]*structpb.Value) error {
+	settings, err := extractSettings(inputVariables)
+	if err != nil {
+		return err
+	}
+
+	runner, _ := settings["runner"].(string)
+	if strings.TrimSpace(runner) == "" {
+		return fmt.Errorf("inputVariables.settings.runner is required")
+	}
+
+	if !common.IsHexAddress(runner) {
+		return fmt.Errorf("inputVariables.settings.runner must be a valid hex address")
+	}
+
+	return nil
+}
+
+// enrichSettings adds server-generated immutable fields to the settings map
+// and writes the enriched settings back to inputVariables.
+func enrichSettings(inputVariables map[string]*structpb.Value, settings map[string]interface{}, taskID string, owner common.Address, body *avsproto.CreateTaskReq) error {
+	settings["id"] = taskID
+	settings["owner"] = owner.Hex()
+	settings["startAt"] = body.StartAt
+	settings["expiredAt"] = body.ExpiredAt
+	settings["maxExecution"] = body.MaxExecution
+
+	// Write enriched settings back to inputVariables
+	enrichedValue, err := structpb.NewValue(settings)
+	if err != nil {
+		return fmt.Errorf("failed to serialize enriched settings: %w", err)
+	}
+	inputVariables["settings"] = enrichedValue
+
+	return nil
+}
+
+// NewWorkflowFromProtobuf populates a Workflow structure from the proto
+// CreateTask request payload.
+func NewWorkflowFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Workflow, error) {
+	if body == nil {
+		return nil, nil
+	}
+
+	owner := user.Address
+
+	if len(body.Edges) == 0 {
+		return nil, fmt.Errorf("%s", ErrEmptyEdgesField)
+	}
+
+	if len(body.Nodes) == 0 {
+		return nil, fmt.Errorf("%s", ErrEmptyNodesField)
+	}
+
+	// Validate inputVariables.settings (shared with SimulateTask)
+	if err := ValidateInputVariablesSettings(body.InputVariables); err != nil {
+		return nil, fmt.Errorf("invalid task argument: %s", err.Error())
+	}
+
+	// Extract the validated settings for enrichment and field copying
+	settings, _ := extractSettings(body.InputVariables) // safe: already validated above
+	name, _ := settings["name"].(string)
+	runner, _ := settings["runner"].(string)
+
+	taskID := GenerateWorkflowID()
+
+	// Enrich settings with server-generated immutable fields
+	if err := enrichSettings(body.InputVariables, settings, taskID, owner, body); err != nil {
+		return nil, fmt.Errorf("invalid task argument: %w", err)
+	}
+
+	t := &Workflow{
+		Task: &avsproto.Task{
+			Id: taskID,
+
+			// Derive storage/API fields from settings
+			Owner:              owner.Hex(),
+			SmartWalletAddress: common.HexToAddress(runner).Hex(),
+			Name:               name,
+
+			Trigger:        body.Trigger,
+			Nodes:          body.Nodes,
+			Edges:          body.Edges,
+			ExpiredAt:      body.ExpiredAt,
+			StartAt:        body.StartAt,
+			MaxExecution:   body.MaxExecution,
+			InputVariables: body.InputVariables, // Contains enriched settings
+			ChainId:        body.ChainId,        // Propagate chain_id from request (0 = default chain)
+
+			// initial state for task
+			Status: avsproto.TaskStatus_Enabled,
+		},
+	}
+
+	// Validate
+	if err := t.ValidateWithError(); err != nil {
+		return nil, fmt.Errorf("Invalid task argument: %w", err)
+	}
+
+	return t, nil
+}
+
+// Return a compact json ready to persist to storage
+func (t *Workflow) ToJSON() ([]byte, error) {
+	// return json.Marshal(t)
+	return protojson.Marshal(t.Task)
+}
+
+func (t *Workflow) FromStorageData(body []byte) error {
+	// err := json.Unmarshal(body, t)
+	err := protojson.Unmarshal(body, t.Task)
+	if err != nil {
+		return err
+	}
+
+	// Ensure task is properly initialized after loading from storage
+	return t.EnsureInitialized()
+}
+
+// EnsureInitialized validates and fixes critical fields that must be set
+// This should be called after loading tasks from storage to ensure data integrity
+func (t *Workflow) EnsureInitialized() error {
+	if t.Task == nil {
+		return fmt.Errorf("task protobuf struct is nil")
+	}
+
+	// The original crash was caused by calling .String() on uninitialized protobuf enums
+	// For TaskStatus enum, the zero value (0) corresponds to Active, which is valid
+	// The main issue was when the entire protobuf message wasn't properly initialized
+	// By ensuring t.Task is not nil above, we prevent the original crash
+
+	// Only validate truly critical fields that cause runtime crashes
+	// Don't validate business logic fields like Owner, as tests may use empty values
+	if t.Task.Id == "" {
+		// Empty ID can cause issues in storage keys and logging
+		return fmt.Errorf("task ID cannot be empty")
+	}
+
+	// For production safety, we could log warnings for missing non-critical fields
+	// but don't fail initialization to maintain backward compatibility
+
+	return nil
+}
+
+// Return a compact json ready to persist to storage
+func (t *Workflow) Validate() bool {
+	return t.ValidateWithError() == nil
+}
+
+// ValidateWithError returns detailed validation error messages
+func (t *Workflow) ValidateWithError() error {
+	// Validate trigger name for JavaScript compatibility
+	if t.Task.Trigger != nil && t.Task.Trigger.Name != "" {
+		if err := ValidateNodeNameForJavaScript(t.Task.Trigger.Name); err != nil {
+			return fmt.Errorf("trigger name validation failed: %w", err)
+		}
+	}
+
+	// Validate all node names for JavaScript compatibility
+	for _, node := range t.Task.Nodes {
+		if err := ValidateNodeNameForJavaScript(node.Name); err != nil {
+			return fmt.Errorf("node '%s' validation failed: %w", node.Id, err)
+		}
+	}
+
+	// Validate block trigger intervals
+	if t.Task.Trigger != nil {
+		if blockTrigger := t.Task.Trigger.GetBlock(); blockTrigger != nil {
+			config := blockTrigger.GetConfig()
+			// Config must exist and have a valid interval
+			if config == nil {
+				return fmt.Errorf("block trigger config is required but missing")
+			}
+			if config.GetInterval() <= 0 {
+				return fmt.Errorf("block trigger interval must be greater than 0, got %d", config.GetInterval())
+			}
+		}
+
+		// Validate cron trigger
+		if cronTrigger := t.Task.Trigger.GetCron(); cronTrigger != nil {
+			config := cronTrigger.GetConfig()
+			if config == nil {
+				return fmt.Errorf("cron trigger config is required but missing")
+			}
+			if len(config.GetSchedules()) == 0 {
+				return fmt.Errorf("cron trigger must have at least one schedule")
+			}
+		}
+
+		// Validate fixed time trigger
+		if fixedTimeTrigger := t.Task.Trigger.GetFixedTime(); fixedTimeTrigger != nil {
+			config := fixedTimeTrigger.GetConfig()
+			if config == nil {
+				return fmt.Errorf("fixed time trigger config is required but missing")
+			}
+			if len(config.GetEpochs()) == 0 {
+				return fmt.Errorf("fixed time trigger must have at least one epoch")
+			}
+		}
+
+		// Validate event trigger
+		if eventTrigger := t.Task.Trigger.GetEvent(); eventTrigger != nil {
+			config := eventTrigger.GetConfig()
+			if config == nil {
+				return fmt.Errorf("event trigger config is required but missing")
+			}
+			if len(config.GetQueries()) == 0 {
+				return fmt.Errorf("event trigger must have at least one query")
+			}
+		}
+	}
+
+	return nil
+}
+
+func (t *Workflow) ToProtoBuf() (*avsproto.Task, error) {
+	return t.Task, nil
+}
+
+// Generate a global unique key for the task in our system
+func (t *Workflow) Key() []byte {
+	return []byte(t.Task.Id)
+}
+
+func (t *Workflow) SetCompleted() {
+	t.Task.Status = avsproto.TaskStatus_Completed
+	t.Task.CompletedAt = time.Now().UnixMilli()
+}
+
+func (t *Workflow) SetEnabled() {
+	t.Task.Status = avsproto.TaskStatus_Enabled
+}
+
+func (t *Workflow) SetFailed() {
+	t.Task.Status = avsproto.TaskStatus_Failed
+	t.Task.CompletedAt = time.Now().UnixMilli()
+}
+
+func (t *Workflow) SetDisabled() {
+	t.Task.Status = avsproto.TaskStatus_Disabled
+}
+
+// Check whether the task own by the given address
+func (t *Workflow) OwnedBy(address common.Address) bool {
+	return strings.EqualFold(t.Task.Owner, address.Hex())
+}
+
+// A task is runable when all of these conditions are matched
+//  1. Its max execution has not reached
+//  2. Its expiration time has not reached
+func (t *Workflow) IsRunable() bool {
+	// When MaxExecution is 0, it is unlimited run
+	reachedMaxRun := t.Task.MaxExecution > 0 && t.Task.ExecutionCount >= t.Task.MaxExecution
+
+	reachedExpiredTime := t.Task.ExpiredAt > 0 && time.Unix(t.Task.ExpiredAt/1000, 0).Before(time.Now())
+
+	beforeStartTime := t.Task.StartAt > 0 && time.Now().UnixMilli() < t.Task.StartAt
+
+	return !reachedMaxRun && !reachedExpiredTime && !beforeStartTime
+}
+
+// WorkflowKeyToId extracts the workflow ID portion of a storage key
+// generated by Workflow.Key(). The first 86 bytes are
+// <43-byte owner>:<43-byte runner>:.
+func WorkflowKeyToId(key []byte) []byte {
+	return key[86:]
+}
+
+// UlidFromWorkflowId parses a workflow ID string into its ULID value.
+func UlidFromWorkflowId(workflowID string) ulid.ULID {
+	return ulid.MustParse(workflowID)
+}

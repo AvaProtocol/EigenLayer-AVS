@@ -457,3 +457,45 @@ func (t *TokenEnrichmentService) GetCacheSize() int {
 	defer t.cacheMux.RUnlock()
 	return len(t.cache)
 }
+
+// tokenServiceRegistry holds TokenEnrichmentService instances keyed by chain
+// ID. Populated at startup by the aggregator/operator from each configured
+// chain's RPC. In gateway mode the registry holds one entry per chain in
+// chains[]; in single-chain mode it holds exactly one entry. Callers that
+// know which chain a workflow targets should use
+// GetTokenEnrichmentServiceForChain so token metadata lookups hit the right
+// whitelist + RPC — otherwise a Sepolia USDC address routed through a
+// mainnet-bound service falls back to symbol="UNKNOWN", decimals=18 (see
+// fetchTokenMetadataFromRPC defaults).
+var (
+	tokenServiceRegistry      = make(map[uint64]*TokenEnrichmentService)
+	tokenServiceRegistryMutex sync.RWMutex
+)
+
+// RegisterTokenEnrichmentService stores svc under its detected chain ID so
+// callers can look it up later via GetTokenEnrichmentServiceForChain.
+// Idempotent: re-registering the same chain replaces the prior entry.
+// Services with chain ID 0 are rejected (chain ID is required for routing).
+func RegisterTokenEnrichmentService(svc *TokenEnrichmentService) {
+	if svc == nil || svc.chainID == 0 {
+		return
+	}
+	tokenServiceRegistryMutex.Lock()
+	tokenServiceRegistry[svc.chainID] = svc
+	tokenServiceRegistryMutex.Unlock()
+}
+
+// GetTokenEnrichmentServiceForChain returns the registered service for the
+// given chain ID, or nil when none is registered. Returns nil for chainID 0;
+// callers wanting a "default" fallback should resolve to the legacy global
+// themselves. Avoiding an implicit registry-size-1 shortcut keeps tests
+// honest: SetTokenEnrichmentService(nil) for isolation won't silently get
+// back a service that some earlier test leaked into the registry.
+func GetTokenEnrichmentServiceForChain(chainID uint64) *TokenEnrichmentService {
+	if chainID == 0 {
+		return nil
+	}
+	tokenServiceRegistryMutex.RLock()
+	defer tokenServiceRegistryMutex.RUnlock()
+	return tokenServiceRegistry[chainID]
+}

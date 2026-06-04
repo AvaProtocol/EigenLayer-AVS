@@ -34,13 +34,13 @@ func TestListTasksByUserPaginationWithBeforeAfter(t *testing.T) {
 	for i := 0; i < totalTestTasks; i++ {
 		task := testutil.RestTask()
 		testutil.SetTaskSettings(task, fmt.Sprintf("task%d", i), wallet.Address)
-		_, err := n.CreateTask(user, task)
+		_, err := n.CreateWorkflow(user, task)
 		if err != nil {
 			t.Fatalf("Failed to create task: %v", err)
 		}
 	}
 
-	result, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	result, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		Limit:              pageSize,
 	})
@@ -54,7 +54,7 @@ func TestListTasksByUserPaginationWithBeforeAfter(t *testing.T) {
 	assert.NotEmpty(t, result.PageInfo.EndCursor, "Expected cursor to be set when HasNextPage is true")
 
 	firstPage := result
-	secondPage, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	secondPage, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		After:              firstPage.PageInfo.EndCursor,
 		Limit:              pageSize,
@@ -86,7 +86,7 @@ func TestListTasksByUserPaginationWithBeforeAfter(t *testing.T) {
 	}
 
 	// Use startCursor of secondPage to navigate backward (items before the first item on page 2)
-	previousPage, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	previousPage, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		Before:             secondPage.PageInfo.StartCursor,
 		Limit:              pageSize,
@@ -122,7 +122,7 @@ func TestListTasksByUserPaginationWithBeforeAfter(t *testing.T) {
 		assert.False(t, secondPageIds[item.Id], "Found duplicate task ID %s in previous and second page", item.Id)
 	}
 
-	defaultLimitResult, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	defaultLimitResult, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		Limit:              0,
 	})
@@ -134,7 +134,7 @@ func TestListTasksByUserPaginationWithBeforeAfter(t *testing.T) {
 	assert.Equal(t, totalTestTasks, len(defaultLimitResult.Items), "Expected %d items with default limit of 0", totalTestTasks)
 
 	largeLimit := totalTestTasks * 2
-	largeLimitResult, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	largeLimitResult, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		Limit:              int64(largeLimit),
 	})
@@ -147,7 +147,7 @@ func TestListTasksByUserPaginationWithBeforeAfter(t *testing.T) {
 	assert.False(t, largeLimitResult.PageInfo.HasNextPage, "Expected HasNextPage to be false when limit exceeds total items")
 	assert.NotEmpty(t, largeLimitResult.PageInfo.EndCursor, "Expected cursor to always be set for current page (GraphQL PageInfo convention)")
 
-	forwardPage, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	forwardPage, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		Limit:              pageSize,
 	})
@@ -156,7 +156,7 @@ func TestListTasksByUserPaginationWithBeforeAfter(t *testing.T) {
 		return
 	}
 
-	backwardPage, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	backwardPage, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		Before:             CreateNextCursor(forwardPage.Items[len(forwardPage.Items)-1].Id),
 		Limit:              pageSize,
@@ -177,7 +177,7 @@ func TestListTasksByUserPaginationWithBeforeAfter(t *testing.T) {
 		}
 	}
 
-	switchedForwardPage, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	switchedForwardPage, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},
 		After:              backwardPage.PageInfo.EndCursor,
 		Limit:              pageSize,

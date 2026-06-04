@@ -136,7 +136,7 @@ func TestRunJavaScript(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
@@ -198,7 +198,7 @@ func TestRunJavaScriptComplex(t *testing.T) {
 		},
 	}
 
-	vm, _ := NewVMWithData(&model.Task{
+	vm, _ := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
@@ -247,7 +247,7 @@ func TestRunJavaScriptComplexWithMap(t *testing.T) {
 		},
 	}
 
-	vm, _ := NewVMWithData(&model.Task{
+	vm, _ := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
@@ -364,7 +364,7 @@ func TestRunJavaScriptCanAccessSecretsWithapContext(t *testing.T) {
 		},
 	}
 
-	vm, _ := NewVMWithData(&model.Task{
+	vm, _ := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
@@ -459,7 +459,7 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 		{Id: "e2-template", Source: customCodeNodeID, Target: restNodeID},
 	}
 
-	taskModel := &model.Task{
+	taskModel := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
@@ -556,7 +556,7 @@ func TestRunJavaScriptReturnUndefined(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "test_undefined",
 			Nodes:   nodes,

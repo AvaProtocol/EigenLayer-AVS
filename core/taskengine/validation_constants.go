@@ -142,7 +142,7 @@ func ConvertLangStringToEnum(langValue interface{}) interface{} {
 
 // ValidateManualTriggerFromProtobuf extracts and validates manual trigger data from protobuf output.
 // Used by TriggerTask path when working with protobuf ManualTrigger_Output.
-func ValidateManualTriggerFromProtobuf(manualOutput *avsproto.ManualTrigger_Output, task *model.Task) error {
+func ValidateManualTriggerFromProtobuf(manualOutput *avsproto.ManualTrigger_Output, task *model.Workflow) error {
 	if manualOutput == nil || manualOutput.Data == nil {
 		return nil // No data to validate
 	}

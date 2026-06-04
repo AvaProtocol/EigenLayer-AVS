@@ -324,9 +324,17 @@ func buildAnalysisHtmlFromStructured(s Summary) string {
 	return sb.String()
 }
 
-// buildFeesSectionHTML renders the Cost section from Summary.Fees.Total —
-// same multi-token format as Telegram, just wrapped in HTML. Simulations
-// render only the static placeholder. Returns "" when there's nothing to show.
+// buildFeesSectionHTML renders the Gas section from Summary.Fees.Total —
+// the actual on-chain gas the UserOp spent, in native token units. The
+// platform fee and per-token value fees are tracked in Fees.Total for
+// API consumers and billing but are NOT rendered here, because grouping
+// them under "⛽" (gas) misleads users into reading them as gas. If a
+// future product surface wants the full breakdown, render it under its
+// own heading.
+//
+// Simulations render only the static placeholder. Returns "" when
+// there's no gas to report (e.g. read-only workflows that only paid the
+// platform fee).
 func buildFeesSectionHTML(s Summary) string {
 	if s.Fees == nil {
 		return ""
@@ -342,30 +350,26 @@ func buildFeesSectionHTML(s Summary) string {
 	if len(s.Fees.Total) == 0 {
 		return ""
 	}
-	parts := make([]string, 0, len(s.Fees.Total))
+	var gasLine string
 	for _, t := range s.Fees.Total {
-		if t == nil || t.Amount == "" || t.Amount == "0" {
-			continue
-		}
-		// USD-unit entries are the platform fee — render as "$X platform fee".
-		if t.Unit == "USD" {
-			parts = append(parts, fmt.Sprintf("$%s platform fee", html.EscapeString(t.Amount)))
+		if t == nil || !t.IsGas || t.Amount == "" || t.Amount == "0" {
 			continue
 		}
 		usd := "$?"
 		if t.USD != "" {
 			usd = "$" + t.USD
 		}
-		parts = append(parts, fmt.Sprintf("%s %s (%s)", html.EscapeString(t.Amount), html.EscapeString(t.Unit), usd))
+		gasLine = fmt.Sprintf("%s %s (%s)", html.EscapeString(t.Amount), html.EscapeString(t.Unit), usd)
+		break
 	}
-	if len(parts) == 0 {
+	if gasLine == "" {
 		return ""
 	}
 	var sb strings.Builder
 	sb.WriteString(`<div style="margin-bottom: 20px;">`)
-	sb.WriteString(`<h3 style="margin: 0 0 8px 0; font-size: 16px;">Cost</h3>`)
+	sb.WriteString(`<h3 style="margin: 0 0 8px 0; font-size: 16px;">Gas</h3>`)
 	sb.WriteString(`<p style="margin: 0;">⛽ `)
-	sb.WriteString(strings.Join(parts, ", "))
+	sb.WriteString(gasLine)
 	sb.WriteString("</p></div>")
 	return sb.String()
 }

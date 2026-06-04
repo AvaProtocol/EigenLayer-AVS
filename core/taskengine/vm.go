@@ -226,7 +226,7 @@ type VM struct {
 	TaskID            string
 	TaskNodes         map[string]*avsproto.TaskNode
 	TaskOwner         common.Address
-	task              *model.Task
+	task              *model.Workflow
 	triggerData       *TriggerData
 	parsedTriggerData *triggerDataType
 	ExecutionLogs     []*avsproto.Execution_Step
@@ -260,6 +260,12 @@ type VM struct {
 	// executionFeeWei is the platform fee (converted from USD to WEI) to be collected
 	// atomically in the UserOp. Set by executor before node execution. Nil = no fee.
 	executionFeeWei *big.Int
+
+	// chainConfigResolver returns the SmartWalletConfig for a given chain_id.
+	// Used by chain-specific node runners (ContractRead/Write, ETHTransfer) to honor
+	// per-node chain_id overrides. When nil or called with 0, callers fall back to
+	// v.smartWalletConfig. Set via WithChainConfigResolver after construction.
+	chainConfigResolver func(chainID int64) *config.SmartWalletConfig
 }
 
 func NewVM() *VM {
@@ -313,6 +319,58 @@ func (v *VM) WithDb(db storage.Storage) *VM {
 	return v
 }
 
+// WithChainConfigResolver wires a function that maps a chain_id to the matching
+// SmartWalletConfig. Chain-specific node runners call this when their node config
+// specifies a non-zero chain_id; without a resolver, all nodes use v.smartWalletConfig.
+func (v *VM) WithChainConfigResolver(resolver func(chainID int64) *config.SmartWalletConfig) *VM {
+	v.chainConfigResolver = resolver
+	return v
+}
+
+// resolveSmartWalletForNode picks the SmartWalletConfig a node should
+// use, walking three sources in order:
+//
+//  1. The node's own chain_id override (set on Config when the SDK or
+//     UI threads it through explicitly).
+//  2. The task's ChainId (the workflow's target chain). Loop iterations
+//     create nested nodes via createNestedNodeFromLoop, which returns
+//     the inner node proto verbatim — those inner nodes don't carry a
+//     per-iteration chain_id, so without this fallback the resolver
+//     would land on v.smartWalletConfig. In gateway mode that default
+//     is populated from chains[0] (mainnet by convention; see
+//     core/config/config.go:367), causing paymaster ops for any other
+//     chain's workflow to dial the wrong RPC and surface as
+//     "no contract code at given address" (Sentry EIGENLAYER-AVS-1N/1M).
+//  3. v.smartWalletConfig as a last-resort default — correct in
+//     single-chain mode where chainConfigResolver is nil and the VM
+//     was constructed with the only smart_wallet config that exists.
+func (v *VM) resolveSmartWalletForNode(nodeChainID int64) *config.SmartWalletConfig {
+	if v.chainConfigResolver != nil {
+		if nodeChainID > 0 {
+			if resolved := v.chainConfigResolver(nodeChainID); resolved != nil {
+				return resolved
+			}
+		}
+		if taskChainID := v.taskChainID(); taskChainID > 0 {
+			if resolved := v.chainConfigResolver(taskChainID); resolved != nil {
+				return resolved
+			}
+		}
+	}
+	return v.smartWalletConfig
+}
+
+// taskChainID returns the chain id of the workflow this VM is executing,
+// or 0 if the task wasn't set (e.g. RunNodeImmediately) or the task
+// itself has no chain_id stored (legacy workflows created before
+// per-task chain_id was required).
+func (v *VM) taskChainID() int64 {
+	if v.task == nil || v.task.Task == nil {
+		return 0
+	}
+	return v.task.Task.ChainId
+}
+
 func (v *VM) GetTriggerNameAsVar() (string, error) {
 	// This method doesn't modify VM state directly, so mutex is not strictly needed
 	// unless task can be modified concurrently, which is unlikely during this call.
@@ -354,11 +412,11 @@ func (v *VM) getNodeNameAsVarLocked(nodeID string) string {
 	return sanitizeTriggerNameForJS(name)
 }
 
-func NewVMWithData(task *model.Task, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
+func NewVMWithData(task *model.Workflow, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
 	return NewVMWithDataAndTransferLog(task, triggerData, smartWalletConfig, secrets, nil)
 }
 
-func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog *structpb.Value) (*VM, error) {
+func NewVMWithDataAndTransferLog(task *model.Workflow, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog *structpb.Value) (*VM, error) {
 	// Add safety checks to prevent nil pointer dereferences
 	// Note: task and triggerData can be nil for testing utilities like runNodeWithInputs
 	if smartWalletConfig == nil {
@@ -1414,18 +1472,17 @@ func (v *VM) runContractRead(taskNode *avsproto.TaskNode) (*avsproto.Execution_S
 		return executionLog, err
 	}
 
-	if v.smartWalletConfig == nil || v.smartWalletConfig.EthRpcUrl == "" {
-		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract read")
+	swConfig := v.resolveSmartWalletForNode(node.Config.GetChainId())
+	if swConfig == nil || swConfig.EthRpcUrl == "" {
+		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract read (chain_id=%d)", node.Config.GetChainId())
 		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
-		// v.addExecutionLog(logEntry)
 		return executionLog, err
 	}
-	rpcClient, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
+	rpcClient, err := ethclient.Dial(swConfig.EthRpcUrl)
 	if err != nil {
 		executionLog = v.createExecutionStep(stepID, false, fmt.Sprintf("failed to dial ETH RPC: %v", err), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
-		// v.addExecutionLog(logEntry)
 		return executionLog, err
 	}
 	defer rpcClient.Close()
@@ -1449,33 +1506,31 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 	}
 	stepID := taskNode.Id
 	var executionLog *avsproto.Execution_Step
-	if v.smartWalletConfig == nil || v.smartWalletConfig.EthRpcUrl == "" {
-		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract write")
+	swConfig := v.resolveSmartWalletForNode(node.Config.GetChainId())
+	if swConfig == nil || swConfig.EthRpcUrl == "" {
+		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract write (chain_id=%d)", node.Config.GetChainId())
 		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
-		// v.addExecutionLog(logEntry)
 		return executionLog, err
 	}
-	rpcClient, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
+	rpcClient, err := ethclient.Dial(swConfig.EthRpcUrl)
 	if err != nil {
 		executionLog = v.createExecutionStep(stepID, false, fmt.Sprintf("failed to dial ETH RPC: %v", err), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
-		// v.addExecutionLog(logEntry)
 		return executionLog, err
 	}
 	defer rpcClient.Close()
 
-	// 🔍 DEBUG: Log VM smart wallet config before creating processor
 	v.logger.Info("🔍 VM DEBUG - Smart wallet config for contract write",
-		"has_config", v.smartWalletConfig != nil,
+		"has_config", swConfig != nil,
 		"task_owner", v.TaskOwner.Hex())
 
-	if v.smartWalletConfig != nil {
+	if swConfig != nil {
 		v.logger.Info("🔍 VM DEBUG - Smart wallet config details",
-			"bundler_url", v.smartWalletConfig.BundlerURL,
-			"factory_address", v.smartWalletConfig.FactoryAddress,
-			"entrypoint_address", v.smartWalletConfig.EntrypointAddress,
-			"eth_rpc_url", v.smartWalletConfig.EthRpcUrl)
+			"bundler_url", swConfig.BundlerURL,
+			"factory_address", swConfig.FactoryAddress,
+			"entrypoint_address", swConfig.EntrypointAddress,
+			"eth_rpc_url", swConfig.EthRpcUrl)
 	} else {
 		v.logger.Warn("⚠️ VM DEBUG - Smart wallet config is NIL in VM!")
 	}
@@ -1499,7 +1554,7 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		}
 	}
 
-	processor := NewContractWriteProcessor(v, rpcClient, v.smartWalletConfig, v.TaskOwner)
+	processor := NewContractWriteProcessor(v, rpcClient, swConfig, v.TaskOwner)
 	processor.CommonProcessor.SetTaskNode(taskNode)
 	executionLog, err = processor.Execute(stepID, node)
 	v.mu.Lock()
@@ -1669,14 +1724,15 @@ func (v *VM) runEthTransfer(taskNode *avsproto.TaskNode) (*avsproto.Execution_St
 	}
 	stepID := taskNode.Id
 	var executionLog *avsproto.Execution_Step
-	if v.smartWalletConfig == nil || v.smartWalletConfig.EthRpcUrl == "" {
-		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for ETH transfer")
+	swConfig := v.resolveSmartWalletForNode(node.Config.GetChainId())
+	if swConfig == nil || swConfig.EthRpcUrl == "" {
+		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for ETH transfer (chain_id=%d)", node.Config.GetChainId())
 		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
 		return executionLog, err
 	}
 
-	rpcClient, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
+	rpcClient, err := ethclient.Dial(swConfig.EthRpcUrl)
 	if err != nil {
 		executionLog = v.createExecutionStep(stepID, false, fmt.Sprintf("failed to dial ETH RPC: %v", err), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
@@ -1684,7 +1740,7 @@ func (v *VM) runEthTransfer(taskNode *avsproto.TaskNode) (*avsproto.Execution_St
 	}
 	defer rpcClient.Close()
 
-	processor := NewETHTransferProcessor(v, rpcClient, v.smartWalletConfig, &v.TaskOwner)
+	processor := NewETHTransferProcessor(v, rpcClient, swConfig, &v.TaskOwner)
 	processor.CommonProcessor.SetTaskNode(taskNode)
 	executionLog, err = processor.Execute(stepID, node)
 	v.mu.Lock()
@@ -1811,6 +1867,12 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 		currentVars[k] = val
 	}
 	v.mu.Unlock()
+	// REST migration back-compat: stored workflows reference variables
+	// in snake_case (`{{settings.chain_id}}`); v4 SDK callers write
+	// camelCase (`{{settings.chainId}}`). Aliasing both spellings on
+	// every map keeps both forms resolvable without a per-record
+	// migration. See vm_template_compat.go.
+	currentVars = expandCaseAliases(currentVars)
 
 	for key, value := range currentVars {
 		if err := jsvm.Set(key, value); err != nil {
@@ -1927,6 +1989,8 @@ func (v *VM) preprocessText(text string) string {
 		currentVars[k] = val
 	}
 	v.mu.Unlock()
+	// REST migration back-compat (see preprocessTextWithVariableMapping).
+	currentVars = expandCaseAliases(currentVars)
 
 	for key, value := range currentVars {
 		if err := jsvm.Set(key, value); err != nil {
@@ -3381,7 +3445,7 @@ func convertProtobufValueToMap(value *structpb.Value) map[string]interface{} {
 }
 
 // validateAllNodeNamesForJavaScript validates all node names in a task
-func validateAllNodeNamesForJavaScript(task *model.Task) error {
+func validateAllNodeNamesForJavaScript(task *model.Workflow) error {
 	if task == nil {
 		return nil
 	}

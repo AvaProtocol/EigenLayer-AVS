@@ -156,7 +156,7 @@ func setupBalanceVM(t *testing.T, config *avsproto.BalanceNode_Config) (*VM, *av
 		},
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "test-task",
 			Nodes:   nodes,
@@ -826,7 +826,7 @@ func TestBalanceNode_MissingAPIKey(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(
-		&model.Task{
+		&model.Workflow{
 			Task: &avsproto.Task{
 				SmartWalletAddress: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
 				Nodes:              []*avsproto.TaskNode{taskNode},
@@ -911,7 +911,7 @@ func TestBalanceNode_TokenAddressesWithTemplateVariables(t *testing.T) {
 	}
 
 	// Create VM with task structure
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "test-task",
 			Nodes:   nodes,
@@ -1200,7 +1200,7 @@ func TestBalanceNode_ExtractAddressFromObject(t *testing.T) {
 				},
 			}
 
-			vm, err := NewVMWithData(&model.Task{
+			vm, err := NewVMWithData(&model.Workflow{
 				Task: &avsproto.Task{
 					Id:      "test-task",
 					Nodes:   nodes,

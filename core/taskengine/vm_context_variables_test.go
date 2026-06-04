@@ -13,7 +13,7 @@ import (
 
 // ---------- helpers ----------
 
-// createTestVMForContext builds a VM with a real model.Task so that context
+// createTestVMForContext builds a VM with a real model.Workflow so that context
 // is populated from actual task state (status, executionCount, etc.), not from
 // inputVariables passthrough.
 func createTestVMForContext(t *testing.T, status avsproto.TaskStatus, executionCount int64, lastRanAt int64, completedAt int64) *VM {
@@ -35,7 +35,7 @@ func createTestVMForContext(t *testing.T, status avsproto.TaskStatus, executionC
 	trigger := &avsproto.TaskTrigger{Id: "trigger1", Name: "test_trigger"}
 	edge := &avsproto.TaskEdge{Id: "e1", Source: trigger.Id, Target: taskNode.Id}
 
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:             "test-context-task",
 			Status:         status,

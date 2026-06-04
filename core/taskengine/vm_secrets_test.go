@@ -38,7 +38,7 @@ func TestSecretAccessPath(t *testing.T) {
 	}
 
 	// Create VM with secrets
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id: "test_secrets",
 			Trigger: &avsproto.TaskTrigger{
@@ -137,7 +137,7 @@ func TestSecretAccessInCustomCode(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id: "test_js_secrets",
 			Trigger: &avsproto.TaskTrigger{
@@ -224,7 +224,7 @@ func TestCollectInputsIncludesSecrets(t *testing.T) {
 		"test_secret": "test_value",
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id: "test_collect_inputs",
 			Trigger: &avsproto.TaskTrigger{

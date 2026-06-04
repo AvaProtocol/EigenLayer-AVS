@@ -42,17 +42,18 @@ func formatTelegramFromStructured(s Summary) string {
 		}
 	}
 
-	// Time / Runner / Cost — metadata block. Network is folded into the Runner
+	// Time / Runner / Gas — metadata block. Network is folded into the Runner
 	// line ("Runner: 0x… on Sepolia") to save a line, since chain is contextual
 	// to the wallet that ran the workflow. When Runner is absent we keep
 	// Network as a standalone line so chain context isn't lost.
-	// Cost follows Runner so the "who and what it cost" pair stays adjacent.
-	// For simulations the Cost line is a placeholder ("⛽ (cost estimated at
-	// deploy)") — actual gas numbers only appear for deployed runs with real
-	// receipts. Runner addresses are intentionally NOT <code>-wrapped (hex
-	// addresses don't trigger Telegram auto-linking; the wrap adds noise).
+	// Gas follows Runner so the "who and what it cost on-chain" pair stays
+	// adjacent. For simulations the Gas line is a placeholder
+	// ("⛽ (cost estimated at deploy)") — actual gas numbers only appear for
+	// deployed runs with real receipts. Runner addresses are intentionally
+	// NOT <code>-wrapped (hex addresses don't trigger Telegram auto-linking;
+	// the wrap adds noise).
 	hasRunner := s.Runner != nil && s.Runner.SmartWallet != ""
-	costLine := formatTelegramCostLine(s)
+	costLine := formatTelegramGasLine(s)
 	if network != "" || s.TriggeredAt != "" || hasRunner || costLine != "" {
 		sb.WriteString("\n")
 		if s.TriggeredAt != "" {
@@ -246,40 +247,37 @@ func formatSubjectWithBoldName(subject string) string {
 	return sb.String()
 }
 
-// formatTelegramCostLine renders a single Cost line from Summary.Fees.Total.
-// Format: "⛽ <b>Cost:</b> 0.000003 ETH ($0.01), 1.2 USDC ($1.20)" — native
-// token first, comma-separated, USD parenthetical per token. Unpriceable
-// tokens render as "$?". For simulations the line collapses to the static
-// "⛽ (see cost estimate before deploy)" placeholder. Returns "" when there's
-// nothing to render.
-func formatTelegramCostLine(s Summary) string {
+// formatTelegramGasLine renders a single Gas line from Summary.Fees.Total —
+// the actual on-chain gas the UserOp spent, in native token units.
+// Format: "⛽ <b>Gas:</b> 0.000003 ETH ($0.01)". Unpriceable tokens render
+// as "$?". For simulations the line collapses to the static
+// "⛽ (see cost estimate before deploy)" placeholder.
+//
+// Returns "" when there's no gas to report (e.g. read-only workflows that
+// only paid the platform fee). The platform fee and per-token value fees
+// are tracked in Fees.Total for API consumers and billing but are NOT
+// rendered in the notification — calling them "cost" under the ⛽ (gas)
+// emoji was misleading. If a future product surface wants the full
+// breakdown, render it under its own emoji on its own line.
+func formatTelegramGasLine(s Summary) string {
 	if s.Workflow != nil && s.Workflow.IsSimulation {
 		return "⛽ <i>(see cost estimate before deploy)</i>\n"
 	}
 	if s.Fees == nil || len(s.Fees.Total) == 0 {
 		return ""
 	}
-	parts := make([]string, 0, len(s.Fees.Total))
 	for _, t := range s.Fees.Total {
-		if t == nil || t.Amount == "" || t.Amount == "0" {
-			continue
-		}
-		// USD-unit entries are the platform fee — render as "$X platform fee"
-		// (the dollar amount is already canonical; no need for the parenthetical).
-		if t.Unit == "USD" {
-			parts = append(parts, fmt.Sprintf("$%s platform fee", html.EscapeString(t.Amount)))
+		if t == nil || !t.IsGas || t.Amount == "" || t.Amount == "0" {
 			continue
 		}
 		usd := "$?"
 		if t.USD != "" {
 			usd = "$" + t.USD
 		}
-		parts = append(parts, fmt.Sprintf("%s %s (%s)", html.EscapeString(t.Amount), html.EscapeString(t.Unit), usd))
+		return fmt.Sprintf("⛽ <b>Gas:</b> %s %s (%s)\n",
+			html.EscapeString(t.Amount), html.EscapeString(t.Unit), usd)
 	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "⛽ <b>Cost:</b> " + strings.Join(parts, ", ") + "\n"
+	return ""
 }
 
 func formatTelegramExampleMessage(workflowName, chainName string) string {

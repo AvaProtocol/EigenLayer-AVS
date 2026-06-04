@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/prometheus/client_golang/prometheus"
 	"gopkg.in/yaml.v2"
 
@@ -47,11 +49,13 @@ const DefaultFactoryProxyAddressHex = "0xB99BC2E399e06CddCF5E725c0ea341E8f032283
 // smart_wallet.entrypoint_address field, this value will be used.
 const DefaultEntrypointAddressHex = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
 
-// DefaultPaymasterAddressHex is the default VerifyingPaymaster address
-// controlled by us and deployed uniformly across supported chains. If the
-// aggregator config omits the smart_wallet.paymaster_address field, this
-// value will be used.
-const DefaultPaymasterAddressHex = "0xf023eA291F5bEDA4Bf59BbDC9004F1d18be19D6f"
+// NOTE: there is no DefaultPaymasterAddressHex. The paymaster contract
+// is deployed per network (mainnet and testnet have different addresses),
+// so silently defaulting any chain's paymaster to a single hardcoded
+// value silently misroutes that chain's UserOps. The YAML must specify
+// paymaster_address explicitly for every chain that wants sponsored
+// transactions; chains that omit it run without a paymaster and rely on
+// the smart wallet's own balance for gas.
 
 // Config contains all of the configuration information for a credible squaring aggregators and challengers.
 // Operators use a separate config. (see config-files/operator.anvil.yaml)
@@ -61,7 +65,14 @@ type Config struct {
 	Logger                    sdklogging.Logger
 	EigenMetricsIpPortAddress string
 	SentryDsn                 string
-	ServerName                string
+	// SentryEnvironment is the value reported as the `environment` tag on
+	// every Sentry event. Defaults to "production" when unset so existing
+	// deployments keep their current bucket. Feature-branch or staging
+	// deployments should set this to "staging" (or "feature:<name>") to
+	// keep their events out of the production issue board and to let
+	// Sentry alerts gate on environment.
+	SentryEnvironment string
+	ServerName        string
 
 	// we need the url for the eigensdk currently... eventually standardize api so as to
 	// only take an ethclient or an rpcUrl (and build the ethclient at each constructor site)
@@ -83,6 +94,12 @@ type Config struct {
 	BackupDir string
 
 	JwtSecret []byte
+
+	// REST rate limit overrides. Nil/zero = use the middleware
+	// default (10 req/s, burst 50). Dev configs typically bump
+	// these so an end-to-end test suite doesn't trip the bucket.
+	RestRateLimitPerSecond float64
+	RestRateLimitBurst     int
 
 	// Account abstraction config
 	SmartWallet *SmartWalletConfig
@@ -111,6 +128,22 @@ type Config struct {
 
 	// NotificationsSummary contains optional AI summarization settings for notifications
 	NotificationsSummary NotificationsSummaryConfig
+
+	// Gateway mode fields — set when chains[] is present in config.
+	// When IsGateway is true, the aggregator acts as a multi-chain gateway
+	// that routes chain-specific operations to per-chain workers via gRPC.
+	IsGateway      bool
+	DefaultChainID int64
+	Chains         []*ChainConfig
+}
+
+// ChainConfig holds per-chain configuration for gateway mode.
+// Each chain has a worker address for gRPC delegation and its own SmartWalletConfig.
+type ChainConfig struct {
+	ChainID     int64
+	Name        string
+	WorkerAddr  string
+	SmartWallet *SmartWalletConfig
 }
 
 // FeeRatesConfig defines the fee structure for workflow execution.
@@ -164,14 +197,43 @@ type SmartWalletConfig struct {
 	MaxWalletsPerOwner int
 }
 
+type BackupConfig struct {
+	Enabled         bool   // Whether periodic backups are enabled
+	IntervalMinutes int    // Interval between backups in minutes
+	BackupDir       string // Directory to store backups
+}
+
+// SmartWalletConfigRaw represents the raw YAML config for smart wallet operations.
+// Used both in the top-level aggregator config and in per-chain gateway configs.
+type SmartWalletConfigRaw struct {
+	EthRpcUrl            string   `yaml:"eth_rpc_url"`
+	EthWsUrl             string   `yaml:"eth_ws_url"`
+	BundlerURL           string   `yaml:"bundler_url"`
+	FactoryAddress       string   `yaml:"factory_address"`
+	EntrypointAddress    string   `yaml:"entrypoint_address"`
+	ControllerPrivateKey string   `yaml:"controller_private_key"`
+	PaymasterAddress     string   `yaml:"paymaster_address"`
+	WhitelistAddresses   []string `yaml:"whitelist_addresses"`
+	MaxWalletsPerOwner   int      `yaml:"max_wallets_per_owner"`
+}
+
+// ChainConfigRaw represents a per-chain entry in the gateway's chains[] config.
+type ChainConfigRaw struct {
+	ChainID     int64                `yaml:"chain_id"`
+	Name        string               `yaml:"name"`
+	WorkerAddr  string               `yaml:"worker_addr"`
+	SmartWallet SmartWalletConfigRaw `yaml:"smart_wallet"`
+}
+
 // These are read from configPath
 type ConfigRaw struct {
-	EcdsaPrivateKey string              `yaml:"ecdsa_private_key"`
-	Environment     sdklogging.LogLevel `yaml:"environment"`
-	EthRpcUrl       string              `yaml:"eth_rpc_url"`
-	EthWsUrl        string              `yaml:"eth_ws_url"`
-	SentryDsn       string              `yaml:"sentry_dsn,omitempty"`
-	ServerName      string              `yaml:"server_name,omitempty"`
+	EcdsaPrivateKey   string              `yaml:"ecdsa_private_key"`
+	Environment       sdklogging.LogLevel `yaml:"environment"`
+	EthRpcUrl         string              `yaml:"eth_rpc_url"`
+	EthWsUrl          string              `yaml:"eth_ws_url"`
+	SentryDsn         string              `yaml:"sentry_dsn,omitempty"`
+	SentryEnvironment string              `yaml:"sentry_environment,omitempty"`
+	ServerName        string              `yaml:"server_name,omitempty"`
 
 	RpcBindAddress  string `yaml:"rpc_bind_address"`
 	HttpBindAddress string `yaml:"http_bind_address"`
@@ -182,17 +244,11 @@ type ConfigRaw struct {
 	DbPath    string `yaml:"db_path"`
 	JwtSecret string `yaml:"jwt_secret"`
 
-	SmartWallet struct {
-		EthRpcUrl            string   `yaml:"eth_rpc_url"`
-		EthWsUrl             string   `yaml:"eth_ws_url"`
-		BundlerURL           string   `yaml:"bundler_url"`
-		FactoryAddress       string   `yaml:"factory_address"`
-		EntrypointAddress    string   `yaml:"entrypoint_address"`
-		ControllerPrivateKey string   `yaml:"controller_private_key"`
-		PaymasterAddress     string   `yaml:"paymaster_address"`
-		WhitelistAddresses   []string `yaml:"whitelist_addresses"`
-		MaxWalletsPerOwner   int      `yaml:"max_wallets_per_owner"`
-	} `yaml:"smart_wallet"`
+	// REST rate-limit overrides; see Config.RestRateLimitPerSecond.
+	RestRateLimitPerSecond float64 `yaml:"rest_rate_limit_per_second"`
+	RestRateLimitBurst     int     `yaml:"rest_rate_limit_burst"`
+
+	SmartWallet SmartWalletConfigRaw `yaml:"smart_wallet"`
 
 	SocketPath string `yaml:"socket_path"`
 
@@ -230,6 +286,9 @@ type ConfigRaw struct {
 			APIKey      string `yaml:"api_key"`
 		} `yaml:"summary"`
 	} `yaml:"notifications"`
+
+	// Gateway mode: per-chain worker configs. When present, aggregator runs as gateway.
+	Chains []ChainConfigRaw `yaml:"chains"`
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
@@ -306,11 +365,28 @@ func NewConfig(configFilePath string) (*Config, error) {
 		return nil, err
 	}
 
-	// Validate that smart wallet RPC URL is configured - this is critical for contract operations
+	// Validate that the top-level smart_wallet is configured. This block is
+	// shared by the aa package globals (factory + entrypoint addresses), the
+	// startup paymaster probe, and any code path that explicitly takes the
+	// aggregator's default chain context (e.g. cmd/backfillWalletSaltIndex).
+	//
+	// In gateway mode there is no implicit fallback to chains[0] — the
+	// operator picks which chain the top-level represents and sets it
+	// explicitly. The previous "use first chain" magic silently routed every
+	// top-level operation to mainnet (by chains[] convention) which made the
+	// startup probe + cmd tools talk to the wrong chain by default.
+	isGateway := len(configRaw.Chains) > 0
 	if configRaw.SmartWallet.EthRpcUrl == "" {
-		logger.Error("smart_wallet.eth_rpc_url is required but not configured")
-		logger.Error("smart_wallet.eth_rpc_url is required but not configured. This RPC URL is critical for Base aggregator contract operations; without it, the aggregator cannot interact with the blockchain.")
-		return nil, fmt.Errorf("critical configuration error: smart_wallet.eth_rpc_url must be set because it is required for Base aggregator contract operations")
+		if isGateway {
+			return nil, fmt.Errorf(
+				"smart_wallet.eth_rpc_url is required at the top level even in gateway mode " +
+					"(used by the aa package, startup probes, and cmd tools). Set an explicit " +
+					"smart_wallet block — typically matching the chain you want as the aggregator's " +
+					"default context (e.g. the AVS chain)")
+		}
+		return nil, fmt.Errorf(
+			"smart_wallet.eth_rpc_url is required: this RPC URL is critical for aggregator " +
+				"contract operations; without it, the aggregator cannot interact with the blockchain")
 	}
 
 	// Create separate RPC client for smart wallet operations (contract read/write)
@@ -367,14 +443,15 @@ func NewConfig(configFilePath string) (*Config, error) {
 	}
 
 	config := &Config{
-		EcdsaPrivateKey: ecdsaPrivateKey,
-		Logger:          logger,
-		SentryDsn:       configRaw.SentryDsn,
-		ServerName:      configRaw.ServerName,
-		EthWsRpcUrl:     configRaw.EthWsUrl,
-		EthHttpRpcUrl:   configRaw.EthRpcUrl,
-		EthHttpClient:   ethRpcClient,
-		EthWsClient:     ethWsClient,
+		EcdsaPrivateKey:   ecdsaPrivateKey,
+		Logger:            logger,
+		SentryDsn:         configRaw.SentryDsn,
+		SentryEnvironment: configRaw.SentryEnvironment,
+		ServerName:        configRaw.ServerName,
+		EthWsRpcUrl:       configRaw.EthWsUrl,
+		EthHttpRpcUrl:     configRaw.EthRpcUrl,
+		EthHttpClient:     ethRpcClient,
+		EthWsClient:       ethWsClient,
 
 		Environment:                       configRaw.Environment,
 		OperatorStateRetrieverAddr:        common.HexToAddress(configRaw.OperatorStateRetrieverAddr),
@@ -389,6 +466,9 @@ func NewConfig(configFilePath string) (*Config, error) {
 		BackupDir: configRaw.DbPath + "_backup",
 		JwtSecret: []byte(configRaw.JwtSecret),
 
+		RestRateLimitPerSecond: configRaw.RestRateLimitPerSecond,
+		RestRateLimitBurst:     configRaw.RestRateLimitBurst,
+
 		SmartWallet: &SmartWalletConfig{
 			EthRpcUrl:            configRaw.SmartWallet.EthRpcUrl,
 			EthWsUrl:             configRaw.SmartWallet.EthWsUrl,
@@ -397,7 +477,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 			EntrypointAddress:    common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.EntrypointAddress, DefaultEntrypointAddressHex)),
 			ChainID:              smartWalletChainId.Int64(), // Use smart wallet chain ID, not EigenLayer chain ID (prevents cross-chain configuration errors for Base aggregator)
 			ControllerPrivateKey: controllerPrivateKey,
-			PaymasterAddress:     common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.PaymasterAddress, DefaultPaymasterAddressHex)),
+			PaymasterAddress:     common.HexToAddress(configRaw.SmartWallet.PaymasterAddress),
 			WhitelistAddresses:   convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
 			MaxWalletsPerOwner:   configRaw.SmartWallet.MaxWalletsPerOwner,
 			// PaymasterOwnerAddress will be populated below by calling owner() on the paymaster contract
@@ -440,17 +520,51 @@ func NewConfig(configFilePath string) (*Config, error) {
 		logger.Info("Controller address derived", "controller", config.SmartWallet.ControllerAddress.Hex())
 	}
 
-	// Fetch the paymaster owner address by calling owner() on the paymaster contract
-	// This is needed for gas reimbursement - we send ETH to the owner (EOA), not the contract itself
+	// Fetch the paymaster owner address by calling owner() on the paymaster contract.
+	// This is needed for gas reimbursement — we send ETH to the owner (EOA), not the
+	// contract itself.
+	//
+	// The probe doubles as a sanity check on the (RPC, paymaster_address) pairing:
+	// if the address has no contract code on the connected RPC, owner() returns an
+	// empty result and unpacking fails. Treat that as a fatal startup error rather
+	// than a warning — previously this was a logger.Warn that let the aggregator
+	// boot with a mismatched config, and every UserOp downstream failed at
+	// "no contract code at given address" (Sentry EIGENLAYER-AVS-1N/1M, user-reported
+	// failure 2026-05-30 01:55 UTC on Sepolia). Fail-fast surfaces the same problem
+	// at startup where it's diagnosable, not hours later on a real workflow.
 	if config.SmartWallet != nil && config.SmartWallet.PaymasterAddress != (common.Address{}) {
 		paymasterOwner, err := fetchPaymasterOwner(smartWalletRpcClient, config.SmartWallet.PaymasterAddress)
 		if err != nil {
-			logger.Warn("Failed to fetch paymaster owner address", "paymaster", config.SmartWallet.PaymasterAddress, "err", err)
-			logger.Warn("Gas reimbursement may fail without paymaster owner address configured")
-		} else {
-			config.SmartWallet.PaymasterOwnerAddress = paymasterOwner
-			logger.Info("Paymaster owner address loaded", "paymaster", config.SmartWallet.PaymasterAddress, "owner", paymasterOwner.Hex())
+			return nil, fmt.Errorf(
+				"paymaster %s is unreachable on RPC %s (owner() call failed: %w) — "+
+					"verify the paymaster address is deployed on this chain, and that the "+
+					"smart_wallet.eth_rpc_url points at the chain where the paymaster lives",
+				config.SmartWallet.PaymasterAddress.Hex(),
+				configRaw.SmartWallet.EthRpcUrl,
+				err,
+			)
 		}
+		config.SmartWallet.PaymasterOwnerAddress = paymasterOwner
+		logger.Info("Paymaster owner address loaded", "paymaster", config.SmartWallet.PaymasterAddress, "owner", paymasterOwner.Hex())
+	}
+
+	// Gateway mode: parse per-chain configs
+	if isGateway {
+		config.IsGateway = true
+		config.DefaultChainID = configRaw.Chains[0].ChainID
+
+		for _, chainRaw := range configRaw.Chains {
+			chainCfg, err := parseChainConfig(chainRaw, logger)
+			if err != nil {
+				return nil, fmt.Errorf("parsing chain config for %s (chain_id=%d): %w",
+					chainRaw.Name, chainRaw.ChainID, err)
+			}
+			config.Chains = append(config.Chains, chainCfg)
+		}
+
+		logger.Info("Gateway mode enabled",
+			"num_chains", len(config.Chains),
+			"default_chain_id", config.DefaultChainID)
 	}
 
 	// If HttpBindAddress is empty, HTTP server will be disabled (startup code will skip starting it)
@@ -507,8 +621,14 @@ func ReadYamlConfig(path string, o interface{}) error {
 		return err
 	}
 
-	err = yaml.Unmarshal(b, o)
-	if err != nil {
+	// Expand ${VAR} and $VAR references against the process environment
+	// before parsing. This lets us commit configs with secret placeholders
+	// (e.g. `controller_private_key: ${CONTROLLER_PRIVATE_KEY}`) and inject
+	// the real values via Railway sealed env vars at runtime — keeping
+	// production credentials out of the git repo.
+	expanded := os.ExpandEnv(string(b))
+
+	if err := yaml.Unmarshal([]byte(expanded), o); err != nil {
 		return fmt.Errorf("unable to parse file with error %#v", err)
 	}
 
@@ -555,7 +675,14 @@ func GetDefaultFeeRatesConfig() *FeeRatesConfig {
 
 // fetchPaymasterOwner calls owner() on the paymaster contract to get the owner address
 // This is used for gas reimbursement - ETH is sent to the owner (EOA), not the contract itself
-func fetchPaymasterOwner(client *eth.InstrumentedClient, paymasterAddress common.Address) (common.Address, error) {
+// paymasterOwnerCaller is the minimal contract-call surface needed to
+// probe a paymaster. Both *eth.InstrumentedClient (top-level smart
+// wallet) and *ethclient.Client (per-chain dials) satisfy it.
+type paymasterOwnerCaller interface {
+	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
+}
+
+func fetchPaymasterOwner(client paymasterOwnerCaller, paymasterAddress common.Address) (common.Address, error) {
 	// ABI for owner() function
 	ownerABI := `[{"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"}]`
 
@@ -589,4 +716,90 @@ func fetchPaymasterOwner(client *eth.InstrumentedClient, paymasterAddress common
 	}
 
 	return owner, nil
+}
+
+// parseChainConfig converts a raw YAML chain config into a runtime ChainConfig.
+// Unlike the top-level SmartWalletConfig, we don't connect to the chain RPC here —
+// that's the worker's responsibility. We just parse and validate the config fields.
+func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfig, error) {
+	if raw.ChainID <= 0 {
+		return nil, fmt.Errorf("chain_id must be positive")
+	}
+	if raw.WorkerAddr == "" {
+		return nil, fmt.Errorf("worker_addr is required")
+	}
+
+	sw := raw.SmartWallet
+
+	// Parse controller private key
+	controllerPrivateKey, err := crypto.HexToECDSA(sw.ControllerPrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("parsing controller_private_key: %w", err)
+	}
+
+	// Enforce sane defaults for max wallets per owner
+	maxWallets := sw.MaxWalletsPerOwner
+	if maxWallets <= 0 {
+		maxWallets = DefaultMaxWalletsPerOwner
+	}
+	if maxWallets > HardMaxWalletsPerOwner {
+		maxWallets = HardMaxWalletsPerOwner
+	}
+
+	chainCfg := &ChainConfig{
+		ChainID:    raw.ChainID,
+		Name:       raw.Name,
+		WorkerAddr: raw.WorkerAddr,
+		SmartWallet: &SmartWalletConfig{
+			EthRpcUrl:            sw.EthRpcUrl,
+			EthWsUrl:             sw.EthWsUrl,
+			BundlerURL:           sw.BundlerURL,
+			FactoryAddress:       common.HexToAddress(firstNonEmpty(sw.FactoryAddress, DefaultFactoryProxyAddressHex)),
+			EntrypointAddress:    common.HexToAddress(firstNonEmpty(sw.EntrypointAddress, DefaultEntrypointAddressHex)),
+			ChainID:              raw.ChainID,
+			ControllerPrivateKey: controllerPrivateKey,
+			ControllerAddress:    crypto.PubkeyToAddress(controllerPrivateKey.PublicKey),
+			PaymasterAddress:     common.HexToAddress(sw.PaymasterAddress),
+			WhitelistAddresses:   convertToAddressSlice(sw.WhitelistAddresses),
+			MaxWalletsPerOwner:   maxWallets,
+		},
+	}
+
+	// Probe paymaster on this chain's RPC. Catches mismatched
+	// paymaster/RPC pairings at startup instead of waiting for the
+	// first UserOp to fail (Sentry EIGENLAYER-AVS-1N/1M). Skip when
+	// bundler_url is empty: that signals a connectivity-only rollout
+	// (e.g. BNB Phase 0.5 in avs-infra/chains/), where wallet ops are
+	// intentionally disabled and the paymaster_address is a placeholder.
+	if chainCfg.SmartWallet.BundlerURL != "" && chainCfg.SmartWallet.EthRpcUrl != "" {
+		rpcClient, err := ethclient.Dial(chainCfg.SmartWallet.EthRpcUrl)
+		if err != nil {
+			return nil, fmt.Errorf("dial RPC %s for chain %s (chain_id=%d): %w",
+				chainCfg.SmartWallet.EthRpcUrl, raw.Name, raw.ChainID, err)
+		}
+		paymasterOwner, err := fetchPaymasterOwner(rpcClient, chainCfg.SmartWallet.PaymasterAddress)
+		rpcClient.Close()
+		if err != nil {
+			return nil, fmt.Errorf(
+				"chain %s (chain_id=%d): paymaster %s is unreachable on RPC %s "+
+					"(owner() call failed: %w) — verify the paymaster address is deployed "+
+					"on this chain, and that the chain's eth_rpc_url points at the same chain "+
+					"as the paymaster",
+				raw.Name, raw.ChainID,
+				chainCfg.SmartWallet.PaymasterAddress.Hex(),
+				chainCfg.SmartWallet.EthRpcUrl,
+				err,
+			)
+		}
+		chainCfg.SmartWallet.PaymasterOwnerAddress = paymasterOwner
+	}
+
+	logger.Info("Parsed chain config",
+		"chain_id", chainCfg.ChainID,
+		"name", chainCfg.Name,
+		"worker_addr", chainCfg.WorkerAddr,
+		"controller", chainCfg.SmartWallet.ControllerAddress.Hex(),
+		"paymaster_owner", chainCfg.SmartWallet.PaymasterOwnerAddress.Hex())
+
+	return chainCfg, nil
 }

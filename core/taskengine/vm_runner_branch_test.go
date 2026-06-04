@@ -129,7 +129,7 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 		Output: testTriggerData.Output,
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "sampletaskid1",
 			Nodes:   nodes,

@@ -25,6 +25,7 @@ import (
 	"github.com/Layr-Labs/eigensdk-go/signerv2"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 	gocron "github.com/go-co-op/gocron/v2"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -82,8 +83,14 @@ type OperatorConfig struct {
 	EnableNodeApi                 bool   `yaml:"enable_node_api"`
 
 	// Optional Sentry integration
-	SentryDsn  string `yaml:"sentry_dsn,omitempty"`
-	ServerName string `yaml:"server_name,omitempty"`
+	SentryDsn string `yaml:"sentry_dsn,omitempty"`
+	// SentryEnvironment is the value reported as the `environment` tag on
+	// every Sentry event. Defaults to "production" when unset so existing
+	// deployments keep their current bucket. Feature-branch or staging
+	// operators should set this to "staging" to keep their events out of
+	// the production issue board.
+	SentryEnvironment string `yaml:"sentry_environment,omitempty"`
+	ServerName        string `yaml:"server_name,omitempty"`
 
 	DbPath string `yaml:"db_path"`
 
@@ -95,11 +102,23 @@ type OperatorConfig struct {
 	// much tooling around it: no official rpc bundler or erc4337 explorer, no
 	// uniswap etc
 	//
-	// Therefore on testnet we will need this option when running in Holesky
+	// Therefore on testnet we will need this option when running in Holesky.
+	//
+	// Legacy single-chain config — superseded by Chains below for multi-chain
+	// operators. Still honored when Chains is empty so existing operator
+	// deployments keep working unchanged.
 	TargetChain struct {
 		EthRpcUrl string `yaml:"eth_rpc_url"`
 		EthWsUrl  string `yaml:"eth_ws_url"`
 	} `yaml:"target_chain"`
+
+	// Chains lists every chain this operator is configured to monitor.
+	// When non-empty, takes precedence over TargetChain and the operator
+	// runs one BlockTrigger + EventTrigger per chain, sharing a single
+	// chain-agnostic TimeTrigger. Each entry's chain_id is detected at
+	// startup from the RPC and used to route incoming MonitorTaskTrigger
+	// messages to the matching per-chain engine.
+	Chains []OperatorChainConfig `yaml:"chains,omitempty"`
 
 	// Only one of bls option is needed: key or remote signer. when using remote signer, we also don't need the password in the env
 	// the password of remote signer is the password we set with cerberus api
@@ -121,6 +140,150 @@ type OperatorConfig struct {
 		MaxTotalEventsPerBlock    uint32 `yaml:"max_total_events_per_block"`     // Across all queries (default: 1000)
 		MaxEventsPerQueryPerBlock uint32 `yaml:"max_events_per_query_per_block"` // Per individual query (default: 500)
 	} `yaml:"event_safety"`
+}
+
+// OperatorChainConfig is one entry in OperatorConfig.Chains. chain_id is
+// optional — when omitted (0), the operator detects it from the RPC at
+// startup; when set, the operator validates that the RPC reports the same
+// value and refuses to start on mismatch.
+type OperatorChainConfig struct {
+	ChainID   int64  `yaml:"chain_id,omitempty"`
+	Name      string `yaml:"name,omitempty"`
+	EthRpcUrl string `yaml:"eth_rpc_url"`
+	EthWsUrl  string `yaml:"eth_ws_url"`
+}
+
+// triggersForChain returns the per-chain trigger set for chainID, or the
+// first configured chain when chainID is 0 (legacy aggregator without chain
+// routing). Returns (nil, false) when chainID is non-zero and unsupported,
+// which the caller must surface as a structured warning so misrouted tasks
+// are observable rather than silently lost.
+func (o *Operator) triggersForChain(chainID int64) (*ChainTriggerSet, bool) {
+	if len(o.chainTriggers) == 0 {
+		return nil, false
+	}
+	if chainID == 0 && len(o.chainOrder) > 0 {
+		set, ok := o.chainTriggers[o.chainOrder[0]]
+		return set, ok
+	}
+	set, ok := o.chainTriggers[chainID]
+	return set, ok
+}
+
+// supportedChainIDs returns the chain_ids the operator advertises to the
+// aggregator/gateway. Order matches chainOrder for deterministic output.
+func (o *Operator) supportedChainIDs() []int64 {
+	out := make([]int64, 0, len(o.chainOrder))
+	for _, id := range o.chainOrder {
+		if id > 0 {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// removeBlockCheck removes a task from every chain's BlockTrigger. Iterating
+// is cheap (one or a handful of chains) and removes the need for the caller
+// to know which chain the task lives on, which matters for DisableTask /
+// DeleteTask messages that arrive without chain context.
+func (o *Operator) removeBlockCheck(taskID string) error {
+	var firstErr error
+	for _, set := range o.chainTriggers {
+		if set.BlockTrigger == nil {
+			continue
+		}
+		if err := set.BlockTrigger.RemoveCheck(taskID); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// removeEventCheck removes a task from every chain's EventTrigger.
+func (o *Operator) removeEventCheck(taskID string) error {
+	var firstErr error
+	for _, set := range o.chainTriggers {
+		if set.EventTrigger == nil {
+			continue
+		}
+		if err := set.EventTrigger.RemoveCheck(taskID); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// primaryBlockProgress reports the latest block seen by the first configured
+// chain. Used in Ping telemetry. Multi-chain progress reporting is a D-2
+// concern — the aggregator currently expects a single number.
+func (o *Operator) primaryBlockProgress() int64 {
+	if set, ok := o.triggersForChain(0); ok && set.BlockTrigger != nil {
+		return set.BlockTrigger.GetProgress()
+	}
+	return 0
+}
+
+// primaryEventProgress reports the event count from the first configured chain.
+func (o *Operator) primaryEventProgress() int64 {
+	if set, ok := o.triggersForChain(0); ok && set.EventTrigger != nil {
+		return set.EventTrigger.GetProgress()
+	}
+	return 0
+}
+
+// EffectiveChains returns the resolved list of chains this operator monitors.
+// When Chains is empty, falls back to a single-entry list derived from the
+// legacy TargetChain (or the EigenLayer RPC as a last resort), so pre-multi-
+// chain operator configs keep working without modification.
+func (c *OperatorConfig) EffectiveChains() []OperatorChainConfig {
+	if len(c.Chains) > 0 {
+		return c.Chains
+	}
+	rpc := c.TargetChain.EthRpcUrl
+	if rpc == "" {
+		rpc = c.EthRpcUrl
+	}
+	ws := c.TargetChain.EthWsUrl
+	if ws == "" {
+		ws = c.EthWsUrl
+	}
+	return []OperatorChainConfig{{
+		EthRpcUrl: rpc,
+		EthWsUrl:  ws,
+	}}
+}
+
+// ChainTriggerSet bundles the per-chain trigger engines and any chain-specific
+// state the operator needs to keep separate. Block and Event triggers each
+// speak to a single chain's RPC; the operator holds one ChainTriggerSet per
+// supported chain and a single shared TimeTrigger for cron/fixed-time tasks
+// (which are chain-agnostic).
+//
+// EthClient is the per-chain HTTP RPC used by the trigger consumer loop when
+// it needs to fetch block details (e.g., HeaderByNumber for block-trigger
+// payload enrichment). Sharing a single targetEthClient across all chains
+// would silently route header fetches to the wrong chain.
+type ChainTriggerSet struct {
+	ChainID      int64
+	Name         string
+	BlockTrigger *triggerengine.BlockTrigger
+	EventTrigger *triggerengine.EventTrigger
+	EthClient    *ethclient.Client
+}
+
+// chainTaggedBlockEvent and chainTaggedEventEvent wrap a TriggerMetadata with
+// the chain_id it came from so the operator's shared consumer loops can
+// dispatch per-chain RPC fetches and per-chain NotifyTriggers correctly.
+// Fan-in goroutines (one per chain) populate these from each chain's raw
+// trigger channel.
+type chainTaggedBlockEvent struct {
+	chainID  int64
+	metadata triggerengine.TriggerMetadata[int64]
+}
+
+type chainTaggedEventEvent struct {
+	chainID  int64
+	metadata triggerengine.TriggerMetadata[triggerengine.EventMark]
 }
 
 type Operator struct {
@@ -169,10 +332,22 @@ type Operator struct {
 
 	publicIP string
 
-	scheduler    gocron.Scheduler
-	eventTrigger *triggerengine.EventTrigger
-	blockTrigger *triggerengine.BlockTrigger
-	timeTrigger  *triggerengine.TimeTrigger
+	scheduler gocron.Scheduler
+
+	// chainTriggers is the per-chain trigger engine map. Keyed by chain_id as
+	// detected from each RPC at startup. Block/event triggers fire from the
+	// chain whose RPC produced them; routing in StreamMessages dispatches
+	// incoming MonitorTaskTrigger to the matching entry based on the task's
+	// chain_id. Empty chain_id (legacy aggregator) falls back to the first
+	// configured chain. Read-only after init — no mutex needed.
+	chainTriggers map[int64]*ChainTriggerSet
+	// chainOrder preserves the configuration order so chain_id=0 fallback is
+	// deterministic.
+	chainOrder []int64
+	// timeTrigger is chain-agnostic (cron/fixed-time schedules don't depend
+	// on which chain a task targets), so the operator holds a single shared
+	// instance regardless of how many chains it monitors.
+	timeTrigger *triggerengine.TimeTrigger
 
 	// Error debouncing to prevent log spam - track last time we logged specific error types
 	lastPingErrorTime   time.Time
@@ -277,16 +452,25 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		if c.ServerName != "" {
 			serverName = c.ServerName
 		}
+		// Sentry's `environment` tag is driven from config so that
+		// feature-branch / staging operators don't bucket into the
+		// production issue board. Default stays "production" so existing
+		// deployments that haven't set sentry_environment keep their
+		// historical bucket.
+		sentryEnv := "production"
+		if c.SentryEnvironment != "" {
+			sentryEnv = c.SentryEnvironment
+		}
 		if err := sentry.Init(sentry.ClientOptions{
 			Dsn:              c.SentryDsn,
 			ServerName:       serverName,
-			Environment:      "production",
+			Environment:      sentryEnv,
 			AttachStacktrace: true,
 			TracesSampleRate: 1.0,
 		}); err != nil {
 			logger.Errorf("Sentry initialization failed: %v", err)
 		} else {
-			logger.Infof("Sentry initialized for operator: %s", serverName)
+			logger.Infof("Sentry initialized for operator: %s (env: %s)", serverName, sentryEnv)
 		}
 	} else if c.SentryDsn != "" {
 		logger.Info("Sentry disabled in development environment")

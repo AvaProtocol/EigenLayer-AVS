@@ -78,7 +78,7 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 				smartWalletConfig.WhitelistAddresses = []common.Address{}
 			}
 
-			vm, _ := NewVMWithData(&model.Task{
+			vm, _ := NewVMWithData(&model.Workflow{
 				Task: &avsproto.Task{
 					Id: fmt.Sprintf("test-%d", i),
 					Trigger: &avsproto.TaskTrigger{

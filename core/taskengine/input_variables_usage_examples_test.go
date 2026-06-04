@@ -155,7 +155,7 @@ func TestInputVariables_UsageExamples(t *testing.T) {
 	}
 
 	// Execute SimulateTask with input variables
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
+	execution, err := engine.SimulateWorkflow(user, trigger, nodes, edges, inputVariables)
 	require.NoError(t, err)
 	require.NotNil(t, execution)
 

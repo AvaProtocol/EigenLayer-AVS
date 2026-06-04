@@ -41,7 +41,7 @@ func ExecutionIndexCounterKey(taskID string) []byte {
 // even when multiple executions are triggered simultaneously.
 //
 // Returns the assigned index (0-based) and any error that occurred.
-func (n *Engine) AssignNextExecutionIndex(task *model.Task) (int64, error) {
+func (n *Engine) AssignNextExecutionIndex(task *model.Workflow) (int64, error) {
 	counterKey := ExecutionIndexCounterKey(task.Id)
 
 	// Use the database's atomic increment operation to get the next index
@@ -69,7 +69,7 @@ func (n *Engine) AssignNextExecutionIndex(task *model.Task) (int64, error) {
 // what their index will be.
 //
 // Returns the current index value and any error that occurred.
-func (n *Engine) GetCurrentExecutionIndex(task *model.Task) (int64, error) {
+func (n *Engine) GetCurrentExecutionIndex(task *model.Workflow) (int64, error) {
 	counterKey := ExecutionIndexCounterKey(task.Id)
 
 	// Get the current counter value using the database's counter functionality
@@ -87,7 +87,7 @@ func (n *Engine) GetCurrentExecutionIndex(task *model.Task) (int64, error) {
 // This should be called when a task is deleted or when starting fresh.
 //
 // Returns any error that occurred.
-func (n *Engine) ResetExecutionIndexCounter(task *model.Task) error {
+func (n *Engine) ResetExecutionIndexCounter(task *model.Workflow) error {
 	counterKey := ExecutionIndexCounterKey(task.Id)
 
 	// Reset the counter to 0 using SetCounter

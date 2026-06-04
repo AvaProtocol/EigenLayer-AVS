@@ -71,7 +71,7 @@ func TestActivationDeactivationSyncWithConfigs(t *testing.T) {
 	user := testutil.TestUser1()
 	taskReq := testutil.RestTask()
 	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
-	task, err := engine.CreateTask(user, taskReq)
+	task, err := engine.CreateWorkflow(user, taskReq)
 	require.NoError(t, err)
 
 	// Wait for MonitorTaskTrigger to be sent
@@ -97,7 +97,7 @@ func TestActivationDeactivationSyncWithConfigs(t *testing.T) {
 	require.True(t, gotMonitor, "expected initial MonitorTaskTrigger for created task")
 
 	// Disable the task and expect a DisableTask control message
-	disableResp, err := engine.SetTaskEnabledByUser(user, task.Id, false)
+	disableResp, err := engine.SetWorkflowEnabledByUser(user, task.Id, false)
 	require.NoError(t, err)
 	require.True(t, disableResp.Success)
 	// ensure batch flush if needed

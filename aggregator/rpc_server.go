@@ -18,14 +18,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/structpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
-	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
-	"github.com/AvaProtocol/EigenLayer-AVS/core/services"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
@@ -38,7 +34,6 @@ import (
 
 // RpcServer is our grpc sever struct hold the entry point of request handler
 type RpcServer struct {
-	avsproto.UnimplementedAggregatorServer
 	avsproto.UnimplementedNodeServer
 
 	config *config.Config
@@ -53,80 +48,74 @@ type RpcServer struct {
 	smartWalletRpc   *ethclient.Client
 	smartWalletWsRpc *ethclient.Client // Global WebSocket client for transaction monitoring
 	chainID          *big.Int
+
+	// chainRegistry is set in gateway mode to route chain-specific operations to workers.
+	// nil in single-chain aggregator mode.
+	chainRegistry *ChainRegistry
 }
 
-// Get nonce of an existing smart wallet of a given owner
-func (r *RpcServer) GetWallet(ctx context.Context, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
-	user, err := r.verifyAuth(ctx)
-
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+// resolveSmartWalletForChain returns the SmartWalletConfig + RPC client
+// for the requested chain. In single-chain mode (no chainRegistry) it
+// always returns the aggregator's defaults. In gateway mode, when
+// requestedChainID matches a registered chain, it returns that chain's
+// SmartWallet config and a lazily-dialed chain-specific RPC client —
+// without this, multi-chain operations that read on-chain state directly
+// from the aggregator (e.g. the ERC-20 balance check in ExecuteWithdraw)
+// always hit the default chain's RPC and miss tokens that only exist on
+// other chains.
+func (r *RpcServer) resolveSmartWalletForChain(requestedChainID int64) (*config.SmartWalletConfig, *ethclient.Client, error) {
+	if r.chainRegistry == nil || requestedChainID == 0 {
+		return r.config.SmartWallet, r.smartWalletRpc, nil
 	}
-	r.config.Logger.Info("process create wallet",
-		"user", user.Address.String(),
-		"salt", payload.Salt,
-		"factory", payload.FactoryAddress,
-	)
-
-	return r.engine.GetWallet(user, payload)
+	if r.config.SmartWallet != nil && requestedChainID == r.config.SmartWallet.ChainID {
+		return r.config.SmartWallet, r.smartWalletRpc, nil
+	}
+	entry, err := r.chainRegistry.GetWorker(requestedChainID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if entry.Config == nil || entry.Config.SmartWallet == nil {
+		return nil, nil, fmt.Errorf("chain %d has no smart_wallet config", requestedChainID)
+	}
+	rpc, err := entry.GetRPC()
+	if err != nil {
+		return nil, nil, err
+	}
+	return entry.Config.SmartWallet, rpc, nil
 }
 
-func (r *RpcServer) SetWallet(ctx context.Context, payload *avsproto.SetWalletReq) (*avsproto.GetWalletResp, error) {
-	user, err := r.verifyAuth(ctx)
-
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	r.config.Logger.Info("process set wallet",
-		"user", user.Address.String(),
-		"salt", payload.Salt,
-		"factory", payload.FactoryAddress,
-		"isHidden", payload.IsHidden,
-	)
-
-	return r.engine.SetWallet(user.Address, payload)
-}
-
-// Get nonce of an existing smart wallet of a given owner
-func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest) (*avsproto.NonceResp, error) {
-	ownerAddress := common.HexToAddress(payload.Owner)
-
-	nonce, err := aa.GetNonce(r.smartWalletRpc, ownerAddress, big.NewInt(0))
-	if err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.ErrorCode_SMART_WALLET_RPC_ERROR), taskengine.NonceFetchingError)
-	}
-
-	return &avsproto.NonceResp{
-		Nonce: nonce.String(),
-	}, nil
-}
-
-// GetAddress returns smart account address of the given owner in the auth key
-func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalletReq) (*avsproto.ListWalletResp, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	return r.engine.ListWallets(user.Address, payload)
-}
-
-// WithdrawFunds handles withdrawal of funds from a smart wallet using UserOp
-func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.WithdrawFundsReq) (*avsproto.WithdrawFundsResp, error) {
-	// Authenticate the user
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
+// ExecuteWithdraw is the auth-free body of the former WithdrawFunds
+// gRPC handler — extracted so the REST WithdrawWallet handler can
+// reuse the bundler + paymaster + balance pipeline without going
+// through gRPC's metadata-based auth. Callers (now only REST via
+// the WithdrawService adapter) supply the already-resolved
+// *model.User and the same payload shape; the response is the same
+// protobuf result type and gets translated to the OpenAPI
+// WithdrawResponse on the REST side.
+func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, payload *avsproto.WithdrawFundsReq) (*avsproto.WithdrawFundsResp, error) {
+	requestedChainID := payload.GetChainId()
 	r.config.Logger.Info("process withdraw funds",
 		"user", user.Address.String(),
 		"recipient", payload.RecipientAddress,
 		"amount", payload.Amount,
 		"token", payload.Token,
 		"smart_wallet", payload.SmartWalletAddress,
+		"requested_chain_id", requestedChainID,
 	)
+
+	// In single-chain aggregator mode (no chainRegistry), reject explicit chain_id
+	// that does not match the aggregator's chain. In gateway mode this resolves
+	// to the matching chain's SmartWallet config + RPC client; everything below
+	// uses `swCfg` / `swRpc` instead of the aggregator defaults so a sepolia
+	// withdraw doesn't hit the mainnet RPC.
+	if r.chainRegistry == nil && requestedChainID != 0 && r.chainID != nil && requestedChainID != r.chainID.Int64() {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"chain_id %d does not match aggregator chain %d", requestedChainID, r.chainID.Int64())
+	}
+	swCfg, swRpc, swErr := r.resolveSmartWalletForChain(requestedChainID)
+	if swErr != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "resolve chain %d: %v", requestedChainID, swErr)
+	}
 
 	// Validate required parameters
 	if payload.RecipientAddress == "" {
@@ -195,7 +184,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 	smartWalletAddress := params.SmartWalletAddress
 
 	// Check if smart wallet config is available
-	if r.config.SmartWallet == nil {
+	if swCfg == nil {
 		return nil, status.Errorf(codes.Internal, "smart wallet configuration not available")
 	}
 
@@ -203,7 +192,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 	// Skip reimbursement for withdrawals — the paymaster absorbs gas costs so users
 	// can withdraw their full balance without reserving ETH for gas reimbursement.
 	paymasterReq := preset.GetVerifyingPaymasterRequestForDuration(
-		r.config.SmartWallet.PaymasterAddress,
+		swCfg.PaymasterAddress,
 		15*time.Minute,
 	)
 	paymasterReq.SkipReimbursement = true
@@ -215,7 +204,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 		if paymasterReq != nil && paymasterReq.SkipReimbursement {
 			// Paymaster absorbs gas costs — no reimbursement deduction needed.
 			// Just validate the wallet has enough ETH for the withdrawal amount.
-			balance, balanceErr := r.smartWalletRpc.BalanceAt(ctx, *smartWalletAddress, nil)
+			balance, balanceErr := swRpc.BalanceAt(ctx, *smartWalletAddress, nil)
 			if balanceErr != nil {
 				return nil, status.Errorf(codes.Internal, "failed to get wallet balance: %v", balanceErr)
 			}
@@ -252,13 +241,13 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 				return nil, status.Errorf(codes.InvalidArgument, "failed to build temporary withdrawal calldata: %v", err)
 			}
 
-			bundlerClient, bundlerErr := bundler.NewBundlerClient(r.config.SmartWallet.BundlerURL)
+			bundlerClient, bundlerErr := bundler.NewBundlerClient(swCfg.BundlerURL)
 			if bundlerErr != nil {
 				return nil, status.Errorf(codes.Internal, "failed to create bundler client: %v", bundlerErr)
 			}
 			tempUserOp, tempErr := preset.BuildUserOpWithPaymaster(
-				r.config.SmartWallet,
-				r.smartWalletRpc,
+				swCfg,
+				swRpc,
 				bundlerClient,
 				user.Address,
 				tempCallData,
@@ -284,7 +273,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 				gasEstimate, gasErr := bundlerClient.EstimateUserOperationGas(
 					ctx,
 					*tempUserOp,
-					r.config.SmartWallet.EntrypointAddress,
+					swCfg.EntrypointAddress,
 					map[string]any{},
 				)
 				if gasErr != nil {
@@ -295,7 +284,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 					}
 					finalAmount = requestedAmount
 				} else {
-					reimbursement, reimbErr := preset.EstimateGasReimbursementAmount(r.smartWalletRpc, gasEstimate, r.config.Logger)
+					reimbursement, reimbErr := preset.EstimateGasReimbursementAmount(swRpc, gasEstimate, r.config.Logger)
 					if reimbErr != nil {
 						r.config.Logger.Warn("Failed to estimate reimbursement",
 							"error", reimbErr)
@@ -307,7 +296,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 						if withdrawAll {
 							maxWithdrawable, maxErr := CalculateMaxWithdrawableAmount(
 								ctx,
-								r.smartWalletRpc,
+								swRpc,
 								*smartWalletAddress,
 								reimbursement,
 							)
@@ -322,7 +311,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 								"maxWithdrawable", finalAmount.String(),
 								"estimatedReimbursement", reimbursement.String())
 						} else {
-							balance, balanceErr := r.smartWalletRpc.BalanceAt(ctx, *smartWalletAddress, nil)
+							balance, balanceErr := swRpc.BalanceAt(ctx, *smartWalletAddress, nil)
 							if balanceErr != nil {
 								return nil, status.Errorf(codes.Internal, "failed to get wallet balance: %v", balanceErr)
 							}
@@ -351,7 +340,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 		if withdrawAll {
 			// "Withdraw all" for ERC20 - get token balance
 			tokenAddress := common.HexToAddress(payload.Token)
-			tokenContract, err := erc20.NewErc20(tokenAddress, r.smartWalletRpc)
+			tokenContract, err := erc20.NewErc20(tokenAddress, swRpc)
 			if err != nil {
 				return nil, status.Errorf(codes.Internal, "failed to create token contract: %v", err)
 			}
@@ -369,7 +358,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 		} else {
 			// Validate token balance
 			tokenAddress := common.HexToAddress(payload.Token)
-			tokenContract, err := erc20.NewErc20(tokenAddress, r.smartWalletRpc)
+			tokenContract, err := erc20.NewErc20(tokenAddress, swRpc)
 			if err != nil {
 				return nil, status.Errorf(codes.Internal, "failed to create token contract: %v", err)
 			}
@@ -398,7 +387,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 	r.config.Logger.Info("processing withdrawal with paymaster sponsorship",
 		"user", user.Address.String(),
 		"smartWallet", smartWalletAddress.Hex(),
-		"paymaster", r.config.SmartWallet.PaymasterAddress.Hex(),
+		"paymaster", swCfg.PaymasterAddress.Hex(),
 		"amount", payload.Amount,
 		"token", payload.Token,
 	)
@@ -409,6 +398,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 		callData,
 		smartWalletAddress,
 		paymasterReq,
+		requestedChainID,
 	)
 
 	if err != nil {
@@ -445,8 +435,9 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 	}
 
 	if userOp != nil {
-		// Get UserOp hash
-		userOpHash := userOp.GetUserOpHash(r.config.SmartWallet.EntrypointAddress, big.NewInt(int64(r.config.SmartWallet.ChainID)))
+		// Get UserOp hash — sign against the chain we actually targeted
+		// so the hash matches what the bundler/paymaster validated.
+		userOpHash := userOp.GetUserOpHash(swCfg.EntrypointAddress, big.NewInt(swCfg.ChainID))
 		resp.UserOpHash = userOpHash.Hex()
 	}
 
@@ -491,13 +482,22 @@ func (r *RpcServer) validateSmartWalletOwnership(owner common.Address, smartWall
 	return nil
 }
 
-// sendUserOpWithGlobalWs sends a UserOp using the global WebSocket client for efficient transaction monitoring
+// sendUserOpWithGlobalWs sends a UserOp using the global WebSocket client for efficient transaction monitoring.
+// In gateway mode, it delegates to the appropriate chain worker instead.
+// requestedChainID picks the worker in gateway mode; pass 0 to use the
+// gateway's default chain (single-chain mode ignores the argument).
 func (r *RpcServer) sendUserOpWithGlobalWs(
 	owner common.Address,
 	callData []byte,
 	smartWalletAddress *common.Address,
 	paymasterReq *preset.VerifyingPaymasterRequest,
+	requestedChainID int64,
 ) (*userop.UserOperation, *types.Receipt, error) {
+	// Gateway mode: route to worker
+	if r.chainRegistry != nil {
+		return r.sendUserOpViaWorker(owner, callData, smartWalletAddress, paymasterReq, requestedChainID)
+	}
+
 	// Use global WebSocket client if available, otherwise fall back to creating new connection
 	// Note: salt=nil here because rpc_server callers (e.g. WithdrawFunds) operate on already-deployed wallets
 	if r.smartWalletWsRpc != nil {
@@ -528,431 +528,59 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 	}
 }
 
-func (r *RpcServer) SetTaskEnabled(ctx context.Context, req *avsproto.SetTaskEnabledReq) (*avsproto.SetTaskEnabledResp, error) {
-	user, err := r.verifyAuth(ctx)
+// sendUserOpViaWorker delegates UserOp execution to a chain worker in gateway mode.
+// It converts the worker response into the same types returned by preset.SendUserOp.
+func (r *RpcServer) sendUserOpViaWorker(
+	owner common.Address,
+	callData []byte,
+	smartWalletAddress *common.Address,
+	paymasterReq *preset.VerifyingPaymasterRequest,
+	chainID int64,
+) (*userop.UserOperation, *types.Receipt, error) {
+	worker, err := r.chainRegistry.GetWorker(chainID)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+		return nil, nil, fmt.Errorf("no worker for chain %d: %w", chainID, err)
 	}
 
-	r.config.Logger.Info("process set task enabled",
-		"user", user.Address.String(),
-		"task_id", req.Id,
-		"enabled", req.Enabled,
-	)
-
-	result, err := r.engine.SetTaskEnabledByUser(user, string(req.Id), req.Enabled)
-
-	if err != nil {
-		return nil, err
+	req := &avsproto.ExecuteUserOpReq{
+		Owner:        owner.Hex(),
+		CallData:     callData,
+		UsePaymaster: paymasterReq != nil,
+	}
+	if smartWalletAddress != nil {
+		req.SmartWalletAddress = smartWalletAddress.Hex()
 	}
 
-	return result, nil
-}
-
-func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.IdReq) (*avsproto.DeleteTaskResp, error) {
-	user, err := r.verifyAuth(ctx)
+	resp, err := worker.Client.ExecuteUserOp(context.Background(), req)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+		return nil, nil, fmt.Errorf("worker ExecuteUserOp failed: %w", err)
+	}
+	if !resp.Success {
+		return nil, nil, fmt.Errorf("worker ExecuteUserOp error: %s", resp.Error)
 	}
 
-	r.config.Logger.Info("process delete task",
-		"user", user.Address.String(),
-		"task_id", string(taskID.Id),
-	)
-
-	result, err := r.engine.DeleteTaskByUser(user, string(taskID.Id))
-
-	if err != nil {
-		return nil, err
+	// Convert worker response to local types for caller compatibility
+	receipt := &types.Receipt{
+		TxHash:  common.HexToHash(resp.TxHash),
+		GasUsed: resp.GasUsed,
 	}
-
-	return result, nil
-}
-
-func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.CreateTaskReq) (*avsproto.CreateTaskResp, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
-	}
-
-	task, err := r.engine.CreateTask(user, taskPayload)
-	if err != nil {
-		return nil, err
-	}
-
-	return &avsproto.CreateTaskResp{
-		Id: task.Id,
-	}, nil
-}
-
-func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksReq) (*avsproto.ListTasksResp, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	// r.config.Logger.Info("process list task",
-	// 	"user", user.Address.String(),
-	// 	"smart_wallet_address", payload.SmartWalletAddress,
-	// )
-
-	listTaskResp, err := r.engine.ListTasksByUser(user, payload)
-	if err != nil {
-		contextFields := map[string]interface{}{
-			"smart_wallet_address": payload.SmartWalletAddress,
-			"before_cursor":        payload.Before,
-			"after_cursor":         payload.After,
-			"limit":                payload.Limit,
+	if resp.GasCostWei != "" {
+		gasCost, ok := new(big.Int).SetString(resp.GasCostWei, 10)
+		if ok && resp.GasUsed > 0 {
+			receipt.EffectiveGasPrice = new(big.Int).Div(gasCost, new(big.Int).SetUint64(resp.GasUsed))
 		}
-		return nil, r.handlePaginationError(err, "ListTasks", user.Address.String(), contextFields)
 	}
 
-	return listTaskResp, nil
+	return nil, receipt, nil
 }
 
-func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListExecutionsReq) (*avsproto.ListExecutionsResp, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	listExecResp, err := r.engine.ListExecutions(user, payload)
-	if err != nil {
-		contextFields := map[string]interface{}{
-			"task_ids":      payload.TaskIds,
-			"before_cursor": payload.Before,
-			"after_cursor":  payload.After,
-			"limit":         payload.Limit,
-		}
-		return nil, r.handlePaginationError(err, "ListExecutions", user.Address.String(), contextFields)
-	}
-
-	return listExecResp, nil
-}
-
-func (r *RpcServer) GetExecution(ctx context.Context, payload *avsproto.ExecutionReq) (*avsproto.Execution, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	return r.engine.GetExecution(user, payload)
-}
-
-func (r *RpcServer) GetExecutionStatus(ctx context.Context, payload *avsproto.ExecutionReq) (*avsproto.ExecutionStatusResp, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	return r.engine.GetExecutionStatus(user, payload)
-}
-
-func (r *RpcServer) GetTask(ctx context.Context, payload *avsproto.IdReq) (*avsproto.Task, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	if payload.Id == "" {
-		return nil, status.Errorf(codes.InvalidArgument, taskengine.TaskIDMissing)
-	}
-
-	task, err := r.engine.GetTask(user, payload.Id)
-	if err != nil {
-		return nil, err
-	}
-
-	return task.ToProtoBuf()
-}
-
-// TriggerTask emit a trigger event that cause the task to be queue and execute eventually. It's similar to a trigger
-// sending by operator, but in this case the user manually provide a trigger point to force run it.
-func (r *RpcServer) TriggerTask(ctx context.Context, payload *avsproto.TriggerTaskReq) (*avsproto.TriggerTaskResp, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	r.config.Logger.Info("process trigger task",
-		"user", user.Address.String(),
-		"task_id", payload.TaskId,
-	)
-
-	if payload.TaskId == "" {
-		return nil, status.Errorf(codes.InvalidArgument, taskengine.TaskIDMissing)
-	}
-
-	return r.engine.TriggerTask(user, payload)
-}
-
-func (r *RpcServer) CreateSecret(ctx context.Context, payload *avsproto.CreateOrUpdateSecretReq) (*avsproto.CreateSecretResp, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	r.config.Logger.Info("process create secret",
-		"user", user.Address.String(),
-		"secret_name", payload.Name,
-	)
-
-	result, err := r.engine.CreateSecret(user, payload)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "")
-	}
-
-	return &avsproto.CreateSecretResp{
-		Success: result,
-	}, nil
-}
-
-func (r *RpcServer) ListSecrets(ctx context.Context, payload *avsproto.ListSecretsReq) (*avsproto.ListSecretsResp, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	r.config.Logger.Info("process list secret",
-		"user", user.Address.String(),
-	)
-
-	listSecretResp, err := r.engine.ListSecrets(user, payload)
-	if err != nil {
-		contextFields := map[string]interface{}{
-			"workflow_id":   payload.WorkflowId,
-			"before_cursor": payload.Before,
-			"after_cursor":  payload.After,
-			"limit":         payload.Limit,
-		}
-		return nil, r.handlePaginationError(err, "ListSecrets", user.Address.String(), contextFields)
-	}
-
-	return listSecretResp, nil
-}
-
-func (r *RpcServer) UpdateSecret(ctx context.Context, payload *avsproto.CreateOrUpdateSecretReq) (*avsproto.UpdateSecretResp, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	r.config.Logger.Info("process update secret",
-		"user", user.Address.String(),
-		"secret_name", payload.Name,
-	)
-
-	result, err := r.engine.UpdateSecret(user, payload)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "")
-	}
-
-	return &avsproto.UpdateSecretResp{
-		Success: result,
-	}, nil
-}
-
-func (r *RpcServer) DeleteSecret(ctx context.Context, payload *avsproto.DeleteSecretReq) (*avsproto.DeleteSecretResp, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	r.config.Logger.Info("process delete secret",
-		"user", user.Address.String(),
-		"secret_name", payload.Name,
-	)
-
-	result, err := r.engine.DeleteSecret(user, payload)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "")
-	}
-
-	return result, nil
-}
-
-// GetWorkflowCount handles the RPC request to get the workflow count
-func (r *RpcServer) GetWorkflowCount(ctx context.Context, req *avsproto.GetWorkflowCountReq) (*avsproto.GetWorkflowCountResp, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	// r.config.Logger.Info("process workflow count",
-	// 	"user", user.Address.String(),
-	// 	"smart_wallet_address", req.Addresses,
-	// )
-
-	return r.engine.GetWorkflowCount(user, req)
-}
-
-// GetExecutionCount handles the RPC request to get the execution count
-func (r *RpcServer) GetExecutionCount(ctx context.Context, req *avsproto.GetExecutionCountReq) (*avsproto.GetExecutionCountResp, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	return r.engine.GetExecutionCount(user, req)
-}
-
-func (r *RpcServer) GetExecutionStats(ctx context.Context, req *avsproto.GetExecutionStatsReq) (*avsproto.GetExecutionStatsResp, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	return r.engine.GetExecutionStats(user, req)
-}
-
-func (r *RpcServer) RunNodeWithInputs(ctx context.Context, req *avsproto.RunNodeWithInputsReq) (*avsproto.RunNodeWithInputsResp, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	// Get node type from the TaskNode for logging
-	var nodeTypeForLogging avsproto.NodeType
-	if req.Node != nil {
-		nodeTypeForLogging = req.Node.Type
-	}
-
-	r.config.Logger.Info("process run node with inputs",
-		"user", user.Address.String(),
-		"node_type", nodeTypeForLogging,
-	)
-
-	// Call the immediate execution function directly
-	result, err := r.engine.RunNodeImmediatelyRPC(user, req)
-	if err != nil {
-		r.config.Logger.Warn("run node with inputs failed",
-			"user", user.Address.String(),
-			"error", err.Error(),
-		)
-		return nil, status.Errorf(codes.Internal, "execution failed: %v", err)
-	}
-
-	r.config.Logger.Info("run node with inputs completed",
-		"user", user.Address.String(),
-		"success", result.Success,
-		"error", result.Error,
-	)
-
-	return result, nil
-}
-
-func (r *RpcServer) RunTrigger(ctx context.Context, req *avsproto.RunTriggerReq) (*avsproto.RunTriggerResp, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	// Get trigger type from the TaskTrigger for logging
-	var triggerTypeForLogging avsproto.TriggerType
-	if req.Trigger != nil {
-		triggerTypeForLogging = req.Trigger.Type
-	}
-
-	r.config.Logger.Info("process run trigger",
-		"user", user.Address.String(),
-		"trigger_type", triggerTypeForLogging,
-		"trigger_name", req.Trigger.GetName(),
-	)
-
-	// Call the trigger execution function directly
-	result, err := r.engine.RunTriggerRPC(user, req)
-	if err != nil {
-		r.config.Logger.Warn("run trigger failed",
-			"user", user.Address.String(),
-			"error", err.Error(),
-		)
-		return nil, status.Errorf(codes.Internal, "execution failed: %v", err)
-	}
-
-	r.config.Logger.Info("run trigger completed",
-		"user", user.Address.String(),
-		"success", result.Success,
-		"error", result.Error,
-	)
-
-	return result, nil
-}
-
-func (r *RpcServer) SimulateTask(ctx context.Context, req *avsproto.SimulateTaskReq) (*avsproto.Execution, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	r.config.Logger.Info("process simulate task",
-		"user", user.Address.String(),
-		"trigger_type", req.Trigger.Type,
-		"nodes_count", len(req.Nodes),
-		"edges_count", len(req.Edges),
-	)
-
-	// Basic validation
-	if req.Trigger == nil {
-		return nil, status.Errorf(codes.InvalidArgument, "trigger is required for task simulation")
-	}
-	if len(req.Nodes) == 0 {
-		return nil, status.Errorf(codes.InvalidArgument, "at least one node is required for task simulation")
-	}
-
-	// Validate inputVariables.settings (same requirements as CreateTask)
-	if err := model.ValidateInputVariablesSettings(req.InputVariables); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid task argument: %s", err.Error())
-	}
-
-	// Convert protobuf input variables to Go native types
-	inputVariables := make(map[string]interface{})
-	for k, v := range req.InputVariables {
-		inputVariables[k] = v.AsInterface()
-	}
-
-	r.config.Logger.Info("simulate task details",
-		"user", user.Address.String(),
-		"trigger_type", req.Trigger.Type,
-		"trigger_name", req.Trigger.Name,
-		"input_keys", getInputKeys(req.InputVariables),
-	)
-
-	// Call the simulation function with the provided task definition (no need to extract triggerType and triggerConfig)
-	execution, err := r.engine.SimulateTask(user, req.Trigger, req.Nodes, req.Edges, inputVariables)
-	if err != nil {
-		r.config.Logger.Error("simulate task failed",
-			"user", user.Address.String(),
-			"trigger_name", req.Trigger.Name,
-			"error", err,
-		)
-		return nil, status.Errorf(codes.Internal, "simulation failed: %v", err)
-	}
-
-	r.config.Logger.Info("simulate task completed",
-		"user", user.Address.String(),
-		"trigger_name", req.Trigger.Name,
-		"status", execution.Status,
-		"execution_id", execution.Id,
-		"steps_count", len(execution.Steps),
-	)
-
-	return execution, nil
-}
-
-// GetTokenMetadata handles token metadata lookup requests
-func (r *RpcServer) GetTokenMetadata(ctx context.Context, payload *avsproto.GetTokenMetadataReq) (*avsproto.GetTokenMetadataResp, error) {
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	r.config.Logger.Info("process get token metadata",
-		"user", user.Address.String(),
-		"address", payload.Address,
-	)
-
-	return r.engine.GetTokenMetadata(user, payload)
-}
+// (Aggregator-service gRPC handlers — CreateTask, ListTasks, GetTask,
+// TriggerTask, SetTaskEnabled, DeleteTask, ListExecutions, GetExecution,
+// GetExecutionStatus, CreateSecret, ListSecrets, UpdateSecret,
+// DeleteSecret, GetWorkflowCount, GetExecutionCount, GetExecutionStats,
+// RunNodeWithInputs, RunTrigger, SimulateTask, GetTokenMetadata — were
+// deleted as part of the REST migration. The REST equivalents live in
+// aggregator/rest/handlers_*.go.)
 
 // ReportEventOverload handles event overload alerts from operators
 func (r *RpcServer) ReportEventOverload(ctx context.Context, alert *avsproto.EventOverloadAlert) (*avsproto.EventOverloadResponse, error) {
@@ -966,7 +594,7 @@ func (r *RpcServer) ReportEventOverload(ctx context.Context, alert *avsproto.Eve
 		"details", alert.Details)
 
 	// Disable the overloaded task immediately
-	deactivated, err := r.engine.DisableTask(alert.TaskId)
+	deactivated, err := r.engine.DisableWorkflow(alert.TaskId)
 	if err != nil {
 		r.config.Logger.Error("❌ Failed to disable overloaded task",
 			"task_id", alert.TaskId,
@@ -995,63 +623,6 @@ func (r *RpcServer) ReportEventOverload(ctx context.Context, alert *avsproto.Eve
 		Message:       responseMessage,
 		Timestamp:     uint64(time.Now().UnixMilli()),
 	}, nil
-}
-
-// Helper functions for logging
-func getInputKeys(inputs map[string]*structpb.Value) []string {
-	keys := make([]string, 0, len(inputs))
-	for k := range inputs {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
-// handlePaginationError processes pagination-related errors and returns user-friendly messages
-func (r *RpcServer) handlePaginationError(err error, methodName string, userAddr string, contextFields map[string]interface{}) error {
-	if err == nil {
-		return nil
-	}
-
-	// Enhanced error handling for cursor validation failures
-	if st, ok := status.FromError(err); ok && st.Code() == codes.InvalidArgument {
-		// Prepare logging fields
-		logFields := []interface{}{
-			"user", userAddr,
-			"error", st.Message(),
-		}
-
-		// Add context-specific fields
-		for key, value := range contextFields {
-			logFields = append(logFields, key, value)
-		}
-
-		// Log detailed information about the invalid request
-		r.config.Logger.Warn("invalid pagination parameters in "+methodName, logFields...)
-
-		// Return a more user-friendly error message for cursor validation
-		if st.Message() == "cursor is not valid" {
-			return status.Errorf(codes.InvalidArgument,
-				"Invalid pagination cursor. Please retry without pagination parameters or use a fresh cursor from a recent response.")
-		}
-
-		// Return original error for other InvalidArgument cases
-		return err
-	}
-
-	// Prepare logging fields for non-pagination errors
-	logFields := []interface{}{
-		"user", userAddr,
-		"error", err,
-	}
-
-	// Add context-specific fields
-	for key, value := range contextFields {
-		logFields = append(logFields, key, value)
-	}
-
-	// Log other types of errors
-	r.config.Logger.Error("error in "+methodName, logFields...)
-	return err
 }
 
 // Operator action
@@ -1117,104 +688,6 @@ func (r *RpcServer) HealthCheck(ctx context.Context, req *avsproto.HealthCheckRe
 	}, nil
 }
 
-// EstimateFees provides comprehensive fee estimation for workflow deployment
-func (r *RpcServer) EstimateFees(ctx context.Context, req *avsproto.EstimateFeesReq) (*avsproto.EstimateFeesResp, error) {
-	// Authenticate the user
-	user, err := r.verifyAuth(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-
-	r.config.Logger.Info("process estimate fees",
-		"user", user.Address.String(),
-		"trigger_type", req.Trigger.Type.String(),
-		"nodes_count", len(req.Nodes),
-		"runner", req.Runner)
-
-	// Validate required fields
-	if req.Trigger == nil {
-		return nil, status.Errorf(codes.InvalidArgument, "trigger is required")
-	}
-	if len(req.Nodes) == 0 {
-		return nil, status.Errorf(codes.InvalidArgument, "at least one node is required")
-	}
-	if req.CreatedAt <= 0 {
-		return nil, status.Errorf(codes.InvalidArgument, "created_at must be a positive timestamp")
-	}
-	if req.ExpireAt <= 0 {
-		return nil, status.Errorf(codes.InvalidArgument, "expire_at must be a positive timestamp")
-	}
-	if req.ExpireAt <= req.CreatedAt {
-		return nil, status.Errorf(codes.InvalidArgument, "expire_at must be after created_at")
-	}
-
-	// Price service is required for USD-equivalent fee numbers. When Moralis
-	// isn't configured, callers receive cogs (WEI) and executionFee (USD) as
-	// raw values without USD-equivalent conversions — and notifications render
-	// "$?" rather than a fabricated number.
-	var priceService taskengine.PriceService
-	if r.config.MoralisApiKey != "" {
-		priceService = services.GetMoralisService(r.config.MoralisApiKey, r.config.Logger)
-	} else {
-		r.config.Logger.Warn("No Moralis API key configured; fee estimates will lack USD-equivalent conversions and notifications will render $? for token totals")
-	}
-
-	// Create fee estimator - use configuration-aware version if fee rates are configured
-	var feeEstimator *taskengine.FeeEstimator
-	if r.config.FeeRates != nil {
-		// Use configurable fee rates from YAML configuration
-		feeEstimator = taskengine.NewFeeEstimatorWithConfig(
-			r.config.Logger,
-			r.smartWalletRpc,
-			r.engine.GetTenderlyClient(),
-			r.config.SmartWallet,
-			priceService,
-			r.config.FeeRates,
-		)
-	} else {
-		// Use hardcoded defaults (backwards compatible)
-		feeEstimator = taskengine.NewFeeEstimator(
-			r.config.Logger,
-			r.smartWalletRpc,
-			r.engine.GetTenderlyClient(),
-			r.config.SmartWallet,
-			priceService,
-		)
-	}
-
-	// Perform fee estimation
-	resp, err := feeEstimator.EstimateFees(ctx, req)
-	if err != nil {
-		r.config.Logger.Error("failed to estimate fees",
-			"error", err,
-			"user", user.Address.String(),
-			"trigger_type", req.Trigger.Type.String())
-		return nil, status.Errorf(codes.Internal, "failed to estimate fees: %v", err)
-	}
-
-	if !resp.Success {
-		// Map custom error codes to gRPC status codes
-		grpcCode := codes.Internal
-		switch resp.ErrorCode {
-		case avsproto.ErrorCode_SMART_WALLET_NOT_FOUND:
-			grpcCode = codes.NotFound
-		case avsproto.ErrorCode_INVALID_REQUEST:
-			grpcCode = codes.InvalidArgument
-		case avsproto.ErrorCode_SIMULATION_ERROR:
-			grpcCode = codes.Unavailable
-		default:
-			grpcCode = codes.Internal
-		}
-		return nil, status.Errorf(grpcCode, "%s", resp.Error)
-	}
-
-	r.config.Logger.Info("✅ fee estimation completed successfully",
-		"user", user.Address.String(),
-		"pricing_model", resp.PricingModel)
-
-	return resp, nil
-}
-
 // startRpcServer initializes and establish a tcp socket on given address from
 // config file
 func (agg *Aggregator) startRpcServer(ctx context.Context) error {
@@ -1259,13 +732,29 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		smartWalletRpc:   smartwalletClient,
 		smartWalletWsRpc: smartwalletWsClient,
 
-		config:       agg.config,
-		operatorPool: agg.operatorPool,
-		chainID:      smartWalletChainID,
+		config:        agg.config,
+		operatorPool:  agg.operatorPool,
+		chainID:       smartWalletChainID,
+		chainRegistry: agg.chainRegistry,
 	}
 
-	// TODO: split node and aggregator
-	avsproto.RegisterAggregatorServer(s, rpcServer)
+	// Expose the smart-wallet clients + rpcServer to the rest of the
+	// aggregator (specifically the REST layer's WithdrawService /
+	// EstimateFees / GetWalletNonce handlers). startHttpServer runs
+	// after startRpcServer so these reads are always populated by the
+	// time the REST router is mounted.
+	agg.smartWalletRpc = smartwalletClient
+	agg.smartWalletWsRpc = smartwalletWsClient
+	agg.rpcServer = rpcServer
+
+	// The Aggregator service (public client surface) is no longer
+	// registered. Clients use the REST API at /api/v1 — see
+	// aggregator/rest/ and api/openapi.yaml. The proto service is
+	// kept (marked DEPRECATED) so generated types stay available
+	// and old SDKs get a clear "Unimplemented" instead of a wire
+	// parse error. Handler methods on RpcServer that implemented
+	// the removed interface are dead code in this commit; they get
+	// deleted in a follow-up alongside the proto service block.
 	avsproto.RegisterNodeServer(s, rpcServer)
 
 	// Register reflection service on gRPC server.

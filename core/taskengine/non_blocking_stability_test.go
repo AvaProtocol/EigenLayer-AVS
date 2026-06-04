@@ -77,14 +77,14 @@ func TestNonBlockingExecutionStability(t *testing.T) {
 	}
 
 	// Create the task
-	createdTask, err := engine.CreateTask(user, taskReq)
+	createdTask, err := engine.CreateWorkflow(user, taskReq)
 	require.NoError(t, err)
 	require.NotNil(t, createdTask)
 
 	t.Logf("Created task with ID: %s", createdTask.Id)
 
 	// Trigger non-blocking execution (this is the key test case)
-	triggerResp, err := engine.TriggerTask(user, &avsproto.TriggerTaskReq{
+	triggerResp, err := engine.TriggerWorkflow(user, &avsproto.TriggerTaskReq{
 		TaskId:      createdTask.Id,
 		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{
@@ -145,7 +145,7 @@ func TestNonBlockingExecutionStability(t *testing.T) {
 	assert.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING, statusResp.Status, "Status should be PENDING")
 
 	// Test 4: Verify that another non-blocking trigger gets a different executionId and incremented index
-	triggerResp2, err := engine.TriggerTask(user, &avsproto.TriggerTaskReq{
+	triggerResp2, err := engine.TriggerWorkflow(user, &avsproto.TriggerTaskReq{
 		TaskId:      createdTask.Id,
 		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{

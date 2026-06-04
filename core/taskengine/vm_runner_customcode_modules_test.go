@@ -106,7 +106,7 @@ func TestCommonJSRequireSyntax(t *testing.T) {
 				Name: "triggertest",
 			}
 
-			vm, err := NewVMWithData(&model.Task{
+			vm, err := NewVMWithData(&model.Workflow{
 				Task: &avsproto.Task{
 					Id:      "test_commonjs_" + tc.name,
 					Trigger: trigger,
@@ -204,7 +204,7 @@ func TestES6ImportSyntax(t *testing.T) {
 				Name: "triggertest",
 			}
 
-			vm, err := NewVMWithData(&model.Task{
+			vm, err := NewVMWithData(&model.Workflow{
 				Task: &avsproto.Task{
 					Id:      "test_es6_" + tc.name,
 					Trigger: trigger,
@@ -376,7 +376,7 @@ func TestErrorHandling(t *testing.T) {
 				Name: "triggertest",
 			}
 
-			vm, err := NewVMWithData(&model.Task{
+			vm, err := NewVMWithData(&model.Workflow{
 				Task: &avsproto.Task{
 					Id:      "test_error_" + tc.name,
 					Trigger: trigger,

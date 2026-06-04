@@ -511,7 +511,7 @@ func TestLoadSecretForTask(t *testing.T) {
 		WorkflowId: "worklow456",
 	})
 
-	secrets, err := LoadSecretForTask(engine.db, &model.Task{
+	secrets, err := LoadSecretForTask(engine.db, &model.Workflow{
 		Task: &avsproto.Task{
 			Owner: user1.Address.Hex(),
 			Id:    "workflow123",

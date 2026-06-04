@@ -56,7 +56,7 @@ func TestPaginationEmptyParameters(t *testing.T) {
 		t.Errorf("Expected no error for normal backward pagination, got %v", err)
 	}
 
-	taskResult, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	taskResult, err := n.ListWorkflowsByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{smartWalletAddress},
 		Before:             "",
 		After:              "",
@@ -71,7 +71,7 @@ func TestPaginationEmptyParameters(t *testing.T) {
 
 	tr := testutil.JsFastTask()
 	testutil.SetTaskSettings(tr, "jsfast_task", smartWalletAddress)
-	task, _ := n.CreateTask(user, tr)
+	task, _ := n.CreateWorkflow(user, tr)
 
 	execResult, err := n.ListExecutions(user, &avsproto.ListExecutionsReq{
 		TaskIds: []string{task.Id},

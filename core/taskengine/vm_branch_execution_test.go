@@ -86,7 +86,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithData(&model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,

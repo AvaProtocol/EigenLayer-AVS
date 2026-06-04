@@ -21,8 +21,8 @@ func SmartWalletTaskStoragePrefix(owner common.Address, smartWalletAddress commo
 	return []byte(fmt.Sprintf("u:%s:%s", strings.ToLower(owner.Hex()), strings.ToLower(smartWalletAddress.Hex())))
 }
 
-func TaskByStatusStoragePrefix(status avsproto.TaskStatus) []byte {
-	return storageschema.TaskByStatusStoragePrefix(status)
+func WorkflowByStatusStoragePrefix(status avsproto.TaskStatus) []byte {
+	return storageschema.WorkflowByStatusStoragePrefix(status)
 }
 
 func WalletByOwnerPrefix(owner common.Address) []byte {
@@ -141,11 +141,11 @@ func MarkWalletStale(db storage.Storage, owner common.Address, smartWalletAddres
 	return StoreWallet(db, owner, wallet)
 }
 
-func TaskStorageKey(id string, status avsproto.TaskStatus) []byte {
-	return storageschema.TaskStorageKey(id, status)
+func WorkflowStorageKey(id string, status avsproto.TaskStatus) []byte {
+	return storageschema.WorkflowStorageKey(id, status)
 }
 
-func TaskUserKey(t *model.Task) []byte {
+func TaskUserKey(t *model.Workflow) []byte {
 	return []byte(fmt.Sprintf(
 		"u:%s:%s:%s",
 		strings.ToLower(t.Owner),
@@ -158,7 +158,7 @@ func TaskExecutionPrefix(taskID string) []byte {
 	return []byte(fmt.Sprintf("history:%s", taskID))
 }
 
-func TaskExecutionKey(t *model.Task, executionID string) []byte {
+func TaskExecutionKey(t *model.Workflow, executionID string) []byte {
 	return []byte(fmt.Sprintf(
 		"history:%s:%s",
 		t.Id,
@@ -166,7 +166,58 @@ func TaskExecutionKey(t *model.Task, executionID string) []byte {
 	))
 }
 
-func TaskTriggerKey(t *model.Task, executionID string) []byte {
+// Chain-scoped storage key variants for gateway mode.
+// These prefix keys with chain_id to prevent collisions when multiple chains share one DB.
+
+func ChainWorkflowStorageKey(chainID int64, id string, status avsproto.TaskStatus) []byte {
+	return storageschema.ChainWorkflowStorageKey(chainID, id, status)
+}
+
+func ChainWorkflowByStatusStoragePrefix(chainID int64, status avsproto.TaskStatus) []byte {
+	return storageschema.ChainWorkflowByStatusStoragePrefix(chainID, status)
+}
+
+func ChainTaskUserKey(chainID int64, t *model.Workflow) []byte {
+	return []byte(fmt.Sprintf(
+		"u:%d:%s:%s:%s",
+		chainID,
+		strings.ToLower(t.Owner),
+		strings.ToLower(t.SmartWalletAddress),
+		t.Key(),
+	))
+}
+
+func ChainTaskExecutionPrefix(chainID int64, taskID string) []byte {
+	return []byte(fmt.Sprintf("history:%d:%s", chainID, taskID))
+}
+
+func ChainTaskExecutionKey(chainID int64, t *model.Workflow, executionID string) []byte {
+	return []byte(fmt.Sprintf(
+		"history:%d:%s:%s",
+		chainID,
+		t.Id,
+		executionID,
+	))
+}
+
+func ChainWalletStorageKey(chainID int64, owner common.Address, smartWalletAddress string) string {
+	return fmt.Sprintf(
+		"w:%d:%s:%s",
+		chainID,
+		strings.ToLower(owner.Hex()),
+		strings.ToLower(smartWalletAddress),
+	)
+}
+
+func ChainWalletByOwnerPrefix(chainID int64, owner common.Address) []byte {
+	return []byte(fmt.Sprintf(
+		"w:%d:%s",
+		chainID,
+		strings.ToLower(owner.String()),
+	))
+}
+
+func TaskTriggerKey(t *model.Workflow, executionID string) []byte {
 	return []byte(fmt.Sprintf(
 		"trigger:%s:%s",
 		t.Id,
@@ -180,29 +231,48 @@ func PendingExecutionPrefix(taskID string) []byte {
 	return []byte(fmt.Sprintf("pending:%s:", taskID))
 }
 
-func PendingExecutionKey(t *model.Task, executionID string) []byte {
+func PendingExecutionKey(t *model.Workflow, executionID string) []byte {
 	return []byte(fmt.Sprintf("pending:%s:%s", t.Id, executionID))
 }
 
+// ExecutionIdFromStorageKey extracts the execution id from either a legacy
+// (history:{taskID}:{executionID}) or chain-scoped
+// (history:{chainID}:{taskID}:{executionID}) history key.
 func ExecutionIdFromStorageKey(key []byte) string {
-	// key layout: history:01JG2FE5MDVKBPHEG0PEYSDKAC:01JG2FE5MFKTH0754RGF2DMVY7
-	return string(key[35:])
+	parsed, err := ParseExecutionKey(key)
+	if err != nil && err != ErrLegacyKey {
+		return ""
+	}
+	return parsed.ExecutionID
 }
 
+// ExecutionIdFromPendingKey parses a pending key. Format never gained a
+// chain prefix; kept on byte offsets.
 func ExecutionIdFromPendingKey(key []byte) string {
 	// key layout: pending:01JG2FE5MDVKBPHEG0PEYSDKAC:01JG2FE5MFKTH0754RGF2DMVY7
 	// "pending:" = 8 bytes, task id = 26 bytes, colon = 1 => start at 8+26+1 = 35
 	return string(key[35:])
 }
 
+// TaskIdFromExecutionStorageKey extracts the task id from either legacy or
+// chain-scoped history keys.
 func TaskIdFromExecutionStorageKey(key []byte) string {
-	// key layout: history:01JG2FE5MDVKBPHEG0PEYSDKAC:01JG2FE5MFKTH0754RGF2DMVY7
-	return string(key[8:34])
+	parsed, err := ParseExecutionKey(key)
+	if err != nil && err != ErrLegacyKey {
+		return ""
+	}
+	return parsed.TaskID
 }
 
+// TaskIdFromTaskStatusStorageKey extracts the task id from either legacy
+// (u:{owner}:{wallet}:{taskID}) or chain-scoped
+// (u:{chainID}:{owner}:{wallet}:{taskID}) user-task keys.
 func TaskIdFromTaskStatusStorageKey(key []byte) []byte {
-	// Exampley key u:0xd7050816337a3f8f690f8083b5ff8019d50c0e50:0x415f09526f25d6520d471890abf0953b0505313d:01JMN2JHAGXTNSY46KH0KYY0MZ
-	return key[88:114]
+	parsed, err := ParseUserTaskKey(key)
+	if err != nil && err != ErrLegacyKey {
+		return nil
+	}
+	return []byte(parsed.TaskID)
 }
 
 func SecretStorageKey(secret *model.Secret) (string, error) {

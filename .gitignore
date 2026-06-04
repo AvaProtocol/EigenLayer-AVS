@@ -23,10 +23,18 @@ node_modules
 operator.yaml
 metadata.json
 
-# Ignores yaml configuration files in the config directory
+# Ignores yaml configuration files in the config directory.
+# Whitelist the shared deployment configs that ship inside the Docker
+# image (Railway + local dev). Operator-specific or per-user configs
+# (e.g. `aggregator.yaml`, `operator.yaml`) stay ignored.
 config/*.yaml
 !config/aggregator.example.yaml
 !config/operator.example.yaml
+!config/*-dev.yaml
+!config/*-railway.yaml
+# Snapshot of tracked configs taken before any restructure; safety net.
+!config/_legacy/
+!config/_legacy/*.yaml
 
 contracts/script/output*
 
@@ -60,7 +68,7 @@ pr-comments-*.json
 .env.test
 .env.local
 
-# Claude Code local settings (user-specific permissions)
+# Claude Code settings (machine-local paths and user-specific permissions)
 .claude/settings.json
 .claude/settings.local.json
 

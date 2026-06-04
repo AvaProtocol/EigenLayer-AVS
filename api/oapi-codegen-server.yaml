@@ -1,0 +1,15 @@
+# oapi-codegen config — Echo server interfaces.
+#
+# Generates the `ServerInterface` Go interface from the OpenAPI paths.
+# Each REST handler implements this interface; the compiler enforces that
+# every spec route has a handler with matching request/response types.
+#
+# Regenerate with: `make rest-gen`
+package: generated
+output: aggregator/rest/generated/server.gen.go
+generate:
+  echo-server: true
+  strict-server: true
+output-options:
+  skip-prune: true
+import-mapping: {}

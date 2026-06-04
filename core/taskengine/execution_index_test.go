@@ -32,7 +32,7 @@ func TestExecutionIndexIncrement(t *testing.T) {
 	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger(), engine, nil)
 
 	// Create a simple task with manual trigger and custom code node
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:             "test-task-increment",
 			Owner:          "", // Empty owner to skip wallet validation
@@ -178,7 +178,7 @@ func TestExecutionIndexSimulation(t *testing.T) {
 	user := testutil.TestUser1()
 
 	// Create a simple task for simulation
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:             "test-task-simulation",
 			Owner:          user.Address.Hex(),
@@ -223,7 +223,7 @@ func TestExecutionIndexSimulation(t *testing.T) {
 	initialExecutionCount := task.ExecutionCount
 
 	// Run simulation - this should not increment the task's ExecutionCount
-	execution, err := engine.SimulateTask(user, task.Trigger, task.Nodes, task.Edges, map[string]interface{}{
+	execution, err := engine.SimulateWorkflow(user, task.Trigger, task.Nodes, task.Edges, map[string]interface{}{
 		"manualTrigger": map[string]interface{}{
 			"data": []interface{}{map[string]interface{}{"test": "simulation"}},
 		},
@@ -252,7 +252,7 @@ func TestExecutionIndexSimulation(t *testing.T) {
 
 	// Run multiple simulations to verify they all get the same index
 	for i := 1; i < 3; i++ {
-		execution, err := engine.SimulateTask(user, task.Trigger, task.Nodes, task.Edges, map[string]interface{}{
+		execution, err := engine.SimulateWorkflow(user, task.Trigger, task.Nodes, task.Edges, map[string]interface{}{
 			"manualTrigger": map[string]interface{}{
 				"data": []interface{}{map[string]interface{}{"test": "simulation"}},
 			},

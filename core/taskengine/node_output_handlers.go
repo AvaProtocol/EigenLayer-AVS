@@ -604,13 +604,21 @@ func (h *GraphQLOutputHandler) ConvertToProtobuf(result map[string]interface{}) 
 	var dataValue *structpb.Value
 	var err error
 
-	if len(result) > 0 {
-		// Deep convert to ensure no protobuf Values remain
-		cleanResult := make(map[string]interface{})
-		for key, value := range result {
-			cleanResult[key] = convertProtobufValueToPlain(value)
+	// GraphQL's ExtractFromExecutionStep returns the raw GraphQL
+	// response map (e.g. `{country: {...}}`). extractExecutionResult
+	// then layers success/executionContext/etc. on top. Strip those
+	// before wrapping so callers see `output.data` = the query
+	// response only, not the response + meta fields.
+	cleanResult := make(map[string]interface{}, len(result))
+	for key, value := range result {
+		switch key {
+		case "success", "error", "errorCode", "executionContext", "nodeId":
+			continue
 		}
+		cleanResult[key] = convertProtobufValueToPlain(value)
+	}
 
+	if len(cleanResult) > 0 {
 		dataValue, err = structpb.NewValue(cleanResult)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to convert GraphQL output: %w", err)
@@ -695,23 +703,22 @@ func (h *FilterOutputHandler) ConvertToProtobuf(result map[string]interface{}) (
 	var dataValue *structpb.Value
 	var err error
 
-	if len(result) > 0 {
-		// Deep convert to ensure no protobuf Values remain
-		cleanResult := make(map[string]interface{})
-		for key, value := range result {
-			cleanResult[key] = convertProtobufValueToPlain(value)
-		}
-
-		dataValue, err = structpb.NewValue(cleanResult)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to convert Filter output: %w", err)
-		}
+	// `result` comes from extractExecutionResult, which adds
+	// success/error/errorCode/executionContext on top of whatever
+	// ExtractFromExecutionStep returned (`{data: filterArray}` for
+	// Filter). Drill into the `data` key so the wrapping output
+	// only carries the filtered array — otherwise SDK callers see
+	// `output.data = {data: array, success: ..., executionContext: ...}`.
+	var payload interface{}
+	if dataField, ok := result["data"]; ok {
+		payload = convertProtobufValueToPlain(dataField)
 	} else {
-		emptyArray := []interface{}{}
-		dataValue, err = structpb.NewValue(emptyArray)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create empty Filter output: %w", err)
-		}
+		payload = []interface{}{}
+	}
+
+	dataValue, err = structpb.NewValue(payload)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to convert Filter output: %w", err)
 	}
 
 	filterOutput := &avsproto.FilterNode_Output{Data: dataValue}

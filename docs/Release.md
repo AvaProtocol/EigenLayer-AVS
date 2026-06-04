@@ -152,9 +152,9 @@ After thorough testing of a pre-release and its corresponding `avs-dev` image:
 
 ### Deployment
 
-- Deployments to various environments (e.g., `Sepolia`, `Base Sepolia`, `Ethereum`, `Base`) are handled by the **manual** GitHub Action workflow: `deploy-avs.yml`.
-- To deploy, a user manually triggers this workflow, selecting the target environment and the version (implicitly by deploying the code from a specific branch/tag).
-- Each environment uses the same Docker image version (for a given release) but varies in runtime configuration.
+- Production deployment is handled by Railway, which pulls the `avaprotocol/ap-avs` Docker image once a new tag is published to Docker Hub.
+- Each Railway service (the unified gateway plus per-chain workers and operators) runs the same image with a different start command and configuration, rather than separate per-chain binaries as in the previous architecture.
+- Manual interventions — pinning a specific image tag, rolling back, or forcing a redeploy — are done from the Railway dashboard per service.
 
 
 ### Version Testing and Troubleshooting

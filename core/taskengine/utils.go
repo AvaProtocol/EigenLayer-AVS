@@ -565,15 +565,18 @@ func GenerateCallData(methodName string, methodParams []string, contractAbi *abi
 		return "", fmt.Errorf("contract ABI is required to generate calldata")
 	}
 
-	// Find the method in the ABI
+	// Find the method in the ABI. Method-not-found is a user-input error
+	// (client sent a methodName not present in the ABI), not a server fault —
+	// return a typed StructuredError so call sites can downgrade the log
+	// level and avoid spamming Sentry (EIGENLAYER-AVS-1K).
 	method, exists := contractAbi.Methods[methodName]
 	if !exists {
-		return "", fmt.Errorf("method '%s' not found in contract ABI", methodName)
+		return "", NewMethodNotFoundError(methodName)
 	}
 
-	// Validate parameter count
+	// Validate parameter count — also a user-input error.
 	if len(methodParams) != len(method.Inputs) {
-		return "", fmt.Errorf("method '%s' expects %d parameters, got %d", methodName, len(method.Inputs), len(methodParams))
+		return "", NewMethodParamCountError(methodName, len(method.Inputs), len(methodParams))
 	}
 
 	// Prepare arguments for ABI encoding
@@ -705,8 +708,65 @@ func parseABIParameter(param string, abiType abi.Type) (interface{}, error) {
 		}
 		return common.HexToAddress(param), nil
 
-	case abi.UintTy, abi.IntTy:
-		return bigint.Parse(param)
+	case abi.UintTy:
+		n, err := bigint.Parse(param)
+		if err != nil {
+			return nil, err
+		}
+		// go-ethereum's ABI encoder is type-strict: it expects native
+		// Go uint8/16/32/64 for fixed-size uints <= 64 bits and
+		// *big.Int only for the larger widths. Passing a *big.Int for
+		// uint16 fails with "abi: cannot use ptr as type uint16 as
+		// argument", so we down-convert here based on the ABI Size.
+		if n.Sign() < 0 {
+			return nil, fmt.Errorf("uint%d cannot be negative: %s", abiType.Size, n.String())
+		}
+		if n.BitLen() > abiType.Size {
+			return nil, fmt.Errorf("value %s overflows uint%d", n.String(), abiType.Size)
+		}
+		switch abiType.Size {
+		case 8:
+			return uint8(n.Uint64()), nil
+		case 16:
+			return uint16(n.Uint64()), nil
+		case 32:
+			return uint32(n.Uint64()), nil
+		case 64:
+			return n.Uint64(), nil
+		default:
+			// 24, 40, 48, 56, 72-256: go-ethereum represents these
+			// non-native widths as *big.Int. Includes the common
+			// uint128 and uint256 cases.
+			return n, nil
+		}
+
+	case abi.IntTy:
+		n, err := bigint.Parse(param)
+		if err != nil {
+			return nil, err
+		}
+		// Same dispatch as UintTy but with signed range validation.
+		// Two's-complement range for intN is [-2^(N-1), 2^(N-1)-1].
+		if abiType.Size <= 64 {
+			limit := new(big.Int).Lsh(big.NewInt(1), uint(abiType.Size-1))
+			minVal := new(big.Int).Neg(limit)
+			maxVal := new(big.Int).Sub(limit, big.NewInt(1))
+			if n.Cmp(minVal) < 0 || n.Cmp(maxVal) > 0 {
+				return nil, fmt.Errorf("value %s overflows int%d", n.String(), abiType.Size)
+			}
+			switch abiType.Size {
+			case 8:
+				return int8(n.Int64()), nil
+			case 16:
+				return int16(n.Int64()), nil
+			case 32:
+				return int32(n.Int64()), nil
+			case 64:
+				return n.Int64(), nil
+			}
+		}
+		// 72-256: pass through as *big.Int (includes int128 and int256).
+		return n, nil
 
 	case abi.BoolTy:
 		switch strings.ToLower(param) {

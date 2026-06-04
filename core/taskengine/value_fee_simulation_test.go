@@ -108,7 +108,7 @@ func TestSimulateTask_ValueFeeMatchesWorkflowDefinition(t *testing.T) {
 	engine := New(db, cfg, nil, testutil.GetLogger())
 	user := testutil.TestUser1()
 
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, map[string]interface{}{
+	execution, err := engine.SimulateWorkflow(user, trigger, nodes, edges, map[string]interface{}{
 		"settings": map[string]interface{}{
 			"name":   "Revenue Splitter Fee Test",
 			"runner": "0x6cF121b8783Ae78A30A46DD4Ae1609E436422C26",
@@ -171,7 +171,7 @@ func TestSimulateTask_ValueFeeOffChainOnly(t *testing.T) {
 	engine := New(db, cfg, nil, testutil.GetLogger())
 	user := testutil.TestUser1()
 
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, map[string]interface{}{
+	execution, err := engine.SimulateWorkflow(user, trigger, nodes, edges, map[string]interface{}{
 		"settings": map[string]interface{}{"name": "Off-chain only", "runner": "0x6cF121b8783Ae78A30A46DD4Ae1609E436422C26"},
 	})
 	require.NoError(t, err)

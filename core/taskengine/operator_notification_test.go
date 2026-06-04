@@ -76,7 +76,7 @@ func TestNotifyOperatorsTaskOperation_DeleteTask(t *testing.T) {
 	// Create a test task
 	taskReq := testutil.RestTask()
 	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
-	task, err := engine.CreateTask(user, taskReq)
+	task, err := engine.CreateWorkflow(user, taskReq)
 	assert.NoError(t, err)
 
 	// Set up mock operator stream
@@ -98,7 +98,7 @@ func TestNotifyOperatorsTaskOperation_DeleteTask(t *testing.T) {
 	engine.lock.Unlock()
 
 	// Delete the task (this should trigger notification)
-	deleted, err := engine.DeleteTaskByUser(user, task.Id)
+	deleted, err := engine.DeleteWorkflowByUser(user, task.Id)
 	assert.NoError(t, err)
 	assert.True(t, deleted.Success)
 
@@ -133,7 +133,7 @@ func TestNotifyOperatorsTaskOperation_DeactivateTask(t *testing.T) {
 	// Create a test task
 	taskReq := testutil.RestTask()
 	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
-	task, err := engine.CreateTask(user, taskReq)
+	task, err := engine.CreateWorkflow(user, taskReq)
 	assert.NoError(t, err)
 
 	// Set up mock operator stream
@@ -155,7 +155,7 @@ func TestNotifyOperatorsTaskOperation_DeactivateTask(t *testing.T) {
 	engine.lock.Unlock()
 
 	// Disable the task (this should trigger notification)
-	resp, err := engine.SetTaskEnabledByUser(user, task.Id, false)
+	resp, err := engine.SetWorkflowEnabledByUser(user, task.Id, false)
 	assert.NoError(t, err)
 	assert.True(t, resp.Success)
 	assert.Equal(t, "disabled", resp.Status)
@@ -191,7 +191,7 @@ func TestNotifyOperatorsTaskOperation_OnlyNotifiesTrackingOperators(t *testing.T
 	// Create a test task
 	taskReq := testutil.RestTask()
 	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
-	task, err := engine.CreateTask(user, taskReq)
+	task, err := engine.CreateWorkflow(user, taskReq)
 	assert.NoError(t, err)
 
 	// Set up two mock operator streams
@@ -218,7 +218,7 @@ func TestNotifyOperatorsTaskOperation_OnlyNotifiesTrackingOperators(t *testing.T
 	engine.lock.Unlock()
 
 	// Delete the task
-	deleted, err := engine.DeleteTaskByUser(user, task.Id)
+	deleted, err := engine.DeleteWorkflowByUser(user, task.Id)
 	assert.NoError(t, err)
 	assert.True(t, deleted.Success)
 
@@ -323,10 +323,10 @@ func TestDeleteTaskRespFields(t *testing.T) {
 
 	taskReq := testutil.RestTask()
 	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
-	task, err := engine.CreateTask(user, taskReq)
+	task, err := engine.CreateWorkflow(user, taskReq)
 	assert.NoError(t, err)
 
-	resp, err := engine.DeleteTaskByUser(user, task.Id)
+	resp, err := engine.DeleteWorkflowByUser(user, task.Id)
 	assert.NoError(t, err)
 	assert.True(t, resp.Success)
 	assert.Equal(t, "deleted", resp.Status)
@@ -347,11 +347,11 @@ func TestSetTaskEnabledRespFields(t *testing.T) {
 
 	taskReq := testutil.RestTask()
 	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
-	task, err := engine.CreateTask(user, taskReq)
+	task, err := engine.CreateWorkflow(user, taskReq)
 	assert.NoError(t, err)
 
 	// Disable
-	resp, err := engine.SetTaskEnabledByUser(user, task.Id, false)
+	resp, err := engine.SetWorkflowEnabledByUser(user, task.Id, false)
 	assert.NoError(t, err)
 	assert.True(t, resp.Success)
 	assert.Equal(t, "disabled", resp.Status)
@@ -378,7 +378,7 @@ func TestReEnableTaskSendsMonitorNotification(t *testing.T) {
 	// Create a test task
 	taskReq := testutil.RestTask()
 	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
-	task, err := engine.CreateTask(user, taskReq)
+	task, err := engine.CreateWorkflow(user, taskReq)
 	assert.NoError(t, err)
 
 	// Use an approved operator address so CanStreamCheck returns true
@@ -396,7 +396,7 @@ func TestReEnableTaskSendsMonitorNotification(t *testing.T) {
 	engine.lock.Unlock()
 
 	// Step 1: Disable the task
-	disableResp, err := engine.SetTaskEnabledByUser(user, task.Id, false)
+	disableResp, err := engine.SetWorkflowEnabledByUser(user, task.Id, false)
 	assert.NoError(t, err)
 	assert.True(t, disableResp.Success)
 	assert.Equal(t, "disabled", disableResp.Status)
@@ -412,7 +412,7 @@ func TestReEnableTaskSendsMonitorNotification(t *testing.T) {
 	assert.Equal(t, task.Id, messages[0].Id)
 
 	// Step 2: Re-enable the task
-	enableResp, err := engine.SetTaskEnabledByUser(user, task.Id, true)
+	enableResp, err := engine.SetWorkflowEnabledByUser(user, task.Id, true)
 	assert.NoError(t, err)
 	assert.True(t, enableResp.Success)
 	assert.Equal(t, "enabled", enableResp.Status)
@@ -448,12 +448,12 @@ func TestReEnableTaskRoundTrip(t *testing.T) {
 	// Create task
 	taskReq := testutil.RestTask()
 	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
-	task, err := engine.CreateTask(user, taskReq)
+	task, err := engine.CreateWorkflow(user, taskReq)
 	assert.NoError(t, err)
 	originalID := task.Id
 
 	// Disable
-	disableResp, err := engine.SetTaskEnabledByUser(user, originalID, false)
+	disableResp, err := engine.SetWorkflowEnabledByUser(user, originalID, false)
 	assert.NoError(t, err)
 	assert.True(t, disableResp.Success)
 	assert.Equal(t, "disabled", disableResp.Status)
@@ -465,12 +465,12 @@ func TestReEnableTaskRoundTrip(t *testing.T) {
 	assert.False(t, existsWhileDisabled, "Disabled task should not be in active tasks map")
 
 	// Verify task is still retrievable from storage
-	retrievedTask, err := engine.GetTask(user, originalID)
+	retrievedTask, err := engine.GetWorkflow(user, originalID)
 	assert.NoError(t, err)
 	assert.Equal(t, avsproto.TaskStatus_Disabled, retrievedTask.Status)
 
 	// Re-enable
-	enableResp, err := engine.SetTaskEnabledByUser(user, originalID, true)
+	enableResp, err := engine.SetWorkflowEnabledByUser(user, originalID, true)
 	assert.NoError(t, err)
 	assert.True(t, enableResp.Success)
 	assert.Equal(t, "enabled", enableResp.Status)
@@ -482,7 +482,7 @@ func TestReEnableTaskRoundTrip(t *testing.T) {
 	assert.True(t, existsAfterReEnable, "Re-enabled task should be in active tasks map")
 
 	// Verify task data is preserved
-	reEnabledTask, err := engine.GetTask(user, originalID)
+	reEnabledTask, err := engine.GetWorkflow(user, originalID)
 	assert.NoError(t, err)
 	assert.Equal(t, avsproto.TaskStatus_Enabled, reEnabledTask.Status)
 	assert.Equal(t, originalID, reEnabledTask.Id)
@@ -506,7 +506,7 @@ func TestReEnableIdempotent(t *testing.T) {
 	// Create a task (starts as Enabled)
 	taskReq := testutil.RestTask()
 	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
-	task, err := engine.CreateTask(user, taskReq)
+	task, err := engine.CreateWorkflow(user, taskReq)
 	assert.NoError(t, err)
 
 	// Set up mock stream
@@ -524,7 +524,7 @@ func TestReEnableIdempotent(t *testing.T) {
 	engine.lock.Unlock()
 
 	// Try to enable an already-enabled task
-	resp, err := engine.SetTaskEnabledByUser(user, task.Id, true)
+	resp, err := engine.SetWorkflowEnabledByUser(user, task.Id, true)
 	assert.NoError(t, err)
 	assert.True(t, resp.Success)
 	assert.Equal(t, "enabled", resp.Status)
@@ -552,10 +552,10 @@ func TestDisableIdempotent(t *testing.T) {
 	// Create and disable a task
 	taskReq := testutil.RestTask()
 	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
-	task, err := engine.CreateTask(user, taskReq)
+	task, err := engine.CreateWorkflow(user, taskReq)
 	assert.NoError(t, err)
 
-	_, err = engine.SetTaskEnabledByUser(user, task.Id, false)
+	_, err = engine.SetWorkflowEnabledByUser(user, task.Id, false)
 	assert.NoError(t, err)
 
 	// Set up mock stream
@@ -573,7 +573,7 @@ func TestDisableIdempotent(t *testing.T) {
 	engine.lock.Unlock()
 
 	// Try to disable an already-disabled task
-	resp, err := engine.SetTaskEnabledByUser(user, task.Id, false)
+	resp, err := engine.SetWorkflowEnabledByUser(user, task.Id, false)
 	assert.NoError(t, err)
 	assert.True(t, resp.Success)
 	assert.Equal(t, "disabled", resp.Status)
@@ -602,11 +602,11 @@ func TestTerminalStatesCannotBeToggled(t *testing.T) {
 	// Create a task and manually set it to Completed status
 	taskReq := testutil.RestTask()
 	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
-	task, err := engine.CreateTask(user, taskReq)
+	task, err := engine.CreateWorkflow(user, taskReq)
 	assert.NoError(t, err)
 
 	// Manually force the task to Completed status in storage
-	taskObj, err := engine.GetTask(user, task.Id)
+	taskObj, err := engine.GetWorkflow(user, task.Id)
 	assert.NoError(t, err)
 
 	oldStatus := taskObj.Status
@@ -615,13 +615,13 @@ func TestTerminalStatesCannotBeToggled(t *testing.T) {
 	assert.NoError(t, err)
 
 	updates := map[string][]byte{
-		string(TaskStorageKey(taskObj.Id, avsproto.TaskStatus_Completed)): taskJSON,
-		string(TaskUserKey(taskObj)):                                      []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)),
+		string(ChainWorkflowStorageKey(taskObj.ChainId, taskObj.Id, avsproto.TaskStatus_Completed)): taskJSON,
+		string(ChainTaskUserKey(taskObj.ChainId, taskObj)):                                          []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)),
 	}
 	err = engine.db.BatchWrite(updates)
 	assert.NoError(t, err)
 	// Delete old key
-	_ = engine.db.Delete(TaskStorageKey(taskObj.Id, oldStatus))
+	_ = engine.db.Delete(ChainWorkflowStorageKey(taskObj.ChainId, taskObj.Id, oldStatus))
 
 	// Remove from active tasks
 	engine.lock.Lock()
@@ -629,14 +629,14 @@ func TestTerminalStatesCannotBeToggled(t *testing.T) {
 	engine.lock.Unlock()
 
 	// Try to enable a completed task
-	enableResp, err := engine.SetTaskEnabledByUser(user, task.Id, true)
+	enableResp, err := engine.SetWorkflowEnabledByUser(user, task.Id, true)
 	assert.NoError(t, err)
 	assert.False(t, enableResp.Success)
 	assert.Equal(t, "error", enableResp.Status)
 	assert.Contains(t, enableResp.Message, "terminal status")
 
 	// Try to disable a completed task
-	disableResp, err := engine.SetTaskEnabledByUser(user, task.Id, false)
+	disableResp, err := engine.SetWorkflowEnabledByUser(user, task.Id, false)
 	assert.NoError(t, err)
 	assert.False(t, disableResp.Success)
 	assert.Equal(t, "error", disableResp.Status)

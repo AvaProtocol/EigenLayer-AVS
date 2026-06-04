@@ -329,7 +329,7 @@ return { amountOutMinimum: amountOutMinimum.toString() };
 	// Execute
 	// ========================================================================
 	t.Log("--- Running SimulateTask (full stop-loss workflow) ---")
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
+	execution, err := engine.SimulateWorkflow(user, trigger, nodes, edges, inputVariables)
 	require.NoError(t, err, "SimulateTask should not return a transport error")
 	require.NotNil(t, execution, "execution must not be nil")
 

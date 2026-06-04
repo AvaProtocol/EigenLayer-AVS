@@ -32,7 +32,7 @@ func TestTaskStatCount(t *testing.T) {
 	tr1 := testutil.RestTask()
 	testutil.SetTaskSettings(tr1, "t1", smartWalletAddress)
 	tr1.MaxExecution = 1
-	n.CreateTask(testutil.TestUser1(), tr1)
+	n.CreateWorkflow(testutil.TestUser1(), tr1)
 
 	statSvc := NewStatService(db)
 	// Query statistics using the same smart wallet address used for task creation
@@ -58,7 +58,7 @@ func TestTaskStatCountCompleted(t *testing.T) {
 
 	user1 := testutil.TestUser1()
 
-	task1 := &model.Task{
+	task1 := &model.Workflow{
 		Task: &avsproto.Task{
 			Owner:              user1.Address.Hex(),
 			SmartWalletAddress: user1.SmartAccountAddress.Hex(),
@@ -66,7 +66,7 @@ func TestTaskStatCountCompleted(t *testing.T) {
 		},
 	}
 
-	db.Set(TaskUserKey(task1), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)))
+	db.Set(ChainTaskUserKey(task1.ChainId, task1), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)))
 
 	statSvc := NewStatService(db)
 	result, _ := statSvc.GetTaskCount(user1.ToSmartWallet())
@@ -87,7 +87,7 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 
 	user1 := testutil.TestUser1()
 
-	task1 := &model.Task{
+	task1 := &model.Workflow{
 		Task: &avsproto.Task{
 			Owner:              user1.Address.Hex(),
 			SmartWalletAddress: user1.SmartAccountAddress.Hex(),
@@ -95,7 +95,7 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 		},
 	}
 
-	task2 := &model.Task{
+	task2 := &model.Workflow{
 		Task: &avsproto.Task{
 			Owner:              user1.Address.Hex(),
 			SmartWalletAddress: user1.SmartAccountAddress.Hex(),
@@ -103,7 +103,7 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 		},
 	}
 
-	task3 := &model.Task{
+	task3 := &model.Workflow{
 		Task: &avsproto.Task{
 			Owner:              user1.Address.Hex(),
 			SmartWalletAddress: user1.SmartAccountAddress.Hex(),
@@ -111,7 +111,7 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 		},
 	}
 
-	task4 := &model.Task{
+	task4 := &model.Workflow{
 		Task: &avsproto.Task{
 			Owner:              user1.Address.Hex(),
 			SmartWalletAddress: user1.SmartAccountAddress.Hex(),
@@ -119,10 +119,10 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 		},
 	}
 
-	db.Set(TaskUserKey(task1), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)))
-	db.Set(TaskUserKey(task2), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Failed)))
-	db.Set(TaskUserKey(task3), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Disabled)))
-	db.Set(TaskUserKey(task4), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Enabled)))
+	db.Set(ChainTaskUserKey(task1.ChainId, task1), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)))
+	db.Set(ChainTaskUserKey(task2.ChainId, task2), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Failed)))
+	db.Set(ChainTaskUserKey(task3.ChainId, task3), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Disabled)))
+	db.Set(ChainTaskUserKey(task4.ChainId, task4), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Enabled)))
 
 	statSvc := NewStatService(db)
 	result, _ := statSvc.GetTaskCount(user1.ToSmartWallet())

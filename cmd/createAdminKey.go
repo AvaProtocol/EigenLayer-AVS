@@ -29,5 +29,6 @@ The --subject flag must be a 0x-prefixed EOA address. The auth layer treats the 
 func init() {
 	createApiKey.Flags().StringArrayVar(&(apiKeyOption.Roles), "role", []string{}, "Role for API Key")
 	createApiKey.Flags().StringVarP(&(apiKeyOption.Subject), "subject", "s", "", "owner EOA address (0x...) bound to this API key; required")
+	createApiKey.Flags().Int64Var(&(apiKeyOption.ChainID), "chain-id", 0, "audience chain ID override (must match one of the gateway's chains[]); defaults to the gateway's default smart-wallet chain")
 	rootCmd.AddCommand(createApiKey)
 }

@@ -51,7 +51,7 @@ func TestFeeBilling_CreditGating_BlocksOnOutstandingBalance(t *testing.T) {
 	StoreWallet(db, owner, &model.SmartWallet{Address: &walletAddr})
 
 	// Create a simple task with manual trigger and custom code node (no on-chain ops)
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:                 "test-fee-gating",
 			Owner:              strings.ToLower(owner.Hex()),
@@ -161,7 +161,7 @@ func TestFeeBilling_CreditGating_AllowsWithHighCreditLimit(t *testing.T) {
 	walletAddr := common.HexToAddress(smartWalletAddr)
 	StoreWallet(db, owner, &model.SmartWallet{Address: &walletAddr})
 
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:                 "test-fee-high-limit",
 			Owner:              strings.ToLower(owner.Hex()),

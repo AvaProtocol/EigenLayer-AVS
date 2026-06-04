@@ -55,7 +55,7 @@ const (
 	shutdownStatus AggregatorStatus = "shutdown"
 )
 
-func RunWithConfig(configPath string) error {
+func RunWithConfig(configPath string, opts ...StartOption) error {
 	nodeConfig, err := config.NewConfig(configPath)
 	if err != nil {
 		panic(fmt.Errorf("Failed to parse config file: %s\nMake sure it is exist and a valid yaml file %w.", configPath, err))
@@ -66,7 +66,7 @@ func RunWithConfig(configPath string) error {
 		panic(fmt.Errorf("Cannot initialize aggregator from config: %w", err))
 	}
 
-	return aggregator.Start(context.Background())
+	return aggregator.Start(context.Background(), opts...)
 }
 
 // block number by calling the getOperatorState() function of the BLSOperatorStateRetriever.sol contract.
@@ -87,6 +87,24 @@ type Aggregator struct {
 	ethRpcClient *ethclient.Client
 	chainID      *big.Int
 
+	// smartWalletRpc / smartWalletWsRpc are dialed in startRpcServer
+	// and shared with the REST layer (estimateFees, getNonce,
+	// withdraw). priceService is similarly built once and shared.
+	// rpcServer is the legacy gRPC bag and currently still hosts the
+	// withdraw UserOp pipeline that the REST WithdrawWallet handler
+	// delegates to via the WithdrawService interface.
+	smartWalletRpc   *ethclient.Client
+	smartWalletWsRpc *ethclient.Client
+	// smartWalletRpcByChain holds one *ethclient.Client per chain in
+	// gateway mode, keyed by chain ID. Lets per-request handlers
+	// (EstimateWorkflowFees, GetWalletNonce, WithdrawWallet) route to
+	// the correct chain's RPC instead of always landing on smartWalletRpc
+	// (which falls back to chains[0] = mainnet via config.go's gateway
+	// fallback). nil in single-chain mode.
+	smartWalletRpcByChain map[int64]*ethclient.Client
+	priceService          taskengine.PriceService
+	rpcServer             *RpcServer
+
 	operatorPool *OperatorPool
 
 	// task engines handles trigger scheduling and send distribute checks to
@@ -103,7 +121,26 @@ type Aggregator struct {
 
 	backup   *backup.Service
 	migrator *migrator.Migrator
+
+	// chainRegistry manages connections to per-chain workers in gateway mode.
+	// nil when running in single-chain aggregator mode.
+	chainRegistry *ChainRegistry
 }
+
+// Engine returns the underlying task engine. Exposed so the cmd layer
+// (or any other consumer holding an *Aggregator) can pass it to
+// downstream constructors like rest.NewServer without the aggregator
+// package needing to import those packages.
+func (agg *Aggregator) Engine() *taskengine.Engine { return agg.engine }
+
+// Logger returns the structured logger the aggregator was built with.
+// Exposed for the same reason as Engine() — to let cmd-level wiring
+// pass the same logger into downstream consumers.
+func (agg *Aggregator) Logger() logging.Logger { return agg.logger }
+
+// Config returns the aggregator's loaded config. Exposed for cmd-level
+// wiring; the config is otherwise read-only after NewAggregator.
+func (agg *Aggregator) Config() *config.Config { return agg.config }
 
 // NewAggregator creates a new Aggregator with the provided config.
 func NewAggregator(c *config.Config) (*Aggregator, error) {
@@ -236,8 +273,6 @@ func (agg *Aggregator) init() {
 		panic(err)
 	}
 
-	SetGlobalChainID(agg.chainID)
-
 	if agg.chainID.Cmp(config.MainnetChainID) == 0 {
 		config.CurrentChainEnv = config.EthereumEnv
 	} else {
@@ -251,14 +286,29 @@ func (agg *Aggregator) init() {
 
 func (agg *Aggregator) migrate() {
 	agg.backup = backup.NewService(agg.logger, agg.db, agg.config.BackupDir)
-	agg.migrator = migrator.NewMigrator(agg.db, agg.backup, migrations.Migrations)
+	// Build the migration list. Static migrations are registered first;
+	// chain-aware migrations are appended via closures so they have access
+	// to agg.chainID detected in init().
+	allMigrations := make([]migrator.Migration, 0, len(migrations.Migrations)+1)
+	allMigrations = append(allMigrations, migrations.Migrations...)
+	if agg.chainID != nil && agg.chainID.Int64() > 0 {
+		allMigrations = append(allMigrations, migrations.NewChainScopedKeysMigration(agg.chainID.Int64()))
+	} else {
+		agg.logger.Warn("Skipping chain-scoped key migration — aggregator chain_id is not set")
+	}
+	agg.migrator = migrator.NewMigrator(agg.db, agg.backup, allMigrations)
 	if err := agg.migrator.Run(); err != nil {
 		agg.logger.Error("Failed to run database migrations", "error", err)
 		panic("database migration failed - cannot continue")
 	}
 }
 
-func (agg *Aggregator) Start(ctx context.Context) error {
+func (agg *Aggregator) Start(ctx context.Context, opts ...StartOption) error {
+	startOpts := &startOptions{}
+	for _, opt := range opts {
+		opt(startOpts)
+	}
+
 	// Disable stack traces globally to reduce log noise
 	debug.SetTraceback("none")
 	os.Setenv("GOTRACEBACK", "none")
@@ -280,6 +330,17 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 
 	agg.migrate()
 
+	// In gateway mode, create chain registry and connect to workers
+	if agg.config.IsGateway {
+		agg.chainRegistry = NewChainRegistry(
+			agg.config.Chains,
+			agg.config.DefaultChainID,
+			agg.logger,
+		)
+		agg.logger.Info("Connecting to chain workers...")
+		agg.chainRegistry.Connect(ctx)
+	}
+
 	agg.logger.Infof("Starting Task engine")
 	agg.startTaskEngine(ctx)
 
@@ -293,7 +354,7 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.startRepl()
 
 	agg.logger.Infof("Starting http server")
-	agg.startHttpServer(ctx)
+	agg.startHttpServer(ctx, startOpts.httpMounts)
 	agg.status = runningStatus
 
 	// Setup wait signal
@@ -312,6 +373,10 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.status = shutdownStatus
 	agg.stopRepl()
 	agg.stopTaskEngine()
+
+	if agg.chainRegistry != nil {
+		agg.chainRegistry.Close()
+	}
 
 	agg.db.Close()
 

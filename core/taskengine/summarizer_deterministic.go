@@ -141,6 +141,13 @@ type TokenTotal struct {
 	Amount string // raw token amount, decimal string
 	Unit   string // token symbol ("ETH", "USDC", etc.)
 	USD    string // dollar equivalent; empty when unpriceable
+	// IsGas marks the native-token entry that represents actual on-chain gas
+	// spent by the UserOp. The other entries in Fees.Total — per-token value
+	// fees (tier_percentage × tx_value) and the USD platform fee — are NOT
+	// gas and notification renderers should not include them under the "⛽"
+	// (gas) emoji. API consumers that want the full fee breakdown read
+	// Fees.Total directly and don't depend on this flag.
+	IsGas bool
 }
 
 // BuildBranchAndSkippedSummary builds a deterministic summary (text and HTML)
@@ -1583,11 +1590,14 @@ func buildTotalsFromVM(vm *VM, fees *FeesInfo) []*TokenTotal {
 
 	out := make([]*TokenTotal, 0, 1+len(erc20Buckets))
 
-	// Native-token entry (always first, when non-zero).
+	// Native-token entry (always first, when non-zero). Marked IsGas so
+	// notification renderers can isolate the actual gas charge from the
+	// other Fees.Total entries (value fees, platform fee).
 	if nativeEth.Sign() > 0 {
 		entry := &TokenTotal{
 			Amount: trimTrailingZeros(nativeEth.Text('f', 9)),
 			Unit:   nativeSymbol,
+			IsGas:  true,
 		}
 		if nativePriceUSD != nil {
 			entry.USD = trimTrailingZeros(new(big.Float).Mul(nativeEth, nativePriceUSD).Text('f', 2))

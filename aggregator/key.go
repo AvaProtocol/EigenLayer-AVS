@@ -14,6 +14,10 @@ import (
 type CreateApiKeyOption struct {
 	Roles   []string
 	Subject string
+	// ChainID overrides the audience claim. When 0, falls back to the
+	// gateway's default smart-wallet chain. In gateway mode the value
+	// must match one of the configured chains[] entries.
+	ChainID int64
 }
 
 // Create an JWT admin key to manage user task
@@ -52,10 +56,29 @@ func CreateAdminKey(configPath string, opt CreateApiKeyOption) error {
 	// the EigenLayer chain ID would silently break cross-chain configs (e.g.
 	// EigenLayer on Ethereum + SmartWallet on Base). config.NewConfig already
 	// populated SmartWallet.ChainID at startup, so no extra RPC dial is needed.
-	if nodeConfig.SmartWallet == nil || nodeConfig.SmartWallet.ChainID == 0 {
-		return fmt.Errorf("smart wallet chain ID not populated in config; cannot build audience claim")
+	chainID := opt.ChainID
+	if chainID == 0 {
+		if nodeConfig.SmartWallet == nil || nodeConfig.SmartWallet.ChainID == 0 {
+			return fmt.Errorf("smart wallet chain ID not populated in config; cannot build audience claim")
+		}
+		chainID = nodeConfig.SmartWallet.ChainID
+	} else if nodeConfig.IsGateway {
+		// In gateway mode, the JWT verifier dispatches to the per-chain
+		// SmartWalletConfig keyed by aud. Reject overrides that name a
+		// chain the gateway isn't actually serving, since the resulting
+		// JWT would always fail auth.
+		known := false
+		for _, c := range nodeConfig.Chains {
+			if c.ChainID == chainID {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return fmt.Errorf("chain ID %d is not configured on this gateway", chainID)
+		}
 	}
-	audienceChainID := strconv.FormatInt(nodeConfig.SmartWallet.ChainID, 10)
+	audienceChainID := strconv.FormatInt(chainID, 10)
 
 	claims := &auth.APIClaim{
 		RegisteredClaims: &jwt.RegisteredClaims{

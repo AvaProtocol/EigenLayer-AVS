@@ -680,8 +680,10 @@ func (x *TokenMetadata) GetDecimals() uint32 {
 
 // GetTokenMetadataReq is the request for token metadata lookup
 type GetTokenMetadataReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"` // Contract address to look up
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Address string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"` // Contract address to look up
+	// Chain to look the token up on. 0 = aggregator default chain.
+	ChainId       int64 `protobuf:"varint,2,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -721,6 +723,13 @@ func (x *GetTokenMetadataReq) GetAddress() string {
 		return x.Address
 	}
 	return ""
+}
+
+func (x *GetTokenMetadataReq) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
 }
 
 // GetTokenMetadataResp is the response containing token metadata
@@ -2238,8 +2247,11 @@ type Task struct {
 	// These variables are available globally to all nodes during execution
 	// and can be referenced using JavaScript template syntax like ${variableName}
 	InputVariables map[string]*structpb.Value `protobuf:"bytes,15,rep,name=input_variables,json=inputVariables,proto3" json:"input_variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Target chain for this task's execution (e.g., 11155111 for Sepolia, 84532 for Base Sepolia).
+	// 0 means use the aggregator's default chain (backward compatible with single-chain mode).
+	ChainId       int64 `protobuf:"varint,16,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Task) Reset() {
@@ -2377,6 +2389,13 @@ func (x *Task) GetInputVariables() map[string]*structpb.Value {
 	return nil
 }
 
+func (x *Task) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
+}
+
 type CreateTaskReq struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	Trigger      *TaskTrigger           `protobuf:"bytes,1,opt,name=trigger,proto3" json:"trigger,omitempty"`
@@ -2393,8 +2412,11 @@ type CreateTaskReq struct {
 	// These variables will be available globally to all nodes during execution
 	// and can be referenced using JavaScript template syntax like ${variableName}
 	InputVariables map[string]*structpb.Value `protobuf:"bytes,9,rep,name=input_variables,json=inputVariables,proto3" json:"input_variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Target chain for execution (e.g., 11155111 for Sepolia, 84532 for Base Sepolia).
+	// 0 means use the aggregator's default chain (backward compatible with single-chain mode).
+	ChainId       int64 `protobuf:"varint,10,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CreateTaskReq) Reset() {
@@ -2488,6 +2510,13 @@ func (x *CreateTaskReq) GetInputVariables() map[string]*structpb.Value {
 		return x.InputVariables
 	}
 	return nil
+}
+
+func (x *CreateTaskReq) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
 }
 
 type CreateTaskResp struct {
@@ -3507,8 +3536,10 @@ type WithdrawFundsReq struct {
 	Token string `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
 	// Required: Smart wallet address to withdraw from (must be from user's getWallet() call)
 	SmartWalletAddress string `protobuf:"bytes,4,opt,name=smart_wallet_address,json=smartWalletAddress,proto3" json:"smart_wallet_address,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Chain to execute the withdrawal on. 0 = aggregator default chain.
+	ChainId       int64 `protobuf:"varint,5,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WithdrawFundsReq) Reset() {
@@ -3567,6 +3598,13 @@ func (x *WithdrawFundsReq) GetSmartWalletAddress() string {
 		return x.SmartWalletAddress
 	}
 	return ""
+}
+
+func (x *WithdrawFundsReq) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
 }
 
 // Response message for WithdrawFunds operation
@@ -3707,7 +3745,9 @@ type TriggerTaskReq struct {
 	IsBlocking bool `protobuf:"varint,8,opt,name=is_blocking,json=isBlocking,proto3" json:"is_blocking,omitempty"`
 	// Input variables for template resolution in trigger configuration (e.g., settings: {runner, chain_id})
 	// These variables are merged with the workflow's input_variables during execution
-	TriggerInput  map[string]*structpb.Value `protobuf:"bytes,9,rep,name=trigger_input,json=triggerInput,proto3" json:"trigger_input,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	TriggerInput map[string]*structpb.Value `protobuf:"bytes,9,rep,name=trigger_input,json=triggerInput,proto3" json:"trigger_input,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Chain to execute against. 0 = use the task's stored chain_id.
+	ChainId       int64 `protobuf:"varint,10,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3820,6 +3860,13 @@ func (x *TriggerTaskReq) GetTriggerInput() map[string]*structpb.Value {
 		return x.TriggerInput
 	}
 	return nil
+}
+
+func (x *TriggerTaskReq) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
 }
 
 type isTriggerTaskReq_TriggerOutput interface {
@@ -5287,8 +5334,11 @@ type RunNodeWithInputsReq struct {
 	Node  *TaskNode              `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"` // Complete node definition with proper Config (consistent with SimulateTask)
 	// Field 2 was node_config (removed in Jan 2025) - do not reuse
 	InputVariables map[string]*structpb.Value `protobuf:"bytes,3,rep,name=input_variables,json=inputVariables,proto3" json:"input_variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Input variables for the node
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Chain to run the node against. 0 = aggregator default chain.
+	// node.config.chain_id (if non-zero) takes precedence over this field.
+	ChainId       int64 `protobuf:"varint,4,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RunNodeWithInputsReq) Reset() {
@@ -5333,6 +5383,13 @@ func (x *RunNodeWithInputsReq) GetInputVariables() map[string]*structpb.Value {
 		return x.InputVariables
 	}
 	return nil
+}
+
+func (x *RunNodeWithInputsReq) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
 }
 
 // Response message for RunNodeWithInputs
@@ -5828,8 +5885,11 @@ type SimulateTaskReq struct {
 	Nodes          []*TaskNode                `protobuf:"bytes,2,rep,name=nodes,proto3" json:"nodes,omitempty"`                                                                                                                   // All workflow nodes
 	Edges          []*TaskEdge                `protobuf:"bytes,3,rep,name=edges,proto3" json:"edges,omitempty"`                                                                                                                   // All edges connecting the nodes
 	InputVariables map[string]*structpb.Value `protobuf:"bytes,6,rep,name=input_variables,json=inputVariables,proto3" json:"input_variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Input variables for the simulation
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Chain to simulate against. 0 = aggregator default chain.
+	// Per-node / per-trigger chain_id (if non-zero) takes precedence.
+	ChainId       int64 `protobuf:"varint,7,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SimulateTaskReq) Reset() {
@@ -5890,6 +5950,13 @@ func (x *SimulateTaskReq) GetInputVariables() map[string]*structpb.Value {
 	return nil
 }
 
+func (x *SimulateTaskReq) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
+}
+
 // Request message for EstimateFees
 type EstimateFeesReq struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -5906,8 +5973,10 @@ type EstimateFeesReq struct {
 	// Input variables for workflow execution simulation
 	// Should contain settings with at least runner for fee estimation
 	InputVariables map[string]*structpb.Value `protobuf:"bytes,8,rep,name=input_variables,json=inputVariables,proto3" json:"input_variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Chain to estimate fees against. 0 = aggregator default chain.
+	ChainId       int64 `protobuf:"varint,9,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EstimateFeesReq) Reset() {
@@ -5994,6 +6063,13 @@ func (x *EstimateFeesReq) GetInputVariables() map[string]*structpb.Value {
 		return x.InputVariables
 	}
 	return nil
+}
+
+func (x *EstimateFeesReq) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
 }
 
 // Fee amount in both native token and USD
@@ -7016,8 +7092,10 @@ func (x *CronTrigger_Output) GetData() *structpb.Value {
 }
 
 type BlockTrigger_Config struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Interval      int64                  `protobuf:"varint,1,opt,name=interval,proto3" json:"interval,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Interval int64                  `protobuf:"varint,1,opt,name=interval,proto3" json:"interval,omitempty"`
+	// Chain to watch blocks on. 0 = inherit task's chain_id.
+	ChainId       int64 `protobuf:"varint,2,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7055,6 +7133,13 @@ func (*BlockTrigger_Config) Descriptor() ([]byte, []int) {
 func (x *BlockTrigger_Config) GetInterval() int64 {
 	if x != nil {
 		return x.Interval
+	}
+	return 0
+}
+
+func (x *BlockTrigger_Config) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
 	}
 	return 0
 }
@@ -7290,8 +7375,10 @@ type EventTrigger_Config struct {
 	// Default: 300 (5 minutes cooldown - prevents repeated firing when conditions remain true)
 	// Set to 0 to disable cooldown (triggers fire immediately when conditions match)
 	CooldownSeconds *uint32 `protobuf:"varint,2,opt,name=cooldown_seconds,json=cooldownSeconds,proto3,oneof" json:"cooldown_seconds,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Chain to watch events on. 0 = inherit task's chain_id.
+	ChainId       int64 `protobuf:"varint,3,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EventTrigger_Config) Reset() {
@@ -7334,6 +7421,13 @@ func (x *EventTrigger_Config) GetQueries() []*EventTrigger_Query {
 func (x *EventTrigger_Config) GetCooldownSeconds() uint32 {
 	if x != nil && x.CooldownSeconds != nil {
 		return *x.CooldownSeconds
+	}
+	return 0
+}
+
+func (x *EventTrigger_Config) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
 	}
 	return 0
 }
@@ -7501,9 +7595,11 @@ func (x *ManualTrigger_Output) GetData() *structpb.Value {
 }
 
 type ETHTransferNode_Config struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Destination   string                 `protobuf:"bytes,1,opt,name=destination,proto3" json:"destination,omitempty"`
-	Amount        string                 `protobuf:"bytes,2,opt,name=amount,proto3" json:"amount,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Destination string                 `protobuf:"bytes,1,opt,name=destination,proto3" json:"destination,omitempty"`
+	Amount      string                 `protobuf:"bytes,2,opt,name=amount,proto3" json:"amount,omitempty"`
+	// Chain to execute the transfer on. 0 = inherit task's chain_id.
+	ChainId       int64 `protobuf:"varint,3,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7550,6 +7646,13 @@ func (x *ETHTransferNode_Config) GetAmount() string {
 		return x.Amount
 	}
 	return ""
+}
+
+func (x *ETHTransferNode_Config) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
 }
 
 type ETHTransferNode_Output struct {
@@ -7609,7 +7712,9 @@ type ContractWriteNode_Config struct {
 	// ETH value to send with the transaction (in wei as string)
 	Value *string `protobuf:"bytes,6,opt,name=value,proto3,oneof" json:"value,omitempty"`
 	// Custom gas limit for the transaction (as string to handle large numbers)
-	GasLimit      *string `protobuf:"bytes,7,opt,name=gas_limit,json=gasLimit,proto3,oneof" json:"gas_limit,omitempty"`
+	GasLimit *string `protobuf:"bytes,7,opt,name=gas_limit,json=gasLimit,proto3,oneof" json:"gas_limit,omitempty"`
+	// Chain to execute the write on. 0 = inherit task's chain_id.
+	ChainId       int64 `protobuf:"varint,8,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7691,6 +7796,13 @@ func (x *ContractWriteNode_Config) GetGasLimit() string {
 		return *x.GasLimit
 	}
 	return ""
+}
+
+func (x *ContractWriteNode_Config) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
 }
 
 type ContractWriteNode_MethodCall struct {
@@ -7973,7 +8085,9 @@ type ContractReadNode_Config struct {
 	// The ABI as array of ABI elements
 	ContractAbi []*structpb.Value `protobuf:"bytes,2,rep,name=contract_abi,json=contractAbi,proto3" json:"contract_abi,omitempty"`
 	// Array of method calls to execute serially
-	MethodCalls   []*ContractReadNode_MethodCall `protobuf:"bytes,3,rep,name=method_calls,json=methodCalls,proto3" json:"method_calls,omitempty"`
+	MethodCalls []*ContractReadNode_MethodCall `protobuf:"bytes,3,rep,name=method_calls,json=methodCalls,proto3" json:"method_calls,omitempty"`
+	// Chain to read state from. 0 = inherit task's chain_id.
+	ChainId       int64 `protobuf:"varint,4,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8027,6 +8141,13 @@ func (x *ContractReadNode_Config) GetMethodCalls() []*ContractReadNode_MethodCal
 		return x.MethodCalls
 	}
 	return nil
+}
+
+func (x *ContractReadNode_Config) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
+	}
+	return 0
 }
 
 type ContractReadNode_MethodResult struct {
@@ -9510,9 +9631,10 @@ const file_avs_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
 	"\x06symbol\x18\x03 \x01(\tR\x06symbol\x12\x1a\n" +
-	"\bdecimals\x18\x04 \x01(\rR\bdecimals\"/\n" +
+	"\bdecimals\x18\x04 \x01(\rR\bdecimals\"J\n" +
 	"\x13GetTokenMetadataReq\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"u\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x19\n" +
+	"\bchain_id\x18\x02 \x01(\x03R\achainId\"u\n" +
 	"\x14GetTokenMetadataResp\x12/\n" +
 	"\x05token\x18\x01 \x01(\v2\x19.aggregator.TokenMetadataR\x05token\x12\x14\n" +
 	"\x05found\x18\x02 \x01(\bR\x05found\x12\x16\n" +
@@ -9530,13 +9652,14 @@ const file_avs_proto_rawDesc = "" +
 	"\x06Config\x12\x1c\n" +
 	"\tschedules\x18\x01 \x03(\tR\tschedules\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xa3\x01\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xbe\x01\n" +
 	"\fBlockTrigger\x127\n" +
-	"\x06config\x18\x01 \x01(\v2\x1f.aggregator.BlockTrigger.ConfigR\x06config\x1a$\n" +
+	"\x06config\x18\x01 \x01(\v2\x1f.aggregator.BlockTrigger.ConfigR\x06config\x1a?\n" +
 	"\x06Config\x12\x1a\n" +
-	"\binterval\x18\x01 \x01(\x03R\binterval\x1a4\n" +
+	"\binterval\x18\x01 \x01(\x03R\binterval\x12\x19\n" +
+	"\bchain_id\x18\x02 \x01(\x03R\achainId\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\x82\x06\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\x9d\x06\n" +
 	"\fEventTrigger\x127\n" +
 	"\x06config\x18\x01 \x01(\v2\x1f.aggregator.EventTrigger.ConfigR\x06config\x1a\xcb\x02\n" +
 	"\x05Query\x12\x1c\n" +
@@ -9557,10 +9680,11 @@ const file_avs_proto_rawDesc = "" +
 	"\x0fapply_to_fields\x18\x03 \x03(\tR\rapplyToFields\x12#\n" +
 	"\rmethod_params\x18\x04 \x03(\tR\fmethodParamsB\f\n" +
 	"\n" +
-	"_call_data\x1a\x87\x01\n" +
+	"_call_data\x1a\xa2\x01\n" +
 	"\x06Config\x128\n" +
 	"\aqueries\x18\x01 \x03(\v2\x1e.aggregator.EventTrigger.QueryR\aqueries\x12.\n" +
-	"\x10cooldown_seconds\x18\x02 \x01(\rH\x00R\x0fcooldownSeconds\x88\x01\x01B\x13\n" +
+	"\x10cooldown_seconds\x18\x02 \x01(\rH\x00R\x0fcooldownSeconds\x88\x01\x01\x12\x19\n" +
+	"\bchain_id\x18\x03 \x01(\x03R\achainIdB\x13\n" +
 	"\x11_cooldown_seconds\x1a4\n" +
 	"\x06Output\x12*\n" +
 	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xf2\x03\n" +
@@ -9591,16 +9715,17 @@ const file_avs_proto_rawDesc = "" +
 	"\x05block\x18\x05 \x01(\v2\x18.aggregator.BlockTriggerH\x00R\x05block\x120\n" +
 	"\x05event\x18\x06 \x01(\v2\x18.aggregator.EventTriggerH\x00R\x05event\x12\x0e\n" +
 	"\x02id\x18\a \x01(\tR\x02idB\x0e\n" +
-	"\ftrigger_type\"\xc7\x01\n" +
+	"\ftrigger_type\"\xe2\x01\n" +
 	"\x0fETHTransferNode\x12:\n" +
-	"\x06config\x18\x01 \x01(\v2\".aggregator.ETHTransferNode.ConfigR\x06config\x1aB\n" +
+	"\x06config\x18\x01 \x01(\v2\".aggregator.ETHTransferNode.ConfigR\x06config\x1a]\n" +
 	"\x06Config\x12 \n" +
 	"\vdestination\x18\x01 \x01(\tR\vdestination\x12\x16\n" +
-	"\x06amount\x18\x02 \x01(\tR\x06amount\x1a4\n" +
+	"\x06amount\x18\x02 \x01(\tR\x06amount\x12\x19\n" +
+	"\bchain_id\x18\x03 \x01(\x03R\achainId\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xcf\a\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xea\a\n" +
 	"\x11ContractWriteNode\x12<\n" +
-	"\x06config\x18\x01 \x01(\v2$.aggregator.ContractWriteNode.ConfigR\x06config\x1a\xe6\x02\n" +
+	"\x06config\x18\x01 \x01(\v2$.aggregator.ContractWriteNode.ConfigR\x06config\x1a\x81\x03\n" +
 	"\x06Config\x12)\n" +
 	"\x10contract_address\x18\x01 \x01(\tR\x0fcontractAddress\x12\x1b\n" +
 	"\tcall_data\x18\x02 \x01(\tR\bcallData\x129\n" +
@@ -9608,7 +9733,8 @@ const file_avs_proto_rawDesc = "" +
 	"\fmethod_calls\x18\x04 \x03(\v2(.aggregator.ContractWriteNode.MethodCallR\vmethodCalls\x12&\n" +
 	"\fis_simulated\x18\x05 \x01(\bH\x00R\visSimulated\x88\x01\x01\x12\x19\n" +
 	"\x05value\x18\x06 \x01(\tH\x01R\x05value\x88\x01\x01\x12 \n" +
-	"\tgas_limit\x18\a \x01(\tH\x02R\bgasLimit\x88\x01\x01B\x0f\n" +
+	"\tgas_limit\x18\a \x01(\tH\x02R\bgasLimit\x88\x01\x01\x12\x19\n" +
+	"\bchain_id\x18\b \x01(\x03R\achainIdB\x0f\n" +
 	"\r_is_simulatedB\b\n" +
 	"\x06_valueB\f\n" +
 	"\n" +
@@ -9634,7 +9760,7 @@ const file_avs_proto_rawDesc = "" +
 	"\areceipt\x18\x05 \x01(\v2\x16.google.protobuf.ValueR\areceipt\x12&\n" +
 	"\fblock_number\x18\x06 \x01(\x04H\x00R\vblockNumber\x88\x01\x01\x12,\n" +
 	"\x05value\x18\a \x01(\v2\x16.google.protobuf.ValueR\x05valueB\x0f\n" +
-	"\r_block_number\"\xf1\x05\n" +
+	"\r_block_number\"\x8c\x06\n" +
 	"\x10ContractReadNode\x12;\n" +
 	"\x06config\x18\x01 \x01(\v2#.aggregator.ContractReadNode.ConfigR\x06config\x1a\xaa\x01\n" +
 	"\n" +
@@ -9645,11 +9771,12 @@ const file_avs_proto_rawDesc = "" +
 	"\x0fapply_to_fields\x18\x03 \x03(\tR\rapplyToFields\x12#\n" +
 	"\rmethod_params\x18\x04 \x03(\tR\fmethodParamsB\f\n" +
 	"\n" +
-	"_call_data\x1a\xba\x01\n" +
+	"_call_data\x1a\xd5\x01\n" +
 	"\x06Config\x12)\n" +
 	"\x10contract_address\x18\x01 \x01(\tR\x0fcontractAddress\x129\n" +
 	"\fcontract_abi\x18\x02 \x03(\v2\x16.google.protobuf.ValueR\vcontractAbi\x12J\n" +
-	"\fmethod_calls\x18\x03 \x03(\v2'.aggregator.ContractReadNode.MethodCallR\vmethodCalls\x1a\xff\x01\n" +
+	"\fmethod_calls\x18\x03 \x03(\v2'.aggregator.ContractReadNode.MethodCallR\vmethodCalls\x12\x19\n" +
+	"\bchain_id\x18\x04 \x01(\x03R\achainId\x1a\xff\x01\n" +
 	"\fMethodResult\x12M\n" +
 	"\x04data\x18\x01 \x03(\v29.aggregator.ContractReadNode.MethodResult.StructuredFieldR\x04data\x12\x1f\n" +
 	"\vmethod_name\x18\x02 \x01(\tR\n" +
@@ -9818,7 +9945,7 @@ const file_avs_proto_rawDesc = "" +
 	"\abalance\x18\x1e \x01(\v2\x1e.aggregator.BalanceNode.OutputH\x00R\abalance\x12\x19\n" +
 	"\bstart_at\x18\x0e \x01(\x03R\astartAt\x12\x15\n" +
 	"\x06end_at\x18\x0f \x01(\x03R\x05endAtB\r\n" +
-	"\voutput_data\"\xa2\x05\n" +
+	"\voutput_data\"\xbd\x05\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05owner\x18\x02 \x01(\tR\x05owner\x120\n" +
@@ -9836,10 +9963,11 @@ const file_avs_proto_rawDesc = "" +
 	"\atrigger\x18\f \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\x12*\n" +
 	"\x05nodes\x18\r \x03(\v2\x14.aggregator.TaskNodeR\x05nodes\x12*\n" +
 	"\x05edges\x18\x0e \x03(\v2\x14.aggregator.TaskEdgeR\x05edges\x12M\n" +
-	"\x0finput_variables\x18\x0f \x03(\v2$.aggregator.Task.InputVariablesEntryR\x0einputVariables\x1aY\n" +
+	"\x0finput_variables\x18\x0f \x03(\v2$.aggregator.Task.InputVariablesEntryR\x0einputVariables\x12\x19\n" +
+	"\bchain_id\x18\x10 \x01(\x03R\achainId\x1aY\n" +
 	"\x13InputVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
-	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"\xf2\x03\n" +
+	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"\x8d\x04\n" +
 	"\rCreateTaskReq\x121\n" +
 	"\atrigger\x18\x01 \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\x12\x19\n" +
 	"\bstart_at\x18\x02 \x01(\x03R\astartAt\x12\x1d\n" +
@@ -9850,7 +9978,9 @@ const file_avs_proto_rawDesc = "" +
 	"\x04name\x18\x06 \x01(\tR\x04name\x12*\n" +
 	"\x05nodes\x18\a \x03(\v2\x14.aggregator.TaskNodeR\x05nodes\x12*\n" +
 	"\x05edges\x18\b \x03(\v2\x14.aggregator.TaskEdgeR\x05edges\x12V\n" +
-	"\x0finput_variables\x18\t \x03(\v2-.aggregator.CreateTaskReq.InputVariablesEntryR\x0einputVariables\x1aY\n" +
+	"\x0finput_variables\x18\t \x03(\v2-.aggregator.CreateTaskReq.InputVariablesEntryR\x0einputVariables\x12\x19\n" +
+	"\bchain_id\x18\n" +
+	" \x01(\x03R\achainId\x1aY\n" +
 	"\x13InputVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
 	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\" \n" +
@@ -9917,12 +10047,13 @@ const file_avs_proto_rawDesc = "" +
 	"\fSetWalletReq\x12\x12\n" +
 	"\x04salt\x18\x01 \x01(\tR\x04salt\x12'\n" +
 	"\x0ffactory_address\x18\x02 \x01(\tR\x0efactoryAddress\x12\x1b\n" +
-	"\tis_hidden\x18\x03 \x01(\bR\bisHidden\"\x9f\x01\n" +
+	"\tis_hidden\x18\x03 \x01(\bR\bisHidden\"\xba\x01\n" +
 	"\x10WithdrawFundsReq\x12+\n" +
 	"\x11recipient_address\x18\x01 \x01(\tR\x10recipientAddress\x12\x16\n" +
 	"\x06amount\x18\x02 \x01(\tR\x06amount\x12\x14\n" +
 	"\x05token\x18\x03 \x01(\tR\x05token\x120\n" +
-	"\x14smart_wallet_address\x18\x04 \x01(\tR\x12smartWalletAddress\"\xdc\x02\n" +
+	"\x14smart_wallet_address\x18\x04 \x01(\tR\x12smartWalletAddress\x12\x19\n" +
+	"\bchain_id\x18\x05 \x01(\x03R\achainId\"\xdc\x02\n" +
 	"\x11WithdrawFundsResp\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n" +
@@ -9935,7 +10066,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x11recipient_address\x18\b \x01(\tR\x10recipientAddress\x12\x16\n" +
 	"\x06amount\x18\t \x01(\tR\x06amount\x12\x14\n" +
 	"\x05token\x18\n" +
-	" \x01(\tR\x05token\"\xb9\x05\n" +
+	" \x01(\tR\x05token\"\xd4\x05\n" +
 	"\x0eTriggerTaskReq\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12:\n" +
 	"\ftrigger_type\x18\x02 \x01(\x0e2\x17.aggregator.TriggerTypeR\vtriggerType\x12F\n" +
@@ -9946,7 +10077,9 @@ const file_avs_proto_rawDesc = "" +
 	"\x0emanual_trigger\x18\a \x01(\v2 .aggregator.ManualTrigger.OutputH\x00R\rmanualTrigger\x12\x1f\n" +
 	"\vis_blocking\x18\b \x01(\bR\n" +
 	"isBlocking\x12Q\n" +
-	"\rtrigger_input\x18\t \x03(\v2,.aggregator.TriggerTaskReq.TriggerInputEntryR\ftriggerInput\x1aW\n" +
+	"\rtrigger_input\x18\t \x03(\v2,.aggregator.TriggerTaskReq.TriggerInputEntryR\ftriggerInput\x12\x19\n" +
+	"\bchain_id\x18\n" +
+	" \x01(\x03R\achainId\x1aW\n" +
 	"\x11TriggerInputEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
 	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01B\x10\n" +
@@ -10070,10 +10203,11 @@ const file_avs_proto_rawDesc = "" +
 	"\x05total\x18\x01 \x01(\x03R\x05total\x12\x1c\n" +
 	"\tsucceeded\x18\x02 \x01(\x03R\tsucceeded\x12\x16\n" +
 	"\x06failed\x18\x03 \x01(\x03R\x06failed\x12,\n" +
-	"\x12avg_execution_time\x18\x04 \x01(\x01R\x10avgExecutionTime\"\xfa\x01\n" +
+	"\x12avg_execution_time\x18\x04 \x01(\x01R\x10avgExecutionTime\"\x95\x02\n" +
 	"\x14RunNodeWithInputsReq\x12(\n" +
 	"\x04node\x18\x01 \x01(\v2\x14.aggregator.TaskNodeR\x04node\x12]\n" +
-	"\x0finput_variables\x18\x03 \x03(\v24.aggregator.RunNodeWithInputsReq.InputVariablesEntryR\x0einputVariables\x1aY\n" +
+	"\x0finput_variables\x18\x03 \x03(\v24.aggregator.RunNodeWithInputsReq.InputVariablesEntryR\x0einputVariables\x12\x19\n" +
+	"\bchain_id\x18\x04 \x01(\x03R\achainId\x1aY\n" +
 	"\x13InputVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
 	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"\x8e\a\n" +
@@ -10116,15 +10250,16 @@ const file_avs_proto_rawDesc = "" +
 	"\fcron_trigger\x18\f \x01(\v2\x1e.aggregator.CronTrigger.OutputH\x00R\vcronTrigger\x12F\n" +
 	"\revent_trigger\x18\r \x01(\v2\x1f.aggregator.EventTrigger.OutputH\x00R\feventTrigger\x12I\n" +
 	"\x0emanual_trigger\x18\x0e \x01(\v2 .aggregator.ManualTrigger.OutputH\x00R\rmanualTriggerB\r\n" +
-	"\voutput_data\"\xd1\x02\n" +
+	"\voutput_data\"\xec\x02\n" +
 	"\x0fSimulateTaskReq\x121\n" +
 	"\atrigger\x18\x01 \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\x12*\n" +
 	"\x05nodes\x18\x02 \x03(\v2\x14.aggregator.TaskNodeR\x05nodes\x12*\n" +
 	"\x05edges\x18\x03 \x03(\v2\x14.aggregator.TaskEdgeR\x05edges\x12X\n" +
-	"\x0finput_variables\x18\x06 \x03(\v2/.aggregator.SimulateTaskReq.InputVariablesEntryR\x0einputVariables\x1aY\n" +
+	"\x0finput_variables\x18\x06 \x03(\v2/.aggregator.SimulateTaskReq.InputVariablesEntryR\x0einputVariables\x12\x19\n" +
+	"\bchain_id\x18\a \x01(\x03R\achainId\x1aY\n" +
 	"\x13InputVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
-	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"\xca\x03\n" +
+	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"\xe5\x03\n" +
 	"\x0fEstimateFeesReq\x121\n" +
 	"\atrigger\x18\x01 \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\x12*\n" +
 	"\x05nodes\x18\x02 \x03(\v2\x14.aggregator.TaskNodeR\x05nodes\x12*\n" +
@@ -10134,7 +10269,8 @@ const file_avs_proto_rawDesc = "" +
 	"\texpire_at\x18\x05 \x01(\x03R\bexpireAt\x12#\n" +
 	"\rmax_execution\x18\x06 \x01(\x03R\fmaxExecution\x12\x16\n" +
 	"\x06runner\x18\a \x01(\tR\x06runner\x12X\n" +
-	"\x0finput_variables\x18\b \x03(\v2/.aggregator.EstimateFeesReq.InputVariablesEntryR\x0einputVariables\x1aY\n" +
+	"\x0finput_variables\x18\b \x03(\v2/.aggregator.EstimateFeesReq.InputVariablesEntryR\x0einputVariables\x12\x19\n" +
+	"\bchain_id\x18\t \x01(\x03R\achainId\x1aY\n" +
 	"\x13InputVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
 	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"\xb2\x01\n" +
@@ -10302,40 +10438,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x18EXECUTION_STATUS_PENDING\x10\x01\x12\x1c\n" +
 	"\x18EXECUTION_STATUS_SUCCESS\x10\x02\x12\x1b\n" +
 	"\x17EXECUTION_STATUS_FAILED\x10\x03\x12\x1a\n" +
-	"\x16EXECUTION_STATUS_ERROR\x10\x05\"\x04\b\x04\x10\x04* EXECUTION_STATUS_PARTIAL_SUCCESS2\xd5\x10\n" +
-	"\n" +
-	"Aggregator\x126\n" +
-	"\x06GetKey\x12\x15.aggregator.GetKeyReq\x1a\x13.aggregator.KeyResp\"\x00\x12]\n" +
-	"\x12GetSignatureFormat\x12!.aggregator.GetSignatureFormatReq\x1a\".aggregator.GetSignatureFormatResp\"\x00\x12=\n" +
-	"\bGetNonce\x12\x18.aggregator.NonceRequest\x1a\x15.aggregator.NonceResp\"\x00\x12B\n" +
-	"\tGetWallet\x12\x18.aggregator.GetWalletReq\x1a\x19.aggregator.GetWalletResp\"\x00\x12B\n" +
-	"\tSetWallet\x12\x18.aggregator.SetWalletReq\x1a\x19.aggregator.GetWalletResp\"\x00\x12F\n" +
-	"\vListWallets\x12\x19.aggregator.ListWalletReq\x1a\x1a.aggregator.ListWalletResp\"\x00\x12N\n" +
-	"\rWithdrawFunds\x12\x1c.aggregator.WithdrawFundsReq\x1a\x1d.aggregator.WithdrawFundsResp\"\x00\x12E\n" +
-	"\n" +
-	"CreateTask\x12\x19.aggregator.CreateTaskReq\x1a\x1a.aggregator.CreateTaskResp\"\x00\x12B\n" +
-	"\tListTasks\x12\x18.aggregator.ListTasksReq\x1a\x19.aggregator.ListTasksResp\"\x00\x120\n" +
-	"\aGetTask\x12\x11.aggregator.IdReq\x1a\x10.aggregator.Task\"\x00\x12Q\n" +
-	"\x0eListExecutions\x12\x1d.aggregator.ListExecutionsReq\x1a\x1e.aggregator.ListExecutionsResp\"\x00\x12A\n" +
-	"\fGetExecution\x12\x18.aggregator.ExecutionReq\x1a\x15.aggregator.Execution\"\x00\x12Q\n" +
-	"\x12GetExecutionStatus\x12\x18.aggregator.ExecutionReq\x1a\x1f.aggregator.ExecutionStatusResp\"\x00\x12Q\n" +
-	"\x0eSetTaskEnabled\x12\x1d.aggregator.SetTaskEnabledReq\x1a\x1e.aggregator.SetTaskEnabledResp\"\x00\x12=\n" +
-	"\n" +
-	"DeleteTask\x12\x11.aggregator.IdReq\x1a\x1a.aggregator.DeleteTaskResp\"\x00\x12H\n" +
-	"\vTriggerTask\x12\x1a.aggregator.TriggerTaskReq\x1a\x1b.aggregator.TriggerTaskResp\"\x00\x12S\n" +
-	"\fCreateSecret\x12#.aggregator.CreateOrUpdateSecretReq\x1a\x1c.aggregator.CreateSecretResp\"\x00\x12K\n" +
-	"\fDeleteSecret\x12\x1b.aggregator.DeleteSecretReq\x1a\x1c.aggregator.DeleteSecretResp\"\x00\x12H\n" +
-	"\vListSecrets\x12\x1a.aggregator.ListSecretsReq\x1a\x1b.aggregator.ListSecretsResp\"\x00\x12S\n" +
-	"\fUpdateSecret\x12#.aggregator.CreateOrUpdateSecretReq\x1a\x1c.aggregator.UpdateSecretResp\"\x00\x12U\n" +
-	"\x10GetWorkflowCount\x12\x1f.aggregator.GetWorkflowCountReq\x1a .aggregator.GetWorkflowCountResp\x12X\n" +
-	"\x11GetExecutionCount\x12 .aggregator.GetExecutionCountReq\x1a!.aggregator.GetExecutionCountResp\x12X\n" +
-	"\x11GetExecutionStats\x12 .aggregator.GetExecutionStatsReq\x1a!.aggregator.GetExecutionStatsResp\x12X\n" +
-	"\x11RunNodeWithInputs\x12 .aggregator.RunNodeWithInputsReq\x1a!.aggregator.RunNodeWithInputsResp\x12C\n" +
-	"\n" +
-	"RunTrigger\x12\x19.aggregator.RunTriggerReq\x1a\x1a.aggregator.RunTriggerResp\x12B\n" +
-	"\fSimulateTask\x12\x1b.aggregator.SimulateTaskReq\x1a\x15.aggregator.Execution\x12U\n" +
-	"\x10GetTokenMetadata\x12\x1f.aggregator.GetTokenMetadataReq\x1a .aggregator.GetTokenMetadataResp\x12I\n" +
-	"\fEstimateFees\x12\x1b.aggregator.EstimateFeesReq\x1a\x1c.aggregator.EstimateFeesRespB\fZ\n" +
+	"\x16EXECUTION_STATUS_ERROR\x10\x05\"\x04\b\x04\x10\x04* EXECUTION_STATUS_PARTIAL_SUCCESSB\fZ\n" +
 	"./avsprotob\x06proto3"
 
 var (
@@ -10678,64 +10781,8 @@ var file_avs_proto_depIdxs = []int32{
 	141, // 178: aggregator.RunTriggerReq.TriggerInputEntry.value:type_name -> google.protobuf.Value
 	141, // 179: aggregator.SimulateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
 	141, // 180: aggregator.EstimateFeesReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	45,  // 181: aggregator.Aggregator.GetKey:input_type -> aggregator.GetKeyReq
-	61,  // 182: aggregator.Aggregator.GetSignatureFormat:input_type -> aggregator.GetSignatureFormatReq
-	34,  // 183: aggregator.Aggregator.GetNonce:input_type -> aggregator.NonceRequest
-	47,  // 184: aggregator.Aggregator.GetWallet:input_type -> aggregator.GetWalletReq
-	49,  // 185: aggregator.Aggregator.SetWallet:input_type -> aggregator.SetWalletReq
-	36,  // 186: aggregator.Aggregator.ListWallets:input_type -> aggregator.ListWalletReq
-	50,  // 187: aggregator.Aggregator.WithdrawFunds:input_type -> aggregator.WithdrawFundsReq
-	32,  // 188: aggregator.Aggregator.CreateTask:input_type -> aggregator.CreateTaskReq
-	39,  // 189: aggregator.Aggregator.ListTasks:input_type -> aggregator.ListTasksReq
-	11,  // 190: aggregator.Aggregator.GetTask:input_type -> aggregator.IdReq
-	41,  // 191: aggregator.Aggregator.ListExecutions:input_type -> aggregator.ListExecutionsReq
-	43,  // 192: aggregator.Aggregator.GetExecution:input_type -> aggregator.ExecutionReq
-	43,  // 193: aggregator.Aggregator.GetExecutionStatus:input_type -> aggregator.ExecutionReq
-	66,  // 194: aggregator.Aggregator.SetTaskEnabled:input_type -> aggregator.SetTaskEnabledReq
-	11,  // 195: aggregator.Aggregator.DeleteTask:input_type -> aggregator.IdReq
-	52,  // 196: aggregator.Aggregator.TriggerTask:input_type -> aggregator.TriggerTaskReq
-	54,  // 197: aggregator.Aggregator.CreateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
-	59,  // 198: aggregator.Aggregator.DeleteSecret:input_type -> aggregator.DeleteSecretReq
-	55,  // 199: aggregator.Aggregator.ListSecrets:input_type -> aggregator.ListSecretsReq
-	54,  // 200: aggregator.Aggregator.UpdateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
-	68,  // 201: aggregator.Aggregator.GetWorkflowCount:input_type -> aggregator.GetWorkflowCountReq
-	70,  // 202: aggregator.Aggregator.GetExecutionCount:input_type -> aggregator.GetExecutionCountReq
-	72,  // 203: aggregator.Aggregator.GetExecutionStats:input_type -> aggregator.GetExecutionStatsReq
-	74,  // 204: aggregator.Aggregator.RunNodeWithInputs:input_type -> aggregator.RunNodeWithInputsReq
-	76,  // 205: aggregator.Aggregator.RunTrigger:input_type -> aggregator.RunTriggerReq
-	78,  // 206: aggregator.Aggregator.SimulateTask:input_type -> aggregator.SimulateTaskReq
-	9,   // 207: aggregator.Aggregator.GetTokenMetadata:input_type -> aggregator.GetTokenMetadataReq
-	79,  // 208: aggregator.Aggregator.EstimateFees:input_type -> aggregator.EstimateFeesReq
-	46,  // 209: aggregator.Aggregator.GetKey:output_type -> aggregator.KeyResp
-	62,  // 210: aggregator.Aggregator.GetSignatureFormat:output_type -> aggregator.GetSignatureFormatResp
-	35,  // 211: aggregator.Aggregator.GetNonce:output_type -> aggregator.NonceResp
-	48,  // 212: aggregator.Aggregator.GetWallet:output_type -> aggregator.GetWalletResp
-	48,  // 213: aggregator.Aggregator.SetWallet:output_type -> aggregator.GetWalletResp
-	38,  // 214: aggregator.Aggregator.ListWallets:output_type -> aggregator.ListWalletResp
-	51,  // 215: aggregator.Aggregator.WithdrawFunds:output_type -> aggregator.WithdrawFundsResp
-	33,  // 216: aggregator.Aggregator.CreateTask:output_type -> aggregator.CreateTaskResp
-	40,  // 217: aggregator.Aggregator.ListTasks:output_type -> aggregator.ListTasksResp
-	31,  // 218: aggregator.Aggregator.GetTask:output_type -> aggregator.Task
-	42,  // 219: aggregator.Aggregator.ListExecutions:output_type -> aggregator.ListExecutionsResp
-	30,  // 220: aggregator.Aggregator.GetExecution:output_type -> aggregator.Execution
-	44,  // 221: aggregator.Aggregator.GetExecutionStatus:output_type -> aggregator.ExecutionStatusResp
-	67,  // 222: aggregator.Aggregator.SetTaskEnabled:output_type -> aggregator.SetTaskEnabledResp
-	65,  // 223: aggregator.Aggregator.DeleteTask:output_type -> aggregator.DeleteTaskResp
-	53,  // 224: aggregator.Aggregator.TriggerTask:output_type -> aggregator.TriggerTaskResp
-	63,  // 225: aggregator.Aggregator.CreateSecret:output_type -> aggregator.CreateSecretResp
-	60,  // 226: aggregator.Aggregator.DeleteSecret:output_type -> aggregator.DeleteSecretResp
-	58,  // 227: aggregator.Aggregator.ListSecrets:output_type -> aggregator.ListSecretsResp
-	64,  // 228: aggregator.Aggregator.UpdateSecret:output_type -> aggregator.UpdateSecretResp
-	69,  // 229: aggregator.Aggregator.GetWorkflowCount:output_type -> aggregator.GetWorkflowCountResp
-	71,  // 230: aggregator.Aggregator.GetExecutionCount:output_type -> aggregator.GetExecutionCountResp
-	73,  // 231: aggregator.Aggregator.GetExecutionStats:output_type -> aggregator.GetExecutionStatsResp
-	75,  // 232: aggregator.Aggregator.RunNodeWithInputs:output_type -> aggregator.RunNodeWithInputsResp
-	77,  // 233: aggregator.Aggregator.RunTrigger:output_type -> aggregator.RunTriggerResp
-	30,  // 234: aggregator.Aggregator.SimulateTask:output_type -> aggregator.Execution
-	10,  // 235: aggregator.Aggregator.GetTokenMetadata:output_type -> aggregator.GetTokenMetadataResp
-	89,  // 236: aggregator.Aggregator.EstimateFees:output_type -> aggregator.EstimateFeesResp
-	209, // [209:237] is the sub-list for method output_type
-	181, // [181:209] is the sub-list for method input_type
+	181, // [181:181] is the sub-list for method output_type
+	181, // [181:181] is the sub-list for method input_type
 	181, // [181:181] is the sub-list for extension type_name
 	181, // [181:181] is the sub-list for extension extendee
 	0,   // [0:181] is the sub-list for field type_name
@@ -10833,7 +10880,7 @@ func file_avs_proto_init() {
 			NumEnums:      8,
 			NumMessages:   133,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   0,
 		},
 		GoTypes:           file_avs_proto_goTypes,
 		DependencyIndexes: file_avs_proto_depIdxs,

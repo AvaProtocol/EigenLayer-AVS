@@ -113,8 +113,31 @@ protoc-gen:
 		--go_opt=paths=source_relative \
     	--go-grpc_out=./protobuf \
 		--go-grpc_opt=paths=source_relative \
-    	protobuf/avs.proto protobuf/node.proto
+    	protobuf/avs.proto protobuf/node.proto protobuf/worker.proto
 	@echo "Protobuf Go generation complete. Files should be in ./protobuf/ and declare package avsproto."
+
+## rest-gen: regenerate REST handler types + Echo ServerInterface from api/openapi.yaml
+##
+## Two outputs are produced under aggregator/rest/generated/:
+##   - types.gen.go    — Go type definitions for every schema in the spec
+##   - server.gen.go   — Echo ServerInterface (one method per spec operationId)
+##
+## REST handlers in aggregator/rest/handlers/ implement the ServerInterface;
+## the compiler enforces that every spec route has a matching handler and
+## that request/response types line up. Regenerate after editing the spec.
+.PHONY: rest-gen
+rest-gen:
+	@echo "Ensuring output directory ./aggregator/rest/generated exists..."
+	@mkdir -p ./aggregator/rest/generated
+	@echo "Deleting old generated files..."
+	@rm -f ./aggregator/rest/generated/*.gen.go
+	@echo "Generating Go types from api/openapi.yaml..."
+	@go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen \
+		-config api/oapi-codegen-types.yaml api/openapi.yaml
+	@echo "Generating Echo server interface from api/openapi.yaml..."
+	@go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen \
+		-config api/oapi-codegen-server.yaml api/openapi.yaml
+	@echo "REST generation complete. Generated files in ./aggregator/rest/generated/."
 
 ## up: bring up docker compose stack
 up:
@@ -209,6 +232,64 @@ operator-default: build
 	@echo "📝 Logs will be written to operator-default.log"
 	./out/ap operator --config=config/operator.yaml 2>&1 | tee operator-default.log
 
+
+## dev-gateway: run the dev gateway (REST 8080, gRPC 2206)
+.PHONY: dev-gateway dev-worker-sepolia dev-worker-base-sepolia dev-operator-sepolia
+dev-gateway: build
+	@mkdir -p logs
+	@echo "🚀 Starting gateway (dev) — REST :8080, gRPC :2206"
+	@echo "📝 Logs: logs/gateway.log"
+	./out/ap aggregator --config=config/gateway-dev.yaml 2>&1 | tee logs/gateway.log
+
+## dev-worker-sepolia: run the sepolia chain worker (gRPC 50051)
+dev-worker-sepolia: build
+	@mkdir -p logs
+	@echo "🛠  Starting worker:sepolia (dev) — gRPC :50051"
+	@echo "📝 Logs: logs/worker-sepolia.log"
+	./out/ap worker --config=config/worker-sepolia-dev.yaml 2>&1 | tee logs/worker-sepolia.log
+
+## dev-worker-base-sepolia: run the base-sepolia chain worker (gRPC 50052)
+dev-worker-base-sepolia: build
+	@mkdir -p logs
+	@echo "🛠  Starting worker:base-sepolia (dev) — gRPC :50052"
+	@echo "📝 Logs: logs/worker-base-sepolia.log"
+	./out/ap worker --config=config/worker-base-sepolia-dev.yaml 2>&1 | tee logs/worker-base-sepolia.log
+
+## dev-operator-sepolia: run the sepolia operator pointed at the dev gateway
+dev-operator-sepolia: build
+	@mkdir -p logs
+	@echo "🔧 Starting operator:sepolia (dev) — aggregator: 127.0.0.1:2206"
+	@echo "📝 Logs: logs/operator-sepolia.log"
+	./out/ap operator --config=config/operator-sepolia.yaml 2>&1 | tee logs/operator-sepolia.log
+
+## dev-stack: run gateway + sepolia worker + base-sepolia worker + sepolia operator together (Ctrl-C stops all)
+##
+## All four processes run as background children of this make recipe.
+## Logs stream to logs/<service>.log. SIGINT (Ctrl-C) propagates to the
+## whole process group via `kill 0`, so the entire stack tears down
+## cleanly on exit. Use `tail -f logs/*.log` in a second terminal to
+## watch everything live.
+.PHONY: dev-stack
+dev-stack: build
+	@mkdir -p logs
+	@echo "🚀 Starting dev stack: gateway + 2 workers + operator"
+	@echo "   gateway      → REST :8080, gRPC :2206  (logs/gateway.log)"
+	@echo "   worker:sep   → gRPC :50051            (logs/worker-sepolia.log)"
+	@echo "   worker:bsep  → gRPC :50052            (logs/worker-base-sepolia.log)"
+	@echo "   operator:sep → 127.0.0.1:2206         (logs/operator-sepolia.log)"
+	@echo ""
+	@echo "   Tail with:  tail -f logs/*.log"
+	@echo "   Stop with:  Ctrl-C  (kills the whole stack)"
+	@echo ""
+	@set -m; \
+		trap 'echo; echo "🛑 Stopping dev stack..."; kill 0 2>/dev/null; exit 0' INT TERM; \
+		./out/ap worker --config=config/worker-sepolia-dev.yaml      > logs/worker-sepolia.log      2>&1 & \
+		./out/ap worker --config=config/worker-base-sepolia-dev.yaml > logs/worker-base-sepolia.log 2>&1 & \
+		sleep 1; \
+		./out/ap aggregator --config=config/gateway-dev.yaml         > logs/gateway.log             2>&1 & \
+		sleep 3; \
+		./out/ap operator   --config=config/operator-sepolia.yaml    > logs/operator-sepolia.log    2>&1 & \
+		wait
 
 ## clean: cleanup storage data
 clean:

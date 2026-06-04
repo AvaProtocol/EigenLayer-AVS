@@ -28,7 +28,7 @@ type HttpJsonResp[T any] struct {
 	Data T `json:"data"`
 }
 
-func (agg *Aggregator) startHttpServer(ctx context.Context) {
+func (agg *Aggregator) startHttpServer(ctx context.Context, extraMounts []HTTPMounter) {
 	// If http_bind_address is not set, skip HTTP server startup entirely
 	if agg.config == nil || agg.config.HttpBindAddress == "" {
 		agg.logger.Info("HTTP server disabled: no http_bind_address configured")
@@ -72,11 +72,21 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 
 		release := fmt.Sprintf("%s@%s", version.Get(), version.GetRevision())
 
+		// Sentry's `environment` tag is driven from config so that
+		// feature-branch / staging deployments don't bucket into the
+		// production issue board. Default stays "production" so existing
+		// deployments that haven't set sentry_environment keep their
+		// historical bucket.
+		sentryEnv := "production"
+		if agg.config.SentryEnvironment != "" {
+			sentryEnv = agg.config.SentryEnvironment
+		}
+
 		// To initialize Sentry's handler, you need to initialize Sentry itself beforehand
 		if err := sentry.Init(sentry.ClientOptions{
 			Dsn:              sentryDsn,
 			ServerName:       serverName,
-			Environment:      "production",
+			Environment:      sentryEnv,
 			Release:          release,
 			AttachStacktrace: true,
 			TracesSampleRate: 1.0,
@@ -105,13 +115,16 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 		}))
 	}
 
-	e.GET("/up", func(c echo.Context) error {
+	// Liveness/readiness probe. /health is the standard k8s+LB path; /up
+	// is kept as an alias because existing probes are wired to it.
+	healthProbe := func(c echo.Context) error {
 		if agg.status == runningStatus {
 			return c.String(http.StatusOK, "up")
 		}
-
 		return c.String(http.StatusServiceUnavailable, "pending...")
-	})
+	}
+	e.GET("/health", healthProbe)
+	e.GET("/up", healthProbe)
 
 	e.GET("/operator", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, &HttpJsonResp[[]*OperatorNode]{
@@ -174,6 +187,19 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 			}
 			panic("manual sentry panic test from /_debug/sentry/panic")
 		})
+	}
+
+	// Mount any extra HTTP surfaces injected via aggregator.WithHTTPMount.
+	// The REST API (aggregator/rest) is wired in this way from
+	// cmd/runAggregator.go so the aggregator package never imports REST
+	// directly — that's the boundary that lets aggregator/rest move to
+	// its own repo without dragging the aggregator core with it.
+	//
+	// Mounters run AFTER the built-in legacy routes (/up, /operator,
+	// /telemetry, /_debug/*) so they can rely on the engine, rpcServer,
+	// smartWalletRpc, and priceService being populated.
+	for _, mounter := range extraMounts {
+		mounter(agg, e)
 	}
 
 	addr := agg.config.HttpBindAddress

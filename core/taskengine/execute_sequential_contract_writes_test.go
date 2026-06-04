@@ -211,7 +211,7 @@ func TestExecuteTask_SequentialContractWrites_Sepolia(t *testing.T) {
 	}
 
 	// Create the task
-	task := &model.Task{
+	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:                 "test-sequential-writes-real-exec",
 			SmartWalletAddress: smartWalletAddr.Hex(),

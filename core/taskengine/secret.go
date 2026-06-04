@@ -8,7 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-func LoadSecretForTask(db storage.Storage, task *model.Task) (map[string]string, error) {
+func LoadSecretForTask(db storage.Storage, task *model.Workflow) (map[string]string, error) {
 	secrets := map[string]string{}
 
 	if task.Owner == "" {

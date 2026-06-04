@@ -80,6 +80,31 @@ func NewInvalidRequestError(reason string) *StructuredError {
 	)
 }
 
+// NewMethodNotFoundError marks the "method name not present in the contract
+// ABI" failure as a user-input error rather than a server fault. Used by
+// GenerateCallData for ContractWrite / ContractRead nodes. Log sites that
+// detect this via IsStructuredError should use Warn (not Error) so that
+// SentryLogger doesn't capture every misnamed method as a Sentry alert
+// (Sentry EIGENLAYER-AVS-1K: 12 events with methodName="nonexistent" that
+// were almost certainly a CI test loop misusing a placeholder string).
+func NewMethodNotFoundError(methodName string) *StructuredError {
+	return NewStructuredError(
+		avsproto.ErrorCode_INVALID_NODE_CONFIG,
+		fmt.Sprintf("method '%s' not found in contract ABI", methodName),
+		map[string]interface{}{"method_name": methodName},
+	)
+}
+
+// NewMethodParamCountError marks a parameter-count mismatch as a user-input
+// error. Same Sentry-noise rationale as NewMethodNotFoundError.
+func NewMethodParamCountError(methodName string, expected, got int) *StructuredError {
+	return NewStructuredError(
+		avsproto.ErrorCode_INVALID_NODE_CONFIG,
+		fmt.Sprintf("method '%s' expects %d parameters, got %d", methodName, expected, got),
+		map[string]interface{}{"method_name": methodName, "expected": expected, "got": got},
+	)
+}
+
 // IsStructuredError checks if an error is a structured error and returns it
 func IsStructuredError(err error) (*StructuredError, bool) {
 	if structErr, ok := err.(*StructuredError); ok {

@@ -142,6 +142,25 @@ func getChainTokenMapping() map[int64]ChainToken {
 // PRICE DATA METHODS
 // =============================================================================
 
+// nativePricingSupportedChains lists the chain IDs for which Moralis
+// actually returns a native-token price. Testnets aren't priced
+// (their native tokens have no market value), so calling Moralis for
+// them returns HTTP 400 "Chain is not supported" — captured as Sentry
+// noise (EIGENLAYER-AVS-1R) without any change in user-visible
+// behavior. Skip the HTTP call entirely for these chains and use the
+// hardcoded fallback price directly.
+//
+// Add a chain here ONLY when Moralis's /erc20/.../price endpoint is
+// verified to return data for it. Mainnet chains where ETH is the
+// native token reuse Ethereum's price under the same fallback.
+var nativePricingSupportedChains = map[int64]bool{
+	1:    true, // Ethereum mainnet
+	8453: true, // Base mainnet
+	// Testnets intentionally absent: 11155111 (Sepolia), 84532 (Base-Sepolia).
+	// BNB Smart Chain (56) is also absent until its allowlist entry in
+	// chainIDToMoralisChain lands and is verified to return data.
+}
+
 // GetNativeTokenPriceUSD implements PriceService interface
 func (ms *MoralisService) GetNativeTokenPriceUSD(chainID int64) (*big.Float, error) {
 	chainToken, exists := ms.chainTokens[chainID]
@@ -151,7 +170,8 @@ func (ms *MoralisService) GetNativeTokenPriceUSD(chainID int64) (*big.Float, err
 		return ms.getETHPrice()
 	}
 
-	// Check cache first
+	// Check cache first — applies before the testnet-skip check so a
+	// recent fallback value stays warm across calls in the same window.
 	cacheKey := fmt.Sprintf("chain_%d", chainID)
 	if cachedPrice := ms.getCachedPrice(cacheKey); cachedPrice != nil {
 		ms.logger.Debug("Using cached price",
@@ -160,6 +180,17 @@ func (ms *MoralisService) GetNativeTokenPriceUSD(chainID int64) (*big.Float, err
 			"price_usd", cachedPrice.Price,
 			"age_seconds", int(time.Since(cachedPrice.Timestamp).Seconds()))
 		return cachedPrice.Price, nil
+	}
+
+	// Testnet skip: Moralis returns 400 "Chain is not supported" for testnet
+	// native pricing. Use the hardcoded fallback directly — same value the
+	// existing error path would produce after the 400, but without one round-
+	// trip of latency or a Sentry capture. Cache the fallback so subsequent
+	// calls within the cache window hit the warm path.
+	if !nativePricingSupportedChains[chainID] {
+		fallback := ms.getFallbackPrice(chainToken.Symbol)
+		ms.setCachedPrice(cacheKey, fallback, chainToken.Symbol)
+		return fallback, nil
 	}
 
 	// Fetch fresh price from Moralis API

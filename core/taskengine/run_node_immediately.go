@@ -2920,8 +2920,20 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 		secrets = make(map[string]string)
 	}
 
+	// Resolve the chain-specific SmartWalletConfig from settings.chain_id
+	// (where the SDK injects it) when the engine is in gateway mode. Without
+	// this, RunNodeImmediately always uses the gateway's default smart wallet
+	// config (the first chain in chains[]), so a contractRead against a
+	// sepolia address would actually query mainnet RPC.
+	vmSmartWalletConfig := n.smartWalletConfig
+	if settingsChainID := extractSettingsChainID(inputVariables); settingsChainID != 0 {
+		if resolved := n.ResolveSmartWalletConfig(settingsChainID); resolved != nil {
+			vmSmartWalletConfig = resolved
+		}
+	}
+
 	// Create a clean VM for isolated execution with proper secrets (no task needed for immediate execution)
-	vm, err := NewVMWithData(nil, nil, n.smartWalletConfig, secrets)
+	vm, err := NewVMWithData(nil, nil, vmSmartWalletConfig, secrets)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VM: %w", err)
 	}
@@ -2929,7 +2941,7 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 	vm.tenderlyClient = n.tenderlyClient
 
 	// Use the simulation mode parameter by default
-	vm.WithLogger(n.logger).WithDb(n.db).SetSimulation(useSimulation)
+	vm.WithLogger(n.logger).WithDb(n.db).WithChainConfigResolver(n.ResolveSmartWalletConfig).SetSimulation(useSimulation)
 
 	if n.logger != nil {
 		n.logger.Info("RunNodeImmediately: Execution mode set",
@@ -3320,6 +3332,23 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 	inputVariables := make(map[string]interface{})
 	for k, v := range req.InputVariables {
 		inputVariables[k] = v.AsInterface()
+	}
+
+	// Workflow-level chain_id override for this isolated node run. Pushed
+	// into inputVariables.settings.chain_id so the in-process executor
+	// (RunNodeImmediately → extractSettingsChainID) picks the right
+	// per-chain SmartWalletConfig. node.Config.chain_id (when set) still
+	// takes precedence — that resolution happens inside the VM via
+	// WithChainConfigResolver.
+	if reqChainID := req.GetChainId(); reqChainID != 0 {
+		settings, _ := inputVariables["settings"].(map[string]interface{})
+		if settings == nil {
+			settings = map[string]interface{}{}
+		}
+		if _, alreadySet := settings["chain_id"]; !alreadySet {
+			settings["chain_id"] = reqChainID
+			inputVariables["settings"] = settings
+		}
 	}
 
 	// Get node type string from the node's Type field
@@ -4279,5 +4308,37 @@ func convertToProtobufCompatible(data interface{}) interface{} {
 	default:
 		// Return as-is for basic types (string, int, float, bool, etc.)
 		return v
+	}
+}
+
+// extractSettingsChainID returns the numeric chain_id from
+// inputVariables["settings"]["chain_id"], or 0 if absent/unparseable.
+// SDK callers put their target chain there (see tests/utils/client.ts
+// `settingsFor`), and the gateway needs it to pick the right per-chain
+// RPC when executing nodes in-process.
+func extractSettingsChainID(inputVariables map[string]interface{}) int64 {
+	settings, ok := inputVariables["settings"].(map[string]interface{})
+	if !ok {
+		return 0
+	}
+	raw, ok := settings["chain_id"]
+	if !ok {
+		return 0
+	}
+	switch v := raw.(type) {
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	case float64:
+		return int64(v)
+	case string:
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return 0
+		}
+		return parsed
+	default:
+		return 0
 	}
 }
