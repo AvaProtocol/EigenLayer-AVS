@@ -21,9 +21,6 @@ operator_address: <operator_address>
 avs_registry_coordinator_address: 0x8DE3Ee0dE880161Aa0CD8Bf9F8F6a7AfEeB9A44B
 operator_state_retriever_address: 0xb3af70D5f72C04D1f490ff49e5aB189fA7122713
 
-eth_rpc_url: https://ethereum-rpc.publicnode.com
-eth_ws_url: wss://ethereum-rpc.publicnode.com
-
 ecdsa_private_key_store_path: <path_to_operator_ecdsa_key_json>
 bls_private_key_store_path: <path_to_operator_bls_key_json>
 
