@@ -8,7 +8,12 @@ import (
 
 const TaskIDLength = 26
 
-func ValidWalletOwner(db storage.Storage, u *model.User, smartWalletAddress common.Address) (bool, error) {
+// ValidWalletOwner reports whether the smart wallet at smartWalletAddress is
+// owned by u on the given chain. Wallets are chain-scoped (the factory
+// address differs per chain, so a wallet derived on chain A is not the same
+// record as one on chain B even if the EOA owner matches), so the chainID is
+// part of the ownership question.
+func ValidWalletOwner(db storage.Storage, chainID int64, u *model.User, smartWalletAddress common.Address) (bool, error) {
 	// the smart wallet address is the default one (if SmartAccountAddress is set)
 	// Note: nil check is required because some callers create User objects with only Address field set
 	if u.SmartAccountAddress != nil && u.SmartAccountAddress.Hex() == smartWalletAddress.Hex() {
@@ -16,7 +21,7 @@ func ValidWalletOwner(db storage.Storage, u *model.User, smartWalletAddress comm
 	}
 
 	// not default, look up in our storage
-	exists, err := db.Exist([]byte(WalletStorageKey(u.Address, smartWalletAddress.Hex())))
+	exists, err := db.Exist([]byte(WalletStorageKey(chainID, u.Address, smartWalletAddress.Hex())))
 	if exists {
 		return true, nil
 	}

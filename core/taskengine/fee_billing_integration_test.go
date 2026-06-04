@@ -48,12 +48,13 @@ func TestFeeBilling_CreditGating_BlocksOnOutstandingBalance(t *testing.T) {
 
 	// Register the smart wallet for this owner so executor wallet validation passes
 	walletAddr := common.HexToAddress(smartWalletAddr)
-	StoreWallet(db, owner, &model.SmartWallet{Address: &walletAddr})
+	StoreWallet(db, int64(1), owner, &model.SmartWallet{Address: &walletAddr})
 
 	// Create a simple task with manual trigger and custom code node (no on-chain ops)
 	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:                 "test-fee-gating",
+			ChainId:            int64(1),
 			Owner:              strings.ToLower(owner.Hex()),
 			SmartWalletAddress: smartWalletAddr,
 			Status:             avsproto.TaskStatus_Enabled,
@@ -109,12 +110,13 @@ func TestFeeBilling_CreditGating_BlocksOnOutstandingBalance(t *testing.T) {
 		Owner:        owner.Hex(),
 		Tier:         "EXECUTION_TIER_1",
 		FeeAmountWei: "1000000000000000", // 0.001 ETH — any non-zero amount
+		ChainID:      int64(1),
 	}
 	err = executor.feeLedger.RecordValueFee(feeRecord)
 	require.NoError(t, err)
 
 	// Verify outstanding balance is now positive
-	outstanding, err := executor.feeLedger.GetOutstandingBalance(owner)
+	outstanding, err := executor.feeLedger.GetOutstandingBalance(int64(1), owner)
 	require.NoError(t, err)
 	assert.True(t, outstanding.Sign() > 0, "Outstanding balance should be positive after recording fee")
 
@@ -159,11 +161,12 @@ func TestFeeBilling_CreditGating_AllowsWithHighCreditLimit(t *testing.T) {
 
 	// Register the smart wallet for this owner
 	walletAddr := common.HexToAddress(smartWalletAddr)
-	StoreWallet(db, owner, &model.SmartWallet{Address: &walletAddr})
+	StoreWallet(db, int64(1), owner, &model.SmartWallet{Address: &walletAddr})
 
 	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:                 "test-fee-high-limit",
+			ChainId:            int64(1),
 			Owner:              strings.ToLower(owner.Hex()),
 			SmartWalletAddress: smartWalletAddr,
 			Status:             avsproto.TaskStatus_Enabled,
@@ -202,6 +205,7 @@ func TestFeeBilling_CreditGating_AllowsWithHighCreditLimit(t *testing.T) {
 		TaskID:       task.Id,
 		Owner:        owner.Hex(),
 		FeeAmountWei: "1000000000000000", // 0.001 ETH (~$2.50) — under $100 limit
+		ChainID:      int64(1),
 	})
 	require.NoError(t, err)
 

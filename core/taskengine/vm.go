@@ -1548,7 +1548,7 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		_, hasSalt := v.vars["aa_salt"]
 		v.mu.Unlock()
 		if !hasSalt && v.db != nil {
-			if wallet, err := GetWallet(v.db, v.TaskOwner, v.task.SmartWalletAddress); err == nil && wallet != nil && wallet.Salt != nil {
+			if wallet, err := GetWallet(v.db, v.task.Task.ChainId, v.TaskOwner, v.task.SmartWalletAddress); err == nil && wallet != nil && wallet.Salt != nil {
 				v.AddVar("aa_salt", wallet.Salt)
 			}
 		}

@@ -68,31 +68,39 @@ type WalletSaltIndexBackfillStats struct {
 	SkippedDeriveError     int
 }
 
-// BackfillWalletSaltIndex walks every persisted wallet record and either
-// writes a (owner, factory, salt) → address secondary index entry (when
-// the live derivation still matches the stored address), or marks the row
-// stale (when the derivation differs — i.e. the factory's account
-// implementation was upgraded since the row was stored).
+// BackfillWalletSaltIndex walks every persisted wallet record on the given
+// chain and either writes a (chainID, owner, factory, salt) → address
+// secondary index entry (when the live derivation still matches the stored
+// address), or marks the row stale (when the derivation differs — i.e. the
+// factory's account implementation was upgraded since the row was stored).
+//
+// Run the backfill once per chain the gateway hosts. The `derive` callback
+// must produce addresses consistent with the chainID passed in (the caller
+// is responsible for binding the deriver to the right RPC endpoint).
 //
 // The function is the shared core for both the `/ava backfill-wallet-salt-index`
 // CLI subcommand and the standalone scripts/migration/... wrapper. Tests
 // inject a fake deriver to exercise the matrix of canonical / stale /
 // missing / error rows without an RPC.
-func BackfillWalletSaltIndex(db storage.Storage, derive WalletSaltIndexAddressDeriver, opts WalletSaltIndexBackfillOptions) (*WalletSaltIndexBackfillStats, error) {
+func BackfillWalletSaltIndex(db storage.Storage, chainID int64, derive WalletSaltIndexAddressDeriver, opts WalletSaltIndexBackfillOptions) (*WalletSaltIndexBackfillStats, error) {
 	if db == nil {
 		return nil, fmt.Errorf("BackfillWalletSaltIndex: db is required")
 	}
 	if derive == nil {
 		return nil, fmt.Errorf("BackfillWalletSaltIndex: derive callback is required")
 	}
+	if chainID <= 0 {
+		return nil, fmt.Errorf("BackfillWalletSaltIndex: chainID is required (got %d)", chainID)
+	}
 	logf := opts.Logf
 	if logf == nil {
 		logf = func(format string, args ...any) {}
 	}
 
-	items, err := db.GetByPrefix([]byte("w:"))
+	walletPrefix := []byte(fmt.Sprintf("w:%d:", chainID))
+	items, err := db.GetByPrefix(walletPrefix)
 	if err != nil {
-		return nil, fmt.Errorf("scan wallet records: %w", err)
+		return nil, fmt.Errorf("scan wallet records for chain %d: %w", chainID, err)
 	}
 
 	stats := &WalletSaltIndexBackfillStats{}
@@ -140,7 +148,7 @@ func BackfillWalletSaltIndex(db storage.Storage, derive WalletSaltIndexAddressDe
 		if canonical {
 			stats.CanonicalConfirmed++
 
-			indexKey := WalletBySaltKey(owner, factory, wallet.Salt)
+			indexKey := WalletBySaltKey(chainID, owner, factory, wallet.Salt)
 			existing, lookupErr := db.GetKey(indexKey)
 			alreadyCorrect := lookupErr == nil && strings.EqualFold(string(existing), wallet.Address.Hex())
 
@@ -185,7 +193,7 @@ func BackfillWalletSaltIndex(db storage.Storage, derive WalletSaltIndexAddressDe
 		logf("  [stale] %s ≠ live derivation %s (owner=%s factory=%s salt=%s)",
 			wallet.Address.Hex(), derived.Hex(), owner.Hex(), factory.Hex(), wallet.Salt.String())
 		if !opts.DryRun {
-			if markErr := MarkWalletStale(db, owner, wallet.Address.Hex()); markErr != nil {
+			if markErr := MarkWalletStale(db, chainID, owner, wallet.Address.Hex()); markErr != nil {
 				logf("  [err] mark stale: %v", markErr)
 				// Fail-fast: a partially marked stale set would let
 				// zombie rows leak back into ListWallets responses

@@ -567,7 +567,7 @@ func TestContractWrite_InvalidNumericValue_ResponseStructure(t *testing.T) {
 	require.NoError(t, err, "Failed to derive smart wallet address")
 
 	// Seed wallet in DB for validation
-	_ = StoreWallet(db, ownerEOA, &model.SmartWallet{
+	_ = StoreWallet(db, int64(1), ownerEOA, &model.SmartWallet{
 		Owner:   &ownerEOA,
 		Address: runnerAddr,
 		Factory: &smartWalletConfig.FactoryAddress,

@@ -478,6 +478,13 @@ func GetAggregatorConfig() *config.Config {
 
 	return &config.Config{
 		SmartWallet: &config.SmartWalletConfig{
+			// ChainID = 1 is the test default. Many tests construct
+			// storage keys manually via StoreWallet(db, int64(1), ...)
+			// alongside engine-mediated calls; both paths must agree on
+			// the chain segment of the chain-scoped key, so we pin the
+			// engine's defaultChainID() to 1 here. Tests that exercise
+			// multi-chain behavior override this on the returned config.
+			ChainID:            1,
 			EthRpcUrl:          GetTestRPCURL(),
 			EthWsUrl:           GetTestWsRPCURL(),
 			FactoryAddress:     common.HexToAddress(GetTestFactoryAddress()),
