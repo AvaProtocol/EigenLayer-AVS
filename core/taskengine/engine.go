@@ -1283,7 +1283,20 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	// as task.SmartWalletAddress. We must verify the caller owns this wallet
 	// on the chain this task targets.
 	if task.SmartWalletAddress != "" {
-		if valid, _ := ValidWalletOwner(n.db, task.ChainId, user, common.HexToAddress(task.SmartWalletAddress)); !valid {
+		valid, ownErr := ValidWalletOwner(n.db, task.ChainId, user, common.HexToAddress(task.SmartWalletAddress))
+		if ownErr != nil {
+			// Storage failure on the ownership check is NOT the same as
+			// "wallet not owned" — surfacing it as InvalidArgument would
+			// make a transient DB hiccup look like a malformed request.
+			n.logger.Error("Wallet ownership check failed (storage error)",
+				"owner", user.Address.Hex(),
+				"smart_wallet", task.SmartWalletAddress,
+				"chain_id", task.ChainId,
+				"error", ownErr)
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE),
+				"failed to validate smart wallet ownership: %v", ownErr)
+		}
+		if !valid {
 			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
 		}
 	}
@@ -2419,7 +2432,18 @@ func (n *Engine) ListWorkflowsByUser(user *model.User, payload *avsproto.ListTas
 			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
 		}
 
-		if valid, _ := n.userOwnsWalletOnAnyChain(user, common.HexToAddress(smartWalletAddress)); !valid {
+		valid, ownErr := n.userOwnsWalletOnAnyChain(user, common.HexToAddress(smartWalletAddress))
+		if ownErr != nil {
+			// Storage failure → surface as STORAGE_UNAVAILABLE; the
+			// caller request is fine, the gateway can't currently answer.
+			n.logger.Error("Wallet ownership check failed (storage error)",
+				"owner", user.Address.Hex(),
+				"smart_wallet", smartWalletAddress,
+				"error", ownErr)
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE),
+				"failed to validate smart wallet ownership: %v", ownErr)
+		}
+		if !valid {
 			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
 		}
 
