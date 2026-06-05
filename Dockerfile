@@ -19,8 +19,9 @@ COPY . .
 # `docker build --build-arg SEMVER=3.2.0 --build-arg REVISION=abc1234`.
 ARG SEMVER=
 ARG REVISION=
-RUN SEMVER="${SEMVER:-$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo dev)}" && \
-    REVISION="${REVISION:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}" && \
+RUN _git_tag=$(git describe --tags --abbrev=0 2>/dev/null); \
+    SEMVER="${SEMVER:-$([ -n "${_git_tag}" ] && echo "${_git_tag#v}" || echo dev)}"; \
+    REVISION="${REVISION:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"; \
     echo "Building with semver=${SEMVER} revision=${REVISION}" && \
     go build \
       -o ./ap \

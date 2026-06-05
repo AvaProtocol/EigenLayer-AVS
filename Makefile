@@ -9,7 +9,7 @@ BINARY_NAME ?= ap
 # when git is missing or there are no tags (e.g. a CI shallow-clone).
 #
 # Override from the environment when needed: `make build SEMVER=4.0.0`.
-SEMVER ?= $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo dev)
+SEMVER ?= $(shell _tag=$$(git describe --tags --abbrev=0 2>/dev/null); [ -n "$$_tag" ] && echo "$$_tag" | sed 's/^v//' || echo dev)
 REVISION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 VERSION_LDFLAGS := -X 'github.com/AvaProtocol/EigenLayer-AVS/version.semver=$(SEMVER)' -X 'github.com/AvaProtocol/EigenLayer-AVS/version.revision=$(REVISION)'
 
