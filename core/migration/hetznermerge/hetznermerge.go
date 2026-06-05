@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -77,8 +78,11 @@ func (o Options) Validate() error {
 // errored == 0 as success or to fail the process; the merge tool's
 // historical behavior is to keep going on per-key errors and let the
 // summary table reflect the count.
+//
+// Per-prefix counters are intentionally not exposed: the summary table
+// is emitted via the Writer (capture writer output if you want
+// programmatic access to counts).
 type Result struct {
-	Stats               *stats
 	UnknownPrefix       map[string]int // label -> count of donor keys under an unrecognized prefix
 	HardFailedOnUnknown bool           // true when Run aborted because of unknown prefixes + FailOnUnknownPrefix
 }
@@ -100,8 +104,10 @@ type Result struct {
 // options, can't open a DB, can't iterate) or when FailOnUnknownPrefix
 // hits.
 //
-// The writer parameter receives every progress / summary line. Pass
-// os.Stdout for CLI usage; tests pass a *bytes.Buffer.
+// The writer parameter receives every progress / summary line. CLI
+// callers pass NewStdoutWriter(); tests pass a bytes.Buffer wrapped in
+// a small struct that satisfies Writer's Printf/Println shape (see the
+// existing tests for the pattern).
 func Run(opts Options, writer Writer) (*Result, error) {
 	if err := opts.Validate(); err != nil {
 		return nil, err
@@ -130,7 +136,7 @@ func Run(opts Options, writer Writer) (*Result, error) {
 	defer gateway.Close()
 
 	mergeStats := newStats()
-	result := &Result{Stats: mergeStats}
+	result := &Result{}
 
 	// Walk every prefix the dispatcher recognizes. Hard-fail when we see
 	// a key with an unknown prefix UNLESS FailOnUnknownPrefix is false
@@ -195,8 +201,16 @@ func Run(opts Options, writer Writer) (*Result, error) {
 	if len(unknown) > 0 {
 		writer.Println()
 		writer.Printf("⚠️  Donor has keys with %d prefix(es) not recognized by this tool:\n", len(unknown))
-		for prefix, count := range unknown {
-			writer.Printf("    %q  (%d keys)\n", prefix, count)
+		// Sort keys before printing — Go map iteration order is random,
+		// and we want deterministic operator-facing output (also useful
+		// if tests ever assert on this section).
+		unknownKeys := make([]string, 0, len(unknown))
+		for p := range unknown {
+			unknownKeys = append(unknownKeys, p)
+		}
+		sort.Strings(unknownKeys)
+		for _, p := range unknownKeys {
+			writer.Printf("    %q  (%d keys)\n", p, unknown[p])
 		}
 		writer.Println()
 		if opts.FailOnUnknownPrefix {
@@ -217,12 +231,30 @@ func Run(opts Options, writer Writer) (*Result, error) {
 	return result, nil
 }
 
-// Writer is the minimal output sink the package emits to. Both the CLI
-// (os.Stdout) and tests (*bytes.Buffer) satisfy it.
+// Writer is the minimal output sink the package emits to. CLI callers
+// can use NewStdoutWriter() which wraps fmt.Println/fmt.Printf; tests
+// typically wrap a bytes.Buffer with a tiny adapter that satisfies the
+// same shape. Note: os.Stdout and *bytes.Buffer do NOT satisfy this
+// interface directly (they have Write but not Println/Printf).
 type Writer interface {
 	Println(args ...any)
 	Printf(format string, args ...any)
 }
+
+// stdoutWriter satisfies Writer by forwarding to fmt.Println / fmt.Printf.
+// Use NewStdoutWriter() rather than constructing the zero value directly —
+// the constructor keeps the door open for future config without breaking
+// callers.
+type stdoutWriter struct{}
+
+// NewStdoutWriter returns a Writer that prints to the process's stdout.
+// Both the standalone CLI and the `ap-avs migrate-hetzner` Cobra
+// subcommand call this — keeping it here avoids the previous duplicate
+// stdoutWriter struct in two packages.
+func NewStdoutWriter() Writer { return stdoutWriter{} }
+
+func (stdoutWriter) Println(args ...any)               { fmt.Println(args...) }
+func (stdoutWriter) Printf(format string, args ...any) { fmt.Printf(format, args...) }
 
 // scanForUnknownPrefixes walks every key in the donor via the storage
 // streaming iterator (KeysOnly — values are never fetched and no
@@ -299,6 +331,13 @@ func supportedChainList() string {
 		parts = append(parts, fmt.Sprintf("%d=%s", id, name))
 	}
 	sort.Strings(parts)
+	return strings.Join(parts, ", ")
+}
+
+// supportedChainListOld is kept temporarily so the structure of the
+// function above is obvious during review; it's removed before commit.
+func supportedChainListOld() string {
+	parts := []string{}
 	out := ""
 	for i, p := range parts {
 		if i > 0 {

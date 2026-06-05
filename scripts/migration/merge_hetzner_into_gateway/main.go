@@ -31,12 +31,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/migration/hetznermerge"
 )
 
-// stdoutWriter satisfies hetznermerge.Writer for the standalone CLI.
-type stdoutWriter struct{}
-
-func (stdoutWriter) Println(args ...any)               { fmt.Println(args...) }
-func (stdoutWriter) Printf(format string, args ...any) { fmt.Printf(format, args...) }
-
 func main() {
 	donorPath := flag.String("donor-path", "", "Path to the donor BadgerDB directory (the Hetzner aggregator's db_path)")
 	donorChainID := flag.Int64("donor-chain-id", 0, "Chain ID for the donor — must match the chain the donor aggregator was serving (1 / 8453 / 11155111 / 84532)")
@@ -62,7 +56,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	if _, err := hetznermerge.Run(opts, stdoutWriter{}); err != nil {
+	if _, err := hetznermerge.Run(opts, hetznermerge.NewStdoutWriter()); err != nil {
 		log.Fatalf("merge failed: %v", err)
 	}
 }
