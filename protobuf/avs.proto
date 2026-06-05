@@ -1375,7 +1375,7 @@ message NativeToken {
 // Per-node cost of goods sold (gas, external API costs, etc.)
 message NodeCOGS {
   string node_id = 1;
-  string cost_type = 2;             // "gas", "external_api", "wallet_creation"
+  string cost_type = 2;             // canonical REST values: "gas", "externalApi", "walletCreation" — see core/taskengine/fee_enums.go and OpenAPI enum NodeCOGSCostType
   Fee fee = 3;                       // Cost in WEI
   string gas_units = 4;             // Gas units (for gas costs only)
 }
@@ -1386,14 +1386,14 @@ message ValueFee {
   Fee fee = 1;                       // { amount: "0.03", unit: "PERCENTAGE" }
   ExecutionTier tier = 2;            // Pricing group (TIER_1, TIER_2, TIER_3)
   string value_base = 3;            // What the percentage applies to (e.g., "input_token_value")
-  string classification_method = 4;  // "rule_based" (V1) or "llm" (V2)
+  string classification_method = 4;  // canonical REST values: "ruleBased" (V1) or "llm" (V2) — see core/taskengine/fee_enums.go and OpenAPI enum ValueFeeClassificationMethod
   float confidence = 5;              // Classification confidence (0.0–1.0)
   string reason = 6;                 // Why this tier was assigned
 }
 
 // Promotional discount
 message FeeDiscount {
-  string discount_type = 1;         // "new_user", "volume", "promotional", "beta_program"
+  string discount_type = 1;         // canonical REST values: "newUser", "volume", "promotional", "betaProgram" — see core/taskengine/fee_enums.go and OpenAPI enum FeeDiscountDiscountType
   string discount_name = 2;
   Fee discount = 3;                  // Discount amount or percentage
   string expiry_date = 4;

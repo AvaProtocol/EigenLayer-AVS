@@ -56,7 +56,7 @@ Default gas estimates:
 - `eth_transfer` — 50,000 gas units
 - `loop` — 300,000 gas units
 
-Smart wallet creation (if the user's wallet doesn't exist yet) is included as a COGS entry with `cost_type: "wallet_creation"`.
+Smart wallet creation (if the user's wallet doesn't exist yet) is included as a COGS entry with `cost_type: "walletCreation"` (canonical REST value — see `core/taskengine/fee_enums.go` and OpenAPI enum `NodeCOGSCostType`).
 
 **External API costs (future):** When a workflow calls a paid external API (e.g., X/Twitter search), that COGS will be estimated and included in the `cogs[]` array.
 
@@ -153,7 +153,7 @@ message NativeToken {
 
 message NodeCOGS {
   string node_id = 1;
-  string cost_type = 2; // "gas", "external_api", "wallet_creation"
+  string cost_type = 2; // "gas", "externalApi", "walletCreation" (canonical REST values)
   Fee fee = 3;           // {amount: "150000000000000", unit: "WEI"}
   string gas_units = 4;
 }
@@ -182,7 +182,7 @@ message ValueFee {
     "fee": { "amount": "0", "unit": "PERCENTAGE" },
     "tier": "EXECUTION_TIER_UNSPECIFIED",
     "value_base": "",
-    "classification_method": "rule_based",
+    "classification_method": "ruleBased",
     "confidence": 1.0,
     "reason": "Workflow has no on-chain execution nodes — no value-capture fee"
   },
@@ -210,7 +210,7 @@ message ValueFee {
     "fee": { "amount": "0.03", "unit": "PERCENTAGE" },
     "tier": "EXECUTION_TIER_1",
     "value_base": "input_token_value",
-    "classification_method": "rule_based",
+    "classification_method": "ruleBased",
     "confidence": 1.0,
     "reason": "V1 default: workflow contains on-chain execution nodes"
   },
@@ -241,7 +241,7 @@ message ValueFee {
     },
     {
       "node_id": "_wallet_creation",
-      "cost_type": "wallet_creation",
+      "cost_type": "walletCreation",
       "fee": { "amount": "6730592094800", "unit": "WEI" }
     }
   ],
@@ -249,7 +249,7 @@ message ValueFee {
     "fee": { "amount": "0.03", "unit": "PERCENTAGE" },
     "tier": "EXECUTION_TIER_1",
     "value_base": "input_token_value",
-    "classification_method": "rule_based",
+    "classification_method": "ruleBased",
     "confidence": 1.0,
     "reason": "V1 default: workflow contains on-chain execution nodes"
   },

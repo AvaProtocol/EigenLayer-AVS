@@ -209,7 +209,7 @@ func TestClassifyWorkflowValue_WithOnChainNodes(t *testing.T) {
 	assert.Equal(t, "0.03", valueFee.Fee.Amount)
 	assert.Equal(t, "PERCENTAGE", valueFee.Fee.Unit)
 	assert.Equal(t, "input_token_value", valueFee.ValueBase)
-	assert.Equal(t, "rule_based", valueFee.ClassificationMethod)
+	assert.Equal(t, ClassificationMethodRuleBased, valueFee.ClassificationMethod)
 	assert.Equal(t, float32(1.0), valueFee.Confidence)
 }
 
