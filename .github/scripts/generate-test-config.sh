@@ -26,7 +26,20 @@ CHAIN_WS="wss://${CHAIN_HOST}"
 # Copy example file as base
 cp config/gateway-dev.example.yaml config/gateway-dev.yaml
 
-# Substitute secret values using unified environment variable names
+# Substitute secret values using unified environment variable names.
+#
+# Heads up: these substitutions are unanchored, so they rewrite the
+# field in EVERY YAML block — top-level AND each per-chain entry under
+# `chains:`. That means the chain_id 84532 (base-sepolia) block ends
+# up pointing at the same Sepolia RPC + bundler as the top-level
+# block. This is intentional for the test fixture: every Go test that
+# loads this file via testutil exercises Sepolia, none of them iterate
+# `chains:`, and a uniformly-Sepolia file is preferable to a
+# half-substituted one that leaves `${BASE_SEPOLIA_BUNDLER_URL}`-style
+# env placeholders unresolved (the Go config loader would parse them
+# as opaque strings, which can surface as confusing failures
+# downstream). When a future test does exercise base-sepolia, switch
+# to anchored sed or a yq-based rewrite then.
 sed -i "s|eth_rpc_url:.*|eth_rpc_url: ${CHAIN_RPC}|g" config/gateway-dev.yaml
 sed -i "s|eth_ws_url:.*|eth_ws_url: ${CHAIN_WS}|g" config/gateway-dev.yaml
 sed -i "s|ecdsa_private_key:.*|ecdsa_private_key: ${CONTROLLER_PRIVATE_KEY}|g" config/gateway-dev.yaml

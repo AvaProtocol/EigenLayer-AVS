@@ -68,11 +68,11 @@ The pre-Railway deployment model ran one aggregator per chain (the
 
 The Railway migration (PRs AvaProtocol/EigenLayer-AVS#538, #544, #550)
 collapsed the per-chain aggregators into a single multi-chain
-**gateway** + per-chain **workers**. The per-chain aggregator configs
-are still referenced by some Makefile targets and integration tests
-(see the migration roadmap below), but the example templates that
-described the old shape now live in `archived/` to keep the active
-directory focused on the current deployment model.
+**gateway** + per-chain **workers**. The pre-Railway example templates
+that described the old shape live in `archived/`; the per-chain
+aggregator configs themselves (when they exist locally as symlinks to
+a secrets-sync directory) are no longer referenced by any in-repo code
+path — except the one documented exception below.
 
 See [`archived/README.md`](./archived/README.md) for what's in there
 and why.

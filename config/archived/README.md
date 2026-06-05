@@ -31,13 +31,21 @@ references them.
 
 ## What's NOT here
 
-The per-chain operator and aggregator configs that some Makefile
-targets and integration tests still reference — `aggregator-sepolia.yaml`,
-`aggregator-ethereum.yaml`, `aggregator-base.yaml`,
-`aggregator-base-sepolia.yaml`, and their operator counterparts —
-**stay in the parent `config/` directory** until those callers are
-migrated to the gateway pattern. See the migration roadmap in
-[`../README.md`](../README.md).
+The per-chain operator configs (`operator-sepolia.yaml`,
+`operator-ethereum.yaml`, `operator-base.yaml`,
+`operator-base-sepolia.yaml`) **stay in the parent `config/`
+directory** because operators are inherently per-chain by EigenLayer's
+design — one operator process per AVS registration per chain — and
+the per-chain Makefile targets that run them are still active.
+
+The per-chain aggregator configs (`aggregator-sepolia.yaml` etc.)
+are no longer referenced by any in-repo code path after the Phase 2-4
+cleanup. They typically exist locally as gitignored symlinks to a
+secrets-sync directory; the symlinks can be removed from local dev
+environments at any time, or relocated into this `archived/`
+directory (where the new `.gitignore` rule keeps them out of git).
+See `../README.md`'s "Known exception" section for the one Base
+mainnet test that still loads `aggregator-base.yaml`.
 
 ## Restoring an archived template
 
