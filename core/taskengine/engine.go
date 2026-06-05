@@ -918,6 +918,21 @@ func (n *Engine) resolveUserChainID(user *model.User) int64 {
 // gRPC callers fall back to the gateway's default chain.
 func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
 	chainID := n.resolveUserChainID(user)
+	// Resolve the per-chain smart wallet config. In single-chain mode
+	// this returns n.smartWalletConfig (the gateway default); in
+	// gateway/multi-chain mode it returns the config for the JWT-derived
+	// chain. Factory address, RPC URL, and max-wallets-per-owner all
+	// vary per chain — using the gateway default for a non-default chain
+	// would derive against the wrong factory and store the resulting
+	// address under the right chain key, producing inconsistent state.
+	swCfg := n.ResolveSmartWalletConfig(chainID)
+	if swCfg == nil {
+		// Defensive — ResolveSmartWalletConfig falls back to
+		// n.smartWalletConfig, which is only nil in tests with a
+		// half-built Engine.
+		return nil, status.Errorf(codes.Internal, "no smart wallet config for chain %d", chainID)
+	}
+
 	// Allow empty factory address (uses default), but validate non-empty ones
 	if payload.GetFactoryAddress() != "" && !common.IsHexAddress(payload.GetFactoryAddress()) {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidFactoryAddressError)
@@ -935,7 +950,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		}
 	}
 
-	factoryAddr := n.smartWalletConfig.FactoryAddress
+	factoryAddr := swCfg.FactoryAddress
 	if payload.GetFactoryAddress() != "" {
 		factoryAddr = common.HexToAddress(payload.GetFactoryAddress())
 	}
@@ -947,10 +962,23 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 	var derivedSenderAddress *common.Address
 	var err error
 
-	// Only try to derive address if rpcConn is available
-	if rpcConn != nil {
-		derivedSenderAddress, err = aa.GetSenderAddressForFactory(rpcConn, user.Address, factoryAddr, saltBig)
-	} else {
+	// Dial a per-chain RPC client so factory.getAddress() runs against
+	// the right chain's deployment. In multi-chain mode the package-level
+	// `rpcConn` is the gateway-default chain's client, which would
+	// produce wrong derivations for any non-default chain. Fall through
+	// to the deterministic mock path in test environments where the
+	// chain's EthRpcUrl is unset.
+	if swCfg.EthRpcUrl != "" {
+		chainRPC, dialErr := ethclient.Dial(swCfg.EthRpcUrl)
+		if dialErr != nil {
+			n.logger.Warn("GetWallet: failed to dial chain RPC, falling back to mock derivation",
+				"chain_id", chainID, "error", dialErr)
+		} else {
+			defer chainRPC.Close()
+			derivedSenderAddress, err = aa.GetSenderAddressForFactory(chainRPC, user.Address, factoryAddr, saltBig)
+		}
+	}
+	if derivedSenderAddress == nil && err == nil {
 		// In test environment or when RPC is unavailable, use a deterministic mock address
 		// This allows tests to run without external dependencies
 		n.logger.Debug("Using mock address derivation due to nil rpcConn (test environment)", "owner", user.Address.Hex(), "salt", saltBig.String())
@@ -968,7 +996,10 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		if err != nil {
 			errMsg = err.Error()
 		}
-		n.logger.Warn("Failed to derive sender address or derived address is nil or zero for GetWallet", "owner", user.Address.Hex(), "factory", factoryAddr.Hex(), "salt", saltBig.String(), "derived", derivedSenderAddress, "error", errMsg, "hasRpcConn", rpcConn != nil)
+		n.logger.Warn("Failed to derive sender address or derived address is nil or zero for GetWallet",
+			"owner", user.Address.Hex(), "factory", factoryAddr.Hex(), "salt", saltBig.String(),
+			"derived", derivedSenderAddress, "error", errMsg,
+			"chain_id", chainID, "chain_rpc_set", swCfg.EthRpcUrl != "")
 		return nil, status.Errorf(codes.InvalidArgument, "Failed to derive sender address or derived address is nil or zero. Error: %v", err)
 	}
 
@@ -980,10 +1011,12 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 	}
 
 	if err == badger.ErrKeyNotFound {
-		// Enforce max smart wallet count per owner before creating a new wallet entry
-		// This check only applies when creating new wallet entries, not accessing existing ones
-		if n.smartWalletConfig != nil {
-			maxAllowed := n.smartWalletConfig.MaxWalletsPerOwner
+		// Enforce max smart wallet count per owner before creating a new wallet entry.
+		// This check only applies when creating new wallet entries, not accessing existing ones.
+		// Per-chain limit comes from swCfg (resolved above) — chains can configure different
+		// quotas; the gateway-default value would over-permit on quota-tightened chains.
+		{
+			maxAllowed := swCfg.MaxWalletsPerOwner
 			if maxAllowed <= 0 {
 				maxAllowed = config.DefaultMaxWalletsPerOwner
 			}
