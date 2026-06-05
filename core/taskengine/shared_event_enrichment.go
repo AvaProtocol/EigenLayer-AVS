@@ -240,13 +240,22 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 			logger.Warn("Failed to get token metadata for Transfer event", "error", err, "contract", contractAddr)
 		}
 	}
+	// Track when the catalog rescued an UNKNOWN entry so we know
+	// whether to trust the bound service's decimals for value
+	// formatting. The simulation chooses a raw value at the upstream
+	// service's decimals scale (typically the 18-decimal default),
+	// so reformatting with catalog decimals would surface a wildly
+	// different magnitude — e.g. a raw 1.5e18 simulator value with
+	// USDC's 6 catalog decimals reads as "1,500,000,000,000 USDC"
+	// instead of the intuitive "1.5 USDC". Only the symbol/name
+	// gets the catalog upgrade; the value display stays in the
+	// upstream's scale.
+	catalogUpgradedDecimals := uint32(18)
+	catalogUpgradedFromUnknown := false
 	if isUnknownTokenMetadata(tokenMetadata) {
-		// `chainID` here is the bound service's chain — for the
-		// dev case where the workflow targets a chain the gateway
-		// doesn't run, this won't match the address. The catalog's
-		// cross-chain scan handles that: addresses are globally
-		// unique for the well-known tokens we care about, so a hit
-		// on any chain is the right symbol.
+		if tokenMetadata != nil {
+			catalogUpgradedDecimals = tokenMetadata.Decimals
+		}
 		boundChainID := tokenService.GetChainID()
 		if catalogHit := LookupTokenInCatalog(boundChainID, contractAddr, logger); catalogHit != nil {
 			if logger != nil {
@@ -256,6 +265,7 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 					"symbol", catalogHit.Symbol)
 			}
 			tokenMetadata = catalogHit
+			catalogUpgradedFromUnknown = true
 		}
 	}
 
@@ -316,10 +326,18 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 	if tokenMetadata != nil {
 		transferResponse.TokenName = tokenMetadata.Name
 		transferResponse.TokenSymbol = tokenMetadata.Symbol
-		transferResponse.TokenDecimals = tokenMetadata.Decimals
+		// Preserve the original (upstream) decimals when the symbol
+		// came from the cross-chain catalog — simulation values are
+		// chosen in the upstream's decimal scale, see the comment on
+		// catalogUpgradedFromUnknown above.
+		displayDecimals := tokenMetadata.Decimals
+		if catalogUpgradedFromUnknown {
+			displayDecimals = catalogUpgradedDecimals
+		}
+		transferResponse.TokenDecimals = displayDecimals
 
 		if rawValueStr != "" {
-			transferResponse.ValueFormatted = tokenService.FormatTokenValue(rawValueStr, tokenMetadata.Decimals)
+			transferResponse.ValueFormatted = tokenService.FormatTokenValue(rawValueStr, displayDecimals)
 		}
 
 		if logger != nil {
