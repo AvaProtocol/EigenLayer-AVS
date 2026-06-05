@@ -3,6 +3,16 @@ ROOT_DIR := $(shell pwd)
 MAIN_PACKAGE_PATH ?= ./
 BINARY_NAME ?= ap
 
+# Version metadata stamped into the binary via -ldflags. Derived from git
+# so /health and telemetry reflect the actual checkout instead of the
+# stale default in version/version.go. Both fields fall back gracefully
+# when git is missing or there are no tags (e.g. a CI shallow-clone).
+#
+# Override from the environment when needed: `make build SEMVER=4.0.0`.
+SEMVER ?= $(shell _tag=$$(git describe --tags --abbrev=0 2>/dev/null); [ -n "$$_tag" ] && echo "$$_tag" | sed 's/^v//' || echo dev)
+REVISION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+VERSION_LDFLAGS := -X 'github.com/AvaProtocol/EigenLayer-AVS/version.semver=$(SEMVER)' -X 'github.com/AvaProtocol/EigenLayer-AVS/version.revision=$(REVISION)'
+
 # ==================================================================================== #
 # HELPERS
 # ==================================================================================== #
@@ -81,7 +91,7 @@ endif
 ## build-prod: build the application for production
 .PHONY: build-prod
 build-prod:
-	go build -ldflags="-X 'github.com/AvaProtocol/EigenLayer-AVS/version.semver=dev' -X 'github.com/AvaProtocol/EigenLayer-AVS/version.revision=dev'" -o=/tmp/bin/${BINARY_NAME} ${MAIN_PACKAGE_PATH}
+	go build -ldflags="$(VERSION_LDFLAGS)" -o=/tmp/bin/${BINARY_NAME} ${MAIN_PACKAGE_PATH}
 
 .PHONY: run
 run: build-prod
@@ -164,7 +174,7 @@ build:
 	mkdir out || true
 	go build \
 		-o ./out/ap \
-    	-ldflags "-X github.com/AvaProtocol/EigenLayer-AVS/version.revision=$(shell  git rev-parse HEAD)"
+		-ldflags "$(VERSION_LDFLAGS)"
 
 ## aggregator: show usage for aggregator commands
 .PHONY: aggregator aggregator-sepolia aggregator-ethereum aggregator-base aggregator-base-sepolia
