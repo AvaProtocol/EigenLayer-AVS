@@ -265,12 +265,23 @@ if [ "$SKIP_DOCKER" = false ]; then
     # Wait between workflows to avoid rate limiting
     sleep 2
     
-    # Trigger production Docker workflow
+    # Trigger production Docker workflow.
+    # The prod workflow only accepts `git_tag` (REQUIRED — must be a published,
+    # non-draft, non-prerelease GitHub release) and `tag_latest`. Skip dispatch
+    # entirely when DOCKER_RELEASE is a pre-release (e.g. user chose to publish
+    # without promoting the pre-release) — the workflow would reject it anyway,
+    # but skipping avoids a misleading "✅ workflow triggered" line followed by
+    # a CI failure.
+    if [[ ! "$DOCKER_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo -e "${YELLOW}   ⏭️  Skipping prod Docker build: ${DOCKER_RELEASE} looks like a pre-release.${NC}"
+        echo -e "${YELLOW}      Prod images must come from a full release tag (vX.Y.Z). Promote the${NC}"
+        echo -e "${YELLOW}      pre-release first via this script's promotion step, then re-run.${NC}"
+        DOCKER_SUCCESS=false
+    else
     echo -e "${BLUE}   🏭 Production Docker build...${NC}"
     gh workflow run "publish-prod-docker.yml" \
         --repo "$REPO" \
         --field git_tag="$DOCKER_RELEASE" \
-        --field branch_name="main" \
         --field tag_latest="$TAG_LATEST"
     
     if [ $? -eq 0 ]; then
@@ -284,6 +295,7 @@ if [ "$SKIP_DOCKER" = false ]; then
         echo -e "${RED}   ❌ Failed to trigger production Docker workflow for ${DOCKER_RELEASE}${NC}"
         DOCKER_SUCCESS=false
     fi
+    fi  # close the prerelease-skip guard
 else
     echo -e "${BLUE}⏭️  Skipping Docker publishing${NC}"
     DOCKER_SUCCESS=true
