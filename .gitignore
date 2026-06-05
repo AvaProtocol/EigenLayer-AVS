@@ -35,9 +35,15 @@ config/*.yaml
 !config/*.example.yaml
 !config/*-railway.yaml
 !config/*-rehearsal.yaml
-# Snapshot of tracked configs taken before any restructure; safety net.
-!config/_legacy/
-!config/_legacy/*.yaml
+# config/archived/ holds documentation templates (the pre-Railway
+# *.example.yaml files, tracked via the whitelist below) plus any
+# historical real-value configs preserved verbatim. Those real-value
+# files are typically symlinks to a gitignored secrets-sync directory;
+# committing the symlink would leak the local filesystem path. Ignore
+# everything in archived/ by default; only the *.example.yaml
+# templates are tracked.
+config/archived/*.yaml
+!config/archived/*.example.yaml
 
 contracts/script/output*
 

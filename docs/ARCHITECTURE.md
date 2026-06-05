@@ -272,8 +272,8 @@ Data format: Protocol Buffer JSON serialization. Migrations run on startup (idem
 ## Configuration
 
 Environment-specific YAML files in `config/`:
-- `aggregator.example.yaml` — Reference config with all fields documented
-- `aggregator-sepolia.yaml`, `aggregator-base.yaml`, `aggregator-ethereum.yaml` — Per-chain configs
+- `archived/aggregator.example.yaml` — Reference config with all fields documented
+- `gateway-dev.yaml` — Local-dev gateway config (multi-chain; replaces the pre-Railway per-chain configs)
 - `operator-*.yaml` — Operator configs per chain
 
 Key config sections: smart wallet (RPC, bundler, factory, entrypoint), fee rates (tier-based pricing), macros/secrets (global workflow variables), approved operators list.

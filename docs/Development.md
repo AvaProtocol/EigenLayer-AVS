@@ -17,26 +17,32 @@ npm install -g grpc-tools
 
 ## Running a Local Node
 
-For a node that connects to Ava pre-deployed AVS contract, you need to create the appropriate config file for your target chain.
+For a node that connects to Ava's pre-deployed AVS contract, copy the
+template config and fill in the placeholder values:
 
-After having the config file, you can run the aggregator for your desired network:
+```bash
+cp config/gateway-dev.example.yaml config/gateway-dev.yaml
+$EDITOR config/gateway-dev.yaml
+```
+
+The default `chains:` block in the template covers Sepolia + Base
+Sepolia. Add more chains under `chains:` if you need them — see
+[config/README.md](../config/README.md) for the layout.
+
+Then build + run:
 
 ```bash
 # Build the application
 make build
 
-# Run aggregator on Sepolia
-make aggregator-sepolia
-
-# Run aggregator on Ethereum mainnet
-make aggregator-ethereum
-
-# Run aggregator on Base
-make aggregator-base
-
-# Run aggregator on Base Sepolia
-make aggregator-base-sepolia
+# Start the local-dev gateway (serves every chain in config/gateway-dev.yaml)
+make gateway-dev
 ```
+
+The legacy `make aggregator-<chain>` targets were retired when the
+Hetzner→Railway migration consolidated the per-chain aggregator
+pattern into a single multi-chain gateway. They now print a
+deprecation notice pointing at `make gateway-dev`.
 
 Or use Docker Compose directly:
 
@@ -90,7 +96,7 @@ make dev-live
 - WebSocket connections from operators (they must reconnect)
 - In-memory state and queued jobs
 
-Persistent storage (BadgerDB) survives restarts. For testing complete workflows or debugging stateful operations, consider using manual restarts (`make aggregator-<chain>`) instead.
+Persistent storage (BadgerDB) survives restarts. For testing complete workflows or debugging stateful operations, consider using manual restarts (`make gateway-dev`) instead.
 
 ## Client SDK
 
