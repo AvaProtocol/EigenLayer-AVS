@@ -1600,9 +1600,26 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	// Tenderly transfer simulations revert with "ERC20: transfer amount exceeds balance".
 	// Cached after first lookup, so subsequent simulations are free.
 	// nil = unknown (fall back to 18); a real 0 is preserved (legitimate ERC20 case).
+	//
+	// Resolution order:
+	//   1. Bound TokenEnrichmentService (per-chain whitelist + RPC). Right answer in
+	//      production where the gateway runs the workflow's target chain.
+	//   2. Cross-chain catalog. Recovers the right decimals in dev when the bound
+	//      service is on a chain that doesn't host the address (e.g. Sepolia gateway
+	//      simulating a mainnet-targeted workflow). Without this, the RPC fallback in
+	//      fetchTokenMetadataFromRPC silently returns Decimals=18 for every miss,
+	//      causing the simulator to inject a 1.5e18 value into a 6-decimal token and
+	//      breaking the value math through the rest of the workflow.
 	var simulatedTokenDecimals *uint32
 	if n.tokenEnrichmentService != nil && len(query.GetAddresses()) > 0 {
-		if md, mdErr := n.tokenEnrichmentService.GetTokenMetadata(query.GetAddresses()[0]); mdErr == nil && md != nil {
+		addr := query.GetAddresses()[0]
+		md, _ := n.tokenEnrichmentService.GetTokenMetadata(addr)
+		if isUnknownTokenMetadata(md) {
+			if catalogHit := LookupTokenInCatalog(uint64(chainID), addr, n.logger); catalogHit != nil {
+				md = catalogHit
+			}
+		}
+		if md != nil && !isUnknownTokenMetadata(md) {
 			d := md.Decimals
 			simulatedTokenDecimals = &d
 		}
