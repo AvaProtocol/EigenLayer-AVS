@@ -265,12 +265,15 @@ if [ "$SKIP_DOCKER" = false ]; then
     # Wait between workflows to avoid rate limiting
     sleep 2
     
-    # Trigger production Docker workflow
+    # Trigger production Docker workflow.
+    # The prod workflow only accepts `git_tag` (REQUIRED — must be a published
+    # GitHub release) and `tag_latest`. Branch/commit-only paths were removed
+    # so version.semver always matches a real release tag — see the workflow's
+    # top-of-file comment for rationale.
     echo -e "${BLUE}   🏭 Production Docker build...${NC}"
     gh workflow run "publish-prod-docker.yml" \
         --repo "$REPO" \
         --field git_tag="$DOCKER_RELEASE" \
-        --field branch_name="main" \
         --field tag_latest="$TAG_LATEST"
     
     if [ $? -eq 0 ]; then

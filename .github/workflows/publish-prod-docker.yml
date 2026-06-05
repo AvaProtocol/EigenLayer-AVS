@@ -1,23 +1,35 @@
 name: Publish Production Docker Image
 
+# Source-of-truth rule:
+#
+#   The image's `version.semver` (which operators report via /telemetry)
+#   MUST equal a published GitHub release tag. There is no path through
+#   this workflow that produces a "main-<sha>" or commit-only RELEASE_TAG —
+#   that would mislabel operator telemetry and make support harder.
+#
+# Trigger paths:
+#
+#   1. `./scripts/release.sh` (the canonical release flow) — promotes the
+#      latest semantic-release pre-release tag to a full GitHub release,
+#      then dispatches this workflow with --field git_tag=vX.Y.Z.
+#
+#   2. Manual dashboard dispatch — for back-fills or re-publishes against
+#      an existing release tag. You must type the release tag (e.g. v3.2.0).
+#      Workflow hard-fails if the tag isn't a published GitHub release.
+#
+# If you need to ship something that isn't at a release yet, create the
+# release first (via release.sh or `gh release create`), then dispatch
+# this workflow against the new tag.
+
 on:
   workflow_dispatch:
     inputs:
-      branch_name:
-        description: "Branch to build from (must be main). Used if no git_tag or commit_hash is provided."
-        required: false
-        type: string
-        default: "main"
-      commit_hash:
-        description: "Specific commit SHA to build (optional). Overrides branch_name for checkout if provided. git_tag takes precedence over this."
-        required: false
-        type: string
       git_tag:
-        description: "Specific Git tag to build (e.g., v1.6.0). Overrides commit_hash and branch_name for checkout."
-        required: false
+        description: "Git tag of a published GitHub release (e.g., v3.2.0). REQUIRED — this becomes version.semver in the binary, which operators report via /telemetry."
+        required: true
         type: string
       tag_latest:
-        description: "Automatically tag the image with 'latest' tag in addition to the primary tag."
+        description: "Also push avaprotocol/ap-avs:latest pointing at this image. Set true for the most-recent release; leave false for back-fills."
         required: false
         type: boolean
         default: false
@@ -26,88 +38,82 @@ jobs:
   publish-prod-build:
     name: Publish production docker image to dockerhub
     runs-on: "blacksmith-4vcpu-ubuntu-2404"
+    permissions:
+      contents: read
     steps:
+      - name: Validate git_tag is a published GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.git_tag }}"
+
+          # gh release view returns 0 for non-existent tags AND for draft
+          # releases that exist but haven't been published. Query --json so
+          # we can distinguish them and reject both.
+          META=$(gh release view "$TAG" --repo "${{ github.repository }}" \
+            --json tagName,isDraft,isPrerelease 2>&1) || META=""
+          if [[ -z "$META" ]] || ! echo "$META" | jq empty 2>/dev/null; then
+            echo "::error::git_tag '$TAG' is not a GitHub release at all."
+            FAIL=1
+          else
+            IS_DRAFT=$(echo "$META" | jq -r '.isDraft')
+            IS_PRE=$(echo "$META" | jq -r '.isPrerelease')
+            if [[ "$IS_DRAFT" == "true" ]]; then
+              echo "::error::git_tag '$TAG' is a DRAFT release (not published). Production images must be"
+              echo "::error::built from a published release. Publish the draft first, then re-dispatch."
+              FAIL=1
+            elif [[ "$IS_PRE" == "true" ]]; then
+              # Semantic-release intentionally creates prereleases (rc.N) before
+              # promotion. Refuse to build prod images from those — release.sh
+              # promotes them to full releases first.
+              echo "::error::git_tag '$TAG' is a PRE-RELEASE. Production images must be built from"
+              echo "::error::full releases (semantic-release pre-releases get promoted by release.sh)."
+              FAIL=1
+            fi
+          fi
+
+          if [[ "${FAIL:-0}" == "1" ]]; then
+            echo "::error::"
+            echo "::error::Production images must be built from a published release so version.semver"
+            echo "::error::matches what operators report in /telemetry. To resolve:"
+            echo "::error::"
+            echo "::error::  1. Run ./scripts/release.sh (promotes the latest pre-release to a full release"
+            echo "::error::     and dispatches this workflow automatically), OR"
+            echo "::error::"
+            echo "::error::  2. Pick an existing published release from"
+            echo "::error::     https://github.com/${{ github.repository }}/releases"
+            exit 1
+          fi
+          echo "✓ $TAG is a published (non-draft, non-prerelease) GitHub release"
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Checkout code
+      - name: Checkout code at the release tag
         id: checkout_code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.git_tag && format('refs/tags/{0}', github.event.inputs.git_tag) || github.event.inputs.commit_hash || github.event.inputs.branch_name }}
+          ref: refs/tags/${{ inputs.git_tag }}
 
-      - name: Determine Tags and Build Args
+      - name: Resolve build args
         id: vars
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
-          PRIMARY_DOCKER_TAG=""
-          BRANCH_FOR_CONTEXT="" 
-          RELEASE_TAG_ARG=""
-
-          if [[ -z "${{ github.event.inputs.git_tag }}" && -z "${{ github.event.inputs.commit_hash }}" ]]; then
-            if [[ "${{ github.event.inputs.branch_name }}" != "main" ]]; then
-              echo "Error: Production builds without a git_tag or commit_hash must be from the main branch."
-              exit 1
-            fi
-          fi
-
-          if [[ -n "${{ github.event.inputs.git_tag }}" ]]; then
-            echo "Source: Git Tag (${{ github.event.inputs.git_tag }})"
-            PRIMARY_DOCKER_TAG="${{ github.event.inputs.git_tag }}"
-            RELEASE_TAG_ARG="${{ github.event.inputs.git_tag }}"
-            # BRANCH_FOR_CONTEXT remains empty for git_tag builds to ensure no short SHA tag is added by meta
-          elif [[ -n "${{ github.event.inputs.commit_hash }}" ]]; then
-            echo "Source: Commit SHA (${{ github.event.inputs.commit_hash }})"
-            RAW_BRANCH_CTX="${{ github.event.inputs.branch_name }}" # Should be main for prod if specified with commit
-            SANITIZED_BRANCH_CTX=$(echo "$RAW_BRANCH_CTX" | sed 's|/|-|g' | tr -cs 'a-zA-Z0-9.-_' '-' | sed 's/--\+/-/g' | sed 's/^-*//;s/-*$//')
-            if [[ -n "$SANITIZED_BRANCH_CTX" ]]; then
-              PRIMARY_DOCKER_TAG="$SANITIZED_BRANCH_CTX-$SHORT_SHA"
-              BRANCH_FOR_CONTEXT="$SANITIZED_BRANCH_CTX"
-              RELEASE_TAG_ARG="$SANITIZED_BRANCH_CTX-$SHORT_SHA"
-            else
-              # This case should ideally not be hit if branch validation is effective
-              PRIMARY_DOCKER_TAG="$SHORT_SHA" 
-              RELEASE_TAG_ARG="$SHORT_SHA"
-            fi
-          else
-            # Source: Branch Name (no git_tag, no commit_hash, must be 'main' due to earlier check)
-            RAW_BRANCH_NAME="${{ github.event.inputs.branch_name }}"
-            echo "Source: Branch ($RAW_BRANCH_NAME)"
-            SANITIZED_BRANCH_NAME=$(echo "$RAW_BRANCH_NAME" | sed 's|/|-|g' | tr -cs 'a-zA-Z0-9.-_' '-' | sed 's/--\+/-/g' | sed 's/^-*//;s/-*$//')
-            PRIMARY_DOCKER_TAG="$SANITIZED_BRANCH_NAME-$SHORT_SHA" 
-            BRANCH_FOR_CONTEXT="$SANITIZED_BRANCH_NAME"
-            RELEASE_TAG_ARG="$SANITIZED_BRANCH_NAME-$SHORT_SHA"
-          fi
-
-          echo "PRIMARY_DOCKER_TAG=${PRIMARY_DOCKER_TAG}" >> $GITHUB_OUTPUT
           echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
-          echo "BRANCH_FOR_CONTEXT=${BRANCH_FOR_CONTEXT}" >> $GITHUB_OUTPUT
-          echo "RELEASE_TAG_ARG=${RELEASE_TAG_ARG}" >> $GITHUB_OUTPUT
 
-          echo "Checked out commit short SHA: $SHORT_SHA"
-          echo "Primary Docker tag will be: $PRIMARY_DOCKER_TAG"
-          echo "Branch context for tagging (if any): $BRANCH_FOR_CONTEXT"
-          echo "RELEASE_TAG build argument will be: $RELEASE_TAG_ARG"
-        shell: bash
-
-      - name: Print Determined Tags and Args
-        run: |
-          echo "---- Debug: Values from vars step (Production Workflow) ----"
-          echo "Primary Docker Tag: ${{ steps.vars.outputs.PRIMARY_DOCKER_TAG }}"
-          echo "Short SHA: ${{ steps.vars.outputs.SHORT_SHA }}"
-          echo "Branch for Context: ${{ steps.vars.outputs.BRANCH_FOR_CONTEXT }}"
-          echo "Release Tag Arg for Build: ${{ steps.vars.outputs.RELEASE_TAG_ARG }}"
-          echo "Tag Latest: ${{ inputs.tag_latest }}"
+          echo "---- Build context ----"
+          echo "Release tag (becomes version.semver): ${{ inputs.git_tag }}"
+          echo "Commit short SHA:                     $SHORT_SHA"
           if [[ "${{ inputs.tag_latest }}" == "true" ]]; then
-            echo "✅ Latest tag will be applied: avaprotocol/ap-avs:latest"
+            echo "✓ Will also push avaprotocol/ap-avs:latest"
           else
-            echo "❌ Latest tag will NOT be applied (default production behavior)"
+            echo "  Will push avaprotocol/ap-avs:${{ inputs.git_tag }} only (not :latest)"
           fi
-          echo "---- End Debug ----"
+          echo "-----------------------"
         shell: bash
 
       - name: Set up QEMU
@@ -122,23 +128,20 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: avaprotocol/ap-avs # Production image name
+          images: avaprotocol/ap-avs
           tags: |
-            # Primary tag (e.g., v1.6.0 or main-<sha>)
-            type=raw,value=${{ steps.vars.outputs.PRIMARY_DOCKER_TAG }}
-
-            # Conditionally add latest tag based on input
+            type=raw,value=${{ inputs.git_tag }}
             ${{ inputs.tag_latest && 'type=raw,value=latest' || '# Latest tag disabled' }}
 
       - name: Build and push production docker image
         uses: useblacksmith/build-push-action@v2
         with:
           build-args: |
-            RELEASE_TAG=${{ steps.vars.outputs.RELEASE_TAG_ARG }}
+            RELEASE_TAG=${{ inputs.git_tag }}
             COMMIT_SHA=${{ steps.vars.outputs.SHORT_SHA }}
           platforms: linux/amd64,linux/arm64
           context: .
-          file: dockerfiles/operator.Dockerfile # Assuming prod also uses operator.Dockerfile
+          file: dockerfiles/operator.Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
