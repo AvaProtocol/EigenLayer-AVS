@@ -76,21 +76,13 @@ Production usage (Railway, via CMD override on the gateway service):
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(2)
 			}
-			if _, err := hetznermerge.Run(opts, stdoutWriter{}); err != nil {
+			if _, err := hetznermerge.Run(opts, hetznermerge.NewStdoutWriter()); err != nil {
 				fmt.Fprintf(os.Stderr, "migrate-hetzner failed: %v\n", err)
 				os.Exit(1)
 			}
 		},
 	}
 )
-
-// stdoutWriter satisfies hetznermerge.Writer for the Cobra subcommand.
-// Mirrors the same type in scripts/migration/merge_hetzner_into_gateway/
-// — kept local to avoid a cross-package dependency for a 4-line shim.
-type stdoutWriter struct{}
-
-func (stdoutWriter) Println(args ...any)               { fmt.Println(args...) }
-func (stdoutWriter) Printf(format string, args ...any) { fmt.Printf(format, args...) }
 
 func init() {
 	migrateHetznerCmd.Flags().StringVar(&migrateHetznerDonorPath, "donor-path", "",
