@@ -18,10 +18,14 @@ import (
 // gateway runs Sepolia + Base-Sepolia but the workflow declares
 // settings.chain_id=1 — the bound service returns symbol="UNKNOWN".
 //
-// `tokenCatalog` loads every token_whitelist/<chain>.json file at
-// package init so callers that know the workflow's chain ID can do a
-// metadata-only lookup against the right chain's whitelist regardless
-// of which service is bound to which RPC.
+// `tokenCatalog` lazily loads every token_whitelist/<chain>.json file
+// on the first call to `LookupTokenInCatalog` (gated by
+// `tokenCatalogOnce`) so callers that know the workflow's chain ID can
+// do a metadata-only lookup against the right chain's whitelist
+// regardless of which service is bound to which RPC. Lazy loading
+// keeps package init free of filesystem reads — important for tests
+// that vendor a different whitelist tree via `os.Chdir` before
+// triggering the first lookup.
 //
 // Format is the same per-chain JSON shape the gateway already uses
 // (`{id, name, symbol, decimals}` arrays). Filenames map to chain IDs
@@ -144,10 +148,16 @@ func LookupTokenInCatalog(chainID uint64, contractAddress string, logger sdklogg
 	tokenCatalogMutex.RLock()
 	defer tokenCatalogMutex.RUnlock()
 
+	// Returns a copy rather than the live cache pointer so a future
+	// caller writing `result.Symbol = "..."` can't corrupt the catalog
+	// for the rest of the process lifetime. TokenMetadata is a small
+	// value type — the copy is cheap and the safety boundary is worth
+	// it for an exported function.
 	if chainID != 0 {
 		if byAddr, ok := tokenCatalog[chainID]; ok {
 			if hit := byAddr[addr]; hit != nil {
-				return hit
+				cp := *hit
+				return &cp
 			}
 		}
 	}
@@ -155,7 +165,8 @@ func LookupTokenInCatalog(chainID uint64, contractAddress string, logger sdklogg
 	// different chain than the address actually lives on.
 	for _, byAddr := range tokenCatalog {
 		if hit := byAddr[addr]; hit != nil {
-			return hit
+			cp := *hit
+			return &cp
 		}
 	}
 	return nil
@@ -164,12 +175,15 @@ func LookupTokenInCatalog(chainID uint64, contractAddress string, logger sdklogg
 // resetTokenCatalogForTesting clears the catalog and re-arms the
 // load-once gate. Tests that mutate the on-disk whitelist tree or
 // want to verify load behaviour use this; production code never calls
-// it.
+// it. Both the catalog map AND the Once reassignment must happen under
+// the mutex — a concurrent LookupTokenInCatalog → loadTokenCatalog →
+// tokenCatalogOnce.Do racing with the Once reassignment is a data
+// race the race detector flags.
 func resetTokenCatalogForTesting() {
 	tokenCatalogMutex.Lock()
 	tokenCatalog = make(map[uint64]map[string]*TokenMetadata)
-	tokenCatalogMutex.Unlock()
 	tokenCatalogOnce = sync.Once{}
+	tokenCatalogMutex.Unlock()
 }
 
 // isUnknownTokenMetadata returns true when the bound TokenEnrichmentService

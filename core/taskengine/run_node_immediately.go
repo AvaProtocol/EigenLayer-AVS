@@ -1611,9 +1611,24 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	//      causing the simulator to inject a 1.5e18 value into a 6-decimal token and
 	//      breaking the value math through the rest of the workflow.
 	var simulatedTokenDecimals *uint32
-	if n.tokenEnrichmentService != nil && len(query.GetAddresses()) > 0 {
+	if len(query.GetAddresses()) > 0 {
 		addr := query.GetAddresses()[0]
-		md, _ := n.tokenEnrichmentService.GetTokenMetadata(addr)
+		var md *TokenMetadata
+		// Gate the bound-service lookup, but NOT the catalog fallback.
+		// If TokenEnrichmentService init failed (typical when RPC is
+		// unavailable), the catalog is still the right answer — without
+		// this path, decimals silently default to 18 and reintroduce
+		// the wrong-scale simulation values this block exists to
+		// prevent. Same reason the error is logged at Debug rather
+		// than ignored — transient RPC failures matter for observability.
+		if n.tokenEnrichmentService != nil {
+			var mdErr error
+			md, mdErr = n.tokenEnrichmentService.GetTokenMetadata(addr)
+			if mdErr != nil && n.logger != nil {
+				n.logger.Debug("simulation injector: bound service token lookup failed; will try catalog",
+					"address", addr, "error", mdErr)
+			}
+		}
 		if isUnknownTokenMetadata(md) {
 			if catalogHit := LookupTokenInCatalog(uint64(chainID), addr, n.logger); catalogHit != nil {
 				md = catalogHit

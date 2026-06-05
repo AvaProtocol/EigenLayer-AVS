@@ -248,6 +248,15 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 	// catalog decimals too, otherwise the displayed amount diverges from
 	// the raw value (e.g. raw 1500000 = 1.5 USDC formatted with the
 	// upstream's wrong 18 decimals reads as "0.0000000000015 USDC").
+	//
+	// We pass the bound service's chain ID as a hint, NOT the workflow's
+	// declared chain ID. For cross-chain dev scenarios (Sepolia gateway
+	// running a mainnet workflow) the bound-chain hint will always miss
+	// the chain-specific lookup inside LookupTokenInCatalog, and recovery
+	// comes from the cross-chain scan fallback. Threading the workflow's
+	// chain_id here would be more precise but isn't reachable from this
+	// scope without widening the helpers signature; the scan recovery is
+	// already the dominant case in practice.
 	if isUnknownTokenMetadata(tokenMetadata) {
 		boundChainID := tokenService.GetChainID()
 		if catalogHit := LookupTokenInCatalog(boundChainID, contractAddr, logger); catalogHit != nil {
