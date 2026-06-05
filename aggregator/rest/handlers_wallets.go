@@ -56,6 +56,11 @@ func (s *Server) ListWallets(ctx echo.Context) error {
 // side effect even when the address already existed. SetWallet is
 // distinct — it only flips isHidden on an existing record and 404s
 // on first use, so it's reserved for UpdateWallet.
+//
+// Chain routing precedence: body.chainId override → JWT aud → gateway
+// default. The override lets a single JWT mint wallets on chains
+// other than the one it was signed against (the JWT only proves EOA
+// ownership, which is chain-independent).
 func (s *Server) CreateWallet(ctx echo.Context) error {
 	user, err := s.requireUser(ctx)
 	if err != nil {
@@ -68,6 +73,10 @@ func (s *Server) CreateWallet(ctx echo.Context) error {
 	}
 	if body.Salt == "" {
 		return badRequest("WALLETS_BAD_SALT", "salt is required", "Wallet derivation needs a salt to compute the CREATE2 address.")
+	}
+
+	if body.ChainId != nil {
+		user.ChainID = *body.ChainId
 	}
 
 	req := &avsproto.GetWalletReq{
@@ -241,7 +250,10 @@ func (s *Server) WithdrawWallet(ctx echo.Context, address generated.EthereumAddr
 // Reads the smart wallet's current nonce off-chain via the
 // entrypoint's getNonce(sender, key=0) call. Used by SDK callers
 // building UserOps client-side.
-func (s *Server) GetWalletNonce(ctx echo.Context, address generated.EthereumAddress) error {
+//
+// Chain routing precedence: ?chainId= override → JWT aud → gateway
+// default. Same pattern as CreateWallet / WithdrawWallet.
+func (s *Server) GetWalletNonce(ctx echo.Context, address generated.EthereumAddress, params generated.GetWalletNonceParams) error {
 	user, err := s.requireUser(ctx)
 	if err != nil {
 		return err
@@ -251,13 +263,15 @@ func (s *Server) GetWalletNonce(ctx echo.Context, address generated.EthereumAddr
 	}
 	walletAddr := common.HexToAddress(string(address))
 
-	// Pick the chain to read the nonce against. The endpoint has no
-	// chainId query param, so fall back to the JWT audience — same
-	// pattern as WithdrawWallet. Without this, gateway-mode requests
-	// from a Sepolia wallet would hit the chains[0]=mainnet RPC and
-	// return an empty nonce (no entrypoint deployed there).
+	// Pick the chain to read the nonce against. Explicit ?chainId=
+	// wins; otherwise fall back to the JWT audience. Without one of
+	// these, gateway-mode requests from a Sepolia wallet would hit
+	// the chains[0]=mainnet RPC and return an empty nonce (no
+	// entrypoint deployed there).
 	chainID := int64(0)
-	if authed := restmw.UserFromContext(ctx); authed != nil {
+	if params.ChainId != nil {
+		chainID = int64(*params.ChainId)
+	} else if authed := restmw.UserFromContext(ctx); authed != nil {
 		chainID = authed.ChainID
 	}
 	rpc, _ := s.resolveSmartWalletForChain(chainID)
