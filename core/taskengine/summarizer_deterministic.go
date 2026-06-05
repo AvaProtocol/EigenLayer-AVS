@@ -713,18 +713,21 @@ func buildTriggerDescription(st *avsproto.Execution_Step, vm *VM) string {
 		chainSuffix = " on " + chainName
 	}
 
-	// Event trigger (Transfer, etc.)
+	// Event trigger (Transfer, conditional thresholds, etc.)
 	if strings.Contains(stepType, "EVENT") {
-		if eventTrigger := st.GetEventTrigger(); eventTrigger != nil && eventTrigger.Data != nil {
-			if data, ok := eventTrigger.Data.AsInterface().(map[string]interface{}); ok {
-				// Transfer event
+		var data map[string]interface{}
+		if eventOutput := st.GetEventTrigger(); eventOutput != nil && eventOutput.Data != nil {
+			if d, ok := eventOutput.Data.AsInterface().(map[string]interface{}); ok {
+				data = d
 				if transfer, ok := data["Transfer"].(map[string]interface{}); ok {
 					to := shortHexAddr(fmt.Sprintf("%v", transfer["to"]))
 					value := fmt.Sprintf("%v", transfer["value"])
-					// TODO: Format value with token decimals when available
 					return fmt.Sprintf("%sTransfer event detected: sent %s to %s%s", prefix, value, to, chainSuffix)
 				}
 			}
+		}
+		if desc := describeEventCondition(taskEventTrigger(vm), data); desc != "" {
+			return prefix + desc + chainSuffix
 		}
 		return prefix + "Event trigger activated" + chainSuffix
 	}
@@ -757,6 +760,85 @@ func buildTriggerDescription(st *avsproto.Execution_Step, vm *VM) string {
 	}
 
 	return prefix + "Workflow triggered" + chainSuffix
+}
+
+// taskEventTrigger returns the configured EventTrigger from the task definition,
+// or nil if the VM has no task or the trigger isn't an event trigger.
+func taskEventTrigger(vm *VM) *avsproto.EventTrigger {
+	if vm == nil || vm.task == nil || vm.task.Task == nil {
+		return nil
+	}
+	return vm.task.Task.Trigger.GetEvent()
+}
+
+// describeEventCondition renders the first user-defined threshold condition as
+// human-readable text (e.g. "AnswerUpdated current dropped below 50000 (actual: 47231)").
+// Returns "" when no usable condition exists; callers should fall back to a generic phrase.
+func describeEventCondition(eventTrigger *avsproto.EventTrigger, data map[string]interface{}) string {
+	if eventTrigger == nil {
+		return ""
+	}
+	cfg := eventTrigger.GetConfig()
+	if cfg == nil {
+		return ""
+	}
+	for _, q := range cfg.GetQueries() {
+		for _, c := range q.GetConditions() {
+			fieldName := c.GetFieldName()
+			operator := c.GetOperator()
+			threshold := c.GetValue()
+			if fieldName == "" || operator == "" || threshold == "" {
+				continue
+			}
+			readable := strings.ReplaceAll(fieldName, ".", " ")
+			opText := formatConditionOperator(operator)
+			actual := extractEventFieldValue(fieldName, data)
+			if actual != "" {
+				return fmt.Sprintf("%s %s %s (actual: %s)", readable, opText, threshold, actual)
+			}
+			return fmt.Sprintf("%s %s %s", readable, opText, threshold)
+		}
+	}
+	return ""
+}
+
+// extractEventFieldValue walks a dotted field path (e.g. "AnswerUpdated.current")
+// through the decoded event data and returns the leaf value as a string. Returns
+// "" when any segment is missing.
+func extractEventFieldValue(fieldName string, data map[string]interface{}) string {
+	if data == nil || fieldName == "" {
+		return ""
+	}
+	var cur interface{} = data
+	for _, part := range strings.Split(fieldName, ".") {
+		m, ok := cur.(map[string]interface{})
+		if !ok {
+			return ""
+		}
+		cur = m[part]
+	}
+	if cur == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", cur)
+}
+
+func formatConditionOperator(op string) string {
+	switch strings.ToLower(op) {
+	case "gt", "greater_than":
+		return "rose above"
+	case "gte":
+		return "reached or exceeded"
+	case "lt", "less_than":
+		return "dropped below"
+	case "lte":
+		return "dropped to or below"
+	case "eq":
+		return "equaled"
+	case "ne":
+		return "differed from"
+	}
+	return op
 }
 
 // buildExecutionsArray builds an array of on-chain execution entries from successful CONTRACT_WRITE steps
