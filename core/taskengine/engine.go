@@ -900,13 +900,31 @@ func (n *Engine) validateNonZeroAddress(factoryAddr common.Address, methodName, 
 // REST sets user.ChainID from the JWT `aud` claim
 // (aggregator/rest/middleware/jwt.go:audienceChainID); that's the
 // authoritative source. Falls back to the gateway's default chain when
-// user.ChainID is zero, which is what the gRPC path always hits since
-// gRPC isn't JWT-authenticated. Wallet RPC proto payloads do not carry
-// a chain ID and cannot override this value.
+// user.ChainID is zero (gRPC path) or when it isn't one of the
+// configured chains.
+//
+// The unconfigured-chain fallback matters because AuthExchange mints
+// JWTs with whatever chain ID the client signed for, with no validation
+// against gateway config. Without the check here, a JWT for chain
+// 99999 would route storage writes into the bucket w:99999:* — orphan
+// data the gateway never reads back, and unbounded keyspace growth if
+// abused. Logging the fallback at Warn surfaces the anomaly so we can
+// detect either a configuration drift (chain removed) or a deliberate
+// probe.
 func (n *Engine) resolveUserChainID(user *model.User) int64 {
-	if user != nil && user.ChainID > 0 {
-		return user.ChainID
+	if user == nil || user.ChainID <= 0 {
+		return n.defaultChainID()
 	}
+	for _, known := range n.knownChainIDs() {
+		if known == user.ChainID {
+			return user.ChainID
+		}
+	}
+	n.logger.Warn("resolveUserChainID: user.ChainID is not a configured chain — falling back to default",
+		"requested_chain_id", user.ChainID,
+		"default_chain_id", n.defaultChainID(),
+		"owner", user.Address.Hex(),
+	)
 	return n.defaultChainID()
 }
 
