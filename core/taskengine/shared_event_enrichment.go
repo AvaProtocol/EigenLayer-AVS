@@ -225,11 +225,37 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 			"hasTokenService", tokenService != nil)
 	}
 
-	// Get token metadata from the enrichment service
-	tokenMetadata, err := tokenService.GetTokenMetadata(eventLog.Address.Hex())
+	// Get token metadata from the enrichment service.
+	// `tokenService` is bound to whatever chain its RPC reports — the
+	// gateway boots one service per chain in `chains[]`. For workflows
+	// targeting a chain the gateway doesn't run (e.g. mainnet workflow
+	// simulated on a Sepolia-only gateway), the bound service returns
+	// nil or the {Symbol: "UNKNOWN", Decimals: 18} fallback from
+	// fetchTokenMetadataFromRPC. The cross-chain catalog covers that
+	// gap by looking up the workflow's declared chain ID directly.
+	contractAddr := eventLog.Address.Hex()
+	tokenMetadata, err := tokenService.GetTokenMetadata(contractAddr)
 	if err != nil {
 		if logger != nil {
-			logger.Warn("Failed to get token metadata for Transfer event", "error", err, "contract", eventLog.Address.Hex())
+			logger.Warn("Failed to get token metadata for Transfer event", "error", err, "contract", contractAddr)
+		}
+	}
+	if isUnknownTokenMetadata(tokenMetadata) {
+		// `chainID` here is the bound service's chain — for the
+		// dev case where the workflow targets a chain the gateway
+		// doesn't run, this won't match the address. The catalog's
+		// cross-chain scan handles that: addresses are globally
+		// unique for the well-known tokens we care about, so a hit
+		// on any chain is the right symbol.
+		boundChainID := tokenService.GetChainID()
+		if catalogHit := LookupTokenInCatalog(boundChainID, contractAddr, logger); catalogHit != nil {
+			if logger != nil {
+				logger.Info("Token catalog: recovered symbol the bound service couldn't resolve",
+					"contract", contractAddr,
+					"boundChainID", boundChainID,
+					"symbol", catalogHit.Symbol)
+			}
+			tokenMetadata = catalogHit
 		}
 	}
 
