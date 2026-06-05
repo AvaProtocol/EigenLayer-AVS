@@ -114,17 +114,29 @@ jobs:
 
       - name: Resolve build args
         id: vars
+        env:
+          TAG: ${{ inputs.git_tag }}
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
 
+          # Strip the leading `v` once, here, so downstream consumers
+          # don't have to. operator/operator.go formats version as
+          # "(v%s)" — passing the raw "v3.2.0" tag through would yield
+          # "(vv3.2.0)" in operator logs. The Makefile + root
+          # Dockerfile do the same `sed 's/^v//'` normalization; this
+          # keeps the prod-docker path consistent with them.
+          SEMVER="${TAG#v}"
+          echo "SEMVER=${SEMVER}" >> $GITHUB_OUTPUT
+
           echo "---- Build context ----"
-          echo "Release tag (becomes version.semver): ${{ inputs.git_tag }}"
-          echo "Commit short SHA:                     $SHORT_SHA"
+          echo "Git tag:                              ${TAG}"
+          echo "Normalized semver (version.semver):   ${SEMVER}"
+          echo "Commit short SHA:                     ${SHORT_SHA}"
           if [[ "${{ inputs.tag_latest }}" == "true" ]]; then
             echo "✓ Will also push avaprotocol/ap-avs:latest"
           else
-            echo "  Will push avaprotocol/ap-avs:${{ inputs.git_tag }} only (not :latest)"
+            echo "  Will push avaprotocol/ap-avs:${TAG} only (not :latest)"
           fi
           echo "-----------------------"
         shell: bash
@@ -150,7 +162,7 @@ jobs:
         uses: useblacksmith/build-push-action@v2
         with:
           build-args: |
-            RELEASE_TAG=${{ inputs.git_tag }}
+            RELEASE_TAG=${{ steps.vars.outputs.SEMVER }}
             COMMIT_SHA=${{ steps.vars.outputs.SHORT_SHA }}
           platforms: linux/amd64,linux/arm64
           context: .

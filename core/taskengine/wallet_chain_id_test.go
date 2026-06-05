@@ -4,11 +4,61 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
+
+// chainIDOverrideForTest is the second chain we inject so the routing
+// assertions below have something to route TO. Sepolia (11155111) is
+// the natural pick — it's the chain the rest of the test environment
+// uses, but testutil's GetAggregatorConfig() returns a synthetic
+// single-chain config (ChainID=1) by design. The routing tests need
+// gateway-mode + at least two configured chains; this constant +
+// withGatewayMultiChain() supplies both without depending on whatever
+// gateway-dev.yaml happens to advertise.
+const chainIDOverrideForTest int64 = 11_155_111
+
+// withGatewayMultiChain promotes a single-chain testutil config to the
+// multi-chain gateway shape so wallet_chain_id_test.go's routing
+// assertions actually execute. testutil.GetAggregatorConfig() pins
+// ChainID=1 (its doc-comment calls this out explicitly: "Tests that
+// exercise multi-chain behavior override this on the returned
+// config"). We're those tests — set IsGateway, populate Chains with
+// the existing default plus a second chain, and prepend the default
+// so DefaultChainID derives correctly via chains[0].
+func withGatewayMultiChain(cfg *config.Config) *config.Config {
+	cfg.IsGateway = true
+	cfg.DefaultChainID = cfg.SmartWallet.ChainID
+	cfg.Chains = []*config.ChainConfig{
+		{
+			ChainID:     cfg.SmartWallet.ChainID,
+			Name:        "default",
+			SmartWallet: cfg.SmartWallet,
+		},
+		{
+			ChainID: chainIDOverrideForTest,
+			Name:    "sepolia",
+			// Reuse the default SmartWallet for the override chain.
+			// GetWallet's mock-derivation path (rpcConn == nil in
+			// tests) doesn't actually dial; we only need a valid
+			// SmartWalletConfig with an EthRpcUrl set so the
+			// production code path takes the right branch.
+			SmartWallet: &config.SmartWalletConfig{
+				ChainID:            chainIDOverrideForTest,
+				EthRpcUrl:          cfg.SmartWallet.EthRpcUrl,
+				EthWsUrl:           cfg.SmartWallet.EthWsUrl,
+				FactoryAddress:     cfg.SmartWallet.FactoryAddress,
+				EntrypointAddress:  cfg.SmartWallet.EntrypointAddress,
+				PaymasterAddress:   cfg.SmartWallet.PaymasterAddress,
+				WhitelistAddresses: cfg.SmartWallet.WhitelistAddresses,
+			},
+		},
+	}
+	return cfg
+}
 
 // resolveUserChainID is the chain-resolution helper consulted by the
 // wallet RPC handlers that accept *model.User. Today that's only
@@ -35,7 +85,7 @@ func TestResolveUserChainID(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
-	cfg := testutil.GetAggregatorConfig()
+	cfg := withGatewayMultiChain(testutil.GetAggregatorConfig())
 	n := New(db, cfg, nil, testutil.GetLogger())
 	defaultChain := n.defaultChainID()
 
@@ -52,24 +102,28 @@ func TestResolveUserChainID(t *testing.T) {
 		}
 	})
 
-	// Pick an override chain that's a) in knownChainIDs (so the
-	// configured-chain branch fires, not the unconfigured fallback)
-	// and b) not equal to defaultChain (so we observe the override).
-	knownNonDefault := int64(0)
+	// withGatewayMultiChain guarantees `chainIDOverrideForTest` is in
+	// knownChainIDs() and is distinct from defaultChain. Sanity-check
+	// that here so a future change to the helper can't silently
+	// re-introduce the single-chain skip path.
+	if chainIDOverrideForTest == defaultChain {
+		t.Fatalf("test setup broken: override chain %d equals default chain %d", chainIDOverrideForTest, defaultChain)
+	}
+	var overrideIsKnown bool
 	for _, k := range n.knownChainIDs() {
-		if k != defaultChain && k > 0 {
-			knownNonDefault = k
+		if k == chainIDOverrideForTest {
+			overrideIsKnown = true
 			break
 		}
 	}
+	if !overrideIsKnown {
+		t.Fatalf("test setup broken: override chain %d not in knownChainIDs %v (withGatewayMultiChain regressed?)", chainIDOverrideForTest, n.knownChainIDs())
+	}
 
 	t.Run("configured non-default ChainID wins over default", func(t *testing.T) {
-		if knownNonDefault == 0 {
-			t.Skipf("test environment has only one configured chain (%d); add a second to exercise override", defaultChain)
-		}
-		u := &model.User{Address: testutil.TestUser1().Address, ChainID: knownNonDefault}
-		if got := n.resolveUserChainID(u); got != knownNonDefault {
-			t.Errorf("ChainID=%d: got %d, want %d (configured override must win)", knownNonDefault, got, knownNonDefault)
+		u := &model.User{Address: testutil.TestUser1().Address, ChainID: chainIDOverrideForTest}
+		if got := n.resolveUserChainID(u); got != chainIDOverrideForTest {
+			t.Errorf("ChainID=%d: got %d, want %d (configured override must win)", chainIDOverrideForTest, got, chainIDOverrideForTest)
 		}
 	})
 
@@ -96,10 +150,7 @@ func TestResolveUserChainID(t *testing.T) {
 		// non-default chain must persist its wallet record under that
 		// chain's storage prefix. Regression guard if a future change
 		// stops routing through resolveUserChainID.
-		if knownNonDefault == 0 {
-			t.Skipf("need a second configured chain to verify routing; got only default %d", defaultChain)
-		}
-		user := &model.User{Address: testutil.TestUser1().Address, ChainID: knownNonDefault}
+		user := &model.User{Address: testutil.TestUser1().Address, ChainID: chainIDOverrideForTest}
 		// Use a salt unlikely to collide with anything pre-existing
 		// in the in-memory DB.
 		const salt = "987654321"
@@ -112,7 +163,7 @@ func TestResolveUserChainID(t *testing.T) {
 		}
 		// Direct storage probe at the per-chain prefix. The override
 		// chain bucket must contain the new record.
-		overrideKey := WalletStorageKey(knownNonDefault, user.Address, strings.ToLower(resp.Address))
+		overrideKey := WalletStorageKey(chainIDOverrideForTest, user.Address, strings.ToLower(resp.Address))
 		exists, err := db.Exist([]byte(overrideKey))
 		if err != nil {
 			t.Fatalf("storage Exist on %s: %v", overrideKey, err)
