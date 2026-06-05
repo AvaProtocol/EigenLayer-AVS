@@ -40,6 +40,21 @@ func TestSupportsTaskTrigger_Manual(t *testing.T) {
 	// Manual triggers must be filtered out regardless of operator capabilities.
 	assert.False(t, engine.supportsTaskTrigger(operatorAddr, manualTask),
 		"manual trigger tasks should never be streamed to operators")
+
+	// Legacy operator: capabilities are nil, which hits the backward-compat
+	// "assume all supported" path. Manual triggers must still be rejected
+	// because they are filtered before the capability check.
+	legacyAddr := "0x000000000000000000000000000000000000dead"
+	engine.trackSyncedTasks[legacyAddr] = &operatorState{
+		TaskID:       make(map[string]bool),
+		Capabilities: nil,
+	}
+	assert.False(t, engine.supportsTaskTrigger(legacyAddr, manualTask),
+		"manual trigger tasks should not be streamed even to legacy operators without capabilities")
+
+	// Operator with no tracked state at all (also the backward-compat path).
+	assert.False(t, engine.supportsTaskTrigger("0xunknownoperator", manualTask),
+		"manual trigger tasks should not be streamed to untracked operators")
 }
 
 // TestSupportsTaskTrigger_MonitorableTypes is a regression guard ensuring the
