@@ -807,8 +807,11 @@ type HealthStatus struct {
 	ChainId *ChainId           `json:"chainId,omitempty"`
 	Status  HealthStatusStatus `json:"status"`
 
-	// Version Aggregator binary version (e.g., `v1.9.6`).
-	Version *string `json:"version,omitempty"`
+	// Version Aggregator binary version (e.g., `v3.2.0`). Always set —
+	// SDK clients use this to stamp the canonical EIP-191 auth
+	// message so the signed `Version` field reflects the
+	// gateway the user actually authenticated against.
+	Version string `json:"version"`
 }
 
 // HealthStatusStatus defines model for HealthStatus.Status.
