@@ -1,0 +1,37 @@
+# Worker configuration TEMPLATE for Sepolia (chain 11155111).
+#
+# This is a checked-in template. The real file is gitignored — copy it
+# and fill in the placeholder values:
+#
+#   cp config/worker-sepolia-dev.example.yaml config/worker-sepolia-dev.yaml
+#   $EDITOR config/worker-sepolia-dev.yaml
+#
+# Handles chain-specific execution: UserOps, contract writes, token
+# enrichment. Stateless — no local DB (gateway owns storage).
+environment: development
+
+chain_id:   11155111
+chain_name: sepolia
+
+# Internal gRPC listen address (gateway connects here).
+# In production (Railway): worker-sepolia.railway.internal:50051
+listen_address: "0.0.0.0:50051"
+
+# Health check endpoint (Railway requires HTTP health checks).
+health_address: "0.0.0.0:8090"
+
+# Gateway address (worker registers with gateway on startup).
+gateway_address: "127.0.0.1:2206"
+
+# Chain RPC endpoints. Public RPC works for low-volume dev.
+eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
+eth_ws_url:  wss://ethereum-sepolia-rpc.publicnode.com
+
+# Third-party bundler endpoint (no self-hosted bundler).
+# Set the SEPOLIA_BUNDLER_URL env var via .env.local before launching.
+bundler_url: ${SEPOLIA_BUNDLER_URL}
+
+# Smart wallet / account abstraction config.
+smart_wallet:
+  controller_private_key: <testnet-controller-private-key-hex>
+  paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
