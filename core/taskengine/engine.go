@@ -723,6 +723,9 @@ func (n *Engine) storeDefaultWalletForListWallets(chainID int64, owner common.Ad
 // Adding multi-chain enumeration (or a chain_id field on ListWalletReq) is
 // a follow-up.
 func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletReq) (*avsproto.ListWalletResp, error) {
+	// ListWallets takes owner directly (legacy signature) — JWT chain
+	// context isn't plumbed through here yet, so fall back to the
+	// gateway default. Migrating to take *model.User is a follow-up.
 	chainID := n.defaultChainID()
 	walletsToReturnProto := []*avsproto.SmartWallet{}
 	processedAddresses := make(map[string]bool)
@@ -892,13 +895,29 @@ func (n *Engine) validateNonZeroAddress(factoryAddr common.Address, methodName, 
 	return nil
 }
 
+// resolveUserChainID returns the chain context for a wallet RPC.
+//
+// REST sets user.ChainID from the JWT `aud` claim
+// (aggregator/rest/middleware/jwt.go:audienceChainID); that's the
+// authoritative source. Falls back to the gateway's default chain when
+// user.ChainID is zero, which is what the gRPC path always hits since
+// gRPC isn't JWT-authenticated. Wallet RPC proto payloads do not carry
+// a chain ID and cannot override this value.
+func (n *Engine) resolveUserChainID(user *model.User) int64 {
+	if user != nil && user.ChainID > 0 {
+		return user.ChainID
+	}
+	return n.defaultChainID()
+}
+
 // GetWallet is the gRPC handler for the GetWallet RPC.
 // It uses the owner (from auth context), salt, and factory_address from payload to derive the wallet address.
 //
-// Wallet records are chain-scoped. The GetWalletReq proto does not carry a
-// chain_id yet, so this handler reads/writes the gateway's default chain only.
+// Wallet records are chain-scoped. The chain context is resolved via
+// resolveUserChainID — REST callers route by their JWT `aud` chain,
+// gRPC callers fall back to the gateway's default chain.
 func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
-	chainID := n.defaultChainID()
+	chainID := n.resolveUserChainID(user)
 	// Allow empty factory address (uses default), but validate non-empty ones
 	if payload.GetFactoryAddress() != "" && !common.IsHexAddress(payload.GetFactoryAddress()) {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidFactoryAddressError)

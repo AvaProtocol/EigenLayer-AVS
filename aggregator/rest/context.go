@@ -38,5 +38,12 @@ func (s *Server) requireUser(ctx echo.Context) (*model.User, error) {
 			Detail: "Subject must be a valid 0x-prefixed EOA address.",
 		}
 	}
-	return &model.User{Address: common.HexToAddress(authed.Subject)}, nil
+	return &model.User{
+		Address: common.HexToAddress(authed.Subject),
+		// Propagate the JWT-derived chain ID. The engine's wallet RPC
+		// handlers (GetWallet/SetWallet/ListWallets) treat this as
+		// authoritative for the chain context; zero falls back to the
+		// gateway's default chain (which is also what the gRPC path uses).
+		ChainID: authed.ChainID,
+	}, nil
 }

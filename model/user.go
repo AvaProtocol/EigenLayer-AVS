@@ -13,6 +13,14 @@ import (
 type User struct {
 	Address             common.Address
 	SmartAccountAddress *common.Address
+	// ChainID is the chain context for wallet RPCs (GetWallet, SetWallet,
+	// ListWallets). The REST adapter sets this from the JWT's `aud`
+	// claim (see aggregator/rest/middleware/jwt.go:audienceChainID) and
+	// it is the authoritative source — wallet RPC payloads do NOT
+	// override it. Zero means "fall back to the gateway's default
+	// chain", which is what the gRPC path uses since gRPC isn't
+	// JWT-authenticated.
+	ChainID int64
 }
 
 func (u *User) LoadDefaultSmartWallet(rpcClient *ethclient.Client) error {
