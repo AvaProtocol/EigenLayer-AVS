@@ -855,16 +855,39 @@ func sanitizeInterface(x interface{}) interface{} {
 	}
 }
 
+// resolveSmartWalletConfig returns the per-chain smart-wallet config when
+// the executor is wired to a gateway-mode engine, falling back to the
+// executor's default config in single-chain mode (or when called without
+// an engine, e.g. tests). The shared async executor created at aggregator
+// startup carries the gateway-default config; a multi-chain task whose
+// validation calls reach the factory must use the TASK's chain config
+// (different chain → different factory address → different derived
+// wallet), otherwise validateDerivedWallet derives against the wrong
+// chain and the RPC-derive fallback path always misses.
+func (x *WorkflowExecutor) resolveSmartWalletConfig(chainID int64) *config.SmartWalletConfig {
+	if x.engine != nil {
+		if cfg := x.engine.ResolveSmartWalletConfig(chainID); cfg != nil {
+			return cfg
+		}
+	}
+	return x.smartWalletConfig
+}
+
 // validateWalletOwnership performs comprehensive wallet ownership validation
 // This handles default wallets (salt:0), stored wallets, and legitimately derived wallets
 func (x *WorkflowExecutor) validateWalletOwnership(chainID int64, user *model.User, smartWalletAddr common.Address) (bool, error) {
-	// Step 1: Load the user's default smart wallet address (salt:0) for comparison
-	if x.smartWalletConfig != nil && x.smartWalletConfig.EthRpcUrl != "" {
-		if rpcClient, err := ethclient.Dial(x.smartWalletConfig.EthRpcUrl); err == nil {
+	swCfg := x.resolveSmartWalletConfig(chainID)
+
+	// Step 1: Load the user's default smart wallet address (salt:0) for comparison.
+	// Must use the task's chain config — deriving against the gateway's default
+	// chain factory produces a different wallet than the task's chain factory
+	// and the comparison will spuriously miss.
+	if swCfg != nil && swCfg.EthRpcUrl != "" {
+		if rpcClient, err := ethclient.Dial(swCfg.EthRpcUrl); err == nil {
 			// Load the default smart wallet address (salt:0)
 			if err := user.LoadDefaultSmartWallet(rpcClient); err != nil {
 				x.logger.Warn("Failed to load default smart wallet for validation",
-					"owner", user.Address.Hex(), "error", err)
+					"owner", user.Address.Hex(), "chain_id", chainID, "error", err)
 			}
 			rpcClient.Close()
 		}
@@ -875,19 +898,21 @@ func (x *WorkflowExecutor) validateWalletOwnership(chainID int64, user *model.Us
 		return true, nil
 	} else if err != nil {
 		x.logger.Debug("ValidWalletOwner check failed", "owner", user.Address.Hex(),
-			"wallet", smartWalletAddr.Hex(), "error", err)
+			"wallet", smartWalletAddr.Hex(), "chain_id", chainID, "error", err)
 	}
 
-	// Step 3: Enhanced validation - check if this is a legitimately derived wallet
-	// This handles cases where the wallet was derived but not stored in the database
-	if x.smartWalletConfig != nil && x.smartWalletConfig.EthRpcUrl != "" {
-		if isValid, err := x.validateDerivedWallet(user.Address, smartWalletAddr); err == nil && isValid {
+	// Step 3: Enhanced validation - check if this is a legitimately derived wallet.
+	// Handles factory-upgrade scenarios where the original wallet record was
+	// never written for the post-upgrade derived address. MUST use the task's
+	// per-chain config — see resolveSmartWalletConfig above.
+	if swCfg != nil && swCfg.EthRpcUrl != "" {
+		if isValid, err := x.validateDerivedWallet(swCfg, user.Address, smartWalletAddr); err == nil && isValid {
 			x.logger.Info("Wallet validated as legitimate derived wallet",
-				"owner", user.Address.Hex(), "wallet", smartWalletAddr.Hex())
+				"owner", user.Address.Hex(), "wallet", smartWalletAddr.Hex(), "chain_id", chainID)
 			return true, nil
 		} else if err != nil {
 			x.logger.Debug("Derived wallet validation failed", "owner", user.Address.Hex(),
-				"wallet", smartWalletAddr.Hex(), "error", err)
+				"wallet", smartWalletAddr.Hex(), "chain_id", chainID, "error", err)
 		}
 	}
 
@@ -895,19 +920,22 @@ func (x *WorkflowExecutor) validateWalletOwnership(chainID int64, user *model.Us
 }
 
 // validateDerivedWallet checks if a wallet address can be legitimately derived
-// from the owner using the configured factory (for any salt value)
-func (x *WorkflowExecutor) validateDerivedWallet(owner common.Address, smartWalletAddr common.Address) (bool, error) {
-	rpcClient, err := ethclient.Dial(x.smartWalletConfig.EthRpcUrl)
+// from the owner using the supplied chain's factory (for any salt value).
+// The swCfg argument is the per-chain config resolved by the caller —
+// passing it in (rather than reading x.smartWalletConfig) is what makes
+// this work in gateway mode where the executor is shared across chains.
+func (x *WorkflowExecutor) validateDerivedWallet(swCfg *config.SmartWalletConfig, owner common.Address, smartWalletAddr common.Address) (bool, error) {
+	rpcClient, err := ethclient.Dial(swCfg.EthRpcUrl)
 	if err != nil {
 		return false, fmt.Errorf("failed to connect to RPC: %w", err)
 	}
 	defer rpcClient.Close()
 
-	factoryAddr := x.smartWalletConfig.FactoryAddress
+	factoryAddr := swCfg.FactoryAddress
 
 	// Try salt values from 0 to max_wallets_per_owner to see if any produce the target wallet address
 	// This uses the configured limit from aggregator.yaml
-	maxWallets := int64(x.smartWalletConfig.MaxWalletsPerOwner)
+	maxWallets := int64(swCfg.MaxWalletsPerOwner)
 
 	for salt := int64(0); salt < maxWallets; salt++ {
 		derivedAddr, err := aa.GetSenderAddressForFactory(rpcClient, owner, factoryAddr, big.NewInt(salt))
