@@ -202,7 +202,7 @@ func (fe *FeeEstimator) EstimateFees(ctx context.Context, req *avsproto.Estimate
 	if walletCreationNeeded {
 		cogs = append(cogs, &avsproto.NodeCOGS{
 			NodeId:   "_wallet_creation",
-			CostType: "wallet_creation",
+			CostType: CostTypeWalletCreation,
 			Fee:      &avsproto.Fee{Amount: walletCreationGasWei.String(), Unit: "WEI"},
 		})
 	}
@@ -377,7 +377,7 @@ func (fe *FeeEstimator) estimateCOGS(ctx context.Context, req *avsproto.Estimate
 		if gasResult != nil {
 			cogsList = append(cogsList, &avsproto.NodeCOGS{
 				NodeId:   gasResult.NodeID,
-				CostType: "gas",
+				CostType: CostTypeGas,
 				Fee:      &avsproto.Fee{Amount: gasResult.TotalCost.String(), Unit: "WEI"},
 				GasUnits: gasResult.GasUnits.String(),
 			})
@@ -511,7 +511,7 @@ func (fe *FeeEstimator) classifyWorkflowValue(req *avsproto.EstimateFeesReq) *av
 			Fee:                  &avsproto.Fee{Amount: "0", Unit: "PERCENTAGE"},
 			Tier:                 avsproto.ExecutionTier_EXECUTION_TIER_UNSPECIFIED,
 			ValueBase:            "",
-			ClassificationMethod: "rule_based",
+			ClassificationMethod: ClassificationMethodRuleBased,
 			Confidence:           1.0,
 			Reason:               "Workflow has no on-chain execution nodes — no value-capture fee",
 		}
@@ -523,7 +523,7 @@ func (fe *FeeEstimator) classifyWorkflowValue(req *avsproto.EstimateFeesReq) *av
 		Fee:                  &avsproto.Fee{Amount: fmt.Sprintf("%.2f", fe.feeRates.Tier1FeePercentage), Unit: "PERCENTAGE"},
 		Tier:                 avsproto.ExecutionTier_EXECUTION_TIER_1,
 		ValueBase:            "input_token_value",
-		ClassificationMethod: "rule_based",
+		ClassificationMethod: ClassificationMethodRuleBased,
 		Confidence:           1.0,
 		Reason:               "V1 default: workflow contains on-chain execution nodes",
 	}
@@ -604,7 +604,7 @@ func buildValueFee(nodes []*avsproto.TaskNode, feeRatesConfig *config.FeeRatesCo
 		return &avsproto.ValueFee{
 			Fee:                  &avsproto.Fee{Amount: "0", Unit: "PERCENTAGE"},
 			Tier:                 avsproto.ExecutionTier_EXECUTION_TIER_UNSPECIFIED,
-			ClassificationMethod: "rule_based",
+			ClassificationMethod: ClassificationMethodRuleBased,
 			Confidence:           1.0,
 			Reason:               "Workflow has no on-chain execution nodes",
 		}
@@ -614,7 +614,7 @@ func buildValueFee(nodes []*avsproto.TaskNode, feeRatesConfig *config.FeeRatesCo
 		Fee:                  &avsproto.Fee{Amount: fmt.Sprintf("%.2f", rates.Tier1FeePercentage), Unit: "PERCENTAGE"},
 		Tier:                 avsproto.ExecutionTier_EXECUTION_TIER_1,
 		ValueBase:            "input_token_value",
-		ClassificationMethod: "rule_based",
+		ClassificationMethod: ClassificationMethodRuleBased,
 		Confidence:           1.0,
 		Reason:               "V1 default: workflow contains on-chain execution nodes",
 	}
@@ -640,7 +640,7 @@ func buildCOGSFromSteps(steps []*avsproto.Execution_Step) []*avsproto.NodeCOGS {
 
 		cogsList = append(cogsList, &avsproto.NodeCOGS{
 			NodeId:   step.Id,
-			CostType: "gas",
+			CostType: CostTypeGas,
 			Fee:      &avsproto.Fee{Amount: step.TotalGasCost, Unit: "WEI"},
 			GasUnits: step.GasUsed,
 		})

@@ -106,7 +106,7 @@ type FeeAmount struct {
 type NodeCOGS struct {
 	NodeID   string
 	StepName string // joined from steps[]; empty for synthetic entries (e.g. _wallet_creation)
-	CostType string // "gas" | "external_api" | "wallet_creation"
+	CostType string // canonical REST values: "gas" | "externalApi" | "walletCreation" — see fee_enums.go and OpenAPI enum NodeCOGSCostType
 	Fee      *FeeAmount
 	GasUnits string // present when CostType == "gas"
 	TxHash   string // joined from steps[].outputData; deployed-gas only
