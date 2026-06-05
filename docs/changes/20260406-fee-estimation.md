@@ -162,7 +162,7 @@ message ValueFee {
   Fee fee = 1;                       // {amount: "0.03", unit: "PERCENTAGE"}
   ExecutionTier tier = 2;
   string value_base = 3;            // "input_token_value"
-  string classification_method = 4; // "rule_based" or "llm"
+  string classification_method = 4; // "ruleBased" or "llm" (canonical REST values)
   float confidence = 5;
   string reason = 6;
 }

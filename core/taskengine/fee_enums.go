@@ -14,7 +14,9 @@ package taskengine
 // sets in aggregator/rest/generated.
 
 // CostType values for NodeCOGS.cost_type. Mirrors the OpenAPI enum
-// NodeCOGSCostType in api/openapi.yaml.
+// NodeCOGSCostType in api/openapi.yaml. CostTypeExternalAPI has no
+// emit sites yet — declared here so the future restApi/graphql-cost
+// path picks the right value the first time.
 const (
 	CostTypeGas            = "gas"
 	CostTypeExternalAPI    = "externalApi"
