@@ -240,32 +240,25 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 			logger.Warn("Failed to get token metadata for Transfer event", "error", err, "contract", contractAddr)
 		}
 	}
-	// Track when the catalog rescued an UNKNOWN entry so we know
-	// whether to trust the bound service's decimals for value
-	// formatting. The simulation chooses a raw value at the upstream
-	// service's decimals scale (typically the 18-decimal default),
-	// so reformatting with catalog decimals would surface a wildly
-	// different magnitude — e.g. a raw 1.5e18 simulator value with
-	// USDC's 6 catalog decimals reads as "1,500,000,000,000 USDC"
-	// instead of the intuitive "1.5 USDC". Only the symbol/name
-	// gets the catalog upgrade; the value display stays in the
-	// upstream's scale.
-	catalogUpgradedDecimals := uint32(18)
-	catalogUpgradedFromUnknown := false
+	// When the bound service returns nil or an UNKNOWN-flavoured fallback,
+	// recover the full metadata (symbol AND decimals) from the cross-chain
+	// catalog. This pairs with the simulation injectors catalog fallback
+	// in run_node_immediately.go — the simulator now picks Transfer values
+	// at the catalog's decimal scale, so the enricher MUST format with
+	// catalog decimals too, otherwise the displayed amount diverges from
+	// the raw value (e.g. raw 1500000 = 1.5 USDC formatted with the
+	// upstream's wrong 18 decimals reads as "0.0000000000015 USDC").
 	if isUnknownTokenMetadata(tokenMetadata) {
-		if tokenMetadata != nil {
-			catalogUpgradedDecimals = tokenMetadata.Decimals
-		}
 		boundChainID := tokenService.GetChainID()
 		if catalogHit := LookupTokenInCatalog(boundChainID, contractAddr, logger); catalogHit != nil {
 			if logger != nil {
-				logger.Info("Token catalog: recovered symbol the bound service couldn't resolve",
+				logger.Info("Token catalog: recovered metadata the bound service couldn't resolve",
 					"contract", contractAddr,
 					"boundChainID", boundChainID,
-					"symbol", catalogHit.Symbol)
+					"symbol", catalogHit.Symbol,
+					"decimals", catalogHit.Decimals)
 			}
 			tokenMetadata = catalogHit
-			catalogUpgradedFromUnknown = true
 		}
 	}
 
@@ -326,18 +319,10 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 	if tokenMetadata != nil {
 		transferResponse.TokenName = tokenMetadata.Name
 		transferResponse.TokenSymbol = tokenMetadata.Symbol
-		// Preserve the original (upstream) decimals when the symbol
-		// came from the cross-chain catalog — simulation values are
-		// chosen in the upstream's decimal scale, see the comment on
-		// catalogUpgradedFromUnknown above.
-		displayDecimals := tokenMetadata.Decimals
-		if catalogUpgradedFromUnknown {
-			displayDecimals = catalogUpgradedDecimals
-		}
-		transferResponse.TokenDecimals = displayDecimals
+		transferResponse.TokenDecimals = tokenMetadata.Decimals
 
 		if rawValueStr != "" {
-			transferResponse.ValueFormatted = tokenService.FormatTokenValue(rawValueStr, displayDecimals)
+			transferResponse.ValueFormatted = tokenService.FormatTokenValue(rawValueStr, tokenMetadata.Decimals)
 		}
 
 		if logger != nil {
