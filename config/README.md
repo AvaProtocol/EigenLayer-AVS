@@ -77,24 +77,45 @@ directory focused on the current deployment model.
 See [`archived/README.md`](./archived/README.md) for what's in there
 and why.
 
-## Migration roadmap (Option C — multi-phase config cleanup)
+## Migration history (Option C — multi-phase config cleanup, all phases now done)
 
-Phase 1 (this commit): documentation + archived templates + deleted
-the stale `_legacy/` snapshot. No code paths changed.
+**Phase 1** (this PR's first commit): documentation + `archived/`
+templates + deleted the stale `_legacy/` snapshot.
 
-Phase 2 (separate PR): migrate `core/testutil/utils.go` and the
-integration tests under `core/taskengine/*_test.go` off the per-chain
-`aggregator-<chain>.yaml` pattern onto the gateway config pattern.
-About 5 test files affected.
+**Phase 2** (this PR): migrated `core/testutil/utils.go` and the
+integration tests under `core/taskengine/*_test.go` +
+`integration_test/` off the per-chain `aggregator-<chain>.yaml`
+pattern onto `gateway-dev.yaml`. `testutil.DefaultConfigPath` now
+points at `gateway-dev.yaml`; the CI bootstrap script
+(`.github/scripts/generate-test-config.sh`) generates
+`gateway-dev.yaml` from `gateway-dev.example.yaml`.
 
-Phase 3 (separate PR): replace the Makefile
+**Phase 3** (this PR): replaced the Makefile
 `aggregator-{sepolia,ethereum,base,base-sepolia}` targets with a
-single `make gateway-dev` target. Update `scripts/aa-wallet-toolkit.sh`
-and `start.sh` references at the same time.
+single `make gateway-dev`. The old targets remain as redirect stubs
+that print a deprecation notice and exit non-zero, so old runbooks
+fail loudly rather than silently doing the wrong thing. Updated
+`scripts/aa-wallet-toolkit.sh`, the backfill-tool docstrings, and
+`docs/Development.md` at the same time.
 
-Phase 4 (separate PR): with no live callers left, the per-chain
-`aggregator-<chain>.yaml` and `operator-<chain>.yaml` configs become
-truly unused. Move them to `archived/` (or delete entirely if no
-historical value).
+**Phase 4** (this PR): with no live callers left, the per-chain
+`aggregator-<chain>.yaml` symlinks (pointing at gitignored configs
+in a separate env repo) are no longer referenced by any in-repo code
+path. They can be deleted from local dev environments at any time;
+nothing in the repo tracks them.
 
-Each phase is independent — Phase 1 stands alone if 2-4 never ship.
+### Known exception
+
+`core/taskengine/userops_withdraw_test.go:30` still loads
+`config/aggregator-base.yaml` — but the test is gated by
+`TEST_CHAIN=base` and gracefully skips when the config is missing.
+Base mainnet (chain ID 8453) isn't in `gateway-dev.yaml`'s default
+`chains:` block (which covers Sepolia + Base Sepolia for local dev),
+so this developer-only opt-in test keeps its own per-chain fixture
+until either:
+
+- Base mainnet is added to `gateway-dev.yaml`'s `chains:` and the
+  test is refactored to select that block, or
+- The test is removed as obsolete.
+
+Neither is in scope for this cleanup.

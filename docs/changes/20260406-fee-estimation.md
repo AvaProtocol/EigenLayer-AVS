@@ -125,7 +125,7 @@ No account balance system or prepaid deposits. The blockchain enforces hard cost
 | `core/taskengine/fee_estimator.go` | `EstimateFees()`, `estimateCOGS()`, `classifyWorkflowValue()`, `buildCOGSFromSteps()` |
 | `core/config/config.go` | `FeeRatesConfig` struct, YAML parsing with pointer fields |
 | `protobuf/avs.proto` | `Fee`, `NativeToken`, `NodeCOGS`, `ValueFee`, `EstimateFeesResp`, `Execution` |
-| `config/aggregator.example.yaml` | Reference YAML with fee config |
+| `config/archived/aggregator.example.yaml` | Reference YAML with fee config |
 
 ### Fee estimation flow
 

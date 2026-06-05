@@ -21,7 +21,7 @@
 // -----
 //
 //	go run scripts/migration/backfill_wallet_salt_index/main.go \
-//	    --config config/aggregator-base.yaml [--dry-run] [--verbose]
+//	    --config config/gateway-dev.yaml [--dry-run] [--verbose]
 package main
 
 import (
@@ -48,7 +48,7 @@ type aggregatorYAML struct {
 }
 
 func main() {
-	configPath := flag.String("config", "", "Path to aggregator YAML config (e.g. config/aggregator-base.yaml)")
+	configPath := flag.String("config", "", "Path to aggregator YAML config (e.g. config/gateway-dev.yaml)")
 	chainID := flag.Int64("chain-id", 0, "Chain ID to backfill. Required. Wallet keys are chain-scoped; run once per chain (e.g. 1, 8453, 11155111, 84532).")
 	dryRun := flag.Bool("dry-run", false, "Print what would change without writing to BadgerDB")
 	verbose := flag.Bool("verbose", false, "Print one line per wallet processed")
