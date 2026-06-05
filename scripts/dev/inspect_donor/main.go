@@ -27,18 +27,23 @@ func main() {
 	}
 	defer db.Close()
 
+	const maxKeys = 500
+	// Keys-only scan — skip value prefetch so the iterator doesn't pull
+	// payload bytes off disk for every match (the tool prints only keys).
+	iterOpts := badger.DefaultIteratorOptions
+	iterOpts.PrefetchValues = false
 	count := 0
 	err = db.View(func(txn *badger.Txn) error {
-		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		it := txn.NewIterator(iterOpts)
 		defer it.Close()
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			if count >= maxKeys {
+				fmt.Fprintf(os.Stderr, "(truncated at %d keys)\n", maxKeys)
+				break
+			}
 			k := string(it.Item().KeyCopy(nil))
 			fmt.Println(k)
 			count++
-			if count > 500 {
-				fmt.Fprintln(os.Stderr, "(truncated at 500 keys)")
-				break
-			}
 		}
 		return nil
 	})

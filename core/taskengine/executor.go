@@ -863,7 +863,7 @@ func sanitizeInterface(x interface{}) interface{} {
 // validation calls reach the factory must use the TASK's chain config
 // (different chain → different factory address → different derived
 // wallet), otherwise validateDerivedWallet derives against the wrong
-// chain and the RPC- fallback path always misses.
+// chain and the RPC-derive fallback path always misses.
 func (x *WorkflowExecutor) resolveSmartWalletConfig(chainID int64) *config.SmartWalletConfig {
 	if x.engine != nil {
 		if cfg := x.engine.ResolveSmartWalletConfig(chainID); cfg != nil {
