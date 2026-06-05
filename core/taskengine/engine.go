@@ -4682,6 +4682,13 @@ func (n *Engine) supportsTaskTrigger(operatorAddr string, task *model.Workflow) 
 	if task.Trigger.GetCron() != nil || task.Trigger.GetFixedTime() != nil {
 		return capabilities.TimeMonitoring
 	}
+	if task.Trigger.GetManual() != nil {
+		// Manual triggers fire via the TriggerWorkflow RPC and execute
+		// entirely on the gateway. Operators have no monitoring role for
+		// them — neither the operator's monitoring loop nor the
+		// NotifyTriggers RPC has any path that handles manual triggers.
+		return false
+	}
 
 	// Default to true for unknown trigger types
 	return true
