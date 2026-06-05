@@ -393,6 +393,11 @@ type ContractWriteNodeConfig struct {
 
 // CreateWalletRequest defines model for CreateWalletRequest.
 type CreateWalletRequest struct {
+	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
+	// chain" — typically only useful in single-chain deployments or for
+	// chain-agnostic operations.
+	ChainId *ChainId `json:"chainId,omitempty"`
+
 	// FactoryAddress Lowercase or checksummed hex EOA / contract address.
 	FactoryAddress *EthereumAddress `json:"factoryAddress,omitempty"`
 
@@ -802,8 +807,11 @@ type HealthStatus struct {
 	ChainId *ChainId           `json:"chainId,omitempty"`
 	Status  HealthStatusStatus `json:"status"`
 
-	// Version Aggregator binary version (e.g., `v1.9.6`).
-	Version *string `json:"version,omitempty"`
+	// Version Aggregator binary version (e.g., `v3.2.0`). Always set —
+	// SDK clients use this to stamp the canonical EIP-191 auth
+	// message so the signed `Version` field reflects the
+	// gateway the user actually authenticated against.
+	Version string `json:"version"`
 }
 
 // HealthStatusStatus defines model for HealthStatus.Status.
@@ -1501,6 +1509,13 @@ type DeleteSecretParams struct {
 
 // GetTokenParams defines parameters for GetToken.
 type GetTokenParams struct {
+	// ChainId Chain ID filter. Omit to use the aggregator default chain. Repeat
+	// the parameter to filter by multiple chains.
+	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
+}
+
+// GetWalletNonceParams defines parameters for GetWalletNonce.
+type GetWalletNonceParams struct {
 	// ChainId Chain ID filter. Omit to use the aggregator default chain. Repeat
 	// the parameter to filter by multiple chains.
 	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`

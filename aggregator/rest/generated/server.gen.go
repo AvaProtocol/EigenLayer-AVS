@@ -73,7 +73,7 @@ type ServerInterface interface {
 	UpdateWallet(ctx echo.Context, address EthereumAddress) error
 	// Get the smart wallet's current nonce
 	// (GET /wallets/{address}:getNonce)
-	GetWalletNonce(ctx echo.Context, address EthereumAddress) error
+	GetWalletNonce(ctx echo.Context, address EthereumAddress, params GetWalletNonceParams) error
 	// Withdraw funds from a smart wallet
 	// (POST /wallets/{address}:withdraw)
 	WithdrawWallet(ctx echo.Context, address EthereumAddress) error
@@ -538,8 +538,17 @@ func (w *ServerInterfaceWrapper) GetWalletNonce(ctx echo.Context) error {
 
 	ctx.Set(BearerAuthScopes, []string{})
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetWalletNonceParams
+	// ------------- Optional query parameter "chainId" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "chainId", ctx.QueryParams(), &params.ChainId)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter chainId: %s", err))
+	}
+
 	// Invoke the callback with all the unmarshaled arguments
-	err = w.Handler.GetWalletNonce(ctx, address)
+	err = w.Handler.GetWalletNonce(ctx, address, params)
 	return err
 }
 
@@ -1556,6 +1565,7 @@ func (response UpdateWallet404ApplicationProblemPlusJSONResponse) VisitUpdateWal
 
 type GetWalletNonceRequestObject struct {
 	Address EthereumAddress `json:"address"`
+	Params  GetWalletNonceParams
 }
 
 type GetWalletNonceResponseObject interface {
@@ -2736,10 +2746,11 @@ func (sh *strictHandler) UpdateWallet(ctx echo.Context, address EthereumAddress)
 }
 
 // GetWalletNonce operation middleware
-func (sh *strictHandler) GetWalletNonce(ctx echo.Context, address EthereumAddress) error {
+func (sh *strictHandler) GetWalletNonce(ctx echo.Context, address EthereumAddress, params GetWalletNonceParams) error {
 	var request GetWalletNonceRequestObject
 
 	request.Address = address
+	request.Params = params
 
 	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
 		return sh.ssi.GetWalletNonce(ctx.Request().Context(), request.(GetWalletNonceRequestObject))

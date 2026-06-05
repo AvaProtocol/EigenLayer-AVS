@@ -723,6 +723,9 @@ func (n *Engine) storeDefaultWalletForListWallets(chainID int64, owner common.Ad
 // Adding multi-chain enumeration (or a chain_id field on ListWalletReq) is
 // a follow-up.
 func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletReq) (*avsproto.ListWalletResp, error) {
+	// ListWallets takes owner directly (legacy signature) — JWT chain
+	// context isn't plumbed through here yet, so fall back to the
+	// gateway default. Migrating to take *model.User is a follow-up.
 	chainID := n.defaultChainID()
 	walletsToReturnProto := []*avsproto.SmartWallet{}
 	processedAddresses := make(map[string]bool)
@@ -892,13 +895,62 @@ func (n *Engine) validateNonZeroAddress(factoryAddr common.Address, methodName, 
 	return nil
 }
 
+// resolveUserChainID returns the chain context for a wallet RPC.
+//
+// REST sets user.ChainID from the JWT `aud` claim
+// (aggregator/rest/middleware/jwt.go:audienceChainID); that's the
+// authoritative source. Falls back to the gateway's default chain when
+// user.ChainID is zero (gRPC path) or when it isn't one of the
+// configured chains.
+//
+// The unconfigured-chain fallback matters because AuthExchange mints
+// JWTs with whatever chain ID the client signed for, with no validation
+// against gateway config. Without the check here, a JWT for chain
+// 99999 would route storage writes into the bucket w:99999:* — orphan
+// data the gateway never reads back, and unbounded keyspace growth if
+// abused. Logging the fallback at Warn surfaces the anomaly so we can
+// detect either a configuration drift (chain removed) or a deliberate
+// probe.
+func (n *Engine) resolveUserChainID(user *model.User) int64 {
+	if user == nil || user.ChainID <= 0 {
+		return n.defaultChainID()
+	}
+	for _, known := range n.knownChainIDs() {
+		if known == user.ChainID {
+			return user.ChainID
+		}
+	}
+	n.logger.Warn("resolveUserChainID: user.ChainID is not a configured chain — falling back to default",
+		"requested_chain_id", user.ChainID,
+		"default_chain_id", n.defaultChainID(),
+		"owner", user.Address.Hex(),
+	)
+	return n.defaultChainID()
+}
+
 // GetWallet is the gRPC handler for the GetWallet RPC.
 // It uses the owner (from auth context), salt, and factory_address from payload to derive the wallet address.
 //
-// Wallet records are chain-scoped. The GetWalletReq proto does not carry a
-// chain_id yet, so this handler reads/writes the gateway's default chain only.
+// Wallet records are chain-scoped. The chain context is resolved via
+// resolveUserChainID — REST callers route by their JWT `aud` chain,
+// gRPC callers fall back to the gateway's default chain.
 func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
-	chainID := n.defaultChainID()
+	chainID := n.resolveUserChainID(user)
+	// Resolve the per-chain smart wallet config. In single-chain mode
+	// this returns n.smartWalletConfig (the gateway default); in
+	// gateway/multi-chain mode it returns the config for the JWT-derived
+	// chain. Factory address, RPC URL, and max-wallets-per-owner all
+	// vary per chain — using the gateway default for a non-default chain
+	// would derive against the wrong factory and store the resulting
+	// address under the right chain key, producing inconsistent state.
+	swCfg := n.ResolveSmartWalletConfig(chainID)
+	if swCfg == nil {
+		// Defensive — ResolveSmartWalletConfig falls back to
+		// n.smartWalletConfig, which is only nil in tests with a
+		// half-built Engine.
+		return nil, status.Errorf(codes.Internal, "no smart wallet config for chain %d", chainID)
+	}
+
 	// Allow empty factory address (uses default), but validate non-empty ones
 	if payload.GetFactoryAddress() != "" && !common.IsHexAddress(payload.GetFactoryAddress()) {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidFactoryAddressError)
@@ -916,7 +968,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		}
 	}
 
-	factoryAddr := n.smartWalletConfig.FactoryAddress
+	factoryAddr := swCfg.FactoryAddress
 	if payload.GetFactoryAddress() != "" {
 		factoryAddr = common.HexToAddress(payload.GetFactoryAddress())
 	}
@@ -928,29 +980,65 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 	var derivedSenderAddress *common.Address
 	var err error
 
-	// Only try to derive address if rpcConn is available
-	if rpcConn != nil {
-		derivedSenderAddress, err = aa.GetSenderAddressForFactory(rpcConn, user.Address, factoryAddr, saltBig)
-	} else {
-		// In test environment or when RPC is unavailable, use a deterministic mock address
-		// This allows tests to run without external dependencies
-		n.logger.Debug("Using mock address derivation due to nil rpcConn (test environment)", "owner", user.Address.Hex(), "salt", saltBig.String())
-
-		// Create a deterministic address based on owner + factory + salt for testing
-		// Concatenate the bytes, hash with Keccak256, and take the last 20 bytes for the address
+	// Wallet derivation is the on-chain source of truth — different
+	// factory deployments produce different initcode and therefore
+	// different CREATE2 addresses for the same (owner, salt). Persisting
+	// a wrong address under the real chain key would permanently corrupt
+	// the (owner, factory, salt) → wallet mapping. So the rules here are:
+	//
+	//  1. In test/CI environments (signalled by the package-level
+	//     `rpcConn == nil` — set by initRPC when the configured RPC URL
+	//     is localhost/mock or when CI dial fails), use a deterministic
+	//     keccak-derived mock. This branch must NEVER fire in prod;
+	//     production gateways always have a working `rpcConn`.
+	//  2. In production, dial the per-chain RPC and derive against the
+	//     real factory. Any failure — missing chain RPC URL, dial error,
+	//     factory call error — is a HARD ERROR. Never fall back to mock.
+	//
+	// Using the package-level `rpcConn` for the test signal (rather than
+	// `swCfg.EthRpcUrl == ""`) matches the legacy gating and avoids a
+	// failure mode where a misconfigured per-chain entry silently
+	// downgrades to mock derivation in production.
+	if rpcConn == nil {
+		n.logger.Debug("GetWallet: test/CI environment (rpcConn nil), using mock derivation",
+			"owner", user.Address.Hex(), "chain_id", chainID, "salt", saltBig.String())
 		concatenated := append(append(user.Address.Bytes(), factoryAddr.Bytes()...), saltBig.Bytes()...)
 		hash := crypto.Keccak256(concatenated)
-		mockAddr := common.BytesToAddress(hash[12:]) // Take the last 20 bytes
+		mockAddr := common.BytesToAddress(hash[12:])
 		derivedSenderAddress = &mockAddr
+	} else {
+		if swCfg.EthRpcUrl == "" {
+			n.logger.Error("GetWallet: no EthRpcUrl configured for chain — refusing to derive (would risk persisting a mock address under a real chain)",
+				"chain_id", chainID, "owner", user.Address.Hex())
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"GetWallet: no EthRpcUrl configured for chain %d", chainID)
+		}
+		chainRPC, dialErr := ethclient.Dial(swCfg.EthRpcUrl)
+		if dialErr != nil {
+			n.logger.Error("GetWallet: failed to dial chain RPC",
+				"chain_id", chainID, "rpc_url", swCfg.EthRpcUrl, "error", dialErr)
+			return nil, status.Errorf(codes.Unavailable,
+				"GetWallet: cannot reach chain %d RPC: %v", chainID, dialErr)
+		}
+		defer chainRPC.Close()
+		derivedSenderAddress, err = aa.GetSenderAddressForFactory(chainRPC, user.Address, factoryAddr, saltBig)
+		if err != nil {
+			n.logger.Error("GetWallet: factory.getAddress() failed",
+				"chain_id", chainID, "owner", user.Address.Hex(), "factory", factoryAddr.Hex(),
+				"salt", saltBig.String(), "error", err)
+			return nil, status.Errorf(codes.Unavailable,
+				"GetWallet: derive sender on chain %d via factory %s: %v",
+				chainID, factoryAddr.Hex(), err)
+		}
 	}
 
-	if err != nil || derivedSenderAddress == nil || *derivedSenderAddress == (common.Address{}) {
-		var errMsg string
-		if err != nil {
-			errMsg = err.Error()
-		}
-		n.logger.Warn("Failed to derive sender address or derived address is nil or zero for GetWallet", "owner", user.Address.Hex(), "factory", factoryAddr.Hex(), "salt", saltBig.String(), "derived", derivedSenderAddress, "error", errMsg, "hasRpcConn", rpcConn != nil)
-		return nil, status.Errorf(codes.InvalidArgument, "Failed to derive sender address or derived address is nil or zero. Error: %v", err)
+	if derivedSenderAddress == nil || *derivedSenderAddress == (common.Address{}) {
+		n.logger.Warn("GetWallet: derived sender address is nil or zero",
+			"owner", user.Address.Hex(), "factory", factoryAddr.Hex(), "salt", saltBig.String(),
+			"chain_id", chainID)
+		return nil, status.Errorf(codes.Internal,
+			"GetWallet: derived sender address is nil or zero (chain %d, factory %s)",
+			chainID, factoryAddr.Hex())
 	}
 
 	dbModelWallet, err := GetWallet(n.db, chainID, user.Address, derivedSenderAddress.Hex())
@@ -961,10 +1049,12 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 	}
 
 	if err == badger.ErrKeyNotFound {
-		// Enforce max smart wallet count per owner before creating a new wallet entry
-		// This check only applies when creating new wallet entries, not accessing existing ones
-		if n.smartWalletConfig != nil {
-			maxAllowed := n.smartWalletConfig.MaxWalletsPerOwner
+		// Enforce max smart wallet count per owner before creating a new wallet entry.
+		// This check only applies when creating new wallet entries, not accessing existing ones.
+		// Per-chain limit comes from swCfg (resolved above) — chains can configure different
+		// quotas; the gateway-default value would over-permit on quota-tightened chains.
+		{
+			maxAllowed := swCfg.MaxWalletsPerOwner
 			if maxAllowed <= 0 {
 				maxAllowed = config.DefaultMaxWalletsPerOwner
 			}
