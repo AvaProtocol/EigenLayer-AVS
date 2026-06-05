@@ -13,13 +13,18 @@ import (
 type User struct {
 	Address             common.Address
 	SmartAccountAddress *common.Address
-	// ChainID is the chain context for wallet RPCs (GetWallet, SetWallet,
-	// ListWallets). The REST adapter sets this from the JWT's `aud`
-	// claim (see aggregator/rest/middleware/jwt.go:audienceChainID) and
-	// it is the authoritative source — wallet RPC payloads do NOT
-	// override it. Zero means "fall back to the gateway's default
-	// chain", which is what the gRPC path uses since gRPC isn't
-	// JWT-authenticated.
+	// ChainID is the chain context for wallet RPC handlers that accept
+	// *User. Today that's only Engine.GetWallet — SetWallet and
+	// ListWallets keep their legacy owner-only signatures and always
+	// operate on the gateway's default chain; plumbing *User through
+	// them is a follow-up.
+	//
+	// The REST adapter sets this from the JWT's `aud` claim (see
+	// aggregator/rest/middleware/jwt.go:audienceChainID) and it is the
+	// authoritative source for the handlers that consult it — wallet
+	// RPC payloads do NOT override it. Zero means "fall back to the
+	// gateway's default chain", which is what the gRPC path uses since
+	// gRPC isn't JWT-authenticated.
 	ChainID int64
 }
 

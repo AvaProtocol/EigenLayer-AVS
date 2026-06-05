@@ -9,8 +9,13 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
-// resolveUserChainID is the single point where wallet RPCs decide which
-// chain to read/write against. The contract is:
+// resolveUserChainID is the chain-resolution helper consulted by the
+// wallet RPC handlers that accept *model.User. Today that's only
+// Engine.GetWallet — SetWallet and ListWallets retain their legacy
+// owner-only signatures and always operate on n.defaultChainID();
+// plumbing *User through them is a follow-up.
+//
+// The contract:
 //
 //   - If user.ChainID > 0, use it (REST callers set this from JWT aud).
 //   - Else fall back to the gateway's default chain (gRPC + any caller

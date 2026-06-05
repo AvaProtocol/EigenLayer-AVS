@@ -40,10 +40,11 @@ func (s *Server) requireUser(ctx echo.Context) (*model.User, error) {
 	}
 	return &model.User{
 		Address: common.HexToAddress(authed.Subject),
-		// Propagate the JWT-derived chain ID. The engine's wallet RPC
-		// handlers (GetWallet/SetWallet/ListWallets) treat this as
-		// authoritative for the chain context; zero falls back to the
-		// gateway's default chain (which is also what the gRPC path uses).
+		// Propagate the JWT-derived chain ID. Engine.GetWallet treats
+		// this as authoritative for the chain context. SetWallet and
+		// ListWallets still use their legacy owner-only signatures and
+		// always hit the gateway default — those handlers ignore this
+		// field today. Zero falls back to the gateway's default chain.
 		ChainID: authed.ChainID,
 	}, nil
 }
