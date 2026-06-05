@@ -12,7 +12,7 @@
 #   all                Run all diagnostic steps
 #
 # Options:
-#   --config PATH      Path to aggregator config (default: config/aggregator-sepolia.yaml)
+#   --config PATH      Path to aggregator config (default: config/gateway-dev.yaml)
 #
 # Examples:
 #   # Run full diagnostic

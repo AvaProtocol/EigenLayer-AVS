@@ -26,7 +26,7 @@ func TestActivationDeactivationSyncWithConfigs(t *testing.T) {
 	taskengine.SetLogger(logger)
 
 	// Load aggregator config from YAML
-	aggCfgPath := testutil.GetConfigPath(testutil.DefaultConfigPath) // config/aggregator-sepolia.yaml
+	aggCfgPath := testutil.GetConfigPath(testutil.DefaultConfigPath) // config/gateway-dev.yaml
 	aggCfg, err := config.NewConfig(aggCfgPath)
 	if err != nil {
 		t.Skipf("Failed to load aggregator config at %s: %v", aggCfgPath, err)

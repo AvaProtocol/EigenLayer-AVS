@@ -3,6 +3,16 @@ ROOT_DIR := $(shell pwd)
 MAIN_PACKAGE_PATH ?= ./
 BINARY_NAME ?= ap
 
+# Version metadata stamped into the binary via -ldflags. Derived from git
+# so /health and telemetry reflect the actual checkout instead of the
+# stale default in version/version.go. Both fields fall back gracefully
+# when git is missing or there are no tags (e.g. a CI shallow-clone).
+#
+# Override from the environment when needed: `make build SEMVER=4.0.0`.
+SEMVER ?= $(shell _tag=$$(git describe --tags --abbrev=0 2>/dev/null); [ -n "$$_tag" ] && echo "$$_tag" | sed 's/^v//' || echo dev)
+REVISION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+VERSION_LDFLAGS := -X 'github.com/AvaProtocol/EigenLayer-AVS/version.semver=$(SEMVER)' -X 'github.com/AvaProtocol/EigenLayer-AVS/version.revision=$(REVISION)'
+
 # ==================================================================================== #
 # HELPERS
 # ==================================================================================== #
@@ -81,7 +91,7 @@ endif
 ## build-prod: build the application for production
 .PHONY: build-prod
 build-prod:
-	go build -ldflags="-X 'github.com/AvaProtocol/EigenLayer-AVS/version.semver=dev' -X 'github.com/AvaProtocol/EigenLayer-AVS/version.revision=dev'" -o=/tmp/bin/${BINARY_NAME} ${MAIN_PACKAGE_PATH}
+	go build -ldflags="$(VERSION_LDFLAGS)" -o=/tmp/bin/${BINARY_NAME} ${MAIN_PACKAGE_PATH}
 
 .PHONY: run
 run: build-prod
@@ -164,37 +174,38 @@ build:
 	mkdir out || true
 	go build \
 		-o ./out/ap \
-    	-ldflags "-X github.com/AvaProtocol/EigenLayer-AVS/version.revision=$(shell  git rev-parse HEAD)"
+		-ldflags "$(VERSION_LDFLAGS)"
 
-## aggregator: show usage for aggregator commands
+## gateway-dev: start the local-dev gateway (replaces the legacy per-chain aggregator targets)
+##
+## The pre-Railway "one aggregator per chain" Makefile targets
+## (aggregator-sepolia / aggregator-ethereum / aggregator-base /
+## aggregator-base-sepolia) have been consolidated into this single
+## gateway target. The gateway-dev.yaml config carries the per-chain
+## blocks (Sepolia + Base Sepolia by default; add more under
+## `chains:` to fan out further). See config/README.md for the
+## current layout.
+.PHONY: gateway-dev
+gateway-dev: build
+	@echo "🚀 Starting local-dev gateway (config/gateway-dev.yaml)..."
+	@echo "📝 Logs will be written to gateway-dev.log"
+	./out/ap aggregator --config=config/gateway-dev.yaml 2>&1 | tee gateway-dev.log
+
+# Legacy per-chain aggregator targets retained as redirects so muscle
+# memory and old runbooks still work. They print a deprecation notice
+# pointing at `make gateway-dev`, then fail rather than silently doing
+# something different from what the caller meant.
 .PHONY: aggregator aggregator-sepolia aggregator-ethereum aggregator-base aggregator-base-sepolia
-aggregator:
-	@echo "Usage: make aggregator-<chain>"
+aggregator aggregator-sepolia aggregator-ethereum aggregator-base aggregator-base-sepolia:
+	@echo "⚠️  '$@' has been removed."
+	@echo "   The pre-Railway per-chain aggregator pattern has been"
+	@echo "   consolidated into the multi-chain gateway. Use:"
 	@echo ""
-	@echo "Available commands:"
-	@echo "  make aggregator-sepolia        - Start aggregator with Sepolia config"
-	@echo "  make aggregator-ethereum       - Start aggregator with Ethereum config"
-	@echo "  make aggregator-base           - Start aggregator with Base config"
-	@echo "  make aggregator-base-sepolia   - Start aggregator with Base Sepolia config"
-aggregator-sepolia: build
-	@echo "🚀 Starting aggregator with Sepolia configuration..."
-	@echo "📝 Logs will be written to aggregator-sepolia.log"
-	./out/ap aggregator --config=config/aggregator-sepolia.yaml 2>&1 | tee aggregator-sepolia.log
-
-aggregator-ethereum: build
-	@echo "🚀 Starting aggregator with Ethereum configuration..."
-	@echo "📝 Logs will be written to aggregator-ethereum.log"
-	./out/ap aggregator --config=config/aggregator-ethereum.yaml 2>&1 | tee aggregator-ethereum.log
-
-aggregator-base: build
-	@echo "🚀 Starting aggregator with Base configuration..."
-	@echo "📝 Logs will be written to aggregator-base.log"
-	./out/ap aggregator --config=config/aggregator-base.yaml 2>&1 | tee aggregator-base.log
-
-aggregator-base-sepolia: build
-	@echo "🚀 Starting aggregator with Base Sepolia configuration..."
-	@echo "📝 Logs will be written to aggregator-base-sepolia.log"
-	./out/ap aggregator --config=config/aggregator-base-sepolia.yaml 2>&1 | tee aggregator-base-sepolia.log
+	@echo "       make gateway-dev"
+	@echo ""
+	@echo "   to start the local-dev gateway. The chains it serves are"
+	@echo "   listed under \`chains:\` in config/gateway-dev.yaml."
+	@exit 1
 ## operator: show usage for operator commands
 .PHONY: operator operator-sepolia operator-ethereum operator-base operator-base-sepolia
 operator:

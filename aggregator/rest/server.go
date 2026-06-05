@@ -12,6 +12,7 @@
 package rest
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -330,7 +331,16 @@ func registerColonActionShimRoutes(api *echo.Group, s *Server) {
 		return s.WithdrawWallet(c, generated.EthereumAddress(c.Param("address")))
 	})
 	api.GET("/wallets/:address"+colonActionShim+"getNonce", func(c echo.Context) error {
-		return s.GetWalletNonce(c, generated.EthereumAddress(c.Param("address")))
+		var params generated.GetWalletNonceParams
+		if raw := c.QueryParam("chainId"); raw != "" {
+			cid, parseErr := strconv.ParseInt(raw, 10, 64)
+			if parseErr != nil {
+				return badRequest("WALLETS_BAD_CHAIN_ID", "Invalid chainId", "chainId must be a base-10 integer.")
+			}
+			cidQ := generated.ChainIdQuery(cid)
+			params.ChainId = &cidQ
+		}
+		return s.GetWalletNonce(c, generated.EthereumAddress(c.Param("address")), params)
 	})
 	// Executions item-level: query params are read manually because Ulid
 	// is a string alias the default Echo binder silently skips.

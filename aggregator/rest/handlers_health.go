@@ -25,7 +25,7 @@ func (s *Server) GetHealth(ctx echo.Context) error {
 	// process has reached the point of serving requests.
 	resp := generated.HealthStatus{
 		Status:  status,
-		Version: ptr(version.Get()),
+		Version: version.Get(),
 	}
 	if s.config != nil && s.config.SmartWallet != nil && s.config.SmartWallet.ChainID > 0 {
 		chainID := s.config.SmartWallet.ChainID

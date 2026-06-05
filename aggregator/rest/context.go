@@ -38,5 +38,13 @@ func (s *Server) requireUser(ctx echo.Context) (*model.User, error) {
 			Detail: "Subject must be a valid 0x-prefixed EOA address.",
 		}
 	}
-	return &model.User{Address: common.HexToAddress(authed.Subject)}, nil
+	return &model.User{
+		Address: common.HexToAddress(authed.Subject),
+		// Propagate the JWT-derived chain ID. Engine.GetWallet treats
+		// this as authoritative for the chain context. SetWallet and
+		// ListWallets still use their legacy owner-only signatures and
+		// always hit the gateway default — those handlers ignore this
+		// field today. Zero falls back to the gateway's default chain.
+		ChainID: authed.ChainID,
+	}, nil
 }

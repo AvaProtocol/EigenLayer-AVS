@@ -13,11 +13,19 @@ RUN go mod download
 # Copy source
 COPY . .
 
-# Build with version info
-ARG GIT_REVISION=unknown
-RUN go build \
-    -o ./ap \
-    -ldflags "-X github.com/AvaProtocol/EigenLayer-AVS/version.revision=${GIT_REVISION}"
+# Build with version metadata. SEMVER + REVISION are derived from git
+# inside the builder (the build context retains .git — see .dockerignore).
+# CI workflows can still inject explicit overrides via --build-arg, e.g.
+# `docker build --build-arg SEMVER=3.2.0 --build-arg REVISION=abc1234`.
+ARG SEMVER=
+ARG REVISION=
+RUN _git_tag=$(git describe --tags --abbrev=0 2>/dev/null); \
+    SEMVER="${SEMVER:-$([ -n "${_git_tag}" ] && echo "${_git_tag#v}" || echo dev)}"; \
+    REVISION="${REVISION:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"; \
+    echo "Building with semver=${SEMVER} revision=${REVISION}" && \
+    go build \
+      -o ./ap \
+      -ldflags "-X 'github.com/AvaProtocol/EigenLayer-AVS/version.semver=${SEMVER}' -X 'github.com/AvaProtocol/EigenLayer-AVS/version.revision=${REVISION}'"
 
 # Runtime image
 FROM debian:bookworm-slim

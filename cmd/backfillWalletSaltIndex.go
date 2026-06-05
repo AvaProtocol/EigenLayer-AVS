@@ -43,7 +43,7 @@ Production usage (Docker):
 
   docker stop aggregator-base
   docker run --rm --volumes-from aggregator-base avaprotocol/ap-avs:latest \
-    backfill-wallet-salt-index --config /app/config/aggregator-base.yaml --dry-run
+    backfill-wallet-salt-index --config /app/config/gateway-railway.yaml --dry-run
   # inspect summary, then re-run without --dry-run
   docker start aggregator-base
 `,

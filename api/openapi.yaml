@@ -220,13 +220,18 @@ components:
       type: object
       required:
         - status
+        - version
       properties:
         status:
           type: string
           enum: [ok, degraded, starting]
         version:
           type: string
-          description: Aggregator binary version (e.g., `v1.9.6`).
+          description: |
+            Aggregator binary version (e.g., `v3.2.0`). Always set —
+            SDK clients use this to stamp the canonical EIP-191 auth
+            message so the signed `Version` field reflects the
+            gateway the user actually authenticated against.
         chainId:
           $ref: '#/components/schemas/ChainId'
           description: EigenLayer registration chain ID.
@@ -1286,6 +1291,15 @@ components:
         factoryAddress:
           $ref: '#/components/schemas/EthereumAddress'
           description: Optional factory override. Defaults to the aggregator's configured factory.
+        chainId:
+          $ref: '#/components/schemas/ChainId'
+          description: |
+            Chain to derive the wallet on. Optional override — when
+            omitted, the gateway defaults to the JWT `aud` chain (i.e.
+            the chain the caller signed the auth message for). Set
+            this when minting a wallet for a chain different from the
+            one the JWT was issued against; the JWT proves EOA
+            ownership, which is chain-independent.
 
     UpdateWalletRequest:
       type: object
@@ -2137,6 +2151,7 @@ paths:
         in: path
         required: true
         schema: { $ref: '#/components/schemas/EthereumAddress' }
+      - $ref: '#/components/parameters/ChainIdQuery'
     get:
       tags: [Wallets]
       summary: Get the smart wallet's current nonce
