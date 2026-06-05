@@ -45,22 +45,35 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -u
           TAG="${{ inputs.git_tag }}"
 
-          # gh release view returns 0 for non-existent tags AND for draft
-          # releases that exist but haven't been published. Query --json so
-          # we can distinguish them and reject both.
-          META=$(gh release view "$TAG" --repo "${{ github.repository }}" \
-            --json tagName,isDraft,isPrerelease 2>&1) || META=""
-          if [[ -z "$META" ]] || ! echo "$META" | jq empty 2>/dev/null; then
-            echo "::error::git_tag '$TAG' is not a GitHub release at all."
+          # Step 1: existence/auth check. Stderr stays on stderr so an
+          # auth or tool error surfaces verbatim in the Actions log; we
+          # only care about the exit code here.
+          if ! gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null; then
+            # gh exits non-zero for "tag not found" AND for transient
+            # auth/network errors. Don't conflate them — the stderr the
+            # user sees right above will tell them which. The error
+            # message we emit covers the most common case (typo or
+            # unpublished draft).
+            echo "::error::git_tag '$TAG' is not retrievable as a release."
+            echo "::error::This is usually because (a) the tag does not exist, (b) it has only"
+            echo "::error::a draft release that hasn't been published yet, or (c) gh auth/network"
+            echo "::error::issues — see the stderr line(s) immediately above for the exact cause."
             FAIL=1
           else
+            # Step 2: it exists and we could read it. Now fetch the JSON
+            # for the draft/prerelease check. Keep stdout pure JSON
+            # (NO 2>&1) so jq can't be derailed by warnings interleaved
+            # into the stream.
+            META=$(gh release view "$TAG" --repo "${{ github.repository }}" \
+              --json tagName,isDraft,isPrerelease)
             IS_DRAFT=$(echo "$META" | jq -r '.isDraft')
             IS_PRE=$(echo "$META" | jq -r '.isPrerelease')
             if [[ "$IS_DRAFT" == "true" ]]; then
-              echo "::error::git_tag '$TAG' is a DRAFT release (not published). Production images must be"
-              echo "::error::built from a published release. Publish the draft first, then re-dispatch."
+              echo "::error::git_tag '$TAG' is a DRAFT release (not published). Production images must"
+              echo "::error::be built from a published release. Publish the draft first, then re-dispatch."
               FAIL=1
             elif [[ "$IS_PRE" == "true" ]]; then
               # Semantic-release intentionally creates prereleases (rc.N) before
