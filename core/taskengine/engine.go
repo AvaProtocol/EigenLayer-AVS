@@ -980,45 +980,65 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 	var derivedSenderAddress *common.Address
 	var err error
 
-	// Dial a per-chain RPC client so factory.getAddress() runs against
-	// the right chain's deployment. In multi-chain mode the package-level
-	// `rpcConn` is the gateway-default chain's client, which would
-	// produce wrong derivations for any non-default chain. Fall through
-	// to the deterministic mock path in test environments where the
-	// chain's EthRpcUrl is unset.
-	if swCfg.EthRpcUrl != "" {
-		chainRPC, dialErr := ethclient.Dial(swCfg.EthRpcUrl)
-		if dialErr != nil {
-			n.logger.Warn("GetWallet: failed to dial chain RPC, falling back to mock derivation",
-				"chain_id", chainID, "error", dialErr)
-		} else {
-			defer chainRPC.Close()
-			derivedSenderAddress, err = aa.GetSenderAddressForFactory(chainRPC, user.Address, factoryAddr, saltBig)
-		}
-	}
-	if derivedSenderAddress == nil && err == nil {
-		// In test environment or when RPC is unavailable, use a deterministic mock address
-		// This allows tests to run without external dependencies
-		n.logger.Debug("Using mock address derivation due to nil rpcConn (test environment)", "owner", user.Address.Hex(), "salt", saltBig.String())
-
-		// Create a deterministic address based on owner + factory + salt for testing
-		// Concatenate the bytes, hash with Keccak256, and take the last 20 bytes for the address
+	// Wallet derivation is the on-chain source of truth — different
+	// factory deployments produce different initcode and therefore
+	// different CREATE2 addresses for the same (owner, salt). Persisting
+	// a wrong address under the real chain key would permanently corrupt
+	// the (owner, factory, salt) → wallet mapping. So the rules here are:
+	//
+	//  1. In test/CI environments (signalled by the package-level
+	//     `rpcConn == nil` — set by initRPC when the configured RPC URL
+	//     is localhost/mock or when CI dial fails), use a deterministic
+	//     keccak-derived mock. This branch must NEVER fire in prod;
+	//     production gateways always have a working `rpcConn`.
+	//  2. In production, dial the per-chain RPC and derive against the
+	//     real factory. Any failure — missing chain RPC URL, dial error,
+	//     factory call error — is a HARD ERROR. Never fall back to mock.
+	//
+	// Using the package-level `rpcConn` for the test signal (rather than
+	// `swCfg.EthRpcUrl == ""`) matches the legacy gating and avoids a
+	// failure mode where a misconfigured per-chain entry silently
+	// downgrades to mock derivation in production.
+	if rpcConn == nil {
+		n.logger.Debug("GetWallet: test/CI environment (rpcConn nil), using mock derivation",
+			"owner", user.Address.Hex(), "chain_id", chainID, "salt", saltBig.String())
 		concatenated := append(append(user.Address.Bytes(), factoryAddr.Bytes()...), saltBig.Bytes()...)
 		hash := crypto.Keccak256(concatenated)
-		mockAddr := common.BytesToAddress(hash[12:]) // Take the last 20 bytes
+		mockAddr := common.BytesToAddress(hash[12:])
 		derivedSenderAddress = &mockAddr
+	} else {
+		if swCfg.EthRpcUrl == "" {
+			n.logger.Error("GetWallet: no EthRpcUrl configured for chain — refusing to derive (would risk persisting a mock address under a real chain)",
+				"chain_id", chainID, "owner", user.Address.Hex())
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"GetWallet: no EthRpcUrl configured for chain %d", chainID)
+		}
+		chainRPC, dialErr := ethclient.Dial(swCfg.EthRpcUrl)
+		if dialErr != nil {
+			n.logger.Error("GetWallet: failed to dial chain RPC",
+				"chain_id", chainID, "rpc_url", swCfg.EthRpcUrl, "error", dialErr)
+			return nil, status.Errorf(codes.Unavailable,
+				"GetWallet: cannot reach chain %d RPC: %v", chainID, dialErr)
+		}
+		defer chainRPC.Close()
+		derivedSenderAddress, err = aa.GetSenderAddressForFactory(chainRPC, user.Address, factoryAddr, saltBig)
+		if err != nil {
+			n.logger.Error("GetWallet: factory.getAddress() failed",
+				"chain_id", chainID, "owner", user.Address.Hex(), "factory", factoryAddr.Hex(),
+				"salt", saltBig.String(), "error", err)
+			return nil, status.Errorf(codes.Unavailable,
+				"GetWallet: derive sender on chain %d via factory %s: %v",
+				chainID, factoryAddr.Hex(), err)
+		}
 	}
 
-	if err != nil || derivedSenderAddress == nil || *derivedSenderAddress == (common.Address{}) {
-		var errMsg string
-		if err != nil {
-			errMsg = err.Error()
-		}
-		n.logger.Warn("Failed to derive sender address or derived address is nil or zero for GetWallet",
+	if derivedSenderAddress == nil || *derivedSenderAddress == (common.Address{}) {
+		n.logger.Warn("GetWallet: derived sender address is nil or zero",
 			"owner", user.Address.Hex(), "factory", factoryAddr.Hex(), "salt", saltBig.String(),
-			"derived", derivedSenderAddress, "error", errMsg,
-			"chain_id", chainID, "chain_rpc_set", swCfg.EthRpcUrl != "")
-		return nil, status.Errorf(codes.InvalidArgument, "Failed to derive sender address or derived address is nil or zero. Error: %v", err)
+			"chain_id", chainID)
+		return nil, status.Errorf(codes.Internal,
+			"GetWallet: derived sender address is nil or zero (chain %d, factory %s)",
+			chainID, factoryAddr.Hex())
 	}
 
 	dbModelWallet, err := GetWallet(n.db, chainID, user.Address, derivedSenderAddress.Hex())
