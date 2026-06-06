@@ -225,11 +225,49 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 			"hasTokenService", tokenService != nil)
 	}
 
-	// Get token metadata from the enrichment service
-	tokenMetadata, err := tokenService.GetTokenMetadata(eventLog.Address.Hex())
+	// Get token metadata from the enrichment service.
+	// `tokenService` is bound to whatever chain its RPC reports — the
+	// gateway boots one service per chain in `chains[]`. For workflows
+	// targeting a chain the gateway doesn't run (e.g. mainnet workflow
+	// simulated on a Sepolia-only gateway), the bound service returns
+	// nil or the {Symbol: "UNKNOWN", Decimals: 18} fallback from
+	// fetchTokenMetadataFromRPC. The cross-chain catalog covers that
+	// gap by looking up the workflow's declared chain ID directly.
+	contractAddr := eventLog.Address.Hex()
+	tokenMetadata, err := tokenService.GetTokenMetadata(contractAddr)
 	if err != nil {
 		if logger != nil {
-			logger.Warn("Failed to get token metadata for Transfer event", "error", err, "contract", eventLog.Address.Hex())
+			logger.Warn("Failed to get token metadata for Transfer event", "error", err, "contract", contractAddr)
+		}
+	}
+	// When the bound service returns nil or an UNKNOWN-flavoured fallback,
+	// recover the full metadata (symbol AND decimals) from the cross-chain
+	// catalog. This pairs with the simulation injectors catalog fallback
+	// in run_node_immediately.go — the simulator now picks Transfer values
+	// at the catalog's decimal scale, so the enricher MUST format with
+	// catalog decimals too, otherwise the displayed amount diverges from
+	// the raw value (e.g. raw 1500000 = 1.5 USDC formatted with the
+	// upstream's wrong 18 decimals reads as "0.0000000000015 USDC").
+	//
+	// We pass the bound service's chain ID as a hint, NOT the workflow's
+	// declared chain ID. For cross-chain dev scenarios (Sepolia gateway
+	// running a mainnet workflow) the bound-chain hint will always miss
+	// the chain-specific lookup inside LookupTokenInCatalog, and recovery
+	// comes from the cross-chain scan fallback. Threading the workflow's
+	// chain_id here would be more precise but isn't reachable from this
+	// scope without widening the helpers signature; the scan recovery is
+	// already the dominant case in practice.
+	if isUnknownTokenMetadata(tokenMetadata) {
+		boundChainID := tokenService.GetChainID()
+		if catalogHit := LookupTokenInCatalog(boundChainID, contractAddr, logger); catalogHit != nil {
+			if logger != nil {
+				logger.Info("Token catalog: recovered metadata the bound service couldn't resolve",
+					"contract", contractAddr,
+					"boundChainID", boundChainID,
+					"symbol", catalogHit.Symbol,
+					"decimals", catalogHit.Decimals)
+			}
+			tokenMetadata = catalogHit
 		}
 	}
 

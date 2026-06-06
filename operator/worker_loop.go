@@ -1046,9 +1046,9 @@ func (o *Operator) StreamMessages() {
 						}
 					}()
 				} else {
-					o.logger.Warn("❓ Unsupported or unrecognized trigger type",
+					o.logger.Debug("⏭️ Trigger type not monitored by operator",
 						"task_id", resp.Id,
-						"solution", "Task may not be monitored")
+						"solution", "Likely a manual or future-typed trigger; ignored")
 				}
 			}
 		}

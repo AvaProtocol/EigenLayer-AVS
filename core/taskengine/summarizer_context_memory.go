@@ -11,6 +11,7 @@ import (
 	"time"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -629,21 +630,18 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, 
 	if pool, ok := settings["uniswapv3_pool"].(map[string]interface{}); ok {
 		if tokens, ok := pool["tokens"].(map[string]interface{}); ok {
 			tokenService := resolveTokenServiceForChain(workflowChainID)
+			var lg sdklogging.Logger
+			if vm != nil {
+				lg = vm.logger
+			}
 			for tokenKey, tokenAddr := range tokens {
 				if addr, ok := tokenAddr.(string); ok && common.IsHexAddress(addr) {
 					addrLower := strings.ToLower(addr)
-					// Skip if already have metadata for this address
 					if _, exists := tokenMetadataMap[addrLower]; !exists {
-						if tokenService != nil {
-							if metadata, err := tokenService.GetTokenMetadata(addr); err == nil && metadata != nil {
-								tokenMetadataMap[addrLower] = &contextMemoryTokenMetadata{
-									Symbol:   metadata.Symbol,
-									Decimals: metadata.Decimals,
-									Name:     metadata.Name,
-								}
-							} else if err != nil && vm != nil && vm.logger != nil {
-								vm.logger.Debug("Failed to fetch token metadata", "address", addr, "tokenKey", tokenKey, "error", err)
-							}
+						if meta := resolveTokenMetadataWithCatalog(tokenService, addr, workflowChainID, lg); meta != nil {
+							tokenMetadataMap[addrLower] = meta
+						} else if lg != nil {
+							lg.Debug("Failed to fetch token metadata", "address", addr, "tokenKey", tokenKey)
 						}
 					}
 				}
@@ -656,20 +654,18 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, 
 	// ensuring context-memory always has the metadata needed for decimal formatting.
 	if tokens, ok := settings["tokens"].([]interface{}); ok {
 		tokenService := resolveTokenServiceForChain(workflowChainID)
-		if tokenService != nil {
-			for _, t := range tokens {
-				if addr, ok := t.(string); ok && common.IsHexAddress(addr) {
-					addrLower := strings.ToLower(addr)
-					if _, exists := tokenMetadataMap[addrLower]; !exists {
-						if metadata, err := tokenService.GetTokenMetadata(addr); err == nil && metadata != nil {
-							tokenMetadataMap[addrLower] = &contextMemoryTokenMetadata{
-								Symbol:   metadata.Symbol,
-								Decimals: metadata.Decimals,
-								Name:     metadata.Name,
-							}
-						} else if err != nil && vm != nil && vm.logger != nil {
-							vm.logger.Debug("Failed to fetch token metadata from settings.tokens", "address", addr, "error", err)
-						}
+		var lg sdklogging.Logger
+		if vm != nil {
+			lg = vm.logger
+		}
+		for _, t := range tokens {
+			if addr, ok := t.(string); ok && common.IsHexAddress(addr) {
+				addrLower := strings.ToLower(addr)
+				if _, exists := tokenMetadataMap[addrLower]; !exists {
+					if meta := resolveTokenMetadataWithCatalog(tokenService, addr, workflowChainID, lg); meta != nil {
+						tokenMetadataMap[addrLower] = meta
+					} else if lg != nil {
+						lg.Debug("Failed to fetch token metadata from settings.tokens", "address", addr)
 					}
 				}
 			}
@@ -706,6 +702,49 @@ func resolveTokenServiceForChain(chainID uint64) *TokenEnrichmentService {
 		return svc
 	}
 	return GetTokenEnrichmentService()
+}
+
+// resolveTokenMetadataWithCatalog returns the API-shaped token metadata for an
+// address, preferring the per-chain TokenEnrichmentService and falling through
+// to the cross-chain catalog when the service either has no entry or surfaces
+// the {Symbol: "UNKNOWN", Decimals: 18} fallback from fetchTokenMetadataFromRPC.
+//
+// This mirrors the catalog fallback enrichTransferEventShared and the
+// simulation injector both use — the workflow's declared chain might not be
+// hosted by the gateway, so the bound services per-chain whitelist can miss
+// addresses that are otherwise well-known on a different chain. Without this
+// fallback, the request to context-memory ships UNKNOWN entries that take
+// precedence over the catalog inside resolveTokenMeta, leaving execution-step
+// descriptions formatted at the wrong decimal scale.
+//
+// Returns nil when neither the bound service nor the catalog can resolve the
+// address. Catalog hits return the catalog's name when the bound service
+// didn't have anything resolvable, otherwise the catalog symbol/decimals win
+// over the bound services UNKNOWN-flavoured fallback.
+func resolveTokenMetadataWithCatalog(tokenService *TokenEnrichmentService, address string, workflowChainID uint64, logger sdklogging.Logger) *contextMemoryTokenMetadata {
+	var (
+		metadata *TokenMetadata
+	)
+	if tokenService != nil {
+		if md, err := tokenService.GetTokenMetadata(address); err == nil && md != nil {
+			metadata = md
+		} else if err != nil && logger != nil {
+			logger.Debug("resolveTokenMetadataWithCatalog: bound service lookup failed", "address", address, "error", err)
+		}
+	}
+	if isUnknownTokenMetadata(metadata) {
+		if catalogHit := LookupTokenInCatalog(workflowChainID, address, logger); catalogHit != nil {
+			metadata = catalogHit
+		}
+	}
+	if metadata == nil {
+		return nil
+	}
+	return &contextMemoryTokenMetadata{
+		Symbol:   metadata.Symbol,
+		Decimals: metadata.Decimals,
+		Name:     metadata.Name,
+	}
 }
 
 // chainIDFromSettingsValue parses a chain_id value from a settings map. The
