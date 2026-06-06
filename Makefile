@@ -50,12 +50,16 @@ PROTOCOLS_VERSION ?= 0.5.0
 .PHONY: sync-tokens
 sync-tokens:
 	@command -v npm >/dev/null 2>&1 || { echo "❌ npm not found; install Node.js to run sync-tokens"; exit 1; }
-	@TMP=$$(mktemp -d) && \
-		npm pack @avaprotocol/protocols@$(PROTOCOLS_VERSION) --pack-destination $$TMP --silent >/dev/null && \
-		tar -xzf $$TMP/avaprotocol-protocols-$(PROTOCOLS_VERSION).tgz -C $$TMP && \
-		cp $$TMP/package/dist/tokens/*.json token_whitelist/ && \
-		rm -rf $$TMP && \
-		echo "✅ synced token_whitelist/ from @avaprotocol/protocols@$(PROTOCOLS_VERSION)"
+	@set -e ; \
+	TMP=$$(mktemp -d) ; \
+	trap 'rm -rf $$TMP' EXIT INT TERM ; \
+	tarball=$$(npm pack @avaprotocol/protocols@$(PROTOCOLS_VERSION) --pack-destination $$TMP --silent | tail -1) ; \
+	[ -n "$$tarball" ] || { echo "❌ npm pack returned no tarball name"; exit 1; } ; \
+	tar -xzf $$TMP/$$tarball -C $$TMP ; \
+	ls $$TMP/package/dist/tokens/*.json >/dev/null 2>&1 || { echo "❌ tarball missing dist/tokens/*.json"; exit 1; } ; \
+	rm -f token_whitelist/*.json ; \
+	cp $$TMP/package/dist/tokens/*.json token_whitelist/ ; \
+	echo "✅ synced token_whitelist/ from @avaprotocol/protocols@$(PROTOCOLS_VERSION) ($$tarball)"
 
 ## audit: run quality control checks (excluding long-running integration tests)
 .PHONY: audit
