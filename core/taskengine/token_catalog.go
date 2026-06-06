@@ -52,6 +52,7 @@ var catalogFileNameToChainID = map[string]uint64{
 	"sepolia.json":      ChainIDSepolia,
 	"base.json":         ChainIDBase,
 	"base-sepolia.json": ChainIDBaseSepolia,
+	"bnb-mainnet.json":  ChainIDBNBMainnet,
 }
 
 // loadTokenCatalog walks the on-disk whitelist directory and populates

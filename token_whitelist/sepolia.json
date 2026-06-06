@@ -1,38 +1,38 @@
 [
   {
+    "id": "0x3e622317f8c93f7328350cf0b56d9ed4c620c5d6",
     "name": "Dai Stablecoin",
     "symbol": "DAI",
-    "decimals": 18,
-    "id": "0x3e622317f8c93f7328350cf0b56d9ed4c620c5d6"
+    "decimals": 18
   },
   {
+    "id": "0x779877a7b0d9e8603169ddbd7836e478b4624789",
     "name": "ChainLink Token",
     "symbol": "LINK",
-    "decimals": 18,
-    "id": "0x779877a7b0d9e8603169ddbd7836e478b4624789"
+    "decimals": 18
   },
   {
+    "id": "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
     "name": "Uniswap",
     "symbol": "UNI",
-    "decimals": 18,
-    "id": "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984"
+    "decimals": 18
   },
   {
+    "id": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
     "name": "USD Coin",
     "symbol": "USDC",
-    "decimals": 6,
-    "id": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238"
+    "decimals": 6
   },
   {
+    "id": "0xaa8e23fb1079ea71e0a56f48a2aa51851d8433d0",
     "name": "Tether USD",
     "symbol": "USDT",
-    "decimals": 6,
-    "id": "0xaa8e23fb1079ea71e0a56f48a2aa51851d8433d0"
+    "decimals": 6
   },
   {
+    "id": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
     "name": "Wrapped Ether",
     "symbol": "WETH",
-    "decimals": 18,
-    "id": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14"
+    "decimals": 18
   }
 ]

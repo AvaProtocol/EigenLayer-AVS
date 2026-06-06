@@ -73,6 +73,7 @@ const (
 	ChainIDSepolia     uint64 = 11155111
 	ChainIDBase        uint64 = 8453
 	ChainIDBaseSepolia uint64 = 84532
+	ChainIDBNBMainnet  uint64 = 56
 )
 
 // Native token sentinel address used by Moralis and other services

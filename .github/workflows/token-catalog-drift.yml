@@ -1,0 +1,58 @@
+name: Token Catalog Drift Check
+
+# Asserts that `token_whitelist/*.json` matches what's published in the
+# pinned `@avaprotocol/protocols` version (see PROTOCOLS_VERSION in
+# Makefile). The Go runtime reads these JSON files directly at startup
+# so they stay source-of-truth-at-checkout; this gate exists so the
+# only way to update them is to bump PROTOCOLS_VERSION and re-sync,
+# never hand-edit. Hand edits would silently fork from the upstream
+# catalog and reintroduce the duplicate-source-of-truth problem the
+# protocols package was created to solve.
+
+on:
+  pull_request:
+    branches: [main, staging]
+    paths:
+      - "token_whitelist/**"
+      - "Makefile"
+      - ".github/workflows/token-catalog-drift.yml"
+  workflow_dispatch:
+
+jobs:
+  drift-check:
+    name: token_whitelist matches @avaprotocol/protocols
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node (for npm pack)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Re-sync from package
+        run: make sync-tokens
+
+      - name: Fail if token_whitelist/ drifted
+        run: |
+          if ! git diff --exit-code token_whitelist/; then
+            PROTOCOLS_VERSION=$(grep '^PROTOCOLS_VERSION' Makefile | head -1 | awk '{print $3}')
+            echo ""
+            echo "::error::token_whitelist/ has drifted from @avaprotocol/protocols@$PROTOCOLS_VERSION"
+            echo ""
+            echo "The diff above shows what's different between the checked-in files and"
+            echo "what the pinned package version emits. Resolve by one of:"
+            echo ""
+            echo "  - Hand-edit reverted (no manual edits to token_whitelist/ allowed):"
+            echo "      git checkout origin/${{ github.base_ref }} -- token_whitelist/"
+            echo ""
+            echo "  - Upstream catalog updated (bump PROTOCOLS_VERSION):"
+            echo "      sed -i 's/PROTOCOLS_VERSION ?= .*/PROTOCOLS_VERSION ?= NEW.VERSION/' Makefile"
+            echo "      make sync-tokens"
+            echo "      git add Makefile token_whitelist/ && git commit"
+            echo ""
+            exit 1
+          fi
+          echo "✅ token_whitelist/ is in sync with @avaprotocol/protocols pin"
