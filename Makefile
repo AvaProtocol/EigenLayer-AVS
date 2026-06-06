@@ -38,6 +38,29 @@ tidy:
 	go fmt ./...
 	go mod tidy -v
 
+# Pinned version of the upstream token catalog package. Bump explicitly
+# when there's a new catalog release worth pulling — drift between this
+# pin and what's in token_whitelist/ is caught by CI (see
+# .github/workflows/token-catalog-drift.yml). The Go runtime continues
+# to read token_whitelist/*.json directly at startup, so token data
+# stays a build-input-free artifact even when offline.
+PROTOCOLS_VERSION ?= 0.5.0
+
+## sync-tokens: refresh token_whitelist/ from @avaprotocol/protocols
+.PHONY: sync-tokens
+sync-tokens:
+	@command -v npm >/dev/null 2>&1 || { echo "❌ npm not found; install Node.js to run sync-tokens"; exit 1; }
+	@set -e ; \
+	TMP=$$(mktemp -d) ; \
+	trap 'rm -rf $$TMP' EXIT INT TERM ; \
+	tarball=$$(npm pack @avaprotocol/protocols@$(PROTOCOLS_VERSION) --pack-destination $$TMP --silent | tail -1) ; \
+	[ -n "$$tarball" ] || { echo "❌ npm pack returned no tarball name"; exit 1; } ; \
+	tar -xzf $$TMP/$$tarball -C $$TMP ; \
+	ls $$TMP/package/dist/tokens/*.json >/dev/null 2>&1 || { echo "❌ tarball missing dist/tokens/*.json"; exit 1; } ; \
+	rm -f token_whitelist/*.json ; \
+	cp $$TMP/package/dist/tokens/*.json token_whitelist/ ; \
+	echo "✅ synced token_whitelist/ from @avaprotocol/protocols@$(PROTOCOLS_VERSION) ($$tarball)"
+
 ## audit: run quality control checks (excluding long-running integration tests)
 .PHONY: audit
 audit:

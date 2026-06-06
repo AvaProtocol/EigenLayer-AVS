@@ -27,6 +27,8 @@ func GetNetworkName(chainID int64) string {
 		return "base"
 	case ChainIDBaseSepolia:
 		return "base-sepolia"
+	case ChainIDBNBMainnet:
+		return "bnb-mainnet"
 	default:
 		return "unknown"
 	}
