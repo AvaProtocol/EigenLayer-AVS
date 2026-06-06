@@ -10,6 +10,55 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// TestResolveTokenMetadataWithCatalog_CatalogFallback covers the critical
+// behavior the per-step contractWrite path now relies on: when the bound
+// TokenEnrichmentService is nil or returns the {Symbol:"UNKNOWN"} fallback,
+// the metadata must come from the cross-chain catalog instead of staying
+// UNKNOWN. See #562 and the buildRequest step-level routing.
+func TestResolveTokenMetadataWithCatalog_CatalogFallback(t *testing.T) {
+	resetTokenCatalogForTesting()
+	t.Cleanup(resetTokenCatalogForTesting)
+
+	const mainnetUSDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+
+	t.Run("nil service falls back to catalog", func(t *testing.T) {
+		meta := resolveTokenMetadataWithCatalog(nil, mainnetUSDC, ChainIDEthereum, nil)
+		require.NotNil(t, meta, "expected catalog fallback for nil service")
+		assert.Equal(t, "USDC", meta.Symbol)
+		assert.Equal(t, uint32(6), meta.Decimals)
+	})
+
+	t.Run("UNKNOWN from bound service is overridden by catalog", func(t *testing.T) {
+		service := &TokenEnrichmentService{
+			cache: map[string]*TokenMetadata{
+				strings.ToLower(mainnetUSDC): {Symbol: "UNKNOWN", Decimals: 18},
+			},
+		}
+		meta := resolveTokenMetadataWithCatalog(service, mainnetUSDC, ChainIDEthereum, nil)
+		require.NotNil(t, meta, "expected catalog to override UNKNOWN")
+		assert.Equal(t, "USDC", meta.Symbol)
+		assert.Equal(t, uint32(6), meta.Decimals)
+	})
+
+	t.Run("known metadata from bound service is preserved", func(t *testing.T) {
+		service := &TokenEnrichmentService{
+			cache: map[string]*TokenMetadata{
+				strings.ToLower(mainnetUSDC): {Symbol: "USDC", Decimals: 6, Name: "USD Coin"},
+			},
+		}
+		meta := resolveTokenMetadataWithCatalog(service, mainnetUSDC, ChainIDEthereum, nil)
+		require.NotNil(t, meta)
+		assert.Equal(t, "USDC", meta.Symbol)
+		assert.Equal(t, uint32(6), meta.Decimals)
+		assert.Equal(t, "USD Coin", meta.Name)
+	})
+
+	t.Run("unknown address with no catalog entry returns nil", func(t *testing.T) {
+		meta := resolveTokenMetadataWithCatalog(nil, "0x0000000000000000000000000000000000000000", ChainIDEthereum, nil)
+		assert.Nil(t, meta)
+	})
+}
+
 // TestBuildRequest_SettingsTokens verifies that settings.tokens addresses
 // are resolved via TokenEnrichmentService and included in the request-level tokenMetadata.
 func TestBuildRequest_SettingsTokens(t *testing.T) {
@@ -64,13 +113,24 @@ func TestBuildRequest_SettingsTokens(t *testing.T) {
 	assert.Equal(t, uint32(18), wethMeta.Decimals)
 }
 
-// TestBuildRequest_SettingsTokensNilService verifies settings.tokens is safely
-// skipped when TokenEnrichmentService is not available.
+// TestBuildRequest_SettingsTokensNilService verifies settings.tokens still
+// resolves via the cross-chain catalog fallback when the bound
+// TokenEnrichmentService is unavailable. The catalog is the entire reason
+// resolveTokenMetadataWithCatalog exists — bound service nil/UNKNOWN is the
+// dominant case the cross-chain catalog was built to cover. See #562, #564.
+//
+// Pre-#565 this test passed only because loadTokenCatalog silently failed in
+// tests (it did os.ReadDir("token_whitelist") from the package's cwd, which
+// is core/taskengine/ at test time — that directory doesn't contain
+// token_whitelist/). The embed in #565 removed the cwd dependency, which
+// surfaced the actual catalog behavior — and the actual behavior is the
+// correct one.
 func TestBuildRequest_SettingsTokensNilService(t *testing.T) {
 	oldService := GetTokenEnrichmentService()
 	SetTokenEnrichmentService(nil)
 	defer SetTokenEnrichmentService(oldService)
 
+	const usdcAddr = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
 	vm := NewVM()
 	vm.mu.Lock()
 	vm.vars = map[string]interface{}{
@@ -79,7 +139,7 @@ func TestBuildRequest_SettingsTokensNilService(t *testing.T) {
 			"chain":  "Ethereum",
 			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
 			"owner":  "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
-			"tokens": []interface{}{"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"},
+			"tokens": []interface{}{usdcAddr},
 		},
 	}
 	vm.TaskNodes = map[string]*avsproto.TaskNode{
@@ -94,8 +154,15 @@ func TestBuildRequest_SettingsTokensNilService(t *testing.T) {
 	req, err := summarizer.buildRequest(vm, "trigger", "success", "")
 	require.NoError(t, err)
 
-	// No tokens should be resolved when service is nil
-	assert.Empty(t, req.TokenMetadata, "tokenMetadata should be empty when service is nil")
+	// Mainnet USDC is in the embedded catalog (token_whitelist/ethereum.json,
+	// now relocated to core/taskengine/tokenwhitelist/ethereum.json) so the
+	// fallback should resolve {Symbol: "USDC", Decimals: 6, Name: "USD Coin"}
+	// even with a nil bound service.
+	require.NotNil(t, req.TokenMetadata)
+	usdcMeta := req.TokenMetadata[strings.ToLower(usdcAddr)]
+	require.NotNil(t, usdcMeta, "USDC metadata should come from catalog fallback")
+	assert.Equal(t, "USDC", usdcMeta.Symbol)
+	assert.Equal(t, uint32(6), usdcMeta.Decimals)
 }
 
 // TestBuildRequest_SettingsTokensDeduplication verifies that tokens already resolved

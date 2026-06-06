@@ -38,6 +38,32 @@ tidy:
 	go fmt ./...
 	go mod tidy -v
 
+# Pinned version of the upstream token catalog package. Bump explicitly
+# when there's a new catalog release worth pulling — drift between this
+# pin and what's in core/taskengine/tokenwhitelist/ is caught by CI (see
+# .github/workflows/token-catalog-drift.yml). The JSON files are baked
+# into the compiled binary via //go:embed (see
+# core/taskengine/tokenwhitelist/fs.go), so the runtime has no
+# filesystem dependency at all — sync-tokens is purely a build-time
+# concern.
+PROTOCOLS_VERSION ?= 0.5.0
+
+## sync-tokens: refresh core/taskengine/tokenwhitelist/ from @avaprotocol/protocols
+.PHONY: sync-tokens
+sync-tokens:
+	@command -v npm >/dev/null 2>&1 || { echo "❌ npm not found; install Node.js to run sync-tokens"; exit 1; }
+	@set -e ; \
+	TMP=$$(mktemp -d) ; \
+	trap 'rm -rf $$TMP' EXIT INT TERM ; \
+	npm pack @avaprotocol/protocols@$(PROTOCOLS_VERSION) --pack-destination $$TMP --silent >$$TMP/pack.out || { echo "❌ npm pack failed"; cat $$TMP/pack.out; exit 1; } ; \
+	tarball=$$(tail -1 $$TMP/pack.out) ; \
+	[ -n "$$tarball" ] && [ -f "$$TMP/$$tarball" ] || { echo "❌ npm pack produced no tarball file in $$TMP (got: '$$tarball')"; exit 1; } ; \
+	tar -xzf $$TMP/$$tarball -C $$TMP ; \
+	ls $$TMP/package/dist/tokens/*.json >/dev/null 2>&1 || { echo "❌ tarball missing dist/tokens/*.json"; exit 1; } ; \
+	rm -f core/taskengine/tokenwhitelist/*.json ; \
+	cp $$TMP/package/dist/tokens/*.json core/taskengine/tokenwhitelist/ ; \
+	echo "✅ synced core/taskengine/tokenwhitelist/ from @avaprotocol/protocols@$(PROTOCOLS_VERSION) ($$tarball)"
+
 ## audit: run quality control checks (excluding long-running integration tests)
 .PHONY: audit
 audit:

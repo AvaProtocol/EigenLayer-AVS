@@ -534,14 +534,18 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, 
 				if stepChainID == 0 {
 					stepChainID = workflowChainID
 				}
-				if tokenService := resolveTokenServiceForChain(stepChainID); tokenService != nil {
-					if metadata, err := tokenService.GetTokenMetadata(resolvedContractAddress); err == nil && metadata != nil {
-						step.TokenMetadata = &contextMemoryTokenMetadata{
-							Symbol:   metadata.Symbol,
-							Decimals: metadata.Decimals,
-							Name:     metadata.Name,
-						}
-					}
+				// Route through resolveTokenMetadataWithCatalog so the per-step
+				// metadata picks up the cross-chain catalog fallback when the
+				// bound TokenEnrichmentService returns UNKNOWN. Without this
+				// the request payload ships {Symbol:"UNKNOWN", Decimals:18} at
+				// the step level for cross-chain dev scenarios, which is
+				// harmless today (resolveTokenMeta on the TS side resolves
+				// via the top-level tokenMetadata map first) but is the kind
+				// of staleness that masks real bugs in the long run.
+				// vm is dereferenced unconditionally at the top of
+				// buildRequest (vm.mu.Lock()), so it is non-nil here.
+				if meta := resolveTokenMetadataWithCatalog(resolveTokenServiceForChain(stepChainID), resolvedContractAddress, stepChainID, vm.logger); meta != nil {
+					step.TokenMetadata = meta
 				}
 			}
 		}
