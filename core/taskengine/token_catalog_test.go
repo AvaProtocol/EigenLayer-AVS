@@ -1,31 +1,18 @@
 package taskengine
 
 import (
-	"os"
 	"testing"
 )
 
-// chdirToRepoRoot mirrors the pattern in token_metadata_engine_test.go —
-// the catalog reads `token_whitelist/` relative to cwd, which only
-// resolves correctly from the repo root.
-func chdirToRepoRoot(t *testing.T) {
-	t.Helper()
-	originalWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	if err := os.Chdir("../.."); err != nil {
-		t.Fatalf("chdir to repo root: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(originalWd) })
-}
+// Catalog data is now baked into the binary via the //go:embed in
+// core/taskengine/tokenwhitelist; tests no longer need to chdir to
+// the repo root for the catalog to load.
 
 // Sanity test: the cross-chain catalog can resolve a token whose
 // address lives on a chain the local TokenEnrichmentService isn't
 // bound to. Mirrors the dev-environment bug where the Sepolia-only
 // gateway saw mainnet USDC and emitted "UNKNOWN".
 func TestLookupTokenInCatalog_CrossChain(t *testing.T) {
-	chdirToRepoRoot(t)
 	resetTokenCatalogForTesting()
 	t.Cleanup(resetTokenCatalogForTesting)
 
@@ -46,7 +33,6 @@ func TestLookupTokenInCatalog_CrossChain(t *testing.T) {
 }
 
 func TestLookupTokenInCatalog_ChainSpecificMatchPreferred(t *testing.T) {
-	chdirToRepoRoot(t)
 	resetTokenCatalogForTesting()
 	t.Cleanup(resetTokenCatalogForTesting)
 
@@ -62,7 +48,6 @@ func TestLookupTokenInCatalog_ChainSpecificMatchPreferred(t *testing.T) {
 }
 
 func TestLookupTokenInCatalog_UnknownAddressReturnsNil(t *testing.T) {
-	chdirToRepoRoot(t)
 	resetTokenCatalogForTesting()
 	t.Cleanup(resetTokenCatalogForTesting)
 
@@ -73,7 +58,6 @@ func TestLookupTokenInCatalog_UnknownAddressReturnsNil(t *testing.T) {
 }
 
 func TestLookupTokenInCatalog_EmptyInputs(t *testing.T) {
-	chdirToRepoRoot(t)
 	resetTokenCatalogForTesting()
 	t.Cleanup(resetTokenCatalogForTesting)
 

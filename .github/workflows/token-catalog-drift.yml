@@ -1,6 +1,6 @@
 name: Token Catalog Drift Check
 
-# Asserts that `token_whitelist/*.json` matches what's published in the
+# Asserts that `core/taskengine/tokenwhitelist/*.json` matches what's published in the
 # pinned `@avaprotocol/protocols` version (see PROTOCOLS_VERSION in
 # Makefile). The Go runtime reads these JSON files directly at startup
 # so they stay source-of-truth-at-checkout; this gate exists so the
@@ -13,9 +13,11 @@ on:
   pull_request:
     branches: [main, staging]
     paths:
-      - "token_whitelist/**"
+      - "core/taskengine/tokenwhitelist/**"
       - "Makefile"
       - ".github/workflows/token-catalog-drift.yml"
+      # Catch attempts to bring the old top-level directory back.
+      - "token_whitelist/**"
   workflow_dispatch:
 
 jobs:
@@ -35,24 +37,24 @@ jobs:
       - name: Re-sync from package
         run: make sync-tokens
 
-      - name: Fail if token_whitelist/ drifted
+      - name: Fail if core/taskengine/tokenwhitelist/ drifted
         run: |
-          if ! git diff --exit-code token_whitelist/; then
+          if ! git diff --exit-code core/taskengine/tokenwhitelist/; then
             PROTOCOLS_VERSION=$(grep '^PROTOCOLS_VERSION' Makefile | head -1 | awk '{print $3}')
             echo ""
-            echo "::error::token_whitelist/ has drifted from @avaprotocol/protocols@$PROTOCOLS_VERSION"
+            echo "::error::core/taskengine/tokenwhitelist/ has drifted from @avaprotocol/protocols@$PROTOCOLS_VERSION"
             echo ""
             echo "The diff above shows what's different between the checked-in files and"
             echo "what the pinned package version emits. Resolve by one of:"
             echo ""
-            echo "  - Hand-edit reverted (no manual edits to token_whitelist/ allowed):"
-            echo "      git checkout origin/${{ github.base_ref }} -- token_whitelist/"
+            echo "  - Hand-edit reverted (no manual edits to core/taskengine/tokenwhitelist/ allowed):"
+            echo "      git checkout origin/${{ github.base_ref }} -- core/taskengine/tokenwhitelist/"
             echo ""
             echo "  - Upstream catalog updated (bump PROTOCOLS_VERSION):"
             echo "      sed -i 's/PROTOCOLS_VERSION ?= .*/PROTOCOLS_VERSION ?= NEW.VERSION/' Makefile"
             echo "      make sync-tokens"
-            echo "      git add Makefile token_whitelist/ && git commit"
+            echo "      git add Makefile core/taskengine/tokenwhitelist/ && git commit"
             echo ""
             exit 1
           fi
-          echo "✅ token_whitelist/ is in sync with @avaprotocol/protocols pin"
+          echo "✅ core/taskengine/tokenwhitelist/ is in sync with @avaprotocol/protocols pin"

@@ -2,11 +2,10 @@ package taskengine
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/tokenwhitelist"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )
 
@@ -55,17 +54,17 @@ var catalogFileNameToChainID = map[string]uint64{
 	"bnb-mainnet.json":  ChainIDBNBMainnet,
 }
 
-// loadTokenCatalog walks the on-disk whitelist directory and populates
-// the global cross-chain map. Idempotent — runs at most once per
-// process lifetime via tokenCatalogOnce.
+// loadTokenCatalog walks the embedded whitelist FS and populates the
+// global cross-chain map. Idempotent — runs at most once per process
+// lifetime via tokenCatalogOnce. Reads from the embed.FS so the
+// runtime doesn't depend on the binary's working directory.
 func loadTokenCatalog(logger sdklogging.Logger) {
 	tokenCatalogOnce.Do(func() {
-		dir := "token_whitelist"
-		entries, err := os.ReadDir(dir)
+		entries, err := tokenwhitelist.FS.ReadDir(".")
 		if err != nil {
 			if logger != nil {
-				logger.Warn("Token catalog: whitelist directory unreadable, cross-chain fallback disabled",
-					"dir", dir, "error", err)
+				logger.Warn("Token catalog: embedded whitelist FS unreadable, cross-chain fallback disabled",
+					"error", err)
 			}
 			return
 		}
@@ -81,20 +80,19 @@ func loadTokenCatalog(logger sdklogging.Logger) {
 			if !ok {
 				continue
 			}
-			path := filepath.Join(dir, entry.Name())
-			data, err := os.ReadFile(path)
+			data, err := tokenwhitelist.FS.ReadFile(entry.Name())
 			if err != nil {
 				if logger != nil {
-					logger.Warn("Token catalog: failed to read whitelist file",
-						"file", path, "error", err)
+					logger.Warn("Token catalog: failed to read embedded whitelist file",
+						"file", entry.Name(), "error", err)
 				}
 				continue
 			}
 			var tokens []TokenMetadata
 			if err := json.Unmarshal(data, &tokens); err != nil {
 				if logger != nil {
-					logger.Warn("Token catalog: failed to parse whitelist file",
-						"file", path, "error", err)
+					logger.Warn("Token catalog: failed to parse embedded whitelist file",
+						"file", entry.Name(), "error", err)
 				}
 				continue
 			}
@@ -116,7 +114,7 @@ func loadTokenCatalog(logger sdklogging.Logger) {
 			tokenCatalog[chainID] = byAddr
 			if logger != nil {
 				logger.Debug("Token catalog: loaded chain whitelist",
-					"file", path, "chainID", chainID, "count", len(byAddr))
+					"file", entry.Name(), "chainID", chainID, "count", len(byAddr))
 			}
 		}
 	})

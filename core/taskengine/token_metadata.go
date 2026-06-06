@@ -5,12 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/tokenwhitelist"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -171,31 +170,24 @@ func (t *TokenEnrichmentService) LoadWhitelist() error {
 		filename = "ethereum.json"
 	}
 
-	// Look for whitelist file in token_whitelist directory
-	whitelistPath := filepath.Join("token_whitelist", filename)
-
-	// Check if file exists
-	if _, err := os.Stat(whitelistPath); os.IsNotExist(err) {
-		return fmt.Errorf("whitelist file not found: %s", whitelistPath)
-	}
-
-	// Read and parse the file
-	data, err := os.ReadFile(whitelistPath)
+	// Read from the embedded FS — see core/taskengine/tokenwhitelist for
+	// the source of truth. The data is baked into the binary so the
+	// runtime doesn't care about the working directory.
+	data, err := tokenwhitelist.FS.ReadFile(filename)
 	if err != nil {
-		return fmt.Errorf("failed to read whitelist file %s: %w", whitelistPath, err)
+		return fmt.Errorf("failed to read embedded whitelist %s: %w", filename, err)
 	}
 
 	var tokens []TokenMetadata
-	err = json.Unmarshal(data, &tokens)
-	if err != nil {
-		return fmt.Errorf("failed to parse whitelist file %s: %w", whitelistPath, err)
+	if err := json.Unmarshal(data, &tokens); err != nil {
+		return fmt.Errorf("failed to parse embedded whitelist %s: %w", filename, err)
 	}
 
-	loaded, skipped := t.loadTokensIntoCache(tokens, whitelistPath)
+	loaded, skipped := t.loadTokensIntoCache(tokens, filename)
 
 	if t.logger != nil {
 		t.logger.Debug("Loaded token whitelist",
-			"file", whitelistPath,
+			"file", filename,
 			"loaded", loaded,
 			"skipped", skipped,
 			"chainID", t.chainID)

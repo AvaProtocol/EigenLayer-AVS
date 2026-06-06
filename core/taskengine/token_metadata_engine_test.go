@@ -15,11 +15,13 @@ import (
 // TestEngine_GetTokenMetadata tests the full engine integration for GetTokenMetadata gRPC endpoint
 // This is an integration test that validates the complete flow from gRPC request to response
 func TestEngine_GetTokenMetadata(t *testing.T) {
-	// Change to project root directory so we can find token_whitelist/
+	// Catalog data is baked into the binary via
+	// core/taskengine/tokenwhitelist (//go:embed). Tests no longer
+	// need to chdir for the whitelist to load. The chdir below is
+	// still needed because GetAggregatorConfig reads YAML from a
+	// path relative to repo root.
 	originalWd, _ := os.Getwd()
 	defer os.Chdir(originalWd)
-
-	// Go up two levels: from core/taskengine to project root
 	err := os.Chdir("../..")
 	require.NoError(t, err)
 
