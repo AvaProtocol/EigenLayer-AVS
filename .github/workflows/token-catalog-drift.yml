@@ -1,13 +1,14 @@
 name: Token Catalog Drift Check
 
-# Asserts that `core/taskengine/tokenwhitelist/*.json` matches what's published in the
-# pinned `@avaprotocol/protocols` version (see PROTOCOLS_VERSION in
-# Makefile). The Go runtime reads these JSON files directly at startup
-# so they stay source-of-truth-at-checkout; this gate exists so the
-# only way to update them is to bump PROTOCOLS_VERSION and re-sync,
-# never hand-edit. Hand edits would silently fork from the upstream
-# catalog and reintroduce the duplicate-source-of-truth problem the
-# protocols package was created to solve.
+# Asserts that `core/taskengine/tokenwhitelist/*.json` matches what's
+# published in the pinned `@avaprotocol/protocols` version (see
+# PROTOCOLS_VERSION in Makefile). The JSON files are baked into the
+# binary via //go:embed (see core/taskengine/tokenwhitelist/fs.go),
+# so they're build-time inputs — this gate exists so the only way to
+# update them is to bump PROTOCOLS_VERSION and re-sync, never hand-
+# edit. Hand edits would silently fork from the upstream catalog and
+# reintroduce the duplicate-source-of-truth problem the protocols
+# package was created to solve.
 
 on:
   pull_request:

@@ -16,7 +16,7 @@ func TestLookupTokenInCatalog_CrossChain(t *testing.T) {
 	resetTokenCatalogForTesting()
 	t.Cleanup(resetTokenCatalogForTesting)
 
-	// Mainnet USDC — lives in token_whitelist/ethereum.json.
+	// Mainnet USDC — lives in core/taskengine/tokenwhitelist/ethereum.json (embedded).
 	const mainnetUSDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
 
 	// Pretend we're calling from a Sepolia-bound service (chain 11155111).

@@ -41,9 +41,11 @@ tidy:
 # Pinned version of the upstream token catalog package. Bump explicitly
 # when there's a new catalog release worth pulling — drift between this
 # pin and what's in core/taskengine/tokenwhitelist/ is caught by CI (see
-# .github/workflows/token-catalog-drift.yml). The Go runtime continues
-# to read core/taskengine/tokenwhitelist/*.json directly at startup, so token data
-# stays a build-input-free artifact even when offline.
+# .github/workflows/token-catalog-drift.yml). The JSON files are baked
+# into the compiled binary via //go:embed (see
+# core/taskengine/tokenwhitelist/fs.go), so the runtime has no
+# filesystem dependency at all — sync-tokens is purely a build-time
+# concern.
 PROTOCOLS_VERSION ?= 0.5.0
 
 ## sync-tokens: refresh core/taskengine/tokenwhitelist/ from @avaprotocol/protocols
