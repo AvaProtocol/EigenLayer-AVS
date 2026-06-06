@@ -542,11 +542,9 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, 
 				// harmless today (resolveTokenMeta on the TS side resolves
 				// via the top-level tokenMetadata map first) but is the kind
 				// of staleness that masks real bugs in the long run.
-				var lg sdklogging.Logger
-				if vm != nil {
-					lg = vm.logger
-				}
-				if meta := resolveTokenMetadataWithCatalog(resolveTokenServiceForChain(stepChainID), resolvedContractAddress, stepChainID, lg); meta != nil {
+				// vm is dereferenced unconditionally at the top of
+				// buildRequest (vm.mu.Lock()), so it is non-nil here.
+				if meta := resolveTokenMetadataWithCatalog(resolveTokenServiceForChain(stepChainID), resolvedContractAddress, stepChainID, vm.logger); meta != nil {
 					step.TokenMetadata = meta
 				}
 			}

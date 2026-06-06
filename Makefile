@@ -55,8 +55,9 @@ sync-tokens:
 	@set -e ; \
 	TMP=$$(mktemp -d) ; \
 	trap 'rm -rf $$TMP' EXIT INT TERM ; \
-	tarball=$$(npm pack @avaprotocol/protocols@$(PROTOCOLS_VERSION) --pack-destination $$TMP --silent | tail -1) ; \
-	[ -n "$$tarball" ] || { echo "❌ npm pack returned no tarball name"; exit 1; } ; \
+	npm pack @avaprotocol/protocols@$(PROTOCOLS_VERSION) --pack-destination $$TMP --silent >$$TMP/pack.out || { echo "❌ npm pack failed"; cat $$TMP/pack.out; exit 1; } ; \
+	tarball=$$(tail -1 $$TMP/pack.out) ; \
+	[ -n "$$tarball" ] && [ -f "$$TMP/$$tarball" ] || { echo "❌ npm pack produced no tarball file in $$TMP (got: '$$tarball')"; exit 1; } ; \
 	tar -xzf $$TMP/$$tarball -C $$TMP ; \
 	ls $$TMP/package/dist/tokens/*.json >/dev/null 2>&1 || { echo "❌ tarball missing dist/tokens/*.json"; exit 1; } ; \
 	rm -f core/taskengine/tokenwhitelist/*.json ; \

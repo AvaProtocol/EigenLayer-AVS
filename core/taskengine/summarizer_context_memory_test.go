@@ -10,6 +10,55 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// TestResolveTokenMetadataWithCatalog_CatalogFallback covers the critical
+// behavior the per-step contractWrite path now relies on: when the bound
+// TokenEnrichmentService is nil or returns the {Symbol:"UNKNOWN"} fallback,
+// the metadata must come from the cross-chain catalog instead of staying
+// UNKNOWN. See #562 and the buildRequest step-level routing.
+func TestResolveTokenMetadataWithCatalog_CatalogFallback(t *testing.T) {
+	resetTokenCatalogForTesting()
+	t.Cleanup(resetTokenCatalogForTesting)
+
+	const mainnetUSDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+
+	t.Run("nil service falls back to catalog", func(t *testing.T) {
+		meta := resolveTokenMetadataWithCatalog(nil, mainnetUSDC, ChainIDEthereum, nil)
+		require.NotNil(t, meta, "expected catalog fallback for nil service")
+		assert.Equal(t, "USDC", meta.Symbol)
+		assert.Equal(t, uint32(6), meta.Decimals)
+	})
+
+	t.Run("UNKNOWN from bound service is overridden by catalog", func(t *testing.T) {
+		service := &TokenEnrichmentService{
+			cache: map[string]*TokenMetadata{
+				strings.ToLower(mainnetUSDC): {Symbol: "UNKNOWN", Decimals: 18},
+			},
+		}
+		meta := resolveTokenMetadataWithCatalog(service, mainnetUSDC, ChainIDEthereum, nil)
+		require.NotNil(t, meta, "expected catalog to override UNKNOWN")
+		assert.Equal(t, "USDC", meta.Symbol)
+		assert.Equal(t, uint32(6), meta.Decimals)
+	})
+
+	t.Run("known metadata from bound service is preserved", func(t *testing.T) {
+		service := &TokenEnrichmentService{
+			cache: map[string]*TokenMetadata{
+				strings.ToLower(mainnetUSDC): {Symbol: "USDC", Decimals: 6, Name: "USD Coin"},
+			},
+		}
+		meta := resolveTokenMetadataWithCatalog(service, mainnetUSDC, ChainIDEthereum, nil)
+		require.NotNil(t, meta)
+		assert.Equal(t, "USDC", meta.Symbol)
+		assert.Equal(t, uint32(6), meta.Decimals)
+		assert.Equal(t, "USD Coin", meta.Name)
+	})
+
+	t.Run("unknown address with no catalog entry returns nil", func(t *testing.T) {
+		meta := resolveTokenMetadataWithCatalog(nil, "0x0000000000000000000000000000000000000000", ChainIDEthereum, nil)
+		assert.Nil(t, meta)
+	})
+}
+
 // TestBuildRequest_SettingsTokens verifies that settings.tokens addresses
 // are resolved via TokenEnrichmentService and included in the request-level tokenMetadata.
 func TestBuildRequest_SettingsTokens(t *testing.T) {

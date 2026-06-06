@@ -11,30 +11,29 @@ import (
 
 // Cross-chain token catalog. Each TokenEnrichmentService is bound to
 // the single chain its RPC client reports, so a service that boots on
-// Sepolia can only resolve addresses listed in token_whitelist/sepolia.json.
+// Sepolia can only resolve addresses listed in its chain's whitelist.
 // When a workflow targets one chain but is simulated against a gateway
 // bound to a different chain — happens routinely in dev when the
 // gateway runs Sepolia + Base-Sepolia but the workflow declares
 // settings.chain_id=1 — the bound service returns symbol="UNKNOWN".
 //
-// `tokenCatalog` lazily loads every token_whitelist/<chain>.json file
-// on the first call to `LookupTokenInCatalog` (gated by
-// `tokenCatalogOnce`) so callers that know the workflow's chain ID can
-// do a metadata-only lookup against the right chain's whitelist
-// regardless of which service is bound to which RPC. Lazy loading
-// keeps package init free of filesystem reads — important for tests
-// that vendor a different whitelist tree via `os.Chdir` before
-// triggering the first lookup.
+// `tokenCatalog` lazily loads every embedded <chain>.json file from the
+// tokenwhitelist package's embed.FS on the first call to
+// `LookupTokenInCatalog` (gated by `tokenCatalogOnce`) so callers that
+// know the workflow's chain ID can do a metadata-only lookup against
+// the right chain's whitelist regardless of which service is bound to
+// which RPC. Reading from the embedded FS means the lookup has no
+// dependency on the binary's working directory.
 //
 // Format is the same per-chain JSON shape the gateway already uses
 // (`{id, name, symbol, decimals}` arrays). Filenames map to chain IDs
-// via the same convention as `LoadWhitelist`: ethereum.json → 1,
+// via `catalogFileNameToChainID` below: ethereum.json → 1,
 // sepolia.json → 11155111, etc.
 //
-// Long term this data sources from the @avaprotocol/protocols package
-// (the `dist/tokens/<chain>.json` sidecar). For now the catalog reads
-// directly from the checked-in token_whitelist/ tree so the migration
-// is a path swap, not a runtime behaviour change.
+// The data is sourced from the @avaprotocol/protocols package (the
+// `dist/tokens/<chain>.json` sidecar), synced into
+// core/taskengine/tokenwhitelist/ via `make sync-tokens` and baked into
+// the binary by the //go:embed in that package's fs.go.
 
 var (
 	tokenCatalog      = make(map[uint64]map[string]*TokenMetadata)

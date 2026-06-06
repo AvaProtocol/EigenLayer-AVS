@@ -32,6 +32,27 @@ func TestLookupTokenInCatalog_CrossChain(t *testing.T) {
 	}
 }
 
+// BNB Mainnet (chain 56) ships its own whitelist file (bnb-mainnet.json)
+// in the embedded FS. Verify the catalog resolves a BNB-native token so
+// the new chain isn't silently absent from cross-chain lookups. Note BNB
+// Binance-Peg USDC is 18 decimals, unlike native USDC at 6.
+func TestLookupTokenInCatalog_BNBMainnet(t *testing.T) {
+	resetTokenCatalogForTesting()
+	t.Cleanup(resetTokenCatalogForTesting)
+
+	const bnbUSDC = "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d"
+	got := LookupTokenInCatalog(ChainIDBNBMainnet, bnbUSDC, nil)
+	if got == nil {
+		t.Fatalf("expected catalog to resolve BNB Mainnet USDC, got nil")
+	}
+	if got.Symbol != "USDC" {
+		t.Errorf("expected symbol USDC, got %q", got.Symbol)
+	}
+	if got.Decimals != 18 {
+		t.Errorf("expected decimals 18 for Binance-Peg USDC, got %d", got.Decimals)
+	}
+}
+
 func TestLookupTokenInCatalog_ChainSpecificMatchPreferred(t *testing.T) {
 	resetTokenCatalogForTesting()
 	t.Cleanup(resetTokenCatalogForTesting)
