@@ -7,12 +7,17 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/oklog/ulid/v2"
+	"github.com/stretchr/testify/require"
 )
 
-func newTaskForAutoDisable(id string) *model.Workflow {
+// newTaskForAutoDisable returns a task with a ULID id. Task IDs flow through
+// storage keys whose schema uses ":" as a delimiter, so embedding arbitrary
+// text (e.g. an error message) into the id is unsafe and unrepresentative.
+func newTaskForAutoDisable() *model.Workflow {
 	return &model.Workflow{
 		Task: &avsproto.Task{
-			Id:                 id,
+			Id:                 ulid.Make().String(),
 			Owner:              "0x0000000000000000000000000000000000000001",
 			SmartWalletAddress: "0x0000000000000000000000000000000000000002",
 			Status:             avsproto.TaskStatus_Enabled,
@@ -42,7 +47,7 @@ func TestPermanentValidationErrorIncrementsCounter(t *testing.T) {
 			defer storage.Destroy(db.(*storage.BadgerStorage))
 
 			executor := NewExecutorForTesting(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
-			task := newTaskForAutoDisable("task-perm-" + errMsg)
+			task := newTaskForAutoDisable()
 
 			executor.persistFailedExecution(task, newFailedExecution("e1", errMsg), avsproto.TaskStatus_Enabled)
 
@@ -72,7 +77,7 @@ func TestTransientValidationErrorDoesNotIncrementCounter(t *testing.T) {
 			defer storage.Destroy(db.(*storage.BadgerStorage))
 
 			executor := NewExecutorForTesting(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
-			task := newTaskForAutoDisable("task-trans-" + errMsg)
+			task := newTaskForAutoDisable()
 
 			executor.persistFailedExecution(task, newFailedExecution("e1", errMsg), avsproto.TaskStatus_Enabled)
 
@@ -96,7 +101,7 @@ func TestAutoDisableOnThreshold(t *testing.T) {
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	executor := NewExecutorForTesting(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
-	task := newTaskForAutoDisable("task-threshold")
+	task := newTaskForAutoDisable()
 
 	const errMsg = "task smart wallet address does not belong to owner"
 	for i := uint32(1); i <= validationFailureDisableThreshold; i++ {
@@ -119,6 +124,73 @@ func TestAutoDisableOnThreshold(t *testing.T) {
 	executor.persistFailedExecution(task, newFailedExecution("e", errMsg), avsproto.TaskStatus_Disabled)
 	if task.Status != avsproto.TaskStatus_Disabled {
 		t.Fatalf("status should remain Disabled, got %v", task.Status)
+	}
+}
+
+// TestCounterResetOnValidationPassThrough covers the executor.go reset path:
+// once a task makes it past every validation gate, both
+// ConsecutiveValidationFailures and LastValidationError must be cleared so a
+// future transient blip cannot inherit a stale baseline.
+func TestCounterResetOnValidationPassThrough(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	// Empty Owner is the documented test escape hatch — see
+	// core/taskengine/executor.go where wallet validation is gated on
+	// task.Owner != "". This lets us exercise the post-validation reset path
+	// without standing up a real chain.
+	task := &model.Workflow{
+		Task: &avsproto.Task{
+			Id:                            ulid.Make().String(),
+			Owner:                         "",
+			Status:                        avsproto.TaskStatus_Enabled,
+			LastValidationError:           "stale message from a prior tick",
+			ConsecutiveValidationFailures: 5,
+			Trigger: &avsproto.TaskTrigger{
+				Id:   "trigger1",
+				Name: "manualTrigger",
+				Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
+				TriggerType: &avsproto.TaskTrigger_Manual{
+					Manual: &avsproto.ManualTrigger{
+						Config: &avsproto.ManualTrigger_Config{},
+					},
+				},
+			},
+			Nodes: []*avsproto.TaskNode{{
+				Id:   "node1",
+				Name: "noop",
+				Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
+				TaskType: &avsproto.TaskNode_CustomCode{
+					CustomCode: &avsproto.CustomCodeNode{
+						Config: &avsproto.CustomCodeNode_Config{
+							Lang:   avsproto.Lang_LANG_JAVASCRIPT,
+							Source: "return 'ok'",
+						},
+					},
+				},
+			}},
+			Edges: []*avsproto.TaskEdge{{
+				Id:     "edge1",
+				Source: "trigger1",
+				Target: "node1",
+			}},
+		},
+	}
+
+	executor := NewExecutorForTesting(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	exec, err := executor.RunTask(task, &QueueExecutionData{
+		ExecutionID:   ulid.Make().String(),
+		TriggerType:   avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
+		TriggerOutput: &avsproto.ManualTrigger_Output{},
+	})
+	require.NoError(t, err, "RunTask should succeed once validation is bypassed")
+	require.NotNil(t, exec)
+
+	if task.ConsecutiveValidationFailures != 0 {
+		t.Fatalf("counter should reset on validation pass-through, got %d", task.ConsecutiveValidationFailures)
+	}
+	if task.LastValidationError != "" {
+		t.Fatalf("LastValidationError should reset on validation pass-through, got %q", task.LastValidationError)
 	}
 }
 
