@@ -193,7 +193,9 @@ func (q *Queue) markJobDone(job *Job, status jobStatus) error {
 
 // isKeyNotFound reports whether err is BadgerDB's "Key not found". The
 // storage.Storage interface surfaces the badger error verbatim from Move,
-// so direct equality and substring match both cover wrapped variants.
+// so errors.Is catches the sentinel and the string-equality fallback
+// covers cases where a wrapper has flattened the error into a plain
+// errors.New with the same message.
 func isKeyNotFound(err error) bool {
 	if err == nil {
 		return false
