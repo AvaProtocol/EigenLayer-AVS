@@ -815,6 +815,20 @@ message Task {
   // Target chain for this task's execution (e.g., 11155111 for Sepolia, 84532 for Base Sepolia).
   // 0 means use the aggregator's default chain (backward compatible with single-chain mode).
   int64 chain_id = 16;
+
+  // last_validation_error is the most recent message from a validation
+  // rejection (e.g. "task smart wallet address does not belong to owner").
+  // Empty when the task has never been rejected, or when a later execution
+  // made it past validation and reset the counter below.
+  string last_validation_error = 17;
+
+  // consecutive_validation_failures counts trigger ticks where validation
+  // rejected this task with a *permanent* error (bad wallet config, VM
+  // construction failure). Transient errors (RPC timeouts, credit limit)
+  // do not increment. Resets to 0 the next time an execution gets past
+  // validation. Past the threshold defined in core/taskengine/executor.go,
+  // the task is automatically flipped to Disabled.
+  uint32 consecutive_validation_failures = 18;
 }
 
 
