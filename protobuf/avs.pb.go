@@ -2249,9 +2249,21 @@ type Task struct {
 	InputVariables map[string]*structpb.Value `protobuf:"bytes,15,rep,name=input_variables,json=inputVariables,proto3" json:"input_variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Target chain for this task's execution (e.g., 11155111 for Sepolia, 84532 for Base Sepolia).
 	// 0 means use the aggregator's default chain (backward compatible with single-chain mode).
-	ChainId       int64 `protobuf:"varint,16,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ChainId int64 `protobuf:"varint,16,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	// last_validation_error is the most recent message from a validation
+	// rejection (e.g. "task smart wallet address does not belong to owner").
+	// Empty when the task has never been rejected, or when a later execution
+	// made it past validation and reset the counter below.
+	LastValidationError string `protobuf:"bytes,17,opt,name=last_validation_error,json=lastValidationError,proto3" json:"last_validation_error,omitempty"`
+	// consecutive_validation_failures counts trigger ticks where validation
+	// rejected this task with a *permanent* error (bad wallet config, VM
+	// construction failure). Transient errors (RPC timeouts, credit limit)
+	// do not increment. Resets to 0 the next time an execution gets past
+	// validation. Past the threshold defined in core/taskengine/executor.go,
+	// the task is automatically flipped to Disabled.
+	ConsecutiveValidationFailures uint32 `protobuf:"varint,18,opt,name=consecutive_validation_failures,json=consecutiveValidationFailures,proto3" json:"consecutive_validation_failures,omitempty"`
+	unknownFields                 protoimpl.UnknownFields
+	sizeCache                     protoimpl.SizeCache
 }
 
 func (x *Task) Reset() {
@@ -2392,6 +2404,20 @@ func (x *Task) GetInputVariables() map[string]*structpb.Value {
 func (x *Task) GetChainId() int64 {
 	if x != nil {
 		return x.ChainId
+	}
+	return 0
+}
+
+func (x *Task) GetLastValidationError() string {
+	if x != nil {
+		return x.LastValidationError
+	}
+	return ""
+}
+
+func (x *Task) GetConsecutiveValidationFailures() uint32 {
+	if x != nil {
+		return x.ConsecutiveValidationFailures
 	}
 	return 0
 }
@@ -6485,7 +6511,7 @@ func (x *NativeToken) GetDecimals() int32 {
 type NodeCOGS struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	CostType      string                 `protobuf:"bytes,2,opt,name=cost_type,json=costType,proto3" json:"cost_type,omitempty"` // "gas", "external_api", "wallet_creation"
+	CostType      string                 `protobuf:"bytes,2,opt,name=cost_type,json=costType,proto3" json:"cost_type,omitempty"` // canonical REST values: "gas", "externalApi", "walletCreation" — see core/taskengine/fee_enums.go and OpenAPI enum NodeCOGSCostType
 	Fee           *Fee                   `protobuf:"bytes,3,opt,name=fee,proto3" json:"fee,omitempty"`                           // Cost in WEI
 	GasUnits      string                 `protobuf:"bytes,4,opt,name=gas_units,json=gasUnits,proto3" json:"gas_units,omitempty"` // Gas units (for gas costs only)
 	unknownFields protoimpl.UnknownFields
@@ -6557,7 +6583,7 @@ type ValueFee struct {
 	Fee                  *Fee                   `protobuf:"bytes,1,opt,name=fee,proto3" json:"fee,omitempty"`                                                               // { amount: "0.03", unit: "PERCENTAGE" }
 	Tier                 ExecutionTier          `protobuf:"varint,2,opt,name=tier,proto3,enum=aggregator.ExecutionTier" json:"tier,omitempty"`                              // Pricing group (TIER_1, TIER_2, TIER_3)
 	ValueBase            string                 `protobuf:"bytes,3,opt,name=value_base,json=valueBase,proto3" json:"value_base,omitempty"`                                  // What the percentage applies to (e.g., "input_token_value")
-	ClassificationMethod string                 `protobuf:"bytes,4,opt,name=classification_method,json=classificationMethod,proto3" json:"classification_method,omitempty"` // "rule_based" (V1) or "llm" (V2)
+	ClassificationMethod string                 `protobuf:"bytes,4,opt,name=classification_method,json=classificationMethod,proto3" json:"classification_method,omitempty"` // canonical REST values: "ruleBased" (V1) or "llm" (V2) — see core/taskengine/fee_enums.go and OpenAPI enum ValueFeeClassificationMethod
 	Confidence           float32                `protobuf:"fixed32,5,opt,name=confidence,proto3" json:"confidence,omitempty"`                                               // Classification confidence (0.0–1.0)
 	Reason               string                 `protobuf:"bytes,6,opt,name=reason,proto3" json:"reason,omitempty"`                                                         // Why this tier was assigned
 	unknownFields        protoimpl.UnknownFields
@@ -6639,7 +6665,7 @@ func (x *ValueFee) GetReason() string {
 // Promotional discount
 type FeeDiscount struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	DiscountType  string                 `protobuf:"bytes,1,opt,name=discount_type,json=discountType,proto3" json:"discount_type,omitempty"` // "new_user", "volume", "promotional", "beta_program"
+	DiscountType  string                 `protobuf:"bytes,1,opt,name=discount_type,json=discountType,proto3" json:"discount_type,omitempty"` // canonical REST values: "newUser", "volume", "promotional", "betaProgram" — see core/taskengine/fee_enums.go and OpenAPI enum FeeDiscountDiscountType
 	DiscountName  string                 `protobuf:"bytes,2,opt,name=discount_name,json=discountName,proto3" json:"discount_name,omitempty"`
 	Discount      *Fee                   `protobuf:"bytes,3,opt,name=discount,proto3" json:"discount,omitempty"` // Discount amount or percentage
 	ExpiryDate    string                 `protobuf:"bytes,4,opt,name=expiry_date,json=expiryDate,proto3" json:"expiry_date,omitempty"`
@@ -9945,7 +9971,7 @@ const file_avs_proto_rawDesc = "" +
 	"\abalance\x18\x1e \x01(\v2\x1e.aggregator.BalanceNode.OutputH\x00R\abalance\x12\x19\n" +
 	"\bstart_at\x18\x0e \x01(\x03R\astartAt\x12\x15\n" +
 	"\x06end_at\x18\x0f \x01(\x03R\x05endAtB\r\n" +
-	"\voutput_data\"\xbd\x05\n" +
+	"\voutput_data\"\xb9\x06\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05owner\x18\x02 \x01(\tR\x05owner\x120\n" +
@@ -9964,7 +9990,9 @@ const file_avs_proto_rawDesc = "" +
 	"\x05nodes\x18\r \x03(\v2\x14.aggregator.TaskNodeR\x05nodes\x12*\n" +
 	"\x05edges\x18\x0e \x03(\v2\x14.aggregator.TaskEdgeR\x05edges\x12M\n" +
 	"\x0finput_variables\x18\x0f \x03(\v2$.aggregator.Task.InputVariablesEntryR\x0einputVariables\x12\x19\n" +
-	"\bchain_id\x18\x10 \x01(\x03R\achainId\x1aY\n" +
+	"\bchain_id\x18\x10 \x01(\x03R\achainId\x122\n" +
+	"\x15last_validation_error\x18\x11 \x01(\tR\x13lastValidationError\x12F\n" +
+	"\x1fconsecutive_validation_failures\x18\x12 \x01(\rR\x1dconsecutiveValidationFailures\x1aY\n" +
 	"\x13InputVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
 	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"\x8d\x04\n" +
