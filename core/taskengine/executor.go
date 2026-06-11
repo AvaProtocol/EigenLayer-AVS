@@ -961,10 +961,16 @@ func (x *WorkflowExecutor) validateDerivedWallet(swCfg *config.SmartWalletConfig
 }
 
 // persistFailedExecution persists a failed execution record to the database
-// This ensures that failed executions (like wallet validation failures) are recorded for troubleshooting
+// This ensures that failed executions (like wallet validation failures) are recorded for troubleshooting.
+//
+// Logs at Warn rather than Error: a validation failure is an expected outcome
+// (misconfigured task, ownership mismatch) that recurs every time the trigger
+// fires until the task is fixed or disabled. The execution record itself is
+// persisted with Status=FAILED and Error=<reason>, so users can still
+// troubleshoot from it. Using Error would route every tick through
+// SentryLogger.captureToSentry and flood Sentry — see EIGENLAYER-AVS-1V.
 func (x *WorkflowExecutor) persistFailedExecution(task *model.Workflow, execution *avsproto.Execution, initialTaskStatus avsproto.TaskStatus) {
-	// Log the failure for debugging
-	x.logger.Error("task execution failed during validation",
+	x.logger.Warn("task execution failed during validation",
 		"error", execution.Error,
 		"task_id", task.Id,
 		"execution_id", execution.Id,
