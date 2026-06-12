@@ -12,6 +12,124 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Railway auto-update configuration.
+#
+# After the prod Docker workflow finishes, the script can flip each
+# Railway service's pinned Source Image from the previous tag to the
+# new ${DOCKER_RELEASE}, then trigger a redeploy. The Railway CLI does
+# not expose a "set service image" verb, so we call the Railway
+# GraphQL API directly (mutations: serviceInstanceUpdate +
+# serviceInstanceRedeploy).
+#
+# Skipped if RAILWAY_API_TOKEN isn't set. Failures within a service
+# warn-and-continue per the "Docker publish already succeeded, don't
+# undo that progress" stance.
+#
+# Generate a token at: https://railway.com/account/tokens (Team token
+# scoped to the AvaProtocol workspace works).
+RAILWAY_GRAPHQL_URL="https://backboard.railway.app/graphql/v2"
+RAILWAY_PROJECT_ID="${RAILWAY_PROJECT_ID:-9499ccd8-1610-4fda-bbcb-ef7d9e453f60}"
+RAILWAY_ENV_ID="${RAILWAY_ENV_ID:-ba5658ef-bafd-4aa8-8dda-c1ee3ba4c14d}"
+# Services that pull avaprotocol/ap-avs and need their tag bumped on
+# every prod release. Order matters: gateway first, workers after, so
+# operators reconnect cleanly. Override via env if you ever add/remove
+# services without touching this script:
+#   RAILWAY_SERVICES="gateway worker-sepolia" ./scripts/release.sh
+RAILWAY_SERVICES="${RAILWAY_SERVICES:-gateway worker-ethereum worker-base worker-sepolia worker-base-sepolia worker-bnb-mainnet}"
+
+# railway_graphql <query-json>
+# Wraps the GraphQL POST with auth + JSON content-type. Echoes the
+# raw response so callers can jq it themselves. Returns 0 if the
+# HTTP call succeeded; the response may still contain {"errors":...}
+# which the caller must check.
+railway_graphql() {
+    local payload="$1"
+    curl -sS --max-time 30 -X POST "$RAILWAY_GRAPHQL_URL" \
+        -H "Authorization: Bearer $RAILWAY_API_TOKEN" \
+        -H "Content-Type: application/json" \
+        --data "$payload"
+}
+
+# railway_update_service <service-name> <full-image-ref>
+# Updates the service's Source Image to the given ref (e.g.
+# avaprotocol/ap-avs:v3.4.2) and triggers a redeploy. Returns 0 on
+# success, 1 on any failure (looked-up service ID missing, GraphQL
+# error response, network error). Always prints what it did so the
+# operator can see progress live.
+railway_update_service() {
+    local service_name="$1"
+    local image_ref="$2"
+
+    # Resolve service ID by name. Querying project.services keeps the
+    # script resilient to service recreations that would invalidate
+    # a hardcoded ID.
+    local lookup_payload
+    lookup_payload=$(jq -nc \
+        --arg pid "$RAILWAY_PROJECT_ID" \
+        '{query: "query($pid: String!){project(id: $pid){services{edges{node{id name}}}}}", variables: {pid: $pid}}')
+    local lookup_response
+    lookup_response=$(railway_graphql "$lookup_payload") || {
+        echo -e "${YELLOW}   ⚠️  ${service_name}: Railway GraphQL unreachable (network?). Skipping.${NC}"
+        return 1
+    }
+    if echo "$lookup_response" | jq -e '.errors' >/dev/null 2>&1; then
+        local err
+        err=$(echo "$lookup_response" | jq -r '.errors[0].message // "unknown GraphQL error"')
+        echo -e "${YELLOW}   ⚠️  ${service_name}: lookup failed: ${err}. Skipping.${NC}"
+        return 1
+    fi
+    local service_id
+    service_id=$(echo "$lookup_response" | \
+        jq -r --arg name "$service_name" \
+        '.data.project.services.edges[].node | select(.name==$name) | .id' | head -n1)
+    if [ -z "$service_id" ] || [ "$service_id" = "null" ]; then
+        echo -e "${YELLOW}   ⚠️  ${service_name}: service not found in project. Skipping.${NC}"
+        return 1
+    fi
+
+    # Update source.image. We pass only the source field so other
+    # service config (start command, region, replicas, healthcheck)
+    # stays untouched.
+    local update_payload
+    update_payload=$(jq -nc \
+        --arg eid "$RAILWAY_ENV_ID" \
+        --arg sid "$service_id" \
+        --arg img "$image_ref" \
+        '{query: "mutation($eid: String!, $sid: String!, $img: String!){serviceInstanceUpdate(environmentId: $eid, serviceId: $sid, input: {source: {image: $img}})}", variables: {eid: $eid, sid: $sid, img: $img}}')
+    local update_response
+    update_response=$(railway_graphql "$update_payload") || {
+        echo -e "${YELLOW}   ⚠️  ${service_name}: update call failed (network?). Skipping redeploy.${NC}"
+        return 1
+    }
+    if echo "$update_response" | jq -e '.errors' >/dev/null 2>&1; then
+        local err
+        err=$(echo "$update_response" | jq -r '.errors[0].message // "unknown GraphQL error"')
+        echo -e "${YELLOW}   ⚠️  ${service_name}: serviceInstanceUpdate failed: ${err}.${NC}"
+        return 1
+    fi
+
+    # Trigger redeploy so the new image actually gets pulled.
+    local redeploy_payload
+    redeploy_payload=$(jq -nc \
+        --arg eid "$RAILWAY_ENV_ID" \
+        --arg sid "$service_id" \
+        '{query: "mutation($eid: String!, $sid: String!){serviceInstanceRedeploy(environmentId: $eid, serviceId: $sid)}", variables: {eid: $eid, sid: $sid}}')
+    local redeploy_response
+    redeploy_response=$(railway_graphql "$redeploy_payload") || {
+        echo -e "${YELLOW}   ⚠️  ${service_name}: image was updated but redeploy call failed. Trigger manually in dashboard.${NC}"
+        return 1
+    }
+    if echo "$redeploy_response" | jq -e '.errors' >/dev/null 2>&1; then
+        local err
+        err=$(echo "$redeploy_response" | jq -r '.errors[0].message // "unknown GraphQL error"')
+        echo -e "${YELLOW}   ⚠️  ${service_name}: redeploy mutation failed: ${err}. Trigger manually.${NC}"
+        return 1
+    fi
+
+    echo -e "${GREEN}   ✅ ${service_name}: image → ${image_ref}, redeploy triggered${NC}"
+    return 0
+}
+
 echo -e "${BLUE}🚀 Starting release promotion and Docker publishing process...${NC}"
 
 # Check if gh CLI is installed and authenticated
@@ -283,7 +401,7 @@ if [ "$SKIP_DOCKER" = false ]; then
         --repo "$REPO" \
         --field git_tag="$DOCKER_RELEASE" \
         --field tag_latest="$TAG_LATEST"
-    
+
     if [ $? -eq 0 ]; then
         LATEST_TAG_INFO=""
         if [ "$TAG_LATEST" = "true" ]; then
@@ -291,6 +409,13 @@ if [ "$SKIP_DOCKER" = false ]; then
         fi
         echo -e "${GREEN}   ✅ Production Docker workflow triggered for ${DOCKER_RELEASE}${LATEST_TAG_INFO}${NC}"
         echo -e "      • Image: avaprotocol/ap-avs:${DOCKER_RELEASE}${LATEST_TAG_INFO}"
+        # Capture the run ID we just dispatched so we can wait on it
+        # below (gh workflow run doesn't return the ID in stdout).
+        # Brief sleep gives GitHub time to register the new run before
+        # we list it, otherwise the "most recent" run is the previous
+        # one and `gh run watch` returns immediately with success.
+        sleep 3
+        PROD_RUN_ID=$(gh run list --repo "$REPO" --workflow="publish-prod-docker.yml" --limit 1 --json databaseId --jq '.[0].databaseId')
     else
         echo -e "${RED}   ❌ Failed to trigger production Docker workflow for ${DOCKER_RELEASE}${NC}"
         DOCKER_SUCCESS=false
@@ -303,6 +428,67 @@ fi
 
 if [ "$DOCKER_SUCCESS" != true ]; then
     echo -e "${YELLOW}⚠️  Some Docker workflows failed to trigger${NC}"
+fi
+
+# ---- Watch prod Docker build to completion + (optionally) update Railway ----
+#
+# Only the prod image is what Railway pulls, so we wait on that one
+# specifically; the dev workflow can finish whenever. We also skip the
+# Railway path for non-full-release tags (e.g. -rc.N) — back-fills and
+# pre-releases shouldn't propagate to prod gateway/workers.
+PROD_WORKFLOW_OK=false
+if [ "$SKIP_DOCKER" = false ] \
+   && [[ "$DOCKER_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+   && [ -n "${PROD_RUN_ID:-}" ]; then
+    echo
+    echo -e "${BLUE}⏳ Waiting for prod Docker workflow to finish (run #${PROD_RUN_ID})...${NC}"
+    echo -e "   ${YELLOW}https://github.com/${REPO}/actions/runs/${PROD_RUN_ID}${NC}"
+    if gh run watch "$PROD_RUN_ID" --repo "$REPO" --exit-status >/dev/null 2>&1; then
+        echo -e "${GREEN}✅ Prod Docker workflow succeeded${NC}"
+        PROD_WORKFLOW_OK=true
+    else
+        echo -e "${RED}❌ Prod Docker workflow failed — skipping Railway update.${NC}"
+        echo -e "${RED}   Check the run for details before retrying.${NC}"
+    fi
+fi
+
+if [ "$PROD_WORKFLOW_OK" = true ]; then
+    if [ -n "${RAILWAY_API_TOKEN:-}" ]; then
+        IMAGE_REF="avaprotocol/ap-avs:${DOCKER_RELEASE}"
+        echo
+        echo -e "${YELLOW}🚂 Update Railway services to ${IMAGE_REF}?${NC}"
+        echo -e "   Services (in order): ${RAILWAY_SERVICES}"
+        read -p "Proceed? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            # Sanity-check jq is installed (the GraphQL helpers depend
+            # on it). curl is standard on macOS + Ubuntu; jq is not.
+            if ! command -v jq &> /dev/null; then
+                echo -e "${YELLOW}⚠️  jq not found in PATH. Install jq (brew install jq) and re-run, or update Railway manually.${NC}"
+            else
+                echo -e "${BLUE}Updating Railway services...${NC}"
+                RAILWAY_FAILS=0
+                for svc in $RAILWAY_SERVICES; do
+                    railway_update_service "$svc" "$IMAGE_REF" || RAILWAY_FAILS=$((RAILWAY_FAILS+1))
+                done
+                if [ "$RAILWAY_FAILS" -gt 0 ]; then
+                    echo -e "${YELLOW}⚠️  ${RAILWAY_FAILS} Railway service(s) failed to update — finish those by hand in the dashboard.${NC}"
+                else
+                    echo -e "${GREEN}✅ All Railway services pointed at ${IMAGE_REF}${NC}"
+                fi
+            fi
+        else
+            echo -e "${BLUE}⏭️  Skipping Railway update (do it from the dashboard if you change your mind)${NC}"
+        fi
+    else
+        echo
+        echo -e "${YELLOW}ℹ️  RAILWAY_API_TOKEN not set — skipping Railway auto-update.${NC}"
+        echo -e "${YELLOW}   To enable next time:${NC}"
+        echo -e "${YELLOW}     1. Create a Team token at https://railway.com/account/tokens${NC}"
+        echo -e "${YELLOW}     2. Export it: export RAILWAY_API_TOKEN=<token>${NC}"
+        echo -e "${YELLOW}     3. Re-run ./scripts/release.sh after the next merge.${NC}"
+        echo -e "${YELLOW}   Or update services manually in the Railway dashboard.${NC}"
+    fi
 fi
 
 # Show final summary
@@ -327,6 +513,10 @@ if [ "$SKIP_DOCKER" = false ]; then
     echo -e "   • Prod Docker image: avaprotocol/ap-avs:${DOCKER_RELEASE}${LATEST_TAG_INFO}"
 fi
 
+if [ "$PROD_WORKFLOW_OK" = true ] && [ -n "${RAILWAY_API_TOKEN:-}" ]; then
+    echo -e "   • Railway services targeted: ${RAILWAY_SERVICES}"
+fi
+
 if [ "$SKIP_PROMOTION" = true ] && [ "$SKIP_DOCKER" = true ]; then
     echo -e "   • No actions performed (both skipped by user)"
 elif [ "$SKIP_PROMOTION" = true ]; then
@@ -338,11 +528,17 @@ fi
 echo
 if [ "$SKIP_DOCKER" = false ]; then
     echo -e "${YELLOW}💡 Next steps:${NC}"
-    echo -e "   • Monitor the workflow runs:"
-    echo -e "     - Dev workflow:  https://github.com/${REPO}/actions/workflows/publish-dev-docker.yml"
-    echo -e "     - Prod workflow: https://github.com/${REPO}/actions/workflows/publish-prod-docker.yml"
-    echo -e "   • Verify Docker images are published correctly"
-    echo -e "   • Update deployment configurations if needed"
+    if [ "$PROD_WORKFLOW_OK" = true ] && [ -n "${RAILWAY_API_TOKEN:-}" ]; then
+        echo -e "   • Watch Railway deploys finish (gateway first, then workers):"
+        echo -e "     railway logs --service gateway"
+        echo -e "   • Confirm Sentry events now tag release: ${DOCKER_RELEASE#v}@<sha>"
+    else
+        echo -e "   • Monitor the workflow runs:"
+        echo -e "     - Dev workflow:  https://github.com/${REPO}/actions/workflows/publish-dev-docker.yml"
+        echo -e "     - Prod workflow: https://github.com/${REPO}/actions/workflows/publish-prod-docker.yml"
+        echo -e "   • Verify Docker images are published correctly"
+        echo -e "   • Update Railway services manually in the dashboard"
+    fi
     echo
 fi
 
