@@ -11,8 +11,8 @@
 #
 # Secrets are injected via Railway sealed env vars and expanded at
 # startup. Set these on the `worker-bnb-mainnet` service:
-#   BNB_RPC (HTTPS; WS derived in code)
-#   BNB_BUNDLER_URL          — optional for connectivity-only; can be
+#   CHAIN_ENDPOINT (HTTPS; WS derived in code)
+#   BUNDLER_URL          — optional for connectivity-only; can be
 #                              left unset (the YAML expansion will
 #                              produce an empty string and bundler
 #                              calls would no-op)
@@ -35,12 +35,12 @@ health_address: "0.0.0.0:8080"
 # listen on `listen_address`.
 
 # Chain RPC endpoints
-eth_rpc_url: ${BNB_RPC}
+eth_rpc_url: ${CHAIN_ENDPOINT}
 
 # Bundler — left as an env var expansion. Unset in connectivity-only
 # mode; populate once a 4337 bundler provider with BNB support is in
 # place.
-bundler_url: ${BNB_BUNDLER_URL}
+bundler_url: ${BUNDLER_URL}
 
 # Smart wallet config
 smart_wallet:
