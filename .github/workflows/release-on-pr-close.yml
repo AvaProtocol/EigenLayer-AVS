@@ -19,7 +19,7 @@ jobs:
       packages: write # If you use GitHub Packages for Docker images (good to have)
     steps:
       - name: Checkout repository with full history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # Fetch all history so go-semantic-release can determine the version based on all commits
           fetch-depth: 0
