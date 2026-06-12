@@ -14,10 +14,17 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-// FeeEstimator handles comprehensive fee estimation for workflows
+// FeeEstimator handles comprehensive fee estimation for workflows.
+//
+// The chain field is a ChainStateReader — the gateway-mode wiring
+// constructs a worker-routed implementation so FeeEstimator no longer
+// holds a direct chain-RPC connection. Single-chain mode and the
+// non-gateway-mode REST callers continue to use a directChainStateReader
+// wrapping an *ethclient.Client (existing constructors take care of
+// this transparently).
 type FeeEstimator struct {
 	logger            sdklogging.Logger
-	ethClient         *ethclient.Client
+	chain             ChainStateReader
 	tenderlyClient    *TenderlyClient
 	smartWalletConfig *config.SmartWalletConfig
 	chainID           int64 // Cached after first detection
@@ -84,8 +91,11 @@ type GasEstimationResult struct {
 	Error            string
 }
 
-// NewFeeEstimator creates a new fee estimator instance
-// Chain ID will be detected automatically from the eth client
+// NewFeeEstimator creates a new fee estimator instance.
+// Wraps the supplied ethClient in a DirectChainStateReader so the
+// chain ID will be detected from the client on first use. Gateway
+// callers should prefer NewFeeEstimatorWithChainReader to inject a
+// worker-routed reader and avoid the direct chain-RPC dependency.
 func NewFeeEstimator(
 	logger sdklogging.Logger,
 	ethClient *ethclient.Client,
@@ -93,20 +103,18 @@ func NewFeeEstimator(
 	smartWalletConfig *config.SmartWalletConfig,
 	priceService PriceService,
 ) *FeeEstimator {
-	return &FeeEstimator{
-		logger:            logger,
-		ethClient:         ethClient,
-		tenderlyClient:    tenderlyClient,
-		smartWalletConfig: smartWalletConfig,
-		chainID:           0, // Will be detected on first use
-		priceService:      priceService,
-		feeRates:          getDefaultFeeRates(),
-		discountRules:     getDefaultDiscountRules(),
-	}
+	return newFeeEstimator(
+		logger,
+		NewDirectChainStateReader(ethClient, 0),
+		tenderlyClient,
+		smartWalletConfig,
+		priceService,
+		getDefaultFeeRates(),
+	)
 }
 
-// NewFeeEstimatorWithConfig creates a new fee estimator instance with configurable rates
-// Chain ID will be detected automatically from the eth client
+// NewFeeEstimatorWithConfig is NewFeeEstimator with explicit fee-rate
+// configuration. Same backward-compatible direct-RPC wrapping.
 func NewFeeEstimatorWithConfig(
 	logger sdklogging.Logger,
 	ethClient *ethclient.Client,
@@ -115,14 +123,51 @@ func NewFeeEstimatorWithConfig(
 	priceService PriceService,
 	feeRatesConfig *config.FeeRatesConfig,
 ) *FeeEstimator {
+	return newFeeEstimator(
+		logger,
+		NewDirectChainStateReader(ethClient, 0),
+		tenderlyClient,
+		smartWalletConfig,
+		priceService,
+		convertFeeRatesConfig(feeRatesConfig),
+	)
+}
+
+// NewFeeEstimatorWithChainReader is the gateway-mode entry point.
+// chain is typically a workerChainStateReader (gateway routes chain-RPC
+// calls through the chain's worker) but any ChainStateReader works.
+func NewFeeEstimatorWithChainReader(
+	logger sdklogging.Logger,
+	chain ChainStateReader,
+	tenderlyClient *TenderlyClient,
+	smartWalletConfig *config.SmartWalletConfig,
+	priceService PriceService,
+	feeRatesConfig *config.FeeRatesConfig,
+) *FeeEstimator {
+	rates := getDefaultFeeRates()
+	if feeRatesConfig != nil {
+		rates = convertFeeRatesConfig(feeRatesConfig)
+	}
+	return newFeeEstimator(logger, chain, tenderlyClient, smartWalletConfig, priceService, rates)
+}
+
+// newFeeEstimator is the internal shared constructor.
+func newFeeEstimator(
+	logger sdklogging.Logger,
+	chain ChainStateReader,
+	tenderlyClient *TenderlyClient,
+	smartWalletConfig *config.SmartWalletConfig,
+	priceService PriceService,
+	rates *FeeRates,
+) *FeeEstimator {
 	return &FeeEstimator{
 		logger:            logger,
-		ethClient:         ethClient,
+		chain:             chain,
 		tenderlyClient:    tenderlyClient,
 		smartWalletConfig: smartWalletConfig,
-		chainID:           0, // Will be detected on first use
+		chainID:           0,
 		priceService:      priceService,
-		feeRates:          convertFeeRatesConfig(feeRatesConfig),
+		feeRates:          rates,
 		discountRules:     getDefaultDiscountRules(),
 	}
 }
@@ -134,15 +179,16 @@ func (fe *FeeEstimator) getChainID(ctx context.Context) (int64, error) {
 		return fe.chainID, nil
 	}
 
-	// Detect chain ID from eth client
-	chainID, err := fe.ethClient.ChainID(ctx)
+	// Detect chain ID from the underlying reader. Worker-routed
+	// readers know the ID a priori; direct-RPC readers will issue an
+	// eth_chainId on first call and cache.
+	chainID, err := fe.chain.ChainID(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get chain ID from eth client: %w", err)
+		return 0, fmt.Errorf("failed to get chain ID: %w", err)
 	}
 
-	// Cache the result
-	fe.chainID = chainID.Int64()
-	fe.logger.Info("🔗 Detected chain ID from eth client", "chain_id", fe.chainID)
+	fe.chainID = chainID
+	fe.logger.Info("🔗 Resolved chain ID", "chain_id", fe.chainID)
 
 	return fe.chainID, nil
 }
@@ -270,7 +316,7 @@ func (fe *FeeEstimator) resolveRunnerAndWalletCreation(ctx context.Context, req 
 
 	// Check if smart wallet already exists.
 	// On RPC failure, assume wallet exists to avoid blocking fee estimation during transient outages.
-	code, err := fe.ethClient.CodeAt(ctx, runnerAddress, nil)
+	code, err := fe.chain.CodeAt(ctx, runnerAddress)
 	if err != nil {
 		fe.logger.Warn("Failed to check smart wallet deployment status, assuming wallet exists",
 			"address", runnerAddress.Hex(), "error", err)
@@ -300,7 +346,7 @@ func (fe *FeeEstimator) estimateWalletCreationGas(ctx context.Context, walletAdd
 	const fallbackCreationGas = int64(500000) // Conservative fallback for ERC-6900 wallet deployment
 
 	// Get current gas price
-	gasPrice, err := fe.ethClient.SuggestGasPrice(ctx)
+	gasPrice, err := fe.chain.SuggestGasPrice(ctx)
 	if err != nil {
 		fe.logger.Warn("Failed to get current gas price for wallet creation", "error", err)
 		gasPrice = big.NewInt(int64(DefaultGasPrice))
@@ -324,7 +370,7 @@ func (fe *FeeEstimator) estimateWalletCreationGas(ctx context.Context, walletAdd
 	calldata := initCodeBytes[20:]
 
 	// Estimate gas via eth_estimateGas against the factory contract
-	estimatedGas, err := fe.ethClient.EstimateGas(ctx, ethereum.CallMsg{
+	estimatedGas, err := fe.chain.EstimateGas(ctx, ethereum.CallMsg{
 		To:   &factoryAddress,
 		Data: calldata,
 	})
@@ -354,7 +400,7 @@ func (fe *FeeEstimator) estimateCOGS(ctx context.Context, req *avsproto.Estimate
 
 	var cogsList []*avsproto.NodeCOGS
 
-	gasPrice, err := fe.ethClient.SuggestGasPrice(ctx)
+	gasPrice, err := fe.chain.SuggestGasPrice(ctx)
 	if err != nil {
 		fe.logger.Warn("Failed to get current gas price, using fallback", "error", err)
 		gasPrice = big.NewInt(int64(DefaultGasPrice))

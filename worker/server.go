@@ -6,12 +6,32 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
+
+// ethereumCallMsgFromProto maps a WorkerEstimateGasReq into the CallMsg
+// shape ethclient.EstimateGas takes. From is optional (chain default
+// applies when empty). Value defaults to 0.
+func ethereumCallMsgFromProto(req *avsproto.WorkerEstimateGasReq, to common.Address) ethereum.CallMsg {
+	msg := ethereum.CallMsg{
+		To:   &to,
+		Data: req.Data,
+	}
+	if req.From != "" {
+		msg.From = common.HexToAddress(req.From)
+	}
+	if req.Value != "" {
+		if v, ok := new(big.Int).SetString(req.Value, 10); ok {
+			msg.Value = v
+		}
+	}
+	return msg
+}
 
 type Server struct {
 	avsproto.UnimplementedChainWorkerServer
@@ -160,5 +180,75 @@ func (s *Server) GetTokenMetadata(ctx context.Context, req *avsproto.WorkerGetTo
 		Decimals: metadata.Decimals,
 		Found:    true,
 		Source:   metadata.Source,
+	}, nil
+}
+
+// GetNonceByAddress reads the EntryPoint nonce for an arbitrary smart
+// wallet address. REST callers know the address from gateway storage
+// and don't want to re-derive (owner, salt). The pre-existing GetNonce
+// happens to do the same thing (its param is misnamed "owner" but is
+// passed to EntryPoint.getNonce as the sender) — but exposing a clearly
+// named alias keeps the gateway-side caller honest about what it's
+// querying.
+func (s *Server) GetNonceByAddress(ctx context.Context, req *avsproto.WorkerGetNonceByAddressReq) (*avsproto.WorkerGetNonceResp, error) {
+	walletAddr := common.HexToAddress(req.WalletAddress)
+
+	key := big.NewInt(0)
+	if req.NonceKey != "" {
+		parsed, ok := new(big.Int).SetString(req.NonceKey, 10)
+		if !ok {
+			return nil, fmt.Errorf("invalid nonce_key %q (expected base-10 big.Int string)", req.NonceKey)
+		}
+		key = parsed
+	}
+
+	nonce, err := aa.GetNonce(s.worker.rpcClient, walletAddr, key)
+	if err != nil {
+		return nil, fmt.Errorf("getting nonce for %s: %w", req.WalletAddress, err)
+	}
+
+	return &avsproto.WorkerGetNonceResp{
+		Nonce: nonce.String(),
+	}, nil
+}
+
+// SuggestGasPrice wraps ethclient.SuggestGasPrice for the chain this
+// worker is bound to. Used by the gateway's fee estimator.
+func (s *Server) SuggestGasPrice(ctx context.Context, req *avsproto.WorkerSuggestGasPriceReq) (*avsproto.WorkerSuggestGasPriceResp, error) {
+	price, err := s.worker.rpcClient.SuggestGasPrice(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("SuggestGasPrice on chain %d: %w", s.worker.config.ChainID, err)
+	}
+	return &avsproto.WorkerSuggestGasPriceResp{
+		GasPriceWei: price.String(),
+	}, nil
+}
+
+// EstimateGas wraps ethclient.EstimateGas. Used by the fee estimator
+// to budget UserOp executions before submitting to the bundler.
+func (s *Server) EstimateGas(ctx context.Context, req *avsproto.WorkerEstimateGasReq) (*avsproto.WorkerEstimateGasResp, error) {
+	to := common.HexToAddress(req.To)
+	msg := ethereumCallMsgFromProto(req, to)
+
+	gas, err := s.worker.rpcClient.EstimateGas(ctx, msg)
+	if err != nil {
+		return nil, fmt.Errorf("EstimateGas on chain %d to %s: %w", s.worker.config.ChainID, req.To, err)
+	}
+	return &avsproto.WorkerEstimateGasResp{
+		Gas: gas,
+	}, nil
+}
+
+// GetCode wraps ethclient.CodeAt(addr, nil). Used by the fee estimator
+// to detect whether the runner contract is deployed before issuing a
+// UserOp against it.
+func (s *Server) GetCode(ctx context.Context, req *avsproto.WorkerGetCodeReq) (*avsproto.WorkerGetCodeResp, error) {
+	addr := common.HexToAddress(req.Address)
+	code, err := s.worker.rpcClient.CodeAt(ctx, addr, nil)
+	if err != nil {
+		return nil, fmt.Errorf("CodeAt on chain %d for %s: %w", s.worker.config.ChainID, req.Address, err)
+	}
+	return &avsproto.WorkerGetCodeResp{
+		Code: code,
 	}, nil
 }

@@ -177,3 +177,66 @@ ripping out the gateway's RPC config.
 
 PR A + B can land in the same release. PR C waits for the safety
 cycle.
+
+## Delivered
+
+### Phase A — `ChainTokenLookup` via fetcher injection (PR #579, v3.6.0)
+
+Landed Phase 1 + Phase 2 in one PR using a slimmer pattern than the
+original sketch: instead of a new `ChainTokenLookup` interface
+threaded through five callsites, we added an optional `fetcher`
+field to `TokenEnrichmentService` and a `NewWorkerRoutedTokenEnrichmentService`
+constructor. Existing callers keep working unchanged; the gateway
+constructs the worker-routed variant per chain at startup
+(`aggregator/task_engine.go:127`), and `tokenServiceRegistry`
+keys-by-chain so each lookup hits the right whitelist + the right
+worker.
+
+Verified in prod (v3.6.0 logs):
+`TokenEnrichmentService initializing mode=worker-routed` for every
+chain; the BNB Dwellir-dead-host startup warn is gone.
+
+### Phase 3 — `ChainStateReader` for FeeEstimator + EntryPoint nonce
+
+Extended `worker.proto` with four new RPCs covering the chain-state
+ops the gateway still issued direct-RPC for:
+
+- `GetNonceByAddress` — EntryPoint nonce by wallet address (used by
+  the REST `GetWalletNonce` handler).
+- `SuggestGasPrice`, `EstimateGas`, `GetCode` — used by FeeEstimator
+  for gas pricing and wallet-creation detection.
+
+Mirrored the worker-routed token pattern: introduced
+`ChainStateReader` interface (`core/taskengine/chain_state_reader.go`)
+with two implementations (`directChainStateReader` wrapping
+`ethclient.Client`, `workerChainStateReader` routing each call via
+gRPC). Added a per-chain registry (`RegisterChainStateReader` /
+`GetChainStateReaderForChain`) populated at startup the same way
+`tokenServiceRegistry` is.
+
+`FeeEstimator`'s `*ethclient.Client` field was replaced with a
+`ChainStateReader`; existing constructors wrap the supplied client
+with `NewDirectChainStateReader` for source compatibility, and a
+new `NewFeeEstimatorWithChainReader` constructor takes a reader
+directly (used by the REST fees handler in gateway mode).
+
+REST handlers migrated:
+
+- `handlers_workflows.go:EstimateFees` builds the FeeEstimator from
+  the per-chain reader; falls back to a direct-RPC reader if the
+  registry doesn't have an entry (single-chain mode / edge cases).
+- `handlers_wallets.go:GetWalletNonce` calls
+  `chainReader.GetEntryPointNonce` instead of `aa.GetNonce(rpc, ...)`.
+
+### Phase 4 (open) — drop the per-chain `ethclient.Dial`
+
+Step 7+8 of the Phase 3 plan were deferred: the gateway's
+`smartWalletRpcByChain` map is still used by `ExecuteWithdraw`
+(`aggregator/rpc_server.go:115`) for ERC-20 balance reads. Until
+withdraw is migrated through a worker RPC, the per-chain RPC URLs
+in `gateway-railway.yaml` (and the `<CHAIN>_RPC` env vars on the
+gateway service) have to stay. Migration sketch:
+
+1. Add `GetTokenBalance(chainID, owner, token)` to `worker.proto`.
+2. Replace the balance call in `ExecuteWithdraw` with a worker RPC.
+3. Then strip the per-chain dial and the dead env vars.
