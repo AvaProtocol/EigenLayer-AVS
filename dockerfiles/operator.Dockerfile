@@ -32,6 +32,14 @@ COPY --from=builder /ava /ava
 # fails with "file not found" — see EigenLayer-AVS gateway switchover.
 COPY --from=builder /app/config /app/config
 
+# Bundle the operator entrypoint script so the two operator Railway
+# services (which need ECDSA/BLS keystores materialized from env vars
+# at startup) can pin to this image. The script auto-detects the
+# binary path so it works equally for /ava (this image) and ./ap (the
+# root Dockerfile). Railway Start Command for an operator service:
+#   /app/scripts/operator-entrypoint.sh operator --config=/app/config/operator-railway.yaml
+COPY --from=builder /app/scripts/operator-entrypoint.sh /app/scripts/operator-entrypoint.sh
+
 ENTRYPOINT ["/ava"]
 
 # No default CMD: this image is shared with external operators, and

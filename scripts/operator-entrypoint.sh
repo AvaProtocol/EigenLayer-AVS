@@ -21,4 +21,21 @@ if [ -n "$BLS_KEY_JSON" ]; then
     echo "Wrote BLS key file"
 fi
 
-exec ./ap "$@"
+# Auto-detect which binary this image carries:
+#   - dockerfiles/operator.Dockerfile and dockerfiles/aggregator.Dockerfile
+#     produce /ava (and this is what avaprotocol/ap-avs ships).
+#   - The root Dockerfile produces ./ap (at WORKDIR /app) and is what
+#     `make build` and any source-build Railway services use.
+# Allow an explicit override via $AVS_BIN for unusual deployments.
+if [ -n "$AVS_BIN" ] && [ -x "$AVS_BIN" ]; then
+    BIN="$AVS_BIN"
+elif [ -x /ava ]; then
+    BIN=/ava
+elif [ -x ./ap ]; then
+    BIN=./ap
+else
+    echo "operator-entrypoint: no AVS binary found at \$AVS_BIN, /ava, or ./ap" >&2
+    exit 1
+fi
+
+exec "$BIN" "$@"
