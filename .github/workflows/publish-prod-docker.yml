@@ -9,17 +9,21 @@ name: Publish Production Docker Image
 #
 # Trigger paths:
 #
-#   1. `./scripts/release.sh` (the canonical release flow) — promotes the
-#      latest semantic-release pre-release tag to a full GitHub release,
-#      then dispatches this workflow with --field git_tag=vX.Y.Z.
+#   1. `./scripts/release.sh` in the avs-infra repo (the canonical
+#      release flow) — promotes the latest semantic-release pre-release
+#      tag to a full GitHub release, dispatches this workflow with
+#      --field git_tag=vX.Y.Z, watches it to completion, and then flips
+#      Railway services to the new image. Lives in avs-infra because
+#      the Railway-flip step needs deployment topology (project ID,
+#      env ID, service list) that doesn't belong in this app repo.
 #
 #   2. Manual dashboard dispatch — for back-fills or re-publishes against
 #      an existing release tag. You must type the release tag (e.g. v3.2.0).
 #      Workflow hard-fails if the tag isn't a published GitHub release.
 #
 # If you need to ship something that isn't at a release yet, create the
-# release first (via release.sh or `gh release create`), then dispatch
-# this workflow against the new tag.
+# release first (via avs-infra's release.sh or `gh release create`),
+# then dispatch this workflow against the new tag.
 
 on:
   workflow_dispatch:
@@ -90,8 +94,8 @@ jobs:
             echo "::error::Production images must be built from a published release so version.semver"
             echo "::error::matches what operators report in /telemetry. To resolve:"
             echo "::error::"
-            echo "::error::  1. Run ./scripts/release.sh (promotes the latest pre-release to a full release"
-            echo "::error::     and dispatches this workflow automatically), OR"
+            echo "::error::  1. Run ./scripts/release.sh from the avs-infra repo (promotes the latest"
+            echo "::error::     pre-release to a full release and dispatches this workflow automatically), OR"
             echo "::error::"
             echo "::error::  2. Pick an existing published release from"
             echo "::error::     https://github.com/${{ github.repository }}/releases"

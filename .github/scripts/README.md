@@ -1,48 +1,42 @@
 # GitHub Scripts
 
-This directory contains scripts for automating GitHub workflows and releases.
+This directory contains scripts that GitHub Actions workflows call into.
 
-## Scripts
+## Release flow lives in `avs-infra`
 
-### `promote-and-publish.sh`
+The previous `promote-and-publish.sh` (and its `scripts/release.sh`
+wrapper at the repo root) moved to the private
+[`avs-infra`](https://github.com/AvaProtocol/avs-infra) repo:
 
-Automates the process of promoting a pre-release to a full release and triggering Docker builds.
+- `avs-infra/scripts/release.sh`
+- `avs-infra/scripts/promote-and-publish.sh`
 
-**What it does:**
-1. Finds the latest pre-release (e.g., `v1.13.2`)
-2. Promotes it to a full release and marks it as "latest"
-3. Triggers the dev Docker workflow (`publish-dev-docker.yml`)
-4. Triggers the prod Docker workflow (`publish-prod-docker.yml`) with `latest` tag
+That's where the Railway-flip step lives now — project ID, environment
+ID, service list, and `RAILWAY_API_TOKEN` are deployment topology that
+doesn't belong with the application code. The release flow there:
 
-**Usage:**
-```bash
-# From repository root
-./.github/scripts/promote-and-publish.sh
+1. Sources `avs-infra/.env` (tokens).
+2. Talks to this repo via `gh` (override with `TARGET_REPO`): finds
+   the latest pre-release, prompts to promote, dispatches
+   `publish-prod-docker.yml` + `publish-dev-docker.yml`.
+3. Watches the prod Docker build to completion.
+4. Flips Railway services to the new image via the Railway GraphQL API.
 
-# Or use the wrapper script
-./release.sh
-```
+See `avs-infra/RAILWAY_OPERATIONS.md` → "Releasing a new version
+end-to-end" for the full runbook.
 
-**Prerequisites:**
-- GitHub CLI (`gh`) installed and authenticated
-- Permissions to create releases and trigger workflows
-- A pre-release must exist to promote
-
-**Docker Images Created:**
-- `avaprotocol/avs-dev:v1.13.2` and `avaprotocol/avs-dev:latest`
-- `avaprotocol/ap-avs:v1.13.2` and `avaprotocol/ap-avs:latest`
+## Scripts that remain here
 
 ### `check-gh-setup.sh`
 
 Verifies that GitHub CLI is properly configured for release automation.
 
-**What it checks:**
+**Checks:**
 - GitHub CLI installation and authentication
 - Repository access and permissions
 - Existing releases and pre-releases
 - Required workflow files
 
-**Usage:**
 ```bash
 ./.github/scripts/check-gh-setup.sh
 ```
@@ -51,15 +45,14 @@ Verifies that GitHub CLI is properly configured for release automation.
 
 Generates test configuration files for the GitHub Actions workflows.
 
-## Workflow Integration
+## Workflows that drive releases
 
-This script works with the following workflows:
-- `release-on-pr-close.yml` - Creates pre-releases automatically
-- `publish-dev-docker.yml` - Builds development Docker images
-- `publish-prod-docker.yml` - Builds production Docker images
+- `release-on-pr-close.yml` — creates pre-release tags automatically
+  on every PR merged to `main` or `staging`.
+- `publish-dev-docker.yml` — builds development Docker images
+  (`avaprotocol/avs-dev:vX.Y.Z`).
+- `publish-prod-docker.yml` — builds production Docker images
+  (`avaprotocol/ap-avs:vX.Y.Z`).
 
-## Security Notes
-
-- The script requires GitHub CLI authentication
-- It will prompt for confirmation before making changes
-- All operations are logged with colored output for clarity
+`avs-infra/scripts/release.sh` is what dispatches the two `publish-*`
+workflows after promoting a pre-release.
