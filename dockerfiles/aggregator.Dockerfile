@@ -25,4 +25,17 @@ RUN useradd -ms /bin/bash ava && \
 
 COPY --from=builder /ava /ava
 
+# Bundle the in-repo configs so the image is self-contained: the Railway
+# gateway service can run with no external mount, and operators reach
+# config/operator_sample.yaml from inside the container if they want.
+# Without this, `/ava aggregator --config=config/gateway-railway.yaml`
+# fails with "file not found" — see EigenLayer-AVS gateway switchover.
+COPY --from=builder /app/config ./config
+
 ENTRYPOINT ["/ava"]
+
+# Default to the Railway gateway role. Operators (and any other use of
+# this image) override by passing their subcommand + args, e.g.
+# `docker run avaprotocol/ap-avs operator --config=...` — args
+# completely replace CMD per Docker semantics.
+CMD ["aggregator", "--config=config/gateway-railway.yaml"]
