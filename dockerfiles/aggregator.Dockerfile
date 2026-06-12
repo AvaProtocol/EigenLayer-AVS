@@ -30,7 +30,7 @@ COPY --from=builder /ava /ava
 # config/operator_sample.yaml from inside the container if they want.
 # Without this, `/ava aggregator --config=config/gateway-railway.yaml`
 # fails with "file not found" — see EigenLayer-AVS gateway switchover.
-COPY --from=builder /app/config ./config
+COPY --from=builder /app/config /app/config
 
 ENTRYPOINT ["/ava"]
 
@@ -38,4 +38,4 @@ ENTRYPOINT ["/ava"]
 # this image) override by passing their subcommand + args, e.g.
 # `docker run avaprotocol/ap-avs operator --config=...` — args
 # completely replace CMD per Docker semantics.
-CMD ["aggregator", "--config=config/gateway-railway.yaml"]
+CMD ["aggregator", "--config=/app/config/gateway-railway.yaml"]
