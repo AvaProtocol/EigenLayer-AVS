@@ -34,8 +34,9 @@ COPY --from=builder /app/config /app/config
 
 ENTRYPOINT ["/ava"]
 
-# Default to the Railway gateway role. Operators (and any other use of
-# this image) override by passing their subcommand + args, e.g.
-# `docker run avaprotocol/ap-avs operator --config=...` — args
-# completely replace CMD per Docker semantics.
-CMD ["aggregator", "--config=/app/config/gateway-railway.yaml"]
+# No default CMD: this image is shared with external operators, and
+# silently flipping a no-args invocation from cobra-help-exit-0 to
+# aggregator-boot-fail would change exit codes / monitoring signals
+# for their existing setups. Callers always pass a subcommand:
+#   - Operators: `docker run avaprotocol/ap-avs operator --config=...`
+#   - Railway gateway: Start Command set in the Railway dashboard.
