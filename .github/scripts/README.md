@@ -1,29 +1,15 @@
 # GitHub Scripts
 
-This directory contains scripts that GitHub Actions workflows call into.
+This directory holds scripts that GitHub Actions workflows call into.
 
-## Release flow lives in `avs-infra`
+## Release scripts have moved out of this repo
 
 The previous `promote-and-publish.sh` (and its `scripts/release.sh`
-wrapper at the repo root) moved to the private
-[`avs-infra`](https://github.com/AvaProtocol/avs-infra) repo:
+wrapper at the repo root) live in a separate operator-side repo now.
+That repo owns deployment topology (Railway project/env IDs, service
+list, API tokens) which doesn't belong with application code.
 
-- `avs-infra/scripts/release.sh`
-- `avs-infra/scripts/promote-and-publish.sh`
-
-That's where the Railway-flip step lives now — project ID, environment
-ID, service list, and `RAILWAY_API_TOKEN` are deployment topology that
-doesn't belong with the application code. The release flow there:
-
-1. Sources `avs-infra/.env` (tokens).
-2. Talks to this repo via `gh` (override with `TARGET_REPO`): finds
-   the latest pre-release, prompts to promote, dispatches
-   `publish-prod-docker.yml` + `publish-dev-docker.yml`.
-3. Watches the prod Docker build to completion.
-4. Flips Railway services to the new image via the Railway GraphQL API.
-
-See `avs-infra/RAILWAY_OPERATIONS.md` → "Releasing a new version
-end-to-end" for the full runbook.
+The team that does releases knows where to run the new flow.
 
 ## Scripts that remain here
 
@@ -54,5 +40,5 @@ Generates test configuration files for the GitHub Actions workflows.
 - `publish-prod-docker.yml` — builds production Docker images
   (`avaprotocol/ap-avs:vX.Y.Z`).
 
-`avs-infra/scripts/release.sh` is what dispatches the two `publish-*`
-workflows after promoting a pre-release.
+The two `publish-*` workflows accept `workflow_dispatch` inputs and are
+invoked by the team's release tooling.
