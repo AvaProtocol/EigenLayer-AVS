@@ -125,8 +125,12 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 			// chainRegistry hasn't connected yet, or a chain that has
 			// no worker registered.
 			var chainTokenService *taskengine.TokenEnrichmentService
+			workerRouted := false
 			if agg.chainRegistry != nil {
-				if entry, err := agg.chainRegistry.GetWorker(chain.ChainID); err == nil && entry.Client != nil {
+				// GetWorker already errors when entry.Client is nil
+				// (chain_registry.go:208), so an explicit nil-check
+				// here would be dead code.
+				if entry, err := agg.chainRegistry.GetWorker(chain.ChainID); err == nil {
 					fetcher := taskengine.NewWorkerRoutedFetcher(entry.Client, 10*time.Second)
 					chainTokenService, err = taskengine.NewWorkerRoutedTokenEnrichmentService(
 						uint64(chain.ChainID), fetcher, agg.logger,
@@ -135,6 +139,8 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 						agg.logger.Warn("Failed to initialize worker-routed TokenEnrichmentService — falling back to direct RPC",
 							"chain", chain.Name, "chain_id", chain.ChainID, "error", err)
 						chainTokenService = nil
+					} else {
+						workerRouted = true
 					}
 				}
 			}
@@ -151,7 +157,7 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 				"chain", chain.Name,
 				"chainID", chainTokenService.GetChainID(),
 				"whitelistTokens", chainTokenService.GetCacheSize(),
-				"worker_routed", agg.chainRegistry != nil)
+				"worker_routed", workerRouted)
 		}
 	}
 

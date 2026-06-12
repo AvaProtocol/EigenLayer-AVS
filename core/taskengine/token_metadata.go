@@ -35,6 +35,12 @@ type TokenMetadata struct {
 // Returning (nil, nil) is interpreted as "not found in any source"
 // (matches the no-rpc-client fallback behavior). Returning a non-nil
 // error means the fetch itself failed (worker unreachable, network etc).
+//
+// TODO(phase-b): thread context.Context through this signature so
+// callers can propagate graceful-shutdown cancellation instead of
+// relying on the worker-fetcher's internal timeout. Deferred to keep
+// Phase A's blast radius zero: adding ctx here ripples to all five
+// callsites that consume TokenEnrichmentService.GetTokenMetadata.
 type TokenMetadataFetcher func(contractAddress string) (*TokenMetadata, error)
 
 // TokenEnrichmentService handles token metadata lookup and enrichment
@@ -185,7 +191,10 @@ func newTokenEnrichmentService(
 		if fetcher != nil {
 			mode = "worker-routed"
 		}
-		logger.Info("TokenEnrichmentService chain ID detected", "chainID", service.chainID, "mode", mode)
+		// "detected" was historically accurate when chainID came from
+		// rpcClient.ChainID(); in worker-routed mode the chainID is
+		// supplied by the caller, so use neutral wording.
+		logger.Info("TokenEnrichmentService initializing", "chainID", service.chainID, "mode", mode)
 	}
 
 	if err := service.LoadWhitelist(); err != nil {
@@ -342,11 +351,16 @@ func (t *TokenEnrichmentService) GetTokenMetadata(contractAddress string) (*Toke
 	t.cacheMux.Unlock()
 
 	if t.logger != nil {
-		t.logger.Info("Fetched token metadata from RPC and cached",
+		// metadata.Source is "rpc" for direct-RPC fetches, or whatever
+		// the worker returned (typically "whitelist" or "rpc") for
+		// worker-routed fetches — log it so this line stays accurate
+		// regardless of which path executed.
+		t.logger.Info("Fetched token metadata and cached",
 			"address", contractAddress,
 			"name", metadata.Name,
 			"symbol", metadata.Symbol,
-			"decimals", metadata.Decimals)
+			"decimals", metadata.Decimals,
+			"source", metadata.Source)
 	}
 
 	return metadata, nil
