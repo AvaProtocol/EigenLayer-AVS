@@ -103,6 +103,13 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 			if chain.SmartWallet == nil || chain.SmartWallet.EthRpcUrl == "" {
 				continue
 			}
+			// We still dial the chain RPC for smartWalletRpcByChain — the
+			// gateway uses it for things like balance reads in the
+			// withdraw flow that haven't been routed through workers yet
+			// (tracked in docs/changes/20260612-delegate-chain-rpc-to-workers.md).
+			// Token-metadata lookups, however, now route through the chain
+			// worker so we don't need direct RPC for them. The dial here
+			// is therefore unchanged for now — Phase B drops it.
 			chainRpc, err := ethclient.Dial(chain.SmartWallet.EthRpcUrl)
 			if err != nil {
 				agg.logger.Warn("Failed to dial chain RPC",
@@ -111,17 +118,46 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 			}
 			agg.smartWalletRpcByChain[chain.ChainID] = chainRpc
 
-			chainTokenService, err := taskengine.NewTokenEnrichmentService(chainRpc, agg.logger)
-			if err != nil {
-				agg.logger.Warn("Failed to initialize chain TokenEnrichmentService",
-					"chain", chain.Name, "chain_id", chain.ChainID, "error", err)
-				continue
+			// Token enrichment routes through the chain worker via gRPC
+			// (worker/server.go:GetTokenMetadata implements this). We
+			// fall back to the direct-RPC path only when the worker
+			// isn't reachable — typically a startup race where the
+			// chainRegistry hasn't connected yet, or a chain that has
+			// no worker registered.
+			var chainTokenService *taskengine.TokenEnrichmentService
+			workerRouted := false
+			if agg.chainRegistry != nil {
+				// GetWorker already errors when entry.Client is nil
+				// (chain_registry.go:208), so an explicit nil-check
+				// here would be dead code.
+				if entry, err := agg.chainRegistry.GetWorker(chain.ChainID); err == nil {
+					fetcher := taskengine.NewWorkerRoutedFetcher(entry.Client, 10*time.Second)
+					chainTokenService, err = taskengine.NewWorkerRoutedTokenEnrichmentService(
+						uint64(chain.ChainID), fetcher, agg.logger,
+					)
+					if err != nil {
+						agg.logger.Warn("Failed to initialize worker-routed TokenEnrichmentService — falling back to direct RPC",
+							"chain", chain.Name, "chain_id", chain.ChainID, "error", err)
+						chainTokenService = nil
+					} else {
+						workerRouted = true
+					}
+				}
+			}
+			if chainTokenService == nil {
+				chainTokenService, err = taskengine.NewTokenEnrichmentService(chainRpc, agg.logger)
+				if err != nil {
+					agg.logger.Warn("Failed to initialize chain TokenEnrichmentService",
+						"chain", chain.Name, "chain_id", chain.ChainID, "error", err)
+					continue
+				}
 			}
 			taskengine.RegisterTokenEnrichmentService(chainTokenService)
-			agg.logger.Info("Chain RPC + TokenEnrichmentService registered",
+			agg.logger.Info("Chain TokenEnrichmentService registered",
 				"chain", chain.Name,
 				"chainID", chainTokenService.GetChainID(),
-				"whitelistTokens", chainTokenService.GetCacheSize())
+				"whitelistTokens", chainTokenService.GetCacheSize(),
+				"worker_routed", workerRouted)
 		}
 	}
 

@@ -27,15 +27,37 @@ type TokenMetadata struct {
 	Source   string `json:"source"` // "whitelist" or "rpc"
 }
 
+// TokenMetadataFetcher fetches metadata for a single ERC-20 contract.
+// Replaces TokenEnrichmentService.fetchTokenMetadataFromRPC when set —
+// the gateway uses a worker-routed implementation (see worker_token_fetcher.go)
+// so the gateway itself doesn't need direct chain-RPC connections.
+//
+// Returning (nil, nil) is interpreted as "not found in any source"
+// (matches the no-rpc-client fallback behavior). Returning a non-nil
+// error means the fetch itself failed (worker unreachable, network etc).
+//
+// TODO(phase-b): thread context.Context through this signature so
+// callers can propagate graceful-shutdown cancellation instead of
+// relying on the worker-fetcher's internal timeout. Deferred to keep
+// Phase A's blast radius zero: adding ctx here ripples to all five
+// callsites that consume TokenEnrichmentService.GetTokenMetadata.
+type TokenMetadataFetcher func(contractAddress string) (*TokenMetadata, error)
+
 // TokenEnrichmentService handles token metadata lookup and enrichment
 type TokenEnrichmentService struct {
-	cache     map[string]*TokenMetadata // In-memory cache: address -> metadata
-	cacheMux  sync.RWMutex              // Protect cache access
-	rpcClient *ethclient.Client
-	chainID   uint64
-	logger    sdklogging.Logger
+	cache    map[string]*TokenMetadata // In-memory cache: address -> metadata
+	cacheMux sync.RWMutex              // Protect cache access
 
-	// ERC20 ABI for contract calls
+	// rpcClient is used when fetcher is nil. Either rpcClient OR fetcher
+	// must be non-nil for cache-miss lookups to work; if both are nil the
+	// service is whitelist-only.
+	rpcClient *ethclient.Client
+	fetcher   TokenMetadataFetcher
+
+	chainID uint64
+	logger  sdklogging.Logger
+
+	// ERC20 ABI for contract calls (used only when rpcClient is set)
 	erc20ABI abi.ABI
 }
 
@@ -100,22 +122,13 @@ func getNativeTokenMetadata() *TokenMetadata {
 	}
 }
 
-// NewTokenEnrichmentService creates a new token enrichment service
+// NewTokenEnrichmentService creates a token enrichment service that talks
+// to the chain directly via rpcClient. The constructor calls rpcClient.ChainID
+// to detect the chain — useful in single-chain mode where the chain isn't
+// known up front. Gateway-mode callers should prefer
+// NewWorkerRoutedTokenEnrichmentService instead, which doesn't require a
+// direct chain RPC connection.
 func NewTokenEnrichmentService(rpcClient *ethclient.Client, logger sdklogging.Logger) (*TokenEnrichmentService, error) {
-	// Parse ERC20 ABI
-	parsedABI, err := abi.JSON(strings.NewReader(erc20ABI_JSON))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse ERC20 ABI: %w", err)
-	}
-
-	service := &TokenEnrichmentService{
-		cache:     make(map[string]*TokenMetadata),
-		rpcClient: rpcClient,
-		logger:    logger,
-		erc20ABI:  parsedABI,
-	}
-
-	// Get chain ID - this is critical for proper operation
 	if rpcClient == nil {
 		return nil, fmt.Errorf("RPC client is required for TokenEnrichmentService - cannot operate without chain connection")
 	}
@@ -128,18 +141,67 @@ func NewTokenEnrichmentService(rpcClient *ethclient.Client, logger sdklogging.Lo
 		return nil, fmt.Errorf("failed to get chain ID from RPC: %w", err)
 	}
 
-	service.chainID = chainID.Uint64()
-	if logger != nil {
-		logger.Info("TokenEnrichmentService chain ID detected", "chainID", service.chainID)
+	return newTokenEnrichmentService(chainID.Uint64(), rpcClient, nil, logger)
+}
+
+// NewWorkerRoutedTokenEnrichmentService creates a token enrichment service that
+// fetches metadata via the supplied fetcher (typically backed by a chain
+// worker's GetTokenMetadata gRPC) instead of dialing the chain itself. This is
+// the gateway's path: it removes the gateway's direct-RPC dependency for each
+// chain it doesn't natively serve (only its own AVS chain).
+//
+// chainID is explicit (not detected) because there's no local RPC to ask.
+// The whitelist load uses chainID to pick the right token-list file.
+func NewWorkerRoutedTokenEnrichmentService(chainID uint64, fetcher TokenMetadataFetcher, logger sdklogging.Logger) (*TokenEnrichmentService, error) {
+	if chainID == 0 {
+		return nil, fmt.Errorf("chainID is required for worker-routed TokenEnrichmentService")
+	}
+	if fetcher == nil {
+		return nil, fmt.Errorf("fetcher is required for worker-routed TokenEnrichmentService")
+	}
+	return newTokenEnrichmentService(chainID, nil, fetcher, logger)
+}
+
+// newTokenEnrichmentService is the shared constructor used by both public
+// constructors. Caller is responsible for ensuring at least one of
+// (rpcClient, fetcher) is non-nil if cache-miss lookups should succeed —
+// when both are nil the service is whitelist-only.
+func newTokenEnrichmentService(
+	chainID uint64,
+	rpcClient *ethclient.Client,
+	fetcher TokenMetadataFetcher,
+	logger sdklogging.Logger,
+) (*TokenEnrichmentService, error) {
+	parsedABI, err := abi.JSON(strings.NewReader(erc20ABI_JSON))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse ERC20 ABI: %w", err)
 	}
 
-	// Load token whitelist for the detected chain
-	err = service.LoadWhitelist()
-	if err != nil {
+	service := &TokenEnrichmentService{
+		cache:     make(map[string]*TokenMetadata),
+		rpcClient: rpcClient,
+		fetcher:   fetcher,
+		chainID:   chainID,
+		logger:    logger,
+		erc20ABI:  parsedABI,
+	}
+
+	if logger != nil {
+		mode := "rpc"
+		if fetcher != nil {
+			mode = "worker-routed"
+		}
+		// "detected" was historically accurate when chainID came from
+		// rpcClient.ChainID(); in worker-routed mode the chainID is
+		// supplied by the caller, so use neutral wording.
+		logger.Info("TokenEnrichmentService initializing", "chainID", service.chainID, "mode", mode)
+	}
+
+	if err := service.LoadWhitelist(); err != nil {
 		if logger != nil {
 			logger.Warn("Failed to load token whitelist", "error", err, "chainID", service.chainID)
 		}
-		// Don't fail initialization - we can still work with RPC calls
+		// Don't fail initialization - we can still work with RPC/fetcher calls
 	}
 
 	if logger != nil {
@@ -259,16 +321,28 @@ func (t *TokenEnrichmentService) GetTokenMetadata(contractAddress string) (*Toke
 	}
 	t.cacheMux.RUnlock()
 
-	// Not in cache/whitelist, try RPC calls if available
-	if t.rpcClient == nil {
-		// No RPC client available and token not in whitelist
-		// Return nil to indicate not found in whitelist-only mode
+	// Not in cache/whitelist — dispatch to fetcher (worker-routed) or
+	// direct RPC depending on how this service was constructed. If
+	// neither is set, the service is whitelist-only and we report
+	// "not found" to the caller via (nil, nil).
+	var metadata *TokenMetadata
+	var err error
+	switch {
+	case t.fetcher != nil:
+		metadata, err = t.fetcher(contractAddress)
+	case t.rpcClient != nil:
+		metadata, err = t.fetchTokenMetadataFromRPC(contractAddress)
+	default:
 		return nil, nil
 	}
-
-	metadata, err := t.fetchTokenMetadataFromRPC(contractAddress)
 	if err != nil {
 		return nil, err
+	}
+	if metadata == nil {
+		// Fetcher signaled "not found" — propagate the whitelist-only
+		// nil-result contract upward so callers can fall back to other
+		// sources (Moralis, etc.) without seeing a synthetic error.
+		return nil, nil
 	}
 
 	// Cache the result for future use
@@ -277,11 +351,16 @@ func (t *TokenEnrichmentService) GetTokenMetadata(contractAddress string) (*Toke
 	t.cacheMux.Unlock()
 
 	if t.logger != nil {
-		t.logger.Info("Fetched token metadata from RPC and cached",
+		// metadata.Source is "rpc" for direct-RPC fetches, or whatever
+		// the worker returned (typically "whitelist" or "rpc") for
+		// worker-routed fetches — log it so this line stays accurate
+		// regardless of which path executed.
+		t.logger.Info("Fetched token metadata and cached",
 			"address", contractAddress,
 			"name", metadata.Name,
 			"symbol", metadata.Symbol,
-			"decimals", metadata.Decimals)
+			"decimals", metadata.Decimals,
+			"source", metadata.Source)
 	}
 
 	return metadata, nil
