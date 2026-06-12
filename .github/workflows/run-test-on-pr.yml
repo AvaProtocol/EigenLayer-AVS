@@ -40,7 +40,7 @@ jobs:
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
           fetch-depth: 0 # Fetch all history for comparing changes
@@ -80,7 +80,7 @@ jobs:
     if: needs.check-changes.outputs.should_run == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
           ref: ${{ github.event.inputs.branch || github.ref }}
@@ -142,7 +142,7 @@ jobs:
           - operator
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
           ref: ${{ github.event.inputs.branch || github.ref }}
