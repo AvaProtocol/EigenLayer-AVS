@@ -675,7 +675,16 @@ func ReadYamlConfig(path string, o interface{}) error {
 	// (e.g. `controller_private_key: ${CONTROLLER_PRIVATE_KEY}`) and inject
 	// the real values via Railway sealed env vars at runtime — keeping
 	// production credentials out of the git repo.
-	expanded := os.ExpandEnv(string(b))
+	//
+	// TrimSpace defensively against a class of bug we hit in production:
+	// Railway env vars sometimes carry a trailing newline (when pasted
+	// into the dashboard UI), which turns "https://rpc.example/key" into
+	// "https://rpc.example/key\n" — malformed URL, opaque DNS lookup
+	// failures. No env var consumed by these configs has meaningful
+	// leading/trailing whitespace, so trimming is safe.
+	expanded := os.Expand(string(b), func(key string) string {
+		return strings.TrimSpace(os.Getenv(key))
+	})
 
 	if err := yaml.Unmarshal([]byte(expanded), o); err != nil {
 		return fmt.Errorf("unable to parse file with error %#v", err)
