@@ -7,6 +7,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
+	badger "github.com/dgraph-io/badger/v4"
 )
 
 type Queue struct {
@@ -165,7 +166,13 @@ func (q *Queue) Dequeue() (*Job, error) {
 	return j, err
 }
 
-// markJobDone moves a job from the inprogress status to complete/failed
+// markJobDone moves a job from the inprogress status to complete/failed.
+//
+// If the inprogress key is missing, that means CleanupOrphanedJobs (which
+// scans pending/inprogress/failed for jobs whose task no longer exists)
+// already deleted it out from under us — the task was removed while this
+// worker held the job. Treat that as a benign no-op so the caller doesn't
+// log Error and trigger a Sentry capture for an expected race.
 func (q *Queue) markJobDone(job *Job, status jobStatus) error {
 	id := job.ID
 	if status != jobComplete && status != jobFailed {
@@ -178,7 +185,25 @@ func (q *Queue) markJobDone(job *Job, status jobStatus) error {
 	defer q.dbLock.Unlock()
 
 	err := q.db.Move(src, dest)
+	if err != nil && isKeyNotFound(err) {
+		return nil
+	}
 	return err
+}
+
+// isKeyNotFound reports whether err is BadgerDB's "Key not found". The
+// storage.Storage interface surfaces the badger error verbatim from Move,
+// so errors.Is catches the sentinel and the string-equality fallback
+// covers cases where a wrapper has flattened the error into a plain
+// errors.New with the same message.
+func isKeyNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return true
+	}
+	return err.Error() == badger.ErrKeyNotFound.Error()
 }
 
 func (q *Queue) getQueueKeyPrefix(status jobStatus) []byte {

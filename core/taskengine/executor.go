@@ -17,6 +17,7 @@ import (
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/getsentry/sentry-go"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
@@ -544,6 +545,15 @@ func (x *WorkflowExecutor) RunTask(task *model.Workflow, queueData *QueueExecuti
 		}
 	}
 
+	// Reaching this point means every validation gate above passed. Clear any
+	// prior consecutive-failure state so a future transient blip doesn't keep
+	// counting from a stale baseline. Persisted by the task write at the end
+	// of RunTask.
+	if task.ConsecutiveValidationFailures != 0 || task.LastValidationError != "" {
+		task.ConsecutiveValidationFailures = 0
+		task.LastValidationError = ""
+	}
+
 	var runTaskErr error = nil
 	if err = vm.Compile(); err != nil {
 		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger metadata", queueData)
@@ -960,15 +970,65 @@ func (x *WorkflowExecutor) validateDerivedWallet(swCfg *config.SmartWalletConfig
 	return false, fmt.Errorf("wallet address cannot be derived from owner with factory %s (checked %d salts)", factoryAddr.Hex(), maxWallets)
 }
 
+// validationFailureDisableThreshold is the number of consecutive permanent
+// validation failures (see permanentValidationErrorPrefixes) tolerated before
+// the executor auto-disables the task. Matches the maxConsecutiveFailures
+// constant used elsewhere (core/taskengine/vm.go) for symmetry.
+const validationFailureDisableThreshold uint32 = 10
+
+// permanentValidationErrorPrefixes lists execution.Error prefixes that will
+// not self-resolve without user intervention — wallet misconfiguration or a
+// structurally broken task graph. Transient errors (RPC failures while
+// validating ownership, insufficient credit) are deliberately excluded:
+// they can clear on the next tick when the chain is reachable or the user
+// tops up.
+var permanentValidationErrorPrefixes = []string{
+	"invalid or missing task smart wallet address",
+	"task smart wallet address does not belong to owner",
+	"failed to create VM:",
+}
+
+// isPermanentValidationError reports whether execution.Error matches one of
+// the prefixes that should count toward auto-disable.
+func isPermanentValidationError(errorMsg string) bool {
+	for _, prefix := range permanentValidationErrorPrefixes {
+		if strings.HasPrefix(errorMsg, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // persistFailedExecution persists a failed execution record to the database
-// This ensures that failed executions (like wallet validation failures) are recorded for troubleshooting
+// This ensures that failed executions (like wallet validation failures) are recorded for troubleshooting.
+//
+// Logs at Warn rather than Error: a validation failure is an expected outcome
+// (misconfigured task, ownership mismatch) that recurs every time the trigger
+// fires until the task is fixed or disabled. The execution record itself is
+// persisted with Status=FAILED and Error=<reason>, so users can still
+// troubleshoot from it. Using Error would route every tick through
+// SentryLogger.captureToSentry and flood Sentry — see EIGENLAYER-AVS-1V.
+//
+// When the same task has hit validationFailureDisableThreshold consecutive
+// *permanent* validation rejections, this also flips the task to Disabled
+// and fires exactly one Sentry event (CaptureMessage, fingerprinted by
+// task_id) so an operator gets a single high-signal alert per broken task
+// instead of a per-tick flood.
 func (x *WorkflowExecutor) persistFailedExecution(task *model.Workflow, execution *avsproto.Execution, initialTaskStatus avsproto.TaskStatus) {
-	// Log the failure for debugging
-	x.logger.Error("task execution failed during validation",
+	x.logger.Warn("task execution failed during validation",
 		"error", execution.Error,
 		"task_id", task.Id,
 		"execution_id", execution.Id,
 		"reason", "validation_failure")
+
+	task.LastValidationError = execution.Error
+	if isPermanentValidationError(execution.Error) {
+		task.ConsecutiveValidationFailures++
+		if task.Status == avsproto.TaskStatus_Enabled && task.ConsecutiveValidationFailures >= validationFailureDisableThreshold {
+			task.Status = avsproto.TaskStatus_Disabled
+			x.reportTaskAutoDisabled(task, execution.Error)
+		}
+	}
 
 	// Ensure no NaN/Inf sneak into protobuf Values (which reject them)
 	sanitizeExecutionForPersistence(execution)
@@ -1005,4 +1065,28 @@ func (x *WorkflowExecutor) persistFailedExecution(task *model.Workflow, executio
 			x.logger.Error("error cleaning up old task status", "task_id", task.Id, "error", err)
 		}
 	}
+}
+
+// reportTaskAutoDisabled fires exactly one Sentry event when a task is
+// auto-disabled by validationFailureDisableThreshold. The fingerprint is
+// scoped to the task ID so each broken workflow gets its own Sentry issue
+// rather than rolling into a single noisy one. The event is logged at Warn
+// in addition; SentryLogger.Warn does not double-capture.
+func (x *WorkflowExecutor) reportTaskAutoDisabled(task *model.Workflow, reason string) {
+	x.logger.Warn("task auto-disabled after consecutive validation failures",
+		"task_id", task.Id,
+		"chain_id", task.ChainId,
+		"consecutive_failures", task.ConsecutiveValidationFailures,
+		"reason", reason)
+	sentry.WithScope(func(scope *sentry.Scope) {
+		scope.SetTag("event", "task_auto_disabled")
+		scope.SetTag("task_id", task.Id)
+		scope.SetTag("chain_id", strconv.FormatInt(task.ChainId, 10))
+		scope.SetExtra("consecutive_failures", task.ConsecutiveValidationFailures)
+		scope.SetExtra("reason", reason)
+		scope.SetFingerprint([]string{"task-auto-disabled", task.Id})
+		sentry.CaptureMessage(fmt.Sprintf(
+			"Task %s auto-disabled after %d consecutive validation failures: %s",
+			task.Id, task.ConsecutiveValidationFailures, reason))
+	})
 }
