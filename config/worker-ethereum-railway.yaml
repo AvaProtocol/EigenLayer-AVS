@@ -3,8 +3,8 @@
 # Secrets are injected via Railway sealed environment variables and
 # expanded at startup (see core/config.ReadYamlConfig). Set these on
 # the `worker-ethereum` Railway service:
-#   ETHEREUM_RPC (HTTPS; WS derived in code)
-#   ETHEREUM_BUNDLER_URL
+#   CHAIN_ENDPOINT (HTTPS; WS derived in code)
+#   BUNDLER_URL
 #   CONTROLLER_PRIVATE_KEY
 #   PAYMASTER_ADDRESS
 environment: production
@@ -24,10 +24,10 @@ health_address: "0.0.0.0:8080"
 # and dials in. Workers only listen on `listen_address`.
 
 # Chain RPC endpoints (Ethereum mainnet)
-eth_rpc_url: ${ETHEREUM_RPC}
+eth_rpc_url: ${CHAIN_ENDPOINT}
 
 # Third-party bundler (self-hosted Voltaire)
-bundler_url: ${ETHEREUM_BUNDLER_URL}
+bundler_url: ${BUNDLER_URL}
 
 # Smart wallet config
 smart_wallet:
