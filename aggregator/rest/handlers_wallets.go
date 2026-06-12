@@ -11,7 +11,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
-	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/avsclient"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -274,14 +274,24 @@ func (s *Server) GetWalletNonce(ctx echo.Context, address generated.EthereumAddr
 	} else if authed := restmw.UserFromContext(ctx); authed != nil {
 		chainID = authed.ChainID
 	}
-	rpc, _ := s.resolveSmartWalletForChain(chainID)
-	if rpc == nil {
-		return &restmw.HTTPError{
-			Status: http.StatusServiceUnavailable,
-			Code:   "NONCE_UNAVAILABLE",
-			Title:  "Smart wallet RPC not configured",
-			Detail: "This aggregator instance was started without a smart-wallet RPC client for the requested chain.",
+	// Prefer the per-chain ChainStateReader — in gateway mode this is
+	// a worker-routed reader so the gateway no longer issues the
+	// EntryPoint nonce eth_call itself. Falls back to the direct-RPC
+	// reader (single-chain mode) or, if the registry is empty, to a
+	// fresh direct reader wrapping resolveSmartWalletForChain's
+	// ethclient (transitional belt-and-braces).
+	chainReader := taskengine.GetChainStateReaderForChain(uint64(chainID))
+	if chainReader == nil {
+		rpc, _ := s.resolveSmartWalletForChain(chainID)
+		if rpc == nil {
+			return &restmw.HTTPError{
+				Status: http.StatusServiceUnavailable,
+				Code:   "NONCE_UNAVAILABLE",
+				Title:  "Smart wallet RPC not configured",
+				Detail: "This aggregator instance was started without a smart-wallet RPC client for the requested chain.",
+			}
 		}
+		chainReader = taskengine.NewDirectChainStateReader(rpc, chainID)
 	}
 
 	// Ownership check — the engine's GetWalletFromDB lookup is the
@@ -296,7 +306,7 @@ func (s *Server) GetWalletNonce(ctx echo.Context, address generated.EthereumAddr
 		}
 	}
 
-	nonce, err := aa.GetNonce(rpc, walletAddr, big.NewInt(0))
+	nonce, err := chainReader.GetEntryPointNonce(ctx.Request().Context(), walletAddr, big.NewInt(0))
 	if err != nil {
 		return fmt.Errorf("entrypoint nonce read failed: %w", err)
 	}

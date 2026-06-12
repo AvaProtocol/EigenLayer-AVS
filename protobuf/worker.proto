@@ -22,6 +22,27 @@ service ChainWorker {
 
   // Get token metadata (enrichment) for a contract address on this chain
   rpc GetTokenMetadata(WorkerGetTokenMetadataReq) returns (WorkerGetTokenMetadataResp);
+
+  // Get the nonce for an arbitrary smart wallet address on this chain.
+  // Differs from GetNonce in that the caller already knows the wallet
+  // address (looked up from gateway storage) and doesn't want to re-derive
+  // it from (owner, salt). Used by REST handlers that read the nonce
+  // directly off the EntryPoint contract.
+  rpc GetNonceByAddress(WorkerGetNonceByAddressReq) returns (WorkerGetNonceResp);
+
+  // Suggest a gas price for this chain. Wraps ethclient.SuggestGasPrice.
+  // Used by the fee estimator to price UserOps.
+  rpc SuggestGasPrice(WorkerSuggestGasPriceReq) returns (WorkerSuggestGasPriceResp);
+
+  // Estimate gas for a contract call on this chain. Wraps
+  // ethclient.EstimateGas with the same CallMsg shape ethclient takes.
+  // Used by the fee estimator to gas-budget UserOp executions.
+  rpc EstimateGas(WorkerEstimateGasReq) returns (WorkerEstimateGasResp);
+
+  // Read the bytecode at a contract address. Wraps ethclient.CodeAt.
+  // Used by the fee estimator to detect whether the runner contract is
+  // deployed before issuing UserOps against it.
+  rpc GetCode(WorkerGetCodeReq) returns (WorkerGetCodeResp);
 }
 
 // Health check
@@ -82,4 +103,39 @@ message WorkerGetTokenMetadataResp {
   uint32 decimals = 3;
   bool found = 4;       // Whether the token was found
   string source = 5;    // "whitelist", "rpc", or "native"
+}
+
+// Nonce query by smart wallet address (companion to GetNonce-by-owner)
+message WorkerGetNonceByAddressReq {
+  string wallet_address = 1;  // Smart wallet address (hex)
+  string nonce_key = 2;       // 192-bit key for the EntryPoint nonce space
+                              // (big.Int as string; "0" for the default space)
+}
+
+// Gas price
+message WorkerSuggestGasPriceReq {}
+
+message WorkerSuggestGasPriceResp {
+  string gas_price_wei = 1;   // big.Int as string
+}
+
+// Gas estimate (mirrors ethereum.CallMsg fields the estimator uses)
+message WorkerEstimateGasReq {
+  string from = 1;     // Sender (hex). Optional; chain default if empty.
+  string to = 2;       // Destination contract (hex).
+  string value = 3;    // Wei (big.Int as string); empty/zero for no value.
+  bytes data = 4;      // Calldata.
+}
+
+message WorkerEstimateGasResp {
+  uint64 gas = 1;
+}
+
+// CodeAt
+message WorkerGetCodeReq {
+  string address = 1;  // Contract address (hex).
+}
+
+message WorkerGetCodeResp {
+  bytes code = 1;      // Raw bytecode (empty if not deployed).
 }

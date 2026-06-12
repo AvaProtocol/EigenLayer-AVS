@@ -9,6 +9,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/mapping"
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -375,14 +376,32 @@ func (s *Server) EstimateWorkflowFees(ctx echo.Context) error {
 	if body.ChainId != nil {
 		reqChainID = *body.ChainId
 	}
-	rpc, smartWalletCfg := s.resolveSmartWalletForChain(reqChainID)
-	if rpc == nil {
+	_, smartWalletCfg := s.resolveSmartWalletForChain(reqChainID)
+	if smartWalletCfg == nil {
 		return &restmw.HTTPError{
 			Status: http.StatusServiceUnavailable,
 			Code:   "FEES_UNAVAILABLE",
 			Title:  "Fee estimator not configured",
-			Detail: "This aggregator instance was started without a smart-wallet RPC client for the requested chain.",
+			Detail: "This aggregator instance has no smart-wallet config for the requested chain.",
 		}
+	}
+
+	// Resolve the per-chain ChainStateReader. In gateway mode this is a
+	// worker-routed reader (the gateway no longer holds direct chain-RPC
+	// connections for fee-estimator reads). In single-chain mode it's a
+	// direct reader wrapping the aggregator's own ethclient.
+	chainReader := taskengine.GetChainStateReaderForChain(uint64(reqChainID))
+	if chainReader == nil {
+		rpc, _ := s.resolveSmartWalletForChain(reqChainID)
+		if rpc == nil {
+			return &restmw.HTTPError{
+				Status: http.StatusServiceUnavailable,
+				Code:   "FEES_UNAVAILABLE",
+				Title:  "Fee estimator not configured",
+				Detail: "This aggregator instance was started without a chain-state reader for the requested chain.",
+			}
+		}
+		chainReader = taskengine.NewDirectChainStateReader(rpc, reqChainID)
 	}
 
 	trigger, err := mapping.OpenAPIToProtoTrigger(body.Trigger)
@@ -425,18 +444,14 @@ func (s *Server) EstimateWorkflowFees(ctx echo.Context) error {
 		req.ChainId = *body.ChainId
 	}
 
-	var estimator *taskengine.FeeEstimator
-	if s.config != nil && s.config.FeeRates != nil {
-		estimator = taskengine.NewFeeEstimatorWithConfig(
-			s.logger, rpc, s.engine.GetTenderlyClient(),
-			smartWalletCfg, s.priceService, s.config.FeeRates,
-		)
-	} else {
-		estimator = taskengine.NewFeeEstimator(
-			s.logger, rpc, s.engine.GetTenderlyClient(),
-			smartWalletCfg, s.priceService,
-		)
+	var feeRatesCfg *config.FeeRatesConfig
+	if s.config != nil {
+		feeRatesCfg = s.config.FeeRates
 	}
+	estimator := taskengine.NewFeeEstimatorWithChainReader(
+		s.logger, chainReader, s.engine.GetTenderlyClient(),
+		smartWalletCfg, s.priceService, feeRatesCfg,
+	)
 
 	resp, err := estimator.EstimateFees(ctx.Request().Context(), req)
 	if err != nil {

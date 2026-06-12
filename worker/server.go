@@ -6,12 +6,40 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
+
+// ethereumCallMsgFromProto maps a WorkerEstimateGasReq into the CallMsg
+// shape ethclient.EstimateGas takes. From is optional (chain default
+// applies when empty). Value defaults to 0. The caller is responsible
+// for validating req.To and supplying the parsed address as `to`; we
+// pass `to` straight through as *Address so the contract-deployment
+// case (To == nil) can be expressed by passing toPtr == nil.
+func ethereumCallMsgFromProto(req *avsproto.WorkerEstimateGasReq, toPtr *common.Address) (ethereum.CallMsg, error) {
+	msg := ethereum.CallMsg{
+		To:   toPtr,
+		Data: req.Data,
+	}
+	if req.From != "" {
+		if !common.IsHexAddress(req.From) {
+			return ethereum.CallMsg{}, fmt.Errorf("invalid from address %q", req.From)
+		}
+		msg.From = common.HexToAddress(req.From)
+	}
+	if req.Value != "" {
+		v, ok := new(big.Int).SetString(req.Value, 10)
+		if !ok {
+			return ethereum.CallMsg{}, fmt.Errorf("invalid value %q (expected base-10 big.Int string)", req.Value)
+		}
+		msg.Value = v
+	}
+	return msg, nil
+}
 
 type Server struct {
 	avsproto.UnimplementedChainWorkerServer
@@ -160,5 +188,107 @@ func (s *Server) GetTokenMetadata(ctx context.Context, req *avsproto.WorkerGetTo
 		Decimals: metadata.Decimals,
 		Found:    true,
 		Source:   metadata.Source,
+	}, nil
+}
+
+// GetNonceByAddress reads the EntryPoint nonce for an arbitrary smart
+// wallet address. REST callers know the address from gateway storage
+// and don't want to re-derive (owner, salt). The pre-existing GetNonce
+// happens to do the same thing (its param is misnamed "owner" but is
+// passed to EntryPoint.getNonce as the sender) — but exposing a clearly
+// named alias keeps the gateway-side caller honest about what it's
+// querying.
+func (s *Server) GetNonceByAddress(ctx context.Context, req *avsproto.WorkerGetNonceByAddressReq) (*avsproto.WorkerGetNonceResp, error) {
+	if !common.IsHexAddress(req.WalletAddress) {
+		return nil, fmt.Errorf("invalid wallet_address %q", req.WalletAddress)
+	}
+	walletAddr := common.HexToAddress(req.WalletAddress)
+
+	key := big.NewInt(0)
+	if req.NonceKey != "" {
+		parsed, ok := new(big.Int).SetString(req.NonceKey, 10)
+		if !ok {
+			return nil, fmt.Errorf("invalid nonce_key %q (expected base-10 big.Int string)", req.NonceKey)
+		}
+		// EntryPoint.getNonce takes a 192-bit key; negative values
+		// underflow the contract's uint192 cast and would either
+		// revert or read an unrelated nonce space. Reject up front.
+		if parsed.Sign() < 0 {
+			return nil, fmt.Errorf("invalid nonce_key %q (must be non-negative)", req.NonceKey)
+		}
+		key = parsed
+	}
+
+	nonce, err := aa.GetNonce(s.worker.rpcClient, walletAddr, key)
+	if err != nil {
+		return nil, fmt.Errorf("getting nonce for %s: %w", req.WalletAddress, err)
+	}
+
+	return &avsproto.WorkerGetNonceResp{
+		Nonce: nonce.String(),
+	}, nil
+}
+
+// SuggestGasPrice wraps ethclient.SuggestGasPrice for the chain this
+// worker is bound to. Used by the gateway's fee estimator.
+//
+// The gateway-side ChainStateReader wrap already includes the chain ID
+// in its error message ("worker SuggestGasPrice (chain N): ..."), so
+// we don't duplicate it here.
+func (s *Server) SuggestGasPrice(ctx context.Context, req *avsproto.WorkerSuggestGasPriceReq) (*avsproto.WorkerSuggestGasPriceResp, error) {
+	price, err := s.worker.rpcClient.SuggestGasPrice(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("SuggestGasPrice: %w", err)
+	}
+	return &avsproto.WorkerSuggestGasPriceResp{
+		GasPriceWei: price.String(),
+	}, nil
+}
+
+// EstimateGas wraps ethclient.EstimateGas. Used by the fee estimator
+// to budget UserOp executions before submitting to the bundler.
+//
+// An empty req.To means "contract deployment" (ethclient.CallMsg.To ==
+// nil); we forward that intent to ethclient rather than silently
+// estimating against the zero address. Same for req.From: empty means
+// "chain default sender", not "0x0...0".
+func (s *Server) EstimateGas(ctx context.Context, req *avsproto.WorkerEstimateGasReq) (*avsproto.WorkerEstimateGasResp, error) {
+	var toPtr *common.Address
+	if req.To != "" {
+		if !common.IsHexAddress(req.To) {
+			return nil, fmt.Errorf("invalid to address %q", req.To)
+		}
+		addr := common.HexToAddress(req.To)
+		toPtr = &addr
+	}
+
+	msg, err := ethereumCallMsgFromProto(req, toPtr)
+	if err != nil {
+		return nil, err
+	}
+
+	gas, err := s.worker.rpcClient.EstimateGas(ctx, msg)
+	if err != nil {
+		return nil, fmt.Errorf("EstimateGas to %s: %w", req.To, err)
+	}
+	return &avsproto.WorkerEstimateGasResp{
+		Gas: gas,
+	}, nil
+}
+
+// GetCode wraps ethclient.CodeAt(addr, nil). Used by the fee estimator
+// to detect whether the runner contract is deployed before issuing a
+// UserOp against it.
+func (s *Server) GetCode(ctx context.Context, req *avsproto.WorkerGetCodeReq) (*avsproto.WorkerGetCodeResp, error) {
+	if !common.IsHexAddress(req.Address) {
+		return nil, fmt.Errorf("invalid address %q", req.Address)
+	}
+	addr := common.HexToAddress(req.Address)
+	code, err := s.worker.rpcClient.CodeAt(ctx, addr, nil)
+	if err != nil {
+		return nil, fmt.Errorf("CodeAt for %s: %w", req.Address, err)
+	}
+	return &avsproto.WorkerGetCodeResp{
+		Code: code,
 	}, nil
 }

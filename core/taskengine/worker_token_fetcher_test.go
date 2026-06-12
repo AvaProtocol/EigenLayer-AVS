@@ -45,6 +45,18 @@ func (f *fakeChainWorkerClient) GetNonce(context.Context, *avsproto.WorkerGetNon
 func (f *fakeChainWorkerClient) GetSmartWalletAddress(context.Context, *avsproto.WorkerGetSmartWalletAddressReq, ...grpc.CallOption) (*avsproto.WorkerGetSmartWalletAddressResp, error) {
 	panic("unused")
 }
+func (f *fakeChainWorkerClient) GetNonceByAddress(context.Context, *avsproto.WorkerGetNonceByAddressReq, ...grpc.CallOption) (*avsproto.WorkerGetNonceResp, error) {
+	panic("unused")
+}
+func (f *fakeChainWorkerClient) SuggestGasPrice(context.Context, *avsproto.WorkerSuggestGasPriceReq, ...grpc.CallOption) (*avsproto.WorkerSuggestGasPriceResp, error) {
+	panic("unused")
+}
+func (f *fakeChainWorkerClient) EstimateGas(context.Context, *avsproto.WorkerEstimateGasReq, ...grpc.CallOption) (*avsproto.WorkerEstimateGasResp, error) {
+	panic("unused")
+}
+func (f *fakeChainWorkerClient) GetCode(context.Context, *avsproto.WorkerGetCodeReq, ...grpc.CallOption) (*avsproto.WorkerGetCodeResp, error) {
+	panic("unused")
+}
 
 // TestWorkerRoutedFetcher_HappyPath confirms a successful worker response
 // gets mapped to a TokenMetadata correctly — name, symbol, decimals, source

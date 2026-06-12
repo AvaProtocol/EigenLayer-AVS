@@ -24,6 +24,10 @@ const (
 	ChainWorker_GetNonce_FullMethodName              = "/aggregator.ChainWorker/GetNonce"
 	ChainWorker_GetSmartWalletAddress_FullMethodName = "/aggregator.ChainWorker/GetSmartWalletAddress"
 	ChainWorker_GetTokenMetadata_FullMethodName      = "/aggregator.ChainWorker/GetTokenMetadata"
+	ChainWorker_GetNonceByAddress_FullMethodName     = "/aggregator.ChainWorker/GetNonceByAddress"
+	ChainWorker_SuggestGasPrice_FullMethodName       = "/aggregator.ChainWorker/SuggestGasPrice"
+	ChainWorker_EstimateGas_FullMethodName           = "/aggregator.ChainWorker/EstimateGas"
+	ChainWorker_GetCode_FullMethodName               = "/aggregator.ChainWorker/GetCode"
 )
 
 // ChainWorkerClient is the client API for ChainWorker service.
@@ -45,6 +49,23 @@ type ChainWorkerClient interface {
 	GetSmartWalletAddress(ctx context.Context, in *WorkerGetSmartWalletAddressReq, opts ...grpc.CallOption) (*WorkerGetSmartWalletAddressResp, error)
 	// Get token metadata (enrichment) for a contract address on this chain
 	GetTokenMetadata(ctx context.Context, in *WorkerGetTokenMetadataReq, opts ...grpc.CallOption) (*WorkerGetTokenMetadataResp, error)
+	// Get the nonce for an arbitrary smart wallet address on this chain.
+	// Differs from GetNonce in that the caller already knows the wallet
+	// address (looked up from gateway storage) and doesn't want to re-derive
+	// it from (owner, salt). Used by REST handlers that read the nonce
+	// directly off the EntryPoint contract.
+	GetNonceByAddress(ctx context.Context, in *WorkerGetNonceByAddressReq, opts ...grpc.CallOption) (*WorkerGetNonceResp, error)
+	// Suggest a gas price for this chain. Wraps ethclient.SuggestGasPrice.
+	// Used by the fee estimator to price UserOps.
+	SuggestGasPrice(ctx context.Context, in *WorkerSuggestGasPriceReq, opts ...grpc.CallOption) (*WorkerSuggestGasPriceResp, error)
+	// Estimate gas for a contract call on this chain. Wraps
+	// ethclient.EstimateGas with the same CallMsg shape ethclient takes.
+	// Used by the fee estimator to gas-budget UserOp executions.
+	EstimateGas(ctx context.Context, in *WorkerEstimateGasReq, opts ...grpc.CallOption) (*WorkerEstimateGasResp, error)
+	// Read the bytecode at a contract address. Wraps ethclient.CodeAt.
+	// Used by the fee estimator to detect whether the runner contract is
+	// deployed before issuing UserOps against it.
+	GetCode(ctx context.Context, in *WorkerGetCodeReq, opts ...grpc.CallOption) (*WorkerGetCodeResp, error)
 }
 
 type chainWorkerClient struct {
@@ -105,6 +126,46 @@ func (c *chainWorkerClient) GetTokenMetadata(ctx context.Context, in *WorkerGetT
 	return out, nil
 }
 
+func (c *chainWorkerClient) GetNonceByAddress(ctx context.Context, in *WorkerGetNonceByAddressReq, opts ...grpc.CallOption) (*WorkerGetNonceResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerGetNonceResp)
+	err := c.cc.Invoke(ctx, ChainWorker_GetNonceByAddress_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chainWorkerClient) SuggestGasPrice(ctx context.Context, in *WorkerSuggestGasPriceReq, opts ...grpc.CallOption) (*WorkerSuggestGasPriceResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerSuggestGasPriceResp)
+	err := c.cc.Invoke(ctx, ChainWorker_SuggestGasPrice_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chainWorkerClient) EstimateGas(ctx context.Context, in *WorkerEstimateGasReq, opts ...grpc.CallOption) (*WorkerEstimateGasResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerEstimateGasResp)
+	err := c.cc.Invoke(ctx, ChainWorker_EstimateGas_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chainWorkerClient) GetCode(ctx context.Context, in *WorkerGetCodeReq, opts ...grpc.CallOption) (*WorkerGetCodeResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerGetCodeResp)
+	err := c.cc.Invoke(ctx, ChainWorker_GetCode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ChainWorkerServer is the server API for ChainWorker service.
 // All implementations must embed UnimplementedChainWorkerServer
 // for forward compatibility.
@@ -124,6 +185,23 @@ type ChainWorkerServer interface {
 	GetSmartWalletAddress(context.Context, *WorkerGetSmartWalletAddressReq) (*WorkerGetSmartWalletAddressResp, error)
 	// Get token metadata (enrichment) for a contract address on this chain
 	GetTokenMetadata(context.Context, *WorkerGetTokenMetadataReq) (*WorkerGetTokenMetadataResp, error)
+	// Get the nonce for an arbitrary smart wallet address on this chain.
+	// Differs from GetNonce in that the caller already knows the wallet
+	// address (looked up from gateway storage) and doesn't want to re-derive
+	// it from (owner, salt). Used by REST handlers that read the nonce
+	// directly off the EntryPoint contract.
+	GetNonceByAddress(context.Context, *WorkerGetNonceByAddressReq) (*WorkerGetNonceResp, error)
+	// Suggest a gas price for this chain. Wraps ethclient.SuggestGasPrice.
+	// Used by the fee estimator to price UserOps.
+	SuggestGasPrice(context.Context, *WorkerSuggestGasPriceReq) (*WorkerSuggestGasPriceResp, error)
+	// Estimate gas for a contract call on this chain. Wraps
+	// ethclient.EstimateGas with the same CallMsg shape ethclient takes.
+	// Used by the fee estimator to gas-budget UserOp executions.
+	EstimateGas(context.Context, *WorkerEstimateGasReq) (*WorkerEstimateGasResp, error)
+	// Read the bytecode at a contract address. Wraps ethclient.CodeAt.
+	// Used by the fee estimator to detect whether the runner contract is
+	// deployed before issuing UserOps against it.
+	GetCode(context.Context, *WorkerGetCodeReq) (*WorkerGetCodeResp, error)
 	mustEmbedUnimplementedChainWorkerServer()
 }
 
@@ -148,6 +226,18 @@ func (UnimplementedChainWorkerServer) GetSmartWalletAddress(context.Context, *Wo
 }
 func (UnimplementedChainWorkerServer) GetTokenMetadata(context.Context, *WorkerGetTokenMetadataReq) (*WorkerGetTokenMetadataResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTokenMetadata not implemented")
+}
+func (UnimplementedChainWorkerServer) GetNonceByAddress(context.Context, *WorkerGetNonceByAddressReq) (*WorkerGetNonceResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetNonceByAddress not implemented")
+}
+func (UnimplementedChainWorkerServer) SuggestGasPrice(context.Context, *WorkerSuggestGasPriceReq) (*WorkerSuggestGasPriceResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SuggestGasPrice not implemented")
+}
+func (UnimplementedChainWorkerServer) EstimateGas(context.Context, *WorkerEstimateGasReq) (*WorkerEstimateGasResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EstimateGas not implemented")
+}
+func (UnimplementedChainWorkerServer) GetCode(context.Context, *WorkerGetCodeReq) (*WorkerGetCodeResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetCode not implemented")
 }
 func (UnimplementedChainWorkerServer) mustEmbedUnimplementedChainWorkerServer() {}
 func (UnimplementedChainWorkerServer) testEmbeddedByValue()                     {}
@@ -260,6 +350,78 @@ func _ChainWorker_GetTokenMetadata_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChainWorker_GetNonceByAddress_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerGetNonceByAddressReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).GetNonceByAddress(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_GetNonceByAddress_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).GetNonceByAddress(ctx, req.(*WorkerGetNonceByAddressReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChainWorker_SuggestGasPrice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerSuggestGasPriceReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).SuggestGasPrice(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_SuggestGasPrice_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).SuggestGasPrice(ctx, req.(*WorkerSuggestGasPriceReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChainWorker_EstimateGas_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerEstimateGasReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).EstimateGas(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_EstimateGas_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).EstimateGas(ctx, req.(*WorkerEstimateGasReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChainWorker_GetCode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerGetCodeReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).GetCode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_GetCode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).GetCode(ctx, req.(*WorkerGetCodeReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ChainWorker_ServiceDesc is the grpc.ServiceDesc for ChainWorker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -286,6 +448,22 @@ var ChainWorker_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTokenMetadata",
 			Handler:    _ChainWorker_GetTokenMetadata_Handler,
+		},
+		{
+			MethodName: "GetNonceByAddress",
+			Handler:    _ChainWorker_GetNonceByAddress_Handler,
+		},
+		{
+			MethodName: "SuggestGasPrice",
+			Handler:    _ChainWorker_SuggestGasPrice_Handler,
+		},
+		{
+			MethodName: "EstimateGas",
+			Handler:    _ChainWorker_EstimateGas_Handler,
+		},
+		{
+			MethodName: "GetCode",
+			Handler:    _ChainWorker_GetCode_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
