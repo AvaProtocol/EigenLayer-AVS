@@ -61,27 +61,47 @@ type ChainStateReader interface {
 // what the gateway currently does for every chain it knows about. Kept
 // for non-gateway callers (single-chain mode, tests) and as the
 // fall-back when the worker for a chain isn't reachable.
+//
+// Instances are stored in the global registry and shared across
+// concurrent HTTP requests, so the lazy-ChainID cache must be
+// goroutine-safe — see detectOnce.
 type directChainStateReader struct {
-	client  *ethclient.Client
-	chainID int64 // 0 means "detect on first call"
+	client *ethclient.Client
+
+	// chainID + detectOnce guard the lazy chain-ID detection. Once
+	// set (either at construction or by the first detect-on-demand
+	// call), chainID is immutable. detectOnce ensures only one
+	// goroutine ever issues the eth_chainId RPC.
+	chainID    int64
+	detectOnce sync.Once
+	detectErr  error
 }
 
 // NewDirectChainStateReader wraps an existing ethclient.Client.
 // chainID may be 0 (will be detected on first ChainID call); pass a
 // known chainID to avoid the round-trip if you have one.
 func NewDirectChainStateReader(client *ethclient.Client, chainID int64) ChainStateReader {
-	return &directChainStateReader{client: client, chainID: chainID}
+	r := &directChainStateReader{client: client, chainID: chainID}
+	if chainID != 0 {
+		// Pre-marking detectOnce as done lets ChainID return the
+		// constructor-supplied value without entering the once-block.
+		r.detectOnce.Do(func() {})
+	}
+	return r
 }
 
 func (d *directChainStateReader) ChainID(ctx context.Context) (int64, error) {
-	if d.chainID != 0 {
-		return d.chainID, nil
+	d.detectOnce.Do(func() {
+		id, err := d.client.ChainID(ctx)
+		if err != nil {
+			d.detectErr = fmt.Errorf("ChainID: %w", err)
+			return
+		}
+		d.chainID = id.Int64()
+	})
+	if d.detectErr != nil {
+		return 0, d.detectErr
 	}
-	id, err := d.client.ChainID(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("ChainID: %w", err)
-	}
-	d.chainID = id.Int64()
 	return d.chainID, nil
 }
 
@@ -157,13 +177,19 @@ func (w *workerChainStateReader) SuggestGasPrice(ctx context.Context) (*big.Int,
 }
 
 func (w *workerChainStateReader) EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error) {
+	// Refuse to silently fan out a missing To as "contract deployment"
+	// — this reader is exclusively used by the fee estimator, which
+	// always has a destination (factory address, contract address).
+	// A nil To here is a caller bug we'd rather surface than mask.
+	if msg.To == nil {
+		return 0, fmt.Errorf("EstimateGas: msg.To is required (deployment estimation not supported via this path)")
+	}
+
 	ctx, cancel := w.withTimeout(ctx)
 	defer cancel()
 	req := &avsproto.WorkerEstimateGasReq{
+		To:   msg.To.Hex(),
 		Data: msg.Data,
-	}
-	if msg.To != nil {
-		req.To = msg.To.Hex()
 	}
 	if (msg.From != common.Address{}) {
 		req.From = msg.From.Hex()
@@ -209,10 +235,13 @@ func (w *workerChainStateReader) GetEntryPointNonce(ctx context.Context, walletA
 	return v, nil
 }
 
+// withTimeout caps the gRPC call's wall time. context.WithTimeout
+// honors whichever deadline is sooner (parent or now+w.timeout), so
+// it's always safe to call — we no longer special-case the
+// already-has-deadline path. That used to let an HTTP handler's
+// 30-60s server-write deadline override our 10s worker-call cap,
+// stalling the gateway when a worker hung.
 func (w *workerChainStateReader) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
-	if _, ok := ctx.Deadline(); ok {
-		return ctx, func() {}
-	}
 	return context.WithTimeout(ctx, w.timeout)
 }
 

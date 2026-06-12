@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math/big"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -250,6 +251,65 @@ func TestWorkerChainStateReader_GetEntryPointNonce_Malformed(t *testing.T) {
 	if _, err := r.GetEntryPointNonce(context.Background(), common.HexToAddress("0xab"), nil); err == nil {
 		t.Fatalf("expected malformed-nonce error")
 	}
+}
+
+// TestWorkerChainStateReader_EstimateGas_NilToRejected: gateway-side
+// callers always have a destination (factory address / contract address).
+// A nil msg.To means the caller has a bug; we'd rather surface it than
+// silently forward as a deployment estimate (which is what the worker
+// server's CallMsg{To: nil} would imply to ethclient).
+func TestWorkerChainStateReader_EstimateGas_NilToRejected(t *testing.T) {
+	r := NewWorkerChainStateReader(&chainStateFakeClient{}, 1, time.Second)
+	_, err := r.EstimateGas(context.Background(), ethereum.CallMsg{Data: []byte{0xaa}})
+	if err == nil {
+		t.Fatalf("expected error for nil msg.To")
+	}
+	if !strings.Contains(err.Error(), "msg.To is required") {
+		t.Fatalf("error should mention msg.To: got %v", err)
+	}
+}
+
+// TestDirectChainStateReader_ChainID_FromConstructor: the constructor
+// chainID short-circuits the eth_chainId RPC. Important because the
+// gateway always supplies a known chainID via the chain config.
+func TestDirectChainStateReader_ChainID_FromConstructor(t *testing.T) {
+	r := NewDirectChainStateReader(nil, 8453)
+	id, err := r.ChainID(context.Background())
+	if err != nil {
+		t.Fatalf("ChainID: %v", err)
+	}
+	if id != 8453 {
+		t.Fatalf("ChainID: got %d, want 8453", id)
+	}
+}
+
+// TestDirectChainStateReader_ChainID_RaceSafe spins up N concurrent
+// callers on a single direct reader and confirms only one of them
+// races to a successful ChainID read. The lazy detect path used to
+// have an unsynchronized read+write — sync.Once now guards it.
+// Tested via the same reader instance across goroutines, which is
+// how the global registry exposes it.
+func TestDirectChainStateReader_ChainID_RaceSafe(t *testing.T) {
+	// We can't construct an ethclient.Client without a network, so
+	// we just confirm the cached-chainID path (constructor != 0)
+	// is safe under concurrency — that's the production hot path
+	// for direct readers, since chainID=0 only ever happens in the
+	// global-fallback init in task_engine.go, and even there the
+	// detected value is registered as a fully-formed reader.
+	r := NewDirectChainStateReader(nil, 11155111)
+	var wg sync.WaitGroup
+	const N = 32
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		go func() {
+			defer wg.Done()
+			id, err := r.ChainID(context.Background())
+			if err != nil || id != 11155111 {
+				t.Errorf("concurrent ChainID: got (%d, %v) want (11155111, nil)", id, err)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // TestChainStateReaderRegistry: register-then-lookup happy path + the
