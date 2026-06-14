@@ -43,6 +43,16 @@ service ChainWorker {
   // Used by the fee estimator to detect whether the runner contract is
   // deployed before issuing UserOps against it.
   rpc GetCode(WorkerGetCodeReq) returns (WorkerGetCodeResp);
+
+  // Read the native-coin balance (wei) at an address. Wraps
+  // ethclient.BalanceAt(latest). Used by the gateway's withdraw preflight
+  // to validate / size native-token withdrawals.
+  rpc GetBalance(WorkerGetBalanceReq) returns (WorkerGetBalanceResp);
+
+  // Read an ERC-20 token balance for an owner. Wraps erc20.BalanceOf.
+  // Used by the gateway's withdraw preflight to validate / size ERC-20
+  // withdrawals.
+  rpc GetTokenBalance(WorkerGetTokenBalanceReq) returns (WorkerGetTokenBalanceResp);
 }
 
 // Health check
@@ -138,4 +148,23 @@ message WorkerGetCodeReq {
 
 message WorkerGetCodeResp {
   bytes code = 1;      // Raw bytecode (empty if not deployed).
+}
+
+// Native-coin balance
+message WorkerGetBalanceReq {
+  string address = 1;  // Account address (hex).
+}
+
+message WorkerGetBalanceResp {
+  string balance_wei = 1;  // Native balance in wei (big.Int as string).
+}
+
+// ERC-20 token balance
+message WorkerGetTokenBalanceReq {
+  string token_address = 1;  // ERC-20 contract address (hex).
+  string owner_address = 2;  // Balance holder address (hex).
+}
+
+message WorkerGetTokenBalanceResp {
+  string balance = 1;  // Raw token balance (big.Int as string, no decimals applied).
 }
