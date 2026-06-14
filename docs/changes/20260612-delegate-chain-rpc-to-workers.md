@@ -262,21 +262,21 @@ After this, no live gateway request path issues direct execution-chain
 RPC. The per-chain `ethclient.Dial` (`smartWalletRpcByChain` +
 `ChainEntry.GetRPC`) remains **only** as the worker-unreachable fallback.
 
-### Phase 4b (open) — strip the per-chain dial + env vars
+### Phase 4b (superseded) — strip the per-chain dial + env vars
 
-Once 4a has been stable in prod for a release cycle (same safety
-discipline as Phase 2→3):
+> **Correction.** This step was originally scoped as a config strip on the
+> assumption that `smartWalletRpcByChain` was the gateway's last per-chain
+> RPC consumer. That inventory was incomplete: the taskengine VM and
+> `GetWallet` derivation dial each chain's `eth_rpc_url` directly and
+> on-demand (CREATE2 derivation, contractRead `eth_call`, block context,
+> `FilterLogs`, simulation storage probes), separate from
+> `smartWalletRpcByChain`. Deleting the env vars now would break
+> `getWallet` + contractRead/Write/simulate in prod.
+>
+> The real remaining work — routing the full VM read/execute surface
+> through workers before any env-var strip — is inventoried and phased in
+> **`docs/changes/20260614-route-vm-execution-through-workers.md`**. The
+> env-var strip is the final phase there, not a standalone step.
 
-1. Remove the `smartWalletRpcByChain` dial loop, `ChainEntry.GetRPC`,
-   and the REST/withdraw direct-reader fallbacks. A missing worker-routed
-   reader becomes an error instead of a silent direct dial.
-2. Strip the per-chain `eth_rpc_url` / `bundler_url` entries from
-   `gateway-railway.yaml`'s `chains:` block (keep `worker_addr` + static
-   contract addresses).
-3. Delete `ETHEREUM_RPC`, `BASE_RPC`, `BASE_SEPOLIA_RPC`, `BNB_RPC`, and
-   the per-chain `*_BUNDLER_URL` env vars from the **gateway** Railway
-   service. Keep the top-level `eth_rpc_url` (`SEPOLIA_RPC`) — that's the
-   gateway's own AVS chain, not an execution chain.
-
-End state: the gateway talks to exactly one chain (its AVS chain) and
-proxies all execution-chain work to workers.
+End state (unchanged goal): the gateway talks to exactly one chain (its
+AVS chain) and proxies all execution-chain work to workers.
