@@ -66,12 +66,9 @@ rest_rate_limit_burst: 500
 
 server_name: "gateway-railway"
 sentry_dsn: https://d304c8708d5097f7787eeb664e4098c6@o1156669.ingest.us.sentry.io/4509386759733248
-# This branch (feature/rest-api-migration) is the testnet/staging gateway,
-# NOT production. Keep its Sentry events out of the production issue
-# board so paging + triage stay clean. When this branch merges to main
-# and the production gateway is rebuilt, drop this field (or set it to
-# "production" explicitly) — default is "production".
-sentry_environment: staging
+# Production gateway (api.avaprotocol.org). Sentry events tag as
+# "production" so they surface on the prod paging + triage board.
+sentry_environment: production
 
 tenderly_account: "chrisli"
 tenderly_project: "default"
