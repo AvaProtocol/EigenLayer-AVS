@@ -1,6 +1,8 @@
 package metrics
 
 import (
+	"strconv"
+
 	"github.com/Layr-Labs/eigensdk-go/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -23,6 +25,16 @@ type MetricsGenerator interface {
 	// This metric would either need to be tracked by the aggregator itself,
 	// or we would need to write a collector that queries onchain for this info
 	// AddPercentageStakeSigned(percentage float64)
+
+	// Per-chain capability gauges — updated from the Ping loop so a
+	// stalled chain shows up in dashboards immediately. SetChainAdvertised
+	// is 1 when the chain is in the advertised set, 0 when it's been
+	// dropped (subscription stalled). SetChainHeadLagSeconds is the time
+	// since the last block head was observed for the chain — used to
+	// alert on subscriptions that fall behind even before they fail the
+	// staleness threshold.
+	SetChainAdvertised(chainID int64, advertised bool)
+	SetChainHeadLagSeconds(chainID int64, lagSeconds float64)
 }
 
 // AvsMetrics contains instrumented metrics that should be incremented by the avs node using the methods below
@@ -40,6 +52,9 @@ type AvsAndEigenMetrics struct {
 	numTasksReceived  *prometheus.CounterVec
 	// if numSignedTaskResponsesAcceptedByAggregator != numTasksReceived, then there is a bug
 	numSignedTaskResponsesAcceptedByAggregator *prometheus.CounterVec
+
+	chainAdvertised    *prometheus.GaugeVec
+	chainHeadLagSecond *prometheus.GaugeVec
 
 	operatorAddress string
 	version         string
@@ -100,6 +115,20 @@ func NewAvsAndEigenMetrics(avsName, operatorAddress, version string, eigenMetric
 				Help:      "The number of signed task responses accepted by the aggregator",
 			}, []string{"operator", "version"}),
 
+		chainAdvertised: promauto.With(reg).NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: apNamespace,
+				Name:      "operator_advertised_chains",
+				Help:      "1 when the operator is currently advertising this chain to the aggregator, 0 when the chain has been dropped (stalled subscription). Per (operator, chain_id).",
+			}, []string{"operator", "version", "chain_id"}),
+
+		chainHeadLagSecond: promauto.With(reg).NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: apNamespace,
+				Name:      "operator_chain_head_lag_seconds",
+				Help:      "Seconds elapsed since the operator last observed a new block head on this chain. Rising values indicate a degrading or hung subscription before it crosses the staleness threshold and is dropped from advertising.",
+			}, []string{"operator", "version", "chain_id"}),
+
 		operatorAddress: operatorAddress,
 		version:         version,
 	}
@@ -131,4 +160,16 @@ func (m *AvsAndEigenMetrics) AddUptime(total float64) {
 
 func (m *AvsAndEigenMetrics) SetPingDuration(duration float64) {
 	m.durationPing.WithLabelValues(m.operatorAddress, m.version).Set(duration)
+}
+
+func (m *AvsAndEigenMetrics) SetChainAdvertised(chainID int64, advertised bool) {
+	v := 0.0
+	if advertised {
+		v = 1.0
+	}
+	m.chainAdvertised.WithLabelValues(m.operatorAddress, m.version, strconv.FormatInt(chainID, 10)).Set(v)
+}
+
+func (m *AvsAndEigenMetrics) SetChainHeadLagSeconds(chainID int64, lagSeconds float64) {
+	m.chainHeadLagSecond.WithLabelValues(m.operatorAddress, m.version, strconv.FormatInt(chainID, 10)).Set(lagSeconds)
 }

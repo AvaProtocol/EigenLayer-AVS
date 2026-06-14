@@ -596,6 +596,135 @@ func (n *Engine) Stop() {
 	}
 }
 
+// chainNeedsOperatorMonitoring reports whether a trigger type needs an
+// operator with a live subscription on the task's chain. Block/Event
+// triggers fail without one; Manual/Cron/FixedTime fire entirely off
+// timing or RPC calls from the gateway itself.
+func chainNeedsOperatorMonitoring(tt avsproto.TriggerType) bool {
+	switch tt {
+	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+		avsproto.TriggerType_TRIGGER_TYPE_EVENT:
+		return true
+	default:
+		return false
+	}
+}
+
+// operatorsCoveringChain returns the addresses of currently-connected
+// operators that advertise the given chain_id. Empty
+// SupportedChainIDs is treated as "single-chain default" — the
+// operator is counted as covering everything (back-compat with
+// pre-multi-chain operators). Caller must hold n.lock or be OK with a
+// best-effort snapshot.
+func (n *Engine) operatorsCoveringChain(chainID int64) []string {
+	if chainID == 0 {
+		// Chain-agnostic tasks are covered by any connected operator;
+		// returning the full set is correct.
+		out := make([]string, 0, len(n.trackSyncedTasks))
+		for addr := range n.trackSyncedTasks {
+			out = append(out, addr)
+		}
+		return out
+	}
+	out := make([]string, 0, len(n.trackSyncedTasks))
+	for addr, state := range n.trackSyncedTasks {
+		if state == nil {
+			continue
+		}
+		if len(state.SupportedChainIDs) == 0 {
+			out = append(out, addr)
+			continue
+		}
+		for _, id := range state.SupportedChainIDs {
+			if id == chainID {
+				out = append(out, addr)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// scanOrphanedTasks logs each currently-stored task whose chain is no
+// longer covered by any connected operator. Runs on a slow interval
+// from the engine startup loop; the alert path is the log line, not
+// an automatic remediation — operators may reconnect and the orphan
+// resolves itself. Logging is deliberately verbose (one line per
+// orphaned task) so on-call has the task IDs at hand.
+func (n *Engine) scanOrphanedTasks() {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	// Build chain→hasOperator map up front; tasks-per-chain is much
+	// larger than operators-per-chain, so this avoids re-walking the
+	// operator set per task.
+	chainHasOperator := make(map[int64]bool, 8)
+	for _, state := range n.trackSyncedTasks {
+		if state == nil {
+			continue
+		}
+		if len(state.SupportedChainIDs) == 0 {
+			// Back-compat: counts as covering anything. Mark a
+			// sentinel "0" so we can short-circuit below.
+			chainHasOperator[0] = true
+			continue
+		}
+		for _, id := range state.SupportedChainIDs {
+			chainHasOperator[id] = true
+		}
+	}
+	hasLegacyOperator := chainHasOperator[0]
+
+	for taskID, task := range n.tasks {
+		if task == nil {
+			continue
+		}
+		if task.Trigger == nil || !chainNeedsOperatorMonitoring(task.Trigger.Type) {
+			continue
+		}
+		if hasLegacyOperator {
+			continue
+		}
+		if !chainHasOperator[task.ChainId] {
+			n.logger.Warn("🚨 Orphaned task: no connected operator advertises this chain — trigger will not fire until coverage returns",
+				"task_id", taskID, "chain_id", task.ChainId, "trigger_type", task.Trigger.Type.String())
+		}
+	}
+}
+
+// UpdateOperatorSupportedChains updates a connected operator's
+// advertised chain capability. Called from the Ping RPC handler so a
+// stalled subscription (chain configured but no recent heads — see
+// operator's chainCapabilityStaleThreshold) can be dropped from
+// per-chain task routing within one Ping interval, without forcing a
+// SyncMessages reconnect.
+//
+// The operator MUST be currently connected (entry exists in
+// trackSyncedTasks) for this to take effect. A Ping for an operator
+// that never opened a stream is a no-op — the SyncMessages connect
+// path is the authoritative one for first-time capability registration.
+//
+// chainIDs nil/empty is treated as "no chains advertised" (matches the
+// pre-multi-chain back-compat convention used elsewhere); callers
+// wanting to preserve the prior set should not call this method.
+func (n *Engine) UpdateOperatorSupportedChains(address string, chainIDs []int64) {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+	state, ok := n.trackSyncedTasks[address]
+	if !ok || state == nil {
+		return
+	}
+	// Avoid log spam: only emit when the set actually changes. Using
+	// stringified slices is fine here — chain sets are tiny.
+	prev := fmt.Sprintf("%v", state.SupportedChainIDs)
+	next := fmt.Sprintf("%v", chainIDs)
+	if prev != next {
+		n.logger.Info("🔁 Operator advertised chain set changed via Ping",
+			"operator", address, "prev", state.SupportedChainIDs, "next", chainIDs)
+	}
+	state.SupportedChainIDs = chainIDs
+}
+
 // AddTaskForTesting adds a task directly to the engine's task map for testing purposes
 // This bypasses database storage and validation - only use in tests
 func (n *Engine) AddWorkflowForTesting(task *model.Workflow) {
@@ -659,7 +788,37 @@ func (n *Engine) MustStart() error {
 	// Start the batch notification processor
 	go n.processBatchedNotifications()
 
+	// Periodic orphan scan: degradation (operator drops chain mid-run)
+	// is the common failure mode, so create-time validation isn't
+	// sufficient on its own. Gateway mode only — single-chain
+	// deployments would log noise during operator-cold-start.
+	if n.config != nil && n.config.IsGateway {
+		go n.runOrphanScanLoop()
+	}
+
 	return nil
+}
+
+// runOrphanScanLoop periodically scans persisted tasks against the
+// connected-operator capability set, logging tasks whose chain has no
+// coverage. 5-minute interval is generous — coverage gaps tend to
+// persist (operator down) or self-heal quickly (subscription
+// reconnect), so polling too aggressively just spams logs.
+func (n *Engine) runOrphanScanLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			n.lock.Lock()
+			shuttingDown := n.shutdown
+			n.lock.Unlock()
+			if shuttingDown {
+				return
+			}
+			n.scanOrphanedTasks()
+		}
+	}
 }
 
 // markPreviousCanonicalStaleIfAny consults the (owner, factory, salt)
@@ -1372,6 +1531,28 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 		}
 		if n.config != nil && n.config.SmartWallet != nil {
 			task.ChainId = n.config.SmartWallet.ChainID
+		}
+	}
+
+	// Reject tasks for chains no connected operator advertises. Block
+	// and event triggers need a live operator subscription on the
+	// task's chain to ever fire; without coverage the task would sit
+	// in storage with `enabled` status but never execute. Only enforce
+	// in gateway mode — single-chain deployments often run the
+	// aggregator before the operator connects (cold-start chicken/egg)
+	// and the legacy back-compat path counts no-chain-list operators
+	// as covering everything.
+	if n.config != nil && n.config.IsGateway && task.Trigger != nil && chainNeedsOperatorMonitoring(task.Trigger.Type) {
+		n.lock.Lock()
+		covering := n.operatorsCoveringChain(task.ChainId)
+		n.lock.Unlock()
+		if len(covering) == 0 {
+			n.logger.Warn("🚫 CreateTask rejected: no operator advertises this chain",
+				"chain_id", task.ChainId, "trigger_type", task.Trigger.Type.String(), "user", userAddr)
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"no connected operator currently monitors chain_id=%d for %s triggers; "+
+					"task cannot fire until coverage is restored",
+				task.ChainId, task.Trigger.Type.String())
 		}
 	}
 

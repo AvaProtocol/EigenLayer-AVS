@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -170,9 +171,49 @@ func (o *Operator) triggersForChain(chainID int64) (*ChainTriggerSet, bool) {
 	return set, ok
 }
 
-// supportedChainIDs returns the chain_ids the operator advertises to the
-// aggregator/gateway. Order matches chainOrder for deterministic output.
+// chainCapabilityStaleThreshold is the watermark window used by
+// supportedChainIDs to decide whether a chain's block subscription is
+// fresh enough to keep advertising. Set to 90s — comfortably longer
+// than 2× block time for every chain we currently support (Ethereum
+// ~12s, Sepolia ~12s, Base ~2s, Base-Sepolia ~2s, BNB ~3s) so a brief
+// RPC blip doesn't drop the chain, but tight enough that a truly hung
+// subscription is detected within ~2 ping intervals (Ping runs every
+// 5s; the gateway picks up the next advertised set on the following
+// Ping).
+const chainCapabilityStaleThreshold = 90 * time.Second
+
+// supportedChainIDs returns the chain_ids the operator currently
+// advertises to the aggregator/gateway. A chain is included only when
+// its block subscription has produced a head within the staleness
+// window — see ChainTriggerSet.isHeadFresh. Chains that have stalled
+// (subscription dead, RPC unreachable) drop out of the advertised set
+// on the next Ping so the gateway can re-route their tasks to a
+// healthier operator without waiting for a SyncMessages reconnect.
+//
+// Order matches chainOrder for deterministic output.
 func (o *Operator) supportedChainIDs() []int64 {
+	out := make([]int64, 0, len(o.chainOrder))
+	for _, id := range o.chainOrder {
+		if id <= 0 {
+			continue
+		}
+		set, ok := o.chainTriggers[id]
+		if !ok || set == nil {
+			continue
+		}
+		if !set.isHeadFresh(chainCapabilityStaleThreshold) {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
+// allConfiguredChainIDs returns every chain the operator was configured
+// for, regardless of liveness. Used for logging / observability so a
+// stalled chain is still surfaced as "configured but unhealthy" instead
+// of disappearing from logs entirely.
+func (o *Operator) allConfiguredChainIDs() []int64 {
 	out := make([]int64, 0, len(o.chainOrder))
 	for _, id := range o.chainOrder {
 		if id > 0 {
@@ -299,6 +340,35 @@ type ChainTriggerSet struct {
 	BlockTrigger *triggerengine.BlockTrigger
 	EventTrigger *triggerengine.EventTrigger
 	EthClient    *ethclient.Client
+
+	// lastHeadSeenAt is updated every time the per-chain block-subscription
+	// fans an event into sharedBlockCh. It's the freshness watermark
+	// liveSupportedChainIDs() uses to decide whether to keep advertising
+	// this chain. Initialized to time.Now() at trigger setup so a slow
+	// first head doesn't drop the chain immediately at boot.
+	//
+	// The mutex guards exclusively this watermark — keep the critical
+	// section tiny (read or store one time.Time) to avoid contending with
+	// the consumer loop, which writes on every block.
+	lastHeadMu     sync.RWMutex
+	lastHeadSeenAt time.Time
+}
+
+// markHeadSeen stamps lastHeadSeenAt = time.Now(). Called from the
+// per-chain fan-in goroutine on every block fanned into sharedBlockCh.
+func (s *ChainTriggerSet) markHeadSeen() {
+	s.lastHeadMu.Lock()
+	s.lastHeadSeenAt = time.Now()
+	s.lastHeadMu.Unlock()
+}
+
+// isHeadFresh reports whether the most recent observed head is within
+// `threshold` of now. Used to drop stalled chains from the advertised
+// capability set without forcing a SyncMessages reconnect.
+func (s *ChainTriggerSet) isHeadFresh(threshold time.Duration) bool {
+	s.lastHeadMu.RLock()
+	defer s.lastHeadMu.RUnlock()
+	return time.Since(s.lastHeadSeenAt) <= threshold
 }
 
 // chainTaggedBlockEvent and chainTaggedEventEvent wrap a TriggerMetadata with

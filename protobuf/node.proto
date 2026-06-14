@@ -25,6 +25,14 @@ message Checkin {
   string remoteIP = 7;
   int64 block_number = 8;
   int64 event_count = 9;
+
+  // Chain IDs this operator is currently able to monitor — same field
+  // as SyncMessagesReq.supported_chain_ids but re-advertised on every
+  // Ping so a stalled subscription (chain in config but no new heads
+  // in the watermark window) can be dropped without forcing a full
+  // SyncMessages reconnect. The aggregator updates its per-operator
+  // capability snapshot from this value on each ping.
+  repeated int64 supported_chain_ids = 10;
 }
 
 message CheckinResp {

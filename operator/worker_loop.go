@@ -188,6 +188,19 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	o.chainTriggers = make(map[int64]*ChainTriggerSet, len(chains))
 	o.chainOrder = make([]int64, 0, len(chains))
 
+	// skippedChains accumulates per-chain init failures so we can surface
+	// them at the end as a single structured log line. Each entry is a
+	// chain name + reason; the aggregator only learns about successfully-
+	// dialed chains via supportedChainIDs(), so misconfigured chains are
+	// silently excluded from task routing rather than crashing the whole
+	// operator. A genuinely empty result (no chains dialed successfully)
+	// still hard-fails below.
+	type skippedChain struct {
+		name   string
+		reason string
+	}
+	var skipped []skippedChain
+
 	for i, chainCfg := range chains {
 		// Per-chain HTTP RPC client used for both chain_id detection and the
 		// consumer loop's header fetches (HeaderByNumber for block-trigger
@@ -195,26 +208,38 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		// silently route header fetches to the wrong chain.
 		perChainEthClient, err := ethclient.Dial(chainCfg.EthRpcUrl)
 		if err != nil {
-			return fmt.Errorf("chain %d (%s): dial %s: %w", i, chainCfg.Name, chainCfg.EthRpcUrl, err)
+			o.logger.Warn("chain RPC unreachable — skipping chain (will not advertise capability)",
+				"chain_index", i, "chain_name", chainCfg.Name, "rpc", chainCfg.EthRpcUrl, "error", err)
+			skipped = append(skipped, skippedChain{name: chainCfg.Name, reason: "dial failed"})
+			continue
 		}
 
 		// Detect the chain_id from RPC and validate against the config (when
 		// the config specified one). Mismatch means the RPC URL is pointing
-		// at a different chain than the operator thinks — fail fast rather
-		// than silently route tasks to the wrong chain.
+		// at a different chain than the operator thinks — skip rather than
+		// risk silently routing tasks to the wrong chain.
 		detectChainCtx, detectCancel := context.WithTimeout(ctx, 10*time.Second)
 		detectedBig, err := perChainEthClient.ChainID(detectChainCtx)
 		detectCancel()
 		if err != nil {
 			perChainEthClient.Close()
-			return fmt.Errorf("chain %d (%s): detect chain_id: %w", i, chainCfg.Name, err)
+			o.logger.Warn("chain_id detection failed — skipping chain",
+				"chain_index", i, "chain_name", chainCfg.Name, "rpc", chainCfg.EthRpcUrl, "error", err)
+			skipped = append(skipped, skippedChain{name: chainCfg.Name, reason: "chain_id detect failed"})
+			continue
 		}
 		detectedID := detectedBig.Int64()
 		if chainCfg.ChainID != 0 && chainCfg.ChainID != detectedID {
 			perChainEthClient.Close()
-			return fmt.Errorf("chain %d (%s): config chain_id=%d but RPC %s reports %d",
-				i, chainCfg.Name, chainCfg.ChainID, chainCfg.EthRpcUrl, detectedID)
+			o.logger.Warn("chain_id mismatch between config and RPC — skipping chain",
+				"chain_index", i, "chain_name", chainCfg.Name,
+				"config_chain_id", chainCfg.ChainID, "rpc_chain_id", detectedID, "rpc", chainCfg.EthRpcUrl)
+			skipped = append(skipped, skippedChain{name: chainCfg.Name, reason: fmt.Sprintf("chain_id mismatch %d vs %d", chainCfg.ChainID, detectedID)})
+			continue
 		}
+		// Duplicate chain_id is a deterministic config error (two yaml
+		// entries resolved to the same chain), not a transient one — keep
+		// it fatal so the operator owner notices the bad config at boot.
 		if _, dup := o.chainTriggers[detectedID]; dup {
 			perChainEthClient.Close()
 			return fmt.Errorf("chain %d (%s): duplicate chain_id %d in operator chains[]",
@@ -248,9 +273,10 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		})
 
 		// Fan-in: stamp every event from this chain's raw channel with
-		// detectedID and forward to the shared channel the consumer loop
-		// reads. Exits when ctx is done (channel close is left to the
-		// trigger engines themselves on shutdown).
+		// detectedID, refresh the liveness watermark, and forward to the
+		// shared channel the consumer loop reads. Exits when ctx is done
+		// (channel close is left to the trigger engines themselves on
+		// shutdown).
 		go func(chainID int64, in <-chan triggerengine.TriggerMetadata[int64]) {
 			for {
 				select {
@@ -259,6 +285,9 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				case item, ok := <-in:
 					if !ok {
 						return
+					}
+					if set, ok := o.chainTriggers[chainID]; ok && set != nil {
+						set.markHeadSeen()
 					}
 					sharedBlockCh <- chainTaggedBlockEvent{chainID: chainID, metadata: item}
 				}
@@ -285,6 +314,11 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 			BlockTrigger: bt,
 			EventTrigger: et,
 			EthClient:    perChainEthClient,
+			// Seed the watermark to "now" so the chain is advertised
+			// immediately at boot. The fan-in goroutine above refreshes
+			// it on every block; an unhealthy chain will fall out of
+			// the watermark window on its own.
+			lastHeadSeenAt: time.Now(),
 		}
 		o.chainOrder = append(o.chainOrder, detectedID)
 
@@ -297,6 +331,15 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		}
 	}
 
+	// All configured chains failed to come up. The operator has nothing
+	// chain-bound to advertise; this is a real config error, not a
+	// soft-fail case, so surface it loudly. (TimeTrigger is chain-agnostic
+	// but on its own can't satisfy block/event tasks, so the operator
+	// would be advertising-but-useless without at least one chain.)
+	if len(o.chainTriggers) == 0 {
+		return fmt.Errorf("operator started with %d configured chain(s) but none initialized successfully — check RPC endpoints", len(chains))
+	}
+
 	timeTriggerCh := make(chan triggerengine.TriggerMetadata[uint64], 1000)
 	o.timeTrigger = triggerengine.NewTimeTrigger(timeTriggerCh, o.logger)
 	o.timeTrigger.Run(ctx)
@@ -305,8 +348,14 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	if o.config.EnabledFeatures.EventTrigger {
 		eventStatus = "enabled"
 	}
-	o.logger.Infof("📊 Monitoring Status: Block ✅ | Time ✅ | Event %s | Chains: %v",
-		eventStatus, o.chainOrder)
+	o.logger.Infof("📊 Monitoring Status: Block ✅ | Time ✅ | Event %s | Chains advertised: %v | Skipped: %d",
+		eventStatus, o.chainOrder, len(skipped))
+	if len(skipped) > 0 {
+		for _, s := range skipped {
+			o.logger.Warn("chain excluded from advertised capability",
+				"chain_name", s.name, "reason", s.reason)
+		}
+	}
 
 	// Establish a connection with gRPC server where new task will be pushed automatically
 	o.logger.Info("open channel to grpc to receive check")
@@ -1092,16 +1141,51 @@ func (o *Operator) PingServer() {
 
 	str := base64.StdEncoding.EncodeToString(blsSignature.Serialize())
 
+	// Re-advertise the currently-live chain set on every ping. The
+	// aggregator updates its per-operator capability snapshot from this
+	// field so a stalled subscription drops out of routing within one
+	// Ping interval, without forcing a SyncMessages reconnect. See
+	// supportedChainIDs() for the freshness watermark logic.
+	liveChains := o.supportedChainIDs()
+
+	// Emit per-chain capability + head-lag gauges. Iterate the
+	// CONFIGURED set so a dropped chain still reports lag (its gauge
+	// keeps growing until the subscription recovers or the operator
+	// restarts), which is what an alert wants to see.
+	if o.metrics != nil {
+		live := make(map[int64]bool, len(liveChains))
+		for _, id := range liveChains {
+			live[id] = true
+		}
+		for _, id := range o.allConfiguredChainIDs() {
+			o.metrics.SetChainAdvertised(id, live[id])
+			if set, ok := o.chainTriggers[id]; ok && set != nil {
+				set.lastHeadMu.RLock()
+				lag := time.Since(set.lastHeadSeenAt).Seconds()
+				set.lastHeadMu.RUnlock()
+				o.metrics.SetChainHeadLagSeconds(id, lag)
+			}
+		}
+	}
 	_, err = o.nodeRpcClient.Ping(context.Background(), &avspb.Checkin{
-		Address:     o.config.OperatorAddress,
-		Id:          id,
-		Signature:   str,
-		Version:     version.Get(),
-		RemoteIP:    o.GetPublicIP(),
-		MetricsPort: o.config.GetPublicMetricPort(),
-		BlockNumber: o.primaryBlockProgress(),
-		EventCount:  o.primaryEventProgress(),
+		Address:           o.config.OperatorAddress,
+		Id:                id,
+		Signature:         str,
+		Version:           version.Get(),
+		RemoteIP:          o.GetPublicIP(),
+		MetricsPort:       o.config.GetPublicMetricPort(),
+		BlockNumber:       o.primaryBlockProgress(),
+		EventCount:        o.primaryEventProgress(),
+		SupportedChainIds: liveChains,
 	})
+
+	// If the live set has narrowed from the configured set, surface
+	// once — observability hook for "Base subscription stalled, dropped
+	// from routing". Re-check at Ping cadence so we don't spam.
+	if cfg := o.allConfiguredChainIDs(); len(liveChains) != len(cfg) {
+		o.logger.Warn("operator advertising fewer chains than configured — chain subscription may be stalled",
+			"configured", cfg, "advertised", liveChains)
+	}
 
 	if err != nil {
 		var errorType string

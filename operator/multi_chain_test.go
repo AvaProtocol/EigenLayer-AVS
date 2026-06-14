@@ -3,6 +3,7 @@ package operator
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestEffectiveChains_DerivedFromTargetChain(t *testing.T) {
@@ -82,10 +83,18 @@ func TestTriggersForChain_FallbackOnZero(t *testing.T) {
 
 func TestSupportedChainIDs_FiltersZero(t *testing.T) {
 	// chain_id=0 is a placeholder for "legacy operator with undetected chain"
-	// and must not be advertised to the aggregator.
+	// and must not be advertised to the aggregator. lastHeadSeenAt is
+	// seeded to now so the liveness filter (added in the capability-
+	// hardening change) is neutral here — this test focuses on the
+	// chain_id=0 exclusion.
+	now := time.Now()
 	o := &Operator{
-		chainTriggers: map[int64]*ChainTriggerSet{0: {}, 11155111: {}, 8453: {}},
-		chainOrder:    []int64{0, 11155111, 8453},
+		chainTriggers: map[int64]*ChainTriggerSet{
+			0:        {lastHeadSeenAt: now},
+			11155111: {lastHeadSeenAt: now},
+			8453:     {lastHeadSeenAt: now},
+		},
+		chainOrder: []int64{0, 11155111, 8453},
 	}
 	got := o.supportedChainIDs()
 	want := []int64{11155111, 8453}
