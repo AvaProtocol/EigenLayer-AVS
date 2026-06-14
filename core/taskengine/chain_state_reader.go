@@ -197,6 +197,9 @@ func (d *directChainStateReader) HeaderByNumber(ctx context.Context, number *big
 	if err != nil {
 		return nil, err
 	}
+	if h == nil {
+		return nil, fmt.Errorf("HeaderByNumber returned nil header")
+	}
 	return &BlockHeader{Number: h.Number.Uint64(), Hash: h.Hash(), Time: h.Time}, nil
 }
 
