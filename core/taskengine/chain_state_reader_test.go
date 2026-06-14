@@ -58,6 +58,11 @@ type chainStateFakeClient struct {
 	callContractReq  *avsproto.WorkerCallContractReq
 	callContractResp *avsproto.WorkerCallContractResp
 	callContractErr  error
+
+	// GetBlockHeader
+	getBlockHeaderReq  *avsproto.WorkerGetBlockHeaderReq
+	getBlockHeaderResp *avsproto.WorkerGetBlockHeaderResp
+	getBlockHeaderErr  error
 }
 
 func (f *chainStateFakeClient) WorkerHealthCheck(context.Context, *avsproto.WorkerHealthCheckReq, ...grpc.CallOption) (*avsproto.WorkerHealthCheckResp, error) {
@@ -76,6 +81,10 @@ func (f *chainStateFakeClient) GetSmartWalletAddress(_ context.Context, req *avs
 func (f *chainStateFakeClient) CallContract(_ context.Context, req *avsproto.WorkerCallContractReq, _ ...grpc.CallOption) (*avsproto.WorkerCallContractResp, error) {
 	f.callContractReq = req
 	return f.callContractResp, f.callContractErr
+}
+func (f *chainStateFakeClient) GetBlockHeader(_ context.Context, req *avsproto.WorkerGetBlockHeaderReq, _ ...grpc.CallOption) (*avsproto.WorkerGetBlockHeaderResp, error) {
+	f.getBlockHeaderReq = req
+	return f.getBlockHeaderResp, f.getBlockHeaderErr
 }
 func (f *chainStateFakeClient) GetTokenMetadata(context.Context, *avsproto.WorkerGetTokenMetadataReq, ...grpc.CallOption) (*avsproto.WorkerGetTokenMetadataResp, error) {
 	panic("unused")
@@ -566,5 +575,44 @@ func TestWorkerChainStateReader_CallContract_NilToRejected(t *testing.T) {
 	r := NewWorkerChainStateReader(&chainStateFakeClient{}, 1, time.Second)
 	if _, err := r.CallContract(context.Background(), ethereum.CallMsg{Data: []byte{0x1}}, nil); err == nil {
 		t.Fatalf("expected error for nil msg.To")
+	}
+}
+
+// TestWorkerChainStateReader_HeaderByNumber: a specific block number
+// serializes as base-10; the worker's number/hash/time map into BlockHeader.
+func TestWorkerChainStateReader_HeaderByNumber(t *testing.T) {
+	hash := common.HexToHash("0xabc123")
+	fake := &chainStateFakeClient{
+		getBlockHeaderResp: &avsproto.WorkerGetBlockHeaderResp{
+			Number: 19000000,
+			Hash:   hash.Hex(),
+			Time:   1700000000,
+		},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	h, err := r.HeaderByNumber(context.Background(), big.NewInt(19000000))
+	if err != nil {
+		t.Fatalf("HeaderByNumber: %v", err)
+	}
+	if h.Number != 19000000 || h.Hash != hash || h.Time != 1700000000 {
+		t.Fatalf("unexpected header %+v", h)
+	}
+	if fake.getBlockHeaderReq.BlockNumber != "19000000" {
+		t.Fatalf("block number not propagated: %q", fake.getBlockHeaderReq.BlockNumber)
+	}
+}
+
+// TestWorkerChainStateReader_HeaderByNumber_Latest: nil number sends an
+// empty block_number string (worker treats empty as "latest").
+func TestWorkerChainStateReader_HeaderByNumber_Latest(t *testing.T) {
+	fake := &chainStateFakeClient{
+		getBlockHeaderResp: &avsproto.WorkerGetBlockHeaderResp{Number: 1, Hash: "0x00", Time: 1},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	if _, err := r.HeaderByNumber(context.Background(), nil); err != nil {
+		t.Fatalf("HeaderByNumber latest: %v", err)
+	}
+	if fake.getBlockHeaderReq.BlockNumber != "" {
+		t.Fatalf("nil number should send empty block_number: got %q", fake.getBlockHeaderReq.BlockNumber)
 	}
 }

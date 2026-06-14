@@ -44,13 +44,16 @@ type SendUserOpFunc func(
 
 type ContractWriteProcessor struct {
 	*CommonProcessor
-	client            *ethclient.Client
+	// client is the per-chain ChainStateReader — worker-routed in gateway
+	// mode, a direct-RPC reader otherwise. Used to stamp simulation
+	// receipts with the latest block number/hash.
+	client            ChainStateReader
 	smartWalletConfig *config.SmartWalletConfig
 	owner             common.Address
 	sendUserOpFunc    SendUserOpFunc
 }
 
-func NewContractWriteProcessor(vm *VM, client *ethclient.Client, smartWalletConfig *config.SmartWalletConfig, owner common.Address) *ContractWriteProcessor {
+func NewContractWriteProcessor(vm *VM, client ChainStateReader, smartWalletConfig *config.SmartWalletConfig, owner common.Address) *ContractWriteProcessor {
 	r := &ContractWriteProcessor{
 		client:            client,
 		smartWalletConfig: smartWalletConfig,
@@ -553,8 +556,8 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		if mr != nil && mr.Receipt != nil && r.client != nil {
 			if header, herr := r.client.HeaderByNumber(ctx, nil); herr == nil && header != nil {
 				if recMap, ok := mr.Receipt.AsInterface().(map[string]interface{}); ok {
-					recMap["blockNumber"] = fmt.Sprintf("0x%x", header.Number.Uint64())
-					recMap["blockHash"] = header.Hash().Hex()
+					recMap["blockNumber"] = fmt.Sprintf("0x%x", header.Number)
+					recMap["blockHash"] = header.Hash.Hex()
 					if newVal, err := structpb.NewValue(recMap); err == nil {
 						mr.Receipt = newVal
 					}

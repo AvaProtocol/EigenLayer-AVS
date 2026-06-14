@@ -169,8 +169,20 @@ next — same migrate-then-verify discipline as Phases 2→4a.
    `decimals()` via the package-level `rpcConn` (the AVS-chain client, no
    chainID param) — chain-ambiguous, so it moves with the event-enrichment
    work (PR 3/5) where chain context is threaded through.
-3. **PR 3 — block context (`GetBlockNumber` / `GetBlockHeader`).** Migrate
-   the trigger/enrichment block reads.
+3. **PR 3 — `GetBlockHeader` + contractWrite block read (delivered).**
+   Added the `GetBlockHeader` worker RPC (number/hash/time) + a
+   `HeaderByNumber` method on `ChainStateReader` returning a lightweight
+   `BlockHeader` (a full `types.Header` can't be carried over gRPC — its
+   hash depends on every field). Switched `ContractWriteProcessor`'s field
+   from `*ethclient.Client` to `ChainStateReader` and migrated its
+   receipt-stamping block read (`vm_runner_contract_write.go:554`);
+   `runContractWrite` resolves the per-chain reader with a direct-dial
+   fallback. The remaining `rpcConn`-based block reads
+   (`run_node_immediately.go`, `engine.go`, `utils.go`) use the AVS-chain
+   client with no chainID param — they move with the `run_node_immediately`
+   chain-threading work alongside the deferred `callContractMethod`. The
+   contractWrite processor's two log-only/best-effort dials (`:715` sender
+   validation, `:784` balance logging) are deferred to PR 4.
 4. **PR 4 — contractWrite / ethTransfer residual dials.** Fold gas
    estimation into `ExecuteUserOp`'s response; drop log-only dials; add
    `GetTransactionReceipt` if a polling path needs it.

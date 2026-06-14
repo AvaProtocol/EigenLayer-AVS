@@ -1522,13 +1522,20 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		executionLog.EndAt = time.Now().UnixMilli()
 		return executionLog, err
 	}
-	rpcClient, err := ethclient.Dial(swConfig.EthRpcUrl)
-	if err != nil {
-		executionLog = v.createExecutionStep(stepID, false, fmt.Sprintf("failed to dial ETH RPC: %v", err), "", time.Now().UnixMilli())
-		executionLog.EndAt = time.Now().UnixMilli()
-		return executionLog, err
+	// Prefer the per-chain ChainStateReader (worker-routed in gateway mode)
+	// for receipt block stamping; fall back to a direct dial only when no
+	// reader is registered for the chain.
+	chainReader := GetChainStateReaderForChain(uint64(node.Config.GetChainId()))
+	if chainReader == nil {
+		rpcClient, dialErr := ethclient.Dial(swConfig.EthRpcUrl)
+		if dialErr != nil {
+			executionLog = v.createExecutionStep(stepID, false, fmt.Sprintf("failed to dial ETH RPC: %v", dialErr), "", time.Now().UnixMilli())
+			executionLog.EndAt = time.Now().UnixMilli()
+			return executionLog, dialErr
+		}
+		defer rpcClient.Close()
+		chainReader = NewDirectChainStateReader(rpcClient, node.Config.GetChainId())
 	}
-	defer rpcClient.Close()
 
 	v.logger.Info("🔍 VM DEBUG - Smart wallet config for contract write",
 		"has_config", swConfig != nil,
@@ -1563,16 +1570,16 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		}
 	}
 
-	processor := NewContractWriteProcessor(v, rpcClient, swConfig, v.TaskOwner)
+	processor := NewContractWriteProcessor(v, chainReader, swConfig, v.TaskOwner)
 	processor.CommonProcessor.SetTaskNode(taskNode)
-	executionLog, err = processor.Execute(stepID, node)
+	executionLog, execErr := processor.Execute(stepID, node)
 	v.mu.Lock()
 	if executionLog != nil {
 		executionLog.Inputs = v.collectInputKeysForLog(stepID)
 	}
 	v.mu.Unlock()
 	// v.addExecutionLog(executionLog)
-	return executionLog, err
+	return executionLog, execErr
 }
 
 func (v *VM) runCustomCode(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, error) {
