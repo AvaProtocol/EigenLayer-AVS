@@ -780,9 +780,10 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	// bundler does the authoritative gas pricing at send time.
 	executionLogBuilder.WriteString("Collecting pre-send diagnostics...\n")
 	if r.client != nil {
-		if _, bundlerErr := bundler.NewBundlerClient(r.smartWalletConfig.BundlerURL); bundlerErr != nil {
+		if bundlerClient, bundlerErr := bundler.NewBundlerClient(r.smartWalletConfig.BundlerURL); bundlerErr != nil {
 			executionLogBuilder.WriteString(fmt.Sprintf("Failed to create bundler client: %v\n", bundlerErr))
 		} else {
+			bundlerClient.Close()
 			if senderOverride != nil {
 				if balance, balErr := r.client.GetBalance(ctx, *senderOverride); balErr == nil {
 					executionLogBuilder.WriteString(fmt.Sprintf("Smart wallet balance: %s wei\n", balance.String()))
