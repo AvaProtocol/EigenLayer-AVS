@@ -73,14 +73,19 @@ func (r *RpcServer) resolveSmartWalletConfigForChain(requestedChainID int64) (*c
 	if r.config.SmartWallet != nil && requestedChainID == r.config.SmartWallet.ChainID {
 		return r.config.SmartWallet, nil
 	}
-	entry, err := r.chainRegistry.GetWorker(requestedChainID)
+	// Config-only lookup — GetChainConfig does NOT require a connected
+	// worker gRPC client (unlike GetWorker, which errors when the worker
+	// is momentarily disconnected). Config resolution must succeed
+	// independently of worker connectivity so the withdraw flow can still
+	// reach its direct-RPC fallback when a worker is down.
+	chainCfg, err := r.chainRegistry.GetChainConfig(requestedChainID)
 	if err != nil {
 		return nil, err
 	}
-	if entry.Config == nil || entry.Config.SmartWallet == nil {
+	if chainCfg == nil || chainCfg.SmartWallet == nil {
 		return nil, fmt.Errorf("chain %d has no smart_wallet config", requestedChainID)
 	}
-	return entry.Config.SmartWallet, nil
+	return chainCfg.SmartWallet, nil
 }
 
 func (r *RpcServer) resolveSmartWalletForChain(requestedChainID int64) (*config.SmartWalletConfig, *ethclient.Client, error) {
@@ -263,6 +268,13 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 		}
 	} else {
 		// ERC20 — no gas reimbursement needed (paymaster covers it).
+		// Validate the token address before converting: HexToAddress
+		// silently coerces a malformed string to the zero address, which
+		// would query the wrong contract. This path is reachable via gRPC
+		// (not only the REST handler), so don't assume upstream validation.
+		if !common.IsHexAddress(payload.Token) {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid token address format: %q", payload.Token)
+		}
 		// Validate the token balance.
 		tokenBalance, balanceErr := chainReader.GetTokenBalance(ctx, common.HexToAddress(payload.Token), *smartWalletAddress)
 		if balanceErr != nil {
