@@ -48,6 +48,11 @@ type chainStateFakeClient struct {
 	getTokenBalanceReq  *avsproto.WorkerGetTokenBalanceReq
 	getTokenBalanceResp *avsproto.WorkerGetTokenBalanceResp
 	getTokenBalanceErr  error
+
+	// GetSmartWalletAddress
+	getSmartWalletReq  *avsproto.WorkerGetSmartWalletAddressReq
+	getSmartWalletResp *avsproto.WorkerGetSmartWalletAddressResp
+	getSmartWalletErr  error
 }
 
 func (f *chainStateFakeClient) WorkerHealthCheck(context.Context, *avsproto.WorkerHealthCheckReq, ...grpc.CallOption) (*avsproto.WorkerHealthCheckResp, error) {
@@ -59,8 +64,9 @@ func (f *chainStateFakeClient) ExecuteUserOp(context.Context, *avsproto.ExecuteU
 func (f *chainStateFakeClient) GetNonce(context.Context, *avsproto.WorkerGetNonceReq, ...grpc.CallOption) (*avsproto.WorkerGetNonceResp, error) {
 	panic("unused")
 }
-func (f *chainStateFakeClient) GetSmartWalletAddress(context.Context, *avsproto.WorkerGetSmartWalletAddressReq, ...grpc.CallOption) (*avsproto.WorkerGetSmartWalletAddressResp, error) {
-	panic("unused")
+func (f *chainStateFakeClient) GetSmartWalletAddress(_ context.Context, req *avsproto.WorkerGetSmartWalletAddressReq, _ ...grpc.CallOption) (*avsproto.WorkerGetSmartWalletAddressResp, error) {
+	f.getSmartWalletReq = req
+	return f.getSmartWalletResp, f.getSmartWalletErr
 }
 func (f *chainStateFakeClient) GetTokenMetadata(context.Context, *avsproto.WorkerGetTokenMetadataReq, ...grpc.CallOption) (*avsproto.WorkerGetTokenMetadataResp, error) {
 	panic("unused")
@@ -429,5 +435,63 @@ func TestWorkerChainStateReader_GetTokenBalance_Malformed(t *testing.T) {
 	r := NewWorkerChainStateReader(fake, 1, time.Second)
 	if _, err := r.GetTokenBalance(context.Background(), common.HexToAddress("0xaa"), common.HexToAddress("0xbb")); err == nil {
 		t.Fatalf("expected malformed-token-balance error")
+	}
+}
+
+// TestWorkerChainStateReader_GetSmartWalletAddress: owner/factory are
+// hex-encoded and the salt serializes as a base-10 string; a valid hex
+// address round-trips back.
+func TestWorkerChainStateReader_GetSmartWalletAddress(t *testing.T) {
+	want := common.HexToAddress("0xABCdEF0123456789012345678901234567890123")
+	fake := &chainStateFakeClient{
+		getSmartWalletResp: &avsproto.WorkerGetSmartWalletAddressResp{Address: want.Hex()},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	owner := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	factory := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	got, err := r.GetSmartWalletAddress(context.Background(), owner, factory, big.NewInt(7))
+	if err != nil {
+		t.Fatalf("GetSmartWalletAddress: %v", err)
+	}
+	if got != want {
+		t.Fatalf("address: got %s want %s", got.Hex(), want.Hex())
+	}
+	if fake.getSmartWalletReq.Owner != owner.Hex() {
+		t.Fatalf("owner not propagated: %q", fake.getSmartWalletReq.Owner)
+	}
+	if fake.getSmartWalletReq.FactoryAddress != factory.Hex() {
+		t.Fatalf("factory not propagated: %q", fake.getSmartWalletReq.FactoryAddress)
+	}
+	if fake.getSmartWalletReq.Salt != "7" {
+		t.Fatalf("salt should serialize base-10: got %q", fake.getSmartWalletReq.Salt)
+	}
+}
+
+// TestWorkerChainStateReader_GetSmartWalletAddress_NilSalt: a nil salt
+// serializes as "0" rather than panicking.
+func TestWorkerChainStateReader_GetSmartWalletAddress_NilSalt(t *testing.T) {
+	fake := &chainStateFakeClient{
+		getSmartWalletResp: &avsproto.WorkerGetSmartWalletAddressResp{
+			Address: "0x2222222222222222222222222222222222222222",
+		},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	if _, err := r.GetSmartWalletAddress(context.Background(), common.HexToAddress("0xaa"), common.HexToAddress("0xbb"), nil); err != nil {
+		t.Fatalf("nil salt: %v", err)
+	}
+	if fake.getSmartWalletReq.Salt != "0" {
+		t.Fatalf("nil salt should serialize as \"0\": got %q", fake.getSmartWalletReq.Salt)
+	}
+}
+
+// TestWorkerChainStateReader_GetSmartWalletAddress_Malformed: a non-address
+// string from the worker is a contract violation; surface it.
+func TestWorkerChainStateReader_GetSmartWalletAddress_Malformed(t *testing.T) {
+	fake := &chainStateFakeClient{
+		getSmartWalletResp: &avsproto.WorkerGetSmartWalletAddressResp{Address: "not-an-address"},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	if _, err := r.GetSmartWalletAddress(context.Background(), common.HexToAddress("0xaa"), common.HexToAddress("0xbb"), big.NewInt(0)); err == nil {
+		t.Fatalf("expected malformed-address error")
 	}
 }

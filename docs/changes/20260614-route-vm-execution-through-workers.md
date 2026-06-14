@@ -148,10 +148,16 @@ fallback machinery Phases 3–4a built.
 Each phase is independently shippable and prod-verifiable before the
 next — same migrate-then-verify discipline as Phases 2→4a.
 
-1. **PR 1 — `GetWallet` → `GetSmartWalletAddress`.** No new proto.
-   Highest-traffic, lowest-risk. Route `engine.go:GetWallet`'s factory
-   derivation through the existing worker RPC; keep the direct dial as
-   fallback. Removes the single most-hit per-chain dial.
+1. **PR 1 — `GetWallet` → `GetSmartWalletAddress` (delivered).**
+   Highest-traffic, lowest-risk. Routed `engine.go:GetWallet`'s factory
+   derivation through the chain worker; the direct dial stays as the
+   no-reader fallback. The existing `GetSmartWalletAddress` worker RPC had
+   **zero callers**, so it was redefined (no back-compat needed): salt is
+   now a base-10 `string` (was `int64`, which couldn't carry a 256-bit
+   salt) and a `factory_address` override was added so worker-derived
+   addresses match the gateway's per-request factory exactly. Added
+   `GetSmartWalletAddress` to the `ChainStateReader` interface + both
+   implementations. Removes the single most-hit per-chain dial.
 2. **PR 2 — `CallContract` worker RPC + contractRead.** New `CallContract`
    proto + worker handler; add `CallContract` to `ChainReader`; migrate
    `ContractReadProcessor` and the `run_node_immediately` eth_call sites.

@@ -378,11 +378,12 @@ func (x *WorkerGetNonceResp) GetNonce() string {
 
 // Smart wallet address derivation
 type WorkerGetSmartWalletAddressReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Owner         string                 `protobuf:"bytes,1,opt,name=owner,proto3" json:"owner,omitempty"` // Owner EOA address (hex)
-	Salt          int64                  `protobuf:"varint,2,opt,name=salt,proto3" json:"salt,omitempty"`  // Salt for CREATE2 derivation
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Owner          string                 `protobuf:"bytes,1,opt,name=owner,proto3" json:"owner,omitempty"`                                         // Owner EOA address (hex)
+	Salt           string                 `protobuf:"bytes,2,opt,name=salt,proto3" json:"salt,omitempty"`                                           // CREATE2 salt (big.Int as base-10 string)
+	FactoryAddress string                 `protobuf:"bytes,3,opt,name=factory_address,json=factoryAddress,proto3" json:"factory_address,omitempty"` // Factory override (hex). Empty = worker's
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *WorkerGetSmartWalletAddressReq) Reset() {
@@ -422,11 +423,18 @@ func (x *WorkerGetSmartWalletAddressReq) GetOwner() string {
 	return ""
 }
 
-func (x *WorkerGetSmartWalletAddressReq) GetSalt() int64 {
+func (x *WorkerGetSmartWalletAddressReq) GetSalt() string {
 	if x != nil {
 		return x.Salt
 	}
-	return 0
+	return ""
+}
+
+func (x *WorkerGetSmartWalletAddressReq) GetFactoryAddress() string {
+	if x != nil {
+		return x.FactoryAddress
+	}
+	return ""
 }
 
 type WorkerGetSmartWalletAddressResp struct {
@@ -1147,10 +1155,11 @@ const file_worker_proto_rawDesc = "" +
 	"\x05owner\x18\x01 \x01(\tR\x05owner\x12\x12\n" +
 	"\x04salt\x18\x02 \x01(\x03R\x04salt\"*\n" +
 	"\x12WorkerGetNonceResp\x12\x14\n" +
-	"\x05nonce\x18\x01 \x01(\tR\x05nonce\"J\n" +
+	"\x05nonce\x18\x01 \x01(\tR\x05nonce\"s\n" +
 	"\x1eWorkerGetSmartWalletAddressReq\x12\x14\n" +
 	"\x05owner\x18\x01 \x01(\tR\x05owner\x12\x12\n" +
-	"\x04salt\x18\x02 \x01(\x03R\x04salt\";\n" +
+	"\x04salt\x18\x02 \x01(\tR\x04salt\x12'\n" +
+	"\x0ffactory_address\x18\x03 \x01(\tR\x0efactoryAddress\";\n" +
 	"\x1fWorkerGetSmartWalletAddressResp\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"F\n" +
 	"\x19WorkerGetTokenMetadataReq\x12)\n" +

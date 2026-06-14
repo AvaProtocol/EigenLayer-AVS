@@ -1265,7 +1265,25 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		hash := crypto.Keccak256(concatenated)
 		mockAddr := common.BytesToAddress(hash[12:])
 		derivedSenderAddress = &mockAddr
+	} else if reader := GetChainStateReaderForChain(uint64(chainID)); reader != nil {
+		// Preferred path: derive via the per-chain ChainStateReader. In
+		// gateway mode this is worker-routed, so the gateway issues no
+		// direct chain RPC for wallet derivation; in single-chain mode it's
+		// a direct reader that reuses the existing client (no per-call dial).
+		addr, deriveErr := reader.GetSmartWalletAddress(context.Background(), user.Address, factoryAddr, saltBig)
+		if deriveErr != nil {
+			n.logger.Error("GetWallet: factory.getAddress() failed (worker-routed)",
+				"chain_id", chainID, "owner", user.Address.Hex(), "factory", factoryAddr.Hex(),
+				"salt", saltBig.String(), "error", deriveErr)
+			return nil, status.Errorf(codes.Unavailable,
+				"GetWallet: derive sender on chain %d via factory %s: %v",
+				chainID, factoryAddr.Hex(), deriveErr)
+		}
+		derivedSenderAddress = &addr
 	} else {
+		// Fallback: no ChainStateReader registered for this chain (single-
+		// chain startup edge / unconfigured chain). Dial the chain RPC
+		// directly, same as before the worker-routing migration.
 		if swCfg.EthRpcUrl == "" {
 			n.logger.Error("GetWallet: no EthRpcUrl configured for chain — refusing to derive (would risk persisting a mock address under a real chain)",
 				"chain_id", chainID, "owner", user.Address.Hex())

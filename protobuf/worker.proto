@@ -94,8 +94,12 @@ message WorkerGetNonceResp {
 
 // Smart wallet address derivation
 message WorkerGetSmartWalletAddressReq {
-  string owner = 1;    // Owner EOA address (hex)
-  int64 salt = 2;      // Salt for CREATE2 derivation
+  string owner = 1;            // Owner EOA address (hex)
+  string salt = 2;             // CREATE2 salt (big.Int as base-10 string)
+  string factory_address = 3;  // Factory override (hex). Empty = worker's
+                               // configured factory. The gateway passes the
+                               // per-chain / per-request factory so derivation
+                               // matches GetWallet's direct-RPC path exactly.
 }
 
 message WorkerGetSmartWalletAddressResp {
