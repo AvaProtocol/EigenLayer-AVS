@@ -354,6 +354,12 @@ func (s *Server) CallContract(ctx context.Context, req *avsproto.WorkerCallContr
 		if !ok {
 			return nil, fmt.Errorf("invalid value %q (expected base-10 big.Int string)", req.Value)
 		}
+		if v.Sign() < 0 {
+			return nil, fmt.Errorf("invalid value %q: must be non-negative", req.Value)
+		}
+		if v.BitLen() > 256 {
+			return nil, fmt.Errorf("invalid value %q: exceeds uint256", req.Value)
+		}
 		msg.Value = v
 	}
 
@@ -362,6 +368,9 @@ func (s *Server) CallContract(ctx context.Context, req *avsproto.WorkerCallContr
 		b, ok := new(big.Int).SetString(req.BlockNumber, 10)
 		if !ok {
 			return nil, fmt.Errorf("invalid block_number %q (expected base-10 big.Int string)", req.BlockNumber)
+		}
+		if b.Sign() < 0 {
+			return nil, fmt.Errorf("invalid block_number %q: must be non-negative", req.BlockNumber)
 		}
 		blockNumber = b
 	}

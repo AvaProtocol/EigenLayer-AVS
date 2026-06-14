@@ -523,6 +523,9 @@ func TestWorkerChainStateReader_CallContract(t *testing.T) {
 	if fake.callContractReq.To != to.Hex() {
 		t.Fatalf("To not propagated: %q", fake.callContractReq.To)
 	}
+	if len(fake.callContractReq.Data) != 1 || fake.callContractReq.Data[0] != 0xab {
+		t.Fatalf("Data not propagated: %x", fake.callContractReq.Data)
+	}
 	if fake.callContractReq.From != "" {
 		t.Fatalf("From should be empty: %q", fake.callContractReq.From)
 	}
