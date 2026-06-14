@@ -158,9 +158,17 @@ next — same migrate-then-verify discipline as Phases 2→4a.
    addresses match the gateway's per-request factory exactly. Added
    `GetSmartWalletAddress` to the `ChainStateReader` interface + both
    implementations. Removes the single most-hit per-chain dial.
-2. **PR 2 — `CallContract` worker RPC + contractRead.** New `CallContract`
-   proto + worker handler; add `CallContract` to `ChainReader`; migrate
-   `ContractReadProcessor` and the `run_node_immediately` eth_call sites.
+2. **PR 2 — `CallContract` worker RPC + contractRead (delivered).** Added
+   the `CallContract` worker RPC (from/to/value/data/block) + handler, and
+   `CallContract` to `ChainStateReader` (direct + worker-routed). Switched
+   `ContractReadProcessor`'s field from `*ethclient.Client` to
+   `ChainStateReader` — it used `CallContract`, `ChainID`, and `CodeAt`,
+   all now on the interface — and `runContractRead` resolves the per-chain
+   reader (worker-routed in gateway mode, direct-dial fallback otherwise).
+   Deferred: `callContractMethod` (`run_node_immediately.go`) reads
+   `decimals()` via the package-level `rpcConn` (the AVS-chain client, no
+   chainID param) — chain-ambiguous, so it moves with the event-enrichment
+   work (PR 3/5) where chain context is threaded through.
 3. **PR 3 — block context (`GetBlockNumber` / `GetBlockHeader`).** Migrate
    the trigger/enrichment block reads.
 4. **PR 4 — contractWrite / ethTransfer residual dials.** Fold gas

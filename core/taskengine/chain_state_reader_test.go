@@ -53,6 +53,11 @@ type chainStateFakeClient struct {
 	getSmartWalletReq  *avsproto.WorkerGetSmartWalletAddressReq
 	getSmartWalletResp *avsproto.WorkerGetSmartWalletAddressResp
 	getSmartWalletErr  error
+
+	// CallContract
+	callContractReq  *avsproto.WorkerCallContractReq
+	callContractResp *avsproto.WorkerCallContractResp
+	callContractErr  error
 }
 
 func (f *chainStateFakeClient) WorkerHealthCheck(context.Context, *avsproto.WorkerHealthCheckReq, ...grpc.CallOption) (*avsproto.WorkerHealthCheckResp, error) {
@@ -67,6 +72,10 @@ func (f *chainStateFakeClient) GetNonce(context.Context, *avsproto.WorkerGetNonc
 func (f *chainStateFakeClient) GetSmartWalletAddress(_ context.Context, req *avsproto.WorkerGetSmartWalletAddressReq, _ ...grpc.CallOption) (*avsproto.WorkerGetSmartWalletAddressResp, error) {
 	f.getSmartWalletReq = req
 	return f.getSmartWalletResp, f.getSmartWalletErr
+}
+func (f *chainStateFakeClient) CallContract(_ context.Context, req *avsproto.WorkerCallContractReq, _ ...grpc.CallOption) (*avsproto.WorkerCallContractResp, error) {
+	f.callContractReq = req
+	return f.callContractResp, f.callContractErr
 }
 func (f *chainStateFakeClient) GetTokenMetadata(context.Context, *avsproto.WorkerGetTokenMetadataReq, ...grpc.CallOption) (*avsproto.WorkerGetTokenMetadataResp, error) {
 	panic("unused")
@@ -493,5 +502,66 @@ func TestWorkerChainStateReader_GetSmartWalletAddress_Malformed(t *testing.T) {
 	r := NewWorkerChainStateReader(fake, 1, time.Second)
 	if _, err := r.GetSmartWalletAddress(context.Background(), common.HexToAddress("0xaa"), common.HexToAddress("0xbb"), big.NewInt(0)); err == nil {
 		t.Fatalf("expected malformed-address error")
+	}
+}
+
+// TestWorkerChainStateReader_CallContract: To/Data propagate; From/Value/
+// block default to empty when unset; raw result bytes round-trip.
+func TestWorkerChainStateReader_CallContract(t *testing.T) {
+	fake := &chainStateFakeClient{
+		callContractResp: &avsproto.WorkerCallContractResp{Result: []byte{0x01, 0x02, 0x03}},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	to := common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+	out, err := r.CallContract(context.Background(), ethereum.CallMsg{To: &to, Data: []byte{0xab}}, nil)
+	if err != nil {
+		t.Fatalf("CallContract: %v", err)
+	}
+	if len(out) != 3 || out[0] != 0x01 {
+		t.Fatalf("unexpected result %x", out)
+	}
+	if fake.callContractReq.To != to.Hex() {
+		t.Fatalf("To not propagated: %q", fake.callContractReq.To)
+	}
+	if fake.callContractReq.From != "" {
+		t.Fatalf("From should be empty: %q", fake.callContractReq.From)
+	}
+	if fake.callContractReq.Value != "" {
+		t.Fatalf("Value should be empty: %q", fake.callContractReq.Value)
+	}
+	if fake.callContractReq.BlockNumber != "" {
+		t.Fatalf("BlockNumber should be empty: %q", fake.callContractReq.BlockNumber)
+	}
+}
+
+// TestWorkerChainStateReader_CallContract_FieldsPropagate: From/Value/block
+// serialize when set.
+func TestWorkerChainStateReader_CallContract_FieldsPropagate(t *testing.T) {
+	fake := &chainStateFakeClient{callContractResp: &avsproto.WorkerCallContractResp{}}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	to := common.HexToAddress("0x00")
+	from := common.HexToAddress("0xDEADBEEF00000000000000000000000000000000")
+	_, err := r.CallContract(context.Background(),
+		ethereum.CallMsg{To: &to, From: from, Value: big.NewInt(99), Data: []byte{0x1}}, big.NewInt(12345))
+	if err != nil {
+		t.Fatalf("CallContract: %v", err)
+	}
+	if fake.callContractReq.From != from.Hex() {
+		t.Fatalf("From: %q", fake.callContractReq.From)
+	}
+	if fake.callContractReq.Value != "99" {
+		t.Fatalf("Value: %q", fake.callContractReq.Value)
+	}
+	if fake.callContractReq.BlockNumber != "12345" {
+		t.Fatalf("BlockNumber: %q", fake.callContractReq.BlockNumber)
+	}
+}
+
+// TestWorkerChainStateReader_CallContract_NilToRejected: a nil destination
+// (deployment probe) is a caller bug the contractRead path never makes.
+func TestWorkerChainStateReader_CallContract_NilToRejected(t *testing.T) {
+	r := NewWorkerChainStateReader(&chainStateFakeClient{}, 1, time.Second)
+	if _, err := r.CallContract(context.Background(), ethereum.CallMsg{Data: []byte{0x1}}, nil); err == nil {
+		t.Fatalf("expected error for nil msg.To")
 	}
 }

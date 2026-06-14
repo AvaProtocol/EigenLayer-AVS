@@ -66,6 +66,10 @@ type ChainStateReader interface {
 	// (owner, salt) under the given factory on this chain. Mirrors
 	// aa.GetSenderAddressForFactory.
 	GetSmartWalletAddress(ctx context.Context, owner, factory common.Address, salt *big.Int) (common.Address, error)
+
+	// CallContract executes a read-only contract call (eth_call) at the
+	// given block (nil = latest). Mirrors ethclient.CallContract.
+	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
 }
 
 // ---------------------------------------------------------------------
@@ -168,6 +172,10 @@ func (d *directChainStateReader) GetSmartWalletAddress(_ context.Context, owner,
 		return common.Address{}, fmt.Errorf("nil sender address for owner=%s factory=%s salt=%s", owner.Hex(), factory.Hex(), salt.String())
 	}
 	return *addr, nil
+}
+
+func (d *directChainStateReader) CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+	return d.client.CallContract(ctx, msg, blockNumber)
 }
 
 // ---------------------------------------------------------------------
@@ -332,6 +340,38 @@ func (w *workerChainStateReader) GetSmartWalletAddress(ctx context.Context, owne
 		return common.Address{}, fmt.Errorf("worker returned malformed address %q for owner=%s on chain %d", resp.Address, owner.Hex(), w.chainID)
 	}
 	return common.HexToAddress(resp.Address), nil
+}
+
+func (w *workerChainStateReader) CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+	// eth_call without a destination is a contract-deployment probe, which
+	// the contractRead path never issues. Surface a nil To rather than
+	// forwarding an ambiguous request to the worker.
+	if msg.To == nil {
+		return nil, fmt.Errorf("CallContract: msg.To is required")
+	}
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	req := &avsproto.WorkerCallContractReq{
+		To:   msg.To.Hex(),
+		Data: msg.Data,
+	}
+	if (msg.From != common.Address{}) {
+		req.From = msg.From.Hex()
+	}
+	if msg.Value != nil {
+		req.Value = msg.Value.String()
+	}
+	if blockNumber != nil {
+		req.BlockNumber = blockNumber.String()
+	}
+	resp, err := w.client.CallContract(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("worker CallContract (chain %d): %w", w.chainID, err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("worker returned nil response for CallContract to %s on chain %d", msg.To.Hex(), w.chainID)
+	}
+	return resp.Result, nil
 }
 
 // withTimeout caps the gRPC call's wall time. context.WithTimeout

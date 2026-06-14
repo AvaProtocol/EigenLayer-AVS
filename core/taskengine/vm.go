@@ -1479,24 +1479,33 @@ func (v *VM) runContractRead(taskNode *avsproto.TaskNode) (*avsproto.Execution_S
 		executionLog.EndAt = time.Now().UnixMilli()
 		return executionLog, err
 	}
-	rpcClient, err := ethclient.Dial(swConfig.EthRpcUrl)
-	if err != nil {
-		executionLog = v.createExecutionStep(stepID, false, fmt.Sprintf("failed to dial ETH RPC: %v", err), "", time.Now().UnixMilli())
-		executionLog.EndAt = time.Now().UnixMilli()
-		return executionLog, err
-	}
-	defer rpcClient.Close()
 
-	processor := NewContractReadProcessor(v, rpcClient)
+	// Prefer the per-chain ChainStateReader — worker-routed in gateway mode,
+	// so the gateway issues no direct eth_call. Fall back to a direct dial
+	// only when no reader is registered for the chain (single-chain mode /
+	// unconfigured chain).
+	chainReader := GetChainStateReaderForChain(uint64(node.Config.GetChainId()))
+	if chainReader == nil {
+		rpcClient, err := ethclient.Dial(swConfig.EthRpcUrl)
+		if err != nil {
+			executionLog = v.createExecutionStep(stepID, false, fmt.Sprintf("failed to dial ETH RPC: %v", err), "", time.Now().UnixMilli())
+			executionLog.EndAt = time.Now().UnixMilli()
+			return executionLog, err
+		}
+		defer rpcClient.Close()
+		chainReader = NewDirectChainStateReader(rpcClient, node.Config.GetChainId())
+	}
+
+	processor := NewContractReadProcessor(v, chainReader)
 	processor.CommonProcessor.SetTaskNode(taskNode)
-	executionLog, err = processor.Execute(stepID, node)
+	executionLog, execErr := processor.Execute(stepID, node)
 	v.mu.Lock()
 	if executionLog != nil {
 		executionLog.Inputs = v.collectInputKeysForLog(stepID)
 	}
 	v.mu.Unlock()
 	// v.addExecutionLog(executionLog)
-	return executionLog, err
+	return executionLog, execErr
 }
 
 func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, error) {

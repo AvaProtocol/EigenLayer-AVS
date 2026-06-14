@@ -1124,6 +1124,128 @@ func (x *WorkerGetTokenBalanceResp) GetBalance() string {
 	return ""
 }
 
+// Read-only contract call (eth_call). Mirrors the ethereum.CallMsg fields
+// the contractRead path uses.
+type WorkerCallContractReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	From          string                 `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`                                  // Caller (hex). Optional; chain default if empty.
+	To            string                 `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`                                      // Target contract (hex). Required.
+	Value         string                 `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"`                                // Wei (big.Int as string); empty/zero for none.
+	Data          []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`                                  // ABI-encoded calldata.
+	BlockNumber   string                 `protobuf:"bytes,5,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"` // Block height (big.Int as string); empty = latest.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerCallContractReq) Reset() {
+	*x = WorkerCallContractReq{}
+	mi := &file_worker_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerCallContractReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerCallContractReq) ProtoMessage() {}
+
+func (x *WorkerCallContractReq) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerCallContractReq.ProtoReflect.Descriptor instead.
+func (*WorkerCallContractReq) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *WorkerCallContractReq) GetFrom() string {
+	if x != nil {
+		return x.From
+	}
+	return ""
+}
+
+func (x *WorkerCallContractReq) GetTo() string {
+	if x != nil {
+		return x.To
+	}
+	return ""
+}
+
+func (x *WorkerCallContractReq) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
+func (x *WorkerCallContractReq) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *WorkerCallContractReq) GetBlockNumber() string {
+	if x != nil {
+		return x.BlockNumber
+	}
+	return ""
+}
+
+type WorkerCallContractResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        []byte                 `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"` // Raw ABI-encoded return bytes.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerCallContractResp) Reset() {
+	*x = WorkerCallContractResp{}
+	mi := &file_worker_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerCallContractResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerCallContractResp) ProtoMessage() {}
+
+func (x *WorkerCallContractResp) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerCallContractResp.ProtoReflect.Descriptor instead.
+func (*WorkerCallContractResp) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *WorkerCallContractResp) GetResult() []byte {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
 var File_worker_proto protoreflect.FileDescriptor
 
 const file_worker_proto_rawDesc = "" +
@@ -1196,7 +1318,15 @@ const file_worker_proto_rawDesc = "" +
 	"\rtoken_address\x18\x01 \x01(\tR\ftokenAddress\x12#\n" +
 	"\rowner_address\x18\x02 \x01(\tR\fownerAddress\"5\n" +
 	"\x19WorkerGetTokenBalanceResp\x12\x18\n" +
-	"\abalance\x18\x01 \x01(\tR\abalance2\xdf\a\n" +
+	"\abalance\x18\x01 \x01(\tR\abalance\"\x88\x01\n" +
+	"\x15WorkerCallContractReq\x12\x12\n" +
+	"\x04from\x18\x01 \x01(\tR\x04from\x12\x0e\n" +
+	"\x02to\x18\x02 \x01(\tR\x02to\x12\x14\n" +
+	"\x05value\x18\x03 \x01(\tR\x05value\x12\x12\n" +
+	"\x04data\x18\x04 \x01(\fR\x04data\x12!\n" +
+	"\fblock_number\x18\x05 \x01(\tR\vblockNumber\"0\n" +
+	"\x16WorkerCallContractResp\x12\x16\n" +
+	"\x06result\x18\x01 \x01(\fR\x06result2\xb6\b\n" +
 	"\vChainWorker\x12X\n" +
 	"\x11WorkerHealthCheck\x12 .aggregator.WorkerHealthCheckReq\x1a!.aggregator.WorkerHealthCheckResp\x12L\n" +
 	"\rExecuteUserOp\x12\x1c.aggregator.ExecuteUserOpReq\x1a\x1d.aggregator.ExecuteUserOpResp\x12I\n" +
@@ -1209,7 +1339,8 @@ const file_worker_proto_rawDesc = "" +
 	"\aGetCode\x12\x1c.aggregator.WorkerGetCodeReq\x1a\x1d.aggregator.WorkerGetCodeResp\x12O\n" +
 	"\n" +
 	"GetBalance\x12\x1f.aggregator.WorkerGetBalanceReq\x1a .aggregator.WorkerGetBalanceResp\x12^\n" +
-	"\x0fGetTokenBalance\x12$.aggregator.WorkerGetTokenBalanceReq\x1a%.aggregator.WorkerGetTokenBalanceRespB\fZ\n" +
+	"\x0fGetTokenBalance\x12$.aggregator.WorkerGetTokenBalanceReq\x1a%.aggregator.WorkerGetTokenBalanceResp\x12U\n" +
+	"\fCallContract\x12!.aggregator.WorkerCallContractReq\x1a\".aggregator.WorkerCallContractRespB\fZ\n" +
 	"./avsprotob\x06proto3"
 
 var (
@@ -1224,7 +1355,7 @@ func file_worker_proto_rawDescGZIP() []byte {
 	return file_worker_proto_rawDescData
 }
 
-var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_worker_proto_goTypes = []any{
 	(*WorkerHealthCheckReq)(nil),            // 0: aggregator.WorkerHealthCheckReq
 	(*WorkerHealthCheckResp)(nil),           // 1: aggregator.WorkerHealthCheckResp
@@ -1247,6 +1378,8 @@ var file_worker_proto_goTypes = []any{
 	(*WorkerGetBalanceResp)(nil),            // 18: aggregator.WorkerGetBalanceResp
 	(*WorkerGetTokenBalanceReq)(nil),        // 19: aggregator.WorkerGetTokenBalanceReq
 	(*WorkerGetTokenBalanceResp)(nil),       // 20: aggregator.WorkerGetTokenBalanceResp
+	(*WorkerCallContractReq)(nil),           // 21: aggregator.WorkerCallContractReq
+	(*WorkerCallContractResp)(nil),          // 22: aggregator.WorkerCallContractResp
 }
 var file_worker_proto_depIdxs = []int32{
 	0,  // 0: aggregator.ChainWorker.WorkerHealthCheck:input_type -> aggregator.WorkerHealthCheckReq
@@ -1260,19 +1393,21 @@ var file_worker_proto_depIdxs = []int32{
 	15, // 8: aggregator.ChainWorker.GetCode:input_type -> aggregator.WorkerGetCodeReq
 	17, // 9: aggregator.ChainWorker.GetBalance:input_type -> aggregator.WorkerGetBalanceReq
 	19, // 10: aggregator.ChainWorker.GetTokenBalance:input_type -> aggregator.WorkerGetTokenBalanceReq
-	1,  // 11: aggregator.ChainWorker.WorkerHealthCheck:output_type -> aggregator.WorkerHealthCheckResp
-	3,  // 12: aggregator.ChainWorker.ExecuteUserOp:output_type -> aggregator.ExecuteUserOpResp
-	5,  // 13: aggregator.ChainWorker.GetNonce:output_type -> aggregator.WorkerGetNonceResp
-	7,  // 14: aggregator.ChainWorker.GetSmartWalletAddress:output_type -> aggregator.WorkerGetSmartWalletAddressResp
-	9,  // 15: aggregator.ChainWorker.GetTokenMetadata:output_type -> aggregator.WorkerGetTokenMetadataResp
-	5,  // 16: aggregator.ChainWorker.GetNonceByAddress:output_type -> aggregator.WorkerGetNonceResp
-	12, // 17: aggregator.ChainWorker.SuggestGasPrice:output_type -> aggregator.WorkerSuggestGasPriceResp
-	14, // 18: aggregator.ChainWorker.EstimateGas:output_type -> aggregator.WorkerEstimateGasResp
-	16, // 19: aggregator.ChainWorker.GetCode:output_type -> aggregator.WorkerGetCodeResp
-	18, // 20: aggregator.ChainWorker.GetBalance:output_type -> aggregator.WorkerGetBalanceResp
-	20, // 21: aggregator.ChainWorker.GetTokenBalance:output_type -> aggregator.WorkerGetTokenBalanceResp
-	11, // [11:22] is the sub-list for method output_type
-	0,  // [0:11] is the sub-list for method input_type
+	21, // 11: aggregator.ChainWorker.CallContract:input_type -> aggregator.WorkerCallContractReq
+	1,  // 12: aggregator.ChainWorker.WorkerHealthCheck:output_type -> aggregator.WorkerHealthCheckResp
+	3,  // 13: aggregator.ChainWorker.ExecuteUserOp:output_type -> aggregator.ExecuteUserOpResp
+	5,  // 14: aggregator.ChainWorker.GetNonce:output_type -> aggregator.WorkerGetNonceResp
+	7,  // 15: aggregator.ChainWorker.GetSmartWalletAddress:output_type -> aggregator.WorkerGetSmartWalletAddressResp
+	9,  // 16: aggregator.ChainWorker.GetTokenMetadata:output_type -> aggregator.WorkerGetTokenMetadataResp
+	5,  // 17: aggregator.ChainWorker.GetNonceByAddress:output_type -> aggregator.WorkerGetNonceResp
+	12, // 18: aggregator.ChainWorker.SuggestGasPrice:output_type -> aggregator.WorkerSuggestGasPriceResp
+	14, // 19: aggregator.ChainWorker.EstimateGas:output_type -> aggregator.WorkerEstimateGasResp
+	16, // 20: aggregator.ChainWorker.GetCode:output_type -> aggregator.WorkerGetCodeResp
+	18, // 21: aggregator.ChainWorker.GetBalance:output_type -> aggregator.WorkerGetBalanceResp
+	20, // 22: aggregator.ChainWorker.GetTokenBalance:output_type -> aggregator.WorkerGetTokenBalanceResp
+	22, // 23: aggregator.ChainWorker.CallContract:output_type -> aggregator.WorkerCallContractResp
+	12, // [12:24] is the sub-list for method output_type
+	0,  // [0:12] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name
@@ -1289,7 +1424,7 @@ func file_worker_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_worker_proto_rawDesc), len(file_worker_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
