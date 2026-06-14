@@ -31,6 +31,7 @@ const (
 	ChainWorker_GetBalance_FullMethodName            = "/aggregator.ChainWorker/GetBalance"
 	ChainWorker_GetTokenBalance_FullMethodName       = "/aggregator.ChainWorker/GetTokenBalance"
 	ChainWorker_CallContract_FullMethodName          = "/aggregator.ChainWorker/CallContract"
+	ChainWorker_GetBlockHeader_FullMethodName        = "/aggregator.ChainWorker/GetBlockHeader"
 )
 
 // ChainWorkerClient is the client API for ChainWorker service.
@@ -81,6 +82,10 @@ type ChainWorkerClient interface {
 	// ethclient.CallContract. Used by the contractRead node so the gateway
 	// issues no direct eth_call against execution chains.
 	CallContract(ctx context.Context, in *WorkerCallContractReq, opts ...grpc.CallOption) (*WorkerCallContractResp, error)
+	// Read a block header's number, hash, and timestamp. Wraps
+	// ethclient.HeaderByNumber. Used to stamp simulation receipts and
+	// enrich event timestamps without a gateway-side chain dial.
+	GetBlockHeader(ctx context.Context, in *WorkerGetBlockHeaderReq, opts ...grpc.CallOption) (*WorkerGetBlockHeaderResp, error)
 }
 
 type chainWorkerClient struct {
@@ -211,6 +216,16 @@ func (c *chainWorkerClient) CallContract(ctx context.Context, in *WorkerCallCont
 	return out, nil
 }
 
+func (c *chainWorkerClient) GetBlockHeader(ctx context.Context, in *WorkerGetBlockHeaderReq, opts ...grpc.CallOption) (*WorkerGetBlockHeaderResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerGetBlockHeaderResp)
+	err := c.cc.Invoke(ctx, ChainWorker_GetBlockHeader_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ChainWorkerServer is the server API for ChainWorker service.
 // All implementations must embed UnimplementedChainWorkerServer
 // for forward compatibility.
@@ -259,6 +274,10 @@ type ChainWorkerServer interface {
 	// ethclient.CallContract. Used by the contractRead node so the gateway
 	// issues no direct eth_call against execution chains.
 	CallContract(context.Context, *WorkerCallContractReq) (*WorkerCallContractResp, error)
+	// Read a block header's number, hash, and timestamp. Wraps
+	// ethclient.HeaderByNumber. Used to stamp simulation receipts and
+	// enrich event timestamps without a gateway-side chain dial.
+	GetBlockHeader(context.Context, *WorkerGetBlockHeaderReq) (*WorkerGetBlockHeaderResp, error)
 	mustEmbedUnimplementedChainWorkerServer()
 }
 
@@ -304,6 +323,9 @@ func (UnimplementedChainWorkerServer) GetTokenBalance(context.Context, *WorkerGe
 }
 func (UnimplementedChainWorkerServer) CallContract(context.Context, *WorkerCallContractReq) (*WorkerCallContractResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CallContract not implemented")
+}
+func (UnimplementedChainWorkerServer) GetBlockHeader(context.Context, *WorkerGetBlockHeaderReq) (*WorkerGetBlockHeaderResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBlockHeader not implemented")
 }
 func (UnimplementedChainWorkerServer) mustEmbedUnimplementedChainWorkerServer() {}
 func (UnimplementedChainWorkerServer) testEmbeddedByValue()                     {}
@@ -542,6 +564,24 @@ func _ChainWorker_CallContract_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChainWorker_GetBlockHeader_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerGetBlockHeaderReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).GetBlockHeader(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_GetBlockHeader_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).GetBlockHeader(ctx, req.(*WorkerGetBlockHeaderReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ChainWorker_ServiceDesc is the grpc.ServiceDesc for ChainWorker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -596,6 +636,10 @@ var ChainWorker_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CallContract",
 			Handler:    _ChainWorker_CallContract_Handler,
+		},
+		{
+			MethodName: "GetBlockHeader",
+			Handler:    _ChainWorker_GetBlockHeader_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

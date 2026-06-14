@@ -58,6 +58,11 @@ service ChainWorker {
   // ethclient.CallContract. Used by the contractRead node so the gateway
   // issues no direct eth_call against execution chains.
   rpc CallContract(WorkerCallContractReq) returns (WorkerCallContractResp);
+
+  // Read a block header's number, hash, and timestamp. Wraps
+  // ethclient.HeaderByNumber. Used to stamp simulation receipts and
+  // enrich event timestamps without a gateway-side chain dial.
+  rpc GetBlockHeader(WorkerGetBlockHeaderReq) returns (WorkerGetBlockHeaderResp);
 }
 
 // Health check
@@ -190,4 +195,17 @@ message WorkerCallContractReq {
 
 message WorkerCallContractResp {
   bytes result = 1;         // Raw ABI-encoded return bytes.
+}
+
+// Block header (the subset of fields the gateway reads). A full
+// types.Header can't be reconstructed faithfully over gRPC — its hash
+// depends on every field — so the worker returns these explicit values.
+message WorkerGetBlockHeaderReq {
+  string block_number = 1;  // big.Int as string; empty = latest.
+}
+
+message WorkerGetBlockHeaderResp {
+  uint64 number = 1;        // Block number.
+  string hash = 2;          // 0x-prefixed block hash.
+  uint64 time = 3;          // Unix timestamp (seconds).
 }

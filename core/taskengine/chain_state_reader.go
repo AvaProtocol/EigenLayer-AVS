@@ -70,6 +70,20 @@ type ChainStateReader interface {
 	// CallContract executes a read-only contract call (eth_call) at the
 	// given block (nil = latest). Mirrors ethclient.CallContract.
 	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
+
+	// HeaderByNumber returns the block's number, hash, and timestamp for
+	// the given height (nil = latest). Returns the subset of header fields
+	// the gateway reads — a full types.Header can't be carried over gRPC
+	// faithfully (its hash depends on every field).
+	HeaderByNumber(ctx context.Context, number *big.Int) (*BlockHeader, error)
+}
+
+// BlockHeader is the subset of block-header fields the gateway reads:
+// number + hash (receipt stamping) and time (event-timestamp enrichment).
+type BlockHeader struct {
+	Number uint64
+	Hash   common.Hash
+	Time   uint64
 }
 
 // ---------------------------------------------------------------------
@@ -176,6 +190,17 @@ func (d *directChainStateReader) GetSmartWalletAddress(_ context.Context, owner,
 
 func (d *directChainStateReader) CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
 	return d.client.CallContract(ctx, msg, blockNumber)
+}
+
+func (d *directChainStateReader) HeaderByNumber(ctx context.Context, number *big.Int) (*BlockHeader, error) {
+	h, err := d.client.HeaderByNumber(ctx, number)
+	if err != nil {
+		return nil, err
+	}
+	if h == nil {
+		return nil, fmt.Errorf("HeaderByNumber returned nil header")
+	}
+	return &BlockHeader{Number: h.Number.Uint64(), Hash: h.Hash(), Time: h.Time}, nil
 }
 
 // ---------------------------------------------------------------------
@@ -372,6 +397,27 @@ func (w *workerChainStateReader) CallContract(ctx context.Context, msg ethereum.
 		return nil, fmt.Errorf("worker returned nil response for CallContract to %s on chain %d", msg.To.Hex(), w.chainID)
 	}
 	return resp.Result, nil
+}
+
+func (w *workerChainStateReader) HeaderByNumber(ctx context.Context, number *big.Int) (*BlockHeader, error) {
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	req := &avsproto.WorkerGetBlockHeaderReq{}
+	if number != nil {
+		req.BlockNumber = number.String()
+	}
+	resp, err := w.client.GetBlockHeader(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("worker GetBlockHeader (chain %d): %w", w.chainID, err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("worker returned nil response for GetBlockHeader on chain %d", w.chainID)
+	}
+	return &BlockHeader{
+		Number: resp.Number,
+		Hash:   common.HexToHash(resp.Hash),
+		Time:   resp.Time,
+	}, nil
 }
 
 // withTimeout caps the gRPC call's wall time. context.WithTimeout

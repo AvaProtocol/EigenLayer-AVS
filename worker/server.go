@@ -384,6 +384,38 @@ func (s *Server) CallContract(ctx context.Context, req *avsproto.WorkerCallContr
 	}, nil
 }
 
+// GetBlockHeader wraps ethclient.HeaderByNumber, returning the number,
+// hash, and timestamp the gateway reads (a full header can't be carried
+// over gRPC faithfully). block_number empty = latest.
+func (s *Server) GetBlockHeader(ctx context.Context, req *avsproto.WorkerGetBlockHeaderReq) (*avsproto.WorkerGetBlockHeaderResp, error) {
+	var number *big.Int
+	if req.BlockNumber != "" {
+		b, ok := new(big.Int).SetString(req.BlockNumber, 10)
+		if !ok {
+			return nil, fmt.Errorf("invalid block_number %q (expected base-10 big.Int string)", req.BlockNumber)
+		}
+		if b.Sign() < 0 {
+			return nil, fmt.Errorf("invalid block_number %q: must be non-negative", req.BlockNumber)
+		}
+		if !b.IsUint64() {
+			return nil, fmt.Errorf("invalid block_number %q: exceeds uint64", req.BlockNumber)
+		}
+		number = b
+	}
+	header, err := s.worker.rpcClient.HeaderByNumber(ctx, number)
+	if err != nil {
+		return nil, fmt.Errorf("HeaderByNumber: %w", err)
+	}
+	if header == nil {
+		return nil, fmt.Errorf("HeaderByNumber returned nil header")
+	}
+	return &avsproto.WorkerGetBlockHeaderResp{
+		Number: header.Number.Uint64(),
+		Hash:   header.Hash().Hex(),
+		Time:   header.Time,
+	}, nil
+}
+
 // GetBalance wraps ethclient.BalanceAt(addr, latest). Used by the gateway's
 // withdraw preflight to validate / size native-coin withdrawals.
 func (s *Server) GetBalance(ctx context.Context, req *avsproto.WorkerGetBalanceReq) (*avsproto.WorkerGetBalanceResp, error) {
