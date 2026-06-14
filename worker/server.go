@@ -157,9 +157,23 @@ func (s *Server) GetSmartWalletAddress(ctx context.Context, req *avsproto.Worker
 
 	ownerAddr := common.HexToAddress(req.Owner)
 
-	salt, ok := new(big.Int).SetString(req.Salt, 10)
-	if !ok {
-		return nil, fmt.Errorf("invalid salt %q (expected base-10 big.Int string)", req.Salt)
+	// Empty salt defaults to 0 (proto3 omits empty strings; this matches
+	// the gateway's nil-salt → "0" convention). CREATE2 salt is a uint256,
+	// so reject negative or >256-bit values rather than letting them
+	// overflow ABI encoding downstream.
+	salt := big.NewInt(0)
+	if req.Salt != "" {
+		parsed, ok := new(big.Int).SetString(req.Salt, 10)
+		if !ok {
+			return nil, fmt.Errorf("invalid salt %q (expected base-10 big.Int string)", req.Salt)
+		}
+		salt = parsed
+	}
+	if salt.Sign() < 0 {
+		return nil, fmt.Errorf("invalid salt %q: must be non-negative", req.Salt)
+	}
+	if salt.BitLen() > 256 {
+		return nil, fmt.Errorf("invalid salt %q: exceeds uint256", req.Salt)
 	}
 
 	// Honor the caller's factory override when provided; otherwise use the
@@ -182,6 +196,9 @@ func (s *Server) GetSmartWalletAddress(ctx context.Context, req *avsproto.Worker
 	)
 	if err != nil {
 		return nil, fmt.Errorf("getting smart wallet address for %s: %w", req.Owner, err)
+	}
+	if addr == nil {
+		return nil, fmt.Errorf("nil sender address for owner=%s factory=%s salt=%s", req.Owner, factory.Hex(), salt.String())
 	}
 
 	return &avsproto.WorkerGetSmartWalletAddressResp{

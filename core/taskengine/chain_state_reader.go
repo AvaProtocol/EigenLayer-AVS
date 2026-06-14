@@ -155,12 +155,17 @@ func (d *directChainStateReader) GetTokenBalance(ctx context.Context, token, own
 }
 
 func (d *directChainStateReader) GetSmartWalletAddress(_ context.Context, owner, factory common.Address, salt *big.Int) (common.Address, error) {
+	// Normalize nil salt to 0 so the direct and worker-routed paths derive
+	// identical addresses (the worker path serializes nil as "0").
+	if salt == nil {
+		salt = big.NewInt(0)
+	}
 	addr, err := aa.GetSenderAddressForFactory(d.client, owner, factory, salt)
 	if err != nil {
 		return common.Address{}, err
 	}
 	if addr == nil {
-		return common.Address{}, fmt.Errorf("nil sender address for owner=%s factory=%s salt=%s", owner.Hex(), factory.Hex(), salt)
+		return common.Address{}, fmt.Errorf("nil sender address for owner=%s factory=%s salt=%s", owner.Hex(), factory.Hex(), salt.String())
 	}
 	return *addr, nil
 }
@@ -319,6 +324,9 @@ func (w *workerChainStateReader) GetSmartWalletAddress(ctx context.Context, owne
 	})
 	if err != nil {
 		return common.Address{}, fmt.Errorf("worker GetSmartWalletAddress (chain %d): %w", w.chainID, err)
+	}
+	if resp == nil {
+		return common.Address{}, fmt.Errorf("worker returned nil response for owner=%s on chain %d", owner.Hex(), w.chainID)
 	}
 	if !common.IsHexAddress(resp.Address) {
 		return common.Address{}, fmt.Errorf("worker returned malformed address %q for owner=%s on chain %d", resp.Address, owner.Hex(), w.chainID)
