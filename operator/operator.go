@@ -223,6 +223,20 @@ func (o *Operator) allConfiguredChainIDs() []int64 {
 	return out
 }
 
+// int64SlicesEqual is an element-wise comparison helper used to debounce
+// the narrowed-chain log warning across pings.
+func int64SlicesEqual(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // removeBlockCheck removes a task from every chain's BlockTrigger. Iterating
 // is cheap (one or a handful of chains) and removes the need for the caller
 // to know which chain the task lives on, which matters for DisableTask /
@@ -457,6 +471,15 @@ type Operator struct {
 
 	// Success message debouncing to prevent log spam
 	lastPingSuccessTime time.Time
+
+	// lastAdvertisedChainsLogged is the most recently logged
+	// narrowed-chain set. The PingServer emits the "advertising fewer
+	// chains than configured" warning only when this changes, so a
+	// steady-state degraded subscription doesn't flood the log on
+	// every 5-second ping. Protected by lastAdvertisedChainsMu — Ping
+	// runs on the scheduler goroutine but tests touch this state too.
+	lastAdvertisedChainsMu     sync.Mutex
+	lastAdvertisedChainsLogged []int64
 }
 
 // validateRPCEndpoint checks if the RPC endpoint is accessible

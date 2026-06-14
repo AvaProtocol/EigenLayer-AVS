@@ -196,11 +196,25 @@ type operatorState struct {
 	// Operator capabilities
 	Capabilities *avsproto.SyncMessagesReq_Capabilities
 
-	// Chains this operator advertises it can monitor. Empty means
-	// "single-chain operator on the aggregator default" (back-compat for
-	// pre-multi-chain operators). Set on every SyncMessages connect /
-	// reconnect from payload.SupportedChainIds.
-	SupportedChainIDs []int64
+	// Chains this operator advertises it can monitor.
+	//
+	// Empty SupportedChainIDs has TWO different meanings depending on
+	// SupportedChainsExplicit:
+	//   - SupportedChainsExplicit=false → legacy pre-multi-chain
+	//     operator that never advertised a list. Treated as "covers
+	//     everything" for back-compat.
+	//   - SupportedChainsExplicit=true → the operator HAS advertised
+	//     chains before (either at SyncMessages connect or via a prior
+	//     Ping) and is now reporting that none of its subscriptions
+	//     are live. Treated as "covers nothing" — DO NOT widen routing
+	//     to this operator. The orphan-scan loop will surface the
+	//     resulting tasks-with-no-coverage on the next tick.
+	//
+	// Once SupportedChainsExplicit is set, it stays set until the
+	// operator reconnects (StreamCheckToOperator rebuilds the state
+	// from scratch on a fresh stream).
+	SupportedChainIDs       []int64
+	SupportedChainsExplicit bool
 
 	// Context cancellation for managing ticker lifecycle
 	TickerCancel context.CancelFunc
@@ -611,8 +625,12 @@ func (n *Engine) Stop() {
 
 // chainNeedsOperatorMonitoring reports whether a trigger type needs an
 // operator with a live subscription on the task's chain. Block/Event
-// triggers fail without one; Manual/Cron/FixedTime fire entirely off
-// timing or RPC calls from the gateway itself.
+// triggers require chain-specific operator coverage; Manual/Cron/FixedTime
+// don't depend on any particular chain (cron + fixed-time still run on
+// the operator's chain-agnostic TimeTrigger; manual fires entirely on
+// the gateway). The question this function answers is specifically
+// "does this trigger need a per-chain RPC subscription?" — not "where
+// does the trigger execute?"
 func chainNeedsOperatorMonitoring(tt avsproto.TriggerType) bool {
 	switch tt {
 	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
@@ -625,10 +643,10 @@ func chainNeedsOperatorMonitoring(tt avsproto.TriggerType) bool {
 
 // operatorsCoveringChain returns the addresses of currently-connected
 // operators that advertise the given chain_id. Empty
-// SupportedChainIDs is treated as "single-chain default" — the
-// operator is counted as covering everything (back-compat with
-// pre-multi-chain operators). Caller MUST hold n.lock — this reads
-// trackSyncedTasks without locking internally.
+// SupportedChainIDs is "covers everything" ONLY when
+// SupportedChainsExplicit is false — see operatorState.SupportedChainIDs
+// for the explicit-empty-vs-legacy-empty distinction. Caller MUST hold
+// n.lock — this reads trackSyncedTasks without locking internally.
 func (n *Engine) operatorsCoveringChain(chainID int64) []string {
 	if chainID == 0 {
 		// Chain-agnostic tasks are covered by any connected operator;
@@ -645,7 +663,13 @@ func (n *Engine) operatorsCoveringChain(chainID int64) []string {
 			continue
 		}
 		if len(state.SupportedChainIDs) == 0 {
-			out = append(out, addr)
+			// Empty list: only treat as "covers everything" for
+			// legacy operators that never explicitly advertised a
+			// chain set. Explicit-empty (operator told us "I have
+			// no live chains") covers nothing.
+			if !state.SupportedChainsExplicit {
+				out = append(out, addr)
+			}
 			continue
 		}
 		for _, id := range state.SupportedChainIDs {
@@ -703,9 +727,13 @@ func (n *Engine) collectOrphans() []orphanedTaskInfo {
 			continue
 		}
 		if len(state.SupportedChainIDs) == 0 {
-			// Back-compat: counts as covering anything. Mark a
-			// sentinel "0" so we can short-circuit below.
-			chainHasOperator[0] = true
+			// Empty list: legacy operators (never explicitly
+			// advertised) still cover everything for back-compat.
+			// Explicit-empty (operator told us it has no live
+			// chains) covers nothing — see SupportedChainsExplicit.
+			if !state.SupportedChainsExplicit {
+				chainHasOperator[0] = true
+			}
 			continue
 		}
 		for _, id := range state.SupportedChainIDs {
@@ -764,9 +792,11 @@ func chainIDSlicesEqual(a, b []int64) bool {
 // that never opened a stream is a no-op — the SyncMessages connect
 // path is the authoritative one for first-time capability registration.
 //
-// chainIDs nil/empty is treated as "no chains advertised" (matches the
-// pre-multi-chain back-compat convention used elsewhere); callers
-// wanting to preserve the prior set should not call this method.
+// Empty chainIDs means "operator has zero live chains right now". This
+// sets SupportedChainsExplicit=true so operatorsCoveringChain treats
+// the empty list as "covers nothing" rather than falling back to the
+// legacy "covers everything" semantics — see operatorState
+// .SupportedChainIDs.
 func (n *Engine) UpdateOperatorSupportedChains(address string, chainIDs []int64) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
@@ -782,6 +812,11 @@ func (n *Engine) UpdateOperatorSupportedChains(address string, chainIDs []int64)
 			"operator", address, "prev", state.SupportedChainIDs, "next", chainIDs)
 	}
 	state.SupportedChainIDs = chainIDs
+	// Any Ping carrying the field flips the explicit flag, including
+	// one with an empty list — the operator has actively told us its
+	// chain capability, so we should never fall back to the legacy
+	// empty-means-everything semantics for it again.
+	state.SupportedChainsExplicit = true
 }
 
 // AddTaskForTesting adds a task directly to the engine's task map for testing purposes
@@ -1730,14 +1765,23 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 	// Access and modify trackSyncedTasks under lock to avoid concurrent map access
 	n.lock.Lock()
 	if _, ok := n.trackSyncedTasks[address]; !ok {
+		// A non-empty SupportedChainIds in the SyncMessages payload
+		// means the operator has explicitly advertised its capability
+		// set. Mark the flag so a subsequent Ping with an empty list
+		// (all subscriptions stalled) is treated as "covers nothing"
+		// rather than expanding to legacy-back-compat "covers
+		// everything". An operator that never sends the field stays
+		// in legacy mode.
+		chains := payload.GetSupportedChainIds()
 		n.trackSyncedTasks[address] = &operatorState{
-			MonotonicClock:    payload.MonotonicClock,
-			TaskID:            map[string]bool{},
-			Capabilities:      payload.Capabilities,
-			SupportedChainIDs: payload.GetSupportedChainIds(),
-			TickerCtx:         tickerCtx,
-			TickerCancel:      tickerCancel,
-			LastConnectTime:   connectionStartTime,
+			MonotonicClock:          payload.MonotonicClock,
+			TaskID:                  map[string]bool{},
+			Capabilities:            payload.Capabilities,
+			SupportedChainIDs:       chains,
+			SupportedChainsExplicit: len(chains) > 0,
+			TickerCtx:               tickerCtx,
+			TickerCancel:            tickerCancel,
+			LastConnectTime:         connectionStartTime,
 		}
 		n.lock.Unlock()
 		n.logger.Info("🔗 New operator connected with capabilities",
@@ -1760,7 +1804,9 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			n.trackSyncedTasks[address].TaskID = map[string]bool{}
 			n.trackSyncedTasks[address].MonotonicClock = payload.MonotonicClock
 			n.trackSyncedTasks[address].Capabilities = payload.Capabilities
-			n.trackSyncedTasks[address].SupportedChainIDs = payload.GetSupportedChainIds()
+			reconnectChains := payload.GetSupportedChainIds()
+			n.trackSyncedTasks[address].SupportedChainIDs = reconnectChains
+			n.trackSyncedTasks[address].SupportedChainsExplicit = len(reconnectChains) > 0
 			n.trackSyncedTasks[address].LastConnectTime = connectionStartTime
 
 			// Set new ticker context for this connection
@@ -1788,7 +1834,9 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 
 			n.trackSyncedTasks[address].TaskID = map[string]bool{}
 			n.trackSyncedTasks[address].Capabilities = payload.Capabilities
-			n.trackSyncedTasks[address].SupportedChainIDs = payload.GetSupportedChainIds()
+			forceResetChains := payload.GetSupportedChainIds()
+			n.trackSyncedTasks[address].SupportedChainIDs = forceResetChains
+			n.trackSyncedTasks[address].SupportedChainsExplicit = len(forceResetChains) > 0
 			n.trackSyncedTasks[address].LastConnectTime = connectionStartTime
 
 			// Set new ticker context for this connection

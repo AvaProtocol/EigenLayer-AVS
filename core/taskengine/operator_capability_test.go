@@ -20,9 +20,10 @@ func seedOperator(n *Engine, addr string, chains []int64) {
 		n.trackSyncedTasks = make(map[string]*operatorState)
 	}
 	n.trackSyncedTasks[addr] = &operatorState{
-		TaskID:            map[string]bool{},
-		MonotonicClock:    time.Now().UnixNano(),
-		SupportedChainIDs: chains,
+		TaskID:                  map[string]bool{},
+		MonotonicClock:          time.Now().UnixNano(),
+		SupportedChainIDs:       chains,
+		SupportedChainsExplicit: len(chains) > 0,
 	}
 }
 
@@ -47,6 +48,71 @@ func TestUpdateOperatorSupportedChains_LiveUpdate(t *testing.T) {
 
 	if len(got) != 1 || got[0] != 1 {
 		t.Fatalf("SupportedChainIDs after live update: got %v want [1]", got)
+	}
+}
+
+// TestUpdateOperatorSupportedChains_EmptyDoesNotWidenCoverage is the
+// regression guard for the empty-list semantics that Copilot flagged.
+// An operator that explicitly advertised [1, 8453] and then degrades
+// to [] (all subscriptions stalled) must NOT be expanded to "covers
+// everything" — that would silently mis-route tasks to a dead
+// operator. The SupportedChainsExplicit flag distinguishes
+// degraded-empty from legacy-empty.
+func TestUpdateOperatorSupportedChains_EmptyDoesNotWidenCoverage(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	engine := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+
+	addr := "0xExplicit"
+	// Simulate the SyncMessages-connect path: explicit non-empty list.
+	engine.lock.Lock()
+	engine.trackSyncedTasks[addr] = &operatorState{
+		TaskID:                  map[string]bool{},
+		SupportedChainIDs:       []int64{1, 8453},
+		SupportedChainsExplicit: true,
+	}
+	engine.lock.Unlock()
+
+	// Ping comes in with an empty list (operator narrowed everything).
+	engine.UpdateOperatorSupportedChains(addr, nil)
+
+	engine.lock.Lock()
+	covering := engine.operatorsCoveringChain(1)
+	hasExplicit := engine.trackSyncedTasks[addr].SupportedChainsExplicit
+	engine.lock.Unlock()
+
+	if len(covering) != 0 {
+		t.Fatalf("explicit-empty operator should NOT cover chain 1, got %v", covering)
+	}
+	if !hasExplicit {
+		t.Fatalf("SupportedChainsExplicit should remain true after empty Ping")
+	}
+}
+
+// TestOperatorsCoveringChain_LegacyVsExplicit confirms the new flag
+// distinguishes legacy back-compat (empty list = covers all) from
+// degraded explicit (empty list = covers nothing).
+func TestOperatorsCoveringChain_LegacyVsExplicit(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	engine := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+
+	engine.lock.Lock()
+	engine.trackSyncedTasks["0xLegacy"] = &operatorState{
+		TaskID:                  map[string]bool{},
+		SupportedChainIDs:       nil,
+		SupportedChainsExplicit: false,
+	}
+	engine.trackSyncedTasks["0xDegraded"] = &operatorState{
+		TaskID:                  map[string]bool{},
+		SupportedChainIDs:       nil,
+		SupportedChainsExplicit: true,
+	}
+	covering := engine.operatorsCoveringChain(1)
+	engine.lock.Unlock()
+
+	if len(covering) != 1 || covering[0] != "0xLegacy" {
+		t.Fatalf("only legacy operator should cover chain 1, got %v", covering)
 	}
 }
 

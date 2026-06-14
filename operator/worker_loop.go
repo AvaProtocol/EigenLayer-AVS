@@ -1189,15 +1189,31 @@ func (o *Operator) PingServer() {
 	})
 
 	// If the live set has narrowed from the configured set, surface
-	// once — observability hook for "Base subscription stalled, dropped
-	// from routing". Only emit on a successful ping; if the ping itself
-	// failed we don't want to mix this signal with the ping-error
-	// debounced logging below, since the narrowed set wasn't actually
-	// communicated to the aggregator on this attempt.
+	// it — observability hook for "Base subscription stalled, dropped
+	// from routing". Only emit on:
+	//   - a successful ping (don't conflate this signal with ping-error
+	//     debouncing below), and
+	//   - a *change* in the narrowed set vs the last logged value, so
+	//     a steady-state degraded operator doesn't flood the log every
+	//     5 seconds.
 	if err == nil {
 		if cfg := o.allConfiguredChainIDs(); len(liveChains) != len(cfg) {
-			o.logger.Warn("operator advertising fewer chains than configured — chain subscription may be stalled",
-				"configured", cfg, "advertised", liveChains)
+			o.lastAdvertisedChainsMu.Lock()
+			changed := !int64SlicesEqual(o.lastAdvertisedChainsLogged, liveChains)
+			if changed {
+				o.lastAdvertisedChainsLogged = append([]int64(nil), liveChains...)
+			}
+			o.lastAdvertisedChainsMu.Unlock()
+			if changed {
+				o.logger.Warn("operator advertising fewer chains than configured — chain subscription may be stalled",
+					"configured", cfg, "advertised", liveChains)
+			}
+		} else {
+			// Recovered to full coverage; clear so a subsequent
+			// re-narrowing logs again.
+			o.lastAdvertisedChainsMu.Lock()
+			o.lastAdvertisedChainsLogged = nil
+			o.lastAdvertisedChainsMu.Unlock()
 		}
 	}
 
