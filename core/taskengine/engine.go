@@ -196,11 +196,25 @@ type operatorState struct {
 	// Operator capabilities
 	Capabilities *avsproto.SyncMessagesReq_Capabilities
 
-	// Chains this operator advertises it can monitor. Empty means
-	// "single-chain operator on the aggregator default" (back-compat for
-	// pre-multi-chain operators). Set on every SyncMessages connect /
-	// reconnect from payload.SupportedChainIds.
-	SupportedChainIDs []int64
+	// Chains this operator advertises it can monitor.
+	//
+	// Empty SupportedChainIDs has TWO different meanings depending on
+	// SupportedChainsExplicit:
+	//   - SupportedChainsExplicit=false → legacy pre-multi-chain
+	//     operator that never advertised a list. Treated as "covers
+	//     everything" for back-compat.
+	//   - SupportedChainsExplicit=true → the operator HAS advertised
+	//     chains before (either at SyncMessages connect or via a prior
+	//     Ping) and is now reporting that none of its subscriptions
+	//     are live. Treated as "covers nothing" — DO NOT widen routing
+	//     to this operator. The orphan-scan loop will surface the
+	//     resulting tasks-with-no-coverage on the next tick.
+	//
+	// Once SupportedChainsExplicit is set, it stays set until the
+	// operator reconnects (StreamCheckToOperator rebuilds the state
+	// from scratch on a fresh stream).
+	SupportedChainIDs       []int64
+	SupportedChainsExplicit bool
 
 	// Context cancellation for managing ticker lifecycle
 	TickerCancel context.CancelFunc
@@ -233,6 +247,13 @@ type Engine struct {
 	tasks            map[string]*model.Workflow
 	lock             *sync.Mutex
 	trackSyncedTasks map[string]*operatorState
+
+	// orphanScanCtx / orphanScanCancel govern the periodic orphan-task
+	// scan started in MustStart (gateway mode only). Cancelling lets
+	// Stop() exit the loop immediately instead of waiting up to 5
+	// minutes for the next tick.
+	orphanScanCtx    context.Context
+	orphanScanCancel context.CancelFunc
 
 	// operator stream management for real-time notifications
 	operatorStreams map[string]avsproto.Node_SyncMessagesServer
@@ -586,6 +607,12 @@ func (n *Engine) Stop() {
 		cancel()
 	}
 
+	// Stop the orphan-scan loop promptly (gateway mode only — nil
+	// cancel is a no-op).
+	if n.orphanScanCancel != nil {
+		n.orphanScanCancel()
+	}
+
 	// wait for all StreamCheckToOperator goroutines to exit
 	n.streamsWG.Wait()
 
@@ -594,6 +621,202 @@ func (n *Engine) Stop() {
 		n.sendBatchedNotifications()
 		n.notificationTicker.Stop()
 	}
+}
+
+// chainNeedsOperatorMonitoring reports whether a trigger type needs an
+// operator with a live subscription on the task's chain. Block/Event
+// triggers require chain-specific operator coverage; Manual/Cron/FixedTime
+// don't depend on any particular chain (cron + fixed-time still run on
+// the operator's chain-agnostic TimeTrigger; manual fires entirely on
+// the gateway). The question this function answers is specifically
+// "does this trigger need a per-chain RPC subscription?" — not "where
+// does the trigger execute?"
+func chainNeedsOperatorMonitoring(tt avsproto.TriggerType) bool {
+	switch tt {
+	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+		avsproto.TriggerType_TRIGGER_TYPE_EVENT:
+		return true
+	default:
+		return false
+	}
+}
+
+// operatorsCoveringChain returns the addresses of currently-connected
+// operators that advertise the given chain_id. Empty
+// SupportedChainIDs is "covers everything" ONLY when
+// SupportedChainsExplicit is false — see operatorState.SupportedChainIDs
+// for the explicit-empty-vs-legacy-empty distinction. Caller MUST hold
+// n.lock — this reads trackSyncedTasks without locking internally.
+func (n *Engine) operatorsCoveringChain(chainID int64) []string {
+	if chainID == 0 {
+		// Chain-agnostic tasks are covered by any connected operator;
+		// returning the full set is correct.
+		out := make([]string, 0, len(n.trackSyncedTasks))
+		for addr := range n.trackSyncedTasks {
+			out = append(out, addr)
+		}
+		return out
+	}
+	out := make([]string, 0, len(n.trackSyncedTasks))
+	for addr, state := range n.trackSyncedTasks {
+		if state == nil {
+			continue
+		}
+		if len(state.SupportedChainIDs) == 0 {
+			// Empty list: only treat as "covers everything" for
+			// legacy operators that never explicitly advertised a
+			// chain set. Explicit-empty (operator told us "I have
+			// no live chains") covers nothing.
+			if !state.SupportedChainsExplicit {
+				out = append(out, addr)
+			}
+			continue
+		}
+		for _, id := range state.SupportedChainIDs {
+			if id == chainID {
+				out = append(out, addr)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// orphanedTaskInfo is the read-only snapshot scanOrphanedTasks
+// produces while holding n.lock; logging happens after the lock is
+// released so a long task list doesn't block CreateTask / Pings / the
+// stream loop.
+type orphanedTaskInfo struct {
+	taskID      string
+	chainID     int64
+	triggerType string
+}
+
+// scanOrphanedTasks logs each currently-stored task whose chain is no
+// longer covered by any connected operator. Runs on a slow interval
+// from the engine startup loop; the alert path is the log line, not
+// an automatic remediation — operators may reconnect and the orphan
+// resolves itself. Logging is deliberately verbose (one line per
+// orphaned task) so on-call has the task IDs at hand.
+//
+// The scan collects orphan info under n.lock and releases the lock
+// before logging — n.logger.Warn can take non-trivial time (Sentry
+// breadcrumb, sink I/O) and we don't want that blocking concurrent
+// Pings / CreateTasks / stream ops.
+func (n *Engine) scanOrphanedTasks() {
+	orphans := n.collectOrphans()
+	for _, o := range orphans {
+		n.logger.Warn("🚨 Orphaned task: no connected operator advertises this chain — trigger will not fire until coverage returns",
+			"task_id", o.taskID, "chain_id", o.chainID, "trigger_type", o.triggerType)
+	}
+}
+
+// collectOrphans walks the task + operator state under n.lock and
+// returns the list of orphaned tasks. Pure read-only — no logging or
+// I/O while the lock is held.
+func (n *Engine) collectOrphans() []orphanedTaskInfo {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	// Build chain→hasOperator map up front; tasks-per-chain is much
+	// larger than operators-per-chain, so this avoids re-walking the
+	// operator set per task.
+	chainHasOperator := make(map[int64]bool, 8)
+	for _, state := range n.trackSyncedTasks {
+		if state == nil {
+			continue
+		}
+		if len(state.SupportedChainIDs) == 0 {
+			// Empty list: legacy operators (never explicitly
+			// advertised) still cover everything for back-compat.
+			// Explicit-empty (operator told us it has no live
+			// chains) covers nothing — see SupportedChainsExplicit.
+			if !state.SupportedChainsExplicit {
+				chainHasOperator[0] = true
+			}
+			continue
+		}
+		for _, id := range state.SupportedChainIDs {
+			chainHasOperator[id] = true
+		}
+	}
+	hasLegacyOperator := chainHasOperator[0]
+
+	var out []orphanedTaskInfo
+	for taskID, task := range n.tasks {
+		if task == nil {
+			continue
+		}
+		if task.Trigger == nil || !chainNeedsOperatorMonitoring(task.Trigger.Type) {
+			continue
+		}
+		if hasLegacyOperator {
+			continue
+		}
+		if !chainHasOperator[task.ChainId] {
+			out = append(out, orphanedTaskInfo{
+				taskID:      taskID,
+				chainID:     task.ChainId,
+				triggerType: task.Trigger.Type.String(),
+			})
+		}
+	}
+	return out
+}
+
+// chainIDSlicesEqual compares two chain-ID slices element-wise. Order
+// matters here because chainOrder is deterministic on the operator
+// side — we want a reorder (which would never happen in practice) to
+// still be logged as a change if it did.
+func chainIDSlicesEqual(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// UpdateOperatorSupportedChains updates a connected operator's
+// advertised chain capability. Called from the Ping RPC handler so a
+// stalled subscription (chain configured but no recent heads — see
+// operator's chainCapabilityStaleThreshold) can be dropped from
+// per-chain task routing within one Ping interval, without forcing a
+// SyncMessages reconnect.
+//
+// The operator MUST be currently connected (entry exists in
+// trackSyncedTasks) for this to take effect. A Ping for an operator
+// that never opened a stream is a no-op — the SyncMessages connect
+// path is the authoritative one for first-time capability registration.
+//
+// Empty chainIDs means "operator has zero live chains right now". This
+// sets SupportedChainsExplicit=true so operatorsCoveringChain treats
+// the empty list as "covers nothing" rather than falling back to the
+// legacy "covers everything" semantics — see operatorState
+// .SupportedChainIDs.
+func (n *Engine) UpdateOperatorSupportedChains(address string, chainIDs []int64) {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+	state, ok := n.trackSyncedTasks[address]
+	if !ok || state == nil {
+		return
+	}
+	// Only emit when the set actually changes — Ping runs every 5s
+	// and the chain set is steady-state for the vast majority of
+	// pings, so a no-op comparison shouldn't allocate.
+	if !chainIDSlicesEqual(state.SupportedChainIDs, chainIDs) {
+		n.logger.Info("🔁 Operator advertised chain set changed via Ping",
+			"operator", address, "prev", state.SupportedChainIDs, "next", chainIDs)
+	}
+	state.SupportedChainIDs = chainIDs
+	// Any Ping carrying the field flips the explicit flag, including
+	// one with an empty list — the operator has actively told us its
+	// chain capability, so we should never fall back to the legacy
+	// empty-means-everything semantics for it again.
+	state.SupportedChainsExplicit = true
 }
 
 // AddTaskForTesting adds a task directly to the engine's task map for testing purposes
@@ -659,7 +882,43 @@ func (n *Engine) MustStart() error {
 	// Start the batch notification processor
 	go n.processBatchedNotifications()
 
+	// Periodic orphan scan: degradation (operator drops chain mid-run)
+	// is the common failure mode, so create-time validation isn't
+	// sufficient on its own. Gateway mode only — single-chain
+	// deployments would log noise during operator-cold-start.
+	//
+	// orphanScanCtx is derived from a fresh background context (we
+	// don't have a parent ctx in MustStart) and cancelled from
+	// Stop() so the loop exits within milliseconds of shutdown
+	// instead of waiting up to 5 minutes for the next tick.
+	if n.config != nil && n.config.IsGateway {
+		n.orphanScanCtx, n.orphanScanCancel = context.WithCancel(context.Background())
+		go n.runOrphanScanLoop(n.orphanScanCtx)
+	}
+
 	return nil
+}
+
+// runOrphanScanLoop periodically scans persisted tasks against the
+// connected-operator capability set, logging tasks whose chain has no
+// coverage. 5-minute interval is generous — coverage gaps tend to
+// persist (operator down) or self-heal quickly (subscription
+// reconnect), so polling too aggressively just spams logs.
+//
+// ctx cancellation exits the loop promptly; we don't poll n.shutdown
+// in between ticks because that would still leave a 5-minute
+// worst-case shutdown delay.
+func (n *Engine) runOrphanScanLoop(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			n.scanOrphanedTasks()
+		}
+	}
 }
 
 // markPreviousCanonicalStaleIfAny consults the (owner, factory, salt)
@@ -1375,6 +1634,28 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 		}
 	}
 
+	// Reject tasks for chains no connected operator advertises. Block
+	// and event triggers need a live operator subscription on the
+	// task's chain to ever fire; without coverage the task would sit
+	// in storage with `enabled` status but never execute. Only enforce
+	// in gateway mode — single-chain deployments often run the
+	// aggregator before the operator connects (cold-start chicken/egg)
+	// and the legacy back-compat path counts no-chain-list operators
+	// as covering everything.
+	if n.config != nil && n.config.IsGateway && task.Trigger != nil && chainNeedsOperatorMonitoring(task.Trigger.Type) {
+		n.lock.Lock()
+		covering := n.operatorsCoveringChain(task.ChainId)
+		n.lock.Unlock()
+		if len(covering) == 0 {
+			n.logger.Warn("🚫 CreateTask rejected: no operator advertises this chain",
+				"chain_id", task.ChainId, "trigger_type", task.Trigger.Type.String(), "user", userAddr)
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"no connected operator currently monitors chain_id=%d for %s triggers; "+
+					"task cannot fire until coverage is restored",
+				task.ChainId, task.Trigger.Type.String())
+		}
+	}
+
 	// Validate smart wallet ownership. The runner address comes from
 	// inputVariables.settings.runner (via NewTaskFromProtobuf) and is stored
 	// as task.SmartWalletAddress. We must verify the caller owns this wallet
@@ -1484,14 +1765,23 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 	// Access and modify trackSyncedTasks under lock to avoid concurrent map access
 	n.lock.Lock()
 	if _, ok := n.trackSyncedTasks[address]; !ok {
+		// A non-empty SupportedChainIds in the SyncMessages payload
+		// means the operator has explicitly advertised its capability
+		// set. Mark the flag so a subsequent Ping with an empty list
+		// (all subscriptions stalled) is treated as "covers nothing"
+		// rather than expanding to legacy-back-compat "covers
+		// everything". An operator that never sends the field stays
+		// in legacy mode.
+		chains := payload.GetSupportedChainIds()
 		n.trackSyncedTasks[address] = &operatorState{
-			MonotonicClock:    payload.MonotonicClock,
-			TaskID:            map[string]bool{},
-			Capabilities:      payload.Capabilities,
-			SupportedChainIDs: payload.GetSupportedChainIds(),
-			TickerCtx:         tickerCtx,
-			TickerCancel:      tickerCancel,
-			LastConnectTime:   connectionStartTime,
+			MonotonicClock:          payload.MonotonicClock,
+			TaskID:                  map[string]bool{},
+			Capabilities:            payload.Capabilities,
+			SupportedChainIDs:       chains,
+			SupportedChainsExplicit: len(chains) > 0,
+			TickerCtx:               tickerCtx,
+			TickerCancel:            tickerCancel,
+			LastConnectTime:         connectionStartTime,
 		}
 		n.lock.Unlock()
 		n.logger.Info("🔗 New operator connected with capabilities",
@@ -1514,7 +1804,9 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			n.trackSyncedTasks[address].TaskID = map[string]bool{}
 			n.trackSyncedTasks[address].MonotonicClock = payload.MonotonicClock
 			n.trackSyncedTasks[address].Capabilities = payload.Capabilities
-			n.trackSyncedTasks[address].SupportedChainIDs = payload.GetSupportedChainIds()
+			reconnectChains := payload.GetSupportedChainIds()
+			n.trackSyncedTasks[address].SupportedChainIDs = reconnectChains
+			n.trackSyncedTasks[address].SupportedChainsExplicit = len(reconnectChains) > 0
 			n.trackSyncedTasks[address].LastConnectTime = connectionStartTime
 
 			// Set new ticker context for this connection
@@ -1542,7 +1834,9 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 
 			n.trackSyncedTasks[address].TaskID = map[string]bool{}
 			n.trackSyncedTasks[address].Capabilities = payload.Capabilities
-			n.trackSyncedTasks[address].SupportedChainIDs = payload.GetSupportedChainIds()
+			forceResetChains := payload.GetSupportedChainIds()
+			n.trackSyncedTasks[address].SupportedChainIDs = forceResetChains
+			n.trackSyncedTasks[address].SupportedChainsExplicit = len(forceResetChains) > 0
 			n.trackSyncedTasks[address].LastConnectTime = connectionStartTime
 
 			// Set new ticker context for this connection

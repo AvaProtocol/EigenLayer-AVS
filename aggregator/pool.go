@@ -216,6 +216,14 @@ func (r *RpcServer) Ping(ctx context.Context, payload *avsproto.Checkin) (*avspr
 		return nil, fmt.Errorf("cannot update operator status error: %w", err)
 	}
 
+	// Refresh per-operator chain capability from the Ping payload.
+	// Operators re-advertise their live chain set on every heartbeat;
+	// a stalled subscription drops the chain from routing within one
+	// Ping interval. See engine.UpdateOperatorSupportedChains.
+	if r.engine != nil {
+		r.engine.UpdateOperatorSupportedChains(payload.Address, payload.GetSupportedChainIds())
+	}
+
 	return &avsproto.CheckinResp{
 		UpdatedAt: timestamppb.Now(),
 	}, nil

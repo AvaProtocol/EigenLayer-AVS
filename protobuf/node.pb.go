@@ -82,18 +82,25 @@ func (MessageOp) EnumDescriptor() ([]byte, []int) {
 }
 
 type Checkin struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Address       string                 `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
-	Signature     string                 `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
-	Status        *Checkin_Status        `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
-	Version       string                 `protobuf:"bytes,5,opt,name=version,proto3" json:"version,omitempty"`
-	MetricsPort   int32                  `protobuf:"varint,6,opt,name=metricsPort,proto3" json:"metricsPort,omitempty"`
-	RemoteIP      string                 `protobuf:"bytes,7,opt,name=remoteIP,proto3" json:"remoteIP,omitempty"`
-	BlockNumber   int64                  `protobuf:"varint,8,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
-	EventCount    int64                  `protobuf:"varint,9,opt,name=event_count,json=eventCount,proto3" json:"event_count,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Address     string                 `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
+	Signature   string                 `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
+	Status      *Checkin_Status        `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
+	Version     string                 `protobuf:"bytes,5,opt,name=version,proto3" json:"version,omitempty"`
+	MetricsPort int32                  `protobuf:"varint,6,opt,name=metricsPort,proto3" json:"metricsPort,omitempty"`
+	RemoteIP    string                 `protobuf:"bytes,7,opt,name=remoteIP,proto3" json:"remoteIP,omitempty"`
+	BlockNumber int64                  `protobuf:"varint,8,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
+	EventCount  int64                  `protobuf:"varint,9,opt,name=event_count,json=eventCount,proto3" json:"event_count,omitempty"`
+	// Chain IDs this operator is currently able to monitor — same field
+	// as SyncMessagesReq.supported_chain_ids but re-advertised on every
+	// Ping so a stalled subscription (chain in config but no new heads
+	// in the watermark window) can be dropped without forcing a full
+	// SyncMessages reconnect. The aggregator updates its per-operator
+	// capability snapshot from this value on each ping.
+	SupportedChainIds []int64 `protobuf:"varint,10,rep,packed,name=supported_chain_ids,json=supportedChainIds,proto3" json:"supported_chain_ids,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Checkin) Reset() {
@@ -187,6 +194,13 @@ func (x *Checkin) GetEventCount() int64 {
 		return x.EventCount
 	}
 	return 0
+}
+
+func (x *Checkin) GetSupportedChainIds() []int64 {
+	if x != nil {
+		return x.SupportedChainIds
+	}
+	return nil
 }
 
 type CheckinResp struct {
@@ -1177,7 +1191,7 @@ const file_node_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
 	"node.proto\x12\n" +
-	"aggregator\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/wrappers.proto\x1a\tavs.proto\"\xa7\x03\n" +
+	"aggregator\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/wrappers.proto\x1a\tavs.proto\"\xd7\x03\n" +
 	"\aCheckin\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x1c\n" +
@@ -1188,7 +1202,9 @@ const file_node_proto_rawDesc = "" +
 	"\bremoteIP\x18\a \x01(\tR\bremoteIP\x12!\n" +
 	"\fblock_number\x18\b \x01(\x03R\vblockNumber\x12\x1f\n" +
 	"\vevent_count\x18\t \x01(\x03R\n" +
-	"eventCount\x1a\x83\x01\n" +
+	"eventCount\x12.\n" +
+	"\x13supported_chain_ids\x18\n" +
+	" \x03(\x03R\x11supportedChainIds\x1a\x83\x01\n" +
 	"\x06Status\x12\x16\n" +
 	"\x06uptime\x18\x01 \x01(\x03R\x06uptime\x12\x1e\n" +
 	"\n" +
