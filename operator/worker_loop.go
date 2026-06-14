@@ -272,12 +272,37 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 			}
 		})
 
+		// Install the trigger set in chainTriggers BEFORE spawning the
+		// fan-in goroutine. The goroutine closes over the *ChainTriggerSet
+		// directly (not via map lookup on every event), which:
+		//   - avoids a map race against later iterations writing other
+		//     chains' entries to chainTriggers
+		//   - skips a per-event lookup
+		// The order matters: bt.Run(ctx) is called below, after the map
+		// is updated, so events can't arrive before the pointer is
+		// usable; but the write still needs to happen before goroutine
+		// spawn to satisfy the Go memory model under -race.
+		triggerSet := &ChainTriggerSet{
+			ChainID:      detectedID,
+			Name:         chainCfg.Name,
+			BlockTrigger: bt,
+			EventTrigger: et,
+			EthClient:    perChainEthClient,
+			// Seed the watermark to "now" so the chain is advertised
+			// immediately at boot. The fan-in goroutine refreshes it
+			// on every block; an unhealthy chain will fall out of the
+			// watermark window on its own.
+			lastHeadSeenAt: time.Now(),
+		}
+		o.chainTriggers[detectedID] = triggerSet
+		o.chainOrder = append(o.chainOrder, detectedID)
+
 		// Fan-in: stamp every event from this chain's raw channel with
 		// detectedID, refresh the liveness watermark, and forward to the
 		// shared channel the consumer loop reads. Exits when ctx is done
 		// (channel close is left to the trigger engines themselves on
 		// shutdown).
-		go func(chainID int64, in <-chan triggerengine.TriggerMetadata[int64]) {
+		go func(chainID int64, in <-chan triggerengine.TriggerMetadata[int64], set *ChainTriggerSet) {
 			for {
 				select {
 				case <-ctx.Done():
@@ -286,13 +311,11 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 					if !ok {
 						return
 					}
-					if set, ok := o.chainTriggers[chainID]; ok && set != nil {
-						set.markHeadSeen()
-					}
+					set.markHeadSeen()
 					sharedBlockCh <- chainTaggedBlockEvent{chainID: chainID, metadata: item}
 				}
 			}
-		}(detectedID, perChainBlockCh)
+		}(detectedID, perChainBlockCh, triggerSet)
 
 		go func(chainID int64, in <-chan triggerengine.TriggerMetadata[triggerengine.EventMark]) {
 			for {
@@ -307,20 +330,6 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				}
 			}
 		}(detectedID, perChainEventCh)
-
-		o.chainTriggers[detectedID] = &ChainTriggerSet{
-			ChainID:      detectedID,
-			Name:         chainCfg.Name,
-			BlockTrigger: bt,
-			EventTrigger: et,
-			EthClient:    perChainEthClient,
-			// Seed the watermark to "now" so the chain is advertised
-			// immediately at boot. The fan-in goroutine above refreshes
-			// it on every block; an unhealthy chain will fall out of
-			// the watermark window on its own.
-			lastHeadSeenAt: time.Now(),
-		}
-		o.chainOrder = append(o.chainOrder, detectedID)
 
 		o.logger.Info("🔗 Chain trigger engine ready",
 			"chain_id", detectedID, "name", chainCfg.Name, "rpc", chainCfg.EthRpcUrl)
@@ -1181,10 +1190,15 @@ func (o *Operator) PingServer() {
 
 	// If the live set has narrowed from the configured set, surface
 	// once — observability hook for "Base subscription stalled, dropped
-	// from routing". Re-check at Ping cadence so we don't spam.
-	if cfg := o.allConfiguredChainIDs(); len(liveChains) != len(cfg) {
-		o.logger.Warn("operator advertising fewer chains than configured — chain subscription may be stalled",
-			"configured", cfg, "advertised", liveChains)
+	// from routing". Only emit on a successful ping; if the ping itself
+	// failed we don't want to mix this signal with the ping-error
+	// debounced logging below, since the narrowed set wasn't actually
+	// communicated to the aggregator on this attempt.
+	if err == nil {
+		if cfg := o.allConfiguredChainIDs(); len(liveChains) != len(cfg) {
+			o.logger.Warn("operator advertising fewer chains than configured — chain subscription may be stalled",
+				"configured", cfg, "advertised", liveChains)
+		}
 	}
 
 	if err != nil {

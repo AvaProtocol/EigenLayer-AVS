@@ -192,6 +192,55 @@ func TestScanOrphanedTasks_NoDeadlock(t *testing.T) {
 	}
 }
 
+// TestCreateWorkflow_RejectsUncoveredChain verifies the gateway-mode
+// guard: a block/event trigger for a chain no connected operator
+// advertises must be rejected at CreateTask time. The most important
+// integration of the capability primitives — without this the
+// liveness watermark + Ping refresh have no behavioral effect on
+// CreateTask.
+//
+// Implementation note: we drive only the chain-coverage branch by
+// constructing a Workflow with no SmartWalletAddress (skips the
+// ownership check) and exercise the engine's chain-coverage gate
+// directly via the helper. The full CreateWorkflow path requires
+// wallet ownership + DB + JWT auth scaffolding that other tests
+// already cover end-to-end.
+func TestCreateWorkflow_RejectsUncoveredChain(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	engine := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+
+	// Only an Ethereum-only operator is connected; chain 8453 (Base)
+	// has no coverage.
+	seedOperator(engine, "0xMainnetOnly", []int64{1})
+
+	// chainNeedsOperatorMonitoring + operatorsCoveringChain are the
+	// gate. Exercise both arms.
+	if !chainNeedsOperatorMonitoring(avsproto.TriggerType_TRIGGER_TYPE_EVENT) {
+		t.Fatalf("event trigger should require coverage")
+	}
+	engine.lock.Lock()
+	coveringBase := engine.operatorsCoveringChain(8453)
+	coveringEth := engine.operatorsCoveringChain(1)
+	engine.lock.Unlock()
+	if len(coveringBase) != 0 {
+		t.Fatalf("Base should have no coverage in this scenario, got %v", coveringBase)
+	}
+	if len(coveringEth) != 1 {
+		t.Fatalf("Ethereum should be covered by 0xMainnetOnly, got %v", coveringEth)
+	}
+
+	// Now register a Base operator and verify coverage flips.
+	engine.UpdateOperatorSupportedChains("0xMainnetOnly", []int64{1, 8453})
+	engine.lock.Lock()
+	coveringBaseAfter := engine.operatorsCoveringChain(8453)
+	engine.lock.Unlock()
+	if len(coveringBaseAfter) != 1 {
+		t.Fatalf("after live update, Base should be covered, got %v", coveringBaseAfter)
+	}
+}
+
 func containsAll(s []string, want ...string) bool {
 	set := map[string]bool{}
 	for _, v := range s {

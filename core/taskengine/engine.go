@@ -234,6 +234,13 @@ type Engine struct {
 	lock             *sync.Mutex
 	trackSyncedTasks map[string]*operatorState
 
+	// orphanScanCtx / orphanScanCancel govern the periodic orphan-task
+	// scan started in MustStart (gateway mode only). Cancelling lets
+	// Stop() exit the loop immediately instead of waiting up to 5
+	// minutes for the next tick.
+	orphanScanCtx    context.Context
+	orphanScanCancel context.CancelFunc
+
 	// operator stream management for real-time notifications
 	operatorStreams map[string]avsproto.Node_SyncMessagesServer
 	streamsMutex    *sync.RWMutex
@@ -586,6 +593,12 @@ func (n *Engine) Stop() {
 		cancel()
 	}
 
+	// Stop the orphan-scan loop promptly (gateway mode only — nil
+	// cancel is a no-op).
+	if n.orphanScanCancel != nil {
+		n.orphanScanCancel()
+	}
+
 	// wait for all StreamCheckToOperator goroutines to exit
 	n.streamsWG.Wait()
 
@@ -614,8 +627,8 @@ func chainNeedsOperatorMonitoring(tt avsproto.TriggerType) bool {
 // operators that advertise the given chain_id. Empty
 // SupportedChainIDs is treated as "single-chain default" — the
 // operator is counted as covering everything (back-compat with
-// pre-multi-chain operators). Caller must hold n.lock or be OK with a
-// best-effort snapshot.
+// pre-multi-chain operators). Caller MUST hold n.lock — this reads
+// trackSyncedTasks without locking internally.
 func (n *Engine) operatorsCoveringChain(chainID int64) []string {
 	if chainID == 0 {
 		// Chain-agnostic tasks are covered by any connected operator;
@@ -645,13 +658,39 @@ func (n *Engine) operatorsCoveringChain(chainID int64) []string {
 	return out
 }
 
+// orphanedTaskInfo is the read-only snapshot scanOrphanedTasks
+// produces while holding n.lock; logging happens after the lock is
+// released so a long task list doesn't block CreateTask / Pings / the
+// stream loop.
+type orphanedTaskInfo struct {
+	taskID      string
+	chainID     int64
+	triggerType string
+}
+
 // scanOrphanedTasks logs each currently-stored task whose chain is no
 // longer covered by any connected operator. Runs on a slow interval
 // from the engine startup loop; the alert path is the log line, not
 // an automatic remediation — operators may reconnect and the orphan
 // resolves itself. Logging is deliberately verbose (one line per
 // orphaned task) so on-call has the task IDs at hand.
+//
+// The scan collects orphan info under n.lock and releases the lock
+// before logging — n.logger.Warn can take non-trivial time (Sentry
+// breadcrumb, sink I/O) and we don't want that blocking concurrent
+// Pings / CreateTasks / stream ops.
 func (n *Engine) scanOrphanedTasks() {
+	orphans := n.collectOrphans()
+	for _, o := range orphans {
+		n.logger.Warn("🚨 Orphaned task: no connected operator advertises this chain — trigger will not fire until coverage returns",
+			"task_id", o.taskID, "chain_id", o.chainID, "trigger_type", o.triggerType)
+	}
+}
+
+// collectOrphans walks the task + operator state under n.lock and
+// returns the list of orphaned tasks. Pure read-only — no logging or
+// I/O while the lock is held.
+func (n *Engine) collectOrphans() []orphanedTaskInfo {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
@@ -675,6 +714,7 @@ func (n *Engine) scanOrphanedTasks() {
 	}
 	hasLegacyOperator := chainHasOperator[0]
 
+	var out []orphanedTaskInfo
 	for taskID, task := range n.tasks {
 		if task == nil {
 			continue
@@ -686,10 +726,30 @@ func (n *Engine) scanOrphanedTasks() {
 			continue
 		}
 		if !chainHasOperator[task.ChainId] {
-			n.logger.Warn("🚨 Orphaned task: no connected operator advertises this chain — trigger will not fire until coverage returns",
-				"task_id", taskID, "chain_id", task.ChainId, "trigger_type", task.Trigger.Type.String())
+			out = append(out, orphanedTaskInfo{
+				taskID:      taskID,
+				chainID:     task.ChainId,
+				triggerType: task.Trigger.Type.String(),
+			})
 		}
 	}
+	return out
+}
+
+// chainIDSlicesEqual compares two chain-ID slices element-wise. Order
+// matters here because chainOrder is deterministic on the operator
+// side — we want a reorder (which would never happen in practice) to
+// still be logged as a change if it did.
+func chainIDSlicesEqual(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // UpdateOperatorSupportedChains updates a connected operator's
@@ -714,11 +774,10 @@ func (n *Engine) UpdateOperatorSupportedChains(address string, chainIDs []int64)
 	if !ok || state == nil {
 		return
 	}
-	// Avoid log spam: only emit when the set actually changes. Using
-	// stringified slices is fine here — chain sets are tiny.
-	prev := fmt.Sprintf("%v", state.SupportedChainIDs)
-	next := fmt.Sprintf("%v", chainIDs)
-	if prev != next {
+	// Only emit when the set actually changes — Ping runs every 5s
+	// and the chain set is steady-state for the vast majority of
+	// pings, so a no-op comparison shouldn't allocate.
+	if !chainIDSlicesEqual(state.SupportedChainIDs, chainIDs) {
 		n.logger.Info("🔁 Operator advertised chain set changed via Ping",
 			"operator", address, "prev", state.SupportedChainIDs, "next", chainIDs)
 	}
@@ -792,8 +851,14 @@ func (n *Engine) MustStart() error {
 	// is the common failure mode, so create-time validation isn't
 	// sufficient on its own. Gateway mode only — single-chain
 	// deployments would log noise during operator-cold-start.
+	//
+	// orphanScanCtx is derived from a fresh background context (we
+	// don't have a parent ctx in MustStart) and cancelled from
+	// Stop() so the loop exits within milliseconds of shutdown
+	// instead of waiting up to 5 minutes for the next tick.
 	if n.config != nil && n.config.IsGateway {
-		go n.runOrphanScanLoop()
+		n.orphanScanCtx, n.orphanScanCancel = context.WithCancel(context.Background())
+		go n.runOrphanScanLoop(n.orphanScanCtx)
 	}
 
 	return nil
@@ -804,18 +869,18 @@ func (n *Engine) MustStart() error {
 // coverage. 5-minute interval is generous — coverage gaps tend to
 // persist (operator down) or self-heal quickly (subscription
 // reconnect), so polling too aggressively just spams logs.
-func (n *Engine) runOrphanScanLoop() {
+//
+// ctx cancellation exits the loop promptly; we don't poll n.shutdown
+// in between ticks because that would still leave a 5-minute
+// worst-case shutdown delay.
+func (n *Engine) runOrphanScanLoop(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case <-ticker.C:
-			n.lock.Lock()
-			shuttingDown := n.shutdown
-			n.lock.Unlock()
-			if shuttingDown {
-				return
-			}
 			n.scanOrphanedTasks()
 		}
 	}
