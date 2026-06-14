@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -60,6 +61,11 @@ type ChainStateReader interface {
 	// GetTokenBalance reads the raw ERC-20 balance (no decimals applied)
 	// of owner for the given token contract. Mirrors erc20.BalanceOf.
 	GetTokenBalance(ctx context.Context, token, owner common.Address) (*big.Int, error)
+
+	// GetSmartWalletAddress derives the CREATE2 smart-wallet address for
+	// (owner, salt) under the given factory on this chain. Mirrors
+	// aa.GetSenderAddressForFactory.
+	GetSmartWalletAddress(ctx context.Context, owner, factory common.Address, salt *big.Int) (common.Address, error)
 }
 
 // ---------------------------------------------------------------------
@@ -146,6 +152,17 @@ func (d *directChainStateReader) GetTokenBalance(ctx context.Context, token, own
 		return nil, fmt.Errorf("erc20 binding for %s: %w", token.Hex(), err)
 	}
 	return contract.BalanceOf(&bind.CallOpts{Context: ctx}, owner)
+}
+
+func (d *directChainStateReader) GetSmartWalletAddress(_ context.Context, owner, factory common.Address, salt *big.Int) (common.Address, error) {
+	addr, err := aa.GetSenderAddressForFactory(d.client, owner, factory, salt)
+	if err != nil {
+		return common.Address{}, err
+	}
+	if addr == nil {
+		return common.Address{}, fmt.Errorf("nil sender address for owner=%s factory=%s salt=%s", owner.Hex(), factory.Hex(), salt)
+	}
+	return *addr, nil
 }
 
 // ---------------------------------------------------------------------
@@ -286,6 +303,27 @@ func (w *workerChainStateReader) GetTokenBalance(ctx context.Context, token, own
 		return nil, fmt.Errorf("worker returned malformed token balance %q for token=%s owner=%s on chain %d", resp.Balance, token.Hex(), owner.Hex(), w.chainID)
 	}
 	return v, nil
+}
+
+func (w *workerChainStateReader) GetSmartWalletAddress(ctx context.Context, owner, factory common.Address, salt *big.Int) (common.Address, error) {
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	saltStr := "0"
+	if salt != nil {
+		saltStr = salt.String()
+	}
+	resp, err := w.client.GetSmartWalletAddress(ctx, &avsproto.WorkerGetSmartWalletAddressReq{
+		Owner:          owner.Hex(),
+		Salt:           saltStr,
+		FactoryAddress: factory.Hex(),
+	})
+	if err != nil {
+		return common.Address{}, fmt.Errorf("worker GetSmartWalletAddress (chain %d): %w", w.chainID, err)
+	}
+	if !common.IsHexAddress(resp.Address) {
+		return common.Address{}, fmt.Errorf("worker returned malformed address %q for owner=%s on chain %d", resp.Address, owner.Hex(), w.chainID)
+	}
+	return common.HexToAddress(resp.Address), nil
 }
 
 // withTimeout caps the gRPC call's wall time. context.WithTimeout

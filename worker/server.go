@@ -151,14 +151,33 @@ func (s *Server) GetSmartWalletAddress(ctx context.Context, req *avsproto.Worker
 	if s.worker.smartWalletCfg == nil {
 		return nil, fmt.Errorf("smart wallet config not initialized")
 	}
+	if !common.IsHexAddress(req.Owner) {
+		return nil, fmt.Errorf("invalid owner address %q", req.Owner)
+	}
 
 	ownerAddr := common.HexToAddress(req.Owner)
-	salt := big.NewInt(req.Salt)
+
+	salt, ok := new(big.Int).SetString(req.Salt, 10)
+	if !ok {
+		return nil, fmt.Errorf("invalid salt %q (expected base-10 big.Int string)", req.Salt)
+	}
+
+	// Honor the caller's factory override when provided; otherwise use the
+	// worker's configured factory. The gateway passes its per-chain /
+	// per-request factory so worker-derived addresses match the gateway's
+	// direct-RPC derivation exactly.
+	factory := s.worker.smartWalletCfg.FactoryAddress
+	if req.FactoryAddress != "" {
+		if !common.IsHexAddress(req.FactoryAddress) {
+			return nil, fmt.Errorf("invalid factory address %q", req.FactoryAddress)
+		}
+		factory = common.HexToAddress(req.FactoryAddress)
+	}
 
 	addr, err := aa.GetSenderAddressForFactory(
 		s.worker.rpcClient,
 		ownerAddr,
-		s.worker.smartWalletCfg.FactoryAddress,
+		factory,
 		salt,
 	)
 	if err != nil {
