@@ -183,9 +183,15 @@ next — same migrate-then-verify discipline as Phases 2→4a.
    chain-threading work alongside the deferred `callContractMethod`. The
    contractWrite processor's two log-only/best-effort dials (`:715` sender
    validation, `:784` balance logging) are deferred to PR 4.
-4. **PR 4 — contractWrite / ethTransfer residual dials.** Fold gas
-   estimation into `ExecuteUserOp`'s response; drop log-only dials; add
-   `GetTransactionReceipt` if a polling path needs it.
+4. **PR 4 — contractWrite residual dials (delivered).** Migrated the
+   contractWrite processor's last two direct dials onto its existing
+   `ChainStateReader` (no new worker RPC): the salt-0 sender-validation
+   read now uses `GetSmartWalletAddress`, and the pre-send diagnostic block
+   uses `GetBalance` + `SuggestGasPrice` (replacing the raw-client
+   `eip1559.SuggestFee` log). The contractWrite node now issues **zero**
+   direct chain dials. ethTransfer was already dial-free (it sends via the
+   userop path). `GetTransactionReceipt` proved unnecessary — no gateway
+   path polls receipts directly.
 5. **PR 5 — event log queries (`FilterLogs`).** Worker-side chunking +
    pagination. Gate behind a design review on whether the gateway should
    replay events at all (operator overlap).
