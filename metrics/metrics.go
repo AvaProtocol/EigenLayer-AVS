@@ -35,6 +35,8 @@ type MetricsGenerator interface {
 	// staleness threshold.
 	SetChainAdvertised(chainID int64, advertised bool)
 	SetChainHeadLagSeconds(chainID int64, lagSeconds float64)
+	SetEventSubscriptions(chainID int64, active, desired int)
+	IncEventSubscriptionRebuildFailures(chainID int64)
 }
 
 // AvsMetrics contains instrumented metrics that should be incremented by the avs node using the methods below
@@ -55,6 +57,9 @@ type AvsAndEigenMetrics struct {
 
 	chainAdvertised    *prometheus.GaugeVec
 	chainHeadLagSecond *prometheus.GaugeVec
+	eventSubsActive    *prometheus.GaugeVec
+	eventSubsDesired   *prometheus.GaugeVec
+	eventRebuildErrors *prometheus.CounterVec
 
 	operatorAddress string
 	version         string
@@ -129,6 +134,27 @@ func NewAvsAndEigenMetrics(avsName, operatorAddress, version string, eigenMetric
 				Help:      "Seconds elapsed since the operator last observed a new block head on this chain. Rising values indicate a degrading or hung subscription before it crosses the staleness threshold and is dropped from advertising.",
 			}, []string{"operator", "version", "chain_id"}),
 
+		eventSubsActive: promauto.With(reg).NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: apNamespace,
+				Name:      "event_subscriptions_active",
+				Help:      "The number of active unique event subscriptions.",
+			}, []string{"operator", "version", "chain_id"}),
+
+		eventSubsDesired: promauto.With(reg).NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: apNamespace,
+				Name:      "event_subscriptions_desired",
+				Help:      "The number of desired unique event subscriptions.",
+			}, []string{"operator", "version", "chain_id"}),
+
+		eventRebuildErrors: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: apNamespace,
+				Name:      "event_subscription_rebuild_failures_total",
+				Help:      "The number of failed full event subscription rebuild attempts.",
+			}, []string{"operator", "version", "chain_id"}),
+
 		operatorAddress: operatorAddress,
 		version:         version,
 	}
@@ -172,4 +198,14 @@ func (m *AvsAndEigenMetrics) SetChainAdvertised(chainID int64, advertised bool) 
 
 func (m *AvsAndEigenMetrics) SetChainHeadLagSeconds(chainID int64, lagSeconds float64) {
 	m.chainHeadLagSecond.WithLabelValues(m.operatorAddress, m.version, strconv.FormatInt(chainID, 10)).Set(lagSeconds)
+}
+
+func (m *AvsAndEigenMetrics) SetEventSubscriptions(chainID int64, active, desired int) {
+	labels := []string{m.operatorAddress, m.version, strconv.FormatInt(chainID, 10)}
+	m.eventSubsActive.WithLabelValues(labels...).Set(float64(active))
+	m.eventSubsDesired.WithLabelValues(labels...).Set(float64(desired))
+}
+
+func (m *AvsAndEigenMetrics) IncEventSubscriptionRebuildFailures(chainID int64) {
+	m.eventRebuildErrors.WithLabelValues(m.operatorAddress, m.version, strconv.FormatInt(chainID, 10)).Inc()
 }

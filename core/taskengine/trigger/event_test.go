@@ -1,6 +1,8 @@
 package trigger
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -999,6 +1001,84 @@ func newTestEventTrigger() *EventTrigger {
 		processedEvents:          make(map[string]bool),
 		lastTriggerTime:          make(map[string]time.Time),
 	}
+}
+
+func TestRebuildSubscriptionsDoesNotCommitPartialSet(t *testing.T) {
+	trigger := newTestEventTrigger()
+	firstSub := newMockSubscription()
+	callCount := 0
+	trigger.subscribeFilterLogs = func(context.Context, ethereum.FilterQuery, chan<- types.Log) (ethereum.Subscription, error) {
+		callCount++
+		if callCount == 1 {
+			return firstSub, nil
+		}
+		return nil, errors.New("transient subscribe failure")
+	}
+
+	queries := []QueryInfo{
+		{Query: ethereum.FilterQuery{}, Description: "first", TaskID: "task-1"},
+		{
+			Query: ethereum.FilterQuery{
+				Addresses: []common.Address{common.HexToAddress("0x1")},
+			},
+			Description: "second",
+			TaskID:      "task-2",
+		},
+	}
+
+	err := trigger.rebuildSubscriptions(
+		context.Background(),
+		queries,
+		make(chan types.Log, 1),
+		make(chan error, 1),
+	)
+
+	assert.Error(t, err)
+	assert.True(t, firstSub.unsubscribed, "successful partial subscriptions must be cleaned up")
+	assert.Empty(t, trigger.subscriptions)
+	assert.Empty(t, trigger.querySubscriptions)
+}
+
+func TestAddSubscriptionsRollsBackOnError(t *testing.T) {
+	trigger := newTestEventTrigger()
+	firstSub := newMockSubscription()
+	callCount := 0
+	trigger.subscribeFilterLogs = func(context.Context, ethereum.FilterQuery, chan<- types.Log) (ethereum.Subscription, error) {
+		callCount++
+		if callCount == 1 {
+			return firstSub, nil
+		}
+		return nil, errors.New("transient subscribe failure")
+	}
+
+	desiredByKey := map[string][]QueryInfo{
+		"key-1": {{
+			Query:       ethereum.FilterQuery{},
+			Description: "first",
+			TaskID:      "task-1",
+		}},
+		"key-2": {{
+			Query: ethereum.FilterQuery{
+				Addresses: []common.Address{common.HexToAddress("0x1")},
+			},
+			Description: "second",
+			TaskID:      "task-2",
+		}},
+	}
+
+	trigger.subsMutex.Lock()
+	err := trigger.addSubscriptions(
+		context.Background(),
+		desiredByKey,
+		make(chan types.Log, 1),
+		make(chan error, 1),
+	)
+	trigger.subsMutex.Unlock()
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "second")
+	assert.True(t, firstSub.unsubscribed, "successful partial subscriptions must be cleaned up")
+	assert.Empty(t, trigger.querySubscriptions)
 }
 
 func TestIncrementalAdd_OnlyNewSubsCreated(t *testing.T) {
