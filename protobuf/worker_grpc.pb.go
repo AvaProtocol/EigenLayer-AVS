@@ -30,6 +30,7 @@ const (
 	ChainWorker_GetCode_FullMethodName               = "/aggregator.ChainWorker/GetCode"
 	ChainWorker_GetBalance_FullMethodName            = "/aggregator.ChainWorker/GetBalance"
 	ChainWorker_GetTokenBalance_FullMethodName       = "/aggregator.ChainWorker/GetTokenBalance"
+	ChainWorker_CallContract_FullMethodName          = "/aggregator.ChainWorker/CallContract"
 )
 
 // ChainWorkerClient is the client API for ChainWorker service.
@@ -76,6 +77,10 @@ type ChainWorkerClient interface {
 	// Used by the gateway's withdraw preflight to validate / size ERC-20
 	// withdrawals.
 	GetTokenBalance(ctx context.Context, in *WorkerGetTokenBalanceReq, opts ...grpc.CallOption) (*WorkerGetTokenBalanceResp, error)
+	// Execute a read-only contract call (eth_call) on this chain. Wraps
+	// ethclient.CallContract. Used by the contractRead node so the gateway
+	// issues no direct eth_call against execution chains.
+	CallContract(ctx context.Context, in *WorkerCallContractReq, opts ...grpc.CallOption) (*WorkerCallContractResp, error)
 }
 
 type chainWorkerClient struct {
@@ -196,6 +201,16 @@ func (c *chainWorkerClient) GetTokenBalance(ctx context.Context, in *WorkerGetTo
 	return out, nil
 }
 
+func (c *chainWorkerClient) CallContract(ctx context.Context, in *WorkerCallContractReq, opts ...grpc.CallOption) (*WorkerCallContractResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerCallContractResp)
+	err := c.cc.Invoke(ctx, ChainWorker_CallContract_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ChainWorkerServer is the server API for ChainWorker service.
 // All implementations must embed UnimplementedChainWorkerServer
 // for forward compatibility.
@@ -240,6 +255,10 @@ type ChainWorkerServer interface {
 	// Used by the gateway's withdraw preflight to validate / size ERC-20
 	// withdrawals.
 	GetTokenBalance(context.Context, *WorkerGetTokenBalanceReq) (*WorkerGetTokenBalanceResp, error)
+	// Execute a read-only contract call (eth_call) on this chain. Wraps
+	// ethclient.CallContract. Used by the contractRead node so the gateway
+	// issues no direct eth_call against execution chains.
+	CallContract(context.Context, *WorkerCallContractReq) (*WorkerCallContractResp, error)
 	mustEmbedUnimplementedChainWorkerServer()
 }
 
@@ -282,6 +301,9 @@ func (UnimplementedChainWorkerServer) GetBalance(context.Context, *WorkerGetBala
 }
 func (UnimplementedChainWorkerServer) GetTokenBalance(context.Context, *WorkerGetTokenBalanceReq) (*WorkerGetTokenBalanceResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTokenBalance not implemented")
+}
+func (UnimplementedChainWorkerServer) CallContract(context.Context, *WorkerCallContractReq) (*WorkerCallContractResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CallContract not implemented")
 }
 func (UnimplementedChainWorkerServer) mustEmbedUnimplementedChainWorkerServer() {}
 func (UnimplementedChainWorkerServer) testEmbeddedByValue()                     {}
@@ -502,6 +524,24 @@ func _ChainWorker_GetTokenBalance_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChainWorker_CallContract_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerCallContractReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).CallContract(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_CallContract_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).CallContract(ctx, req.(*WorkerCallContractReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ChainWorker_ServiceDesc is the grpc.ServiceDesc for ChainWorker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -552,6 +592,10 @@ var ChainWorker_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTokenBalance",
 			Handler:    _ChainWorker_GetTokenBalance_Handler,
+		},
+		{
+			MethodName: "CallContract",
+			Handler:    _ChainWorker_CallContract_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

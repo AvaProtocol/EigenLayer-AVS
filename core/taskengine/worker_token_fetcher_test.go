@@ -63,6 +63,9 @@ func (f *fakeChainWorkerClient) GetBalance(context.Context, *avsproto.WorkerGetB
 func (f *fakeChainWorkerClient) GetTokenBalance(context.Context, *avsproto.WorkerGetTokenBalanceReq, ...grpc.CallOption) (*avsproto.WorkerGetTokenBalanceResp, error) {
 	panic("unused")
 }
+func (f *fakeChainWorkerClient) CallContract(context.Context, *avsproto.WorkerCallContractReq, ...grpc.CallOption) (*avsproto.WorkerCallContractResp, error) {
+	panic("unused")
+}
 
 // TestWorkerRoutedFetcher_HappyPath confirms a successful worker response
 // gets mapped to a TokenMetadata correctly — name, symbol, decimals, source

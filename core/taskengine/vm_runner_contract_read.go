@@ -13,16 +13,19 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
 type ContractReadProcessor struct {
 	*CommonProcessor
-	client *ethclient.Client
+	// client is the per-chain ChainStateReader — worker-routed in gateway
+	// mode (the gateway issues no direct eth_call), a direct-RPC reader in
+	// single-chain mode. nil for the empty-config error path, which never
+	// reaches a chain call.
+	client ChainStateReader
 }
 
-func NewContractReadProcessor(vm *VM, client *ethclient.Client) *ContractReadProcessor {
+func NewContractReadProcessor(vm *VM, client ChainStateReader) *ContractReadProcessor {
 	return &ContractReadProcessor{
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
@@ -308,7 +311,7 @@ func (r *ContractReadProcessor) executeMethodCallWithoutFormatting(ctx context.C
 		chainID, _ := r.client.ChainID(ctx)
 
 		// Check if contract has code (exists)
-		code, _ := r.client.CodeAt(ctx, contractAddress, nil)
+		code, _ := r.client.CodeAt(ctx, contractAddress)
 
 		r.vm.logger.Debug("Contract call executed",
 			"contract_address", contractAddress.Hex(),
@@ -346,7 +349,7 @@ func (r *ContractReadProcessor) executeMethodCallWithoutFormatting(ctx context.C
 	// Handle empty contract response
 	if len(output) == 0 {
 		// Check if contract exists to provide better error message
-		code, _ := r.client.CodeAt(ctx, contractAddress, nil)
+		code, _ := r.client.CodeAt(ctx, contractAddress)
 		chainID, _ := r.client.ChainID(ctx)
 
 		var errorMsg string
@@ -963,7 +966,7 @@ func (r *ContractReadProcessor) executeMethodCallWithDecimalFormatting(ctx conte
 		chainID, _ := r.client.ChainID(ctx)
 
 		// Check if contract has code (exists)
-		code, _ := r.client.CodeAt(ctx, contractAddress, nil)
+		code, _ := r.client.CodeAt(ctx, contractAddress)
 
 		r.vm.logger.Debug("Contract call executed",
 			"contract_address", contractAddress.Hex(),
@@ -1001,7 +1004,7 @@ func (r *ContractReadProcessor) executeMethodCallWithDecimalFormatting(ctx conte
 	// Handle empty contract response
 	if len(output) == 0 {
 		// Check if contract exists to provide better error message
-		code, _ := r.client.CodeAt(ctx, contractAddress, nil)
+		code, _ := r.client.CodeAt(ctx, contractAddress)
 		chainID, _ := r.client.ChainID(ctx)
 
 		var errorMsg string

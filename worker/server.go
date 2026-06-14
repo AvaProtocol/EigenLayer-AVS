@@ -331,6 +331,59 @@ func (s *Server) GetCode(ctx context.Context, req *avsproto.WorkerGetCodeReq) (*
 	}, nil
 }
 
+// CallContract wraps ethclient.CallContract (eth_call). Used by the
+// contractRead node so the gateway issues no direct eth_call against
+// execution chains.
+func (s *Server) CallContract(ctx context.Context, req *avsproto.WorkerCallContractReq) (*avsproto.WorkerCallContractResp, error) {
+	if !common.IsHexAddress(req.To) {
+		return nil, fmt.Errorf("invalid to address %q", req.To)
+	}
+	to := common.HexToAddress(req.To)
+	msg := ethereum.CallMsg{
+		To:   &to,
+		Data: req.Data,
+	}
+	if req.From != "" {
+		if !common.IsHexAddress(req.From) {
+			return nil, fmt.Errorf("invalid from address %q", req.From)
+		}
+		msg.From = common.HexToAddress(req.From)
+	}
+	if req.Value != "" {
+		v, ok := new(big.Int).SetString(req.Value, 10)
+		if !ok {
+			return nil, fmt.Errorf("invalid value %q (expected base-10 big.Int string)", req.Value)
+		}
+		if v.Sign() < 0 {
+			return nil, fmt.Errorf("invalid value %q: must be non-negative", req.Value)
+		}
+		if v.BitLen() > 256 {
+			return nil, fmt.Errorf("invalid value %q: exceeds uint256", req.Value)
+		}
+		msg.Value = v
+	}
+
+	var blockNumber *big.Int
+	if req.BlockNumber != "" {
+		b, ok := new(big.Int).SetString(req.BlockNumber, 10)
+		if !ok {
+			return nil, fmt.Errorf("invalid block_number %q (expected base-10 big.Int string)", req.BlockNumber)
+		}
+		if b.Sign() < 0 {
+			return nil, fmt.Errorf("invalid block_number %q: must be non-negative", req.BlockNumber)
+		}
+		blockNumber = b
+	}
+
+	result, err := s.worker.rpcClient.CallContract(ctx, msg, blockNumber)
+	if err != nil {
+		return nil, fmt.Errorf("CallContract to %s: %w", req.To, err)
+	}
+	return &avsproto.WorkerCallContractResp{
+		Result: result,
+	}, nil
+}
+
 // GetBalance wraps ethclient.BalanceAt(addr, latest). Used by the gateway's
 // withdraw preflight to validate / size native-coin withdrawals.
 func (s *Server) GetBalance(ctx context.Context, req *avsproto.WorkerGetBalanceReq) (*avsproto.WorkerGetBalanceResp, error) {
