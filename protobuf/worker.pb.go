@@ -594,6 +594,342 @@ func (x *WorkerGetTokenMetadataResp) GetSource() string {
 	return ""
 }
 
+// Nonce query by smart wallet address (companion to GetNonce-by-owner)
+type WorkerGetNonceByAddressReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WalletAddress string                 `protobuf:"bytes,1,opt,name=wallet_address,json=walletAddress,proto3" json:"wallet_address,omitempty"` // Smart wallet address (hex)
+	NonceKey      string                 `protobuf:"bytes,2,opt,name=nonce_key,json=nonceKey,proto3" json:"nonce_key,omitempty"`                // 192-bit key for the EntryPoint nonce space
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerGetNonceByAddressReq) Reset() {
+	*x = WorkerGetNonceByAddressReq{}
+	mi := &file_worker_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerGetNonceByAddressReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerGetNonceByAddressReq) ProtoMessage() {}
+
+func (x *WorkerGetNonceByAddressReq) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerGetNonceByAddressReq.ProtoReflect.Descriptor instead.
+func (*WorkerGetNonceByAddressReq) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *WorkerGetNonceByAddressReq) GetWalletAddress() string {
+	if x != nil {
+		return x.WalletAddress
+	}
+	return ""
+}
+
+func (x *WorkerGetNonceByAddressReq) GetNonceKey() string {
+	if x != nil {
+		return x.NonceKey
+	}
+	return ""
+}
+
+// Gas price
+type WorkerSuggestGasPriceReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerSuggestGasPriceReq) Reset() {
+	*x = WorkerSuggestGasPriceReq{}
+	mi := &file_worker_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerSuggestGasPriceReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerSuggestGasPriceReq) ProtoMessage() {}
+
+func (x *WorkerSuggestGasPriceReq) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerSuggestGasPriceReq.ProtoReflect.Descriptor instead.
+func (*WorkerSuggestGasPriceReq) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{11}
+}
+
+type WorkerSuggestGasPriceResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	GasPriceWei   string                 `protobuf:"bytes,1,opt,name=gas_price_wei,json=gasPriceWei,proto3" json:"gas_price_wei,omitempty"` // big.Int as string
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerSuggestGasPriceResp) Reset() {
+	*x = WorkerSuggestGasPriceResp{}
+	mi := &file_worker_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerSuggestGasPriceResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerSuggestGasPriceResp) ProtoMessage() {}
+
+func (x *WorkerSuggestGasPriceResp) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerSuggestGasPriceResp.ProtoReflect.Descriptor instead.
+func (*WorkerSuggestGasPriceResp) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *WorkerSuggestGasPriceResp) GetGasPriceWei() string {
+	if x != nil {
+		return x.GasPriceWei
+	}
+	return ""
+}
+
+// Gas estimate (mirrors ethereum.CallMsg fields the estimator uses)
+type WorkerEstimateGasReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	From          string                 `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`   // Sender (hex). Optional; chain default if empty.
+	To            string                 `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`       // Destination contract (hex).
+	Value         string                 `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"` // Wei (big.Int as string); empty/zero for no value.
+	Data          []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`   // Calldata.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerEstimateGasReq) Reset() {
+	*x = WorkerEstimateGasReq{}
+	mi := &file_worker_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerEstimateGasReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerEstimateGasReq) ProtoMessage() {}
+
+func (x *WorkerEstimateGasReq) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerEstimateGasReq.ProtoReflect.Descriptor instead.
+func (*WorkerEstimateGasReq) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *WorkerEstimateGasReq) GetFrom() string {
+	if x != nil {
+		return x.From
+	}
+	return ""
+}
+
+func (x *WorkerEstimateGasReq) GetTo() string {
+	if x != nil {
+		return x.To
+	}
+	return ""
+}
+
+func (x *WorkerEstimateGasReq) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
+func (x *WorkerEstimateGasReq) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type WorkerEstimateGasResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Gas           uint64                 `protobuf:"varint,1,opt,name=gas,proto3" json:"gas,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerEstimateGasResp) Reset() {
+	*x = WorkerEstimateGasResp{}
+	mi := &file_worker_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerEstimateGasResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerEstimateGasResp) ProtoMessage() {}
+
+func (x *WorkerEstimateGasResp) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerEstimateGasResp.ProtoReflect.Descriptor instead.
+func (*WorkerEstimateGasResp) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *WorkerEstimateGasResp) GetGas() uint64 {
+	if x != nil {
+		return x.Gas
+	}
+	return 0
+}
+
+// CodeAt
+type WorkerGetCodeReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"` // Contract address (hex).
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerGetCodeReq) Reset() {
+	*x = WorkerGetCodeReq{}
+	mi := &file_worker_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerGetCodeReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerGetCodeReq) ProtoMessage() {}
+
+func (x *WorkerGetCodeReq) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerGetCodeReq.ProtoReflect.Descriptor instead.
+func (*WorkerGetCodeReq) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *WorkerGetCodeReq) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type WorkerGetCodeResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          []byte                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"` // Raw bytecode (empty if not deployed).
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerGetCodeResp) Reset() {
+	*x = WorkerGetCodeResp{}
+	mi := &file_worker_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerGetCodeResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerGetCodeResp) ProtoMessage() {}
+
+func (x *WorkerGetCodeResp) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerGetCodeResp.ProtoReflect.Descriptor instead.
+func (*WorkerGetCodeResp) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *WorkerGetCodeResp) GetCode() []byte {
+	if x != nil {
+		return x.Code
+	}
+	return nil
+}
+
 var File_worker_proto protoreflect.FileDescriptor
 
 const file_worker_proto_rawDesc = "" +
@@ -638,13 +974,34 @@ const file_worker_proto_rawDesc = "" +
 	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12\x1a\n" +
 	"\bdecimals\x18\x03 \x01(\rR\bdecimals\x12\x14\n" +
 	"\x05found\x18\x04 \x01(\bR\x05found\x12\x16\n" +
-	"\x06source\x18\x05 \x01(\tR\x06source2\xd5\x03\n" +
+	"\x06source\x18\x05 \x01(\tR\x06source\"`\n" +
+	"\x1aWorkerGetNonceByAddressReq\x12%\n" +
+	"\x0ewallet_address\x18\x01 \x01(\tR\rwalletAddress\x12\x1b\n" +
+	"\tnonce_key\x18\x02 \x01(\tR\bnonceKey\"\x1a\n" +
+	"\x18WorkerSuggestGasPriceReq\"?\n" +
+	"\x19WorkerSuggestGasPriceResp\x12\"\n" +
+	"\rgas_price_wei\x18\x01 \x01(\tR\vgasPriceWei\"d\n" +
+	"\x14WorkerEstimateGasReq\x12\x12\n" +
+	"\x04from\x18\x01 \x01(\tR\x04from\x12\x0e\n" +
+	"\x02to\x18\x02 \x01(\tR\x02to\x12\x14\n" +
+	"\x05value\x18\x03 \x01(\tR\x05value\x12\x12\n" +
+	"\x04data\x18\x04 \x01(\fR\x04data\")\n" +
+	"\x15WorkerEstimateGasResp\x12\x10\n" +
+	"\x03gas\x18\x01 \x01(\x04R\x03gas\",\n" +
+	"\x10WorkerGetCodeReq\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"'\n" +
+	"\x11WorkerGetCodeResp\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\fR\x04code2\xae\x06\n" +
 	"\vChainWorker\x12X\n" +
 	"\x11WorkerHealthCheck\x12 .aggregator.WorkerHealthCheckReq\x1a!.aggregator.WorkerHealthCheckResp\x12L\n" +
 	"\rExecuteUserOp\x12\x1c.aggregator.ExecuteUserOpReq\x1a\x1d.aggregator.ExecuteUserOpResp\x12I\n" +
 	"\bGetNonce\x12\x1d.aggregator.WorkerGetNonceReq\x1a\x1e.aggregator.WorkerGetNonceResp\x12p\n" +
 	"\x15GetSmartWalletAddress\x12*.aggregator.WorkerGetSmartWalletAddressReq\x1a+.aggregator.WorkerGetSmartWalletAddressResp\x12a\n" +
-	"\x10GetTokenMetadata\x12%.aggregator.WorkerGetTokenMetadataReq\x1a&.aggregator.WorkerGetTokenMetadataRespB\fZ\n" +
+	"\x10GetTokenMetadata\x12%.aggregator.WorkerGetTokenMetadataReq\x1a&.aggregator.WorkerGetTokenMetadataResp\x12[\n" +
+	"\x11GetNonceByAddress\x12&.aggregator.WorkerGetNonceByAddressReq\x1a\x1e.aggregator.WorkerGetNonceResp\x12^\n" +
+	"\x0fSuggestGasPrice\x12$.aggregator.WorkerSuggestGasPriceReq\x1a%.aggregator.WorkerSuggestGasPriceResp\x12R\n" +
+	"\vEstimateGas\x12 .aggregator.WorkerEstimateGasReq\x1a!.aggregator.WorkerEstimateGasResp\x12F\n" +
+	"\aGetCode\x12\x1c.aggregator.WorkerGetCodeReq\x1a\x1d.aggregator.WorkerGetCodeRespB\fZ\n" +
 	"./avsprotob\x06proto3"
 
 var (
@@ -659,7 +1016,7 @@ func file_worker_proto_rawDescGZIP() []byte {
 	return file_worker_proto_rawDescData
 }
 
-var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_worker_proto_goTypes = []any{
 	(*WorkerHealthCheckReq)(nil),            // 0: aggregator.WorkerHealthCheckReq
 	(*WorkerHealthCheckResp)(nil),           // 1: aggregator.WorkerHealthCheckResp
@@ -671,23 +1028,38 @@ var file_worker_proto_goTypes = []any{
 	(*WorkerGetSmartWalletAddressResp)(nil), // 7: aggregator.WorkerGetSmartWalletAddressResp
 	(*WorkerGetTokenMetadataReq)(nil),       // 8: aggregator.WorkerGetTokenMetadataReq
 	(*WorkerGetTokenMetadataResp)(nil),      // 9: aggregator.WorkerGetTokenMetadataResp
+	(*WorkerGetNonceByAddressReq)(nil),      // 10: aggregator.WorkerGetNonceByAddressReq
+	(*WorkerSuggestGasPriceReq)(nil),        // 11: aggregator.WorkerSuggestGasPriceReq
+	(*WorkerSuggestGasPriceResp)(nil),       // 12: aggregator.WorkerSuggestGasPriceResp
+	(*WorkerEstimateGasReq)(nil),            // 13: aggregator.WorkerEstimateGasReq
+	(*WorkerEstimateGasResp)(nil),           // 14: aggregator.WorkerEstimateGasResp
+	(*WorkerGetCodeReq)(nil),                // 15: aggregator.WorkerGetCodeReq
+	(*WorkerGetCodeResp)(nil),               // 16: aggregator.WorkerGetCodeResp
 }
 var file_worker_proto_depIdxs = []int32{
-	0, // 0: aggregator.ChainWorker.WorkerHealthCheck:input_type -> aggregator.WorkerHealthCheckReq
-	2, // 1: aggregator.ChainWorker.ExecuteUserOp:input_type -> aggregator.ExecuteUserOpReq
-	4, // 2: aggregator.ChainWorker.GetNonce:input_type -> aggregator.WorkerGetNonceReq
-	6, // 3: aggregator.ChainWorker.GetSmartWalletAddress:input_type -> aggregator.WorkerGetSmartWalletAddressReq
-	8, // 4: aggregator.ChainWorker.GetTokenMetadata:input_type -> aggregator.WorkerGetTokenMetadataReq
-	1, // 5: aggregator.ChainWorker.WorkerHealthCheck:output_type -> aggregator.WorkerHealthCheckResp
-	3, // 6: aggregator.ChainWorker.ExecuteUserOp:output_type -> aggregator.ExecuteUserOpResp
-	5, // 7: aggregator.ChainWorker.GetNonce:output_type -> aggregator.WorkerGetNonceResp
-	7, // 8: aggregator.ChainWorker.GetSmartWalletAddress:output_type -> aggregator.WorkerGetSmartWalletAddressResp
-	9, // 9: aggregator.ChainWorker.GetTokenMetadata:output_type -> aggregator.WorkerGetTokenMetadataResp
-	5, // [5:10] is the sub-list for method output_type
-	0, // [0:5] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	0,  // 0: aggregator.ChainWorker.WorkerHealthCheck:input_type -> aggregator.WorkerHealthCheckReq
+	2,  // 1: aggregator.ChainWorker.ExecuteUserOp:input_type -> aggregator.ExecuteUserOpReq
+	4,  // 2: aggregator.ChainWorker.GetNonce:input_type -> aggregator.WorkerGetNonceReq
+	6,  // 3: aggregator.ChainWorker.GetSmartWalletAddress:input_type -> aggregator.WorkerGetSmartWalletAddressReq
+	8,  // 4: aggregator.ChainWorker.GetTokenMetadata:input_type -> aggregator.WorkerGetTokenMetadataReq
+	10, // 5: aggregator.ChainWorker.GetNonceByAddress:input_type -> aggregator.WorkerGetNonceByAddressReq
+	11, // 6: aggregator.ChainWorker.SuggestGasPrice:input_type -> aggregator.WorkerSuggestGasPriceReq
+	13, // 7: aggregator.ChainWorker.EstimateGas:input_type -> aggregator.WorkerEstimateGasReq
+	15, // 8: aggregator.ChainWorker.GetCode:input_type -> aggregator.WorkerGetCodeReq
+	1,  // 9: aggregator.ChainWorker.WorkerHealthCheck:output_type -> aggregator.WorkerHealthCheckResp
+	3,  // 10: aggregator.ChainWorker.ExecuteUserOp:output_type -> aggregator.ExecuteUserOpResp
+	5,  // 11: aggregator.ChainWorker.GetNonce:output_type -> aggregator.WorkerGetNonceResp
+	7,  // 12: aggregator.ChainWorker.GetSmartWalletAddress:output_type -> aggregator.WorkerGetSmartWalletAddressResp
+	9,  // 13: aggregator.ChainWorker.GetTokenMetadata:output_type -> aggregator.WorkerGetTokenMetadataResp
+	5,  // 14: aggregator.ChainWorker.GetNonceByAddress:output_type -> aggregator.WorkerGetNonceResp
+	12, // 15: aggregator.ChainWorker.SuggestGasPrice:output_type -> aggregator.WorkerSuggestGasPriceResp
+	14, // 16: aggregator.ChainWorker.EstimateGas:output_type -> aggregator.WorkerEstimateGasResp
+	16, // 17: aggregator.ChainWorker.GetCode:output_type -> aggregator.WorkerGetCodeResp
+	9,  // [9:18] is the sub-list for method output_type
+	0,  // [0:9] is the sub-list for method input_type
+	0,  // [0:0] is the sub-list for extension type_name
+	0,  // [0:0] is the sub-list for extension extendee
+	0,  // [0:0] is the sub-list for field type_name
 }
 
 func init() { file_worker_proto_init() }
@@ -701,7 +1073,7 @@ func file_worker_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_worker_proto_rawDesc), len(file_worker_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
