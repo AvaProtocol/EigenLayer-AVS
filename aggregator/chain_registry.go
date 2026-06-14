@@ -21,10 +21,12 @@ type ChainEntry struct {
 	conn   *grpc.ClientConn
 	Client avsproto.ChainWorkerClient
 
-	// rpc is lazily dialed by GetRPC. The gateway needs a chain-specific
-	// ethclient for direct on-chain reads (e.g. ERC-20 balance checks in
-	// the withdraw flow) — not every operation rides through the worker
-	// gRPC channel.
+	// rpc is lazily dialed by GetRPC. As of Phase 4 this is a fallback
+	// only — withdraw balance reads route through the chain worker's
+	// ChainStateReader, so GetRPC is dialed solely when no worker-routed
+	// reader is registered for the chain (single-chain mode / startup
+	// race). It's slated for removal with the rest of the gateway's
+	// per-chain RPC config.
 	//
 	// rpcMu serializes the dial; once `rpc` is non-nil, GetRPC returns it
 	// without taking the lock-critical-section path. Dial failures are NOT

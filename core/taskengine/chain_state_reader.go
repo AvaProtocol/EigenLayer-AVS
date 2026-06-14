@@ -8,9 +8,11 @@ import (
 	"time"
 
 	ethereum "github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
@@ -50,6 +52,14 @@ type ChainStateReader interface {
 	// given smart wallet address. key is the 192-bit nonce-space key
 	// (typically 0 for the default space). Mirrors aa.GetNonce.
 	GetEntryPointNonce(ctx context.Context, walletAddr common.Address, key *big.Int) (*big.Int, error)
+
+	// GetBalance reads the native-coin balance (wei) at addr, latest block.
+	// Mirrors ethclient.BalanceAt(addr, nil).
+	GetBalance(ctx context.Context, addr common.Address) (*big.Int, error)
+
+	// GetTokenBalance reads the raw ERC-20 balance (no decimals applied)
+	// of owner for the given token contract. Mirrors erc20.BalanceOf.
+	GetTokenBalance(ctx context.Context, token, owner common.Address) (*big.Int, error)
 }
 
 // ---------------------------------------------------------------------
@@ -124,6 +134,18 @@ func (d *directChainStateReader) GetEntryPointNonce(_ context.Context, walletAdd
 	// flight when the caller cancels. Worth fixing in aa as a
 	// separate follow-up; out of scope for this layer.
 	return getEntryPointNonceDirect(d.client, walletAddr, key)
+}
+
+func (d *directChainStateReader) GetBalance(ctx context.Context, addr common.Address) (*big.Int, error) {
+	return d.client.BalanceAt(ctx, addr, nil)
+}
+
+func (d *directChainStateReader) GetTokenBalance(ctx context.Context, token, owner common.Address) (*big.Int, error) {
+	contract, err := erc20.NewErc20(token, d.client)
+	if err != nil {
+		return nil, fmt.Errorf("erc20 binding for %s: %w", token.Hex(), err)
+	}
+	return contract.BalanceOf(&bind.CallOpts{Context: ctx}, owner)
 }
 
 // ---------------------------------------------------------------------
@@ -231,6 +253,37 @@ func (w *workerChainStateReader) GetEntryPointNonce(ctx context.Context, walletA
 	v, ok := new(big.Int).SetString(resp.Nonce, 10)
 	if !ok {
 		return nil, fmt.Errorf("worker returned malformed nonce %q for %s on chain %d", resp.Nonce, walletAddr.Hex(), w.chainID)
+	}
+	return v, nil
+}
+
+func (w *workerChainStateReader) GetBalance(ctx context.Context, addr common.Address) (*big.Int, error) {
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	resp, err := w.client.GetBalance(ctx, &avsproto.WorkerGetBalanceReq{Address: addr.Hex()})
+	if err != nil {
+		return nil, fmt.Errorf("worker GetBalance (chain %d): %w", w.chainID, err)
+	}
+	v, ok := new(big.Int).SetString(resp.BalanceWei, 10)
+	if !ok {
+		return nil, fmt.Errorf("worker returned malformed balance %q for %s on chain %d", resp.BalanceWei, addr.Hex(), w.chainID)
+	}
+	return v, nil
+}
+
+func (w *workerChainStateReader) GetTokenBalance(ctx context.Context, token, owner common.Address) (*big.Int, error) {
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	resp, err := w.client.GetTokenBalance(ctx, &avsproto.WorkerGetTokenBalanceReq{
+		TokenAddress: token.Hex(),
+		OwnerAddress: owner.Hex(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("worker GetTokenBalance (chain %d): %w", w.chainID, err)
+	}
+	v, ok := new(big.Int).SetString(resp.Balance, 10)
+	if !ok {
+		return nil, fmt.Errorf("worker returned malformed token balance %q for token=%s owner=%s on chain %d", resp.Balance, token.Hex(), owner.Hex(), w.chainID)
 	}
 	return v, nil
 }

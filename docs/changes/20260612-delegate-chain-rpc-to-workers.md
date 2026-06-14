@@ -228,15 +228,55 @@ REST handlers migrated:
 - `handlers_wallets.go:GetWalletNonce` calls
   `chainReader.GetEntryPointNonce` instead of `aa.GetNonce(rpc, ...)`.
 
-### Phase 4 (open) — drop the per-chain `ethclient.Dial`
+### Phase 4a — route withdraw balance reads through workers (delivered)
 
-Step 7+8 of the Phase 3 plan were deferred: the gateway's
-`smartWalletRpcByChain` map is still used by `ExecuteWithdraw`
-(`aggregator/rpc_server.go:115`) for ERC-20 balance reads. Until
-withdraw is migrated through a worker RPC, the per-chain RPC URLs
-in `gateway-railway.yaml` (and the `<CHAIN>_RPC` env vars on the
-gateway service) have to stay. Migration sketch:
+The last live gateway direct-RPC path was `ExecuteWithdraw`'s preflight
+balance validation. The send path already routed through the worker
+(`sendUserOpViaWorker` → `ChainWorker.ExecuteUserOp`); only the balance
+reads stayed gateway-side.
 
-1. Add `GetTokenBalance(chainID, owner, token)` to `worker.proto`.
-2. Replace the balance call in `ExecuteWithdraw` with a worker RPC.
-3. Then strip the per-chain dial and the dead env vars.
+Shipped:
+
+- Extended `worker.proto` with `GetBalance` (native wei, wraps
+  `ethclient.BalanceAt`) and `GetTokenBalance` (ERC-20, wraps
+  `erc20.BalanceOf`); implemented both in `worker/server.go`.
+- Added matching `GetBalance` / `GetTokenBalance` methods to the
+  `ChainStateReader` interface and both implementations
+  (`directChainStateReader`, `workerChainStateReader`).
+- `ExecuteWithdraw` now resolves a per-chain `ChainStateReader`
+  (worker-routed in gateway mode) for both native and ERC-20 balance
+  reads, mirroring the REST fee/nonce handlers. It falls back to a
+  direct-RPC reader only when no worker-routed reader is registered
+  (single-chain mode / startup race).
+- Removed the dead gas-reimbursement branch: withdrawals always run with
+  `SkipReimbursement = true`, so the `BuildUserOpWithPaymaster` /
+  `EstimateGasReimbursementAmount` / `CalculateMaxWithdrawableAmount`
+  path was unreachable. Deleted the now-orphaned
+  `CalculateMaxWithdrawableAmount` helper.
+- Split `resolveSmartWalletForChain` into a dial-free
+  `resolveSmartWalletConfigForChain` (primary path) plus the original
+  (fallback only), so the gateway no longer dials chain RPC on the live
+  withdraw path.
+
+After this, no live gateway request path issues direct execution-chain
+RPC. The per-chain `ethclient.Dial` (`smartWalletRpcByChain` +
+`ChainEntry.GetRPC`) remains **only** as the worker-unreachable fallback.
+
+### Phase 4b (superseded) — strip the per-chain dial + env vars
+
+> **Correction.** This step was originally scoped as a config strip on the
+> assumption that `smartWalletRpcByChain` was the gateway's last per-chain
+> RPC consumer. That inventory was incomplete: the taskengine VM and
+> `GetWallet` derivation dial each chain's `eth_rpc_url` directly and
+> on-demand (CREATE2 derivation, contractRead `eth_call`, block context,
+> `FilterLogs`, simulation storage probes), separate from
+> `smartWalletRpcByChain`. Deleting the env vars now would break
+> `getWallet` + contractRead/Write/simulate in prod.
+>
+> The real remaining work — routing the full VM read/execute surface
+> through workers before any env-var strip — is inventoried and phased in
+> **`docs/changes/20260614-route-vm-execution-through-workers.md`**. The
+> env-var strip is the final phase there, not a standalone step.
+
+End state (unchanged goal): the gateway talks to exactly one chain (its
+AVS chain) and proxies all execution-chain work to workers.

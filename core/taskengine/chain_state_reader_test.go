@@ -38,6 +38,16 @@ type chainStateFakeClient struct {
 	getNonceReq  *avsproto.WorkerGetNonceByAddressReq
 	getNonceResp *avsproto.WorkerGetNonceResp
 	getNonceErr  error
+
+	// GetBalance
+	getBalanceReq  *avsproto.WorkerGetBalanceReq
+	getBalanceResp *avsproto.WorkerGetBalanceResp
+	getBalanceErr  error
+
+	// GetTokenBalance
+	getTokenBalanceReq  *avsproto.WorkerGetTokenBalanceReq
+	getTokenBalanceResp *avsproto.WorkerGetTokenBalanceResp
+	getTokenBalanceErr  error
 }
 
 func (f *chainStateFakeClient) WorkerHealthCheck(context.Context, *avsproto.WorkerHealthCheckReq, ...grpc.CallOption) (*avsproto.WorkerHealthCheckResp, error) {
@@ -70,6 +80,14 @@ func (f *chainStateFakeClient) GetCode(_ context.Context, req *avsproto.WorkerGe
 func (f *chainStateFakeClient) GetNonceByAddress(_ context.Context, req *avsproto.WorkerGetNonceByAddressReq, _ ...grpc.CallOption) (*avsproto.WorkerGetNonceResp, error) {
 	f.getNonceReq = req
 	return f.getNonceResp, f.getNonceErr
+}
+func (f *chainStateFakeClient) GetBalance(_ context.Context, req *avsproto.WorkerGetBalanceReq, _ ...grpc.CallOption) (*avsproto.WorkerGetBalanceResp, error) {
+	f.getBalanceReq = req
+	return f.getBalanceResp, f.getBalanceErr
+}
+func (f *chainStateFakeClient) GetTokenBalance(_ context.Context, req *avsproto.WorkerGetTokenBalanceReq, _ ...grpc.CallOption) (*avsproto.WorkerGetTokenBalanceResp, error) {
+	f.getTokenBalanceReq = req
+	return f.getTokenBalanceResp, f.getTokenBalanceErr
 }
 
 // TestWorkerChainStateReader_ChainID confirms the worker-routed reader
@@ -342,5 +360,74 @@ func TestChainStateReaderRegistry(t *testing.T) {
 	RegisterChainStateReader(2, nil)
 	if GetChainStateReaderForChain(2) != nil {
 		t.Fatalf("nil reader should be rejected")
+	}
+}
+
+// TestWorkerChainStateReader_GetBalance: the address is hex-encoded for the
+// worker; the wei balance round-trips through a base-10 string.
+func TestWorkerChainStateReader_GetBalance(t *testing.T) {
+	fake := &chainStateFakeClient{
+		getBalanceResp: &avsproto.WorkerGetBalanceResp{BalanceWei: "1000000000000000000"},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	addr := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	balance, err := r.GetBalance(context.Background(), addr)
+	if err != nil {
+		t.Fatalf("GetBalance: %v", err)
+	}
+	want, _ := new(big.Int).SetString("1000000000000000000", 10)
+	if balance.Cmp(want) != 0 {
+		t.Fatalf("balance: got %s want %s", balance, want)
+	}
+	if fake.getBalanceReq.Address != addr.Hex() {
+		t.Fatalf("address not propagated: got %q want %q", fake.getBalanceReq.Address, addr.Hex())
+	}
+}
+
+// TestWorkerChainStateReader_GetBalance_Malformed: a non-numeric balance
+// string is a worker contract violation; surface it rather than return 0.
+func TestWorkerChainStateReader_GetBalance_Malformed(t *testing.T) {
+	fake := &chainStateFakeClient{
+		getBalanceResp: &avsproto.WorkerGetBalanceResp{BalanceWei: "not-a-number"},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	if _, err := r.GetBalance(context.Background(), common.HexToAddress("0xab")); err == nil {
+		t.Fatalf("expected malformed-balance error")
+	}
+}
+
+// TestWorkerChainStateReader_GetTokenBalance: both token and owner addresses
+// are hex-encoded for the worker; the raw balance round-trips via base-10.
+func TestWorkerChainStateReader_GetTokenBalance(t *testing.T) {
+	fake := &chainStateFakeClient{
+		getTokenBalanceResp: &avsproto.WorkerGetTokenBalanceResp{Balance: "500000"},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	token := common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+	owner := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	balance, err := r.GetTokenBalance(context.Background(), token, owner)
+	if err != nil {
+		t.Fatalf("GetTokenBalance: %v", err)
+	}
+	if balance.Cmp(big.NewInt(500000)) != 0 {
+		t.Fatalf("token balance: got %s want 500000", balance)
+	}
+	if fake.getTokenBalanceReq.TokenAddress != token.Hex() {
+		t.Fatalf("token not propagated: got %q want %q", fake.getTokenBalanceReq.TokenAddress, token.Hex())
+	}
+	if fake.getTokenBalanceReq.OwnerAddress != owner.Hex() {
+		t.Fatalf("owner not propagated: got %q want %q", fake.getTokenBalanceReq.OwnerAddress, owner.Hex())
+	}
+}
+
+// TestWorkerChainStateReader_GetTokenBalance_Malformed: a non-numeric token
+// balance string is a worker contract violation; surface it.
+func TestWorkerChainStateReader_GetTokenBalance_Malformed(t *testing.T) {
+	fake := &chainStateFakeClient{
+		getTokenBalanceResp: &avsproto.WorkerGetTokenBalanceResp{Balance: "garbage"},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	if _, err := r.GetTokenBalance(context.Background(), common.HexToAddress("0xaa"), common.HexToAddress("0xbb")); err == nil {
+		t.Fatalf("expected malformed-token-balance error")
 	}
 }

@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -290,5 +292,43 @@ func (s *Server) GetCode(ctx context.Context, req *avsproto.WorkerGetCodeReq) (*
 	}
 	return &avsproto.WorkerGetCodeResp{
 		Code: code,
+	}, nil
+}
+
+// GetBalance wraps ethclient.BalanceAt(addr, latest). Used by the gateway's
+// withdraw preflight to validate / size native-coin withdrawals.
+func (s *Server) GetBalance(ctx context.Context, req *avsproto.WorkerGetBalanceReq) (*avsproto.WorkerGetBalanceResp, error) {
+	if !common.IsHexAddress(req.Address) {
+		return nil, fmt.Errorf("invalid address %q", req.Address)
+	}
+	balance, err := s.worker.rpcClient.BalanceAt(ctx, common.HexToAddress(req.Address), nil)
+	if err != nil {
+		return nil, fmt.Errorf("BalanceAt for %s: %w", req.Address, err)
+	}
+	return &avsproto.WorkerGetBalanceResp{
+		BalanceWei: balance.String(),
+	}, nil
+}
+
+// GetTokenBalance reads an ERC-20 balance via erc20.BalanceOf. Used by the
+// gateway's withdraw preflight to validate / size ERC-20 withdrawals. The
+// returned balance is raw token units (no decimals applied).
+func (s *Server) GetTokenBalance(ctx context.Context, req *avsproto.WorkerGetTokenBalanceReq) (*avsproto.WorkerGetTokenBalanceResp, error) {
+	if !common.IsHexAddress(req.TokenAddress) {
+		return nil, fmt.Errorf("invalid token address %q", req.TokenAddress)
+	}
+	if !common.IsHexAddress(req.OwnerAddress) {
+		return nil, fmt.Errorf("invalid owner address %q", req.OwnerAddress)
+	}
+	token, err := erc20.NewErc20(common.HexToAddress(req.TokenAddress), s.worker.rpcClient)
+	if err != nil {
+		return nil, fmt.Errorf("erc20 binding for %s: %w", req.TokenAddress, err)
+	}
+	balance, err := token.BalanceOf(&bind.CallOpts{Context: ctx}, common.HexToAddress(req.OwnerAddress))
+	if err != nil {
+		return nil, fmt.Errorf("BalanceOf token=%s owner=%s: %w", req.TokenAddress, req.OwnerAddress, err)
+	}
+	return &avsproto.WorkerGetTokenBalanceResp{
+		Balance: balance.String(),
 	}, nil
 }

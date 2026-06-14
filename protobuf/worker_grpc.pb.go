@@ -28,6 +28,8 @@ const (
 	ChainWorker_SuggestGasPrice_FullMethodName       = "/aggregator.ChainWorker/SuggestGasPrice"
 	ChainWorker_EstimateGas_FullMethodName           = "/aggregator.ChainWorker/EstimateGas"
 	ChainWorker_GetCode_FullMethodName               = "/aggregator.ChainWorker/GetCode"
+	ChainWorker_GetBalance_FullMethodName            = "/aggregator.ChainWorker/GetBalance"
+	ChainWorker_GetTokenBalance_FullMethodName       = "/aggregator.ChainWorker/GetTokenBalance"
 )
 
 // ChainWorkerClient is the client API for ChainWorker service.
@@ -66,6 +68,14 @@ type ChainWorkerClient interface {
 	// Used by the fee estimator to detect whether the runner contract is
 	// deployed before issuing UserOps against it.
 	GetCode(ctx context.Context, in *WorkerGetCodeReq, opts ...grpc.CallOption) (*WorkerGetCodeResp, error)
+	// Read the native-coin balance (wei) at an address. Wraps
+	// ethclient.BalanceAt(latest). Used by the gateway's withdraw preflight
+	// to validate / size native-token withdrawals.
+	GetBalance(ctx context.Context, in *WorkerGetBalanceReq, opts ...grpc.CallOption) (*WorkerGetBalanceResp, error)
+	// Read an ERC-20 token balance for an owner. Wraps erc20.BalanceOf.
+	// Used by the gateway's withdraw preflight to validate / size ERC-20
+	// withdrawals.
+	GetTokenBalance(ctx context.Context, in *WorkerGetTokenBalanceReq, opts ...grpc.CallOption) (*WorkerGetTokenBalanceResp, error)
 }
 
 type chainWorkerClient struct {
@@ -166,6 +176,26 @@ func (c *chainWorkerClient) GetCode(ctx context.Context, in *WorkerGetCodeReq, o
 	return out, nil
 }
 
+func (c *chainWorkerClient) GetBalance(ctx context.Context, in *WorkerGetBalanceReq, opts ...grpc.CallOption) (*WorkerGetBalanceResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerGetBalanceResp)
+	err := c.cc.Invoke(ctx, ChainWorker_GetBalance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chainWorkerClient) GetTokenBalance(ctx context.Context, in *WorkerGetTokenBalanceReq, opts ...grpc.CallOption) (*WorkerGetTokenBalanceResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerGetTokenBalanceResp)
+	err := c.cc.Invoke(ctx, ChainWorker_GetTokenBalance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ChainWorkerServer is the server API for ChainWorker service.
 // All implementations must embed UnimplementedChainWorkerServer
 // for forward compatibility.
@@ -202,6 +232,14 @@ type ChainWorkerServer interface {
 	// Used by the fee estimator to detect whether the runner contract is
 	// deployed before issuing UserOps against it.
 	GetCode(context.Context, *WorkerGetCodeReq) (*WorkerGetCodeResp, error)
+	// Read the native-coin balance (wei) at an address. Wraps
+	// ethclient.BalanceAt(latest). Used by the gateway's withdraw preflight
+	// to validate / size native-token withdrawals.
+	GetBalance(context.Context, *WorkerGetBalanceReq) (*WorkerGetBalanceResp, error)
+	// Read an ERC-20 token balance for an owner. Wraps erc20.BalanceOf.
+	// Used by the gateway's withdraw preflight to validate / size ERC-20
+	// withdrawals.
+	GetTokenBalance(context.Context, *WorkerGetTokenBalanceReq) (*WorkerGetTokenBalanceResp, error)
 	mustEmbedUnimplementedChainWorkerServer()
 }
 
@@ -238,6 +276,12 @@ func (UnimplementedChainWorkerServer) EstimateGas(context.Context, *WorkerEstima
 }
 func (UnimplementedChainWorkerServer) GetCode(context.Context, *WorkerGetCodeReq) (*WorkerGetCodeResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetCode not implemented")
+}
+func (UnimplementedChainWorkerServer) GetBalance(context.Context, *WorkerGetBalanceReq) (*WorkerGetBalanceResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBalance not implemented")
+}
+func (UnimplementedChainWorkerServer) GetTokenBalance(context.Context, *WorkerGetTokenBalanceReq) (*WorkerGetTokenBalanceResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTokenBalance not implemented")
 }
 func (UnimplementedChainWorkerServer) mustEmbedUnimplementedChainWorkerServer() {}
 func (UnimplementedChainWorkerServer) testEmbeddedByValue()                     {}
@@ -422,6 +466,42 @@ func _ChainWorker_GetCode_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChainWorker_GetBalance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerGetBalanceReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).GetBalance(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_GetBalance_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).GetBalance(ctx, req.(*WorkerGetBalanceReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChainWorker_GetTokenBalance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerGetTokenBalanceReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).GetTokenBalance(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_GetTokenBalance_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).GetTokenBalance(ctx, req.(*WorkerGetTokenBalanceReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ChainWorker_ServiceDesc is the grpc.ServiceDesc for ChainWorker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -464,6 +544,14 @@ var ChainWorker_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetCode",
 			Handler:    _ChainWorker_GetCode_Handler,
+		},
+		{
+			MethodName: "GetBalance",
+			Handler:    _ChainWorker_GetBalance_Handler,
+		},
+		{
+			MethodName: "GetTokenBalance",
+			Handler:    _ChainWorker_GetTokenBalance_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
