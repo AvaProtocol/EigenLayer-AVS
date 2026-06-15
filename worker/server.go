@@ -433,6 +433,58 @@ func (s *Server) GetBlockNumber(ctx context.Context, req *avsproto.WorkerGetBloc
 	return &avsproto.WorkerGetBlockNumberResp{Number: number}, nil
 }
 
+// maxWalletSaltScan caps the salt range FindMatchingWalletSalt will scan, so a
+// caller can't make the worker issue an unbounded number of factory calls.
+const maxWalletSaltScan = 2000
+
+// FindMatchingWalletSalt scans salts [0, max_salts) for the one whose CREATE2
+// smart-wallet address (under factory_address, or the worker's configured
+// factory) matches target_address. The loop + comparison run worker-side so a
+// wide range is a single round-trip. Returns found=false when no salt matches.
+func (s *Server) FindMatchingWalletSalt(ctx context.Context, req *avsproto.WorkerFindMatchingWalletSaltReq) (*avsproto.WorkerFindMatchingWalletSaltResp, error) {
+	if s.worker.smartWalletCfg == nil {
+		return nil, fmt.Errorf("smart wallet config not initialized")
+	}
+	if !common.IsHexAddress(req.Owner) {
+		return nil, fmt.Errorf("invalid owner address %q", req.Owner)
+	}
+	if !common.IsHexAddress(req.TargetAddress) {
+		return nil, fmt.Errorf("invalid target address %q", req.TargetAddress)
+	}
+	if req.MaxSalts <= 0 {
+		return nil, fmt.Errorf("max_salts must be positive, got %d", req.MaxSalts)
+	}
+	if req.MaxSalts > maxWalletSaltScan {
+		return nil, fmt.Errorf("max_salts %d exceeds cap %d", req.MaxSalts, maxWalletSaltScan)
+	}
+
+	factory := s.worker.smartWalletCfg.FactoryAddress
+	if req.FactoryAddress != "" {
+		if !common.IsHexAddress(req.FactoryAddress) {
+			return nil, fmt.Errorf("invalid factory address %q", req.FactoryAddress)
+		}
+		factory = common.HexToAddress(req.FactoryAddress)
+	}
+
+	owner := common.HexToAddress(req.Owner)
+	target := common.HexToAddress(req.TargetAddress)
+
+	for salt := int64(0); salt < req.MaxSalts; salt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		addr, err := aa.GetSenderAddressForFactory(s.worker.rpcClient, owner, factory, big.NewInt(salt))
+		if err != nil {
+			// A single failed derivation shouldn't abort the whole scan.
+			continue
+		}
+		if addr != nil && *addr == target {
+			return &avsproto.WorkerFindMatchingWalletSaltResp{Found: true, Salt: salt}, nil
+		}
+	}
+	return &avsproto.WorkerFindMatchingWalletSaltResp{Found: false}, nil
+}
+
 // GetBalance wraps ethclient.BalanceAt(addr, latest). Used by the gateway's
 // withdraw preflight to validate / size native-coin withdrawals.
 func (s *Server) GetBalance(ctx context.Context, req *avsproto.WorkerGetBalanceReq) (*avsproto.WorkerGetBalanceResp, error) {

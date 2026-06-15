@@ -67,6 +67,12 @@ service ChainWorker {
   // Read the latest block number. Wraps ethclient.BlockNumber. Used by the
   // immediate-trigger path to stamp the current block for the operator.
   rpc GetBlockNumber(WorkerGetBlockNumberReq) returns (WorkerGetBlockNumberResp);
+
+  // Find the salt in [0, max_salts) whose CREATE2 smart-wallet address
+  // (under the given factory) matches target. The worker runs the scan +
+  // comparison locally so a wide range is a single round-trip. Used by the
+  // gateway's wallet-ownership validation (factory-upgrade fallback).
+  rpc FindMatchingWalletSalt(WorkerFindMatchingWalletSaltReq) returns (WorkerFindMatchingWalletSaltResp);
 }
 
 // Health check
@@ -223,4 +229,17 @@ message WorkerGetBlockNumberReq {}
 
 message WorkerGetBlockNumberResp {
   uint64 number = 1;        // Latest block number.
+}
+
+// Salt-scan wallet match
+message WorkerFindMatchingWalletSaltReq {
+  string owner = 1;            // Owner EOA address (hex).
+  string factory_address = 2;  // Factory override (hex). Empty = worker's configured factory.
+  string target_address = 3;   // Smart-wallet address to match (hex).
+  int64 max_salts = 4;         // Scan salts in [0, max_salts).
+}
+
+message WorkerFindMatchingWalletSaltResp {
+  bool found = 1;
+  int64 salt = 2;              // The matching salt; valid only when found.
 }
