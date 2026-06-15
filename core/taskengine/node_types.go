@@ -230,8 +230,10 @@ func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
 	case *avsproto.TaskTrigger_Block:
 		blockTrigger := trigger.GetBlock()
 		if blockTrigger != nil && blockTrigger.Config != nil {
-			// Direct field access - BlockTrigger.Config only has interval field
 			triggerConfig["interval"] = blockTrigger.Config.Interval
+			// Surface the trigger's chain so the immediate block read
+			// resolves the right per-chain worker.
+			triggerConfig["chain_id"] = blockTrigger.Config.GetChainId()
 		}
 	case *avsproto.TaskTrigger_Cron:
 		cronTrigger := trigger.GetCron()

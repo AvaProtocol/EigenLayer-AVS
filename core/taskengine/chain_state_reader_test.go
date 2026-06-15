@@ -589,11 +589,16 @@ func TestWorkerChainStateReader_CallContract_NilToRejected(t *testing.T) {
 // serializes as base-10; the worker's number/hash/time map into BlockHeader.
 func TestWorkerChainStateReader_HeaderByNumber(t *testing.T) {
 	hash := common.HexToHash("0xabc123")
+	parent := common.HexToHash("0xdef456")
 	fake := &chainStateFakeClient{
 		getBlockHeaderResp: &avsproto.WorkerGetBlockHeaderResp{
-			Number: 19000000,
-			Hash:   hash.Hex(),
-			Time:   1700000000,
+			Number:     19000000,
+			Hash:       hash.Hex(),
+			Time:       1700000000,
+			ParentHash: parent.Hex(),
+			Difficulty: "12345",
+			GasLimit:   30000000,
+			GasUsed:    15000000,
 		},
 	}
 	r := NewWorkerChainStateReader(fake, 1, time.Second)
@@ -604,8 +609,34 @@ func TestWorkerChainStateReader_HeaderByNumber(t *testing.T) {
 	if h.Number != 19000000 || h.Hash != hash || h.Time != 1700000000 {
 		t.Fatalf("unexpected header %+v", h)
 	}
+	if h.ParentHash != parent || h.Difficulty.Cmp(big.NewInt(12345)) != 0 || h.GasLimit != 30000000 || h.GasUsed != 15000000 {
+		t.Fatalf("extended header fields not mapped: %+v", h)
+	}
 	if fake.getBlockHeaderReq.BlockNumber != "19000000" {
 		t.Fatalf("block number not propagated: %q", fake.getBlockHeaderReq.BlockNumber)
+	}
+}
+
+// TestRequireChainIDFromConfig: chain_id is mandatory with no engine-default
+// fallback — absent, zero, or wrong-typed values are hard errors; valid
+// numeric types (int64 / float64 from a structpb round-trip) parse.
+func TestRequireChainIDFromConfig(t *testing.T) {
+	if _, err := requireChainIDFromConfig(map[string]interface{}{}); err == nil {
+		t.Fatalf("absent chain_id should error")
+	}
+	if _, err := requireChainIDFromConfig(map[string]interface{}{"chain_id": int64(0)}); err == nil {
+		t.Fatalf("zero chain_id should error")
+	}
+	if _, err := requireChainIDFromConfig(map[string]interface{}{"chain_id": "11155111"}); err == nil {
+		t.Fatalf("string chain_id should error (unexpected type)")
+	}
+	got, err := requireChainIDFromConfig(map[string]interface{}{"chain_id": int64(11155111)})
+	if err != nil || got != 11155111 {
+		t.Fatalf("int64 chain_id: got %d err %v", got, err)
+	}
+	got, err = requireChainIDFromConfig(map[string]interface{}{"chain_id": float64(8453)})
+	if err != nil || got != 8453 {
+		t.Fatalf("float64 chain_id: got %d err %v", got, err)
 	}
 }
 
@@ -613,7 +644,9 @@ func TestWorkerChainStateReader_HeaderByNumber(t *testing.T) {
 // empty block_number string (worker treats empty as "latest").
 func TestWorkerChainStateReader_HeaderByNumber_Latest(t *testing.T) {
 	fake := &chainStateFakeClient{
-		getBlockHeaderResp: &avsproto.WorkerGetBlockHeaderResp{Number: 1, Hash: "0x00", Time: 1},
+		getBlockHeaderResp: &avsproto.WorkerGetBlockHeaderResp{
+			Number: 1, Hash: "0x01", Time: 1, ParentHash: "0x00", Difficulty: "0",
+		},
 	}
 	r := NewWorkerChainStateReader(fake, 1, time.Second)
 	if _, err := r.HeaderByNumber(context.Background(), nil); err != nil {
@@ -621,6 +654,19 @@ func TestWorkerChainStateReader_HeaderByNumber_Latest(t *testing.T) {
 	}
 	if fake.getBlockHeaderReq.BlockNumber != "" {
 		t.Fatalf("nil number should send empty block_number: got %q", fake.getBlockHeaderReq.BlockNumber)
+	}
+}
+
+// TestWorkerChainStateReader_HeaderByNumber_IncompleteRejected: an empty
+// hash (worker/gateway version skew) must hard-fail, not coerce to the
+// zero hash and propagate an incorrect block-trigger output.
+func TestWorkerChainStateReader_HeaderByNumber_IncompleteRejected(t *testing.T) {
+	fake := &chainStateFakeClient{
+		getBlockHeaderResp: &avsproto.WorkerGetBlockHeaderResp{Number: 1, Hash: "", ParentHash: "0x00"},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	if _, err := r.HeaderByNumber(context.Background(), nil); err == nil {
+		t.Fatalf("expected error for empty hash")
 	}
 }
 

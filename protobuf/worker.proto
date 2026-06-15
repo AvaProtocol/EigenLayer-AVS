@@ -212,6 +212,10 @@ message WorkerGetBlockHeaderResp {
   uint64 number = 1;        // Block number.
   string hash = 2;          // 0x-prefixed block hash.
   uint64 time = 3;          // Unix timestamp (seconds).
+  string parent_hash = 4;   // 0x-prefixed parent block hash.
+  string difficulty = 5;    // big.Int as base-10 string.
+  uint64 gas_limit = 6;     // Block gas limit.
+  uint64 gas_used = 7;      // Block gas used.
 }
 
 // Latest block number

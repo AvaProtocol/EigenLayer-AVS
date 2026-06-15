@@ -409,10 +409,18 @@ func (s *Server) GetBlockHeader(ctx context.Context, req *avsproto.WorkerGetBloc
 	if header == nil {
 		return nil, fmt.Errorf("HeaderByNumber returned nil header")
 	}
+	difficulty := "0"
+	if header.Difficulty != nil {
+		difficulty = header.Difficulty.String()
+	}
 	return &avsproto.WorkerGetBlockHeaderResp{
-		Number: header.Number.Uint64(),
-		Hash:   header.Hash().Hex(),
-		Time:   header.Time,
+		Number:     header.Number.Uint64(),
+		Hash:       header.Hash().Hex(),
+		Time:       header.Time,
+		ParentHash: header.ParentHash.Hex(),
+		Difficulty: difficulty,
+		GasLimit:   header.GasLimit,
+		GasUsed:    header.GasUsed,
 	}, nil
 }
 
