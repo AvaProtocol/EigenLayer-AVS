@@ -2,7 +2,6 @@ package taskengine
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -78,31 +77,6 @@ func GetMetadataForTransfer(log *types.Log) (*Metadata, error) {
 	}
 
 	return &m, nil
-}
-
-func GetBlock(blockNumber uint64) (*types.Header, error) {
-	cacheKey := fmt.Sprintf("blkt:%d", blockNumber)
-
-	var blockHeader *types.Header
-	// Check if metadata is cached
-	if data, err := cache.Get(cacheKey); err == nil {
-		if err = json.Unmarshal(data, blockHeader); err == nil {
-			return blockHeader, nil
-		}
-	}
-
-	blockHeader, err := rpcConn.HeaderByNumber(context.Background(), big.NewInt(int64(blockNumber)))
-	if err != nil {
-		return nil, fmt.Errorf("error fetching block header: %w", err)
-	}
-
-	data, err := json.Marshal(blockHeader)
-	if err == nil {
-		// Ignore cache errors - caching is not critical
-		cache.Set(cacheKey, data)
-	}
-
-	return blockHeader, nil
 }
 
 // ToDecimal converts a big.Int value to a human-readable format
