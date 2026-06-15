@@ -88,11 +88,19 @@ small, independently-shippable slices, each verified before the next.
    `GetBlockNumber` worker RPC + reader method. Thread chainID through
    `instructOperatorImmediateTrigger`, `runBlockTriggerImmediately`,
    `GetBlock` (+ its callers). Lowest-risk, no payload concerns.
-2. **PR B — event-enrichment reads.** Thread chainID through
-   `parseEventWithParsedABI` + `callContractMethod`; route the
-   `HeaderByNumber` (event block timestamp) and `CallContract` (decimals)
-   through the per-chain reader. Subsumes the `callContractMethod`
-   deferral noted in parent PR 2.
+2. **PR B — event-enrichment reads (delivered).** Threaded chainID through
+   `callContractMethod`, `parseEventWithParsedABI`, `parseEventWithABI`,
+   `runEventTriggerWithHistoricalSearch` (enrichment only), the
+   `OutputHandler.ConvertToProtobuf` interface (+ all impls), and
+   `RunNodeImmediatelyRPC`; emitted `chain_id` into the event trigger
+   config. The `HeaderByNumber` (event block timestamp) and `CallContract`
+   (decimals) reads now route through the per-chain worker. These are
+   **best-effort, non-fatal** enrichment: an unspecified chain *skips*
+   enrichment (`chainReaderForEnrichment` → nil) rather than reading a
+   default chain — never hard-fails the event decode. Subsumes the
+   `callContractMethod` deferral from parent PR 2. The
+   `runEventTriggerWithHistoricalSearch` `BlockNumber`/`FilterLogs` reads
+   stay on `rpcConn` for PR C.
 3. **PR C — simulate historical search.** *Tenderly-first (see "Simulate
    fidelity" below).* First, prefer the existing Tenderly / direct-call
    simulate strategies and shrink the historical-`FilterLogs` path to the

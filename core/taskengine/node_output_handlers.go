@@ -24,7 +24,7 @@ type NodeOutputHandler interface {
 	// ConvertToProtobuf converts the extracted result map to the appropriate protobuf output type
 	// Returns the protobuf OutputData variant (which must implement isRunNodeWithInputsResp_OutputData),
 	// optional metadata, and any error encountered
-	ConvertToProtobuf(result map[string]interface{}) (interface{}, *structpb.Value, error)
+	ConvertToProtobuf(chainID int64, result map[string]interface{}) (interface{}, *structpb.Value, error)
 
 	// CreateEmptyOutput creates an empty output structure for error cases
 	// This ensures we never return OUTPUT_DATA_NOT_SET
@@ -48,7 +48,7 @@ func (h *RestAPIOutputHandler) ExtractFromExecutionStep(step *avsproto.Execution
 	return result, nil
 }
 
-func (h *RestAPIOutputHandler) ConvertToProtobuf(result map[string]interface{}) (interface{}, *structpb.Value, error) {
+func (h *RestAPIOutputHandler) ConvertToProtobuf(chainID int64, result map[string]interface{}) (interface{}, *structpb.Value, error) {
 	var cleanData interface{}
 
 	if result != nil {
@@ -135,7 +135,7 @@ func (h *CustomCodeOutputHandler) ExtractFromExecutionStep(step *avsproto.Execut
 	return result, nil
 }
 
-func (h *CustomCodeOutputHandler) ConvertToProtobuf(result map[string]interface{}) (interface{}, *structpb.Value, error) {
+func (h *CustomCodeOutputHandler) ConvertToProtobuf(chainID int64, result map[string]interface{}) (interface{}, *structpb.Value, error) {
 	var rawData interface{}
 
 	if result != nil {
@@ -188,7 +188,7 @@ func (h *BalanceOutputHandler) ExtractFromExecutionStep(step *avsproto.Execution
 	return result, nil
 }
 
-func (h *BalanceOutputHandler) ConvertToProtobuf(result map[string]interface{}) (interface{}, *structpb.Value, error) {
+func (h *BalanceOutputHandler) ConvertToProtobuf(chainID int64, result map[string]interface{}) (interface{}, *structpb.Value, error) {
 	var dataValue *structpb.Value
 	var err error
 
@@ -244,7 +244,7 @@ func (h *ContractReadOutputHandler) ExtractFromExecutionStep(step *avsproto.Exec
 	return result, nil
 }
 
-func (h *ContractReadOutputHandler) ConvertToProtobuf(result map[string]interface{}) (interface{}, *structpb.Value, error) {
+func (h *ContractReadOutputHandler) ConvertToProtobuf(chainID int64, result map[string]interface{}) (interface{}, *structpb.Value, error) {
 	contractReadOutput := &avsproto.ContractReadNode_Output{}
 	var metadata *structpb.Value
 
@@ -334,7 +334,7 @@ func (h *ContractWriteOutputHandler) ExtractFromExecutionStep(step *avsproto.Exe
 	return result, nil
 }
 
-func (h *ContractWriteOutputHandler) ConvertToProtobuf(result map[string]interface{}) (interface{}, *structpb.Value, error) {
+func (h *ContractWriteOutputHandler) ConvertToProtobuf(chainID int64, result map[string]interface{}) (interface{}, *structpb.Value, error) {
 	contractWriteOutput := &avsproto.ContractWriteNode_Output{}
 	var resultsArray []interface{}
 	var decodedEventsData = make(map[string]interface{})
@@ -424,7 +424,7 @@ func (h *ContractWriteOutputHandler) ConvertToProtobuf(result map[string]interfa
 													}
 												}
 
-												if decodedEvent, err := h.engine.parseEventWithParsedABI(eventLog, contractABI, nil); err == nil {
+												if decodedEvent, err := h.engine.parseEventWithParsedABI(chainID, eventLog, contractABI, nil); err == nil {
 													// Flatten event data: if decoded map contains the concrete event name as a key,
 													// unwrap it so methodName maps directly to event fields
 													if nameVal, hasName := decodedEvent["eventName"]; hasName {
@@ -551,7 +551,7 @@ func (h *ETHTransferOutputHandler) ExtractFromExecutionStep(step *avsproto.Execu
 	return result, nil
 }
 
-func (h *ETHTransferOutputHandler) ConvertToProtobuf(result map[string]interface{}) (interface{}, *structpb.Value, error) {
+func (h *ETHTransferOutputHandler) ConvertToProtobuf(chainID int64, result map[string]interface{}) (interface{}, *structpb.Value, error) {
 	// Only include transfer object in data to match ERC20 transfer format
 	ethData := map[string]interface{}{}
 	if result != nil {
@@ -600,7 +600,7 @@ func (h *GraphQLOutputHandler) ExtractFromExecutionStep(step *avsproto.Execution
 	return result, nil
 }
 
-func (h *GraphQLOutputHandler) ConvertToProtobuf(result map[string]interface{}) (interface{}, *structpb.Value, error) {
+func (h *GraphQLOutputHandler) ConvertToProtobuf(chainID int64, result map[string]interface{}) (interface{}, *structpb.Value, error) {
 	var dataValue *structpb.Value
 	var err error
 
@@ -659,7 +659,7 @@ func (h *BranchOutputHandler) ExtractFromExecutionStep(step *avsproto.Execution_
 	return result, nil
 }
 
-func (h *BranchOutputHandler) ConvertToProtobuf(result map[string]interface{}) (interface{}, *structpb.Value, error) {
+func (h *BranchOutputHandler) ConvertToProtobuf(chainID int64, result map[string]interface{}) (interface{}, *structpb.Value, error) {
 	branchData := map[string]interface{}{}
 	if result != nil && len(result) > 0 {
 		if conditionId, ok := result["conditionId"].(string); ok {
@@ -699,7 +699,7 @@ func (h *FilterOutputHandler) ExtractFromExecutionStep(step *avsproto.Execution_
 	return result, nil
 }
 
-func (h *FilterOutputHandler) ConvertToProtobuf(result map[string]interface{}) (interface{}, *structpb.Value, error) {
+func (h *FilterOutputHandler) ConvertToProtobuf(chainID int64, result map[string]interface{}) (interface{}, *structpb.Value, error) {
 	var dataValue *structpb.Value
 	var err error
 
@@ -743,7 +743,7 @@ func (h *LoopOutputHandler) ExtractFromExecutionStep(step *avsproto.Execution_St
 	return result, nil
 }
 
-func (h *LoopOutputHandler) ConvertToProtobuf(result map[string]interface{}) (interface{}, *structpb.Value, error) {
+func (h *LoopOutputHandler) ConvertToProtobuf(chainID int64, result map[string]interface{}) (interface{}, *structpb.Value, error) {
 	if result != nil {
 		var loopData interface{}
 		if loopResult, exists := result["loopResult"]; exists {

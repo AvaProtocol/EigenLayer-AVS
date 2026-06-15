@@ -695,3 +695,25 @@ func TestWorkerChainStateReader_GetBlockNumber_Err(t *testing.T) {
 		t.Fatalf("expected chain-id-wrapped error, got %v", err)
 	}
 }
+
+// TestChainReaderForEnrichment: best-effort enrichment resolves a reader
+// only for a registered, positive chain ID; an unspecified (<=0) or
+// unregistered chain returns nil ("skip enrichment", never a default).
+func TestChainReaderForEnrichment(t *testing.T) {
+	ClearChainStateReaderRegistry()
+	defer ClearChainStateReaderRegistry()
+
+	if chainReaderForEnrichment(0) != nil {
+		t.Fatalf("chainID 0 should skip (nil reader)")
+	}
+	if chainReaderForEnrichment(-1) != nil {
+		t.Fatalf("negative chainID should skip (nil reader)")
+	}
+	if chainReaderForEnrichment(8453) != nil {
+		t.Fatalf("unregistered chain should be nil")
+	}
+	RegisterChainStateReader(8453, NewWorkerChainStateReader(&chainStateFakeClient{}, 8453, 0))
+	if chainReaderForEnrichment(8453) == nil {
+		t.Fatalf("registered chain should resolve a reader")
+	}
+}
