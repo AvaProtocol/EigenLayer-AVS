@@ -101,14 +101,32 @@ small, independently-shippable slices, each verified before the next.
    `callContractMethod` deferral from parent PR 2. The
    `runEventTriggerWithHistoricalSearch` `BlockNumber`/`FilterLogs` reads
    stay on `rpcConn` for PR C.
-3. **PR C — simulate historical search.** *Tenderly-first (see "Simulate
-   fidelity" below).* First, prefer the existing Tenderly / direct-call
-   simulate strategies and shrink the historical-`FilterLogs` path to the
-   residue Tenderly genuinely can't reproduce. Thread chainID through
-   `runEventTriggerWithHistoricalSearch` + `searchEventsForQuery`. Add the
-   `FilterLogs` worker RPC (with the chunking decision settled) **only** for
-   that residue — if Tenderly covers it all, this collapses into "delete
-   the historical-search path" with no new worker RPC.
+3. **PR C — simulate historical search → deleted (delivered).** The
+   Tenderly-first inventory resolved to "delete", not "migrate":
+   - Event-trigger simulate already prefers synthetic generation
+     (`simulationMode: true`, the default). That path is **100% local
+     synthetic** (`createMockTransferLog` / `createMockAnswerUpdatedLog` /
+     ABI-encoded generic) and covers all event types — it doesn't even
+     call Tenderly's API (only `SimulateContractWrite` does).
+   - `FilterLogs` was reached **only** via `simulationMode: false`
+     (historical real-event lookup). The Tenderly→historical fallback was
+     already dead (its `"simulation not yet supported"` trigger string is
+     never generated).
+   - Studio's entire git history never set `simulationMode: false` (only
+     `true`, since removed), and the ava-sdk-js `RunTriggerRequest` doesn't
+     expose the field. So no shipped client can reach the historical path.
+   - A live Tenderly simulate of an ERC-20 transfer confirmed Tenderly
+     returns a fully-decoded `Transfer` event in one call — a real-EVM
+     alternative far lighter than a 3–6 month log scan, if higher fidelity
+     than the synthetic mock is ever wanted.
+
+   So `runEventTriggerWithHistoricalSearch` + `searchEventsForQuery` (and
+   the dead block-search-range helpers) were **deleted**. Event triggers
+   now run simulation-only; an explicit `simulationMode: false` is rejected
+   with a clear error rather than silently returning synthetic data. No
+   `FilterLogs` worker RPC was needed. This removes the last gateway
+   `FilterLogs`/`BlockNumber` reads (only the dead `utils.GetBlock`
+   remains, cleaned up in PR D).
 4. **PR D — retire `rpcConn` + the env-var strip.** Once no chain read
    uses `rpcConn`, replace the `rpcConn == nil` test signal with an
    explicit test flag, drop the per-chain dial fallbacks, strip the
