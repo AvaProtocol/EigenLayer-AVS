@@ -888,9 +888,9 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 
 				backoff := time.Second
 				for {
-					if err := t.retryConnectToRpc(); err != nil {
-						t.logger.Error("❌ Failed to reconnect to RPC", "error", err)
-						break
+					t.retryConnectToRpc()
+					if t.shutdown {
+						return
 					}
 					t.logger.Info("🔌 Reconnected, rebuilding subscriptions")
 					if err := t.rebuildSubscriptions(ctx, newQueries, logs, errorCh); err == nil {
