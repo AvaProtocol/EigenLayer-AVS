@@ -416,6 +416,15 @@ func (s *Server) GetBlockHeader(ctx context.Context, req *avsproto.WorkerGetBloc
 	}, nil
 }
 
+// GetBlockNumber wraps ethclient.BlockNumber (latest block).
+func (s *Server) GetBlockNumber(ctx context.Context, req *avsproto.WorkerGetBlockNumberReq) (*avsproto.WorkerGetBlockNumberResp, error) {
+	number, err := s.worker.rpcClient.BlockNumber(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("BlockNumber: %w", err)
+	}
+	return &avsproto.WorkerGetBlockNumberResp{Number: number}, nil
+}
+
 // GetBalance wraps ethclient.BalanceAt(addr, latest). Used by the gateway's
 // withdraw preflight to validate / size native-coin withdrawals.
 func (s *Server) GetBalance(ctx context.Context, req *avsproto.WorkerGetBalanceReq) (*avsproto.WorkerGetBalanceResp, error) {

@@ -63,6 +63,10 @@ type chainStateFakeClient struct {
 	getBlockHeaderReq  *avsproto.WorkerGetBlockHeaderReq
 	getBlockHeaderResp *avsproto.WorkerGetBlockHeaderResp
 	getBlockHeaderErr  error
+
+	// GetBlockNumber
+	getBlockNumberResp *avsproto.WorkerGetBlockNumberResp
+	getBlockNumberErr  error
 }
 
 func (f *chainStateFakeClient) WorkerHealthCheck(context.Context, *avsproto.WorkerHealthCheckReq, ...grpc.CallOption) (*avsproto.WorkerHealthCheckResp, error) {
@@ -85,6 +89,9 @@ func (f *chainStateFakeClient) CallContract(_ context.Context, req *avsproto.Wor
 func (f *chainStateFakeClient) GetBlockHeader(_ context.Context, req *avsproto.WorkerGetBlockHeaderReq, _ ...grpc.CallOption) (*avsproto.WorkerGetBlockHeaderResp, error) {
 	f.getBlockHeaderReq = req
 	return f.getBlockHeaderResp, f.getBlockHeaderErr
+}
+func (f *chainStateFakeClient) GetBlockNumber(_ context.Context, _ *avsproto.WorkerGetBlockNumberReq, _ ...grpc.CallOption) (*avsproto.WorkerGetBlockNumberResp, error) {
+	return f.getBlockNumberResp, f.getBlockNumberErr
 }
 func (f *chainStateFakeClient) GetTokenMetadata(context.Context, *avsproto.WorkerGetTokenMetadataReq, ...grpc.CallOption) (*avsproto.WorkerGetTokenMetadataResp, error) {
 	panic("unused")
@@ -614,5 +621,31 @@ func TestWorkerChainStateReader_HeaderByNumber_Latest(t *testing.T) {
 	}
 	if fake.getBlockHeaderReq.BlockNumber != "" {
 		t.Fatalf("nil number should send empty block_number: got %q", fake.getBlockHeaderReq.BlockNumber)
+	}
+}
+
+// TestWorkerChainStateReader_GetBlockNumber: the worker's latest block
+// number is returned verbatim.
+func TestWorkerChainStateReader_GetBlockNumber(t *testing.T) {
+	fake := &chainStateFakeClient{
+		getBlockNumberResp: &avsproto.WorkerGetBlockNumberResp{Number: 21000000},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	n, err := r.GetBlockNumber(context.Background())
+	if err != nil {
+		t.Fatalf("GetBlockNumber: %v", err)
+	}
+	if n != 21000000 {
+		t.Fatalf("block number: got %d want 21000000", n)
+	}
+}
+
+// TestWorkerChainStateReader_GetBlockNumber_Err: a transport error wraps
+// the chain ID for triage.
+func TestWorkerChainStateReader_GetBlockNumber_Err(t *testing.T) {
+	fake := &chainStateFakeClient{getBlockNumberErr: errors.New("transport closed")}
+	r := NewWorkerChainStateReader(fake, 99, time.Second)
+	if _, err := r.GetBlockNumber(context.Background()); err == nil || !strings.Contains(err.Error(), "chain 99") {
+		t.Fatalf("expected chain-id-wrapped error, got %v", err)
 	}
 }

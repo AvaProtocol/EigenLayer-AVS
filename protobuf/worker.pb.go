@@ -1353,6 +1353,87 @@ func (x *WorkerGetBlockHeaderResp) GetTime() uint64 {
 	return 0
 }
 
+// Latest block number
+type WorkerGetBlockNumberReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerGetBlockNumberReq) Reset() {
+	*x = WorkerGetBlockNumberReq{}
+	mi := &file_worker_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerGetBlockNumberReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerGetBlockNumberReq) ProtoMessage() {}
+
+func (x *WorkerGetBlockNumberReq) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerGetBlockNumberReq.ProtoReflect.Descriptor instead.
+func (*WorkerGetBlockNumberReq) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{25}
+}
+
+type WorkerGetBlockNumberResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Number        uint64                 `protobuf:"varint,1,opt,name=number,proto3" json:"number,omitempty"` // Latest block number.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerGetBlockNumberResp) Reset() {
+	*x = WorkerGetBlockNumberResp{}
+	mi := &file_worker_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerGetBlockNumberResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerGetBlockNumberResp) ProtoMessage() {}
+
+func (x *WorkerGetBlockNumberResp) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerGetBlockNumberResp.ProtoReflect.Descriptor instead.
+func (*WorkerGetBlockNumberResp) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *WorkerGetBlockNumberResp) GetNumber() uint64 {
+	if x != nil {
+		return x.Number
+	}
+	return 0
+}
+
 var File_worker_proto protoreflect.FileDescriptor
 
 const file_worker_proto_rawDesc = "" +
@@ -1439,7 +1520,10 @@ const file_worker_proto_rawDesc = "" +
 	"\x18WorkerGetBlockHeaderResp\x12\x16\n" +
 	"\x06number\x18\x01 \x01(\x04R\x06number\x12\x12\n" +
 	"\x04hash\x18\x02 \x01(\tR\x04hash\x12\x12\n" +
-	"\x04time\x18\x03 \x01(\x04R\x04time2\x93\t\n" +
+	"\x04time\x18\x03 \x01(\x04R\x04time\"\x19\n" +
+	"\x17WorkerGetBlockNumberReq\"2\n" +
+	"\x18WorkerGetBlockNumberResp\x12\x16\n" +
+	"\x06number\x18\x01 \x01(\x04R\x06number2\xf0\t\n" +
 	"\vChainWorker\x12X\n" +
 	"\x11WorkerHealthCheck\x12 .aggregator.WorkerHealthCheckReq\x1a!.aggregator.WorkerHealthCheckResp\x12L\n" +
 	"\rExecuteUserOp\x12\x1c.aggregator.ExecuteUserOpReq\x1a\x1d.aggregator.ExecuteUserOpResp\x12I\n" +
@@ -1454,7 +1538,8 @@ const file_worker_proto_rawDesc = "" +
 	"GetBalance\x12\x1f.aggregator.WorkerGetBalanceReq\x1a .aggregator.WorkerGetBalanceResp\x12^\n" +
 	"\x0fGetTokenBalance\x12$.aggregator.WorkerGetTokenBalanceReq\x1a%.aggregator.WorkerGetTokenBalanceResp\x12U\n" +
 	"\fCallContract\x12!.aggregator.WorkerCallContractReq\x1a\".aggregator.WorkerCallContractResp\x12[\n" +
-	"\x0eGetBlockHeader\x12#.aggregator.WorkerGetBlockHeaderReq\x1a$.aggregator.WorkerGetBlockHeaderRespB\fZ\n" +
+	"\x0eGetBlockHeader\x12#.aggregator.WorkerGetBlockHeaderReq\x1a$.aggregator.WorkerGetBlockHeaderResp\x12[\n" +
+	"\x0eGetBlockNumber\x12#.aggregator.WorkerGetBlockNumberReq\x1a$.aggregator.WorkerGetBlockNumberRespB\fZ\n" +
 	"./avsprotob\x06proto3"
 
 var (
@@ -1469,7 +1554,7 @@ func file_worker_proto_rawDescGZIP() []byte {
 	return file_worker_proto_rawDescData
 }
 
-var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_worker_proto_goTypes = []any{
 	(*WorkerHealthCheckReq)(nil),            // 0: aggregator.WorkerHealthCheckReq
 	(*WorkerHealthCheckResp)(nil),           // 1: aggregator.WorkerHealthCheckResp
@@ -1496,6 +1581,8 @@ var file_worker_proto_goTypes = []any{
 	(*WorkerCallContractResp)(nil),          // 22: aggregator.WorkerCallContractResp
 	(*WorkerGetBlockHeaderReq)(nil),         // 23: aggregator.WorkerGetBlockHeaderReq
 	(*WorkerGetBlockHeaderResp)(nil),        // 24: aggregator.WorkerGetBlockHeaderResp
+	(*WorkerGetBlockNumberReq)(nil),         // 25: aggregator.WorkerGetBlockNumberReq
+	(*WorkerGetBlockNumberResp)(nil),        // 26: aggregator.WorkerGetBlockNumberResp
 }
 var file_worker_proto_depIdxs = []int32{
 	0,  // 0: aggregator.ChainWorker.WorkerHealthCheck:input_type -> aggregator.WorkerHealthCheckReq
@@ -1511,21 +1598,23 @@ var file_worker_proto_depIdxs = []int32{
 	19, // 10: aggregator.ChainWorker.GetTokenBalance:input_type -> aggregator.WorkerGetTokenBalanceReq
 	21, // 11: aggregator.ChainWorker.CallContract:input_type -> aggregator.WorkerCallContractReq
 	23, // 12: aggregator.ChainWorker.GetBlockHeader:input_type -> aggregator.WorkerGetBlockHeaderReq
-	1,  // 13: aggregator.ChainWorker.WorkerHealthCheck:output_type -> aggregator.WorkerHealthCheckResp
-	3,  // 14: aggregator.ChainWorker.ExecuteUserOp:output_type -> aggregator.ExecuteUserOpResp
-	5,  // 15: aggregator.ChainWorker.GetNonce:output_type -> aggregator.WorkerGetNonceResp
-	7,  // 16: aggregator.ChainWorker.GetSmartWalletAddress:output_type -> aggregator.WorkerGetSmartWalletAddressResp
-	9,  // 17: aggregator.ChainWorker.GetTokenMetadata:output_type -> aggregator.WorkerGetTokenMetadataResp
-	5,  // 18: aggregator.ChainWorker.GetNonceByAddress:output_type -> aggregator.WorkerGetNonceResp
-	12, // 19: aggregator.ChainWorker.SuggestGasPrice:output_type -> aggregator.WorkerSuggestGasPriceResp
-	14, // 20: aggregator.ChainWorker.EstimateGas:output_type -> aggregator.WorkerEstimateGasResp
-	16, // 21: aggregator.ChainWorker.GetCode:output_type -> aggregator.WorkerGetCodeResp
-	18, // 22: aggregator.ChainWorker.GetBalance:output_type -> aggregator.WorkerGetBalanceResp
-	20, // 23: aggregator.ChainWorker.GetTokenBalance:output_type -> aggregator.WorkerGetTokenBalanceResp
-	22, // 24: aggregator.ChainWorker.CallContract:output_type -> aggregator.WorkerCallContractResp
-	24, // 25: aggregator.ChainWorker.GetBlockHeader:output_type -> aggregator.WorkerGetBlockHeaderResp
-	13, // [13:26] is the sub-list for method output_type
-	0,  // [0:13] is the sub-list for method input_type
+	25, // 13: aggregator.ChainWorker.GetBlockNumber:input_type -> aggregator.WorkerGetBlockNumberReq
+	1,  // 14: aggregator.ChainWorker.WorkerHealthCheck:output_type -> aggregator.WorkerHealthCheckResp
+	3,  // 15: aggregator.ChainWorker.ExecuteUserOp:output_type -> aggregator.ExecuteUserOpResp
+	5,  // 16: aggregator.ChainWorker.GetNonce:output_type -> aggregator.WorkerGetNonceResp
+	7,  // 17: aggregator.ChainWorker.GetSmartWalletAddress:output_type -> aggregator.WorkerGetSmartWalletAddressResp
+	9,  // 18: aggregator.ChainWorker.GetTokenMetadata:output_type -> aggregator.WorkerGetTokenMetadataResp
+	5,  // 19: aggregator.ChainWorker.GetNonceByAddress:output_type -> aggregator.WorkerGetNonceResp
+	12, // 20: aggregator.ChainWorker.SuggestGasPrice:output_type -> aggregator.WorkerSuggestGasPriceResp
+	14, // 21: aggregator.ChainWorker.EstimateGas:output_type -> aggregator.WorkerEstimateGasResp
+	16, // 22: aggregator.ChainWorker.GetCode:output_type -> aggregator.WorkerGetCodeResp
+	18, // 23: aggregator.ChainWorker.GetBalance:output_type -> aggregator.WorkerGetBalanceResp
+	20, // 24: aggregator.ChainWorker.GetTokenBalance:output_type -> aggregator.WorkerGetTokenBalanceResp
+	22, // 25: aggregator.ChainWorker.CallContract:output_type -> aggregator.WorkerCallContractResp
+	24, // 26: aggregator.ChainWorker.GetBlockHeader:output_type -> aggregator.WorkerGetBlockHeaderResp
+	26, // 27: aggregator.ChainWorker.GetBlockNumber:output_type -> aggregator.WorkerGetBlockNumberResp
+	14, // [14:28] is the sub-list for method output_type
+	0,  // [0:14] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name
@@ -1542,7 +1631,7 @@ func file_worker_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_worker_proto_rawDesc), len(file_worker_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   25,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

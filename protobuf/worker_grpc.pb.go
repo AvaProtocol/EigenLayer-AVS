@@ -32,6 +32,7 @@ const (
 	ChainWorker_GetTokenBalance_FullMethodName       = "/aggregator.ChainWorker/GetTokenBalance"
 	ChainWorker_CallContract_FullMethodName          = "/aggregator.ChainWorker/CallContract"
 	ChainWorker_GetBlockHeader_FullMethodName        = "/aggregator.ChainWorker/GetBlockHeader"
+	ChainWorker_GetBlockNumber_FullMethodName        = "/aggregator.ChainWorker/GetBlockNumber"
 )
 
 // ChainWorkerClient is the client API for ChainWorker service.
@@ -86,6 +87,9 @@ type ChainWorkerClient interface {
 	// ethclient.HeaderByNumber. Used to stamp simulation receipts and
 	// enrich event timestamps without a gateway-side chain dial.
 	GetBlockHeader(ctx context.Context, in *WorkerGetBlockHeaderReq, opts ...grpc.CallOption) (*WorkerGetBlockHeaderResp, error)
+	// Read the latest block number. Wraps ethclient.BlockNumber. Used by the
+	// immediate-trigger path to stamp the current block for the operator.
+	GetBlockNumber(ctx context.Context, in *WorkerGetBlockNumberReq, opts ...grpc.CallOption) (*WorkerGetBlockNumberResp, error)
 }
 
 type chainWorkerClient struct {
@@ -226,6 +230,16 @@ func (c *chainWorkerClient) GetBlockHeader(ctx context.Context, in *WorkerGetBlo
 	return out, nil
 }
 
+func (c *chainWorkerClient) GetBlockNumber(ctx context.Context, in *WorkerGetBlockNumberReq, opts ...grpc.CallOption) (*WorkerGetBlockNumberResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerGetBlockNumberResp)
+	err := c.cc.Invoke(ctx, ChainWorker_GetBlockNumber_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ChainWorkerServer is the server API for ChainWorker service.
 // All implementations must embed UnimplementedChainWorkerServer
 // for forward compatibility.
@@ -278,6 +292,9 @@ type ChainWorkerServer interface {
 	// ethclient.HeaderByNumber. Used to stamp simulation receipts and
 	// enrich event timestamps without a gateway-side chain dial.
 	GetBlockHeader(context.Context, *WorkerGetBlockHeaderReq) (*WorkerGetBlockHeaderResp, error)
+	// Read the latest block number. Wraps ethclient.BlockNumber. Used by the
+	// immediate-trigger path to stamp the current block for the operator.
+	GetBlockNumber(context.Context, *WorkerGetBlockNumberReq) (*WorkerGetBlockNumberResp, error)
 	mustEmbedUnimplementedChainWorkerServer()
 }
 
@@ -326,6 +343,9 @@ func (UnimplementedChainWorkerServer) CallContract(context.Context, *WorkerCallC
 }
 func (UnimplementedChainWorkerServer) GetBlockHeader(context.Context, *WorkerGetBlockHeaderReq) (*WorkerGetBlockHeaderResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetBlockHeader not implemented")
+}
+func (UnimplementedChainWorkerServer) GetBlockNumber(context.Context, *WorkerGetBlockNumberReq) (*WorkerGetBlockNumberResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBlockNumber not implemented")
 }
 func (UnimplementedChainWorkerServer) mustEmbedUnimplementedChainWorkerServer() {}
 func (UnimplementedChainWorkerServer) testEmbeddedByValue()                     {}
@@ -582,6 +602,24 @@ func _ChainWorker_GetBlockHeader_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChainWorker_GetBlockNumber_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerGetBlockNumberReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).GetBlockNumber(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_GetBlockNumber_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).GetBlockNumber(ctx, req.(*WorkerGetBlockNumberReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ChainWorker_ServiceDesc is the grpc.ServiceDesc for ChainWorker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -640,6 +678,10 @@ var ChainWorker_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetBlockHeader",
 			Handler:    _ChainWorker_GetBlockHeader_Handler,
+		},
+		{
+			MethodName: "GetBlockNumber",
+			Handler:    _ChainWorker_GetBlockNumber_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
