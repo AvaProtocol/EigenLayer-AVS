@@ -512,6 +512,19 @@ func (s *Server) GetTransactionReceipt(ctx context.Context, req *avsproto.Worker
 	return resp, nil
 }
 
+// GetStorageAt wraps ethclient.StorageAt (latest block). Used by the
+// gateway's simulation balance-slot probing.
+func (s *Server) GetStorageAt(ctx context.Context, req *avsproto.WorkerGetStorageAtReq) (*avsproto.WorkerGetStorageAtResp, error) {
+	if !common.IsHexAddress(req.Address) {
+		return nil, fmt.Errorf("invalid address %q", req.Address)
+	}
+	value, err := s.worker.rpcClient.StorageAt(ctx, common.HexToAddress(req.Address), common.HexToHash(req.Slot), nil)
+	if err != nil {
+		return nil, fmt.Errorf("StorageAt %s slot %s: %w", req.Address, req.Slot, err)
+	}
+	return &avsproto.WorkerGetStorageAtResp{Value: value}, nil
+}
+
 // GetBalance wraps ethclient.BalanceAt(addr, latest). Used by the gateway's
 // withdraw preflight to validate / size native-coin withdrawals.
 func (s *Server) GetBalance(ctx context.Context, req *avsproto.WorkerGetBalanceReq) (*avsproto.WorkerGetBalanceResp, error) {

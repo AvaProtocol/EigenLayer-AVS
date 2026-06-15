@@ -94,6 +94,10 @@ type ChainStateReader interface {
 	// block fields are populated — not logs. Mirrors
 	// ethclient.TransactionReceipt with NotFound mapped to a nil receipt.
 	GetTransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
+
+	// GetStorageAt reads a contract storage slot (latest block). Mirrors
+	// ethclient.StorageAt.
+	GetStorageAt(ctx context.Context, account common.Address, slot common.Hash) ([]byte, error)
 }
 
 // BlockHeader is the subset of block-header fields the gateway reads:
@@ -246,6 +250,10 @@ func (d *directChainStateReader) GetTransactionReceipt(ctx context.Context, txHa
 		return nil, nil
 	}
 	return receipt, err
+}
+
+func (d *directChainStateReader) GetStorageAt(ctx context.Context, account common.Address, slot common.Hash) ([]byte, error) {
+	return d.client.StorageAt(ctx, account, slot, nil)
 }
 
 func (d *directChainStateReader) FindMatchingWalletSalt(ctx context.Context, owner, factory, target common.Address, maxSalts int64) (bool, int64, error) {
@@ -535,6 +543,22 @@ func (w *workerChainStateReader) GetTransactionReceipt(ctx context.Context, txHa
 		receipt.EffectiveGasPrice = egp
 	}
 	return receipt, nil
+}
+
+func (w *workerChainStateReader) GetStorageAt(ctx context.Context, account common.Address, slot common.Hash) ([]byte, error) {
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	resp, err := w.client.GetStorageAt(ctx, &avsproto.WorkerGetStorageAtReq{
+		Address: account.Hex(),
+		Slot:    slot.Hex(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("worker GetStorageAt (chain %d): %w", w.chainID, err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("worker returned nil response for GetStorageAt on chain %d", w.chainID)
+	}
+	return resp.Value, nil
 }
 
 func (w *workerChainStateReader) FindMatchingWalletSalt(ctx context.Context, owner, factory, target common.Address, maxSalts int64) (bool, int64, error) {

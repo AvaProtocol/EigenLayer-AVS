@@ -77,6 +77,11 @@ type chainStateFakeClient struct {
 	getReceiptReq  *avsproto.WorkerGetTransactionReceiptReq
 	getReceiptResp *avsproto.WorkerGetTransactionReceiptResp
 	getReceiptErr  error
+
+	// GetStorageAt
+	getStorageReq  *avsproto.WorkerGetStorageAtReq
+	getStorageResp *avsproto.WorkerGetStorageAtResp
+	getStorageErr  error
 }
 
 func (f *chainStateFakeClient) WorkerHealthCheck(context.Context, *avsproto.WorkerHealthCheckReq, ...grpc.CallOption) (*avsproto.WorkerHealthCheckResp, error) {
@@ -110,6 +115,10 @@ func (f *chainStateFakeClient) FindMatchingWalletSalt(_ context.Context, req *av
 func (f *chainStateFakeClient) GetTransactionReceipt(_ context.Context, req *avsproto.WorkerGetTransactionReceiptReq, _ ...grpc.CallOption) (*avsproto.WorkerGetTransactionReceiptResp, error) {
 	f.getReceiptReq = req
 	return f.getReceiptResp, f.getReceiptErr
+}
+func (f *chainStateFakeClient) GetStorageAt(_ context.Context, req *avsproto.WorkerGetStorageAtReq, _ ...grpc.CallOption) (*avsproto.WorkerGetStorageAtResp, error) {
+	f.getStorageReq = req
+	return f.getStorageResp, f.getStorageErr
 }
 func (f *chainStateFakeClient) GetTokenMetadata(context.Context, *avsproto.WorkerGetTokenMetadataReq, ...grpc.CallOption) (*avsproto.WorkerGetTokenMetadataResp, error) {
 	panic("unused")
@@ -811,5 +820,27 @@ func TestWorkerChainStateReader_GetTransactionReceipt_Pending(t *testing.T) {
 	receipt, err := r.GetTransactionReceipt(context.Background(), common.HexToHash("0xaa"))
 	if err != nil || receipt != nil {
 		t.Fatalf("pending should be (nil, nil); got receipt=%v err=%v", receipt, err)
+	}
+}
+
+// TestWorkerChainStateReader_GetStorageAt: address/slot are hex-encoded;
+// the raw 32-byte value round-trips.
+func TestWorkerChainStateReader_GetStorageAt(t *testing.T) {
+	want := []byte{0xde, 0xad, 0xbe, 0xef}
+	fake := &chainStateFakeClient{
+		getStorageResp: &avsproto.WorkerGetStorageAtResp{Value: want},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	addr := common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
+	slot := common.HexToHash("0x09")
+	got, err := r.GetStorageAt(context.Background(), addr, slot)
+	if err != nil {
+		t.Fatalf("GetStorageAt: %v", err)
+	}
+	if len(got) != 4 || got[0] != 0xde {
+		t.Fatalf("unexpected value %x", got)
+	}
+	if fake.getStorageReq.Address != addr.Hex() || fake.getStorageReq.Slot != slot.Hex() {
+		t.Fatalf("args not propagated: %+v", fake.getStorageReq)
 	}
 }

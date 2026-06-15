@@ -35,6 +35,7 @@ const (
 	ChainWorker_GetBlockNumber_FullMethodName         = "/aggregator.ChainWorker/GetBlockNumber"
 	ChainWorker_FindMatchingWalletSalt_FullMethodName = "/aggregator.ChainWorker/FindMatchingWalletSalt"
 	ChainWorker_GetTransactionReceipt_FullMethodName  = "/aggregator.ChainWorker/GetTransactionReceipt"
+	ChainWorker_GetStorageAt_FullMethodName           = "/aggregator.ChainWorker/GetStorageAt"
 )
 
 // ChainWorkerClient is the client API for ChainWorker service.
@@ -101,6 +102,10 @@ type ChainWorkerClient interface {
 	// found=false when the receipt isn't available yet (pending). Used by the
 	// gateway's userop confirmation-waiting to backfill gas data.
 	GetTransactionReceipt(ctx context.Context, in *WorkerGetTransactionReceiptReq, opts ...grpc.CallOption) (*WorkerGetTransactionReceiptResp, error)
+	// Read a contract storage slot (latest). Wraps ethclient.StorageAt. Used
+	// by the gateway's Tenderly simulation to probe an ERC-20's balance slot
+	// for state overrides.
+	GetStorageAt(ctx context.Context, in *WorkerGetStorageAtReq, opts ...grpc.CallOption) (*WorkerGetStorageAtResp, error)
 }
 
 type chainWorkerClient struct {
@@ -271,6 +276,16 @@ func (c *chainWorkerClient) GetTransactionReceipt(ctx context.Context, in *Worke
 	return out, nil
 }
 
+func (c *chainWorkerClient) GetStorageAt(ctx context.Context, in *WorkerGetStorageAtReq, opts ...grpc.CallOption) (*WorkerGetStorageAtResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerGetStorageAtResp)
+	err := c.cc.Invoke(ctx, ChainWorker_GetStorageAt_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ChainWorkerServer is the server API for ChainWorker service.
 // All implementations must embed UnimplementedChainWorkerServer
 // for forward compatibility.
@@ -335,6 +350,10 @@ type ChainWorkerServer interface {
 	// found=false when the receipt isn't available yet (pending). Used by the
 	// gateway's userop confirmation-waiting to backfill gas data.
 	GetTransactionReceipt(context.Context, *WorkerGetTransactionReceiptReq) (*WorkerGetTransactionReceiptResp, error)
+	// Read a contract storage slot (latest). Wraps ethclient.StorageAt. Used
+	// by the gateway's Tenderly simulation to probe an ERC-20's balance slot
+	// for state overrides.
+	GetStorageAt(context.Context, *WorkerGetStorageAtReq) (*WorkerGetStorageAtResp, error)
 	mustEmbedUnimplementedChainWorkerServer()
 }
 
@@ -392,6 +411,9 @@ func (UnimplementedChainWorkerServer) FindMatchingWalletSalt(context.Context, *W
 }
 func (UnimplementedChainWorkerServer) GetTransactionReceipt(context.Context, *WorkerGetTransactionReceiptReq) (*WorkerGetTransactionReceiptResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTransactionReceipt not implemented")
+}
+func (UnimplementedChainWorkerServer) GetStorageAt(context.Context, *WorkerGetStorageAtReq) (*WorkerGetStorageAtResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetStorageAt not implemented")
 }
 func (UnimplementedChainWorkerServer) mustEmbedUnimplementedChainWorkerServer() {}
 func (UnimplementedChainWorkerServer) testEmbeddedByValue()                     {}
@@ -702,6 +724,24 @@ func _ChainWorker_GetTransactionReceipt_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChainWorker_GetStorageAt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerGetStorageAtReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).GetStorageAt(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_GetStorageAt_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).GetStorageAt(ctx, req.(*WorkerGetStorageAtReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ChainWorker_ServiceDesc is the grpc.ServiceDesc for ChainWorker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -772,6 +812,10 @@ var ChainWorker_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTransactionReceipt",
 			Handler:    _ChainWorker_GetTransactionReceipt_Handler,
+		},
+		{
+			MethodName: "GetStorageAt",
+			Handler:    _ChainWorker_GetStorageAt_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

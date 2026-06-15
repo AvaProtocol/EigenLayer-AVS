@@ -76,10 +76,18 @@ dials follow the same model, reusing existing worker RPCs where possible:
    placeholder (it dialed then returned an error without using the client).
    The bundler poll (`bundler.GetUserOperationReceipt`) stays — bundler
    routing is a separate concern from chain RPC.
-3. **PR 3 — simulation state overrides.** Resolve `InjectERC20BalanceChange`
-   — either supply the balance override through Tenderly's `state_objects`
-   directly (no chain read), or add a worker `GetStorageAt` RPC. Removes
-   the last live dial.
+3. **PR 3 — simulation state overrides (delivered).** Tenderly's
+   `state_objects` can't supply an ERC-20 balance override without the
+   discovered storage slot, so the probe stays — routed through a new worker
+   `GetStorageAt` RPC. Added it to `ChainStateReader`; changed
+   `ProbeERC20BalanceSlot` to take a `ChainStateReader` (its `balanceOf`
+   `eth_call` reuses `CallContract`; its slot probing uses `GetStorageAt`)
+   and `InjectERC20BalanceChange` to resolve the per-chain reader (direct
+   dial fallback). The probe result is cached per token, so the worker
+   round-trips are one-time. **With this, every live per-chain read / write
+   / derivation in gateway mode is worker-routed** — the remaining
+   `ethclient.Dial` sites in `core/taskengine` are all fallback-only
+   (reached only in single-chain mode / when no reader is registered).
 4. **PR 4 — remove fallback dials + env-var strip.** Once no live path
    dials per-chain RPC: delete the `vm.go`/`engine.go` fallback dials,
    `smartWalletRpcByChain` + `ChainEntry.GetRPC` + the REST/withdraw
