@@ -100,14 +100,21 @@ func (n *Engine) runBlockTriggerImmediately(triggerConfig map[string]interface{}
 		}
 	}
 
-	// Ensure RPC connection is available
-	if rpcConn == nil {
-		return nil, fmt.Errorf("RPC connection not available for BlockTrigger execution")
+	// Resolve the trigger's chain. Required — there is no engine-default
+	// chain; a missing/zero chain_id is a hard error so the block read
+	// never silently targets the wrong chain.
+	chainID, err := requireChainIDFromConfig(triggerConfig)
+	if err != nil {
+		return nil, fmt.Errorf("BlockTrigger: %w", err)
+	}
+	reader := GetChainStateReaderForChain(uint64(chainID))
+	if reader == nil {
+		return nil, fmt.Errorf("BlockTrigger: no chain-state reader available for chain %d", chainID)
 	}
 
 	// If no specific block number, get the latest block
 	if blockNumber == 0 {
-		currentBlock, err := rpcConn.BlockNumber(context.Background())
+		currentBlock, err := reader.GetBlockNumber(context.Background())
 		if err != nil {
 			// For simulations, use a mock block number to avoid RPC rate limiting
 			if strings.Contains(err.Error(), "rate limit") || strings.Contains(err.Error(), "429") {
@@ -121,13 +128,13 @@ func (n *Engine) runBlockTriggerImmediately(triggerConfig map[string]interface{}
 		} else {
 			blockNumber = currentBlock
 			if n.logger != nil {
-				n.logger.Info("BlockTrigger: Using latest block for immediate execution", "blockNumber", blockNumber)
+				n.logger.Info("BlockTrigger: Using latest block for immediate execution", "blockNumber", blockNumber, "chainID", chainID)
 			}
 		}
 	}
 
-	// Get real block data from RPC
-	header, err := rpcConn.HeaderByNumber(context.Background(), big.NewInt(int64(blockNumber)))
+	// Get real block data via the chain's worker
+	header, err := reader.HeaderByNumber(context.Background(), big.NewInt(int64(blockNumber)))
 	if err != nil {
 		// For simulations, use mock block data to avoid RPC rate limiting
 		if strings.Contains(err.Error(), "rate limit") || strings.Contains(err.Error(), "429") {
@@ -151,7 +158,7 @@ func (n *Engine) runBlockTriggerImmediately(triggerConfig map[string]interface{}
 
 	result := map[string]interface{}{
 		"blockNumber": blockNumber,
-		"blockHash":   header.Hash().Hex(),
+		"blockHash":   header.Hash.Hex(),
 		"timestamp":   header.Time,
 		"parentHash":  header.ParentHash.Hex(),
 		"difficulty":  header.Difficulty.String(),
@@ -160,9 +167,38 @@ func (n *Engine) runBlockTriggerImmediately(triggerConfig map[string]interface{}
 	}
 
 	if n.logger != nil {
-		n.logger.Info("BlockTrigger executed immediately", "blockNumber", blockNumber, "blockHash", header.Hash().Hex())
+		n.logger.Info("BlockTrigger executed immediately", "blockNumber", blockNumber, "blockHash", header.Hash.Hex())
 	}
 	return result, nil
+}
+
+// requireChainIDFromConfig extracts the required chain_id from a trigger /
+// node config map. There is NO engine-default fallback: a missing or zero
+// chain_id is a hard error, so chain-scoped reads never silently target
+// the wrong chain. Accepts the numeric types config maps carry (int64 from
+// direct proto extraction, float64 after a structpb round-trip).
+func requireChainIDFromConfig(config map[string]interface{}) (int64, error) {
+	raw, ok := config["chain_id"]
+	if !ok {
+		return 0, fmt.Errorf("chain_id not specified in trigger config")
+	}
+	var chainID int64
+	switch v := raw.(type) {
+	case int64:
+		chainID = v
+	case int:
+		chainID = int64(v)
+	case uint64:
+		chainID = int64(v)
+	case float64:
+		chainID = int64(v)
+	default:
+		return 0, fmt.Errorf("chain_id has unexpected type %T", raw)
+	}
+	if chainID == 0 {
+		return 0, fmt.Errorf("chain_id must be non-zero")
+	}
+	return chainID, nil
 }
 
 // runFixedTimeTriggerImmediately returns the current timestamp immediately

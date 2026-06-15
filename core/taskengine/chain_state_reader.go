@@ -83,11 +83,18 @@ type ChainStateReader interface {
 }
 
 // BlockHeader is the subset of block-header fields the gateway reads:
-// number + hash (receipt stamping) and time (event-timestamp enrichment).
+// number + hash (receipt stamping), time (event-timestamp enrichment), and
+// parentHash/difficulty/gasLimit/gasUsed (block-trigger output). A full
+// types.Header can't be carried over gRPC faithfully (its hash depends on
+// every field), so these are the explicit fields callers consume.
 type BlockHeader struct {
-	Number uint64
-	Hash   common.Hash
-	Time   uint64
+	Number     uint64
+	Hash       common.Hash
+	Time       uint64
+	ParentHash common.Hash
+	Difficulty *big.Int
+	GasLimit   uint64
+	GasUsed    uint64
 }
 
 // ---------------------------------------------------------------------
@@ -204,7 +211,15 @@ func (d *directChainStateReader) HeaderByNumber(ctx context.Context, number *big
 	if h == nil {
 		return nil, fmt.Errorf("HeaderByNumber returned nil header")
 	}
-	return &BlockHeader{Number: h.Number.Uint64(), Hash: h.Hash(), Time: h.Time}, nil
+	return &BlockHeader{
+		Number:     h.Number.Uint64(),
+		Hash:       h.Hash(),
+		Time:       h.Time,
+		ParentHash: h.ParentHash,
+		Difficulty: h.Difficulty,
+		GasLimit:   h.GasLimit,
+		GasUsed:    h.GasUsed,
+	}, nil
 }
 
 func (d *directChainStateReader) GetBlockNumber(ctx context.Context) (uint64, error) {
@@ -421,10 +436,20 @@ func (w *workerChainStateReader) HeaderByNumber(ctx context.Context, number *big
 	if resp == nil {
 		return nil, fmt.Errorf("worker returned nil response for GetBlockHeader on chain %d", w.chainID)
 	}
+	difficulty, ok := new(big.Int).SetString(resp.Difficulty, 10)
+	if !ok {
+		// Difficulty is informational (post-merge it's 0); tolerate a
+		// missing/blank value rather than failing the whole header read.
+		difficulty = big.NewInt(0)
+	}
 	return &BlockHeader{
-		Number: resp.Number,
-		Hash:   common.HexToHash(resp.Hash),
-		Time:   resp.Time,
+		Number:     resp.Number,
+		Hash:       common.HexToHash(resp.Hash),
+		Time:       resp.Time,
+		ParentHash: common.HexToHash(resp.ParentHash),
+		Difficulty: difficulty,
+		GasLimit:   resp.GasLimit,
+		GasUsed:    resp.GasUsed,
 	}, nil
 }
 

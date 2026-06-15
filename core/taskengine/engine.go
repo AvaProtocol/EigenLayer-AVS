@@ -3088,18 +3088,13 @@ func (n *Engine) instructOperatorImmediateTrigger(taskID string) error {
 		return fmt.Errorf("failed to get task for immediate trigger: %w", err)
 	}
 
-	// Resolve the chain for the current-block read. task.ChainId can be 0
-	// in single-chain mode or for legacy tasks created before chain_id was
-	// always persisted; fall back to the engine's default chain — the same
-	// key the reader registry uses in single-chain mode — so we don't
-	// regress the path that previously worked via the single global RPC.
+	// The current-block read must target the task's chain. Required — there
+	// is no engine-default chain; a zero/unset chain_id is a hard error so
+	// the read never silently targets the wrong chain.
 	chainID := task.ChainId
-	if chainID == 0 && n.tokenEnrichmentService != nil {
-		chainID = int64(n.tokenEnrichmentService.GetChainID())
+	if chainID == 0 {
+		return fmt.Errorf("task %s has no chain_id; cannot resolve chain for immediate block trigger", taskID)
 	}
-
-	// Current block for the resolved chain, routed through the chain worker
-	// in gateway mode (no gateway-side chain dial).
 	reader := GetChainStateReaderForChain(uint64(chainID))
 	if reader == nil {
 		return fmt.Errorf("no chain-state reader available for chain %d (immediate block trigger)", chainID)

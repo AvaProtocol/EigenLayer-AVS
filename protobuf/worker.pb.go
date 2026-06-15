@@ -1295,9 +1295,13 @@ func (x *WorkerGetBlockHeaderReq) GetBlockNumber() string {
 
 type WorkerGetBlockHeaderResp struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Number        uint64                 `protobuf:"varint,1,opt,name=number,proto3" json:"number,omitempty"` // Block number.
-	Hash          string                 `protobuf:"bytes,2,opt,name=hash,proto3" json:"hash,omitempty"`      // 0x-prefixed block hash.
-	Time          uint64                 `protobuf:"varint,3,opt,name=time,proto3" json:"time,omitempty"`     // Unix timestamp (seconds).
+	Number        uint64                 `protobuf:"varint,1,opt,name=number,proto3" json:"number,omitempty"`                          // Block number.
+	Hash          string                 `protobuf:"bytes,2,opt,name=hash,proto3" json:"hash,omitempty"`                               // 0x-prefixed block hash.
+	Time          uint64                 `protobuf:"varint,3,opt,name=time,proto3" json:"time,omitempty"`                              // Unix timestamp (seconds).
+	ParentHash    string                 `protobuf:"bytes,4,opt,name=parent_hash,json=parentHash,proto3" json:"parent_hash,omitempty"` // 0x-prefixed parent block hash.
+	Difficulty    string                 `protobuf:"bytes,5,opt,name=difficulty,proto3" json:"difficulty,omitempty"`                   // big.Int as base-10 string.
+	GasLimit      uint64                 `protobuf:"varint,6,opt,name=gas_limit,json=gasLimit,proto3" json:"gas_limit,omitempty"`      // Block gas limit.
+	GasUsed       uint64                 `protobuf:"varint,7,opt,name=gas_used,json=gasUsed,proto3" json:"gas_used,omitempty"`         // Block gas used.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1349,6 +1353,34 @@ func (x *WorkerGetBlockHeaderResp) GetHash() string {
 func (x *WorkerGetBlockHeaderResp) GetTime() uint64 {
 	if x != nil {
 		return x.Time
+	}
+	return 0
+}
+
+func (x *WorkerGetBlockHeaderResp) GetParentHash() string {
+	if x != nil {
+		return x.ParentHash
+	}
+	return ""
+}
+
+func (x *WorkerGetBlockHeaderResp) GetDifficulty() string {
+	if x != nil {
+		return x.Difficulty
+	}
+	return ""
+}
+
+func (x *WorkerGetBlockHeaderResp) GetGasLimit() uint64 {
+	if x != nil {
+		return x.GasLimit
+	}
+	return 0
+}
+
+func (x *WorkerGetBlockHeaderResp) GetGasUsed() uint64 {
+	if x != nil {
+		return x.GasUsed
 	}
 	return 0
 }
@@ -1516,11 +1548,18 @@ const file_worker_proto_rawDesc = "" +
 	"\x16WorkerCallContractResp\x12\x16\n" +
 	"\x06result\x18\x01 \x01(\fR\x06result\"<\n" +
 	"\x17WorkerGetBlockHeaderReq\x12!\n" +
-	"\fblock_number\x18\x01 \x01(\tR\vblockNumber\"Z\n" +
+	"\fblock_number\x18\x01 \x01(\tR\vblockNumber\"\xd3\x01\n" +
 	"\x18WorkerGetBlockHeaderResp\x12\x16\n" +
 	"\x06number\x18\x01 \x01(\x04R\x06number\x12\x12\n" +
 	"\x04hash\x18\x02 \x01(\tR\x04hash\x12\x12\n" +
-	"\x04time\x18\x03 \x01(\x04R\x04time\"\x19\n" +
+	"\x04time\x18\x03 \x01(\x04R\x04time\x12\x1f\n" +
+	"\vparent_hash\x18\x04 \x01(\tR\n" +
+	"parentHash\x12\x1e\n" +
+	"\n" +
+	"difficulty\x18\x05 \x01(\tR\n" +
+	"difficulty\x12\x1b\n" +
+	"\tgas_limit\x18\x06 \x01(\x04R\bgasLimit\x12\x19\n" +
+	"\bgas_used\x18\a \x01(\x04R\agasUsed\"\x19\n" +
 	"\x17WorkerGetBlockNumberReq\"2\n" +
 	"\x18WorkerGetBlockNumberResp\x12\x16\n" +
 	"\x06number\x18\x01 \x01(\x04R\x06number2\xf0\t\n" +
