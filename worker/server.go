@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -490,6 +491,12 @@ func (s *Server) FindMatchingWalletSalt(ctx context.Context, req *avsproto.Worke
 // an error) when the receipt isn't available yet (pending / unknown hash),
 // so the gateway's confirmation-waiting loop can keep polling.
 func (s *Server) GetTransactionReceipt(ctx context.Context, req *avsproto.WorkerGetTransactionReceiptReq) (*avsproto.WorkerGetTransactionReceiptResp, error) {
+	// Validate the hash shape: common.HexToHash silently coerces a malformed
+	// or empty value to the zero hash, which would then look like "pending"
+	// (found=false) and mask a caller bug instead of surfacing it.
+	if len(req.TxHash) != 66 || !strings.HasPrefix(req.TxHash, "0x") {
+		return nil, fmt.Errorf("invalid tx_hash %q", req.TxHash)
+	}
 	receipt, err := s.worker.rpcClient.TransactionReceipt(ctx, common.HexToHash(req.TxHash))
 	if errors.Is(err, ethereum.NotFound) {
 		return &avsproto.WorkerGetTransactionReceiptResp{Found: false}, nil
@@ -517,6 +524,12 @@ func (s *Server) GetTransactionReceipt(ctx context.Context, req *avsproto.Worker
 func (s *Server) GetStorageAt(ctx context.Context, req *avsproto.WorkerGetStorageAtReq) (*avsproto.WorkerGetStorageAtResp, error) {
 	if !common.IsHexAddress(req.Address) {
 		return nil, fmt.Errorf("invalid address %q", req.Address)
+	}
+	// A malformed slot would be silently coerced to slot 0 (a valid slot that
+	// returns real data), which could let a wrong-slot probe pass ERC-20
+	// balance-slot validation. Reject anything that isn't a 32-byte hex word.
+	if len(req.Slot) != 66 || !strings.HasPrefix(req.Slot, "0x") {
+		return nil, fmt.Errorf("invalid slot %q", req.Slot)
 	}
 	value, err := s.worker.rpcClient.StorageAt(ctx, common.HexToAddress(req.Address), common.HexToHash(req.Slot), nil)
 	if err != nil {

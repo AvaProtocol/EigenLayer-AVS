@@ -3918,7 +3918,7 @@ func (n *Engine) injectTransferEventState(data map[string]interface{}, vm *VM) {
 		if vm.smartWalletConfig != nil && vm.smartWalletConfig.EthRpcUrl != "" {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := vm.simulationState.InjectETHBalanceChange(ctx, vm.smartWalletConfig.EthRpcUrl, holderAddress, transferAmount); err != nil {
+			if err := vm.simulationState.InjectETHBalanceChange(ctx, vm.smartWalletConfig, holderAddress, transferAmount); err != nil {
 				n.logger.Warn("Failed to inject ETH balance override", "error", err)
 			}
 		}

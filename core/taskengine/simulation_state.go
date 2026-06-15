@@ -385,20 +385,36 @@ func (s *SimulationStateMap) InjectERC20BalanceChange(
 }
 
 // InjectETHBalanceChange updates the state map to reflect an ETH balance change
-// for the given address. It queries the current on-chain balance via RPC and adds the delta.
+// for the given address. It reads the current on-chain balance through the
+// per-chain worker (gateway mode) and adds the delta, falling back to a direct
+// dial only when no chain-state reader is registered — mirroring
+// InjectERC20BalanceChange so the gateway issues no direct per-chain dial.
 func (s *SimulationStateMap) InjectETHBalanceChange(
 	ctx context.Context,
-	rpcURL string,
+	smartWalletConfig *config.SmartWalletConfig,
 	address common.Address,
 	delta *big.Int,
 ) error {
-	client, err := ethclient.DialContext(ctx, rpcURL)
-	if err != nil {
-		return fmt.Errorf("failed to connect to RPC for ETH balance: %w", err)
+	if smartWalletConfig == nil {
+		return fmt.Errorf("no smart wallet config available for ETH balance probing")
 	}
-	defer client.Close()
 
-	currentBalance, err := client.BalanceAt(ctx, address, nil)
+	// Resolve the per-chain reader (worker-routed in gateway mode); fall back
+	// to a direct dial only when no reader is registered.
+	reader := GetChainStateReaderForChain(uint64(smartWalletConfig.ChainID))
+	if reader == nil {
+		if smartWalletConfig.EthRpcUrl == "" {
+			return fmt.Errorf("no chain-state reader or RPC URL available for ETH balance probing")
+		}
+		client, dialErr := ethclient.DialContext(ctx, smartWalletConfig.EthRpcUrl)
+		if dialErr != nil {
+			return fmt.Errorf("failed to connect to RPC for ETH balance: %w", dialErr)
+		}
+		defer client.Close()
+		reader = NewDirectChainStateReader(client, smartWalletConfig.ChainID)
+	}
+
+	currentBalance, err := reader.GetBalance(ctx, address)
 	if err != nil {
 		return fmt.Errorf("failed to get ETH balance: %w", err)
 	}

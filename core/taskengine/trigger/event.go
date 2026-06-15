@@ -31,13 +31,7 @@ func parseABIOptimized(abiValues []*structpb.Value) (*abi.ABI, error) {
 		return nil, fmt.Errorf("empty ABI")
 	}
 
-	// Convert protobuf Values to JSON bytes directly
-	abiArray := make([]interface{}, len(abiValues))
-	for i, value := range abiValues {
-		abiArray[i] = value.AsInterface()
-	}
-
-	// Marshal to JSON bytes
+	// Marshal the protobuf Values to JSON bytes directly.
 	jsonBytes, err := protojson.Marshal(&structpb.ListValue{Values: abiValues})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal ABI to JSON: %v", err)

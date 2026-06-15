@@ -155,7 +155,13 @@ func NewDirectChainStateReader(client *ethclient.Client, chainID int64) ChainSta
 
 func (d *directChainStateReader) ChainID(ctx context.Context) (int64, error) {
 	d.detectOnce.Do(func() {
-		id, err := d.client.ChainID(ctx)
+		// Use a background context, not the caller's: the result (success or
+		// error) is cached permanently via detectOnce, so a cancelled
+		// first-caller context must not poison every later call with a stale
+		// "context canceled" error. A short timeout bounds the detection.
+		detectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		id, err := d.client.ChainID(detectCtx)
 		if err != nil {
 			d.detectErr = fmt.Errorf("ChainID: %w", err)
 			return
