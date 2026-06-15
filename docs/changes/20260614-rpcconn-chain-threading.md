@@ -47,13 +47,17 @@ New, needed here:
 
 - **`GetBlockNumber() → uint64`** — wraps `ethclient.BlockNumber`. Trivial.
 - **`FilterLogs(addresses, topics, from_block, to_block) → []Log`** — wraps
-  `ethclient.FilterLogs`. **Payload-sensitive** (see Risks). The gateway
-  already chunks ranges caller-side (`:2764`); keep chunking on the
-  gateway and have the worker serve one bounded range per call, OR move
-  chunking worker-side and stream. Decide before building.
+  `ethclient.FilterLogs`. **Payload-sensitive** (see Risks) and **heavy**
+  relative to a point read. Needed only by the simulate-only historical
+  search, and only for the residue Tenderly can't reproduce (see
+  "Simulate fidelity" below) — so scope it to that residue, don't add it
+  speculatively. The gateway already chunks ranges caller-side (`:2764`);
+  keep chunking on the gateway and have the worker serve one bounded range
+  per call, OR move chunking worker-side and stream. Decide before building.
 
-Add `GetBlockNumber` and `FilterLogs` to the `ChainStateReader` interface
-+ both impls, mirroring the existing methods.
+Add `GetBlockNumber` to the `ChainStateReader` interface + both impls
+unconditionally. Add `FilterLogs` only once PR C confirms a residue of
+historical searches that Tenderly/direct-call can't cover.
 
 ## Strategy: thread chainID, resolve per-chain reader
 
@@ -89,10 +93,14 @@ small, independently-shippable slices, each verified before the next.
    `HeaderByNumber` (event block timestamp) and `CallContract` (decimals)
    through the per-chain reader. Subsumes the `callContractMethod`
    deferral noted in parent PR 2.
-3. **PR C — `FilterLogs` + historical search.** *Gated on the design
-   question below.* Add `FilterLogs` worker RPC (with the chunking
-   decision settled); thread chainID through
-   `runEventTriggerWithHistoricalSearch` + `searchEventsForQuery`.
+3. **PR C — simulate historical search.** *Tenderly-first (see "Simulate
+   fidelity" below).* First, prefer the existing Tenderly / direct-call
+   simulate strategies and shrink the historical-`FilterLogs` path to the
+   residue Tenderly genuinely can't reproduce. Thread chainID through
+   `runEventTriggerWithHistoricalSearch` + `searchEventsForQuery`. Add the
+   `FilterLogs` worker RPC (with the chunking decision settled) **only** for
+   that residue — if Tenderly covers it all, this collapses into "delete
+   the historical-search path" with no new worker RPC.
 4. **PR D — retire `rpcConn` + the env-var strip.** Once no chain read
    uses `rpcConn`, replace the `rpcConn == nil` test signal with an
    explicit test flag, drop the per-chain dial fallbacks, strip the
@@ -101,20 +109,53 @@ small, independently-shippable slices, each verified before the next.
    Keep the top-level `eth_rpc_url` (AVS chain). **This is PR 7 of the
    parent doc — the irreversible step, after a prod cycle.**
 
-## Open design question — should the gateway run `FilterLogs` at all?
+## Layer note — live state vs simulate history (don't conflate them)
 
-Operators already own event monitoring and historical replay. The
-gateway's `FilterLogs` path (`runEventTriggerWithHistoricalSearch`) is the
-manual-run / simulate path for event triggers. Before building PR C,
-decide:
+Two different operations get muddled because both involve event logs:
 
-- **Route it** through the worker (per this plan), or
-- **Redesign** — have the gateway ask an operator (which already holds the
-  event subscription + history) rather than replaying logs itself.
+- **Live trigger monitoring is the operator's job, and it is stream-based.**
+  Operators subscribe to EVM events (`SubscribeFilterLogs` in
+  `core/taskengine/trigger/event.go`) and fire when a task's trigger
+  condition is met. They are forward-looking and **do not own or store an
+  event history** — they monitor conditions, they don't keep a log archive.
+  (External PR #582 hardens exactly this layer: partial-subscription
+  rollback + active-vs-desired subscription telemetry.) **Live chain/event
+  state belongs to these streams, never to a gateway `FilterLogs` poll.**
 
-Routing is the smaller change and keeps the gateway self-sufficient for
-simulate/runTrigger; redesign removes duplicate chain work but couples the
-gateway's simulate path to operator availability. Resolve before PR C.
+- **The gateway's `FilterLogs` is simulate-only historical search.** It
+  lives solely in `runEventTriggerWithHistoricalSearch`, the manual-run /
+  simulate path, where it does a one-off **backward-looking** scan to
+  surface a recent matching event as sample output. A live stream cannot
+  answer this (it has no past), and operators cannot serve it (no history)
+  — so "ask an operator" is a non-option, and there is no operator-overlap
+  to resolve. If the gateway keeps doing this search, it routes through the
+  chain worker like every other read in this migration.
+
+So the chain-routing question is settled: **worker-route the simulate
+historical search.** The only remaining question is the *simulate-fidelity*
+one below — independent of routing.
+
+## Simulate fidelity — prefer Tenderly over `FilterLogs`
+
+`FilterLogs` is much heavier than a simulated call. Several simulate
+strategies already exist (`runEventTriggerWithDirectCalls`,
+`runEventTriggerWithTenderlySimulation`, `runEventTriggerWithHistoricalSearch`).
+Direction: **prefer Tenderly / direct-call simulation; fall back to a
+historical `FilterLogs` scan only for scenarios Tenderly genuinely cannot
+reproduce.**
+
+Concretely — a case like "detect a past ERC-20 Transfer" is the kind of
+thing that today reaches for `FilterLogs`, but if Tenderly can simulate
+the transfer and surface the event, we should use that and skip the
+log scan entirely. PR C should:
+
+1. Inventory what `runEventTriggerWithHistoricalSearch` is relied on for.
+2. Move every case Tenderly/direct-call can cover onto those strategies.
+3. Keep `FilterLogs` (worker-routed) **only** for the irreducible residue —
+   genuinely historical, on-chain-only scans that simulation can't fabricate.
+
+If the residue is empty, PR C deletes the historical-search path entirely
+and no `FilterLogs` worker RPC is needed.
 
 ## Risks
 
