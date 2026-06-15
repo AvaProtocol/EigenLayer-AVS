@@ -65,7 +65,7 @@ func TestABIFieldTyping(t *testing.T) {
 	}
 
 	// Test the parseEventWithABI function
-	parsedData, err := engine.parseEventWithABI(mockLog, testABI, nil)
+	parsedData, err := engine.parseEventWithABI(0, mockLog, testABI, nil)
 	if err != nil {
 		t.Fatalf("Failed to parse event with ABI: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestDecimalFormattingWithProperTypes(t *testing.T) {
 	// In a real scenario, this would be retrieved via RPC call
 
 	// Test without decimal formatting first
-	parsedData, err := engine.parseEventWithABI(mockLog, testABI, nil)
+	parsedData, err := engine.parseEventWithABI(0, mockLog, testABI, nil)
 	if err != nil {
 		t.Fatalf("Failed to parse event with ABI: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestValueRawPopulatedWhenDecimalsCallFails(t *testing.T) {
 	}
 
 	// Test the parseEventWithABI function with a query that will fail decimals() call
-	parsedData, err := engine.parseEventWithABI(mockLog, testABI, mockQuery)
+	parsedData, err := engine.parseEventWithABI(0, mockLog, testABI, mockQuery)
 	if err != nil {
 		t.Fatalf("Failed to parse event with ABI: %v", err)
 	}

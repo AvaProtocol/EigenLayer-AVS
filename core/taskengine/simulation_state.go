@@ -181,7 +181,7 @@ var commonAllowanceSlots = []int64{1, 2, 3, 10}
 // Returns the slot index, or an error if no match is found.
 func (s *SimulationStateMap) ProbeERC20BalanceSlot(
 	ctx context.Context,
-	rpcURL string,
+	reader ChainStateReader,
 	tokenContract common.Address,
 	holder common.Address,
 ) (int64, error) {
@@ -198,17 +198,11 @@ func (s *SimulationStateMap) ProbeERC20BalanceSlot(
 		return *cached, nil
 	}
 
-	client, err := ethclient.DialContext(ctx, rpcURL)
-	if err != nil {
-		return -1, fmt.Errorf("failed to connect to RPC for slot probing: %w", err)
-	}
-	defer client.Close()
-
 	// Call balanceOf(holder) to get the expected value
 	balanceOfSig := crypto.Keccak256([]byte("balanceOf(address)"))[:4]
 	callData := append(balanceOfSig, common.LeftPadBytes(holder.Bytes(), 32)...)
 
-	result, err := client.CallContract(ctx, ethereum.CallMsg{
+	result, err := reader.CallContract(ctx, ethereum.CallMsg{
 		To:   &tokenContract,
 		Data: callData,
 	}, nil)
@@ -225,7 +219,7 @@ func (s *SimulationStateMap) ProbeERC20BalanceSlot(
 	if expectedBalance.Sign() > 0 {
 		for _, candidateSlot := range commonBalanceSlots {
 			slotHash := erc20BalanceSlot(holder, candidateSlot)
-			storageValue, err := client.StorageAt(ctx, tokenContract, slotHash, nil)
+			storageValue, err := reader.GetStorageAt(ctx, tokenContract, slotHash)
 			if err != nil {
 				continue
 			}
@@ -264,7 +258,7 @@ func (s *SimulationStateMap) ProbeERC20BalanceSlot(
 
 		for _, refAddr := range referenceAddresses {
 			refCallData := append(crypto.Keccak256([]byte("balanceOf(address)"))[:4], common.LeftPadBytes(refAddr.Bytes(), 32)...)
-			refResult, err := client.CallContract(ctx, ethereum.CallMsg{To: &tokenContract, Data: refCallData}, nil)
+			refResult, err := reader.CallContract(ctx, ethereum.CallMsg{To: &tokenContract, Data: refCallData}, nil)
 			if err != nil {
 				continue
 			}
@@ -276,7 +270,7 @@ func (s *SimulationStateMap) ProbeERC20BalanceSlot(
 			// Found a reference holder with balance — probe slots against it
 			for _, candidateSlot := range commonBalanceSlots {
 				slotHash := erc20BalanceSlot(refAddr, candidateSlot)
-				storageValue, err := client.StorageAt(ctx, tokenContract, slotHash, nil)
+				storageValue, err := reader.GetStorageAt(ctx, tokenContract, slotHash)
 				if err != nil {
 					continue
 				}
@@ -328,29 +322,36 @@ func (s *SimulationStateMap) InjectERC20BalanceChange(
 	holder common.Address,
 	delta *big.Int,
 ) error {
-	if smartWalletConfig == nil || smartWalletConfig.EthRpcUrl == "" {
-		return fmt.Errorf("no RPC URL available for ERC20 balance probing")
+	if smartWalletConfig == nil {
+		return fmt.Errorf("no smart wallet config available for ERC20 balance probing")
 	}
 
-	rpcURL := smartWalletConfig.EthRpcUrl
+	// Resolve the per-chain reader (worker-routed in gateway mode); fall back
+	// to a direct dial only when no reader is registered.
+	reader := GetChainStateReaderForChain(uint64(smartWalletConfig.ChainID))
+	if reader == nil {
+		if smartWalletConfig.EthRpcUrl == "" {
+			return fmt.Errorf("no chain-state reader or RPC URL available for ERC20 balance probing")
+		}
+		client, dialErr := ethclient.DialContext(ctx, smartWalletConfig.EthRpcUrl)
+		if dialErr != nil {
+			return fmt.Errorf("failed to connect to RPC: %w", dialErr)
+		}
+		defer client.Close()
+		reader = NewDirectChainStateReader(client, smartWalletConfig.ChainID)
+	}
 
 	// Discover the balance mapping slot
-	mappingSlot, err := s.ProbeERC20BalanceSlot(ctx, rpcURL, tokenContract, holder)
+	mappingSlot, err := s.ProbeERC20BalanceSlot(ctx, reader, tokenContract, holder)
 	if err != nil {
 		return fmt.Errorf("failed to probe balance slot: %w", err)
 	}
 
 	// Get current on-chain balance
-	client, err := ethclient.DialContext(ctx, rpcURL)
-	if err != nil {
-		return fmt.Errorf("failed to connect to RPC: %w", err)
-	}
-	defer client.Close()
-
 	balanceOfSig := crypto.Keccak256([]byte("balanceOf(address)"))[:4]
 	callData := append(balanceOfSig, common.LeftPadBytes(holder.Bytes(), 32)...)
 
-	result, err := client.CallContract(ctx, ethereum.CallMsg{
+	result, err := reader.CallContract(ctx, ethereum.CallMsg{
 		To:   &tokenContract,
 		Data: callData,
 	}, nil)
@@ -384,20 +385,36 @@ func (s *SimulationStateMap) InjectERC20BalanceChange(
 }
 
 // InjectETHBalanceChange updates the state map to reflect an ETH balance change
-// for the given address. It queries the current on-chain balance via RPC and adds the delta.
+// for the given address. It reads the current on-chain balance through the
+// per-chain worker (gateway mode) and adds the delta, falling back to a direct
+// dial only when no chain-state reader is registered — mirroring
+// InjectERC20BalanceChange so the gateway issues no direct per-chain dial.
 func (s *SimulationStateMap) InjectETHBalanceChange(
 	ctx context.Context,
-	rpcURL string,
+	smartWalletConfig *config.SmartWalletConfig,
 	address common.Address,
 	delta *big.Int,
 ) error {
-	client, err := ethclient.DialContext(ctx, rpcURL)
-	if err != nil {
-		return fmt.Errorf("failed to connect to RPC for ETH balance: %w", err)
+	if smartWalletConfig == nil {
+		return fmt.Errorf("no smart wallet config available for ETH balance probing")
 	}
-	defer client.Close()
 
-	currentBalance, err := client.BalanceAt(ctx, address, nil)
+	// Resolve the per-chain reader (worker-routed in gateway mode); fall back
+	// to a direct dial only when no reader is registered.
+	reader := GetChainStateReaderForChain(uint64(smartWalletConfig.ChainID))
+	if reader == nil {
+		if smartWalletConfig.EthRpcUrl == "" {
+			return fmt.Errorf("no chain-state reader or RPC URL available for ETH balance probing")
+		}
+		client, dialErr := ethclient.DialContext(ctx, smartWalletConfig.EthRpcUrl)
+		if dialErr != nil {
+			return fmt.Errorf("failed to connect to RPC for ETH balance: %w", dialErr)
+		}
+		defer client.Close()
+		reader = NewDirectChainStateReader(client, smartWalletConfig.ChainID)
+	}
+
+	currentBalance, err := reader.GetBalance(ctx, address)
 	if err != nil {
 		return fmt.Errorf("failed to get ETH balance: %w", err)
 	}

@@ -2,14 +2,18 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -149,18 +153,54 @@ func (s *Server) GetSmartWalletAddress(ctx context.Context, req *avsproto.Worker
 	if s.worker.smartWalletCfg == nil {
 		return nil, fmt.Errorf("smart wallet config not initialized")
 	}
+	if !common.IsHexAddress(req.Owner) {
+		return nil, fmt.Errorf("invalid owner address %q", req.Owner)
+	}
 
 	ownerAddr := common.HexToAddress(req.Owner)
-	salt := big.NewInt(req.Salt)
+
+	// Empty salt defaults to 0 (proto3 omits empty strings; this matches
+	// the gateway's nil-salt → "0" convention). CREATE2 salt is a uint256,
+	// so reject negative or >256-bit values rather than letting them
+	// overflow ABI encoding downstream.
+	salt := big.NewInt(0)
+	if req.Salt != "" {
+		parsed, ok := new(big.Int).SetString(req.Salt, 10)
+		if !ok {
+			return nil, fmt.Errorf("invalid salt %q (expected base-10 big.Int string)", req.Salt)
+		}
+		salt = parsed
+	}
+	if salt.Sign() < 0 {
+		return nil, fmt.Errorf("invalid salt %q: must be non-negative", req.Salt)
+	}
+	if salt.BitLen() > 256 {
+		return nil, fmt.Errorf("invalid salt %q: exceeds uint256", req.Salt)
+	}
+
+	// Honor the caller's factory override when provided; otherwise use the
+	// worker's configured factory. The gateway passes its per-chain /
+	// per-request factory so worker-derived addresses match the gateway's
+	// direct-RPC derivation exactly.
+	factory := s.worker.smartWalletCfg.FactoryAddress
+	if req.FactoryAddress != "" {
+		if !common.IsHexAddress(req.FactoryAddress) {
+			return nil, fmt.Errorf("invalid factory address %q", req.FactoryAddress)
+		}
+		factory = common.HexToAddress(req.FactoryAddress)
+	}
 
 	addr, err := aa.GetSenderAddressForFactory(
 		s.worker.rpcClient,
 		ownerAddr,
-		s.worker.smartWalletCfg.FactoryAddress,
+		factory,
 		salt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("getting smart wallet address for %s: %w", req.Owner, err)
+	}
+	if addr == nil {
+		return nil, fmt.Errorf("nil sender address for owner=%s factory=%s salt=%s", req.Owner, factory.Hex(), salt.String())
 	}
 
 	return &avsproto.WorkerGetSmartWalletAddressResp{
@@ -290,5 +330,248 @@ func (s *Server) GetCode(ctx context.Context, req *avsproto.WorkerGetCodeReq) (*
 	}
 	return &avsproto.WorkerGetCodeResp{
 		Code: code,
+	}, nil
+}
+
+// CallContract wraps ethclient.CallContract (eth_call). Used by the
+// contractRead node so the gateway issues no direct eth_call against
+// execution chains.
+func (s *Server) CallContract(ctx context.Context, req *avsproto.WorkerCallContractReq) (*avsproto.WorkerCallContractResp, error) {
+	if !common.IsHexAddress(req.To) {
+		return nil, fmt.Errorf("invalid to address %q", req.To)
+	}
+	to := common.HexToAddress(req.To)
+	msg := ethereum.CallMsg{
+		To:   &to,
+		Data: req.Data,
+	}
+	if req.From != "" {
+		if !common.IsHexAddress(req.From) {
+			return nil, fmt.Errorf("invalid from address %q", req.From)
+		}
+		msg.From = common.HexToAddress(req.From)
+	}
+	if req.Value != "" {
+		v, ok := new(big.Int).SetString(req.Value, 10)
+		if !ok {
+			return nil, fmt.Errorf("invalid value %q (expected base-10 big.Int string)", req.Value)
+		}
+		if v.Sign() < 0 {
+			return nil, fmt.Errorf("invalid value %q: must be non-negative", req.Value)
+		}
+		if v.BitLen() > 256 {
+			return nil, fmt.Errorf("invalid value %q: exceeds uint256", req.Value)
+		}
+		msg.Value = v
+	}
+
+	var blockNumber *big.Int
+	if req.BlockNumber != "" {
+		b, ok := new(big.Int).SetString(req.BlockNumber, 10)
+		if !ok {
+			return nil, fmt.Errorf("invalid block_number %q (expected base-10 big.Int string)", req.BlockNumber)
+		}
+		if b.Sign() < 0 {
+			return nil, fmt.Errorf("invalid block_number %q: must be non-negative", req.BlockNumber)
+		}
+		blockNumber = b
+	}
+
+	result, err := s.worker.rpcClient.CallContract(ctx, msg, blockNumber)
+	if err != nil {
+		return nil, fmt.Errorf("CallContract to %s: %w", req.To, err)
+	}
+	return &avsproto.WorkerCallContractResp{
+		Result: result,
+	}, nil
+}
+
+// GetBlockHeader wraps ethclient.HeaderByNumber, returning the number,
+// hash, and timestamp the gateway reads (a full header can't be carried
+// over gRPC faithfully). block_number empty = latest.
+func (s *Server) GetBlockHeader(ctx context.Context, req *avsproto.WorkerGetBlockHeaderReq) (*avsproto.WorkerGetBlockHeaderResp, error) {
+	var number *big.Int
+	if req.BlockNumber != "" {
+		b, ok := new(big.Int).SetString(req.BlockNumber, 10)
+		if !ok {
+			return nil, fmt.Errorf("invalid block_number %q (expected base-10 big.Int string)", req.BlockNumber)
+		}
+		if b.Sign() < 0 {
+			return nil, fmt.Errorf("invalid block_number %q: must be non-negative", req.BlockNumber)
+		}
+		if !b.IsUint64() {
+			return nil, fmt.Errorf("invalid block_number %q: exceeds uint64", req.BlockNumber)
+		}
+		number = b
+	}
+	header, err := s.worker.rpcClient.HeaderByNumber(ctx, number)
+	if err != nil {
+		return nil, fmt.Errorf("HeaderByNumber: %w", err)
+	}
+	if header == nil {
+		return nil, fmt.Errorf("HeaderByNumber returned nil header")
+	}
+	difficulty := "0"
+	if header.Difficulty != nil {
+		difficulty = header.Difficulty.String()
+	}
+	return &avsproto.WorkerGetBlockHeaderResp{
+		Number:     header.Number.Uint64(),
+		Hash:       header.Hash().Hex(),
+		Time:       header.Time,
+		ParentHash: header.ParentHash.Hex(),
+		Difficulty: difficulty,
+		GasLimit:   header.GasLimit,
+		GasUsed:    header.GasUsed,
+	}, nil
+}
+
+// GetBlockNumber wraps ethclient.BlockNumber (latest block).
+func (s *Server) GetBlockNumber(ctx context.Context, req *avsproto.WorkerGetBlockNumberReq) (*avsproto.WorkerGetBlockNumberResp, error) {
+	number, err := s.worker.rpcClient.BlockNumber(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("BlockNumber: %w", err)
+	}
+	return &avsproto.WorkerGetBlockNumberResp{Number: number}, nil
+}
+
+// maxWalletSaltScan caps the salt range FindMatchingWalletSalt will scan, so a
+// caller can't make the worker issue an unbounded number of factory calls.
+const maxWalletSaltScan = 2000
+
+// FindMatchingWalletSalt scans salts [0, max_salts) for the one whose CREATE2
+// smart-wallet address (under factory_address, or the worker's configured
+// factory) matches target_address. The loop + comparison run worker-side so a
+// wide range is a single round-trip. Returns found=false when no salt matches.
+func (s *Server) FindMatchingWalletSalt(ctx context.Context, req *avsproto.WorkerFindMatchingWalletSaltReq) (*avsproto.WorkerFindMatchingWalletSaltResp, error) {
+	if s.worker.smartWalletCfg == nil {
+		return nil, fmt.Errorf("smart wallet config not initialized")
+	}
+	if !common.IsHexAddress(req.Owner) {
+		return nil, fmt.Errorf("invalid owner address %q", req.Owner)
+	}
+	if !common.IsHexAddress(req.TargetAddress) {
+		return nil, fmt.Errorf("invalid target address %q", req.TargetAddress)
+	}
+	if req.MaxSalts <= 0 {
+		return nil, fmt.Errorf("max_salts must be positive, got %d", req.MaxSalts)
+	}
+	if req.MaxSalts > maxWalletSaltScan {
+		return nil, fmt.Errorf("max_salts %d exceeds cap %d", req.MaxSalts, maxWalletSaltScan)
+	}
+
+	factory := s.worker.smartWalletCfg.FactoryAddress
+	if req.FactoryAddress != "" {
+		if !common.IsHexAddress(req.FactoryAddress) {
+			return nil, fmt.Errorf("invalid factory address %q", req.FactoryAddress)
+		}
+		factory = common.HexToAddress(req.FactoryAddress)
+	}
+
+	owner := common.HexToAddress(req.Owner)
+	target := common.HexToAddress(req.TargetAddress)
+
+	for salt := int64(0); salt < req.MaxSalts; salt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		addr, err := aa.GetSenderAddressForFactory(s.worker.rpcClient, owner, factory, big.NewInt(salt))
+		if err != nil {
+			// A single failed derivation shouldn't abort the whole scan.
+			continue
+		}
+		if addr != nil && *addr == target {
+			return &avsproto.WorkerFindMatchingWalletSaltResp{Found: true, Salt: salt}, nil
+		}
+	}
+	return &avsproto.WorkerFindMatchingWalletSaltResp{Found: false}, nil
+}
+
+// GetTransactionReceipt wraps ethclient.TransactionReceipt. found=false (not
+// an error) when the receipt isn't available yet (pending / unknown hash),
+// so the gateway's confirmation-waiting loop can keep polling.
+func (s *Server) GetTransactionReceipt(ctx context.Context, req *avsproto.WorkerGetTransactionReceiptReq) (*avsproto.WorkerGetTransactionReceiptResp, error) {
+	// Validate the hash shape: common.HexToHash silently coerces a malformed
+	// or empty value to the zero hash, which would then look like "pending"
+	// (found=false) and mask a caller bug instead of surfacing it.
+	if len(req.TxHash) != 66 || !strings.HasPrefix(req.TxHash, "0x") {
+		return nil, fmt.Errorf("invalid tx_hash %q", req.TxHash)
+	}
+	receipt, err := s.worker.rpcClient.TransactionReceipt(ctx, common.HexToHash(req.TxHash))
+	if errors.Is(err, ethereum.NotFound) {
+		return &avsproto.WorkerGetTransactionReceiptResp{Found: false}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("TransactionReceipt for %s: %w", req.TxHash, err)
+	}
+	resp := &avsproto.WorkerGetTransactionReceiptResp{
+		Found:   true,
+		Status:  receipt.Status,
+		GasUsed: receipt.GasUsed,
+		TxHash:  receipt.TxHash.Hex(),
+	}
+	if receipt.EffectiveGasPrice != nil {
+		resp.EffectiveGasPrice = receipt.EffectiveGasPrice.String()
+	}
+	if receipt.BlockNumber != nil {
+		resp.BlockNumber = receipt.BlockNumber.Uint64()
+	}
+	return resp, nil
+}
+
+// GetStorageAt wraps ethclient.StorageAt (latest block). Used by the
+// gateway's simulation balance-slot probing.
+func (s *Server) GetStorageAt(ctx context.Context, req *avsproto.WorkerGetStorageAtReq) (*avsproto.WorkerGetStorageAtResp, error) {
+	if !common.IsHexAddress(req.Address) {
+		return nil, fmt.Errorf("invalid address %q", req.Address)
+	}
+	// A malformed slot would be silently coerced to slot 0 (a valid slot that
+	// returns real data), which could let a wrong-slot probe pass ERC-20
+	// balance-slot validation. Reject anything that isn't a 32-byte hex word.
+	if len(req.Slot) != 66 || !strings.HasPrefix(req.Slot, "0x") {
+		return nil, fmt.Errorf("invalid slot %q", req.Slot)
+	}
+	value, err := s.worker.rpcClient.StorageAt(ctx, common.HexToAddress(req.Address), common.HexToHash(req.Slot), nil)
+	if err != nil {
+		return nil, fmt.Errorf("StorageAt %s slot %s: %w", req.Address, req.Slot, err)
+	}
+	return &avsproto.WorkerGetStorageAtResp{Value: value}, nil
+}
+
+// GetBalance wraps ethclient.BalanceAt(addr, latest). Used by the gateway's
+// withdraw preflight to validate / size native-coin withdrawals.
+func (s *Server) GetBalance(ctx context.Context, req *avsproto.WorkerGetBalanceReq) (*avsproto.WorkerGetBalanceResp, error) {
+	if !common.IsHexAddress(req.Address) {
+		return nil, fmt.Errorf("invalid address %q", req.Address)
+	}
+	balance, err := s.worker.rpcClient.BalanceAt(ctx, common.HexToAddress(req.Address), nil)
+	if err != nil {
+		return nil, fmt.Errorf("BalanceAt for %s: %w", req.Address, err)
+	}
+	return &avsproto.WorkerGetBalanceResp{
+		BalanceWei: balance.String(),
+	}, nil
+}
+
+// GetTokenBalance reads an ERC-20 balance via erc20.BalanceOf. Used by the
+// gateway's withdraw preflight to validate / size ERC-20 withdrawals. The
+// returned balance is raw token units (no decimals applied).
+func (s *Server) GetTokenBalance(ctx context.Context, req *avsproto.WorkerGetTokenBalanceReq) (*avsproto.WorkerGetTokenBalanceResp, error) {
+	if !common.IsHexAddress(req.TokenAddress) {
+		return nil, fmt.Errorf("invalid token address %q", req.TokenAddress)
+	}
+	if !common.IsHexAddress(req.OwnerAddress) {
+		return nil, fmt.Errorf("invalid owner address %q", req.OwnerAddress)
+	}
+	token, err := erc20.NewErc20(common.HexToAddress(req.TokenAddress), s.worker.rpcClient)
+	if err != nil {
+		return nil, fmt.Errorf("erc20 binding for %s: %w", req.TokenAddress, err)
+	}
+	balance, err := token.BalanceOf(&bind.CallOpts{Context: ctx}, common.HexToAddress(req.OwnerAddress))
+	if err != nil {
+		return nil, fmt.Errorf("BalanceOf token=%s owner=%s: %w", req.TokenAddress, req.OwnerAddress, err)
+	}
+	return &avsproto.WorkerGetTokenBalanceResp{
+		Balance: balance.String(),
 	}, nil
 }

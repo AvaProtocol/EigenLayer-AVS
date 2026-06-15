@@ -57,6 +57,30 @@ func (f *fakeChainWorkerClient) EstimateGas(context.Context, *avsproto.WorkerEst
 func (f *fakeChainWorkerClient) GetCode(context.Context, *avsproto.WorkerGetCodeReq, ...grpc.CallOption) (*avsproto.WorkerGetCodeResp, error) {
 	panic("unused")
 }
+func (f *fakeChainWorkerClient) GetBalance(context.Context, *avsproto.WorkerGetBalanceReq, ...grpc.CallOption) (*avsproto.WorkerGetBalanceResp, error) {
+	panic("unused")
+}
+func (f *fakeChainWorkerClient) GetTokenBalance(context.Context, *avsproto.WorkerGetTokenBalanceReq, ...grpc.CallOption) (*avsproto.WorkerGetTokenBalanceResp, error) {
+	panic("unused")
+}
+func (f *fakeChainWorkerClient) CallContract(context.Context, *avsproto.WorkerCallContractReq, ...grpc.CallOption) (*avsproto.WorkerCallContractResp, error) {
+	panic("unused")
+}
+func (f *fakeChainWorkerClient) GetBlockHeader(context.Context, *avsproto.WorkerGetBlockHeaderReq, ...grpc.CallOption) (*avsproto.WorkerGetBlockHeaderResp, error) {
+	panic("unused")
+}
+func (f *fakeChainWorkerClient) GetBlockNumber(context.Context, *avsproto.WorkerGetBlockNumberReq, ...grpc.CallOption) (*avsproto.WorkerGetBlockNumberResp, error) {
+	panic("unused")
+}
+func (f *fakeChainWorkerClient) FindMatchingWalletSalt(context.Context, *avsproto.WorkerFindMatchingWalletSaltReq, ...grpc.CallOption) (*avsproto.WorkerFindMatchingWalletSaltResp, error) {
+	panic("unused")
+}
+func (f *fakeChainWorkerClient) GetTransactionReceipt(context.Context, *avsproto.WorkerGetTransactionReceiptReq, ...grpc.CallOption) (*avsproto.WorkerGetTransactionReceiptResp, error) {
+	panic("unused")
+}
+func (f *fakeChainWorkerClient) GetStorageAt(context.Context, *avsproto.WorkerGetStorageAtReq, ...grpc.CallOption) (*avsproto.WorkerGetStorageAtResp, error) {
+	panic("unused")
+}
 
 // TestWorkerRoutedFetcher_HappyPath confirms a successful worker response
 // gets mapped to a TokenMetadata correctly — name, symbol, decimals, source

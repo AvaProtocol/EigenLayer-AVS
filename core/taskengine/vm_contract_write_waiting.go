@@ -2,16 +2,41 @@ package taskengine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
+
+// receiptForTx fetches a transaction receipt for the VM's chain via the
+// per-chain worker (gateway mode) when a reader is registered, falling back
+// to a direct dial otherwise. Returns (nil, nil) when the receipt isn't
+// available yet (pending).
+func (v *VM) receiptForTx(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+	if v.smartWalletConfig == nil {
+		return nil, fmt.Errorf("smart wallet config not available")
+	}
+	if reader := GetChainStateReaderForChain(uint64(v.smartWalletConfig.ChainID)); reader != nil {
+		return reader.GetTransactionReceipt(ctx, txHash)
+	}
+	client, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+	receipt, err := client.TransactionReceipt(ctx, txHash)
+	if errors.Is(err, ethereum.NotFound) {
+		return nil, nil
+	}
+	return receipt, err
+}
 
 // shouldWaitForContractWriteConfirmation checks if a contract_write execution step requires waiting for on-chain confirmation
 // This is true when:
@@ -86,13 +111,6 @@ func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirm
 		return nil, fmt.Errorf("smart wallet config not available for UserOp confirmation")
 	}
 
-	// Create eth client
-	client, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to RPC: %w", err)
-	}
-	defer client.Close()
-
 	// Create bundler client
 	bundlerClient, err := bundler.NewBundlerClient(v.smartWalletConfig.BundlerURL)
 	if err != nil {
@@ -143,7 +161,7 @@ func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirm
 			result := &waitForUserOpConfirmationResult{TxHash: txHash}
 			if txHash != "" {
 				receiptCtx, receiptCancel := context.WithTimeout(context.Background(), 30*time.Second)
-				onChainReceipt, receiptErr := client.TransactionReceipt(receiptCtx, common.HexToHash(txHash))
+				onChainReceipt, receiptErr := v.receiptForTx(receiptCtx, common.HexToHash(txHash))
 				receiptCancel()
 				if receiptErr == nil && onChainReceipt != nil {
 					result.Receipt = onChainReceipt
@@ -173,37 +191,6 @@ func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirm
 		// Wait before next retry
 		time.Sleep(currentInterval)
 	}
-}
-
-// getReceiptByUserOpHash queries the EntryPoint contract for UserOperation events to find the transaction receipt
-// This is a fallback method when the bundler doesn't provide the receipt directly
-func (v *VM) getReceiptByUserOpHash(userOpHash string) (*types.Receipt, error) {
-	if v.smartWalletConfig == nil {
-		return nil, fmt.Errorf("smart wallet config not available")
-	}
-
-	client, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to RPC: %w", err)
-	}
-	defer client.Close()
-
-	// This method is currently unused - we rely on bundler.GetUserOperationReceipt instead
-	// Keeping this as a placeholder for future implementation if needed
-
-	// In a real implementation, you would query eth_getLogs with UserOperationEvent signature
-	// and search for the matching userOpHash in recent blocks
-
-	// In a real implementation, you would:
-	// 1. Query eth_getLogs with UserOperationEvent signature
-	// 2. Parse the logs to find the matching userOpHash
-	// 3. Extract the transaction hash from the log
-	// 4. Get the receipt using eth_getTransactionReceipt
-
-	// For now, we rely on the bundler's GetUserOperationReceipt method
-	// which is called in waitForUserOpConfirmation
-
-	return nil, fmt.Errorf("receipt not found (use bundler.GetUserOperationReceipt instead)")
 }
 
 // waitForOnChainConfirmationIfNeeded is the single entry point for receipt-waiting logic.

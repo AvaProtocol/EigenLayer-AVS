@@ -16,13 +16,11 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/bigint"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
@@ -44,13 +42,16 @@ type SendUserOpFunc func(
 
 type ContractWriteProcessor struct {
 	*CommonProcessor
-	client            *ethclient.Client
+	// client is the per-chain ChainStateReader — worker-routed in gateway
+	// mode, a direct-RPC reader otherwise. Used to stamp simulation
+	// receipts with the latest block number/hash.
+	client            ChainStateReader
 	smartWalletConfig *config.SmartWalletConfig
 	owner             common.Address
 	sendUserOpFunc    SendUserOpFunc
 }
 
-func NewContractWriteProcessor(vm *VM, client *ethclient.Client, smartWalletConfig *config.SmartWalletConfig, owner common.Address) *ContractWriteProcessor {
+func NewContractWriteProcessor(vm *VM, client ChainStateReader, smartWalletConfig *config.SmartWalletConfig, owner common.Address) *ContractWriteProcessor {
 	r := &ContractWriteProcessor{
 		client:            client,
 		smartWalletConfig: smartWalletConfig,
@@ -553,8 +554,8 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		if mr != nil && mr.Receipt != nil && r.client != nil {
 			if header, herr := r.client.HeaderByNumber(ctx, nil); herr == nil && header != nil {
 				if recMap, ok := mr.Receipt.AsInterface().(map[string]interface{}); ok {
-					recMap["blockNumber"] = fmt.Sprintf("0x%x", header.Number.Uint64())
-					recMap["blockHash"] = header.Hash().Hex()
+					recMap["blockNumber"] = fmt.Sprintf("0x%x", header.Number)
+					recMap["blockHash"] = header.Hash.Hex()
 					if newVal, err := structpb.NewValue(recMap); err == nil {
 						mr.Receipt = newVal
 					}
@@ -710,18 +711,15 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	// Optional runner validation: if task.SmartWalletAddress is set, ensure it matches
 	// one of the owner EOA's known smart wallets (authoritative). If wallet list cannot be checked,
 	// fall back to checking the derived salt:0 address as a best-effort sanity check.
-	if r.vm.task != nil && r.vm.task.Task != nil && r.vm.task.SmartWalletAddress != "" {
+	if r.vm.task != nil && r.vm.task.Task != nil && r.vm.task.SmartWalletAddress != "" && r.client != nil {
 		runnerStr := r.vm.task.SmartWalletAddress
-		client, err := ethclient.Dial(r.smartWalletConfig.EthRpcUrl)
-		if err == nil {
-			// derive sender at salt:0
-			sender, derr := aa.GetSenderAddress(client, r.owner, big.NewInt(0))
-			client.Close()
-			if derr == nil && sender != nil {
-				if !strings.EqualFold(sender.Hex(), runnerStr) {
-					// Do not fail solely on derived salt:0 mismatch; authoritative check is the wallet list in run_node path
-					r.vm.logger.Warn("runner does not match derived salt:0; proceeding (wallet list validation applies in run_node)", "expected", sender.Hex(), "runner", runnerStr)
-				}
+		// Derive sender at salt:0 via the per-chain reader (worker-routed in
+		// gateway mode) instead of a direct dial. Best-effort sanity check;
+		// the authoritative wallet-list validation runs in the run_node path.
+		sender, derr := r.client.GetSmartWalletAddress(ctx, r.owner, r.smartWalletConfig.FactoryAddress, big.NewInt(0))
+		if derr == nil && (sender != common.Address{}) {
+			if !strings.EqualFold(sender.Hex(), runnerStr) {
+				r.vm.logger.Warn("runner does not match derived salt:0; proceeding (wallet list validation applies in run_node)", "expected", sender.Hex(), "runner", runnerStr)
 			}
 		}
 	}
@@ -777,37 +775,26 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		executionLogBuilder.WriteString("No paymaster (self-funded transaction)\n")
 	}
 
-	// Pre-send gas estimation to capture in logs
-	executionLogBuilder.WriteString("Performing gas estimation...\n")
-
-	// Create a temporary UserOp for gas estimation
-	rpcClient, rpcErr := ethclient.Dial(r.smartWalletConfig.EthRpcUrl)
-	if rpcErr != nil {
-		executionLogBuilder.WriteString(fmt.Sprintf("Failed to connect to RPC: %v\n", rpcErr))
-	} else {
-		defer rpcClient.Close()
-
-		_, bundlerErr := bundler.NewBundlerClient(r.smartWalletConfig.BundlerURL)
-		if bundlerErr != nil {
+	// Pre-send diagnostics (logged only). Read via the per-chain reader
+	// (worker-routed in gateway mode) so there's no gateway-side dial; the
+	// bundler does the authoritative gas pricing at send time.
+	executionLogBuilder.WriteString("Collecting pre-send diagnostics...\n")
+	if r.client != nil {
+		if bundlerClient, bundlerErr := bundler.NewBundlerClient(r.smartWalletConfig.BundlerURL); bundlerErr != nil {
 			executionLogBuilder.WriteString(fmt.Sprintf("Failed to create bundler client: %v\n", bundlerErr))
 		} else {
-			// Check smart wallet balance
-			smartWalletAddr := senderOverride
-			if smartWalletAddr != nil {
-				if balance, balErr := rpcClient.BalanceAt(ctx, *smartWalletAddr, nil); balErr == nil {
+			bundlerClient.Close()
+			if senderOverride != nil {
+				if balance, balErr := r.client.GetBalance(ctx, *senderOverride); balErr == nil {
 					executionLogBuilder.WriteString(fmt.Sprintf("Smart wallet balance: %s wei\n", balance.String()))
 				} else {
 					executionLogBuilder.WriteString(fmt.Sprintf("Failed to check balance: %v\n", balErr))
 				}
 			}
-
-			// Try to get current gas prices
-			if maxFee, maxPriority, feeErr := eip1559.SuggestFee(rpcClient); feeErr == nil {
-				executionLogBuilder.WriteString(fmt.Sprintf("Current gas prices:\n"))
-				executionLogBuilder.WriteString(fmt.Sprintf("  MaxFeePerGas: %s wei\n", maxFee.String()))
-				executionLogBuilder.WriteString(fmt.Sprintf("  MaxPriorityFeePerGas: %s wei\n", maxPriority.String()))
+			if gasPrice, feeErr := r.client.SuggestGasPrice(ctx); feeErr == nil {
+				executionLogBuilder.WriteString(fmt.Sprintf("Suggested gas price: %s wei\n", gasPrice.String()))
 			} else {
-				executionLogBuilder.WriteString(fmt.Sprintf("Failed to get gas prices: %v\n", feeErr))
+				executionLogBuilder.WriteString(fmt.Sprintf("Failed to get gas price: %v\n", feeErr))
 			}
 		}
 	}

@@ -1265,7 +1265,25 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		hash := crypto.Keccak256(concatenated)
 		mockAddr := common.BytesToAddress(hash[12:])
 		derivedSenderAddress = &mockAddr
+	} else if reader := GetChainStateReaderForChain(uint64(chainID)); reader != nil {
+		// Preferred path: derive via the per-chain ChainStateReader. In
+		// gateway mode this is worker-routed, so the gateway issues no
+		// direct chain RPC for wallet derivation; in single-chain mode it's
+		// a direct reader that reuses the existing client (no per-call dial).
+		addr, deriveErr := reader.GetSmartWalletAddress(context.Background(), user.Address, factoryAddr, saltBig)
+		if deriveErr != nil {
+			n.logger.Error("GetWallet: factory.getAddress() failed (worker-routed)",
+				"chain_id", chainID, "owner", user.Address.Hex(), "factory", factoryAddr.Hex(),
+				"salt", saltBig.String(), "error", deriveErr)
+			return nil, status.Errorf(codes.Unavailable,
+				"GetWallet: derive sender on chain %d via factory %s: %v",
+				chainID, factoryAddr.Hex(), deriveErr)
+		}
+		derivedSenderAddress = &addr
 	} else {
+		// Fallback: no ChainStateReader registered for this chain (single-
+		// chain startup edge / unconfigured chain). Dial the chain RPC
+		// directly, same as before the worker-routing migration.
 		if swCfg.EthRpcUrl == "" {
 			n.logger.Error("GetWallet: no EthRpcUrl configured for chain — refusing to derive (would risk persisting a mock address under a real chain)",
 				"chain_id", chainID, "owner", user.Address.Hex())
@@ -3063,12 +3081,25 @@ func (n *Engine) GetWorkflow(user *model.User, taskID string) (*model.Workflow, 
 // instructOperatorImmediateTrigger instructs the connected operator to trigger the task immediately
 // with the current block number, bypassing the normal interval waiting
 func (n *Engine) instructOperatorImmediateTrigger(taskID string) error {
-	// Get the current block number to pass to the operator
-	if rpcConn == nil {
-		return fmt.Errorf("RPC connection not available for immediate block trigger")
+	// Load the task first so the current-block read targets the task's
+	// chain (via its per-chain worker), not a single gateway RPC.
+	task, err := n.GetWorkflowByID(taskID)
+	if err != nil {
+		return fmt.Errorf("failed to get task for immediate trigger: %w", err)
 	}
 
-	currentBlock, err := rpcConn.BlockNumber(context.Background())
+	// The current-block read must target the task's chain. Required — there
+	// is no engine-default chain; a zero/unset chain_id is a hard error so
+	// the read never silently targets the wrong chain.
+	chainID := task.ChainId
+	if chainID == 0 {
+		return fmt.Errorf("task %s has no chain_id; cannot resolve chain for immediate block trigger", taskID)
+	}
+	reader := GetChainStateReaderForChain(uint64(chainID))
+	if reader == nil {
+		return fmt.Errorf("no chain-state reader available for chain %d (immediate block trigger)", chainID)
+	}
+	currentBlock, err := reader.GetBlockNumber(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to get current block number: %w", err)
 	}
@@ -3076,13 +3107,8 @@ func (n *Engine) instructOperatorImmediateTrigger(taskID string) error {
 	if n.logger != nil {
 		n.logger.Info("Instructing operator to trigger immediately",
 			"task_id", taskID,
+			"chain_id", chainID,
 			"current_block", currentBlock)
-	}
-
-	// Get the task to include proper metadata
-	task, err := n.GetWorkflowByID(taskID)
-	if err != nil {
-		return fmt.Errorf("failed to get task for immediate trigger: %w", err)
 	}
 
 	// Send immediate trigger instruction directly to operators with task metadata
@@ -3892,7 +3918,7 @@ func (n *Engine) injectTransferEventState(data map[string]interface{}, vm *VM) {
 		if vm.smartWalletConfig != nil && vm.smartWalletConfig.EthRpcUrl != "" {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := vm.simulationState.InjectETHBalanceChange(ctx, vm.smartWalletConfig.EthRpcUrl, holderAddress, transferAmount); err != nil {
+			if err := vm.simulationState.InjectETHBalanceChange(ctx, vm.smartWalletConfig, holderAddress, transferAmount); err != nil {
 				n.logger.Warn("Failed to inject ETH balance override", "error", err)
 			}
 		}

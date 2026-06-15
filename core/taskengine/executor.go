@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -892,14 +893,23 @@ func (x *WorkflowExecutor) validateWalletOwnership(chainID int64, user *model.Us
 	// Must use the task's chain config — deriving against the gateway's default
 	// chain factory produces a different wallet than the task's chain factory
 	// and the comparison will spuriously miss.
-	if swCfg != nil && swCfg.EthRpcUrl != "" {
-		if rpcClient, err := ethclient.Dial(swCfg.EthRpcUrl); err == nil {
-			// Load the default smart wallet address (salt:0)
-			if err := user.LoadDefaultSmartWallet(rpcClient); err != nil {
+	if swCfg != nil {
+		if reader := GetChainStateReaderForChain(uint64(chainID)); reader != nil {
+			// Gateway mode: derive salt:0 via the chain worker (no gateway dial).
+			if addr, derr := reader.GetSmartWalletAddress(context.Background(), user.Address, swCfg.FactoryAddress, big.NewInt(0)); derr == nil {
+				user.SmartAccountAddress = &addr
+			} else {
 				x.logger.Warn("Failed to load default smart wallet for validation",
-					"owner", user.Address.Hex(), "chain_id", chainID, "error", err)
+					"owner", user.Address.Hex(), "chain_id", chainID, "error", derr)
 			}
-			rpcClient.Close()
+		} else if swCfg.EthRpcUrl != "" {
+			if rpcClient, err := ethclient.Dial(swCfg.EthRpcUrl); err == nil {
+				if err := user.LoadDefaultSmartWallet(rpcClient); err != nil {
+					x.logger.Warn("Failed to load default smart wallet for validation",
+						"owner", user.Address.Hex(), "chain_id", chainID, "error", err)
+				}
+				rpcClient.Close()
+			}
 		}
 	}
 
@@ -915,8 +925,8 @@ func (x *WorkflowExecutor) validateWalletOwnership(chainID int64, user *model.Us
 	// Handles factory-upgrade scenarios where the original wallet record was
 	// never written for the post-upgrade derived address. MUST use the task's
 	// per-chain config — see resolveSmartWalletConfig above.
-	if swCfg != nil && swCfg.EthRpcUrl != "" {
-		if isValid, err := x.validateDerivedWallet(swCfg, user.Address, smartWalletAddr); err == nil && isValid {
+	if swCfg != nil {
+		if isValid, err := x.validateDerivedWallet(chainID, swCfg, user.Address, smartWalletAddr); err == nil && isValid {
 			x.logger.Info("Wallet validated as legitimate derived wallet",
 				"owner", user.Address.Hex(), "wallet", smartWalletAddr.Hex(), "chain_id", chainID)
 			return true, nil
@@ -934,25 +944,46 @@ func (x *WorkflowExecutor) validateWalletOwnership(chainID int64, user *model.Us
 // The swCfg argument is the per-chain config resolved by the caller —
 // passing it in (rather than reading x.smartWalletConfig) is what makes
 // this work in gateway mode where the executor is shared across chains.
-func (x *WorkflowExecutor) validateDerivedWallet(swCfg *config.SmartWalletConfig, owner common.Address, smartWalletAddr common.Address) (bool, error) {
-	rpcClient, err := ethclient.Dial(swCfg.EthRpcUrl)
-	if err != nil {
-		return false, fmt.Errorf("failed to connect to RPC: %w", err)
-	}
-	defer rpcClient.Close()
-
+func (x *WorkflowExecutor) validateDerivedWallet(chainID int64, swCfg *config.SmartWalletConfig, owner common.Address, smartWalletAddr common.Address) (bool, error) {
 	factoryAddr := swCfg.FactoryAddress
 
 	// Try salt values from 0 to max_wallets_per_owner to see if any produce the target wallet address
 	// This uses the configured limit from aggregator.yaml
 	maxWallets := int64(swCfg.MaxWalletsPerOwner)
 
-	for salt := int64(0); salt < maxWallets; salt++ {
-		derivedAddr, err := aa.GetSenderAddressForFactory(rpcClient, owner, factoryAddr, big.NewInt(salt))
+	// Prefer the per-chain reader: in gateway mode the worker runs the whole
+	// salt scan server-side (one round-trip). Fall back to a direct dial +
+	// local loop only when no reader is registered (single-chain mode / tests).
+	if reader := GetChainStateReaderForChain(uint64(chainID)); reader != nil {
+		found, salt, err := reader.FindMatchingWalletSalt(context.Background(), owner, factoryAddr, smartWalletAddr, maxWallets)
 		if err != nil {
-			// Log error for debugging but continue with next salt
+			return false, err
+		}
+		if found {
+			x.logger.Debug("Found matching derived wallet",
+				"owner", owner.Hex(), "wallet", smartWalletAddr.Hex(), "factory", factoryAddr.Hex(), "salt", salt)
+			return true, nil
+		}
+		// No salt matched: the wallet is legitimately not derivable from this
+		// owner. That is a "not valid" result, not an error — only genuine scan
+		// failures (above) return a non-nil error, so the caller can tell
+		// "checked, not owned" apart from "could not check".
+		x.logger.Debug("No matching derived wallet found",
+			"owner", owner.Hex(), "wallet", smartWalletAddr.Hex(), "factory", factoryAddr.Hex(), "salts_checked", maxWallets)
+		return false, nil
+	}
+
+	rpcClient, err := ethclient.Dial(swCfg.EthRpcUrl)
+	if err != nil {
+		return false, fmt.Errorf("failed to connect to RPC: %w", err)
+	}
+	defer rpcClient.Close()
+
+	for salt := int64(0); salt < maxWallets; salt++ {
+		derivedAddr, derr := aa.GetSenderAddressForFactory(rpcClient, owner, factoryAddr, big.NewInt(salt))
+		if derr != nil {
 			x.logger.Debug("Failed to derive wallet address",
-				"owner", owner.Hex(), "factory", factoryAddr.Hex(), "salt", salt, "error", err)
+				"owner", owner.Hex(), "factory", factoryAddr.Hex(), "salt", salt, "error", derr)
 			continue
 		}
 
@@ -964,10 +995,11 @@ func (x *WorkflowExecutor) validateDerivedWallet(swCfg *config.SmartWalletConfig
 		}
 	}
 
+	// No salt matched: not an error, just "not owned" (see worker branch).
 	x.logger.Debug("No matching derived wallet found",
 		"owner", owner.Hex(), "wallet", smartWalletAddr.Hex(),
 		"factory", factoryAddr.Hex(), "salts_checked", maxWallets)
-	return false, fmt.Errorf("wallet address cannot be derived from owner with factory %s (checked %d salts)", factoryAddr.Hex(), maxWallets)
+	return false, nil
 }
 
 // validationFailureDisableThreshold is the number of consecutive permanent

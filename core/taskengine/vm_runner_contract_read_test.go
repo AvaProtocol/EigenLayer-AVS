@@ -70,7 +70,7 @@ func TestContractReadSimpleReturn(t *testing.T) {
 		return
 	}
 
-	n := NewContractReadProcessor(vm, testutil.GetRpcClient())
+	n := NewContractReadProcessor(vm, NewDirectChainStateReader(testutil.GetRpcClient(), 0))
 
 	step, err := n.Execute("123", node)
 
@@ -175,7 +175,7 @@ func TestContractReadComplexReturn(t *testing.T) {
 		return
 	}
 
-	n := NewContractReadProcessor(vm, testutil.GetRpcClient())
+	n := NewContractReadProcessor(vm, NewDirectChainStateReader(testutil.GetRpcClient(), 0))
 	step, err := n.Execute("123abc", node)
 
 	if err != nil {
@@ -311,7 +311,7 @@ func TestContractReadWithDecimalFormatting(t *testing.T) {
 		return
 	}
 
-	n := NewContractReadProcessor(vm, testutil.GetRpcClient())
+	n := NewContractReadProcessor(vm, NewDirectChainStateReader(testutil.GetRpcClient(), 0))
 	step, err := n.Execute("123decimal", node)
 
 	if err != nil {

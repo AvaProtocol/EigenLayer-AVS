@@ -1,0 +1,200 @@
+# Thread chainID through run_node/enrichment; retire the AVS-chain `rpcConn`
+
+## Why
+
+PRs 1–4 of `20260614-route-vm-execution-through-workers.md` migrated every
+**chain-aware** gateway VM path (getWallet, contractRead, contractWrite)
+onto per-chain `ChainStateReader`s. What remains is a cluster of reads
+that go through the **package-level `rpcConn`** — a single
+`*ethclient.Client` set once at startup from
+`config.SmartWallet.EthRpcUrl` (`engine.go:SetRpc`, the gateway's **AVS
+chain**, currently Sepolia).
+
+Two problems with `rpcConn`:
+
+1. **Wrong chain in multi-chain mode.** These reads hit the AVS chain
+   regardless of the workflow's actual chain. A contractRead-style
+   enrichment or event search for a Base workflow reads Sepolia. This is
+   a latent correctness bug today, not just a routing concern.
+2. **Last `eth_rpc_url` consumers.** `rpcConn` (and the per-chain VM dials,
+   now migrated) are the reason the gateway still needs every chain's
+   `eth_rpc_url`. Retiring `rpcConn` is the precondition for the env-var
+   strip (PR 7 of the parent doc).
+
+`rpcConn == nil` also doubles as the **test/CI mock signal**
+(`engine.go:1261` GetWallet, etc.) — any migration must preserve that.
+
+## Complete `rpcConn` inventory
+
+| Site | Enclosing func | Op | chainID source |
+|---|---|---|---|
+| `engine.go:3089` | `instructOperatorImmediateTrigger(taskID)` | `BlockNumber` | load task → `task.ChainId` |
+| `run_node_immediately.go:110,130` | `runBlockTriggerImmediately(triggerConfig, …)` | `BlockNumber`, `HeaderByNumber` | `triggerConfig["chainId"]` (block trigger is chain-scoped) |
+| `run_node_immediately.go:2252` | `parseEventWithParsedABI(eventLog, abi, query)` | `HeaderByNumber` | thread param (caller `:1881` has it; `node_output_handlers.go:427` passes `nil` query) |
+| `run_node_immediately.go:2311` | `callContractMethod(addr, callData)` | `CallContract` (decimals) | thread param (caller `:1958` has `eventLog` → event chain) |
+| `run_node_immediately.go:2330` | `runEventTriggerWithHistoricalSearch(ctx, queries, …)` | `BlockNumber` | `EventTrigger_Config.GetChainId()` from the queries |
+| `run_node_immediately.go:2654,2720,2764` | `searchEventsForQuery(ctx, addrs, topics, …)` | `FilterLogs` | thread param (caller `:2433`) |
+| `utils.go:94` | `GetBlock(blockNumber)` (package func) | `HeaderByNumber` | needs a chainID param + caller audit |
+
+Already converted: `engine.go:1261` (GetWallet) keeps `rpcConn == nil`
+purely as the test signal — no chain read.
+
+## Worker RPCs
+
+Existing (reuse): `CallContract`, `HeaderByNumber` (PRs 2–3).
+
+New, needed here:
+
+- **`GetBlockNumber() → uint64`** — wraps `ethclient.BlockNumber`. Trivial.
+- **`FilterLogs(addresses, topics, from_block, to_block) → []Log`** — wraps
+  `ethclient.FilterLogs`. **Payload-sensitive** (see Risks) and **heavy**
+  relative to a point read. Needed only by the simulate-only historical
+  search, and only for the residue Tenderly can't reproduce (see
+  "Simulate fidelity" below) — so scope it to that residue, don't add it
+  speculatively. The gateway already chunks ranges caller-side (`:2764`);
+  keep chunking on the gateway and have the worker serve one bounded range
+  per call, OR move chunking worker-side and stream. Decide before building.
+
+Add `GetBlockNumber` to the `ChainStateReader` interface + both impls
+unconditionally. Add `FilterLogs` only once PR C confirms a residue of
+historical searches that Tenderly/direct-call can't cover.
+
+## Strategy: thread chainID, resolve per-chain reader
+
+Each function above gains a `chainID int64` parameter (or extracts it from
+a config/trigger already in scope), then:
+
+```go
+reader := GetChainStateReaderForChain(uint64(chainID))
+if reader == nil {
+    // test/CI (no registry) or unconfigured chain — preserve today's
+    // behavior: skip the read (mock/degraded path), exactly as the
+    // rpcConn == nil branches do now.
+}
+```
+
+The `rpcConn == nil` test signal is preserved: in tests the registry is
+empty, so `GetChainStateReaderForChain` returns nil and we take the same
+degraded/mock branch the code takes today. Production (gateway) always has
+per-chain readers registered.
+
+The threading is mechanical but wide — it touches the run_node entry
+points, event historical-search, and event-enrichment helpers. Do it in
+small, independently-shippable slices, each verified before the next.
+
+## PR breakdown
+
+1. **PR A — `GetBlockNumber` + `GetBlock`/block-trigger reads.** Add the
+   `GetBlockNumber` worker RPC + reader method. Thread chainID through
+   `instructOperatorImmediateTrigger`, `runBlockTriggerImmediately`,
+   `GetBlock` (+ its callers). Lowest-risk, no payload concerns.
+2. **PR B — event-enrichment reads (delivered).** Threaded chainID through
+   `callContractMethod`, `parseEventWithParsedABI`, `parseEventWithABI`,
+   `runEventTriggerWithHistoricalSearch` (enrichment only), the
+   `OutputHandler.ConvertToProtobuf` interface (+ all impls), and
+   `RunNodeImmediatelyRPC`; emitted `chain_id` into the event trigger
+   config. The `HeaderByNumber` (event block timestamp) and `CallContract`
+   (decimals) reads now route through the per-chain worker. These are
+   **best-effort, non-fatal** enrichment: an unspecified chain *skips*
+   enrichment (`chainReaderForEnrichment` → nil) rather than reading a
+   default chain — never hard-fails the event decode. Subsumes the
+   `callContractMethod` deferral from parent PR 2. The
+   `runEventTriggerWithHistoricalSearch` `BlockNumber`/`FilterLogs` reads
+   stay on `rpcConn` for PR C.
+3. **PR C — simulate historical search → deleted (delivered).** The
+   Tenderly-first inventory resolved to "delete", not "migrate":
+   - Event-trigger simulate already prefers synthetic generation
+     (`simulationMode: true`, the default). That path is **100% local
+     synthetic** (`createMockTransferLog` / `createMockAnswerUpdatedLog` /
+     ABI-encoded generic) and covers all event types — it doesn't even
+     call Tenderly's API (only `SimulateContractWrite` does).
+   - `FilterLogs` was reached **only** via `simulationMode: false`
+     (historical real-event lookup). The Tenderly→historical fallback was
+     already dead (its `"simulation not yet supported"` trigger string is
+     never generated).
+   - Studio's entire git history never set `simulationMode: false` (only
+     `true`, since removed), and the ava-sdk-js `RunTriggerRequest` doesn't
+     expose the field. So no shipped client can reach the historical path.
+   - A live Tenderly simulate of an ERC-20 transfer confirmed Tenderly
+     returns a fully-decoded `Transfer` event in one call — a real-EVM
+     alternative far lighter than a 3–6 month log scan, if higher fidelity
+     than the synthetic mock is ever wanted.
+
+   So `runEventTriggerWithHistoricalSearch` + `searchEventsForQuery` (and
+   the dead block-search-range helpers) were **deleted**. Event triggers
+   now run simulation-only; an explicit `simulationMode: false` is rejected
+   with a clear error rather than silently returning synthetic data. No
+   `FilterLogs` worker RPC was needed. This removes the last gateway
+   `FilterLogs`/`BlockNumber` reads (only the dead `utils.GetBlock`
+   remains, cleaned up in PR D).
+4. **PR D — retire `rpcConn` + the env-var strip.** Once no chain read
+   uses `rpcConn`, replace the `rpcConn == nil` test signal with an
+   explicit test flag, drop the per-chain dial fallbacks, strip the
+   per-chain `eth_rpc_url`/`bundler_url` from `gateway-railway.yaml`, and
+   delete the `<CHAIN>_RPC` env vars from the gateway Railway service.
+   Keep the top-level `eth_rpc_url` (AVS chain). **This is PR 7 of the
+   parent doc — the irreversible step, after a prod cycle.**
+
+## Layer note — live state vs simulate history (don't conflate them)
+
+Two different operations get muddled because both involve event logs:
+
+- **Live trigger monitoring is the operator's job, and it is stream-based.**
+  Operators subscribe to EVM events (`SubscribeFilterLogs` in
+  `core/taskengine/trigger/event.go`) and fire when a task's trigger
+  condition is met. They are forward-looking and **do not own or store an
+  event history** — they monitor conditions, they don't keep a log archive.
+  (External PR #582 hardens exactly this layer: partial-subscription
+  rollback + active-vs-desired subscription telemetry.) **Live chain/event
+  state belongs to these streams, never to a gateway `FilterLogs` poll.**
+
+- **The gateway's `FilterLogs` is simulate-only historical search.** It
+  lives solely in `runEventTriggerWithHistoricalSearch`, the manual-run /
+  simulate path, where it does a one-off **backward-looking** scan to
+  surface a recent matching event as sample output. A live stream cannot
+  answer this (it has no past), and operators cannot serve it (no history)
+  — so "ask an operator" is a non-option, and there is no operator-overlap
+  to resolve. If the gateway keeps doing this search, it routes through the
+  chain worker like every other read in this migration.
+
+So the chain-routing question is settled: **worker-route the simulate
+historical search.** The only remaining question is the *simulate-fidelity*
+one below — independent of routing.
+
+## Simulate fidelity — prefer Tenderly over `FilterLogs`
+
+`FilterLogs` is much heavier than a simulated call. Several simulate
+strategies already exist (`runEventTriggerWithDirectCalls`,
+`runEventTriggerWithTenderlySimulation`, `runEventTriggerWithHistoricalSearch`).
+Direction: **prefer Tenderly / direct-call simulation; fall back to a
+historical `FilterLogs` scan only for scenarios Tenderly genuinely cannot
+reproduce.**
+
+Concretely — a case like "detect a past ERC-20 Transfer" is the kind of
+thing that today reaches for `FilterLogs`, but if Tenderly can simulate
+the transfer and surface the event, we should use that and skip the
+log scan entirely. PR C should:
+
+1. Inventory what `runEventTriggerWithHistoricalSearch` is relied on for.
+2. Move every case Tenderly/direct-call can cover onto those strategies.
+3. Keep `FilterLogs` (worker-routed) **only** for the irreducible residue —
+   genuinely historical, on-chain-only scans that simulation can't fabricate.
+
+If the residue is empty, PR C deletes the historical-search path entirely
+and no `FilterLogs` worker RPC is needed.
+
+## Risks
+
+- **`FilterLogs` payload size.** A wide block range returns large log sets.
+  Keep per-call ranges bounded (gateway-side chunking already exists at
+  `:2764`); never let the worker return one unbounded message. Consider
+  streaming if single-range payloads can still be large.
+- **Block-number atomicity.** Functions that read `BlockNumber` then act
+  on `HeaderByNumber`/`FilterLogs(at block)` across two gRPC calls can
+  straddle a new head. Where it matters (historical search), pin the
+  height explicitly across calls.
+- **Test-mode signal.** The `rpcConn == nil` mock signal is load-bearing
+  across many tests. Until PR D swaps it for an explicit flag, keep the
+  nil-reader branch behaviorally identical to today's nil-rpcConn branch.
+- **Wide blast radius.** Threading chainID touches many call sites; keep
+  each PR to one function cluster and lean on the existing run_node tests.

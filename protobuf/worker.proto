@@ -43,6 +43,46 @@ service ChainWorker {
   // Used by the fee estimator to detect whether the runner contract is
   // deployed before issuing UserOps against it.
   rpc GetCode(WorkerGetCodeReq) returns (WorkerGetCodeResp);
+
+  // Read the native-coin balance (wei) at an address. Wraps
+  // ethclient.BalanceAt(latest). Used by the gateway's withdraw preflight
+  // to validate / size native-token withdrawals.
+  rpc GetBalance(WorkerGetBalanceReq) returns (WorkerGetBalanceResp);
+
+  // Read an ERC-20 token balance for an owner. Wraps erc20.BalanceOf.
+  // Used by the gateway's withdraw preflight to validate / size ERC-20
+  // withdrawals.
+  rpc GetTokenBalance(WorkerGetTokenBalanceReq) returns (WorkerGetTokenBalanceResp);
+
+  // Execute a read-only contract call (eth_call) on this chain. Wraps
+  // ethclient.CallContract. Used by the contractRead node so the gateway
+  // issues no direct eth_call against execution chains.
+  rpc CallContract(WorkerCallContractReq) returns (WorkerCallContractResp);
+
+  // Read a block header's number, hash, and timestamp. Wraps
+  // ethclient.HeaderByNumber. Used to stamp simulation receipts and
+  // enrich event timestamps without a gateway-side chain dial.
+  rpc GetBlockHeader(WorkerGetBlockHeaderReq) returns (WorkerGetBlockHeaderResp);
+
+  // Read the latest block number. Wraps ethclient.BlockNumber. Used by the
+  // immediate-trigger path to stamp the current block for the operator.
+  rpc GetBlockNumber(WorkerGetBlockNumberReq) returns (WorkerGetBlockNumberResp);
+
+  // Find the salt in [0, max_salts) whose CREATE2 smart-wallet address
+  // (under the given factory) matches target. The worker runs the scan +
+  // comparison locally so a wide range is a single round-trip. Used by the
+  // gateway's wallet-ownership validation (factory-upgrade fallback).
+  rpc FindMatchingWalletSalt(WorkerFindMatchingWalletSaltReq) returns (WorkerFindMatchingWalletSaltResp);
+
+  // Read a transaction receipt by hash. Wraps ethclient.TransactionReceipt.
+  // found=false when the receipt isn't available yet (pending). Used by the
+  // gateway's userop confirmation-waiting to backfill gas data.
+  rpc GetTransactionReceipt(WorkerGetTransactionReceiptReq) returns (WorkerGetTransactionReceiptResp);
+
+  // Read a contract storage slot (latest). Wraps ethclient.StorageAt. Used
+  // by the gateway's Tenderly simulation to probe an ERC-20's balance slot
+  // for state overrides.
+  rpc GetStorageAt(WorkerGetStorageAtReq) returns (WorkerGetStorageAtResp);
 }
 
 // Health check
@@ -84,8 +124,12 @@ message WorkerGetNonceResp {
 
 // Smart wallet address derivation
 message WorkerGetSmartWalletAddressReq {
-  string owner = 1;    // Owner EOA address (hex)
-  int64 salt = 2;      // Salt for CREATE2 derivation
+  string owner = 1;            // Owner EOA address (hex)
+  string salt = 2;             // CREATE2 salt (big.Int as base-10 string)
+  string factory_address = 3;  // Factory override (hex). Empty = worker's
+                               // configured factory. The gateway passes the
+                               // per-chain / per-request factory so derivation
+                               // matches GetWallet's direct-RPC path exactly.
 }
 
 message WorkerGetSmartWalletAddressResp {
@@ -138,4 +182,98 @@ message WorkerGetCodeReq {
 
 message WorkerGetCodeResp {
   bytes code = 1;      // Raw bytecode (empty if not deployed).
+}
+
+// Native-coin balance
+message WorkerGetBalanceReq {
+  string address = 1;  // Account address (hex).
+}
+
+message WorkerGetBalanceResp {
+  string balance_wei = 1;  // Native balance in wei (big.Int as string).
+}
+
+// ERC-20 token balance
+message WorkerGetTokenBalanceReq {
+  string token_address = 1;  // ERC-20 contract address (hex).
+  string owner_address = 2;  // Balance holder address (hex).
+}
+
+message WorkerGetTokenBalanceResp {
+  string balance = 1;  // Raw token balance (big.Int as string, no decimals applied).
+}
+
+// Read-only contract call (eth_call). Mirrors the ethereum.CallMsg fields
+// the contractRead path uses.
+message WorkerCallContractReq {
+  string from = 1;          // Caller (hex). Optional; chain default if empty.
+  string to = 2;            // Target contract (hex). Required.
+  string value = 3;         // Wei (big.Int as string); empty/zero for none.
+  bytes data = 4;           // ABI-encoded calldata.
+  string block_number = 5;  // Block height (big.Int as string); empty = latest.
+}
+
+message WorkerCallContractResp {
+  bytes result = 1;         // Raw ABI-encoded return bytes.
+}
+
+// Block header (the subset of fields the gateway reads). A full
+// types.Header can't be reconstructed faithfully over gRPC — its hash
+// depends on every field — so the worker returns these explicit values.
+message WorkerGetBlockHeaderReq {
+  string block_number = 1;  // big.Int as string; empty = latest.
+}
+
+message WorkerGetBlockHeaderResp {
+  uint64 number = 1;        // Block number.
+  string hash = 2;          // 0x-prefixed block hash.
+  uint64 time = 3;          // Unix timestamp (seconds).
+  string parent_hash = 4;   // 0x-prefixed parent block hash.
+  string difficulty = 5;    // big.Int as base-10 string.
+  uint64 gas_limit = 6;     // Block gas limit.
+  uint64 gas_used = 7;      // Block gas used.
+}
+
+// Latest block number
+message WorkerGetBlockNumberReq {}
+
+message WorkerGetBlockNumberResp {
+  uint64 number = 1;        // Latest block number.
+}
+
+// Salt-scan wallet match
+message WorkerFindMatchingWalletSaltReq {
+  string owner = 1;            // Owner EOA address (hex).
+  string factory_address = 2;  // Factory override (hex). Empty = worker's configured factory.
+  string target_address = 3;   // Smart-wallet address to match (hex).
+  int64 max_salts = 4;         // Scan salts in [0, max_salts).
+}
+
+message WorkerFindMatchingWalletSaltResp {
+  bool found = 1;
+  int64 salt = 2;              // The matching salt; valid only when found.
+}
+
+// Transaction receipt (the subset of fields the gateway reads)
+message WorkerGetTransactionReceiptReq {
+  string tx_hash = 1;          // 0x-prefixed transaction hash.
+}
+
+message WorkerGetTransactionReceiptResp {
+  bool found = 1;                 // false when not yet available (pending).
+  uint64 status = 2;             // 1 = success, 0 = reverted.
+  uint64 gas_used = 3;
+  string effective_gas_price = 4; // wei (big.Int as string).
+  uint64 block_number = 5;
+  string tx_hash = 6;            // 0x-prefixed.
+}
+
+// Storage slot read
+message WorkerGetStorageAtReq {
+  string address = 1;  // Contract address (hex).
+  string slot = 2;     // 0x-prefixed 32-byte storage slot key.
+}
+
+message WorkerGetStorageAtResp {
+  bytes value = 1;     // Raw 32-byte storage word.
 }

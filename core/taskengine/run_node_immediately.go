@@ -100,14 +100,21 @@ func (n *Engine) runBlockTriggerImmediately(triggerConfig map[string]interface{}
 		}
 	}
 
-	// Ensure RPC connection is available
-	if rpcConn == nil {
-		return nil, fmt.Errorf("RPC connection not available for BlockTrigger execution")
+	// Resolve the trigger's chain. Required — there is no engine-default
+	// chain; a missing/zero chain_id is a hard error so the block read
+	// never silently targets the wrong chain.
+	chainID, err := requireChainIDFromConfig(triggerConfig)
+	if err != nil {
+		return nil, fmt.Errorf("BlockTrigger: %w", err)
+	}
+	reader := GetChainStateReaderForChain(uint64(chainID))
+	if reader == nil {
+		return nil, fmt.Errorf("BlockTrigger: no chain-state reader available for chain %d", chainID)
 	}
 
 	// If no specific block number, get the latest block
 	if blockNumber == 0 {
-		currentBlock, err := rpcConn.BlockNumber(context.Background())
+		currentBlock, err := reader.GetBlockNumber(context.Background())
 		if err != nil {
 			// For simulations, use a mock block number to avoid RPC rate limiting
 			if strings.Contains(err.Error(), "rate limit") || strings.Contains(err.Error(), "429") {
@@ -116,18 +123,18 @@ func (n *Engine) runBlockTriggerImmediately(triggerConfig map[string]interface{}
 					n.logger.Warn("BlockTrigger: Using mock block number due to RPC rate limiting", "mockBlockNumber", blockNumber, "rpcError", err.Error())
 				}
 			} else {
-				return nil, fmt.Errorf("failed to get current block number from RPC: %w", err)
+				return nil, fmt.Errorf("failed to get current block number for chain %d: %w", chainID, err)
 			}
 		} else {
 			blockNumber = currentBlock
 			if n.logger != nil {
-				n.logger.Info("BlockTrigger: Using latest block for immediate execution", "blockNumber", blockNumber)
+				n.logger.Info("BlockTrigger: Using latest block for immediate execution", "blockNumber", blockNumber, "chainID", chainID)
 			}
 		}
 	}
 
-	// Get real block data from RPC
-	header, err := rpcConn.HeaderByNumber(context.Background(), big.NewInt(int64(blockNumber)))
+	// Get real block data via the chain's worker
+	header, err := reader.HeaderByNumber(context.Background(), big.NewInt(int64(blockNumber)))
 	if err != nil {
 		// For simulations, use mock block data to avoid RPC rate limiting
 		if strings.Contains(err.Error(), "rate limit") || strings.Contains(err.Error(), "429") {
@@ -146,12 +153,12 @@ func (n *Engine) runBlockTriggerImmediately(triggerConfig map[string]interface{}
 				"parentHash":  common.HexToHash(fmt.Sprintf("0x%016x%016x%016x%016x", blockNumber-1, blockNumber, blockNumber+1, blockNumber+2)).Hex(),
 			}, nil
 		}
-		return nil, fmt.Errorf("failed to get block header for block %d from RPC: %w", blockNumber, err)
+		return nil, fmt.Errorf("failed to get block header for block %d on chain %d: %w", blockNumber, chainID, err)
 	}
 
 	result := map[string]interface{}{
 		"blockNumber": blockNumber,
-		"blockHash":   header.Hash().Hex(),
+		"blockHash":   header.Hash.Hex(),
 		"timestamp":   header.Time,
 		"parentHash":  header.ParentHash.Hex(),
 		"difficulty":  header.Difficulty.String(),
@@ -160,9 +167,49 @@ func (n *Engine) runBlockTriggerImmediately(triggerConfig map[string]interface{}
 	}
 
 	if n.logger != nil {
-		n.logger.Info("BlockTrigger executed immediately", "blockNumber", blockNumber, "blockHash", header.Hash().Hex())
+		n.logger.Info("BlockTrigger executed immediately", "blockNumber", blockNumber, "blockHash", header.Hash.Hex())
 	}
 	return result, nil
+}
+
+// requireChainIDFromConfig extracts the required chain_id from a trigger /
+// node config map. There is NO engine-default fallback: a missing or zero
+// chain_id is a hard error, so chain-scoped reads never silently target
+// the wrong chain. Accepts the numeric types config maps carry (int64 from
+// direct proto extraction, float64 after a structpb round-trip).
+func requireChainIDFromConfig(config map[string]interface{}) (int64, error) {
+	raw, ok := config["chain_id"]
+	if !ok {
+		return 0, fmt.Errorf("chain_id not specified in trigger config")
+	}
+	var chainID int64
+	switch v := raw.(type) {
+	case int64:
+		chainID = v
+	case int:
+		chainID = int64(v)
+	case uint64:
+		if v > math.MaxInt64 {
+			return 0, fmt.Errorf("chain_id %d exceeds int64 range", v)
+		}
+		chainID = int64(v)
+	case float64:
+		// structpb round-trips numbers as float64; require an exact,
+		// in-range integer rather than silently truncating.
+		if v != math.Trunc(v) {
+			return 0, fmt.Errorf("chain_id %v is not an integer", v)
+		}
+		if v < math.MinInt64 || v > math.MaxInt64 {
+			return 0, fmt.Errorf("chain_id %v out of int64 range", v)
+		}
+		chainID = int64(v)
+	default:
+		return 0, fmt.Errorf("chain_id has unexpected type %T", raw)
+	}
+	if chainID <= 0 {
+		return 0, fmt.Errorf("chain_id must be a positive integer, got %d", chainID)
+	}
+	return chainID, nil
 }
 
 // runFixedTimeTriggerImmediately returns the current timestamp immediately
@@ -351,91 +398,42 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		}
 	}
 
-	// Check if simulation mode is enabled (default: true, provides sample data for development)
-	simulationMode := true
+	// Event triggers run in simulation mode. The historical on-chain search
+	// (simulationMode: false) was removed: synthetic simulation covers all
+	// event types, and no shipped client (studio / SDK) ever requested
+	// historical mode. Reject an explicit simulationMode:false rather than
+	// silently returning synthetic data for a historical ask.
 	if simModeInterface, exists := triggerConfig["simulationMode"]; exists {
-		if simModeBool, ok := simModeInterface.(bool); ok {
-			simulationMode = simModeBool
+		if simModeBool, ok := simModeInterface.(bool); ok && !simModeBool {
+			return nil, NewInvalidNodeConfigError("event trigger historical search (simulationMode: false) has been removed; event triggers run in simulation mode")
 		}
 	}
 
 	if n.logger != nil {
 		n.logger.Info("EventTrigger: Processing queries-based EventTrigger",
-			"queriesCount", len(queriesArray),
-			"simulationMode", simulationMode)
+			"queriesCount", len(queriesArray))
 	}
 
-	// 🔮 SMART DETECTION: Determine if this should use direct calls or simulation
-	if simulationMode {
-		// Check if this is a direct method call scenario (oracle reading)
-		shouldUseDirect := n.shouldUseDirectCalls(queriesArray)
-
+	// Direct method calls (oracle reads) vs synthetic event simulation.
+	if n.shouldUseDirectCalls(queriesArray) {
 		if n.logger != nil {
-			n.logger.Debug("🔍 TRACE: Path decision",
-				"simulationMode", simulationMode,
-				"shouldUseDirect", shouldUseDirect,
-				"queriesCount", len(queriesArray))
+			n.logger.Debug("🔍 EventTrigger: Using DIRECT CALLS path")
 		}
-
-		if shouldUseDirect {
-			if n.logger != nil {
-				n.logger.Debug("🔍 EventTrigger: Using DIRECT CALLS path")
-			}
-			return n.runEventTriggerWithDirectCalls(ctx, queriesArray, inputVariables)
-		} else {
-			if n.logger != nil {
-				n.logger.Debug("🔍 EventTrigger: Attempting TENDERLY SIMULATION path")
-			}
-			// Try Tenderly simulation first, but fallback to historical search if not supported
-			result, err := n.runEventTriggerWithTenderlySimulation(ctx, queriesArray, inputVariables)
-			if err != nil {
-				// Check if this is a "not supported" error that should fallback to historical search
-				if strings.Contains(err.Error(), "simulation not yet supported") {
-					if n.logger != nil {
-						n.logger.Info("⚠️ EventTrigger: Tenderly simulation not supported, falling back to historical search",
-							"error", err.Error())
-					}
-					// Fallback to historical search with timeout check
-					if rpcConn == nil {
-						if n.logger != nil {
-							n.logger.Warn("⚠️ EventTrigger: RPC connection not available for historical search fallback, returning simulation error")
-						}
-						// Return the original simulation error since RPC is not available
-						return nil, fmt.Errorf("tenderly simulation not supported and RPC connection not available: %w", err)
-					}
-					// Create a timeout context for historical search (30 seconds max)
-					historicalCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-					defer cancel()
-
-					historicalResult, histErr := n.runEventTriggerWithHistoricalSearch(historicalCtx, queriesArray, inputVariables)
-					if histErr != nil {
-						if n.logger != nil {
-							n.logger.Warn("⚠️ EventTrigger: Historical search failed after simulation failure",
-								"simulationError", err.Error(),
-								"historicalError", histErr.Error())
-						}
-						// Return the simulation error as the primary error (more informative)
-						return nil, fmt.Errorf("tenderly simulation failed: %w (historical search also failed: %v)", err, histErr)
-					}
-					return historicalResult, nil
-				}
-				// If addresses are missing for simulation, reject as invalid configuration (too broad)
-				if strings.Contains(err.Error(), "no contract addresses provided") {
-					return nil, NewInvalidNodeConfigError("queries[].addresses must be a non-empty array")
-				}
-				// For other errors, return them as-is
-				return nil, err
-			}
-			return result, nil
-		}
+		return n.runEventTriggerWithDirectCalls(ctx, queriesArray, inputVariables)
 	}
 
-	// 📊 HISTORICAL SEARCH MODE (use simulationMode: false for production)
-	// Ensure RPC connection is available for historical on-chain queries
-	if rpcConn == nil {
-		return nil, fmt.Errorf("RPC connection not available for EventTrigger historical search")
+	if n.logger != nil {
+		n.logger.Debug("🔍 EventTrigger: Using simulation path")
 	}
-	return n.runEventTriggerWithHistoricalSearch(ctx, queriesArray, inputVariables)
+	result, err := n.runEventTriggerWithTenderlySimulation(ctx, queriesArray, inputVariables)
+	if err != nil {
+		// Missing addresses → invalid config (too broad to simulate).
+		if strings.Contains(err.Error(), "no contract addresses provided") {
+			return nil, NewInvalidNodeConfigError("queries[].addresses must be a non-empty array")
+		}
+		return nil, err
+	}
+	return result, nil
 }
 
 // shouldUseDirectCalls determines if the query should use direct contract calls vs simulation
@@ -1870,7 +1868,7 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 }
 
 // parseEventWithABI parses an event log using the provided contract ABI and applies method calls for enhanced formatting
-func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string, query *avsproto.EventTrigger_Query) (map[string]interface{}, error) {
+func (n *Engine) parseEventWithABI(chainID int64, eventLog *types.Log, contractABIString string, query *avsproto.EventTrigger_Query) (map[string]interface{}, error) {
 	// Parse the ABI
 	contractABI, err := abi.JSON(strings.NewReader(contractABIString))
 	if err != nil {
@@ -1878,11 +1876,11 @@ func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string
 	}
 
 	// Find the matching event in ABI using the first topic (event signature)
-	return n.parseEventWithParsedABI(eventLog, &contractABI, query)
+	return n.parseEventWithParsedABI(chainID, eventLog, &contractABI, query)
 }
 
 // parseEventWithParsedABI contains the shared logic for both optimized and legacy methods
-func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.ABI, query *avsproto.EventTrigger_Query) (map[string]interface{}, error) {
+func (n *Engine) parseEventWithParsedABI(chainID int64, eventLog *types.Log, contractABI *abi.ABI, query *avsproto.EventTrigger_Query) (map[string]interface{}, error) {
 	// Find the matching event in ABI using the first topic (event signature)
 	if len(eventLog.Topics) == 0 {
 		return nil, fmt.Errorf("event log has no topics")
@@ -1955,7 +1953,7 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 				}
 
 				// Make the decimals() call to the contract
-				if decimals, err := n.callContractMethod(eventLog.Address, callData); err == nil {
+				if decimals, err := n.callContractMethod(chainID, eventLog.Address, callData); err == nil {
 					if decimalsInt, ok := decimals.(*big.Int); ok {
 						decimalsValue = decimalsInt
 
@@ -2016,7 +2014,14 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 					}
 				} else {
 					if n.logger != nil {
-						n.logger.Warn("Failed to call decimals() method", "error", err)
+						if chainReaderForEnrichment(chainID) == nil {
+							// Chain unspecified / unregistered — best-effort
+							// decimals enrichment is skipped quietly (not a
+							// failure, and not warn-level noise per event).
+							n.logger.Debug("Skipping decimals enrichment: no chain-state reader", "chainID", chainID)
+						} else {
+							n.logger.Warn("Failed to call decimals() method", "error", err)
+						}
 					}
 				}
 				break
@@ -2244,12 +2249,14 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 			}
 		}
 
-		// Add proper blockTimestamp for real events (not simulated)
-		// For real events, we can get the actual block timestamp if needed
-		if eventLog.BlockNumber > 0 && rpcConn != nil {
+		// Add proper blockTimestamp for real events (not simulated). This is
+		// best-effort enrichment: route through the trigger's chain worker
+		// when the chain is known; if chain_id isn't specified we skip it
+		// (keep the default timestamp) rather than read a default chain.
+		if blockReader := chainReaderForEnrichment(chainID); eventLog.BlockNumber > 0 && blockReader != nil {
 			// Get actual block timestamp for real events
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			header, err := rpcConn.HeaderByNumber(ctx, big.NewInt(int64(eventLog.BlockNumber)))
+			header, err := blockReader.HeaderByNumber(ctx, big.NewInt(int64(eventLog.BlockNumber)))
 			cancel()
 
 			if err == nil {
@@ -2286,10 +2293,28 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 }
 
 // callContractMethod makes a contract method call to retrieve additional data
-func (n *Engine) callContractMethod(contractAddress common.Address, callData string) (interface{}, error) {
-	// Ensure RPC connection is available
-	if rpcConn == nil {
-		return nil, fmt.Errorf("RPC connection not available for contract method call")
+// chainReaderForEnrichment returns the per-chain reader for best-effort
+// event enrichment, or nil when the chain is unspecified (chainID <= 0) or
+// no reader is registered for it. A nil result means "skip enrichment" —
+// the caller keeps its defaults rather than reading a default/wrong chain.
+func chainReaderForEnrichment(chainID int64) ChainStateReader {
+	if chainID <= 0 {
+		return nil
+	}
+	return GetChainStateReaderForChain(uint64(chainID))
+}
+
+func (n *Engine) callContractMethod(chainID int64, contractAddress common.Address, callData string) (interface{}, error) {
+	// chain_id is required — there is no engine-default chain. Callers
+	// treat this as best-effort enrichment and skip on error, so an
+	// unresolvable chain simply means "no enrichment" (never a wrong
+	// chain), consistent with the no-default-chain rule.
+	if chainID <= 0 {
+		return nil, fmt.Errorf("callContractMethod: chain_id required for enrichment")
+	}
+	reader := GetChainStateReaderForChain(uint64(chainID))
+	if reader == nil {
+		return nil, fmt.Errorf("callContractMethod: no chain-state reader for chain %d", chainID)
 	}
 
 	// Remove 0x prefix if present
@@ -2304,11 +2329,11 @@ func (n *Engine) callContractMethod(contractAddress common.Address, callData str
 		Data: callDataBytes,
 	}
 
-	// Make the contract call
+	// Make the contract call via the chain's worker
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	result, err := rpcConn.CallContract(ctx, msg, nil)
+	result, err := reader.CallContract(ctx, msg, nil)
 	if err != nil {
 		return nil, fmt.Errorf("contract call failed: %w", err)
 	}
@@ -2322,522 +2347,6 @@ func (n *Engine) callContractMethod(contractAddress common.Address, callData str
 	}
 
 	return nil, fmt.Errorf("unexpected result length: %d", len(result))
-}
-
-// runEventTriggerWithHistoricalSearch executes event trigger using historical blockchain search
-func (n *Engine) runEventTriggerWithHistoricalSearch(ctx context.Context, queriesArray []interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
-	// Get the latest block number
-	currentBlock, err := rpcConn.BlockNumber(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get current block number: %w", err)
-	}
-
-	// Chain-specific search strategy: Use 3-month and 6-month ranges based on chain block times
-	var searchRanges []uint64
-	if n.tokenEnrichmentService != nil {
-		chainID := n.tokenEnrichmentService.GetChainID()
-		searchRanges = GetChainSearchRanges(chainID)
-
-		if n.logger != nil {
-			ranges := GetBlockSearchRanges(chainID)
-			n.logger.Info("EventTrigger: Using chain-specific search ranges",
-				"chainID", chainID,
-				"oneMonth", ranges.OneMonth,
-				"twoMonths", ranges.TwoMonths,
-				"fourMonths", ranges.FourMonths)
-		}
-	} else {
-		// Fallback to default Ethereum-like ranges if no token service available
-		searchRanges = GetChainSearchRanges(1) // Default to Ethereum mainnet
-
-		if n.logger != nil {
-			n.logger.Warn("EventTrigger: Using default Ethereum search ranges (no token service available)")
-		}
-	}
-
-	var allEvents []types.Log
-	var totalSearched uint64
-
-	// Process each query in the queries
-	for queryIndex, queryInterface := range queriesArray {
-		queryMap, ok := queryInterface.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		// Parse query configuration
-		var addresses []common.Address
-		var topics [][]common.Hash
-		var maxEventsPerBlock uint32
-
-		// Extract addresses list
-		if addressesInterface, exists := queryMap["addresses"]; exists {
-			if addressesArray, ok := addressesInterface.([]interface{}); ok {
-				for _, addrInterface := range addressesArray {
-					if addrStr, ok := addrInterface.(string); ok && addrStr != "" {
-						addresses = append(addresses, common.HexToAddress(addrStr))
-					}
-				}
-			}
-		}
-
-		// Extract topics list and build proper Ethereum log filter structure
-		if topicsInterface, exists := queryMap["topics"]; exists {
-			if topicsArray, ok := topicsInterface.([]interface{}); ok {
-				// For each query, we expect one topic group that defines the topic filter structure
-				// Multiple topic groups within one query is not supported in Ethereum filtering
-				if len(topicsArray) > 0 {
-					if topicGroupMap, ok := topicsArray[0].(map[string]interface{}); ok {
-						if valuesInterface, exists := topicGroupMap["values"]; exists {
-							if valuesArray, ok := valuesInterface.([]interface{}); ok {
-								// Build topics array where each position corresponds to topic[0], topic[1], topic[2], etc.
-								// For Ethereum log filtering: topics[i] = []common.Hash{possible values for topic position i}
-								// If a position should be wildcard (any value), use nil for that position
-
-								// Initialize topics array with the correct size
-								topics = make([][]common.Hash, len(valuesArray))
-
-								// Process each value and assign to the corresponding topic position
-								for i, valueInterface := range valuesArray {
-									if valueStr, ok := valueInterface.(string); ok && valueStr != "" {
-										// Non-null value: create a topic filter for this position
-										topics[i] = []common.Hash{common.HexToHash(valueStr)}
-									} else {
-										// null value: this topic position should be wildcard (nil)
-										topics[i] = nil
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-
-		// Extract maxEventsPerBlock
-		if maxEventsInterface, exists := queryMap["maxEventsPerBlock"]; exists {
-			if maxEventsFloat, ok := maxEventsInterface.(float64); ok {
-				maxEventsPerBlock = uint32(maxEventsFloat)
-			}
-		}
-
-		if n.logger != nil {
-			n.logger.Info("EventTrigger: Processing query",
-				"queryIndex", queryIndex,
-				"addressesCount", len(addresses),
-				"topicGroupsCount", len(topics),
-				"maxEventsPerBlock", maxEventsPerBlock)
-		}
-
-		// Execute search for this query
-		queryEvents, querySearched, err := n.searchEventsForQuery(ctx, addresses, topics, currentBlock, searchRanges)
-		if err != nil {
-			if n.logger != nil {
-				n.logger.Warn("EventTrigger: Query failed, continuing with other queries",
-					"queryIndex", queryIndex,
-					"error", err)
-			}
-			continue
-		}
-
-		allEvents = append(allEvents, queryEvents...)
-		totalSearched += querySearched
-
-		if n.logger != nil {
-			n.logger.Info("EventTrigger: Query completed",
-				"queryIndex", queryIndex,
-				"eventsFound", len(queryEvents),
-				"blocksSearched", querySearched)
-		}
-
-		// Continue processing all queries to find the most recent event across all queries
-		// Don't stop early - we need to check all queries to find the truly most recent event
-	}
-
-	if n.logger != nil {
-		n.logger.Info("EventTrigger: All queries processed",
-			"queriesProcessed", len(queriesArray),
-			"totalEvents", len(allEvents),
-			"totalSearched", totalSearched)
-	}
-
-	// If no events found after processing all queries
-	if len(allEvents) == 0 {
-		if n.logger != nil {
-			n.logger.Info("EventTrigger: No events found after processing all queries",
-				"totalBlocksSearched", totalSearched,
-				"queriesCount", len(queriesArray))
-		}
-
-		return map[string]interface{}{
-			"success":       false,
-			"evm_log":       nil,
-			"queriesCount":  len(queriesArray),
-			"totalSearched": totalSearched,
-			"message":       "No events found matching any query criteria",
-			"searchMetadata": map[string]interface{}{
-				"blocksSearchedBackwards": totalSearched,
-				"searchComplete":          true,
-				"timeoutOccurred":         false,
-			},
-		}, nil
-	}
-
-	// Find the most recent event (highest block number + log index)
-	mostRecentEvent := &allEvents[0]
-	for i := 1; i < len(allEvents); i++ {
-		current := &allEvents[i]
-		if current.BlockNumber > mostRecentEvent.BlockNumber ||
-			(current.BlockNumber == mostRecentEvent.BlockNumber && current.Index > mostRecentEvent.Index) {
-			mostRecentEvent = current
-		}
-	}
-
-	// Build the result with proper EventTrigger.Output structure
-	topics := make([]string, len(mostRecentEvent.Topics))
-	for i, topic := range mostRecentEvent.Topics {
-		topics[i] = topic.Hex()
-	}
-
-	// Convert topics to protobuf-compatible format for metadata
-	topicsMetadata := make([]interface{}, len(topics))
-	for i, topic := range topics {
-		topicsMetadata[i] = topic
-	}
-
-	// Get chain ID for metadata
-	var chainID int64 = 11155111 // Default to Sepolia
-	if n.tokenEnrichmentService != nil {
-		chainID = int64(n.tokenEnrichmentService.GetChainID())
-	}
-
-	// Build raw metadata (the original blockchain event data)
-	metadata := map[string]interface{}{
-		"address":          mostRecentEvent.Address.Hex(), // Original contract address
-		"topics":           topicsMetadata,
-		"data":             "0x" + common.Bytes2Hex(mostRecentEvent.Data),
-		"blockNumber":      mostRecentEvent.BlockNumber,
-		"transactionHash":  mostRecentEvent.TxHash.Hex(),
-		"transactionIndex": mostRecentEvent.TxIndex,
-		"blockHash":        mostRecentEvent.BlockHash.Hex(),
-		"logIndex":         mostRecentEvent.Index,
-		"removed":          mostRecentEvent.Removed,
-		"chainId":          chainID,
-	}
-
-	// Parse event data using ABI if provided in any query
-	var parsedData map[string]interface{}
-	var isTransferEvent bool
-	var contractABI string
-	var queryWithABI map[string]interface{}
-
-	// Find the first query that has a contract ABI
-	for _, queryInterface := range queriesArray {
-		if queryMap, ok := queryInterface.(map[string]interface{}); ok {
-			if abiInterface, exists := queryMap["contractAbi"]; exists {
-				if abiStr, ok := abiInterface.(string); ok && abiStr != "" {
-					contractABI = abiStr
-					queryWithABI = queryMap
-					break
-				}
-			}
-		}
-	}
-
-	if contractABI != "" {
-		// Convert the query map to protobuf query for method calls support
-		protobufQuery, err := n.convertMapToEventQuery(queryWithABI)
-		if err != nil {
-			n.logger.Warn("Failed to convert query map to protobuf, using ABI without method calls", "error", err)
-			protobufQuery = nil
-		} else {
-			if n.logger != nil {
-				methodCallsCount := 0
-				if protobufQuery != nil && protobufQuery.GetMethodCalls() != nil {
-					methodCallsCount = len(protobufQuery.GetMethodCalls())
-				}
-				n.logger.Info("✅ Successfully converted query map to protobuf",
-					"hasProtobufQuery", protobufQuery != nil,
-					"methodCallsCount", methodCallsCount)
-			}
-		}
-
-		// Parse using the provided ABI
-		parsedEventData, err := n.parseEventWithABI(mostRecentEvent, contractABI, protobufQuery)
-		if err != nil {
-			n.logger.Warn("Failed to parse event with provided ABI, using raw data", "error", err)
-			// Fallback to raw data if ABI parsing fails
-			parsedData = metadata
-		} else {
-			parsedData = parsedEventData
-
-			// Check if this is enriched transfer data
-			if eventName, ok := parsedEventData["eventName"].(string); ok && eventName == "Transfer" {
-				isTransferEvent = true
-			}
-		}
-	} else {
-		// No ABI provided, use raw event data
-		parsedData = metadata
-	}
-
-	// Build the result structure based on event type
-	result := map[string]interface{}{
-		"success":       true,
-		"metadata":      metadata, // Raw blockchain event data
-		"queriesCount":  len(queriesArray),
-		"totalSearched": totalSearched,
-		"totalEvents":   len(allEvents),
-		"searchMetadata": map[string]interface{}{
-			"blocksSearchedBackwards": totalSearched,
-			"searchComplete":          true,
-			"timeoutOccurred":         false,
-			"stoppedEarly":            true, // Since we stop after finding first event
-		},
-	}
-
-	// For Transfer events with enriched data, structure it properly
-	if isTransferEvent {
-		// parsedData contains the enriched transfer_log structure
-		result["transfer_log"] = parsedData
-		result["data"] = parsedData // Also provide as data for backward compatibility
-
-		if n.logger != nil {
-			n.logger.Info("✅ EventTrigger: Created enriched transfer_log structure in historical search",
-				"tokenSymbol", parsedData["tokenSymbol"],
-				"blockTimestamp", parsedData["blockTimestamp"])
-		}
-	} else {
-		// For non-Transfer events, use standard data structure
-		result["data"] = parsedData
-	}
-
-	if n.logger != nil {
-		hasABI := contractABI != ""
-		n.logger.Info("EventTrigger: Successfully found most recent event with queries-based search",
-			"blockNumber", mostRecentEvent.BlockNumber,
-			"txHash", mostRecentEvent.TxHash.Hex(),
-			"address", mostRecentEvent.Address.Hex(),
-			"totalEvents", len(allEvents),
-			"totalSearched", totalSearched,
-			"hasABI", hasABI)
-	}
-
-	return result, nil
-}
-
-// searchEventsForQuery executes a single query search with recent-first strategy
-func (n *Engine) searchEventsForQuery(ctx context.Context, addresses []common.Address, topics [][]common.Hash, currentBlock uint64, searchRanges []uint64) ([]types.Log, uint64, error) {
-	var allEvents []types.Log
-	var totalSearched uint64
-
-	// PRIORITY SEARCH: Search very recent blocks first to find the most recent events
-	// Use a single comprehensive search of recent blocks instead of stopping early
-	recentRange := uint64(5000) // Search last 5000 blocks for most recent events
-
-	var fromBlock uint64
-	if currentBlock < recentRange {
-		fromBlock = 0
-	} else {
-		fromBlock = currentBlock - recentRange
-	}
-
-	// Prepare filter query for recent comprehensive search
-	query := ethereum.FilterQuery{
-		FromBlock: big.NewInt(int64(fromBlock)),
-		ToBlock:   big.NewInt(int64(currentBlock)),
-		Addresses: addresses,
-		Topics:    topics,
-	}
-
-	// Search recent blocks comprehensively
-	logs, err := rpcConn.FilterLogs(ctx, query)
-	if err == nil {
-		totalSearched += (currentBlock - fromBlock)
-		allEvents = append(allEvents, logs...)
-
-		if len(logs) > 0 {
-			// Return immediately since we found events in the most recent range
-			return allEvents, totalSearched, nil
-		}
-	}
-
-	// FALLBACK SEARCH: If no recent events found, search larger ranges
-	for _, searchRange := range searchRanges {
-		select {
-		case <-ctx.Done():
-			if n.logger != nil {
-				n.logger.Warn("EventTrigger: Search timeout reached, returning partial results",
-					"blocksSearched", totalSearched,
-					"eventsFound", len(allEvents))
-			}
-			return allEvents, totalSearched, nil
-		default:
-		}
-
-		var fromBlock uint64
-		if currentBlock < searchRange {
-			fromBlock = 0
-		} else {
-			fromBlock = currentBlock - searchRange
-		}
-
-		// Prepare filter query
-		query := ethereum.FilterQuery{
-			FromBlock: big.NewInt(int64(fromBlock)),
-			ToBlock:   big.NewInt(int64(currentBlock)),
-			Addresses: addresses,
-			Topics:    topics,
-		}
-
-		if n.logger != nil {
-			addressStrs := make([]string, len(addresses))
-			for i, addr := range addresses {
-				addressStrs[i] = addr.Hex()
-			}
-
-			topicStrs := make([][]string, len(topics))
-			for i, topicGroup := range topics {
-				if topicGroup == nil {
-					topicStrs[i] = []string{"<wildcard>"}
-				} else {
-					topicStrs[i] = make([]string, len(topicGroup))
-					for j, topic := range topicGroup {
-						topicStrs[i][j] = topic.Hex()
-					}
-				}
-			}
-
-			n.logger.Debug("EventTrigger: Fallback search with larger range",
-				"fromBlock", fromBlock,
-				"toBlock", currentBlock,
-				"addresses", addressStrs,
-				"topics", topicStrs,
-				"blockRange", currentBlock-fromBlock)
-		}
-
-		// Fetch logs from Ethereum with timeout context
-		logs, err := rpcConn.FilterLogs(ctx, query)
-		var usedChunkedSearch bool
-
-		if err != nil {
-			if n.logger != nil {
-				// Check if it's a known RPC limit error to avoid stack traces
-				errorMsg := err.Error()
-				if strings.Contains(errorMsg, "Block range limit exceeded") ||
-					strings.Contains(errorMsg, "range limit") ||
-					strings.Contains(errorMsg, "too many blocks") {
-					n.logger.Debug("EventTrigger: Block range limit hit, using chunked search",
-						"blockRange", currentBlock-fromBlock)
-
-					// Try chunked search for large ranges
-					if currentBlock-fromBlock > 1000 {
-						usedChunkedSearch = true
-
-						// Break the range into 1000-block chunks, searching from MOST RECENT first
-						chunkSize := uint64(1000)
-						var chunkedSearched uint64
-
-						// Search chunks in reverse order (most recent first)
-						for chunkStart := currentBlock; chunkStart > fromBlock; {
-							// Check timeout during chunked search
-							select {
-							case <-ctx.Done():
-								n.logger.Info("EventTrigger: Chunked search timeout reached",
-									"chunkedSearched", chunkedSearched)
-								totalSearched += chunkedSearched
-								return allEvents, totalSearched, nil
-							default:
-							}
-
-							chunkEnd := chunkStart
-							if chunkStart < fromBlock+chunkSize {
-								chunkStart = fromBlock
-							} else {
-								chunkStart = chunkStart - chunkSize
-							}
-
-							chunkQuery := query
-							chunkQuery.FromBlock = big.NewInt(int64(chunkStart))
-							chunkQuery.ToBlock = big.NewInt(int64(chunkEnd))
-
-							chunkLogs, chunkErr := rpcConn.FilterLogs(ctx, chunkQuery)
-							chunkedSearched += (chunkEnd - chunkStart)
-
-							if chunkErr == nil {
-								allEvents = append(allEvents, chunkLogs...)
-								if n.logger != nil && len(chunkLogs) > 0 {
-									n.logger.Info("EventTrigger: Found events in chunk - returning most recent",
-										"chunkStart", chunkStart,
-										"chunkEnd", chunkEnd,
-										"eventsInChunk", len(chunkLogs))
-								}
-								// Return immediately when we find events (these are most recent due to reverse search)
-								if len(chunkLogs) > 0 {
-									totalSearched += chunkedSearched
-									return allEvents, totalSearched, nil
-								}
-							} else {
-								if n.logger != nil {
-									n.logger.Debug("EventTrigger: Chunk failed, continuing",
-										"chunkStart", chunkStart,
-										"chunkEnd", chunkEnd,
-										"error", chunkErr)
-								}
-							}
-						}
-
-						// Update searched counter with chunked progress
-						totalSearched += chunkedSearched
-
-						// If chunked search found events, return them
-						if len(allEvents) > 0 {
-							return allEvents, totalSearched, nil
-						}
-					}
-				} else {
-					n.logger.Warn("EventTrigger: Failed to fetch logs, continuing search",
-						"fromBlock", fromBlock,
-						"toBlock", currentBlock,
-						"error", err)
-				}
-			}
-
-			// If still error after chunked retry, continue to next range
-			if err != nil {
-				continue
-			}
-		}
-
-		// Only update searched counter if chunked search wasn't used (it handles its own counting)
-		if !usedChunkedSearch {
-			totalSearched += (currentBlock - fromBlock)
-		}
-
-		allEvents = append(allEvents, logs...)
-
-		if n.logger != nil {
-			n.logger.Info("EventTrigger: Fallback search completed for range",
-				"fromBlock", fromBlock,
-				"toBlock", currentBlock,
-				"logsFound", len(logs),
-				"totalEventsSoFar", len(allEvents),
-				"blockRange", currentBlock-fromBlock)
-		}
-
-		// Continue searching even if we found events to ensure we get the most recent ones
-		// Only return early if we're searching a very recent range (< 5000 blocks)
-		if len(logs) > 0 && (currentBlock-fromBlock) < 5000 {
-			return allEvents, totalSearched, nil
-		}
-
-		// If we've searched back to genesis, stop
-		if fromBlock == 0 {
-			break
-		}
-	}
-
-	return allEvents, totalSearched, nil
 }
 
 // runManualTriggerImmediately executes a manual trigger immediately
@@ -3055,29 +2564,43 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 							"owner", vm.TaskOwner.Hex())
 					}
 
-					// Connect to RPC to derive addresses
-					client, err := ethclient.Dial(n.smartWalletConfig.EthRpcUrl)
-					if err != nil {
-						return nil, fmt.Errorf("failed to connect to RPC for address derivation: %w", err)
-					}
-
-					// Check salts 0-4 (we allow up to 5 smart wallets per EOA)
-					for salt := int64(0); salt < 5; salt++ {
-						derivedAddr, err := aa.GetSenderAddress(client, vm.TaskOwner, big.NewInt(salt))
-						if err != nil {
-							if n.logger != nil {
-								n.logger.Debug("Failed to derive address for salt", "salt", salt, "error", err)
-							}
-							continue
+					// Check salts 0-4 (we allow up to 5 smart wallets per EOA).
+					// Prefer the per-chain reader: in gateway mode the worker
+					// runs the scan server-side. Fall back to a direct dial +
+					// local loop when no reader is registered.
+					const runnerSaltScan = int64(5)
+					factoryAddr := n.smartWalletConfig.FactoryAddress
+					runnerAddr := common.HexToAddress(runnerStr)
+					if reader := GetChainStateReaderForChain(uint64(n.smartWalletConfig.ChainID)); reader != nil {
+						found, salt, derr := reader.FindMatchingWalletSalt(context.Background(), vm.TaskOwner, factoryAddr, runnerAddr, runnerSaltScan)
+						if derr != nil {
+							return nil, fmt.Errorf("failed to derive addresses for runner validation: %w", derr)
 						}
-
-						if strings.EqualFold(derivedAddr.Hex(), runnerStr) {
+						if found {
 							matchedSalt = big.NewInt(salt)
-							chosenSender = *derivedAddr
-							break
+							chosenSender = runnerAddr
 						}
+					} else {
+						client, err := ethclient.Dial(n.smartWalletConfig.EthRpcUrl)
+						if err != nil {
+							return nil, fmt.Errorf("failed to connect to RPC for address derivation: %w", err)
+						}
+						for salt := int64(0); salt < runnerSaltScan; salt++ {
+							derivedAddr, derr := aa.GetSenderAddress(client, vm.TaskOwner, big.NewInt(salt))
+							if derr != nil {
+								if n.logger != nil {
+									n.logger.Debug("Failed to derive address for salt", "salt", salt, "error", derr)
+								}
+								continue
+							}
+							if strings.EqualFold(derivedAddr.Hex(), runnerStr) {
+								matchedSalt = big.NewInt(salt)
+								chosenSender = *derivedAddr
+								break
+							}
+						}
+						client.Close()
 					}
-					client.Close()
 
 					// If no match found in salts 0-4, reject the runner
 					if matchedSalt == nil {
@@ -3500,6 +3023,14 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		ErrorCode: responseErrorCode,
 	}
 
+	// Chain for output handlers that decode event logs (contractWrite).
+	// Prefer the explicit request chain, then the node config; 0 means
+	// "skip enrichment" downstream — no engine-default chain.
+	outputChainID := req.GetChainId()
+	if outputChainID == 0 {
+		outputChainID, _ = requireChainIDFromConfig(nodeConfig)
+	}
+
 	// Use handler to convert result to protobuf output
 	factory := NewNodeOutputHandlerFactory(n)
 	handler, err := factory.GetHandler(nodeTypeStr)
@@ -3507,7 +3038,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		// Fallback to RestAPI for unknown node types
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{RestApi: &avsproto.RestAPINode_Output{}}
 	} else {
-		outputData, metadata, err := handler.ConvertToProtobuf(result)
+		outputData, metadata, err := handler.ConvertToProtobuf(outputChainID, result)
 		if err != nil {
 			return &avsproto.RunNodeWithInputsResp{
 				Success: false,

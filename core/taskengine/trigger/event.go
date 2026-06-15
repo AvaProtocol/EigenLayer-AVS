@@ -31,13 +31,7 @@ func parseABIOptimized(abiValues []*structpb.Value) (*abi.ABI, error) {
 		return nil, fmt.Errorf("empty ABI")
 	}
 
-	// Convert protobuf Values to JSON bytes directly
-	abiArray := make([]interface{}, len(abiValues))
-	for i, value := range abiValues {
-		abiArray[i] = value.AsInterface()
-	}
-
-	// Marshal to JSON bytes
+	// Marshal the protobuf Values to JSON bytes directly.
 	jsonBytes, err := protojson.Marshal(&structpb.ListValue{Values: abiValues})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal ABI to JSON: %v", err)
@@ -92,8 +86,14 @@ type QueryInfo struct {
 	MaxEventsPerBlock uint32
 }
 
+type subscribeFilterLogsFunc func(context.Context, ethereum.FilterQuery, chan<- types.Log) (ethereum.Subscription, error)
+
 type EventTrigger struct {
 	*CommonTrigger
+
+	// operatorAddress identifies this operator in overload alerts so spikes can
+	// be attributed to a specific operator in multi-operator deployments.
+	operatorAddress string
 
 	// New unified registry (preferred)
 	registry *TaskRegistry
@@ -129,6 +129,11 @@ type EventTrigger struct {
 	// Add deduplication tracking
 	processedEventsMutex sync.RWMutex
 	processedEvents      map[string]bool // key: "blockNumber-txHash-logIndex"
+	// processedEventsOrder records the insertion order of processedEvents keys
+	// so cleanup can evict the OLDEST entries (FIFO) instead of a random map
+	// subset — a random eviction could drop a recent key and re-admit a
+	// duplicate. Guarded by processedEventsMutex alongside the map.
+	processedEventsOrder []string
 
 	// Cooldown tracking: taskID -> last trigger time
 	cooldownMutex   sync.RWMutex
@@ -136,6 +141,10 @@ type EventTrigger struct {
 
 	// Token enrichment service for enriching Transfer events
 	tokenEnrichmentService *taskengine.TokenEnrichmentService
+
+	subscribeFilterLogs         subscribeFilterLogsFunc
+	setSubscriptionCounts       func(active, desired int)
+	incSubscriptionRebuildError func()
 }
 
 type SubscriptionInfo struct {
@@ -154,7 +163,7 @@ type managedSubscription struct {
 	queryIndex   int
 }
 
-func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], logger sdklogging.Logger, maxEventsPerQuery uint32, maxTotalEvents uint32) *EventTrigger {
+func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], logger sdklogging.Logger, maxEventsPerQuery uint32, maxTotalEvents uint32, operatorAddress string) *EventTrigger {
 	var err error
 
 	b := EventTrigger{
@@ -165,6 +174,7 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 			logger:    logger,
 		},
 
+		operatorAddress:          operatorAddress,
 		registry:                 NewTaskRegistry(),
 		triggerCh:                triggerCh,
 		checks:                   sync.Map{},
@@ -176,6 +186,7 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 		defaultMaxEventsPerQuery: maxEventsPerQuery,
 		defaultMaxTotalEvents:    maxTotalEvents,
 		processedEvents:          make(map[string]bool),
+		processedEventsOrder:     make([]string, 0),
 		lastTriggerTime:          make(map[string]time.Time),
 	}
 
@@ -187,6 +198,9 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 	b.wsEthClient, err = ethclient.Dial(o.WsRpcURL)
 	if err != nil {
 		panic(err)
+	}
+	b.subscribeFilterLogs = func(ctx context.Context, query ethereum.FilterQuery, logs chan<- types.Log) (ethereum.Subscription, error) {
+		return b.wsEthClient.SubscribeFilterLogs(ctx, query, logs)
 	}
 
 	// Use global TokenEnrichmentService or initialize if not set
@@ -211,6 +225,187 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 	b.tokenEnrichmentService = taskengine.GetTokenEnrichmentService()
 
 	return &b
+}
+
+func (t *EventTrigger) SetSubscriptionMetrics(setCounts func(active, desired int), incRebuildError func()) {
+	t.setSubscriptionCounts = setCounts
+	t.incSubscriptionRebuildError = incRebuildError
+}
+
+func (t *EventTrigger) desiredSubscriptionCount(queries []QueryInfo) int {
+	keys := make(map[string]struct{}, len(queries))
+	for _, queryInfo := range queries {
+		keys[t.createQueryKey(queryInfo.Query)] = struct{}{}
+	}
+	return len(keys)
+}
+
+func (t *EventTrigger) updateSubscriptionMetrics(desired int) {
+	if t.setSubscriptionCounts == nil {
+		return
+	}
+	t.subsMutex.RLock()
+	active := len(t.querySubscriptions)
+	t.subsMutex.RUnlock()
+	t.setSubscriptionCounts(active, desired)
+}
+
+func (t *EventTrigger) rebuildSubscriptions(
+	ctx context.Context,
+	queries []QueryInfo,
+	logs chan<- types.Log,
+	errorCh chan<- error,
+) error {
+	rebuilt := make([]SubscriptionInfo, 0, len(queries))
+	for _, queryInfo := range queries {
+		timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		sub, err := t.subscribeFilterLogs(timeoutCtx, queryInfo.Query, logs)
+		cancel()
+		if err != nil {
+			for _, subInfo := range rebuilt {
+				subInfo.subscription.Unsubscribe()
+			}
+			return fmt.Errorf("recreate subscription %q: %w", queryInfo.Description, err)
+		}
+		rebuilt = append(rebuilt, SubscriptionInfo{
+			subscription: sub,
+			query:        queryInfo.Query,
+			description:  queryInfo.Description,
+			taskID:       queryInfo.TaskID,
+			queryIndex:   queryInfo.QueryIndex,
+		})
+	}
+
+	t.subsMutex.Lock()
+	t.subscriptions = rebuilt
+	t.populateQuerySubscriptions()
+	for _, managedSub := range t.querySubscriptions {
+		go func(sub ethereum.Subscription) {
+			if err := <-sub.Err(); err != nil {
+				errorCh <- err
+			}
+		}(managedSub.subscription)
+	}
+	t.subsMutex.Unlock()
+	return nil
+}
+
+// addSubscriptions adds all currently-missing desired subscriptions.
+// Must be called with subsMutex held.
+// On any subscribe failure, it rolls back newly-added subscriptions and returns an error
+// so the caller can escalate to a full reconnect.
+func (t *EventTrigger) addSubscriptions(
+	ctx context.Context,
+	desiredByKey map[string][]QueryInfo,
+	logs chan<- types.Log,
+	errorCh chan<- error,
+) error {
+	type addedSubscription struct {
+		key   string
+		query ethereum.FilterQuery
+		desc  string
+		sub   ethereum.Subscription
+	}
+
+	added := make([]addedSubscription, 0)
+	for key, queryInfos := range desiredByKey {
+		if _, exists := t.querySubscriptions[key]; exists {
+			continue
+		}
+
+		// Use the first queryInfo for the shared subscription.
+		qi := queryInfos[0]
+		timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		sub, subErr := t.subscribeFilterLogs(timeoutCtx, qi.Query, logs)
+		cancel()
+		if subErr != nil {
+			for _, created := range added {
+				created.sub.Unsubscribe()
+				delete(t.querySubscriptions, created.key)
+			}
+			return fmt.Errorf("create subscription during incremental update %q: %w", qi.Description, subErr)
+		}
+
+		taskIDs := make(map[string]bool)
+		for _, q := range queryInfos {
+			taskIDs[q.TaskID] = true
+		}
+
+		t.querySubscriptions[key] = &managedSubscription{
+			subscription: sub,
+			query:        qi.Query,
+			description:  qi.Description,
+			taskIDs:      taskIDs,
+			queryIndex:   qi.QueryIndex,
+		}
+
+		added = append(added, addedSubscription{
+			key:   key,
+			query: qi.Query,
+			desc:  qi.Description,
+			sub:   sub,
+		})
+
+		t.logger.Info("✅ Created new subscription during incremental update",
+			"key", key,
+			"description", qi.Description,
+			"task_ids", taskIDs,
+			"addresses", qi.Query.Addresses,
+			"topics", qi.Query.Topics)
+	}
+
+	for _, created := range added {
+		// DIAGNOSTIC: one-shot historical FilterLogs cross-check
+		// of the WS subscription against the last ~50 blocks via
+		// the HTTP RPC client. This goroutine fires ONCE per
+		// newly created subscription (not per event, not on a
+		// timer), so the cost is bounded by subscription churn
+		// rather than chain throughput. It runs when a task is
+		// added or after an error-driven resubscribe — not on
+		// every block. If FilterLogs returns >0 events but the
+		// WS subscription delivers 0 (heartbeat shows 0
+		// received), the WS layer is the problem, not the filter.
+		go func(q ethereum.FilterQuery, desc string) {
+			headerCtx, headerCancel := context.WithTimeout(ctx, 5*time.Second)
+			defer headerCancel()
+			header, herr := t.ethClient.HeaderByNumber(headerCtx, nil)
+			if herr != nil || header == nil {
+				t.logger.Warn("🩺 FilterLogs cross-check: failed to get latest block",
+					"description", desc, "error", herr)
+				return
+			}
+			latest := header.Number.Uint64()
+			var from uint64
+			if latest > 50 {
+				from = latest - 50
+			}
+			q.FromBlock = new(big.Int).SetUint64(from)
+			q.ToBlock = new(big.Int).SetUint64(latest)
+			filterCtx, filterCancel := context.WithTimeout(ctx, 10*time.Second)
+			defer filterCancel()
+			matches, ferr := t.ethClient.FilterLogs(filterCtx, q)
+			if ferr != nil {
+				t.logger.Warn("🩺 FilterLogs cross-check: query failed",
+					"description", desc,
+					"from_block", from, "to_block", latest,
+					"error", ferr)
+				return
+			}
+			t.logger.Info("🩺 FilterLogs cross-check completed",
+				"description", desc,
+				"from_block", from, "to_block", latest,
+				"historical_matches", len(matches))
+		}(created.query, created.desc)
+
+		// Start error monitoring for new subscription.
+		go func(s ethereum.Subscription) {
+			if errSub := <-s.Err(); errSub != nil {
+				errorCh <- errSub
+			}
+		}(created.sub)
+	}
+
+	return nil
 }
 
 // rebuildSubscriptionSlice derives the flat t.subscriptions slice from t.querySubscriptions.
@@ -475,6 +670,7 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 	}
 	t.populateQuerySubscriptions()
 	t.subsMutex.Unlock()
+	t.updateSubscriptionMetrics(t.desiredSubscriptionCount(queries))
 
 	// Create error channel that collects errors from all subscriptions
 	errorCh := make(chan error, 100) // Buffered to handle multiple subscription errors
@@ -587,6 +783,7 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 
 				// Mark as processed immediately to prevent race conditions
 				t.processedEvents[eventKey] = true
+				t.processedEventsOrder = append(t.processedEventsOrder, eventKey)
 				t.processedEventsMutex.Unlock()
 
 				// Safety check: count events per block per task
@@ -642,91 +839,19 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 				}
 
 				// ADD: new subscriptions needed
-				for key, queryInfos := range desiredByKey {
-					if _, exists := t.querySubscriptions[key]; !exists {
-						// Use the first queryInfo for the subscription
-						qi := queryInfos[0]
-						timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-						sub, subErr := t.wsEthClient.SubscribeFilterLogs(timeoutCtx, qi.Query, logs)
-						cancel()
-						if subErr != nil {
-							t.logger.Error("❌ Failed to create subscription during incremental update",
-								"key", key,
-								"description", qi.Description,
-								"error", subErr)
-							continue
-						}
-
-						taskIDs := make(map[string]bool)
-						for _, q := range queryInfos {
-							taskIDs[q.TaskID] = true
-						}
-
-						t.querySubscriptions[key] = &managedSubscription{
-							subscription: sub,
-							query:        qi.Query,
-							description:  qi.Description,
-							taskIDs:      taskIDs,
-							queryIndex:   qi.QueryIndex,
-						}
-
-						t.logger.Info("✅ Created new subscription during incremental update",
-							"key", key,
-							"description", qi.Description,
-							"task_ids", taskIDs,
-							"addresses", qi.Query.Addresses,
-							"topics", qi.Query.Topics)
-
-						// DIAGNOSTIC: one-shot historical FilterLogs cross-check
-						// of the WS subscription against the last ~50 blocks via
-						// the HTTP RPC client. This goroutine fires ONCE per
-						// newly created subscription (not per event, not on a
-						// timer), so the cost is bounded by subscription churn
-						// rather than chain throughput. It runs when a task is
-						// added or after an error-driven resubscribe — not on
-						// every block. If FilterLogs returns >0 events but the
-						// WS subscription delivers 0 (heartbeat shows 0
-						// received), the WS layer is the problem, not the filter.
-						go func(q ethereum.FilterQuery, desc string) {
-							headerCtx, headerCancel := context.WithTimeout(ctx, 5*time.Second)
-							defer headerCancel()
-							header, herr := t.ethClient.HeaderByNumber(headerCtx, nil)
-							if herr != nil || header == nil {
-								t.logger.Warn("🩺 FilterLogs cross-check: failed to get latest block",
-									"description", desc, "error", herr)
-								return
-							}
-							latest := header.Number.Uint64()
-							var from uint64
-							if latest > 50 {
-								from = latest - 50
-							}
-							q.FromBlock = new(big.Int).SetUint64(from)
-							q.ToBlock = new(big.Int).SetUint64(latest)
-							filterCtx, filterCancel := context.WithTimeout(ctx, 10*time.Second)
-							defer filterCancel()
-							matches, ferr := t.ethClient.FilterLogs(filterCtx, q)
-							if ferr != nil {
-								t.logger.Warn("🩺 FilterLogs cross-check: query failed",
-									"description", desc,
-									"from_block", from, "to_block", latest,
-									"error", ferr)
-								return
-							}
-							t.logger.Info("🩺 FilterLogs cross-check completed",
-								"description", desc,
-								"from_block", from, "to_block", latest,
-								"historical_matches", len(matches))
-						}(qi.Query, qi.Description)
-
-						// Start error monitoring for new subscription
-						go func(s ethereum.Subscription, d string) {
-							errSub := <-s.Err()
-							if errSub != nil {
-								errorCh <- errSub
-							}
-						}(sub, qi.Description)
+				if err := t.addSubscriptions(ctx, desiredByKey, logs, errorCh); err != nil {
+					t.subsMutex.Unlock()
+					t.updateSubscriptionMetrics(t.desiredSubscriptionCount(newQueries))
+					if t.incSubscriptionRebuildError != nil {
+						t.incSubscriptionRebuildError()
 					}
+					t.logger.Warn("Failed to create all subscriptions during incremental update; forcing reconnect", "error", err)
+					select {
+					case errorCh <- err:
+					default:
+						t.logger.Warn("Incremental update reconnect signal dropped because error channel is full", "error", err)
+					}
+					continue
 				}
 
 				// UPDATE taskIDs: refresh task sets for existing subscriptions
@@ -747,6 +872,7 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 				t.logger.Info("🔄 Incremental subscription update completed",
 					"active_subscriptions", activeCount,
 					"desired_queries", len(newQueries))
+				t.updateSubscriptionMetrics(t.desiredSubscriptionCount(newQueries))
 
 			case err := <-errorCh:
 				if err == nil {
@@ -754,56 +880,64 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 				}
 				t.logger.Warn("🔥 Subscription error, attempting reconnection", "error", err)
 
-				// Attempt to reconnect
-				if err := t.retryConnectToRpc(); err != nil {
-					t.logger.Error("❌ Failed to reconnect to RPC", "error", err)
-					continue
-				}
-
-				// Rebuild and resubscribe
-				t.logger.Info("🔌 Reconnected, rebuilding subscriptions")
 				newQueries := t.buildFilterQueries()
-
 				t.subsMutex.Lock()
-				// Clean up old managed subscriptions
 				for _, ms := range t.querySubscriptions {
 					ms.subscription.Unsubscribe()
 				}
 				t.querySubscriptions = make(map[string]*managedSubscription)
-				t.subscriptions = make([]SubscriptionInfo, 0, len(newQueries))
+				t.subscriptions = nil
+				t.subsMutex.Unlock()
+				desiredCount := t.desiredSubscriptionCount(newQueries)
+				t.updateSubscriptionMetrics(desiredCount)
+				t.wsEthClient.Close()
 
-				// Create new subscriptions
-				for i, queryInfo := range newQueries {
-					// Use timeout context to prevent indefinite blocking during reconnection
-					timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-					sub, subErr := t.wsEthClient.SubscribeFilterLogs(timeoutCtx, queryInfo.Query, logs)
-					cancel() // Clean up timeout context
-					if subErr != nil {
-						t.logger.Error("❌ Failed to recreate subscription", "index", i, "error", subErr)
-						continue
+				backoff := time.Second
+				for {
+					t.retryConnectToRpc()
+					if t.shutdown {
+						return
+					}
+					t.logger.Info("🔌 Reconnected, rebuilding subscriptions")
+					if err := t.rebuildSubscriptions(ctx, newQueries, logs, errorCh); err == nil {
+						t.updateSubscriptionMetrics(desiredCount)
+						// Drain any stale errors the torn-down subscriptions queued
+						// before we rebuilt. Without this they sit in errorCh and
+						// immediately re-trigger a full reconnect against the fresh
+						// client. Only the current backlog is drained; errors from
+						// the newly-built subscriptions arrive after this point.
+					drainStaleErrors:
+						for {
+							select {
+							case <-errorCh:
+							default:
+								break drainStaleErrors
+							}
+						}
+						t.logger.Info("🔌 Reconnection completed",
+							"active_subscriptions", desiredCount,
+							"desired_subscriptions", desiredCount)
+						break
+					} else {
+						if t.incSubscriptionRebuildError != nil {
+							t.incSubscriptionRebuildError()
+						}
+						t.logger.Warn("Failed to rebuild all subscriptions; reconnecting",
+							"error", err, "retry_in", backoff)
+						t.wsEthClient.Close()
 					}
 
-					t.subscriptions = append(t.subscriptions, SubscriptionInfo{
-						subscription: sub,
-						query:        queryInfo.Query,
-						description:  queryInfo.Description,
-						taskID:       queryInfo.TaskID,
-						queryIndex:   queryInfo.QueryIndex,
-					})
-
-					// Restart error monitoring for this subscription
-					go func(idx int, s ethereum.Subscription, d string) {
-						errSub := <-s.Err()
-						if errSub != nil {
-							errorCh <- errSub
-						}
-					}(i, sub, queryInfo.Description)
+					timer := time.NewTimer(backoff)
+					select {
+					case <-ctx.Done():
+						timer.Stop()
+						return
+					case <-timer.C:
+					}
+					if backoff < 15*time.Second {
+						backoff *= 2
+					}
 				}
-				// Rebuild querySubscriptions from the new flat subscriptions
-				t.populateQuerySubscriptions()
-				t.subsMutex.Unlock()
-
-				t.logger.Info("🔌 Reconnection completed", "active_subscriptions", len(newQueries))
 			}
 		}
 	}()
@@ -868,7 +1002,7 @@ func (t *EventTrigger) checkEventSafety(log types.Log) bool {
 		if t.onOverloadAlert != nil {
 			alert := &avsproto.EventOverloadAlert{
 				TaskId:          matchingTaskID,
-				OperatorAddress: "operator", // TODO: Get from config
+				OperatorAddress: t.operatorAddress,
 				BlockNumber:     blockNumber,
 				EventsDetected:  currentCount,
 				SafetyLimit:     maxEventsPerBlock,
@@ -946,6 +1080,7 @@ func (t *EventTrigger) processLog(log types.Log) error {
 
 	// Mark this event as processed
 	t.processedEvents[eventKey] = true
+	t.processedEventsOrder = append(t.processedEventsOrder, eventKey)
 	t.processedEventsMutex.Unlock()
 
 	return t.processLogInternal(log)
@@ -1832,27 +1967,36 @@ func (t *EventTrigger) cleanupOldProcessedEvents(maxEvents uint64) {
 	t.processedEventsMutex.Lock()
 	defer t.processedEventsMutex.Unlock()
 
-	// Remove old events if we have too many
+	// Remove old events if we have too many. Evict the OLDEST keys first using
+	// processedEventsOrder (insertion order) so a recently-seen event is never
+	// dropped while a stale one survives — random map eviction could re-admit a
+	// duplicate that arrives again right after cleanup.
 	currentCount := len(t.processedEvents)
 	if currentCount > int(maxEvents) {
-		// Simple approach: clear a portion of the map to keep memory usage bounded
-		// Since we can't easily determine "oldest" without block numbers in the key,
-		// we'll just clear about half of the events
 		toRemove := currentCount - int(maxEvents)
 		removedCount := 0
 
-		for key := range t.processedEvents {
-			delete(t.processedEvents, key)
-			removedCount++
-			if removedCount >= toRemove {
-				break
+		for removedCount < toRemove && len(t.processedEventsOrder) > 0 {
+			oldest := t.processedEventsOrder[0]
+			t.processedEventsOrder = t.processedEventsOrder[1:]
+			// A key may already be gone (defensive); only count real deletions.
+			if _, ok := t.processedEvents[oldest]; ok {
+				delete(t.processedEvents, oldest)
+				removedCount++
 			}
 		}
 
-		t.logger.Debug("🧹 Cleaned up old processed events",
+		// Reclaim the backing array once the slice has drifted far from the map
+		// size, so the order slice doesn't grow unbounded via re-slicing.
+		if len(t.processedEventsOrder) > 2*len(t.processedEvents) {
+			compacted := make([]string, len(t.processedEventsOrder))
+			copy(compacted, t.processedEventsOrder)
+			t.processedEventsOrder = compacted
+		}
+
+		t.logger.Debug("🧹 Cleaned up old processed events (FIFO)",
 			"removed", removedCount,
-			"remaining", len(t.processedEvents),
-			"note", "Using simple cleanup since txHash-logIndex keys don't contain timestamps")
+			"remaining", len(t.processedEvents))
 	}
 }
 

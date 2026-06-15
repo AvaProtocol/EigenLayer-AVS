@@ -55,7 +55,12 @@ repos:
             # Allows an optional ! for breaking change e.g. feat!:
             # Requires a colon and a space after type/scope/!.
             # Requires some subject text.
-            PATTERN="^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\([\w\s-]+\))?!?:\s.+"
+            # Use POSIX bracket expressions, not \w/\s: BSD grep (macOS) does
+            # not honor those GNU/PCRE shorthands, so a scoped subject like
+            # fix(trigger): ... was wrongly rejected on macOS while passing
+            # under the GNU grep that CI uses. Avoid apostrophes in this
+            # block too: pre-commit shlex-parses the single-quoted entry.
+            PATTERN="^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\([[:alnum:]_[:space:]-]+\))?!?:[[:space:]].+"
             if ! grep -Eq "$PATTERN" <<< "$FIRST_LINE"; then
               echo "-------------------------------------------------------------------"
               echo "ERROR: Commit message does not follow Conventional Commits format."

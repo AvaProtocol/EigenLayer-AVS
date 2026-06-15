@@ -2,15 +2,20 @@ package taskengine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"sync"
 	"time"
 
 	ethereum "github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
@@ -50,6 +55,64 @@ type ChainStateReader interface {
 	// given smart wallet address. key is the 192-bit nonce-space key
 	// (typically 0 for the default space). Mirrors aa.GetNonce.
 	GetEntryPointNonce(ctx context.Context, walletAddr common.Address, key *big.Int) (*big.Int, error)
+
+	// GetBalance reads the native-coin balance (wei) at addr, latest block.
+	// Mirrors ethclient.BalanceAt(addr, nil).
+	GetBalance(ctx context.Context, addr common.Address) (*big.Int, error)
+
+	// GetTokenBalance reads the raw ERC-20 balance (no decimals applied)
+	// of owner for the given token contract. Mirrors erc20.BalanceOf.
+	GetTokenBalance(ctx context.Context, token, owner common.Address) (*big.Int, error)
+
+	// GetSmartWalletAddress derives the CREATE2 smart-wallet address for
+	// (owner, salt) under the given factory on this chain. Mirrors
+	// aa.GetSenderAddressForFactory.
+	GetSmartWalletAddress(ctx context.Context, owner, factory common.Address, salt *big.Int) (common.Address, error)
+
+	// CallContract executes a read-only contract call (eth_call) at the
+	// given block (nil = latest). Mirrors ethclient.CallContract.
+	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
+
+	// HeaderByNumber returns the block's number, hash, and timestamp for
+	// the given height (nil = latest). Returns the subset of header fields
+	// the gateway reads — a full types.Header can't be carried over gRPC
+	// faithfully (its hash depends on every field).
+	HeaderByNumber(ctx context.Context, number *big.Int) (*BlockHeader, error)
+
+	// GetBlockNumber returns the latest block number. Mirrors
+	// ethclient.BlockNumber.
+	GetBlockNumber(ctx context.Context) (uint64, error)
+
+	// FindMatchingWalletSalt scans salts [0, maxSalts) for the one whose
+	// CREATE2 smart-wallet address (under factory) equals target. Returns
+	// found=false when none matches. The worker-routed implementation runs
+	// the scan server-side so a wide range is a single round-trip.
+	FindMatchingWalletSalt(ctx context.Context, owner, factory, target common.Address, maxSalts int64) (found bool, salt int64, err error)
+
+	// GetTransactionReceipt reads a tx receipt by hash. Returns (nil, nil)
+	// when the receipt isn't available yet (pending). Only the gas / status /
+	// block fields are populated — not logs. Mirrors
+	// ethclient.TransactionReceipt with NotFound mapped to a nil receipt.
+	GetTransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
+
+	// GetStorageAt reads a contract storage slot (latest block). Mirrors
+	// ethclient.StorageAt.
+	GetStorageAt(ctx context.Context, account common.Address, slot common.Hash) ([]byte, error)
+}
+
+// BlockHeader is the subset of block-header fields the gateway reads:
+// number + hash (receipt stamping), time (event-timestamp enrichment), and
+// parentHash/difficulty/gasLimit/gasUsed (block-trigger output). A full
+// types.Header can't be carried over gRPC faithfully (its hash depends on
+// every field), so these are the explicit fields callers consume.
+type BlockHeader struct {
+	Number     uint64
+	Hash       common.Hash
+	Time       uint64
+	ParentHash common.Hash
+	Difficulty *big.Int
+	GasLimit   uint64
+	GasUsed    uint64
 }
 
 // ---------------------------------------------------------------------
@@ -92,7 +155,13 @@ func NewDirectChainStateReader(client *ethclient.Client, chainID int64) ChainSta
 
 func (d *directChainStateReader) ChainID(ctx context.Context) (int64, error) {
 	d.detectOnce.Do(func() {
-		id, err := d.client.ChainID(ctx)
+		// Use a background context, not the caller's: the result (success or
+		// error) is cached permanently via detectOnce, so a cancelled
+		// first-caller context must not poison every later call with a stale
+		// "context canceled" error. A short timeout bounds the detection.
+		detectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		id, err := d.client.ChainID(detectCtx)
 		if err != nil {
 			d.detectErr = fmt.Errorf("ChainID: %w", err)
 			return
@@ -124,6 +193,107 @@ func (d *directChainStateReader) GetEntryPointNonce(_ context.Context, walletAdd
 	// flight when the caller cancels. Worth fixing in aa as a
 	// separate follow-up; out of scope for this layer.
 	return getEntryPointNonceDirect(d.client, walletAddr, key)
+}
+
+func (d *directChainStateReader) GetBalance(ctx context.Context, addr common.Address) (*big.Int, error) {
+	return d.client.BalanceAt(ctx, addr, nil)
+}
+
+func (d *directChainStateReader) GetTokenBalance(ctx context.Context, token, owner common.Address) (*big.Int, error) {
+	contract, err := erc20.NewErc20(token, d.client)
+	if err != nil {
+		return nil, fmt.Errorf("erc20 binding for %s: %w", token.Hex(), err)
+	}
+	return contract.BalanceOf(&bind.CallOpts{Context: ctx}, owner)
+}
+
+func (d *directChainStateReader) GetSmartWalletAddress(_ context.Context, owner, factory common.Address, salt *big.Int) (common.Address, error) {
+	// Normalize nil salt to 0 so the direct and worker-routed paths derive
+	// identical addresses (the worker path serializes nil as "0").
+	if salt == nil {
+		salt = big.NewInt(0)
+	}
+	addr, err := aa.GetSenderAddressForFactory(d.client, owner, factory, salt)
+	if err != nil {
+		return common.Address{}, err
+	}
+	if addr == nil {
+		return common.Address{}, fmt.Errorf("nil sender address for owner=%s factory=%s salt=%s", owner.Hex(), factory.Hex(), salt.String())
+	}
+	return *addr, nil
+}
+
+func (d *directChainStateReader) CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+	return d.client.CallContract(ctx, msg, blockNumber)
+}
+
+func (d *directChainStateReader) HeaderByNumber(ctx context.Context, number *big.Int) (*BlockHeader, error) {
+	h, err := d.client.HeaderByNumber(ctx, number)
+	if err != nil {
+		return nil, err
+	}
+	if h == nil {
+		return nil, fmt.Errorf("HeaderByNumber returned nil header")
+	}
+	return &BlockHeader{
+		Number:     h.Number.Uint64(),
+		Hash:       h.Hash(),
+		Time:       h.Time,
+		ParentHash: h.ParentHash,
+		Difficulty: h.Difficulty,
+		GasLimit:   h.GasLimit,
+		GasUsed:    h.GasUsed,
+	}, nil
+}
+
+func (d *directChainStateReader) GetBlockNumber(ctx context.Context) (uint64, error) {
+	return d.client.BlockNumber(ctx)
+}
+
+func (d *directChainStateReader) GetTransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+	receipt, err := d.client.TransactionReceipt(ctx, txHash)
+	if errors.Is(err, ethereum.NotFound) {
+		return nil, nil
+	}
+	return receipt, err
+}
+
+func (d *directChainStateReader) GetStorageAt(ctx context.Context, account common.Address, slot common.Hash) ([]byte, error) {
+	return d.client.StorageAt(ctx, account, slot, nil)
+}
+
+// maxDirectWalletSaltScan mirrors worker.maxWalletSaltScan: the direct fallback
+// must honor the same bound so a high MaxWalletsPerOwner config can't turn the
+// scan into thousands of sequential RPC round-trips.
+const maxDirectWalletSaltScan = 2000
+
+func (d *directChainStateReader) FindMatchingWalletSalt(ctx context.Context, owner, factory, target common.Address, maxSalts int64) (bool, int64, error) {
+	if maxSalts > maxDirectWalletSaltScan {
+		return false, 0, fmt.Errorf("max_salts %d exceeds cap %d", maxSalts, maxDirectWalletSaltScan)
+	}
+	var lastErr error
+	errCount := int64(0)
+	for salt := int64(0); salt < maxSalts; salt++ {
+		if err := ctx.Err(); err != nil {
+			return false, 0, err
+		}
+		addr, err := aa.GetSenderAddressForFactory(d.client, owner, factory, big.NewInt(salt))
+		if err != nil {
+			lastErr = err
+			errCount++
+			continue
+		}
+		if addr != nil && *addr == target {
+			return true, salt, nil
+		}
+	}
+	// If every derivation errored, this is a systemic RPC failure, not a
+	// genuine "no match" — surface it so connectivity problems aren't masked
+	// as not-found (which the worker-routed path would propagate too).
+	if maxSalts > 0 && errCount == maxSalts {
+		return false, 0, fmt.Errorf("all %d salt derivations failed: %w", maxSalts, lastErr)
+	}
+	return false, 0, nil
 }
 
 // ---------------------------------------------------------------------
@@ -233,6 +403,204 @@ func (w *workerChainStateReader) GetEntryPointNonce(ctx context.Context, walletA
 		return nil, fmt.Errorf("worker returned malformed nonce %q for %s on chain %d", resp.Nonce, walletAddr.Hex(), w.chainID)
 	}
 	return v, nil
+}
+
+func (w *workerChainStateReader) GetBalance(ctx context.Context, addr common.Address) (*big.Int, error) {
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	resp, err := w.client.GetBalance(ctx, &avsproto.WorkerGetBalanceReq{Address: addr.Hex()})
+	if err != nil {
+		return nil, fmt.Errorf("worker GetBalance (chain %d): %w", w.chainID, err)
+	}
+	v, ok := new(big.Int).SetString(resp.BalanceWei, 10)
+	if !ok {
+		return nil, fmt.Errorf("worker returned malformed balance %q for %s on chain %d", resp.BalanceWei, addr.Hex(), w.chainID)
+	}
+	return v, nil
+}
+
+func (w *workerChainStateReader) GetTokenBalance(ctx context.Context, token, owner common.Address) (*big.Int, error) {
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	resp, err := w.client.GetTokenBalance(ctx, &avsproto.WorkerGetTokenBalanceReq{
+		TokenAddress: token.Hex(),
+		OwnerAddress: owner.Hex(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("worker GetTokenBalance (chain %d): %w", w.chainID, err)
+	}
+	v, ok := new(big.Int).SetString(resp.Balance, 10)
+	if !ok {
+		return nil, fmt.Errorf("worker returned malformed token balance %q for token=%s owner=%s on chain %d", resp.Balance, token.Hex(), owner.Hex(), w.chainID)
+	}
+	return v, nil
+}
+
+func (w *workerChainStateReader) GetSmartWalletAddress(ctx context.Context, owner, factory common.Address, salt *big.Int) (common.Address, error) {
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	saltStr := "0"
+	if salt != nil {
+		saltStr = salt.String()
+	}
+	resp, err := w.client.GetSmartWalletAddress(ctx, &avsproto.WorkerGetSmartWalletAddressReq{
+		Owner:          owner.Hex(),
+		Salt:           saltStr,
+		FactoryAddress: factory.Hex(),
+	})
+	if err != nil {
+		return common.Address{}, fmt.Errorf("worker GetSmartWalletAddress (chain %d): %w", w.chainID, err)
+	}
+	if resp == nil {
+		return common.Address{}, fmt.Errorf("worker returned nil response for owner=%s on chain %d", owner.Hex(), w.chainID)
+	}
+	if !common.IsHexAddress(resp.Address) {
+		return common.Address{}, fmt.Errorf("worker returned malformed address %q for owner=%s on chain %d", resp.Address, owner.Hex(), w.chainID)
+	}
+	return common.HexToAddress(resp.Address), nil
+}
+
+func (w *workerChainStateReader) CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+	// eth_call without a destination is a contract-deployment probe, which
+	// the contractRead path never issues. Surface a nil To rather than
+	// forwarding an ambiguous request to the worker.
+	if msg.To == nil {
+		return nil, fmt.Errorf("CallContract: msg.To is required")
+	}
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	req := &avsproto.WorkerCallContractReq{
+		To:   msg.To.Hex(),
+		Data: msg.Data,
+	}
+	if (msg.From != common.Address{}) {
+		req.From = msg.From.Hex()
+	}
+	if msg.Value != nil {
+		req.Value = msg.Value.String()
+	}
+	if blockNumber != nil {
+		req.BlockNumber = blockNumber.String()
+	}
+	resp, err := w.client.CallContract(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("worker CallContract (chain %d): %w", w.chainID, err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("worker returned nil response for CallContract to %s on chain %d", msg.To.Hex(), w.chainID)
+	}
+	return resp.Result, nil
+}
+
+func (w *workerChainStateReader) HeaderByNumber(ctx context.Context, number *big.Int) (*BlockHeader, error) {
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	req := &avsproto.WorkerGetBlockHeaderReq{}
+	if number != nil {
+		req.BlockNumber = number.String()
+	}
+	resp, err := w.client.GetBlockHeader(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("worker GetBlockHeader (chain %d): %w", w.chainID, err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("worker returned nil response for GetBlockHeader on chain %d", w.chainID)
+	}
+	// A blank hash means the worker didn't populate it (version skew) —
+	// HexToHash would silently coerce "" to the zero hash and propagate an
+	// incorrect block-trigger output. Hard-fail instead. (ParentHash is
+	// genuinely zero only for genesis, but the worker always serializes it
+	// via .Hex(), so an empty string is still skew.)
+	if resp.Hash == "" || resp.ParentHash == "" {
+		return nil, fmt.Errorf("worker returned incomplete block header (hash=%q parentHash=%q) on chain %d", resp.Hash, resp.ParentHash, w.chainID)
+	}
+	difficulty, ok := new(big.Int).SetString(resp.Difficulty, 10)
+	if !ok {
+		// Difficulty is informational (post-merge it's 0); tolerate a
+		// missing/blank value rather than failing the whole header read.
+		difficulty = big.NewInt(0)
+	}
+	return &BlockHeader{
+		Number:     resp.Number,
+		Hash:       common.HexToHash(resp.Hash),
+		Time:       resp.Time,
+		ParentHash: common.HexToHash(resp.ParentHash),
+		Difficulty: difficulty,
+		GasLimit:   resp.GasLimit,
+		GasUsed:    resp.GasUsed,
+	}, nil
+}
+
+func (w *workerChainStateReader) GetBlockNumber(ctx context.Context) (uint64, error) {
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	resp, err := w.client.GetBlockNumber(ctx, &avsproto.WorkerGetBlockNumberReq{})
+	if err != nil {
+		return 0, fmt.Errorf("worker GetBlockNumber (chain %d): %w", w.chainID, err)
+	}
+	if resp == nil {
+		return 0, fmt.Errorf("worker returned nil response for GetBlockNumber on chain %d", w.chainID)
+	}
+	return resp.Number, nil
+}
+
+func (w *workerChainStateReader) GetTransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	resp, err := w.client.GetTransactionReceipt(ctx, &avsproto.WorkerGetTransactionReceiptReq{TxHash: txHash.Hex()})
+	if err != nil {
+		return nil, fmt.Errorf("worker GetTransactionReceipt (chain %d): %w", w.chainID, err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("worker returned nil response for GetTransactionReceipt on chain %d", w.chainID)
+	}
+	if !resp.Found {
+		return nil, nil
+	}
+	receipt := &types.Receipt{
+		Status:      resp.Status,
+		GasUsed:     resp.GasUsed,
+		TxHash:      common.HexToHash(resp.TxHash),
+		BlockNumber: new(big.Int).SetUint64(resp.BlockNumber),
+	}
+	if egp, ok := new(big.Int).SetString(resp.EffectiveGasPrice, 10); ok {
+		receipt.EffectiveGasPrice = egp
+	}
+	return receipt, nil
+}
+
+func (w *workerChainStateReader) GetStorageAt(ctx context.Context, account common.Address, slot common.Hash) ([]byte, error) {
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	resp, err := w.client.GetStorageAt(ctx, &avsproto.WorkerGetStorageAtReq{
+		Address: account.Hex(),
+		Slot:    slot.Hex(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("worker GetStorageAt (chain %d): %w", w.chainID, err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("worker returned nil response for GetStorageAt on chain %d", w.chainID)
+	}
+	return resp.Value, nil
+}
+
+func (w *workerChainStateReader) FindMatchingWalletSalt(ctx context.Context, owner, factory, target common.Address, maxSalts int64) (bool, int64, error) {
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	resp, err := w.client.FindMatchingWalletSalt(ctx, &avsproto.WorkerFindMatchingWalletSaltReq{
+		Owner:          owner.Hex(),
+		FactoryAddress: factory.Hex(),
+		TargetAddress:  target.Hex(),
+		MaxSalts:       maxSalts,
+	})
+	if err != nil {
+		return false, 0, fmt.Errorf("worker FindMatchingWalletSalt (chain %d): %w", w.chainID, err)
+	}
+	if resp == nil {
+		return false, 0, fmt.Errorf("worker returned nil response for FindMatchingWalletSalt on chain %d", w.chainID)
+	}
+	return resp.Found, resp.Salt, nil
 }
 
 // withTimeout caps the gRPC call's wall time. context.WithTimeout

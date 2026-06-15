@@ -19,15 +19,23 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ChainWorker_WorkerHealthCheck_FullMethodName     = "/aggregator.ChainWorker/WorkerHealthCheck"
-	ChainWorker_ExecuteUserOp_FullMethodName         = "/aggregator.ChainWorker/ExecuteUserOp"
-	ChainWorker_GetNonce_FullMethodName              = "/aggregator.ChainWorker/GetNonce"
-	ChainWorker_GetSmartWalletAddress_FullMethodName = "/aggregator.ChainWorker/GetSmartWalletAddress"
-	ChainWorker_GetTokenMetadata_FullMethodName      = "/aggregator.ChainWorker/GetTokenMetadata"
-	ChainWorker_GetNonceByAddress_FullMethodName     = "/aggregator.ChainWorker/GetNonceByAddress"
-	ChainWorker_SuggestGasPrice_FullMethodName       = "/aggregator.ChainWorker/SuggestGasPrice"
-	ChainWorker_EstimateGas_FullMethodName           = "/aggregator.ChainWorker/EstimateGas"
-	ChainWorker_GetCode_FullMethodName               = "/aggregator.ChainWorker/GetCode"
+	ChainWorker_WorkerHealthCheck_FullMethodName      = "/aggregator.ChainWorker/WorkerHealthCheck"
+	ChainWorker_ExecuteUserOp_FullMethodName          = "/aggregator.ChainWorker/ExecuteUserOp"
+	ChainWorker_GetNonce_FullMethodName               = "/aggregator.ChainWorker/GetNonce"
+	ChainWorker_GetSmartWalletAddress_FullMethodName  = "/aggregator.ChainWorker/GetSmartWalletAddress"
+	ChainWorker_GetTokenMetadata_FullMethodName       = "/aggregator.ChainWorker/GetTokenMetadata"
+	ChainWorker_GetNonceByAddress_FullMethodName      = "/aggregator.ChainWorker/GetNonceByAddress"
+	ChainWorker_SuggestGasPrice_FullMethodName        = "/aggregator.ChainWorker/SuggestGasPrice"
+	ChainWorker_EstimateGas_FullMethodName            = "/aggregator.ChainWorker/EstimateGas"
+	ChainWorker_GetCode_FullMethodName                = "/aggregator.ChainWorker/GetCode"
+	ChainWorker_GetBalance_FullMethodName             = "/aggregator.ChainWorker/GetBalance"
+	ChainWorker_GetTokenBalance_FullMethodName        = "/aggregator.ChainWorker/GetTokenBalance"
+	ChainWorker_CallContract_FullMethodName           = "/aggregator.ChainWorker/CallContract"
+	ChainWorker_GetBlockHeader_FullMethodName         = "/aggregator.ChainWorker/GetBlockHeader"
+	ChainWorker_GetBlockNumber_FullMethodName         = "/aggregator.ChainWorker/GetBlockNumber"
+	ChainWorker_FindMatchingWalletSalt_FullMethodName = "/aggregator.ChainWorker/FindMatchingWalletSalt"
+	ChainWorker_GetTransactionReceipt_FullMethodName  = "/aggregator.ChainWorker/GetTransactionReceipt"
+	ChainWorker_GetStorageAt_FullMethodName           = "/aggregator.ChainWorker/GetStorageAt"
 )
 
 // ChainWorkerClient is the client API for ChainWorker service.
@@ -66,6 +74,38 @@ type ChainWorkerClient interface {
 	// Used by the fee estimator to detect whether the runner contract is
 	// deployed before issuing UserOps against it.
 	GetCode(ctx context.Context, in *WorkerGetCodeReq, opts ...grpc.CallOption) (*WorkerGetCodeResp, error)
+	// Read the native-coin balance (wei) at an address. Wraps
+	// ethclient.BalanceAt(latest). Used by the gateway's withdraw preflight
+	// to validate / size native-token withdrawals.
+	GetBalance(ctx context.Context, in *WorkerGetBalanceReq, opts ...grpc.CallOption) (*WorkerGetBalanceResp, error)
+	// Read an ERC-20 token balance for an owner. Wraps erc20.BalanceOf.
+	// Used by the gateway's withdraw preflight to validate / size ERC-20
+	// withdrawals.
+	GetTokenBalance(ctx context.Context, in *WorkerGetTokenBalanceReq, opts ...grpc.CallOption) (*WorkerGetTokenBalanceResp, error)
+	// Execute a read-only contract call (eth_call) on this chain. Wraps
+	// ethclient.CallContract. Used by the contractRead node so the gateway
+	// issues no direct eth_call against execution chains.
+	CallContract(ctx context.Context, in *WorkerCallContractReq, opts ...grpc.CallOption) (*WorkerCallContractResp, error)
+	// Read a block header's number, hash, and timestamp. Wraps
+	// ethclient.HeaderByNumber. Used to stamp simulation receipts and
+	// enrich event timestamps without a gateway-side chain dial.
+	GetBlockHeader(ctx context.Context, in *WorkerGetBlockHeaderReq, opts ...grpc.CallOption) (*WorkerGetBlockHeaderResp, error)
+	// Read the latest block number. Wraps ethclient.BlockNumber. Used by the
+	// immediate-trigger path to stamp the current block for the operator.
+	GetBlockNumber(ctx context.Context, in *WorkerGetBlockNumberReq, opts ...grpc.CallOption) (*WorkerGetBlockNumberResp, error)
+	// Find the salt in [0, max_salts) whose CREATE2 smart-wallet address
+	// (under the given factory) matches target. The worker runs the scan +
+	// comparison locally so a wide range is a single round-trip. Used by the
+	// gateway's wallet-ownership validation (factory-upgrade fallback).
+	FindMatchingWalletSalt(ctx context.Context, in *WorkerFindMatchingWalletSaltReq, opts ...grpc.CallOption) (*WorkerFindMatchingWalletSaltResp, error)
+	// Read a transaction receipt by hash. Wraps ethclient.TransactionReceipt.
+	// found=false when the receipt isn't available yet (pending). Used by the
+	// gateway's userop confirmation-waiting to backfill gas data.
+	GetTransactionReceipt(ctx context.Context, in *WorkerGetTransactionReceiptReq, opts ...grpc.CallOption) (*WorkerGetTransactionReceiptResp, error)
+	// Read a contract storage slot (latest). Wraps ethclient.StorageAt. Used
+	// by the gateway's Tenderly simulation to probe an ERC-20's balance slot
+	// for state overrides.
+	GetStorageAt(ctx context.Context, in *WorkerGetStorageAtReq, opts ...grpc.CallOption) (*WorkerGetStorageAtResp, error)
 }
 
 type chainWorkerClient struct {
@@ -166,6 +206,86 @@ func (c *chainWorkerClient) GetCode(ctx context.Context, in *WorkerGetCodeReq, o
 	return out, nil
 }
 
+func (c *chainWorkerClient) GetBalance(ctx context.Context, in *WorkerGetBalanceReq, opts ...grpc.CallOption) (*WorkerGetBalanceResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerGetBalanceResp)
+	err := c.cc.Invoke(ctx, ChainWorker_GetBalance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chainWorkerClient) GetTokenBalance(ctx context.Context, in *WorkerGetTokenBalanceReq, opts ...grpc.CallOption) (*WorkerGetTokenBalanceResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerGetTokenBalanceResp)
+	err := c.cc.Invoke(ctx, ChainWorker_GetTokenBalance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chainWorkerClient) CallContract(ctx context.Context, in *WorkerCallContractReq, opts ...grpc.CallOption) (*WorkerCallContractResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerCallContractResp)
+	err := c.cc.Invoke(ctx, ChainWorker_CallContract_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chainWorkerClient) GetBlockHeader(ctx context.Context, in *WorkerGetBlockHeaderReq, opts ...grpc.CallOption) (*WorkerGetBlockHeaderResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerGetBlockHeaderResp)
+	err := c.cc.Invoke(ctx, ChainWorker_GetBlockHeader_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chainWorkerClient) GetBlockNumber(ctx context.Context, in *WorkerGetBlockNumberReq, opts ...grpc.CallOption) (*WorkerGetBlockNumberResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerGetBlockNumberResp)
+	err := c.cc.Invoke(ctx, ChainWorker_GetBlockNumber_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chainWorkerClient) FindMatchingWalletSalt(ctx context.Context, in *WorkerFindMatchingWalletSaltReq, opts ...grpc.CallOption) (*WorkerFindMatchingWalletSaltResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerFindMatchingWalletSaltResp)
+	err := c.cc.Invoke(ctx, ChainWorker_FindMatchingWalletSalt_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chainWorkerClient) GetTransactionReceipt(ctx context.Context, in *WorkerGetTransactionReceiptReq, opts ...grpc.CallOption) (*WorkerGetTransactionReceiptResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerGetTransactionReceiptResp)
+	err := c.cc.Invoke(ctx, ChainWorker_GetTransactionReceipt_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chainWorkerClient) GetStorageAt(ctx context.Context, in *WorkerGetStorageAtReq, opts ...grpc.CallOption) (*WorkerGetStorageAtResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerGetStorageAtResp)
+	err := c.cc.Invoke(ctx, ChainWorker_GetStorageAt_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ChainWorkerServer is the server API for ChainWorker service.
 // All implementations must embed UnimplementedChainWorkerServer
 // for forward compatibility.
@@ -202,6 +322,38 @@ type ChainWorkerServer interface {
 	// Used by the fee estimator to detect whether the runner contract is
 	// deployed before issuing UserOps against it.
 	GetCode(context.Context, *WorkerGetCodeReq) (*WorkerGetCodeResp, error)
+	// Read the native-coin balance (wei) at an address. Wraps
+	// ethclient.BalanceAt(latest). Used by the gateway's withdraw preflight
+	// to validate / size native-token withdrawals.
+	GetBalance(context.Context, *WorkerGetBalanceReq) (*WorkerGetBalanceResp, error)
+	// Read an ERC-20 token balance for an owner. Wraps erc20.BalanceOf.
+	// Used by the gateway's withdraw preflight to validate / size ERC-20
+	// withdrawals.
+	GetTokenBalance(context.Context, *WorkerGetTokenBalanceReq) (*WorkerGetTokenBalanceResp, error)
+	// Execute a read-only contract call (eth_call) on this chain. Wraps
+	// ethclient.CallContract. Used by the contractRead node so the gateway
+	// issues no direct eth_call against execution chains.
+	CallContract(context.Context, *WorkerCallContractReq) (*WorkerCallContractResp, error)
+	// Read a block header's number, hash, and timestamp. Wraps
+	// ethclient.HeaderByNumber. Used to stamp simulation receipts and
+	// enrich event timestamps without a gateway-side chain dial.
+	GetBlockHeader(context.Context, *WorkerGetBlockHeaderReq) (*WorkerGetBlockHeaderResp, error)
+	// Read the latest block number. Wraps ethclient.BlockNumber. Used by the
+	// immediate-trigger path to stamp the current block for the operator.
+	GetBlockNumber(context.Context, *WorkerGetBlockNumberReq) (*WorkerGetBlockNumberResp, error)
+	// Find the salt in [0, max_salts) whose CREATE2 smart-wallet address
+	// (under the given factory) matches target. The worker runs the scan +
+	// comparison locally so a wide range is a single round-trip. Used by the
+	// gateway's wallet-ownership validation (factory-upgrade fallback).
+	FindMatchingWalletSalt(context.Context, *WorkerFindMatchingWalletSaltReq) (*WorkerFindMatchingWalletSaltResp, error)
+	// Read a transaction receipt by hash. Wraps ethclient.TransactionReceipt.
+	// found=false when the receipt isn't available yet (pending). Used by the
+	// gateway's userop confirmation-waiting to backfill gas data.
+	GetTransactionReceipt(context.Context, *WorkerGetTransactionReceiptReq) (*WorkerGetTransactionReceiptResp, error)
+	// Read a contract storage slot (latest). Wraps ethclient.StorageAt. Used
+	// by the gateway's Tenderly simulation to probe an ERC-20's balance slot
+	// for state overrides.
+	GetStorageAt(context.Context, *WorkerGetStorageAtReq) (*WorkerGetStorageAtResp, error)
 	mustEmbedUnimplementedChainWorkerServer()
 }
 
@@ -238,6 +390,30 @@ func (UnimplementedChainWorkerServer) EstimateGas(context.Context, *WorkerEstima
 }
 func (UnimplementedChainWorkerServer) GetCode(context.Context, *WorkerGetCodeReq) (*WorkerGetCodeResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetCode not implemented")
+}
+func (UnimplementedChainWorkerServer) GetBalance(context.Context, *WorkerGetBalanceReq) (*WorkerGetBalanceResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBalance not implemented")
+}
+func (UnimplementedChainWorkerServer) GetTokenBalance(context.Context, *WorkerGetTokenBalanceReq) (*WorkerGetTokenBalanceResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTokenBalance not implemented")
+}
+func (UnimplementedChainWorkerServer) CallContract(context.Context, *WorkerCallContractReq) (*WorkerCallContractResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CallContract not implemented")
+}
+func (UnimplementedChainWorkerServer) GetBlockHeader(context.Context, *WorkerGetBlockHeaderReq) (*WorkerGetBlockHeaderResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBlockHeader not implemented")
+}
+func (UnimplementedChainWorkerServer) GetBlockNumber(context.Context, *WorkerGetBlockNumberReq) (*WorkerGetBlockNumberResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBlockNumber not implemented")
+}
+func (UnimplementedChainWorkerServer) FindMatchingWalletSalt(context.Context, *WorkerFindMatchingWalletSaltReq) (*WorkerFindMatchingWalletSaltResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FindMatchingWalletSalt not implemented")
+}
+func (UnimplementedChainWorkerServer) GetTransactionReceipt(context.Context, *WorkerGetTransactionReceiptReq) (*WorkerGetTransactionReceiptResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTransactionReceipt not implemented")
+}
+func (UnimplementedChainWorkerServer) GetStorageAt(context.Context, *WorkerGetStorageAtReq) (*WorkerGetStorageAtResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetStorageAt not implemented")
 }
 func (UnimplementedChainWorkerServer) mustEmbedUnimplementedChainWorkerServer() {}
 func (UnimplementedChainWorkerServer) testEmbeddedByValue()                     {}
@@ -422,6 +598,150 @@ func _ChainWorker_GetCode_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChainWorker_GetBalance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerGetBalanceReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).GetBalance(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_GetBalance_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).GetBalance(ctx, req.(*WorkerGetBalanceReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChainWorker_GetTokenBalance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerGetTokenBalanceReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).GetTokenBalance(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_GetTokenBalance_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).GetTokenBalance(ctx, req.(*WorkerGetTokenBalanceReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChainWorker_CallContract_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerCallContractReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).CallContract(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_CallContract_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).CallContract(ctx, req.(*WorkerCallContractReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChainWorker_GetBlockHeader_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerGetBlockHeaderReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).GetBlockHeader(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_GetBlockHeader_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).GetBlockHeader(ctx, req.(*WorkerGetBlockHeaderReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChainWorker_GetBlockNumber_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerGetBlockNumberReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).GetBlockNumber(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_GetBlockNumber_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).GetBlockNumber(ctx, req.(*WorkerGetBlockNumberReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChainWorker_FindMatchingWalletSalt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerFindMatchingWalletSaltReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).FindMatchingWalletSalt(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_FindMatchingWalletSalt_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).FindMatchingWalletSalt(ctx, req.(*WorkerFindMatchingWalletSaltReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChainWorker_GetTransactionReceipt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerGetTransactionReceiptReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).GetTransactionReceipt(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_GetTransactionReceipt_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).GetTransactionReceipt(ctx, req.(*WorkerGetTransactionReceiptReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChainWorker_GetStorageAt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerGetStorageAtReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).GetStorageAt(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_GetStorageAt_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).GetStorageAt(ctx, req.(*WorkerGetStorageAtReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ChainWorker_ServiceDesc is the grpc.ServiceDesc for ChainWorker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -464,6 +784,38 @@ var ChainWorker_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetCode",
 			Handler:    _ChainWorker_GetCode_Handler,
+		},
+		{
+			MethodName: "GetBalance",
+			Handler:    _ChainWorker_GetBalance_Handler,
+		},
+		{
+			MethodName: "GetTokenBalance",
+			Handler:    _ChainWorker_GetTokenBalance_Handler,
+		},
+		{
+			MethodName: "CallContract",
+			Handler:    _ChainWorker_CallContract_Handler,
+		},
+		{
+			MethodName: "GetBlockHeader",
+			Handler:    _ChainWorker_GetBlockHeader_Handler,
+		},
+		{
+			MethodName: "GetBlockNumber",
+			Handler:    _ChainWorker_GetBlockNumber_Handler,
+		},
+		{
+			MethodName: "FindMatchingWalletSalt",
+			Handler:    _ChainWorker_FindMatchingWalletSalt_Handler,
+		},
+		{
+			MethodName: "GetTransactionReceipt",
+			Handler:    _ChainWorker_GetTransactionReceipt_Handler,
+		},
+		{
+			MethodName: "GetStorageAt",
+			Handler:    _ChainWorker_GetStorageAt_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

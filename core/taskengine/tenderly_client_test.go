@@ -1750,7 +1750,7 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		if err != nil {
 			t.Logf("Transfer simulation failed (expected): %v", err)
 			t.Logf("Note: Tenderly simulation is optimized for Chainlink price feeds")
-			t.Logf("For Transfer events, use historical search mode (simulationMode: false)")
+			t.Logf("For Transfer events, simulation mode returns synthetic sample data")
 			return
 		}
 
@@ -1765,72 +1765,6 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 			if eventData, ok := result["data"].(map[string]interface{}); ok {
 				eventDataJSON, _ := json.MarshalIndent(eventData, "", "  ")
 				t.Logf("📊 Transfer Event Data: %s", string(eventDataJSON))
-			}
-		}
-	})
-}
-
-// TestEventTriggerImmediately_HistoricalSearch_Unit tests historical search with known contracts
-func TestEventTriggerImmediately_HistoricalSearch_Unit(t *testing.T) {
-	// This test uses historical search and may not find events, which is expected
-	logger := testutil.GetLogger()
-
-	// Create a test engine
-	db := testutil.TestMustDB()
-	config := testutil.GetAggregatorConfig()
-	engine := New(db, config, nil, logger)
-
-	t.Run("NoEventsFound_ExpectedBehavior", func(t *testing.T) {
-		// Test historical search that likely won't find events
-		triggerConfig := map[string]interface{}{
-			"simulationMode": false, // Use historical search
-			"queries": []interface{}{
-				map[string]interface{}{
-					"addresses": []interface{}{
-						"0x779877A7B0D9E8603169DdbD7836e478b4624789", // LINK token
-					},
-					"topics": []interface{}{
-						map[string]interface{}{
-							"values": []interface{}{
-								"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer
-								"0x000000000000000000000000c60e71bd0f2e6d8832fea1a2d56091c48493c788", // from
-								nil, // to (wildcard)
-							},
-						},
-					},
-				},
-			},
-		}
-
-		t.Logf("🔍 Testing historical search (may not find recent events)")
-
-		result, err := engine.runEventTriggerImmediately(triggerConfig, map[string]interface{}{})
-
-		require.NoError(t, err, "Historical search should not error")
-		require.NotNil(t, result, "Should get result even if no events found")
-
-		// Document the "no events found" structure
-		if success, ok := result["success"].(bool); ok && !success {
-			t.Logf("✅ No events found (expected for historical search)")
-			t.Logf("📊 No Events Response Structure:")
-			t.Logf("   success: %v", result["success"])
-			t.Logf("   message: %v", result["message"])
-			t.Logf("   queriesCount: %v", result["queriesCount"])
-			t.Logf("   totalSearched: %v", result["totalSearched"])
-
-			// Print complete structure for documentation
-			resultJSON, _ := json.MarshalIndent(result, "", "  ")
-			t.Logf("\n📋 Complete 'No Events' Response:")
-			t.Logf("%s", string(resultJSON))
-		} else {
-			t.Logf("🎉 Unexpectedly found events in historical search!")
-			if eventData, hasData := result["data"].(map[string]interface{}); hasData {
-				eventDataJSON, _ := json.MarshalIndent(eventData, "", "  ")
-				t.Logf("📊 Event Data: %s", string(eventDataJSON))
-			}
-			if evmLog, hasEvmLog := result["evm_log"]; hasEvmLog {
-				evmLogJSON, _ := json.MarshalIndent(evmLog, "", "  ")
-				t.Logf("📊 EVM Log: %s", string(evmLogJSON))
 			}
 		}
 	})
@@ -1923,7 +1857,7 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 		t.Logf("2. Use the exact same query structure as above")
 		t.Logf("3. The response will have this exact raw blockchain log data structure")
 		t.Logf("4. Users can reference fields like: data.address, data.topics, data.data, etc.")
-		t.Logf("5. For production: set 'simulationMode': false to use real blockchain data")
+		t.Logf("5. Event triggers run in simulation mode (synthetic sample data)")
 
 		// Verify all expected raw blockchain log fields are present (now in metadata)
 		expectedFields := []string{
@@ -1937,52 +1871,6 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 
 		t.Logf("\n✅ All expected raw blockchain log fields are present!")
 		t.Logf("🎯 Users now have a complete raw blockchain log data structure to reference")
-	})
-
-	t.Run("CompareWithHistoricalSearch", func(t *testing.T) {
-		t.Logf("=== COMPARISON: SIMULATION vs HISTORICAL SEARCH ===")
-
-		// Test historical search (simulationMode: false)
-		historicalConfig := map[string]interface{}{
-			"simulationMode": false, // Historical search
-			"queries": []interface{}{
-				map[string]interface{}{
-					"addresses": []interface{}{
-						"0x779877A7B0D9E8603169DdbD7836e478b4624789",
-					},
-					"topics": []interface{}{
-						map[string]interface{}{
-							"values": []interface{}{
-								"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-								"0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-								nil,
-							},
-						},
-					},
-				},
-			},
-		}
-
-		historicalResult, err := engine.runEventTriggerImmediately(historicalConfig, map[string]interface{}{})
-		require.NoError(t, err, "Historical search should not error")
-
-		if success, ok := historicalResult["success"].(bool); ok && !success {
-			t.Logf("Historical Search Result: No events found (as expected)")
-			t.Logf("This is why simulation mode is useful for getting sample data!")
-			t.Logf("   - Historical search: searches real blockchain (may find nothing)")
-			t.Logf("   - Simulation mode: always provides sample data structure")
-		} else {
-			t.Logf("📊 Historical Search Result: Found real events!")
-			if eventData, hasData := historicalResult["data"].(map[string]interface{}); hasData {
-				eventDataJSON, _ := json.MarshalIndent(eventData, "", "  ")
-				t.Logf("   Real event data: %s", string(eventDataJSON))
-			}
-		}
-
-		t.Logf("\n🎯 === RECOMMENDATION ===")
-		t.Logf("✅ For getting sample data structure: use simulationMode: true")
-		t.Logf("✅ For production workflows: use simulationMode: false")
-		t.Logf("✅ Simulation mode guarantees consistent sample data for documentation")
 	})
 }
 

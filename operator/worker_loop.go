@@ -256,7 +256,15 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 
 		perChainEventCh := make(chan triggerengine.TriggerMetadata[triggerengine.EventMark], 1000)
 		et := triggerengine.NewEventTrigger(&rpcOpt, perChainEventCh, o.logger,
-			o.config.GetMaxEventsPerQueryPerBlock(), o.config.GetMaxTotalEventsPerBlock())
+			o.config.GetMaxEventsPerQueryPerBlock(), o.config.GetMaxTotalEventsPerBlock(), o.config.OperatorAddress)
+		et.SetSubscriptionMetrics(
+			func(active, desired int) {
+				o.metrics.SetEventSubscriptions(detectedID, active, desired)
+			},
+			func() {
+				o.metrics.IncEventSubscriptionRebuildFailures(detectedID)
+			},
+		)
 		et.SetOverloadAlertCallback(func(alert *avspb.EventOverloadAlert) {
 			o.logger.Warn("🚨 Sending event overload alert to aggregator",
 				"task_id", alert.TaskId,

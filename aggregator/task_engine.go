@@ -103,15 +103,15 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 			if chain.SmartWallet == nil || chain.SmartWallet.EthRpcUrl == "" {
 				continue
 			}
-			// We still dial the chain RPC for smartWalletRpcByChain — the
-			// gateway uses it for ERC-20 balance reads in the withdraw
-			// flow (rpc_server.go:ExecuteWithdraw) that haven't been
-			// routed through workers yet. Phase 3 of the design doc
-			// migrated FeeEstimator + EntryPoint-nonce reads off this
-			// client and onto worker-routed ChainStateReaders below;
-			// the dial here is the last remaining direct chain-RPC
-			// dependency and gets removed in the withdraw-migration
-			// follow-up (Phase 4) tracked in
+			// We still dial the chain RPC for smartWalletRpcByChain, but
+			// it's now only a FALLBACK: every live gateway read path
+			// (token metadata, FeeEstimator, EntryPoint nonce, and — as
+			// of Phase 4 — withdraw balance checks) routes through a
+			// worker-routed ChainStateReader / TokenEnrichmentService.
+			// This client is used only when the worker for a chain isn't
+			// reachable at startup (the fallbacks below + the REST/withdraw
+			// direct-reader fallbacks). Dropping the dial + the per-chain
+			// *_RPC env vars is the final Phase 4 cleanup, tracked in
 			// docs/changes/20260612-delegate-chain-rpc-to-workers.md.
 			chainRpc, err := ethclient.Dial(chain.SmartWallet.EthRpcUrl)
 			if err != nil {
