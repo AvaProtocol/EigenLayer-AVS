@@ -123,7 +123,7 @@ func (n *Engine) runBlockTriggerImmediately(triggerConfig map[string]interface{}
 					n.logger.Warn("BlockTrigger: Using mock block number due to RPC rate limiting", "mockBlockNumber", blockNumber, "rpcError", err.Error())
 				}
 			} else {
-				return nil, fmt.Errorf("failed to get current block number from RPC: %w", err)
+				return nil, fmt.Errorf("failed to get current block number for chain %d: %w", chainID, err)
 			}
 		} else {
 			blockNumber = currentBlock
@@ -153,7 +153,7 @@ func (n *Engine) runBlockTriggerImmediately(triggerConfig map[string]interface{}
 				"parentHash":  common.HexToHash(fmt.Sprintf("0x%016x%016x%016x%016x", blockNumber-1, blockNumber, blockNumber+1, blockNumber+2)).Hex(),
 			}, nil
 		}
-		return nil, fmt.Errorf("failed to get block header for block %d from RPC: %w", blockNumber, err)
+		return nil, fmt.Errorf("failed to get block header for block %d on chain %d: %w", blockNumber, chainID, err)
 	}
 
 	result := map[string]interface{}{
@@ -189,14 +189,25 @@ func requireChainIDFromConfig(config map[string]interface{}) (int64, error) {
 	case int:
 		chainID = int64(v)
 	case uint64:
+		if v > math.MaxInt64 {
+			return 0, fmt.Errorf("chain_id %d exceeds int64 range", v)
+		}
 		chainID = int64(v)
 	case float64:
+		// structpb round-trips numbers as float64; require an exact,
+		// in-range integer rather than silently truncating.
+		if v != math.Trunc(v) {
+			return 0, fmt.Errorf("chain_id %v is not an integer", v)
+		}
+		if v < math.MinInt64 || v > math.MaxInt64 {
+			return 0, fmt.Errorf("chain_id %v out of int64 range", v)
+		}
 		chainID = int64(v)
 	default:
 		return 0, fmt.Errorf("chain_id has unexpected type %T", raw)
 	}
-	if chainID == 0 {
-		return 0, fmt.Errorf("chain_id must be non-zero")
+	if chainID <= 0 {
+		return 0, fmt.Errorf("chain_id must be a positive integer, got %d", chainID)
 	}
 	return chainID, nil
 }

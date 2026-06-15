@@ -644,7 +644,9 @@ func TestRequireChainIDFromConfig(t *testing.T) {
 // empty block_number string (worker treats empty as "latest").
 func TestWorkerChainStateReader_HeaderByNumber_Latest(t *testing.T) {
 	fake := &chainStateFakeClient{
-		getBlockHeaderResp: &avsproto.WorkerGetBlockHeaderResp{Number: 1, Hash: "0x00", Time: 1},
+		getBlockHeaderResp: &avsproto.WorkerGetBlockHeaderResp{
+			Number: 1, Hash: "0x01", Time: 1, ParentHash: "0x00", Difficulty: "0",
+		},
 	}
 	r := NewWorkerChainStateReader(fake, 1, time.Second)
 	if _, err := r.HeaderByNumber(context.Background(), nil); err != nil {
@@ -652,6 +654,19 @@ func TestWorkerChainStateReader_HeaderByNumber_Latest(t *testing.T) {
 	}
 	if fake.getBlockHeaderReq.BlockNumber != "" {
 		t.Fatalf("nil number should send empty block_number: got %q", fake.getBlockHeaderReq.BlockNumber)
+	}
+}
+
+// TestWorkerChainStateReader_HeaderByNumber_IncompleteRejected: an empty
+// hash (worker/gateway version skew) must hard-fail, not coerce to the
+// zero hash and propagate an incorrect block-trigger output.
+func TestWorkerChainStateReader_HeaderByNumber_IncompleteRejected(t *testing.T) {
+	fake := &chainStateFakeClient{
+		getBlockHeaderResp: &avsproto.WorkerGetBlockHeaderResp{Number: 1, Hash: "", ParentHash: "0x00"},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	if _, err := r.HeaderByNumber(context.Background(), nil); err == nil {
+		t.Fatalf("expected error for empty hash")
 	}
 }
 

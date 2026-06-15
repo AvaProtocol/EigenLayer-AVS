@@ -436,6 +436,14 @@ func (w *workerChainStateReader) HeaderByNumber(ctx context.Context, number *big
 	if resp == nil {
 		return nil, fmt.Errorf("worker returned nil response for GetBlockHeader on chain %d", w.chainID)
 	}
+	// A blank hash means the worker didn't populate it (version skew) —
+	// HexToHash would silently coerce "" to the zero hash and propagate an
+	// incorrect block-trigger output. Hard-fail instead. (ParentHash is
+	// genuinely zero only for genesis, but the worker always serializes it
+	// via .Hex(), so an empty string is still skew.)
+	if resp.Hash == "" || resp.ParentHash == "" {
+		return nil, fmt.Errorf("worker returned incomplete block header (hash=%q parentHash=%q) on chain %d", resp.Hash, resp.ParentHash, w.chainID)
+	}
 	difficulty, ok := new(big.Int).SetString(resp.Difficulty, 10)
 	if !ok {
 		// Difficulty is informational (post-merge it's 0); tolerate a
