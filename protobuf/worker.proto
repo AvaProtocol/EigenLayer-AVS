@@ -63,6 +63,10 @@ service ChainWorker {
   // ethclient.HeaderByNumber. Used to stamp simulation receipts and
   // enrich event timestamps without a gateway-side chain dial.
   rpc GetBlockHeader(WorkerGetBlockHeaderReq) returns (WorkerGetBlockHeaderResp);
+
+  // Read the latest block number. Wraps ethclient.BlockNumber. Used by the
+  // immediate-trigger path to stamp the current block for the operator.
+  rpc GetBlockNumber(WorkerGetBlockNumberReq) returns (WorkerGetBlockNumberResp);
 }
 
 // Health check
@@ -208,4 +212,11 @@ message WorkerGetBlockHeaderResp {
   uint64 number = 1;        // Block number.
   string hash = 2;          // 0x-prefixed block hash.
   uint64 time = 3;          // Unix timestamp (seconds).
+}
+
+// Latest block number
+message WorkerGetBlockNumberReq {}
+
+message WorkerGetBlockNumberResp {
+  uint64 number = 1;        // Latest block number.
 }

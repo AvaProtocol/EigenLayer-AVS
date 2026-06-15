@@ -76,6 +76,10 @@ type ChainStateReader interface {
 	// the gateway reads — a full types.Header can't be carried over gRPC
 	// faithfully (its hash depends on every field).
 	HeaderByNumber(ctx context.Context, number *big.Int) (*BlockHeader, error)
+
+	// GetBlockNumber returns the latest block number. Mirrors
+	// ethclient.BlockNumber.
+	GetBlockNumber(ctx context.Context) (uint64, error)
 }
 
 // BlockHeader is the subset of block-header fields the gateway reads:
@@ -201,6 +205,10 @@ func (d *directChainStateReader) HeaderByNumber(ctx context.Context, number *big
 		return nil, fmt.Errorf("HeaderByNumber returned nil header")
 	}
 	return &BlockHeader{Number: h.Number.Uint64(), Hash: h.Hash(), Time: h.Time}, nil
+}
+
+func (d *directChainStateReader) GetBlockNumber(ctx context.Context) (uint64, error) {
+	return d.client.BlockNumber(ctx)
 }
 
 // ---------------------------------------------------------------------
@@ -418,6 +426,19 @@ func (w *workerChainStateReader) HeaderByNumber(ctx context.Context, number *big
 		Hash:   common.HexToHash(resp.Hash),
 		Time:   resp.Time,
 	}, nil
+}
+
+func (w *workerChainStateReader) GetBlockNumber(ctx context.Context) (uint64, error) {
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	resp, err := w.client.GetBlockNumber(ctx, &avsproto.WorkerGetBlockNumberReq{})
+	if err != nil {
+		return 0, fmt.Errorf("worker GetBlockNumber (chain %d): %w", w.chainID, err)
+	}
+	if resp == nil {
+		return 0, fmt.Errorf("worker returned nil response for GetBlockNumber on chain %d", w.chainID)
+	}
+	return resp.Number, nil
 }
 
 // withTimeout caps the gRPC call's wall time. context.WithTimeout
