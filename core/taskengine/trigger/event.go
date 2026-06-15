@@ -895,6 +895,19 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 					t.logger.Info("🔌 Reconnected, rebuilding subscriptions")
 					if err := t.rebuildSubscriptions(ctx, newQueries, logs, errorCh); err == nil {
 						t.updateSubscriptionMetrics(desiredCount)
+						// Drain any stale errors the torn-down subscriptions queued
+						// before we rebuilt. Without this they sit in errorCh and
+						// immediately re-trigger a full reconnect against the fresh
+						// client. Only the current backlog is drained; errors from
+						// the newly-built subscriptions arrive after this point.
+					drainStaleErrors:
+						for {
+							select {
+							case <-errorCh:
+							default:
+								break drainStaleErrors
+							}
+						}
 						t.logger.Info("🔌 Reconnection completed",
 							"active_subscriptions", desiredCount,
 							"desired_subscriptions", desiredCount)

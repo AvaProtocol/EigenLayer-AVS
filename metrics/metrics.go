@@ -152,7 +152,7 @@ func NewAvsAndEigenMetrics(avsName, operatorAddress, version string, eigenMetric
 			prometheus.CounterOpts{
 				Namespace: apNamespace,
 				Name:      "event_subscription_rebuild_failures_total",
-				Help:      "The number of failed full event subscription rebuild attempts.",
+				Help:      "The number of failed event subscription rebuild attempts, covering both full post-reconnect rebuilds and incremental subscription updates.",
 			}, []string{"operator", "version", "chain_id"}),
 
 		operatorAddress: operatorAddress,
