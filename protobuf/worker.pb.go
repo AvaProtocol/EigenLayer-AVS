@@ -1716,6 +1716,103 @@ func (x *WorkerGetTransactionReceiptResp) GetTxHash() string {
 	return ""
 }
 
+// Storage slot read
+type WorkerGetStorageAtReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"` // Contract address (hex).
+	Slot          string                 `protobuf:"bytes,2,opt,name=slot,proto3" json:"slot,omitempty"`       // 0x-prefixed 32-byte storage slot key.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerGetStorageAtReq) Reset() {
+	*x = WorkerGetStorageAtReq{}
+	mi := &file_worker_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerGetStorageAtReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerGetStorageAtReq) ProtoMessage() {}
+
+func (x *WorkerGetStorageAtReq) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerGetStorageAtReq.ProtoReflect.Descriptor instead.
+func (*WorkerGetStorageAtReq) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *WorkerGetStorageAtReq) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *WorkerGetStorageAtReq) GetSlot() string {
+	if x != nil {
+		return x.Slot
+	}
+	return ""
+}
+
+type WorkerGetStorageAtResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Value         []byte                 `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"` // Raw 32-byte storage word.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerGetStorageAtResp) Reset() {
+	*x = WorkerGetStorageAtResp{}
+	mi := &file_worker_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerGetStorageAtResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerGetStorageAtResp) ProtoMessage() {}
+
+func (x *WorkerGetStorageAtResp) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerGetStorageAtResp.ProtoReflect.Descriptor instead.
+func (*WorkerGetStorageAtResp) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *WorkerGetStorageAtResp) GetValue() []byte {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
 var File_worker_proto protoreflect.FileDescriptor
 
 const file_worker_proto_rawDesc = "" +
@@ -1829,7 +1926,12 @@ const file_worker_proto_rawDesc = "" +
 	"\bgas_used\x18\x03 \x01(\x04R\agasUsed\x12.\n" +
 	"\x13effective_gas_price\x18\x04 \x01(\tR\x11effectiveGasPrice\x12!\n" +
 	"\fblock_number\x18\x05 \x01(\x04R\vblockNumber\x12\x17\n" +
-	"\atx_hash\x18\x06 \x01(\tR\x06txHash2\xd7\v\n" +
+	"\atx_hash\x18\x06 \x01(\tR\x06txHash\"E\n" +
+	"\x15WorkerGetStorageAtReq\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
+	"\x04slot\x18\x02 \x01(\tR\x04slot\".\n" +
+	"\x16WorkerGetStorageAtResp\x12\x14\n" +
+	"\x05value\x18\x01 \x01(\fR\x05value2\xae\f\n" +
 	"\vChainWorker\x12X\n" +
 	"\x11WorkerHealthCheck\x12 .aggregator.WorkerHealthCheckReq\x1a!.aggregator.WorkerHealthCheckResp\x12L\n" +
 	"\rExecuteUserOp\x12\x1c.aggregator.ExecuteUserOpReq\x1a\x1d.aggregator.ExecuteUserOpResp\x12I\n" +
@@ -1847,7 +1949,8 @@ const file_worker_proto_rawDesc = "" +
 	"\x0eGetBlockHeader\x12#.aggregator.WorkerGetBlockHeaderReq\x1a$.aggregator.WorkerGetBlockHeaderResp\x12[\n" +
 	"\x0eGetBlockNumber\x12#.aggregator.WorkerGetBlockNumberReq\x1a$.aggregator.WorkerGetBlockNumberResp\x12s\n" +
 	"\x16FindMatchingWalletSalt\x12+.aggregator.WorkerFindMatchingWalletSaltReq\x1a,.aggregator.WorkerFindMatchingWalletSaltResp\x12p\n" +
-	"\x15GetTransactionReceipt\x12*.aggregator.WorkerGetTransactionReceiptReq\x1a+.aggregator.WorkerGetTransactionReceiptRespB\fZ\n" +
+	"\x15GetTransactionReceipt\x12*.aggregator.WorkerGetTransactionReceiptReq\x1a+.aggregator.WorkerGetTransactionReceiptResp\x12U\n" +
+	"\fGetStorageAt\x12!.aggregator.WorkerGetStorageAtReq\x1a\".aggregator.WorkerGetStorageAtRespB\fZ\n" +
 	"./avsprotob\x06proto3"
 
 var (
@@ -1862,7 +1965,7 @@ func file_worker_proto_rawDescGZIP() []byte {
 	return file_worker_proto_rawDescData
 }
 
-var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_worker_proto_goTypes = []any{
 	(*WorkerHealthCheckReq)(nil),             // 0: aggregator.WorkerHealthCheckReq
 	(*WorkerHealthCheckResp)(nil),            // 1: aggregator.WorkerHealthCheckResp
@@ -1895,6 +1998,8 @@ var file_worker_proto_goTypes = []any{
 	(*WorkerFindMatchingWalletSaltResp)(nil), // 28: aggregator.WorkerFindMatchingWalletSaltResp
 	(*WorkerGetTransactionReceiptReq)(nil),   // 29: aggregator.WorkerGetTransactionReceiptReq
 	(*WorkerGetTransactionReceiptResp)(nil),  // 30: aggregator.WorkerGetTransactionReceiptResp
+	(*WorkerGetStorageAtReq)(nil),            // 31: aggregator.WorkerGetStorageAtReq
+	(*WorkerGetStorageAtResp)(nil),           // 32: aggregator.WorkerGetStorageAtResp
 }
 var file_worker_proto_depIdxs = []int32{
 	0,  // 0: aggregator.ChainWorker.WorkerHealthCheck:input_type -> aggregator.WorkerHealthCheckReq
@@ -1913,24 +2018,26 @@ var file_worker_proto_depIdxs = []int32{
 	25, // 13: aggregator.ChainWorker.GetBlockNumber:input_type -> aggregator.WorkerGetBlockNumberReq
 	27, // 14: aggregator.ChainWorker.FindMatchingWalletSalt:input_type -> aggregator.WorkerFindMatchingWalletSaltReq
 	29, // 15: aggregator.ChainWorker.GetTransactionReceipt:input_type -> aggregator.WorkerGetTransactionReceiptReq
-	1,  // 16: aggregator.ChainWorker.WorkerHealthCheck:output_type -> aggregator.WorkerHealthCheckResp
-	3,  // 17: aggregator.ChainWorker.ExecuteUserOp:output_type -> aggregator.ExecuteUserOpResp
-	5,  // 18: aggregator.ChainWorker.GetNonce:output_type -> aggregator.WorkerGetNonceResp
-	7,  // 19: aggregator.ChainWorker.GetSmartWalletAddress:output_type -> aggregator.WorkerGetSmartWalletAddressResp
-	9,  // 20: aggregator.ChainWorker.GetTokenMetadata:output_type -> aggregator.WorkerGetTokenMetadataResp
-	5,  // 21: aggregator.ChainWorker.GetNonceByAddress:output_type -> aggregator.WorkerGetNonceResp
-	12, // 22: aggregator.ChainWorker.SuggestGasPrice:output_type -> aggregator.WorkerSuggestGasPriceResp
-	14, // 23: aggregator.ChainWorker.EstimateGas:output_type -> aggregator.WorkerEstimateGasResp
-	16, // 24: aggregator.ChainWorker.GetCode:output_type -> aggregator.WorkerGetCodeResp
-	18, // 25: aggregator.ChainWorker.GetBalance:output_type -> aggregator.WorkerGetBalanceResp
-	20, // 26: aggregator.ChainWorker.GetTokenBalance:output_type -> aggregator.WorkerGetTokenBalanceResp
-	22, // 27: aggregator.ChainWorker.CallContract:output_type -> aggregator.WorkerCallContractResp
-	24, // 28: aggregator.ChainWorker.GetBlockHeader:output_type -> aggregator.WorkerGetBlockHeaderResp
-	26, // 29: aggregator.ChainWorker.GetBlockNumber:output_type -> aggregator.WorkerGetBlockNumberResp
-	28, // 30: aggregator.ChainWorker.FindMatchingWalletSalt:output_type -> aggregator.WorkerFindMatchingWalletSaltResp
-	30, // 31: aggregator.ChainWorker.GetTransactionReceipt:output_type -> aggregator.WorkerGetTransactionReceiptResp
-	16, // [16:32] is the sub-list for method output_type
-	0,  // [0:16] is the sub-list for method input_type
+	31, // 16: aggregator.ChainWorker.GetStorageAt:input_type -> aggregator.WorkerGetStorageAtReq
+	1,  // 17: aggregator.ChainWorker.WorkerHealthCheck:output_type -> aggregator.WorkerHealthCheckResp
+	3,  // 18: aggregator.ChainWorker.ExecuteUserOp:output_type -> aggregator.ExecuteUserOpResp
+	5,  // 19: aggregator.ChainWorker.GetNonce:output_type -> aggregator.WorkerGetNonceResp
+	7,  // 20: aggregator.ChainWorker.GetSmartWalletAddress:output_type -> aggregator.WorkerGetSmartWalletAddressResp
+	9,  // 21: aggregator.ChainWorker.GetTokenMetadata:output_type -> aggregator.WorkerGetTokenMetadataResp
+	5,  // 22: aggregator.ChainWorker.GetNonceByAddress:output_type -> aggregator.WorkerGetNonceResp
+	12, // 23: aggregator.ChainWorker.SuggestGasPrice:output_type -> aggregator.WorkerSuggestGasPriceResp
+	14, // 24: aggregator.ChainWorker.EstimateGas:output_type -> aggregator.WorkerEstimateGasResp
+	16, // 25: aggregator.ChainWorker.GetCode:output_type -> aggregator.WorkerGetCodeResp
+	18, // 26: aggregator.ChainWorker.GetBalance:output_type -> aggregator.WorkerGetBalanceResp
+	20, // 27: aggregator.ChainWorker.GetTokenBalance:output_type -> aggregator.WorkerGetTokenBalanceResp
+	22, // 28: aggregator.ChainWorker.CallContract:output_type -> aggregator.WorkerCallContractResp
+	24, // 29: aggregator.ChainWorker.GetBlockHeader:output_type -> aggregator.WorkerGetBlockHeaderResp
+	26, // 30: aggregator.ChainWorker.GetBlockNumber:output_type -> aggregator.WorkerGetBlockNumberResp
+	28, // 31: aggregator.ChainWorker.FindMatchingWalletSalt:output_type -> aggregator.WorkerFindMatchingWalletSaltResp
+	30, // 32: aggregator.ChainWorker.GetTransactionReceipt:output_type -> aggregator.WorkerGetTransactionReceiptResp
+	32, // 33: aggregator.ChainWorker.GetStorageAt:output_type -> aggregator.WorkerGetStorageAtResp
+	17, // [17:34] is the sub-list for method output_type
+	0,  // [0:17] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name
@@ -1947,7 +2054,7 @@ func file_worker_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_worker_proto_rawDesc), len(file_worker_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   31,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

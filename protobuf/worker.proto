@@ -78,6 +78,11 @@ service ChainWorker {
   // found=false when the receipt isn't available yet (pending). Used by the
   // gateway's userop confirmation-waiting to backfill gas data.
   rpc GetTransactionReceipt(WorkerGetTransactionReceiptReq) returns (WorkerGetTransactionReceiptResp);
+
+  // Read a contract storage slot (latest). Wraps ethclient.StorageAt. Used
+  // by the gateway's Tenderly simulation to probe an ERC-20's balance slot
+  // for state overrides.
+  rpc GetStorageAt(WorkerGetStorageAtReq) returns (WorkerGetStorageAtResp);
 }
 
 // Health check
@@ -261,4 +266,14 @@ message WorkerGetTransactionReceiptResp {
   string effective_gas_price = 4; // wei (big.Int as string).
   uint64 block_number = 5;
   string tx_hash = 6;            // 0x-prefixed.
+}
+
+// Storage slot read
+message WorkerGetStorageAtReq {
+  string address = 1;  // Contract address (hex).
+  string slot = 2;     // 0x-prefixed 32-byte storage slot key.
+}
+
+message WorkerGetStorageAtResp {
+  bytes value = 1;     // Raw 32-byte storage word.
 }
