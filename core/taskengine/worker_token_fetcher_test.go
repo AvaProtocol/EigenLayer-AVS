@@ -75,6 +75,9 @@ func (f *fakeChainWorkerClient) GetBlockNumber(context.Context, *avsproto.Worker
 func (f *fakeChainWorkerClient) FindMatchingWalletSalt(context.Context, *avsproto.WorkerFindMatchingWalletSaltReq, ...grpc.CallOption) (*avsproto.WorkerFindMatchingWalletSaltResp, error) {
 	panic("unused")
 }
+func (f *fakeChainWorkerClient) GetTransactionReceipt(context.Context, *avsproto.WorkerGetTransactionReceiptReq, ...grpc.CallOption) (*avsproto.WorkerGetTransactionReceiptResp, error) {
+	panic("unused")
+}
 
 // TestWorkerRoutedFetcher_HappyPath confirms a successful worker response
 // gets mapped to a TokenMetadata correctly — name, symbol, decimals, source

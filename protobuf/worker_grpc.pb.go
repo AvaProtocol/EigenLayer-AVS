@@ -34,6 +34,7 @@ const (
 	ChainWorker_GetBlockHeader_FullMethodName         = "/aggregator.ChainWorker/GetBlockHeader"
 	ChainWorker_GetBlockNumber_FullMethodName         = "/aggregator.ChainWorker/GetBlockNumber"
 	ChainWorker_FindMatchingWalletSalt_FullMethodName = "/aggregator.ChainWorker/FindMatchingWalletSalt"
+	ChainWorker_GetTransactionReceipt_FullMethodName  = "/aggregator.ChainWorker/GetTransactionReceipt"
 )
 
 // ChainWorkerClient is the client API for ChainWorker service.
@@ -96,6 +97,10 @@ type ChainWorkerClient interface {
 	// comparison locally so a wide range is a single round-trip. Used by the
 	// gateway's wallet-ownership validation (factory-upgrade fallback).
 	FindMatchingWalletSalt(ctx context.Context, in *WorkerFindMatchingWalletSaltReq, opts ...grpc.CallOption) (*WorkerFindMatchingWalletSaltResp, error)
+	// Read a transaction receipt by hash. Wraps ethclient.TransactionReceipt.
+	// found=false when the receipt isn't available yet (pending). Used by the
+	// gateway's userop confirmation-waiting to backfill gas data.
+	GetTransactionReceipt(ctx context.Context, in *WorkerGetTransactionReceiptReq, opts ...grpc.CallOption) (*WorkerGetTransactionReceiptResp, error)
 }
 
 type chainWorkerClient struct {
@@ -256,6 +261,16 @@ func (c *chainWorkerClient) FindMatchingWalletSalt(ctx context.Context, in *Work
 	return out, nil
 }
 
+func (c *chainWorkerClient) GetTransactionReceipt(ctx context.Context, in *WorkerGetTransactionReceiptReq, opts ...grpc.CallOption) (*WorkerGetTransactionReceiptResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerGetTransactionReceiptResp)
+	err := c.cc.Invoke(ctx, ChainWorker_GetTransactionReceipt_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ChainWorkerServer is the server API for ChainWorker service.
 // All implementations must embed UnimplementedChainWorkerServer
 // for forward compatibility.
@@ -316,6 +331,10 @@ type ChainWorkerServer interface {
 	// comparison locally so a wide range is a single round-trip. Used by the
 	// gateway's wallet-ownership validation (factory-upgrade fallback).
 	FindMatchingWalletSalt(context.Context, *WorkerFindMatchingWalletSaltReq) (*WorkerFindMatchingWalletSaltResp, error)
+	// Read a transaction receipt by hash. Wraps ethclient.TransactionReceipt.
+	// found=false when the receipt isn't available yet (pending). Used by the
+	// gateway's userop confirmation-waiting to backfill gas data.
+	GetTransactionReceipt(context.Context, *WorkerGetTransactionReceiptReq) (*WorkerGetTransactionReceiptResp, error)
 	mustEmbedUnimplementedChainWorkerServer()
 }
 
@@ -370,6 +389,9 @@ func (UnimplementedChainWorkerServer) GetBlockNumber(context.Context, *WorkerGet
 }
 func (UnimplementedChainWorkerServer) FindMatchingWalletSalt(context.Context, *WorkerFindMatchingWalletSaltReq) (*WorkerFindMatchingWalletSaltResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method FindMatchingWalletSalt not implemented")
+}
+func (UnimplementedChainWorkerServer) GetTransactionReceipt(context.Context, *WorkerGetTransactionReceiptReq) (*WorkerGetTransactionReceiptResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTransactionReceipt not implemented")
 }
 func (UnimplementedChainWorkerServer) mustEmbedUnimplementedChainWorkerServer() {}
 func (UnimplementedChainWorkerServer) testEmbeddedByValue()                     {}
@@ -662,6 +684,24 @@ func _ChainWorker_FindMatchingWalletSalt_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChainWorker_GetTransactionReceipt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerGetTransactionReceiptReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).GetTransactionReceipt(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_GetTransactionReceipt_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).GetTransactionReceipt(ctx, req.(*WorkerGetTransactionReceiptReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ChainWorker_ServiceDesc is the grpc.ServiceDesc for ChainWorker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -728,6 +768,10 @@ var ChainWorker_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "FindMatchingWalletSalt",
 			Handler:    _ChainWorker_FindMatchingWalletSalt_Handler,
+		},
+		{
+			MethodName: "GetTransactionReceipt",
+			Handler:    _ChainWorker_GetTransactionReceipt_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
