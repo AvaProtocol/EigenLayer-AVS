@@ -80,6 +80,12 @@ type ChainStateReader interface {
 	// GetBlockNumber returns the latest block number. Mirrors
 	// ethclient.BlockNumber.
 	GetBlockNumber(ctx context.Context) (uint64, error)
+
+	// FindMatchingWalletSalt scans salts [0, maxSalts) for the one whose
+	// CREATE2 smart-wallet address (under factory) equals target. Returns
+	// found=false when none matches. The worker-routed implementation runs
+	// the scan server-side so a wide range is a single round-trip.
+	FindMatchingWalletSalt(ctx context.Context, owner, factory, target common.Address, maxSalts int64) (found bool, salt int64, err error)
 }
 
 // BlockHeader is the subset of block-header fields the gateway reads:
@@ -224,6 +230,22 @@ func (d *directChainStateReader) HeaderByNumber(ctx context.Context, number *big
 
 func (d *directChainStateReader) GetBlockNumber(ctx context.Context) (uint64, error) {
 	return d.client.BlockNumber(ctx)
+}
+
+func (d *directChainStateReader) FindMatchingWalletSalt(ctx context.Context, owner, factory, target common.Address, maxSalts int64) (bool, int64, error) {
+	for salt := int64(0); salt < maxSalts; salt++ {
+		if err := ctx.Err(); err != nil {
+			return false, 0, err
+		}
+		addr, err := aa.GetSenderAddressForFactory(d.client, owner, factory, big.NewInt(salt))
+		if err != nil {
+			continue
+		}
+		if addr != nil && *addr == target {
+			return true, salt, nil
+		}
+	}
+	return false, 0, nil
 }
 
 // ---------------------------------------------------------------------
@@ -472,6 +494,24 @@ func (w *workerChainStateReader) GetBlockNumber(ctx context.Context) (uint64, er
 		return 0, fmt.Errorf("worker returned nil response for GetBlockNumber on chain %d", w.chainID)
 	}
 	return resp.Number, nil
+}
+
+func (w *workerChainStateReader) FindMatchingWalletSalt(ctx context.Context, owner, factory, target common.Address, maxSalts int64) (bool, int64, error) {
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	resp, err := w.client.FindMatchingWalletSalt(ctx, &avsproto.WorkerFindMatchingWalletSaltReq{
+		Owner:          owner.Hex(),
+		FactoryAddress: factory.Hex(),
+		TargetAddress:  target.Hex(),
+		MaxSalts:       maxSalts,
+	})
+	if err != nil {
+		return false, 0, fmt.Errorf("worker FindMatchingWalletSalt (chain %d): %w", w.chainID, err)
+	}
+	if resp == nil {
+		return false, 0, fmt.Errorf("worker returned nil response for FindMatchingWalletSalt on chain %d", w.chainID)
+	}
+	return resp.Found, resp.Salt, nil
 }
 
 // withTimeout caps the gRPC call's wall time. context.WithTimeout

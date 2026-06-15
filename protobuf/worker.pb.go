@@ -1466,6 +1466,127 @@ func (x *WorkerGetBlockNumberResp) GetNumber() uint64 {
 	return 0
 }
 
+// Salt-scan wallet match
+type WorkerFindMatchingWalletSaltReq struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Owner          string                 `protobuf:"bytes,1,opt,name=owner,proto3" json:"owner,omitempty"`                                         // Owner EOA address (hex).
+	FactoryAddress string                 `protobuf:"bytes,2,opt,name=factory_address,json=factoryAddress,proto3" json:"factory_address,omitempty"` // Factory override (hex). Empty = worker's configured factory.
+	TargetAddress  string                 `protobuf:"bytes,3,opt,name=target_address,json=targetAddress,proto3" json:"target_address,omitempty"`    // Smart-wallet address to match (hex).
+	MaxSalts       int64                  `protobuf:"varint,4,opt,name=max_salts,json=maxSalts,proto3" json:"max_salts,omitempty"`                  // Scan salts in [0, max_salts).
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *WorkerFindMatchingWalletSaltReq) Reset() {
+	*x = WorkerFindMatchingWalletSaltReq{}
+	mi := &file_worker_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerFindMatchingWalletSaltReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerFindMatchingWalletSaltReq) ProtoMessage() {}
+
+func (x *WorkerFindMatchingWalletSaltReq) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerFindMatchingWalletSaltReq.ProtoReflect.Descriptor instead.
+func (*WorkerFindMatchingWalletSaltReq) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *WorkerFindMatchingWalletSaltReq) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *WorkerFindMatchingWalletSaltReq) GetFactoryAddress() string {
+	if x != nil {
+		return x.FactoryAddress
+	}
+	return ""
+}
+
+func (x *WorkerFindMatchingWalletSaltReq) GetTargetAddress() string {
+	if x != nil {
+		return x.TargetAddress
+	}
+	return ""
+}
+
+func (x *WorkerFindMatchingWalletSaltReq) GetMaxSalts() int64 {
+	if x != nil {
+		return x.MaxSalts
+	}
+	return 0
+}
+
+type WorkerFindMatchingWalletSaltResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Found         bool                   `protobuf:"varint,1,opt,name=found,proto3" json:"found,omitempty"`
+	Salt          int64                  `protobuf:"varint,2,opt,name=salt,proto3" json:"salt,omitempty"` // The matching salt; valid only when found.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerFindMatchingWalletSaltResp) Reset() {
+	*x = WorkerFindMatchingWalletSaltResp{}
+	mi := &file_worker_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerFindMatchingWalletSaltResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerFindMatchingWalletSaltResp) ProtoMessage() {}
+
+func (x *WorkerFindMatchingWalletSaltResp) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerFindMatchingWalletSaltResp.ProtoReflect.Descriptor instead.
+func (*WorkerFindMatchingWalletSaltResp) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *WorkerFindMatchingWalletSaltResp) GetFound() bool {
+	if x != nil {
+		return x.Found
+	}
+	return false
+}
+
+func (x *WorkerFindMatchingWalletSaltResp) GetSalt() int64 {
+	if x != nil {
+		return x.Salt
+	}
+	return 0
+}
+
 var File_worker_proto protoreflect.FileDescriptor
 
 const file_worker_proto_rawDesc = "" +
@@ -1562,7 +1683,16 @@ const file_worker_proto_rawDesc = "" +
 	"\bgas_used\x18\a \x01(\x04R\agasUsed\"\x19\n" +
 	"\x17WorkerGetBlockNumberReq\"2\n" +
 	"\x18WorkerGetBlockNumberResp\x12\x16\n" +
-	"\x06number\x18\x01 \x01(\x04R\x06number2\xf0\t\n" +
+	"\x06number\x18\x01 \x01(\x04R\x06number\"\xa4\x01\n" +
+	"\x1fWorkerFindMatchingWalletSaltReq\x12\x14\n" +
+	"\x05owner\x18\x01 \x01(\tR\x05owner\x12'\n" +
+	"\x0ffactory_address\x18\x02 \x01(\tR\x0efactoryAddress\x12%\n" +
+	"\x0etarget_address\x18\x03 \x01(\tR\rtargetAddress\x12\x1b\n" +
+	"\tmax_salts\x18\x04 \x01(\x03R\bmaxSalts\"L\n" +
+	" WorkerFindMatchingWalletSaltResp\x12\x14\n" +
+	"\x05found\x18\x01 \x01(\bR\x05found\x12\x12\n" +
+	"\x04salt\x18\x02 \x01(\x03R\x04salt2\xe5\n" +
+	"\n" +
 	"\vChainWorker\x12X\n" +
 	"\x11WorkerHealthCheck\x12 .aggregator.WorkerHealthCheckReq\x1a!.aggregator.WorkerHealthCheckResp\x12L\n" +
 	"\rExecuteUserOp\x12\x1c.aggregator.ExecuteUserOpReq\x1a\x1d.aggregator.ExecuteUserOpResp\x12I\n" +
@@ -1578,7 +1708,8 @@ const file_worker_proto_rawDesc = "" +
 	"\x0fGetTokenBalance\x12$.aggregator.WorkerGetTokenBalanceReq\x1a%.aggregator.WorkerGetTokenBalanceResp\x12U\n" +
 	"\fCallContract\x12!.aggregator.WorkerCallContractReq\x1a\".aggregator.WorkerCallContractResp\x12[\n" +
 	"\x0eGetBlockHeader\x12#.aggregator.WorkerGetBlockHeaderReq\x1a$.aggregator.WorkerGetBlockHeaderResp\x12[\n" +
-	"\x0eGetBlockNumber\x12#.aggregator.WorkerGetBlockNumberReq\x1a$.aggregator.WorkerGetBlockNumberRespB\fZ\n" +
+	"\x0eGetBlockNumber\x12#.aggregator.WorkerGetBlockNumberReq\x1a$.aggregator.WorkerGetBlockNumberResp\x12s\n" +
+	"\x16FindMatchingWalletSalt\x12+.aggregator.WorkerFindMatchingWalletSaltReq\x1a,.aggregator.WorkerFindMatchingWalletSaltRespB\fZ\n" +
 	"./avsprotob\x06proto3"
 
 var (
@@ -1593,35 +1724,37 @@ func file_worker_proto_rawDescGZIP() []byte {
 	return file_worker_proto_rawDescData
 }
 
-var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_worker_proto_goTypes = []any{
-	(*WorkerHealthCheckReq)(nil),            // 0: aggregator.WorkerHealthCheckReq
-	(*WorkerHealthCheckResp)(nil),           // 1: aggregator.WorkerHealthCheckResp
-	(*ExecuteUserOpReq)(nil),                // 2: aggregator.ExecuteUserOpReq
-	(*ExecuteUserOpResp)(nil),               // 3: aggregator.ExecuteUserOpResp
-	(*WorkerGetNonceReq)(nil),               // 4: aggregator.WorkerGetNonceReq
-	(*WorkerGetNonceResp)(nil),              // 5: aggregator.WorkerGetNonceResp
-	(*WorkerGetSmartWalletAddressReq)(nil),  // 6: aggregator.WorkerGetSmartWalletAddressReq
-	(*WorkerGetSmartWalletAddressResp)(nil), // 7: aggregator.WorkerGetSmartWalletAddressResp
-	(*WorkerGetTokenMetadataReq)(nil),       // 8: aggregator.WorkerGetTokenMetadataReq
-	(*WorkerGetTokenMetadataResp)(nil),      // 9: aggregator.WorkerGetTokenMetadataResp
-	(*WorkerGetNonceByAddressReq)(nil),      // 10: aggregator.WorkerGetNonceByAddressReq
-	(*WorkerSuggestGasPriceReq)(nil),        // 11: aggregator.WorkerSuggestGasPriceReq
-	(*WorkerSuggestGasPriceResp)(nil),       // 12: aggregator.WorkerSuggestGasPriceResp
-	(*WorkerEstimateGasReq)(nil),            // 13: aggregator.WorkerEstimateGasReq
-	(*WorkerEstimateGasResp)(nil),           // 14: aggregator.WorkerEstimateGasResp
-	(*WorkerGetCodeReq)(nil),                // 15: aggregator.WorkerGetCodeReq
-	(*WorkerGetCodeResp)(nil),               // 16: aggregator.WorkerGetCodeResp
-	(*WorkerGetBalanceReq)(nil),             // 17: aggregator.WorkerGetBalanceReq
-	(*WorkerGetBalanceResp)(nil),            // 18: aggregator.WorkerGetBalanceResp
-	(*WorkerGetTokenBalanceReq)(nil),        // 19: aggregator.WorkerGetTokenBalanceReq
-	(*WorkerGetTokenBalanceResp)(nil),       // 20: aggregator.WorkerGetTokenBalanceResp
-	(*WorkerCallContractReq)(nil),           // 21: aggregator.WorkerCallContractReq
-	(*WorkerCallContractResp)(nil),          // 22: aggregator.WorkerCallContractResp
-	(*WorkerGetBlockHeaderReq)(nil),         // 23: aggregator.WorkerGetBlockHeaderReq
-	(*WorkerGetBlockHeaderResp)(nil),        // 24: aggregator.WorkerGetBlockHeaderResp
-	(*WorkerGetBlockNumberReq)(nil),         // 25: aggregator.WorkerGetBlockNumberReq
-	(*WorkerGetBlockNumberResp)(nil),        // 26: aggregator.WorkerGetBlockNumberResp
+	(*WorkerHealthCheckReq)(nil),             // 0: aggregator.WorkerHealthCheckReq
+	(*WorkerHealthCheckResp)(nil),            // 1: aggregator.WorkerHealthCheckResp
+	(*ExecuteUserOpReq)(nil),                 // 2: aggregator.ExecuteUserOpReq
+	(*ExecuteUserOpResp)(nil),                // 3: aggregator.ExecuteUserOpResp
+	(*WorkerGetNonceReq)(nil),                // 4: aggregator.WorkerGetNonceReq
+	(*WorkerGetNonceResp)(nil),               // 5: aggregator.WorkerGetNonceResp
+	(*WorkerGetSmartWalletAddressReq)(nil),   // 6: aggregator.WorkerGetSmartWalletAddressReq
+	(*WorkerGetSmartWalletAddressResp)(nil),  // 7: aggregator.WorkerGetSmartWalletAddressResp
+	(*WorkerGetTokenMetadataReq)(nil),        // 8: aggregator.WorkerGetTokenMetadataReq
+	(*WorkerGetTokenMetadataResp)(nil),       // 9: aggregator.WorkerGetTokenMetadataResp
+	(*WorkerGetNonceByAddressReq)(nil),       // 10: aggregator.WorkerGetNonceByAddressReq
+	(*WorkerSuggestGasPriceReq)(nil),         // 11: aggregator.WorkerSuggestGasPriceReq
+	(*WorkerSuggestGasPriceResp)(nil),        // 12: aggregator.WorkerSuggestGasPriceResp
+	(*WorkerEstimateGasReq)(nil),             // 13: aggregator.WorkerEstimateGasReq
+	(*WorkerEstimateGasResp)(nil),            // 14: aggregator.WorkerEstimateGasResp
+	(*WorkerGetCodeReq)(nil),                 // 15: aggregator.WorkerGetCodeReq
+	(*WorkerGetCodeResp)(nil),                // 16: aggregator.WorkerGetCodeResp
+	(*WorkerGetBalanceReq)(nil),              // 17: aggregator.WorkerGetBalanceReq
+	(*WorkerGetBalanceResp)(nil),             // 18: aggregator.WorkerGetBalanceResp
+	(*WorkerGetTokenBalanceReq)(nil),         // 19: aggregator.WorkerGetTokenBalanceReq
+	(*WorkerGetTokenBalanceResp)(nil),        // 20: aggregator.WorkerGetTokenBalanceResp
+	(*WorkerCallContractReq)(nil),            // 21: aggregator.WorkerCallContractReq
+	(*WorkerCallContractResp)(nil),           // 22: aggregator.WorkerCallContractResp
+	(*WorkerGetBlockHeaderReq)(nil),          // 23: aggregator.WorkerGetBlockHeaderReq
+	(*WorkerGetBlockHeaderResp)(nil),         // 24: aggregator.WorkerGetBlockHeaderResp
+	(*WorkerGetBlockNumberReq)(nil),          // 25: aggregator.WorkerGetBlockNumberReq
+	(*WorkerGetBlockNumberResp)(nil),         // 26: aggregator.WorkerGetBlockNumberResp
+	(*WorkerFindMatchingWalletSaltReq)(nil),  // 27: aggregator.WorkerFindMatchingWalletSaltReq
+	(*WorkerFindMatchingWalletSaltResp)(nil), // 28: aggregator.WorkerFindMatchingWalletSaltResp
 }
 var file_worker_proto_depIdxs = []int32{
 	0,  // 0: aggregator.ChainWorker.WorkerHealthCheck:input_type -> aggregator.WorkerHealthCheckReq
@@ -1638,22 +1771,24 @@ var file_worker_proto_depIdxs = []int32{
 	21, // 11: aggregator.ChainWorker.CallContract:input_type -> aggregator.WorkerCallContractReq
 	23, // 12: aggregator.ChainWorker.GetBlockHeader:input_type -> aggregator.WorkerGetBlockHeaderReq
 	25, // 13: aggregator.ChainWorker.GetBlockNumber:input_type -> aggregator.WorkerGetBlockNumberReq
-	1,  // 14: aggregator.ChainWorker.WorkerHealthCheck:output_type -> aggregator.WorkerHealthCheckResp
-	3,  // 15: aggregator.ChainWorker.ExecuteUserOp:output_type -> aggregator.ExecuteUserOpResp
-	5,  // 16: aggregator.ChainWorker.GetNonce:output_type -> aggregator.WorkerGetNonceResp
-	7,  // 17: aggregator.ChainWorker.GetSmartWalletAddress:output_type -> aggregator.WorkerGetSmartWalletAddressResp
-	9,  // 18: aggregator.ChainWorker.GetTokenMetadata:output_type -> aggregator.WorkerGetTokenMetadataResp
-	5,  // 19: aggregator.ChainWorker.GetNonceByAddress:output_type -> aggregator.WorkerGetNonceResp
-	12, // 20: aggregator.ChainWorker.SuggestGasPrice:output_type -> aggregator.WorkerSuggestGasPriceResp
-	14, // 21: aggregator.ChainWorker.EstimateGas:output_type -> aggregator.WorkerEstimateGasResp
-	16, // 22: aggregator.ChainWorker.GetCode:output_type -> aggregator.WorkerGetCodeResp
-	18, // 23: aggregator.ChainWorker.GetBalance:output_type -> aggregator.WorkerGetBalanceResp
-	20, // 24: aggregator.ChainWorker.GetTokenBalance:output_type -> aggregator.WorkerGetTokenBalanceResp
-	22, // 25: aggregator.ChainWorker.CallContract:output_type -> aggregator.WorkerCallContractResp
-	24, // 26: aggregator.ChainWorker.GetBlockHeader:output_type -> aggregator.WorkerGetBlockHeaderResp
-	26, // 27: aggregator.ChainWorker.GetBlockNumber:output_type -> aggregator.WorkerGetBlockNumberResp
-	14, // [14:28] is the sub-list for method output_type
-	0,  // [0:14] is the sub-list for method input_type
+	27, // 14: aggregator.ChainWorker.FindMatchingWalletSalt:input_type -> aggregator.WorkerFindMatchingWalletSaltReq
+	1,  // 15: aggregator.ChainWorker.WorkerHealthCheck:output_type -> aggregator.WorkerHealthCheckResp
+	3,  // 16: aggregator.ChainWorker.ExecuteUserOp:output_type -> aggregator.ExecuteUserOpResp
+	5,  // 17: aggregator.ChainWorker.GetNonce:output_type -> aggregator.WorkerGetNonceResp
+	7,  // 18: aggregator.ChainWorker.GetSmartWalletAddress:output_type -> aggregator.WorkerGetSmartWalletAddressResp
+	9,  // 19: aggregator.ChainWorker.GetTokenMetadata:output_type -> aggregator.WorkerGetTokenMetadataResp
+	5,  // 20: aggregator.ChainWorker.GetNonceByAddress:output_type -> aggregator.WorkerGetNonceResp
+	12, // 21: aggregator.ChainWorker.SuggestGasPrice:output_type -> aggregator.WorkerSuggestGasPriceResp
+	14, // 22: aggregator.ChainWorker.EstimateGas:output_type -> aggregator.WorkerEstimateGasResp
+	16, // 23: aggregator.ChainWorker.GetCode:output_type -> aggregator.WorkerGetCodeResp
+	18, // 24: aggregator.ChainWorker.GetBalance:output_type -> aggregator.WorkerGetBalanceResp
+	20, // 25: aggregator.ChainWorker.GetTokenBalance:output_type -> aggregator.WorkerGetTokenBalanceResp
+	22, // 26: aggregator.ChainWorker.CallContract:output_type -> aggregator.WorkerCallContractResp
+	24, // 27: aggregator.ChainWorker.GetBlockHeader:output_type -> aggregator.WorkerGetBlockHeaderResp
+	26, // 28: aggregator.ChainWorker.GetBlockNumber:output_type -> aggregator.WorkerGetBlockNumberResp
+	28, // 29: aggregator.ChainWorker.FindMatchingWalletSalt:output_type -> aggregator.WorkerFindMatchingWalletSaltResp
+	15, // [15:30] is the sub-list for method output_type
+	0,  // [0:15] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name
@@ -1670,7 +1805,7 @@ func file_worker_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_worker_proto_rawDesc), len(file_worker_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   27,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

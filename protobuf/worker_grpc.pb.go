@@ -19,20 +19,21 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ChainWorker_WorkerHealthCheck_FullMethodName     = "/aggregator.ChainWorker/WorkerHealthCheck"
-	ChainWorker_ExecuteUserOp_FullMethodName         = "/aggregator.ChainWorker/ExecuteUserOp"
-	ChainWorker_GetNonce_FullMethodName              = "/aggregator.ChainWorker/GetNonce"
-	ChainWorker_GetSmartWalletAddress_FullMethodName = "/aggregator.ChainWorker/GetSmartWalletAddress"
-	ChainWorker_GetTokenMetadata_FullMethodName      = "/aggregator.ChainWorker/GetTokenMetadata"
-	ChainWorker_GetNonceByAddress_FullMethodName     = "/aggregator.ChainWorker/GetNonceByAddress"
-	ChainWorker_SuggestGasPrice_FullMethodName       = "/aggregator.ChainWorker/SuggestGasPrice"
-	ChainWorker_EstimateGas_FullMethodName           = "/aggregator.ChainWorker/EstimateGas"
-	ChainWorker_GetCode_FullMethodName               = "/aggregator.ChainWorker/GetCode"
-	ChainWorker_GetBalance_FullMethodName            = "/aggregator.ChainWorker/GetBalance"
-	ChainWorker_GetTokenBalance_FullMethodName       = "/aggregator.ChainWorker/GetTokenBalance"
-	ChainWorker_CallContract_FullMethodName          = "/aggregator.ChainWorker/CallContract"
-	ChainWorker_GetBlockHeader_FullMethodName        = "/aggregator.ChainWorker/GetBlockHeader"
-	ChainWorker_GetBlockNumber_FullMethodName        = "/aggregator.ChainWorker/GetBlockNumber"
+	ChainWorker_WorkerHealthCheck_FullMethodName      = "/aggregator.ChainWorker/WorkerHealthCheck"
+	ChainWorker_ExecuteUserOp_FullMethodName          = "/aggregator.ChainWorker/ExecuteUserOp"
+	ChainWorker_GetNonce_FullMethodName               = "/aggregator.ChainWorker/GetNonce"
+	ChainWorker_GetSmartWalletAddress_FullMethodName  = "/aggregator.ChainWorker/GetSmartWalletAddress"
+	ChainWorker_GetTokenMetadata_FullMethodName       = "/aggregator.ChainWorker/GetTokenMetadata"
+	ChainWorker_GetNonceByAddress_FullMethodName      = "/aggregator.ChainWorker/GetNonceByAddress"
+	ChainWorker_SuggestGasPrice_FullMethodName        = "/aggregator.ChainWorker/SuggestGasPrice"
+	ChainWorker_EstimateGas_FullMethodName            = "/aggregator.ChainWorker/EstimateGas"
+	ChainWorker_GetCode_FullMethodName                = "/aggregator.ChainWorker/GetCode"
+	ChainWorker_GetBalance_FullMethodName             = "/aggregator.ChainWorker/GetBalance"
+	ChainWorker_GetTokenBalance_FullMethodName        = "/aggregator.ChainWorker/GetTokenBalance"
+	ChainWorker_CallContract_FullMethodName           = "/aggregator.ChainWorker/CallContract"
+	ChainWorker_GetBlockHeader_FullMethodName         = "/aggregator.ChainWorker/GetBlockHeader"
+	ChainWorker_GetBlockNumber_FullMethodName         = "/aggregator.ChainWorker/GetBlockNumber"
+	ChainWorker_FindMatchingWalletSalt_FullMethodName = "/aggregator.ChainWorker/FindMatchingWalletSalt"
 )
 
 // ChainWorkerClient is the client API for ChainWorker service.
@@ -90,6 +91,11 @@ type ChainWorkerClient interface {
 	// Read the latest block number. Wraps ethclient.BlockNumber. Used by the
 	// immediate-trigger path to stamp the current block for the operator.
 	GetBlockNumber(ctx context.Context, in *WorkerGetBlockNumberReq, opts ...grpc.CallOption) (*WorkerGetBlockNumberResp, error)
+	// Find the salt in [0, max_salts) whose CREATE2 smart-wallet address
+	// (under the given factory) matches target. The worker runs the scan +
+	// comparison locally so a wide range is a single round-trip. Used by the
+	// gateway's wallet-ownership validation (factory-upgrade fallback).
+	FindMatchingWalletSalt(ctx context.Context, in *WorkerFindMatchingWalletSaltReq, opts ...grpc.CallOption) (*WorkerFindMatchingWalletSaltResp, error)
 }
 
 type chainWorkerClient struct {
@@ -240,6 +246,16 @@ func (c *chainWorkerClient) GetBlockNumber(ctx context.Context, in *WorkerGetBlo
 	return out, nil
 }
 
+func (c *chainWorkerClient) FindMatchingWalletSalt(ctx context.Context, in *WorkerFindMatchingWalletSaltReq, opts ...grpc.CallOption) (*WorkerFindMatchingWalletSaltResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkerFindMatchingWalletSaltResp)
+	err := c.cc.Invoke(ctx, ChainWorker_FindMatchingWalletSalt_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ChainWorkerServer is the server API for ChainWorker service.
 // All implementations must embed UnimplementedChainWorkerServer
 // for forward compatibility.
@@ -295,6 +311,11 @@ type ChainWorkerServer interface {
 	// Read the latest block number. Wraps ethclient.BlockNumber. Used by the
 	// immediate-trigger path to stamp the current block for the operator.
 	GetBlockNumber(context.Context, *WorkerGetBlockNumberReq) (*WorkerGetBlockNumberResp, error)
+	// Find the salt in [0, max_salts) whose CREATE2 smart-wallet address
+	// (under the given factory) matches target. The worker runs the scan +
+	// comparison locally so a wide range is a single round-trip. Used by the
+	// gateway's wallet-ownership validation (factory-upgrade fallback).
+	FindMatchingWalletSalt(context.Context, *WorkerFindMatchingWalletSaltReq) (*WorkerFindMatchingWalletSaltResp, error)
 	mustEmbedUnimplementedChainWorkerServer()
 }
 
@@ -346,6 +367,9 @@ func (UnimplementedChainWorkerServer) GetBlockHeader(context.Context, *WorkerGet
 }
 func (UnimplementedChainWorkerServer) GetBlockNumber(context.Context, *WorkerGetBlockNumberReq) (*WorkerGetBlockNumberResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetBlockNumber not implemented")
+}
+func (UnimplementedChainWorkerServer) FindMatchingWalletSalt(context.Context, *WorkerFindMatchingWalletSaltReq) (*WorkerFindMatchingWalletSaltResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FindMatchingWalletSalt not implemented")
 }
 func (UnimplementedChainWorkerServer) mustEmbedUnimplementedChainWorkerServer() {}
 func (UnimplementedChainWorkerServer) testEmbeddedByValue()                     {}
@@ -620,6 +644,24 @@ func _ChainWorker_GetBlockNumber_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChainWorker_FindMatchingWalletSalt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerFindMatchingWalletSaltReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainWorkerServer).FindMatchingWalletSalt(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainWorker_FindMatchingWalletSalt_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainWorkerServer).FindMatchingWalletSalt(ctx, req.(*WorkerFindMatchingWalletSaltReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ChainWorker_ServiceDesc is the grpc.ServiceDesc for ChainWorker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -682,6 +724,10 @@ var ChainWorker_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetBlockNumber",
 			Handler:    _ChainWorker_GetBlockNumber_Handler,
+		},
+		{
+			MethodName: "FindMatchingWalletSalt",
+			Handler:    _ChainWorker_FindMatchingWalletSalt_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

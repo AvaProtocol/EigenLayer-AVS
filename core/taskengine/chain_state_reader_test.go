@@ -67,6 +67,11 @@ type chainStateFakeClient struct {
 	// GetBlockNumber
 	getBlockNumberResp *avsproto.WorkerGetBlockNumberResp
 	getBlockNumberErr  error
+
+	// FindMatchingWalletSalt
+	findSaltReq  *avsproto.WorkerFindMatchingWalletSaltReq
+	findSaltResp *avsproto.WorkerFindMatchingWalletSaltResp
+	findSaltErr  error
 }
 
 func (f *chainStateFakeClient) WorkerHealthCheck(context.Context, *avsproto.WorkerHealthCheckReq, ...grpc.CallOption) (*avsproto.WorkerHealthCheckResp, error) {
@@ -92,6 +97,10 @@ func (f *chainStateFakeClient) GetBlockHeader(_ context.Context, req *avsproto.W
 }
 func (f *chainStateFakeClient) GetBlockNumber(_ context.Context, _ *avsproto.WorkerGetBlockNumberReq, _ ...grpc.CallOption) (*avsproto.WorkerGetBlockNumberResp, error) {
 	return f.getBlockNumberResp, f.getBlockNumberErr
+}
+func (f *chainStateFakeClient) FindMatchingWalletSalt(_ context.Context, req *avsproto.WorkerFindMatchingWalletSaltReq, _ ...grpc.CallOption) (*avsproto.WorkerFindMatchingWalletSaltResp, error) {
+	f.findSaltReq = req
+	return f.findSaltResp, f.findSaltErr
 }
 func (f *chainStateFakeClient) GetTokenMetadata(context.Context, *avsproto.WorkerGetTokenMetadataReq, ...grpc.CallOption) (*avsproto.WorkerGetTokenMetadataResp, error) {
 	panic("unused")
@@ -715,5 +724,43 @@ func TestChainReaderForEnrichment(t *testing.T) {
 	RegisterChainStateReader(8453, NewWorkerChainStateReader(&chainStateFakeClient{}, 8453, 0))
 	if chainReaderForEnrichment(8453) == nil {
 		t.Fatalf("registered chain should resolve a reader")
+	}
+}
+
+// TestWorkerChainStateReader_FindMatchingWalletSalt: owner/factory/target
+// are hex-encoded, max_salts propagates, and (found, salt) round-trips.
+func TestWorkerChainStateReader_FindMatchingWalletSalt(t *testing.T) {
+	fake := &chainStateFakeClient{
+		findSaltResp: &avsproto.WorkerFindMatchingWalletSaltResp{Found: true, Salt: 3},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	owner := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	factory := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	target := common.HexToAddress("0x3333333333333333333333333333333333333333")
+	found, salt, err := r.FindMatchingWalletSalt(context.Background(), owner, factory, target, 2000)
+	if err != nil {
+		t.Fatalf("FindMatchingWalletSalt: %v", err)
+	}
+	if !found || salt != 3 {
+		t.Fatalf("got found=%v salt=%d, want true/3", found, salt)
+	}
+	if fake.findSaltReq.Owner != owner.Hex() || fake.findSaltReq.FactoryAddress != factory.Hex() || fake.findSaltReq.TargetAddress != target.Hex() {
+		t.Fatalf("address args not propagated: %+v", fake.findSaltReq)
+	}
+	if fake.findSaltReq.MaxSalts != 2000 {
+		t.Fatalf("max_salts not propagated: %d", fake.findSaltReq.MaxSalts)
+	}
+}
+
+// TestWorkerChainStateReader_FindMatchingWalletSalt_NotFound: a no-match
+// scan returns found=false without error.
+func TestWorkerChainStateReader_FindMatchingWalletSalt_NotFound(t *testing.T) {
+	fake := &chainStateFakeClient{
+		findSaltResp: &avsproto.WorkerFindMatchingWalletSaltResp{Found: false},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	found, _, err := r.FindMatchingWalletSalt(context.Background(), common.HexToAddress("0xaa"), common.HexToAddress("0xbb"), common.HexToAddress("0xcc"), 5)
+	if err != nil || found {
+		t.Fatalf("expected not-found, no error; got found=%v err=%v", found, err)
 	}
 }

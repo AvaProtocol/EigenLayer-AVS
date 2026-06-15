@@ -52,12 +52,19 @@ dials follow the same model, reusing existing worker RPCs where possible:
 
 ## PR breakdown
 
-1. **PR 1 — wallet-derivation dials.** Route `validateWalletOwnership`,
-   `validateDerivedWallet`, and the `run_node` salt-scan through the
-   per-chain `ChainStateReader.GetSmartWalletAddress`. Refactor
-   `user.LoadDefaultSmartWallet` to take a derived address (or a reader)
-   instead of a raw `*ethclient.Client`. Lowest-risk; no new proto. Removes
-   3 live dials.
+1. **PR 1 — wallet-derivation dials (delivered).** The `validateDerivedWallet`
+   salt-scan (up to `MaxWalletsPerOwner` = 2000) made per-salt routing a
+   non-starter, so a **server-side scan RPC** `FindMatchingWalletSalt(owner,
+   factory, target, max_salts) → (found, salt)` was added (capped at 2000):
+   the worker runs the loop + comparison locally, one round-trip. Added it
+   to the `ChainStateReader` interface + both impls. Migrated:
+   `validateWalletOwnership` Step 1 (default wallet) → `GetSmartWalletAddress`;
+   `validateDerivedWallet` and the `run_node` salt-scan → `FindMatchingWalletSalt`.
+   Each keeps a direct-dial + local-loop fallback for single-chain mode /
+   no-reader. `LoadDefaultSmartWallet` stays for the fallback; the reader
+   path sets `user.SmartAccountAddress` from the worker-derived address
+   (using the task's per-chain factory, fixing the latent global-factory
+   inconsistency).
 2. **PR 2 — userop receipt waiting.** Migrate `waitForUserOpConfirmation`.
    First check whether gateway-mode sends (via `ExecuteUserOp`) already
    return a confirmed receipt, making the separate wait redundant; if not,

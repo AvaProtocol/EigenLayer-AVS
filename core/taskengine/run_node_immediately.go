@@ -2564,29 +2564,43 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 							"owner", vm.TaskOwner.Hex())
 					}
 
-					// Connect to RPC to derive addresses
-					client, err := ethclient.Dial(n.smartWalletConfig.EthRpcUrl)
-					if err != nil {
-						return nil, fmt.Errorf("failed to connect to RPC for address derivation: %w", err)
-					}
-
-					// Check salts 0-4 (we allow up to 5 smart wallets per EOA)
-					for salt := int64(0); salt < 5; salt++ {
-						derivedAddr, err := aa.GetSenderAddress(client, vm.TaskOwner, big.NewInt(salt))
-						if err != nil {
-							if n.logger != nil {
-								n.logger.Debug("Failed to derive address for salt", "salt", salt, "error", err)
-							}
-							continue
+					// Check salts 0-4 (we allow up to 5 smart wallets per EOA).
+					// Prefer the per-chain reader: in gateway mode the worker
+					// runs the scan server-side. Fall back to a direct dial +
+					// local loop when no reader is registered.
+					const runnerSaltScan = int64(5)
+					factoryAddr := n.smartWalletConfig.FactoryAddress
+					runnerAddr := common.HexToAddress(runnerStr)
+					if reader := GetChainStateReaderForChain(uint64(n.smartWalletConfig.ChainID)); reader != nil {
+						found, salt, derr := reader.FindMatchingWalletSalt(context.Background(), vm.TaskOwner, factoryAddr, runnerAddr, runnerSaltScan)
+						if derr != nil {
+							return nil, fmt.Errorf("failed to derive addresses for runner validation: %w", derr)
 						}
-
-						if strings.EqualFold(derivedAddr.Hex(), runnerStr) {
+						if found {
 							matchedSalt = big.NewInt(salt)
-							chosenSender = *derivedAddr
-							break
+							chosenSender = runnerAddr
 						}
+					} else {
+						client, err := ethclient.Dial(n.smartWalletConfig.EthRpcUrl)
+						if err != nil {
+							return nil, fmt.Errorf("failed to connect to RPC for address derivation: %w", err)
+						}
+						for salt := int64(0); salt < runnerSaltScan; salt++ {
+							derivedAddr, derr := aa.GetSenderAddress(client, vm.TaskOwner, big.NewInt(salt))
+							if derr != nil {
+								if n.logger != nil {
+									n.logger.Debug("Failed to derive address for salt", "salt", salt, "error", derr)
+								}
+								continue
+							}
+							if strings.EqualFold(derivedAddr.Hex(), runnerStr) {
+								matchedSalt = big.NewInt(salt)
+								chosenSender = *derivedAddr
+								break
+							}
+						}
+						client.Close()
 					}
-					client.Close()
 
 					// If no match found in salts 0-4, reject the runner
 					if matchedSalt == nil {
