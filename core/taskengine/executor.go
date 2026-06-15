@@ -964,9 +964,13 @@ func (x *WorkflowExecutor) validateDerivedWallet(chainID int64, swCfg *config.Sm
 				"owner", owner.Hex(), "wallet", smartWalletAddr.Hex(), "factory", factoryAddr.Hex(), "salt", salt)
 			return true, nil
 		}
+		// No salt matched: the wallet is legitimately not derivable from this
+		// owner. That is a "not valid" result, not an error — only genuine scan
+		// failures (above) return a non-nil error, so the caller can tell
+		// "checked, not owned" apart from "could not check".
 		x.logger.Debug("No matching derived wallet found",
 			"owner", owner.Hex(), "wallet", smartWalletAddr.Hex(), "factory", factoryAddr.Hex(), "salts_checked", maxWallets)
-		return false, fmt.Errorf("wallet address cannot be derived from owner with factory %s (checked %d salts)", factoryAddr.Hex(), maxWallets)
+		return false, nil
 	}
 
 	rpcClient, err := ethclient.Dial(swCfg.EthRpcUrl)
@@ -991,10 +995,11 @@ func (x *WorkflowExecutor) validateDerivedWallet(chainID int64, swCfg *config.Sm
 		}
 	}
 
+	// No salt matched: not an error, just "not owned" (see worker branch).
 	x.logger.Debug("No matching derived wallet found",
 		"owner", owner.Hex(), "wallet", smartWalletAddr.Hex(),
 		"factory", factoryAddr.Hex(), "salts_checked", maxWallets)
-	return false, fmt.Errorf("wallet address cannot be derived from owner with factory %s (checked %d salts)", factoryAddr.Hex(), maxWallets)
+	return false, nil
 }
 
 // validationFailureDisableThreshold is the number of consecutive permanent

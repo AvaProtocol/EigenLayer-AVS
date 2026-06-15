@@ -91,6 +91,10 @@ type subscribeFilterLogsFunc func(context.Context, ethereum.FilterQuery, chan<- 
 type EventTrigger struct {
 	*CommonTrigger
 
+	// operatorAddress identifies this operator in overload alerts so spikes can
+	// be attributed to a specific operator in multi-operator deployments.
+	operatorAddress string
+
 	// New unified registry (preferred)
 	registry *TaskRegistry
 
@@ -125,6 +129,11 @@ type EventTrigger struct {
 	// Add deduplication tracking
 	processedEventsMutex sync.RWMutex
 	processedEvents      map[string]bool // key: "blockNumber-txHash-logIndex"
+	// processedEventsOrder records the insertion order of processedEvents keys
+	// so cleanup can evict the OLDEST entries (FIFO) instead of a random map
+	// subset — a random eviction could drop a recent key and re-admit a
+	// duplicate. Guarded by processedEventsMutex alongside the map.
+	processedEventsOrder []string
 
 	// Cooldown tracking: taskID -> last trigger time
 	cooldownMutex   sync.RWMutex
@@ -154,7 +163,7 @@ type managedSubscription struct {
 	queryIndex   int
 }
 
-func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], logger sdklogging.Logger, maxEventsPerQuery uint32, maxTotalEvents uint32) *EventTrigger {
+func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], logger sdklogging.Logger, maxEventsPerQuery uint32, maxTotalEvents uint32, operatorAddress string) *EventTrigger {
 	var err error
 
 	b := EventTrigger{
@@ -165,6 +174,7 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 			logger:    logger,
 		},
 
+		operatorAddress:          operatorAddress,
 		registry:                 NewTaskRegistry(),
 		triggerCh:                triggerCh,
 		checks:                   sync.Map{},
@@ -176,6 +186,7 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 		defaultMaxEventsPerQuery: maxEventsPerQuery,
 		defaultMaxTotalEvents:    maxTotalEvents,
 		processedEvents:          make(map[string]bool),
+		processedEventsOrder:     make([]string, 0),
 		lastTriggerTime:          make(map[string]time.Time),
 	}
 
@@ -772,6 +783,7 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 
 				// Mark as processed immediately to prevent race conditions
 				t.processedEvents[eventKey] = true
+				t.processedEventsOrder = append(t.processedEventsOrder, eventKey)
 				t.processedEventsMutex.Unlock()
 
 				// Safety check: count events per block per task
@@ -990,7 +1002,7 @@ func (t *EventTrigger) checkEventSafety(log types.Log) bool {
 		if t.onOverloadAlert != nil {
 			alert := &avsproto.EventOverloadAlert{
 				TaskId:          matchingTaskID,
-				OperatorAddress: "operator", // TODO: Get from config
+				OperatorAddress: t.operatorAddress,
 				BlockNumber:     blockNumber,
 				EventsDetected:  currentCount,
 				SafetyLimit:     maxEventsPerBlock,
@@ -1068,6 +1080,7 @@ func (t *EventTrigger) processLog(log types.Log) error {
 
 	// Mark this event as processed
 	t.processedEvents[eventKey] = true
+	t.processedEventsOrder = append(t.processedEventsOrder, eventKey)
 	t.processedEventsMutex.Unlock()
 
 	return t.processLogInternal(log)
@@ -1954,27 +1967,36 @@ func (t *EventTrigger) cleanupOldProcessedEvents(maxEvents uint64) {
 	t.processedEventsMutex.Lock()
 	defer t.processedEventsMutex.Unlock()
 
-	// Remove old events if we have too many
+	// Remove old events if we have too many. Evict the OLDEST keys first using
+	// processedEventsOrder (insertion order) so a recently-seen event is never
+	// dropped while a stale one survives — random map eviction could re-admit a
+	// duplicate that arrives again right after cleanup.
 	currentCount := len(t.processedEvents)
 	if currentCount > int(maxEvents) {
-		// Simple approach: clear a portion of the map to keep memory usage bounded
-		// Since we can't easily determine "oldest" without block numbers in the key,
-		// we'll just clear about half of the events
 		toRemove := currentCount - int(maxEvents)
 		removedCount := 0
 
-		for key := range t.processedEvents {
-			delete(t.processedEvents, key)
-			removedCount++
-			if removedCount >= toRemove {
-				break
+		for removedCount < toRemove && len(t.processedEventsOrder) > 0 {
+			oldest := t.processedEventsOrder[0]
+			t.processedEventsOrder = t.processedEventsOrder[1:]
+			// A key may already be gone (defensive); only count real deletions.
+			if _, ok := t.processedEvents[oldest]; ok {
+				delete(t.processedEvents, oldest)
+				removedCount++
 			}
 		}
 
-		t.logger.Debug("🧹 Cleaned up old processed events",
+		// Reclaim the backing array once the slice has drifted far from the map
+		// size, so the order slice doesn't grow unbounded via re-slicing.
+		if len(t.processedEventsOrder) > 2*len(t.processedEvents) {
+			compacted := make([]string, len(t.processedEventsOrder))
+			copy(compacted, t.processedEventsOrder)
+			t.processedEventsOrder = compacted
+		}
+
+		t.logger.Debug("🧹 Cleaned up old processed events (FIFO)",
 			"removed", removedCount,
-			"remaining", len(t.processedEvents),
-			"note", "Using simple cleanup since txHash-logIndex keys don't contain timestamps")
+			"remaining", len(t.processedEvents))
 	}
 }
 

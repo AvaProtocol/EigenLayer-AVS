@@ -262,18 +262,36 @@ func (d *directChainStateReader) GetStorageAt(ctx context.Context, account commo
 	return d.client.StorageAt(ctx, account, slot, nil)
 }
 
+// maxDirectWalletSaltScan mirrors worker.maxWalletSaltScan: the direct fallback
+// must honor the same bound so a high MaxWalletsPerOwner config can't turn the
+// scan into thousands of sequential RPC round-trips.
+const maxDirectWalletSaltScan = 2000
+
 func (d *directChainStateReader) FindMatchingWalletSalt(ctx context.Context, owner, factory, target common.Address, maxSalts int64) (bool, int64, error) {
+	if maxSalts > maxDirectWalletSaltScan {
+		return false, 0, fmt.Errorf("max_salts %d exceeds cap %d", maxSalts, maxDirectWalletSaltScan)
+	}
+	var lastErr error
+	errCount := int64(0)
 	for salt := int64(0); salt < maxSalts; salt++ {
 		if err := ctx.Err(); err != nil {
 			return false, 0, err
 		}
 		addr, err := aa.GetSenderAddressForFactory(d.client, owner, factory, big.NewInt(salt))
 		if err != nil {
+			lastErr = err
+			errCount++
 			continue
 		}
 		if addr != nil && *addr == target {
 			return true, salt, nil
 		}
+	}
+	// If every derivation errored, this is a systemic RPC failure, not a
+	// genuine "no match" — surface it so connectivity problems aren't masked
+	// as not-found (which the worker-routed path would propagate too).
+	if maxSalts > 0 && errCount == maxSalts {
+		return false, 0, fmt.Errorf("all %d salt derivations failed: %w", maxSalts, lastErr)
 	}
 	return false, 0, nil
 }
