@@ -210,6 +210,9 @@ func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
 	case *avsproto.TaskTrigger_Event:
 		eventTrigger := trigger.GetEvent()
 		if eventTrigger != nil && eventTrigger.Config != nil {
+			// Surface the trigger's chain so best-effort event enrichment
+			// (timestamp/decimals) resolves the right per-chain worker.
+			triggerConfig["chain_id"] = eventTrigger.Config.GetChainId()
 			// Access protobuf fields directly to avoid JSON roundtrip
 			if len(eventTrigger.Config.Queries) > 0 {
 				// Convert queries to interface{} for map storage

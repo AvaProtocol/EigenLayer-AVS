@@ -292,6 +292,11 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	// Trigger chain for best-effort event enrichment. Soft-resolved: a
+	// missing chain_id yields 0, which skips enrichment rather than reading
+	// a default chain (there is no engine-default chain).
+	eventChainID, _ := requireChainIDFromConfig(triggerConfig)
+
 	// Create a temporary VM for template variable resolution
 	// This allows eventTrigger to use {{settings.uniswapv3_pool.token0.id}} syntax in addresses
 	tempVM := NewVM()
@@ -454,7 +459,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 					historicalCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 					defer cancel()
 
-					historicalResult, histErr := n.runEventTriggerWithHistoricalSearch(historicalCtx, queriesArray, inputVariables)
+					historicalResult, histErr := n.runEventTriggerWithHistoricalSearch(historicalCtx, eventChainID, queriesArray, inputVariables)
 					if histErr != nil {
 						if n.logger != nil {
 							n.logger.Warn("⚠️ EventTrigger: Historical search failed after simulation failure",
@@ -482,7 +487,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	if rpcConn == nil {
 		return nil, fmt.Errorf("RPC connection not available for EventTrigger historical search")
 	}
-	return n.runEventTriggerWithHistoricalSearch(ctx, queriesArray, inputVariables)
+	return n.runEventTriggerWithHistoricalSearch(ctx, eventChainID, queriesArray, inputVariables)
 }
 
 // shouldUseDirectCalls determines if the query should use direct contract calls vs simulation
@@ -1917,7 +1922,7 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 }
 
 // parseEventWithABI parses an event log using the provided contract ABI and applies method calls for enhanced formatting
-func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string, query *avsproto.EventTrigger_Query) (map[string]interface{}, error) {
+func (n *Engine) parseEventWithABI(chainID int64, eventLog *types.Log, contractABIString string, query *avsproto.EventTrigger_Query) (map[string]interface{}, error) {
 	// Parse the ABI
 	contractABI, err := abi.JSON(strings.NewReader(contractABIString))
 	if err != nil {
@@ -1925,11 +1930,11 @@ func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string
 	}
 
 	// Find the matching event in ABI using the first topic (event signature)
-	return n.parseEventWithParsedABI(eventLog, &contractABI, query)
+	return n.parseEventWithParsedABI(chainID, eventLog, &contractABI, query)
 }
 
 // parseEventWithParsedABI contains the shared logic for both optimized and legacy methods
-func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.ABI, query *avsproto.EventTrigger_Query) (map[string]interface{}, error) {
+func (n *Engine) parseEventWithParsedABI(chainID int64, eventLog *types.Log, contractABI *abi.ABI, query *avsproto.EventTrigger_Query) (map[string]interface{}, error) {
 	// Find the matching event in ABI using the first topic (event signature)
 	if len(eventLog.Topics) == 0 {
 		return nil, fmt.Errorf("event log has no topics")
@@ -2002,7 +2007,7 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 				}
 
 				// Make the decimals() call to the contract
-				if decimals, err := n.callContractMethod(eventLog.Address, callData); err == nil {
+				if decimals, err := n.callContractMethod(chainID, eventLog.Address, callData); err == nil {
 					if decimalsInt, ok := decimals.(*big.Int); ok {
 						decimalsValue = decimalsInt
 
@@ -2063,7 +2068,14 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 					}
 				} else {
 					if n.logger != nil {
-						n.logger.Warn("Failed to call decimals() method", "error", err)
+						if chainReaderForEnrichment(chainID) == nil {
+							// Chain unspecified / unregistered — best-effort
+							// decimals enrichment is skipped quietly (not a
+							// failure, and not warn-level noise per event).
+							n.logger.Debug("Skipping decimals enrichment: no chain-state reader", "chainID", chainID)
+						} else {
+							n.logger.Warn("Failed to call decimals() method", "error", err)
+						}
 					}
 				}
 				break
@@ -2291,12 +2303,14 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 			}
 		}
 
-		// Add proper blockTimestamp for real events (not simulated)
-		// For real events, we can get the actual block timestamp if needed
-		if eventLog.BlockNumber > 0 && rpcConn != nil {
+		// Add proper blockTimestamp for real events (not simulated). This is
+		// best-effort enrichment: route through the trigger's chain worker
+		// when the chain is known; if chain_id isn't specified we skip it
+		// (keep the default timestamp) rather than read a default chain.
+		if blockReader := chainReaderForEnrichment(chainID); eventLog.BlockNumber > 0 && blockReader != nil {
 			// Get actual block timestamp for real events
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			header, err := rpcConn.HeaderByNumber(ctx, big.NewInt(int64(eventLog.BlockNumber)))
+			header, err := blockReader.HeaderByNumber(ctx, big.NewInt(int64(eventLog.BlockNumber)))
 			cancel()
 
 			if err == nil {
@@ -2333,10 +2347,28 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 }
 
 // callContractMethod makes a contract method call to retrieve additional data
-func (n *Engine) callContractMethod(contractAddress common.Address, callData string) (interface{}, error) {
-	// Ensure RPC connection is available
-	if rpcConn == nil {
-		return nil, fmt.Errorf("RPC connection not available for contract method call")
+// chainReaderForEnrichment returns the per-chain reader for best-effort
+// event enrichment, or nil when the chain is unspecified (chainID <= 0) or
+// no reader is registered for it. A nil result means "skip enrichment" —
+// the caller keeps its defaults rather than reading a default/wrong chain.
+func chainReaderForEnrichment(chainID int64) ChainStateReader {
+	if chainID <= 0 {
+		return nil
+	}
+	return GetChainStateReaderForChain(uint64(chainID))
+}
+
+func (n *Engine) callContractMethod(chainID int64, contractAddress common.Address, callData string) (interface{}, error) {
+	// chain_id is required — there is no engine-default chain. Callers
+	// treat this as best-effort enrichment and skip on error, so an
+	// unresolvable chain simply means "no enrichment" (never a wrong
+	// chain), consistent with the no-default-chain rule.
+	if chainID <= 0 {
+		return nil, fmt.Errorf("callContractMethod: chain_id required for enrichment")
+	}
+	reader := GetChainStateReaderForChain(uint64(chainID))
+	if reader == nil {
+		return nil, fmt.Errorf("callContractMethod: no chain-state reader for chain %d", chainID)
 	}
 
 	// Remove 0x prefix if present
@@ -2351,11 +2383,11 @@ func (n *Engine) callContractMethod(contractAddress common.Address, callData str
 		Data: callDataBytes,
 	}
 
-	// Make the contract call
+	// Make the contract call via the chain's worker
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	result, err := rpcConn.CallContract(ctx, msg, nil)
+	result, err := reader.CallContract(ctx, msg, nil)
 	if err != nil {
 		return nil, fmt.Errorf("contract call failed: %w", err)
 	}
@@ -2372,7 +2404,11 @@ func (n *Engine) callContractMethod(contractAddress common.Address, callData str
 }
 
 // runEventTriggerWithHistoricalSearch executes event trigger using historical blockchain search
-func (n *Engine) runEventTriggerWithHistoricalSearch(ctx context.Context, queriesArray []interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+// enrichChainID is the trigger's chain, used for best-effort event
+// enrichment (decimals/timestamp) via parseEventWithABI. The historical
+// search's own chain handling (search ranges / metadata / FilterLogs) is
+// migrated separately; see docs/changes/20260614-rpcconn-chain-threading.md.
+func (n *Engine) runEventTriggerWithHistoricalSearch(ctx context.Context, enrichChainID int64, queriesArray []interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	// Get the latest block number
 	currentBlock, err := rpcConn.BlockNumber(ctx)
 	if err != nil {
@@ -2610,7 +2646,7 @@ func (n *Engine) runEventTriggerWithHistoricalSearch(ctx context.Context, querie
 		}
 
 		// Parse using the provided ABI
-		parsedEventData, err := n.parseEventWithABI(mostRecentEvent, contractABI, protobufQuery)
+		parsedEventData, err := n.parseEventWithABI(enrichChainID, mostRecentEvent, contractABI, protobufQuery)
 		if err != nil {
 			n.logger.Warn("Failed to parse event with provided ABI, using raw data", "error", err)
 			// Fallback to raw data if ABI parsing fails
@@ -3547,6 +3583,14 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		ErrorCode: responseErrorCode,
 	}
 
+	// Chain for output handlers that decode event logs (contractWrite).
+	// Prefer the explicit request chain, then the node config; 0 means
+	// "skip enrichment" downstream — no engine-default chain.
+	outputChainID := req.GetChainId()
+	if outputChainID == 0 {
+		outputChainID, _ = requireChainIDFromConfig(nodeConfig)
+	}
+
 	// Use handler to convert result to protobuf output
 	factory := NewNodeOutputHandlerFactory(n)
 	handler, err := factory.GetHandler(nodeTypeStr)
@@ -3554,7 +3598,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		// Fallback to RestAPI for unknown node types
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{RestApi: &avsproto.RestAPINode_Output{}}
 	} else {
-		outputData, metadata, err := handler.ConvertToProtobuf(result)
+		outputData, metadata, err := handler.ConvertToProtobuf(outputChainID, result)
 		if err != nil {
 			return &avsproto.RunNodeWithInputsResp{
 				Success: false,
