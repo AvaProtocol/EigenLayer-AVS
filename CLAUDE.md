@@ -44,9 +44,16 @@ make protoc-gen  # Regenerate protobuf bindings after modifying .proto files
 ### Storage Migrations
 
 ```bash
-go run scripts/compare_storage_structure.go main       # Check for breaking changes
-go run scripts/migration/create_migration.go main      # Generate migration files
+make storage-check                                       # Check for breaking storage changes vs origin/main (exits 1 if a migration is needed)
+go run scripts/compare_storage_structure.go origin/main  # Same check, explicit ref
+go run scripts/migration/create_migration.go origin/main # Generate migration files
 ```
+
+`storage-check` walks the Go AST of every tracked source file in both refs and
+diffs storage **key templates** (e.g. `w:%d:%s`) and persisted **model structs**
+under `model/`. A removed/reshaped key or a removed/retyped field is breaking
+(orphans or fails to deserialize stored records); new keys and `omitempty`
+fields are additive. Use `REF=<ref>` to compare against another ref.
 
 ### Contracts (Foundry)
 
@@ -108,14 +115,14 @@ The `getWorkflow` output is the ground truth — it shows the trigger's `topics`
 ## Branching and Pull Requests
 - All feature branches and PRs must target `staging`, never `main` directly.
 - The `main` branch is updated only by merging `staging` → `main` after migration checks pass.
-- Before merging to `main`, run `go run scripts/compare_storage_structure.go main` to check for breaking storage changes.
+- Before merging to `main`, run `make storage-check` (compares against `origin/main`) to check for breaking storage changes.
 - **PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/) / semantic-release format** (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `ci:`, `perf:`, `BREAKING CHANGE:` footer for majors). Squash merges use the PR title as the commit subject, and `.github/workflows/release-on-pr-close.yml` runs `go-semantic-release` against it to compute the next version. A non-conforming title (e.g. `release: staging → main ...`) yields no version bump and no release. For staging→main release PRs, pick the highest-impact prefix across the bundled changes (e.g. `feat:` if any feature is included).
 
 ## Development Guidelines
 
 - After modifying `.proto` files, always run `make protoc-gen`
 - Breaking protobuf changes require manual migration analysis
-- Check for breaking storage changes before merging: `go run scripts/compare_storage_structure.go main`
+- Check for breaking storage changes before merging: `make storage-check`
 - Use structured logging: `logger.Error("message", "key", value)`
 - Critical errors reported to Sentry in production
 - Use `testutil` package for common test setup

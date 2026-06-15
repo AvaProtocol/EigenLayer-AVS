@@ -332,6 +332,13 @@ dev-stack: build
 clean:
 	rm -rf /tmp/ap-avs /tmp/ap.sock
 
+## storage-check: compare BadgerDB key/value structure against a ref (default
+##                origin/main) and flag breaking changes before a release.
+##                Exits non-zero when a migration is required. Pass REF=<ref>.
+.PHONY: storage-check
+storage-check:
+	@go run scripts/compare_storage_structure.go $(if $(REF),$(REF),origin/main)
+
 ## hetzner-snapshot: pull fresh BadgerDB tarballs from each Hetzner aggregator
 ##                   into ./donors/<chain>/db/. Brief docker-stop per chain.
 ##                   Pass CHAIN=sepolia (etc.) to limit scope.
