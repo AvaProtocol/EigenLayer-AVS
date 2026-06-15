@@ -2068,7 +2068,14 @@ func (n *Engine) parseEventWithParsedABI(chainID int64, eventLog *types.Log, con
 					}
 				} else {
 					if n.logger != nil {
-						n.logger.Warn("Failed to call decimals() method", "error", err)
+						if chainReaderForEnrichment(chainID) == nil {
+							// Chain unspecified / unregistered — best-effort
+							// decimals enrichment is skipped quietly (not a
+							// failure, and not warn-level noise per event).
+							n.logger.Debug("Skipping decimals enrichment: no chain-state reader", "chainID", chainID)
+						} else {
+							n.logger.Warn("Failed to call decimals() method", "error", err)
+						}
 					}
 				}
 				break
