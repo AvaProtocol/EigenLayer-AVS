@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -483,6 +484,32 @@ func (s *Server) FindMatchingWalletSalt(ctx context.Context, req *avsproto.Worke
 		}
 	}
 	return &avsproto.WorkerFindMatchingWalletSaltResp{Found: false}, nil
+}
+
+// GetTransactionReceipt wraps ethclient.TransactionReceipt. found=false (not
+// an error) when the receipt isn't available yet (pending / unknown hash),
+// so the gateway's confirmation-waiting loop can keep polling.
+func (s *Server) GetTransactionReceipt(ctx context.Context, req *avsproto.WorkerGetTransactionReceiptReq) (*avsproto.WorkerGetTransactionReceiptResp, error) {
+	receipt, err := s.worker.rpcClient.TransactionReceipt(ctx, common.HexToHash(req.TxHash))
+	if errors.Is(err, ethereum.NotFound) {
+		return &avsproto.WorkerGetTransactionReceiptResp{Found: false}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("TransactionReceipt for %s: %w", req.TxHash, err)
+	}
+	resp := &avsproto.WorkerGetTransactionReceiptResp{
+		Found:   true,
+		Status:  receipt.Status,
+		GasUsed: receipt.GasUsed,
+		TxHash:  receipt.TxHash.Hex(),
+	}
+	if receipt.EffectiveGasPrice != nil {
+		resp.EffectiveGasPrice = receipt.EffectiveGasPrice.String()
+	}
+	if receipt.BlockNumber != nil {
+		resp.BlockNumber = receipt.BlockNumber.Uint64()
+	}
+	return resp, nil
 }
 
 // GetBalance wraps ethclient.BalanceAt(addr, latest). Used by the gateway's

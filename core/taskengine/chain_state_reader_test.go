@@ -72,6 +72,11 @@ type chainStateFakeClient struct {
 	findSaltReq  *avsproto.WorkerFindMatchingWalletSaltReq
 	findSaltResp *avsproto.WorkerFindMatchingWalletSaltResp
 	findSaltErr  error
+
+	// GetTransactionReceipt
+	getReceiptReq  *avsproto.WorkerGetTransactionReceiptReq
+	getReceiptResp *avsproto.WorkerGetTransactionReceiptResp
+	getReceiptErr  error
 }
 
 func (f *chainStateFakeClient) WorkerHealthCheck(context.Context, *avsproto.WorkerHealthCheckReq, ...grpc.CallOption) (*avsproto.WorkerHealthCheckResp, error) {
@@ -101,6 +106,10 @@ func (f *chainStateFakeClient) GetBlockNumber(_ context.Context, _ *avsproto.Wor
 func (f *chainStateFakeClient) FindMatchingWalletSalt(_ context.Context, req *avsproto.WorkerFindMatchingWalletSaltReq, _ ...grpc.CallOption) (*avsproto.WorkerFindMatchingWalletSaltResp, error) {
 	f.findSaltReq = req
 	return f.findSaltResp, f.findSaltErr
+}
+func (f *chainStateFakeClient) GetTransactionReceipt(_ context.Context, req *avsproto.WorkerGetTransactionReceiptReq, _ ...grpc.CallOption) (*avsproto.WorkerGetTransactionReceiptResp, error) {
+	f.getReceiptReq = req
+	return f.getReceiptResp, f.getReceiptErr
 }
 func (f *chainStateFakeClient) GetTokenMetadata(context.Context, *avsproto.WorkerGetTokenMetadataReq, ...grpc.CallOption) (*avsproto.WorkerGetTokenMetadataResp, error) {
 	panic("unused")
@@ -762,5 +771,45 @@ func TestWorkerChainStateReader_FindMatchingWalletSalt_NotFound(t *testing.T) {
 	found, _, err := r.FindMatchingWalletSalt(context.Background(), common.HexToAddress("0xaa"), common.HexToAddress("0xbb"), common.HexToAddress("0xcc"), 5)
 	if err != nil || found {
 		t.Fatalf("expected not-found, no error; got found=%v err=%v", found, err)
+	}
+}
+
+// TestWorkerChainStateReader_GetTransactionReceipt: a found receipt maps its
+// gas/status/block fields; tx hash propagates.
+func TestWorkerChainStateReader_GetTransactionReceipt(t *testing.T) {
+	fake := &chainStateFakeClient{
+		getReceiptResp: &avsproto.WorkerGetTransactionReceiptResp{
+			Found: true, Status: 1, GasUsed: 21000,
+			EffectiveGasPrice: "1500000000", BlockNumber: 19000000,
+			TxHash: "0xabc",
+		},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	txHash := common.HexToHash("0xdeadbeef")
+	receipt, err := r.GetTransactionReceipt(context.Background(), txHash)
+	if err != nil {
+		t.Fatalf("GetTransactionReceipt: %v", err)
+	}
+	if receipt == nil || receipt.Status != 1 || receipt.GasUsed != 21000 {
+		t.Fatalf("unexpected receipt %+v", receipt)
+	}
+	if receipt.EffectiveGasPrice == nil || receipt.EffectiveGasPrice.Cmp(big.NewInt(1500000000)) != 0 {
+		t.Fatalf("effective gas price not mapped: %v", receipt.EffectiveGasPrice)
+	}
+	if fake.getReceiptReq.TxHash != txHash.Hex() {
+		t.Fatalf("tx hash not propagated: %q", fake.getReceiptReq.TxHash)
+	}
+}
+
+// TestWorkerChainStateReader_GetTransactionReceipt_Pending: found=false maps
+// to (nil, nil) so the caller's polling loop keeps waiting.
+func TestWorkerChainStateReader_GetTransactionReceipt_Pending(t *testing.T) {
+	fake := &chainStateFakeClient{
+		getReceiptResp: &avsproto.WorkerGetTransactionReceiptResp{Found: false},
+	}
+	r := NewWorkerChainStateReader(fake, 1, time.Second)
+	receipt, err := r.GetTransactionReceipt(context.Background(), common.HexToHash("0xaa"))
+	if err != nil || receipt != nil {
+		t.Fatalf("pending should be (nil, nil); got receipt=%v err=%v", receipt, err)
 	}
 }

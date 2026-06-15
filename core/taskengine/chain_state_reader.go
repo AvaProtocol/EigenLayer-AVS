@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
@@ -86,6 +88,12 @@ type ChainStateReader interface {
 	// found=false when none matches. The worker-routed implementation runs
 	// the scan server-side so a wide range is a single round-trip.
 	FindMatchingWalletSalt(ctx context.Context, owner, factory, target common.Address, maxSalts int64) (found bool, salt int64, err error)
+
+	// GetTransactionReceipt reads a tx receipt by hash. Returns (nil, nil)
+	// when the receipt isn't available yet (pending). Only the gas / status /
+	// block fields are populated — not logs. Mirrors
+	// ethclient.TransactionReceipt with NotFound mapped to a nil receipt.
+	GetTransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
 }
 
 // BlockHeader is the subset of block-header fields the gateway reads:
@@ -230,6 +238,14 @@ func (d *directChainStateReader) HeaderByNumber(ctx context.Context, number *big
 
 func (d *directChainStateReader) GetBlockNumber(ctx context.Context) (uint64, error) {
 	return d.client.BlockNumber(ctx)
+}
+
+func (d *directChainStateReader) GetTransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+	receipt, err := d.client.TransactionReceipt(ctx, txHash)
+	if errors.Is(err, ethereum.NotFound) {
+		return nil, nil
+	}
+	return receipt, err
 }
 
 func (d *directChainStateReader) FindMatchingWalletSalt(ctx context.Context, owner, factory, target common.Address, maxSalts int64) (bool, int64, error) {
@@ -494,6 +510,31 @@ func (w *workerChainStateReader) GetBlockNumber(ctx context.Context) (uint64, er
 		return 0, fmt.Errorf("worker returned nil response for GetBlockNumber on chain %d", w.chainID)
 	}
 	return resp.Number, nil
+}
+
+func (w *workerChainStateReader) GetTransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+	ctx, cancel := w.withTimeout(ctx)
+	defer cancel()
+	resp, err := w.client.GetTransactionReceipt(ctx, &avsproto.WorkerGetTransactionReceiptReq{TxHash: txHash.Hex()})
+	if err != nil {
+		return nil, fmt.Errorf("worker GetTransactionReceipt (chain %d): %w", w.chainID, err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("worker returned nil response for GetTransactionReceipt on chain %d", w.chainID)
+	}
+	if !resp.Found {
+		return nil, nil
+	}
+	receipt := &types.Receipt{
+		Status:      resp.Status,
+		GasUsed:     resp.GasUsed,
+		TxHash:      common.HexToHash(resp.TxHash),
+		BlockNumber: new(big.Int).SetUint64(resp.BlockNumber),
+	}
+	if egp, ok := new(big.Int).SetString(resp.EffectiveGasPrice, 10); ok {
+		receipt.EffectiveGasPrice = egp
+	}
+	return receipt, nil
 }
 
 func (w *workerChainStateReader) FindMatchingWalletSalt(ctx context.Context, owner, factory, target common.Address, maxSalts int64) (bool, int64, error) {

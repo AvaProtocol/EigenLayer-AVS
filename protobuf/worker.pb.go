@@ -1587,6 +1587,135 @@ func (x *WorkerFindMatchingWalletSaltResp) GetSalt() int64 {
 	return 0
 }
 
+// Transaction receipt (the subset of fields the gateway reads)
+type WorkerGetTransactionReceiptReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TxHash        string                 `protobuf:"bytes,1,opt,name=tx_hash,json=txHash,proto3" json:"tx_hash,omitempty"` // 0x-prefixed transaction hash.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerGetTransactionReceiptReq) Reset() {
+	*x = WorkerGetTransactionReceiptReq{}
+	mi := &file_worker_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerGetTransactionReceiptReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerGetTransactionReceiptReq) ProtoMessage() {}
+
+func (x *WorkerGetTransactionReceiptReq) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerGetTransactionReceiptReq.ProtoReflect.Descriptor instead.
+func (*WorkerGetTransactionReceiptReq) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *WorkerGetTransactionReceiptReq) GetTxHash() string {
+	if x != nil {
+		return x.TxHash
+	}
+	return ""
+}
+
+type WorkerGetTransactionReceiptResp struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Found             bool                   `protobuf:"varint,1,opt,name=found,proto3" json:"found,omitempty"`   // false when not yet available (pending).
+	Status            uint64                 `protobuf:"varint,2,opt,name=status,proto3" json:"status,omitempty"` // 1 = success, 0 = reverted.
+	GasUsed           uint64                 `protobuf:"varint,3,opt,name=gas_used,json=gasUsed,proto3" json:"gas_used,omitempty"`
+	EffectiveGasPrice string                 `protobuf:"bytes,4,opt,name=effective_gas_price,json=effectiveGasPrice,proto3" json:"effective_gas_price,omitempty"` // wei (big.Int as string).
+	BlockNumber       uint64                 `protobuf:"varint,5,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
+	TxHash            string                 `protobuf:"bytes,6,opt,name=tx_hash,json=txHash,proto3" json:"tx_hash,omitempty"` // 0x-prefixed.
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *WorkerGetTransactionReceiptResp) Reset() {
+	*x = WorkerGetTransactionReceiptResp{}
+	mi := &file_worker_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerGetTransactionReceiptResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerGetTransactionReceiptResp) ProtoMessage() {}
+
+func (x *WorkerGetTransactionReceiptResp) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerGetTransactionReceiptResp.ProtoReflect.Descriptor instead.
+func (*WorkerGetTransactionReceiptResp) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *WorkerGetTransactionReceiptResp) GetFound() bool {
+	if x != nil {
+		return x.Found
+	}
+	return false
+}
+
+func (x *WorkerGetTransactionReceiptResp) GetStatus() uint64 {
+	if x != nil {
+		return x.Status
+	}
+	return 0
+}
+
+func (x *WorkerGetTransactionReceiptResp) GetGasUsed() uint64 {
+	if x != nil {
+		return x.GasUsed
+	}
+	return 0
+}
+
+func (x *WorkerGetTransactionReceiptResp) GetEffectiveGasPrice() string {
+	if x != nil {
+		return x.EffectiveGasPrice
+	}
+	return ""
+}
+
+func (x *WorkerGetTransactionReceiptResp) GetBlockNumber() uint64 {
+	if x != nil {
+		return x.BlockNumber
+	}
+	return 0
+}
+
+func (x *WorkerGetTransactionReceiptResp) GetTxHash() string {
+	if x != nil {
+		return x.TxHash
+	}
+	return ""
+}
+
 var File_worker_proto protoreflect.FileDescriptor
 
 const file_worker_proto_rawDesc = "" +
@@ -1691,8 +1820,16 @@ const file_worker_proto_rawDesc = "" +
 	"\tmax_salts\x18\x04 \x01(\x03R\bmaxSalts\"L\n" +
 	" WorkerFindMatchingWalletSaltResp\x12\x14\n" +
 	"\x05found\x18\x01 \x01(\bR\x05found\x12\x12\n" +
-	"\x04salt\x18\x02 \x01(\x03R\x04salt2\xe5\n" +
-	"\n" +
+	"\x04salt\x18\x02 \x01(\x03R\x04salt\"9\n" +
+	"\x1eWorkerGetTransactionReceiptReq\x12\x17\n" +
+	"\atx_hash\x18\x01 \x01(\tR\x06txHash\"\xd6\x01\n" +
+	"\x1fWorkerGetTransactionReceiptResp\x12\x14\n" +
+	"\x05found\x18\x01 \x01(\bR\x05found\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\x04R\x06status\x12\x19\n" +
+	"\bgas_used\x18\x03 \x01(\x04R\agasUsed\x12.\n" +
+	"\x13effective_gas_price\x18\x04 \x01(\tR\x11effectiveGasPrice\x12!\n" +
+	"\fblock_number\x18\x05 \x01(\x04R\vblockNumber\x12\x17\n" +
+	"\atx_hash\x18\x06 \x01(\tR\x06txHash2\xd7\v\n" +
 	"\vChainWorker\x12X\n" +
 	"\x11WorkerHealthCheck\x12 .aggregator.WorkerHealthCheckReq\x1a!.aggregator.WorkerHealthCheckResp\x12L\n" +
 	"\rExecuteUserOp\x12\x1c.aggregator.ExecuteUserOpReq\x1a\x1d.aggregator.ExecuteUserOpResp\x12I\n" +
@@ -1709,7 +1846,8 @@ const file_worker_proto_rawDesc = "" +
 	"\fCallContract\x12!.aggregator.WorkerCallContractReq\x1a\".aggregator.WorkerCallContractResp\x12[\n" +
 	"\x0eGetBlockHeader\x12#.aggregator.WorkerGetBlockHeaderReq\x1a$.aggregator.WorkerGetBlockHeaderResp\x12[\n" +
 	"\x0eGetBlockNumber\x12#.aggregator.WorkerGetBlockNumberReq\x1a$.aggregator.WorkerGetBlockNumberResp\x12s\n" +
-	"\x16FindMatchingWalletSalt\x12+.aggregator.WorkerFindMatchingWalletSaltReq\x1a,.aggregator.WorkerFindMatchingWalletSaltRespB\fZ\n" +
+	"\x16FindMatchingWalletSalt\x12+.aggregator.WorkerFindMatchingWalletSaltReq\x1a,.aggregator.WorkerFindMatchingWalletSaltResp\x12p\n" +
+	"\x15GetTransactionReceipt\x12*.aggregator.WorkerGetTransactionReceiptReq\x1a+.aggregator.WorkerGetTransactionReceiptRespB\fZ\n" +
 	"./avsprotob\x06proto3"
 
 var (
@@ -1724,7 +1862,7 @@ func file_worker_proto_rawDescGZIP() []byte {
 	return file_worker_proto_rawDescData
 }
 
-var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
+var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
 var file_worker_proto_goTypes = []any{
 	(*WorkerHealthCheckReq)(nil),             // 0: aggregator.WorkerHealthCheckReq
 	(*WorkerHealthCheckResp)(nil),            // 1: aggregator.WorkerHealthCheckResp
@@ -1755,6 +1893,8 @@ var file_worker_proto_goTypes = []any{
 	(*WorkerGetBlockNumberResp)(nil),         // 26: aggregator.WorkerGetBlockNumberResp
 	(*WorkerFindMatchingWalletSaltReq)(nil),  // 27: aggregator.WorkerFindMatchingWalletSaltReq
 	(*WorkerFindMatchingWalletSaltResp)(nil), // 28: aggregator.WorkerFindMatchingWalletSaltResp
+	(*WorkerGetTransactionReceiptReq)(nil),   // 29: aggregator.WorkerGetTransactionReceiptReq
+	(*WorkerGetTransactionReceiptResp)(nil),  // 30: aggregator.WorkerGetTransactionReceiptResp
 }
 var file_worker_proto_depIdxs = []int32{
 	0,  // 0: aggregator.ChainWorker.WorkerHealthCheck:input_type -> aggregator.WorkerHealthCheckReq
@@ -1772,23 +1912,25 @@ var file_worker_proto_depIdxs = []int32{
 	23, // 12: aggregator.ChainWorker.GetBlockHeader:input_type -> aggregator.WorkerGetBlockHeaderReq
 	25, // 13: aggregator.ChainWorker.GetBlockNumber:input_type -> aggregator.WorkerGetBlockNumberReq
 	27, // 14: aggregator.ChainWorker.FindMatchingWalletSalt:input_type -> aggregator.WorkerFindMatchingWalletSaltReq
-	1,  // 15: aggregator.ChainWorker.WorkerHealthCheck:output_type -> aggregator.WorkerHealthCheckResp
-	3,  // 16: aggregator.ChainWorker.ExecuteUserOp:output_type -> aggregator.ExecuteUserOpResp
-	5,  // 17: aggregator.ChainWorker.GetNonce:output_type -> aggregator.WorkerGetNonceResp
-	7,  // 18: aggregator.ChainWorker.GetSmartWalletAddress:output_type -> aggregator.WorkerGetSmartWalletAddressResp
-	9,  // 19: aggregator.ChainWorker.GetTokenMetadata:output_type -> aggregator.WorkerGetTokenMetadataResp
-	5,  // 20: aggregator.ChainWorker.GetNonceByAddress:output_type -> aggregator.WorkerGetNonceResp
-	12, // 21: aggregator.ChainWorker.SuggestGasPrice:output_type -> aggregator.WorkerSuggestGasPriceResp
-	14, // 22: aggregator.ChainWorker.EstimateGas:output_type -> aggregator.WorkerEstimateGasResp
-	16, // 23: aggregator.ChainWorker.GetCode:output_type -> aggregator.WorkerGetCodeResp
-	18, // 24: aggregator.ChainWorker.GetBalance:output_type -> aggregator.WorkerGetBalanceResp
-	20, // 25: aggregator.ChainWorker.GetTokenBalance:output_type -> aggregator.WorkerGetTokenBalanceResp
-	22, // 26: aggregator.ChainWorker.CallContract:output_type -> aggregator.WorkerCallContractResp
-	24, // 27: aggregator.ChainWorker.GetBlockHeader:output_type -> aggregator.WorkerGetBlockHeaderResp
-	26, // 28: aggregator.ChainWorker.GetBlockNumber:output_type -> aggregator.WorkerGetBlockNumberResp
-	28, // 29: aggregator.ChainWorker.FindMatchingWalletSalt:output_type -> aggregator.WorkerFindMatchingWalletSaltResp
-	15, // [15:30] is the sub-list for method output_type
-	0,  // [0:15] is the sub-list for method input_type
+	29, // 15: aggregator.ChainWorker.GetTransactionReceipt:input_type -> aggregator.WorkerGetTransactionReceiptReq
+	1,  // 16: aggregator.ChainWorker.WorkerHealthCheck:output_type -> aggregator.WorkerHealthCheckResp
+	3,  // 17: aggregator.ChainWorker.ExecuteUserOp:output_type -> aggregator.ExecuteUserOpResp
+	5,  // 18: aggregator.ChainWorker.GetNonce:output_type -> aggregator.WorkerGetNonceResp
+	7,  // 19: aggregator.ChainWorker.GetSmartWalletAddress:output_type -> aggregator.WorkerGetSmartWalletAddressResp
+	9,  // 20: aggregator.ChainWorker.GetTokenMetadata:output_type -> aggregator.WorkerGetTokenMetadataResp
+	5,  // 21: aggregator.ChainWorker.GetNonceByAddress:output_type -> aggregator.WorkerGetNonceResp
+	12, // 22: aggregator.ChainWorker.SuggestGasPrice:output_type -> aggregator.WorkerSuggestGasPriceResp
+	14, // 23: aggregator.ChainWorker.EstimateGas:output_type -> aggregator.WorkerEstimateGasResp
+	16, // 24: aggregator.ChainWorker.GetCode:output_type -> aggregator.WorkerGetCodeResp
+	18, // 25: aggregator.ChainWorker.GetBalance:output_type -> aggregator.WorkerGetBalanceResp
+	20, // 26: aggregator.ChainWorker.GetTokenBalance:output_type -> aggregator.WorkerGetTokenBalanceResp
+	22, // 27: aggregator.ChainWorker.CallContract:output_type -> aggregator.WorkerCallContractResp
+	24, // 28: aggregator.ChainWorker.GetBlockHeader:output_type -> aggregator.WorkerGetBlockHeaderResp
+	26, // 29: aggregator.ChainWorker.GetBlockNumber:output_type -> aggregator.WorkerGetBlockNumberResp
+	28, // 30: aggregator.ChainWorker.FindMatchingWalletSalt:output_type -> aggregator.WorkerFindMatchingWalletSaltResp
+	30, // 31: aggregator.ChainWorker.GetTransactionReceipt:output_type -> aggregator.WorkerGetTransactionReceiptResp
+	16, // [16:32] is the sub-list for method output_type
+	0,  // [0:16] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name
@@ -1805,7 +1947,7 @@ func file_worker_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_worker_proto_rawDesc), len(file_worker_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   29,
+			NumMessages:   31,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

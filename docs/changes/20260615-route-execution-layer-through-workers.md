@@ -65,11 +65,17 @@ dials follow the same model, reusing existing worker RPCs where possible:
    path sets `user.SmartAccountAddress` from the worker-derived address
    (using the task's per-chain factory, fixing the latent global-factory
    inconsistency).
-2. **PR 2 — userop receipt waiting.** Migrate `waitForUserOpConfirmation`.
-   First check whether gateway-mode sends (via `ExecuteUserOp`) already
-   return a confirmed receipt, making the separate wait redundant; if not,
-   add a `GetTransactionReceipt` worker RPC. Removes 2 live dials + the
-   per-chain bundler dependency in this path.
+2. **PR 2 — userop receipt waiting (delivered).** `waitForUserOpConfirmation`
+   is a real pending-receipt poll (reachable when a send returns "pending"),
+   so it was migrated rather than dropped: added a `GetTransactionReceipt`
+   worker RPC (gas/status/block fields; `found=false` → pending) + a
+   `ChainStateReader.GetTransactionReceipt` (NotFound → `(nil, nil)`). The
+   single `client.TransactionReceipt` call now goes through `v.receiptForTx`
+   (per-chain reader, direct-dial fallback), removing the function's
+   top-level chain dial. Deleted the dead `getReceiptByUserOpHash`
+   placeholder (it dialed then returned an error without using the client).
+   The bundler poll (`bundler.GetUserOperationReceipt`) stays — bundler
+   routing is a separate concern from chain RPC.
 3. **PR 3 — simulation state overrides.** Resolve `InjectERC20BalanceChange`
    — either supply the balance override through Tenderly's `state_objects`
    directly (no chain read), or add a worker `GetStorageAt` RPC. Removes

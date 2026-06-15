@@ -73,6 +73,11 @@ service ChainWorker {
   // comparison locally so a wide range is a single round-trip. Used by the
   // gateway's wallet-ownership validation (factory-upgrade fallback).
   rpc FindMatchingWalletSalt(WorkerFindMatchingWalletSaltReq) returns (WorkerFindMatchingWalletSaltResp);
+
+  // Read a transaction receipt by hash. Wraps ethclient.TransactionReceipt.
+  // found=false when the receipt isn't available yet (pending). Used by the
+  // gateway's userop confirmation-waiting to backfill gas data.
+  rpc GetTransactionReceipt(WorkerGetTransactionReceiptReq) returns (WorkerGetTransactionReceiptResp);
 }
 
 // Health check
@@ -242,4 +247,18 @@ message WorkerFindMatchingWalletSaltReq {
 message WorkerFindMatchingWalletSaltResp {
   bool found = 1;
   int64 salt = 2;              // The matching salt; valid only when found.
+}
+
+// Transaction receipt (the subset of fields the gateway reads)
+message WorkerGetTransactionReceiptReq {
+  string tx_hash = 1;          // 0x-prefixed transaction hash.
+}
+
+message WorkerGetTransactionReceiptResp {
+  bool found = 1;                 // false when not yet available (pending).
+  uint64 status = 2;             // 1 = success, 0 = reverted.
+  uint64 gas_used = 3;
+  string effective_gas_price = 4; // wei (big.Int as string).
+  uint64 block_number = 5;
+  string tx_hash = 6;            // 0x-prefixed.
 }
