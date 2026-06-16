@@ -1,8 +1,6 @@
 package mapping
 
 import (
-	"encoding/json"
-
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
@@ -57,13 +55,11 @@ func openAPIEventQueriesToProto(in []generated.EventTriggerQuery) []*avsproto.Ev
 				if c.FieldType != nil {
 					pc.FieldType = *c.FieldType
 				}
-				// OpenAPI carries Value as an object so SDKs can pass
-				// typed payloads (e.g. {"address":"0x…"}). The proto
-				// stores it as a JSON-encoded string and parses it on
-				// the operator side via FieldType.
-				if raw, err := json.Marshal(c.Value); err == nil {
-					pc.Value = string(raw)
-				}
+				// Value is a plain string on the wire, matching the proto
+				// EventCondition.value. The operator parses it according
+				// to FieldType (e.g. "200000000000" → big.Int for a
+				// uint256/int256 field).
+				pc.Value = c.Value
 				pq.Conditions = append(pq.Conditions, pc)
 			}
 		}
@@ -92,9 +88,7 @@ func openAPIEventQueriesToProto(in []generated.EventTriggerQuery) []*avsproto.Ev
 	return out
 }
 
-// protoEventQueriesToOpenAPI inverts openAPIEventQueriesToProto. The
-// condition Value is round-tripped through JSON so the polymorphic
-// SDK shape survives.
+// protoEventQueriesToOpenAPI inverts openAPIEventQueriesToProto.
 func protoEventQueriesToOpenAPI(in []*avsproto.EventTrigger_Query) []generated.EventTriggerQuery {
 	if len(in) == 0 {
 		return nil
@@ -143,11 +137,7 @@ func protoEventQueriesToOpenAPI(in []*avsproto.EventTrigger_Query) []generated.E
 				if ft := c.GetFieldType(); ft != "" {
 					ec.FieldType = &ft
 				}
-				var v map[string]interface{}
-				if c.GetValue() != "" {
-					_ = json.Unmarshal([]byte(c.GetValue()), &v)
-				}
-				ec.Value = v
+				ec.Value = c.GetValue()
 				conds = append(conds, ec)
 			}
 			oq.Conditions = &conds

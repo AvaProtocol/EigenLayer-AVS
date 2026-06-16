@@ -94,6 +94,12 @@ func TestTriggerRoundTrip(t *testing.T) {
 						Queries: []generated.EventTriggerQuery{{
 							Addresses: &[]generated.EthereumAddress{addr},
 							Topics:    &[]string{sig, ""},
+							Conditions: &[]generated.EventCondition{{
+								FieldName: "AnswerUpdated.current",
+								Operator:  generated.Gt,
+								Value:     "200000000000",
+								FieldType: func() *string { s := "int256"; return &s }(),
+							}},
 						}},
 					},
 				}
@@ -111,6 +117,14 @@ func TestTriggerRoundTrip(t *testing.T) {
 				require.Len(t, topics, 2)
 				assert.Equal(t, "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", topics[0])
 				assert.Equal(t, "", topics[1], "wildcard topic round-trips as empty string in the []string shape")
+				require.NotNil(t, v.Config.Queries[0].Conditions)
+				conds := *v.Config.Queries[0].Conditions
+				require.Len(t, conds, 1)
+				assert.Equal(t, "AnswerUpdated.current", conds[0].FieldName)
+				assert.Equal(t, generated.Gt, conds[0].Operator)
+				assert.Equal(t, "200000000000", conds[0].Value, "condition value is a plain string, matching the proto")
+				require.NotNil(t, conds[0].FieldType)
+				assert.Equal(t, "int256", *conds[0].FieldType)
 			},
 		},
 	}
