@@ -397,6 +397,9 @@ func (s *ChainTriggerSet) markHeadSeen() {
 // its head subscription should be running). When false the chain is idle —
 // stale heads are expected, not a stall — and it stays advertised.
 func (s *ChainTriggerSet) blockWorkPresent() bool {
+	// nil hasBlockTasks → treat the chain as idle, so it stays advertised.
+	// This is the safe default (a wiring gap can't silently un-advertise a
+	// chain); real setup always wires bt.HasBlockTasks.
 	return s.hasBlockTasks != nil && s.hasBlockTasks()
 }
 

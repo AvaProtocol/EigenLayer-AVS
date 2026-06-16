@@ -285,6 +285,9 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 			perChainEthClient.Close()
 			// NewBlockTrigger may have succeeded before NewEventTrigger
 			// panicked; close its already-dialed clients so they don't leak.
+			// (No et check: a panic in NewEventTrigger means Go never assigned
+			// its return value, so et is nil here — any WS clients it dialed
+			// before panicking are a known leak, tracked as a follow-up.)
 			if bt != nil {
 				bt.Close()
 			}
