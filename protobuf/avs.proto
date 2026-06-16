@@ -1443,7 +1443,11 @@ message EstimateFeesResp {
   repeated string warnings = 11;
 }
 
-// EventCondition represents a condition to evaluate on decoded event data
+// EventCondition represents a condition to evaluate on decoded event data.
+// MIRRORED in api/openapi.yaml (components.schemas.EventCondition). The two
+// schemas must agree on every field's type — `value` in particular MUST stay
+// `string` in both. Past schema drift here (OpenAPI authored as an object,
+// proto as a string) broke production simulate requests; see PR #601.
 message EventCondition {
   string field_name = 1;        // Event field name (e.g., "answer", "roundId")
   string operator = 2;          // Comparison operator: "gt", "gte", "lt", "lte", "eq", "ne"
