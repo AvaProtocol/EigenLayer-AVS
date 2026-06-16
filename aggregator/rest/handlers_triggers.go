@@ -44,7 +44,7 @@ func (s *Server) RunTrigger(ctx echo.Context) error {
 		req.TriggerInput = converted
 	}
 
-	resp, err := s.engine.RunTriggerRPC(user, req)
+	resp, err := s.engine.RunTriggerRPCWithContext(ctx.Request().Context(), user, req)
 	if err != nil {
 		return err
 	}

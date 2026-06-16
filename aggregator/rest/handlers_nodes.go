@@ -55,7 +55,7 @@ func (s *Server) RunNode(ctx echo.Context) error {
 		req.InputVariables = converted
 	}
 
-	resp, err := s.engine.RunNodeImmediatelyRPC(user, req)
+	resp, err := s.engine.RunNodeImmediatelyRPCWithContext(ctx.Request().Context(), user, req)
 	if err != nil {
 		return err
 	}

@@ -256,7 +256,7 @@ func (s *Server) TriggerWorkflow(ctx echo.Context, id generated.Ulid) error {
 		}
 	}
 
-	resp, err := s.engine.TriggerWorkflow(user, req)
+	resp, err := s.engine.TriggerWorkflowWithContext(ctx.Request().Context(), user, req)
 	if err != nil {
 		return notFoundOrError(err)
 	}

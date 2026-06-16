@@ -1194,6 +1194,14 @@ func (n *Engine) resolveUserChainID(user *model.User) int64 {
 // resolveUserChainID — REST callers route by their JWT `aud` chain,
 // gRPC callers fall back to the gateway's default chain.
 func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
+	return n.GetWalletWithContext(context.Background(), user, payload)
+}
+
+// GetWalletWithContext is GetWallet with a caller-supplied context. REST
+// handlers pass the request context so a client disconnect / timeout cancels
+// the worker-routed CREATE2 derivation; the worker reader's withTimeout still
+// bounds the call when ctx carries no deadline.
+func (n *Engine) GetWalletWithContext(ctx context.Context, user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
 	chainID := n.resolveUserChainID(user)
 	// Resolve the per-chain smart wallet config. In single-chain mode
 	// this returns n.smartWalletConfig (the gateway default); in
@@ -1270,7 +1278,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		// gateway mode this is worker-routed, so the gateway issues no
 		// direct chain RPC for wallet derivation; in single-chain mode it's
 		// a direct reader that reuses the existing client (no per-call dial).
-		addr, deriveErr := reader.GetSmartWalletAddress(context.Background(), user.Address, factoryAddr, saltBig)
+		addr, deriveErr := reader.GetSmartWalletAddress(ctx, user.Address, factoryAddr, saltBig)
 		if deriveErr != nil {
 			n.logger.Error("GetWallet: factory.getAddress() failed (worker-routed)",
 				"chain_id", chainID, "owner", user.Address.Hex(), "factory", factoryAddr.Hex(),
@@ -3080,7 +3088,7 @@ func (n *Engine) GetWorkflow(user *model.User, taskID string) (*model.Workflow, 
 
 // instructOperatorImmediateTrigger instructs the connected operator to trigger the task immediately
 // with the current block number, bypassing the normal interval waiting
-func (n *Engine) instructOperatorImmediateTrigger(taskID string) error {
+func (n *Engine) instructOperatorImmediateTrigger(ctx context.Context, taskID string) error {
 	// Load the task first so the current-block read targets the task's
 	// chain (via its per-chain worker), not a single gateway RPC.
 	task, err := n.GetWorkflowByID(taskID)
@@ -3099,7 +3107,7 @@ func (n *Engine) instructOperatorImmediateTrigger(taskID string) error {
 	if reader == nil {
 		return fmt.Errorf("no chain-state reader available for chain %d (immediate block trigger)", chainID)
 	}
-	currentBlock, err := reader.GetBlockNumber(context.Background())
+	currentBlock, err := reader.GetBlockNumber(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get current block number: %w", err)
 	}
@@ -3197,6 +3205,14 @@ func (n *Engine) instructOperatorImmediateTrigger(taskID string) error {
 }
 
 func (n *Engine) TriggerWorkflow(user *model.User, payload *avsproto.TriggerTaskReq) (*avsproto.TriggerTaskResp, error) {
+	return n.TriggerWorkflowWithContext(context.Background(), user, payload)
+}
+
+// TriggerWorkflowWithContext is TriggerWorkflow with a caller-supplied context.
+// REST handlers pass the request context so a client disconnect / timeout
+// cancels the worker-routed current-block read (immediate trigger) and the
+// blocking execution's wallet-ownership validation.
+func (n *Engine) TriggerWorkflowWithContext(ctx context.Context, user *model.User, payload *avsproto.TriggerTaskReq) (*avsproto.TriggerTaskResp, error) {
 	// Validate task ID format first
 	if !ValidateTaskId(payload.TaskId) {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidTaskIdFormat)
@@ -3265,7 +3281,7 @@ func (n *Engine) TriggerWorkflow(user *model.User, payload *avsproto.TriggerTask
 			n.logger.Debug("💾 Persisted pending execution ID with index", "task_id", task.Id, "execution_id", preExecID, "index", preAssignedIndex, "key", string(pendingKey))
 
 			// Best-effort operator instruction (ignore errors; operator may connect later)
-			_ = n.instructOperatorImmediateTrigger(task.Id)
+			_ = n.instructOperatorImmediateTrigger(ctx, task.Id)
 
 			startTime := time.Now().UnixMilli()
 			resp := &avsproto.TriggerTaskResp{
@@ -3326,7 +3342,7 @@ func (n *Engine) TriggerWorkflow(user *model.User, payload *avsproto.TriggerTask
 
 	if payload.IsBlocking {
 		executor := NewExecutor(n.ResolveSmartWalletConfig(task.ChainId), n.db, n.logger, n, n.priceService)
-		execution, runErr := executor.RunTask(task, &queueTaskData)
+		execution, runErr := executor.RunTaskWithContext(ctx, task, &queueTaskData)
 		if runErr != nil {
 			n.logger.Error("failed to run blocking task", runErr)
 			// For blocking execution, return the error to the caller
@@ -3517,7 +3533,7 @@ func (n *Engine) SimulateWorkflow(user *model.User, trigger *avsproto.TaskTrigge
 	// Step 1: Start timing BEFORE trigger execution (consistent with node timing)
 	triggerStartTime := time.Now()
 
-	triggerOutput, err := n.runTriggerImmediately(triggerTypeStr, triggerConfig, inputVariables)
+	triggerOutput, err := n.runTriggerImmediately(context.Background(), triggerTypeStr, triggerConfig, inputVariables)
 	if err != nil {
 		return nil, fmt.Errorf("failed to simulate trigger: %w", err)
 	}

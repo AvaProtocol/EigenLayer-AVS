@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"context"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
@@ -181,7 +182,7 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 			}
 
 			// Execute the trigger
-			result, err := engine.runTriggerImmediately("eventTrigger", triggerConfig, map[string]interface{}{})
+			result, err := engine.runTriggerImmediately(context.Background(), "eventTrigger", triggerConfig, map[string]interface{}{})
 			require.NoError(t, err, "runTriggerImmediately should not return an error")
 
 			// Debug: Print actual response for analysis

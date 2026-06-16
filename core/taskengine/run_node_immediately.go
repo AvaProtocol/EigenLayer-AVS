@@ -45,6 +45,15 @@ func getRealisticBlockNumberForChain(chainID int64) uint64 {
 // RunNodeImmediately executes a node immediately with optional simulation mode
 // useSimulation parameter (bool): true = simulation (default), false = real execution
 func (n *Engine) RunNodeImmediately(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, user *model.User, useSimulation ...interface{}) (map[string]interface{}, error) {
+	return n.RunNodeImmediatelyWithContext(context.Background(), nodeType, nodeConfig, inputVariables, user, useSimulation...)
+}
+
+// RunNodeImmediatelyWithContext is RunNodeImmediately with a caller-supplied
+// context. RPC handlers pass the request context so a client disconnect /
+// timeout cancels the worker-routed block reads and wallet-salt scan reached
+// from here; the worker reader's withTimeout still bounds each call when ctx
+// carries no deadline.
+func (n *Engine) RunNodeImmediatelyWithContext(ctx context.Context, nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, user *model.User, useSimulation ...interface{}) (map[string]interface{}, error) {
 	// Default to simulation mode
 	simulationMode := true
 
@@ -56,17 +65,17 @@ func (n *Engine) RunNodeImmediately(nodeType string, nodeConfig map[string]inter
 	}
 
 	if IsTriggerNodeType(nodeType) {
-		return n.runTriggerImmediately(nodeType, nodeConfig, inputVariables)
+		return n.runTriggerImmediately(ctx, nodeType, nodeConfig, inputVariables)
 	} else {
-		return n.runProcessingNodeWithInputs(user, nodeType, nodeConfig, inputVariables, simulationMode)
+		return n.runProcessingNodeWithInputs(ctx, user, nodeType, nodeConfig, inputVariables, simulationMode)
 	}
 }
 
 // runTriggerImmediately executes trigger nodes immediately, ignoring any scheduling configuration
-func (n *Engine) runTriggerImmediately(triggerType string, triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+func (n *Engine) runTriggerImmediately(ctx context.Context, triggerType string, triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	switch triggerType {
 	case NodeTypeBlockTrigger:
-		return n.runBlockTriggerImmediately(triggerConfig, inputVariables)
+		return n.runBlockTriggerImmediately(ctx, triggerConfig, inputVariables)
 	case NodeTypeFixedTimeTrigger:
 		return n.runFixedTimeTriggerImmediately(triggerConfig, inputVariables)
 	case NodeTypeCronTrigger:
@@ -81,7 +90,7 @@ func (n *Engine) runTriggerImmediately(triggerType string, triggerConfig map[str
 }
 
 // runBlockTriggerImmediately gets the latest block data immediately, ignoring any interval configuration
-func (n *Engine) runBlockTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+func (n *Engine) runBlockTriggerImmediately(ctx context.Context, triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	// For immediate execution, we ignore interval and always get the latest block
 	// unless a specific blockNumber is provided
 	var blockNumber uint64
@@ -114,7 +123,7 @@ func (n *Engine) runBlockTriggerImmediately(triggerConfig map[string]interface{}
 
 	// If no specific block number, get the latest block
 	if blockNumber == 0 {
-		currentBlock, err := reader.GetBlockNumber(context.Background())
+		currentBlock, err := reader.GetBlockNumber(ctx)
 		if err != nil {
 			// For simulations, use a mock block number to avoid RPC rate limiting
 			if strings.Contains(err.Error(), "rate limit") || strings.Contains(err.Error(), "429") {
@@ -134,7 +143,7 @@ func (n *Engine) runBlockTriggerImmediately(triggerConfig map[string]interface{}
 	}
 
 	// Get real block data via the chain's worker
-	header, err := reader.HeaderByNumber(context.Background(), big.NewInt(int64(blockNumber)))
+	header, err := reader.HeaderByNumber(ctx, big.NewInt(int64(blockNumber)))
 	if err != nil {
 		// For simulations, use mock block data to avoid RPC rate limiting
 		if strings.Contains(err.Error(), "rate limit") || strings.Contains(err.Error(), "429") {
@@ -2445,10 +2454,10 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 }
 
 // runProcessingNodeWithInputs handles execution of processing node types
-func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, useSimulation bool) (map[string]interface{}, error) {
+func (n *Engine) runProcessingNodeWithInputs(ctx context.Context, user *model.User, nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, useSimulation bool) (map[string]interface{}, error) {
 	// Check if this is actually a trigger type that was misrouted
 	if IsTriggerNodeType(nodeType) {
-		return n.runTriggerImmediately(nodeType, nodeConfig, inputVariables)
+		return n.runTriggerImmediately(ctx, nodeType, nodeConfig, inputVariables)
 	}
 
 	// Load secrets for immediate execution (global macroSecrets + user-level secrets)
@@ -2572,7 +2581,7 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 					factoryAddr := n.smartWalletConfig.FactoryAddress
 					runnerAddr := common.HexToAddress(runnerStr)
 					if reader := GetChainStateReaderForChain(uint64(n.smartWalletConfig.ChainID)); reader != nil {
-						found, salt, derr := reader.FindMatchingWalletSalt(context.Background(), vm.TaskOwner, factoryAddr, runnerAddr, runnerSaltScan)
+						found, salt, derr := reader.FindMatchingWalletSalt(ctx, vm.TaskOwner, factoryAddr, runnerAddr, runnerSaltScan)
 						if derr != nil {
 							return nil, fmt.Errorf("failed to derive addresses for runner validation: %w", derr)
 						}
@@ -2870,6 +2879,13 @@ func (n *Engine) detectNodeTypeFromStep(step *avsproto.Execution_Step) string {
 
 // RunNodeImmediatelyRPC handles the RPC interface for immediate node execution
 func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWithInputsReq) (*avsproto.RunNodeWithInputsResp, error) {
+	return n.RunNodeImmediatelyRPCWithContext(context.Background(), user, req)
+}
+
+// RunNodeImmediatelyRPCWithContext is RunNodeImmediatelyRPC with a
+// caller-supplied context, propagated to the worker-routed block reads and
+// wallet-salt scan so a cancelled request interrupts them.
+func (n *Engine) RunNodeImmediatelyRPCWithContext(ctx context.Context, user *model.User, req *avsproto.RunNodeWithInputsReq) (*avsproto.RunNodeWithInputsResp, error) {
 	// The request now contains a complete TaskNode, consistent with SimulateTask
 	node := req.Node
 	if node == nil {
@@ -2948,7 +2964,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 	// Execute the node immediately with authenticated user
 	// NOTE: lang field conversion for CustomCode is handled by ParseLanguageFromConfig
 	// Pass the isSimulated flag from node config to control simulation/real execution
-	result, err := n.RunNodeImmediately(nodeTypeStr, nodeConfig, inputVariables, user, useSimulation)
+	result, err := n.RunNodeImmediatelyWithContext(ctx, nodeTypeStr, nodeConfig, inputVariables, user, useSimulation)
 	if err != nil {
 		if n.logger != nil {
 			if isExpectedValidationError(err) {
@@ -3109,6 +3125,13 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 
 // RunTriggerRPC handles the RPC interface for immediate trigger execution
 func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*avsproto.RunTriggerResp, error) {
+	return n.RunTriggerRPCWithContext(context.Background(), user, req)
+}
+
+// RunTriggerRPCWithContext is RunTriggerRPC with a caller-supplied context,
+// propagated to the worker-routed block reads reached from runTriggerImmediately
+// so a cancelled request interrupts them.
+func (n *Engine) RunTriggerRPCWithContext(ctx context.Context, user *model.User, req *avsproto.RunTriggerReq) (*avsproto.RunTriggerResp, error) {
 	// Validate that trigger is provided
 	if req.Trigger == nil {
 		resp := &avsproto.RunTriggerResp{
@@ -3157,7 +3180,7 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 
 	// Execute the trigger immediately with trigger input data
 	// NOTE: lang field conversion for ManualTrigger is handled by ParseLanguageFromConfig
-	result, err := n.runTriggerImmediately(triggerTypeStr, triggerConfig, triggerInput)
+	result, err := n.runTriggerImmediately(ctx, triggerTypeStr, triggerConfig, triggerInput)
 	if err != nil {
 		if n.logger != nil {
 			// Categorize errors to avoid unnecessary stack traces for expected validation errors
