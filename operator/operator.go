@@ -183,12 +183,18 @@ func (o *Operator) triggersForChain(chainID int64) (*ChainTriggerSet, bool) {
 const chainCapabilityStaleThreshold = 90 * time.Second
 
 // supportedChainIDs returns the chain_ids the operator currently
-// advertises to the aggregator/gateway. A chain is included only when
-// its block subscription has produced a head within the staleness
-// window — see ChainTriggerSet.isHeadFresh. Chains that have stalled
-// (subscription dead, RPC unreachable) drop out of the advertised set
-// on the next Ping so the gateway can re-route their tasks to a
-// healthier operator without waiting for a SyncMessages reconnect.
+// advertises to the aggregator/gateway. A chain is advertised unless its
+// block subscription is genuinely STALLED — i.e. it has block tasks (so the
+// subscription should be producing heads) but no head has arrived within the
+// staleness window. See ChainTriggerSet.isHeadFresh.
+//
+// A chain with no block tasks has its head subscription intentionally
+// stopped, so it produces no heads by design. Such an idle chain must STILL
+// be advertised: it can serve event tasks, and — critically — the gateway
+// only routes tasks (including the first block task) to chains an operator
+// advertises. Dropping an idle chain creates a deadlock: no tasks → no
+// subscription → stale watermark → un-advertised → never gets tasks. So
+// liveness is gated on the watermark only while block work is present.
 //
 // Order matches chainOrder for deterministic output.
 func (o *Operator) supportedChainIDs() []int64 {
@@ -201,7 +207,10 @@ func (o *Operator) supportedChainIDs() []int64 {
 		if !ok || set == nil {
 			continue
 		}
-		if !set.isHeadFresh(chainCapabilityStaleThreshold) {
+		// Only a chain with active block work can be "stalled": no block
+		// tasks means no head subscription is expected to be running, so a
+		// stale watermark is normal, not a failure.
+		if set.blockWorkPresent() && !set.isHeadFresh(chainCapabilityStaleThreshold) {
 			continue
 		}
 		out = append(out, id)
@@ -355,6 +364,14 @@ type ChainTriggerSet struct {
 	EventTrigger *triggerengine.EventTrigger
 	EthClient    *ethclient.Client
 
+	// hasBlockTasks reports whether the block subscription currently has
+	// work (and so should be producing heads). supportedChainIDs uses it to
+	// distinguish a genuinely stalled chain from an idle one — only a chain
+	// with block work can be "stalled". Wired to BlockTrigger.HasBlockTasks
+	// in real setup; injectable so liveness logic is unit-testable without
+	// constructing a real (WS-dialing) BlockTrigger.
+	hasBlockTasks func() bool
+
 	// lastHeadSeenAt is updated every time the per-chain block-subscription
 	// fans an event into sharedBlockCh. It's the freshness watermark
 	// liveSupportedChainIDs() uses to decide whether to keep advertising
@@ -374,6 +391,16 @@ func (s *ChainTriggerSet) markHeadSeen() {
 	s.lastHeadMu.Lock()
 	s.lastHeadSeenAt = time.Now()
 	s.lastHeadMu.Unlock()
+}
+
+// blockWorkPresent reports whether this chain currently has block tasks (so
+// its head subscription should be running). When false the chain is idle —
+// stale heads are expected, not a stall — and it stays advertised.
+func (s *ChainTriggerSet) blockWorkPresent() bool {
+	// nil hasBlockTasks → treat the chain as idle, so it stays advertised.
+	// This is the safe default (a wiring gap can't silently un-advertise a
+	// chain); real setup always wires bt.HasBlockTasks.
+	return s.hasBlockTasks != nil && s.hasBlockTasks()
 }
 
 // isHeadFresh reports whether the most recent observed head is within

@@ -550,7 +550,13 @@ type EventCondition struct {
 	FieldName string                 `json:"fieldName"`
 	FieldType *string                `json:"fieldType,omitempty"`
 	Operator  EventConditionOperator `json:"operator"`
-	Value     map[string]interface{} `json:"value"`
+
+	// Value Value to compare against, encoded as a string. The operator
+	// parses it according to `fieldType` (e.g. `int256` / `uint256`
+	// → big.Int, `address` → checksummed hex, `bool` →
+	// "true"/"false"). Matches the proto `EventCondition.value`,
+	// which is also a string.
+	Value string `json:"value"`
 }
 
 // EventConditionOperator defines model for EventCondition.Operator.

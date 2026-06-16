@@ -24,8 +24,8 @@ config/
 ├── worker-<chain>-dev.example.yaml      — per-chain local-dev worker template
 ├── worker-<chain>-dev.yaml              — per-chain local-dev worker, real (gitignored)
 │
-├── operator-railway.yaml                — Railway operator template
-├── operator-<chain>-railway.yaml        — per-chain operator overrides
+├── operator-sepolia-railway.yaml        — Railway operator: all TESTNET chains
+├── operator-ethereum-railway.yaml       — Railway operator: all MAINNET chains
 └── operator-<chain>.yaml                — local operator configs (gitignored symlinks)
 ```
 
@@ -35,7 +35,8 @@ config/
 |---|---|
 | Production aggregator on Railway | `gateway-railway.yaml` |
 | Production worker for chain N on Railway | `worker-<chain>-railway.yaml` |
-| Production operator on Railway | `operator-railway.yaml` (+ optional per-chain override) |
+| Production testnet operator on Railway | `operator-sepolia-railway.yaml` (monitors all testnet chains) |
+| Production mainnet operator on Railway | `operator-ethereum-railway.yaml` (monitors all mainnet chains) |
 | Local dev gateway | `gateway-dev.yaml` (copy from `gateway-dev.example.yaml`, fill in secrets) |
 | Local dev worker for chain N | `worker-<chain>-dev.yaml` (same copy pattern) |
 | Operating drill / rehearsal | `gateway-dev-rehearsal.yaml` |

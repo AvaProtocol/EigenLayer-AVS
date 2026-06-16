@@ -21,7 +21,8 @@ to per-chain **workers**. The new templates live one level up:
   [`../gateway-railway.yaml`](../gateway-railway.yaml)
 - Workers → [`../worker-<chain>-dev.example.yaml`](..) +
   [`../worker-<chain>-railway.yaml`](..)
-- Operator → [`../operator-railway.yaml`](../operator-railway.yaml)
+- Operator → [`../operator-sepolia-railway.yaml`](../operator-sepolia-railway.yaml) (testnets),
+  [`../operator-ethereum-railway.yaml`](../operator-ethereum-railway.yaml) (mainnets)
 
 If you're reading the codebase trying to understand how the pre-Railway
 shape looked — what fields the old aggregator config had, how a

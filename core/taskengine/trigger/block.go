@@ -156,6 +156,15 @@ func (b *BlockTrigger) calculateMinInterval() int64 {
 	return minInterval
 }
 
+// HasBlockTasks reports whether this trigger currently has any block-interval
+// tasks. When false, the head subscription is intentionally stopped (no work
+// to do), so the absence of fresh heads is expected and must NOT be read as a
+// stalled subscription — the operator's chain-capability watermark uses this
+// to avoid un-advertising an idle-but-healthy chain.
+func (b *BlockTrigger) HasBlockTasks() bool {
+	return b.registry.GetBlockTaskCount() > 0
+}
+
 // shouldCheckAtBlock determines if we should perform checks at the given block number
 // Using checkpoint system starting from block 0: check at minInterval, 2*minInterval, 3*minInterval, etc.
 func (b *BlockTrigger) shouldCheckAtBlock(blockNumber int64) bool {

@@ -35,8 +35,15 @@ func TestChainTriggerSet_LivenessWatermark(t *testing.T) {
 	}
 }
 
-// TestSupportedChainIDs_FiltersStalled confirms a stalled chain (head
-// older than the staleness threshold) drops out of the advertised set
+// hasBlockWork / noBlockWork are injectable stubs for ChainTriggerSet's
+// block-task probe, so liveness tests don't need a real (WS-dialing)
+// BlockTrigger.
+func hasBlockWork() bool { return true }
+func noBlockWork() bool  { return false }
+
+// TestSupportedChainIDs_FiltersStalled confirms a chain that is stalled
+// *while it has block work* (head older than the staleness threshold but the
+// subscription should be producing heads) drops out of the advertised set,
 // even though it's still in chainOrder.
 func TestSupportedChainIDs_FiltersStalled(t *testing.T) {
 	o := &Operator{
@@ -44,10 +51,12 @@ func TestSupportedChainIDs_FiltersStalled(t *testing.T) {
 			1: {
 				ChainID:        1,
 				lastHeadSeenAt: time.Now(), // fresh
+				hasBlockTasks:  hasBlockWork,
 			},
 			8453: {
 				ChainID:        8453,
 				lastHeadSeenAt: time.Now().Add(-10 * time.Minute), // stale
+				hasBlockTasks:  hasBlockWork,                      // has block work → stall counts
 			},
 		},
 		chainOrder: []int64{1, 8453},
@@ -65,6 +74,35 @@ func TestSupportedChainIDs_FiltersStalled(t *testing.T) {
 	wantAll := []int64{1, 8453}
 	if !reflect.DeepEqual(all, wantAll) {
 		t.Fatalf("allConfiguredChainIDs: got %v, want %v", all, wantAll)
+	}
+}
+
+// TestSupportedChainIDs_IdleChainStaysAdvertised is the core fix: a chain with
+// NO block tasks has its head subscription intentionally stopped, so a stale
+// watermark is expected — it must STAY advertised (it can still serve event
+// tasks, and the gateway only routes the first block task to advertised
+// chains; dropping it would deadlock coverage).
+func TestSupportedChainIDs_IdleChainStaysAdvertised(t *testing.T) {
+	o := &Operator{
+		chainTriggers: map[int64]*ChainTriggerSet{
+			1: {
+				ChainID:        1,
+				lastHeadSeenAt: time.Now().Add(-10 * time.Minute), // stale...
+				hasBlockTasks:  noBlockWork,                       // ...but idle → not a stall
+			},
+			8453: {
+				ChainID:        8453,
+				lastHeadSeenAt: time.Now().Add(-10 * time.Minute), // stale + has work → dropped
+				hasBlockTasks:  hasBlockWork,
+			},
+		},
+		chainOrder: []int64{1, 8453},
+	}
+
+	got := o.supportedChainIDs()
+	want := []int64{1} // idle chain 1 advertised; stalled-with-work chain 8453 dropped
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("idle chain advertisement: got %v, want %v", got, want)
 	}
 }
 
