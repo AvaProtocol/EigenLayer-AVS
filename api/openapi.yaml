@@ -448,8 +448,13 @@ components:
           type: string
           enum: [eq, ne, gt, gte, lt, lte, contains]
         value:
-          # JSON Value; type depends on field
-          additionalProperties: true
+          type: string
+          description: |
+            Value to compare against, encoded as a string. The operator
+            parses it according to `fieldType` (e.g. `int256` / `uint256`
+            → big.Int, `address` → checksummed hex, `bool` →
+            "true"/"false"). Matches the proto `EventCondition.value`,
+            which is also a string.
         fieldType: { type: string }
 
     EventMethodCall:
