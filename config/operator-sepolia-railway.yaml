@@ -1,5 +1,7 @@
-# Operator configuration for Railway deployment (testnet)
-# Connects to gateway over Railway private networking
+# Operator configuration for Railway deployment (testnet — Sepolia AVS).
+# This single operator monitors all TESTNET destination chains.
+# Connects to gateway over Railway private networking.
+# Railway service: operator-sepolia
 environment: production
 
 operator_address: 0x997E5D40a32c44a3D93E59fC55C4Fd20b7d2d49D
@@ -8,8 +10,10 @@ operator_address: 0x997E5D40a32c44a3D93E59fC55C4Fd20b7d2d49D
 avs_registry_coordinator_address: 0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD
 operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
 
-# EigenLayer chain RPC (Sepolia) — driven by env var so the key can
-# be rotated without redeploying. Set on the operator service:
+# EigenLayer / AVS registration chain RPC (Sepolia) — driven by env var so
+# the key can be rotated without redeploying. This is the chain the operator
+# registers against, distinct from the destination chains it monitors (see
+# `chains:` below). Set on the operator-sepolia service:
 #   CHAIN_ENDPOINT (HTTPS; WS derived in code)
 eth_rpc_url: ${CHAIN_ENDPOINT}
 
@@ -36,11 +40,23 @@ sentry_dsn: https://d304c8708d5097f7787eeb664e4098c6@o1156669.ingest.us.sentry.i
 # board. operator-ethereum-railway (mainnet) stays unset → defaults to
 # production.
 sentry_environment: staging
-server_name: "operator-railway"
+server_name: "operator-sepolia-railway"
 
-# Destination chain - Sepolia
-target_chain:
-  eth_rpc_url: ${CHAIN_ENDPOINT}
+# Destination chains — all TESTNETS. This single operator monitors every
+# testnet the gateway routes (Sepolia, Base-Sepolia). Each chain's WS URL is
+# derived from its HTTPS RPC in code (config.DeriveWsURL); set an explicit
+# eth_ws_url here only if a provider serves WS on a different host/path.
+# chain_id is validated against the RPC at startup — a mismatched RPC is
+# soft-skipped (chain dropped from the advertised set) rather than crashing
+# the operator. Set the per-chain RPC env vars on the operator-sepolia
+# service: SEPOLIA_RPC, BASE_SEPOLIA_RPC.
+chains:
+  - chain_id: 11155111
+    name: sepolia
+    eth_rpc_url: ${SEPOLIA_RPC}
+  - chain_id: 84532
+    name: base-sepolia
+    eth_rpc_url: ${BASE_SEPOLIA_RPC}
 
 enabled_features:
   event_trigger: true

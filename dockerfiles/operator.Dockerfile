@@ -36,8 +36,9 @@ COPY --from=builder /app/config /app/config
 # services (which need ECDSA/BLS keystores materialized from env vars
 # at startup) can pin to this image. The script auto-detects the
 # binary path so it works equally for /ava (this image) and ./ap (the
-# root Dockerfile). Railway Start Command for an operator service:
-#   /app/scripts/operator-entrypoint.sh operator --config=/app/config/operator-railway.yaml
+# root Dockerfile). Railway Start Command per operator service:
+#   operator-sepolia:  /app/scripts/operator-entrypoint.sh operator --config=/app/config/operator-sepolia-railway.yaml
+#   operator-ethereum: /app/scripts/operator-entrypoint.sh operator --config=/app/config/operator-ethereum-railway.yaml
 COPY --from=builder /app/scripts/operator-entrypoint.sh /app/scripts/operator-entrypoint.sh
 
 ENTRYPOINT ["/ava"]

@@ -157,9 +157,22 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		o.logger.Error("Failed to create ping job", "error", err)
 	}
 
-	macros.SetRpc(o.config.TargetChain.EthWsUrl)
-	taskengine.SetRpc(o.config.TargetChain.EthRpcUrl)
-	taskengine.SetWsRpc(o.config.TargetChain.EthWsUrl)
+	// Resolve the chains this operator monitors. EffectiveChains returns the
+	// chains[] array (multi-chain config) or a single chain derived from
+	// TargetChain/EthRpcUrl (legacy config).
+	chains := o.config.EffectiveChains()
+	if len(chains) == 0 {
+		return fmt.Errorf("operator has no chains configured")
+	}
+
+	// The package-global RPC setters are single-valued; point them at the
+	// primary (first) chain. With a multi-chain config TargetChain is empty,
+	// so deriving from TargetChain here would set these to "" and silently
+	// break macro / task-engine code that reads them — use the primary chain.
+	primaryChain := chains[0]
+	macros.SetRpc(primaryChain.EthWsUrl)
+	taskengine.SetRpc(primaryChain.EthRpcUrl)
+	taskengine.SetWsRpc(primaryChain.EthWsUrl)
 	taskengine.SetLogger(o.logger)
 
 	var metricsErrChan <-chan error
@@ -173,17 +186,13 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		}
 	}
 
-	// Build per-chain trigger engines from the resolved chains list. Each
-	// chain gets its own BlockTrigger and EventTrigger speaking to that
+	// Build per-chain trigger engines from the resolved chains list (above).
+	// Each chain gets its own BlockTrigger and EventTrigger speaking to that
 	// chain's RPC + WS; their output channels are fanned-in (tagged with
-	// chain_id) to a shared consumer loop below.
-	chains := o.config.EffectiveChains()
-	if len(chains) == 0 {
-		return fmt.Errorf("operator has no chains configured")
-	}
-
-	sharedBlockCh := make(chan chainTaggedBlockEvent, 1000)
-	sharedEventCh := make(chan chainTaggedEventEvent, 1000)
+	// chain_id) to a shared consumer loop below. Scale the shared buffers by
+	// chain count so a single busy chain can't starve the others' headroom.
+	sharedBlockCh := make(chan chainTaggedBlockEvent, len(chains)*1000)
+	sharedEventCh := make(chan chainTaggedEventEvent, len(chains)*1000)
 
 	o.chainTriggers = make(map[int64]*ChainTriggerSet, len(chains))
 	o.chainOrder = make([]int64, 0, len(chains))
@@ -252,11 +261,38 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		}
 
 		perChainBlockCh := make(chan triggerengine.TriggerMetadata[int64], 1000)
-		bt := triggerengine.NewBlockTrigger(&rpcOpt, perChainBlockCh, o.logger)
-
 		perChainEventCh := make(chan triggerengine.TriggerMetadata[triggerengine.EventMark], 1000)
-		et := triggerengine.NewEventTrigger(&rpcOpt, perChainEventCh, o.logger,
-			o.config.GetMaxEventsPerQueryPerBlock(), o.config.GetMaxTotalEventsPerBlock(), o.config.OperatorAddress)
+
+		// NewBlockTrigger / NewEventTrigger dial the chain's WS endpoint in
+		// their constructors and panic on failure. In a multi-chain operator
+		// one unreachable per-chain WS must not crash the whole process and
+		// take down every other chain — construct under recovery and soft-skip
+		// the chain, the same treatment a failed HTTP dial gets above.
+		var bt *triggerengine.BlockTrigger
+		var et *triggerengine.EventTrigger
+		constructErr := func() (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("%v", r)
+				}
+			}()
+			bt = triggerengine.NewBlockTrigger(&rpcOpt, perChainBlockCh, o.logger)
+			et = triggerengine.NewEventTrigger(&rpcOpt, perChainEventCh, o.logger,
+				o.config.GetMaxEventsPerQueryPerBlock(), o.config.GetMaxTotalEventsPerBlock(), o.config.OperatorAddress)
+			return nil
+		}()
+		if constructErr != nil {
+			perChainEthClient.Close()
+			// NewBlockTrigger may have succeeded before NewEventTrigger
+			// panicked; close its already-dialed clients so they don't leak.
+			if bt != nil {
+				bt.Close()
+			}
+			o.logger.Warn("chain WS unreachable — skipping chain (will not advertise capability)",
+				"chain_index", i, "chain_name", chainCfg.Name, "ws", chainCfg.EthWsUrl, "error", constructErr)
+			skipped = append(skipped, skippedChain{name: chainCfg.Name, reason: "ws dial failed"})
+			continue
+		}
 		et.SetSubscriptionMetrics(
 			func(active, desired int) {
 				o.metrics.SetEventSubscriptions(detectedID, active, desired)
@@ -291,11 +327,12 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		// usable; but the write still needs to happen before goroutine
 		// spawn to satisfy the Go memory model under -race.
 		triggerSet := &ChainTriggerSet{
-			ChainID:      detectedID,
-			Name:         chainCfg.Name,
-			BlockTrigger: bt,
-			EventTrigger: et,
-			EthClient:    perChainEthClient,
+			ChainID:       detectedID,
+			Name:          chainCfg.Name,
+			BlockTrigger:  bt,
+			EventTrigger:  et,
+			EthClient:     perChainEthClient,
+			hasBlockTasks: bt.HasBlockTasks,
 			// Seed the watermark to "now" so the chain is advertised
 			// immediately at boot. The fan-in goroutine refreshes it
 			// on every block; an unhealthy chain will fall out of the
@@ -1064,6 +1101,12 @@ func (o *Operator) StreamMessages() {
 							o.logger.Info("❌ Failed to add block trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for blocks")
 						}
 					}()
+					// Adding a block task (re)starts the head subscription if it
+					// was idle. Reset the liveness watermark so the freshly
+					// started subscription gets a full staleness window to
+					// produce its first head before supportedChainIDs() could
+					// consider the chain stalled.
+					set.markHeadSeen()
 				} else if trigger := triggerObj.GetCron(); trigger != nil {
 					scheduleInfo := "unknown"
 					if trigger.Config != nil && trigger.Config.Schedules != nil {

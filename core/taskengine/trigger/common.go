@@ -55,6 +55,20 @@ func (b *CommonTrigger) Shutdown() {
 	b.done <- true
 }
 
+// Close releases the trigger's RPC/WS clients without going through the
+// Run/Shutdown lifecycle. Unlike Shutdown it does NOT signal the done
+// channel, so it's safe to call on a trigger that was constructed but never
+// Run — e.g. when multi-chain operator setup soft-skips a sibling chain after
+// this trigger's constructor already dialed its clients.
+func (b *CommonTrigger) Close() {
+	if b.ethClient != nil {
+		b.ethClient.Close()
+	}
+	if b.wsEthClient != nil {
+		b.wsEthClient.Close()
+	}
+}
+
 func (b *CommonTrigger) GetProgress() int64 {
 	return b.progress
 }
