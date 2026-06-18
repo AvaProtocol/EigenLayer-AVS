@@ -1108,11 +1108,14 @@ func (x *WorkflowExecutor) persistFailedExecution(task *model.Workflow, executio
 //
 // The Warn log and the Sentry scope both carry owner, smart_wallet,
 // created_at (derived from the ULID task id since Task has no created_at
-// field) and the factory_address resolved at validation time. Without those,
-// an operator triaging a burst of these alerts (e.g. EIGENLAYER-AVS-1Y..28)
-// can't tell at a glance whether it's one customer's wallet-migration
-// mistake, a cohort from a SDK regression, or a chain-config drift — the
-// same observability gap 460292b closed for the startup invalid-task log.
+// field) and factory_address (resolved here via resolveSmartWalletConfig
+// for the task's chain — the same lookup the validation path used moments
+// earlier; config doesn't drift mid-process, so the values match). Without
+// those, an operator triaging a burst of these alerts (e.g.
+// EIGENLAYER-AVS-1Y..28) can't tell at a glance whether it's one
+// customer's wallet-migration mistake, a cohort from a SDK regression, or
+// a chain-config drift — the same observability gap 460292b closed for
+// the startup invalid-task log.
 func (x *WorkflowExecutor) reportTaskAutoDisabled(task *model.Workflow, reason string) {
 	createdAt := "unknown"
 	if parsed, perr := ulid.Parse(strings.ToUpper(task.Id)); perr == nil {
