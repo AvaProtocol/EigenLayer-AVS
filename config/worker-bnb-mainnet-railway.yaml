@@ -16,13 +16,13 @@
 #                              left unset (the YAML expansion will
 #                              produce an empty string and bundler
 #                              calls would no-op)
-#   CONTROLLER_PRIVATE_KEY_TESTNET — placeholder pairing while BNB is
-#                              connectivity-only (wallet ops disabled, no real
-#                              paymaster). Matches the gateway's BNB entry and
-#                              its testnet placeholder paymaster so
-#                              verifyingSigner == controller stays consistent.
-#                              Swap BOTH this and PAYMASTER_ADDRESS to the
-#                              mainnet pair when BNB's own paymaster deploys.
+#   CONTROLLER_PRIVATE_KEY_MAINNET — BNB is a mainnet chain, so it uses the
+#                              mainnet controller. Wallet ops are disabled
+#                              while connectivity-only (no real paymaster), so
+#                              the controller is not exercised yet; when BNB's
+#                              own mainnet paymaster deploys, PAYMASTER_ADDRESS
+#                              must resolve to a paymaster whose verifyingSigner
+#                              equals this mainnet controller (0x3b6f68B9…).
 #   PAYMASTER_ADDRESS        — shared (not used until paymaster
 #                              deploys on BNB)
 environment: production
@@ -50,5 +50,5 @@ bundler_url: ${BUNDLER_URL}
 
 # Smart wallet config
 smart_wallet:
-  controller_private_key: ${CONTROLLER_PRIVATE_KEY_TESTNET}
+  controller_private_key: ${CONTROLLER_PRIVATE_KEY_MAINNET}
   paymaster_address: ${PAYMASTER_ADDRESS}

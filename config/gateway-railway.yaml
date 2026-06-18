@@ -172,11 +172,14 @@ chains:
     smart_wallet:
       eth_rpc_url: ${BNB_RPC}
       bundler_url: ${BNB_BUNDLER_URL}
-      # Testnet controller to match the testnet placeholder paymaster
-      # above (keeps verifyingSigner == controller even though wallet
-      # ops are disabled). Swap both to the mainnet pair when BNB's own
-      # mainnet paymaster is deployed.
-      controller_private_key: ${CONTROLLER_PRIVATE_KEY_TESTNET}
+      # BNB is a mainnet chain → mainnet controller (matches worker-bnb).
+      # paymaster_address is a not-called testnet placeholder while
+      # connectivity-only; the startup verifyingSigner probe is skipped
+      # here because BNB_BUNDLER_URL is unset. When BNB wallet ops are
+      # enabled, point PAYMASTER_ADDRESS at a real BNB mainnet paymaster
+      # whose verifyingSigner equals this mainnet controller — the probe
+      # will then enforce that pairing at boot.
+      controller_private_key: ${CONTROLLER_PRIVATE_KEY_MAINNET}
       paymaster_address: ${PAYMASTER_ADDRESS_TESTNET}
       max_wallets_per_owner: 2000
 
