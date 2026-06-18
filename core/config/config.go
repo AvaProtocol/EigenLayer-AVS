@@ -561,6 +561,30 @@ func NewConfig(configFilePath string) (*Config, error) {
 		}
 		config.SmartWallet.PaymasterOwnerAddress = paymasterOwner
 		logger.Info("Paymaster owner address loaded", "paymaster", config.SmartWallet.PaymasterAddress, "owner", paymasterOwner.Hex())
+
+		// The aggregator signs the paymaster hash with the controller key, so the
+		// paymaster's verifyingSigner must equal the controller address or every
+		// sponsored UserOp fails at signing time. Probe it at startup (alongside
+		// owner()) so a key/paymaster-tier mismatch is fatal here, not silent until
+		// the first user transfer (Sentry EIGENLAYER-AVS-1W).
+		verifyingSigner, err := fetchPaymasterVerifyingSigner(smartWalletRpcClient, config.SmartWallet.PaymasterAddress)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"paymaster %s verifyingSigner() call failed on RPC %s: %w",
+				config.SmartWallet.PaymasterAddress.Hex(), configRaw.SmartWallet.EthRpcUrl, err,
+			)
+		}
+		if !strings.EqualFold(verifyingSigner.Hex(), config.SmartWallet.ControllerAddress.Hex()) {
+			return nil, fmt.Errorf(
+				"paymaster %s verifyingSigner (%s) does not match controller address (%s) — "+
+					"the controller_private_key and paymaster_address belong to different "+
+					"network tiers (e.g. testnet controller paired with the mainnet paymaster); "+
+					"set the controller key whose address equals the paymaster's verifyingSigner",
+				config.SmartWallet.PaymasterAddress.Hex(),
+				verifyingSigner.Hex(), config.SmartWallet.ControllerAddress.Hex(),
+			)
+		}
+		logger.Info("Paymaster verifyingSigner verified", "paymaster", config.SmartWallet.PaymasterAddress, "verifyingSigner", verifyingSigner.Hex())
 	}
 
 	// Gateway mode: parse per-chain configs
@@ -776,6 +800,47 @@ func fetchPaymasterOwner(client paymasterOwnerCaller, paymasterAddress common.Ad
 	return owner, nil
 }
 
+// fetchPaymasterVerifyingSigner calls verifyingSigner() on the VerifyingPaymaster
+// contract. This is the address whose ECDSA signature the paymaster accepts on
+// sponsored UserOps — it MUST equal the aggregator's controller address, since
+// the aggregator signs the paymaster hash with the controller key. owner() (the
+// admin/reimbursement EOA) is a distinct role and is NOT a substitute for this
+// check: a paymaster can have the right owner but a different verifyingSigner,
+// which silently breaks every sponsored UserOp at signing time
+// (Sentry EIGENLAYER-AVS-1W — mainnet paymaster paired with the testnet
+// controller key).
+func fetchPaymasterVerifyingSigner(client paymasterOwnerCaller, paymasterAddress common.Address) (common.Address, error) {
+	signerABI := `[{"inputs":[],"name":"verifyingSigner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"}]`
+
+	parsedABI, err := abi.JSON(strings.NewReader(signerABI))
+	if err != nil {
+		return common.Address{}, fmt.Errorf("failed to parse verifyingSigner ABI: %w", err)
+	}
+
+	calldata, err := parsedABI.Pack("verifyingSigner")
+	if err != nil {
+		return common.Address{}, fmt.Errorf("failed to pack verifyingSigner() call: %w", err)
+	}
+
+	msg := ethereum.CallMsg{
+		To:   &paymasterAddress,
+		Data: calldata,
+	}
+
+	result, err := client.CallContract(context.Background(), msg, nil)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("failed to call verifyingSigner() on paymaster: %w", err)
+	}
+
+	var signer common.Address
+	err = parsedABI.UnpackIntoInterface(&signer, "verifyingSigner", result)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("failed to unpack verifyingSigner() result: %w", err)
+	}
+
+	return signer, nil
+}
+
 // parseChainConfig converts a raw YAML chain config into a runtime ChainConfig.
 // Unlike the top-level SmartWalletConfig, we don't connect to the chain RPC here —
 // that's the worker's responsibility. We just parse and validate the config fields.
@@ -844,8 +909,8 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 				chainCfg.SmartWallet.EthRpcUrl, raw.Name, raw.ChainID, err)
 		}
 		paymasterOwner, err := fetchPaymasterOwner(rpcClient, chainCfg.SmartWallet.PaymasterAddress)
-		rpcClient.Close()
 		if err != nil {
+			rpcClient.Close()
 			return nil, fmt.Errorf(
 				"chain %s (chain_id=%d): paymaster %s is unreachable on RPC %s "+
 					"(owner() call failed: %w) — verify the paymaster address is deployed "+
@@ -858,6 +923,32 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 			)
 		}
 		chainCfg.SmartWallet.PaymasterOwnerAddress = paymasterOwner
+
+		// The controller key must match this paymaster's verifyingSigner, or
+		// sponsored UserOps on this chain fail at signing time. This is the
+		// per-chain analogue of the top-level probe — it catches a controller
+		// key from the wrong network tier (Sentry EIGENLAYER-AVS-1W: the
+		// gateway's testnet controller paired with the mainnet paymaster on
+		// Ethereum + Base).
+		verifyingSigner, err := fetchPaymasterVerifyingSigner(rpcClient, chainCfg.SmartWallet.PaymasterAddress)
+		rpcClient.Close()
+		if err != nil {
+			return nil, fmt.Errorf(
+				"chain %s (chain_id=%d): paymaster %s verifyingSigner() call failed on RPC %s: %w",
+				raw.Name, raw.ChainID, chainCfg.SmartWallet.PaymasterAddress.Hex(),
+				chainCfg.SmartWallet.EthRpcUrl, err,
+			)
+		}
+		if !strings.EqualFold(verifyingSigner.Hex(), chainCfg.SmartWallet.ControllerAddress.Hex()) {
+			return nil, fmt.Errorf(
+				"chain %s (chain_id=%d): paymaster %s verifyingSigner (%s) does not match "+
+					"controller address (%s) — the controller_private_key and paymaster_address "+
+					"belong to different network tiers; set the controller key whose address "+
+					"equals the paymaster's verifyingSigner",
+				raw.Name, raw.ChainID, chainCfg.SmartWallet.PaymasterAddress.Hex(),
+				verifyingSigner.Hex(), chainCfg.SmartWallet.ControllerAddress.Hex(),
+			)
+		}
 	}
 
 	logger.Info("Parsed chain config",
