@@ -25,6 +25,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	storageschema "github.com/AvaProtocol/EigenLayer-AVS/storage/schema"
+	"github.com/oklog/ulid/v2"
 )
 
 // reconstructTriggerOutputData is a helper function to reconstruct trigger output data
@@ -1104,16 +1105,46 @@ func (x *WorkflowExecutor) persistFailedExecution(task *model.Workflow, executio
 // scoped to the task ID so each broken workflow gets its own Sentry issue
 // rather than rolling into a single noisy one. The event is logged at Warn
 // in addition; SentryLogger.Warn does not double-capture.
+//
+// The Warn log and the Sentry scope both carry owner, smart_wallet,
+// created_at (derived from the ULID task id since Task has no created_at
+// field) and factory_address (resolved here via resolveSmartWalletConfig
+// for the task's chain — the same lookup the validation path used moments
+// earlier; config doesn't drift mid-process, so the values match). Without
+// those, an operator triaging a burst of these alerts (e.g.
+// EIGENLAYER-AVS-1Y..28) can't tell at a glance whether it's one
+// customer's wallet-migration mistake, a cohort from a SDK regression, or
+// a chain-config drift — the same observability gap 460292b closed for
+// the startup invalid-task log.
 func (x *WorkflowExecutor) reportTaskAutoDisabled(task *model.Workflow, reason string) {
+	createdAt := "unknown"
+	if parsed, perr := ulid.Parse(strings.ToUpper(task.Id)); perr == nil {
+		createdAt = time.UnixMilli(int64(parsed.Time())).UTC().Format(time.RFC3339)
+	}
+	factoryAddress := ""
+	if swCfg := x.resolveSmartWalletConfig(task.ChainId); swCfg != nil {
+		factoryAddress = swCfg.FactoryAddress.Hex()
+	}
+
 	x.logger.Warn("task auto-disabled after consecutive validation failures",
 		"task_id", task.Id,
 		"chain_id", task.ChainId,
+		"owner", task.Owner,
+		"smart_wallet", task.SmartWalletAddress,
+		"factory_address", factoryAddress,
+		"created_at", createdAt,
 		"consecutive_failures", task.ConsecutiveValidationFailures,
 		"reason", reason)
 	sentry.WithScope(func(scope *sentry.Scope) {
 		scope.SetTag("event", "task_auto_disabled")
 		scope.SetTag("task_id", task.Id)
 		scope.SetTag("chain_id", strconv.FormatInt(task.ChainId, 10))
+		scope.SetTag("owner", task.Owner)
+		scope.SetTag("smart_wallet", task.SmartWalletAddress)
+		if factoryAddress != "" {
+			scope.SetTag("factory_address", factoryAddress)
+		}
+		scope.SetExtra("created_at", createdAt)
 		scope.SetExtra("consecutive_failures", task.ConsecutiveValidationFailures)
 		scope.SetExtra("reason", reason)
 		scope.SetFingerprint([]string{"task-auto-disabled", task.Id})
