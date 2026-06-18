@@ -32,4 +32,12 @@ var Migrations = []migrator.Migration{
 	// ACTIVE MIGRATIONS
 	// ========================================
 	// Add new migrations here that need to be applied
+	{
+		// One-time cleanup of the legacy invalid-task cohort: workflow rows
+		// that are Failed AND still fail config validation (invalid node
+		// names / configs orphaned by an old proto migration). See
+		// delete_invalid_failed_tasks.go. Idempotent: re-running finds none.
+		Name:     "20260618-delete-invalid-failed-tasks",
+		Function: DeleteInvalidFailedTasks,
+	},
 }
