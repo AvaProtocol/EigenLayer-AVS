@@ -6165,6 +6165,13 @@ func (n *Engine) DetectAndHandleInvalidTasks() error {
 
 	invalidTasks := []string{}
 	updates := make(map[string][]byte)
+	// Status-keyed storage uses status in the key (t:<chain>:<status>:<id>),
+	// so flipping a task to Failed means writing the new Failed key AND
+	// deleting the old (Enabled) one. Without the delete, the stale Enabled
+	// key survives, MustStart reloads it from the Enabled prefix on the next
+	// boot, and this scan re-fails it — an invisible every-boot loop. Collect
+	// the stale keys here and delete them after the batch write succeeds.
+	staleStatusKeys := [][]byte{}
 
 	// Acquire lock once for the entire operation to reduce lock contention
 	n.lock.Lock()
@@ -6173,9 +6180,26 @@ func (n *Engine) DetectAndHandleInvalidTasks() error {
 	for taskID, task := range n.tasks {
 		if err := task.ValidateWithError(); err != nil {
 			invalidTasks = append(invalidTasks, taskID)
+
+			// Log owner/smart-wallet/created-at so an auto-failed task can be
+			// traced to its user straight from the logs, without a DB query —
+			// the observability gap that let a cohort of invalid tasks fail
+			// silently for ~a year. created_at is derived from the ULID task
+			// ID since Task has no created_at field.
+			createdAt := "unknown"
+			if parsed, perr := ulid.Parse(strings.ToUpper(taskID)); perr == nil {
+				createdAt = time.UnixMilli(int64(parsed.Time())).UTC().Format(time.RFC3339)
+			}
 			n.logger.Warn("🚨 Found invalid task configuration",
 				"task_id", taskID,
+				"owner", task.GetOwner(),
+				"smart_wallet", task.GetSmartWalletAddress(),
+				"chain_id", task.GetChainId(),
+				"created_at", createdAt,
 				"error", err.Error())
+
+			// Capture the pre-failure status key before SetFailed mutates it.
+			oldStatus := task.Status
 
 			// Mark task as failed and prepare storage updates
 			task.SetFailed()
@@ -6191,6 +6215,18 @@ func (n *Engine) DetectAndHandleInvalidTasks() error {
 			// Prepare the task status update in storage
 			updates[string(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
 			updates[string(ChainTaskUserKey(task.ChainId, task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Failed))
+
+			// Queue the old status-keyed row for deletion (skip when the
+			// status didn't actually change, to avoid deleting what we just
+			// wrote).
+			if oldStatus != task.Status {
+				staleStatusKeys = append(staleStatusKeys, ChainWorkflowStorageKey(task.ChainId, task.Id, oldStatus))
+			}
+
+			// Drop from the in-memory active set so it isn't treated as active
+			// for the rest of this process run. Deleting the current key while
+			// ranging over a map is safe in Go.
+			delete(n.tasks, taskID)
 		}
 	}
 
@@ -6205,12 +6241,22 @@ func (n *Engine) DetectAndHandleInvalidTasks() error {
 		"count", len(invalidTasks),
 		"task_ids", invalidTasks)
 
-	// Batch write the updates
+	// Write the Failed records first so we never lose a task record, ...
 	if len(updates) > 0 {
 		if err := n.db.BatchWrite(updates); err != nil {
 			n.logger.Error("Failed to update invalid tasks in storage",
 				"error", err)
 			return err
+		}
+	}
+
+	// ... then delete the stale old-status rows so the next boot's
+	// Enabled-prefix scan doesn't reload and re-fail them.
+	for _, key := range staleStatusKeys {
+		if err := n.db.Delete(key); err != nil {
+			n.logger.Error("Failed to delete stale task status key",
+				"key", string(key),
+				"error", err)
 		}
 	}
 
