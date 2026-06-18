@@ -1076,7 +1076,11 @@ func TestAddSubscriptionsRollsBackOnError(t *testing.T) {
 	trigger.subsMutex.Unlock()
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "second")
+	// desiredByKey is a map, so addSubscriptions iterates it in Go's randomized
+	// order — whichever key is processed second hits the mock's failure. Assert
+	// on the underlying cause (always present) rather than a specific key's
+	// description ("first"/"second"), which was order-dependent and flaky.
+	assert.Contains(t, err.Error(), "transient subscribe failure")
 	assert.True(t, firstSub.unsubscribed, "successful partial subscriptions must be cleaned up")
 	assert.Empty(t, trigger.querySubscriptions)
 }

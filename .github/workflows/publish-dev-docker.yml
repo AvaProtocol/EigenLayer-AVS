@@ -1,15 +1,10 @@
 name: Publish Dev Docker Image
 
 on:
-  # Auto-build on PR merge to staging when protobuf changes — SDK CI pulls :latest to test against.
-  # Non-proto changes don't affect the wire format, so no need to rebuild the image.
-  push:
-    branches:
-      - staging
-    paths:
-      - 'protobuf/avs.proto'
-
-  # Manual dispatch for ad-hoc builds (specific tag, commit, or branch)
+  # Dev image publishing is driven entirely through the release flow
+  # (scripts/release.sh dispatches this workflow). The auto-build-on-proto-change
+  # push trigger was removed so a push to staging (e.g. a release merge or a
+  # sync-main force-push) no longer kicks off a duplicate dev image build.
   workflow_dispatch:
     inputs:
       branch_name:

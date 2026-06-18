@@ -5,7 +5,12 @@
 # the `worker-ethereum` Railway service:
 #   CHAIN_ENDPOINT (HTTPS; WS derived in code)
 #   BUNDLER_URL
-#   CONTROLLER_PRIVATE_KEY
+#   CONTROLLER_PRIVATE_KEY  — mainnet controller. On Railway set this to
+#                             ${{shared.CONTROLLER_PRIVATE_KEY_MAINNET}} so the
+#                             value is shared with the gateway + other mainnet
+#                             workers and can't drift. Its address must equal
+#                             PAYMASTER_ADDRESS's verifyingSigner (0x3b6f68B9…,
+#                             Sentry EIGENLAYER-AVS-1W).
 #   PAYMASTER_ADDRESS
 environment: production
 
