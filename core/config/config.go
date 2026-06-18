@@ -574,7 +574,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 				config.SmartWallet.PaymasterAddress.Hex(), configRaw.SmartWallet.EthRpcUrl, err,
 			)
 		}
-		if !strings.EqualFold(verifyingSigner.Hex(), config.SmartWallet.ControllerAddress.Hex()) {
+		if verifyingSigner != config.SmartWallet.ControllerAddress {
 			return nil, fmt.Errorf(
 				"paymaster %s verifyingSigner (%s) does not match controller address (%s) — "+
 					"the controller_private_key and paymaster_address belong to different "+
@@ -939,7 +939,7 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 				chainCfg.SmartWallet.EthRpcUrl, err,
 			)
 		}
-		if !strings.EqualFold(verifyingSigner.Hex(), chainCfg.SmartWallet.ControllerAddress.Hex()) {
+		if verifyingSigner != chainCfg.SmartWallet.ControllerAddress {
 			return nil, fmt.Errorf(
 				"chain %s (chain_id=%d): paymaster %s verifyingSigner (%s) does not match "+
 					"controller address (%s) — the controller_private_key and paymaster_address "+
