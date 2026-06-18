@@ -446,7 +446,15 @@ func NewConfig(configFilePath string) (*Config, error) {
 
 	controllerPrivateKey, err := crypto.HexToECDSA(configRaw.SmartWallet.ControllerPrivateKey)
 	if err != nil {
-		panic(err)
+		// Name the field + the likely cause. The bare crypto error
+		// ("invalid length, need 256 bits") gives no hint which key is at
+		// fault. In practice this is almost always a missing/empty env var or
+		// an unresolved ${{shared.*}} Railway reference, which decodes to the
+		// wrong length. (Production incident: gateway crash-loop after a
+		// per-tier controller key var was unset on the service.)
+		panic(fmt.Errorf("smart_wallet.controller_private_key is not a valid 64-hex-char "+
+			"private key — check the controller key env var for this service; an empty value or an "+
+			"unresolved ${...}/${{shared.*}} reference produces this: %w", err))
 	}
 
 	// Enforce sane default for max wallets per owner (no unlimited allowed)
@@ -712,7 +720,11 @@ func ReadYamlConfig(path string, o interface{}) error {
 	})
 
 	if err := yaml.Unmarshal([]byte(expanded), o); err != nil {
-		return fmt.Errorf("unable to parse file with error %#v", err)
+		// A common cause is an env var that resolved to a value containing
+		// YAML-special characters — e.g. an unresolved ${{shared.*}} Railway
+		// reference left as literal "${{...}}" text after expansion.
+		return fmt.Errorf("unable to parse YAML config %q (a substituted env var may "+
+			"contain an unresolved ${{...}} reference or YAML-special characters): %w", path, err)
 	}
 
 	return nil
