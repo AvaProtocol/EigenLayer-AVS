@@ -108,3 +108,29 @@ func TestDetectAndHandleInvalidTasks_LeavesValidTasksAlone(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, failedExists, "valid task must not be written under the Failed key")
 }
+
+// TestCreateWorkflow_RejectsInvalidNodeName guards the dominant legacy-cohort
+// failure mode at the create boundary: a node name with a space ("send eth")
+// is not a valid JavaScript identifier. The create path validates this via
+// model.NewWorkflowFromProtobuf → ValidateWithError, so such a task can no
+// longer be persisted. (Block/cron/event missing-config is already covered by
+// TestCreateTaskReturnErrorWhenNilBlockTriggerConfig and the same
+// ValidateWithError path; the 7 missing-config legacy tasks were valid at
+// creation and only became invalid after a proto schema migration moved
+// trigger-config fields — a data artifact, not a create-time gap.)
+func TestCreateWorkflow_RejectsInvalidNodeName(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	n := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+
+	// Sanity: a valid task creates fine.
+	if _, err := n.CreateWorkflow(testutil.TestUser1(), testutil.RestTask()); err != nil {
+		t.Fatalf("valid task should create: %v", err)
+	}
+
+	bad := testutil.RestTask()
+	bad.Nodes[0].Name = "send eth" // space → not a valid JS identifier
+	_, err := n.CreateWorkflow(testutil.TestUser1(), bad)
+	require.Error(t, err, "CreateWorkflow must reject a spaced node name")
+	assert.Contains(t, err.Error(), "JavaScript identifier")
+}
