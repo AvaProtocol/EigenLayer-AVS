@@ -6180,8 +6180,22 @@ func (n *Engine) DetectAndHandleInvalidTasks() error {
 	for taskID, task := range n.tasks {
 		if err := task.ValidateWithError(); err != nil {
 			invalidTasks = append(invalidTasks, taskID)
+
+			// Log owner/smart-wallet/created-at so an auto-failed task can be
+			// traced to its user straight from the logs, without a DB query —
+			// the observability gap that let a cohort of invalid tasks fail
+			// silently for ~a year. created_at is derived from the ULID task
+			// ID since Task has no created_at field.
+			createdAt := "unknown"
+			if parsed, perr := ulid.Parse(strings.ToUpper(taskID)); perr == nil {
+				createdAt = time.UnixMilli(int64(parsed.Time())).UTC().Format(time.RFC3339)
+			}
 			n.logger.Warn("🚨 Found invalid task configuration",
 				"task_id", taskID,
+				"owner", task.GetOwner(),
+				"smart_wallet", task.GetSmartWalletAddress(),
+				"chain_id", task.GetChainId(),
+				"created_at", createdAt,
 				"error", err.Error())
 
 			// Capture the pre-failure status key before SetFailed mutates it.
