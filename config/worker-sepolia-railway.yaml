@@ -4,7 +4,12 @@
 # startup. Set these on the `worker-sepolia` service:
 #   CHAIN_ENDPOINT (HTTPS; WS derived in code)
 #   BUNDLER_URL
-#   CONTROLLER_PRIVATE_KEY
+#   CONTROLLER_PRIVATE_KEY  — testnet controller. On Railway set this to
+#                             ${{shared.CONTROLLER_PRIVATE_KEY_TESTNET}} so the
+#                             value is shared with the gateway + other testnet
+#                             workers and can't drift. Its address must equal
+#                             PAYMASTER_ADDRESS's verifyingSigner (0x82F2Dd9a…,
+#                             Sentry EIGENLAYER-AVS-1W).
 #   PAYMASTER_ADDRESS
 environment: production
 

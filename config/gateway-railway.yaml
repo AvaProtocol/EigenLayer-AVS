@@ -29,7 +29,20 @@
 #   ETHEREUM_BUNDLER_URL, SEPOLIA_BUNDLER_URL,
 #   BASE_BUNDLER_URL,     BASE_SEPOLIA_BUNDLER_URL
 #   BNB_BUNDLER_URL      — optional; connectivity-only rollout leaves it unset
-#   CONTROLLER_PRIVATE_KEY      — paymaster controller, shared across chains
+#   CONTROLLER_PRIVATE_KEY_MAINNET — controller whose address equals the
+#                                 mainnet VerifyingPaymaster's verifyingSigner
+#                                 (Ethereum + Base). → 0x3b6f68B9…
+#   CONTROLLER_PRIVATE_KEY_TESTNET — controller whose address equals the
+#                                 testnet VerifyingPaymaster's verifyingSigner
+#                                 (Sepolia + Base-Sepolia). → 0x82F2Dd9a…
+#                                 The controller is PER-NETWORK, not shared:
+#                                 each paymaster tier accepts signatures only
+#                                 from its own verifyingSigner, so a mainnet
+#                                 chain MUST use the mainnet controller and a
+#                                 testnet chain the testnet controller. Pairing
+#                                 the mainnet paymaster with the testnet
+#                                 controller breaks every sponsored UserOp
+#                                 (Sentry EIGENLAYER-AVS-1W).
 #   PAYMASTER_ADDRESS_MAINNET   — VerifyingPaymaster on Ethereum + Base
 #   PAYMASTER_ADDRESS_TESTNET   — VerifyingPaymaster on Sepolia + Base-Sepolia
 #                                 (also used as a placeholder on BNB until its
@@ -84,26 +97,32 @@ tenderly_access_key: ${TENDERLY_ACCESS_KEY}
 smart_wallet:
   eth_rpc_url: ${SEPOLIA_RPC}
   bundler_url: ${SEPOLIA_BUNDLER_URL}
-  controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+  controller_private_key: ${CONTROLLER_PRIVATE_KEY_TESTNET}
   paymaster_address: ${PAYMASTER_ADDRESS_TESTNET}
 
 # Chain workers — worker_addr is set from WORKER_* env vars so adding
 # a chain is just "set another env var + add a row here".
 chains:
-  # Paymaster addresses are PER-NETWORK (different contract instance on
-  # mainnet vs testnet), so each chain references its network's env var.
-  # See docs/Contract.md for the deployed addresses.
-  #   PAYMASTER_ADDRESS_MAINNET  → 0xf023eA29… (Ethereum + Base)
-  #   PAYMASTER_ADDRESS_TESTNET  → 0xd856f532… (Sepolia + Base-Sepolia)
+  # Paymaster addresses AND controller keys are PER-NETWORK (a different
+  # contract instance on mainnet vs testnet, each accepting signatures
+  # only from its own verifyingSigner), so each chain references its
+  # network's env vars. See docs/Contract.md for the deployed addresses.
+  #   PAYMASTER_ADDRESS_MAINNET      → 0xf023eA29… (Ethereum + Base)
+  #   PAYMASTER_ADDRESS_TESTNET      → 0xd856f532… (Sepolia + Base-Sepolia)
+  #   CONTROLLER_PRIVATE_KEY_MAINNET → 0x3b6f68B9… (mainnet verifyingSigner)
+  #   CONTROLLER_PRIVATE_KEY_TESTNET → 0x82F2Dd9a… (testnet verifyingSigner)
   # Using a single shared PAYMASTER_ADDRESS broke Sepolia workflows for
   # the duration of the previous deploy (Sentry EIGENLAYER-AVS-1N/1M).
+  # Using a single shared CONTROLLER_PRIVATE_KEY (testnet) against the
+  # mainnet paymaster broke every sponsored mainnet UserOp on Ethereum +
+  # Base (Sentry EIGENLAYER-AVS-1W) — same class of bug, controller side.
   - chain_id: 1
     name: ethereum
     worker_addr: ${WORKER_ETHEREUM}
     smart_wallet:
       eth_rpc_url: ${ETHEREUM_RPC}
       bundler_url: ${ETHEREUM_BUNDLER_URL}
-      controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+      controller_private_key: ${CONTROLLER_PRIVATE_KEY_MAINNET}
       paymaster_address: ${PAYMASTER_ADDRESS_MAINNET}
       # Mainnet production cap is 3; this branch (feature/rest-api-migration)
       # only feeds the testing environment, so we lift the cap to match the
@@ -116,7 +135,7 @@ chains:
     smart_wallet:
       eth_rpc_url: ${BASE_RPC}
       bundler_url: ${BASE_BUNDLER_URL}
-      controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+      controller_private_key: ${CONTROLLER_PRIVATE_KEY_MAINNET}
       paymaster_address: ${PAYMASTER_ADDRESS_MAINNET}
       # See chain 1 note above — relaxed for test-env churn only.
       max_wallets_per_owner: 2000
@@ -127,7 +146,7 @@ chains:
     smart_wallet:
       eth_rpc_url: ${SEPOLIA_RPC}
       bundler_url: ${SEPOLIA_BUNDLER_URL}
-      controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+      controller_private_key: ${CONTROLLER_PRIVATE_KEY_TESTNET}
       paymaster_address: ${PAYMASTER_ADDRESS_TESTNET}
       max_wallets_per_owner: 2000
 
@@ -137,7 +156,7 @@ chains:
     smart_wallet:
       eth_rpc_url: ${BASE_SEPOLIA_RPC}
       bundler_url: ${BASE_SEPOLIA_BUNDLER_URL}
-      controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+      controller_private_key: ${CONTROLLER_PRIVATE_KEY_TESTNET}
       paymaster_address: ${PAYMASTER_ADDRESS_TESTNET}
       max_wallets_per_owner: 2000
 
@@ -153,7 +172,14 @@ chains:
     smart_wallet:
       eth_rpc_url: ${BNB_RPC}
       bundler_url: ${BNB_BUNDLER_URL}
-      controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+      # BNB is a mainnet chain → mainnet controller (matches worker-bnb).
+      # paymaster_address is a not-called testnet placeholder while
+      # connectivity-only; the startup verifyingSigner probe is skipped
+      # here because BNB_BUNDLER_URL is unset. When BNB wallet ops are
+      # enabled, point PAYMASTER_ADDRESS at a real BNB mainnet paymaster
+      # whose verifyingSigner equals this mainnet controller — the probe
+      # will then enforce that pairing at boot.
+      controller_private_key: ${CONTROLLER_PRIVATE_KEY_MAINNET}
       paymaster_address: ${PAYMASTER_ADDRESS_TESTNET}
       max_wallets_per_owner: 2000
 
