@@ -4,7 +4,11 @@
 # startup. Set these on the `worker-base-sepolia` service:
 #   CHAIN_ENDPOINT (HTTPS; WS derived in code)
 #   BUNDLER_URL
-#   CONTROLLER_PRIVATE_KEY
+#   CONTROLLER_PRIVATE_KEY_TESTNET  — testnet controller; its address must
+#                                     equal PAYMASTER_ADDRESS's verifyingSigner
+#                                     (0x82F2Dd9a…). Share this secret with the
+#                                     gateway + other testnet workers so it
+#                                     can't drift (Sentry EIGENLAYER-AVS-1W).
 #   PAYMASTER_ADDRESS
 environment: production
 
@@ -29,5 +33,5 @@ bundler_url: ${BUNDLER_URL}
 
 # Smart wallet config
 smart_wallet:
-  controller_private_key: ${CONTROLLER_PRIVATE_KEY}
+  controller_private_key: ${CONTROLLER_PRIVATE_KEY_TESTNET}
   paymaster_address: ${PAYMASTER_ADDRESS}
