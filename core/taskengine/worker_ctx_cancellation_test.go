@@ -9,10 +9,11 @@ import (
 )
 
 // blockingChainStateReader embeds the ChainStateReader interface so it
-// satisfies the full method set, but overrides only GetBlockNumber. The
-// override signals when the worker call has started, then blocks until the
-// caller's context is cancelled — mirroring an in-flight worker round-trip
-// that a request cancellation should be able to interrupt.
+// satisfies the full method set, overriding the two block-read methods the
+// test exercises (GetBlockNumber and HeaderByNumber). GetBlockNumber signals
+// when the worker call has started, then both block until the caller's context
+// is cancelled — mirroring an in-flight worker round-trip that a request
+// cancellation should be able to interrupt.
 type blockingChainStateReader struct {
 	ChainStateReader
 	started chan struct{}
@@ -29,17 +30,22 @@ func (b *blockingChainStateReader) HeaderByNumber(ctx context.Context, _ *big.In
 	return nil, ctx.Err()
 }
 
-
 func TestRunBlockTriggerImmediately_ContextCancellationInterruptsWorkerCall(t *testing.T) {
 	// runBlockTriggerImmediately only reads n.logger (nil-guarded) and the
 	// global chain-state reader registry, so a zero-value Engine is enough —
 	// this keeps the test independent of the gateway config fixture.
 	engine := &Engine{}
 
+	// Start from a clean registry and clear it on exit. A nil-reader
+	// "unregister" is a no-op (RegisterChainStateReader early-returns on nil),
+	// so ClearChainStateReaderRegistry is the real cleanup — matches the
+	// pattern in chain_state_reader_test.go.
+	ClearChainStateReaderRegistry()
+	defer ClearChainStateReaderRegistry()
+
 	const testChainID int64 = 987654321
 	reader := &blockingChainStateReader{started: make(chan struct{})}
 	RegisterChainStateReader(uint64(testChainID), reader)
-	defer RegisterChainStateReader(uint64(testChainID), nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

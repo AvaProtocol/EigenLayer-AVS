@@ -333,7 +333,7 @@ func (s *Server) SimulateWorkflow(ctx echo.Context) error {
 		chainIDs = append(chainIDs, authed.ChainID)
 	}
 
-	exec, err := s.engine.SimulateWorkflow(user, trigger, nodes, edges, inputVars, chainIDs...)
+	exec, err := s.engine.SimulateWorkflowWithContext(ctx.Request().Context(), user, trigger, nodes, edges, inputVars, chainIDs...)
 	if err != nil {
 		return err
 	}

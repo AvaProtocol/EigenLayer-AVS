@@ -3419,6 +3419,15 @@ func (n *Engine) TriggerWorkflowWithContext(ctx context.Context, user *model.Use
 // default. Per-node / per-trigger chain_id (set on the node configs) takes
 // precedence over this value.
 func (n *Engine) SimulateWorkflow(user *model.User, trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, inputVariables map[string]interface{}, chainIDs ...int64) (*avsproto.Execution, error) {
+	return n.SimulateWorkflowWithContext(context.Background(), user, trigger, nodes, edges, inputVariables, chainIDs...)
+}
+
+// SimulateWorkflowWithContext is SimulateWorkflow with a caller-supplied
+// context. The REST simulate handler passes the request context so a client
+// disconnect / timeout cancels the worker-routed trigger reads (e.g. a
+// BlockTrigger's GetBlockNumber / HeaderByNumber) reached via
+// runTriggerImmediately.
+func (n *Engine) SimulateWorkflowWithContext(ctx context.Context, user *model.User, trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, inputVariables map[string]interface{}, chainIDs ...int64) (*avsproto.Execution, error) {
 	var chainID int64
 	if len(chainIDs) > 0 {
 		chainID = chainIDs[0]
@@ -3533,7 +3542,7 @@ func (n *Engine) SimulateWorkflow(user *model.User, trigger *avsproto.TaskTrigge
 	// Step 1: Start timing BEFORE trigger execution (consistent with node timing)
 	triggerStartTime := time.Now()
 
-	triggerOutput, err := n.runTriggerImmediately(context.Background(), triggerTypeStr, triggerConfig, inputVariables)
+	triggerOutput, err := n.runTriggerImmediately(ctx, triggerTypeStr, triggerConfig, inputVariables)
 	if err != nil {
 		return nil, fmt.Errorf("failed to simulate trigger: %w", err)
 	}
