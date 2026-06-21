@@ -1,11 +1,20 @@
 #!/bin/sh
-# Entrypoint for operator on Railway
-# Writes key files from environment variables, then starts the operator.
+# Shared runtime entrypoint for Railway services (gateway, workers,
+# operators). It materializes per-deployment inputs that we deliberately
+# keep OUT of the public avaprotocol/ap-avs image — delivered instead as
+# environment variables — then execs the AVS binary with the given args.
 #
-# Required env vars:
-#   ECDSA_KEY_JSON - contents of the ECDSA keystore JSON file
-#   BLS_KEY_JSON   - contents of the BLS keystore JSON file
-#   OPERATOR_KEY_PASSWORD - password for both keystores
+# Optional env vars:
+#   AP_CONFIG_YAML - full service config YAML. When set, written verbatim to
+#                    /app/config/runtime.yaml so the service can run with
+#                    `--config=config/runtime.yaml`. This lets the public image
+#                    ship no deployment-specific config; the per-service YAML
+#                    lives in avs-infra. Any ${VAR} placeholders inside are
+#                    expanded later by core/config.ReadYamlConfig from the other
+#                    env vars, so they are written here untouched.
+#   ECDSA_KEY_JSON - contents of the ECDSA keystore JSON file (operators)
+#   BLS_KEY_JSON   - contents of the BLS keystore JSON file (operators)
+#   OPERATOR_KEY_PASSWORD - password for both keystores (operators)
 
 set -e
 
@@ -19,6 +28,16 @@ fi
 if [ -n "$BLS_KEY_JSON" ]; then
     echo "$BLS_KEY_JSON" > /app/keys/bls.key.json
     echo "Wrote BLS key file"
+fi
+
+# Runtime config injection (env-var-driven deployment). When AP_CONFIG_YAML is
+# set, write it verbatim to /app/config/runtime.yaml so the start command can
+# point at `--config=config/runtime.yaml`. printf '%s' avoids interpreting
+# backslashes and leaves ${VAR} placeholders intact for ReadYamlConfig.
+if [ -n "$AP_CONFIG_YAML" ]; then
+    mkdir -p /app/config
+    printf '%s' "$AP_CONFIG_YAML" > /app/config/runtime.yaml
+    echo "Wrote runtime config to /app/config/runtime.yaml ($(wc -c < /app/config/runtime.yaml) bytes)"
 fi
 
 # Auto-detect which binary this image carries:
