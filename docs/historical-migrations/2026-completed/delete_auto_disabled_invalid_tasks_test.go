@@ -1,3 +1,5 @@
+//go:build historical_migrations
+
 package migrations
 
 import (
