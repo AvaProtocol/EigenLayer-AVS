@@ -23,32 +23,16 @@ var Migrations = []migrator.Migration{
 	// - 20250603-183034-token-metadata-fields (moved to docs/historical-migrations/2025-completed/)
 	// - 20250128-120000-protobuf-structure-cleanup (moved to docs/historical-migrations/2025-completed/)
 	// - 20250913-185000-add-execution-indexes (moved to docs/historical-migrations/2025-completed/)
+	// - 20260618-delete-invalid-failed-tasks (moved to docs/historical-migrations/2026-completed/ — applied in v3.10.3, 33 records)
+	// - 20260621-delete-auto-disabled-invalid-tasks (moved to docs/historical-migrations/2026-completed/ — applied in v3.10.3, 12 records: EIGENLAYER-AVS-1X..28)
 	//
-	// These migrations have been successfully applied in production and consistently
-	// report 0 records updated. They have been archived to reduce startup overhead.
-	// Migration completion records remain in the database (migration:* keys).
+	// These migrations have been successfully applied in production. They have
+	// been archived (behind the historical_migrations build tag) to reduce
+	// startup overhead. Migration completion records remain in the database
+	// (migration:* keys), so even if re-registered they would be skipped.
 
 	// ========================================
 	// ACTIVE MIGRATIONS
 	// ========================================
 	// Add new migrations here that need to be applied
-	{
-		// One-time cleanup of the legacy invalid-task cohort: workflow rows
-		// that are Failed AND still fail config validation (invalid node
-		// names / configs orphaned by an old proto migration). See
-		// delete_invalid_failed_tasks.go. Idempotent: re-running finds none.
-		Name:     "20260618-delete-invalid-failed-tasks",
-		Function: DeleteInvalidFailedTasks,
-	},
-	{
-		// One-time cleanup of the auto-disabled invalid-task cohort: workflow
-		// rows the executor flipped to Disabled after the consecutive-permanent-
-		// validation-failure threshold — overwhelmingly "smart wallet address
-		// does not belong to owner" (EIGENLAYER-AVS-1X..28). They pass config
-		// validation, so DeleteInvalidFailedTasks leaves them; this removes them.
-		// See delete_auto_disabled_invalid_tasks.go. Idempotent: re-running
-		// finds none.
-		Name:     "20260621-delete-auto-disabled-invalid-tasks",
-		Function: DeleteAutoDisabledInvalidTasks,
-	},
 }

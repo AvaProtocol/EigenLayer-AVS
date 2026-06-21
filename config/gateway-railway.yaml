@@ -70,12 +70,11 @@ operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
 
 jwt_secret: ${GATEWAY_JWT_SECRET}
 
-# REST rate-limit overrides (default is 10/s, burst 50). Lifted on this
-# test branch so the v4 jest suite — which spreads ~90 requests across
-# parallel workers — doesn't get throttled into spurious "Try again in
-# 1s" failures. Production should keep the conservative default.
-rest_rate_limit_per_second: 200
-rest_rate_limit_burst: 500
+# REST rate-limit. Left unset so the server uses its built-in production
+# default — 10 req/s, burst 50 (aggregator/rest/middleware.DefaultRateLimit).
+# Raise these only on a non-prod gateway that needs to absorb a test suite's
+# burst (the v4 jest suite spreads ~90 requests across parallel workers);
+# production keeps the conservative default.
 
 server_name: "gateway-railway"
 sentry_dsn: https://d304c8708d5097f7787eeb664e4098c6@o1156669.ingest.us.sentry.io/4509386759733248
@@ -124,10 +123,10 @@ chains:
       bundler_url: ${ETHEREUM_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY_MAINNET}
       paymaster_address: ${PAYMASTER_ADDRESS_MAINNET}
-      # Mainnet production cap is 3; this branch (feature/rest-api-migration)
-      # only feeds the testing environment, so we lift the cap to match the
-      # testnet chains and let the v4 test suite churn through wallets.
-      max_wallets_per_owner: 2000
+      # Production cap. ValidWalletOwner validates DB-stored wallets
+      # independently of this value; it bounds NEW wallet creation and the
+      # ownership salt-scan fallback for not-yet-stored wallets.
+      max_wallets_per_owner: 3
 
   - chain_id: 8453
     name: base
@@ -137,8 +136,8 @@ chains:
       bundler_url: ${BASE_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY_MAINNET}
       paymaster_address: ${PAYMASTER_ADDRESS_MAINNET}
-      # See chain 1 note above — relaxed for test-env churn only.
-      max_wallets_per_owner: 2000
+      # See chain 1 note above.
+      max_wallets_per_owner: 3
 
   - chain_id: 11155111
     name: sepolia
@@ -148,7 +147,7 @@ chains:
       bundler_url: ${SEPOLIA_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY_TESTNET}
       paymaster_address: ${PAYMASTER_ADDRESS_TESTNET}
-      max_wallets_per_owner: 2000
+      max_wallets_per_owner: 3
 
   - chain_id: 84532
     name: base-sepolia
@@ -158,7 +157,7 @@ chains:
       bundler_url: ${BASE_SEPOLIA_BUNDLER_URL}
       controller_private_key: ${CONTROLLER_PRIVATE_KEY_TESTNET}
       paymaster_address: ${PAYMASTER_ADDRESS_TESTNET}
-      max_wallets_per_owner: 2000
+      max_wallets_per_owner: 3
 
   # BNB Smart Chain mainnet — connectivity-only rollout. The chain
   # has no SmartWallet factory deployed yet (avs-contracts Phase 2
@@ -181,7 +180,7 @@ chains:
       # will then enforce that pairing at boot.
       controller_private_key: ${CONTROLLER_PRIVATE_KEY_MAINNET}
       paymaster_address: ${PAYMASTER_ADDRESS_TESTNET}
-      max_wallets_per_owner: 2000
+      max_wallets_per_owner: 3
 
 macros:
   secrets:

@@ -1,3 +1,11 @@
+//go:build historical_migrations
+
+// Archived 2026-06-21 after applying in production (release v3.10.3): the
+// boot log reported "Migration 20260618-delete-invalid-failed-tasks completed
+// successfully. 33 records updated." Excluded from normal builds via the
+// historical_migrations build tag; kept for reference. See
+// migrations/migrations.go (COMPLETED MIGRATIONS) and
+// docs/historical-migrations/2026-completed/README.md.
 package migrations
 
 import (
