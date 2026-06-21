@@ -68,7 +68,7 @@ go run ./scripts/migration/merge_hetzner_into_gateway \
 #    because wsalt: keys are chain-scoped; run once per chain.
 for chain in 1 8453 11155111 84532; do
   go run ./scripts/migration/backfill_wallet_salt_index \
-    --config config/gateway-railway.yaml --chain-id "$chain"
+    --config config/runtime.yaml --chain-id "$chain"
 done
 
 # 7. Start the Railway gateway service. Smoke-test workflows + execution
