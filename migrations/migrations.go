@@ -40,4 +40,15 @@ var Migrations = []migrator.Migration{
 		Name:     "20260618-delete-invalid-failed-tasks",
 		Function: DeleteInvalidFailedTasks,
 	},
+	{
+		// One-time cleanup of the auto-disabled invalid-task cohort: workflow
+		// rows the executor flipped to Disabled after the consecutive-permanent-
+		// validation-failure threshold — overwhelmingly "smart wallet address
+		// does not belong to owner" (EIGENLAYER-AVS-1X..28). They pass config
+		// validation, so DeleteInvalidFailedTasks leaves them; this removes them.
+		// See delete_auto_disabled_invalid_tasks.go. Idempotent: re-running
+		// finds none.
+		Name:     "20260621-delete-auto-disabled-invalid-tasks",
+		Function: DeleteAutoDisabledInvalidTasks,
+	},
 }
