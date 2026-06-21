@@ -2,8 +2,14 @@
 
 The aggregator binary (`ap`) runs as one of three roles depending on its
 subcommand: **gateway**, **worker**, or **operator**. Each role needs a
-YAML config passed via `--config=<path>`. This directory holds those
-configs grouped by deployment target.
+YAML config passed via `--config=<path>`.
+
+> **Production Railway configs moved.** The prod `*-railway.yaml` configs now
+> live in the `avs-infra` repo (`railway/configs/`) and are delivered to each
+> Railway service via the `AP_CONFIG_YAML` env var (the image entrypoint writes
+> it to `config/runtime.yaml` at boot). They are no longer in this repo or baked
+> into the public image. This directory now holds only **local-dev and sample**
+> configs.
 
 ## Layout
 
@@ -15,28 +21,24 @@ config/
 │   ├── aggregator.example.yaml          — old "one aggregator per chain" template
 │   └── operator.example.yaml            — old per-chain operator template
 │
-├── gateway-railway.yaml                 — prod gateway (Railway-deployed)
 ├── gateway-dev.example.yaml             — local-dev gateway template
 ├── gateway-dev.yaml                     — local-dev gateway, real (gitignored)
 ├── gateway-dev-rehearsal.yaml           — rehearsal-gateway config used by ops drills
 │
-├── worker-<chain>-railway.yaml          — per-chain prod workers (Railway-deployed)
 ├── worker-<chain>-dev.example.yaml      — per-chain local-dev worker template
 ├── worker-<chain>-dev.yaml              — per-chain local-dev worker, real (gitignored)
 │
-├── operator-sepolia-railway.yaml        — Railway operator: all TESTNET chains
-├── operator-ethereum-railway.yaml       — Railway operator: all MAINNET chains
 └── operator-<chain>.yaml                — local operator configs (gitignored symlinks)
 ```
+
+Production `*-railway.yaml` configs live in `avs-infra` (`railway/configs/`),
+not here — see the note above.
 
 ## When to use which
 
 | Scenario | Config file |
 |---|---|
-| Production aggregator on Railway | `gateway-railway.yaml` |
-| Production worker for chain N on Railway | `worker-<chain>-railway.yaml` |
-| Production testnet operator on Railway | `operator-sepolia-railway.yaml` (monitors all testnet chains) |
-| Production mainnet operator on Railway | `operator-ethereum-railway.yaml` (monitors all mainnet chains) |
+| Production (any role) on Railway | `avs-infra` → `railway/configs/<svc>-railway.yaml`, delivered via `AP_CONFIG_YAML` |
 | Local dev gateway | `gateway-dev.yaml` (copy from `gateway-dev.example.yaml`, fill in secrets) |
 | Local dev worker for chain N | `worker-<chain>-dev.yaml` (same copy pattern) |
 | Operating drill / rehearsal | `gateway-dev-rehearsal.yaml` |
