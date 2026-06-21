@@ -25,20 +25,19 @@ RUN useradd -ms /bin/bash ava && \
 
 COPY --from=builder /ava /ava
 
-# Bundle the in-repo configs so the image is self-contained: the Railway
-# gateway service can run with no external mount, and operators reach
-# config/operator_sample.yaml from inside the container if they want.
-# Without this, `/ava aggregator --config=config/gateway-railway.yaml`
-# fails with "file not found" — see EigenLayer-AVS gateway switchover.
+# Bundle the in-repo sample/local-dev configs so external operators can reach
+# a template (e.g. config/operator_sample.yaml) from inside the container.
+# Production Railway services do NOT use these: each receives its config via
+# the AP_CONFIG_YAML env var, which the entrypoint writes to config/runtime.yaml
+# at boot. The prod *-railway.yaml configs live in the avs-infra repo, not here.
 COPY --from=builder /app/config /app/config
 
-# Bundle the operator entrypoint script so the two operator Railway
-# services (which need ECDSA/BLS keystores materialized from env vars
-# at startup) can pin to this image. The script auto-detects the
-# binary path so it works equally for /ava (this image) and ./ap (the
-# root Dockerfile). Railway Start Command per operator service:
-#   operator-sepolia:  /app/scripts/operator-entrypoint.sh operator --config=/app/config/operator-sepolia-railway.yaml
-#   operator-ethereum: /app/scripts/operator-entrypoint.sh operator --config=/app/config/operator-ethereum-railway.yaml
+# Bundle the shared entrypoint. It materializes per-deployment inputs from env
+# vars at boot — operator ECDSA/BLS keystores AND the service config
+# (AP_CONFIG_YAML -> config/runtime.yaml) — then execs the binary. Auto-detects
+# /ava (this image) vs ./ap (root Dockerfile). Railway Start Commands route
+# through it, e.g.:
+#   /app/scripts/operator-entrypoint.sh operator --config=config/runtime.yaml
 COPY --from=builder /app/scripts/operator-entrypoint.sh /app/scripts/operator-entrypoint.sh
 
 ENTRYPOINT ["/ava"]

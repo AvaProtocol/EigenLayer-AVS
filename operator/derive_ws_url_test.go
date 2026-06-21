@@ -9,7 +9,7 @@ import "testing"
 // removal).
 //
 // Regression guard for the Railway env-var rename in #546: without
-// derivation, removing eth_ws_url from operator-railway.yaml would
+// derivation, removing eth_ws_url from the operator config would
 // leave c.EthWsUrl empty and operator/operator.go:NewOperator would
 // fail the WebSocket dial at startup. Surfaced by Copilot review.
 func TestApplyWsURLDerivation_FillsMissingAtAllLayers(t *testing.T) {
