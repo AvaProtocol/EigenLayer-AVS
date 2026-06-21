@@ -86,7 +86,7 @@ func (s *Server) CreateWallet(ctx echo.Context) error {
 		req.FactoryAddress = string(*body.FactoryAddress)
 	}
 
-	resp, err := s.engine.GetWallet(user, req)
+	resp, err := s.engine.GetWalletWithContext(ctx.Request().Context(), user, req)
 	if err != nil {
 		return err
 	}

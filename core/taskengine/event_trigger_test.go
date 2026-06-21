@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -344,7 +345,7 @@ func TestEventTriggerQueriesBasedConfiguration(t *testing.T) {
 			}
 			inputVariables := map[string]interface{}{}
 
-			result, err := engine.runTriggerImmediately("eventTrigger", triggerConfig, inputVariables)
+			result, err := engine.runTriggerImmediately(context.Background(), "eventTrigger", triggerConfig, inputVariables)
 
 			if tc.expectError {
 				if err == nil || !strings.Contains(err.Error(), tc.errorMsg) {
@@ -436,7 +437,7 @@ func TestEventTriggerQueriesBasedUserScenario(t *testing.T) {
 	}
 	inputVariables := map[string]interface{}{}
 
-	result, err := engine.runTriggerImmediately("eventTrigger", triggerConfig, inputVariables)
+	result, err := engine.runTriggerImmediately(context.Background(), "eventTrigger", triggerConfig, inputVariables)
 	if err != nil {
 		t.Errorf("runTriggerImmediately failed: %v", err)
 		return

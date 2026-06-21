@@ -25,6 +25,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	storageschema "github.com/AvaProtocol/EigenLayer-AVS/storage/schema"
+	"github.com/oklog/ulid/v2"
 )
 
 // reconstructTriggerOutputData is a helper function to reconstruct trigger output data
@@ -206,7 +207,16 @@ func (x *WorkflowExecutor) Perform(job *apqueue.Job) error {
 	return runErr // Propagate the error from task execution
 }
 
+// RunTask executes a task using a background context. It is retained for the
+// async queue path (Perform) and tests, which have no request-scoped context.
 func (x *WorkflowExecutor) RunTask(task *model.Workflow, queueData *QueueExecutionData) (*avsproto.Execution, error) {
+	return x.RunTaskWithContext(context.Background(), task, queueData)
+}
+
+// RunTaskWithContext is RunTask with a caller-supplied context. The ctx is
+// propagated to wallet-ownership validation so a cancelled request interrupts
+// in-flight chain-worker derivations.
+func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.Workflow, queueData *QueueExecutionData) (*avsproto.Execution, error) {
 	// Load secrets for the task
 	secrets, err := LoadSecretForTask(x.db, task)
 	if err != nil {
@@ -450,7 +460,7 @@ func (x *WorkflowExecutor) RunTask(task *model.Workflow, queueData *QueueExecuti
 		smartWalletAddr := common.HexToAddress(task.SmartWalletAddress)
 
 		// Enhanced wallet validation that handles any legitimately derived wallet
-		isValid, err := x.validateWalletOwnership(task.ChainId, user, smartWalletAddr)
+		isValid, err := x.validateWalletOwnership(ctx, task.ChainId, user, smartWalletAddr)
 		if err != nil {
 			execution.EndAt = time.Now().UnixMilli()
 			execution.Error = fmt.Sprintf("failed to validate wallet ownership for owner %s: %v", owner.Hex(), err)
@@ -885,8 +895,11 @@ func (x *WorkflowExecutor) resolveSmartWalletConfig(chainID int64) *config.Smart
 }
 
 // validateWalletOwnership performs comprehensive wallet ownership validation
-// This handles default wallets (salt:0), stored wallets, and legitimately derived wallets
-func (x *WorkflowExecutor) validateWalletOwnership(chainID int64, user *model.User, smartWalletAddr common.Address) (bool, error) {
+// This handles default wallets (salt:0), stored wallets, and legitimately derived wallets.
+// ctx is propagated to the chain-worker calls so a cancelled request (client
+// disconnect / timeout) interrupts an in-flight derivation; the worker reader's
+// own withTimeout still bounds the call when ctx carries no deadline.
+func (x *WorkflowExecutor) validateWalletOwnership(ctx context.Context, chainID int64, user *model.User, smartWalletAddr common.Address) (bool, error) {
 	swCfg := x.resolveSmartWalletConfig(chainID)
 
 	// Step 1: Load the user's default smart wallet address (salt:0) for comparison.
@@ -896,7 +909,7 @@ func (x *WorkflowExecutor) validateWalletOwnership(chainID int64, user *model.Us
 	if swCfg != nil {
 		if reader := GetChainStateReaderForChain(uint64(chainID)); reader != nil {
 			// Gateway mode: derive salt:0 via the chain worker (no gateway dial).
-			if addr, derr := reader.GetSmartWalletAddress(context.Background(), user.Address, swCfg.FactoryAddress, big.NewInt(0)); derr == nil {
+			if addr, derr := reader.GetSmartWalletAddress(ctx, user.Address, swCfg.FactoryAddress, big.NewInt(0)); derr == nil {
 				user.SmartAccountAddress = &addr
 			} else {
 				x.logger.Warn("Failed to load default smart wallet for validation",
@@ -926,7 +939,7 @@ func (x *WorkflowExecutor) validateWalletOwnership(chainID int64, user *model.Us
 	// never written for the post-upgrade derived address. MUST use the task's
 	// per-chain config — see resolveSmartWalletConfig above.
 	if swCfg != nil {
-		if isValid, err := x.validateDerivedWallet(chainID, swCfg, user.Address, smartWalletAddr); err == nil && isValid {
+		if isValid, err := x.validateDerivedWallet(ctx, chainID, swCfg, user.Address, smartWalletAddr); err == nil && isValid {
 			x.logger.Info("Wallet validated as legitimate derived wallet",
 				"owner", user.Address.Hex(), "wallet", smartWalletAddr.Hex(), "chain_id", chainID)
 			return true, nil
@@ -944,7 +957,7 @@ func (x *WorkflowExecutor) validateWalletOwnership(chainID int64, user *model.Us
 // The swCfg argument is the per-chain config resolved by the caller —
 // passing it in (rather than reading x.smartWalletConfig) is what makes
 // this work in gateway mode where the executor is shared across chains.
-func (x *WorkflowExecutor) validateDerivedWallet(chainID int64, swCfg *config.SmartWalletConfig, owner common.Address, smartWalletAddr common.Address) (bool, error) {
+func (x *WorkflowExecutor) validateDerivedWallet(ctx context.Context, chainID int64, swCfg *config.SmartWalletConfig, owner common.Address, smartWalletAddr common.Address) (bool, error) {
 	factoryAddr := swCfg.FactoryAddress
 
 	// Try salt values from 0 to max_wallets_per_owner to see if any produce the target wallet address
@@ -955,7 +968,7 @@ func (x *WorkflowExecutor) validateDerivedWallet(chainID int64, swCfg *config.Sm
 	// salt scan server-side (one round-trip). Fall back to a direct dial +
 	// local loop only when no reader is registered (single-chain mode / tests).
 	if reader := GetChainStateReaderForChain(uint64(chainID)); reader != nil {
-		found, salt, err := reader.FindMatchingWalletSalt(context.Background(), owner, factoryAddr, smartWalletAddr, maxWallets)
+		found, salt, err := reader.FindMatchingWalletSalt(ctx, owner, factoryAddr, smartWalletAddr, maxWallets)
 		if err != nil {
 			return false, err
 		}
@@ -1104,16 +1117,46 @@ func (x *WorkflowExecutor) persistFailedExecution(task *model.Workflow, executio
 // scoped to the task ID so each broken workflow gets its own Sentry issue
 // rather than rolling into a single noisy one. The event is logged at Warn
 // in addition; SentryLogger.Warn does not double-capture.
+//
+// The Warn log and the Sentry scope both carry owner, smart_wallet,
+// created_at (derived from the ULID task id since Task has no created_at
+// field) and factory_address (resolved here via resolveSmartWalletConfig
+// for the task's chain — the same lookup the validation path used moments
+// earlier; config doesn't drift mid-process, so the values match). Without
+// those, an operator triaging a burst of these alerts (e.g.
+// EIGENLAYER-AVS-1Y..28) can't tell at a glance whether it's one
+// customer's wallet-migration mistake, a cohort from a SDK regression, or
+// a chain-config drift — the same observability gap 460292b closed for
+// the startup invalid-task log.
 func (x *WorkflowExecutor) reportTaskAutoDisabled(task *model.Workflow, reason string) {
+	createdAt := "unknown"
+	if parsed, perr := ulid.Parse(strings.ToUpper(task.Id)); perr == nil {
+		createdAt = time.UnixMilli(int64(parsed.Time())).UTC().Format(time.RFC3339)
+	}
+	factoryAddress := ""
+	if swCfg := x.resolveSmartWalletConfig(task.ChainId); swCfg != nil {
+		factoryAddress = swCfg.FactoryAddress.Hex()
+	}
+
 	x.logger.Warn("task auto-disabled after consecutive validation failures",
 		"task_id", task.Id,
 		"chain_id", task.ChainId,
+		"owner", task.Owner,
+		"smart_wallet", task.SmartWalletAddress,
+		"factory_address", factoryAddress,
+		"created_at", createdAt,
 		"consecutive_failures", task.ConsecutiveValidationFailures,
 		"reason", reason)
 	sentry.WithScope(func(scope *sentry.Scope) {
 		scope.SetTag("event", "task_auto_disabled")
 		scope.SetTag("task_id", task.Id)
 		scope.SetTag("chain_id", strconv.FormatInt(task.ChainId, 10))
+		scope.SetTag("owner", task.Owner)
+		scope.SetTag("smart_wallet", task.SmartWalletAddress)
+		if factoryAddress != "" {
+			scope.SetTag("factory_address", factoryAddress)
+		}
+		scope.SetExtra("created_at", createdAt)
 		scope.SetExtra("consecutive_failures", task.ConsecutiveValidationFailures)
 		scope.SetExtra("reason", reason)
 		scope.SetFingerprint([]string{"task-auto-disabled", task.Id})
