@@ -35,26 +35,44 @@ import (
 func DeleteInvalidFailedTasks(db storage.Storage) (int, error) {
 	failedToken := storageschema.WorkflowStatusToStorageKey(avsproto.TaskStatus_Failed)
 
-	items, err := db.GetByPrefix([]byte("t:"))
-	if err != nil {
+	// Phase 1: constant-memory key scan. Collect only the Failed status keys
+	// (t:<chain>:f:<id>); values are NOT fetched here, so a database full of
+	// Enabled/Completed rows is never materialized in memory. IterateKeysOnly
+	// is the codebase's sanctioned scan for this — GetByPrefix would load every
+	// workflow value at once and can spike memory / OOM at startup on a large DB.
+	var failedKeys [][]byte
+	if err := db.IterateKeysOnly([]byte("t:"), func(key []byte) error {
+		// Match Failed workflow rows: t:<chain>:f:<id>. Task IDs are ULIDs
+		// (no colons), so a 4-way split is exact.
+		parts := strings.SplitN(string(key), ":", 4)
+		if len(parts) != 4 || parts[0] != "t" || parts[2] != failedToken {
+			return nil
+		}
+		// Key bytes are iterator-owned — copy before retaining past the visit.
+		failedKeys = append(failedKeys, append([]byte{}, key...))
+		return nil
+	}); err != nil {
 		return 0, err
 	}
 
+	// Phase 2: fetch, validate, and delete each candidate individually. The
+	// iterator's read transaction is already closed, so these writes are safe.
 	deleted := 0
-	for _, it := range items {
-		// Match Failed workflow rows: t:<chain>:f:<id>. Task IDs are ULIDs
-		// (no colons), so a 4-way split is exact.
-		parts := strings.SplitN(string(it.Key), ":", 4)
-		if len(parts) != 4 || parts[0] != "t" || parts[2] != failedToken {
-			continue
-		}
+	for _, key := range failedKeys {
+		parts := strings.SplitN(string(key), ":", 4)
 		chainID, perr := strconv.ParseInt(parts[1], 10, 64)
 		if perr != nil {
 			continue
 		}
 
+		value, gerr := db.GetKey(key)
+		if gerr != nil {
+			// Vanished between scan and fetch (e.g. concurrent delete) — skip.
+			continue
+		}
+
 		task := &model.Workflow{Task: &avsproto.Task{}}
-		if uerr := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(it.Value, task); uerr != nil {
+		if uerr := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(value, task); uerr != nil {
 			// Undecodable record — leave it alone rather than risk deleting
 			// something we can't interpret.
 			continue
@@ -68,8 +86,8 @@ func DeleteInvalidFailedTasks(db storage.Storage) (int, error) {
 
 		// Delete the Failed status row (fail loudly — this key definitely
 		// exists, so an error here is real).
-		if derr := db.Delete(it.Key); derr != nil {
-			return deleted, fmt.Errorf("delete failed-status key %q: %w", string(it.Key), derr)
+		if derr := db.Delete(key); derr != nil {
+			return deleted, fmt.Errorf("delete failed-status key %q: %w", string(key), derr)
 		}
 		// Delete the user index and any Enabled orphan. These may be absent
 		// (Delete on a missing key is a no-op), so best-effort is fine.
