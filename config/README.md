@@ -16,14 +16,8 @@ YAML config passed via `--config=<path>`.
 ```
 config/
 ├── README.md                            — this file
-├── archived/                            — pre-Railway deployment shape (kept for reference)
-│   ├── README.md
-│   ├── aggregator.example.yaml          — old "one aggregator per chain" template
-│   └── operator.example.yaml            — old per-chain operator template
-│
 ├── gateway-dev.example.yaml             — local-dev gateway template
 ├── gateway-dev.yaml                     — local-dev gateway, real (gitignored)
-├── gateway-dev-rehearsal.yaml           — rehearsal-gateway config used by ops drills
 │
 ├── worker-<chain>-dev.example.yaml      — per-chain local-dev worker template
 ├── worker-<chain>-dev.yaml              — per-chain local-dev worker, real (gitignored)
@@ -41,7 +35,6 @@ not here — see the note above.
 | Production (any role) on Railway | `avs-infra` → `railway/configs/<svc>-railway.yaml`, delivered via `AP_CONFIG_YAML` |
 | Local dev gateway | `gateway-dev.yaml` (copy from `gateway-dev.example.yaml`, fill in secrets) |
 | Local dev worker for chain N | `worker-<chain>-dev.yaml` (same copy pattern) |
-| Operating drill / rehearsal | `gateway-dev-rehearsal.yaml` |
 
 `scripts/start.sh` in the studio repo wires up the local-dev gateway +
 all workers + operator pane via these config files. See that script
@@ -63,22 +56,15 @@ The `.gitignore` excludes any `config/*-dev.yaml` and a few specific
 names (`gateway-dev.yaml`, `aggregator.yaml`, `operator.yaml`) — see
 the top-level `.gitignore` for the full list.
 
-## `archived/` — pre-Railway deployment shape
+## Pre-Railway bare-metal templates (moved)
 
-The pre-Railway deployment model ran one aggregator per chain (the
-`aggregator.example.yaml` template) and a single operator binary
-(`operator.example.yaml`). Both templates documented that shape.
-
-The Railway migration (PRs AvaProtocol/EigenLayer-AVS#538, #544, #550)
-collapsed the per-chain aggregators into a single multi-chain
-**gateway** + per-chain **workers**. The pre-Railway example templates
-that described the old shape live in `archived/`; the per-chain
-aggregator configs themselves (when they exist locally as symlinks to
-a secrets-sync directory) are no longer referenced by any in-repo code
-path — except the one documented exception below.
-
-See [`archived/README.md`](./archived/README.md) for what's in there
-and why.
+The pre-Railway deployment model (one aggregator per chain + a single
+operator binary) and its config templates moved to **avs-infra**
+(`terraform/docs/archived-baremetal-templates/`), next to the terraform
+that deployed that bare-metal stack — which is now being decommissioned.
+Per-chain aggregator configs that may still exist locally as gitignored
+symlinks to a secrets-sync directory are no longer referenced by any
+in-repo code path, except the one documented exception below.
 
 ## Migration history (Option C — multi-phase config cleanup, all phases now done)
 
