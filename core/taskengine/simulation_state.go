@@ -438,6 +438,112 @@ func (s *SimulationStateMap) InjectETHBalanceChange(
 	return nil
 }
 
+// Default storage-slot indices used when a user-supplied ERC20 override does
+// not specify them. These match the most common standard-ERC20 layout; tokens
+// with non-standard layouts (e.g. USDC FiatToken at 9/10) must set the slots
+// explicitly. See TENDERLY_STATE_OVERRIDES.md for a reference table.
+const (
+	defaultERC20BalanceSlot   = int64(0)
+	defaultERC20AllowanceSlot = int64(3)
+)
+
+// parseUint256 parses a balance/allowance override value supplied as either a
+// 0x-prefixed hex string or a plain decimal string.
+func parseUint256(value string) (*big.Int, error) {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return nil, fmt.Errorf("empty value")
+	}
+	if strings.HasPrefix(v, "0x") || strings.HasPrefix(v, "0X") {
+		n, ok := new(big.Int).SetString(v[2:], 16)
+		if !ok {
+			return nil, fmt.Errorf("invalid hex value %q", value)
+		}
+		return n, nil
+	}
+	n, ok := new(big.Int).SetString(v, 10)
+	if !ok {
+		return nil, fmt.Errorf("invalid decimal value %q", value)
+	}
+	return n, nil
+}
+
+// ApplyUserERC20Override seeds the simulation state with a caller-supplied ERC20
+// balance and/or allowance override. Unlike InjectERC20BalanceChange, the values
+// are absolute (not deltas) and no RPC call is made — the caller provides the
+// exact balance/allowance and (optionally) the mapping slots, so this is a pure,
+// synchronous state mutation suitable for isolated RunNodeImmediately simulations.
+//
+// balance overrides the holder's balanceOf; allowance overrides
+// allowance[owner][spender] and therefore requires a spender address.
+func (s *SimulationStateMap) ApplyUserERC20Override(
+	tokenAddress, ownerAddress, spenderAddress string,
+	balance, allowance string,
+	balanceSlot, allowanceSlot *uint64,
+) error {
+	if !common.IsHexAddress(tokenAddress) {
+		return fmt.Errorf("invalid token_address %q", tokenAddress)
+	}
+	if !common.IsHexAddress(ownerAddress) {
+		return fmt.Errorf("invalid owner_address %q", ownerAddress)
+	}
+	token := common.HexToAddress(tokenAddress)
+	owner := common.HexToAddress(ownerAddress)
+
+	if balance == "" && allowance == "" {
+		return fmt.Errorf("ERC20 override for token %s specifies neither balance nor allowance", tokenAddress)
+	}
+
+	if balance != "" {
+		bal, err := parseUint256(balance)
+		if err != nil {
+			return fmt.Errorf("balance override: %w", err)
+		}
+		slot := defaultERC20BalanceSlot
+		if balanceSlot != nil {
+			slot = int64(*balanceSlot)
+		}
+		slotHash := erc20BalanceSlot(owner, slot)
+		s.SetStorageSlot(token.Hex(), slotHash.Hex(), fmt.Sprintf("0x%064x", bal))
+
+		if s.logger != nil {
+			s.logger.Info("Applied user ERC20 balance override for simulation",
+				"token", token.Hex(),
+				"owner", owner.Hex(),
+				"balance", bal.String(),
+				"slot", slotHash.Hex())
+		}
+	}
+
+	if allowance != "" {
+		if !common.IsHexAddress(spenderAddress) {
+			return fmt.Errorf("allowance override for token %s requires a valid spender_address", tokenAddress)
+		}
+		spender := common.HexToAddress(spenderAddress)
+		allow, err := parseUint256(allowance)
+		if err != nil {
+			return fmt.Errorf("allowance override: %w", err)
+		}
+		slot := defaultERC20AllowanceSlot
+		if allowanceSlot != nil {
+			slot = int64(*allowanceSlot)
+		}
+		slotHash := erc20AllowanceSlot(owner, spender, slot)
+		s.SetStorageSlot(token.Hex(), slotHash.Hex(), fmt.Sprintf("0x%064x", allow))
+
+		if s.logger != nil {
+			s.logger.Info("Applied user ERC20 allowance override for simulation",
+				"token", token.Hex(),
+				"owner", owner.Hex(),
+				"spender", spender.Hex(),
+				"allowance", allow.String(),
+				"slot", slotHash.Hex())
+		}
+	}
+
+	return nil
+}
+
 // IsEmpty returns true if there are no accumulated state overrides.
 func (s *SimulationStateMap) IsEmpty() bool {
 	s.mu.Lock()

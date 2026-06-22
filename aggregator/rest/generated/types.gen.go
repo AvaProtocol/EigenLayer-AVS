@@ -466,6 +466,30 @@ type CustomCodeNodeConfig struct {
 	Source string `json:"source"`
 }
 
+// ERC20StateOverride Seeds a token's balanceOf / allowance storage slots for a single simulation. balanceOf[owner] lives at keccak256(abi.encode(owner, balanceSlot)); allowance[owner][spender] at keccak256(abi.encode(spender, keccak256(abi.encode(owner, allowanceSlot)))).
+type ERC20StateOverride struct {
+	// Allowance Allowance override (hex 0x… or decimal string).
+	Allowance *string `json:"allowance,omitempty"`
+
+	// AllowanceSlot Storage slot for the allowance mapping (default: 3).
+	AllowanceSlot *int64 `json:"allowanceSlot,omitempty"`
+
+	// Balance Balance override (hex 0x… or decimal string).
+	Balance *string `json:"balance,omitempty"`
+
+	// BalanceSlot Storage slot for the balanceOf mapping (default: 0).
+	BalanceSlot *int64 `json:"balanceSlot,omitempty"`
+
+	// OwnerAddress Lowercase or checksummed hex EOA / contract address.
+	OwnerAddress EthereumAddress `json:"ownerAddress"`
+
+	// SpenderAddress Lowercase or checksummed hex EOA / contract address.
+	SpenderAddress *EthereumAddress `json:"spenderAddress,omitempty"`
+
+	// TokenAddress Lowercase or checksummed hex EOA / contract address.
+	TokenAddress EthereumAddress `json:"tokenAddress"`
+}
+
 // ETHTransferNode defines model for ETHTransferNode.
 type ETHTransferNode struct {
 	Config *ETHTransferNodeConfig `json:"config,omitempty"`
@@ -1066,6 +1090,9 @@ type RunNodeRequest struct {
 	// chain" — typically only useful in single-chain deployments or for
 	// chain-agnostic operations.
 	ChainId *ChainId `json:"chainId,omitempty"`
+
+	// Erc20Overrides Optional ERC20 balance/allowance state overrides applied only during this isolated node simulation. Lets callers seed token balances and approvals so contract-write simulations (e.g. Uniswap swaps) don't revert with "transfer amount exceeds allowance/balance" before the approval/funding transactions have been run. Ignored for real execution.
+	Erc20Overrides *[]ERC20StateOverride `json:"erc20Overrides,omitempty"`
 
 	// InputVariables Free-form key-value bag of values used to resolve `{{variable.path}}`
 	// template references inside trigger and node configs. Conventional
