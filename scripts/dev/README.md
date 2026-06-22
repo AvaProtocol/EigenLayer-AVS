@@ -8,7 +8,7 @@ the merged data via the SDK.
 
 ## Env vars required by `make dev-stack-rehearsal`
 
-`config/gateway-dev-rehearsal.yaml` references everything secret via
+`config/gateway-dev-rehearsal.yaml` (copy it from the tracked `config/gateway-dev-rehearsal.example.yaml`) references everything secret via
 `${REHEARSAL_*}` env vars so nothing real lives in git. Export these
 in your shell (or a local untracked `.env` you `source` before the
 make target) before starting the rehearsal gateway:
@@ -139,7 +139,7 @@ make migration-rehearse CHAIN=sepolia APPLY=1
 | `snapshot-hetzner-donors.sh` | SSH + docker-stop + tarball each Hetzner aggregator. Extracts to `./donors/<chain>/db/`. |
 | `run-merge-rehearsal.sh` | Runs the merge tool sequentially per donor against `./tmp/rehearsal-gateway-db`. Calls `count-gateway-keys.go` at the end. |
 | `count-gateway-keys.go` | One-shot scan of the gateway DB that prints per-prefix per-chain key counts. Helps spot unexpected key distributions after the merge. |
-| `../../config/gateway-dev-rehearsal.yaml` | Gateway config pointing at the rehearsal scratch DB with all 4 chains registered. Used by `make dev-stack-rehearsal`. |
+| `../../config/gateway-dev-rehearsal.example.yaml` | Template for the rehearsal gateway config (all 4 chains, scratch DB). Copy to `gateway-dev-rehearsal.yaml` (gitignored) for `make dev-stack-rehearsal`. |
 
 ## Disk + downtime budget
 

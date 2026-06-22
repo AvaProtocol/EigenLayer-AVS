@@ -23,27 +23,20 @@ node_modules
 operator.yaml
 metadata.json
 
-# Ignores yaml configuration files in the config directory.
-# Whitelist the shared deployment configs that ship inside the Docker
-# image (Railway + rehearsal) and the .example.yaml templates that
-# document the file shapes. Operator-/developer-specific configs
-# (e.g. `aggregator.yaml`, `operator.yaml`, `gateway-dev.yaml`,
-# `worker-*-dev.yaml`) stay ignored — they typically carry testnet
-# credentials that should not land in git. Copy the matching
+# Ignores yaml configuration files in the config directory. ONLY the
+# `*.example.yaml` templates that document the file shapes are tracked;
+# every real config (e.g. `gateway-dev.yaml`, `worker-*-dev.yaml`,
+# `gateway-dev-rehearsal.yaml`) stays ignored — they carry testnet
+# credentials / local paths that should not land in git. Copy the matching
 # `*.example.yaml` and fill in the placeholders to bootstrap one.
+# Production Railway deploy configs live in avs-infra (railway/configs/),
+# delivered via AP_CONFIG_YAML — not here. The pre-Railway bare-metal
+# templates moved to avs-infra/terraform/docs/archived-baremetal-templates/.
 config/*.yaml
 !config/*.example.yaml
-!config/*-railway.yaml
-!config/*-rehearsal.yaml
-# config/archived/ holds documentation templates (the pre-Railway
-# *.example.yaml files, tracked via the whitelist below) plus any
-# historical real-value configs preserved verbatim. Those real-value
-# files are typically symlinks to a gitignored secrets-sync directory;
-# committing the symlink would leak the local filesystem path. Ignore
-# everything in archived/ by default; only the *.example.yaml
-# templates are tracked.
-config/archived/*.yaml
-!config/archived/*.example.yaml
+# config/archived/ is retired (templates moved to avs-infra). Ignore any
+# local leftovers, e.g. symlinks into a secrets-sync directory.
+config/archived/
 
 contracts/script/output*
 
