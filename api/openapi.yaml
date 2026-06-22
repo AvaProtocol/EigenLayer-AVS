@@ -1427,6 +1427,42 @@ components:
         node: { $ref: '#/components/schemas/Node' }
         inputVariables: { $ref: '#/components/schemas/InputVariables' }
         chainId: { $ref: '#/components/schemas/ChainId' }
+        erc20Overrides:
+          type: array
+          description: >
+            Optional ERC20 balance/allowance state overrides applied only during
+            this isolated node simulation. Lets callers seed token balances and
+            approvals so contract-write simulations (e.g. Uniswap swaps) don't
+            revert with "transfer amount exceeds allowance/balance" before the
+            approval/funding transactions have been run. Ignored for real execution.
+          items: { $ref: '#/components/schemas/ERC20StateOverride' }
+
+    ERC20StateOverride:
+      type: object
+      required: [tokenAddress, ownerAddress]
+      description: >
+        Seeds a token's balanceOf / allowance storage slots for a single
+        simulation. balanceOf[owner] lives at keccak256(abi.encode(owner,
+        balanceSlot)); allowance[owner][spender] at keccak256(abi.encode(spender,
+        keccak256(abi.encode(owner, allowanceSlot)))).
+      properties:
+        tokenAddress: { $ref: '#/components/schemas/EthereumAddress' }
+        ownerAddress: { $ref: '#/components/schemas/EthereumAddress' }
+        spenderAddress: { $ref: '#/components/schemas/EthereumAddress' }
+        balance:
+          type: string
+          description: Balance override (hex 0x… or decimal string).
+        allowance:
+          type: string
+          description: Allowance override (hex 0x… or decimal string).
+        balanceSlot:
+          type: integer
+          format: int64
+          description: 'Storage slot for the balanceOf mapping (default: 0).'
+        allowanceSlot:
+          type: integer
+          format: int64
+          description: 'Storage slot for the allowance mapping (default: 3).'
 
     RunNodeResponse:
       type: object

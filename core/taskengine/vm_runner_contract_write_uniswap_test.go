@@ -26,11 +26,15 @@ func TestContractWriteNode_UniswapV3Quote(t *testing.T) {
 	// Get test configuration and create Tenderly client
 	logger := testutil.GetLogger()
 	testConfig := testutil.GetTestConfig()
-	require.NotNil(t, testConfig, "Test config must be loaded from aggregator.yaml")
+	if testConfig == nil {
+		t.Skip("No test config available (requires aggregator.yaml + Tenderly)")
+	}
 
 	// Create Tenderly client
 	tenderlyClient := NewTenderlyClient(testConfig, logger)
-	require.NotNil(t, tenderlyClient, "Tenderly client must be created")
+	if tenderlyClient == nil {
+		t.Skip("No Tenderly client available")
+	}
 
 	// Setup the test VM with necessary config
 	smartWalletConfig := testutil.GetTestSmartWalletConfig()
@@ -140,60 +144,57 @@ func TestContractWriteNode_UniswapV3Quote(t *testing.T) {
 		},
 	}
 
+	// Seed ERC20 state overrides so the simulation no longer reverts with
+	// "transfer amount exceeds allowance/balance" before reaching the swap logic.
+	// This exercises the same SimulationStateMap path that RunNodeImmediately
+	// populates from a request's erc20_overrides. We approve the SwapRouter02 to
+	// spend the runner's USDC and give the runner a large USDC balance.
+	usdc := "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+	owner := "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e"
+	swapRouter02 := "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E"
+	require.NotNil(t, vm.simulationState, "simulation state must exist in simulation mode")
+	// Seed at every common balance slot so the test USDC's actual layout is covered.
+	for _, slot := range commonBalanceSlots {
+		s := uint64(slot)
+		err := vm.simulationState.ApplyUserERC20Override(
+			usdc, owner, swapRouter02,
+			"0x38d7ea4c68000", // 1,000,000 USDC (6 decimals)
+			"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", // max allowance
+			&s, &s,
+		)
+		require.NoError(t, err)
+	}
+
 	// Execute the node
 	step, err := vm.RunNodeWithInputs(node, inputVars)
 	require.NoError(t, err)
-	assert.NotNil(t, step)
+	require.NotNil(t, step)
 
-	// Currently this test will fail with "ERC20: transfer amount exceeds allowance"
-	// because the USDC token hasn't been approved for the SwapRouter02.
-	//
-	// TO FIX: The TenderlyClient needs to be enhanced to support ERC20 state overrides:
-	// 1. Token balance: keccak256(abi.encode(owner, balanceSlot)) where balanceSlot is typically 0
-	// 2. Token allowance: keccak256(abi.encode(spender, keccak256(abi.encode(owner, allowanceSlot))))
-	//    where allowanceSlot is typically 3 or 4
-	//
-	// Example state_objects for Tenderly API:
-	// "state_objects": {
-	//   "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238": {  // USDC token
-	//     "storage": {
-	//       "<allowance_slot>": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", // max approval
-	//       "<balance_slot>": "0x38d7ea4c68000"  // 1,000,000 USDC (6 decimals)
-	//     }
-	//   }
-	// }
+	// With balance + allowance seeded, the simulation must never fail on an
+	// approval/funding precondition — that's exactly what erc20_overrides fix.
+	// QuoterV2.quoteExactInputSingle still reverts by design (it returns the
+	// quote via revert data), so "execution reverted" remains acceptable; an
+	// allowance/balance revert would mean the override path regressed.
+	assert.NotContains(t, step.Error, "transfer amount exceeds allowance",
+		"erc20_overrides should have seeded the allowance — got: %s", step.Error)
+	assert.NotContains(t, step.Error, "transfer amount exceeds balance",
+		"erc20_overrides should have seeded the balance — got: %s", step.Error)
+	assert.False(t, vm.simulationState.IsEmpty(),
+		"simulation state should hold the seeded ERC20 overrides")
 
-	if !step.Success {
-		t.Logf("Expected failure: %s", step.Error)
-
-		// Expected error: either "execution reverted" (QuoterV2's internal revert) or
-		// "transfer amount exceeds allowance" (if it reaches the transferFrom call)
-		// Both are valid since they indicate the calldata generation worked
-		hasExpectedError := assert.Contains(t, step.Error, "execution reverted",
-			"Expected revert error from QuoterV2 or allowance error") ||
-			assert.Contains(t, step.Error, "transfer amount exceeds allowance",
-				"Expected allowance error because test doesn't set up ERC20 approval state overrides")
-
-		require.True(t, hasExpectedError, "Expected either 'execution reverted' or 'transfer amount exceeds allowance', got: %s", step.Error)
-
-		// The important validations that DID work:
-		// ✅ Tuple parameter was correctly parsed from JSON array format
-		// ✅ Calldata was successfully generated
-		// ✅ Tenderly simulation was called
-		// ✅ The contract execution reached the point where it would fail (proving calldata is valid)
-		t.Logf("✅ SUCCESS: Calldata generation for tuple parameters works correctly")
-		t.Logf("ℹ️  To make the swap succeed, enhance TenderlyClient to support ERC20 state overrides")
-	} else {
-		t.Logf("✅ UNEXPECTED SUCCESS: Swap simulation passed!")
-
-		// Validate the output structure
+	if step.Success {
+		t.Logf("✅ Swap simulation succeeded with ERC20 overrides")
 		contractWrite, ok := step.OutputData.(*avsproto.Execution_Step_ContractWrite)
 		require.True(t, ok, "Step output should be ContractWrite")
 		require.NotNil(t, contractWrite)
 		require.NotNil(t, contractWrite.ContractWrite)
 		require.NotNil(t, contractWrite.ContractWrite.Data)
-
-		// Log the swap output
 		t.Logf("Swap output: %v", contractWrite.ContractWrite.Data.AsInterface())
+	} else {
+		// Acceptable: QuoterV2's intentional revert-with-data. The key assertions
+		// above already prove the allowance/balance preconditions were satisfied.
+		require.Contains(t, step.Error, "execution reverted",
+			"only QuoterV2's intentional revert is acceptable once overrides are seeded, got: %s", step.Error)
+		t.Logf("ℹ️  QuoterV2 reverted by design; allowance/balance overrides were applied correctly")
 	}
 }
