@@ -18,7 +18,6 @@ config/
 ├── README.md                            — this file
 ├── gateway-dev.example.yaml             — local-dev gateway template
 ├── gateway-dev.yaml                     — local-dev gateway, real (gitignored)
-├── gateway-dev-rehearsal.example.yaml   — Hetzner-merge rehearsal template (copy → .yaml)
 │
 ├── worker-<chain>-dev.example.yaml      — per-chain local-dev worker template
 ├── worker-<chain>-dev.yaml              — per-chain local-dev worker, real (gitignored)
@@ -36,7 +35,6 @@ not here — see the note above.
 | Production (any role) on Railway | `avs-infra` → `railway/configs/<svc>-railway.yaml`, delivered via `AP_CONFIG_YAML` |
 | Local dev gateway | `gateway-dev.yaml` (copy from `gateway-dev.example.yaml`, fill in secrets) |
 | Local dev worker for chain N | `worker-<chain>-dev.yaml` (same copy pattern) |
-| Operating drill / rehearsal | `gateway-dev-rehearsal.yaml` (copy from `gateway-dev-rehearsal.example.yaml`) |
 
 `scripts/start.sh` in the studio repo wires up the local-dev gateway +
 all workers + operator pane via these config files. See that script
