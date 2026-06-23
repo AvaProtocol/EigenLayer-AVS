@@ -25,8 +25,8 @@ metadata.json
 
 # Ignores yaml configuration files in the config directory. ONLY the
 # `*.example.yaml` templates that document the file shapes are tracked;
-# every real config (e.g. `gateway.yaml`, `worker-*-dev.yaml`,
-# `gateway-rehearsal.yaml`) stays ignored — they carry testnet
+# every real config (e.g. `gateway.yaml`, `worker-*.yaml`,
+# `operator-*.yaml`) stays ignored — they carry testnet
 # credentials / local paths that should not land in git. Copy the matching
 # `*.example.yaml` and fill in the placeholders to bootstrap one.
 # Production Railway deploy configs live in avs-infra (railway/configs/),
