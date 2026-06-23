@@ -3,6 +3,7 @@ package taskengine
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/big"
 	"strings"
 	"sync"
@@ -447,25 +448,53 @@ const (
 	defaultERC20AllowanceSlot = int64(3)
 )
 
+// maxUint256 is 2^256 - 1, the largest value an EVM storage word can hold.
+var maxUint256 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+
 // parseUint256 parses a balance/allowance override value supplied as either a
-// 0x-prefixed hex string or a plain decimal string.
+// 0x-prefixed hex string or a plain decimal string. The result is validated to
+// be a non-negative value that fits in a uint256, so it can never produce an
+// invalid EVM storage word.
 func parseUint256(value string) (*big.Int, error) {
 	v := strings.TrimSpace(value)
 	if v == "" {
 		return nil, fmt.Errorf("empty value")
 	}
+	var n *big.Int
+	var ok bool
 	if strings.HasPrefix(v, "0x") || strings.HasPrefix(v, "0X") {
-		n, ok := new(big.Int).SetString(v[2:], 16)
+		n, ok = new(big.Int).SetString(v[2:], 16)
 		if !ok {
 			return nil, fmt.Errorf("invalid hex value %q", value)
 		}
-		return n, nil
+	} else {
+		n, ok = new(big.Int).SetString(v, 10)
+		if !ok {
+			return nil, fmt.Errorf("invalid decimal value %q", value)
+		}
 	}
-	n, ok := new(big.Int).SetString(v, 10)
-	if !ok {
-		return nil, fmt.Errorf("invalid decimal value %q", value)
+	if n.Sign() < 0 {
+		return nil, fmt.Errorf("value %q must be non-negative", value)
+	}
+	if n.Cmp(maxUint256) > 0 {
+		return nil, fmt.Errorf("value %q exceeds uint256 max", value)
 	}
 	return n, nil
+}
+
+// erc20SlotOrDefault resolves the storage mapping slot for an override: the
+// caller's explicit slot when supplied (bounds-checked so an out-of-range
+// uint64 can't overflow into a bogus int64), otherwise the default slot for
+// that mapping. Tokens with non-standard layouts (e.g. USDC FiatToken at 9/10)
+// should pass the slot explicitly — see TENDERLY_STATE_OVERRIDES.md.
+func erc20SlotOrDefault(explicit *uint64, def int64) (int64, error) {
+	if explicit == nil {
+		return def, nil
+	}
+	if *explicit > math.MaxInt64 {
+		return 0, fmt.Errorf("storage slot %d exceeds the supported range", *explicit)
+	}
+	return int64(*explicit), nil
 }
 
 // ApplyUserERC20Override seeds the simulation state with a caller-supplied ERC20
@@ -499,9 +528,9 @@ func (s *SimulationStateMap) ApplyUserERC20Override(
 		if err != nil {
 			return fmt.Errorf("balance override: %w", err)
 		}
-		slot := defaultERC20BalanceSlot
-		if balanceSlot != nil {
-			slot = int64(*balanceSlot)
+		slot, err := erc20SlotOrDefault(balanceSlot, defaultERC20BalanceSlot)
+		if err != nil {
+			return fmt.Errorf("balance override: %w", err)
 		}
 		slotHash := erc20BalanceSlot(owner, slot)
 		s.SetStorageSlot(token.Hex(), slotHash.Hex(), fmt.Sprintf("0x%064x", bal))
@@ -524,9 +553,9 @@ func (s *SimulationStateMap) ApplyUserERC20Override(
 		if err != nil {
 			return fmt.Errorf("allowance override: %w", err)
 		}
-		slot := defaultERC20AllowanceSlot
-		if allowanceSlot != nil {
-			slot = int64(*allowanceSlot)
+		slot, err := erc20SlotOrDefault(allowanceSlot, defaultERC20AllowanceSlot)
+		if err != nil {
+			return fmt.Errorf("allowance override: %w", err)
 		}
 		slotHash := erc20AllowanceSlot(owner, spender, slot)
 		s.SetStorageSlot(token.Hex(), slotHash.Hex(), fmt.Sprintf("0x%064x", allow))

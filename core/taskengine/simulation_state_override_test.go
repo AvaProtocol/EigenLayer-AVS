@@ -1,7 +1,9 @@
 package taskengine
 
 import (
+	"math"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
@@ -26,6 +28,8 @@ func TestParseUint256(t *testing.T) {
 		{"empty", "", nil, true},
 		{"garbage", "0xnothex", nil, true},
 		{"not decimal", "12ab", nil, true},
+		{"negative decimal", "-1", nil, true},
+		{"exceeds uint256", "0x1" + strings.Repeat("0", 64), nil, true}, // 2^256 > 2^256-1
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -122,5 +126,14 @@ func TestApplyUserERC20Override_Validation(t *testing.T) {
 	t.Run("balance only is fine", func(t *testing.T) {
 		err := state.ApplyUserERC20Override(token, owner, "", "1", "", nil, nil)
 		assert.NoError(t, err)
+	})
+	t.Run("negative balance value rejected", func(t *testing.T) {
+		err := state.ApplyUserERC20Override(token, owner, "", "-1", "", nil, nil)
+		assert.Error(t, err)
+	})
+	t.Run("slot index out of int64 range rejected", func(t *testing.T) {
+		hugeSlot := uint64(math.MaxInt64) + 1
+		err := state.ApplyUserERC20Override(token, owner, "", "1", "", &hugeSlot, nil)
+		assert.Error(t, err)
 	})
 }
