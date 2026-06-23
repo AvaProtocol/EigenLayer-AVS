@@ -339,23 +339,22 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	// Initialize AI summarizer (global) from aggregator config
 	// Only context-memory API is supported - all email content generation is delegated to context-memory
 	// The aggregator acts as a pass-through for the context-memory response to SendGrid
-	contextMemorySummarizer := NewContextMemorySummarizerFromAggregatorConfig(config)
+	contextMemorySummarizer, err := NewContextMemorySummarizerFromAggregatorConfig(config)
+	if err != nil {
+		// notifications.summary is enabled but misconfigured — refuse to boot rather than
+		// silently fall back, so a broken summarizer config surfaces loudly at startup.
+		logger.Fatal("Invalid notifications.summary configuration — refusing to start", "error", err)
+		// Defense-in-depth: Logger.Fatal is interface-defined and not guaranteed to exit on
+		// every implementation (e.g. NoOpLogger.Fatal is a no-op). Force termination so a
+		// misconfiguration can never fall through to the deterministic-fallback path below.
+		os.Exit(1)
+	}
 	if contextMemorySummarizer != nil {
 		SetSummarizer(contextMemorySummarizer)
 		logger.Info("AI summarizer initialized", "provider", "context-memory", "base_url", config.NotificationsSummary.APIEndpoint)
 	} else {
-		// Log why context-memory is not available
-		if !config.NotificationsSummary.Enabled {
-			logger.Debug("Context-memory API not available: NotificationsSummary.Enabled is false")
-		} else if strings.ToLower(config.NotificationsSummary.Provider) != "context-memory" {
-			logger.Debug("Context-memory API not configured: provider is not 'context-memory'", "provider", config.NotificationsSummary.Provider)
-		} else if strings.TrimSpace(config.NotificationsSummary.APIEndpoint) == "" {
-			logger.Debug("Context-memory API not available: api_endpoint not configured in notifications.summary")
-		} else if strings.TrimSpace(config.NotificationsSummary.APIKey) == "" {
-			logger.Debug("Context-memory API not available: api_key not configured in notifications.summary")
-		}
-		// No summarizer configured - deterministic fallback will be used
-		logger.Debug("Context-memory API not configured, will use deterministic fallback")
+		// Summarization not enabled — the deterministic summarizer is used.
+		logger.Debug("notifications.summary.enabled is false; using deterministic summarizer")
 	}
 
 	// Initialize global macro variables and secrets from config

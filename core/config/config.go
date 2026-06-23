@@ -384,7 +384,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 	// Validate that the top-level smart_wallet is configured. This block is
 	// shared by the aa package globals (factory + entrypoint addresses), the
 	// startup paymaster probe, and any code path that explicitly takes the
-	// aggregator's default chain context (e.g. cmd/backfillWalletSaltIndex).
+	// aggregator's default chain context.
 	//
 	// In gateway mode there is no implicit fallback to chains[0] — the
 	// operator picks which chain the top-level represents and sets it

@@ -213,87 +213,14 @@ Before merging changes from `staging` to `main`, ensure any storage structure ch
 
 # Development guide
 
-View docs/Development.md
+See the [development guide](docs/Development.md).
 
 ## Testing
 
-### Test Configuration
-
-For integration tests that require interaction with blockchain networks, you need to configure test credentials:
-
-#### Required Environment Variables
-
-```bash
-# Owner EOA wallet of testing smart wallets (must have funds on test networks)
-OWNER_EOA=
-
-# Test network endpoints  
-SEPOLIA_RPC=https://your-sepolia-rpc-endpoint
-SEPOLIA_BUNDLER_RPC=https://your-sepolia-bundler-endpoint
-```
-
-#### Security Notice
-
-⚠️ **SECURITY WARNING**: 
-- Never use private keys containing real funds for testing
-- Use dedicated test keys funded only with testnet tokens
-- The fallback private key (all 1's) is insecure and only for development
-- Always configure proper test keys via environment variables or config files
-
-#### Test Key Setup
-
-1. Generate a new private key for testing (or use an existing test key)
-2. Fund the corresponding address with testnet tokens (Sepolia ETH, test USDC, etc.)
-3. Set the `OWNER_EOA` environment variable or add it to your config
-4. Ensure the key has sufficient balance for test transactions
-
-## Testing
-
-### Standard Tests
-
-The Makefile includes two primary test configurations:
-
-```bash
-# Default test suite
-go test -race -buildvcs -vet=off ./...
-
-# Verbose test output
-go test -v -race -buildvcs ./...
-```
-
-### Enhanced Test Output
-
-For improved test result formatting, use `gotestfmt`:
-
-1. Install the formatter:
-
-   ```bash
-   go install github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt@latest
-   ```
-
-2. Run once in the current terminal session to make Bash scripts more robust and error-aware.
-
-   ```bash
-   set -euo pipefail
-   ```
-
-3. Run tests with formatted output:
-
-   Run all tests with complete output:
-
-   ```base
-   go test -v ./...
-   ```
-
-   or, run selected test cases:
-
-   ```bash
-   go test -json -run ^TestRestRequestErrorHandling$ ./... 2>&1 | gotestfmt --hide=all
-   ```
-
-   The `--hide=all` flag suppresses output for skipped and successful tests, showing only failures. For more output configuration options, see the [gotestfmt documentation](https://github.com/GoTestTools/gotestfmt?tab=readme-ov-file#how-do-i-make-the-output-less-verbose).
-
-=======
+How to run the test suite locally — unit vs. integration tiers, the
+`config/test.yaml` fixture and `OWNER_EOA` setup, the security notes, and
+formatted output — lives in the development guide:
+**[Testing](docs/Development.md#testing)**.
 
 ## Linting and Code Quality
 

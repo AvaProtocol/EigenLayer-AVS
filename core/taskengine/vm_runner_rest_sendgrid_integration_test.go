@@ -20,12 +20,12 @@ import (
 // is correctly used to send a SendGrid email with the proper subject and summary fields.
 // This test uses the actual response format from the context-memory API.
 func TestSendGridEmailWithContextMemoryResponse(t *testing.T) {
-	// Load test config from gateway-dev.yaml
+	// Load test config from test.yaml
 	// Use GetTestRPC() to ensure config is loaded (it calls loadTestConfigOnce internally)
 	_ = testutil.GetTestRPC()
 	testConfig := testutil.GetTestConfig()
 	if testConfig == nil {
-		t.Fatal("Test config must be loaded from gateway-dev.yaml")
+		t.Fatal("Test config must be loaded from test.yaml")
 	}
 
 	// Extract SendGrid API key from config
@@ -84,7 +84,10 @@ func TestSendGridEmailWithContextMemoryResponse(t *testing.T) {
 	}
 	// Override context_api_endpoint to use mock server
 	mockConfig.MacroSecrets["context_api_endpoint"] = contextMemoryServer.URL
-	summarizer := NewContextMemorySummarizerFromAggregatorConfig(&mockConfig)
+	summarizer, err := NewContextMemorySummarizerFromAggregatorConfig(&mockConfig)
+	if err != nil {
+		t.Fatalf("Failed to create context-memory summarizer from config: %v", err)
+	}
 	if summarizer == nil {
 		t.Fatal("Failed to create context-memory summarizer from config")
 	}

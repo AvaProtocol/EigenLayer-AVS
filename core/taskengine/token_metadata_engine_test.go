@@ -25,7 +25,7 @@ func TestEngine_GetTokenMetadata(t *testing.T) {
 	err := os.Chdir("../..")
 	require.NoError(t, err)
 
-	// Load config from test config (gateway-dev.yaml)
+	// Load config from test config (test.yaml)
 	cfg := testutil.GetAggregatorConfig()
 
 	// Create engine with nil storage and queue (we only need token service for this test)

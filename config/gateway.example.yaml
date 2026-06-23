@@ -1,0 +1,101 @@
+# Gateway configuration TEMPLATE for local development.
+#
+# This is a checked-in template. The real file is gitignored — copy it
+# and fill in the placeholder values:
+#
+#   cp config/gateway.example.yaml config/gateway.yaml
+#   $EDITOR config/gateway.yaml
+#
+# Replaces per-chain aggregator configs. Routes tasks to chain workers
+# based on chain_id. Single DB for all chains; keys are chain-scoped
+# (t:{chain_id}:{status}:{task_id}).
+environment: development
+
+db_path: /tmp/ap-avs/gateway
+backup_dir: /tmp/ap-avs-gateway-backup
+
+# AVS operator EOA private key (testnet). Anything funded on Sepolia
+# will do — this signs EigenLayer registration + task-aggregation txs.
+ecdsa_private_key: <testnet-ecdsa-private-key-hex>
+
+# EigenLayer contracts live on Sepolia (the AVS registration chain).
+# Bring your own provider — public RPC works for low-volume dev.
+eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
+eth_ws_url:  wss://ethereum-sepolia-rpc.publicnode.com
+
+rpc_bind_address:  "0.0.0.0:2206"
+http_bind_address: "0.0.0.0:8080"
+
+avs_registry_coordinator_address: 0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD
+operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
+
+# HS256 signing key for client JWTs. Generate locally: `openssl rand -hex 16`
+jwt_secret: <random-hex-string>
+
+# Dev REST rate limits — high enough that the full v4 test suite
+# (~80 requests in a couple seconds) doesn't trip the bucket.
+# Production uses the middleware defaults (10/s, burst 50).
+rest_rate_limit_per_second: 200
+rest_rate_limit_burst: 1000
+
+server_name: "gateway"
+# Optional: Sentry DSN for error reporting (leave empty for no reporting).
+sentry_dsn: ""
+
+# Optional: Tenderly integration for transaction simulation.
+tenderly_account: ""
+tenderly_project: ""
+tenderly_access_key: ""
+
+# Top-level smart_wallet — required by the aa package globals (factory +
+# entrypoint), the startup paymaster probe, and any cmd tool that takes
+# the aggregator's default chain context. Points at Sepolia to match the
+# AVS chain above. Per-workflow execution still routes via chains[].
+smart_wallet:
+  eth_rpc_url:            https://ethereum-sepolia-rpc.publicnode.com
+  bundler_url:            ${SEPOLIA_BUNDLER_URL}
+  controller_private_key: <testnet-controller-private-key-hex>
+  paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
+
+# Chain worker registry — gateway routes tasks to workers by chain_id.
+# In production (Railway): worker-sepolia.railway.internal:50051
+# Locally: workers run on different localhost ports.
+chains:
+  - chain_id: 11155111
+    name: sepolia
+    worker_addr: "127.0.0.1:50051"
+    smart_wallet:
+      eth_rpc_url:            https://ethereum-sepolia-rpc.publicnode.com
+      eth_ws_url:             wss://ethereum-sepolia-rpc.publicnode.com
+      bundler_url:            ${SEPOLIA_BUNDLER_URL}
+      controller_private_key: <testnet-controller-private-key-hex>
+      paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
+      max_wallets_per_owner:  2000
+
+  - chain_id: 84532
+    name: base-sepolia
+    worker_addr: "127.0.0.1:50052"
+    smart_wallet:
+      eth_rpc_url:            https://sepolia.base.org
+      eth_ws_url:             wss://base-sepolia-rpc.publicnode.com
+      bundler_url:            ${BASE_SEPOLIA_BUNDLER_URL}
+      controller_private_key: <testnet-controller-private-key-hex>
+      paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
+      max_wallets_per_owner:  3
+
+# Optional: per-macro secret values referenced from workflow JSON.
+# Leave keys empty unless your local workflows actually use them.
+macros:
+  secrets:
+    ap_notify_bot_token: ""
+    sendgrid_key:        ""
+    thegraph_api_key:    ""
+    moralis_api_key:     ""
+
+# Optional: post-execution AI summarization. Disabled by default in dev.
+notifications:
+  summary:
+    enabled:      false
+    provider:     context-memory
+    api_endpoint: "http://localhost:3010"
+    api_key:      ""

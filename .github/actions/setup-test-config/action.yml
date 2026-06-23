@@ -1,5 +1,5 @@
 name: 'Setup Test Configuration'
-description: 'Generate config/aggregator.yaml for CI unit tests'
+description: 'Generate config/test.yaml for CI unit tests'
 inputs:
   chain-endpoint:
     description: 'Chain RPC endpoint domain (e.g., sepolia.infura.io/v3/KEY)'
@@ -28,7 +28,7 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Generate and verify config/aggregator.yaml
+    - name: Generate and verify config/test.yaml
       env:
         # Unified environment variables
         CHAIN_ENDPOINT: "${{ inputs.chain-endpoint }}"

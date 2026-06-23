@@ -34,9 +34,9 @@ func TestWithdrawAllETH_Sepolia(t *testing.T) {
 
 	if err != nil {
 		// Fallback to explicit path if GetConfigPath fails
-		cfg, err = config.NewConfig("../../config/gateway-dev.yaml")
+		cfg, err = config.NewConfig("../../config/test.yaml")
 		if err != nil {
-			t.Skipf("Failed to load gateway-dev.yaml: %v", err)
+			t.Skipf("Failed to load test.yaml: %v", err)
 		}
 	}
 
