@@ -10,7 +10,7 @@ var (
 	// Keep `semver` here roughly in sync with the latest release tag as a
 	// safety net — if a build slips through without ldflags, /health will
 	// still report something plausible rather than ancient history.
-	semver   = "3.10.4"
+	semver   = "3.11.0"
 	revision = "unknown"
 )
 
