@@ -1,0 +1,62 @@
+# Operator configuration TEMPLATE for Sepolia (chain 11155111).
+#
+# This is a checked-in template. The real file is gitignored — copy it
+# and fill in the placeholder values:
+#
+#   cp config/operator-sepolia.example.yaml config/operator-sepolia.yaml
+#   $EDITOR config/operator-sepolia.yaml
+#
+# The operator registers with EigenLayer, signs task results with its BLS
+# key, and connects to a gateway/aggregator. Running operators in any
+# hosted environment is configured from the avs-infra repo; this template
+# is for local development only.
+environment: development
+
+# Your operator EOA (must be registered with EigenLayer).
+operator_address: <operator-eoa-address>
+
+# AVS contracts (Sepolia testnet — the AVS registration chain).
+avs_registry_coordinator_address: 0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD
+operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
+
+# RPC endpoints for AVS operations (Sepolia). Public RPC works for dev.
+eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
+eth_ws_url:  wss://ethereum-sepolia-rpc.publicnode.com
+
+# Local key store paths (absolute paths to your testnet key files).
+ecdsa_private_key_store_path: <path-to-ecdsa-key.json>
+bls_private_key_store_path:   <path-to-bls-key.json>
+
+# Optional BLS remote signer (skip bls_private_key_store_path when used).
+# bls_remote_signer:
+#   grpc_url:   "127.0.0.1:50051"
+#   public_key: "<bls-public-key>"
+#   password:   ""
+
+# Gateway/aggregator the operator connects to (local dev gateway).
+aggregator_server_ip_port_address: "127.0.0.1:2206"
+
+# AVS node spec metrics / node API (https://eigen.nethermind.io/docs/spec/intro).
+eigen_metrics_ip_port_address: localhost:9090
+enable_metrics:                true
+node_api_ip_port_address:      localhost:9010
+enable_node_api:               true
+
+# Operator-local storage path.
+db_path: /tmp/ap-avs-operator
+
+# Optional error reporting.
+# sentry_dsn: ""
+# server_name: operator-sepolia-1
+# sentry_environment: staging
+
+# Destination chain where tasks run (Sepolia).
+target_chain:
+  eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
+  eth_ws_url:  wss://ethereum-sepolia-rpc.publicnode.com
+
+# Feature toggles.
+enabled_features:
+  # Event triggers need a websocket RPC that streams all on-chain events;
+  # this can be billing-heavy depending on your provider.
+  event_trigger: true

@@ -3,8 +3,8 @@
 # This is a checked-in template. The real file is gitignored — copy it
 # and fill in the placeholder values:
 #
-#   cp config/gateway-dev.example.yaml config/gateway-dev.yaml
-#   $EDITOR config/gateway-dev.yaml
+#   cp config/gateway.example.yaml config/gateway.yaml
+#   $EDITOR config/gateway.yaml
 #
 # Replaces per-chain aggregator configs. Routes tasks to chain workers
 # based on chain_id. Single DB for all chains; keys are chain-scoped
@@ -38,7 +38,7 @@ jwt_secret: <random-hex-string>
 rest_rate_limit_per_second: 200
 rest_rate_limit_burst: 1000
 
-server_name: "gateway-dev"
+server_name: "gateway"
 # Optional: Sentry DSN for error reporting (leave empty for no reporting).
 sentry_dsn: ""
 

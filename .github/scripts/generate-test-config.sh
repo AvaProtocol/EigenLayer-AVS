@@ -7,7 +7,7 @@ set -e
 #
 # test.example.yaml is the dedicated test-fixture template (multi-chain
 # shape); it shares the top-level fields the tests read. Despite the
-# neighbouring gateway-dev/operator configs, test.yaml is a fixture only —
+# neighbouring gateway/operator configs, test.yaml is a fixture only —
 # no server is started from it.
 
 echo "Generating test config files from test.example.yaml..."

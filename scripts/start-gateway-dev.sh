@@ -125,7 +125,7 @@ tmux split-window -t "$WIN" -v -p 50 -c "$PROJECT_DIR"
 tmux select-pane  -t "$WIN.2"
 tmux split-window -t "$WIN" -v -p 50 -c "$PROJECT_DIR"
 
-tmux send-keys -t "$WIN.0" "./out/ap aggregator --config=config/gateway-dev.yaml 2>&1 | tee gateway-dev.log" Enter
+tmux send-keys -t "$WIN.0" "./out/ap aggregator --config=config/gateway.yaml 2>&1 | tee gateway-dev.log" Enter
 
 if [[ "$START_OPERATOR" == "true" ]]; then
     tmux send-keys -t "$WIN.1" "./out/ap operator --config=config/operator-sepolia.yaml 2>&1 | tee operator-dev.log" Enter
@@ -133,8 +133,8 @@ else
     tmux send-keys -t "$WIN.1" "echo 'Operator not started. Re-run with --operator (or pass operator as the first positional arg).'" Enter
 fi
 
-tmux send-keys -t "$WIN.2" "./out/ap worker --config=config/worker-sepolia-dev.yaml 2>&1 | tee worker-sepolia-dev.log" Enter
-tmux send-keys -t "$WIN.3" "./out/ap worker --config=config/worker-base-sepolia-dev.yaml 2>&1 | tee worker-base-sepolia-dev.log" Enter
+tmux send-keys -t "$WIN.2" "./out/ap worker --config=config/worker-sepolia.yaml 2>&1 | tee worker-sepolia-dev.log" Enter
+tmux send-keys -t "$WIN.3" "./out/ap worker --config=config/worker-base-sepolia.yaml 2>&1 | tee worker-base-sepolia-dev.log" Enter
 
 tmux select-pane -t "$WIN.0"
 

@@ -21,8 +21,8 @@ For a node that connects to Ava's pre-deployed AVS contract, copy the
 template config and fill in the placeholder values:
 
 ```bash
-cp config/gateway-dev.example.yaml config/gateway-dev.yaml
-$EDITOR config/gateway-dev.yaml
+cp config/gateway.example.yaml config/gateway.yaml
+$EDITOR config/gateway.yaml
 ```
 
 The default `chains:` block in the template covers Sepolia + Base
@@ -35,14 +35,14 @@ Then build + run:
 # Build the application
 make build
 
-# Start the local-dev gateway (serves every chain in config/gateway-dev.yaml)
-make gateway-dev
+# Start the local-dev gateway (serves every chain in config/gateway.yaml)
+make gateway
 ```
 
 The legacy `make aggregator-<chain>` targets were retired when the
 Hetzner→Railway migration consolidated the per-chain aggregator
 pattern into a single multi-chain gateway. They now print a
-deprecation notice pointing at `make gateway-dev`.
+deprecation notice pointing at `make gateway`.
 
 Or use Docker Compose directly:
 
@@ -96,7 +96,7 @@ make dev-live
 - WebSocket connections from operators (they must reconnect)
 - In-memory state and queued jobs
 
-Persistent storage (BadgerDB) survives restarts. For testing complete workflows or debugging stateful operations, consider using manual restarts (`make gateway-dev`) instead.
+Persistent storage (BadgerDB) survives restarts. For testing complete workflows or debugging stateful operations, consider using manual restarts (`make gateway`) instead.
 
 ## Client SDK
 
