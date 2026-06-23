@@ -26,15 +26,11 @@ func TestContractWriteNode_UniswapV3Quote(t *testing.T) {
 	// Get test configuration and create Tenderly client
 	logger := testutil.GetLogger()
 	testConfig := testutil.GetTestConfig()
-	if testConfig == nil {
-		t.Skip("No test config available (requires aggregator.yaml + Tenderly)")
-	}
+	require.NotNil(t, testConfig, "Test config must be loaded from config/test.yaml (Tenderly creds required)")
 
 	// Create Tenderly client
 	tenderlyClient := NewTenderlyClient(testConfig, logger)
-	if tenderlyClient == nil {
-		t.Skip("No Tenderly client available")
-	}
+	require.NotNil(t, tenderlyClient, "Tenderly client must be created")
 
 	// Setup the test VM with necessary config
 	smartWalletConfig := testutil.GetTestSmartWalletConfig()
