@@ -88,6 +88,9 @@ func (s *Service) PerformBackup() (string, error) {
 	backupFile := filepath.Join(backupPath, "full-backup.db")
 	f, err := os.Create(backupFile)
 	if err != nil {
+		// Remove the just-created timestamp dir so a failed attempt doesn't linger as an
+		// orphan that pruneOldBackups would count toward backupRetention.
+		os.RemoveAll(backupPath)
 		return "", fmt.Errorf("failed to create backup file: %v", err)
 	}
 	defer f.Close()
@@ -96,6 +99,10 @@ func (s *Service) PerformBackup() (string, error) {
 	since := uint64(0) // Full backup
 	_, err = s.db.Backup(context.Background(), f, since)
 	if err != nil {
+		// Drop the partial backup: its timestamp dir + empty/partial full-backup.db would
+		// otherwise count toward backupRetention and prune a valid backup on the next success.
+		f.Close()
+		os.RemoveAll(backupPath)
 		return "", fmt.Errorf("backup operation failed: %v", err)
 	}
 

@@ -122,7 +122,10 @@ func NewContextMemorySummarizerFromAggregatorConfig(c *config.Config) (Summarize
 		return nil, nil // Not enabled — deterministic fallback is used.
 	}
 	if strings.ToLower(c.NotificationsSummary.Provider) != "context-memory" {
-		return nil, fmt.Errorf("notifications.summary.enabled is true but provider %q is unsupported (expected \"context-memory\")", c.NotificationsSummary.Provider)
+		// NOTE: "context-memory" is a legacy provider identifier — the endpoint now points at
+		// Studio's /api/summarize, not the retired context-memory service. The string is kept
+		// for config back-compat; don't be misled by the name.
+		return nil, fmt.Errorf("notifications.summary.enabled is true but provider %q is unsupported (expected \"context-memory\" — a legacy identifier; the endpoint now points at Studio)", c.NotificationsSummary.Provider)
 	}
 	baseURL := strings.TrimSpace(c.NotificationsSummary.APIEndpoint)
 	if baseURL == "" {

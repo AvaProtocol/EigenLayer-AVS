@@ -344,6 +344,10 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 		// notifications.summary is enabled but misconfigured — refuse to boot rather than
 		// silently fall back, so a broken summarizer config surfaces loudly at startup.
 		logger.Fatal("Invalid notifications.summary configuration — refusing to start", "error", err)
+		// Defense-in-depth: Logger.Fatal is interface-defined and not guaranteed to exit on
+		// every implementation (e.g. NoOpLogger.Fatal is a no-op). Force termination so a
+		// misconfiguration can never fall through to the deterministic-fallback path below.
+		os.Exit(1)
 	}
 	if contextMemorySummarizer != nil {
 		SetSummarizer(contextMemorySummarizer)
