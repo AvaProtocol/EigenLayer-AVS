@@ -3,6 +3,7 @@ package taskengine
 import (
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
@@ -10,6 +11,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -411,21 +413,31 @@ func TestRunNodeImmediatelyRPC(t *testing.T) {
 	// SimulationStateMap → Tenderly state_objects — rather than calling
 	// ApplyUserERC20Override directly.
 	//
-	// The control run (no overrides) is informational; the assertion that proves
-	// the feature is on the override run: the simulation no longer reverts on the
-	// allowance/balance precondition.
+	// It uses a deterministic, never-funded owner so the counterfactual salt:0
+	// runner is guaranteed to hold 0 USDC and 0 allowance. That makes the proof
+	// self-contained and robust (no dependency on a shared wallet staying
+	// funded/unapproved) and lets us isolate BOTH override paths:
+	//
+	//   1. no overrides      → reverts on the allowance precondition
+	//   2. allowance only    → reverts on the *balance* precondition (so the
+	//                          balance override is provably load-bearing)
+	//   3. balance+allowance → swap simulates cleanly
+	//
+	// This requires Tenderly creds (config/test.yaml); per project convention for
+	// integration tests we hard-fail rather than skip when they are missing.
 	t.Run("ERC20Overrides_UniswapSwap", func(t *testing.T) {
 		db := testutil.TestMustDB()
 		defer storage.Destroy(db.(*storage.BadgerStorage))
 
 		config := testutil.GetAggregatorConfig()
+		require.NotEmpty(t, config.TenderlyAccessKey,
+			"erc20_overrides E2E test requires Tenderly creds in config/test.yaml (tenderly_account/project/access_key)")
 		engine := New(db, config, nil, testutil.GetLogger())
 
-		ownerAddr, ok := testutil.MustGetTestOwnerAddress()
-		if !ok {
-			t.Skip("OWNER_EOA not set, skipping erc20_overrides E2E test")
-		}
-		ownerEOA := *ownerAddr
+		// Deterministic throwaway owner — its salt:0 smart wallet has never held
+		// USDC nor approved SwapRouter02 on Sepolia, so the control reverts
+		// reliably and the balance override is never masked by a real balance.
+		ownerEOA := common.HexToAddress("0xe8a78b476AE1403b7fD39b662545AE608Aced7c7")
 
 		aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
 		client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
@@ -450,62 +462,64 @@ func TestRunNodeImmediatelyRPC(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		newReq := func(overrides []*avsproto.ERC20StateOverride) *avsproto.RunNodeWithInputsReq {
-			return &avsproto.RunNodeWithInputsReq{
+		runSwap := func(overrides []*avsproto.ERC20StateOverride) *avsproto.RunNodeWithInputsResp {
+			resp, err := engine.RunNodeImmediatelyRPC(user, &avsproto.RunNodeWithInputsReq{
 				Node:           exactInputSingleSwapNode(runner),
 				InputVariables: map[string]*structpb.Value{"settings": settingsVal},
 				Erc20Overrides: overrides,
-			}
+			})
+			require.NoError(t, err, "RunNodeImmediatelyRPC should not error")
+			require.NotNil(t, resp)
+			return resp
 		}
 
-		// Control: no overrides. Informational only — the runner may or may not be
-		// funded/approved on Sepolia, so we just log how it behaves.
-		control, err := engine.RunNodeImmediatelyRPC(user, newReq(nil))
-		require.NoError(t, err)
-		require.NotNil(t, control)
-		t.Logf("control (no overrides): success=%v error=%q", control.Success, control.Error)
-
-		// Seed the runner's USDC balance and its approval for SwapRouter02 via the
-		// request. USDC on Sepolia is a FiatToken (balance slot 9, allowance slot
-		// 10); we also cover the standard ERC20 layout (balance 0, allowance 3) so
-		// the override lands regardless of the deployed token's storage layout. Each
-		// entry drives a distinct slot through the real request → proto →
-		// simulation-state path.
+		// USDC on Sepolia is Circle's FiatToken: balanceOf at storage slot 9 and
+		// allowance at slot 10 (confirmed empirically against the deployed token).
 		maxAllowance := "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-		bigBalance := "0x38d7ea4c68000" // 1,000,000 USDC
-		overrides := []*avsproto.ERC20StateOverride{}
-		for _, slot := range []uint64{0, 9} {
-			overrides = append(overrides, &avsproto.ERC20StateOverride{
-				TokenAddress: overridesUSDC,
-				OwnerAddress: runner,
-				Balance:      strPtr(bigBalance),
-				BalanceSlot:  u64Ptr(slot),
-			})
+		bigBalance := "0x38d7ea4c68000" // 1,000,000 USDC (6 decimals)
+		balanceOverride := &avsproto.ERC20StateOverride{
+			TokenAddress: overridesUSDC,
+			OwnerAddress: runner,
+			Balance:      strPtr(bigBalance),
+			BalanceSlot:  u64Ptr(9),
 		}
-		for _, slot := range []uint64{3, 10} {
-			overrides = append(overrides, &avsproto.ERC20StateOverride{
-				TokenAddress:   overridesUSDC,
-				OwnerAddress:   runner,
-				SpenderAddress: strPtr(overridesSwapRouter02),
-				Allowance:      strPtr(maxAllowance),
-				AllowanceSlot:  u64Ptr(slot),
-			})
+		allowanceOverride := &avsproto.ERC20StateOverride{
+			TokenAddress:   overridesUSDC,
+			OwnerAddress:   runner,
+			SpenderAddress: strPtr(overridesSwapRouter02),
+			Allowance:      strPtr(maxAllowance),
+			AllowanceSlot:  u64Ptr(10),
 		}
 
-		result, err := engine.RunNodeImmediatelyRPC(user, newReq(overrides))
-		require.NoError(t, err, "RunNodeImmediatelyRPC should not error")
-		require.NotNil(t, result)
-		t.Logf("with overrides: success=%v error=%q", result.Success, result.Error)
+		// 1. No overrides → reverts because the runner has no SwapRouter02 approval.
+		control := runSwap(nil)
+		t.Logf("no overrides       : success=%v error=%q", control.Success, control.Error)
+		require.False(t, control.Success, "unfunded/unapproved runner must not swap without overrides")
+		require.True(t, isFundingOrApprovalRevert(control.Error),
+			"control should revert on the allowance/balance precondition, got: "+control.Error)
 
-		// The feature's contract: with balance + allowance seeded through the
-		// request, the simulation must not revert on the funding/approval
-		// precondition. Any remaining revert (e.g. pool liquidity) is unrelated.
-		assert.NotContains(t, result.Error, "transfer amount exceeds allowance",
-			"erc20_overrides should have seeded the allowance through the RPC path")
-		assert.NotContains(t, result.Error, "transfer amount exceeds balance",
-			"erc20_overrides should have seeded the balance through the RPC path")
+		// 2. Allowance only → approval now satisfied, so it must revert on the
+		//    *balance* precondition. This proves the balance override is necessary
+		//    and that the allowance override already flowed through the RPC path.
+		allowOnly := runSwap([]*avsproto.ERC20StateOverride{allowanceOverride})
+		t.Logf("allowance only     : success=%v error=%q", allowOnly.Success, allowOnly.Error)
+		require.False(t, allowOnly.Success, "swap must still fail with balance unseeded")
+		assert.NotContains(t, allowOnly.Error, "transfer amount exceeds allowance",
+			"allowance override should have seeded the approval through the RPC path")
+		assert.Contains(t, allowOnly.Error, "transfer amount exceeds balance",
+			"with approval seeded but balance unseeded, the swap must revert on balance")
+
+		// 3. Balance + allowance → both preconditions seeded through the request,
+		//    so the swap simulates cleanly. The flip from (2) to (3) is the
+		//    decisive proof that the balance override reaches the Tenderly sim.
+		result := runSwap([]*avsproto.ERC20StateOverride{balanceOverride, allowanceOverride})
+		t.Logf("balance + allowance: success=%v error=%q", result.Success, result.Error)
+		assert.NotContains(t, result.Error, "transfer amount exceeds allowance")
+		assert.NotContains(t, result.Error, "transfer amount exceeds balance")
 		assert.NotContains(t, result.Error, "STF",
 			"Uniswap TransferHelper 'STF' means transferFrom failed — overrides should prevent it")
+		assert.Truef(t, result.Success,
+			"swap simulation should succeed once erc20_overrides seed balance+allowance, got error=%q", result.Error)
 	})
 }
 
@@ -520,6 +534,15 @@ const (
 
 func strPtr(s string) *string { return &s }
 func u64Ptr(v uint64) *uint64 { return &v }
+
+// isFundingOrApprovalRevert reports whether a simulation error is the
+// ERC20 funding/approval precondition that erc20_overrides exist to seed —
+// either the OpenZeppelin-style messages or Uniswap's TransferHelper "STF".
+func isFundingOrApprovalRevert(errMsg string) bool {
+	return strings.Contains(errMsg, "transfer amount exceeds allowance") ||
+		strings.Contains(errMsg, "transfer amount exceeds balance") ||
+		strings.Contains(errMsg, "STF")
+}
 
 // exactInputSingleSwapNode builds a SwapRouter02.exactInputSingle contractWrite
 // node that pulls `amountIn` USDC from the runner via transferFrom — the exact
