@@ -35,14 +35,14 @@ import (
 
 const (
 	// DefaultConfigPath is the default config file tests load. Points at
-	// the gateway-dev.yaml fixture (multi-chain shape), whose top-level
+	// the test.yaml fixture (multi-chain shape), whose top-level
 	// fields — eth_rpc_url, ecdsa_private_key, smart_wallet block,
 	// tenderly_* — are read by testutil/utils.go just like the legacy
 	// aggregator-sepolia.yaml's were. Tests that need a chain other than
 	// the default Sepolia can still call config.NewConfig() with an
 	// explicit path (see GetConfigPath below) — e.g. a Base-specific
 	// integration test.
-	DefaultConfigPath = "gateway-dev.yaml"
+	DefaultConfigPath = "test.yaml"
 )
 
 var testConfig *config.Config
@@ -134,7 +134,7 @@ func loadTestConfigOnce() {
 
 // GetConfigPath returns the absolute path to a config file from the repo root.
 // This is useful for tests that need to load config files explicitly.
-// Example: GetConfigPath(testutil.DefaultConfigPath) or GetConfigPath("gateway-dev.yaml")
+// Example: GetConfigPath(testutil.DefaultConfigPath) or GetConfigPath("test.yaml")
 func GetConfigPath(configFileName string) string {
 	if _, thisFile, _, ok := runtime.Caller(0); ok {
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../.."))
@@ -155,10 +155,10 @@ func GetTestConfig() *config.Config {
 func GetTestRPC() string {
 	loadTestConfigOnce()
 	if testConfig == nil {
-		panic("testConfig is nil - gateway-dev.yaml config must be loaded")
+		panic("testConfig is nil - test.yaml config must be loaded")
 	}
 	if testConfig.EthHttpRpcUrl == "" {
-		panic("EthHttpRpcUrl is empty in gateway-dev.yaml config")
+		panic("EthHttpRpcUrl is empty in test.yaml config")
 	}
 	return testConfig.EthHttpRpcUrl
 }
@@ -168,7 +168,7 @@ func GetTestRPC() string {
 func GetTestWsRPC() string {
 	loadTestConfigOnce()
 	if testConfig == nil {
-		panic("testConfig is nil - gateway-dev.yaml config must be loaded")
+		panic("testConfig is nil - test.yaml config must be loaded")
 	}
 	if testConfig.EthWsRpcUrl != "" {
 		return testConfig.EthWsRpcUrl
@@ -177,7 +177,7 @@ func GetTestWsRPC() string {
 	if http := GetTestRPC(); strings.HasPrefix(http, "https://") {
 		return strings.Replace(http, "https://", "wss://", 1)
 	}
-	panic("EthWsRpcUrl is empty in gateway-dev.yaml config and cannot derive from EthHttpRpcUrl")
+	panic("EthWsRpcUrl is empty in test.yaml config and cannot derive from EthHttpRpcUrl")
 }
 
 // GetTestBundlerRPC returns the bundler RPC URL for tests from aggregator config
@@ -185,13 +185,13 @@ func GetTestWsRPC() string {
 func GetTestBundlerRPC() string {
 	loadTestConfigOnce()
 	if testConfig == nil {
-		panic("testConfig is nil - gateway-dev.yaml config must be loaded")
+		panic("testConfig is nil - test.yaml config must be loaded")
 	}
 	if testConfig.SmartWallet == nil {
-		panic("SmartWallet config is nil in gateway-dev.yaml")
+		panic("SmartWallet config is nil in test.yaml")
 	}
 	if testConfig.SmartWallet.BundlerURL == "" {
-		panic("BundlerURL is empty in gateway-dev.yaml config")
+		panic("BundlerURL is empty in test.yaml config")
 	}
 	return testConfig.SmartWallet.BundlerURL
 }
@@ -201,10 +201,10 @@ func GetTestBundlerRPC() string {
 func GetTestTenderlyAccount() string {
 	loadTestConfigOnce()
 	if testConfig == nil {
-		panic("testConfig is nil - gateway-dev.yaml config must be loaded")
+		panic("testConfig is nil - test.yaml config must be loaded")
 	}
 	if testConfig.TenderlyAccount == "" {
-		panic("TenderlyAccount is empty in gateway-dev.yaml config")
+		panic("TenderlyAccount is empty in test.yaml config")
 	}
 	return testConfig.TenderlyAccount
 }
@@ -214,10 +214,10 @@ func GetTestTenderlyAccount() string {
 func GetTestTenderlyProject() string {
 	loadTestConfigOnce()
 	if testConfig == nil {
-		panic("testConfig is nil - gateway-dev.yaml config must be loaded")
+		panic("testConfig is nil - test.yaml config must be loaded")
 	}
 	if testConfig.TenderlyProject == "" {
-		panic("TenderlyProject is empty in gateway-dev.yaml config")
+		panic("TenderlyProject is empty in test.yaml config")
 	}
 	return testConfig.TenderlyProject
 }
@@ -227,10 +227,10 @@ func GetTestTenderlyProject() string {
 func GetTestTenderlyAccessKey() string {
 	loadTestConfigOnce()
 	if testConfig == nil {
-		panic("testConfig is nil - gateway-dev.yaml config must be loaded")
+		panic("testConfig is nil - test.yaml config must be loaded")
 	}
 	if testConfig.TenderlyAccessKey == "" {
-		panic("TenderlyAccessKey is empty in gateway-dev.yaml config")
+		panic("TenderlyAccessKey is empty in test.yaml config")
 	}
 	return testConfig.TenderlyAccessKey
 }
@@ -271,13 +271,13 @@ func MustGetTestOwnerAddress() (*common.Address, bool) {
 func GetTestControllerPrivateKey() string {
 	loadTestConfigOnce()
 	if testConfig == nil {
-		panic("testConfig is nil - gateway-dev.yaml config must be loaded")
+		panic("testConfig is nil - test.yaml config must be loaded")
 	}
 	if testConfig.SmartWallet == nil {
-		panic("SmartWallet config is nil in gateway-dev.yaml")
+		panic("SmartWallet config is nil in test.yaml")
 	}
 	if testConfig.SmartWallet.ControllerPrivateKey == nil {
-		panic("ControllerPrivateKey is nil in gateway-dev.yaml config")
+		panic("ControllerPrivateKey is nil in test.yaml config")
 	}
 	return fmt.Sprintf("%x", testConfig.SmartWallet.ControllerPrivateKey.D)
 }
@@ -286,10 +286,10 @@ func GetTestControllerPrivateKey() string {
 // Panics if config is not loaded or SmartWallet is nil
 func GetTestFactoryAddress() string {
 	if testConfig == nil {
-		panic("testConfig is nil - gateway-dev.yaml config must be loaded")
+		panic("testConfig is nil - test.yaml config must be loaded")
 	}
 	if testConfig.SmartWallet == nil {
-		panic("SmartWallet config is nil in gateway-dev.yaml")
+		panic("SmartWallet config is nil in test.yaml")
 	}
 	return testConfig.SmartWallet.FactoryAddress.Hex()
 }
@@ -298,10 +298,10 @@ func GetTestFactoryAddress() string {
 // Panics if config is not loaded or SmartWallet is nil
 func GetTestEntrypointAddress() string {
 	if testConfig == nil {
-		panic("testConfig is nil - gateway-dev.yaml config must be loaded")
+		panic("testConfig is nil - test.yaml config must be loaded")
 	}
 	if testConfig.SmartWallet == nil {
-		panic("SmartWallet config is nil in gateway-dev.yaml")
+		panic("SmartWallet config is nil in test.yaml")
 	}
 	return testConfig.SmartWallet.EntrypointAddress.Hex()
 }
@@ -310,11 +310,11 @@ func GetTestEntrypointAddress() string {
 // Panics if config is not loaded or SmartWallet is nil
 func GetTestPaymasterAddress() string {
 	if testConfig == nil {
-		panic("testConfig is nil - gateway-dev.yaml config must be loaded")
+		panic("testConfig is nil - test.yaml config must be loaded")
 	}
 
 	if testConfig.SmartWallet == nil {
-		panic("SmartWallet config is nil in gateway-dev.yaml")
+		panic("SmartWallet config is nil in test.yaml")
 	}
 
 	return testConfig.SmartWallet.PaymasterAddress.Hex()
@@ -503,7 +503,7 @@ func GetAggregatorConfig() *config.Config {
 		TenderlyAccount:   GetTestTenderlyAccount(),
 		TenderlyProject:   GetTestTenderlyProject(),
 		TenderlyAccessKey: GetTestTenderlyAccessKey(),
-		// Include MacroSecrets from loaded gateway-dev.yaml
+		// Include MacroSecrets from loaded test.yaml
 		MacroSecrets: macroSecrets,
 	}
 }

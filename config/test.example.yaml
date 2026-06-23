@@ -1,21 +1,26 @@
-# Gateway configuration TEMPLATE for local development.
+# Test configuration TEMPLATE for running the Go test suite locally.
+#
+# This is the fixture that the test suite loads (testutil.DefaultConfigPath).
+# Despite living next to the gateway/operator configs, you do NOT run any
+# server with it — it only supplies the RPC endpoint + Tenderly credentials
+# that integration/simulation tests read.
 #
 # This is a checked-in template. The real file is gitignored — copy it
 # and fill in the placeholder values:
 #
-#   cp config/gateway-dev.example.yaml config/gateway-dev.yaml
-#   $EDITOR config/gateway-dev.yaml
+#   cp config/test.example.yaml config/test.yaml
+#   $EDITOR config/test.yaml
 #
-# Replaces per-chain aggregator configs. Routes tasks to chain workers
-# based on chain_id. Single DB for all chains; keys are chain-scoped
-# (t:{chain_id}:{status}:{task_id}).
+# Pure unit tests need none of this. Only integration/simulation tests
+# (Tenderly contract-write sims, on-chain reads) require a populated
+# config/test.yaml; without it they t.Skip or panic with "testConfig is nil".
 environment: development
 
-db_path: /tmp/ap-avs/gateway
-backup_dir: /tmp/ap-avs-gateway-backup
+db_path: /tmp/ap-avs/test
+backup_dir: /tmp/ap-avs-test-backup
 
 # AVS operator EOA private key (testnet). Anything funded on Sepolia
-# will do — this signs EigenLayer registration + task-aggregation txs.
+# will do — a throwaway key is fine for tests.
 ecdsa_private_key: <testnet-ecdsa-private-key-hex>
 
 # EigenLayer contracts live on Sepolia (the AVS registration chain).
@@ -34,32 +39,28 @@ jwt_secret: <random-hex-string>
 
 # Dev REST rate limits — high enough that the full v4 test suite
 # (~80 requests in a couple seconds) doesn't trip the bucket.
-# Production uses the middleware defaults (10/s, burst 50).
 rest_rate_limit_per_second: 200
 rest_rate_limit_burst: 1000
 
-server_name: "gateway-dev"
-# Optional: Sentry DSN for error reporting (leave empty for no reporting).
+server_name: "test"
 sentry_dsn: ""
 
-# Optional: Tenderly integration for transaction simulation.
+# Tenderly integration — REQUIRED for contract-write simulation tests
+# (e.g. the Uniswap override tests). Fill in your own Tenderly account.
 tenderly_account: ""
 tenderly_project: ""
 tenderly_access_key: ""
 
 # Top-level smart_wallet — required by the aa package globals (factory +
-# entrypoint), the startup paymaster probe, and any cmd tool that takes
-# the aggregator's default chain context. Points at Sepolia to match the
-# AVS chain above. Per-workflow execution still routes via chains[].
+# entrypoint) and any test that takes the default chain context.
 smart_wallet:
   eth_rpc_url:            https://ethereum-sepolia-rpc.publicnode.com
   bundler_url:            ${SEPOLIA_BUNDLER_URL}
   controller_private_key: <testnet-controller-private-key-hex>
   paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
 
-# Chain worker registry — gateway routes tasks to workers by chain_id.
-# In production (Railway): worker-sepolia.railway.internal:50051
-# Locally: workers run on different localhost ports.
+# Chain worker registry. Tests read the top-level fields above; the
+# chains[] block mirrors the gateway shape so the config loader is happy.
 chains:
   - chain_id: 11155111
     name: sepolia
@@ -84,7 +85,6 @@ chains:
       max_wallets_per_owner:  3
 
 # Optional: per-macro secret values referenced from workflow JSON.
-# Leave keys empty unless your local workflows actually use them.
 macros:
   secrets:
     ap_notify_bot_token: ""
@@ -92,7 +92,7 @@ macros:
     thegraph_api_key:    ""
     moralis_api_key:     ""
 
-# Optional: post-execution AI summarization. Disabled by default in dev.
+# Optional: post-execution AI summarization. Disabled by default in tests.
 notifications:
   summary:
     enabled:      false

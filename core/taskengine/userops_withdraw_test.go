@@ -438,9 +438,9 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
 	if err != nil {
 		// Fallback to explicit path if GetConfigPath fails
-		cfg, err = config.NewConfig("../../config/gateway-dev.yaml")
+		cfg, err = config.NewConfig("../../config/test.yaml")
 		if err != nil {
-			t.Skipf("Failed to load gateway-dev.yaml: %v", err)
+			t.Skipf("Failed to load test.yaml: %v", err)
 		}
 	}
 

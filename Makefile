@@ -202,24 +202,24 @@ build:
 		-o ./out/ap \
 		-ldflags "$(VERSION_LDFLAGS)"
 
-## gateway-dev: start the local-dev gateway (replaces the legacy per-chain aggregator targets)
+## gateway: start the local-dev gateway (replaces the legacy per-chain aggregator targets)
 ##
 ## The pre-Railway "one aggregator per chain" Makefile targets
 ## (aggregator-sepolia / aggregator-ethereum / aggregator-base /
 ## aggregator-base-sepolia) have been consolidated into this single
-## gateway target. The gateway-dev.yaml config carries the per-chain
+## gateway target. The gateway.yaml config carries the per-chain
 ## blocks (Sepolia + Base Sepolia by default; add more under
 ## `chains:` to fan out further). See config/README.md for the
 ## current layout.
-.PHONY: gateway-dev
-gateway-dev: build
-	@echo "🚀 Starting local-dev gateway (config/gateway-dev.yaml)..."
-	@echo "📝 Logs will be written to gateway-dev.log"
-	./out/ap aggregator --config=config/gateway-dev.yaml 2>&1 | tee gateway-dev.log
+.PHONY: gateway
+gateway: build
+	@echo "🚀 Starting local-dev gateway (config/gateway.yaml)..."
+	@echo "📝 Logs will be written to gateway.log"
+	./out/ap aggregator --config=config/gateway.yaml 2>&1 | tee gateway.log
 
 # Legacy per-chain aggregator targets retained as redirects so muscle
 # memory and old runbooks still work. They print a deprecation notice
-# pointing at `make gateway-dev`, then fail rather than silently doing
+# pointing at `make gateway`, then fail rather than silently doing
 # something different from what the caller meant.
 .PHONY: aggregator aggregator-sepolia aggregator-ethereum aggregator-base aggregator-base-sepolia
 aggregator aggregator-sepolia aggregator-ethereum aggregator-base aggregator-base-sepolia:
@@ -227,10 +227,10 @@ aggregator aggregator-sepolia aggregator-ethereum aggregator-base aggregator-bas
 	@echo "   The pre-Railway per-chain aggregator pattern has been"
 	@echo "   consolidated into the multi-chain gateway. Use:"
 	@echo ""
-	@echo "       make gateway-dev"
+	@echo "       make gateway"
 	@echo ""
 	@echo "   to start the local-dev gateway. The chains it serves are"
-	@echo "   listed under \`chains:\` in config/gateway-dev.yaml."
+	@echo "   listed under \`chains:\` in config/gateway.yaml."
 	@exit 1
 ## operator: show usage for operator commands
 .PHONY: operator operator-sepolia operator-ethereum operator-base operator-base-sepolia
@@ -276,21 +276,21 @@ dev-gateway: build
 	@mkdir -p logs
 	@echo "🚀 Starting gateway (dev) — REST :8080, gRPC :2206"
 	@echo "📝 Logs: logs/gateway.log"
-	./out/ap aggregator --config=config/gateway-dev.yaml 2>&1 | tee logs/gateway.log
+	./out/ap aggregator --config=config/gateway.yaml 2>&1 | tee logs/gateway.log
 
 ## dev-worker-sepolia: run the sepolia chain worker (gRPC 50051)
 dev-worker-sepolia: build
 	@mkdir -p logs
 	@echo "🛠  Starting worker:sepolia (dev) — gRPC :50051"
 	@echo "📝 Logs: logs/worker-sepolia.log"
-	./out/ap worker --config=config/worker-sepolia-dev.yaml 2>&1 | tee logs/worker-sepolia.log
+	./out/ap worker --config=config/worker-sepolia.yaml 2>&1 | tee logs/worker-sepolia.log
 
 ## dev-worker-base-sepolia: run the base-sepolia chain worker (gRPC 50052)
 dev-worker-base-sepolia: build
 	@mkdir -p logs
 	@echo "🛠  Starting worker:base-sepolia (dev) — gRPC :50052"
 	@echo "📝 Logs: logs/worker-base-sepolia.log"
-	./out/ap worker --config=config/worker-base-sepolia-dev.yaml 2>&1 | tee logs/worker-base-sepolia.log
+	./out/ap worker --config=config/worker-base-sepolia.yaml 2>&1 | tee logs/worker-base-sepolia.log
 
 ## dev-operator-sepolia: run the sepolia operator pointed at the dev gateway
 dev-operator-sepolia: build
@@ -320,10 +320,10 @@ dev-stack: build
 	@echo ""
 	@set -m; \
 		trap 'echo; echo "🛑 Stopping dev stack..."; kill 0 2>/dev/null; exit 0' INT TERM; \
-		./out/ap worker --config=config/worker-sepolia-dev.yaml      > logs/worker-sepolia.log      2>&1 & \
-		./out/ap worker --config=config/worker-base-sepolia-dev.yaml > logs/worker-base-sepolia.log 2>&1 & \
+		./out/ap worker --config=config/worker-sepolia.yaml      > logs/worker-sepolia.log      2>&1 & \
+		./out/ap worker --config=config/worker-base-sepolia.yaml > logs/worker-base-sepolia.log 2>&1 & \
 		sleep 1; \
-		./out/ap aggregator --config=config/gateway-dev.yaml         > logs/gateway.log             2>&1 & \
+		./out/ap aggregator --config=config/gateway.yaml         > logs/gateway.log             2>&1 & \
 		sleep 3; \
 		./out/ap operator   --config=config/operator-sepolia.yaml    > logs/operator-sepolia.log    2>&1 & \
 		wait

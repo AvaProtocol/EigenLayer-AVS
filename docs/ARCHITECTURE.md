@@ -273,7 +273,7 @@ Data format: Protocol Buffer JSON serialization. Migrations run on startup (idem
 
 Environment-specific YAML files in `config/`:
 - `archived/aggregator.example.yaml` — Reference config with all fields documented
-- `gateway-dev.yaml` — Local-dev gateway config (multi-chain; replaces the pre-Railway per-chain configs)
+- `gateway.yaml` — Local-dev gateway config (multi-chain; replaces the pre-Railway per-chain configs)
 - `operator-*.yaml` — Operator configs per chain
 
 Key config sections: smart wallet (RPC, bundler, factory, entrypoint), fee rates (tier-based pricing), macros/secrets (global workflow variables), approved operators list.

@@ -21,8 +21,8 @@ For a node that connects to Ava's pre-deployed AVS contract, copy the
 template config and fill in the placeholder values:
 
 ```bash
-cp config/gateway-dev.example.yaml config/gateway-dev.yaml
-$EDITOR config/gateway-dev.yaml
+cp config/gateway.example.yaml config/gateway.yaml
+$EDITOR config/gateway.yaml
 ```
 
 The default `chains:` block in the template covers Sepolia + Base
@@ -35,14 +35,14 @@ Then build + run:
 # Build the application
 make build
 
-# Start the local-dev gateway (serves every chain in config/gateway-dev.yaml)
-make gateway-dev
+# Start the local-dev gateway (serves every chain in config/gateway.yaml)
+make gateway
 ```
 
 The legacy `make aggregator-<chain>` targets were retired when the
 Hetzner→Railway migration consolidated the per-chain aggregator
 pattern into a single multi-chain gateway. They now print a
-deprecation notice pointing at `make gateway-dev`.
+deprecation notice pointing at `make gateway`.
 
 Or use Docker Compose directly:
 
@@ -96,7 +96,102 @@ make dev-live
 - WebSocket connections from operators (they must reconnect)
 - In-memory state and queued jobs
 
-Persistent storage (BadgerDB) survives restarts. For testing complete workflows or debugging stateful operations, consider using manual restarts (`make gateway-dev`) instead.
+Persistent storage (BadgerDB) survives restarts. For testing complete workflows or debugging stateful operations, consider using manual restarts (`make gateway`) instead.
+
+## Testing
+
+### Test configuration
+
+Tests come in two tiers, and most contributors only ever need the first:
+
+- **Unit tests** — need **no configuration**. Just run `go test`. The override
+  logic, slot math, mappings, and validation are all covered here (e.g.
+  `core/taskengine/simulation_state_override_test.go`). These run anywhere,
+  including CI on forks.
+- **Integration / simulation tests** — exercise real RPC reads and Tenderly
+  contract-write simulations. These load a config fixture at
+  `config/test.yaml` (this is `testutil.DefaultConfigPath`). **You do not run
+  any server for this** — `test.yaml` is purely a test fixture, not the gateway
+  or operator config. Create it once from the template:
+
+  ```bash
+  cp config/test.example.yaml config/test.yaml
+  # then fill in:
+  #   eth_rpc_url        — a Sepolia RPC endpoint (your own Infura/Alchemy/etc.)
+  #   tenderly_account / tenderly_project / tenderly_access_key — your Tenderly creds
+  ```
+
+  A test that can't find `config/test.yaml` either `t.Skip`s or panics with
+  `testConfig is nil - test.yaml config must be loaded` — that just means the
+  fixture is missing, not that your change is broken. No operator, bundler, or
+  paymaster needs to run: simulation tests never broadcast on-chain.
+
+  The owner EOA of the testing smart wallets is read separately from the
+  environment (or a `.env` file in the repo root), **not** from `test.yaml`.
+  It must be funded with testnet tokens so the tests can derive and exercise
+  the smart wallet:
+
+  ```bash
+  # Owner EOA of the testing smart wallets (must have testnet funds)
+  OWNER_EOA=0x...
+  ```
+
+  > These are the same values CI substitutes in the "Setup test configuration"
+  > step of `.github/workflows/run-test-on-pr.yml`. Repo secrets are not exposed
+  > to pull requests from forks, so to run these on a fork you supply your own.
+
+#### Security notice
+
+⚠️ **SECURITY WARNING** — only ever use throwaway test keys here:
+
+- Never use private keys that hold real funds for testing.
+- Use dedicated test keys funded only with testnet tokens.
+- The fallback private key (all 1's) is insecure and only for local development.
+- Always supply proper test keys via environment variables or `config/test.yaml`.
+
+### Standard Tests
+
+The Makefile includes two primary test configurations:
+
+```bash
+# Default test suite
+go test -race -buildvcs -vet=off ./...
+
+# Verbose test output
+go test -v -race -buildvcs ./...
+```
+
+### Enhanced Test Output
+
+For improved test result formatting, use `gotestfmt`:
+
+1. Install the formatter:
+
+   ```bash
+   go install github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt@latest
+   ```
+
+2. Run once in the current terminal session to make Bash scripts more robust and error-aware.
+
+   ```bash
+   set -euo pipefail
+   ```
+
+3. Run tests with formatted output:
+
+   Run all tests with complete output:
+
+   ```bash
+   go test -v ./...
+   ```
+
+   or, run selected test cases:
+
+   ```bash
+   go test -json -run ^TestRestRequestErrorHandling$ ./... 2>&1 | gotestfmt --hide=all
+   ```
+
+   The `--hide=all` flag suppresses output for skipped and successful tests, showing only failures. For more output configuration options, see the [gotestfmt documentation](https://github.com/GoTestTools/gotestfmt?tab=readme-ov-file#how-do-i-make-the-output-less-verbose).
 
 ## Client SDK
 
