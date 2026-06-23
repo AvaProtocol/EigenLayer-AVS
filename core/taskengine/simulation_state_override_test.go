@@ -78,7 +78,7 @@ func TestApplyUserERC20Override_BalanceAndAllowance(t *testing.T) {
 
 	// Allowance slot value: max uint256
 	wantAllowSlot := erc20AllowanceSlot(common.HexToAddress(owner), common.HexToAddress(spender), 3).Hex()
-	assert.Equal(t, "0x"+"ff"+"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", storage[wantAllowSlot])
+	assert.Equal(t, "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", storage[wantAllowSlot])
 }
 
 func TestApplyUserERC20Override_SlotRequired(t *testing.T) {

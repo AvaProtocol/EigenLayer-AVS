@@ -149,7 +149,7 @@ func TestContractWriteNode_UniswapV3Quote(t *testing.T) {
 	owner := "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e"
 	swapRouter02 := "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E"
 	require.NotNil(t, vm.simulationState, "simulation state must exist in simulation mode")
-	bigBalance := "0x38d7ea4c68000"                                                      // 1,000,000 USDC (6 decimals)
+	bigBalance := "0x38d7ea4c68000"                                                      // 1,000,000,000 USDC (6 decimals)
 	maxAllowance := "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" // max uint256
 	// Cover both the standard OpenZeppelin ERC20 layout (balance slot 0 /
 	// allowance slot 1) and USDC's FiatToken layout (9 / 10) so the override lands

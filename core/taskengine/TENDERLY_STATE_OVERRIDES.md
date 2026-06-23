@@ -84,7 +84,7 @@ set — ERC20 storage layout is not standardized, so there is no safe default:
 ```go
 err := vm.simulationState.ApplyUserERC20Override(
     tokenAddress, ownerAddress, spenderAddress,
-    "0x38d7ea4c68000", // balance: 1,000,000 USDC
+    "0x38d7ea4c68000", // balance: 1,000,000,000 USDC
     "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", // allowance: max uint256
     balanceSlotPtr,   // *uint64, required when balance is set (e.g. USDC: 9)
     allowanceSlotPtr, // *uint64, required when allowance is set (e.g. USDC: 10)
@@ -119,15 +119,14 @@ When calling the Tenderly simulation API, include state overrides in the `state_
 ```
 
 Where:
-- Token balance: `0x38d7ea4c68000` = 1,000,000 USDC (6 decimals)
+- Token balance: `0x38d7ea4c68000` = 1,000,000,000 USDC (6 decimals)
 - Token allowance: `0xffff...ffff` = max uint256 (unlimited approval)
 
 ## Common Token Storage Slots
 
 | Token Type | balanceOf Slot | allowance Slot |
 |------------|----------------|----------------|
-| Standard ERC20 | 0 | 3 |
-| OpenZeppelin ERC20 | 0 | 1 |
+| OpenZeppelin ERC20 (v4/v5) | 0 | 1 |
 | USDC (FiatToken) | 9 | 10 |
 
 **Note:** Always verify the actual storage layout by checking the token's contract source code or using tools like `cast storage` from Foundry.
@@ -172,7 +171,7 @@ const result = await client.runNodeWithInputs({
       tokenAddress: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', // USDC
       ownerAddress: '0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e',
       spenderAddress: '0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E', // SwapRouter02
-      balance: '0x38d7ea4c68000',  // 1,000,000 USDC (6 decimals)
+      balance: '0x38d7ea4c68000',  // 1,000,000,000 USDC (6 decimals)
       allowance: '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', // max uint256
       balanceSlot: 9,    // USDC FiatToken layout (required — see table below)
       allowanceSlot: 10, // USDC FiatToken layout (required — see table below)

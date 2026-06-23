@@ -476,7 +476,7 @@ func TestRunNodeImmediatelyRPC(t *testing.T) {
 		// USDC on Sepolia is Circle's FiatToken: balanceOf at storage slot 9 and
 		// allowance at slot 10 (confirmed empirically against the deployed token).
 		maxAllowance := "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-		bigBalance := "0x38d7ea4c68000" // 1,000,000 USDC (6 decimals)
+		bigBalance := "0x38d7ea4c68000" // 1,000,000,000 USDC (6 decimals)
 		balanceOverride := &avsproto.ERC20StateOverride{
 			TokenAddress: overridesUSDC,
 			OwnerAddress: runner,
