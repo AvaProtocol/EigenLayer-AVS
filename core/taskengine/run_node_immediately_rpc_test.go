@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -402,4 +403,170 @@ func TestRunNodeImmediatelyRPC(t *testing.T) {
 
 		t.Logf("✅ ETHTransfer RPC test completed successfully")
 	})
+
+	// ERC20Overrides_UniswapSwap drives the new erc20_overrides request field
+	// end-to-end: it builds a RunNodeWithInputsReq with populated overrides and
+	// calls the real RunNodeImmediatelyRPC entrypoint on a Uniswap swap node. This
+	// exercises the whole new path — proto field → RunNodeImmediately threading →
+	// SimulationStateMap → Tenderly state_objects — rather than calling
+	// ApplyUserERC20Override directly.
+	//
+	// The control run (no overrides) is informational; the assertion that proves
+	// the feature is on the override run: the simulation no longer reverts on the
+	// allowance/balance precondition.
+	t.Run("ERC20Overrides_UniswapSwap", func(t *testing.T) {
+		db := testutil.TestMustDB()
+		defer storage.Destroy(db.(*storage.BadgerStorage))
+
+		config := testutil.GetAggregatorConfig()
+		engine := New(db, config, nil, testutil.GetLogger())
+
+		ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+		if !ok {
+			t.Skip("OWNER_EOA not set, skipping erc20_overrides E2E test")
+		}
+		ownerEOA := *ownerAddr
+
+		aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
+		client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
+		require.NoError(t, err, "Failed to connect to RPC")
+		defer client.Close()
+
+		runnerAddr, err := aa.GetSenderAddress(client, ownerEOA, big.NewInt(0))
+		require.NoError(t, err, "Failed to derive smart wallet address")
+
+		user := &model.User{Address: ownerEOA}
+		_ = StoreWallet(db, int64(1), ownerEOA, &model.SmartWallet{
+			Owner:   &ownerEOA,
+			Address: runnerAddr,
+			Factory: &config.SmartWallet.FactoryAddress,
+			Salt:    big.NewInt(0),
+		})
+
+		runner := runnerAddr.Hex()
+		settingsVal, err := structpb.NewValue(map[string]interface{}{
+			"runner":   runner,
+			"chain_id": 11155111, // Sepolia
+		})
+		require.NoError(t, err)
+
+		newReq := func(overrides []*avsproto.ERC20StateOverride) *avsproto.RunNodeWithInputsReq {
+			return &avsproto.RunNodeWithInputsReq{
+				Node:           exactInputSingleSwapNode(runner),
+				InputVariables: map[string]*structpb.Value{"settings": settingsVal},
+				Erc20Overrides: overrides,
+			}
+		}
+
+		// Control: no overrides. Informational only — the runner may or may not be
+		// funded/approved on Sepolia, so we just log how it behaves.
+		control, err := engine.RunNodeImmediatelyRPC(user, newReq(nil))
+		require.NoError(t, err)
+		require.NotNil(t, control)
+		t.Logf("control (no overrides): success=%v error=%q", control.Success, control.Error)
+
+		// Seed the runner's USDC balance and its approval for SwapRouter02 via the
+		// request. USDC on Sepolia is a FiatToken (balance slot 9, allowance slot
+		// 10); we also cover the standard ERC20 layout (balance 0, allowance 3) so
+		// the override lands regardless of the deployed token's storage layout. Each
+		// entry drives a distinct slot through the real request → proto →
+		// simulation-state path.
+		maxAllowance := "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+		bigBalance := "0x38d7ea4c68000" // 1,000,000 USDC
+		overrides := []*avsproto.ERC20StateOverride{}
+		for _, slot := range []uint64{0, 9} {
+			overrides = append(overrides, &avsproto.ERC20StateOverride{
+				TokenAddress: overridesUSDC,
+				OwnerAddress: runner,
+				Balance:      strPtr(bigBalance),
+				BalanceSlot:  u64Ptr(slot),
+			})
+		}
+		for _, slot := range []uint64{3, 10} {
+			overrides = append(overrides, &avsproto.ERC20StateOverride{
+				TokenAddress:   overridesUSDC,
+				OwnerAddress:   runner,
+				SpenderAddress: strPtr(overridesSwapRouter02),
+				Allowance:      strPtr(maxAllowance),
+				AllowanceSlot:  u64Ptr(slot),
+			})
+		}
+
+		result, err := engine.RunNodeImmediatelyRPC(user, newReq(overrides))
+		require.NoError(t, err, "RunNodeImmediatelyRPC should not error")
+		require.NotNil(t, result)
+		t.Logf("with overrides: success=%v error=%q", result.Success, result.Error)
+
+		// The feature's contract: with balance + allowance seeded through the
+		// request, the simulation must not revert on the funding/approval
+		// precondition. Any remaining revert (e.g. pool liquidity) is unrelated.
+		assert.NotContains(t, result.Error, "transfer amount exceeds allowance",
+			"erc20_overrides should have seeded the allowance through the RPC path")
+		assert.NotContains(t, result.Error, "transfer amount exceeds balance",
+			"erc20_overrides should have seeded the balance through the RPC path")
+		assert.NotContains(t, result.Error, "STF",
+			"Uniswap TransferHelper 'STF' means transferFrom failed — overrides should prevent it")
+	})
+}
+
+// Sepolia Uniswap V3 + token addresses (shared with execute_uniswap_approval_test.go).
+const (
+	overridesUSDC         = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" // token1 (FiatToken: balance slot 9, allowance slot 10)
+	overridesWETH         = "0xfff9976782d46cc05630d1f6ebab18b2324d6b14" // token0
+	overridesSwapRouter02 = "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E"
+	overridesFeeTier      = "3000"
+	overridesAmountIn     = "100" // 0.0001 USDC (6 decimals)
+)
+
+func strPtr(s string) *string { return &s }
+func u64Ptr(v uint64) *uint64 { return &v }
+
+// exactInputSingleSwapNode builds a SwapRouter02.exactInputSingle contractWrite
+// node that pulls `amountIn` USDC from the runner via transferFrom — the exact
+// path that reverts with "transfer amount exceeds allowance/balance" (Uniswap
+// surfaces it as "STF") unless the runner is funded and has approved the router.
+func exactInputSingleSwapNode(runner string) *avsproto.TaskNode {
+	abi, _ := structpb.NewValue(map[string]interface{}{
+		"inputs": []interface{}{
+			map[string]interface{}{
+				"name": "params",
+				"type": "tuple",
+				"components": []interface{}{
+					map[string]interface{}{"name": "tokenIn", "type": "address"},
+					map[string]interface{}{"name": "tokenOut", "type": "address"},
+					map[string]interface{}{"name": "fee", "type": "uint24"},
+					map[string]interface{}{"name": "recipient", "type": "address"},
+					map[string]interface{}{"name": "amountIn", "type": "uint256"},
+					map[string]interface{}{"name": "amountOutMinimum", "type": "uint256"},
+					map[string]interface{}{"name": "sqrtPriceLimitX96", "type": "uint160"},
+				},
+			},
+		},
+		"name":            "exactInputSingle",
+		"outputs":         []interface{}{map[string]interface{}{"name": "amountOut", "type": "uint256"}},
+		"stateMutability": "payable",
+		"type":            "function",
+	})
+
+	// amountOutMinimum=0 so the swap can't revert on slippage — keeps the test
+	// focused on the allowance/balance precondition the overrides target.
+	params := fmt.Sprintf(`["%s", "%s", "%s", "%s", "%s", "0", 0]`,
+		overridesUSDC, overridesWETH, overridesFeeTier, runner, overridesAmountIn)
+
+	return &avsproto.TaskNode{
+		Id:   "execute_swap",
+		Name: "execute_swap",
+		Type: avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE,
+		TaskType: &avsproto.TaskNode_ContractWrite{
+			ContractWrite: &avsproto.ContractWriteNode{
+				Config: &avsproto.ContractWriteNode_Config{
+					ContractAddress: overridesSwapRouter02,
+					ContractAbi:     []*structpb.Value{abi},
+					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
+						{MethodName: "exactInputSingle", MethodParams: []string{params}},
+					},
+				},
+			},
+		},
+	}
 }

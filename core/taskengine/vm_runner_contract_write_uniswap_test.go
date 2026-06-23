@@ -153,16 +153,20 @@ func TestContractWriteNode_UniswapV3Quote(t *testing.T) {
 	owner := "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e"
 	swapRouter02 := "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E"
 	require.NotNil(t, vm.simulationState, "simulation state must exist in simulation mode")
-	// Seed at every common balance slot so the test USDC's actual layout is covered.
-	for _, slot := range commonBalanceSlots {
-		s := uint64(slot)
-		err := vm.simulationState.ApplyUserERC20Override(
-			usdc, owner, swapRouter02,
-			"0x38d7ea4c68000", // 1,000,000 USDC (6 decimals)
-			"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", // max allowance
-			&s, &s,
-		)
-		require.NoError(t, err)
+	bigBalance := "0x38d7ea4c68000"                                                      // 1,000,000 USDC (6 decimals)
+	maxAllowance := "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" // max uint256
+	// Cover both the standard ERC20 layout (balance slot 0 / allowance slot 3) and
+	// USDC's FiatToken layout (9 / 10) so the override lands regardless of which
+	// the deployed test token uses. Balance and allowance get their OWN slots.
+	for _, balSlot := range []uint64{0, 9} {
+		s := balSlot
+		require.NoError(t, vm.simulationState.ApplyUserERC20Override(
+			usdc, owner, "", bigBalance, "", &s, nil))
+	}
+	for _, allowSlot := range []uint64{3, 10} {
+		s := allowSlot
+		require.NoError(t, vm.simulationState.ApplyUserERC20Override(
+			usdc, owner, swapRouter02, "", maxAllowance, nil, &s))
 	}
 
 	// Execute the node

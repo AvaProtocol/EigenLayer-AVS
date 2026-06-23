@@ -185,8 +185,12 @@ const result = await client.runNodeWithInputs({
 - `token_address` / `owner_address` must be valid hex addresses.
 - An allowance override requires a valid `spender_address`.
 - At least one of `balance` / `allowance` must be set.
-- For non-standard layouts (e.g. USDC at 9/10) set the slots explicitly — see
-  the [table below](#common-token-storage-slots).
+- `balance` / `allowance` must be non-negative and fit in a `uint256`.
+- The defaults (`balance_slot` 0, `allowance_slot` 3) match a standard ERC20
+  layout. Other layouts differ — OpenZeppelin keeps `_allowances` at slot 1, and
+  USDC (FiatToken) uses 9/10 — so for those tokens set the slots explicitly (see
+  the [table below](#common-token-storage-slots)). If you don't know the layout,
+  send several overrides for the same token, one per candidate slot.
 
 ## Example Use Case: Uniswap Swap
 
