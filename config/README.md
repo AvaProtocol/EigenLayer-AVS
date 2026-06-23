@@ -66,33 +66,7 @@ Per-chain aggregator configs that may still exist locally as gitignored
 symlinks to a secrets-sync directory are no longer referenced by any
 in-repo code path, except the one documented exception below.
 
-## Migration history (Option C — multi-phase config cleanup, all phases now done)
-
-**Phase 1** (this PR's first commit): documentation + `archived/`
-templates + deleted the stale `_legacy/` snapshot.
-
-**Phase 2** (this PR): migrated `core/testutil/utils.go` and the
-integration tests under `core/taskengine/*_test.go` +
-`integration_test/` off the per-chain `aggregator-<chain>.yaml`
-pattern onto `gateway-dev.yaml`. `testutil.DefaultConfigPath` now
-points at `gateway-dev.yaml`; the CI bootstrap script
-(`.github/scripts/generate-test-config.sh`) generates
-`gateway-dev.yaml` from `gateway-dev.example.yaml`.
-
-**Phase 3** (this PR): replaced the Makefile
-`aggregator-{sepolia,ethereum,base,base-sepolia}` targets with a
-single `make gateway-dev`. The old targets remain as redirect stubs
-that print a deprecation notice and exit non-zero, so old runbooks
-fail loudly rather than silently doing the wrong thing. Updated
-`docs/Development.md` at the same time.
-
-**Phase 4** (this PR): with no live callers left, the per-chain
-`aggregator-<chain>.yaml` symlinks (pointing at gitignored configs
-in a separate env repo) are no longer referenced by any in-repo code
-path. They can be deleted from local dev environments at any time;
-nothing in the repo tracks them.
-
-### Known exception
+## Known config exception
 
 `core/taskengine/userops_withdraw_test.go:30` still loads
 `config/aggregator-base.yaml` — but the test is gated by
@@ -105,5 +79,3 @@ until either:
 - Base mainnet is added to `gateway-dev.yaml`'s `chains:` and the
   test is refactored to select that block, or
 - The test is removed as obsolete.
-
-Neither is in scope for this cleanup.
