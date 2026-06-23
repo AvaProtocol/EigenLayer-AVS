@@ -15,6 +15,12 @@ import (
 const (
 	// Default auth token for local context-memory tests
 	ContextMemoryAuthToken = "test-auth-token-12345"
+
+	// defaultSummarizerURL is the production Studio origin, used ONLY as a convenience
+	// fallback in tests when CONTEXT_MEMORY_URL is unset. Production code has no hardcoded
+	// default — it reads the origin from notifications.summary.api_endpoint and fails fast
+	// at startup if it is missing.
+	defaultSummarizerURL = "https://app.avaprotocol.org"
 )
 
 type fakeSummarizer struct {
@@ -61,7 +67,7 @@ func TestComposeSummarySmart_UsesAISummarizer(t *testing.T) {
 		// Use real context-memory API
 		baseURL := os.Getenv("CONTEXT_MEMORY_URL")
 		if baseURL == "" {
-			baseURL = ContextAPIURL // Default to production URL from source code
+			baseURL = defaultSummarizerURL // Test-only fallback when CONTEXT_MEMORY_URL is unset
 		}
 		t.Logf("Using real context-memory API at: %s", baseURL)
 		summarizer := NewContextMemorySummarizer(baseURL, authToken)
@@ -523,7 +529,7 @@ func TestComposeSummarySmart_WithRealWorkflowState(t *testing.T) {
 		// Use real context-memory API (defaults to localhost:3000)
 		baseURL := os.Getenv("CONTEXT_MEMORY_URL")
 		if baseURL == "" {
-			baseURL = ContextAPIURL // Default to production URL from source code
+			baseURL = defaultSummarizerURL // Test-only fallback when CONTEXT_MEMORY_URL is unset
 		}
 		t.Logf("Using real context-memory API at: %s", baseURL)
 		summarizer := NewContextMemorySummarizer(baseURL, authToken)

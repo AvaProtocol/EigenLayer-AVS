@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -108,31 +109,34 @@ func ComposeSummarySmart(vm *VM, currentStepName string) Summary {
 	return s
 }
 
-// NewContextMemorySummarizerFromAggregatorConfig creates a ContextMemorySummarizer from aggregator config
-// Reads api_endpoint and api_key from notifications.summary section
-func NewContextMemorySummarizerFromAggregatorConfig(c *config.Config) Summarizer {
-	if c == nil {
-		return nil
+// NewContextMemorySummarizerFromAggregatorConfig builds the workflow summarizer from the
+// aggregator's notifications.summary config (api_endpoint + api_key).
+//
+// Returns (nil, nil) when summarization is disabled — a valid "off" mode in which callers
+// use the deterministic summarizer. Returns (nil, error) when summarization is ENABLED but
+// misconfigured (unsupported provider, or empty endpoint/key) so the daemon fails fast at
+// startup instead of silently degrading. There is no hardcoded endpoint default: the origin
+// must come from config (avs-infra: ${SUMMARIZER_API_URL} / ${SUMMARIZER_API_KEY}).
+func NewContextMemorySummarizerFromAggregatorConfig(c *config.Config) (Summarizer, error) {
+	if c == nil || !c.NotificationsSummary.Enabled {
+		return nil, nil // Not enabled — deterministic fallback is used.
 	}
-	if !c.NotificationsSummary.Enabled || strings.ToLower(c.NotificationsSummary.Provider) != "context-memory" {
-		return nil
+	if strings.ToLower(c.NotificationsSummary.Provider) != "context-memory" {
+		return nil, fmt.Errorf("notifications.summary.enabled is true but provider %q is unsupported (expected \"context-memory\")", c.NotificationsSummary.Provider)
 	}
-	baseURL := c.NotificationsSummary.APIEndpoint
-	if strings.TrimSpace(baseURL) == "" {
-		return nil
-	}
-	authToken := c.NotificationsSummary.APIKey
-	if strings.TrimSpace(authToken) == "" {
-		return nil
-	}
+	baseURL := strings.TrimSpace(c.NotificationsSummary.APIEndpoint)
 	if baseURL == "" {
-		baseURL = ContextAPIURL
+		return nil, fmt.Errorf("notifications.summary.enabled is true but api_endpoint is empty (set SUMMARIZER_API_URL to the Studio origin, e.g. https://app.avaprotocol.org)")
+	}
+	authToken := strings.TrimSpace(c.NotificationsSummary.APIKey)
+	if authToken == "" {
+		return nil, fmt.Errorf("notifications.summary.enabled is true but api_key is empty (set SUMMARIZER_API_KEY)")
 	}
 	return &ContextMemorySummarizer{
 		baseURL:    baseURL,
 		authToken:  authToken,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
-	}
+	}, nil
 }
 
 // FormatForMessageChannels converts a Summary into a concise chat message
