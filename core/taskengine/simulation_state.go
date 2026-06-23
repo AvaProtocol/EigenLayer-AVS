@@ -3,6 +3,7 @@ package taskengine
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/big"
 	"strings"
 	"sync"
@@ -433,6 +434,136 @@ func (s *SimulationStateMap) InjectETHBalanceChange(
 			"currentBalance", currentBalance.String(),
 			"delta", delta.String(),
 			"newBalance", newBalance.String())
+	}
+
+	return nil
+}
+
+// maxUint256 is 2^256 - 1, the largest value an EVM storage word can hold.
+var maxUint256 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+
+// parseUint256 parses a balance/allowance override value supplied as either a
+// 0x-prefixed hex string or a plain decimal string. The result is validated to
+// be a non-negative value that fits in a uint256, so it can never produce an
+// invalid EVM storage word.
+func parseUint256(value string) (*big.Int, error) {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return nil, fmt.Errorf("empty value")
+	}
+	var n *big.Int
+	var ok bool
+	if strings.HasPrefix(v, "0x") || strings.HasPrefix(v, "0X") {
+		n, ok = new(big.Int).SetString(v[2:], 16)
+		if !ok {
+			return nil, fmt.Errorf("invalid hex value %q", value)
+		}
+	} else {
+		n, ok = new(big.Int).SetString(v, 10)
+		if !ok {
+			return nil, fmt.Errorf("invalid decimal value %q", value)
+		}
+	}
+	if n.Sign() < 0 {
+		return nil, fmt.Errorf("value %q must be non-negative", value)
+	}
+	if n.Cmp(maxUint256) > 0 {
+		return nil, fmt.Errorf("value %q exceeds uint256 max", value)
+	}
+	return n, nil
+}
+
+// requireERC20Slot resolves the storage mapping slot for an override. The slot
+// is required: ERC20 storage layout is not standardized (OpenZeppelin uses
+// _balances at slot 0 / _allowances at slot 1, USDC FiatToken uses 9/10, others
+// differ), so there is no safe default — a guessed slot would silently seed the
+// wrong storage word and produce a misleading simulation. The caller must state
+// the layout explicitly. The value is bounds-checked so an out-of-range uint64
+// can't overflow into a bogus int64. See TENDERLY_STATE_OVERRIDES.md.
+func requireERC20Slot(explicit *uint64, field string) (int64, error) {
+	if explicit == nil {
+		return 0, fmt.Errorf("%s is required (ERC20 storage layout varies per token: "+
+			"OpenZeppelin uses 0/1, USDC FiatToken uses 9/10 — see TENDERLY_STATE_OVERRIDES.md)", field)
+	}
+	if *explicit > math.MaxInt64 {
+		return 0, fmt.Errorf("storage slot %d exceeds the supported range", *explicit)
+	}
+	return int64(*explicit), nil
+}
+
+// ApplyUserERC20Override seeds the simulation state with a caller-supplied ERC20
+// balance and/or allowance override. Unlike InjectERC20BalanceChange, the values
+// are absolute (not deltas) and no RPC call is made — the caller provides the
+// exact balance/allowance and the mapping slots, so this is a pure, synchronous
+// state mutation suitable for isolated RunNodeImmediately simulations.
+//
+// balance overrides the holder's balanceOf and requires balanceSlot; allowance
+// overrides allowance[owner][spender] and requires both a spender address and
+// allowanceSlot. The slots are required because ERC20 storage layout is not
+// standardized — see requireERC20Slot.
+func (s *SimulationStateMap) ApplyUserERC20Override(
+	tokenAddress, ownerAddress, spenderAddress string,
+	balance, allowance string,
+	balanceSlot, allowanceSlot *uint64,
+) error {
+	if !common.IsHexAddress(tokenAddress) {
+		return fmt.Errorf("invalid token_address %q", tokenAddress)
+	}
+	if !common.IsHexAddress(ownerAddress) {
+		return fmt.Errorf("invalid owner_address %q", ownerAddress)
+	}
+	token := common.HexToAddress(tokenAddress)
+	owner := common.HexToAddress(ownerAddress)
+
+	if balance == "" && allowance == "" {
+		return fmt.Errorf("ERC20 override for token %s specifies neither balance nor allowance", tokenAddress)
+	}
+
+	if balance != "" {
+		bal, err := parseUint256(balance)
+		if err != nil {
+			return fmt.Errorf("balance override: %w", err)
+		}
+		slot, err := requireERC20Slot(balanceSlot, "balance_slot")
+		if err != nil {
+			return fmt.Errorf("balance override: %w", err)
+		}
+		slotHash := erc20BalanceSlot(owner, slot)
+		s.SetStorageSlot(token.Hex(), slotHash.Hex(), fmt.Sprintf("0x%064x", bal))
+
+		if s.logger != nil {
+			s.logger.Info("Applied user ERC20 balance override for simulation",
+				"token", token.Hex(),
+				"owner", owner.Hex(),
+				"balance", bal.String(),
+				"slot", slotHash.Hex())
+		}
+	}
+
+	if allowance != "" {
+		if !common.IsHexAddress(spenderAddress) {
+			return fmt.Errorf("allowance override for token %s requires a valid spender_address", tokenAddress)
+		}
+		spender := common.HexToAddress(spenderAddress)
+		allow, err := parseUint256(allowance)
+		if err != nil {
+			return fmt.Errorf("allowance override: %w", err)
+		}
+		slot, err := requireERC20Slot(allowanceSlot, "allowance_slot")
+		if err != nil {
+			return fmt.Errorf("allowance override: %w", err)
+		}
+		slotHash := erc20AllowanceSlot(owner, spender, slot)
+		s.SetStorageSlot(token.Hex(), slotHash.Hex(), fmt.Sprintf("0x%064x", allow))
+
+		if s.logger != nil {
+			s.logger.Info("Applied user ERC20 allowance override for simulation",
+				"token", token.Hex(),
+				"owner", owner.Hex(),
+				"spender", spender.Hex(),
+				"allowance", allow.String(),
+				"slot", slotHash.Hex())
+		}
 	}
 
 	return nil

@@ -1242,6 +1242,29 @@ message RunNodeWithInputsReq {
   // Chain to run the node against. 0 = aggregator default chain.
   // node.config.chain_id (if non-zero) takes precedence over this field.
   int64 chain_id = 4;
+  // Optional ERC20 balance/allowance state overrides applied only during this
+  // isolated node simulation (RunNodeImmediately). Lets callers seed token
+  // balances and approvals so contract-write simulations (e.g. Uniswap swaps)
+  // don't revert with "transfer amount exceeds allowance/balance" before the
+  // approval/funding transactions have been run. Simulation-only: a
+  // real-execution request (isSimulated=false) that sets these is rejected with
+  // an error, never silently ignored.
+  repeated ERC20StateOverride erc20_overrides = 5;
+}
+
+// ERC20StateOverride seeds a token's balanceOf / allowance storage slots for a
+// single simulation. The slot for balanceOf[owner] is
+// keccak256(abi.encode(owner, balance_slot)); the slot for
+// allowance[owner][spender] is
+// keccak256(abi.encode(spender, keccak256(abi.encode(owner, allowance_slot)))).
+message ERC20StateOverride {
+  string token_address = 1;            // ERC20 token contract address
+  string owner_address = 2;            // Address whose balance/allowance to override
+  optional string spender_address = 3; // Spender to approve (required for allowance override)
+  optional string balance = 4;         // Balance override (hex 0x… or decimal string)
+  optional string allowance = 5;       // Allowance override (hex 0x… or decimal string)
+  optional uint64 balance_slot = 6;    // Storage slot for the balanceOf mapping (required when balance is set; layout varies per token)
+  optional uint64 allowance_slot = 7;  // Storage slot for the allowance mapping (required when allowance is set; layout varies per token)
 }
 
 // Response message for RunNodeWithInputs

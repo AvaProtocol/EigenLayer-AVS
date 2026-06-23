@@ -6,7 +6,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -26,7 +25,7 @@ func TestContractWriteNode_UniswapV3Quote(t *testing.T) {
 	// Get test configuration and create Tenderly client
 	logger := testutil.GetLogger()
 	testConfig := testutil.GetTestConfig()
-	require.NotNil(t, testConfig, "Test config must be loaded from aggregator.yaml")
+	require.NotNil(t, testConfig, "Test config must be loaded from config/test.yaml (Tenderly creds required)")
 
 	// Create Tenderly client
 	tenderlyClient := NewTenderlyClient(testConfig, logger)
@@ -140,60 +139,29 @@ func TestContractWriteNode_UniswapV3Quote(t *testing.T) {
 		},
 	}
 
-	// Execute the node
+	// Execute the node. This test validates tuple-parameter calldata generation,
+	// not erc20_overrides: QuoterV2.quoteExactInputSingle is a view function that
+	// reverts by design to return the quote and never performs a transferFrom, so
+	// seeding balances/allowances here would prove nothing. The erc20_overrides
+	// request path is covered end-to-end by
+	// TestRunNodeImmediatelyRPC/ERC20Overrides_UniswapSwap.
 	step, err := vm.RunNodeWithInputs(node, inputVars)
 	require.NoError(t, err)
-	assert.NotNil(t, step)
+	require.NotNil(t, step)
 
-	// Currently this test will fail with "ERC20: transfer amount exceeds allowance"
-	// because the USDC token hasn't been approved for the SwapRouter02.
-	//
-	// TO FIX: The TenderlyClient needs to be enhanced to support ERC20 state overrides:
-	// 1. Token balance: keccak256(abi.encode(owner, balanceSlot)) where balanceSlot is typically 0
-	// 2. Token allowance: keccak256(abi.encode(spender, keccak256(abi.encode(owner, allowanceSlot))))
-	//    where allowanceSlot is typically 3 or 4
-	//
-	// Example state_objects for Tenderly API:
-	// "state_objects": {
-	//   "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238": {  // USDC token
-	//     "storage": {
-	//       "<allowance_slot>": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", // max approval
-	//       "<balance_slot>": "0x38d7ea4c68000"  // 1,000,000 USDC (6 decimals)
-	//     }
-	//   }
-	// }
-
-	if !step.Success {
-		t.Logf("Expected failure: %s", step.Error)
-
-		// Expected error: either "execution reverted" (QuoterV2's internal revert) or
-		// "transfer amount exceeds allowance" (if it reaches the transferFrom call)
-		// Both are valid since they indicate the calldata generation worked
-		hasExpectedError := assert.Contains(t, step.Error, "execution reverted",
-			"Expected revert error from QuoterV2 or allowance error") ||
-			assert.Contains(t, step.Error, "transfer amount exceeds allowance",
-				"Expected allowance error because test doesn't set up ERC20 approval state overrides")
-
-		require.True(t, hasExpectedError, "Expected either 'execution reverted' or 'transfer amount exceeds allowance', got: %s", step.Error)
-
-		// The important validations that DID work:
-		// ✅ Tuple parameter was correctly parsed from JSON array format
-		// ✅ Calldata was successfully generated
-		// ✅ Tenderly simulation was called
-		// ✅ The contract execution reached the point where it would fail (proving calldata is valid)
-		t.Logf("✅ SUCCESS: Calldata generation for tuple parameters works correctly")
-		t.Logf("ℹ️  To make the swap succeed, enhance TenderlyClient to support ERC20 state overrides")
-	} else {
-		t.Logf("✅ UNEXPECTED SUCCESS: Swap simulation passed!")
-
-		// Validate the output structure
+	if step.Success {
+		t.Logf("✅ Quote simulation succeeded")
 		contractWrite, ok := step.OutputData.(*avsproto.Execution_Step_ContractWrite)
 		require.True(t, ok, "Step output should be ContractWrite")
 		require.NotNil(t, contractWrite)
 		require.NotNil(t, contractWrite.ContractWrite)
 		require.NotNil(t, contractWrite.ContractWrite.Data)
-
-		// Log the swap output
-		t.Logf("Swap output: %v", contractWrite.ContractWrite.Data.AsInterface())
+		t.Logf("Quote output: %v", contractWrite.ContractWrite.Data.AsInterface())
+	} else {
+		// QuoterV2 returns its result via revert, so "execution reverted" is the
+		// expected outcome and confirms the tuple calldata reached the contract.
+		require.Contains(t, step.Error, "execution reverted",
+			"QuoterV2 quote should revert by design once calldata reaches it, got: %s", step.Error)
+		t.Logf("ℹ️  QuoterV2 reverted by design; tuple calldata generation validated")
 	}
 }
