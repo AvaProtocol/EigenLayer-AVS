@@ -3,13 +3,13 @@
 # Run `brew install tmux` to install tmux
 #
 # Usage:
-#   ./scripts/start-gateway-dev.sh [--operator] [--session NAME] [--window NAME] [--no-attach] [--no-build]
-#   ./scripts/start-gateway-dev.sh operator                                   # legacy positional form
+#   ./scripts/start-gateway.sh [--operator] [--session NAME] [--window NAME] [--no-attach] [--no-build]
+#   ./scripts/start-gateway.sh operator                                   # legacy positional form
 #
-# Standalone:                ./scripts/start-gateway-dev.sh --operator
-#   → creates session 'gateway-dev' with one 4-pane window and attaches.
+# Standalone:                ./scripts/start-gateway.sh --operator
+#   → creates session 'gateway' with one 4-pane window and attaches.
 #
-# Called by another script:  ./scripts/start-gateway-dev.sh --session studio --window avs --operator --no-attach
+# Called by another script:  ./scripts/start-gateway.sh --session studio --window avs --operator --no-attach
 #   → if 'studio' session exists, adds an 'avs' window with the 4 panes; if not, creates 'studio' and uses its
 #     first window. Returns without attaching so the caller controls the session.
 #
@@ -27,7 +27,7 @@
 
 set -e
 
-SESSION_NAME="gateway-dev"
+SESSION_NAME="gateway"
 WINDOW_NAME=""           # empty → don't rename the first window of a new session
 START_OPERATOR=false
 ATTACH=true
@@ -125,16 +125,16 @@ tmux split-window -t "$WIN" -v -p 50 -c "$PROJECT_DIR"
 tmux select-pane  -t "$WIN.2"
 tmux split-window -t "$WIN" -v -p 50 -c "$PROJECT_DIR"
 
-tmux send-keys -t "$WIN.0" "./out/ap aggregator --config=config/gateway.yaml 2>&1 | tee gateway-dev.log" Enter
+tmux send-keys -t "$WIN.0" "./out/ap aggregator --config=config/gateway.yaml 2>&1 | tee gateway.log" Enter
 
 if [[ "$START_OPERATOR" == "true" ]]; then
-    tmux send-keys -t "$WIN.1" "./out/ap operator --config=config/operator-sepolia.yaml 2>&1 | tee operator-dev.log" Enter
+    tmux send-keys -t "$WIN.1" "./out/ap operator --config=config/operator-sepolia.yaml 2>&1 | tee operator.log" Enter
 else
     tmux send-keys -t "$WIN.1" "echo 'Operator not started. Re-run with --operator (or pass operator as the first positional arg).'" Enter
 fi
 
-tmux send-keys -t "$WIN.2" "./out/ap worker --config=config/worker-sepolia.yaml 2>&1 | tee worker-sepolia-dev.log" Enter
-tmux send-keys -t "$WIN.3" "./out/ap worker --config=config/worker-base-sepolia.yaml 2>&1 | tee worker-base-sepolia-dev.log" Enter
+tmux send-keys -t "$WIN.2" "./out/ap worker --config=config/worker-sepolia.yaml 2>&1 | tee worker-sepolia.log" Enter
+tmux send-keys -t "$WIN.3" "./out/ap worker --config=config/worker-base-sepolia.yaml 2>&1 | tee worker-base-sepolia.log" Enter
 
 tmux select-pane -t "$WIN.0"
 
