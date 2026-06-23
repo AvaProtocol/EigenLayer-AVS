@@ -439,16 +439,6 @@ func (s *SimulationStateMap) InjectETHBalanceChange(
 	return nil
 }
 
-// Default storage-slot indices used when a user-supplied ERC20 override does
-// not specify them. These match the standard OpenZeppelin ERC20 layout
-// (_balances at slot 0, _allowances at slot 1); tokens with non-standard
-// layouts (e.g. USDC FiatToken at 9/10) must set the slots explicitly. See
-// TENDERLY_STATE_OVERRIDES.md for a reference table.
-const (
-	defaultERC20BalanceSlot   = int64(0)
-	defaultERC20AllowanceSlot = int64(1)
-)
-
 // maxUint256 is 2^256 - 1, the largest value an EVM storage word can hold.
 var maxUint256 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
 
@@ -483,14 +473,17 @@ func parseUint256(value string) (*big.Int, error) {
 	return n, nil
 }
 
-// erc20SlotOrDefault resolves the storage mapping slot for an override: the
-// caller's explicit slot when supplied (bounds-checked so an out-of-range
-// uint64 can't overflow into a bogus int64), otherwise the default slot for
-// that mapping. Tokens with non-standard layouts (e.g. USDC FiatToken at 9/10)
-// should pass the slot explicitly — see TENDERLY_STATE_OVERRIDES.md.
-func erc20SlotOrDefault(explicit *uint64, def int64) (int64, error) {
+// requireERC20Slot resolves the storage mapping slot for an override. The slot
+// is required: ERC20 storage layout is not standardized (OpenZeppelin uses
+// _balances at slot 0 / _allowances at slot 1, USDC FiatToken uses 9/10, others
+// differ), so there is no safe default — a guessed slot would silently seed the
+// wrong storage word and produce a misleading simulation. The caller must state
+// the layout explicitly. The value is bounds-checked so an out-of-range uint64
+// can't overflow into a bogus int64. See TENDERLY_STATE_OVERRIDES.md.
+func requireERC20Slot(explicit *uint64, field string) (int64, error) {
 	if explicit == nil {
-		return def, nil
+		return 0, fmt.Errorf("%s is required (ERC20 storage layout varies per token: "+
+			"OpenZeppelin uses 0/1, USDC FiatToken uses 9/10 — see TENDERLY_STATE_OVERRIDES.md)", field)
 	}
 	if *explicit > math.MaxInt64 {
 		return 0, fmt.Errorf("storage slot %d exceeds the supported range", *explicit)
@@ -501,11 +494,13 @@ func erc20SlotOrDefault(explicit *uint64, def int64) (int64, error) {
 // ApplyUserERC20Override seeds the simulation state with a caller-supplied ERC20
 // balance and/or allowance override. Unlike InjectERC20BalanceChange, the values
 // are absolute (not deltas) and no RPC call is made — the caller provides the
-// exact balance/allowance and (optionally) the mapping slots, so this is a pure,
-// synchronous state mutation suitable for isolated RunNodeImmediately simulations.
+// exact balance/allowance and the mapping slots, so this is a pure, synchronous
+// state mutation suitable for isolated RunNodeImmediately simulations.
 //
-// balance overrides the holder's balanceOf; allowance overrides
-// allowance[owner][spender] and therefore requires a spender address.
+// balance overrides the holder's balanceOf and requires balanceSlot; allowance
+// overrides allowance[owner][spender] and requires both a spender address and
+// allowanceSlot. The slots are required because ERC20 storage layout is not
+// standardized — see requireERC20Slot.
 func (s *SimulationStateMap) ApplyUserERC20Override(
 	tokenAddress, ownerAddress, spenderAddress string,
 	balance, allowance string,
@@ -529,7 +524,7 @@ func (s *SimulationStateMap) ApplyUserERC20Override(
 		if err != nil {
 			return fmt.Errorf("balance override: %w", err)
 		}
-		slot, err := erc20SlotOrDefault(balanceSlot, defaultERC20BalanceSlot)
+		slot, err := requireERC20Slot(balanceSlot, "balance_slot")
 		if err != nil {
 			return fmt.Errorf("balance override: %w", err)
 		}
@@ -554,7 +549,7 @@ func (s *SimulationStateMap) ApplyUserERC20Override(
 		if err != nil {
 			return fmt.Errorf("allowance override: %w", err)
 		}
-		slot, err := erc20SlotOrDefault(allowanceSlot, defaultERC20AllowanceSlot)
+		slot, err := requireERC20Slot(allowanceSlot, "allowance_slot")
 		if err != nil {
 			return fmt.Errorf("allowance override: %w", err)
 		}

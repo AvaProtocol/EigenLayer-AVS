@@ -471,13 +471,13 @@ type ERC20StateOverride struct {
 	// Allowance Allowance override (hex 0x… or decimal string).
 	Allowance *string `json:"allowance,omitempty"`
 
-	// AllowanceSlot Storage slot for the allowance mapping (default: 1).
+	// AllowanceSlot Storage slot for the allowance mapping. Required when allowance is set; ERC20 storage layout varies per token (OpenZeppelin 1, USDC FiatToken 10).
 	AllowanceSlot *int64 `json:"allowanceSlot,omitempty"`
 
 	// Balance Balance override (hex 0x… or decimal string).
 	Balance *string `json:"balance,omitempty"`
 
-	// BalanceSlot Storage slot for the balanceOf mapping (default: 0).
+	// BalanceSlot Storage slot for the balanceOf mapping. Required when balance is set; ERC20 storage layout varies per token (OpenZeppelin 0, USDC FiatToken 9).
 	BalanceSlot *int64 `json:"balanceSlot,omitempty"`
 
 	// OwnerAddress Lowercase or checksummed hex EOA / contract address.

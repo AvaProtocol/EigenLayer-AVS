@@ -1261,8 +1261,8 @@ message ERC20StateOverride {
   optional string spender_address = 3; // Spender to approve (required for allowance override)
   optional string balance = 4;         // Balance override (hex 0x… or decimal string)
   optional string allowance = 5;       // Allowance override (hex 0x… or decimal string)
-  optional uint64 balance_slot = 6;    // Storage slot for the balanceOf mapping (default: 0)
-  optional uint64 allowance_slot = 7;  // Storage slot for the allowance mapping (default: 1)
+  optional uint64 balance_slot = 6;    // Storage slot for the balanceOf mapping (required when balance is set; layout varies per token)
+  optional uint64 allowance_slot = 7;  // Storage slot for the allowance mapping (required when allowance is set; layout varies per token)
 }
 
 // Response message for RunNodeWithInputs

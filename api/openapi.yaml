@@ -1459,12 +1459,12 @@ components:
           type: integer
           format: int64
           minimum: 0
-          description: 'Storage slot for the balanceOf mapping (default: 0).'
+          description: 'Storage slot for the balanceOf mapping. Required when balance is set; ERC20 storage layout varies per token (OpenZeppelin 0, USDC FiatToken 9).'
         allowanceSlot:
           type: integer
           format: int64
           minimum: 0
-          description: 'Storage slot for the allowance mapping (default: 1).'
+          description: 'Storage slot for the allowance mapping. Required when allowance is set; ERC20 storage layout varies per token (OpenZeppelin 1, USDC FiatToken 10).'
 
     RunNodeResponse:
       type: object

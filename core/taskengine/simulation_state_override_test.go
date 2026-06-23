@@ -81,25 +81,45 @@ func TestApplyUserERC20Override_BalanceAndAllowance(t *testing.T) {
 	assert.Equal(t, "0x"+"ff"+"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", storage[wantAllowSlot])
 }
 
-func TestApplyUserERC20Override_DefaultSlots(t *testing.T) {
-	state := NewSimulationStateMap(testutil.GetLogger())
+func TestApplyUserERC20Override_SlotRequired(t *testing.T) {
 	token := "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
 	owner := "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e"
 	spender := "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E"
+	bal := uint64(9)
+	allow := uint64(10)
 
-	// No slots supplied — should fall back to defaults (0 balance, 1 allowance).
-	require.NoError(t, state.ApplyUserERC20Override(token, owner, spender, "5", "10", nil, nil))
+	// ERC20 storage layout is not standardized, so the slot is required when the
+	// corresponding value is set — omitting it is a validation error, never a
+	// silently-guessed default.
+	t.Run("balance without slot is rejected", func(t *testing.T) {
+		state := NewSimulationStateMap(testutil.GetLogger())
+		err := state.ApplyUserERC20Override(token, owner, "", "5", "", nil, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "balance_slot is required")
+	})
 
-	objects := state.BuildStateObjects(owner, "0x0")
-	tokenObj := objects["0x1c7d4b196cb0c7b01d743fbc6116a902379c7238"].(map[string]interface{})
-	storage := tokenObj["storage"].(map[string]string)
+	t.Run("allowance without slot is rejected", func(t *testing.T) {
+		state := NewSimulationStateMap(testutil.GetLogger())
+		err := state.ApplyUserERC20Override(token, owner, spender, "", "10", nil, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "allowance_slot is required")
+	})
 
-	wantBal := erc20BalanceSlot(common.HexToAddress(owner), defaultERC20BalanceSlot).Hex()
-	wantAllow := erc20AllowanceSlot(common.HexToAddress(owner), common.HexToAddress(spender), defaultERC20AllowanceSlot).Hex()
-	_, hasBal := storage[wantBal]
-	_, hasAllow := storage[wantAllow]
-	assert.True(t, hasBal, "balance override at default slot 0")
-	assert.True(t, hasAllow, "allowance override at default slot 1")
+	t.Run("explicit slots are honored", func(t *testing.T) {
+		state := NewSimulationStateMap(testutil.GetLogger())
+		require.NoError(t, state.ApplyUserERC20Override(token, owner, spender, "5", "10", &bal, &allow))
+
+		objects := state.BuildStateObjects(owner, "0x0")
+		tokenObj := objects["0x1c7d4b196cb0c7b01d743fbc6116a902379c7238"].(map[string]interface{})
+		storage := tokenObj["storage"].(map[string]string)
+
+		wantBal := erc20BalanceSlot(common.HexToAddress(owner), int64(bal)).Hex()
+		wantAllow := erc20AllowanceSlot(common.HexToAddress(owner), common.HexToAddress(spender), int64(allow)).Hex()
+		_, hasBal := storage[wantBal]
+		_, hasAllow := storage[wantAllow]
+		assert.True(t, hasBal, "balance override at explicit slot 9")
+		assert.True(t, hasAllow, "allowance override at explicit slot 10")
+	})
 }
 
 func TestApplyUserERC20Override_Validation(t *testing.T) {
@@ -123,9 +143,14 @@ func TestApplyUserERC20Override_Validation(t *testing.T) {
 		err := state.ApplyUserERC20Override(token, owner, "", "", "10", nil, nil)
 		assert.Error(t, err)
 	})
-	t.Run("balance only is fine", func(t *testing.T) {
-		err := state.ApplyUserERC20Override(token, owner, "", "1", "", nil, nil)
+	t.Run("balance only is fine with an explicit slot", func(t *testing.T) {
+		slot := uint64(0)
+		err := state.ApplyUserERC20Override(token, owner, "", "1", "", &slot, nil)
 		assert.NoError(t, err)
+	})
+	t.Run("balance only without a slot is rejected", func(t *testing.T) {
+		err := state.ApplyUserERC20Override(token, owner, "", "1", "", nil, nil)
+		assert.Error(t, err)
 	})
 	t.Run("negative balance value rejected", func(t *testing.T) {
 		err := state.ApplyUserERC20Override(token, owner, "", "-1", "", nil, nil)
