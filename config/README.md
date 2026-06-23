@@ -84,7 +84,6 @@ points at `gateway-dev.yaml`; the CI bootstrap script
 single `make gateway-dev`. The old targets remain as redirect stubs
 that print a deprecation notice and exit non-zero, so old runbooks
 fail loudly rather than silently doing the wrong thing. Updated
-`scripts/aa-wallet-toolkit.sh`, the backfill-tool docstrings, and
 `docs/Development.md` at the same time.
 
 **Phase 4** (this PR): with no live callers left, the per-chain
