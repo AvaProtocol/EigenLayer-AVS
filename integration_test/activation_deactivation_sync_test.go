@@ -25,8 +25,10 @@ func TestActivationDeactivationSyncWithConfigs(t *testing.T) {
 	logger := testutil.GetLogger()
 	taskengine.SetLogger(logger)
 
-	// Load aggregator config from YAML
-	aggCfgPath := testutil.GetConfigPath(testutil.DefaultConfigPath) // config/gateway.yaml
+	// Load aggregator config from YAML. This is an integration test that drives a
+	// real aggregator, so it loads the gateway server config — not test.yaml, which
+	// is the unit/simulation fixture (testutil.DefaultConfigPath).
+	aggCfgPath := testutil.GetConfigPath("gateway.yaml")
 	aggCfg, err := config.NewConfig(aggCfgPath)
 	if err != nil {
 		t.Skipf("Failed to load aggregator config at %s: %v", aggCfgPath, err)
