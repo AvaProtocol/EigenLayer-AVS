@@ -217,38 +217,6 @@ View docs/Development.md
 
 ## Testing
 
-### Test Configuration
-
-For integration tests that require interaction with blockchain networks, you need to configure test credentials:
-
-#### Required Environment Variables
-
-```bash
-# Owner EOA wallet of testing smart wallets (must have funds on test networks)
-OWNER_EOA=
-
-# Test network endpoints  
-SEPOLIA_RPC=https://your-sepolia-rpc-endpoint
-SEPOLIA_BUNDLER_RPC=https://your-sepolia-bundler-endpoint
-```
-
-#### Security Notice
-
-⚠️ **SECURITY WARNING**: 
-- Never use private keys containing real funds for testing
-- Use dedicated test keys funded only with testnet tokens
-- The fallback private key (all 1's) is insecure and only for development
-- Always configure proper test keys via environment variables or config files
-
-#### Test Key Setup
-
-1. Generate a new private key for testing (or use an existing test key)
-2. Fund the corresponding address with testnet tokens (Sepolia ETH, test USDC, etc.)
-3. Set the `OWNER_EOA` environment variable or add it to your config
-4. Ensure the key has sufficient balance for test transactions
-
-## Testing
-
 ### Test configuration
 
 Tests come in two tiers, and most contributors only ever need the first:
@@ -275,9 +243,28 @@ Tests come in two tiers, and most contributors only ever need the first:
   fixture is missing, not that your change is broken. No operator, bundler, or
   paymaster needs to run: simulation tests never broadcast on-chain.
 
+  The owner EOA of the testing smart wallets is read separately from the
+  environment (or a `.env` file in the repo root), **not** from `test.yaml`.
+  It must be funded with testnet tokens so the tests can derive and exercise
+  the smart wallet:
+
+  ```bash
+  # Owner EOA of the testing smart wallets (must have testnet funds)
+  OWNER_EOA=0x...
+  ```
+
   > These are the same values CI substitutes in the "Setup test configuration"
   > step of `.github/workflows/run-test-on-pr.yml`. Repo secrets are not exposed
   > to pull requests from forks, so to run these on a fork you supply your own.
+
+#### Security notice
+
+⚠️ **SECURITY WARNING** — only ever use throwaway test keys here:
+
+- Never use private keys that hold real funds for testing.
+- Use dedicated test keys funded only with testnet tokens.
+- The fallback private key (all 1's) is insecure and only for local development.
+- Always supply proper test keys via environment variables or `config/test.yaml`.
 
 ### Standard Tests
 
