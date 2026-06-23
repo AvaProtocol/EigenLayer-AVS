@@ -440,12 +440,13 @@ func (s *SimulationStateMap) InjectETHBalanceChange(
 }
 
 // Default storage-slot indices used when a user-supplied ERC20 override does
-// not specify them. These match the most common standard-ERC20 layout; tokens
-// with non-standard layouts (e.g. USDC FiatToken at 9/10) must set the slots
-// explicitly. See TENDERLY_STATE_OVERRIDES.md for a reference table.
+// not specify them. These match the standard OpenZeppelin ERC20 layout
+// (_balances at slot 0, _allowances at slot 1); tokens with non-standard
+// layouts (e.g. USDC FiatToken at 9/10) must set the slots explicitly. See
+// TENDERLY_STATE_OVERRIDES.md for a reference table.
 const (
 	defaultERC20BalanceSlot   = int64(0)
-	defaultERC20AllowanceSlot = int64(3)
+	defaultERC20AllowanceSlot = int64(1)
 )
 
 // maxUint256 is 2^256 - 1, the largest value an EVM storage word can hold.

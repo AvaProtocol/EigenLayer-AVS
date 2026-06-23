@@ -471,7 +471,7 @@ type ERC20StateOverride struct {
 	// Allowance Allowance override (hex 0x… or decimal string).
 	Allowance *string `json:"allowance,omitempty"`
 
-	// AllowanceSlot Storage slot for the allowance mapping (default: 3).
+	// AllowanceSlot Storage slot for the allowance mapping (default: 1).
 	AllowanceSlot *int64 `json:"allowanceSlot,omitempty"`
 
 	// Balance Balance override (hex 0x… or decimal string).

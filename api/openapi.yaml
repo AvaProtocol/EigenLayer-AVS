@@ -1458,11 +1458,13 @@ components:
         balanceSlot:
           type: integer
           format: int64
+          minimum: 0
           description: 'Storage slot for the balanceOf mapping (default: 0).'
         allowanceSlot:
           type: integer
           format: int64
-          description: 'Storage slot for the allowance mapping (default: 3).'
+          minimum: 0
+          description: 'Storage slot for the allowance mapping (default: 1).'
 
     RunNodeResponse:
       type: object

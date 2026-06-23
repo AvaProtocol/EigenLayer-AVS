@@ -151,15 +151,16 @@ func TestContractWriteNode_UniswapV3Quote(t *testing.T) {
 	require.NotNil(t, vm.simulationState, "simulation state must exist in simulation mode")
 	bigBalance := "0x38d7ea4c68000"                                                      // 1,000,000 USDC (6 decimals)
 	maxAllowance := "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" // max uint256
-	// Cover both the standard ERC20 layout (balance slot 0 / allowance slot 3) and
-	// USDC's FiatToken layout (9 / 10) so the override lands regardless of which
-	// the deployed test token uses. Balance and allowance get their OWN slots.
+	// Cover both the standard OpenZeppelin ERC20 layout (balance slot 0 /
+	// allowance slot 1) and USDC's FiatToken layout (9 / 10) so the override lands
+	// regardless of which the deployed test token uses. Balance and allowance get
+	// their OWN slots.
 	for _, balSlot := range []uint64{0, 9} {
 		s := balSlot
 		require.NoError(t, vm.simulationState.ApplyUserERC20Override(
 			usdc, owner, "", bigBalance, "", &s, nil))
 	}
-	for _, allowSlot := range []uint64{3, 10} {
+	for _, allowSlot := range []uint64{1, 10} {
 		s := allowSlot
 		require.NoError(t, vm.simulationState.ApplyUserERC20Override(
 			usdc, owner, swapRouter02, "", maxAllowance, nil, &s))

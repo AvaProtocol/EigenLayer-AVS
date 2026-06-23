@@ -31,7 +31,7 @@ ERC20 tokens use Solidity mappings to store balances and allowances:
 
 ```solidity
 mapping(address => uint256) public balanceOf;           // Usually at storage slot 0
-mapping(address => mapping(address => uint256)) public allowance;  // Usually at slot 3 or 4
+mapping(address => mapping(address => uint256)) public allowance;  // OpenZeppelin: slot 1 (varies by token)
 ```
 
 ## Calculating Storage Slots
@@ -60,7 +60,7 @@ storage_slot = keccak256(abi.encode(spender_address, inner_hash))
 Where:
 - `owner_address` is the token owner (32 bytes, left-padded)
 - `spender_address` is the approved spender (32 bytes, left-padded)
-- `allowance_mapping_slot` is usually 3 or 4 (check the token contract)
+- `allowance_mapping_slot` is 1 for standard OpenZeppelin ERC20 (varies by token — e.g. USDC FiatToken uses 10; check the token contract)
 
 ## Go Implementation
 
@@ -77,7 +77,7 @@ func erc20AllowanceSlot(owner, spender common.Address, mappingSlot int64) common
 
 To seed a balance and/or allowance directly, use the higher-level helper
 `SimulationStateMap.ApplyUserERC20Override`, which parses hex/decimal values,
-computes the slots (defaulting to balance slot 0 / allowance slot 3) and records
+computes the slots (defaulting to balance slot 0 / allowance slot 1) and records
 the storage override:
 
 ```go
@@ -86,7 +86,7 @@ err := vm.simulationState.ApplyUserERC20Override(
     "0x38d7ea4c68000", // balance: 1,000,000 USDC
     "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", // allowance: max uint256
     balanceSlotPtr,   // *uint64, nil → default 0
-    allowanceSlotPtr, // *uint64, nil → default 3
+    allowanceSlotPtr, // *uint64, nil → default 1
 )
 ```
 
@@ -152,7 +152,7 @@ message ERC20StateOverride {
   optional string balance = 4;         // Balance override (hex 0x… or decimal string)
   optional string allowance = 5;       // Allowance override (hex 0x… or decimal string)
   optional uint64 balance_slot = 6;    // Storage slot for the balanceOf mapping (default: 0)
-  optional uint64 allowance_slot = 7;  // Storage slot for the allowance mapping (default: 3)
+  optional uint64 allowance_slot = 7;  // Storage slot for the allowance mapping (default: 1)
 }
 ```
 
@@ -173,8 +173,8 @@ const result = await client.runNodeWithInputs({
       spenderAddress: '0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E', // SwapRouter02
       balance: '0x38d7ea4c68000',  // 1,000,000 USDC (6 decimals)
       allowance: '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', // max uint256
-      balanceSlot: 0,    // Standard ERC20 (omit to use default)
-      allowanceSlot: 3,  // Standard ERC20 (omit to use default)
+      balanceSlot: 0,    // Standard OpenZeppelin ERC20 (omit to use default)
+      allowanceSlot: 1,  // Standard OpenZeppelin ERC20 (omit to use default)
     },
   ],
 });
@@ -186,11 +186,12 @@ const result = await client.runNodeWithInputs({
 - An allowance override requires a valid `spender_address`.
 - At least one of `balance` / `allowance` must be set.
 - `balance` / `allowance` must be non-negative and fit in a `uint256`.
-- The defaults (`balance_slot` 0, `allowance_slot` 3) match a standard ERC20
-  layout. Other layouts differ — OpenZeppelin keeps `_allowances` at slot 1, and
-  USDC (FiatToken) uses 9/10 — so for those tokens set the slots explicitly (see
-  the [table below](#common-token-storage-slots)). If you don't know the layout,
-  send several overrides for the same token, one per candidate slot.
+- The defaults (`balance_slot` 0, `allowance_slot` 1) match the standard
+  OpenZeppelin ERC20 layout (`_balances` at slot 0, `_allowances` at slot 1).
+  Other layouts differ — USDC (FiatToken) uses 9/10 — so for those tokens set the
+  slots explicitly (see the [table below](#common-token-storage-slots)). If you
+  don't know the layout, send several overrides for the same token, one per
+  candidate slot.
 
 ## Example Use Case: Uniswap Swap
 

@@ -67,8 +67,10 @@ func (s *Server) RunNode(ctx echo.Context) error {
 
 // openAPIERC20OverridesToProto maps the REST ERC20StateOverride list onto the
 // proto representation consumed by RunNodeImmediately. Slot indices are widened
-// from the spec's int64 to the proto's uint64 (negative values are clamped to
-// 0; the engine validates the resulting addresses/values).
+// from the spec's int64 to the proto's uint64. A negative slot is invalid (a
+// storage slot is a non-negative index), so it is treated as unset — the engine
+// then applies its default slot — rather than silently coerced to slot 0, which
+// would mask the caller's mistake. The engine validates addresses/values.
 func openAPIERC20OverridesToProto(in []generated.ERC20StateOverride) []*avsproto.ERC20StateOverride {
 	if len(in) == 0 {
 		return nil
@@ -85,22 +87,20 @@ func openAPIERC20OverridesToProto(in []generated.ERC20StateOverride) []*avsproto
 			s := string(*o.SpenderAddress)
 			po.SpenderAddress = &s
 		}
-		if o.BalanceSlot != nil {
-			po.BalanceSlot = int64ToUint64Ptr(*o.BalanceSlot)
-		}
-		if o.AllowanceSlot != nil {
-			po.AllowanceSlot = int64ToUint64Ptr(*o.AllowanceSlot)
-		}
+		po.BalanceSlot = nonNegativeSlotPtr(o.BalanceSlot)
+		po.AllowanceSlot = nonNegativeSlotPtr(o.AllowanceSlot)
 		out = append(out, po)
 	}
 	return out
 }
 
-func int64ToUint64Ptr(v int64) *uint64 {
-	if v < 0 {
-		v = 0
+// nonNegativeSlotPtr widens a spec int64 storage slot to the proto's uint64,
+// returning nil (unset → engine default) when the slot is absent or negative.
+func nonNegativeSlotPtr(v *int64) *uint64 {
+	if v == nil || *v < 0 {
+		return nil
 	}
-	u := uint64(v)
+	u := uint64(*v)
 	return &u
 }
 

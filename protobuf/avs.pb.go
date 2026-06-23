@@ -5444,7 +5444,7 @@ type ERC20StateOverride struct {
 	Balance        *string                `protobuf:"bytes,4,opt,name=balance,proto3,oneof" json:"balance,omitempty"`                                     // Balance override (hex 0x… or decimal string)
 	Allowance      *string                `protobuf:"bytes,5,opt,name=allowance,proto3,oneof" json:"allowance,omitempty"`                                 // Allowance override (hex 0x… or decimal string)
 	BalanceSlot    *uint64                `protobuf:"varint,6,opt,name=balance_slot,json=balanceSlot,proto3,oneof" json:"balance_slot,omitempty"`         // Storage slot for the balanceOf mapping (default: 0)
-	AllowanceSlot  *uint64                `protobuf:"varint,7,opt,name=allowance_slot,json=allowanceSlot,proto3,oneof" json:"allowance_slot,omitempty"`   // Storage slot for the allowance mapping (default: 3)
+	AllowanceSlot  *uint64                `protobuf:"varint,7,opt,name=allowance_slot,json=allowanceSlot,proto3,oneof" json:"allowance_slot,omitempty"`   // Storage slot for the allowance mapping (default: 1)
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }

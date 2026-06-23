@@ -87,7 +87,7 @@ func TestApplyUserERC20Override_DefaultSlots(t *testing.T) {
 	owner := "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e"
 	spender := "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E"
 
-	// No slots supplied — should fall back to defaults (0 balance, 3 allowance).
+	// No slots supplied — should fall back to defaults (0 balance, 1 allowance).
 	require.NoError(t, state.ApplyUserERC20Override(token, owner, spender, "5", "10", nil, nil))
 
 	objects := state.BuildStateObjects(owner, "0x0")
@@ -99,7 +99,7 @@ func TestApplyUserERC20Override_DefaultSlots(t *testing.T) {
 	_, hasBal := storage[wantBal]
 	_, hasAllow := storage[wantAllow]
 	assert.True(t, hasBal, "balance override at default slot 0")
-	assert.True(t, hasAllow, "allowance override at default slot 3")
+	assert.True(t, hasAllow, "allowance override at default slot 1")
 }
 
 func TestApplyUserERC20Override_Validation(t *testing.T) {
