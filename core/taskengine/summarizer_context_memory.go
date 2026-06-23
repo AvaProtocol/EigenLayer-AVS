@@ -16,8 +16,12 @@ import (
 )
 
 const (
-	// ContextAPIURL is the production URL for the context-api service
-	ContextAPIURL = "https://context-api.avaprotocol.org"
+	// ContextAPIURL is the default base URL for the workflow-summary endpoint.
+	// Migrated from the deprecated context-memory service to Studio, which now hosts
+	// /api/summarize with the identical request/response contract. The "/api/summarize"
+	// path is appended by the client. Override per-environment via
+	// NotificationsSummary.APIEndpoint (avs-infra config) and rotate APIKey.
+	ContextAPIURL = "https://app.avaprotocol.org"
 )
 
 // ContextMemorySummarizer implements Summarizer using the context-memory API
