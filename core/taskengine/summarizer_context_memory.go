@@ -15,31 +15,20 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-const (
-	// ContextAPIURL is the default base URL (bare origin) for the workflow-summary
-	// endpoint. Migrated from the deprecated context-memory service to Studio, which now
-	// hosts /api/summarize with the identical request/response contract. The client
-	// appends "/api/summarize", so this MUST be an origin only — do NOT include the
-	// "/api/summarize" path or a trailing slash (either would double the path to
-	// ".../api/summarize/api/summarize" or "...//api/summarize"). Override per-environment
-	// via NotificationsSummary.APIEndpoint (avs-infra) and rotate APIKey. NOTE: the
-	// constant name is legacy — it now points at Studio, not context-memory.
-	ContextAPIURL = "https://app.avaprotocol.org"
-)
-
-// ContextMemorySummarizer implements Summarizer using the context-memory API
+// ContextMemorySummarizer implements Summarizer by posting to the workflow-summary
+// endpoint (Studio's /api/summarize; the standalone context-memory service is deprecated).
 type ContextMemorySummarizer struct {
 	baseURL    string
 	authToken  string
 	httpClient *http.Client
 }
 
-// NewContextMemorySummarizer creates a new summarizer that calls context-memory API
-// baseURL defaults to ContextAPIURL (production) if empty
+// NewContextMemorySummarizer creates a summarizer that posts to {baseURL}/api/summarize.
+// baseURL MUST be a bare origin (no "/api/summarize" path and no trailing slash) — the
+// client appends the path itself; including it would double the path. No default is
+// applied: the origin must be supplied explicitly (production wiring fails fast at
+// startup when it is missing, see NewContextMemorySummarizerFromAggregatorConfig).
 func NewContextMemorySummarizer(baseURL, authToken string) Summarizer {
-	if baseURL == "" {
-		baseURL = ContextAPIURL
-	}
 	return &ContextMemorySummarizer{
 		baseURL:    baseURL,
 		authToken:  authToken,

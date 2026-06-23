@@ -84,7 +84,10 @@ func TestSendGridEmailWithContextMemoryResponse(t *testing.T) {
 	}
 	// Override context_api_endpoint to use mock server
 	mockConfig.MacroSecrets["context_api_endpoint"] = contextMemoryServer.URL
-	summarizer := NewContextMemorySummarizerFromAggregatorConfig(&mockConfig)
+	summarizer, err := NewContextMemorySummarizerFromAggregatorConfig(&mockConfig)
+	if err != nil {
+		t.Fatalf("Failed to create context-memory summarizer from config: %v", err)
+	}
 	if summarizer == nil {
 		t.Fatal("Failed to create context-memory summarizer from config")
 	}

@@ -73,13 +73,13 @@ type EdgeDefinition struct {
 	Target string `json:"target"`
 }
 
-// getContextMemoryURL returns the base URL for context-memory API
-// Uses CONTEXT_MEMORY_URL env var if set, otherwise defaults to production URL from source code
+// getContextMemoryURL returns the base URL for the summarizer API in tests.
+// Uses CONTEXT_MEMORY_URL env var if set, otherwise the production origin above.
 func getContextMemoryURL() string {
 	if url := os.Getenv("CONTEXT_MEMORY_URL"); url != "" {
 		return url
 	}
-	return ContextAPIURL
+	return defaultSummarizerURL
 }
 
 // baseURL shared across tests to avoid redeclaration issues
