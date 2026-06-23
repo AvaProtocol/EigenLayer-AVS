@@ -16,11 +16,14 @@ import (
 )
 
 const (
-	// ContextAPIURL is the default base URL for the workflow-summary endpoint.
-	// Migrated from the deprecated context-memory service to Studio, which now hosts
-	// /api/summarize with the identical request/response contract. The "/api/summarize"
-	// path is appended by the client. Override per-environment via
-	// NotificationsSummary.APIEndpoint (avs-infra config) and rotate APIKey.
+	// ContextAPIURL is the default base URL (bare origin) for the workflow-summary
+	// endpoint. Migrated from the deprecated context-memory service to Studio, which now
+	// hosts /api/summarize with the identical request/response contract. The client
+	// appends "/api/summarize", so this MUST be an origin only — do NOT include the
+	// "/api/summarize" path or a trailing slash (either would double the path to
+	// ".../api/summarize/api/summarize" or "...//api/summarize"). Override per-environment
+	// via NotificationsSummary.APIEndpoint (avs-infra) and rotate APIKey. NOTE: the
+	// constant name is legacy — it now points at Studio, not context-memory.
 	ContextAPIURL = "https://app.avaprotocol.org"
 )
 
