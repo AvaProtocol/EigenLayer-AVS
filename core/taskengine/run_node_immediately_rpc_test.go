@@ -448,12 +448,12 @@ func TestRunNodeImmediatelyRPC(t *testing.T) {
 		require.NoError(t, err, "Failed to derive smart wallet address")
 
 		user := &model.User{Address: ownerEOA}
-		_ = StoreWallet(db, int64(1), ownerEOA, &model.SmartWallet{
+		require.NoError(t, StoreWallet(db, int64(1), ownerEOA, &model.SmartWallet{
 			Owner:   &ownerEOA,
 			Address: runnerAddr,
 			Factory: &config.SmartWallet.FactoryAddress,
 			Salt:    big.NewInt(0),
-		})
+		}))
 
 		runner := runnerAddr.Hex()
 		settingsVal, err := structpb.NewValue(map[string]interface{}{
@@ -464,7 +464,7 @@ func TestRunNodeImmediatelyRPC(t *testing.T) {
 
 		runSwap := func(overrides []*avsproto.ERC20StateOverride) *avsproto.RunNodeWithInputsResp {
 			resp, err := engine.RunNodeImmediatelyRPC(user, &avsproto.RunNodeWithInputsReq{
-				Node:           exactInputSingleSwapNode(runner),
+				Node:           exactInputSingleSwapNode(t, runner),
 				InputVariables: map[string]*structpb.Value{"settings": settingsVal},
 				Erc20Overrides: overrides,
 			})
@@ -548,8 +548,9 @@ func isFundingOrApprovalRevert(errMsg string) bool {
 // node that pulls `amountIn` USDC from the runner via transferFrom — the exact
 // path that reverts with "transfer amount exceeds allowance/balance" (Uniswap
 // surfaces it as "STF") unless the runner is funded and has approved the router.
-func exactInputSingleSwapNode(runner string) *avsproto.TaskNode {
-	abi, _ := structpb.NewValue(map[string]interface{}{
+func exactInputSingleSwapNode(t *testing.T, runner string) *avsproto.TaskNode {
+	t.Helper()
+	abi, err := structpb.NewValue(map[string]interface{}{
 		"inputs": []interface{}{
 			map[string]interface{}{
 				"name": "params",
@@ -570,6 +571,7 @@ func exactInputSingleSwapNode(runner string) *avsproto.TaskNode {
 		"stateMutability": "payable",
 		"type":            "function",
 	})
+	require.NoError(t, err, "failed to build exactInputSingle ABI value")
 
 	// amountOutMinimum=0 so the swap can't revert on slippage — keeps the test
 	// focused on the allowance/balance precondition the overrides target.
