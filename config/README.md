@@ -16,6 +16,9 @@ YAML config passed via `--config=<path>`.
 ```
 config/
 ├── README.md                            — this file
+├── test.example.yaml                    — Go test-suite fixture template
+├── test.yaml                            — Go test-suite fixture, real (gitignored)
+│
 ├── gateway-dev.example.yaml             — local-dev gateway template
 ├── gateway-dev.yaml                     — local-dev gateway, real (gitignored)
 │
@@ -33,6 +36,7 @@ not here — see the note above.
 | Scenario | Config file |
 |---|---|
 | Production (any role) on Railway | `avs-infra` → `railway/configs/<svc>-railway.yaml`, delivered via `AP_CONFIG_YAML` |
+| Running the Go test suite | `test.yaml` (copy from `test.example.yaml`, fill in RPC + Tenderly). Loaded as `testutil.DefaultConfigPath`; **not** a server config. |
 | Local dev gateway | `gateway-dev.yaml` (copy from `gateway-dev.example.yaml`, fill in secrets) |
 | Local dev worker for chain N | `worker-<chain>-dev.yaml` (same copy pattern) |
 

@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-// sepoliaConfig holds the notifications.summary section from gateway-dev.yaml
+// sepoliaConfig holds the notifications.summary section from test.yaml
 type sepoliaConfig struct {
 	Notifications struct {
 		Summary struct {
@@ -28,7 +28,7 @@ type sepoliaConfig struct {
 	} `yaml:"notifications"`
 }
 
-// loadSepoliaConfig loads the context-memory API config from the local gateway-dev.yaml
+// loadSepoliaConfig loads the context-memory API config from the local test.yaml
 func loadSepoliaConfig(t *testing.T) (string, string) {
 	t.Helper()
 
@@ -45,10 +45,10 @@ func loadSepoliaConfig(t *testing.T) (string, string) {
 		return url, token
 	}
 
-	// Try to load from gateway-dev.yaml
+	// Try to load from the test fixture config (config/test.yaml)
 	configPaths := []string{
-		"../../config/gateway-dev.yaml",
-		"config/gateway-dev.yaml",
+		"../../config/test.yaml",
+		"config/test.yaml",
 	}
 
 	for _, path := range configPaths {
@@ -73,7 +73,7 @@ func loadSepoliaConfig(t *testing.T) (string, string) {
 		return apiURL, apiKey
 	}
 
-	t.Skip("Could not load gateway-dev.yaml config")
+	t.Skip("Could not load test.yaml config")
 	return "", ""
 }
 

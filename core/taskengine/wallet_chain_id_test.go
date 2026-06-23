@@ -18,7 +18,7 @@ import (
 // single-chain config (ChainID=1) by design. The routing tests need
 // gateway-mode + at least two configured chains; this constant +
 // withGatewayMultiChain() supplies both without depending on whatever
-// gateway-dev.yaml happens to advertise.
+// test.yaml happens to advertise.
 const chainIDOverrideForTest int64 = 11_155_111
 
 // withGatewayMultiChain promotes a single-chain testutil config to the

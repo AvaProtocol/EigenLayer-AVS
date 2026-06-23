@@ -249,6 +249,36 @@ SEPOLIA_BUNDLER_RPC=https://your-sepolia-bundler-endpoint
 
 ## Testing
 
+### Test configuration
+
+Tests come in two tiers, and most contributors only ever need the first:
+
+- **Unit tests** — need **no configuration**. Just run `go test`. The override
+  logic, slot math, mappings, and validation are all covered here (e.g.
+  `core/taskengine/simulation_state_override_test.go`). These run anywhere,
+  including CI on forks.
+- **Integration / simulation tests** — exercise real RPC reads and Tenderly
+  contract-write simulations. These load a config fixture at
+  `config/test.yaml` (this is `testutil.DefaultConfigPath`). **You do not run
+  any server for this** — `test.yaml` is purely a test fixture, not the gateway
+  or operator config. Create it once from the template:
+
+  ```bash
+  cp config/test.example.yaml config/test.yaml
+  # then fill in:
+  #   eth_rpc_url        — a Sepolia RPC endpoint (your own Infura/Alchemy/etc.)
+  #   tenderly_account / tenderly_project / tenderly_access_key — your Tenderly creds
+  ```
+
+  A test that can't find `config/test.yaml` either `t.Skip`s or panics with
+  `testConfig is nil - test.yaml config must be loaded` — that just means the
+  fixture is missing, not that your change is broken. No operator, bundler, or
+  paymaster needs to run: simulation tests never broadcast on-chain.
+
+  > These are the same values CI substitutes in the "Setup test configuration"
+  > step of `.github/workflows/run-test-on-pr.yml`. Repo secrets are not exposed
+  > to pull requests from forks, so to run these on a fork you supply your own.
+
 ### Standard Tests
 
 The Makefile includes two primary test configurations:

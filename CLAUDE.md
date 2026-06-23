@@ -141,5 +141,6 @@ The `getWorkflow` output is the ground truth — it shows the trigger's `topics`
 
 - Go 1.22+, Node.js, Docker/Docker Compose, Foundry
 - `config/operator_sample.yaml` - Operator config template
-- `config/aggregator.yaml` - Aggregator config (development)
+- `config/gateway-dev.yaml` - Local-dev gateway config (copy from `gateway-dev.example.yaml`)
+- `config/test.yaml` - Go test-suite fixture (copy from `test.example.yaml`); loaded as `testutil.DefaultConfigPath`, not a server config
 - Contract addresses in README.md (Ethereum Mainnet, Sepolia Testnet)
