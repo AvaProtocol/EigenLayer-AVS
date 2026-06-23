@@ -1434,7 +1434,9 @@ components:
             this isolated node simulation. Lets callers seed token balances and
             approvals so contract-write simulations (e.g. Uniswap swaps) don't
             revert with "transfer amount exceeds allowance/balance" before the
-            approval/funding transactions have been run. Ignored for real execution.
+            approval/funding transactions have been run. Simulation-only: a
+            real-execution request (isSimulated=false) that sets these is rejected
+            with an error, never silently ignored.
           items: { $ref: '#/components/schemas/ERC20StateOverride' }
 
     ERC20StateOverride:

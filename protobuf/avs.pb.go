@@ -5367,7 +5367,9 @@ type RunNodeWithInputsReq struct {
 	// isolated node simulation (RunNodeImmediately). Lets callers seed token
 	// balances and approvals so contract-write simulations (e.g. Uniswap swaps)
 	// don't revert with "transfer amount exceeds allowance/balance" before the
-	// approval/funding transactions have been run. Ignored for real execution.
+	// approval/funding transactions have been run. Simulation-only: a
+	// real-execution request (isSimulated=false) that sets these is rejected with
+	// an error, never silently ignored.
 	Erc20Overrides []*ERC20StateOverride `protobuf:"bytes,5,rep,name=erc20_overrides,json=erc20Overrides,proto3" json:"erc20_overrides,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache

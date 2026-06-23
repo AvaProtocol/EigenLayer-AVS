@@ -1091,7 +1091,7 @@ type RunNodeRequest struct {
 	// chain-agnostic operations.
 	ChainId *ChainId `json:"chainId,omitempty"`
 
-	// Erc20Overrides Optional ERC20 balance/allowance state overrides applied only during this isolated node simulation. Lets callers seed token balances and approvals so contract-write simulations (e.g. Uniswap swaps) don't revert with "transfer amount exceeds allowance/balance" before the approval/funding transactions have been run. Ignored for real execution.
+	// Erc20Overrides Optional ERC20 balance/allowance state overrides applied only during this isolated node simulation. Lets callers seed token balances and approvals so contract-write simulations (e.g. Uniswap swaps) don't revert with "transfer amount exceeds allowance/balance" before the approval/funding transactions have been run. Simulation-only: a real-execution request (isSimulated=false) that sets these is rejected with an error, never silently ignored.
 	Erc20Overrides *[]ERC20StateOverride `json:"erc20Overrides,omitempty"`
 
 	// InputVariables Free-form key-value bag of values used to resolve `{{variable.path}}`

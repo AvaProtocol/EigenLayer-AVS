@@ -1246,7 +1246,9 @@ message RunNodeWithInputsReq {
   // isolated node simulation (RunNodeImmediately). Lets callers seed token
   // balances and approvals so contract-write simulations (e.g. Uniswap swaps)
   // don't revert with "transfer amount exceeds allowance/balance" before the
-  // approval/funding transactions have been run. Ignored for real execution.
+  // approval/funding transactions have been run. Simulation-only: a
+  // real-execution request (isSimulated=false) that sets these is rejected with
+  // an error, never silently ignored.
   repeated ERC20StateOverride erc20_overrides = 5;
 }
 
