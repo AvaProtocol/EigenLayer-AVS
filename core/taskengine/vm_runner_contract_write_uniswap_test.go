@@ -6,7 +6,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -140,62 +139,29 @@ func TestContractWriteNode_UniswapV3Quote(t *testing.T) {
 		},
 	}
 
-	// Seed ERC20 state overrides so the simulation no longer reverts with
-	// "transfer amount exceeds allowance/balance" before reaching the swap logic.
-	// This exercises the same SimulationStateMap path that RunNodeImmediately
-	// populates from a request's erc20_overrides. We approve the SwapRouter02 to
-	// spend the runner's USDC and give the runner a large USDC balance.
-	usdc := "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
-	owner := "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e"
-	swapRouter02 := "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E"
-	require.NotNil(t, vm.simulationState, "simulation state must exist in simulation mode")
-	bigBalance := "0x38d7ea4c68000"                                                      // 1,000,000,000 USDC (6 decimals)
-	maxAllowance := "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" // max uint256
-	// Cover both the standard OpenZeppelin ERC20 layout (balance slot 0 /
-	// allowance slot 1) and USDC's FiatToken layout (9 / 10) so the override lands
-	// regardless of which the deployed test token uses. Balance and allowance get
-	// their OWN slots.
-	for _, balSlot := range []uint64{0, 9} {
-		s := balSlot
-		require.NoError(t, vm.simulationState.ApplyUserERC20Override(
-			usdc, owner, "", bigBalance, "", &s, nil))
-	}
-	for _, allowSlot := range []uint64{1, 10} {
-		s := allowSlot
-		require.NoError(t, vm.simulationState.ApplyUserERC20Override(
-			usdc, owner, swapRouter02, "", maxAllowance, nil, &s))
-	}
-
-	// Execute the node
+	// Execute the node. This test validates tuple-parameter calldata generation,
+	// not erc20_overrides: QuoterV2.quoteExactInputSingle is a view function that
+	// reverts by design to return the quote and never performs a transferFrom, so
+	// seeding balances/allowances here would prove nothing. The erc20_overrides
+	// request path is covered end-to-end by
+	// TestRunNodeImmediatelyRPC/ERC20Overrides_UniswapSwap.
 	step, err := vm.RunNodeWithInputs(node, inputVars)
 	require.NoError(t, err)
 	require.NotNil(t, step)
 
-	// With balance + allowance seeded, the simulation must never fail on an
-	// approval/funding precondition — that's exactly what erc20_overrides fix.
-	// QuoterV2.quoteExactInputSingle still reverts by design (it returns the
-	// quote via revert data), so "execution reverted" remains acceptable; an
-	// allowance/balance revert would mean the override path regressed.
-	assert.NotContains(t, step.Error, "transfer amount exceeds allowance",
-		"erc20_overrides should have seeded the allowance — got: %s", step.Error)
-	assert.NotContains(t, step.Error, "transfer amount exceeds balance",
-		"erc20_overrides should have seeded the balance — got: %s", step.Error)
-	assert.False(t, vm.simulationState.IsEmpty(),
-		"simulation state should hold the seeded ERC20 overrides")
-
 	if step.Success {
-		t.Logf("✅ Swap simulation succeeded with ERC20 overrides")
+		t.Logf("✅ Quote simulation succeeded")
 		contractWrite, ok := step.OutputData.(*avsproto.Execution_Step_ContractWrite)
 		require.True(t, ok, "Step output should be ContractWrite")
 		require.NotNil(t, contractWrite)
 		require.NotNil(t, contractWrite.ContractWrite)
 		require.NotNil(t, contractWrite.ContractWrite.Data)
-		t.Logf("Swap output: %v", contractWrite.ContractWrite.Data.AsInterface())
+		t.Logf("Quote output: %v", contractWrite.ContractWrite.Data.AsInterface())
 	} else {
-		// Acceptable: QuoterV2's intentional revert-with-data. The key assertions
-		// above already prove the allowance/balance preconditions were satisfied.
+		// QuoterV2 returns its result via revert, so "execution reverted" is the
+		// expected outcome and confirms the tuple calldata reached the contract.
 		require.Contains(t, step.Error, "execution reverted",
-			"only QuoterV2's intentional revert is acceptable once overrides are seeded, got: %s", step.Error)
-		t.Logf("ℹ️  QuoterV2 reverted by design; allowance/balance overrides were applied correctly")
+			"QuoterV2 quote should revert by design once calldata reaches it, got: %s", step.Error)
+		t.Logf("ℹ️  QuoterV2 reverted by design; tuple calldata generation validated")
 	}
 }

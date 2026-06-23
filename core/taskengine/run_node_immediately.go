@@ -2465,7 +2465,14 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 // a caller can never silently fake balances/approvals against a live wallet.
 func (n *Engine) applyERC20Overrides(vm *VM, useSimulation bool, rawOverrides interface{}) error {
 	overrides, ok := rawOverrides.([]*avsproto.ERC20StateOverride)
-	if !ok || len(overrides) == 0 {
+	if !ok {
+		// The value is only ever stashed by RunNodeImmediatelyRPCWithContext as a
+		// []*avsproto.ERC20StateOverride. A different type here means an internal
+		// wiring/serialization bug — surface it rather than silently dropping the
+		// caller's overrides.
+		return fmt.Errorf("erc20_overrides: internal error, expected []*ERC20StateOverride under %s but got %T", erc20OverridesConfigKey, rawOverrides)
+	}
+	if len(overrides) == 0 {
 		return nil
 	}
 
