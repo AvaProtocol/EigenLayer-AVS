@@ -369,6 +369,45 @@ func composePlainTextBodyFromAPI(body contextMemorySummarizeBody) string {
 	return strings.TrimSpace(sb.String())
 }
 
+// BuildNotifyPayload builds the raw execution-data payload (the same SummarizeRequest the
+// summarizer would POST to /api/summarize) as a generic map, for the gateway to merge into a
+// Studio /api/notify call. Path B: Studio summarizes AND distributes, so the gateway forwards
+// raw data instead of summarizing + sending locally. Reuses buildRequest (incl. token
+// enrichment) and the same status/executionError derivation as Summarize.
+func (c *ContextMemorySummarizer) BuildNotifyPayload(vm *VM, currentStepName string) (map[string]interface{}, error) {
+	if c == nil {
+		return nil, fmt.Errorf("summarizer not initialized")
+	}
+
+	// Derive the execution verdict BEFORE buildRequest acquires vm.mu (same as Summarize).
+	// Empty ExecutionLogs = single-node RunNodeImmediately: treat as success (nothing failed yet).
+	var status, executionError string
+	if len(vm.ExecutionLogs) == 0 {
+		status = "success"
+	} else {
+		var resultStatus ExecutionResultStatus
+		executionError, _, resultStatus = vm.AnalyzeExecutionResult()
+		status = mapExecutionStatusToAPIString(resultStatus)
+	}
+
+	req, err := c.buildRequest(vm, currentStepName, status, executionError)
+	if err != nil {
+		return nil, err
+	}
+
+	// Round-trip through JSON so the merged body carries the exact field names/shapes the
+	// /api/summarize (and /api/notify) contract expects.
+	encoded, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
 func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, executionError string) (*contextMemorySummarizeRequest, error) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
