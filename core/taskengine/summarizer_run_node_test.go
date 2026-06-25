@@ -28,7 +28,7 @@ func TestComposeSummary_RunNodeRestSubjectAndBody(t *testing.T) {
 	restPayload := map[string]interface{}{
 		"status":     202,
 		"statusText": "Accepted",
-		"url":        "https://studio.avaprotocol.org/api/notify",
+		"url":        "https://app.avaprotocol.org/api/notify",
 	}
 	restValue, err := structpb.NewValue(restPayload)
 	if err != nil {
