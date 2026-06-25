@@ -31,32 +31,6 @@ const (
 	statusIconFailed  = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#EF4444"/><path d="M10 6L6 10M6 6L10 10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`
 )
 
-// buildStatusHtml generates the status badge HTML for email notifications.
-// The Summary carries the context-memory-supplied status ("success" | "failed" | "error")
-// plus step counts — a success run with SkippedSteps>0 renders yellow ("warn") and
-// uses s.SkippedNote as the badge text so the skip is visible.
-func buildStatusHtml(s Summary) string {
-	var iconSvg, bgColor, textColor string
-	switch {
-	case s.Status == "success" && s.SkippedSteps > 0:
-		iconSvg = statusIconWarn
-		bgColor = "#FEF3C7"   // light yellow
-		textColor = "#92400E" // dark amber
-	case s.Status == "failed" || s.Status == "error":
-		iconSvg = statusIconFailed
-		bgColor = "#FEE2E2"   // light red
-		textColor = "#991B1B" // dark red
-	default: // "success" without skipped steps, or unknown
-		iconSvg = statusIconSuccess
-		bgColor = "#D1FAE5"   // light green
-		textColor = "#065F46" // dark green
-	}
-	return fmt.Sprintf(
-		`<div style="display:inline-block; padding:8px 16px; background-color:%s; color:%s; border-radius:8px; font-weight:500; margin:8px 0">%s%s</div>`,
-		bgColor, textColor, iconSvg, getStatusDisplayText(s),
-	)
-}
-
 // HTTPRequestExecutor interface for making HTTP requests
 type HTTPRequestExecutor interface {
 	ExecuteRequest(method, url, body string, headers map[string]string) (*resty.Response, error)
@@ -682,10 +656,9 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		r.vm.logger.Debug("REST API body preprocessing", "contentType", contentType, "usedJSONPreprocessing", isJSONContent)
 	}
 
-	// Optionally compose summary and inject into provider payloads when enabled via nodeConfig.options.summarize
-	// Keep a reference to the composed summary so we can return it to clients even
-	// when the notification provider (Studio /api/notify) returns an empty body.
-	var summaryForClient *Summary
+	// Optionally forward raw execution data to Studio /api/notify (Path B), which summarizes
+	// AND sends and returns the summary (surfaced to the SDK after the POST). The gateway no
+	// longer summarizes or sends notifications itself — it is a pass-through to /api/notify.
 	isStudioNotify := false
 	if shouldSummarize(r.vm, node) {
 		provider := detectNotificationProvider(url)
@@ -693,11 +666,8 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 			r.vm.logger.Info("REST API summarize enabled", "provider", provider, "url", url)
 		}
 		if provider == "studio-notify" {
-			// Path B: forward raw execution data to Studio /api/notify, which summarizes AND
-			// sends and returns the summary (surfaced to the SDK after the POST). The gateway no
-			// longer summarizes or sends email itself.
 			isStudioNotify = true
-			if cm, ok := globalSummarizer.(*ContextMemorySummarizer); ok && cm != nil {
+			if cm := globalSummarizer; cm != nil {
 				if payload, err := cm.BuildNotifyPayload(r.vm, r.vm.GetNodeNameAsVar(stepID)); err == nil {
 					var bodyObj map[string]interface{}
 					if json.Unmarshal([]byte(body), &bodyObj) == nil {
@@ -714,20 +684,6 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 				}
 			} else if r.vm.logger != nil {
 				r.vm.logger.Warn("REST API notify: no summarizer configured to build payload")
-			}
-		} else if provider == "telegram" {
-			// Legacy gateway-side Telegram send (moves to /api/notify in Phase 3).
-			currentName := r.vm.GetNodeNameAsVar(stepID)
-			s := ComposeSummarySmart(r.vm, currentName)
-			summaryForClient = &s
-			var bodyObj map[string]interface{}
-			if json.Unmarshal([]byte(body), &bodyObj) == nil {
-				telegramMsg := FormatForMessageChannels(s, "telegram", r.vm)
-				bodyObj["parse_mode"] = "HTML"
-				bodyObj["text"] = telegramMsg
-				body = FormatAsJSON(bodyObj)
-			} else if r.vm.logger != nil {
-				r.vm.logger.Warn("REST API summarize enabled but body is not JSON, skipping injection")
 			}
 		}
 	}
@@ -810,7 +766,6 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	// Parse response body
 	var bodyData interface{}
 	bodyStr := string(response.Body())
-	statusSuccess := response.StatusCode() < 400
 	if bodyStr != "" {
 		var jsonData interface{}
 		if err := json.Unmarshal(response.Body(), &jsonData); err == nil {
@@ -834,34 +789,10 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 			bodyData = bodyStr
 		}
 	} else {
-		// If the provider didn't return a body (common for notification providers with 202 Accepted),
-		// surface the composed summary in the server response so clients have subject/body to display.
-		// For single-node notification calls, derive success from the HTTP response status.
-		if summaryForClient != nil {
-			// Build a summary for clients based on HTTP response status
-			var subj string
-			var bod string
-			if statusSuccess {
-				subj = summaryForClient.Subject
-				bod = summaryForClient.Body
-			} else {
-				subj = summaryForClient.Subject
-				if strings.TrimSpace(summaryForClient.Body) != "" {
-					bod = summaryForClient.Body
-				} else {
-					bod = fmt.Sprintf(
-						"Smart wallet executed 1 notification step, but the provider returned HTTP %d.\n\nThe email could not be sent.",
-						response.StatusCode(),
-					)
-				}
-			}
-			bodyData = map[string]interface{}{
-				"subject": subj,
-				"body":    bod,
-			}
-		} else {
-			bodyData = ""
-		}
+		// No body returned (common for notification providers with 202 Accepted). The
+		// studio-notify summary, when the provider returns one, is extracted from the
+		// response body above; otherwise there is nothing to surface.
+		bodyData = ""
 	}
 
 	// Create standard format response
