@@ -712,7 +712,7 @@ func TestRestRequestSendGridGlobalSecret(t *testing.T) {
 			t.Errorf("expected GET request, got %s", r.Method)
 		}
 
-		// Verify that the Authorization header is present and uses the sendgrid_key
+		// Verify that the Authorization header is present and uses the email_api_key
 		authHeader := r.Header.Get("Authorization")
 		if !strings.HasPrefix(authHeader, "Bearer ") {
 			t.Errorf("expected Authorization header with Bearer token, got: %s", authHeader)
@@ -721,7 +721,7 @@ func TestRestRequestSendGridGlobalSecret(t *testing.T) {
 		// Check that the API key from the template was properly substituted
 		expectedKey := "SENDGRID_KEY_FOR_UNIT_TESTS"
 		if !strings.Contains(authHeader, expectedKey) {
-			t.Errorf("expected sendgrid_key to be substituted in Authorization header, got: %s", authHeader)
+			t.Errorf("expected email_api_key to be substituted in Authorization header, got: %s", authHeader)
 		}
 
 		// Return mock SendGrid account information response
@@ -738,12 +738,12 @@ func TestRestRequestSendGridGlobalSecret(t *testing.T) {
 	}))
 	defer sendGridServer.Close()
 
-	// Create REST API node that calls our mock SendGrid server using the global sendgrid_key secret
+	// Create REST API node that calls our mock SendGrid server using the global email_api_key secret
 	node := &avsproto.RestAPINode{
 		Config: &avsproto.RestAPINode_Config{
 			Url: sendGridServer.URL + "/v3/user/account",
 			Headers: map[string]string{
-				"Authorization": "Bearer {{apContext.configVars.sendgrid_key}}",
+				"Authorization": "Bearer {{apContext.configVars.email_api_key}}",
 				"Content-Type":  "application/json",
 			},
 			Body:   "",
@@ -775,7 +775,7 @@ func TestRestRequestSendGridGlobalSecret(t *testing.T) {
 
 	// Create VM with SendGrid secret available through global macro secrets
 	globalSecrets := map[string]string{
-		"sendgrid_key": "SENDGRID_KEY_FOR_UNIT_TESTS",
+		"email_api_key": "SENDGRID_KEY_FOR_UNIT_TESTS",
 	}
 
 	vm, err := NewVMWithData(&model.Workflow{
@@ -857,10 +857,10 @@ func TestRestRequestSendGridGlobalSecret(t *testing.T) {
 	}
 
 	t.Logf("✅ SUCCESS: SendGrid global secret test passed!")
-	t.Logf("✅ sendgrid_key global secret was properly substituted in Authorization header")
+	t.Logf("✅ email_api_key global secret was properly substituted in Authorization header")
 	t.Logf("✅ SendGrid API response structure properly accessible: type='%s', reputation=%f",
 		expectedAccountType, expectedReputation)
-	t.Logf("✅ Verified global secret access via {{apContext.configVars.sendgrid_key}} template")
+	t.Logf("✅ Verified global secret access via {{apContext.configVars.email_api_key}} template")
 }
 
 func TestRestSummarizeTelegramHTML(t *testing.T) {

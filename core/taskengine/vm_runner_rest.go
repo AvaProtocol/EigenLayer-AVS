@@ -19,10 +19,8 @@ const (
 	MockAPIEndpoint = "https://mock-api.ap-aggregator.local"
 )
 
-// SendGrid Dynamic Template ID for AI-generated workflow summaries
-const (
-	SendGridSummaryTemplateID = "d-3b4b885af0fc45ad822024ebc72f169c"
-)
+// Email-service template that renders AI-generated workflow summaries.
+const WorkflowSummaryTemplate = "workflow-summary"
 
 // Status HTML badge SVG icons for email notifications
 const (
@@ -417,21 +415,21 @@ func parseJSONBody(body string) interface{} {
 
 // RestProcessor handles REST API calls with template variable support
 //
-// Global secrets like sendgrid_key can be accessed via templates:
-// Example URL: "https://api.sendgrid.com/v3/user/account"
-// Example Headers: "Authorization": "Bearer {{apContext.configVars.sendgrid_key}}"
+// Global secrets like email_api_key can be accessed via templates:
+// Example URL: "https://email-api.avaprotocol.org/api/send"
+// Example Headers: "Authorization": "Bearer {{apContext.configVars.email_api_key}}"
 //
 // Available global secrets (configured in aggregator.yaml):
 // - ap_notify_bot_token: Telegram bot token for notifications
-// - sendgrid_key: SendGrid API key for email services
+// - email_api_key: email-service (Bento transport) API key for email
 //
 // Usage example:
-//   URL: https://api.sendgrid.com/v3/user/account
+//   URL: https://email-api.avaprotocol.org/api/send
 //   Headers: {
-//     "Authorization": "Bearer {{apContext.configVars.sendgrid_key}}",
+//     "Authorization": "Bearer {{apContext.configVars.email_api_key}}",
 //     "Content-Type": "application/json"
 //   }
-//   Method: GET
+//   Method: POST
 //
 // ... existing code ...
 
@@ -707,16 +705,14 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 			var bodyObj map[string]interface{}
 			if err := json.Unmarshal([]byte(body), &bodyObj); err == nil {
 				switch provider {
-				case "sendgrid":
-					// Always use Dynamic Templates for AI summaries - inject template_id automatically
-					bodyObj["template_id"] = SendGridSummaryTemplateID
-
-					// Get dynamic template data from summary (subject/title/analysis...)
+				case "emailservice":
+					// Build the summary's template data (subject/title/analysis...). The
+					// granular fields below populate the workflow-summary template props.
 					dynamicData := s.SendGridDynamicData()
 
-					// Single source of truth: the runner block returned by context-memory,
-					// shared with the Telegram render. SendGrid template variables keep
-					// their existing format — `runner` is full hex, `eoaAddress` is shortened.
+					// Single source of truth: the runner block returned by the summarizer,
+					// shared with the Telegram render — `runner` is full hex, `eoaAddress`
+					// is shortened.
 					if s.Runner != nil {
 						dynamicData["runner"] = s.Runner.SmartWallet
 						dynamicData["eoaAddress"] = shortHex(s.Runner.OwnerEOA)
@@ -1004,34 +1000,18 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 						dynamicData["preheader"] = summaryForClient.Subject
 					}
 
-					// Ensure 'from' object includes a display name for better inbox rendering
-					if fromObj, ok := bodyObj["from"].(map[string]interface{}); ok {
-						if _, hasName := fromObj["name"]; !hasName || strings.TrimSpace(asString(fromObj["name"])) == "" {
-							fromObj["name"] = "AP Studio Notification"
-							bodyObj["from"] = fromObj
-						}
+					// Render via the email-service `workflow-summary` template instead of
+					// SendGrid dynamic templates: map the computed fields to the template's
+					// props and strip all SendGrid-specific keys. The studio Email node
+					// already emits a top-level `to`.
+					if subj, ok := dynamicData["subject"].(string); ok && subj != "" {
+						bodyObj["subject"] = subj
 					}
-
-					// Set SendGrid category for filtering in Activity Feed and Stats
-					bodyObj["categories"] = []string{"workflow-summary"}
-
-					// Provide dynamic_template_data both at top-level and per-personalization to satisfy API variants
-					bodyObj["dynamic_template_data"] = dynamicData
-
-					// Attach dynamic_template_data per-personalization; DO NOT set subject here when using template {{{subject}}}
-					if pers, ok := bodyObj["personalizations"].([]interface{}); ok {
-						for i := range pers {
-							if p, ok := pers[i].(map[string]interface{}); ok {
-								// Pass all dynamic template data (SendGrid expects snake_case)
-								p["dynamic_template_data"] = dynamicData
-								pers[i] = p
-							}
-						}
-						bodyObj["personalizations"] = pers
+					bodyObj["template"] = WorkflowSummaryTemplate
+					bodyObj["data"] = workflowSummaryTemplateData(dynamicData)
+					for _, k := range []string{"personalizations", "from", "reply_to", "template_id", "categories", "dynamic_template_data", "content"} {
+						delete(bodyObj, k)
 					}
-
-					// Remove any content array; Dynamic Templates should not include 'content'
-					delete(bodyObj, "content")
 				case "telegram":
 					// Format summary for Telegram: concise, chat-friendly message
 					// Pass VM so transfer events can be formatted as transfer notifications
@@ -1224,12 +1204,13 @@ func shouldSummarize(vm *VM, node *avsproto.RestAPINode) bool {
 	return false
 }
 
-// detectNotificationProvider returns "sendgrid" or "telegram" based on URL patterns; empty string if unknown
+// detectNotificationProvider returns "emailservice" or "telegram" based on URL patterns; empty string if unknown
 func detectNotificationProvider(u string) string {
 	lu := strings.ToLower(u)
-	// SendGrid: allow detection by path for tests using mock servers
-	if strings.Contains(lu, "/v3/mail/send") || strings.Contains(lu, "/mail/send") || strings.Contains(lu, "api.sendgrid.com") && strings.Contains(lu, "/mail/send") {
-		return "sendgrid"
+	// Email-service: the standalone Bento transport's send endpoint. Path-based so
+	// tests using mock servers (mock-api/api/send) match too.
+	if strings.Contains(lu, "/api/send") {
+		return "emailservice"
 	}
 	if strings.Contains(lu, "api.telegram.org") && strings.Contains(lu, "/sendmessage") {
 		return "telegram"

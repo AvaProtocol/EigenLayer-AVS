@@ -31,12 +31,12 @@ func TestSendGridEmailWithContextMemoryResponse(t *testing.T) {
 	// Extract SendGrid API key from config
 	sendgridKey := ""
 	if testConfig.MacroSecrets != nil {
-		if key, ok := testConfig.MacroSecrets["sendgrid_key"]; ok {
+		if key, ok := testConfig.MacroSecrets["email_api_key"]; ok {
 			sendgridKey = key
 		}
 	}
 	if sendgridKey == "" {
-		t.Skip("sendgrid_key not found in config, skipping SendGrid integration test")
+		t.Skip("email_api_key not found in config, skipping SendGrid integration test")
 	}
 
 	// Mock context-memory API server that returns the exact response from terminal output
@@ -94,7 +94,7 @@ func TestSendGridEmailWithContextMemoryResponse(t *testing.T) {
 	SetSummarizer(summarizer)
 	defer SetSummarizer(nil) // Clean up after test
 
-	// Set global macro secrets so template variables like {{apContext.configVars.sendgrid_key}} can be resolved
+	// Set global macro secrets so template variables like {{apContext.configVars.email_api_key}} can be resolved
 	if testConfig.MacroSecrets != nil {
 		SetMacroSecrets(testConfig.MacroSecrets)
 		defer SetMacroSecrets(nil) // Clean up after test
@@ -133,7 +133,7 @@ func TestSendGridEmailWithContextMemoryResponse(t *testing.T) {
 								Url:    sendgridAPIURL,
 								Method: "POST",
 								Headers: map[string]string{
-									"Authorization": "Bearer {{apContext.configVars.sendgrid_key}}",
+									"Authorization": "Bearer {{apContext.configVars.email_api_key}}",
 									"Content-Type":  "application/json",
 								},
 								Body: `{

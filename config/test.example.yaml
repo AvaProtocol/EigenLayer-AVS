@@ -88,7 +88,7 @@ chains:
 macros:
   secrets:
     ap_notify_bot_token: ""
-    sendgrid_key:        ""
+    email_api_key:       ""
     thegraph_api_key:    ""
     moralis_api_key:     ""
 

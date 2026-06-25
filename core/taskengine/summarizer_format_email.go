@@ -107,6 +107,24 @@ func (s Summary) SendGridDynamicData() map[string]interface{} {
 	return data
 }
 
+// workflowSummaryTemplateData maps the computed summary fields (built by the
+// vm_runner_rest summarize block into `dynamicData`) to the email-service
+// `workflow-summary` template's props: preheader, summaryHtml, statusHtml, runner,
+// eoaAddress, analysisHtml, year. The one-line `summary` text is wrapped as HTML since
+// the template injects summaryHtml as trusted HTML.
+func workflowSummaryTemplateData(dynamicData map[string]interface{}) map[string]interface{} {
+	data := map[string]interface{}{}
+	for _, key := range []string{"preheader", "statusHtml", "analysisHtml", "runner", "eoaAddress", "year"} {
+		if v, ok := dynamicData[key]; ok {
+			data[key] = v
+		}
+	}
+	if summary, ok := dynamicData["summary"].(string); ok && strings.TrimSpace(summary) != "" {
+		data["summaryHtml"] = `<p style="margin:0">` + html.EscapeString(summary) + `</p>`
+	}
+	return data
+}
+
 // getStatusColor returns the color for the email status badge.
 // Per Studio, a `success` run with branch-skipped steps renders yellow ("warn"),
 // not green — the skip is worth user attention even though nothing failed.
