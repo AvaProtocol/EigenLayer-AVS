@@ -47,8 +47,19 @@ const (
 
 var testConfig *config.Config
 
-// LoadDotEnv loads environment variables from .env file in the repository root.
-// This allows tests to access OWNER_EOA and other secrets from .env
+// LoadDotEnv loads environment variables from the repository root dotenv files
+// so tests can resolve ${VAR} references in config/test.yaml (e.g. the
+// ${SEPOLIA_BUNDLER_URL} / ${BASE_SEPOLIA_BUNDLER_URL} bundler URLs) and read
+// secrets like OWNER_EOA.
+//
+// Files are loaded in order: .env.local first, then .env. The first file to set
+// a given key wins, so .env.local overrides .env (dotenv convention), and a real
+// process environment variable overrides both. Each file is optional.
+//
+// Note: both files are gitignored. In a fresh git worktree they are absent, so
+// ${VAR} references resolve to empty — that is the cause of the "BundlerURL is
+// empty in test.yaml config" panic in worktrees. Copy or symlink the dotenv
+// files (or export the vars) before running bundler-dependent tests there.
 func LoadDotEnv() error {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -56,18 +67,37 @@ func LoadDotEnv() error {
 	}
 
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../.."))
-	envPath := filepath.Join(repoRoot, ".env")
 
-	// Check if .env file exists
-	if _, err := os.Stat(envPath); os.IsNotExist(err) {
-		// .env file doesn't exist, skip silently (tests may use env vars from other sources)
-		return nil
+	loadedAny := false
+	for _, name := range []string{".env.local", ".env"} {
+		loaded, err := loadDotEnvFile(filepath.Join(repoRoot, name))
+		if err != nil {
+			return err
+		}
+		loadedAny = loadedAny || loaded
 	}
 
-	// Read .env file
+	if !loadedAny {
+		// Not fatal — vars may come from the real environment (e.g. CI) — but
+		// surface it so a missing dotenv in a worktree isn't a silent mystery.
+		log.Printf("testutil: no .env.local or .env found under %s; ${VAR} refs in test.yaml rely on the process environment", repoRoot)
+	}
+
+	return nil
+}
+
+// loadDotEnvFile reads a single KEY=VALUE dotenv file, setting each key only if
+// it is not already present in the environment. Returns (false, nil) when the
+// file does not exist. Existing env vars (and earlier-loaded files) take
+// precedence, so callers should load higher-priority files first.
+func loadDotEnvFile(envPath string) (bool, error) {
+	if _, err := os.Stat(envPath); os.IsNotExist(err) {
+		return false, nil
+	}
+
 	file, err := os.Open(envPath)
 	if err != nil {
-		return fmt.Errorf("failed to open .env file: %w", err)
+		return false, fmt.Errorf("failed to open %s: %w", envPath, err)
 	}
 	defer file.Close()
 
@@ -92,17 +122,17 @@ func LoadDotEnv() error {
 		// Remove quotes if present
 		value = strings.Trim(value, `"'`)
 
-		// Only set if not already set in environment (env vars take precedence)
+		// Only set if not already set (real env + earlier files take precedence)
 		if os.Getenv(key) == "" {
 			os.Setenv(key, value)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading .env file: %w", err)
+		return false, fmt.Errorf("error reading %s: %w", envPath, err)
 	}
 
-	return nil
+	return true, nil
 }
 
 // init loads environment variables from .env file only.

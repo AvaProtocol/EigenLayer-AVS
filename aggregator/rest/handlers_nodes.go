@@ -54,12 +54,59 @@ func (s *Server) RunNode(ctx echo.Context) error {
 		}
 		req.InputVariables = converted
 	}
+	if body.Erc20Overrides != nil {
+		req.Erc20Overrides = openAPIERC20OverridesToProto(*body.Erc20Overrides)
+	}
 
 	resp, err := s.engine.RunNodeImmediatelyRPCWithContext(ctx.Request().Context(), user, req)
 	if err != nil {
 		return err
 	}
 	return ctx.JSON(http.StatusOK, runNodeRespToOpenAPI(resp))
+}
+
+// openAPIERC20OverridesToProto maps the REST ERC20StateOverride list onto the
+// proto representation consumed by RunNodeImmediately. Slot indices are widened
+// from the spec's int64 to the proto's uint64. A negative slot is invalid (a
+// storage slot is a non-negative index), so it is treated as unset rather than
+// silently coerced to slot 0 — and because the engine requires an explicit slot
+// whenever the corresponding balance/allowance is set, a missing or negative
+// slot surfaces as a clear validation error instead of a wrong-slot seed. The
+// engine validates addresses/values.
+func openAPIERC20OverridesToProto(in []generated.ERC20StateOverride) []*avsproto.ERC20StateOverride {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*avsproto.ERC20StateOverride, 0, len(in))
+	for _, o := range in {
+		po := &avsproto.ERC20StateOverride{
+			TokenAddress: string(o.TokenAddress),
+			OwnerAddress: string(o.OwnerAddress),
+			Balance:      o.Balance,
+			Allowance:    o.Allowance,
+		}
+		if o.SpenderAddress != nil {
+			s := string(*o.SpenderAddress)
+			po.SpenderAddress = &s
+		}
+		po.BalanceSlot = nonNegativeSlotPtr(o.BalanceSlot)
+		po.AllowanceSlot = nonNegativeSlotPtr(o.AllowanceSlot)
+		out = append(out, po)
+	}
+	return out
+}
+
+// nonNegativeSlotPtr widens a spec int64 storage slot to the proto's uint64,
+// returning nil when the slot is absent or negative. A nil slot is then
+// rejected by the engine (an explicit slot is required when balance/allowance
+// is set), so a negative value surfaces as a validation error rather than a
+// silent slot-0 seed.
+func nonNegativeSlotPtr(v *int64) *uint64 {
+	if v == nil || *v < 0 {
+		return nil
+	}
+	u := uint64(*v)
+	return &u
 }
 
 // runNodeRespToOpenAPI maps the engine RunNodeWithInputsResp to the

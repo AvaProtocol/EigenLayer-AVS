@@ -21,6 +21,11 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// erc20OverridesConfigKey is the reserved nodeConfig key used to thread
+// caller-supplied ERC20 state overrides from the RPC request down to the VM's
+// simulation state. It is stripped from the config before the node is built.
+const erc20OverridesConfigKey = "__erc20Overrides"
+
 // getRealisticBlockNumberForChain returns a realistic block number for simulation based on chain ID
 // Only includes chains that the aggregator actually supports: Ethereum and Base
 func getRealisticBlockNumberForChain(chainID int64) uint64 {
@@ -2453,6 +2458,56 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 	return result, nil
 }
 
+// applyERC20Overrides seeds the VM's simulation state with caller-supplied
+// ERC20 balance/allowance overrides. rawOverrides is the value stashed under
+// erc20OverridesConfigKey — a []*avsproto.ERC20StateOverride. Overrides are
+// honored only in simulation mode; in real-execution mode they are rejected so
+// a caller can never silently fake balances/approvals against a live wallet.
+func (n *Engine) applyERC20Overrides(vm *VM, useSimulation bool, rawOverrides interface{}) error {
+	overrides, ok := rawOverrides.([]*avsproto.ERC20StateOverride)
+	if !ok {
+		// The value is only ever stashed by RunNodeImmediatelyRPCWithContext as a
+		// []*avsproto.ERC20StateOverride. A different type here means an internal
+		// wiring/serialization bug — surface it rather than silently dropping the
+		// caller's overrides.
+		return fmt.Errorf("erc20_overrides: internal error, expected []*ERC20StateOverride under %s but got %T", erc20OverridesConfigKey, rawOverrides)
+	}
+	if len(overrides) == 0 {
+		return nil
+	}
+
+	if !useSimulation {
+		return fmt.Errorf("erc20_overrides are only supported in simulation mode")
+	}
+	if vm.simulationState == nil {
+		// Should not happen when useSimulation is true, but guard anyway.
+		return fmt.Errorf("erc20_overrides require an active simulation state")
+	}
+
+	for i, o := range overrides {
+		if o == nil {
+			continue
+		}
+		if err := vm.simulationState.ApplyUserERC20Override(
+			o.GetTokenAddress(),
+			o.GetOwnerAddress(),
+			o.GetSpenderAddress(),
+			o.GetBalance(),
+			o.GetAllowance(),
+			o.BalanceSlot,
+			o.AllowanceSlot,
+		); err != nil {
+			return fmt.Errorf("erc20_overrides[%d]: %w", i, err)
+		}
+	}
+
+	if n.logger != nil {
+		n.logger.Info("Applied caller-supplied ERC20 state overrides for simulation",
+			"count", len(overrides))
+	}
+	return nil
+}
+
 // runProcessingNodeWithInputs handles execution of processing node types
 func (n *Engine) runProcessingNodeWithInputs(ctx context.Context, user *model.User, nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, useSimulation bool) (map[string]interface{}, error) {
 	// Check if this is actually a trigger type that was misrouted
@@ -2657,6 +2712,18 @@ func (n *Engine) runProcessingNodeWithInputs(ctx context.Context, user *model.Us
 	processedInputVariables := inputVariables
 	for key, processedValue := range processedInputVariables {
 		vm.AddVar(key, processedValue)
+	}
+
+	// Apply caller-supplied ERC20 state overrides to the simulation state.
+	// These seed token balances/allowances so contract-write simulations
+	// (e.g. Uniswap swaps) don't revert before approval/funding txs are run.
+	// Only honored in simulation mode — strip the reserved key either way so
+	// it never reaches CreateNodeFromType.
+	if rawOverrides, ok := nodeConfig[erc20OverridesConfigKey]; ok {
+		delete(nodeConfig, erc20OverridesConfigKey)
+		if err := n.applyERC20Overrides(vm, useSimulation, rawOverrides); err != nil {
+			return nil, err
+		}
 	}
 
 	// Create node from type and config
@@ -2950,6 +3017,14 @@ func (n *Engine) RunNodeImmediatelyRPCWithContext(ctx context.Context, user *mod
 				RestApi: &avsproto.RestAPINode_Output{},
 			},
 		}, nil
+	}
+
+	// Carry any caller-supplied ERC20 state overrides through to the VM's
+	// simulation state. These are simulation-only seeds for token
+	// balances/allowances (see runProcessingNodeWithInputs); they are
+	// stashed under a reserved key and stripped before CreateNodeFromType.
+	if len(req.GetErc20Overrides()) > 0 {
+		nodeConfig[erc20OverridesConfigKey] = req.GetErc20Overrides()
 	}
 
 	// Extract isSimulated from node config (defaults to true if not specified)

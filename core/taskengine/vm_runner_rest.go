@@ -684,366 +684,48 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	// Optionally compose summary and inject into provider payloads when enabled via nodeConfig.options.summarize
 	// Keep a reference to the composed summary so we can return it to clients even
-	// when the external notification provider (e.g., SendGrid) returns an empty body.
+	// when the notification provider (Studio /api/notify) returns an empty body.
 	var summaryForClient *Summary
+	isStudioNotify := false
 	if shouldSummarize(r.vm, node) {
 		provider := detectNotificationProvider(url)
 		if r.vm.logger != nil {
 			r.vm.logger.Info("REST API summarize enabled", "provider", provider, "url", url)
 		}
-		if provider != "" {
-			// Build summary from current VM context (AI if enabled, else deterministic)
+		if provider == "studio-notify" {
+			// Path B: forward raw execution data to Studio /api/notify, which summarizes AND
+			// sends and returns the summary (surfaced to the SDK after the POST). The gateway no
+			// longer summarizes or sends email itself.
+			isStudioNotify = true
+			if cm, ok := globalSummarizer.(*ContextMemorySummarizer); ok && cm != nil {
+				if payload, err := cm.BuildNotifyPayload(r.vm, r.vm.GetNodeNameAsVar(stepID)); err == nil {
+					var bodyObj map[string]interface{}
+					if json.Unmarshal([]byte(body), &bodyObj) == nil {
+						// Node fields (channel/format/recipient/...) win; add the raw execution data.
+						for k, v := range payload {
+							if _, exists := bodyObj[k]; !exists {
+								bodyObj[k] = v
+							}
+						}
+						body = FormatAsJSON(bodyObj)
+					}
+				} else if r.vm.logger != nil {
+					r.vm.logger.Warn("REST API notify: failed to build raw payload", "error", err)
+				}
+			} else if r.vm.logger != nil {
+				r.vm.logger.Warn("REST API notify: no summarizer configured to build payload")
+			}
+		} else if provider == "telegram" {
+			// Legacy gateway-side Telegram send (moves to /api/notify in Phase 3).
 			currentName := r.vm.GetNodeNameAsVar(stepID)
-			if r.vm.logger != nil {
-				r.vm.logger.Info("REST API calling ComposeSummarySmart", "currentName", currentName)
-			}
 			s := ComposeSummarySmart(r.vm, currentName)
-			if r.vm.logger != nil {
-				r.vm.logger.Info("REST API summary generated", "subject", s.Subject, "bodyLength", len(s.Body))
-			}
 			summaryForClient = &s
-
-			// Attempt to parse body as JSON and inject subject/body accordingly
 			var bodyObj map[string]interface{}
-			if err := json.Unmarshal([]byte(body), &bodyObj); err == nil {
-				switch provider {
-				case "sendgrid":
-					// Always use Dynamic Templates for AI summaries - inject template_id automatically
-					bodyObj["template_id"] = SendGridSummaryTemplateID
-
-					// Get dynamic template data from summary (subject/title/analysis...)
-					dynamicData := s.SendGridDynamicData()
-
-					// Single source of truth: the runner block returned by context-memory,
-					// shared with the Telegram render. SendGrid template variables keep
-					// their existing format — `runner` is full hex, `eoaAddress` is shortened.
-					if s.Runner != nil {
-						dynamicData["runner"] = s.Runner.SmartWallet
-						dynamicData["eoaAddress"] = shortHex(s.Runner.OwnerEOA)
-					}
-					// Get execution index from VM field (set by executor)
-					executionIndex := r.vm.ExecutionIndex
-					dynamicData["year"] = fmt.Sprintf("%d", time.Now().Year()) // Current year for email footer
-
-					// Compute skipped nodes (by name) = workflow nodes - executed step names
-					// Skip branch condition pseudo-nodes which are routing points, not actual nodes
-					// Include the CURRENT node since it's executing (not yet in ExecutionLogs)
-					executedNames := make(map[string]struct{})
-					for _, st := range r.vm.ExecutionLogs {
-						name := st.GetName()
-						if name == "" {
-							name = st.GetId()
-						}
-						if name != "" {
-							executedNames[name] = struct{}{}
-						}
-					}
-					// Add current node name to executed list (it's executing but not yet in logs)
-					currentNodeName := ""
-					r.vm.mu.Lock()
-					if currentTaskNode, ok := r.vm.TaskNodes[stepID]; ok && currentTaskNode != nil {
-						currentNodeName = currentTaskNode.Name
-					}
-					r.vm.mu.Unlock()
-					if currentNodeName == "" {
-						currentNodeName = stepID
-					}
-					if currentNodeName != "" {
-						executedNames[currentNodeName] = struct{}{}
-					}
-
-					skippedNodes := make([]string, 0, len(r.vm.TaskNodes))
-					r.vm.mu.Lock()
-					taskNodeCount := len(r.vm.TaskNodes)
-					for nodeID, n := range r.vm.TaskNodes {
-						if n != nil {
-							// Skip branch condition nodes (they have IDs like "nodeId.conditionId")
-							// These are routing/edge nodes, not actual executable nodes
-							if strings.Contains(nodeID, ".") {
-								continue
-							}
-							if _, ok := executedNames[n.Name]; !ok {
-								skippedNodes = append(skippedNodes, n.Name)
-							}
-						}
-					}
-					r.vm.mu.Unlock()
-
-					// Debug logging for skipped nodes calculation
-					r.vm.logger.Debug("Skipped nodes calculation",
-						"totalTaskNodes", taskNodeCount,
-						"executedCount", len(executedNames),
-						"executedNames", getMapKeys(executedNames),
-						"skippedCount", len(skippedNodes),
-						"skippedNodes", skippedNodes)
-
-					if len(skippedNodes) > 0 {
-						dynamicData["skippedNodes"] = skippedNodes
-					}
-
-					// Collect branch selections with condition expressions
-					branchSelections := make([]map[string]interface{}, 0, 2)
-					for _, st := range r.vm.ExecutionLogs {
-						t := strings.ToUpper(st.GetType())
-						if !strings.Contains(t, "BRANCH") {
-							continue
-						}
-						entry := map[string]interface{}{}
-						name := st.GetName()
-						if name == "" {
-							name = st.GetId()
-						}
-						entry["step"] = name
-						// selected conditionId from branch output
-						if br := st.GetBranch(); br != nil && br.GetData() != nil {
-							if m, ok := br.GetData().AsInterface().(map[string]interface{}); ok {
-								if cid, ok := m["conditionId"].(string); ok {
-									entry["condition_id"] = cid
-									if idx := strings.LastIndex(cid, "."); idx >= 0 && idx+1 < len(cid) {
-										switch cid[idx+1:] {
-										case "0":
-											entry["path"] = "if"
-										case "1":
-											entry["path"] = "else"
-										default:
-											entry["path"] = cid[idx+1:]
-										}
-									}
-								}
-							}
-						}
-						// conditions array from config
-						if st.GetConfig() != nil {
-							if cfgMap, ok := st.GetConfig().AsInterface().(map[string]interface{}); ok {
-								if conds, ok := cfgMap["conditions"].([]interface{}); ok {
-									condList := make([]map[string]interface{}, 0, len(conds))
-									for _, c := range conds {
-										if cm, ok := c.(map[string]interface{}); ok {
-											condList = append(condList, map[string]interface{}{
-												"id":         cm["id"],
-												"type":       cm["type"],
-												"expression": cm["expression"],
-											})
-										}
-									}
-									if len(condList) > 0 {
-										entry["conditions"] = condList
-									}
-								}
-							}
-						}
-						branchSelections = append(branchSelections, entry)
-					}
-					if len(branchSelections) > 0 {
-						dynamicData["branchSelections"] = branchSelections
-					}
-
-					// Check if we have a summary from context-memory API
-					// If so, use it as-is (pass-through) instead of overwriting with deterministic summary
-					// Check for structured fields (Trigger, Executions) to determine if we have an AI summary
-					hasAISummary := (strings.TrimSpace(summaryForClient.Subject) != "" || summaryForClient.Trigger != "" || len(summaryForClient.Executions) > 0) && strings.TrimSpace(summaryForClient.Body) != ""
-
-					// Compose deterministic branch/skip summary strings
-					// When branches/skips are present, use the structured summary as the primary analysisHtml
-					// Pass currentNodeName so BuildBranchAndSkippedSummary uses the same calculation logic
-					// BUT: Skip this if we have an AI summary (context-memory) - use original response as pass-through
-					if !isSingleNodeImmediate(r.vm) && !hasAISummary {
-						if text, html := BuildBranchAndSkippedSummary(r.vm, currentNodeName); strings.TrimSpace(html) != "" {
-							// Replace analysisHtml with the structured branch summary
-							// The old analysisHtml (from Summary.Body) often duplicates this information
-							dynamicData["analysisHtml"] = html
-							dynamicData["branchSummaryHtml"] = html
-
-							// Compute and set status, statusHtml, subject, and summary (deterministic)
-							executedSteps := len(r.vm.ExecutionLogs)
-
-							// Count actual skipped nodes by name (not by alternate branch paths)
-							// vm.TaskNodes includes nodes on ALL branch paths, but only one path is taken
-							skippedCount := len(skippedNodes) // Use actual skipped node names count
-
-							// For summary display, use executedSteps as total if nothing was truly skipped
-							totalSteps := executedSteps
-							if skippedCount > 0 {
-								totalSteps = executedSteps + skippedCount
-							}
-
-							failed, failedName, failedReason := findEarliestFailure(r.vm)
-
-							// Use ExecutionResultStatus enum
-							var resultStatus ExecutionResultStatus
-							var statusText, statusBgColor, statusTextColor, iconSvg string
-							skippedNote := ""
-							if failed {
-								resultStatus = ExecutionFailed
-								statusText = fmt.Sprintf("but failed at the '%s' step due to %s.", safeName(failedName), firstLine(failedReason))
-								statusBgColor = "#FEE2E2"
-								statusTextColor = "#991B1B"
-								iconSvg = statusIconFailed
-							} else if skippedCount > 0 {
-								resultStatus = ExecutionSuccess
-								// Per Studio: success with branch-skipped steps renders yellow "warn".
-								// The skip count lives in the badge, never appended to the title.
-								skippedNote = buildSkippedNote(skippedCount)
-								statusText = skippedNote
-								statusBgColor = "#FEF3C7"
-								statusTextColor = "#92400E"
-								iconSvg = statusIconWarn
-							} else {
-								resultStatus = ExecutionSuccess
-								statusText = "All steps completed successfully"
-								statusBgColor = "#D1FAE5"
-								statusTextColor = "#065F46"
-								iconSvg = statusIconSuccess
-							}
-
-							statusHtml := fmt.Sprintf(
-								`<div style="display:inline-block; padding:8px 16px; background-color:%s; color:%s; border-radius:8px; font-weight:500; margin:8px 0">%s%s</div>`,
-								statusBgColor,
-								statusTextColor,
-								iconSvg,
-								statusText,
-							)
-							if skippedNote != "" {
-								dynamicData["skipped_note"] = skippedNote
-							}
-
-							workflowName := resolveWorkflowName(r.vm)
-							summaryLine := fmt.Sprintf("Your workflow '%s' executed %d out of %d total steps", workflowName, executedSteps, totalSteps)
-
-							// Update subject based on status
-							var subjectStatusText string
-							switch resultStatus {
-							case ExecutionSuccess:
-								subjectStatusText = "successfully completed"
-							case ExecutionFailed:
-								subjectStatusText = "failed to execute"
-							}
-
-							// Build subject with appropriate prefix
-							var newSubject string
-							if r.vm.IsSimulation {
-								// Simulation: workflow_name status
-								newSubject = fmt.Sprintf("Simulation: %s %s", workflowName, subjectStatusText)
-								if r.vm.logger != nil {
-									r.vm.logger.Info("Using Simulation prefix for email subject", "subject", newSubject, "isSimulation", r.vm.IsSimulation)
-								}
-							} else {
-								// Deployed run: Run #X: workflow_name status
-								if executionIndex >= 0 {
-									newSubject = fmt.Sprintf("Run #%d: %s %s", executionIndex+1, workflowName, subjectStatusText) // +1 for 1-based display
-									if r.vm.logger != nil {
-										r.vm.logger.Info("Using Run # prefix for email subject", "subject", newSubject, "executionIndex", executionIndex, "displayIndex", executionIndex+1)
-									}
-								} else {
-									// Fallback if execution index not available
-									newSubject = fmt.Sprintf("%s %s", workflowName, subjectStatusText)
-									if r.vm.logger != nil {
-										r.vm.logger.Warn("Execution index not available, using basic subject format", "subject", newSubject)
-									}
-								}
-							}
-
-							dynamicData["statusHtml"] = statusHtml
-							dynamicData["summary"] = summaryLine
-							dynamicData["subject"] = newSubject
-
-							// Set preheader from deterministic summary line (fallback to subject)
-							preheader := extractPreheaderFromSummaryText(text, newSubject)
-							dynamicData["preheader"] = preheader
-						}
-					} else if hasAISummary {
-						// Use structured summary data - aggregator builds HTML from structured fields
-						if r.vm.logger != nil {
-							r.vm.logger.Info("Using structured summary data",
-								"subject", summaryForClient.Subject,
-								"hasTrigger", summaryForClient.Trigger != "",
-								"executionsCount", len(summaryForClient.Executions),
-								"errorsCount", len(summaryForClient.Errors))
-						}
-
-						// Use SendGridDynamicData() to build all template variables from structured fields
-						sgData := summaryForClient.SendGridDynamicData()
-						for k, v := range sgData {
-							dynamicData[k] = v
-						}
-
-						if summaryForClient.Body != "" {
-							dynamicData["body"] = summaryForClient.Body
-						}
-
-						// Generate statusHtml from the context-memory API status.
-						// If status is empty (API didn't set it), fall back to VM inspection.
-						if summaryForClient.Status != "" {
-							dynamicData["statusHtml"] = buildStatusHtml(*summaryForClient)
-						} else {
-							failed, _, _ := findEarliestFailure(r.vm)
-							fallback := *summaryForClient
-							if failed {
-								fallback.Status = "failed"
-							} else {
-								fallback.Status = "success"
-							}
-							dynamicData["statusHtml"] = buildStatusHtml(fallback)
-						}
-
-						// Use SummaryLine if available, otherwise extract from body
-						summaryLine := summaryForClient.SummaryLine
-						if summaryLine == "" {
-							// Fallback: extract summary line from body or use subject
-							summaryLine = summaryForClient.Subject
-							if strings.Contains(summaryForClient.Body, "\n\n") {
-								firstPara := strings.Split(summaryForClient.Body, "\n\n")[0]
-								if len(firstPara) > 0 && len(firstPara) < 200 {
-									summaryLine = firstPara
-								}
-							}
-						}
-						dynamicData["summary"] = summaryLine
-
-						// Set preheader from subject (context-memory API provides correct subject format)
-						dynamicData["preheader"] = summaryForClient.Subject
-					}
-
-					// Ensure 'from' object includes a display name for better inbox rendering
-					if fromObj, ok := bodyObj["from"].(map[string]interface{}); ok {
-						if _, hasName := fromObj["name"]; !hasName || strings.TrimSpace(asString(fromObj["name"])) == "" {
-							fromObj["name"] = "AP Studio Notification"
-							bodyObj["from"] = fromObj
-						}
-					}
-
-					// Set SendGrid category for filtering in Activity Feed and Stats
-					bodyObj["categories"] = []string{"workflow-summary"}
-
-					// Provide dynamic_template_data both at top-level and per-personalization to satisfy API variants
-					bodyObj["dynamic_template_data"] = dynamicData
-
-					// Attach dynamic_template_data per-personalization; DO NOT set subject here when using template {{{subject}}}
-					if pers, ok := bodyObj["personalizations"].([]interface{}); ok {
-						for i := range pers {
-							if p, ok := pers[i].(map[string]interface{}); ok {
-								// Pass all dynamic template data (SendGrid expects snake_case)
-								p["dynamic_template_data"] = dynamicData
-								pers[i] = p
-							}
-						}
-						bodyObj["personalizations"] = pers
-					}
-
-					// Remove any content array; Dynamic Templates should not include 'content'
-					delete(bodyObj, "content")
-				case "telegram":
-					// Format summary for Telegram: concise, chat-friendly message
-					// Pass VM so transfer events can be formatted as transfer notifications
-					telegramMsg := FormatForMessageChannels(s, "telegram", r.vm)
-					bodyObj["parse_mode"] = "HTML"
-					bodyObj["text"] = telegramMsg
-				}
-				// Use FormatAsJSON to ensure HTML characters are not escaped in the body
+			if json.Unmarshal([]byte(body), &bodyObj) == nil {
+				telegramMsg := FormatForMessageChannels(s, "telegram", r.vm)
+				bodyObj["parse_mode"] = "HTML"
+				bodyObj["text"] = telegramMsg
 				body = FormatAsJSON(bodyObj)
-				if r.vm.logger != nil {
-					r.vm.logger.Debug("REST API injected composed summary into provider payload", "provider", provider)
-				}
 			} else if r.vm.logger != nil {
 				r.vm.logger.Warn("REST API summarize enabled but body is not JSON, skipping injection")
 			}
@@ -1133,6 +815,21 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		var jsonData interface{}
 		if err := json.Unmarshal(response.Body(), &jsonData); err == nil {
 			bodyData = jsonData
+			if isStudioNotify {
+				// /api/notify returns { ok, summary }. Surface the run summary (subject + body
+				// line) to the SDK so the UI keeps showing it — same shape the legacy local
+				// summary produced. Omitted for format=plain (no summary in the response).
+				if m, ok := jsonData.(map[string]interface{}); ok {
+					if summaryVal, ok := m["summary"].(map[string]interface{}); ok {
+						subj, _ := summaryVal["subject"].(string)
+						bodyText := ""
+						if bodyMap, ok := summaryVal["body"].(map[string]interface{}); ok {
+							bodyText, _ = bodyMap["summary"].(string)
+						}
+						bodyData = map[string]interface{}{"subject": subj, "body": bodyText}
+					}
+				}
+			}
 		} else {
 			bodyData = bodyStr
 		}
@@ -1224,12 +921,12 @@ func shouldSummarize(vm *VM, node *avsproto.RestAPINode) bool {
 	return false
 }
 
-// detectNotificationProvider returns "sendgrid" or "telegram" based on URL patterns; empty string if unknown
+// detectNotificationProvider returns "studio-notify" or "telegram" based on URL patterns; empty string if unknown
 func detectNotificationProvider(u string) string {
 	lu := strings.ToLower(u)
-	// SendGrid: allow detection by path for tests using mock servers
-	if strings.Contains(lu, "/v3/mail/send") || strings.Contains(lu, "/mail/send") || strings.Contains(lu, "api.sendgrid.com") && strings.Contains(lu, "/mail/send") {
-		return "sendgrid"
+	// Studio /api/notify — Path B distribution endpoint (path-based so mock servers match).
+	if strings.Contains(lu, "/api/notify") {
+		return "studio-notify"
 	}
 	if strings.Contains(lu, "api.telegram.org") && strings.Contains(lu, "/sendmessage") {
 		return "telegram"

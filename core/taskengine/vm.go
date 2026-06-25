@@ -2438,6 +2438,11 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 	tempVM.TaskOwner = v.TaskOwner
 	// Propagate shared clients (e.g., Tenderly)
 	tempVM.tenderlyClient = v.tenderlyClient
+	// Share the accumulated simulation state so caller-seeded overrides
+	// (e.g. erc20_overrides) and any earlier nodes' state diffs reach this
+	// node's Tenderly simulation. Without this the node would run against a
+	// fresh, empty state and the seeded balances/allowances would be lost.
+	tempVM.simulationState = v.simulationState
 
 	// Log simulation mode for debugging
 	if v.logger != nil {
