@@ -1,7 +1,6 @@
 package taskengine
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -12,6 +11,36 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 )
 
+// formatValueConcise renders an arbitrary value as a short, human-readable string for
+// branch-condition logging (used by vm_runner_branch.go). Long strings/objects are truncated.
+func formatValueConcise(v interface{}) string {
+	if v == nil {
+		return "null"
+	}
+
+	switch val := v.(type) {
+	case string:
+		if len(val) > 50 {
+			return fmt.Sprintf("\"%s...\"", val[:47])
+		}
+		return fmt.Sprintf("\"%s\"", val)
+	case bool:
+		return fmt.Sprintf("%t", val)
+	case float64, int, int64:
+		return fmt.Sprintf("%v", val)
+	case map[string]interface{}:
+		return fmt.Sprintf("{object with %d keys}", len(val))
+	case []interface{}:
+		return fmt.Sprintf("[array with %d items]", len(val))
+	default:
+		s := fmt.Sprintf("%v", val)
+		if len(s) > 50 {
+			return s[:47] + "..."
+		}
+		return s
+	}
+}
+
 // Constants for example execution messages shown when no executions are available
 const (
 	// ExampleExecutionMessage is the base message for example executions
@@ -20,18 +49,13 @@ const (
 	ExampleExecutionAnnotation = "This is an example. Actual execution details will appear when the workflow is simulated or triggered by a real event."
 )
 
-// Summarizer defines an interface for generating human-readable summaries
-// from the current VM execution context. Implementations must be resilient
-// and return concise content suitable for email/IM notifications.
-type Summarizer interface {
-	Summarize(ctx context.Context, vm *VM, currentStepName string) (Summary, error)
-}
+// globalSummarizer holds the Studio /api/notify payload builder (Path B). It is the only
+// summarizer path: the gateway forwards raw execution data and Studio summarizes + sends.
+var globalSummarizer *ContextMemorySummarizer
 
-var globalSummarizer Summarizer
-
-// SetSummarizer sets the global summarizer implementation used by ComposeSummarySmart.
-// Pass nil to disable AI summarization and use deterministic fallback only.
-func SetSummarizer(s Summarizer) {
+// SetSummarizer sets the global summarizer used to build /api/notify payloads.
+// Pass nil to disable (notification nodes then forward their body unchanged).
+func SetSummarizer(s *ContextMemorySummarizer) {
 	globalSummarizer = s
 }
 
@@ -59,67 +83,17 @@ func SetPriceService(svc PriceService) {
 	globalPriceService = svc
 }
 
-// ComposeSummarySmart tries the configured summarizer (context-memory API) with strict timeout
-// and falls back to deterministic ComposeSummary on any failure. The summary is automatically
-// formatted for the appropriate channel (email or chat) by the REST API runner
-// when used in notification nodes.
-func ComposeSummarySmart(vm *VM, currentStepName string) Summary {
-	if globalSummarizer == nil {
-		if vm != nil && vm.logger != nil {
-			vm.logger.Info("ComposeSummarySmart: no global summarizer, using deterministic")
-		}
-		return ComposeSummary(vm, currentStepName)
-	}
-
-	if vm != nil && vm.logger != nil {
-		vm.logger.Info("ComposeSummarySmart: starting summarization via context-memory API")
-	}
-
-	// Use a generous timeout to allow AI summarization to complete
-	// The context-memory API may take 10-20 seconds for complex workflows
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	s, err := globalSummarizer.Summarize(ctx, vm, currentStepName)
-	if err != nil {
-		if vm != nil && vm.logger != nil {
-			vm.logger.Info("Context-memory API not available: summarization failed, falling back to deterministic", "error", err)
-		}
-		return ComposeSummary(vm, currentStepName)
-	}
-
-	// Validate minimal fields; fall back if empty
-	if strings.TrimSpace(s.Subject) == "" || strings.TrimSpace(s.Body) == "" {
-		if vm != nil && vm.logger != nil {
-			vm.logger.Warn("ComposeSummarySmart: summary has empty fields, falling back to deterministic")
-		}
-		return ComposeSummary(vm, currentStepName)
-	}
-
-	if len(strings.TrimSpace(s.Body)) < 40 {
-		if vm != nil && vm.logger != nil {
-			vm.logger.Warn("ComposeSummarySmart: summary body too short, falling back to deterministic", "bodyLength", len(s.Body))
-		}
-		return ComposeSummary(vm, currentStepName)
-	}
-
-	if vm != nil && vm.logger != nil {
-		vm.logger.Info("ComposeSummarySmart: summarization successful", "subject", s.Subject, "bodyLength", len(s.Body))
-	}
-	return s
-}
-
 // NewContextMemorySummarizerFromAggregatorConfig builds the workflow summarizer from the
 // aggregator's notifications.summary config (api_endpoint + api_key).
 //
-// Returns (nil, nil) when summarization is disabled — a valid "off" mode in which callers
-// use the deterministic summarizer. Returns (nil, error) when summarization is ENABLED but
+// Returns (nil, nil) when summarization is disabled — a valid "off" mode in which notification
+// nodes forward their body unchanged. Returns (nil, error) when summarization is ENABLED but
 // misconfigured (unsupported provider, or empty endpoint/key) so the daemon fails fast at
 // startup instead of silently degrading. There is no hardcoded endpoint default: the origin
 // must come from config (avs-infra: ${SUMMARIZER_API_URL} / ${SUMMARIZER_API_KEY}).
-func NewContextMemorySummarizerFromAggregatorConfig(c *config.Config) (Summarizer, error) {
+func NewContextMemorySummarizerFromAggregatorConfig(c *config.Config) (*ContextMemorySummarizer, error) {
 	if c == nil || !c.NotificationsSummary.Enabled {
-		return nil, nil // Not enabled — deterministic fallback is used.
+		return nil, nil // Not enabled — notification nodes forward their body unchanged.
 	}
 	if strings.ToLower(c.NotificationsSummary.Provider) != "context-memory" {
 		// NOTE: "context-memory" is a legacy provider identifier — the endpoint now points at
@@ -140,52 +114,6 @@ func NewContextMemorySummarizerFromAggregatorConfig(c *config.Config) (Summarize
 		authToken:  authToken,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}, nil
-}
-
-// FormatForMessageChannels converts a Summary into a concise chat message
-// suitable for messaging channels like Telegram or Discord. It prioritizes
-// AI-generated structured fields (Trigger, Executions, Errors) when available.
-//
-// Note: Email is handled separately via SendGridDynamicData(), not this function.
-//
-// Thread-safety: This function reads from the Summary struct and VM object.
-// The Summary struct should not be modified after creation. The VM object is
-// accessed read-only (for transfer event extraction). If the Summary or VM
-// may be accessed concurrently, ensure proper synchronization at the caller level.
-//
-// Fallback order:
-// 1. AI-generated structured data from context-memory API
-// 2. Transfer event detection (for simple transfer notifications without API)
-// 3. Plain text body (legacy)
-func FormatForMessageChannels(s Summary, channel string, vm *VM) string {
-	// Prioritize AI-generated structured format (from context-memory API)
-	// Check for new PRD format (transfers/workflow) or legacy format (executions/errors/trigger)
-	hasStructuredData := len(s.Transfers) > 0 || s.Workflow != nil || len(s.Executions) > 0 || len(s.Errors) > 0 || s.Trigger != ""
-	if hasStructuredData {
-		switch strings.ToLower(channel) {
-		case "telegram":
-			return formatTelegramFromStructured(s)
-		case "discord":
-			return formatDiscordFromStructured(s)
-		default:
-			return formatPlainTextFromStructured(s)
-		}
-	}
-
-	// Fallback: Check for transfer event data (when API not available)
-	if vm != nil {
-		if transferData := ExtractTransferEventData(vm); transferData != nil {
-			return FormatTransferMessage(transferData)
-		}
-	}
-
-	// Fallback: For single-node executions without meaningful data, show example message
-	if vm != nil && isSingleNodeImmediate(vm) {
-		return formatSingleNodeExampleMessage(vm, channel)
-	}
-
-	// Legacy fallback: use plain text body
-	return formatChannelFromBody(s, channel)
 }
 
 // truncateAddress truncates an Ethereum address to format "0x5d814...434f"
@@ -245,28 +173,6 @@ func isStepSimulated(st *avsproto.Execution_Step) bool {
 		}
 	}
 	return false
-}
-
-// buildTxExplorerURL constructs a full block explorer transaction URL from a Summary and tx hash.
-// It resolves chainID from Workflow.ChainID first, then falls back to reverse-mapping the Network name.
-// Returns "" if the txHash is not a valid Ethereum transaction hash or the chain is unknown.
-func buildTxExplorerURL(s Summary, txHash string) string {
-	if !isValidTxHash(txHash) {
-		return ""
-	}
-	var chainID int64
-	if s.Workflow != nil {
-		chainID = s.Workflow.ChainID
-	}
-	// Fallback: reverse-map the network display name to a chain ID
-	if chainID == 0 {
-		chainID = mapNameToChainID(s.Network)
-	}
-	baseURL := getBlockExplorerURL(chainID)
-	if baseURL == "" {
-		return ""
-	}
-	return baseURL + "/tx/" + txHash
 }
 
 // getBlockExplorerURL returns the block explorer base URL for a chain ID.
@@ -357,22 +263,5 @@ func getChainDisplayName(chainID int64) string {
 		return "Avalanche Fuji"
 	default:
 		return ""
-	}
-}
-
-// formatSingleNodeExampleMessage creates an example message for single-node executions
-// when no meaningful execution data (like transfer_monitor) is available.
-// This helps users understand what the notification format will look like.
-func formatSingleNodeExampleMessage(vm *VM, channel string) string {
-	workflowName := resolveWorkflowName(vm)
-	chainName := resolveChainName(vm)
-
-	switch strings.ToLower(channel) {
-	case "telegram":
-		return formatTelegramExampleMessage(workflowName, chainName)
-	case "discord":
-		return formatDiscordExampleMessage(workflowName, chainName)
-	default:
-		return formatPlainTextExampleMessage(workflowName, chainName)
 	}
 }
