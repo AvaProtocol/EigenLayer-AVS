@@ -684,7 +684,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	// Optionally compose summary and inject into provider payloads when enabled via nodeConfig.options.summarize
 	// Keep a reference to the composed summary so we can return it to clients even
-	// when the external notification provider (e.g., SendGrid) returns an empty body.
+	// when the notification provider (Studio /api/notify) returns an empty body.
 	var summaryForClient *Summary
 	isStudioNotify := false
 	if shouldSummarize(r.vm, node) {
