@@ -332,10 +332,6 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 		logger: logger,
 	}
 
-	// Wire global fee rates so Summary.Fees population (in both ComposeSummary
-	// and the context-memory summarizer) uses the aggregator's configured rates.
-	SetFeeRates(config.FeeRates)
-
 	// Initialize AI summarizer (global) from aggregator config
 	// Only context-memory API is supported - all email content generation is delegated to context-memory
 	// The aggregator acts as a pass-through for the context-memory response to SendGrid
@@ -578,10 +574,6 @@ func (n *Engine) GetTenderlyClient() *TenderlyClient {
 
 func (n *Engine) SetPriceService(priceService PriceService) {
 	n.priceService = priceService
-	// Also wire as the package-level price service so Summary.Fees population
-	// (in both ComposeSummary and ContextMemorySummarizer.Summarize) can compute
-	// native-token totals from USD platform fees and value-fee legs.
-	SetPriceService(priceService)
 }
 
 func (n *Engine) Stop() {

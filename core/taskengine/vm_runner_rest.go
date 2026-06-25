@@ -3,7 +3,6 @@ package taskengine
 import (
 	"encoding/json"
 	"fmt"
-	"html"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,18 +16,6 @@ import (
 // Constants for mock API testing
 const (
 	MockAPIEndpoint = "https://mock-api.ap-aggregator.local"
-)
-
-// SendGrid Dynamic Template ID for AI-generated workflow summaries
-const (
-	SendGridSummaryTemplateID = "d-3b4b885af0fc45ad822024ebc72f169c"
-)
-
-// Status HTML badge SVG icons for email notifications
-const (
-	statusIconSuccess = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#10B981"/><path d="M11 6L7 10L5 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
-	statusIconWarn    = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#F59E0B"/><circle cx="8" cy="5" r="1" fill="white"/><rect x="7.5" y="7" width="1" height="4" rx="0.5" fill="white"/></svg>`
-	statusIconFailed  = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#EF4444"/><path d="M10 6L6 10M6 6L10 10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`
 )
 
 // HTTPRequestExecutor interface for making HTTP requests
@@ -678,6 +665,8 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 							}
 						}
 						body = FormatAsJSON(bodyObj)
+					} else if r.vm.logger != nil {
+						r.vm.logger.Warn("REST API notify: body is not JSON, skipping payload injection")
 					}
 				} else if r.vm.logger != nil {
 					r.vm.logger.Warn("REST API notify: failed to build raw payload", "error", err)
@@ -685,6 +674,10 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 			} else if r.vm.logger != nil {
 				r.vm.logger.Warn("REST API notify: no summarizer configured to build payload")
 			}
+		} else if provider == "telegram" && r.vm.logger != nil {
+			// Legacy direct-to-Telegram nodes no longer get gateway-side summary injection
+			// (Path B routes telegram through /api/notify). Warn so the no-op is debuggable.
+			r.vm.logger.Warn("REST API summarize on legacy direct-Telegram node — re-save the workflow in Studio to route through /api/notify")
 		}
 	}
 
@@ -869,37 +862,6 @@ func detectNotificationProvider(u string) string {
 	return ""
 }
 
-// buildStyledHTMLEmail wraps a plain-text body into a simple, safe HTML layout
-// suitable for email clients. It escapes the input text and preserves paragraph
-// breaks by turning double newlines into <p> blocks and single newlines into <br/>.
-func buildStyledHTMLEmail(subject, body string) string {
-	// Escape HTML to avoid injection
-	safe := html.EscapeString(body)
-	// Normalize newlines
-	safe = strings.ReplaceAll(safe, "\r\n", "\n")
-	// Split by paragraphs (double newline)
-	parts := strings.Split(safe, "\n\n")
-	var paragraphs []string
-	for _, p := range parts {
-		if strings.TrimSpace(p) == "" {
-			continue
-		}
-		// Convert single newlines within a paragraph to <br/>
-		p = strings.ReplaceAll(p, "\n", "<br/>")
-		paragraphs = append(paragraphs, "<p style=\"margin:0 0 16px 0;\">"+p+"</p>")
-	}
-
-	content := strings.Join(paragraphs, "\n")
-	// Minimal, responsive-friendly light theme
-	return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
-		"<title>" + html.EscapeString(subject) + "</title>" +
-		"<style>body{background:#FFFFFF;color:#1F2937;margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;}" +
-		".container{max-width:640px;margin:0 auto;padding:32px 24px;}h1,h2,h3,h4,h5,h6{color:#111827;margin-top:24px;margin-bottom:12px;}a{color:#8B5CF6;text-decoration:none;}" +
-		"p{margin:0 0 16px 0;line-height:1.6;}.divider{border-top:1px solid #E5E7EB;margin:24px 0;}" +
-		"@media(max-width:480px){.container{padding:24px 16px;}h1,h2,h3{font-size:1.2rem;}}</style></head>" +
-		"<body><div class=\"container\">" + content + "</div></body></html>"
-}
-
 // escapeJSONString properly escapes a string for use within JSON
 func escapeJSONString(s string) string {
 	// Use Go's built-in JSON marshaling to properly escape the string
@@ -1009,56 +971,4 @@ func (r *RestProcessor) preprocessJSONWithVariableMapping(text string) string {
 		result = result[:start] + escapedReplacement + result[end+2:]
 	}
 	return result
-}
-
-// shortHex formats a hex string as 0xABCD…WXYZ for compact display. If too short, returns as-is.
-func shortHex(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return s
-	}
-	if strings.HasPrefix(s, "0x") {
-		if len(s) > 10 { // 0x + 4 prefix + … + 4 suffix
-			return s[:6] + "…" + s[len(s)-4:]
-		}
-		return s
-	}
-	if len(s) > 8 {
-		return s[:4] + "…" + s[len(s)-4:]
-	}
-	return s
-}
-
-// extractPreheaderFromSummaryText finds the first meaningful line after the
-// "Workflow Summary" heading and truncates it for email preheader usage.
-func extractPreheaderFromSummaryText(text, fallback string) string {
-	t := strings.TrimSpace(text)
-	if t == "" {
-		return fallback
-	}
-	lines := strings.Split(t, "\n")
-	for _, ln := range lines {
-		s := strings.TrimSpace(ln)
-		if s == "" {
-			continue
-		}
-		if strings.EqualFold(s, "Summary") {
-			continue
-		}
-		// Truncate to ~180 chars to fit preheader best practices
-		if len(s) > 180 {
-			return s[:177] + "..."
-		}
-		return s
-	}
-	return fallback
-}
-
-// getMapKeys returns keys from a map[string]struct{} for logging
-func getMapKeys(m map[string]struct{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }
