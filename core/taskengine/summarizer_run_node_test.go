@@ -28,7 +28,7 @@ func TestComposeSummary_RunNodeRestSubjectAndBody(t *testing.T) {
 	restPayload := map[string]interface{}{
 		"status":     202,
 		"statusText": "Accepted",
-		"url":        "https://api.sendgrid.com/v3/mail/send",
+		"url":        "https://studio.avaprotocol.org/api/notify",
 	}
 	restValue, err := structpb.NewValue(restPayload)
 	if err != nil {
@@ -64,7 +64,7 @@ func TestComposeSummary_RunNodeRestSubjectAndBody(t *testing.T) {
 		t.Fatalf("expected body to mention HTTP status, got: %q", summary.Body)
 	}
 
-	if !strings.Contains(summary.Body, "SendGrid") {
-		t.Fatalf("expected body to mention SendGrid provider, got: %q", summary.Body)
+	if !strings.Contains(summary.Body, "Ava Protocol") {
+		t.Fatalf("expected body to mention the Ava Protocol notification provider, got: %q", summary.Body)
 	}
 }
