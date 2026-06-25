@@ -2141,8 +2141,8 @@ func convertInterfaceToInt(val interface{}) int {
 
 func providerDisplayName(provider string) string {
 	switch strings.ToLower(provider) {
-	case "sendgrid":
-		return "SendGrid"
+	case "studio-notify":
+		return "Ava Protocol"
 	case "telegram":
 		return "Telegram"
 	default:
@@ -2237,8 +2237,8 @@ func isNotificationNode(node *avsproto.TaskNode) bool {
 		return false
 	}
 
-	// SendGrid
-	if strings.Contains(url, "sendgrid") || strings.Contains(url, "/mail/send") {
+	// Studio /api/notify (Path B distribution endpoint)
+	if strings.Contains(url, "/api/notify") {
 		return true
 	}
 	// Telegram
