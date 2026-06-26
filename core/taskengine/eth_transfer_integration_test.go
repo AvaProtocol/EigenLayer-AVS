@@ -205,6 +205,7 @@ func TestETHTransferTaskWithInvalidConfig(t *testing.T) {
 						Config: &avsproto.ETHTransferNode_Config{
 							Destination: "invalid-address", // Invalid address
 							Amount:      "1000000000000000000",
+							ChainId:     1, // explicit chain (G5) so destination validation is reached
 						},
 					},
 				},

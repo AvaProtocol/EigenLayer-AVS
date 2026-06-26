@@ -327,50 +327,28 @@ func (v *VM) WithChainConfigResolver(resolver func(chainID int64) *config.SmartW
 	return v
 }
 
-// resolveSmartWalletForNode picks the SmartWalletConfig a node should use.
-//
-// An explicit, non-zero node chain_id is AUTHORITATIVE: if it can't be
-// resolved against the aggregator's configured chain set, that's a hard
-// error. We deliberately do NOT fall back to the task chain in that case —
-// silently retargeting a node the user explicitly pinned to chain Y onto the
-// task's chain X would execute it on the wrong chain with no signal, a
-// footgun once a multi-chain UI lets users pick per-node chains.
-//
-// A zero node chain_id means "inherit", and walks two further sources:
-//  1. The task's ChainId (the workflow's target chain). Loop iterations
-//     create nested nodes via createNestedNodeFromLoop, which returns the
-//     inner node proto verbatim — those inner nodes don't carry a
-//     per-iteration chain_id, so without this fallback the resolver would
-//     land on v.smartWalletConfig. In gateway mode that default is populated
-//     from chains[0] (mainnet by convention; see core/config/config.go:367),
-//     causing paymaster ops for any other chain's workflow to dial the wrong
-//     RPC and surface as "no contract code at given address"
-//     (Sentry EIGENLAYER-AVS-1N/1M).
-//  2. v.smartWalletConfig as a last-resort default — correct in single-chain
-//     mode where chainConfigResolver is nil and the VM was constructed with
-//     the only smart_wallet config that exists.
+// resolveSmartWalletForNode picks the SmartWalletConfig a chain-aware node
+// should use. Post-G5 a task carries no chain, so the node's own chain_id is
+// authoritative — there is nothing to inherit:
+//   - Gateway/multi-chain mode (resolver present): chain_id is REQUIRED and
+//     must be configured. chain_id <= 0 or an unconfigured chain is a hard
+//     error — no silent fallback to a default chain (the Sentry
+//     EIGENLAYER-AVS-1N/1M footgun, where chains[0]/mainnet was used for a
+//     non-mainnet workflow).
+//   - Single-chain mode (no resolver): there is exactly one configured chain,
+//     so it is unambiguous; the sole smart_wallet config is used regardless of
+//     the node's chain_id.
 func (v *VM) resolveSmartWalletForNode(nodeChainID int64) (*config.SmartWalletConfig, error) {
 	if v.chainConfigResolver != nil {
-		if nodeChainID > 0 {
-			if resolved := v.chainConfigResolver(nodeChainID); resolved != nil {
-				return resolved, nil
-			}
-			return nil, fmt.Errorf("chain_id %d is not configured on this aggregator; the node explicitly targets an unsupported chain", nodeChainID)
+		if nodeChainID <= 0 {
+			return nil, fmt.Errorf("chain-aware node requires an explicit chain_id in gateway mode (got %d); a task no longer provides a default chain", nodeChainID)
 		}
-		if taskChainID := v.taskChainID(); taskChainID > 0 {
-			if resolved := v.chainConfigResolver(taskChainID); resolved != nil {
-				return resolved, nil
-			}
+		if resolved := v.chainConfigResolver(nodeChainID); resolved != nil {
+			return resolved, nil
 		}
+		return nil, fmt.Errorf("chain_id %d is not configured on this aggregator", nodeChainID)
 	}
 	return v.smartWalletConfig, nil
-}
-
-// taskChainID is a zero-returning shim. Tasks no longer carry a chain (G5);
-// per-node chains are authoritative, so there is no task chain to inherit.
-// Retained so the resolver's inherit branch compiles; it never fires now.
-func (v *VM) taskChainID() int64 {
-	return 0
 }
 
 // vmDefaultChainID returns the VM's default-config chain, used for

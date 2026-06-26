@@ -75,10 +75,12 @@ func TestResolveSmartWalletForNode_TaskChainIDFallback(t *testing.T) {
 			want:        baseCfg,
 		},
 		{
-			name:        "node chain_id 0 falls back to vm default (no task inherit)",
+			// Gateway mode (resolver present) requires an explicit chain — a
+			// 0 node chain_id errors; there is no task chain to inherit.
+			name:        "node chain_id 0 errors in gateway mode",
 			nodeChainID: 0,
 			vmDefault:   mainnetCfg,
-			want:        mainnetCfg,
+			wantErr:     true,
 		},
 		{
 			name:        "explicit unknown node chain_id errors",
