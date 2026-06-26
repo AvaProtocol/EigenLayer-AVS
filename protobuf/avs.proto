@@ -148,7 +148,7 @@ message CronTrigger {
 message BlockTrigger {
   message Config {
     int64 interval = 1;
-    // Chain to watch blocks on. 0 = inherit task's chain_id.
+    // Chain to watch blocks on. 0 = the aggregator's default chain (a task carries no chain).
     int64 chain_id = 2;
   }
   
@@ -218,7 +218,7 @@ message EventTrigger {
     // Default: 300 (5 minutes cooldown - prevents repeated firing when conditions remain true)
     // Set to 0 to disable cooldown (triggers fire immediately when conditions match)
     optional uint32 cooldown_seconds = 2;
-    // Chain to watch events on. 0 = inherit task's chain_id.
+    // Chain to watch events on. 0 = the aggregator's default chain (a task carries no chain).
     int64 chain_id = 3;
   }
 
@@ -380,7 +380,7 @@ message ETHTransferNode {
   message Config {
     string destination = 1;
     string amount = 2;
-    // Chain to execute the transfer on. 0 = inherit task's chain_id.
+    // Chain to execute the transfer on. 0 = the aggregator's default chain (a task carries no chain).
     int64 chain_id = 3;
   }
 
@@ -406,7 +406,7 @@ message ContractWriteNode {
     optional string value = 6;
     // Custom gas limit for the transaction (as string to handle large numbers)
     optional string gas_limit = 7;
-    // Chain to execute the write on. 0 = inherit task's chain_id.
+    // Chain to execute the write on. 0 = the aggregator's default chain (a task carries no chain).
     int64 chain_id = 8;
   }
 
@@ -451,7 +451,7 @@ message ContractReadNode {
     repeated google.protobuf.Value contract_abi = 2;
     // Array of method calls to execute serially
     repeated MethodCall method_calls = 3;
-    // Chain to read state from. 0 = inherit task's chain_id.
+    // Chain to read state from. 0 = the aggregator's default chain (a task carries no chain).
     int64 chain_id = 4;
   }
 
@@ -812,9 +812,10 @@ message Task {
   // and can be referenced using JavaScript template syntax like ${variableName}
   map<string, google.protobuf.Value> input_variables = 15;
 
-  // Target chain for this task's execution (e.g., 11155111 for Sepolia, 84532 for Base Sepolia).
-  // 0 means use the aggregator's default chain (backward compatible with single-chain mode).
-  int64 chain_id = 16;
+  // Field 16 (chain_id) removed: a task no longer belongs to a chain. Chain
+  // lives only on chain-aware triggers/nodes (each carries its own chain_id);
+  // per-chain views are derived from the parts. See PLAN_CHAIN_DECOUPLING.md (G5).
+  reserved 16;
 
   // last_validation_error is the most recent message from a validation
   // rejection (e.g. "task smart wallet address does not belong to owner").
@@ -853,9 +854,10 @@ message CreateTaskReq {
   // and can be referenced using JavaScript template syntax like ${variableName}
   map<string, google.protobuf.Value> input_variables = 9;
 
-  // Target chain for execution (e.g., 11155111 for Sepolia, 84532 for Base Sepolia).
-  // 0 means use the aggregator's default chain (backward compatible with single-chain mode).
-  int64 chain_id = 10;
+  // Field 10 (chain_id) removed: a task no longer carries a chain. Each
+  // chain-aware trigger/node specifies its own chain_id (required). See
+  // PLAN_CHAIN_DECOUPLING.md (G5).
+  reserved 10;
 }
 
 message CreateTaskResp {

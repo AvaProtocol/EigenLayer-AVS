@@ -615,13 +615,13 @@ func TestTerminalStatesCannotBeToggled(t *testing.T) {
 	assert.NoError(t, err)
 
 	updates := map[string][]byte{
-		string(ChainWorkflowStorageKey(taskObj.ChainId, taskObj.Id, avsproto.TaskStatus_Completed)): taskJSON,
-		string(ChainTaskUserKey(taskObj.ChainId, taskObj)):                                          []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)),
+		string(WorkflowStorageKey(taskObj.Id, avsproto.TaskStatus_Completed)): taskJSON,
+		string(TaskUserKey(taskObj)):                                          []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)),
 	}
 	err = engine.db.BatchWrite(updates)
 	assert.NoError(t, err)
 	// Delete old key
-	_ = engine.db.Delete(ChainWorkflowStorageKey(taskObj.ChainId, taskObj.Id, oldStatus))
+	_ = engine.db.Delete(WorkflowStorageKey(taskObj.Id, oldStatus))
 
 	// Remove from active tasks
 	engine.lock.Lock()

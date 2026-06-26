@@ -35,4 +35,11 @@ var Migrations = []migrator.Migration{
 	// ACTIVE MIGRATIONS
 	// ========================================
 	// Add new migrations here that need to be applied
+	{
+		// G5: a task no longer carries a chain. Storage moved from the
+		// chain-bucketed schema (t:<chain>:<status>:<id>) to chain-agnostic
+		// keys (t:<status>:<id>). This deletes the now-orphaned old rows.
+		Name:     "20260626-wipe-chain-bucketed-task-keys",
+		Function: WipeChainBucketedTaskKeys,
+	},
 }

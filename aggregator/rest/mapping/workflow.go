@@ -67,9 +67,8 @@ func OpenAPIToProtoCreateWorkflow(in generated.CreateWorkflowRequest) (*avsproto
 	if in.MaxExecution != nil {
 		out.MaxExecution = *in.MaxExecution
 	}
-	if in.ChainId != nil {
-		out.ChainId = *in.ChainId
-	}
+	// chain_id is no longer a task-level field (G5); each chain-aware
+	// trigger/node carries its own. A request-level chainId is ignored here.
 	// Note: in.SmartWalletAddress still flows through
 	// inputVariables.settings.runner per the existing engine contract.
 	// in.Name is mirrored into settings.name above.
@@ -138,9 +137,7 @@ func ProtoToOpenAPIWorkflow(in *avsproto.Task) (generated.Workflow, error) {
 	if v := in.GetExecutionCount(); v != 0 {
 		out.ExecutionCount = &v
 	}
-	if v := in.GetChainId(); v != 0 {
-		out.ChainId = &v
-	}
+	// chain_id removed from Task (G5) — no workflow-level chain to surface.
 
 	trig, err := ProtoToOpenAPITrigger(in.GetTrigger())
 	if err != nil {

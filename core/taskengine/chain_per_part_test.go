@@ -109,7 +109,7 @@ func TestValidateExplicitPartChains(t *testing.T) {
 		require.NoError(t, n.validateExplicitPartChains(task))
 	})
 
-	t.Run("chain_id 0 (inherit) passes", func(t *testing.T) {
+	t.Run("chain_id 0 passes (resolves to aggregator default at execution)", func(t *testing.T) {
 		task := &model.Workflow{Task: &avsproto.Task{Nodes: []*avsproto.TaskNode{cwNode(0)}}}
 		require.NoError(t, n.validateExplicitPartChains(task))
 	})

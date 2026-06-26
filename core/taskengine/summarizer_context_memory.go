@@ -176,11 +176,10 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, 
 	// settings.chain_id is the last fallback (e.g. RunNodeImmediately where
 	// vm.task is nil). vm.mu is already held — do not call chainIDFromVM,
 	// which re-locks.
+	// A task carries no chain (G5); derive from the VM default config, then the
+	// settings.chain_id fallback below.
 	var workflowChainID uint64
-	if vm.task != nil && vm.task.Task != nil && vm.task.Task.ChainId > 0 {
-		workflowChainID = uint64(vm.task.Task.ChainId)
-	}
-	if workflowChainID == 0 && vm.smartWalletConfig != nil && vm.smartWalletConfig.ChainID > 0 {
+	if vm.smartWalletConfig != nil && vm.smartWalletConfig.ChainID > 0 {
 		workflowChainID = uint64(vm.smartWalletConfig.ChainID)
 	}
 	if workflowChainID == 0 {

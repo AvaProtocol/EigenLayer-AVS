@@ -28,6 +28,26 @@ const erc20OverridesConfigKey = "__erc20Overrides"
 
 // getRealisticBlockNumberForChain returns a realistic block number for simulation based on chain ID
 // Only includes chains that the aggregator actually supports: Ethereum and Base
+
+// stampNodeChainIfUnset sets chainID on a chain-aware node's config when the
+// node didn't specify one. Used by RunNodeImmediately, where the chain is
+// supplied via the request rather than baked into the node (G5: the strict
+// resolver only reads node.Config.chain_id).
+func stampNodeChainIfUnset(node *avsproto.TaskNode, chainID int64) {
+	if node == nil || chainID == 0 {
+		return
+	}
+	if cw := node.GetContractWrite(); cw != nil && cw.Config != nil && cw.Config.ChainId == 0 {
+		cw.Config.ChainId = chainID
+	}
+	if cr := node.GetContractRead(); cr != nil && cr.Config != nil && cr.Config.ChainId == 0 {
+		cr.Config.ChainId = chainID
+	}
+	if et := node.GetEthTransfer(); et != nil && et.Config != nil && et.Config.ChainId == 0 {
+		et.Config.ChainId = chainID
+	}
+}
+
 func getRealisticBlockNumberForChain(chainID int64) uint64 {
 	switch chainID {
 	case 1: // Ethereum mainnet
@@ -2993,6 +3013,11 @@ func (n *Engine) RunNodeImmediatelyRPCWithContext(ctx context.Context, user *mod
 			settings["chain_id"] = reqChainID
 			inputVariables["settings"] = settings
 		}
+		// A chain-aware node must carry an explicit chain (G5). For an isolated
+		// node run the request supplies the chain, so stamp it onto the node's
+		// own config when the node didn't specify one — the strict resolver
+		// (resolveSmartWalletForNode) only reads node.Config.chain_id.
+		stampNodeChainIfUnset(node, reqChainID)
 	}
 
 	// Get node type string from the node's Type field

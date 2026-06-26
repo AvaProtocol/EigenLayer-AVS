@@ -327,54 +327,34 @@ func (v *VM) WithChainConfigResolver(resolver func(chainID int64) *config.SmartW
 	return v
 }
 
-// resolveSmartWalletForNode picks the SmartWalletConfig a node should use.
-//
-// An explicit, non-zero node chain_id is AUTHORITATIVE: if it can't be
-// resolved against the aggregator's configured chain set, that's a hard
-// error. We deliberately do NOT fall back to the task chain in that case —
-// silently retargeting a node the user explicitly pinned to chain Y onto the
-// task's chain X would execute it on the wrong chain with no signal, a
-// footgun once a multi-chain UI lets users pick per-node chains.
-//
-// A zero node chain_id means "inherit", and walks two further sources:
-//  1. The task's ChainId (the workflow's target chain). Loop iterations
-//     create nested nodes via createNestedNodeFromLoop, which returns the
-//     inner node proto verbatim — those inner nodes don't carry a
-//     per-iteration chain_id, so without this fallback the resolver would
-//     land on v.smartWalletConfig. In gateway mode that default is populated
-//     from chains[0] (mainnet by convention; see core/config/config.go:367),
-//     causing paymaster ops for any other chain's workflow to dial the wrong
-//     RPC and surface as "no contract code at given address"
-//     (Sentry EIGENLAYER-AVS-1N/1M).
-//  2. v.smartWalletConfig as a last-resort default — correct in single-chain
-//     mode where chainConfigResolver is nil and the VM was constructed with
-//     the only smart_wallet config that exists.
+// resolveSmartWalletForNode picks the SmartWalletConfig a chain-aware node
+// should use. Post-G5 a task carries no chain, so the node's own chain_id is
+// authoritative — there is nothing to inherit:
+//   - An explicit node chain_id (> 0) is authoritative: in gateway mode it must
+//     resolve against the configured set, else error (no silent fallback — the
+//     Sentry EIGENLAYER-AVS-1N/1M footgun).
+//   - A 0 node chain_id resolves to the VM's default config — the request /
+//     aggregator chain. Deployed tasks SHOULD carry explicit per-node chains
+//     (enforced at create for gateway, see validateExplicitPartChains), but an
+//     isolated run (RunNodeImmediately / simulate) supplies the chain via the
+//     request, which is already baked into v.smartWalletConfig here.
 func (v *VM) resolveSmartWalletForNode(nodeChainID int64) (*config.SmartWalletConfig, error) {
-	if v.chainConfigResolver != nil {
-		if nodeChainID > 0 {
-			if resolved := v.chainConfigResolver(nodeChainID); resolved != nil {
-				return resolved, nil
-			}
-			return nil, fmt.Errorf("chain_id %d is not configured on this aggregator; the node explicitly targets an unsupported chain", nodeChainID)
+	if v.chainConfigResolver != nil && nodeChainID > 0 {
+		if resolved := v.chainConfigResolver(nodeChainID); resolved != nil {
+			return resolved, nil
 		}
-		if taskChainID := v.taskChainID(); taskChainID > 0 {
-			if resolved := v.chainConfigResolver(taskChainID); resolved != nil {
-				return resolved, nil
-			}
-		}
+		return nil, fmt.Errorf("chain_id %d is not configured on this aggregator", nodeChainID)
 	}
 	return v.smartWalletConfig, nil
 }
 
-// taskChainID returns the chain id of the workflow this VM is executing,
-// or 0 if the task wasn't set (e.g. RunNodeImmediately) or the task
-// itself has no chain_id stored (legacy workflows created before
-// per-task chain_id was required).
-func (v *VM) taskChainID() int64 {
-	if v.task == nil || v.task.Task == nil {
-		return 0
+// vmDefaultChainID returns the VM's default-config chain, used for
+// chain-invariant lookups (e.g. wallet salt) now that tasks carry no chain.
+func (v *VM) vmDefaultChainID() int64 {
+	if v.smartWalletConfig != nil {
+		return v.smartWalletConfig.ChainID
 	}
-	return v.task.Task.ChainId
+	return 0
 }
 
 func (v *VM) GetTriggerNameAsVar() (string, error) {
@@ -1580,7 +1560,7 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		_, hasSalt := v.vars["aa_salt"]
 		v.mu.Unlock()
 		if !hasSalt && v.db != nil {
-			if wallet, err := GetWallet(v.db, v.task.Task.ChainId, v.TaskOwner, v.task.SmartWalletAddress); err == nil && wallet != nil && wallet.Salt != nil {
+			if wallet, err := GetWallet(v.db, v.vmDefaultChainID(), v.TaskOwner, v.task.SmartWalletAddress); err == nil && wallet != nil && wallet.Salt != nil {
 				v.AddVar("aa_salt", wallet.Salt)
 			}
 		}
@@ -3004,6 +2984,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 		case "contractRead":
 			crConfig := &avsproto.ContractReadNode_Config{}
+			crConfig.ChainId = int64(chainIDFromSettingsValue(runnerConfig["chainId"]))
 
 			// Extract contract configuration
 			if contractAddress, ok := runnerConfig["contractAddress"].(string); ok {
@@ -3080,6 +3061,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 		case "ethTransfer":
 			etConfig := &avsproto.ETHTransferNode_Config{}
+			etConfig.ChainId = int64(chainIDFromSettingsValue(runnerConfig["chainId"]))
 			if destination, ok := runnerConfig["destination"].(string); ok {
 				etConfig.Destination = destination
 			}
@@ -3108,6 +3090,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 		case "contractWrite":
 			cwConfig := &avsproto.ContractWriteNode_Config{}
+			cwConfig.ChainId = int64(chainIDFromSettingsValue(runnerConfig["chainId"]))
 
 			// Extract contract configuration
 			if contractAddress, ok := runnerConfig["contractAddress"].(string); ok {

@@ -293,6 +293,7 @@ func TestLoopNode_ContractWrite_Approve_PerIterationData(t *testing.T) {
 			"type": "contractWrite",
 			"config": map[string]interface{}{
 				"contractAddress": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+				"chainId":         11155111, // explicit chain (G5 strict)
 				"contractAbi": []interface{}{
 					map[string]interface{}{
 						"type":            "function",
@@ -398,6 +399,7 @@ func TestLoopNode_ContractWrite_InvalidAddress_PartialFailure(t *testing.T) {
 			"type": "contractWrite",
 			"config": map[string]interface{}{
 				"contractAddress": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+				"chainId":         11155111, // explicit chain (G5 strict)
 				"contractAbi": []interface{}{
 					map[string]interface{}{
 						"type":            "function",
@@ -488,6 +490,7 @@ func TestLoopNode_ContractWrite_MetadataTransactionHash(t *testing.T) {
 			"type": "contractWrite",
 			"config": map[string]interface{}{
 				"contractAddress": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+				"chainId":         11155111, // explicit chain (G5 strict)
 				"contractAbi": []interface{}{
 					map[string]interface{}{
 						"type":            "function",
@@ -569,6 +572,7 @@ func TestLoopNode_EthTransfer_MetadataTransactionHash(t *testing.T) {
 			"type": "ethTransfer",
 			"config": map[string]interface{}{
 				"destination": "{{value}}",
+				"chainId":     11155111,           // explicit chain (G5 strict)
 				"amount":      "1000000000000000", // 0.001 ETH
 			},
 		},

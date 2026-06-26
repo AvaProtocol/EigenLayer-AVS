@@ -401,7 +401,7 @@ components:
           description: Fire every N blocks.
         chainId:
           $ref: '#/components/schemas/ChainId'
-          description: Chain to watch blocks on. 0 = inherit workflow chainId.
+          description: Chain to watch blocks on. 0 = the aggregator's default chain (a workflow carries no chain).
 
     EventTriggerQuery:
       type: object
@@ -491,7 +491,7 @@ components:
             trigger again. Default 300. 0 disables cooldown.
         chainId:
           $ref: '#/components/schemas/ChainId'
-          description: Chain to watch events on. 0 = inherit workflow chainId.
+          description: Chain to watch events on. 0 = the aggregator's default chain (a workflow carries no chain).
 
     # ---- Trigger union ----
 
@@ -591,7 +591,7 @@ components:
           description: Amount in wei (decimal string for big-int safety). Special value `max` withdraws the entire balance.
         chainId:
           $ref: '#/components/schemas/ChainId'
-          description: Chain to execute on. 0 = inherit workflow chainId.
+          description: Chain to execute on. 0 = the aggregator's default chain (a workflow carries no chain).
 
     ContractWriteNodeConfig:
       type: object
@@ -617,7 +617,7 @@ components:
           description: Custom gas limit (decimal string).
         chainId:
           $ref: '#/components/schemas/ChainId'
-          description: Chain to execute on. 0 = inherit workflow chainId.
+          description: Chain to execute on. 0 = the aggregator's default chain (a workflow carries no chain).
 
     ContractReadNodeConfig:
       type: object
@@ -633,7 +633,7 @@ components:
           items: { $ref: '#/components/schemas/MethodCall' }
         chainId:
           $ref: '#/components/schemas/ChainId'
-          description: Chain to read from. 0 = inherit workflow chainId.
+          description: Chain to read from. 0 = the aggregator's default chain (a workflow carries no chain).
 
     GraphQLQueryNodeConfig:
       type: object
@@ -941,7 +941,9 @@ components:
         smartWalletAddress: { $ref: '#/components/schemas/EthereumAddress' }
         chainId:
           $ref: '#/components/schemas/ChainId'
-          description: Default chain. Triggers and nodes may override.
+          description: >-
+            Deprecated and ignored (G5): a workflow no longer has a chain. Set
+            chain_id on each chain-aware trigger/node instead.
         trigger: { $ref: '#/components/schemas/Trigger' }
         nodes:
           type: array

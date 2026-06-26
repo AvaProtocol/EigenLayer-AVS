@@ -144,6 +144,7 @@ func TestSimulationStateMap_ContractWriteWithBalanceOverride(t *testing.T) {
 
 		nodeConfig := map[string]interface{}{
 			"contractAddress": usdcContract,
+			"chainId":         11155111, // explicit chain (G5 strict)
 			"contractAbi":     usdcABI,
 			"methodCalls": []interface{}{
 				map[string]interface{}{
@@ -196,6 +197,7 @@ func TestSimulationStateMap_ContractWriteWithBalanceOverride(t *testing.T) {
 
 		nodeConfig := map[string]interface{}{
 			"contractAddress": usdcContract,
+			"chainId":         11155111, // explicit chain (G5 strict)
 			"contractAbi":     usdcABI,
 			"methodCalls": []interface{}{
 				map[string]interface{}{

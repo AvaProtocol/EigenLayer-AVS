@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/migrator"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	storageschema "github.com/AvaProtocol/EigenLayer-AVS/storage/schema"
-	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 // MigrateKeysToChainScoped rewrites legacy single-chain storage keys to the
@@ -16,9 +16,9 @@ import (
 //
 // Legacy → chain-scoped:
 //
-//   t:{status}:{taskID}                   → t:{chainID}:{status}:{taskID}
-//   u:{owner}:{wallet}:{taskID}           → u:{chainID}:{owner}:{wallet}:{taskID}
-//   history:{taskID}:{executionID}        → history:{chainID}:{taskID}:{executionID}
+//	t:{status}:{taskID}                   → t:{chainID}:{status}:{taskID}
+//	u:{owner}:{wallet}:{taskID}           → u:{chainID}:{owner}:{wallet}:{taskID}
+//	history:{taskID}:{executionID}        → history:{chainID}:{taskID}:{executionID}
 //
 // The migration is idempotent: re-running on a partially-migrated DB skips
 // keys that are already in chain-scoped form and only rewrites the legacy

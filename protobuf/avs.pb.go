@@ -2247,9 +2247,6 @@ type Task struct {
 	// These variables are available globally to all nodes during execution
 	// and can be referenced using JavaScript template syntax like ${variableName}
 	InputVariables map[string]*structpb.Value `protobuf:"bytes,15,rep,name=input_variables,json=inputVariables,proto3" json:"input_variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	// Target chain for this task's execution (e.g., 11155111 for Sepolia, 84532 for Base Sepolia).
-	// 0 means use the aggregator's default chain (backward compatible with single-chain mode).
-	ChainId int64 `protobuf:"varint,16,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	// last_validation_error is the most recent message from a validation
 	// rejection (e.g. "task smart wallet address does not belong to owner").
 	// Empty when the task has never been rejected, or when a later execution
@@ -2401,13 +2398,6 @@ func (x *Task) GetInputVariables() map[string]*structpb.Value {
 	return nil
 }
 
-func (x *Task) GetChainId() int64 {
-	if x != nil {
-		return x.ChainId
-	}
-	return 0
-}
-
 func (x *Task) GetLastValidationError() string {
 	if x != nil {
 		return x.LastValidationError
@@ -2438,11 +2428,8 @@ type CreateTaskReq struct {
 	// These variables will be available globally to all nodes during execution
 	// and can be referenced using JavaScript template syntax like ${variableName}
 	InputVariables map[string]*structpb.Value `protobuf:"bytes,9,rep,name=input_variables,json=inputVariables,proto3" json:"input_variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	// Target chain for execution (e.g., 11155111 for Sepolia, 84532 for Base Sepolia).
-	// 0 means use the aggregator's default chain (backward compatible with single-chain mode).
-	ChainId       int64 `protobuf:"varint,10,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *CreateTaskReq) Reset() {
@@ -2536,13 +2523,6 @@ func (x *CreateTaskReq) GetInputVariables() map[string]*structpb.Value {
 		return x.InputVariables
 	}
 	return nil
-}
-
-func (x *CreateTaskReq) GetChainId() int64 {
-	if x != nil {
-		return x.ChainId
-	}
-	return 0
 }
 
 type CreateTaskResp struct {
@@ -7236,7 +7216,7 @@ func (x *CronTrigger_Output) GetData() *structpb.Value {
 type BlockTrigger_Config struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Interval int64                  `protobuf:"varint,1,opt,name=interval,proto3" json:"interval,omitempty"`
-	// Chain to watch blocks on. 0 = inherit task's chain_id.
+	// Chain to watch blocks on. 0 = the aggregator's default chain (a task carries no chain).
 	ChainId       int64 `protobuf:"varint,2,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -7517,7 +7497,7 @@ type EventTrigger_Config struct {
 	// Default: 300 (5 minutes cooldown - prevents repeated firing when conditions remain true)
 	// Set to 0 to disable cooldown (triggers fire immediately when conditions match)
 	CooldownSeconds *uint32 `protobuf:"varint,2,opt,name=cooldown_seconds,json=cooldownSeconds,proto3,oneof" json:"cooldown_seconds,omitempty"`
-	// Chain to watch events on. 0 = inherit task's chain_id.
+	// Chain to watch events on. 0 = the aggregator's default chain (a task carries no chain).
 	ChainId       int64 `protobuf:"varint,3,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -7740,7 +7720,7 @@ type ETHTransferNode_Config struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	Destination string                 `protobuf:"bytes,1,opt,name=destination,proto3" json:"destination,omitempty"`
 	Amount      string                 `protobuf:"bytes,2,opt,name=amount,proto3" json:"amount,omitempty"`
-	// Chain to execute the transfer on. 0 = inherit task's chain_id.
+	// Chain to execute the transfer on. 0 = the aggregator's default chain (a task carries no chain).
 	ChainId       int64 `protobuf:"varint,3,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -7855,7 +7835,7 @@ type ContractWriteNode_Config struct {
 	Value *string `protobuf:"bytes,6,opt,name=value,proto3,oneof" json:"value,omitempty"`
 	// Custom gas limit for the transaction (as string to handle large numbers)
 	GasLimit *string `protobuf:"bytes,7,opt,name=gas_limit,json=gasLimit,proto3,oneof" json:"gas_limit,omitempty"`
-	// Chain to execute the write on. 0 = inherit task's chain_id.
+	// Chain to execute the write on. 0 = the aggregator's default chain (a task carries no chain).
 	ChainId       int64 `protobuf:"varint,8,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -8228,7 +8208,7 @@ type ContractReadNode_Config struct {
 	ContractAbi []*structpb.Value `protobuf:"bytes,2,rep,name=contract_abi,json=contractAbi,proto3" json:"contract_abi,omitempty"`
 	// Array of method calls to execute serially
 	MethodCalls []*ContractReadNode_MethodCall `protobuf:"bytes,3,rep,name=method_calls,json=methodCalls,proto3" json:"method_calls,omitempty"`
-	// Chain to read state from. 0 = inherit task's chain_id.
+	// Chain to read state from. 0 = the aggregator's default chain (a task carries no chain).
 	ChainId       int64 `protobuf:"varint,4,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -10087,7 +10067,7 @@ const file_avs_proto_rawDesc = "" +
 	"\abalance\x18\x1e \x01(\v2\x1e.aggregator.BalanceNode.OutputH\x00R\abalance\x12\x19\n" +
 	"\bstart_at\x18\x0e \x01(\x03R\astartAt\x12\x15\n" +
 	"\x06end_at\x18\x0f \x01(\x03R\x05endAtB\r\n" +
-	"\voutput_data\"\xb9\x06\n" +
+	"\voutput_data\"\xa4\x06\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05owner\x18\x02 \x01(\tR\x05owner\x120\n" +
@@ -10105,13 +10085,12 @@ const file_avs_proto_rawDesc = "" +
 	"\atrigger\x18\f \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\x12*\n" +
 	"\x05nodes\x18\r \x03(\v2\x14.aggregator.TaskNodeR\x05nodes\x12*\n" +
 	"\x05edges\x18\x0e \x03(\v2\x14.aggregator.TaskEdgeR\x05edges\x12M\n" +
-	"\x0finput_variables\x18\x0f \x03(\v2$.aggregator.Task.InputVariablesEntryR\x0einputVariables\x12\x19\n" +
-	"\bchain_id\x18\x10 \x01(\x03R\achainId\x122\n" +
+	"\x0finput_variables\x18\x0f \x03(\v2$.aggregator.Task.InputVariablesEntryR\x0einputVariables\x122\n" +
 	"\x15last_validation_error\x18\x11 \x01(\tR\x13lastValidationError\x12F\n" +
 	"\x1fconsecutive_validation_failures\x18\x12 \x01(\rR\x1dconsecutiveValidationFailures\x1aY\n" +
 	"\x13InputVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
-	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"\x8d\x04\n" +
+	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01J\x04\b\x10\x10\x11\"\xf8\x03\n" +
 	"\rCreateTaskReq\x121\n" +
 	"\atrigger\x18\x01 \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\x12\x19\n" +
 	"\bstart_at\x18\x02 \x01(\x03R\astartAt\x12\x1d\n" +
@@ -10122,12 +10101,11 @@ const file_avs_proto_rawDesc = "" +
 	"\x04name\x18\x06 \x01(\tR\x04name\x12*\n" +
 	"\x05nodes\x18\a \x03(\v2\x14.aggregator.TaskNodeR\x05nodes\x12*\n" +
 	"\x05edges\x18\b \x03(\v2\x14.aggregator.TaskEdgeR\x05edges\x12V\n" +
-	"\x0finput_variables\x18\t \x03(\v2-.aggregator.CreateTaskReq.InputVariablesEntryR\x0einputVariables\x12\x19\n" +
-	"\bchain_id\x18\n" +
-	" \x01(\x03R\achainId\x1aY\n" +
+	"\x0finput_variables\x18\t \x03(\v2-.aggregator.CreateTaskReq.InputVariablesEntryR\x0einputVariables\x1aY\n" +
 	"\x13InputVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
-	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\" \n" +
+	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01J\x04\b\n" +
+	"\x10\v\" \n" +
 	"\x0eCreateTaskResp\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"$\n" +
 	"\fNonceRequest\x12\x14\n" +

@@ -4,8 +4,6 @@ import (
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
-	"github.com/AvaProtocol/EigenLayer-AVS/model"
-	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -52,60 +50,41 @@ func TestResolveSmartWalletForNode_TaskChainIDFallback(t *testing.T) {
 		return registry[chainID]
 	}
 
-	newVM := func(taskChainID int64, vmDefault *config.SmartWalletConfig) *VM {
+	newVM := func(vmDefault *config.SmartWalletConfig) *VM {
 		vm := NewVM()
 		vm.smartWalletConfig = vmDefault
 		vm.chainConfigResolver = resolver
-		if taskChainID != 0 {
-			vm.task = &model.Workflow{
-				Task: &avsproto.Task{ChainId: taskChainID},
-			}
-		}
 		return vm
 	}
 
+	// Post-G5: a task carries no chain, so there is no inheritance. A node's
+	// explicit chain resolves (or errors if unconfigured); a 0 node chain
+	// resolves to the VM default config (the request/aggregator chain).
+	_ = sepoliaCfg
 	tests := []struct {
 		name        string
 		nodeChainID int64
-		taskChainID int64
 		vmDefault   *config.SmartWalletConfig
 		want        *config.SmartWalletConfig
 		wantErr     bool
 	}{
 		{
-			name:        "node chain_id takes precedence over task chain_id",
+			name:        "explicit node chain_id resolves",
 			nodeChainID: baseChainID,
-			taskChainID: sepoliaChainID,
 			vmDefault:   mainnetCfg,
 			want:        baseCfg,
 		},
 		{
-			name:        "node chain_id 0 falls back to task chain_id (loop iteration case)",
+			// A 0 node chain_id resolves to the VM default config (the
+			// request/aggregator chain) — there is no task chain to inherit.
+			name:        "node chain_id 0 uses the VM default config",
 			nodeChainID: 0,
-			taskChainID: sepoliaChainID,
-			vmDefault:   mainnetCfg, // populated from chains[0] = mainnet — the bug fixture
-			want:        sepoliaCfg,
-		},
-		{
-			name:        "both 0 falls back to vm default (single-chain mode shape)",
-			nodeChainID: 0,
-			taskChainID: 0,
 			vmDefault:   mainnetCfg,
 			want:        mainnetCfg,
 		},
 		{
-			// An explicit, unresolvable node chain_id is a hard error — we do
-			// NOT silently retarget it onto the task chain (the G4 footgun).
-			name:        "explicit unknown node chain_id errors instead of falling back to task",
+			name:        "explicit unknown node chain_id errors",
 			nodeChainID: 999999, // not registered
-			taskChainID: sepoliaChainID,
-			vmDefault:   mainnetCfg,
-			wantErr:     true,
-		},
-		{
-			name:        "explicit unknown node chain_id errors even with no task chain",
-			nodeChainID: 999998,
-			taskChainID: 0,
 			vmDefault:   mainnetCfg,
 			wantErr:     true,
 		},
@@ -113,22 +92,21 @@ func TestResolveSmartWalletForNode_TaskChainIDFallback(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			vm := newVM(tt.taskChainID, tt.vmDefault)
+			vm := newVM(tt.vmDefault)
 			got, err := vm.resolveSmartWalletForNode(tt.nodeChainID)
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("resolveSmartWalletForNode(%d) with task=%d: expected error, got chain %d (%s)",
-						tt.nodeChainID, tt.taskChainID, chainIDOrZero(got), rpcOrEmpty(got))
+					t.Fatalf("resolveSmartWalletForNode(%d): expected error, got chain %d (%s)",
+						tt.nodeChainID, chainIDOrZero(got), rpcOrEmpty(got))
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("resolveSmartWalletForNode(%d) with task=%d: unexpected error: %v",
-					tt.nodeChainID, tt.taskChainID, err)
+				t.Fatalf("resolveSmartWalletForNode(%d): unexpected error: %v", tt.nodeChainID, err)
 			}
 			if got != tt.want {
-				t.Fatalf("resolveSmartWalletForNode(%d) with task=%d: got chain %d (%s), want chain %d (%s)",
-					tt.nodeChainID, tt.taskChainID,
+				t.Fatalf("resolveSmartWalletForNode(%d): got chain %d (%s), want chain %d (%s)",
+					tt.nodeChainID,
 					chainIDOrZero(got), rpcOrEmpty(got),
 					chainIDOrZero(tt.want), rpcOrEmpty(tt.want))
 			}
@@ -137,20 +115,18 @@ func TestResolveSmartWalletForNode_TaskChainIDFallback(t *testing.T) {
 }
 
 // TestResolveSmartWalletForNode_NoResolver covers the single-chain
-// (non-gateway) shape: chainConfigResolver is nil, so the resolver
-// must always return v.smartWalletConfig regardless of the node or
-// task chain_id values.
+// (non-gateway) shape: chainConfigResolver is nil, so the resolver returns
+// v.smartWalletConfig regardless of the node chain_id (including 0).
 func TestResolveSmartWalletForNode_NoResolver(t *testing.T) {
 	defaultCfg := &config.SmartWalletConfig{ChainID: 1, EthRpcUrl: "https://default/rpc"}
 	vm := NewVM()
 	vm.smartWalletConfig = defaultCfg
-	vm.task = &model.Workflow{Task: &avsproto.Task{ChainId: 11_155_111}}
 
 	if got, err := vm.resolveSmartWalletForNode(8453); err != nil || got != defaultCfg {
 		t.Fatalf("expected default config when chainConfigResolver is nil, got %v (err %v)", got, err)
 	}
 	if got, err := vm.resolveSmartWalletForNode(0); err != nil || got != defaultCfg {
-		t.Fatalf("expected default config when chainConfigResolver is nil (chain_id 0), got %v (err %v)", got, err)
+		t.Fatalf("expected default config for chain_id 0 when resolver is nil, got %v (err %v)", got, err)
 	}
 }
 
