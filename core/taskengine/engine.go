@@ -519,9 +519,8 @@ func (n *Engine) isChainConfigured(chainID int64) bool {
 
 // validateExplicitPartChains rejects, at create time, a task whose chain-aware
 // trigger or nodes either omit chain_id (<= 0) or name a chain the aggregator
-// isn't configured for. Post-G5 a task carries no chain; an omitted (0) chain resolves to the
-// aggregator default at execution, so only an explicit, unconfigured chain is
-// rejected here. Only enforced in gateway
+// isn't configured for. Post-G5 a task carries no chain, so every chain-aware part must name an
+// explicit, configured chain; chain_id 0 or an unconfigured chain is rejected. Only enforced in gateway
 // mode, where chainConfigs enumerates the served chains; single-chain mode has
 // one chain and nothing to validate against.
 func (n *Engine) validateExplicitPartChains(task *model.Workflow) error {
@@ -529,10 +528,13 @@ func (n *Engine) validateExplicitPartChains(task *model.Workflow) error {
 		return nil
 	}
 	check := func(kind string, chainID int64) error {
-		// chain_id 0 resolves to the aggregator default at execution (a task no
-		// longer provides a chain); only an explicit, unconfigured chain is a
-		// hard error here.
-		if chainID == 0 || n.isChainConfigured(chainID) {
+		// A task carries no chain, so every chain-aware part must name an
+		// explicit, configured chain — chain_id 0 is rejected at create.
+		if chainID <= 0 {
+			return status.Errorf(codes.InvalidArgument,
+				"%s requires an explicit chain_id (a task no longer provides a default chain)", kind)
+		}
+		if n.isChainConfigured(chainID) {
 			return nil
 		}
 		return status.Errorf(codes.InvalidArgument,

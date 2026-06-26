@@ -2137,6 +2137,7 @@ func TestContractWrite_WETHDeposit_WithETHValue_Sepolia(t *testing.T) {
 		nodeType := "contractWrite"
 		nodeConfig := map[string]interface{}{
 			"contractAddress": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14", // WETH on Sepolia
+			"chainId":         int64(11155111),                              // explicit chain (strict)
 			"contractAbi": []interface{}{
 				map[string]interface{}{
 					"constant":        false,

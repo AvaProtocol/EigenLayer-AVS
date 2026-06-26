@@ -95,6 +95,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 		nodeType := "contractWrite"
 		nodeConfig := map[string]interface{}{
 			"contractAddress": "0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3", // Sepolia QuoterV2
+			"chainId":         int64(11155111),                              // explicit chain (strict)
 			"contractAbi": []interface{}{
 				map[string]interface{}{
 					"inputs": []interface{}{
@@ -218,6 +219,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 		nodeType := "contractWrite"
 		nodeConfig := map[string]interface{}{
 			"contractAddress": "0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3",
+			"chainId":         int64(11155111), // explicit chain (strict)
 			"contractAbi": []interface{}{
 				map[string]interface{}{
 					"inputs": []interface{}{
@@ -304,6 +306,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 		nodeType := "contractWrite"
 		nodeConfig := map[string]interface{}{
 			"contractAddress": "0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3",
+			"chainId":         int64(11155111), // explicit chain (strict)
 			"contractAbi":     quoterV2ABI,
 			"methodCalls": []interface{}{
 				map[string]interface{}{
@@ -363,6 +366,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 		nodeType := "contractWrite"
 		nodeConfig := map[string]interface{}{
 			"contractAddress": "0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3",
+			"chainId":         int64(11155111), // explicit chain (strict)
 			"contractAbi":     quoterV2ABI,
 			"methodCalls": []interface{}{
 				map[string]interface{}{
@@ -433,6 +437,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 		nodeType := "contractWrite"
 		nodeConfig := map[string]interface{}{
 			"contractAddress": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", // USDC Sepolia
+			"chainId":         int64(11155111),                              // explicit chain (strict)
 			"contractAbi": []interface{}{
 				map[string]interface{}{
 					"inputs": []interface{}{
