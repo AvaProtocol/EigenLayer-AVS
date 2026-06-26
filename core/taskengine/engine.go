@@ -586,6 +586,10 @@ func checkNodeChain(node *avsproto.TaskNode, check func(string, int64) error) er
 			return check("loop eth transfer runner", et.Config.GetChainId())
 		}
 	}
+	// NOTE: chain-aware nodes nested inside a Branch node's conditional paths are
+	// not validated here — they fall through to the strict resolveSmartWalletForNode
+	// check at execution time instead of being rejected at create time. If Branch
+	// gains nested chain-aware runners, add a case here (mirroring Loop above).
 	return nil
 }
 
@@ -688,12 +692,13 @@ func chainNeedsOperatorMonitoring(tt avsproto.TriggerType) bool {
 // triggerMonitoringChainID returns the chain an operator must subscribe to in
 // order to watch this task's trigger fire (G2). For chain-watching triggers
 // (event/block) it is the trigger's OWN configured chain — so a workflow can
-// watch chain X while its nodes act on chain Y. A 0 on the trigger means
-// "inherit", so we fall back to the task chain (legacy, until G5 removes the
-// task chain). Non-chain triggers (cron/fixedtime/manual) carry the fallback
-// through unchanged — the operator's TimeTrigger is chain-agnostic and ignores
-// it. Proto getters are nil-safe, so the GetEvent()/GetBlock() chain reads are
-// safe for any trigger type.
+// watch chain X while its nodes act on chain Y. Post-G5 there is no task-level
+// chain: every caller passes fallbackChainID=0, and strict create-time validation
+// already rejects a chain-watching trigger with chain_id<=0, so a 0 trigger chain
+// here only occurs for non-chain triggers (cron/fixedtime/manual), which carry the
+// fallback through unchanged — the operator's TimeTrigger is chain-agnostic and
+// ignores it. Proto getters are nil-safe, so the GetEvent()/GetBlock() chain reads
+// are safe for any trigger type.
 func triggerMonitoringChainID(trigger *avsproto.TaskTrigger, fallbackChainID int64) int64 {
 	if cid := trigger.GetEvent().GetConfig().GetChainId(); cid != 0 {
 		return cid
