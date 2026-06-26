@@ -192,6 +192,10 @@ func openAPIEventToProto(in generated.EventTrigger) *avsproto.EventTrigger {
 		out.Config.Queries = openAPIEventQueriesToProto(in.Config.Queries)
 		// chainId is required on the EventTrigger config (G5) — a plain value.
 		out.Config.ChainId = int64(in.Config.ChainId)
+		if in.Config.CooldownSeconds != nil {
+			cs := uint32(*in.Config.CooldownSeconds)
+			out.Config.CooldownSeconds = &cs
+		}
 	}
 	return out
 }
@@ -203,6 +207,10 @@ func protoEventToOpenAPI(in *avsproto.EventTrigger) generated.EventTrigger {
 		c := generated.EventTriggerConfig{
 			Queries: protoEventQueriesToOpenAPI(cfg.GetQueries()),
 			ChainId: generated.ChainId(cfg.GetChainId()),
+		}
+		if cfg.CooldownSeconds != nil {
+			cs := int32(cfg.GetCooldownSeconds())
+			c.CooldownSeconds = &cs
 		}
 		out.Config = &c
 	}

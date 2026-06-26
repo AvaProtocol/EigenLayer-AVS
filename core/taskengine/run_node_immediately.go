@@ -1489,11 +1489,13 @@ func (n *Engine) executeMethodCallForSimulation(ctx context.Context, methodCall 
 	// Get method params as strings (ContractReadNode expects []string)
 	methodParams := methodCall.GetMethodParams()
 
-	// Create a temporary contractRead node for execution (same as direct calls)
+	// Create a temporary contractRead node for execution (same as direct calls).
+	// chain_id is required (G5 strict) — carry the caller's chain onto the node.
 	contractReadNode := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: contractAddressStr,
 			ContractAbi:     abiValues,
+			ChainId:         chainID,
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					MethodName:   methodCall.GetMethodName(),
