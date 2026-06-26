@@ -148,7 +148,7 @@ message CronTrigger {
 message BlockTrigger {
   message Config {
     int64 interval = 1;
-    // Chain to watch blocks on. Required: a task no longer provides a chain to inherit.
+    // Chain to watch blocks on. 0 = the aggregator's default chain (a task carries no chain).
     int64 chain_id = 2;
   }
   
@@ -218,7 +218,7 @@ message EventTrigger {
     // Default: 300 (5 minutes cooldown - prevents repeated firing when conditions remain true)
     // Set to 0 to disable cooldown (triggers fire immediately when conditions match)
     optional uint32 cooldown_seconds = 2;
-    // Chain to watch events on. Required: a task no longer provides a chain to inherit.
+    // Chain to watch events on. 0 = the aggregator's default chain (a task carries no chain).
     int64 chain_id = 3;
   }
 
@@ -380,7 +380,7 @@ message ETHTransferNode {
   message Config {
     string destination = 1;
     string amount = 2;
-    // Chain to execute the transfer on. Required: a task no longer provides a chain to inherit.
+    // Chain to execute the transfer on. 0 = the aggregator's default chain (a task carries no chain).
     int64 chain_id = 3;
   }
 
@@ -406,7 +406,7 @@ message ContractWriteNode {
     optional string value = 6;
     // Custom gas limit for the transaction (as string to handle large numbers)
     optional string gas_limit = 7;
-    // Chain to execute the write on. Required: a task no longer provides a chain to inherit.
+    // Chain to execute the write on. 0 = the aggregator's default chain (a task carries no chain).
     int64 chain_id = 8;
   }
 
@@ -451,7 +451,7 @@ message ContractReadNode {
     repeated google.protobuf.Value contract_abi = 2;
     // Array of method calls to execute serially
     repeated MethodCall method_calls = 3;
-    // Chain to read state from. Required: a task no longer provides a chain to inherit.
+    // Chain to read state from. 0 = the aggregator's default chain (a task carries no chain).
     int64 chain_id = 4;
   }
 

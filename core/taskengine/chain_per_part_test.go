@@ -109,11 +109,9 @@ func TestValidateExplicitPartChains(t *testing.T) {
 		require.NoError(t, n.validateExplicitPartChains(task))
 	})
 
-	t.Run("chain_id 0 is rejected (explicit chain required)", func(t *testing.T) {
+	t.Run("chain_id 0 passes (resolves to aggregator default at execution)", func(t *testing.T) {
 		task := &model.Workflow{Task: &avsproto.Task{Nodes: []*avsproto.TaskNode{cwNode(0)}}}
-		err := n.validateExplicitPartChains(task)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "explicit chain_id")
+		require.NoError(t, n.validateExplicitPartChains(task))
 	})
 
 	t.Run("unconfigured explicit node chain is rejected", func(t *testing.T) {

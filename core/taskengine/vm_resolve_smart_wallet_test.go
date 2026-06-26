@@ -58,8 +58,8 @@ func TestResolveSmartWalletForNode_TaskChainIDFallback(t *testing.T) {
 	}
 
 	// Post-G5: a task carries no chain, so there is no inheritance. A node's
-	// explicit chain resolves (or errors if unconfigured); a 0 node chain is a
-	// hard error (chain_id required on chain-aware nodes in all modes).
+	// explicit chain resolves (or errors if unconfigured); a 0 node chain
+	// resolves to the VM default config (the request/aggregator chain).
 	_ = sepoliaCfg
 	tests := []struct {
 		name        string
@@ -75,12 +75,12 @@ func TestResolveSmartWalletForNode_TaskChainIDFallback(t *testing.T) {
 			want:        baseCfg,
 		},
 		{
-			// Gateway mode (resolver present) requires an explicit chain — a
-			// 0 node chain_id errors; there is no task chain to inherit.
-			name:        "node chain_id 0 errors in gateway mode",
+			// A 0 node chain_id resolves to the VM default config (the
+			// request/aggregator chain) — there is no task chain to inherit.
+			name:        "node chain_id 0 uses the VM default config",
 			nodeChainID: 0,
 			vmDefault:   mainnetCfg,
-			wantErr:     true,
+			want:        mainnetCfg,
 		},
 		{
 			name:        "explicit unknown node chain_id errors",
@@ -115,9 +115,8 @@ func TestResolveSmartWalletForNode_TaskChainIDFallback(t *testing.T) {
 }
 
 // TestResolveSmartWalletForNode_NoResolver covers the single-chain
-// (non-gateway) shape: chainConfigResolver is nil, so an explicit node
-// chain_id returns v.smartWalletConfig — but chain_id <= 0 is still a hard
-// error (G5: chain_id is required on chain-aware nodes in all modes).
+// (non-gateway) shape: chainConfigResolver is nil, so the resolver returns
+// v.smartWalletConfig regardless of the node chain_id (including 0).
 func TestResolveSmartWalletForNode_NoResolver(t *testing.T) {
 	defaultCfg := &config.SmartWalletConfig{ChainID: 1, EthRpcUrl: "https://default/rpc"}
 	vm := NewVM()
@@ -126,8 +125,8 @@ func TestResolveSmartWalletForNode_NoResolver(t *testing.T) {
 	if got, err := vm.resolveSmartWalletForNode(8453); err != nil || got != defaultCfg {
 		t.Fatalf("expected default config when chainConfigResolver is nil, got %v (err %v)", got, err)
 	}
-	if _, err := vm.resolveSmartWalletForNode(0); err == nil {
-		t.Fatalf("expected error for chain_id 0 (explicit chain required), got nil")
+	if got, err := vm.resolveSmartWalletForNode(0); err != nil || got != defaultCfg {
+		t.Fatalf("expected default config for chain_id 0 when resolver is nil, got %v (err %v)", got, err)
 	}
 }
 
