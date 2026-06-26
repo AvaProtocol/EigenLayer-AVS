@@ -7216,7 +7216,7 @@ func (x *CronTrigger_Output) GetData() *structpb.Value {
 type BlockTrigger_Config struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Interval int64                  `protobuf:"varint,1,opt,name=interval,proto3" json:"interval,omitempty"`
-	// Chain to watch blocks on. 0 = inherit task's chain_id.
+	// Chain to watch blocks on. Required in gateway mode (a task has no chain).
 	ChainId       int64 `protobuf:"varint,2,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -7497,7 +7497,7 @@ type EventTrigger_Config struct {
 	// Default: 300 (5 minutes cooldown - prevents repeated firing when conditions remain true)
 	// Set to 0 to disable cooldown (triggers fire immediately when conditions match)
 	CooldownSeconds *uint32 `protobuf:"varint,2,opt,name=cooldown_seconds,json=cooldownSeconds,proto3,oneof" json:"cooldown_seconds,omitempty"`
-	// Chain to watch events on. 0 = inherit task's chain_id.
+	// Chain to watch events on. Required in gateway mode (a task has no chain).
 	ChainId       int64 `protobuf:"varint,3,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -7720,7 +7720,7 @@ type ETHTransferNode_Config struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	Destination string                 `protobuf:"bytes,1,opt,name=destination,proto3" json:"destination,omitempty"`
 	Amount      string                 `protobuf:"bytes,2,opt,name=amount,proto3" json:"amount,omitempty"`
-	// Chain to execute the transfer on. 0 = inherit task's chain_id.
+	// Chain to execute the transfer on. Required in gateway mode.
 	ChainId       int64 `protobuf:"varint,3,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -7835,7 +7835,7 @@ type ContractWriteNode_Config struct {
 	Value *string `protobuf:"bytes,6,opt,name=value,proto3,oneof" json:"value,omitempty"`
 	// Custom gas limit for the transaction (as string to handle large numbers)
 	GasLimit *string `protobuf:"bytes,7,opt,name=gas_limit,json=gasLimit,proto3,oneof" json:"gas_limit,omitempty"`
-	// Chain to execute the write on. 0 = inherit task's chain_id.
+	// Chain to execute the write on. Required in gateway mode.
 	ChainId       int64 `protobuf:"varint,8,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -8208,7 +8208,7 @@ type ContractReadNode_Config struct {
 	ContractAbi []*structpb.Value `protobuf:"bytes,2,rep,name=contract_abi,json=contractAbi,proto3" json:"contract_abi,omitempty"`
 	// Array of method calls to execute serially
 	MethodCalls []*ContractReadNode_MethodCall `protobuf:"bytes,3,rep,name=method_calls,json=methodCalls,proto3" json:"method_calls,omitempty"`
-	// Chain to read state from. 0 = inherit task's chain_id.
+	// Chain to read state from. Required in gateway mode.
 	ChainId       int64 `protobuf:"varint,4,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
