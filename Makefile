@@ -215,7 +215,7 @@ build:
 gateway: build
 	@echo "🚀 Starting local-dev gateway (config/gateway.yaml)..."
 	@echo "📝 Logs will be written to gateway.log"
-	./out/ap aggregator --config=config/gateway.yaml 2>&1 | tee gateway.log
+	@set -a; [ -f .env.local ] && . ./.env.local; set +a; ./out/ap aggregator --config=config/gateway.yaml 2>&1 | tee gateway.log
 
 # Legacy per-chain aggregator targets retained as redirects so muscle
 # memory and old runbooks still work. They print a deprecation notice
@@ -270,34 +270,32 @@ operator-default: build
 	./out/ap operator --config=config/operator.yaml 2>&1 | tee operator-default.log
 
 
-## dev-gateway: run the dev gateway (REST 8080, gRPC 2206)
+## run-*: BUILD-FREE pure-exec targets — the single source of truth for each
+## local-dev process's command (config + .env.local). studio/scripts/start.sh
+## (tmux panes) and `make dev-stack` both invoke these, so config paths / ports /
+## env can't drift between them. Build-free so callers that already ran
+## `make build` don't fire concurrent go builds racing on ./out/ap. Output goes
+## to the caller's terminal/pane; callers that want files redirect (dev-stack →
+## logs/, start.sh → tee). Each sources .env.local so the
+## ${SEPOLIA_BUNDLER_URL} / ${BASE_SEPOLIA_BUNDLER_URL} refs in the YAML resolve.
+.PHONY: run-gateway run-worker-sepolia run-worker-base-sepolia run-operator-sepolia
+run-gateway:
+	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap aggregator --config=config/gateway.yaml
+run-worker-sepolia:
+	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap worker --config=config/worker-sepolia.yaml
+run-worker-base-sepolia:
+	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap worker --config=config/worker-base-sepolia.yaml
+run-operator-sepolia:
+	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap operator --config=config/operator-sepolia.yaml
+
+## dev-gateway / dev-worker-* / dev-operator-sepolia: build once, then run a single
+## process in the foreground (standalone use). For a file log, pipe it yourself:
+##   make run-gateway 2>&1 | tee logs/gateway.log
 .PHONY: dev-gateway dev-worker-sepolia dev-worker-base-sepolia dev-operator-sepolia
-dev-gateway: build
-	@mkdir -p logs
-	@echo "🚀 Starting gateway (dev) — REST :8080, gRPC :2206"
-	@echo "📝 Logs: logs/gateway.log"
-	./out/ap aggregator --config=config/gateway.yaml 2>&1 | tee logs/gateway.log
-
-## dev-worker-sepolia: run the sepolia chain worker (gRPC 50051)
-dev-worker-sepolia: build
-	@mkdir -p logs
-	@echo "🛠  Starting worker:sepolia (dev) — gRPC :50051"
-	@echo "📝 Logs: logs/worker-sepolia.log"
-	./out/ap worker --config=config/worker-sepolia.yaml 2>&1 | tee logs/worker-sepolia.log
-
-## dev-worker-base-sepolia: run the base-sepolia chain worker (gRPC 50052)
-dev-worker-base-sepolia: build
-	@mkdir -p logs
-	@echo "🛠  Starting worker:base-sepolia (dev) — gRPC :50052"
-	@echo "📝 Logs: logs/worker-base-sepolia.log"
-	./out/ap worker --config=config/worker-base-sepolia.yaml 2>&1 | tee logs/worker-base-sepolia.log
-
-## dev-operator-sepolia: run the sepolia operator pointed at the dev gateway
-dev-operator-sepolia: build
-	@mkdir -p logs
-	@echo "🔧 Starting operator:sepolia (dev) — aggregator: 127.0.0.1:2206"
-	@echo "📝 Logs: logs/operator-sepolia.log"
-	./out/ap operator --config=config/operator-sepolia.yaml 2>&1 | tee logs/operator-sepolia.log
+dev-gateway: build run-gateway
+dev-worker-sepolia: build run-worker-sepolia
+dev-worker-base-sepolia: build run-worker-base-sepolia
+dev-operator-sepolia: build run-operator-sepolia
 
 ## dev-stack: run gateway + sepolia worker + base-sepolia worker + sepolia operator together (Ctrl-C stops all)
 ##
@@ -318,14 +316,19 @@ dev-stack: build
 	@echo "   Tail with:  tail -f logs/*.log"
 	@echo "   Stop with:  Ctrl-C  (kills the whole stack)"
 	@echo ""
-	@set -m; \
+	@set -a; [ -f .env.local ] && . ./.env.local; set +a; \
+		if [ -z "$$SEPOLIA_BUNDLER_URL" ] || [ -z "$$BASE_SEPOLIA_BUNDLER_URL" ]; then \
+			echo "❌ Missing SEPOLIA_BUNDLER_URL / BASE_SEPOLIA_BUNDLER_URL — add them to .env.local (pull from Railway)"; \
+			exit 1; \
+		fi; \
+		set -m; \
 		trap 'echo; echo "🛑 Stopping dev stack..."; kill 0 2>/dev/null; exit 0' INT TERM; \
-		./out/ap worker --config=config/worker-sepolia.yaml      > logs/worker-sepolia.log      2>&1 & \
-		./out/ap worker --config=config/worker-base-sepolia.yaml > logs/worker-base-sepolia.log 2>&1 & \
+		$(MAKE) run-worker-sepolia      > logs/worker-sepolia.log      2>&1 & \
+		$(MAKE) run-worker-base-sepolia > logs/worker-base-sepolia.log 2>&1 & \
 		sleep 1; \
-		./out/ap aggregator --config=config/gateway.yaml         > logs/gateway.log             2>&1 & \
+		$(MAKE) run-gateway             > logs/gateway.log             2>&1 & \
 		sleep 3; \
-		./out/ap operator   --config=config/operator-sepolia.yaml    > logs/operator-sepolia.log    2>&1 & \
+		$(MAKE) run-operator-sepolia    > logs/operator-sepolia.log    2>&1 & \
 		wait
 
 ## clean: cleanup storage data
