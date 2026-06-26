@@ -111,6 +111,55 @@ func TestNodeRoundTrip(t *testing.T) {
 	}
 }
 
+// TestNodeRoundTrip_PerNodeChainId proves the persisted create() path decodes a
+// per-node chain_id (int64) for every chain-aware node — OpenAPIToProtoNode is
+// the same mapper CreateWorkflow runs, and it carries chainId via the protojson
+// round-trip (jsonRetargetProto). This is the SDK's "create()-path int64" check,
+// verifiable here without a deploy.
+func TestNodeRoundTrip_PerNodeChainId(t *testing.T) {
+	const chainID = int64(11155111)
+
+	t.Run("contractWrite", func(t *testing.T) {
+		typ := generated.ContractWrite
+		inner := generated.ContractWriteNode{Type: &typ, Config: &generated.ContractWriteNodeConfig{
+			ContractAddress: generated.EthereumAddress("0x1234567890123456789012345678901234567890"),
+			ChainId:         generated.ChainId(chainID),
+		}}
+		n := generated.Node{Id: "cw1", Type: generated.NodeTypeContractWrite}
+		require.NoError(t, n.FromContractWriteNode(inner))
+		pn, err := OpenAPIToProtoNode(n)
+		require.NoError(t, err)
+		assert.Equal(t, chainID, pn.GetContractWrite().GetConfig().GetChainId())
+	})
+
+	t.Run("contractRead", func(t *testing.T) {
+		typ := generated.ContractRead
+		inner := generated.ContractReadNode{Type: &typ, Config: &generated.ContractReadNodeConfig{
+			ContractAddress: generated.EthereumAddress("0x1234567890123456789012345678901234567890"),
+			ChainId:         generated.ChainId(chainID),
+		}}
+		n := generated.Node{Id: "cr1", Type: generated.NodeTypeContractRead}
+		require.NoError(t, n.FromContractReadNode(inner))
+		pn, err := OpenAPIToProtoNode(n)
+		require.NoError(t, err)
+		assert.Equal(t, chainID, pn.GetContractRead().GetConfig().GetChainId())
+	})
+
+	t.Run("ethTransfer", func(t *testing.T) {
+		typ := generated.EthTransfer
+		inner := generated.ETHTransferNode{Type: &typ, Config: &generated.ETHTransferNodeConfig{
+			Destination: generated.EthereumAddress("0x1234567890123456789012345678901234567890"),
+			Amount:      "1",
+			ChainId:     generated.ChainId(chainID),
+		}}
+		n := generated.Node{Id: "et1", Type: generated.NodeTypeEthTransfer}
+		require.NoError(t, n.FromETHTransferNode(inner))
+		pn, err := OpenAPIToProtoNode(n)
+		require.NoError(t, err)
+		assert.Equal(t, chainID, pn.GetEthTransfer().GetConfig().GetChainId())
+	})
+}
+
 func TestNodeRoundTrip_LoopWithCustomCodeRunner(t *testing.T) {
 	innerTyp := generated.CustomCode
 	runnerNode := generated.Node{Id: "inner", Type: generated.NodeTypeCustomCode}
