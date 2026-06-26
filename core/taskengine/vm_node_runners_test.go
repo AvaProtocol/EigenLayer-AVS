@@ -26,6 +26,7 @@ func TestVM_ContractReadRunner(t *testing.T) {
 	// Test contract read with proper configuration
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
+			ChainId:         11155111,                                     // explicit chain (G5 strict)
 			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", // Chainlink ETH/USD price feed
 			ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABIForRunners),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
@@ -63,6 +64,7 @@ func TestVM_ContractReadRunner_MissingConfig(t *testing.T) {
 	// Test contract read with missing smart wallet config
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
+			ChainId:         11155111, // explicit chain (G5 strict)
 			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419",
 			ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABIForRunners),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
@@ -194,6 +196,7 @@ func TestVM_EthTransferRunner(t *testing.T) {
 	// Test ETH transfer with missing smart wallet config (should fail gracefully)
 	node := &avsproto.ETHTransferNode{
 		Config: &avsproto.ETHTransferNode_Config{
+			ChainId:     11155111, // explicit chain (G5 strict)
 			Destination: "0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E",
 			Amount:      "1000000000000000", // 0.001 ETH in wei
 		},

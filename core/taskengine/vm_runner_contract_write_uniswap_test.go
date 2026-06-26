@@ -114,6 +114,7 @@ func TestContractWriteNode_UniswapV3Quote(t *testing.T) {
 
 	// Create the node config
 	nodeConfig := &avsproto.ContractWriteNode_Config{
+		ChainId:         11155111, // explicit chain (G5 strict)
 		ContractAddress: "0xed1f6473345f45b75f8179591dd5ba1888cf2fb3",
 		ContractAbi:     []*structpb.Value{abiValue},
 		MethodCalls: []*avsproto.ContractWriteNode_MethodCall{

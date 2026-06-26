@@ -448,6 +448,7 @@ func TestContractReadCamelCaseResolution(t *testing.T) {
 	// Test contract read that uses camelCase template
 	contractReadConfig := map[string]interface{}{
 		"contractAddress": "{{eventTrigger.data.contractAddress}}", // camelCase template
+		"chainId":         11155111,                                // explicit chain (G5 strict)
 		"contractAbi": []interface{}{
 			map[string]interface{}{
 				"inputs":          []interface{}{},

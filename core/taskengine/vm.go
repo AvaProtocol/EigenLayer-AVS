@@ -330,25 +330,26 @@ func (v *VM) WithChainConfigResolver(resolver func(chainID int64) *config.SmartW
 // resolveSmartWalletForNode picks the SmartWalletConfig a chain-aware node
 // should use. Post-G5 a task carries no chain, so the node's own chain_id is
 // authoritative — there is nothing to inherit:
-//   - Gateway/multi-chain mode (resolver present): chain_id is REQUIRED and
-//     must be configured. chain_id <= 0 or an unconfigured chain is a hard
-//     error — no silent fallback to a default chain (the Sentry
-//     EIGENLAYER-AVS-1N/1M footgun, where chains[0]/mainnet was used for a
-//     non-mainnet workflow).
-//   - Single-chain mode (no resolver): there is exactly one configured chain,
-//     so it is unambiguous; the sole smart_wallet config is used regardless of
-//     the node's chain_id.
+//   - chain_id <= 0 is a hard error in ALL modes — the node must name its
+//     chain explicitly; a task no longer provides a default to inherit.
+//   - Gateway/multi-chain mode (resolver present): the chain must resolve
+//     against the configured set, else error (no silent fallback to a default
+//     chain — the Sentry EIGENLAYER-AVS-1N/1M footgun).
+//   - Single-chain mode (no resolver): the sole smart_wallet config is used.
 func (v *VM) resolveSmartWalletForNode(nodeChainID int64) (*config.SmartWalletConfig, error) {
+	if nodeChainID <= 0 {
+		return nil, fmt.Errorf("chain-aware node requires an explicit chain_id (got %d); a task no longer provides a default chain", nodeChainID)
+	}
 	if v.chainConfigResolver != nil {
-		if nodeChainID <= 0 {
-			return nil, fmt.Errorf("chain-aware node requires an explicit chain_id in gateway mode (got %d); a task no longer provides a default chain", nodeChainID)
-		}
 		if resolved := v.chainConfigResolver(nodeChainID); resolved != nil {
 			return resolved, nil
 		}
 		return nil, fmt.Errorf("chain_id %d is not configured on this aggregator", nodeChainID)
 	}
-	return v.smartWalletConfig, nil
+	if v.smartWalletConfig != nil {
+		return v.smartWalletConfig, nil
+	}
+	return nil, fmt.Errorf("no smart wallet config available for chain_id %d", nodeChainID)
 }
 
 // vmDefaultChainID returns the VM's default-config chain, used for
@@ -2987,6 +2988,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 		case "contractRead":
 			crConfig := &avsproto.ContractReadNode_Config{}
+			crConfig.ChainId = int64(chainIDFromSettingsValue(runnerConfig["chainId"]))
 
 			// Extract contract configuration
 			if contractAddress, ok := runnerConfig["contractAddress"].(string); ok {
@@ -3063,6 +3065,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 		case "ethTransfer":
 			etConfig := &avsproto.ETHTransferNode_Config{}
+			etConfig.ChainId = int64(chainIDFromSettingsValue(runnerConfig["chainId"]))
 			if destination, ok := runnerConfig["destination"].(string); ok {
 				etConfig.Destination = destination
 			}
@@ -3091,6 +3094,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 		case "contractWrite":
 			cwConfig := &avsproto.ContractWriteNode_Config{}
+			cwConfig.ChainId = int64(chainIDFromSettingsValue(runnerConfig["chainId"]))
 
 			// Extract contract configuration
 			if contractAddress, ok := runnerConfig["contractAddress"].(string); ok {

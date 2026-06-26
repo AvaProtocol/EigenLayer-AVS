@@ -517,19 +517,23 @@ func (n *Engine) isChainConfigured(chainID int64) bool {
 	return false
 }
 
-// validateExplicitPartChains rejects a task whose chain-aware trigger or nodes
-// name an explicit chain_id (>0) the aggregator isn't configured for — the
-// create-time half of G4. Without it such a task saves and only fails later at
-// execution (resolveSmartWalletForNode errors on an unconfigured explicit
-// chain). Only enforced in gateway mode, where chainConfigs enumerates the
-// served chains; single-chain mode has one chain and nothing to validate
-// against. chain_id == 0 (inherit) is still permitted here — G5 tightens that.
+// validateExplicitPartChains rejects, at create time, a task whose chain-aware
+// trigger or nodes either omit chain_id (<= 0) or name a chain the aggregator
+// isn't configured for. Post-G5 a task carries no default chain, so every
+// chain-aware part must name an explicit configured chain — this surfaces the
+// error at save time instead of only at execution. Only enforced in gateway
+// mode, where chainConfigs enumerates the served chains; single-chain mode has
+// one chain and nothing to validate against.
 func (n *Engine) validateExplicitPartChains(task *model.Workflow) error {
 	if n.config == nil || !n.config.IsGateway || task == nil {
 		return nil
 	}
 	check := func(kind string, chainID int64) error {
-		if chainID == 0 || n.isChainConfigured(chainID) {
+		if chainID <= 0 {
+			return status.Errorf(codes.InvalidArgument,
+				"%s requires an explicit chain_id (a task no longer provides a default chain)", kind)
+		}
+		if n.isChainConfigured(chainID) {
 			return nil
 		}
 		return status.Errorf(codes.InvalidArgument,

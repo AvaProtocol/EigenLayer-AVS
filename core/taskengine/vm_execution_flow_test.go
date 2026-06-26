@@ -25,6 +25,7 @@ func TestVM_EthTransfer_BasicExecution(t *testing.T) {
 	// Test ETH transfer node (will likely fail due to insufficient funds, but should not panic)
 	node := &avsproto.ETHTransferNode{
 		Config: &avsproto.ETHTransferNode_Config{
+			ChainId:     11155111,                                     // explicit chain (G5 strict)
 			Destination: "0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E", // Test address
 			Amount:      "0.001",                                      // Small amount in ETH
 		},
@@ -56,6 +57,7 @@ func TestVM_EthTransfer_ErrorHandling(t *testing.T) {
 			setupVM: func(v *VM) { v.smartWalletConfig = nil },
 			node: &avsproto.ETHTransferNode{
 				Config: &avsproto.ETHTransferNode_Config{
+					ChainId:     11155111, // explicit chain (G5 strict)
 					Destination: "0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E",
 					Amount:      "0.001",
 				},
@@ -68,6 +70,7 @@ func TestVM_EthTransfer_ErrorHandling(t *testing.T) {
 			setupVM: func(v *VM) { v.smartWalletConfig = testutil.GetTestSmartWalletConfig() },
 			node: &avsproto.ETHTransferNode{
 				Config: &avsproto.ETHTransferNode_Config{
+					ChainId:     11155111, // explicit chain (G5 strict)
 					Destination: "invalid-address",
 					Amount:      "0.001",
 				},
@@ -80,6 +83,7 @@ func TestVM_EthTransfer_ErrorHandling(t *testing.T) {
 			setupVM: func(v *VM) { v.smartWalletConfig = testutil.GetTestSmartWalletConfig() },
 			node: &avsproto.ETHTransferNode{
 				Config: &avsproto.ETHTransferNode_Config{
+					ChainId:     11155111, // explicit chain (G5 strict)
 					Destination: "0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E",
 					Amount:      "invalid-amount",
 				},
