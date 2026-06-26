@@ -24,7 +24,7 @@ health_address: "0.0.0.0:8091"
 gateway_address: "127.0.0.1:2206"
 
 # Chain RPC endpoints (Base Sepolia). Public RPC works for low-volume dev.
-eth_rpc_url: https://sepolia.base.org
+eth_rpc_url: https://base-sepolia-rpc.publicnode.com
 eth_ws_url:  wss://base-sepolia-rpc.publicnode.com
 
 # Third-party bundler endpoint (no self-hosted bundler).
