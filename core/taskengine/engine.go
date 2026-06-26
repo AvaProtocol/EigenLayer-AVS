@@ -712,6 +712,25 @@ func chainNeedsOperatorMonitoring(tt avsproto.TriggerType) bool {
 	}
 }
 
+// triggerMonitoringChainID returns the chain an operator must subscribe to in
+// order to watch this task's trigger fire (G2). For chain-watching triggers
+// (event/block) it is the trigger's OWN configured chain — so a workflow can
+// watch chain X while its nodes act on chain Y. A 0 on the trigger means
+// "inherit", so we fall back to the task chain (legacy, until G5 removes the
+// task chain). Non-chain triggers (cron/fixedtime/manual) carry the fallback
+// through unchanged — the operator's TimeTrigger is chain-agnostic and ignores
+// it. Proto getters are nil-safe, so the GetEvent()/GetBlock() chain reads are
+// safe for any trigger type.
+func triggerMonitoringChainID(trigger *avsproto.TaskTrigger, fallbackChainID int64) int64 {
+	if cid := trigger.GetEvent().GetConfig().GetChainId(); cid != 0 {
+		return cid
+	}
+	if cid := trigger.GetBlock().GetConfig().GetChainId(); cid != 0 {
+		return cid
+	}
+	return fallbackChainID
+}
+
 // operatorsCoveringChain returns the addresses of currently-connected
 // operators that advertise the given chain_id. Empty
 // SupportedChainIDs is "covers everything" ONLY when
@@ -824,10 +843,13 @@ func (n *Engine) collectOrphans() []orphanedTaskInfo {
 		if hasLegacyOperator {
 			continue
 		}
-		if !chainHasOperator[task.ChainId] {
+		// Coverage is judged on the trigger's monitoring chain (G2), which is
+		// where the operator actually subscribes — not the task chain.
+		monitorChainID := triggerMonitoringChainID(task.Trigger, task.ChainId)
+		if !chainHasOperator[monitorChainID] {
 			out = append(out, orphanedTaskInfo{
 				taskID:      taskID,
-				chainID:     task.ChainId,
+				chainID:     monitorChainID,
 				triggerType: task.Trigger.Type.String(),
 			})
 		}
@@ -1740,16 +1762,19 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	// and the legacy back-compat path counts no-chain-list operators
 	// as covering everything.
 	if n.config != nil && n.config.IsGateway && task.Trigger != nil && chainNeedsOperatorMonitoring(task.Trigger.Type) {
+		// Coverage is judged on the trigger's monitoring chain (G2) — the chain
+		// the operator subscribes to — not the task chain.
+		monitorChainID := triggerMonitoringChainID(task.Trigger, task.ChainId)
 		n.lock.Lock()
-		covering := n.operatorsCoveringChain(task.ChainId)
+		covering := n.operatorsCoveringChain(monitorChainID)
 		n.lock.Unlock()
 		if len(covering) == 0 {
 			n.logger.Warn("🚫 CreateTask rejected: no operator advertises this chain",
-				"chain_id", task.ChainId, "trigger_type", task.Trigger.Type.String(), "user", userAddr)
+				"chain_id", monitorChainID, "trigger_type", task.Trigger.Type.String(), "user", userAddr)
 			return nil, status.Errorf(codes.FailedPrecondition,
 				"no connected operator currently monitors chain_id=%d for %s triggers; "+
 					"task cannot fire until coverage is restored",
-				task.ChainId, task.Trigger.Type.String())
+				monitorChainID, task.Trigger.Type.String())
 		}
 	}
 
@@ -2568,7 +2593,9 @@ func (n *Engine) sendMonitorTaskTriggerToOperators(task *model.Workflow) {
 			ExpiredAt: task.ExpiredAt,
 			Trigger:   task.Trigger,
 			StartAt:   task.StartAt,
-			ChainId:   task.ChainId,
+			// Operators route by the trigger's monitoring chain (G2), not the
+			// task chain — a workflow may watch chain X and act on chain Y.
+			ChainId: triggerMonitoringChainID(task.Trigger, task.ChainId),
 		},
 	}
 

@@ -138,3 +138,36 @@ func TestValidateExplicitPartChains(t *testing.T) {
 		require.NoError(t, single.validateExplicitPartChains(task))
 	})
 }
+
+// TestTriggerMonitoringChainID locks G2: the operator monitors a chain-watching
+// trigger on the trigger's OWN chain, falling back to the task chain only when
+// the trigger leaves its chain at 0 (legacy). Non-chain triggers carry the
+// fallback through.
+func TestTriggerMonitoringChainID(t *testing.T) {
+	const taskChain = int64(11155111)
+
+	eventTrigger := func(chainID int64) *avsproto.TaskTrigger {
+		return &avsproto.TaskTrigger{TriggerType: &avsproto.TaskTrigger_Event{
+			Event: &avsproto.EventTrigger{Config: &avsproto.EventTrigger_Config{ChainId: chainID}},
+		}}
+	}
+	blockTrigger := func(chainID int64) *avsproto.TaskTrigger {
+		return &avsproto.TaskTrigger{TriggerType: &avsproto.TaskTrigger_Block{
+			Block: &avsproto.BlockTrigger{Config: &avsproto.BlockTrigger_Config{ChainId: chainID, Interval: 1}},
+		}}
+	}
+	cronTrigger := &avsproto.TaskTrigger{TriggerType: &avsproto.TaskTrigger_Cron{
+		Cron: &avsproto.CronTrigger{Config: &avsproto.CronTrigger_Config{Schedules: []string{"* * * * *"}}},
+	}}
+
+	assert.Equal(t, int64(8453), triggerMonitoringChainID(eventTrigger(8453), taskChain),
+		"event trigger uses its own chain, not the task chain")
+	assert.Equal(t, taskChain, triggerMonitoringChainID(eventTrigger(0), taskChain),
+		"event trigger chain 0 falls back to the task chain (legacy)")
+	assert.Equal(t, int64(8453), triggerMonitoringChainID(blockTrigger(8453), taskChain),
+		"block trigger uses its own chain")
+	assert.Equal(t, taskChain, triggerMonitoringChainID(cronTrigger, taskChain),
+		"cron trigger carries the fallback (chain-agnostic)")
+	assert.Equal(t, taskChain, triggerMonitoringChainID(nil, taskChain),
+		"nil trigger carries the fallback")
+}

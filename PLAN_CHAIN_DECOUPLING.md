@@ -47,7 +47,7 @@ task-level chain entirely** (no `Task.chain_id`, chain-agnostic task storage). G
 | # | Gap | Location | Effect today |
 |---|---|---|---|
 | **G1** | ~~EventTrigger.Config.chainId dropped at REST→proto.~~ **FIXED** — `openAPIEventToProto`/`protoEventToOpenAPI` now map `chainId` both directions (mirrors BlockTrigger). Test: `trigger_test.go` event case. | `aggregator/rest/mapping/trigger.go` | Event-trigger chain now reaches the proto. |
-| **G2** | **Operator monitors triggers by task chain, not the trigger's own chain.** `trigger.Config.GetChainId()` is never read at runtime; subscription keys on `TaskMetadata.GetChainId()`. | `operator/worker_loop.go:1055-1090` | An event trigger on chain X attached to a task whose default chain is Y is watched on Y. (Phase 2.) |
+| **G2** | ~~Operator monitors triggers by task chain, not the trigger's own chain.~~ **FIXED** — the aggregator now dispatches `TaskMetadata.ChainId` as the trigger's monitoring chain (`triggerMonitoringChainID`, event/block config chain → task-chain fallback), and computes operator coverage + orphan-scan from it; the operator routes on that value. Test: `chain_per_part_test.go` (`TestTriggerMonitoringChainID`). | `core/taskengine/engine.go`, `operator/worker_loop.go` | An event trigger on chain X attached to a task whose default chain is Y is now watched on X. |
 | **G3** | ~~`ExtractNodeConfiguration` omits `chainId`.~~ **FIXED** — emits `chainId` for contract/transfer nodes; `CreateNodeFromType` reads it back onto the proto; `requireChainIDFromConfig` accepts the camelCase key. Test: `chain_per_part_test.go`. | `core/taskengine/vm.go`, `run_node_immediately.go` | Simulate/preview/`runNodeImmediately`/loop-nested now honor the per-node chain. |
 | **G4** | ~~Unknown explicit chain silently fell back / wasn't validated at create.~~ **FIXED** — `resolveSmartWalletForNode` errors on an explicit unresolvable chain (`vm.go:347`), and `validateExplicitPartChains` rejects an unconfigured explicit part chain at create (gateway mode). Tests: `vm_resolve_smart_wallet_test.go`, `chain_per_part_test.go`. `0`-inherit still allowed until G5. | `core/taskengine/engine.go`, `vm.go:347` | Explicit wrong-chain execution closed at both create and run. |
 | **G5** | **Make `chain_id` required per chain-aware part AND remove the task-level chain entirely** (the decided model). Per the resolution rule, `chain_id` becomes REQUIRED (`>0`, configured) on event/block triggers and contract/transfer nodes, all modes; `0` rejected. `Task.chain_id` / `CreateTaskReq.chain_id` are **removed** and task **storage becomes chain-agnostic** (chain drops out of `t:`/`u:`/execution keys — Decision 1). Requires: drop "0 = inherit" from proto + OpenAPI; remove audit-class-**A** fallback sites; fix the Loop runner; update ~30 `task.ChainId` readers; **wipe-all migration** (storage schema changed; legacy parts unfixable). | proto `avs.proto` (remove fields 16/10 + the 151/222/383/410/455 comments), `api/openapi.yaml`, `storage/schema/workflow.go` + `core/taskengine/schema.go` (key builders), `vm.go:347`/`:1583`, `loop_helpers.go:205`, `executor.go`, `engine.go` (~30 readers), `ChainRegistry.*`, `aggregator/key.go`, `migrations/` | Today chain is baked into the task (field + storage key) and a `0`-chain part silently runs on it. After G5, chain lives **only** on the parts — explicit-or-error — and a task belongs to no chain at all; per-chain views derive from the parts. Only the (B) chain-agnostic operator-routing sentinel for cron/manual survives. |
@@ -293,18 +293,20 @@ the genuinely new protocol work (cross-chain sequencing) and maps to studio Phas
 operator's event subscription (G2). Independent, low-risk, no storage change. `chain_id == 0` still
 inherits the task chain (legacy path) — tightened in Phase 3. Build + targeted tests green.
 
-### Phase 2 — Operator routes the trigger by the trigger's own chain (G2)
+### Phase 2 — Operator routes the trigger by the trigger's own chain (G2) — **IMPLEMENTED**
 
-In `operator/worker_loop.go:1055-1090`, key the EventTrigger (and BlockTrigger) subscription on
-`trigger.GetEvent().GetConfig().GetChainId()` falling back to `TaskMetadata.GetChainId()` (the inherit
-rule). Because there is **one trigger per task**, there is no union-of-chains problem: the
-`operatorsCoveringChain` selection (`engine.go:649-682`) should be driven by the **trigger's** chain, not
-the task's. Confirm that the aggregator computes coverage from the trigger chain when it dispatches the
-task to operators (so a task watching chain X is only sent to operators covering X), and that cron/manual
-triggers remain chain-agnostic (covered by any operator).
+Done at the **aggregator** (single source of truth) rather than only the operator: a new
+`triggerMonitoringChainID(trigger, fallback)` returns the event/block trigger's own configured chain
+(falling back to the task chain when the trigger left it 0 — legacy, until G5). It's applied at all three
+`TaskMetadata.ChainId` dispatch sites, the create-time coverage check (`operatorsCoveringChain`), and the
+orphan-scan coverage map. The operator keeps routing on `TaskMetadata.GetChainId()` — now the trigger's
+monitoring chain — and its variable was renamed `monitorChainID` for clarity. Because there is **one
+trigger per task**, there's no union-of-chains problem. Cron/manual/fixed-time stay chain-agnostic (the
+helper carries the fallback through; the operator's TimeTrigger ignores it).
 
 **Outcome:** event triggers fire on their own chain. A workflow can now *watch* chain X and *act* on
 chain Y within one task, with independent (non-sequential) steps. This fully satisfies studio Phase 3.
+Build + targeted tests (`TestTriggerMonitoringChainID`, operator + engine coverage suites) green.
 
 ### Phase 3 — `chain_id` required per part; remove the task-level chain; chain-agnostic storage (G5)
 
