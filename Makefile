@@ -276,21 +276,21 @@ dev-gateway: build
 	@mkdir -p logs
 	@echo "🚀 Starting gateway (dev) — REST :8080, gRPC :2206"
 	@echo "📝 Logs: logs/gateway.log"
-	./out/ap aggregator --config=config/gateway.yaml 2>&1 | tee logs/gateway.log
+	@set -a; [ -f .env.local ] && . ./.env.local; set +a; ./out/ap aggregator --config=config/gateway-dev.yaml 2>&1 | tee logs/gateway.log
 
 ## dev-worker-sepolia: run the sepolia chain worker (gRPC 50051)
 dev-worker-sepolia: build
 	@mkdir -p logs
 	@echo "🛠  Starting worker:sepolia (dev) — gRPC :50051"
 	@echo "📝 Logs: logs/worker-sepolia.log"
-	./out/ap worker --config=config/worker-sepolia.yaml 2>&1 | tee logs/worker-sepolia.log
+	@set -a; [ -f .env.local ] && . ./.env.local; set +a; ./out/ap worker --config=config/worker-sepolia-dev.yaml 2>&1 | tee logs/worker-sepolia.log
 
 ## dev-worker-base-sepolia: run the base-sepolia chain worker (gRPC 50052)
 dev-worker-base-sepolia: build
 	@mkdir -p logs
 	@echo "🛠  Starting worker:base-sepolia (dev) — gRPC :50052"
 	@echo "📝 Logs: logs/worker-base-sepolia.log"
-	./out/ap worker --config=config/worker-base-sepolia.yaml 2>&1 | tee logs/worker-base-sepolia.log
+	@set -a; [ -f .env.local ] && . ./.env.local; set +a; ./out/ap worker --config=config/worker-base-sepolia-dev.yaml 2>&1 | tee logs/worker-base-sepolia.log
 
 ## dev-operator-sepolia: run the sepolia operator pointed at the dev gateway
 dev-operator-sepolia: build
@@ -318,12 +318,17 @@ dev-stack: build
 	@echo "   Tail with:  tail -f logs/*.log"
 	@echo "   Stop with:  Ctrl-C  (kills the whole stack)"
 	@echo ""
-	@set -m; \
+	@set -a; [ -f .env.local ] && . ./.env.local; set +a; \
+		if [ -z "$$SEPOLIA_BUNDLER_URL" ] || [ -z "$$BASE_SEPOLIA_BUNDLER_URL" ]; then \
+			echo "❌ Missing SEPOLIA_BUNDLER_URL / BASE_SEPOLIA_BUNDLER_URL — add them to .env.local (pull from Railway)"; \
+			exit 1; \
+		fi; \
+		set -m; \
 		trap 'echo; echo "🛑 Stopping dev stack..."; kill 0 2>/dev/null; exit 0' INT TERM; \
-		./out/ap worker --config=config/worker-sepolia.yaml      > logs/worker-sepolia.log      2>&1 & \
-		./out/ap worker --config=config/worker-base-sepolia.yaml > logs/worker-base-sepolia.log 2>&1 & \
+		./out/ap worker --config=config/worker-sepolia-dev.yaml      > logs/worker-sepolia.log      2>&1 & \
+		./out/ap worker --config=config/worker-base-sepolia-dev.yaml > logs/worker-base-sepolia.log 2>&1 & \
 		sleep 1; \
-		./out/ap aggregator --config=config/gateway.yaml         > logs/gateway.log             2>&1 & \
+		./out/ap aggregator --config=config/gateway-dev.yaml         > logs/gateway.log             2>&1 & \
 		sleep 3; \
 		./out/ap operator   --config=config/operator-sepolia.yaml    > logs/operator-sepolia.log    2>&1 & \
 		wait
