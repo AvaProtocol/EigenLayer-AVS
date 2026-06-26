@@ -29,22 +29,26 @@ Backend gaps (this repo):
 - [x] **G5c** — task storage chain-agnostic (`t:<status>:<id>`); per-chain read iteration collapsed — **merged #631**
 - [x] **G5d** — `wipe-chain-bucketed-task-keys` boot migration — **merged #631**
 - [x] **G5e** — proto/OpenAPI "0 = inherit" comments dropped; loop-runner chain wiring fixed — **merged #631**
-- [x] **Strict reject-0** — `chain_id <= 0` invalid in all modes (resolver + create validator); no default fallback — **PR #632 (green, awaiting client-lockstep merge)**
+- [x] **Strict reject-0** — `chain_id <= 0` invalid in all modes (resolver + create validator); no default fallback — **merged #632**
+- [x] **Create-path verification** — `TestNodeRoundTrip_PerNodeChainId` proves the persisted create path decodes per-node `chainId` — **merged #633**
+- [x] **OpenAPI renovation** — removed `Workflow.chainId` / `CreateWorkflowRequest.chainId` + the `ChainIdQuery` param on list/count/executions; per-part config `chainId` now `required` — **merged #634**
 
-Wallet/exec defaults (decided): wallet-ownership checks across all configured chains
-(`userOwnsWalletOnAnyChain`); VM-default config = aggregator default; salt is chain-invariant. ✅ done.
+**Backend chain decoupling is complete on `staging`.** Wallet/exec defaults (decided): wallet-ownership
+checks across all configured chains (`userOwnsWalletOnAnyChain`); VM-default config = aggregator default;
+salt is chain-invariant. ✅ done.
 
-Client (separate repos — required to land in lockstep with #632):
+Client (separate repos — backend spec on `staging` now unblocks them):
 
-- [ ] **`ava-sdk-js`** — always send per-part `chainId` (create / runNode / simulate); drop workflow-level `chainId`
+- [ ] **`ava-sdk-js`** — **handed off to the SDK project.** Regen types (`openapi-download`+`types-gen` off the
+      renovated staging spec), make builder `chainId` required, drop list/count/executions `chainId` params, fix the
+      stale chain-resolution doc, flip the `PER_NODE_CHAIN_READY` tests. Contract: `## Client contract` below.
 - [ ] **studio** — Phase 3: per-part chains in the canvas; drop workflow-level `chainId`; chain-agnostic workflow list
-- [ ] Spec handed off: *"what the client must send"* (per node/trigger type) — see the chat handoff / `## Client contract` below
 
-Release / ops:
+Release / ops (this repo):
 
-- [ ] **staging → main** promotion: confirm the wipe migration runs at boot; `make storage-check` will flag the
-      breaking proto + key-template change (expected — the migration is the handler)
-- [ ] Heads-up to the studio/SDK team before merging #632 (strict rejects chain-less calls)
+- [ ] **staging → main** promotion: confirm the `wipe-chain-bucketed-task-keys` migration runs at boot;
+      `make storage-check` will flag the breaking proto + key-template change (expected — the migration is the handler).
+      Coordinate with the SDK/studio client update so chain-less calls aren't in flight when strict prod goes live.
 
 Future (not started):
 
