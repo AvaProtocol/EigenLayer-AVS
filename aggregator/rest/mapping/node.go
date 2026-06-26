@@ -1,11 +1,14 @@
 package mapping
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -336,15 +339,108 @@ func ProtoToOpenAPINode(in *avsproto.TaskNode) (generated.Node, error) {
 // protoRetargetJSON serializes a proto message via protojson (camelCase)
 // and unmarshals it into the supplied Go struct. Inverse of
 // jsonRetargetProto.
+//
+// protojson encodes 64-bit integer fields (int64/uint64/sint64/fixed64/sfixed64)
+// as JSON *strings* per the proto3-JSON spec, but the generated REST structs type
+// them as plain int64 with no `,string` tag — so encoding/json rejects the string
+// ("cannot unmarshal string into ... of type int64"). Since chainId became a
+// required int64 on every chain-aware config, that broke proto→OpenAPI rendering
+// on create/get/list. We rewrite exactly those fields back to JSON numbers,
+// identifying them via the proto descriptor so genuine string fields (e.g. an
+// ethTransfer Amount) are never touched. See issue #639.
 func protoRetargetJSON(in proto.Message, out interface{}) error {
 	raw, err := (protojson.MarshalOptions{EmitUnpopulated: false}).Marshal(in)
 	if err != nil {
 		return fmt.Errorf("marshal proto config: %w", err)
 	}
+
+	desc := in.ProtoReflect().Descriptor()
+	// Well-known types (Timestamp, Duration, Struct, Value, ...) protojson-encode
+	// to non-object JSON and carry no plain int64 struct fields — decode directly.
+	if !isWellKnownProto(desc) {
+		var tree map[string]interface{}
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		if decErr := dec.Decode(&tree); decErr == nil {
+			unquoteProtoInt64Strings(tree, desc)
+			if normalized, mErr := json.Marshal(tree); mErr == nil {
+				raw = normalized
+			}
+		}
+	}
+
 	if err := json.Unmarshal(raw, out); err != nil {
 		return fmt.Errorf("unmarshal config into Go struct: %w", err)
 	}
 	return nil
+}
+
+// unquoteProtoInt64Strings walks a protojson-decoded JSON tree alongside the
+// proto descriptor and converts the string-encoded 64-bit integer fields back to
+// JSON numbers (json.Number), recursing into nested (non-well-known) messages,
+// repeated values, and map values. Driven by the descriptor so only true int64
+// fields are touched — never string fields that merely contain digits.
+func unquoteProtoInt64Strings(tree map[string]interface{}, md protoreflect.MessageDescriptor) {
+	fields := md.Fields()
+	for i := 0; i < fields.Len(); i++ {
+		fd := fields.Get(i)
+		val, ok := tree[fd.JSONName()]
+		if !ok {
+			continue
+		}
+		switch {
+		case fd.IsMap():
+			vDesc := fd.MapValue()
+			if vDesc.Kind() == protoreflect.MessageKind && !isWellKnownProto(vDesc.Message()) {
+				if m, ok := val.(map[string]interface{}); ok {
+					for _, mv := range m {
+						if sub, ok := mv.(map[string]interface{}); ok {
+							unquoteProtoInt64Strings(sub, vDesc.Message())
+						}
+					}
+				}
+			}
+		case fd.IsList():
+			list, _ := val.([]interface{})
+			if is64BitIntKind(fd.Kind()) {
+				for j, item := range list {
+					if s, ok := item.(string); ok {
+						list[j] = json.Number(s)
+					}
+				}
+			} else if fd.Kind() == protoreflect.MessageKind && !isWellKnownProto(fd.Message()) {
+				for _, item := range list {
+					if sub, ok := item.(map[string]interface{}); ok {
+						unquoteProtoInt64Strings(sub, fd.Message())
+					}
+				}
+			}
+		case fd.Kind() == protoreflect.MessageKind:
+			if !isWellKnownProto(fd.Message()) {
+				if sub, ok := val.(map[string]interface{}); ok {
+					unquoteProtoInt64Strings(sub, fd.Message())
+				}
+			}
+		case is64BitIntKind(fd.Kind()):
+			if s, ok := val.(string); ok {
+				tree[fd.JSONName()] = json.Number(s)
+			}
+		}
+	}
+}
+
+func is64BitIntKind(k protoreflect.Kind) bool {
+	switch k {
+	case protoreflect.Int64Kind, protoreflect.Uint64Kind, protoreflect.Sint64Kind,
+		protoreflect.Fixed64Kind, protoreflect.Sfixed64Kind:
+		return true
+	default:
+		return false
+	}
+}
+
+func isWellKnownProto(md protoreflect.MessageDescriptor) bool {
+	return strings.HasPrefix(string(md.FullName()), "google.protobuf.")
 }
 
 // protoLoopRunnerToOpenAPI converts the proto LoopNode.Runner oneof back
