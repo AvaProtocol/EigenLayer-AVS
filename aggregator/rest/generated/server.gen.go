@@ -141,13 +141,6 @@ func (w *ServerInterfaceWrapper) ListExecutions(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter workflowId: %s", err))
 	}
 
-	// ------------- Optional query parameter "chainId" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "chainId", ctx.QueryParams(), &params.ChainId)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter chainId: %s", err))
-	}
-
 	// ------------- Optional query parameter "before" -------------
 
 	err = runtime.BindQueryParameter("form", true, false, "before", ctx.QueryParams(), &params.Before)
@@ -277,13 +270,6 @@ func (w *ServerInterfaceWrapper) CountExecutions(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter workflowId: %s", err))
 	}
 
-	// ------------- Optional query parameter "chainId" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "chainId", ctx.QueryParams(), &params.ChainId)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter chainId: %s", err))
-	}
-
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.CountExecutions(ctx, params)
 	return err
@@ -302,13 +288,6 @@ func (w *ServerInterfaceWrapper) ExecutionStats(ctx echo.Context) error {
 	err = runtime.BindQueryParameter("form", true, false, "workflowId", ctx.QueryParams(), &params.WorkflowId)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter workflowId: %s", err))
-	}
-
-	// ------------- Optional query parameter "chainId" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "chainId", ctx.QueryParams(), &params.ChainId)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter chainId: %s", err))
 	}
 
 	// Invoke the callback with all the unmarshaled arguments
@@ -592,13 +571,6 @@ func (w *ServerInterfaceWrapper) ListWorkflows(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter status: %s", err))
 	}
 
-	// ------------- Optional query parameter "chainId" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "chainId", ctx.QueryParams(), &params.ChainId)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter chainId: %s", err))
-	}
-
 	// ------------- Optional query parameter "before" -------------
 
 	err = runtime.BindQueryParameter("form", true, false, "before", ctx.QueryParams(), &params.Before)
@@ -787,13 +759,6 @@ func (w *ServerInterfaceWrapper) CountWorkflows(ctx echo.Context) error {
 	err = runtime.BindQueryParameter("form", true, false, "status", ctx.QueryParams(), &params.Status)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter status: %s", err))
-	}
-
-	// ------------- Optional query parameter "chainId" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "chainId", ctx.QueryParams(), &params.ChainId)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter chainId: %s", err))
 	}
 
 	// Invoke the callback with all the unmarshaled arguments

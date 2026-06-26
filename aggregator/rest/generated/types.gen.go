@@ -407,12 +407,8 @@ type CreateWalletRequest struct {
 
 // CreateWorkflowRequest defines model for CreateWorkflowRequest.
 type CreateWorkflowRequest struct {
-	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
-	// chain-aware trigger/node configs this is required and must be a
-	// configured chain; on query/filter params it is optional.
-	ChainId   *ChainId `json:"chainId,omitempty"`
-	Edges     *[]Edge  `json:"edges,omitempty"`
-	ExpiredAt *int64   `json:"expiredAt,omitempty"`
+	Edges     *[]Edge `json:"edges,omitempty"`
+	ExpiredAt *int64  `json:"expiredAt,omitempty"`
 
 	// InputVariables Free-form key-value bag of values used to resolve `{{variable.path}}`
 	// template references inside trigger and node configs. Conventional
@@ -1345,11 +1341,6 @@ type WithdrawResponseStatus string
 
 // Workflow defines model for Workflow.
 type Workflow struct {
-	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
-	// chain-aware trigger/node configs this is required and must be a
-	// configured chain; on query/filter params it is optional.
-	ChainId *ChainId `json:"chainId,omitempty"`
-
 	// CompletedAt Unix-epoch milliseconds — when the workflow reached a terminal state.
 	CompletedAt *int64 `json:"completedAt,omitempty"`
 
@@ -1463,10 +1454,6 @@ type ListExecutionsParams struct {
 	// WorkflowId Filter by workflow ID. Repeat to OR multiple workflows.
 	WorkflowId *[]Ulid `form:"workflowId,omitempty" json:"workflowId,omitempty"`
 
-	// ChainId Chain ID filter. Omit to use the aggregator default chain. Repeat
-	// the parameter to filter by multiple chains.
-	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
-
 	// Before Cursor — return items immediately before this position (backward pagination).
 	Before *PageBefore `form:"before,omitempty" json:"before,omitempty"`
 
@@ -1504,19 +1491,11 @@ type StreamExecutionParams struct {
 // CountExecutionsParams defines parameters for CountExecutions.
 type CountExecutionsParams struct {
 	WorkflowId *[]Ulid `form:"workflowId,omitempty" json:"workflowId,omitempty"`
-
-	// ChainId Chain ID filter. Omit to use the aggregator default chain. Repeat
-	// the parameter to filter by multiple chains.
-	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
 // ExecutionStatsParams defines parameters for ExecutionStats.
 type ExecutionStatsParams struct {
 	WorkflowId *[]Ulid `form:"workflowId,omitempty" json:"workflowId,omitempty"`
-
-	// ChainId Chain ID filter. Omit to use the aggregator default chain. Repeat
-	// the parameter to filter by multiple chains.
-	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
 // ListSecretsParams defines parameters for ListSecrets.
@@ -1562,10 +1541,6 @@ type ListWorkflowsParams struct {
 	// Status Filter by status. Repeat to OR multiple statuses.
 	Status *[]WorkflowStatus `form:"status,omitempty" json:"status,omitempty"`
 
-	// ChainId Chain ID filter. Omit to use the aggregator default chain. Repeat
-	// the parameter to filter by multiple chains.
-	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
-
 	// Before Cursor — return items immediately before this position (backward pagination).
 	Before *PageBefore `form:"before,omitempty" json:"before,omitempty"`
 
@@ -1592,10 +1567,6 @@ type ListExecutionsForWorkflowParams struct {
 type CountWorkflowsParams struct {
 	SmartWalletAddress *[]EthereumAddress `form:"smartWalletAddress,omitempty" json:"smartWalletAddress,omitempty"`
 	Status             *[]WorkflowStatus  `form:"status,omitempty" json:"status,omitempty"`
-
-	// ChainId Chain ID filter. Omit to use the aggregator default chain. Repeat
-	// the parameter to filter by multiple chains.
-	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
 // AuthExchangeJSONRequestBody defines body for AuthExchange for application/json ContentType.

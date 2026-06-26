@@ -894,9 +894,6 @@ components:
         name: { type: string }
         owner: { $ref: '#/components/schemas/EthereumAddress' }
         smartWalletAddress: { $ref: '#/components/schemas/EthereumAddress' }
-        chainId:
-          $ref: '#/components/schemas/ChainId'
-          description: Workflow-level default chain. Triggers and nodes may override.
         trigger: { $ref: '#/components/schemas/Trigger' }
         nodes:
           type: array
@@ -939,11 +936,6 @@ components:
       properties:
         name: { type: string }
         smartWalletAddress: { $ref: '#/components/schemas/EthereumAddress' }
-        chainId:
-          $ref: '#/components/schemas/ChainId'
-          description: >-
-            Deprecated and ignored (G5): a workflow no longer has a chain. Set
-            chain_id on each chain-aware trigger/node instead.
         trigger: { $ref: '#/components/schemas/Trigger' }
         nodes:
           type: array
@@ -1704,7 +1696,6 @@ paths:
           schema:
             type: array
             items: { $ref: '#/components/schemas/WorkflowStatus' }
-        - $ref: '#/components/parameters/ChainIdQuery'
         - $ref: '#/components/parameters/PageBefore'
         - $ref: '#/components/parameters/PageAfter'
         - $ref: '#/components/parameters/PageLimit'
@@ -1902,7 +1893,6 @@ paths:
           schema:
             type: array
             items: { $ref: '#/components/schemas/WorkflowStatus' }
-        - $ref: '#/components/parameters/ChainIdQuery'
       responses:
         '200':
           description: Workflow count for the filter set.
@@ -1927,7 +1917,6 @@ paths:
           schema:
             type: array
             items: { $ref: '#/components/schemas/Ulid' }
-        - $ref: '#/components/parameters/ChainIdQuery'
         - $ref: '#/components/parameters/PageBefore'
         - $ref: '#/components/parameters/PageAfter'
         - $ref: '#/components/parameters/PageLimit'
@@ -2065,7 +2054,6 @@ paths:
           schema:
             type: array
             items: { $ref: '#/components/schemas/Ulid' }
-        - $ref: '#/components/parameters/ChainIdQuery'
       responses:
         '200':
           description: Execution count.
@@ -2085,7 +2073,6 @@ paths:
           schema:
             type: array
             items: { $ref: '#/components/schemas/Ulid' }
-        - $ref: '#/components/parameters/ChainIdQuery'
       responses:
         '200':
           description: Execution stats.
