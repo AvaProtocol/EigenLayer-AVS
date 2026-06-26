@@ -200,7 +200,7 @@ func requireChainIDFromConfig(config map[string]interface{}) (int64, error) {
 		raw, ok = config["chainId"]
 	}
 	if !ok {
-		return 0, fmt.Errorf("chain_id not specified in trigger config")
+		return 0, fmt.Errorf("chain_id not specified in trigger/node config")
 	}
 	var chainID int64
 	switch v := raw.(type) {

@@ -11,7 +11,7 @@ contract-write/transfer/read acting on chain Y — so that:
 - a workflow can eventually **bridge across chains mid-run** (act on B after bridging from A).
 
 We lead this **bottom-up from the AVS backend**. The studio client
-(`/Users/mikasa/Code/studio/PLAN_WALLET_CHAIN_DECOUPLING.md`, Phase 3/4) and the v4 SDK
+(the `studio` repo's `PLAN_WALLET_CHAIN_DECOUPLING.md`, Phase 3/4) and the v4 SDK
 (`ava-sdk-js`) follow the model defined here — they must not ship a per-node chain the backend would
 flatten.
 
@@ -413,5 +413,5 @@ Scope this separately once Phases 1–3 land; do not block them on it.
 - Model: `model/user.go` (`SmartWallet` has no chainId; `User.ChainID` from JWT aud),
   `model/workflow.go` (`Workflow` wraps `*avsproto.Task`).
 - OpenAPI: `api/openapi.yaml:402,492,592,618,634`.
-- SDK (`/Users/mikasa/Code/ava-sdk-js`): `packages/sdk-js/src/v4/builders/{nodes,triggers}.ts`,
+- SDK (the `ava-sdk-js` repo): `packages/sdk-js/src/v4/builders/{nodes,triggers}.ts`,
   `packages/types/src/openapi.gen.ts` (per-node/trigger `chainId`).

@@ -132,6 +132,26 @@ func TestValidateExplicitPartChains(t *testing.T) {
 		assert.Contains(t, err.Error(), "event trigger")
 	})
 
+	t.Run("unconfigured block trigger chain is rejected", func(t *testing.T) {
+		task := &model.Workflow{Task: &avsproto.Task{Trigger: &avsproto.TaskTrigger{
+			TriggerType: &avsproto.TaskTrigger_Block{Block: &avsproto.BlockTrigger{
+				Config: &avsproto.BlockTrigger_Config{ChainId: 999999, Interval: 1},
+			}},
+		}}}
+		err := n.validateExplicitPartChains(task)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "block trigger")
+	})
+
+	t.Run("configured block trigger chain passes", func(t *testing.T) {
+		task := &model.Workflow{Task: &avsproto.Task{Trigger: &avsproto.TaskTrigger{
+			TriggerType: &avsproto.TaskTrigger_Block{Block: &avsproto.BlockTrigger{
+				Config: &avsproto.BlockTrigger_Config{ChainId: 1, Interval: 1},
+			}},
+		}}}
+		require.NoError(t, n.validateExplicitPartChains(task))
+	})
+
 	t.Run("non-gateway mode skips validation", func(t *testing.T) {
 		single := &Engine{config: &config.Config{IsGateway: false}}
 		task := &model.Workflow{Task: &avsproto.Task{Nodes: []*avsproto.TaskNode{cwNode(137)}}}

@@ -2298,7 +2298,9 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 						ExpiredAt: task.ExpiredAt,
 						Trigger:   task.Trigger,
 						StartAt:   task.StartAt,
-						ChainId:   task.ChainId,
+						// Operators route by the trigger's monitoring chain (G2),
+						// not the task chain — watch X, act Y.
+						ChainId: triggerMonitoringChainID(task.Trigger, task.ChainId),
 					},
 				}
 
@@ -3254,7 +3256,8 @@ func (n *Engine) instructOperatorImmediateTrigger(ctx context.Context, taskID st
 					ExpiredAt: task.ExpiredAt,
 					Trigger:   task.Trigger,
 					StartAt:   task.StartAt,
-					ChainId:   task.ChainId,
+					// Operators route by the trigger's monitoring chain (G2).
+					ChainId: triggerMonitoringChainID(task.Trigger, task.ChainId),
 				},
 			}
 
