@@ -721,8 +721,8 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 
 	// batch update storage for task + execution log
 	updates := map[string][]byte{}
-	updates[string(ChainWorkflowStorageKey(x.engine.defaultChainID(), task.Id, task.Status))], err = task.ToJSON()
-	updates[string(ChainTaskUserKey(x.engine.defaultChainID(), task))] = []byte(fmt.Sprintf("%d", task.Status))
+	updates[string(WorkflowStorageKey(task.Id, task.Status))], err = task.ToJSON()
+	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 	// update execution log
 	var executionByte []byte
@@ -739,7 +739,7 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 		}
 		if mErr == nil {
 			executionByte = b
-			key := string(ChainTaskExecutionKey(x.engine.defaultChainID(), task, execution.Id))
+			key := string(TaskExecutionKey(task, execution.Id))
 			updates[key] = executionByte
 			if x.logger != nil {
 				x.logger.Info("Executor: persisting execution", "task_id", task.Id, "execution_id", execution.Id, "key", key)
@@ -756,7 +756,7 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 
 	// whenever a task change its status, we moved it, therefore we will need to clean up the old storage
 	if task.Status != initialTaskStatus {
-		if err = x.db.Delete(ChainWorkflowStorageKey(x.engine.defaultChainID(), task.Id, initialTaskStatus)); err != nil {
+		if err = x.db.Delete(WorkflowStorageKey(task.Id, initialTaskStatus)); err != nil {
 			x.logger.Errorf("error updating task status. %w", err, "task_id", task.Id)
 		}
 	}
@@ -1073,8 +1073,8 @@ func (x *WorkflowExecutor) persistFailedExecution(task *model.Workflow, executio
 
 	// Update task data
 	if taskJSON, err := task.ToJSON(); err == nil {
-		updates[string(ChainWorkflowStorageKey(x.engine.defaultChainID(), task.Id, task.Status))] = taskJSON
-		updates[string(ChainTaskUserKey(x.engine.defaultChainID(), task))] = []byte(fmt.Sprintf("%d", task.Status))
+		updates[string(WorkflowStorageKey(task.Id, task.Status))] = taskJSON
+		updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 	} else {
 		x.logger.Error("Failed to serialize task for persistence", "task_id", task.Id, "error", err)
 	}
@@ -1082,7 +1082,7 @@ func (x *WorkflowExecutor) persistFailedExecution(task *model.Workflow, executio
 	// Update execution log
 	mo := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}
 	if executionByte, mErr := mo.Marshal(execution); mErr == nil {
-		key := string(ChainTaskExecutionKey(x.engine.defaultChainID(), task, execution.Id))
+		key := string(TaskExecutionKey(task, execution.Id))
 		updates[key] = executionByte
 		x.logger.Info("Executor: persisting failed execution", "task_id", task.Id, "execution_id", execution.Id, "key", key)
 	} else {
@@ -1096,7 +1096,7 @@ func (x *WorkflowExecutor) persistFailedExecution(task *model.Workflow, executio
 
 	// Clean up old task status if it changed
 	if task.Status != initialTaskStatus {
-		if err := x.db.Delete(ChainWorkflowStorageKey(x.engine.defaultChainID(), task.Id, initialTaskStatus)); err != nil {
+		if err := x.db.Delete(WorkflowStorageKey(task.Id, initialTaskStatus)); err != nil {
 			x.logger.Error("error cleaning up old task status", "task_id", task.Id, "error", err)
 		}
 	}

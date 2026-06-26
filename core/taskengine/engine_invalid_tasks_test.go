@@ -31,7 +31,7 @@ func seedInvalidEnabledTask(t *testing.T, db interface {
 
 	taskJSON, err := task.ToJSON()
 	require.NoError(t, err)
-	require.NoError(t, db.Set(ChainWorkflowStorageKey(chainID, id, avsproto.TaskStatus_Enabled), taskJSON))
+	require.NoError(t, db.Set(WorkflowStorageKey(id, avsproto.TaskStatus_Enabled), taskJSON))
 	return task
 }
 
@@ -57,7 +57,7 @@ func TestDetectAndHandleInvalidTasks_DeletesStaleEnabledKey(t *testing.T) {
 	assert.Empty(t, enabledItems, "stale Enabled-status key must be deleted so the next boot can't reload it")
 
 	// ...and the task must now live under the Failed key.
-	failedExists, err := db.Exist(ChainWorkflowStorageKey(chainID, task.Id, avsproto.TaskStatus_Failed))
+	failedExists, err := db.Exist(WorkflowStorageKey(task.Id, avsproto.TaskStatus_Failed))
 	require.NoError(t, err)
 	assert.True(t, failedExists, "task should now be stored under the Failed status key")
 
@@ -102,7 +102,7 @@ func TestDetectAndHandleInvalidTasks_LeavesValidTasksAlone(t *testing.T) {
 	n.lock.Unlock()
 	assert.True(t, stillActive, "valid task must remain active")
 
-	failedExists, err := db.Exist(ChainWorkflowStorageKey(chainID, valid.Id, avsproto.TaskStatus_Failed))
+	failedExists, err := db.Exist(WorkflowStorageKey(valid.Id, avsproto.TaskStatus_Failed))
 	require.NoError(t, err)
 	assert.False(t, failedExists, "valid task must not be written under the Failed key")
 }

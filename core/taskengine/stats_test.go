@@ -34,10 +34,9 @@ func TestTaskStatCount(t *testing.T) {
 	tr1.MaxExecution = 1
 	n.CreateWorkflow(testutil.TestUser1(), tr1)
 
-	// CreateWorkflow stamps the task with the engine's defaultChainID
-	// (config.SmartWallet.ChainID), so the stat service must scan that
-	// chain — the chain-0 default in NewStatService would miss it.
-	statSvc := NewStatServiceWithChains(db, []int64{config.SmartWallet.ChainID})
+	// Task storage is chain-agnostic (G5); the stat service scans a single
+	// per-wallet prefix.
+	statSvc := NewStatService(db)
 	// Query statistics using the same smart wallet address used for task creation
 	addr := common.HexToAddress(smartWalletAddress)
 	owner := testutil.TestUser1().Address
@@ -69,7 +68,7 @@ func TestTaskStatCountCompleted(t *testing.T) {
 		},
 	}
 
-	db.Set(ChainTaskUserKey(int64(1), task1), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)))
+	db.Set(TaskUserKey(task1), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)))
 
 	statSvc := NewStatService(db)
 	result, _ := statSvc.GetTaskCount(user1.ToSmartWallet())
@@ -122,10 +121,10 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 		},
 	}
 
-	db.Set(ChainTaskUserKey(int64(1), task1), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)))
-	db.Set(ChainTaskUserKey(int64(1), task2), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Failed)))
-	db.Set(ChainTaskUserKey(int64(1), task3), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Disabled)))
-	db.Set(ChainTaskUserKey(int64(1), task4), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Enabled)))
+	db.Set(TaskUserKey(task1), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)))
+	db.Set(TaskUserKey(task2), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Failed)))
+	db.Set(TaskUserKey(task3), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Disabled)))
+	db.Set(TaskUserKey(task4), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Enabled)))
 
 	statSvc := NewStatService(db)
 	result, _ := statSvc.GetTaskCount(user1.ToSmartWallet())
