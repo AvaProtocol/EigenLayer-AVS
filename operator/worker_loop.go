@@ -1052,15 +1052,18 @@ func (o *Operator) StreamMessages() {
 					continue
 				}
 
-				taskChainID := resp.TaskMetadata.GetChainId()
+				// TaskMetadata.ChainId is the trigger's MONITORING chain (G2),
+				// set by the aggregator from the event/block trigger's own
+				// config — which may differ from where the task's nodes act.
+				monitorChainID := resp.TaskMetadata.GetChainId()
 
 				if trigger := triggerObj.GetEvent(); trigger != nil {
-					o.logger.Info("📥 Monitoring event trigger", "task_id", resp.Id, "chain_id", taskChainID)
+					o.logger.Info("📥 Monitoring event trigger", "task_id", resp.Id, "chain_id", monitorChainID)
 
-					set, ok := o.triggersForChain(taskChainID)
+					set, ok := o.triggersForChain(monitorChainID)
 					if !ok {
 						o.logger.Warn("⚠️ Dropping event task — operator does not monitor this chain",
-							"task_id", resp.Id, "chain_id", taskChainID,
+							"task_id", resp.Id, "chain_id", monitorChainID,
 							"supported", o.supportedChainIDs())
 						continue
 					}
@@ -1080,12 +1083,12 @@ func (o *Operator) StreamMessages() {
 						}
 					}()
 				} else if trigger := triggerObj.GetBlock(); trigger != nil {
-					o.logger.Info("📦 Monitoring block trigger", "task_id", resp.Id, "chain_id", taskChainID, "interval", trigger.Config.GetInterval())
+					o.logger.Info("📦 Monitoring block trigger", "task_id", resp.Id, "chain_id", monitorChainID, "interval", trigger.Config.GetInterval())
 
-					set, ok := o.triggersForChain(taskChainID)
+					set, ok := o.triggersForChain(monitorChainID)
 					if !ok {
 						o.logger.Warn("⚠️ Dropping block task — operator does not monitor this chain",
-							"task_id", resp.Id, "chain_id", taskChainID,
+							"task_id", resp.Id, "chain_id", monitorChainID,
 							"supported", o.supportedChainIDs())
 						continue
 					}

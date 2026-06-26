@@ -191,6 +191,9 @@ func openAPIEventToProto(in generated.EventTrigger) *avsproto.EventTrigger {
 	out := &avsproto.EventTrigger{Config: &avsproto.EventTrigger_Config{}}
 	if in.Config != nil {
 		out.Config.Queries = openAPIEventQueriesToProto(in.Config.Queries)
+		if in.Config.ChainId != nil {
+			out.Config.ChainId = *in.Config.ChainId
+		}
 	}
 	return out
 }
@@ -199,7 +202,11 @@ func protoEventToOpenAPI(in *avsproto.EventTrigger) generated.EventTrigger {
 	t := generated.Event
 	out := generated.EventTrigger{Type: &t}
 	if cfg := in.GetConfig(); cfg != nil {
-		out.Config = &generated.EventTriggerConfig{Queries: protoEventQueriesToOpenAPI(cfg.GetQueries())}
+		c := generated.EventTriggerConfig{Queries: protoEventQueriesToOpenAPI(cfg.GetQueries())}
+		if cid := cfg.GetChainId(); cid != 0 {
+			c.ChainId = &cid
+		}
+		out.Config = &c
 	}
 	return out
 }

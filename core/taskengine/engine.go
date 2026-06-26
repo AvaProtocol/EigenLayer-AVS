@@ -508,6 +508,86 @@ func (n *Engine) chainScopedTaskKey(task *model.Workflow) []byte {
 	return ChainWorkflowStorageKey(chainID, task.Id, task.Status)
 }
 
+// isChainConfigured reports whether the aggregator serves chainID, using the
+// canonical set knownChainIDs() (default chain + chainConfigs). ResolveSmart-
+// WalletConfig is NOT a substitute — it falls back to the default config for
+// an unknown chain, so it can't tell "configured" from "unconfigured".
+func (n *Engine) isChainConfigured(chainID int64) bool {
+	for _, id := range n.knownChainIDs() {
+		if id == chainID {
+			return true
+		}
+	}
+	return false
+}
+
+// validateExplicitPartChains rejects a task whose chain-aware trigger or nodes
+// name an explicit chain_id (>0) the aggregator isn't configured for — the
+// create-time half of G4. Without it such a task saves and only fails later at
+// execution (resolveSmartWalletForNode errors on an unconfigured explicit
+// chain). Only enforced in gateway mode, where chainConfigs enumerates the
+// served chains; single-chain mode has one chain and nothing to validate
+// against. chain_id == 0 (inherit) is still permitted here — G5 tightens that.
+func (n *Engine) validateExplicitPartChains(task *model.Workflow) error {
+	if n.config == nil || !n.config.IsGateway || task == nil {
+		return nil
+	}
+	check := func(kind string, chainID int64) error {
+		if chainID == 0 || n.isChainConfigured(chainID) {
+			return nil
+		}
+		return status.Errorf(codes.InvalidArgument,
+			"%s targets chain_id=%d, which is not configured on this aggregator", kind, chainID)
+	}
+	if t := task.Trigger; t != nil {
+		if et := t.GetEvent(); et != nil && et.Config != nil {
+			if err := check("event trigger", et.Config.GetChainId()); err != nil {
+				return err
+			}
+		}
+		if bt := t.GetBlock(); bt != nil && bt.Config != nil {
+			if err := check("block trigger", bt.Config.GetChainId()); err != nil {
+				return err
+			}
+		}
+	}
+	for _, node := range task.Nodes {
+		if err := checkNodeChain(node, check); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkNodeChain runs check against a node's chain-aware config, looking inside
+// a Loop runner too (it wraps one chain-aware node inline).
+func checkNodeChain(node *avsproto.TaskNode, check func(string, int64) error) error {
+	if node == nil {
+		return nil
+	}
+	if cw := node.GetContractWrite(); cw != nil && cw.Config != nil {
+		return check("contract write node", cw.Config.GetChainId())
+	}
+	if cr := node.GetContractRead(); cr != nil && cr.Config != nil {
+		return check("contract read node", cr.Config.GetChainId())
+	}
+	if et := node.GetEthTransfer(); et != nil && et.Config != nil {
+		return check("eth transfer node", et.Config.GetChainId())
+	}
+	if loop := node.GetLoop(); loop != nil {
+		if cw := loop.GetContractWrite(); cw != nil && cw.Config != nil {
+			return check("loop contract write runner", cw.Config.GetChainId())
+		}
+		if cr := loop.GetContractRead(); cr != nil && cr.Config != nil {
+			return check("loop contract read runner", cr.Config.GetChainId())
+		}
+		if et := loop.GetEthTransfer(); et != nil && et.Config != nil {
+			return check("loop eth transfer runner", et.Config.GetChainId())
+		}
+	}
+	return nil
+}
+
 // findTaskKey searches every known chain bucket for a task by id at the
 // given status, returning the matching chain-scoped key. Used by lookup
 // paths that have only a task_id (no chain context). Returns the
@@ -632,6 +712,25 @@ func chainNeedsOperatorMonitoring(tt avsproto.TriggerType) bool {
 	}
 }
 
+// triggerMonitoringChainID returns the chain an operator must subscribe to in
+// order to watch this task's trigger fire (G2). For chain-watching triggers
+// (event/block) it is the trigger's OWN configured chain — so a workflow can
+// watch chain X while its nodes act on chain Y. A 0 on the trigger means
+// "inherit", so we fall back to the task chain (legacy, until G5 removes the
+// task chain). Non-chain triggers (cron/fixedtime/manual) carry the fallback
+// through unchanged — the operator's TimeTrigger is chain-agnostic and ignores
+// it. Proto getters are nil-safe, so the GetEvent()/GetBlock() chain reads are
+// safe for any trigger type.
+func triggerMonitoringChainID(trigger *avsproto.TaskTrigger, fallbackChainID int64) int64 {
+	if cid := trigger.GetEvent().GetConfig().GetChainId(); cid != 0 {
+		return cid
+	}
+	if cid := trigger.GetBlock().GetConfig().GetChainId(); cid != 0 {
+		return cid
+	}
+	return fallbackChainID
+}
+
 // operatorsCoveringChain returns the addresses of currently-connected
 // operators that advertise the given chain_id. Empty
 // SupportedChainIDs is "covers everything" ONLY when
@@ -744,10 +843,13 @@ func (n *Engine) collectOrphans() []orphanedTaskInfo {
 		if hasLegacyOperator {
 			continue
 		}
-		if !chainHasOperator[task.ChainId] {
+		// Coverage is judged on the trigger's monitoring chain (G2), which is
+		// where the operator actually subscribes — not the task chain.
+		monitorChainID := triggerMonitoringChainID(task.Trigger, task.ChainId)
+		if !chainHasOperator[monitorChainID] {
 			out = append(out, orphanedTaskInfo{
 				taskID:      taskID,
-				chainID:     task.ChainId,
+				chainID:     monitorChainID,
 				triggerType: task.Trigger.Type.String(),
 			})
 		}
@@ -1660,16 +1762,19 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	// and the legacy back-compat path counts no-chain-list operators
 	// as covering everything.
 	if n.config != nil && n.config.IsGateway && task.Trigger != nil && chainNeedsOperatorMonitoring(task.Trigger.Type) {
+		// Coverage is judged on the trigger's monitoring chain (G2) — the chain
+		// the operator subscribes to — not the task chain.
+		monitorChainID := triggerMonitoringChainID(task.Trigger, task.ChainId)
 		n.lock.Lock()
-		covering := n.operatorsCoveringChain(task.ChainId)
+		covering := n.operatorsCoveringChain(monitorChainID)
 		n.lock.Unlock()
 		if len(covering) == 0 {
 			n.logger.Warn("🚫 CreateTask rejected: no operator advertises this chain",
-				"chain_id", task.ChainId, "trigger_type", task.Trigger.Type.String(), "user", userAddr)
+				"chain_id", monitorChainID, "trigger_type", task.Trigger.Type.String(), "user", userAddr)
 			return nil, status.Errorf(codes.FailedPrecondition,
 				"no connected operator currently monitors chain_id=%d for %s triggers; "+
 					"task cannot fire until coverage is restored",
-				task.ChainId, task.Trigger.Type.String())
+				monitorChainID, task.Trigger.Type.String())
 		}
 	}
 
@@ -1699,6 +1804,11 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	// Validate all node names for JavaScript compatibility
 	if err := validateAllNodeNamesForJavaScript(task); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "node name validation failed: %v", err)
+	}
+
+	// Reject chain-aware parts that name an explicit, unconfigured chain (G4).
+	if err := n.validateExplicitPartChains(task); err != nil {
+		return nil, err
 	}
 
 	updates := map[string][]byte{}
@@ -2188,7 +2298,9 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 						ExpiredAt: task.ExpiredAt,
 						Trigger:   task.Trigger,
 						StartAt:   task.StartAt,
-						ChainId:   task.ChainId,
+						// Operators route by the trigger's monitoring chain (G2),
+						// not the task chain — watch X, act Y.
+						ChainId: triggerMonitoringChainID(task.Trigger, task.ChainId),
 					},
 				}
 
@@ -2483,7 +2595,9 @@ func (n *Engine) sendMonitorTaskTriggerToOperators(task *model.Workflow) {
 			ExpiredAt: task.ExpiredAt,
 			Trigger:   task.Trigger,
 			StartAt:   task.StartAt,
-			ChainId:   task.ChainId,
+			// Operators route by the trigger's monitoring chain (G2), not the
+			// task chain — a workflow may watch chain X and act on chain Y.
+			ChainId: triggerMonitoringChainID(task.Trigger, task.ChainId),
 		},
 	}
 
@@ -3142,7 +3256,8 @@ func (n *Engine) instructOperatorImmediateTrigger(ctx context.Context, taskID st
 					ExpiredAt: task.ExpiredAt,
 					Trigger:   task.Trigger,
 					StartAt:   task.StartAt,
-					ChainId:   task.ChainId,
+					// Operators route by the trigger's monitoring chain (G2).
+					ChainId: triggerMonitoringChainID(task.Trigger, task.ChainId),
 				},
 			}
 

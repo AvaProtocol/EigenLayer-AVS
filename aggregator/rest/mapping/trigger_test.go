@@ -87,10 +87,12 @@ func TestTriggerRoundTrip(t *testing.T) {
 				tr := generated.Trigger{Name: "eventTrigger", Type: generated.TriggerTypeEvent}
 				addr := generated.EthereumAddress("0x1234567890123456789012345678901234567890")
 				sig := "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+				eventChainID := int64(8453)
 				typ := generated.Event
 				inner := generated.EventTrigger{
 					Type: &typ,
 					Config: &generated.EventTriggerConfig{
+						ChainId: &eventChainID,
 						Queries: []generated.EventTriggerQuery{{
 							Addresses: &[]generated.EthereumAddress{addr},
 							Topics:    &[]string{sig, ""},
@@ -109,6 +111,8 @@ func TestTriggerRoundTrip(t *testing.T) {
 			check: func(t *testing.T, out generated.Trigger) {
 				v, err := out.AsEventTrigger()
 				require.NoError(t, err)
+				require.NotNil(t, v.Config.ChainId, "event trigger chain_id must survive the round-trip (G1)")
+				assert.Equal(t, int64(8453), *v.Config.ChainId)
 				require.Len(t, v.Config.Queries, 1)
 				require.NotNil(t, v.Config.Queries[0].Addresses)
 				assert.Equal(t, "0x1234567890123456789012345678901234567890", string((*v.Config.Queries[0].Addresses)[0]))

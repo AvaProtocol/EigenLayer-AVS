@@ -194,7 +194,13 @@ func (n *Engine) runBlockTriggerImmediately(ctx context.Context, triggerConfig m
 func requireChainIDFromConfig(config map[string]interface{}) (int64, error) {
 	raw, ok := config["chain_id"]
 	if !ok {
-		return 0, fmt.Errorf("chain_id not specified in trigger config")
+		// Node config maps (ExtractNodeConfiguration) carry the camelCase
+		// `chainId`; trigger config maps carry snake_case `chain_id`. Accept
+		// either so per-node chains resolve on the isolated-run output path.
+		raw, ok = config["chainId"]
+	}
+	if !ok {
+		return 0, fmt.Errorf("chain_id not specified in trigger/node config")
 	}
 	var chainID int64
 	switch v := raw.(type) {
