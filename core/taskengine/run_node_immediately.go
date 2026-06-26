@@ -46,6 +46,19 @@ func stampNodeChainIfUnset(node *avsproto.TaskNode, chainID int64) {
 	if et := node.GetEthTransfer(); et != nil && et.Config != nil && et.Config.ChainId == 0 {
 		et.Config.ChainId = chainID
 	}
+	// Loop node's inner runner is itself chain-aware — stamp it too, so a directly
+	// constructed (test/SDK) Loop whose runner has chain_id=0 still resolves.
+	if loop := node.GetLoop(); loop != nil {
+		if cw := loop.GetContractWrite(); cw != nil && cw.Config != nil && cw.Config.ChainId == 0 {
+			cw.Config.ChainId = chainID
+		}
+		if cr := loop.GetContractRead(); cr != nil && cr.Config != nil && cr.Config.ChainId == 0 {
+			cr.Config.ChainId = chainID
+		}
+		if et := loop.GetEthTransfer(); et != nil && et.Config != nil && et.Config.ChainId == 0 {
+			et.Config.ChainId = chainID
+		}
+	}
 }
 
 func getRealisticBlockNumberForChain(chainID int64) uint64 {

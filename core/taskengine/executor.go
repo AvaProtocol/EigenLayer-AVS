@@ -451,6 +451,16 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 
 		// Enhanced wallet validation that handles any legitimately derived wallet
 		isValid, err := x.validateWalletOwnership(ctx, x.engine.defaultChainID(), user, smartWalletAddr)
+		if err == nil && !isValid {
+			// The smart-wallet runner address is chain-invariant across configured
+			// chains, but its ownership record (w:<chain>:...) may have been written
+			// under a different chain than the gateway default. Mirror the create-time
+			// cross-chain check (userOwnsWalletOnAnyChain) so a wallet registered on a
+			// non-default chain isn't spuriously rejected at execution → auto-disabled.
+			if ok, ownErr := x.engine.userOwnsWalletOnAnyChain(user, smartWalletAddr); ownErr == nil && ok {
+				isValid = true
+			}
+		}
 		if err != nil {
 			execution.EndAt = time.Now().UnixMilli()
 			execution.Error = fmt.Sprintf("failed to validate wallet ownership for owner %s: %v", owner.Hex(), err)
@@ -470,12 +480,19 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 			x.logger.Info("Executor: AA sender resolved", "sender", task.SmartWalletAddress)
 		}
 
-		// Look up the wallet's salt from DB for auto-deployment of non-salt-0 wallets
+		// Look up the wallet's salt from DB for auto-deployment of non-salt-0 wallets.
+		// The salt is chain-invariant (same salt derives the same address on every
+		// configured chain), but the record (w:<chain>:...) is keyed by the chain it
+		// was registered on, which may differ from the gateway default. Scan all
+		// configured chains so the salt isn't missed → wallet auto-deployed wrong.
 		if x.db != nil {
-			if wallet, walletErr := GetWallet(x.db, x.engine.defaultChainID(), owner, task.SmartWalletAddress); walletErr == nil && wallet != nil && wallet.Salt != nil {
-				vm.AddVar("aa_salt", wallet.Salt)
-				if x.logger != nil {
-					x.logger.Info("Executor: AA salt resolved from wallet DB", "salt", wallet.Salt.String(), "wallet", task.SmartWalletAddress)
+			for _, walletChainID := range x.engine.knownChainIDs() {
+				if wallet, walletErr := GetWallet(x.db, walletChainID, owner, task.SmartWalletAddress); walletErr == nil && wallet != nil && wallet.Salt != nil {
+					vm.AddVar("aa_salt", wallet.Salt)
+					if x.logger != nil {
+						x.logger.Info("Executor: AA salt resolved from wallet DB", "salt", wallet.Salt.String(), "wallet", task.SmartWalletAddress, "chain_id", walletChainID)
+					}
+					break
 				}
 			}
 		}
@@ -533,15 +550,23 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 
 		if creditLimitWei != nil {
 			taskOwner := common.HexToAddress(task.Owner)
-			withinLimit, outstanding, checkErr := x.feeLedger.CheckCreditLimit(x.engine.defaultChainID(), taskOwner, creditLimitWei)
-			if checkErr != nil {
-				x.logger.Warn("Fee ledger check failed, proceeding with execution", "error", checkErr)
-			} else if !withinLimit {
-				execution.EndAt = time.Now().UnixMilli()
-				execution.Error = fmt.Sprintf("[INSUFFICIENT_CREDIT] outstanding value fees (%s wei) exceed credit limit", outstanding.String())
-				execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
-				x.persistFailedExecution(task, execution, initialTaskStatus)
-				return execution, nil
+			// Value fees accrue per execution chain (fl:<chain>:<owner>) and a task's
+			// nodes can act on different chains, so an outstanding balance may sit on a
+			// non-default chain. Gate against every configured chain rather than just
+			// the gateway default, so credit limits can't be bypassed cross-chain.
+			for _, feeChainID := range x.engine.knownChainIDs() {
+				withinLimit, outstanding, checkErr := x.feeLedger.CheckCreditLimit(feeChainID, taskOwner, creditLimitWei)
+				if checkErr != nil {
+					x.logger.Warn("Fee ledger check failed, proceeding with execution", "chain_id", feeChainID, "error", checkErr)
+					continue
+				}
+				if !withinLimit {
+					execution.EndAt = time.Now().UnixMilli()
+					execution.Error = fmt.Sprintf("[INSUFFICIENT_CREDIT] outstanding value fees (%s wei) exceed credit limit", outstanding.String())
+					execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
+					x.persistFailedExecution(task, execution, initialTaskStatus)
+					return execution, nil
+				}
 			}
 		}
 	}
