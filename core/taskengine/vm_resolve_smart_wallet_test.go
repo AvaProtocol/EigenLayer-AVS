@@ -57,9 +57,9 @@ func TestResolveSmartWalletForNode_TaskChainIDFallback(t *testing.T) {
 		return vm
 	}
 
-	// Post-G5: a task carries no chain, so there is no task-chain inheritance.
-	// A node's explicit chain resolves (or errors if unconfigured); a 0 node
-	// chain falls back only to the VM default config.
+	// Post-G5: a task carries no chain, so there is no inheritance. A node's
+	// explicit chain resolves (or errors if unconfigured); a 0 node chain is a
+	// hard error (chain_id required on chain-aware nodes in all modes).
 	_ = sepoliaCfg
 	tests := []struct {
 		name        string

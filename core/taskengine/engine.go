@@ -1743,7 +1743,10 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	// as task.SmartWalletAddress. We must verify the caller owns this wallet
 	// on the chain this task targets.
 	if task.SmartWalletAddress != "" {
-		valid, ownErr := ValidWalletOwner(n.db, n.defaultChainID(), user, common.HexToAddress(task.SmartWalletAddress))
+		// The runner wallet may have been registered on any chain (its CREATE2
+		// address is chain-invariant), and a task no longer names a chain — so
+		// check ownership across every configured chain, not just the default.
+		valid, ownErr := n.userOwnsWalletOnAnyChain(user, common.HexToAddress(task.SmartWalletAddress))
 		if ownErr != nil {
 			// Storage failure on the ownership check is NOT the same as
 			// "wallet not owned" — surfacing it as InvalidArgument would
