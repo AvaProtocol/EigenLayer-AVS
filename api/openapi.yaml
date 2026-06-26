@@ -118,9 +118,9 @@ components:
       type: integer
       format: int64
       description: |
-        Numeric chain ID. `0` or omitted means "use the aggregator's default
-        chain" — typically only useful in single-chain deployments or for
-        chain-agnostic operations.
+        Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+        chain-aware trigger/node configs this is required and must be a
+        configured chain; on query/filter params it is optional.
       example: 11155111
 
     EthereumAddress:
@@ -392,7 +392,7 @@ components:
     BlockTriggerConfig:
       type: object
       description: Fires every N blocks on the target chain.
-      required: [interval]
+      required: [interval, chainId]
       properties:
         interval:
           type: integer
@@ -401,7 +401,7 @@ components:
           description: Fire every N blocks.
         chainId:
           $ref: '#/components/schemas/ChainId'
-          description: Chain to watch blocks on. Required: a workflow carries no chain to inherit.
+          description: Chain to watch blocks on. Required — a workflow carries no chain to inherit.
 
     EventTriggerQuery:
       type: object
@@ -476,7 +476,7 @@ components:
     EventTriggerConfig:
       type: object
       description: Fires when matching on-chain events are observed.
-      required: [queries]
+      required: [queries, chainId]
       properties:
         queries:
           type: array
@@ -491,7 +491,7 @@ components:
             trigger again. Default 300. 0 disables cooldown.
         chainId:
           $ref: '#/components/schemas/ChainId'
-          description: Chain to watch events on. Required: a workflow carries no chain to inherit.
+          description: Chain to watch events on. Required — a workflow carries no chain to inherit.
 
     # ---- Trigger union ----
 
@@ -583,7 +583,7 @@ components:
 
     ETHTransferNodeConfig:
       type: object
-      required: [destination, amount]
+      required: [destination, amount, chainId]
       properties:
         destination: { $ref: '#/components/schemas/EthereumAddress' }
         amount:
@@ -591,11 +591,11 @@ components:
           description: Amount in wei (decimal string for big-int safety). Special value `max` withdraws the entire balance.
         chainId:
           $ref: '#/components/schemas/ChainId'
-          description: Chain to execute on. Required: a workflow carries no chain to inherit.
+          description: Chain to execute on. Required — a workflow carries no chain to inherit.
 
     ContractWriteNodeConfig:
       type: object
-      required: [contractAddress]
+      required: [contractAddress, chainId]
       properties:
         contractAddress: { $ref: '#/components/schemas/EthereumAddress' }
         callData: { $ref: '#/components/schemas/Hex' }
@@ -617,11 +617,11 @@ components:
           description: Custom gas limit (decimal string).
         chainId:
           $ref: '#/components/schemas/ChainId'
-          description: Chain to execute on. Required: a workflow carries no chain to inherit.
+          description: Chain to execute on. Required — a workflow carries no chain to inherit.
 
     ContractReadNodeConfig:
       type: object
-      required: [contractAddress]
+      required: [contractAddress, chainId]
       properties:
         contractAddress: { $ref: '#/components/schemas/EthereumAddress' }
         contractAbi:
@@ -633,7 +633,7 @@ components:
           items: { $ref: '#/components/schemas/MethodCall' }
         chainId:
           $ref: '#/components/schemas/ChainId'
-          description: Chain to read from. Required: a workflow carries no chain to inherit.
+          description: Chain to read from. Required — a workflow carries no chain to inherit.
 
     GraphQLQueryNodeConfig:
       type: object
