@@ -224,7 +224,6 @@ func NewWorkflowFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Workflo
 			StartAt:        body.StartAt,
 			MaxExecution:   body.MaxExecution,
 			InputVariables: body.InputVariables, // Contains enriched settings
-			ChainId:        body.ChainId,        // Propagate chain_id from request (0 = default chain)
 
 			// initial state for task
 			Status: avsproto.TaskStatus_Enabled,

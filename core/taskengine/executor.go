@@ -252,22 +252,12 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 
 	// Create VM with trigger reason data.
 	// In gateway mode, resolve the SmartWalletConfig for the task's target chain.
+	// A task carries no chain (G5); the VM's default config is the aggregator
+	// default. Each chain-aware node resolves its OWN chain via the
+	// chainConfigResolver wired into the VM, so this default is only a fallback.
 	swConfig := x.smartWalletConfig
 	if x.engine != nil {
-		if task.ChainId == 0 {
-			// Legacy task without chain_id. ResolveSmartWalletConfig(0) returns
-			// the gateway's default smart_wallet config, which in gateway mode
-			// is populated from chains[0] (mainnet by convention; see
-			// core/config/config.go:367). For any task whose actual chain isn't
-			// chains[0], paymaster + bundler + RPC will be wrong and on-chain
-			// nodes (ETHTransfer, ContractWrite) will fail with
-			// "no contract code at given address". Log loudly so affected
-			// workflows are discoverable and can be migrated.
-			x.logger.Warn("task missing chain_id; falling back to gateway default chain",
-				"task_id", task.Id,
-				"workflow_name", task.Name)
-		}
-		swConfig = x.engine.ResolveSmartWalletConfig(task.ChainId)
+		swConfig = x.engine.ResolveSmartWalletConfig(x.engine.defaultChainID())
 	}
 	vm, err := NewVMWithData(task, triggerReason, swConfig, secrets)
 	if err != nil {
@@ -460,7 +450,7 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 		smartWalletAddr := common.HexToAddress(task.SmartWalletAddress)
 
 		// Enhanced wallet validation that handles any legitimately derived wallet
-		isValid, err := x.validateWalletOwnership(ctx, task.ChainId, user, smartWalletAddr)
+		isValid, err := x.validateWalletOwnership(ctx, x.engine.defaultChainID(), user, smartWalletAddr)
 		if err != nil {
 			execution.EndAt = time.Now().UnixMilli()
 			execution.Error = fmt.Sprintf("failed to validate wallet ownership for owner %s: %v", owner.Hex(), err)
@@ -482,7 +472,7 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 
 		// Look up the wallet's salt from DB for auto-deployment of non-salt-0 wallets
 		if x.db != nil {
-			if wallet, walletErr := GetWallet(x.db, task.ChainId, owner, task.SmartWalletAddress); walletErr == nil && wallet != nil && wallet.Salt != nil {
+			if wallet, walletErr := GetWallet(x.db, x.engine.defaultChainID(), owner, task.SmartWalletAddress); walletErr == nil && wallet != nil && wallet.Salt != nil {
 				vm.AddVar("aa_salt", wallet.Salt)
 				if x.logger != nil {
 					x.logger.Info("Executor: AA salt resolved from wallet DB", "salt", wallet.Salt.String(), "wallet", task.SmartWalletAddress)
@@ -543,7 +533,7 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 
 		if creditLimitWei != nil {
 			taskOwner := common.HexToAddress(task.Owner)
-			withinLimit, outstanding, checkErr := x.feeLedger.CheckCreditLimit(task.ChainId, taskOwner, creditLimitWei)
+			withinLimit, outstanding, checkErr := x.feeLedger.CheckCreditLimit(x.engine.defaultChainID(), taskOwner, creditLimitWei)
 			if checkErr != nil {
 				x.logger.Warn("Fee ledger check failed, proceeding with execution", "error", checkErr)
 			} else if !withinLimit {
@@ -731,8 +721,8 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 
 	// batch update storage for task + execution log
 	updates := map[string][]byte{}
-	updates[string(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status))], err = task.ToJSON()
-	updates[string(ChainTaskUserKey(task.ChainId, task))] = []byte(fmt.Sprintf("%d", task.Status))
+	updates[string(ChainWorkflowStorageKey(x.engine.defaultChainID(), task.Id, task.Status))], err = task.ToJSON()
+	updates[string(ChainTaskUserKey(x.engine.defaultChainID(), task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 	// update execution log
 	var executionByte []byte
@@ -749,7 +739,7 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 		}
 		if mErr == nil {
 			executionByte = b
-			key := string(ChainTaskExecutionKey(task.ChainId, task, execution.Id))
+			key := string(ChainTaskExecutionKey(x.engine.defaultChainID(), task, execution.Id))
 			updates[key] = executionByte
 			if x.logger != nil {
 				x.logger.Info("Executor: persisting execution", "task_id", task.Id, "execution_id", execution.Id, "key", key)
@@ -766,7 +756,7 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 
 	// whenever a task change its status, we moved it, therefore we will need to clean up the old storage
 	if task.Status != initialTaskStatus {
-		if err = x.db.Delete(ChainWorkflowStorageKey(task.ChainId, task.Id, initialTaskStatus)); err != nil {
+		if err = x.db.Delete(ChainWorkflowStorageKey(x.engine.defaultChainID(), task.Id, initialTaskStatus)); err != nil {
 			x.logger.Errorf("error updating task status. %w", err, "task_id", task.Id)
 		}
 	}
@@ -1083,8 +1073,8 @@ func (x *WorkflowExecutor) persistFailedExecution(task *model.Workflow, executio
 
 	// Update task data
 	if taskJSON, err := task.ToJSON(); err == nil {
-		updates[string(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
-		updates[string(ChainTaskUserKey(task.ChainId, task))] = []byte(fmt.Sprintf("%d", task.Status))
+		updates[string(ChainWorkflowStorageKey(x.engine.defaultChainID(), task.Id, task.Status))] = taskJSON
+		updates[string(ChainTaskUserKey(x.engine.defaultChainID(), task))] = []byte(fmt.Sprintf("%d", task.Status))
 	} else {
 		x.logger.Error("Failed to serialize task for persistence", "task_id", task.Id, "error", err)
 	}
@@ -1092,7 +1082,7 @@ func (x *WorkflowExecutor) persistFailedExecution(task *model.Workflow, executio
 	// Update execution log
 	mo := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}
 	if executionByte, mErr := mo.Marshal(execution); mErr == nil {
-		key := string(ChainTaskExecutionKey(task.ChainId, task, execution.Id))
+		key := string(ChainTaskExecutionKey(x.engine.defaultChainID(), task, execution.Id))
 		updates[key] = executionByte
 		x.logger.Info("Executor: persisting failed execution", "task_id", task.Id, "execution_id", execution.Id, "key", key)
 	} else {
@@ -1106,7 +1096,7 @@ func (x *WorkflowExecutor) persistFailedExecution(task *model.Workflow, executio
 
 	// Clean up old task status if it changed
 	if task.Status != initialTaskStatus {
-		if err := x.db.Delete(ChainWorkflowStorageKey(task.ChainId, task.Id, initialTaskStatus)); err != nil {
+		if err := x.db.Delete(ChainWorkflowStorageKey(x.engine.defaultChainID(), task.Id, initialTaskStatus)); err != nil {
 			x.logger.Error("error cleaning up old task status", "task_id", task.Id, "error", err)
 		}
 	}
@@ -1134,13 +1124,12 @@ func (x *WorkflowExecutor) reportTaskAutoDisabled(task *model.Workflow, reason s
 		createdAt = time.UnixMilli(int64(parsed.Time())).UTC().Format(time.RFC3339)
 	}
 	factoryAddress := ""
-	if swCfg := x.resolveSmartWalletConfig(task.ChainId); swCfg != nil {
+	if swCfg := x.resolveSmartWalletConfig(x.engine.defaultChainID()); swCfg != nil {
 		factoryAddress = swCfg.FactoryAddress.Hex()
 	}
 
 	x.logger.Warn("task auto-disabled after consecutive validation failures",
 		"task_id", task.Id,
-		"chain_id", task.ChainId,
 		"owner", task.Owner,
 		"smart_wallet", task.SmartWalletAddress,
 		"factory_address", factoryAddress,
@@ -1150,7 +1139,6 @@ func (x *WorkflowExecutor) reportTaskAutoDisabled(task *model.Workflow, reason s
 	sentry.WithScope(func(scope *sentry.Scope) {
 		scope.SetTag("event", "task_auto_disabled")
 		scope.SetTag("task_id", task.Id)
-		scope.SetTag("chain_id", strconv.FormatInt(task.ChainId, 10))
 		scope.SetTag("owner", task.Owner)
 		scope.SetTag("smart_wallet", task.SmartWalletAddress)
 		if factoryAddress != "" {

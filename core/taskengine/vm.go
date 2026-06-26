@@ -366,15 +366,20 @@ func (v *VM) resolveSmartWalletForNode(nodeChainID int64) (*config.SmartWalletCo
 	return v.smartWalletConfig, nil
 }
 
-// taskChainID returns the chain id of the workflow this VM is executing,
-// or 0 if the task wasn't set (e.g. RunNodeImmediately) or the task
-// itself has no chain_id stored (legacy workflows created before
-// per-task chain_id was required).
+// taskChainID is a zero-returning shim. Tasks no longer carry a chain (G5);
+// per-node chains are authoritative, so there is no task chain to inherit.
+// Retained so the resolver's inherit branch compiles; it never fires now.
 func (v *VM) taskChainID() int64 {
-	if v.task == nil || v.task.Task == nil {
-		return 0
+	return 0
+}
+
+// vmDefaultChainID returns the VM's default-config chain, used for
+// chain-invariant lookups (e.g. wallet salt) now that tasks carry no chain.
+func (v *VM) vmDefaultChainID() int64 {
+	if v.smartWalletConfig != nil {
+		return v.smartWalletConfig.ChainID
 	}
-	return v.task.Task.ChainId
+	return 0
 }
 
 func (v *VM) GetTriggerNameAsVar() (string, error) {
@@ -1580,7 +1585,7 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		_, hasSalt := v.vars["aa_salt"]
 		v.mu.Unlock()
 		if !hasSalt && v.db != nil {
-			if wallet, err := GetWallet(v.db, v.task.Task.ChainId, v.TaskOwner, v.task.SmartWalletAddress); err == nil && wallet != nil && wallet.Salt != nil {
+			if wallet, err := GetWallet(v.db, v.vmDefaultChainID(), v.TaskOwner, v.task.SmartWalletAddress); err == nil && wallet != nil && wallet.Salt != nil {
 				v.AddVar("aa_salt", wallet.Salt)
 			}
 		}

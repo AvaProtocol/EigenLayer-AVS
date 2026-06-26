@@ -18,9 +18,8 @@ func seedInvalidEnabledTask(t *testing.T, db interface {
 }, chainID int64, id string) *model.Workflow {
 	t.Helper()
 	task := &model.Workflow{Task: &avsproto.Task{
-		Id:      id,
-		ChainId: chainID,
-		Status:  avsproto.TaskStatus_Enabled,
+		Id:     id,
+		Status: avsproto.TaskStatus_Enabled,
 		Trigger: &avsproto.TaskTrigger{
 			Name: "trigger1",
 			// Block trigger with a nil Config → fails ValidateWithError with
@@ -84,9 +83,8 @@ func TestDetectAndHandleInvalidTasks_LeavesValidTasksAlone(t *testing.T) {
 
 	const chainID = int64(11155111)
 	valid := &model.Workflow{Task: &avsproto.Task{
-		Id:      "valid-task-1",
-		ChainId: chainID,
-		Status:  avsproto.TaskStatus_Enabled,
+		Id:     "valid-task-1",
+		Status: avsproto.TaskStatus_Enabled,
 		Trigger: &avsproto.TaskTrigger{
 			Name: "trigger1",
 			TriggerType: &avsproto.TaskTrigger_Block{Block: &avsproto.BlockTrigger{

@@ -501,11 +501,7 @@ func (n *Engine) knownChainIDs() []int64 {
 // the aggregator default chain so writers never produce zero-prefixed
 // (and therefore never-readable) keys.
 func (n *Engine) chainScopedTaskKey(task *model.Workflow) []byte {
-	chainID := task.ChainId
-	if chainID == 0 {
-		chainID = n.defaultChainID()
-	}
-	return ChainWorkflowStorageKey(chainID, task.Id, task.Status)
+	return ChainWorkflowStorageKey(n.defaultChainID(), task.Id, task.Status)
 }
 
 // isChainConfigured reports whether the aggregator serves chainID, using the
@@ -845,7 +841,7 @@ func (n *Engine) collectOrphans() []orphanedTaskInfo {
 		}
 		// Coverage is judged on the trigger's monitoring chain (G2), which is
 		// where the operator actually subscribes — not the task chain.
-		monitorChainID := triggerMonitoringChainID(task.Trigger, task.ChainId)
+		monitorChainID := triggerMonitoringChainID(task.Trigger, 0)
 		if !chainHasOperator[monitorChainID] {
 			out = append(out, orphanedTaskInfo{
 				taskID:      taskID,
@@ -1738,20 +1734,9 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	// (non-gateway) deployments keep the legacy behavior — there's only one
 	// chain there, so the inference is unambiguous.
 	//
-	// Resolve chain_id BEFORE the wallet-ownership check below — that check
-	// reads `w:<chainID>:<owner>:<wallet>` and would miss the canonical row
-	// if it ran against task.ChainId == 0.
-	if task.ChainId == 0 {
-		if n.config != nil && n.config.IsGateway {
-			return nil, status.Errorf(codes.InvalidArgument,
-				"chain_id is required when running in gateway mode; the SDK / REST handler "+
-					"must populate it (e.g. from the JWT audience or an explicit request field) "+
-					"so the task is bound to the chain it should execute on")
-		}
-		if n.config != nil && n.config.SmartWallet != nil {
-			task.ChainId = n.config.SmartWallet.ChainID
-		}
-	}
+	// A task no longer carries a chain (G5). Chain-aware validation below uses
+	// the trigger's monitoring chain (coverage) and the aggregator default
+	// chain (wallet ownership — the runner address is chain-invariant).
 
 	// Reject tasks for chains no connected operator advertises. Block
 	// and event triggers need a live operator subscription on the
@@ -1764,7 +1749,7 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	if n.config != nil && n.config.IsGateway && task.Trigger != nil && chainNeedsOperatorMonitoring(task.Trigger.Type) {
 		// Coverage is judged on the trigger's monitoring chain (G2) — the chain
 		// the operator subscribes to — not the task chain.
-		monitorChainID := triggerMonitoringChainID(task.Trigger, task.ChainId)
+		monitorChainID := triggerMonitoringChainID(task.Trigger, 0)
 		n.lock.Lock()
 		covering := n.operatorsCoveringChain(monitorChainID)
 		n.lock.Unlock()
@@ -1783,7 +1768,7 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	// as task.SmartWalletAddress. We must verify the caller owns this wallet
 	// on the chain this task targets.
 	if task.SmartWalletAddress != "" {
-		valid, ownErr := ValidWalletOwner(n.db, task.ChainId, user, common.HexToAddress(task.SmartWalletAddress))
+		valid, ownErr := ValidWalletOwner(n.db, n.defaultChainID(), user, common.HexToAddress(task.SmartWalletAddress))
 		if ownErr != nil {
 			// Storage failure on the ownership check is NOT the same as
 			// "wallet not owned" — surfacing it as InvalidArgument would
@@ -1791,7 +1776,7 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 			n.logger.Error("Wallet ownership check failed (storage error)",
 				"owner", user.Address.Hex(),
 				"smart_wallet", task.SmartWalletAddress,
-				"chain_id", task.ChainId,
+				"chain_id", n.defaultChainID(),
 				"error", ownErr)
 			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE),
 				"failed to validate smart wallet ownership: %v", ownErr)
@@ -1818,8 +1803,8 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 		return nil, status.Errorf(codes.Internal, "Failed to serialize task: %v", err)
 	}
 
-	updates[string(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
-	updates[string(ChainTaskUserKey(task.ChainId, task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Enabled))
+	updates[string(ChainWorkflowStorageKey(n.defaultChainID(), task.Id, task.Status))] = taskJSON
+	updates[string(ChainTaskUserKey(n.defaultChainID(), task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Enabled))
 
 	if err = n.db.BatchWrite(updates); err != nil {
 		return nil, err
@@ -2253,7 +2238,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 				n.logger.Debug("⏭️ Skipping task - operator does not monitor this chain",
 					"task_id", task.Id,
 					"operator", address,
-					"task_chain_id", task.ChainId)
+					"trigger_chain_id", triggerMonitoringChainID(task.Trigger, 0))
 				continue
 			}
 
@@ -2300,7 +2285,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 						StartAt:   task.StartAt,
 						// Operators route by the trigger's monitoring chain (G2),
 						// not the task chain — watch X, act Y.
-						ChainId: triggerMonitoringChainID(task.Trigger, task.ChainId),
+						ChainId: triggerMonitoringChainID(task.Trigger, 0),
 					},
 				}
 
@@ -2597,7 +2582,7 @@ func (n *Engine) sendMonitorTaskTriggerToOperators(task *model.Workflow) {
 			StartAt:   task.StartAt,
 			// Operators route by the trigger's monitoring chain (G2), not the
 			// task chain — a workflow may watch chain X and act on chain Y.
-			ChainId: triggerMonitoringChainID(task.Trigger, task.ChainId),
+			ChainId: triggerMonitoringChainID(task.Trigger, 0),
 		},
 	}
 
@@ -3201,12 +3186,12 @@ func (n *Engine) instructOperatorImmediateTrigger(ctx context.Context, taskID st
 		return fmt.Errorf("failed to get task for immediate trigger: %w", err)
 	}
 
-	// The current-block read must target the task's chain. Required — there
-	// is no engine-default chain; a zero/unset chain_id is a hard error so
-	// the read never silently targets the wrong chain.
-	chainID := task.ChainId
+	// The current-block read must target the block trigger's own chain (G5) —
+	// a zero/unset chain is a hard error so the read never silently targets the
+	// wrong chain.
+	chainID := triggerMonitoringChainID(task.Trigger, 0)
 	if chainID == 0 {
-		return fmt.Errorf("task %s has no chain_id; cannot resolve chain for immediate block trigger", taskID)
+		return fmt.Errorf("task %s block trigger has no chain_id; cannot resolve chain for immediate block trigger", taskID)
 	}
 	reader := GetChainStateReaderForChain(uint64(chainID))
 	if reader == nil {
@@ -3257,7 +3242,7 @@ func (n *Engine) instructOperatorImmediateTrigger(ctx context.Context, taskID st
 					Trigger:   task.Trigger,
 					StartAt:   task.StartAt,
 					// Operators route by the trigger's monitoring chain (G2).
-					ChainId: triggerMonitoringChainID(task.Trigger, task.ChainId),
+					ChainId: triggerMonitoringChainID(task.Trigger, 0),
 				},
 			}
 
@@ -3334,17 +3319,9 @@ func (n *Engine) TriggerWorkflowWithContext(ctx context.Context, user *model.Use
 		return nil, status.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
-	// Allow caller to override the task's stored chain_id for this invocation.
-	// Useful for testing a task against a different chain without re-creating it.
-	if reqChainID := payload.GetChainId(); reqChainID != 0 && reqChainID != task.ChainId {
-		if n.logger != nil {
-			n.logger.Info("TriggerTask overriding task chain_id",
-				"task_id", task.Id,
-				"task_chain_id", task.ChainId,
-				"requested_chain_id", reqChainID)
-		}
-		task.ChainId = reqChainID
-	}
+	// A task no longer carries a chain (G5), so there is nothing to override —
+	// the payload's chain_id is ignored. Each chain-aware node runs on its own
+	// configured chain.
 
 	// Important business logic validation: Check if task is runnable
 	if !task.IsRunable() {
@@ -3447,7 +3424,7 @@ func (n *Engine) TriggerWorkflowWithContext(ctx context.Context, user *model.Use
 	}
 
 	if payload.IsBlocking {
-		executor := NewExecutor(n.ResolveSmartWalletConfig(task.ChainId), n.db, n.logger, n, n.priceService)
+		executor := NewExecutor(n.ResolveSmartWalletConfig(n.defaultChainID()), n.db, n.logger, n, n.priceService)
 		execution, runErr := executor.RunTaskWithContext(ctx, task, &queueTaskData)
 		if runErr != nil {
 			n.logger.Error("failed to run blocking task", runErr)
@@ -3479,7 +3456,7 @@ func (n *Engine) TriggerWorkflowWithContext(ctx context.Context, user *model.Use
 			sanitizeExecutionForPersistence(execution)
 			mo := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}
 			if b, mErr := mo.Marshal(execution); mErr == nil {
-				key := ChainTaskExecutionKey(task.ChainId, task, execution.Id)
+				key := ChainTaskExecutionKey(n.defaultChainID(), task, execution.Id)
 				if setErr := n.db.Set(key, b); setErr != nil {
 					n.logger.Error("TriggerTask: failed to persist execution synchronously", "task_id", task.Id, "execution_id", execution.Id, "error", setErr)
 				} else if n.logger != nil {
@@ -3581,7 +3558,6 @@ func (n *Engine) SimulateWorkflowWithContext(ctx context.Context, user *model.Us
 			Nodes:              nodes,
 			Edges:              edges,
 			Status:             avsproto.TaskStatus_Enabled, // Set as enabled for simulation
-			ChainId:            chainID,                     // Workflow-level chain override; 0 = aggregator default
 		},
 	}
 
@@ -3690,9 +3666,16 @@ func (n *Engine) SimulateWorkflowWithContext(ctx context.Context, user *model.Us
 		secrets = make(map[string]string)
 	}
 
-	// Step 5: Create VM with simulated trigger data (similar to RunTask)
+	// Step 5: Create VM with simulated trigger data (similar to RunTask).
+	// The simulation's default config chain comes from the optional chainID
+	// arg (falling back to the aggregator default); per-node chains still win
+	// via the chainConfigResolver wired below.
+	simChainID := chainID
+	if simChainID == 0 {
+		simChainID = n.defaultChainID()
+	}
 	triggerReason := GetTriggerReasonOrDefault(queueData, task.Id, n.logger)
-	vm, err := NewVMWithData(task, triggerReason, n.ResolveSmartWalletConfig(task.ChainId), secrets)
+	vm, err := NewVMWithData(task, triggerReason, n.ResolveSmartWalletConfig(simChainID), secrets)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VM for simulation: %w", err)
 	}
@@ -4333,7 +4316,7 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 	}
 
 	// First try to get completed execution from storage
-	rawExecution, err := n.db.GetKey(ChainTaskExecutionKey(task.ChainId, task, payload.ExecutionId))
+	rawExecution, err := n.db.GetKey(ChainTaskExecutionKey(n.defaultChainID(), task, payload.ExecutionId))
 	if err == nil {
 		exec := &avsproto.Execution{}
 		// DiscardUnknown: tolerate proto fields renamed/removed since
@@ -4399,7 +4382,7 @@ func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.Executio
 	}
 
 	// First check if execution is completed and stored
-	rawExecution, err := n.db.GetKey(ChainTaskExecutionKey(task.ChainId, task, payload.ExecutionId))
+	rawExecution, err := n.db.GetKey(ChainTaskExecutionKey(n.defaultChainID(), task, payload.ExecutionId))
 	if err == nil {
 		exec := &avsproto.Execution{}
 		// DiscardUnknown: tolerate proto fields renamed/removed since
@@ -4505,7 +4488,7 @@ func (n *Engine) DeleteWorkflowByUser(user *model.User, taskID string) (*avsprot
 	deletedAt := time.Now().UnixMilli()
 
 	n.logger.Info("🗑️ Deleting task storage", "task_id", taskID)
-	if err := n.db.Delete(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status)); err != nil {
+	if err := n.db.Delete(ChainWorkflowStorageKey(n.defaultChainID(), task.Id, task.Status)); err != nil {
 		n.logger.Error("failed to delete task storage", "error", err, "task_id", task.Id)
 		return &avsproto.DeleteTaskResp{
 			Success: false,
@@ -4516,7 +4499,7 @@ func (n *Engine) DeleteWorkflowByUser(user *model.User, taskID string) (*avsprot
 	}
 
 	n.logger.Info("🗑️ Deleting task user key", "task_id", taskID)
-	if err := n.db.Delete(ChainTaskUserKey(task.ChainId, task)); err != nil {
+	if err := n.db.Delete(ChainTaskUserKey(n.defaultChainID(), task)); err != nil {
 		n.logger.Error("failed to delete task user key", "error", err, "task_id", task.Id)
 		return &avsproto.DeleteTaskResp{
 			Success: false,
@@ -4626,8 +4609,8 @@ func (n *Engine) SetWorkflowEnabledByUser(user *model.User, taskID string, enabl
 			PreviousStatus: getTaskStatusString(oldStatus),
 		}, nil
 	}
-	updates[string(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
-	updates[string(ChainTaskUserKey(task.ChainId, task))] = []byte(fmt.Sprintf("%d", task.Status))
+	updates[string(ChainWorkflowStorageKey(n.defaultChainID(), task.Id, task.Status))] = taskJSON
+	updates[string(ChainTaskUserKey(n.defaultChainID(), task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 	if err = n.db.BatchWrite(updates); err != nil {
 		return &avsproto.SetTaskEnabledResp{
@@ -4641,7 +4624,7 @@ func (n *Engine) SetWorkflowEnabledByUser(user *model.User, taskID string, enabl
 
 	// Delete old record if different status
 	if oldStatus != task.Status {
-		if delErr := n.db.Delete(ChainWorkflowStorageKey(task.ChainId, task.Id, oldStatus)); delErr != nil {
+		if delErr := n.db.Delete(ChainWorkflowStorageKey(n.defaultChainID(), task.Id, oldStatus)); delErr != nil {
 			n.logger.Error("failed to delete old task status entry", "error", delErr, "task_id", task.Id, "old_status", oldStatus)
 		}
 	}
@@ -4704,13 +4687,13 @@ func (n *Engine) DisableWorkflow(taskID string) (bool, error) {
 		return false, fmt.Errorf("failed to serialize task during disabling: %w", err)
 	}
 
-	updates[string(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
-	updates[string(ChainTaskUserKey(task.ChainId, task))] = []byte(fmt.Sprintf("%d", task.Status))
+	updates[string(ChainWorkflowStorageKey(n.defaultChainID(), task.Id, task.Status))] = taskJSON
+	updates[string(ChainTaskUserKey(n.defaultChainID(), task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 	if err = n.db.BatchWrite(updates); err == nil {
 		// Delete the old record
 		if oldStatus != task.Status {
-			if delErr := n.db.Delete(ChainWorkflowStorageKey(task.ChainId, task.Id, oldStatus)); delErr != nil {
+			if delErr := n.db.Delete(ChainWorkflowStorageKey(n.defaultChainID(), task.Id, oldStatus)); delErr != nil {
 				n.logger.Error("failed to delete old task status entry", "error", delErr, "task_id", task.Id, "old_status", oldStatus)
 			}
 		}
@@ -5100,11 +5083,15 @@ func (n *Engine) supportsTaskChain(operatorAddr string, task *model.Workflow) bo
 	if len(state.SupportedChainIDs) == 0 {
 		return true
 	}
-	if task.ChainId == 0 {
+	// Capability is judged on the trigger's monitoring chain (G2) — the chain
+	// the operator must subscribe to. A chain-agnostic trigger (cron/manual)
+	// yields 0 and is covered by any operator.
+	monitorChainID := triggerMonitoringChainID(task.Trigger, 0)
+	if monitorChainID == 0 {
 		return true
 	}
 	for _, id := range state.SupportedChainIDs {
-		if id == task.ChainId {
+		if id == monitorChainID {
 			return true
 		}
 	}
@@ -6325,7 +6312,6 @@ func (n *Engine) DetectAndHandleInvalidTasks() error {
 				"task_id", taskID,
 				"owner", task.GetOwner(),
 				"smart_wallet", task.GetSmartWalletAddress(),
-				"chain_id", task.GetChainId(),
 				"created_at", createdAt,
 				"error", err.Error())
 
@@ -6344,14 +6330,14 @@ func (n *Engine) DetectAndHandleInvalidTasks() error {
 			}
 
 			// Prepare the task status update in storage
-			updates[string(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status))] = taskJSON
-			updates[string(ChainTaskUserKey(task.ChainId, task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Failed))
+			updates[string(ChainWorkflowStorageKey(n.defaultChainID(), task.Id, task.Status))] = taskJSON
+			updates[string(ChainTaskUserKey(n.defaultChainID(), task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Failed))
 
 			// Queue the old status-keyed row for deletion (skip when the
 			// status didn't actually change, to avoid deleting what we just
 			// wrote).
 			if oldStatus != task.Status {
-				staleStatusKeys = append(staleStatusKeys, ChainWorkflowStorageKey(task.ChainId, task.Id, oldStatus))
+				staleStatusKeys = append(staleStatusKeys, ChainWorkflowStorageKey(n.defaultChainID(), task.Id, oldStatus))
 			}
 
 			// Drop from the in-memory active set so it isn't treated as active

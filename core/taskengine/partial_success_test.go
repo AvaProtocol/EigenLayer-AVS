@@ -190,11 +190,10 @@ func TestGetExecutionStatus_StepFailures(t *testing.T) {
 	// Create a test task
 	task := &model.Workflow{
 		Task: &avsproto.Task{
-			Id:      "test-task-id",
-			ChainId: int64(1),
-			Owner:   user.Address.Hex(),
-			Status:  avsproto.TaskStatus_Enabled,
-			Name:    "Test Task",
+			Id:     "test-task-id",
+			Owner:  user.Address.Hex(),
+			Status: avsproto.TaskStatus_Enabled,
+			Name:   "Test Task",
 		},
 	}
 
@@ -233,7 +232,7 @@ func TestGetExecutionStatus_StepFailures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to serialize task: %v", err)
 	}
-	err = db.Set(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status), taskJSON)
+	err = db.Set(ChainWorkflowStorageKey(int64(1), task.Id, task.Status), taskJSON)
 	if err != nil {
 		t.Fatalf("Failed to store task: %v", err)
 	}
@@ -243,7 +242,7 @@ func TestGetExecutionStatus_StepFailures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to serialize execution: %v", err)
 	}
-	err = db.Set(ChainTaskExecutionKey(task.ChainId, task, execution.Id), executionJSON)
+	err = db.Set(ChainTaskExecutionKey(int64(1), task, execution.Id), executionJSON)
 	if err != nil {
 		t.Fatalf("Failed to store execution: %v", err)
 	}
@@ -279,11 +278,10 @@ func TestGetExecutionStatus_FullSuccess(t *testing.T) {
 	// Create a test task
 	task := &model.Workflow{
 		Task: &avsproto.Task{
-			Id:      "test-task-id",
-			ChainId: int64(1),
-			Owner:   user.Address.Hex(),
-			Status:  avsproto.TaskStatus_Enabled,
-			Name:    "Test Task",
+			Id:     "test-task-id",
+			Owner:  user.Address.Hex(),
+			Status: avsproto.TaskStatus_Enabled,
+			Name:   "Test Task",
 		},
 	}
 
@@ -316,7 +314,7 @@ func TestGetExecutionStatus_FullSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to serialize task: %v", err)
 	}
-	err = db.Set(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status), taskJSON)
+	err = db.Set(ChainWorkflowStorageKey(int64(1), task.Id, task.Status), taskJSON)
 	if err != nil {
 		t.Fatalf("Failed to store task: %v", err)
 	}
@@ -326,7 +324,7 @@ func TestGetExecutionStatus_FullSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to serialize execution: %v", err)
 	}
-	err = db.Set(ChainTaskExecutionKey(task.ChainId, task, execution.Id), executionJSON)
+	err = db.Set(ChainTaskExecutionKey(int64(1), task, execution.Id), executionJSON)
 	if err != nil {
 		t.Fatalf("Failed to store execution: %v", err)
 	}
@@ -362,11 +360,10 @@ func TestGetExecutionStatus_FullFailure(t *testing.T) {
 	// Create a test task
 	task := &model.Workflow{
 		Task: &avsproto.Task{
-			Id:      "test-task-id",
-			ChainId: int64(1),
-			Owner:   user.Address.Hex(),
-			Status:  avsproto.TaskStatus_Enabled,
-			Name:    "Test Task",
+			Id:     "test-task-id",
+			Owner:  user.Address.Hex(),
+			Status: avsproto.TaskStatus_Enabled,
+			Name:   "Test Task",
 		},
 	}
 
@@ -399,7 +396,7 @@ func TestGetExecutionStatus_FullFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to serialize task: %v", err)
 	}
-	err = db.Set(ChainWorkflowStorageKey(task.ChainId, task.Id, task.Status), taskJSON)
+	err = db.Set(ChainWorkflowStorageKey(int64(1), task.Id, task.Status), taskJSON)
 	if err != nil {
 		t.Fatalf("Failed to store task: %v", err)
 	}
@@ -409,7 +406,7 @@ func TestGetExecutionStatus_FullFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to serialize execution: %v", err)
 	}
-	err = db.Set(ChainTaskExecutionKey(task.ChainId, task, execution.Id), executionJSON)
+	err = db.Set(ChainTaskExecutionKey(int64(1), task, execution.Id), executionJSON)
 	if err != nil {
 		t.Fatalf("Failed to store execution: %v", err)
 	}

@@ -69,7 +69,7 @@ func TestTaskStatCountCompleted(t *testing.T) {
 		},
 	}
 
-	db.Set(ChainTaskUserKey(task1.ChainId, task1), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)))
+	db.Set(ChainTaskUserKey(int64(1), task1), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)))
 
 	statSvc := NewStatService(db)
 	result, _ := statSvc.GetTaskCount(user1.ToSmartWallet())
@@ -122,10 +122,10 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 		},
 	}
 
-	db.Set(ChainTaskUserKey(task1.ChainId, task1), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)))
-	db.Set(ChainTaskUserKey(task2.ChainId, task2), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Failed)))
-	db.Set(ChainTaskUserKey(task3.ChainId, task3), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Disabled)))
-	db.Set(ChainTaskUserKey(task4.ChainId, task4), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Enabled)))
+	db.Set(ChainTaskUserKey(int64(1), task1), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Completed)))
+	db.Set(ChainTaskUserKey(int64(1), task2), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Failed)))
+	db.Set(ChainTaskUserKey(int64(1), task3), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Disabled)))
+	db.Set(ChainTaskUserKey(int64(1), task4), []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Enabled)))
 
 	statSvc := NewStatService(db)
 	result, _ := statSvc.GetTaskCount(user1.ToSmartWallet())
