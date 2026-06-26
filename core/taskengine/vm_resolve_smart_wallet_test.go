@@ -70,6 +70,7 @@ func TestResolveSmartWalletForNode_TaskChainIDFallback(t *testing.T) {
 		taskChainID int64
 		vmDefault   *config.SmartWalletConfig
 		want        *config.SmartWalletConfig
+		wantErr     bool
 	}{
 		{
 			name:        "node chain_id takes precedence over task chain_id",
@@ -93,25 +94,38 @@ func TestResolveSmartWalletForNode_TaskChainIDFallback(t *testing.T) {
 			want:        mainnetCfg,
 		},
 		{
-			name:        "unknown node chain_id but known task chain_id resolves to task",
+			// An explicit, unresolvable node chain_id is a hard error — we do
+			// NOT silently retarget it onto the task chain (the G4 footgun).
+			name:        "explicit unknown node chain_id errors instead of falling back to task",
 			nodeChainID: 999999, // not registered
 			taskChainID: sepoliaChainID,
 			vmDefault:   mainnetCfg,
-			want:        sepoliaCfg,
+			wantErr:     true,
 		},
 		{
-			name:        "both unknown falls back to vm default",
+			name:        "explicit unknown node chain_id errors even with no task chain",
 			nodeChainID: 999998,
 			taskChainID: 0,
 			vmDefault:   mainnetCfg,
-			want:        mainnetCfg,
+			wantErr:     true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			vm := newVM(tt.taskChainID, tt.vmDefault)
-			got := vm.resolveSmartWalletForNode(tt.nodeChainID)
+			got, err := vm.resolveSmartWalletForNode(tt.nodeChainID)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("resolveSmartWalletForNode(%d) with task=%d: expected error, got chain %d (%s)",
+						tt.nodeChainID, tt.taskChainID, chainIDOrZero(got), rpcOrEmpty(got))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveSmartWalletForNode(%d) with task=%d: unexpected error: %v",
+					tt.nodeChainID, tt.taskChainID, err)
+			}
 			if got != tt.want {
 				t.Fatalf("resolveSmartWalletForNode(%d) with task=%d: got chain %d (%s), want chain %d (%s)",
 					tt.nodeChainID, tt.taskChainID,
@@ -132,11 +146,11 @@ func TestResolveSmartWalletForNode_NoResolver(t *testing.T) {
 	vm.smartWalletConfig = defaultCfg
 	vm.task = &model.Workflow{Task: &avsproto.Task{ChainId: 11_155_111}}
 
-	if got := vm.resolveSmartWalletForNode(8453); got != defaultCfg {
-		t.Fatalf("expected default config when chainConfigResolver is nil, got %v", got)
+	if got, err := vm.resolveSmartWalletForNode(8453); err != nil || got != defaultCfg {
+		t.Fatalf("expected default config when chainConfigResolver is nil, got %v (err %v)", got, err)
 	}
-	if got := vm.resolveSmartWalletForNode(0); got != defaultCfg {
-		t.Fatalf("expected default config when chainConfigResolver is nil (chain_id 0), got %v", got)
+	if got, err := vm.resolveSmartWalletForNode(0); err != nil || got != defaultCfg {
+		t.Fatalf("expected default config when chainConfigResolver is nil (chain_id 0), got %v (err %v)", got, err)
 	}
 }
 

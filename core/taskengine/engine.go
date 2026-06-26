@@ -508,6 +508,86 @@ func (n *Engine) chainScopedTaskKey(task *model.Workflow) []byte {
 	return ChainWorkflowStorageKey(chainID, task.Id, task.Status)
 }
 
+// isChainConfigured reports whether the aggregator serves chainID, using the
+// canonical set knownChainIDs() (default chain + chainConfigs). ResolveSmart-
+// WalletConfig is NOT a substitute — it falls back to the default config for
+// an unknown chain, so it can't tell "configured" from "unconfigured".
+func (n *Engine) isChainConfigured(chainID int64) bool {
+	for _, id := range n.knownChainIDs() {
+		if id == chainID {
+			return true
+		}
+	}
+	return false
+}
+
+// validateExplicitPartChains rejects a task whose chain-aware trigger or nodes
+// name an explicit chain_id (>0) the aggregator isn't configured for — the
+// create-time half of G4. Without it such a task saves and only fails later at
+// execution (resolveSmartWalletForNode errors on an unconfigured explicit
+// chain). Only enforced in gateway mode, where chainConfigs enumerates the
+// served chains; single-chain mode has one chain and nothing to validate
+// against. chain_id == 0 (inherit) is still permitted here — G5 tightens that.
+func (n *Engine) validateExplicitPartChains(task *model.Workflow) error {
+	if n.config == nil || !n.config.IsGateway || task == nil {
+		return nil
+	}
+	check := func(kind string, chainID int64) error {
+		if chainID == 0 || n.isChainConfigured(chainID) {
+			return nil
+		}
+		return status.Errorf(codes.InvalidArgument,
+			"%s targets chain_id=%d, which is not configured on this aggregator", kind, chainID)
+	}
+	if t := task.Trigger; t != nil {
+		if et := t.GetEvent(); et != nil && et.Config != nil {
+			if err := check("event trigger", et.Config.GetChainId()); err != nil {
+				return err
+			}
+		}
+		if bt := t.GetBlock(); bt != nil && bt.Config != nil {
+			if err := check("block trigger", bt.Config.GetChainId()); err != nil {
+				return err
+			}
+		}
+	}
+	for _, node := range task.Nodes {
+		if err := checkNodeChain(node, check); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkNodeChain runs check against a node's chain-aware config, looking inside
+// a Loop runner too (it wraps one chain-aware node inline).
+func checkNodeChain(node *avsproto.TaskNode, check func(string, int64) error) error {
+	if node == nil {
+		return nil
+	}
+	if cw := node.GetContractWrite(); cw != nil && cw.Config != nil {
+		return check("contract write node", cw.Config.GetChainId())
+	}
+	if cr := node.GetContractRead(); cr != nil && cr.Config != nil {
+		return check("contract read node", cr.Config.GetChainId())
+	}
+	if et := node.GetEthTransfer(); et != nil && et.Config != nil {
+		return check("eth transfer node", et.Config.GetChainId())
+	}
+	if loop := node.GetLoop(); loop != nil {
+		if cw := loop.GetContractWrite(); cw != nil && cw.Config != nil {
+			return check("loop contract write runner", cw.Config.GetChainId())
+		}
+		if cr := loop.GetContractRead(); cr != nil && cr.Config != nil {
+			return check("loop contract read runner", cr.Config.GetChainId())
+		}
+		if et := loop.GetEthTransfer(); et != nil && et.Config != nil {
+			return check("loop eth transfer runner", et.Config.GetChainId())
+		}
+	}
+	return nil
+}
+
 // findTaskKey searches every known chain bucket for a task by id at the
 // given status, returning the matching chain-scoped key. Used by lookup
 // paths that have only a task_id (no chain context). Returns the
@@ -1699,6 +1779,11 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	// Validate all node names for JavaScript compatibility
 	if err := validateAllNodeNamesForJavaScript(task); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "node name validation failed: %v", err)
+	}
+
+	// Reject chain-aware parts that name an explicit, unconfigured chain (G4).
+	if err := n.validateExplicitPartChains(task); err != nil {
+		return nil, err
 	}
 
 	updates := map[string][]byte{}
