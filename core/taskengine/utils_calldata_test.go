@@ -490,6 +490,7 @@ func TestContractRead_InvalidNumericValue_ResponseStructure(t *testing.T) {
 		TaskType: &avsproto.TaskNode_ContractRead{
 			ContractRead: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
+					ChainId:         11155111, // explicit chain (strict)
 					ContractAddress: "0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3",
 					ContractAbi:     contractAbi,
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
@@ -506,7 +507,8 @@ func TestContractRead_InvalidNumericValue_ResponseStructure(t *testing.T) {
 	}
 
 	req := &avsproto.RunNodeWithInputsReq{
-		Node: contractReadNode,
+		ChainId: 11155111, // explicit chain (strict)
+		Node:    contractReadNode,
 		InputVariables: map[string]*structpb.Value{
 			"settings": structpb.NewStructValue(&structpb.Struct{
 				Fields: map[string]*structpb.Value{
@@ -649,6 +651,7 @@ func TestContractWrite_InvalidNumericValue_ResponseStructure(t *testing.T) {
 		TaskType: &avsproto.TaskNode_ContractWrite{
 			ContractWrite: &avsproto.ContractWriteNode{
 				Config: &avsproto.ContractWriteNode_Config{
+					ChainId:         11155111, // explicit chain (strict)
 					ContractAddress: "0xA0b86a33E6441d0be3c7bb50e65Eb42d5E0b2b4b",
 					ContractAbi:     contractAbi,
 					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
@@ -667,7 +670,8 @@ func TestContractWrite_InvalidNumericValue_ResponseStructure(t *testing.T) {
 	}
 
 	req := &avsproto.RunNodeWithInputsReq{
-		Node: contractWriteNode,
+		ChainId: 11155111, // explicit chain (strict)
+		Node:    contractWriteNode,
 		InputVariables: map[string]*structpb.Value{
 			"settings": structpb.NewStructValue(&structpb.Struct{
 				Fields: map[string]*structpb.Value{

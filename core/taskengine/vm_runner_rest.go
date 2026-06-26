@@ -3,7 +3,6 @@ package taskengine
 import (
 	"encoding/json"
 	"fmt"
-	"html"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,44 +17,6 @@ import (
 const (
 	MockAPIEndpoint = "https://mock-api.ap-aggregator.local"
 )
-
-// SendGrid Dynamic Template ID for AI-generated workflow summaries
-const (
-	SendGridSummaryTemplateID = "d-3b4b885af0fc45ad822024ebc72f169c"
-)
-
-// Status HTML badge SVG icons for email notifications
-const (
-	statusIconSuccess = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#10B981"/><path d="M11 6L7 10L5 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
-	statusIconWarn    = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#F59E0B"/><circle cx="8" cy="5" r="1" fill="white"/><rect x="7.5" y="7" width="1" height="4" rx="0.5" fill="white"/></svg>`
-	statusIconFailed  = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#EF4444"/><path d="M10 6L6 10M6 6L10 10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`
-)
-
-// buildStatusHtml generates the status badge HTML for email notifications.
-// The Summary carries the context-memory-supplied status ("success" | "failed" | "error")
-// plus step counts — a success run with SkippedSteps>0 renders yellow ("warn") and
-// uses s.SkippedNote as the badge text so the skip is visible.
-func buildStatusHtml(s Summary) string {
-	var iconSvg, bgColor, textColor string
-	switch {
-	case s.Status == "success" && s.SkippedSteps > 0:
-		iconSvg = statusIconWarn
-		bgColor = "#FEF3C7"   // light yellow
-		textColor = "#92400E" // dark amber
-	case s.Status == "failed" || s.Status == "error":
-		iconSvg = statusIconFailed
-		bgColor = "#FEE2E2"   // light red
-		textColor = "#991B1B" // dark red
-	default: // "success" without skipped steps, or unknown
-		iconSvg = statusIconSuccess
-		bgColor = "#D1FAE5"   // light green
-		textColor = "#065F46" // dark green
-	}
-	return fmt.Sprintf(
-		`<div style="display:inline-block; padding:8px 16px; background-color:%s; color:%s; border-radius:8px; font-weight:500; margin:8px 0">%s%s</div>`,
-		bgColor, textColor, iconSvg, getStatusDisplayText(s),
-	)
-}
 
 // HTTPRequestExecutor interface for making HTTP requests
 type HTTPRequestExecutor interface {
@@ -682,10 +643,9 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		r.vm.logger.Debug("REST API body preprocessing", "contentType", contentType, "usedJSONPreprocessing", isJSONContent)
 	}
 
-	// Optionally compose summary and inject into provider payloads when enabled via nodeConfig.options.summarize
-	// Keep a reference to the composed summary so we can return it to clients even
-	// when the notification provider (Studio /api/notify) returns an empty body.
-	var summaryForClient *Summary
+	// Optionally forward raw execution data to Studio /api/notify (Path B), which summarizes
+	// AND sends and returns the summary (surfaced to the SDK after the POST). The gateway no
+	// longer summarizes or sends notifications itself — it is a pass-through to /api/notify.
 	isStudioNotify := false
 	if shouldSummarize(r.vm, node) {
 		provider := detectNotificationProvider(url)
@@ -693,11 +653,8 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 			r.vm.logger.Info("REST API summarize enabled", "provider", provider, "url", url)
 		}
 		if provider == "studio-notify" {
-			// Path B: forward raw execution data to Studio /api/notify, which summarizes AND
-			// sends and returns the summary (surfaced to the SDK after the POST). The gateway no
-			// longer summarizes or sends email itself.
 			isStudioNotify = true
-			if cm, ok := globalSummarizer.(*ContextMemorySummarizer); ok && cm != nil {
+			if cm := globalSummarizer; cm != nil {
 				if payload, err := cm.BuildNotifyPayload(r.vm, r.vm.GetNodeNameAsVar(stepID)); err == nil {
 					var bodyObj map[string]interface{}
 					if json.Unmarshal([]byte(body), &bodyObj) == nil {
@@ -708,6 +665,8 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 							}
 						}
 						body = FormatAsJSON(bodyObj)
+					} else if r.vm.logger != nil {
+						r.vm.logger.Warn("REST API notify: body is not JSON, skipping payload injection")
 					}
 				} else if r.vm.logger != nil {
 					r.vm.logger.Warn("REST API notify: failed to build raw payload", "error", err)
@@ -715,20 +674,10 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 			} else if r.vm.logger != nil {
 				r.vm.logger.Warn("REST API notify: no summarizer configured to build payload")
 			}
-		} else if provider == "telegram" {
-			// Legacy gateway-side Telegram send (moves to /api/notify in Phase 3).
-			currentName := r.vm.GetNodeNameAsVar(stepID)
-			s := ComposeSummarySmart(r.vm, currentName)
-			summaryForClient = &s
-			var bodyObj map[string]interface{}
-			if json.Unmarshal([]byte(body), &bodyObj) == nil {
-				telegramMsg := FormatForMessageChannels(s, "telegram", r.vm)
-				bodyObj["parse_mode"] = "HTML"
-				bodyObj["text"] = telegramMsg
-				body = FormatAsJSON(bodyObj)
-			} else if r.vm.logger != nil {
-				r.vm.logger.Warn("REST API summarize enabled but body is not JSON, skipping injection")
-			}
+		} else if provider == "telegram" && r.vm.logger != nil {
+			// Legacy direct-to-Telegram nodes no longer get gateway-side summary injection
+			// (Path B routes telegram through /api/notify). Warn so the no-op is debuggable.
+			r.vm.logger.Warn("REST API summarize on legacy direct-Telegram node — re-save the workflow in Studio to route through /api/notify")
 		}
 	}
 
@@ -810,7 +759,6 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	// Parse response body
 	var bodyData interface{}
 	bodyStr := string(response.Body())
-	statusSuccess := response.StatusCode() < 400
 	if bodyStr != "" {
 		var jsonData interface{}
 		if err := json.Unmarshal(response.Body(), &jsonData); err == nil {
@@ -834,34 +782,10 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 			bodyData = bodyStr
 		}
 	} else {
-		// If the provider didn't return a body (common for notification providers with 202 Accepted),
-		// surface the composed summary in the server response so clients have subject/body to display.
-		// For single-node notification calls, derive success from the HTTP response status.
-		if summaryForClient != nil {
-			// Build a summary for clients based on HTTP response status
-			var subj string
-			var bod string
-			if statusSuccess {
-				subj = summaryForClient.Subject
-				bod = summaryForClient.Body
-			} else {
-				subj = summaryForClient.Subject
-				if strings.TrimSpace(summaryForClient.Body) != "" {
-					bod = summaryForClient.Body
-				} else {
-					bod = fmt.Sprintf(
-						"Smart wallet executed 1 notification step, but the provider returned HTTP %d.\n\nThe email could not be sent.",
-						response.StatusCode(),
-					)
-				}
-			}
-			bodyData = map[string]interface{}{
-				"subject": subj,
-				"body":    bod,
-			}
-		} else {
-			bodyData = ""
-		}
+		// No body returned (common for notification providers with 202 Accepted). The
+		// studio-notify summary, when the provider returns one, is extracted from the
+		// response body above; otherwise there is nothing to surface.
+		bodyData = ""
 	}
 
 	// Create standard format response
@@ -936,37 +860,6 @@ func detectNotificationProvider(u string) string {
 		return "telegram"
 	}
 	return ""
-}
-
-// buildStyledHTMLEmail wraps a plain-text body into a simple, safe HTML layout
-// suitable for email clients. It escapes the input text and preserves paragraph
-// breaks by turning double newlines into <p> blocks and single newlines into <br/>.
-func buildStyledHTMLEmail(subject, body string) string {
-	// Escape HTML to avoid injection
-	safe := html.EscapeString(body)
-	// Normalize newlines
-	safe = strings.ReplaceAll(safe, "\r\n", "\n")
-	// Split by paragraphs (double newline)
-	parts := strings.Split(safe, "\n\n")
-	var paragraphs []string
-	for _, p := range parts {
-		if strings.TrimSpace(p) == "" {
-			continue
-		}
-		// Convert single newlines within a paragraph to <br/>
-		p = strings.ReplaceAll(p, "\n", "<br/>")
-		paragraphs = append(paragraphs, "<p style=\"margin:0 0 16px 0;\">"+p+"</p>")
-	}
-
-	content := strings.Join(paragraphs, "\n")
-	// Minimal, responsive-friendly light theme
-	return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
-		"<title>" + html.EscapeString(subject) + "</title>" +
-		"<style>body{background:#FFFFFF;color:#1F2937;margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;}" +
-		".container{max-width:640px;margin:0 auto;padding:32px 24px;}h1,h2,h3,h4,h5,h6{color:#111827;margin-top:24px;margin-bottom:12px;}a{color:#8B5CF6;text-decoration:none;}" +
-		"p{margin:0 0 16px 0;line-height:1.6;}.divider{border-top:1px solid #E5E7EB;margin:24px 0;}" +
-		"@media(max-width:480px){.container{padding:24px 16px;}h1,h2,h3{font-size:1.2rem;}}</style></head>" +
-		"<body><div class=\"container\">" + content + "</div></body></html>"
 }
 
 // escapeJSONString properly escapes a string for use within JSON
@@ -1078,56 +971,4 @@ func (r *RestProcessor) preprocessJSONWithVariableMapping(text string) string {
 		result = result[:start] + escapedReplacement + result[end+2:]
 	}
 	return result
-}
-
-// shortHex formats a hex string as 0xABCD…WXYZ for compact display. If too short, returns as-is.
-func shortHex(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return s
-	}
-	if strings.HasPrefix(s, "0x") {
-		if len(s) > 10 { // 0x + 4 prefix + … + 4 suffix
-			return s[:6] + "…" + s[len(s)-4:]
-		}
-		return s
-	}
-	if len(s) > 8 {
-		return s[:4] + "…" + s[len(s)-4:]
-	}
-	return s
-}
-
-// extractPreheaderFromSummaryText finds the first meaningful line after the
-// "Workflow Summary" heading and truncates it for email preheader usage.
-func extractPreheaderFromSummaryText(text, fallback string) string {
-	t := strings.TrimSpace(text)
-	if t == "" {
-		return fallback
-	}
-	lines := strings.Split(t, "\n")
-	for _, ln := range lines {
-		s := strings.TrimSpace(ln)
-		if s == "" {
-			continue
-		}
-		if strings.EqualFold(s, "Summary") {
-			continue
-		}
-		// Truncate to ~180 chars to fit preheader best practices
-		if len(s) > 180 {
-			return s[:177] + "..."
-		}
-		return s
-	}
-	return fallback
-}
-
-// getMapKeys returns keys from a map[string]struct{} for logging
-func getMapKeys(m map[string]struct{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }

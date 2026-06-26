@@ -28,6 +28,39 @@ const erc20OverridesConfigKey = "__erc20Overrides"
 
 // getRealisticBlockNumberForChain returns a realistic block number for simulation based on chain ID
 // Only includes chains that the aggregator actually supports: Ethereum and Base
+
+// stampNodeChainIfUnset sets chainID on a chain-aware node's config when the
+// node didn't specify one. Used by RunNodeImmediately, where the chain is
+// supplied via the request rather than baked into the node (G5: the strict
+// resolver only reads node.Config.chain_id).
+func stampNodeChainIfUnset(node *avsproto.TaskNode, chainID int64) {
+	if node == nil || chainID == 0 {
+		return
+	}
+	if cw := node.GetContractWrite(); cw != nil && cw.Config != nil && cw.Config.ChainId == 0 {
+		cw.Config.ChainId = chainID
+	}
+	if cr := node.GetContractRead(); cr != nil && cr.Config != nil && cr.Config.ChainId == 0 {
+		cr.Config.ChainId = chainID
+	}
+	if et := node.GetEthTransfer(); et != nil && et.Config != nil && et.Config.ChainId == 0 {
+		et.Config.ChainId = chainID
+	}
+	// Loop node's inner runner is itself chain-aware — stamp it too, so a directly
+	// constructed (test/SDK) Loop whose runner has chain_id=0 still resolves.
+	if loop := node.GetLoop(); loop != nil {
+		if cw := loop.GetContractWrite(); cw != nil && cw.Config != nil && cw.Config.ChainId == 0 {
+			cw.Config.ChainId = chainID
+		}
+		if cr := loop.GetContractRead(); cr != nil && cr.Config != nil && cr.Config.ChainId == 0 {
+			cr.Config.ChainId = chainID
+		}
+		if et := loop.GetEthTransfer(); et != nil && et.Config != nil && et.Config.ChainId == 0 {
+			et.Config.ChainId = chainID
+		}
+	}
+}
+
 func getRealisticBlockNumberForChain(chainID int64) uint64 {
 	switch chainID {
 	case 1: // Ethereum mainnet
@@ -194,7 +227,13 @@ func (n *Engine) runBlockTriggerImmediately(ctx context.Context, triggerConfig m
 func requireChainIDFromConfig(config map[string]interface{}) (int64, error) {
 	raw, ok := config["chain_id"]
 	if !ok {
-		return 0, fmt.Errorf("chain_id not specified in trigger config")
+		// Node config maps (ExtractNodeConfiguration) carry the camelCase
+		// `chainId`; trigger config maps carry snake_case `chain_id`. Accept
+		// either so per-node chains resolve on the isolated-run output path.
+		raw, ok = config["chainId"]
+	}
+	if !ok {
+		return 0, fmt.Errorf("chain_id not specified in trigger/node config")
 	}
 	var chainID int64
 	switch v := raw.(type) {
@@ -1463,11 +1502,13 @@ func (n *Engine) executeMethodCallForSimulation(ctx context.Context, methodCall 
 	// Get method params as strings (ContractReadNode expects []string)
 	methodParams := methodCall.GetMethodParams()
 
-	// Create a temporary contractRead node for execution (same as direct calls)
+	// Create a temporary contractRead node for execution (same as direct calls).
+	// chain_id is required (G5 strict) — carry the caller's chain onto the node.
 	contractReadNode := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: contractAddressStr,
 			ContractAbi:     abiValues,
+			ChainId:         chainID,
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					MethodName:   methodCall.GetMethodName(),
@@ -2987,6 +3028,11 @@ func (n *Engine) RunNodeImmediatelyRPCWithContext(ctx context.Context, user *mod
 			settings["chain_id"] = reqChainID
 			inputVariables["settings"] = settings
 		}
+		// A chain-aware node must carry an explicit chain (G5). For an isolated
+		// node run the request supplies the chain, so stamp it onto the node's
+		// own config when the node didn't specify one — the strict resolver
+		// (resolveSmartWalletForNode) only reads node.Config.chain_id.
+		stampNodeChainIfUnset(node, reqChainID)
 	}
 
 	// Get node type string from the node's Type field

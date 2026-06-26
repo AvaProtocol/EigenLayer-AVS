@@ -116,9 +116,8 @@ func openAPIBlockToProto(in generated.BlockTrigger) *avsproto.BlockTrigger {
 	out := &avsproto.BlockTrigger{Config: &avsproto.BlockTrigger_Config{}}
 	if in.Config != nil {
 		out.Config.Interval = in.Config.Interval
-		if in.Config.ChainId != nil {
-			out.Config.ChainId = *in.Config.ChainId
-		}
+		// chainId is required on the BlockTrigger config (G5) — a plain value.
+		out.Config.ChainId = int64(in.Config.ChainId)
 	}
 	return out
 }
@@ -127,9 +126,9 @@ func protoBlockToOpenAPI(in *avsproto.BlockTrigger) generated.BlockTrigger {
 	t := generated.BlockTriggerTypeBlock
 	out := generated.BlockTrigger{Type: &t}
 	if cfg := in.GetConfig(); cfg != nil {
-		c := generated.BlockTriggerConfig{Interval: cfg.GetInterval()}
-		if cid := cfg.GetChainId(); cid != 0 {
-			c.ChainId = &cid
+		c := generated.BlockTriggerConfig{
+			Interval: cfg.GetInterval(),
+			ChainId:  generated.ChainId(cfg.GetChainId()),
 		}
 		out.Config = &c
 	}
@@ -191,6 +190,12 @@ func openAPIEventToProto(in generated.EventTrigger) *avsproto.EventTrigger {
 	out := &avsproto.EventTrigger{Config: &avsproto.EventTrigger_Config{}}
 	if in.Config != nil {
 		out.Config.Queries = openAPIEventQueriesToProto(in.Config.Queries)
+		// chainId is required on the EventTrigger config (G5) — a plain value.
+		out.Config.ChainId = int64(in.Config.ChainId)
+		if in.Config.CooldownSeconds != nil {
+			cs := uint32(*in.Config.CooldownSeconds)
+			out.Config.CooldownSeconds = &cs
+		}
 	}
 	return out
 }
@@ -199,7 +204,15 @@ func protoEventToOpenAPI(in *avsproto.EventTrigger) generated.EventTrigger {
 	t := generated.Event
 	out := generated.EventTrigger{Type: &t}
 	if cfg := in.GetConfig(); cfg != nil {
-		out.Config = &generated.EventTriggerConfig{Queries: protoEventQueriesToOpenAPI(cfg.GetQueries())}
+		c := generated.EventTriggerConfig{
+			Queries: protoEventQueriesToOpenAPI(cfg.GetQueries()),
+			ChainId: generated.ChainId(cfg.GetChainId()),
+		}
+		if cfg.CooldownSeconds != nil {
+			cs := int32(cfg.GetCooldownSeconds())
+			c.CooldownSeconds = &cs
+		}
+		out.Config = &c
 	}
 	return out
 }

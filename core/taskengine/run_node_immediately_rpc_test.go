@@ -113,6 +113,7 @@ func TestRunNodeImmediatelyRPC(t *testing.T) {
 			TaskType: &avsproto.TaskNode_ContractWrite{
 				ContractWrite: &avsproto.ContractWriteNode{
 					Config: &avsproto.ContractWriteNode_Config{
+						ChainId:         11155111, // explicit chain (G5 strict)
 						ContractAddress: "0xA0b86a33E6441d0be3c7bb50e65Eb42d5E0b2b4b",
 						ContractAbi:     contractAbi,
 						MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
@@ -315,6 +316,7 @@ func TestRunNodeImmediatelyRPC(t *testing.T) {
 			TaskType: &avsproto.TaskNode_EthTransfer{
 				EthTransfer: &avsproto.ETHTransferNode{
 					Config: &avsproto.ETHTransferNode_Config{
+						ChainId:     11155111, // explicit chain (G5 strict)
 						Destination: destinationAddr,
 						Amount:      amount,
 					},
@@ -591,6 +593,7 @@ func exactInputSingleSwapNode(t *testing.T, runner string) *avsproto.TaskNode {
 		TaskType: &avsproto.TaskNode_ContractWrite{
 			ContractWrite: &avsproto.ContractWriteNode{
 				Config: &avsproto.ContractWriteNode_Config{
+					ChainId:         11155111, // explicit chain (G5 strict)
 					ContractAddress: overridesSwapRouter02,
 					ContractAbi:     []*structpb.Value{abi},
 					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{

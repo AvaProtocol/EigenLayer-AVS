@@ -160,6 +160,7 @@ func TestExecuteTask_UniswapApprovalAndSwap_DifferentApprovalAmounts_Sepolia(t *
 					TaskType: &avsproto.TaskNode_ContractWrite{
 						ContractWrite: &avsproto.ContractWriteNode{
 							Config: &avsproto.ContractWriteNode_Config{
+								ChainId:         11155111,                                 // explicit chain (strict)
 								ContractAddress: "{{settings.uniswap_v3_pool.token1.id}}", // USDC
 								ContractAbi: func() []*structpb.Value {
 									abi, _ := structpb.NewValue(map[string]interface{}{
@@ -195,6 +196,7 @@ func TestExecuteTask_UniswapApprovalAndSwap_DifferentApprovalAmounts_Sepolia(t *
 					TaskType: &avsproto.TaskNode_ContractWrite{
 						ContractWrite: &avsproto.ContractWriteNode{
 							Config: &avsproto.ContractWriteNode_Config{
+								ChainId:         11155111, // explicit chain (strict)
 								ContractAddress: "{{settings.uniswap_v3_contracts.quoterV2}}",
 								ContractAbi: func() []*structpb.Value {
 									abi, _ := structpb.NewValue(map[string]interface{}{
@@ -243,6 +245,7 @@ func TestExecuteTask_UniswapApprovalAndSwap_DifferentApprovalAmounts_Sepolia(t *
 					TaskType: &avsproto.TaskNode_ContractWrite{
 						ContractWrite: &avsproto.ContractWriteNode{
 							Config: &avsproto.ContractWriteNode_Config{
+								ChainId:         11155111, // explicit chain (strict)
 								ContractAddress: "{{settings.uniswap_v3_contracts.swapRouter02}}",
 								ContractAbi: func() []*structpb.Value {
 									abi, _ := structpb.NewValue(map[string]interface{}{

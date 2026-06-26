@@ -296,10 +296,10 @@ type BlockTriggerType string
 
 // BlockTriggerConfig Fires every N blocks on the target chain.
 type BlockTriggerConfig struct {
-	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-	// chain" — typically only useful in single-chain deployments or for
-	// chain-agnostic operations.
-	ChainId *ChainId `json:"chainId,omitempty"`
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId `json:"chainId"`
 
 	// Interval Fire every N blocks.
 	Interval int64 `json:"interval"`
@@ -330,9 +330,9 @@ type BranchNodeConfig struct {
 	Conditions []BranchCondition `json:"conditions"`
 }
 
-// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-// chain" — typically only useful in single-chain deployments or for
-// chain-agnostic operations.
+// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+// chain-aware trigger/node configs this is required and must be a
+// configured chain; on query/filter params it is optional.
 type ChainId = int64
 
 // ContractReadNode defines model for ContractReadNode.
@@ -346,10 +346,10 @@ type ContractReadNodeType string
 
 // ContractReadNodeConfig defines model for ContractReadNodeConfig.
 type ContractReadNodeConfig struct {
-	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-	// chain" — typically only useful in single-chain deployments or for
-	// chain-agnostic operations.
-	ChainId     *ChainId                  `json:"chainId,omitempty"`
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId     ChainId                   `json:"chainId"`
 	ContractAbi *[]map[string]interface{} `json:"contractAbi,omitempty"`
 
 	// ContractAddress Lowercase or checksummed hex EOA / contract address.
@@ -371,10 +371,10 @@ type ContractWriteNodeConfig struct {
 	// CallData Arbitrary-length hex-encoded byte string.
 	CallData *Hex `json:"callData,omitempty"`
 
-	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-	// chain" — typically only useful in single-chain deployments or for
-	// chain-agnostic operations.
-	ChainId     *ChainId                  `json:"chainId,omitempty"`
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId     ChainId                   `json:"chainId"`
 	ContractAbi *[]map[string]interface{} `json:"contractAbi,omitempty"`
 
 	// ContractAddress Lowercase or checksummed hex EOA / contract address.
@@ -393,9 +393,9 @@ type ContractWriteNodeConfig struct {
 
 // CreateWalletRequest defines model for CreateWalletRequest.
 type CreateWalletRequest struct {
-	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-	// chain" — typically only useful in single-chain deployments or for
-	// chain-agnostic operations.
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
 	ChainId *ChainId `json:"chainId,omitempty"`
 
 	// FactoryAddress Lowercase or checksummed hex EOA / contract address.
@@ -407,12 +407,8 @@ type CreateWalletRequest struct {
 
 // CreateWorkflowRequest defines model for CreateWorkflowRequest.
 type CreateWorkflowRequest struct {
-	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-	// chain" — typically only useful in single-chain deployments or for
-	// chain-agnostic operations.
-	ChainId   *ChainId `json:"chainId,omitempty"`
-	Edges     *[]Edge  `json:"edges,omitempty"`
-	ExpiredAt *int64   `json:"expiredAt,omitempty"`
+	Edges     *[]Edge `json:"edges,omitempty"`
+	ExpiredAt *int64  `json:"expiredAt,omitempty"`
 
 	// InputVariables Free-form key-value bag of values used to resolve `{{variable.path}}`
 	// template references inside trigger and node configs. Conventional
@@ -504,10 +500,10 @@ type ETHTransferNodeConfig struct {
 	// Amount Amount in wei (decimal string for big-int safety). Special value `max` withdraws the entire balance.
 	Amount string `json:"amount"`
 
-	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-	// chain" — typically only useful in single-chain deployments or for
-	// chain-agnostic operations.
-	ChainId *ChainId `json:"chainId,omitempty"`
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId `json:"chainId"`
 
 	// Destination Lowercase or checksummed hex EOA / contract address.
 	Destination EthereumAddress `json:"destination"`
@@ -526,9 +522,9 @@ type Edge struct {
 
 // EstimateFeesRequest defines model for EstimateFeesRequest.
 type EstimateFeesRequest struct {
-	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-	// chain" — typically only useful in single-chain deployments or for
-	// chain-agnostic operations.
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
 	ChainId   *ChainId `json:"chainId,omitempty"`
 	CreatedAt int64    `json:"createdAt"`
 	Edges     *[]Edge  `json:"edges,omitempty"`
@@ -550,9 +546,9 @@ type EstimateFeesRequest struct {
 
 // EstimateFeesResponse defines model for EstimateFeesResponse.
 type EstimateFeesResponse struct {
-	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-	// chain" — typically only useful in single-chain deployments or for
-	// chain-agnostic operations.
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
 	ChainId ChainId `json:"chainId"`
 
 	// Cogs Per-node operational costs (gas, external API).
@@ -608,10 +604,10 @@ type EventTriggerType string
 
 // EventTriggerConfig Fires when matching on-chain events are observed.
 type EventTriggerConfig struct {
-	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-	// chain" — typically only useful in single-chain deployments or for
-	// chain-agnostic operations.
-	ChainId *ChainId `json:"chainId,omitempty"`
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId `json:"chainId"`
 
 	// CooldownSeconds Seconds to wait after a fire before allowing the same task to
 	// trigger again. Default 300. 0 disables cooldown.
@@ -644,9 +640,9 @@ type EventTriggerQuery struct {
 
 // Execution defines model for Execution.
 type Execution struct {
-	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-	// chain" — typically only useful in single-chain deployments or for
-	// chain-agnostic operations.
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
 	ChainId *ChainId `json:"chainId,omitempty"`
 
 	// Cogs Per-node actual costs (gas, external API).
@@ -831,9 +827,9 @@ type GraphQLQueryNodeConfig struct {
 
 // HealthStatus defines model for HealthStatus.
 type HealthStatus struct {
-	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-	// chain" — typically only useful in single-chain deployments or for
-	// chain-agnostic operations.
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
 	ChainId *ChainId           `json:"chainId,omitempty"`
 	Status  HealthStatusStatus `json:"status"`
 
@@ -1086,9 +1082,9 @@ type RestAPINodeConfig_Options struct {
 
 // RunNodeRequest defines model for RunNodeRequest.
 type RunNodeRequest struct {
-	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-	// chain" — typically only useful in single-chain deployments or for
-	// chain-agnostic operations.
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
 	ChainId *ChainId `json:"chainId,omitempty"`
 
 	// Erc20Overrides Optional ERC20 balance/allowance state overrides applied only during this isolated node simulation. Lets callers seed token balances and approvals so contract-write simulations (e.g. Uniswap swaps) don't revert with "transfer amount exceeds allowance/balance" before the approval/funding transactions have been run. Simulation-only: a real-execution request (isSimulated=false) that sets these is rejected with an error, never silently ignored.
@@ -1164,9 +1160,9 @@ type SecretList struct {
 
 // SimulateWorkflowRequest defines model for SimulateWorkflowRequest.
 type SimulateWorkflowRequest struct {
-	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-	// chain" — typically only useful in single-chain deployments or for
-	// chain-agnostic operations.
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
 	ChainId *ChainId `json:"chainId,omitempty"`
 	Edges   *[]Edge  `json:"edges,omitempty"`
 
@@ -1188,9 +1184,9 @@ type TokenMetadataResponse struct {
 	// Address Lowercase or checksummed hex EOA / contract address.
 	Address *EthereumAddress `json:"address,omitempty"`
 
-	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-	// chain" — typically only useful in single-chain deployments or for
-	// chain-agnostic operations.
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
 	ChainId  *ChainId                     `json:"chainId,omitempty"`
 	Decimals *int32                       `json:"decimals,omitempty"`
 	Found    bool                         `json:"found"`
@@ -1307,9 +1303,9 @@ type WithdrawRequest struct {
 	// Amount Amount in wei (decimal string) or `max` for the full balance.
 	Amount string `json:"amount"`
 
-	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-	// chain" — typically only useful in single-chain deployments or for
-	// chain-agnostic operations.
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
 	ChainId *ChainId `json:"chainId,omitempty"`
 
 	// RecipientAddress Lowercase or checksummed hex EOA / contract address.
@@ -1345,11 +1341,6 @@ type WithdrawResponseStatus string
 
 // Workflow defines model for Workflow.
 type Workflow struct {
-	// ChainId Numeric chain ID. `0` or omitted means "use the aggregator's default
-	// chain" — typically only useful in single-chain deployments or for
-	// chain-agnostic operations.
-	ChainId *ChainId `json:"chainId,omitempty"`
-
 	// CompletedAt Unix-epoch milliseconds — when the workflow reached a terminal state.
 	CompletedAt *int64 `json:"completedAt,omitempty"`
 
@@ -1463,10 +1454,6 @@ type ListExecutionsParams struct {
 	// WorkflowId Filter by workflow ID. Repeat to OR multiple workflows.
 	WorkflowId *[]Ulid `form:"workflowId,omitempty" json:"workflowId,omitempty"`
 
-	// ChainId Chain ID filter. Omit to use the aggregator default chain. Repeat
-	// the parameter to filter by multiple chains.
-	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
-
 	// Before Cursor — return items immediately before this position (backward pagination).
 	Before *PageBefore `form:"before,omitempty" json:"before,omitempty"`
 
@@ -1504,19 +1491,11 @@ type StreamExecutionParams struct {
 // CountExecutionsParams defines parameters for CountExecutions.
 type CountExecutionsParams struct {
 	WorkflowId *[]Ulid `form:"workflowId,omitempty" json:"workflowId,omitempty"`
-
-	// ChainId Chain ID filter. Omit to use the aggregator default chain. Repeat
-	// the parameter to filter by multiple chains.
-	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
 // ExecutionStatsParams defines parameters for ExecutionStats.
 type ExecutionStatsParams struct {
 	WorkflowId *[]Ulid `form:"workflowId,omitempty" json:"workflowId,omitempty"`
-
-	// ChainId Chain ID filter. Omit to use the aggregator default chain. Repeat
-	// the parameter to filter by multiple chains.
-	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
 // ListSecretsParams defines parameters for ListSecrets.
@@ -1562,10 +1541,6 @@ type ListWorkflowsParams struct {
 	// Status Filter by status. Repeat to OR multiple statuses.
 	Status *[]WorkflowStatus `form:"status,omitempty" json:"status,omitempty"`
 
-	// ChainId Chain ID filter. Omit to use the aggregator default chain. Repeat
-	// the parameter to filter by multiple chains.
-	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
-
 	// Before Cursor — return items immediately before this position (backward pagination).
 	Before *PageBefore `form:"before,omitempty" json:"before,omitempty"`
 
@@ -1592,10 +1567,6 @@ type ListExecutionsForWorkflowParams struct {
 type CountWorkflowsParams struct {
 	SmartWalletAddress *[]EthereumAddress `form:"smartWalletAddress,omitempty" json:"smartWalletAddress,omitempty"`
 	Status             *[]WorkflowStatus  `form:"status,omitempty" json:"status,omitempty"`
-
-	// ChainId Chain ID filter. Omit to use the aggregator default chain. Repeat
-	// the parameter to filter by multiple chains.
-	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
 // AuthExchangeJSONRequestBody defines body for AuthExchange for application/json ContentType.

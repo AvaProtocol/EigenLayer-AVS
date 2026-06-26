@@ -1,11 +1,8 @@
 package taskengine
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -15,8 +12,9 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-// ContextMemorySummarizer implements Summarizer by posting to the workflow-summary
-// endpoint (Studio's /api/summarize; the standalone context-memory service is deprecated).
+// ContextMemorySummarizer builds the raw execution-data payload the gateway forwards to
+// Studio's /api/notify (Path B). It no longer posts to /api/summarize itself — Studio
+// summarizes and distributes; the gateway is a pass-through.
 type ContextMemorySummarizer struct {
 	baseURL    string
 	authToken  string
@@ -28,7 +26,7 @@ type ContextMemorySummarizer struct {
 // client appends the path itself; including it would double the path. No default is
 // applied: the origin must be supplied explicitly (production wiring fails fast at
 // startup when it is missing, see NewContextMemorySummarizerFromAggregatorConfig).
-func NewContextMemorySummarizer(baseURL, authToken string) Summarizer {
+func NewContextMemorySummarizer(baseURL, authToken string) *ContextMemorySummarizer {
 	return &ContextMemorySummarizer{
 		baseURL:    baseURL,
 		authToken:  authToken,
@@ -82,291 +80,6 @@ type contextMemoryEdgeDef struct {
 	ID     string `json:"id"`
 	Source string `json:"source"`
 	Target string `json:"target"`
-}
-
-// contextMemoryTransferInfo matches the API response structure for transfers
-type contextMemoryTransferInfo struct {
-	StepName    string `json:"stepName"`
-	Type        string `json:"type"`
-	From        string `json:"from"`
-	To          string `json:"to"`
-	RawAmount   string `json:"rawAmount"`
-	Amount      string `json:"amount"`
-	Symbol      string `json:"symbol"`
-	Decimals    int    `json:"decimals"`
-	TxHash      string `json:"txHash"`
-	IsSimulated bool   `json:"isSimulated"`
-}
-
-// contextMemoryBalanceInfo matches the API response structure for balances
-type contextMemoryBalanceInfo struct {
-	StepName         string `json:"stepName"`
-	TokenAddress     string `json:"tokenAddress"`
-	Symbol           string `json:"symbol"`
-	Name             string `json:"name"`
-	Balance          string `json:"balance"`
-	BalanceFormatted string `json:"balanceFormatted"`
-	Decimals         int    `json:"decimals"`
-}
-
-// contextMemoryWorkflowInfo matches the API response structure for workflow metadata
-type contextMemoryWorkflowInfo struct {
-	Name         string `json:"name"`
-	Chain        string `json:"chain"`
-	ChainID      int64  `json:"chainId"`
-	IsSimulation bool   `json:"isSimulation"`
-	RunNumber    *int64 `json:"runNumber"`
-}
-
-// contextMemoryExecutionEntry matches the API response structure for execution entries.
-// Each entry has a description and an optional txHash for on-chain transactions.
-type contextMemoryExecutionEntry struct {
-	Description string `json:"description"`
-	TxHash      string `json:"txHash,omitempty"`
-}
-
-// contextMemorySummarizeBody contains the structured workflow execution summary
-// The aggregator is responsible for rendering this into email HTML or Telegram format
-type contextMemorySummarizeBody struct {
-	Summary       string                        `json:"summary"`               // One-line execution summary (no skip-note suffix)
-	Status        string                        `json:"status"`                // "success" | "failed" | "error"
-	Network       string                        `json:"network"`               // Chain name (e.g., "Sepolia", "Ethereum")
-	Trigger       string                        `json:"trigger"`               // What triggered the workflow (text description)
-	TriggeredAt   string                        `json:"triggeredAt"`           // ISO 8601 timestamp (from trigger output)
-	Executions    []contextMemoryExecutionEntry `json:"executions"`            // On-chain operations only (no BRANCH entries)
-	Errors        []string                      `json:"errors"`                // Failed steps and skipped node descriptions
-	SkippedNote   string                        `json:"skippedNote,omitempty"` // "1 node was skipped by Branch condition." — present only when status=success && skippedSteps>0
-	ExecutedSteps int                           `json:"executedSteps"`         // Number of steps that actually executed
-	TotalSteps    int                           `json:"totalSteps"`            // Executed + skipped-by-branch
-	SkippedSteps  int                           `json:"skippedSteps"`          // 0 when nothing was skipped
-
-	// Enhanced structured data for rich notifications (kept for potential future use)
-	Transfers []contextMemoryTransferInfo `json:"transfers,omitempty"` // Transfer details
-	Balances  []contextMemoryBalanceInfo  `json:"balances,omitempty"`  // Balance snapshots
-	Workflow  *contextMemoryWorkflowInfo  `json:"workflow,omitempty"`  // Workflow metadata
-}
-
-// SummarizeResponse matches the TypeScript SummarizeResponse
-type contextMemorySummarizeResponse struct {
-	Subject       string                     `json:"subject"`
-	Body          contextMemorySummarizeBody `json:"body"`
-	PromptVersion string                     `json:"promptVersion"`
-	Cached        bool                       `json:"cached,omitempty"`
-}
-
-func (c *ContextMemorySummarizer) Summarize(ctx context.Context, vm *VM, currentStepName string) (Summary, error) {
-	if c == nil || c.httpClient == nil {
-		return Summary{}, fmt.Errorf("summarizer not initialized")
-	}
-
-	// Compute execution verdict BEFORE buildRequest acquires vm.mu — AnalyzeExecutionResult
-	// takes the same lock and sync.Mutex is not reentrant.
-	//
-	// Empty ExecutionLogs is the single-node RunNodeImmediately case: the only
-	// step is the notification node currently running and therefore not in
-	// ExecutionLogs yet. AnalyzeExecutionResult treats that as "no execution
-	// steps found" / ExecutionFailed, which would emit a bogus status=failed
-	// to context-memory. Mirror the deterministic path and treat empty logs as
-	// success — nothing has failed yet.
-	var status, executionError string
-	if len(vm.ExecutionLogs) == 0 {
-		status = "success"
-	} else {
-		var resultStatus ExecutionResultStatus
-		executionError, _, resultStatus = vm.AnalyzeExecutionResult()
-		status = mapExecutionStatusToAPIString(resultStatus)
-	}
-
-	// Build request from VM
-	req, err := c.buildRequest(vm, currentStepName, status, executionError)
-	if err != nil {
-		// Include the specific validation error to help with debugging
-		return Summary{}, fmt.Errorf("failed to build request (validation error): %w", err)
-	}
-
-	// Marshal request
-	reqBody, err := json.Marshal(req)
-	if err != nil {
-		return Summary{}, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	// Create HTTP request
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.baseURL+"/api/summarize", bytes.NewBuffer(reqBody))
-	if err != nil {
-		return Summary{}, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	if c.authToken != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.authToken)
-	}
-
-	// Log request details
-	if vm != nil && vm.logger != nil {
-		vm.logger.Info("Context-memory API: sending request", "url", c.baseURL+"/api/summarize", "request_size", len(reqBody))
-	}
-
-	// Send request
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		// Log DEBUG level for fallback operations (reduces log clutter in production)
-		if vm != nil && vm.logger != nil {
-			vm.logger.Debug("Context-memory API not available: HTTP request failed", "error", err, "url", c.baseURL+"/api/summarize")
-		}
-		return Summary{}, fmt.Errorf("HTTP request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		// Log DEBUG level for fallback operations (reduces log clutter in production)
-		if vm != nil && vm.logger != nil {
-			vm.logger.Debug("Context-memory API not available: non-2xx response", "status_code", resp.StatusCode, "response_body", string(body), "url", c.baseURL+"/api/summarize")
-		}
-		return Summary{}, fmt.Errorf("non-2xx response (%d): %s", resp.StatusCode, string(body))
-	}
-
-	// Parse response
-	var apiResp contextMemorySummarizeResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		if vm != nil && vm.logger != nil {
-			vm.logger.Info("Context-memory API: failed to decode response", "error", err)
-		}
-		return Summary{}, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	// Log successful response
-	if vm != nil && vm.logger != nil {
-		vm.logger.Info("Context-memory API: received successful response", "subject", apiResp.Subject, "status", apiResp.Body.Status)
-	}
-
-	// Convert API response transfers to Summary transfers
-	var transfers []TransferInfo
-	if len(apiResp.Body.Transfers) > 0 {
-		transfers = make([]TransferInfo, len(apiResp.Body.Transfers))
-		for i, t := range apiResp.Body.Transfers {
-			transfers[i] = TransferInfo{
-				StepName:    t.StepName,
-				Type:        t.Type,
-				From:        t.From,
-				To:          t.To,
-				RawAmount:   t.RawAmount,
-				Amount:      t.Amount,
-				Symbol:      t.Symbol,
-				Decimals:    t.Decimals,
-				TxHash:      t.TxHash,
-				IsSimulated: t.IsSimulated,
-			}
-		}
-	}
-
-	// Convert API response balances to Summary balances
-	var balances []BalanceInfo
-	if len(apiResp.Body.Balances) > 0 {
-		balances = make([]BalanceInfo, len(apiResp.Body.Balances))
-		for i, b := range apiResp.Body.Balances {
-			balances[i] = BalanceInfo{
-				StepName:         b.StepName,
-				TokenAddress:     b.TokenAddress,
-				Symbol:           b.Symbol,
-				Name:             b.Name,
-				Balance:          b.Balance,
-				BalanceFormatted: b.BalanceFormatted,
-				Decimals:         b.Decimals,
-			}
-		}
-	}
-
-	// Workflow metadata: the aggregator owns IsSimulation since it ran the
-	// workflow — the API response's value (if any) is informational only.
-	// Always populate so renderers can rely on the flag without nil-checking
-	// against API response shape drift.
-	workflow := &WorkflowInfo{IsSimulation: vm.IsSimulation}
-	if apiResp.Body.Workflow != nil {
-		workflow.Name = apiResp.Body.Workflow.Name
-		workflow.Chain = apiResp.Body.Workflow.Chain
-		workflow.ChainID = apiResp.Body.Workflow.ChainID
-		workflow.RunNumber = apiResp.Body.Workflow.RunNumber
-	}
-
-	// Convert API execution entries to Summary execution entries
-	// Validate txHash at ingestion: only keep hashes that look like real
-	// Ethereum tx hashes (0x + 64 hex chars). This filters out Tenderly
-	// simulation IDs and other non-hash values the API may return.
-	var executions []ExecutionEntry
-	for _, e := range apiResp.Body.Executions {
-		entry := ExecutionEntry{Description: e.Description}
-		if isValidTxHash(e.TxHash) {
-			entry.TxHash = e.TxHash
-		}
-		executions = append(executions, entry)
-	}
-
-	// Runner / Fees are aggregator-local (not from the API response). Both helpers
-	// read VM state directly so notifications surface the same fee numbers as
-	// EstimateFees() and the persisted Execution.Fee. See PRD:
-	// docs/changes/20260501-summary-runner-and-fees-sections.md.
-	return Summary{
-		Subject:       apiResp.Subject,
-		Body:          composePlainTextBodyFromAPI(apiResp.Body),
-		SummaryLine:   apiResp.Body.Summary,
-		Status:        apiResp.Body.Status,
-		Network:       apiResp.Body.Network,
-		Trigger:       apiResp.Body.Trigger,
-		TriggeredAt:   apiResp.Body.TriggeredAt,
-		Executions:    executions,
-		Errors:        apiResp.Body.Errors,
-		SkippedNote:   apiResp.Body.SkippedNote,
-		ExecutedSteps: apiResp.Body.ExecutedSteps,
-		TotalSteps:    apiResp.Body.TotalSteps,
-		SkippedSteps:  apiResp.Body.SkippedSteps,
-		SmartWallet:   req.SmartWallet,
-		Transfers:     transfers,
-		Balances:      balances,
-		Workflow:      workflow,
-		Runner:        buildRunnerFromVM(vm),
-		Fees:          buildFeesFromVM(vm),
-	}, nil
-}
-
-// composePlainTextBodyFromAPI creates a plain text body from the structured API response
-// This is used for backward compatibility with channels that expect plain text
-// NOTE: Does NOT include summary line - that's in the separate SummaryLine field
-func composePlainTextBodyFromAPI(body contextMemorySummarizeBody) string {
-	var sb strings.Builder
-
-	// Trigger (don't include summary - it's in SummaryLine field)
-	if body.Trigger != "" {
-		sb.WriteString("Trigger: ")
-		sb.WriteString(body.Trigger)
-		sb.WriteString("\n\n")
-	}
-
-	// Executions
-	if len(body.Executions) > 0 {
-		sb.WriteString("Executed:\n")
-		for _, exec := range body.Executions {
-			sb.WriteString("- ")
-			sb.WriteString(exec.Description)
-			sb.WriteString("\n")
-		}
-		if len(body.Errors) > 0 {
-			sb.WriteString("\n")
-		}
-	}
-
-	// Errors
-	if len(body.Errors) > 0 {
-		sb.WriteString("Issues:\n")
-		for _, err := range body.Errors {
-			sb.WriteString("- ")
-			sb.WriteString(err)
-			sb.WriteString("\n")
-		}
-	}
-
-	return strings.TrimSpace(sb.String())
 }
 
 // BuildNotifyPayload builds the raw execution-data payload (the same SummarizeRequest the
@@ -463,11 +176,10 @@ func (c *ContextMemorySummarizer) buildRequest(vm *VM, currentStepName, status, 
 	// settings.chain_id is the last fallback (e.g. RunNodeImmediately where
 	// vm.task is nil). vm.mu is already held — do not call chainIDFromVM,
 	// which re-locks.
+	// A task carries no chain (G5); derive from the VM default config, then the
+	// settings.chain_id fallback below.
 	var workflowChainID uint64
-	if vm.task != nil && vm.task.Task != nil && vm.task.Task.ChainId > 0 {
-		workflowChainID = uint64(vm.task.Task.ChainId)
-	}
-	if workflowChainID == 0 && vm.smartWalletConfig != nil && vm.smartWalletConfig.ChainID > 0 {
+	if vm.smartWalletConfig != nil && vm.smartWalletConfig.ChainID > 0 {
 		workflowChainID = uint64(vm.smartWalletConfig.ChainID)
 	}
 	if workflowChainID == 0 {

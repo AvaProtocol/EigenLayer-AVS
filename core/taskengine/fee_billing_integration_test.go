@@ -54,7 +54,6 @@ func TestFeeBilling_CreditGating_BlocksOnOutstandingBalance(t *testing.T) {
 	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:                 "test-fee-gating",
-			ChainId:            int64(1),
 			Owner:              strings.ToLower(owner.Hex()),
 			SmartWalletAddress: smartWalletAddr,
 			Status:             avsproto.TaskStatus_Enabled,
@@ -166,7 +165,6 @@ func TestFeeBilling_CreditGating_AllowsWithHighCreditLimit(t *testing.T) {
 	task := &model.Workflow{
 		Task: &avsproto.Task{
 			Id:                 "test-fee-high-limit",
-			ChainId:            int64(1),
 			Owner:              strings.ToLower(owner.Hex()),
 			SmartWalletAddress: smartWalletAddr,
 			Status:             avsproto.TaskStatus_Enabled,

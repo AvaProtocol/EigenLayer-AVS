@@ -104,6 +104,7 @@ func TestContractWriteDataPriority(t *testing.T) {
 
 		nodeConfig := map[string]interface{}{
 			"contractAddress": sepoliaUsdcAddress.Hex(),
+			"chainId":         int64(11155111), // explicit chain (strict)
 			"contractAbi":     contractAbi,
 			"methodCalls": []interface{}{
 				map[string]interface{}{
@@ -165,6 +166,7 @@ func TestContractWriteDataPriority(t *testing.T) {
 
 		nodeConfig := map[string]interface{}{
 			"contractAddress": sepoliaUsdcAddress.Hex(),
+			"chainId":         int64(11155111), // explicit chain (strict)
 			"contractAbi":     contractAbi,
 			"methodCalls": []interface{}{
 				map[string]interface{}{
@@ -225,6 +227,7 @@ func TestContractWriteDataPriority(t *testing.T) {
 
 		nodeConfig := map[string]interface{}{
 			"contractAddress": sepoliaUsdcAddress.Hex(),
+			"chainId":         int64(11155111), // explicit chain (strict)
 			"contractAbi":     contractAbi,
 			"methodCalls": []interface{}{
 				map[string]interface{}{
@@ -292,6 +295,7 @@ func TestContractWriteDataPriority(t *testing.T) {
 
 		nodeConfig := map[string]interface{}{
 			"contractAddress": sepoliaUsdcAddress.Hex(),
+			"chainId":         int64(11155111), // explicit chain (strict)
 			"contractAbi":     contractAbi,
 			"methodCalls": []interface{}{
 				map[string]interface{}{

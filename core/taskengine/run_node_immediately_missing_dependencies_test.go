@@ -64,6 +64,7 @@ func TestRunNodeImmediately_ContractWrite_MissingNodeDependency(t *testing.T) {
 		nodeType := "contractWrite"
 		nodeConfig := map[string]interface{}{
 			"contractAddress": "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E", // Uniswap SwapRouter02
+			"chainId":         int64(11155111),                              // explicit chain (strict)
 			"contractAbi": []interface{}{
 				map[string]interface{}{
 					"inputs": []interface{}{
@@ -150,6 +151,7 @@ func TestRunNodeImmediately_ContractWrite_MissingNodeDependency(t *testing.T) {
 		nodeType := "contractWrite"
 		nodeConfig := map[string]interface{}{
 			"contractAddress": "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E",
+			"chainId":         int64(11155111), // explicit chain (strict)
 			"contractAbi": []interface{}{
 				map[string]interface{}{
 					"inputs": []interface{}{
@@ -199,6 +201,7 @@ func TestRunNodeImmediately_ContractWrite_MissingNodeDependency(t *testing.T) {
 		nodeType := "contractWrite"
 		nodeConfig := map[string]interface{}{
 			"contractAddress": "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E",
+			"chainId":         int64(11155111), // explicit chain (strict)
 			"contractAbi": []interface{}{
 				map[string]interface{}{
 					"inputs": []interface{}{

@@ -69,6 +69,7 @@ func TestVM_ContractRead_BasicExecution(t *testing.T) {
 
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
+			ChainId:         11155111,                                     // explicit chain (G5 strict)
 			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", // Chainlink ETH/USD
 			ContractAbi:     decimalsABIValues,
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
@@ -107,6 +108,7 @@ func TestVM_ContractRead_DecimalFormatting(t *testing.T) {
 
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
+			ChainId:         11155111,                                     // explicit chain (G5 strict)
 			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", // Chainlink ETH/USD
 			ContractAbi:     MustConvertJSONABIToProtobufValues(testChainlinkABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
@@ -199,6 +201,7 @@ func TestVM_ContractRead_LatestRoundData(t *testing.T) {
 	// Test reading latest round data from ETH/USD price feed
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
+			ChainId:         11155111, // explicit chain (G5 strict)
 			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419",
 			ContractAbi:     MustConvertJSONABIToProtobufValues(testLatestRoundDataABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
@@ -235,6 +238,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			setupVM: func(v *VM) { v.smartWalletConfig = nil },
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
+					ChainId:         11155111, // explicit chain (G5 strict)
 					ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419",
 					ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
@@ -271,6 +275,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			},
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
+					ChainId:         11155111, // explicit chain (G5 strict)
 					ContractAddress: "invalid-address",
 					ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
@@ -318,6 +323,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			},
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
+					ChainId:         11155111,                                     // explicit chain (G5 strict)
 					ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", // Valid Chainlink contract
 					ContractAbi:     MustConvertJSONABIToProtobufValues(testChainlinkABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
@@ -353,6 +359,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			},
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
+					ChainId:         11155111,                                     // explicit chain (G5 strict)
 					ContractAddress: "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c", // Client's contract address
 					ContractAbi:     MustConvertJSONABIToProtobufValues(testChainlinkABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
@@ -388,6 +395,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			},
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
+					ChainId:         11155111,                                     // explicit chain (G5 strict)
 					ContractAddress: "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c", // Address that returns empty data
 					ContractAbi:     MustConvertJSONABIToProtobufValues(testChainlinkABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
@@ -453,6 +461,7 @@ func TestVM_ContractWrite_BasicExecution(t *testing.T) {
 	// Test contract write (will likely fail due to lack of actual transaction setup, but should not panic)
 	node := &avsproto.ContractWriteNode{
 		Config: &avsproto.ContractWriteNode_Config{
+			ChainId:         11155111,                                     // explicit chain (G5 strict)
 			ContractAddress: "0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E", // Test address
 			ContractAbi:     MustConvertJSONABIToProtobufValues(testTransferABI),
 			MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
@@ -532,6 +541,7 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 			setupVM: func(v *VM) { v.smartWalletConfig = nil },
 			node: &avsproto.ContractWriteNode{
 				Config: &avsproto.ContractWriteNode_Config{
+					ChainId:         11155111, // explicit chain (G5 strict)
 					ContractAddress: "0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E",
 					ContractAbi:     MustConvertJSONABIToProtobufValues(testSimpleFunctionABI),
 					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
@@ -567,6 +577,7 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 			},
 			node: &avsproto.ContractWriteNode{
 				Config: &avsproto.ContractWriteNode_Config{
+					ChainId:         11155111, // explicit chain (G5 strict)
 					ContractAddress: "invalid-address",
 					ContractAbi:     MustConvertJSONABIToProtobufValues(testSimpleFunctionABI),
 					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{

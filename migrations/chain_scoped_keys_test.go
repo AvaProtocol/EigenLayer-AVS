@@ -20,7 +20,7 @@ func TestMigrateKeysToChainScoped(t *testing.T) {
 		"t:c:task-completed-1": []byte(`{"id":"task-completed-1"}`),
 		"t:i:task-disabled-1":  []byte(`{"id":"task-disabled-1"}`),
 		// u: user-tasks
-		"u:0xowner1:0xwalletA:task-enabled-1": []byte("ref"),
+		"u:0xowner1:0xwalletA:task-enabled-1":   []byte("ref"),
 		"u:0xowner2:0xwalletB:task-completed-1": []byte("ref"),
 		// history: executions
 		"history:task-enabled-1:exec-1":   []byte(`{"id":"exec-1"}`),
@@ -86,9 +86,9 @@ func TestMigrateKeysToChainScoped_Idempotent(t *testing.T) {
 
 	const chainID = int64(8453)
 	seed := map[string][]byte{
-		"t:a:task-1":                          []byte("v"),
-		"history:task-1:exec-1":               []byte("v"),
-		"u:0xowner:0xwallet:task-1":           []byte("ref"),
+		"t:a:task-1":                []byte("v"),
+		"history:task-1:exec-1":     []byte("v"),
+		"u:0xowner:0xwallet:task-1": []byte("ref"),
 	}
 	if err := db.BatchWrite(toBatch(seed)); err != nil {
 		t.Fatalf("seed: %v", err)

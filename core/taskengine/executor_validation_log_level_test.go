@@ -134,7 +134,6 @@ func TestReportTaskAutoDisabledIncludesOwnerContext(t *testing.T) {
 			Id:                 taskID,
 			Owner:              "0x000000000000000000000000000000000000beef",
 			SmartWalletAddress: "0x000000000000000000000000000000000000dead",
-			ChainId:            11155111,
 			Status:             avsproto.TaskStatus_Enabled,
 		},
 	}
@@ -159,7 +158,6 @@ func TestReportTaskAutoDisabledIncludesOwnerContext(t *testing.T) {
 		"task_id":      taskID,
 		"owner":        task.Owner,
 		"smart_wallet": task.SmartWalletAddress,
-		"chain_id":     task.ChainId,
 		"reason":       errMsg,
 	}
 	for k, want := range wantFields {

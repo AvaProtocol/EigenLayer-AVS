@@ -220,25 +220,30 @@ func TestScanOrphanedTasks_NoDeadlock(t *testing.T) {
 
 	seedOperator(engine, "0xMainnet", []int64{1, 8453})
 
+	// Chain lives on the event trigger (G2/G5), not the task — coverage is
+	// judged on the trigger's monitoring chain.
+	eventOnChain := func(chainID int64) *avsproto.TaskTrigger {
+		return &avsproto.TaskTrigger{
+			Type:        avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+			TriggerType: &avsproto.TaskTrigger_Event{Event: &avsproto.EventTrigger{Config: &avsproto.EventTrigger_Config{ChainId: chainID}}},
+		}
+	}
 	engine.lock.Lock()
 	engine.tasks["covered-event"] = &model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "covered-event",
-			ChainId: 1,
-			Trigger: &avsproto.TaskTrigger{Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT},
+			Trigger: eventOnChain(1),
 		},
 	}
 	engine.tasks["orphan-event"] = &model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "orphan-event",
-			ChainId: 56, // BNB — no operator covers
-			Trigger: &avsproto.TaskTrigger{Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT},
+			Trigger: eventOnChain(56), // BNB — no operator covers
 		},
 	}
 	engine.tasks["cron-chain-agnostic"] = &model.Workflow{
 		Task: &avsproto.Task{
 			Id:      "cron-chain-agnostic",
-			ChainId: 56,
 			Trigger: &avsproto.TaskTrigger{Type: avsproto.TriggerType_TRIGGER_TYPE_CRON},
 		},
 	}

@@ -327,48 +327,38 @@ func (v *VM) WithChainConfigResolver(resolver func(chainID int64) *config.SmartW
 	return v
 }
 
-// resolveSmartWalletForNode picks the SmartWalletConfig a node should
-// use, walking three sources in order:
-//
-//  1. The node's own chain_id override (set on Config when the SDK or
-//     UI threads it through explicitly).
-//  2. The task's ChainId (the workflow's target chain). Loop iterations
-//     create nested nodes via createNestedNodeFromLoop, which returns
-//     the inner node proto verbatim — those inner nodes don't carry a
-//     per-iteration chain_id, so without this fallback the resolver
-//     would land on v.smartWalletConfig. In gateway mode that default
-//     is populated from chains[0] (mainnet by convention; see
-//     core/config/config.go:367), causing paymaster ops for any other
-//     chain's workflow to dial the wrong RPC and surface as
-//     "no contract code at given address" (Sentry EIGENLAYER-AVS-1N/1M).
-//  3. v.smartWalletConfig as a last-resort default — correct in
-//     single-chain mode where chainConfigResolver is nil and the VM
-//     was constructed with the only smart_wallet config that exists.
-func (v *VM) resolveSmartWalletForNode(nodeChainID int64) *config.SmartWalletConfig {
-	if v.chainConfigResolver != nil {
-		if nodeChainID > 0 {
-			if resolved := v.chainConfigResolver(nodeChainID); resolved != nil {
-				return resolved
-			}
-		}
-		if taskChainID := v.taskChainID(); taskChainID > 0 {
-			if resolved := v.chainConfigResolver(taskChainID); resolved != nil {
-				return resolved
-			}
-		}
+// resolveSmartWalletForNode picks the SmartWalletConfig a chain-aware node
+// should use. Post-G5 a task carries no chain, so the node's own chain_id is
+// REQUIRED — there is nothing to inherit and no default to fall back to:
+//   - chain_id <= 0 is a hard error in all modes. An isolated run
+//     (RunNodeImmediately / simulate) must supply the chain on the request,
+//     which is stamped onto the node before execution (stampNodeChainIfUnset).
+//   - Gateway mode: the chain must resolve against the configured set, else
+//     error (no silent fallback — the Sentry EIGENLAYER-AVS-1N/1M footgun).
+//   - Single-chain mode (no resolver): the sole smart_wallet config is used.
+func (v *VM) resolveSmartWalletForNode(nodeChainID int64) (*config.SmartWalletConfig, error) {
+	if nodeChainID <= 0 {
+		return nil, fmt.Errorf("chain-aware node requires an explicit chain_id (got %d); a task no longer provides a default chain", nodeChainID)
 	}
-	return v.smartWalletConfig
+	if v.chainConfigResolver != nil {
+		if resolved := v.chainConfigResolver(nodeChainID); resolved != nil {
+			return resolved, nil
+		}
+		return nil, fmt.Errorf("chain_id %d is not configured on this aggregator", nodeChainID)
+	}
+	if v.smartWalletConfig != nil {
+		return v.smartWalletConfig, nil
+	}
+	return nil, fmt.Errorf("no smart wallet config available for chain_id %d", nodeChainID)
 }
 
-// taskChainID returns the chain id of the workflow this VM is executing,
-// or 0 if the task wasn't set (e.g. RunNodeImmediately) or the task
-// itself has no chain_id stored (legacy workflows created before
-// per-task chain_id was required).
-func (v *VM) taskChainID() int64 {
-	if v.task == nil || v.task.Task == nil {
-		return 0
+// vmDefaultChainID returns the VM's default-config chain, used for
+// chain-invariant lookups (e.g. wallet salt) now that tasks carry no chain.
+func (v *VM) vmDefaultChainID() int64 {
+	if v.smartWalletConfig != nil {
+		return v.smartWalletConfig.ChainID
 	}
-	return v.task.Task.ChainId
+	return 0
 }
 
 func (v *VM) GetTriggerNameAsVar() (string, error) {
@@ -1472,7 +1462,12 @@ func (v *VM) runContractRead(taskNode *avsproto.TaskNode) (*avsproto.Execution_S
 		return executionLog, err
 	}
 
-	swConfig := v.resolveSmartWalletForNode(node.Config.GetChainId())
+	swConfig, err := v.resolveSmartWalletForNode(node.Config.GetChainId())
+	if err != nil {
+		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
+		executionLog.EndAt = time.Now().UnixMilli()
+		return executionLog, err
+	}
 	if swConfig == nil || swConfig.EthRpcUrl == "" {
 		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract read (chain_id=%d)", node.Config.GetChainId())
 		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
@@ -1515,7 +1510,12 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 	}
 	stepID := taskNode.Id
 	var executionLog *avsproto.Execution_Step
-	swConfig := v.resolveSmartWalletForNode(node.Config.GetChainId())
+	swConfig, err := v.resolveSmartWalletForNode(node.Config.GetChainId())
+	if err != nil {
+		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
+		executionLog.EndAt = time.Now().UnixMilli()
+		return executionLog, err
+	}
 	if swConfig == nil || swConfig.EthRpcUrl == "" {
 		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract write (chain_id=%d)", node.Config.GetChainId())
 		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
@@ -1564,7 +1564,7 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		_, hasSalt := v.vars["aa_salt"]
 		v.mu.Unlock()
 		if !hasSalt && v.db != nil {
-			if wallet, err := GetWallet(v.db, v.task.Task.ChainId, v.TaskOwner, v.task.SmartWalletAddress); err == nil && wallet != nil && wallet.Salt != nil {
+			if wallet, err := GetWallet(v.db, v.vmDefaultChainID(), v.TaskOwner, v.task.SmartWalletAddress); err == nil && wallet != nil && wallet.Salt != nil {
 				v.AddVar("aa_salt", wallet.Salt)
 			}
 		}
@@ -1740,7 +1740,12 @@ func (v *VM) runEthTransfer(taskNode *avsproto.TaskNode) (*avsproto.Execution_St
 	}
 	stepID := taskNode.Id
 	var executionLog *avsproto.Execution_Step
-	swConfig := v.resolveSmartWalletForNode(node.Config.GetChainId())
+	swConfig, err := v.resolveSmartWalletForNode(node.Config.GetChainId())
+	if err != nil {
+		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
+		executionLog.EndAt = time.Now().UnixMilli()
+		return executionLog, err
+	}
 	if swConfig == nil || swConfig.EthRpcUrl == "" {
 		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for ETH transfer (chain_id=%d)", node.Config.GetChainId())
 		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
@@ -2591,6 +2596,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		node.Type = avsproto.NodeType_NODE_TYPE_CONTRACT_READ
 		// Create contract read node with proper configuration
 		contractConfig := &avsproto.ContractReadNode_Config{}
+		contractConfig.ChainId = int64(chainIDFromSettingsValue(config["chainId"]))
 
 		// Use camelCase only for consistency with JavaScript SDK
 		if address, ok := config["contractAddress"].(string); ok {
@@ -2663,6 +2669,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		node.Type = avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE
 		// Create contract write node with proper configuration
 		contractConfig := &avsproto.ContractWriteNode_Config{}
+		contractConfig.ChainId = int64(chainIDFromSettingsValue(config["chainId"]))
 
 		// Use camelCase only for consistency with JavaScript SDK
 		if address, ok := config["contractAddress"].(string); ok {
@@ -2841,6 +2848,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		node.Type = avsproto.NodeType_NODE_TYPE_ETH_TRANSFER
 		// Create ETH transfer node with proper configuration
 		ethConfig := &avsproto.ETHTransferNode_Config{}
+		ethConfig.ChainId = int64(chainIDFromSettingsValue(config["chainId"]))
 		if destination, ok := config["destination"].(string); ok {
 			ethConfig.Destination = destination
 		}
@@ -2980,6 +2988,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 		case "contractRead":
 			crConfig := &avsproto.ContractReadNode_Config{}
+			crConfig.ChainId = int64(chainIDFromSettingsValue(runnerConfig["chainId"]))
 
 			// Extract contract configuration
 			if contractAddress, ok := runnerConfig["contractAddress"].(string); ok {
@@ -3056,6 +3065,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 		case "ethTransfer":
 			etConfig := &avsproto.ETHTransferNode_Config{}
+			etConfig.ChainId = int64(chainIDFromSettingsValue(runnerConfig["chainId"]))
 			if destination, ok := runnerConfig["destination"].(string); ok {
 				etConfig.Destination = destination
 			}
@@ -3084,6 +3094,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 		case "contractWrite":
 			cwConfig := &avsproto.ContractWriteNode_Config{}
+			cwConfig.ChainId = int64(chainIDFromSettingsValue(runnerConfig["chainId"]))
 
 			// Extract contract configuration
 			if contractAddress, ok := runnerConfig["contractAddress"].(string); ok {
@@ -3594,6 +3605,12 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				"contractAbi":     contractAbiArray,
 			}
 
+			// Carry the per-node chain so isolated paths (runNodeImmediately,
+			// simulation, loop-nested) don't lose it and run on the wrong chain.
+			if cid := contractRead.Config.GetChainId(); cid != 0 {
+				config["chainId"] = cid
+			}
+
 			// Handle method calls - extract fields to simple map for protobuf compatibility
 			if len(contractRead.Config.MethodCalls) > 0 {
 				methodCallsArray := make([]interface{}, len(contractRead.Config.MethodCalls))
@@ -3645,6 +3662,12 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 			config := map[string]interface{}{
 				"contractAddress": contractWrite.Config.ContractAddress,
 				"contractAbi":     contractAbiArray,
+			}
+
+			// Carry the per-node chain so isolated paths (runNodeImmediately,
+			// simulation, loop-nested) don't lose it and run on the wrong chain.
+			if cid := contractWrite.Config.GetChainId(); cid != 0 {
+				config["chainId"] = cid
 			}
 
 			// Extract optional value field (ETH to send with transaction)
@@ -3748,6 +3771,12 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 			config := map[string]interface{}{
 				"destination": ethTransfer.Config.Destination,
 				"amount":      ethTransfer.Config.Amount,
+			}
+
+			// Carry the per-node chain so isolated paths (runNodeImmediately,
+			// simulation, loop-nested) don't lose it and run on the wrong chain.
+			if cid := ethTransfer.Config.GetChainId(); cid != 0 {
+				config["chainId"] = cid
 			}
 
 			// Clean up complex protobuf types before returning
