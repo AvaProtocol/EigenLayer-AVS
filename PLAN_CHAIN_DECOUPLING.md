@@ -1,6 +1,6 @@
 # PLAN: Decouple chainId from the workflow — per-trigger / per-node chains
 
-**Owner:** AVS backend (this repo leads). **Status:** proposal / pre-implementation.
+**Owner:** AVS backend (this repo leads). **Status:** backend implemented (strict enforcement in review).
 **Date:** 2026-06-26.
 
 Today a workflow (AVS task) is bound to **one** `chainId`, fixed at creation. The goal is to make
@@ -14,6 +14,42 @@ We lead this **bottom-up from the AVS backend**. The studio client
 (the `studio` repo's `PLAN_WALLET_CHAIN_DECOUPLING.md`, Phase 3/4) and the v4 SDK
 (`ava-sdk-js`) follow the model defined here — they must not ship a per-node chain the backend would
 flatten.
+
+---
+
+## ✅ Completion checklist (status)
+
+Backend gaps (this repo):
+
+- [x] **G1** — EventTrigger `chainId` mapped REST↔proto — **merged #630**
+- [x] **G2** — operator routes/coverage by the trigger's own chain (`triggerMonitoringChainID`) — **merged #630**
+- [x] **G3** — `ExtractNodeConfiguration` carries `chainId`; `CreateNodeFromType` reads it back — **merged #630**
+- [x] **G4** — explicit unresolvable/unconfigured chain rejected at run + create — **merged #630**
+- [x] **G5b** — `Task.chain_id` / `CreateTaskReq.chain_id` removed from proto; ~60 readers rerouted — **merged #631**
+- [x] **G5c** — task storage chain-agnostic (`t:<status>:<id>`); per-chain read iteration collapsed — **merged #631**
+- [x] **G5d** — `wipe-chain-bucketed-task-keys` boot migration — **merged #631**
+- [x] **G5e** — proto/OpenAPI "0 = inherit" comments dropped; loop-runner chain wiring fixed — **merged #631**
+- [x] **Strict reject-0** — `chain_id <= 0` invalid in all modes (resolver + create validator); no default fallback — **PR #632 (green, awaiting client-lockstep merge)**
+
+Wallet/exec defaults (decided): wallet-ownership checks across all configured chains
+(`userOwnsWalletOnAnyChain`); VM-default config = aggregator default; salt is chain-invariant. ✅ done.
+
+Client (separate repos — required to land in lockstep with #632):
+
+- [ ] **`ava-sdk-js`** — always send per-part `chainId` (create / runNode / simulate); drop workflow-level `chainId`
+- [ ] **studio** — Phase 3: per-part chains in the canvas; drop workflow-level `chainId`; chain-agnostic workflow list
+- [ ] Spec handed off: *"what the client must send"* (per node/trigger type) — see the chat handoff / `## Client contract` below
+
+Release / ops:
+
+- [ ] **staging → main** promotion: confirm the wipe migration runs at boot; `make storage-check` will flag the
+      breaking proto + key-template change (expected — the migration is the handler)
+- [ ] Heads-up to the studio/SDK team before merging #632 (strict rejects chain-less calls)
+
+Future (not started):
+
+- [ ] **Phase 4** — true cross-chain *sequencing* (bridge A→B then act on B): wait-for-finality primitive +
+      re-entrant executor. Independent multi-chain (watch X / act Y) already works; this is the bridge case only.
 
 ---
 
@@ -395,6 +431,47 @@ Scope this separately once Phases 1–3 land; do not block them on it.
   to the 4 configured chains); a part left without a chain is rejected at create. The dashboard lists
   across chains and derives any per-chain view from the parts; the create endpoint's authKey remains
   API-auth scope only, not a task chain.
+
+---
+
+## Client contract — what the client must send (after #632)
+
+**Rule:** every **chain-aware** part carries its own `chainId` (`>0`, configured). No workflow-level
+chain; no default fallback. Omitting it on a chain-aware part is rejected (`InvalidArgument`); non-chain
+parts must not send one.
+
+**Chain-aware parts** (source of truth: `checkNodeChain` / `validateExplicitPartChains`):
+
+| Part | needs `chainId`? | proto field |
+|---|---|---|
+| EventTrigger | ✅ | `EventTrigger.Config.chain_id` |
+| BlockTrigger | ✅ | `BlockTrigger.Config.chain_id` |
+| ContractWrite node | ✅ | `ContractWriteNode.Config.chain_id` |
+| ContractRead node | ✅ | `ContractReadNode.Config.chain_id` |
+| ETHTransfer node | ✅ | `ETHTransferNode.Config.chain_id` |
+| Loop node with a chain-aware runner | ✅ on the **runner's** config | runner `Config.chain_id` |
+| Manual / Cron / FixedTime trigger | ❌ chain-agnostic | — |
+| CustomCode / RestAPI / GraphQL / Branch / Filter | ❌ | — |
+| Balance node | ⚠️ uses its own `chain` **string** (name or id), not `chain_id` | `BalanceNode.Config.chain` |
+
+**Per API surface:**
+
+- **CreateWorkflow** — set `chainId` on every chain-aware part; **stop sending a workflow-level `chainId`**
+  (`Task.chain_id` / `CreateWorkflowRequest.chainId` removed/ignored). Missing/`0` on any chain-aware part → rejected.
+- **RunNodeWithInputs / runNodeImmediately** — set `RunNodeWithInputsReq.chain_id` (or the node's own
+  `chainId`); the backend stamps the request chain onto the node (`stampNodeChainIfUnset`).
+- **SimulateTask** — per-part chains, or `SimulateTaskReq.chain_id`.
+- **List / Get / Cancel / Pause / SetEnabled** — chain-agnostic (storage no longer per-chain); don't pass
+  a workflow chain to scope these. "Workflows on chain Y" is derived client-side from the parts.
+- **Unchanged** (still take their own `chain_id`): `WithdrawFundsReq`, `EstimateFeesReq`, `GetTokenMetadataReq`.
+- **Ignored:** `TriggerTaskReq.chain_id` (a task has no chain to override).
+
+**Allowed values** (the configured set; else "chain_id N is not configured on this aggregator"):
+Ethereum `1`, Base `8453`, Sepolia `11155111`, Base Sepolia `84532`. (Soneium/Minato out of scope.)
+
+**SDK (`ava-sdk-js`) mapping** — builders already expose the params; the change is to always populate:
+`Triggers.event/block({chainId})`, `Nodes.contractWrite/contractRead/ethTransfer({chainId})`, the Loop
+runner's `chainId`, `runNodeWithInputs` request `chainId`; remove any workflow-level `chainId`.
 
 ---
 

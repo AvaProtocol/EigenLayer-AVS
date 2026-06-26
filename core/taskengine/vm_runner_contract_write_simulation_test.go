@@ -77,7 +77,8 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		// Test run_node_immediately
 		nodeConfig := map[string]interface{}{
 			"contractAddress": sepoliaUsdcAddress.Hex(),
-			"contractAbi":     contractAbi, // Now using parsed array instead of JSON string
+			"chainId":         int64(11155111), // explicit chain (strict)
+			"contractAbi":     contractAbi,     // Now using parsed array instead of JSON string
 			"methodCalls": []interface{}{
 				map[string]interface{}{
 					"callData":   approveCallData,
@@ -190,6 +191,7 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		// Exact node config from client request
 		nodeConfig := map[string]interface{}{
 			"contractAddress": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+			"chainId":         int64(11155111), // explicit chain (strict)
 			"contractAbi":     contractAbi,
 			"methodCalls": []interface{}{
 				map[string]interface{}{
@@ -319,6 +321,7 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 
 		nodeConfig := map[string]interface{}{
 			"contractAddress": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+			"chainId":         int64(11155111), // explicit chain (strict)
 			"contractAbi":     transferAbi,
 			"methodCalls": []interface{}{
 				map[string]interface{}{

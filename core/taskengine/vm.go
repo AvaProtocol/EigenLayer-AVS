@@ -329,23 +329,27 @@ func (v *VM) WithChainConfigResolver(resolver func(chainID int64) *config.SmartW
 
 // resolveSmartWalletForNode picks the SmartWalletConfig a chain-aware node
 // should use. Post-G5 a task carries no chain, so the node's own chain_id is
-// authoritative — there is nothing to inherit:
-//   - An explicit node chain_id (> 0) is authoritative: in gateway mode it must
-//     resolve against the configured set, else error (no silent fallback — the
-//     Sentry EIGENLAYER-AVS-1N/1M footgun).
-//   - A 0 node chain_id resolves to the VM's default config — the request /
-//     aggregator chain. Deployed tasks SHOULD carry explicit per-node chains
-//     (enforced at create for gateway, see validateExplicitPartChains), but an
-//     isolated run (RunNodeImmediately / simulate) supplies the chain via the
-//     request, which is already baked into v.smartWalletConfig here.
+// REQUIRED — there is nothing to inherit and no default to fall back to:
+//   - chain_id <= 0 is a hard error in all modes. An isolated run
+//     (RunNodeImmediately / simulate) must supply the chain on the request,
+//     which is stamped onto the node before execution (stampNodeChainIfUnset).
+//   - Gateway mode: the chain must resolve against the configured set, else
+//     error (no silent fallback — the Sentry EIGENLAYER-AVS-1N/1M footgun).
+//   - Single-chain mode (no resolver): the sole smart_wallet config is used.
 func (v *VM) resolveSmartWalletForNode(nodeChainID int64) (*config.SmartWalletConfig, error) {
-	if v.chainConfigResolver != nil && nodeChainID > 0 {
+	if nodeChainID <= 0 {
+		return nil, fmt.Errorf("chain-aware node requires an explicit chain_id (got %d); a task no longer provides a default chain", nodeChainID)
+	}
+	if v.chainConfigResolver != nil {
 		if resolved := v.chainConfigResolver(nodeChainID); resolved != nil {
 			return resolved, nil
 		}
 		return nil, fmt.Errorf("chain_id %d is not configured on this aggregator", nodeChainID)
 	}
-	return v.smartWalletConfig, nil
+	if v.smartWalletConfig != nil {
+		return v.smartWalletConfig, nil
+	}
+	return nil, fmt.Errorf("no smart wallet config available for chain_id %d", nodeChainID)
 }
 
 // vmDefaultChainID returns the VM's default-config chain, used for

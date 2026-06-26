@@ -143,6 +143,7 @@ func TestRunNodeWithInputsRespectsIsSimulatedFlag(t *testing.T) {
 				TaskType: &avsproto.TaskNode_ContractWrite{
 					ContractWrite: &avsproto.ContractWriteNode{
 						Config: &avsproto.ContractWriteNode_Config{
+							ChainId:         11155111,                                     // explicit chain (strict)
 							ContractAddress: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", // USDC on Sepolia
 							ContractAbi:     contractAbi,
 							MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
@@ -161,7 +162,8 @@ func TestRunNodeWithInputsRespectsIsSimulatedFlag(t *testing.T) {
 
 			// Create protobuf request with the full TaskNode
 			req := &avsproto.RunNodeWithInputsReq{
-				Node: contractWriteNode,
+				ChainId: 11155111, // explicit chain (strict)
+				Node:    contractWriteNode,
 			}
 
 			// Settings for the workflow
@@ -307,6 +309,7 @@ func TestRunNodeWithInputsDefaultsToSimulation(t *testing.T) {
 		TaskType: &avsproto.TaskNode_ContractWrite{
 			ContractWrite: &avsproto.ContractWriteNode{
 				Config: &avsproto.ContractWriteNode_Config{
+					ChainId:         11155111, // explicit chain (strict)
 					ContractAddress: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
 					ContractAbi:     contractAbi,
 					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
@@ -324,7 +327,8 @@ func TestRunNodeWithInputsDefaultsToSimulation(t *testing.T) {
 	}
 
 	req := &avsproto.RunNodeWithInputsReq{
-		Node: contractWriteNode,
+		ChainId: 11155111, // explicit chain (strict)
+		Node:    contractWriteNode,
 	}
 
 	settingsData := map[string]interface{}{

@@ -59,6 +59,7 @@ func TestContractWrite_WithSettingsAndUserAuth(t *testing.T) {
 		// Contract configuration for USDC approve
 		nodeConfig := map[string]interface{}{
 			"contractAddress": "0xA0b86a33E6441d0be3c7bb50e65Eb42d5E0b2b4b", // USDC Sepolia
+			"chainId":         int64(11155111),                              // explicit chain (strict)
 			"contractAbi": []interface{}{
 				map[string]interface{}{
 					"inputs": []interface{}{
@@ -144,6 +145,7 @@ func TestContractWrite_WithSettingsAndUserAuth(t *testing.T) {
 
 		nodeConfig := map[string]interface{}{
 			"contractAddress": "0xA0b86a33E6441d0be3c7bb50e65Eb42d5E0b2b4b",
+			"chainId":         int64(11155111), // explicit chain (strict)
 			"contractAbi": []interface{}{
 				map[string]interface{}{
 					"inputs": []interface{}{
@@ -197,6 +199,7 @@ func TestContractWrite_WithSettingsAndUserAuth(t *testing.T) {
 
 		nodeConfig := map[string]interface{}{
 			"contractAddress": "0xA0b86a33E6441d0be3c7bb50e65Eb42d5E0b2b4b",
+			"chainId":         int64(11155111), // explicit chain (strict)
 			"contractAbi": []interface{}{
 				map[string]interface{}{
 					"inputs": []interface{}{
@@ -245,6 +248,7 @@ func TestContractWrite_WithSettingsAndUserAuth(t *testing.T) {
 
 		nodeConfig := map[string]interface{}{
 			"contractAddress": "0xA0b86a33E6441d0be3c7bb50e65Eb42d5E0b2b4b",
+			"chainId":         int64(11155111), // explicit chain (strict)
 			"contractAbi": []interface{}{
 				map[string]interface{}{
 					"inputs": []interface{}{
