@@ -391,12 +391,19 @@ func unquoteProtoInt64Strings(tree map[string]interface{}, md protoreflect.Messa
 		switch {
 		case fd.IsMap():
 			vDesc := fd.MapValue()
-			if vDesc.Kind() == protoreflect.MessageKind && !isWellKnownProto(vDesc.Message()) {
-				if m, ok := val.(map[string]interface{}); ok {
-					for _, mv := range m {
-						if sub, ok := mv.(map[string]interface{}); ok {
-							unquoteProtoInt64Strings(sub, vDesc.Message())
-						}
+			m, _ := val.(map[string]interface{})
+			switch {
+			case vDesc.Kind() == protoreflect.MessageKind && !isWellKnownProto(vDesc.Message()):
+				for _, mv := range m {
+					if sub, ok := mv.(map[string]interface{}); ok {
+						unquoteProtoInt64Strings(sub, vDesc.Message())
+					}
+				}
+			case is64BitIntKind(vDesc.Kind()):
+				// map<_, int64> values are protojson-encoded as strings too.
+				for k, mv := range m {
+					if s, ok := mv.(string); ok {
+						m[k] = json.Number(s)
 					}
 				}
 			}
