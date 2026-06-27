@@ -32,23 +32,23 @@ Backend gaps (this repo):
 - [x] **Strict reject-0** — `chain_id <= 0` invalid in all modes (resolver + create validator); no default fallback — **merged #632**
 - [x] **Create-path verification** — `TestNodeRoundTrip_PerNodeChainId` proves the persisted create path decodes per-node `chainId` — **merged #633**
 - [x] **OpenAPI renovation** — removed `Workflow.chainId` / `CreateWorkflowRequest.chainId` + the `ChainIdQuery` param on list/count/executions; per-part config `chainId` now `required` — **merged #634**
+- [x] **Executor cross-chain wallet/salt/fee** — execution-time wallet ownership/salt/credit checks scan all configured chains (mirror create-time), not the gateway default — **merged #637**
+- [x] **proto→OpenAPI int64 render fix** — `protoRetargetJSON` unquotes protojson's string-encoded `int64` (chainId) so create/get/list render chain-aware nodes; descriptor-driven so string fields (Amount) are untouched — **merged #640 (closes #639)**
 
-**Backend chain decoupling is complete on `staging`.** Wallet/exec defaults (decided): wallet-ownership
+**Backend chain decoupling is complete.** Wallet/exec defaults (decided): wallet-ownership
 checks across all configured chains (`userOwnsWalletOnAnyChain`); VM-default config = aggregator default;
 salt is chain-invariant. ✅ done.
 
-Client (separate repos — backend spec on `staging` now unblocks them):
+Client (separate repos — backend spec on `main` now unblocks them):
 
-- [ ] **`ava-sdk-js`** — **handed off to the SDK project.** Regen types (`openapi-download`+`types-gen` off the
-      renovated staging spec), make builder `chainId` required, drop list/count/executions `chainId` params, fix the
-      stale chain-resolution doc, flip the `PER_NODE_CHAIN_READY` tests. Contract: `## Client contract` below.
-- [ ] **studio** — Phase 3: per-part chains in the canvas; drop workflow-level `chainId`; chain-agnostic workflow list
+- [x] **`ava-sdk-js`** — **done.** Types regenerated off the renovated spec, builders require `chainId`, list/count/executions
+      `chainId` dropped; `PER_NODE_CHAIN_READY` multichain e2e **passes** against a local gateway.
+- [ ] **studio** — Phase 3: per-part chains in the canvas; drop workflow-level `chainId`; chain-agnostic workflow list (separate repo; not gated on the backend)
 
 Release / ops (this repo):
 
-- [ ] **staging → main** promotion: confirm the `wipe-chain-bucketed-task-keys` migration runs at boot;
-      `make storage-check` will flag the breaking proto + key-template change (expected — the migration is the handler).
-      Coordinate with the SDK/studio client update so chain-less calls aren't in flight when strict prod goes live.
+- [x] **staging → main** promotion (chain decoupling, incl. executor cross-chain fix #637): **merged #636**; `wipe-chain-bucketed-task-keys` migration runs at boot after a DB backup.
+- [ ] **staging → main** follow-up promotion: ship the #639 render fix (#640) + dev tooling to `main`. `make storage-check` clean (no new migration). *(SDK lockstep satisfied — e2e green; main currently carries the chain decoupling WITH the #639 render bug until this lands.)*
 
 Future (not started):
 
