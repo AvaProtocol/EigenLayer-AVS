@@ -782,6 +782,19 @@ components:
           format: int64
           description: Safety bound; 0 = server default (the wait is never unbounded).
 
+    SignalExecutionRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+          description: The approver's decision.
+        payload:
+          type: object
+          additionalProperties: true
+          description: Optional structured data delivered as the await step's output.
+
     # ---- Node union ----
 
     Node:
@@ -2035,6 +2048,41 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ExecutionStatusSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /executions/{id}:signal:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Ulid' }
+      - name: workflowId
+        in: query
+        required: true
+        description: Workflow id the execution belongs to. See `getExecution`.
+        schema: { $ref: '#/components/schemas/Ulid' }
+    post:
+      tags: [Executions]
+      summary: Deliver an approval/external signal to a waiting execution
+      description: |
+        Resumes a WAITING execution (durable execution). The caller must own the
+        workflow; the signal only counts against an actual pending wait whose kind
+        it matches and which has not timed out. v1 is the external-signal (human
+        approval) flavor — e.g. a Telegram approve/reject for a money-moving step.
+      operationId: signalExecution
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignalExecutionRequest' }
+      responses:
+        '200':
+          description: The resumed (terminal or still-waiting) execution.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Execution' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 

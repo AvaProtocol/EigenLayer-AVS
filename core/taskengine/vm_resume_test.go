@@ -348,6 +348,19 @@ func TestAwaitNode_SuspendThenSignal_EndToEnd(t *testing.T) {
 	assert.Nil(t, wakes[execID])
 }
 
+// TestSignalExecution_RequiresOwnedWorkflow proves the engine-level transport gate:
+// SignalExecution resolves the workflow via GetWorkflow (ownership), so a signal for
+// a non-owned/non-existent workflow is rejected before any resume. The full
+// resume path is covered by TestAwaitNode_SuspendThenSignal_EndToEnd + Advance tests.
+func TestSignalExecution_RequiresOwnedWorkflow(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	n := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+
+	_, err := n.SignalExecution(testutil.TestUser1(), "nonexistent-workflow", "exec-1", "approve", nil)
+	require.Error(t, err, "signaling a non-owned/non-existent workflow must be rejected")
+}
+
 // TestSnapshotNodeVars_ExcludesReservedNames guards the reserved-name collision:
 // a node literally named a system var (apContext) must not be snapshotted, or a
 // resume could persist secrets to disk.

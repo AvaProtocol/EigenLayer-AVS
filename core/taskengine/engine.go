@@ -4293,6 +4293,27 @@ func (n *Engine) getExecutionStatusFromQueue(task *model.Workflow, executionID s
 }
 
 // GetExecution for a given task id and execution id
+// SignalExecution delivers an external/approval signal to a WAITING execution
+// (durable execution — the human-approval transport). The authenticated user must
+// own the workflow (GetWorkflow enforces ownership); the executor's DeliverSignal
+// then enforces the gate (a matching, un-timed-out wait must exist). Decision is
+// "approve" | "reject".
+func (n *Engine) SignalExecution(user *model.User, workflowID, executionID, decision string, payload *structpb.Value) (*avsproto.Execution, error) {
+	task, err := n.GetWorkflow(user, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	executor := NewExecutor(n.ResolveSmartWalletConfig(n.defaultChainID()), n.db, n.logger, n, n.priceService)
+	signal := &Signal{
+		ExecutionID: executionID,
+		Kind:        WakeExternalSignal,
+		Decision:    decision,
+		Approver:    strings.ToLower(user.Address.Hex()),
+		Payload:     payload,
+	}
+	return executor.DeliverSignal(task, signal)
+}
+
 func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) (*avsproto.Execution, error) {
 	task, err := n.GetWorkflow(user, payload.TaskId)
 	if err != nil {

@@ -200,6 +200,12 @@ const (
 	SecretScopeWorkflow SecretScope = "workflow"
 )
 
+// Defines values for SignalExecutionRequestDecision.
+const (
+	Approve SignalExecutionRequestDecision = "approve"
+	Reject  SignalExecutionRequestDecision = "reject"
+)
+
 // Defines values for TokenMetadataResponseSource.
 const (
 	Cache     TokenMetadataResponseSource = "cache"
@@ -1193,6 +1199,18 @@ type SecretList struct {
 	PageInfo PageInfo `json:"pageInfo"`
 }
 
+// SignalExecutionRequest defines model for SignalExecutionRequest.
+type SignalExecutionRequest struct {
+	// Decision The approver's decision.
+	Decision SignalExecutionRequestDecision `json:"decision"`
+
+	// Payload Optional structured data delivered as the await step's output.
+	Payload *map[string]interface{} `json:"payload,omitempty"`
+}
+
+// SignalExecutionRequestDecision The approver's decision.
+type SignalExecutionRequestDecision string
+
 // SimulateWorkflowRequest defines model for SimulateWorkflowRequest.
 type SimulateWorkflowRequest struct {
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
@@ -1515,6 +1533,12 @@ type GetExecutionStatusParams struct {
 	WorkflowId Ulid `form:"workflowId" json:"workflowId"`
 }
 
+// SignalExecutionParams defines parameters for SignalExecution.
+type SignalExecutionParams struct {
+	// WorkflowId Workflow id the execution belongs to. See `getExecution`.
+	WorkflowId Ulid `form:"workflowId" json:"workflowId"`
+}
+
 // StreamExecutionParams defines parameters for StreamExecution.
 type StreamExecutionParams struct {
 	Interval *string `form:"interval,omitempty" json:"interval,omitempty"`
@@ -1606,6 +1630,9 @@ type CountWorkflowsParams struct {
 
 // AuthExchangeJSONRequestBody defines body for AuthExchange for application/json ContentType.
 type AuthExchangeJSONRequestBody = AuthExchangeRequest
+
+// SignalExecutionJSONRequestBody defines body for SignalExecution for application/json ContentType.
+type SignalExecutionJSONRequestBody = SignalExecutionRequest
 
 // RunNodeJSONRequestBody defines body for RunNode for application/json ContentType.
 type RunNodeJSONRequestBody = RunNodeRequest
