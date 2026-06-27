@@ -90,12 +90,43 @@ The first two implementations:
 
 - **`Await` (cross-chain).** `Config` embeds an event-watch on chain B (chain B = `event.chain_id`); on
   resume the matched log is its output (`{{await.data.amount}}`). Wake source: chain event.
-- **`HumanApproval`.** `Config { prompt, approvers, channel (telegram|api), timeout_seconds, on_timeout }`.
-  Suspends with an external-signal subscription scoped to the execution and the authorized approver(s); the
-  gateway's approve/reject endpoint (hit by the Telegram bot callback or an API client) delivers the signal;
-  the decision becomes the step's output, and a downstream `Branch` routes on approve/reject. Timeout →
-  auto-reject (or escalate). **Security:** the signal must be authenticated and authorized against
-  `Config.approvers` — a money-moving gate is only as safe as who can sign the green-light.
+- **`HumanApproval`.** `Config { prompt, channel (telegram|api), timeout_seconds, on_timeout, approvers? }`.
+  Suspends with an external-signal subscription scoped to the execution; the gateway's approve/reject endpoint
+  (hit by the Telegram bot callback or an API client) delivers the signal; the decision becomes the step's
+  output, and a downstream `Branch` routes on approve/reject. Timeout → auto-reject (or escalate). Security
+  model below.
+
+### Approval security model (resolved)
+
+The trust anchor already exists — no per-approval signature is needed:
+
+1. **Deploy = EOA signature gate.** Creating a workflow is EOA-authenticated (SIWE → JWT); the user signs
+   with the EOA that *owns* the CREATE2-derived smart wallet. That signature proves ownership **and bounds
+   what the workflow may ever do** (its contracts, and — see below — capped recipients/amounts).
+2. **Telegram binding under that auth.** Studio, while the user is EOA-authenticated, links the user's
+   Telegram (bot-verified `telegram_user_id` ↔ owner), stored server-side.
+3. **In-flight approval = a Telegram tap**, relayed by the bot → gateway, checked against the binding. No
+   fresh EOA signature mid-flight.
+
+**Why that's safe:** the EOA signs the *envelope* (what the workflow may do); the Telegram tap is a
+*go/no-go within it*. A compromised Telegram can only green-light **pre-authorized** actions — it cannot
+redirect funds or change amounts. The blast radius is bounded by the signed envelope, not by Telegram
+account security.
+
+**Engine must enforce:**
+- binding established under EOA auth and stored server-side; approval checks
+  `telegram_user_id == bound approver for the workflow's owner` (default approver = owner; `Config.approvers`
+  only for delegated/multi-party).
+- **trusted bot→gateway channel** (bot is backend; shared secret/mTLS) so Telegram's verified user id is the
+  only authenticated input — no forged "approve" injectable.
+- **scoped + idempotent** — the signal advances *this* WAITING execution exactly once (status guard);
+  replayed callbacks no-op.
+- **timeout → auto-reject** (never leave a money-gating await hanging) + **audit** (approver id + time).
+
+**Recommended envelope tightening (so the go/no-go is genuinely bounded):** support an optional, deploy-signed
+**per-workflow value cap / recipient allow-list** for money-moving steps — otherwise a dynamic
+recipient/amount (from a prior node) widens what the tap authorizes. Optionally a **high-value tier** that
+*does* require a fresh EOA signature (via the extension) above a threshold — opt-in, not the default.
 
 Future steps reuse the same interface for free: `Delay`, `WaitForWebhook`, retry/backoff wrappers, SLAs.
 
@@ -156,9 +187,11 @@ the real bridge; a gateway-endpoint integration test for the Telegram approve/re
 
 ## Open questions / risks
 
-- **Approval security model** — authentication of the approve/reject signal, the `approvers` allow-list, and
-  binding a Telegram identity to an authorized party. This is the highest-stakes new surface (it gates money
-  movement) and needs its own mini-design before P-step 2.
+- **Approval security model** — **resolved** (see *Approval security model* above): anchored on the existing
+  deploy-time EOA signature (the bounded envelope) + a studio-established Telegram binding; in-flight approval
+  is a bound Telegram tap, no fresh signature. Remaining *implementation* details: the binding store + check,
+  the trusted bot→gateway channel, and the optional deploy-signed value cap / recipient allow-list (and the
+  opt-in high-value re-sign tier).
 - **Migration** — relaxed same-results ⇒ wipe in-flight/old executions at cutover. Confirm no live executions
   must survive the switch (or provide a drain window).
 - **Crash-recovery re-arm correctness** — the boot `wake:` re-arm + GC must be exactly-once against
