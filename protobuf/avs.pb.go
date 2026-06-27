@@ -562,6 +562,9 @@ const (
 	ExecutionStatus_EXECUTION_STATUS_SUCCESS     ExecutionStatus = 2
 	ExecutionStatus_EXECUTION_STATUS_FAILED      ExecutionStatus = 3
 	ExecutionStatus_EXECUTION_STATUS_ERROR       ExecutionStatus = 5
+	// Durable execution: the execution is suspended mid-workflow, waiting for a
+	// signal (chain event, external approval, or timer) to advance. Non-terminal.
+	ExecutionStatus_EXECUTION_STATUS_WAITING ExecutionStatus = 6
 )
 
 // Enum value maps for ExecutionStatus.
@@ -572,6 +575,7 @@ var (
 		2: "EXECUTION_STATUS_SUCCESS",
 		3: "EXECUTION_STATUS_FAILED",
 		5: "EXECUTION_STATUS_ERROR",
+		6: "EXECUTION_STATUS_WAITING",
 	}
 	ExecutionStatus_value = map[string]int32{
 		"EXECUTION_STATUS_UNSPECIFIED": 0,
@@ -579,6 +583,7 @@ var (
 		"EXECUTION_STATUS_SUCCESS":     2,
 		"EXECUTION_STATUS_FAILED":      3,
 		"EXECUTION_STATUS_ERROR":       5,
+		"EXECUTION_STATUS_WAITING":     6,
 	}
 )
 
@@ -2112,9 +2117,15 @@ type Execution struct {
 	// This helps clients understand execution order without calculating based on timestamps
 	Index int64 `protobuf:"varint,6,opt,name=index,proto3" json:"index,omitempty"`
 	// Fees actually charged for this execution (matches EstimateFeesResp format)
-	ExecutionFee  *Fee              `protobuf:"bytes,7,opt,name=execution_fee,json=executionFee,proto3" json:"execution_fee,omitempty"` // Flat platform fee charged {amount, unit: "USD"}
-	Cogs          []*NodeCOGS       `protobuf:"bytes,9,rep,name=cogs,proto3" json:"cogs,omitempty"`                                     // Per-node actual gas/API costs {fee: {amount, unit: "WEI"}}
-	ValueFee      *ValueFee         `protobuf:"bytes,10,opt,name=value_fee,json=valueFee,proto3" json:"value_fee,omitempty"`            // Value-capture fee charged (post-paid) {fee: {amount, unit: "PERCENTAGE"}}
+	ExecutionFee *Fee        `protobuf:"bytes,7,opt,name=execution_fee,json=executionFee,proto3" json:"execution_fee,omitempty"` // Flat platform fee charged {amount, unit: "USD"}
+	Cogs         []*NodeCOGS `protobuf:"bytes,9,rep,name=cogs,proto3" json:"cogs,omitempty"`                                     // Per-node actual gas/API costs {fee: {amount, unit: "WEI"}}
+	ValueFee     *ValueFee   `protobuf:"bytes,10,opt,name=value_fee,json=valueFee,proto3" json:"value_fee,omitempty"`            // Value-capture fee charged (post-paid) {fee: {amount, unit: "PERCENTAGE"}}
+	// Durable execution (suspend/resume). Set only while status == WAITING; cleared
+	// on resume to a terminal status. The accumulated `steps` above carry each
+	// completed step's output, so they are the resumable state — these fields just
+	// mark where/why the execution is parked.
+	ResumeNodeId  string            `protobuf:"bytes,11,opt,name=resume_node_id,json=resumeNodeId,proto3" json:"resume_node_id,omitempty"` // the suspended step; execution resumes at its successors
+	WaitReason    string            `protobuf:"bytes,12,opt,name=wait_reason,json=waitReason,proto3" json:"wait_reason,omitempty"`         // debug/human label for why it is waiting
 	Steps         []*Execution_Step `protobuf:"bytes,8,rep,name=steps,proto3" json:"steps,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2211,6 +2222,20 @@ func (x *Execution) GetValueFee() *ValueFee {
 		return x.ValueFee
 	}
 	return nil
+}
+
+func (x *Execution) GetResumeNodeId() string {
+	if x != nil {
+		return x.ResumeNodeId
+	}
+	return ""
+}
+
+func (x *Execution) GetWaitReason() string {
+	if x != nil {
+		return x.WaitReason
+	}
+	return ""
 }
 
 func (x *Execution) GetSteps() []*Execution_Step {
@@ -10019,7 +10044,7 @@ const file_avs_proto_rawDesc = "" +
 	"\vcustom_code\x18\x12 \x01(\v2\x1a.aggregator.CustomCodeNodeH\x00R\n" +
 	"customCode\x123\n" +
 	"\abalance\x18\x13 \x01(\v2\x17.aggregator.BalanceNodeH\x00R\abalanceB\v\n" +
-	"\ttask_type\"\x8a\x0f\n" +
+	"\ttask_type\"\xd1\x0f\n" +
 	"\tExecution\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\bstart_at\x18\x02 \x01(\x03R\astartAt\x12\x15\n" +
@@ -10030,7 +10055,10 @@ const file_avs_proto_rawDesc = "" +
 	"\rexecution_fee\x18\a \x01(\v2\x0f.aggregator.FeeR\fexecutionFee\x12(\n" +
 	"\x04cogs\x18\t \x03(\v2\x14.aggregator.NodeCOGSR\x04cogs\x121\n" +
 	"\tvalue_fee\x18\n" +
-	" \x01(\v2\x14.aggregator.ValueFeeR\bvalueFee\x120\n" +
+	" \x01(\v2\x14.aggregator.ValueFeeR\bvalueFee\x12$\n" +
+	"\x0eresume_node_id\x18\v \x01(\tR\fresumeNodeId\x12\x1f\n" +
+	"\vwait_reason\x18\f \x01(\tR\n" +
+	"waitReason\x120\n" +
 	"\x05steps\x18\b \x03(\v2\x1a.aggregator.Execution.StepR\x05steps\x1a\x94\f\n" +
 	"\x04Step\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -10570,13 +10598,14 @@ const file_avs_proto_rawDesc = "" +
 	"\n" +
 	"\x06Failed\x10\x02\x12\v\n" +
 	"\aRunning\x10\x04\x12\f\n" +
-	"\bDisabled\x10\x05*\xd0\x01\n" +
+	"\bDisabled\x10\x05*\xee\x01\n" +
 	"\x0fExecutionStatus\x12 \n" +
 	"\x1cEXECUTION_STATUS_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18EXECUTION_STATUS_PENDING\x10\x01\x12\x1c\n" +
 	"\x18EXECUTION_STATUS_SUCCESS\x10\x02\x12\x1b\n" +
 	"\x17EXECUTION_STATUS_FAILED\x10\x03\x12\x1a\n" +
-	"\x16EXECUTION_STATUS_ERROR\x10\x05\"\x04\b\x04\x10\x04* EXECUTION_STATUS_PARTIAL_SUCCESSB\fZ\n" +
+	"\x16EXECUTION_STATUS_ERROR\x10\x05\x12\x1c\n" +
+	"\x18EXECUTION_STATUS_WAITING\x10\x06\"\x04\b\x04\x10\x04* EXECUTION_STATUS_PARTIAL_SUCCESSB\fZ\n" +
 	"./avsprotob\x06proto3"
 
 var (

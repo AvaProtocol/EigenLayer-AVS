@@ -370,6 +370,9 @@ enum ExecutionStatus {
   reserved 4;
   reserved "EXECUTION_STATUS_PARTIAL_SUCCESS";
   EXECUTION_STATUS_ERROR = 5;
+  // Durable execution: the execution is suspended mid-workflow, waiting for a
+  // signal (chain event, external approval, or timer) to advance. Non-terminal.
+  EXECUTION_STATUS_WAITING = 6;
 }
 
 
@@ -723,6 +726,13 @@ message Execution {
   Fee execution_fee = 7;            // Flat platform fee charged {amount, unit: "USD"}
   repeated NodeCOGS cogs = 9;      // Per-node actual gas/API costs {fee: {amount, unit: "WEI"}}
   ValueFee value_fee = 10;         // Value-capture fee charged (post-paid) {fee: {amount, unit: "PERCENTAGE"}}
+
+  // Durable execution (suspend/resume). Set only while status == WAITING; cleared
+  // on resume to a terminal status. The accumulated `steps` above carry each
+  // completed step's output, so they are the resumable state — these fields just
+  // mark where/why the execution is parked.
+  string resume_node_id = 11;  // the suspended step; execution resumes at its successors
+  string wait_reason    = 12;  // debug/human label for why it is waiting
 
   message Step {
     string id = 1;
