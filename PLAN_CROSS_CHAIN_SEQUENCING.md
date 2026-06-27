@@ -1,7 +1,10 @@
 # PLAN — Cross-Chain Sequencing (Phase 4)
 
-Status: **design, not started.** Successor to `PLAN_CHAIN_DECOUPLING.md` Phase 4. This doc is the
-design of record; nothing here is implemented yet.
+Status: **design — SUPERSEDED as the engine approach by [`PLAN_DURABLE_EXECUTION.md`](PLAN_DURABLE_EXECUTION.md).**
+The decision (Level 3) is to build a durable execution engine and make cross-chain `Await` one `Suspendable`
+feature on it, rather than the Level-1 bolt-on described here. This doc is retained for **Appendix B
+(test scenarios E1–E15)** and the **reference map**, both still valid; Appendices A/C/D describe the bolt-on
+mechanics that the engine makes native. Read `PLAN_DURABLE_EXECUTION.md` first.
 
 ## What this is
 
