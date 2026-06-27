@@ -571,3 +571,93 @@ dead one, and expires the timed-out ones — no in-memory state required to surv
 - **Pre-existing gotchas surfaced** (not fixed here): `BatchWrite` swallows commit errors and splits on
   `ErrTxnTooBig`. Worth a follow-up to make `BatchWrite` return commit errors, but the design above is
   correct without it.
+
+---
+
+## Appendix D — Internal-trigger sync path (wake routing)
+
+The last conceptually-unproven piece. Grounded in the sync protocol (`protobuf/node.proto`),
+`StreamCheckToOperator` (`engine.go:1818`), `AggregateChecksResultWithState` (`engine.go:2627`), and the
+operator watch (`operator/worker_loop.go:1081`).
+
+### D.1 The gap
+The existing pipeline is **`task_id`-keyed**: `SyncMessagesResp.TaskMetadata{ task_id, trigger, chain_id }`
+goes *down* to operators; `NotifyTriggersReq{ task_id, trigger_output, trigger_request_id }` comes *up* when
+it fires; the aggregator starts a **fresh** run. An internal trigger is **execution-scoped** (a specific
+WAITING execution wants a specific event on chain B, and the fire must *resume that execution*, not start a
+new run). So we thread an `execution_id` through both messages and branch on it.
+
+### D.2 Proto additions (additive)
+```proto
+// node.proto — SyncMessagesResp.TaskMetadata
++ string execution_id = 7;   // set for internal/await triggers; "" for a task's own trigger
+// node.proto — NotifyTriggersReq
++ string execution_id = 11;  // operator echoes it back when an internal trigger fires
+```
+That's the entire wire change. An internal trigger is just a `TaskMetadata` with `chain_id = B`,
+`trigger =` the internal EventTrigger (built from `Await.Config`), and `execution_id` set. The operator
+needs no new *watch* logic — only to carry the id through.
+
+### D.3 Registration (suspend → operators covering B)
+- The set the sync loop pushes to operator **O** becomes: *active task triggers* (today) **+** *WAITING
+  executions' internal triggers whose `chain_id ∈ O.supported_chain_ids`*. The internal-trigger set is an
+  in-memory mirror, **rebuilt on boot from the `itrigger:` scan** (Appendix C.5) and updated on
+  suspend/resume.
+- On suspend, don't wait for the next sync tick: **immediately** push `MonitorTaskTrigger(TaskMetadata{…,
+  execution_id})` to operators covering B (reuse the immediate/batched notify path at `engine.go:2341`,
+  same mechanism as `ImmediateTrigger`).
+
+### D.4 Operator side (reuse the per-chain watch; `worker_loop.go`)
+- `EventTrigger.AddCheck` keys the check by **`(task_id, execution_id)`** so a task's own trigger
+  (`execution_id=""`) and its internal triggers (`execution_id` set) coexist without collision.
+- On fire: echo `execution_id` in `NotifyTriggersReq`; the `trigger_request_id` becomes
+  `task_id:exec_id:txHash:logIndex` (per-execution-per-event).
+- A `DeleteTask`/`DisableTask` message scoped by `execution_id` removes one internal check.
+- **No new watch logic** — it's the existing per-chain `EventTrigger` machinery with an extra id passed through.
+
+### D.5 Wake → resume routing (`AggregateChecksResultWithState`)
+Branch right after the dedup (`engine.go:2706`), before the fresh-run path:
+```go
+if payload.ExecutionId != "" {                 // an internal/await trigger fired
+    return n.resumeWaitingExecution(payload)
+}
+// ... existing runnable check + QueueExecutionData + enqueue (fresh run) ...
+```
+`resumeWaitingExecution`:
+1. Load the execution. **If status != WAITING → no-op** (already resumed / cancelled / timed-out). This is
+   the durable exactly-once guard, beyond the 5-min dedup window (**E8**).
+2. (If the bound filter is a data field, post-match it here — see D.7.)
+3. Build `QueueExecutionData{ ExecutionID: payload.ExecutionId, IsResume: true,
+   TriggerOutput: ExtractTriggerOutput(payload.TriggerOutput) }` and enqueue `JobTypeExecuteTask`.
+4. `executor.Perform` sees `IsResume` → the resume entrypoint (Appendix A.4): load checkpoint, set
+   `vars[awaitNode].data = <wake event>`, run the B-leg.
+
+`QueueExecutionData` (Go struct) gains one field: `IsResume bool` (it already carries `ExecutionID`).
+
+### D.6 Dedup & idempotency (two layers)
+- **Short window:** `trigger_request_id` (now per-execution-per-event) → the existing 5-min dedup
+  (`engine.go:2706`) drops immediate duplicates.
+- **Durable:** the **execution-status guard** in D.5 step 1 makes resume exactly-once across a restart
+  (when a wake arrives hours later or twice around a reboot) — the dedup map doesn't need to survive.
+
+### D.7 Filter precision (E6)
+- **Preferred:** the bridge arrival event indexes the discriminator (e.g. `messageId`) as a **topic** — the
+  operator's event check fires *only* on the matching log; no post-match needed.
+- **Fallback:** if the discriminator is in event *data* (not indexed), the operator fires on every arrival
+  event for that address/topic; `resumeWaitingExecution` **post-matches** the bound value against the event
+  data and no-ops on mismatch. The `Await.Config.filter` records which mode applies.
+
+### D.8 Deregistration
+On resolve (resume success/fail, timeout, or cancel), the engine sends a `Delete` scoped by
+`(task_id, execution_id)` to operators covering B, and deletes `itrigger:`/`ckpt:` (Appendix C.4). Boot GC
+(C.5) is the backstop if a deregister is missed.
+
+### D.9 What this satisfies
+- **E3 (restart):** boot `itrigger:` scan → rebuild the internal-trigger mirror → the sync loop re-pushes it
+  to operators covering B on (re)connect. No in-memory state needs to survive.
+- **E6 (correct filter):** topic-indexed precision at the operator, or aggregator post-match (D.7).
+- **E7 (concurrent isolated):** distinct `(task_id, execution_id)` checks + distinct filters; each fire
+  carries its own `execution_id` → resumes exactly its own execution.
+- **Open risk — coverage drift:** chain B is validated as covered at create time (O7/E11), but the only
+  covering operator could drop *while* a wait is pending. Behavior then (re-route on reconnect? alert?) is
+  unresolved and called out in the main Open-questions list.
