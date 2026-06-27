@@ -1,6 +1,8 @@
 package taskengine
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 
 	"google.golang.org/protobuf/types/known/structpb"
@@ -149,4 +151,62 @@ func (s *Signal) Validate() error {
 		return fmt.Errorf("external signal requires a decision")
 	}
 	return nil
+}
+
+// snapshotNodeVars serializes only the per-node output vars (keyed by node name)
+// for a durable suspend. System/secret vars (settings, aa_*, apContext, trigger)
+// are deliberately excluded — they are re-injected fresh on resume, never
+// persisted (apContext carries secrets). This is the restorable slice of state
+// that lets a resumed leg reference prior steps' outputs ({{node.data.x}}).
+func (v *VM) snapshotNodeVars() ([]byte, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	out := make(map[string]any, len(v.TaskNodes))
+	for nodeID := range v.TaskNodes {
+		name := v.getNodeNameAsVarLocked(nodeID)
+		if name == "" {
+			continue
+		}
+		if val, ok := v.vars[name]; ok {
+			out[name] = val
+		}
+	}
+	return json.Marshal(out)
+}
+
+// restoreNodeVars overlays a snapshot from snapshotNodeVars back onto the VM's
+// vars, so resumed nodes resolve prior steps' outputs. UseNumber keeps integers
+// from being silently coerced to float64, preserving template-render fidelity.
+func (v *VM) restoreNodeVars(snapshot []byte) error {
+	if len(snapshot) == 0 {
+		return nil
+	}
+	var restored map[string]any
+	dec := json.NewDecoder(bytes.NewReader(snapshot))
+	dec.UseNumber()
+	if err := dec.Decode(&restored); err != nil {
+		return fmt.Errorf("restore node vars: %w", err)
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.vars == nil {
+		v.vars = make(map[string]any)
+	}
+	for k, val := range restored {
+		v.vars[k] = val
+	}
+	return nil
+}
+
+// completedNodeIDsFromSteps derives the resume completion set from a prior leg's
+// persisted execution steps (each executed node appended one step). This is the
+// resumeCompleted the re-entrant scheduler consumes.
+func completedNodeIDsFromSteps(steps []*avsproto.Execution_Step) map[string]bool {
+	out := make(map[string]bool, len(steps))
+	for _, s := range steps {
+		if s != nil && s.Id != "" {
+			out[s.Id] = true
+		}
+	}
+	return out
 }

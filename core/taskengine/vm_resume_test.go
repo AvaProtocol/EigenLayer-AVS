@@ -84,3 +84,64 @@ func TestScheduler_Resume_EmptyCompletedEqualsFresh(t *testing.T) {
 	require.NoError(t, vm.Run())
 	assert.ElementsMatch(t, ids, executedNodeIDs(vm), "empty completed == fresh run")
 }
+
+// TestVM_SnapshotRestoreNodeVars_Fidelity is the fidelity-critical proof for
+// increment 4: a node's output survives a snapshot → restore (into a fresh VM)
+// such that template resolution is byte-identical — so a resumed leg can read
+// {{prior.data.x}}. Also asserts secrets/system vars are NOT snapshotted.
+func TestVM_SnapshotRestoreNodeVars_Fidelity(t *testing.T) {
+	vm, ids := buildLinearCustomCodeVM(t)
+	cc1 := ids[0]
+
+	proc := &CommonProcessor{vm: vm}
+	proc.SetOutputVarForStep(cc1, map[string]any{"data": map[string]any{
+		"value":  42,
+		"msg":    "hi",
+		"amount": "1000000000000000000",
+	}})
+
+	name := vm.GetNodeNameAsVar(cc1)
+	tmpl := "{{" + name + ".data.value}}|{{" + name + ".data.msg}}|{{" + name + ".data.amount}}"
+	before := vm.preprocessText(tmpl)
+	require.Equal(t, "42|hi|1000000000000000000", before, "sanity: original resolution")
+
+	snap, err := vm.snapshotNodeVars()
+	require.NoError(t, err)
+	require.Contains(t, string(snap), name, "snapshot includes the node output")
+	require.NotContains(t, string(snap), "apContext", "snapshot excludes system/secret vars")
+
+	// Restore into a fresh VM (same task) and assert identical resolution.
+	vm2, _ := buildLinearCustomCodeVM(t)
+	require.NoError(t, vm2.restoreNodeVars(snap))
+	after := vm2.preprocessText(tmpl)
+	assert.Equal(t, before, after, "template resolution must be identical after snapshot/restore")
+}
+
+func TestCompletedNodeIDsFromSteps(t *testing.T) {
+	steps := []*avsproto.Execution_Step{{Id: "a"}, {Id: "b"}, nil, {Id: ""}}
+	assert.Equal(t, map[string]bool{"a": true, "b": true}, completedNodeIDsFromSteps(steps))
+}
+
+// TestResume_RestoredVarsUsableByFrontier ties it together: restore a prior leg's
+// node vars into a fresh VM, mark them completed, and run — the frontier node
+// executes (only it) with the restored vars available. This is the in-memory
+// shape of advance(); the storage-backed wiring is the remaining step.
+func TestResume_RestoredVarsUsableByFrontier(t *testing.T) {
+	// Leg 1: run fully, snapshot the node vars.
+	vm1, ids := buildLinearCustomCodeVM(t)
+	require.NoError(t, vm1.Run())
+	require.Len(t, executedNodeIDs(vm1), 3)
+	snap, err := vm1.snapshotNodeVars()
+	require.NoError(t, err)
+
+	// Leg 2 (resume): fresh VM, restore vars, mark cc1+cc2 done, run.
+	vm2, _ := buildLinearCustomCodeVM(t)
+	require.NoError(t, vm2.restoreNodeVars(snap))
+	vm2.resumeCompleted = completedNodeIDsFromSteps([]*avsproto.Execution_Step{{Id: ids[0]}, {Id: ids[1]}})
+	require.NoError(t, vm2.Run())
+
+	assert.Equal(t, []string{ids[2]}, executedNodeIDs(vm2), "only the frontier runs on resume")
+	// The restored prior output is present and resolvable.
+	assert.Contains(t, vm2.preprocessText("{{"+vm2.GetNodeNameAsVar(ids[0])+".data.ok}}"), "true",
+		"restored prior-node output is readable by the resumed leg")
+}
