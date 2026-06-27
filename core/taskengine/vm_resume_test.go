@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -120,6 +121,51 @@ func TestVM_SnapshotRestoreNodeVars_Fidelity(t *testing.T) {
 func TestCompletedNodeIDsFromSteps(t *testing.T) {
 	steps := []*avsproto.Execution_Step{{Id: "a"}, {Id: "b"}, nil, {Id: ""}}
 	assert.Equal(t, map[string]bool{"a": true, "b": true}, completedNodeIDsFromSteps(steps))
+}
+
+// TestScheduler_Resume_AllCompleted_Terminates guards the empty-frontier case
+// (every node already completed). Without the early return it would hang on an
+// unclosed channel; the timeout fails fast rather than wedging the suite.
+func TestScheduler_Resume_AllCompleted_Terminates(t *testing.T) {
+	vm, ids := buildLinearCustomCodeVM(t)
+	vm.resumeCompleted = map[string]bool{ids[0]: true, ids[1]: true, ids[2]: true}
+
+	done := make(chan error, 1)
+	go func() { done <- vm.Run() }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("scheduler hung on an all-completed (empty frontier) resume")
+	}
+	assert.Empty(t, executedNodeIDs(vm), "no nodes execute when all are completed")
+}
+
+// TestSnapshotNodeVars_ExcludesReservedNames guards the reserved-name collision:
+// a node literally named a system var (apContext) must not be snapshotted, or a
+// resume could persist secrets to disk.
+func TestSnapshotNodeVars_ExcludesReservedNames(t *testing.T) {
+	node := &avsproto.TaskNode{
+		Id: "apContext", Name: "apContext",
+		TaskType: &avsproto.TaskNode_CustomCode{CustomCode: &avsproto.CustomCodeNode{
+			Config: &avsproto.CustomCodeNode_Config{Lang: avsproto.Lang_LANG_JAVASCRIPT, Source: "return {};"},
+		}},
+	}
+	trigger := &avsproto.TaskTrigger{Id: "t", Name: "t", TriggerType: &avsproto.TaskTrigger_Manual{}}
+	task := &model.Workflow{Task: &avsproto.Task{
+		Id: "x", Nodes: []*avsproto.TaskNode{node}, Trigger: trigger,
+		Edges: []*avsproto.TaskEdge{{Id: "e", Source: "t", Target: "apContext"}},
+	}}
+	vm, err := NewVMWithData(task, nil, &config.SmartWalletConfig{}, nil)
+	require.NoError(t, err)
+
+	proc := &CommonProcessor{vm: vm}
+	proc.SetOutputVarForStep("apContext", map[string]any{"data": map[string]any{"secret": "leak"}})
+
+	snap, err := vm.snapshotNodeVars()
+	require.NoError(t, err)
+	assert.NotContains(t, string(snap), "leak", "a node named apContext must not be snapshotted")
+	assert.Equal(t, "{}", string(snap), "snapshot is empty — the only node collides with a reserved name")
 }
 
 // TestResume_RestoredVarsUsableByFrontier ties it together: restore a prior leg's

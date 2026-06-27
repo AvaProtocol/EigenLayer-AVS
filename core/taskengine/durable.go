@@ -156,19 +156,31 @@ func (s *Signal) Validate() error {
 	return nil
 }
 
+// reservedSystemVarNames are VM vars that hold system/secret context, re-injected
+// fresh on resume — never node outputs. A node whose (user-chosen) name collides
+// with one of these must NOT have its var snapshotted or restored: snapshotting
+// would persist secrets (apContext) to disk; restoring would clobber system state.
+var reservedSystemVarNames = map[string]bool{
+	"apContext":     true, // secrets / ap.* JS context
+	"settings":      true, // runner + chain_id
+	"aa_sender":     true, // smart-wallet address
+	"aa_salt":       true, // wallet salt
+	"triggerConfig": true, // trigger config
+}
+
 // snapshotNodeVars serializes only the per-node output vars (keyed by node name)
-// for a durable suspend. System/secret vars (settings, aa_*, apContext, trigger)
-// are deliberately excluded — they are re-injected fresh on resume, never
-// persisted (apContext carries secrets). This is the restorable slice of state
-// that lets a resumed leg reference prior steps' outputs ({{node.data.x}}).
+// for a durable suspend. System/secret vars are deliberately excluded — they are
+// re-injected fresh on resume, never persisted (apContext carries secrets). This
+// is the restorable slice of state that lets a resumed leg reference prior steps'
+// outputs ({{node.data.x}}).
 func (v *VM) snapshotNodeVars() ([]byte, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	out := make(map[string]any, len(v.TaskNodes))
 	for nodeID := range v.TaskNodes {
 		name := v.getNodeNameAsVarLocked(nodeID)
-		if name == "" {
-			continue
+		if name == "" || reservedSystemVarNames[name] {
+			continue // never persist a system/secret var, even if a node is named one
 		}
 		if val, ok := v.vars[name]; ok {
 			out[name] = val
@@ -196,6 +208,9 @@ func (v *VM) restoreNodeVars(snapshot []byte) error {
 		v.vars = make(map[string]any)
 	}
 	for k, val := range restored {
+		if reservedSystemVarNames[k] {
+			continue // defense-in-depth: a corrupt/tampered snapshot must not clobber system/secret vars
+		}
 		v.vars[k] = val
 	}
 	return nil
@@ -292,6 +307,11 @@ func loadAllWakeSubscriptions(db storage.Storage) (map[string]*WakeSubscription,
 		sub, err := unmarshalWake(it.Value)
 		if err != nil {
 			return nil, fmt.Errorf("load wake %s: %w", execID, err)
+		}
+		// Re-validate on load: a corrupted or partially-written record gets a clear
+		// error path here rather than surfacing as hard-to-debug behavior later.
+		if err := sub.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid wake %s: %w", execID, err)
 		}
 		out[execID] = sub
 	}

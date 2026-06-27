@@ -1082,6 +1082,14 @@ func (v *VM) runKahnScheduler() error {
 		scheduledCount++
 	}
 
+	// Empty frontier — e.g. a resume where every node already completed, or a graph
+	// with no runnable roots. Nothing will be processed, so the termination check
+	// inside the worker loop is never reached; return now instead of spawning
+	// workers that would block forever on an unclosed, empty channel.
+	if scheduledCount == 0 {
+		return nil
+	}
+
 	var processed int64
 	var mu sync.Mutex
 	workers := len(nodes)
