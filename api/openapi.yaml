@@ -103,8 +103,8 @@ components:
       name: chainId
       in: query
       description: |
-        Chain ID filter. Omit to use the aggregator default chain. Repeat
-        the parameter to filter by multiple chains.
+        The chain to operate on (a single value). Omit to use the aggregator
+        default (the request's JWT `aud` chain, then the gateway default).
       schema:
         type: integer
         format: int64

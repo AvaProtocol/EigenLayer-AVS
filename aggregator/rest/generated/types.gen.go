@@ -1523,15 +1523,15 @@ type DeleteSecretParams struct {
 
 // GetTokenParams defines parameters for GetToken.
 type GetTokenParams struct {
-	// ChainId Chain ID filter. Omit to use the aggregator default chain. Repeat
-	// the parameter to filter by multiple chains.
+	// ChainId The chain to operate on (a single value). Omit to use the aggregator
+	// default (the request's JWT `aud` chain, then the gateway default).
 	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
 // GetWalletNonceParams defines parameters for GetWalletNonce.
 type GetWalletNonceParams struct {
-	// ChainId Chain ID filter. Omit to use the aggregator default chain. Repeat
-	// the parameter to filter by multiple chains.
+	// ChainId The chain to operate on (a single value). Omit to use the aggregator
+	// default (the request's JWT `aud` chain, then the gateway default).
 	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
