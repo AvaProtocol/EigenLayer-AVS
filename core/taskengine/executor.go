@@ -879,17 +879,26 @@ func (x *WorkflowExecutor) Advance(task *model.Workflow, executionID string, sig
 	if err := protojson.Unmarshal(raw, execution); err != nil {
 		return nil, fmt.Errorf("unmarshal execution %s: %w", executionID, err)
 	}
-	// Only a WAITING execution resumes (exactly-once across a duplicate / post-restart signal).
+	// Only a WAITING execution resumes (exactly-once across a duplicate / post-restart
+	// signal). On the no-op path, still best-effort GC any orphaned durable state in
+	// case a prior finalize crashed between persisting the terminal record and cleanup.
 	if execution.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING {
+		_ = deleteCheckpoint(x.db, executionID)
+		_ = deleteWakeSubscription(x.db, executionID)
 		return execution, nil
 	}
 
-	// Rebuild the VM (mirror RunTask's construction).
+	// Rebuild the VM, mirroring RunTask's swConfig resolution so the resumed leg uses
+	// the same wallet/chain settings as the initial leg.
 	secrets, secErr := LoadSecretForTask(x.db, task)
 	if secErr != nil {
 		secrets = map[string]string{}
 	}
-	vm, err := NewVMWithData(task, nil, x.smartWalletConfig, secrets)
+	swConfig := x.smartWalletConfig
+	if x.engine != nil {
+		swConfig = x.engine.ResolveSmartWalletConfig(x.engine.defaultChainID())
+	}
+	vm, err := NewVMWithData(task, nil, swConfig, secrets)
 	if err != nil {
 		return nil, fmt.Errorf("rebuild vm on resume: %w", err)
 	}
@@ -901,11 +910,15 @@ func (x *WorkflowExecutor) Advance(task *model.Workflow, executionID string, sig
 		return nil, fmt.Errorf("compile on resume: %w", err)
 	}
 
-	// Restore prior-leg vars.
-	if ckpt, lErr := loadCheckpoint(x.db, executionID); lErr == nil && len(ckpt) > 0 {
-		if err := vm.restoreNodeVars(ckpt); err != nil {
-			return nil, fmt.Errorf("restore vars on resume: %w", err)
-		}
+	// Restore prior-leg vars. A WAITING execution always has a checkpoint (written
+	// at suspend); a missing/unreadable one is corruption — fail rather than resume
+	// with partial state.
+	ckpt, lErr := loadCheckpoint(x.db, executionID)
+	if lErr != nil {
+		return nil, fmt.Errorf("load checkpoint for WAITING execution %s: %w", executionID, lErr)
+	}
+	if err := vm.restoreNodeVars(ckpt); err != nil {
+		return nil, fmt.Errorf("restore vars on resume: %w", err)
 	}
 
 	// The wake delivers the suspended step's output.
