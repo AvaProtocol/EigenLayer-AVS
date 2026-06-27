@@ -477,3 +477,97 @@ Sepolia→Base Sepolia through a real bridge, Await the destination event, act o
 - P4.4 (durability hardening) → **E3, E8, E9, E13**.
 - P4.5 (bridge UX) → **E15**.
 - Cross-cutting: **E10, E12, E14** land alongside their nearest phase.
+
+---
+
+## Appendix C — Storage contract (the atomic suspend/resume write)
+
+Grounded in the existing schema (`core/taskengine/schema.go`), the executor's atomic end-of-run write
+(`executor.go:748`), and the `storage.Storage` interface (`storage/db.go`).
+
+### C.1 New keys (chain-agnostic, matching `history:`/`u:`)
+Post-decoupling, task/execution keys are chain-agnostic (`history:<taskId>:<execId>`,
+`u:<owner>:<wallet>:<key>`). The new keys follow suit — the watched chain is **data in the value**, not in
+the key (the checkpoint/wait belong to a task+execution, which are chain-agnostic; only the watch *target*
+is per-chain, and that lives inside).
+
+```
+CheckpointKey(taskId, execId)       →  ckpt:<taskId>:<execId>
+InternalTriggerKey(taskId, execId)  →  itrigger:<taskId>:<execId>     // chain_id(B) is in the value
+Scan prefixes for boot recovery:       ckpt:        itrigger:
+```
+
+Both key templates are **new ⇒ additive**: `make storage-check` stays clean, **no migration**.
+
+### C.2 Serialization (proto, protojson — like executions)
+```proto
+message ExecutionCheckpoint {
+  string                  task_id = 1;
+  string                  execution_id = 2;
+  string                  vars_json = 3;            // JSON of v.vars (lossless for the map[string]any)
+  repeated Execution_Step execution_logs = 4;       // A-leg steps (also yields completed_node_ids)
+  string                  resume_node_id = 5;        // the Await node
+  AwaitConfig             await = 6;                 // { chain_id, address, topics, filter, timeout_at }
+  map<string,string>      branch_selections = 7;     // empty in v1, forward-compat
+}
+message InternalTrigger {
+  string              task_id = 1;
+  string              execution_id = 2;
+  int64               chain_id = 3;                  // chain B (the watch target)
+  EventTrigger.Config event_config = 4;              // reuse the existing event-watch config
+  int64               expires_at = 5;                // unix; timeout sweep
+}
+// Execution (additive): + EXECUTION_STATUS_WAITING=4, + resume_node_id, + wait_reason, + resume_fee_wei(0)
+```
+All additive proto changes; `vars` as a JSON string keeps big-int/typed values lossless (a `Struct` would
+coerce them).
+
+### C.3 Atomic suspend write (crash-safe by ordering)
+`BatchWrite` is a single Badger txn **only while it fits**; it splits on `ErrTxnTooBig` (`db.go:125`) and
+**ignores commit errors** (always returns nil). So we don't put the (potentially large) checkpoint in the
+same batch as the small "armed" markers, and we don't trust the return value — the boot scan (C.5) is the
+source of truth.
+
+```
+1. db.Set(CheckpointKey, checkpointBlob)                       // resume DATA first (single txn)
+2. db.BatchWrite({ TaskExecutionKey: execution{WAITING,…},     // ARMED markers — 2 small keys,
+                   InternalTriggerKey: internalTrigger })      //   always one atomic txn
+```
+**Invariant:** armed markers exist ⟹ the checkpoint exists (write order). A crash between 1 and 2 leaves an
+orphan checkpoint that never fires (no trigger, no WAITING execution) → swept by an orphan-checkpoint GC.
+The task's own status row (`WorkflowStorageKey`/`TaskUserKey`) is **untouched** — the task stays Enabled;
+only this *execution* is WAITING, so there's no status-move/`Delete` to coordinate.
+
+### C.4 Resume-completion write (durable terminal first, then cleanup)
+```
+1. db.BatchWrite({ TaskExecutionKey: execution{SUCCESS|FAILED, full steps},
+                   WorkflowStorageKey/TaskUserKey: task status })   // terminal result, durable
+2. db.Delete(CheckpointKey); db.Delete(InternalTriggerKey)          // cleanup (post-commit)
+```
+A crash between 1 and 2 leaves a **terminal** execution plus a stale checkpoint/trigger → reconciled on boot
+(C.5) and by the idempotency guard (a late wake sees a terminal execution → no-op, satisfying **E8**).
+
+### C.5 Boot re-arm + GC (durability O3 / E3, timeout O6 / E9)
+On aggregator start (and the source of truth for the armed set):
+```
+IterateKeysOnly("itrigger:") → for each (taskId, execId):
+   exec = GetKey(TaskExecutionKey)
+   if exec missing OR exec.status != WAITING:        // stale (completed/cancelled or crash-after-terminal)
+       Delete(InternalTriggerKey); Delete(CheckpointKey)        // GC
+   else if now > expires_at:
+       run timeout path → mark exec FAILED; Delete(InternalTriggerKey); Delete(CheckpointKey)   // E9
+   else:
+       re-register the internal trigger into the set synced to operators covering chain_id(B)    // E3
+```
+This makes the persisted `itrigger:` set the durable registry: a restart re-arms every live wait, GCs every
+dead one, and expires the timed-out ones — no in-memory state required to survive the restart.
+`IterateKeysOnly` is constant-memory (safe even with many waits).
+
+### C.6 What this buys / costs
+- **Atomicity:** the armed-markers batch is always a single txn (2 small keys); the large checkpoint is a
+  separate single `Set`; ordering + boot reconciliation cover the seams. No reliance on `BatchWrite`'s
+  (swallowed) error.
+- **storage-check:** two additive key templates + additive proto fields ⇒ **no migration**.
+- **Pre-existing gotchas surfaced** (not fixed here): `BatchWrite` swallows commit errors and splits on
+  `ErrTxnTooBig`. Worth a follow-up to make `BatchWrite` return commit errors, but the design above is
+  correct without it.
