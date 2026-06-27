@@ -3321,6 +3321,28 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				Config: balanceConfig,
 			},
 		}
+	case NodeTypeAwait:
+		node.Type = avsproto.NodeType_NODE_TYPE_AWAIT
+		awaitConfig := &avsproto.AwaitNode_Config{}
+		if channel, ok := config["channel"].(string); ok {
+			awaitConfig.Channel = channel
+		} else {
+			return nil, fmt.Errorf("await node requires 'channel' field")
+		}
+		if approvers, ok := config["approvers"].([]interface{}); ok {
+			for _, a := range approvers {
+				if s, ok := a.(string); ok {
+					awaitConfig.Approvers = append(awaitConfig.Approvers, s)
+				}
+			}
+		}
+		if prompt, ok := config["prompt"].(string); ok {
+			awaitConfig.Prompt = prompt
+		}
+		if timeout, ok := config["timeoutSeconds"].(float64); ok {
+			awaitConfig.TimeoutSeconds = uint32(timeout)
+		}
+		node.TaskType = &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{Config: awaitConfig}}
 	default:
 		return nil, fmt.Errorf("unsupported node type for CreateNodeFromType: %s", nodeType)
 	}
@@ -3818,6 +3840,17 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 
 			// Clean up complex protobuf types before returning
 			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_Await:
+		await := taskNode.GetAwait()
+		if await != nil && await.Config != nil {
+			return map[string]interface{}{
+				"channel":        await.Config.Channel,
+				"approvers":      await.Config.Approvers,
+				"prompt":         await.Config.Prompt,
+				"timeoutSeconds": float64(await.Config.TimeoutSeconds),
+			}
 		}
 
 	case *avsproto.TaskNode_Branch:

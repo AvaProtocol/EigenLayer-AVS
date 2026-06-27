@@ -176,6 +176,18 @@ func OpenAPIToProtoNode(in generated.Node) (*avsproto.TaskNode, error) {
 		out.Type = avsproto.NodeType_NODE_TYPE_BALANCE
 		out.TaskType = &avsproto.TaskNode_Balance{Balance: &avsproto.BalanceNode{Config: cfg}}
 
+	case string(generated.NodeTypeAwait):
+		v, err := in.AsAwaitNode()
+		if err != nil {
+			return nil, fmt.Errorf("node %s: decode AwaitNode: %w", in.Id, err)
+		}
+		cfg := &avsproto.AwaitNode_Config{}
+		if err := jsonRetargetProto(v.Config, cfg); err != nil {
+			return nil, fmt.Errorf("node %s: %w", in.Id, err)
+		}
+		out.Type = avsproto.NodeType_NODE_TYPE_AWAIT
+		out.TaskType = &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{Config: cfg}}
+
 	default:
 		return nil, fmt.Errorf("node %s: unknown type %q", in.Id, discriminator)
 	}
@@ -323,7 +335,7 @@ func ProtoToOpenAPINode(in *avsproto.TaskNode) (generated.Node, error) {
 		return out, out.FromCustomCodeNode(v)
 
 	case avsproto.NodeType_NODE_TYPE_BALANCE:
-		t := generated.BalanceNodeTypeBalance
+		t := generated.Balance
 		v := generated.BalanceNode{Type: &t}
 		v.Config = &generated.BalanceNodeConfig{}
 		if err := protoRetargetJSON(in.GetBalance().GetConfig(), v.Config); err != nil {
@@ -331,6 +343,16 @@ func ProtoToOpenAPINode(in *avsproto.TaskNode) (generated.Node, error) {
 		}
 		out.Type = generated.NodeTypeBalance
 		return out, out.FromBalanceNode(v)
+
+	case avsproto.NodeType_NODE_TYPE_AWAIT:
+		t := generated.AwaitNodeTypeAwait
+		v := generated.AwaitNode{Type: &t}
+		v.Config = &generated.AwaitNodeConfig{}
+		if err := protoRetargetJSON(in.GetAwait().GetConfig(), v.Config); err != nil {
+			return out, err
+		}
+		out.Type = generated.NodeTypeAwait
+		return out, out.FromAwaitNode(v)
 	}
 
 	return out, fmt.Errorf("node %s: unsupported proto type %v", in.GetId(), in.GetType())

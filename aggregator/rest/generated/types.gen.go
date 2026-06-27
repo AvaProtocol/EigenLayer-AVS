@@ -16,9 +16,14 @@ const (
 	BearerAuthScopes = "bearerAuth.Scopes"
 )
 
+// Defines values for AwaitNodeType.
+const (
+	AwaitNodeTypeAwait AwaitNodeType = "await"
+)
+
 // Defines values for BalanceNodeType.
 const (
-	BalanceNodeTypeBalance BalanceNodeType = "balance"
+	Balance BalanceNodeType = "balance"
 )
 
 // Defines values for BlockTriggerType.
@@ -159,6 +164,7 @@ const (
 
 // Defines values for NodeType.
 const (
+	NodeTypeAwait         NodeType = "await"
 	NodeTypeBalance       NodeType = "balance"
 	NodeTypeBranch        NodeType = "branch"
 	NodeTypeContractRead  NodeType = "contractRead"
@@ -256,6 +262,33 @@ type AuthExchangeResponse struct {
 
 	// Token JWT bearer token.
 	Token string `json:"token"`
+}
+
+// AwaitNode defines model for AwaitNode.
+type AwaitNode struct {
+	// Config Pauses the workflow until a signal arrives (durable execution). v1 is the
+	// external-signal flavor (human approval — e.g. a Telegram approve/reject).
+	Config *AwaitNodeConfig `json:"config,omitempty"`
+	Type   *AwaitNodeType   `json:"type,omitempty"`
+}
+
+// AwaitNodeType defines model for AwaitNode.Type.
+type AwaitNodeType string
+
+// AwaitNodeConfig Pauses the workflow until a signal arrives (durable execution). v1 is the
+// external-signal flavor (human approval — e.g. a Telegram approve/reject).
+type AwaitNodeConfig struct {
+	// Approvers Authorized approver identities. Empty = the workflow owner.
+	Approvers *[]string `json:"approvers,omitempty"`
+
+	// Channel Signal channel: `telegram` or `api`.
+	Channel string `json:"channel"`
+
+	// Prompt Message shown to the approver.
+	Prompt *string `json:"prompt,omitempty"`
+
+	// TimeoutSeconds Safety bound; 0 = server default (the wait is never unbounded).
+	TimeoutSeconds *int64 `json:"timeoutSeconds,omitempty"`
 }
 
 // BalanceNode defines model for BalanceNode.
@@ -1972,6 +2005,36 @@ func (t *Node) MergeBalanceNode(v BalanceNode) error {
 	return err
 }
 
+// AsAwaitNode returns the union data inside the Node as a AwaitNode
+func (t Node) AsAwaitNode() (AwaitNode, error) {
+	var body AwaitNode
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAwaitNode overwrites any union data inside the Node as the provided AwaitNode
+func (t *Node) FromAwaitNode(v AwaitNode) error {
+	t.Type = "await"
+
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAwaitNode performs a merge with any union data inside the Node, using the provided AwaitNode
+func (t *Node) MergeAwaitNode(v AwaitNode) error {
+	t.Type = "await"
+
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 func (t Node) Discriminator() (string, error) {
 	var discriminator struct {
 		Discriminator string `json:"type"`
@@ -1986,6 +2049,8 @@ func (t Node) ValueByDiscriminator() (interface{}, error) {
 		return nil, err
 	}
 	switch discriminator {
+	case "await":
+		return t.AsAwaitNode()
 	case "balance":
 		return t.AsBalanceNode()
 	case "branch":
