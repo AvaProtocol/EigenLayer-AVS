@@ -252,3 +252,228 @@ Adding a node type (P4.3 touch-points):
   `aggregator/rest/mapping/node.go:24` `OpenAPIToProtoNode`; `core/taskengine/vm.go:2542`
   `CreateNodeFromType`; `:3502` `ExtractNodeConfiguration`; a new `vm_runner_await.go`; VM dispatch; loop
   runner support.
+
+---
+
+## Appendix A — P4.2 re-entrant executor (deep-dive)
+
+The load-bearing change. Grounded in `runKahnScheduler` (`core/taskengine/vm.go:947`) and the `VM` struct.
+
+### A.1 What to checkpoint
+Only three `VM` fields carry irrecoverable state; everything else is rebuilt by `Compile()` or re-injected
+by the executor.
+
+| VM field | Checkpoint? | Why |
+|---|---|---|
+| `vars map[string]any` | ✅ | shared context + every node output; JSON-serializable |
+| `ExecutionLogs []*Execution_Step` | ✅ | A-leg steps for the final record |
+| `plans`, `entrypoint`, `mu`, `Status`, `instructionCount` | ❌ | rebuilt by `Compile()` |
+| `smartWalletConfig`, `chainConfigResolver`, `db`, `logger`, `executionFeeWei` | ❌ | re-injected on resume |
+
+`completed_node_ids` is **derived**: `[step.NodeID for step in ExecutionLogs]`. Lean checkpoint:
+
+```
+ckpt:<taskId>:<execId>
+  vars            JSON(v.vars)
+  execution_logs  []Execution_Step            // also yields completed_node_ids
+  resume_node_id  (the Await node)
+  await           { chain_id, address, topics, filter, timeout_at }
+  branch_selections  map[branchNodeId]selectedConditionNodeId   // empty in v1, forward-compat
+```
+
+### A.2 Suspend signal
+`executeNode` returns `(*Step, error)`, but errors become warnings (`vm.go:1069`) and a returned `Step`
+only *adds* branch scheduling — neither halts the run. Add a VM-level flag the `Await` runner sets:
+
+```go
+// VM, guarded by v.mu:
+suspend *SuspendRequest   // nil normally
+// SuspendRequest { awaitNodeID, wake{chain,address,topics,filter}, timeoutAt }
+```
+
+In the worker loop right after `executeNode` (`vm.go:1077`):
+
+```go
+mu.Lock()
+if v.suspendRequested() {
+    suspended = true
+    closeOnce.Do(func() { close(ready) })   // no new work; in-flight drain & exit
+    processed++
+    mu.Unlock()
+    continue                                // skip scheduling Await's successors
+}
+// ... existing decrement-successors / branch-selection ...
+```
+
+`runKahnScheduler` returns a `suspended` bool → executor writes checkpoint, sets **WAITING**, registers the
+internal trigger.
+
+**v1 constraint:** `Await` must be on a **linear path** (nothing else in-flight when it runs — the
+bridge→Await→act pattern guarantees this). Draining N parallel in-flight nodes / partial checkpoint is
+deferred. Reject at create-time (if cheap) a graph where `Await` can run concurrently with siblings.
+
+### A.3 Resume seam (replaces only the initial-ready seed, `vm.go:1037-1046`)
+`runKahnScheduler` gains a `completed map[string]bool` param (empty ⇒ today's behavior, byte-identical):
+
+```go
+queue := []string{}
+for id, c := range predCount {
+    if c == 0 && !branchTargets[id] { queue = append(queue, id) }
+}
+visited := map[string]bool{}
+for len(queue) > 0 {
+    id := queue[0]; queue = queue[1:]
+    if visited[id] { continue }
+    visited[id] = true
+    if completed[id] {
+        scheduled[id] = true                 // counts as done; NOT added to scheduledCount
+        for _, succ := range adj[id] {        // fast-forward = the decrement a finished worker does
+            if _, ok := predCount[succ]; ok {
+                predCount[succ]--
+                if predCount[succ] == 0 && !branchTargets[succ] { queue = append(queue, succ) }
+            }
+        }
+        // branch nodes in the prefix replay via branch_selections — deferred (v1 linear)
+    } else {
+        ready <- id; scheduled[id] = true; scheduledCount++   // the resume frontier
+    }
+}
+```
+
+Fresh run: `completed` empty → every node hits `else` → identical to today. Resume: the completed prefix
+decrements down; frontier = `Await`'s successors (the B-leg). `scheduledCount`/`processed` count only
+executed nodes, so the existing termination (`processed == scheduledCount → close(ready)`) holds.
+
+### A.4 Resume sequence (executor)
+1. Resume job arrives (`executionId` + wake-event payload).
+2. Load checkpoint → new VM; inject restored `vars`, `ExecutionLogs`, per-chain config/resolver/db.
+3. `vars[awaitNodeName].data = <wake event log>` so the B-leg reads `{{await.data.*}}`.
+4. `Compile()`; `runKahnScheduler(completed = set(completed_node_ids))` → run B-leg; append steps.
+5. Terminal status; deregister internal trigger.
+
+### A.5 Why goja never needs serializing
+Completed nodes are **never re-executed** on resume — their outputs are already in restored `vars`. A
+custom-code node from the A-leg is just `vars["myCode"].data`; resume skips it.
+
+### A.6 P4.2 risks
+- **`scheduledCount` accounting** — fast-forwarded nodes set `scheduled[id]=true` but must NOT bump
+  `scheduledCount`, or termination never fires. (Needs a "resumed run terminates" test.)
+- **Branch in the completed prefix** — deferred; needs `branch_selections` replay. v1 Await is post-bridge
+  linear.
+- **Checkpoint atomicity** — checkpoint write + status→WAITING + internal-trigger register = one
+  `BatchWrite` (reuse the atomic end-of-run write at `executor.go:748`).
+- **Idempotent resume** — a resume job delivered twice (around a restart) must no-op; guard on current
+  status before resuming.
+
+---
+
+## Appendix B — Outcomes & e2e test scenarios (build toward these)
+
+The acceptance criteria, expressed as observable outcomes and the scenarios that prove them. We build the
+feature *toward* this list. **Test layers:** most scenarios are **Go integration** tests (engine + executor
++ VM, with the operator's `NotifyTriggers` and chain events **simulated/injected** — deterministic, fast).
+A small subset (the real bridge) are **testnet SDK e2e** (`ava-sdk-js`, Sepolia ↔ Base Sepolia, gated/slow).
+Per repo convention, integration tests **hard-fail** on missing prereqs (`require`, not `t.Skip`).
+
+### Outcomes (definition of done)
+- **O1 — Single execution across the bridge.** One workflow bridges on A, waits, and acts on B as **one
+  execution with one execution record** spanning both legs.
+- **O2 — Shared context.** The B-leg sees the A-leg's full `vars`, including the bridge output and any
+  earlier node's output.
+- **O3 — Restart durability.** A WAITING execution survives an aggregator restart and still completes when
+  the B event fires.
+- **O4 — Exactly-once node execution.** Completed (A-leg) nodes are **not** re-run on resume — no duplicate
+  side effects.
+- **O5 — Correct wake.** Only the matching B event resumes the right execution; concurrent waits don't
+  cross-talk; a duplicate signal resumes once.
+- **O6 — Clean timeout.** A stuck bridge times out → execution FAILED, internal trigger released.
+- **O7 — Create-time validation.** Creation is rejected if chain B is unconfigured/`0` or not
+  operator-covered.
+- **O8 — No resume fee gate.** Resume incurs no extra credit check; `resume_fee_wei = 0`.
+- **O9 — Chain-invariant wallet on B.** The B-leg acts via the same smart-wallet address; auto-deploys on B
+  if needed (salt via #637).
+- **O10 — Cancellable wait.** A WAITING execution can be cancelled/paused, deregistering its wait.
+
+### E2E scenarios
+
+**E1 — Happy path: bridge → wait → act (O1, O2, O9).** *Integration.*
+Build a task: `contractWrite(chainId=A, bridge)` → `Await(chainId=B, event=Arrival, filter=messageId=={{bridge.data.messageId}})` → `contractWrite(chainId=B, act)`. Run it.
+- *Then:* A-leg executes; status becomes **WAITING**; an internal trigger is registered on B with the
+  bound filter. Inject the matching B `Arrival` event. Status becomes **SUCCESS**.
+- *Assert:* one execution record; `ExecutionLogs` = A-leg steps + Await + B-leg steps, in order; the B-leg
+  `contractWrite` resolved `{{bridge.data.transactionHash}}` and `{{await.data.amount}}`; the B UserOp used
+  the same smart-wallet address as the A leg.
+
+**E2 — Shared context proof (O2).** *Integration.*
+Put a `customCode` node in the A-leg that emits a value, and have a B-leg node consume it.
+- *Assert:* the B-leg received the exact A-leg value across the suspend boundary (impossible with two
+  separate workflows — this is the feature's reason for existing).
+
+**E3 — Restart durability (O3).** *Integration — the make-or-break test.*
+Drive E1 to **WAITING**, then **tear down and re-create the engine from the same BadgerDB** (simulated
+aggregator restart). Reconnect a fake operator covering B.
+- *Assert:* the internal trigger is re-registered on boot/reconnect; injecting the B event after restart
+  still resumes the execution to **SUCCESS**.
+
+**E4 — Exactly-once across suspend (O4).** *Integration.*
+A-leg node has an observable side effect (counter / mock tx). Drive to WAITING and resume.
+- *Assert:* the A-leg side effect fired **exactly once** total; resume executed **only** the B-leg.
+
+**E5 — Resumed run terminates (P4.2 A.6).** *Integration.*
+Resume a multi-node B-leg (incl. a fan-out/fan-in).
+- *Assert:* the resumed scheduler reaches a terminal status and does not hang (guards the
+  `scheduledCount`/termination edge case).
+
+**E6 — Correct-filter wake (O5).** *Integration.*
+WAITING execution with `filter=messageId==M1`. Inject a **non-matching** B event (`messageId==M2`).
+- *Assert:* no resume. Then inject the matching `M1` event → resumes once.
+
+**E7 — Concurrent independent waits (O5).** *Integration.*
+Two WAITING executions on the same chain B with distinct filters (M1, M2). Fire M2 then M1.
+- *Assert:* each resumes exactly its own execution; no cross-talk; order-independent.
+
+**E8 — Duplicate resume signal (O5).** *Integration.*
+Deliver the same matching B event **twice** (e.g., around a restart).
+- *Assert:* the execution resumes **once**; the second delivery is a no-op (status guard).
+
+**E9 — Timeout on stuck bridge (O6).** *Integration.*
+WAITING execution, no B event before `timeout_seconds`.
+- *Assert:* the timeout sweep transitions the execution to **FAILED** with a timeout reason; the internal
+  trigger is GC'd; a late B event no longer resumes.
+
+**E10 — B-leg failure after resume (O1 terminal).** *Integration.*
+Resume into a B-leg `contractWrite` that reverts.
+- *Assert:* execution ends **FAILED** with the B-leg error; single record; no dangling WAITING/trigger.
+
+**E11 — Create-time validation (O7).** *Integration.*
+(a) `Await.chainId` not in the configured set / `0` → `CreateWorkflow` rejected (`InvalidArgument`).
+(b) `Await.chainId` configured but **no operator covers it** → rejected.
+(c) Valid + covered → accepted.
+
+**E12 — No resume fee gate (O8).** *Integration.*
+Owner with an outstanding fee balance that would block a fresh task. Drive E1 to resume.
+- *Assert:* the resume leg is **not** blocked; `resume_fee_wei == 0`; total fee = A-leg fee + 0.
+
+**E13 — Cancel a WAITING execution (O10).** *Integration.*
+Drive to WAITING, then cancel/pause the workflow.
+- *Assert:* the internal trigger is deregistered; a subsequent matching B event does **not** resume.
+
+**E14 — Auto-deploy wallet on B (O9).** *Integration.*
+Resume where the smart wallet is **not yet deployed** on B.
+- *Assert:* the B UserOp deploys it (initCode + salt via #637 cross-chain salt lookup) at the same address;
+  the act succeeds.
+
+**E15 — Real bridge on testnet (O1, O9 end-to-end).** *Testnet SDK e2e — gated/slow.*
+Via `ava-sdk-js` against a local gateway + Sepolia/Base-Sepolia workers + operator: bridge a small amount
+Sepolia→Base Sepolia through a real bridge, Await the destination event, act on Base Sepolia.
+- *Assert:* one workflow completes across both real chains; the destination action lands at the same smart
+  wallet. (The single full-stack proof; everything else is deterministic integration.)
+
+### Build order vs. scenarios
+- P4.1 (checkpoint persistence) → unblocks **E4** state restoration assertions.
+- P4.2 (re-entrant executor) → **E1, E2, E4, E5** (resume runs, no re-exec, terminates) via a synthetic
+  resume job (no triggers yet).
+- P4.3 (Await + internal trigger) → **E1 (full), E6, E7, E11**.
+- P4.4 (durability hardening) → **E3, E8, E9, E13**.
+- P4.5 (bridge UX) → **E15**.
+- Cross-cutting: **E10, E12, E14** land alongside their nearest phase.
