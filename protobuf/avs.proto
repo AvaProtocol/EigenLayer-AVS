@@ -606,7 +606,6 @@ message AwaitNode {
     google.protobuf.Value data = 1;
   }
   Config config = 1;
-  Output output = 2;
 }
 
 message BranchNode {

@@ -18,13 +18,20 @@ const defaultAwaitTimeoutSeconds = 86400 // 24h
 // as this node's output.
 func (v *VM) runAwait(node *avsproto.TaskNode) (*avsproto.Execution_Step, error) {
 	t0 := time.Now()
-	cfg := node.GetAwait().GetConfig()
-
 	step := &avsproto.Execution_Step{
 		Id:      node.Id,
 		Type:    avsproto.NodeType_NODE_TYPE_AWAIT.String(),
 		Name:    node.Name,
 		StartAt: t0.UnixMilli(),
+	}
+
+	cfg := node.GetAwait().GetConfig()
+	if cfg == nil {
+		err := fmt.Errorf("await node %s has no config", node.Id)
+		step.Success = false
+		step.Error = err.Error()
+		step.EndAt = time.Now().UnixMilli()
+		return step, err
 	}
 
 	timeoutSec := int64(cfg.GetTimeoutSeconds())

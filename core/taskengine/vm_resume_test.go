@@ -329,7 +329,8 @@ func TestAwaitNode_SuspendThenSignal_EndToEnd(t *testing.T) {
 	require.NoError(t, err)
 
 	// Leg 2 — deliver the approval signal; the execution resumes and runs cc2.
-	payload, _ := structpb.NewValue(map[string]any{"decision": "approve", "by": "0xowner"})
+	payload, err := structpb.NewValue(map[string]any{"decision": "approve", "by": "0xowner"})
+	require.NoError(t, err)
 	out, err := executor.DeliverSignal(task, &Signal{
 		ExecutionID: execID, Kind: WakeExternalSignal, Decision: "approve", Approver: "0xowner", Payload: payload,
 	})

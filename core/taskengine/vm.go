@@ -3340,6 +3340,9 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			awaitConfig.Prompt = prompt
 		}
 		if timeout, ok := config["timeoutSeconds"].(float64); ok {
+			if timeout < 0 || timeout > float64(^uint32(0)) {
+				return nil, fmt.Errorf("await node 'timeoutSeconds' out of range: %v", timeout)
+			}
 			awaitConfig.TimeoutSeconds = uint32(timeout)
 		}
 		node.TaskType = &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{Config: awaitConfig}}
@@ -3845,9 +3848,13 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 	case *avsproto.TaskNode_Await:
 		await := taskNode.GetAwait()
 		if await != nil && await.Config != nil {
+			approvers := make([]interface{}, len(await.Config.Approvers))
+			for i, a := range await.Config.Approvers {
+				approvers[i] = a
+			}
 			return map[string]interface{}{
 				"channel":        await.Config.Channel,
-				"approvers":      await.Config.Approvers,
+				"approvers":      approvers, // []interface{} so structpb.NewValue accepts it
 				"prompt":         await.Config.Prompt,
 				"timeoutSeconds": float64(await.Config.TimeoutSeconds),
 			}

@@ -386,6 +386,14 @@ func loadAllWakeSubscriptions(db storage.Storage) (map[string]*WakeSubscription,
 	return out, nil
 }
 
+func loadWakeSubscription(db storage.Storage, execID string) (*WakeSubscription, error) {
+	b, err := db.GetKey(wakeSubscriptionKey(execID))
+	if err != nil {
+		return nil, err
+	}
+	return unmarshalWake(b)
+}
+
 func deleteWakeSubscription(db storage.Storage, execID string) error {
 	return db.Delete(wakeSubscriptionKey(execID))
 }

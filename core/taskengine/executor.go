@@ -869,6 +869,19 @@ func (x *WorkflowExecutor) DeliverSignal(task *model.Workflow, signal *Signal) (
 	if err := signal.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid signal: %w", err)
 	}
+	// Enforce the gate: a signal only counts against an actual pending wait whose
+	// kind it matches and which hasn't timed out. Otherwise resumption could be
+	// triggered with no wait outstanding (or with the wrong wake source).
+	wake, err := loadWakeSubscription(x.db, signal.ExecutionID)
+	if err != nil {
+		return nil, fmt.Errorf("no pending wait for execution %s: %w", signal.ExecutionID, err)
+	}
+	if signal.Kind != wake.Kind {
+		return nil, fmt.Errorf("signal kind %s does not match the pending wait (%s)", signal.Kind, wake.Kind)
+	}
+	if wake.TimeoutAt > 0 && time.Now().UnixMilli() > wake.TimeoutAt {
+		return nil, fmt.Errorf("the wait for execution %s has timed out", signal.ExecutionID)
+	}
 	return x.Advance(task, signal.ExecutionID, signal)
 }
 
