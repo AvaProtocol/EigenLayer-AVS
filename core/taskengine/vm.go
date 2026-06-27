@@ -274,6 +274,12 @@ type VM struct {
 	// without re-executing them, so it resumes from where execution left off.
 	// Set once before Run(); read-only during the run.
 	resumeCompleted map[string]bool
+
+	// suspend is set by a Suspendable step's runner (via requestSuspend) to pause
+	// the execution mid-run. The scheduler stops scheduling new work; after Run()
+	// the executor reads PendingSuspend() to checkpoint + register the wake instead
+	// of finishing. nil for a normal run.
+	suspend *SuspendRequest
 }
 
 func NewVM() *VM {
@@ -1100,6 +1106,7 @@ func (v *VM) runKahnScheduler() error {
 	wg.Add(workers)
 
 	var closeOnce sync.Once
+	var suspended bool // guarded by mu; set when a Suspendable step pauses the run
 	worker := func() {
 		defer wg.Done()
 		for id := range ready {
@@ -1119,8 +1126,28 @@ func (v *VM) runKahnScheduler() error {
 				}
 			}
 
-			// On completion, decrement successors
+			// On completion (or suspension), update scheduling state.
 			mu.Lock()
+			if suspended {
+				// Another worker already suspended the run; stop scheduling. (An
+				// in-flight node still finishes its executeNode above, but schedules
+				// nothing further.)
+				processed++
+				mu.Unlock()
+				continue
+			}
+			if v.isSuspendRequested() {
+				// A Suspendable step (Await/HumanApproval) asked to pause. Stop
+				// scheduling new work and wind the run down; the executor will then
+				// checkpoint + register the wake. Successors are NOT scheduled.
+				suspended = true
+				closeOnce.Do(func() { close(ready) })
+				processed++
+				mu.Unlock()
+				continue
+			}
+
+			// Schedule successors.
 			for _, succ := range adj[id] {
 				if _, exists := predCount[succ]; exists {
 					predCount[succ]--

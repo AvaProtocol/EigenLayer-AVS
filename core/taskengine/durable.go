@@ -43,6 +43,40 @@ func (d RunDisposition) String() string {
 	}
 }
 
+// SuspendRequest is recorded by a Suspendable step's runner (Await, HumanApproval)
+// to pause the execution. The scheduler stops scheduling new work; the executor
+// then checkpoints the run (snapshot vars + status WAITING) and registers Wake in
+// the durable registry. AwaitNodeID is the step that suspended.
+type SuspendRequest struct {
+	AwaitNodeID string
+	Wake        *WakeSubscription
+}
+
+// requestSuspend records a suspension (called by a step runner during executeNode).
+// First-writer-wins: once a step has asked to suspend, later requests are ignored.
+func (v *VM) requestSuspend(nodeID string, wake *WakeSubscription) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.suspend == nil {
+		v.suspend = &SuspendRequest{AwaitNodeID: nodeID, Wake: wake}
+	}
+}
+
+// isSuspendRequested reports whether a step asked the execution to suspend.
+func (v *VM) isSuspendRequested() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.suspend != nil
+}
+
+// PendingSuspend returns the recorded suspension after a Run (nil if the run
+// completed normally). The executor consumes this to decide checkpoint vs. finish.
+func (v *VM) PendingSuspend() *SuspendRequest {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.suspend
+}
+
 // WakeKind identifies which signal source can advance a suspended execution.
 type WakeKind int
 

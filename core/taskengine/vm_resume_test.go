@@ -141,6 +141,43 @@ func TestScheduler_Resume_AllCompleted_Terminates(t *testing.T) {
 	assert.Empty(t, executedNodeIDs(vm), "no nodes execute when all are completed")
 }
 
+// TestScheduler_Suspend_StopsAfterCurrentNode proves the suspend path: a step that
+// requests suspension (simulated via requestSuspend on cc1) runs, then the scheduler
+// stops — cc2/cc3 are never scheduled — and the suspension is available to the
+// executor via PendingSuspend.
+func TestScheduler_Suspend_StopsAfterCurrentNode(t *testing.T) {
+	vm, _ := buildLinearCustomCodeVM(t)
+	vm.requestSuspend("cc1", &WakeSubscription{Kind: WakeTimer, TimeoutAt: 1})
+
+	require.NoError(t, vm.Run())
+
+	assert.Equal(t, []string{"cc1"}, executedNodeIDs(vm), "run stops after the suspending step")
+	susp := vm.PendingSuspend()
+	require.NotNil(t, susp, "executor can see the pending suspension")
+	assert.Equal(t, "cc1", susp.AwaitNodeID)
+}
+
+// TestSuspendThenResume_EndToEnd is the in-memory shape of the whole feature
+// (minus storage + real signals): leg 1 runs and suspends after cc1; leg 2 restores
+// its vars, marks cc1 completed, and resumes — running exactly cc2+cc3.
+func TestSuspendThenResume_EndToEnd(t *testing.T) {
+	// Leg 1 — run, suspend after cc1, snapshot.
+	vm1, _ := buildLinearCustomCodeVM(t)
+	vm1.requestSuspend("cc1", &WakeSubscription{Kind: WakeTimer, TimeoutAt: 1})
+	require.NoError(t, vm1.Run())
+	require.Equal(t, []string{"cc1"}, executedNodeIDs(vm1))
+	require.NotNil(t, vm1.PendingSuspend())
+	snap, err := vm1.snapshotNodeVars()
+	require.NoError(t, err)
+
+	// Leg 2 — resume: restore vars, mark cc1 done, run the rest.
+	vm2, _ := buildLinearCustomCodeVM(t)
+	require.NoError(t, vm2.restoreNodeVars(snap))
+	vm2.resumeCompleted = map[string]bool{"cc1": true}
+	require.NoError(t, vm2.Run())
+	assert.Equal(t, []string{"cc2", "cc3"}, executedNodeIDs(vm2), "resume runs exactly the remaining steps")
+}
+
 // TestSnapshotNodeVars_ExcludesReservedNames guards the reserved-name collision:
 // a node literally named a system var (apContext) must not be snapshotted, or a
 // resume could persist secrets to disk.
