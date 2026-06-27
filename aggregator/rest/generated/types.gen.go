@@ -861,8 +861,9 @@ type Lang string
 // LoopNode defines model for LoopNode.
 type LoopNode struct {
 	// Config Iterates over an input array, running an inner Node per item. The
-	// runner node is one of the chain-aware or chain-agnostic node types
-	// and inherits chainId from this LoopNode if it does not specify its own.
+	// runner node is one of the chain-aware or chain-agnostic node types;
+	// a chain-aware runner must specify its own required `chainId` (there is
+	// no inheritance from the loop or workflow).
 	Config *LoopNodeConfig `json:"config,omitempty"`
 	Type   *LoopNodeType   `json:"type,omitempty"`
 }
@@ -871,8 +872,9 @@ type LoopNode struct {
 type LoopNodeType string
 
 // LoopNodeConfig Iterates over an input array, running an inner Node per item. The
-// runner node is one of the chain-aware or chain-agnostic node types
-// and inherits chainId from this LoopNode if it does not specify its own.
+// runner node is one of the chain-aware or chain-agnostic node types;
+// a chain-aware runner must specify its own required `chainId` (there is
+// no inheritance from the loop or workflow).
 type LoopNodeConfig struct {
 	// InputVariable Template path for the iterable (e.g., `{{settings.addressList}}`).
 	InputVariable string `json:"inputVariable"`

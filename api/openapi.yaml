@@ -725,8 +725,9 @@ components:
       type: object
       description: |
         Iterates over an input array, running an inner Node per item. The
-        runner node is one of the chain-aware or chain-agnostic node types
-        and inherits chainId from this LoopNode if it does not specify its own.
+        runner node is one of the chain-aware or chain-agnostic node types;
+        a chain-aware runner must specify its own required `chainId` (there is
+        no inheritance from the loop or workflow).
       required: [inputVariable, runner]
       properties:
         inputVariable:
@@ -1658,10 +1659,10 @@ paths:
       tags: [Workflows]
       summary: Create a workflow
       description: |
-        Persist a new workflow definition. The server resolves the
-        workflow-level `chainId` (falling back to the aggregator default
-        if omitted) and ensures the smart wallet belongs to the
-        authenticated user. Returns the persisted Workflow with its
+        Persist a new workflow definition. Each chain-aware trigger and node
+        carries its own required `chainId` (there is no workflow-level chain);
+        the server validates those chains and ensures the smart wallet belongs
+        to the authenticated user. Returns the persisted Workflow with its
         server-assigned `id` and `createdAt`.
       operationId: createWorkflow
       requestBody:
