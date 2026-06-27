@@ -661,3 +661,107 @@ On resolve (resume success/fail, timeout, or cancel), the engine sends a `Delete
 - **Open risk — coverage drift:** chain B is validated as covered at create time (O7/E11), but the only
   covering operator could drop *while* a wait is pending. Behavior then (re-route on reconnect? alert?) is
   unresolved and called out in the main Open-questions list.
+
+---
+
+## Appendix E — P4.3 `Await` node spec (the 7 touch-points)
+
+Mechanical now that the semantics are pinned. The key move: **`AwaitNode.Config` embeds
+`EventTrigger.Config` verbatim**, so the engine builds the internal trigger (Appendix D) directly from it
+and the operator watches it with **zero new logic**. Next free IDs: `NodeType` value `11`, `TaskNode`
+oneof field `20`.
+
+### E.1 Proto (`protobuf/avs.proto`)
+```proto
+enum NodeType { …; NODE_TYPE_AWAIT = 11; }     // append
+
+message AwaitNode {
+  message Config {
+    EventTrigger.Config event           = 1;   // REUSE — chain B = event.chain_id; topics/conditions = the bound filter
+    uint32              timeout_seconds = 2;   // safety bound; 0 ⇒ server default (e.g. 24h), create-time may cap
+    OnTimeout           on_timeout      = 3;   // FAIL (v1) | BRANCH (deferred)
+  }
+  message Output { google.protobuf.Value data = 1; }   // the matched arrival event (mirrors EventTrigger.Output)
+  Config config = 1;
+  Output output = 2;
+}
+enum OnTimeout { AWAIT_ON_TIMEOUT_FAIL = 0; AWAIT_ON_TIMEOUT_BRANCH = 1; }   // FAIL default ⇒ v1 works
+
+message TaskNode { oneof task_type { …; AwaitNode await = 20; } }   // append
+```
+`make protoc-gen` after. Chain B is `Await.Config.event.chain_id` — no separate field.
+
+### E.2 The runner (new `core/taskengine/vm_runner_await.go`)
+The runner only ever runs **once**, on the suspend pass (it is in `completed_node_ids` on resume, so it is
+never re-executed — Appendix A.5):
+```go
+func (v *VM) runAwait(stepID string, node *avsproto.AwaitNode) (*avsproto.Execution_Step, error) {
+    cfg := node.GetConfig()
+    wake := resolveTemplates(cfg.GetEvent(), v.vars)   // bind {{bridge.data.messageId}} into topics/conditions
+    v.mu.Lock()
+    v.suspend = &SuspendRequest{
+        awaitNodeID: stepID,
+        wake:        wake,                              // an EventTrigger.Config — handed straight to Appendix D
+        timeoutAt:   now + timeoutOrDefault(cfg.GetTimeoutSeconds()),
+    }
+    v.mu.Unlock()
+    return suspendedStep(stepID), nil                  // status=WAITING marker; scheduler drains (Appendix A.2)
+}
+```
+The scheduler sees `v.suspend`, drains, returns `suspended`; the executor writes the checkpoint + registers
+the internal trigger (Appendices C.3, D.3).
+
+### E.3 VM dispatch (`vm.go` `executeNode`, ~`:1263`)
+```go
+} else if node.GetAwait() != nil {
+    step, err := v.runAwait(node.Id, node.GetAwait())
+    executionLogForNode = step
+}
+```
+
+### E.4 Config map ↔ proto (`vm.go`)
+- `CreateNodeFromType` (~`:2542`): add an `"await"` case parsing the config map (`event`, `timeoutSeconds`,
+  `onTimeout`) into `AwaitNode_Config`, reusing the existing EventTrigger config parser for `event`.
+- `ExtractNodeConfiguration` (~`:3502`): add the inverse case (proto → camelCase map), so isolated runs /
+  simulation surface the await config. *(Note: `RunNodeImmediately` on a standalone `Await` is degenerate —
+  there's no execution to suspend; it should return a clear "Await runs only inside a workflow" error.)*
+
+### E.5 REST + OpenAPI
+- `aggregator/rest/mapping/node.go`: add the `await` variant to `OpenAPIToProtoNode` (inbound
+  `jsonRetargetProto`) and `ProtoToOpenAPINode` (outbound `protoRetargetJSON` — the #639 int64 unquote
+  already covers the embedded `chain_id`).
+- `api/openapi.yaml`: add `AwaitNode` + `AwaitNodeConfig` schemas. `AwaitNodeConfig.event` references the
+  existing event-config schema; `chainId` (via `event`) is **required** (chain-aware part). `make rest-gen`.
+
+### E.6 Chain-aware validation (O7 / E11)
+`Await.Config.event.chain_id` is a chain-aware part — wire it into the existing checks:
+- `checkNodeChain` (`engine.go`): add a case returning `node.GetAwait().GetConfig().GetEvent().GetChainId()`
+  → enforces required/`>0`/configured like other chain-aware parts.
+- **New coverage check:** additionally require `operatorsCoveringChain(chainB)` non-empty at create
+  (the wait can never fire otherwise). This is the one rule beyond the generic chain-aware validation.
+- `stampNodeChainIfUnset`: **not** applied — `Await` has no aggregator-default fallback; an unset chain is a
+  hard reject.
+
+### E.7 Loop support — explicitly none
+`Await` is a control/suspend node, not a data runner. It is **not** a valid `LoopNode.runner` (suspending
+inside a per-item loop is out of scope). Reject an `Await` loop-runner at create time. So the usual
+"loop-runner support" touch-point is a deliberate *no-op + guard*, not an addition.
+
+### E.8 Resume interaction (closing the loop with A.4 / D.5)
+On resume the runner does **not** run again. The executor (D.5 → A.4):
+1. sets `vars[awaitNodeName].data = <wake event>` (so the B-leg reads `{{await.data.*}}`), and
+2. rewrites the await's execution step from "suspended" to **success** with the arrival event as its output,
+   so the final single record shows the await completing with the event that woke it.
+
+### E.9 Touch-point checklist
+1. `protobuf/avs.proto` — enum + `AwaitNode` + `OnTimeout` + oneof; `make protoc-gen`
+2. `core/taskengine/vm_runner_await.go` — the suspend-pass runner (new file)
+3. `core/taskengine/vm.go` — `executeNode` dispatch
+4. `core/taskengine/vm.go` — `CreateNodeFromType`
+5. `core/taskengine/vm.go` — `ExtractNodeConfiguration`
+6. `aggregator/rest/mapping/node.go` + `api/openapi.yaml` — REST variant + schema; `make rest-gen`
+7. `core/taskengine/engine.go` — `checkNodeChain` case + the operator-coverage create check; loop-runner guard
+
+This is the implementation kickoff for E1 (the `Await` becomes a real node). It depends on P4.0 (the proto
+`WAITING`/checkpoint additions) but is otherwise self-contained; the suspend/resume behavior it triggers is
+specified in Appendices A, C, and D.
