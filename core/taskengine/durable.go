@@ -263,6 +263,30 @@ func completedNodeIDsFromSteps(steps []*avsproto.Execution_Step) map[string]bool
 	return out
 }
 
+// ---- Durable checkpoint (key: ckpt:<execId>) ---------------------------------
+//
+// The resumable vars snapshot for a suspended execution (snapshotNodeVars output).
+// Paired with the WAITING execution record (which carries the completed steps) and
+// the wake subscription. New key template — additive, no migration.
+
+const checkpointPrefix = "ckpt:"
+
+func checkpointKey(execID string) []byte {
+	return []byte(checkpointPrefix + execID)
+}
+
+func persistCheckpoint(db storage.Storage, execID string, varsSnapshot []byte) error {
+	return db.Set(checkpointKey(execID), varsSnapshot)
+}
+
+func loadCheckpoint(db storage.Storage, execID string) ([]byte, error) {
+	return db.GetKey(checkpointKey(execID))
+}
+
+func deleteCheckpoint(db storage.Storage, execID string) error {
+	return db.Delete(checkpointKey(execID))
+}
+
 // ---- Durable wake registry (key: wake:<execId>) ------------------------------
 //
 // The persisted set of pending waits. It is the source of truth for restart

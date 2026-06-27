@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
@@ -176,6 +177,62 @@ func TestSuspendThenResume_EndToEnd(t *testing.T) {
 	vm2.resumeCompleted = map[string]bool{"cc1": true}
 	require.NoError(t, vm2.Run())
 	assert.Equal(t, []string{"cc2", "cc3"}, executedNodeIDs(vm2), "resume runs exactly the remaining steps")
+}
+
+// TestExecutor_CheckpointAndResume_DBBacked is the storage-backed proof: the real
+// executor method checkpoints a suspended run to BadgerDB (WAITING execution +
+// vars checkpoint + wake), then a fresh VM reloads it and resumes to completion.
+func TestExecutor_CheckpointAndResume_DBBacked(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	// Minimal executor — checkpointSuspendedExecution only needs db + logger (no
+	// engine/RPC), so avoid NewExecutorForTesting which dials an RPC.
+	executor := &WorkflowExecutor{db: db, logger: testutil.GetLogger()}
+
+	// Leg 1 — run, suspend after cc1.
+	vm1, _ := buildLinearCustomCodeVM(t)
+	vm1.requestSuspend("cc1", &WakeSubscription{Kind: WakeTimer, TimeoutAt: 999})
+	require.NoError(t, vm1.Run())
+	require.Equal(t, []string{"cc1"}, executedNodeIDs(vm1))
+	susp := vm1.PendingSuspend()
+	require.NotNil(t, susp)
+
+	const execID = "exec-durable-1"
+	out, err := executor.checkpointSuspendedExecution(vm1.task, &avsproto.Execution{Id: execID, StartAt: 1}, vm1, susp)
+	require.NoError(t, err)
+	assert.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING, out.Status)
+
+	// Persisted: the WAITING execution record (with its one completed step)...
+	raw, err := db.GetKey(TaskExecutionKey(vm1.task, execID))
+	require.NoError(t, err)
+	loaded := &avsproto.Execution{}
+	require.NoError(t, protojson.Unmarshal(raw, loaded))
+	assert.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING, loaded.Status)
+	assert.Equal(t, "cc1", loaded.ResumeNodeId)
+	require.Len(t, loaded.Steps, 1)
+	// ...the vars checkpoint...
+	ckpt, err := loadCheckpoint(db, execID)
+	require.NoError(t, err)
+	require.NotEmpty(t, ckpt)
+	// ...and the wake subscription.
+	wakes, err := loadAllWakeSubscriptions(db)
+	require.NoError(t, err)
+	require.NotNil(t, wakes[execID])
+
+	// Leg 2 — resume from storage: fresh VM, restore the checkpoint, completed from
+	// the persisted steps, run the rest.
+	vm2, _ := buildLinearCustomCodeVM(t)
+	require.NoError(t, vm2.restoreNodeVars(ckpt))
+	vm2.resumeCompleted = completedNodeIDsFromSteps(loaded.Steps)
+	require.NoError(t, vm2.Run())
+	assert.Equal(t, []string{"cc2", "cc3"}, executedNodeIDs(vm2), "resumed from storage, runs the remaining steps")
+
+	// Terminal cleanup (what advance() does on completion).
+	require.NoError(t, deleteCheckpoint(db, execID))
+	require.NoError(t, deleteWakeSubscription(db, execID))
+	gone, err := loadAllWakeSubscriptions(db)
+	require.NoError(t, err)
+	assert.Nil(t, gone[execID])
 }
 
 // TestSnapshotNodeVars_ExcludesReservedNames guards the reserved-name collision:

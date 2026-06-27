@@ -676,6 +676,13 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 		runTaskErr = vm.Run()
 	}
 
+	// Durable execution: a Suspendable step (Await / HumanApproval) may have paused
+	// the run. Checkpoint and return WAITING instead of finalizing. Inert today — no
+	// current node calls requestSuspend, so PendingSuspend is always nil.
+	if susp := vm.PendingSuspend(); susp != nil {
+		return x.checkpointSuspendedExecution(task, execution, vm, susp)
+	}
+
 	t1 := time.Now()
 
 	// when MaxExecution is 0, it means unlimited run until cancel
@@ -802,6 +809,55 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 		x.logger.Warn("task execution completed with step failures", "task_id", task.Id, "failed_steps", failedStepCount, "triggermark", queueData)
 	}
 
+	return execution, nil
+}
+
+// checkpointSuspendedExecution persists a paused execution so it can resume later
+// (PLAN_DURABLE_EXECUTION.md). It writes, in crash-safe order (Appendix C.3): the
+// resume DATA (vars snapshot) first, then the armed markers (wake subscription +
+// the WAITING execution record whose `steps` carry the completed-node outputs).
+// The task's own status row is untouched — the task stays Enabled; only this
+// execution is WAITING.
+func (x *WorkflowExecutor) checkpointSuspendedExecution(task *model.Workflow, execution *avsproto.Execution, vm *VM, susp *SuspendRequest) (*avsproto.Execution, error) {
+	execution.Steps = vm.ExecutionLogs
+	execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING
+	execution.ResumeNodeId = susp.AwaitNodeID
+	if susp.Wake != nil {
+		execution.WaitReason = "waiting on " + susp.Wake.Kind.String()
+	}
+	// EndAt intentionally left unset — the execution has not finished.
+	sanitizeExecutionForPersistence(execution)
+
+	// 1. Resume data first.
+	snapshot, err := vm.snapshotNodeVars()
+	if err != nil {
+		return nil, fmt.Errorf("checkpoint snapshot vars: %w", err)
+	}
+	if err := persistCheckpoint(x.db, execution.Id, snapshot); err != nil {
+		return nil, fmt.Errorf("persist checkpoint: %w", err)
+	}
+	// 2. Armed markers: the wake subscription...
+	if susp.Wake != nil {
+		if err := persistWakeSubscription(x.db, execution.Id, susp.Wake); err != nil {
+			return nil, fmt.Errorf("persist wake: %w", err)
+		}
+	}
+	// ...and the WAITING execution record.
+	mo := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}
+	execBytes, err := mo.Marshal(execution)
+	if err != nil {
+		return nil, fmt.Errorf("marshal suspended execution: %w", err)
+	}
+	if err := x.db.BatchWrite(map[string][]byte{
+		string(TaskExecutionKey(task, execution.Id)): execBytes,
+	}); err != nil {
+		return nil, fmt.Errorf("persist suspended execution: %w", err)
+	}
+
+	if x.logger != nil {
+		x.logger.Info("execution suspended (durable)",
+			"task_id", task.Id, "execution_id", execution.Id, "resume_node", susp.AwaitNodeID)
+	}
 	return execution, nil
 }
 
