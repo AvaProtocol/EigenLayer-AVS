@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 // Durable execution vocabulary (Level-3 engine — see PLAN_DURABLE_EXECUTION.md).
@@ -209,4 +212,92 @@ func completedNodeIDsFromSteps(steps []*avsproto.Execution_Step) map[string]bool
 		}
 	}
 	return out
+}
+
+// ---- Durable wake registry (key: wake:<execId>) ------------------------------
+//
+// The persisted set of pending waits. It is the source of truth for restart
+// durability: on boot, loadAllWakeSubscriptions rebuilds the in-memory registry,
+// which the engine then re-arms to operators (chain), reloads timers, and GCs
+// against execution status. New key template — additive, no migration.
+
+const wakeSubscriptionPrefix = "wake:"
+
+func wakeSubscriptionKey(execID string) []byte {
+	return []byte(wakeSubscriptionPrefix + execID)
+}
+
+// persistedWake is the on-disk shape. ChainEvent is stored as protojson so its
+// proto oneofs / well-known types (structpb.Value in contract_abi) round-trip
+// faithfully — plain encoding/json cannot serialize those.
+type persistedWake struct {
+	Kind       WakeKind            `json:"kind"`
+	ChainEvent json.RawMessage     `json:"chainEvent,omitempty"`
+	External   *ExternalSignalSpec `json:"external,omitempty"`
+	TimeoutAt  int64               `json:"timeoutAt"`
+}
+
+func marshalWake(sub *WakeSubscription) ([]byte, error) {
+	rec := persistedWake{Kind: sub.Kind, External: sub.External, TimeoutAt: sub.TimeoutAt}
+	if sub.ChainEvent != nil {
+		b, err := protojson.Marshal(sub.ChainEvent)
+		if err != nil {
+			return nil, fmt.Errorf("marshal wake chain event: %w", err)
+		}
+		rec.ChainEvent = b
+	}
+	return json.Marshal(rec)
+}
+
+func unmarshalWake(b []byte) (*WakeSubscription, error) {
+	var rec persistedWake
+	if err := json.Unmarshal(b, &rec); err != nil {
+		return nil, err
+	}
+	sub := &WakeSubscription{Kind: rec.Kind, External: rec.External, TimeoutAt: rec.TimeoutAt}
+	if len(rec.ChainEvent) > 0 {
+		cfg := &avsproto.EventTrigger_Config{}
+		if err := protojson.Unmarshal(rec.ChainEvent, cfg); err != nil {
+			return nil, fmt.Errorf("unmarshal wake chain event: %w", err)
+		}
+		sub.ChainEvent = cfg
+	}
+	return sub, nil
+}
+
+// persistWakeSubscription writes the wait for execID. Validated first so we never
+// persist an inconsistent subscription.
+func persistWakeSubscription(db storage.Storage, execID string, sub *WakeSubscription) error {
+	if err := sub.Validate(); err != nil {
+		return err
+	}
+	b, err := marshalWake(sub)
+	if err != nil {
+		return err
+	}
+	return db.Set(wakeSubscriptionKey(execID), b)
+}
+
+// loadAllWakeSubscriptions scans the registry — the boot re-arm entrypoint. The
+// engine uses the result to re-register chain waits to operators, reload timers,
+// and GC entries whose execution is no longer WAITING.
+func loadAllWakeSubscriptions(db storage.Storage) (map[string]*WakeSubscription, error) {
+	items, err := db.GetByPrefix([]byte(wakeSubscriptionPrefix))
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]*WakeSubscription, len(items))
+	for _, it := range items {
+		execID := strings.TrimPrefix(string(it.Key), wakeSubscriptionPrefix)
+		sub, err := unmarshalWake(it.Value)
+		if err != nil {
+			return nil, fmt.Errorf("load wake %s: %w", execID, err)
+		}
+		out[execID] = sub
+	}
+	return out, nil
+}
+
+func deleteWakeSubscription(db storage.Storage, execID string) error {
+	return db.Delete(wakeSubscriptionKey(execID))
 }
