@@ -266,6 +266,14 @@ type VM struct {
 	// per-node chain_id overrides. When nil or called with 0, callers fall back to
 	// v.smartWalletConfig. Set via WithChainConfigResolver after construction.
 	chainConfigResolver func(chainID int64) *config.SmartWalletConfig
+
+	// resumeCompleted marks nodes that completed in a prior leg of a durable
+	// execution (PLAN_DURABLE_EXECUTION.md). nil/empty for a fresh run — in which
+	// case the scheduler behaves exactly as before. When set, the scheduler
+	// fast-forwards these nodes (applies their completion to downstream predCounts)
+	// without re-executing them, so it resumes from where execution left off.
+	// Set once before Run(); read-only during the run.
+	resumeCompleted map[string]bool
 }
 
 func NewVM() *VM {
@@ -957,6 +965,7 @@ func (v *VM) runKahnScheduler() error {
 	}
 	trigger := v.task.Trigger
 	edges := v.task.Edges
+	completed := v.resumeCompleted // nil for a fresh run; read-only during the run
 	v.mu.Unlock()
 
 	for _, e := range edges {
@@ -1034,15 +1043,43 @@ func (v *VM) runKahnScheduler() error {
 		}
 	}
 
+	// Seed the initial ready frontier. For a fresh run (completed nil/empty) this is
+	// every predCount==0 non-branch node — identical to the original seed. For a
+	// resume, the already-completed prefix is "fast-forwarded" (its successors are
+	// decremented as if it had run, without executing it), so the frontier becomes the
+	// not-yet-completed nodes that have become ready — i.e. where execution left off.
+	// See PLAN_DURABLE_EXECUTION.md (Appendix A.3).
+	seedQueue := make([]string, 0, len(predCount))
 	for nodeID, c := range predCount {
-		if c == 0 {
-			if branchTargets[nodeID] {
-				continue // still gated by branch until a condition is selected
-			}
-			ready <- nodeID
-			scheduled[nodeID] = true
-			scheduledCount++
+		if c == 0 && !branchTargets[nodeID] {
+			seedQueue = append(seedQueue, nodeID)
 		}
+	}
+	seedVisited := make(map[string]bool)
+	for len(seedQueue) > 0 {
+		nodeID := seedQueue[0]
+		seedQueue = seedQueue[1:]
+		if seedVisited[nodeID] {
+			continue
+		}
+		seedVisited[nodeID] = true
+		if completed[nodeID] {
+			// Already ran in a prior leg: apply its completion to downstream predCounts
+			// without executing it. Counts as done; NOT added to scheduledCount.
+			scheduled[nodeID] = true
+			for _, succ := range adj[nodeID] {
+				if _, exists := predCount[succ]; exists {
+					predCount[succ]--
+					if predCount[succ] == 0 && !branchTargets[succ] {
+						seedQueue = append(seedQueue, succ)
+					}
+				}
+			}
+			continue
+		}
+		ready <- nodeID
+		scheduled[nodeID] = true
+		scheduledCount++
 	}
 
 	var processed int64
