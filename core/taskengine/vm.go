@@ -1438,6 +1438,11 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
+	} else if node.GetAwait() != nil {
+		executionLogForNode, err = v.runAwait(node)
+		if executionLogForNode != nil {
+			v.addExecutionLog(executionLogForNode)
+		}
 	} else {
 		err = fmt.Errorf("unknown node type for node ID %s", node.Id)
 	}

@@ -861,6 +861,17 @@ func (x *WorkflowExecutor) checkpointSuspendedExecution(task *model.Workflow, ex
 	return execution, nil
 }
 
+// DeliverSignal is the signal-intake entrypoint: a gateway approve/reject endpoint
+// or operator internal-trigger calls this to wake a suspended execution. It
+// validates the signal and advances the execution. (Authorization of the signal
+// against the wait's approvers is a follow-up — see the approval security model.)
+func (x *WorkflowExecutor) DeliverSignal(task *model.Workflow, signal *Signal) (*avsproto.Execution, error) {
+	if err := signal.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid signal: %w", err)
+	}
+	return x.Advance(task, signal.ExecutionID, signal)
+}
+
 // Advance resumes a WAITING execution from storage. An optional signal's payload
 // becomes the suspended step's output (readable by downstream steps). Idempotent
 // (durable exactly-once, E8): a non-WAITING execution is a no-op, so a duplicate or
