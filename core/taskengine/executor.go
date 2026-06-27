@@ -676,6 +676,13 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 		runTaskErr = vm.Run()
 	}
 
+	// Durable execution: a Suspendable step (Await / HumanApproval) may have paused
+	// the run. Checkpoint and return WAITING instead of finalizing. Inert today — no
+	// current node calls requestSuspend, so PendingSuspend is always nil.
+	if susp := vm.PendingSuspend(); susp != nil {
+		return x.checkpointSuspendedExecution(task, execution, vm, susp)
+	}
+
 	t1 := time.Now()
 
 	// when MaxExecution is 0, it means unlimited run until cancel
@@ -802,6 +809,168 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 		x.logger.Warn("task execution completed with step failures", "task_id", task.Id, "failed_steps", failedStepCount, "triggermark", queueData)
 	}
 
+	return execution, nil
+}
+
+// checkpointSuspendedExecution persists a paused execution so it can resume later
+// (PLAN_DURABLE_EXECUTION.md). It writes, in crash-safe order (Appendix C.3): the
+// resume DATA (vars snapshot) first, then the armed markers (wake subscription +
+// the WAITING execution record whose `steps` carry the completed-node outputs).
+// The task's own status row is untouched — the task stays Enabled; only this
+// execution is WAITING.
+func (x *WorkflowExecutor) checkpointSuspendedExecution(task *model.Workflow, execution *avsproto.Execution, vm *VM, susp *SuspendRequest) (*avsproto.Execution, error) {
+	execution.Steps = vm.ExecutionLogs
+	execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING
+	execution.ResumeNodeId = susp.AwaitNodeID
+	if susp.Wake != nil {
+		execution.WaitReason = "waiting on " + susp.Wake.Kind.String()
+	}
+	// EndAt intentionally left unset — the execution has not finished.
+	sanitizeExecutionForPersistence(execution)
+
+	// 1. Resume data first.
+	snapshot, err := vm.snapshotNodeVars()
+	if err != nil {
+		return nil, fmt.Errorf("checkpoint snapshot vars: %w", err)
+	}
+	if err := persistCheckpoint(x.db, execution.Id, snapshot); err != nil {
+		return nil, fmt.Errorf("persist checkpoint: %w", err)
+	}
+	// 2. Armed markers: the wake subscription...
+	if susp.Wake != nil {
+		if err := persistWakeSubscription(x.db, execution.Id, susp.Wake); err != nil {
+			return nil, fmt.Errorf("persist wake: %w", err)
+		}
+	}
+	// ...and the WAITING execution record.
+	mo := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}
+	execBytes, err := mo.Marshal(execution)
+	if err != nil {
+		return nil, fmt.Errorf("marshal suspended execution: %w", err)
+	}
+	if err := x.db.BatchWrite(map[string][]byte{
+		string(TaskExecutionKey(task, execution.Id)): execBytes,
+	}); err != nil {
+		return nil, fmt.Errorf("persist suspended execution: %w", err)
+	}
+
+	if x.logger != nil {
+		x.logger.Info("execution suspended (durable)",
+			"task_id", task.Id, "execution_id", execution.Id, "resume_node", susp.AwaitNodeID)
+	}
+	return execution, nil
+}
+
+// Advance resumes a WAITING execution from storage. An optional signal's payload
+// becomes the suspended step's output (readable by downstream steps). Idempotent
+// (durable exactly-once, E8): a non-WAITING execution is a no-op, so a duplicate or
+// post-restart signal resumes at most once. On a terminal finish it persists the
+// final record and GCs the checkpoint + wake; if the run suspends again it
+// re-checkpoints.
+//
+// Reconstructs node + trigger output vars from the checkpoint; faithful
+// reconstruction of arbitrary input variables is a follow-up.
+func (x *WorkflowExecutor) Advance(task *model.Workflow, executionID string, signal *Signal) (*avsproto.Execution, error) {
+	raw, err := x.db.GetKey(TaskExecutionKey(task, executionID))
+	if err != nil {
+		return nil, fmt.Errorf("load execution %s: %w", executionID, err)
+	}
+	execution := &avsproto.Execution{}
+	if err := protojson.Unmarshal(raw, execution); err != nil {
+		return nil, fmt.Errorf("unmarshal execution %s: %w", executionID, err)
+	}
+	// Only a WAITING execution resumes (exactly-once across a duplicate / post-restart
+	// signal). On the no-op path, still best-effort GC any orphaned durable state in
+	// case a prior finalize crashed between persisting the terminal record and cleanup.
+	if execution.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING {
+		_ = deleteCheckpoint(x.db, executionID)
+		_ = deleteWakeSubscription(x.db, executionID)
+		return execution, nil
+	}
+
+	// Rebuild the VM, mirroring RunTask's swConfig resolution so the resumed leg uses
+	// the same wallet/chain settings as the initial leg.
+	secrets, secErr := LoadSecretForTask(x.db, task)
+	if secErr != nil {
+		secrets = map[string]string{}
+	}
+	swConfig := x.smartWalletConfig
+	if x.engine != nil {
+		swConfig = x.engine.ResolveSmartWalletConfig(x.engine.defaultChainID())
+	}
+	vm, err := NewVMWithData(task, nil, swConfig, secrets)
+	if err != nil {
+		return nil, fmt.Errorf("rebuild vm on resume: %w", err)
+	}
+	vm.WithDb(x.db).WithLogger(x.logger)
+	if x.engine != nil {
+		vm.WithChainConfigResolver(x.engine.ResolveSmartWalletConfig)
+	}
+	if err := vm.Compile(); err != nil {
+		return nil, fmt.Errorf("compile on resume: %w", err)
+	}
+
+	// Restore prior-leg vars. A WAITING execution always has a checkpoint (written
+	// at suspend); a missing/unreadable one is corruption — fail rather than resume
+	// with partial state.
+	ckpt, lErr := loadCheckpoint(x.db, executionID)
+	if lErr != nil {
+		return nil, fmt.Errorf("load checkpoint for WAITING execution %s: %w", executionID, lErr)
+	}
+	if err := vm.restoreNodeVars(ckpt); err != nil {
+		return nil, fmt.Errorf("restore vars on resume: %w", err)
+	}
+
+	// The wake delivers the suspended step's output.
+	if signal != nil && signal.Payload != nil && execution.ResumeNodeId != "" {
+		(&CommonProcessor{vm: vm}).SetOutputVarForStep(execution.ResumeNodeId,
+			map[string]any{"data": signal.Payload.AsInterface()})
+	}
+
+	// Resume state: skip the completed prefix, keep its steps in the final record.
+	vm.resumeCompleted = completedNodeIDsFromSteps(execution.Steps)
+	vm.ExecutionLogs = append([]*avsproto.Execution_Step{}, execution.Steps...)
+
+	runErr := vm.Run()
+
+	// Suspended again — re-checkpoint and stay WAITING.
+	if susp := vm.PendingSuspend(); susp != nil {
+		return x.checkpointSuspendedExecution(task, execution, vm, susp)
+	}
+
+	// Terminal — finalize and GC the durable state.
+	executionError, _, resultStatus := vm.AnalyzeExecutionResult()
+	execution.Steps = vm.ExecutionLogs
+	execution.Status = convertToExecutionStatus(resultStatus)
+	execution.Error = executionError
+	execution.EndAt = time.Now().UnixMilli()
+	if runErr != nil {
+		execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_ERROR
+		if execution.Error == "" {
+			execution.Error = fmt.Sprintf("VM execution error: %s", runErr.Error())
+		}
+	}
+	execution.ResumeNodeId = ""
+	execution.WaitReason = ""
+	sanitizeExecutionForPersistence(execution)
+
+	mo := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}
+	execBytes, err := mo.Marshal(execution)
+	if err != nil {
+		return nil, fmt.Errorf("marshal resumed execution: %w", err)
+	}
+	if err := x.db.BatchWrite(map[string][]byte{
+		string(TaskExecutionKey(task, executionID)): execBytes,
+	}); err != nil {
+		return nil, fmt.Errorf("persist resumed execution: %w", err)
+	}
+	_ = deleteCheckpoint(x.db, executionID)
+	_ = deleteWakeSubscription(x.db, executionID)
+
+	if x.logger != nil {
+		x.logger.Info("execution resumed to terminal",
+			"task_id", task.Id, "execution_id", executionID, "status", execution.Status.String())
+	}
 	return execution, nil
 }
 

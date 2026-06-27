@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
@@ -141,6 +142,138 @@ func TestScheduler_Resume_AllCompleted_Terminates(t *testing.T) {
 	assert.Empty(t, executedNodeIDs(vm), "no nodes execute when all are completed")
 }
 
+// TestScheduler_Suspend_StopsAfterCurrentNode proves the suspend path: a step that
+// requests suspension (simulated via requestSuspend on cc1) runs, then the scheduler
+// stops — cc2/cc3 are never scheduled — and the suspension is available to the
+// executor via PendingSuspend.
+func TestScheduler_Suspend_StopsAfterCurrentNode(t *testing.T) {
+	vm, _ := buildLinearCustomCodeVM(t)
+	vm.requestSuspend("cc1", &WakeSubscription{Kind: WakeTimer, TimeoutAt: 1})
+
+	require.NoError(t, vm.Run())
+
+	assert.Equal(t, []string{"cc1"}, executedNodeIDs(vm), "run stops after the suspending step")
+	susp := vm.PendingSuspend()
+	require.NotNil(t, susp, "executor can see the pending suspension")
+	assert.Equal(t, "cc1", susp.AwaitNodeID)
+}
+
+// TestSuspendThenResume_EndToEnd is the in-memory shape of the whole feature
+// (minus storage + real signals): leg 1 runs and suspends after cc1; leg 2 restores
+// its vars, marks cc1 completed, and resumes — running exactly cc2+cc3.
+func TestSuspendThenResume_EndToEnd(t *testing.T) {
+	// Leg 1 — run, suspend after cc1, snapshot.
+	vm1, _ := buildLinearCustomCodeVM(t)
+	vm1.requestSuspend("cc1", &WakeSubscription{Kind: WakeTimer, TimeoutAt: 1})
+	require.NoError(t, vm1.Run())
+	require.Equal(t, []string{"cc1"}, executedNodeIDs(vm1))
+	require.NotNil(t, vm1.PendingSuspend())
+	snap, err := vm1.snapshotNodeVars()
+	require.NoError(t, err)
+
+	// Leg 2 — resume: restore vars, mark cc1 done, run the rest.
+	vm2, _ := buildLinearCustomCodeVM(t)
+	require.NoError(t, vm2.restoreNodeVars(snap))
+	vm2.resumeCompleted = map[string]bool{"cc1": true}
+	require.NoError(t, vm2.Run())
+	assert.Equal(t, []string{"cc2", "cc3"}, executedNodeIDs(vm2), "resume runs exactly the remaining steps")
+}
+
+// TestExecutor_CheckpointAndResume_DBBacked is the storage-backed proof: the real
+// executor method checkpoints a suspended run to BadgerDB (WAITING execution +
+// vars checkpoint + wake), then a fresh VM reloads it and resumes to completion.
+func TestExecutor_CheckpointAndResume_DBBacked(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	// Minimal executor — checkpointSuspendedExecution only needs db + logger (no
+	// engine/RPC), so avoid NewExecutorForTesting which dials an RPC.
+	executor := &WorkflowExecutor{db: db, logger: testutil.GetLogger()}
+
+	// Leg 1 — run, suspend after cc1.
+	vm1, _ := buildLinearCustomCodeVM(t)
+	vm1.requestSuspend("cc1", &WakeSubscription{Kind: WakeTimer, TimeoutAt: 999})
+	require.NoError(t, vm1.Run())
+	require.Equal(t, []string{"cc1"}, executedNodeIDs(vm1))
+	susp := vm1.PendingSuspend()
+	require.NotNil(t, susp)
+
+	const execID = "exec-durable-1"
+	out, err := executor.checkpointSuspendedExecution(vm1.task, &avsproto.Execution{Id: execID, StartAt: 1}, vm1, susp)
+	require.NoError(t, err)
+	assert.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING, out.Status)
+
+	// Persisted: the WAITING execution record (with its one completed step)...
+	raw, err := db.GetKey(TaskExecutionKey(vm1.task, execID))
+	require.NoError(t, err)
+	loaded := &avsproto.Execution{}
+	require.NoError(t, protojson.Unmarshal(raw, loaded))
+	assert.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING, loaded.Status)
+	assert.Equal(t, "cc1", loaded.ResumeNodeId)
+	require.Len(t, loaded.Steps, 1)
+	// ...the vars checkpoint...
+	ckpt, err := loadCheckpoint(db, execID)
+	require.NoError(t, err)
+	require.NotEmpty(t, ckpt)
+	// ...and the wake subscription.
+	wakes, err := loadAllWakeSubscriptions(db)
+	require.NoError(t, err)
+	require.NotNil(t, wakes[execID])
+
+	// Leg 2 — resume from storage: fresh VM, restore the checkpoint, completed from
+	// the persisted steps, run the rest.
+	vm2, _ := buildLinearCustomCodeVM(t)
+	require.NoError(t, vm2.restoreNodeVars(ckpt))
+	vm2.resumeCompleted = completedNodeIDsFromSteps(loaded.Steps)
+	require.NoError(t, vm2.Run())
+	assert.Equal(t, []string{"cc2", "cc3"}, executedNodeIDs(vm2), "resumed from storage, runs the remaining steps")
+
+	// Terminal cleanup (what advance() does on completion).
+	require.NoError(t, deleteCheckpoint(db, execID))
+	require.NoError(t, deleteWakeSubscription(db, execID))
+	gone, err := loadAllWakeSubscriptions(db)
+	require.NoError(t, err)
+	assert.Nil(t, gone[execID])
+}
+
+// TestExecutor_Advance_ResumesAndFinalizes exercises the production resume
+// entrypoint: a stored WAITING execution → Advance() rebuilds the VM, restores,
+// runs the rest to a terminal status, and GCs the durable state. Plus idempotency.
+func TestExecutor_Advance_ResumesAndFinalizes(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	executor := &WorkflowExecutor{db: db, logger: testutil.GetLogger(), smartWalletConfig: &config.SmartWalletConfig{}}
+
+	// Arrange a WAITING execution: run+suspend after cc1, then checkpoint it.
+	vm1, _ := buildLinearCustomCodeVM(t)
+	vm1.WithDb(db)
+	vm1.requestSuspend("cc1", &WakeSubscription{Kind: WakeTimer, TimeoutAt: 999})
+	require.NoError(t, vm1.Run())
+	const execID = "exec-advance-1"
+	_, err := executor.checkpointSuspendedExecution(vm1.task, &avsproto.Execution{Id: execID, StartAt: 1}, vm1, vm1.PendingSuspend())
+	require.NoError(t, err)
+
+	// Act: advance (resume).
+	out, err := executor.Advance(vm1.task, execID, nil)
+	require.NoError(t, err)
+
+	// Resumed to a terminal status, ran the remaining steps, durable state GC'd.
+	assert.NotEqual(t, avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING, out.Status)
+	var ids []string
+	for _, s := range out.Steps {
+		ids = append(ids, s.Id)
+	}
+	assert.Equal(t, []string{"cc1", "cc2", "cc3"}, ids, "resume appended the remaining steps to the record")
+	wakes, err := loadAllWakeSubscriptions(db)
+	require.NoError(t, err)
+	assert.Nil(t, wakes[execID], "wake GC'd on terminal finish")
+
+	// Idempotent: advancing a now-terminal execution is a no-op (E8).
+	again, err := executor.Advance(vm1.task, execID, nil)
+	require.NoError(t, err)
+	assert.Equal(t, out.Status, again.Status)
+	assert.Len(t, again.Steps, 3, "no re-execution on a duplicate advance")
+}
+
 // TestSnapshotNodeVars_ExcludesReservedNames guards the reserved-name collision:
 // a node literally named a system var (apContext) must not be snapshotted, or a
 // resume could persist secrets to disk.
@@ -164,8 +297,8 @@ func TestSnapshotNodeVars_ExcludesReservedNames(t *testing.T) {
 
 	snap, err := vm.snapshotNodeVars()
 	require.NoError(t, err)
-	assert.NotContains(t, string(snap), "leak", "a node named apContext must not be snapshotted")
-	assert.Equal(t, "{}", string(snap), "snapshot is empty — the only node collides with a reserved name")
+	assert.NotContains(t, string(snap), "leak", "the apContext node's secret value must not be snapshotted")
+	assert.NotContains(t, string(snap), "apContext", "a node named apContext must be excluded from the snapshot")
 }
 
 // TestResume_RestoredVarsUsableByFrontier ties it together: restore a prior leg's

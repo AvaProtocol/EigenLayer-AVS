@@ -43,6 +43,40 @@ func (d RunDisposition) String() string {
 	}
 }
 
+// SuspendRequest is recorded by a Suspendable step's runner (Await, HumanApproval)
+// to pause the execution. The scheduler stops scheduling new work; the executor
+// then checkpoints the run (snapshot vars + status WAITING) and registers Wake in
+// the durable registry. AwaitNodeID is the step that suspended.
+type SuspendRequest struct {
+	AwaitNodeID string
+	Wake        *WakeSubscription
+}
+
+// requestSuspend records a suspension (called by a step runner during executeNode).
+// First-writer-wins: once a step has asked to suspend, later requests are ignored.
+func (v *VM) requestSuspend(nodeID string, wake *WakeSubscription) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.suspend == nil {
+		v.suspend = &SuspendRequest{AwaitNodeID: nodeID, Wake: wake}
+	}
+}
+
+// isSuspendRequested reports whether a step asked the execution to suspend.
+func (v *VM) isSuspendRequested() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.suspend != nil
+}
+
+// PendingSuspend returns the recorded suspension after a Run (nil if the run
+// completed normally). The executor consumes this to decide checkpoint vs. finish.
+func (v *VM) PendingSuspend() *SuspendRequest {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.suspend
+}
+
 // WakeKind identifies which signal source can advance a suspended execution.
 type WakeKind int
 
@@ -176,7 +210,7 @@ var reservedSystemVarNames = map[string]bool{
 func (v *VM) snapshotNodeVars() ([]byte, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	out := make(map[string]any, len(v.TaskNodes))
+	out := make(map[string]any, len(v.TaskNodes)+1)
 	for nodeID := range v.TaskNodes {
 		name := v.getNodeNameAsVarLocked(nodeID)
 		if name == "" || reservedSystemVarNames[name] {
@@ -184,6 +218,16 @@ func (v *VM) snapshotNodeVars() ([]byte, error) {
 		}
 		if val, ok := v.vars[name]; ok {
 			out[name] = val
+		}
+	}
+	// Include the trigger's output var too (keyed by sanitized trigger name) so a
+	// resumed leg can still reference {{trigger.data.x}}.
+	if v.task != nil && v.task.Trigger != nil {
+		tname := sanitizeTriggerNameForJS(v.task.Trigger.GetName())
+		if tname != "" && !reservedSystemVarNames[tname] {
+			if val, ok := v.vars[tname]; ok {
+				out[tname] = val
+			}
 		}
 	}
 	return json.Marshal(out)
@@ -227,6 +271,30 @@ func completedNodeIDsFromSteps(steps []*avsproto.Execution_Step) map[string]bool
 		}
 	}
 	return out
+}
+
+// ---- Durable checkpoint (key: ckpt:<execId>) ---------------------------------
+//
+// The resumable vars snapshot for a suspended execution (snapshotNodeVars output).
+// Paired with the WAITING execution record (which carries the completed steps) and
+// the wake subscription. New key template — additive, no migration.
+
+const checkpointPrefix = "ckpt:"
+
+func checkpointKey(execID string) []byte {
+	return []byte(checkpointPrefix + execID)
+}
+
+func persistCheckpoint(db storage.Storage, execID string, varsSnapshot []byte) error {
+	return db.Set(checkpointKey(execID), varsSnapshot)
+}
+
+func loadCheckpoint(db storage.Storage, execID string) ([]byte, error) {
+	return db.GetKey(checkpointKey(execID))
+}
+
+func deleteCheckpoint(db storage.Storage, execID string) error {
+	return db.Delete(checkpointKey(execID))
 }
 
 // ---- Durable wake registry (key: wake:<execId>) ------------------------------
