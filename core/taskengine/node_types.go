@@ -27,6 +27,7 @@ const (
 	NodeTypeFilter        = "filter"
 	NodeTypeLoop          = "loop"
 	NodeTypeBalance       = "balance"
+	NodeTypeAwait         = "await"
 )
 
 // AllNodeTypes returns a slice of all supported node types

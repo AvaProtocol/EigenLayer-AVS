@@ -1438,6 +1438,11 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
+	} else if node.GetAwait() != nil {
+		executionLogForNode, err = v.runAwait(node)
+		if executionLogForNode != nil {
+			v.addExecutionLog(executionLogForNode)
+		}
 	} else {
 		err = fmt.Errorf("unknown node type for node ID %s", node.Id)
 	}
@@ -3316,6 +3321,31 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				Config: balanceConfig,
 			},
 		}
+	case NodeTypeAwait:
+		node.Type = avsproto.NodeType_NODE_TYPE_AWAIT
+		awaitConfig := &avsproto.AwaitNode_Config{}
+		if channel, ok := config["channel"].(string); ok {
+			awaitConfig.Channel = channel
+		} else {
+			return nil, fmt.Errorf("await node requires 'channel' field")
+		}
+		if approvers, ok := config["approvers"].([]interface{}); ok {
+			for _, a := range approvers {
+				if s, ok := a.(string); ok {
+					awaitConfig.Approvers = append(awaitConfig.Approvers, s)
+				}
+			}
+		}
+		if prompt, ok := config["prompt"].(string); ok {
+			awaitConfig.Prompt = prompt
+		}
+		if timeout, ok := config["timeoutSeconds"].(float64); ok {
+			if timeout < 0 || timeout > float64(^uint32(0)) {
+				return nil, fmt.Errorf("await node 'timeoutSeconds' out of range: %v", timeout)
+			}
+			awaitConfig.TimeoutSeconds = uint32(timeout)
+		}
+		node.TaskType = &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{Config: awaitConfig}}
 	default:
 		return nil, fmt.Errorf("unsupported node type for CreateNodeFromType: %s", nodeType)
 	}
@@ -3813,6 +3843,21 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 
 			// Clean up complex protobuf types before returning
 			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_Await:
+		await := taskNode.GetAwait()
+		if await != nil && await.Config != nil {
+			approvers := make([]interface{}, len(await.Config.Approvers))
+			for i, a := range await.Config.Approvers {
+				approvers[i] = a
+			}
+			return map[string]interface{}{
+				"channel":        await.Config.Channel,
+				"approvers":      approvers, // []interface{} so structpb.NewValue accepts it
+				"prompt":         await.Config.Prompt,
+				"timeoutSeconds": float64(await.Config.TimeoutSeconds),
+			}
 		}
 
 	case *avsproto.TaskNode_Branch:

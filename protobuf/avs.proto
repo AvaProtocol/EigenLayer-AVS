@@ -34,6 +34,7 @@ enum NodeType {
   NODE_TYPE_FILTER = 8;          // Filter node
   NODE_TYPE_LOOP = 9;            // Loop node
   NODE_TYPE_BALANCE = 10;        // Balance node for retrieving wallet token balances
+  NODE_TYPE_AWAIT = 11;          // Suspendable node: pause until a signal arrives (durable execution)
 }
 
 // ExecutionTier defines value-capture pricing groups for on-chain execution nodes.
@@ -584,7 +585,26 @@ message BalanceNode {
     google.protobuf.Value data = 1;
   }
 
-  // Include Config as field 
+  // Include Config as field
+  Config config = 1;
+}
+
+// AwaitNode pauses the workflow until a signal arrives (durable execution — see
+// PLAN_DURABLE_EXECUTION.md). v1 ships the external-signal flavor (human approval:
+// the gateway delivers an approve/reject, e.g. from Telegram). chain-event
+// (cross-chain Await) and timer wakes follow.
+message AwaitNode {
+  message Config {
+    // External-signal wake parameters.
+    string channel = 1;             // "telegram" | "api"
+    repeated string approvers = 2;  // authorized parties; empty ⇒ the workflow owner
+    string prompt = 3;              // shown to the approver
+    uint32 timeout_seconds = 4;     // safety bound; 0 ⇒ server default (never an unbounded wait)
+  }
+  message Output {
+    // The delivered signal (decision + payload), readable by downstream steps.
+    google.protobuf.Value data = 1;
+  }
   Config config = 1;
 }
 
@@ -707,6 +727,8 @@ message TaskNode {
     CustomCodeNode    custom_code = 18;
     // Get token balances for a wallet address
     BalanceNode       balance = 19;
+    // Pause until a signal arrives (durable execution)
+    AwaitNode         await = 20;
   }
 }
 

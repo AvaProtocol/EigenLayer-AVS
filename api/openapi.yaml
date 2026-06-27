@@ -324,6 +324,7 @@ components:
         - filter
         - loop
         - balance
+        - await
       description: |
         Discriminator field for the Node union. Mirrors the proto
         `NodeType` enum but without the `NODE_TYPE_` prefix.
@@ -759,6 +760,28 @@ components:
           items: { $ref: '#/components/schemas/EthereumAddress' }
           description: Restrict to these tokens. Empty = fetch all.
 
+    AwaitNodeConfig:
+      type: object
+      description: |
+        Pauses the workflow until a signal arrives (durable execution). v1 is the
+        external-signal flavor (human approval — e.g. a Telegram approve/reject).
+      required: [channel]
+      properties:
+        channel:
+          type: string
+          description: 'Signal channel: `telegram` or `api`.'
+        approvers:
+          type: array
+          items: { type: string }
+          description: Authorized approver identities. Empty = the workflow owner.
+        prompt:
+          type: string
+          description: Message shown to the approver.
+        timeoutSeconds:
+          type: integer
+          format: int64
+          description: Safety bound; 0 = server default (the wait is never unbounded).
+
     # ---- Node union ----
 
     Node:
@@ -781,6 +804,7 @@ components:
           filter:        '#/components/schemas/FilterNode'
           loop:          '#/components/schemas/LoopNode'
           balance:       '#/components/schemas/BalanceNode'
+          await:         '#/components/schemas/AwaitNode'
       oneOf:
         - $ref: '#/components/schemas/ETHTransferNode'
         - $ref: '#/components/schemas/ContractWriteNode'
@@ -792,6 +816,7 @@ components:
         - $ref: '#/components/schemas/FilterNode'
         - $ref: '#/components/schemas/LoopNode'
         - $ref: '#/components/schemas/BalanceNode'
+        - $ref: '#/components/schemas/AwaitNode'
 
     ETHTransferNode:
       allOf:
@@ -862,6 +887,13 @@ components:
           properties:
             type: { type: string, enum: [balance] }
             config: { $ref: '#/components/schemas/BalanceNodeConfig' }
+
+    AwaitNode:
+      allOf:
+        - type: object
+          properties:
+            type: { type: string, enum: [await] }
+            config: { $ref: '#/components/schemas/AwaitNodeConfig' }
 
     # ---- Workflow envelope ----
 

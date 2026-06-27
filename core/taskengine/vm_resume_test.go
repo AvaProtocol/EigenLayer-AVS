@@ -7,12 +7,22 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
+
+func customCodeNode(id string) *avsproto.TaskNode {
+	return &avsproto.TaskNode{
+		Id: id, Name: id,
+		TaskType: &avsproto.TaskNode_CustomCode{CustomCode: &avsproto.CustomCodeNode{
+			Config: &avsproto.CustomCodeNode_Config{Lang: avsproto.Lang_LANG_JAVASCRIPT, Source: "return { ok: true };"},
+		}},
+	}
+}
 
 // buildLinearCustomCodeVM builds trigger -> cc1 -> cc2 -> cc3 (all self-contained
 // CustomCode nodes, no cross-references), compiled and ready to Run.
@@ -272,6 +282,70 @@ func TestExecutor_Advance_ResumesAndFinalizes(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, out.Status, again.Status)
 	assert.Len(t, again.Steps, 3, "no re-execution on a duplicate advance")
+}
+
+// TestAwaitNode_SuspendThenSignal_EndToEnd is the whole user-facing feature: a
+// workflow [cc1 -> await -> cc2] runs, the Await node suspends it, a delivered
+// approval signal (DeliverSignal) resumes it, and cc2 runs. The first real
+// Suspendable node, end-to-end through storage.
+func TestAwaitNode_SuspendThenSignal_EndToEnd(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	executor := &WorkflowExecutor{db: db, logger: testutil.GetLogger(), smartWalletConfig: &config.SmartWalletConfig{}}
+
+	trigger := &avsproto.TaskTrigger{Id: "t", Name: "t", TriggerType: &avsproto.TaskTrigger_Manual{}}
+	await := &avsproto.TaskNode{
+		Id: "appr", Name: "appr", Type: avsproto.NodeType_NODE_TYPE_AWAIT,
+		TaskType: &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{
+			Config: &avsproto.AwaitNode_Config{Channel: "telegram", Approvers: []string{"0xowner"}, Prompt: "approve?", TimeoutSeconds: 3600},
+		}},
+	}
+	task := &model.Workflow{Task: &avsproto.Task{
+		Id:      "approval-wf",
+		Trigger: trigger,
+		Nodes:   []*avsproto.TaskNode{customCodeNode("cc1"), await, customCodeNode("cc2")},
+		Edges: []*avsproto.TaskEdge{
+			{Id: "e0", Source: "t", Target: "cc1"},
+			{Id: "e1", Source: "cc1", Target: "appr"},
+			{Id: "e2", Source: "appr", Target: "cc2"},
+		},
+	}}
+
+	// Leg 1 — run; the Await node suspends after cc1.
+	vm1, err := NewVMWithData(task, nil, &config.SmartWalletConfig{}, nil)
+	require.NoError(t, err)
+	vm1.WithDb(db).WithLogger(testutil.GetLogger())
+	require.NoError(t, vm1.Compile())
+	require.NoError(t, vm1.Run())
+	assert.Equal(t, []string{"cc1", "appr"}, executedNodeIDs(vm1), "ran up to the Await, then suspended")
+	susp := vm1.PendingSuspend()
+	require.NotNil(t, susp)
+	assert.Equal(t, WakeExternalSignal, susp.Wake.Kind)
+	assert.Equal(t, "appr", susp.AwaitNodeID)
+	assert.Equal(t, "telegram", susp.Wake.External.Channel)
+
+	const execID = "exec-appr-1"
+	_, err = executor.checkpointSuspendedExecution(task, &avsproto.Execution{Id: execID, StartAt: 1}, vm1, susp)
+	require.NoError(t, err)
+
+	// Leg 2 — deliver the approval signal; the execution resumes and runs cc2.
+	payload, err := structpb.NewValue(map[string]any{"decision": "approve", "by": "0xowner"})
+	require.NoError(t, err)
+	out, err := executor.DeliverSignal(task, &Signal{
+		ExecutionID: execID, Kind: WakeExternalSignal, Decision: "approve", Approver: "0xowner", Payload: payload,
+	})
+	require.NoError(t, err)
+	assert.NotEqual(t, avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING, out.Status, "resumed to terminal")
+	var ids []string
+	for _, s := range out.Steps {
+		ids = append(ids, s.Id)
+	}
+	assert.Equal(t, []string{"cc1", "appr", "cc2"}, ids, "signal resumed the workflow; cc2 ran")
+
+	// Durable state GC'd.
+	wakes, err := loadAllWakeSubscriptions(db)
+	require.NoError(t, err)
+	assert.Nil(t, wakes[execID])
 }
 
 // TestSnapshotNodeVars_ExcludesReservedNames guards the reserved-name collision:
