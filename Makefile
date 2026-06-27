@@ -289,13 +289,22 @@ run-operator-sepolia:
 	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap operator --config=config/operator-sepolia.yaml
 
 ## dev-gateway / dev-worker-* / dev-operator-sepolia: build once, then run a single
-## process in the foreground (standalone use). For a file log, pipe it yourself:
-##   make run-gateway 2>&1 | tee logs/gateway.log
+## process in the foreground (standalone use), streaming to logs/<svc>.log.
+## Depends on `build` only and invokes run-* in the recipe so the binary is built
+## before it runs even under `make -j` (a `build run-*` prereq list could race).
 .PHONY: dev-gateway dev-worker-sepolia dev-worker-base-sepolia dev-operator-sepolia
-dev-gateway: build run-gateway
-dev-worker-sepolia: build run-worker-sepolia
-dev-worker-base-sepolia: build run-worker-base-sepolia
-dev-operator-sepolia: build run-operator-sepolia
+dev-gateway: build
+	@mkdir -p logs
+	@$(MAKE) --no-print-directory run-gateway 2>&1 | tee logs/gateway.log
+dev-worker-sepolia: build
+	@mkdir -p logs
+	@$(MAKE) --no-print-directory run-worker-sepolia 2>&1 | tee logs/worker-sepolia.log
+dev-worker-base-sepolia: build
+	@mkdir -p logs
+	@$(MAKE) --no-print-directory run-worker-base-sepolia 2>&1 | tee logs/worker-base-sepolia.log
+dev-operator-sepolia: build
+	@mkdir -p logs
+	@$(MAKE) --no-print-directory run-operator-sepolia 2>&1 | tee logs/operator-sepolia.log
 
 ## dev-stack: run gateway + sepolia worker + base-sepolia worker + sepolia operator together (Ctrl-C stops all)
 ##
@@ -323,12 +332,12 @@ dev-stack: build
 		fi; \
 		set -m; \
 		trap 'echo; echo "🛑 Stopping dev stack..."; kill 0 2>/dev/null; exit 0' INT TERM; \
-		$(MAKE) run-worker-sepolia      > logs/worker-sepolia.log      2>&1 & \
-		$(MAKE) run-worker-base-sepolia > logs/worker-base-sepolia.log 2>&1 & \
+		$(MAKE) --no-print-directory run-worker-sepolia      > logs/worker-sepolia.log      2>&1 & \
+		$(MAKE) --no-print-directory run-worker-base-sepolia > logs/worker-base-sepolia.log 2>&1 & \
 		sleep 1; \
-		$(MAKE) run-gateway             > logs/gateway.log             2>&1 & \
+		$(MAKE) --no-print-directory run-gateway             > logs/gateway.log             2>&1 & \
 		sleep 3; \
-		$(MAKE) run-operator-sepolia    > logs/operator-sepolia.log    2>&1 & \
+		$(MAKE) --no-print-directory run-operator-sepolia    > logs/operator-sepolia.log    2>&1 & \
 		wait
 
 ## clean: cleanup storage data

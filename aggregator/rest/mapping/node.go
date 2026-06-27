@@ -354,25 +354,63 @@ func protoRetargetJSON(in proto.Message, out interface{}) error {
 		return fmt.Errorf("marshal proto config: %w", err)
 	}
 
+	// Only pay for the unquote round-trip when the message actually carries a
+	// 64-bit int field (most node configs don't). Well-known types (Timestamp,
+	// Duration, Struct, ...) protojson-encode to non-object JSON, so skip them too.
 	desc := in.ProtoReflect().Descriptor()
-	// Well-known types (Timestamp, Duration, Struct, Value, ...) protojson-encode
-	// to non-object JSON and carry no plain int64 struct fields — decode directly.
-	if !isWellKnownProto(desc) {
+	if !isWellKnownProto(desc) && messageHas64BitInt(desc, map[protoreflect.FullName]bool{}) {
 		var tree map[string]interface{}
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.UseNumber()
-		if decErr := dec.Decode(&tree); decErr == nil {
-			unquoteProtoInt64Strings(tree, desc)
-			if normalized, mErr := json.Marshal(tree); mErr == nil {
-				raw = normalized
-			}
+		if decErr := dec.Decode(&tree); decErr != nil {
+			return fmt.Errorf("decode protojson intermediate: %w", decErr)
 		}
+		unquoteProtoInt64Strings(tree, desc)
+		normalized, mErr := json.Marshal(tree)
+		if mErr != nil {
+			return fmt.Errorf("re-marshal normalized config: %w", mErr)
+		}
+		raw = normalized
 	}
 
 	if err := json.Unmarshal(raw, out); err != nil {
 		return fmt.Errorf("unmarshal config into Go struct: %w", err)
 	}
 	return nil
+}
+
+// messageHas64BitInt reports whether md — or any nested non-well-known message it
+// contains — declares a 64-bit integer field (the only fields protojson encodes
+// as strings that the unquote pass must repair). Lets protoRetargetJSON skip the
+// tree round-trip for the common int64-free config. `seen` guards recursive types.
+// (Map *keys* typed as int64 are not considered: encoding/json natively parses
+// string JSON object keys into integer map-key types, so they never need fixing.)
+func messageHas64BitInt(md protoreflect.MessageDescriptor, seen map[protoreflect.FullName]bool) bool {
+	if seen[md.FullName()] {
+		return false
+	}
+	seen[md.FullName()] = true
+	fields := md.Fields()
+	for i := 0; i < fields.Len(); i++ {
+		fd := fields.Get(i)
+		if is64BitIntKind(fd.Kind()) {
+			return true
+		}
+		if fd.IsMap() {
+			vDesc := fd.MapValue()
+			if is64BitIntKind(vDesc.Kind()) {
+				return true
+			}
+			if vDesc.Kind() == protoreflect.MessageKind && !isWellKnownProto(vDesc.Message()) && messageHas64BitInt(vDesc.Message(), seen) {
+				return true
+			}
+			continue
+		}
+		if fd.Kind() == protoreflect.MessageKind && !isWellKnownProto(fd.Message()) && messageHas64BitInt(fd.Message(), seen) {
+			return true
+		}
+	}
+	return false
 }
 
 // unquoteProtoInt64Strings walks a protojson-decoded JSON tree alongside the
