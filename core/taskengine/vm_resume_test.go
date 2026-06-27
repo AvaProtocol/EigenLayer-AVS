@@ -235,6 +235,45 @@ func TestExecutor_CheckpointAndResume_DBBacked(t *testing.T) {
 	assert.Nil(t, gone[execID])
 }
 
+// TestExecutor_Advance_ResumesAndFinalizes exercises the production resume
+// entrypoint: a stored WAITING execution → Advance() rebuilds the VM, restores,
+// runs the rest to a terminal status, and GCs the durable state. Plus idempotency.
+func TestExecutor_Advance_ResumesAndFinalizes(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	executor := &WorkflowExecutor{db: db, logger: testutil.GetLogger(), smartWalletConfig: &config.SmartWalletConfig{}}
+
+	// Arrange a WAITING execution: run+suspend after cc1, then checkpoint it.
+	vm1, _ := buildLinearCustomCodeVM(t)
+	vm1.WithDb(db)
+	vm1.requestSuspend("cc1", &WakeSubscription{Kind: WakeTimer, TimeoutAt: 999})
+	require.NoError(t, vm1.Run())
+	const execID = "exec-advance-1"
+	_, err := executor.checkpointSuspendedExecution(vm1.task, &avsproto.Execution{Id: execID, StartAt: 1}, vm1, vm1.PendingSuspend())
+	require.NoError(t, err)
+
+	// Act: advance (resume).
+	out, err := executor.Advance(vm1.task, execID, nil)
+	require.NoError(t, err)
+
+	// Resumed to a terminal status, ran the remaining steps, durable state GC'd.
+	assert.NotEqual(t, avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING, out.Status)
+	var ids []string
+	for _, s := range out.Steps {
+		ids = append(ids, s.Id)
+	}
+	assert.Equal(t, []string{"cc1", "cc2", "cc3"}, ids, "resume appended the remaining steps to the record")
+	wakes, err := loadAllWakeSubscriptions(db)
+	require.NoError(t, err)
+	assert.Nil(t, wakes[execID], "wake GC'd on terminal finish")
+
+	// Idempotent: advancing a now-terminal execution is a no-op (E8).
+	again, err := executor.Advance(vm1.task, execID, nil)
+	require.NoError(t, err)
+	assert.Equal(t, out.Status, again.Status)
+	assert.Len(t, again.Steps, 3, "no re-execution on a duplicate advance")
+}
+
 // TestSnapshotNodeVars_ExcludesReservedNames guards the reserved-name collision:
 // a node literally named a system var (apContext) must not be snapshotted, or a
 // resume could persist secrets to disk.
@@ -258,8 +297,8 @@ func TestSnapshotNodeVars_ExcludesReservedNames(t *testing.T) {
 
 	snap, err := vm.snapshotNodeVars()
 	require.NoError(t, err)
-	assert.NotContains(t, string(snap), "leak", "a node named apContext must not be snapshotted")
-	assert.Equal(t, "{}", string(snap), "snapshot is empty — the only node collides with a reserved name")
+	assert.NotContains(t, string(snap), "leak", "the apContext node's secret value must not be snapshotted")
+	assert.NotContains(t, string(snap), "apContext", "a node named apContext must be excluded from the snapshot")
 }
 
 // TestResume_RestoredVarsUsableByFrontier ties it together: restore a prior leg's

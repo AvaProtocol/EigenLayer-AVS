@@ -861,6 +861,106 @@ func (x *WorkflowExecutor) checkpointSuspendedExecution(task *model.Workflow, ex
 	return execution, nil
 }
 
+// Advance resumes a WAITING execution from storage. An optional signal's payload
+// becomes the suspended step's output (readable by downstream steps). Idempotent
+// (durable exactly-once, E8): a non-WAITING execution is a no-op, so a duplicate or
+// post-restart signal resumes at most once. On a terminal finish it persists the
+// final record and GCs the checkpoint + wake; if the run suspends again it
+// re-checkpoints.
+//
+// Reconstructs node + trigger output vars from the checkpoint; faithful
+// reconstruction of arbitrary input variables is a follow-up.
+func (x *WorkflowExecutor) Advance(task *model.Workflow, executionID string, signal *Signal) (*avsproto.Execution, error) {
+	raw, err := x.db.GetKey(TaskExecutionKey(task, executionID))
+	if err != nil {
+		return nil, fmt.Errorf("load execution %s: %w", executionID, err)
+	}
+	execution := &avsproto.Execution{}
+	if err := protojson.Unmarshal(raw, execution); err != nil {
+		return nil, fmt.Errorf("unmarshal execution %s: %w", executionID, err)
+	}
+	// Only a WAITING execution resumes (exactly-once across a duplicate / post-restart signal).
+	if execution.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING {
+		return execution, nil
+	}
+
+	// Rebuild the VM (mirror RunTask's construction).
+	secrets, secErr := LoadSecretForTask(x.db, task)
+	if secErr != nil {
+		secrets = map[string]string{}
+	}
+	vm, err := NewVMWithData(task, nil, x.smartWalletConfig, secrets)
+	if err != nil {
+		return nil, fmt.Errorf("rebuild vm on resume: %w", err)
+	}
+	vm.WithDb(x.db).WithLogger(x.logger)
+	if x.engine != nil {
+		vm.WithChainConfigResolver(x.engine.ResolveSmartWalletConfig)
+	}
+	if err := vm.Compile(); err != nil {
+		return nil, fmt.Errorf("compile on resume: %w", err)
+	}
+
+	// Restore prior-leg vars.
+	if ckpt, lErr := loadCheckpoint(x.db, executionID); lErr == nil && len(ckpt) > 0 {
+		if err := vm.restoreNodeVars(ckpt); err != nil {
+			return nil, fmt.Errorf("restore vars on resume: %w", err)
+		}
+	}
+
+	// The wake delivers the suspended step's output.
+	if signal != nil && signal.Payload != nil && execution.ResumeNodeId != "" {
+		(&CommonProcessor{vm: vm}).SetOutputVarForStep(execution.ResumeNodeId,
+			map[string]any{"data": signal.Payload.AsInterface()})
+	}
+
+	// Resume state: skip the completed prefix, keep its steps in the final record.
+	vm.resumeCompleted = completedNodeIDsFromSteps(execution.Steps)
+	vm.ExecutionLogs = append([]*avsproto.Execution_Step{}, execution.Steps...)
+
+	runErr := vm.Run()
+
+	// Suspended again — re-checkpoint and stay WAITING.
+	if susp := vm.PendingSuspend(); susp != nil {
+		return x.checkpointSuspendedExecution(task, execution, vm, susp)
+	}
+
+	// Terminal — finalize and GC the durable state.
+	executionError, _, resultStatus := vm.AnalyzeExecutionResult()
+	execution.Steps = vm.ExecutionLogs
+	execution.Status = convertToExecutionStatus(resultStatus)
+	execution.Error = executionError
+	execution.EndAt = time.Now().UnixMilli()
+	if runErr != nil {
+		execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_ERROR
+		if execution.Error == "" {
+			execution.Error = fmt.Sprintf("VM execution error: %s", runErr.Error())
+		}
+	}
+	execution.ResumeNodeId = ""
+	execution.WaitReason = ""
+	sanitizeExecutionForPersistence(execution)
+
+	mo := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}
+	execBytes, err := mo.Marshal(execution)
+	if err != nil {
+		return nil, fmt.Errorf("marshal resumed execution: %w", err)
+	}
+	if err := x.db.BatchWrite(map[string][]byte{
+		string(TaskExecutionKey(task, executionID)): execBytes,
+	}); err != nil {
+		return nil, fmt.Errorf("persist resumed execution: %w", err)
+	}
+	_ = deleteCheckpoint(x.db, executionID)
+	_ = deleteWakeSubscription(x.db, executionID)
+
+	if x.logger != nil {
+		x.logger.Info("execution resumed to terminal",
+			"task_id", task.Id, "execution_id", executionID, "status", execution.Status.String())
+	}
+	return execution, nil
+}
+
 // sanitizeExecutionForPersistence walks execution steps and replaces any NaN/Inf float
 // occurrences inside step output/config/metadata with safe JSON values (nil or 0).
 // NOTE: This function does NOT redact sensitive data - it only handles NaN/Inf for JSON compatibility.

@@ -210,7 +210,7 @@ var reservedSystemVarNames = map[string]bool{
 func (v *VM) snapshotNodeVars() ([]byte, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	out := make(map[string]any, len(v.TaskNodes))
+	out := make(map[string]any, len(v.TaskNodes)+1)
 	for nodeID := range v.TaskNodes {
 		name := v.getNodeNameAsVarLocked(nodeID)
 		if name == "" || reservedSystemVarNames[name] {
@@ -218,6 +218,16 @@ func (v *VM) snapshotNodeVars() ([]byte, error) {
 		}
 		if val, ok := v.vars[name]; ok {
 			out[name] = val
+		}
+	}
+	// Include the trigger's output var too (keyed by sanitized trigger name) so a
+	// resumed leg can still reference {{trigger.data.x}}.
+	if v.task != nil && v.task.Trigger != nil {
+		tname := sanitizeTriggerNameForJS(v.task.Trigger.GetName())
+		if tname != "" && !reservedSystemVarNames[tname] {
+			if val, ok := v.vars[tname]; ok {
+				out[tname] = val
+			}
 		}
 	}
 	return json.Marshal(out)
