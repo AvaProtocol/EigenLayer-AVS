@@ -359,6 +359,12 @@ func registerColonActionShimRoutes(api *echo.Group, s *Server) {
 		}
 		return s.StreamExecution(c, generated.Ulid(c.Param("id")), params)
 	})
+	api.POST("/executions/:id"+colonActionShim+"signal", func(c echo.Context) error {
+		params := generated.SignalExecutionParams{
+			WorkflowId: generated.Ulid(c.QueryParam("workflowId")),
+		}
+		return s.SignalExecution(c, generated.Ulid(c.Param("id")), params)
+	})
 
 	// Collection-level actions. Routed via the generated wrapper so the
 	// oapi-codegen runtime handles query-param binding the same way the
