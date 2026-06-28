@@ -570,6 +570,112 @@ func TestValidateAwaitOperatorCoverage(t *testing.T) {
 	require.NoError(t, n.validateAwaitOperatorCoverage(awaitNode(&avsproto.AwaitNode_Config{Channel: "telegram"})))
 }
 
+// TestAwaitNode_ResumeThroughBranchTarget guards the resume scheduler: when the
+// completed prefix runs through a Branch-selected node before the Await, that branch
+// target must be fast-forwarded on resume so the Await's successors become schedulable.
+// Without the fix the workflow resumes to a dead frontier and ccAfter never runs.
+func TestAwaitNode_ResumeThroughBranchTarget(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	executor := &WorkflowExecutor{db: db, logger: testutil.GetLogger(), smartWalletConfig: &config.SmartWalletConfig{}}
+
+	trigger := &avsproto.TaskTrigger{Id: "t", Name: "t", TriggerType: &avsproto.TaskTrigger_Manual{}}
+	branch := &avsproto.TaskNode{
+		Id: "br", Name: "br",
+		TaskType: &avsproto.TaskNode_Branch{Branch: &avsproto.BranchNode{
+			Config: &avsproto.BranchNode_Config{
+				Conditions: []*avsproto.BranchNode_Condition{{Id: "a1", Type: "if", Expression: "true"}},
+			},
+		}},
+	}
+	await := &avsproto.TaskNode{
+		Id: "wait", Name: "wait", Type: avsproto.NodeType_NODE_TYPE_AWAIT,
+		TaskType: &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{
+			Config: &avsproto.AwaitNode_Config{Channel: "telegram", TimeoutSeconds: 3600},
+		}},
+	}
+	task := &model.Workflow{Task: &avsproto.Task{
+		Id: "branch-await-wf", Trigger: trigger,
+		Nodes: []*avsproto.TaskNode{branch, customCodeNode("ccTarget"), await, customCodeNode("ccAfter")},
+		Edges: []*avsproto.TaskEdge{
+			{Id: "e0", Source: "t", Target: "br"},
+			{Id: "e1", Source: "br.a1", Target: "ccTarget"}, // branch-condition edge → branch target
+			{Id: "e2", Source: "ccTarget", Target: "wait"},
+			{Id: "e3", Source: "wait", Target: "ccAfter"},
+		},
+	}}
+
+	// Leg 1 — branch selects ccTarget, it runs, the Await suspends.
+	vm1, err := NewVMWithData(task, nil, &config.SmartWalletConfig{}, nil)
+	require.NoError(t, err)
+	vm1.WithDb(db).WithLogger(testutil.GetLogger())
+	require.NoError(t, vm1.Compile())
+	require.NoError(t, vm1.Run())
+	require.NotNil(t, vm1.PendingSuspend(), "suspended at the Await")
+	assert.Contains(t, executedNodeIDs(vm1), "ccTarget", "the branch target ran in leg 1")
+
+	const execID = "exec-branch-await"
+	_, err = executor.checkpointSuspendedExecution(task, &avsproto.Execution{Id: execID, StartAt: 1}, vm1, vm1.PendingSuspend())
+	require.NoError(t, err)
+
+	// Leg 2 — resume; ccAfter (downstream of the Await, past the completed branch target) must run.
+	payload, err := structpb.NewValue(map[string]any{"decision": "approve"})
+	require.NoError(t, err)
+	out, err := executor.DeliverSignal(task, &Signal{ExecutionID: execID, Kind: WakeExternalSignal, Decision: "approve", Payload: payload})
+	require.NoError(t, err)
+	var ids []string
+	for _, s := range out.Steps {
+		ids = append(ids, s.Id)
+	}
+	assert.Contains(t, ids, "ccAfter", "resume must schedule the Await's successor past the completed branch target")
+	assert.NotEqual(t, avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING, out.Status, "resumed to terminal")
+}
+
+// TestValidateAwaitConfigs proves invalid Await configs are rejected at create time
+// (the XOR + required-flavor rule), not deferred to execution.
+func TestValidateAwaitConfigs(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	n := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+
+	awaitTask := func(c *avsproto.AwaitNode_Config) *model.Workflow {
+		return &model.Workflow{Task: &avsproto.Task{Nodes: []*avsproto.TaskNode{{
+			Id: "wait", Type: avsproto.NodeType_NODE_TYPE_AWAIT,
+			TaskType: &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{Config: c}},
+		}}}}
+	}
+
+	require.NoError(t, n.validateAwaitConfigs(awaitTask(&avsproto.AwaitNode_Config{Channel: "telegram"})), "external-signal valid")
+	require.NoError(t, n.validateAwaitConfigs(awaitTask(&avsproto.AwaitNode_Config{ChainEvent: chainEventConfig(8453)})), "chain-event valid")
+
+	for _, bad := range []*avsproto.AwaitNode_Config{
+		{Channel: "telegram", ChainEvent: chainEventConfig(8453)}, // both flavors
+		{},                  // neither flavor
+		{Prompt: "approve?"}, // external fields but no channel
+	} {
+		err := n.validateAwaitConfigs(awaitTask(bad))
+		require.Error(t, err)
+		assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	}
+}
+
+// TestPendingChainEventTriggers_GCsOrphanedWake proves a chain-event wake whose
+// workflow was deleted is GC'd (not streamed) at sync time, so operators stop watching
+// promptly instead of waiting for the timeout sweep.
+func TestPendingChainEventTriggers_GCsOrphanedWake(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	n := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+
+	require.NoError(t, persistWakeSubscription(db, "exec-orphan", &WakeSubscription{
+		Kind: WakeChainEvent, TaskID: "deleted-wf", ChainEvent: chainEventConfig(8453), TimeoutAt: 1 << 40,
+	}))
+	assert.Empty(t, n.pendingChainEventTriggers(), "an orphaned wake (deleted workflow) is not streamed")
+	wakes, err := loadAllWakeSubscriptions(db)
+	require.NoError(t, err)
+	assert.Nil(t, wakes["exec-orphan"], "the orphaned wake is GC'd")
+}
+
 // TestInternalTrigger_SyncAndRoute proves the operator-transport seam: a chain-event
 // wake surfaces as a synthetic event-trigger "task" (pendingChainEventTriggers) that
 // the operator sync streams, and an internal-trigger id round-trips so the notify
@@ -588,9 +694,13 @@ func TestInternalTrigger_SyncAndRoute(t *testing.T) {
 	_, ok = parseInternalTriggerTaskID("01HZY8M0000000000000000000")
 	assert.False(t, ok, "a normal task id is not an internal trigger")
 
+	// A real workflow backs the wake — pendingChainEventTriggers GCs wakes whose task is gone.
+	created, err := n.CreateWorkflow(testutil.TestUser1(), testutil.RestTask())
+	require.NoError(t, err)
+
 	// A persisted chain-event wake surfaces as a synthetic single-shot event trigger.
 	require.NoError(t, persistWakeSubscription(db, execID, &WakeSubscription{
-		Kind: WakeChainEvent, TaskID: "wf-1", ChainEvent: chainEventConfig(8453), TimeoutAt: 1 << 40,
+		Kind: WakeChainEvent, TaskID: created.Id, ChainEvent: chainEventConfig(8453), TimeoutAt: 1 << 40,
 	}))
 	// An external-signal wake must NOT surface (it's not operator-watched).
 	require.NoError(t, persistWakeSubscription(db, "exec-ext-1", &WakeSubscription{

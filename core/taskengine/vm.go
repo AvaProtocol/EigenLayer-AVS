@@ -1062,6 +1062,18 @@ func (v *VM) runKahnScheduler() error {
 			seedQueue = append(seedQueue, nodeID)
 		}
 	}
+	// On resume, a branch-target node that already ran in a prior leg must also be
+	// fast-forwarded so its completion propagates to its successors — the Branch
+	// runtime (which is what normally schedules a target) does not re-run on resume,
+	// and the phantom predCount keeps the target from ever reaching the queue via the
+	// predCount path. Without this, a completed Branch-before-Await prefix would leave
+	// the await's successors permanently unschedulable. Fresh runs have empty
+	// `completed`, so this adds nothing there.
+	for nodeID := range completed {
+		if branchTargets[nodeID] {
+			seedQueue = append(seedQueue, nodeID)
+		}
+	}
 	seedVisited := make(map[string]bool)
 	for len(seedQueue) > 0 {
 		nodeID := seedQueue[0]

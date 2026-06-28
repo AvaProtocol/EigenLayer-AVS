@@ -40,6 +40,43 @@ func (n *Engine) validateAwaitOperatorCoverage(task *model.Workflow) error {
 	return nil
 }
 
+// validateAwaitConfigs rejects, at create time, an Await node with an invalid config:
+// the external-signal flavor (a channel) and the chain-event flavor are mutually
+// exclusive, and exactly one must be set (an external-signal Await requires a channel).
+// Without this an invalid Await would persist and only fail later at execution in
+// runAwait / WakeSubscription.Validate. Runs in every mode (it's a config error, not a
+// coverage condition).
+func (n *Engine) validateAwaitConfigs(task *model.Workflow) error {
+	if task == nil {
+		return nil
+	}
+	for _, node := range task.Nodes {
+		await := node.GetAwait()
+		if await == nil {
+			continue
+		}
+		cfg := await.GetConfig()
+		if cfg == nil {
+			return status.Errorf(codes.InvalidArgument, "await node %s has no config", node.GetId())
+		}
+		hasChainEvent := cfg.GetChainEvent() != nil
+		hasExternalFields := cfg.GetChannel() != "" || len(cfg.GetApprovers()) > 0 || cfg.GetPrompt() != ""
+		if hasChainEvent && hasExternalFields {
+			return status.Errorf(codes.InvalidArgument,
+				"await node %s sets both an external-signal field and chain_event; they are mutually exclusive", node.GetId())
+		}
+		if hasChainEvent {
+			continue // chain-event flavor is valid
+		}
+		// External-signal flavor — channel is required (approvers/prompt alone is invalid).
+		if cfg.GetChannel() == "" {
+			return status.Errorf(codes.InvalidArgument,
+				"await node %s requires either an external-signal 'channel' or 'chain_event'", node.GetId())
+		}
+	}
+	return nil
+}
+
 // deregisterInternalTrigger tells operators to stop watching a consumed internal
 // trigger (the wake it stood for is gone). If the execution re-suspended on a new
 // chain-event wake, the next sync re-registers it (DeleteTask also untracks it).
@@ -126,6 +163,17 @@ func (n *Engine) pendingChainEventTriggers() []*model.Workflow {
 	out := make([]*model.Workflow, 0, len(wakes))
 	for executionID, wake := range wakes {
 		if wake.Kind != WakeChainEvent || wake.ChainEvent == nil {
+			continue
+		}
+		// GC a wake whose workflow has been deleted (e.g. DELETE /workflows/{id})
+		// instead of streaming an internal trigger that can never resume — otherwise
+		// operators keep watching it until the timeout sweep eventually clears it.
+		// NotFound only; a transient/corrupt error preserves the state for recovery.
+		if _, err := n.GetWorkflowByID(wake.TaskID); err != nil {
+			if status.Code(err) == codes.NotFound {
+				_ = deleteCheckpoint(n.db, executionID)
+				_ = deleteWakeSubscription(n.db, executionID)
+			}
 			continue
 		}
 		id := internalTriggerTaskID(executionID)
