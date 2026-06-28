@@ -272,8 +272,11 @@ type AuthExchangeResponse struct {
 
 // AwaitNode defines model for AwaitNode.
 type AwaitNode struct {
-	// Config Pauses the workflow until a signal arrives (durable execution). v1 is the
-	// external-signal flavor (human approval — e.g. a Telegram approve/reject).
+	// Config Pauses the workflow until a wake arrives (durable execution). Two mutually
+	// exclusive flavors: the external-signal flavor (human approval — set `channel`,
+	// e.g. a Telegram approve/reject), or the chain-event flavor (cross-chain — set
+	// `chainEvent` to pause until an operator observes that on-chain event, e.g. a
+	// bridge arrival on another chain). Exactly one flavor must be configured.
 	Config *AwaitNodeConfig `json:"config,omitempty"`
 	Type   *AwaitNodeType   `json:"type,omitempty"`
 }
@@ -281,16 +284,24 @@ type AwaitNode struct {
 // AwaitNodeType defines model for AwaitNode.Type.
 type AwaitNodeType string
 
-// AwaitNodeConfig Pauses the workflow until a signal arrives (durable execution). v1 is the
-// external-signal flavor (human approval — e.g. a Telegram approve/reject).
+// AwaitNodeConfig Pauses the workflow until a wake arrives (durable execution). Two mutually
+// exclusive flavors: the external-signal flavor (human approval — set `channel`,
+// e.g. a Telegram approve/reject), or the chain-event flavor (cross-chain — set
+// `chainEvent` to pause until an operator observes that on-chain event, e.g. a
+// bridge arrival on another chain). Exactly one flavor must be configured.
 type AwaitNodeConfig struct {
-	// Approvers Authorized approver identities. Empty = the workflow owner.
+	// Approvers External-signal flavor — authorized approver identities. Empty = the workflow owner.
 	Approvers *[]string `json:"approvers,omitempty"`
 
-	// Channel Signal channel: `telegram` or `api`.
-	Channel string `json:"channel"`
+	// ChainEvent Chain-event flavor — the on-chain event to wait for (a mid-workflow
+	// EventTrigger). An operator covering `chainEvent.chainId` watches it and
+	// resumes the execution when it fires. Mutually exclusive with `channel`.
+	ChainEvent *EventTriggerConfig `json:"chainEvent,omitempty"`
 
-	// Prompt Message shown to the approver.
+	// Channel External-signal flavor — signal channel: `telegram` or `api`.
+	Channel *string `json:"channel,omitempty"`
+
+	// Prompt External-signal flavor — message shown to the approver.
 	Prompt *string `json:"prompt,omitempty"`
 
 	// TimeoutSeconds Safety bound; 0 = server default (the wait is never unbounded).

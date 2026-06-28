@@ -763,20 +763,28 @@ components:
     AwaitNodeConfig:
       type: object
       description: |
-        Pauses the workflow until a signal arrives (durable execution). v1 is the
-        external-signal flavor (human approval — e.g. a Telegram approve/reject).
-      required: [channel]
+        Pauses the workflow until a wake arrives (durable execution). Two mutually
+        exclusive flavors: the external-signal flavor (human approval — set `channel`,
+        e.g. a Telegram approve/reject), or the chain-event flavor (cross-chain — set
+        `chainEvent` to pause until an operator observes that on-chain event, e.g. a
+        bridge arrival on another chain). Exactly one flavor must be configured.
       properties:
         channel:
           type: string
-          description: 'Signal channel: `telegram` or `api`.'
+          description: 'External-signal flavor — signal channel: `telegram` or `api`.'
         approvers:
           type: array
           items: { type: string }
-          description: Authorized approver identities. Empty = the workflow owner.
+          description: External-signal flavor — authorized approver identities. Empty = the workflow owner.
         prompt:
           type: string
-          description: Message shown to the approver.
+          description: External-signal flavor — message shown to the approver.
+        chainEvent:
+          allOf: [{ $ref: '#/components/schemas/EventTriggerConfig' }]
+          description: |
+            Chain-event flavor — the on-chain event to wait for (a mid-workflow
+            EventTrigger). An operator covering `chainEvent.chainId` watches it and
+            resumes the execution when it fires. Mutually exclusive with `channel`.
         timeoutSeconds:
           type: integer
           format: int64
