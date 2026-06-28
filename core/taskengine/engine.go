@@ -300,6 +300,29 @@ type Engine struct {
 	pendingNotifications map[string][]PendingNotification // operatorAddr -> list of notifications
 	notificationMutex    *sync.RWMutex
 	notificationTicker   *time.Ticker
+
+	// Per-execution serialization for durable resume (exactly-once). Sharded so a
+	// fixed set of mutexes bounds memory — the same executionID always maps to the
+	// same shard, so concurrent resumes of one execution serialize. See executionMutex.
+	executionMutexes [executionLockShards]sync.Mutex
+}
+
+// executionLockShards bounds the per-execution resume locks to a fixed set of mutexes.
+const executionLockShards = 256
+
+// executionMutex returns the lock guarding resume of executionID. Holding it across
+// the load-status → run → write-terminal sequence makes durable resume exactly-once:
+// a second concurrent signal (two approvers, a duplicate operator notify) blocks, then
+// finds the execution already terminal and no-ops — so an on-chain ContractWrite /
+// ETHTransfer in the resumed leg can never run twice.
+func (n *Engine) executionMutex(executionID string) *sync.Mutex {
+	// FNV-1a — allocation-free, deterministic (same id → same shard).
+	var h uint32 = 2166136261
+	for i := 0; i < len(executionID); i++ {
+		h ^= uint32(executionID[i])
+		h *= 16777619
+	}
+	return &n.executionMutexes[h%executionLockShards]
 }
 
 // create a new task engine using given storage, config and queue
@@ -4350,6 +4373,10 @@ func (n *Engine) SignalExecution(user *model.User, workflowID, executionID, deci
 	if err != nil {
 		return nil, err // GetWorkflow returns codes.NotFound for a missing/non-owned workflow
 	}
+	// Serialize concurrent resumes of this execution (exactly-once — see executionMutex).
+	mu := n.executionMutex(executionID)
+	mu.Lock()
+	defer mu.Unlock()
 	executor := NewExecutor(n.ResolveSmartWalletConfig(n.defaultChainID()), n.db, n.logger, n, n.priceService)
 	exec, err := executor.DeliverSignal(task, &Signal{
 		ExecutionID: executionID,
@@ -4564,6 +4591,10 @@ func (n *Engine) DeleteWorkflowByUser(user *model.User, taskID string) (*avsprot
 			Id:      taskID,
 		}, nil
 	}
+
+	// GC durable state of any suspended (WAITING) execution this task owned, so its
+	// checkpoint/wake — and any operator internal trigger — don't outlive the workflow.
+	n.gcDurableStateForTask(taskID)
 
 	n.logger.Info("📢 Starting operator notifications", "task_id", taskID)
 	n.notifyOperatorsTaskOperation(taskID, avsproto.MessageOp_DeleteTask)

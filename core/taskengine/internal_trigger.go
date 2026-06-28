@@ -55,6 +55,12 @@ func (n *Engine) validateAwaitConfigs(task *model.Workflow) error {
 		if await == nil {
 			continue
 		}
+		// An Await whose name is a reserved system var would, on resume, overwrite that
+		// var (the delivered signal is set under the node's name) — reject it at create.
+		if reservedSystemVarNames[node.GetName()] {
+			return status.Errorf(codes.InvalidArgument,
+				"await node name %q collides with a reserved system variable; rename it", node.GetName())
+		}
 		cfg := await.GetConfig()
 		if cfg == nil {
 			return status.Errorf(codes.InvalidArgument, "await node %s has no config", node.GetId())
@@ -84,11 +90,34 @@ func (n *Engine) deregisterInternalTrigger(executionID string) {
 	n.notifyOperatorsTaskOperation(internalTriggerTaskID(executionID), avsproto.MessageOp_DeleteTask)
 }
 
+// gcDurableStateForTask removes the durable state (checkpoint + wake, plus the operator
+// internal trigger for chain-event waits) of every suspended execution belonging to
+// taskID. Called when a workflow is deleted so a WAITING execution's wake doesn't
+// linger until the timeout sweep — and so external-signal waits (which the sync-time GC
+// never sees) are cleaned up promptly too.
+func (n *Engine) gcDurableStateForTask(taskID string) {
+	wakes, err := loadAllWakeSubscriptions(n.db, n.logger)
+	if err != nil {
+		n.logger.Error("gc durable state for deleted task: load wakes", "task_id", taskID, "error", err)
+		return
+	}
+	for executionID, wake := range wakes {
+		if wake.TaskID != taskID {
+			continue
+		}
+		_ = deleteCheckpoint(n.db, executionID)
+		_ = deleteWakeSubscription(n.db, executionID)
+		if wake.Kind == WakeChainEvent {
+			n.deregisterInternalTrigger(executionID)
+		}
+	}
+}
+
 // sweepExpiredWaits fails WAITING executions whose wake timed out (a stuck bridge, an
 // approver who never responded) and GCs their durable state. Runs on the periodic
 // scan loop, so a wait whose timeout passed while no operator was up still resolves.
 func (n *Engine) sweepExpiredWaits() {
-	wakes, err := loadAllWakeSubscriptions(n.db)
+	wakes, err := loadAllWakeSubscriptions(n.db, n.logger)
 	if err != nil {
 		n.logger.Error("sweep expired waits: load wakes", "error", err)
 		return
@@ -114,8 +143,14 @@ func (n *Engine) sweepExpiredWaits() {
 		if executor == nil {
 			executor = NewExecutor(n.ResolveSmartWalletConfig(n.defaultChainID()), n.db, n.logger, n, n.priceService)
 		}
-		if _, err := executor.ExpireWait(task, executionID); err != nil {
-			n.logger.Error("sweep expired waits: expire", "execution_id", executionID, "error", err)
+		// Serialize against a concurrent resume of the same execution (exactly-once):
+		// a signal landing as the sweep expires must not double-finalize.
+		mu := n.executionMutex(executionID)
+		mu.Lock()
+		_, expireErr := executor.ExpireWait(task, executionID)
+		mu.Unlock()
+		if expireErr != nil {
+			n.logger.Error("sweep expired waits: expire", "execution_id", executionID, "error", expireErr)
 			continue
 		}
 		// Deregistration only applies to chain-event waits (operator-watched triggers).
@@ -155,7 +190,7 @@ func parseInternalTriggerTaskID(taskID string) (executionID string, ok bool) {
 // them with zero new transport. Re-derived from storage on every sync, so a boot or
 // operator reconnect re-arms every live wait for free.
 func (n *Engine) pendingChainEventTriggers() []*model.Workflow {
-	wakes, err := loadAllWakeSubscriptions(n.db)
+	wakes, err := loadAllWakeSubscriptions(n.db, n.logger)
 	if err != nil {
 		n.logger.Error("internal-trigger sync: load wake subscriptions", "error", err)
 		return nil
@@ -200,6 +235,13 @@ func (n *Engine) pendingChainEventTriggers() []*model.Workflow {
 // A duplicate or late fire is a safe no-op — the wake is gone once resumed, and
 // Advance only acts on a still-WAITING execution.
 func (n *Engine) deliverChainEventWake(executionID string, payload *avsproto.NotifyTriggersReq) (*ExecutionState, error) {
+	// Serialize against any other resume of this execution (a duplicate operator notify
+	// or a concurrent external signal) so the load-wake → run sequence is exactly-once.
+	// The gate read below must be inside the lock: the loser then finds no wake and no-ops.
+	mu := n.executionMutex(executionID)
+	mu.Lock()
+	defer mu.Unlock()
+
 	wake, err := loadWakeSubscription(n.db, executionID)
 	if err != nil {
 		// No pending wait — already resumed, timed out, or GC'd. Nothing to do.

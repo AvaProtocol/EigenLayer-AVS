@@ -291,7 +291,7 @@ type AwaitNodeType string
 // `chainEvent` to pause until an operator observes that on-chain event, e.g. a
 // bridge arrival on another chain). Exactly one flavor must be configured.
 type AwaitNodeConfig struct {
-	// Approvers External-signal flavor — authorized approver identities. Empty = the workflow owner.
+	// Approvers External-signal flavor — authorized approver identities. Empty = the workflow owner. NOTE (v1): not yet enforced — the signal endpoint authorizes by workflow ownership only, so the owner can always approve regardless of this list. Delegated-approver enforcement (Telegram binding) is a follow-up; do not rely on this field for security yet.
 	Approvers *[]string `json:"approvers,omitempty"`
 
 	// ChainEvent Chain-event flavor — the on-chain event to wait for (a mid-workflow

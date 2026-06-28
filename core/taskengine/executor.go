@@ -862,8 +862,34 @@ func (x *WorkflowExecutor) checkpointSuspendedExecution(task *model.Workflow, ex
 		return nil, fmt.Errorf("marshal suspended execution: %w", err)
 	}
 	batch[string(TaskExecutionKey(task, execution.Id))] = execBytes
+
+	// Count this run toward MaxExecution at suspend time — a suspended execution is a
+	// run in progress, so the limit must not be bypassed (nor a new execution fire)
+	// while it waits. ExecutionCount was already incremented in RunTask; persist the
+	// task now, in the same atomic batch. The resume in Advance does NOT re-count.
+	initialTaskStatus := task.Status
+	if task.MaxExecution > 0 && task.ExecutionCount >= task.MaxExecution {
+		task.SetCompleted()
+	}
+	if task.ExpiredAt > 0 && time.Now().UnixMilli() >= task.ExpiredAt {
+		task.SetCompleted()
+	}
+	taskJSON, err := task.ToJSON()
+	if err != nil {
+		return nil, fmt.Errorf("marshal suspended task: %w", err)
+	}
+	batch[string(WorkflowStorageKey(task.Id, task.Status))] = taskJSON
+	batch[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
+
 	if err := x.db.BatchWrite(batch); err != nil {
-		return nil, fmt.Errorf("persist suspended execution + wake: %w", err)
+		return nil, fmt.Errorf("persist suspended execution + wake + task: %w", err)
+	}
+	// If MaxExecution/expiry flipped the task to a terminal status, drop the stale
+	// status-keyed record (mirrors RunTask's normal finalize).
+	if task.Status != initialTaskStatus {
+		if err := x.db.Delete(WorkflowStorageKey(task.Id, initialTaskStatus)); err != nil && x.logger != nil {
+			x.logger.Warn("failed to delete stale task status key after suspend", "task_id", task.Id, "error", err)
+		}
 	}
 
 	if x.logger != nil {
@@ -875,8 +901,17 @@ func (x *WorkflowExecutor) checkpointSuspendedExecution(task *model.Workflow, ex
 
 // DeliverSignal is the signal-intake entrypoint: a gateway approve/reject endpoint
 // or operator internal-trigger calls this to wake a suspended execution. It
-// validates the signal and advances the execution. (Authorization of the signal
-// against the wait's approvers is a follow-up — see the approval security model.)
+// validates the signal and advances the execution.
+//
+// SECURITY (v1, must close before delegated approval ships): the wake's `Approvers`
+// list is NOT yet enforced — the engine relies on the caller having authorized the
+// signal (SignalExecution gates on workflow ownership, so today only the owner can
+// signal). Consequently the signal `Payload` is owner-trusted; because a downstream
+// node may template `{{await.data.*}}` into JS source, an UNtrusted payload could
+// inject code. That is safe while only the owner (who already controls the workflow
+// source) can signal. When delegated approvers are enforced, the payload must be
+// treated as untrusted data (escaped / passed as a runtime value, not into source).
+// See the approval security model in PLAN_DURABLE_EXECUTION.md.
 func (x *WorkflowExecutor) DeliverSignal(task *model.Workflow, signal *Signal) (*avsproto.Execution, error) {
 	if err := signal.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid signal: %w", err)
