@@ -90,6 +90,7 @@ const (
 	ExecutionStatusFailed  ExecutionStatus = "failed"
 	ExecutionStatusPending ExecutionStatus = "pending"
 	ExecutionStatusSuccess ExecutionStatus = "success"
+	ExecutionStatusWaiting ExecutionStatus = "waiting"
 )
 
 // Defines values for ExecutionTier.
@@ -708,8 +709,12 @@ type Execution struct {
 	Index   *int64 `json:"index,omitempty"`
 	StartAt int64  `json:"startAt"`
 
-	// Status Outcome of an execution. `pending` is in-flight; `success` is full
-	// success; `failed` is logical failure (e.g., a node returned an error);
+	// Status Outcome of an execution. `pending` is in-flight; `waiting` is suspended
+	// mid-workflow at an `await` node, durably parked until a signal arrives
+	// (a human approve/reject or an operator-observed chain event) or the wait
+	// times out — non-terminal, like `pending`, but distinguishable so a client
+	// can show "awaiting approval"; `success` is full success; `failed` is
+	// logical failure (e.g., a node returned an error, or a wait timed out);
 	// `error` is a system / infrastructure failure (e.g., RPC unreachable).
 	Status   ExecutionStatus  `json:"status"`
 	Steps    *[]ExecutionStep `json:"steps,omitempty"`
@@ -740,8 +745,12 @@ type ExecutionStats struct {
 	Total            int64    `json:"total"`
 }
 
-// ExecutionStatus Outcome of an execution. `pending` is in-flight; `success` is full
-// success; `failed` is logical failure (e.g., a node returned an error);
+// ExecutionStatus Outcome of an execution. `pending` is in-flight; `waiting` is suspended
+// mid-workflow at an `await` node, durably parked until a signal arrives
+// (a human approve/reject or an operator-observed chain event) or the wait
+// times out — non-terminal, like `pending`, but distinguishable so a client
+// can show "awaiting approval"; `success` is full success; `failed` is
+// logical failure (e.g., a node returned an error, or a wait timed out);
 // `error` is a system / infrastructure failure (e.g., RPC unreachable).
 type ExecutionStatus string
 
@@ -754,8 +763,12 @@ type ExecutionStatusSummary struct {
 	Id      Ulid   `json:"id"`
 	StartAt *int64 `json:"startAt,omitempty"`
 
-	// Status Outcome of an execution. `pending` is in-flight; `success` is full
-	// success; `failed` is logical failure (e.g., a node returned an error);
+	// Status Outcome of an execution. `pending` is in-flight; `waiting` is suspended
+	// mid-workflow at an `await` node, durably parked until a signal arrives
+	// (a human approve/reject or an operator-observed chain event) or the wait
+	// times out — non-terminal, like `pending`, but distinguishable so a client
+	// can show "awaiting approval"; `success` is full success; `failed` is
+	// logical failure (e.g., a node returned an error, or a wait timed out);
 	// `error` is a system / infrastructure failure (e.g., RPC unreachable).
 	Status ExecutionStatus `json:"status"`
 
@@ -1308,8 +1321,12 @@ type TriggerWorkflowResponse struct {
 	ExecutionId Ulid   `json:"executionId"`
 	StartAt     *int64 `json:"startAt,omitempty"`
 
-	// Status Outcome of an execution. `pending` is in-flight; `success` is full
-	// success; `failed` is logical failure (e.g., a node returned an error);
+	// Status Outcome of an execution. `pending` is in-flight; `waiting` is suspended
+	// mid-workflow at an `await` node, durably parked until a signal arrives
+	// (a human approve/reject or an operator-observed chain event) or the wait
+	// times out — non-terminal, like `pending`, but distinguishable so a client
+	// can show "awaiting approval"; `success` is full success; `failed` is
+	// logical failure (e.g., a node returned an error, or a wait timed out);
 	// `error` is a system / infrastructure failure (e.g., RPC unreachable).
 	Status ExecutionStatus `json:"status"`
 }

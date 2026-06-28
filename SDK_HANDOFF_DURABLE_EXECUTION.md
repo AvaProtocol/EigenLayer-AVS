@@ -67,12 +67,14 @@ Chain-event awaits are **not** resumed through this endpoint — an operator fir
 
 ---
 
-## The `WAITING` lifecycle (important for polling/streaming)
+## The `waiting` lifecycle (important for polling/streaming)
 
-`EXECUTION_STATUS_WAITING` is **non-terminal**. Any SDK helper that "waits for an execution to finish" must treat `WAITING` as *keep waiting*, not done:
+Over REST the status is the lowercase wire value **`"waiting"`** (the generated `ExecutionStatus` union member; proto enum `EXECUTION_STATUS_WAITING`). It is **non-terminal**. Any SDK helper that "waits for an execution to finish" must treat `"waiting"` as *keep waiting*, not done:
 
-- `executions.get` / the SSE stream will report `WAITING` while paused, then a terminal status (`SUCCESS` / `FAILED` / `ERROR`) once resumed (or `FAILED` with "await timed out…" if the timeout sweep fires).
-- A `waitForExecution`-style util that currently stops on "any status set" or "not PENDING" will return early on `WAITING` — update its terminal-status predicate to exclude `WAITING`.
+- `executions.get` / the SSE stream report `"waiting"` while paused, then a terminal status (`"success"` / `"failed"` / `"error"`) once resumed (or `"failed"` with "await timed out…" if the timeout sweep fires).
+- A `waitForExecution`-style util that currently stops on "any status set" or "not `pending`" will return early on `"waiting"` — update its terminal-status predicate to exclude `"waiting"`.
+
+> Note: `"waiting"` was added to the OpenAPI `ExecutionStatus` enum and the REST wire mapping together with this hand-off — before that fix a paused execution surfaced as `"pending"` over REST. Make sure your `openapi-download` is current.
 
 ---
 
@@ -116,7 +118,7 @@ signal(
 }
 ```
 
-**3. WAITING-aware wait/stream** — update the terminal-status predicate in any execution-completion helper to exclude `EXECUTION_STATUS_WAITING`.
+**3. WAITING-aware wait/stream** — update the terminal-status predicate in any execution-completion helper to exclude `"waiting"`.
 
 ---
 
