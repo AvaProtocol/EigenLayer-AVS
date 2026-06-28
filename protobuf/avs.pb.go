@@ -1549,10 +1549,11 @@ func (x *BalanceNode) GetConfig() *BalanceNode_Config {
 	return nil
 }
 
-// AwaitNode pauses the workflow until a signal arrives (durable execution — see
-// PLAN_DURABLE_EXECUTION.md). v1 ships the external-signal flavor (human approval:
-// the gateway delivers an approve/reject, e.g. from Telegram). chain-event
-// (cross-chain Await) and timer wakes follow.
+// AwaitNode pauses the workflow until a wake arrives (durable execution — see
+// PLAN_DURABLE_EXECUTION.md). Two mutually-exclusive flavors: external-signal (human
+// approval — the gateway delivers an approve/reject, e.g. from Telegram) and
+// chain-event (cross-chain Await — an operator observes an on-chain event). Timer
+// wakes follow.
 type AwaitNode struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Config        *AwaitNode_Config      `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`

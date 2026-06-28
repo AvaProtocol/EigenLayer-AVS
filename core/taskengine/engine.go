@@ -1787,6 +1787,12 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 		return nil, err
 	}
 
+	// Reject an Await with an invalid config (the two flavors are mutually exclusive;
+	// exactly one is required) before it can persist and fail only at execution time.
+	if err := n.validateAwaitConfigs(task); err != nil {
+		return nil, err
+	}
+
 	// Reject a chain-event Await whose chain no operator currently covers — a wait
 	// that nothing could ever fire would never resume.
 	if err := n.validateAwaitOperatorCoverage(task); err != nil {

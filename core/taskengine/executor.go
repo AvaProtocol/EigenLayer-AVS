@@ -676,9 +676,9 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 		runTaskErr = vm.Run()
 	}
 
-	// Durable execution: a Suspendable step (Await / HumanApproval) may have paused
-	// the run. Checkpoint and return WAITING instead of finalizing. Inert today — no
-	// current node calls requestSuspend, so PendingSuspend is always nil.
+	// Durable execution: an Await node may have paused the run via requestSuspend.
+	// Checkpoint and return WAITING instead of finalizing; the execution resumes later
+	// via DeliverSignal/Advance (human approval) or an operator chain-event wake.
 	if susp := vm.PendingSuspend(); susp != nil {
 		return x.checkpointSuspendedExecution(task, execution, vm, susp)
 	}
@@ -836,25 +836,34 @@ func (x *WorkflowExecutor) checkpointSuspendedExecution(task *model.Workflow, ex
 	if err := persistCheckpoint(x.db, execution.Id, snapshot); err != nil {
 		return nil, fmt.Errorf("persist checkpoint: %w", err)
 	}
-	// 2. Armed markers: the wake subscription...
+	// 2. Armed markers — the wake subscription AND the WAITING execution record are
+	//    written ATOMICALLY in one batch. As separate writes, a crash between them
+	//    could leave a wake pointing at an execution that was never persisted: the
+	//    internal-trigger sync would then watch and fire a wake that can never resume.
+	//    (The checkpoint above stays a separate prior write — it's resume data with no
+	//    wake referencing it, so a partial write is an inert orphan.)
+	batch := map[string][]byte{}
 	if susp.Wake != nil {
 		// Bind the wake to its task so a chain-event notify / boot re-arm can resolve
 		// the task (executions are stored task-scoped; no global exec→task index).
 		susp.Wake.TaskID = task.Id
-		if err := persistWakeSubscription(x.db, execution.Id, susp.Wake); err != nil {
-			return nil, fmt.Errorf("persist wake: %w", err)
+		if err := susp.Wake.Validate(); err != nil {
+			return nil, fmt.Errorf("validate wake: %w", err)
 		}
+		wakeBytes, err := marshalWake(susp.Wake)
+		if err != nil {
+			return nil, fmt.Errorf("marshal wake: %w", err)
+		}
+		batch[string(wakeSubscriptionKey(execution.Id))] = wakeBytes
 	}
-	// ...and the WAITING execution record.
 	mo := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}
 	execBytes, err := mo.Marshal(execution)
 	if err != nil {
 		return nil, fmt.Errorf("marshal suspended execution: %w", err)
 	}
-	if err := x.db.BatchWrite(map[string][]byte{
-		string(TaskExecutionKey(task, execution.Id)): execBytes,
-	}); err != nil {
-		return nil, fmt.Errorf("persist suspended execution: %w", err)
+	batch[string(TaskExecutionKey(task, execution.Id))] = execBytes
+	if err := x.db.BatchWrite(batch); err != nil {
+		return nil, fmt.Errorf("persist suspended execution + wake: %w", err)
 	}
 
 	if x.logger != nil {
