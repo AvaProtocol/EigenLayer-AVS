@@ -34,6 +34,17 @@ func (v *VM) runAwait(node *avsproto.TaskNode) (*avsproto.Execution_Step, error)
 		return step, err
 	}
 
+	// The two flavors are mutually exclusive — reject an ambiguous config rather than
+	// silently preferring one (the proto can't express the XOR).
+	hasExternal := cfg.GetChannel() != "" || len(cfg.GetApprovers()) > 0 || cfg.GetPrompt() != ""
+	if cfg.GetChainEvent() != nil && hasExternal {
+		err := fmt.Errorf("await node %s sets both chain_event and external-signal fields; they are mutually exclusive", node.Id)
+		step.Success = false
+		step.Error = err.Error()
+		step.EndAt = time.Now().UnixMilli()
+		return step, err
+	}
+
 	timeoutSec := int64(cfg.GetTimeoutSeconds())
 	if timeoutSec <= 0 {
 		timeoutSec = defaultAwaitTimeoutSeconds

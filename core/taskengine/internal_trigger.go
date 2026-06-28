@@ -28,7 +28,11 @@ func (n *Engine) validateAwaitOperatorCoverage(task *model.Workflow) error {
 		if ce == nil {
 			continue // external-signal flavor needs no operator
 		}
-		if len(n.operatorsCoveringChain(ce.GetChainId())) == 0 {
+		// operatorsCoveringChain reads trackSyncedTasks and requires n.lock.
+		n.lock.Lock()
+		covered := len(n.operatorsCoveringChain(ce.GetChainId()))
+		n.lock.Unlock()
+		if covered == 0 {
 			return status.Errorf(codes.FailedPrecondition,
 				"await node waits on chain_id=%d but no operator currently covers it; the wait could never fire", ce.GetChainId())
 		}
@@ -60,9 +64,14 @@ func (n *Engine) sweepExpiredWaits() {
 		}
 		task, err := n.GetWorkflowByID(wake.TaskID)
 		if err != nil {
-			// Task gone — GC the orphaned durable state and move on.
-			_ = deleteCheckpoint(n.db, executionID)
-			_ = deleteWakeSubscription(n.db, executionID)
+			// Only GC when the task is genuinely gone. On a corrupted/transient error,
+			// preserve the durable state so the problem stays diagnosable + recoverable.
+			if status.Code(err) == codes.NotFound {
+				_ = deleteCheckpoint(n.db, executionID)
+				_ = deleteWakeSubscription(n.db, executionID)
+			} else {
+				n.logger.Error("sweep expired waits: load task", "task_id", wake.TaskID, "execution_id", executionID, "error", err)
+			}
 			continue
 		}
 		if executor == nil {
@@ -72,7 +81,10 @@ func (n *Engine) sweepExpiredWaits() {
 			n.logger.Error("sweep expired waits: expire", "execution_id", executionID, "error", err)
 			continue
 		}
-		n.deregisterInternalTrigger(executionID)
+		// Deregistration only applies to chain-event waits (operator-watched triggers).
+		if wake.Kind == WakeChainEvent {
+			n.deregisterInternalTrigger(executionID)
+		}
 		n.logger.Info("expired timed-out wait", "execution_id", executionID, "task_id", wake.TaskID)
 	}
 }

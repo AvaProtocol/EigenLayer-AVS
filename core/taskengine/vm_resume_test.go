@@ -428,6 +428,42 @@ func TestAwaitNode_ChainEvent_SuspendThenResume(t *testing.T) {
 	assert.Nil(t, wakes[execID], "wake GC'd after resume")
 }
 
+// TestAwaitNode_RejectsAmbiguousConfig proves the flavors are mutually exclusive: an
+// Await with both an external-signal channel and a chain_event fails rather than
+// silently picking one (and does not suspend).
+func TestAwaitNode_RejectsAmbiguousConfig(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	trigger := &avsproto.TaskTrigger{Id: "t", Name: "t", TriggerType: &avsproto.TaskTrigger_Manual{}}
+	await := &avsproto.TaskNode{
+		Id: "wait", Name: "wait", Type: avsproto.NodeType_NODE_TYPE_AWAIT,
+		TaskType: &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{
+			Config: &avsproto.AwaitNode_Config{Channel: "telegram", ChainEvent: chainEventConfig(8453)},
+		}},
+	}
+	task := &model.Workflow{Task: &avsproto.Task{
+		Id: "ambig-wf", Trigger: trigger,
+		Nodes: []*avsproto.TaskNode{customCodeNode("cc1"), await},
+		Edges: []*avsproto.TaskEdge{{Id: "e0", Source: "t", Target: "cc1"}, {Id: "e1", Source: "cc1", Target: "wait"}},
+	}}
+	vm, err := NewVMWithData(task, nil, &config.SmartWalletConfig{}, nil)
+	require.NoError(t, err)
+	vm.WithDb(db).WithLogger(testutil.GetLogger())
+	require.NoError(t, vm.Compile())
+	_ = vm.Run()
+
+	assert.Nil(t, vm.PendingSuspend(), "an ambiguous Await must not suspend")
+	var awaitStep *avsproto.Execution_Step
+	for _, s := range vm.ExecutionLogs {
+		if s.Id == "wait" {
+			awaitStep = s
+		}
+	}
+	require.NotNil(t, awaitStep, "the Await step is recorded")
+	assert.False(t, awaitStep.Success)
+	assert.Contains(t, awaitStep.Error, "mutually exclusive")
+}
+
 // TestAwaitNode_ChainEvent_ExpireOnTimeout proves the timeout sweep's finalize: a
 // WAITING execution whose wake timed out is failed and its durable state GC'd.
 func TestAwaitNode_ChainEvent_ExpireOnTimeout(t *testing.T) {

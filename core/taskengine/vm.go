@@ -3357,7 +3357,11 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 			awaitConfig.ChainEvent = eventConfig
 		}
-		if awaitConfig.Channel == "" && awaitConfig.ChainEvent == nil {
+		hasExternal := awaitConfig.Channel != "" || len(awaitConfig.Approvers) > 0 || awaitConfig.Prompt != ""
+		if awaitConfig.ChainEvent != nil && hasExternal {
+			return nil, fmt.Errorf("await node sets both 'chainEvent' and external-signal fields; they are mutually exclusive")
+		}
+		if !hasExternal && awaitConfig.ChainEvent == nil {
 			return nil, fmt.Errorf("await node requires either 'channel' (external signal) or 'chainEvent' (chain event)")
 		}
 		node.TaskType = &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{Config: awaitConfig}}
@@ -3863,25 +3867,28 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 	case *avsproto.TaskNode_Await:
 		await := taskNode.GetAwait()
 		if await != nil && await.Config != nil {
-			approvers := make([]interface{}, len(await.Config.Approvers))
-			for i, a := range await.Config.Approvers {
-				approvers[i] = a
-			}
 			result := map[string]interface{}{
-				"channel":        await.Config.Channel,
-				"approvers":      approvers, // []interface{} so structpb.NewValue accepts it
-				"prompt":         await.Config.Prompt,
 				"timeoutSeconds": float64(await.Config.TimeoutSeconds),
 			}
-			// Chain-event flavor — re-encode via protojson so the nested config (and
-			// its well-known types) round-trips as clean JSON map types.
+			// Emit only the active flavor's fields (they are mutually exclusive), so
+			// the serialized config isn't a confusing mix of channel:"" + chainEvent.
 			if await.Config.ChainEvent != nil {
+				// Re-encode via protojson so the nested config (and its well-known
+				// types) round-trips as clean JSON map types.
 				if raw, err := protojson.Marshal(await.Config.ChainEvent); err == nil {
 					var chainEvent map[string]interface{}
 					if json.Unmarshal(raw, &chainEvent) == nil {
 						result["chainEvent"] = chainEvent
 					}
 				}
+			} else {
+				approvers := make([]interface{}, len(await.Config.Approvers))
+				for i, a := range await.Config.Approvers {
+					approvers[i] = a // []interface{} so structpb.NewValue accepts it
+				}
+				result["channel"] = await.Config.Channel
+				result["approvers"] = approvers
+				result["prompt"] = await.Config.Prompt
 			}
 			return result
 		}
