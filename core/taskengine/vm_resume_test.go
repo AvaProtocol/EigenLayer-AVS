@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -346,6 +348,29 @@ func TestAwaitNode_SuspendThenSignal_EndToEnd(t *testing.T) {
 	wakes, err := loadAllWakeSubscriptions(db)
 	require.NoError(t, err)
 	assert.Nil(t, wakes[execID])
+}
+
+// TestSignalExecution_AuthGates proves the engine-level transport gates map to the
+// right gRPC codes (so the REST layer returns 400 vs 404, not 500): an invalid
+// decision is InvalidArgument; a signal from a non-owner is NotFound (the ownership
+// gate — User2 cannot signal User1's workflow). The full suspend→signal→resume path
+// is covered by TestAwaitNode_SuspendThenSignal_EndToEnd + the Advance tests.
+func TestSignalExecution_AuthGates(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	n := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+
+	// Invalid decision is rejected up front, before any workflow lookup.
+	_, err := n.SignalExecution(testutil.TestUser1(), "any-workflow", "exec-1", "maybe", nil)
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err), "invalid decision → InvalidArgument")
+
+	// User1 owns a workflow; User2 must not be able to signal it.
+	created, err := n.CreateWorkflow(testutil.TestUser1(), testutil.RestTask())
+	require.NoError(t, err)
+	_, err = n.SignalExecution(testutil.TestUser2(), created.Id, "exec-1", "approve", nil)
+	require.Error(t, err)
+	assert.Equal(t, codes.NotFound, status.Code(err), "non-owner signal → NotFound (ownership gate)")
 }
 
 // TestSnapshotNodeVars_ExcludesReservedNames guards the reserved-name collision:

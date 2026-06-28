@@ -29,6 +29,9 @@ type ServerInterface interface {
 	// Get execution status (lightweight, no steps)
 	// (GET /executions/{id}:getStatus)
 	GetExecutionStatus(ctx echo.Context, id Ulid, params GetExecutionStatusParams) error
+	// Deliver an approval/external signal to a waiting execution
+	// (POST /executions/{id}:signal)
+	SignalExecution(ctx echo.Context, id Ulid, params SignalExecutionParams) error
 	// Stream execution status changes (Server-Sent Events)
 	// (GET /executions/{id}:stream)
 	StreamExecution(ctx echo.Context, id Ulid, params StreamExecutionParams) error
@@ -218,6 +221,33 @@ func (w *ServerInterfaceWrapper) GetExecutionStatus(ctx echo.Context) error {
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.GetExecutionStatus(ctx, id, params)
+	return err
+}
+
+// SignalExecution converts echo context to params.
+func (w *ServerInterfaceWrapper) SignalExecution(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "id" -------------
+	var id Ulid
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", ctx.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter id: %s", err))
+	}
+
+	ctx.Set(BearerAuthScopes, []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SignalExecutionParams
+	// ------------- Required query parameter "workflowId" -------------
+
+	err = runtime.BindQueryParameter("form", true, true, "workflowId", ctx.QueryParams(), &params.WorkflowId)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter workflowId: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.SignalExecution(ctx, id, params)
 	return err
 }
 
@@ -820,6 +850,7 @@ func RegisterHandlersWithBaseURL(router EchoRouter, si ServerInterface, baseURL 
 	router.GET(baseURL+"/executions", wrapper.ListExecutions)
 	router.GET(baseURL+"/executions/:id", wrapper.GetExecution)
 	router.GET(baseURL+"/executions/:id:getStatus", wrapper.GetExecutionStatus)
+	router.POST(baseURL+"/executions/:id:signal", wrapper.SignalExecution)
 	router.GET(baseURL+"/executions/:id:stream", wrapper.StreamExecution)
 	router.GET(baseURL+"/executions:count", wrapper.CountExecutions)
 	router.GET(baseURL+"/executions:stats", wrapper.ExecutionStats)
@@ -1028,6 +1059,58 @@ type GetExecutionStatus404ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response GetExecutionStatus404ApplicationProblemPlusJSONResponse) VisitGetExecutionStatusResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SignalExecutionRequestObject struct {
+	Id     Ulid `json:"id"`
+	Params SignalExecutionParams
+	Body   *SignalExecutionJSONRequestBody
+}
+
+type SignalExecutionResponseObject interface {
+	VisitSignalExecutionResponse(w http.ResponseWriter) error
+}
+
+type SignalExecution200JSONResponse Execution
+
+func (response SignalExecution200JSONResponse) VisitSignalExecutionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SignalExecution400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response SignalExecution400ApplicationProblemPlusJSONResponse) VisitSignalExecutionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SignalExecution401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response SignalExecution401ApplicationProblemPlusJSONResponse) VisitSignalExecutionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SignalExecution404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response SignalExecution404ApplicationProblemPlusJSONResponse) VisitSignalExecutionResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(404)
 
@@ -2138,6 +2221,9 @@ type StrictServerInterface interface {
 	// Get execution status (lightweight, no steps)
 	// (GET /executions/{id}:getStatus)
 	GetExecutionStatus(ctx context.Context, request GetExecutionStatusRequestObject) (GetExecutionStatusResponseObject, error)
+	// Deliver an approval/external signal to a waiting execution
+	// (POST /executions/{id}:signal)
+	SignalExecution(ctx context.Context, request SignalExecutionRequestObject) (SignalExecutionResponseObject, error)
 	// Stream execution status changes (Server-Sent Events)
 	// (GET /executions/{id}:stream)
 	StreamExecution(ctx context.Context, request StreamExecutionRequestObject) (StreamExecutionResponseObject, error)
@@ -2333,6 +2419,38 @@ func (sh *strictHandler) GetExecutionStatus(ctx echo.Context, id Ulid, params Ge
 		return err
 	} else if validResponse, ok := response.(GetExecutionStatusResponseObject); ok {
 		return validResponse.VisitGetExecutionStatusResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// SignalExecution operation middleware
+func (sh *strictHandler) SignalExecution(ctx echo.Context, id Ulid, params SignalExecutionParams) error {
+	var request SignalExecutionRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	var body SignalExecutionJSONRequestBody
+	if err := ctx.Bind(&body); err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.SignalExecution(ctx.Request().Context(), request.(SignalExecutionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SignalExecution")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(SignalExecutionResponseObject); ok {
+		return validResponse.VisitSignalExecutionResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}
