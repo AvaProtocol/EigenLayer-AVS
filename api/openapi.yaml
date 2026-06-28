@@ -1115,12 +1115,17 @@ components:
       type: string
       enum:
         - pending
+        - waiting
         - success
         - failed
         - error
       description: |
-        Outcome of an execution. `pending` is in-flight; `success` is full
-        success; `failed` is logical failure (e.g., a node returned an error);
+        Outcome of an execution. `pending` is in-flight; `waiting` is suspended
+        mid-workflow at an `await` node, durably parked until a signal arrives
+        (a human approve/reject or an operator-observed chain event) or the wait
+        times out — non-terminal, like `pending`, but distinguishable so a client
+        can show "awaiting approval"; `success` is full success; `failed` is
+        logical failure (e.g., a node returned an error, or a wait timed out);
         `error` is a system / infrastructure failure (e.g., RPC unreachable).
 
     Fee:

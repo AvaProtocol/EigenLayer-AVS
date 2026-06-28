@@ -241,6 +241,8 @@ func executionStatusProtoToWire(s avsproto.ExecutionStatus) string {
 	switch s {
 	case avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING:
 		return "pending"
+	case avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING:
+		return "waiting"
 	case avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS:
 		return "success"
 	case avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED:
