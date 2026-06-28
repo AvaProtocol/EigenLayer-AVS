@@ -838,6 +838,9 @@ func (x *WorkflowExecutor) checkpointSuspendedExecution(task *model.Workflow, ex
 	}
 	// 2. Armed markers: the wake subscription...
 	if susp.Wake != nil {
+		// Bind the wake to its task so a chain-event notify / boot re-arm can resolve
+		// the task (executions are stored task-scoped; no global exec→task index).
+		susp.Wake.TaskID = task.Id
 		if err := persistWakeSubscription(x.db, execution.Id, susp.Wake); err != nil {
 			return nil, fmt.Errorf("persist wake: %w", err)
 		}
@@ -995,6 +998,53 @@ func (x *WorkflowExecutor) Advance(task *model.Workflow, executionID string, sig
 		x.logger.Info("execution resumed to terminal",
 			"task_id", task.Id, "execution_id", executionID, "status", execution.Status.String())
 	}
+	return execution, nil
+}
+
+// ExpireWait fails a WAITING execution whose wake timed out, writing a terminal
+// (FAILED) record and GC'ing the durable state. Idempotent: a non-WAITING execution
+// just GCs any orphaned state. Mirrors Advance's finalize without running the VM —
+// nothing resumes, the wait simply expires.
+func (x *WorkflowExecutor) ExpireWait(task *model.Workflow, executionID string) (*avsproto.Execution, error) {
+	raw, err := x.db.GetKey(TaskExecutionKey(task, executionID))
+	if err != nil {
+		_ = deleteCheckpoint(x.db, executionID)
+		_ = deleteWakeSubscription(x.db, executionID)
+		return nil, fmt.Errorf("load execution %s: %w", executionID, err)
+	}
+	execution := &avsproto.Execution{}
+	if err := protojson.Unmarshal(raw, execution); err != nil {
+		return nil, fmt.Errorf("unmarshal execution %s: %w", executionID, err)
+	}
+	// Only a still-WAITING execution expires; otherwise just GC (a resume may have
+	// raced the sweep) and return the record as-is.
+	if execution.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING {
+		_ = deleteCheckpoint(x.db, executionID)
+		_ = deleteWakeSubscription(x.db, executionID)
+		return execution, nil
+	}
+
+	execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
+	if execution.Error == "" {
+		execution.Error = "await timed out before a wake arrived"
+	}
+	execution.EndAt = time.Now().UnixMilli()
+	execution.ResumeNodeId = ""
+	execution.WaitReason = ""
+	sanitizeExecutionForPersistence(execution)
+
+	mo := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}
+	execBytes, err := mo.Marshal(execution)
+	if err != nil {
+		return nil, fmt.Errorf("marshal expired execution: %w", err)
+	}
+	if err := x.db.BatchWrite(map[string][]byte{
+		string(TaskExecutionKey(task, executionID)): execBytes,
+	}); err != nil {
+		return nil, fmt.Errorf("persist expired execution: %w", err)
+	}
+	_ = deleteCheckpoint(x.db, executionID)
+	_ = deleteWakeSubscription(x.db, executionID)
 	return execution, nil
 }
 

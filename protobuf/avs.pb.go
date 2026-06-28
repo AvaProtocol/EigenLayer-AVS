@@ -9029,13 +9029,19 @@ func (x *BalanceNode_Output) GetData() *structpb.Value {
 
 type AwaitNode_Config struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// External-signal wake parameters.
+	// External-signal wake parameters (human-approval flavor). Used when chain_event
+	// is unset.
 	Channel        string   `protobuf:"bytes,1,opt,name=channel,proto3" json:"channel,omitempty"`                                      // "telegram" | "api"
 	Approvers      []string `protobuf:"bytes,2,rep,name=approvers,proto3" json:"approvers,omitempty"`                                  // authorized parties; empty ⇒ the workflow owner
 	Prompt         string   `protobuf:"bytes,3,opt,name=prompt,proto3" json:"prompt,omitempty"`                                        // shown to the approver
 	TimeoutSeconds uint32   `protobuf:"varint,4,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"` // safety bound; 0 ⇒ server default (never an unbounded wait)
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Chain-event wake (cross-chain flavor). When set, the Await pauses until an
+	// operator covering chain_event.chain_id observes this event — a mid-workflow
+	// EventTrigger (e.g. a bridge arrival on chain B). Reuses the event-trigger
+	// machinery; mutually exclusive with the external-signal fields above.
+	ChainEvent    *EventTrigger_Config `protobuf:"bytes,5,opt,name=chain_event,json=chainEvent,proto3" json:"chain_event,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AwaitNode_Config) Reset() {
@@ -9094,6 +9100,13 @@ func (x *AwaitNode_Config) GetTimeoutSeconds() uint32 {
 		return x.TimeoutSeconds
 	}
 	return 0
+}
+
+func (x *AwaitNode_Config) GetChainEvent() *EventTrigger_Config {
+	if x != nil {
+		return x.ChainEvent
+	}
+	return nil
 }
 
 type AwaitNode_Output struct {
@@ -10161,14 +10174,16 @@ const file_avs_proto_rawDesc = "" +
 	"\x13min_usd_value_cents\x18\x05 \x01(\x03R\x10minUsdValueCents\x12'\n" +
 	"\x0ftoken_addresses\x18\x06 \x03(\tR\x0etokenAddresses\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xfb\x01\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xbd\x02\n" +
 	"\tAwaitNode\x124\n" +
-	"\x06config\x18\x01 \x01(\v2\x1c.aggregator.AwaitNode.ConfigR\x06config\x1a\x81\x01\n" +
+	"\x06config\x18\x01 \x01(\v2\x1c.aggregator.AwaitNode.ConfigR\x06config\x1a\xc3\x01\n" +
 	"\x06Config\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x12\x1c\n" +
 	"\tapprovers\x18\x02 \x03(\tR\tapprovers\x12\x16\n" +
 	"\x06prompt\x18\x03 \x01(\tR\x06prompt\x12'\n" +
-	"\x0ftimeout_seconds\x18\x04 \x01(\rR\x0etimeoutSeconds\x1a4\n" +
+	"\x0ftimeout_seconds\x18\x04 \x01(\rR\x0etimeoutSeconds\x12@\n" +
+	"\vchain_event\x18\x05 \x01(\v2\x1f.aggregator.EventTrigger.ConfigR\n" +
+	"chainEvent\x1a4\n" +
 	"\x06Output\x12*\n" +
 	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\x96\x02\n" +
 	"\n" +
@@ -11117,43 +11132,44 @@ var file_avs_proto_depIdxs = []int32{
 	4,   // 150: aggregator.CustomCodeNode.Config.lang:type_name -> aggregator.Lang
 	145, // 151: aggregator.CustomCodeNode.Output.data:type_name -> google.protobuf.Value
 	145, // 152: aggregator.BalanceNode.Output.data:type_name -> google.protobuf.Value
-	145, // 153: aggregator.AwaitNode.Output.data:type_name -> google.protobuf.Value
-	130, // 154: aggregator.BranchNode.Config.conditions:type_name -> aggregator.BranchNode.Condition
-	145, // 155: aggregator.BranchNode.Output.data:type_name -> google.protobuf.Value
-	145, // 156: aggregator.FilterNode.Output.data:type_name -> google.protobuf.Value
-	3,   // 157: aggregator.LoopNode.Config.execution_mode:type_name -> aggregator.ExecutionMode
-	145, // 158: aggregator.LoopNode.Output.data:type_name -> google.protobuf.Value
-	5,   // 159: aggregator.Execution.Step.error_code:type_name -> aggregator.ErrorCode
-	145, // 160: aggregator.Execution.Step.config:type_name -> google.protobuf.Value
-	145, // 161: aggregator.Execution.Step.metadata:type_name -> google.protobuf.Value
-	145, // 162: aggregator.Execution.Step.execution_context:type_name -> google.protobuf.Value
-	98,  // 163: aggregator.Execution.Step.block_trigger:type_name -> aggregator.BlockTrigger.Output
-	94,  // 164: aggregator.Execution.Step.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
-	96,  // 165: aggregator.Execution.Step.cron_trigger:type_name -> aggregator.CronTrigger.Output
-	102, // 166: aggregator.Execution.Step.event_trigger:type_name -> aggregator.EventTrigger.Output
-	104, // 167: aggregator.Execution.Step.manual_trigger:type_name -> aggregator.ManualTrigger.Output
-	108, // 168: aggregator.Execution.Step.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
-	119, // 169: aggregator.Execution.Step.graphql:type_name -> aggregator.GraphQLQueryNode.Output
-	116, // 170: aggregator.Execution.Step.contract_read:type_name -> aggregator.ContractReadNode.Output
-	111, // 171: aggregator.Execution.Step.contract_write:type_name -> aggregator.ContractWriteNode.Output
-	125, // 172: aggregator.Execution.Step.custom_code:type_name -> aggregator.CustomCodeNode.Output
-	122, // 173: aggregator.Execution.Step.rest_api:type_name -> aggregator.RestAPINode.Output
-	132, // 174: aggregator.Execution.Step.branch:type_name -> aggregator.BranchNode.Output
-	134, // 175: aggregator.Execution.Step.filter:type_name -> aggregator.FilterNode.Output
-	136, // 176: aggregator.Execution.Step.loop:type_name -> aggregator.LoopNode.Output
-	127, // 177: aggregator.Execution.Step.balance:type_name -> aggregator.BalanceNode.Output
-	145, // 178: aggregator.Task.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	145, // 179: aggregator.CreateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	145, // 180: aggregator.TriggerTaskReq.TriggerInputEntry.value:type_name -> google.protobuf.Value
-	145, // 181: aggregator.RunNodeWithInputsReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	145, // 182: aggregator.RunTriggerReq.TriggerInputEntry.value:type_name -> google.protobuf.Value
-	145, // 183: aggregator.SimulateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	145, // 184: aggregator.EstimateFeesReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	185, // [185:185] is the sub-list for method output_type
-	185, // [185:185] is the sub-list for method input_type
-	185, // [185:185] is the sub-list for extension type_name
-	185, // [185:185] is the sub-list for extension extendee
-	0,   // [0:185] is the sub-list for field type_name
+	101, // 153: aggregator.AwaitNode.Config.chain_event:type_name -> aggregator.EventTrigger.Config
+	145, // 154: aggregator.AwaitNode.Output.data:type_name -> google.protobuf.Value
+	130, // 155: aggregator.BranchNode.Config.conditions:type_name -> aggregator.BranchNode.Condition
+	145, // 156: aggregator.BranchNode.Output.data:type_name -> google.protobuf.Value
+	145, // 157: aggregator.FilterNode.Output.data:type_name -> google.protobuf.Value
+	3,   // 158: aggregator.LoopNode.Config.execution_mode:type_name -> aggregator.ExecutionMode
+	145, // 159: aggregator.LoopNode.Output.data:type_name -> google.protobuf.Value
+	5,   // 160: aggregator.Execution.Step.error_code:type_name -> aggregator.ErrorCode
+	145, // 161: aggregator.Execution.Step.config:type_name -> google.protobuf.Value
+	145, // 162: aggregator.Execution.Step.metadata:type_name -> google.protobuf.Value
+	145, // 163: aggregator.Execution.Step.execution_context:type_name -> google.protobuf.Value
+	98,  // 164: aggregator.Execution.Step.block_trigger:type_name -> aggregator.BlockTrigger.Output
+	94,  // 165: aggregator.Execution.Step.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
+	96,  // 166: aggregator.Execution.Step.cron_trigger:type_name -> aggregator.CronTrigger.Output
+	102, // 167: aggregator.Execution.Step.event_trigger:type_name -> aggregator.EventTrigger.Output
+	104, // 168: aggregator.Execution.Step.manual_trigger:type_name -> aggregator.ManualTrigger.Output
+	108, // 169: aggregator.Execution.Step.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
+	119, // 170: aggregator.Execution.Step.graphql:type_name -> aggregator.GraphQLQueryNode.Output
+	116, // 171: aggregator.Execution.Step.contract_read:type_name -> aggregator.ContractReadNode.Output
+	111, // 172: aggregator.Execution.Step.contract_write:type_name -> aggregator.ContractWriteNode.Output
+	125, // 173: aggregator.Execution.Step.custom_code:type_name -> aggregator.CustomCodeNode.Output
+	122, // 174: aggregator.Execution.Step.rest_api:type_name -> aggregator.RestAPINode.Output
+	132, // 175: aggregator.Execution.Step.branch:type_name -> aggregator.BranchNode.Output
+	134, // 176: aggregator.Execution.Step.filter:type_name -> aggregator.FilterNode.Output
+	136, // 177: aggregator.Execution.Step.loop:type_name -> aggregator.LoopNode.Output
+	127, // 178: aggregator.Execution.Step.balance:type_name -> aggregator.BalanceNode.Output
+	145, // 179: aggregator.Task.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	145, // 180: aggregator.CreateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	145, // 181: aggregator.TriggerTaskReq.TriggerInputEntry.value:type_name -> google.protobuf.Value
+	145, // 182: aggregator.RunNodeWithInputsReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	145, // 183: aggregator.RunTriggerReq.TriggerInputEntry.value:type_name -> google.protobuf.Value
+	145, // 184: aggregator.SimulateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	145, // 185: aggregator.EstimateFeesReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	186, // [186:186] is the sub-list for method output_type
+	186, // [186:186] is the sub-list for method input_type
+	186, // [186:186] is the sub-list for extension type_name
+	186, // [186:186] is the sub-list for extension extendee
+	0,   // [0:186] is the sub-list for field type_name
 }
 
 func init() { file_avs_proto_init() }

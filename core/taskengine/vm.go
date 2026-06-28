@@ -14,6 +14,7 @@ import (
 	"github.com/dop251/goja"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
@@ -3326,8 +3327,6 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		awaitConfig := &avsproto.AwaitNode_Config{}
 		if channel, ok := config["channel"].(string); ok {
 			awaitConfig.Channel = channel
-		} else {
-			return nil, fmt.Errorf("await node requires 'channel' field")
 		}
 		if approvers, ok := config["approvers"].([]interface{}); ok {
 			for _, a := range approvers {
@@ -3344,6 +3343,26 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				return nil, fmt.Errorf("await node 'timeoutSeconds' out of range: %v", timeout)
 			}
 			awaitConfig.TimeoutSeconds = uint32(timeout)
+		}
+		// Chain-event flavor — a nested EventTrigger config. protojson handles its
+		// well-known types (e.g. structpb in contract_abi) that plain decoding can't.
+		if chainEvent, ok := config["chainEvent"].(map[string]interface{}); ok {
+			raw, err := json.Marshal(chainEvent)
+			if err != nil {
+				return nil, fmt.Errorf("await node: marshal chainEvent: %w", err)
+			}
+			eventConfig := &avsproto.EventTrigger_Config{}
+			if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(raw, eventConfig); err != nil {
+				return nil, fmt.Errorf("await node: invalid chainEvent: %w", err)
+			}
+			awaitConfig.ChainEvent = eventConfig
+		}
+		hasExternal := awaitConfig.Channel != "" || len(awaitConfig.Approvers) > 0 || awaitConfig.Prompt != ""
+		if awaitConfig.ChainEvent != nil && hasExternal {
+			return nil, fmt.Errorf("await node sets both 'chainEvent' and external-signal fields; they are mutually exclusive")
+		}
+		if !hasExternal && awaitConfig.ChainEvent == nil {
+			return nil, fmt.Errorf("await node requires either 'channel' (external signal) or 'chainEvent' (chain event)")
 		}
 		node.TaskType = &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{Config: awaitConfig}}
 	default:
@@ -3848,16 +3867,30 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 	case *avsproto.TaskNode_Await:
 		await := taskNode.GetAwait()
 		if await != nil && await.Config != nil {
-			approvers := make([]interface{}, len(await.Config.Approvers))
-			for i, a := range await.Config.Approvers {
-				approvers[i] = a
-			}
-			return map[string]interface{}{
-				"channel":        await.Config.Channel,
-				"approvers":      approvers, // []interface{} so structpb.NewValue accepts it
-				"prompt":         await.Config.Prompt,
+			result := map[string]interface{}{
 				"timeoutSeconds": float64(await.Config.TimeoutSeconds),
 			}
+			// Emit only the active flavor's fields (they are mutually exclusive), so
+			// the serialized config isn't a confusing mix of channel:"" + chainEvent.
+			if await.Config.ChainEvent != nil {
+				// Re-encode via protojson so the nested config (and its well-known
+				// types) round-trips as clean JSON map types.
+				if raw, err := protojson.Marshal(await.Config.ChainEvent); err == nil {
+					var chainEvent map[string]interface{}
+					if json.Unmarshal(raw, &chainEvent) == nil {
+						result["chainEvent"] = chainEvent
+					}
+				}
+			} else {
+				approvers := make([]interface{}, len(await.Config.Approvers))
+				for i, a := range await.Config.Approvers {
+					approvers[i] = a // []interface{} so structpb.NewValue accepts it
+				}
+				result["channel"] = await.Config.Channel
+				result["approvers"] = approvers
+				result["prompt"] = await.Config.Prompt
+			}
+			return result
 		}
 
 	case *avsproto.TaskNode_Branch:
