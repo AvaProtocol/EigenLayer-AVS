@@ -575,6 +575,12 @@ func checkNodeChain(node *avsproto.TaskNode, check func(string, int64) error) er
 	if et := node.GetEthTransfer(); et != nil && et.Config != nil {
 		return check("eth transfer node", et.Config.GetChainId())
 	}
+	if await := node.GetAwait(); await != nil && await.Config != nil {
+		// Only the chain-event flavor is chain-aware; external-signal Awaits have no chain.
+		if ce := await.Config.GetChainEvent(); ce != nil {
+			return check("await node chain event", ce.GetChainId())
+		}
+	}
 	if loop := node.GetLoop(); loop != nil {
 		if cw := loop.GetContractWrite(); cw != nil && cw.Config != nil {
 			return check("loop contract write runner", cw.Config.GetChainId())
@@ -987,6 +993,7 @@ func (n *Engine) runOrphanScanLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			n.scanOrphanedTasks()
+			n.sweepExpiredWaits()
 		}
 	}
 }
@@ -1777,6 +1784,12 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 
 	// Reject chain-aware parts that name an explicit, unconfigured chain (G4).
 	if err := n.validateExplicitPartChains(task); err != nil {
+		return nil, err
+	}
+
+	// Reject a chain-event Await whose chain no operator currently covers — a wait
+	// that nothing could ever fire would never resume.
+	if err := n.validateAwaitOperatorCoverage(task); err != nil {
 		return nil, err
 	}
 

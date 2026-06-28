@@ -2,11 +2,80 @@ package taskengine
 
 import (
 	"strings"
+	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// validateAwaitOperatorCoverage rejects, at create time, a chain-event Await whose
+// chain no operator currently covers — the wait could never be observed, so it would
+// never resume. Gateway-only (where operators advertise chain coverage); a transient
+// FailedPrecondition, not a malformed request, since coverage is connection state.
+func (n *Engine) validateAwaitOperatorCoverage(task *model.Workflow) error {
+	if n.config == nil || !n.config.IsGateway || task == nil {
+		return nil
+	}
+	for _, node := range task.Nodes {
+		await := node.GetAwait()
+		if await == nil || await.Config == nil {
+			continue
+		}
+		ce := await.Config.GetChainEvent()
+		if ce == nil {
+			continue // external-signal flavor needs no operator
+		}
+		if len(n.operatorsCoveringChain(ce.GetChainId())) == 0 {
+			return status.Errorf(codes.FailedPrecondition,
+				"await node waits on chain_id=%d but no operator currently covers it; the wait could never fire", ce.GetChainId())
+		}
+	}
+	return nil
+}
+
+// deregisterInternalTrigger tells operators to stop watching a consumed internal
+// trigger (the wake it stood for is gone). If the execution re-suspended on a new
+// chain-event wake, the next sync re-registers it (DeleteTask also untracks it).
+func (n *Engine) deregisterInternalTrigger(executionID string) {
+	n.notifyOperatorsTaskOperation(internalTriggerTaskID(executionID), avsproto.MessageOp_DeleteTask)
+}
+
+// sweepExpiredWaits fails WAITING executions whose wake timed out (a stuck bridge, an
+// approver who never responded) and GCs their durable state. Runs on the periodic
+// scan loop, so a wait whose timeout passed while no operator was up still resolves.
+func (n *Engine) sweepExpiredWaits() {
+	wakes, err := loadAllWakeSubscriptions(n.db)
+	if err != nil {
+		n.logger.Error("sweep expired waits: load wakes", "error", err)
+		return
+	}
+	now := time.Now().UnixMilli()
+	var executor *WorkflowExecutor
+	for executionID, wake := range wakes {
+		if wake.TimeoutAt <= 0 || wake.TimeoutAt > now {
+			continue
+		}
+		task, err := n.GetWorkflowByID(wake.TaskID)
+		if err != nil {
+			// Task gone — GC the orphaned durable state and move on.
+			_ = deleteCheckpoint(n.db, executionID)
+			_ = deleteWakeSubscription(n.db, executionID)
+			continue
+		}
+		if executor == nil {
+			executor = NewExecutor(n.ResolveSmartWalletConfig(n.defaultChainID()), n.db, n.logger, n, n.priceService)
+		}
+		if _, err := executor.ExpireWait(task, executionID); err != nil {
+			n.logger.Error("sweep expired waits: expire", "execution_id", executionID, "error", err)
+			continue
+		}
+		n.deregisterInternalTrigger(executionID)
+		n.logger.Info("expired timed-out wait", "execution_id", executionID, "task_id", wake.TaskID)
+	}
+}
 
 // internalTriggerPrefix namespaces the synthetic task IDs that stand in for a
 // suspended execution's chain-event wake. Real task IDs are ULIDs (base32, no
@@ -92,5 +161,8 @@ func (n *Engine) deliverChainEventWake(executionID string, payload *avsproto.Not
 		n.logger.Error("internal-trigger wake: deliver signal", "execution_id", executionID, "error", err)
 		return &ExecutionState{Status: "error", Message: err.Error()}, err
 	}
+	// The wake it watched is consumed — tell operators to stop. A re-suspend on a new
+	// chain-event wake re-registers via the next sync.
+	n.deregisterInternalTrigger(executionID)
 	return &ExecutionState{Status: "wake_delivered", TaskStillEnabled: true, Message: "resumed execution " + executionID}, nil
 }

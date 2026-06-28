@@ -428,6 +428,112 @@ func TestAwaitNode_ChainEvent_SuspendThenResume(t *testing.T) {
 	assert.Nil(t, wakes[execID], "wake GC'd after resume")
 }
 
+// TestAwaitNode_ChainEvent_ExpireOnTimeout proves the timeout sweep's finalize: a
+// WAITING execution whose wake timed out is failed and its durable state GC'd.
+func TestAwaitNode_ChainEvent_ExpireOnTimeout(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	executor := &WorkflowExecutor{db: db, logger: testutil.GetLogger(), smartWalletConfig: &config.SmartWalletConfig{}}
+
+	trigger := &avsproto.TaskTrigger{Id: "t", Name: "t", TriggerType: &avsproto.TaskTrigger_Manual{}}
+	await := &avsproto.TaskNode{
+		Id: "wait", Name: "wait", Type: avsproto.NodeType_NODE_TYPE_AWAIT,
+		TaskType: &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{
+			Config: &avsproto.AwaitNode_Config{ChainEvent: chainEventConfig(8453), TimeoutSeconds: 3600},
+		}},
+	}
+	task := &model.Workflow{Task: &avsproto.Task{
+		Id: "stuck-wf", Trigger: trigger,
+		Nodes: []*avsproto.TaskNode{customCodeNode("cc1"), await, customCodeNode("cc2")},
+		Edges: []*avsproto.TaskEdge{
+			{Id: "e0", Source: "t", Target: "cc1"},
+			{Id: "e1", Source: "cc1", Target: "wait"},
+			{Id: "e2", Source: "wait", Target: "cc2"},
+		},
+	}}
+
+	vm1, err := NewVMWithData(task, nil, &config.SmartWalletConfig{}, nil)
+	require.NoError(t, err)
+	vm1.WithDb(db).WithLogger(testutil.GetLogger())
+	require.NoError(t, vm1.Compile())
+	require.NoError(t, vm1.Run())
+	susp := vm1.PendingSuspend()
+	require.NotNil(t, susp)
+
+	const execID = "exec-stuck-1"
+	_, err = executor.checkpointSuspendedExecution(task, &avsproto.Execution{Id: execID, StartAt: 1}, vm1, susp)
+	require.NoError(t, err)
+
+	// The wait times out: expire it. cc2 never ran; the execution is FAILED, state GC'd.
+	out, err := executor.ExpireWait(task, execID)
+	require.NoError(t, err)
+	assert.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED, out.Status)
+	assert.Contains(t, out.Error, "timed out")
+	var ids []string
+	for _, s := range out.Steps {
+		ids = append(ids, s.Id)
+	}
+	assert.Equal(t, []string{"cc1", "wait"}, ids, "cc2 did not run — the wait expired")
+	wakes, err := loadAllWakeSubscriptions(db)
+	require.NoError(t, err)
+	assert.Nil(t, wakes[execID], "wake GC'd after expiry")
+
+	// Idempotent: expiring again just returns the terminal record.
+	again, err := executor.ExpireWait(task, execID)
+	require.NoError(t, err)
+	assert.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED, again.Status)
+}
+
+// TestSweepExpiredWaits_TimeGating proves the sweep only touches wakes past their
+// timeout, and GCs a wake whose task is gone (orphan).
+func TestSweepExpiredWaits_TimeGating(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	n := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+
+	// A future wake is left alone; an expired orphan (task gone) is GC'd.
+	const farFuture = int64(99999999999999) // unix ms, ~year 5138
+	require.NoError(t, persistWakeSubscription(db, "exec-future", &WakeSubscription{
+		Kind: WakeChainEvent, TaskID: "wf-x", ChainEvent: chainEventConfig(8453), TimeoutAt: farFuture,
+	}))
+	require.NoError(t, persistWakeSubscription(db, "exec-expired-orphan", &WakeSubscription{
+		Kind: WakeChainEvent, TaskID: "wf-gone", ChainEvent: chainEventConfig(8453), TimeoutAt: 1,
+	}))
+
+	n.sweepExpiredWaits()
+
+	wakes, err := loadAllWakeSubscriptions(db)
+	require.NoError(t, err)
+	assert.NotNil(t, wakes["exec-future"], "future wake untouched")
+	assert.Nil(t, wakes["exec-expired-orphan"], "expired orphan wake GC'd")
+}
+
+// TestValidateAwaitOperatorCoverage proves the create-time guard: a chain-event Await
+// whose chain no operator covers is rejected (gateway mode); an external-signal Await
+// has no chain and is fine.
+func TestValidateAwaitOperatorCoverage(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	cfg := testutil.GetAggregatorConfig()
+	cfg.IsGateway = true // the guard only runs in gateway mode
+	n := New(db, cfg, nil, testutil.GetLogger())
+
+	awaitNode := func(c *avsproto.AwaitNode_Config) *model.Workflow {
+		return &model.Workflow{Task: &avsproto.Task{Nodes: []*avsproto.TaskNode{{
+			Id: "wait", Type: avsproto.NodeType_NODE_TYPE_AWAIT,
+			TaskType: &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{Config: c}},
+		}}}}
+	}
+
+	// Chain-event Await, no operator connected for the chain → rejected.
+	err := n.validateAwaitOperatorCoverage(awaitNode(&avsproto.AwaitNode_Config{ChainEvent: chainEventConfig(8453)}))
+	require.Error(t, err)
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+
+	// External-signal Await has no chain → allowed regardless of operators.
+	require.NoError(t, n.validateAwaitOperatorCoverage(awaitNode(&avsproto.AwaitNode_Config{Channel: "telegram"})))
+}
+
 // TestInternalTrigger_SyncAndRoute proves the operator-transport seam: a chain-event
 // wake surfaces as a synthetic event-trigger "task" (pendingChainEventTriggers) that
 // the operator sync streams, and an internal-trigger id round-trips so the notify
