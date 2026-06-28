@@ -239,6 +239,9 @@ func normalizeStepType(t string) string {
 // lowercase wire vocabulary used by the OpenAPI spec.
 func executionStatusProtoToWire(s avsproto.ExecutionStatus) string {
 	switch s {
+	case avsproto.ExecutionStatus_EXECUTION_STATUS_UNSPECIFIED:
+		// Zero value — status not yet set; treat as in-flight.
+		return "pending"
 	case avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING:
 		return "pending"
 	case avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING:
@@ -250,6 +253,10 @@ func executionStatusProtoToWire(s avsproto.ExecutionStatus) string {
 	case avsproto.ExecutionStatus_EXECUTION_STATUS_ERROR:
 		return "error"
 	default:
-		return "pending"
+		// Every defined enum value has an explicit case above (guarded by the
+		// mapping test). A value reaching here is an unknown/future enum — surface
+		// it as "error" rather than masquerading it as in-flight "pending" (that
+		// silent default is exactly what once hid WAITING).
+		return "error"
 	}
 }
