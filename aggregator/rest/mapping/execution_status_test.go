@@ -30,8 +30,8 @@ func TestExecutionStatusProtoToWire(t *testing.T) {
 		s := avsproto.ExecutionStatus(v)
 		want, ok := expected[s]
 		require.Truef(t, ok, "ExecutionStatus %s has no proto→wire mapping/test entry", s)
-		assert.Equal(t, want, executionStatusProtoToWire(s), s.String())
+		assert.Equal(t, want, ExecutionStatusProtoToWire(s), s.String())
 	}
 	// The waiting wire value is a member of the generated OpenAPI enum (no drift).
-	assert.Equal(t, string(generated.ExecutionStatusWaiting), executionStatusProtoToWire(avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING))
+	assert.Equal(t, string(generated.ExecutionStatusWaiting), ExecutionStatusProtoToWire(avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING))
 }

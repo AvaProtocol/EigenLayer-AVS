@@ -163,7 +163,7 @@ func (s *Server) GetExecutionStatus(ctx echo.Context, id generated.Ulid, params 
 	// the terminal state via GetExecution.
 	out := generated.ExecutionStatusSummary{
 		Id:     id,
-		Status: generated.ExecutionStatus(executionStatusToWire(statusResp.GetStatus())),
+		Status: generated.ExecutionStatus(mapping.ExecutionStatusProtoToWire(statusResp.GetStatus())),
 	}
 	wid := generated.Ulid(workflowID)
 	out.WorkflowId = &wid
@@ -260,7 +260,7 @@ func (s *Server) StreamExecution(ctx echo.Context, id generated.Ulid, params gen
 			}
 			return false, nil
 		}
-		current := executionStatusToWire(exec.GetStatus())
+		current := mapping.ExecutionStatusProtoToWire(exec.GetStatus())
 		if current != lastStatus {
 			if err := emit(current, exec); err != nil {
 				return true, err
@@ -297,24 +297,6 @@ func (s *Server) StreamExecution(ctx echo.Context, id generated.Ulid, params gen
 				return nil
 			}
 		}
-	}
-}
-
-// executionStatusToWire mirrors the helper in the workflows handler
-// but lives here too because the executions package uses it on every
-// poll and the workflows file is already large.
-func executionStatusToWire(s avsproto.ExecutionStatus) string {
-	switch s {
-	case avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING:
-		return "pending"
-	case avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS:
-		return "success"
-	case avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED:
-		return "failed"
-	case avsproto.ExecutionStatus_EXECUTION_STATUS_ERROR:
-		return "error"
-	default:
-		return "pending"
 	}
 }
 

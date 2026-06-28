@@ -25,7 +25,7 @@ func ProtoToOpenAPIExecution(in *avsproto.Execution, workflowID string) (generat
 		Id:         generated.Ulid(in.GetId()),
 		WorkflowId: generated.Ulid(workflowID),
 		StartAt:    in.GetStartAt(),
-		Status:     generated.ExecutionStatus(executionStatusProtoToWire(in.GetStatus())),
+		Status:     generated.ExecutionStatus(ExecutionStatusProtoToWire(in.GetStatus())),
 	}
 	if v := in.GetEndAt(); v != 0 {
 		out.EndAt = &v
@@ -85,13 +85,16 @@ func ProtoToOpenAPIExecution(in *avsproto.Execution, workflowID string) (generat
 	return out, nil
 }
 
-// ProtoExecutionToOpenAPISummary lifts an Execution into the lightweight
-// status summary returned by the GetExecutionStatus and StreamExecution
-// endpoints. Skips the steps/cogs/fee payload to keep responses small.
+// ProtoExecutionToOpenAPISummary lifts a full Execution into the lightweight
+// status summary shape (skips the steps/cogs/fee payload to keep responses
+// small). Status goes through the shared ExecutionStatusProtoToWire so every
+// status surface stays consistent. NOTE: the GetExecutionStatus handler builds
+// this shape inline (it has only the status enum, not a full Execution), so it
+// does not call this helper — keep the two in sync if you change the shape.
 func ProtoExecutionToOpenAPISummary(in *avsproto.Execution, workflowID string) generated.ExecutionStatusSummary {
 	out := generated.ExecutionStatusSummary{
 		Id:     generated.Ulid(in.GetId()),
-		Status: generated.ExecutionStatus(executionStatusProtoToWire(in.GetStatus())),
+		Status: generated.ExecutionStatus(ExecutionStatusProtoToWire(in.GetStatus())),
 	}
 	if v := in.GetStartAt(); v != 0 {
 		out.StartAt = &v
@@ -235,9 +238,9 @@ func normalizeStepType(t string) string {
 	return t
 }
 
-// executionStatusProtoToWire normalizes ExecutionStatus enum names to the
+// ExecutionStatusProtoToWire normalizes ExecutionStatus enum names to the
 // lowercase wire vocabulary used by the OpenAPI spec.
-func executionStatusProtoToWire(s avsproto.ExecutionStatus) string {
+func ExecutionStatusProtoToWire(s avsproto.ExecutionStatus) string {
 	switch s {
 	case avsproto.ExecutionStatus_EXECUTION_STATUS_UNSPECIFIED:
 		// Zero value — status not yet set; treat as in-flight.

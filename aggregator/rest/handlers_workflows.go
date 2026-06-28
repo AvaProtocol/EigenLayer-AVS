@@ -255,7 +255,7 @@ func (s *Server) TriggerWorkflow(ctx echo.Context, id generated.Ulid) error {
 	// translate to a lowercase string.
 	out := generated.TriggerWorkflowResponse{
 		ExecutionId: generated.Ulid(resp.GetExecutionId()),
-		Status:      generated.ExecutionStatus(protoExecStatusToOpenAPI(resp.GetStatus())),
+		Status:      generated.ExecutionStatus(mapping.ExecutionStatusProtoToWire(resp.GetStatus())),
 	}
 	if v := resp.GetStartAt(); v != 0 {
 		out.StartAt = &v
@@ -591,21 +591,4 @@ func openAPIInputVarsToProto(in generated.InputVariables) (map[string]*structpb.
 		out[k] = pv
 	}
 	return out, nil
-}
-
-// protoExecStatusToOpenAPI maps the proto ExecutionStatus enum that
-// TriggerTaskResp returns to the lowercase string used on the wire.
-func protoExecStatusToOpenAPI(s avsproto.ExecutionStatus) string {
-	switch s {
-	case avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING:
-		return "pending"
-	case avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS:
-		return "success"
-	case avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED:
-		return "failed"
-	case avsproto.ExecutionStatus_EXECUTION_STATUS_ERROR:
-		return "error"
-	default:
-		return "pending"
-	}
 }
