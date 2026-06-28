@@ -882,7 +882,8 @@ func (x *WorkflowExecutor) checkpointSuspendedExecution(task *model.Workflow, ex
 	batch[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 	if err := x.db.BatchWrite(batch); err != nil {
-		return nil, fmt.Errorf("persist suspended execution + wake + task: %w", err)
+		// The batch always holds the execution + task, and the wake when present.
+		return nil, fmt.Errorf("persist suspended execution state: %w", err)
 	}
 	// If MaxExecution/expiry flipped the task to a terminal status, drop the stale
 	// status-keyed record (mirrors RunTask's normal finalize).

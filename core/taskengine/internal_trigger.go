@@ -208,6 +208,10 @@ func (n *Engine) pendingChainEventTriggers() []*model.Workflow {
 			if status.Code(err) == codes.NotFound {
 				_ = deleteCheckpoint(n.db, executionID)
 				_ = deleteWakeSubscription(n.db, executionID)
+				n.logger.Warn("gc orphaned wake: workflow gone", "execution_id", executionID, "task_id", wake.TaskID)
+			} else {
+				// Transient/corrupt error — preserve the state, but surface it (mirrors sweepExpiredWaits).
+				n.logger.Error("internal-trigger sync: resolve task for wake", "execution_id", executionID, "task_id", wake.TaskID, "error", err)
 			}
 			continue
 		}
