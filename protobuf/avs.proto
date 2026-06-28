@@ -595,11 +595,17 @@ message BalanceNode {
 // (cross-chain Await) and timer wakes follow.
 message AwaitNode {
   message Config {
-    // External-signal wake parameters.
+    // External-signal wake parameters (human-approval flavor). Used when chain_event
+    // is unset.
     string channel = 1;             // "telegram" | "api"
     repeated string approvers = 2;  // authorized parties; empty ⇒ the workflow owner
     string prompt = 3;              // shown to the approver
     uint32 timeout_seconds = 4;     // safety bound; 0 ⇒ server default (never an unbounded wait)
+    // Chain-event wake (cross-chain flavor). When set, the Await pauses until an
+    // operator covering chain_event.chain_id observes this event — a mid-workflow
+    // EventTrigger (e.g. a bridge arrival on chain B). Reuses the event-trigger
+    // machinery; mutually exclusive with the external-signal fields above.
+    EventTrigger.Config chain_event = 5;
   }
   message Output {
     // The delivered signal (decision + payload), readable by downstream steps.

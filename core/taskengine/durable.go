@@ -105,6 +105,12 @@ func (k WakeKind) String() string {
 type WakeSubscription struct {
 	Kind WakeKind `json:"kind"`
 
+	// TaskID is the workflow that owns the suspended execution. Carried here because
+	// executions are stored task-scoped (TaskExecutionKey) and there is no global
+	// exec→task index, so resuming from a wake (a chain-event notify or boot re-arm)
+	// needs the task to load the execution.
+	TaskID string `json:"taskId"`
+
 	// ChainEvent is the event filter the operator watches (chain = ChainEvent's
 	// chain_id). Set iff Kind == WakeChainEvent. Reuses the existing event-trigger
 	// config so the operator watches it with no new logic.
@@ -315,13 +321,14 @@ func wakeSubscriptionKey(execID string) []byte {
 // faithfully — plain encoding/json cannot serialize those.
 type persistedWake struct {
 	Kind       WakeKind            `json:"kind"`
+	TaskID     string              `json:"taskId"`
 	ChainEvent json.RawMessage     `json:"chainEvent,omitempty"`
 	External   *ExternalSignalSpec `json:"external,omitempty"`
 	TimeoutAt  int64               `json:"timeoutAt"`
 }
 
 func marshalWake(sub *WakeSubscription) ([]byte, error) {
-	rec := persistedWake{Kind: sub.Kind, External: sub.External, TimeoutAt: sub.TimeoutAt}
+	rec := persistedWake{Kind: sub.Kind, TaskID: sub.TaskID, External: sub.External, TimeoutAt: sub.TimeoutAt}
 	if sub.ChainEvent != nil {
 		b, err := protojson.Marshal(sub.ChainEvent)
 		if err != nil {
@@ -337,7 +344,7 @@ func unmarshalWake(b []byte) (*WakeSubscription, error) {
 	if err := json.Unmarshal(b, &rec); err != nil {
 		return nil, err
 	}
-	sub := &WakeSubscription{Kind: rec.Kind, External: rec.External, TimeoutAt: rec.TimeoutAt}
+	sub := &WakeSubscription{Kind: rec.Kind, TaskID: rec.TaskID, External: rec.External, TimeoutAt: rec.TimeoutAt}
 	if len(rec.ChainEvent) > 0 {
 		cfg := &avsproto.EventTrigger_Config{}
 		if err := protojson.Unmarshal(rec.ChainEvent, cfg); err != nil {

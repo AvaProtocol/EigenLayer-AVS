@@ -38,14 +38,27 @@ func (v *VM) runAwait(node *avsproto.TaskNode) (*avsproto.Execution_Step, error)
 	if timeoutSec <= 0 {
 		timeoutSec = defaultAwaitTimeoutSeconds
 	}
-	wake := &WakeSubscription{
-		Kind: WakeExternalSignal,
-		External: &ExternalSignalSpec{
-			Channel:   cfg.GetChannel(),
-			Approvers: cfg.GetApprovers(),
-			Prompt:    cfg.GetPrompt(),
-		},
-		TimeoutAt: t0.Add(time.Duration(timeoutSec) * time.Second).UnixMilli(),
+	timeoutAt := t0.Add(time.Duration(timeoutSec) * time.Second).UnixMilli()
+
+	// Two flavors: a chain-event wake (cross-chain — an operator watches the event)
+	// or an external-signal wake (human approval). chain_event selects the former.
+	var wake *WakeSubscription
+	if ev := cfg.GetChainEvent(); ev != nil {
+		wake = &WakeSubscription{
+			Kind:       WakeChainEvent,
+			ChainEvent: ev,
+			TimeoutAt:  timeoutAt,
+		}
+	} else {
+		wake = &WakeSubscription{
+			Kind: WakeExternalSignal,
+			External: &ExternalSignalSpec{
+				Channel:   cfg.GetChannel(),
+				Approvers: cfg.GetApprovers(),
+				Prompt:    cfg.GetPrompt(),
+			},
+			TimeoutAt: timeoutAt,
+		}
 	}
 	if err := wake.Validate(); err != nil {
 		// A misconfigured Await fails the step rather than suspending.
@@ -58,7 +71,11 @@ func (v *VM) runAwait(node *avsproto.TaskNode) (*avsproto.Execution_Step, error)
 	v.requestSuspend(node.Id, wake)
 
 	step.Success = true
-	step.Log = fmt.Sprintf("awaiting external signal on channel %q", cfg.GetChannel())
+	if wake.Kind == WakeChainEvent {
+		step.Log = fmt.Sprintf("awaiting chain event on chain %d", wake.ChainEvent.GetChainId())
+	} else {
+		step.Log = fmt.Sprintf("awaiting external signal on channel %q", cfg.GetChannel())
+	}
 	step.EndAt = time.Now().UnixMilli()
 	return step, nil
 }

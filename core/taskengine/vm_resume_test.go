@@ -350,6 +350,124 @@ func TestAwaitNode_SuspendThenSignal_EndToEnd(t *testing.T) {
 	assert.Nil(t, wakes[execID])
 }
 
+// chainEventConfig is a small EventTrigger.Config fixture for chain-event Await tests.
+func chainEventConfig(chainID int64) *avsproto.EventTrigger_Config {
+	return &avsproto.EventTrigger_Config{
+		ChainId: chainID,
+		Queries: []*avsproto.EventTrigger_Query{{
+			Addresses: []string{"0xbridge0000000000000000000000000000000000"},
+			Topics:    []string{"0xMessageReceived00000000000000000000000000000000000000000000000000"},
+		}},
+	}
+}
+
+// TestAwaitNode_ChainEvent_SuspendThenResume proves the cross-chain flavor: an Await
+// with a chain_event config suspends with a WakeChainEvent subscription (carrying the
+// task id + event filter), and a chain-event Signal (the matched log) resumes it.
+func TestAwaitNode_ChainEvent_SuspendThenResume(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	executor := &WorkflowExecutor{db: db, logger: testutil.GetLogger(), smartWalletConfig: &config.SmartWalletConfig{}}
+
+	trigger := &avsproto.TaskTrigger{Id: "t", Name: "t", TriggerType: &avsproto.TaskTrigger_Manual{}}
+	await := &avsproto.TaskNode{
+		Id: "wait", Name: "wait", Type: avsproto.NodeType_NODE_TYPE_AWAIT,
+		TaskType: &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{
+			Config: &avsproto.AwaitNode_Config{ChainEvent: chainEventConfig(8453), TimeoutSeconds: 3600},
+		}},
+	}
+	task := &model.Workflow{Task: &avsproto.Task{
+		Id:      "bridge-wf",
+		Trigger: trigger,
+		Nodes:   []*avsproto.TaskNode{customCodeNode("cc1"), await, customCodeNode("cc2")},
+		Edges: []*avsproto.TaskEdge{
+			{Id: "e0", Source: "t", Target: "cc1"},
+			{Id: "e1", Source: "cc1", Target: "wait"},
+			{Id: "e2", Source: "wait", Target: "cc2"},
+		},
+	}}
+
+	// Leg 1 — runs to the Await, then suspends on the chain event.
+	vm1, err := NewVMWithData(task, nil, &config.SmartWalletConfig{}, nil)
+	require.NoError(t, err)
+	vm1.WithDb(db).WithLogger(testutil.GetLogger())
+	require.NoError(t, vm1.Compile())
+	require.NoError(t, vm1.Run())
+	susp := vm1.PendingSuspend()
+	require.NotNil(t, susp)
+	assert.Equal(t, WakeChainEvent, susp.Wake.Kind)
+	require.NotNil(t, susp.Wake.ChainEvent)
+	assert.Equal(t, int64(8453), susp.Wake.ChainEvent.GetChainId())
+
+	const execID = "exec-bridge-1"
+	_, err = executor.checkpointSuspendedExecution(task, &avsproto.Execution{Id: execID, StartAt: 1}, vm1, susp)
+	require.NoError(t, err)
+
+	// The persisted wake carries its task id (so a notify can resolve the task) + the event filter.
+	wakes, err := loadAllWakeSubscriptions(db)
+	require.NoError(t, err)
+	require.NotNil(t, wakes[execID])
+	assert.Equal(t, "bridge-wf", wakes[execID].TaskID)
+	assert.Equal(t, WakeChainEvent, wakes[execID].Kind)
+	require.NotNil(t, wakes[execID].ChainEvent)
+
+	// Leg 2 — the matched chain log arrives as a chain-event signal; the execution resumes.
+	eventData, err := structpb.NewValue(map[string]any{"amount": "1000", "messageId": "0xabc"})
+	require.NoError(t, err)
+	out, err := executor.DeliverSignal(task, &Signal{ExecutionID: execID, Kind: WakeChainEvent, Payload: eventData})
+	require.NoError(t, err)
+	assert.NotEqual(t, avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING, out.Status, "resumed to terminal")
+	var ids []string
+	for _, s := range out.Steps {
+		ids = append(ids, s.Id)
+	}
+	assert.Equal(t, []string{"cc1", "wait", "cc2"}, ids, "chain event resumed the workflow; cc2 ran")
+
+	wakes, err = loadAllWakeSubscriptions(db)
+	require.NoError(t, err)
+	assert.Nil(t, wakes[execID], "wake GC'd after resume")
+}
+
+// TestInternalTrigger_SyncAndRoute proves the operator-transport seam: a chain-event
+// wake surfaces as a synthetic event-trigger "task" (pendingChainEventTriggers) that
+// the operator sync streams, and an internal-trigger id round-trips so the notify
+// path can route it back. A notify with no live wake is a safe no-op.
+func TestInternalTrigger_SyncAndRoute(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	n := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+
+	// id round-trip; a real ULID-style id is not mistaken for an internal trigger.
+	const execID = "exec-itrig-1"
+	id := internalTriggerTaskID(execID)
+	got, ok := parseInternalTriggerTaskID(id)
+	require.True(t, ok)
+	assert.Equal(t, execID, got)
+	_, ok = parseInternalTriggerTaskID("01HZY8M0000000000000000000")
+	assert.False(t, ok, "a normal task id is not an internal trigger")
+
+	// A persisted chain-event wake surfaces as a synthetic single-shot event trigger.
+	require.NoError(t, persistWakeSubscription(db, execID, &WakeSubscription{
+		Kind: WakeChainEvent, TaskID: "wf-1", ChainEvent: chainEventConfig(8453), TimeoutAt: 1 << 40,
+	}))
+	// An external-signal wake must NOT surface (it's not operator-watched).
+	require.NoError(t, persistWakeSubscription(db, "exec-ext-1", &WakeSubscription{
+		Kind: WakeExternalSignal, TaskID: "wf-2", External: &ExternalSignalSpec{Channel: "telegram"}, TimeoutAt: 1 << 40,
+	}))
+
+	triggers := n.pendingChainEventTriggers()
+	require.Len(t, triggers, 1, "only the chain-event wake yields an internal trigger")
+	syn := triggers[0]
+	assert.Equal(t, id, syn.Id)
+	assert.Equal(t, int64(8453), syn.Trigger.GetEvent().GetConfig().GetChainId())
+	assert.Equal(t, int64(1<<40), syn.ExpiredAt)
+
+	// A notify for an execution with no live wake is a safe no-op, not an error.
+	state, err := n.deliverChainEventWake("exec-gone", &avsproto.NotifyTriggersReq{})
+	require.NoError(t, err)
+	assert.Equal(t, "not_found", state.Status)
+}
+
 // TestSignalExecution_AuthGates proves the engine-level transport gates map to the
 // right gRPC codes (so the REST layer returns 400 vs 404, not 500): an invalid
 // decision is InvalidArgument; a signal from a non-owner is NotFound (the ownership

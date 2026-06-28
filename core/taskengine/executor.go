@@ -838,6 +838,9 @@ func (x *WorkflowExecutor) checkpointSuspendedExecution(task *model.Workflow, ex
 	}
 	// 2. Armed markers: the wake subscription...
 	if susp.Wake != nil {
+		// Bind the wake to its task so a chain-event notify / boot re-arm can resolve
+		// the task (executions are stored task-scoped; no global exec→task index).
+		susp.Wake.TaskID = task.Id
 		if err := persistWakeSubscription(x.db, execution.Id, susp.Wake); err != nil {
 			return nil, fmt.Errorf("persist wake: %w", err)
 		}

@@ -2231,6 +2231,23 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			tasksByTriggerType[triggerTypeName]++
 		}
 
+		// Internal triggers: synthetic single-shot event-watches standing in for
+		// WAITING executions' chain-event waits (cross-chain Await). Unlike user tasks
+		// (single-operator assignment), these BROADCAST to every operator covering the
+		// chain — any one firing resumes the execution and the aggregator dedups the
+		// rest. They flow through the same tracked-task + send path, so a boot or
+		// operator reconnect re-arms every live wait automatically.
+		for _, itrigger := range n.pendingChainEventTriggers() {
+			if _, ok := tracked[itrigger.Id]; ok {
+				continue
+			}
+			if !n.supportsTaskTrigger(address, itrigger) || !n.supportsTaskChain(address, itrigger) {
+				continue
+			}
+			tasksToStream = append(tasksToStream, itrigger)
+			tasksByTriggerType[itrigger.Trigger.String()]++
+		}
+
 		// Log task processing results
 		n.logger.Debug("🔍 Task processing completed for operator",
 			"operator", address,
@@ -2636,6 +2653,14 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 	// Update operator task tracking
 	if state, exists := n.trackSyncedTasks[address]; exists {
 		state.TaskID[payload.TaskId] = true
+	}
+
+	// Internal trigger (itrig_<execId>): an operator-watched chain event standing in
+	// for a suspended execution's chain-event wake. Route it to resume that execution
+	// rather than the normal task-execution path (it has no user workflow to enqueue).
+	if executionID, ok := parseInternalTriggerTaskID(payload.TaskId); ok {
+		n.lock.Unlock()
+		return n.deliverChainEventWake(executionID, payload)
 	}
 
 	// Get task information to determine execution state
