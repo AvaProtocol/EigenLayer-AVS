@@ -4292,28 +4292,35 @@ func (n *Engine) getExecutionStatusFromQueue(task *model.Workflow, executionID s
 	return &statusValue, nil
 }
 
-// GetExecution for a given task id and execution id
 // SignalExecution delivers an external/approval signal to a WAITING execution
 // (durable execution — the human-approval transport). The authenticated user must
-// own the workflow (GetWorkflow enforces ownership); the executor's DeliverSignal
-// then enforces the gate (a matching, un-timed-out wait must exist). Decision is
-// "approve" | "reject".
+// own the workflow (GetWorkflow → NotFound otherwise); the decision is validated
+// (InvalidArgument); and a DeliverSignal gate failure (no pending wait / mismatched
+// kind / timed out) is mapped to FailedPrecondition, so the REST layer returns a
+// 4xx rather than a 500. Decision is "approve" | "reject".
 func (n *Engine) SignalExecution(user *model.User, workflowID, executionID, decision string, payload *structpb.Value) (*avsproto.Execution, error) {
+	if decision != "approve" && decision != "reject" {
+		return nil, status.Errorf(codes.InvalidArgument, "decision must be 'approve' or 'reject', got %q", decision)
+	}
 	task, err := n.GetWorkflow(user, workflowID)
 	if err != nil {
-		return nil, err
+		return nil, err // GetWorkflow returns codes.NotFound for a missing/non-owned workflow
 	}
 	executor := NewExecutor(n.ResolveSmartWalletConfig(n.defaultChainID()), n.db, n.logger, n, n.priceService)
-	signal := &Signal{
+	exec, err := executor.DeliverSignal(task, &Signal{
 		ExecutionID: executionID,
 		Kind:        WakeExternalSignal,
 		Decision:    decision,
 		Approver:    strings.ToLower(user.Address.Hex()),
 		Payload:     payload,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "deliver signal: %v", err)
 	}
-	return executor.DeliverSignal(task, signal)
+	return exec, nil
 }
 
+// GetExecution for a given task id and execution id
 func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) (*avsproto.Execution, error) {
 	task, err := n.GetWorkflow(user, payload.TaskId)
 	if err != nil {

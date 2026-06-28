@@ -127,7 +127,10 @@ func (s *Server) SignalExecution(ctx echo.Context, id generated.Ulid, params gen
 	workflowID := string(params.WorkflowId)
 	exec, err := s.engine.SignalExecution(user, workflowID, string(id), string(body.Decision), payload)
 	if err != nil {
-		return notFoundOrError(err)
+		// SignalExecution returns gRPC status errors (NotFound / InvalidArgument /
+		// FailedPrecondition); the central ProblemErrorHandler maps them to the right
+		// HTTP status (404 vs 400), so don't force a 404 here.
+		return err
 	}
 	resp, err := mapping.ProtoToOpenAPIExecution(exec, workflowID)
 	if err != nil {
