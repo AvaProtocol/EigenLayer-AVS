@@ -172,8 +172,8 @@ func (w *WakeSubscription) Validate() error {
 // Signal is an inbound wake delivered to one waiting execution via
 // advance(executionId, signal). Its Payload becomes the suspended step's output.
 type Signal struct {
-	ExecutionID string    `json:"executionId"`
-	Kind        WakeKind  `json:"kind"`
+	ExecutionID string   `json:"executionId"`
+	Kind        WakeKind `json:"kind"`
 	// Decision is set for external/approval signals: "approve" | "reject".
 	Decision string `json:"decision,omitempty"`
 	// Approver identifies who delivered an external signal (audit + authorization).

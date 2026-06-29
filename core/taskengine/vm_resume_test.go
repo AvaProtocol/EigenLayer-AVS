@@ -768,7 +768,7 @@ func TestValidateAwaitConfigs(t *testing.T) {
 
 	for _, bad := range []*avsproto.AwaitNode_Config{
 		{Channel: "telegram", ChainEvent: chainEventConfig(8453)}, // both flavors
-		{},                  // neither flavor
+		{},                   // neither flavor
 		{Prompt: "approve?"}, // external fields but no channel
 	} {
 		err := n.validateAwaitConfigs(awaitTask(bad))
