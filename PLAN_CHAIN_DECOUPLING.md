@@ -34,8 +34,9 @@ Backend gaps (this repo):
 - [x] **OpenAPI renovation** — removed `Workflow.chainId` / `CreateWorkflowRequest.chainId` + the `ChainIdQuery` param on list/count/executions; per-part config `chainId` now `required` — **merged #634**
 - [x] **Executor cross-chain wallet/salt/fee** — execution-time wallet ownership/salt/credit checks scan all configured chains (mirror create-time), not the gateway default — **merged #637**
 - [x] **proto→OpenAPI int64 render fix** — `protoRetargetJSON` unquotes protojson's string-encoded `int64` (chainId) so create/get/list render chain-aware nodes; descriptor-driven so string fields (Amount) are untouched — **merged #640 (closes #639)**
+- [x] **OpenAPI description cleanup** — dropped stale workflow-level / loop-inherited `chainId` prose from `createWorkflow` + `LoopNodeConfig` — **#642 (on `staging`, closes on next promotion)**
 
-**Backend chain decoupling is complete.** Wallet/exec defaults (decided): wallet-ownership
+**Backend chain decoupling is complete and released on `main`.** Wallet/exec defaults (decided): wallet-ownership
 checks across all configured chains (`userOwnsWalletOnAnyChain`); VM-default config = aggregator default;
 salt is chain-invariant. ✅ done.
 
@@ -43,12 +44,12 @@ Client (separate repos — backend spec on `main` now unblocks them):
 
 - [x] **`ava-sdk-js`** — **done.** Types regenerated off the renovated spec, builders require `chainId`, list/count/executions
       `chainId` dropped; `PER_NODE_CHAIN_READY` multichain e2e **passes** against a local gateway.
-- [ ] **studio** — Phase 3: per-part chains in the canvas; drop workflow-level `chainId`; chain-agnostic workflow list (separate repo; not gated on the backend)
+- [ ] **studio** — Phase 3 adoption: per-part chains in the canvas; drop workflow-level `chainId`; chain-agnostic workflow list. **Step-by-step in [`## Studio adoption guide`](#studio-adoption-guide-how-to-adopt-per-part-chains) below.** (separate repo; not gated on the backend)
 
 Release / ops (this repo):
 
 - [x] **staging → main** promotion (chain decoupling, incl. executor cross-chain fix #637): **merged #636**; `wipe-chain-bucketed-task-keys` migration runs at boot after a DB backup.
-- [ ] **staging → main** follow-up promotion: ship the #639 render fix (#640) + dev tooling to `main`. `make storage-check` clean (no new migration). *(SDK lockstep satisfied — e2e green; main currently carries the chain decoupling WITH the #639 render bug until this lands.)*
+- [x] **staging → main** follow-up promotion: #639 render fix (#640) + dev tooling — **merged #641** (storage-check clean, no new migration); `staging` realigned to `main` via sync-main. SDK lockstep satisfied (e2e green). **Backend chain decoupling is fully released on `main`.**
 
 Future (not started):
 
@@ -476,6 +477,65 @@ Ethereum `1`, Base `8453`, Sepolia `11155111`, Base Sepolia `84532`. (Soneium/Mi
 **SDK (`ava-sdk-js`) mapping** — builders already expose the params; the change is to always populate:
 `Triggers.event/block({chainId})`, `Nodes.contractWrite/contractRead/ethTransfer({chainId})`, the Loop
 runner's `chainId`, `runNodeWithInputs` request `chainId`; remove any workflow-level `chainId`.
+
+---
+
+## Studio adoption guide: how to adopt per-part chains
+
+For the **studio** client (Phase 3). The backend is live on `main`; nothing below is blocked. The
+mental model shift: **a workflow no longer has a chain.** Chain is a property of each chain-aware part
+(event/block trigger; contractRead/Write/ethTransfer node). Everything below follows from that.
+
+### 1. Canvas / UX
+- **Remove the workflow-level chain selector** (the single "this workflow runs on chain X" control). There is
+  no `Task.chain_id` / `CreateWorkflowRequest.chainId` anymore — sending one is ignored, and relying on it to
+  scope nodes is gone.
+- **Add a chain selector to each chain-aware part** — on event & block trigger config, and on
+  contractRead / contractWrite / ethTransfer node config. Options = the configured set (below). Required;
+  no "inherit/default" option.
+- A Loop node's **runner** gets its own chain selector when the runner is chain-aware — it does **not**
+  inherit from the loop or workflow.
+- Non-chain parts (cron/manual/fixedtime triggers; customCode/restApi/graphql/branch/filter) show **no**
+  chain selector. The **Balance** node keeps its existing `chain` **string** field (name or id) — leave it.
+
+### 2. Create / save
+- On save, set `chainId` on every chain-aware part via the SDK builders (see `## Client contract` for the
+  exact fields). **Stop sending a workflow-level `chainId`.**
+- The backend **rejects** create if any chain-aware part is missing `chainId`/`0` or names an unconfigured
+  chain (`InvalidArgument`). Validate in-canvas before save and surface the error **on the offending node**
+  (see §4), so the user fixes it inline rather than getting a generic save failure.
+
+### 3. Workflow list / detail (chain-agnostic)
+- `listWorkflows` / `getWorkflow` no longer take a `chainId` query param and storage is not per-chain. **Don't
+  pass a chain to scope these.**
+- A **"chain" column / filter** in the workflow list is now **derived client-side**: read each workflow's
+  parts and show the distinct chains they use (a workflow can legitimately span chains — watch X, act on Y).
+  If you previously grouped/filtered workflows by a single workflow chain, replace that with a
+  derive-from-parts computation.
+
+### 4. Validation & error surfacing
+- Map the backend's `InvalidArgument` chain errors to inline node errors:
+  - *"chain-aware node requires an explicit chain_id"* → highlight the node, prompt to pick a chain.
+  - *"chain_id N is not configured on this aggregator"* → the selected chain isn't in the configured set.
+- Mirror the rule client-side so the canvas blocks save before the round-trip when possible.
+
+### 5. Existing / deployed workflows
+- The `wipe-chain-bucketed-task-keys` migration **deleted old chain-bucketed tasks** at the prod cutover
+  (no backfill — decided trade-off). Studio should **not** assume pre-cutover workflows still exist; users
+  re-create them with explicit per-part chains. Surface a clear empty-state rather than erroring on missing
+  tasks.
+
+### Configured chains (allowed `chainId` values)
+Ethereum `1`, Base `8453`, Sepolia `11155111`, Base Sepolia `84532`. (Soneium/Minato out of scope.) The
+aggregator is the source of truth; selecting anything else is rejected.
+
+### Definition of done (studio Phase 3)
+- [ ] Workflow-level chain selector removed; per-part chain selectors added (triggers + chain-aware nodes + loop runner)
+- [ ] Save sends per-part `chainId`, never a workflow-level one
+- [ ] Workflow list/detail no longer pass a chain; "chain" view derived from parts
+- [ ] `InvalidArgument` chain errors surfaced inline on the offending node, with client-side pre-validation
+- [ ] Empty-state for users whose pre-cutover workflows were wiped
+- [ ] SDK bumped to the version with required per-part `chainId` builders (e2e-verified)
 
 ---
 

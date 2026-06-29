@@ -16,9 +16,14 @@ const (
 	BearerAuthScopes = "bearerAuth.Scopes"
 )
 
+// Defines values for AwaitNodeType.
+const (
+	AwaitNodeTypeAwait AwaitNodeType = "await"
+)
+
 // Defines values for BalanceNodeType.
 const (
-	BalanceNodeTypeBalance BalanceNodeType = "balance"
+	Balance BalanceNodeType = "balance"
 )
 
 // Defines values for BlockTriggerType.
@@ -85,6 +90,7 @@ const (
 	ExecutionStatusFailed  ExecutionStatus = "failed"
 	ExecutionStatusPending ExecutionStatus = "pending"
 	ExecutionStatusSuccess ExecutionStatus = "success"
+	ExecutionStatusWaiting ExecutionStatus = "waiting"
 )
 
 // Defines values for ExecutionTier.
@@ -159,6 +165,7 @@ const (
 
 // Defines values for NodeType.
 const (
+	NodeTypeAwait         NodeType = "await"
 	NodeTypeBalance       NodeType = "balance"
 	NodeTypeBranch        NodeType = "branch"
 	NodeTypeContractRead  NodeType = "contractRead"
@@ -192,6 +199,12 @@ const (
 	SecretScopeOrg      SecretScope = "org"
 	SecretScopeUser     SecretScope = "user"
 	SecretScopeWorkflow SecretScope = "workflow"
+)
+
+// Defines values for SignalExecutionRequestDecision.
+const (
+	Approve SignalExecutionRequestDecision = "approve"
+	Reject  SignalExecutionRequestDecision = "reject"
 )
 
 // Defines values for TokenMetadataResponseSource.
@@ -256,6 +269,44 @@ type AuthExchangeResponse struct {
 
 	// Token JWT bearer token.
 	Token string `json:"token"`
+}
+
+// AwaitNode defines model for AwaitNode.
+type AwaitNode struct {
+	// Config Pauses the workflow until a wake arrives (durable execution). Two mutually
+	// exclusive flavors: the external-signal flavor (human approval — set `channel`,
+	// e.g. a Telegram approve/reject), or the chain-event flavor (cross-chain — set
+	// `chainEvent` to pause until an operator observes that on-chain event, e.g. a
+	// bridge arrival on another chain). Exactly one flavor must be configured.
+	Config *AwaitNodeConfig `json:"config,omitempty"`
+	Type   *AwaitNodeType   `json:"type,omitempty"`
+}
+
+// AwaitNodeType defines model for AwaitNode.Type.
+type AwaitNodeType string
+
+// AwaitNodeConfig Pauses the workflow until a wake arrives (durable execution). Two mutually
+// exclusive flavors: the external-signal flavor (human approval — set `channel`,
+// e.g. a Telegram approve/reject), or the chain-event flavor (cross-chain — set
+// `chainEvent` to pause until an operator observes that on-chain event, e.g. a
+// bridge arrival on another chain). Exactly one flavor must be configured.
+type AwaitNodeConfig struct {
+	// Approvers External-signal flavor — authorized approver identities. Empty = the workflow owner. NOTE (v1): not yet enforced — the signal endpoint authorizes by workflow ownership only, so the owner can always approve regardless of this list. Delegated-approver enforcement (Telegram binding) is a follow-up; do not rely on this field for security yet.
+	Approvers *[]string `json:"approvers,omitempty"`
+
+	// ChainEvent Chain-event flavor — the on-chain event to wait for (a mid-workflow
+	// EventTrigger). An operator covering `chainEvent.chainId` watches it and
+	// resumes the execution when it fires. Mutually exclusive with `channel`.
+	ChainEvent *EventTriggerConfig `json:"chainEvent,omitempty"`
+
+	// Channel External-signal flavor — signal channel: `telegram` or `api`.
+	Channel *string `json:"channel,omitempty"`
+
+	// Prompt External-signal flavor — message shown to the approver.
+	Prompt *string `json:"prompt,omitempty"`
+
+	// TimeoutSeconds Safety bound; 0 = server default (the wait is never unbounded).
+	TimeoutSeconds *int64 `json:"timeoutSeconds,omitempty"`
 }
 
 // BalanceNode defines model for BalanceNode.
@@ -658,8 +709,12 @@ type Execution struct {
 	Index   *int64 `json:"index,omitempty"`
 	StartAt int64  `json:"startAt"`
 
-	// Status Outcome of an execution. `pending` is in-flight; `success` is full
-	// success; `failed` is logical failure (e.g., a node returned an error);
+	// Status Outcome of an execution. `pending` is in-flight; `waiting` is suspended
+	// mid-workflow at an `await` node, durably parked until a signal arrives
+	// (a human approve/reject or an operator-observed chain event) or the wait
+	// times out — non-terminal, like `pending`, but distinguishable so a client
+	// can show "awaiting approval"; `success` is full success; `failed` is
+	// logical failure (e.g., a node returned an error, or a wait timed out);
 	// `error` is a system / infrastructure failure (e.g., RPC unreachable).
 	Status   ExecutionStatus  `json:"status"`
 	Steps    *[]ExecutionStep `json:"steps,omitempty"`
@@ -690,8 +745,12 @@ type ExecutionStats struct {
 	Total            int64    `json:"total"`
 }
 
-// ExecutionStatus Outcome of an execution. `pending` is in-flight; `success` is full
-// success; `failed` is logical failure (e.g., a node returned an error);
+// ExecutionStatus Outcome of an execution. `pending` is in-flight; `waiting` is suspended
+// mid-workflow at an `await` node, durably parked until a signal arrives
+// (a human approve/reject or an operator-observed chain event) or the wait
+// times out — non-terminal, like `pending`, but distinguishable so a client
+// can show "awaiting approval"; `success` is full success; `failed` is
+// logical failure (e.g., a node returned an error, or a wait timed out);
 // `error` is a system / infrastructure failure (e.g., RPC unreachable).
 type ExecutionStatus string
 
@@ -704,8 +763,12 @@ type ExecutionStatusSummary struct {
 	Id      Ulid   `json:"id"`
 	StartAt *int64 `json:"startAt,omitempty"`
 
-	// Status Outcome of an execution. `pending` is in-flight; `success` is full
-	// success; `failed` is logical failure (e.g., a node returned an error);
+	// Status Outcome of an execution. `pending` is in-flight; `waiting` is suspended
+	// mid-workflow at an `await` node, durably parked until a signal arrives
+	// (a human approve/reject or an operator-observed chain event) or the wait
+	// times out — non-terminal, like `pending`, but distinguishable so a client
+	// can show "awaiting approval"; `success` is full success; `failed` is
+	// logical failure (e.g., a node returned an error, or a wait timed out);
 	// `error` is a system / infrastructure failure (e.g., RPC unreachable).
 	Status ExecutionStatus `json:"status"`
 
@@ -861,8 +924,9 @@ type Lang string
 // LoopNode defines model for LoopNode.
 type LoopNode struct {
 	// Config Iterates over an input array, running an inner Node per item. The
-	// runner node is one of the chain-aware or chain-agnostic node types
-	// and inherits chainId from this LoopNode if it does not specify its own.
+	// runner node is one of the chain-aware or chain-agnostic node types;
+	// a chain-aware runner must specify its own required `chainId` (there is
+	// no inheritance from the loop or workflow).
 	Config *LoopNodeConfig `json:"config,omitempty"`
 	Type   *LoopNodeType   `json:"type,omitempty"`
 }
@@ -871,8 +935,9 @@ type LoopNode struct {
 type LoopNodeType string
 
 // LoopNodeConfig Iterates over an input array, running an inner Node per item. The
-// runner node is one of the chain-aware or chain-agnostic node types
-// and inherits chainId from this LoopNode if it does not specify its own.
+// runner node is one of the chain-aware or chain-agnostic node types;
+// a chain-aware runner must specify its own required `chainId` (there is
+// no inheritance from the loop or workflow).
 type LoopNodeConfig struct {
 	// InputVariable Template path for the iterable (e.g., `{{settings.addressList}}`).
 	InputVariable string `json:"inputVariable"`
@@ -1158,6 +1223,18 @@ type SecretList struct {
 	PageInfo PageInfo `json:"pageInfo"`
 }
 
+// SignalExecutionRequest defines model for SignalExecutionRequest.
+type SignalExecutionRequest struct {
+	// Decision The approver's decision.
+	Decision SignalExecutionRequestDecision `json:"decision"`
+
+	// Payload Optional structured data delivered as the await step's output.
+	Payload *map[string]interface{} `json:"payload,omitempty"`
+}
+
+// SignalExecutionRequestDecision The approver's decision.
+type SignalExecutionRequestDecision string
+
 // SimulateWorkflowRequest defines model for SimulateWorkflowRequest.
 type SimulateWorkflowRequest struct {
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
@@ -1244,8 +1321,12 @@ type TriggerWorkflowResponse struct {
 	ExecutionId Ulid   `json:"executionId"`
 	StartAt     *int64 `json:"startAt,omitempty"`
 
-	// Status Outcome of an execution. `pending` is in-flight; `success` is full
-	// success; `failed` is logical failure (e.g., a node returned an error);
+	// Status Outcome of an execution. `pending` is in-flight; `waiting` is suspended
+	// mid-workflow at an `await` node, durably parked until a signal arrives
+	// (a human approve/reject or an operator-observed chain event) or the wait
+	// times out — non-terminal, like `pending`, but distinguishable so a client
+	// can show "awaiting approval"; `success` is full success; `failed` is
+	// logical failure (e.g., a node returned an error, or a wait timed out);
 	// `error` is a system / infrastructure failure (e.g., RPC unreachable).
 	Status ExecutionStatus `json:"status"`
 }
@@ -1480,6 +1561,12 @@ type GetExecutionStatusParams struct {
 	WorkflowId Ulid `form:"workflowId" json:"workflowId"`
 }
 
+// SignalExecutionParams defines parameters for SignalExecution.
+type SignalExecutionParams struct {
+	// WorkflowId Workflow id the execution belongs to. See `getExecution`.
+	WorkflowId Ulid `form:"workflowId" json:"workflowId"`
+}
+
 // StreamExecutionParams defines parameters for StreamExecution.
 type StreamExecutionParams struct {
 	Interval *string `form:"interval,omitempty" json:"interval,omitempty"`
@@ -1521,15 +1608,15 @@ type DeleteSecretParams struct {
 
 // GetTokenParams defines parameters for GetToken.
 type GetTokenParams struct {
-	// ChainId Chain ID filter. Omit to use the aggregator default chain. Repeat
-	// the parameter to filter by multiple chains.
+	// ChainId The chain to operate on (a single value). Omit to use the aggregator
+	// default (the request's JWT `aud` chain, then the gateway default).
 	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
 // GetWalletNonceParams defines parameters for GetWalletNonce.
 type GetWalletNonceParams struct {
-	// ChainId Chain ID filter. Omit to use the aggregator default chain. Repeat
-	// the parameter to filter by multiple chains.
+	// ChainId The chain to operate on (a single value). Omit to use the aggregator
+	// default (the request's JWT `aud` chain, then the gateway default).
 	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
@@ -1571,6 +1658,9 @@ type CountWorkflowsParams struct {
 
 // AuthExchangeJSONRequestBody defines body for AuthExchange for application/json ContentType.
 type AuthExchangeJSONRequestBody = AuthExchangeRequest
+
+// SignalExecutionJSONRequestBody defines body for SignalExecution for application/json ContentType.
+type SignalExecutionJSONRequestBody = SignalExecutionRequest
 
 // RunNodeJSONRequestBody defines body for RunNode for application/json ContentType.
 type RunNodeJSONRequestBody = RunNodeRequest
@@ -1970,6 +2060,36 @@ func (t *Node) MergeBalanceNode(v BalanceNode) error {
 	return err
 }
 
+// AsAwaitNode returns the union data inside the Node as a AwaitNode
+func (t Node) AsAwaitNode() (AwaitNode, error) {
+	var body AwaitNode
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAwaitNode overwrites any union data inside the Node as the provided AwaitNode
+func (t *Node) FromAwaitNode(v AwaitNode) error {
+	t.Type = "await"
+
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAwaitNode performs a merge with any union data inside the Node, using the provided AwaitNode
+func (t *Node) MergeAwaitNode(v AwaitNode) error {
+	t.Type = "await"
+
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 func (t Node) Discriminator() (string, error) {
 	var discriminator struct {
 		Discriminator string `json:"type"`
@@ -1984,6 +2104,8 @@ func (t Node) ValueByDiscriminator() (interface{}, error) {
 		return nil, err
 	}
 	switch discriminator {
+	case "await":
+		return t.AsAwaitNode()
 	case "balance":
 		return t.AsBalanceNode()
 	case "branch":

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/mapping"
@@ -101,6 +102,43 @@ func (s *Server) GetExecution(ctx echo.Context, id generated.Ulid, params genera
 	return ctx.JSON(http.StatusOK, resp)
 }
 
+// SignalExecution — POST /api/v1/executions/{id}:signal
+//
+// Delivers an approval/external signal to a WAITING execution (durable execution).
+// The caller must own the workflow; the engine's gate (DeliverSignal) rejects a
+// signal with no pending wait, a mismatched kind, or one that has timed out.
+func (s *Server) SignalExecution(ctx echo.Context, id generated.Ulid, params generated.SignalExecutionParams) error {
+	user, err := s.requireUser(ctx)
+	if err != nil {
+		return err
+	}
+	var body generated.SignalExecutionRequest
+	if err := ctx.Bind(&body); err != nil {
+		return badRequest("SIGNAL_BAD_REQUEST", "Invalid request body", err.Error())
+	}
+	var payload *structpb.Value
+	if body.Payload != nil {
+		p, perr := structpb.NewValue(map[string]interface{}(*body.Payload))
+		if perr != nil {
+			return badRequest("SIGNAL_BAD_PAYLOAD", "Invalid payload", perr.Error())
+		}
+		payload = p
+	}
+	workflowID := string(params.WorkflowId)
+	exec, err := s.engine.SignalExecution(user, workflowID, string(id), string(body.Decision), payload)
+	if err != nil {
+		// SignalExecution returns gRPC status errors (NotFound / InvalidArgument /
+		// FailedPrecondition); the central ProblemErrorHandler maps them to the right
+		// HTTP status (404 vs 400), so don't force a 404 here.
+		return err
+	}
+	resp, err := mapping.ProtoToOpenAPIExecution(exec, workflowID)
+	if err != nil {
+		return err
+	}
+	return ctx.JSON(http.StatusOK, resp)
+}
+
 // GetExecutionStatus — GET /api/v1/executions/{id}:getStatus?workflowId=...
 //
 // Lightweight summary — same scoping rule as GetExecution. Used by
@@ -125,7 +163,7 @@ func (s *Server) GetExecutionStatus(ctx echo.Context, id generated.Ulid, params 
 	// the terminal state via GetExecution.
 	out := generated.ExecutionStatusSummary{
 		Id:     id,
-		Status: generated.ExecutionStatus(executionStatusToWire(statusResp.GetStatus())),
+		Status: generated.ExecutionStatus(mapping.ExecutionStatusProtoToWire(statusResp.GetStatus())),
 	}
 	wid := generated.Ulid(workflowID)
 	out.WorkflowId = &wid
@@ -222,7 +260,7 @@ func (s *Server) StreamExecution(ctx echo.Context, id generated.Ulid, params gen
 			}
 			return false, nil
 		}
-		current := executionStatusToWire(exec.GetStatus())
+		current := mapping.ExecutionStatusProtoToWire(exec.GetStatus())
 		if current != lastStatus {
 			if err := emit(current, exec); err != nil {
 				return true, err
@@ -259,24 +297,6 @@ func (s *Server) StreamExecution(ctx echo.Context, id generated.Ulid, params gen
 				return nil
 			}
 		}
-	}
-}
-
-// executionStatusToWire mirrors the helper in the workflows handler
-// but lives here too because the executions package uses it on every
-// poll and the workflows file is already large.
-func executionStatusToWire(s avsproto.ExecutionStatus) string {
-	switch s {
-	case avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING:
-		return "pending"
-	case avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS:
-		return "success"
-	case avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED:
-		return "failed"
-	case avsproto.ExecutionStatus_EXECUTION_STATUS_ERROR:
-		return "error"
-	default:
-		return "pending"
 	}
 }
 

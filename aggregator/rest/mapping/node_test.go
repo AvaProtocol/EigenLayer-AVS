@@ -160,6 +160,81 @@ func TestNodeRoundTrip_PerNodeChainId(t *testing.T) {
 	})
 }
 
+// TestNodeRoundTrip_Await proves the Await node survives the create→render REST
+// round-trip (OpenAPI → proto → OpenAPI), so the SDK/studio can put it in a workflow.
+func TestNodeRoundTrip_Await(t *testing.T) {
+	typ := generated.AwaitNodeTypeAwait
+	channel := "telegram"
+	approvers := []string{"0xowner"}
+	prompt := "approve the transfer?"
+	timeout := int64(3600)
+	inner := generated.AwaitNode{Type: &typ, Config: &generated.AwaitNodeConfig{
+		Channel:        &channel,
+		Approvers:      &approvers,
+		Prompt:         &prompt,
+		TimeoutSeconds: &timeout,
+	}}
+	n := generated.Node{Id: "appr", Type: generated.NodeTypeAwait}
+	require.NoError(t, n.FromAwaitNode(inner))
+
+	// Inbound (CreateWorkflow path).
+	pn, err := OpenAPIToProtoNode(n)
+	require.NoError(t, err)
+	cfg := pn.GetAwait().GetConfig()
+	require.NotNil(t, cfg)
+	assert.Equal(t, "telegram", cfg.GetChannel())
+	assert.Equal(t, []string{"0xowner"}, cfg.GetApprovers())
+	assert.Equal(t, "approve the transfer?", cfg.GetPrompt())
+	assert.Equal(t, uint32(3600), cfg.GetTimeoutSeconds())
+
+	// Outbound (GET/list render).
+	rt, err := ProtoToOpenAPINode(pn)
+	require.NoError(t, err)
+	v, err := rt.AsAwaitNode()
+	require.NoError(t, err)
+	require.NotNil(t, v.Config.Channel)
+	assert.Equal(t, "telegram", *v.Config.Channel)
+	require.NotNil(t, v.Config.TimeoutSeconds)
+	assert.Equal(t, int64(3600), *v.Config.TimeoutSeconds)
+}
+
+// TestNodeRoundTrip_AwaitChainEvent proves the cross-chain (chain-event) flavor of
+// Await survives OpenAPI → proto → OpenAPI, including the nested EventTrigger config.
+func TestNodeRoundTrip_AwaitChainEvent(t *testing.T) {
+	typ := generated.AwaitNodeTypeAwait
+	timeout := int64(7200)
+	addrs := []generated.EthereumAddress{"0xbridge0000000000000000000000000000000000"}
+	topics := []string{"0xMessageReceived00000000000000000000000000000000000000000000000000"}
+	inner := generated.AwaitNode{Type: &typ, Config: &generated.AwaitNodeConfig{
+		TimeoutSeconds: &timeout,
+		ChainEvent: &generated.EventTriggerConfig{
+			ChainId: generated.ChainId(8453),
+			Queries: []generated.EventTriggerQuery{{Addresses: &addrs, Topics: &topics}},
+		},
+	}}
+	n := generated.Node{Id: "wait", Type: generated.NodeTypeAwait}
+	require.NoError(t, n.FromAwaitNode(inner))
+
+	// Inbound (CreateWorkflow path) — the chain-event config retargets into the proto.
+	pn, err := OpenAPIToProtoNode(n)
+	require.NoError(t, err)
+	cfg := pn.GetAwait().GetConfig()
+	require.NotNil(t, cfg)
+	assert.Empty(t, cfg.GetChannel(), "chain-event flavor has no channel")
+	require.NotNil(t, cfg.GetChainEvent())
+	assert.Equal(t, int64(8453), cfg.GetChainEvent().GetChainId())
+	require.Len(t, cfg.GetChainEvent().GetQueries(), 1)
+	assert.Equal(t, []string{"0xbridge0000000000000000000000000000000000"}, cfg.GetChainEvent().GetQueries()[0].GetAddresses())
+
+	// Outbound (GET/list render).
+	rt, err := ProtoToOpenAPINode(pn)
+	require.NoError(t, err)
+	v, err := rt.AsAwaitNode()
+	require.NoError(t, err)
+	require.NotNil(t, v.Config.ChainEvent)
+	assert.Equal(t, generated.ChainId(8453), v.Config.ChainEvent.ChainId)
+}
+
 func TestNodeRoundTrip_LoopWithCustomCodeRunner(t *testing.T) {
 	innerTyp := generated.CustomCode
 	runnerNode := generated.Node{Id: "inner", Type: generated.NodeTypeCustomCode}

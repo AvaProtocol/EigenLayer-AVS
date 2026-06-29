@@ -103,8 +103,8 @@ components:
       name: chainId
       in: query
       description: |
-        Chain ID filter. Omit to use the aggregator default chain. Repeat
-        the parameter to filter by multiple chains.
+        The chain to operate on (a single value). Omit to use the aggregator
+        default (the request's JWT `aud` chain, then the gateway default).
       schema:
         type: integer
         format: int64
@@ -324,6 +324,7 @@ components:
         - filter
         - loop
         - balance
+        - await
       description: |
         Discriminator field for the Node union. Mirrors the proto
         `NodeType` enum but without the `NODE_TYPE_` prefix.
@@ -725,8 +726,9 @@ components:
       type: object
       description: |
         Iterates over an input array, running an inner Node per item. The
-        runner node is one of the chain-aware or chain-agnostic node types
-        and inherits chainId from this LoopNode if it does not specify its own.
+        runner node is one of the chain-aware or chain-agnostic node types;
+        a chain-aware runner must specify its own required `chainId` (there is
+        no inheritance from the loop or workflow).
       required: [inputVariable, runner]
       properties:
         inputVariable:
@@ -758,6 +760,54 @@ components:
           items: { $ref: '#/components/schemas/EthereumAddress' }
           description: Restrict to these tokens. Empty = fetch all.
 
+    AwaitNodeConfig:
+      type: object
+      description: |
+        Pauses the workflow until a wake arrives (durable execution). Two mutually
+        exclusive flavors: the external-signal flavor (human approval — set `channel`,
+        e.g. a Telegram approve/reject), or the chain-event flavor (cross-chain — set
+        `chainEvent` to pause until an operator observes that on-chain event, e.g. a
+        bridge arrival on another chain). Exactly one flavor must be configured.
+      properties:
+        channel:
+          type: string
+          description: 'External-signal flavor — signal channel: `telegram` or `api`.'
+        approvers:
+          type: array
+          items: { type: string }
+          description: >-
+            External-signal flavor — authorized approver identities. Empty = the
+            workflow owner. NOTE (v1): not yet enforced — the signal endpoint
+            authorizes by workflow ownership only, so the owner can always approve
+            regardless of this list. Delegated-approver enforcement (Telegram binding)
+            is a follow-up; do not rely on this field for security yet.
+        prompt:
+          type: string
+          description: External-signal flavor — message shown to the approver.
+        chainEvent:
+          allOf: [{ $ref: '#/components/schemas/EventTriggerConfig' }]
+          description: |
+            Chain-event flavor — the on-chain event to wait for (a mid-workflow
+            EventTrigger). An operator covering `chainEvent.chainId` watches it and
+            resumes the execution when it fires. Mutually exclusive with `channel`.
+        timeoutSeconds:
+          type: integer
+          format: int64
+          description: Safety bound; 0 = server default (the wait is never unbounded).
+
+    SignalExecutionRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+          description: The approver's decision.
+        payload:
+          type: object
+          additionalProperties: true
+          description: Optional structured data delivered as the await step's output.
+
     # ---- Node union ----
 
     Node:
@@ -780,6 +830,7 @@ components:
           filter:        '#/components/schemas/FilterNode'
           loop:          '#/components/schemas/LoopNode'
           balance:       '#/components/schemas/BalanceNode'
+          await:         '#/components/schemas/AwaitNode'
       oneOf:
         - $ref: '#/components/schemas/ETHTransferNode'
         - $ref: '#/components/schemas/ContractWriteNode'
@@ -791,6 +842,7 @@ components:
         - $ref: '#/components/schemas/FilterNode'
         - $ref: '#/components/schemas/LoopNode'
         - $ref: '#/components/schemas/BalanceNode'
+        - $ref: '#/components/schemas/AwaitNode'
 
     ETHTransferNode:
       allOf:
@@ -861,6 +913,13 @@ components:
           properties:
             type: { type: string, enum: [balance] }
             config: { $ref: '#/components/schemas/BalanceNodeConfig' }
+
+    AwaitNode:
+      allOf:
+        - type: object
+          properties:
+            type: { type: string, enum: [await] }
+            config: { $ref: '#/components/schemas/AwaitNodeConfig' }
 
     # ---- Workflow envelope ----
 
@@ -1061,12 +1120,17 @@ components:
       type: string
       enum:
         - pending
+        - waiting
         - success
         - failed
         - error
       description: |
-        Outcome of an execution. `pending` is in-flight; `success` is full
-        success; `failed` is logical failure (e.g., a node returned an error);
+        Outcome of an execution. `pending` is in-flight; `waiting` is suspended
+        mid-workflow at an `await` node, durably parked until a signal arrives
+        (a human approve/reject or an operator-observed chain event) or the wait
+        times out — non-terminal, like `pending`, but distinguishable so a client
+        can show "awaiting approval"; `success` is full success; `failed` is
+        logical failure (e.g., a node returned an error, or a wait timed out);
         `error` is a system / infrastructure failure (e.g., RPC unreachable).
 
     Fee:
@@ -1658,10 +1722,10 @@ paths:
       tags: [Workflows]
       summary: Create a workflow
       description: |
-        Persist a new workflow definition. The server resolves the
-        workflow-level `chainId` (falling back to the aggregator default
-        if omitted) and ensures the smart wallet belongs to the
-        authenticated user. Returns the persisted Workflow with its
+        Persist a new workflow definition. Each chain-aware trigger and node
+        carries its own required `chainId` (there is no workflow-level chain);
+        the server validates those chains and ensures the smart wallet belongs
+        to the authenticated user. Returns the persisted Workflow with its
         server-assigned `id` and `createdAt`.
       operationId: createWorkflow
       requestBody:
@@ -2002,6 +2066,41 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ExecutionStatusSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /executions/{id}:signal:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Ulid' }
+      - name: workflowId
+        in: query
+        required: true
+        description: Workflow id the execution belongs to. See `getExecution`.
+        schema: { $ref: '#/components/schemas/Ulid' }
+    post:
+      tags: [Executions]
+      summary: Deliver an approval/external signal to a waiting execution
+      description: |
+        Resumes a WAITING execution (durable execution). The caller must own the
+        workflow; the signal only counts against an actual pending wait whose kind
+        it matches and which has not timed out. v1 is the external-signal (human
+        approval) flavor — e.g. a Telegram approve/reject for a money-moving step.
+      operationId: signalExecution
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignalExecutionRequest' }
+      responses:
+        '200':
+          description: The resumed (terminal or still-waiting) execution.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Execution' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 

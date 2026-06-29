@@ -41,6 +41,7 @@ func TestColonActionRouting(t *testing.T) {
 		{"POST", "/wallets/:address:withdraw", "WALLET_WITHDRAW"},
 		{"GET", "/wallets/:address:getNonce", "WALLET_GET_NONCE"},
 		{"GET", "/executions/:id:getStatus", "EXECUTION_GET_STATUS"},
+		{"POST", "/executions/:id:signal", "EXECUTION_SIGNAL"},
 		{"GET", "/executions/:id:stream", "EXECUTION_STREAM"},
 		// Collection-level — these are the ones the original bug missed
 		{"POST", "/auth:exchange", "AUTH_EXCHANGE"},

@@ -300,6 +300,29 @@ type Engine struct {
 	pendingNotifications map[string][]PendingNotification // operatorAddr -> list of notifications
 	notificationMutex    *sync.RWMutex
 	notificationTicker   *time.Ticker
+
+	// Per-execution serialization for durable resume (exactly-once). Sharded so a
+	// fixed set of mutexes bounds memory — the same executionID always maps to the
+	// same shard, so concurrent resumes of one execution serialize. See executionMutex.
+	executionMutexes [executionLockShards]sync.Mutex
+}
+
+// executionLockShards bounds the per-execution resume locks to a fixed set of mutexes.
+const executionLockShards = 256
+
+// executionMutex returns the lock guarding resume of executionID. Holding it across
+// the load-status → run → write-terminal sequence makes durable resume exactly-once:
+// a second concurrent signal (two approvers, a duplicate operator notify) blocks, then
+// finds the execution already terminal and no-ops — so an on-chain ContractWrite /
+// ETHTransfer in the resumed leg can never run twice.
+func (n *Engine) executionMutex(executionID string) *sync.Mutex {
+	// FNV-1a — allocation-free, deterministic (same id → same shard).
+	var h uint32 = 2166136261
+	for i := 0; i < len(executionID); i++ {
+		h ^= uint32(executionID[i])
+		h *= 16777619
+	}
+	return &n.executionMutexes[h%executionLockShards]
 }
 
 // create a new task engine using given storage, config and queue
@@ -574,6 +597,12 @@ func checkNodeChain(node *avsproto.TaskNode, check func(string, int64) error) er
 	}
 	if et := node.GetEthTransfer(); et != nil && et.Config != nil {
 		return check("eth transfer node", et.Config.GetChainId())
+	}
+	if await := node.GetAwait(); await != nil && await.Config != nil {
+		// Only the chain-event flavor is chain-aware; external-signal Awaits have no chain.
+		if ce := await.Config.GetChainEvent(); ce != nil {
+			return check("await node chain event", ce.GetChainId())
+		}
 	}
 	if loop := node.GetLoop(); loop != nil {
 		if cw := loop.GetContractWrite(); cw != nil && cw.Config != nil {
@@ -987,6 +1016,7 @@ func (n *Engine) runOrphanScanLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			n.scanOrphanedTasks()
+			n.sweepExpiredWaits()
 		}
 	}
 }
@@ -1780,6 +1810,18 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 		return nil, err
 	}
 
+	// Reject an Await with an invalid config (the two flavors are mutually exclusive;
+	// exactly one is required) before it can persist and fail only at execution time.
+	if err := n.validateAwaitConfigs(task); err != nil {
+		return nil, err
+	}
+
+	// Reject a chain-event Await whose chain no operator currently covers — a wait
+	// that nothing could ever fire would never resume.
+	if err := n.validateAwaitOperatorCoverage(task); err != nil {
+		return nil, err
+	}
+
 	updates := map[string][]byte{}
 
 	taskJSON, err := task.ToJSON()
@@ -2231,6 +2273,23 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			tasksByTriggerType[triggerTypeName]++
 		}
 
+		// Internal triggers: synthetic single-shot event-watches standing in for
+		// WAITING executions' chain-event waits (cross-chain Await). Unlike user tasks
+		// (single-operator assignment), these BROADCAST to every operator covering the
+		// chain — any one firing resumes the execution and the aggregator dedups the
+		// rest. They flow through the same tracked-task + send path, so a boot or
+		// operator reconnect re-arms every live wait automatically.
+		for _, itrigger := range n.pendingChainEventTriggers() {
+			if _, ok := tracked[itrigger.Id]; ok {
+				continue
+			}
+			if !n.supportsTaskTrigger(address, itrigger) || !n.supportsTaskChain(address, itrigger) {
+				continue
+			}
+			tasksToStream = append(tasksToStream, itrigger)
+			tasksByTriggerType[itrigger.Trigger.String()]++
+		}
+
 		// Log task processing results
 		n.logger.Debug("🔍 Task processing completed for operator",
 			"operator", address,
@@ -2636,6 +2695,14 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 	// Update operator task tracking
 	if state, exists := n.trackSyncedTasks[address]; exists {
 		state.TaskID[payload.TaskId] = true
+	}
+
+	// Internal trigger (itrig_<execId>): an operator-watched chain event standing in
+	// for a suspended execution's chain-event wake. Route it to resume that execution
+	// rather than the normal task-execution path (it has no user workflow to enqueue).
+	if executionID, ok := parseInternalTriggerTaskID(payload.TaskId); ok {
+		n.lock.Unlock()
+		return n.deliverChainEventWake(executionID, payload)
 	}
 
 	// Get task information to determine execution state
@@ -4292,6 +4359,38 @@ func (n *Engine) getExecutionStatusFromQueue(task *model.Workflow, executionID s
 	return &statusValue, nil
 }
 
+// SignalExecution delivers an external/approval signal to a WAITING execution
+// (durable execution — the human-approval transport). The authenticated user must
+// own the workflow (GetWorkflow → NotFound otherwise); the decision is validated
+// (InvalidArgument); and a DeliverSignal gate failure (no pending wait / mismatched
+// kind / timed out) is mapped to FailedPrecondition, so the REST layer returns a
+// 4xx rather than a 500. Decision is "approve" | "reject".
+func (n *Engine) SignalExecution(user *model.User, workflowID, executionID, decision string, payload *structpb.Value) (*avsproto.Execution, error) {
+	if decision != "approve" && decision != "reject" {
+		return nil, status.Errorf(codes.InvalidArgument, "decision must be 'approve' or 'reject', got %q", decision)
+	}
+	task, err := n.GetWorkflow(user, workflowID)
+	if err != nil {
+		return nil, err // GetWorkflow returns codes.NotFound for a missing/non-owned workflow
+	}
+	// Serialize concurrent resumes of this execution (exactly-once — see executionMutex).
+	mu := n.executionMutex(executionID)
+	mu.Lock()
+	defer mu.Unlock()
+	executor := NewExecutor(n.ResolveSmartWalletConfig(n.defaultChainID()), n.db, n.logger, n, n.priceService)
+	exec, err := executor.DeliverSignal(task, &Signal{
+		ExecutionID: executionID,
+		Kind:        WakeExternalSignal,
+		Decision:    decision,
+		Approver:    strings.ToLower(user.Address.Hex()),
+		Payload:     payload,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "deliver signal: %v", err)
+	}
+	return exec, nil
+}
+
 // GetExecution for a given task id and execution id
 func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) (*avsproto.Execution, error) {
 	task, err := n.GetWorkflow(user, payload.TaskId)
@@ -4492,6 +4591,10 @@ func (n *Engine) DeleteWorkflowByUser(user *model.User, taskID string) (*avsprot
 			Id:      taskID,
 		}, nil
 	}
+
+	// GC durable state of any suspended (WAITING) execution this task owned, so its
+	// checkpoint/wake — and any operator internal trigger — don't outlive the workflow.
+	n.gcDurableStateForTask(taskID)
 
 	n.logger.Info("📢 Starting operator notifications", "task_id", taskID)
 	n.notifyOperatorsTaskOperation(taskID, avsproto.MessageOp_DeleteTask)

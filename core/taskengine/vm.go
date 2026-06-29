@@ -14,6 +14,7 @@ import (
 	"github.com/dop251/goja"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
@@ -266,6 +267,20 @@ type VM struct {
 	// per-node chain_id overrides. When nil or called with 0, callers fall back to
 	// v.smartWalletConfig. Set via WithChainConfigResolver after construction.
 	chainConfigResolver func(chainID int64) *config.SmartWalletConfig
+
+	// resumeCompleted marks nodes that completed in a prior leg of a durable
+	// execution (PLAN_DURABLE_EXECUTION.md). nil/empty for a fresh run — in which
+	// case the scheduler behaves exactly as before. When set, the scheduler
+	// fast-forwards these nodes (applies their completion to downstream predCounts)
+	// without re-executing them, so it resumes from where execution left off.
+	// Set once before Run(); read-only during the run.
+	resumeCompleted map[string]bool
+
+	// suspend is set by a Suspendable step's runner (via requestSuspend) to pause
+	// the execution mid-run. The scheduler stops scheduling new work; after Run()
+	// the executor reads PendingSuspend() to checkpoint + register the wake instead
+	// of finishing. nil for a normal run.
+	suspend *SuspendRequest
 }
 
 func NewVM() *VM {
@@ -957,6 +972,7 @@ func (v *VM) runKahnScheduler() error {
 	}
 	trigger := v.task.Trigger
 	edges := v.task.Edges
+	completed := v.resumeCompleted // nil for a fresh run; read-only during the run
 	v.mu.Unlock()
 
 	for _, e := range edges {
@@ -1034,15 +1050,63 @@ func (v *VM) runKahnScheduler() error {
 		}
 	}
 
+	// Seed the initial ready frontier. For a fresh run (completed nil/empty) this is
+	// every predCount==0 non-branch node — identical to the original seed. For a
+	// resume, the already-completed prefix is "fast-forwarded" (its successors are
+	// decremented as if it had run, without executing it), so the frontier becomes the
+	// not-yet-completed nodes that have become ready — i.e. where execution left off.
+	// See PLAN_DURABLE_EXECUTION.md (Appendix A.3).
+	seedQueue := make([]string, 0, len(predCount))
 	for nodeID, c := range predCount {
-		if c == 0 {
-			if branchTargets[nodeID] {
-				continue // still gated by branch until a condition is selected
-			}
-			ready <- nodeID
-			scheduled[nodeID] = true
-			scheduledCount++
+		if c == 0 && !branchTargets[nodeID] {
+			seedQueue = append(seedQueue, nodeID)
 		}
+	}
+	// On resume, a branch-target node that already ran in a prior leg must also be
+	// fast-forwarded so its completion propagates to its successors — the Branch
+	// runtime (which is what normally schedules a target) does not re-run on resume,
+	// and the phantom predCount keeps the target from ever reaching the queue via the
+	// predCount path. Without this, a completed Branch-before-Await prefix would leave
+	// the await's successors permanently unschedulable. Fresh runs have empty
+	// `completed`, so this adds nothing there.
+	for nodeID := range completed {
+		if branchTargets[nodeID] {
+			seedQueue = append(seedQueue, nodeID)
+		}
+	}
+	seedVisited := make(map[string]bool)
+	for len(seedQueue) > 0 {
+		nodeID := seedQueue[0]
+		seedQueue = seedQueue[1:]
+		if seedVisited[nodeID] {
+			continue
+		}
+		seedVisited[nodeID] = true
+		if completed[nodeID] {
+			// Already ran in a prior leg: apply its completion to downstream predCounts
+			// without executing it. Counts as done; NOT added to scheduledCount.
+			scheduled[nodeID] = true
+			for _, succ := range adj[nodeID] {
+				if _, exists := predCount[succ]; exists {
+					predCount[succ]--
+					if predCount[succ] == 0 && !branchTargets[succ] {
+						seedQueue = append(seedQueue, succ)
+					}
+				}
+			}
+			continue
+		}
+		ready <- nodeID
+		scheduled[nodeID] = true
+		scheduledCount++
+	}
+
+	// Empty frontier — e.g. a resume where every node already completed, or a graph
+	// with no runnable roots. Nothing will be processed, so the termination check
+	// inside the worker loop is never reached; return now instead of spawning
+	// workers that would block forever on an unclosed, empty channel.
+	if scheduledCount == 0 {
+		return nil
 	}
 
 	var processed int64
@@ -1055,6 +1119,7 @@ func (v *VM) runKahnScheduler() error {
 	wg.Add(workers)
 
 	var closeOnce sync.Once
+	var suspended bool // guarded by mu; set when a Suspendable step pauses the run
 	worker := func() {
 		defer wg.Done()
 		for id := range ready {
@@ -1074,8 +1139,28 @@ func (v *VM) runKahnScheduler() error {
 				}
 			}
 
-			// On completion, decrement successors
+			// On completion (or suspension), update scheduling state.
 			mu.Lock()
+			if suspended {
+				// Another worker already suspended the run; stop scheduling. (An
+				// in-flight node still finishes its executeNode above, but schedules
+				// nothing further.)
+				processed++
+				mu.Unlock()
+				continue
+			}
+			if v.isSuspendRequested() {
+				// A Suspendable step (Await/HumanApproval) asked to pause. Stop
+				// scheduling new work and wind the run down; the executor will then
+				// checkpoint + register the wake. Successors are NOT scheduled.
+				suspended = true
+				closeOnce.Do(func() { close(ready) })
+				processed++
+				mu.Unlock()
+				continue
+			}
+
+			// Schedule successors.
 			for _, succ := range adj[id] {
 				if _, exists := predCount[succ]; exists {
 					predCount[succ]--
@@ -1363,6 +1448,11 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		}
 	} else if node.GetBalance() != nil {
 		executionLogForNode, err = v.runBalance(node)
+		if executionLogForNode != nil {
+			v.addExecutionLog(executionLogForNode)
+		}
+	} else if node.GetAwait() != nil {
+		executionLogForNode, err = v.runAwait(node)
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
@@ -3244,6 +3334,49 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				Config: balanceConfig,
 			},
 		}
+	case NodeTypeAwait:
+		node.Type = avsproto.NodeType_NODE_TYPE_AWAIT
+		awaitConfig := &avsproto.AwaitNode_Config{}
+		if channel, ok := config["channel"].(string); ok {
+			awaitConfig.Channel = channel
+		}
+		if approvers, ok := config["approvers"].([]interface{}); ok {
+			for _, a := range approvers {
+				if s, ok := a.(string); ok {
+					awaitConfig.Approvers = append(awaitConfig.Approvers, s)
+				}
+			}
+		}
+		if prompt, ok := config["prompt"].(string); ok {
+			awaitConfig.Prompt = prompt
+		}
+		if timeout, ok := config["timeoutSeconds"].(float64); ok {
+			if timeout < 0 || timeout > float64(^uint32(0)) {
+				return nil, fmt.Errorf("await node 'timeoutSeconds' out of range: %v", timeout)
+			}
+			awaitConfig.TimeoutSeconds = uint32(timeout)
+		}
+		// Chain-event flavor — a nested EventTrigger config. protojson handles its
+		// well-known types (e.g. structpb in contract_abi) that plain decoding can't.
+		if chainEvent, ok := config["chainEvent"].(map[string]interface{}); ok {
+			raw, err := json.Marshal(chainEvent)
+			if err != nil {
+				return nil, fmt.Errorf("await node: marshal chainEvent: %w", err)
+			}
+			eventConfig := &avsproto.EventTrigger_Config{}
+			if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(raw, eventConfig); err != nil {
+				return nil, fmt.Errorf("await node: invalid chainEvent: %w", err)
+			}
+			awaitConfig.ChainEvent = eventConfig
+		}
+		hasExternal := awaitConfig.Channel != "" || len(awaitConfig.Approvers) > 0 || awaitConfig.Prompt != ""
+		if awaitConfig.ChainEvent != nil && hasExternal {
+			return nil, fmt.Errorf("await node sets both 'chainEvent' and external-signal fields; they are mutually exclusive")
+		}
+		if !hasExternal && awaitConfig.ChainEvent == nil {
+			return nil, fmt.Errorf("await node requires either 'channel' (external signal) or 'chainEvent' (chain event)")
+		}
+		node.TaskType = &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{Config: awaitConfig}}
 	default:
 		return nil, fmt.Errorf("unsupported node type for CreateNodeFromType: %s", nodeType)
 	}
@@ -3741,6 +3874,35 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 
 			// Clean up complex protobuf types before returning
 			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_Await:
+		await := taskNode.GetAwait()
+		if await != nil && await.Config != nil {
+			result := map[string]interface{}{
+				"timeoutSeconds": float64(await.Config.TimeoutSeconds),
+			}
+			// Emit only the active flavor's fields (they are mutually exclusive), so
+			// the serialized config isn't a confusing mix of channel:"" + chainEvent.
+			if await.Config.ChainEvent != nil {
+				// Re-encode via protojson so the nested config (and its well-known
+				// types) round-trips as clean JSON map types.
+				if raw, err := protojson.Marshal(await.Config.ChainEvent); err == nil {
+					var chainEvent map[string]interface{}
+					if json.Unmarshal(raw, &chainEvent) == nil {
+						result["chainEvent"] = chainEvent
+					}
+				}
+			} else {
+				approvers := make([]interface{}, len(await.Config.Approvers))
+				for i, a := range await.Config.Approvers {
+					approvers[i] = a // []interface{} so structpb.NewValue accepts it
+				}
+				result["channel"] = await.Config.Channel
+				result["approvers"] = approvers
+				result["prompt"] = await.Config.Prompt
+			}
+			return result
 		}
 
 	case *avsproto.TaskNode_Branch:
