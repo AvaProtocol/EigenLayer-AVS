@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -371,7 +372,7 @@ func persistWakeSubscription(db storage.Storage, execID string, sub *WakeSubscri
 // loadAllWakeSubscriptions scans the registry — the boot re-arm entrypoint. The
 // engine uses the result to re-register chain waits to operators, reload timers,
 // and GC entries whose execution is no longer WAITING.
-func loadAllWakeSubscriptions(db storage.Storage) (map[string]*WakeSubscription, error) {
+func loadAllWakeSubscriptions(db storage.Storage, logger ...sdklogging.Logger) (map[string]*WakeSubscription, error) {
 	items, err := db.GetByPrefix([]byte(wakeSubscriptionPrefix))
 	if err != nil {
 		return nil, err
@@ -379,14 +380,19 @@ func loadAllWakeSubscriptions(db storage.Storage) (map[string]*WakeSubscription,
 	out := make(map[string]*WakeSubscription, len(items))
 	for _, it := range items {
 		execID := strings.TrimPrefix(string(it.Key), wakeSubscriptionPrefix)
-		sub, err := unmarshalWake(it.Value)
-		if err != nil {
-			return nil, fmt.Errorf("load wake %s: %w", execID, err)
+		sub, uErr := unmarshalWake(it.Value)
+		if uErr == nil {
+			// Re-validate on load to catch a partially-written / version-mismatched record.
+			uErr = sub.Validate()
 		}
-		// Re-validate on load: a corrupted or partially-written record gets a clear
-		// error path here rather than surfacing as hard-to-debug behavior later.
-		if err := sub.Validate(); err != nil {
-			return nil, fmt.Errorf("invalid wake %s: %w", execID, err)
+		if uErr != nil {
+			// Skip a corrupt/invalid record — do NOT abort the whole scan. One bad
+			// record must never block every timeout sweep and chain-event re-arm on
+			// each periodic tick (it would silently freeze durable execution).
+			if len(logger) > 0 && logger[0] != nil {
+				logger[0].Error("skipping corrupt wake record", "exec_id", execID, "error", uErr)
+			}
+			continue
 		}
 		out[execID] = sub
 	}

@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -568,6 +569,123 @@ func TestValidateAwaitOperatorCoverage(t *testing.T) {
 
 	// External-signal Await has no chain → allowed regardless of operators.
 	require.NoError(t, n.validateAwaitOperatorCoverage(awaitNode(&avsproto.AwaitNode_Config{Channel: "telegram"})))
+}
+
+// TestDeliverChainEventWake_ConcurrentExactlyOnce proves the per-execution lock makes
+// resume exactly-once: two concurrent chain-event wakes for the same execution resume
+// it exactly once (the other no-ops), so an on-chain step in the resumed leg can't run
+// twice.
+func TestDeliverChainEventWake_ConcurrentExactlyOnce(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	n := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+	executor := &WorkflowExecutor{db: db, logger: testutil.GetLogger(), smartWalletConfig: &config.SmartWalletConfig{}}
+
+	trigger := &avsproto.TaskTrigger{Id: "t", Name: "t", TriggerType: &avsproto.TaskTrigger_Manual{}}
+	await := &avsproto.TaskNode{
+		Id: "wait", Name: "wait", Type: avsproto.NodeType_NODE_TYPE_AWAIT,
+		TaskType: &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{
+			Config: &avsproto.AwaitNode_Config{ChainEvent: chainEventConfig(8453), TimeoutSeconds: 3600},
+		}},
+	}
+	task := &model.Workflow{Task: &avsproto.Task{
+		Id: "concurrent-wf", Trigger: trigger, Status: avsproto.TaskStatus_Enabled,
+		Nodes: []*avsproto.TaskNode{customCodeNode("cc1"), await, customCodeNode("cc2")},
+		Edges: []*avsproto.TaskEdge{
+			{Id: "e0", Source: "t", Target: "cc1"}, {Id: "e1", Source: "cc1", Target: "wait"}, {Id: "e2", Source: "wait", Target: "cc2"},
+		},
+	}}
+	// Store the task so GetWorkflowByID resolves it from the wake's TaskID.
+	taskJSON, err := task.ToJSON()
+	require.NoError(t, err)
+	require.NoError(t, db.Set(WorkflowStorageKey(task.Id, avsproto.TaskStatus_Enabled), taskJSON))
+
+	// Build the WAITING execution.
+	vm1, err := NewVMWithData(task, nil, &config.SmartWalletConfig{}, nil)
+	require.NoError(t, err)
+	vm1.WithDb(db).WithLogger(testutil.GetLogger())
+	require.NoError(t, vm1.Compile())
+	require.NoError(t, vm1.Run())
+	require.NotNil(t, vm1.PendingSuspend())
+	const execID = "exec-concurrent"
+	_, err = executor.checkpointSuspendedExecution(task, &avsproto.Execution{Id: execID, StartAt: 1}, vm1, vm1.PendingSuspend())
+	require.NoError(t, err)
+
+	// Fire two concurrent wakes for the same execution.
+	var wg sync.WaitGroup
+	results := make([]string, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			state, _ := n.deliverChainEventWake(execID, &avsproto.NotifyTriggersReq{})
+			if state != nil {
+				results[idx] = state.Status
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	delivered := 0
+	for _, s := range results {
+		if s == "wake_delivered" {
+			delivered++
+		}
+	}
+	assert.Equal(t, 1, delivered, "exactly one concurrent wake resumes the execution; the other no-ops")
+}
+
+// TestLoadAllWakeSubscriptions_SkipsCorrupt proves one corrupt wake record does not
+// abort the whole scan — otherwise a single bad record would freeze every timeout
+// sweep and chain-event re-arm permanently.
+func TestLoadAllWakeSubscriptions_SkipsCorrupt(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+
+	require.NoError(t, persistWakeSubscription(db, "good", &WakeSubscription{
+		Kind: WakeExternalSignal, TaskID: "wf", External: &ExternalSignalSpec{Channel: "telegram"}, TimeoutAt: 1 << 40,
+	}))
+	require.NoError(t, db.Set(wakeSubscriptionKey("bad"), []byte("{not valid json")))
+
+	wakes, err := loadAllWakeSubscriptions(db)
+	require.NoError(t, err, "a corrupt record must not fail the scan")
+	assert.NotNil(t, wakes["good"], "the healthy wake still loads")
+	assert.Nil(t, wakes["bad"], "the corrupt wake is skipped")
+}
+
+// TestCheckpoint_CountsTowardMaxExecution proves a suspended run counts toward
+// MaxExecution at suspend time (the task is completed), so a MaxExecution=1 workflow
+// that suspends does not fire again while it waits.
+func TestCheckpoint_CountsTowardMaxExecution(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	executor := &WorkflowExecutor{db: db, logger: testutil.GetLogger(), smartWalletConfig: &config.SmartWalletConfig{}}
+
+	trigger := &avsproto.TaskTrigger{Id: "t", Name: "t", TriggerType: &avsproto.TaskTrigger_Manual{}}
+	await := &avsproto.TaskNode{
+		Id: "wait", Name: "wait", Type: avsproto.NodeType_NODE_TYPE_AWAIT,
+		TaskType: &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{
+			Config: &avsproto.AwaitNode_Config{Channel: "telegram", TimeoutSeconds: 3600},
+		}},
+	}
+	task := &model.Workflow{Task: &avsproto.Task{
+		Id: "maxexec-wf", Trigger: trigger,
+		MaxExecution: 1, ExecutionCount: 1, Status: avsproto.TaskStatus_Enabled, // RunTask already incremented the count
+		Nodes: []*avsproto.TaskNode{customCodeNode("cc1"), await},
+		Edges: []*avsproto.TaskEdge{{Id: "e0", Source: "t", Target: "cc1"}, {Id: "e1", Source: "cc1", Target: "wait"}},
+	}}
+
+	vm1, err := NewVMWithData(task, nil, &config.SmartWalletConfig{}, nil)
+	require.NoError(t, err)
+	vm1.WithDb(db).WithLogger(testutil.GetLogger())
+	require.NoError(t, vm1.Compile())
+	require.NoError(t, vm1.Run())
+	require.NotNil(t, vm1.PendingSuspend())
+
+	_, err = executor.checkpointSuspendedExecution(task, &avsproto.Execution{Id: "e1", StartAt: 1}, vm1, vm1.PendingSuspend())
+	require.NoError(t, err)
+	assert.Equal(t, avsproto.TaskStatus_Completed, task.Status,
+		"MaxExecution=1 task is Completed at suspend so it won't fire again while waiting")
 }
 
 // TestAwaitNode_ResumeThroughBranchTarget guards the resume scheduler: when the
