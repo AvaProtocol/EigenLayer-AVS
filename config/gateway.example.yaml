@@ -85,11 +85,14 @@ chains:
 
 # Optional: delegated partners (tenants). A partner authenticates its own
 # end users in its own system and may call the no-fund simulate family
-# (workflows:simulate / nodes:run / triggers:run) on their behalf WITHOUT a
-# per-user wallet signature, by sending a short-lived Ed25519-signed assertion
-# in the `X-Partner-Assertion` header. The assertion's `iss` must equal `id`,
-# its signature must verify against one of `public_keys`, and it must declare a
-# `scope` granted below. Fund-moving operations are never authorized this way.
+# (workflows:simulate / nodes:run / triggers:run) AND no-fund wallet
+# derivation (GET /wallets, POST /wallets) on their behalf WITHOUT a per-user
+# wallet signature, by sending a short-lived Ed25519-signed assertion in the
+# `X-Partner-Assertion` header. The assertion's `iss` must equal `id`, its
+# signature must verify against one of `public_keys`, it must declare a `scope`
+# granted below, carry a short-lived `exp`, and (if partner_assertion_audience
+# is set) an `aud` matching it. For wallet derivation `sub` must be the end
+# user's 0x EOA. Fund-moving operations are never authorized this way.
 # See PLAN_PARTNER_PAYMENTS.md. Omit this block to disable partner delegation.
 partners:
   - id: studio
@@ -99,6 +102,9 @@ partners:
     scopes:
       - simulate
     status: active
+# Bind partner assertions to this gateway/environment so a captured assertion
+# can't be replayed elsewhere; assertions must carry a matching `aud`.
+partner_assertion_audience: "avs-gateway-staging"
 
 # Optional: per-macro secret values referenced from workflow JSON.
 # Leave keys empty unless your local workflows actually use them.

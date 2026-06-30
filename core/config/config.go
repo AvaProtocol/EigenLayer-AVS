@@ -106,6 +106,10 @@ type Config struct {
 	// simulate family on behalf of their own end users. See PartnerConfig.
 	Partners []PartnerConfig
 
+	// PartnerAssertionAudience binds partner assertions to this gateway;
+	// see the ConfigRaw field of the same name.
+	PartnerAssertionAudience string
+
 	// Account abstraction config
 	SmartWallet *SmartWalletConfig
 
@@ -325,6 +329,13 @@ type ConfigRaw struct {
 	// Partners registers delegated tenants permitted to call the simulate
 	// family on behalf of their own users. See PartnerConfig.
 	Partners []PartnerConfig `yaml:"partners"`
+
+	// PartnerAssertionAudience, when set, is the value every partner
+	// assertion's `aud` claim must contain — bind it to this gateway /
+	// environment (e.g. "avs-gateway-staging") so a captured assertion
+	// cannot be replayed against another environment. Empty disables the
+	// check (not recommended in production).
+	PartnerAssertionAudience string `yaml:"partner_assertion_audience"`
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
@@ -528,7 +539,8 @@ func NewConfig(configFilePath string) (*Config, error) {
 		RestRateLimitPerSecond: configRaw.RestRateLimitPerSecond,
 		RestRateLimitBurst:     configRaw.RestRateLimitBurst,
 
-		Partners: configRaw.Partners,
+		Partners:                 configRaw.Partners,
+		PartnerAssertionAudience: configRaw.PartnerAssertionAudience,
 
 		SmartWallet: &SmartWalletConfig{
 			EthRpcUrl:            configRaw.SmartWallet.EthRpcUrl,

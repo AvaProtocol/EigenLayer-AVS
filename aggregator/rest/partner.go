@@ -108,6 +108,30 @@ func (s *Server) requireSimulateAuth(ctx echo.Context) (*model.User, error) {
 	}
 }
 
+// requireWalletDeriveAuth authorizes the no-fund wallet derivation/list step
+// (runner resolution during a preview) via the same either/or path as
+// requireSimulateAuth, but additionally requires a concrete owner EOA: a smart
+// wallet is derived deterministically from its owner, so an empty/opaque
+// subject cannot be served. Partner assertions used here must carry a real
+// `sub` address. This unblocks Studio's `$SMART_WALLET$` placeholder
+// resolution (getWallets) for partner-delegated previews; it stays no-fund and
+// needs no ownership check — derivation only reads (owner, salt, factory).
+func (s *Server) requireWalletDeriveAuth(ctx echo.Context) (*model.User, error) {
+	user, err := s.requireSimulateAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if user.Address == (common.Address{}) {
+		return nil, &restmw.HTTPError{
+			Status: http.StatusBadRequest,
+			Code:   "PARTNER_SUBJECT_REQUIRED",
+			Title:  "Owner address required",
+			Detail: "Wallet derivation requires the assertion `sub` to be the end-user's 0x EOA address.",
+		}
+	}
+	return user, nil
+}
+
 // verifyPartnerAssertion validates the X-Partner-Assertion header against the
 // configured partner registry. It returns:
 //
@@ -176,6 +200,18 @@ func (s *Server) verifyPartnerAssertion(ctx echo.Context, requiredScope string) 
 		return nil, partnerError(http.StatusUnauthorized, "PARTNER_ASSERTION_TTL",
 			"Partner assertion lifetime too long",
 			fmt.Sprintf("`exp` may be at most %s in the future.", maxPartnerAssertionTTL))
+	}
+
+	// Replay binding: when an expected audience is configured, the assertion
+	// must target this gateway/environment so a captured token can't be
+	// replayed elsewhere.
+	if want := strings.TrimSpace(s.config.PartnerAssertionAudience); want != "" {
+		aud, _ := claims.GetAudience()
+		if !slices.Contains(aud, want) {
+			return nil, partnerError(http.StatusUnauthorized, "PARTNER_ASSERTION_AUDIENCE",
+				"Partner assertion audience mismatch",
+				fmt.Sprintf("Assertion `aud` must include %q for this gateway.", want))
+		}
 	}
 
 	// Scope must be granted by the registry AND declared by the token.

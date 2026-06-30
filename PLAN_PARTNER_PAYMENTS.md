@@ -84,10 +84,12 @@ directly** on simulate calls; there is **no separate token-exchange endpoint** i
 a thin per-call wrapper) conceptually carries:
 
 ```json
-{ "sub": "<end-user address or partner-user-id>",
-  "act": { "partner_id": "studio" },     // delegation / audit trail
+{ "iss": "studio",                        // partner_id → selects registered keys
+  "sub": "<end-user address or partner-user-id>",
   "scope": "simulate",                    // simulate | (later) execute
-  "exp": "<now + minutes>" }
+  "aud": "avs-gateway-staging",           // binds to this gateway (anti-replay)
+  "exp": "<now + minutes>",               // required, short-lived (≤1h)
+  "jti": "<nonce>" }                       // RESERVED for replay cache (future)
 ```
 
 - **`scope: simulate`** → AVS honors it for the simulate family on partner trust alone. No wallet
@@ -140,9 +142,20 @@ untouched — it already accepts an arbitrary address and skips ownership.
 way it would trust an admin key, but **scoped to no-fund operations only**. The blast radius of a leaked
 partner simulate-token is "someone can run free previews," not "someone can touch funds."
 
-**3.4 Rate-limit & attribution.** Meter simulate calls per `partner_id` (+ optional `sub`) so a partner's
-preview volume is bounded and observable. No billing yet — simulate is free/near-free; this is abuse
-control, not revenue.
+**3.3a Runner resolution (the second gate).** Studio's simulate flow resolves the `$SMART_WALLET$` runner
+placeholder at simulate time via `getWallets` → the wallet derive/list endpoints
+([ListWallets](aggregator/rest/handlers_wallets.go#L27), [CreateWallet](aggregator/rest/handlers_wallets.go#L64)),
+which were also `requireUser`-gated — so partner-delegated simulate alone would die at runner resolution.
+Deriving a smart wallet is deterministic from `(owner, salt, factory)`, moves no funds, and needs no
+ownership check — the **same no-fund class as simulate**. So these two wallet endpoints accept the partner
+assertion too (`requireWalletDeriveAuth`), with the extra requirement that `sub` be a real EOA (you can't
+derive a wallet without an owner). Listing is owner-scoped, so it never exposes another user's wallets.
+Fund-moving wallet ops (`:withdraw`, `:getNonce`, `UpdateWallet`) stay user-JWT-only.
+
+**3.4 Rate-limit & attribution (REQUIRED).** Meter calls per `partner_id` **and per `sub`** so one abusive
+end-user can't exhaust the whole partner's quota (noisy-neighbor within a tenant). No billing yet —
+simulate is free/near-free; this is abuse control. *(Implementation note: the partner path currently logs
+`partner_id`/`sub` for attribution; the per-`(partner_id, sub)` limiter is the immediate fast-follow.)*
 
 **That is the entire urgent deliverable.** No proto change, no storage-key change, no contracts work — a
 registry namespace, an auth middleware, and an `either/or` gate on three handlers.
@@ -202,11 +215,14 @@ Run `make storage-check` vs `origin/main` before any merge to `main`.
   is needed for v1. Partners authenticate with a short-lived **Ed25519-signed assertion** (private_key_jwt
   style) in the **`X-Partner-Assertion`** header, kept separate from the user `Authorization: Bearer` path.
   `requireSimulateAuth` ([aggregator/rest/partner.go](aggregator/rest/partner.go)) is the either/or gate
-  wired into the three simulate-family handlers; it verifies signature against the partner's registered
-  key(s) (rotation-friendly), enforces partner `status: active`, requires the scope to be both
-  registry-granted and token-declared, and caps the assertion TTL (≤1h, `exp` required). Studio is the
-  first partner (`scopes: ["simulate"]`). No proto/storage-key change; no change to the user-JWT path.
-  Per-partner **rate-limiting is deferred** (logged/attributed for now) — fast follow.
+  wired into the three simulate-family handlers **and** the two no-fund wallet-derivation handlers
+  (`ListWallets`/`CreateWallet`, via `requireWalletDeriveAuth`, so Studio's `$SMART_WALLET$` runner
+  resolution works end-to-end — §3.3a). It verifies signature against the partner's registered key(s)
+  (rotation-friendly), enforces partner `status: active`, requires the scope to be both registry-granted
+  and token-declared, requires a short-lived `exp` (TTL ≤1h), and — when `partner_assertion_audience` is
+  set — binds `aud` to this gateway (anti-replay). Studio is the first partner (`scopes: ["simulate"]`).
+  No proto/storage-key change; no change to the user-JWT path. **Deferred fast-follows:** per-`(partner,
+  sub)` rate-limiting (currently logged/attributed) and a `jti` replay cache.
 - **Phase 2 — FUTURE: attribution seam.** `Task.partner_id` proto field + `(wallet,chainId)→partner`
   registry + stamp on `CreateTask`; thread an ignored `partner_id` through the fee record call site.
 - **Phase 3 — FUTURE: per-partner billing.** Partner-keyed ledger + per-partner fee schedule + credit
@@ -237,10 +253,18 @@ Run `make storage-check` vs `origin/main` before any merge to `main`.
 ## 8. Risk register
 
 - **Over-trusting the partner token** — mitigated by **scope**: a simulate-token can only run free
-  previews; it can never create or execute. The execute class always requires on-chain fund authority,
-  never partner trust (the §0 invariant).
-- **Leaked partner assertion key** — rotatable via `AssertionPubKeys`; short-lived derived tokens; scoped
-  to simulate. Blast radius = preview spam, bounded by rate-limit.
+  previews and derive wallet addresses; it can never create or execute. The execute class always requires
+  on-chain fund authority, never partner trust (the §0 invariant).
+- **Data exposure (non-issue, stated to preempt review)** — partner-delegated simulate does **not** widen
+  data exposure. Arbitrary-address preview is already possible today with a user JWT (the engine skips
+  ownership), and wallet listing is owner-scoped. The partner token only removes the *signature*
+  requirement; it exposes nothing about other users' wallets that a user JWT couldn't already.
+- **Replay** — assertions are bound to this gateway via `aud` (`partner_assertion_audience`) so a captured
+  token can't be replayed across environments, and `exp` is required and capped (≤1h). A `jti`/nonce
+  replay cache (true single-use) is reserved as a follow-up — the claim carries `jti` now so the cache is
+  a drop-in later.
+- **Leaked partner assertion key** — rotatable via multiple `public_keys`; short-lived assertions; scoped
+  to simulate. Blast radius = preview spam, bounded by the per-`(partner, sub)` rate-limit.
 - **Scope creep into execute on partner trust** — guard in code: the execute authorization check must be
   independent of the partner layer and require fund authority (controller/Calibur). Never let
   `scope: execute` be satisfied by a partner credential alone.

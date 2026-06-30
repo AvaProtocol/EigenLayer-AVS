@@ -24,8 +24,13 @@ import (
 // behind the REST shape so the SDK stays clean.
 
 // ListWallets — GET /api/v1/wallets
+//
+// No-fund: lists the smart wallets derived/owned by the authenticated owner
+// (the JWT subject, or a partner assertion's `sub`). Scoped to that owner, so
+// it never exposes another user's wallets. Partner-delegatable to resolve a
+// preview's runner — see requireWalletDeriveAuth.
 func (s *Server) ListWallets(ctx echo.Context) error {
-	user, err := s.requireUser(ctx)
+	user, err := s.requireWalletDeriveAuth(ctx)
 	if err != nil {
 		return err
 	}
@@ -62,7 +67,11 @@ func (s *Server) ListWallets(ctx echo.Context) error {
 // other than the one it was signed against (the JWT only proves EOA
 // ownership, which is chain-independent).
 func (s *Server) CreateWallet(ctx echo.Context) error {
-	user, err := s.requireUser(ctx)
+	// No-fund: derives the counterfactual CREATE2 address from (owner, salt,
+	// factory) and records it. Partner-delegatable so a preview can resolve a
+	// social user's runner before any wallet is deployed — see
+	// requireWalletDeriveAuth.
+	user, err := s.requireWalletDeriveAuth(ctx)
 	if err != nil {
 		return err
 	}

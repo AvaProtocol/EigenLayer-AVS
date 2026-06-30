@@ -22,6 +22,12 @@ const testPartnerSubject = "0x1111111111111111111111111111111111111111"
 // "studio" partner keyed on the supplied Ed25519 public key.
 func newPartnerServer(t *testing.T, pub ed25519.PublicKey, scopes []string, status string) *Server {
 	t.Helper()
+	return newPartnerServerAud(t, pub, scopes, status, "")
+}
+
+// newPartnerServerAud is newPartnerServer with a configured expected audience.
+func newPartnerServerAud(t *testing.T, pub ed25519.PublicKey, scopes []string, status, audience string) *Server {
+	t.Helper()
 	logger, err := sdklogging.NewZapLogger(sdklogging.Development)
 	if err != nil {
 		t.Fatalf("logger: %v", err)
@@ -29,6 +35,7 @@ func newPartnerServer(t *testing.T, pub ed25519.PublicKey, scopes []string, stat
 	return &Server{
 		logger: logger,
 		config: &config.Config{
+			PartnerAssertionAudience: audience,
 			Partners: []config.PartnerConfig{{
 				ID:         "studio",
 				PublicKeys: []string{base64.StdEncoding.EncodeToString(pub)},
@@ -194,6 +201,53 @@ func TestVerifyPartnerAssertion_Rejections(t *testing.T) {
 			_, err := s.verifyPartnerAssertion(ctxWithAssertion(tc.assertion(t)), scopeSimulate)
 			assertHTTPStatus(t, err, tc.wantStatus)
 		})
+	}
+}
+
+func TestVerifyPartnerAssertion_Audience(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+
+	t.Run("matching audience accepted", func(t *testing.T) {
+		s := newPartnerServerAud(t, pub, []string{scopeSimulate}, partnerStatusActive, "avs-gateway-staging")
+		c := validClaims()
+		c["aud"] = "avs-gateway-staging"
+		principal, err := s.verifyPartnerAssertion(ctxWithAssertion(signAssertion(t, priv, c)), scopeSimulate)
+		if err != nil {
+			t.Fatalf("expected success, got: %v", err)
+		}
+		if principal == nil || principal.PartnerID != "studio" {
+			t.Fatalf("expected studio principal, got %+v", principal)
+		}
+	})
+
+	t.Run("missing/mismatched audience rejected", func(t *testing.T) {
+		s := newPartnerServerAud(t, pub, []string{scopeSimulate}, partnerStatusActive, "avs-gateway-staging")
+		// Assertion targets prod, gateway expects staging.
+		c := validClaims()
+		c["aud"] = "avs-gateway-prod"
+		_, err := s.verifyPartnerAssertion(ctxWithAssertion(signAssertion(t, priv, c)), scopeSimulate)
+		assertHTTPStatus(t, err, http.StatusUnauthorized)
+	})
+}
+
+// requireWalletDeriveAuth must reject a partner assertion whose `sub` is not a
+// concrete EOA — a smart wallet can't be derived without an owner.
+func TestRequireWalletDeriveAuth_OpaqueSubjectRejected(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	s := newPartnerServer(t, pub, []string{scopeSimulate}, partnerStatusActive)
+
+	c := validClaims()
+	c["sub"] = "studio-user-42" // not an address
+	_, err := s.requireWalletDeriveAuth(ctxWithAssertion(signAssertion(t, priv, c)))
+	assertHTTPStatus(t, err, http.StatusBadRequest)
+
+	// With a real EOA sub it resolves to that owner.
+	user, err := s.requireWalletDeriveAuth(ctxWithAssertion(signAssertion(t, priv, validClaims())))
+	if err != nil {
+		t.Fatalf("expected success with address sub, got: %v", err)
+	}
+	if user.Address.Hex() != testPartnerSubject {
+		t.Fatalf("expected owner %s, got %s", testPartnerSubject, user.Address.Hex())
 	}
 }
 
