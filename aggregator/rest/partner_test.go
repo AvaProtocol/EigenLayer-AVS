@@ -101,10 +101,65 @@ func TestRequireSimulateAuth_NoCredential(t *testing.T) {
 	assertHTTPStatus(t, err, http.StatusUnauthorized)
 }
 
+// ctxWithUser builds an Echo context as the JWT middleware would leave it —
+// with an AuthenticatedUser attached (no partner header).
+func ctxWithUser(subject string) echo.Context {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workflows:simulate", nil)
+	c := e.NewContext(req, httptest.NewRecorder())
+	c.Set("auth.user", &restmw.AuthenticatedUser{Subject: subject})
+	return c
+}
+
+func TestRequireSimulateAuth_PrefersUserJWT(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(nil)
+	s := newPartnerServer(t, pub, []string{scopeSimulate}, partnerStatusActive)
+
+	const subject = "0x2222222222222222222222222222222222222222"
+	user, err := s.requireSimulateAuth(ctxWithUser(subject))
+	if err != nil {
+		t.Fatalf("valid user JWT should succeed, got: %v", err)
+	}
+	if user.Address.Hex() != subject {
+		t.Fatalf("expected user %s, got %s", subject, user.Address.Hex())
+	}
+
+	// A present-but-empty-subject JWT must be rejected, NOT silently fall
+	// through to the partner path.
+	_, err = s.requireSimulateAuth(ctxWithUser(""))
+	assertHTTPStatus(t, err, http.StatusUnauthorized)
+}
+
+func TestDecodeEd25519Keys_TolerantAndMultiEncoding(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(nil)
+	std := base64.StdEncoding.EncodeToString(pub)
+
+	for _, enc := range []string{
+		std,
+		base64.RawStdEncoding.EncodeToString(pub),
+		base64.URLEncoding.EncodeToString(pub),
+		"ed25519:" + std,
+	} {
+		if _, err := decodeEd25519Key(enc); err != nil {
+			t.Fatalf("expected %q to decode, got %v", enc, err)
+		}
+	}
+
+	// A bad key is tolerated as long as at least one is usable (rotation).
+	keys, err := decodeEd25519Keys([]string{"!!!not-base64!!!", std})
+	if err != nil || len(keys) != 1 {
+		t.Fatalf("expected 1 usable key tolerating the bad one, got %d err=%v", len(keys), err)
+	}
+
+	// All-bad must fail (never silently accept any signature).
+	if _, err := decodeEd25519Keys([]string{"nope", "alsobad"}); err == nil {
+		t.Fatal("expected error when no keys are usable")
+	}
+}
+
 func TestVerifyPartnerAssertion_Rejections(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
-	otherPub, otherPriv, _ := ed25519.GenerateKey(nil)
-	_ = otherPub
+	_, otherPriv, _ := ed25519.GenerateKey(nil)
 
 	cases := []struct {
 		name       string

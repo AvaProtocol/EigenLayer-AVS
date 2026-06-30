@@ -75,8 +75,10 @@ type partnerPrincipal struct {
 //     simulate tolerates this since it skips ownership).
 //   - Else → 401.
 func (s *Server) requireSimulateAuth(ctx echo.Context) (*model.User, error) {
-	// Prefer an end-user JWT when one was presented.
-	if authed := restmw.UserFromContext(ctx); authed != nil && authed.Subject != "" {
+	// Any presented end-user JWT goes through the user path. requireUser
+	// rejects a missing/invalid subject — we must NOT silently fall through to
+	// the partner path for a structurally-valid-but-empty-subject token.
+	if authed := restmw.UserFromContext(ctx); authed != nil {
 		return s.requireUser(ctx)
 	}
 
@@ -241,28 +243,50 @@ func (s *Server) lookupPartner(id string) *config.PartnerConfig {
 	return nil
 }
 
-// decodeEd25519Keys decodes the partner's base64 (optionally "ed25519:"-
-// prefixed) public keys into ed25519.PublicKey values. Returns an error
-// when none are usable so a misconfigured partner can't silently accept any
-// signature.
+// ed25519Base64Encodings are the base64 variants accepted for a partner
+// public key, so keys produced by common tooling (openssl/age/ssh-keygen emit
+// padded or raw, std or url-safe) decode without a silent mismatch.
+var ed25519Base64Encodings = []*base64.Encoding{
+	base64.StdEncoding,
+	base64.RawStdEncoding,
+	base64.URLEncoding,
+	base64.RawURLEncoding,
+}
+
+// decodeEd25519Key decodes one base64 (optionally "ed25519:"-prefixed) public
+// key, trying each accepted encoding.
+func decodeEd25519Key(s string) (ed25519.PublicKey, error) {
+	s = strings.TrimPrefix(strings.TrimSpace(s), "ed25519:")
+	for _, enc := range ed25519Base64Encodings {
+		if b, err := enc.DecodeString(s); err == nil && len(b) == ed25519.PublicKeySize {
+			return ed25519.PublicKey(b), nil
+		}
+	}
+	return nil, fmt.Errorf("not a valid base64-encoded %d-byte Ed25519 public key", ed25519.PublicKeySize)
+}
+
+// decodeEd25519Keys decodes a partner's public keys, tolerating individual bad
+// entries (so a fat-fingered key during rotation doesn't break a partner whose
+// other key is valid) but failing when NONE are usable — a partner with no
+// usable key must never silently accept any signature.
 func decodeEd25519Keys(encoded []string) ([]ed25519.PublicKey, error) {
 	out := make([]ed25519.PublicKey, 0, len(encoded))
+	var errs []string
 	for _, e := range encoded {
-		e = strings.TrimSpace(e)
-		e = strings.TrimPrefix(e, "ed25519:")
-		if e == "" {
+		if strings.TrimPrefix(strings.TrimSpace(e), "ed25519:") == "" {
 			continue
 		}
-		b, err := base64.StdEncoding.DecodeString(e)
+		pk, err := decodeEd25519Key(e)
 		if err != nil {
-			return nil, fmt.Errorf("public key is not valid base64: %w", err)
+			errs = append(errs, err.Error())
+			continue
 		}
-		if len(b) != ed25519.PublicKeySize {
-			return nil, fmt.Errorf("public key must be %d bytes, got %d", ed25519.PublicKeySize, len(b))
-		}
-		out = append(out, ed25519.PublicKey(b))
+		out = append(out, pk)
 	}
 	if len(out) == 0 {
+		if len(errs) > 0 {
+			return nil, fmt.Errorf("no usable public keys: %s", strings.Join(errs, "; "))
+		}
 		return nil, fmt.Errorf("no public keys configured")
 	}
 	return out, nil
