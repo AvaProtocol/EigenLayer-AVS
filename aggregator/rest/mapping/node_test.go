@@ -164,7 +164,7 @@ func TestNodeRoundTrip_PerNodeChainId(t *testing.T) {
 // round-trip (OpenAPI → proto → OpenAPI), so the SDK/studio can put it in a workflow.
 func TestNodeRoundTrip_Await(t *testing.T) {
 	typ := generated.AwaitNodeTypeAwait
-	channel := "telegram"
+	channel := generated.Telegram
 	approvers := []string{"0xowner"}
 	prompt := "approve the transfer?"
 	timeout := int64(3600)
@@ -193,7 +193,7 @@ func TestNodeRoundTrip_Await(t *testing.T) {
 	v, err := rt.AsAwaitNode()
 	require.NoError(t, err)
 	require.NotNil(t, v.Config.Channel)
-	assert.Equal(t, "telegram", *v.Config.Channel)
+	assert.Equal(t, generated.Telegram, *v.Config.Channel)
 	require.NotNil(t, v.Config.TimeoutSeconds)
 	assert.Equal(t, int64(3600), *v.Config.TimeoutSeconds)
 }

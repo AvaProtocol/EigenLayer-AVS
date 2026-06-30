@@ -20,7 +20,8 @@ import (
 // use this to confirm a trigger config parses and returns the expected
 // shape before committing it to a workflow.
 func (s *Server) RunTrigger(ctx echo.Context) error {
-	user, err := s.requireUser(ctx)
+	// No-fund operation: a user JWT or a partner assertion both authorize it.
+	user, err := s.requireSimulateAuth(ctx)
 	if err != nil {
 		return err
 	}

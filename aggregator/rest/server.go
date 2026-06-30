@@ -140,6 +140,12 @@ func (s *Server) Mount(e *echo.Echo) {
 	if s.config != nil && len(s.config.JwtSecret) > 0 {
 		api.Use(restmw.JWT(restmw.JWTConfig{SigningKey: s.config.JwtSecret}))
 	}
+	// Operability: partner assertions are only environment-bound when an
+	// audience is configured. Warn if partners are registered without one so
+	// an operator doesn't silently ship replayable-across-environments creds.
+	if s.config != nil && len(s.config.Partners) > 0 && strings.TrimSpace(s.config.PartnerAssertionAudience) == "" {
+		s.logger.Warn("partner_assertion_audience is unset while partners are registered; assertions are not bound to this environment and can be replayed across deployments")
+	}
 	api.Use(restmw.RateLimit(s.rateLimitConfig(), restmw.NewInMemoryBackend()))
 
 	// Wrap the api group with a filter that drops route registrations

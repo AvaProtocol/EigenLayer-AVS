@@ -102,6 +102,14 @@ type Config struct {
 	RestRateLimitPerSecond float64
 	RestRateLimitBurst     int
 
+	// Partners are the registered delegated tenants permitted to call the
+	// simulate family on behalf of their own end users. See PartnerConfig.
+	Partners []PartnerConfig
+
+	// PartnerAssertionAudience binds partner assertions to this gateway;
+	// see the ConfigRaw field of the same name.
+	PartnerAssertionAudience string
+
 	// Account abstraction config
 	SmartWallet *SmartWalletConfig
 
@@ -226,6 +234,33 @@ type ChainConfigRaw struct {
 	SmartWallet SmartWalletConfigRaw `yaml:"smart_wallet"`
 }
 
+// PartnerConfig is a registered partner (tenant) permitted to call
+// delegated, no-fund operations — currently the simulate family
+// (workflows:simulate / nodes:run / triggers:run) — on behalf of its own
+// authenticated end users, without those users producing a wallet
+// signature. Partners authenticate with a short-lived Ed25519-signed
+// assertion (private_key_jwt style) whose `iss` claim equals ID and whose
+// signature verifies against one of PublicKeys.
+//
+// Simulate moves no funds and skips wallet-ownership, so partner trust is
+// sufficient for it; fund-moving operations (createTask/execute) are never
+// authorized by a partner assertion alone. See PLAN_PARTNER_PAYMENTS.md.
+type PartnerConfig struct {
+	// ID is the partner identifier; it must equal the `iss` claim of the
+	// partner's assertions (e.g. "studio").
+	ID string `yaml:"id"`
+	// PublicKeys are base64-encoded Ed25519 public keys (optionally
+	// "ed25519:"-prefixed). Multiple entries allow key rotation — any
+	// listed key may verify an assertion.
+	PublicKeys []string `yaml:"public_keys"`
+	// Scopes are the delegation scopes granted to this partner, e.g.
+	// ["simulate"]. A request is allowed only if its required scope is
+	// present here.
+	Scopes []string `yaml:"scopes"`
+	// Status gates the partner; only "active" partners are honored.
+	Status string `yaml:"status"`
+}
+
 // These are read from configPath
 type ConfigRaw struct {
 	EcdsaPrivateKey   string              `yaml:"ecdsa_private_key"`
@@ -290,6 +325,17 @@ type ConfigRaw struct {
 
 	// Gateway mode: per-chain worker configs. When present, aggregator runs as gateway.
 	Chains []ChainConfigRaw `yaml:"chains"`
+
+	// Partners registers delegated tenants permitted to call the simulate
+	// family on behalf of their own users. See PartnerConfig.
+	Partners []PartnerConfig `yaml:"partners"`
+
+	// PartnerAssertionAudience, when set, is the value every partner
+	// assertion's `aud` claim must contain — bind it to this gateway /
+	// environment (e.g. "avs-gateway-staging") so a captured assertion
+	// cannot be replayed against another environment. Empty disables the
+	// check (not recommended in production).
+	PartnerAssertionAudience string `yaml:"partner_assertion_audience"`
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
@@ -492,6 +538,9 @@ func NewConfig(configFilePath string) (*Config, error) {
 
 		RestRateLimitPerSecond: configRaw.RestRateLimitPerSecond,
 		RestRateLimitBurst:     configRaw.RestRateLimitBurst,
+
+		Partners:                 configRaw.Partners,
+		PartnerAssertionAudience: configRaw.PartnerAssertionAudience,
 
 		SmartWallet: &SmartWalletConfig{
 			EthRpcUrl:            configRaw.SmartWallet.EthRpcUrl,

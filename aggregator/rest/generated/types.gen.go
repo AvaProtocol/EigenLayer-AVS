@@ -21,6 +21,12 @@ const (
 	AwaitNodeTypeAwait AwaitNodeType = "await"
 )
 
+// Defines values for AwaitNodeConfigChannel.
+const (
+	Api      AwaitNodeConfigChannel = "api"
+	Telegram AwaitNodeConfigChannel = "telegram"
+)
+
 // Defines values for BalanceNodeType.
 const (
 	Balance BalanceNodeType = "balance"
@@ -300,7 +306,7 @@ type AwaitNodeConfig struct {
 	ChainEvent *EventTriggerConfig `json:"chainEvent,omitempty"`
 
 	// Channel External-signal flavor — signal channel: `telegram` or `api`.
-	Channel *string `json:"channel,omitempty"`
+	Channel *AwaitNodeConfigChannel `json:"channel,omitempty"`
 
 	// Prompt External-signal flavor — message shown to the approver.
 	Prompt *string `json:"prompt,omitempty"`
@@ -308,6 +314,9 @@ type AwaitNodeConfig struct {
 	// TimeoutSeconds Safety bound; 0 = server default (the wait is never unbounded).
 	TimeoutSeconds *int64 `json:"timeoutSeconds,omitempty"`
 }
+
+// AwaitNodeConfigChannel External-signal flavor — signal channel: `telegram` or `api`.
+type AwaitNodeConfigChannel string
 
 // BalanceNode defines model for BalanceNode.
 type BalanceNode struct {

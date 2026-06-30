@@ -771,6 +771,7 @@ components:
       properties:
         channel:
           type: string
+          enum: [telegram, api]
           description: 'External-signal flavor — signal channel: `telegram` or `api`.'
         approvers:
           type: array
