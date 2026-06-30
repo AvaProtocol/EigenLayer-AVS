@@ -9,12 +9,14 @@ Ava Protocol Automation AVS (Actively Validated Service) on EigenLayer - a task 
 ### Building and Running
 
 ```bash
-make build           # Build main binary
-make dev-build       # Build development version
-make dev-agg         # Run aggregator locally
-make dev-op          # Run operator locally
-make up              # Start docker compose stack
-make dev-live        # Live reload during development
+make build                  # Build main binary (-> out/ap)
+make build-prod             # Build production binary
+make gateway                # Run local-dev gateway (config/gateway.yaml); logs -> gateway.log
+make dev-gateway            # Same, logs -> logs/gateway.log
+make dev-operator-sepolia   # Run a Sepolia operator locally
+make dev-stack              # gateway + workers + operator together (logs/)
+make up                     # Start docker compose stack
+make dev-live               # Live reload during development
 ```
 
 ### Testing
