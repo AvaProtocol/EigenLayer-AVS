@@ -21,7 +21,8 @@ import (
 // without persisting a workflow. Used by SDK testing flows and the
 // agent-CLI verify command.
 func (s *Server) RunNode(ctx echo.Context) error {
-	user, err := s.requireUser(ctx)
+	// No-fund operation: a user JWT or a partner assertion both authorize it.
+	user, err := s.requireSimulateAuth(ctx)
 	if err != nil {
 		return err
 	}

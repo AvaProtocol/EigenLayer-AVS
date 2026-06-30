@@ -1,6 +1,7 @@
 # PLAN: Partner Tenancy — Delegated Simulate now, Fund Authority later
 
-**Status:** Decisions recorded 2026-06-30 — v1 = direct partner assertion; authKey chainId retained as-is
+**Status:** Phase 1 IMPLEMENTED 2026-06-30 — partner-delegated simulate (Ed25519 `X-Partner-Assertion`).
+Decisions: v1 = direct partner assertion; authKey chainId retained as-is
 **Owner:** Chris
 **Created:** 2026-06-30
 **Related (AVS):** `aggregator/rest/handlers_auth.go`, `aggregator/rest/middleware/jwt.go`,
@@ -195,11 +196,17 @@ Run `make storage-check` vs `origin/main` before any merge to `main`.
 
 ## 6. Phasing
 
-- **Phase 1 — URGENT: partner-delegated simulate.**
-  `Partner` registry + storage; partner client-assertion middleware; `requireSimulateAuth` either/or gate
-  on the three simulate-family handlers; per-partner rate-limit/attribution; register Studio
-  (`scopes:["simulate"]`). No proto/storage-key change. Ship and let Studio's social users preview
-  without a wallet signature.
+- **Phase 1 — URGENT: partner-delegated simulate. ✅ IMPLEMENTED 2026-06-30.**
+  Built as a **config-based** partner registry (`config.PartnerConfig`, `partners:` YAML block) rather
+  than BadgerDB — partners are a small, trusted, operator-curated set, so no storage migration / CRUD API
+  is needed for v1. Partners authenticate with a short-lived **Ed25519-signed assertion** (private_key_jwt
+  style) in the **`X-Partner-Assertion`** header, kept separate from the user `Authorization: Bearer` path.
+  `requireSimulateAuth` ([aggregator/rest/partner.go](aggregator/rest/partner.go)) is the either/or gate
+  wired into the three simulate-family handlers; it verifies signature against the partner's registered
+  key(s) (rotation-friendly), enforces partner `status: active`, requires the scope to be both
+  registry-granted and token-declared, and caps the assertion TTL (≤1h, `exp` required). Studio is the
+  first partner (`scopes: ["simulate"]`). No proto/storage-key change; no change to the user-JWT path.
+  Per-partner **rate-limiting is deferred** (logged/attributed for now) — fast follow.
 - **Phase 2 — FUTURE: attribution seam.** `Task.partner_id` proto field + `(wallet,chainId)→partner`
   registry + stamp on `CreateTask`; thread an ignored `partner_id` through the fee record call site.
 - **Phase 3 — FUTURE: per-partner billing.** Partner-keyed ledger + per-partner fee schedule + credit
