@@ -115,14 +115,40 @@ func BigLt(a *big.Int, b *big.Int) bool {
 	return a.Cmp(b) < 0
 }
 
+// ParseUnit converts a decimal string into a fixed-point integer scaled by
+// 10^decimals, matching the ethers.js parseUnits(value, decimals) convention.
+// It accepts a fractional component (e.g. ParseUnit("2621.99", 8) == 262199000000),
+// which is what task-condition expressions need to build a price threshold to
+// compare against chainlinkPrice(). A fraction with more digits than `decimals`
+// or a negative value is rejected.
 func ParseUnit(val string, decimal uint) *big.Int {
-	b, ok := ethmath.ParseBig256(val)
+	parts := strings.SplitN(val, ".", 2)
+
+	whole, ok := new(big.Int).SetString(parts[0], 10)
 	if !ok {
 		panic(fmt.Errorf("Parse error: %s", val))
 	}
+	if whole.Sign() < 0 {
+		panic(fmt.Errorf("Parse error: negative value not supported: %s", val))
+	}
 
-	r := big.NewInt(0)
-	return r.Div(b, big.NewInt(int64(decimal)))
+	scale := new(big.Int).Exp(big.NewInt(10), new(big.Int).SetUint64(uint64(decimal)), nil)
+	result := new(big.Int).Mul(whole, scale)
+
+	// Add the fractional component, right-padded to `decimals` digits.
+	if len(parts) == 2 && parts[1] != "" {
+		frac := parts[1]
+		if uint(len(frac)) > decimal {
+			panic(fmt.Errorf("Parse error: fractional part %q exceeds %d decimals in %q", frac, decimal, val))
+		}
+		fracVal, ok := new(big.Int).SetString(frac+strings.Repeat("0", int(decimal)-len(frac)), 10)
+		if !ok || fracVal.Sign() < 0 {
+			panic(fmt.Errorf("Parse error: %s", val))
+		}
+		result.Add(result, fracVal)
+	}
+
+	return result
 }
 
 func ToBigInt(val string) *big.Int {
