@@ -2650,12 +2650,19 @@ func (n *Engine) runProcessingNodeWithInputs(ctx context.Context, user *model.Us
 					return nil, fmt.Errorf("failed to list wallets for owner %s: %w", vm.TaskOwner.Hex(), err)
 				}
 				var chosenSender common.Address
-				var matchedSalt *big.Int // Track matched salt for debug logging
+				var matchedSalt *big.Int // Matched wallet salt; propagated to aa_salt so the real UserOp path derives/deploys the correct sender for non-zero salts
 				walletExists := false
 				for _, w := range resp.GetItems() {
 					if strings.EqualFold(w.GetAddress(), runnerStr) {
 						chosenSender = common.HexToAddress(w.GetAddress())
 						walletExists = true
+						// Capture the wallet's salt so a runner at salt 1-4 deploys/derives
+						// under its own salt rather than defaulting to salt 0.
+						if saltStr := w.GetSalt(); saltStr != "" {
+							if parsedSalt, ok := new(big.Int).SetString(saltStr, 10); ok {
+								matchedSalt = parsedSalt
+							}
+						}
 						break
 					}
 				}
@@ -2729,6 +2736,14 @@ func (n *Engine) runProcessingNodeWithInputs(ctx context.Context, user *model.Us
 				}
 
 				vm.AddVar("aa_sender", chosenSender.Hex())
+				// Propagate the resolved salt so the real UserOp path (aa_salt) derives
+				// and auto-deploys the runner under its own salt. Absent this, a runner
+				// at salt 1-4 would fall back to salt 0 and mismatch its initCode/sender.
+				// For the common salt:0 runner this is a no-op (big.NewInt(0) resolves
+				// identically to the default).
+				if matchedSalt != nil {
+					vm.AddVar("aa_salt", matchedSalt)
+				}
 			} else {
 				return nil, fmt.Errorf("settings must be an object for %s", nodeType)
 			}
