@@ -15,13 +15,25 @@ func TestParseUnit(t *testing.T) {
 	if got := ParseUnit("1", 8); got.Cmp(e8) != 0 { // integer scaling
 		t.Fatalf("ParseUnit(1, 8) = %s, want %s", got, e8)
 	}
-	// Over-precision must be rejected.
-	func() {
-		defer func() {
-			if recover() == nil {
-				t.Fatal("ParseUnit(1.999, 2) expected panic on over-precision")
-			}
+
+	// Malformed or out-of-range input must be rejected, not silently coerced.
+	for _, bad := range []struct {
+		val     string
+		decimal uint
+	}{
+		{"1.999", 2}, // over-precision
+		{"-0.5", 8},  // negative with a "-0" whole part
+		{"-1.5", 8},  // negative
+		{"1.+5", 8},  // malformed fraction (leading +)
+		{"1", 1000},  // decimals out of range
+	} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("ParseUnit(%q, %d) expected panic, got none", bad.val, bad.decimal)
+				}
+			}()
+			ParseUnit(bad.val, bad.decimal)
 		}()
-		ParseUnit("1.999", 2)
-	}()
+	}
 }

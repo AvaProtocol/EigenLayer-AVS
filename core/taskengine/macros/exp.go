@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"regexp"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -59,7 +60,7 @@ func readContractData(contractAddress string, data string, method string, contra
 }
 
 // QueryContract
-//const taskCondition = `cmp(chainlinkPrice("0x694AA1769357215DE4FAC081bf1f309aDC325306"), parseUnit("262199799820", 8)) > 1`
+//const taskCondition = `cmp(chainlinkPrice("0x694AA1769357215DE4FAC081bf1f309aDC325306"), parseUnit("2621.99", 8)) > 1`
 
 func chainlinkLatestRoundData(tokenPair string) *big.Int {
 	output, err := QueryContract(
@@ -115,22 +116,35 @@ func BigLt(a *big.Int, b *big.Int) bool {
 	return a.Cmp(b) < 0
 }
 
-// ParseUnit converts a decimal string into a fixed-point integer scaled by
-// 10^decimals, matching the ethers.js parseUnits(value, decimals) convention.
-// It accepts a fractional component (e.g. ParseUnit("2621.99", 8) == 262199000000),
-// which is what task-condition expressions need to build a price threshold to
-// compare against chainlinkPrice(). A fraction with more digits than `decimals`
-// or a negative value is rejected.
-func ParseUnit(val string, decimal uint) *big.Int {
-	parts := strings.SplitN(val, ".", 2)
+// parseUnitRe matches a non-negative decimal number with an optional fractional
+// part (e.g. "2621", "2621.99", "2621."). Validating the shape up front rejects
+// signs, a leading "+" in the fraction, hex, and other malformed input that
+// big.Int.SetString would otherwise silently accept. A bare ".5" (empty whole
+// part) is intentionally rejected; task thresholds are written with a leading 0.
+var parseUnitRe = regexp.MustCompile(`^[0-9]+(\.[0-9]*)?$`)
 
-	whole, ok := new(big.Int).SetString(parts[0], 10)
-	if !ok {
-		panic(fmt.Errorf("Parse error: %s", val))
+// parseUnitMaxDecimals caps 10^decimals so a user-supplied `decimal` can't force
+// the aggregator/operator to materialize a huge integer. 10^78 ≈ 2^259, beyond
+// anything on-chain needs (uint256 tops out near 10^77).
+const parseUnitMaxDecimals = 78
+
+// ParseUnit converts a non-negative decimal string into a fixed-point integer
+// scaled by 10^decimals, matching the ethers.js parseUnits(value, decimals)
+// convention. It accepts a fractional component (e.g. ParseUnit("2621.99", 8) ==
+// 262199000000), which is what task-condition expressions need to build a price
+// threshold to compare against chainlinkPrice(). Input that is not a non-negative
+// decimal, a fraction with more digits than `decimals` (over-precision), or
+// `decimals` beyond the on-chain range is rejected.
+func ParseUnit(val string, decimal uint) *big.Int {
+	if !parseUnitRe.MatchString(val) {
+		panic(fmt.Errorf("Parse error: %q is not a non-negative decimal number", val))
 	}
-	if whole.Sign() < 0 {
-		panic(fmt.Errorf("Parse error: negative value not supported: %s", val))
+	if decimal > parseUnitMaxDecimals {
+		panic(fmt.Errorf("Parse error: decimals %d out of range (max %d)", decimal, parseUnitMaxDecimals))
 	}
+
+	parts := strings.SplitN(val, ".", 2)
+	whole, _ := new(big.Int).SetString(parts[0], 10) // regex guarantees a valid non-negative integer
 
 	scale := new(big.Int).Exp(big.NewInt(10), new(big.Int).SetUint64(uint64(decimal)), nil)
 	result := new(big.Int).Mul(whole, scale)
@@ -141,10 +155,7 @@ func ParseUnit(val string, decimal uint) *big.Int {
 		if uint(len(frac)) > decimal {
 			panic(fmt.Errorf("Parse error: fractional part %q exceeds %d decimals in %q", frac, decimal, val))
 		}
-		fracVal, ok := new(big.Int).SetString(frac+strings.Repeat("0", int(decimal)-len(frac)), 10)
-		if !ok || fracVal.Sign() < 0 {
-			panic(fmt.Errorf("Parse error: %s", val))
-		}
+		fracVal, _ := new(big.Int).SetString(frac+strings.Repeat("0", int(decimal)-len(frac)), 10)
 		result.Add(result, fracVal)
 	}
 
