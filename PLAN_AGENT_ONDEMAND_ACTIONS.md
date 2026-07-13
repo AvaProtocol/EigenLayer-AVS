@@ -64,6 +64,18 @@ The "gap of the preview→confirm→execute contract" is exactly the set of dive
 | G6 | Runner **salt not propagated** on the `nodes:run` real path (validates salt 0–4, sets only `aa_sender`) | Correctness (edge) | **P2** | [run_node_immediately.go:2731](core/taskengine/run_node_immediately.go#L2731) |
 | G7 | **No execution fee** wired on `nodes:run` (nil `executionFeeWei`) | Product/pricing | **P2 — decision** | (fee set only in `executor.go`) |
 
+### Implementation status (2026-07-12, branch `feat/ondemand-single-node-execution`)
+
+| Gap | Status | Commit |
+| --- | --- | --- |
+| G1 native value passthrough | ✅ **done + tested** | `fix(taskengine): correct single-node contractWrite real execution` |
+| G2 typed identity (userOpHash + normalized status) | ✅ **done + tested** (via receipt fields, no proto change) | same |
+| G3 pending ≠ failure | ✅ **done + tested** | same |
+| G6 runner salt propagation | ✅ **done** | same |
+| G5 idempotency | ✅ **done + tested** (Idempotency-Key header, no proto change) | `feat(taskengine): idempotent nodes:run via Idempotency-Key header` |
+| G4 atomic batching | ⛔ **deferred** — shares the Execute loop with deployed workflows and interleaves with the reimbursement wrapper; restrict chat execution to single-call actions until revisited | — |
+| G7 fee posture | ✅ **decided: fee-free for v1** (confirmed 2026-07-12); monetization revisited separately (analysis below) | — |
+
 ### G1 — Native `value` is dropped on execute (P0, breaks the example)
 
 The real path packs the smart-wallet call with a **hardcoded zero value**:
@@ -94,7 +106,9 @@ A mined real result carries a `Receipt` **map** with `transactionHash` and the s
 `SendUserOp` blocks up to ~2 minutes polling for the receipt and can return a **UserOp with no receipt** (still pending). In that branch the result is `status:"pending"`, `transactionHash:"pending"` ([vm_runner_contract_write.go:1022-1030](core/taskengine/vm_runner_contract_write.go#L1022)), and success is computed as `receipt != nil && receipt.Status == 1 && userOpInnerSuccess` ([:1087](core/taskengine/vm_runner_contract_write.go#L1087)) → **`success=false`**. So a swap that *will* land but hasn't yet is reported identically to a swap that *failed*. And because `nodes:run` is stateless, there is **no way to re-poll** that UserOp's status afterward.
 **Fix**: (a) surface a distinct `pending` status in the typed result (G2) so studio doesn't render pending as failure; (b) provide a way to resolve a pending UserOp — either a lightweight status lookup keyed by `userOpHash`, or have studio poll chain/bundler with the returned `userOpHash`. Minimum viable: make `pending` unambiguous in the response.
 
-### G4 — Non-atomic approve+swap (P1, reliability)
+### G4 — Non-atomic approve+swap (P1, reliability) — DEFERRED
+
+> **Decision: deferred.** The `Execute` loop is shared with deployed workflows and the fix interleaves with the reimbursement wrapper (which decodes a *single* `execute`, not a batch), so this is a behavior change with real blast radius, not a local fix. Until it lands, **restrict chat execution to single-call actions** (do the `approve` as its own confirmed action, or use tokens already approved). Design notes retained below.
 
 `Execute` loops over `methodCalls` ([vm_runner_contract_write.go:1526](core/taskengine/vm_runner_contract_write.go#L1526)); each real method calls `executeRealUserOpTransaction` independently ([:643](core/taskengine/vm_runner_contract_write.go#L643)) → **one UserOp per method**, and the loop **does not stop on a failed method** ("Don't fail the entire execution for individual method failures", [:1729](core/taskengine/vm_runner_contract_write.go#L1729)). So approve+swap = two sequential UserOps; if approve lands and swap fails, `computeWriteStepSuccess` reports the *step* as failed while the **approve is already on-chain** — a partial side effect the preview (single atomic Tenderly sim with allowance injection) never showed. This is both a fidelity gap and a footgun.
 **Fix**: when a node has multiple `methodCalls` and `is_simulated=false`, batch them into **one `executeBatch` UserOp** via the existing `aa.PackExecuteBatch` / `PackExecuteBatchWithValues` ([core/chainio/aa/aa.go:206](core/chainio/aa/aa.go#L206)) — atomic, one gas estimate, one signature. Keep per-method sequential as a fallback. Until this lands, restrict chat execution to single-call actions (or accept the approve-then-swap risk with a guard).
@@ -108,9 +122,19 @@ A mined real result carries a `Receipt` **map** with `transactionHash` and the s
 The run-node path validates the runner across **salts 0–4** and computes `matchedSalt`, but then sets only `aa_sender` and **discards the salt** ([run_node_immediately.go:2731](core/taskengine/run_node_immediately.go#L2731)) — `aa_salt` is never set on this path (it *is* set on the deployed-task path, [executor.go:491](core/taskengine/executor.go#L491), and in `runContractWrite` from `vm.task`, [vm.go:1658](core/taskengine/vm.go#L1658), but `vm.task` is nil for `nodes:run`). The real send reads `aa_salt` ([vm_runner_contract_write.go:756](core/taskengine/vm_runner_contract_write.go#L756)) and, absent it, defaults to salt 0. For the overwhelmingly common **salt:0** runner this is fine; for a runner at salt 1–4 the sender override and the auto-deploy salt/initCode diverge → wrong/failed deploy.
 **Fix**: carry `matchedSalt` into `aa_salt` on the `nodes:run` path (mirror `executor.go`). Cheap; removes a latent multi-wallet bug.
 
-### G7 — Execution fee posture (P2, decision not bug)
+### G7 — Execution fee posture (P2, decision — resolved: fee-free for v1)
 
-The deployed-task executor adds a platform `executionFeeWei` batch transfer ([executor.go:356-368]); the `nodes:run` path leaves it nil, so **on-demand actions are gas-sponsored but fee-free** today. Decide explicitly: charge a fee on on-demand executes (wire it like the executor) or document them as free. Pure product/pricing.
+The deployed-task executor adds a platform `executionFeeWei` batch transfer ([executor.go:356-368]); the `nodes:run` path leaves it nil, so **on-demand actions are gas-sponsored but fee-free** today.
+
+**Decision for v1: keep on-demand executes fee-free.** Ship the capability; don't couple monetization to correctness. Monetization is a separate, deliberate design. The analysis that informs that later design:
+
+**Does batching a fee into the UserOp add significant gas?** No — *if batched*, which is already how `wrapWithReimbursement` works (it appends `executionFeeWei` as an extra `executeBatchWithValues` entry, `builder.go:499-503`). The marginal cost of a fee is one extra batch op = a value-transfer CALL to an existing recipient (~9,000 gas) + the extra batch entry's calldata (~3 words ≈ 1,500 gas) + minor loop/decode overhead ≈ **~10–15k gas**. Against a Uniswap `exactInputSingle` (~120–180k) inside a full UserOp (~250–400k with EntryPoint verification), that's **~3–6%**. The expensive alternative is a *separate* fee UserOp — a whole extra EntryPoint verification + preVerificationGas + base ≈ 60–100k+ gas. So **batching is the efficient path**; a separate fee tx is not.
+
+**Would charging on every tx raise user cost?** Yes, two components: (1) the fee amount itself (revenue, a direct cost), and (2) the ~10–15k marginal gas — borne by the user because the paymaster sponsors then the wallet reimburses. For **micro trades** a *flat* per-tx fee (+ the fixed gas overhead) is a large % of a small swap; a **bps fee** scales with size and is the better "charge on every tx" shape. Batched into the existing reimbursement op, a bps fee is the lowest-friction option and needs no new signature.
+
+**Coinbase x402 as a micro-fee rail?** x402 revives HTTP 402: the client hits an endpoint, gets payment requirements, pays with stablecoin (USDC, typically Base) by signing an EIP-3009 `transferWithAuthorization`, retries with an `X-PAYMENT` header, and a *facilitator* verifies + settles on-chain. The **payer pays no gas directly** (the facilitator submits settlement; USDC transfer gas on Base is sub-cent), so it's effectively gasless-for-payer and purpose-built for **agent/API micropayments** — conceptually a good fit for "charge $X per chat action," stable-denominated and decoupled from the swap's gas.
+- **Friction against our model:** x402 reintroduces a **user signature** (the EIP-3009 authorization), which conflicts with the delegated model where the aggregator signs and the user doesn't sign per-tx — unless the fund-authorization/session-key layer also authorizes the x402 payment. It's also Base/USDC-centric today and adds a facilitator dependency.
+- **Recommendation:** for a wallet/ETH-denominated fee, **batch a bps fee into the existing reimbursement UserOp** (cheap, no new signature, works today). Treat **x402 as a separate, deliberate rail** specifically for the agent/chat surface if/when per-action USDC micropayments are desired — its own project, not part of this backend correctness work.
 
 ---
 
@@ -130,14 +154,14 @@ The deployed-task executor adds a platform `executionFeeWei` batch transfer ([ex
 
 ---
 
-## 6. Suggested backend sequencing
+## 6. Backend sequencing (status)
 
-1. **G1 (value passthrough)** + **G2 (typed result incl. return value)** + **G3 (pending status)** — the P0 set that makes a single real swap *work and be reconcilable*. Ship together; they're the whole "execute returns something studio can trust."
-2. **G4 (atomic batch)** — makes approve+swap a reliable market order.
-3. **G5 (idempotency)** — safety before chat drives real executes at volume.
-4. **G6 (salt)**, **G7 (fee decision)** — cleanup/decisions.
+1. ✅ **G1 + G2 + G3 + G6** — shipped: a single real execute is correct (value forwarded), reconcilable (userOpHash + normalized `confirmed`/`pending`/`failed`), pending is not failure, and non-zero-salt runners resolve. (commit `fix(taskengine): correct single-node contractWrite real execution`)
+2. ✅ **G5 (idempotency)** — shipped: `Idempotency-Key` header dedupes retries/double-clicks. (commit `feat(taskengine): idempotent nodes:run via Idempotency-Key header`)
+3. ⛔ **G4 (atomic batch)** — deferred (shared-loop blast radius). Chat execution restricted to single-call actions meanwhile.
+4. ✅ **G7 (fee)** — decided fee-free for v1 (confirmed); monetization is a separate design (see G7 analysis).
 
-Each is independently shippable; **G1 alone is a small, standalone correctness fix worth landing regardless.** Deferred (later hardening): server-side spend/fund-authorization policy.
+Deferred (later hardening): server-side spend/fund-authorization policy; atomic multi-call batching (G4); fee monetization (G7).
 
 ---
 
