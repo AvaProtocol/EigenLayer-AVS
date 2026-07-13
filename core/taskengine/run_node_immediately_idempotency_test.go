@@ -72,6 +72,16 @@ func TestRunNodeImmediatelyIdempotency(t *testing.T) {
 	resp5, err := engine.RunNodeImmediatelyRPCIdempotent(ctx, otherUser, customCodeReq("return 'second'"), "confirm-key-1")
 	require.NoError(t, err)
 	assert.False(t, proto.Equal(resp1, resp5), "idempotency cache must be scoped per authenticated subject")
+
+	// Zero-address subject (e.g. a partner-assertion simulate caller) must NOT
+	// dedupe — otherwise two indistinguishable callers sharing a key would
+	// cross-replay. Same key, different nodes → the second still executes.
+	zeroUser := &model.User{} // Address is the zero value
+	zresp1, err := engine.RunNodeImmediatelyRPCIdempotent(ctx, zeroUser, customCodeReq("return 'first'"), "shared-key")
+	require.NoError(t, err)
+	zresp2, err := engine.RunNodeImmediatelyRPCIdempotent(ctx, zeroUser, customCodeReq("return 'second'"), "shared-key")
+	require.NoError(t, err)
+	assert.False(t, proto.Equal(zresp1, zresp2), "a zero-address subject must not dedupe (avoids cross-caller replay)")
 }
 
 // The cache key is deterministic and scoped, and entries older than the TTL are

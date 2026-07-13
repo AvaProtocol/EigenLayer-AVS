@@ -309,7 +309,7 @@ type Engine struct {
 
 	// Collapses concurrent nodes:run requests that carry the same Idempotency-Key
 	// so a retried/double-clicked Confirm can't broadcast a second UserOp. Works
-	// with a persistent TTL cache (see runNodeImmediatelyIdempotent) that also
+	// with a persistent TTL cache (see RunNodeImmediatelyRPCIdempotent) that also
 	// dedupes sequential retries after the first request has completed.
 	idempotencyGroup singleflight.Group
 }

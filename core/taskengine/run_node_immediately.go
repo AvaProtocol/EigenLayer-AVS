@@ -3038,15 +3038,15 @@ func idempotencyCacheKey(subject, clientKey string) []byte {
 // the caller may safely retry. Polling a pending UserOp's final status is a
 // separate concern — reuse of the same key returns the cached pending result.
 func (n *Engine) RunNodeImmediatelyRPCIdempotent(ctx context.Context, user *model.User, req *avsproto.RunNodeWithInputsReq, idempotencyKey string) (*avsproto.RunNodeWithInputsResp, error) {
-	if idempotencyKey == "" {
+	// Idempotency needs a distinct authenticated subject to scope the cache key.
+	// A partner-assertion (simulate-only) caller can resolve to the zero address;
+	// deduping those would let one caller's key cross-replay another's result, so
+	// skip idempotency when there is no real subject. Safe by construction: real
+	// executes (fund-moving) always carry a non-zero authenticated owner.
+	if idempotencyKey == "" || user == nil || user.Address == (common.Address{}) {
 		return n.RunNodeImmediatelyRPCWithContext(ctx, user, req)
 	}
-
-	subject := ""
-	if user != nil {
-		subject = user.Address.Hex()
-	}
-	cacheKey := idempotencyCacheKey(subject, idempotencyKey)
+	cacheKey := idempotencyCacheKey(user.Address.Hex(), idempotencyKey)
 
 	// Fast path: a prior completed result still within the TTL window.
 	if resp := n.readIdempotentResponse(cacheKey); resp != nil {
@@ -3081,15 +3081,25 @@ func (n *Engine) readIdempotentResponse(cacheKey []byte) *avsproto.RunNodeWithIn
 		return nil
 	}
 	raw, err := n.db.GetKey(cacheKey)
-	if err != nil || len(raw) < 8 {
+	if err != nil {
+		return nil // not found
+	}
+	if len(raw) < 8 {
+		_ = n.db.Delete(cacheKey) // corrupt/short entry — drop it
 		return nil
 	}
 	ts := int64(binary.BigEndian.Uint64(raw[:8]))
 	if time.Since(time.Unix(0, ts)) > idempotencyTTL {
-		return nil // expired; a fresh request is allowed to re-execute
+		// Expired: best-effort delete so stale keys don't accumulate unbounded,
+		// then let the fresh request re-execute.
+		_ = n.db.Delete(cacheKey)
+		return nil
 	}
 	resp := &avsproto.RunNodeWithInputsResp{}
 	if err := proto.Unmarshal(raw[8:], resp); err != nil {
+		// Corrupt payload: drop it so the next request re-executes and repopulates
+		// cleanly instead of failing to decode forever.
+		_ = n.db.Delete(cacheKey)
 		return nil
 	}
 	return resp
