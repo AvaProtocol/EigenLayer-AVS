@@ -127,8 +127,21 @@ func runNodeRespToOpenAPI(in *avsproto.RunNodeWithInputsResp) generated.RunNodeR
 		out.ErrorCode = &code
 	}
 	if md := in.GetMetadata(); md != nil {
-		if v, ok := md.AsInterface().(map[string]interface{}); ok && v != nil {
-			out.Metadata = &v
+		switch v := md.AsInterface().(type) {
+		case map[string]interface{}:
+			if v != nil {
+				out.Metadata = &v
+			}
+		case []interface{}:
+			// Some node types (notably contractWrite) produce a per-method
+			// results array as metadata. RunNodeResponse.metadata is an object,
+			// so a bare array was previously dropped here — taking the per-method
+			// receipts (executionStatus, userOpHash, transactionHash) with it.
+			// Wrap it under "results" so those actually reach the client.
+			if len(v) > 0 {
+				wrapped := map[string]interface{}{"results": v}
+				out.Metadata = &wrapped
+			}
 		}
 	}
 	if ec := in.GetExecutionContext(); ec != nil {
