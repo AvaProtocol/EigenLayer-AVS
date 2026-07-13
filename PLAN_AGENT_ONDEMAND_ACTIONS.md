@@ -74,7 +74,7 @@ The "gap of the preview→confirm→execute contract" is exactly the set of dive
 | G6 runner salt propagation | ✅ **done** | same |
 | G5 idempotency | ✅ **done + tested** (Idempotency-Key header, no proto change) | `feat(taskengine): idempotent nodes:run via Idempotency-Key header` |
 | G4 atomic batching | ⛔ **deferred** — shares the Execute loop with deployed workflows and interleaves with the reimbursement wrapper; restrict chat execution to single-call actions until revisited | — |
-| G7 fee posture | 🟡 **fee-free for v1** (analysis below); revisit monetization separately | — |
+| G7 fee posture | ✅ **decided: fee-free for v1** (confirmed 2026-07-12); monetization revisited separately (analysis below) | — |
 
 ### G1 — Native `value` is dropped on execute (P0, breaks the example)
 
@@ -159,7 +159,7 @@ The deployed-task executor adds a platform `executionFeeWei` batch transfer ([ex
 1. ✅ **G1 + G2 + G3 + G6** — shipped: a single real execute is correct (value forwarded), reconcilable (userOpHash + normalized `confirmed`/`pending`/`failed`), pending is not failure, and non-zero-salt runners resolve. (commit `fix(taskengine): correct single-node contractWrite real execution`)
 2. ✅ **G5 (idempotency)** — shipped: `Idempotency-Key` header dedupes retries/double-clicks. (commit `feat(taskengine): idempotent nodes:run via Idempotency-Key header`)
 3. ⛔ **G4 (atomic batch)** — deferred (shared-loop blast radius). Chat execution restricted to single-call actions meanwhile.
-4. 🟡 **G7 (fee)** — fee-free for v1; monetization is a separate design (see G7 analysis).
+4. ✅ **G7 (fee)** — decided fee-free for v1 (confirmed); monetization is a separate design (see G7 analysis).
 
 Deferred (later hardening): server-side spend/fund-authorization policy; atomic multi-call batching (G4); fee monetization (G7).
 
