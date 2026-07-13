@@ -30,6 +30,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/oklog/ulid/v2"
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -305,6 +306,12 @@ type Engine struct {
 	// fixed set of mutexes bounds memory — the same executionID always maps to the
 	// same shard, so concurrent resumes of one execution serialize. See executionMutex.
 	executionMutexes [executionLockShards]sync.Mutex
+
+	// Collapses concurrent nodes:run requests that carry the same Idempotency-Key
+	// so a retried/double-clicked Confirm can't broadcast a second UserOp. Works
+	// with a persistent TTL cache (see runNodeImmediatelyIdempotent) that also
+	// dedupes sequential retries after the first request has completed.
+	idempotencyGroup singleflight.Group
 }
 
 // executionLockShards bounds the per-execution resume locks to a fixed set of mutexes.

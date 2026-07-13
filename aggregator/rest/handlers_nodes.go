@@ -59,7 +59,11 @@ func (s *Server) RunNode(ctx echo.Context) error {
 		req.Erc20Overrides = openAPIERC20OverridesToProto(*body.Erc20Overrides)
 	}
 
-	resp, err := s.engine.RunNodeImmediatelyRPCWithContext(ctx.Request().Context(), user, req)
+	// A caller-supplied Idempotency-Key (Stripe-style header) makes a retried or
+	// double-submitted execute safe: the same key returns the first result instead
+	// of broadcasting a second UserOp. Absent the header, behavior is unchanged.
+	idempotencyKey := ctx.Request().Header.Get("Idempotency-Key")
+	resp, err := s.engine.RunNodeImmediatelyRPCIdempotent(ctx.Request().Context(), user, req, idempotencyKey)
 	if err != nil {
 		return err
 	}

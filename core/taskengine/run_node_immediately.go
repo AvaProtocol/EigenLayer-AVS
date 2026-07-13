@@ -2,6 +2,9 @@ package taskengine
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -18,6 +21,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -3003,6 +3007,110 @@ func (n *Engine) detectNodeTypeFromStep(step *avsproto.Execution_Step) string {
 // RunNodeImmediatelyRPC handles the RPC interface for immediate node execution
 func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWithInputsReq) (*avsproto.RunNodeWithInputsResp, error) {
 	return n.RunNodeImmediatelyRPCWithContext(context.Background(), user, req)
+}
+
+// idempotencyTTL bounds how long a completed nodes:run result stays replayable
+// under the same Idempotency-Key. Sized to comfortably cover a Confirm retry (a
+// real UserOp send blocks up to ~2 min) without pinning results indefinitely.
+const idempotencyTTL = 15 * time.Minute
+
+// idempotencyCachePrefix namespaces persisted nodes:run responses in storage.
+const idempotencyCachePrefix = "idem:noderun:"
+
+// idempotencyCacheKey derives a bounded, collision-resistant storage key from the
+// authenticated subject and the client-supplied key. Scoping by subject prevents
+// one caller's idempotency key from colliding with another's.
+func idempotencyCacheKey(subject, clientKey string) []byte {
+	sum := sha256.Sum256([]byte(subject + "\x00" + clientKey))
+	return []byte(idempotencyCachePrefix + hex.EncodeToString(sum[:]))
+}
+
+// RunNodeImmediatelyRPCIdempotent runs a single node, deduplicating by
+// idempotencyKey so a retried or double-submitted request (e.g. a chat Confirm)
+// does not execute — and broadcast — a second UserOp. An empty key preserves the
+// plain non-idempotent behavior.
+//
+// Two layers cooperate: singleflight collapses requests that are in flight
+// concurrently (a double-click), and a persistent TTL cache returns the prior
+// result for a request that arrives after the first has completed (a retry).
+// Only a definitive response (err == nil, which includes an on-chain failure or
+// a still-pending UserOp) is cached; a transport/engine error caches nothing so
+// the caller may safely retry. Polling a pending UserOp's final status is a
+// separate concern — reuse of the same key returns the cached pending result.
+func (n *Engine) RunNodeImmediatelyRPCIdempotent(ctx context.Context, user *model.User, req *avsproto.RunNodeWithInputsReq, idempotencyKey string) (*avsproto.RunNodeWithInputsResp, error) {
+	if idempotencyKey == "" {
+		return n.RunNodeImmediatelyRPCWithContext(ctx, user, req)
+	}
+
+	subject := ""
+	if user != nil {
+		subject = user.Address.Hex()
+	}
+	cacheKey := idempotencyCacheKey(subject, idempotencyKey)
+
+	// Fast path: a prior completed result still within the TTL window.
+	if resp := n.readIdempotentResponse(cacheKey); resp != nil {
+		return resp, nil
+	}
+
+	// Collapse concurrent duplicates: only the singleflight leader executes.
+	v, err, _ := n.idempotencyGroup.Do(string(cacheKey), func() (interface{}, error) {
+		// Re-check under the leader in case a racing request completed and cached
+		// between our fast-path miss and acquiring the singleflight slot.
+		if resp := n.readIdempotentResponse(cacheKey); resp != nil {
+			return resp, nil
+		}
+		resp, runErr := n.RunNodeImmediatelyRPCWithContext(ctx, user, req)
+		if runErr != nil {
+			return nil, runErr
+		}
+		n.writeIdempotentResponse(cacheKey, resp)
+		return resp, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	resp, _ := v.(*avsproto.RunNodeWithInputsResp)
+	return resp, nil
+}
+
+// readIdempotentResponse returns a cached response if one exists and is within
+// the TTL; otherwise nil. Stored as [8-byte big-endian unix-nano ts][proto bytes].
+func (n *Engine) readIdempotentResponse(cacheKey []byte) *avsproto.RunNodeWithInputsResp {
+	if n.db == nil {
+		return nil
+	}
+	raw, err := n.db.GetKey(cacheKey)
+	if err != nil || len(raw) < 8 {
+		return nil
+	}
+	ts := int64(binary.BigEndian.Uint64(raw[:8]))
+	if time.Since(time.Unix(0, ts)) > idempotencyTTL {
+		return nil // expired; a fresh request is allowed to re-execute
+	}
+	resp := &avsproto.RunNodeWithInputsResp{}
+	if err := proto.Unmarshal(raw[8:], resp); err != nil {
+		return nil
+	}
+	return resp
+}
+
+// writeIdempotentResponse persists a completed response for TTL-bounded replay.
+// Best-effort: a store failure only means a later retry re-executes.
+func (n *Engine) writeIdempotentResponse(cacheKey []byte, resp *avsproto.RunNodeWithInputsResp) {
+	if n.db == nil || resp == nil {
+		return
+	}
+	payload, err := proto.Marshal(resp)
+	if err != nil {
+		return
+	}
+	buf := make([]byte, 8+len(payload))
+	binary.BigEndian.PutUint64(buf[:8], uint64(time.Now().UnixNano()))
+	copy(buf[8:], payload)
+	if err := n.db.Set(cacheKey, buf); err != nil && n.logger != nil {
+		n.logger.Warn("RunNodeImmediately: failed to persist idempotent response", "error", err)
+	}
 }
 
 // RunNodeImmediatelyRPCWithContext is RunNodeImmediatelyRPC with a
