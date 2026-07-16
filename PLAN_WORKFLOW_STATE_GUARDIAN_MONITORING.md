@@ -297,7 +297,10 @@ gateway facts behind them (all verified against current code):
     volatile rules (flag sets, thresholds, trust overrides) at runtime and a single gateway-config
     change propagates to **all** deployed instances on next run — no re-deploy, no state loss. (Note:
     only `macros.secrets` currently reaches `apContext.configVars`; either place the ruleset there or
-    add `macros.vars` injection.)
+    add `macros.vars` injection.) **It must ALWAYS be set** (even to `{}`): verified live that an
+    unresolved `{{...}}` inside a `customCode` `source` hard-fails the node (`could not resolve
+    variable apContext.configVars.guardian_ruleset in source`), so this is required guardian setup,
+    not an optional value a JS fallback can cover.
 
   A rare **structural** (interpreter-shape) change is handled by **re-creating** the workflow — the new
   task's first run is a **silent seed** (compute findings, write all `ntfy:` markers, send nothing) so
