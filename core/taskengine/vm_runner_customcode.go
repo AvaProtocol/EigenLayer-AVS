@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,15 +31,15 @@ import (
 // within one run without mutating real state. Bind this AFTER the step vars so a node
 // accidentally named "state" can't shadow it.
 func installStateBinding(jsvm *goja.Runtime, vm *VM) {
+	if vm == nil {
+		return
+	}
 	obj := jsvm.NewObject()
 
-	taskID := ""
-	if vm != nil {
-		taskID = vm.GetTaskId()
-	}
-	// scratch-only when we must not (or cannot) persist.
-	scratchOnly := vm == nil || vm.db == nil || taskID == "" || vm.IsSimulation
-	scratch := map[string][]byte{}
+	taskID := vm.GetTaskId()
+	// scratch-only when we must not (or cannot) persist. The scratch lives on the VM
+	// (vm.scratch*), so all customCode steps of one run share it.
+	scratchOnly := vm.db == nil || taskID == "" || vm.IsSimulation
 
 	obj.Set("get", func(key string) interface{} {
 		if key == "" {
@@ -46,7 +47,7 @@ func installStateBinding(jsvm *goja.Runtime, vm *VM) {
 		}
 		var raw []byte
 		if scratchOnly {
-			raw = scratch[key]
+			raw = vm.scratchGet(key)
 		} else if b, err := vm.db.GetKey(WorkflowStateKey(taskID, key)); err == nil {
 			raw = b
 		}
@@ -69,7 +70,7 @@ func installStateBinding(jsvm *goja.Runtime, vm *VM) {
 			return
 		}
 		if scratchOnly {
-			scratch[key] = encoded
+			vm.scratchSet(key, encoded)
 			return
 		}
 		if setErr := vm.db.Set(WorkflowStateKey(taskID, key), encoded); setErr != nil && vm.logger != nil {
@@ -78,23 +79,23 @@ func installStateBinding(jsvm *goja.Runtime, vm *VM) {
 	})
 
 	obj.Set("list", func(prefix string) []string {
-		out := []string{}
+		var out []string
 		if scratchOnly {
-			for k := range scratch {
-				if strings.HasPrefix(k, prefix) {
-					out = append(out, k)
-				}
+			out = vm.scratchList(prefix)
+		} else {
+			full := string(WorkflowStatePrefix(taskID))
+			keys, err := vm.db.ListKeys(full + prefix)
+			if err != nil {
+				return []string{}
 			}
-			return out
+			out = make([]string, 0, len(keys))
+			for _, k := range keys {
+				out = append(out, strings.TrimPrefix(k, full))
+			}
 		}
-		full := string(WorkflowStatePrefix(taskID))
-		keys, err := vm.db.ListKeys(full + prefix)
-		if err != nil {
-			return out
-		}
-		for _, k := range keys {
-			out = append(out, strings.TrimPrefix(k, full))
-		}
+		// Deterministic order regardless of backing store (Badger iterates sorted;
+		// the scratch map does not) so simulation and real runs agree.
+		sort.Strings(out)
 		return out
 	})
 

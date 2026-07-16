@@ -580,7 +580,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	// credential never lives in the workflow JSON. GoPlus first; on "" (keys unset or
 	// mint failed) we send no Authorization header — GoPlus still answers keyless.
 	if restAuthProvider(node) == "goplus" {
-		if token := goplusAuthHeader(); token != "" {
+		if token := goplusTokenProvider(); token != "" {
 			processedHeaders["Authorization"] = token
 			if r.vm.logger != nil {
 				r.vm.logger.Debug("REST: attached GoPlus session token (authed)", "stepID", stepID)
@@ -909,11 +909,21 @@ func restAuthProvider(node *avsproto.RestAPINode) string {
 	return strings.ToLower(strings.TrimSpace(provider))
 }
 
+// goplusTokenProvider is the seam the REST runner calls to obtain a GoPlus
+// Authorization header value; overridable in tests. Returns "" for keyless.
+var goplusTokenProvider = goplusAuthHeader
+
+// goplusHTTPClient bounds the token-mint call so a slow/hung GoPlus endpoint
+// cannot block REST node execution indefinitely.
+var goplusHTTPClient = &http.Client{Timeout: 15 * time.Second}
+
 // goplusTokenCache holds the module-cached GoPlus session token, refreshed shortly
-// before expiry. The token value already includes the "Bearer " prefix GoPlus attaches.
+// before expiry. Keyed by the app_key it was minted for, so a rotated key never
+// reuses a stale token. The token value already includes the "Bearer " prefix.
 var goplusTokenCache struct {
 	sync.RWMutex
 	token   string
+	appKey  string
 	expires time.Time
 }
 
@@ -930,7 +940,7 @@ func goplusAuthHeader() string {
 	}
 
 	goplusTokenCache.RLock()
-	if goplusTokenCache.token != "" && time.Until(goplusTokenCache.expires) > 60*time.Second {
+	if goplusTokenCache.token != "" && goplusTokenCache.appKey == appKey && time.Until(goplusTokenCache.expires) > 60*time.Second {
 		token := goplusTokenCache.token
 		goplusTokenCache.RUnlock()
 		return token
@@ -939,8 +949,8 @@ func goplusAuthHeader() string {
 
 	goplusTokenCache.Lock()
 	defer goplusTokenCache.Unlock()
-	// Re-check under the write lock (another goroutine may have refreshed).
-	if goplusTokenCache.token != "" && time.Until(goplusTokenCache.expires) > 60*time.Second {
+	// Re-check under the write lock (another goroutine may have refreshed for this key).
+	if goplusTokenCache.token != "" && goplusTokenCache.appKey == appKey && time.Until(goplusTokenCache.expires) > 60*time.Second {
 		return goplusTokenCache.token
 	}
 
@@ -951,11 +961,19 @@ func goplusAuthHeader() string {
 		"sign":    hex.EncodeToString(sum[:]),
 		"time":    now,
 	})
-	resp, err := http.Post("https://api.gopluslabs.io/api/v1/token", "application/json", bytes.NewReader(reqBody))
+	req, err := http.NewRequest(http.MethodPost, "https://api.gopluslabs.io/api/v1/token", bytes.NewReader(reqBody))
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := goplusHTTPClient.Do(req)
 	if err != nil {
 		return ""
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ""
+	}
 	var parsed struct {
 		Code   int `json:"code"`
 		Result struct {
@@ -966,9 +984,16 @@ func goplusAuthHeader() string {
 	if decodeErr := json.NewDecoder(resp.Body).Decode(&parsed); decodeErr != nil || parsed.Code != 1 || parsed.Result.AccessToken == "" {
 		return ""
 	}
-	goplusTokenCache.token = parsed.Result.AccessToken
+	// GoPlus returns the token already prefixed with "Bearer "; normalize defensively
+	// so a change on their side can't produce an invalid Authorization header.
+	token := parsed.Result.AccessToken
+	if !strings.HasPrefix(token, "Bearer ") {
+		token = "Bearer " + token
+	}
+	goplusTokenCache.token = token
+	goplusTokenCache.appKey = appKey
 	goplusTokenCache.expires = time.Now().Add(time.Duration(parsed.Result.ExpiresIn) * time.Second)
-	return parsed.Result.AccessToken
+	return token
 }
 
 // escapeJSONString properly escapes a string for use within JSON

@@ -4612,6 +4612,8 @@ func (n *Engine) DeleteWorkflowByUser(user *model.User, taskID string) (*avsprot
 				n.logger.Warn("failed to delete workflow state key", "key", k, "error", delErr)
 			}
 		}
+	} else {
+		n.logger.Warn("failed to list workflow state keys for cascade delete; state may be orphaned", "task_id", taskID, "error", listErr)
 	}
 
 	n.logger.Info("📢 Starting operator notifications", "task_id", taskID)
