@@ -284,5 +284,47 @@ re-sends. Exactly-once preserved without an explicit release.
 
 ---
 
+## 9. Client-review resolutions (A–D) — gateway-side commitments
+
+The studio client-side review of the composed workflow surfaced four items. Resolutions, and the
+gateway facts behind them (all verified against current code):
+
+- **A — Logic-freeze / central update.** Confirmed: there is **no in-place workflow update** today
+  (`handlers_workflows.go` exposes only create/get/delete/pause/resume; editing a node's `customCode`
+  means delete+recreate → new `taskId` → lost `wfstate`). Two gateway actions:
+  1. **Expose a `guardian_ruleset` (and, generally, feature-ruleset) configVar** so a workflow can read
+     volatile rules (flag sets, thresholds, trust overrides) at runtime and a single gateway-config
+     change propagates to **all** deployed instances on next run — no re-deploy, no state loss. (Note:
+     only `macros.secrets` currently reaches `apContext.configVars`; either place the ruleset there or
+     add `macros.vars` injection.)
+  2. **Add an in-place `UpdateWorkflow`** (edit node config, **same `taskId`, preserve `wfstate`).
+     Without it, any change to the frozen interpreter shape is a fleet re-deploy + state migration. This
+     is now the strongest driver for the feature — track it as its own item.
+- **B — Read-only deploy auth.** Confirmed: `CreateWorkflow` requires a user JWT (EIP-191 signature);
+  partner assertion is rejected for create; **no** fund-moving-vs-read-only distinction exists. The
+  ownership gate is a pure DB check, so a **counterfactual (undeployed) runner is accepted** for a
+  read-only workflow. **Gateway decision to make:** allow the **read-only / no-runner-fund class to be
+  created via `X-Partner-Assertion` (or a managed signer)** so studio can enroll social/Telegram-only
+  users with zero user signature. Low risk (moves no funds; worst case is unwanted notifications). Until
+  decided, studio uses a one-time web-sign hand-off (one signature ever).
+- **C — Claim-once semantics.** Confirmed: executions are **serialized per task** (single FIFO worker,
+  no overlap) and **at-most-once with NO retry** (`apqueue/worker.go` marks failed and drops;
+  `Recover()` is a no-op). Therefore **mark-after-send (at-least-once) is the correct design for a
+  security monitor** — never miss a real flag; a rare duplicate (send ok → mark fails → re-send next
+  tick) is the safe direction. Pre-claim (`setIfAbsent`) would convert a send failure into a permanent
+  miss and is **not** the default. `state` binding for v1 = `get/set/list` (`setIfAbsent` optional).
+  One detail to verify: the notify node sends a **single pre-built JSON body template**
+  (`{{verdict.data.telegramBody}}`) — ensure `preprocessJSONWithVariableMapping` forwards it verbatim
+  rather than re-parsing/re-serializing (which could corrupt the escaped payload).
+- **D — Cadence / cost.** **Default cadence is 6h** (`0 */6 * * *`), not hourly. Scans/day =
+  `users × wallets × chains × (24/cadenceHours)`; approvals-only = 2 external calls/scan. Pair with a
+  paid GoPlus CU tier; add a brief per-`(chain,address)` verdict cache. **Scope: approvals-only for v1**;
+  held-token scan is a fast-follow.
+
+`wfstate` growth is bounded by distinct-flags-ever per workflow (small in practice); no prune on clean
+scans (absence ≠ cleared, studio parity). A time-based `wfstate` TTL is a future option if needed.
+
+---
+
 *Planning only. No code changed by this document. Gateway-side response to the studio
 `PLAN_GUARDIAN_MONITORING_ARCHITECTURE.md` hand-off.*
