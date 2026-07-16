@@ -289,24 +289,29 @@ re-sends. Exactly-once preserved without an explicit release.
 The studio client-side review of the composed workflow surfaced four items. Resolutions, and the
 gateway facts behind them (all verified against current code):
 
-- **A — Logic-freeze / central update.** Confirmed: there is **no in-place workflow update** today
+- **A — Logic-freeze / central update. DECIDED (studio, 2026-07-15): accept the freeze; NO
+  `UpdateWorkflow` ask.** Confirmed there is no in-place workflow update today
   (`handlers_workflows.go` exposes only create/get/delete/pause/resume; editing a node's `customCode`
-  means delete+recreate → new `taskId` → lost `wfstate`). Two gateway actions:
-  1. **Expose a `guardian_ruleset` (and, generally, feature-ruleset) configVar** so a workflow can read
-     volatile rules (flag sets, thresholds, trust overrides) at runtime and a single gateway-config
-     change propagates to **all** deployed instances on next run — no re-deploy, no state loss. (Note:
-     only `macros.secrets` currently reaches `apContext.configVars`; either place the ruleset there or
-     add `macros.vars` injection.)
-  2. **Add an in-place `UpdateWorkflow`** (edit node config, **same `taskId`, preserve `wfstate`).
-     Without it, any change to the frozen interpreter shape is a fleet re-deploy + state migration. This
-     is now the strongest driver for the feature — track it as its own item.
-- **B — Read-only deploy auth.** Confirmed: `CreateWorkflow` requires a user JWT (EIP-191 signature);
-  partner assertion is rejected for create; **no** fund-moving-vs-read-only distinction exists. The
-  ownership gate is a pure DB check, so a **counterfactual (undeployed) runner is accepted** for a
-  read-only workflow. **Gateway decision to make:** allow the **read-only / no-runner-fund class to be
-  created via `X-Partner-Assertion` (or a managed signer)** so studio can enroll social/Telegram-only
-  users with zero user signature. Low risk (moves no funds; worst case is unwanted notifications). Until
-  decided, studio uses a one-time web-sign hand-off (one signature ever).
+  means delete+recreate → new `taskId` → lost `wfstate`). The only gateway-side need is:
+  - **Expose a `guardian_ruleset` (and, generally, feature-ruleset) configVar** so a workflow reads
+    volatile rules (flag sets, thresholds, trust overrides) at runtime and a single gateway-config
+    change propagates to **all** deployed instances on next run — no re-deploy, no state loss. (Note:
+    only `macros.secrets` currently reaches `apContext.configVars`; either place the ruleset there or
+    add `macros.vars` injection.)
+
+  A rare **structural** (interpreter-shape) change is handled by **re-creating** the workflow — the new
+  task's first run is a **silent seed** (compute findings, write all `ntfy:` markers, send nothing) so
+  the switch doesn't double-alert. This needs **no `wfstate` read API** and **no `UpdateWorkflow`** — a
+  fleet re-create on rare structural change is acceptable. (An in-place `UpdateWorkflow` remains a
+  possible future ergonomics win but is explicitly **not** required for the guardian.)
+- **B — Read-only deploy auth. DECIDED (studio, 2026-07-15): web hand-off; NO create-auth change.**
+  Confirmed: `CreateWorkflow` requires a user JWT (EIP-191 signature); partner assertion is rejected for
+  create; **no** fund-moving-vs-read-only distinction exists; and a **counterfactual (undeployed) runner
+  is accepted** (the ownership gate is a pure DB check). Studio enrolls via its existing
+  conversation-resume-on-web hand-off — a one-time EIP-191 sign establishes the 48h session and deploys
+  (one signature ever). **No gateway change required.** Relaxing create-auth for the read-only/no-fund
+  class via `X-Partner-Assertion` (zero user signature) is parked as a **future lever**, not a
+  dependency.
 - **C — Claim-once semantics.** Confirmed: executions are **serialized per task** (single FIFO worker,
   no overlap) and **at-most-once with NO retry** (`apqueue/worker.go` marks failed and drops;
   `Recover()` is a no-op). Therefore **mark-after-send (at-least-once) is the correct design for a
