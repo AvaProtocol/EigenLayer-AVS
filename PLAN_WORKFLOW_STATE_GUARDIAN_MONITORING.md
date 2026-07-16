@@ -83,10 +83,34 @@ block). No proto, no SDK type change.
 
 ---
 
-## 2. Extension 2 — client-defined per-workflow state
+## 2. Extension 2 — client-defined per-workflow state (`{{state.*}}`)
 
 A generic cross-run key/value store scoped to `taskId`, with the **client defining the JSON** via a
 CustomCode binding. **Feasibility: EASY→MODERATE.**
+
+### 2.0 Namespace — `state`, parallel to `settings`
+
+The client already configures workflows with `{{settings.*}}` (immutable config: `runner`,
+`chain_id`, `address_list`, …) and reads platform runtime via `{{context.*}}` (read-only). Neither is
+mutable + persistent + client-defined. Add one namespace — **`state`** — for exactly that:
+
+| Namespace | Role | Mutability | Set by |
+|---|---|---|---|
+| `{{apContext.configVars.*}}` | platform secrets | immutable, read-only | gateway config |
+| `{{settings.*}}` | workflow config | immutable, read-only | client at create |
+| `{{context.*}}` | runtime metadata | read-only | gateway |
+| **`{{state.*}}`** | **workflow memory** | **read + write, persists across runs** | **client (CustomCode)** |
+
+Rule of thumb: **`settings` in, `state` in/out, `context` read-only.** `state` is chosen (over
+`store`/`storage`/`memory`) because it's the same word as the CustomCode binding and consistent with
+the existing single-word lowercase namespaces. Verified: `state` is unused as a var namespace today.
+**Register `state` in `reservedSystemVarNames` (`durable.go:204`)** alongside `settings`/`context` so
+it's re-injected fresh each run (never snapshotted as a node output) and can't be clobbered by a node
+named `state`. Client `state.<key>` maps to storage `wfstate:<taskId>:<key>`.
+
+Sub-key conventions (mirror `settings` snake_case): scalars/objects as top-level keys
+(`{{state.last_processed_block}}`, `{{state.cursor}}`, template-readable anywhere); iterated
+collections as prefixed keys via the JS binding (`state.set("seen:"+id, …)` / `state.list("seen:")`).
 
 ### 2.1 Storage layer (`storage/db.go` + `core/taskengine/schema.go`)
 
