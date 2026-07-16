@@ -4603,6 +4603,17 @@ func (n *Engine) DeleteWorkflowByUser(user *model.User, taskID string) (*avsprot
 	// checkpoint/wake — and any operator internal trigger — don't outlive the workflow.
 	n.gcDurableStateForTask(taskID)
 
+	// Cascade-delete this workflow's durable per-run state ({{state.*}} /
+	// wfstate:<taskId>) so it doesn't outlive the task (scoped by taskID, so this
+	// touches only this workflow's namespace).
+	if stateKeys, listErr := n.db.ListKeys(string(WorkflowStatePrefix(taskID))); listErr == nil {
+		for _, k := range stateKeys {
+			if delErr := n.db.Delete([]byte(k)); delErr != nil {
+				n.logger.Warn("failed to delete workflow state key", "key", k, "error", delErr)
+			}
+		}
+	}
+
 	n.logger.Info("📢 Starting operator notifications", "task_id", taskID)
 	n.notifyOperatorsTaskOperation(taskID, avsproto.MessageOp_DeleteTask)
 	n.logger.Info("✅ Delete task operation completed", "task_id", taskID)

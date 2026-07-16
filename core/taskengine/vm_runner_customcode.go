@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"reflect"
@@ -15,6 +16,90 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/modules"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
+
+// installStateBinding exposes `state.get/set/list` to customCode JS, backed by the
+// per-workflow `wfstate:<taskId>` namespace (WorkflowStateKey). This is the durable,
+// cross-run, client-defined state store — the `{{state.*}}` capability.
+//
+//   - state.get(key)        -> the stored JSON value, or undefined
+//   - state.set(key, value) -> persists arbitrary JSON under this workflow's namespace
+//   - state.list(prefix)    -> the stateKeys (prefix included) currently stored
+//
+// Writes never hit the DB in simulation, for a single-node run (no task id), or when
+// no DB is wired: those use an in-memory scratch map so read-after-write still works
+// within one run without mutating real state. Bind this AFTER the step vars so a node
+// accidentally named "state" can't shadow it.
+func installStateBinding(jsvm *goja.Runtime, vm *VM) {
+	obj := jsvm.NewObject()
+
+	taskID := ""
+	if vm != nil {
+		taskID = vm.GetTaskId()
+	}
+	// scratch-only when we must not (or cannot) persist.
+	scratchOnly := vm == nil || vm.db == nil || taskID == "" || vm.IsSimulation
+	scratch := map[string][]byte{}
+
+	obj.Set("get", func(key string) interface{} {
+		if key == "" {
+			return goja.Undefined()
+		}
+		var raw []byte
+		if scratchOnly {
+			raw = scratch[key]
+		} else if b, err := vm.db.GetKey(WorkflowStateKey(taskID, key)); err == nil {
+			raw = b
+		}
+		if raw == nil {
+			return goja.Undefined()
+		}
+		var value interface{}
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return goja.Undefined()
+		}
+		return value
+	})
+
+	obj.Set("set", func(key string, value interface{}) {
+		if key == "" {
+			return
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return
+		}
+		if scratchOnly {
+			scratch[key] = encoded
+			return
+		}
+		if setErr := vm.db.Set(WorkflowStateKey(taskID, key), encoded); setErr != nil && vm.logger != nil {
+			vm.logger.Warn("state.set failed", "key", key, "error", setErr)
+		}
+	})
+
+	obj.Set("list", func(prefix string) []string {
+		out := []string{}
+		if scratchOnly {
+			for k := range scratch {
+				if strings.HasPrefix(k, prefix) {
+					out = append(out, k)
+				}
+			}
+			return out
+		}
+		full := string(WorkflowStatePrefix(taskID))
+		keys, err := vm.db.ListKeys(full + prefix)
+		if err != nil {
+			return out
+		}
+		for _, k := range keys {
+			out = append(out, strings.TrimPrefix(k, full))
+		}
+		return out
+	})
+
+	jsvm.Set("state", obj)
+}
 
 type JSProcessor struct {
 	*CommonProcessor
@@ -73,6 +158,10 @@ func NewJSProcessor(vm *VM) *JSProcessor {
 		}
 	}
 
+	// Expose {{state.*}} — durable per-workflow state. Bound last so a step var
+	// accidentally named "state" cannot shadow it.
+	installStateBinding(r.jsvm, vm)
+
 	return &r
 }
 
@@ -129,6 +218,10 @@ func NewJSProcessorWithIsolatedVars(vm *VM, isolatedVars map[string]any) *JSProc
 			}
 		}
 	}
+
+	// Expose {{state.*}} — durable per-workflow state. Bound last so an isolated var
+	// accidentally named "state" cannot shadow it.
+	installStateBinding(r.jsvm, vm)
 
 	return &r
 }

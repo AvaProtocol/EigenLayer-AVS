@@ -48,6 +48,23 @@ func WalletStorageKey(chainID int64, owner common.Address, smartWalletAddress st
 	)
 }
 
+// WorkflowStateKey returns the key for one entry of a workflow's durable,
+// cross-run mutable state — the `{{state.*}}` store exposed to customCode.
+//
+// Scoped ONLY by taskID (no owner, no chain): every workflow has an isolated
+// namespace, so a user with several monitoring workflows never has their state
+// collide, and deleting a workflow can wipe exactly its state (see
+// WorkflowStatePrefix). `stateKey` is a client-defined opaque string.
+func WorkflowStateKey(taskID, stateKey string) []byte {
+	return []byte(fmt.Sprintf("wfstate:%s:%s", taskID, stateKey))
+}
+
+// WorkflowStatePrefix returns the scan/cascade-delete prefix for all `{{state.*}}`
+// entries of one workflow.
+func WorkflowStatePrefix(taskID string) []byte {
+	return []byte(fmt.Sprintf("wfstate:%s:", taskID))
+}
+
 // WalletBySaltKey returns the secondary index key that maps a
 // (chainID, owner, factory, salt) tuple to its current canonical wallet
 // address.
