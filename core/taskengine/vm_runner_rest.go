@@ -582,6 +582,12 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	if restAuthProvider(node) == "goplus" {
 		if token := goplusAuthHeader(); token != "" {
 			processedHeaders["Authorization"] = token
+			if r.vm.logger != nil {
+				r.vm.logger.Debug("REST: attached GoPlus session token (authed)", "stepID", stepID)
+			}
+		} else if r.vm.logger != nil {
+			// Keys unset or mint failed: GoPlus still answers keyless (lower limits).
+			r.vm.logger.Warn("REST: GoPlus auth requested but no token minted; falling back to keyless", "stepID", stepID)
 		}
 	}
 
