@@ -59,7 +59,11 @@ func (s *Server) RunNode(ctx echo.Context) error {
 		req.Erc20Overrides = openAPIERC20OverridesToProto(*body.Erc20Overrides)
 	}
 
-	resp, err := s.engine.RunNodeImmediatelyRPCWithContext(ctx.Request().Context(), user, req)
+	// A caller-supplied Idempotency-Key (Stripe-style header) makes a retried or
+	// double-submitted execute safe: the same key returns the first result instead
+	// of broadcasting a second UserOp. Absent the header, behavior is unchanged.
+	idempotencyKey := ctx.Request().Header.Get("Idempotency-Key")
+	resp, err := s.engine.RunNodeImmediatelyRPCIdempotent(ctx.Request().Context(), user, req, idempotencyKey)
 	if err != nil {
 		return err
 	}
@@ -123,8 +127,21 @@ func runNodeRespToOpenAPI(in *avsproto.RunNodeWithInputsResp) generated.RunNodeR
 		out.ErrorCode = &code
 	}
 	if md := in.GetMetadata(); md != nil {
-		if v, ok := md.AsInterface().(map[string]interface{}); ok && v != nil {
-			out.Metadata = &v
+		switch v := md.AsInterface().(type) {
+		case map[string]interface{}:
+			if v != nil {
+				out.Metadata = &v
+			}
+		case []interface{}:
+			// Some node types (notably contractWrite) produce a per-method
+			// results array as metadata. RunNodeResponse.metadata is an object,
+			// so a bare array was previously dropped here — taking the per-method
+			// receipts (executionStatus, userOpHash, transactionHash) with it.
+			// Wrap it under "results" so those actually reach the client.
+			if len(v) > 0 {
+				wrapped := map[string]interface{}{"results": v}
+				out.Metadata = &wrapped
+			}
 		}
 	}
 	if ec := in.GetExecutionContext(); ec != nil {

@@ -281,6 +281,42 @@ type VM struct {
 	// the executor reads PendingSuspend() to checkpoint + register the wake instead
 	// of finishing. nil for a normal run.
 	suspend *SuspendRequest
+
+	// stateScratch backs the {{state.*}} binding when it must NOT persist — in
+	// simulation, single-node runs (no task id), or when no DB is wired. It lives
+	// on the VM (not per-JSProcessor) so all customCode steps of one run share it,
+	// keeping read-after-write coherent across nodes just like the DB-backed path.
+	// Guarded by mu. Never flushed to storage.
+	stateScratch map[string][]byte
+}
+
+// scratchGet/scratchSet/scratchList back the {{state.*}} binding's non-persistent
+// mode (see stateScratch). All are mutex-guarded so parallel customCode steps are safe.
+func (v *VM) scratchGet(key string) []byte {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.stateScratch[key]
+}
+
+func (v *VM) scratchSet(key string, value []byte) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.stateScratch == nil {
+		v.stateScratch = make(map[string][]byte)
+	}
+	v.stateScratch[key] = value
+}
+
+func (v *VM) scratchList(prefix string) []string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	out := make([]string, 0, len(v.stateScratch))
+	for k := range v.stateScratch {
+		if strings.HasPrefix(k, prefix) {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 func NewVM() *VM {

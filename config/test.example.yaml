@@ -91,6 +91,13 @@ macros:
     sendgrid_key:        ""
     thegraph_api_key:    ""
     moralis_api_key:     ""
+    # GoPlus signed-token auth for restApi nodes using `options.auth.provider: goplus`.
+    # Leave blank to fall back to keyless GoPlus (lower rate limits).
+    goplus_app_key:      ""
+    goplus_app_secret:   ""
+    # guardian_ruleset — tunable verdict knobs read via {{apContext.configVars.guardian_ruleset}}
+    # (bare-injected as a JS object; must be valid JSON and must be set).
+    guardian_ruleset:    '{"weak":["honeypot_related_address","blacklist_doubt"]}'
 
 # Optional: post-execution AI summarization. Disabled by default in tests.
 notifications:

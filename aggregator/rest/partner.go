@@ -58,11 +58,12 @@ const (
 )
 
 // partnerPrincipal is the result of a verified partner assertion: which
-// partner vouched (PartnerID) and the end-user it vouched for (Subject,
-// possibly empty or a non-address identifier).
+// partner vouched (partnerID) and the end-user it vouched for (subject,
+// possibly empty or a non-address identifier). Package-private — fields stay
+// lowercase since it never leaves this package.
 type partnerPrincipal struct {
-	PartnerID string
-	Subject   string
+	partnerID string
+	subject   string
 }
 
 // requireSimulateAuth authorizes a simulate-family request via EITHER an
@@ -91,12 +92,12 @@ func (s *Server) requireSimulateAuth(ctx echo.Context) (*model.User, error) {
 		// `sub` is attribution only. Use it as the acting address when it's
 		// a real EOA; otherwise leave the zero address — simulate runs
 		// against any address and never checks ownership.
-		if common.IsHexAddress(principal.Subject) {
-			user.Address = common.HexToAddress(principal.Subject)
+		if common.IsHexAddress(principal.subject) {
+			user.Address = common.HexToAddress(principal.subject)
 		}
 		s.logger.Info("partner-delegated simulate call",
-			"partner_id", principal.PartnerID,
-			"subject", principal.Subject,
+			"partner_id", principal.partnerID,
+			"subject", principal.subject,
 		)
 		return user, nil
 	}
@@ -149,9 +150,10 @@ func (s *Server) verifyPartnerAssertion(ctx echo.Context, requiredScope string) 
 	}
 
 	// Read the issuer without verifying so we can select the partner's keys.
-	parser := jwt.NewParser(jwt.WithValidMethods([]string{"EdDSA"}))
+	// No alg enforcement here — ParseUnverified validates nothing; the EdDSA
+	// requirement is enforced on the real verify (jwt.Parse) below.
 	preview := jwt.MapClaims{}
-	if _, _, err := parser.ParseUnverified(raw, preview); err != nil {
+	if _, _, err := jwt.NewParser().ParseUnverified(raw, preview); err != nil {
 		return nil, partnerError(http.StatusUnauthorized, "PARTNER_ASSERTION_MALFORMED",
 			"Malformed partner assertion", err.Error())
 	}
@@ -176,8 +178,7 @@ func (s *Server) verifyPartnerAssertion(ctx echo.Context, requiredScope string) 
 	// Verify the signature against each registered key (rotation support).
 	var verified *jwt.Token
 	for _, pk := range pubKeys {
-		key := pk
-		tok, verr := jwt.Parse(raw, func(*jwt.Token) (any, error) { return key, nil },
+		tok, verr := jwt.Parse(raw, func(*jwt.Token) (any, error) { return pk, nil },
 			jwt.WithValidMethods([]string{"EdDSA"}))
 		if verr == nil && tok.Valid {
 			verified = tok
@@ -227,7 +228,7 @@ func (s *Server) verifyPartnerAssertion(ctx echo.Context, requiredScope string) 
 	}
 
 	subject, _ := claims["sub"].(string)
-	return &partnerPrincipal{PartnerID: issuer, Subject: strings.TrimSpace(subject)}, nil
+	return &partnerPrincipal{partnerID: issuer, subject: strings.TrimSpace(subject)}, nil
 }
 
 // lookupPartner returns the registered partner whose ID matches id, or nil.

@@ -138,6 +138,7 @@ func TestDecodeEd25519Keys_TolerantAndMultiEncoding(t *testing.T) {
 		std,
 		base64.RawStdEncoding.EncodeToString(pub),
 		base64.URLEncoding.EncodeToString(pub),
+		base64.RawURLEncoding.EncodeToString(pub),
 		"ed25519:" + std,
 	} {
 		if _, err := decodeEd25519Key(enc); err != nil {
@@ -270,7 +271,7 @@ func TestVerifyPartnerAssertion_Audience(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected success, got: %v", err)
 		}
-		if principal == nil || principal.PartnerID != "studio" {
+		if principal == nil || principal.partnerID != "studio" {
 			t.Fatalf("expected studio principal, got %+v", principal)
 		}
 	})

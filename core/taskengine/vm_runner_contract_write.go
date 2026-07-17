@@ -640,11 +640,11 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		"contract", contractAddress.Hex(),
 		"method", methodName)
 
-	return r.executeRealUserOpTransaction(ctx, contractAddress, callData, methodName, parsedABI, t0)
+	return r.executeRealUserOpTransaction(ctx, contractAddress, callData, methodName, parsedABI, node, t0)
 }
 
 // executeRealUserOpTransaction executes a real UserOp transaction for contract writes
-func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Context, contractAddress common.Address, callData string, methodName string, parsedABI *abi.ABI, startTime time.Time) *avsproto.ContractWriteNode_MethodResult {
+func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Context, contractAddress common.Address, callData string, methodName string, parsedABI *abi.ABI, node *avsproto.ContractWriteNode, startTime time.Time) *avsproto.ContractWriteNode_MethodResult {
 	r.vm.logger.Info("🔍 REAL USEROP DEBUG - Starting real UserOp transaction execution",
 		"contract_address", contractAddress.Hex(),
 		"method_name", methodName,
@@ -660,6 +660,27 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 
 	// Convert hex calldata to bytes
 	callDataBytes := common.FromHex(callData)
+
+	// Resolve the native ETH value to send with this call (payable methods / native-in
+	// swaps such as wrapping ETH or an ETH-in Uniswap swap). The simulation path already
+	// honors node.Config.Value via extractTransactionValue; the real path must match it,
+	// otherwise a call that previews correctly executes with 0 wei and reverts/no-ops.
+	transactionValue := big.NewInt(0)
+	if rawValue := r.extractTransactionValue(node); rawValue != "" && rawValue != "0" {
+		parsedValue, parseErr := bigint.Parse(rawValue)
+		if parseErr != nil || parsedValue.Sign() < 0 {
+			r.vm.logger.Error("🚨 DEPLOYED WORKFLOW ERROR: Invalid transaction value",
+				"raw_value", rawValue,
+				"method_name", methodName,
+				"error", parseErr)
+			return &avsproto.ContractWriteNode_MethodResult{
+				Success:    false,
+				Error:      fmt.Sprintf("invalid transaction value %q: must be a non-negative wei integer", rawValue),
+				MethodName: methodName,
+			}
+		}
+		transactionValue = parsedValue
+	}
 
 	// 🔍 PRE-FLIGHT VALIDATION: Check for common failure scenarios before gas estimation
 	if validationErr := r.validateTransactionBeforeGasEstimation(methodName, callData, callDataBytes, contractAddress); validationErr != nil {
@@ -679,13 +700,13 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	// Create smart wallet execute calldata: execute(target, value, data)
 	executionLogBuilder.WriteString(fmt.Sprintf("Packing smart wallet execute calldata...\n"))
 	executionLogBuilder.WriteString(fmt.Sprintf("  Target contract: %s\n", contractAddress.Hex()))
-	executionLogBuilder.WriteString(fmt.Sprintf("  ETH value: 0\n"))
+	executionLogBuilder.WriteString(fmt.Sprintf("  ETH value: %s wei\n", transactionValue.String()))
 	executionLogBuilder.WriteString(fmt.Sprintf("  Method calldata: %d bytes\n", len(callDataBytes)))
 
 	smartWalletCallData, err := aa.PackExecute(
-		contractAddress, // target contract
-		big.NewInt(0),   // ETH value (0 for contract calls)
-		callDataBytes,   // contract method calldata
+		contractAddress,  // target contract
+		transactionValue, // ETH value to send with the call (0 for non-payable calls)
+		callDataBytes,    // contract method calldata
 	)
 	if err != nil {
 		executionLogBuilder.WriteString(fmt.Sprintf("CALLDATA PACKING FAILED: %v\n", err))
@@ -1085,8 +1106,28 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 	// For AA transactions, check both receipt status AND UserOp inner success
 	// For regular transactions, just check receipt status
 	success := receipt != nil && receipt.Status == 1 && userOpInnerSuccess
+
+	// A UserOp that the bundler accepted but that hasn't been mined within the
+	// send timeout is PENDING, not failed — the on-chain outcome is still
+	// undecided and can be resolved later via userOpHash. Distinguishing this
+	// from an outright failure is essential for the chat preview→confirm→execute
+	// flow, where rendering a slow-but-successful swap as an error is wrong.
+	pending := receipt == nil && userOp != nil
+
+	// executionStatus is the unambiguous, machine-readable outcome clients should
+	// branch on (instead of interpreting the EVM hex `status`): "confirmed"
+	// (mined + inner success), "pending" (submitted, awaiting confirmation), or
+	// "failed" (submission or on-chain failure).
+	executionStatus := "failed"
+	switch {
+	case success:
+		executionStatus = "confirmed"
+	case pending:
+		executionStatus = "pending"
+	}
+
 	errorMsg := ""
-	if !success {
+	if !success && !pending {
 		if receipt == nil {
 			errorMsg = "No transaction receipt received"
 		} else if receipt.Status != 1 {
@@ -1097,9 +1138,23 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 		}
 	}
 
+	// Stamp the normalized status onto the receipt the client reads, and ensure
+	// the UserOp hash is present on the mined branch too (the pending branch
+	// already sets it) so callers always have a handle to the submitted UserOp.
+	if receiptMap != nil {
+		receiptMap["executionStatus"] = executionStatus
+		if _, hasHash := receiptMap["userOpHash"]; !hasHash && userOp != nil && r.smartWalletConfig != nil {
+			receiptMap["userOpHash"] = userOp.GetUserOpHash(r.smartWalletConfig.EntrypointAddress, big.NewInt(r.smartWalletConfig.ChainID)).Hex()
+		}
+		if v, err := structpb.NewValue(receiptMap); err == nil {
+			receiptValue = v
+		}
+	}
+
 	r.vm.logger.Info("🎯 DEPLOYED WORKFLOW: Final transaction result",
 		"method_name", methodName,
 		"success", success,
+		"execution_status", executionStatus,
 		"error_msg", errorMsg,
 		"has_receipt_value", receiptValue != nil)
 
@@ -1109,7 +1164,7 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 		Success:    success,
 		Error:      errorMsg,
 		Receipt:    receiptValue,
-		Value:      nil, // Real transactions don't return values directly
+		Value:      nil, // Real transactions don't return values directly; decoded events carry outputs
 	}
 }
 
@@ -1225,8 +1280,10 @@ func (r *ContractWriteProcessor) convertTenderlyResultToFlexibleFormat(result *C
 	// Note: blockNumber/blockHash default to placeholders here and can be
 	// overridden by the caller with real chain context when available.
 	receiptStatus := "0x1" // Default to success
+	simExecutionStatus := "confirmed"
 	if !result.Success {
 		receiptStatus = "0x0" // Set to failure if transaction failed
+		simExecutionStatus = "failed"
 	}
 
 	// Prepare logs from Tenderly simulation result
@@ -1249,6 +1306,7 @@ func (r *ContractWriteProcessor) convertTenderlyResultToFlexibleFormat(result *C
 		"cumulativeGasUsed": r.getGasUsedWithFallback(result, StandardGasCostHex),
 		"effectiveGasPrice": r.getEffectiveGasPriceWithFallback(result),
 		"status":            receiptStatus,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        // Success/failure status based on actual result
+		"executionStatus":   simExecutionStatus,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   // Normalized outcome, uniform with the real path ("confirmed"/"failed")
 		"logsBloom":         "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", // Empty logs bloom
 		"logs":              receiptLogs,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          // Logs from Tenderly simulation
 		"type":              "0x2",                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // EIP-1559 transaction type

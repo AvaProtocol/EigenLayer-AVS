@@ -30,6 +30,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/oklog/ulid/v2"
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -305,6 +306,12 @@ type Engine struct {
 	// fixed set of mutexes bounds memory — the same executionID always maps to the
 	// same shard, so concurrent resumes of one execution serialize. See executionMutex.
 	executionMutexes [executionLockShards]sync.Mutex
+
+	// Collapses concurrent nodes:run requests that carry the same Idempotency-Key
+	// so a retried/double-clicked Confirm can't broadcast a second UserOp. Works
+	// with a persistent TTL cache (see RunNodeImmediatelyRPCIdempotent) that also
+	// dedupes sequential retries after the first request has completed.
+	idempotencyGroup singleflight.Group
 }
 
 // executionLockShards bounds the per-execution resume locks to a fixed set of mutexes.
@@ -4595,6 +4602,19 @@ func (n *Engine) DeleteWorkflowByUser(user *model.User, taskID string) (*avsprot
 	// GC durable state of any suspended (WAITING) execution this task owned, so its
 	// checkpoint/wake — and any operator internal trigger — don't outlive the workflow.
 	n.gcDurableStateForTask(taskID)
+
+	// Cascade-delete this workflow's durable per-run state ({{state.*}} /
+	// wfstate:<taskId>) so it doesn't outlive the task (scoped by taskID, so this
+	// touches only this workflow's namespace).
+	if stateKeys, listErr := n.db.ListKeys(string(WorkflowStatePrefix(taskID))); listErr == nil {
+		for _, k := range stateKeys {
+			if delErr := n.db.Delete([]byte(k)); delErr != nil {
+				n.logger.Warn("failed to delete workflow state key", "key", k, "error", delErr)
+			}
+		}
+	} else {
+		n.logger.Warn("failed to list workflow state keys for cascade delete; state may be orphaned", "task_id", taskID, "error", listErr)
+	}
 
 	n.logger.Info("📢 Starting operator notifications", "task_id", taskID)
 	n.notifyOperatorsTaskOperation(taskID, avsproto.MessageOp_DeleteTask)

@@ -1,11 +1,16 @@
 package taskengine
 
 import (
+	"bytes"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -571,6 +576,21 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		processedHeaders[processedKey] = processedValue
 	}
 
+	// Server-side auth providers (options.auth): mint + attach a provider token so the
+	// credential never lives in the workflow JSON. GoPlus first; on "" (keys unset or
+	// mint failed) we send no Authorization header — GoPlus still answers keyless.
+	if restAuthProvider(node) == "goplus" {
+		if token := goplusTokenProvider(); token != "" {
+			processedHeaders["Authorization"] = token
+			if r.vm.logger != nil {
+				r.vm.logger.Debug("REST: attached GoPlus session token (authed)", "stepID", stepID)
+			}
+		} else if r.vm.logger != nil {
+			// Keys unset or mint failed: GoPlus still answers keyless (lower limits).
+			r.vm.logger.Warn("REST: GoPlus auth requested but no token minted; falling back to keyless", "stepID", stepID)
+		}
+	}
+
 	// Only apply JSON preprocessing if content type is JSON
 	contentType := ""
 	for key, value := range processedHeaders {
@@ -860,6 +880,120 @@ func detectNotificationProvider(u string) string {
 		return "telegram"
 	}
 	return ""
+}
+
+// ── REST auth providers ─────────────────────────────────────────────────────
+// A restApi node can request server-side credential injection with
+//
+//	config.options.auth = { "provider": "goplus" }
+//
+// The gateway mints the provider's token from macros.secrets and attaches it as
+// the Authorization header at execution time, so the secret never appears in the
+// (client-visible) workflow JSON. GoPlus is the first provider; add more here.
+
+// restAuthProvider returns the lower-cased options.auth.provider (e.g. "goplus"),
+// or "" when none is set. Mirrors shouldSummarize's options-bag read.
+func restAuthProvider(node *avsproto.RestAPINode) string {
+	if node == nil || node.Config == nil || node.Config.Options == nil {
+		return ""
+	}
+	optsMap, ok := node.Config.Options.AsInterface().(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	auth, ok := optsMap["auth"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	provider, _ := auth["provider"].(string)
+	return strings.ToLower(strings.TrimSpace(provider))
+}
+
+// goplusTokenProvider is the seam the REST runner calls to obtain a GoPlus
+// Authorization header value; overridable in tests. Returns "" for keyless.
+var goplusTokenProvider = goplusAuthHeader
+
+// goplusHTTPClient bounds the token-mint call so a slow/hung GoPlus endpoint
+// cannot block REST node execution indefinitely.
+var goplusHTTPClient = &http.Client{Timeout: 15 * time.Second}
+
+// goplusTokenCache holds the module-cached GoPlus session token, refreshed shortly
+// before expiry. Keyed by the app_key it was minted for, so a rotated key never
+// reuses a stale token. The token value already includes the "Bearer " prefix.
+var goplusTokenCache struct {
+	sync.RWMutex
+	token   string
+	appKey  string
+	expires time.Time
+}
+
+// goplusAuthHeader returns the Authorization header value for GoPlus, minting +
+// caching a signed session token from macros.secrets (goplus_app_key /
+// goplus_app_secret): sign = sha1_hex(app_key + time + app_secret) → POST /v1/token.
+// Returns "" to fall back to keyless GoPlus access (lower rate limits) when the
+// keys are unset or minting fails — the caller then sends no Authorization header.
+func goplusAuthHeader() string {
+	appKey := GetMacroSecret("goplus_app_key")
+	appSecret := GetMacroSecret("goplus_app_secret")
+	if appKey == "" || appSecret == "" {
+		return ""
+	}
+
+	goplusTokenCache.RLock()
+	if goplusTokenCache.token != "" && goplusTokenCache.appKey == appKey && time.Until(goplusTokenCache.expires) > 60*time.Second {
+		token := goplusTokenCache.token
+		goplusTokenCache.RUnlock()
+		return token
+	}
+	goplusTokenCache.RUnlock()
+
+	// Mint the token WITHOUT holding the cache lock, so an in-flight HTTP call (up to
+	// the client timeout) never serializes unrelated REST executions that only need to
+	// RLock the cache. A few goroutines may race and mint duplicates on a cold/expiring
+	// cache — cheap and harmless (last writer wins).
+	now := time.Now().Unix()
+	sum := sha1.Sum([]byte(appKey + strconv.FormatInt(now, 10) + appSecret))
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"app_key": appKey,
+		"sign":    hex.EncodeToString(sum[:]),
+		"time":    now,
+	})
+	req, err := http.NewRequest(http.MethodPost, "https://api.gopluslabs.io/api/v1/token", bytes.NewReader(reqBody))
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := goplusHTTPClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ""
+	}
+	var parsed struct {
+		Code   int `json:"code"`
+		Result struct {
+			AccessToken string `json:"access_token"`
+			ExpiresIn   int64  `json:"expires_in"`
+		} `json:"result"`
+	}
+	if decodeErr := json.NewDecoder(resp.Body).Decode(&parsed); decodeErr != nil || parsed.Code != 1 || parsed.Result.AccessToken == "" {
+		return ""
+	}
+	// GoPlus returns the token already prefixed with "Bearer "; normalize defensively
+	// so a change on their side can't produce an invalid Authorization header.
+	token := parsed.Result.AccessToken
+	if !strings.HasPrefix(token, "Bearer ") {
+		token = "Bearer " + token
+	}
+	// Publish under the write lock — brief, no network held.
+	goplusTokenCache.Lock()
+	goplusTokenCache.token = token
+	goplusTokenCache.appKey = appKey
+	goplusTokenCache.expires = time.Now().Add(time.Duration(parsed.Result.ExpiresIn) * time.Second)
+	goplusTokenCache.Unlock()
+	return token
 }
 
 // escapeJSONString properly escapes a string for use within JSON
