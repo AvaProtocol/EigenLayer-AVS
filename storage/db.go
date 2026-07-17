@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	badger "github.com/dgraph-io/badger/v4"
 )
@@ -56,6 +57,10 @@ type Storage interface {
 	BatchWrite(updates map[string][]byte) error
 	Move(src, dest []byte) error
 	Set(key, value []byte) error
+	// SetWithTTL writes a key that the store auto-expires after `ttl`, so short-lived
+	// entries (e.g. idempotency replay cache) are reaped by the DB itself rather than
+	// only on read-after-expiry — bounding growth for keys that are never re-read.
+	SetWithTTL(key, value []byte, ttl time.Duration) error
 	Delete(key []byte) error
 
 	GetCounter(key []byte, defaultValue ...uint64) (uint64, error)
@@ -137,6 +142,12 @@ func (s *BadgerStorage) Set(key, value []byte) error {
 	return s.db.Update(func(txn *badger.Txn) error {
 		err := txn.Set(key, value)
 		return err
+	})
+}
+
+func (s *BadgerStorage) SetWithTTL(key, value []byte, ttl time.Duration) error {
+	return s.db.Update(func(txn *badger.Txn) error {
+		return txn.SetEntry(badger.NewEntry(key, value).WithTTL(ttl))
 	})
 }
 

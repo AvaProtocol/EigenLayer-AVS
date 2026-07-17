@@ -3037,13 +3037,35 @@ func idempotencyCacheKey(subject, clientKey string) []byte {
 // a still-pending UserOp) is cached; a transport/engine error caches nothing so
 // the caller may safely retry. Polling a pending UserOp's final status is a
 // separate concern — reuse of the same key returns the cached pending result.
+// contractWriteIsSimulated mirrors the runner's is_simulated resolution for a
+// contractWrite node: the default is SIMULATION unless is_simulated is explicitly
+// set to false. Only contractWrite carries this flag and is the node that
+// broadcasts a real UserOp on this path. Returns false for any other node type so
+// their idempotency behavior is unchanged.
+func contractWriteIsSimulated(node *avsproto.TaskNode) bool {
+	cw := node.GetContractWrite()
+	if cw == nil {
+		return false
+	}
+	cfg := cw.GetConfig()
+	if cfg == nil || cfg.IsSimulated == nil {
+		return true // unset => simulation (matches the runner default)
+	}
+	return cfg.GetIsSimulated()
+}
+
 func (n *Engine) RunNodeImmediatelyRPCIdempotent(ctx context.Context, user *model.User, req *avsproto.RunNodeWithInputsReq, idempotencyKey string) (*avsproto.RunNodeWithInputsResp, error) {
 	// Idempotency needs a distinct authenticated subject to scope the cache key.
 	// A partner-assertion (simulate-only) caller can resolve to the zero address;
 	// deduping those would let one caller's key cross-replay another's result, so
 	// skip idempotency when there is no real subject. Safe by construction: real
 	// executes (fund-moving) always carry a non-zero authenticated owner.
-	if idempotencyKey == "" || user == nil || user.Address == (common.Address{}) {
+	//
+	// Also skip for a SIMULATED contractWrite: idempotency exists to prevent a
+	// second broadcast of a real UserOp, so a preview must never be cached — else a
+	// client that reused a key across a preview and a later real execute could get
+	// the cached preview back in place of the broadcast.
+	if idempotencyKey == "" || user == nil || user.Address == (common.Address{}) || contractWriteIsSimulated(req.GetNode()) {
 		return n.RunNodeImmediatelyRPCWithContext(ctx, user, req)
 	}
 	cacheKey := idempotencyCacheKey(user.Address.Hex(), idempotencyKey)
@@ -3118,7 +3140,10 @@ func (n *Engine) writeIdempotentResponse(cacheKey []byte, resp *avsproto.RunNode
 	buf := make([]byte, 8+len(payload))
 	binary.BigEndian.PutUint64(buf[:8], uint64(time.Now().UnixNano()))
 	copy(buf[8:], payload)
-	if err := n.db.Set(cacheKey, buf); err != nil && n.logger != nil {
+	// Persist with a native store TTL so the entry is reaped by the DB even if it is
+	// never read again (the common case — a fresh key per action). The embedded
+	// timestamp + read-time expiry check remain as a belt-and-suspenders safety net.
+	if err := n.db.SetWithTTL(cacheKey, buf, idempotencyTTL); err != nil && n.logger != nil {
 		n.logger.Warn("RunNodeImmediately: failed to persist idempotent response", "error", err)
 	}
 }

@@ -137,11 +137,14 @@ func runNodeRespToOpenAPI(in *avsproto.RunNodeWithInputsResp) generated.RunNodeR
 			// results array as metadata. RunNodeResponse.metadata is an object,
 			// so a bare array was previously dropped here — taking the per-method
 			// receipts (executionStatus, userOpHash, transactionHash) with it.
-			// Wrap it under "results" so those actually reach the client.
-			if len(v) > 0 {
-				wrapped := map[string]interface{}{"results": v}
-				out.Metadata = &wrapped
+			// Wrap it under "results" so those reach the client — including an
+			// EMPTY array (results: []), so callers always see a consistent shape
+			// rather than metadata=null for a legitimately empty result set.
+			if v == nil {
+				v = []interface{}{}
 			}
+			wrapped := map[string]interface{}{"results": v}
+			out.Metadata = &wrapped
 		}
 	}
 	if ec := in.GetExecutionContext(); ec != nil {

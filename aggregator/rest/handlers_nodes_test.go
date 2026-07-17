@@ -42,6 +42,21 @@ func TestRunNodeRespToOpenAPISurfacesContractWriteReceiptArray(t *testing.T) {
 	assert.Equal(t, "0xtx", receipt["transactionHash"])
 }
 
+// An EMPTY results array must still surface as {results: []}, not metadata=null,
+// so clients see a consistent shape for a legitimately empty result set.
+func TestRunNodeRespToOpenAPIEmptyArrayMetadataWrapped(t *testing.T) {
+	md, err := structpb.NewValue([]interface{}{})
+	require.NoError(t, err)
+
+	out := runNodeRespToOpenAPI(&avsproto.RunNodeWithInputsResp{Success: true, Metadata: md})
+
+	require.NotNil(t, out.Metadata, "empty array metadata must still be surfaced")
+	m := *out.Metadata
+	arr, ok := m["results"].([]interface{})
+	require.True(t, ok, "empty array must be wrapped under 'results'")
+	assert.Empty(t, arr)
+}
+
 // Map-typed metadata (e.g. ethTransfer's gasUsed/transactionHash) must keep
 // surfacing as-is, without the "results" wrapper.
 func TestRunNodeRespToOpenAPIMapMetadataStillForwarded(t *testing.T) {

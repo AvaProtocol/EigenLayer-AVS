@@ -16,6 +16,28 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// TestContractWriteIsSimulated locks the guard that keeps idempotency off simulated
+// contractWrite previews: default (unset) is simulation, only an explicit
+// is_simulated=false is a real execute, and non-contractWrite nodes are unaffected.
+func TestContractWriteIsSimulated(t *testing.T) {
+	cwNode := func(sim *bool) *avsproto.TaskNode {
+		return &avsproto.TaskNode{TaskType: &avsproto.TaskNode_ContractWrite{
+			ContractWrite: &avsproto.ContractWriteNode{
+				Config: &avsproto.ContractWriteNode_Config{IsSimulated: sim},
+			},
+		}}
+	}
+	tr, fa := true, false
+
+	require.True(t, contractWriteIsSimulated(cwNode(nil)), "unset => simulation (runner default)")
+	require.True(t, contractWriteIsSimulated(cwNode(&tr)), "explicit true => simulated")
+	require.False(t, contractWriteIsSimulated(cwNode(&fa)), "explicit false => real execute")
+	require.False(t, contractWriteIsSimulated(nil), "nil node => not simulated (unchanged)")
+	require.False(t, contractWriteIsSimulated(&avsproto.TaskNode{
+		TaskType: &avsproto.TaskNode_CustomCode{CustomCode: &avsproto.CustomCodeNode{}},
+	}), "non-contractWrite => idempotency behavior unchanged")
+}
+
 // customCodeReq builds a single-node RunNodeWithInputs request whose customCode
 // node returns the given constant, so distinct sources produce distinct results.
 func customCodeReq(source string) *avsproto.RunNodeWithInputsReq {
