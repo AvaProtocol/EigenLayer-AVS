@@ -334,5 +334,50 @@ scans (absence ≠ cleared, studio parity). A time-based `wfstate` TTL is a futu
 
 ---
 
-*Planning only. No code changed by this document. Gateway-side response to the studio
-`PLAN_GUARDIAN_MONITORING_ARCHITECTURE.md` hand-off.*
+## 10. Completion status
+
+The two gateway extensions shipped in **PR #662** (merged to `staging`, 2026-07-16). Shipped record:
+`docs/changes/20260717-workflow-state-and-rest-auth.md`.
+
+**✅ Done — gateway (PR #662):**
+- [x] **Extension 1 — REST `options.auth` providers.** `restAuthProvider` reads `options.auth.provider`;
+  `goplusAuthHeader` mints + caches a GoPlus signed token (sha1 sign → `/v1/token`), cache keyed by
+  `app_key`, 15 s HTTP timeout, 2xx check, `Bearer ` normalization; Authorization injected server-side
+  in `vm_runner_rest.go`. Keyless fallback when keys unset. (`vm_runner_rest.go`)
+- [x] **Extension 2 — `{{state.*}}` per-workflow state.** `wfstate:<taskId>:<stateKey>` namespace +
+  `state.get/set/list` goja binding (VM-scoped scratch, `IsSimulation`-guarded, deterministic-sorted
+  `list`); cascade-delete on task teardown. Additive storage (`make storage-check` clean).
+  (`schema.go`, `vm_runner_customcode.go`, `vm.go`, `engine.go`)
+- [x] **`guardian_ruleset` config wired** — `gateway.example.yaml` / `test.example.yaml`, the local
+  gateway config, and avs-infra `gateway-railway.yaml` (`${GOPLUS_APP_KEY}`/`${GOPLUS_APP_SECRET}` env
+  refs + inlined ruleset).
+- [x] **Tests** — state roundtrip / cross-run persistence / simulation no-op; `restAuthProvider`
+  parsing; Authorization-injection (mockable seam). Live-verified: authed GoPlus + `state` against a
+  local gateway.
+
+**✅ Done — SDK (ava-sdk-js `staging`):**
+- [x] Guardian wallet-risk monitor test + builder/verdict fixture (offline verdict parity + builder
+  shape + live deploy/trigger) — `tests/v4/templates/guardian-wallet-risk-monitor.test.ts`.
+
+**⏭️ Deferred / optional (not blocking v1):**
+- [ ] `SetIfAbsent` storage primitive for **strict** exactly-once claim-once (mark-after-send is the v1
+  default, §3.3).
+- [ ] `{{state.*}}` template auto-load for non-CustomCode nodes (§2.3).
+- [ ] GoPlus `code:4033` retry-keyless nuance (keyless-on-unset-keys **is** implemented).
+- [ ] Held-token (critical-token) scan — approvals-only for v1; held-token is a fast-follow.
+- [ ] Promote the `Guardian` builder from SDK test fixture to published `packages/sdk-js` surface.
+
+**🟨 Client-side (studio) — separate product work, tracked in the studio guardian docs:**
+- [ ] Advisor tool `enable_guardian_monitoring` deploys the per-user workflow.
+- [ ] Enrollment via the one-time web-sign hand-off (§9-B).
+- [ ] Sync `guardian_ruleset` from `app/lib/goplus.ts`.
+
+**🔧 Ops follow-up:**
+- [x] Railway `GOPLUS_APP_KEY` / `GOPLUS_APP_SECRET` set on the gateway service.
+- [ ] Republish `avs-dev:latest` dev docker so the SDK E2E guardian **live** test asserts (it soft-skips
+  against the pre-merge image).
+
+---
+
+*Gateway-side response to the studio `PLAN_GUARDIAN_MONITORING_ARCHITECTURE.md` hand-off. The two
+extensions are now implemented (PR #662); this document is retained as the design record.*
