@@ -56,6 +56,9 @@ func installStateBinding(jsvm *goja.Runtime, vm *VM) {
 		}
 		var value interface{}
 		if err := json.Unmarshal(raw, &value); err != nil {
+			if vm.logger != nil {
+				vm.logger.Warn("state.get: corrupt stored value, returning undefined", "key", key, "error", err)
+			}
 			return goja.Undefined()
 		}
 		return value
@@ -67,6 +70,9 @@ func installStateBinding(jsvm *goja.Runtime, vm *VM) {
 		}
 		encoded, err := json.Marshal(value)
 		if err != nil {
+			if vm.logger != nil {
+				vm.logger.Warn("state.set: value not JSON-encodable, not persisted", "key", key, "error", err)
+			}
 			return
 		}
 		if scratchOnly {

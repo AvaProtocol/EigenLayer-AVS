@@ -947,13 +947,10 @@ func goplusAuthHeader() string {
 	}
 	goplusTokenCache.RUnlock()
 
-	goplusTokenCache.Lock()
-	defer goplusTokenCache.Unlock()
-	// Re-check under the write lock (another goroutine may have refreshed for this key).
-	if goplusTokenCache.token != "" && goplusTokenCache.appKey == appKey && time.Until(goplusTokenCache.expires) > 60*time.Second {
-		return goplusTokenCache.token
-	}
-
+	// Mint the token WITHOUT holding the cache lock, so an in-flight HTTP call (up to
+	// the client timeout) never serializes unrelated REST executions that only need to
+	// RLock the cache. A few goroutines may race and mint duplicates on a cold/expiring
+	// cache — cheap and harmless (last writer wins).
 	now := time.Now().Unix()
 	sum := sha1.Sum([]byte(appKey + strconv.FormatInt(now, 10) + appSecret))
 	reqBody, _ := json.Marshal(map[string]interface{}{
@@ -990,9 +987,12 @@ func goplusAuthHeader() string {
 	if !strings.HasPrefix(token, "Bearer ") {
 		token = "Bearer " + token
 	}
+	// Publish under the write lock — brief, no network held.
+	goplusTokenCache.Lock()
 	goplusTokenCache.token = token
 	goplusTokenCache.appKey = appKey
 	goplusTokenCache.expires = time.Now().Add(time.Duration(parsed.Result.ExpiresIn) * time.Second)
+	goplusTokenCache.Unlock()
 	return token
 }
 
