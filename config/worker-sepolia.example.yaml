@@ -27,9 +27,13 @@ gateway_address: "127.0.0.1:2206"
 eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
 eth_ws_url:  wss://ethereum-sepolia-rpc.publicnode.com
 
-# Third-party bundler endpoint (no self-hosted bundler).
+# Bundler endpoint. bundler_provider defaults to 'alchemy' in code (URL derived
+# from alchemy_api_key); pinned to self_hosted here so this worker uses bundler_url.
+# Set 'alchemy' + ALCHEMY_API_KEY to route via Alchemy instead.
 # Set the SEPOLIA_BUNDLER_URL env var via .env.local before launching.
-bundler_url: ${SEPOLIA_BUNDLER_URL}
+bundler_url:      ${SEPOLIA_BUNDLER_URL}
+bundler_provider: self_hosted
+alchemy_api_key:  ${ALCHEMY_API_KEY}
 
 # Smart wallet / account abstraction config.
 smart_wallet:
