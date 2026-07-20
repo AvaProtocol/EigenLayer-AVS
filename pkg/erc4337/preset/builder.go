@@ -562,7 +562,11 @@ func sendUserOpShared(
 	copy(originalCallData, callData)
 
 	// Initialize clients once and reuse them
-	bundlerClient, err := bundler.NewBundlerClient(smartWalletConfig.BundlerURL)
+	activeBundlerURL, err := smartWalletConfig.ActiveBundlerURL()
+	if err != nil {
+		return nil, nil, err
+	}
+	bundlerClient, err := bundler.NewBundlerClient(activeBundlerURL)
 	if err != nil {
 		return nil, nil, err
 	}

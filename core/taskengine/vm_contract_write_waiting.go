@@ -112,7 +112,11 @@ func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirm
 	}
 
 	// Create bundler client
-	bundlerClient, err := bundler.NewBundlerClient(v.smartWalletConfig.BundlerURL)
+	activeBundlerURL, err := v.smartWalletConfig.ActiveBundlerURL()
+	if err != nil {
+		return nil, fmt.Errorf("resolve bundler endpoint: %w", err)
+	}
+	bundlerClient, err := bundler.NewBundlerClient(activeBundlerURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create bundler client: %w", err)
 	}

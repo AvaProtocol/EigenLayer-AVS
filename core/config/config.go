@@ -187,9 +187,19 @@ type NotificationsSummaryConfig struct {
 }
 
 type SmartWalletConfig struct {
-	EthRpcUrl         string
-	EthWsUrl          string
-	BundlerURL        string
+	EthRpcUrl string
+	EthWsUrl  string
+	// BundlerURL is the self-hosted (Voltaire) bundler endpoint. Used only when
+	// BundlerProvider is "self_hosted".
+	BundlerURL string
+	// BundlerProvider selects the bundler endpoint. "alchemy" (the default when
+	// empty) derives the URL from AlchemyAPIKey + the chain's Alchemy subdomain;
+	// "self_hosted" uses BundlerURL (our Voltaire bundler). The alchemy path never
+	// falls back to BundlerURL — a missing key or unmapped chain is a hard error.
+	BundlerProvider string
+	// AlchemyAPIKey is the Alchemy app key for the alchemy provider. The bundler
+	// URL is derived as https://<subdomain>.g.alchemy.com/v2/<AlchemyAPIKey>.
+	AlchemyAPIKey     string
 	FactoryAddress    common.Address
 	EntrypointAddress common.Address
 	// ChainID of the connected network (derived at runtime from RPC)
@@ -206,6 +216,67 @@ type SmartWalletConfig struct {
 	MaxWalletsPerOwner int
 }
 
+// Bundler provider identifiers for SmartWalletConfig.BundlerProvider.
+const (
+	BundlerProviderAlchemy    = "alchemy"
+	BundlerProviderSelfHosted = "self_hosted"
+)
+
+// alchemyNetworkSubdomain maps a chain ID to its Alchemy JSON-RPC/bundler
+// network subdomain (https://<subdomain>.g.alchemy.com/v2/<key>). Extend this
+// when onboarding a new chain to the Alchemy bundler path — e.g. Unichain
+// ("unichain-mainnet") or Robinhood Chain ("robinhood-mainnet").
+var alchemyNetworkSubdomain = map[int64]string{
+	1:        "eth-mainnet",
+	11155111: "eth-sepolia",
+	8453:     "base-mainnet",
+	84532:    "base-sepolia",
+}
+
+// ProviderName returns the effective bundler provider, defaulting to alchemy
+// when BundlerProvider is empty. Safe to log (no secret).
+func (c *SmartWalletConfig) ProviderName() string {
+	p := strings.ToLower(strings.TrimSpace(c.BundlerProvider))
+	if p == "" {
+		return BundlerProviderAlchemy
+	}
+	return p
+}
+
+// ActiveBundlerURL returns the bundler endpoint for the configured provider.
+// The provider defaults to alchemy. The alchemy path derives its URL from
+// AlchemyAPIKey + the chain's Alchemy subdomain and NEVER falls back to
+// BundlerURL; a missing key or an unmapped chain is a hard error (fail closed).
+// The self_hosted path uses BundlerURL (our Voltaire bundler).
+func (c *SmartWalletConfig) ActiveBundlerURL() (string, error) {
+	switch c.ProviderName() {
+	case BundlerProviderSelfHosted, "voltaire":
+		if c.BundlerURL == "" {
+			return "", fmt.Errorf("bundler_provider=self_hosted but bundler_url is empty (chain_id=%d)", c.ChainID)
+		}
+		return c.BundlerURL, nil
+	case BundlerProviderAlchemy:
+		if c.AlchemyAPIKey == "" {
+			return "", fmt.Errorf("bundler_provider=alchemy but alchemy_api_key is empty (chain_id=%d); set alchemy_api_key or bundler_provider: self_hosted", c.ChainID)
+		}
+		subdomain, ok := alchemyNetworkSubdomain[c.ChainID]
+		if !ok {
+			return "", fmt.Errorf("bundler_provider=alchemy but chain_id=%d has no known Alchemy network subdomain; add it to alchemyNetworkSubdomain or set bundler_provider: self_hosted", c.ChainID)
+		}
+		return fmt.Sprintf("https://%s.g.alchemy.com/v2/%s", subdomain, c.AlchemyAPIKey), nil
+	default:
+		return "", fmt.Errorf("unknown bundler_provider %q (chain_id=%d); expected %q or %q", c.BundlerProvider, c.ChainID, BundlerProviderAlchemy, BundlerProviderSelfHosted)
+	}
+}
+
+// BundlerConfigured reports whether a bundler endpoint resolves for this chain.
+// Distinguishes wallet-op chains from connectivity-only rollouts (where no
+// bundler is configured for either provider).
+func (c *SmartWalletConfig) BundlerConfigured() bool {
+	_, err := c.ActiveBundlerURL()
+	return err == nil
+}
+
 type BackupConfig struct {
 	Enabled         bool   // Whether periodic backups are enabled
 	IntervalMinutes int    // Interval between backups in minutes
@@ -218,6 +289,8 @@ type SmartWalletConfigRaw struct {
 	EthRpcUrl            string   `yaml:"eth_rpc_url"`
 	EthWsUrl             string   `yaml:"eth_ws_url"`
 	BundlerURL           string   `yaml:"bundler_url"`
+	BundlerProvider      string   `yaml:"bundler_provider"`
+	AlchemyAPIKey        string   `yaml:"alchemy_api_key"`
 	FactoryAddress       string   `yaml:"factory_address"`
 	EntrypointAddress    string   `yaml:"entrypoint_address"`
 	ControllerPrivateKey string   `yaml:"controller_private_key"`
@@ -546,6 +619,8 @@ func NewConfig(configFilePath string) (*Config, error) {
 			EthRpcUrl:            configRaw.SmartWallet.EthRpcUrl,
 			EthWsUrl:             configRaw.SmartWallet.EthWsUrl,
 			BundlerURL:           configRaw.SmartWallet.BundlerURL,
+			BundlerProvider:      configRaw.SmartWallet.BundlerProvider,
+			AlchemyAPIKey:        configRaw.SmartWallet.AlchemyAPIKey,
 			FactoryAddress:       common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.FactoryAddress, DefaultFactoryProxyAddressHex)),
 			EntrypointAddress:    common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.EntrypointAddress, DefaultEntrypointAddressHex)),
 			ChainID:              smartWalletChainId.Int64(), // Use smart wallet chain ID, not EigenLayer chain ID (prevents cross-chain configuration errors for Base aggregator)
@@ -937,6 +1012,8 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 			EthRpcUrl:            sw.EthRpcUrl,
 			EthWsUrl:             wsURL,
 			BundlerURL:           sw.BundlerURL,
+			BundlerProvider:      sw.BundlerProvider,
+			AlchemyAPIKey:        sw.AlchemyAPIKey,
 			FactoryAddress:       common.HexToAddress(firstNonEmpty(sw.FactoryAddress, DefaultFactoryProxyAddressHex)),
 			EntrypointAddress:    common.HexToAddress(firstNonEmpty(sw.EntrypointAddress, DefaultEntrypointAddressHex)),
 			ChainID:              raw.ChainID,
@@ -950,11 +1027,12 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 
 	// Probe paymaster on this chain's RPC. Catches mismatched
 	// paymaster/RPC pairings at startup instead of waiting for the
-	// first UserOp to fail (Sentry EIGENLAYER-AVS-1N/1M). Skip when
-	// bundler_url is empty: that signals a connectivity-only rollout
-	// (e.g. BNB Phase 0.5 in avs-infra/chains/), where wallet ops are
-	// intentionally disabled and the paymaster_address is a placeholder.
-	if chainCfg.SmartWallet.BundlerURL != "" && chainCfg.SmartWallet.EthRpcUrl != "" {
+	// first UserOp to fail (Sentry EIGENLAYER-AVS-1N/1M). Skip when no
+	// bundler resolves for the configured provider: that signals a
+	// connectivity-only rollout (e.g. BNB Phase 0.5 in avs-infra/chains/),
+	// where wallet ops are intentionally disabled and the paymaster_address
+	// is a placeholder.
+	if chainCfg.SmartWallet.BundlerConfigured() && chainCfg.SmartWallet.EthRpcUrl != "" {
 		rpcClient, err := ethclient.Dial(chainCfg.SmartWallet.EthRpcUrl)
 		if err != nil {
 			return nil, fmt.Errorf("dial RPC %s for chain %s (chain_id=%d): %w",

@@ -764,6 +764,9 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 		PaymasterAddress:     paymasterAddress,
 		WhitelistAddresses:   []common.Address{},
 	}
+	// Tests target our self-hosted (Voltaire) bundler at GetTestBundlerRPC();
+	// the provider now defaults to alchemy, so opt in explicitly.
+	smartWalletConfig.BundlerProvider = config.BundlerProviderSelfHosted
 
 	// Fetch paymaster owner address by calling owner() on the paymaster contract.
 	// Reimbursement sends ETH to the owner EOA, not the paymaster contract itself.
@@ -815,6 +818,7 @@ func GetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 	return &config.SmartWalletConfig{
 		EthRpcUrl:            GetTestRPC(),
 		BundlerURL:           GetTestBundlerRPC(),
+		BundlerProvider:      config.BundlerProviderSelfHosted,
 		EthWsUrl:             GetTestWsRPC(),
 		FactoryAddress:       common.HexToAddress(GetTestFactoryAddress()),
 		EntrypointAddress:    common.HexToAddress(GetTestEntrypointAddress()),

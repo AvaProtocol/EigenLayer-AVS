@@ -53,7 +53,15 @@ tenderly_access_key: ""
 # AVS chain above. Per-workflow execution still routes via chains[].
 smart_wallet:
   eth_rpc_url:            https://ethereum-sepolia-rpc.publicnode.com
-  bundler_url:            ${SEPOLIA_BUNDLER_URL}
+  # bundler_provider selects the bundler. It DEFAULTS TO 'alchemy' when omitted:
+  # the URL is derived as https://<chain-subdomain>.g.alchemy.com/v2/<alchemy_api_key>
+  # and NEVER falls back to bundler_url. Set alchemy_api_key, or set
+  # bundler_provider: self_hosted to use bundler_url (our Voltaire bundler).
+  # A chain with neither a valid alchemy config nor (self_hosted + bundler_url)
+  # hard-errors at send time — so every wallet-op chain must set one.
+  bundler_provider:       alchemy
+  alchemy_api_key:        ${ALCHEMY_API_KEY}
+  bundler_url:            ${SEPOLIA_BUNDLER_URL}   # used only when bundler_provider: self_hosted
   controller_private_key: <testnet-controller-private-key-hex>
   paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
 

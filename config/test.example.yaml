@@ -56,6 +56,10 @@ tenderly_access_key: ""
 smart_wallet:
   eth_rpc_url:            https://ethereum-sepolia-rpc.publicnode.com
   bundler_url:            ${SEPOLIA_BUNDLER_URL}
+  # bundler_provider defaults to 'alchemy' (URL derived from alchemy_api_key +
+  # chain subdomain). Set to 'self_hosted' to use bundler_url (Voltaire).
+  bundler_provider:       self_hosted
+  alchemy_api_key:        ${ALCHEMY_API_KEY}
   controller_private_key: <testnet-controller-private-key-hex>
   paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
 
@@ -69,6 +73,8 @@ chains:
       eth_rpc_url:            https://ethereum-sepolia-rpc.publicnode.com
       eth_ws_url:             wss://ethereum-sepolia-rpc.publicnode.com
       bundler_url:            ${SEPOLIA_BUNDLER_URL}
+      bundler_provider:       self_hosted
+      alchemy_api_key:        ${ALCHEMY_API_KEY}
       controller_private_key: <testnet-controller-private-key-hex>
       paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
       max_wallets_per_owner:  2000
@@ -80,6 +86,8 @@ chains:
       eth_rpc_url:            https://sepolia.base.org
       eth_ws_url:             wss://base-sepolia-rpc.publicnode.com
       bundler_url:            ${BASE_SEPOLIA_BUNDLER_URL}
+      bundler_provider:       self_hosted
+      alchemy_api_key:        ${ALCHEMY_API_KEY}
       controller_private_key: <testnet-controller-private-key-hex>
       paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
       max_wallets_per_owner:  3

@@ -17,9 +17,11 @@ type WorkerConfig struct {
 	ListenAddress string `yaml:"listen_address"`
 	HealthAddress string `yaml:"health_address"`
 
-	EthRpcUrl  string `yaml:"eth_rpc_url"`
-	EthWsUrl   string `yaml:"eth_ws_url"`
-	BundlerURL string `yaml:"bundler_url"`
+	EthRpcUrl       string `yaml:"eth_rpc_url"`
+	EthWsUrl        string `yaml:"eth_ws_url"`
+	BundlerURL      string `yaml:"bundler_url"`
+	BundlerProvider string `yaml:"bundler_provider"`
+	AlchemyAPIKey   string `yaml:"alchemy_api_key"`
 
 	SmartWallet SmartWalletRaw `yaml:"smart_wallet"`
 }
@@ -84,6 +86,8 @@ func (c *WorkerConfig) ToSmartWalletConfig() (*config.SmartWalletConfig, error) 
 		EthRpcUrl:             c.EthRpcUrl,
 		EthWsUrl:              c.EthWsUrl,
 		BundlerURL:            c.BundlerURL,
+		BundlerProvider:       c.BundlerProvider,
+		AlchemyAPIKey:         c.AlchemyAPIKey,
 		FactoryAddress:        factoryAddr,
 		EntrypointAddress:     entrypointAddr,
 		ChainID:               c.ChainID,
