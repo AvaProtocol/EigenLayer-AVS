@@ -755,11 +755,27 @@ func sendUserOpShared(
 				}
 			}
 			if gasErr != nil || gas == nil {
-				l.Warn("Gas estimation failed, using defaults", "attempts", maxRetries, "error", gasErr)
-				// Fallback to conservative defaults when estimation fails
+				// Live estimation failed. Verification/preVerification gas are
+				// execution-independent, so prefer the earlier unwrapped estimate
+				// (if it succeeded) rather than the 1M DEFAULT_VERIFICATION_GAS_LIMIT
+				// — the blind default trips Alchemy Rundler's verification-gas-limit
+				// efficiency floor (>=20%). Fall back to the conservative default only
+				// when no estimate is available at all (e.g. the op genuinely reverts,
+				// in which case it will fail on-chain regardless of provider).
 				estimatedCallGas = new(big.Int).Mul(DEFAULT_CALL_GAS_LIMIT, big.NewInt(ETH_TRANSFER_GAS_MULTIPLIER))
-				estimatedVerificationGas = DEFAULT_VERIFICATION_GAS_LIMIT
 				estimatedPreVerificationGas = DEFAULT_PREVERIFICATION_GAS
+				if unwrappedGasEstimate != nil && unwrappedGasEstimate.VerificationGasLimit != nil && unwrappedGasEstimate.VerificationGasLimit.Sign() > 0 {
+					vg := new(big.Int).Mul(unwrappedGasEstimate.VerificationGasLimit, big.NewInt(115))
+					vg.Div(vg, big.NewInt(100)) // +15% buffer
+					estimatedVerificationGas = vg
+					if unwrappedGasEstimate.PreVerificationGas != nil && unwrappedGasEstimate.PreVerificationGas.Sign() > 0 {
+						estimatedPreVerificationGas = unwrappedGasEstimate.PreVerificationGas
+					}
+					l.Warn("Gas estimation failed; reusing unwrapped estimate for verification gas", "attempts", maxRetries, "verificationGas", estimatedVerificationGas, "error", gasErr)
+				} else {
+					estimatedVerificationGas = DEFAULT_VERIFICATION_GAS_LIMIT
+					l.Warn("Gas estimation failed, using conservative defaults", "attempts", maxRetries, "error", gasErr)
+				}
 			} else {
 				estimatedCallGas = gas.CallGasLimit
 				estimatedVerificationGas = gas.VerificationGasLimit
