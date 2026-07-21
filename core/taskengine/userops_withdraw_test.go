@@ -520,8 +520,8 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 	require.NoError(t, err, "Failed to get smart wallet balance")
 	t.Logf("💰 Smart Wallet ETH Balance: %s wei (%.9f ETH)", smartWalletBalance.String(), float64(smartWalletBalance.Int64())/1e18)
 
-	// Fixed withdrawal amount: 0.001 ETH
-	withdrawalAmount := big.NewInt(1000000000000000) // 0.001 ETH in wei
+	// Fixed withdrawal amount: 0.00001 ETH (small, to conserve testnet ETH across runs)
+	withdrawalAmount := big.NewInt(10000000000000) // 0.00001 ETH in wei
 
 	// Skip if balance is insufficient
 	if smartWalletBalance.Cmp(withdrawalAmount) < 0 {
@@ -558,10 +558,14 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 	})
 	require.NoError(t, err, "Failed to store wallet in database")
 
-	// ETHTransfer node configuration
+	// ETHTransfer node configuration.
+	// chainId lives on the node config (camelCase) — post chain-decoupling (G5)
+	// the strict resolver reads node.Config.chain_id, and a direct
+	// RunNodeImmediately call does not stamp it from settings.
 	ethTransferConfig := map[string]interface{}{
 		"destination": destinationAddress.Hex(),
 		"amount":      withdrawalAmount.String(),
+		"chainId":     int64(11155111), // Sepolia
 	}
 
 	settings := map[string]interface{}{

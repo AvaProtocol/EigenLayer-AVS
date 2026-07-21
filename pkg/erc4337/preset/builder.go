@@ -562,7 +562,11 @@ func sendUserOpShared(
 	copy(originalCallData, callData)
 
 	// Initialize clients once and reuse them
-	bundlerClient, err := bundler.NewBundlerClient(smartWalletConfig.BundlerURL)
+	activeBundlerURL, err := smartWalletConfig.ActiveBundlerURL()
+	if err != nil {
+		return nil, nil, err
+	}
+	bundlerClient, err := bundler.NewBundlerClient(activeBundlerURL)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -682,12 +686,25 @@ func sendUserOpShared(
 		isWrappedOperation := len(callData) >= 4 && hexutil.Encode(callData[:4]) == "0xc3ff72fc"
 
 		if isWrappedOperation {
-			// SKIP gas estimation for wrapped operations - bundler simulation always fails with -32521
-			// Use fallback defaults directly since estimation will fail anyway
-			l.Debug("Skipping gas estimation for wrapped operation (executeBatchWithValues)")
+			// The wrapped op (executeBatchWithValues) reverts under eth_estimateUserOperationGas
+			// (-32521), so its CALL gas can't be bundler-simulated — keep the padded default there.
+			// But VERIFICATION gas (validateUserOp + paymaster validation) is independent of the
+			// execution calldata, so reuse the accurate value from the unwrapped estimate instead
+			// of the 1M conservative default. The default trips Alchemy Rundler's verification-gas-
+			// limit-efficiency floor (needs >=20%; 1M declared vs ~30K actual ≈ 3%). Voltaire has no
+			// such floor, which is why the default worked there. A small buffer hedges paymaster
+			// validation variance while staying well above the 20% floor.
 			estimatedCallGas = new(big.Int).Mul(DEFAULT_CALL_GAS_LIMIT, big.NewInt(ETH_TRANSFER_GAS_MULTIPLIER))
-			estimatedVerificationGas = DEFAULT_VERIFICATION_GAS_LIMIT
 			estimatedPreVerificationGas = DEFAULT_PREVERIFICATION_GAS
+			if unwrappedGasEstimate != nil && unwrappedGasEstimate.VerificationGasLimit != nil && unwrappedGasEstimate.VerificationGasLimit.Sign() > 0 {
+				vg := new(big.Int).Mul(unwrappedGasEstimate.VerificationGasLimit, big.NewInt(115))
+				vg.Div(vg, big.NewInt(100)) // +15% buffer
+				estimatedVerificationGas = vg
+				l.Debug("Wrapped operation: verification gas from unwrapped estimate (+15%)", "verificationGas", estimatedVerificationGas, "callGas", estimatedCallGas)
+			} else {
+				l.Debug("Wrapped operation: no unwrapped estimate, using conservative verification default")
+				estimatedVerificationGas = DEFAULT_VERIFICATION_GAS_LIMIT
+			}
 		} else {
 			// Attempt bundler gas estimation on unwrapped calldata
 			// IMPORTANT: Pass 0 for callGasLimit and verificationGasLimit to force bundler to actually estimate
@@ -738,11 +755,27 @@ func sendUserOpShared(
 				}
 			}
 			if gasErr != nil || gas == nil {
-				l.Warn("Gas estimation failed, using defaults", "attempts", maxRetries, "error", gasErr)
-				// Fallback to conservative defaults when estimation fails
+				// Live estimation failed. Verification/preVerification gas are
+				// execution-independent, so prefer the earlier unwrapped estimate
+				// (if it succeeded) rather than the 1M DEFAULT_VERIFICATION_GAS_LIMIT
+				// — the blind default trips Alchemy Rundler's verification-gas-limit
+				// efficiency floor (>=20%). Fall back to the conservative default only
+				// when no estimate is available at all (e.g. the op genuinely reverts,
+				// in which case it will fail on-chain regardless of provider).
 				estimatedCallGas = new(big.Int).Mul(DEFAULT_CALL_GAS_LIMIT, big.NewInt(ETH_TRANSFER_GAS_MULTIPLIER))
-				estimatedVerificationGas = DEFAULT_VERIFICATION_GAS_LIMIT
 				estimatedPreVerificationGas = DEFAULT_PREVERIFICATION_GAS
+				if unwrappedGasEstimate != nil && unwrappedGasEstimate.VerificationGasLimit != nil && unwrappedGasEstimate.VerificationGasLimit.Sign() > 0 {
+					vg := new(big.Int).Mul(unwrappedGasEstimate.VerificationGasLimit, big.NewInt(115))
+					vg.Div(vg, big.NewInt(100)) // +15% buffer
+					estimatedVerificationGas = vg
+					if unwrappedGasEstimate.PreVerificationGas != nil && unwrappedGasEstimate.PreVerificationGas.Sign() > 0 {
+						estimatedPreVerificationGas = unwrappedGasEstimate.PreVerificationGas
+					}
+					l.Warn("Gas estimation failed; reusing unwrapped estimate for verification gas", "attempts", maxRetries, "verificationGas", estimatedVerificationGas, "error", gasErr)
+				} else {
+					estimatedVerificationGas = DEFAULT_VERIFICATION_GAS_LIMIT
+					l.Warn("Gas estimation failed, using conservative defaults", "attempts", maxRetries, "error", gasErr)
+				}
 			} else {
 				estimatedCallGas = gas.CallGasLimit
 				estimatedVerificationGas = gas.VerificationGasLimit
@@ -781,11 +814,21 @@ func sendUserOpShared(
 		return nil, nil, err
 	}
 
-	// Run full validation on the final, fully-built userOp to catch signature/paymaster issues early
+	// Run full validation on the final, fully-built userOp to catch signature/paymaster issues early.
+	// eth_simulateUserOperation is a Voltaire/Candide extension; third-party bundlers (e.g. Alchemy
+	// Rundler) don't implement it and return JSON-RPC -32600/-32601 "Unsupported method". Treat that
+	// as non-fatal and skip the early sim — sendUserOpCore still runs eth_estimateUserOperationGas,
+	// which simulates against the EntryPoint and rejects reverting ops. A genuine sim failure on a
+	// bundler that DOES support the method is still fatal.
 	if paymasterReq != nil {
 		if simErr := bundlerClient.SimulateUserOperation(context.Background(), *userOp, entrypoint); simErr != nil {
-			l.Warn("SimulateUserOperation failed", "error", simErr)
-			return userOp, nil, fmt.Errorf("simulate validation failed: %w", simErr)
+			msg := strings.ToLower(simErr.Error())
+			if strings.Contains(msg, "unsupported method") || strings.Contains(msg, "method not found") || strings.Contains(msg, "-32601") {
+				l.Warn("bundler does not support eth_simulateUserOperation; skipping early sim (gas estimation still validates)", "error", simErr)
+			} else {
+				l.Warn("SimulateUserOperation failed", "error", simErr)
+				return userOp, nil, fmt.Errorf("simulate validation failed: %w", simErr)
+			}
 		}
 	}
 

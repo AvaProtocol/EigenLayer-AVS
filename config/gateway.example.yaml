@@ -53,6 +53,14 @@ tenderly_access_key: ""
 # AVS chain above. Per-workflow execution still routes via chains[].
 smart_wallet:
   eth_rpc_url:            https://ethereum-sepolia-rpc.publicnode.com
+  # bundler_provider selects the bundler and DEFAULTS TO 'alchemy' in code when
+  # omitted: the URL is derived from alchemy_api_key + the chain's Alchemy subdomain
+  # and NEVER falls back to bundler_url. This example pins 'self_hosted' so a copied
+  # config works out-of-box with your Voltaire ${*_BUNDLER_URL}; switch to 'alchemy'
+  # (and set ALCHEMY_API_KEY) to route through Alchemy. A wallet-op chain configured
+  # for alchemy with no key — or an alchemy-unmapped chain — hard-errors at send time.
+  bundler_provider:       self_hosted
+  alchemy_api_key:        ${ALCHEMY_API_KEY}
   bundler_url:            ${SEPOLIA_BUNDLER_URL}
   controller_private_key: <testnet-controller-private-key-hex>
   paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
@@ -68,6 +76,8 @@ chains:
       eth_rpc_url:            https://ethereum-sepolia-rpc.publicnode.com
       eth_ws_url:             wss://ethereum-sepolia-rpc.publicnode.com
       bundler_url:            ${SEPOLIA_BUNDLER_URL}
+      bundler_provider:       self_hosted
+      alchemy_api_key:        ${ALCHEMY_API_KEY}
       controller_private_key: <testnet-controller-private-key-hex>
       paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
       max_wallets_per_owner:  2000
@@ -79,6 +89,8 @@ chains:
       eth_rpc_url:            https://sepolia.base.org
       eth_ws_url:             wss://base-sepolia-rpc.publicnode.com
       bundler_url:            ${BASE_SEPOLIA_BUNDLER_URL}
+      bundler_provider:       self_hosted
+      alchemy_api_key:        ${ALCHEMY_API_KEY}
       controller_private_key: <testnet-controller-private-key-hex>
       paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
       max_wallets_per_owner:  3
