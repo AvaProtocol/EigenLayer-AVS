@@ -20,6 +20,11 @@ func TestActiveBundlerURL(t *testing.T) {
 			want: "https://base-mainnet.g.alchemy.com/v2/K2",
 		},
 		{
+			name: "explicit alchemy on bnb mainnet",
+			cfg:  SmartWalletConfig{BundlerProvider: "alchemy", ChainID: 56, AlchemyAPIKey: "K3"},
+			want: "https://bnb-mainnet.g.alchemy.com/v2/K3",
+		},
+		{
 			name: "alchemy path never falls back to bundler_url",
 			cfg:  SmartWalletConfig{ChainID: 11155111, AlchemyAPIKey: "K", BundlerURL: "https://voltaire.example/rpc"},
 			want: "https://eth-sepolia.g.alchemy.com/v2/K",

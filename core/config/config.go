@@ -231,6 +231,7 @@ var alchemyNetworkSubdomain = map[int64]string{
 	11155111: "eth-sepolia",
 	8453:     "base-mainnet",
 	84532:    "base-sepolia",
+	56:       "bnb-mainnet",
 }
 
 // ProviderName returns the effective bundler provider, defaulting to alchemy
