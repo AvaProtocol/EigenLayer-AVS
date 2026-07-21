@@ -1085,6 +1085,7 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 		"chain_id", chainCfg.ChainID,
 		"name", chainCfg.Name,
 		"worker_addr", chainCfg.WorkerAddr,
+		"bundler_provider", chainCfg.SmartWallet.ProviderName(),
 		"controller", chainCfg.SmartWallet.ControllerAddress.Hex(),
 		"paymaster_owner", chainCfg.SmartWallet.PaymasterOwnerAddress.Hex())
 
