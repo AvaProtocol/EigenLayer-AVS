@@ -174,6 +174,20 @@ controller-signed authKey path. **Seam to preserve now:** the execute authorizat
 single, swappable check (today: "controller can sign for this wallet"; tomorrow: "Calibur permission
 exists") so dropping Calibur in does not touch the partner/scope layer.
 
+**Why Calibur, and not a 4337-routed EIP-7702 account: no EntryPoint migration.** We run **EntryPoint
+v0.6** today ([client.go:25](pkg/erc4337/bundler/client.go#L25), `EntryPointV06Address`), while every
+EIP-7702 delegation candidate surveyed in
+[discussion #658](https://github.com/AvaProtocol/EigenLayer-AVS/discussions/658) targets EntryPoint v0.7+.
+Forcing 7702 accounts through our 4337/bundler rails would drag in a v0.6→v0.7 migration we have not
+scoped. Calibur's relayer-native / direct-transaction model instead lets the aggregator EOA sign and
+submit the call directly — **no bundler, no EntryPoint upgrade** — which is the decisive reason it is the
+pick over a bundler-routed 7702 account. This reinforces the seam above: only the swappable authority
+check changes; the execution transport stays put and forces no infra migration. **De-risking next step
+(small + verifiable, not a full build):** a minimal Sepolia PoC of a Calibur-delegated EOA executing a
+single scoped call directly from the aggregator EOA (no bundler) and then revoking that authority — tx
+hashes proving the direct-transaction path works, no EntryPoint migration is needed, and revocation
+behaves — before any production code lands.
+
 **4.2 Partner attribution on tasks.** Add `string partner_id = NN [json_name="partnerId"]` to
 `protobuf/avs.proto` (additive/`omitempty`; old tasks load via the existing `DiscardUnknown` path,
 [executor.go:138](core/taskengine/executor.go#L138)); run `make protoc-gen` + `make storage-check`).
