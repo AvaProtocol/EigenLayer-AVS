@@ -124,6 +124,10 @@ func TestAtomicBatchOnDemand(t *testing.T) {
 		assert.Equal(t, true, results[0]["success"])
 		assert.Equal(t, true, results[1]["success"])
 		assert.True(t, step.Success)
+
+		// The two results share one on-chain receipt (gasUsed 21000), so step gas must be counted
+		// once — not summed per sub-call. Guards against the fan-out double-counting gas.
+		assert.Equal(t, "21000", step.GasUsed, "batch gas must be counted once across sub-calls, not 2x")
 	})
 
 	t.Run("a reverted batch fails all sub-calls atomically", func(t *testing.T) {
@@ -164,5 +168,78 @@ func TestAtomicBatchOnDemand(t *testing.T) {
 		require.NoError(t, err)
 		// Two method calls on a deployed task => two sequential UserOps (unchanged, non-batched).
 		require.Equal(t, 2, callCount, "deployed multi-call path must remain one UserOp per method")
+	})
+
+	t.Run("a value-bearing call packs executeBatchWithValues", func(t *testing.T) {
+		vm, err := NewVMWithData(nil, nil, swConfig, nil)
+		require.NoError(t, err)
+		vm.AddVar("aa_sender", runner.Hex())
+		processor := NewContractWriteProcessor(vm, nil, swConfig, owner)
+
+		var callCount int
+		var captured []byte
+		processor.sendUserOpFunc = countingSender(&callCount, &captured, 1)
+
+		// Node-level value applies to the LAST sub-call, so the batch carries a non-zero value and
+		// must fall back from executeBatch to executeBatchWithValues.
+		cdA := approveCalldataHex(router, 1000)
+		cdB := approveCalldataHex(router, 2000)
+		addrA := tokenA.Hex()
+		addrB := tokenB.Hex()
+		value := "12345"
+		node := &avsproto.ContractWriteNode{
+			Config: &avsproto.ContractWriteNode_Config{
+				ContractAddress: tokenA.Hex(),
+				ChainId:         swConfig.ChainID,
+				IsSimulated:     &falsePtr,
+				Value:           &value,
+				MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
+					{MethodName: "approve", CallData: &cdA, ContractAddress: &addrA},
+					{MethodName: "approve", CallData: &cdB, ContractAddress: &addrB},
+				},
+			},
+		}
+
+		_, err = processor.Execute("step1", node)
+		require.NoError(t, err)
+		require.Equal(t, 1, callCount, "still one UserOp")
+
+		require.GreaterOrEqual(t, len(captured), 4)
+		assert.Equal(t, "c3ff72fc", common.Bytes2Hex(captured[:4]), "value-bearing batch must use executeBatchWithValues")
+		_, values, _, err := aa.UnpackExecuteCalldata(captured)
+		require.NoError(t, err)
+		require.Len(t, values, 2)
+		assert.Equal(t, int64(0), values[0].Int64(), "approve (not last) carries 0 value")
+		assert.Equal(t, "12345", values[1].String(), "node value lands on the last sub-call")
+	})
+
+	t.Run("an unresolvable per-call contractAddress fails fast (no UserOp)", func(t *testing.T) {
+		vm, err := NewVMWithData(nil, nil, swConfig, nil)
+		require.NoError(t, err)
+		vm.AddVar("aa_sender", runner.Hex())
+		processor := NewContractWriteProcessor(vm, nil, swConfig, owner)
+
+		var callCount int
+		processor.sendUserOpFunc = countingSender(&callCount, nil, 1)
+
+		cdA := approveCalldataHex(router, 1000)
+		cdB := approveCalldataHex(router, 2000)
+		addrA := tokenA.Hex()
+		bad := "0xNOT_A_VALID_ADDRESS"
+		node := &avsproto.ContractWriteNode{
+			Config: &avsproto.ContractWriteNode_Config{
+				ContractAddress: tokenA.Hex(),
+				ChainId:         swConfig.ChainID,
+				IsSimulated:     &falsePtr,
+				MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
+					{MethodName: "approve", CallData: &cdA, ContractAddress: &addrA},
+					{MethodName: "approve", CallData: &cdB, ContractAddress: &bad},
+				},
+			},
+		}
+
+		_, err = processor.Execute("step1", node)
+		require.Error(t, err, "an invalid per-call target must fail the node, not silently fall back")
+		require.Equal(t, 0, callCount, "no UserOp should be sent when a target is invalid")
 	})
 }

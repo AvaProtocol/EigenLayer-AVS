@@ -429,11 +429,13 @@ func EstimateGasReimbursementAmount(client *ethclient.Client, gasEstimate *bundl
 	return reimbursement, nil
 }
 
-// wrapWithReimbursement wraps original SimpleAccount.execute() calldata with
-// executeBatchWithValues to add reimbursement transfers atomically. It appends a
-// transfer of reimbursement ETH to the reimbursement recipient (paymaster owner),
-// and if executionFeeWei is non-nil and > 0, it also adds a transfer of the
-// execution fee to the same recipient.
+// wrapWithReimbursement re-packs the original smart-wallet calldata as
+// executeBatchWithValues to add reimbursement transfers atomically. The input may be a single
+// SimpleAccount.execute() OR an already-batched executeBatch()/executeBatchWithValues() (e.g. an
+// on-demand approve+swap): it is decoded via aa.UnpackExecuteCalldata into its application call(s),
+// then a transfer of reimbursement ETH to the reimbursement recipient (paymaster owner) is
+// appended, plus — if executionFeeWei is non-nil and > 0 — a transfer of the execution fee to the
+// same recipient.
 func wrapWithReimbursement(
 	client *ethclient.Client,
 	originalCallData []byte,

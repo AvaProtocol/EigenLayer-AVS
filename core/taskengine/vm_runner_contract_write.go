@@ -1030,6 +1030,20 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 // failed. It composes with the paymaster reimbursement wrapper (which now appends its entries onto
 // this batch) and is used only on the run-node route for real (non-simulated) multi-call execution;
 // deployed workflows keep the sequential per-method path.
+// uniqueTargetHexes returns the distinct target addresses (hex, order-preserving) — used to label
+// batch logs with every contract involved rather than just the first sub-call's.
+func uniqueTargetHexes(targets []common.Address) []string {
+	seen := make(map[common.Address]bool, len(targets))
+	out := make([]string, 0, len(targets))
+	for _, t := range targets {
+		if !seen[t] {
+			seen[t] = true
+			out = append(out, t.Hex())
+		}
+	}
+	return out
+}
+
 func (r *ContractWriteProcessor) executeAtomicBatch(
 	ctx context.Context,
 	node *avsproto.ContractWriteNode,
@@ -1037,7 +1051,7 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 	methodCalls []*avsproto.ContractWriteNode_MethodCall,
 	perCallTargets []common.Address,
 	log *strings.Builder,
-) []*avsproto.ContractWriteNode_MethodResult {
+) (results []*avsproto.ContractWriteNode_MethodResult) {
 	n := len(methodCalls)
 
 	// failAll builds a uniform failure result set. Atomic intent: if the batch can't be assembled
@@ -1064,6 +1078,24 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 		}
 		return out
 	}
+
+	// Match the sequential per-method path's panic-recovery safety net: this route runs the same
+	// historically-fragile machinery (resolveMethodCallData → GenerateOrUseCallData, ABI tuple
+	// normalization, submitSmartWalletUserOp). Degrade a panic to a failed batch (all sub-calls) and
+	// report to Sentry rather than letting it unwind the request goroutine.
+	defer func() {
+		if rcv := recover(); rcv != nil {
+			if r.vm != nil && r.vm.logger != nil {
+				r.vm.logger.Error("🚨 PANIC in executeAtomicBatch - capturing for Sentry",
+					"panic", fmt.Sprintf("%v", rcv), "num_calls", n)
+			}
+			enhancedPanicRecovery("contract_write", "executeAtomicBatch", map[string]interface{}{
+				"num_calls":  n,
+				"panic_type": fmt.Sprintf("%T", rcv),
+			})
+			results = failAll(fmt.Sprintf("panic during atomic batch execution: %v", rcv), nil)
+		}
+	}()
 
 	if r.smartWalletConfig == nil {
 		log.WriteString("Atomic batch requires smart wallet config; aborting\n")
@@ -1143,11 +1175,14 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 	}
 
 	logLabel := fmt.Sprintf("atomicBatch[%s]", strings.Join(methodNames, ","))
+	// The batch spans heterogeneous targets; join the unique ones so bundler/AA error logs don't
+	// misleadingly point at just the first sub-call's contract.
+	logTarget := strings.Join(uniqueTargetHexes(targets), ",")
 	log.WriteString(fmt.Sprintf("Submitting atomic batch of %d calls as one UserOp (%s)\n", n, packKind))
 
 	var executionLogBuilder strings.Builder
 	executionLogBuilder.WriteString(fmt.Sprintf("Atomic batch UserOp for %d calls (%s)\n", n, packKind))
-	userOp, receipt, userErrorMsg := r.submitSmartWalletUserOp(ctx, smartWalletCallData, logLabel, targets[0].Hex(), &executionLogBuilder)
+	userOp, receipt, userErrorMsg := r.submitSmartWalletUserOp(ctx, smartWalletCallData, logLabel, logTarget, &executionLogBuilder)
 	if userErrorMsg != "" {
 		return failAll(userErrorMsg, nil)
 	}
@@ -1156,7 +1191,7 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 	// (txHash/userOpHash) and the same all-or-nothing success (executeBatch reverts atomically),
 	// while each carries its own methodName/target/methodABI so the downstream event decoder
 	// attributes per-call events (Approval to the token, Swap/amountOut to the pool).
-	results := make([]*avsproto.ContractWriteNode_MethodResult, n)
+	results = make([]*avsproto.ContractWriteNode_MethodResult, n)
 	for i := range methodCalls {
 		callDataHex := "0x" + common.Bytes2Hex(datas[i])
 		results[i] = r.createRealTransactionResult(methodNames[i], perCallTargets[i].Hex(), callDataHex, parsedABI, userOp, receipt)
@@ -1782,9 +1817,19 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	for i, mc := range methodCalls {
 		perCallTargets[i] = contractAddr
 		if override := strings.TrimSpace(mc.GetContractAddress()); override != "" {
-			if resolved := r.vm.preprocessTextWithVariableMapping(override); common.IsHexAddress(resolved) {
-				perCallTargets[i] = common.HexToAddress(resolved)
+			resolved := r.vm.preprocessTextWithVariableMapping(override)
+			if !common.IsHexAddress(resolved) {
+				// A per-call target was explicitly provided but did not resolve to a valid address
+				// (unresolved {{template}}, typo, or a variable that resolved to empty). Fail fast
+				// instead of silently falling back to the node-level contract — sending an atomic,
+				// irreversible sub-call to the wrong contract is exactly the footgun this feature
+				// exists to prevent. Mirrors the node-level validation in getInputData.
+				err = NewInvalidAddressError(resolved)
+				finalizeErrorMsg = err.Error()
+				finalizeSuccess = false
+				return s, err
 			}
+			perCallTargets[i] = common.HexToAddress(resolved)
 		}
 	}
 
@@ -2299,9 +2344,21 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	totalGasCost := "0"
 	hasGasInfo := false
 
+	// An atomic batch fans ONE on-chain receipt out into N MethodResults (all sharing the same
+	// transactionHash/gasUsed), so summing gas per result would over-count N×. Dedupe by tx identity
+	// and count each distinct receipt once. The sequential path is unaffected — its results carry
+	// distinct tx hashes (and if two of them were ever bundled into one tx, counting the shared
+	// receipt once is the correct behavior there too).
+	countedReceiptTx := make(map[string]bool)
 	for _, methodResult := range results {
 		if methodResult.Receipt != nil {
 			if receiptMap := methodResult.Receipt.AsInterface().(map[string]interface{}); receiptMap != nil {
+				if txh, ok := receiptMap["transactionHash"].(string); ok && txh != "" {
+					if countedReceiptTx[txh] {
+						continue // this receipt's gas was already counted for a sibling sub-call
+					}
+					countedReceiptTx[txh] = true
+				}
 				// Extract gas information from receipt
 				if gasUsedHex, ok := receiptMap["gasUsed"].(string); ok && gasUsedHex != "" {
 					// Convert hex to decimal for aggregation

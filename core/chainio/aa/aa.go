@@ -25,8 +25,10 @@ var (
 	factoryABI  abi.ABI
 	defaultSalt = big.NewInt(0)
 
-	simpleAccountABI  *abi.ABI
-	EntrypointAddress = common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789")
+	simpleAccountABI     *abi.ABI
+	simpleAccountABIOnce sync.Once
+	simpleAccountABIErr  error
+	EntrypointAddress    = common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789")
 
 	// factoryAddress is set via SetFactoryAddress() from config
 	// It uses the default from config.DefaultFactoryProxyAddressHex if not overridden in YAML
@@ -189,30 +191,35 @@ func loadSimpleAccountABI() (*abi.ABI, error) {
 	return &parsedABI, nil
 }
 
+// ensureSimpleAccountABI lazily parses and caches the embedded SimpleAccount ABI exactly once.
+// The parse is deterministic, so a sync.Once is enough — and it removes the check-then-set data
+// race on the package-level simpleAccountABI that the pack/unpack helpers previously shared (now
+// hit on every paymaster-sponsored send via UnpackExecuteCalldata, not just batches).
+func ensureSimpleAccountABI() (*abi.ABI, error) {
+	simpleAccountABIOnce.Do(func() {
+		simpleAccountABI, simpleAccountABIErr = loadSimpleAccountABI()
+	})
+	return simpleAccountABI, simpleAccountABIErr
+}
+
 // Generate calldata for UserOps
 func PackExecute(targetAddress common.Address, ethValue *big.Int, calldata []byte) ([]byte, error) {
-	var err error
-	if simpleAccountABI == nil {
-		simpleAccountABI, err = loadSimpleAccountABI()
-		if err != nil {
-			return nil, err
-		}
+	parsedABI, err := ensureSimpleAccountABI()
+	if err != nil {
+		return nil, err
 	}
 
-	return simpleAccountABI.Pack("execute", targetAddress, ethValue, calldata)
+	return parsedABI.Pack("execute", targetAddress, ethValue, calldata)
 }
 
 // Generate calldata for batch UserOps - executes multiple contract calls in one transaction
 func PackExecuteBatch(targetAddresses []common.Address, calldataArray [][]byte) ([]byte, error) {
-	var err error
-	if simpleAccountABI == nil {
-		simpleAccountABI, err = loadSimpleAccountABI()
-		if err != nil {
-			return nil, err
-		}
+	parsedABI, err := ensureSimpleAccountABI()
+	if err != nil {
+		return nil, err
 	}
 
-	return simpleAccountABI.Pack("executeBatch", targetAddresses, calldataArray)
+	return parsedABI.Pack("executeBatch", targetAddresses, calldataArray)
 }
 
 // PackExecuteBatchWithValues generates calldata for batch UserOps with ETH values per call
@@ -313,15 +320,13 @@ func UnpackExecuteCalldata(calldata []byte) (targets []common.Address, values []
 	if len(calldata) < 4 {
 		return nil, nil, nil, fmt.Errorf("calldata too short: %d bytes", len(calldata))
 	}
-	if simpleAccountABI == nil {
-		simpleAccountABI, err = loadSimpleAccountABI()
-		if err != nil {
-			return nil, nil, nil, err
-		}
+	parsedABI, err := ensureSimpleAccountABI()
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	selector := calldata[:4]
-	method, err := simpleAccountABI.MethodById(selector)
+	method, err := parsedABI.MethodById(selector)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("unrecognized smart-wallet method selector 0x%x: %w", selector, err)
 	}
