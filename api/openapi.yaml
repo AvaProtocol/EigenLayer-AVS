@@ -573,6 +573,13 @@ components:
         methodName: { type: string }
         callData:
           $ref: '#/components/schemas/Hex'
+        contractAddress:
+          $ref: '#/components/schemas/EthereumAddress'
+          description: >-
+            Per-call target contract. When set, this call is sent to this address
+            instead of the node-level contractAddress, so a single ContractWrite
+            node can express a heterogeneous atomic batch (e.g. approve on the
+            token + swap on the router). Absent = the node-level contract.
         applyToFields:
           type: array
           items: { type: string }
