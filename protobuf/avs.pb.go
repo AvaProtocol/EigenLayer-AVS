@@ -8027,8 +8027,13 @@ type ContractWriteNode_MethodCall struct {
 	MethodName    string                 `protobuf:"bytes,2,opt,name=method_name,json=methodName,proto3" json:"method_name,omitempty"`            // Method name for clarity and response mapping
 	ApplyToFields []string               `protobuf:"bytes,3,rep,name=apply_to_fields,json=applyToFields,proto3" json:"apply_to_fields,omitempty"` // Fields to apply formatting to (e.g., ["current", "answer"])
 	MethodParams  []string               `protobuf:"bytes,4,rep,name=method_params,json=methodParams,proto3" json:"method_params,omitempty"`      // Array of Handlebars templates for method parameters (e.g. ["{{value.sender}}", "{{value.recipient}}", "{{value.amount}}"])
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Per-call target contract. When set, this call is sent to this address instead of the node-level
+	// Config.contract_address. This lets a single node express a heterogeneous atomic batch — e.g.
+	// approve() on the token and exactInputSingle() on the router — so on-demand execution can batch
+	// both into one UserOp. Absent = fall back to the node-level contract address (the common case).
+	ContractAddress *string `protobuf:"bytes,5,opt,name=contract_address,json=contractAddress,proto3,oneof" json:"contract_address,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ContractWriteNode_MethodCall) Reset() {
@@ -8087,6 +8092,13 @@ func (x *ContractWriteNode_MethodCall) GetMethodParams() []string {
 		return x.MethodParams
 	}
 	return nil
+}
+
+func (x *ContractWriteNode_MethodCall) GetContractAddress() string {
+	if x != nil && x.ContractAddress != nil {
+		return *x.ContractAddress
+	}
+	return ""
 }
 
 type ContractWriteNode_Output struct {
@@ -10066,7 +10078,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x06amount\x18\x02 \x01(\tR\x06amount\x12\x19\n" +
 	"\bchain_id\x18\x03 \x01(\x03R\achainId\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xea\a\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xaf\b\n" +
 	"\x11ContractWriteNode\x12<\n" +
 	"\x06config\x18\x01 \x01(\v2$.aggregator.ContractWriteNode.ConfigR\x06config\x1a\x81\x03\n" +
 	"\x06Config\x12)\n" +
@@ -10081,16 +10093,18 @@ const file_avs_proto_rawDesc = "" +
 	"\r_is_simulatedB\b\n" +
 	"\x06_valueB\f\n" +
 	"\n" +
-	"_gas_limit\x1a\xaa\x01\n" +
+	"_gas_limit\x1a\xef\x01\n" +
 	"\n" +
 	"MethodCall\x12 \n" +
 	"\tcall_data\x18\x01 \x01(\tH\x00R\bcallData\x88\x01\x01\x12\x1f\n" +
 	"\vmethod_name\x18\x02 \x01(\tR\n" +
 	"methodName\x12&\n" +
 	"\x0fapply_to_fields\x18\x03 \x03(\tR\rapplyToFields\x12#\n" +
-	"\rmethod_params\x18\x04 \x03(\tR\fmethodParamsB\f\n" +
+	"\rmethod_params\x18\x04 \x03(\tR\fmethodParams\x12.\n" +
+	"\x10contract_address\x18\x05 \x01(\tH\x01R\x0fcontractAddress\x88\x01\x01B\f\n" +
 	"\n" +
-	"_call_data\x1a4\n" +
+	"_call_dataB\x13\n" +
+	"\x11_contract_address\x1a4\n" +
 	"\x06Output\x12*\n" +
 	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\x1a\xaf\x02\n" +
 	"\fMethodResult\x12\x1f\n" +

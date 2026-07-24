@@ -73,7 +73,7 @@ The "gap of the preview→confirm→execute contract" is exactly the set of dive
 | G3 pending ≠ failure | ✅ **done + tested** | same |
 | G6 runner salt propagation | ✅ **done** | same |
 | G5 idempotency | ✅ **done + tested** (Idempotency-Key header, no proto change) | `feat(taskengine): idempotent nodes:run via Idempotency-Key header` |
-| G4 atomic batching | ⛔ **deferred** — shares the Execute loop with deployed workflows and interleaves with the reimbursement wrapper; restrict chat execution to single-call actions until revisited | — |
+| G4 atomic batching | ✅ **done + tested** — on-demand (nodes:run) multi-call real execution now submits one `executeBatch` UserOp; composes with the reimbursement wrapper; gated on the run-node route so deployed workflows are unchanged | `feat(taskengine): atomic approve+swap batching for on-demand execution` |
 | G7 fee posture | ✅ **decided: fee-free for v1** (confirmed 2026-07-12); monetization revisited separately (analysis below) | — |
 
 ### G1 — Native `value` is dropped on execute (P0, breaks the example)
@@ -106,9 +106,25 @@ A mined real result carries a `Receipt` **map** with `transactionHash` and the s
 `SendUserOp` blocks up to ~2 minutes polling for the receipt and can return a **UserOp with no receipt** (still pending). In that branch the result is `status:"pending"`, `transactionHash:"pending"` ([vm_runner_contract_write.go:1022-1030](core/taskengine/vm_runner_contract_write.go#L1022)), and success is computed as `receipt != nil && receipt.Status == 1 && userOpInnerSuccess` ([:1087](core/taskengine/vm_runner_contract_write.go#L1087)) → **`success=false`**. So a swap that *will* land but hasn't yet is reported identically to a swap that *failed*. And because `nodes:run` is stateless, there is **no way to re-poll** that UserOp's status afterward.
 **Fix**: (a) surface a distinct `pending` status in the typed result (G2) so studio doesn't render pending as failure; (b) provide a way to resolve a pending UserOp — either a lightweight status lookup keyed by `userOpHash`, or have studio poll chain/bundler with the returned `userOpHash`. Minimum viable: make `pending` unambiguous in the response.
 
-### G4 — Non-atomic approve+swap (P1, reliability) — DEFERRED
+### G4 — Non-atomic approve+swap (P1, reliability) — SHIPPED
 
-> **Decision: deferred.** The `Execute` loop is shared with deployed workflows and the fix interleaves with the reimbursement wrapper (which decodes a *single* `execute`, not a batch), so this is a behavior change with real blast radius, not a local fix. Until it lands, **restrict chat execution to single-call actions** (do the `approve` as its own confirmed action, or use tokens already approved). Design notes retained below.
+> **Status: shipped.** On-demand (`nodes:run`) real execution of a multi-call node now submits a
+> single atomic `executeBatch` UserOp instead of one UserOp per method, so approve+swap is
+> all-or-nothing (no dangling allowance from an approve that lands while its swap reverts). Three
+> pieces made the deferred blast radius tractable:
+> 1. **Reimbursement composition.** `wrapWithReimbursement` now decodes the smart-wallet calldata
+>    through a shared ABI-aware unpacker (`aa.UnpackExecuteCalldata`) and *appends* its
+>    reimbursement/fee entries onto whatever app calls are present — a single `execute` (unchanged,
+>    byte-identical for deployed workflows) **or** an `executeBatch`. The batch composes instead of
+>    colliding.
+> 2. **Route gating.** The batch path is gated on the run-node route (`vm.task == nil`); deployed
+>    workflows keep the exact sequential per-method semantics — the shared-loop blast radius is
+>    contained.
+> 3. **Heterogeneous targets.** A new optional `contract_address` on `MethodCall` lets one node
+>    express approve@token + swap@router; the batch and the per-call event decoder both honor it.
+>    All-zero-value batches pack as `executeBatch` (bundler-estimatable); a value-bearing call falls
+>    back to `executeBatchWithValues`. The single receipt fans out into one result per sub-call,
+>    sharing tx identity.
 
 `Execute` loops over `methodCalls` ([vm_runner_contract_write.go:1526](core/taskengine/vm_runner_contract_write.go#L1526)); each real method calls `executeRealUserOpTransaction` independently ([:643](core/taskengine/vm_runner_contract_write.go#L643)) → **one UserOp per method**, and the loop **does not stop on a failed method** ("Don't fail the entire execution for individual method failures", [:1729](core/taskengine/vm_runner_contract_write.go#L1729)). So approve+swap = two sequential UserOps; if approve lands and swap fails, `computeWriteStepSuccess` reports the *step* as failed while the **approve is already on-chain** — a partial side effect the preview (single atomic Tenderly sim with allowance injection) never showed. This is both a fidelity gap and a footgun.
 **Fix**: when a node has multiple `methodCalls` and `is_simulated=false`, batch them into **one `executeBatch` UserOp** via the existing `aa.PackExecuteBatch` / `PackExecuteBatchWithValues` ([core/chainio/aa/aa.go:206](core/chainio/aa/aa.go#L206)) — atomic, one gas estimate, one signature. Keep per-method sequential as a fallback. Until this lands, restrict chat execution to single-call actions (or accept the approve-then-swap risk with a guard).
@@ -158,10 +174,10 @@ The deployed-task executor adds a platform `executionFeeWei` batch transfer ([ex
 
 1. ✅ **G1 + G2 + G3 + G6** — shipped: a single real execute is correct (value forwarded), reconcilable (userOpHash + normalized `confirmed`/`pending`/`failed`), pending is not failure, and non-zero-salt runners resolve. (commit `fix(taskengine): correct single-node contractWrite real execution`)
 2. ✅ **G5 (idempotency)** — shipped: `Idempotency-Key` header dedupes retries/double-clicks. (commit `feat(taskengine): idempotent nodes:run via Idempotency-Key header`)
-3. ⛔ **G4 (atomic batch)** — deferred (shared-loop blast radius). Chat execution restricted to single-call actions meanwhile.
+3. ✅ **G4 (atomic batch)** — shipped: on-demand multi-call real execution submits one `executeBatch` UserOp, composes with the reimbursement wrapper, gated on the run-node route. Heterogeneous targets via a per-call `contract_address`.
 4. ✅ **G7 (fee)** — decided fee-free for v1 (confirmed); monetization is a separate design (see G7 analysis).
 
-Deferred (later hardening): server-side spend/fund-authorization policy; atomic multi-call batching (G4); fee monetization (G7).
+Deferred (later hardening): server-side spend/fund-authorization policy; fee monetization (G7).
 
 ---
 

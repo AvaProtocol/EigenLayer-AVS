@@ -419,6 +419,11 @@ message ContractWriteNode {
     string method_name = 2;   // Method name for clarity and response mapping
     repeated string apply_to_fields = 3;  // Fields to apply formatting to (e.g., ["current", "answer"])
     repeated string method_params = 4; // Array of Handlebars templates for method parameters (e.g. ["{{value.sender}}", "{{value.recipient}}", "{{value.amount}}"])
+    // Per-call target contract. When set, this call is sent to this address instead of the node-level
+    // Config.contract_address. This lets a single node express a heterogeneous atomic batch — e.g.
+    // approve() on the token and exactInputSingle() on the router — so on-demand execution can batch
+    // both into one UserOp. Absent = fall back to the node-level contract address (the common case).
+    optional string contract_address = 5;
   }
 
   message Output {
