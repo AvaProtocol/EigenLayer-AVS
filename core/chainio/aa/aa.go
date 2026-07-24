@@ -25,8 +25,10 @@ var (
 	factoryABI  abi.ABI
 	defaultSalt = big.NewInt(0)
 
-	simpleAccountABI  *abi.ABI
-	EntrypointAddress = common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789")
+	simpleAccountABI     *abi.ABI
+	simpleAccountABIOnce sync.Once
+	simpleAccountABIErr  error
+	EntrypointAddress    = common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789")
 
 	// factoryAddress is set via SetFactoryAddress() from config
 	// It uses the default from config.DefaultFactoryProxyAddressHex if not overridden in YAML
@@ -189,30 +191,35 @@ func loadSimpleAccountABI() (*abi.ABI, error) {
 	return &parsedABI, nil
 }
 
+// ensureSimpleAccountABI lazily parses and caches the embedded SimpleAccount ABI exactly once.
+// The parse is deterministic, so a sync.Once is enough — and it removes the check-then-set data
+// race on the package-level simpleAccountABI that the pack/unpack helpers previously shared (now
+// hit on every paymaster-sponsored send via UnpackExecuteCalldata, not just batches).
+func ensureSimpleAccountABI() (*abi.ABI, error) {
+	simpleAccountABIOnce.Do(func() {
+		simpleAccountABI, simpleAccountABIErr = loadSimpleAccountABI()
+	})
+	return simpleAccountABI, simpleAccountABIErr
+}
+
 // Generate calldata for UserOps
 func PackExecute(targetAddress common.Address, ethValue *big.Int, calldata []byte) ([]byte, error) {
-	var err error
-	if simpleAccountABI == nil {
-		simpleAccountABI, err = loadSimpleAccountABI()
-		if err != nil {
-			return nil, err
-		}
+	parsedABI, err := ensureSimpleAccountABI()
+	if err != nil {
+		return nil, err
 	}
 
-	return simpleAccountABI.Pack("execute", targetAddress, ethValue, calldata)
+	return parsedABI.Pack("execute", targetAddress, ethValue, calldata)
 }
 
 // Generate calldata for batch UserOps - executes multiple contract calls in one transaction
 func PackExecuteBatch(targetAddresses []common.Address, calldataArray [][]byte) ([]byte, error) {
-	var err error
-	if simpleAccountABI == nil {
-		simpleAccountABI, err = loadSimpleAccountABI()
-		if err != nil {
-			return nil, err
-		}
+	parsedABI, err := ensureSimpleAccountABI()
+	if err != nil {
+		return nil, err
 	}
 
-	return simpleAccountABI.Pack("executeBatch", targetAddresses, calldataArray)
+	return parsedABI.Pack("executeBatch", targetAddresses, calldataArray)
 }
 
 // PackExecuteBatchWithValues generates calldata for batch UserOps with ETH values per call
@@ -297,4 +304,91 @@ func PackExecuteBatchWithValues(targetAddresses []common.Address, values []*big.
 		}
 	}
 	return result, nil
+}
+
+// UnpackExecuteCalldata decodes SimpleAccount smart-wallet calldata — produced by PackExecute,
+// PackExecuteBatch, or PackExecuteBatchWithValues — back into per-call (target, value, data)
+// tuples. It dispatches on the 4-byte function selector via the embedded ABI, so it stays correct
+// regardless of which pack helper produced the calldata:
+//   - execute(address,uint256,bytes)                  → one entry
+//   - executeBatch(address[],bytes[])                 → N entries, all values 0
+//   - executeBatchWithValues(address[],uint256[],bytes[]) → N entries with explicit values
+//
+// It is the inverse the paymaster reimbursement wrapper needs to append its own batch entries onto
+// an already-batched call without having to know how that call was originally packed.
+func UnpackExecuteCalldata(calldata []byte) (targets []common.Address, values []*big.Int, datas [][]byte, err error) {
+	if len(calldata) < 4 {
+		return nil, nil, nil, fmt.Errorf("calldata too short: %d bytes", len(calldata))
+	}
+	parsedABI, err := ensureSimpleAccountABI()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	selector := calldata[:4]
+	method, err := parsedABI.MethodById(selector)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("unrecognized smart-wallet method selector 0x%x: %w", selector, err)
+	}
+
+	args, err := method.Inputs.Unpack(calldata[4:])
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to unpack %s calldata: %w", method.Name, err)
+	}
+
+	switch method.Name {
+	case "execute":
+		dest, ok := args[0].(common.Address)
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("execute: unexpected dest type %T", args[0])
+		}
+		value, ok := args[1].(*big.Int)
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("execute: unexpected value type %T", args[1])
+		}
+		data, ok := args[2].([]byte)
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("execute: unexpected data type %T", args[2])
+		}
+		return []common.Address{dest}, []*big.Int{value}, [][]byte{data}, nil
+
+	case "executeBatch":
+		dest, ok := args[0].([]common.Address)
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("executeBatch: unexpected dest type %T", args[0])
+		}
+		data, ok := args[1].([][]byte)
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("executeBatch: unexpected data type %T", args[1])
+		}
+		if len(dest) != len(data) {
+			return nil, nil, nil, fmt.Errorf("executeBatch: dest/func length mismatch (%d vs %d)", len(dest), len(data))
+		}
+		vals := make([]*big.Int, len(dest))
+		for i := range vals {
+			vals[i] = big.NewInt(0)
+		}
+		return dest, vals, data, nil
+
+	case "executeBatchWithValues":
+		dest, ok := args[0].([]common.Address)
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("executeBatchWithValues: unexpected dest type %T", args[0])
+		}
+		vals, ok := args[1].([]*big.Int)
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("executeBatchWithValues: unexpected values type %T", args[1])
+		}
+		data, ok := args[2].([][]byte)
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("executeBatchWithValues: unexpected data type %T", args[2])
+		}
+		if len(dest) != len(vals) || len(dest) != len(data) {
+			return nil, nil, nil, fmt.Errorf("executeBatchWithValues: array length mismatch (dest=%d values=%d func=%d)", len(dest), len(vals), len(data))
+		}
+		return dest, vals, data, nil
+
+	default:
+		return nil, nil, nil, fmt.Errorf("unsupported smart-wallet method %q for reimbursement wrapping", method.Name)
+	}
 }

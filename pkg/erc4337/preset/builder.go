@@ -429,11 +429,13 @@ func EstimateGasReimbursementAmount(client *ethclient.Client, gasEstimate *bundl
 	return reimbursement, nil
 }
 
-// wrapWithReimbursement wraps original SimpleAccount.execute() calldata with
-// executeBatchWithValues to add reimbursement transfers atomically. It appends a
-// transfer of reimbursement ETH to the reimbursement recipient (paymaster owner),
-// and if executionFeeWei is non-nil and > 0, it also adds a transfer of the
-// execution fee to the same recipient.
+// wrapWithReimbursement re-packs the original smart-wallet calldata as
+// executeBatchWithValues to add reimbursement transfers atomically. The input may be a single
+// SimpleAccount.execute() OR an already-batched executeBatch()/executeBatchWithValues() (e.g. an
+// on-demand approve+swap): it is decoded via aa.UnpackExecuteCalldata into its application call(s),
+// then a transfer of reimbursement ETH to the reimbursement recipient (paymaster owner) is
+// appended, plus — if executionFeeWei is non-nil and > 0 — a transfer of the execution fee to the
+// same recipient.
 func wrapWithReimbursement(
 	client *ethclient.Client,
 	originalCallData []byte,
@@ -449,53 +451,40 @@ func wrapWithReimbursement(
 		return nil, nil, nil, fmt.Errorf("failed to estimate reimbursement: %w", err)
 	}
 
-	// Decode execute(dest, value, data) - we need to manually decode since we don't have a public GetAccountABI
-	// The execute() function signature is: execute(address dest, uint256 value, bytes calldata func)
-	// Calldata format: [4-byte selector][32-byte dest][32-byte value][offset to bytes][length][data...]
-
-	if len(originalCallData) < 4 {
-		return nil, nil, nil, fmt.Errorf("calldata too short: %d bytes", len(originalCallData))
+	// Decode the original smart-wallet calldata into per-call (target, value, data) entries.
+	// This handles execute() (single call — the common deployed-workflow case) AND
+	// executeBatch()/executeBatchWithValues() (an already-atomic multi-call, e.g. an on-demand
+	// approve+swap). Decoding through the shared ABI-aware unpacker — instead of hand-decoding a
+	// single execute() — is what lets reimbursement compose with atomic batching: we append our
+	// reimbursement (and optional fee) entries onto whatever application calls are already there,
+	// rather than assuming exactly one.
+	appTargets, appValues, appDatas, decodeErr := aa.UnpackExecuteCalldata(originalCallData)
+	if decodeErr != nil {
+		return nil, nil, nil, fmt.Errorf("failed to decode smart-wallet calldata for reimbursement wrapping: %w", decodeErr)
 	}
 
-	// Skip function selector (4 bytes) and decode the ABI-encoded parameters
-	params := originalCallData[4:]
-	if len(params) < 96 { // minimum: 32 (dest) + 32 (value) + 32 (offset)
-		return nil, nil, nil, fmt.Errorf("calldata params too short: %d bytes", len(params))
-	}
-
-	// Decode: address dest (32 bytes, right-aligned)
-	dest := common.BytesToAddress(params[12:32]) // Skip 12 padding bytes, take last 20
-
-	// Decode: uint256 value (32 bytes)
-	value := new(big.Int).SetBytes(params[32:64])
-
-	// Decode: bytes data (dynamic, offset at params[64:96])
-	dataOffset := new(big.Int).SetBytes(params[64:96]).Uint64()
-	var data []byte
-	if dataOffset < uint64(len(params)) {
-		// Data exists, read length and content
-		dataLength := new(big.Int).SetBytes(params[dataOffset : dataOffset+32]).Uint64()
-		if dataOffset+32+dataLength <= uint64(len(params)) {
-			data = params[dataOffset+32 : dataOffset+32+dataLength]
+	// Normalize any nil data slices to empty (avoids ABI encoding issues with nil []byte).
+	for i := range appDatas {
+		if len(appDatas[i]) == 0 {
+			appDatas[i] = make([]byte, 0)
 		}
 	}
 
-	// If data is nil or empty, use make([]byte, 0) to avoid ABI encoding issues
-	if len(data) == 0 {
-		data = make([]byte, 0)
+	// Build batch arrays for executeBatchWithValues:
+	//   [0..n)  = original application call(s) (single execute, or an atomic batch)
+	//   [n]     = reimbursement to paymaster owner (compensates gas paid by the paymaster)
+	//   [n+1]   = execution fee to fee recipient (optional, only if executionFeeWei > 0)
+	targets := append(append([]common.Address{}, appTargets...), reimbursementRecipient)
+	values := append(append([]*big.Int{}, appValues...), reimbursementAmount)
+	calldatas := append(append([][]byte{}, appDatas...), make([]byte, 0))
+
+	// Sum of the application-call values (excludes reimbursement, which the caller adds separately).
+	appValueSum := new(big.Int)
+	for _, v := range appValues {
+		appValueSum.Add(appValueSum, v)
 	}
 
-	l.Debug("Decoded execute() params", "dest", dest.Hex(), "value", value.String(), "dataLen", len(data))
-
-	// Create batch arrays for executeBatchWithValues
-	// [0] = original operation (e.g., withdrawal)
-	// [1] = reimbursement to paymaster owner (to compensate for gas paid by paymaster)
-	// [2] = execution fee to fee recipient (optional, only if executionFeeWei > 0)
-	targets := []common.Address{dest, reimbursementRecipient}
-	values := []*big.Int{value, reimbursementAmount}
-	calldatas := [][]byte{data, make([]byte, 0)}
-
-	// Add execution fee as 3rd batch operation if specified
+	// Add execution fee as an extra batch operation if specified
 	if executionFeeWei != nil && executionFeeWei.Sign() > 0 {
 		targets = append(targets, reimbursementRecipient)
 		values = append(values, executionFeeWei)
@@ -503,7 +492,7 @@ func wrapWithReimbursement(
 		l.Debug("Execution fee added to batch", "fee_wei", executionFeeWei.String(), "recipient", reimbursementRecipient.Hex())
 	}
 
-	l.Debug("Reimbursement wrapping", "dest", dest.Hex(), "value", value.String(), "reimburse", reimbursementAmount.String(), "recipient", reimbursementRecipient.Hex(), "batch_ops", len(targets))
+	l.Debug("Reimbursement wrapping", "app_calls", len(appTargets), "app_value_sum", appValueSum.String(), "reimburse", reimbursementAmount.String(), "recipient", reimbursementRecipient.Hex(), "batch_ops", len(targets))
 
 	// Use manual ABI encoding to bypass Go's ABI encoder bug with empty []byte slices
 	wrappedCalldata, err = aa.PackExecuteBatchWithValues(targets, values, calldatas)
@@ -513,8 +502,8 @@ func wrapWithReimbursement(
 
 	l.Debug("Calldata manually encoded", "bytes", len(wrappedCalldata))
 
-	// outgoingValue = original value + execution fee (reimbursement is added by caller)
-	totalValue := new(big.Int).Set(value)
+	// outgoingValue = sum of application-call values + execution fee (reimbursement is added by caller)
+	totalValue := new(big.Int).Set(appValueSum)
 	if executionFeeWei != nil && executionFeeWei.Sign() > 0 {
 		totalValue.Add(totalValue, executionFeeWei)
 	}

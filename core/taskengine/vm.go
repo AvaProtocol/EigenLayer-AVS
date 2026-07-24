@@ -2832,6 +2832,11 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 					if methodName, ok := methodCallMap["methodName"].(string); ok {
 						methodCall.MethodName = methodName
 					}
+					// Per-call target override (camelCase). Lets one node express a heterogeneous
+					// atomic batch — e.g. approve on the token + swap on the router.
+					if contractAddress, ok := methodCallMap["contractAddress"].(string); ok && contractAddress != "" {
+						methodCall.ContractAddress = &contractAddress
+					}
 					// Handle methodParams field as string array for handlebars templating
 					if methodParamsInterface, ok := methodCallMap["methodParams"]; ok {
 						if methodParamsArray, ok := methodParamsInterface.([]interface{}); ok {
@@ -3249,6 +3254,10 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 						}
 						if methodName, ok := methodCallMap["methodName"].(string); ok {
 							methodCall.MethodName = methodName
+						}
+						// Per-call target override (camelCase), for heterogeneous atomic batches.
+						if contractAddress, ok := methodCallMap["contractAddress"].(string); ok && contractAddress != "" {
+							methodCall.ContractAddress = &contractAddress
 						}
 						// Map methodParams (array of strings)
 						if params, ok := methodCallMap["methodParams"].([]interface{}); ok {

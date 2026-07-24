@@ -138,59 +138,25 @@ func (r *ContractWriteProcessor) getInputData(node *avsproto.ContractWriteNode) 
 	return contractAddress, callData, methodCalls, nil
 }
 
-func (r *ContractWriteProcessor) executeMethodCall(
-	ctx context.Context,
+// resolveMethodCallData resolves a single method call's parameters — Handlebars template
+// substitution, JSON object/array normalization against the ABI (so a struct/tuple param such as
+// Uniswap's exactInputSingle encodes correctly), and undefined-value validation — and returns the
+// ABI-encoded calldata hex plus the fully-resolved params. On any validation/encoding failure it
+// returns a populated failure MethodResult (errResult != nil) that the caller should return as-is.
+//
+// It is shared by the sequential per-method path (executeMethodCall) and the atomic batch path
+// (executeBatchedUserOpTransaction) so both encode calls through identical logic and cannot drift.
+func (r *ContractWriteProcessor) resolveMethodCallData(
 	parsedABI *abi.ABI,
-	originalAbiString string,
-	contractAddress common.Address,
 	methodCall *avsproto.ContractWriteNode_MethodCall,
-	shouldSimulate bool,
-	node *avsproto.ContractWriteNode,
-) *avsproto.ContractWriteNode_MethodResult {
-	t0 := time.Now()
-
-	// VERY OBVIOUS DEBUG - use Info to avoid noisy error-level logs in normal flow
-	// Log method execution start at debug level for development/troubleshooting
-	r.vm.logger.Debug("ContractWriteProcessor: executeMethodCall started",
-		"method", methodCall.MethodName,
-		"contract", contractAddress.Hex(),
-		"timestamp", time.Now().Format("15:04:05.000"))
-
-	// CRITICAL: We NEVER have eoaAddress's private key and can NEVER send transactions from it
-	// eoaAddress (r.owner) is ONLY for ownership verification
-	// For ALL transactions (simulations AND real), we MUST use runner (smart wallet) address as sender
-	// The runner smart wallet corresponds to and is controlled by eoaAddress, but sender must ALWAYS be runner
-	var senderAddress common.Address
-	if aaSenderVar, ok := r.vm.vars["aa_sender"]; ok {
-		if aaSenderStr, ok := aaSenderVar.(string); ok && aaSenderStr != "" {
-			senderAddress = common.HexToAddress(aaSenderStr) // This is the runner (smart wallet)
-			r.vm.logger.Info("CONTRACT WRITE - Sender address resolved from aa_sender",
-				"sender_address_runner", senderAddress.Hex(),
-				"aa_sender_var", aaSenderStr)
-		} else {
-			return &avsproto.ContractWriteNode_MethodResult{
-				MethodName: methodCall.MethodName,
-				Success:    false,
-				Error:      fmt.Sprintf("aa_sender variable is set but invalid - must be a non-empty hex address string, got: %v", aaSenderVar),
-			}
-		}
-	} else {
-		// This should never happen because RunNodeImmediately validates settings.runner and sets aa_sender
-		// If we get here, it means validation was bypassed or there's a bug in the validation logic
-		return &avsproto.ContractWriteNode_MethodResult{
-			MethodName: methodCall.MethodName,
-			Success:    false,
-			Error:      "aa_sender variable not set - settings.runner is required for contractWrite",
-		}
-	}
-
+) (callData string, resolvedMethodParams []string, errResult *avsproto.ContractWriteNode_MethodResult) {
 	// Substitute template variables in methodParams before generating calldata
 	// Use preprocessTextWithVariableMapping for each parameter to support dot notation like {{value.address}}
-	resolvedMethodParams := make([]string, len(methodCall.MethodParams))
+	resolvedMethodParams = make([]string, len(methodCall.MethodParams))
 	for i, param := range methodCall.MethodParams {
 		// LANGUAGE ENFORCEMENT: Validate Handlebars template size before preprocessing
 		if err := ValidateInputByLanguage(param, avsproto.Lang_LANG_HANDLEBARS); err != nil {
-			return &avsproto.ContractWriteNode_MethodResult{
+			return "", nil, &avsproto.ContractWriteNode_MethodResult{
 				MethodName: methodCall.MethodName,
 				Success:    false,
 				Error:      err.Error(),
@@ -210,7 +176,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 					"error", err)
 			}
 			// Return error result - validation failures should stop execution
-			return &avsproto.ContractWriteNode_MethodResult{
+			return "", nil, &avsproto.ContractWriteNode_MethodResult{
 				MethodName: methodCall.MethodName,
 				Success:    false,
 				Error:      err.Error(),
@@ -248,7 +214,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 											"missing_field", fieldName,
 											"available_fields", GetMapKeys(objData))
 									}
-									return &avsproto.ContractWriteNode_MethodResult{
+									return "", nil, &avsproto.ContractWriteNode_MethodResult{
 										MethodName: methodCall.MethodName,
 										Success:    false,
 										Error:      fmt.Sprintf("missing required field '%s' in struct parameter for method '%s'", fieldName, methodCall.MethodName),
@@ -306,7 +272,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 				"error", err)
 		}
 		// Return error result - validation failures should stop execution
-		return &avsproto.ContractWriteNode_MethodResult{
+		return "", nil, &avsproto.ContractWriteNode_MethodResult{
 			MethodName: methodCall.MethodName,
 			Success:    false,
 			Error:      err.Error(),
@@ -318,8 +284,8 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	if methodCall.CallData != nil {
 		existingCallData = *methodCall.CallData
 	}
-	callData, err := GenerateOrUseCallData(methodCall.MethodName, existingCallData, resolvedMethodParams, parsedABI)
-	if err != nil {
+	generatedCallData, genErr := GenerateOrUseCallData(methodCall.MethodName, existingCallData, resolvedMethodParams, parsedABI)
+	if genErr != nil {
 		if r.vm != nil && r.vm.logger != nil {
 			// User-input errors (StructuredError — method not in ABI,
 			// parameter count mismatch) log at Warn so SentryLogger doesn't
@@ -328,35 +294,90 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			// which is how methodName="nonexistent" filled up Sentry
 			// EIGENLAYER-AVS-1K. Real server faults (bad ABI parsing, encoder
 			// crashes, etc.) still surface as .Error() and reach Sentry.
-			if _, isStructured := IsStructuredError(err); isStructured {
+			if _, isStructured := IsStructuredError(genErr); isStructured {
 				r.vm.logger.Warn("contract write: invalid method/params (user-input error)",
 					"methodName", methodCall.MethodName,
 					"rawMethodParams", methodCall.MethodParams,
 					"resolvedMethodParams", resolvedMethodParams,
-					"error", err)
+					"error", genErr)
 			} else {
 				r.vm.logger.Error("❌ Failed to get/generate calldata for contract write",
 					"methodName", methodCall.MethodName,
 					"providedCallData", methodCall.CallData,
 					"rawMethodParams", methodCall.MethodParams,
 					"resolvedMethodParams", resolvedMethodParams,
-					"error", err)
+					"error", genErr)
 			}
 		}
-		return &avsproto.ContractWriteNode_MethodResult{
+		return "", nil, &avsproto.ContractWriteNode_MethodResult{
 			Success:    false,
-			Error:      err.Error(),
+			Error:      genErr.Error(),
 			MethodName: methodCall.MethodName,
 		}
 	}
 
 	// Log successful calldata generation if needed
-	if existingCallData == "" && callData != "" && r.vm != nil && r.vm.logger != nil {
+	if existingCallData == "" && generatedCallData != "" && r.vm != nil && r.vm.logger != nil {
 		r.vm.logger.Debug("✅ Generated calldata from methodName and methodParams for contract write",
 			"methodName", methodCall.MethodName,
 			"rawMethodParams", methodCall.MethodParams,
 			"resolvedMethodParams", resolvedMethodParams,
-			"generatedCallData", callData)
+			"generatedCallData", generatedCallData)
+	}
+
+	return generatedCallData, resolvedMethodParams, nil
+}
+
+func (r *ContractWriteProcessor) executeMethodCall(
+	ctx context.Context,
+	parsedABI *abi.ABI,
+	originalAbiString string,
+	contractAddress common.Address,
+	methodCall *avsproto.ContractWriteNode_MethodCall,
+	shouldSimulate bool,
+	node *avsproto.ContractWriteNode,
+) *avsproto.ContractWriteNode_MethodResult {
+	t0 := time.Now()
+
+	// VERY OBVIOUS DEBUG - use Info to avoid noisy error-level logs in normal flow
+	// Log method execution start at debug level for development/troubleshooting
+	r.vm.logger.Debug("ContractWriteProcessor: executeMethodCall started",
+		"method", methodCall.MethodName,
+		"contract", contractAddress.Hex(),
+		"timestamp", time.Now().Format("15:04:05.000"))
+
+	// CRITICAL: We NEVER have eoaAddress's private key and can NEVER send transactions from it
+	// eoaAddress (r.owner) is ONLY for ownership verification
+	// For ALL transactions (simulations AND real), we MUST use runner (smart wallet) address as sender
+	// The runner smart wallet corresponds to and is controlled by eoaAddress, but sender must ALWAYS be runner
+	var senderAddress common.Address
+	if aaSenderVar, ok := r.vm.vars["aa_sender"]; ok {
+		if aaSenderStr, ok := aaSenderVar.(string); ok && aaSenderStr != "" {
+			senderAddress = common.HexToAddress(aaSenderStr) // This is the runner (smart wallet)
+			r.vm.logger.Info("CONTRACT WRITE - Sender address resolved from aa_sender",
+				"sender_address_runner", senderAddress.Hex(),
+				"aa_sender_var", aaSenderStr)
+		} else {
+			return &avsproto.ContractWriteNode_MethodResult{
+				MethodName: methodCall.MethodName,
+				Success:    false,
+				Error:      fmt.Sprintf("aa_sender variable is set but invalid - must be a non-empty hex address string, got: %v", aaSenderVar),
+			}
+		}
+	} else {
+		// This should never happen because RunNodeImmediately validates settings.runner and sets aa_sender
+		// If we get here, it means validation was bypassed or there's a bug in the validation logic
+		return &avsproto.ContractWriteNode_MethodResult{
+			MethodName: methodCall.MethodName,
+			Success:    false,
+			Error:      "aa_sender variable not set - settings.runner is required for contractWrite",
+		}
+	}
+
+	// Resolve params → calldata via the shared encoder (identical logic to the atomic batch path).
+	callData, resolvedMethodParams, errResult := r.resolveMethodCallData(parsedABI, methodCall)
+	if errResult != nil {
+		return errResult
 	}
 
 	calldata := common.FromHex(callData)
@@ -644,87 +665,22 @@ func (r *ContractWriteProcessor) executeMethodCall(
 }
 
 // executeRealUserOpTransaction executes a real UserOp transaction for contract writes
-func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Context, contractAddress common.Address, callData string, methodName string, parsedABI *abi.ABI, node *avsproto.ContractWriteNode, startTime time.Time) *avsproto.ContractWriteNode_MethodResult {
-	r.vm.logger.Info("🔍 REAL USEROP DEBUG - Starting real UserOp transaction execution",
-		"contract_address", contractAddress.Hex(),
-		"method_name", methodName,
-		"calldata_length", len(callData),
-		"calldata", callData,
-		"owner_eoaAddress", r.owner.Hex())
-
-	// Initialize execution log builder to capture all details
-	var executionLogBuilder strings.Builder
-	executionLogBuilder.WriteString(fmt.Sprintf("UserOp Transaction Execution for %s\n", methodName))
-	executionLogBuilder.WriteString(fmt.Sprintf("Contract: %s\n", contractAddress.Hex()))
-	executionLogBuilder.WriteString(fmt.Sprintf("Owner EOA: %s\n", r.owner.Hex()))
-
-	// Convert hex calldata to bytes
-	callDataBytes := common.FromHex(callData)
-
-	// Resolve the native ETH value to send with this call (payable methods / native-in
-	// swaps such as wrapping ETH or an ETH-in Uniswap swap). The simulation path already
-	// honors node.Config.Value via extractTransactionValue; the real path must match it,
-	// otherwise a call that previews correctly executes with 0 wei and reverts/no-ops.
-	transactionValue := big.NewInt(0)
-	if rawValue := r.extractTransactionValue(node); rawValue != "" && rawValue != "0" {
-		parsedValue, parseErr := bigint.Parse(rawValue)
-		if parseErr != nil || parsedValue.Sign() < 0 {
-			r.vm.logger.Error("🚨 DEPLOYED WORKFLOW ERROR: Invalid transaction value",
-				"raw_value", rawValue,
-				"method_name", methodName,
-				"error", parseErr)
-			return &avsproto.ContractWriteNode_MethodResult{
-				Success:    false,
-				Error:      fmt.Sprintf("invalid transaction value %q: must be a non-negative wei integer", rawValue),
-				MethodName: methodName,
-			}
-		}
-		transactionValue = parsedValue
-	}
-
-	// 🔍 PRE-FLIGHT VALIDATION: Check for common failure scenarios before gas estimation
-	if validationErr := r.validateTransactionBeforeGasEstimation(methodName, callData, callDataBytes, contractAddress); validationErr != nil {
-		executionLogBuilder.WriteString(fmt.Sprintf("PRE-FLIGHT VALIDATION FAILED: %v\n", validationErr))
-		executionLogBuilder.WriteString("Skipped gas estimation to avoid bundler error\n")
-
-		r.vm.logger.Error("🚫 PRE-FLIGHT VALIDATION FAILED - Skipping gas estimation to avoid bundler error",
-			"validation_error", validationErr.Error(),
-			"method", methodName,
-			"contract", contractAddress.Hex())
-		return &avsproto.ContractWriteNode_MethodResult{
-			Success: false,
-			Error:   fmt.Sprintf("Pre-flight validation failed: %v", validationErr),
-		}
-	}
-
-	// Create smart wallet execute calldata: execute(target, value, data)
-	executionLogBuilder.WriteString(fmt.Sprintf("Packing smart wallet execute calldata...\n"))
-	executionLogBuilder.WriteString(fmt.Sprintf("  Target contract: %s\n", contractAddress.Hex()))
-	executionLogBuilder.WriteString(fmt.Sprintf("  ETH value: %s wei\n", transactionValue.String()))
-	executionLogBuilder.WriteString(fmt.Sprintf("  Method calldata: %d bytes\n", len(callDataBytes)))
-
-	smartWalletCallData, err := aa.PackExecute(
-		contractAddress,  // target contract
-		transactionValue, // ETH value to send with the call (0 for non-payable calls)
-		callDataBytes,    // contract method calldata
-	)
-	if err != nil {
-		executionLogBuilder.WriteString(fmt.Sprintf("CALLDATA PACKING FAILED: %v\n", err))
-
-		r.vm.logger.Error("🚨 DEPLOYED WORKFLOW ERROR: Failed to pack smart wallet execute calldata",
-			"error", err,
-			"contract_address", contractAddress.Hex(),
-			"method_name", methodName,
-			"calldata_bytes_length", len(callDataBytes))
-		// Return error result - workflow execution FAILS (no fallback for deployed workflows)
-		return &avsproto.ContractWriteNode_MethodResult{
-			Success: false,
-			Error:   fmt.Sprintf("Failed to pack smart wallet execute calldata: %v", err),
-		}
-	}
-
-	executionLogBuilder.WriteString(fmt.Sprintf("Smart wallet calldata packed: %d bytes\n", len(smartWalletCallData)))
-
+// submitSmartWalletUserOp performs the shared real-execution send used by both the single-call
+// path (executeRealUserOpTransaction) and the atomic batch path (executeAtomicBatch): it sets the
+// AA factory/entrypoint, resolves the paymaster request and sender/salt overrides from VM vars,
+// runs pre-send diagnostics, sends the pre-packed smart-wallet calldata as ONE UserOp, increments
+// the per-owner tx counter, and maps bundler/AA errors to a concise user-facing message.
+//
+// On send failure it returns a non-empty userErrorMsg (the caller turns it into failed
+// MethodResult(s)). On success it returns the userOp and receipt (receipt may be nil = pending)
+// with an empty userErrorMsg. logLabel/logTarget are used only for log lines.
+func (r *ContractWriteProcessor) submitSmartWalletUserOp(
+	ctx context.Context,
+	smartWalletCallData []byte,
+	logLabel string,
+	logTarget string,
+	executionLogBuilder *strings.Builder,
+) (*userop.UserOperation, *types.Receipt, string) {
 	// Set up factory address for AA operations
 	aa.SetFactoryAddress(r.smartWalletConfig.FactoryAddress)
 	aa.SetEntrypointAddress(r.smartWalletConfig.EntrypointAddress)
@@ -890,8 +846,8 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 			"bundler: UserOp transaction failed, workflow execution FAILED",
 			"bundler_error", err,
 			"bundler_url", r.smartWalletConfig.BundlerURL,
-			"method", methodName,
-			"contract", contractAddress.Hex(),
+			"method", logLabel,
+			"contract", logTarget,
 			"sender_smart_wallet", func() string {
 				if senderOverride != nil {
 					return senderOverride.Hex()
@@ -939,7 +895,102 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 				userErrorMsg = userErrorMsg[:200] + "..."
 			}
 		}
+		if userErrorMsg == "" {
+			userErrorMsg = "Transaction failed"
+		}
 
+		return userOp, receipt, userErrorMsg
+	}
+
+	return userOp, receipt, ""
+}
+
+func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Context, contractAddress common.Address, callData string, methodName string, parsedABI *abi.ABI, node *avsproto.ContractWriteNode, startTime time.Time) *avsproto.ContractWriteNode_MethodResult {
+	r.vm.logger.Info("🔍 REAL USEROP DEBUG - Starting real UserOp transaction execution",
+		"contract_address", contractAddress.Hex(),
+		"method_name", methodName,
+		"calldata_length", len(callData),
+		"calldata", callData,
+		"owner_eoaAddress", r.owner.Hex())
+
+	// Initialize execution log builder to capture all details
+	var executionLogBuilder strings.Builder
+	executionLogBuilder.WriteString(fmt.Sprintf("UserOp Transaction Execution for %s\n", methodName))
+	executionLogBuilder.WriteString(fmt.Sprintf("Contract: %s\n", contractAddress.Hex()))
+	executionLogBuilder.WriteString(fmt.Sprintf("Owner EOA: %s\n", r.owner.Hex()))
+
+	// Convert hex calldata to bytes
+	callDataBytes := common.FromHex(callData)
+
+	// Resolve the native ETH value to send with this call (payable methods / native-in
+	// swaps such as wrapping ETH or an ETH-in Uniswap swap). The simulation path already
+	// honors node.Config.Value via extractTransactionValue; the real path must match it,
+	// otherwise a call that previews correctly executes with 0 wei and reverts/no-ops.
+	transactionValue := big.NewInt(0)
+	if rawValue := r.extractTransactionValue(node); rawValue != "" && rawValue != "0" {
+		parsedValue, parseErr := bigint.Parse(rawValue)
+		if parseErr != nil || parsedValue.Sign() < 0 {
+			r.vm.logger.Error("🚨 DEPLOYED WORKFLOW ERROR: Invalid transaction value",
+				"raw_value", rawValue,
+				"method_name", methodName,
+				"error", parseErr)
+			return &avsproto.ContractWriteNode_MethodResult{
+				Success:    false,
+				Error:      fmt.Sprintf("invalid transaction value %q: must be a non-negative wei integer", rawValue),
+				MethodName: methodName,
+			}
+		}
+		transactionValue = parsedValue
+	}
+
+	// 🔍 PRE-FLIGHT VALIDATION: Check for common failure scenarios before gas estimation
+	if validationErr := r.validateTransactionBeforeGasEstimation(methodName, callData, callDataBytes, contractAddress); validationErr != nil {
+		executionLogBuilder.WriteString(fmt.Sprintf("PRE-FLIGHT VALIDATION FAILED: %v\n", validationErr))
+		executionLogBuilder.WriteString("Skipped gas estimation to avoid bundler error\n")
+
+		r.vm.logger.Error("🚫 PRE-FLIGHT VALIDATION FAILED - Skipping gas estimation to avoid bundler error",
+			"validation_error", validationErr.Error(),
+			"method", methodName,
+			"contract", contractAddress.Hex())
+		return &avsproto.ContractWriteNode_MethodResult{
+			Success: false,
+			Error:   fmt.Sprintf("Pre-flight validation failed: %v", validationErr),
+		}
+	}
+
+	// Create smart wallet execute calldata: execute(target, value, data)
+	executionLogBuilder.WriteString(fmt.Sprintf("Packing smart wallet execute calldata...\n"))
+	executionLogBuilder.WriteString(fmt.Sprintf("  Target contract: %s\n", contractAddress.Hex()))
+	executionLogBuilder.WriteString(fmt.Sprintf("  ETH value: %s wei\n", transactionValue.String()))
+	executionLogBuilder.WriteString(fmt.Sprintf("  Method calldata: %d bytes\n", len(callDataBytes)))
+
+	smartWalletCallData, err := aa.PackExecute(
+		contractAddress,  // target contract
+		transactionValue, // ETH value to send with the call (0 for non-payable calls)
+		callDataBytes,    // contract method calldata
+	)
+	if err != nil {
+		executionLogBuilder.WriteString(fmt.Sprintf("CALLDATA PACKING FAILED: %v\n", err))
+
+		r.vm.logger.Error("🚨 DEPLOYED WORKFLOW ERROR: Failed to pack smart wallet execute calldata",
+			"error", err,
+			"contract_address", contractAddress.Hex(),
+			"method_name", methodName,
+			"calldata_bytes_length", len(callDataBytes))
+		// Return error result - workflow execution FAILS (no fallback for deployed workflows)
+		return &avsproto.ContractWriteNode_MethodResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to pack smart wallet execute calldata: %v", err),
+		}
+	}
+
+	executionLogBuilder.WriteString(fmt.Sprintf("Smart wallet calldata packed: %d bytes\n", len(smartWalletCallData)))
+
+	// Submit the packed calldata as a single UserOp via the shared send path (paymaster + sender/
+	// salt resolution, send, tx-counter increment, bundler/AA error mapping). Shared with the
+	// atomic batch path so both routes have identical send semantics.
+	userOp, receipt, userErrorMsg := r.submitSmartWalletUserOp(ctx, smartWalletCallData, methodName, contractAddress.Hex(), &executionLogBuilder)
+	if userErrorMsg != "" {
 		// Return error result with simplified user message
 		// Detailed execution log is available in server logs for debugging
 		return &avsproto.ContractWriteNode_MethodResult{
@@ -970,6 +1021,182 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	// Do NOT append executionLogBuilder to the error field
 
 	return result
+}
+
+// executeAtomicBatch encodes every method call and submits them as a SINGLE atomic UserOp
+// (executeBatch / executeBatchWithValues), then fans the one resulting receipt into one
+// MethodResult per call. This is the on-demand approve+swap path: either every sub-call lands or
+// the whole UserOp reverts — no dangling allowance from an approve that succeeded while its swap
+// failed. It composes with the paymaster reimbursement wrapper (which now appends its entries onto
+// this batch) and is used only on the run-node route for real (non-simulated) multi-call execution;
+// deployed workflows keep the sequential per-method path.
+// uniqueTargetHexes returns the distinct target addresses (hex, order-preserving) — used to label
+// batch logs with every contract involved rather than just the first sub-call's.
+func uniqueTargetHexes(targets []common.Address) []string {
+	seen := make(map[common.Address]bool, len(targets))
+	out := make([]string, 0, len(targets))
+	for _, t := range targets {
+		if !seen[t] {
+			seen[t] = true
+			out = append(out, t.Hex())
+		}
+	}
+	return out
+}
+
+func (r *ContractWriteProcessor) executeAtomicBatch(
+	ctx context.Context,
+	node *avsproto.ContractWriteNode,
+	parsedABI *abi.ABI,
+	methodCalls []*avsproto.ContractWriteNode_MethodCall,
+	perCallTargets []common.Address,
+	log *strings.Builder,
+) (results []*avsproto.ContractWriteNode_MethodResult) {
+	n := len(methodCalls)
+
+	// failAll builds a uniform failure result set. Atomic intent: if the batch can't be assembled
+	// or the single UserOp is rejected, none of the sub-calls ran, so every one reports failed.
+	// perIndexErr carries the specific error for the offending call; the rest share sharedErr.
+	failAll := func(sharedErr string, perIndexErr map[int]string) []*avsproto.ContractWriteNode_MethodResult {
+		out := make([]*avsproto.ContractWriteNode_MethodResult, n)
+		for i, mc := range methodCalls {
+			name := mc.MethodName
+			if name == "" {
+				name = fmt.Sprintf("method_%d", i+1)
+			}
+			msg := sharedErr
+			if perIndexErr != nil {
+				if specific, ok := perIndexErr[i]; ok {
+					msg = specific
+				}
+			}
+			out[i] = &avsproto.ContractWriteNode_MethodResult{
+				MethodName: name,
+				Success:    false,
+				Error:      msg,
+			}
+		}
+		return out
+	}
+
+	// Match the sequential per-method path's panic-recovery safety net: this route runs the same
+	// historically-fragile machinery (resolveMethodCallData → GenerateOrUseCallData, ABI tuple
+	// normalization, submitSmartWalletUserOp). Degrade a panic to a failed batch (all sub-calls) and
+	// report to Sentry rather than letting it unwind the request goroutine.
+	defer func() {
+		if rcv := recover(); rcv != nil {
+			if r.vm != nil && r.vm.logger != nil {
+				r.vm.logger.Error("🚨 PANIC in executeAtomicBatch - capturing for Sentry",
+					"panic", fmt.Sprintf("%v", rcv), "num_calls", n)
+			}
+			enhancedPanicRecovery("contract_write", "executeAtomicBatch", map[string]interface{}{
+				"num_calls":  n,
+				"panic_type": fmt.Sprintf("%T", rcv),
+			})
+			results = failAll(fmt.Sprintf("panic during atomic batch execution: %v", rcv), nil)
+		}
+	}()
+
+	if r.smartWalletConfig == nil {
+		log.WriteString("Atomic batch requires smart wallet config; aborting\n")
+		return failAll("smart wallet config is required for atomic batch execution", nil)
+	}
+
+	// Resolve the node-level native value and apply it to the LAST sub-call (the primary action,
+	// e.g. the swap); preceding calls (e.g. approve) carry 0. For the token-in approve+swap case
+	// this is all-zero, letting us use the cheaper, bundler-estimatable executeBatch below.
+	nodeValue := big.NewInt(0)
+	if rawValue := r.extractTransactionValue(node); rawValue != "" && rawValue != "0" {
+		parsed, parseErr := bigint.Parse(rawValue)
+		if parseErr != nil || parsed.Sign() < 0 {
+			return failAll(fmt.Sprintf("invalid transaction value %q: must be a non-negative wei integer", rawValue), nil)
+		}
+		nodeValue = parsed
+	}
+
+	targets := make([]common.Address, n)
+	values := make([]*big.Int, n)
+	datas := make([][]byte, n)
+	methodNames := make([]string, n)
+	anyValue := false
+
+	for i, mc := range methodCalls {
+		callDataHex, _, errResult := r.resolveMethodCallData(parsedABI, mc)
+		if errResult != nil {
+			// One sub-call failed to encode → the whole atomic batch is aborted before any send.
+			return failAll("atomic batch aborted: a sibling call could not be prepared", map[int]string{i: errResult.Error})
+		}
+		callDataBytes := common.FromHex(callDataHex)
+
+		methodName := mc.MethodName
+		if parsedABI != nil && (methodName == "" || methodName == UnknownMethodName) {
+			if m, err := byte4.GetMethodFromCalldata(*parsedABI, callDataBytes); err == nil {
+				methodName = m.Name
+			}
+		}
+		if methodName == "" {
+			methodName = fmt.Sprintf("method_%d", i+1)
+		}
+		methodNames[i] = methodName
+
+		// Pre-flight validation mirrors the single-call path so a malformed call aborts before send.
+		if validationErr := r.validateTransactionBeforeGasEstimation(methodName, callDataHex, callDataBytes, perCallTargets[i]); validationErr != nil {
+			return failAll("atomic batch aborted: a sibling call failed pre-flight validation", map[int]string{i: fmt.Sprintf("Pre-flight validation failed: %v", validationErr)})
+		}
+
+		value := big.NewInt(0)
+		if i == n-1 {
+			value = nodeValue
+		}
+		if value.Sign() > 0 {
+			anyValue = true
+		}
+
+		targets[i] = perCallTargets[i]
+		values[i] = value
+		datas[i] = callDataBytes
+		log.WriteString(fmt.Sprintf("Batch call %d: %s on %s (value %s wei, %d bytes)\n", i+1, methodName, perCallTargets[i].Hex(), value.String(), len(callDataBytes)))
+	}
+
+	// Pack the atomic batch. Prefer executeBatch (no per-call values) when every value is zero — its
+	// selector is bundler-estimatable, unlike executeBatchWithValues (0xc3ff72fc) which the bundler
+	// can't simulate. Only fall back to executeBatchWithValues when a call actually carries value.
+	packKind := "executeBatch"
+	var smartWalletCallData []byte
+	var packErr error
+	if anyValue {
+		packKind = "executeBatchWithValues"
+		smartWalletCallData, packErr = aa.PackExecuteBatchWithValues(targets, values, datas)
+	} else {
+		smartWalletCallData, packErr = aa.PackExecuteBatch(targets, datas)
+	}
+	if packErr != nil {
+		return failAll(fmt.Sprintf("failed to pack atomic batch calldata: %v", packErr), nil)
+	}
+
+	logLabel := fmt.Sprintf("atomicBatch[%s]", strings.Join(methodNames, ","))
+	// The batch spans heterogeneous targets; join the unique ones so bundler/AA error logs don't
+	// misleadingly point at just the first sub-call's contract.
+	logTarget := strings.Join(uniqueTargetHexes(targets), ",")
+	log.WriteString(fmt.Sprintf("Submitting atomic batch of %d calls as one UserOp (%s)\n", n, packKind))
+
+	var executionLogBuilder strings.Builder
+	executionLogBuilder.WriteString(fmt.Sprintf("Atomic batch UserOp for %d calls (%s)\n", n, packKind))
+	userOp, receipt, userErrorMsg := r.submitSmartWalletUserOp(ctx, smartWalletCallData, logLabel, logTarget, &executionLogBuilder)
+	if userErrorMsg != "" {
+		return failAll(userErrorMsg, nil)
+	}
+
+	// Fan the single receipt into one result per sub-call: all share the same tx identity
+	// (txHash/userOpHash) and the same all-or-nothing success (executeBatch reverts atomically),
+	// while each carries its own methodName/target/methodABI so the downstream event decoder
+	// attributes per-call events (Approval to the token, Swap/amountOut to the pool).
+	results = make([]*avsproto.ContractWriteNode_MethodResult, n)
+	for i := range methodCalls {
+		callDataHex := "0x" + common.Bytes2Hex(datas[i])
+		results[i] = r.createRealTransactionResult(methodNames[i], perCallTargets[i].Hex(), callDataHex, parsedABI, userOp, receipt)
+	}
+	return results
 }
 
 // createRealTransactionResult creates a result from a real UserOp transaction
@@ -1582,11 +1809,49 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// and fields that need formatting with those decimal values
 	var decimalProviders = make(map[string]*big.Int) // methodName -> decimal value
 
+	// Resolve the per-call target contract for each method: an explicit per-call contract_address
+	// overrides the node-level address, letting one node express a heterogeneous atomic batch
+	// (e.g. approve on the token + swap on the router). Absent = the node-level contract (common case,
+	// so pre-existing tasks — which never carry this new field — are unaffected).
+	perCallTargets := make([]common.Address, len(methodCalls))
+	for i, mc := range methodCalls {
+		perCallTargets[i] = contractAddr
+		if override := strings.TrimSpace(mc.GetContractAddress()); override != "" {
+			resolved := r.vm.preprocessTextWithVariableMapping(override)
+			if !common.IsHexAddress(resolved) {
+				// A per-call target was explicitly provided but did not resolve to a valid address
+				// (unresolved {{template}}, typo, or a variable that resolved to empty). Fail fast
+				// instead of silently falling back to the node-level contract — sending an atomic,
+				// irreversible sub-call to the wrong contract is exactly the footgun this feature
+				// exists to prevent. Mirrors the node-level validation in getInputData.
+				err = NewInvalidAddressError(resolved)
+				finalizeErrorMsg = err.Error()
+				finalizeSuccess = false
+				return s, err
+			}
+			perCallTargets[i] = common.HexToAddress(resolved)
+		}
+	}
+
+	// Atomic-batch route: on-demand (nodes:run) real execution of more than one method call. Instead
+	// of one UserOp per method (sequential, non-atomic — approve could land while swap reverts,
+	// leaving a dangling allowance), submit a single executeBatch UserOp so the whole set is
+	// all-or-nothing. Gated on the run-node route (vm.task == nil) so deployed workflows keep their
+	// existing per-method semantics — this is the shared-loop blast radius G4 was deferred for.
+	batchMode := r.vm.task == nil && len(methodCalls) > 1 && !r.resolveSimulationMode(node, r.vm.IsSimulation)
+
 	// Execute each method call
 	ctx := context.Background()
+	if batchMode {
+		log.WriteString(fmt.Sprintf("Atomic batch mode: submitting %d method calls as one UserOp\n", len(methodCalls)))
+		results = r.executeAtomicBatch(ctx, node, parsedABI, methodCalls, perCallTargets, &log)
+	}
 	for i, methodCall := range methodCalls {
+		if batchMode {
+			break // handled atomically above; skip the sequential per-method path
+		}
 		// Log the method call action consistently with ContractRead
-		log.WriteString(fmt.Sprintf("Calling method %s on %s\n", methodCall.MethodName, contractAddr.Hex()))
+		log.WriteString(fmt.Sprintf("Calling method %s on %s\n", methodCall.MethodName, perCallTargets[i].Hex()))
 
 		// General parameter logging (flattened): derive names from ABI when available,
 		// otherwise use arg{index}. Resolve template variables before logging.
@@ -1681,7 +1946,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 				// Surface simulation mode clearly in the node log for users
 				log.WriteString("Simulation Mode is ON — no real transactions will be submitted on-chain.\n")
 			}
-			result = r.executeMethodCall(ctx, parsedABI, originalAbiString, contractAddr, methodCall, effectiveSim, node)
+			result = r.executeMethodCall(ctx, parsedABI, originalAbiString, perCallTargets[i], methodCall, effectiveSim, node)
 		}()
 		// Ensure MethodName is populated to avoid empty keys downstream
 		if result.MethodName == "" {
@@ -1927,8 +2192,16 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 											"contract_address", contractAddress)
 
 										// Method 2: Dynamic pool discovery from transaction logs
-										// First pass: collect all unique addresses from logs to build relevant address list
-										relevantAddresses := []string{contractAddress} // Always include the target contract
+										// First pass: collect all unique addresses from logs to build relevant address list.
+										// Seed with THIS method's own target (per-call override or node-level) so a
+										// heterogeneous atomic batch attributes each call's events to the right contract —
+										// Approval to the token, Swap/amountOut to the router/pool. Falls back to the node
+										// contract for the common single-target case.
+										methodTarget := contractAddress
+										if idx < len(perCallTargets) {
+											methodTarget = perCallTargets[idx].Hex()
+										}
+										relevantAddresses := []string{methodTarget} // Always include this method's target contract
 
 										// Scan all logs in this transaction to find pool addresses
 										if poolAddresses := r.discoverPoolAddressesFromLogs(logsArray); len(poolAddresses) > 0 {
@@ -2071,9 +2344,21 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	totalGasCost := "0"
 	hasGasInfo := false
 
+	// An atomic batch fans ONE on-chain receipt out into N MethodResults (all sharing the same
+	// transactionHash/gasUsed), so summing gas per result would over-count N×. Dedupe by tx identity
+	// and count each distinct receipt once. The sequential path is unaffected — its results carry
+	// distinct tx hashes (and if two of them were ever bundled into one tx, counting the shared
+	// receipt once is the correct behavior there too).
+	countedReceiptTx := make(map[string]bool)
 	for _, methodResult := range results {
 		if methodResult.Receipt != nil {
 			if receiptMap := methodResult.Receipt.AsInterface().(map[string]interface{}); receiptMap != nil {
+				if txh, ok := receiptMap["transactionHash"].(string); ok && txh != "" {
+					if countedReceiptTx[txh] {
+						continue // this receipt's gas was already counted for a sibling sub-call
+					}
+					countedReceiptTx[txh] = true
+				}
 				// Extract gas information from receipt
 				if gasUsedHex, ok := receiptMap["gasUsed"].(string); ok && gasUsedHex != "" {
 					// Convert hex to decimal for aggregation
