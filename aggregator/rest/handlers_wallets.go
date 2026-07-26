@@ -185,9 +185,19 @@ func (s *Server) WithdrawWallet(ctx echo.Context, address generated.EthereumAddr
 		return badRequest("WITHDRAW_BAD_RECIPIENT", "Invalid recipient address",
 			"recipientAddress must be a valid 0x-prefixed hex address.")
 	}
-	if body.Token != "ETH" && !common.IsHexAddress(body.Token) {
-		return badRequest("WITHDRAW_BAD_TOKEN", "Invalid token",
-			"token must be the literal \"ETH\" or a valid 0x-prefixed ERC-20 address.")
+	if body.Token != "ETH" {
+		if !common.IsHexAddress(body.Token) {
+			return badRequest("WITHDRAW_BAD_TOKEN", "Invalid token",
+				"token must be the literal \"ETH\" or a valid 0x-prefixed ERC-20 address.")
+		}
+		// The zero address passes IsHexAddress but is never an ERC-20 —
+		// balanceOf on it fails downstream with the opaque "no contract
+		// code at given address" (Sentry EIGENLAYER-AVS-1J). Reject it here
+		// as a 400. Native withdrawals use the literal "ETH".
+		if common.HexToAddress(body.Token) == (common.Address{}) {
+			return badRequest("WITHDRAW_BAD_TOKEN", "Invalid token",
+				"token cannot be the zero address; use the literal \"ETH\" to withdraw native currency.")
+		}
 	}
 	if body.Amount != "max" {
 		amt, ok := new(big.Int).SetString(body.Amount, 10)

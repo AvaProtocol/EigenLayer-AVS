@@ -490,6 +490,22 @@ func TestWorkerChainStateReader_GetTokenBalance_Malformed(t *testing.T) {
 	}
 }
 
+// TestDirectChainStateReader_GetTokenBalance_ZeroAddress: the zero address is
+// never an ERC-20; balanceOf on it fails with the opaque "no contract code at
+// given address" (Sentry EIGENLAYER-AVS-1J). The reader must reject it up
+// front without dialing the chain, so a nil client is safe here.
+func TestDirectChainStateReader_GetTokenBalance_ZeroAddress(t *testing.T) {
+	r := NewDirectChainStateReader(nil, 11155111)
+	owner := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	_, err := r.GetTokenBalance(context.Background(), common.Address{}, owner)
+	if err == nil {
+		t.Fatalf("expected zero-address token to be rejected")
+	}
+	if !strings.Contains(err.Error(), "zero address") {
+		t.Fatalf("error should mention zero address, got: %v", err)
+	}
+}
+
 // TestWorkerChainStateReader_GetSmartWalletAddress: owner/factory are
 // hex-encoded and the salt serializes as a base-10 string; a valid hex
 // address round-trips back.
