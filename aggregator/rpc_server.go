@@ -2,6 +2,7 @@ package aggregator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/allegro/bigcache/v3"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -275,10 +277,31 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 		if !common.IsHexAddress(payload.Token) {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid token address format: %q", payload.Token)
 		}
+		tokenAddr := common.HexToAddress(payload.Token)
+		// The zero address is never a valid ERC-20. It passes IsHexAddress,
+		// so guard explicitly — otherwise GetTokenBalance calls balanceOf on
+		// it and fails with the opaque "no contract code at given address".
+		// This path is reachable via gRPC (not only the REST handler), so
+		// don't assume upstream validation. Native withdrawals use "ETH".
+		if tokenAddr == (common.Address{}) {
+			return nil, status.Errorf(codes.InvalidArgument,
+				"token cannot be the zero address on chain %d; use \"ETH\" to withdraw native currency", requestedChainID)
+		}
 		// Validate the token balance.
-		tokenBalance, balanceErr := chainReader.GetTokenBalance(ctx, common.HexToAddress(payload.Token), *smartWalletAddress)
+		tokenBalance, balanceErr := chainReader.GetTokenBalance(ctx, tokenAddr, *smartWalletAddress)
 		if balanceErr != nil {
-			return nil, status.Errorf(codes.Internal, "failed to get token balance: %v", balanceErr)
+			// "no contract code at given address" means the token isn't
+			// deployed on this chain (wrong chainId, or a non-token address) —
+			// a client error, not a server fault. Return FailedPrecondition
+			// (HTTP 400) so it doesn't page Sentry as a 500, and include the
+			// token + chain so the event is self-diagnosable without
+			// cross-referencing gateway logs (Sentry EIGENLAYER-AVS-1J).
+			if errors.Is(balanceErr, bind.ErrNoCode) || strings.Contains(balanceErr.Error(), "no contract code at given address") {
+				return nil, status.Errorf(codes.FailedPrecondition,
+					"token %s has no contract code on chain %d — verify the token address and chainId", payload.Token, requestedChainID)
+			}
+			return nil, status.Errorf(codes.Internal,
+				"failed to get token balance for token %s on chain %d: %v", payload.Token, requestedChainID, balanceErr)
 		}
 		if withdrawAll {
 			if tokenBalance.Cmp(big.NewInt(0)) == 0 {
