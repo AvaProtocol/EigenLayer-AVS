@@ -200,6 +200,12 @@ func (d *directChainStateReader) GetBalance(ctx context.Context, addr common.Add
 }
 
 func (d *directChainStateReader) GetTokenBalance(ctx context.Context, token, owner common.Address) (*big.Int, error) {
+	// The zero address is never an ERC-20 contract; balanceOf on it fails
+	// with the opaque "no contract code at given address". Reject up front
+	// so callers get an actionable error (Sentry EIGENLAYER-AVS-1J).
+	if token == (common.Address{}) {
+		return nil, fmt.Errorf("token address is the zero address, not an ERC-20 contract")
+	}
 	contract, err := erc20.NewErc20(token, d.client)
 	if err != nil {
 		return nil, fmt.Errorf("erc20 binding for %s: %w", token.Hex(), err)

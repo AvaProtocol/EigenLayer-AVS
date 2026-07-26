@@ -563,6 +563,13 @@ func (s *Server) GetTokenBalance(ctx context.Context, req *avsproto.WorkerGetTok
 	if !common.IsHexAddress(req.OwnerAddress) {
 		return nil, fmt.Errorf("invalid owner address %q", req.OwnerAddress)
 	}
+	// The zero address passes IsHexAddress but is never an ERC-20 contract;
+	// balanceOf on it fails with "no contract code at given address". Reject
+	// it explicitly so the caller gets an actionable error rather than an
+	// opaque RPC failure (Sentry EIGENLAYER-AVS-1J).
+	if common.HexToAddress(req.TokenAddress) == (common.Address{}) {
+		return nil, fmt.Errorf("token address is the zero address, not an ERC-20 contract")
+	}
 	token, err := erc20.NewErc20(common.HexToAddress(req.TokenAddress), s.worker.rpcClient)
 	if err != nil {
 		return nil, fmt.Errorf("erc20 binding for %s: %w", req.TokenAddress, err)
