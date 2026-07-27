@@ -23,6 +23,12 @@ type Problem struct {
 	Code     string `json:"code,omitempty"`
 }
 
+// genericServerErrorDetail replaces any 5xx Problem detail the code didn't
+// deliberately author for the caller. Server-side failure text is internal
+// state and stays in the logs and Sentry; the client correlates via the
+// request id carried in Problem.Instance.
+const genericServerErrorDetail = "An internal error occurred while processing this request."
+
 // HTTPError is a typed error a handler can return to control the
 // Problem fields directly. Anything else (echo.HTTPError, plain errors)
 // gets best-effort-mapped to a Problem by ProblemErrorHandler.
@@ -80,6 +86,13 @@ func ProblemErrorHandler(logger sdklogging.Logger) echo.HTTPErrorHandler {
 			Type:     "about:blank",
 		}
 
+		// A typed *HTTPError carries a Detail a handler author wrote for the
+		// caller ("this aggregator has no smart-wallet config for the
+		// requested chain"). Every other branch carries whatever text the
+		// failure happened to produce internally, which must not be echoed
+		// back on a 5xx — see the clamp below.
+		detailIsAuthored := false
+
 		var typed *HTTPError
 		var echoErr *echo.HTTPError
 		switch {
@@ -88,6 +101,7 @@ func ProblemErrorHandler(logger sdklogging.Logger) echo.HTTPErrorHandler {
 			p.Code = typed.Code
 			p.Title = typed.Title
 			p.Detail = typed.Detail
+			detailIsAuthored = true
 		case errors.As(err, &echoErr):
 			p.Status = echoErr.Code
 			p.Title = http.StatusText(echoErr.Code)
@@ -110,12 +124,32 @@ func ProblemErrorHandler(logger sdklogging.Logger) echo.HTTPErrorHandler {
 		}
 
 		if logger != nil && p.Status >= 500 {
+			// `err` is passed as an error value, not err.Error(). pkg/logger's
+			// SentryLogger uses the first error-typed tag as the captured
+			// exception and only falls back to wrapping the message string
+			// when there is none — so passing a string made every 5xx from
+			// every route report as the same `*errors.errorString: REST
+			// handler error`, collapsing unrelated root causes into one
+			// Sentry issue (EIGENLAYER-AVS-1J / -2A). Passing the error
+			// itself makes Sentry group on the actual failure.
 			logger.Error("REST handler error",
 				"status", p.Status,
 				"path", c.Request().URL.Path,
+				"route", c.Path(),
 				"method", c.Request().Method,
 				"request_id", p.Instance,
-				"error", err.Error())
+				"error", err)
+		}
+
+		// An unauthored 5xx Detail is raw internal state — a panic message
+		// ("runtime error: invalid memory address or nil pointer
+		// dereference"), an engine error chain, a driver string. The log
+		// call above and its Sentry event keep the full text; the caller
+		// gets a fixed line plus the request id in `instance`, which is
+		// what correlates the two. 4xx details are unchanged: those
+		// describe the caller's own input and are meant to be actionable.
+		if p.Status >= 500 && !detailIsAuthored {
+			p.Detail = genericServerErrorDetail
 		}
 
 		// Defer to Echo's standard response writing with our shape +
