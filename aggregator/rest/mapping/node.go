@@ -153,6 +153,9 @@ func OpenAPIToProtoNode(in generated.Node) (*avsproto.TaskNode, error) {
 		if err != nil {
 			return nil, fmt.Errorf("node %s: decode CustomCodeNode: %w", in.Id, err)
 		}
+		if v.Config == nil {
+			return nil, fmt.Errorf("node %s: CustomCodeNode missing config", in.Id)
+		}
 		// CustomCodeNode_Config.Lang is a proto enum whose wire form
 		// (LANG_JAVASCRIPT) doesn't match the OpenAPI wire form
 		// (javascript), so it's mapped explicitly rather than through
