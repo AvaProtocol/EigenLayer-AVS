@@ -122,6 +122,9 @@ func OpenAPIToProtoNode(in generated.Node) (*avsproto.TaskNode, error) {
 		if err != nil {
 			return nil, fmt.Errorf("node %s: decode LoopNode: %w", in.Id, err)
 		}
+		if v.Config == nil {
+			return nil, fmt.Errorf("node %s: LoopNode missing config", in.Id)
+		}
 		// LoopNode.Config.Runner is a nested Node — recurse so its
 		// discriminated union survives the round-trip. The runner lives
 		// on the proto LoopNode (oneof), not on LoopNode_Config.
@@ -152,6 +155,9 @@ func OpenAPIToProtoNode(in generated.Node) (*avsproto.TaskNode, error) {
 		v, err := in.AsCustomCodeNode()
 		if err != nil {
 			return nil, fmt.Errorf("node %s: decode CustomCodeNode: %w", in.Id, err)
+		}
+		if v.Config == nil {
+			return nil, fmt.Errorf("node %s: CustomCodeNode missing config", in.Id)
 		}
 		// CustomCodeNode_Config.Lang is a proto enum whose wire form
 		// (LANG_JAVASCRIPT) doesn't match the OpenAPI wire form
