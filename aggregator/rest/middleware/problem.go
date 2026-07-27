@@ -110,12 +110,21 @@ func ProblemErrorHandler(logger sdklogging.Logger) echo.HTTPErrorHandler {
 		}
 
 		if logger != nil && p.Status >= 500 {
+			// `err` is passed as an error value, not err.Error(). pkg/logger's
+			// SentryLogger uses the first error-typed tag as the captured
+			// exception and only falls back to wrapping the message string
+			// when there is none — so passing a string made every 5xx from
+			// every route report as the same `*errors.errorString: REST
+			// handler error`, collapsing unrelated root causes into one
+			// Sentry issue (EIGENLAYER-AVS-1J / -2A). Passing the error
+			// itself makes Sentry group on the actual failure.
 			logger.Error("REST handler error",
 				"status", p.Status,
 				"path", c.Request().URL.Path,
+				"route", c.Path(),
 				"method", c.Request().Method,
 				"request_id", p.Instance,
-				"error", err.Error())
+				"error", err)
 		}
 
 		// Defer to Echo's standard response writing with our shape +

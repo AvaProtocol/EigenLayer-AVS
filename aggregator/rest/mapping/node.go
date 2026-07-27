@@ -122,6 +122,9 @@ func OpenAPIToProtoNode(in generated.Node) (*avsproto.TaskNode, error) {
 		if err != nil {
 			return nil, fmt.Errorf("node %s: decode LoopNode: %w", in.Id, err)
 		}
+		if v.Config == nil {
+			return nil, fmt.Errorf("node %s: LoopNode missing config", in.Id)
+		}
 		// LoopNode.Config.Runner is a nested Node — recurse so its
 		// discriminated union survives the round-trip. The runner lives
 		// on the proto LoopNode (oneof), not on LoopNode_Config.
