@@ -72,10 +72,8 @@ func TestNonBlockingExecutionStability(t *testing.T) {
 		SmartWalletAddress: walletResp.Address,
 		StartAt:            time.Now().UnixMilli(),
 		ExpiredAt:          time.Now().Add(24 * time.Hour).UnixMilli(),
-		// Omitted-equivalent: CreateWorkflow rewrites a non-positive value to
-		// DefaultMaxExecution, so this is no longer "unlimited" — this test
-		// just doesn't care about the cap.
-		MaxExecution:   0,
+		// max_execution omitted: this test doesn't care about the cap, and
+		// CreateWorkflow supplies DefaultMaxExecution.
 		InputVariables: testutil.TestSettingsInputVariables("Non-blocking Stability Test", walletResp.Address),
 	}
 
