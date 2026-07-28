@@ -988,9 +988,12 @@ type MethodCall struct {
 	ApplyToFields *[]string `json:"applyToFields,omitempty"`
 
 	// CallData Arbitrary-length hex-encoded byte string.
-	CallData     *Hex      `json:"callData,omitempty"`
-	MethodName   string    `json:"methodName"`
-	MethodParams *[]string `json:"methodParams,omitempty"`
+	CallData *Hex `json:"callData,omitempty"`
+
+	// ContractAddress Lowercase or checksummed hex EOA / contract address.
+	ContractAddress *EthereumAddress `json:"contractAddress,omitempty"`
+	MethodName      string           `json:"methodName"`
+	MethodParams    *[]string        `json:"methodParams,omitempty"`
 }
 
 // NativeToken defines model for NativeToken.
