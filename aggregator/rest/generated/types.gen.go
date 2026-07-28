@@ -476,9 +476,11 @@ type CreateWorkflowRequest struct {
 	// `settings.chainId` (chain id). camelCase keys; back-compat support
 	// for snake_case keys exists during the migration window.
 	InputVariables *InputVariables `json:"inputVariables,omitempty"`
-	MaxExecution   *int64          `json:"maxExecution,omitempty"`
-	Name           *string         `json:"name,omitempty"`
-	Nodes          []Node          `json:"nodes"`
+
+	// MaxExecution Optional cap on total executions. Omit it (or send 0) to take the server default rather than to run forever — unlimited execution is not offered, because every run spends metered provider quota.
+	MaxExecution *int64  `json:"maxExecution,omitempty"`
+	Name         *string `json:"name,omitempty"`
+	Nodes        []Node  `json:"nodes"`
 
 	// SmartWalletAddress Lowercase or checksummed hex EOA / contract address.
 	SmartWalletAddress EthereumAddress `json:"smartWalletAddress"`
@@ -1457,7 +1459,7 @@ type Workflow struct {
 	// for snake_case keys exists during the migration window.
 	InputVariables *InputVariables `json:"inputVariables,omitempty"`
 
-	// MaxExecution Cap on how many times this workflow may execute. 0 = unlimited.
+	// MaxExecution Cap on how many times this workflow may execute. Always present and always finite: a create request that omits the field (or sends 0) is assigned the server default, so "run forever" is not expressible. The workflow reaches status `completed` once `executionCount` hits this value. Compare the two to derive remaining runs.
 	MaxExecution *int64  `json:"maxExecution,omitempty"`
 	Name         *string `json:"name,omitempty"`
 	Nodes        []Node  `json:"nodes"`
