@@ -64,7 +64,20 @@ func OpenAPIToProtoCreateWorkflow(in generated.CreateWorkflowRequest) (*avsproto
 	if in.ExpiredAt != nil {
 		out.ExpiredAt = *in.ExpiredAt
 	}
+	// A non-positive max_execution used to mean "run forever" and now cannot be
+	// honoured. Reject it rather than silently rewriting it to the default: the
+	// request pointer lets us tell an *explicit* 0 (a caller asking for
+	// unlimited) from an omitted field (a caller with no opinion), and only the
+	// latter should quietly take the default.
+	//
+	// Negatives matter as much as 0. The executor gates on `MaxExecution > 0`,
+	// so a negative value reads as unlimited everywhere while slipping past an
+	// `== 0` check — it would be the one remaining way to create an uncapped
+	// workflow.
 	if in.MaxExecution != nil {
+		if *in.MaxExecution <= 0 {
+			return nil, fmt.Errorf("maxExecution must be greater than 0 (got %d): unlimited execution is not supported, because every run spends metered provider quota — omit the field to take the server default", *in.MaxExecution)
+		}
 		out.MaxExecution = *in.MaxExecution
 	}
 	// chain_id is no longer a task-level field (G5); each chain-aware
@@ -136,6 +149,25 @@ func ProtoToOpenAPIWorkflow(in *avsproto.Task) (generated.Workflow, error) {
 	}
 	if v := in.GetExecutionCount(); v != 0 {
 		out.ExecutionCount = &v
+	}
+
+	// Runs left before the workflow completes. Emitted unconditionally (not
+	// behind the `!= 0` guard the fields above use) because 0 is the single
+	// most important value here — it is exactly the state where the workflow
+	// has stopped, and omitting it would look identical to "not reported".
+	if maxExecution := in.GetMaxExecution(); maxExecution > 0 {
+		remaining := maxExecution - in.GetExecutionCount()
+		if remaining < 0 {
+			remaining = 0
+		}
+		out.RemainingExecutions = &remaining
+	}
+
+	// Why a terminal workflow stopped. UNSPECIFIED carries no information, so
+	// it is left absent rather than serialized.
+	if reason := in.GetCompletionReason(); reason != avsproto.TaskCompletionReason_TASK_COMPLETION_REASON_UNSPECIFIED {
+		completionReason := generated.WorkflowCompletionReason(reason.String())
+		out.CompletionReason = &completionReason
 	}
 	// chain_id removed from Task (G5) — no workflow-level chain to surface.
 

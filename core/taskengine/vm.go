@@ -4964,6 +4964,19 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 		return s, resolveErr
 	}
 
+	// Fan-out ceiling (limits.go). The trigger floors bound how often a task
+	// runs, not how much a single run does — without this, one execution can
+	// make an unbounded number of provider calls. Fail rather than truncate: a
+	// loop that silently processed the first MaxLoopIterations of a longer list
+	// would report success while skipping most of its work.
+	if len(inputArray) > MaxLoopIterations {
+		err := fmt.Errorf("loop input has %d items, exceeding the %d-iteration maximum: each iteration spends provider quota, so split the input or filter it upstream",
+			len(inputArray), MaxLoopIterations)
+		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		finalizeStep(s, false, nil, err.Error(), log.String())
+		return s, err
+	}
+
 	// Determine execution mode
 	concurrent := false
 	var executionModeLog string

@@ -349,11 +349,30 @@ enum ErrorCode {
 // TaskStatus represents status of the task. The transition is as follow
 enum TaskStatus {
   Enabled   = 0;
-  // Task is completed when it reaches its max_execution count or its expiration time
+  // Task is completed when it reaches its max_execution count or its expiration
+  // time. Which of the two is recorded in Task.completion_reason — the status
+  // alone cannot tell them apart.
   Completed = 1;
   Failed    = 2;
   Running   = 4;
   Disabled  = 5;
+}
+
+// TaskCompletionReason records *why* a task reached a terminal state.
+//
+// Both an exhausted execution budget and a passed expiry land on
+// TaskStatus.Completed, so without this a client asking "why did my workflow
+// stop?" cannot be answered. Cancellation is not represented because cancelling
+// deletes the task rather than leaving a terminal record.
+//
+// Prefixed value names: proto3 enum values share the enclosing file's
+// namespace, and the bare style used by TaskStatus above would collide.
+enum TaskCompletionReason {
+  TASK_COMPLETION_REASON_UNSPECIFIED = 0;
+  // execution_count reached max_execution.
+  TASK_COMPLETION_REASON_MAX_EXECUTIONS_REACHED = 1;
+  // The wall clock passed expired_at.
+  TASK_COMPLETION_REASON_EXPIRED = 2;
 }
 
 // ExecutionStatus represents the outcome of a task execution.
@@ -874,6 +893,11 @@ message Task {
   // validation. Past the threshold defined in core/taskengine/executor.go,
   // the task is automatically flipped to Disabled.
   uint32 consecutive_validation_failures = 18;
+
+  // Why this task reached a terminal state, set alongside completed_at.
+  // UNSPECIFIED while the task is still runnable, and on tasks that reached a
+  // terminal state before this field existed.
+  TaskCompletionReason completion_reason = 19;
 }
 
 
