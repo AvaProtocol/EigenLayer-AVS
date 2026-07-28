@@ -74,7 +74,22 @@ const (
 	// ceilings structurally cannot reach: N leaked tasks cost N times the
 	// per-task cap. Counts only *active* (Enabled) tasks, so completed and
 	// cancelled ones never accumulate against an owner.
-	MaxActiveWorkflowsPerOwner = 100
+	//
+	// Sized from a measurement, not a guess. The first value here was 100,
+	// chosen with no data; the ava-sdk-js v4 suite then failed 30 of 48 suites
+	// against a local gateway with 132 rejections, because a single full run
+	// creates ~105 workflows under one EOA (gateway log, 7.7-minute window) and
+	// per-test cleanup lags creation enough that the live count crosses 100
+	// mid-run. 1000 leaves ~10x headroom over that observed peak.
+	//
+	// A loose bound is the right trade here. This cap is only a backstop
+	// against mass *creation*: DefaultMaxExecution already stops any single
+	// leaked task after 51,840 runs and the interval floors bound its rate, so
+	// the per-task ceilings do the real work. Against that, being too tight is
+	// the more damaging failure — it is the one ceiling evaluated against an
+	// owner's *current* state, so an owner already over it is locked out of
+	// creating anything, with no grandfathering.
+	MaxActiveWorkflowsPerOwner = 1000
 
 	// MaxLoopIterations bounds fan-out *within* a single execution, which the
 	// trigger floors cannot reach: a REST node inside a Loop runs once per
