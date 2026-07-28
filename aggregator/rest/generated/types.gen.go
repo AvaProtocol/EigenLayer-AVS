@@ -1469,7 +1469,7 @@ type Workflow struct {
 	// for snake_case keys exists during the migration window.
 	InputVariables *InputVariables `json:"inputVariables,omitempty"`
 
-	// MaxExecution Cap on how many times this workflow may execute. Always present and always finite: a create request that omits the field (or sends 0) is assigned the server default, so "run forever" is not expressible. The workflow reaches status `completed` once `executionCount` hits this value. Compare the two to derive remaining runs.
+	// MaxExecution Cap on how many times this workflow may execute. The workflow reaches status `completed` once `executionCount` hits this value. Present and finite on every workflow created since the server began assigning a default — a create request that omits the field takes that default, and one that sends 0 or a negative is rejected, so "run forever" is not expressible. Absent on workflows created before that change and stored uncapped; those keep running without a limit, and `remainingExecutions` is likewise absent for them.
 	MaxExecution *int64  `json:"maxExecution,omitempty"`
 	Name         *string `json:"name,omitempty"`
 	Nodes        []Node  `json:"nodes"`
@@ -1477,7 +1477,7 @@ type Workflow struct {
 	// Owner Lowercase or checksummed hex EOA / contract address.
 	Owner EthereumAddress `json:"owner"`
 
-	// RemainingExecutions Runs left before the workflow completes — `maxExecution` minus `executionCount`, floored at 0. Derived server-side so clients do not have to reproduce the arithmetic (and so an absent `executionCount` on a never-run workflow cannot be misread).
+	// RemainingExecutions Runs left before the workflow completes — `maxExecution` minus `executionCount`, floored at 0. Derived server-side so clients do not have to reproduce the arithmetic (and so an absent `executionCount` on a never-run workflow cannot be misread). Reported as 0 rather than omitted once the budget is spent. Absent only on legacy uncapped workflows, where no finite number exists.
 	RemainingExecutions *int64 `json:"remainingExecutions,omitempty"`
 
 	// SmartWalletAddress Lowercase or checksummed hex EOA / contract address.

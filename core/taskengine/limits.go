@@ -207,7 +207,20 @@ func validateTriggerFrequency(trigger *avsproto.TaskTrigger, fallbackChainID int
 	}
 
 	if cronTrigger := trigger.GetCron(); cronTrigger != nil {
-		for _, expr := range cronTrigger.GetConfig().GetSchedules() {
+		// An absent config would not panic — generated getters are nil-safe, so
+		// GetConfig().GetSchedules() yields nil and the loop below is skipped.
+		// It would instead pass the floor *silently* and leave the task to be
+		// auto-failed later by the ValidateWithError sweep. Reject it here, for
+		// the same reason the block branch does: a task that can never fire
+		// should fail at create, where the caller can still act on it.
+		config := cronTrigger.GetConfig()
+		if config == nil {
+			return fmt.Errorf("cron trigger config is required but missing")
+		}
+		if len(config.GetSchedules()) == 0 {
+			return fmt.Errorf("cron trigger must have at least one schedule")
+		}
+		for _, expr := range config.GetSchedules() {
 			interval, err := minCronInterval(expr)
 			if err != nil {
 				return err
@@ -229,13 +242,18 @@ func validateTriggerFrequency(trigger *avsproto.TaskTrigger, fallbackChainID int
 			return fmt.Errorf("block trigger interval must be greater than 0, got %d", config.GetInterval())
 		}
 
-		blockTime := blockTimeForChain(triggerMonitoringChainID(trigger, fallbackChainID))
+		// Report the *resolved* chain, not config.GetChainId(). An unset
+		// chain_id resolves to the aggregator default, and naming chain 0 while
+		// quoting a block count derived from a 12s chain sends the caller
+		// looking for a chain that isn't involved.
+		chainID := triggerMonitoringChainID(trigger, fallbackChainID)
+		blockTime := blockTimeForChain(chainID)
 		interval := time.Duration(config.GetInterval()) * blockTime
 		if interval < MinBlockTriggerInterval {
 			minBlocks := int64(math.Ceil(float64(MinBlockTriggerInterval) / float64(blockTime)))
 			return fmt.Errorf(
 				"block trigger interval of %d block(s) on chain %d fires every ~%s, faster than the %s minimum: use at least %d blocks",
-				config.GetInterval(), config.GetChainId(), interval, MinBlockTriggerInterval, minBlocks)
+				config.GetInterval(), chainID, interval, MinBlockTriggerInterval, minBlocks)
 		}
 	}
 

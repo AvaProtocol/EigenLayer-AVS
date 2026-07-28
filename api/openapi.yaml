@@ -982,11 +982,14 @@ components:
           type: integer
           format: int64
           description: >-
-            Cap on how many times this workflow may execute. Always present and
-            always finite: a create request that omits the field (or sends 0)
-            is assigned the server default, so "run forever" is not expressible.
-            The workflow reaches status `completed` once `executionCount` hits
-            this value. Compare the two to derive remaining runs.
+            Cap on how many times this workflow may execute. The workflow
+            reaches status `completed` once `executionCount` hits this value.
+            Present and finite on every workflow created since the server
+            began assigning a default — a create request that omits the field
+            takes that default, and one that sends 0 or a negative is rejected,
+            so "run forever" is not expressible. Absent on workflows created
+            before that change and stored uncapped; those keep running without
+            a limit, and `remainingExecutions` is likewise absent for them.
         executionCount:
           type: integer
           format: int64
@@ -999,6 +1002,8 @@ components:
             `executionCount`, floored at 0. Derived server-side so clients do
             not have to reproduce the arithmetic (and so an absent
             `executionCount` on a never-run workflow cannot be misread).
+            Reported as 0 rather than omitted once the budget is spent. Absent
+            only on legacy uncapped workflows, where no finite number exists.
         completionReason:
           type: string
           enum:

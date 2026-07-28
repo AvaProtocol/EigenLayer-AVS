@@ -154,6 +154,55 @@ func TestValidateTriggerFrequencyIgnoresUnratedTriggers(t *testing.T) {
 	}
 }
 
+// Copilot review flagged a nil cron Config as a panic. It is not — generated
+// getters are nil-safe, so GetConfig().GetSchedules() returns nil and the loop
+// is skipped. The real defect is what that silence means: the trigger cleared
+// the frequency floor and would be created, then auto-failed later by the
+// ValidateWithError sweep. Both malformed shapes must fail at create instead,
+// matching what the block branch already did.
+func TestValidateTriggerFrequencyRejectsMalformedCron(t *testing.T) {
+	nilConfig := &avsproto.TaskTrigger{
+		Type:        avsproto.TriggerType_TRIGGER_TYPE_CRON,
+		TriggerType: &avsproto.TaskTrigger_Cron{Cron: &avsproto.CronTrigger{Config: nil}},
+	}
+	if err := validateTriggerFrequency(nilConfig, 1); err == nil {
+		t.Error("a cron trigger with no config must be rejected at create, not left to the sweep")
+	}
+
+	if err := validateTriggerFrequency(cronTrigger(), 1); err == nil {
+		t.Error("a cron trigger with an empty schedule list must be rejected")
+	}
+}
+
+// The error must name the chain the block-count boundary was actually computed
+// from. An unset chain_id resolves to the aggregator default, so quoting
+// "chain 0" alongside a 12s-chain block count sends the caller looking for a
+// chain that isn't involved.
+func TestBlockFrequencyErrorNamesResolvedChain(t *testing.T) {
+	unsetChain := &avsproto.TaskTrigger{
+		Type: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+		TriggerType: &avsproto.TaskTrigger_Block{
+			Block: &avsproto.BlockTrigger{
+				Config: &avsproto.BlockTrigger_Config{Interval: 1}, // ChainId omitted
+			},
+		},
+	}
+	err := validateTriggerFrequency(unsetChain, 1)
+	if err == nil {
+		t.Fatal("every block on a 12s chain must be rejected")
+	}
+	if strings.Contains(err.Error(), "chain 0") {
+		t.Errorf("error names the unresolved chain 0: %v", err)
+	}
+	if !strings.Contains(err.Error(), "chain 1") {
+		t.Errorf("error should name the resolved fallback chain 1: %v", err)
+	}
+	// The quoted boundary must match the chain named, not the raw config value.
+	if !strings.Contains(err.Error(), "at least 5 blocks") {
+		t.Errorf("expected the 12s-chain boundary of 5 blocks: %v", err)
+	}
+}
+
 // The two floors are deliberately different: reacting to chain state is the
 // point of a block trigger, so it gets a tighter bound than cron. This pins
 // that they can't silently collapse back into one value.
