@@ -1726,6 +1726,17 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 		}
 	}
 
+	// max_execution is already enforced by the executor, but an omitted value
+	// left it 0 — and 0 means "unlimited run until cancel". Default it so an
+	// abandoned task stops on its own instead of running forever.
+	if taskPayload.MaxExecution == 0 {
+		taskPayload.MaxExecution = DefaultMaxExecution
+	}
+
+	if err := n.checkActiveWorkflowQuota(userAddr); err != nil {
+		return nil, err
+	}
+
 	task, err := model.NewWorkflowFromProtobuf(user, taskPayload)
 
 	if err != nil {
@@ -1740,6 +1751,18 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	// path (run_node_immediately.go) does this resolution; CreateTask must too.
 	if err := resolveEventTriggerTemplates(task.Trigger, task.InputVariables, n.logger); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "EventTrigger template resolution failed: %v", err)
+	}
+
+	// Constant frequency ceiling (limits.go). Checked on the built task so a
+	// block trigger's chain is resolvable — a block interval means nothing in
+	// wall-clock until you know the chain's block time.
+	//
+	// Deliberately NOT added to Workflow.ValidateWithError: that runs in a sweep
+	// over every already-loaded task and flips whatever fails to Failed, so a new
+	// rule there would retroactively kill existing customer workflows on the next
+	// boot. New tasks are held to the floor; existing ones keep running.
+	if err := validateTriggerFrequency(task.Trigger, n.defaultChainID()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 
 	// Default chain_id to the aggregator's SmartWallet chain when not specified.

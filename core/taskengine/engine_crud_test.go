@@ -55,13 +55,20 @@ func TestCreateTaskReturnErrorWhenInvalidBlockTriggerInterval(t *testing.T) {
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
 
+	// A block interval only means something in wall-clock: on the test chain's
+	// ~12s blocks, MinBlockTriggerInterval (60s) means at least 5 blocks. An
+	// interval of 1 used to be accepted and is 7,200 executions/day — the
+	// fastest cost vector the engine had, previously checked only for > 0.
 	testCases := []struct {
-		interval int64
-		wantErr  bool
+		interval    int64
+		wantErr     bool
+		errContains string
 	}{
-		{interval: 0, wantErr: true},
-		{interval: -1, wantErr: true},
-		{interval: 1, wantErr: false},
+		{interval: 0, wantErr: true, errContains: "Invalid task argument"},
+		{interval: -1, wantErr: true, errContains: "Invalid task argument"},
+		{interval: 1, wantErr: true, errContains: "faster than the"},
+		{interval: 4, wantErr: true, errContains: "faster than the"},
+		{interval: 5, wantErr: false},
 		{interval: 100, wantErr: false},
 		{interval: 1000, wantErr: false},
 	}
@@ -83,10 +90,14 @@ func TestCreateTaskReturnErrorWhenInvalidBlockTriggerInterval(t *testing.T) {
 				t.Errorf("CreateTask() unexpected error for interval %d: %v", tt.interval, err)
 			}
 
+			if tt.wantErr && err == nil {
+				t.Errorf("CreateTask() expected an error for interval %d, got nil", tt.interval)
+			}
+
 			if tt.wantErr && err != nil {
 				t.Logf("CreateTask() correctly rejected interval %d with error: %v", tt.interval, err)
-				if !strings.Contains(err.Error(), "Invalid task argument") {
-					t.Errorf("Expected error to contain 'Invalid task argument', got: %v", err)
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("Expected error to contain %q, got: %v", tt.errContains, err)
 				}
 			}
 		})
