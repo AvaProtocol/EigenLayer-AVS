@@ -687,11 +687,11 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 
 	// when MaxExecution is 0, it means unlimited run until cancel
 	if task.MaxExecution > 0 && task.ExecutionCount >= task.MaxExecution {
-		task.SetCompleted()
+		task.SetCompleted(avsproto.TaskCompletionReason_TASK_COMPLETION_REASON_MAX_EXECUTIONS_REACHED)
 	}
 
 	if task.ExpiredAt > 0 && t1.UnixMilli() >= task.ExpiredAt {
-		task.SetCompleted()
+		task.SetCompleted(avsproto.TaskCompletionReason_TASK_COMPLETION_REASON_EXPIRED)
 	}
 
 	// Analyze execution results from all steps (including failed ones)
@@ -869,10 +869,10 @@ func (x *WorkflowExecutor) checkpointSuspendedExecution(task *model.Workflow, ex
 	// task now, in the same atomic batch. The resume in Advance does NOT re-count.
 	initialTaskStatus := task.Status
 	if task.MaxExecution > 0 && task.ExecutionCount >= task.MaxExecution {
-		task.SetCompleted()
+		task.SetCompleted(avsproto.TaskCompletionReason_TASK_COMPLETION_REASON_MAX_EXECUTIONS_REACHED)
 	}
 	if task.ExpiredAt > 0 && time.Now().UnixMilli() >= task.ExpiredAt {
-		task.SetCompleted()
+		task.SetCompleted(avsproto.TaskCompletionReason_TASK_COMPLETION_REASON_EXPIRED)
 	}
 	taskJSON, err := task.ToJSON()
 	if err != nil {

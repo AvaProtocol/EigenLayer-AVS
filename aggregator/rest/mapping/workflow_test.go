@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 // TestOpenAPIToProtoCreateWorkflow_MirrorsNameIntoSettings asserts that the
@@ -158,4 +159,139 @@ func customCodeNode() generated.Node {
 	n := generated.Node{Id: "node1", Type: generated.NodeTypeCustomCode, Name: &name}
 	_ = n.FromCustomCodeNode(inner)
 	return n
+}
+
+// TestProtoToOpenAPIWorkflow_ExecutionBudget covers the two fields a client
+// needs to answer "how much life does this workflow have left, and why did it
+// stop?" — neither of which was previously derivable from the response.
+//
+// `remainingExecutions` is computed server-side rather than left to the client:
+// `executionCount` is omitted when zero, so a client subtracting the two fields
+// on a never-run workflow has to know that an absent field means 0.
+//
+// `completionReason` exists because an exhausted budget and a passed expiry
+// both produce status `completed`. Before this, they were indistinguishable.
+func TestProtoToOpenAPIWorkflow_ExecutionBudget(t *testing.T) {
+	baseTask := func() *avsproto.Task {
+		return &avsproto.Task{
+			Id:                 "01kxrxyb9x35phtw194afsz563",
+			Owner:              "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
+			SmartWalletAddress: "0x8Ee38eB323c14a1752DABDA1cca9661AEE377017",
+			Status:             avsproto.TaskStatus_Enabled,
+			MaxExecution:       100,
+			Trigger: &avsproto.TaskTrigger{
+				Id:          "trigger",
+				Name:        "tick",
+				Type:        avsproto.TriggerType_TRIGGER_TYPE_CRON,
+				TriggerType: &avsproto.TaskTrigger_Cron{Cron: &avsproto.CronTrigger{Config: &avsproto.CronTrigger_Config{Schedules: []string{"0 */6 * * *"}}}},
+			},
+		}
+	}
+
+	t.Run("remaining is max minus count", func(t *testing.T) {
+		task := baseTask()
+		task.ExecutionCount = 30
+		out, err := ProtoToOpenAPIWorkflow(task)
+		require.NoError(t, err)
+		require.NotNil(t, out.RemainingExecutions)
+		assert.Equal(t, int64(70), *out.RemainingExecutions)
+	})
+
+	t.Run("remaining is reported on a never-run workflow", func(t *testing.T) {
+		// executionCount is omitted at 0, so this is precisely the case a
+		// client-side subtraction gets wrong.
+		out, err := ProtoToOpenAPIWorkflow(baseTask())
+		require.NoError(t, err)
+		require.Nil(t, out.ExecutionCount, "guard the premise: count is omitted at zero")
+		require.NotNil(t, out.RemainingExecutions)
+		assert.Equal(t, int64(100), *out.RemainingExecutions)
+	})
+
+	t.Run("remaining is emitted as zero, not omitted, once exhausted", func(t *testing.T) {
+		task := baseTask()
+		task.ExecutionCount = 100
+		task.Status = avsproto.TaskStatus_Completed
+		out, err := ProtoToOpenAPIWorkflow(task)
+		require.NoError(t, err)
+		require.NotNil(t, out.RemainingExecutions, "zero is the whole point; omitting it reads as 'not reported'")
+		assert.Equal(t, int64(0), *out.RemainingExecutions)
+	})
+
+	t.Run("remaining never goes negative", func(t *testing.T) {
+		task := baseTask()
+		task.ExecutionCount = 105 // a suspended run can overshoot
+		out, err := ProtoToOpenAPIWorkflow(task)
+		require.NoError(t, err)
+		require.NotNil(t, out.RemainingExecutions)
+		assert.Equal(t, int64(0), *out.RemainingExecutions)
+	})
+
+	t.Run("completion reason distinguishes exhaustion from expiry", func(t *testing.T) {
+		for _, tc := range []struct {
+			reason avsproto.TaskCompletionReason
+			want   generated.WorkflowCompletionReason
+		}{
+			{avsproto.TaskCompletionReason_TASK_COMPLETION_REASON_MAX_EXECUTIONS_REACHED, generated.TASKCOMPLETIONREASONMAXEXECUTIONSREACHED},
+			{avsproto.TaskCompletionReason_TASK_COMPLETION_REASON_EXPIRED, generated.TASKCOMPLETIONREASONEXPIRED},
+		} {
+			task := baseTask()
+			task.Status = avsproto.TaskStatus_Completed
+			task.CompletionReason = tc.reason
+			out, err := ProtoToOpenAPIWorkflow(task)
+			require.NoError(t, err)
+			require.NotNil(t, out.CompletionReason, "reason %v should be surfaced", tc.reason)
+			assert.Equal(t, tc.want, *out.CompletionReason)
+		}
+	})
+
+	t.Run("unspecified reason is omitted rather than serialized", func(t *testing.T) {
+		out, err := ProtoToOpenAPIWorkflow(baseTask())
+		require.NoError(t, err)
+		assert.Nil(t, out.CompletionReason, "UNSPECIFIED carries no information")
+	})
+}
+
+// TestOpenAPIToProtoCreateWorkflow_MaxExecutionMustBePositive pins that
+// "unlimited" is not expressible through the public API.
+//
+// The request field is a pointer, which is what lets an *explicit* 0 (a caller
+// asking for unlimited) be told apart from an omitted field (a caller with no
+// opinion). Only the latter should quietly take the server default; silently
+// rewriting an explicit 0 would answer a different question than the one asked.
+//
+// Negatives are rejected for a sharper reason: the executor gates on
+// `MaxExecution > 0`, so a negative reads as unlimited everywhere while
+// slipping past an `== 0` check. Without this it would be the one remaining
+// way to create an uncapped workflow.
+func TestOpenAPIToProtoCreateWorkflow_MaxExecutionMustBePositive(t *testing.T) {
+	request := func(maxExecution *int64) generated.CreateWorkflowRequest {
+		return generated.CreateWorkflowRequest{
+			SmartWalletAddress: "0x8Ee38eB323c14a1752DABDA1cca9661AEE377017",
+			Trigger:            cronTrigger(),
+			Nodes:              []generated.Node{customCodeNode()},
+			Edges:              &[]generated.Edge{{Id: "e1", Source: "trigger", Target: "node1"}},
+			MaxExecution:       maxExecution,
+		}
+	}
+
+	for _, invalid := range []int64{0, -1, -51840} {
+		out, err := OpenAPIToProtoCreateWorkflow(request(&invalid))
+		require.Error(t, err, "maxExecution %d must be rejected, not silently defaulted", invalid)
+		assert.Nil(t, out)
+		assert.Contains(t, err.Error(), "greater than 0")
+	}
+
+	t.Run("omitted is accepted and left for the engine to default", func(t *testing.T) {
+		out, err := OpenAPIToProtoCreateWorkflow(request(nil))
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), out.MaxExecution,
+			"the mapping leaves it zero; CreateWorkflow substitutes DefaultMaxExecution")
+	})
+
+	t.Run("a positive value passes through untouched", func(t *testing.T) {
+		explicit := int64(7)
+		out, err := OpenAPIToProtoCreateWorkflow(request(&explicit))
+		require.NoError(t, err)
+		assert.Equal(t, int64(7), out.MaxExecution)
+	})
 }

@@ -360,9 +360,15 @@ func (t *Workflow) Key() []byte {
 	return []byte(t.Task.Id)
 }
 
-func (t *Workflow) SetCompleted() {
+// SetCompleted moves the task to its terminal Completed state.
+//
+// The reason is required rather than optional: an exhausted execution budget
+// and a passed expiry both land on TaskStatus_Completed, so a caller that
+// doesn't say which leaves "why did my workflow stop?" unanswerable.
+func (t *Workflow) SetCompleted(reason avsproto.TaskCompletionReason) {
 	t.Task.Status = avsproto.TaskStatus_Completed
 	t.Task.CompletedAt = time.Now().UnixMilli()
+	t.Task.CompletionReason = reason
 }
 
 func (t *Workflow) SetEnabled() {

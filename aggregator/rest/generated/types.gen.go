@@ -242,6 +242,13 @@ const (
 	WithdrawResponseStatusPending   WithdrawResponseStatus = "pending"
 )
 
+// Defines values for WorkflowCompletionReason.
+const (
+	TASKCOMPLETIONREASONEXPIRED              WorkflowCompletionReason = "TASK_COMPLETION_REASON_EXPIRED"
+	TASKCOMPLETIONREASONMAXEXECUTIONSREACHED WorkflowCompletionReason = "TASK_COMPLETION_REASON_MAX_EXECUTIONS_REACHED"
+	TASKCOMPLETIONREASONUNSPECIFIED          WorkflowCompletionReason = "TASK_COMPLETION_REASON_UNSPECIFIED"
+)
+
 // Defines values for WorkflowStatus.
 const (
 	Completed WorkflowStatus = "completed"
@@ -476,9 +483,11 @@ type CreateWorkflowRequest struct {
 	// `settings.chainId` (chain id). camelCase keys; back-compat support
 	// for snake_case keys exists during the migration window.
 	InputVariables *InputVariables `json:"inputVariables,omitempty"`
-	MaxExecution   *int64          `json:"maxExecution,omitempty"`
-	Name           *string         `json:"name,omitempty"`
-	Nodes          []Node          `json:"nodes"`
+
+	// MaxExecution Optional cap on total executions. Omit the field to take the server default. Sending 0 (or a negative) is rejected rather than treated as unlimited: unlimited execution is not offered, because every run spends metered provider quota.
+	MaxExecution *int64  `json:"maxExecution,omitempty"`
+	Name         *string `json:"name,omitempty"`
+	Nodes        []Node  `json:"nodes"`
 
 	// SmartWalletAddress Lowercase or checksummed hex EOA / contract address.
 	SmartWalletAddress EthereumAddress `json:"smartWalletAddress"`
@@ -988,9 +997,12 @@ type MethodCall struct {
 	ApplyToFields *[]string `json:"applyToFields,omitempty"`
 
 	// CallData Arbitrary-length hex-encoded byte string.
-	CallData     *Hex      `json:"callData,omitempty"`
-	MethodName   string    `json:"methodName"`
-	MethodParams *[]string `json:"methodParams,omitempty"`
+	CallData *Hex `json:"callData,omitempty"`
+
+	// ContractAddress Lowercase or checksummed hex EOA / contract address.
+	ContractAddress *EthereumAddress `json:"contractAddress,omitempty"`
+	MethodName      string           `json:"methodName"`
+	MethodParams    *[]string        `json:"methodParams,omitempty"`
 }
 
 // NativeToken defines model for NativeToken.
@@ -1434,6 +1446,9 @@ type Workflow struct {
 	// CompletedAt Unix-epoch milliseconds — when the workflow reached a terminal state.
 	CompletedAt *int64 `json:"completedAt,omitempty"`
 
+	// CompletionReason Why the workflow reached a terminal state. An exhausted execution budget and a passed expiry both produce status `completed`, so the status alone cannot distinguish them. Absent or UNSPECIFIED while the workflow is still runnable, and on workflows that terminated before this field existed. Cancellation is not represented — cancelling deletes the workflow rather than leaving a record.
+	CompletionReason *WorkflowCompletionReason `json:"completionReason,omitempty"`
+
 	// CreatedAt Unix-epoch milliseconds — when the workflow was first created.
 	CreatedAt *int64  `json:"createdAt,omitempty"`
 	Edges     *[]Edge `json:"edges,omitempty"`
@@ -1454,13 +1469,16 @@ type Workflow struct {
 	// for snake_case keys exists during the migration window.
 	InputVariables *InputVariables `json:"inputVariables,omitempty"`
 
-	// MaxExecution Cap on how many times this workflow may execute. 0 = unlimited.
+	// MaxExecution Cap on how many times this workflow may execute. The workflow reaches status `completed` once `executionCount` hits this value. Present and finite on every workflow created since the server began assigning a default — a create request that omits the field takes that default, and one that sends 0 or a negative is rejected, so "run forever" is not expressible. Absent on workflows created before that change and stored uncapped; those keep running without a limit, and `remainingExecutions` is likewise absent for them.
 	MaxExecution *int64  `json:"maxExecution,omitempty"`
 	Name         *string `json:"name,omitempty"`
 	Nodes        []Node  `json:"nodes"`
 
 	// Owner Lowercase or checksummed hex EOA / contract address.
 	Owner EthereumAddress `json:"owner"`
+
+	// RemainingExecutions Runs left before the workflow completes — `maxExecution` minus `executionCount`, floored at 0. Derived server-side so clients do not have to reproduce the arithmetic (and so an absent `executionCount` on a never-run workflow cannot be misread). Reported as 0 rather than omitted once the budget is spent. Absent only on legacy uncapped workflows, where no finite number exists.
+	RemainingExecutions *int64 `json:"remainingExecutions,omitempty"`
 
 	// SmartWalletAddress Lowercase or checksummed hex EOA / contract address.
 	SmartWalletAddress EthereumAddress `json:"smartWalletAddress"`
@@ -1474,6 +1492,9 @@ type Workflow struct {
 	Status  WorkflowStatus `json:"status"`
 	Trigger Trigger        `json:"trigger"`
 }
+
+// WorkflowCompletionReason Why the workflow reached a terminal state. An exhausted execution budget and a passed expiry both produce status `completed`, so the status alone cannot distinguish them. Absent or UNSPECIFIED while the workflow is still runnable, and on workflows that terminated before this field existed. Cancellation is not represented — cancelling deletes the workflow rather than leaving a record.
+type WorkflowCompletionReason string
 
 // WorkflowCount defines model for WorkflowCount.
 type WorkflowCount struct {
