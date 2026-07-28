@@ -172,6 +172,76 @@ func TestBlockAndCronFloorsAreDistinct(t *testing.T) {
 	}
 }
 
+// A loop runs its body once per input element, so one execution can spend
+// unbounded provider quota no matter how rarely the task fires — the trigger
+// floors cannot reach this. The loop caps concurrent workers at 10, but that
+// throttles parallelism, not total work.
+func TestLoopIterationCap(t *testing.T) {
+	addresses := func(n int) []interface{} {
+		out := make([]interface{}, n)
+		for i := range out {
+			out[i] = fmt.Sprintf("0xAddr%d", i)
+		}
+		return out
+	}
+
+	runLoopOver := func(t *testing.T, items []interface{}) *avsproto.Execution_Step {
+		t.Helper()
+		node, err := CreateNodeFromType("loop", map[string]interface{}{
+			"inputVariable":    "{{settings.address_list}}",
+			"iterVal":          "value",
+			"iterKey":          "index",
+			"iterationTimeout": float64(30),
+			"executionMode":    "sequential",
+			"runner": map[string]interface{}{
+				"type": "customCode",
+				"config": map[string]interface{}{
+					"lang":   avsproto.Lang_LANG_JAVASCRIPT,
+					"source": "return value;",
+				},
+			},
+		}, "")
+		if err != nil {
+			t.Fatalf("CreateNodeFromType: %v", err)
+		}
+		node.Name = "loopCapTest"
+
+		step, _ := NewVM().RunNodeWithInputs(node, map[string]interface{}{
+			"settings": map[string]interface{}{
+				"runner":       "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
+				"address_list": items,
+			},
+		})
+		return step
+	}
+
+	t.Run("at the cap succeeds", func(t *testing.T) {
+		step := runLoopOver(t, addresses(MaxLoopIterations))
+		if step == nil || !step.Success {
+			t.Fatalf("a loop of exactly %d items should run, got %+v", MaxLoopIterations, step)
+		}
+	})
+
+	t.Run("one over the cap fails loudly", func(t *testing.T) {
+		step := runLoopOver(t, addresses(MaxLoopIterations+1))
+		if step == nil {
+			t.Fatal("expected a step, got nil")
+		}
+		if step.Success {
+			t.Fatal("a loop over the cap must fail, not silently truncate")
+		}
+		if !strings.Contains(step.Error, "exceeding") {
+			t.Errorf("expected the error to name the limit, got: %q", step.Error)
+		}
+		// The failure must not be a partial run reported as a whole one.
+		if out := step.GetLoop(); out != nil && out.Data != nil {
+			if arr, ok := out.Data.AsInterface().([]interface{}); ok && len(arr) > 0 {
+				t.Errorf("expected no partial results, got %d", len(arr))
+			}
+		}
+	})
+}
+
 func TestBlockTimeForChain(t *testing.T) {
 	if got := blockTimeForChain(1); got != 12*time.Second {
 		t.Errorf("Ethereum block time = %v, want 12s", got)

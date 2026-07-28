@@ -57,17 +57,35 @@ const (
 	// DefaultMaxExecution is applied when a create request omits
 	// `max_execution`. The field was already enforced (executor.go), but an
 	// omitted value meant 0, and 0 means unlimited — so the default was
-	// infinity. This bounds an *accident*; it is set far above any legitimate
-	// cadence (at the 6h product default, 10,000 runs is ~7 years) so a real
-	// workflow never reaches it. Callers that genuinely need more can still
-	// pass a larger value explicitly.
-	DefaultMaxExecution int64 = 10_000
+	// infinity.
+	//
+	// Sized so a workflow running flat out at the cron floor survives six
+	// months: 288 executions/day x 180 days. A task that legitimately needs
+	// longer can still pass a larger value explicitly; this only has to be
+	// generous enough that nobody hits it by accident.
+	//
+	// Note this is six months only at the *cron* floor. A block-triggered task
+	// at its own 60s floor burns 1,440/day and reaches this in ~36 days. One
+	// constant cannot give both floors the same wall-clock lifetime while the
+	// floors differ 5x, and the shorter bound is the safer place to land.
+	DefaultMaxExecution int64 = (24 * 60 / 5) * 180
 
 	// MaxActiveWorkflowsPerOwner bounds the per-account case that per-task
 	// ceilings structurally cannot reach: N leaked tasks cost N times the
 	// per-task cap. Counts only *active* (Enabled) tasks, so completed and
 	// cancelled ones never accumulate against an owner.
 	MaxActiveWorkflowsPerOwner = 100
+
+	// MaxLoopIterations bounds fan-out *within* a single execution, which the
+	// trigger floors cannot reach: a REST node inside a Loop runs once per
+	// element of the resolved input array, so one execution can make thousands
+	// of provider calls no matter how rarely it fires. The loop already caps
+	// concurrent workers at 10, but that throttles parallelism, not total work.
+	//
+	// Exceeding this is an error rather than a silent truncation — a loop that
+	// quietly processed the first 100 of 5,000 addresses would report success
+	// while skipping most of its job.
+	MaxLoopIterations = 100
 )
 
 // cronSamples is how many consecutive fire times to inspect when deriving a

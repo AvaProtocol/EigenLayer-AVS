@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -55,26 +56,32 @@ func TestCreateTaskReturnErrorWhenInvalidBlockTriggerInterval(t *testing.T) {
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
 
-	// A block interval only means something in wall-clock: on the test chain's
-	// ~12s blocks, MinBlockTriggerInterval (60s) means at least 5 blocks. An
-	// interval of 1 used to be accepted and is 7,200 executions/day — the
-	// fastest cost vector the engine had, previously checked only for > 0.
+	// A block interval only means anything in wall-clock, so the boundary is
+	// derived from MinBlockTriggerInterval and the test chain's block time
+	// rather than hardcoded — the cases stay correct if either constant moves.
+	blockTime := blockTimeForChain(n.defaultChainID())
+	minBlocks := int64(math.Ceil(float64(MinBlockTriggerInterval) / float64(blockTime)))
+
 	testCases := []struct {
+		name        string
 		interval    int64
 		wantErr     bool
 		errContains string
 	}{
-		{interval: 0, wantErr: true, errContains: "Invalid task argument"},
-		{interval: -1, wantErr: true, errContains: "Invalid task argument"},
-		{interval: 1, wantErr: true, errContains: "faster than the"},
-		{interval: 4, wantErr: true, errContains: "faster than the"},
-		{interval: 5, wantErr: false},
-		{interval: 100, wantErr: false},
-		{interval: 1000, wantErr: false},
+		// Non-positive intervals are rejected before the frequency check, by
+		// the proto→model conversion.
+		{name: "zero", interval: 0, wantErr: true, errContains: "Invalid task argument"},
+		{name: "negative", interval: -1, wantErr: true, errContains: "Invalid task argument"},
+		// Every block was valid until the frequency floor landed: 7,200
+		// executions/day on a 12s chain, and previously checked only for > 0.
+		{name: "every block", interval: 1, wantErr: true, errContains: "faster than the"},
+		{name: "one below the floor", interval: minBlocks - 1, wantErr: true, errContains: "faster than the"},
+		{name: "exactly at the floor", interval: minBlocks, wantErr: false},
+		{name: "well above the floor", interval: minBlocks * 20, wantErr: false},
 	}
 
 	for _, tt := range testCases {
-		t.Run("", func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			tr1 := testutil.RestTask()
 			tr1.Trigger.TriggerType = &avsproto.TaskTrigger_Block{
 				Block: &avsproto.BlockTrigger{
@@ -86,19 +93,18 @@ func TestCreateTaskReturnErrorWhenInvalidBlockTriggerInterval(t *testing.T) {
 
 			_, err := n.CreateWorkflow(testutil.TestUser1(), tr1)
 
-			if !tt.wantErr && err != nil {
-				t.Errorf("CreateTask() unexpected error for interval %d: %v", tt.interval, err)
-			}
-
-			if tt.wantErr && err == nil {
-				t.Errorf("CreateTask() expected an error for interval %d, got nil", tt.interval)
-			}
-
-			if tt.wantErr && err != nil {
-				t.Logf("CreateTask() correctly rejected interval %d with error: %v", tt.interval, err)
-				if !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("Expected error to contain %q, got: %v", tt.errContains, err)
+			if !tt.wantErr {
+				if err != nil {
+					t.Errorf("interval %d (block time %s): unexpected error: %v", tt.interval, blockTime, err)
 				}
+				return
+			}
+
+			if err == nil {
+				t.Fatalf("interval %d (block time %s): expected an error, got nil", tt.interval, blockTime)
+			}
+			if !strings.Contains(err.Error(), tt.errContains) {
+				t.Errorf("interval %d: expected error containing %q, got: %v", tt.interval, tt.errContains, err)
 			}
 		})
 	}
