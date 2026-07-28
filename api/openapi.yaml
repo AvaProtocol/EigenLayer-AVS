@@ -1042,10 +1042,12 @@ components:
         maxExecution:
           type: integer
           format: int64
+          minimum: 1
           description: >-
-            Optional cap on total executions. Omit it (or send 0) to take the
-            server default rather than to run forever — unlimited execution is
-            not offered, because every run spends metered provider quota.
+            Optional cap on total executions. Omit the field to take the server
+            default. Sending 0 (or a negative) is rejected rather than treated
+            as unlimited: unlimited execution is not offered, because every run
+            spends metered provider quota.
 
     WorkflowList:
       type: object

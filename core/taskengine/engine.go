@@ -1729,7 +1729,13 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	// max_execution is already enforced by the executor, but an omitted value
 	// left it 0 — and 0 means "unlimited run until cancel". Default it so an
 	// abandoned task stops on its own instead of running forever.
-	if taskPayload.MaxExecution == 0 {
+	//
+	// `<= 0`, not `== 0`: the executor gates on `MaxExecution > 0`, so a
+	// negative value reads as unlimited just like 0 does while slipping past an
+	// equality check. The REST layer rejects an explicit non-positive value
+	// outright (it can distinguish that from an omitted field); this is the
+	// backstop for every other caller, so no path can store an uncapped task.
+	if taskPayload.MaxExecution <= 0 {
 		taskPayload.MaxExecution = DefaultMaxExecution
 	}
 

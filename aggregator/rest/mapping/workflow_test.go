@@ -250,3 +250,48 @@ func TestProtoToOpenAPIWorkflow_ExecutionBudget(t *testing.T) {
 		assert.Nil(t, out.CompletionReason, "UNSPECIFIED carries no information")
 	})
 }
+
+// TestOpenAPIToProtoCreateWorkflow_MaxExecutionMustBePositive pins that
+// "unlimited" is not expressible through the public API.
+//
+// The request field is a pointer, which is what lets an *explicit* 0 (a caller
+// asking for unlimited) be told apart from an omitted field (a caller with no
+// opinion). Only the latter should quietly take the server default; silently
+// rewriting an explicit 0 would answer a different question than the one asked.
+//
+// Negatives are rejected for a sharper reason: the executor gates on
+// `MaxExecution > 0`, so a negative reads as unlimited everywhere while
+// slipping past an `== 0` check. Without this it would be the one remaining
+// way to create an uncapped workflow.
+func TestOpenAPIToProtoCreateWorkflow_MaxExecutionMustBePositive(t *testing.T) {
+	request := func(maxExecution *int64) generated.CreateWorkflowRequest {
+		return generated.CreateWorkflowRequest{
+			SmartWalletAddress: "0x8Ee38eB323c14a1752DABDA1cca9661AEE377017",
+			Trigger:            cronTrigger(),
+			Nodes:              []generated.Node{customCodeNode()},
+			Edges:              &[]generated.Edge{{Id: "e1", Source: "trigger", Target: "node1"}},
+			MaxExecution:       maxExecution,
+		}
+	}
+
+	for _, invalid := range []int64{0, -1, -51840} {
+		out, err := OpenAPIToProtoCreateWorkflow(request(&invalid))
+		require.Error(t, err, "maxExecution %d must be rejected, not silently defaulted", invalid)
+		assert.Nil(t, out)
+		assert.Contains(t, err.Error(), "greater than 0")
+	}
+
+	t.Run("omitted is accepted and left for the engine to default", func(t *testing.T) {
+		out, err := OpenAPIToProtoCreateWorkflow(request(nil))
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), out.MaxExecution,
+			"the mapping leaves it zero; CreateWorkflow substitutes DefaultMaxExecution")
+	})
+
+	t.Run("a positive value passes through untouched", func(t *testing.T) {
+		explicit := int64(7)
+		out, err := OpenAPIToProtoCreateWorkflow(request(&explicit))
+		require.NoError(t, err)
+		assert.Equal(t, int64(7), out.MaxExecution)
+	})
+}

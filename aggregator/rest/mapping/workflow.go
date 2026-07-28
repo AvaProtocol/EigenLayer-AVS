@@ -64,7 +64,20 @@ func OpenAPIToProtoCreateWorkflow(in generated.CreateWorkflowRequest) (*avsproto
 	if in.ExpiredAt != nil {
 		out.ExpiredAt = *in.ExpiredAt
 	}
+	// A non-positive max_execution used to mean "run forever" and now cannot be
+	// honoured. Reject it rather than silently rewriting it to the default: the
+	// request pointer lets us tell an *explicit* 0 (a caller asking for
+	// unlimited) from an omitted field (a caller with no opinion), and only the
+	// latter should quietly take the default.
+	//
+	// Negatives matter as much as 0. The executor gates on `MaxExecution > 0`,
+	// so a negative value reads as unlimited everywhere while slipping past an
+	// `== 0` check — it would be the one remaining way to create an uncapped
+	// workflow.
 	if in.MaxExecution != nil {
+		if *in.MaxExecution <= 0 {
+			return nil, fmt.Errorf("maxExecution must be greater than 0 (got %d): unlimited execution is not supported, because every run spends metered provider quota — omit the field to take the server default", *in.MaxExecution)
+		}
 		out.MaxExecution = *in.MaxExecution
 	}
 	// chain_id is no longer a task-level field (G5); each chain-aware

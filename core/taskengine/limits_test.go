@@ -293,3 +293,43 @@ func TestCheckActiveWorkflowQuota(t *testing.T) {
 		t.Error("owner matching should be case-insensitive, got nil")
 	}
 }
+
+// CreateWorkflow must never store a task the executor would treat as uncapped.
+// The executor gates on `MaxExecution > 0`, so both 0 and any negative read as
+// "run forever" — an `== 0` check would let negatives straight through.
+func TestCreateWorkflowDefaultsNonPositiveMaxExecution(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	engine := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+	user := testutil.TestUser1()
+
+	for _, given := range []int64{0, -1, -DefaultMaxExecution} {
+		task := testutil.RestTask()
+		task.MaxExecution = given
+
+		created, err := engine.CreateWorkflow(user, task)
+		if err != nil {
+			t.Fatalf("maxExecution %d: CreateWorkflow failed: %v", given, err)
+		}
+		if created.MaxExecution != DefaultMaxExecution {
+			t.Errorf("maxExecution %d became %d, want the default %d",
+				given, created.MaxExecution, DefaultMaxExecution)
+		}
+		if created.MaxExecution <= 0 {
+			t.Errorf("maxExecution %d stayed non-positive (%d) — the executor would treat this task as uncapped",
+				given, created.MaxExecution)
+		}
+	}
+
+	// An explicit positive value is the caller's to choose and must survive.
+	task := testutil.RestTask()
+	task.MaxExecution = 7
+	created, err := engine.CreateWorkflow(user, task)
+	if err != nil {
+		t.Fatalf("CreateWorkflow with an explicit cap failed: %v", err)
+	}
+	if created.MaxExecution != 7 {
+		t.Errorf("explicit maxExecution 7 became %d", created.MaxExecution)
+	}
+}

@@ -484,7 +484,7 @@ type CreateWorkflowRequest struct {
 	// for snake_case keys exists during the migration window.
 	InputVariables *InputVariables `json:"inputVariables,omitempty"`
 
-	// MaxExecution Optional cap on total executions. Omit it (or send 0) to take the server default rather than to run forever — unlimited execution is not offered, because every run spends metered provider quota.
+	// MaxExecution Optional cap on total executions. Omit the field to take the server default. Sending 0 (or a negative) is rejected rather than treated as unlimited: unlimited execution is not offered, because every run spends metered provider quota.
 	MaxExecution *int64  `json:"maxExecution,omitempty"`
 	Name         *string `json:"name,omitempty"`
 	Nodes        []Node  `json:"nodes"`
