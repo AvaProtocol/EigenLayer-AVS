@@ -137,6 +137,25 @@ func ProtoToOpenAPIWorkflow(in *avsproto.Task) (generated.Workflow, error) {
 	if v := in.GetExecutionCount(); v != 0 {
 		out.ExecutionCount = &v
 	}
+
+	// Runs left before the workflow completes. Emitted unconditionally (not
+	// behind the `!= 0` guard the fields above use) because 0 is the single
+	// most important value here — it is exactly the state where the workflow
+	// has stopped, and omitting it would look identical to "not reported".
+	if maxExecution := in.GetMaxExecution(); maxExecution > 0 {
+		remaining := maxExecution - in.GetExecutionCount()
+		if remaining < 0 {
+			remaining = 0
+		}
+		out.RemainingExecutions = &remaining
+	}
+
+	// Why a terminal workflow stopped. UNSPECIFIED carries no information, so
+	// it is left absent rather than serialized.
+	if reason := in.GetCompletionReason(); reason != avsproto.TaskCompletionReason_TASK_COMPLETION_REASON_UNSPECIFIED {
+		completionReason := generated.WorkflowCompletionReason(reason.String())
+		out.CompletionReason = &completionReason
+	}
 	// chain_id removed from Task (G5) — no workflow-level chain to surface.
 
 	trig, err := ProtoToOpenAPITrigger(in.GetTrigger())

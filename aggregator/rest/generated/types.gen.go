@@ -242,6 +242,13 @@ const (
 	WithdrawResponseStatusPending   WithdrawResponseStatus = "pending"
 )
 
+// Defines values for WorkflowCompletionReason.
+const (
+	TASKCOMPLETIONREASONEXPIRED              WorkflowCompletionReason = "TASK_COMPLETION_REASON_EXPIRED"
+	TASKCOMPLETIONREASONMAXEXECUTIONSREACHED WorkflowCompletionReason = "TASK_COMPLETION_REASON_MAX_EXECUTIONS_REACHED"
+	TASKCOMPLETIONREASONUNSPECIFIED          WorkflowCompletionReason = "TASK_COMPLETION_REASON_UNSPECIFIED"
+)
+
 // Defines values for WorkflowStatus.
 const (
 	Completed WorkflowStatus = "completed"
@@ -1439,6 +1446,9 @@ type Workflow struct {
 	// CompletedAt Unix-epoch milliseconds — when the workflow reached a terminal state.
 	CompletedAt *int64 `json:"completedAt,omitempty"`
 
+	// CompletionReason Why the workflow reached a terminal state. An exhausted execution budget and a passed expiry both produce status `completed`, so the status alone cannot distinguish them. Absent or UNSPECIFIED while the workflow is still runnable, and on workflows that terminated before this field existed. Cancellation is not represented — cancelling deletes the workflow rather than leaving a record.
+	CompletionReason *WorkflowCompletionReason `json:"completionReason,omitempty"`
+
 	// CreatedAt Unix-epoch milliseconds — when the workflow was first created.
 	CreatedAt *int64  `json:"createdAt,omitempty"`
 	Edges     *[]Edge `json:"edges,omitempty"`
@@ -1467,6 +1477,9 @@ type Workflow struct {
 	// Owner Lowercase or checksummed hex EOA / contract address.
 	Owner EthereumAddress `json:"owner"`
 
+	// RemainingExecutions Runs left before the workflow completes — `maxExecution` minus `executionCount`, floored at 0. Derived server-side so clients do not have to reproduce the arithmetic (and so an absent `executionCount` on a never-run workflow cannot be misread).
+	RemainingExecutions *int64 `json:"remainingExecutions,omitempty"`
+
 	// SmartWalletAddress Lowercase or checksummed hex EOA / contract address.
 	SmartWalletAddress EthereumAddress `json:"smartWalletAddress"`
 
@@ -1479,6 +1492,9 @@ type Workflow struct {
 	Status  WorkflowStatus `json:"status"`
 	Trigger Trigger        `json:"trigger"`
 }
+
+// WorkflowCompletionReason Why the workflow reached a terminal state. An exhausted execution budget and a passed expiry both produce status `completed`, so the status alone cannot distinguish them. Absent or UNSPECIFIED while the workflow is still runnable, and on workflows that terminated before this field existed. Cancellation is not represented — cancelling deletes the workflow rather than leaving a record.
+type WorkflowCompletionReason string
 
 // WorkflowCount defines model for WorkflowCount.
 type WorkflowCount struct {

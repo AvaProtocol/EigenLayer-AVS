@@ -165,8 +165,10 @@ func TestExecutionCountPersistence(t *testing.T) {
 		assert.Equal(t, int64(2), task.ExecutionCount, "ExecutionCount should reach max execution")
 
 		if task.MaxExecution > 0 && task.ExecutionCount >= task.MaxExecution {
-			task.SetCompleted()
+			task.SetCompleted(avsproto.TaskCompletionReason_TASK_COMPLETION_REASON_MAX_EXECUTIONS_REACHED)
 		}
+		assert.Equal(t, avsproto.TaskCompletionReason_TASK_COMPLETION_REASON_MAX_EXECUTIONS_REACHED,
+			task.CompletionReason, "an exhausted budget must be distinguishable from an expiry")
 
 		jsonData, err := task.ToJSON()
 		assert.NoError(t, err, "ToJSON should not error")

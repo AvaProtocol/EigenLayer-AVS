@@ -991,6 +991,27 @@ components:
           type: integer
           format: int64
           description: How many times this workflow has executed so far.
+        remainingExecutions:
+          type: integer
+          format: int64
+          description: >-
+            Runs left before the workflow completes — `maxExecution` minus
+            `executionCount`, floored at 0. Derived server-side so clients do
+            not have to reproduce the arithmetic (and so an absent
+            `executionCount` on a never-run workflow cannot be misread).
+        completionReason:
+          type: string
+          enum:
+            - TASK_COMPLETION_REASON_UNSPECIFIED
+            - TASK_COMPLETION_REASON_MAX_EXECUTIONS_REACHED
+            - TASK_COMPLETION_REASON_EXPIRED
+          description: >-
+            Why the workflow reached a terminal state. An exhausted execution
+            budget and a passed expiry both produce status `completed`, so the
+            status alone cannot distinguish them. Absent or UNSPECIFIED while
+            the workflow is still runnable, and on workflows that terminated
+            before this field existed. Cancellation is not represented —
+            cancelling deletes the workflow rather than leaving a record.
         createdAt:
           type: integer
           format: int64
