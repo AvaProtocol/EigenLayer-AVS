@@ -1,16 +1,28 @@
 package version
 
 var (
-	// Default values stamped into the binary when -ldflags doesn't
-	// override them. Both Makefile targets (`make build`, `make build-prod`)
-	// and the Dockerfile now derive these from `git describe` / `git rev-parse`
-	// at compile time, so these defaults only fire when the build path
-	// bypasses both (e.g. a one-off `go build ./...` without ldflags).
+	// Defaults for builds that bypass -ldflags. Every real build path stamps
+	// these instead:
 	//
-	// Keep `semver` here roughly in sync with the latest release tag as a
-	// safety net — if a build slips through without ldflags, /health will
-	// still report something plausible rather than ancient history.
-	semver   = "4.7.1"
+	//	make build / build-prod   SEMVER from `git describe --tags`
+	//	Dockerfile               ARG SEMVER, falling back to the git tag
+	//	publish-prod-docker.yml  SEMVER from the published release tag
+	//
+	// so these values only surface on a bare `go build ./...`, a `go run`, or
+	// a test binary.
+	//
+	// semver is deliberately "dev" rather than the latest release number. A
+	// stale release number here is worse than no number: an unstamped binary
+	// reporting "4.7.1" on /health and in Sentry's release tag is
+	// indistinguishable from a real 4.7.1, so a locally-built binary running
+	// somewhere it shouldn't looks like a legitimate deploy. "dev" says
+	// exactly what it is.
+	//
+	// This also removes a manual chore. Keeping the literal in step with the
+	// tag meant a `chore: bump version.go` commit on main after every release,
+	// which then had to be synced back to staging — upkeep for a value nothing
+	// reads in production.
+	semver   = "dev"
 	revision = "unknown"
 )
 
