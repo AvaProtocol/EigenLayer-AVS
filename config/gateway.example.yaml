@@ -60,6 +60,14 @@ tenderly_access_key: ""
 #     gas; which also means
 #   - configuring the webhook URL in Alchemy BEFORE this gateway is deployed
 #     and configured will refuse every sponsorship on that policy.
+# An Alchemy ACCESS KEY (alcht_...), NOT the app api key above. The app key
+# authorises RPC/bundler traffic; this authorises the account-level admin APIs
+# at manage.g.alchemy.com — Gas Manager policy config and spend stats.
+# Create it at dashboard.alchemy.com -> Security -> Create Access Key (team
+# level, not inside an app; needs billing/team admin). Scope it Gas Manager
+# READ ONLY: a read/write key can delete the policy that funds sponsorship.
+alchemy_api_secret: ""
+
 gas_manager_policy_id: ""
 # Echoed back as the request's webhookData. The webhook cannot sit behind the
 # REST JWT (Alchemy has no token), so this is its only caller authentication.
