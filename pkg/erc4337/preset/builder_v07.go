@@ -112,15 +112,19 @@ func SignUserOpV07(op *userop.UserOperationV07, entryPoint common.Address, chain
 // but has 0x00 where the segment index belongs, which reverts validation with
 // AA23 and revert data 0x151d90fe. Estimation needs something shaped like a
 // real signature, not merely something the right length.
+// Built directly rather than through WrapSignatureMAv2 so there is no error to
+// discard: the length is fixed here, so the only possible failure is
+// unreachable, and an ignored error would still trip errcheck.
 func dummySignatureV07() []byte {
-	sig := make([]byte, 65)
+	framed := make([]byte, 67)
+	framed[0] = userop.SigSegmentValidationData
+	framed[1] = userop.SigTypeEOA
 	// Non-zero body so ecrecover does real work during estimation; the exact
 	// bytes are irrelevant because estimation does not verify the signer.
-	for i := range sig {
-		sig[i] = 0xAA
+	for i := 2; i < 66; i++ {
+		framed[i] = 0xAA
 	}
-	sig[64] = 0x1C
-	framed, _ := userop.WrapSignatureMAv2(sig)
+	framed[66] = 0x1C
 	return framed
 }
 
@@ -152,10 +156,14 @@ func parseHexBig(s, field string) (*big.Int, error) {
 //
 // The operation is mutated in place with realistic seed limits before the
 // call — see seedVerificationGas and the constants above for why the seed
-// cannot simply be generous — and with the returned values afterwards. The
-// signature is left
-// as the caller set it; pass an unsigned operation and sign after estimating,
-// since the gas values are part of the hash.
+// cannot simply be generous — and with the returned values afterwards.
+//
+// The signature is restored to whatever the caller set, including empty. A
+// dummy is needed for the RPC (estimation reverts without a well-framed one)
+// but must not survive the call: SendUserOpV07 treats an empty signature as
+// "unsigned", so a dummy left behind would sail past that guard and go out
+// with a signature the account rejects. Estimate first, then sign — the gas
+// values are part of the hash.
 func EstimateUserOpGasV07(ctx context.Context, client *rpc.Client, op *userop.UserOperationV07, entryPoint common.Address) (*GasEstimateV07, error) {
 	if client == nil {
 		return nil, fmt.Errorf("nil bundler client")
@@ -172,9 +180,13 @@ func EstimateUserOpGasV07(ctx context.Context, client *rpc.Client, op *userop.Us
 	if op.PreVerificationGas == nil {
 		op.PreVerificationGas = big.NewInt(initialPreVerificationGas)
 	}
+	callerSignature := op.Signature
 	if len(op.Signature) == 0 {
 		op.Signature = dummySignatureV07()
 	}
+	// Restore unconditionally, including on the error paths below — an
+	// estimation failure must not leave a dummy signature behind either.
+	defer func() { op.Signature = callerSignature }()
 
 	payload, err := json.Marshal(op)
 	if err != nil {

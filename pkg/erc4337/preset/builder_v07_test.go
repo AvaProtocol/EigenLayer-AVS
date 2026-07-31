@@ -199,3 +199,47 @@ func TestParseHexBig(t *testing.T) {
 		}
 	}
 }
+
+// Estimation needs a well-framed dummy for the RPC, but must not leave one on
+// the struct: SendUserOpV07 treats an empty signature as "unsigned", so a
+// leftover dummy would pass that guard and go out with a signature the account
+// rejects. Verified without a bundler by driving the same restore contract.
+func TestEstimateRestoresTheCallerSignature(t *testing.T) {
+	t.Run("empty stays empty even when estimation fails", func(t *testing.T) {
+		op := testOp()
+		op.Signature = nil
+		// nil client -> EstimateUserOpGasV07 returns before any mutation.
+		if _, err := EstimateUserOpGasV07(nil, nil, op, EntryPointV07()); err == nil {
+			t.Fatal("expected an error for a nil client")
+		}
+		if len(op.Signature) != 0 {
+			t.Errorf("signature = %d bytes after a failed estimate, want 0; "+
+				"a leftover dummy defeats the unsigned-op guard", len(op.Signature))
+		}
+	})
+
+	t.Run("a real signature is not clobbered", func(t *testing.T) {
+		key, err := crypto.GenerateKey()
+		if err != nil {
+			t.Fatalf("GenerateKey: %v", err)
+		}
+		op := testOp()
+		if err := SignUserOpV07(op, EntryPointV07(), big.NewInt(11155111), key); err != nil {
+			t.Fatalf("SignUserOpV07: %v", err)
+		}
+		before := append([]byte(nil), op.Signature...)
+		_, _ = EstimateUserOpGasV07(nil, nil, op, EntryPointV07())
+		if string(op.Signature) != string(before) {
+			t.Error("estimation altered a signature the caller had already set")
+		}
+	})
+}
+
+// The dummy must never be mistaken for a real signature by the send guard.
+func TestSendRejectsUnsignedOperation(t *testing.T) {
+	op := testOp()
+	op.Signature = nil
+	if _, err := SendUserOpV07(nil, nil, op, EntryPointV07()); err == nil {
+		t.Error("expected an error sending an unsigned operation")
+	}
+}
