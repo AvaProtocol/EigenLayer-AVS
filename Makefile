@@ -278,7 +278,7 @@ operator-default: build
 ## to the caller's terminal/pane; callers that want files redirect (dev-stack →
 ## logs/, start.sh → tee). Each sources .env.local so the
 ## ${SEPOLIA_BUNDLER_URL} / ${BASE_SEPOLIA_BUNDLER_URL} refs in the YAML resolve.
-.PHONY: run-gateway run-worker-sepolia run-worker-ethereum run-worker-base run-worker-base-sepolia run-operator-sepolia
+.PHONY: run-gateway run-worker-sepolia run-worker-ethereum run-worker-base run-worker-base-sepolia run-operator-sepolia run-operator-ethereum
 run-gateway:
 	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap aggregator --config=config/gateway.yaml
 run-worker-sepolia:
@@ -298,6 +298,11 @@ run-worker-base-sepolia:
 	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap worker --config=config/worker-base-sepolia.yaml
 run-operator-sepolia:
 	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap operator --config=config/operator-sepolia.yaml
+# Second operator, registered against the Ethereum mainnet AVS. Binds its
+# metrics/node-api on 9091/9011 because operator-sepolia already holds
+# 9090/9010 — running both with the stock ports fails on bind, not on config.
+run-operator-ethereum:
+	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap operator --config=config/operator-ethereum.yaml
 
 ## dev-gateway / dev-worker-* / dev-operator-sepolia: build once, then run a single
 ## process in the foreground (standalone use), streaming to logs/<svc>.log.

@@ -1055,7 +1055,18 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 	// connectivity-only rollout (e.g. BNB Phase 0.5 in avs-infra/chains/),
 	// where wallet ops are intentionally disabled and the paymaster_address
 	// is a placeholder.
-	if chainCfg.SmartWallet.BundlerConfigured() && chainCfg.SmartWallet.EthRpcUrl != "" {
+	//
+	// Also skip when no paymaster is configured at all. Omitting
+	// paymaster_address is a supported configuration — the chain runs
+	// unsponsored and the smart wallet pays its own gas — so probing here
+	// would call owner() on the zero address and fail the boot for a chain
+	// that never wanted a paymaster. The top-level probe above has always
+	// had this guard; the per-chain path did not, which only became
+	// reachable once chains moved to bundler_provider: alchemy. Before that,
+	// an unsponsored chain typically had an empty bundler_url, so
+	// BundlerConfigured() was false and the probe was skipped by accident.
+	hasPaymaster := chainCfg.SmartWallet.PaymasterAddress != (common.Address{})
+	if hasPaymaster && chainCfg.SmartWallet.BundlerConfigured() && chainCfg.SmartWallet.EthRpcUrl != "" {
 		rpcClient, err := ethclient.Dial(chainCfg.SmartWallet.EthRpcUrl)
 		if err != nil {
 			return nil, fmt.Errorf("dial RPC %s for chain %s (chain_id=%d): %w",
