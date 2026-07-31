@@ -166,6 +166,12 @@ func (agg *Aggregator) startHttpServer(ctx context.Context, extraMounts []HTTPMo
 		return c.HTMLBlob(http.StatusOK, buf.Bytes())
 	})
 
+	// Alchemy Gas Manager custom-rules webhook. Deliberately on this router
+	// and not the /api/v1 group — that group's JWT and rate-limit middleware
+	// would reject Alchemy, and Gas Manager reads any non-200 as "deny
+	// sponsorship". See gas_manager_webhook.go.
+	agg.registerGasManagerWebhook(e)
+
 	// Register debug endpoints only if not in production
 	if os.Getenv("APP_ENV") != "production" {
 		// Debug endpoints to validate Sentry wiring from a running instance
