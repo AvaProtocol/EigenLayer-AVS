@@ -1,6 +1,7 @@
 package userop
 
 import (
+	"encoding/json"
 	"math/big"
 	"testing"
 
@@ -221,6 +222,131 @@ func TestInitCodeAndPaymasterAndData(t *testing.T) {
 			"c0ffee"
 		if hexutil.Encode(got) != want {
 			t.Errorf("paymasterAndData\n got %s\nwant %s", hexutil.Encode(got), want)
+		}
+	})
+}
+
+// The wire shape is what the bundler actually parses, and its rules are not
+// expressible in struct tags: numbers go out as hex quantity strings, and the
+// factory/paymaster groups must be absent rather than present-and-empty. A
+// bundler receiving `"paymaster": ""` reads it as sponsorship by the zero
+// address and rejects the operation as a validation failure, which gives no
+// hint that the encoding was at fault.
+func TestMarshalJSON_WireShape(t *testing.T) {
+	base := func() UserOperationV07 {
+		return UserOperationV07{
+			Sender: common.HexToAddress("0x981e18d5aade83620a6bd21990b5da0c797e1e5b"),
+			Nonce:  big.NewInt(0), CallData: hexutil.MustDecode("0xdeadbeef"),
+			CallGasLimit: big.NewInt(500000), VerificationGasLimit: big.NewInt(1500000),
+			PreVerificationGas:   big.NewInt(100000),
+			MaxFeePerGas:         big.NewInt(20000000000),
+			MaxPriorityFeePerGas: big.NewInt(1000000000),
+			Signature:            hexutil.MustDecode("0xff00"),
+		}
+	}
+	decode := func(t *testing.T, op UserOperationV07) map[string]interface{} {
+		t.Helper()
+		b, err := json.Marshal(&op)
+		if err != nil {
+			t.Fatalf("MarshalJSON: %v", err)
+		}
+		var m map[string]interface{}
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return m
+	}
+
+	t.Run("numbers are hex quantity strings, not JSON numbers", func(t *testing.T) {
+		m := decode(t, base())
+		for k, want := range map[string]string{
+			"nonce": "0x0", "callGasLimit": "0x7a120", "verificationGasLimit": "0x16e360",
+			"preVerificationGas": "0x186a0", "maxFeePerGas": "0x4a817c800",
+			"maxPriorityFeePerGas": "0x3b9aca00",
+		} {
+			got, ok := m[k].(string)
+			if !ok {
+				t.Errorf("%s is %T, want a hex string", k, m[k])
+				continue
+			}
+			if got != want {
+				t.Errorf("%s = %s, want %s", k, got, want)
+			}
+		}
+	})
+
+	t.Run("factory and paymaster keys are absent when unused", func(t *testing.T) {
+		m := decode(t, base())
+		for _, k := range []string{"factory", "factoryData", "paymaster",
+			"paymasterVerificationGasLimit", "paymasterPostOpGasLimit", "paymasterData"} {
+			if v, present := m[k]; present {
+				t.Errorf("%s present (%v); must be omitted entirely, not empty", k, v)
+			}
+		}
+	})
+
+	t.Run("factory group appears together", func(t *testing.T) {
+		op := base()
+		f := common.HexToAddress("0x00000000000017c61b5bEe81050EC8eFc9c6fecd")
+		op.Factory, op.FactoryData = &f, hexutil.MustDecode("0x8b4e464e")
+		m := decode(t, op)
+		if m["factory"] != f.Hex() {
+			t.Errorf("factory = %v, want %s", m["factory"], f.Hex())
+		}
+		if m["factoryData"] != "0x8b4e464e" {
+			t.Errorf("factoryData = %v", m["factoryData"])
+		}
+	})
+
+	t.Run("paymaster group appears together", func(t *testing.T) {
+		op := base()
+		p := common.HexToAddress("0xf023eA291F5bEDA4Bf59BbDC9004F1d18be19D6f")
+		op.Paymaster = &p
+		op.PaymasterVerificationGasLimit = big.NewInt(100000)
+		op.PaymasterPostOpGasLimit = big.NewInt(50000)
+		op.PaymasterData = hexutil.MustDecode("0xc0ffee")
+		m := decode(t, op)
+		for k, want := range map[string]string{
+			"paymaster": p.Hex(), "paymasterVerificationGasLimit": "0x186a0",
+			"paymasterPostOpGasLimit": "0xc350", "paymasterData": "0xc0ffee",
+		} {
+			if m[k] != want {
+				t.Errorf("%s = %v, want %s", k, m[k], want)
+			}
+		}
+	})
+
+	t.Run("half-set groups are errors, not silent drops", func(t *testing.T) {
+		f := common.HexToAddress("0x00000000000017c61b5bEe81050EC8eFc9c6fecd")
+		p := common.HexToAddress("0xf023eA291F5bEDA4Bf59BbDC9004F1d18be19D6f")
+		for name, mutate := range map[string]func(*UserOperationV07){
+			"factoryData without factory": func(o *UserOperationV07) {
+				o.FactoryData = hexutil.MustDecode("0x8b4e464e")
+			},
+			"factory without factoryData": func(o *UserOperationV07) { o.Factory = &f },
+			"paymaster gas without paymaster": func(o *UserOperationV07) {
+				o.PaymasterVerificationGasLimit = big.NewInt(1)
+			},
+			"paymasterData without paymaster": func(o *UserOperationV07) {
+				o.PaymasterData = hexutil.MustDecode("0xc0ffee")
+			},
+			"paymaster without its gas limits": func(o *UserOperationV07) { o.Paymaster = &p },
+		} {
+			t.Run(name, func(t *testing.T) {
+				op := base()
+				mutate(&op)
+				if _, err := json.Marshal(&op); err == nil {
+					t.Error("expected an error; a half-set group would be silently dropped or malformed")
+				}
+			})
+		}
+	})
+
+	t.Run("nil required field is an error", func(t *testing.T) {
+		op := base()
+		op.CallGasLimit = nil
+		if _, err := json.Marshal(&op); err == nil {
+			t.Error("expected an error for a nil callGasLimit")
 		}
 	})
 }

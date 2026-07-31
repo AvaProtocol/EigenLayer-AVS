@@ -1,11 +1,13 @@
 package userop
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
@@ -199,4 +201,110 @@ func toBytes32(b []byte) [32]byte {
 	var out [32]byte
 	copy(out[:], b)
 	return out
+}
+
+// MarshalJSON renders the operation in the shape v0.7 bundlers expect on
+// eth_sendUserOperation / eth_estimateUserOperationGas.
+//
+// The struct tags alone are not enough for two reasons:
+//
+//   - every numeric field goes on the wire as a hex quantity string, not a
+//     JSON number;
+//   - the factory and paymaster groups must be ABSENT, not present-and-empty,
+//     when unused. A bundler that receives `"paymaster": ""` treats the
+//     operation as sponsored by the zero address and rejects it, which
+//     surfaces as an opaque validation error rather than a shape complaint.
+//
+// `omitempty` cannot express the second rule for the gas-limit fields, since
+// a legitimately-zero limit would drop out too — hence an explicit builder.
+func (op *UserOperationV07) MarshalJSON() ([]byte, error) {
+	hexBig := func(v *big.Int, name string) (string, error) {
+		if v == nil {
+			return "", fmt.Errorf("%s is nil", name)
+		}
+		if v.Sign() < 0 {
+			return "", fmt.Errorf("%s is negative", name)
+		}
+		return "0x" + v.Text(16), nil
+	}
+
+	out := map[string]interface{}{
+		"sender":    op.Sender.Hex(),
+		"callData":  hexutil.Encode(op.CallData),
+		"signature": hexutil.Encode(op.Signature),
+	}
+	for _, f := range []struct {
+		key string
+		val *big.Int
+	}{
+		{"nonce", op.Nonce},
+		{"callGasLimit", op.CallGasLimit},
+		{"verificationGasLimit", op.VerificationGasLimit},
+		{"preVerificationGas", op.PreVerificationGas},
+		{"maxFeePerGas", op.MaxFeePerGas},
+		{"maxPriorityFeePerGas", op.MaxPriorityFeePerGas},
+	} {
+		s, err := hexBig(f.val, f.key)
+		if err != nil {
+			return nil, err
+		}
+		out[f.key] = s
+	}
+
+	// Factory pair: both present or both absent. Neither half-state is
+	// something to paper over — a nil Factory with FactoryData set would
+	// silently drop the data and send a deployed-account operation where the
+	// caller meant a counterfactual one (the account never gets deployed, and
+	// the failure surfaces as a missing-account revert far from here). The
+	// mirror case emits a factory with no constructor call.
+	if op.Factory == nil && len(op.FactoryData) > 0 {
+		return nil, fmt.Errorf("factoryData is set but factory is nil")
+	}
+	if op.Factory != nil {
+		if len(op.FactoryData) == 0 {
+			return nil, fmt.Errorf("factory %s is set but factoryData is empty", op.Factory.Hex())
+		}
+		out["factory"] = op.Factory.Hex()
+		out["factoryData"] = hexutil.Encode(op.FactoryData)
+	}
+
+	// Paymaster group: all four present or all absent. The two gas limits are
+	// required by the spec once a paymaster is set, so a nil here is a
+	// caller bug rather than something to default away. And a paymaster field
+	// populated without a paymaster address means sponsorship was intended and
+	// is about to be silently dropped — the operation would go out unsponsored
+	// and drain the account instead.
+	if op.Paymaster == nil {
+		for _, f := range []struct {
+			set  bool
+			name string
+		}{
+			{op.PaymasterVerificationGasLimit != nil, "paymasterVerificationGasLimit"},
+			{op.PaymasterPostOpGasLimit != nil, "paymasterPostOpGasLimit"},
+			{len(op.PaymasterData) > 0, "paymasterData"},
+		} {
+			if f.set {
+				return nil, fmt.Errorf("%s is set but paymaster is nil", f.name)
+			}
+		}
+	}
+	if op.Paymaster != nil {
+		out["paymaster"] = op.Paymaster.Hex()
+		for _, f := range []struct {
+			key string
+			val *big.Int
+		}{
+			{"paymasterVerificationGasLimit", op.PaymasterVerificationGasLimit},
+			{"paymasterPostOpGasLimit", op.PaymasterPostOpGasLimit},
+		} {
+			s, err := hexBig(f.val, f.key)
+			if err != nil {
+				return nil, err
+			}
+			out[f.key] = s
+		}
+		out["paymasterData"] = hexutil.Encode(op.PaymasterData)
+	}
+
+	return json.Marshal(out)
 }
