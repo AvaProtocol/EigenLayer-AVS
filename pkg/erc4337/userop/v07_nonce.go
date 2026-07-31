@@ -111,8 +111,11 @@ func DecodeNonceMAv2(nonce *big.Int) (entityID uint32, options uint8, sequence u
 // Total 67 bytes for a 65-byte ECDSA signature. Sending the bare 65 bytes
 // reverts in validation with no indication that framing was the problem.
 const (
-	sigSegmentValidationData byte = 0xFF
-	sigTypeEOA               byte = 0x00
+	// SigSegmentValidationData is the reserved segment index meaning "what
+	// follows is validation data" rather than per-hook data.
+	SigSegmentValidationData byte = 0xFF
+	// SigTypeEOA marks a plain ECDSA signature.
+	SigTypeEOA byte = 0x00
 )
 
 // WrapSignatureMAv2 frames a 65-byte ECDSA signature for a semi-modular
@@ -122,6 +125,6 @@ func WrapSignatureMAv2(ecdsaSig []byte) ([]byte, error) {
 		return nil, fmt.Errorf("expected a 65-byte ECDSA signature, got %d bytes", len(ecdsaSig))
 	}
 	out := make([]byte, 0, 2+len(ecdsaSig))
-	out = append(out, sigSegmentValidationData, sigTypeEOA)
+	out = append(out, SigSegmentValidationData, SigTypeEOA)
 	return append(out, ecdsaSig...), nil
 }
