@@ -559,7 +559,7 @@ func TestContractWrite_InvalidNumericValue_ResponseStructure(t *testing.T) {
 
 	// Get smart wallet address for settings
 	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
-	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+	setGlobalFactory(t, smartWalletConfig)
 
 	client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
 	require.NoError(t, err, "Failed to connect to RPC")

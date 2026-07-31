@@ -39,7 +39,9 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 func TestSendUserOp(t *testing.T) {
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
-	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+	if err := aa.SetFactoryAddressForConfig(smartWalletConfig); err != nil {
+		t.Fatalf("setting global factory: %v", err)
+	}
 
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
 	if !ok {
@@ -89,7 +91,9 @@ func TestPaymaster(t *testing.T) {
 
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
-	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+	if err := aa.SetFactoryAddressForConfig(smartWalletConfig); err != nil {
+		t.Fatalf("setting global factory: %v", err)
+	}
 
 	// Because we used the master key to signed, the address cannot be calculated from that key and need to set explicitly
 	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")

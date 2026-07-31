@@ -116,6 +116,44 @@ func DeriveInitCodeAuto(owner, factory common.Address, salt *big.Int) (common.Ad
 	}
 }
 
+// PackExecuteBatchAuto builds atomic-batch calldata for the account
+// implementation this factory belongs to.
+//
+// Unlike execute(), batching did NOT carry over. MA v2 has a single
+// executeBatch((address,uint256,bytes)[]) that always takes per-call values;
+// the v0.6 account has two entry points, executeBatch(address[],bytes[]) and
+// executeBatchWithValues(...), with different selectors. Sending v0.6 batch
+// calldata to an MA v2 account reverts in validation as AA23, which names
+// neither the batch nor the account type.
+//
+// Callers pass values regardless; the v0.6 branch drops them when every value
+// is zero, because executeBatchWithValues (0xc3ff72fc) is not simulatable by
+// the bundler while plain executeBatch is.
+func PackExecuteBatchAuto(factory common.Address, targets []common.Address, values []*big.Int, datas [][]byte) ([]byte, error) {
+	if len(targets) != len(datas) || len(targets) != len(values) {
+		return nil, fmt.Errorf("batch arity mismatch: %d targets, %d values, %d calldatas",
+			len(targets), len(values), len(datas))
+	}
+	if ProviderForFactory(factory) == ProviderModularAccountV2 {
+		calls := make([]Call, len(targets))
+		for i := range targets {
+			calls[i] = Call{Target: targets[i], Value: values[i], Data: datas[i]}
+		}
+		return PackExecuteBatchMAv2(calls)
+	}
+	anyValue := false
+	for _, v := range values {
+		if v != nil && v.Sign() != 0 {
+			anyValue = true
+			break
+		}
+	}
+	if anyValue {
+		return PackExecuteBatchWithValues(targets, values, datas)
+	}
+	return PackExecuteBatch(targets, datas)
+}
+
 // EffectiveFactory returns the factory this chain creates accounts at NOW,
 // which is the MA v2 constant on an MA v2 chain and the configured
 // smart_wallet.factory_address otherwise.

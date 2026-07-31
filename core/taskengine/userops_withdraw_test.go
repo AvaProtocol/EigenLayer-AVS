@@ -60,7 +60,7 @@ func setupUserOpWithdrawalTest(t *testing.T) (*config.Config, common.Address, *c
 	t.Cleanup(func() { client.Close() })
 
 	// Set factory address for smart wallet derivation
-	aa.SetFactoryAddress(cfg.SmartWallet.FactoryAddress)
+	setGlobalFactory(t, cfg.SmartWallet)
 
 	// Always derive smart wallet address from owner + salt:0
 	// This ensures consistency and tests the auto-creation flow
@@ -489,7 +489,7 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 	t.Cleanup(func() { client.Close() })
 
 	// Set factory address for smart wallet derivation
-	aa.SetFactoryAddress(cfg.SmartWallet.FactoryAddress)
+	setGlobalFactory(t, cfg.SmartWallet)
 	t.Logf("🔧 Set factory address: %s", cfg.SmartWallet.FactoryAddress.Hex())
 
 	// Always derive smart wallet address from owner + salt:0

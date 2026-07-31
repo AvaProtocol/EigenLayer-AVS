@@ -1169,15 +1169,19 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 	// Pack the atomic batch. Prefer executeBatch (no per-call values) when every value is zero — its
 	// selector is bundler-estimatable, unlike executeBatchWithValues (0xc3ff72fc) which the bundler
 	// can't simulate. Only fall back to executeBatchWithValues when a call actually carries value.
-	packKind := "executeBatch"
-	var smartWalletCallData []byte
-	var packErr error
-	if anyValue {
-		packKind = "executeBatchWithValues"
-		smartWalletCallData, packErr = aa.PackExecuteBatchWithValues(targets, values, datas)
-	} else {
-		smartWalletCallData, packErr = aa.PackExecuteBatch(targets, datas)
+	// Routed on the chain's account implementation. Batching is the one call
+	// shape that did NOT carry over to MA v2 — see aa.PackExecuteBatchAuto —
+	// so packing v0.6 batch calldata here reverts in validation as AA23,
+	// naming neither the batch nor the account type.
+	batchFactory, factoryErr := aa.EffectiveFactory(r.smartWalletConfig)
+	if factoryErr != nil {
+		return failAll(fmt.Sprintf("failed to resolve account factory for batch: %v", factoryErr), nil)
 	}
+	packKind := "executeBatch"
+	if anyValue && aa.ProviderForFactory(batchFactory) != aa.ProviderModularAccountV2 {
+		packKind = "executeBatchWithValues"
+	}
+	smartWalletCallData, packErr := aa.PackExecuteBatchAuto(batchFactory, targets, values, datas)
 	if packErr != nil {
 		return failAll(fmt.Sprintf("failed to pack atomic batch calldata: %v", packErr), nil)
 	}

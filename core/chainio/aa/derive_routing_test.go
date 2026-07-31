@@ -174,3 +174,34 @@ func TestDeriveSenderAddressForFactoryRejectsUnknownProvider(t *testing.T) {
 		t.Error("expected an error for an unrecognised provider")
 	}
 }
+
+// The package-global factory is what GetSenderAddress derives against, and
+// GetSenderAddress infers the account implementation from it. So an unset
+// global must resolve to the DEFAULT provider's factory, not to the v0.6
+// SimpleAccountFactory.
+//
+// This regressed once already: the fallback stayed on
+// config.DefaultFactoryProxyAddressHex after the default provider flipped, so
+// every caller that reached the global before SetFactoryAddressForConfig ran
+// derived a v0.6 address on an MA v2 chain — silently, since both branches
+// return a well-formed address.
+func TestUnsetGlobalFactoryFollowsTheDefaultProvider(t *testing.T) {
+	SetFactoryAddress(common.Address{}) // simulate "never configured"
+
+	got := getFactoryAddress()
+	want, err := FactoryAddressForProvider("", common.HexToAddress(config.DefaultFactoryProxyAddressHex))
+	if err != nil {
+		t.Fatalf("FactoryAddressForProvider: %v", err)
+	}
+	if got != want {
+		t.Errorf("unset global factory = %s, want %s (the default provider's factory)",
+			got.Hex(), want.Hex())
+	}
+	if got == common.HexToAddress(config.DefaultFactoryProxyAddressHex) {
+		t.Error("unset global fell back to the v0.6 SimpleAccountFactory")
+	}
+	if ProviderForFactory(got) != ProviderModularAccountV2 {
+		t.Errorf("unset global resolves to provider %q, want %q",
+			ProviderForFactory(got), ProviderModularAccountV2)
+	}
+}

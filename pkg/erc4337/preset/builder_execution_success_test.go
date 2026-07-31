@@ -27,7 +27,9 @@ func TestUserOpWithdrawalSkipsReimbursementWhenBalanceInsufficient(t *testing.T)
 	require.NoError(t, err, "Failed to connect to RPC")
 	defer client.Close()
 
-	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+	if err := aa.SetFactoryAddressForConfig(smartWalletConfig); err != nil {
+		t.Fatalf("setting global factory: %v", err)
+	}
 
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
 	if !ok {
@@ -167,7 +169,9 @@ func TestUserOpExecutionFailureExcessiveTransfer(t *testing.T) {
 		t.Skipf("Skipping TestUserOpExecutionFailureExcessiveTransfer: chain ID %d is not Sepolia (11155111)", chainID.Uint64())
 	}
 
-	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+	if err := aa.SetFactoryAddressForConfig(smartWalletConfig); err != nil {
+		t.Fatalf("setting global factory: %v", err)
+	}
 
 	// Get owner EOA from environment variable (OWNER_EOA or TEST_PRIVATE_KEY)
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
@@ -263,7 +267,9 @@ func TestUserOpExecutionSuccessWithPaymaster(t *testing.T) {
 		t.Skipf("Skipping TestUserOpExecutionSuccessWithPaymaster: chain ID %d is not Sepolia (11155111)", chainID.Uint64())
 	}
 
-	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+	if err := aa.SetFactoryAddressForConfig(smartWalletConfig); err != nil {
+		t.Fatalf("setting global factory: %v", err)
+	}
 
 	// Get owner EOA from environment variable (OWNER_EOA or TEST_PRIVATE_KEY)
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()

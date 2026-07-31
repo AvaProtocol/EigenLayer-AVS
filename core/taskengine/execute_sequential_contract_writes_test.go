@@ -43,7 +43,7 @@ func TestExecuteTask_SequentialContractWrites_Sepolia(t *testing.T) {
 	t.Logf("   Chain: Sepolia (ID: %d)", cfg.SmartWallet.ChainID)
 
 	// Set factory for AA library
-	aa.SetFactoryAddress(cfg.SmartWallet.FactoryAddress)
+	setGlobalFactory(t, cfg.SmartWallet)
 	t.Logf("   Computing salt:0 smart wallet address...")
 
 	// Connect to Sepolia

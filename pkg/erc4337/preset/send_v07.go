@@ -124,6 +124,14 @@ func SendUserOpMAv2(
 		return nil, nil, err
 	}
 
+	// Sign last: the signature covers every gas and paymaster field, so it has
+	// to come after pricing. SendUserOpV07WithRetry only RE-signs, and only
+	// when it tightens the verification gas limit — it will not sign an
+	// unsigned operation, it rejects one.
+	if err := SignUserOpV07(op, entryPoint, chainID, smartWalletConfig.ControllerPrivateKey); err != nil {
+		return op, nil, fmt.Errorf("signing user operation: %w", err)
+	}
+
 	opHash, err := SendUserOpV07WithRetry(ctx, bundlerRPC, op, entryPoint, chainID,
 		smartWalletConfig.ControllerPrivateKey)
 	if err != nil {
@@ -210,6 +218,23 @@ func priceOperationV07(
 	if err != nil {
 		return fmt.Errorf("reading latest header: %w", err)
 	}
+
+	// The bundler enforces its own priority-fee floor, independent of what the
+	// chain suggests, and rejects anything under it in precheck:
+	//
+	//	maxPriorityFeePerGas is 1500000 but must be at least 100000000
+	//
+	// On a quiet testnet the chain's suggestion is well below that floor, so
+	// the chain value alone is not enough. Ask the bundler and take whichever
+	// is higher — it is the party that decides whether to accept the operation.
+	if bundlerTip, tipErr := bundlerMaxPriorityFee(ctx, bundlerRPC); tipErr != nil {
+		l.Debug("bundler did not report a priority fee, using the chain's", "error", tipErr)
+	} else if bundlerTip.Cmp(tip) > 0 {
+		l.Debug("raising priority fee to the bundler's floor",
+			"chain_tip", tip.String(), "bundler_tip", bundlerTip.String())
+		tip = bundlerTip
+	}
+
 	op.MaxPriorityFeePerGas = tip
 	op.MaxFeePerGas = new(big.Int).Add(tip, new(big.Int).Mul(head.BaseFee, big.NewInt(2)))
 
@@ -230,4 +255,20 @@ func isDeployed(ctx context.Context, client *ethclient.Client, addr common.Addre
 		return false, err
 	}
 	return len(code) > 0, nil
+}
+
+// bundlerMaxPriorityFee asks the bundler what priority fee it currently wants.
+//
+// Rundler exposes this as rundler_maxPriorityFeePerGas. It is not part of
+// ERC-4337, so a bundler that does not implement it returns a method error —
+// which is why the caller treats failure as "no opinion" rather than fatal.
+func bundlerMaxPriorityFee(ctx context.Context, client *rpc.Client) (*big.Int, error) {
+	if client == nil {
+		return nil, fmt.Errorf("nil bundler client")
+	}
+	var out string
+	if err := client.CallContext(ctx, &out, "rundler_maxPriorityFeePerGas"); err != nil {
+		return nil, err
+	}
+	return parseHexBig(out, "rundler_maxPriorityFeePerGas")
 }
