@@ -132,6 +132,13 @@ type Config struct {
 	// Moralis Web3 Data API key for token price lookup (optional)
 	MoralisApiKey string `yaml:"moralis_api_key"`
 
+	// AlchemyAPISecret is an Alchemy ACCESS KEY (alcht_...), distinct from
+	// alchemy_api_key: the app key authorises RPC and bundler traffic, while
+	// this authorises the account-level admin APIs at manage.g.alchemy.com —
+	// notably the Gas Manager policy and spend endpoints. Scope it Gas Manager
+	// READ; a read/write key can delete the policy that funds sponsorship.
+	AlchemyAPISecret string `yaml:"alchemy_api_secret"`
+
 	// GasManagerPolicyID is the Alchemy Gas Manager policy this gateway
 	// answers sponsorship questions for. The Gas Manager "custom rules"
 	// webhook is only mounted when this is set — a mounted route that
@@ -389,7 +396,8 @@ type ConfigRaw struct {
 	// Moralis Web3 Data API key for token price lookup (optional)
 	MoralisApiKey string `yaml:"moralis_api_key"`
 
-	// Alchemy Gas Manager sponsorship webhook (optional; see Config)
+	// Alchemy Gas Manager sponsorship webhook + admin API (optional; see Config)
+	AlchemyAPISecret        string `yaml:"alchemy_api_secret"`
 	GasManagerPolicyID      string `yaml:"gas_manager_policy_id"`
 	GasManagerWebhookSecret string `yaml:"gas_manager_webhook_secret"`
 
@@ -664,7 +672,8 @@ func NewConfig(configFilePath string) (*Config, error) {
 		// Pass through Moralis API key (from YAML or environment variable)
 		MoralisApiKey: firstNonEmpty(configRaw.MoralisApiKey, os.Getenv("MORALIS_API_KEY")),
 
-		// Gas Manager sponsorship webhook (from YAML or environment variable)
+		// Gas Manager sponsorship webhook + admin API (from YAML or environment)
+		AlchemyAPISecret:        firstNonEmpty(configRaw.AlchemyAPISecret, os.Getenv("ALCHEMY_API_SECRET")),
 		GasManagerPolicyID:      firstNonEmpty(configRaw.GasManagerPolicyID, os.Getenv("ALCHEMY_GAS_POLICY_ID")),
 		GasManagerWebhookSecret: firstNonEmpty(configRaw.GasManagerWebhookSecret, os.Getenv("GAS_MANAGER_WEBHOOK_SECRET")),
 

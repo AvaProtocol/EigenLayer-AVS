@@ -277,10 +277,19 @@ type sponsorshipResultV07 struct {
 // RequestSponsorshipV07 fills the paymaster fields (and the gas values Gas
 // Manager prices alongside them) from a Gas Manager policy.
 //
-// The policy's own rules apply here, including the custom-rules webhook, so a
-// denial surfaces as an RPC error rather than an unsponsored operation. That
-// is the intended shape: an operation that silently fell back to self-funded
-// would drain the account.
+// Verified against the live Sepolia policy: an MA v2 operation comes back with
+// a real paymaster (0x2cc0c798…) and priced gas.
+//
+// Whatever the policy enforces applies here — spend caps and, once configured,
+// the custom-rules webhook — and a denial surfaces as an RPC error rather than
+// an unsponsored operation. That is the shape we want: an operation that
+// silently fell back to self-funded would drain the account instead.
+//
+// Note the webhook is NOT currently configured on the policy (webhookRules is
+// null), so nothing consults the gateway's FeeLedger gate today and any sender
+// reaching the policy is sponsored within its caps. Enabling it is what makes
+// the credit limit bind — and it also means MA v2 wallets must be registered
+// in gateway storage first, or the webhook will refuse every one of them.
 func RequestSponsorshipV07(ctx context.Context, client *rpc.Client, op *userop.UserOperationV07, entryPoint common.Address, req SponsorshipRequestV07) error {
 	if client == nil {
 		return fmt.Errorf("nil bundler client")
