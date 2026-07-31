@@ -1,9 +1,11 @@
 package taskengine
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 
+	"github.com/dgraph-io/badger/v4"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
@@ -79,12 +81,30 @@ func GetOrCreateMAv2Wallet(db storage.Storage, rpcConn *ethclient.Client, chainI
 	// Prefer the (chain, owner, factory, salt) index over deriving again — it
 	// answers "has this been registered?" without an RPC round trip, and it is
 	// the same index StoreWallet maintains.
-	if existingAddr, err := LookupCanonicalWalletAddress(db, chainID, owner, factory, salt); err == nil {
-		if wallet, getErr := GetWallet(db, chainID, owner, existingAddr.Hex()); getErr == nil {
+	//
+	// Only a genuine "not recorded yet" may fall through to derive-and-store.
+	// Treating any read error as absence would re-register on a transient
+	// storage fault, and re-registration writes IsHidden:false — silently
+	// un-hiding a wallet the user had hidden. Idempotency here is only as good
+	// as the lookup it rests on.
+	existingAddr, err := LookupCanonicalWalletAddress(db, chainID, owner, factory, salt)
+	switch {
+	case err == nil:
+		wallet, getErr := GetWallet(db, chainID, owner, existingAddr.Hex())
+		if getErr == nil {
 			return wallet, nil
 		}
-		// Index present but the record is gone — fall through and rewrite it
-		// rather than returning a dangling reference.
+		if !errors.Is(getErr, badger.ErrKeyNotFound) {
+			return nil, fmt.Errorf("reading registered MA v2 wallet %s for owner %s on chain %d: %w",
+				existingAddr.Hex(), owner.Hex(), chainID, getErr)
+		}
+		// Index points at a record that is gone. Rewrite it rather than
+		// returning a dangling reference.
+	case errors.Is(err, badger.ErrKeyNotFound):
+		// Not registered yet — the expected path for a new wallet.
+	default:
+		return nil, fmt.Errorf("looking up MA v2 wallet index for owner %s salt %s on chain %d: %w",
+			owner.Hex(), salt, chainID, err)
 	}
 
 	derived, err := aa.GetSenderAddressMAv2ForFactory(rpcConn, owner, factory, salt)

@@ -68,13 +68,12 @@ func TestGetOrCreateMAv2WalletGuards(t *testing.T) {
 
 	tests := []struct {
 		name  string
-		db    interface{}
 		owner common.Address
 		salt  *big.Int
 	}{
-		{"nil salt", db, owner, nil},
-		{"negative salt", db, owner, big.NewInt(-1)},
-		{"zero owner", db, common.Address{}, big.NewInt(0)},
+		{"nil salt", owner, nil},
+		{"negative salt", owner, big.NewInt(-1)},
+		{"zero owner", common.Address{}, big.NewInt(0)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -171,5 +170,38 @@ func TestWalletFactoryMatchesDerivationFactory(t *testing.T) {
 	if MAv2WalletFactory() != aa.MAv2FactoryAddress() {
 		t.Errorf("taskengine factory %s != aa factory %s",
 			MAv2WalletFactory().Hex(), aa.MAv2FactoryAddress().Hex())
+	}
+}
+
+// Idempotency is only as strong as the lookup it rests on. If a storage read
+// error were treated as "not registered", the fall-through would re-derive and
+// re-store with IsHidden:false — silently un-hiding a wallet the user hid. A
+// closed database is the cheapest way to make every read fail.
+func TestRegistrationDoesNotFallThroughOnStorageError(t *testing.T) {
+	db := testutil.TestMustDB()
+	owner := mav2Owner()
+	addr := common.HexToAddress("0x61CaF92C082E70F8F780A8f1c04d01A14B63e0B0")
+	factory := MAv2WalletFactory()
+	salt := big.NewInt(0)
+
+	if err := StoreWallet(db, mav2TestChain, owner, &model.SmartWallet{
+		Owner: &owner, Address: &addr, Factory: &factory, Salt: salt, IsHidden: true,
+	}); err != nil {
+		t.Fatalf("StoreWallet: %v", err)
+	}
+	db.Close() // every subsequent read now errors rather than reporting absence
+
+	// nil RPC: if this wrongly falls through to derive-and-store it will panic
+	// or error on the RPC, either way not returning a fresh IsHidden:false
+	// record. What must NOT happen is a silent success that clobbers the flag.
+	got, err := GetOrCreateMAv2Wallet(db, nil, mav2TestChain, owner, salt)
+	if err == nil {
+		if got != nil && !got.IsHidden {
+			t.Fatal("returned a re-registered record with IsHidden reset; the storage error was masked")
+		}
+		t.Fatal("expected an error when storage reads fail, got success")
+	}
+	if !strings.Contains(err.Error(), "looking up") && !strings.Contains(err.Error(), "reading registered") {
+		t.Errorf("error should name the failed lookup, got: %v", err)
 	}
 }
