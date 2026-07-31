@@ -48,7 +48,19 @@ const DefaultFactoryProxyAddressHex = "0xB99BC2E399e06CddCF5E725c0ea341E8f032283
 // DefaultEntrypointAddressHex is the default ERC-4337 EntryPoint address used
 // across supported chains. If the aggregator config omits the
 // smart_wallet.entrypoint_address field, this value will be used.
+//
+// This is the v0.6 EntryPoint, and smart_wallet.entrypoint_address configures
+// only the v0.6 path. Modular Account v2 operations run against
+// EntryPointV07AddressHex regardless of what the YAML says — read
+// SmartWalletConfig.EntryPointAddress() rather than the field, or you will
+// address the wrong contract on an MA v2 chain.
 const DefaultEntrypointAddressHex = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
+
+// EntryPointV07AddressHex is the canonical ERC-4337 v0.7 EntryPoint, the same
+// address on every chain that has one. It is deliberately NOT configurable:
+// unlike the v0.6 deployment there is nothing per-chain to point at, and a
+// YAML override could only ever be wrong.
+const EntryPointV07AddressHex = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
 
 // NOTE: there is no DefaultPaymasterAddressHex. The paymaster contract
 // is deployed per network (mainnet and testnet have different addresses),
@@ -285,6 +297,22 @@ func (c *SmartWalletConfig) UsesModularAccountV2() bool {
 	return c.AccountProviderName() == AccountProviderModularAccountV2
 }
 
+// EntryPointAddress returns the EntryPoint this chain's operations actually
+// run against: the canonical v0.7 contract on an MA v2 chain, otherwise the
+// configured (v0.6) address.
+//
+// Prefer this over reading EntrypointAddress directly. That field is the v0.6
+// EntryPoint, and using it on an MA v2 chain addresses a contract the
+// operation never touches — which does not fail loudly. It produces userOp
+// hashes that match nothing on chain, and receipt polling that waits out its
+// full timeout looking for an event emitted somewhere else.
+func (c *SmartWalletConfig) EntryPointAddress() common.Address {
+	if c.UsesModularAccountV2() {
+		return common.HexToAddress(EntryPointV07AddressHex)
+	}
+	return c.EntrypointAddress
+}
+
 // ValidateAccountProvider rejects an unrecognised value rather than silently
 // falling back. A typo would otherwise derive v0.6 addresses on a chain the
 // operator believed was on MA v2 — and the mistake is only visible as users
@@ -309,6 +337,14 @@ var alchemyNetworkSubdomain = map[int64]string{
 	8453:     "base-mainnet",
 	84532:    "base-sepolia",
 	56:       "bnb-mainnet",
+	// Chain IDs read from each chain's own eth_chainId rather than from
+	// documentation, and each verified to carry the canonical EntryPoint v0.7
+	// (16,035 bytes) and Modular Account v2 factory (6,661 bytes) at the
+	// standard addresses — byte-identical to Sepolia, where operations have
+	// actually landed.
+	42161: "arb-mainnet",
+	999:   "hyperliquid-mainnet",
+	4663:  "robinhood-mainnet",
 }
 
 // ProviderName returns the effective bundler provider, defaulting to alchemy

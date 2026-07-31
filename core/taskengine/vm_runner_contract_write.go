@@ -399,7 +399,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		r.vm.logger.Info("🔍 CONTRACT WRITE DEBUG - Smart Wallet Config Details",
 			"bundler_url", r.smartWalletConfig.BundlerURL,
 			"factory_address", r.smartWalletConfig.FactoryAddress,
-			"entrypoint_address", r.smartWalletConfig.EntrypointAddress)
+			"entrypoint_address", r.smartWalletConfig.EntryPointAddress())
 	} else {
 		r.vm.logger.Warn("⚠️ CONTRACT WRITE DEBUG - Smart wallet config is NIL!")
 	}
@@ -2025,8 +2025,8 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 					}
 				}()
 				if r.smartWalletConfig != nil {
-					if (r.smartWalletConfig.EntrypointAddress != common.Address{}) {
-						log.WriteString(fmt.Sprintf("  EntryPoint: %s\n", r.smartWalletConfig.EntrypointAddress.Hex()))
+					if (r.smartWalletConfig.EntryPointAddress() != common.Address{}) {
+						log.WriteString(fmt.Sprintf("  EntryPoint: %s\n", r.smartWalletConfig.EntryPointAddress().Hex()))
 					}
 					if r.smartWalletConfig.BundlerURL != "" {
 						log.WriteString(fmt.Sprintf("  Bundler: %s\n", r.smartWalletConfig.BundlerURL))
@@ -2042,7 +2042,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			// If this is a bundler/AA error, add additional debugging information
 			if strings.Contains(result.Error, "Bundler failed") || strings.Contains(result.Error, "AA21") {
 				log.WriteString("BUNDLER FAILURE DETAILS:\n")
-				log.WriteString(fmt.Sprintf("  Entry Point: %s\n", r.smartWalletConfig.EntrypointAddress.Hex()))
+				log.WriteString(fmt.Sprintf("  Entry Point: %s\n", r.smartWalletConfig.EntryPointAddress().Hex()))
 				log.WriteString(fmt.Sprintf("  Factory: %s\n", r.smartWalletConfig.FactoryAddress.Hex()))
 
 				if strings.Contains(result.Error, "AA21") {

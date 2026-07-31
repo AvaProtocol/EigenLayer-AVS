@@ -1671,7 +1671,7 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		v.logger.Info("🔍 VM DEBUG - Smart wallet config details",
 			"bundler_url", swConfig.BundlerURL,
 			"factory_address", swConfig.FactoryAddress,
-			"entrypoint_address", swConfig.EntrypointAddress,
+			"entrypoint_address", swConfig.EntryPointAddress(),
 			"eth_rpc_url", swConfig.EthRpcUrl)
 	} else {
 		v.logger.Warn("⚠️ VM DEBUG - Smart wallet config is NIL in VM!")
