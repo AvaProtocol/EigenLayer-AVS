@@ -300,7 +300,9 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	// Use the aa and preset packages that should already be imported
 
 	// Set up factory address for AA operations
-	aa.SetFactoryAddress(p.smartWalletConfig.FactoryAddress)
+	if err := aa.SetFactoryAddressForConfig(p.smartWalletConfig); err != nil {
+		return nil, fmt.Errorf("cannot resolve account factory: %w", err)
+	}
 	aa.SetEntrypointAddress(p.smartWalletConfig.EntrypointAddress)
 
 	// For ETH transfers, we need to create a call to the smart wallet's execute function

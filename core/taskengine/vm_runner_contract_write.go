@@ -682,7 +682,9 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 	executionLogBuilder *strings.Builder,
 ) (*userop.UserOperation, *types.Receipt, string) {
 	// Set up factory address for AA operations
-	aa.SetFactoryAddress(r.smartWalletConfig.FactoryAddress)
+	if err := aa.SetFactoryAddressForConfig(r.smartWalletConfig); err != nil {
+		return nil, nil, fmt.Sprintf("cannot resolve account factory: %v", err)
+	}
 	aa.SetEntrypointAddress(r.smartWalletConfig.EntrypointAddress)
 
 	// Optional runner validation: if task.SmartWalletAddress is set, ensure it matches
@@ -693,10 +695,17 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 		// Derive sender at salt:0 via the per-chain reader (worker-routed in
 		// gateway mode) instead of a direct dial. Best-effort sanity check;
 		// the authoritative wallet-list validation runs in the run_node path.
-		sender, derr := r.client.GetSmartWalletAddress(ctx, r.owner, r.smartWalletConfig.FactoryAddress, big.NewInt(0))
-		if derr == nil && (sender != common.Address{}) {
-			if !strings.EqualFold(sender.Hex(), runnerStr) {
-				r.vm.logger.Warn("runner does not match derived salt:0; proceeding (wallet list validation applies in run_node)", "expected", sender.Hex(), "runner", runnerStr)
+		// A factory-resolution failure only costs us the sanity check; the
+		// authoritative validation still runs in run_node. Skipping beats
+		// failing the write on a diagnostic.
+		if defaultFactory, factoryErr := aa.EffectiveFactory(r.smartWalletConfig); factoryErr != nil {
+			r.vm.logger.Warn("skipping runner sanity check: cannot resolve factory", "error", factoryErr)
+		} else {
+			sender, derr := r.client.GetSmartWalletAddress(ctx, r.owner, defaultFactory, big.NewInt(0))
+			if derr == nil && (sender != common.Address{}) {
+				if !strings.EqualFold(sender.Hex(), runnerStr) {
+					r.vm.logger.Warn("runner does not match derived salt:0; proceeding (wallet list validation applies in run_node)", "expected", sender.Hex(), "runner", runnerStr)
+				}
 			}
 		}
 	}

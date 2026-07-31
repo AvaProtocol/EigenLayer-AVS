@@ -237,9 +237,8 @@ type SmartWalletConfig struct {
 	MaxWalletsPerOwner int
 
 	// AccountProvider selects which smart-account implementation this chain
-	// derives and deploys: the v0.6 SimpleAccount fork, or Alchemy Modular
-	// Account v2. See AccountProviderName for why this defaults to the OLD
-	// value, unlike BundlerProvider.
+	// derives and deploys: Alchemy Modular Account v2 (the default), or the
+	// legacy v0.6 SimpleAccount fork. See AccountProviderName.
 	AccountProvider string
 }
 
@@ -256,22 +255,21 @@ const (
 )
 
 // AccountProviderName returns the effective smart-account implementation,
-// defaulting to simple_account when unset.
+// defaulting to modular_account_v2 when unset.
 //
-// This defaults to the OLD value, which is the opposite of BundlerProvider —
-// and the difference is deliberate. Switching bundlers is invisible to users:
-// the same account sends the same operations through a different relay.
-// Switching account providers changes the DERIVED ADDRESS for every
-// (owner, salt), so defaulting to modular_account_v2 would silently move every
-// user's wallet the moment a gateway rolled out, orphaning their funds and
-// every task whose runner references the old address.
+// This default was flipped as part of the EntryPoint v0.7 cutover. Be aware of
+// what it means: the provider changes the DERIVED ADDRESS for every
+// (owner, salt), so a chain that omits account_provider resolves its users to
+// different wallets than it did under simple_account. That is the intended
+// migration, taken deliberately across all chains at once after an audit found
+// no meaningful balances in the v0.6 wallets.
 //
-// The switch is therefore opt-in per chain, so a rollout is a config change
-// that can be made one chain at a time and reverted, rather than a deploy.
+// simple_account remains selectable so a chain can be pinned to the legacy
+// derivation, but it is now the exception rather than the fallback.
 func (c *SmartWalletConfig) AccountProviderName() string {
 	p := strings.ToLower(strings.TrimSpace(c.AccountProvider))
 	if p == "" {
-		return AccountProviderSimpleAccount
+		return AccountProviderModularAccountV2
 	}
 	return p
 }
