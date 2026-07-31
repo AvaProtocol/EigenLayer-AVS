@@ -766,6 +766,13 @@ func NewConfig(configFilePath string) (*Config, error) {
 	// "no contract code at given address" (Sentry EIGENLAYER-AVS-1N/1M, user-reported
 	// failure 2026-05-30 01:55 UTC on Sepolia). Fail-fast surfaces the same problem
 	// at startup where it's diagnosable, not hours later on a real workflow.
+	// Same fail-at-boot rule for the top-level smart_wallet as for each chain.
+	if config.SmartWallet != nil {
+		if err := config.SmartWallet.ValidateAccountProvider(); err != nil {
+			return nil, fmt.Errorf("top-level smart_wallet: %w", err)
+		}
+	}
+
 	if config.SmartWallet != nil && config.SmartWallet.PaymasterAddress != (common.Address{}) {
 		paymasterOwner, err := fetchPaymasterOwner(smartWalletRpcClient, config.SmartWallet.PaymasterAddress)
 		if err != nil {
@@ -1110,6 +1117,14 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 			WhitelistAddresses:   convertToAddressSlice(sw.WhitelistAddresses),
 			MaxWalletsPerOwner:   maxWallets,
 		},
+	}
+
+	// Reject an unrecognised account_provider at boot rather than at the first
+	// derivation. A typo silently reads as simple_account, so a chain the
+	// operator believed was on MA v2 would quietly hand users v0.6 addresses —
+	// visible only much later, and not obviously as a config error.
+	if err := chainCfg.SmartWallet.ValidateAccountProvider(); err != nil {
+		return nil, fmt.Errorf("chain %s (chain_id=%d): %w", raw.Name, raw.ChainID, err)
 	}
 
 	// Probe paymaster on this chain's RPC. Catches mismatched

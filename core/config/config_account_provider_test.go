@@ -49,3 +49,20 @@ func TestValidateAccountProvider(t *testing.T) {
 		}
 	}
 }
+
+// Before this was wired, ValidateAccountProvider existed but was never called
+// during config load: a typo like "mav2" was accepted, AccountProviderName()
+// returned it verbatim, and UsesModularAccountV2() went false — so a chain the
+// operator believed was on MA v2 silently handed users v0.6 addresses. The
+// function existing is not the same as it running.
+func TestTypoWouldSilentlyReadAsSimpleAccount(t *testing.T) {
+	c := SmartWalletConfig{AccountProvider: "mav2"}
+
+	if c.UsesModularAccountV2() {
+		t.Fatal("precondition changed")
+	}
+	// This is the trap: it looks harmless. Only validation catches it.
+	if err := c.ValidateAccountProvider(); err == nil {
+		t.Fatal("a typo must be rejected; otherwise it degrades silently to simple_account")
+	}
+}

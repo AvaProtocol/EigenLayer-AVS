@@ -91,3 +91,34 @@ func TestDeriveSenderAddressRejectsUnknownProvider(t *testing.T) {
 		t.Error("expected an error for an unrecognised provider")
 	}
 }
+
+// This package must accept exactly what config accepts. Config normalises
+// (trim + lowercase) before storing, but callers reasonably pass the raw yaml
+// value through — and a config the gateway loaded happily must not fail here
+// as an "unknown provider", which reads as a code bug rather than whitespace.
+func TestProviderNormalisationMatchesConfig(t *testing.T) {
+	for _, in := range []AccountProvider{
+		"modular_account_v2", "MODULAR_ACCOUNT_V2", " modular_account_v2 ", "Modular_Account_V2",
+	} {
+		if got := normaliseProvider(in); got != ProviderModularAccountV2 {
+			t.Errorf("normaliseProvider(%q) = %q, want %q", in, got, ProviderModularAccountV2)
+		}
+	}
+	for _, in := range []AccountProvider{"", "   ", "simple_account", "SIMPLE_ACCOUNT", " Simple_Account "} {
+		if got := normaliseProvider(in); got != ProviderSimpleAccount {
+			t.Errorf("normaliseProvider(%q) = %q, want %q", in, got, ProviderSimpleAccount)
+		}
+	}
+}
+
+// A whitespace/case variant must reach the right factory, not error.
+func TestFactoryAddressAcceptsUnnormalisedProvider(t *testing.T) {
+	simple := common.HexToAddress("0xB99BC2E399e06CddCF5E725c0ea341E8f0322834")
+	got, err := FactoryAddressForProvider(" Modular_Account_V2 ", simple)
+	if err != nil {
+		t.Fatalf("unexpected error for a value config would accept: %v", err)
+	}
+	if got != MAv2FactoryAddress() {
+		t.Errorf("factory = %s, want %s", got.Hex(), MAv2FactoryAddress().Hex())
+	}
+}
