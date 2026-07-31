@@ -1,0 +1,233 @@
+package preset
+
+import (
+	"context"
+	"fmt"
+	"math/big"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rpc"
+
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
+)
+
+// SendUserOpMAv2 is the v0.7 counterpart to SendUserOp: it takes the same
+// inputs, builds a Modular Account v2 operation, and returns once the
+// operation is mined. (SendUserOpV07 is the raw one-shot send this sits on
+// top of; this is the orchestrator that builds, prices, and signs first.)
+//
+// callData is the account's execute() calldata, the SAME bytes the v0.6 path
+// builds. execute(address,uint256,bytes) kept selector 0xb61d27f6 in MA v2, so
+// aa.PackExecute output is byte-identical to aa.PackExecuteMAv2 and callers
+// need no repacking. That is NOT true of batching:
+// executeBatchWithValues has no MA v2 successor, so a batched operation must
+// be packed with aa.PackExecuteBatchMAv2 before it gets here.
+//
+// Sponsorship is all-or-nothing on purpose. When a Gas Manager policy is
+// configured, an operation the policy declines fails rather than falling back
+// to self-funded — silently paying out of the account's own balance is how a
+// declined sponsorship turns into a drained wallet.
+func SendUserOpMAv2(
+	smartWalletConfig *config.SmartWalletConfig,
+	owner common.Address,
+	callData []byte,
+	senderOverride *common.Address,
+	saltOverride *big.Int,
+	lgr logger.Logger,
+) (*userop.UserOperationV07, *types.Receipt, error) {
+	l := logger.EnsureLogger(lgr)
+	if smartWalletConfig == nil {
+		return nil, nil, fmt.Errorf("nil smart wallet config")
+	}
+	if smartWalletConfig.ControllerPrivateKey == nil {
+		return nil, nil, fmt.Errorf("no controller private key configured")
+	}
+
+	bundlerURL, err := smartWalletConfig.ActiveBundlerURL()
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolving bundler url: %w", err)
+	}
+
+	ctx := context.Background()
+	chainRPC, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
+	if err != nil {
+		return nil, nil, fmt.Errorf("dialing chain rpc: %w", err)
+	}
+	defer chainRPC.Close()
+
+	bundlerRPC, err := rpc.DialContext(ctx, bundlerURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("dialing bundler: %w", err)
+	}
+	defer bundlerRPC.Close()
+
+	entryPoint := EntryPointV07()
+	chainID := big.NewInt(smartWalletConfig.ChainID)
+
+	salt := saltOverride
+	if salt == nil {
+		salt = big.NewInt(0)
+	}
+
+	factory, err := aa.EffectiveFactory(smartWalletConfig)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolving account factory: %w", err)
+	}
+
+	sender, err := resolveSenderV07(chainRPC, owner, factory, salt, senderOverride)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	op := &userop.UserOperationV07{
+		Sender:               sender,
+		CallData:             callData,
+		CallGasLimit:         big.NewInt(initialCallGasLimit),
+		PreVerificationGas:   big.NewInt(initialPreVerificationGas),
+		MaxFeePerGas:         big.NewInt(0),
+		MaxPriorityFeePerGas: big.NewInt(0),
+	}
+
+	// An account with no code yet must carry its own deployment. Reading the
+	// code is the authoritative check — a wallet record can exist for an
+	// address that was never deployed, and vice versa.
+	deployed, err := isDeployed(ctx, chainRPC, sender)
+	if err != nil {
+		return nil, nil, fmt.Errorf("checking whether %s is deployed: %w", sender.Hex(), err)
+	}
+	if !deployed {
+		deployFactory, factoryData, initErr := aa.DeriveInitCodeAuto(owner, factory, salt)
+		if initErr != nil {
+			return nil, nil, fmt.Errorf("building init code: %w", initErr)
+		}
+		op.Factory = &deployFactory
+		op.FactoryData = factoryData
+	}
+	op.VerificationGasLimit = seedVerificationGas(op)
+
+	// MA v2 selects its validation function from the NONCE, not the signature.
+	// A zero nonce reverts with ValidationFunctionMissing rather than as a
+	// nonce error, which is the single most misleading failure on this path.
+	nonce, err := NextNonceV07(ctx, bundlerRPC, entryPoint, sender,
+		userop.FallbackSignerEntityID, userop.ValidationOptionGlobal)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading nonce: %w", err)
+	}
+	op.Nonce = nonce
+
+	if err := priceOperationV07(ctx, chainRPC, bundlerRPC, op, entryPoint, smartWalletConfig, l); err != nil {
+		return nil, nil, err
+	}
+
+	opHash, err := SendUserOpV07WithRetry(ctx, bundlerRPC, op, entryPoint, chainID,
+		smartWalletConfig.ControllerPrivateKey)
+	if err != nil {
+		return op, nil, fmt.Errorf("sending user operation: %w", err)
+	}
+	l.Info("v0.7 user operation sent",
+		"sender", sender.Hex(), "userop_hash", opHash.Hex(),
+		"sponsored", op.Paymaster != nil, "deploying", op.Factory != nil)
+
+	// Reuses the v0.6 confirmation watcher: UserOperationEvent is unchanged
+	// between EntryPoint versions, so only the EntryPoint address differs.
+	var wsClient *ethclient.Client
+	if smartWalletConfig.EthWsUrl != "" {
+		if ws, wsErr := ethclient.Dial(smartWalletConfig.EthWsUrl); wsErr == nil {
+			wsClient = ws
+			defer ws.Close()
+		} else {
+			l.Warn("websocket dial failed, polling for the receipt instead", "error", wsErr)
+		}
+	}
+	receipt, err := waitForUserOpConfirmation(chainRPC, wsClient, entryPoint, opHash.Hex(), l)
+	if err != nil {
+		return op, nil, err
+	}
+	return op, receipt, nil
+}
+
+// resolveSenderV07 picks the account the operation runs as. An explicit
+// override is trusted (the caller has already resolved which of the owner's
+// wallets to use); otherwise the address is derived from the factory.
+func resolveSenderV07(
+	chainRPC *ethclient.Client,
+	owner, factory common.Address,
+	salt *big.Int,
+	senderOverride *common.Address,
+) (common.Address, error) {
+	if senderOverride != nil && *senderOverride != (common.Address{}) {
+		return *senderOverride, nil
+	}
+	derived, err := aa.DeriveSenderAddressAuto(chainRPC, owner, factory, salt)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("deriving sender for owner %s salt %s: %w",
+			owner.Hex(), salt.String(), err)
+	}
+	if derived == nil || *derived == (common.Address{}) {
+		return common.Address{}, fmt.Errorf("derived a zero sender for owner %s salt %s",
+			owner.Hex(), salt.String())
+	}
+	return *derived, nil
+}
+
+// priceOperationV07 fills the gas and paymaster fields, either from a Gas
+// Manager policy (which prices the operation as part of sponsoring it) or from
+// the bundler's own estimate.
+func priceOperationV07(
+	ctx context.Context,
+	chainRPC *ethclient.Client,
+	bundlerRPC *rpc.Client,
+	op *userop.UserOperationV07,
+	entryPoint common.Address,
+	smartWalletConfig *config.SmartWalletConfig,
+	l logger.Logger,
+) error {
+	if policyID := smartWalletConfig.GasManagerPolicyID; policyID != "" {
+		if err := RequestSponsorshipV07(ctx, bundlerRPC, op, entryPoint,
+			SponsorshipRequestV07{PolicyID: policyID}); err != nil {
+			// Deliberately fatal. See SendUserOpV07's contract: falling through
+			// to an unsponsored send would spend the account's own balance on
+			// an operation the policy just refused to fund.
+			return fmt.Errorf("gas manager declined to sponsor: %w", err)
+		}
+		l.Debug("operation sponsored", "paymaster", op.Paymaster.Hex())
+		return nil
+	}
+
+	// Unsponsored: the account pays, so the fee fields have to be real. A
+	// zero maxFeePerGas is accepted by estimation and then silently never
+	// mined, which reads as a hung operation rather than a pricing bug.
+	tip, err := chainRPC.SuggestGasTipCap(ctx)
+	if err != nil {
+		return fmt.Errorf("suggesting gas tip: %w", err)
+	}
+	head, err := chainRPC.HeaderByNumber(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("reading latest header: %w", err)
+	}
+	op.MaxPriorityFeePerGas = tip
+	op.MaxFeePerGas = new(big.Int).Add(tip, new(big.Int).Mul(head.BaseFee, big.NewInt(2)))
+
+	estimate, err := EstimateUserOpGasV07(ctx, bundlerRPC, op, entryPoint)
+	if err != nil {
+		return fmt.Errorf("estimating gas: %w", err)
+	}
+	op.CallGasLimit = estimate.CallGasLimit
+	op.VerificationGasLimit = estimate.VerificationGasLimit
+	op.PreVerificationGas = estimate.PreVerificationGas
+	return nil
+}
+
+// isDeployed reports whether an account already has code.
+func isDeployed(ctx context.Context, client *ethclient.Client, addr common.Address) (bool, error) {
+	code, err := client.CodeAt(ctx, addr, nil)
+	if err != nil {
+		return false, err
+	}
+	return len(code) > 0, nil
+}

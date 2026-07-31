@@ -240,6 +240,12 @@ type SmartWalletConfig struct {
 	// derives and deploys: Alchemy Modular Account v2 (the default), or the
 	// legacy v0.6 SimpleAccount fork. See AccountProviderName.
 	AccountProvider string
+
+	// GasManagerPolicyID is copied down from the top-level config so the v0.7
+	// send path — which is handed only a SmartWalletConfig — can request
+	// sponsorship without reaching back up. Empty means unsponsored: the
+	// operation is priced by estimation and the account pays its own gas.
+	GasManagerPolicyID string
 }
 
 // Bundler provider identifiers for SmartWalletConfig.BundlerProvider.
@@ -707,6 +713,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 			PaymasterAddress:     common.HexToAddress(configRaw.SmartWallet.PaymasterAddress),
 			WhitelistAddresses:   convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
 			MaxWalletsPerOwner:   configRaw.SmartWallet.MaxWalletsPerOwner,
+			GasManagerPolicyID:   firstNonEmpty(configRaw.GasManagerPolicyID, os.Getenv("ALCHEMY_GAS_POLICY_ID")),
 			// PaymasterOwnerAddress will be populated below by calling owner() on the paymaster contract
 		},
 
@@ -822,6 +829,10 @@ func NewConfig(configFilePath string) (*Config, error) {
 				return nil, fmt.Errorf("parsing chain config for %s (chain_id=%d): %w",
 					chainRaw.Name, chainRaw.ChainID, err)
 			}
+			// Sponsorship is configured once for the gateway, not per chain, but
+			// the v0.7 send path is only ever handed a SmartWalletConfig. Push
+			// the policy down so every chain can reach it.
+			chainCfg.SmartWallet.GasManagerPolicyID = config.GasManagerPolicyID
 			config.Chains = append(config.Chains, chainCfg)
 		}
 
