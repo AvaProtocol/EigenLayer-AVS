@@ -93,7 +93,7 @@ func (s *Server) ExecuteUserOp(ctx context.Context, req *avsproto.ExecuteUserOpR
 		)
 	}
 
-	userOp, receipt, err := preset.SendUserOp(
+	userOp, receipt, err := preset.SendUserOpAuto(
 		s.worker.smartWalletCfg,
 		ownerAddr,
 		req.CallData,
@@ -115,11 +115,7 @@ func (s *Server) ExecuteUserOp(ctx context.Context, req *avsproto.ExecuteUserOpR
 	}
 
 	if userOp != nil {
-		opHash := userOp.GetUserOpHash(
-			s.worker.smartWalletCfg.EntrypointAddress,
-			big.NewInt(s.worker.config.ChainID),
-		)
-		resp.UserOpHash = opHash.Hex()
+		resp.UserOpHash = userOp.UserOpHash.Hex()
 	}
 
 	if receipt != nil {

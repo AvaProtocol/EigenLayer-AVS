@@ -351,7 +351,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	p.vm.mu.Unlock()
 
 	// Send UserOp transaction with overrides
-	userOp, receipt, err := preset.SendUserOp(
+	userOp, receipt, err := preset.SendUserOpAuto(
 		p.smartWalletConfig,
 		*p.taskOwner,
 		smartWalletCallData,
@@ -383,7 +383,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		txHash = receipt.TxHash.Hex()
 	} else if userOp != nil {
 		// Fallback: use a deterministic hash based on UserOp
-		txHash = fmt.Sprintf("0x%064x", userOp.GetUserOpHash(aa.EntrypointAddress, big.NewInt(p.smartWalletConfig.ChainID)))
+		txHash = userOp.UserOpHash.Hex()
 	} else {
 		txHash = fmt.Sprintf("0x%064d", time.Now().UnixNano())
 	}
@@ -405,7 +405,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	// and include the userOpHash so waitForOnChainConfirmationIfNeeded can poll for it.
 	if receipt == nil && userOp != nil {
 		resultObj["receiptStatus"] = "pending"
-		resultObj["userOpHash"] = fmt.Sprintf("0x%064x", userOp.GetUserOpHash(aa.EntrypointAddress, big.NewInt(p.smartWalletConfig.ChainID)))
+		resultObj["userOpHash"] = userOp.UserOpHash.Hex()
 	}
 
 	// Extract gas information from receipt if available

@@ -15,7 +15,7 @@ func TestSetWalletHiddenStatus(t *testing.T) {
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
 	u := testutil.TestUser1()
-	defaultFactory := n.smartWalletConfig.FactoryAddress.Hex()
+	defaultFactory := effectiveFactoryHex(t, n.smartWalletConfig)
 
 	saltValue := "12345"
 	// Ensure wallet exists
@@ -215,7 +215,7 @@ func TestHideDefaultWallet(t *testing.T) {
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
 	u := testutil.TestUser1()
-	defaultFactory := n.smartWalletConfig.FactoryAddress.Hex()
+	defaultFactory := effectiveFactoryHex(t, n.smartWalletConfig)
 	defaultSalt := "0"
 
 	// Ensure default wallet exists and get its address

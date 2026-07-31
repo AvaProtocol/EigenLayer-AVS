@@ -23,7 +23,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -38,7 +37,7 @@ type SendUserOpFunc func(
 	saltOverride *big.Int,
 	executionFeeWei *big.Int,
 	lgr logger.Logger,
-) (*userop.UserOperation, *types.Receipt, error)
+) (*preset.SentUserOp, *types.Receipt, error)
 
 type ContractWriteProcessor struct {
 	*CommonProcessor
@@ -56,7 +55,7 @@ func NewContractWriteProcessor(vm *VM, client ChainStateReader, smartWalletConfi
 		client:            client,
 		smartWalletConfig: smartWalletConfig,
 		owner:             owner,
-		sendUserOpFunc:    preset.SendUserOp, // Default to the real implementation
+		sendUserOpFunc:    preset.SendUserOpAuto, // Default to the real implementation
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
@@ -680,7 +679,7 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 	logLabel string,
 	logTarget string,
 	executionLogBuilder *strings.Builder,
-) (*userop.UserOperation, *types.Receipt, string) {
+) (*preset.SentUserOp, *types.Receipt, string) {
 	// Set up factory address for AA operations
 	if err := aa.SetFactoryAddressForConfig(r.smartWalletConfig); err != nil {
 		return nil, nil, fmt.Sprintf("cannot resolve account factory: %v", err)
@@ -1209,7 +1208,7 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 }
 
 // createRealTransactionResult creates a result from a real UserOp transaction
-func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contractAddress, callData string, parsedABI *abi.ABI, userOp *userop.UserOperation, receipt *types.Receipt) *avsproto.ContractWriteNode_MethodResult {
+func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contractAddress, callData string, parsedABI *abi.ABI, userOp *preset.SentUserOp, receipt *types.Receipt) *avsproto.ContractWriteNode_MethodResult {
 	r.vm.logger.Info("🔍 DEPLOYED WORKFLOW: Creating real transaction result",
 		"method_name", methodName,
 		"contract_address", contractAddress,
@@ -1282,7 +1281,7 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 	} else if userOp != nil {
 		// UserOp submitted but receipt not available yet
 		receiptMap = map[string]interface{}{
-			"userOpHash":      userOp.GetUserOpHash(r.smartWalletConfig.EntrypointAddress, big.NewInt(r.smartWalletConfig.ChainID)).Hex(),
+			"userOpHash":      userOp.UserOpHash.Hex(),
 			"sender":          userOp.Sender.Hex(),
 			"nonce":           fmt.Sprintf("0x%x", userOp.Nonce.Uint64()),
 			"status":          "pending",
@@ -1383,7 +1382,7 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 	if receiptMap != nil {
 		receiptMap["executionStatus"] = executionStatus
 		if _, hasHash := receiptMap["userOpHash"]; !hasHash && userOp != nil && r.smartWalletConfig != nil {
-			receiptMap["userOpHash"] = userOp.GetUserOpHash(r.smartWalletConfig.EntrypointAddress, big.NewInt(r.smartWalletConfig.ChainID)).Hex()
+			receiptMap["userOpHash"] = userOp.UserOpHash.Hex()
 		}
 		if v, err := structpb.NewValue(receiptMap); err == nil {
 			receiptValue = v

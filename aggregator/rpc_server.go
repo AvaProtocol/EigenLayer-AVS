@@ -27,7 +27,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
@@ -383,8 +382,7 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 	if userOp != nil {
 		// Get UserOp hash — sign against the chain we actually targeted
 		// so the hash matches what the bundler/paymaster validated.
-		userOpHash := userOp.GetUserOpHash(swCfg.EntrypointAddress, big.NewInt(swCfg.ChainID))
-		resp.UserOpHash = userOpHash.Hex()
+		resp.UserOpHash = userOp.UserOpHash.Hex()
 	}
 
 	if receipt != nil {
@@ -438,7 +436,7 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 	smartWalletAddress *common.Address,
 	paymasterReq *preset.VerifyingPaymasterRequest,
 	requestedChainID int64,
-) (*userop.UserOperation, *types.Receipt, error) {
+) (*preset.SentUserOp, *types.Receipt, error) {
 	// Gateway mode: route to worker
 	if r.chainRegistry != nil {
 		return r.sendUserOpViaWorker(owner, callData, smartWalletAddress, paymasterReq, requestedChainID)
@@ -447,7 +445,7 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 	// Use global WebSocket client if available, otherwise fall back to creating new connection
 	// Note: salt=nil here because rpc_server callers (e.g. WithdrawFunds) operate on already-deployed wallets
 	if r.smartWalletWsRpc != nil {
-		return preset.SendUserOpWithWsClient(
+		return preset.SendUserOpAutoWithWsClient(
 			r.config.SmartWallet,
 			owner,
 			callData,
@@ -461,7 +459,7 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 	} else {
 		// Fallback to original method (creates new WebSocket connection)
 		r.config.Logger.Warn("Global WebSocket client not available, using fallback method")
-		return preset.SendUserOp(
+		return preset.SendUserOpAuto(
 			r.config.SmartWallet,
 			owner,
 			callData,
@@ -482,7 +480,7 @@ func (r *RpcServer) sendUserOpViaWorker(
 	smartWalletAddress *common.Address,
 	paymasterReq *preset.VerifyingPaymasterRequest,
 	chainID int64,
-) (*userop.UserOperation, *types.Receipt, error) {
+) (*preset.SentUserOp, *types.Receipt, error) {
 	worker, err := r.chainRegistry.GetWorker(chainID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("no worker for chain %d: %w", chainID, err)
@@ -517,7 +515,14 @@ func (r *RpcServer) sendUserOpViaWorker(
 		}
 	}
 
-	return nil, receipt, nil
+	// The worker already reports the hash; discarding the operation here left
+	// resp.UserOpHash empty in gateway mode. Only the hash crosses the RPC
+	// boundary, so the rest of SentUserOp stays zero.
+	sent := &preset.SentUserOp{UserOpHash: common.HexToHash(resp.UserOpHash)}
+	if smartWalletAddress != nil {
+		sent.Sender = *smartWalletAddress
+	}
+	return sent, receipt, nil
 }
 
 // (Aggregator-service gRPC handlers — CreateTask, ListTasks, GetTask,
