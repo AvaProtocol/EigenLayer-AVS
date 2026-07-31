@@ -10,6 +10,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -143,9 +144,16 @@ func (agg *Aggregator) registerGasManagerWebhook(e *echo.Echo) {
 		agg.logger.Warn("gas manager webhook mounted without gas_manager_webhook_secret (env GAS_MANAGER_WEBHOOK_SECRET); endpoint is unauthenticated beyond the policy id check",
 			"path", gasManagerWebhookPath)
 	}
+	// Body cap. This route sits outside /api/v1 and so outside that group's
+	// middleware, which means nothing else bounds request size here. A Gas
+	// Manager payload is one UserOp plus three short fields; 64 KiB is orders
+	// of magnitude of headroom. Deliberately no rate limit: throttling this
+	// route would return 429 to Alchemy, which reads as "deny" and turns a
+	// traffic spike into a sponsorship outage. The policy-id check runs before
+	// any storage access, so an unauthenticated caller cannot reach the scan.
 	e.POST(gasManagerWebhookPath, func(c echo.Context) error {
 		return agg.handleGasManagerWebhook(c, cfg)
-	})
+	}, middleware.BodyLimit("64K"))
 	agg.logger.Info("gas manager webhook mounted", "path", gasManagerWebhookPath)
 }
 
@@ -230,8 +238,18 @@ func (agg *Aggregator) ownerWithinCreditLimit(owner common.Address) (bool, *big.
 		creditLimitWei = converted
 	}
 
+	// An empty chain list would make the loop below a no-op and return
+	// "within limit" for everyone — a fail-OPEN in the one function whose
+	// entire job is to fail closed. It means the aggregator has no chain
+	// context (uninitialised, or mounted before init populated it), which is
+	// never a state in which we can vouch for an owner's balance.
+	chainIDs := agg.knownFeeChainIDs()
+	if len(chainIDs) == 0 {
+		return false, big.NewInt(0), fmt.Errorf("no known chains: cannot evaluate credit limit")
+	}
+
 	worstOutstanding := big.NewInt(0)
-	for _, chainID := range agg.knownFeeChainIDs() {
+	for _, chainID := range chainIDs {
 		within, outstanding, err := ledger.CheckCreditLimit(chainID, owner, creditLimitWei)
 		if err != nil {
 			return false, worstOutstanding, fmt.Errorf("chain %d: %w", chainID, err)

@@ -143,11 +143,21 @@ func (op *UserOperationV07) PackForSignature() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if op.Nonce == nil {
-		return nil, fmt.Errorf("nonce is nil")
-	}
-	if op.PreVerificationGas == nil {
-		return nil, fmt.Errorf("preVerificationGas is nil")
+	// Nonce and preVerificationGas are packed as raw uint256 rather than
+	// through packUint128Pair, so they miss its guards. A negative value would
+	// two's-complement into an enormous uint256 and produce a hash over
+	// arguments nobody intended, rather than failing — the same class of
+	// silently-wrong calldata every other numeric field here rejects.
+	for _, f := range []struct {
+		v    *big.Int
+		name string
+	}{{op.Nonce, "nonce"}, {op.PreVerificationGas, "preVerificationGas"}} {
+		if f.v == nil {
+			return nil, fmt.Errorf("%s is nil", f.name)
+		}
+		if f.v.Sign() < 0 {
+			return nil, fmt.Errorf("%s is negative", f.name)
+		}
 	}
 
 	args := abi.Arguments{

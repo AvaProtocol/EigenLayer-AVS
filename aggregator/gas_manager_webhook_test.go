@@ -3,6 +3,7 @@ package aggregator
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,17 +22,35 @@ const (
 	testSecret   = "s3cr3t-webhook-token"
 )
 
+const testChainID = int64(11155111)
+
+// newWebhookAggregator builds an aggregator with a real chain context.
+//
+// The chain id matters more than it looks: ownerWithinCreditLimit iterates
+// knownFeeChainIDs(), so an aggregator with none would skip the ledger read
+// entirely and every test would pass without ever exercising the credit gate.
 func newWebhookAggregator(t *testing.T) (*Aggregator, func()) {
 	t.Helper()
 	db := testutil.TestMustDB()
 	agg := &Aggregator{
-		logger: testutil.GetLogger(),
-		db:     db,
+		logger:  testutil.GetLogger(),
+		db:      db,
+		chainID: big.NewInt(testChainID),
 		config: &config.Config{
 			FeeRates: &config.FeeRatesConfig{CreditLimitUSD: 0},
 		},
 	}
 	return agg, func() { db.Close() }
+}
+
+// Guards the harness itself. If this regresses to an empty list, every
+// approval assertion below becomes vacuous — the ledger would never be read.
+func TestWebhookHarnessHasChainContext(t *testing.T) {
+	agg, cleanup := newWebhookAggregator(t)
+	defer cleanup()
+	if got := agg.knownFeeChainIDs(); len(got) == 0 {
+		t.Fatal("harness has no known chains — credit-limit assertions would not exercise the ledger")
+	}
 }
 
 // post drives the handler directly so the test covers the decision logic
@@ -123,6 +142,102 @@ func TestGasManagerWebhook_ApprovesKnownWalletWithinLimit(t *testing.T) {
 	}
 	if !approved {
 		t.Error("approved = false, want true for a known wallet with no outstanding fees")
+	}
+}
+
+// The behaviour the whole feature exists for: an owner carrying outstanding
+// value fees above their credit limit must not get sponsored gas. Seeds a real
+// FeeLedger record rather than stubbing, so this exercises the same
+// CheckCreditLimit path production takes.
+func TestGasManagerWebhook_DeniesOwnerOverCreditLimit(t *testing.T) {
+	agg, cleanup := newWebhookAggregator(t)
+	defer cleanup()
+
+	owner := common.HexToAddress("0x72d841f43241957b558097a5110a8ed68c6fd88c")
+	wallet := common.HexToAddress("0x981e18d5aade83620a6bd21990b5da0c797e1e5b")
+	storeWallet(t, agg, testChainID, owner, wallet)
+
+	cfg := gasManagerWebhookConfig{PolicyID: testPolicyID}
+	body := bodyFor(wallet.Hex(), testChainID, testPolicyID, "")
+
+	// Clean ledger → approved. Establishes that the denial below is caused by
+	// the fee, not by some unrelated rejection earlier in the handler.
+	if _, approved := post(t, agg, cfg, body); !approved {
+		t.Fatal("precondition: expected approval with an empty ledger")
+	}
+
+	ledger := taskengine.NewFeeLedger(agg.db, agg.logger)
+	if err := ledger.RecordValueFee(&taskengine.FeeRecord{
+		ExecutionID:    "exec-over-limit",
+		TaskID:         "task-over-limit",
+		Owner:          owner.Hex(),
+		Tier:           "EXECUTION_TIER_1",
+		TierPercentage: "0.03",
+		TxValueWei:     "1000000000000000000",
+		FeeAmountWei:   "300000000000000", // outstanding > 0, limit is 0
+		Timestamp:      1,
+		ChainID:        testChainID,
+	}); err != nil {
+		t.Fatalf("seeding fee record: %v", err)
+	}
+
+	status, approved := post(t, agg, cfg, body)
+	if status != http.StatusOK {
+		t.Errorf("status = %d, want 200", status)
+	}
+	if approved {
+		t.Error("approved = true for an owner over their credit limit — the credit gate is not being enforced")
+	}
+}
+
+// Fees accrue per execution chain, so an owner over their limit on one chain
+// must not be able to draw sponsorship by requesting on another.
+func TestGasManagerWebhook_CreditLimitIsNotBypassableCrossChain(t *testing.T) {
+	agg, cleanup := newWebhookAggregator(t)
+	defer cleanup()
+	otherChain := int64(8453)
+	agg.config.Chains = []*config.ChainConfig{
+		{ChainID: otherChain, SmartWallet: &config.SmartWalletConfig{ChainID: otherChain}},
+	}
+
+	owner := common.HexToAddress("0x72d841f43241957b558097a5110a8ed68c6fd88c")
+	wallet := common.HexToAddress("0x981e18d5aade83620a6bd21990b5da0c797e1e5b")
+	storeWallet(t, agg, testChainID, owner, wallet)
+
+	// Debt sits on the OTHER chain; the request comes in on testChainID.
+	ledger := taskengine.NewFeeLedger(agg.db, agg.logger)
+	if err := ledger.RecordValueFee(&taskengine.FeeRecord{
+		ExecutionID: "exec-other-chain", TaskID: "task-other-chain",
+		Owner: owner.Hex(), Tier: "EXECUTION_TIER_1", TierPercentage: "0.03",
+		TxValueWei: "1000000000000000000", FeeAmountWei: "300000000000000",
+		Timestamp: 1, ChainID: otherChain,
+	}); err != nil {
+		t.Fatalf("seeding fee record: %v", err)
+	}
+
+	cfg := gasManagerWebhookConfig{PolicyID: testPolicyID}
+	_, approved := post(t, agg, cfg, bodyFor(wallet.Hex(), testChainID, testPolicyID, ""))
+	if approved {
+		t.Error("approved = true — debt on another chain was not counted, so the limit is bypassable by switching chains")
+	}
+}
+
+// An aggregator with no chain context cannot vouch for anyone's balance. The
+// loop over known chains would otherwise be a no-op and approve unconditionally.
+func TestGasManagerWebhook_DeniesWithNoChainContext(t *testing.T) {
+	agg, cleanup := newWebhookAggregator(t)
+	defer cleanup()
+	agg.chainID = nil
+	agg.config.Chains = nil
+
+	owner := common.HexToAddress("0x72d841f43241957b558097a5110a8ed68c6fd88c")
+	wallet := common.HexToAddress("0x981e18d5aade83620a6bd21990b5da0c797e1e5b")
+	storeWallet(t, agg, testChainID, owner, wallet)
+
+	cfg := gasManagerWebhookConfig{PolicyID: testPolicyID}
+	_, approved := post(t, agg, cfg, bodyFor(wallet.Hex(), testChainID, testPolicyID, ""))
+	if approved {
+		t.Error("approved = true with no known chains; must fail closed")
 	}
 }
 
