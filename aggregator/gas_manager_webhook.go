@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -58,9 +57,11 @@ type gasManagerWebhookResponse struct {
 	Approved bool `json:"approved"`
 }
 
-// gasManagerWebhookConfig carries the deployment-supplied settings. Sourced
-// from the environment rather than the YAML because both values are secrets
-// that Railway already delivers that way.
+// gasManagerWebhookConfig carries the deployment-supplied settings. Both come
+// from the gateway config (`gas_manager_policy_id`, `gas_manager_webhook_secret`),
+// which resolves them from YAML with an environment fallback — the same path
+// `moralis_api_key` and `alchemy_api_key` take, so a deployment configures
+// them in one place rather than two.
 type gasManagerWebhookConfig struct {
 	// PolicyID is the Gas Manager policy this gateway answers for. A request
 	// quoting any other policy is refused: it means either a misconfigured
@@ -74,10 +75,13 @@ type gasManagerWebhookConfig struct {
 	Secret string
 }
 
-func gasManagerWebhookConfigFromEnv() gasManagerWebhookConfig {
+func (agg *Aggregator) gasManagerWebhookConfig() gasManagerWebhookConfig {
+	if agg.config == nil {
+		return gasManagerWebhookConfig{}
+	}
 	return gasManagerWebhookConfig{
-		PolicyID: strings.TrimSpace(os.Getenv("ALCHEMY_GAS_POLICY_ID")),
-		Secret:   strings.TrimSpace(os.Getenv("GAS_MANAGER_WEBHOOK_SECRET")),
+		PolicyID: strings.TrimSpace(agg.config.GasManagerPolicyID),
+		Secret:   strings.TrimSpace(agg.config.GasManagerWebhookSecret),
 	}
 }
 
@@ -116,17 +120,17 @@ func ownerOfSmartWallet(db storage.Storage, chainID int64, wallet common.Address
 
 // registerGasManagerWebhook mounts the webhook on the unauthenticated router.
 func (agg *Aggregator) registerGasManagerWebhook(e *echo.Echo) {
-	cfg := gasManagerWebhookConfigFromEnv()
+	cfg := agg.gasManagerWebhookConfig()
 	if cfg.PolicyID == "" {
 		// Without a policy id every request would be refused, which is worse
 		// than not serving the route: an operator who set the URL in the
 		// dashboard would see all sponsorship denied with no clue why.
-		agg.logger.Warn("gas manager webhook not mounted: ALCHEMY_GAS_POLICY_ID is unset",
+		agg.logger.Warn("gas manager webhook not mounted: gas_manager_policy_id is unset (env ALCHEMY_GAS_POLICY_ID)",
 			"path", gasManagerWebhookPath)
 		return
 	}
 	if cfg.Secret == "" {
-		agg.logger.Warn("gas manager webhook mounted without GAS_MANAGER_WEBHOOK_SECRET; endpoint is unauthenticated beyond the policy id check",
+		agg.logger.Warn("gas manager webhook mounted without gas_manager_webhook_secret (env GAS_MANAGER_WEBHOOK_SECRET); endpoint is unauthenticated beyond the policy id check",
 			"path", gasManagerWebhookPath)
 	}
 	e.POST(gasManagerWebhookPath, func(c echo.Context) error {
