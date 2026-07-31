@@ -2,6 +2,7 @@ package aggregator
 
 import (
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -110,13 +111,22 @@ func ownerOfSmartWallet(db storage.Storage, chainID int64, wallet common.Address
 		}
 		owner = common.HexToAddress(parts[2])
 		found = true
-		return nil
+		// Stop at the first match. A non-nil error is the iterator's only
+		// break signal, so this sentinel is swallowed below. Without it the
+		// scan walks the chain's entire key space on every sponsorship
+		// request, and any duplicate key would silently decide the owner by
+		// iteration order.
+		return errStopIterating
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, errStopIterating) {
 		return common.Address{}, false, err
 	}
 	return owner, found, nil
 }
+
+// errStopIterating breaks out of IterateKeysOnly early. It never escapes
+// ownerOfSmartWallet.
+var errStopIterating = errors.New("stop iterating")
 
 // registerGasManagerWebhook mounts the webhook on the unauthenticated router.
 func (agg *Aggregator) registerGasManagerWebhook(e *echo.Echo) {
