@@ -132,6 +132,13 @@ type Config struct {
 	// Moralis Web3 Data API key for token price lookup (optional)
 	MoralisApiKey string `yaml:"moralis_api_key"`
 
+	// AlchemyAPISecret is an Alchemy ACCESS KEY (alcht_...), distinct from
+	// alchemy_api_key: the app key authorises RPC and bundler traffic, while
+	// this authorises the account-level admin APIs at manage.g.alchemy.com —
+	// notably the Gas Manager policy and spend endpoints. Scope it Gas Manager
+	// READ; a read/write key can delete the policy that funds sponsorship.
+	AlchemyAPISecret string `yaml:"alchemy_api_secret"`
+
 	// GasManagerPolicyID is the Alchemy Gas Manager policy this gateway
 	// answers sponsorship questions for. The Gas Manager "custom rules"
 	// webhook is only mounted when this is set — a mounted route that
@@ -228,6 +235,12 @@ type SmartWalletConfig struct {
 	// Maximum number of smart wallets allowed per EOA owner
 	// Unlimited is NOT supported. If zero or negative, the default limit is applied.
 	MaxWalletsPerOwner int
+
+	// AccountProvider selects which smart-account implementation this chain
+	// derives and deploys: the v0.6 SimpleAccount fork, or Alchemy Modular
+	// Account v2. See AccountProviderName for why this defaults to the OLD
+	// value, unlike BundlerProvider.
+	AccountProvider string
 }
 
 // Bundler provider identifiers for SmartWalletConfig.BundlerProvider.
@@ -235,6 +248,52 @@ const (
 	BundlerProviderAlchemy    = "alchemy"
 	BundlerProviderSelfHosted = "self_hosted"
 )
+
+// Account provider identifiers for SmartWalletConfig.AccountProvider.
+const (
+	AccountProviderSimpleAccount    = "simple_account"
+	AccountProviderModularAccountV2 = "modular_account_v2"
+)
+
+// AccountProviderName returns the effective smart-account implementation,
+// defaulting to simple_account when unset.
+//
+// This defaults to the OLD value, which is the opposite of BundlerProvider —
+// and the difference is deliberate. Switching bundlers is invisible to users:
+// the same account sends the same operations through a different relay.
+// Switching account providers changes the DERIVED ADDRESS for every
+// (owner, salt), so defaulting to modular_account_v2 would silently move every
+// user's wallet the moment a gateway rolled out, orphaning their funds and
+// every task whose runner references the old address.
+//
+// The switch is therefore opt-in per chain, so a rollout is a config change
+// that can be made one chain at a time and reverted, rather than a deploy.
+func (c *SmartWalletConfig) AccountProviderName() string {
+	p := strings.ToLower(strings.TrimSpace(c.AccountProvider))
+	if p == "" {
+		return AccountProviderSimpleAccount
+	}
+	return p
+}
+
+// UsesModularAccountV2 reports whether this chain derives MA v2 accounts.
+func (c *SmartWalletConfig) UsesModularAccountV2() bool {
+	return c.AccountProviderName() == AccountProviderModularAccountV2
+}
+
+// ValidateAccountProvider rejects an unrecognised value rather than silently
+// falling back. A typo would otherwise derive v0.6 addresses on a chain the
+// operator believed was on MA v2 — and the mistake is only visible as users
+// receiving unexpected addresses.
+func (c *SmartWalletConfig) ValidateAccountProvider() error {
+	switch c.AccountProviderName() {
+	case AccountProviderSimpleAccount, AccountProviderModularAccountV2:
+		return nil
+	default:
+		return fmt.Errorf("unknown account_provider %q (chain_id=%d); expected %q or %q",
+			c.AccountProvider, c.ChainID, AccountProviderSimpleAccount, AccountProviderModularAccountV2)
+	}
+}
 
 // alchemyNetworkSubdomain maps a chain ID to its Alchemy JSON-RPC/bundler
 // network subdomain (https://<subdomain>.g.alchemy.com/v2/<key>). Extend this
@@ -305,6 +364,7 @@ type SmartWalletConfigRaw struct {
 	EthWsUrl             string   `yaml:"eth_ws_url"`
 	BundlerURL           string   `yaml:"bundler_url"`
 	BundlerProvider      string   `yaml:"bundler_provider"`
+	AccountProvider      string   `yaml:"account_provider"`
 	AlchemyAPIKey        string   `yaml:"alchemy_api_key"`
 	FactoryAddress       string   `yaml:"factory_address"`
 	EntrypointAddress    string   `yaml:"entrypoint_address"`
@@ -389,7 +449,8 @@ type ConfigRaw struct {
 	// Moralis Web3 Data API key for token price lookup (optional)
 	MoralisApiKey string `yaml:"moralis_api_key"`
 
-	// Alchemy Gas Manager sponsorship webhook (optional; see Config)
+	// Alchemy Gas Manager sponsorship webhook + admin API (optional; see Config)
+	AlchemyAPISecret        string `yaml:"alchemy_api_secret"`
 	GasManagerPolicyID      string `yaml:"gas_manager_policy_id"`
 	GasManagerWebhookSecret string `yaml:"gas_manager_webhook_secret"`
 
@@ -639,6 +700,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 			EthWsUrl:             configRaw.SmartWallet.EthWsUrl,
 			BundlerURL:           configRaw.SmartWallet.BundlerURL,
 			BundlerProvider:      configRaw.SmartWallet.BundlerProvider,
+			AccountProvider:      configRaw.SmartWallet.AccountProvider,
 			AlchemyAPIKey:        configRaw.SmartWallet.AlchemyAPIKey,
 			FactoryAddress:       common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.FactoryAddress, DefaultFactoryProxyAddressHex)),
 			EntrypointAddress:    common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.EntrypointAddress, DefaultEntrypointAddressHex)),
@@ -664,7 +726,8 @@ func NewConfig(configFilePath string) (*Config, error) {
 		// Pass through Moralis API key (from YAML or environment variable)
 		MoralisApiKey: firstNonEmpty(configRaw.MoralisApiKey, os.Getenv("MORALIS_API_KEY")),
 
-		// Gas Manager sponsorship webhook (from YAML or environment variable)
+		// Gas Manager sponsorship webhook + admin API (from YAML or environment)
+		AlchemyAPISecret:        firstNonEmpty(configRaw.AlchemyAPISecret, os.Getenv("ALCHEMY_API_SECRET")),
 		GasManagerPolicyID:      firstNonEmpty(configRaw.GasManagerPolicyID, os.Getenv("ALCHEMY_GAS_POLICY_ID")),
 		GasManagerWebhookSecret: firstNonEmpty(configRaw.GasManagerWebhookSecret, os.Getenv("GAS_MANAGER_WEBHOOK_SECRET")),
 
@@ -703,6 +766,13 @@ func NewConfig(configFilePath string) (*Config, error) {
 	// "no contract code at given address" (Sentry EIGENLAYER-AVS-1N/1M, user-reported
 	// failure 2026-05-30 01:55 UTC on Sepolia). Fail-fast surfaces the same problem
 	// at startup where it's diagnosable, not hours later on a real workflow.
+	// Same fail-at-boot rule for the top-level smart_wallet as for each chain.
+	if config.SmartWallet != nil {
+		if err := config.SmartWallet.ValidateAccountProvider(); err != nil {
+			return nil, fmt.Errorf("top-level smart_wallet: %w", err)
+		}
+	}
+
 	if config.SmartWallet != nil && config.SmartWallet.PaymasterAddress != (common.Address{}) {
 		paymasterOwner, err := fetchPaymasterOwner(smartWalletRpcClient, config.SmartWallet.PaymasterAddress)
 		if err != nil {
@@ -1036,6 +1106,7 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 			EthWsUrl:             wsURL,
 			BundlerURL:           sw.BundlerURL,
 			BundlerProvider:      sw.BundlerProvider,
+			AccountProvider:      sw.AccountProvider,
 			AlchemyAPIKey:        sw.AlchemyAPIKey,
 			FactoryAddress:       common.HexToAddress(firstNonEmpty(sw.FactoryAddress, DefaultFactoryProxyAddressHex)),
 			EntrypointAddress:    common.HexToAddress(firstNonEmpty(sw.EntrypointAddress, DefaultEntrypointAddressHex)),
@@ -1046,6 +1117,14 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 			WhitelistAddresses:   convertToAddressSlice(sw.WhitelistAddresses),
 			MaxWalletsPerOwner:   maxWallets,
 		},
+	}
+
+	// Reject an unrecognised account_provider at boot rather than at the first
+	// derivation. A typo silently reads as simple_account, so a chain the
+	// operator believed was on MA v2 would quietly hand users v0.6 addresses —
+	// visible only much later, and not obviously as a config error.
+	if err := chainCfg.SmartWallet.ValidateAccountProvider(); err != nil {
+		return nil, fmt.Errorf("chain %s (chain_id=%d): %w", raw.Name, raw.ChainID, err)
 	}
 
 	// Probe paymaster on this chain's RPC. Catches mismatched

@@ -60,6 +60,14 @@ tenderly_access_key: ""
 #     gas; which also means
 #   - configuring the webhook URL in Alchemy BEFORE this gateway is deployed
 #     and configured will refuse every sponsorship on that policy.
+# An Alchemy ACCESS KEY (alcht_...), NOT the app api key above. The app key
+# authorises RPC/bundler traffic; this authorises the account-level admin APIs
+# at manage.g.alchemy.com — Gas Manager policy config and spend stats.
+# Create it at dashboard.alchemy.com -> Security -> Create Access Key (team
+# level, not inside an app; needs billing/team admin). Scope it Gas Manager
+# READ ONLY: a read/write key can delete the policy that funds sponsorship.
+alchemy_api_secret: ""
+
 gas_manager_policy_id: ""
 # Echoed back as the request's webhookData. The webhook cannot sit behind the
 # REST JWT (Alchemy has no token), so this is its only caller authentication.
@@ -80,6 +88,15 @@ smart_wallet:
   # time. 'self_hosted' remains for a locally-run Voltaire; the shared Voltaire
   # bundlers this example used to assume were retired 2026-07.
   bundler_provider:       alchemy
+  # account_provider selects the smart-account implementation. Unlike
+  # bundler_provider, this defaults to the OLD value (simple_account) and is
+  # opt-in per chain — switching it changes the DERIVED ADDRESS for every
+  # (owner, salt), so flipping it on a chain with existing users moves their
+  # wallets and orphans any task whose runner references the old address.
+  # Roll it out one chain at a time, and re-onboard wallets on that chain.
+  #   simple_account      v0.6 SimpleAccount via smart_wallet.factory_address
+  #   modular_account_v2  Alchemy MA v2 via the canonical AccountFactory
+  account_provider:       simple_account
   alchemy_api_key:        ${ALCHEMY_API_KEY}
   controller_private_key: <testnet-controller-private-key-hex>
   paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
