@@ -45,6 +45,17 @@ sed -i "s|eth_rpc_url:.*|eth_rpc_url: ${CHAIN_RPC}|g" config/test.yaml
 sed -i "s|eth_ws_url:.*|eth_ws_url: ${CHAIN_WS}|g" config/test.yaml
 sed -i "s|ecdsa_private_key:.*|ecdsa_private_key: ${CONTROLLER_PRIVATE_KEY}|g" config/test.yaml
 sed -i "s|bundler_url:.*|bundler_url: ${BUNDLER_RPC}|g" config/test.yaml
+# CI supplies its own bundler via the BUNDLER_RPC secret, so it must declare
+# self_hosted regardless of what the template ships with. The template tracks
+# production, which runs bundler_provider: alchemy — and on that path the
+# endpoint is derived from alchemy_api_key and bundler_url is never read, so
+# inheriting `alchemy` here fails closed at send time with
+# "bundler_provider=alchemy but alchemy_api_key is empty".
+#
+# The cost is that CI does not exercise the provider production actually uses.
+# Closing that gap means adding an ALCHEMY_API_KEY secret and substituting it
+# below instead of forcing self_hosted.
+sed -i "s|bundler_provider:.*|bundler_provider: self_hosted|g" config/test.yaml
 sed -i "s|controller_private_key:.*|controller_private_key: ${CONTROLLER_PRIVATE_KEY}|g" config/test.yaml
 sed -i "s|paymaster_address:.*|paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92|g" config/test.yaml
 sed -i "s|tenderly_account:.*|tenderly_account: ${TENDERLY_ACCOUNT}|g" config/test.yaml

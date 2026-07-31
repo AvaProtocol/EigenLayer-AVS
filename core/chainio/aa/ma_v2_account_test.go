@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 // Selector for createSemiModularAccount(address,uint256), read off the
@@ -120,7 +121,12 @@ func TestGetSenderAddressMAv2Guards(t *testing.T) {
 		}
 	})
 	t.Run("nil salt", func(t *testing.T) {
-		if _, err := GetSenderAddressMAv2(nil, owner, nil); err == nil {
+		// Must pass a non-nil client: the nil-client guard runs first, so
+		// GetSenderAddressMAv2(nil, owner, nil) would return on that check and
+		// never reach the salt validation this subtest exists to cover. The
+		// zero-value client is never dialled, because the salt check returns
+		// before any RPC happens.
+		if _, err := GetSenderAddressMAv2(&ethclient.Client{}, owner, nil); err == nil {
 			t.Error("expected an error for nil salt")
 		}
 	})
