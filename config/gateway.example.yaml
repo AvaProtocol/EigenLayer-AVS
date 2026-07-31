@@ -47,6 +47,25 @@ tenderly_account: ""
 tenderly_project: ""
 tenderly_access_key: ""
 
+# Optional: Alchemy Gas Manager sponsorship webhook.
+#
+# gas_manager_policy_id is the policy this gateway answers sponsorship
+# questions for. The webhook at POST /webhooks/gas-manager is mounted ONLY
+# when this is set — leaving it empty is the normal local-dev state, and the
+# route then 404s rather than silently refusing every sponsorship.
+#
+# Two things to know before pointing a real Gas Manager policy at a gateway:
+#   - the policy's "Sponsor on error or timeout" must stay OFF, so an
+#     unreachable gateway denies sponsorship instead of handing out unlimited
+#     gas; which also means
+#   - configuring the webhook URL in Alchemy BEFORE this gateway is deployed
+#     and configured will refuse every sponsorship on that policy.
+gas_manager_policy_id: ""
+# Echoed back as the request's webhookData. The webhook cannot sit behind the
+# REST JWT (Alchemy has no token), so this is its only caller authentication.
+# Empty disables the check.
+gas_manager_webhook_secret: ""
+
 # Top-level smart_wallet — required by the aa package globals (factory +
 # entrypoint), the startup paymaster probe, and any cmd tool that takes
 # the aggregator's default chain context. Points at Sepolia to match the

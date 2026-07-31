@@ -132,6 +132,20 @@ type Config struct {
 	// Moralis Web3 Data API key for token price lookup (optional)
 	MoralisApiKey string `yaml:"moralis_api_key"`
 
+	// GasManagerPolicyID is the Alchemy Gas Manager policy this gateway
+	// answers sponsorship questions for. The Gas Manager "custom rules"
+	// webhook is only mounted when this is set — a mounted route that
+	// refuses everything is indistinguishable from a broken chain in the
+	// dashboard, whereas an unmounted route 404s loudly.
+	GasManagerPolicyID string `yaml:"gas_manager_policy_id"`
+
+	// GasManagerWebhookSecret, when set, must be echoed as the webhook
+	// request's webhookData. The webhook cannot sit behind the REST JWT
+	// (Alchemy has no token), so this is its only caller authentication.
+	// Optional so the endpoint can be brought up before the sponsorship
+	// caller is taught to send it.
+	GasManagerWebhookSecret string `yaml:"gas_manager_webhook_secret"`
+
 	// Fee rates configuration for task execution pricing
 	FeeRates *FeeRatesConfig
 
@@ -374,6 +388,10 @@ type ConfigRaw struct {
 
 	// Moralis Web3 Data API key for token price lookup (optional)
 	MoralisApiKey string `yaml:"moralis_api_key"`
+
+	// Alchemy Gas Manager sponsorship webhook (optional; see Config)
+	GasManagerPolicyID      string `yaml:"gas_manager_policy_id"`
+	GasManagerWebhookSecret string `yaml:"gas_manager_webhook_secret"`
 
 	// Fee structure: execution_fee + COGS + value tiers
 	// Pointer fields: nil = use default, explicit 0.0 = free tier
@@ -645,6 +663,10 @@ func NewConfig(configFilePath string) (*Config, error) {
 
 		// Pass through Moralis API key (from YAML or environment variable)
 		MoralisApiKey: firstNonEmpty(configRaw.MoralisApiKey, os.Getenv("MORALIS_API_KEY")),
+
+		// Gas Manager sponsorship webhook (from YAML or environment variable)
+		GasManagerPolicyID:      firstNonEmpty(configRaw.GasManagerPolicyID, os.Getenv("ALCHEMY_GAS_POLICY_ID")),
+		GasManagerWebhookSecret: firstNonEmpty(configRaw.GasManagerWebhookSecret, os.Getenv("GAS_MANAGER_WEBHOOK_SECRET")),
 
 		// Initialize fee rates - use defaults if no YAML config provided
 		FeeRates: loadFeeRatesFromConfig(configRaw.FeeRates),

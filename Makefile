@@ -278,11 +278,22 @@ operator-default: build
 ## to the caller's terminal/pane; callers that want files redirect (dev-stack →
 ## logs/, start.sh → tee). Each sources .env.local so the
 ## ${SEPOLIA_BUNDLER_URL} / ${BASE_SEPOLIA_BUNDLER_URL} refs in the YAML resolve.
-.PHONY: run-gateway run-worker-sepolia run-worker-base-sepolia run-operator-sepolia
+.PHONY: run-gateway run-worker-sepolia run-worker-ethereum run-worker-base run-worker-base-sepolia run-operator-sepolia
 run-gateway:
 	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap aggregator --config=config/gateway.yaml
 run-worker-sepolia:
 	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap worker --config=config/worker-sepolia.yaml
+# MAINNET workers — move REAL funds, pay REAL gas (no paymaster). Need these in
+# .env.local: ETHEREUM_RPC_URL/WS, BASE_RPC_URL/WS, MAINNET_CONTROLLER_PRIVATE_KEY.
+# No *_BUNDLER_URL: every chain runs bundler_provider: alchemy, which derives the
+# endpoint from ALCHEMY_API_KEY and never reads bundler_url — the self-hosted
+# Voltaire tunnels these used to need are retired. start.sh skips these two panes
+# when the mainnet vars are absent, so a Sepolia-only stack still boots.
+run-worker-ethereum:
+	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap worker --config=config/worker-ethereum.yaml
+run-worker-base:
+	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap worker --config=config/worker-base.yaml
+# Retired from the default local stack (see studio scripts/start.sh); kept runnable.
 run-worker-base-sepolia:
 	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap worker --config=config/worker-base-sepolia.yaml
 run-operator-sepolia:
