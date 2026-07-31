@@ -89,3 +89,7 @@ tmp/rehearsal-gateway-backup/
 
 # Local Claude Code agent state (session locks, project-local skills, etc.)
 .claude/
+
+# spike harness build outputs
+/deferred_action
+/permission_hooks
