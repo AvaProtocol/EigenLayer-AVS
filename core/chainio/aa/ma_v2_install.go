@@ -32,9 +32,19 @@ func SingleSignerValidationModuleAddress() common.Address {
 	return common.HexToAddress(SingleSignerValidationModuleAddressHex)
 }
 
-// ControllerEntityID is where the controller is installed. Entity 0 is the
-// account's fallback signer (the owner) and cannot be reused.
-const ControllerEntityID uint32 = 1
+// MinSessionEntityID is the lowest entity a session signer may occupy. Entity
+// 0 is the account's fallback signer (the owner) and can never be reused.
+//
+// Entities are allocated PER GRANT, not per gateway — one SessionPolicy, one
+// entity, one signer (avs-infra Smart_Wallet_MA_v2_Spend_Policy.md §6.7). That
+// is not only a product choice. The deferred-action digest commits to the full
+// nonce of the operation that will carry it, and the nonce key is derived from
+// the entity id, so a fresh entity means a fresh key whose sequence is
+// predictably zero — which is the entire reason the owner can sign the grant
+// before the operation exists. Reusing one entity across grants makes the
+// second grant's nonce unpredictable at signing time and the property
+// collapses.
+const MinSessionEntityID uint32 = 1
 
 // ValidationConfig flag bits (aa-sdk serializeValidationConfig order).
 const (
@@ -118,23 +128,77 @@ func PackInstallValidation(config [25]byte, selectors [][4]byte, installData []b
 	return installValidationABI.Pack("installValidation", config, selectors, installData, hooks)
 }
 
-// PackControllerInstall is the exact grant this system asks an owner to
-// authorize: SingleSignerValidationModule at entity 1 naming the controller,
-// global + userOp validation and deliberately NOT signature validation, no
-// selector scoping, no hooks (permission hooks ride here later — master doc
-// §5 step 2).
-func PackControllerInstall(controller common.Address) ([]byte, error) {
-	if controller == (common.Address{}) {
-		return nil, fmt.Errorf("controller address is zero")
+// SessionGrant is one grant of authority on one account: which entity, which
+// signer occupies it, and what that signer is allowed to do.
+//
+// This is the thing an owner authorizes, so every field is committed to by the
+// deferred-action digest. The gateway cannot widen a grant after signing —
+// changing any field here changes the digest and invalidates the signature.
+type SessionGrant struct {
+	// EntityID must be unique per account and >= MinSessionEntityID. It is
+	// allocated by the gateway when a SessionPolicy is created.
+	EntityID uint32
+
+	// Signer is the session key that will sign operations for this grant.
+	Signer common.Address
+
+	// Selectors scopes the grant to specific function selectors. Empty means
+	// global — any selector the account exposes. Note these are alternatives,
+	// not additive: an enumerated set clears the global flag, because a
+	// validation that is global does not consult the selector list at all.
+	Selectors [][4]byte
+
+	// Hooks are the encoded permission hooks (allowlist, spend cap, time
+	// range) installed alongside the validation, each as
+	// hookConfig ++ initData. They ride the SAME installValidation call, so
+	// they are covered by the owner's signature rather than needing one of
+	// their own.
+	Hooks [][]byte
+
+	// AllowSignatureValidation lets this entity answer isValidSignature AS the
+	// account. Default false, and it should stay false for gateway-held
+	// signers: the controller executes, it does not speak as the user. Set it
+	// only for a grant that genuinely represents the owner.
+	AllowSignatureValidation bool
+}
+
+// Validate reports why a grant cannot be installed, if it cannot.
+func (g SessionGrant) Validate() error {
+	if g.EntityID < MinSessionEntityID {
+		return fmt.Errorf("entity id %d is reserved (entity 0 is the owner's fallback signer)", g.EntityID)
 	}
-	installData, err := PackSingleSignerInstallData(ControllerEntityID, controller)
+	if g.Signer == (common.Address{}) {
+		return fmt.Errorf("session signer is the zero address")
+	}
+	return nil
+}
+
+// Flags renders the grant's ValidationConfig flag byte.
+func (g SessionGrant) Flags() byte {
+	flags := ValidationFlagUserOp
+	if len(g.Selectors) == 0 {
+		flags |= ValidationFlagGlobal
+	}
+	if g.AllowSignatureValidation {
+		flags |= ValidationFlagSignature
+	}
+	return flags
+}
+
+// PackSessionSignerInstall encodes the installValidation self-call that grants
+// this session signer its authority — the exact calldata an owner authorizes.
+func PackSessionSignerInstall(grant SessionGrant) ([]byte, error) {
+	if err := grant.Validate(); err != nil {
+		return nil, err
+	}
+	installData, err := PackSingleSignerInstallData(grant.EntityID, grant.Signer)
 	if err != nil {
 		return nil, fmt.Errorf("packing SingleSignerValidationModule install data: %w", err)
 	}
 	config := PackValidationConfig(
 		SingleSignerValidationModuleAddress(),
-		ControllerEntityID,
-		ValidationFlagGlobal|ValidationFlagUserOp,
+		grant.EntityID,
+		grant.Flags(),
 	)
-	return PackInstallValidation(config, nil, installData, nil)
+	return PackInstallValidation(config, grant.Selectors, installData, grant.Hooks)
 }

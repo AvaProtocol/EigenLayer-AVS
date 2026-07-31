@@ -52,6 +52,10 @@ const defaultRPC = "https://ethereum-sepolia-rpc.publicnode.com"
 // the unspent remainder stays in the account.
 var prefundWei = big.NewInt(2_000_000_000_000_000) // 0.002 ETH
 
+// spikeEntityID is the entity this harness grants. Real grants allocate one
+// per SessionPolicy; the spike only ever creates one.
+const spikeEntityID = aa.MinSessionEntityID
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "spike failed: %v\n", err)
@@ -164,18 +168,21 @@ func run() error {
 		return proveInstallPersists(ctx, chain, chainRPC, bundler, entryPoint, chainID,
 			account, ownerAddr, controllerKey)
 	}
-	installCall, err := aa.PackControllerInstall(controllerAddr)
+	installCall, err := aa.PackSessionSignerInstall(aa.SessionGrant{
+		EntityID: spikeEntityID,
+		Signer:   controllerAddr,
+	})
 	if err != nil {
 		return err
 	}
 	opts := uint8(userop.ValidationOptionGlobal | userop.ValidationOptionDeferredAction)
-	nonce, err := userop.EncodeNonceMAv2(aa.ControllerEntityID, opts, 0)
+	nonce, err := userop.EncodeNonceMAv2(spikeEntityID, opts, 0)
 	if err != nil {
 		return err
 	}
 	// Cross-check the assumption rather than trusting it: the on-chain
 	// sequence for this key must still be zero.
-	liveNonce, err := preset.NextNonceV07(ctx, chainRPC, entryPoint, account, aa.ControllerEntityID, opts)
+	liveNonce, err := preset.NextNonceV07(ctx, chainRPC, entryPoint, account, spikeEntityID, opts)
 	if err != nil {
 		return err
 	}
@@ -261,7 +268,7 @@ func proveInstallPersists(ctx context.Context, chain *ethclient.Client, chainRPC
 	if err != nil {
 		return err
 	}
-	nonceB, err := preset.NextNonceV07(ctx, chainRPC, entryPoint, account, aa.ControllerEntityID,
+	nonceB, err := preset.NextNonceV07(ctx, chainRPC, entryPoint, account, spikeEntityID,
 		userop.ValidationOptionGlobal)
 	if err != nil {
 		return err
