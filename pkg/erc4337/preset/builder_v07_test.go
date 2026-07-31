@@ -1,6 +1,7 @@
 package preset
 
 import (
+	"bytes"
 	"math/big"
 	"testing"
 
@@ -241,5 +242,16 @@ func TestSendRejectsUnsignedOperation(t *testing.T) {
 	op.Signature = nil
 	if _, err := SendUserOpV07(nil, nil, op, EntryPointV07()); err == nil {
 		t.Error("expected an error sending an unsigned operation")
+	}
+}
+
+// Every other magic constant in this package cites how it was obtained; this
+// one is only exercised against a live bundler, so a wrong value would surface
+// as an AA25 nonce mismatch rather than a bad call, and never in CI.
+func TestGetNonceSelector(t *testing.T) {
+	want := crypto.Keccak256([]byte("getNonce(address,uint192)"))[:4]
+	got := common.FromHex(selectorGetNonce)
+	if !bytes.Equal(got, want) {
+		t.Errorf("selectorGetNonce = %x, want %x for getNonce(address,uint192)", got, want)
 	}
 }

@@ -23,6 +23,16 @@ const EntryPointV07Address = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
 // EntryPointV07 returns the v0.7 EntryPoint address.
 func EntryPointV07() common.Address { return common.HexToAddress(EntryPointV07Address) }
 
+// selectorGetNonce is EntryPoint.getNonce(address,uint192) -> uint256.
+//
+//	cast sig "getNonce(address,uint192)"  =>  0x35567e1a
+//
+// Asserted in the tests rather than trusted: NextNonceV07 is only exercised
+// against a live bundler, so a wrong selector here would return garbage that
+// reads as an AA25 nonce mismatch rather than as a bad call — and would never
+// surface in CI.
+const selectorGetNonce = "0x35567e1a"
+
 // Rundler does NOT compute verificationGasLimit. Measured against Alchemy's
 // Sepolia bundler, eth_estimateUserOperationGas echoes whatever the caller
 // sent:
@@ -237,11 +247,10 @@ func NextNonceV07(ctx context.Context, client *rpc.Client, entryPoint, sender co
 	if err != nil {
 		return nil, err
 	}
-	// getNonce(address,uint192) -> uint256
 	var padded [64]byte
 	copy(padded[12:32], sender.Bytes())
 	key.FillBytes(padded[32+8 : 64]) // uint192 occupies the low 24 bytes
-	data := append(common.FromHex("0x35567e1a"), padded[:]...)
+	data := append(common.FromHex(selectorGetNonce), padded[:]...)
 
 	var out string
 	if err := client.CallContext(ctx, &out, "eth_call", map[string]interface{}{
