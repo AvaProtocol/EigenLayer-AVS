@@ -38,13 +38,20 @@ func SendUserOpMAv2(
 	callData []byte,
 	senderOverride *common.Address,
 	saltOverride *big.Int,
+	auth *SessionAuthorization,
 	lgr logger.Logger,
 ) (*userop.UserOperationV07, *types.Receipt, error) {
 	l := logger.EnsureLogger(lgr)
 	if smartWalletConfig == nil {
 		return nil, nil, fmt.Errorf("nil smart wallet config")
 	}
-	if smartWalletConfig.ControllerPrivateKey == nil {
+	if err := auth.Validate(); err != nil {
+		return nil, nil, err
+	}
+	// Without a session authorization the operation runs as the account's
+	// fallback signer, which only the OWNER's key can do. The gateway does not
+	// hold it, so this path exists for callers that supply their own signer.
+	if auth == nil && smartWalletConfig.ControllerPrivateKey == nil {
 		return nil, nil, fmt.Errorf("no controller private key configured")
 	}
 
@@ -84,6 +91,17 @@ func SendUserOpMAv2(
 		return nil, nil, err
 	}
 
+	// A grant carrying execution hooks requires user-op context on EVERY
+	// operation under it — including the one that installs the grant, since
+	// the hooks are live from the moment the install applies mid-validation.
+	if auth != nil && auth.WrapExecuteUserOp {
+		wrapped, wrapErr := aa.WrapExecuteUserOp(callData)
+		if wrapErr != nil {
+			return nil, nil, fmt.Errorf("wrapping calldata for user-op context: %w", wrapErr)
+		}
+		callData = wrapped
+	}
+
 	op := &userop.UserOperationV07{
 		Sender:               sender,
 		CallData:             callData,
@@ -108,13 +126,13 @@ func SendUserOpMAv2(
 		op.Factory = &deployFactory
 		op.FactoryData = factoryData
 	}
-	op.VerificationGasLimit = seedVerificationGas(op)
+	op.VerificationGasLimit = seedVerificationGasFor(op, auth)
 
 	// MA v2 selects its validation function from the NONCE, not the signature.
 	// A zero nonce reverts with ValidationFunctionMissing rather than as a
 	// nonce error, which is the single most misleading failure on this path.
-	nonce, err := NextNonceV07(ctx, bundlerRPC, entryPoint, sender,
-		userop.FallbackSignerEntityID, userop.ValidationOptionGlobal)
+	nonceEntity, nonceOptions := auth.nonceEntity()
+	nonce, err := NextNonceV07(ctx, bundlerRPC, entryPoint, sender, nonceEntity, nonceOptions)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading nonce: %w", err)
 	}
@@ -128,18 +146,27 @@ func SendUserOpMAv2(
 	// to come after pricing. SendUserOpV07WithRetry only RE-signs, and only
 	// when it tightens the verification gas limit — it will not sign an
 	// unsigned operation, it rejects one.
-	if err := SignUserOpV07(op, entryPoint, chainID, smartWalletConfig.ControllerPrivateKey); err != nil {
+	signingKey := smartWalletConfig.ControllerPrivateKey
+	if auth != nil {
+		signingKey = auth.SignerKey
+	}
+	if auth.Deferred() {
+		if err := SignUserOpV07Deferred(op, entryPoint, chainID, signingKey,
+			auth.DeferredData, auth.OwnerSignature); err != nil {
+			return op, nil, fmt.Errorf("signing user operation with deferred action: %w", err)
+		}
+	} else if err := SignUserOpV07(op, entryPoint, chainID, signingKey); err != nil {
 		return op, nil, fmt.Errorf("signing user operation: %w", err)
 	}
 
-	opHash, err := SendUserOpV07WithRetry(ctx, bundlerRPC, op, entryPoint, chainID,
-		smartWalletConfig.ControllerPrivateKey)
+	opHash, err := SendUserOpV07WithRetry(ctx, bundlerRPC, op, entryPoint, chainID, signingKey)
 	if err != nil {
 		return op, nil, fmt.Errorf("sending user operation: %w", err)
 	}
 	l.Info("v0.7 user operation sent",
 		"sender", sender.Hex(), "userop_hash", opHash.Hex(),
-		"sponsored", op.Paymaster != nil, "deploying", op.Factory != nil)
+		"sponsored", op.Paymaster != nil, "deploying", op.Factory != nil,
+		"entity", nonceEntity, "installs_grant", auth.Deferred())
 
 	// Reuses the v0.6 confirmation watcher: UserOperationEvent is unchanged
 	// between EntryPoint versions, so only the EntryPoint address differs.

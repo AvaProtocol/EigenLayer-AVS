@@ -72,7 +72,18 @@ func SendUserOpAuto(
 	}
 
 	if smartWalletConfig.UsesModularAccountV2() {
-		op, receipt, err := SendUserOpMAv2(smartWalletConfig, owner, callData, senderOverride, saltOverride, lgr)
+		// The gateway cannot sign as the account's owner, so anything it
+		// executes runs under a session grant. The resolver is how storage
+		// reaches this path without the send path reaching into storage.
+		wallet := owner
+		if senderOverride != nil {
+			wallet = *senderOverride
+		}
+		auth, authErr := resolveSession(smartWalletConfig.ChainID, owner, wallet)
+		if authErr != nil {
+			return nil, nil, fmt.Errorf("resolving session authorization for %s: %w", wallet.Hex(), authErr)
+		}
+		op, receipt, err := SendUserOpMAv2(smartWalletConfig, owner, callData, senderOverride, saltOverride, auth, lgr)
 		sent, convErr := sentFromV07(op, big.NewInt(smartWalletConfig.ChainID))
 		if err != nil {
 			// Report the send failure, not the conversion: the send is why
