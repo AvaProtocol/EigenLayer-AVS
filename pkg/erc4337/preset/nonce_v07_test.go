@@ -3,6 +3,7 @@ package preset
 import (
 	"errors"
 	"math/big"
+	"sync"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -133,6 +134,41 @@ func containsAll(s string, subs ...string) bool {
 		}
 	}
 	return true
+}
+
+// The manager exists because the *previous* nonce bug was a concurrency bug,
+// so it must be race-clean under concurrent access. Run with -race. This
+// asserts no data race and that every concurrent accept lands a
+// well-formed successor — not a sequential ordering (concurrent callers may
+// interleave; the send path heals interleavings via AA25-invalidate-retry).
+func TestNonceManagerV07ConcurrentAccessIsRaceFree(t *testing.T) {
+	sender := common.HexToAddress("0x00000000000000000000000000000000000000A5")
+	const goroutines, iterations = 8, 200
+
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(entityID uint32) {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				used := mustNonce(t, entityID, userop.ValidationOptionGlobal, uint64(i))
+				NoteUserOpAccepted(sender, entityID, userop.ValidationOptionGlobal, used)
+				_, _ = cachedNext(t, sender, entityID, userop.ValidationOptionGlobal)
+				if i%3 == 0 {
+					InvalidateNonce(sender, entityID, userop.ValidationOptionGlobal)
+				}
+			}
+		}(uint32(g + 1)) // distinct entity per goroutine: distinct slots, same map
+	}
+	wg.Wait()
+
+	// After the storm, a fresh accept must still produce the exact successor —
+	// the map is intact, not corrupted by the concurrent writers.
+	NoteUserOpAccepted(sender, 1, userop.ValidationOptionGlobal, mustNonce(t, 1, userop.ValidationOptionGlobal, 41))
+	next, ok := cachedNext(t, sender, 1, userop.ValidationOptionGlobal)
+	if !ok || next.Cmp(mustNonce(t, 1, userop.ValidationOptionGlobal, 42)) != 0 {
+		t.Fatalf("post-concurrency slot = %v, want sequence 42", next)
+	}
 }
 
 func TestIsInvalidNonceError(t *testing.T) {

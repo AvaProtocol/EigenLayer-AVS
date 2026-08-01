@@ -326,7 +326,12 @@ func verifyGrantSignature(digest common.Hash, signature []byte, owner common.Add
 		return fmt.Errorf("grant signature is malformed: %w", err)
 	}
 	if got := crypto.PubkeyToAddress(*pub); got != owner {
-		return fmt.Errorf("grant was signed by %s, not the wallet owner %s", got.Hex(), owner.Hex())
+		return fmt.Errorf("%w: signed by %s, not the wallet owner %s", ErrGrantSignerMismatch, got.Hex(), owner.Hex())
 	}
 	return nil
 }
+
+// ErrGrantSignerMismatch is returned when a grant's signature recovers to an
+// address other than the wallet owner. Exposed as a sentinel so the REST
+// layer can map it to a 400 with errors.Is rather than matching error text.
+var ErrGrantSignerMismatch = errors.New("grant was signed by the wrong key")
