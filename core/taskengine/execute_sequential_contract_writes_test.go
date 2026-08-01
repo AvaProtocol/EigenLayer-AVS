@@ -108,6 +108,7 @@ func TestExecuteTask_SequentialContractWrites_Sepolia(t *testing.T) {
 			TaskType: &avsproto.TaskNode_ContractWrite{
 				ContractWrite: &avsproto.ContractWriteNode{
 					Config: &avsproto.ContractWriteNode_Config{
+						ChainId:         cfg.SmartWallet.ChainID,
 						ContractAddress: SEPOLIA_USDC,
 						ContractAbi: func() []*structpb.Value {
 							abi, _ := structpb.NewValue(map[string]interface{}{
@@ -139,6 +140,7 @@ func TestExecuteTask_SequentialContractWrites_Sepolia(t *testing.T) {
 			TaskType: &avsproto.TaskNode_ContractWrite{
 				ContractWrite: &avsproto.ContractWriteNode{
 					Config: &avsproto.ContractWriteNode_Config{
+						ChainId:         cfg.SmartWallet.ChainID,
 						ContractAddress: SEPOLIA_SWAPROUTER,
 						ContractAbi: func() []*structpb.Value {
 							abi, _ := structpb.NewValue(map[string]interface{}{
