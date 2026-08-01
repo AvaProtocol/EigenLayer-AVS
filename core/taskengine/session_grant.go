@@ -51,6 +51,12 @@ type SessionGrantRequest struct {
 	// the grant's first operation. Distinct from ValidUntil. Zero picks
 	// defaultSigningWindow.
 	SigningWindow time.Duration
+
+	// AllowSelfAdministration accepts a global grant that carries no execution
+	// hook, which can call the account's own installValidation and escalate
+	// itself. Present so the case is stateable — test fixtures need it — and
+	// deliberately absent from anything the grant screen sends.
+	AllowSelfAdministration bool
 }
 
 // defaultSigningWindow bounds the gap between signing a grant and its first
@@ -111,6 +117,8 @@ func PrepareSessionGrant(
 		Selectors: req.Selectors,
 		Hooks:     req.Hooks,
 		Global:    len(req.Selectors) == 0,
+
+		AllowSelfAdministration: req.AllowSelfAdministration,
 	}
 	installCall, err := aa.PackSessionSignerInstall(grant)
 	if err != nil {

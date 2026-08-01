@@ -149,6 +149,12 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 	inputVars := map[string]interface{}{"settings": settings}
 
 	db := testutil.TestMustDB()
+
+	// The gateway cannot sign as this wallet's owner — a stock MA v2 account
+	// trusts only its fallback signer — so it needs a session grant, the same
+	// one the grant screen creates in production.
+	grantControllerAuthority(t, db, cfg.SmartWallet, ownerAddress, *smartWalletAddress)
+
 	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
 	engine := New(db, cfg, nil, testutil.GetLogger())
 	t.Cleanup(func() { engine.Stop() })
