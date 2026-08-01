@@ -1302,6 +1302,23 @@ func (n *Engine) resolveUserChainID(user *model.User) int64 {
 	return n.defaultChainID()
 }
 
+// resolveFactoryOverride picks the factory a wallet operation should use.
+//
+// An explicit override always wins: it is how a caller reaches a wallet
+// created under the pre-cutover factory (its provider is inferred from the
+// address rather than this chain's config), and it lets a chain with no
+// configured default factory still serve a caller who supplies one. Only when
+// there is no override does the chain default (EffectiveFactory) apply — whose
+// error is fatal solely in that case. The override's format must already be
+// validated by the caller. Shared by GetWallet and SetWallet so the "override
+// wins" rule lives in one place.
+func resolveFactoryOverride(swCfg *config.SmartWalletConfig, overrideHex string) (common.Address, error) {
+	if overrideHex != "" {
+		return common.HexToAddress(overrideHex), nil
+	}
+	return aa.EffectiveFactory(swCfg)
+}
+
 // GetWallet is the gRPC handler for the GetWallet RPC.
 // It uses the owner (from auth context), salt, and factory_address from payload to derive the wallet address.
 //
@@ -1350,15 +1367,9 @@ func (n *Engine) GetWalletWithContext(ctx context.Context, user *model.User, pay
 		}
 	}
 
-	factoryAddr, factoryErr := aa.EffectiveFactory(swCfg)
+	factoryAddr, factoryErr := resolveFactoryOverride(swCfg, payload.GetFactoryAddress())
 	if factoryErr != nil {
 		return nil, status.Errorf(codes.Internal, "GetWallet: resolve factory: %v", factoryErr)
-	}
-	// An explicit factory still wins — that is how a caller reaches a wallet
-	// created under the pre-cutover factory, whose provider is then inferred
-	// from the address itself rather than from this chain's config.
-	if payload.GetFactoryAddress() != "" {
-		factoryAddr = common.HexToAddress(payload.GetFactoryAddress())
 	}
 
 	if err := n.validateNonZeroAddress(factoryAddr, "GetWallet", user.Address.Hex(), saltBig.String()); err != nil {
@@ -1541,12 +1552,9 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid salt format: %s", payload.GetSalt())
 	}
 
-	factoryAddr, factoryErr := aa.EffectiveFactory(n.smartWalletConfig) // Default factory
+	factoryAddr, factoryErr := resolveFactoryOverride(n.smartWalletConfig, payload.GetFactoryAddress())
 	if factoryErr != nil {
 		return nil, status.Errorf(codes.Internal, "SetWallet: resolve factory: %v", factoryErr)
-	}
-	if payload.GetFactoryAddress() != "" {
-		factoryAddr = common.HexToAddress(payload.GetFactoryAddress())
 	}
 
 	if err := n.validateNonZeroAddress(factoryAddr, "SetWallet", owner.Hex(), payload.GetSalt()); err != nil {
