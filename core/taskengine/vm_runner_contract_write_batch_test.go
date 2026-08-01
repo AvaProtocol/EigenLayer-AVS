@@ -8,7 +8,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/common"
@@ -76,7 +75,7 @@ func TestAtomicBatchOnDemand(t *testing.T) {
 	}
 
 	countingSender := func(callCount *int, captured *[]byte, status uint64) SendUserOpFunc {
-		return func(_ *config.SmartWalletConfig, _ common.Address, callData []byte, _ *preset.VerifyingPaymasterRequest, _ *common.Address, _ *big.Int, _ *big.Int, _ logger.Logger) (*userop.UserOperation, *types.Receipt, error) {
+		return func(_ *config.SmartWalletConfig, _ common.Address, callData []byte, _ *preset.VerifyingPaymasterRequest, _ *common.Address, _ *big.Int, _ *big.Int, _ logger.Logger) (*preset.SentUserOp, *types.Receipt, error) {
 			*callCount++
 			if captured != nil {
 				*captured = callData

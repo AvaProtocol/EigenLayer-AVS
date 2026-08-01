@@ -5,7 +5,6 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -23,9 +22,9 @@ func mockSendUserOp(
 	saltOverride *big.Int,
 	executionFeeWei *big.Int,
 	lgr logger.Logger,
-) (*userop.UserOperation, *types.Receipt, error) {
+) (*preset.SentUserOp, *types.Receipt, error) {
 	capturedPaymasterRequest = paymasterReq
-	return &userop.UserOperation{}, &types.Receipt{}, nil
+	return &preset.SentUserOp{}, &types.Receipt{}, nil
 }
 
 /*

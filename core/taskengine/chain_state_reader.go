@@ -66,7 +66,9 @@ type ChainStateReader interface {
 
 	// GetSmartWalletAddress derives the CREATE2 smart-wallet address for
 	// (owner, salt) under the given factory on this chain. Mirrors
-	// aa.GetSenderAddressForFactory.
+	// aa.DeriveSenderAddressAuto — the factory determines which account
+	// implementation (and therefore which derivation ABI) is used, so callers
+	// must pass the factory they actually mean. See aa.EffectiveFactory.
 	GetSmartWalletAddress(ctx context.Context, owner, factory common.Address, salt *big.Int) (common.Address, error)
 
 	// CallContract executes a read-only contract call (eth_call) at the
@@ -219,7 +221,7 @@ func (d *directChainStateReader) GetSmartWalletAddress(_ context.Context, owner,
 	if salt == nil {
 		salt = big.NewInt(0)
 	}
-	addr, err := aa.GetSenderAddressForFactory(d.client, owner, factory, salt)
+	addr, err := aa.DeriveSenderAddressAuto(d.client, owner, factory, salt)
 	if err != nil {
 		return common.Address{}, err
 	}
@@ -283,7 +285,7 @@ func (d *directChainStateReader) FindMatchingWalletSalt(ctx context.Context, own
 		if err := ctx.Err(); err != nil {
 			return false, 0, err
 		}
-		addr, err := aa.GetSenderAddressForFactory(d.client, owner, factory, big.NewInt(salt))
+		addr, err := aa.DeriveSenderAddressAuto(d.client, owner, factory, big.NewInt(salt))
 		if err != nil {
 			lastErr = err
 			errCount++

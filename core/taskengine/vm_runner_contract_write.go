@@ -23,7 +23,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -38,7 +37,7 @@ type SendUserOpFunc func(
 	saltOverride *big.Int,
 	executionFeeWei *big.Int,
 	lgr logger.Logger,
-) (*userop.UserOperation, *types.Receipt, error)
+) (*preset.SentUserOp, *types.Receipt, error)
 
 type ContractWriteProcessor struct {
 	*CommonProcessor
@@ -56,7 +55,7 @@ func NewContractWriteProcessor(vm *VM, client ChainStateReader, smartWalletConfi
 		client:            client,
 		smartWalletConfig: smartWalletConfig,
 		owner:             owner,
-		sendUserOpFunc:    preset.SendUserOp, // Default to the real implementation
+		sendUserOpFunc:    preset.SendUserOpAuto, // Default to the real implementation
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
@@ -400,7 +399,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		r.vm.logger.Info("🔍 CONTRACT WRITE DEBUG - Smart Wallet Config Details",
 			"bundler_url", r.smartWalletConfig.BundlerURL,
 			"factory_address", r.smartWalletConfig.FactoryAddress,
-			"entrypoint_address", r.smartWalletConfig.EntrypointAddress)
+			"entrypoint_address", r.smartWalletConfig.EntryPointAddress())
 	} else {
 		r.vm.logger.Warn("⚠️ CONTRACT WRITE DEBUG - Smart wallet config is NIL!")
 	}
@@ -680,9 +679,11 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 	logLabel string,
 	logTarget string,
 	executionLogBuilder *strings.Builder,
-) (*userop.UserOperation, *types.Receipt, string) {
+) (*preset.SentUserOp, *types.Receipt, string) {
 	// Set up factory address for AA operations
-	aa.SetFactoryAddress(r.smartWalletConfig.FactoryAddress)
+	if err := aa.SetFactoryAddressForConfig(r.smartWalletConfig); err != nil {
+		return nil, nil, fmt.Sprintf("cannot resolve account factory: %v", err)
+	}
 	aa.SetEntrypointAddress(r.smartWalletConfig.EntrypointAddress)
 
 	// Optional runner validation: if task.SmartWalletAddress is set, ensure it matches
@@ -693,10 +694,17 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 		// Derive sender at salt:0 via the per-chain reader (worker-routed in
 		// gateway mode) instead of a direct dial. Best-effort sanity check;
 		// the authoritative wallet-list validation runs in the run_node path.
-		sender, derr := r.client.GetSmartWalletAddress(ctx, r.owner, r.smartWalletConfig.FactoryAddress, big.NewInt(0))
-		if derr == nil && (sender != common.Address{}) {
-			if !strings.EqualFold(sender.Hex(), runnerStr) {
-				r.vm.logger.Warn("runner does not match derived salt:0; proceeding (wallet list validation applies in run_node)", "expected", sender.Hex(), "runner", runnerStr)
+		// A factory-resolution failure only costs us the sanity check; the
+		// authoritative validation still runs in run_node. Skipping beats
+		// failing the write on a diagnostic.
+		if defaultFactory, factoryErr := aa.EffectiveFactory(r.smartWalletConfig); factoryErr != nil {
+			r.vm.logger.Warn("skipping runner sanity check: cannot resolve factory", "error", factoryErr)
+		} else {
+			sender, derr := r.client.GetSmartWalletAddress(ctx, r.owner, defaultFactory, big.NewInt(0))
+			if derr == nil && (sender != common.Address{}) {
+				if !strings.EqualFold(sender.Hex(), runnerStr) {
+					r.vm.logger.Warn("runner does not match derived salt:0; proceeding (wallet list validation applies in run_node)", "expected", sender.Hex(), "runner", runnerStr)
+				}
 			}
 		}
 	}
@@ -1161,15 +1169,19 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 	// Pack the atomic batch. Prefer executeBatch (no per-call values) when every value is zero — its
 	// selector is bundler-estimatable, unlike executeBatchWithValues (0xc3ff72fc) which the bundler
 	// can't simulate. Only fall back to executeBatchWithValues when a call actually carries value.
-	packKind := "executeBatch"
-	var smartWalletCallData []byte
-	var packErr error
-	if anyValue {
-		packKind = "executeBatchWithValues"
-		smartWalletCallData, packErr = aa.PackExecuteBatchWithValues(targets, values, datas)
-	} else {
-		smartWalletCallData, packErr = aa.PackExecuteBatch(targets, datas)
+	// Routed on the chain's account implementation. Batching is the one call
+	// shape that did NOT carry over to MA v2 — see aa.PackExecuteBatchAuto —
+	// so packing v0.6 batch calldata here reverts in validation as AA23,
+	// naming neither the batch nor the account type.
+	batchFactory, factoryErr := aa.EffectiveFactory(r.smartWalletConfig)
+	if factoryErr != nil {
+		return failAll(fmt.Sprintf("failed to resolve account factory for batch: %v", factoryErr), nil)
 	}
+	packKind := "executeBatch"
+	if anyValue && aa.ProviderForFactory(batchFactory) != aa.ProviderModularAccountV2 {
+		packKind = "executeBatchWithValues"
+	}
+	smartWalletCallData, packErr := aa.PackExecuteBatchAuto(batchFactory, targets, values, datas)
 	if packErr != nil {
 		return failAll(fmt.Sprintf("failed to pack atomic batch calldata: %v", packErr), nil)
 	}
@@ -1200,7 +1212,7 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 }
 
 // createRealTransactionResult creates a result from a real UserOp transaction
-func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contractAddress, callData string, parsedABI *abi.ABI, userOp *userop.UserOperation, receipt *types.Receipt) *avsproto.ContractWriteNode_MethodResult {
+func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contractAddress, callData string, parsedABI *abi.ABI, userOp *preset.SentUserOp, receipt *types.Receipt) *avsproto.ContractWriteNode_MethodResult {
 	r.vm.logger.Info("🔍 DEPLOYED WORKFLOW: Creating real transaction result",
 		"method_name", methodName,
 		"contract_address", contractAddress,
@@ -1273,7 +1285,7 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 	} else if userOp != nil {
 		// UserOp submitted but receipt not available yet
 		receiptMap = map[string]interface{}{
-			"userOpHash":      userOp.GetUserOpHash(r.smartWalletConfig.EntrypointAddress, big.NewInt(r.smartWalletConfig.ChainID)).Hex(),
+			"userOpHash":      userOp.UserOpHash.Hex(),
 			"sender":          userOp.Sender.Hex(),
 			"nonce":           fmt.Sprintf("0x%x", userOp.Nonce.Uint64()),
 			"status":          "pending",
@@ -1374,7 +1386,7 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 	if receiptMap != nil {
 		receiptMap["executionStatus"] = executionStatus
 		if _, hasHash := receiptMap["userOpHash"]; !hasHash && userOp != nil && r.smartWalletConfig != nil {
-			receiptMap["userOpHash"] = userOp.GetUserOpHash(r.smartWalletConfig.EntrypointAddress, big.NewInt(r.smartWalletConfig.ChainID)).Hex()
+			receiptMap["userOpHash"] = userOp.UserOpHash.Hex()
 		}
 		if v, err := structpb.NewValue(receiptMap); err == nil {
 			receiptValue = v
@@ -2017,8 +2029,8 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 					}
 				}()
 				if r.smartWalletConfig != nil {
-					if (r.smartWalletConfig.EntrypointAddress != common.Address{}) {
-						log.WriteString(fmt.Sprintf("  EntryPoint: %s\n", r.smartWalletConfig.EntrypointAddress.Hex()))
+					if (r.smartWalletConfig.EntryPointAddress() != common.Address{}) {
+						log.WriteString(fmt.Sprintf("  EntryPoint: %s\n", r.smartWalletConfig.EntryPointAddress().Hex()))
 					}
 					if r.smartWalletConfig.BundlerURL != "" {
 						log.WriteString(fmt.Sprintf("  Bundler: %s\n", r.smartWalletConfig.BundlerURL))
@@ -2034,7 +2046,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			// If this is a bundler/AA error, add additional debugging information
 			if strings.Contains(result.Error, "Bundler failed") || strings.Contains(result.Error, "AA21") {
 				log.WriteString("BUNDLER FAILURE DETAILS:\n")
-				log.WriteString(fmt.Sprintf("  Entry Point: %s\n", r.smartWalletConfig.EntrypointAddress.Hex()))
+				log.WriteString(fmt.Sprintf("  Entry Point: %s\n", r.smartWalletConfig.EntryPointAddress().Hex()))
 				log.WriteString(fmt.Sprintf("  Factory: %s\n", r.smartWalletConfig.FactoryAddress.Hex()))
 
 				if strings.Contains(result.Error, "AA21") {

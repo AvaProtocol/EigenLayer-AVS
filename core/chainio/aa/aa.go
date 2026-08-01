@@ -36,25 +36,68 @@ var (
 	factoryAddressMu sync.RWMutex
 )
 
-// SetFactoryAddress sets the factory proxy address from config
-// This should be called during initialization with the value from config.SmartWallet.FactoryAddress
-// which already handles default value and YAML override
+// SetFactoryAddress sets the factory proxy address used by the global-factory
+// helpers (GetSenderAddress, GetNonce...).
+//
+// Prefer SetFactoryAddressForConfig. Passing config.SmartWallet.FactoryAddress
+// straight in is now wrong on any chain running Modular Account v2: that field
+// is the SimpleAccount factory, and since GetSenderAddress infers the account
+// implementation from this value, an MA v2 chain would silently derive v0.6
+// addresses everywhere the global factory is used.
 func SetFactoryAddress(address common.Address) {
 	factoryAddressMu.Lock()
 	defer factoryAddressMu.Unlock()
 	factoryAddress = address
 }
 
-// getFactoryAddress returns the current factory address, with fallback to default from config
+// SetFactoryAddressForConfig sets the global factory to the one this chain's
+// configured account provider actually creates accounts at, which is the only
+// value the global-factory helpers can derive correctly against.
+func SetFactoryAddressForConfig(swCfg *config.SmartWalletConfig) error {
+	effective, err := EffectiveFactory(swCfg)
+	if err != nil {
+		return err
+	}
+	SetFactoryAddress(effective)
+	return nil
+}
+
+// getFactoryAddress returns the current factory address, falling back to the
+// factory of the DEFAULT account provider when nothing has been set.
+//
+// The fallback must track config's default account_provider, which is
+// modular_account_v2. It used to be config.DefaultFactoryProxyAddressHex — the
+// v0.6 SimpleAccountFactory — and that became wrong the moment GetSenderAddress
+// started inferring the account implementation from this value: any caller
+// reaching the global before SetFactoryAddressForConfig ran would derive a v0.6
+// address on an MA v2 chain, silently and with no error to notice.
+//
+// That is not a hypothetical ordering problem. model.LoadDefaultSmartWallet and
+// the preset builders all go through GetSenderAddress, and the whole Go test
+// suite hits this path because most tests never construct an Engine.
 func getFactoryAddress() common.Address {
 	factoryAddressMu.RLock()
 	defer factoryAddressMu.RUnlock()
 	if factoryAddress != (common.Address{}) {
 		return factoryAddress
 	}
-	// Fallback to default if not set (shouldn't happen in normal operation)
-	// This uses the default from config package, which can be overridden in YAML
-	return common.HexToAddress(config.DefaultFactoryProxyAddressHex)
+	return defaultProviderFactory()
+}
+
+// defaultProviderFactory is the factory belonging to config's default
+// account_provider. Resolved through the same routing every other caller uses,
+// so it cannot drift from it.
+func defaultProviderFactory() common.Address {
+	var swCfg config.SmartWalletConfig // zero value == unset provider == the default
+	factory, err := FactoryAddressForProvider(
+		AccountProvider(swCfg.AccountProviderName()),
+		common.HexToAddress(config.DefaultFactoryProxyAddressHex),
+	)
+	if err != nil {
+		// Unreachable: the default provider is by definition a known one.
+		return common.HexToAddress(config.DefaultFactoryProxyAddressHex)
+	}
+	return factory
 }
 
 func SetEntrypointAddress(address common.Address) {
@@ -126,11 +169,17 @@ func computeSmartWalletAddress(factoryAddr common.Address, ownerAddress common.A
 	return common.BytesToAddress(hash[12:]), nil
 }
 
-// GetSenderAddress is a wrapper that uses the factory address from config
-// It calls GetSenderAddressForFactory with the factory address set via SetFactoryAddress()
-// which reads from config (with default value and YAML override support)
+// GetSenderAddress is a wrapper that uses the factory address from config,
+// set via SetFactoryAddress().
+//
+// It routes through DeriveSenderAddressAuto rather than calling
+// GetSenderAddressForFactory directly, so the account implementation follows
+// the configured factory. Callers of SetFactoryAddress must therefore pass the
+// EFFECTIVE factory (see EffectiveFactory) — passing the raw
+// smart_wallet.factory_address on an MA v2 chain would derive the wrong
+// address here, and every global-factory caller would inherit the mistake.
 func GetSenderAddress(conn *ethclient.Client, ownerAddress common.Address, salt *big.Int) (*common.Address, error) {
-	return GetSenderAddressForFactory(conn, ownerAddress, getFactoryAddress(), salt)
+	return DeriveSenderAddressAuto(conn, ownerAddress, getFactoryAddress(), salt)
 }
 
 // GetSenderAddressForFactory computes the smart wallet address using the factory proxy address

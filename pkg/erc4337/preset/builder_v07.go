@@ -14,11 +14,15 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/rpc"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 )
 
-// EntryPointV07Address is the same on every chain Alchemy supports.
-const EntryPointV07Address = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
+// EntryPointV07Address is the same on every chain Alchemy supports. It is an
+// alias for config's constant rather than a second literal: two copies of an
+// address are two things to get out of step, and a mismatch would surface as
+// signatures that verify nowhere.
+const EntryPointV07Address = config.EntryPointV07AddressHex
 
 // EntryPointV07 returns the v0.7 EntryPoint address.
 func EntryPointV07() common.Address { return common.HexToAddress(EntryPointV07Address) }

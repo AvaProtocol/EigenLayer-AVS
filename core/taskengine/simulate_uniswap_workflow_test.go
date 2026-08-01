@@ -51,7 +51,7 @@ func TestSimulateTask_StopLossWorkflow_Sepolia(t *testing.T) {
 	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
 	require.NoError(t, err, "load aggregator config")
 
-	aa.SetFactoryAddress(cfg.SmartWallet.FactoryAddress)
+	setGlobalFactory(t, cfg.SmartWallet)
 
 	client, err := ethclient.Dial(cfg.SmartWallet.EthRpcUrl)
 	require.NoError(t, err, "connect to Sepolia RPC")

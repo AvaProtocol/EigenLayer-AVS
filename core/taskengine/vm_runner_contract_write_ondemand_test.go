@@ -7,7 +7,6 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/common"
@@ -18,19 +17,14 @@ import (
 
 // wellFormedUserOp returns a UserOperation with every big.Int/byte field populated
 // so GetUserOpHash / PackForSignature don't panic in unit tests.
-func wellFormedUserOp(sender common.Address) *userop.UserOperation {
-	return &userop.UserOperation{
+func wellFormedUserOp(sender common.Address) *preset.SentUserOp {
+	return &preset.SentUserOp{
 		Sender:               sender,
 		Nonce:                big.NewInt(0),
-		InitCode:             []byte{},
-		CallData:             []byte{},
 		CallGasLimit:         big.NewInt(0),
 		VerificationGasLimit: big.NewInt(0),
 		PreVerificationGas:   big.NewInt(0),
 		MaxFeePerGas:         big.NewInt(0),
-		MaxPriorityFeePerGas: big.NewInt(0),
-		PaymasterAndData:     []byte{},
-		Signature:            []byte{},
 	}
 }
 
@@ -144,7 +138,7 @@ func TestContractWriteRealPathForwardsNativeValue(t *testing.T) {
 			_ *big.Int,
 			_ *big.Int,
 			_ logger.Logger,
-		) (*userop.UserOperation, *types.Receipt, error) {
+		) (*preset.SentUserOp, *types.Receipt, error) {
 			capturedCallData = callData
 			return wellFormedUserOp(runner), minedReceipt(1), nil
 		}

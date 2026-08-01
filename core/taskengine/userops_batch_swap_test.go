@@ -68,7 +68,7 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 	require.NoError(t, err, "Failed to connect to RPC")
 	t.Cleanup(func() { client.Close() })
 
-	aa.SetFactoryAddress(cfg.SmartWallet.FactoryAddress)
+	setGlobalFactory(t, cfg.SmartWallet)
 
 	smartWalletAddress, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(0))
 	require.NoError(t, err, "Failed to derive smart wallet address")

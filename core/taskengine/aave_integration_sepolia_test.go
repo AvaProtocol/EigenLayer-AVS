@@ -62,7 +62,7 @@ func TestAAVEHealthFactorContractRead(t *testing.T) {
 		t.Skip("OWNER_EOA or TEST_PRIVATE_KEY not set, skipping AAVE integration test")
 	}
 	smartWalletConfig := config.SmartWallet
-	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+	setGlobalFactory(t, smartWalletConfig)
 	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
 	require.NoError(t, err, "Failed to connect to RPC")
 	defer client.Close()
