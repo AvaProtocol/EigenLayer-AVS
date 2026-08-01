@@ -162,6 +162,11 @@ jobs:
       - name: Run Go test
         env:
           OWNER_EOA: ${{ vars.OWNER_EOA }}
+          # The owner's key, not just its address: MA v2 wallets grant the
+          # gateway nothing by default, so live tests must authorize a session
+          # grant the way production owners do — and only the owner's key can
+          # sign one (core/taskengine/session_grant_testhelper_test.go).
+          TEST_PRIVATE_KEY: ${{ secrets.TEST_PRIVATE_KEY }}
         run: |
           cd ./${{ matrix.test }}
           go test . -v -short
