@@ -5,7 +5,6 @@ import (
 	"errors"
 	"math/big"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -310,7 +309,7 @@ func mapPolicyError(err error) error {
 	case errors.Is(err, taskengine.ErrSessionEntityTaken):
 		return &restmw.HTTPError{Status: http.StatusConflict, Code: "POLICIES_ENTITY_TAKEN",
 			Title: "Grant allocation superseded", Detail: err.Error() + " Prepare the grant again."}
-	case strings.Contains(err.Error(), "signed by"):
+	case errors.Is(err, taskengine.ErrGrantSignerMismatch):
 		return badRequest("POLICIES_BAD_SIGNATURE", "Signature does not match", err.Error())
 	default:
 		return badRequest("POLICIES_REJECTED", "Policy request rejected", err.Error())
