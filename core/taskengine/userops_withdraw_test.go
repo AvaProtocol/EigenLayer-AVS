@@ -60,7 +60,7 @@ func setupUserOpWithdrawalTest(t *testing.T) (*config.Config, common.Address, *c
 	t.Cleanup(func() { client.Close() })
 
 	// Set factory address for smart wallet derivation
-	aa.SetFactoryAddress(cfg.SmartWallet.FactoryAddress)
+	setGlobalFactory(t, cfg.SmartWallet)
 
 	// Always derive smart wallet address from owner + salt:0
 	// This ensures consistency and tests the auto-creation flow
@@ -73,6 +73,12 @@ func setupUserOpWithdrawalTest(t *testing.T) (*config.Config, common.Address, *c
 
 	// Create engine for RunNodeImmediately execution
 	db := testutil.TestMustDB()
+
+	// The gateway cannot sign as this wallet's owner — a stock MA v2 account
+	// trusts only its fallback signer — so it needs a session grant, the same
+	// one the grant screen creates in production.
+	grantControllerAuthority(t, db, cfg.SmartWallet, ownerAddress, *smartWalletAddress)
+
 	t.Cleanup(func() {
 		storage.Destroy(db.(*storage.BadgerStorage))
 	})
@@ -489,7 +495,7 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 	t.Cleanup(func() { client.Close() })
 
 	// Set factory address for smart wallet derivation
-	aa.SetFactoryAddress(cfg.SmartWallet.FactoryAddress)
+	setGlobalFactory(t, cfg.SmartWallet)
 	t.Logf("🔧 Set factory address: %s", cfg.SmartWallet.FactoryAddress.Hex())
 
 	// Always derive smart wallet address from owner + salt:0
@@ -535,6 +541,10 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 
 	// Create engine for RunNodeImmediately execution
 	db := testutil.TestMustDB()
+
+	// Same as above: without a grant the gateway would sign as the wallet's
+	// owner, whose key it does not hold.
+	grantControllerAuthority(t, db, cfg.SmartWallet, ownerAddress, *smartWalletAddress)
 	t.Cleanup(func() {
 		storage.Destroy(db.(*storage.BadgerStorage))
 	})

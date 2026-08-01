@@ -200,11 +200,24 @@ const (
 	PUT     RestAPINodeConfigMethod = "PUT"
 )
 
+// Defines values for RevokePolicyResponseStatus.
+const (
+	Deleted RevokePolicyResponseStatus = "deleted"
+	Revoked RevokePolicyResponseStatus = "revoked"
+)
+
 // Defines values for SecretScope.
 const (
 	SecretScopeOrg      SecretScope = "org"
 	SecretScopeUser     SecretScope = "user"
 	SecretScopeWorkflow SecretScope = "workflow"
+)
+
+// Defines values for SessionPolicyStatus.
+const (
+	SessionPolicyStatusActive  SessionPolicyStatus = "active"
+	SessionPolicyStatusPending SessionPolicyStatus = "pending"
+	SessionPolicyStatusRevoked SessionPolicyStatus = "revoked"
 )
 
 // Defines values for SignalExecutionRequestDecision.
@@ -251,12 +264,21 @@ const (
 
 // Defines values for WorkflowStatus.
 const (
-	Completed WorkflowStatus = "completed"
-	Disabled  WorkflowStatus = "disabled"
-	Enabled   WorkflowStatus = "enabled"
-	Failed    WorkflowStatus = "failed"
-	Running   WorkflowStatus = "running"
+	WorkflowStatusCompleted WorkflowStatus = "completed"
+	WorkflowStatusDisabled  WorkflowStatus = "disabled"
+	WorkflowStatusEnabled   WorkflowStatus = "enabled"
+	WorkflowStatusFailed    WorkflowStatus = "failed"
+	WorkflowStatusRunning   WorkflowStatus = "running"
 )
+
+// AllowedAction One contract the agent may call, scoped to selectors.
+type AllowedAction struct {
+	// Selectors 4-byte function selectors permitted on the target.
+	Selectors []string `json:"selectors"`
+
+	// Target Lowercase or checksummed hex EOA / contract address.
+	Target EthereumAddress `json:"target"`
+}
 
 // AuthExchangeRequest defines model for AuthExchangeRequest.
 type AuthExchangeRequest struct {
@@ -587,6 +609,16 @@ type Edge struct {
 
 	// Target Node ID where this edge ends.
 	Target string `json:"target"`
+}
+
+// Erc20SpendCap Cumulative ERC-20 spend cap, enforced on-chain at execution. The
+// token must appear as an `allowedActions` target.
+type Erc20SpendCap struct {
+	// Amount Total cap in the token's smallest unit (decimal string, no reset).
+	Amount string `json:"amount"`
+
+	// Token Lowercase or checksummed hex EOA / contract address.
+	Token EthereumAddress `json:"token"`
 }
 
 // EstimateFeesRequest defines model for EstimateFeesRequest.
@@ -1082,6 +1114,54 @@ type PageInfo struct {
 	StartCursor *string `json:"startCursor,omitempty"`
 }
 
+// PreparePolicyRequest defines model for PreparePolicyRequest.
+type PreparePolicyRequest struct {
+	AgentLabel     string          `json:"agentLabel"`
+	AllowedActions []AllowedAction `json:"allowedActions"`
+
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId `json:"chainId"`
+
+	// Erc20SpendCap Cumulative ERC-20 spend cap, enforced on-chain at execution. The
+	// token must appear as an `allowedActions` target.
+	Erc20SpendCap Erc20SpendCap `json:"erc20SpendCap"`
+
+	// ExpiresInSeconds Grant lifetime, relative (skew-proof). Becomes an absolute validUntil.
+	ExpiresInSeconds int64   `json:"expiresInSeconds"`
+	Justification    *string `json:"justification,omitempty"`
+}
+
+// PreparedPolicy defines model for PreparedPolicy.
+type PreparedPolicy struct {
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId `json:"chainId"`
+
+	// Deadline Unix seconds; bounds signing → first use, NOT the grant lifetime.
+	Deadline int64 `json:"deadline"`
+
+	// Digest The EIP-712 hash the typed data produces, for client-side verification.
+	Digest string `json:"digest"`
+
+	// EntityId The validation entity allocated for this grant (provisional until submit).
+	EntityId int64 `json:"entityId"`
+
+	// PolicyId ULID identifier (26-char Crockford base32).
+	PolicyId Ulid `json:"policyId"`
+
+	// SessionSigner Lowercase or checksummed hex EOA / contract address.
+	SessionSigner EthereumAddress `json:"sessionSigner"`
+
+	// TypedData The exact eth_signTypedData_v4 payload for the owner's wallet.
+	TypedData map[string]interface{} `json:"typedData"`
+
+	// ValidUntil Absolute grant expiry, unix milliseconds. Echo verbatim to submit.
+	ValidUntil int64 `json:"validUntil"`
+}
+
 // Problem RFC 7807 problem+json. Returned as `application/problem+json` on any
 // 4xx/5xx response. `type` and `title` describe the error class; `detail`
 // is human-readable; `instance` is a per-request identifier suitable for
@@ -1166,6 +1246,19 @@ type RestAPINodeConfig_Options struct {
 	AdditionalProperties map[string]interface{} `json:"-"`
 }
 
+// RevokePolicyResponse defines model for RevokePolicyResponse.
+type RevokePolicyResponse struct {
+	// OnChainCleanupRequired True when the grant's validation is still installed on the
+	// account and needs the owner's uninstallValidation to clear.
+	OnChainCleanupRequired bool `json:"onChainCleanupRequired"`
+
+	// Status deleted = was pending, nothing was ever installed. revoked = retained for audit.
+	Status RevokePolicyResponseStatus `json:"status"`
+}
+
+// RevokePolicyResponseStatus deleted = was pending, nothing was ever installed. revoked = retained for audit.
+type RevokePolicyResponseStatus string
+
 // RunNodeRequest defines model for RunNodeRequest.
 type RunNodeRequest struct {
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
@@ -1244,6 +1337,51 @@ type SecretList struct {
 	PageInfo PageInfo `json:"pageInfo"`
 }
 
+// SessionPolicy defines model for SessionPolicy.
+type SessionPolicy struct {
+	AgentLabel     string           `json:"agentLabel"`
+	AllowedActions *[]AllowedAction `json:"allowedActions,omitempty"`
+
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId `json:"chainId"`
+
+	// CreatedAt Unix milliseconds.
+	CreatedAt int64 `json:"createdAt"`
+	EntityId  int64 `json:"entityId"`
+
+	// Erc20SpendCap Cumulative ERC-20 spend cap, enforced on-chain at execution. The
+	// token must appear as an `allowedActions` target.
+	Erc20SpendCap *Erc20SpendCap `json:"erc20SpendCap,omitempty"`
+
+	// Id ULID identifier (26-char Crockford base32).
+	Id            Ulid    `json:"id"`
+	Justification *string `json:"justification,omitempty"`
+
+	// Runner Lowercase or checksummed hex EOA / contract address.
+	Runner EthereumAddress `json:"runner"`
+
+	// SessionSigner Lowercase or checksummed hex EOA / contract address.
+	SessionSigner EthereumAddress `json:"sessionSigner"`
+
+	// Status pending = signed and stored, install not yet on-chain (revocable
+	// for free). active = install applied. revoked = grants nothing.
+	Status SessionPolicyStatus `json:"status"`
+
+	// ValidUntil Unix milliseconds.
+	ValidUntil int64 `json:"validUntil"`
+}
+
+// SessionPolicyStatus pending = signed and stored, install not yet on-chain (revocable
+// for free). active = install applied. revoked = grants nothing.
+type SessionPolicyStatus string
+
+// SessionPolicyList defines model for SessionPolicyList.
+type SessionPolicyList struct {
+	Items []SessionPolicy `json:"items"`
+}
+
 // SignalExecutionRequest defines model for SignalExecutionRequest.
 type SignalExecutionRequest struct {
 	// Decision The approver's decision.
@@ -1272,6 +1410,33 @@ type SimulateWorkflowRequest struct {
 	InputVariables InputVariables `json:"inputVariables"`
 	Nodes          []Node         `json:"nodes"`
 	Trigger        Trigger        `json:"trigger"`
+}
+
+// SubmitPolicyRequest defines model for SubmitPolicyRequest.
+type SubmitPolicyRequest struct {
+	AgentLabel     string          `json:"agentLabel"`
+	AllowedActions []AllowedAction `json:"allowedActions"`
+
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId  ChainId `json:"chainId"`
+	Deadline int64   `json:"deadline"`
+	EntityId int64   `json:"entityId"`
+
+	// Erc20SpendCap Cumulative ERC-20 spend cap, enforced on-chain at execution. The
+	// token must appear as an `allowedActions` target.
+	Erc20SpendCap Erc20SpendCap `json:"erc20SpendCap"`
+	Justification *string       `json:"justification,omitempty"`
+
+	// PolicyId ULID identifier (26-char Crockford base32).
+	PolicyId Ulid `json:"policyId"`
+
+	// Signature The owner's 65-byte signature over the prepared digest.
+	Signature string `json:"signature"`
+
+	// ValidUntil The ABSOLUTE expiry from prepare. It is baked into the signed calldata; recomputing it would change the digest.
+	ValidUntil int64 `json:"validUntil"`
 }
 
 // Timestamp RFC 3339 timestamp.
@@ -1643,6 +1808,27 @@ type GetTokenParams struct {
 	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
+// ListWalletPoliciesParams defines parameters for ListWalletPolicies.
+type ListWalletPoliciesParams struct {
+	// ChainId The chain to operate on (a single value). Omit to use the aggregator
+	// default (the request's JWT `aud` chain, then the gateway default).
+	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
+}
+
+// RevokeWalletPolicyParams defines parameters for RevokeWalletPolicy.
+type RevokeWalletPolicyParams struct {
+	// ChainId The chain to operate on (a single value). Omit to use the aggregator
+	// default (the request's JWT `aud` chain, then the gateway default).
+	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
+}
+
+// GetWalletPolicyParams defines parameters for GetWalletPolicy.
+type GetWalletPolicyParams struct {
+	// ChainId The chain to operate on (a single value). Omit to use the aggregator
+	// default (the request's JWT `aud` chain, then the gateway default).
+	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
+}
+
 // GetWalletNonceParams defines parameters for GetWalletNonce.
 type GetWalletNonceParams struct {
 	// ChainId The chain to operate on (a single value). Omit to use the aggregator
@@ -1706,6 +1892,12 @@ type CreateWalletJSONRequestBody = CreateWalletRequest
 
 // UpdateWalletJSONRequestBody defines body for UpdateWallet for application/json ContentType.
 type UpdateWalletJSONRequestBody = UpdateWalletRequest
+
+// PrepareWalletPolicyJSONRequestBody defines body for PrepareWalletPolicy for application/json ContentType.
+type PrepareWalletPolicyJSONRequestBody = PreparePolicyRequest
+
+// SubmitWalletPolicyJSONRequestBody defines body for SubmitWalletPolicy for application/json ContentType.
+type SubmitWalletPolicyJSONRequestBody = SubmitPolicyRequest
 
 // WithdrawWalletJSONRequestBody defines body for WithdrawWallet for application/json ContentType.
 type WithdrawWalletJSONRequestBody = WithdrawRequest

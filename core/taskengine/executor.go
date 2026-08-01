@@ -1212,7 +1212,11 @@ func (x *WorkflowExecutor) validateWalletOwnership(ctx context.Context, chainID 
 	if swCfg != nil {
 		if reader := GetChainStateReaderForChain(uint64(chainID)); reader != nil {
 			// Gateway mode: derive salt:0 via the chain worker (no gateway dial).
-			if addr, derr := reader.GetSmartWalletAddress(ctx, user.Address, swCfg.FactoryAddress, big.NewInt(0)); derr == nil {
+			defaultFactory, factoryErr := aa.EffectiveFactory(swCfg)
+			if factoryErr != nil {
+				x.logger.Warn("Failed to resolve factory for validation",
+					"chain_id", chainID, "error", factoryErr)
+			} else if addr, derr := reader.GetSmartWalletAddress(ctx, user.Address, defaultFactory, big.NewInt(0)); derr == nil {
 				user.SmartAccountAddress = &addr
 			} else {
 				x.logger.Warn("Failed to load default smart wallet for validation",
@@ -1261,7 +1265,14 @@ func (x *WorkflowExecutor) validateWalletOwnership(ctx context.Context, chainID 
 // passing it in (rather than reading x.smartWalletConfig) is what makes
 // this work in gateway mode where the executor is shared across chains.
 func (x *WorkflowExecutor) validateDerivedWallet(ctx context.Context, chainID int64, swCfg *config.SmartWalletConfig, owner common.Address, smartWalletAddr common.Address) (bool, error) {
-	factoryAddr := swCfg.FactoryAddress
+	// Scans this chain's CURRENT factory only. After the v0.7 cutover that is
+	// the MA v2 factory, so a pre-cutover v0.6 wallet no longer validates by
+	// derivation — it validates through its stored record in step 2 of
+	// validateWalletOwnership, which is where existing wallets are recognised.
+	factoryAddr, factoryErr := aa.EffectiveFactory(swCfg)
+	if factoryErr != nil {
+		return false, factoryErr
+	}
 
 	// Try salt values from 0 to max_wallets_per_owner to see if any produce the target wallet address
 	// This uses the configured limit from aggregator.yaml
@@ -1296,7 +1307,7 @@ func (x *WorkflowExecutor) validateDerivedWallet(ctx context.Context, chainID in
 	defer rpcClient.Close()
 
 	for salt := int64(0); salt < maxWallets; salt++ {
-		derivedAddr, derr := aa.GetSenderAddressForFactory(rpcClient, owner, factoryAddr, big.NewInt(salt))
+		derivedAddr, derr := aa.DeriveSenderAddressAuto(rpcClient, owner, factoryAddr, big.NewInt(salt))
 		if derr != nil {
 			x.logger.Debug("Failed to derive wallet address",
 				"owner", owner.Hex(), "factory", factoryAddr.Hex(), "salt", salt, "error", derr)

@@ -7,15 +7,14 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-// The default is the single most consequential line in this file. MA v2
-// derives DIFFERENT addresses for the same (owner, salt), so a default of
-// modular_account_v2 would move every existing user's wallet the moment a
-// gateway rolled out — orphaning funds and every task whose runner references
-// the old address. If someone "tidies" this to the newer value, this fails.
-func TestDefaultProviderIsSimpleAccount(t *testing.T) {
-	if got := normaliseProvider(""); got != ProviderSimpleAccount {
-		t.Fatalf("empty provider = %q, want %q — defaulting to MA v2 would move every existing wallet",
-			got, ProviderSimpleAccount)
+// The default is the single most consequential line in this file, and it must
+// track core/config's — see the cross-package guard in core/taskengine. The
+// EntryPoint v0.7 cutover moved it to modular_account_v2 on every chain. MA v2
+// derives DIFFERENT addresses for the same (owner, salt), so reverting this
+// silently moves every wallet back.
+func TestDefaultProviderIsModularAccountV2(t *testing.T) {
+	if got := normaliseProvider(""); got != ProviderModularAccountV2 {
+		t.Fatalf("empty provider = %q, want %q", got, ProviderModularAccountV2)
 	}
 }
 
@@ -32,10 +31,10 @@ func TestFactoryAddressForProvider(t *testing.T) {
 		}
 	})
 
-	t.Run("empty provider behaves as simple account", func(t *testing.T) {
+	t.Run("empty provider behaves as MA v2 and ignores the configured factory", func(t *testing.T) {
 		got, err := FactoryAddressForProvider("", simple)
-		if err != nil || got != simple {
-			t.Errorf("got (%s, %v), want (%s, nil)", got.Hex(), err, simple.Hex())
+		if err != nil || got != MAv2FactoryAddress() {
+			t.Errorf("got (%s, %v), want (%s, nil)", got.Hex(), err, MAv2FactoryAddress().Hex())
 		}
 	})
 
@@ -98,13 +97,13 @@ func TestDeriveSenderAddressRejectsUnknownProvider(t *testing.T) {
 // as an "unknown provider", which reads as a code bug rather than whitespace.
 func TestProviderNormalisationMatchesConfig(t *testing.T) {
 	for _, in := range []AccountProvider{
-		"modular_account_v2", "MODULAR_ACCOUNT_V2", " modular_account_v2 ", "Modular_Account_V2",
+		"", "   ", "modular_account_v2", "MODULAR_ACCOUNT_V2", " modular_account_v2 ", "Modular_Account_V2",
 	} {
 		if got := normaliseProvider(in); got != ProviderModularAccountV2 {
 			t.Errorf("normaliseProvider(%q) = %q, want %q", in, got, ProviderModularAccountV2)
 		}
 	}
-	for _, in := range []AccountProvider{"", "   ", "simple_account", "SIMPLE_ACCOUNT", " Simple_Account "} {
+	for _, in := range []AccountProvider{"simple_account", "SIMPLE_ACCOUNT", " Simple_Account "} {
 		if got := normaliseProvider(in); got != ProviderSimpleAccount {
 			t.Errorf("normaliseProvider(%q) = %q, want %q", in, got, ProviderSimpleAccount)
 		}

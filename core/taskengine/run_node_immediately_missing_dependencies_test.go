@@ -34,7 +34,7 @@ func TestRunNodeImmediately_ContractWrite_MissingNodeDependency(t *testing.T) {
 	}
 
 	ownerEOA := *ownerAddr
-	factory := config.SmartWallet.FactoryAddress
+	factory := effectiveFactoryAddr(t, config.SmartWallet)
 
 	// Connect to RPC client for GetSenderAddress
 	client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)

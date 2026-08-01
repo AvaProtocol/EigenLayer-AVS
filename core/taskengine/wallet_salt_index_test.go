@@ -244,7 +244,7 @@ func TestListWallets_HardFiltersStaleRows(t *testing.T) {
 	engine := New(db, cfg, nil, testutil.GetLogger())
 
 	owner := common.HexToAddress("0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788")
-	factory := cfg.SmartWallet.FactoryAddress
+	factory := effectiveFactoryAddr(t, cfg.SmartWallet)
 
 	// Two wallets for different salts, then mark one stale and verify
 	// it disappears from the list response entirely.

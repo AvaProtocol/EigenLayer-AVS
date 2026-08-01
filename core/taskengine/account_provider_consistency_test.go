@@ -5,6 +5,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // `aa` deliberately redeclares AccountProvider as its own string type instead
@@ -38,7 +39,7 @@ func TestAccountProviderConstantsMatchAcrossPackages(t *testing.T) {
 }
 
 // Both packages must also agree on what an unset value means. If config
-// defaulted to simple_account while aa defaulted to modular_account_v2 (or
+// defaulted to modular_account_v2 while aa defaulted to simple_account (or
 // vice versa), a chain with no account_provider set would be recorded as one
 // and derived as the other.
 func TestAccountProviderDefaultsAgreeAcrossPackages(t *testing.T) {
@@ -46,21 +47,29 @@ func TestAccountProviderDefaultsAgreeAcrossPackages(t *testing.T) {
 	configDefault := swCfg.AccountProviderName()
 
 	// aa's default is observable through the factory it selects for an empty
-	// provider: SimpleAccount uses the supplied factory, MA v2 ignores it.
-	simpleFactory := MAv2WalletFactory() // any non-zero address works as a probe
-	got, err := aa.FactoryAddressForProvider("", simpleFactory)
+	// provider: SimpleAccount echoes back the supplied factory, MA v2 ignores
+	// it and returns its own constant. The probe must therefore be an address
+	// that is NOT the MA v2 factory, or the two branches are indistinguishable.
+	probeFactory := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
+	if probeFactory == MAv2WalletFactory() {
+		t.Fatal("probe address collides with the MA v2 factory; pick another")
+	}
+	got, err := aa.FactoryAddressForProvider("", probeFactory)
 	if err != nil {
 		t.Fatalf("aa.FactoryAddressForProvider(\"\"): %v", err)
 	}
 
-	aaDefaultIsSimple := got == simpleFactory
+	aaDefaultIsSimple := got == probeFactory
 	configDefaultIsSimple := configDefault == config.AccountProviderSimpleAccount
 
 	if aaDefaultIsSimple != configDefaultIsSimple {
 		t.Fatalf("default mismatch: config says %q, aa resolves an empty provider differently",
 			configDefault)
 	}
-	if !configDefaultIsSimple {
-		t.Fatal("default is no longer simple_account; enabling MA v2 by default moves every existing wallet")
+	// The EntryPoint v0.7 cutover made MA v2 the default on every chain. If
+	// this flips back, an unconfigured chain silently returns to v0.6
+	// derivation and every wallet address moves again.
+	if configDefault != config.AccountProviderModularAccountV2 {
+		t.Fatalf("default is %q, want %q", configDefault, config.AccountProviderModularAccountV2)
 	}
 }

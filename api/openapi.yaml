@@ -1639,6 +1639,180 @@ components:
           type: array
           items: { $ref: '#/components/schemas/OperatorInfo' }
 
+    # -------------------------------------------------------------------
+    # Session policies
+    # -------------------------------------------------------------------
+
+    AllowedAction:
+      type: object
+      required: [target, selectors]
+      properties:
+        target:
+          $ref: '#/components/schemas/EthereumAddress'
+        selectors:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            pattern: '^0x[a-fA-F0-9]{8}$'
+          description: 4-byte function selectors permitted on the target.
+      description: One contract the agent may call, scoped to selectors.
+
+    Erc20SpendCap:
+      type: object
+      required: [token, amount]
+      properties:
+        token:
+          $ref: '#/components/schemas/EthereumAddress'
+        amount:
+          type: string
+          pattern: '^[0-9]+$'
+          description: Total cap in the token's smallest unit (decimal string, no reset).
+          example: '500000000'
+      description: |
+        Cumulative ERC-20 spend cap, enforced on-chain at execution. The
+        token must appear as an `allowedActions` target.
+
+    PreparePolicyRequest:
+      type: object
+      required: [chainId, agentLabel, allowedActions, erc20SpendCap, expiresInSeconds]
+      properties:
+        chainId: { $ref: '#/components/schemas/ChainId' }
+        agentLabel:
+          type: string
+          minLength: 1
+          maxLength: 120
+        justification:
+          type: string
+          maxLength: 500
+        allowedActions:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/AllowedAction' }
+        erc20SpendCap: { $ref: '#/components/schemas/Erc20SpendCap' }
+        expiresInSeconds:
+          type: integer
+          format: int64
+          minimum: 60
+          description: Grant lifetime, relative (skew-proof). Becomes an absolute validUntil.
+
+    PreparedPolicy:
+      type: object
+      required: [policyId, chainId, entityId, sessionSigner, deadline, validUntil, digest, typedData]
+      properties:
+        policyId: { $ref: '#/components/schemas/Ulid' }
+        chainId: { $ref: '#/components/schemas/ChainId' }
+        entityId:
+          type: integer
+          format: int64
+          description: The validation entity allocated for this grant (provisional until submit).
+        sessionSigner:
+          $ref: '#/components/schemas/EthereumAddress'
+        deadline:
+          type: integer
+          format: int64
+          description: Unix seconds; bounds signing → first use, NOT the grant lifetime.
+        validUntil:
+          type: integer
+          format: int64
+          description: Absolute grant expiry, unix milliseconds. Echo verbatim to submit.
+        digest:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{64}$'
+          description: The EIP-712 hash the typed data produces, for client-side verification.
+        typedData:
+          type: object
+          additionalProperties: true
+          description: The exact eth_signTypedData_v4 payload for the owner's wallet.
+
+    SubmitPolicyRequest:
+      type: object
+      required: [chainId, policyId, entityId, deadline, validUntil, agentLabel, allowedActions, erc20SpendCap, signature]
+      properties:
+        chainId: { $ref: '#/components/schemas/ChainId' }
+        policyId: { $ref: '#/components/schemas/Ulid' }
+        entityId:
+          type: integer
+          format: int64
+        deadline:
+          type: integer
+          format: int64
+        validUntil:
+          type: integer
+          format: int64
+          description: The ABSOLUTE expiry from prepare. It is baked into the signed calldata; recomputing it would change the digest.
+        agentLabel:
+          type: string
+          minLength: 1
+          maxLength: 120
+        justification:
+          type: string
+          maxLength: 500
+        allowedActions:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/AllowedAction' }
+        erc20SpendCap: { $ref: '#/components/schemas/Erc20SpendCap' }
+        signature:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{130}$'
+          description: The owner's 65-byte signature over the prepared digest.
+
+    SessionPolicy:
+      type: object
+      required: [id, runner, chainId, status, entityId, sessionSigner, agentLabel, validUntil, createdAt]
+      properties:
+        id: { $ref: '#/components/schemas/Ulid' }
+        runner: { $ref: '#/components/schemas/EthereumAddress' }
+        chainId: { $ref: '#/components/schemas/ChainId' }
+        status:
+          type: string
+          enum: [pending, active, revoked]
+          description: |
+            pending = signed and stored, install not yet on-chain (revocable
+            for free). active = install applied. revoked = grants nothing.
+        entityId:
+          type: integer
+          format: int64
+        sessionSigner:
+          $ref: '#/components/schemas/EthereumAddress'
+        agentLabel: { type: string }
+        justification: { type: string }
+        allowedActions:
+          type: array
+          items: { $ref: '#/components/schemas/AllowedAction' }
+        erc20SpendCap: { $ref: '#/components/schemas/Erc20SpendCap' }
+        validUntil:
+          type: integer
+          format: int64
+          description: Unix milliseconds.
+        createdAt:
+          type: integer
+          format: int64
+          description: Unix milliseconds.
+
+    SessionPolicyList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SessionPolicy' }
+
+    RevokePolicyResponse:
+      type: object
+      required: [status, onChainCleanupRequired]
+      properties:
+        status:
+          type: string
+          enum: [deleted, revoked]
+          description: deleted = was pending, nothing was ever installed. revoked = retained for audit.
+        onChainCleanupRequired:
+          type: boolean
+          description: |
+            True when the grant's validation is still installed on the
+            account and needs the owner's uninstallValidation to clear.
+
   responses:
     BadRequest:
       description: Request validation failed.
@@ -2343,6 +2517,153 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/NonceResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # =====================================================================
+  # Session policies — grants of execution authority on a wallet
+  # =====================================================================
+  # A policy is the record behind the grant screen: which agent may act on a
+  # wallet, bounded by allowed actions, an ERC-20 spend cap, and an expiry.
+  # Granting is prepare → sign → submit: the wallet needs the EIP-712 payload
+  # before the owner can sign it, and nothing is stored until the signature
+  # comes back. Fund authority — never reachable through a partner assertion.
+
+  /wallets/{address}/policies:prepare:
+    parameters:
+      - name: address
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/EthereumAddress' }
+    post:
+      tags: [Policies]
+      summary: Allocate a grant and return the EIP-712 payload the owner signs
+      description: |
+        Allocates the policy id, validation entity, and session signer, builds
+        the exact `installValidation` calldata the signature will commit to,
+        and returns the typed data for `eth_signTypedData_v4`. Stores nothing:
+        a prepare that is never submitted leaves no state behind. The echoed
+        fields must be passed back verbatim to `:submit` — the gateway
+        recomputes everything from them, so tampering only produces a
+        signature that no longer verifies.
+      operationId: prepareWalletPolicy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PreparePolicyRequest' }
+      responses:
+        '200':
+          description: Payload to sign, plus the allocations submit must echo.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PreparedPolicy' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /wallets/{address}/policies:submit:
+    parameters:
+      - name: address
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/EthereumAddress' }
+    post:
+      tags: [Policies]
+      summary: Submit the owner's signature and persist the grant
+      description: |
+        Recomputes the grant from the echoed prepare fields, verifies the
+        signature recovers to the authenticated owner, re-checks the entity
+        allocation inside the write, and stores the policy as `pending`. The
+        install itself rides the first workflow operation on this wallet —
+        nothing reaches the chain here.
+      operationId: submitWalletPolicy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitPolicyRequest' }
+      responses:
+        '201':
+          description: Grant stored; the gateway may now execute within it.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionPolicy' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            The validation entity was taken by another grant while this one
+            was being signed. Prepare again.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /wallets/{address}/policies:
+    parameters:
+      - name: address
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/EthereumAddress' }
+      - $ref: '#/components/parameters/ChainIdQuery'
+    get:
+      tags: [Policies]
+      summary: List the wallet's session policies
+      description: Grant material (calldata, signatures) is never echoed.
+      operationId: listWalletPolicies
+      responses:
+        '200':
+          description: Policies for this wallet, newest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionPolicyList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /wallets/{address}/policies/{policyId}:
+    parameters:
+      - name: address
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/EthereumAddress' }
+      - name: policyId
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Ulid' }
+      - $ref: '#/components/parameters/ChainIdQuery'
+    get:
+      tags: [Policies]
+      summary: Get one session policy
+      operationId: getWalletPolicy
+      responses:
+        '200':
+          description: The policy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionPolicy' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Policies]
+      summary: Revoke a session policy
+      description: |
+        A `pending` grant (never used on-chain) is deleted outright — nothing
+        was installed, so nothing remains. An `active` grant stops authorizing
+        immediately, but its on-chain validation still exists until the owner
+        executes `uninstallValidation`; the response says which case applied.
+      operationId: revokeWalletPolicy
+      responses:
+        '200':
+          description: Revocation outcome.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RevokePolicyResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   # =====================================================================

@@ -135,6 +135,37 @@ func (s *Server) requireWalletDeriveAuth(ctx echo.Context) (*model.User, error) 
 	return user, nil
 }
 
+// refusePartnerAssertion explicitly rejects a request that presents
+// X-Partner-Assertion on an endpoint partner delegation may never reach.
+//
+// Session-policy management is FUND AUTHORITY: a policy record carries the
+// owner's signed grant of on-chain execution rights, and creating, reading,
+// or revoking one is exactly the class of operation the package comment
+// above excludes from delegation. The failure mode this guard exists for is
+// silent non-consultation — a handler that authenticates the user JWT and
+// never looks at the assertion header, leaving a partner integrating against
+// the wrong endpoint to discover the boundary from behavior instead of from
+// an error.
+//
+// The assertion is refused WITHOUT verification, valid or not: the boundary
+// is categorical, verification costs signature checks, and a
+// validity-dependent response would make this endpoint an oracle for
+// assertion validity.
+//
+// MUST be the first line of every /policies handler (avs-infra master doc
+// §7.4a; the decision predates the routes). Returns nil when no assertion is
+// present — user-JWT requests pass through untouched.
+func refusePartnerAssertion(ctx echo.Context, capability string) error {
+	if strings.TrimSpace(ctx.Request().Header.Get(partnerAssertionHeader)) == "" {
+		return nil
+	}
+	return partnerError(http.StatusForbidden, "PARTNER_DELEGATION_UNSUPPORTED",
+		"Partner delegation not supported here",
+		fmt.Sprintf("%s is fund authority and cannot be exercised through a partner assertion. "+
+			"Partner delegation covers the no-fund simulate family only; use the end-user's "+
+			"Bearer JWT (POST /api/v1/auth:exchange) for this endpoint.", capability))
+}
+
 // verifyPartnerAssertion validates the X-Partner-Assertion header against the
 // configured partner registry. It returns:
 //

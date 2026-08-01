@@ -865,13 +865,18 @@ func CheckBundlerAvailability(bundlerURL string) error {
 // This is useful for integration tests that need wallets to be deployed before testing UserOp execution.
 // It uses GetSenderAddress to compute the wallet address, which is what the system actually uses.
 func EnsureWalletDeployed(client *ethclient.Client, factoryAddress common.Address, ownerAddress common.Address, salt *big.Int, controllerPrivateKey string) error {
-	// Set factory address so GetSenderAddress uses the correct factory
-	aa.SetFactoryAddress(factoryAddress)
-
-	// Get expected wallet address using GetSenderAddress (this is what the system uses)
-	expectedWalletPtr, err := aa.GetSenderAddress(client, ownerAddress, salt)
+	// Derive against the passed factory explicitly rather than parking it in
+	// the package global first. That global is process-wide: setting it here
+	// changed which factory unrelated tests derived against for the rest of
+	// the run, depending only on execution order.
+	//
+	// The provider is pinned to SimpleAccount because that is what this helper
+	// can actually deploy — it goes through NewSimpleFactory below. It is not
+	// a stand-in for the chain's configured provider.
+	expectedWalletPtr, err := aa.DeriveSenderAddressForFactory(
+		client, ownerAddress, factoryAddress, salt, aa.ProviderSimpleAccount)
 	if err != nil {
-		return fmt.Errorf("failed to get address from GetSenderAddress: %w", err)
+		return fmt.Errorf("failed to derive SimpleAccount address: %w", err)
 	}
 	expectedWallet := *expectedWalletPtr
 
@@ -963,7 +968,10 @@ func GetTestSmartWalletAddress(t *testing.T, client *ethclient.Client, factoryAd
 	err := EnsureWalletDeployed(client, factoryAddress, owner, salt, controllerPrivateKey)
 	require.NoError(t, err, "Failed to ensure wallet is deployed for salt %s", salt.String())
 
-	walletAddress, err := aa.GetSenderAddress(client, owner, salt)
+	// Same factory and provider EnsureWalletDeployed just deployed with, rather
+	// than whatever the package global happens to hold.
+	walletAddress, err := aa.DeriveSenderAddressForFactory(
+		client, owner, factoryAddress, salt, aa.ProviderSimpleAccount)
 	require.NoError(t, err, "Failed to get wallet address for salt %s", salt.String())
 
 	return *walletAddress

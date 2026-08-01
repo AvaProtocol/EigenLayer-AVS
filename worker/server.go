@@ -93,7 +93,7 @@ func (s *Server) ExecuteUserOp(ctx context.Context, req *avsproto.ExecuteUserOpR
 		)
 	}
 
-	userOp, receipt, err := preset.SendUserOp(
+	userOp, receipt, err := preset.SendUserOpAuto(
 		s.worker.smartWalletCfg,
 		ownerAddr,
 		req.CallData,
@@ -115,11 +115,7 @@ func (s *Server) ExecuteUserOp(ctx context.Context, req *avsproto.ExecuteUserOpR
 	}
 
 	if userOp != nil {
-		opHash := userOp.GetUserOpHash(
-			s.worker.smartWalletCfg.EntrypointAddress,
-			big.NewInt(s.worker.config.ChainID),
-		)
-		resp.UserOpHash = opHash.Hex()
+		resp.UserOpHash = userOp.UserOpHash.Hex()
 	}
 
 	if receipt != nil {
@@ -182,7 +178,10 @@ func (s *Server) GetSmartWalletAddress(ctx context.Context, req *avsproto.Worker
 	// worker's configured factory. The gateway passes its per-chain /
 	// per-request factory so worker-derived addresses match the gateway's
 	// direct-RPC derivation exactly.
-	factory := s.worker.smartWalletCfg.FactoryAddress
+	factory, factoryErr := aa.EffectiveFactory(s.worker.smartWalletCfg)
+	if factoryErr != nil {
+		return nil, factoryErr
+	}
 	if req.FactoryAddress != "" {
 		if !common.IsHexAddress(req.FactoryAddress) {
 			return nil, fmt.Errorf("invalid factory address %q", req.FactoryAddress)
@@ -190,7 +189,7 @@ func (s *Server) GetSmartWalletAddress(ctx context.Context, req *avsproto.Worker
 		factory = common.HexToAddress(req.FactoryAddress)
 	}
 
-	addr, err := aa.GetSenderAddressForFactory(
+	addr, err := aa.DeriveSenderAddressAuto(
 		s.worker.rpcClient,
 		ownerAddr,
 		factory,
@@ -460,7 +459,10 @@ func (s *Server) FindMatchingWalletSalt(ctx context.Context, req *avsproto.Worke
 		return nil, fmt.Errorf("max_salts %d exceeds cap %d", req.MaxSalts, maxWalletSaltScan)
 	}
 
-	factory := s.worker.smartWalletCfg.FactoryAddress
+	factory, factoryErr := aa.EffectiveFactory(s.worker.smartWalletCfg)
+	if factoryErr != nil {
+		return nil, factoryErr
+	}
 	if req.FactoryAddress != "" {
 		if !common.IsHexAddress(req.FactoryAddress) {
 			return nil, fmt.Errorf("invalid factory address %q", req.FactoryAddress)
@@ -475,7 +477,7 @@ func (s *Server) FindMatchingWalletSalt(ctx context.Context, req *avsproto.Worke
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		addr, err := aa.GetSenderAddressForFactory(s.worker.rpcClient, owner, factory, big.NewInt(salt))
+		addr, err := aa.DeriveSenderAddressAuto(s.worker.rpcClient, owner, factory, big.NewInt(salt))
 		if err != nil {
 			// A single failed derivation shouldn't abort the whole scan.
 			continue

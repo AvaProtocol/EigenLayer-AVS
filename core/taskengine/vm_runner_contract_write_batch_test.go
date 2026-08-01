@@ -8,7 +8,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/common"
@@ -76,7 +75,7 @@ func TestAtomicBatchOnDemand(t *testing.T) {
 	}
 
 	countingSender := func(callCount *int, captured *[]byte, status uint64) SendUserOpFunc {
-		return func(_ *config.SmartWalletConfig, _ common.Address, callData []byte, _ *preset.VerifyingPaymasterRequest, _ *common.Address, _ *big.Int, _ *big.Int, _ logger.Logger) (*userop.UserOperation, *types.Receipt, error) {
+		return func(_ *config.SmartWalletConfig, _ common.Address, callData []byte, _ *preset.VerifyingPaymasterRequest, _ *common.Address, _ *big.Int, _ *big.Int, _ logger.Logger) (*preset.SentUserOp, *types.Receipt, error) {
 			*callCount++
 			if captured != nil {
 				*captured = callData
@@ -205,7 +204,10 @@ func TestAtomicBatchOnDemand(t *testing.T) {
 		require.Equal(t, 1, callCount, "still one UserOp")
 
 		require.GreaterOrEqual(t, len(captured), 4)
-		assert.Equal(t, "c3ff72fc", common.Bytes2Hex(captured[:4]), "value-bearing batch must use executeBatchWithValues")
+		// MA v2 (the default provider) carries per-call values natively in
+		// its executeBatch tuples — the v0.6 fork's executeBatchWithValues
+		// (0xc3ff72fc) has no successor and needs none.
+		assert.Equal(t, "34fcd5be", common.Bytes2Hex(captured[:4]), "value-bearing batch must use the MA v2 executeBatch")
 		_, values, _, err := aa.UnpackExecuteCalldata(captured)
 		require.NoError(t, err)
 		require.Len(t, values, 2)

@@ -39,7 +39,19 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 func TestSendUserOp(t *testing.T) {
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
-	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+	// SendUserOp is the v0.6 path — v0.6 EntryPoint, executeBatchWithValues
+	// calldata — so it must derive a v0.6 SimpleAccount. Pin the provider
+	// explicitly: the default flipped to modular_account_v2 in the cutover
+	// (#694), which would otherwise resolve this owner+salt to an MA v2
+	// account that rejects a v0.6 UserOp at validation (nonce 0 carries no
+	// validation locator → ValidationFunctionMissing → the bundler's AA23).
+	// When the v0.6 path is removed post-cutover, this test goes with it.
+	smartWalletConfig.AccountProvider = config.AccountProviderSimpleAccount
+	smartWalletConfig.FactoryAddress = common.HexToAddress(config.DefaultFactoryProxyAddressHex)
+
+	if err := aa.SetFactoryAddressForConfig(smartWalletConfig); err != nil {
+		t.Fatalf("setting global factory: %v", err)
+	}
 
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
 	if !ok {
@@ -89,7 +101,9 @@ func TestPaymaster(t *testing.T) {
 
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
-	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+	if err := aa.SetFactoryAddressForConfig(smartWalletConfig); err != nil {
+		t.Fatalf("setting global factory: %v", err)
+	}
 
 	// Because we used the master key to signed, the address cannot be calculated from that key and need to set explicitly
 	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")

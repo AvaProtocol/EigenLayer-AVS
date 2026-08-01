@@ -352,22 +352,22 @@ func (fe *FeeEstimator) estimateWalletCreationGas(ctx context.Context, walletAdd
 		gasPrice = big.NewInt(int64(DefaultGasPrice))
 	}
 
-	// Build createAccount calldata using the factory ABI.
-	factoryAddress := fe.smartWalletConfig.FactoryAddress
-	initCodeHex, err := aa.GetInitCodeForFactory(walletAddress.Hex(), factoryAddress, big.NewInt(0))
+	// Build account-creation calldata against the factory this chain actually
+	// deploys with — the method differs between SimpleAccount and MA v2, so
+	// estimating against the configured SimpleAccount factory on an MA v2
+	// chain would price a deployment that never happens.
+	factoryAddress, err := aa.EffectiveFactory(fe.smartWalletConfig)
 	if err != nil {
-		fe.logger.Warn("Failed to build createAccount calldata, using fallback gas estimate",
+		fe.logger.Warn("Failed to resolve account factory, using fallback gas estimate",
 			"error", err, "fallback_gas", fallbackCreationGas)
 		return big.NewInt(fallbackCreationGas), gasPrice, nil
 	}
-
-	// initCode = factoryAddress (20 bytes) + calldata, so strip the factory address prefix
-	initCodeBytes := common.FromHex(initCodeHex)
-	if len(initCodeBytes) <= 20 {
-		fe.logger.Warn("InitCode too short, using fallback gas estimate", "fallback_gas", fallbackCreationGas)
+	factoryAddress, calldata, err := aa.DeriveInitCodeAuto(walletAddress, factoryAddress, big.NewInt(0))
+	if err != nil {
+		fe.logger.Warn("Failed to build account-creation calldata, using fallback gas estimate",
+			"error", err, "fallback_gas", fallbackCreationGas)
 		return big.NewInt(fallbackCreationGas), gasPrice, nil
 	}
-	calldata := initCodeBytes[20:]
 
 	// Estimate gas via eth_estimateGas against the factory contract
 	estimatedGas, err := fe.chain.EstimateGas(ctx, ethereum.CallMsg{

@@ -14,11 +14,15 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/rpc"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 )
 
-// EntryPointV07Address is the same on every chain Alchemy supports.
-const EntryPointV07Address = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
+// EntryPointV07Address is the same on every chain Alchemy supports. It is an
+// alias for config's constant rather than a second literal: two copies of an
+// address are two things to get out of step, and a mismatch would surface as
+// signatures that verify nowhere.
+const EntryPointV07Address = config.EntryPointV07AddressHex
 
 // EntryPointV07 returns the v0.7 EntryPoint address.
 func EntryPointV07() common.Address { return common.HexToAddress(EntryPointV07Address) }
@@ -58,8 +62,22 @@ const selectorGetNonce = "0x35567e1a"
 const (
 	seedVerificationGasDeploying = 200_000 // ~160k actual -> ~0.8 efficiency
 	seedVerificationGasDeployed  = 60_000  // ~45k actual  -> ~0.75 efficiency
-	initialCallGasLimit          = 500_000
-	initialPreVerificationGas    = 100_000
+
+	// Session-entity seeds, all measured on Sepolia rather than derived. Each
+	// step up is a specific cost the previous seed did not cover:
+	//
+	//   module entity      60k AA26s — validating through an installed module
+	//                      is an external call, and the entity's first use
+	//                      writes a cold nonce-key slot (~22k)
+	//   deferred install   300k AA26s — the install itself runs inside
+	//                      validation, writing cold module storage
+	//   + permission hooks 300k AA26s again — every allowlist entry is its
+	//                      own cold SSTORE, so cost scales with grant contents
+	seedVerificationGasModuleEntity  = 100_000
+	seedVerificationGasDeferredBare  = 400_000
+	seedVerificationGasDeferredHooks = 700_000
+	initialCallGasLimit              = 500_000
+	initialPreVerificationGas        = 100_000
 
 	// verificationGasEfficiencyFloor is Rundler's published threshold.
 	verificationGasEfficiencyFloor = 0.4

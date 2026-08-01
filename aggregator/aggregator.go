@@ -280,7 +280,9 @@ func (agg *Aggregator) init() {
 	}
 
 	// Setup account abstraction config
-	aa.SetFactoryAddress(agg.config.SmartWallet.FactoryAddress)
+	if err := aa.SetFactoryAddressForConfig(agg.config.SmartWallet); err != nil {
+		panic(fmt.Sprintf("smart_wallet: cannot resolve account factory: %v", err))
+	}
 	aa.SetEntrypointAddress(agg.config.SmartWallet.EntrypointAddress)
 }
 

@@ -94,7 +94,7 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		}
 		ownerEOA := *ownerAddr
 		// Factory address is automatically set by engine.New() from config.SmartWallet.FactoryAddress
-		factory := config.SmartWallet.FactoryAddress
+		factory := effectiveFactoryAddr(t, config.SmartWallet)
 
 		// Derive actual salt:0 smart wallet address (no mock needed)
 		// Connect to RPC to derive address
@@ -161,7 +161,7 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 			t.Skip("Owner EOA address not set, skipping simulation test")
 		}
 		ownerEOA := *ownerAddr
-		factory := config.SmartWallet.FactoryAddress
+		factory := effectiveFactoryAddr(t, config.SmartWallet)
 
 		// Derive actual salt:0 smart wallet address (need ethclient)
 		client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
@@ -298,7 +298,7 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		}
 		ethc, err := ethclient.Dial(rpcURL)
 		require.NoError(t, err, "Failed to connect RPC for derivation")
-		factory := config.SmartWallet.FactoryAddress
+		factory := effectiveFactoryAddr(t, config.SmartWallet)
 		derivedRunner, derr := aa.GetSenderAddress(ethc, ownerEOA, big.NewInt(0))
 		require.NoError(t, derr, "Failed to derive runner")
 

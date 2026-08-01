@@ -121,7 +121,9 @@ func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirm
 		return nil, fmt.Errorf("failed to create bundler client: %w", err)
 	}
 
-	entrypoint := v.smartWalletConfig.EntrypointAddress
+	// The EntryPoint the operation actually ran against, not the configured
+	// v0.6 address — polling the wrong one just waits out the full timeout.
+	entrypoint := v.smartWalletConfig.EntryPointAddress()
 
 	v.logger.Info("⏳ Waiting for UserOp confirmation",
 		"userOpHash", userOpHash,

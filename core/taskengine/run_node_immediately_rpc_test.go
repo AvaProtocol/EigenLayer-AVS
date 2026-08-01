@@ -29,7 +29,7 @@ func TestRunNodeImmediatelyRPC(t *testing.T) {
 		engine := New(db, config, nil, testutil.GetLogger())
 
 		smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
-		aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+		setGlobalFactory(t, smartWalletConfig)
 
 		// Create test user (simulating authenticated user from JWT)
 		ownerAddr, ok := testutil.MustGetTestOwnerAddress()
@@ -271,7 +271,7 @@ func TestRunNodeImmediatelyRPC(t *testing.T) {
 		engine := New(db, config, nil, testutil.GetLogger())
 
 		smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
-		aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+		setGlobalFactory(t, smartWalletConfig)
 
 		// Create test user (simulating authenticated user from JWT)
 		ownerAddr, ok := testutil.MustGetTestOwnerAddress()
@@ -441,7 +441,7 @@ func TestRunNodeImmediatelyRPC(t *testing.T) {
 		// reliably and the balance override is never masked by a real balance.
 		ownerEOA := common.HexToAddress("0xe8a78b476AE1403b7fD39b662545AE608Aced7c7")
 
-		aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
+		setGlobalFactory(t, config.SmartWallet)
 		client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
 		require.NoError(t, err, "Failed to connect to RPC")
 		defer client.Close()

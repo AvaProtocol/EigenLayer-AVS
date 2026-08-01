@@ -85,3 +85,29 @@ func TestBundlerConfigured(t *testing.T) {
 		t.Fatal("self_hosted without url should report not configured")
 	}
 }
+
+// The four chains the expansion targets must resolve to an Alchemy subdomain.
+// A missing entry is a hard error at send time (ActiveBundlerURL refuses to
+// guess), so it would surface as a chain that boots fine and then cannot
+// execute anything.
+func TestExpansionChainsHaveAlchemySubdomains(t *testing.T) {
+	for _, tc := range []struct {
+		chainID int64
+		want    string
+	}{
+		{56, "https://bnb-mainnet.g.alchemy.com/v2/K"},
+		{42161, "https://arb-mainnet.g.alchemy.com/v2/K"},
+		{999, "https://hyperliquid-mainnet.g.alchemy.com/v2/K"},
+		{4663, "https://robinhood-mainnet.g.alchemy.com/v2/K"},
+	} {
+		c := SmartWalletConfig{ChainID: tc.chainID, BundlerProvider: "alchemy", AlchemyAPIKey: "K"}
+		got, err := c.ActiveBundlerURL()
+		if err != nil {
+			t.Errorf("chain %d: %v", tc.chainID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("chain %d: got %s, want %s", tc.chainID, got, tc.want)
+		}
+	}
+}

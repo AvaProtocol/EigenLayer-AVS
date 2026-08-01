@@ -33,14 +33,14 @@ func TestContractWriteDataPriority(t *testing.T) {
 		engine := New(db, config, nil, testutil.GetLogger())
 
 		smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
-		aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+		setGlobalFactory(t, smartWalletConfig)
 
 		ownerAddr, ok := testutil.MustGetTestOwnerAddress()
 		if !ok {
 			t.Skip("Owner EOA address not set, skipping test")
 		}
 		ownerEOA := *ownerAddr
-		factory := config.SmartWallet.FactoryAddress
+		factory := effectiveFactoryAddr(t, config.SmartWallet)
 
 		client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
 		require.NoError(t, err, "Failed to connect to RPC")

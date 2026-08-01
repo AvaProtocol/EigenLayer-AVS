@@ -57,7 +57,7 @@ func TestRunNodeWithInputsRespectsIsSimulatedFlag(t *testing.T) {
 			engine := New(db, config, nil, testutil.GetLogger())
 
 			smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
-			aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+			setGlobalFactory(t, smartWalletConfig)
 
 			// Create test user (simulating authenticated user from JWT)
 			ownerAddr, ok := testutil.MustGetTestOwnerAddress()
@@ -246,7 +246,7 @@ func TestRunNodeWithInputsDefaultsToSimulation(t *testing.T) {
 	engine := New(db, config, nil, testutil.GetLogger())
 
 	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
-	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+	setGlobalFactory(t, smartWalletConfig)
 
 	// Create test user
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()

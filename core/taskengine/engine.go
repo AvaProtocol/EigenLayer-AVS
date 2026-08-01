@@ -389,7 +389,10 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	SetMacroSecrets(config.MacroSecrets)
 
 	SetRpc(config.SmartWallet.EthRpcUrl)
-	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
+	if err := aa.SetFactoryAddressForConfig(config.SmartWallet); err != nil {
+		panic(fmt.Sprintf("smart_wallet: cannot resolve account factory: %v", err))
+	}
+
 	//SetWsRpc(config.SmartWallet.EthWsUrl)
 
 	// Use global TokenEnrichmentService or initialize if not set
@@ -1096,13 +1099,18 @@ func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletR
 	walletsToReturnProto := []*avsproto.SmartWallet{}
 	processedAddresses := make(map[string]bool)
 
-	defaultSystemFactory := n.smartWalletConfig.FactoryAddress
+	// The chain's CURRENT factory, not the raw configured one: on an MA v2
+	// chain those differ, and deriving against the configured SimpleAccount
+	// factory would hand the user their pre-cutover address.
+	defaultSystemFactory, factoryErr := aa.EffectiveFactory(n.smartWalletConfig)
 	var defaultDerivedAddress *common.Address
 	var deriveErr error
 
 	// Only try to derive default address if rpcConn is available
-	if rpcConn != nil {
-		defaultDerivedAddress, deriveErr = aa.GetSenderAddressForFactory(rpcConn, owner, defaultSystemFactory, defaultSalt)
+	if factoryErr != nil {
+		deriveErr = factoryErr
+	} else if rpcConn != nil {
+		defaultDerivedAddress, deriveErr = aa.DeriveSenderAddressAuto(rpcConn, owner, defaultSystemFactory, defaultSalt)
 	} else {
 		// In test environment or when RPC is unavailable, skip default derivation
 		n.logger.Debug("Skipping default wallet derivation due to nil rpcConn (test environment)", "owner", owner.Hex())
@@ -1342,7 +1350,13 @@ func (n *Engine) GetWalletWithContext(ctx context.Context, user *model.User, pay
 		}
 	}
 
-	factoryAddr := swCfg.FactoryAddress
+	factoryAddr, factoryErr := aa.EffectiveFactory(swCfg)
+	if factoryErr != nil {
+		return nil, status.Errorf(codes.Internal, "GetWallet: resolve factory: %v", factoryErr)
+	}
+	// An explicit factory still wins — that is how a caller reaches a wallet
+	// created under the pre-cutover factory, whose provider is then inferred
+	// from the address itself rather than from this chain's config.
 	if payload.GetFactoryAddress() != "" {
 		factoryAddr = common.HexToAddress(payload.GetFactoryAddress())
 	}
@@ -1413,7 +1427,7 @@ func (n *Engine) GetWalletWithContext(ctx context.Context, user *model.User, pay
 				"GetWallet: cannot reach chain %d RPC: %v", chainID, dialErr)
 		}
 		defer chainRPC.Close()
-		derivedSenderAddress, err = aa.GetSenderAddressForFactory(chainRPC, user.Address, factoryAddr, saltBig)
+		derivedSenderAddress, err = aa.DeriveSenderAddressAuto(chainRPC, user.Address, factoryAddr, saltBig)
 		if err != nil {
 			n.logger.Error("GetWallet: factory.getAddress() failed",
 				"chain_id", chainID, "owner", user.Address.Hex(), "factory", factoryAddr.Hex(),
@@ -1527,7 +1541,10 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid salt format: %s", payload.GetSalt())
 	}
 
-	factoryAddr := n.smartWalletConfig.FactoryAddress // Default factory
+	factoryAddr, factoryErr := aa.EffectiveFactory(n.smartWalletConfig) // Default factory
+	if factoryErr != nil {
+		return nil, status.Errorf(codes.Internal, "SetWallet: resolve factory: %v", factoryErr)
+	}
 	if payload.GetFactoryAddress() != "" {
 		factoryAddr = common.HexToAddress(payload.GetFactoryAddress())
 	}
@@ -1536,7 +1553,7 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 		return nil, err
 	}
 
-	derivedWalletAddress, err := aa.GetSenderAddressForFactory(rpcConn, owner, factoryAddr, saltBig)
+	derivedWalletAddress, err := aa.DeriveSenderAddressAuto(rpcConn, owner, factoryAddr, saltBig)
 	if err != nil {
 		n.logger.Error("Failed to derive wallet address for SetWallet", "owner", owner.Hex(), "salt", payload.GetSalt(), "factory", payload.GetFactoryAddress(), "error", err)
 		return nil, status.Errorf(codes.Internal, "Failed to derive wallet address: %v", err)

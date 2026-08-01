@@ -157,6 +157,12 @@ jobs:
           controller-private-key: ${{ secrets.CONTROLLER_PRIVATE_KEY }}
           tenderly-access-key: ${{ secrets.TENDERLY_ACCESS_KEY }}
           owner-eoa: ${{ vars.OWNER_EOA }}
+          # The owner's key, not just its address: MA v2 wallets grant the
+          # gateway nothing by default, so live tests authorize a session
+          # grant the way production owners do, and only the owner's key can
+          # sign one (core/taskengine/session_grant_testhelper_test.go). The
+          # action exports it to the job environment for the test step.
+          test-private-key: ${{ secrets.TEST_PRIVATE_KEY }}
           moralis-api-key: ${{ secrets.MORALIS_API_KEY }}
 
       - name: Run Go test
