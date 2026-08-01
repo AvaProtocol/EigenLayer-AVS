@@ -140,10 +140,18 @@ func NewSessionResolver(
 		}
 		// The install rides the grant's FIRST operation only. Replaying an
 		// applied action would re-run installValidation on an entity that
-		// already exists.
+		// already exists. OnApplied is how the send path closes that loop:
+		// it fires when the install is known to be on-chain (receipt in
+		// hand, or the carrier nonce found consumed), and the ByID variant
+		// re-reads the record so a grant revoked mid-flight is never
+		// resurrected by a stale pointer.
 		if !policy.Grant.Applied() {
 			auth.DeferredData = policy.Grant.InstallCall
 			auth.OwnerSignature = policy.Grant.OwnerSignature
+			policyID, policyChain, policyOwner := policy.ID, policy.ChainID, *policy.Owner
+			auth.OnApplied = func(userOpHash string) error {
+				return MarkSessionGrantAppliedByID(db, policyChain, policyOwner, policyID, userOpHash)
+			}
 		}
 		return auth, nil
 	}

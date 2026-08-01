@@ -1,10 +1,12 @@
 package taskengine
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
 
+	badger "github.com/dgraph-io/badger/v4"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 
@@ -255,6 +257,37 @@ func MarkSessionGrantApplied(db storage.Storage, policy *model.SessionPolicy, us
 	policy.Grant.AppliedUserOpHash = userOpHash
 	policy.Status = model.SessionPolicyActive
 	return StoreSessionPolicy(db, policy)
+}
+
+// MarkSessionGrantAppliedByID is MarkSessionGrantApplied for callers that
+// held the policy EARLIER — the resolver's callback fires after an operation
+// confirms, and by then the record may have moved. It re-reads and only
+// transitions pending → active:
+//
+//   - Record gone: the grant was revoked (pending revokes delete outright)
+//     while its install was in flight. Nothing to update — though if the
+//     operation mined, the entity now exists on-chain with no record behind
+//     it, an orphan only the owner's uninstallValidation can clear. Reported
+//     as nil because there is no state left to make consistent.
+//   - Status not pending: never overwrite. Re-storing a stale in-memory
+//     policy here could resurrect a revoked grant as active, which is why
+//     this exists instead of handing the callback the old pointer.
+func MarkSessionGrantAppliedByID(db storage.Storage, chainID int64, owner common.Address, policyID, userOpHash string) error {
+	raw, err := db.GetKey(SessionPolicyKey(chainID, owner, policyID))
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return nil // no record — revoked while in flight; see above
+	}
+	if err != nil {
+		return fmt.Errorf("reading session policy %s: %w", policyID, err)
+	}
+	policy := &model.SessionPolicy{}
+	if err := policy.FromStorageData(raw); err != nil {
+		return fmt.Errorf("session policy %s is unreadable: %w", policyID, err)
+	}
+	if policy.Status != model.SessionPolicyPending || policy.Grant.Applied() {
+		return nil
+	}
+	return MarkSessionGrantApplied(db, policy, userOpHash)
 }
 
 // RevokeSessionGrant removes a grant.

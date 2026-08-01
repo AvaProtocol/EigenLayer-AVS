@@ -150,11 +150,19 @@ func TestMAv2SessionGrantEndToEnd(t *testing.T) {
 
 	// ---- the gateway executes, signing as the controller ---------------------
 
+	// The applied-marking callback the resolver installs in production —
+	// captured here to prove the send path invokes it with the carrying
+	// operation's hash once the receipt is in hand.
+	var appliedHash string
 	auth := &preset.SessionAuthorization{
 		EntityID:       entity,
 		SignerKey:      controllerKey,
 		DeferredData:   deferredData,
 		OwnerSignature: ownerSig,
+		OnApplied: func(userOpHash string) error {
+			appliedHash = userOpHash
+			return nil
+		},
 	}
 	require.NoError(t, auth.Validate())
 	require.True(t, auth.Deferred(), "this operation must carry the install")
@@ -167,6 +175,8 @@ func TestMAv2SessionGrantEndToEnd(t *testing.T) {
 	require.NotNil(t, receipt, "no receipt — the operation did not mine")
 	require.NotNil(t, op)
 	require.NotNil(t, op.Factory, "the first operation must also deploy the account")
+	require.NotEmpty(t, appliedHash,
+		"the send path must report the applied install so the stored grant stops attaching it")
 
 	deployed, err := chain.CodeAt(ctx, *account, nil)
 	require.NoError(t, err)

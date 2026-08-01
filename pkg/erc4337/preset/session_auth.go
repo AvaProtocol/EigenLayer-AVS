@@ -46,6 +46,21 @@ type SessionAuthorization struct {
 	// from the stored grant's contents, not guessed: an ERC-20 spend cap
 	// installs an execution hook, a time range does not.
 	WrapExecuteUserOp bool
+
+	// OnApplied is how the send path reports that the grant's install reached
+	// the chain, so the stored record stops attaching the deferred action.
+	// Set by the resolver alongside DeferredData; carried as a callback
+	// because the record lives above this package (BadgerDB, taskengine) and
+	// the send path must not reach into storage.
+	//
+	// Invoked with the carrying operation's userOpHash once its receipt is
+	// seen — or with "" when the install is discovered indirectly, by finding
+	// the carrier nonce already consumed (the only operation that ever uses a
+	// grant's deferred key is its install, so a consumed sequence IS the
+	// receipt). An error is logged by the caller, never fatal: the install
+	// succeeded on-chain, and an unrecorded one heals on the next operation
+	// through that same consumed-nonce path.
+	OnApplied func(userOpHash string) error
 }
 
 // Deferred reports whether this operation carries the grant's install.

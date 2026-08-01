@@ -136,14 +136,34 @@ func SendUserOpMAv2(
 	// overlap the first in the mempool (getNonce alone reads mined state and
 	// AA25s any sequential pair). Deferred operations bypass it: the owner's
 	// signature committed to sequence zero at grant time, so no cached value
-	// may substitute — the only question is whether that nonce is still
-	// unused, checked explicitly for a clear error.
+	// may substitute.
 	nonceEntity, nonceOptions := auth.nonceEntity()
 	var nonce *big.Int
 	if auth.Deferred() {
 		nonce, err = NextNonceV07(ctx, bundlerRPC, entryPoint, sender, nonceEntity, nonceOptions)
 		if err == nil {
-			err = VerifyDeferredNonceUnused(nonce)
+			var sequence uint64
+			if _, _, sequence, err = userop.DecodeNonceMAv2(nonce); err == nil && sequence != 0 {
+				// The carrier sequence is consumed, and the only operation
+				// that ever uses a grant's deferred key is its install: the
+				// install MINED without this process seeing the receipt (a
+				// confirmation timeout, or a crash between send and record).
+				// Not an error — record the fact and run this operation as
+				// an ordinary one under the now-installed entity.
+				l.Info("grant install found already applied on-chain; recording and continuing plain",
+					"sender", sender.Hex(), "entity", auth.EntityID, "sequence", sequence)
+				if auth.OnApplied != nil {
+					if markErr := auth.OnApplied(""); markErr != nil {
+						l.Error("grant is applied on-chain but could not be recorded; the next operation will retry",
+							"sender", sender.Hex(), "error", markErr)
+					}
+				}
+				auth.DeferredData, auth.OwnerSignature = nil, nil
+				nonceEntity, nonceOptions = auth.nonceEntity()
+				op.Signature = nil
+				op.VerificationGasLimit = seedVerificationGasFor(op, auth)
+				nonce, err = NextNonceV07Managed(ctx, bundlerRPC, entryPoint, sender, nonceEntity, nonceOptions)
+			}
 		}
 	} else {
 		nonce, err = NextNonceV07Managed(ctx, bundlerRPC, entryPoint, sender, nonceEntity, nonceOptions)
@@ -233,9 +253,34 @@ func SendUserOpMAv2(
 			l.Warn("websocket dial failed, polling for the receipt instead", "error", wsErr)
 		}
 	}
+	installsGrant := auth.Deferred()
 	receipt, err := waitForUserOpConfirmation(chainRPC, wsClient, entryPoint, opHash.Hex(), l)
 	if err != nil {
+		// Includes the mined-but-execution-reverted case — in which the
+		// install DID apply (it runs in the validation frame, which an
+		// execution revert does not roll back, results doc §3.4). Not marked
+		// here because this path cannot distinguish that from a true
+		// validation-level failure; the next operation heals it through the
+		// consumed-carrier-nonce path above.
 		return op, nil, err
+	}
+	if installsGrant {
+		if receipt == nil {
+			// Confirmation timed out with the operation still pending. The
+			// grant stays recorded as pending; if the install mines later,
+			// the next operation discovers the consumed carrier nonce and
+			// records it then.
+			l.Info("grant install sent but unconfirmed; recording deferred to the next operation",
+				"sender", sender.Hex(), "userop_hash", opHash.Hex())
+		} else if auth.OnApplied != nil {
+			// The install is on-chain. Record it so the stored grant stops
+			// attaching the deferred action — attaching a consumed one would
+			// fail every subsequent operation on this wallet.
+			if markErr := auth.OnApplied(opHash.Hex()); markErr != nil {
+				l.Error("grant applied on-chain but could not be recorded; the next operation will retry",
+					"sender", sender.Hex(), "userop_hash", opHash.Hex(), "error", markErr)
+			}
+		}
 	}
 	return op, receipt, nil
 }
