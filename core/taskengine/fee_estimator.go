@@ -342,6 +342,12 @@ func (fe *FeeEstimator) resolveRunnerAndWalletCreation(ctx context.Context, req 
 
 // estimateWalletCreationGas estimates gas needed for smart wallet creation
 // by calling eth_estimateGas against the factory's createAccount method.
+// feeEstimationDummyOwner is a placeholder owner used only to build
+// representative account-creation init code for gas estimation. The deploy
+// cost does not depend on the owner value, and the real owner is not available
+// on the fee-estimation path — so a fixed non-zero address stands in.
+var feeEstimationDummyOwner = common.HexToAddress("0x000000000000000000000000000000000000dEaD")
+
 func (fe *FeeEstimator) estimateWalletCreationGas(ctx context.Context, walletAddress common.Address) (*big.Int, *big.Int, error) {
 	const fallbackCreationGas = int64(500000) // Conservative fallback for ERC-6900 wallet deployment
 
@@ -362,7 +368,13 @@ func (fe *FeeEstimator) estimateWalletCreationGas(ctx context.Context, walletAdd
 			"error", err, "fallback_gas", fallbackCreationGas)
 		return big.NewInt(fallbackCreationGas), gasPrice, nil
 	}
-	factoryAddress, calldata, err := aa.DeriveInitCodeAuto(walletAddress, factoryAddress, big.NewInt(0))
+	// Deploy gas is independent of the owner baked into the CREATE2 init code,
+	// and the real owner is not in scope on this estimation path — so use a
+	// fixed placeholder rather than walletAddress. Passing the wallet as its
+	// own owner prices creation of a *different*, wallet-owned account; the gas
+	// happens to match, which is why this was latent, but it is misleading and
+	// should not be relied on.
+	factoryAddress, calldata, err := aa.DeriveInitCodeAuto(feeEstimationDummyOwner, factoryAddress, big.NewInt(0))
 	if err != nil {
 		fe.logger.Warn("Failed to build account-creation calldata, using fallback gas estimate",
 			"error", err, "fallback_gas", fallbackCreationGas)
@@ -386,7 +398,7 @@ func (fe *FeeEstimator) estimateWalletCreationGas(ctx context.Context, walletAdd
 	bufferedGas.Add(bufferedGas, buffer)
 
 	fe.logger.Info("Estimated wallet creation gas via eth_estimateGas",
-		"raw_gas", estimatedGas, "buffered_gas", bufferedGas, "factory", factoryAddress.Hex())
+		"wallet", walletAddress.Hex(), "raw_gas", estimatedGas, "buffered_gas", bufferedGas, "factory", factoryAddress.Hex())
 
 	return bufferedGas, gasPrice, nil
 }

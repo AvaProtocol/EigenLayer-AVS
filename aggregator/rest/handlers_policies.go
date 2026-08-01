@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 	"github.com/labstack/echo/v4"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
@@ -296,7 +297,32 @@ func typedDataJSON(policy *model.SessionPolicy) (map[string]interface{}, error) 
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, err
 	}
+
+	// go-ethereum's TypedDataDomain has no `omitempty`, so marshalling it
+	// emits name, version and salt as empty strings even though this domain
+	// declares neither. EIP-712 says a verifier reads the domain through its
+	// TYPE, so the digest is unaffected — but strict clients validate the
+	// object, and ethers v6 rejects the payload outright ("invalid BytesLike
+	// value" for salt: ""). Emit only what EIP712Domain declares.
+	out["domain"] = filterToDeclaredFields(out["domain"], typed.Types["EIP712Domain"])
 	return out, nil
+}
+
+// filterToDeclaredFields drops domain keys the EIP712Domain type does not
+// declare. Keyed off the type rather than a hardcoded list so a future domain
+// that does carry a name or version keeps it without another fix here.
+func filterToDeclaredFields(domain interface{}, declared []apitypes.Type) interface{} {
+	fields, ok := domain.(map[string]interface{})
+	if !ok {
+		return domain
+	}
+	kept := make(map[string]interface{}, len(declared))
+	for _, f := range declared {
+		if v, present := fields[f.Name]; present {
+			kept[f.Name] = v
+		}
+	}
+	return kept
 }
 
 // mapPolicyError translates engine sentinels into REST problems.
