@@ -100,15 +100,30 @@ func NextNonceV07Managed(ctx context.Context, client *rpc.Client, entryPoint, se
 // NoteUserOpAccepted records that the bundler accepted an operation at
 // usedNonce, so the next operation on the same key overlaps it in the
 // mempool instead of colliding with it.
+//
+// The successor is built by re-encoding sequence+1 under the slot's own key
+// rather than adding 1 to the full 256-bit nonce: the layout is
+// [192-bit key][64-bit sequence], and a bare +1 at the sequence ceiling
+// would carry into the key half and cache a nonce for a different validation
+// entirely. Unrepresentable states drop the record — a missing cache entry
+// costs a chain read; a corrupt one costs an AA25.
 func NoteUserOpAccepted(sender common.Address, entityID uint32, options uint8, usedNonce *big.Int) {
 	slot, err := slotV07(sender, entityID, options)
 	if err != nil || usedNonce == nil {
 		return // an unencodable slot was never cached; nothing to record
 	}
+	_, _, sequence, err := userop.DecodeNonceMAv2(usedNonce)
+	if err != nil || sequence == ^uint64(0) {
+		return
+	}
+	next, err := userop.EncodeNonceMAv2(entityID, options, sequence+1)
+	if err != nil {
+		return
+	}
 	m := globalNonceManagerV07
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.next[slot] = new(big.Int).Add(usedNonce, big.NewInt(1))
+	m.next[slot] = next
 }
 
 // InvalidateNonce drops the cached counter so the next read is authoritative

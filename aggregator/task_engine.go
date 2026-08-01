@@ -227,6 +227,11 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		agg.queue,
 		agg.logger,
 	)
+	// Teach the send path where session grants live. Installed here — the one
+	// place a single production engine exists — rather than in New, which test
+	// suites call many times per process (the resolver is process-global, and
+	// engines constructed later would silently overwrite earlier ones).
+	agg.engine.InstallSessionResolver()
 
 	// Price service for fee conversion (USD → ETH and ERC20 lookups). When
 	// Moralis isn't configured, it stays nil and callers gracefully degrade

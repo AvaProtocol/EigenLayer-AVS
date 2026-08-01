@@ -48,12 +48,6 @@ func SendUserOpMAv2(
 	if err := auth.Validate(); err != nil {
 		return nil, nil, err
 	}
-	// Without a session authorization the operation runs as the account's
-	// fallback signer, which only the OWNER's key can do. The gateway does not
-	// hold it, so this path exists for callers that supply their own signer.
-	if auth == nil && smartWalletConfig.ControllerPrivateKey == nil {
-		return nil, nil, fmt.Errorf("no controller private key configured")
-	}
 
 	bundlerURL, err := smartWalletConfig.ActiveBundlerURL()
 	if err != nil {
@@ -89,6 +83,27 @@ func SendUserOpMAv2(
 	sender, err := resolveSenderV07(chainRPC, owner, factory, salt, senderOverride)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// A caller that supplies no authorization gets the stored grant for THIS
+	// wallet — looked up only now, because grants are keyed by the smart
+	// wallet's address and the sender is not known until it is resolved.
+	// Resolving earlier against the owner EOA (or a guessed wallet) finds
+	// nothing and signs as the fallback entity the gateway cannot validate
+	// for.
+	if auth == nil {
+		if auth, err = resolveSession(smartWalletConfig.ChainID, owner, sender); err != nil {
+			return nil, nil, fmt.Errorf("resolving session authorization for %s: %w", sender.Hex(), err)
+		}
+		if err = auth.Validate(); err != nil {
+			return nil, nil, err
+		}
+	}
+	// Without a session authorization the operation runs as the account's
+	// fallback signer, which only the OWNER's key can do. The gateway does not
+	// hold it, so this path exists for callers that supply their own signer.
+	if auth == nil && smartWalletConfig.ControllerPrivateKey == nil {
+		return nil, nil, fmt.Errorf("no controller private key configured")
 	}
 
 	// A grant carrying execution hooks requires user-op context on EVERY

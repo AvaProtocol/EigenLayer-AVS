@@ -355,13 +355,14 @@ func PackExecuteBatchWithValues(targetAddresses []common.Address, values []*big.
 	return result, nil
 }
 
-// UnpackExecuteCalldata decodes SimpleAccount smart-wallet calldata — produced by PackExecute,
-// PackExecuteBatch, or PackExecuteBatchWithValues — back into per-call (target, value, data)
-// tuples. It dispatches on the 4-byte function selector via the embedded ABI, so it stays correct
-// regardless of which pack helper produced the calldata:
-//   - execute(address,uint256,bytes)                  → one entry
-//   - executeBatch(address[],bytes[])                 → N entries, all values 0
-//   - executeBatchWithValues(address[],uint256[],bytes[]) → N entries with explicit values
+// UnpackExecuteCalldata decodes smart-wallet execution calldata — produced by any of the pack
+// helpers, v0.6 or MA v2 — back into per-call (target, value, data) tuples. It dispatches on the
+// 4-byte function selector via the embedded ABIs, so it stays correct regardless of which pack
+// helper produced the calldata:
+//   - execute(address,uint256,bytes)                  → one entry (identical in both accounts)
+//   - executeBatch(address[],bytes[])                 → N entries, all values 0 (v0.6)
+//   - executeBatchWithValues(address[],uint256[],bytes[]) → N entries with explicit values (v0.6 fork)
+//   - executeBatch((address,uint256,bytes)[])         → N entries, per-tuple values (MA v2)
 //
 // It is the inverse the paymaster reimbursement wrapper needs to append its own batch entries onto
 // an already-batched call without having to know how that call was originally packed.
@@ -377,7 +378,9 @@ func UnpackExecuteCalldata(calldata []byte) (targets []common.Address, values []
 	selector := calldata[:4]
 	method, err := parsedABI.MethodById(selector)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("unrecognized smart-wallet method selector 0x%x: %w", selector, err)
+		// Not a v0.6 SimpleAccount method — try the MA v2 account, whose
+		// batch selector differs (tuple-array form; see ma_v2.go).
+		return unpackExecuteCalldataMAv2(calldata, selector)
 	}
 
 	args, err := method.Inputs.Unpack(calldata[4:])
@@ -440,4 +443,34 @@ func UnpackExecuteCalldata(calldata []byte) (targets []common.Address, values []
 	default:
 		return nil, nil, nil, fmt.Errorf("unsupported smart-wallet method %q for reimbursement wrapping", method.Name)
 	}
+}
+
+// unpackExecuteCalldataMAv2 decodes the MA v2 executeBatch tuple form.
+// (MA v2's `execute` shares the v0.6 selector and never reaches here.)
+func unpackExecuteCalldataMAv2(calldata, selector []byte) (targets []common.Address, values []*big.Int, datas [][]byte, err error) {
+	parsedABI, err := ensureModularAccountABI()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	method, err := parsedABI.MethodById(selector)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("unrecognized smart-wallet method selector 0x%x: %w", selector, err)
+	}
+	args, err := method.Inputs.Unpack(calldata[4:])
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to unpack MA v2 %s calldata: %w", method.Name, err)
+	}
+	if method.Name != "executeBatch" || len(args) != 1 {
+		return nil, nil, nil, fmt.Errorf("unsupported MA v2 smart-wallet method %q", method.Name)
+	}
+	calls := *abi.ConvertType(args[0], new([]Call)).(*[]Call)
+	targets = make([]common.Address, len(calls))
+	values = make([]*big.Int, len(calls))
+	datas = make([][]byte, len(calls))
+	for i, call := range calls {
+		targets[i] = call.Target
+		values[i] = call.Value
+		datas[i] = call.Data
+	}
+	return targets, values, datas, nil
 }

@@ -72,8 +72,10 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 	if err := ctx.Bind(&req); err != nil {
 		return badRequest("POLICIES_BAD_BODY", "Invalid request body", err.Error())
 	}
-	if req.ExpiresInSeconds <= 0 {
-		return badRequest("POLICIES_BAD_EXPIRY", "Invalid expiry", "expiresInSeconds must be positive.")
+	// Matches the published contract (openapi.yaml minimum: 60): a
+	// sub-minute grant expires before its first operation can mine.
+	if req.ExpiresInSeconds < 60 {
+		return badRequest("POLICIES_BAD_EXPIRY", "Invalid expiry", "expiresInSeconds must be at least 60.")
 	}
 	perms, err := permissionsFromAPI(req.AllowedActions, &req.Erc20SpendCap, nowMs()+req.ExpiresInSeconds*1000)
 	if err != nil {

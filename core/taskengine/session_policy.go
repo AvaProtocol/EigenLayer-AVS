@@ -107,6 +107,22 @@ func NextSessionEntityID(db storage.Storage, chainID int64, owner, wallet common
 	return next, nil
 }
 
+// InstallSessionResolver wires the send path to this engine's session-policy
+// storage. Without it every MA v2 operation is signed as the account's
+// fallback signer — the user's EOA, whose key the gateway does not hold — so
+// nothing the gateway executes validates.
+//
+// Called once at aggregator startup, deliberately NOT from New: the resolver
+// is process-global (the preset package has no per-engine context), and test
+// suites construct many engines whose constructors would silently overwrite
+// each other's resolver — the last-built engine would then answer authority
+// questions for all of them. The single production engine installs it
+// explicitly; tests that need one install their own scoped to their own
+// database.
+func (n *Engine) InstallSessionResolver() {
+	preset.SetSessionResolver(NewSessionResolver(n.db, controllerSessionSigner(n.config)))
+}
+
 // NewSessionResolver builds the resolver the send path consults, backed by
 // storage and a key lookup.
 //
