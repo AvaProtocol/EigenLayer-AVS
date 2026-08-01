@@ -67,6 +67,12 @@ func SendUserOpMAv2(
 	}
 	defer bundlerRPC.Close()
 
+	// Nonce reads are plain eth_calls and go to the CHAIN rpc. The bundler
+	// endpoint only advertises the ERC-4337 namespace on some providers
+	// (Voltaire answers eth_call with Method-not-found; Alchemy happens to
+	// serve both from one URL, which is how this hid during development).
+	nonceRPC := chainRPC.Client()
+
 	entryPoint := EntryPointV07()
 	chainID := big.NewInt(smartWalletConfig.ChainID)
 
@@ -155,7 +161,7 @@ func SendUserOpMAv2(
 	nonceEntity, nonceOptions := auth.nonceEntity()
 	var nonce *big.Int
 	if auth.Deferred() {
-		nonce, err = NextNonceV07(ctx, bundlerRPC, entryPoint, sender, nonceEntity, nonceOptions)
+		nonce, err = NextNonceV07(ctx, nonceRPC, entryPoint, sender, nonceEntity, nonceOptions)
 		if err == nil {
 			var sequence uint64
 			if _, _, sequence, err = userop.DecodeNonceMAv2(nonce); err == nil && sequence != 0 {
@@ -177,11 +183,11 @@ func SendUserOpMAv2(
 				nonceEntity, nonceOptions = auth.nonceEntity()
 				op.Signature = nil
 				op.VerificationGasLimit = seedVerificationGasFor(op, auth)
-				nonce, err = NextNonceV07Managed(ctx, bundlerRPC, entryPoint, sender, nonceEntity, nonceOptions)
+				nonce, err = NextNonceV07Managed(ctx, nonceRPC, entryPoint, sender, nonceEntity, nonceOptions)
 			}
 		}
 	} else {
-		nonce, err = NextNonceV07Managed(ctx, bundlerRPC, entryPoint, sender, nonceEntity, nonceOptions)
+		nonce, err = NextNonceV07Managed(ctx, nonceRPC, entryPoint, sender, nonceEntity, nonceOptions)
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading nonce: %w", err)
@@ -233,7 +239,7 @@ func SendUserOpMAv2(
 		// once. Deferred operations are excluded — their nonce is committed
 		// by the owner's signature and cannot be substituted.
 		InvalidateNonce(sender, nonceEntity, nonceOptions)
-		freshNonce, nonceErr := NextNonceV07Managed(ctx, bundlerRPC, entryPoint, sender, nonceEntity, nonceOptions)
+		freshNonce, nonceErr := NextNonceV07Managed(ctx, nonceRPC, entryPoint, sender, nonceEntity, nonceOptions)
 		if nonceErr == nil && freshNonce.Cmp(op.Nonce) != 0 {
 			l.Info("retrying after AA25 with the chain's nonce",
 				"sender", sender.Hex(), "stale", op.Nonce.String(), "fresh", freshNonce.String())
