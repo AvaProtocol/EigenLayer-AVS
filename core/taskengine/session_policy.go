@@ -5,7 +5,9 @@ import (
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -144,5 +146,37 @@ func NewSessionResolver(
 			auth.OwnerSignature = policy.Grant.OwnerSignature
 		}
 		return auth, nil
+	}
+}
+
+// controllerSessionSigner resolves a session signer to its key.
+//
+// Today every policy is signed by the gateway's controller key, so this
+// accepts exactly that address and refuses anything else. That is a deliberate
+// interim: avs-infra §7.4 describes session_signer as gateway-ASSIGNED, one
+// fresh key per policy, which needs key generation and custody this gateway
+// does not have yet.
+//
+// What matters is that the interim does not weaken the model. Authority is
+// still per grant, because each policy occupies its own validation ENTITY —
+// and the entity, not the key, is what carries the hooks, the revocation
+// target, and the nonce space that makes grant-time signing work. Sharing one
+// key across entities means a compromised controller reaches every grant, but
+// that is already true of the controller today.
+//
+// Refusing an unknown signer is the important half: a policy naming a key we
+// cannot produce must fail loudly here, not sign with the wrong one.
+func controllerSessionSigner(cfg *config.Config) func(common.Address) (*ecdsa.PrivateKey, error) {
+	return func(signer common.Address) (*ecdsa.PrivateKey, error) {
+		if cfg == nil || cfg.SmartWallet == nil || cfg.SmartWallet.ControllerPrivateKey == nil {
+			return nil, fmt.Errorf("no controller key configured; cannot sign as session signer %s", signer.Hex())
+		}
+		controller := crypto.PubkeyToAddress(cfg.SmartWallet.ControllerPrivateKey.PublicKey)
+		if signer != controller {
+			return nil, fmt.Errorf(
+				"session signer %s is not the gateway controller %s; per-policy signer keys are not implemented",
+				signer.Hex(), controller.Hex())
+		}
+		return cfg.SmartWallet.ControllerPrivateKey, nil
 	}
 }

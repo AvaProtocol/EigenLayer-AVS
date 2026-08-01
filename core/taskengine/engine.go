@@ -20,6 +20,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
@@ -392,6 +393,11 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	if err := aa.SetFactoryAddressForConfig(config.SmartWallet); err != nil {
 		panic(fmt.Sprintf("smart_wallet: cannot resolve account factory: %v", err))
 	}
+
+	// Teach the send path where session grants live. Without this every MA v2
+	// operation is signed as the account's fallback signer -- the user's EOA,
+	// whose key we do not hold -- so nothing the gateway executes validates.
+	preset.SetSessionResolver(NewSessionResolver(db, controllerSessionSigner(config)))
 	//SetWsRpc(config.SmartWallet.EthWsUrl)
 
 	// Use global TokenEnrichmentService or initialize if not set
