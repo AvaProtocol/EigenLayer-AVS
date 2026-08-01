@@ -267,3 +267,36 @@ func TestPoliciesSubmitRejectsTamperedCapOverHTTP(t *testing.T) {
 	require.True(t, strings.Contains(rec.Body.String(), "POLICIES_BAD_SIGNATURE"),
 		"a tampered echo must surface as a signature mismatch, got: %s", rec.Body.String())
 }
+
+// go-ethereum's TypedDataDomain has no `omitempty`, so a naive marshal emits
+// name, version and salt as empty strings. EIP-712 verifiers read the domain
+// through its TYPE, so the digest is unaffected and this looks harmless — but
+// ethers v6 validates the object and rejects `salt: ""` outright with
+// "invalid BytesLike value", which fails the grant before it is ever signed.
+// Found by running the SDK's grant flow against a live gateway.
+func TestTypedDataDomainCarriesOnlyDeclaredFields(t *testing.T) {
+	rig := newPolicyRig(t)
+	rec := rig.call(t, prepareBody(policyTestChain), func(c echo.Context) error {
+		return rig.server.PrepareWalletPolicy(c, generated.EthereumAddress(rig.wallet.Hex()))
+	}, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var prepared generated.PreparedPolicy
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &prepared))
+	domain, ok := prepared.TypedData["domain"].(map[string]interface{})
+	require.True(t, ok, "domain should be an object")
+
+	// go-ethereum's TypedDataDomain has no `omitempty`, so a naive marshal
+	// emits name, version and salt as empty strings. EIP-712 verifiers read
+	// the domain through its TYPE, so the digest is unaffected and this looks
+	// harmless — but ethers v6 validates the object and rejects `salt: ""`
+	// with "invalid BytesLike value", failing the grant before it is signed.
+	// Found by running the SDK grant flow against a live gateway.
+	for _, undeclared := range []string{"name", "version", "salt"} {
+		require.NotContains(t, domain, undeclared,
+			"domain carries %q, which EIP712Domain does not declare; strict clients reject it", undeclared)
+	}
+	for _, declared := range []string{"chainId", "verifyingContract"} {
+		require.Contains(t, domain, declared)
+	}
+}
