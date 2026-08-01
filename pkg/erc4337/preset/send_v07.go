@@ -131,8 +131,23 @@ func SendUserOpMAv2(
 	// MA v2 selects its validation function from the NONCE, not the signature.
 	// A zero nonce reverts with ValidationFunctionMissing rather than as a
 	// nonce error, which is the single most misleading failure on this path.
+	//
+	// Plain operations read through the nonce manager so a second write can
+	// overlap the first in the mempool (getNonce alone reads mined state and
+	// AA25s any sequential pair). Deferred operations bypass it: the owner's
+	// signature committed to sequence zero at grant time, so no cached value
+	// may substitute — the only question is whether that nonce is still
+	// unused, checked explicitly for a clear error.
 	nonceEntity, nonceOptions := auth.nonceEntity()
-	nonce, err := NextNonceV07(ctx, bundlerRPC, entryPoint, sender, nonceEntity, nonceOptions)
+	var nonce *big.Int
+	if auth.Deferred() {
+		nonce, err = NextNonceV07(ctx, bundlerRPC, entryPoint, sender, nonceEntity, nonceOptions)
+		if err == nil {
+			err = VerifyDeferredNonceUnused(nonce)
+		}
+	} else {
+		nonce, err = NextNonceV07Managed(ctx, bundlerRPC, entryPoint, sender, nonceEntity, nonceOptions)
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading nonce: %w", err)
 	}
@@ -175,9 +190,33 @@ func SendUserOpMAv2(
 	}
 
 	opHash, err := SendUserOpV07WithRetry(ctx, bundlerRPC, op, entryPoint, chainID, signingKey)
+	if err != nil && !auth.Deferred() && isInvalidNonceError(err) {
+		// AA25 covers both directions of cache drift — a duplicate (another
+		// operation took this sequence) and a gap (a cached pending operation
+		// was dropped). Either way the cache is wrong: drop it, take the
+		// chain's answer, re-sign (the nonce is in the userOpHash), retry
+		// once. Deferred operations are excluded — their nonce is committed
+		// by the owner's signature and cannot be substituted.
+		InvalidateNonce(sender, nonceEntity, nonceOptions)
+		freshNonce, nonceErr := NextNonceV07Managed(ctx, bundlerRPC, entryPoint, sender, nonceEntity, nonceOptions)
+		if nonceErr == nil && freshNonce.Cmp(op.Nonce) != 0 {
+			l.Info("retrying after AA25 with the chain's nonce",
+				"sender", sender.Hex(), "stale", op.Nonce.String(), "fresh", freshNonce.String())
+			op.Nonce = freshNonce
+			if signErr := SignUserOpV07(op, entryPoint, chainID, signingKey); signErr == nil {
+				opHash, err = SendUserOpV07WithRetry(ctx, bundlerRPC, op, entryPoint, chainID, signingKey)
+			}
+		}
+	}
 	if err != nil {
+		InvalidateNonce(sender, nonceEntity, nonceOptions)
 		return op, nil, fmt.Errorf("sending user operation: %w", err)
 	}
+	// Record acceptance NOW — the bundler holds the operation, so the next
+	// one on this key must use the following sequence even though nothing has
+	// mined yet. This is the line that lets sequential contract writes
+	// overlap the mempool instead of dying AA25.
+	NoteUserOpAccepted(sender, nonceEntity, nonceOptions, op.Nonce)
 	l.Info("v0.7 user operation sent",
 		"sender", sender.Hex(), "userop_hash", opHash.Hex(),
 		"sponsored", op.Paymaster != nil, "deploying", op.Factory != nil,
