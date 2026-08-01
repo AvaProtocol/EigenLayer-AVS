@@ -286,12 +286,6 @@ func TestTypedDataDomainCarriesOnlyDeclaredFields(t *testing.T) {
 	domain, ok := prepared.TypedData["domain"].(map[string]interface{})
 	require.True(t, ok, "domain should be an object")
 
-	// go-ethereum's TypedDataDomain has no `omitempty`, so a naive marshal
-	// emits name, version and salt as empty strings. EIP-712 verifiers read
-	// the domain through its TYPE, so the digest is unaffected and this looks
-	// harmless — but ethers v6 validates the object and rejects `salt: ""`
-	// with "invalid BytesLike value", failing the grant before it is signed.
-	// Found by running the SDK grant flow against a live gateway.
 	for _, undeclared := range []string{"name", "version", "salt"} {
 		require.NotContains(t, domain, undeclared,
 			"domain carries %q, which EIP712Domain does not declare; strict clients reject it", undeclared)
