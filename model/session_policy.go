@@ -41,6 +41,14 @@ type SessionPolicy struct {
 	AgentLabel    string `json:"agent_label,omitempty"`
 	Justification string `json:"justification,omitempty"`
 
+	// AllowedActions and ERC20SpendCap are the grant's declared permissions
+	// (master §7.2 P1/P2), stored for the manage screen and for rebuilding
+	// the module-cleanup payload at revocation. Display/rebuild data only:
+	// what the owner actually authorized is Grant.InstallCall, and these must
+	// never be re-encoded into it after signing.
+	AllowedActions []AllowedAction `json:"allowed_actions,omitempty"`
+	ERC20SpendCap  *ERC20SpendCap  `json:"erc20_spend_cap,omitempty"`
+
 	// Grant is the owner's authorization. Absent once applied is not a valid
 	// state: it is retained so revocation can reproduce the module cleanup
 	// payload, which is the same (entityId, inputs) tuple as the install.
@@ -53,6 +61,22 @@ type SessionPolicy struct {
 
 	Status    SessionPolicyStatus `json:"status"`
 	CreatedAt int64               `json:"created_at"`
+}
+
+// AllowedAction is one contract the grant's agent may call, scoped to
+// function selectors (master §7.2 P1).
+type AllowedAction struct {
+	Target    *common.Address `json:"target"`
+	Selectors []string        `json:"selectors"` // 0x-prefixed 4-byte selectors
+}
+
+// ERC20SpendCap is the grant's cumulative token cap (master §7.2 P2).
+// GrantedCap preserves the original total for "used X of Y" rendering — the
+// on-chain module only exposes the remainder.
+type ERC20SpendCap struct {
+	Token      *common.Address `json:"token"`
+	Amount     string          `json:"amount"`      // smallest unit, decimal string
+	GrantedCap string          `json:"granted_cap"` // == Amount at grant time
 }
 
 // SessionGrantAuthorization is the owner's signed deferred action.

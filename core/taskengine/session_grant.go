@@ -39,6 +39,20 @@ type SessionGrantRequest struct {
 	// signature covers them too.
 	Hooks [][]byte
 
+	// HooksFor builds the hooks once the entity is known. Hook install data
+	// embeds the entity id, and the entity is allocated inside
+	// PrepareSessionGrant — so a caller that does not already know its entity
+	// (the REST prepare path) supplies this instead of Hooks. When set it
+	// wins over Hooks.
+	HooksFor func(entityID uint32) ([][]byte, error)
+
+	// Deadline pins the signing-window bound to an absolute uint48 unix-
+	// seconds value instead of now+SigningWindow. The submit path needs this:
+	// the deadline is inside the signed digest, so reproducing the prepared
+	// grant deterministically requires the original value, not a fresh clock
+	// reading. Zero means derive from SigningWindow.
+	Deadline uint64
+
 	// Selectors scopes the grant. Empty means a global grant, which requires
 	// an execution hook — see aa.SessionGrant.
 	Selectors [][4]byte
@@ -111,11 +125,18 @@ func PrepareSessionGrant(
 		return nil, err
 	}
 
+	hooks := req.Hooks
+	if req.HooksFor != nil {
+		if hooks, err = req.HooksFor(entity); err != nil {
+			return nil, fmt.Errorf("building hooks for entity %d: %w", entity, err)
+		}
+	}
+
 	grant := aa.SessionGrant{
 		EntityID:  entity,
 		Signer:    sessionSigner,
 		Selectors: req.Selectors,
-		Hooks:     req.Hooks,
+		Hooks:     hooks,
 		Global:    len(req.Selectors) == 0,
 
 		AllowSelfAdministration: req.AllowSelfAdministration,
@@ -125,11 +146,14 @@ func PrepareSessionGrant(
 		return nil, fmt.Errorf("building the grant for wallet %s: %w", req.Wallet.Hex(), err)
 	}
 
-	window := req.SigningWindow
-	if window <= 0 {
-		window = defaultSigningWindow
+	deadline := req.Deadline
+	if deadline == 0 {
+		window := req.SigningWindow
+		if window <= 0 {
+			window = defaultSigningWindow
+		}
+		deadline = uint64(time.Now().Add(window).Unix())
 	}
-	deadline := uint64(time.Now().Add(window).Unix())
 
 	// The digest commits to the FULL nonce of the operation that will carry
 	// the action. It is knowable now only because a freshly allocated entity
