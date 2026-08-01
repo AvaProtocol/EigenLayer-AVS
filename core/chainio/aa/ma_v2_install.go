@@ -142,11 +142,17 @@ type SessionGrant struct {
 	// Signer is the session key that will sign operations for this grant.
 	Signer common.Address
 
-	// Selectors scopes the grant to specific function selectors. Empty means
-	// global — any selector the account exposes. Note these are alternatives,
-	// not additive: an enumerated set clears the global flag, because a
-	// validation that is global does not consult the selector list at all.
+	// Selectors scopes the grant to specific function selectors. Mutually
+	// exclusive with Global — a global validation never consults the selector
+	// list, so setting both would produce a grant that is wider than it reads.
 	Selectors [][4]byte
+
+	// Global lets the entity validate ANY selector the account exposes,
+	// including the account's own native functions. It must be set
+	// explicitly: it used to be inferred from an empty Selectors, which made
+	// the most dangerous grant the one you got by omission. See
+	// AllowSelfAdministration.
+	Global bool
 
 	// Hooks are the encoded permission hooks (allowlist, spend cap, time
 	// range) installed alongside the validation, each as
@@ -160,6 +166,34 @@ type SessionGrant struct {
 	// signers: the controller executes, it does not speak as the user. Set it
 	// only for a grant that genuinely represents the owner.
 	AllowSignatureValidation bool
+
+	// AllowSelfAdministration acknowledges that a Global grant carrying no
+	// execution hook can administer its own authority.
+	//
+	// A global validation may call the account's native functions, which is
+	// how one-click self-revoke works (uninstallValidation, proven on Sepolia)
+	// — but the same authority reaches installValidation, so such a grant can
+	// escalate itself: add signature validation, widen its own hooks, or
+	// install a second signer. An execution hook that rejects non-execute
+	// selectors closes this (the allowlist hook does, also proven), which is
+	// why a policied grant cannot touch its own authority.
+	//
+	// Production grants must therefore either be selector-scoped or carry an
+	// execution hook. This flag exists so a spike or a deliberately
+	// self-administering grant can still be built, loudly.
+	AllowSelfAdministration bool
+}
+
+// HasExecutionHook reports whether any hook runs at execution rather than
+// validation. Hook entries are hookConfig(25) ++ initData, and a clear
+// HookFlagValidation bit in the config's flag byte means execution.
+func (g SessionGrant) HasExecutionHook() bool {
+	for _, h := range g.Hooks {
+		if len(h) >= 25 && h[24]&HookFlagValidation == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // Validate reports why a grant cannot be installed, if it cannot.
@@ -170,13 +204,26 @@ func (g SessionGrant) Validate() error {
 	if g.Signer == (common.Address{}) {
 		return fmt.Errorf("session signer is the zero address")
 	}
+	// Scope must be stated. Neither means a grant that validates nothing;
+	// both means a grant whose selector list is silently ignored.
+	if g.Global && len(g.Selectors) > 0 {
+		return fmt.Errorf("grant is Global and also lists %d selectors; a global validation ignores the list, so this is wider than it reads", len(g.Selectors))
+	}
+	if !g.Global && len(g.Selectors) == 0 {
+		return fmt.Errorf("grant has no scope: set Global or list Selectors")
+	}
+	if g.Global && !g.HasExecutionHook() && !g.AllowSelfAdministration {
+		return fmt.Errorf(
+			"refusing a global grant with no execution hook: it can call the account's own installValidation/uninstallValidation and escalate itself. " +
+				"Scope it with Selectors, add an execution hook (e.g. aa.AllowlistExecHook), or set AllowSelfAdministration to accept this deliberately")
+	}
 	return nil
 }
 
 // Flags renders the grant's ValidationConfig flag byte.
 func (g SessionGrant) Flags() byte {
 	flags := ValidationFlagUserOp
-	if len(g.Selectors) == 0 {
+	if g.Global {
 		flags |= ValidationFlagGlobal
 	}
 	if g.AllowSignatureValidation {

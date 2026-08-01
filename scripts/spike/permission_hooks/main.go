@@ -218,7 +218,12 @@ func run() error {
 	installCall, err := aa.PackSessionSignerInstall(aa.SessionGrant{
 		EntityID: entity,
 		Signer:   controllerAddr,
-		Hooks:    [][]byte{allowHook, aa.AllowlistExecHook(entity), timeHook},
+		Global:   true,
+		// Global is safe here BECAUSE of the allowlist execution hook: it
+		// rejects any non-execute selector, so this grant cannot reach the
+		// account's own installValidation/uninstallValidation. Probe D proved
+		// exactly that.
+		Hooks: [][]byte{allowHook, aa.AllowlistExecHook(entity), timeHook},
 	})
 	if err != nil {
 		return err

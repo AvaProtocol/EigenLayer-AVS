@@ -3,6 +3,7 @@ package aa
 import (
 	"bytes"
 	"encoding/hex"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -40,7 +41,7 @@ func TestPackSingleSignerInstallData(t *testing.T) {
 
 func TestPackSessionSignerInstallSelectorAndShape(t *testing.T) {
 	controller := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
-	call, err := PackSessionSignerInstall(SessionGrant{EntityID: MinSessionEntityID, Signer: controller})
+	call, err := PackSessionSignerInstall(SessionGrant{EntityID: MinSessionEntityID, Signer: controller, Global: true, AllowSelfAdministration: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +68,7 @@ func TestPackSessionSignerInstallSelectorAndShape(t *testing.T) {
 }
 
 func TestPackSessionSignerInstallRejectsZeroAddress(t *testing.T) {
-	if _, err := PackSessionSignerInstall(SessionGrant{EntityID: MinSessionEntityID}); err == nil {
+	if _, err := PackSessionSignerInstall(SessionGrant{EntityID: MinSessionEntityID, Global: true, AllowSelfAdministration: true}); err == nil {
 		t.Fatal("expected an error for the zero controller address")
 	}
 }
@@ -80,7 +81,7 @@ func TestSessionGrantEntityReachesBothEncodings(t *testing.T) {
 	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
 	const entity = uint32(7)
 
-	call, err := PackSessionSignerInstall(SessionGrant{EntityID: entity, Signer: signer})
+	call, err := PackSessionSignerInstall(SessionGrant{EntityID: entity, Signer: signer, Global: true, AllowSelfAdministration: true})
 	if err != nil {
 		t.Fatalf("PackSessionSignerInstall: %v", err)
 	}
@@ -103,8 +104,8 @@ func TestSessionGrantEntityReachesBothEncodings(t *testing.T) {
 func TestSessionGrantFlags(t *testing.T) {
 	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
 
-	t.Run("no selectors means global", func(t *testing.T) {
-		g := SessionGrant{EntityID: 1, Signer: signer}
+	t.Run("Global sets the global flag", func(t *testing.T) {
+		g := SessionGrant{EntityID: 1, Signer: signer, Global: true}
 		if g.Flags()&ValidationFlagGlobal == 0 {
 			t.Error("expected the global flag")
 		}
@@ -113,9 +114,7 @@ func TestSessionGrantFlags(t *testing.T) {
 		}
 	})
 
-	// A global validation never consults the selector list, so setting both
-	// would silently widen a grant the owner believed was scoped.
-	t.Run("selectors clear global", func(t *testing.T) {
+	t.Run("selector-scoped grants are not global", func(t *testing.T) {
 		g := SessionGrant{EntityID: 1, Signer: signer, Selectors: [][4]byte{{0x09, 0x5e, 0xa7, 0xb3}}}
 		if g.Flags()&ValidationFlagGlobal != 0 {
 			t.Error("an enumerated selector set must not also be global")
@@ -126,7 +125,7 @@ func TestSessionGrantFlags(t *testing.T) {
 	// it sign arbitrary messages AS the user, which is not what execution
 	// authority means.
 	t.Run("signature validation is off unless asked for", func(t *testing.T) {
-		g := SessionGrant{EntityID: 1, Signer: signer}
+		g := SessionGrant{EntityID: 1, Signer: signer, Global: true}
 		if g.Flags()&ValidationFlagSignature != 0 {
 			t.Error("signature validation must default off")
 		}
@@ -141,7 +140,7 @@ func TestSessionGrantRejectsTheOwnerEntity(t *testing.T) {
 	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
 	// Entity 0 is the fallback signer. Installing over it would replace the
 	// owner's own validation with a gateway-held key.
-	if _, err := PackSessionSignerInstall(SessionGrant{EntityID: 0, Signer: signer}); err == nil {
+	if _, err := PackSessionSignerInstall(SessionGrant{EntityID: 0, Signer: signer, Global: true, AllowSelfAdministration: true}); err == nil {
 		t.Error("expected entity 0 to be rejected")
 	}
 }
@@ -152,18 +151,106 @@ func TestSessionGrantCarriesHooks(t *testing.T) {
 	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
 	hook := append(bytes.Repeat([]byte{0xab}, 26), 0x01, 0x02)
 
-	withHook, err := PackSessionSignerInstall(SessionGrant{EntityID: 1, Signer: signer, Hooks: [][]byte{hook}})
+	withHook, err := PackSessionSignerInstall(SessionGrant{EntityID: 1, Signer: signer, Global: true, Hooks: [][]byte{hook}, AllowSelfAdministration: true})
 	if err != nil {
 		t.Fatalf("PackSessionSignerInstall: %v", err)
 	}
 	if !bytes.Contains(withHook, hook) {
 		t.Error("hook payload is not present in the install call")
 	}
-	without, err := PackSessionSignerInstall(SessionGrant{EntityID: 1, Signer: signer})
+	without, err := PackSessionSignerInstall(SessionGrant{EntityID: 1, Signer: signer, Global: true, AllowSelfAdministration: true})
 	if err != nil {
 		t.Fatalf("PackSessionSignerInstall: %v", err)
 	}
 	if len(withHook) <= len(without) {
 		t.Error("hooks did not lengthen the encoded call")
 	}
+}
+
+// A global validation may call the account's own native functions. That is
+// how one-click self-revoke works (uninstallValidation, proven on Sepolia),
+// but the same authority reaches installValidation — so a bare global grant
+// can escalate itself: add signature validation, widen its hooks, install a
+// second signer.
+//
+// This previously WAS the default. Flags() inferred global from an empty
+// Selectors, so the plainest possible grant — entity and signer, nothing else
+// — produced the one shape that must never reach production. The rule lived in
+// a doc sentence while the code made violating it the path of least
+// resistance. It is now a build-time refusal.
+func TestBareGlobalGrantIsRefused(t *testing.T) {
+	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
+
+	// The exact literal that used to be the easy, and wrong, thing to write.
+	_, err := PackSessionSignerInstall(SessionGrant{EntityID: 1, Signer: signer, Global: true})
+	if err == nil {
+		t.Fatal("a global grant with no execution hook must be refused")
+	}
+	if !strings.Contains(err.Error(), "escalate itself") {
+		t.Errorf("the error should say why, got: %v", err)
+	}
+
+	t.Run("an execution hook makes it safe", func(t *testing.T) {
+		// The allowlist exec hook rejects non-execute selectors, which is what
+		// stopped the policied grant from revoking itself in the spike.
+		g := SessionGrant{EntityID: 1, Signer: signer, Global: true,
+			Hooks: [][]byte{AllowlistExecHook(1)}}
+		if !g.HasExecutionHook() {
+			t.Fatal("AllowlistExecHook was not recognised as an execution hook")
+		}
+		if _, err := PackSessionSignerInstall(g); err != nil {
+			t.Errorf("a hook-carrying global grant must be allowed: %v", err)
+		}
+	})
+
+	t.Run("a validation-only hook does not make it safe", func(t *testing.T) {
+		// TimeRange runs at validation, so it never sees the selector being
+		// executed and cannot block a self-administering call.
+		timeHook, err := TimeRangeValidationHook(1, 1785541743, 0)
+		if err != nil {
+			t.Fatalf("TimeRangeValidationHook: %v", err)
+		}
+		g := SessionGrant{EntityID: 1, Signer: signer, Global: true, Hooks: [][]byte{timeHook}}
+		if g.HasExecutionHook() {
+			t.Fatal("a validation hook must not count as an execution hook")
+		}
+		if _, err := PackSessionSignerInstall(g); err == nil {
+			t.Error("validation-only hooks must not satisfy the guard")
+		}
+	})
+
+	t.Run("selector scoping makes it safe", func(t *testing.T) {
+		g := SessionGrant{EntityID: 1, Signer: signer,
+			Selectors: [][4]byte{{0xb6, 0x1d, 0x27, 0xf6}}} // execute
+		if _, err := PackSessionSignerInstall(g); err != nil {
+			t.Errorf("a selector-scoped grant must be allowed: %v", err)
+		}
+	})
+
+	t.Run("the escape hatch is explicit", func(t *testing.T) {
+		g := SessionGrant{EntityID: 1, Signer: signer, Global: true, AllowSelfAdministration: true}
+		if _, err := PackSessionSignerInstall(g); err != nil {
+			t.Errorf("an acknowledged self-administering grant must build: %v", err)
+		}
+	})
+}
+
+// Scope must be stated rather than inferred, in both directions.
+func TestGrantScopeMustBeUnambiguous(t *testing.T) {
+	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
+
+	t.Run("no scope at all", func(t *testing.T) {
+		if _, err := PackSessionSignerInstall(SessionGrant{EntityID: 1, Signer: signer}); err == nil {
+			t.Error("a grant with neither Global nor Selectors must be refused")
+		}
+	})
+
+	t.Run("both is wider than it reads", func(t *testing.T) {
+		g := SessionGrant{EntityID: 1, Signer: signer, Global: true,
+			Selectors:               [][4]byte{{0xb6, 0x1d, 0x27, 0xf6}},
+			AllowSelfAdministration: true}
+		if _, err := PackSessionSignerInstall(g); err == nil {
+			t.Error("Global plus Selectors must be refused; the list is silently ignored on chain")
+		}
+	})
 }

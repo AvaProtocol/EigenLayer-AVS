@@ -171,6 +171,12 @@ func run() error {
 	installCall, err := aa.PackSessionSignerInstall(aa.SessionGrant{
 		EntityID: spikeEntityID,
 		Signer:   controllerAddr,
+		Global:   true,
+		// This harness proves the deferred-action mechanism in isolation, so
+		// it grants bare global authority on purpose. A grant of this shape
+		// can administer itself (see SessionGrant.AllowSelfAdministration);
+		// production grants are selector-scoped or carry an execution hook.
+		AllowSelfAdministration: true,
 	})
 	if err != nil {
 		return err
