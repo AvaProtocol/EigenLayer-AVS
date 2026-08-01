@@ -204,7 +204,10 @@ func TestAtomicBatchOnDemand(t *testing.T) {
 		require.Equal(t, 1, callCount, "still one UserOp")
 
 		require.GreaterOrEqual(t, len(captured), 4)
-		assert.Equal(t, "c3ff72fc", common.Bytes2Hex(captured[:4]), "value-bearing batch must use executeBatchWithValues")
+		// MA v2 (the default provider) carries per-call values natively in
+		// its executeBatch tuples — the v0.6 fork's executeBatchWithValues
+		// (0xc3ff72fc) has no successor and needs none.
+		assert.Equal(t, "34fcd5be", common.Bytes2Hex(captured[:4]), "value-bearing batch must use the MA v2 executeBatch")
 		_, values, _, err := aa.UnpackExecuteCalldata(captured)
 		require.NoError(t, err)
 		require.Len(t, values, 2)

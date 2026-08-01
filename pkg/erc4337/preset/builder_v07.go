@@ -62,8 +62,22 @@ const selectorGetNonce = "0x35567e1a"
 const (
 	seedVerificationGasDeploying = 200_000 // ~160k actual -> ~0.8 efficiency
 	seedVerificationGasDeployed  = 60_000  // ~45k actual  -> ~0.75 efficiency
-	initialCallGasLimit          = 500_000
-	initialPreVerificationGas    = 100_000
+
+	// Session-entity seeds, all measured on Sepolia rather than derived. Each
+	// step up is a specific cost the previous seed did not cover:
+	//
+	//   module entity      60k AA26s — validating through an installed module
+	//                      is an external call, and the entity's first use
+	//                      writes a cold nonce-key slot (~22k)
+	//   deferred install   300k AA26s — the install itself runs inside
+	//                      validation, writing cold module storage
+	//   + permission hooks 300k AA26s again — every allowlist entry is its
+	//                      own cold SSTORE, so cost scales with grant contents
+	seedVerificationGasModuleEntity  = 100_000
+	seedVerificationGasDeferredBare  = 400_000
+	seedVerificationGasDeferredHooks = 700_000
+	initialCallGasLimit              = 500_000
+	initialPreVerificationGas        = 100_000
 
 	// verificationGasEfficiencyFloor is Rundler's published threshold.
 	verificationGasEfficiencyFloor = 0.4

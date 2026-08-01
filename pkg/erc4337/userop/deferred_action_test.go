@@ -9,7 +9,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 )
 
@@ -89,29 +88,9 @@ func TestDeferredActionDigestMatchesTypedData(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	typed := apitypes.TypedData{
-		Types: apitypes.Types{
-			"EIP712Domain": []apitypes.Type{
-				{Name: "chainId", Type: "uint256"},
-				{Name: "verifyingContract", Type: "address"},
-			},
-			"DeferredAction": []apitypes.Type{
-				{Name: "nonce", Type: "uint256"},
-				{Name: "deadline", Type: "uint48"},
-				{Name: "call", Type: "bytes"},
-			},
-		},
-		PrimaryType: "DeferredAction",
-		Domain: apitypes.TypedDataDomain{
-			ChainId:           (*math.HexOrDecimal256)(chainID),
-			VerifyingContract: account.Hex(),
-		},
-		Message: apitypes.TypedDataMessage{
-			"nonce":    (*math.HexOrDecimal256)(nonce),
-			"deadline": (*math.HexOrDecimal256)(new(big.Int).SetUint64(deadline)),
-			"call":     hexutil.Bytes(call),
-		},
-	}
+	// The PRODUCTION helper builds the payload — this pins wallet parity for
+	// what the /policies prepare response actually returns, not a test copy.
+	typed := DeferredActionTypedData(chainID, account, nonce, deadline, call)
 	walletDigest, _, err := apitypes.TypedDataAndHash(typed)
 	if err != nil {
 		t.Fatal(err)

@@ -38,14 +38,15 @@ func SendUserOpMAv2(
 	callData []byte,
 	senderOverride *common.Address,
 	saltOverride *big.Int,
+	auth *SessionAuthorization,
 	lgr logger.Logger,
 ) (*userop.UserOperationV07, *types.Receipt, error) {
 	l := logger.EnsureLogger(lgr)
 	if smartWalletConfig == nil {
 		return nil, nil, fmt.Errorf("nil smart wallet config")
 	}
-	if smartWalletConfig.ControllerPrivateKey == nil {
-		return nil, nil, fmt.Errorf("no controller private key configured")
+	if err := auth.Validate(); err != nil {
+		return nil, nil, err
 	}
 
 	bundlerURL, err := smartWalletConfig.ActiveBundlerURL()
@@ -66,6 +67,12 @@ func SendUserOpMAv2(
 	}
 	defer bundlerRPC.Close()
 
+	// Nonce reads are plain eth_calls and go to the CHAIN rpc. The bundler
+	// endpoint only advertises the ERC-4337 namespace on some providers
+	// (Voltaire answers eth_call with Method-not-found; Alchemy happens to
+	// serve both from one URL, which is how this hid during development).
+	nonceRPC := chainRPC.Client()
+
 	entryPoint := EntryPointV07()
 	chainID := big.NewInt(smartWalletConfig.ChainID)
 
@@ -82,6 +89,38 @@ func SendUserOpMAv2(
 	sender, err := resolveSenderV07(chainRPC, owner, factory, salt, senderOverride)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// A caller that supplies no authorization gets the stored grant for THIS
+	// wallet — looked up only now, because grants are keyed by the smart
+	// wallet's address and the sender is not known until it is resolved.
+	// Resolving earlier against the owner EOA (or a guessed wallet) finds
+	// nothing and signs as the fallback entity the gateway cannot validate
+	// for.
+	if auth == nil {
+		if auth, err = resolveSession(smartWalletConfig.ChainID, owner, sender); err != nil {
+			return nil, nil, fmt.Errorf("resolving session authorization for %s: %w", sender.Hex(), err)
+		}
+		if err = auth.Validate(); err != nil {
+			return nil, nil, err
+		}
+	}
+	// Without a session authorization the operation runs as the account's
+	// fallback signer, which only the OWNER's key can do. The gateway does not
+	// hold it, so this path exists for callers that supply their own signer.
+	if auth == nil && smartWalletConfig.ControllerPrivateKey == nil {
+		return nil, nil, fmt.Errorf("no controller private key configured")
+	}
+
+	// A grant carrying execution hooks requires user-op context on EVERY
+	// operation under it — including the one that installs the grant, since
+	// the hooks are live from the moment the install applies mid-validation.
+	if auth != nil && auth.WrapExecuteUserOp {
+		wrapped, wrapErr := aa.WrapExecuteUserOp(callData)
+		if wrapErr != nil {
+			return nil, nil, fmt.Errorf("wrapping calldata for user-op context: %w", wrapErr)
+		}
+		callData = wrapped
 	}
 
 	op := &userop.UserOperationV07{
@@ -108,17 +147,67 @@ func SendUserOpMAv2(
 		op.Factory = &deployFactory
 		op.FactoryData = factoryData
 	}
-	op.VerificationGasLimit = seedVerificationGas(op)
+	op.VerificationGasLimit = seedVerificationGasFor(op, auth)
 
 	// MA v2 selects its validation function from the NONCE, not the signature.
 	// A zero nonce reverts with ValidationFunctionMissing rather than as a
 	// nonce error, which is the single most misleading failure on this path.
-	nonce, err := NextNonceV07(ctx, bundlerRPC, entryPoint, sender,
-		userop.FallbackSignerEntityID, userop.ValidationOptionGlobal)
+	//
+	// Plain operations read through the nonce manager so a second write can
+	// overlap the first in the mempool (getNonce alone reads mined state and
+	// AA25s any sequential pair). Deferred operations bypass it: the owner's
+	// signature committed to sequence zero at grant time, so no cached value
+	// may substitute.
+	nonceEntity, nonceOptions := auth.nonceEntity()
+	var nonce *big.Int
+	if auth.Deferred() {
+		nonce, err = NextNonceV07(ctx, nonceRPC, entryPoint, sender, nonceEntity, nonceOptions)
+		if err == nil {
+			var sequence uint64
+			if _, _, sequence, err = userop.DecodeNonceMAv2(nonce); err == nil && sequence != 0 {
+				// The carrier sequence is consumed, and the only operation
+				// that ever uses a grant's deferred key is its install: the
+				// install MINED without this process seeing the receipt (a
+				// confirmation timeout, or a crash between send and record).
+				// Not an error — record the fact and run this operation as
+				// an ordinary one under the now-installed entity.
+				l.Info("grant install found already applied on-chain; recording and continuing plain",
+					"sender", sender.Hex(), "entity", auth.EntityID, "sequence", sequence)
+				if auth.OnApplied != nil {
+					if markErr := auth.OnApplied(""); markErr != nil {
+						l.Error("grant is applied on-chain but could not be recorded; the next operation will retry",
+							"sender", sender.Hex(), "error", markErr)
+					}
+				}
+				auth.DeferredData, auth.OwnerSignature = nil, nil
+				nonceEntity, nonceOptions = auth.nonceEntity()
+				op.Signature = nil
+				op.VerificationGasLimit = seedVerificationGasFor(op, auth)
+				nonce, err = NextNonceV07Managed(ctx, nonceRPC, entryPoint, sender, nonceEntity, nonceOptions)
+			}
+		}
+	} else {
+		nonce, err = NextNonceV07Managed(ctx, nonceRPC, entryPoint, sender, nonceEntity, nonceOptions)
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading nonce: %w", err)
 	}
 	op.Nonce = nonce
+
+	// Estimation of a deferred operation must carry the REAL owner grant.
+	// Ordinary signature validation fails gracefully so estimation can
+	// proceed, but a bad deferred-action signature REVERTS
+	// (DeferredActionSignatureInvalid) — so estimating with the plain dummy
+	// gets AA23 with nothing pointing at the missing grant. Only the
+	// controller's half may be a dummy here; the real one is installed below,
+	// after pricing, because the signature covers the gas fields.
+	if auth.Deferred() {
+		estSig, estErr := DeferredEstimationSignature(auth.DeferredData, auth.OwnerSignature)
+		if estErr != nil {
+			return nil, nil, fmt.Errorf("building the estimation signature: %w", estErr)
+		}
+		op.Signature = estSig
+	}
 
 	if err := priceOperationV07(ctx, chainRPC, bundlerRPC, op, entryPoint, smartWalletConfig, l); err != nil {
 		return nil, nil, err
@@ -128,18 +217,51 @@ func SendUserOpMAv2(
 	// to come after pricing. SendUserOpV07WithRetry only RE-signs, and only
 	// when it tightens the verification gas limit — it will not sign an
 	// unsigned operation, it rejects one.
-	if err := SignUserOpV07(op, entryPoint, chainID, smartWalletConfig.ControllerPrivateKey); err != nil {
+	signingKey := smartWalletConfig.ControllerPrivateKey
+	if auth != nil {
+		signingKey = auth.SignerKey
+	}
+	if auth.Deferred() {
+		if err := SignUserOpV07Deferred(op, entryPoint, chainID, signingKey,
+			auth.DeferredData, auth.OwnerSignature); err != nil {
+			return op, nil, fmt.Errorf("signing user operation with deferred action: %w", err)
+		}
+	} else if err := SignUserOpV07(op, entryPoint, chainID, signingKey); err != nil {
 		return op, nil, fmt.Errorf("signing user operation: %w", err)
 	}
 
-	opHash, err := SendUserOpV07WithRetry(ctx, bundlerRPC, op, entryPoint, chainID,
-		smartWalletConfig.ControllerPrivateKey)
+	opHash, err := SendUserOpV07WithRetry(ctx, bundlerRPC, op, entryPoint, chainID, signingKey)
+	if err != nil && !auth.Deferred() && isInvalidNonceError(err) {
+		// AA25 covers both directions of cache drift — a duplicate (another
+		// operation took this sequence) and a gap (a cached pending operation
+		// was dropped). Either way the cache is wrong: drop it, take the
+		// chain's answer, re-sign (the nonce is in the userOpHash), retry
+		// once. Deferred operations are excluded — their nonce is committed
+		// by the owner's signature and cannot be substituted.
+		InvalidateNonce(sender, nonceEntity, nonceOptions)
+		freshNonce, nonceErr := NextNonceV07Managed(ctx, nonceRPC, entryPoint, sender, nonceEntity, nonceOptions)
+		if nonceErr == nil && freshNonce.Cmp(op.Nonce) != 0 {
+			l.Info("retrying after AA25 with the chain's nonce",
+				"sender", sender.Hex(), "stale", op.Nonce.String(), "fresh", freshNonce.String())
+			op.Nonce = freshNonce
+			if signErr := SignUserOpV07(op, entryPoint, chainID, signingKey); signErr == nil {
+				opHash, err = SendUserOpV07WithRetry(ctx, bundlerRPC, op, entryPoint, chainID, signingKey)
+			}
+		}
+	}
 	if err != nil {
+		InvalidateNonce(sender, nonceEntity, nonceOptions)
 		return op, nil, fmt.Errorf("sending user operation: %w", err)
 	}
+	// Record acceptance NOW — the bundler holds the operation, so the next
+	// one on this key must use the following sequence even though nothing has
+	// mined yet. This is the line that lets sequential contract writes
+	// overlap the mempool instead of dying AA25.
+	NoteUserOpAccepted(sender, nonceEntity, nonceOptions, op.Nonce)
 	l.Info("v0.7 user operation sent",
 		"sender", sender.Hex(), "userop_hash", opHash.Hex(),
-		"sponsored", op.Paymaster != nil, "deploying", op.Factory != nil)
+		"sponsored", op.Paymaster != nil, "deploying", op.Factory != nil,
+		"entity", nonceEntity, "installs_grant", auth.Deferred())
 
 	// Reuses the v0.6 confirmation watcher: UserOperationEvent is unchanged
 	// between EntryPoint versions, so only the EntryPoint address differs.
@@ -152,9 +274,34 @@ func SendUserOpMAv2(
 			l.Warn("websocket dial failed, polling for the receipt instead", "error", wsErr)
 		}
 	}
+	installsGrant := auth.Deferred()
 	receipt, err := waitForUserOpConfirmation(chainRPC, wsClient, entryPoint, opHash.Hex(), l)
 	if err != nil {
+		// Includes the mined-but-execution-reverted case — in which the
+		// install DID apply (it runs in the validation frame, which an
+		// execution revert does not roll back, results doc §3.4). Not marked
+		// here because this path cannot distinguish that from a true
+		// validation-level failure; the next operation heals it through the
+		// consumed-carrier-nonce path above.
 		return op, nil, err
+	}
+	if installsGrant {
+		if receipt == nil {
+			// Confirmation timed out with the operation still pending. The
+			// grant stays recorded as pending; if the install mines later,
+			// the next operation discovers the consumed carrier nonce and
+			// records it then.
+			l.Info("grant install sent but unconfirmed; recording deferred to the next operation",
+				"sender", sender.Hex(), "userop_hash", opHash.Hex())
+		} else if auth.OnApplied != nil {
+			// The install is on-chain. Record it so the stored grant stops
+			// attaching the deferred action — attaching a consumed one would
+			// fail every subsequent operation on this wallet.
+			if markErr := auth.OnApplied(opHash.Hex()); markErr != nil {
+				l.Error("grant applied on-chain but could not be recorded; the next operation will retry",
+					"sender", sender.Hex(), "userop_hash", opHash.Hex(), "error", markErr)
+			}
+		}
 	}
 	return op, receipt, nil
 }

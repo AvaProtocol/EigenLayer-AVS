@@ -392,6 +392,7 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	if err := aa.SetFactoryAddressForConfig(config.SmartWallet); err != nil {
 		panic(fmt.Sprintf("smart_wallet: cannot resolve account factory: %v", err))
 	}
+
 	//SetWsRpc(config.SmartWallet.EthWsUrl)
 
 	// Use global TokenEnrichmentService or initialize if not set

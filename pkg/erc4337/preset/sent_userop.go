@@ -72,7 +72,12 @@ func SendUserOpAuto(
 	}
 
 	if smartWalletConfig.UsesModularAccountV2() {
-		op, receipt, err := SendUserOpMAv2(smartWalletConfig, owner, callData, senderOverride, saltOverride, lgr)
+		// nil auth: SendUserOpMAv2 resolves the session grant itself, AFTER
+		// it has resolved the actual sender. Grants are stored per
+		// smart-wallet address, and callers do not always pass an override —
+		// resolving here against the owner EOA used to find nothing and sign
+		// as the fallback entity the gateway cannot validate for.
+		op, receipt, err := SendUserOpMAv2(smartWalletConfig, owner, callData, senderOverride, saltOverride, nil, lgr)
 		sent, convErr := sentFromV07(op, big.NewInt(smartWalletConfig.ChainID))
 		if err != nil {
 			// Report the send failure, not the conversion: the send is why

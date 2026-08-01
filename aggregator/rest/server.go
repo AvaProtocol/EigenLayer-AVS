@@ -372,6 +372,15 @@ func registerColonActionShimRoutes(api *echo.Group, s *Server) {
 		return s.SignalExecution(c, generated.Ulid(c.Param("id")), params)
 	})
 
+	// Session-policy grant flow: prepare → sign → submit. Nested under the
+	// wallet, so the shim path carries the :address parameter.
+	api.POST("/wallets/:address/policies"+colonActionShim+"prepare", func(c echo.Context) error {
+		return s.PrepareWalletPolicy(c, generated.EthereumAddress(c.Param("address")))
+	})
+	api.POST("/wallets/:address/policies"+colonActionShim+"submit", func(c echo.Context) error {
+		return s.SubmitWalletPolicy(c, generated.EthereumAddress(c.Param("address")))
+	})
+
 	// Collection-level actions. Routed via the generated wrapper so the
 	// oapi-codegen runtime handles query-param binding the same way the
 	// non-shim routes would.

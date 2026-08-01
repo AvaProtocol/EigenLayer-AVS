@@ -22,6 +22,13 @@ inputs:
   owner-eoa:
     description: 'Owner EOA address for test smart wallet derivation (controller signs UserOps)'
     required: true
+  test-private-key:
+    description: |
+      Private key for the owner EOA. Under MA v2 the gateway holds no
+      authority until the owner signs a session grant, and only the owner's
+      key can sign one — so live tests need the key, not just owner-eoa.
+      Optional: jobs that do not run live tests (e.g. lint) can omit it.
+    required: false
   moralis-api-key:
     description: 'Moralis Web3 Data API key for token balance integration tests'
     required: false
@@ -45,3 +52,14 @@ runs:
         MORALIS_API_KEY: "${{ inputs.moralis-api-key }}"
       shell: bash
       run: ./.github/scripts/generate-test-config.sh
+
+    # The live-test fixtures read TEST_PRIVATE_KEY from the ENVIRONMENT
+    # (os.Getenv), not from config/test.yaml — so export it to the job so
+    # every later step sees it. Referenced via $env, not interpolated into
+    # the script body, so the secret never appears verbatim in the command.
+    - name: Export the owner key to the job environment
+      if: ${{ inputs.test-private-key != '' }}
+      shell: bash
+      env:
+        TEST_PRIVATE_KEY: "${{ inputs.test-private-key }}"
+      run: echo "TEST_PRIVATE_KEY=${TEST_PRIVATE_KEY}" >> "$GITHUB_ENV"

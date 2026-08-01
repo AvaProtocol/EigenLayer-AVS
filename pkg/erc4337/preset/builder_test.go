@@ -39,6 +39,16 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 func TestSendUserOp(t *testing.T) {
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
+	// SendUserOp is the v0.6 path — v0.6 EntryPoint, executeBatchWithValues
+	// calldata — so it must derive a v0.6 SimpleAccount. Pin the provider
+	// explicitly: the default flipped to modular_account_v2 in the cutover
+	// (#694), which would otherwise resolve this owner+salt to an MA v2
+	// account that rejects a v0.6 UserOp at validation (nonce 0 carries no
+	// validation locator → ValidationFunctionMissing → the bundler's AA23).
+	// When the v0.6 path is removed post-cutover, this test goes with it.
+	smartWalletConfig.AccountProvider = config.AccountProviderSimpleAccount
+	smartWalletConfig.FactoryAddress = common.HexToAddress(config.DefaultFactoryProxyAddressHex)
+
 	if err := aa.SetFactoryAddressForConfig(smartWalletConfig); err != nil {
 		t.Fatalf("setting global factory: %v", err)
 	}

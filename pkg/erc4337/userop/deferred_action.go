@@ -6,7 +6,10 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 )
 
 // Deferred actions — the mechanism that lets the owner authorize the
@@ -131,6 +134,37 @@ func DeferredActionDigest(chainID *big.Int, account common.Address, nonce *big.I
 	structHash := crypto.Keccak256(structData)
 
 	return crypto.Keccak256Hash([]byte{0x19, 0x01}, domainSeparator, structHash), nil
+}
+
+// DeferredActionTypedData builds the eth_signTypedData_v4 payload whose hash
+// is DeferredActionDigest — the exact JSON a wallet needs to produce the
+// owner's grant signature. Digest parity between this construction and the
+// manual assembly is pinned by TestDeferredActionDigestMatchesTypedData; a
+// drift between them would produce signatures the account rejects.
+func DeferredActionTypedData(chainID *big.Int, account common.Address, nonce *big.Int, deadline uint64, call []byte) apitypes.TypedData {
+	return apitypes.TypedData{
+		Types: apitypes.Types{
+			"EIP712Domain": []apitypes.Type{
+				{Name: "chainId", Type: "uint256"},
+				{Name: "verifyingContract", Type: "address"},
+			},
+			"DeferredAction": []apitypes.Type{
+				{Name: "nonce", Type: "uint256"},
+				{Name: "deadline", Type: "uint48"},
+				{Name: "call", Type: "bytes"},
+			},
+		},
+		PrimaryType: "DeferredAction",
+		Domain: apitypes.TypedDataDomain{
+			ChainId:           (*math.HexOrDecimal256)(chainID),
+			VerifyingContract: account.Hex(),
+		},
+		Message: apitypes.TypedDataMessage{
+			"nonce":    (*math.HexOrDecimal256)(nonce),
+			"deadline": (*math.HexOrDecimal256)(new(big.Int).SetUint64(deadline)),
+			"call":     hexutil.Bytes(call),
+		},
+	}
 }
 
 // WrapSignatureMAv2Deferred assembles the full UserOperation signature for an

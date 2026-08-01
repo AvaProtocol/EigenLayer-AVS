@@ -415,3 +415,29 @@ func FeeRecordKey(chainID int64, owner common.Address, executionID string) []byt
 func FeeRecordPrefix(chainID int64, owner common.Address) []byte {
 	return []byte(fmt.Sprintf("fr:%d:%s:", chainID, strings.ToLower(owner.Hex())))
 }
+
+// SessionPolicyPrefix scans every session policy an owner holds on a chain.
+// Fresh `sp:` namespace — additive, no migration (avs-infra §7.4a).
+func SessionPolicyPrefix(chainID int64, owner common.Address) []byte {
+	return []byte(fmt.Sprintf(
+		"sp:%d:%s:",
+		chainID,
+		strings.ToLower(owner.Hex()),
+	))
+}
+
+// SessionPolicyKey is the primary key for one grant.
+//
+// Keyed by OWNER, not by wallet, because that is who the grant belongs to and
+// who lists them. The wallet lives in the record's Runner field, so resolving
+// "the grant for this wallet" is a prefix scan plus a filter — see
+// core/taskengine/session_policy.go. Note this means entity-id uniqueness is
+// per account while the key is per owner; allocation has to account for that.
+func SessionPolicyKey(chainID int64, owner common.Address, policyID string) []byte {
+	return []byte(fmt.Sprintf(
+		"sp:%d:%s:%s",
+		chainID,
+		strings.ToLower(owner.Hex()),
+		policyID,
+	))
+}

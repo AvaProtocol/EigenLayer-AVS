@@ -69,6 +69,12 @@ func TestSimulateTask_StopLossWorkflow_Sepolia(t *testing.T) {
 		"wallet must hold at least 2 USDC; fund %s", smartWalletAddr.Hex())
 
 	db := testutil.TestMustDB()
+
+	// The gateway cannot sign as this wallet's owner — a stock MA v2 account
+	// trusts only its fallback signer — so it needs a session grant, the same
+	// one the grant screen creates in production.
+	grantControllerAuthority(t, db, cfg.SmartWallet, ownerAddress, *smartWalletAddr)
+
 	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
 
 	engine := New(db, cfg, nil, testutil.GetLogger())
@@ -164,6 +170,7 @@ return { inputBalance, hasEnoughBalance, swapAmount };
 		TaskType: &avsproto.TaskNode_ContractWrite{
 			ContractWrite: &avsproto.ContractWriteNode{
 				Config: &avsproto.ContractWriteNode_Config{
+					ChainId:         cfg.SmartWallet.ChainID,
 					ContractAddress: SEPOLIA_USDC,
 					ContractAbi: []*structpb.Value{sv(t, map[string]interface{}{
 						"type": "function", "name": "approve", "stateMutability": "nonpayable",
@@ -190,6 +197,7 @@ return { inputBalance, hasEnoughBalance, swapAmount };
 		TaskType: &avsproto.TaskNode_ContractRead{
 			ContractRead: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
+					ChainId:         cfg.SmartWallet.ChainID,
 					ContractAddress: SEPOLIA_QUOTER_V2,
 					ContractAbi: []*structpb.Value{sv(t, map[string]interface{}{
 						"type": "function", "name": "quoteExactInputSingle", "stateMutability": "nonpayable",
@@ -252,6 +260,7 @@ return { amountOutMinimum: amountOutMinimum.toString() };
 		TaskType: &avsproto.TaskNode_ContractWrite{
 			ContractWrite: &avsproto.ContractWriteNode{
 				Config: &avsproto.ContractWriteNode_Config{
+					ChainId:         cfg.SmartWallet.ChainID,
 					ContractAddress: SEPOLIA_SWAPROUTER,
 					ContractAbi: []*structpb.Value{sv(t, map[string]interface{}{
 						"type": "function", "name": "exactInputSingle", "stateMutability": "payable",
