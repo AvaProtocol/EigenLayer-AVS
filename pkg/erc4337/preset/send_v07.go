@@ -138,6 +138,21 @@ func SendUserOpMAv2(
 	}
 	op.Nonce = nonce
 
+	// Estimation of a deferred operation must carry the REAL owner grant.
+	// Ordinary signature validation fails gracefully so estimation can
+	// proceed, but a bad deferred-action signature REVERTS
+	// (DeferredActionSignatureInvalid) — so estimating with the plain dummy
+	// gets AA23 with nothing pointing at the missing grant. Only the
+	// controller's half may be a dummy here; the real one is installed below,
+	// after pricing, because the signature covers the gas fields.
+	if auth.Deferred() {
+		estSig, estErr := DeferredEstimationSignature(auth.DeferredData, auth.OwnerSignature)
+		if estErr != nil {
+			return nil, nil, fmt.Errorf("building the estimation signature: %w", estErr)
+		}
+		op.Signature = estSig
+	}
+
 	if err := priceOperationV07(ctx, chainRPC, bundlerRPC, op, entryPoint, smartWalletConfig, l); err != nil {
 		return nil, nil, err
 	}
