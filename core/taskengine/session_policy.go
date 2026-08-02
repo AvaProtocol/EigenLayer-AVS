@@ -175,18 +175,17 @@ func NewSessionResolver(
 
 // controllerSessionSigner resolves a session signer to its key.
 //
-// Today every policy is signed by the gateway's controller key, so this
-// accepts exactly that address and refuses anything else. That is a deliberate
-// interim: avs-infra §7.4 describes session_signer as gateway-ASSIGNED, one
-// fresh key per policy, which needs key generation and custody this gateway
-// does not have yet.
-//
-// What matters is that the interim does not weaken the model. Authority is
-// still per grant, because each policy occupies its own validation ENTITY —
-// and the entity, not the key, is what carries the hooks, the revocation
-// target, and the nonce space that makes grant-time signing work. Sharing one
-// key across entities means a compromised controller reaches every grant, but
-// that is already true of the controller today.
+// Every policy is signed by the gateway's controller key, so this accepts
+// exactly that address and refuses anything else. This is the DESIGN, not a
+// placeholder — per-policy signer keys are deliberately not planned, because
+// they add key generation, custody, and rotation without changing the trust
+// model. Authority is per grant regardless of the key: each policy occupies
+// its own validation ENTITY, and the entity — not the key — is what carries
+// the hooks, the revocation target, and the nonce space that makes grant-time
+// signing work. A single shared key means a compromised controller reaches
+// every grant, but that is already true of the controller today, so a key per
+// policy would buy complexity, not a smaller blast radius. Revisit only if
+// that blast radius itself becomes the thing to shrink.
 //
 // Refusing an unknown signer is the important half: a policy naming a key we
 // cannot produce must fail loudly here, not sign with the wrong one.
@@ -198,7 +197,7 @@ func controllerSessionSigner(cfg *config.Config) func(common.Address) (*ecdsa.Pr
 		controller := crypto.PubkeyToAddress(cfg.SmartWallet.ControllerPrivateKey.PublicKey)
 		if signer != controller {
 			return nil, fmt.Errorf(
-				"session signer %s is not the gateway controller %s; per-policy signer keys are not implemented",
+				"session signer %s is not the gateway controller %s; every policy signs with the shared controller key by design",
 				signer.Hex(), controller.Hex())
 		}
 		return cfg.SmartWallet.ControllerPrivateKey, nil
