@@ -24,9 +24,9 @@ backup_dir: /tmp/ap-avs-test-backup
 ecdsa_private_key: <testnet-ecdsa-private-key-hex>
 
 # EigenLayer contracts live on Sepolia (the AVS registration chain).
-# Bring your own provider — public RPC works for low-volume dev.
-eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
-eth_ws_url:  wss://ethereum-sepolia-rpc.publicnode.com
+# Set via .env.local / env.
+eth_rpc_url: ${ETH_RPC_URL}
+eth_ws_url:  ${ETH_WS_URL}
 
 rpc_bind_address:  "0.0.0.0:2206"
 http_bind_address: "0.0.0.0:8080"
@@ -54,7 +54,7 @@ tenderly_access_key: ""
 # Top-level smart_wallet — required by the aa package globals (factory +
 # entrypoint) and any test that takes the default chain context.
 smart_wallet:
-  eth_rpc_url:            https://ethereum-sepolia-rpc.publicnode.com
+  eth_rpc_url:            ${ETH_RPC_URL}
   bundler_url:            ${SEPOLIA_BUNDLER_URL}
   # bundler_provider defaults to 'alchemy' (URL derived from alchemy_api_key +
   # chain subdomain). Set to 'self_hosted' to use bundler_url (Voltaire).
@@ -70,8 +70,8 @@ chains:
     name: sepolia
     worker_addr: "127.0.0.1:50051"
     smart_wallet:
-      eth_rpc_url:            https://ethereum-sepolia-rpc.publicnode.com
-      eth_ws_url:             wss://ethereum-sepolia-rpc.publicnode.com
+      eth_rpc_url:            ${ETH_RPC_URL}
+      eth_ws_url:             ${ETH_WS_URL}
       bundler_url:            ${SEPOLIA_BUNDLER_URL}
       bundler_provider:       alchemy
       alchemy_api_key:        ${ALCHEMY_API_KEY}
@@ -83,8 +83,8 @@ chains:
     name: base-sepolia
     worker_addr: "127.0.0.1:50052"
     smart_wallet:
-      eth_rpc_url:            https://sepolia.base.org
-      eth_ws_url:             wss://base-sepolia-rpc.publicnode.com
+      eth_rpc_url:            ${BASE_SEPOLIA_RPC_URL}
+      eth_ws_url:             ${BASE_SEPOLIA_WS_URL}
       bundler_url:            ${BASE_SEPOLIA_BUNDLER_URL}
       bundler_provider:       alchemy
       alchemy_api_key:        ${ALCHEMY_API_KEY}

@@ -301,8 +301,19 @@ run-operator-sepolia:
 # Second operator, registered against the Ethereum mainnet AVS. Binds its
 # metrics/node-api on 9091/9011 because operator-sepolia already holds
 # 9090/9010 — running both with the stock ports fails on bind, not on config.
+#
+# Mainnet operator keys (alias 0x4f061d46 for operator 0xc6B87) use a DIFFERENT
+# password than Sepolia/vinh. Prefer MAINNET_OPERATOR_{ECDSA,BLS}_KEY_PASSWORD
+# from .env.local so the shared OPERATOR_* vars keep working for sepolia.
 run-operator-ethereum:
-	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap operator --config=config/operator-ethereum.yaml
+	@set -a; [ -f .env.local ] && . ./.env.local; set +a; \
+	if [ -n "$${MAINNET_OPERATOR_ECDSA_KEY_PASSWORD:-}" ]; then \
+		export OPERATOR_ECDSA_KEY_PASSWORD="$$MAINNET_OPERATOR_ECDSA_KEY_PASSWORD"; \
+	fi; \
+	if [ -n "$${MAINNET_OPERATOR_BLS_KEY_PASSWORD:-}" ]; then \
+		export OPERATOR_BLS_KEY_PASSWORD="$$MAINNET_OPERATOR_BLS_KEY_PASSWORD"; \
+	fi; \
+	exec ./out/ap operator --config=config/operator-ethereum.yaml
 
 ## dev-gateway / dev-worker-* / dev-operator-sepolia: build once, then run a single
 ## process in the foreground (standalone use), streaming to logs/<svc>.log.

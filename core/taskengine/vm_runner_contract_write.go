@@ -874,19 +874,26 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 
 		// Create simplified user-facing error message
 		var userErrorMsg string
+		errLower := strings.ToLower(err.Error())
 		if strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "dial tcp") {
 			userErrorMsg = "Bundler service unavailable"
 		} else if strings.Contains(err.Error(), "AA21") {
 			userErrorMsg = "Insufficient ETH balance for gas fees"
+		} else if strings.Contains(err.Error(), "AA20") || strings.Contains(errLower, "not deployed") {
+			// AA20 is the EntryPoint code for "account not deployed". Prefer this
+			// over the AA23 branch below when both strings appear — "not deployed"
+			// is the more actionable client copy.
+			userErrorMsg = "Smart wallet not deployed"
+		} else if strings.Contains(err.Error(), "AA23") {
+			// Validation reverted (deferred-action framing, initCode mismatch,
+			// signature shape, etc.). Surface a readable code rather than only
+			// the raw bundler reason.
+			userErrorMsg = "Smart wallet validation failed (AA23)"
 		} else if strings.Contains(err.Error(), "AA") {
-			// Parse standard AA error codes like AA10, AA21, AA23, etc.
+			// Parse standard AA error codes like AA10, AA25, AA26, etc.
 			// Avoid falsely matching 'AA' inside hex strings or addresses.
 			if code := regexp.MustCompile(`AA\d{2}`).FindString(err.Error()); code != "" {
 				userErrorMsg = code
-			} else if strings.Contains(strings.ToLower(err.Error()), "not deployed") ||
-				strings.Contains(strings.ToLower(err.Error()), "override is not deployed") ||
-				strings.Contains(strings.ToLower(err.Error()), "sender not deployed") {
-				userErrorMsg = "Smart wallet not deployed"
 			} else {
 				userErrorMsg = "Transaction validation failed"
 			}

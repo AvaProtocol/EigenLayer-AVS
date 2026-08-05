@@ -332,10 +332,19 @@ func RequestSponsorshipV07(ctx context.Context, client *rpc.Client, op *userop.U
 	if err != nil {
 		return fmt.Errorf("marshaling user operation: %w", err)
 	}
+	// Prefer a signature already installed on the operation. Deferred-action
+	// estimation MUST carry the real owner grant (a plain dummy reverts with
+	// DeferredActionSignatureInvalid → AA23); SendUserOpMAv2 puts that grant
+	// on op.Signature before pricing. Ordinary operations leave Signature
+	// empty and fall through to the framed dummy.
+	dummy := dummySignatureV07()
+	if len(op.Signature) > 0 {
+		dummy = op.Signature
+	}
 	params := map[string]interface{}{
 		"policyId":       req.PolicyID,
 		"entryPoint":     entryPoint.Hex(),
-		"dummySignature": fmt.Sprintf("0x%x", dummySignatureV07()),
+		"dummySignature": fmt.Sprintf("0x%x", dummy),
 		"userOperation":  json.RawMessage(payload),
 	}
 

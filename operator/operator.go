@@ -784,6 +784,14 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	sdkClients, err := clients.BuildAll(chainioConfig, operatorEcdsaPrivateKey, logger)
 	if err != nil {
 		logger.Errorf("❌ Failed to build EigenLayer SDK clients: %v", err)
+		// The eigensdk AVS subscriber path issues eth_call over eth_ws_url
+		// (NewSubscriberFromConfig → ServiceManager). A WS endpoint that only
+		// supports eth_subscribe answers with JSON-RPC "method not found",
+		// which is easy to misread as a bad RegistryCoordinator address.
+		if strings.Contains(err.Error(), "method not found") {
+			logger.Errorf("   💡 eth_ws_url must support eth_call over WebSocket (not only eth_subscribe)")
+			logger.Errorf("   💡 Current eth_ws_url: %s", c.EthWsUrl)
+		}
 		return nil, fmt.Errorf("failed to build EigenLayer SDK clients: %w", err)
 	}
 	skWallet, err := wallet.NewPrivateKeyWallet(ethRpcClient, signerV2, signerAddress, logger)

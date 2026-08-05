@@ -112,6 +112,21 @@ func TestSeedVerificationGasScalesWithGrantContents(t *testing.T) {
 	if hooks.Cmp(big.NewInt(300_000)) <= 0 {
 		t.Errorf("hook-carrying seed %s is at or below the measured AA26 threshold", hooks)
 	}
+
+	// First-use that also deploys the account pays deploy + install in one
+	// validation frame. The deferred seeds alone under-cover that case.
+	factory := common.HexToAddress("0x00000000000017c61b5bEe81050EC8eFc9c6fecd")
+	deploying := &userop.UserOperationV07{Factory: &factory}
+	hooksDeploying := seedVerificationGasFor(deploying, &SessionAuthorization{
+		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
+		WrapExecuteUserOp: true})
+	if hooksDeploying.Cmp(hooks) <= 0 {
+		t.Errorf("deploy+hooks seed %s must exceed hooks-only seed %s", hooksDeploying, hooks)
+	}
+	wantMin := new(big.Int).Add(hooks, big.NewInt(seedVerificationGasDeploying))
+	if hooksDeploying.Cmp(wantMin) != 0 {
+		t.Errorf("deploy+hooks seed = %s, want hooks + deploying seed = %s", hooksDeploying, wantMin)
+	}
 }
 
 // The resolver is the only way storage reaches the send path. An unset
