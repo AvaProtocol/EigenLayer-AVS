@@ -20,6 +20,16 @@ avs_registry_coordinator_address: 0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD
 operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
 
 # RPC endpoints for AVS operations (Sepolia). Public RPC works for dev.
+#
+# IMPORTANT: eth_ws_url must support eth_call over WebSocket. The EigenLayer
+# SDK builds the AVS registry subscriber by calling ServiceManager() (and
+# friends) on the WS client. Tenderly's public gateway WS returns
+# "method not found" for eth_call, which surfaces as:
+#   Failed to fetch ServiceManager address: method not found
+# Prefer a full-node provider (Dwellir, Alchemy, publicnode), not Tenderly WS.
+# Local paid Dwellir example (host from CHAIN_ENDPOINT in ava-sdk-js-env):
+#   eth_rpc_url: https://api-ethereum-sepolia.n.dwellir.com/<project-id>
+#   eth_ws_url:  wss://api-ethereum-sepolia.n.dwellir.com/<project-id>
 eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
 eth_ws_url:  wss://ethereum-sepolia-rpc.publicnode.com
 

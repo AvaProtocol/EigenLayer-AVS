@@ -140,6 +140,23 @@ func SendUserOpMAv2(
 		return nil, nil, fmt.Errorf("checking whether %s is deployed: %w", sender.Hex(), err)
 	}
 	if !deployed {
+		// Factory createAccount must produce the same address as `sender`. A
+		// wrong salt (or a legacy SimpleAccount address on an MA v2 chain)
+		// deploys somewhere else while the UserOp claims the override — the
+		// EntryPoint then reverts validation as AA23 with no useful reason.
+		derived, derr := aa.DeriveSenderAddressAuto(chainRPC, owner, factory, salt)
+		if derr != nil {
+			return nil, nil, fmt.Errorf("deriving counterfactual address for deploy of %s: %w", sender.Hex(), derr)
+		}
+		if derived == nil || *derived != sender {
+			want := common.Address{}
+			if derived != nil {
+				want = *derived
+			}
+			return nil, nil, fmt.Errorf(
+				"sender %s is not deployed and does not match the address derived for owner %s salt %s factory %s (derived %s); cannot attach initCode",
+				sender.Hex(), owner.Hex(), salt.String(), factory.Hex(), want.Hex())
+		}
 		deployFactory, factoryData, initErr := aa.DeriveInitCodeAuto(owner, factory, salt)
 		if initErr != nil {
 			return nil, nil, fmt.Errorf("building init code: %w", initErr)

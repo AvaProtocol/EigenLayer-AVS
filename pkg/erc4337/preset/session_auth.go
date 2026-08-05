@@ -121,20 +121,31 @@ func (s *SessionAuthorization) nonceEntity() (entityID uint32, options uint8) {
 // that window, and SendUserOpV07WithRetry tightens from the bundler's own
 // ratio when they miss.
 func seedVerificationGasFor(op *userop.UserOperationV07, auth *SessionAuthorization) *big.Int {
-	if auth.Deferred() {
-		if auth.WrapExecuteUserOp {
-			// Hook-carrying grant: allowlist entries plus the exec hook.
-			return big.NewInt(seedVerificationGasDeferredHooks)
-		}
-		return big.NewInt(seedVerificationGasDeferredBare)
-	}
-	if auth != nil {
+	var seed int64
+	switch {
+	case auth.Deferred() && auth.WrapExecuteUserOp:
+		// Hook-carrying grant: allowlist entries plus the exec hook.
+		seed = seedVerificationGasDeferredHooks
+	case auth.Deferred():
+		seed = seedVerificationGasDeferredBare
+	case auth != nil:
 		// Validating as an installed module entity rather than the bytecode
 		// fallback signer: an external call plus, on the entity's first use, a
 		// cold nonce-key slot.
-		return big.NewInt(seedVerificationGasModuleEntity)
+		seed = seedVerificationGasModuleEntity
+	default:
+		return seedVerificationGas(op)
 	}
-	return seedVerificationGas(op)
+	// The deferred/module seeds above were measured on already-deployed
+	// accounts. First-use that ALSO deploys the account pays both costs in
+	// one validation frame (~160k for createSemiModularAccount alone). Add
+	// the deploying seed rather than inventing a third measured number —
+	// over-seeding is corrected by SendUserOpV07WithRetry's efficiency
+	// tighten, under-seeding is AA23/AA26 at estimation.
+	if op != nil && op.Factory != nil {
+		seed += seedVerificationGasDeploying
+	}
+	return big.NewInt(seed)
 }
 
 // SessionResolver answers "under what authority may the gateway execute for

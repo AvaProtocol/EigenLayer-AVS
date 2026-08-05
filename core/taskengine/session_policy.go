@@ -10,6 +10,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
@@ -161,8 +162,23 @@ func NewSessionResolver(
 		// hand, or the carrier nonce found consumed), and the ByID variant
 		// re-reads the record so a grant revoked mid-flight is never
 		// resurrected by a stale pointer.
+		//
+		// DeferredData must be EncodeDeferredActionData(locator, deadline,
+		// installCall) — NOT the raw installValidation calldata. The account
+		// unpacks the deferred signature as locator(21) ++ deadline(6) ++
+		// call; feeding InstallCall alone makes validation revert AA23 with
+		// no useful reason, which is exactly what first-use (and first-use
+		// that also deploys the counterfactual account) used to hit.
 		if !policy.Grant.Applied() {
-			auth.DeferredData = policy.Grant.InstallCall
+			encoded, encErr := userop.EncodeDeferredActionData(
+				userop.FallbackSignerLocator(),
+				policy.Grant.Deadline,
+				policy.Grant.InstallCall,
+			)
+			if encErr != nil {
+				return nil, fmt.Errorf("session policy %s: encoding deferred action: %w", policy.ID, encErr)
+			}
+			auth.DeferredData = encoded
 			auth.OwnerSignature = policy.Grant.OwnerSignature
 			policyID, policyChain, policyOwner := policy.ID, policy.ChainID, *policy.Owner
 			auth.OnApplied = func(userOpHash string) error {
