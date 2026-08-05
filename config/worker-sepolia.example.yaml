@@ -23,9 +23,9 @@ health_address: "0.0.0.0:8090"
 # Gateway address (worker registers with gateway on startup).
 gateway_address: "127.0.0.1:2206"
 
-# Chain RPC endpoints. Public RPC works for low-volume dev.
-eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
-eth_ws_url:  wss://ethereum-sepolia-rpc.publicnode.com
+# Chain RPC endpoints. Set via .env.local / env.
+eth_rpc_url: ${ETH_RPC_URL}
+eth_ws_url:  ${ETH_WS_URL}
 
 # Bundler endpoint. bundler_provider defaults to 'alchemy' in code (URL derived
 # from alchemy_api_key); pinned to self_hosted here so this worker uses bundler_url.

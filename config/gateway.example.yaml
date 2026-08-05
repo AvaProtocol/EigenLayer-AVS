@@ -19,9 +19,9 @@ backup_dir: /tmp/ap-avs-gateway-backup
 ecdsa_private_key: <testnet-ecdsa-private-key-hex>
 
 # EigenLayer contracts live on Sepolia (the AVS registration chain).
-# Bring your own provider — public RPC works for low-volume dev.
-eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
-eth_ws_url:  wss://ethereum-sepolia-rpc.publicnode.com
+# Set via .env.local / env.
+eth_rpc_url: ${ETH_RPC_URL}
+eth_ws_url:  ${ETH_WS_URL}
 
 rpc_bind_address:  "0.0.0.0:2206"
 http_bind_address: "0.0.0.0:8080"
@@ -79,7 +79,7 @@ gas_manager_webhook_secret: ""
 # the aggregator's default chain context. Points at Sepolia to match the
 # AVS chain above. Per-workflow execution still routes via chains[].
 smart_wallet:
-  eth_rpc_url:            https://ethereum-sepolia-rpc.publicnode.com
+  eth_rpc_url:            ${ETH_RPC_URL}
   # bundler_provider selects the bundler; 'alchemy' is both the code default and
   # what every production chain runs. The URL is derived from alchemy_api_key +
   # the chain's Alchemy subdomain and NEVER falls back to bundler_url, so no
@@ -111,8 +111,8 @@ chains:
     name: sepolia
     worker_addr: "127.0.0.1:50051"
     smart_wallet:
-      eth_rpc_url:            https://ethereum-sepolia-rpc.publicnode.com
-      eth_ws_url:             wss://ethereum-sepolia-rpc.publicnode.com
+      eth_rpc_url:            ${ETH_RPC_URL}
+      eth_ws_url:             ${ETH_WS_URL}
       bundler_provider:       alchemy
       alchemy_api_key:        ${ALCHEMY_API_KEY}
       controller_private_key: <testnet-controller-private-key-hex>
@@ -123,8 +123,8 @@ chains:
     name: base-sepolia
     worker_addr: "127.0.0.1:50052"
     smart_wallet:
-      eth_rpc_url:            https://sepolia.base.org
-      eth_ws_url:             wss://base-sepolia-rpc.publicnode.com
+      eth_rpc_url:            ${BASE_SEPOLIA_RPC_URL}
+      eth_ws_url:             ${BASE_SEPOLIA_WS_URL}
       bundler_provider:       alchemy
       alchemy_api_key:        ${ALCHEMY_API_KEY}
       controller_private_key: <testnet-controller-private-key-hex>
