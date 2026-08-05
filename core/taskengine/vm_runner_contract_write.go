@@ -879,21 +879,15 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 			userErrorMsg = "Bundler service unavailable"
 		} else if strings.Contains(err.Error(), "AA21") {
 			userErrorMsg = "Insufficient ETH balance for gas fees"
-		} else if strings.Contains(err.Error(), "AA20") ||
-			strings.Contains(errLower, "not deployed") ||
-			strings.Contains(errLower, "override is not deployed") ||
-			strings.Contains(errLower, "sender not deployed") ||
-			strings.Contains(errLower, "account not deployed") {
-			// AA20 is the EntryPoint code for "account not deployed". AA23 can
-			// also surface on an undeployed sender when initCode is missing or
-			// mismatched; map the explicit not-deployed cases to readable copy
-			// so clients are not left with the raw bundler string alone.
+		} else if strings.Contains(err.Error(), "AA20") || strings.Contains(errLower, "not deployed") {
+			// AA20 is the EntryPoint code for "account not deployed". Prefer this
+			// over the AA23 branch below when both strings appear — "not deployed"
+			// is the more actionable client copy.
 			userErrorMsg = "Smart wallet not deployed"
 		} else if strings.Contains(err.Error(), "AA23") {
-			// Validation reverted. Common causes: bad deferred-action payload
-			// on first use of a session grant, wrong factory/initCode for a
-			// counterfactual sender, or signature framing. Surface a readable
-			// code rather than only the raw bundler reason.
+			// Validation reverted (deferred-action framing, initCode mismatch,
+			// signature shape, etc.). Surface a readable code rather than only
+			// the raw bundler reason.
 			userErrorMsg = "Smart wallet validation failed (AA23)"
 		} else if strings.Contains(err.Error(), "AA") {
 			// Parse standard AA error codes like AA10, AA25, AA26, etc.
