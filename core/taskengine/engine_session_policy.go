@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/oklog/ulid/v2"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 )
 
@@ -27,6 +28,11 @@ var (
 	ErrSessionEntityTaken = errors.New("validation entity was taken while the grant was being signed")
 	// ErrSessionPolicyNotFound → 404.
 	ErrSessionPolicyNotFound = errors.New("session policy not found")
+	// ErrSessionWalletNotMAv2: grants only validate on Modular Account v2 runners.
+	// A legacy SimpleAccount (or missing factory on the wallet record) must be
+	// refused at prepare/submit so clients never collect a doomed owner signature.
+	// Studio filters Auto to MA v2; this is the gateway belt-and-braces half.
+	ErrSessionWalletNotMAv2 = errors.New("session grants require a Modular Account v2 smart wallet; legacy SimpleAccount cannot host session policies")
 )
 
 // SessionPolicyInput carries one grant's declared shape between prepare and
@@ -78,13 +84,64 @@ func (n *Engine) requireOwnedWallet(user *model.User, wallet common.Address) err
 	return nil
 }
 
+// requireMAv2SessionWallet refuses prepare/submit when the target runner is
+// not Modular Account v2. Session policies install ERC-6900 modules; a v0.6
+// SimpleAccount cannot validate them and would only produce opaque AA23 later.
+func (n *Engine) requireMAv2SessionWallet(user *model.User, chainID int64, wallet common.Address) error {
+	if err := n.requireOwnedWallet(user, wallet); err != nil {
+		return err
+	}
+	rec, err := n.lookupOwnedWalletRecord(user, chainID, wallet)
+	if err != nil {
+		return fmt.Errorf("loading wallet %s for session grant: %w", wallet.Hex(), err)
+	}
+	if rec == nil || rec.Factory == nil || *rec.Factory == (common.Address{}) {
+		return fmt.Errorf("%w: no factory recorded for %s", ErrSessionWalletNotMAv2, wallet.Hex())
+	}
+	if aa.ProviderForFactory(*rec.Factory) != aa.ProviderModularAccountV2 {
+		return fmt.Errorf("%w: wallet %s uses factory %s",
+			ErrSessionWalletNotMAv2, wallet.Hex(), rec.Factory.Hex())
+	}
+	return nil
+}
+
+// lookupOwnedWalletRecord loads the stored smart-wallet row for (owner, wallet),
+// preferring the grant's chainID then falling back to any known chain.
+// Missing keys are not errors — the caller treats nil as "no factory recorded".
+func (n *Engine) lookupOwnedWalletRecord(user *model.User, chainID int64, wallet common.Address) (*model.SmartWallet, error) {
+	if n.db == nil || user == nil {
+		return nil, fmt.Errorf("storage unavailable")
+	}
+	try := func(id int64) *model.SmartWallet {
+		rec, err := GetWallet(n.db, id, user.Address, wallet.Hex())
+		if err != nil || rec == nil {
+			return nil
+		}
+		return rec
+	}
+	if chainID > 0 {
+		if rec := try(chainID); rec != nil {
+			return rec, nil
+		}
+	}
+	for _, id := range n.knownChainIDs() {
+		if id == chainID {
+			continue
+		}
+		if rec := try(id); rec != nil {
+			return rec, nil
+		}
+	}
+	return nil, nil
+}
+
 // PrepareSessionPolicy allocates a grant and returns what the owner signs.
 // Nothing is stored; an abandoned prepare leaves no state.
 func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (*PreparedSessionGrant, error) {
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
-	if err := n.requireOwnedWallet(user, in.Wallet); err != nil {
+	if err := n.requireMAv2SessionWallet(user, in.ChainID, in.Wallet); err != nil {
 		return nil, err
 	}
 	signer, err := n.sessionSignerAddress()
@@ -126,7 +183,7 @@ func (n *Engine) SubmitSessionPolicy(
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
-	if err := n.requireOwnedWallet(user, in.Wallet); err != nil {
+	if err := n.requireMAv2SessionWallet(user, in.ChainID, in.Wallet); err != nil {
 		return nil, err
 	}
 	if _, err := ulid.ParseStrict(strings.ToUpper(policyID)); err != nil {

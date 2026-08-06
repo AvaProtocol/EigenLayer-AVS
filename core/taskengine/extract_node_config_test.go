@@ -722,3 +722,40 @@ func TestExtractNodeConfiguration_ETHTransferNode(t *testing.T) {
 	_, err := structpb.NewValue(config)
 	assert.NoError(t, err, "Protobuf conversion should succeed for ETHTransfer node")
 }
+
+func TestExtractNodeConfiguration_PreservesMethodCallContractAddress(t *testing.T) {
+	// Regression for PR #706: GetNodeDataForExecution round-trip used ExtractNodeConfiguration
+	// then CreateNodeFromType; dropping methodCalls[].contractAddress made atomic
+	// approve+swap send approve to the node-level router → AA23 under session hooks.
+	usdc := "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+	router := "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E"
+	node := &avsproto.TaskNode{
+		Id:   "cw1",
+		Name: "swap",
+		Type: avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE,
+		TaskType: &avsproto.TaskNode_ContractWrite{
+			ContractWrite: &avsproto.ContractWriteNode{
+				Config: &avsproto.ContractWriteNode_Config{
+					ContractAddress: router,
+					ChainId:         11155111,
+					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
+						{MethodName: "approve", ContractAddress: &usdc, MethodParams: []string{router, "1"}},
+						{MethodName: "exactInputSingle", MethodParams: []string{"{}"}},
+					},
+				},
+			},
+		},
+	}
+	cfg := ExtractNodeConfiguration(node)
+	require.NotNil(t, cfg)
+	calls, ok := cfg["methodCalls"].([]interface{})
+	require.True(t, ok, "methodCalls should be []interface{}")
+	require.Len(t, calls, 2)
+	first, ok := calls[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, usdc, first["contractAddress"], "approve must keep per-call token address through extract")
+	second, ok := calls[1].(map[string]interface{})
+	require.True(t, ok)
+	_, has := second["contractAddress"]
+	assert.False(t, has, "exactInputSingle without override should omit the field")
+}

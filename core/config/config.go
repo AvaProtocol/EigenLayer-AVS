@@ -162,8 +162,8 @@ type Config struct {
 	// GasManagerWebhookSecret, when set, must be echoed as the webhook
 	// request's webhookData. The webhook cannot sit behind the REST JWT
 	// (Alchemy has no token), so this is its only caller authentication.
-	// Optional so the endpoint can be brought up before the sponsorship
-	// caller is taught to send it.
+	// RequestSponsorshipV07 sends this value as Alchemy webhookData when set.
+	// Empty disables the check on both the sponsorship call and the webhook.
 	GasManagerWebhookSecret string `yaml:"gas_manager_webhook_secret"`
 
 	// Fee rates configuration for task execution pricing
@@ -259,6 +259,12 @@ type SmartWalletConfig struct {
 	// sponsorship without reaching back up. Empty means unsponsored: the
 	// operation is priced by estimation and the account pays its own gas.
 	AlchemyPaymasterPolicyID string
+
+	// GasManagerWebhookSecret is copied down from the top-level config with the
+	// policy id. When set, RequestSponsorshipV07 sends it as Alchemy's
+	// webhookData so the custom-rules webhook can authenticate the call.
+	// Empty omits the field (webhook secret check disabled on the gateway).
+	GasManagerWebhookSecret string
 }
 
 // Bundler provider identifiers for SmartWalletConfig.BundlerProvider.
@@ -754,6 +760,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 			WhitelistAddresses:       convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
 			MaxWalletsPerOwner:       configRaw.SmartWallet.MaxWalletsPerOwner,
 			AlchemyPaymasterPolicyID: resolveAlchemyPaymasterPolicyID(configRaw),
+			GasManagerWebhookSecret:  firstNonEmpty(configRaw.GasManagerWebhookSecret, os.Getenv("GAS_MANAGER_WEBHOOK_SECRET")),
 			// PaymasterOwnerAddress will be populated below by calling owner() on the paymaster contract
 		},
 
@@ -847,8 +854,9 @@ func NewConfig(configFilePath string) (*Config, error) {
 			}
 			// Sponsorship is configured once for the gateway, not per chain, but
 			// the v0.7 send path is only ever handed a SmartWalletConfig. Push
-			// the policy down so every chain can reach it.
+			// the policy and webhook secret down so every chain can reach them.
 			chainCfg.SmartWallet.AlchemyPaymasterPolicyID = config.AlchemyPaymasterPolicyID
+			chainCfg.SmartWallet.GasManagerWebhookSecret = config.GasManagerWebhookSecret
 			config.Chains = append(config.Chains, chainCfg)
 		}
 

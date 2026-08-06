@@ -75,6 +75,25 @@ func signDigest(t *testing.T, key *ecdsa.PrivateKey, digest common.Hash) []byte 
 	return sig
 }
 
+func TestSessionPolicyPrepareRejectsSimpleAccountRunner(t *testing.T) {
+	engine, db, _, owner, _ := newPolicyTestEngine(t)
+	user := &model.User{Address: owner}
+	// Legacy v0.6 SimpleAccount factory (not MA v2).
+	v06Factory := common.HexToAddress("0xB99BC2E399e06CddCF5E725c0ea341E8f0322834")
+	v06Wallet := common.HexToAddress("0x00000000000000000000000000000000000000b6")
+	require.NoError(t, StoreWallet(db, testPolicyChain, owner, &model.SmartWallet{
+		Owner: &owner, Address: &v06Wallet, Factory: &v06Factory, Salt: big.NewInt(0),
+	}))
+
+	_, err := engine.PrepareSessionPolicy(user, SessionPolicyInput{
+		Wallet: v06Wallet, ChainID: testPolicyChain,
+		AgentLabel: "TradingBot", Justification: "should refuse",
+		Permissions: testPermissions(),
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrSessionWalletNotMAv2)
+}
+
 func TestSessionPolicyPrepareSubmitRoundTrip(t *testing.T) {
 	engine, _, ownerKey, owner, wallet := newPolicyTestEngine(t)
 	user := &model.User{Address: owner}
