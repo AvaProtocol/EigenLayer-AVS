@@ -64,14 +64,20 @@ jobs:
           # Get list of changed files
           CHANGED_FILES=$(git diff --name-only origin/$BASE_BRANCH...HEAD)
 
-          # Check if any changes are in relevant directories
-          RELEVANT_CHANGES=$(echo "$CHANGED_FILES" | grep -E '\.go$|go\.mod|go\.sum|^core/|^pkg/|^aggregator/|^operator/|^model/|^cmd/|^version/|^config/')
+          # Check if any changes are in relevant directories.
+          # `|| true` is required: with bash -e, grep exit 1 (no match) aborts
+          # the job as failure instead of setting should_run=false.
+          RELEVANT_CHANGES=$(echo "$CHANGED_FILES" | grep -E '\.go$|go\.mod|go\.sum|^core/|^pkg/|^aggregator/|^operator/|^model/|^cmd/|^version/|^config/' || true)
 
           if [ -n "$RELEVANT_CHANGES" ]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "Relevant changes:"
+            echo "$RELEVANT_CHANGES"
           else
             echo "should_run=false" >> $GITHUB_OUTPUT
             echo "No relevant changes found. Skipping tests."
+            echo "Changed files:"
+            echo "$CHANGED_FILES"
           fi
 
   lint:
