@@ -45,10 +45,12 @@ import (
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/services"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
@@ -58,12 +60,25 @@ func (agg *Aggregator) stopTaskEngine() {
 }
 
 func (agg *Aggregator) startTaskEngine(ctx context.Context) {
-	agg.logger.Info("Start execution engine",
-		"bundler", agg.config.SmartWallet.BundlerURL,
-		"factory", agg.config.SmartWallet.FactoryAddress,
-		"entrypoint", agg.config.SmartWallet.EntrypointAddress,
-		"paymaster", agg.config.SmartWallet.PaymasterAddress,
-	)
+	sw := agg.config.SmartWallet
+	if sw == nil {
+		agg.logger.Info("Start execution engine", "smart_wallet", "nil")
+	} else {
+		effectiveFactory := common.Address{}
+		if f, err := aa.EffectiveFactory(sw); err == nil {
+			effectiveFactory = f
+		}
+		// Prefer effective (provider-aware) values over raw yaml fields so boot
+		// logs do not look like a v0.6 SimpleAccount stack when MA v2 is on.
+		agg.logger.Info("Start execution engine",
+			"account_provider", sw.AccountProviderName(),
+			"effective_factory", effectiveFactory.Hex(),
+			"config_factory_address", sw.FactoryAddress.Hex(),
+			"entry_point", sw.EntryPointAddress().Hex(),
+			"paymaster_policy_set", sw.AlchemyPaymasterPolicyID != "",
+			"legacy_v06_paymaster", sw.PaymasterAddress.Hex(),
+		)
+	}
 
 	// ChainIDs lets the cleanup loop locate tasks across every chain bucket
 	// in chain-scoped storage. Single-chain aggregator: just its own chain.

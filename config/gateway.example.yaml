@@ -19,9 +19,9 @@ backup_dir: /tmp/ap-avs-gateway-backup
 ecdsa_private_key: <testnet-ecdsa-private-key-hex>
 
 # EigenLayer contracts live on Sepolia (the AVS registration chain).
-# Bring your own provider — public RPC works for low-volume dev.
-eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
-eth_ws_url:  wss://ethereum-sepolia-rpc.publicnode.com
+# Set via .env.local / env.
+eth_rpc_url: ${ETH_RPC_URL}
+eth_ws_url:  ${ETH_WS_URL}
 
 rpc_bind_address:  "0.0.0.0:2206"
 http_bind_address: "0.0.0.0:8080"
@@ -47,14 +47,13 @@ tenderly_account: ""
 tenderly_project: ""
 tenderly_access_key: ""
 
-# Optional: Alchemy Gas Manager sponsorship webhook.
+# Optional: Alchemy paymaster policy sponsorship (Gas Manager dashboard).
 #
-# gas_manager_policy_id is the policy this gateway answers sponsorship
-# questions for. The webhook at POST /webhooks/gas-manager is mounted ONLY
-# when this is set — leaving it empty is the normal local-dev state, and the
-# route then 404s rather than silently refusing every sponsorship.
+# alchemy_paymaster_policy_id — Policy UUID from Alchemy (Gas Manager → policy).
+# Used for MA v2 UserOp sponsorship. Env override: ALCHEMY_PAYMASTER_POLICY_ID.
+# The webhook at POST /webhooks/gas-manager is mounted ONLY when this is set.
 #
-# Two things to know before pointing a real Gas Manager policy at a gateway:
+# Two things to know before pointing a real policy at a gateway:
 #   - the policy's "Sponsor on error or timeout" must stay OFF, so an
 #     unreachable gateway denies sponsorship instead of handing out unlimited
 #     gas; which also means
@@ -68,18 +67,23 @@ tenderly_access_key: ""
 # READ ONLY: a read/write key can delete the policy that funds sponsorship.
 alchemy_api_secret: ""
 
-gas_manager_policy_id: ""
+alchemy_paymaster_policy_id: ""
 # Echoed back as the request's webhookData. The webhook cannot sit behind the
 # REST JWT (Alchemy has no token), so this is its only caller authentication.
 # Empty disables the check.
 gas_manager_webhook_secret: ""
 
+# Token price service for fee USD lines / estimateFees. Env: MORALIS_API_KEY.
+# Distinct from macros.secrets.moralis_api_key (workflow templates only).
+moralis_api_key: ${MORALIS_API_KEY}
+
 # Top-level smart_wallet — required by the aa package globals (factory +
-# entrypoint), the startup paymaster probe, and any cmd tool that takes
-# the aggregator's default chain context. Points at Sepolia to match the
-# AVS chain above. Per-workflow execution still routes via chains[].
+# entrypoint). On modular_account_v2 chains the v0.6 verifying-paymaster
+# probe is skipped; Alchemy paymaster policy sponsors MA v2 UserOps.
+# Points at Sepolia to match the AVS chain above. Per-workflow execution
+# still routes via chains[].
 smart_wallet:
-  eth_rpc_url:            https://ethereum-sepolia-rpc.publicnode.com
+  eth_rpc_url:            ${ETH_RPC_URL}
   # bundler_provider selects the bundler; 'alchemy' is both the code default and
   # what every production chain runs. The URL is derived from alchemy_api_key +
   # the chain's Alchemy subdomain and NEVER falls back to bundler_url, so no
@@ -111,8 +115,8 @@ chains:
     name: sepolia
     worker_addr: "127.0.0.1:50051"
     smart_wallet:
-      eth_rpc_url:            https://ethereum-sepolia-rpc.publicnode.com
-      eth_ws_url:             wss://ethereum-sepolia-rpc.publicnode.com
+      eth_rpc_url:            ${ETH_RPC_URL}
+      eth_ws_url:             ${ETH_WS_URL}
       bundler_provider:       alchemy
       alchemy_api_key:        ${ALCHEMY_API_KEY}
       controller_private_key: <testnet-controller-private-key-hex>
@@ -123,8 +127,8 @@ chains:
     name: base-sepolia
     worker_addr: "127.0.0.1:50052"
     smart_wallet:
-      eth_rpc_url:            https://sepolia.base.org
-      eth_ws_url:             wss://base-sepolia-rpc.publicnode.com
+      eth_rpc_url:            ${BASE_SEPOLIA_RPC_URL}
+      eth_ws_url:             ${BASE_SEPOLIA_WS_URL}
       bundler_provider:       alchemy
       alchemy_api_key:        ${ALCHEMY_API_KEY}
       controller_private_key: <testnet-controller-private-key-hex>

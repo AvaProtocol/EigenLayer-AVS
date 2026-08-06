@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
@@ -1668,10 +1669,17 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		"task_owner", v.TaskOwner.Hex())
 
 	if swConfig != nil {
+		effectiveFactory, factoryErr := aa.EffectiveFactory(swConfig)
+		effectiveFactoryHex := ""
+		if factoryErr == nil {
+			effectiveFactoryHex = effectiveFactory.Hex()
+		}
 		v.logger.Info("🔍 VM DEBUG - Smart wallet config details",
 			"bundler_url", swConfig.BundlerURL,
-			"factory_address", swConfig.FactoryAddress,
-			"entrypoint_address", swConfig.EntryPointAddress(),
+			"account_provider", swConfig.AccountProviderName(),
+			"effective_factory", effectiveFactoryHex,
+			"config_factory_address", swConfig.FactoryAddress.Hex(),
+			"entrypoint_address", swConfig.EntryPointAddress().Hex(),
 			"eth_rpc_url", swConfig.EthRpcUrl)
 	} else {
 		v.logger.Warn("⚠️ VM DEBUG - Smart wallet config is NIL in VM!")
@@ -3879,6 +3887,15 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 						methodCallMap["callData"] = ""
 					}
 
+					// Per-call target (G4 atomic approve+swap). MUST survive the
+					// proto→map→proto round-trip in GetNodeDataForExecution /
+					// CreateNodeFromType. Dropping it forces every sub-call onto
+					// the node-level router → hooks allowlist rejects approve →
+					// opaque AA23 at Gas Manager (live 2026-08-05).
+					if methodCall.ContractAddress != nil && *methodCall.ContractAddress != "" {
+						methodCallMap["contractAddress"] = *methodCall.ContractAddress
+					}
+
 					// Include methodParams if present
 					if len(methodCall.MethodParams) > 0 {
 						methodCallMap["methodParams"] = methodCall.MethodParams
@@ -4164,6 +4181,11 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 				// Include callData only if it's set (it's optional)
 				if methodCall.CallData != nil {
 					methodCallMap["callData"] = *methodCall.CallData
+				}
+
+				// Per-call target — same G4 field as non-loop contractWrite extract.
+				if methodCall.ContractAddress != nil && *methodCall.ContractAddress != "" {
+					methodCallMap["contractAddress"] = *methodCall.ContractAddress
 				}
 
 				// Include methodParams if present

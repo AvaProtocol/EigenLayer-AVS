@@ -3,6 +3,7 @@ package taskengine
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -10,6 +11,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
@@ -108,9 +110,9 @@ func NextSessionEntityID(db storage.Storage, chainID int64, owner, wallet common
 }
 
 // InstallSessionResolver wires the send path to this engine's session-policy
-// storage. Without it every MA v2 operation is signed as the account's
-// fallback signer — the user's EOA, whose key the gateway does not hold — so
-// nothing the gateway executes validates.
+// storage. Without it every MA v2 operation fails fast with "no session
+// authorization" — the gateway cannot sign as the owner fallback, and
+// estimating a doomed UserOp only produces opaque AA23.
 //
 // Called once at aggregator startup, deliberately NOT from New: the resolver
 // is process-global (the preset package has no per-engine context), and test
@@ -139,10 +141,8 @@ func NewSessionResolver(
 			return nil, err
 		}
 		if policy == nil {
-			// No grant. The operation stays on the owner's fallback signer,
-			// which the gateway cannot sign — but that failure belongs to the
-			// caller that asked for an operation it has no authority for, and
-			// it reads more clearly than a fabricated authorization.
+			// No grant. SendUserOpMAv2 fails fast on nil rather than estimating
+			// a controller-as-fallback UserOp that always AA23s.
 			return nil, nil
 		}
 		key, err := signerKeyFor(*policy.SessionSigner)
@@ -152,6 +152,7 @@ func NewSessionResolver(
 		auth := &preset.SessionAuthorization{
 			EntityID:          policy.EntityID,
 			SignerKey:         key,
+			PolicyID:          policy.ID,
 			WrapExecuteUserOp: policy.Grant.RequiresExecuteUserOp,
 		}
 		// The install rides the grant's FIRST operation only. Replaying an
@@ -161,9 +162,27 @@ func NewSessionResolver(
 		// hand, or the carrier nonce found consumed), and the ByID variant
 		// re-reads the record so a grant revoked mid-flight is never
 		// resurrected by a stale pointer.
+		//
+		// DeferredData must be EncodeDeferredActionData(locator, deadline,
+		// installCall) — NOT the raw installValidation calldata. The account
+		// unpacks the deferred signature as locator(21) ++ deadline(6) ++
+		// call; feeding InstallCall alone makes validation revert AA23 with
+		// no useful reason, which is exactly what first-use (and first-use
+		// that also deploys the counterfactual account) used to hit.
 		if !policy.Grant.Applied() {
-			auth.DeferredData = policy.Grant.InstallCall
+			encoded, encErr := userop.EncodeDeferredActionData(
+				userop.FallbackSignerLocator(),
+				policy.Grant.Deadline,
+				policy.Grant.InstallCall,
+			)
+			if encErr != nil {
+				return nil, fmt.Errorf("session policy %s: encoding deferred action: %w", policy.ID, encErr)
+			}
+			auth.DeferredData = encoded
 			auth.OwnerSignature = policy.Grant.OwnerSignature
+			if policy.Grant.CarrierNonce != nil {
+				auth.CarrierNonce = new(big.Int).Set(policy.Grant.CarrierNonce)
+			}
 			policyID, policyChain, policyOwner := policy.ID, policy.ChainID, *policy.Owner
 			auth.OnApplied = func(userOpHash string) error {
 				return MarkSessionGrantAppliedByID(db, policyChain, policyOwner, policyID, userOpHash)
@@ -175,18 +194,17 @@ func NewSessionResolver(
 
 // controllerSessionSigner resolves a session signer to its key.
 //
-// Today every policy is signed by the gateway's controller key, so this
-// accepts exactly that address and refuses anything else. That is a deliberate
-// interim: avs-infra §7.4 describes session_signer as gateway-ASSIGNED, one
-// fresh key per policy, which needs key generation and custody this gateway
-// does not have yet.
-//
-// What matters is that the interim does not weaken the model. Authority is
-// still per grant, because each policy occupies its own validation ENTITY —
-// and the entity, not the key, is what carries the hooks, the revocation
-// target, and the nonce space that makes grant-time signing work. Sharing one
-// key across entities means a compromised controller reaches every grant, but
-// that is already true of the controller today.
+// Every policy is signed by the gateway's controller key, so this accepts
+// exactly that address and refuses anything else. This is the DESIGN, not a
+// placeholder — per-policy signer keys are deliberately not planned, because
+// they add key generation, custody, and rotation without changing the trust
+// model. Authority is per grant regardless of the key: each policy occupies
+// its own validation ENTITY, and the entity — not the key — is what carries
+// the hooks, the revocation target, and the nonce space that makes grant-time
+// signing work. A single shared key means a compromised controller reaches
+// every grant, but that is already true of the controller today, so a key per
+// policy would buy complexity, not a smaller blast radius. Revisit only if
+// that blast radius itself becomes the thing to shrink.
 //
 // Refusing an unknown signer is the important half: a policy naming a key we
 // cannot produce must fail loudly here, not sign with the wrong one.
@@ -198,7 +216,7 @@ func controllerSessionSigner(cfg *config.Config) func(common.Address) (*ecdsa.Pr
 		controller := crypto.PubkeyToAddress(cfg.SmartWallet.ControllerPrivateKey.PublicKey)
 		if signer != controller {
 			return nil, fmt.Errorf(
-				"session signer %s is not the gateway controller %s; per-policy signer keys are not implemented",
+				"session signer %s is not the gateway controller %s; every policy signs with the shared controller key by design",
 				signer.Hex(), controller.Hex())
 		}
 		return cfg.SmartWallet.ControllerPrivateKey, nil

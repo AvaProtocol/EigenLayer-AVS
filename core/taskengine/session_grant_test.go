@@ -91,6 +91,20 @@ func TestSessionGrantRoundTrip(t *testing.T) {
 	if !auth.WrapExecuteUserOp {
 		t.Error("the hook-carrying grant must wrap in user-op context")
 	}
+	// DeferredData must be the ENCODED deferred-action payload the owner
+	// signed over (locator ++ deadline ++ installCall), not the raw
+	// installValidation calldata. Feeding InstallCall alone is what produced
+	// AA23 on first use of a pending grant (including first deploy).
+	if string(auth.DeferredData) != string(prepared.DeferredData) {
+		t.Errorf("DeferredData is not the encoded deferred action (len got %d, want %d)",
+			len(auth.DeferredData), len(prepared.DeferredData))
+	}
+	if len(auth.DeferredData) < 21+6+4 {
+		t.Errorf("DeferredData is too short to be locator+deadline+selector: %d bytes", len(auth.DeferredData))
+	}
+	if string(auth.DeferredData) == string(policy.Grant.InstallCall) {
+		t.Error("DeferredData must not be the raw InstallCall; wrap it with EncodeDeferredActionData")
+	}
 
 	if err := MarkSessionGrantApplied(db, policy, "0xdeadbeef"); err != nil {
 		t.Fatalf("MarkSessionGrantApplied: %v", err)

@@ -56,7 +56,8 @@ func TestSessionResolverReturnsTheWalletsGrant(t *testing.T) {
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 	keyFor, key := spKeyFor(t)
 
-	if err := StoreSessionPolicy(db, spPolicy("p1", spWallet, 1, model.SessionPolicyPending)); err != nil {
+	pending := spPolicy("p1", spWallet, 1, model.SessionPolicyPending)
+	if err := StoreSessionPolicy(db, pending); err != nil {
 		t.Fatalf("StoreSessionPolicy: %v", err)
 	}
 	// A grant on a DIFFERENT wallet the same owner holds must not leak across.
@@ -75,9 +76,26 @@ func TestSessionResolverReturnsTheWalletsGrant(t *testing.T) {
 	if auth.EntityID != 1 || auth.SignerKey != key {
 		t.Errorf("wrong entity/key: %d %v", auth.EntityID, auth.SignerKey == key)
 	}
+	if auth.PolicyID != "p1" {
+		t.Errorf("PolicyID = %q, want p1 (for send-path logging)", auth.PolicyID)
+	}
+	if auth.CarrierNonce == nil || auth.CarrierNonce.Cmp(pending.Grant.CarrierNonce) != 0 {
+		t.Errorf("CarrierNonce = %v, want %v (send path asserts it against op.Nonce)",
+			auth.CarrierNonce, pending.Grant.CarrierNonce)
+	}
 	// Pending means the install has not been applied, so it must ride along.
 	if !auth.Deferred() {
 		t.Error("a pending grant's first operation must carry the install")
+	}
+	// DeferredData is the ENCODED deferred-action payload, not the raw
+	// installValidation calldata stored on the grant. The account expects
+	// locator(21) ++ deadline(6) ++ call; raw InstallCall alone reverts AA23.
+	if string(auth.DeferredData) == string(pending.Grant.InstallCall) {
+		t.Error("DeferredData must not equal raw InstallCall")
+	}
+	if len(auth.DeferredData) <= len(pending.Grant.InstallCall) {
+		t.Errorf("DeferredData should be InstallCall plus locator+deadline prefix; got %d bytes for a %d-byte install",
+			len(auth.DeferredData), len(pending.Grant.InstallCall))
 	}
 }
 

@@ -19,9 +19,11 @@ operator_address: <operator-eoa-address>
 avs_registry_coordinator_address: 0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD
 operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
 
-# RPC endpoints for AVS operations (Sepolia). Public RPC works for dev.
-eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
-eth_ws_url:  wss://ethereum-sepolia-rpc.publicnode.com
+# RPC endpoints for AVS operations (Sepolia). Set via .env.local / env.
+# eth_ws_url must support eth_call over WebSocket (not only eth_subscribe);
+# the EigenLayer SDK calls ServiceManager on the WS client at startup.
+eth_rpc_url: ${ETH_RPC_URL}
+eth_ws_url:  ${ETH_WS_URL}
 
 # Local key store paths (absolute paths to your testnet key files).
 ecdsa_private_key_store_path: <path-to-ecdsa-key.json>
@@ -52,8 +54,8 @@ db_path: /tmp/ap-avs-operator
 
 # Destination chain where tasks run (Sepolia).
 target_chain:
-  eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
-  eth_ws_url:  wss://ethereum-sepolia-rpc.publicnode.com
+  eth_rpc_url: ${ETH_RPC_URL}
+  eth_ws_url:  ${ETH_WS_URL}
 
 # Feature toggles.
 enabled_features:

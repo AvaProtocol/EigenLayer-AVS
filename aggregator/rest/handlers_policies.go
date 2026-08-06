@@ -328,6 +328,8 @@ func filterToDeclaredFields(domain interface{}, declared []apitypes.Type) interf
 // mapPolicyError translates engine sentinels into REST problems.
 func mapPolicyError(err error) error {
 	switch {
+	case errors.Is(err, taskengine.ErrSessionWalletNotMAv2):
+		return badRequest("SESSION_WALLET_NOT_MA_V2", err.Error(), "")
 	case errors.Is(err, taskengine.ErrWalletNotOwned), errors.Is(err, taskengine.ErrSessionPolicyNotFound):
 		// Existence is not confirmed to non-owners: both cases read as 404.
 		return &restmw.HTTPError{Status: http.StatusNotFound, Code: "POLICIES_NOT_FOUND",
