@@ -2,10 +2,12 @@ package aggregator
 
 import (
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -46,13 +48,64 @@ const gasManagerWebhookPath = "/webhooks/gas-manager"
 // gasManagerWebhookRequest is Alchemy's request body. userOperation's shape
 // varies by EntryPoint version, so only `sender` is decoded — it is the one
 // field present in both v0.6 and v0.7 and the only one this decision needs.
+//
+// chainId is a flexibleInt64: Alchemy's docs show it as a JSON string
+// (`"chainId": ""`), while our own probes and unit tests send a JSON number.
+// Rejecting either shape fails closed as approved=false and silently kills
+// sponsorship for every UserOp.
 type gasManagerWebhookRequest struct {
 	UserOperation struct {
 		Sender string `json:"sender"`
 	} `json:"userOperation"`
-	PolicyID    string `json:"policyId"`
-	ChainID     int64  `json:"chainId"`
-	WebhookData string `json:"webhookData"`
+	PolicyID    string        `json:"policyId"`
+	ChainID     flexibleInt64 `json:"chainId"`
+	WebhookData string        `json:"webhookData"`
+}
+
+// flexibleInt64 unmarshals a JSON number or a decimal/hex string into an int64.
+// Used for Alchemy Gas Manager webhook fields whose wire type is documented
+// loosely (string in the docs, number in practice).
+type flexibleInt64 int64
+
+func (v *flexibleInt64) UnmarshalJSON(b []byte) error {
+	b = bytesTrimSpace(b)
+	if len(b) == 0 || string(b) == "null" {
+		*v = 0
+		return nil
+	}
+	// JSON number
+	if b[0] != '"' {
+		var n int64
+		if err := json.Unmarshal(b, &n); err != nil {
+			return fmt.Errorf("chainId number: %w", err)
+		}
+		*v = flexibleInt64(n)
+		return nil
+	}
+	// JSON string — decimal ("11155111") or 0x-hex ("0xaa36a7")
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return fmt.Errorf("chainId string: %w", err)
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		*v = 0
+		return nil
+	}
+	base := 10
+	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
+		base = 0 // strconv auto-detects 0x
+	}
+	n, err := strconv.ParseInt(s, base, 64)
+	if err != nil {
+		return fmt.Errorf("chainId %q: %w", s, err)
+	}
+	*v = flexibleInt64(n)
+	return nil
+}
+
+func bytesTrimSpace(b []byte) []byte {
+	return []byte(strings.TrimSpace(string(b)))
 }
 
 type gasManagerWebhookResponse struct {
@@ -190,7 +243,8 @@ func (agg *Aggregator) handleGasManagerWebhook(c echo.Context, cfg gasManagerWeb
 		return agg.deny(c, "storage unavailable")
 	}
 
-	owner, found, err := ownerOfSmartWallet(agg.db, req.ChainID, wallet)
+	chainID := int64(req.ChainID)
+	owner, found, err := ownerOfSmartWallet(agg.db, chainID, wallet)
 	if err != nil {
 		return agg.deny(c, "owner lookup failed", "wallet", wallet.Hex(), "error", err)
 	}
@@ -198,7 +252,7 @@ func (agg *Aggregator) handleGasManagerWebhook(c echo.Context, cfg gasManagerWeb
 		// An unknown sender is not ours to sponsor. This is the check that
 		// stops the policy from funding wallets created outside this gateway.
 		return agg.deny(c, "sender is not a known smart wallet",
-			"wallet", wallet.Hex(), "chain_id", req.ChainID)
+			"wallet", wallet.Hex(), "chain_id", chainID)
 	}
 
 	withinLimit, outstanding, err := agg.ownerWithinCreditLimit(owner)

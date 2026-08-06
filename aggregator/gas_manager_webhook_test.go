@@ -77,6 +77,53 @@ func bodyFor(sender string, chainID int64, policyID, webhookData string) string 
 		sender, policyID, chainID, webhookData)
 }
 
+// Alchemy's docs show chainId as a JSON string. The numeric form must keep
+// working (our unit tests + hand curls), and both decimal and 0x-hex strings
+// must approve the same known wallet.
+func TestGasManagerWebhook_AcceptsStringChainID(t *testing.T) {
+	agg, cleanup := newWebhookAggregator(t)
+	defer cleanup()
+
+	owner := common.HexToAddress("0x72d841f43241957b558097a5110a8ed68c6fd88c")
+	wallet := common.HexToAddress("0x981e18d5aade83620a6bd21990b5da0c797e1e5b")
+	storeWallet(t, agg, testChainID, owner, wallet)
+	cfg := gasManagerWebhookConfig{PolicyID: testPolicyID, Secret: testSecret}
+
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "decimal string",
+			body: fmt.Sprintf(
+				`{"userOperation":{"sender":%q},"policyId":%q,"chainId":"11155111","webhookData":%q}`,
+				wallet.Hex(), testPolicyID, testSecret),
+		},
+		{
+			name: "hex string",
+			// 0xaa36a7 == 11155111
+			body: fmt.Sprintf(
+				`{"userOperation":{"sender":%q},"policyId":%q,"chainId":"0xaa36a7","webhookData":%q}`,
+				wallet.Hex(), testPolicyID, testSecret),
+		},
+		{
+			name: "json number still works",
+			body: bodyFor(wallet.Hex(), testChainID, testPolicyID, testSecret),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, approved := post(t, agg, cfg, tc.body)
+			if code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", code)
+			}
+			if !approved {
+				t.Fatalf("expected approved=true for %s", tc.name)
+			}
+		})
+	}
+}
+
 // storeWallet writes a wallet record so the reverse lookup can find it.
 func storeWallet(t *testing.T, agg *Aggregator, chainID int64, owner, wallet common.Address) {
 	t.Helper()
