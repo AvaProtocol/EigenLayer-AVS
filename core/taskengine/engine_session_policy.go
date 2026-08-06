@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	badger "github.com/dgraph-io/badger/v4"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/oklog/ulid/v2"
@@ -107,20 +108,27 @@ func (n *Engine) requireMAv2SessionWallet(user *model.User, chainID int64, walle
 
 // lookupOwnedWalletRecord loads the stored smart-wallet row for (owner, wallet),
 // preferring the grant's chainID then falling back to any known chain.
-// Missing keys are not errors — the caller treats nil as "no factory recorded".
+// badger.ErrKeyNotFound is "missing" (nil, nil); any other DB error is returned.
 func (n *Engine) lookupOwnedWalletRecord(user *model.User, chainID int64, wallet common.Address) (*model.SmartWallet, error) {
 	if n.db == nil || user == nil {
 		return nil, fmt.Errorf("storage unavailable")
 	}
-	try := func(id int64) *model.SmartWallet {
+	try := func(id int64) (*model.SmartWallet, error) {
 		rec, err := GetWallet(n.db, id, user.Address, wallet.Hex())
-		if err != nil || rec == nil {
-			return nil
+		if err != nil {
+			if errors.Is(err, badger.ErrKeyNotFound) {
+				return nil, nil
+			}
+			return nil, err
 		}
-		return rec
+		return rec, nil
 	}
 	if chainID > 0 {
-		if rec := try(chainID); rec != nil {
+		rec, err := try(chainID)
+		if err != nil {
+			return nil, err
+		}
+		if rec != nil {
 			return rec, nil
 		}
 	}
@@ -128,7 +136,11 @@ func (n *Engine) lookupOwnedWalletRecord(user *model.User, chainID int64, wallet
 		if id == chainID {
 			continue
 		}
-		if rec := try(id); rec != nil {
+		rec, err := try(id)
+		if err != nil {
+			return nil, err
+		}
+		if rec != nil {
 			return rec, nil
 		}
 	}

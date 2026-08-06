@@ -760,7 +760,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 			WhitelistAddresses:       convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
 			MaxWalletsPerOwner:       configRaw.SmartWallet.MaxWalletsPerOwner,
 			AlchemyPaymasterPolicyID: resolveAlchemyPaymasterPolicyID(configRaw),
-			GasManagerWebhookSecret:  firstNonEmpty(configRaw.GasManagerWebhookSecret, os.Getenv("GAS_MANAGER_WEBHOOK_SECRET")),
+			GasManagerWebhookSecret:  strings.TrimSpace(firstNonEmpty(configRaw.GasManagerWebhookSecret, os.Getenv("GAS_MANAGER_WEBHOOK_SECRET"))),
 			// PaymasterOwnerAddress will be populated below by calling owner() on the paymaster contract
 		},
 
@@ -781,7 +781,9 @@ func NewConfig(configFilePath string) (*Config, error) {
 		// Alchemy paymaster policy (Gas Manager) + admin API
 		AlchemyAPISecret:         firstNonEmpty(configRaw.AlchemyAPISecret, os.Getenv("ALCHEMY_API_SECRET")),
 		AlchemyPaymasterPolicyID: resolveAlchemyPaymasterPolicyID(configRaw),
-		GasManagerWebhookSecret:  firstNonEmpty(configRaw.GasManagerWebhookSecret, os.Getenv("GAS_MANAGER_WEBHOOK_SECRET")),
+		// Trim: pasted secrets often carry trailing whitespace; webhook compares
+		// with subtle.ConstantTimeCompare on the raw webhookData body field.
+		GasManagerWebhookSecret: strings.TrimSpace(firstNonEmpty(configRaw.GasManagerWebhookSecret, os.Getenv("GAS_MANAGER_WEBHOOK_SECRET"))),
 
 		// Initialize fee rates - use defaults if no YAML config provided
 		FeeRates: loadFeeRatesFromConfig(configRaw.FeeRates),
