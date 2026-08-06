@@ -155,26 +155,32 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 
 	db := testutil.TestMustDB()
 
-	// The gateway cannot sign as this wallet's owner — a stock MA v2 account
-	// trusts only its fallback signer — so it needs a session grant, the same
-	// one the grant screen creates in production.
-	grantControllerAuthority(t, db, cfg.SmartWallet, ownerAddress, *smartWalletAddress)
+	// Production-shaped grant: allowlist approve on USDC + WETH, USDC spend
+	// cap, TimeRange + AllowlistExecHook (RequiresExecuteUserOp). Matches
+	// Studio uniswapV3Capability([USDC,WETH]) — not the bare global fixture.
+	// Cap amount is large enough that two test approves never hit the limit.
+	const usdcCapAmount = "1000000000000" // 1e12 raw units
+	grantControllerAuthorityWithERC20Approves(t, db, cfg.SmartWallet,
+		ownerAddress, *smartWalletAddress,
+		[]common.Address{usdc, weth}, usdc, usdcCapAmount)
 
 	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
 	engine := New(db, cfg, nil, testutil.GetLogger())
 	t.Cleanup(func() { engine.Stop() })
 
 	user := &model.User{Address: ownerAddress, SmartAccountAddress: smartWalletAddress}
-	require.NoError(t, StoreWallet(db, int64(1), ownerAddress, &model.SmartWallet{
+	// Chain-scoped wallet key must match the grant's chain (Sepolia).
+	require.NoError(t, StoreWallet(db, sepoliaChainID, ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddress,
 		Salt:    big.NewInt(0),
 	}), "Failed to store wallet")
 
-	// Real execution (is_simulated=false) with paymaster — this is the composed path:
-	// executeBatch(approve, approve) wrapped by the reimbursement wrapper into executeBatchWithValues.
+	// Real execution (is_simulated=false). Sponsorship follows config
+	// (alchemy_paymaster_policy_id); when empty, self-funded prefund applies.
+	// Force paymaster flag is legacy v0.6; MA v2 uses the policy id path.
 	usePaymaster := true
-	t.Logf("🚀 Submitting atomic batch as one UserOp (real, paymaster-sponsored)...")
+	t.Logf("🚀 Submitting atomic batch as one UserOp (real path)...")
 	result, err := engine.RunNodeImmediately("contractWrite", batchConfig, inputVars, user, false, &usePaymaster)
 	require.NoError(t, err, "batch RunNodeImmediately should not error")
 	require.NotNil(t, result, "batch result should not be nil")

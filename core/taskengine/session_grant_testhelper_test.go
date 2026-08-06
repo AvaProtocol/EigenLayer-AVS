@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
@@ -93,6 +95,129 @@ func grantControllerAuthority(
 			policy.EntityID, wallet.Hex())
 	}
 
+	installSessionResolver(t, db, swCfg, controller)
+}
+
+// grantControllerAuthorityWithERC20Approves installs a production-shaped
+// session grant: allowlist approve() on each token, an ERC-20 spend cap on
+// capToken (must be one of the approve targets), TimeRange + AllowlistExecHook
+// so RequiresExecuteUserOp / wrapExecuteUserOp match production Uniswap grants.
+//
+// Long-lived Sepolia fixtures often already have the controller on entity 1
+// with a different hook set (bare global or USDC-only Studio grant). Reusing
+// that entity without reinstall leaves stale hooks and AA23s on WETH approve.
+// This helper skips occupied on-chain entities and allocates a free one so the
+// deferred install rides the test's first operation with the right hooks.
+func grantControllerAuthorityWithERC20Approves(
+	t *testing.T,
+	db storage.Storage,
+	swCfg *config.SmartWalletConfig,
+	owner, wallet common.Address,
+	approveTokens []common.Address,
+	capToken common.Address,
+	capAmount string, // decimal smallest-unit string
+) {
+	t.Helper()
+
+	if len(approveTokens) == 0 {
+		t.Fatal("grantControllerAuthorityWithERC20Approves: need at least one approve token")
+	}
+	ownerKey := requireOwnerKey(t)
+	if got := crypto.PubkeyToAddress(ownerKey.PublicKey); got != owner {
+		t.Fatalf("TEST_PRIVATE_KEY is %s but the test's owner is %s; they must match to authorize a grant",
+			got.Hex(), owner.Hex())
+	}
+	if swCfg.ControllerPrivateKey == nil {
+		t.Fatal("no controller key configured; the gateway cannot be granted anything")
+	}
+	controller := crypto.PubkeyToAddress(swCfg.ControllerPrivateKey.PublicKey)
+
+	actions := make([]model.AllowedAction, 0, len(approveTokens))
+	for _, tok := range approveTokens {
+		a := tok
+		actions = append(actions, model.AllowedAction{
+			Target:    &a,
+			Selectors: []string{"0x095ea7b3"}, // approve(address,uint256)
+		})
+	}
+	cap := capToken
+	perms := SessionPermissions{
+		AllowedActions: actions,
+		SpendCap: &model.ERC20SpendCap{
+			Token:      &cap,
+			Amount:     capAmount,
+			GrantedCap: capAmount,
+		},
+		ValidUntilMs: time.Now().Add(7 * 24 * time.Hour).UnixMilli(),
+	}
+	if err := perms.Validate(); err != nil {
+		t.Fatalf("test grant permissions: %v", err)
+	}
+
+	var policy *model.SessionPolicy
+	for attempt := 0; attempt < 32; attempt++ {
+		policyID := fmt.Sprintf("test-approve-grant-%d", attempt)
+		prepared, err := PrepareSessionGrant(db, swCfg.ChainID, controller, policyID, SessionGrantRequest{
+			Owner:      owner,
+			Wallet:     wallet,
+			AgentLabel: "test-erc20-approves",
+			ValidUntil: perms.ValidUntilMs,
+			HooksFor:   perms.HooksFor,
+		})
+		if err != nil {
+			t.Fatalf("preparing production-shaped test grant (attempt %d): %v", attempt, err)
+		}
+
+		sig, err := crypto.Sign(prepared.Digest.Bytes(), ownerKey)
+		if err != nil {
+			t.Fatalf("signing the grant: %v", err)
+		}
+		sig[64] += 27
+
+		pol, err := SubmitSessionGrant(db, prepared, sig)
+		if err != nil {
+			t.Fatalf("submitting the grant (attempt %d): %v", attempt, err)
+		}
+		attachDeclaredPermissions(pol, perms)
+		if err := StoreSessionPolicy(db, pol); err != nil {
+			t.Fatalf("storing declared permissions on grant: %v", err)
+		}
+
+		if installedOnChain(t, swCfg, wallet, pol.EntityID, controller) {
+			// Occupied on-chain — cannot reinstall different hooks on this entity.
+			// Mark revoked in DB so NextSessionEntityID advances.
+			pol.Status = model.SessionPolicyRevoked
+			if err := StoreSessionPolicy(db, pol); err != nil {
+				t.Fatalf("reserving occupied entity %d: %v", pol.EntityID, err)
+			}
+			t.Logf("grant: entity %d already holds controller on %s; trying next entity for fresh hooks install",
+				pol.EntityID, wallet.Hex())
+			continue
+		}
+
+		// Free entity: leave pending so the install rides the first UserOp.
+		policy = pol
+		t.Logf("grant: entity %d pending on %s (USDC+WETH-style approves, RequiresExecuteUserOp=%v); install rides first operation",
+			pol.EntityID, wallet.Hex(), pol.Grant != nil && pol.Grant.RequiresExecuteUserOp)
+		break
+	}
+	if policy == nil {
+		t.Fatal("could not allocate a free session entity for a production-shaped grant after 32 attempts")
+	}
+	if policy.Grant == nil || !policy.Grant.RequiresExecuteUserOp {
+		t.Fatal("expected RequiresExecuteUserOp=true (allowlist execution hook); grant shape is wrong")
+	}
+
+	installSessionResolver(t, db, swCfg, controller)
+}
+
+func installSessionResolver(
+	t *testing.T,
+	db storage.Storage,
+	swCfg *config.SmartWalletConfig,
+	controller common.Address,
+) {
+	t.Helper()
 	preset.SetSessionResolver(NewSessionResolver(db, func(a common.Address) (*ecdsa.PrivateKey, error) {
 		if a != controller {
 			return nil, fmt.Errorf("no key for session signer %s", a.Hex())
