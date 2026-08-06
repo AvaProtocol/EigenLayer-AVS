@@ -93,6 +93,13 @@ func processContractWriteTemplates(vm *VM, contractWrite *avsproto.ContractWrite
 			CallData:   processedCallData,
 			MethodName: substituteTemplateVariables(methodCall.MethodName, iterInputs),
 		}
+		// Preserve per-call target override (G4 heterogeneous batch). Without
+		// this, loop-hosted approve+swap falls back to the node-level router
+		// and session hooks AA23.
+		if methodCall.ContractAddress != nil && *methodCall.ContractAddress != "" {
+			addr := substituteTemplateVariables(*methodCall.ContractAddress, iterInputs)
+			processedMethodCall.ContractAddress = &addr
+		}
 
 		// Process methodParams with advanced template variable preprocessing
 		// This supports dot notation like {{value.address}} in addition to simple {{value}} substitution

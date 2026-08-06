@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"strings"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -49,23 +51,16 @@ func SendUserOpMAv2(
 		return nil, nil, err
 	}
 
-	bundlerURL, err := smartWalletConfig.ActiveBundlerURL()
-	if err != nil {
-		return nil, nil, fmt.Errorf("resolving bundler url: %w", err)
-	}
-
 	ctx := context.Background()
+	// Fail-fast guards (session grant, factory derivation) only need the chain
+	// RPC. Dial the bundler after those checks so a legacy SimpleAccount
+	// runner or missing grant does not waste a bundler round-trip — and so
+	// guard-only tests need no bundler URL.
 	chainRPC, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dialing chain rpc: %w", err)
 	}
 	defer chainRPC.Close()
-
-	bundlerRPC, err := rpc.DialContext(ctx, bundlerURL)
-	if err != nil {
-		return nil, nil, fmt.Errorf("dialing bundler: %w", err)
-	}
-	defer bundlerRPC.Close()
 
 	// Nonce reads are plain eth_calls and go to the CHAIN rpc. The bundler
 	// endpoint only advertises the ERC-4337 namespace on some providers
@@ -95,8 +90,8 @@ func SendUserOpMAv2(
 	// wallet — looked up only now, because grants are keyed by the smart
 	// wallet's address and the sender is not known until it is resolved.
 	// Resolving earlier against the owner EOA (or a guessed wallet) finds
-	// nothing and signs as the fallback entity the gateway cannot validate
-	// for.
+	// nothing and used to sign as the fallback entity the gateway cannot
+	// validate for.
 	if auth == nil {
 		if auth, err = resolveSession(smartWalletConfig.ChainID, owner, sender); err != nil {
 			return nil, nil, fmt.Errorf("resolving session authorization for %s: %w", sender.Hex(), err)
@@ -105,17 +100,40 @@ func SendUserOpMAv2(
 			return nil, nil, err
 		}
 	}
-	// Without a session authorization the operation runs as the account's
-	// fallback signer, which only the OWNER's key can do. The gateway does not
-	// hold it, so this path exists for callers that supply their own signer.
-	if auth == nil && smartWalletConfig.ControllerPrivateKey == nil {
-		return nil, nil, fmt.Errorf("no controller private key configured")
+	// MA v2 operations always need a session grant. The gateway does not hold
+	// the owner's key; estimating a controller-signed fallback UserOp only
+	// produces opaque AA23. Callers that supply their own authorization
+	// (integration tests, spikes) pass it explicitly and never hit this.
+	if auth == nil {
+		return nil, nil, fmt.Errorf(
+			"no session authorization for smart wallet %s (owner %s); MA v2 execution requires a session grant — the gateway cannot sign as the owner fallback",
+			sender.Hex(), owner.Hex())
+	}
+
+	// Sender must be the address this chain's factory derives for (owner, salt).
+	// Covers both cases that previously reached the bundler as AA23:
+	//   - undeployed override with the wrong salt/factory (initCode would
+	//     deploy elsewhere)
+	//   - deployed legacy SimpleAccount runner on an MA v2 chain (no initCode,
+	//     v0.7 validation against v0.6 bytecode)
+	derived, derr := aa.DeriveSenderAddressAuto(chainRPC, owner, factory, salt)
+	if derr != nil {
+		return nil, nil, fmt.Errorf("deriving counterfactual address for sender %s: %w", sender.Hex(), derr)
+	}
+	if derived == nil || *derived != sender {
+		want := common.Address{}
+		if derived != nil {
+			want = *derived
+		}
+		return nil, nil, fmt.Errorf(
+			"sender %s does not match the address derived for owner %s salt %s factory %s (derived %s); refusing MA v2 UserOp — wrong account type, salt, or factory (e.g. a legacy SimpleAccount runner on an MA v2 chain)",
+			sender.Hex(), owner.Hex(), salt.String(), factory.Hex(), want.Hex())
 	}
 
 	// A grant carrying execution hooks requires user-op context on EVERY
 	// operation under it — including the one that installs the grant, since
 	// the hooks are live from the moment the install applies mid-validation.
-	if auth != nil && auth.WrapExecuteUserOp {
+	if auth.WrapExecuteUserOp {
 		wrapped, wrapErr := aa.WrapExecuteUserOp(callData)
 		if wrapErr != nil {
 			return nil, nil, fmt.Errorf("wrapping calldata for user-op context: %w", wrapErr)
@@ -134,29 +152,13 @@ func SendUserOpMAv2(
 
 	// An account with no code yet must carry its own deployment. Reading the
 	// code is the authoritative check — a wallet record can exist for an
-	// address that was never deployed, and vice versa.
+	// address that was never deployed, and vice versa. Derive already matched
+	// above, so initCode is safe to attach.
 	deployed, err := isDeployed(ctx, chainRPC, sender)
 	if err != nil {
 		return nil, nil, fmt.Errorf("checking whether %s is deployed: %w", sender.Hex(), err)
 	}
 	if !deployed {
-		// Factory createAccount must produce the same address as `sender`. A
-		// wrong salt (or a legacy SimpleAccount address on an MA v2 chain)
-		// deploys somewhere else while the UserOp claims the override — the
-		// EntryPoint then reverts validation as AA23 with no useful reason.
-		derived, derr := aa.DeriveSenderAddressAuto(chainRPC, owner, factory, salt)
-		if derr != nil {
-			return nil, nil, fmt.Errorf("deriving counterfactual address for deploy of %s: %w", sender.Hex(), derr)
-		}
-		if derived == nil || *derived != sender {
-			want := common.Address{}
-			if derived != nil {
-				want = *derived
-			}
-			return nil, nil, fmt.Errorf(
-				"sender %s is not deployed and does not match the address derived for owner %s salt %s factory %s (derived %s); cannot attach initCode",
-				sender.Hex(), owner.Hex(), salt.String(), factory.Hex(), want.Hex())
-		}
 		deployFactory, factoryData, initErr := aa.DeriveInitCodeAuto(owner, factory, salt)
 		if initErr != nil {
 			return nil, nil, fmt.Errorf("building init code: %w", initErr)
@@ -165,6 +167,29 @@ func SendUserOpMAv2(
 		op.FactoryData = factoryData
 	}
 	op.VerificationGasLimit = seedVerificationGasFor(op, auth)
+
+	// Without a Gas Manager policy the account pays gas from native balance /
+	// EntryPoint deposit. A zero total is a guaranteed prefund failure —
+	// refuse before dialing the bundler so the error is clear and guard tests
+	// need no bundler URL. Sponsorship is alchemy_paymaster_policy_id /
+	// ALCHEMY_PAYMASTER_POLICY_ID (legacy aliases still accepted); when set,
+	// this check is skipped.
+	if smartWalletConfig.AlchemyPaymasterPolicyID == "" {
+		if err := ensureSelfFundedPrefund(ctx, chainRPC, entryPoint, sender); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	// Bundler is only needed from pricing onwards.
+	bundlerURL, err := smartWalletConfig.ActiveBundlerURL()
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolving bundler url: %w", err)
+	}
+	bundlerRPC, err := rpc.DialContext(ctx, bundlerURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("dialing bundler: %w", err)
+	}
+	defer bundlerRPC.Close()
 
 	// MA v2 selects its validation function from the NONCE, not the signature.
 	// A zero nonce reverts with ValidationFunctionMissing rather than as a
@@ -211,6 +236,28 @@ func SendUserOpMAv2(
 	}
 	op.Nonce = nonce
 
+	if err := checkDeferredCarrierNonce(auth, op.Nonce, sender); err != nil {
+		return nil, nil, err
+	}
+
+	l.Info("v0.7 user operation prepared",
+		"account_provider", smartWalletConfig.AccountProviderName(),
+		"effective_factory", factory.Hex(),
+		"config_factory_address", smartWalletConfig.FactoryAddress.Hex(),
+		"entry_point", entryPoint.Hex(),
+		"owner", owner.Hex(),
+		"sender", sender.Hex(),
+		"salt", salt.String(),
+		"deployed", deployed,
+		"deploying", op.Factory != nil,
+		"entity", nonceEntity,
+		"deferred", auth.Deferred(),
+		"policy_id", auth.PolicyID,
+		"wrap_execute_user_op", auth.WrapExecuteUserOp,
+		"verification_gas_seed", op.VerificationGasLimit.String(),
+		"paymaster_policy_set", smartWalletConfig.AlchemyPaymasterPolicyID != "",
+	)
+
 	// Estimation of a deferred operation must carry the REAL owner grant.
 	// Ordinary signature validation fails gracefully so estimation can
 	// proceed, but a bad deferred-action signature REVERTS
@@ -234,10 +281,7 @@ func SendUserOpMAv2(
 	// to come after pricing. SendUserOpV07WithRetry only RE-signs, and only
 	// when it tightens the verification gas limit — it will not sign an
 	// unsigned operation, it rejects one.
-	signingKey := smartWalletConfig.ControllerPrivateKey
-	if auth != nil {
-		signingKey = auth.SignerKey
-	}
+	signingKey := auth.SignerKey
 	if auth.Deferred() {
 		if err := SignUserOpV07Deferred(op, entryPoint, chainID, signingKey,
 			auth.DeferredData, auth.OwnerSignature); err != nil {
@@ -268,7 +312,7 @@ func SendUserOpMAv2(
 	}
 	if err != nil {
 		InvalidateNonce(sender, nonceEntity, nonceOptions)
-		return op, nil, fmt.Errorf("sending user operation: %w", err)
+		return op, nil, fmt.Errorf("sending user operation: %w", annotatePrefundError(err, sender))
 	}
 	// Record acceptance NOW — the bundler holds the operation, so the next
 	// one on this key must use the following sequence even though nothing has
@@ -278,7 +322,8 @@ func SendUserOpMAv2(
 	l.Info("v0.7 user operation sent",
 		"sender", sender.Hex(), "userop_hash", opHash.Hex(),
 		"sponsored", op.Paymaster != nil, "deploying", op.Factory != nil,
-		"entity", nonceEntity, "installs_grant", auth.Deferred())
+		"entity", nonceEntity, "installs_grant", auth.Deferred(),
+		"policy_id", auth.PolicyID, "effective_factory", factory.Hex())
 
 	// Reuses the v0.6 confirmation watcher: UserOperationEvent is unchanged
 	// between EntryPoint versions, so only the EntryPoint address differs.
@@ -323,9 +368,93 @@ func SendUserOpMAv2(
 	return op, receipt, nil
 }
 
+// checkDeferredCarrierNonce refuses a deferred operation whose live nonce
+// differs from the nonce the owner signed over at grant time. A mismatch
+// would otherwise surface as AA23 from DeferredActionSignatureInvalid.
+func checkDeferredCarrierNonce(auth *SessionAuthorization, opNonce *big.Int, sender common.Address) error {
+	if auth == nil || !auth.Deferred() || auth.CarrierNonce == nil {
+		return nil
+	}
+	if opNonce == nil {
+		return fmt.Errorf("deferred carrier nonce check: operation nonce is nil")
+	}
+	if auth.CarrierNonce.Cmp(opNonce) != 0 {
+		return fmt.Errorf(
+			"deferred carrier nonce mismatch for %s: grant signed over %s but operation uses %s (entity %d); refusing before estimate",
+			sender.Hex(), auth.CarrierNonce.String(), opNonce.String(), auth.EntityID)
+	}
+	return nil
+}
+
+// ensureSelfFundedPrefund refuses an unsponsored operation when the account
+// has nothing to pay gas with. Estimation can succeed with a zero balance
+// (validation does not charge the account), so without this check the failure
+// only appears at eth_sendUserOperation as a prefund error that Studio users
+// read as another opaque AA / bundler failure.
+//
+// Sponsorship is alchemy_paymaster_policy_id / ALCHEMY_PAYMASTER_POLICY_ID —
+// when set, the caller skips this check and RequestSponsorshipV07 attaches a
+// paymaster.
+func ensureSelfFundedPrefund(ctx context.Context, chainRPC *ethclient.Client, entryPoint, sender common.Address) error {
+	if chainRPC == nil {
+		return fmt.Errorf("nil chain rpc")
+	}
+	balance, err := chainRPC.BalanceAt(ctx, sender, nil)
+	if err != nil {
+		return fmt.Errorf("reading native balance of %s: %w", sender.Hex(), err)
+	}
+	deposit, err := entryPointDeposit(ctx, chainRPC, entryPoint, sender)
+	if err != nil {
+		// Deposit is best-effort: a failed eth_call should not mask a clear
+		// zero-balance situation, but also should not invent a deposit.
+		deposit = big.NewInt(0)
+	}
+	total := new(big.Int).Add(balance, deposit)
+	if total.Sign() > 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"smart wallet %s cannot pay gas: native balance and EntryPoint deposit are both zero, and no Alchemy paymaster policy is configured; set alchemy_paymaster_policy_id (or env ALCHEMY_PAYMASTER_POLICY_ID) for sponsorship, or fund the wallet with Sepolia ETH",
+		sender.Hex())
+}
+
+// entryPointDeposit reads EntryPoint.balanceOf(sender) for v0.7.
+func entryPointDeposit(ctx context.Context, chainRPC *ethclient.Client, entryPoint, sender common.Address) (*big.Int, error) {
+	// cast sig "balanceOf(address)" => 0x70a08231 — same selector as ERC-20.
+	data := append(common.FromHex("0x70a08231"), common.LeftPadBytes(sender.Bytes(), 32)...)
+	out, err := chainRPC.CallContract(ctx, ethereum.CallMsg{To: &entryPoint, Data: data}, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(out) < 32 {
+		return big.NewInt(0), nil
+	}
+	return new(big.Int).SetBytes(out), nil
+}
+
+// annotatePrefundError rewrites the bundler's prefund precheck into a message
+// that names the wallet and the Gas Manager escape hatch.
+func annotatePrefundError(err error, sender common.Address) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "balance and deposit together is 0") ||
+		strings.Contains(msg, "AA21") ||
+		strings.Contains(strings.ToLower(msg), "didn't pay prefund") {
+		return fmt.Errorf(
+			"smart wallet %s cannot pay gas (bundler prefund check): %w; set alchemy_paymaster_policy_id / ALCHEMY_PAYMASTER_POLICY_ID or fund the wallet",
+			sender.Hex(), err)
+	}
+	return err
+}
+
 // resolveSenderV07 picks the account the operation runs as. An explicit
 // override is trusted (the caller has already resolved which of the owner's
 // wallets to use); otherwise the address is derived from the factory.
+//
+// Trust here only selects the candidate sender. SendUserOpMAv2 always re-
+// derives against the provider factory and refuses a mismatch before estimate.
 func resolveSenderV07(
 	chainRPC *ethclient.Client,
 	owner, factory common.Address,
@@ -359,7 +488,7 @@ func priceOperationV07(
 	smartWalletConfig *config.SmartWalletConfig,
 	l logger.Logger,
 ) error {
-	if policyID := smartWalletConfig.GasManagerPolicyID; policyID != "" {
+	if policyID := smartWalletConfig.AlchemyPaymasterPolicyID; policyID != "" {
 		if err := RequestSponsorshipV07(ctx, bundlerRPC, op, entryPoint,
 			SponsorshipRequestV07{PolicyID: policyID}); err != nil {
 			// Deliberately fatal. See SendUserOpV07's contract: falling through

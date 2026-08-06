@@ -60,8 +60,9 @@ type gasManagerWebhookResponse struct {
 }
 
 // gasManagerWebhookConfig carries the deployment-supplied settings. Both come
-// from the gateway config (`gas_manager_policy_id`, `gas_manager_webhook_secret`),
-// which resolves them from YAML with an environment fallback — the same path
+// from the gateway config (`alchemy_paymaster_policy_id` /
+// ALCHEMY_PAYMASTER_POLICY_ID, `gas_manager_webhook_secret`), which resolves
+// them from YAML with an environment fallback — the same path
 // `moralis_api_key` and `alchemy_api_key` take, so a deployment configures
 // them in one place rather than two.
 type gasManagerWebhookConfig struct {
@@ -82,7 +83,7 @@ func (agg *Aggregator) gasManagerWebhookConfig() gasManagerWebhookConfig {
 		return gasManagerWebhookConfig{}
 	}
 	return gasManagerWebhookConfig{
-		PolicyID: strings.TrimSpace(agg.config.GasManagerPolicyID),
+		PolicyID: strings.TrimSpace(agg.config.AlchemyPaymasterPolicyID),
 		Secret:   strings.TrimSpace(agg.config.GasManagerWebhookSecret),
 	}
 }
@@ -136,7 +137,7 @@ func (agg *Aggregator) registerGasManagerWebhook(e *echo.Echo) {
 		// Without a policy id every request would be refused, which is worse
 		// than not serving the route: an operator who set the URL in the
 		// dashboard would see all sponsorship denied with no clue why.
-		agg.logger.Warn("gas manager webhook not mounted: gas_manager_policy_id is unset (env ALCHEMY_GAS_POLICY_ID)",
+		agg.logger.Warn("paymaster / gas manager webhook not mounted: alchemy_paymaster_policy_id is unset (env ALCHEMY_PAYMASTER_POLICY_ID)",
 			"path", gasManagerWebhookPath)
 		return
 	}

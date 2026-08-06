@@ -151,12 +151,13 @@ type Config struct {
 	// READ; a read/write key can delete the policy that funds sponsorship.
 	AlchemyAPISecret string `yaml:"alchemy_api_secret"`
 
-	// GasManagerPolicyID is the Alchemy Gas Manager policy this gateway
-	// answers sponsorship questions for. The Gas Manager "custom rules"
-	// webhook is only mounted when this is set — a mounted route that
-	// refuses everything is indistinguishable from a broken chain in the
-	// dashboard, whereas an unmounted route 404s loudly.
-	GasManagerPolicyID string `yaml:"gas_manager_policy_id"`
+	// AlchemyPaymasterPolicyID is the Alchemy Gas Manager / paymaster policy
+	// UUID used for ERC-4337 sponsorship (yaml alchemy_paymaster_policy_id,
+	// env ALCHEMY_PAYMASTER_POLICY_ID). The Gas Manager "custom rules" webhook
+	// is only mounted when this is set — a mounted route that refuses
+	// everything is indistinguishable from a broken chain in the dashboard,
+	// whereas an unmounted route 404s loudly.
+	AlchemyPaymasterPolicyID string
 
 	// GasManagerWebhookSecret, when set, must be echoed as the webhook
 	// request's webhookData. The webhook cannot sit behind the REST JWT
@@ -253,11 +254,11 @@ type SmartWalletConfig struct {
 	// legacy v0.6 SimpleAccount fork. See AccountProviderName.
 	AccountProvider string
 
-	// GasManagerPolicyID is copied down from the top-level config so the v0.7
-	// send path — which is handed only a SmartWalletConfig — can request
+	// AlchemyPaymasterPolicyID is copied down from the top-level config so the
+	// v0.7 send path — which is handed only a SmartWalletConfig — can request
 	// sponsorship without reaching back up. Empty means unsponsored: the
 	// operation is priced by estimation and the account pays its own gas.
-	GasManagerPolicyID string
+	AlchemyPaymasterPolicyID string
 }
 
 // Bundler provider identifiers for SmartWalletConfig.BundlerProvider.
@@ -489,10 +490,10 @@ type ConfigRaw struct {
 	// Moralis Web3 Data API key for token price lookup (optional)
 	MoralisApiKey string `yaml:"moralis_api_key"`
 
-	// Alchemy Gas Manager sponsorship webhook + admin API (optional; see Config)
-	AlchemyAPISecret        string `yaml:"alchemy_api_secret"`
-	GasManagerPolicyID      string `yaml:"gas_manager_policy_id"`
-	GasManagerWebhookSecret string `yaml:"gas_manager_webhook_secret"`
+	// Alchemy paymaster policy (Gas Manager) + admin API (optional; see Config)
+	AlchemyAPISecret         string `yaml:"alchemy_api_secret"`
+	AlchemyPaymasterPolicyID string `yaml:"alchemy_paymaster_policy_id"`
+	GasManagerWebhookSecret  string `yaml:"gas_manager_webhook_secret"`
 
 	// Fee structure: execution_fee + COGS + value tiers
 	// Pointer fields: nil = use default, explicit 0.0 = free tier
@@ -736,20 +737,20 @@ func NewConfig(configFilePath string) (*Config, error) {
 		PartnerAssertionAudience: configRaw.PartnerAssertionAudience,
 
 		SmartWallet: &SmartWalletConfig{
-			EthRpcUrl:            configRaw.SmartWallet.EthRpcUrl,
-			EthWsUrl:             configRaw.SmartWallet.EthWsUrl,
-			BundlerURL:           configRaw.SmartWallet.BundlerURL,
-			BundlerProvider:      configRaw.SmartWallet.BundlerProvider,
-			AccountProvider:      configRaw.SmartWallet.AccountProvider,
-			AlchemyAPIKey:        configRaw.SmartWallet.AlchemyAPIKey,
-			FactoryAddress:       common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.FactoryAddress, DefaultFactoryProxyAddressHex)),
-			EntrypointAddress:    common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.EntrypointAddress, DefaultEntrypointAddressHex)),
-			ChainID:              smartWalletChainId.Int64(), // Use smart wallet chain ID, not EigenLayer chain ID (prevents cross-chain configuration errors for Base aggregator)
-			ControllerPrivateKey: controllerPrivateKey,
-			PaymasterAddress:     common.HexToAddress(configRaw.SmartWallet.PaymasterAddress),
-			WhitelistAddresses:   convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
-			MaxWalletsPerOwner:   configRaw.SmartWallet.MaxWalletsPerOwner,
-			GasManagerPolicyID:   firstNonEmpty(configRaw.GasManagerPolicyID, os.Getenv("ALCHEMY_GAS_POLICY_ID")),
+			EthRpcUrl:                configRaw.SmartWallet.EthRpcUrl,
+			EthWsUrl:                 configRaw.SmartWallet.EthWsUrl,
+			BundlerURL:               configRaw.SmartWallet.BundlerURL,
+			BundlerProvider:          configRaw.SmartWallet.BundlerProvider,
+			AccountProvider:          configRaw.SmartWallet.AccountProvider,
+			AlchemyAPIKey:            configRaw.SmartWallet.AlchemyAPIKey,
+			FactoryAddress:           common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.FactoryAddress, DefaultFactoryProxyAddressHex)),
+			EntrypointAddress:        common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.EntrypointAddress, DefaultEntrypointAddressHex)),
+			ChainID:                  smartWalletChainId.Int64(), // Use smart wallet chain ID, not EigenLayer chain ID (prevents cross-chain configuration errors for Base aggregator)
+			ControllerPrivateKey:     controllerPrivateKey,
+			PaymasterAddress:         common.HexToAddress(configRaw.SmartWallet.PaymasterAddress),
+			WhitelistAddresses:       convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
+			MaxWalletsPerOwner:       configRaw.SmartWallet.MaxWalletsPerOwner,
+			AlchemyPaymasterPolicyID: resolveAlchemyPaymasterPolicyID(configRaw),
 			// PaymasterOwnerAddress will be populated below by calling owner() on the paymaster contract
 		},
 
@@ -767,10 +768,10 @@ func NewConfig(configFilePath string) (*Config, error) {
 		// Pass through Moralis API key (from YAML or environment variable)
 		MoralisApiKey: firstNonEmpty(configRaw.MoralisApiKey, os.Getenv("MORALIS_API_KEY")),
 
-		// Gas Manager sponsorship webhook + admin API (from YAML or environment)
-		AlchemyAPISecret:        firstNonEmpty(configRaw.AlchemyAPISecret, os.Getenv("ALCHEMY_API_SECRET")),
-		GasManagerPolicyID:      firstNonEmpty(configRaw.GasManagerPolicyID, os.Getenv("ALCHEMY_GAS_POLICY_ID")),
-		GasManagerWebhookSecret: firstNonEmpty(configRaw.GasManagerWebhookSecret, os.Getenv("GAS_MANAGER_WEBHOOK_SECRET")),
+		// Alchemy paymaster policy (Gas Manager) + admin API
+		AlchemyAPISecret:         firstNonEmpty(configRaw.AlchemyAPISecret, os.Getenv("ALCHEMY_API_SECRET")),
+		AlchemyPaymasterPolicyID: resolveAlchemyPaymasterPolicyID(configRaw),
+		GasManagerWebhookSecret:  firstNonEmpty(configRaw.GasManagerWebhookSecret, os.Getenv("GAS_MANAGER_WEBHOOK_SECRET")),
 
 		// Initialize fee rates - use defaults if no YAML config provided
 		FeeRates: loadFeeRatesFromConfig(configRaw.FeeRates),
@@ -814,44 +815,20 @@ func NewConfig(configFilePath string) (*Config, error) {
 		}
 	}
 
+	// The v0.6 verifying-paymaster probe (owner + verifyingSigner) only applies
+	// to SimpleAccount chains. MA v2 sponsors via AlchemyPaymasterPolicyID and
+	// ignores smart_wallet.paymaster_address on the send path — probing the
+	// legacy contract at boot only produced misleading "paymaster loaded"
+	// logs and forced a live RPC dependency for an unused address.
 	if config.SmartWallet != nil && config.SmartWallet.PaymasterAddress != (common.Address{}) {
-		paymasterOwner, err := fetchPaymasterOwner(smartWalletRpcClient, config.SmartWallet.PaymasterAddress)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"paymaster %s is unreachable on RPC %s (owner() call failed: %w) — "+
-					"verify the paymaster address is deployed on this chain, and that the "+
-					"smart_wallet.eth_rpc_url points at the chain where the paymaster lives",
-				config.SmartWallet.PaymasterAddress.Hex(),
-				configRaw.SmartWallet.EthRpcUrl,
-				err,
+		if config.SmartWallet.UsesModularAccountV2() {
+			logger.Info("Skipping v0.6 verifying-paymaster probe on modular_account_v2; sponsorship uses alchemy_paymaster_policy_id",
+				"paymaster_address_ignored", config.SmartWallet.PaymasterAddress.Hex(),
+				"paymaster_policy_set", config.AlchemyPaymasterPolicyID != "",
 			)
+		} else if err := probeVerifyingPaymaster(logger, smartWalletRpcClient, config.SmartWallet, configRaw.SmartWallet.EthRpcUrl); err != nil {
+			return nil, err
 		}
-		config.SmartWallet.PaymasterOwnerAddress = paymasterOwner
-		logger.Info("Paymaster owner address loaded", "paymaster", config.SmartWallet.PaymasterAddress, "owner", paymasterOwner.Hex())
-
-		// The aggregator signs the paymaster hash with the controller key, so the
-		// paymaster's verifyingSigner must equal the controller address or every
-		// sponsored UserOp fails at signing time. Probe it at startup (alongside
-		// owner()) so a key/paymaster-tier mismatch is fatal here, not silent until
-		// the first user transfer (Sentry EIGENLAYER-AVS-1W).
-		verifyingSigner, err := fetchPaymasterVerifyingSigner(smartWalletRpcClient, config.SmartWallet.PaymasterAddress)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"paymaster %s verifyingSigner() call failed on RPC %s: %w",
-				config.SmartWallet.PaymasterAddress.Hex(), configRaw.SmartWallet.EthRpcUrl, err,
-			)
-		}
-		if verifyingSigner != config.SmartWallet.ControllerAddress {
-			return nil, fmt.Errorf(
-				"paymaster %s verifyingSigner (%s) does not match controller address (%s) — "+
-					"the controller_private_key and paymaster_address belong to different "+
-					"network tiers (e.g. testnet controller paired with the mainnet paymaster); "+
-					"set the controller key whose address equals the paymaster's verifyingSigner",
-				config.SmartWallet.PaymasterAddress.Hex(),
-				verifyingSigner.Hex(), config.SmartWallet.ControllerAddress.Hex(),
-			)
-		}
-		logger.Info("Paymaster verifyingSigner verified", "paymaster", config.SmartWallet.PaymasterAddress, "verifyingSigner", verifyingSigner.Hex())
 	}
 
 	// Gateway mode: parse per-chain configs
@@ -868,7 +845,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 			// Sponsorship is configured once for the gateway, not per chain, but
 			// the v0.7 send path is only ever handed a SmartWalletConfig. Push
 			// the policy down so every chain can reach it.
-			chainCfg.SmartWallet.GasManagerPolicyID = config.GasManagerPolicyID
+			chainCfg.SmartWallet.AlchemyPaymasterPolicyID = config.AlchemyPaymasterPolicyID
 			config.Chains = append(config.Chains, chainCfg)
 		}
 
@@ -954,6 +931,12 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// resolveAlchemyPaymasterPolicyID returns the Alchemy paymaster policy UUID
+// from yaml alchemy_paymaster_policy_id or env ALCHEMY_PAYMASTER_POLICY_ID.
+func resolveAlchemyPaymasterPolicyID(raw ConfigRaw) string {
+	return firstNonEmpty(raw.AlchemyPaymasterPolicyID, os.Getenv("ALCHEMY_PAYMASTER_POLICY_ID"))
 }
 
 func ReadYamlConfig(path string, o interface{}) error {
@@ -1106,6 +1089,52 @@ func fetchPaymasterVerifyingSigner(client paymasterCaller, paymasterAddress comm
 	return callPaymasterAddressGetter(client, paymasterAddress, paymasterVerifyingSignerABI, "verifyingSigner")
 }
 
+// probeVerifyingPaymaster loads owner() and verifyingSigner() on a v0.6
+// VerifyingPaymaster and ensures verifyingSigner equals the controller.
+// Only call this for simple_account chains — MA v2 does not use this contract.
+func probeVerifyingPaymaster(
+	logger sdklogging.Logger,
+	client paymasterCaller,
+	sw *SmartWalletConfig,
+	rpcURL string,
+) error {
+	if sw == nil || sw.PaymasterAddress == (common.Address{}) {
+		return nil
+	}
+	paymasterOwner, err := fetchPaymasterOwner(client, sw.PaymasterAddress)
+	if err != nil {
+		return fmt.Errorf(
+			"paymaster %s is unreachable on RPC %s (owner() call failed: %w) — "+
+				"verify the paymaster address is deployed on this chain, and that the "+
+				"eth_rpc_url points at the chain where the paymaster lives",
+			sw.PaymasterAddress.Hex(), rpcURL, err,
+		)
+	}
+	sw.PaymasterOwnerAddress = paymasterOwner
+	logger.Info("Paymaster owner address loaded",
+		"paymaster", sw.PaymasterAddress.Hex(), "owner", paymasterOwner.Hex())
+
+	verifyingSigner, err := fetchPaymasterVerifyingSigner(client, sw.PaymasterAddress)
+	if err != nil {
+		return fmt.Errorf(
+			"paymaster %s verifyingSigner() call failed on RPC %s: %w",
+			sw.PaymasterAddress.Hex(), rpcURL, err,
+		)
+	}
+	if verifyingSigner != sw.ControllerAddress {
+		return fmt.Errorf(
+			"paymaster %s verifyingSigner (%s) does not match controller address (%s) — "+
+				"the controller_private_key and paymaster_address belong to different "+
+				"network tiers (e.g. testnet controller paired with the mainnet paymaster); "+
+				"set the controller key whose address equals the paymaster's verifyingSigner",
+			sw.PaymasterAddress.Hex(), verifyingSigner.Hex(), sw.ControllerAddress.Hex(),
+		)
+	}
+	logger.Info("Paymaster verifyingSigner verified",
+		"paymaster", sw.PaymasterAddress.Hex(), "verifyingSigner", verifyingSigner.Hex())
+	return nil
+}
+
 // parseChainConfig converts a raw YAML chain config into a runtime ChainConfig.
 // Unlike the top-level SmartWalletConfig, we don't connect to the chain RPC here —
 // that's the worker's responsibility. We just parse and validate the config fields.
@@ -1191,51 +1220,22 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 	// BundlerConfigured() was false and the probe was skipped by accident.
 	hasPaymaster := chainCfg.SmartWallet.PaymasterAddress != (common.Address{})
 	if hasPaymaster && chainCfg.SmartWallet.BundlerConfigured() && chainCfg.SmartWallet.EthRpcUrl != "" {
-		rpcClient, err := ethclient.Dial(chainCfg.SmartWallet.EthRpcUrl)
-		if err != nil {
-			return nil, fmt.Errorf("dial RPC %s for chain %s (chain_id=%d): %w",
-				chainCfg.SmartWallet.EthRpcUrl, raw.Name, raw.ChainID, err)
-		}
-		defer rpcClient.Close()
-
-		paymasterOwner, err := fetchPaymasterOwner(rpcClient, chainCfg.SmartWallet.PaymasterAddress)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"chain %s (chain_id=%d): paymaster %s is unreachable on RPC %s "+
-					"(owner() call failed: %w) — verify the paymaster address is deployed "+
-					"on this chain, and that the chain's eth_rpc_url points at the same chain "+
-					"as the paymaster",
-				raw.Name, raw.ChainID,
-				chainCfg.SmartWallet.PaymasterAddress.Hex(),
-				chainCfg.SmartWallet.EthRpcUrl,
-				err,
+		if chainCfg.SmartWallet.UsesModularAccountV2() {
+			logger.Info("Skipping v0.6 verifying-paymaster probe on modular_account_v2 chain",
+				"chain_id", chainCfg.ChainID,
+				"name", chainCfg.Name,
+				"paymaster_address_ignored", chainCfg.SmartWallet.PaymasterAddress.Hex(),
 			)
-		}
-		chainCfg.SmartWallet.PaymasterOwnerAddress = paymasterOwner
-
-		// The controller key must match this paymaster's verifyingSigner, or
-		// sponsored UserOps on this chain fail at signing time. This is the
-		// per-chain analogue of the top-level probe — it catches a controller
-		// key from the wrong network tier (Sentry EIGENLAYER-AVS-1W: the
-		// gateway's testnet controller paired with the mainnet paymaster on
-		// Ethereum + Base).
-		verifyingSigner, err := fetchPaymasterVerifyingSigner(rpcClient, chainCfg.SmartWallet.PaymasterAddress)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"chain %s (chain_id=%d): paymaster %s verifyingSigner() call failed on RPC %s: %w",
-				raw.Name, raw.ChainID, chainCfg.SmartWallet.PaymasterAddress.Hex(),
-				chainCfg.SmartWallet.EthRpcUrl, err,
-			)
-		}
-		if verifyingSigner != chainCfg.SmartWallet.ControllerAddress {
-			return nil, fmt.Errorf(
-				"chain %s (chain_id=%d): paymaster %s verifyingSigner (%s) does not match "+
-					"controller address (%s) — the controller_private_key and paymaster_address "+
-					"belong to different network tiers; set the controller key whose address "+
-					"equals the paymaster's verifyingSigner",
-				raw.Name, raw.ChainID, chainCfg.SmartWallet.PaymasterAddress.Hex(),
-				verifyingSigner.Hex(), chainCfg.SmartWallet.ControllerAddress.Hex(),
-			)
+		} else {
+			rpcClient, err := ethclient.Dial(chainCfg.SmartWallet.EthRpcUrl)
+			if err != nil {
+				return nil, fmt.Errorf("dial RPC %s for chain %s (chain_id=%d): %w",
+					chainCfg.SmartWallet.EthRpcUrl, raw.Name, raw.ChainID, err)
+			}
+			defer rpcClient.Close()
+			if err := probeVerifyingPaymaster(logger, rpcClient, chainCfg.SmartWallet, chainCfg.SmartWallet.EthRpcUrl); err != nil {
+				return nil, fmt.Errorf("chain %s (chain_id=%d): %w", raw.Name, raw.ChainID, err)
+			}
 		}
 	}
 
@@ -1243,6 +1243,7 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 		"chain_id", chainCfg.ChainID,
 		"name", chainCfg.Name,
 		"worker_addr", chainCfg.WorkerAddr,
+		"account_provider", chainCfg.SmartWallet.AccountProviderName(),
 		"bundler_provider", chainCfg.SmartWallet.ProviderName(),
 		"controller", chainCfg.SmartWallet.ControllerAddress.Hex(),
 		"paymaster_owner", chainCfg.SmartWallet.PaymasterOwnerAddress.Hex())

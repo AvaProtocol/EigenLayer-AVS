@@ -41,6 +41,16 @@ type SessionAuthorization struct {
 	DeferredData   []byte
 	OwnerSignature []byte
 
+	// CarrierNonce is the full 256-bit nonce the owner signed over at grant
+	// time (entity + deferred options + sequence 0). Optional: when set on a
+	// deferred operation, the send path asserts op.Nonce equals this value
+	// before estimation so a drift cannot surface as opaque AA23.
+	CarrierNonce *big.Int
+
+	// PolicyID is the storage id of the SessionPolicy this authorization
+	// came from. Logging only — never affects validation.
+	PolicyID string
+
 	// WrapExecuteUserOp opts the operation into user-op context, which every
 	// operation under a grant carrying EXECUTION hooks must do. It is derived
 	// from the stored grant's contents, not guessed: an ERC-20 spend cap
@@ -149,8 +159,12 @@ func seedVerificationGasFor(op *userop.UserOperationV07, auth *SessionAuthorizat
 }
 
 // SessionResolver answers "under what authority may the gateway execute for
-// this wallet?" — returning nil when there is no grant, which leaves the
-// operation on the owner's fallback signer.
+// this wallet?" — returning nil when there is no grant.
+//
+// A nil result is a hard failure on the MA v2 send path: the gateway cannot
+// sign as the owner fallback, and estimating a doomed controller-as-fallback
+// UserOp only produces opaque AA23. Callers that supply their own
+// SessionAuthorization (tests, spikes) never hit the resolver.
 //
 // This exists so the send path never reaches into storage. The gateway
 // installs one resolver at boot that reads SessionPolicy records; tests and

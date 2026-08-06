@@ -76,6 +76,13 @@ func TestSessionResolverReturnsTheWalletsGrant(t *testing.T) {
 	if auth.EntityID != 1 || auth.SignerKey != key {
 		t.Errorf("wrong entity/key: %d %v", auth.EntityID, auth.SignerKey == key)
 	}
+	if auth.PolicyID != "p1" {
+		t.Errorf("PolicyID = %q, want p1 (for send-path logging)", auth.PolicyID)
+	}
+	if auth.CarrierNonce == nil || auth.CarrierNonce.Cmp(pending.Grant.CarrierNonce) != 0 {
+		t.Errorf("CarrierNonce = %v, want %v (send path asserts it against op.Nonce)",
+			auth.CarrierNonce, pending.Grant.CarrierNonce)
+	}
 	// Pending means the install has not been applied, so it must ride along.
 	if !auth.Deferred() {
 		t.Error("a pending grant's first operation must carry the install")
