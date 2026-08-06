@@ -92,4 +92,14 @@ func TestFormatSessionPolicyTargetNotAllowed(t *testing.T) {
 	if !strings.Contains(strings.ToLower(msg), "095ea7b3") {
 		t.Fatalf("selector: %s", msg)
 	}
+	if strings.Contains(msg, "Uniswap") || strings.Contains(msg, "uniswap") {
+		t.Fatalf("remediation must not be Uniswap-specific: %s", msg)
+	}
+	// Selector formatting is normalized even if input lacked 0x / mixed case.
+	msg2 := FormatSessionPolicyTargetNotAllowed([]PlannedCall{
+		{Target: weth, Selector: "095EA7B3", Label: "approve"},
+	}, "")
+	if !strings.Contains(msg2, "selector=0x095ea7b3") {
+		t.Fatalf("expected normalized selector in %s", msg2)
+	}
 }

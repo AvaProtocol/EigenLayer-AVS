@@ -78,6 +78,8 @@ func MissingGrantCalls(allowed []model.AllowedAction, planned []PlannedCall) []P
 
 // FormatSessionPolicyTargetNotAllowed builds a stable, client-parseable error.
 // Prefix SESSION_POLICY_TARGET_NOT_ALLOWED is the machine code for Studio maps.
+// Remediation is capability-agnostic: this preflight applies to any MA v2
+// contract write, not only Uniswap.
 func FormatSessionPolicyTargetNotAllowed(missing []PlannedCall, policyID string) string {
 	if len(missing) == 0 {
 		return "SESSION_POLICY_TARGET_NOT_ALLOWED: session grant does not cover the planned calls"
@@ -89,13 +91,25 @@ func FormatSessionPolicyTargetNotAllowed(missing []PlannedCall, policyID string)
 			label = "call"
 		}
 		parts = append(parts, fmt.Sprintf("%s target=%s selector=%s",
-			label, m.Target.Hex(), strings.ToLower(m.Selector)))
+			label, m.Target.Hex(), normalizeSelector(m.Selector)))
 	}
 	msg := "SESSION_POLICY_TARGET_NOT_ALLOWED: session grant does not allow: " +
 		strings.Join(parts, "; ") +
-		" — re-grant Uniswap (or the capability) with approve for this token and the router"
+		" — re-grant the session policy so the allowlist includes these target(s) and selector(s)"
 	if policyID != "" {
 		msg += " (policy " + policyID + ")"
 	}
 	return msg
+}
+
+// normalizeSelector matches MissingGrantCalls: trim, lowercase, ensure 0x prefix.
+func normalizeSelector(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return "0x00000000"
+	}
+	if !strings.HasPrefix(s, "0x") {
+		return "0x" + s
+	}
+	return s
 }
