@@ -98,7 +98,9 @@ func (v *flexibleInt64) UnmarshalJSON(b []byte) error {
 	}
 	n, err := strconv.ParseInt(s, base, 64)
 	if err != nil {
-		return fmt.Errorf("chainId %q: %w", s, err)
+		// Length only — this endpoint is unauthenticated; echoing the raw
+		// string would let an attacker spam huge log lines.
+		return fmt.Errorf("chainId string (len=%d): %w", len(s), err)
 	}
 	*v = flexibleInt64(n)
 	return nil
