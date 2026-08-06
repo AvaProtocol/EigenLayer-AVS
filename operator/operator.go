@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -790,7 +791,10 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		// which is easy to misread as a bad RegistryCoordinator address.
 		if strings.Contains(err.Error(), "method not found") {
 			logger.Errorf("   💡 eth_ws_url must support eth_call over WebSocket (not only eth_subscribe)")
-			logger.Errorf("   💡 Current eth_ws_url: %s", c.EthWsUrl)
+			// Host only — path/query often embeds provider API keys (Alchemy/Infura).
+			if u, parseErr := url.Parse(c.EthWsUrl); parseErr == nil && u.Host != "" {
+				logger.Errorf("   💡 Current eth_ws_url host: %s://%s", u.Scheme, u.Host)
+			}
 		}
 		return nil, fmt.Errorf("failed to build EigenLayer SDK clients: %w", err)
 	}
