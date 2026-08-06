@@ -35,6 +35,11 @@ import (
 // Uses the same live infra + key as the Sepolia withdraw test (OWNER_EOA + controller key from .env);
 // paymaster sponsors gas and the wallet reimburses, so the wallet needs a little ETH.
 func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
+	// Live Sepolia + paymaster; excluded from CI `go test -short` (make test
+	// / PR unit jobs). Run via: go test ./core/taskengine -run TestUserOpAtomicBatch_Sepolia
+	if testing.Short() {
+		t.Skip("skipping live Sepolia atomic-batch proof under -short")
+	}
 	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
 	if err != nil {
 		cfg, err = config.NewConfig("../../config/test.yaml")

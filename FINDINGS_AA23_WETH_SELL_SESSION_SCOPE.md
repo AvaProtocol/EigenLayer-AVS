@@ -1,9 +1,9 @@
 # Findings — Auto swap AA23 on ETH/WETH sell (session allowlist / Gas Manager)
 
 **Date:** 2026-08-06  
-**Owner for fix:** AVS gateway (+ Alchemy Gas Manager ops where noted); Studio residual already landed  
+**Owner for fix:** User **re-grant** (new allowlist) + AVS typed errors / Gas Manager ops  
 **Related:** `FINDINGS_AA23_FACTORY_MISMATCH.md` (factory mismatch = red herring; packing/`contractAddress` fixed in #706; USDC buy path proven)  
-**Status:** **Open (Studio remaining)** — gateway preflight + SDK builders landed; Studio grant compile / demote coverage still handoff
+**Status:** **Studio grant path landed (2026-08-06)** — compile USDC+WETH, coverage = approve(tokenIn)+router, `SESSION_POLICY_TARGET_NOT_ALLOWED` preflight + card copy. On-chain still needs re-authorize once; AVS optional typed prefix.
 
 ---
 
@@ -12,9 +12,9 @@
 | Item | Detail |
 |------|--------|
 | **Symptom (UI)** | Studio Auto card: “Smart-wallet validation failed (AA23)…” on **sell 0.0001 ETH → USDC** (Sepolia) |
-| **Studio residual** | **OK** — demotes ETH-in → WETH when `nativeWei=0` and WETH balance covers need |
-| **Where it fails** | **Prod** `nodes:run` → bundler/session validation → `Smart wallet validation failed (AA23)` on **both** `approve` and `exactInputSingle` |
-| **Likely root cause** | Session grant allowlist is **router `exactInputSingle` + approve(cap token only, default USDC)** — WETH `approve` is **off-allowlist** → hooks grant returns AA23 |
+| **Studio residual** | **OK** — demote + grant compile (cap USDC + WETH approve) + demote coverage + typed fail-closed |
+| **Where it fails** | **Prod** `nodes:run` → bundler/session validation → AA23 when grant lacks WETH approve (preflight now blocks with re-authorize copy) |
+| **Likely root cause** | Session grant allowlist was **router + approve(USDC only)** — WETH `approve` off-allowlist |
 | **Not the problem** | Wrong runner (using MA v2 `0x46aD…`), missing WETH balance (~0.00043), Studio demote, factory mismatch (already closed) |
 | **Local gateway** | Idle for this failure (`GATEWAY_URL` points at prod). Older local run failed for a **different** reason (Gas Manager webhook **404**) |
 
