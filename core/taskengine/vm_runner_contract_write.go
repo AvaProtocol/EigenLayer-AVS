@@ -1945,9 +1945,10 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		aa23Snaps = append(aa23Snaps, snap)
 	}
 	// AA23 debug: single summary of how every sub-call target was resolved.
+	// Debug level — temporary instrumentation (avoid Info noise on every multi-call write).
 	// Grep gateway.log for "AA23_DEBUG contractWrite.per-call-targets".
 	if r.vm != nil && r.vm.logger != nil {
-		r.vm.logger.Info("AA23_DEBUG contractWrite.per-call-targets",
+		r.vm.logger.Debug("AA23_DEBUG contractWrite.per-call-targets",
 			"node_contract", contractAddr.Hex(),
 			"method_call_count", len(methodCalls),
 			"calls", aa23Snaps,

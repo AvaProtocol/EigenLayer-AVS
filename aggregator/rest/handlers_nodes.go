@@ -32,12 +32,15 @@ func (s *Server) RunNode(ctx echo.Context) error {
 	// AA23 debug: capture the raw HTTP body BEFORE Bind consumes it, so we can
 	// prove whether Studio's JSON carried methodCalls[].contractAddress on the wire.
 	// Grep gateway.log for "AA23_DEBUG". Temporary — remove once root cause is closed.
+	// Always restore Body so Bind still works even when ReadAll fails mid-stream.
 	rawBody, rawErr := io.ReadAll(ctx.Request().Body)
-	if rawErr == nil {
-		ctx.Request().Body = io.NopCloser(bytes.NewReader(rawBody))
+	ctx.Request().Body = io.NopCloser(bytes.NewReader(rawBody))
+	if rawErr != nil {
+		if s.logger != nil {
+			s.logger.Warn("AA23_DEBUG RunNode: failed to read raw body", "error", rawErr.Error(), "bytes_read", len(rawBody))
+		}
+	} else {
 		s.logAA23RawBodyMethodCalls(rawBody)
-	} else if s.logger != nil {
-		s.logger.Warn("AA23_DEBUG RunNode: failed to read raw body", "error", rawErr.Error())
 	}
 
 	var body generated.RunNodeRequest
@@ -116,7 +119,7 @@ func (s *Server) logAA23RawBodyMethodCalls(raw []byte) {
 		return
 	}
 	if probe.Node == nil || probe.Node.Config == nil {
-		s.logger.Info("AA23_DEBUG RunNode.raw-body: no contractWrite config",
+		s.logger.Debug("AA23_DEBUG RunNode.raw-body: no contractWrite config",
 			"body_bytes", len(raw))
 		return
 	}
@@ -145,7 +148,7 @@ func (s *Server) logAA23RawBodyMethodCalls(raw []byte) {
 	if cfg.IsSimulated != nil {
 		isSim = *cfg.IsSimulated
 	}
-	s.logger.Info("AA23_DEBUG RunNode.raw-body",
+	s.logger.Debug("AA23_DEBUG RunNode.raw-body",
 		"body_bytes", len(raw),
 		"node_id", probe.Node.ID,
 		"node_type", probe.Node.Type,
@@ -164,7 +167,7 @@ func (s *Server) logAA23OpenAPIMethodCalls(stage string, n generated.Node) {
 		return
 	}
 	if n.Type != generated.NodeTypeContractWrite {
-		s.logger.Info("AA23_DEBUG RunNode."+stage+": not contractWrite",
+		s.logger.Debug("AA23_DEBUG RunNode."+stage+": not contractWrite",
 			"node_id", n.Id, "node_type", string(n.Type))
 		return
 	}
@@ -192,7 +195,7 @@ func (s *Server) logAA23OpenAPIMethodCalls(stage string, n generated.Node) {
 			calls = append(calls, snap)
 		}
 	}
-	s.logger.Info("AA23_DEBUG RunNode."+stage,
+	s.logger.Debug("AA23_DEBUG RunNode."+stage,
 		"node_id", n.Id,
 		"node_contract", string(cfg.ContractAddress),
 		"chain_id", cfg.ChainId,
@@ -209,7 +212,7 @@ func (s *Server) logAA23ProtoMethodCalls(stage string, node *avsproto.TaskNode) 
 	}
 	cw := node.GetContractWrite()
 	if cw == nil || cw.GetConfig() == nil {
-		s.logger.Info("AA23_DEBUG RunNode."+stage+": no ContractWrite config",
+		s.logger.Debug("AA23_DEBUG RunNode."+stage+": no ContractWrite config",
 			"node_id", node.GetId(), "type", node.GetType().String())
 		return
 	}
@@ -230,7 +233,7 @@ func (s *Server) logAA23ProtoMethodCalls(stage string, node *avsproto.TaskNode) 
 			ContractAddress:    addr,
 		})
 	}
-	s.logger.Info("AA23_DEBUG RunNode."+stage,
+	s.logger.Debug("AA23_DEBUG RunNode."+stage,
 		"node_id", node.GetId(),
 		"node_contract", cfg.GetContractAddress(),
 		"chain_id", cfg.GetChainId(),

@@ -493,7 +493,10 @@ type ConfigRaw struct {
 	// Alchemy paymaster policy (Gas Manager) + admin API (optional; see Config)
 	AlchemyAPISecret         string `yaml:"alchemy_api_secret"`
 	AlchemyPaymasterPolicyID string `yaml:"alchemy_paymaster_policy_id"`
-	GasManagerWebhookSecret  string `yaml:"gas_manager_webhook_secret"`
+	// GasManagerPolicyID is a legacy yaml alias for alchemy_paymaster_policy_id.
+	// Still resolved as a fallback so existing configs keep sponsorship.
+	GasManagerPolicyID      string `yaml:"gas_manager_policy_id"`
+	GasManagerWebhookSecret string `yaml:"gas_manager_webhook_secret"`
 
 	// Fee structure: execution_fee + COGS + value tiers
 	// Pointer fields: nil = use default, explicit 0.0 = free tier
@@ -933,10 +936,17 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// resolveAlchemyPaymasterPolicyID returns the Alchemy paymaster policy UUID
-// from yaml alchemy_paymaster_policy_id or env ALCHEMY_PAYMASTER_POLICY_ID.
+// resolveAlchemyPaymasterPolicyID returns the Alchemy paymaster policy UUID.
+// Canonical: yaml alchemy_paymaster_policy_id / env ALCHEMY_PAYMASTER_POLICY_ID.
+// Legacy aliases still accepted so existing deployments do not silently lose
+// sponsorship: yaml gas_manager_policy_id / env ALCHEMY_GAS_POLICY_ID.
 func resolveAlchemyPaymasterPolicyID(raw ConfigRaw) string {
-	return firstNonEmpty(raw.AlchemyPaymasterPolicyID, os.Getenv("ALCHEMY_PAYMASTER_POLICY_ID"))
+	return firstNonEmpty(
+		raw.AlchemyPaymasterPolicyID,
+		os.Getenv("ALCHEMY_PAYMASTER_POLICY_ID"),
+		raw.GasManagerPolicyID,
+		os.Getenv("ALCHEMY_GAS_POLICY_ID"),
+	)
 }
 
 func ReadYamlConfig(path string, o interface{}) error {

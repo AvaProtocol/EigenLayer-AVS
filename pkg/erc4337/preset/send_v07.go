@@ -172,8 +172,8 @@ func SendUserOpMAv2(
 	// EntryPoint deposit. A zero total is a guaranteed prefund failure —
 	// refuse before dialing the bundler so the error is clear and guard tests
 	// need no bundler URL. Sponsorship is alchemy_paymaster_policy_id /
-	// ALCHEMY_PAYMASTER_POLICY_ID (legacy aliases still accepted); when set,
-	// this check is skipped.
+	// ALCHEMY_PAYMASTER_POLICY_ID (config also accepts legacy gas_manager_policy_id /
+	// ALCHEMY_GAS_POLICY_ID); when set, this check is skipped.
 	if smartWalletConfig.AlchemyPaymasterPolicyID == "" {
 		if err := ensureSelfFundedPrefund(ctx, chainRPC, entryPoint, sender); err != nil {
 			return nil, nil, err
@@ -414,7 +414,7 @@ func ensureSelfFundedPrefund(ctx context.Context, chainRPC *ethclient.Client, en
 		return nil
 	}
 	return fmt.Errorf(
-		"smart wallet %s cannot pay gas: native balance and EntryPoint deposit are both zero, and no Alchemy paymaster policy is configured; set alchemy_paymaster_policy_id (or env ALCHEMY_PAYMASTER_POLICY_ID) for sponsorship, or fund the wallet with Sepolia ETH",
+		"smart wallet %s cannot pay gas: native balance and EntryPoint deposit are both zero, and no Alchemy paymaster policy is configured; set alchemy_paymaster_policy_id (or env ALCHEMY_PAYMASTER_POLICY_ID) for sponsorship, or fund the wallet with the chain's native gas token",
 		sender.Hex())
 }
 
