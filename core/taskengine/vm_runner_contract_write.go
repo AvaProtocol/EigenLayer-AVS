@@ -991,6 +991,20 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		}
 	}
 
+	// Session allowlist preflight (single call) — same as atomic batch.
+	if msg := r.preflightSessionGrantCoverage([]PlannedCall{{
+		Target:   contractAddress,
+		Selector: SelectorFromCalldata(callDataBytes),
+		Label:    methodName,
+	}}); msg != "" {
+		executionLogBuilder.WriteString(msg + "\n")
+		return &avsproto.ContractWriteNode_MethodResult{
+			Success:    false,
+			Error:      msg,
+			MethodName: methodName,
+		}
+	}
+
 	// Create smart wallet execute calldata: execute(target, value, data)
 	executionLogBuilder.WriteString(fmt.Sprintf("Packing smart wallet execute calldata...\n"))
 	executionLogBuilder.WriteString(fmt.Sprintf("  Target contract: %s\n", contractAddress.Hex()))
@@ -1063,6 +1077,50 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 // failed. It composes with the paymaster reimbursement wrapper (which now appends its entries onto
 // this batch) and is used only on the run-node route for real (non-simulated) multi-call execution;
 // deployed workflows keep the sequential per-method path.
+// preflightSessionGrantCoverage refuses MA v2 UserOps whose planned inner
+// calls are outside the active session grant's allowlist — before the bundler
+// returns opaque AA23 (WETH sell under a USDC-only Uniswap grant).
+//
+// Returns "" when the check is skipped or the grant covers the calls.
+// Skips when: not MA v2, no db, no aa_sender, no usable policy, or the policy
+// has empty AllowedActions (legacy / incomplete records).
+func (r *ContractWriteProcessor) preflightSessionGrantCoverage(planned []PlannedCall) string {
+	if r == nil || r.smartWalletConfig == nil || !r.smartWalletConfig.UsesModularAccountV2() {
+		return ""
+	}
+	if r.vm == nil || r.vm.db == nil || len(planned) == 0 {
+		return ""
+	}
+	sender := getAASenderAddress(r.vm)
+	if sender == nil {
+		return ""
+	}
+	chainID := r.smartWalletConfig.ChainID
+	if chainID <= 0 {
+		chainID = r.vm.vmDefaultChainID()
+	}
+	policy, err := ActiveSessionPolicyForWallet(r.vm.db, chainID, r.owner, *sender)
+	if err != nil {
+		// Storage / multi-grant errors should fail closed with a clear message.
+		return fmt.Sprintf("SESSION_POLICY_LOOKUP_FAILED: %v", err)
+	}
+	if policy == nil || len(policy.AllowedActions) == 0 {
+		return ""
+	}
+	missing := MissingGrantCalls(policy.AllowedActions, planned)
+	if len(missing) == 0 {
+		return ""
+	}
+	if r.vm.logger != nil {
+		r.vm.logger.Warn("session grant does not cover planned contract calls",
+			"policy_id", policy.ID,
+			"wallet", sender.Hex(),
+			"missing_count", len(missing),
+		)
+	}
+	return FormatSessionPolicyTargetNotAllowed(missing, policy.ID)
+}
+
 // uniqueTargetHexes returns the distinct target addresses (hex, order-preserving) — used to label
 // batch logs with every contract involved rather than just the first sub-call's.
 func uniqueTargetHexes(targets []common.Address) []string {
@@ -1212,6 +1270,21 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 				"used_node_fallback", override == "",
 			)
 		}
+	}
+
+	// Session allowlist preflight: refuse off-grant targets (e.g. WETH approve
+	// under a USDC-only Uniswap grant) before Gas Manager / bundler AA23.
+	planned := make([]PlannedCall, n)
+	for i := range methodCalls {
+		planned[i] = PlannedCall{
+			Target:   targets[i],
+			Selector: SelectorFromCalldata(datas[i]),
+			Label:    methodNames[i],
+		}
+	}
+	if msg := r.preflightSessionGrantCoverage(planned); msg != "" {
+		log.WriteString(msg + "\n")
+		return failAll(msg, nil)
 	}
 
 	// Pack the atomic batch. Prefer executeBatch (no per-call values) when every value is zero — its
