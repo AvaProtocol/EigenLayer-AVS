@@ -3,6 +3,7 @@ package taskengine
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -109,9 +110,9 @@ func NextSessionEntityID(db storage.Storage, chainID int64, owner, wallet common
 }
 
 // InstallSessionResolver wires the send path to this engine's session-policy
-// storage. Without it every MA v2 operation is signed as the account's
-// fallback signer — the user's EOA, whose key the gateway does not hold — so
-// nothing the gateway executes validates.
+// storage. Without it every MA v2 operation fails fast with "no session
+// authorization" — the gateway cannot sign as the owner fallback, and
+// estimating a doomed UserOp only produces opaque AA23.
 //
 // Called once at aggregator startup, deliberately NOT from New: the resolver
 // is process-global (the preset package has no per-engine context), and test
@@ -140,10 +141,8 @@ func NewSessionResolver(
 			return nil, err
 		}
 		if policy == nil {
-			// No grant. The operation stays on the owner's fallback signer,
-			// which the gateway cannot sign — but that failure belongs to the
-			// caller that asked for an operation it has no authority for, and
-			// it reads more clearly than a fabricated authorization.
+			// No grant. SendUserOpMAv2 fails fast on nil rather than estimating
+			// a controller-as-fallback UserOp that always AA23s.
 			return nil, nil
 		}
 		key, err := signerKeyFor(*policy.SessionSigner)
@@ -153,6 +152,7 @@ func NewSessionResolver(
 		auth := &preset.SessionAuthorization{
 			EntityID:          policy.EntityID,
 			SignerKey:         key,
+			PolicyID:          policy.ID,
 			WrapExecuteUserOp: policy.Grant.RequiresExecuteUserOp,
 		}
 		// The install rides the grant's FIRST operation only. Replaying an
@@ -180,6 +180,9 @@ func NewSessionResolver(
 			}
 			auth.DeferredData = encoded
 			auth.OwnerSignature = policy.Grant.OwnerSignature
+			if policy.Grant.CarrierNonce != nil {
+				auth.CarrierNonce = new(big.Int).Set(policy.Grant.CarrierNonce)
+			}
 			policyID, policyChain, policyOwner := policy.ID, policy.ChainID, *policy.Owner
 			auth.OnApplied = func(userOpHash string) error {
 				return MarkSessionGrantAppliedByID(db, policyChain, policyOwner, policyID, userOpHash)

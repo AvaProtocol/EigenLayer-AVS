@@ -159,6 +159,7 @@ func TestMAv2SessionGrantEndToEnd(t *testing.T) {
 		SignerKey:      controllerKey,
 		DeferredData:   deferredData,
 		OwnerSignature: ownerSig,
+		CarrierNonce:   carrierNonce, // send path asserts op.Nonce == this
 		OnApplied: func(userOpHash string) error {
 			appliedHash = userOpHash
 			return nil
