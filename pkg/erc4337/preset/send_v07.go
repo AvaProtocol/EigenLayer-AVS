@@ -490,7 +490,10 @@ func priceOperationV07(
 ) error {
 	if policyID := smartWalletConfig.AlchemyPaymasterPolicyID; policyID != "" {
 		if err := RequestSponsorshipV07(ctx, bundlerRPC, op, entryPoint,
-			SponsorshipRequestV07{PolicyID: policyID}); err != nil {
+			SponsorshipRequestV07{
+				PolicyID:    policyID,
+				WebhookData: smartWalletConfig.GasManagerWebhookSecret,
+			}); err != nil {
 			// Deliberately fatal. See SendUserOpV07's contract: falling through
 			// to an unsponsored send would spend the account's own balance on
 			// an operation the policy just refused to fund.

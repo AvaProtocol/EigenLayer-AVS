@@ -5,9 +5,16 @@
 “factory_address / account_provider mismatch”.  
 **Found during:** Studio live test of Auto-mode Uniswap swap, owner EOA
 `0xc60e71bd…c788`, Sepolia.  
-**Status:** **Resolved for case B (first-use MA v2)** — end-to-end UserOp mined
-on Sepolia under Gas Manager. Earlier Studio AA23 at Gas Manager was not a
-durable send-path bug (see “Resolution” below).
+**Status:** **Resolved** (merged to staging as PR #706). Root cause of Studio
+Auto AA23 was `methodCalls[].contractAddress` dropped on the `nodes:run`
+extract→recreate round-trip (approve fell back to the router). Packing fix
+verified live on Sepolia under Gas Manager.
+
+**AVS follow-ups (this branch):** strip temporary `AA23_DEBUG` logs; refuse
+session grant prepare/submit for non–MA v2 runners (SimpleAccount).
+
+**Not AVS:** Studio Fix C / consent Deny / false-Confirmed hydrate — stay in
+Studio plans. Gas Manager custom-rules webhook still optional ops wiring.
 
 ---
 
@@ -21,7 +28,9 @@ durable send-path bug (see “Resolution” below).
 | 4 | Zero balance without sponsorship | **Fixed as guard** — fail-fast + clear error; sponsorship is the product path |
 | 5 | Misleading boot logs / v0.6 paymaster probe | **Fixed (code)** — effective factory/EP/policy logged; MA v2 skips v0.6 probe |
 | 6 | Moralis “no API key” WARN | **Fixed (config)** — top-level `moralis_api_key` (fee USD only; not UserOps) |
-| 7 | AA23 on first-use MA v2 under Gas Manager | **Resolved** — full path verified; wallet deployed + swap mined |
+| 7 | AA23 on first-use / Auto batch under Gas Manager | **Fixed (#706)** — preserve per-call `contractAddress`; live Sepolia mine |
+| 8 | Temporary `AA23_DEBUG` instrumentation | **Stripped** (cleanup after #706 soak) |
+| 9 | Session grant on SimpleAccount runner | **Fixed** — prepare/submit refuse non–MA v2 |
 
 ---
 

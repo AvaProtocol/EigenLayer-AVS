@@ -287,6 +287,11 @@ func NextNonceV07(ctx context.Context, client *rpc.Client, entryPoint, sender co
 // SponsorshipRequestV07 asks Alchemy's Gas Manager to cover the operation.
 type SponsorshipRequestV07 struct {
 	PolicyID string
+	// WebhookData is echoed by Alchemy to the policy's custom-rules webhook as
+	// webhookData. When the gateway has gas_manager_webhook_secret set, this
+	// must match that secret or the webhook denies sponsorship. Empty omits
+	// the field (no secret check on the webhook side either).
+	WebhookData string
 }
 
 type sponsorshipResultV07 struct {
@@ -312,11 +317,11 @@ type sponsorshipResultV07 struct {
 // an unsponsored operation. That is the shape we want: an operation that
 // silently fell back to self-funded would drain the account instead.
 //
-// Note the webhook is NOT currently configured on the policy (webhookRules is
-// null), so nothing consults the gateway's FeeLedger gate today and any sender
-// reaching the policy is sponsored within its caps. Enabling it is what makes
-// the credit limit bind — and it also means MA v2 wallets must be registered
-// in gateway storage first, or the webhook will refuse every one of them.
+// When the policy's custom-rules webhook is pointed at the gateway
+// (/webhooks/gas-manager), FeeLedger credit checks bind here. MA v2 wallets
+// must be registered in gateway storage or the webhook refuses them. If
+// gas_manager_webhook_secret is set, WebhookData must match or every request
+// is denied.
 func RequestSponsorshipV07(ctx context.Context, client *rpc.Client, op *userop.UserOperationV07, entryPoint common.Address, req SponsorshipRequestV07) error {
 	if client == nil {
 		return fmt.Errorf("nil bundler client")
@@ -346,6 +351,12 @@ func RequestSponsorshipV07(ctx context.Context, client *rpc.Client, op *userop.U
 		"entryPoint":     entryPoint.Hex(),
 		"dummySignature": fmt.Sprintf("0x%x", dummy),
 		"userOperation":  json.RawMessage(payload),
+	}
+	// Only include when non-empty — Alchemy's schema treats webhookData as
+	// optional; sending "" is fine but omitting keeps the body minimal and
+	// matches the "secret unset" deployment path.
+	if req.WebhookData != "" {
+		params["webhookData"] = req.WebhookData
 	}
 
 	var res sponsorshipResultV07

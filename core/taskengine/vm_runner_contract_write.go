@@ -716,7 +716,9 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 		}
 	}
 
-	// Determine if paymaster should be used based on transaction limits and whitelist
+	// Determine if the v0.6 verifying paymaster should be attached. MA v2 never
+	// uses that path (sponsorship is Alchemy Gas Manager policy); log accordingly
+	// so ops do not think "no paymaster" means unsponsored when the policy is set.
 	var paymasterReq *preset.VerifyingPaymasterRequest
 	if r.shouldUsePaymaster() {
 		paymasterReq = preset.GetVerifyingPaymasterRequestForDuration(
@@ -726,6 +728,15 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 		r.vm.logger.Info("Using paymaster for sponsored transaction",
 			"paymaster", r.smartWalletConfig.PaymasterAddress.Hex(),
 			"owner", r.owner.Hex())
+	} else if r.smartWalletConfig != nil && r.smartWalletConfig.UsesModularAccountV2() {
+		if r.smartWalletConfig.AlchemyPaymasterPolicyID != "" {
+			r.vm.logger.Info("MA v2: Gas Manager will sponsor (alchemy_paymaster_policy_id set)",
+				"owner", r.owner.Hex(),
+				"paymaster_policy_set", true)
+		} else {
+			r.vm.logger.Info("MA v2: self-funded (no alchemy_paymaster_policy_id)",
+				"owner", r.owner.Hex())
+		}
 	} else {
 		r.vm.logger.Info("Using regular transaction (no paymaster)",
 			"owner", r.owner.Hex())
@@ -1890,69 +1901,24 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// (e.g. approve on the token + swap on the router). Absent = the node-level contract (common case,
 	// so pre-existing tasks — which never carry this new field — are unaffected).
 	perCallTargets := make([]common.Address, len(methodCalls))
-	type aa23CallSnap struct {
-		Index             int    `json:"index"`
-		MethodName        string `json:"methodName"`
-		RawOverride       string `json:"rawOverride"`
-		HasRawOverride    bool   `json:"hasRawOverride"`
-		ResolvedOverride  string `json:"resolvedOverride"`
-		UsedNodeFallback  bool   `json:"usedNodeFallback"`
-		ResolvedTarget    string `json:"resolvedTarget"`
-		NodeLevelContract string `json:"nodeLevelContract"`
-	}
-	aa23Snaps := make([]aa23CallSnap, 0, len(methodCalls))
 	for i, mc := range methodCalls {
 		perCallTargets[i] = contractAddr
-		rawOverride := ""
-		hasRaw := false
-		if mc != nil && mc.ContractAddress != nil {
-			hasRaw = true
-			rawOverride = *mc.ContractAddress
-		}
 		override := strings.TrimSpace(mc.GetContractAddress())
-		snap := aa23CallSnap{
-			Index:             i,
-			MethodName:        mc.GetMethodName(),
-			RawOverride:       rawOverride,
-			HasRawOverride:    hasRaw,
-			UsedNodeFallback:  override == "",
-			NodeLevelContract: contractAddr.Hex(),
-			ResolvedTarget:    contractAddr.Hex(),
-		}
 		if override != "" {
 			resolved := r.vm.preprocessTextWithVariableMapping(override)
-			snap.ResolvedOverride = resolved
 			if !common.IsHexAddress(resolved) {
 				// A per-call target was explicitly provided but did not resolve to a valid address
 				// (unresolved {{template}}, typo, or a variable that resolved to empty). Fail fast
 				// instead of silently falling back to the node-level contract — sending an atomic,
 				// irreversible sub-call to the wrong contract is exactly the footgun this feature
 				// exists to prevent. Mirrors the node-level validation in getInputData.
-				if r.vm != nil && r.vm.logger != nil {
-					r.vm.logger.Error("AA23_DEBUG contractWrite.per-call-target INVALID",
-						"index", i, "method", mc.GetMethodName(),
-						"raw_override", rawOverride, "resolved", resolved)
-				}
 				err = NewInvalidAddressError(resolved)
 				finalizeErrorMsg = err.Error()
 				finalizeSuccess = false
 				return s, err
 			}
 			perCallTargets[i] = common.HexToAddress(resolved)
-			snap.UsedNodeFallback = false
-			snap.ResolvedTarget = perCallTargets[i].Hex()
 		}
-		aa23Snaps = append(aa23Snaps, snap)
-	}
-	// AA23 debug: single summary of how every sub-call target was resolved.
-	// Debug level — temporary instrumentation (avoid Info noise on every multi-call write).
-	// Grep gateway.log for "AA23_DEBUG contractWrite.per-call-targets".
-	if r.vm != nil && r.vm.logger != nil {
-		r.vm.logger.Debug("AA23_DEBUG contractWrite.per-call-targets",
-			"node_contract", contractAddr.Hex(),
-			"method_call_count", len(methodCalls),
-			"calls", aa23Snaps,
-		)
 	}
 
 	// Atomic-batch route: on-demand (nodes:run) real execution of more than one method call. Instead
