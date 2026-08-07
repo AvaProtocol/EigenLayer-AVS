@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Mirrors the aa-package default test at the config layer, because the two
 // defaults have to agree: config decides what the gateway believes, aa decides
@@ -36,7 +39,8 @@ func TestAccountProviderNormalisation(t *testing.T) {
 // on a chain the operator believed was on MA v2, visible only as users getting
 // unexpected addresses.
 func TestValidateAccountProvider(t *testing.T) {
-	for _, ok := range []string{"", "simple_account", "modular_account_v2", "Modular_Account_V2"} {
+	// Empty takes the modular_account_v2 default; casing is normalized.
+	for _, ok := range []string{"", "modular_account_v2", "Modular_Account_V2"} {
 		c := SmartWalletConfig{AccountProvider: ok}
 		if err := c.ValidateAccountProvider(); err != nil {
 			t.Errorf("ValidateAccountProvider(%q) = %v, want nil", ok, err)
@@ -47,6 +51,23 @@ func TestValidateAccountProvider(t *testing.T) {
 		if err := c.ValidateAccountProvider(); err == nil {
 			t.Errorf("ValidateAccountProvider(%q) = nil, want an error", bad)
 		}
+	}
+}
+
+// simple_account is refused at load rather than accepted and then failed at
+// send time. Its derivation still exists — stored wallet records reference the
+// v0.6 factory — but the path that executes against those wallets was removed
+// with the EntryPoint v0.7 cutover, so a chain pinned to it would hand users
+// legacy addresses and fail every operation. Boot names the config line; a
+// send-time failure names nothing.
+func TestSimpleAccountIsRefusedAtLoad(t *testing.T) {
+	c := SmartWalletConfig{AccountProvider: AccountProviderSimpleAccount, ChainID: 11155111}
+	err := c.ValidateAccountProvider()
+	if err == nil {
+		t.Fatal("simple_account must be refused: its send path no longer exists")
+	}
+	if !strings.Contains(err.Error(), AccountProviderModularAccountV2) {
+		t.Errorf("the refusal must name the supported value, got: %v", err)
 	}
 }
 

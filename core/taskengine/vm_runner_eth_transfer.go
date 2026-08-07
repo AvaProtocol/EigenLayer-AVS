@@ -318,24 +318,15 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		return executionLog, err
 	}
 
-	// Determine if paymaster should be used (similar to contract write logic)
-	var paymasterReq *preset.VerifyingPaymasterRequest
-	if p.shouldUsePaymaster() {
-		paymasterReq = preset.GetVerifyingPaymasterRequestForDuration(
-			p.smartWalletConfig.PaymasterAddress,
-			15*time.Minute, // 15 minute validity window
-		)
-		// For MAX transfers, skip reimbursement so the full balance can be sent.
-		// Paymaster absorbs gas costs, matching the withdrawal RPC behavior.
-		if isMaxTransfer {
-			paymasterReq.SkipReimbursement = true
-		}
-		p.vm.logger.Info("🎫 Using paymaster for sponsored ETH transfer",
-			"paymaster", p.smartWalletConfig.PaymasterAddress.Hex(),
-			"owner", p.taskOwner.Hex(),
-			"skipReimbursement", isMaxTransfer)
+	// Sponsorship on MA v2 is the chain's Alchemy Gas Manager policy, applied
+	// inside the send path. A MAX transfer used to need the v0.6 paymaster's
+	// SkipReimbursement so the whole balance could move; with reimbursement
+	// gone there is nothing to skip.
+	if p.smartWalletConfig != nil && p.smartWalletConfig.AlchemyPaymasterPolicyID != "" {
+		p.vm.logger.Info("Gas Manager will sponsor the ETH transfer",
+			"owner", p.taskOwner.Hex())
 	} else {
-		p.vm.logger.Info("💰 Using regular ETH transfer (no paymaster)",
+		p.vm.logger.Info("Self-funded ETH transfer (no alchemy_paymaster_policy_id)",
 			"owner", p.taskOwner.Hex())
 	}
 
@@ -355,10 +346,8 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		p.smartWalletConfig,
 		*p.taskOwner,
 		smartWalletCallData,
-		paymasterReq,
 		senderOverride,
 		saltOverride,
-		p.vm.executionFeeWei, // Execution fee in Wei (nil = no fee)
 		p.vm.logger,
 	)
 

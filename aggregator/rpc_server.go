@@ -231,14 +231,11 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 		return nil, status.Errorf(codes.Internal, "smart wallet configuration not available")
 	}
 
-	// Enable paymaster for gas sponsorship (15 minute validity)
-	// Skip reimbursement for withdrawals — the paymaster absorbs gas costs so users
-	// can withdraw their full balance without reserving ETH for gas reimbursement.
-	paymasterReq := preset.GetVerifyingPaymasterRequestForDuration(
-		swCfg.PaymasterAddress,
-		15*time.Minute,
-	)
-	paymasterReq.SkipReimbursement = true
+	// Withdrawals used to attach the v0.6 verifying paymaster with
+	// SkipReimbursement so a user could move their full balance without
+	// reserving ETH for reimbursement. Both went with the EntryPoint v0.7
+	// cutover: sponsorship is the chain's Gas Manager policy and there is no
+	// reimbursement leg to skip.
 
 	// Pre-flight: validate the wallet balance covers the withdrawal.
 	// Withdrawals always run with SkipReimbursement (set above) — the
@@ -342,7 +339,6 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 		user.Address,
 		callData,
 		smartWalletAddress,
-		paymasterReq,
 		requestedChainID,
 	)
 
@@ -430,46 +426,30 @@ func (r *RpcServer) validateSmartWalletOwnership(owner common.Address, smartWall
 // In gateway mode, it delegates to the appropriate chain worker instead.
 // requestedChainID picks the worker in gateway mode; pass 0 to use the
 // gateway's default chain (single-chain mode ignores the argument).
+// The shared WebSocket client is no longer threaded through: the MA v2 send
+// path opens its own connection for receipt watching, so the v0.6-era
+// SendUserOpAutoWithWsClient variant that existed to reuse the aggregator's
+// long-lived socket had nothing left to reuse.
 func (r *RpcServer) sendUserOpWithGlobalWs(
 	owner common.Address,
 	callData []byte,
 	smartWalletAddress *common.Address,
-	paymasterReq *preset.VerifyingPaymasterRequest,
 	requestedChainID int64,
 ) (*preset.SentUserOp, *types.Receipt, error) {
 	// Gateway mode: route to worker
 	if r.chainRegistry != nil {
-		return r.sendUserOpViaWorker(owner, callData, smartWalletAddress, paymasterReq, requestedChainID)
+		return r.sendUserOpViaWorker(owner, callData, smartWalletAddress, requestedChainID)
 	}
 
-	// Use global WebSocket client if available, otherwise fall back to creating new connection
 	// Note: salt=nil here because rpc_server callers (e.g. WithdrawFunds) operate on already-deployed wallets
-	if r.smartWalletWsRpc != nil {
-		return preset.SendUserOpAutoWithWsClient(
-			r.config.SmartWallet,
-			owner,
-			callData,
-			paymasterReq, // Use provided paymaster request
-			smartWalletAddress,
-			nil,                // saltOverride - not needed for already-deployed wallets
-			r.smartWalletWsRpc, // Use global WebSocket client
-			nil,                // executionFeeWei - no platform fee for direct RPC calls (e.g., WithdrawFunds)
-			r.config.Logger,    // Pass logger for debug/verbose logging
-		)
-	} else {
-		// Fallback to original method (creates new WebSocket connection)
-		r.config.Logger.Warn("Global WebSocket client not available, using fallback method")
-		return preset.SendUserOpAuto(
-			r.config.SmartWallet,
-			owner,
-			callData,
-			paymasterReq, // Use provided paymaster request
-			smartWalletAddress,
-			nil,             // saltOverride - not needed for already-deployed wallets
-			nil,             // executionFeeWei - no platform fee for direct RPC calls
-			r.config.Logger, // Pass logger for debug/verbose logging
-		)
-	}
+	return preset.SendUserOpAuto(
+		r.config.SmartWallet,
+		owner,
+		callData,
+		smartWalletAddress,
+		nil,             // saltOverride - not needed for already-deployed wallets
+		r.config.Logger, // Pass logger for debug/verbose logging
+	)
 }
 
 // sendUserOpViaWorker delegates UserOp execution to a chain worker in gateway mode.
@@ -478,7 +458,6 @@ func (r *RpcServer) sendUserOpViaWorker(
 	owner common.Address,
 	callData []byte,
 	smartWalletAddress *common.Address,
-	paymasterReq *preset.VerifyingPaymasterRequest,
 	chainID int64,
 ) (*preset.SentUserOp, *types.Receipt, error) {
 	worker, err := r.chainRegistry.GetWorker(chainID)
@@ -486,10 +465,12 @@ func (r *RpcServer) sendUserOpViaWorker(
 		return nil, nil, fmt.Errorf("no worker for chain %d: %w", chainID, err)
 	}
 
+	// UsePaymaster selected the v0.6 verifying paymaster and is ignored by the
+	// worker now that sponsorship is the chain's Gas Manager policy. Left off
+	// rather than set to a value that decides nothing.
 	req := &avsproto.ExecuteUserOpReq{
-		Owner:        owner.Hex(),
-		CallData:     callData,
-		UsePaymaster: paymasterReq != nil,
+		Owner:    owner.Hex(),
+		CallData: callData,
 	}
 	if smartWalletAddress != nil {
 		req.SmartWalletAddress = smartWalletAddress.Hex()

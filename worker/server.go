@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
-	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -85,22 +84,16 @@ func (s *Server) ExecuteUserOp(ctx context.Context, req *avsproto.ExecuteUserOpR
 		senderOverride = &addr
 	}
 
-	var paymasterReq *preset.VerifyingPaymasterRequest
-	if req.UsePaymaster && s.worker.smartWalletCfg.PaymasterAddress != (common.Address{}) {
-		paymasterReq = preset.GetVerifyingPaymasterRequestForDuration(
-			s.worker.smartWalletCfg.PaymasterAddress,
-			15*time.Minute,
-		)
-	}
-
+	// req.UsePaymaster selected the v0.6 verifying paymaster, which went with
+	// the EntryPoint v0.7 cutover. Sponsorship is now the chain's Gas Manager
+	// policy and applies inside the send path, so the flag no longer chooses
+	// anything; it is left on the wire for older callers and ignored.
 	userOp, receipt, err := preset.SendUserOpAuto(
 		s.worker.smartWalletCfg,
 		ownerAddr,
 		req.CallData,
-		paymasterReq,
 		senderOverride,
 		nil, // saltOverride: not exposed in ExecuteUserOpReq; sender override is used instead
-		nil, // executionFeeWei: value-capture fee not yet wired through worker RPC
 		s.worker.logger,
 	)
 	if err != nil {

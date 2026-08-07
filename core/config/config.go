@@ -5,16 +5,11 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
-	"math/big"
 	"os"
 	"strings"
-	"time"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/prometheus/client_golang/prometheus"
 	"gopkg.in/yaml.v2"
 
@@ -289,8 +284,9 @@ const (
 // migration, taken deliberately across all chains at once after an audit found
 // no meaningful balances in the v0.6 wallets.
 //
-// simple_account remains selectable so a chain can be pinned to the legacy
-// derivation, but it is now the exception rather than the fallback.
+// simple_account is no longer selectable — ValidateAccountProvider refuses it.
+// It named a derivation whose send path was removed with the v0.7 cutover, so
+// pinning a chain to it would derive wallets that nothing can execute against.
 func (c *SmartWalletConfig) AccountProviderName() string {
 	p := strings.ToLower(strings.TrimSpace(c.AccountProvider))
 	if p == "" {
@@ -320,17 +316,31 @@ func (c *SmartWalletConfig) EntryPointAddress() common.Address {
 	return c.EntrypointAddress
 }
 
-// ValidateAccountProvider rejects an unrecognised value rather than silently
-// falling back. A typo would otherwise derive v0.6 addresses on a chain the
-// operator believed was on MA v2 — and the mistake is only visible as users
-// receiving unexpected addresses.
+// ValidateAccountProvider rejects anything but modular_account_v2.
+//
+// An unrecognised value has always been refused rather than silently falling
+// back: a typo would otherwise derive v0.6 addresses on a chain the operator
+// believed was on MA v2, and the mistake surfaces only as users receiving
+// unexpected addresses.
+//
+// simple_account is now refused for a stronger reason. Its send path was
+// removed with the EntryPoint v0.7 cutover, so a chain pinned to it would
+// derive legacy wallets and then fail every operation at send time. Failing at
+// boot names the config line; failing at send names nothing. No deployed chain
+// sets this — every avs-infra config omits account_provider and takes the
+// modular_account_v2 default — so this refuses a value nothing is using.
 func (c *SmartWalletConfig) ValidateAccountProvider() error {
 	switch c.AccountProviderName() {
-	case AccountProviderSimpleAccount, AccountProviderModularAccountV2:
+	case AccountProviderModularAccountV2:
 		return nil
+	case AccountProviderSimpleAccount:
+		return fmt.Errorf(
+			"account_provider %q (chain_id=%d) is no longer supported: the v0.6 send path was removed "+
+				"with the EntryPoint v0.7 cutover. Remove the line to take the %q default",
+			AccountProviderSimpleAccount, c.ChainID, AccountProviderModularAccountV2)
 	default:
-		return fmt.Errorf("unknown account_provider %q (chain_id=%d); expected %q or %q",
-			c.AccountProvider, c.ChainID, AccountProviderSimpleAccount, AccountProviderModularAccountV2)
+		return fmt.Errorf("unknown account_provider %q (chain_id=%d); expected %q",
+			c.AccountProvider, c.ChainID, AccountProviderModularAccountV2)
 	}
 }
 
@@ -827,20 +837,15 @@ func NewConfig(configFilePath string) (*Config, error) {
 		}
 	}
 
-	// The v0.6 verifying-paymaster probe (owner + verifyingSigner) only applies
-	// to SimpleAccount chains. MA v2 sponsors via AlchemyPaymasterPolicyID and
-	// ignores smart_wallet.paymaster_address on the send path — probing the
-	// legacy contract at boot only produced misleading "paymaster loaded"
-	// logs and forced a live RPC dependency for an unused address.
+	// smart_wallet.paymaster_address is inert. It named the v0.6 verifying
+	// paymaster, which went with the EntryPoint v0.7 cutover; sponsorship is
+	// now the chain's Gas Manager policy. Left readable so an existing config
+	// still loads, and reported once so nobody funds a contract nothing calls.
 	if config.SmartWallet != nil && config.SmartWallet.PaymasterAddress != (common.Address{}) {
-		if config.SmartWallet.UsesModularAccountV2() {
-			logger.Info("Skipping v0.6 verifying-paymaster probe on modular_account_v2; sponsorship uses alchemy_paymaster_policy_id",
-				"paymaster_address_ignored", config.SmartWallet.PaymasterAddress.Hex(),
-				"paymaster_policy_set", config.AlchemyPaymasterPolicyID != "",
-			)
-		} else if err := probeVerifyingPaymaster(logger, smartWalletRpcClient, config.SmartWallet, configRaw.SmartWallet.EthRpcUrl); err != nil {
-			return nil, err
-		}
+		logger.Warn("smart_wallet.paymaster_address is ignored: the v0.6 verifying paymaster was removed with the EntryPoint v0.7 cutover",
+			"paymaster_address_ignored", config.SmartWallet.PaymasterAddress.Hex(),
+			"paymaster_policy_set", config.AlchemyPaymasterPolicyID != "",
+		)
 	}
 
 	// Gateway mode: parse per-chain configs
@@ -1033,128 +1038,6 @@ func GetDefaultFeeRatesConfig() *FeeRatesConfig {
 	}
 }
 
-// paymasterCaller is the minimal contract-call surface needed to probe a
-// paymaster's no-arg address getters (owner() and verifyingSigner()). Both
-// *eth.InstrumentedClient (top-level smart wallet) and *ethclient.Client
-// (per-chain dials) satisfy it.
-type paymasterCaller interface {
-	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
-}
-
-// paymasterProbeTimeout bounds each startup paymaster RPC call so an
-// unresponsive endpoint fails the boot fast instead of hanging indefinitely —
-// which is the whole point of the startup probe.
-const paymasterProbeTimeout = 15 * time.Second
-
-// Paymaster getter ABIs are parsed once at package init (these are constant,
-// so a parse error is a programming bug and panicking is appropriate, like
-// regexp.MustCompile). callPaymasterAddressGetter reuses them per call.
-var (
-	paymasterOwnerABI           = mustParseAddressGetterABI("owner")
-	paymasterVerifyingSignerABI = mustParseAddressGetterABI("verifyingSigner")
-)
-
-// mustParseAddressGetterABI parses an ABI exposing a single no-arg view
-// function returning an address (owner(), verifyingSigner()).
-func mustParseAddressGetterABI(method string) abi.ABI {
-	parsed, err := abi.JSON(strings.NewReader(
-		`[{"inputs":[],"name":"` + method + `","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"}]`))
-	if err != nil {
-		panic(fmt.Sprintf("config: parsing paymaster %s() ABI: %v", method, err))
-	}
-	return parsed
-}
-
-// callPaymasterAddressGetter invokes a no-arg, address-returning view function
-// on the paymaster and returns the result. A short timeout bounds the call so
-// an unresponsive RPC fails fast at boot.
-func callPaymasterAddressGetter(client paymasterCaller, paymasterAddress common.Address, parsedABI abi.ABI, method string) (common.Address, error) {
-	calldata, err := parsedABI.Pack(method)
-	if err != nil {
-		return common.Address{}, fmt.Errorf("failed to pack %s() call: %w", method, err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), paymasterProbeTimeout)
-	defer cancel()
-
-	result, err := client.CallContract(ctx, ethereum.CallMsg{To: &paymasterAddress, Data: calldata}, nil)
-	if err != nil {
-		return common.Address{}, fmt.Errorf("failed to call %s() on paymaster: %w", method, err)
-	}
-
-	var out common.Address
-	if err := parsedABI.UnpackIntoInterface(&out, method, result); err != nil {
-		return common.Address{}, fmt.Errorf("failed to unpack %s() result: %w", method, err)
-	}
-	return out, nil
-}
-
-// fetchPaymasterOwner calls owner() on the paymaster contract to get the owner
-// address. This is used for gas reimbursement — ETH is sent to the owner (EOA),
-// not the contract itself.
-func fetchPaymasterOwner(client paymasterCaller, paymasterAddress common.Address) (common.Address, error) {
-	return callPaymasterAddressGetter(client, paymasterAddress, paymasterOwnerABI, "owner")
-}
-
-// fetchPaymasterVerifyingSigner calls verifyingSigner() on the VerifyingPaymaster
-// contract. This is the address whose ECDSA signature the paymaster accepts on
-// sponsored UserOps — it MUST equal the aggregator's controller address, since
-// the aggregator signs the paymaster hash with the controller key. owner() (the
-// admin/reimbursement EOA) is a distinct role and is NOT a substitute for this
-// check: a paymaster can have the right owner but a different verifyingSigner,
-// which silently breaks every sponsored UserOp at signing time
-// (Sentry EIGENLAYER-AVS-1W — mainnet paymaster paired with the testnet
-// controller key).
-func fetchPaymasterVerifyingSigner(client paymasterCaller, paymasterAddress common.Address) (common.Address, error) {
-	return callPaymasterAddressGetter(client, paymasterAddress, paymasterVerifyingSignerABI, "verifyingSigner")
-}
-
-// probeVerifyingPaymaster loads owner() and verifyingSigner() on a v0.6
-// VerifyingPaymaster and ensures verifyingSigner equals the controller.
-// Only call this for simple_account chains — MA v2 does not use this contract.
-func probeVerifyingPaymaster(
-	logger sdklogging.Logger,
-	client paymasterCaller,
-	sw *SmartWalletConfig,
-	rpcURL string,
-) error {
-	if sw == nil || sw.PaymasterAddress == (common.Address{}) {
-		return nil
-	}
-	paymasterOwner, err := fetchPaymasterOwner(client, sw.PaymasterAddress)
-	if err != nil {
-		return fmt.Errorf(
-			"paymaster %s is unreachable on RPC %s (owner() call failed: %w) — "+
-				"verify the paymaster address is deployed on this chain, and that the "+
-				"eth_rpc_url points at the chain where the paymaster lives",
-			sw.PaymasterAddress.Hex(), rpcURL, err,
-		)
-	}
-	sw.PaymasterOwnerAddress = paymasterOwner
-	logger.Info("Paymaster owner address loaded",
-		"paymaster", sw.PaymasterAddress.Hex(), "owner", paymasterOwner.Hex())
-
-	verifyingSigner, err := fetchPaymasterVerifyingSigner(client, sw.PaymasterAddress)
-	if err != nil {
-		return fmt.Errorf(
-			"paymaster %s verifyingSigner() call failed on RPC %s: %w",
-			sw.PaymasterAddress.Hex(), rpcURL, err,
-		)
-	}
-	if verifyingSigner != sw.ControllerAddress {
-		return fmt.Errorf(
-			"paymaster %s verifyingSigner (%s) does not match controller address (%s) — "+
-				"the controller_private_key and paymaster_address belong to different "+
-				"network tiers (e.g. testnet controller paired with the mainnet paymaster); "+
-				"set the controller key whose address equals the paymaster's verifyingSigner",
-			sw.PaymasterAddress.Hex(), verifyingSigner.Hex(), sw.ControllerAddress.Hex(),
-		)
-	}
-	logger.Info("Paymaster verifyingSigner verified",
-		"paymaster", sw.PaymasterAddress.Hex(), "verifyingSigner", verifyingSigner.Hex())
-	return nil
-}
-
 // parseChainConfig converts a raw YAML chain config into a runtime ChainConfig.
 // Unlike the top-level SmartWalletConfig, we don't connect to the chain RPC here —
 // that's the worker's responsibility. We just parse and validate the config fields.
@@ -1220,43 +1103,16 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 	if err := chainCfg.SmartWallet.ValidateAccountProvider(); err != nil {
 		return nil, fmt.Errorf("chain %s (chain_id=%d): %w", raw.Name, raw.ChainID, err)
 	}
-
-	// Probe paymaster on this chain's RPC. Catches mismatched
-	// paymaster/RPC pairings at startup instead of waiting for the
-	// first UserOp to fail (Sentry EIGENLAYER-AVS-1N/1M). Skip when no
-	// bundler resolves for the configured provider: that signals a
-	// connectivity-only rollout (e.g. BNB Phase 0.5 in avs-infra/chains/),
-	// where wallet ops are intentionally disabled and the paymaster_address
-	// is a placeholder.
-	//
-	// Also skip when no paymaster is configured at all. Omitting
-	// paymaster_address is a supported configuration — the chain runs
-	// unsponsored and the smart wallet pays its own gas — so probing here
-	// would call owner() on the zero address and fail the boot for a chain
-	// that never wanted a paymaster. The top-level probe above has always
-	// had this guard; the per-chain path did not, which only became
-	// reachable once chains moved to bundler_provider: alchemy. Before that,
-	// an unsponsored chain typically had an empty bundler_url, so
-	// BundlerConfigured() was false and the probe was skipped by accident.
-	hasPaymaster := chainCfg.SmartWallet.PaymasterAddress != (common.Address{})
-	if hasPaymaster && chainCfg.SmartWallet.BundlerConfigured() && chainCfg.SmartWallet.EthRpcUrl != "" {
-		if chainCfg.SmartWallet.UsesModularAccountV2() {
-			logger.Info("Skipping v0.6 verifying-paymaster probe on modular_account_v2 chain",
-				"chain_id", chainCfg.ChainID,
-				"name", chainCfg.Name,
-				"paymaster_address_ignored", chainCfg.SmartWallet.PaymasterAddress.Hex(),
-			)
-		} else {
-			rpcClient, err := ethclient.Dial(chainCfg.SmartWallet.EthRpcUrl)
-			if err != nil {
-				return nil, fmt.Errorf("dial RPC %s for chain %s (chain_id=%d): %w",
-					chainCfg.SmartWallet.EthRpcUrl, raw.Name, raw.ChainID, err)
-			}
-			defer rpcClient.Close()
-			if err := probeVerifyingPaymaster(logger, rpcClient, chainCfg.SmartWallet, chainCfg.SmartWallet.EthRpcUrl); err != nil {
-				return nil, fmt.Errorf("chain %s (chain_id=%d): %w", raw.Name, raw.ChainID, err)
-			}
-		}
+	// smart_wallet.paymaster_address is inert per chain for the same reason it
+	// is inert globally: it named the v0.6 verifying paymaster, and sponsorship
+	// is now the chain's Gas Manager policy. Reported rather than probed — the
+	// boot no longer depends on an RPC call to a contract nothing invokes.
+	if chainCfg.SmartWallet.PaymasterAddress != (common.Address{}) {
+		logger.Warn("smart_wallet.paymaster_address is ignored on this chain: the v0.6 verifying paymaster was removed with the EntryPoint v0.7 cutover",
+			"chain_id", chainCfg.ChainID,
+			"name", chainCfg.Name,
+			"paymaster_address_ignored", chainCfg.SmartWallet.PaymasterAddress.Hex(),
+		)
 	}
 
 	logger.Info("Parsed chain config",
