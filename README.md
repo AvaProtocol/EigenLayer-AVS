@@ -314,14 +314,16 @@ func main() {
 
 ## Testing Bundler Connectivity
 
-The Ava Protocol uses ERC-4337 bundlers for smart wallet transactions. You can test bundler connectivity using the following commands:
+Production and local development use Alchemy's ERC-4337 bundler. With
+`bundler_provider: alchemy`, the endpoint is derived as
+`https://<network>.g.alchemy.com/v2/<ALCHEMY_API_KEY>` (e.g. `eth-sepolia`,
+`base-sepolia`, `eth-mainnet`). Set `ALCHEMY_API_KEY` in `.env.local`.
 
 ### Basic Connectivity Test
 
-Test if the bundler is responding:
-
 ```bash
-curl -X POST https://bundler-sepolia.avaprotocol.org/rpc?apikey= \
+export ALCHEMY_API_KEY=your_key
+curl -X POST "https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}'
 ```
@@ -333,39 +335,23 @@ curl -X POST https://bundler-sepolia.avaprotocol.org/rpc?apikey= \
 
 ### ERC-4337 EntryPoint Support
 
-Check which EntryPoint contracts the bundler supports:
-
 ```bash
-curl -X POST https://bundler-sepolia.avaprotocol.org/rpc?apikey= \
+curl -X POST "https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"eth_supportedEntryPoints","params":[],"id":1}'
 ```
 
-**Expected Response:**
+**Expected Response (includes EntryPoint v0.7):**
 ```json
-{"jsonrpc": "2.0", "id": 1, "result": ["0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108", "0x0000000071727De22E5E9d8BAf0edAc6f37da032", "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"]}
-```
-
-### Gas Estimation Test
-
-Test UserOp gas estimation (will fail for non-deployed accounts, which is expected):
-
-```bash
-curl -X POST https://bundler-sepolia.avaprotocol.org/rpc?apikey= \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"eth_estimateUserOperationGas","params":[{"sender":"0x69bb9251D3c2066DcF7aDAFe3E7CE36E76990617","nonce":"0x0","initCode":"0x","callData":"0x","callGasLimit":"0x0","verificationGasLimit":"0x0","preVerificationGas":"0x0","maxFeePerGas":"0x0","maxPriorityFeePerGas":"0x0","paymasterAndData":"0x","signature":"0x"},"0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"],"id":1}'
-```
-
-**Expected Response (for non-deployed account):**
-```json
-{"jsonrpc": "2.0", "id": 1, "error": {"code": -32500, "message": "AA20 account not deployed"}}
+{"jsonrpc": "2.0", "id": 1, "result": ["0x0000000071727De22E5E9d8BAf0edAc6f37da032"]}
 ```
 
 ### User Operation Debugging Scripts
 
-Query and debug user operations using the provided scripts:
-
 ```bash
+# Point the helper scripts at Alchemy (or any v0.7 bundler URL)
+export SEPOLIA_BUNDLER_RPC="https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+
 # Query specific user operation by hash
 ./scripts/query_userop.sh 0x1234567890abcdef... [status|receipt|both]
 

@@ -48,18 +48,18 @@ const (
 var testConfig *config.Config
 
 // LoadDotEnv loads environment variables from the repository root dotenv files
-// so tests can resolve ${VAR} references in config/test.yaml (e.g. the
-// ${SEPOLIA_BUNDLER_URL} / ${BASE_SEPOLIA_BUNDLER_URL} bundler URLs) and read
-// secrets like OWNER_EOA.
+// so tests can resolve ${VAR} references in config/test.yaml (e.g.
+// ${ALCHEMY_API_KEY}, ${ETH_RPC_URL}) and read secrets like OWNER_EOA.
 //
 // Files are loaded in order: .env.local first, then .env. The first file to set
 // a given key wins, so .env.local overrides .env (dotenv convention), and a real
 // process environment variable overrides both. Each file is optional.
 //
 // Note: both files are gitignored. In a fresh git worktree they are absent, so
-// ${VAR} references resolve to empty — that is the cause of the "BundlerURL is
-// empty in test.yaml config" panic in worktrees. Copy or symlink the dotenv
-// files (or export the vars) before running bundler-dependent tests there.
+// ${VAR} references resolve to empty — that is the cause of alchemy-path
+// failures ("alchemy_api_key is empty") when running live tests without env.
+// Copy or symlink the dotenv files (or export ALCHEMY_API_KEY) before running
+// bundler-dependent tests there.
 func LoadDotEnv() error {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -210,8 +210,10 @@ func GetTestWsRPC() string {
 	panic("EthWsRpcUrl is empty in test.yaml config and cannot derive from EthHttpRpcUrl")
 }
 
-// GetTestBundlerRPC returns the bundler RPC URL for tests from aggregator config
-// Panics if config is not loaded or BundlerURL is empty
+// GetTestBundlerRPC returns the resolved bundler endpoint for tests via
+// SmartWalletConfig.ActiveBundlerURL (alchemy URL derived from the key, or
+// bundler_url when provider is self_hosted). Panics if config is missing or
+// the provider cannot resolve an endpoint.
 func GetTestBundlerRPC() string {
 	loadTestConfigOnce()
 	if testConfig == nil {
@@ -220,10 +222,41 @@ func GetTestBundlerRPC() string {
 	if testConfig.SmartWallet == nil {
 		panic("SmartWallet config is nil in test.yaml")
 	}
-	if testConfig.SmartWallet.BundlerURL == "" {
-		panic("BundlerURL is empty in test.yaml config")
+	url, err := testConfig.SmartWallet.ActiveBundlerURL()
+	if err != nil {
+		panic(fmt.Sprintf("test bundler endpoint: %v", err))
 	}
-	return testConfig.SmartWallet.BundlerURL
+	return url
+}
+
+// GetTestAlchemyAPIKey returns the Alchemy API key from the loaded test config.
+// Empty when not set (unit tests that never send UserOps do not need it).
+func GetTestAlchemyAPIKey() string {
+	loadTestConfigOnce()
+	if testConfig == nil || testConfig.SmartWallet == nil {
+		return ""
+	}
+	return testConfig.SmartWallet.AlchemyAPIKey
+}
+
+// GetTestBundlerProvider returns the configured bundler provider from test.yaml
+// (defaults to alchemy when the field is empty — same as production).
+func GetTestBundlerProvider() string {
+	loadTestConfigOnce()
+	if testConfig == nil || testConfig.SmartWallet == nil {
+		return config.BundlerProviderAlchemy
+	}
+	return testConfig.SmartWallet.ProviderName()
+}
+
+// GetTestChainID returns the smart-wallet chain ID from the loaded test config.
+// Falls back to Sepolia (11155111) when the config was not fully dialed.
+func GetTestChainID() int64 {
+	loadTestConfigOnce()
+	if testConfig != nil && testConfig.SmartWallet != nil && testConfig.SmartWallet.ChainID != 0 {
+		return testConfig.SmartWallet.ChainID
+	}
+	return 11155111
 }
 
 // GetTestTenderlyAccount returns the Tenderly account for tests from aggregator config
@@ -723,50 +756,49 @@ func JsFastTask() *avsproto.CreateTaskReq {
 	return &tr1
 }
 
+// baseTestSmartWalletConfig builds a SmartWalletConfig from the loaded
+// test.yaml fixture. Provider + Alchemy key come from the file so CI and local
+// runs exercise the same bundler production uses (alchemy). BundlerURL is only
+// meaningful when provider is self_hosted; on the alchemy path it is unused.
+func baseTestSmartWalletConfig() *config.SmartWalletConfig {
+	loadTestConfigOnce()
+	var rawBundlerURL string
+	var disableSponsorship bool
+	if testConfig != nil && testConfig.SmartWallet != nil {
+		rawBundlerURL = testConfig.SmartWallet.BundlerURL
+		disableSponsorship = testConfig.SmartWallet.DisableGasSponsorship
+	}
+	return &config.SmartWalletConfig{
+		EthRpcUrl:             GetTestRPC(),
+		EthWsUrl:              GetTestWsRPC(),
+		BundlerURL:            rawBundlerURL,
+		BundlerProvider:       GetTestBundlerProvider(),
+		AlchemyAPIKey:         GetTestAlchemyAPIKey(),
+		ChainID:               GetTestChainID(),
+		FactoryAddress:        common.HexToAddress(GetTestFactoryAddress()),
+		EntrypointAddress:     common.HexToAddress(GetTestEntrypointAddress()),
+		PaymasterAddress:      common.HexToAddress(GetTestPaymasterAddress()),
+		WhitelistAddresses:    []common.Address{},
+		DisableGasSponsorship: disableSponsorship,
+	}
+}
+
 func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 	controllerKeyHex := GetTestControllerPrivateKey()
 	// In CI or local without key, return a minimal config that avoids panicking; tests that need
 	// real ERC-4337 will be gated and skipped.
 	if controllerKeyHex == "" {
-		return &config.SmartWalletConfig{
-			EthRpcUrl:          GetTestRPC(),
-			BundlerURL:         GetTestBundlerRPC(),
-			EthWsUrl:           GetTestWsRPC(),
-			FactoryAddress:     common.HexToAddress(GetTestFactoryAddress()),
-			EntrypointAddress:  common.HexToAddress(GetTestEntrypointAddress()),
-			PaymasterAddress:   common.HexToAddress(GetTestPaymasterAddress()),
-			WhitelistAddresses: []common.Address{},
-		}
+		return baseTestSmartWalletConfig()
 	}
 	controllerPrivateKey, err := crypto.HexToECDSA(controllerKeyHex)
 	if err != nil {
 		// Fallback to non-panicking minimal config
-		return &config.SmartWalletConfig{
-			EthRpcUrl:          GetTestRPC(),
-			BundlerURL:         GetTestBundlerRPC(),
-			EthWsUrl:           GetTestWsRPC(),
-			FactoryAddress:     common.HexToAddress(GetTestFactoryAddress()),
-			EntrypointAddress:  common.HexToAddress(GetTestEntrypointAddress()),
-			PaymasterAddress:   common.HexToAddress(GetTestPaymasterAddress()),
-			WhitelistAddresses: []common.Address{},
-		}
+		return baseTestSmartWalletConfig()
 	}
 
-	paymasterAddress := common.HexToAddress(GetTestPaymasterAddress())
-
-	smartWalletConfig := &config.SmartWalletConfig{
-		EthRpcUrl:            GetTestRPC(),
-		BundlerURL:           GetTestBundlerRPC(),
-		EthWsUrl:             GetTestWsRPC(),
-		FactoryAddress:       common.HexToAddress(GetTestFactoryAddress()),
-		EntrypointAddress:    common.HexToAddress(GetTestEntrypointAddress()),
-		ControllerPrivateKey: controllerPrivateKey,
-		PaymasterAddress:     paymasterAddress,
-		WhitelistAddresses:   []common.Address{},
-	}
-	// Tests target our self-hosted (Voltaire) bundler at GetTestBundlerRPC();
-	// the provider now defaults to alchemy, so opt in explicitly.
-	smartWalletConfig.BundlerProvider = config.BundlerProviderSelfHosted
+	smartWalletConfig := baseTestSmartWalletConfig()
+	smartWalletConfig.ControllerPrivateKey = controllerPrivateKey
+	paymasterAddress := smartWalletConfig.PaymasterAddress
 
 	// Fetch paymaster owner address by calling owner() on the paymaster contract.
 	// Reimbursement sends ETH to the owner EOA, not the paymaster contract itself.
@@ -790,42 +822,8 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 // Using base sepolia to run test because it's very cheap and fast
 // Note: Currently uses same config as Sepolia since Base Sepolia config is not in aggregator.yaml
 func GetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
-	controllerKeyHex := GetTestControllerPrivateKey()
-	if controllerKeyHex == "" {
-		return &config.SmartWalletConfig{
-			EthRpcUrl:          GetTestRPC(),
-			BundlerURL:         GetTestBundlerRPC(),
-			EthWsUrl:           GetTestWsRPC(),
-			FactoryAddress:     common.HexToAddress(GetTestFactoryAddress()),
-			EntrypointAddress:  common.HexToAddress(GetTestEntrypointAddress()),
-			PaymasterAddress:   common.HexToAddress(GetTestPaymasterAddress()),
-			WhitelistAddresses: []common.Address{},
-		}
-	}
-	controllerPrivateKey, err := crypto.HexToECDSA(controllerKeyHex)
-	if err != nil {
-		return &config.SmartWalletConfig{
-			EthRpcUrl:          GetTestRPC(),
-			BundlerURL:         GetTestBundlerRPC(),
-			EthWsUrl:           GetTestWsRPC(),
-			FactoryAddress:     common.HexToAddress(GetTestFactoryAddress()),
-			EntrypointAddress:  common.HexToAddress(GetTestEntrypointAddress()),
-			PaymasterAddress:   common.HexToAddress(GetTestPaymasterAddress()),
-			WhitelistAddresses: []common.Address{},
-		}
-	}
-
-	return &config.SmartWalletConfig{
-		EthRpcUrl:            GetTestRPC(),
-		BundlerURL:           GetTestBundlerRPC(),
-		BundlerProvider:      config.BundlerProviderSelfHosted,
-		EthWsUrl:             GetTestWsRPC(),
-		FactoryAddress:       common.HexToAddress(GetTestFactoryAddress()),
-		EntrypointAddress:    common.HexToAddress(GetTestEntrypointAddress()),
-		ControllerPrivateKey: controllerPrivateKey,
-		PaymasterAddress:     common.HexToAddress(GetTestPaymasterAddress()),
-		WhitelistAddresses:   []common.Address{},
-	}
+	// Same fixture as Sepolia for now; chain-specific overrides would land here.
+	return GetTestSmartWalletConfig()
 }
 
 func GetTestSecrets() map[string]string {

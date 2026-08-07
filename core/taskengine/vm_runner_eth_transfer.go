@@ -362,7 +362,8 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		preset.LogBundlerError(p.vm.logger, err,
 			"bundler: ETH transfer UserOp transaction failed",
 			"bundler_error", err,
-			"bundler_url", p.smartWalletConfig.BundlerURL,
+			"bundler_provider", p.smartWalletConfig.ProviderName(),
+			"bundler_url", p.smartWalletConfig.BundlerEndpointLabel(),
 			"destination", destination,
 			"amount", amountStr)
 

@@ -12,6 +12,17 @@ set -e
 
 echo "Generating test config files from test.example.yaml..."
 
+# Bundler: Alchemy only. Production and CI both derive the endpoint from
+# alchemy_api_key + the chain subdomain; bundler_url is never read on that path.
+# The self-hosted Voltaire fallback is gone (#725) — a missing key means the
+# job is misconfigured, not a valid mode. Name the secret so the failure is
+# actionable on a fork or a secret-less run. Fail before writing any files.
+if [ -z "${ALCHEMY_API_KEY:-}" ]; then
+  echo "ERROR: ALCHEMY_API_KEY is required. Set the repo secret ALCHEMY_API_KEY" >&2
+  echo "(or export it locally). The self-hosted bundler fallback has been retired." >&2
+  exit 1
+fi
+
 mkdir -p config
 
 # Strip any leading scheme (https://, http://, wss://, ws://) so we can
@@ -32,40 +43,23 @@ cp config/test.example.yaml config/test.yaml
 # Heads up: these substitutions are unanchored, so they rewrite the
 # field in EVERY YAML block — top-level AND each per-chain entry under
 # `chains:`. That means the chain_id 84532 (base-sepolia) block ends
-# up pointing at the same Sepolia RPC + bundler as the top-level
-# block. This is intentional for the test fixture: every Go test that
-# loads this file via testutil exercises Sepolia, none of them iterate
-# `chains:`, and a uniformly-Sepolia file is preferable to a
-# half-substituted one that leaves `${BASE_SEPOLIA_BUNDLER_URL}`-style
-# env placeholders unresolved (the Go config loader would parse them
-# as opaque strings, which can surface as confusing failures
-# downstream). When a future test does exercise base-sepolia, switch
-# to anchored sed or a yq-based rewrite then.
+# up pointing at the same Sepolia RPC as the top-level block. This is
+# intentional for the test fixture: every Go test that loads this file
+# via testutil exercises Sepolia, none of them iterate `chains:`, and a
+# uniformly-Sepolia file is preferable to a half-substituted one that
+# leaves `${BASE_SEPOLIA_RPC_URL}`-style env placeholders unresolved
+# (the Go config loader would parse them as opaque strings, which can
+# surface as confusing failures downstream). When a future test does
+# exercise base-sepolia, switch to anchored sed or a yq-based rewrite then.
 sed -i "s|eth_rpc_url:.*|eth_rpc_url: ${CHAIN_RPC}|g" config/test.yaml
 sed -i "s|eth_ws_url:.*|eth_ws_url: ${CHAIN_WS}|g" config/test.yaml
 sed -i "s|ecdsa_private_key:.*|ecdsa_private_key: ${CONTROLLER_PRIVATE_KEY}|g" config/test.yaml
-sed -i "s|bundler_url:.*|bundler_url: ${BUNDLER_RPC:-}|g" config/test.yaml
 
-# Bundler provider. CI now exercises the provider production actually uses.
-#
-# With ALCHEMY_API_KEY set, the endpoint is derived from the key and
-# bundler_url is never read — which is the production path, and the reason
-# this gap was worth closing: CI was validating a bundler no deployment uses.
-#
-# Without the key, fall back to the self-hosted bundler so a fork or a
-# secret-less run still works rather than failing closed at send time with
-# "bundler_provider=alchemy but alchemy_api_key is empty". That fallback is
-# meant to disappear once the self-hosted bundlers are retired; when it does,
-# a missing key should become a hard failure rather than a silent downgrade.
-if [ -n "${ALCHEMY_API_KEY:-}" ]; then
-  sed -i "s|bundler_provider:.*|bundler_provider: alchemy|g" config/test.yaml
-  sed -i "s|alchemy_api_key:.*|alchemy_api_key: ${ALCHEMY_API_KEY}|g" config/test.yaml
-  echo "bundler_provider: alchemy (endpoint derived from ALCHEMY_API_KEY)"
-else
-  sed -i "s|bundler_provider:.*|bundler_provider: self_hosted|g" config/test.yaml
-  sed -i "s|alchemy_api_key:.*|alchemy_api_key:|g" config/test.yaml
-  echo "WARNING: ALCHEMY_API_KEY not set — falling back to the self-hosted bundler (BUNDLER_RPC)."
-fi
+# Template has no bundler_url; still clear any leftover if someone re-adds it.
+sed -i "s|bundler_url:.*|bundler_url:|g" config/test.yaml
+sed -i "s|bundler_provider:.*|bundler_provider: alchemy|g" config/test.yaml
+sed -i "s|alchemy_api_key:.*|alchemy_api_key: ${ALCHEMY_API_KEY}|g" config/test.yaml
+echo "bundler_provider: alchemy (endpoint derived from ALCHEMY_API_KEY)"
 
 # CI must never draw on the production Gas Manager policy: the policy's
 # custom-rules webhook points at the production gateway, which would approve

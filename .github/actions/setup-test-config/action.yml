@@ -4,9 +4,6 @@ inputs:
   chain-endpoint:
     description: 'Chain RPC endpoint domain (e.g., sepolia.infura.io/v3/KEY)'
     required: true
-  bundler-rpc:
-    description: 'Bundler RPC URL'
-    required: true
   tenderly-account:
     description: 'Tenderly account name'
     required: true
@@ -34,11 +31,11 @@ inputs:
     required: false
   alchemy-api-key:
     description: |
-      Alchemy API key. When set, CI runs bundler_provider: alchemy and derives
-      the endpoint from the key — the same path production uses. Without it CI
-      falls back to the self-hosted bundler (bundler-rpc), which no deployment
-      uses any more.
-    required: false
+      Alchemy API key. Required. CI runs bundler_provider: alchemy and derives
+      the endpoint from the key — the same path production uses. A missing key
+      fails the job with a message naming the ALCHEMY_API_KEY secret; there is
+      no self-hosted bundler fallback (#725).
+    required: true
 runs:
   using: 'composite'
   steps:
@@ -46,7 +43,6 @@ runs:
       env:
         # Unified environment variables
         CHAIN_ENDPOINT: "${{ inputs.chain-endpoint }}"
-        BUNDLER_RPC: "${{ inputs.bundler-rpc }}"
 
         # Tenderly HTTP API credentials
         TENDERLY_ACCOUNT: "${{ inputs.tenderly-account }}"

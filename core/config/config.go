@@ -481,6 +481,35 @@ func (c *SmartWalletConfig) BundlerConfigured() bool {
 	return err == nil
 }
 
+// BundlerEndpointLabel returns a log-safe description of the active bundler
+// endpoint. Prefer this over ActiveBundlerURL() / BundlerURL in structured
+// logs: the alchemy path embeds alchemy_api_key in the URL, and self_hosted
+// URLs may carry ?apikey=. Secrets are redacted. Empty when c is nil.
+func (c *SmartWalletConfig) BundlerEndpointLabel() string {
+	if c == nil {
+		return ""
+	}
+	url, err := c.ActiveBundlerURL()
+	if err != nil {
+		return fmt.Sprintf("%s:unresolved", c.ProviderName())
+	}
+	return redactBundlerURLForLog(url)
+}
+
+// redactBundlerURLForLog strips secrets from a bundler endpoint so it is safe
+// to emit in logs. Alchemy keys live in the path after /v2/; legacy apikey=
+// query params (self-hosted Voltaire) are stripped.
+func redactBundlerURLForLog(u string) string {
+	const alchemyPath = ".g.alchemy.com/v2/"
+	if i := strings.Index(u, alchemyPath); i >= 0 {
+		return u[:i+len(alchemyPath)] + "***"
+	}
+	if i := strings.Index(u, "?"); i >= 0 {
+		return u[:i] + "?***"
+	}
+	return u
+}
+
 type BackupConfig struct {
 	Enabled         bool   // Whether periodic backups are enabled
 	IntervalMinutes int    // Interval between backups in minutes

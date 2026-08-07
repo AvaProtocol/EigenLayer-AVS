@@ -405,7 +405,8 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			effectiveFactoryHex = effectiveFactory.Hex()
 		}
 		r.vm.logger.Info("🔍 CONTRACT WRITE DEBUG - Smart Wallet Config Details",
-			"bundler_url", r.smartWalletConfig.BundlerURL,
+			"bundler_provider", r.smartWalletConfig.ProviderName(),
+			"bundler_url", r.smartWalletConfig.BundlerEndpointLabel(),
 			"account_provider", r.smartWalletConfig.AccountProviderName(),
 			"effective_factory", effectiveFactoryHex,
 			"config_factory_address", r.smartWalletConfig.FactoryAddress.Hex(),
@@ -858,7 +859,8 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 		preset.LogBundlerError(r.vm.logger, err,
 			"bundler: UserOp transaction failed, workflow execution FAILED",
 			"bundler_error", err,
-			"bundler_url", r.smartWalletConfig.BundlerURL,
+			"bundler_provider", r.smartWalletConfig.ProviderName(),
+			"bundler_url", r.smartWalletConfig.BundlerEndpointLabel(),
 			"method", logLabel,
 			"contract", logTarget,
 			"sender_smart_wallet", func() string {
@@ -2124,8 +2126,8 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 					if (r.smartWalletConfig.EntryPointAddress() != common.Address{}) {
 						log.WriteString(fmt.Sprintf("  EntryPoint: %s\n", r.smartWalletConfig.EntryPointAddress().Hex()))
 					}
-					if r.smartWalletConfig.BundlerURL != "" {
-						log.WriteString(fmt.Sprintf("  Bundler: %s\n", r.smartWalletConfig.BundlerURL))
+					if label := r.smartWalletConfig.BundlerEndpointLabel(); label != "" {
+						log.WriteString(fmt.Sprintf("  Bundler (%s): %s\n", r.smartWalletConfig.ProviderName(), label))
 					}
 					if (r.smartWalletConfig.PaymasterAddress != common.Address{}) {
 						log.WriteString(fmt.Sprintf("  Paymaster: %s\n", r.smartWalletConfig.PaymasterAddress.Hex()))

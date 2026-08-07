@@ -91,6 +91,6 @@ For tasks where we cover the fee:
 
 - The Factory Proxy is responsible for deploying new smart wallets
 - Smart wallets are dynamically generated with new addresses
-- The bundler is an EOA (Externally Owned Account) that can send transactions. Production bundler address: `0x6A99324303928aF456aA21f3C88dc58E812D9B40` (Ethereum & Base), Testnet bundler address: `0xE164dd09e720640F6695cB6cED0308065ceFECd9` (Sepolia & Base Sepolia)
-- We use [Voltaire](https://github.com/candidelabs/voltaire) as our bundler implementation
+- UserOperations are submitted through Alchemy's ERC-4337 bundler (`bundler_provider: alchemy`). The endpoint is derived from `alchemy_api_key` and the chain's Alchemy network subdomain.
+- `bundler_provider: self_hosted` remains available for a locally-run bundler (e.g. [Voltaire](https://github.com/candidelabs/voltaire)); the shared `bundler-*.avaprotocol.org` hosts are retired.
 - The execution flow follows [ERC4337](https://eips.ethereum.org/EIPS/eip-4337) specification
