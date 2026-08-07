@@ -82,9 +82,13 @@ func TestMarkAppliedByIDIsIdempotentAndRaceSafe(t *testing.T) {
 
 	// Revoked-in-flight: the record moved on; a late mark must not resurrect
 	// it as active.
-	_, cleanup, err := engine.RevokeSessionPolicyByID(user, testPolicyChain, wallet, stored.ID)
+	_, cleanupRequired, cleanup, err := engine.RevokeSessionPolicyByID(user, testPolicyChain, wallet, stored.ID)
 	require.NoError(t, err)
-	require.True(t, cleanup, "an applied grant's revoke leaves on-chain state")
+	require.True(t, cleanupRequired, "an applied grant's revoke leaves on-chain state")
+	require.NotNil(t, cleanup, "applied revoke must hand back the uninstall call")
+	require.Equal(t, stored.EntityID, cleanup.EntityID)
+	require.Equal(t, wallet, cleanup.Target)
+	require.NotEmpty(t, cleanup.CallData)
 	require.NoError(t, MarkSessionGrantAppliedByID(engine.db, testPolicyChain, owner, wallet, stored.ID, "0xlate"))
 	after, err := ListSessionPolicies(engine.db, testPolicyChain, owner)
 	require.NoError(t, err)

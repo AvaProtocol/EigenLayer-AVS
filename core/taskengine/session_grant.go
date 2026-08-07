@@ -373,19 +373,67 @@ func MarkSessionGrantAppliedByID(db storage.Storage, chainID int64, owner, runne
 	return MarkSessionGrantApplied(db, policy, userOpHash)
 }
 
+// OnChainRevokeCleanup is the owner-executable call that clears an applied
+// grant's validation entity and its hooks from the runner.
+//
+// Production grants are policied: the controller cannot self-uninstall (the
+// allowlist's execution hook blocks uninstallValidation — spike R4). The
+// proven path is the owner calling this calldata on Target as a plain
+// transaction (spike R3) or as a UserOp validated by the owner fallback
+// (deferred-uninstall U-B). The gateway does not hold the owner key, so it
+// builds the payload and the product surfaces it for the wallet to sign.
+type OnChainRevokeCleanup struct {
+	EntityID uint32
+	Target   common.Address // the runner / smart wallet
+	CallData []byte         // uninstallValidation, derived from Grant.InstallCall
+	ChainID  int64
+}
+
+// BuildOnChainRevokeCleanup derives the uninstallValidation call that reverses
+// an applied grant, using the stored InstallCall — never live permission
+// structs. See aa.SessionSignerUninstallFromInstall for why that matters.
+//
+// Works for already-revoked records too: the retained Grant is what makes a
+// later cleanup attempt possible after the storage-only revoke.
+func BuildOnChainRevokeCleanup(policy *model.SessionPolicy) (*OnChainRevokeCleanup, error) {
+	if policy == nil {
+		return nil, fmt.Errorf("no policy to clean up")
+	}
+	if policy.Runner == nil {
+		return nil, fmt.Errorf("policy %s has no runner", policy.ID)
+	}
+	if policy.Grant == nil || len(policy.Grant.InstallCall) == 0 {
+		return nil, fmt.Errorf("policy %s has no InstallCall to derive uninstall from", policy.ID)
+	}
+	if policy.EntityID == 0 {
+		return nil, fmt.Errorf("policy %s has entity 0; the owner fallback cannot be uninstalled this way", policy.ID)
+	}
+	callData, err := aa.SessionSignerUninstallFromInstall(policy.EntityID, policy.Grant.InstallCall)
+	if err != nil {
+		return nil, fmt.Errorf("building uninstall for policy %s entity %d: %w", policy.ID, policy.EntityID, err)
+	}
+	return &OnChainRevokeCleanup{
+		EntityID: policy.EntityID,
+		Target:   *policy.Runner,
+		CallData: callData,
+		ChainID:  policy.ChainID,
+	}, nil
+}
+
 // RevokeSessionGrant removes a grant.
 //
 // Before the install reaches the chain this is complete on its own: nothing
 // was installed, so deleting the record removes the authority. After it has
 // applied, this only stops the gateway from using the grant — the module is
 // still installed on the account, and clearing it needs uninstallValidation.
-// The record is retained in that case so the cleanup payload survives.
+// The record is retained in that case so the cleanup payload survives;
+// BuildOnChainRevokeCleanup rebuilds it from Grant.InstallCall.
 func RevokeSessionGrant(db storage.Storage, policy *model.SessionPolicy) (onChainCleanupRequired bool, err error) {
 	if policy == nil {
 		return false, fmt.Errorf("no policy to revoke")
 	}
 	key := SessionPolicyKey(policy.ChainID, *policy.Owner, policy.ID)
-	if !policy.Grant.Applied() {
+	if policy.Grant == nil || !policy.Grant.Applied() {
 		return false, db.Delete(key)
 	}
 	policy.Status = model.SessionPolicyRevoked

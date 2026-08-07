@@ -230,10 +230,11 @@ func TestSessionPolicyRevokePendingDeletesOutright(t *testing.T) {
 		signDigest(t, ownerKey, prepared.Digest))
 	require.NoError(t, err)
 
-	deleted, cleanupRequired, err := engine.RevokeSessionPolicyByID(user, testPolicyChain, wallet, stored.ID)
+	deleted, cleanupRequired, cleanup, err := engine.RevokeSessionPolicyByID(user, testPolicyChain, wallet, stored.ID)
 	require.NoError(t, err)
 	require.True(t, deleted, "a pending grant was never on-chain; revoke deletes it")
 	require.False(t, cleanupRequired)
+	require.Nil(t, cleanup)
 
 	_, err = engine.GetSessionPolicyByID(user, testPolicyChain, wallet, stored.ID)
 	require.True(t, errors.Is(err, ErrSessionPolicyNotFound))

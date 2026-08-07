@@ -200,7 +200,7 @@ func (s *Server) RevokeWalletPolicy(ctx echo.Context, address generated.Ethereum
 		return badRequest("POLICIES_BAD_CHAIN_ID", "Chain unresolvable",
 			"Provide ?chainId= or authenticate with a chain-scoped token.")
 	}
-	deleted, cleanupRequired, err := s.engine.RevokeSessionPolicyByID(user, chainID, wallet, string(policyID))
+	deleted, cleanupRequired, cleanup, err := s.engine.RevokeSessionPolicyByID(user, chainID, wallet, string(policyID))
 	if err != nil {
 		return mapPolicyError(err)
 	}
@@ -208,10 +208,22 @@ func (s *Server) RevokeWalletPolicy(ctx echo.Context, address generated.Ethereum
 	if deleted {
 		status = generated.RevokePolicyResponseStatus("deleted")
 	}
-	return ctx.JSON(http.StatusOK, generated.RevokePolicyResponse{
+	resp := generated.RevokePolicyResponse{
 		Status:                 status,
 		OnChainCleanupRequired: cleanupRequired,
-	})
+	}
+	if cleanup != nil {
+		// Owner-executable uninstallValidation. Studio (or any wallet client)
+		// sends this as a plain call to the runner — the controller cannot
+		// self-uninstall a policied grant (spike R4 / #717).
+		resp.OnChainCleanup = &generated.OnChainRevokeCleanup{
+			EntityId: int32(cleanup.EntityID),
+			Target:   generated.EthereumAddress(cleanup.Target.Hex()),
+			CallData: generated.Hex("0x" + common.Bytes2Hex(cleanup.CallData)),
+			ChainId:  cleanup.ChainID,
+		}
+	}
+	return ctx.JSON(http.StatusOK, resp)
 }
 
 // ── mapping ───────────────────────────────────────────────────────────────

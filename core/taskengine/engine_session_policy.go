@@ -304,14 +304,15 @@ func (n *Engine) GetSessionPolicyByID(user *model.User, chainID int64, wallet co
 // RevokeSessionPolicyByID revokes one policy. deleted reports the pending
 // case (record removed outright); cleanupRequired reports that the grant's
 // validation is still installed on the account and needs the owner's
-// uninstallValidation.
+// uninstallValidation. When cleanup is required, cleanup carries the
+// owner-executable call derived from the retained InstallCall (#717 AC3).
 //
 // Takes the runner's write lock for the same reason submit does: it changes
 // which grant the send path will resolve, and must not interleave with a
 // submit deciding the same question.
-func (n *Engine) RevokeSessionPolicyByID(user *model.User, chainID int64, wallet common.Address, policyID string) (deleted, cleanupRequired bool, err error) {
+func (n *Engine) RevokeSessionPolicyByID(user *model.User, chainID int64, wallet common.Address, policyID string) (deleted, cleanupRequired bool, cleanup *OnChainRevokeCleanup, err error) {
 	if err := n.requireOwnedWallet(user, wallet); err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
 	lock := sessionAuthorityLock(chainID, user.Address, wallet)
 	lock.Lock()
@@ -319,13 +320,25 @@ func (n *Engine) RevokeSessionPolicyByID(user *model.User, chainID int64, wallet
 
 	policy, err := n.GetSessionPolicyByID(user, chainID, wallet, policyID)
 	if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
 	cleanupRequired, err = RevokeSessionGrant(n.db, policy)
 	if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
-	return !cleanupRequired, cleanupRequired, nil
+	if !cleanupRequired {
+		return true, false, nil, nil
+	}
+	// Storage revoke already landed. Building the call is what closes the
+	// "reports into the void" gap: a failure here means the record is
+	// revoked but the product has no payload to hand the wallet — still
+	// better than refusing the soft revoke, so surface the build error
+	// with cleanupRequired so the client knows both halves.
+	cleanup, buildErr := BuildOnChainRevokeCleanup(policy)
+	if buildErr != nil {
+		return false, true, nil, fmt.Errorf("grant revoked off-chain but on-chain cleanup payload could not be built: %w", buildErr)
+	}
+	return false, true, cleanup, nil
 }
 
 // attachDeclaredPermissions records the grant's declared shape on the policy
