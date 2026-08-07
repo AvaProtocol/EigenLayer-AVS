@@ -41,6 +41,14 @@ Studio-facing failures still used **Error** → Sentry:
 `IsClientUserOpFailure` classifies those as **Warn**. True infra (bundler dial,
 unexpected RPC) stays **Error**.
 
+Copilot review (PR #728) tightened the classifier further:
+
+- **Do not** demote `SESSION_POLICY_LOOKUP_FAILED` (storage/corruption).
+- **Do not** demote bare `gas manager declined to sponsor` (wraps transport
+  failures too) — only known Alchemy denial text (webhook / AA23 /
+  validation|execution reverted).
+- **Do not** demote bare `AA23` (packing / account-type regressions must page).
+
 ## Follow-ups (not this PR)
 
 1. **staging → main** release so preflight + worker policy + grant supersede hit prod.

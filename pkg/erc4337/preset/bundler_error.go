@@ -40,35 +40,41 @@ func IsUserOpRevert(err error) bool {
 // fmt.Errorf-wrapped at several layers (send_v07, RequestSponsorshipV07,
 // LogBundlerError callers). Prefer adding a new marker constant here when
 // introducing a new client-facing failure class.
+//
+// Deliberately NOT matched (must stay Error → Sentry):
+//   - SESSION_POLICY_LOOKUP_FAILED — wraps Badger GetByPrefix / corrupt records
+//     as well as multi-grant; multi-grant has its own marker below
+//   - bare "gas manager declined to sponsor" without a known denial reason —
+//     RequestSponsorshipV07 also wraps dial/timeout/malformed RPC that way
+//   - bare "AA23" without a sponsorship-denial context — packing bugs and wrong
+//     account type also AA23 and are operator-actionable
 func IsClientUserOpFailure(err error) bool {
 	if err == nil {
 		return false
 	}
 	s := err.Error()
-	// Order: specific markers first.
 	switch {
 	case strings.Contains(s, "SESSION_POLICY_TARGET_NOT_ALLOWED"):
-		return true
-	case strings.Contains(s, "SESSION_POLICY_LOOKUP_FAILED"):
-		// Multi-grant / storage races the client can clear by revoking.
+		// Typed preflight: batch target/selector outside the active grant.
 		return true
 	case strings.Contains(s, "no session authorization for smart wallet"):
 		return true
 	case strings.Contains(s, "more than one usable session policy"):
+		// Client-clearable by revoking extras (or re-grant after supersede).
 		return true
 	case strings.Contains(s, "cannot pay gas"):
 		// Self-funded prefund: zero native + no policy (or deposit).
 		return true
 	case strings.Contains(s, "Request was denied by webhook"):
-		// FeeLedger / policy / secret gate — client or config, not bundler down.
+		// FeeLedger / policy / secret gate. Often config, still not "bundler down".
 		return true
-	case strings.Contains(s, "gas manager declined to sponsor"):
-		// Alchemy declined after sim or webhook. Almost always AA23 (hooks),
-		// execution revert (swap economics), or webhook deny — not "Gas Manager
-		// is offline". Infra paymaster/RPC failures use different wording.
-		return true
-	case strings.Contains(s, "AA23"):
-		// Session validation / hooks — client grant scope until proven otherwise.
+	// Gas Manager: only known *denial* payloads from Alchemy, not transport
+	// failures that share the "gas manager declined to sponsor:" wrap in send_v07.
+	case strings.Contains(s, "gas manager declined to sponsor") &&
+		(strings.Contains(s, "Request was denied by webhook") ||
+			strings.Contains(s, "AA23") ||
+			strings.Contains(s, "validation reverted") ||
+			strings.Contains(s, "execution reverted")):
 		return true
 	default:
 		return false

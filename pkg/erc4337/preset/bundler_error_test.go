@@ -32,8 +32,12 @@ func TestIsClientUserOpFailure(t *testing.T) {
 		{"prefund", errors.New("smart wallet 0x cannot pay gas: native balance and EntryPoint deposit are both zero"), true},
 		{"webhook deny", fmt.Errorf("gas manager declined to sponsor: alchemy_requestGasAndPaymasterAndData (policy x): Request was denied by webhook"), true},
 		{"AA23 via gas manager", fmt.Errorf("gas manager declined to sponsor: alchemy_requestGasAndPaymasterAndData (policy bf905871): validation reverted: [reason]: AA23 reverted"), true},
-		{"bare AA23", errors.New("validation reverted: [reason]: AA23 reverted"), true},
 		{"execution reverted via GM", fmt.Errorf("gas manager declined to sponsor: alchemy_requestGasAndPaymasterAndData (policy x): execution reverted"), true},
+		// Must stay Error → Sentry (infra / ambiguous)
+		{"bare AA23", errors.New("validation reverted: [reason]: AA23 reverted"), false},
+		{"SESSION_POLICY_LOOKUP_FAILED storage", errors.New("SESSION_POLICY_LOOKUP_FAILED: listing session policies: connection refused"), false},
+		{"gas manager transport", fmt.Errorf("gas manager declined to sponsor: alchemy_requestGasAndPaymasterAndData (policy x): %w", errors.New("connection refused")), false},
+		{"gas manager timeout", fmt.Errorf("gas manager declined to sponsor: alchemy_requestGasAndPaymasterAndData (policy x): context deadline exceeded"), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
