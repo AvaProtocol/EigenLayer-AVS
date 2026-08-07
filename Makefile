@@ -276,8 +276,8 @@ operator-default: build
 ## env can't drift between them. Build-free so callers that already ran
 ## `make build` don't fire concurrent go builds racing on ./out/ap. Output goes
 ## to the caller's terminal/pane; callers that want files redirect (dev-stack →
-## logs/, start.sh → tee). Each sources .env.local so the
-## ${SEPOLIA_BUNDLER_URL} / ${BASE_SEPOLIA_BUNDLER_URL} refs in the YAML resolve.
+## logs/, start.sh → tee). Each sources .env.local so ${ALCHEMY_API_KEY} and
+## the per-chain RPC refs in the YAML resolve.
 .PHONY: run-gateway run-worker-sepolia run-worker-ethereum run-worker-base run-worker-base-sepolia run-operator-sepolia run-operator-ethereum
 run-gateway:
 	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap aggregator --config=config/gateway.yaml
@@ -353,8 +353,8 @@ dev-stack: build
 	@echo "   Stop with:  Ctrl-C  (kills the whole stack)"
 	@echo ""
 	@set -a; [ -f .env.local ] && . ./.env.local; set +a; \
-		if [ -z "$$SEPOLIA_BUNDLER_URL" ] || [ -z "$$BASE_SEPOLIA_BUNDLER_URL" ]; then \
-			echo "❌ Missing SEPOLIA_BUNDLER_URL / BASE_SEPOLIA_BUNDLER_URL — add them to .env.local (pull from Railway)"; \
+		if [ -z "$$ALCHEMY_API_KEY" ]; then \
+			echo "❌ Missing ALCHEMY_API_KEY — add it to .env.local (bundler endpoint is derived from the key)"; \
 			exit 1; \
 		fi; \
 		set -m; \

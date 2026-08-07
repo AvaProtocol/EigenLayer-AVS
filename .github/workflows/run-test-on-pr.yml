@@ -95,15 +95,13 @@ jobs:
         uses: ./.github/actions/setup-test-config
         with:
           chain-endpoint: ${{ secrets.CHAIN_ENDPOINT }}
-          bundler-rpc: ${{ secrets.BUNDLER_RPC }}
           tenderly-account: ${{ vars.TENDERLY_ACCOUNT }}
           tenderly-project: ${{ vars.TENDERLY_PROJECT }}
           controller-private-key: ${{ secrets.CONTROLLER_PRIVATE_KEY }}
           tenderly-access-key: ${{ secrets.TENDERLY_ACCESS_KEY }}
           owner-eoa: ${{ vars.OWNER_EOA }}
           moralis-api-key: ${{ secrets.MORALIS_API_KEY }}
-          # Runs CI on the same bundler production uses. Without it CI falls
-          # back to the self-hosted bundler, which nothing deploys against.
+          # Required: CI uses Alchemy (production path). Missing key fails closed.
           alchemy-api-key: ${{ secrets.ALCHEMY_API_KEY }}
 
       - name: Set up Go
@@ -160,7 +158,6 @@ jobs:
         uses: ./.github/actions/setup-test-config
         with:
           chain-endpoint: ${{ secrets.CHAIN_ENDPOINT }}
-          bundler-rpc: ${{ secrets.BUNDLER_RPC }}
           tenderly-account: ${{ vars.TENDERLY_ACCOUNT }}
           tenderly-project: ${{ vars.TENDERLY_PROJECT }}
           controller-private-key: ${{ secrets.CONTROLLER_PRIVATE_KEY }}
@@ -173,8 +170,7 @@ jobs:
           # action exports it to the job environment for the test step.
           test-private-key: ${{ secrets.TEST_PRIVATE_KEY }}
           moralis-api-key: ${{ secrets.MORALIS_API_KEY }}
-          # Runs CI on the same bundler production uses. Without it CI falls
-          # back to the self-hosted bundler, which nothing deploys against.
+          # Required: CI uses Alchemy (production path). Missing key fails closed.
           alchemy-api-key: ${{ secrets.ALCHEMY_API_KEY }}
 
       - name: Run Go test

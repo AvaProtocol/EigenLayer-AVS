@@ -19,11 +19,9 @@
 #   2 (top-right)    Worker Sepolia       — :50051
 #   3 (bottom-right) Worker Base Sepolia  — :50052
 #
-# Bundlers: SEPOLIA_BUNDLER_URL + BASE_SEPOLIA_BUNDLER_URL are sourced from
-# ./.env.local and exported into the tmux session so the YAMLs' ${VAR}
-# placeholders resolve. Pull them from Railway:
-#   railway link --service gateway
-#   railway variables --kv | grep -E '^(SEPOLIA|BASE_SEPOLIA)_BUNDLER_URL=' > .env.local
+# Bundler: ALCHEMY_API_KEY is sourced from ./.env.local and exported into the
+# tmux session so the YAMLs' ${ALCHEMY_API_KEY} placeholders resolve. Every
+# chain uses bundler_provider: alchemy (endpoint derived from the key).
 
 set -e
 
@@ -54,7 +52,7 @@ command -v tmux >/dev/null 2>&1 || { echo "❌ tmux not found. Run: brew install
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Source bundler URLs from .env.local (so YAML ${VAR} expansion resolves).
+# Source env from .env.local (so YAML ${VAR} expansion resolves).
 if [[ -f "$PROJECT_DIR/.env.local" ]]; then
     set -a
     # shellcheck disable=SC1090
@@ -62,14 +60,12 @@ if [[ -f "$PROJECT_DIR/.env.local" ]]; then
     set +a
 fi
 
-if [[ -z "$SEPOLIA_BUNDLER_URL" || -z "$BASE_SEPOLIA_BUNDLER_URL" ]]; then
-    echo "❌ Missing bundler URLs. Set in $PROJECT_DIR/.env.local:"
-    echo "     SEPOLIA_BUNDLER_URL=https://..."
-    echo "     BASE_SEPOLIA_BUNDLER_URL=https://..."
+if [[ -z "$ALCHEMY_API_KEY" ]]; then
+    echo "❌ Missing ALCHEMY_API_KEY. Set in $PROJECT_DIR/.env.local:"
+    echo "     ALCHEMY_API_KEY=..."
     echo ""
-    echo "   Pull from Railway:"
-    echo "     railway link --service gateway"
-    echo "     railway variables --kv | grep -E '^(SEPOLIA|BASE_SEPOLIA)_BUNDLER_URL=' > .env.local"
+    echo "   The bundler endpoint is derived from this key (bundler_provider: alchemy)."
+    echo "   The shared bundler-*.avaprotocol.org hosts are retired."
     exit 1
 fi
 
@@ -108,10 +104,9 @@ else
     WIN="$SESSION_NAME:$TARGET_WIN"
 fi
 
-# Bundler vars need to live on the session so panes inherit them (the binary
-# reads ${VAR} from its own env, not from the YAML).
-tmux set-environment -t "$SESSION_NAME" SEPOLIA_BUNDLER_URL "$SEPOLIA_BUNDLER_URL"
-tmux set-environment -t "$SESSION_NAME" BASE_SEPOLIA_BUNDLER_URL "$BASE_SEPOLIA_BUNDLER_URL"
+# Alchemy key needs to live on the session so panes inherit it (the binary
+# expands ${ALCHEMY_API_KEY} from its own env when loading YAML).
+tmux set-environment -t "$SESSION_NAME" ALCHEMY_API_KEY "$ALCHEMY_API_KEY"
 
 # 4-pane layout in the AVS window:
 # +-----------------+-----------------+
@@ -141,8 +136,7 @@ tmux select-pane -t "$WIN.0"
 echo "Gateway:             http://localhost:8080  (REST), localhost:2206 (gRPC)"
 echo "Worker Sepolia:      localhost:50051"
 echo "Worker Base-Sepolia: localhost:50052"
-echo "Bundler (Sepolia):   ${SEPOLIA_BUNDLER_URL%%\?*}"
-echo "Bundler (Base-Sep):  ${BASE_SEPOLIA_BUNDLER_URL%%\?*}"
+echo "Bundler:             Alchemy (eth-sepolia / base-sepolia via ALCHEMY_API_KEY)"
 echo ""
 
 if [[ "$ATTACH" == "true" ]]; then

@@ -93,8 +93,8 @@ smart_wallet:
   # the chain's Alchemy subdomain and NEVER falls back to bundler_url, so no
   # *_BUNDLER_URL is needed on this path. A wallet-op chain configured for
   # alchemy with no key — or an alchemy-unmapped chain — hard-errors at send
-  # time. 'self_hosted' remains for a locally-run Voltaire; the shared Voltaire
-  # bundlers this example used to assume were retired 2026-07.
+  # time. 'self_hosted' remains only for a locally-run Voltaire; the shared
+  # bundler-*.avaprotocol.org hosts were retired (#725).
   bundler_provider:       alchemy
   # account_provider selects the smart-account implementation. modular_account_v2
   # is the only supported value and the default when the line is absent; this

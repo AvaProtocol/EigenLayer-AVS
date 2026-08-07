@@ -12,7 +12,7 @@ BUNDLER_RPC="${SEPOLIA_BUNDLER_RPC:-}"
 if [ -z "$BUNDLER_RPC" ]; then
     echo "Error: SEPOLIA_BUNDLER_RPC environment variable is not set."
     echo "Please set it to your bundler RPC URL with API key."
-    echo "Example: export SEPOLIA_BUNDLER_RPC='https://bundler-sepolia.avaprotocol.org/rpc?apikey=YOUR_API_KEY'"
+    echo "Example: export SEPOLIA_BUNDLER_RPC=\"https://eth-sepolia.g.alchemy.com/v2/\${ALCHEMY_API_KEY}\""
     exit 1
 fi
 
