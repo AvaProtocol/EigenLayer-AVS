@@ -6,6 +6,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// sponsors resolves sponsorship the way the worker does at startup: through the
+// SmartWalletConfig the send path is handed, not a parallel predicate. Keeping
+// the test on the same path as production is the point — a second way to answer
+// "will this sponsor?" is how the gateway and worker drifted apart to begin with.
+func sponsors(t *testing.T, cfg *WorkerConfig) bool {
+	t.Helper()
+	smartWalletConfig, err := cfg.ToSmartWalletConfig()
+	require.NoError(t, err)
+	return smartWalletConfig.SponsorshipPolicyID() != ""
+}
+
 // A worker that cannot request sponsorship sends operations the smart wallet
 // has to pay for itself — and a wallet holding only tokens cannot, so the
 // user's withdrawal fails. That is #722, and it happened because the policy
@@ -22,7 +33,7 @@ func TestWorkerCarriesTheGasManagerPolicyIntoSmartWalletConfig(t *testing.T) {
 		AlchemyPaymasterPolicyID: "policy-uuid",
 		GasManagerWebhookSecret:  "shhh",
 	}
-	require.True(t, cfg.SponsorshipConfigured())
+	require.True(t, sponsors(t, cfg))
 
 	smartWalletConfig, err := cfg.ToSmartWalletConfig()
 	require.NoError(t, err)
@@ -39,7 +50,7 @@ func TestWorkerWithoutAPolicyReportsItCannotSponsor(t *testing.T) {
 	t.Setenv("ALCHEMY_GAS_POLICY_ID", "")
 
 	cfg := &WorkerConfig{ChainID: 11155111}
-	require.False(t, cfg.SponsorshipConfigured())
+	require.False(t, sponsors(t, cfg))
 
 	smartWalletConfig, err := cfg.ToSmartWalletConfig()
 	require.NoError(t, err)
@@ -62,7 +73,7 @@ func TestWorkerPolicyResolutionMatchesTheGateway(t *testing.T) {
 		t.Setenv("ALCHEMY_PAYMASTER_POLICY_ID", "env-uuid")
 		t.Setenv("GAS_MANAGER_WEBHOOK_SECRET", "env-secret")
 		cfg := &WorkerConfig{ChainID: 1}
-		require.True(t, cfg.SponsorshipConfigured())
+		require.True(t, sponsors(t, cfg))
 		smartWalletConfig, err := cfg.ToSmartWalletConfig()
 		require.NoError(t, err)
 		require.Equal(t, "env-uuid", smartWalletConfig.AlchemyPaymasterPolicyID)
@@ -110,7 +121,7 @@ func TestDisableGasSponsorshipDropsAConfiguredPolicy(t *testing.T) {
 		GasManagerWebhookSecret:  "shhh",
 		DisableGasSponsorship:    true,
 	}
-	require.False(t, cfg.SponsorshipConfigured())
+	require.False(t, sponsors(t, cfg))
 
 	smartWalletConfig, err := cfg.ToSmartWalletConfig()
 	require.NoError(t, err)
@@ -129,10 +140,10 @@ func TestOptOutIgnoresAPolicyInheritedFromTheEnvironment(t *testing.T) {
 		AlchemyAPIKey:         "key",
 		DisableGasSponsorship: true,
 	}
-	require.False(t, cfg.SponsorshipConfigured())
+	require.False(t, sponsors(t, cfg))
 
 	cfg.DisableGasSponsorship = false
-	require.True(t, cfg.SponsorshipConfigured(),
+	require.True(t, sponsors(t, cfg),
 		"the opt-out must be what disables it, not sponsorship being broken outright")
 }
 
@@ -149,6 +160,6 @@ func TestSelfHostedBundlerCannotSponsor(t *testing.T) {
 		BundlerURL:               "http://bundler.internal",
 		AlchemyPaymasterPolicyID: "policy-uuid",
 	}
-	require.False(t, cfg.SponsorshipConfigured(),
+	require.False(t, sponsors(t, cfg),
 		"a policy on a self-hosted bundler is inert; attempting it would fail the send")
 }

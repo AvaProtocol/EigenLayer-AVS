@@ -72,17 +72,6 @@ func NewWorkerConfig(configPath string) (*WorkerConfig, error) {
 	return &cfg, nil
 }
 
-// SponsorshipConfigured reports whether this worker can ask Alchemy to sponsor.
-// False means every operation it sends must be covered by the smart wallet's
-// own balance.
-func (c *WorkerConfig) SponsorshipConfigured() bool {
-	smartWalletConfig, err := c.ToSmartWalletConfig()
-	if err != nil {
-		return false
-	}
-	return smartWalletConfig.SponsorshipPolicyID() != ""
-}
-
 // ToSmartWalletConfig converts the worker's raw config into the shared SmartWalletConfig
 // used by existing execution code (preset.SendUserOp, aa.GetNonce, etc.)
 func (c *WorkerConfig) ToSmartWalletConfig() (*config.SmartWalletConfig, error) {
