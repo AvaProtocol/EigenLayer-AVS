@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -173,6 +174,8 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		Justification: in.Justification,
 		ValidUntil:    in.Permissions.ValidUntilMs,
 		HooksFor:      in.Permissions.HooksFor,
+		TeardownCheck: n.teardownVerifier(),
+		TeardownCtx:   context.Background(),
 	})
 	if err != nil {
 		return nil, err
@@ -243,6 +246,8 @@ func (n *Engine) SubmitSessionPolicy(
 		ValidUntil:    in.Permissions.ValidUntilMs,
 		HooksFor:      in.Permissions.HooksFor,
 		Deadline:      deadline,
+		TeardownCheck: n.teardownVerifier(),
+		TeardownCtx:   context.Background(),
 	})
 	if err != nil {
 		return nil, nil, err

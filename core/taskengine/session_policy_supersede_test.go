@@ -482,16 +482,22 @@ func TestReplacingAPendingGrantCarriesNoTeardown(t *testing.T) {
 // The feature: replacing an APPLIED grant batches its teardown into the same
 // owner signature. Install first — the operation carrying this is validated by
 // the new entity, which must exist before the outer validation runs.
+//
+// Packing is asserted offline (no TeardownCheck): a live RPC that answers
+// zero for every entity would drop all targets as "already clear".
 func TestReplacingAnAppliedGrantBatchesItsTeardown(t *testing.T) {
 	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
-	user := &model.User{Address: owner}
 
 	first, _ := grantOn(t, engine, ownerKey, owner, wallet)
 	require.NoError(t, MarkSessionGrantApplied(db, first, "0xapplied"))
 
-	prepared, err := engine.PrepareSessionPolicy(user, SessionPolicyInput{
-		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "TradingBot",
-		Permissions: testPermissions(),
+	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
+	if first.SessionSigner != nil {
+		signer = *first.SessionSigner
+	}
+	prepared, err := PrepareSessionGrant(db, testPolicyChain, signer, "01replaceappliedaaaaaaaaaa", SessionGrantRequest{
+		Owner: owner, Wallet: wallet, AgentLabel: "TradingBot",
+		HooksFor: testPermissions().HooksFor,
 	})
 	require.NoError(t, err)
 
@@ -518,15 +524,15 @@ func TestReplacingAnAppliedGrantBatchesItsTeardown(t *testing.T) {
 // Storage supersede still collapses usable to one; the batch clears the chain.
 func TestStackedInstalledGrantsBatchAllTeardowns(t *testing.T) {
 	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
-	user := &model.User{Address: owner}
 
 	seedUsablePolicy(t, db, owner, wallet, "01stackedaaaaaaaaaaaaaaaaa", 1)
 	seedUsablePolicy(t, db, owner, wallet, "01stackedbbbbbbbbbbbbbbbbb", 2)
 	require.Len(t, usableOn(t, db, owner, wallet), 2, "precondition: the broken state")
 
-	prepared, err := engine.PrepareSessionPolicy(user, SessionPolicyInput{
-		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "TradingBot",
-		Permissions: testPermissions(),
+	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
+	prepared, err := PrepareSessionGrant(db, testPolicyChain, signer, "01stackedprepareaaaaaaaaaa", SessionGrantRequest{
+		Owner: owner, Wallet: wallet, AgentLabel: "TradingBot",
+		HooksFor: testPermissions().HooksFor,
 	})
 	require.NoError(t, err, "a stacked wallet must still be grantable")
 	require.Len(t, prepared.Supersedes, 2, "both applied entities ride the replace batch")
@@ -557,9 +563,13 @@ func TestRevokedAppliedLeftoversAreTornDownOnNextGrant(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, cleanupRequired)
 
-	prepared, err := engine.PrepareSessionPolicy(user, SessionPolicyInput{
-		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "TradingBot",
-		Permissions: testPermissions(),
+	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
+	if first.SessionSigner != nil {
+		signer = *first.SessionSigner
+	}
+	prepared, err := PrepareSessionGrant(db, testPolicyChain, signer, "01revokedleftoveraaaaaaaaa", SessionGrantRequest{
+		Owner: owner, Wallet: wallet, AgentLabel: "TradingBot",
+		HooksFor: testPermissions().HooksFor,
 	})
 	require.NoError(t, err)
 	require.Len(t, prepared.Supersedes, 1)

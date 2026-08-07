@@ -189,6 +189,66 @@ func TestTornDownEntitiesAreExcludedFromReplaceBatchAndCleanup(t *testing.T) {
 	_ = stored
 }
 
+// dropClearedTeardownTargets must not pack uninstall of an entity that is
+// already clear on chain — that reverts the whole replace batch (#731 re-audit).
+func TestDropClearedTeardownTargetsSkipsAndMarks(t *testing.T) {
+	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	user := &model.User{Address: owner}
+
+	first, _ := grantOn(t, engine, ownerKey, owner, wallet)
+	require.NoError(t, MarkSessionGrantApplied(db, first, "0xfirst"))
+
+	// Storage still believes entity needs cleanup; chain says clear (owner ran
+	// onChainCleanup offline).
+	verify := func(_ context.Context, _ int64, _ common.Address, entity uint32) (bool, error) {
+		return entity == first.EntityID, nil
+	}
+	prepared, err := PrepareSessionGrant(db, testPolicyChain,
+		common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB"),
+		"01dropclearedaaaaaaaaaaaaa",
+		SessionGrantRequest{
+			Owner: owner, Wallet: wallet, AgentLabel: "Bot",
+			Hooks:         [][]byte{aa.AllowlistExecHook(1)},
+			TeardownCheck: verify,
+		})
+	require.NoError(t, err)
+	require.Empty(t, prepared.Supersedes, "cleared entity must not ride the batch")
+
+	all, err := ListSessionPolicies(db, testPolicyChain, owner)
+	require.NoError(t, err)
+	var found *model.SessionPolicy
+	for _, p := range all {
+		if p.ID == first.ID {
+			found = p
+			break
+		}
+	}
+	require.NotNil(t, found)
+	require.True(t, found.Grant.TornDown(), "chain-clear must set TornDownAt so recheck matches")
+	_ = user
+}
+
+func TestDropClearedTeardownTargetsFailsPrepareOnReadError(t *testing.T) {
+	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	first, _ := grantOn(t, engine, ownerKey, owner, wallet)
+	require.NoError(t, MarkSessionGrantApplied(db, first, "0xfirst"))
+
+	verify := func(context.Context, int64, common.Address, uint32) (bool, error) {
+		return false, fmt.Errorf("rpc down")
+	}
+	_, err := PrepareSessionGrant(db, testPolicyChain,
+		common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB"),
+		"01droprpcfailaaaaaaaaaaaaaa",
+		SessionGrantRequest{
+			Owner: owner, Wallet: wallet, AgentLabel: "Bot",
+			Hooks:         [][]byte{aa.AllowlistExecHook(1)},
+			TeardownCheck: verify,
+		})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "still installed")
+	require.Contains(t, err.Error(), "prepare again")
+}
+
 func TestVerifySupersededTeardownMarksTornDownAt(t *testing.T) {
 	db, superseded := teardownFixture(t)
 	// Fixture has revoked status but no AppliedAt — set applied so mark path runs.

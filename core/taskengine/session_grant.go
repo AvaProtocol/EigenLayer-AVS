@@ -76,6 +76,19 @@ type SessionGrantRequest struct {
 	// itself. Present so the case is stateable — test fixtures need it — and
 	// deliberately absent from anything the grant screen sends.
 	AllowSelfAdministration bool
+
+	// TeardownCheck, when set, reads each storage teardown candidate on chain
+	// before packing the replace batch. Entities already clear are dropped and
+	// marked TornDownAt — storage belief alone is wrong after the owner ran
+	// explicit onChainCleanup (or a prior replace that never marked). Re-
+	// uninstalling a cleared entity reverts the whole deferred batch, so the
+	// new grant never installs (#731 re-audit).
+	//
+	// Nil skips the read (offline tests). A read failure fails prepare rather
+	// than packing a batch that may permanently brick granting for the wallet.
+	TeardownCheck TeardownVerifier
+	// TeardownCtx bounds chain reads during prepare. Ignored when TeardownCheck is nil.
+	TeardownCtx context.Context
 }
 
 // defaultSigningWindow bounds the gap between signing a grant and its first
@@ -177,6 +190,11 @@ func PrepareSessionGrant(
 	// owner signature. N-way is the same composition with more uninstalls.
 	deferredCall := installCall
 	teardownTargets, err := onChainTeardownTargets(db, chainID, req.Owner, req.Wallet)
+	if err != nil {
+		return nil, err
+	}
+	teardownTargets, err = dropClearedTeardownTargets(
+		req.TeardownCtx, db, chainID, req.Owner, req.Wallet, teardownTargets, req.TeardownCheck)
 	if err != nil {
 		return nil, err
 	}
@@ -488,9 +506,10 @@ var ErrGrantSignerMismatch = errors.New("grant was signed by the wrong key")
 // recheckSupersededGrant refuses a replacement whose teardown set moved
 // between prepare and submit.
 //
-// The owner signed away a specific set of entities. If storage now believes a
-// different set is on chain, the batch would remove the wrong thing (or leave
-// a new leftover), so it is refused the way a taken entity is — prepare again.
+// Compares the set the owner signed (prepared.Supersedes) against storage
+// candidates that still need cleanup. Dropped-cleared entities must already
+// have TornDownAt from prepare's chain read so they no longer appear here.
+// If the set moved, prepare again.
 func recheckSupersededGrant(db storage.Storage, prepared *PreparedSessionGrant, policy *model.SessionPolicy) error {
 	current, err := onChainTeardownTargets(db, policy.ChainID, *policy.Owner, *policy.Runner)
 	if err != nil {
@@ -520,6 +539,51 @@ func recheckSupersededGrant(db storage.Storage, prepared *PreparedSessionGrant, 
 		}
 	}
 	return nil
+}
+
+// dropClearedTeardownTargets removes candidates whose validation entity is
+// already clear on chain, and records TornDownAt so they stay out of future
+// batches. Re-uninstalling a cleared entity reverts the whole deferred
+// install+uninstall batch (Sepolia #731 re-audit).
+//
+// verify nil: return candidates unchanged (offline tests).
+// verify error: fail prepare — packing a maybe-doomed batch is worse.
+func dropClearedTeardownTargets(
+	ctx context.Context,
+	db storage.Storage,
+	chainID int64,
+	owner, runner common.Address,
+	candidates []*model.SessionPolicy,
+	verify TeardownVerifier,
+) ([]*model.SessionPolicy, error) {
+	if verify == nil || len(candidates) == 0 {
+		return candidates, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// Bound the multi-read so prepare cannot hang on a stuck RPC.
+	ctx, cancel := context.WithTimeout(ctx, teardownVerifyTimeout)
+	defer cancel()
+
+	kept := make([]*model.SessionPolicy, 0, len(candidates))
+	for _, p := range candidates {
+		cleared, err := verify(ctx, chainID, runner, p.EntityID)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"checking whether entity %d is still installed on %s before packing teardown: %w; prepare again",
+				p.EntityID, runner.Hex(), err)
+		}
+		if cleared {
+			// Owner (or a prior replace) already cleared it — sync storage.
+			if markErr := MarkEntityTornDown(db, chainID, owner, runner, p.EntityID); markErr != nil {
+				return nil, fmt.Errorf("marking entity %d torn down after on-chain clear: %w", p.EntityID, markErr)
+			}
+			continue
+		}
+		kept = append(kept, p)
+	}
+	return kept, nil
 }
 
 // TeardownVerifier reads back whether a validation entity is clear on chain.
@@ -568,34 +632,47 @@ func VerifySupersededTeardown(
 		}
 		return err
 	}
+	strandedPolicyID := superseded.ID
+	if db != nil && superseded.Owner != nil {
+		if id := policyIDForEntity(db, superseded.ChainID, *superseded.Owner, *superseded.Runner, superseded.EntityID); id != "" {
+			strandedPolicyID = id
+		}
+	}
 	if !cleared {
 		// Mined, and cleared nothing. The entity is still live authority.
 		if logger != nil {
 			logger.Error("a replaced grant is still installed on chain after its teardown mined",
-				"policy", superseded.ID, "runner", superseded.Runner.Hex(),
+				"policy", strandedPolicyID, "runner", superseded.Runner.Hex(),
 				"entity", superseded.EntityID,
 				"hint", "the account catches onUninstall reverts and strands module state; this entity needs an explicit uninstall")
 		}
 		return fmt.Errorf("entity %d on %s survived its teardown (policy %s)",
-			superseded.EntityID, superseded.Runner.Hex(), superseded.ID)
+			superseded.EntityID, superseded.Runner.Hex(), strandedPolicyID)
 	}
 
 	if db != nil && superseded.Owner != nil {
 		if markErr := MarkEntityTornDown(db, superseded.ChainID, *superseded.Owner, *superseded.Runner, superseded.EntityID); markErr != nil {
 			if logger != nil {
 				logger.Warn("entity verified clear on chain but TornDownAt could not be stored",
-					"runner", superseded.Runner.Hex(), "entity", superseded.EntityID, "error", markErr)
+					"policy", strandedPolicyID, "runner", superseded.Runner.Hex(),
+					"entity", superseded.EntityID, "error", markErr)
 			}
-			// Verification succeeded; a failed mark only means the next grant
-			// may re-attempt uninstall (harmless if already clear).
+			// Failed mark is serious: the next prepare will re-read the chain
+			// and drop this entity via dropClearedTeardownTargets, so granting
+			// still recovers. Log only.
 		}
 	}
 	return nil
 }
 
 // MarkEntityTornDown sets TornDownAt on the policy that owns entity on runner.
-// Idempotent when already marked.
+// Idempotent when already marked. Takes the runner write lock so a concurrent
+// MarkSessionGrantAppliedByID cannot lose its AppliedUserOpHash write.
 func MarkEntityTornDown(db storage.Storage, chainID int64, owner, runner common.Address, entity uint32) error {
+	lock := sessionAuthorityLock(chainID, owner, runner)
+	lock.Lock()
+	defer lock.Unlock()
+
 	policies, err := ListSessionPolicies(db, chainID, owner)
 	if err != nil {
 		return err
@@ -611,4 +688,23 @@ func MarkEntityTornDown(db storage.Storage, chainID int64, owner, runner common.
 		return StoreSessionPolicy(db, p)
 	}
 	return nil // no matching record — nothing to mark
+}
+
+// policyIDForEntity returns the storage id of the grant occupying entity on
+// runner, or "" if none. Used for diagnostics when the resolver only knows the
+// new grant's id.
+func policyIDForEntity(db storage.Storage, chainID int64, owner, runner common.Address, entity uint32) string {
+	if db == nil {
+		return ""
+	}
+	policies, err := ListSessionPolicies(db, chainID, owner)
+	if err != nil {
+		return ""
+	}
+	for _, p := range policies {
+		if p.Runner != nil && *p.Runner == runner && p.EntityID == entity {
+			return p.ID
+		}
+	}
+	return ""
 }
