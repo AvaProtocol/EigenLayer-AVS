@@ -326,31 +326,62 @@ func readValidationState(
 // investigate, not to keep piling onto.
 const maxFixtureEntityScan = 16
 
-// Fixture runner salts.
+// Fixture runner salts — one wallet per test that writes (#719).
 //
-// Every live fixture derives its runner from salt 0 today, which is why one
-// test's leftover validation entities become another test's problem: the wallet
-// is shared, and the entity layout on it belongs to whichever test installed
-// first. Verifying permissions (above) removes the failure mode; separate salts
-// would remove the coupling.
+// Sharing salt 0 meant the entity layout on the wallet belonged to whichever
+// test installed first, so one test's leftovers decided another's outcome.
+// Verifying permissions (above) removed the failure mode; separate salts remove
+// the coupling that caused it.
 //
-// They are all still 0 because a new salt is an undeployed, unfunded
-// counterfactual wallet. Flipping one without funding its runner turns a
-// passing live test into a failing one, so the salt and the funding have to
-// move together: pick a fresh value here, run the test once to have
-// requireFundedRunner print the runner address and the shortfall, fund it, and
-// it stays isolated from then on.
+// Only the tests that SEND get their own salt. The Uniswap simulation grants a
+// policy but never sends an operation, so its install never reaches the chain
+// and it installs nothing: it reads the wallet, it does not write it. Leaving it
+// on salt 0 makes that wallet exclusively its own — including the real USDC
+// balance it needs, which a fresh counterfactual would not have.
+//
+// A salt and its funding move together. A new value is an undeployed, unfunded
+// counterfactual, and flipping one alone turns a passing live test into a
+// failing one:
+//
+//	go run ./scripts/fixture_wallet -salt N -deploy -fund 0.02
+//
+// which also prints each entity's signer and deferred nonce sequence.
+// KNOWN RED, and deliberately so: the two fixtures below grant BARE global
+// authority (grantControllerAuthority), and a bare grant's deferred install
+// AA23s on a wallet where its entity is actually free. They passed on shared
+// salt 0 only by ADOPTING a bare grant some earlier run had already installed
+// — "entity 3 already grants exactly what this test needs; reusing it" — so
+// they never ran the install path at all. Isolating them made that visible,
+// which is the point: #719 asks that a live test pass from a COLD fixture.
+//
+// Not the gas seed (raising seedVerificationGasDeferredBare to the hooked
+// value changes nothing), and not the isolation: the batch-swap fixture below
+// takes a HOOKED grant and installs cleanly on its own cold wallet. Tracked
+// separately; do not re-point these at salt 0 to make them green.
 const (
-	fixtureSaltWithdrawal        = 0
-	fixtureSaltSequentialWrites  = 0
+	fixtureSaltWithdrawal       = 21
+	fixtureSaltSequentialWrites = 22
+	fixtureSaltBatchSwap        = 23
+	// The one non-writer: salt 0 is now its private wallet, USDC balance and all.
 	fixtureSaltUniswapSimulation = 0
-	fixtureSaltBatchSwap         = 0
-	// Salt 13 is funded and its entity space is clean, so unlike the fixtures
-	// above this one is genuinely isolated. The replace check installs and
-	// removes entities; doing that on a shared runner would churn another
-	// test's entity layout.
+	// The replace checks install and remove entities several at a time, which
+	// would churn any layout they shared.
 	fixtureSaltGrantReplace = 13
 )
+
+// Entities are consumed, never recycled — by design, not by neglect.
+//
+// A torn-down entity reads clear on every module while its EntryPoint deferred
+// nonce sequence keeps its value forever, and a grant signs a carrier nonce at
+// sequence 0. So reissuing an id signs a nonce the EntryPoint has already
+// consumed, and the operation AA23s during validation with nothing on chain to
+// explain why. NextSessionEntityID allocating max+1 over retained records is
+// what prevents that (see aa.EntryPointNonce), which means every run on a
+// fixture moves its entity ids up and none of them ever come back.
+//
+// The remedy is a fresh salt, not reuse. When a fixture's entity space gets
+// crowded, `scripts/fixture_wallet -salt N` shows how far it has walked and
+// which ids are spent; pick a new salt, deploy and fund it, and move on.
 
 // resetInitialPermissions brings the fixture's runner to the permission state
 // the test declares, and returns the stored grant to run under.

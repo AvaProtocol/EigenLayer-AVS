@@ -67,7 +67,7 @@ func setupUserOpWithdrawalTest(t *testing.T) (*config.Config, common.Address, *c
 	require.NoError(t, err, "Failed to derive smart wallet address")
 
 	t.Logf("🔑 Owner EOA: %s", ownerAddress.Hex())
-	t.Logf("💼 Smart Wallet (salt:0): %s", smartWalletAddress.Hex())
+	t.Logf("💼 Smart Wallet (salt:%d): %s", fixtureSaltWithdrawal, smartWalletAddress.Hex())
 	t.Logf("💰 Destination: %s", destinationAddress.Hex())
 
 	// Create engine for RunNodeImmediately execution
@@ -94,7 +94,7 @@ func setupUserOpWithdrawalTest(t *testing.T) (*config.Config, common.Address, *c
 	}
 
 	// Register the smart wallet in the database
-	err = StoreWallet(db, int64(1), ownerAddress, &model.SmartWallet{
+	err = StoreWallet(db, int64(11155111), ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddress,
 		Salt:    big.NewInt(fixtureSaltWithdrawal),
@@ -464,7 +464,7 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 	require.NoError(t, err, "Failed to derive smart wallet address")
 
 	t.Logf("🔑 Owner EOA: %s", ownerAddress.Hex())
-	t.Logf("💼 Smart Wallet (salt:0): %s", smartWalletAddress.Hex())
+	t.Logf("💼 Smart Wallet (salt:%d): %s", fixtureSaltWithdrawal, smartWalletAddress.Hex())
 	t.Logf("💰 Destination: %s", destinationAddress.Hex())
 
 	// Check if wallet is deployed, and deploy it if needed
@@ -521,7 +521,7 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 	}
 
 	// Register the smart wallet in the database
-	err = StoreWallet(db, int64(1), ownerAddress, &model.SmartWallet{
+	err = StoreWallet(db, int64(11155111), ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddress,
 		Salt:    big.NewInt(fixtureSaltWithdrawal),
