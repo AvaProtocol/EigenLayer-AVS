@@ -71,6 +71,13 @@ type SessionAuthorization struct {
 	// succeeded on-chain, and an unrecorded one heals on the next operation
 	// through that same consumed-nonce path.
 	OnApplied func(userOpHash string) error
+
+	// DeferredTeardownCount is how many uninstallValidation calls the deferred
+	// batch carries (N-way replace). Zero for a plain first install. Used to
+	// size verificationGasLimit: each teardown runs inside validation and
+	// costs ~100k gas (Sepolia). The flat deferred-hooks seed alone is only
+	// enough for install + ~1 uninstall.
+	DeferredTeardownCount int
 }
 
 // Deferred reports whether this operation carries the grant's install.
@@ -145,6 +152,12 @@ func seedVerificationGasFor(op *userop.UserOperationV07, auth *SessionAuthorizat
 		seed = seedVerificationGasModuleEntity
 	default:
 		return seedVerificationGas(op)
+	}
+	// N-way replace: each uninstallValidation runs during deferred validation
+	// and is charged against verificationGasLimit, not call gas. Flat seed is
+	// only enough for the install itself plus ~1 teardown.
+	if auth != nil && auth.Deferred() && auth.DeferredTeardownCount > 0 {
+		seed += int64(auth.DeferredTeardownCount) * seedVerificationGasPerUninstall
 	}
 	// The deferred/module seeds above were measured on already-deployed
 	// accounts. First-use that ALSO deploys the account pays both costs in

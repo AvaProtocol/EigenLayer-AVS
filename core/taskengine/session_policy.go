@@ -338,31 +338,36 @@ func NewSessionResolver(
 			}
 			policyID, policyChain, policyOwner := policy.ID, policy.ChainID, *policy.Owner
 			policyRunner := *policy.Runner
-			// Captured now, from the payload the owner signed: if this grant
-			// replaced an installed one, its batch carries that entity's
-			// uninstall, and the entity it names is what must be verified gone.
-			replacedEntity, replacedSomething, entityErr := aa.UninstalledEntityWithin(policy.Grant.InstallCall)
+			// Captured now, from the payload the owner signed: every entity the
+			// batch uninstalls must be verified gone (N-way replace included).
+			replacedEntities, entityErr := aa.UninstalledEntitiesWithin(policy.Grant.InstallCall)
 			if entityErr != nil {
-				return nil, fmt.Errorf("session policy %s: reading the teardown target: %w", policy.ID, entityErr)
+				return nil, fmt.Errorf("session policy %s: reading the teardown targets: %w", policy.ID, entityErr)
 			}
+			// Count for verification-gas seeding (deferred uninstalls run in
+			// validation; flat seed under-seeds N-way batches — #731 review).
+			auth.DeferredTeardownCount = len(replacedEntities)
 			auth.OnApplied = func(userOpHash string) error {
 				if err := MarkSessionGrantAppliedByID(db, policyChain, policyOwner, policyRunner, policyID, userOpHash); err != nil {
 					return err
 				}
-				if !replacedSomething || verifyTeardown == nil {
+				if len(replacedEntities) == 0 || verifyTeardown == nil {
 					return nil
 				}
 				// The batch has mined, which says the operation ran — not that
 				// the uninstall did anything. A failed check does not fail the
 				// send: the new grant is installed and there is nothing to roll
-				// back. VerifySupersededTeardown logs the outcome; we only
-				// bound the RPC so a hung dial cannot stall OnApplied.
-				replaced := &model.SessionPolicy{
-					ID: policyID, ChainID: policyChain, Runner: &policyRunner, EntityID: replacedEntity,
-				}
+				// back. VerifySupersededTeardown marks TornDownAt when clear.
 				ctx, cancel := context.WithTimeout(context.Background(), teardownVerifyTimeout)
 				defer cancel()
-				_ = VerifySupersededTeardown(ctx, db, verifyTeardown, replaced, globalLogger)
+				ownerAddr := policyOwner
+				for _, replacedEntity := range replacedEntities {
+					replaced := &model.SessionPolicy{
+						ID: policyID, ChainID: policyChain, Owner: &ownerAddr,
+						Runner: &policyRunner, EntityID: replacedEntity,
+					}
+					_ = VerifySupersededTeardown(ctx, db, verifyTeardown, replaced, globalLogger)
+				}
 				return nil
 			}
 		}
@@ -401,39 +406,47 @@ func controllerSessionSigner(cfg *config.Config) func(common.Address) (*ecdsa.Pr
 	}
 }
 
-// supersededOnChainGrant returns the runner's grant whose install has actually
-// REACHED THE CHAIN, so a replacement can carry its teardown.
+// maxOnChainTeardowns is how many prior entities one replacement batch
+// uninstalls. Bounded by deferred validation gas: each uninstall costs
+// ~100k verification gas (Sepolia measurement, #731 review), and the seed
+// scales with count. Soft-degrades rather than refusing prepare — leftover
+// entities ride the next grant (self-heal), matching #716.
 //
-// Only an applied grant qualifies. A pending one has no on-chain entity — its
-// install is still riding an operation, or never will — so batching an
-// uninstall for it would tear down something that does not exist. Superseding
-// a pending grant stays what #716 made it: a storage-only revoke.
+// Sized for install+hooks (~700k base) plus a few teardowns with headroom
+// under Rundler's efficiency floor after the scaled seed lands.
+const maxOnChainTeardowns = 4
+
+// onChainTeardownTargets returns grants on this runner whose validation
+// entity is still believed installed and should be removed when the owner
+// next grants (#717 AC1).
 //
-// ambiguous reports that the runner carries MORE THAN ONE installed grant, in
-// which case no policy is returned and the caller must NOT batch a teardown.
-// This is the deliberate half. #716 gave granting a self-healing property — a
-// wallet stuck with stacked usable grants is repaired by granting again — and
-// refusing here would take that away precisely from the wallets that need it
-// most. A replacement can only remove one entity, so it removes none, the
-// storage-level supersede still collapses the set to one usable grant, and the
-// on-chain leftovers stay exactly as they were. Degraded, not broken: no worse
-// than before replacement carried teardown at all.
+// Included when Grant.NeedsOnChainCleanup():
+//   - usable + applied — the current grant being replaced
+//   - revoked + applied, not yet torn down — leftovers and late-landing orphans
 //
-// Clearing those leftovers needs an N-way batch or a sweep, tracked on #717.
-func supersededOnChainGrant(db storage.Storage, chainID int64, owner, runner common.Address) (policy *model.SessionPolicy, ambiguous bool, err error) {
+// Excluded: never applied, already TornDownAt, missing InstallCall, entity 0.
+//
+// If more than maxOnChainTeardowns remain, the first N (stable list order)
+// are returned; the rest wait for a later grant. Never refuses prepare.
+func onChainTeardownTargets(db storage.Storage, chainID int64, owner, runner common.Address) ([]*model.SessionPolicy, error) {
 	policies, err := ListSessionPolicies(db, chainID, owner)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	var found *model.SessionPolicy
+	out := make([]*model.SessionPolicy, 0)
 	for _, p := range policies {
-		if p.Runner == nil || *p.Runner != runner || !p.Usable() || !p.Grant.Applied() {
+		if p.Runner == nil || *p.Runner != runner || p.Grant == nil {
 			continue
 		}
-		if found != nil {
-			return nil, true, nil
+		if !p.Grant.NeedsOnChainCleanup() || len(p.Grant.InstallCall) == 0 || p.EntityID == 0 {
+			continue
 		}
-		found = p
+		if p.Usable() || p.Status == model.SessionPolicyRevoked {
+			out = append(out, p)
+		}
 	}
-	return found, false, nil
+	if len(out) > maxOnChainTeardowns {
+		out = out[:maxOnChainTeardowns]
+	}
+	return out, nil
 }

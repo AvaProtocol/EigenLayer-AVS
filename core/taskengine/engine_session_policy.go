@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -173,6 +174,8 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		Justification: in.Justification,
 		ValidUntil:    in.Permissions.ValidUntilMs,
 		HooksFor:      in.Permissions.HooksFor,
+		TeardownCheck: n.teardownVerifier(),
+		TeardownCtx:   context.Background(),
 	})
 	if err != nil {
 		return nil, err
@@ -243,6 +246,8 @@ func (n *Engine) SubmitSessionPolicy(
 		ValidUntil:    in.Permissions.ValidUntilMs,
 		HooksFor:      in.Permissions.HooksFor,
 		Deadline:      deadline,
+		TeardownCheck: n.teardownVerifier(),
+		TeardownCtx:   context.Background(),
 	})
 	if err != nil {
 		return nil, nil, err
@@ -301,17 +306,20 @@ func (n *Engine) GetSessionPolicyByID(user *model.User, chainID int64, wallet co
 	return nil, ErrSessionPolicyNotFound
 }
 
-// RevokeSessionPolicyByID revokes one policy. deleted reports the pending
-// case (record removed outright); cleanupRequired reports that the grant's
-// validation is still installed on the account and needs the owner's
-// uninstallValidation.
+// RevokeSessionPolicyByID revokes one policy.
+//
+//   - deleted: the storage record was removed (empty grant with no InstallCall).
+//   - cleanupRequired + cleanup: applied grant still installed on chain; owner
+//     must execute the returned uninstallValidation call (#717 AC3).
+//   - neither: pending grant retained as revoked so a late install can mark
+//     AppliedAt and later cleanup; no entity is known on chain yet.
 //
 // Takes the runner's write lock for the same reason submit does: it changes
 // which grant the send path will resolve, and must not interleave with a
 // submit deciding the same question.
-func (n *Engine) RevokeSessionPolicyByID(user *model.User, chainID int64, wallet common.Address, policyID string) (deleted, cleanupRequired bool, err error) {
+func (n *Engine) RevokeSessionPolicyByID(user *model.User, chainID int64, wallet common.Address, policyID string) (deleted, cleanupRequired bool, cleanup *OnChainRevokeCleanup, err error) {
 	if err := n.requireOwnedWallet(user, wallet); err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
 	lock := sessionAuthorityLock(chainID, user.Address, wallet)
 	lock.Lock()
@@ -319,13 +327,26 @@ func (n *Engine) RevokeSessionPolicyByID(user *model.User, chainID int64, wallet
 
 	policy, err := n.GetSessionPolicyByID(user, chainID, wallet, policyID)
 	if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
+	hadInstallCall := policy.Grant != nil && len(policy.Grant.InstallCall) > 0
 	cleanupRequired, err = RevokeSessionGrant(n.db, policy)
 	if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
-	return !cleanupRequired, cleanupRequired, nil
+	if cleanupRequired {
+		built, buildErr := BuildOnChainRevokeCleanup(policy)
+		if buildErr != nil {
+			return false, true, nil, fmt.Errorf("grant revoked off-chain but on-chain cleanup payload could not be built: %w", buildErr)
+		}
+		return false, true, built, nil
+	}
+	// Pending without InstallCall → deleted. Pending with InstallCall → retained.
+	// Applied already torn down → revoked, no cleanup payload.
+	if !hadInstallCall {
+		return true, false, nil, nil
+	}
+	return false, false, nil, nil
 }
 
 // attachDeclaredPermissions records the grant's declared shape on the policy

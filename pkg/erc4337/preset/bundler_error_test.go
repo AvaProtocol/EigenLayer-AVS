@@ -33,6 +33,7 @@ func TestIsClientUserOpFailure(t *testing.T) {
 		{"webhook deny", fmt.Errorf("gas manager declined to sponsor: alchemy_requestGasAndPaymasterAndData (policy x): Request was denied by webhook"), true},
 		{"AA23 via gas manager", fmt.Errorf("gas manager declined to sponsor: alchemy_requestGasAndPaymasterAndData (policy bf905871): validation reverted: [reason]: AA23 reverted"), true},
 		{"execution reverted via GM", fmt.Errorf("gas manager declined to sponsor: alchemy_requestGasAndPaymasterAndData (policy x): execution reverted"), true},
+		{"grant install failed", errors.New("SESSION_GRANT_INSTALL_FAILED: deferred grant install/replace did not land: AA23"), true},
 		// Must stay Error → Sentry (infra / ambiguous)
 		{"bare AA23", errors.New("validation reverted: [reason]: AA23 reverted"), false},
 		{"SESSION_POLICY_LOOKUP_FAILED storage", errors.New("SESSION_POLICY_LOOKUP_FAILED: listing session policies: connection refused"), false},

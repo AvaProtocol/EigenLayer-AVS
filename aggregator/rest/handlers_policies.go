@@ -189,6 +189,19 @@ func (s *Server) GetWalletPolicy(ctx echo.Context, address generated.EthereumAdd
 	return ctx.JSON(http.StatusOK, policyToAPI(policy))
 }
 
+// onChainCleanupAPI maps the engine cleanup payload to the OpenAPI type.
+func onChainCleanupAPI(c *taskengine.OnChainRevokeCleanup) *generated.OnChainRevokeCleanup {
+	if c == nil {
+		return nil
+	}
+	return &generated.OnChainRevokeCleanup{
+		EntityId: int64(c.EntityID),
+		Target:   generated.EthereumAddress(c.Target.Hex()),
+		CallData: generated.Hex("0x" + common.Bytes2Hex(c.CallData)),
+		ChainId:  c.ChainID,
+	}
+}
+
 // RevokeWalletPolicy revokes one grant.
 func (s *Server) RevokeWalletPolicy(ctx echo.Context, address generated.EthereumAddress, policyID generated.Ulid, params generated.RevokeWalletPolicyParams) error {
 	user, wallet, err := s.policyAuth(ctx, address)
@@ -200,7 +213,7 @@ func (s *Server) RevokeWalletPolicy(ctx echo.Context, address generated.Ethereum
 		return badRequest("POLICIES_BAD_CHAIN_ID", "Chain unresolvable",
 			"Provide ?chainId= or authenticate with a chain-scoped token.")
 	}
-	deleted, cleanupRequired, err := s.engine.RevokeSessionPolicyByID(user, chainID, wallet, string(policyID))
+	deleted, cleanupRequired, cleanup, err := s.engine.RevokeSessionPolicyByID(user, chainID, wallet, string(policyID))
 	if err != nil {
 		return mapPolicyError(err)
 	}
@@ -208,10 +221,17 @@ func (s *Server) RevokeWalletPolicy(ctx echo.Context, address generated.Ethereum
 	if deleted {
 		status = generated.RevokePolicyResponseStatus("deleted")
 	}
-	return ctx.JSON(http.StatusOK, generated.RevokePolicyResponse{
+	resp := generated.RevokePolicyResponse{
 		Status:                 status,
 		OnChainCleanupRequired: cleanupRequired,
-	})
+	}
+	if cleanup != nil {
+		// Owner-executable uninstallValidation. Studio (or any wallet client)
+		// sends this as a plain call to the runner — the controller cannot
+		// self-uninstall a policied grant (spike R4 / #717).
+		resp.OnChainCleanup = onChainCleanupAPI(cleanup)
+	}
+	return ctx.JSON(http.StatusOK, resp)
 }
 
 // ── mapping ───────────────────────────────────────────────────────────────
@@ -239,8 +259,10 @@ func permissionsFromAPI(actions []generated.AllowedAction, spendCap *generated.E
 	return perms, nil
 }
 
-// policyToAPI renders a policy for responses. Grant material — calldata,
-// nonce, the owner's signature — is secret-grade and never leaves storage.
+// policyToAPI renders a policy for responses. Grant material — install
+// calldata, carrier nonce, owner signature — is secret-grade and never leaves
+// storage. Revoked+applied policies may include onChainCleanup (derived
+// uninstall only) so clients can finish teardown without re-revoking.
 func policyToAPI(p *model.SessionPolicy) generated.SessionPolicy {
 	out := generated.SessionPolicy{
 		Id:         generated.Ulid(p.ID),
@@ -250,6 +272,16 @@ func policyToAPI(p *model.SessionPolicy) generated.SessionPolicy {
 		AgentLabel: p.AgentLabel,
 		ValidUntil: p.ValidUntil,
 		CreatedAt:  p.CreatedAt,
+	}
+	// Only when still believed installed. TornDownAt means a prior replace
+	// (or cleanup) already verified the entity clear — do not re-advertise.
+	if p.Status == model.SessionPolicyRevoked && p.Grant != nil && p.Grant.NeedsOnChainCleanup() {
+		if c, err := taskengine.BuildOnChainRevokeCleanup(p); err == nil {
+			out.OnChainCleanup = onChainCleanupAPI(c)
+		}
+		// Build failure: omit field. Callers that need diagnostics use revoke,
+		// which surfaces the error. Silent omit is better than claiming no
+		// cleanup is needed when the record is corrupt.
 	}
 	if p.Runner != nil {
 		out.Runner = generated.EthereumAddress(p.Runner.Hex())
