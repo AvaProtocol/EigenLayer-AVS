@@ -44,18 +44,36 @@ cp config/test.example.yaml config/test.yaml
 sed -i "s|eth_rpc_url:.*|eth_rpc_url: ${CHAIN_RPC}|g" config/test.yaml
 sed -i "s|eth_ws_url:.*|eth_ws_url: ${CHAIN_WS}|g" config/test.yaml
 sed -i "s|ecdsa_private_key:.*|ecdsa_private_key: ${CONTROLLER_PRIVATE_KEY}|g" config/test.yaml
-sed -i "s|bundler_url:.*|bundler_url: ${BUNDLER_RPC}|g" config/test.yaml
-# CI supplies its own bundler via the BUNDLER_RPC secret, so it must declare
-# self_hosted regardless of what the template ships with. The template tracks
-# production, which runs bundler_provider: alchemy — and on that path the
-# endpoint is derived from alchemy_api_key and bundler_url is never read, so
-# inheriting `alchemy` here fails closed at send time with
-# "bundler_provider=alchemy but alchemy_api_key is empty".
+sed -i "s|bundler_url:.*|bundler_url: ${BUNDLER_RPC:-}|g" config/test.yaml
+
+# Bundler provider. CI now exercises the provider production actually uses.
 #
-# The cost is that CI does not exercise the provider production actually uses.
-# Closing that gap means adding an ALCHEMY_API_KEY secret and substituting it
-# below instead of forcing self_hosted.
-sed -i "s|bundler_provider:.*|bundler_provider: self_hosted|g" config/test.yaml
+# With ALCHEMY_API_KEY set, the endpoint is derived from the key and
+# bundler_url is never read — which is the production path, and the reason
+# this gap was worth closing: CI was validating a bundler no deployment uses.
+#
+# Without the key, fall back to the self-hosted bundler so a fork or a
+# secret-less run still works rather than failing closed at send time with
+# "bundler_provider=alchemy but alchemy_api_key is empty". That fallback is
+# meant to disappear once the self-hosted bundlers are retired; when it does,
+# a missing key should become a hard failure rather than a silent downgrade.
+if [ -n "${ALCHEMY_API_KEY:-}" ]; then
+  sed -i "s|bundler_provider:.*|bundler_provider: alchemy|g" config/test.yaml
+  sed -i "s|alchemy_api_key:.*|alchemy_api_key: ${ALCHEMY_API_KEY}|g" config/test.yaml
+  echo "bundler_provider: alchemy (endpoint derived from ALCHEMY_API_KEY)"
+else
+  sed -i "s|bundler_provider:.*|bundler_provider: self_hosted|g" config/test.yaml
+  sed -i "s|alchemy_api_key:.*|alchemy_api_key:|g" config/test.yaml
+  echo "WARNING: ALCHEMY_API_KEY not set — falling back to the self-hosted bundler (BUNDLER_RPC)."
+fi
+
+# CI must never draw on the production Gas Manager policy: the policy's
+# custom-rules webhook points at the production gateway, which would approve
+# and bill a CI run against production's wallet records and credit ledger.
+# The template sets this, but assert it rather than trusting the copy.
+if ! grep -q "^disable_gas_sponsorship: true" config/test.yaml; then
+  printf '\n# CI never draws on the production Gas Manager policy.\ndisable_gas_sponsorship: true\n' >> config/test.yaml
+fi
 sed -i "s|controller_private_key:.*|controller_private_key: ${CONTROLLER_PRIVATE_KEY}|g" config/test.yaml
 sed -i "s|paymaster_address:.*|paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92|g" config/test.yaml
 sed -i "s|tenderly_account:.*|tenderly_account: ${TENDERLY_ACCOUNT}|g" config/test.yaml

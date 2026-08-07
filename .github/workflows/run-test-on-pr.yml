@@ -102,6 +102,9 @@ jobs:
           tenderly-access-key: ${{ secrets.TENDERLY_ACCESS_KEY }}
           owner-eoa: ${{ vars.OWNER_EOA }}
           moralis-api-key: ${{ secrets.MORALIS_API_KEY }}
+          # Runs CI on the same bundler production uses. Without it CI falls
+          # back to the self-hosted bundler, which nothing deploys against.
+          alchemy-api-key: ${{ secrets.ALCHEMY_API_KEY }}
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -170,6 +173,9 @@ jobs:
           # action exports it to the job environment for the test step.
           test-private-key: ${{ secrets.TEST_PRIVATE_KEY }}
           moralis-api-key: ${{ secrets.MORALIS_API_KEY }}
+          # Runs CI on the same bundler production uses. Without it CI falls
+          # back to the self-hosted bundler, which nothing deploys against.
+          alchemy-api-key: ${{ secrets.ALCHEMY_API_KEY }}
 
       - name: Run Go test
         env:

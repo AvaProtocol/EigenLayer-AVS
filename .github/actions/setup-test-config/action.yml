@@ -32,6 +32,13 @@ inputs:
   moralis-api-key:
     description: 'Moralis Web3 Data API key for token balance integration tests'
     required: false
+  alchemy-api-key:
+    description: |
+      Alchemy API key. When set, CI runs bundler_provider: alchemy and derives
+      the endpoint from the key — the same path production uses. Without it CI
+      falls back to the self-hosted bundler (bundler-rpc), which no deployment
+      uses any more.
+    required: false
 runs:
   using: 'composite'
   steps:
@@ -50,6 +57,7 @@ runs:
         TENDERLY_ACCESS_KEY: "${{ inputs.tenderly-access-key }}"
         OWNER_EOA: "${{ inputs.owner-eoa }}"
         MORALIS_API_KEY: "${{ inputs.moralis-api-key }}"
+        ALCHEMY_API_KEY: "${{ inputs.alchemy-api-key }}"
       shell: bash
       run: ./.github/scripts/generate-test-config.sh
 
