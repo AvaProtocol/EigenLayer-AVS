@@ -85,9 +85,21 @@ func (s *Server) ExecuteUserOp(ctx context.Context, req *avsproto.ExecuteUserOpR
 	}
 
 	// req.UsePaymaster selected the v0.6 verifying paymaster, which went with
-	// the EntryPoint v0.7 cutover. Sponsorship is now the chain's Gas Manager
-	// policy and applies inside the send path, so the flag no longer chooses
-	// anything; it is left on the wire for older callers and ignored.
+	// the EntryPoint v0.7 cutover, so it no longer chooses anything. Left on
+	// the wire for older callers and ignored.
+	//
+	// It is worth being precise about what that means here, because the
+	// obvious reading is wrong: operations sent through this path are NOT
+	// sponsored. Gas Manager sponsorship needs AlchemyPaymasterPolicyID on the
+	// SmartWalletConfig, and worker config carries no such field for
+	// ToSmartWalletConfig to copy — so priceOperationV07 never requests it and
+	// the operation takes the self-funded prefund path, which fails for a
+	// zero-balance wallet.
+	//
+	// This is not new. The MA v2 branch never received the paymaster request
+	// either, so worker-routed operations were already unsponsored before the
+	// v0.6 removal; only the misleading plumbing is gone. Wiring the policy
+	// through worker config is tracked separately.
 	userOp, receipt, err := preset.SendUserOpAuto(
 		s.worker.smartWalletCfg,
 		ownerAddr,
