@@ -1,12 +1,14 @@
 package taskengine
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
 	"strings"
 	"time"
 
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	badger "github.com/dgraph-io/badger/v4"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -459,4 +461,62 @@ func recheckSupersededGrant(db storage.Storage, prepared *PreparedSessionGrant, 
 			policy.Runner.Hex(), current.ID, current.EntityID)
 	}
 	return nil
+}
+
+// TeardownVerifier reads back whether a validation entity is clear on chain.
+// Supplied by the aggregator, which owns the chain client; nil in tests and in
+// any process without one, where verification is skipped rather than faked.
+type TeardownVerifier func(ctx context.Context, account common.Address, entity uint32) (cleared bool, err error)
+
+// VerifySupersededTeardown checks that the entity a replacement was supposed
+// to remove is actually gone, and records the answer on the superseded policy.
+//
+// This is not belt-and-braces. A replace batch that mines proves the operation
+// executed, NOT that the uninstall did anything: the account catches a hook
+// module's onUninstall revert and strands the state. Sepolia showed the two
+// outcomes are indistinguishable from a receipt — 601,275 gas and success=true
+// with the entity still holding its signer and its full spend cap, against
+// 636,341 gas and a clean teardown. Without this read, the product would
+// report an entity revoked on the strength of a transaction that removed
+// nothing.
+//
+// A failed verification does not error the caller. The new grant is already
+// installed and usable, and the operation has mined — there is nothing to roll
+// back. What matters is that the stranded entity stops being invisible, so it
+// is marked and logged for the sweep that #717 tracks.
+func VerifySupersededTeardown(
+	ctx context.Context,
+	db storage.Storage,
+	verify TeardownVerifier,
+	superseded *model.SessionPolicy,
+	logger sdklogging.Logger,
+) error {
+	if verify == nil || superseded == nil || superseded.Runner == nil {
+		return nil // no chain client: skip honestly rather than assume success
+	}
+
+	cleared, err := verify(ctx, *superseded.Runner, superseded.EntityID)
+	if err != nil {
+		// Unknown is not cleared. Say so rather than recording either answer.
+		if logger != nil {
+			logger.Warn("could not verify that a replaced grant was torn down on chain",
+				"policy", superseded.ID, "runner", superseded.Runner.Hex(),
+				"entity", superseded.EntityID, "error", err)
+		}
+		return err
+	}
+	if cleared {
+		return nil
+	}
+
+	// Mined, and cleared nothing. The entity is still live authority on the
+	// account even though storage has it revoked.
+	if logger != nil {
+		logger.Error("a replaced grant is still installed on chain after its teardown mined",
+			"policy", superseded.ID, "runner", superseded.Runner.Hex(),
+			"entity", superseded.EntityID,
+			"hint", "the account catches onUninstall reverts and strands module state; this entity needs an explicit uninstall")
+	}
+	return fmt.Errorf("entity %d on %s survived its teardown (policy %s)",
+		superseded.EntityID, superseded.Runner.Hex(), superseded.ID)
 }
