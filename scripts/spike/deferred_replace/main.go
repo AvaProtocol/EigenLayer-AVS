@@ -255,7 +255,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("building the new grant's install: %w", err)
 	}
-	uninstallPrior, err := policiedUninstall(prior)
+	uninstallPrior, err := policiedUninstall(prior, token)
 	if err != nil {
 		return fmt.Errorf("building the prior grant's uninstall: %w", err)
 	}
@@ -350,50 +350,71 @@ func run() error {
 	return nil
 }
 
-// policiedInstall builds the production grant shape: a global session signer
-// with allowlist + spend cap + time range. Matching production matters — a
-// bare grant has no execution hook, and the exec hook is the thing that makes
-// self-administration interesting.
+// policiedInstall builds the production grant shape, using the SAME builders
+// SessionPermissions.HooksFor uses and in the same order — allowlist
+// validation hook, allowlist EXEC hook, time-range validation hook.
+//
+// Getting this wrong is not a subtle failure: passing raw install data where a
+// hook ENTRY is expected (config ++ data) packs fine and then reverts AA23 at
+// estimation, and omitting the exec hook changes the grant into the bare shape
+// whose self-administration is exactly what the spike is not testing.
+func allowlistInputs(token common.Address) []aa.AllowlistInput {
+	return []aa.AllowlistInput{{
+		Target:               token,
+		HasSelectorAllowlist: true,
+		Selectors:            [][4]byte{{0xa9, 0x05, 0x9c, 0xbb}}, // transfer
+		HasERC20SpendLimit:   true,
+		ERC20SpendLimit:      new(big.Int).Mul(big.NewInt(100), oneToken),
+	}}
+}
+
 func policiedInstall(entity uint32, signer, token common.Address) ([]byte, error) {
-	validUntil := uint64(time.Now().Add(7 * 24 * time.Hour).Unix())
-	allowlist, err := aa.PackAllowlistInstallData(entity, []aa.AllowlistInput{
-		{Target: token, Selectors: [][4]byte{{0xa9, 0x05, 0x9c, 0xbb}}}, // transfer
-	})
+	inputs := allowlistInputs(token)
+	allowlistHook, err := aa.AllowlistValidationHook(entity, inputs)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("allowlist validation hook: %w", err)
 	}
-	timeRange, err := aa.PackTimeRangeInstallData(entity, validUntil, 0)
+	timeRangeHook, err := aa.TimeRangeValidationHook(entity, uint64(time.Now().Add(7*24*time.Hour).Unix()), 0)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("time-range hook: %w", err)
 	}
 	return aa.PackSessionSignerInstall(aa.SessionGrant{
 		EntityID: entity,
 		Signer:   signer,
 		Global:   true,
-		Hooks:    [][]byte{allowlist, timeRange},
+		Hooks:    [][]byte{allowlistHook, aa.AllowlistExecHook(entity), timeRangeHook},
 	})
 }
 
-// policiedUninstall rebuilds the prior grant's teardown. The hook data must be
-// one entry per installed hook in the ACCOUNT's stored order — reverse of
-// install, because the hook set is a prepend-on-add list (§3.5). A misrouted
-// entry does not revert; it strands module state silently, which is why the
-// probes read the cap back rather than trusting the receipt.
-func policiedUninstall(entity uint32) ([]byte, error) {
-	singleSigner, err := aa.PackSingleSignerUninstallData(entity)
-	if err != nil {
-		return nil, err
-	}
+// policiedUninstall rebuilds the prior grant's teardown.
+//
+// Two things this got wrong the first time, both of which mined a SUCCESSFUL
+// transaction that cleared nothing — the §3.5 hazard exactly:
+//
+//   - PackSessionSignerUninstall already packs the validation module's own
+//     teardown (PackSingleSignerUninstallData) as uninstallData. Passing it
+//     AGAIN as a hook entry displaced the allowlist's payload, so the
+//     allowlist was handed data meant for a different module.
+//   - hookUninstallData is one entry per installed hook in the ACCOUNT's
+//     STORED order — the reverse of install, because the hook set is a
+//     prepend-on-add list. Install order is [allowlist-validation,
+//     allowlist-exec, time-range], so stored order is [time-range,
+//     allowlist-exec, allowlist-validation].
+//
+// The allowlist's teardown is the SAME (entityId, inputs) tuple it was
+// installed with; its exec-hook entry carries no install data, so its slot is
+// empty. A misrouted entry does not revert — onUninstall reverts are caught
+// and the state stranded — which is why every probe reads the cap back.
+func policiedUninstall(entity uint32, token common.Address) ([]byte, error) {
 	timeRange, err := aa.PackTimeRangeUninstallData(entity)
 	if err != nil {
 		return nil, err
 	}
-	// Stored order: validation hooks reversed (timeRange installed last, so it
-	// is first), then execution hooks. The allowlist appears twice — once as a
-	// validation hook, once as an execution hook — and takes the same
-	// (entityId, inputs) payload it was installed with, which for the spike's
-	// fixture is the allowlist install data.
-	return aa.PackSessionSignerUninstall(entity, [][]byte{timeRange, singleSigner})
+	allowlist, err := aa.PackAllowlistInstallData(entity, allowlistInputs(token))
+	if err != nil {
+		return nil, err
+	}
+	return aa.PackSessionSignerUninstall(entity, [][]byte{timeRange, nil, allowlist})
 }
 
 // attemptDeferred sends one probe: `deferred` runs during validation under the
