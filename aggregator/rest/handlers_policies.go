@@ -136,7 +136,7 @@ func (s *Server) SubmitWalletPolicy(ctx echo.Context, address generated.Ethereum
 		return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
 	}
 
-	policy, err := s.engine.SubmitSessionPolicy(user, taskengine.SessionPolicyInput{
+	policy, superseded, err := s.engine.SubmitSessionPolicy(user, taskengine.SessionPolicyInput{
 		Wallet:        wallet,
 		ChainID:       int64(req.ChainId),
 		AgentLabel:    req.AgentLabel,
@@ -146,7 +146,7 @@ func (s *Server) SubmitWalletPolicy(ctx echo.Context, address generated.Ethereum
 	if err != nil {
 		return mapPolicyError(err)
 	}
-	return ctx.JSON(http.StatusCreated, policyToAPI(policy))
+	return ctx.JSON(http.StatusCreated, submitPolicyToAPI(policy, superseded))
 }
 
 // ListWalletPolicies lists the wallet's grants, newest first.
@@ -282,6 +282,40 @@ func policyToAPI(p *model.SessionPolicy) generated.SessionPolicy {
 	return out
 }
 
+// submitPolicyToAPI renders the submit response: the stored policy plus the
+// grants this submit replaced.
+//
+// SubmitPolicyResponse is `allOf: [SessionPolicy, {supersededPolicyIds}]`,
+// which oapi-codegen flattens into a separate struct rather than an embedded
+// one — hence the field-by-field copy. TestSubmitPolicyResponseCarriesEverySessionPolicyField
+// fails if the two schemas ever drift apart.
+func submitPolicyToAPI(p *model.SessionPolicy, superseded []string) generated.SubmitPolicyResponse {
+	base := policyToAPI(p)
+	out := generated.SubmitPolicyResponse{
+		Id:             base.Id,
+		Runner:         base.Runner,
+		ChainId:        base.ChainId,
+		Status:         generated.SubmitPolicyResponseStatus(base.Status),
+		EntityId:       base.EntityId,
+		SessionSigner:  base.SessionSigner,
+		AgentLabel:     base.AgentLabel,
+		Justification:  base.Justification,
+		AllowedActions: base.AllowedActions,
+		Erc20SpendCap:  base.Erc20SpendCap,
+		ValidUntil:     base.ValidUntil,
+		CreatedAt:      base.CreatedAt,
+	}
+	// Always present, empty on a first grant: a client checking "did this
+	// replace anything" should read an empty array, not have to treat a
+	// missing key as the same thing.
+	ids := make([]generated.Ulid, 0, len(superseded))
+	for _, id := range superseded {
+		ids = append(ids, generated.Ulid(id))
+	}
+	out.SupersededPolicyIds = &ids
+	return out
+}
+
 // typedDataJSON renders the eth_signTypedData_v4 payload for the prepare
 // response — built from the SAME fields the digest was computed over, so the
 // wallet signs exactly what submit will verify.
@@ -337,6 +371,14 @@ func mapPolicyError(err error) error {
 	case errors.Is(err, taskengine.ErrSessionEntityTaken):
 		return &restmw.HTTPError{Status: http.StatusConflict, Code: "POLICIES_ENTITY_TAKEN",
 			Title: "Grant allocation superseded", Detail: err.Error() + " Prepare the grant again."}
+	case errors.Is(err, taskengine.ErrSessionPolicySupersedeFailed):
+		// The grant IS stored. Do not tell the client to retry the submit —
+		// the entity is spent, so a retry only fails. The wallet now holds
+		// more than one usable grant and will refuse to execute until the
+		// leftovers are revoked (or another grant replaces them all).
+		return &restmw.HTTPError{Status: http.StatusInternalServerError, Code: "POLICIES_SUPERSEDE_FAILED",
+			Title: "Grant stored, previous grant not replaced", Detail: err.Error() +
+				" List this wallet's policies and revoke the older usable ones, or grant again to replace them."}
 	case errors.Is(err, taskengine.ErrGrantSignerMismatch):
 		return badRequest("POLICIES_BAD_SIGNATURE", "Signature does not match", err.Error())
 	default:

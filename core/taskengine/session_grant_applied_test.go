@@ -25,7 +25,7 @@ func storedPendingGrant(t *testing.T) (*Engine, *model.User, common.Address, *mo
 		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "Bot", Permissions: testPermissions(),
 	})
 	require.NoError(t, err)
-	stored, err := engine.SubmitSessionPolicy(user, SessionPolicyInput{
+	stored, _, err := engine.SubmitSessionPolicy(user, SessionPolicyInput{
 		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "Bot", Permissions: testPermissions(),
 	}, prepared.Policy.ID, prepared.Policy.EntityID, prepared.Policy.Grant.Deadline,
 		signDigest(t, ownerKey, prepared.Digest))
