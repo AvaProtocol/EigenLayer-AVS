@@ -72,7 +72,7 @@ func NewWorkerConfig(configPath string) (*WorkerConfig, error) {
 // False means every operation it sends must be covered by the smart wallet's
 // own balance.
 func (c *WorkerConfig) SponsorshipConfigured() bool {
-	return config.ResolveAlchemyPaymasterPolicyID(c.AlchemyPaymasterPolicyID, c.GasManagerPolicyID) != ""
+	return config.ResolveAlchemyPaymasterPolicyID(c.Environment, c.AlchemyPaymasterPolicyID, c.GasManagerPolicyID) != ""
 }
 
 // ToSmartWalletConfig converts the worker's raw config into the shared SmartWalletConfig
@@ -107,7 +107,7 @@ func (c *WorkerConfig) ToSmartWalletConfig() (*config.SmartWalletConfig, error) 
 
 	return &config.SmartWalletConfig{
 		AlchemyPaymasterPolicyID: config.ResolveAlchemyPaymasterPolicyID(
-			c.AlchemyPaymasterPolicyID, c.GasManagerPolicyID),
+			c.Environment, c.AlchemyPaymasterPolicyID, c.GasManagerPolicyID),
 		GasManagerWebhookSecret: config.ResolveGasManagerWebhookSecret(c.GasManagerWebhookSecret),
 
 		EthRpcUrl:             c.EthRpcUrl,

@@ -872,6 +872,18 @@ func NewConfig(configFilePath string) (*Config, error) {
 			"default_chain_id", config.DefaultChainID)
 	}
 
+	// Say once, at boot, whether this process can have operations sponsored.
+	// A development process is refused deliberately — see
+	// SponsorshipRefusedForEnvironment — and that should read as a decision
+	// rather than as a missing policy someone ought to go and set.
+	if SponsorshipRefusedForEnvironment(string(configRaw.Environment)) {
+		logger.Info("Gas Manager sponsorship refused: development environment; operations run self-funded",
+			"hint", "the policy's webhook points at the production gateway; fund the test smart wallet instead")
+	} else if config.AlchemyPaymasterPolicyID == "" {
+		logger.Warn("No Gas Manager policy configured: operations run self-funded",
+			"hint", "set alchemy_paymaster_policy_id or ALCHEMY_PAYMASTER_POLICY_ID")
+	}
+
 	// If HttpBindAddress is empty, HTTP server will be disabled (startup code will skip starting it)
 	config.validate()
 	return config, nil
@@ -963,13 +975,36 @@ func firstNonEmpty(values ...string) string {
 // file, and the gateway and worker disagreeing about where sponsorship comes
 // from is exactly how worker-routed operations ended up unsponsored (#722).
 // One resolver, so they cannot drift apart again.
-func ResolveAlchemyPaymasterPolicyID(canonicalYaml, legacyYaml string) string {
+func ResolveAlchemyPaymasterPolicyID(environment, canonicalYaml, legacyYaml string) string {
+	if SponsorshipRefusedForEnvironment(environment) {
+		return ""
+	}
 	return strings.TrimSpace(firstNonEmpty(
 		canonicalYaml,
 		os.Getenv("ALCHEMY_PAYMASTER_POLICY_ID"),
 		legacyYaml,
 		os.Getenv("ALCHEMY_GAS_POLICY_ID"),
 	))
+}
+
+// SponsorshipRefusedForEnvironment reports whether this process must not ask
+// Alchemy to sponsor, whatever its config says.
+//
+// A development process must not, and the reason is not tidiness. The Gas
+// Manager policy's custom-rules webhook is a single URL pointing at the
+// PRODUCTION gateway, so a locally-run gateway or worker that requests
+// sponsorship has Alchemy call production to approve it. Production then
+// decides using its own wallet records and its own credit ledger — so a local
+// test either gets a confusing denial for a wallet production has never heard
+// of, or, for a shared test wallet production does know, succeeds and bills
+// the production sponsorship budget for someone's laptop.
+//
+// This is a refusal rather than a convention because the policy id resolves
+// from the ENVIRONMENT as well as from yaml: an ALCHEMY_PAYMASTER_POLICY_ID
+// exported in a shell or sitting in a .env is enough to opt a local process in
+// by accident. Development runs self-funded; fund the test wallet instead.
+func SponsorshipRefusedForEnvironment(environment string) bool {
+	return strings.EqualFold(strings.TrimSpace(environment), string(sdklogging.Development))
 }
 
 // ResolveGasManagerWebhookSecret returns the secret echoed to Alchemy as
@@ -981,7 +1016,7 @@ func ResolveGasManagerWebhookSecret(yamlValue string) string {
 }
 
 func resolveAlchemyPaymasterPolicyID(raw ConfigRaw) string {
-	return ResolveAlchemyPaymasterPolicyID(raw.AlchemyPaymasterPolicyID, raw.GasManagerPolicyID)
+	return ResolveAlchemyPaymasterPolicyID(string(raw.Environment), raw.AlchemyPaymasterPolicyID, raw.GasManagerPolicyID)
 }
 
 func ReadYamlConfig(path string, o interface{}) error {

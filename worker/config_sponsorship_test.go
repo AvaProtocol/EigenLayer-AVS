@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 )
 
 // A worker that cannot request sponsorship sends operations the smart wallet
@@ -88,4 +90,64 @@ func TestWorkerPolicyResolutionMatchesTheGateway(t *testing.T) {
 			"a policy id with stray whitespace would be rejected by Alchemy as an unknown policy")
 		require.Equal(t, "s", smartWalletConfig.GasManagerWebhookSecret)
 	})
+}
+
+// A development process must never draw on the Gas Manager policy.
+//
+// The policy's custom-rules webhook is a single URL pointing at the PRODUCTION
+// gateway, so a locally-run worker that requests sponsorship has production
+// approve it — deciding against production's wallet records and charging
+// production's credit ledger for a laptop. Refused in code rather than by
+// convention, because the policy id also resolves from the environment: an
+// exported ALCHEMY_PAYMASTER_POLICY_ID is enough to opt in by accident.
+func TestDevelopmentRefusesSponsorshipEvenWhenConfigured(t *testing.T) {
+	t.Setenv("ALCHEMY_PAYMASTER_POLICY_ID", "")
+	t.Setenv("ALCHEMY_GAS_POLICY_ID", "")
+
+	cfg := &WorkerConfig{
+		ChainID:                  11155111,
+		Environment:              "development",
+		AlchemyPaymasterPolicyID: "policy-uuid",
+		GasManagerWebhookSecret:  "shhh",
+	}
+	require.False(t, cfg.SponsorshipConfigured(),
+		"a development worker must not report itself as able to sponsor")
+
+	smartWalletConfig, err := cfg.ToSmartWalletConfig()
+	require.NoError(t, err)
+	require.Empty(t, smartWalletConfig.AlchemyPaymasterPolicyID,
+		"an explicitly configured policy must still be dropped in development")
+}
+
+// The accident this guards against: the policy is never written to a local
+// config file, it just exists in the developer's environment.
+func TestDevelopmentIgnoresAPolicyInheritedFromTheEnvironment(t *testing.T) {
+	t.Setenv("ALCHEMY_PAYMASTER_POLICY_ID", "leaked-from-shell")
+
+	cfg := &WorkerConfig{ChainID: 11155111, Environment: "development"}
+	require.False(t, cfg.SponsorshipConfigured())
+
+	smartWalletConfig, err := cfg.ToSmartWalletConfig()
+	require.NoError(t, err)
+	require.Empty(t, smartWalletConfig.AlchemyPaymasterPolicyID)
+
+	// Same worker, production environment: the policy applies.
+	cfg.Environment = "production"
+	require.True(t, cfg.SponsorshipConfigured())
+	smartWalletConfig, err = cfg.ToSmartWalletConfig()
+	require.NoError(t, err)
+	require.Equal(t, "leaked-from-shell", smartWalletConfig.AlchemyPaymasterPolicyID,
+		"the guard must key on the environment, not disable sponsorship outright")
+}
+
+// Only development is refused. Anything else — production, staging, an unset
+// value — keeps whatever sponsorship it was given, so the guard cannot quietly
+// switch a deployed chain to self-funded.
+func TestOnlyDevelopmentIsRefused(t *testing.T) {
+	for _, env := range []string{"production", "Production", "staging", ""} {
+		require.False(t, config.SponsorshipRefusedForEnvironment(env), "env %q", env)
+	}
+	for _, env := range []string{"development", "Development", "  development  "} {
+		require.True(t, config.SponsorshipRefusedForEnvironment(env), "env %q", env)
+	}
 }

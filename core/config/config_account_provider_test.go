@@ -3,6 +3,8 @@ package config
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // Mirrors the aa-package default test at the config layer, because the two
@@ -91,4 +93,24 @@ func TestTypoIsRejectedAtLoad(t *testing.T) {
 	if err := c.ValidateAccountProvider(); err == nil {
 		t.Fatal("a typo must be rejected at config load, not at first derivation")
 	}
+}
+
+// The gateway resolves the same way the worker does, through the same
+// function — including the development refusal. Pinned here as well as in the
+// worker package because the two disagreeing about where sponsorship comes
+// from is the bug this whole path exists to prevent.
+func TestSponsorshipResolutionIsSharedAndEnvironmentGated(t *testing.T) {
+	t.Setenv("ALCHEMY_PAYMASTER_POLICY_ID", "")
+	t.Setenv("ALCHEMY_GAS_POLICY_ID", "")
+
+	require.Equal(t, "policy", ResolveAlchemyPaymasterPolicyID("production", "policy", ""))
+	require.Equal(t, "legacy", ResolveAlchemyPaymasterPolicyID("production", "", "legacy"),
+		"the legacy yaml alias must keep working")
+	require.Empty(t, ResolveAlchemyPaymasterPolicyID("development", "policy", ""),
+		"development must not draw on the production policy, however it is configured")
+
+	t.Setenv("ALCHEMY_PAYMASTER_POLICY_ID", "from-env")
+	require.Equal(t, "from-env", ResolveAlchemyPaymasterPolicyID("production", "", ""))
+	require.Empty(t, ResolveAlchemyPaymasterPolicyID("development", "", ""),
+		"an environment-inherited policy is exactly the accident the guard is for")
 }

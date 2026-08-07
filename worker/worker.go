@@ -77,7 +77,17 @@ func (w *Worker) Start(ctx context.Context) error {
 	// withdrawal failing: without a policy every operation this worker sends
 	// must be paid for by the smart wallet itself, so a wallet holding only
 	// tokens cannot move them.
-	if !w.config.SponsorshipConfigured() {
+	switch {
+	case config.SponsorshipRefusedForEnvironment(w.config.Environment):
+		// Deliberate, and not a misconfiguration to fix: the policy's webhook
+		// points at the production gateway, so a development process asking
+		// for sponsorship would have production approve — and pay for — it.
+		w.logger.Info("Chain worker runs self-funded: sponsorship is refused in a development environment",
+			"chain_id", w.config.ChainID,
+			"chain_name", w.config.ChainName,
+			"hint", "fund the test smart wallet with the chain's native token",
+		)
+	case !w.config.SponsorshipConfigured():
 		w.logger.Warn("Chain worker has no Gas Manager policy: operations it sends will be self-funded",
 			"chain_id", w.config.ChainID,
 			"chain_name", w.config.ChainName,
