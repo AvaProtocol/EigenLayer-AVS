@@ -236,9 +236,25 @@ func livePermissions() SessionPermissions {
 		SpendCap: &model.ERC20SpendCap{
 			Token: &token, Amount: "1000000000000", GrantedCap: "1000000000000",
 		},
-		ValidUntilMs: time.Now().Add(7 * 24 * time.Hour).UnixMilli(),
+		ValidUntilMs: liveGrantValidUntilMs,
 	}
 }
+
+// liveGrantValidUntilMs is fixed for the process, and has to be.
+//
+// Submit does not trust the payload it is handed: it re-runs
+// PrepareSessionGrant and verifies the owner's signature against the digest it
+// rebuilds. So every input that reaches the deferred call must be identical at
+// prepare and at submit. ValidUntil reaches the TimeRange hook, which stores
+// unix SECONDS, so recomputing it from time.Now() at submit is invisible until
+// the two calls land either side of a second boundary — and then the rebuilt
+// digest differs and the signature recovers to a stranger.
+//
+// That went from theoretical to routine when #731 added a per-candidate chain
+// read to prepare (teardownVerifier dials per check), pushing prepare into the
+// hundreds of milliseconds. A real client sends the same validUntil it prepared
+// with; a test that regenerates it is the one telling the lie.
+var liveGrantValidUntilMs = time.Now().Add(7 * 24 * time.Hour).UnixMilli()
 
 func approveABIForReplace() []interface{} {
 	return []interface{}{
