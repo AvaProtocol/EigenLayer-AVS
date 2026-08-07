@@ -25,6 +25,10 @@ ecdsa_private_key: <testnet-ecdsa-private-key-hex>
 
 # EigenLayer contracts live on Sepolia (the AVS registration chain).
 # Set via .env.local / env.
+# Supply a chain RPC you control. Do NOT point this at a free public endpoint
+# (publicnode, *.base.org, ankr, llamarpc, ...): they rate-limit under load,
+# which makes runs fail nondeterministically on whichever request happens to be
+# in flight rather than on anything real.
 eth_rpc_url: ${ETH_RPC_URL}
 eth_ws_url:  ${ETH_WS_URL}
 
@@ -55,9 +59,9 @@ tenderly_access_key: ""
 # entrypoint) and any test that takes the default chain context.
 smart_wallet:
   eth_rpc_url:            ${ETH_RPC_URL}
-  bundler_url:            ${SEPOLIA_BUNDLER_URL}
-  # bundler_provider defaults to 'alchemy' (URL derived from alchemy_api_key +
-  # chain subdomain). Set to 'self_hosted' to use bundler_url (Voltaire).
+  # bundler_provider: alchemy (default) derives the URL from alchemy_api_key +
+  # the chain subdomain and never reads bundler_url. self_hosted is only for a
+  # locally-run Voltaire — shared bundler-*.avaprotocol.org hosts are retired.
   bundler_provider:       alchemy
   alchemy_api_key:        ${ALCHEMY_API_KEY}
   controller_private_key: <testnet-controller-private-key-hex>
@@ -72,7 +76,6 @@ chains:
     smart_wallet:
       eth_rpc_url:            ${ETH_RPC_URL}
       eth_ws_url:             ${ETH_WS_URL}
-      bundler_url:            ${SEPOLIA_BUNDLER_URL}
       bundler_provider:       alchemy
       alchemy_api_key:        ${ALCHEMY_API_KEY}
       controller_private_key: <testnet-controller-private-key-hex>
@@ -85,7 +88,6 @@ chains:
     smart_wallet:
       eth_rpc_url:            ${BASE_SEPOLIA_RPC_URL}
       eth_ws_url:             ${BASE_SEPOLIA_WS_URL}
-      bundler_url:            ${BASE_SEPOLIA_BUNDLER_URL}
       bundler_provider:       alchemy
       alchemy_api_key:        ${ALCHEMY_API_KEY}
       controller_private_key: <testnet-controller-private-key-hex>
@@ -114,3 +116,15 @@ notifications:
     provider:     context-memory
     api_endpoint: "http://localhost:3010"
     api_key:      ""
+
+# Gas Manager sponsorship is DISABLED for local/development runs, deliberately.
+#
+# The policy's custom-rules webhook is a single URL pointing at the PRODUCTION
+# gateway, so a locally-run process that requests sponsorship has production
+# approve it — deciding against production's wallet records and billing
+# production's budget for your machine. Leave this true locally and fund the
+# test smart wallet with the chain's native token instead.
+#
+# It is an explicit setting rather than an inference from `environment` so that
+# changing log verbosity can never change who pays for gas.
+disable_gas_sponsorship: true

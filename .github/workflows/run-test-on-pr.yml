@@ -64,14 +64,20 @@ jobs:
           # Get list of changed files
           CHANGED_FILES=$(git diff --name-only origin/$BASE_BRANCH...HEAD)
 
-          # Check if any changes are in relevant directories
-          RELEVANT_CHANGES=$(echo "$CHANGED_FILES" | grep -E '\.go$|go\.mod|go\.sum|^core/|^pkg/|^aggregator/|^operator/|^model/|^cmd/|^version/|^config/')
+          # Check if any changes are in relevant directories.
+          # `|| true` is required: with bash -e, grep exit 1 (no match) aborts
+          # the job as failure instead of setting should_run=false.
+          RELEVANT_CHANGES=$(echo "$CHANGED_FILES" | grep -E '\.go$|go\.mod|go\.sum|^core/|^pkg/|^aggregator/|^operator/|^model/|^cmd/|^version/|^config/' || true)
 
           if [ -n "$RELEVANT_CHANGES" ]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "Relevant changes:"
+            echo "$RELEVANT_CHANGES"
           else
             echo "should_run=false" >> $GITHUB_OUTPUT
             echo "No relevant changes found. Skipping tests."
+            echo "Changed files:"
+            echo "$CHANGED_FILES"
           fi
 
   lint:
@@ -89,13 +95,14 @@ jobs:
         uses: ./.github/actions/setup-test-config
         with:
           chain-endpoint: ${{ secrets.CHAIN_ENDPOINT }}
-          bundler-rpc: ${{ secrets.BUNDLER_RPC }}
           tenderly-account: ${{ vars.TENDERLY_ACCOUNT }}
           tenderly-project: ${{ vars.TENDERLY_PROJECT }}
           controller-private-key: ${{ secrets.CONTROLLER_PRIVATE_KEY }}
           tenderly-access-key: ${{ secrets.TENDERLY_ACCESS_KEY }}
           owner-eoa: ${{ vars.OWNER_EOA }}
           moralis-api-key: ${{ secrets.MORALIS_API_KEY }}
+          # Required: CI uses Alchemy (production path). Missing key fails closed.
+          alchemy-api-key: ${{ secrets.ALCHEMY_API_KEY }}
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -151,7 +158,6 @@ jobs:
         uses: ./.github/actions/setup-test-config
         with:
           chain-endpoint: ${{ secrets.CHAIN_ENDPOINT }}
-          bundler-rpc: ${{ secrets.BUNDLER_RPC }}
           tenderly-account: ${{ vars.TENDERLY_ACCOUNT }}
           tenderly-project: ${{ vars.TENDERLY_PROJECT }}
           controller-private-key: ${{ secrets.CONTROLLER_PRIVATE_KEY }}
@@ -164,6 +170,8 @@ jobs:
           # action exports it to the job environment for the test step.
           test-private-key: ${{ secrets.TEST_PRIVATE_KEY }}
           moralis-api-key: ${{ secrets.MORALIS_API_KEY }}
+          # Required: CI uses Alchemy (production path). Missing key fails closed.
+          alchemy-api-key: ${{ secrets.ALCHEMY_API_KEY }}
 
       - name: Run Go test
         env:

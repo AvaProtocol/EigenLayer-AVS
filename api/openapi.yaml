@@ -1791,6 +1791,25 @@ components:
           format: int64
           description: Unix milliseconds.
 
+    SubmitPolicyResponse:
+      allOf:
+        - $ref: '#/components/schemas/SessionPolicy'
+        - type: object
+          required: [supersededPolicyIds]
+          properties:
+            supersededPolicyIds:
+              type: array
+              items: { $ref: '#/components/schemas/Ulid' }
+              description: |
+                Grants revoked to keep this runner's authority a singleton —
+                the previous grants this submit replaced. Their `status` now
+                reads `revoked`; the array distinguishes a replacement the
+                gateway performed from one the user asked for via
+                `DELETE .../policies/{policyId}`.
+
+                Empty on a first grant. Non-empty means the user's earlier
+                permission is gone, which is worth reflecting in the UI.
+
     SessionPolicyList:
       type: object
       required: [items]
@@ -2577,6 +2596,21 @@ paths:
         allocation inside the write, and stores the policy as `pending`. The
         install itself rides the first workflow operation on this wallet —
         nothing reaches the chain here.
+
+        **This REPLACES the runner's previous grants.** A wallet carries at
+        most one usable grant: the send path resolves exactly one and refuses
+        to execute when it finds more, so grants do not stack. Every other
+        usable grant on this runner is revoked as part of this call, and the
+        ones revoked come back in `supersededPolicyIds`. There is no flag to
+        opt out, and clients do not need to revoke the previous grant first.
+
+        Replacement is scoped to the runner, not to a capability: submitting a
+        grant for one capability revokes the runner's grant for any other.
+
+        Off-chain only. The superseded grants' validation entities and ERC-20
+        spend caps stay installed on the account until the owner signs
+        `uninstallValidation` — replacing a grant does not reduce what the
+        account could authorize on chain, only what this gateway will use.
       operationId: submitWalletPolicy
       requestBody:
         required: true
@@ -2588,7 +2622,7 @@ paths:
           description: Grant stored; the gateway may now execute within it.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/SessionPolicy' }
+              schema: { $ref: '#/components/schemas/SubmitPolicyResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }

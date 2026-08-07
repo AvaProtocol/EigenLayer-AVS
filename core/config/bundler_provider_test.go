@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestActiveBundlerURL(t *testing.T) {
 	cases := []struct {
@@ -83,6 +86,36 @@ func TestBundlerConfigured(t *testing.T) {
 	}
 	if (&SmartWalletConfig{BundlerProvider: "self_hosted"}).BundlerConfigured() {
 		t.Fatal("self_hosted without url should report not configured")
+	}
+}
+
+func TestBundlerEndpointLabel(t *testing.T) {
+	// Alchemy embeds the key in the path — must never appear in the label.
+	alchemy := &SmartWalletConfig{ChainID: 11155111, AlchemyAPIKey: "super-secret-key"}
+	got := alchemy.BundlerEndpointLabel()
+	if got != "https://eth-sepolia.g.alchemy.com/v2/***" {
+		t.Fatalf("alchemy label: got %q", got)
+	}
+	if strings.Contains(got, "super-secret-key") {
+		t.Fatalf("alchemy label leaked key: %q", got)
+	}
+
+	// Self-hosted with apikey query param.
+	selfHosted := &SmartWalletConfig{
+		BundlerProvider: BundlerProviderSelfHosted,
+		BundlerURL:      "https://bundler.example/rpc?apikey=sekrit",
+	}
+	got = selfHosted.BundlerEndpointLabel()
+	if got != "https://bundler.example/rpc?***" {
+		t.Fatalf("self_hosted label: got %q", got)
+	}
+
+	// Unresolved alchemy (no key) — still log-safe.
+	if label := (&SmartWalletConfig{ChainID: 1}).BundlerEndpointLabel(); label != "alchemy:unresolved" {
+		t.Fatalf("unresolved label: got %q", label)
+	}
+	if (*SmartWalletConfig)(nil).BundlerEndpointLabel() != "" {
+		t.Fatal("nil config should return empty label")
 	}
 }
 

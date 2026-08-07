@@ -4,8 +4,10 @@
 # Usage: ./analyze-userop.sh <userop-hash-or-tx-hash> [chain]
 #   chain: base, sepolia, mainnet (default: base)
 #
-# Required environment variables (set in .env file):
-# - BASE_BUNDLER_RPC or SEPOLIA_BUNDLER_RPC: Bundler RPC URL with API key
+# Environment variables (set in .env file):
+# - BASE_BUNDLER_RPC / SEPOLIA_BUNDLER_RPC / MAINNET_BUNDLER_RPC (optional):
+#   full bundler URL (e.g. https://eth-sepolia.g.alchemy.com/v2/$ALCHEMY_API_KEY).
+#   When unset, falls back to a local Voltaire at http://localhost:4440/rpc.
 # - ETHERSCAN_API_KEY or BASESCAN_API_KEY: API key for Etherscan/Basescan API
 
 # Load environment variables from .env file

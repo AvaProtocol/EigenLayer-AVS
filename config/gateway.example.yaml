@@ -20,6 +20,10 @@ ecdsa_private_key: <testnet-ecdsa-private-key-hex>
 
 # EigenLayer contracts live on Sepolia (the AVS registration chain).
 # Set via .env.local / env.
+# Supply a chain RPC you control. Do NOT point this at a free public endpoint
+# (publicnode, *.base.org, ankr, llamarpc, ...): they rate-limit under load,
+# which makes runs fail nondeterministically on whichever request happens to be
+# in flight rather than on anything real.
 eth_rpc_url: ${ETH_RPC_URL}
 eth_ws_url:  ${ETH_WS_URL}
 
@@ -89,23 +93,23 @@ smart_wallet:
   # the chain's Alchemy subdomain and NEVER falls back to bundler_url, so no
   # *_BUNDLER_URL is needed on this path. A wallet-op chain configured for
   # alchemy with no key — or an alchemy-unmapped chain — hard-errors at send
-  # time. 'self_hosted' remains for a locally-run Voltaire; the shared Voltaire
-  # bundlers this example used to assume were retired 2026-07.
+  # time. 'self_hosted' remains only for a locally-run Voltaire; the shared
+  # bundler-*.avaprotocol.org hosts were retired (#725).
   bundler_provider:       alchemy
-  # account_provider selects the smart-account implementation. It now defaults
-  # to modular_account_v2 on every chain; this line names the value rather than
-  # opting in to it.
+  # account_provider selects the smart-account implementation. modular_account_v2
+  # is the only supported value and the default when the line is absent; this
+  # line names it rather than opting in to it.
   #
-  # Be aware of what it controls: the setting decides the DERIVED ADDRESS for
-  # every (owner, salt). Changing it moves every wallet on the chain, and a
-  # wallet created under the other provider stops executing — dispatch follows
-  # the chain's setting, not the individual wallet.
-  #   modular_account_v2  Alchemy MA v2 via the canonical AccountFactory (v0.7)
-  #   simple_account      legacy v0.6 SimpleAccount via smart_wallet.factory_address
+  # simple_account is REFUSED at config load. It named the legacy v0.6
+  # derivation whose send path was removed with the EntryPoint v0.7 cutover, so
+  # a chain pinned to it would derive wallets nothing can execute against.
   account_provider:       modular_account_v2
   alchemy_api_key:        ${ALCHEMY_API_KEY}
   controller_private_key: <testnet-controller-private-key-hex>
-  paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
+  # paymaster_address is INERT. It named the v0.6 verifying paymaster, removed
+  # with the EntryPoint v0.7 cutover; sponsorship is alchemy_paymaster_policy_id.
+  # Still parsed so older configs load, and logged once as ignored. Leave unset.
+  paymaster_address:
 
 # Chain worker registry — gateway routes tasks to workers by chain_id.
 # In production (Railway): worker-sepolia.railway.internal:50051
@@ -183,3 +187,15 @@ notifications:
     provider:     context-memory
     api_endpoint: "http://localhost:3010"
     api_key:      ""
+
+# Gas Manager sponsorship is DISABLED for local/development runs, deliberately.
+#
+# The policy's custom-rules webhook is a single URL pointing at the PRODUCTION
+# gateway, so a locally-run process that requests sponsorship has production
+# approve it — deciding against production's wallet records and billing
+# production's budget for your machine. Leave this true locally and fund the
+# test smart wallet with the chain's native token instead.
+#
+# It is an explicit setting rather than an inference from `environment` so that
+# changing log verbosity can never change who pays for gas.
+disable_gas_sponsorship: true

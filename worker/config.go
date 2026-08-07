@@ -23,6 +23,26 @@ type WorkerConfig struct {
 	BundlerProvider string `yaml:"bundler_provider"`
 	AlchemyAPIKey   string `yaml:"alchemy_api_key"`
 
+	// Gas Manager sponsorship. A worker that omits these sends UNSPONSORED
+	// operations: priceOperationV07 only asks Alchemy to sponsor when a policy
+	// id is present, and otherwise requires the smart wallet to cover its own
+	// prefund — which a wallet holding only tokens cannot do.
+	//
+	// The webhook itself stays on the gateway (POST /webhooks/gas-manager);
+	// what the worker needs is the SECRET, because it is echoed to Alchemy as
+	// webhookData and the gateway's webhook rejects any request whose value
+	// does not match.
+	AlchemyPaymasterPolicyID string `yaml:"alchemy_paymaster_policy_id"`
+	// DisableGasSponsorship opts this worker out of the Gas Manager policy.
+	// Local/development worker configs set it — see
+	// config.SmartWalletConfig.SponsorshipPolicyID for why that matters.
+	DisableGasSponsorship bool `yaml:"disable_gas_sponsorship"`
+	// GasManagerPolicyID is the legacy alias, accepted for the same reason the
+	// gateway accepts it: an existing deployment must not silently lose
+	// sponsorship on rename.
+	GasManagerPolicyID      string `yaml:"gas_manager_policy_id"`
+	GasManagerWebhookSecret string `yaml:"gas_manager_webhook_secret"`
+
 	SmartWallet SmartWalletRaw `yaml:"smart_wallet"`
 }
 
@@ -83,6 +103,11 @@ func (c *WorkerConfig) ToSmartWalletConfig() (*config.SmartWalletConfig, error) 
 	paymasterAddr := common.HexToAddress(c.SmartWallet.PaymasterAddress)
 
 	return &config.SmartWalletConfig{
+		AlchemyPaymasterPolicyID: config.ResolveAlchemyPaymasterPolicyID(
+			c.AlchemyPaymasterPolicyID, c.GasManagerPolicyID),
+		DisableGasSponsorship:   c.DisableGasSponsorship,
+		GasManagerWebhookSecret: config.ResolveGasManagerWebhookSecret(c.GasManagerWebhookSecret),
+
 		EthRpcUrl:             c.EthRpcUrl,
 		EthWsUrl:              c.EthWsUrl,
 		BundlerURL:            c.BundlerURL,

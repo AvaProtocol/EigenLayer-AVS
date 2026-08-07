@@ -25,7 +25,7 @@ func storedPendingGrant(t *testing.T) (*Engine, *model.User, common.Address, *mo
 		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "Bot", Permissions: testPermissions(),
 	})
 	require.NoError(t, err)
-	stored, err := engine.SubmitSessionPolicy(user, SessionPolicyInput{
+	stored, _, err := engine.SubmitSessionPolicy(user, SessionPolicyInput{
 		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "Bot", Permissions: testPermissions(),
 	}, prepared.Policy.ID, prepared.Policy.EntityID, prepared.Policy.Grant.Deadline,
 		signDigest(t, ownerKey, prepared.Digest))
@@ -41,7 +41,7 @@ func TestResolverMarksAppliedAndStopsAttachingTheInstall(t *testing.T) {
 	engine, user, wallet, stored := storedPendingGrant(t)
 	controllerKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	resolver := NewSessionResolver(engine.db, testResolverKey(controllerKey))
+	resolver := NewSessionResolver(engine.db, testResolverKey(controllerKey), nil)
 
 	// First resolution: pending grant → deferred install attached, with the
 	// callback that will record its landing.
@@ -74,8 +74,8 @@ func TestMarkAppliedByIDIsIdempotentAndRaceSafe(t *testing.T) {
 	owner := user.Address
 
 	// Idempotent: marking twice keeps the first record.
-	require.NoError(t, MarkSessionGrantAppliedByID(engine.db, testPolicyChain, owner, stored.ID, "0xfirst"))
-	require.NoError(t, MarkSessionGrantAppliedByID(engine.db, testPolicyChain, owner, stored.ID, "0xsecond"))
+	require.NoError(t, MarkSessionGrantAppliedByID(engine.db, testPolicyChain, owner, wallet, stored.ID, "0xfirst"))
+	require.NoError(t, MarkSessionGrantAppliedByID(engine.db, testPolicyChain, owner, wallet, stored.ID, "0xsecond"))
 	updated, err := engine.GetSessionPolicyByID(user, testPolicyChain, wallet, stored.ID)
 	require.NoError(t, err)
 	require.Equal(t, "0xfirst", updated.Grant.AppliedUserOpHash)
@@ -85,7 +85,7 @@ func TestMarkAppliedByIDIsIdempotentAndRaceSafe(t *testing.T) {
 	_, cleanup, err := engine.RevokeSessionPolicyByID(user, testPolicyChain, wallet, stored.ID)
 	require.NoError(t, err)
 	require.True(t, cleanup, "an applied grant's revoke leaves on-chain state")
-	require.NoError(t, MarkSessionGrantAppliedByID(engine.db, testPolicyChain, owner, stored.ID, "0xlate"))
+	require.NoError(t, MarkSessionGrantAppliedByID(engine.db, testPolicyChain, owner, wallet, stored.ID, "0xlate"))
 	after, err := ListSessionPolicies(engine.db, testPolicyChain, owner)
 	require.NoError(t, err)
 	require.Len(t, after, 1)
@@ -93,5 +93,5 @@ func TestMarkAppliedByIDIsIdempotentAndRaceSafe(t *testing.T) {
 
 	// Deleted-in-flight (a PENDING grant revoked while its op was in the
 	// mempool): no record left; the mark is a no-op, not an error.
-	require.NoError(t, MarkSessionGrantAppliedByID(engine.db, testPolicyChain, owner, "01jarbitrarymissingpolicyid", ""))
+	require.NoError(t, MarkSessionGrantAppliedByID(engine.db, testPolicyChain, owner, wallet, "01jarbitrarymissingpolicyid", ""))
 }

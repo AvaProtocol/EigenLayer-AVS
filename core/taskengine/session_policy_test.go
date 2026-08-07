@@ -65,7 +65,7 @@ func TestSessionResolverReturnsTheWalletsGrant(t *testing.T) {
 		t.Fatalf("StoreSessionPolicy: %v", err)
 	}
 
-	resolve := NewSessionResolver(db, keyFor)
+	resolve := NewSessionResolver(db, keyFor, nil)
 	auth, err := resolve(spChain, spOwner, spWallet)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -113,7 +113,7 @@ func TestSessionResolverDoesNotReplayAnAppliedGrant(t *testing.T) {
 		t.Fatalf("StoreSessionPolicy: %v", err)
 	}
 
-	auth, err := NewSessionResolver(db, keyFor)(spChain, spOwner, spWallet)
+	auth, err := NewSessionResolver(db, keyFor, nil)(spChain, spOwner, spWallet)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestSessionResolverNoGrant(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 	keyFor, _ := spKeyFor(t)
-	auth, err := NewSessionResolver(db, keyFor)(spChain, spOwner, spWallet)
+	auth, err := NewSessionResolver(db, keyFor, nil)(spChain, spOwner, spWallet)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestRevokedGrantIsNotUsableButStillConsumesItsEntity(t *testing.T) {
 		t.Fatalf("StoreSessionPolicy: %v", err)
 	}
 
-	auth, err := NewSessionResolver(db, keyFor)(spChain, spOwner, spWallet)
+	auth, err := NewSessionResolver(db, keyFor, nil)(spChain, spOwner, spWallet)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestTwoUsableGrantsOnOneWalletIsRefused(t *testing.T) {
 			t.Fatalf("StoreSessionPolicy: %v", err)
 		}
 	}
-	if _, err := NewSessionResolver(db, keyFor)(spChain, spOwner, spWallet); err == nil {
+	if _, err := NewSessionResolver(db, keyFor, nil)(spChain, spOwner, spWallet); err == nil {
 		t.Error("expected a refusal when a wallet has two usable grants")
 	}
 }

@@ -24,18 +24,47 @@ health_address: "0.0.0.0:8090"
 gateway_address: "127.0.0.1:2206"
 
 # Chain RPC endpoints. Set via .env.local / env.
+# Supply a chain RPC you control. Do NOT point this at a free public endpoint
+# (publicnode, *.base.org, ankr, llamarpc, ...): they rate-limit under load,
+# which makes runs fail nondeterministically on whichever request happens to be
+# in flight rather than on anything real.
 eth_rpc_url: ${ETH_RPC_URL}
 eth_ws_url:  ${ETH_WS_URL}
 
-# Bundler endpoint. bundler_provider defaults to 'alchemy' in code (URL derived
-# from alchemy_api_key); pinned to self_hosted here so this worker uses bundler_url.
-# Set 'alchemy' + ALCHEMY_API_KEY to route via Alchemy instead.
-# Set the SEPOLIA_BUNDLER_URL env var via .env.local before launching.
-bundler_url:      ${SEPOLIA_BUNDLER_URL}
-bundler_provider: self_hosted
+# Bundler. alchemy (matching production) derives the endpoint from
+# alchemy_api_key + the chain subdomain and never reads bundler_url. Set
+# ALCHEMY_API_KEY in .env.local before launching. self_hosted remains only for
+# a locally-run Voltaire — the shared bundler-*.avaprotocol.org hosts are retired.
+bundler_provider: alchemy
 alchemy_api_key:  ${ALCHEMY_API_KEY}
+
+# Gas Manager sponsorship — MUST match the gateway, or this worker sends
+# UNSPONSORED operations.
+#
+# Sponsorship is requested only when a policy id is present. Without one, every
+# operation this worker sends has to be paid for out of the smart wallet's own
+# balance, so a wallet holding only tokens cannot move them — which is how
+# withdrawals routed through a worker silently stopped being sponsored (#722).
+#
+# The webhook endpoint itself stays on the gateway (POST /webhooks/gas-manager).
+# What the worker needs is the SECRET: it is echoed to Alchemy as webhookData,
+# and the gateway's webhook rejects any request whose value does not match.
+alchemy_paymaster_policy_id: ${ALCHEMY_PAYMASTER_POLICY_ID}
+gas_manager_webhook_secret:  ${GAS_MANAGER_WEBHOOK_SECRET}
 
 # Smart wallet / account abstraction config.
 smart_wallet:
   controller_private_key: <testnet-controller-private-key-hex>
   paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
+
+# Gas Manager sponsorship is DISABLED for local/development runs, deliberately.
+#
+# The policy's custom-rules webhook is a single URL pointing at the PRODUCTION
+# gateway, so a locally-run process that requests sponsorship has production
+# approve it — deciding against production's wallet records and billing
+# production's budget for your machine. Leave this true locally and fund the
+# test smart wallet with the chain's native token instead.
+#
+# It is an explicit setting rather than an inference from `environment` so that
+# changing log verbosity can never change who pays for gas.
+disable_gas_sponsorship: true

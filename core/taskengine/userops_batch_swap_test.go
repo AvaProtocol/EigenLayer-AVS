@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 package taskengine
 
 import (
@@ -35,24 +38,25 @@ import (
 // Uses the same live infra + key as the Sepolia withdraw test (OWNER_EOA + controller key from .env);
 // paymaster sponsors gas and the wallet reimburses, so the wallet needs a little ETH.
 func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
+	// Live Sepolia + paymaster; excluded from CI `go test -short` (make test
+	// / PR unit jobs). Run via: go test ./core/taskengine -run TestUserOpAtomicBatch_Sepolia
+	if testing.Short() {
+		t.Skip("skipping live Sepolia atomic-batch proof under -short")
+	}
 	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
 	if err != nil {
 		cfg, err = config.NewConfig("../../config/test.yaml")
 		if err != nil {
-			t.Skipf("Failed to load test.yaml: %v", err)
+			require.NoError(t, err, "config/test.yaml will not load; copy it from test.example.yaml")
 		}
 	}
 
 	// Confirm we're actually connected to Sepolia before spending testnet funds.
 	tempClient, err := ethclient.Dial(cfg.SmartWallet.EthRpcUrl)
-	if err != nil {
-		t.Skipf("Cannot connect to RPC: %v", err)
-	}
+	require.NoError(t, err, "cannot reach the configured RPC; a live test with no chain proves nothing")
 	chainID, err := tempClient.ChainID(context.Background())
 	tempClient.Close()
-	if err != nil {
-		t.Skipf("Cannot get chain ID from RPC: %v", err)
-	}
+	require.NoError(t, err, "the configured RPC will not report its chain id")
 	const sepoliaChainID = int64(11155111)
 	if chainID.Int64() != sepoliaChainID {
 		t.Skipf("Test requires Sepolia (current chain ID: %d)", chainID.Int64())
@@ -60,7 +64,7 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 
 	ownerEOAHex := os.Getenv("OWNER_EOA")
 	if ownerEOAHex == "" {
-		t.Skip("OWNER_EOA environment variable not set")
+		t.Fatal("OWNER_EOA must be set: this test executes against that owner's smart wallet")
 	}
 	ownerAddress := common.HexToAddress(ownerEOAHex)
 
@@ -70,7 +74,7 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 
 	setGlobalFactory(t, cfg.SmartWallet)
 
-	smartWalletAddress, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(0))
+	smartWalletAddress, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(fixtureSaltBatchSwap))
 	require.NoError(t, err, "Failed to derive smart wallet address")
 	t.Logf("🔑 Owner EOA: %s", ownerAddress.Hex())
 	t.Logf("💼 Smart Wallet (salt:0): %s", smartWalletAddress.Hex())
@@ -80,7 +84,7 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 	require.NoError(t, err, "Failed to check wallet deployment status")
 	if len(code) == 0 {
 		t.Logf("⚠️  Wallet not deployed, deploying it first...")
-		err = testutil.EnsureWalletDeployed(client, cfg.SmartWallet.FactoryAddress, ownerAddress, big.NewInt(0), testutil.GetTestControllerPrivateKey())
+		err = testutil.EnsureWalletDeployed(client, cfg.SmartWallet.FactoryAddress, ownerAddress, big.NewInt(fixtureSaltBatchSwap), testutil.GetTestControllerPrivateKey())
 		require.NoError(t, err, "Failed to deploy wallet (controller needs funds to deploy)")
 		t.Logf("✅ Wallet deployed")
 	}
@@ -89,9 +93,7 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 	balance, err := client.BalanceAt(context.Background(), *smartWalletAddress, nil)
 	require.NoError(t, err, "Failed to get wallet balance")
 	t.Logf("💰 Smart Wallet ETH: %s wei", balance.String())
-	if balance.Sign() == 0 {
-		t.Skip("Smart wallet has 0 ETH — fund it so it can reimburse paymaster gas")
-	}
+	requireFundedRunner(t, cfg.SmartWallet, *smartWalletAddress, big.NewInt(1))
 
 	router := common.HexToAddress(SEPOLIA_SWAPROUTER)
 	usdc := common.HexToAddress(SEPOLIA_USDC)
@@ -150,27 +152,32 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 
 	db := testutil.TestMustDB()
 
-	// The gateway cannot sign as this wallet's owner — a stock MA v2 account
-	// trusts only its fallback signer — so it needs a session grant, the same
-	// one the grant screen creates in production.
-	grantControllerAuthority(t, db, cfg.SmartWallet, ownerAddress, *smartWalletAddress)
+	// Production-shaped grant: allowlist approve on USDC + WETH, USDC spend
+	// cap, TimeRange + AllowlistExecHook (RequiresExecuteUserOp). Matches
+	// Studio uniswapV3Capability([USDC,WETH]) — not the bare global fixture.
+	// Cap amount is large enough that two test approves never hit the limit.
+	const usdcCapAmount = "1000000000000" // 1e12 raw units
+	grantControllerAuthorityWithERC20Approves(t, db, cfg.SmartWallet,
+		ownerAddress, *smartWalletAddress,
+		[]common.Address{usdc, weth}, usdc, usdcCapAmount)
 
 	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
 	engine := New(db, cfg, nil, testutil.GetLogger())
 	t.Cleanup(func() { engine.Stop() })
 
 	user := &model.User{Address: ownerAddress, SmartAccountAddress: smartWalletAddress}
-	require.NoError(t, StoreWallet(db, int64(1), ownerAddress, &model.SmartWallet{
+	// Chain-scoped wallet key must match the grant's chain (Sepolia).
+	require.NoError(t, StoreWallet(db, sepoliaChainID, ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddress,
-		Salt:    big.NewInt(0),
+		Salt:    big.NewInt(fixtureSaltBatchSwap),
 	}), "Failed to store wallet")
 
-	// Real execution (is_simulated=false) with paymaster — this is the composed path:
-	// executeBatch(approve, approve) wrapped by the reimbursement wrapper into executeBatchWithValues.
-	usePaymaster := true
-	t.Logf("🚀 Submitting atomic batch as one UserOp (real, paymaster-sponsored)...")
-	result, err := engine.RunNodeImmediately("contractWrite", batchConfig, inputVars, user, false, &usePaymaster)
+	// Real execution: second arg is simulationMode only (false = real UserOp).
+	// Sponsorship follows SmartWalletConfig.AlchemyPaymasterPolicyID (empty →
+	// self-funded). There is no usePaymaster variadic on RunNodeImmediately.
+	t.Logf("🚀 Submitting atomic batch as one UserOp (real path, simulationMode=false)...")
+	result, err := engine.RunNodeImmediately("contractWrite", batchConfig, inputVars, user, false)
 	require.NoError(t, err, "batch RunNodeImmediately should not error")
 	require.NotNil(t, result, "batch result should not be nil")
 

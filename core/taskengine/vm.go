@@ -1675,7 +1675,8 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 			effectiveFactoryHex = effectiveFactory.Hex()
 		}
 		v.logger.Info("🔍 VM DEBUG - Smart wallet config details",
-			"bundler_url", swConfig.BundlerURL,
+			"bundler_provider", swConfig.ProviderName(),
+			"bundler_url", swConfig.BundlerEndpointLabel(),
 			"account_provider", swConfig.AccountProviderName(),
 			"effective_factory", effectiveFactoryHex,
 			"config_factory_address", swConfig.FactoryAddress.Hex(),

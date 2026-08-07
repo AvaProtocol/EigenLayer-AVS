@@ -28,14 +28,17 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// SendUserOpFunc is the send path a processor uses, swappable in tests.
+//
+// It carries no paymaster request or execution fee: both belonged to the v0.6
+// verifying paymaster, which went with the EntryPoint v0.7 cutover. MA v2
+// sponsorship comes from the chain's Gas Manager policy inside the send path.
 type SendUserOpFunc func(
 	config *config.SmartWalletConfig,
 	owner common.Address,
 	callData []byte,
-	paymasterReq *preset.VerifyingPaymasterRequest,
 	senderOverride *common.Address,
 	saltOverride *big.Int,
-	executionFeeWei *big.Int,
 	lgr logger.Logger,
 ) (*preset.SentUserOp, *types.Receipt, error)
 
@@ -402,7 +405,8 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			effectiveFactoryHex = effectiveFactory.Hex()
 		}
 		r.vm.logger.Info("🔍 CONTRACT WRITE DEBUG - Smart Wallet Config Details",
-			"bundler_url", r.smartWalletConfig.BundlerURL,
+			"bundler_provider", r.smartWalletConfig.ProviderName(),
+			"bundler_url", r.smartWalletConfig.BundlerEndpointLabel(),
 			"account_provider", r.smartWalletConfig.AccountProviderName(),
 			"effective_factory", effectiveFactoryHex,
 			"config_factory_address", r.smartWalletConfig.FactoryAddress.Hex(),
@@ -716,29 +720,14 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 		}
 	}
 
-	// Determine if the v0.6 verifying paymaster should be attached. MA v2 never
-	// uses that path (sponsorship is Alchemy Gas Manager policy); log accordingly
-	// so ops do not think "no paymaster" means unsponsored when the policy is set.
-	var paymasterReq *preset.VerifyingPaymasterRequest
-	if r.shouldUsePaymaster() {
-		paymasterReq = preset.GetVerifyingPaymasterRequestForDuration(
-			r.smartWalletConfig.PaymasterAddress,
-			15*time.Minute, // 15 minute validity window
-		)
-		r.vm.logger.Info("Using paymaster for sponsored transaction",
-			"paymaster", r.smartWalletConfig.PaymasterAddress.Hex(),
+	// Sponsorship on MA v2 is the chain's Alchemy Gas Manager policy, applied
+	// inside the send path — there is nothing to attach here. Logged so ops do
+	// not read "no paymaster" as "unsponsored" when a policy is configured.
+	if r.smartWalletConfig.SponsorshipPolicyID() != "" {
+		r.vm.logger.Info("Gas Manager will sponsor (alchemy_paymaster_policy_id set)",
 			"owner", r.owner.Hex())
-	} else if r.smartWalletConfig != nil && r.smartWalletConfig.UsesModularAccountV2() {
-		if r.smartWalletConfig.AlchemyPaymasterPolicyID != "" {
-			r.vm.logger.Info("MA v2: Gas Manager will sponsor (alchemy_paymaster_policy_id set)",
-				"owner", r.owner.Hex(),
-				"paymaster_policy_set", true)
-		} else {
-			r.vm.logger.Info("MA v2: self-funded (no alchemy_paymaster_policy_id)",
-				"owner", r.owner.Hex())
-		}
 	} else {
-		r.vm.logger.Info("Using regular transaction (no paymaster)",
+		r.vm.logger.Info("Self-funded (no alchemy_paymaster_policy_id)",
 			"owner", r.owner.Hex())
 	}
 
@@ -771,11 +760,13 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 		executionLogBuilder.WriteString(fmt.Sprintf("Smart wallet sender: %s\n", senderOverride.Hex()))
 	}
 
-	// Add paymaster information to execution log
-	if paymasterReq != nil {
-		executionLogBuilder.WriteString(fmt.Sprintf("Using paymaster: %s\n", r.smartWalletConfig.PaymasterAddress.Hex()))
+	// Sponsorship is decided inside the send path by the chain's Gas Manager
+	// policy, so the log records whether one is configured rather than an
+	// attached request.
+	if r.smartWalletConfig.SponsorshipPolicyID() != "" {
+		executionLogBuilder.WriteString("Sponsored by the Alchemy Gas Manager policy\n")
 	} else {
-		executionLogBuilder.WriteString("No paymaster (self-funded transaction)\n")
+		executionLogBuilder.WriteString("No sponsorship policy (self-funded transaction)\n")
 	}
 
 	// Pre-send diagnostics (logged only). Read via the per-chain reader
@@ -814,11 +805,9 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 		r.smartWalletConfig,
 		r.owner, // Use EOA address (owner) for smart wallet derivation
 		smartWalletCallData,
-		paymasterReq,         // Use paymaster for wallet creation/sponsorship if shouldUsePaymaster() returned true
-		senderOverride,       // Smart wallet address from aa_sender
-		saltOverride,         // Salt for wallet auto-deployment (from aa_salt VM var)
-		r.vm.executionFeeWei, // Execution fee in Wei (nil = no fee)
-		r.vm.logger,          // Pass logger for debug/verbose logging
+		senderOverride, // Smart wallet address from aa_sender
+		saltOverride,   // Salt for wallet auto-deployment (from aa_salt VM var)
+		r.vm.logger,    // Pass logger for debug/verbose logging
 	)
 
 	// Increment transaction counter for this address (regardless of success/failure)
@@ -841,21 +830,20 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 			executionLogBuilder.WriteString("Solution: Fund the smart wallet with ETH for gas fees\n")
 
 			// Add gas estimation details if available from userOp
+			// Gas figures on an operation that reached the bundler are the
+			// estimated ones. These used to be filtered against the v0.6
+			// builder's seed values to hide "not yet estimated" placeholders;
+			// the v0.7 path seeds different numbers, so that comparison had
+			// stopped hiding anything and only obscured what was reported.
 			if userOp != nil {
-				executionLogBuilder.WriteString("Gas Requirements (if estimated):\n")
-				// Only show gas limits if they were actually estimated (not default values)
-				// Use the shared constant from preset package to avoid duplication
-				defaultCallGasLimit := preset.DEFAULT_CALL_GAS_LIMIT
-				defaultVerificationGasLimit := preset.DEFAULT_VERIFICATION_GAS_LIMIT
-				defaultPreVerificationGas := preset.DEFAULT_PREVERIFICATION_GAS
-
-				if userOp.CallGasLimit != nil && userOp.CallGasLimit.Cmp(defaultCallGasLimit) != 0 {
+				executionLogBuilder.WriteString("Gas Requirements:\n")
+				if userOp.CallGasLimit != nil {
 					executionLogBuilder.WriteString(fmt.Sprintf("  CallGasLimit: %s\n", userOp.CallGasLimit.String()))
 				}
-				if userOp.VerificationGasLimit != nil && userOp.VerificationGasLimit.Cmp(defaultVerificationGasLimit) != 0 {
+				if userOp.VerificationGasLimit != nil {
 					executionLogBuilder.WriteString(fmt.Sprintf("  VerificationGasLimit: %s\n", userOp.VerificationGasLimit.String()))
 				}
-				if userOp.PreVerificationGas != nil && userOp.PreVerificationGas.Cmp(defaultPreVerificationGas) != 0 {
+				if userOp.PreVerificationGas != nil {
 					executionLogBuilder.WriteString(fmt.Sprintf("  PreVerificationGas: %s\n", userOp.PreVerificationGas.String()))
 				}
 				if userOp.MaxFeePerGas != nil {
@@ -871,7 +859,8 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 		preset.LogBundlerError(r.vm.logger, err,
 			"bundler: UserOp transaction failed, workflow execution FAILED",
 			"bundler_error", err,
-			"bundler_url", r.smartWalletConfig.BundlerURL,
+			"bundler_provider", r.smartWalletConfig.ProviderName(),
+			"bundler_url", r.smartWalletConfig.BundlerEndpointLabel(),
 			"method", logLabel,
 			"contract", logTarget,
 			"sender_smart_wallet", func() string {
@@ -991,6 +980,20 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		}
 	}
 
+	// Session allowlist preflight (single call) — same as atomic batch.
+	if msg := r.preflightSessionGrantCoverage([]PlannedCall{{
+		Target:   contractAddress,
+		Selector: SelectorFromCalldata(callDataBytes),
+		Label:    methodName,
+	}}); msg != "" {
+		executionLogBuilder.WriteString(msg + "\n")
+		return &avsproto.ContractWriteNode_MethodResult{
+			Success:    false,
+			Error:      msg,
+			MethodName: methodName,
+		}
+	}
+
 	// Create smart wallet execute calldata: execute(target, value, data)
 	executionLogBuilder.WriteString(fmt.Sprintf("Packing smart wallet execute calldata...\n"))
 	executionLogBuilder.WriteString(fmt.Sprintf("  Target contract: %s\n", contractAddress.Hex()))
@@ -1063,6 +1066,50 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 // failed. It composes with the paymaster reimbursement wrapper (which now appends its entries onto
 // this batch) and is used only on the run-node route for real (non-simulated) multi-call execution;
 // deployed workflows keep the sequential per-method path.
+// preflightSessionGrantCoverage refuses MA v2 UserOps whose planned inner
+// calls are outside the active session grant's allowlist — before the bundler
+// returns opaque AA23 (WETH sell under a USDC-only Uniswap grant).
+//
+// Returns "" when the check is skipped or the grant covers the calls.
+// Skips when: not MA v2, no db, no aa_sender, no usable policy, or the policy
+// has empty AllowedActions (legacy / incomplete records).
+func (r *ContractWriteProcessor) preflightSessionGrantCoverage(planned []PlannedCall) string {
+	if r == nil || r.smartWalletConfig == nil || !r.smartWalletConfig.UsesModularAccountV2() {
+		return ""
+	}
+	if r.vm == nil || r.vm.db == nil || len(planned) == 0 {
+		return ""
+	}
+	sender := getAASenderAddress(r.vm)
+	if sender == nil {
+		return ""
+	}
+	chainID := r.smartWalletConfig.ChainID
+	if chainID <= 0 {
+		chainID = r.vm.vmDefaultChainID()
+	}
+	policy, err := ActiveSessionPolicyForWallet(r.vm.db, chainID, r.owner, *sender)
+	if err != nil {
+		// Storage / multi-grant errors should fail closed with a clear message.
+		return fmt.Sprintf("SESSION_POLICY_LOOKUP_FAILED: %v", err)
+	}
+	if policy == nil || len(policy.AllowedActions) == 0 {
+		return ""
+	}
+	missing := MissingGrantCalls(policy.AllowedActions, planned)
+	if len(missing) == 0 {
+		return ""
+	}
+	if r.vm.logger != nil {
+		r.vm.logger.Warn("session grant does not cover planned contract calls",
+			"policy_id", policy.ID,
+			"wallet", sender.Hex(),
+			"missing_count", len(missing),
+		)
+	}
+	return FormatSessionPolicyTargetNotAllowed(missing, policy.ID)
+}
+
 // uniqueTargetHexes returns the distinct target addresses (hex, order-preserving) — used to label
 // batch logs with every contract involved rather than just the first sub-call's.
 func uniqueTargetHexes(targets []common.Address) []string {
@@ -1212,6 +1259,21 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 				"used_node_fallback", override == "",
 			)
 		}
+	}
+
+	// Session allowlist preflight: refuse off-grant targets (e.g. WETH approve
+	// under a USDC-only Uniswap grant) before Gas Manager / bundler AA23.
+	planned := make([]PlannedCall, n)
+	for i := range methodCalls {
+		planned[i] = PlannedCall{
+			Target:   targets[i],
+			Selector: SelectorFromCalldata(datas[i]),
+			Label:    methodNames[i],
+		}
+	}
+	if msg := r.preflightSessionGrantCoverage(planned); msg != "" {
+		log.WriteString(msg + "\n")
+		return failAll(msg, nil)
 	}
 
 	// Pack the atomic batch. Prefer executeBatch (no per-call values) when every value is zero — its
@@ -1489,50 +1551,6 @@ func convertLogsToInterface(logs []*types.Log) []interface{} {
 		}
 	}
 	return result
-}
-
-// shouldUsePaymaster determines if the v0.6 verifying paymaster should be
-// attached to a UserOp.
-//
-// MA v2 never uses that path: SendUserOpAuto ignores paymasterReq and sponsors
-// only via the Alchemy paymaster policy
-// (alchemy_paymaster_policy_id / ALCHEMY_PAYMASTER_POLICY_ID).
-// Returning true under MA v2 only produced misleading "Using paymaster
-// 0xd856…" logs that suggested sponsorship was active when the account was
-// actually self-funded (and often zero-balance → prefund failure).
-func (r *ContractWriteProcessor) shouldUsePaymaster() bool {
-	if r.smartWalletConfig == nil {
-		return false
-	}
-	if r.smartWalletConfig.UsesModularAccountV2() {
-		if r.vm != nil && r.vm.logger != nil {
-			if r.smartWalletConfig.AlchemyPaymasterPolicyID != "" {
-				r.vm.logger.Debug("MA v2: Alchemy paymaster policy will sponsor the operation",
-					"owner", r.owner.Hex(), "paymaster_policy_set", true)
-			} else {
-				r.vm.logger.Info("MA v2: no Alchemy paymaster policy; smart wallet pays its own gas",
-					"owner", r.owner.Hex(),
-					"hint", "set alchemy_paymaster_policy_id or ALCHEMY_PAYMASTER_POLICY_ID for sponsorship")
-			}
-		}
-		return false
-	}
-
-	// v0.6 SimpleAccount: ALWAYS use the verifying paymaster if configured.
-	// Paymaster sponsors gas, wallet reimburses via executeBatchWithValues.
-	// If wallet can't reimburse, UserOp still completes (paymaster absorbs cost).
-	if (r.smartWalletConfig.PaymasterAddress == common.Address{}) {
-		if r.vm != nil && r.vm.logger != nil {
-			r.vm.logger.Debug("No paymaster configured, proceeding self-funded",
-				"owner", r.owner.Hex())
-		}
-		return false
-	}
-	if r.vm != nil && r.vm.logger != nil {
-		r.vm.logger.Debug("Using paymaster for gas sponsorship (with automatic reimbursement)",
-			"owner", r.owner.Hex(), "paymaster", r.smartWalletConfig.PaymasterAddress.Hex())
-	}
-	return true
 }
 
 // createMockContractWriteResult creates a mock result when Tenderly fails
@@ -2108,8 +2126,8 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 					if (r.smartWalletConfig.EntryPointAddress() != common.Address{}) {
 						log.WriteString(fmt.Sprintf("  EntryPoint: %s\n", r.smartWalletConfig.EntryPointAddress().Hex()))
 					}
-					if r.smartWalletConfig.BundlerURL != "" {
-						log.WriteString(fmt.Sprintf("  Bundler: %s\n", r.smartWalletConfig.BundlerURL))
+					if label := r.smartWalletConfig.BundlerEndpointLabel(); label != "" {
+						log.WriteString(fmt.Sprintf("  Bundler (%s): %s\n", r.smartWalletConfig.ProviderName(), label))
 					}
 					if (r.smartWalletConfig.PaymasterAddress != common.Address{}) {
 						log.WriteString(fmt.Sprintf("  Paymaster: %s\n", r.smartWalletConfig.PaymasterAddress.Hex()))

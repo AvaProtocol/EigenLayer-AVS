@@ -80,7 +80,7 @@ func TestSessionGrantRoundTrip(t *testing.T) {
 			return nil, fmt.Errorf("unexpected signer %s", a.Hex())
 		}
 		return signerKey, nil
-	})
+	}, nil)
 	auth, err := resolve(spChain, owner, spWallet)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)

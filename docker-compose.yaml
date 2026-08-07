@@ -48,10 +48,10 @@ services:
       - TENDERLY_PROJECT=${TENDERLY_PROJECT}
       - TENDERLY_ACCESS_KEY=${TENDERLY_ACCESS_KEY}
       
-      # Smart wallet configuration
+      # Smart wallet configuration (bundler_provider: alchemy — endpoint from key)
       - SMART_WALLET_ETH_RPC_URL=${SMART_WALLET_ETH_RPC_URL:-${ETH_RPC_URL}}
       - SMART_WALLET_ETH_WS_URL=${SMART_WALLET_ETH_WS_URL:-${ETH_WS_URL}}
-      - BUNDLER_URL=${BUNDLER_URL}
+      - ALCHEMY_API_KEY=${ALCHEMY_API_KEY}
       - CONTROLLER_PRIVATE_KEY=${CONTROLLER_PRIVATE_KEY}
       - MAX_WALLETS_PER_OWNER=${MAX_WALLETS_PER_OWNER:-3}
       

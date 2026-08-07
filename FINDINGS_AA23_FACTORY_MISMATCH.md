@@ -10,6 +10,10 @@ Auto AA23 was `methodCalls[].contractAddress` dropped on the `nodes:run`
 extract→recreate round-trip (approve fell back to the router). Packing fix
 verified live on Sepolia under Gas Manager.
 
+**New open issue (2026-08-06):** Auto **ETH/WETH sell** still AA23s on prod after
+Studio demote — session grant allowlists **USDC approve only**. See
+**`FINDINGS_AA23_WETH_SELL_SESSION_SCOPE.md`** (handoff for fix).
+
 **AVS follow-ups (this branch):** strip temporary `AA23_DEBUG` logs; refuse
 session grant prepare/submit for non–MA v2 runners (SimpleAccount).
 

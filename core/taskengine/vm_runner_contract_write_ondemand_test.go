@@ -29,7 +29,7 @@ func wellFormedUserOp(sender common.Address) *preset.SentUserOp {
 }
 
 // ondemandTestConfig builds a smart-wallet config sufficient to drive the real
-// UserOp path in-process. PaymasterAddress is left zero so shouldUsePaymaster()
+// UserOp path in-process. PaymasterAddress is left zero so nothing
 // short-circuits to self-funded (no bundler gas estimation needed under the mock).
 func ondemandTestConfig() *config.SmartWalletConfig {
 	return &config.SmartWalletConfig{
@@ -133,9 +133,7 @@ func TestContractWriteRealPathForwardsNativeValue(t *testing.T) {
 			_ *config.SmartWalletConfig,
 			_ common.Address,
 			callData []byte,
-			_ *preset.VerifyingPaymasterRequest,
 			_ *common.Address,
-			_ *big.Int,
 			_ *big.Int,
 			_ logger.Logger,
 		) (*preset.SentUserOp, *types.Receipt, error) {

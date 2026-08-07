@@ -4,9 +4,6 @@ inputs:
   chain-endpoint:
     description: 'Chain RPC endpoint domain (e.g., sepolia.infura.io/v3/KEY)'
     required: true
-  bundler-rpc:
-    description: 'Bundler RPC URL'
-    required: true
   tenderly-account:
     description: 'Tenderly account name'
     required: true
@@ -32,6 +29,13 @@ inputs:
   moralis-api-key:
     description: 'Moralis Web3 Data API key for token balance integration tests'
     required: false
+  alchemy-api-key:
+    description: |
+      Alchemy API key. Required. CI runs bundler_provider: alchemy and derives
+      the endpoint from the key — the same path production uses. A missing key
+      fails the job with a message naming the ALCHEMY_API_KEY secret; there is
+      no self-hosted bundler fallback (#725).
+    required: true
 runs:
   using: 'composite'
   steps:
@@ -39,7 +43,6 @@ runs:
       env:
         # Unified environment variables
         CHAIN_ENDPOINT: "${{ inputs.chain-endpoint }}"
-        BUNDLER_RPC: "${{ inputs.bundler-rpc }}"
 
         # Tenderly HTTP API credentials
         TENDERLY_ACCOUNT: "${{ inputs.tenderly-account }}"
@@ -50,6 +53,7 @@ runs:
         TENDERLY_ACCESS_KEY: "${{ inputs.tenderly-access-key }}"
         OWNER_EOA: "${{ inputs.owner-eoa }}"
         MORALIS_API_KEY: "${{ inputs.moralis-api-key }}"
+        ALCHEMY_API_KEY: "${{ inputs.alchemy-api-key }}"
       shell: bash
       run: ./.github/scripts/generate-test-config.sh
 

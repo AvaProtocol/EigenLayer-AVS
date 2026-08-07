@@ -294,3 +294,120 @@ func TestTypedDataDomainCarriesOnlyDeclaredFields(t *testing.T) {
 		require.Contains(t, domain, declared)
 	}
 }
+
+// grantOverHTTP runs prepare → sign → submit and returns the decoded response.
+func (r *policyTestRig) grantOverHTTP(t *testing.T) generated.SubmitPolicyResponse {
+	t.Helper()
+	address := generated.EthereumAddress(r.wallet.Hex())
+
+	rec := r.call(t, prepareBody(policyTestChain), func(c echo.Context) error {
+		return r.server.PrepareWalletPolicy(c, address)
+	}, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var prepared generated.PreparedPolicy
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &prepared))
+
+	digest := common.FromHex(prepared.Digest)
+	sig, err := crypto.Sign(digest, r.ownerKey)
+	require.NoError(t, err)
+	sig[64] += 27
+
+	body := prepareBody(policyTestChain)
+	rec = r.call(t, generated.SubmitPolicyRequest{
+		ChainId:        body.ChainId,
+		PolicyId:       prepared.PolicyId,
+		EntityId:       prepared.EntityId,
+		Deadline:       prepared.Deadline,
+		ValidUntil:     prepared.ValidUntil,
+		AgentLabel:     body.AgentLabel,
+		AllowedActions: body.AllowedActions,
+		Erc20SpendCap:  body.Erc20SpendCap,
+		Signature:      fmt.Sprintf("0x%x", sig),
+	}, func(c echo.Context) error {
+		return r.server.SubmitWalletPolicy(c, address)
+	}, nil)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+
+	var submitted generated.SubmitPolicyResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &submitted))
+	return submitted
+}
+
+// Re-granting over HTTP replaces, and says what it replaced. The client does
+// not have to revoke first, and does not have to ask for replacement.
+func TestPoliciesSubmitReplacesThePreviousGrantOverHTTP(t *testing.T) {
+	rig := newPolicyRig(t)
+	address := generated.EthereumAddress(rig.wallet.Hex())
+
+	first := rig.grantOverHTTP(t)
+	require.NotNil(t, first.SupersededPolicyIds, "the field is required, so it is present even when empty")
+	require.Empty(t, first.SupersededPolicyIds, "a first grant replaces nothing, and says so with an empty array")
+
+	second := rig.grantOverHTTP(t)
+	require.Equal(t, []generated.Ulid{first.Id}, second.SupersededPolicyIds)
+
+	// The list shows both records — one usable, one revoked for audit.
+	rec := rig.call(t, nil, func(c echo.Context) error {
+		return rig.server.ListWalletPolicies(c, address, generated.ListWalletPoliciesParams{})
+	}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var list generated.SessionPolicyList
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &list))
+	require.Len(t, list.Items, 2)
+
+	status := map[generated.Ulid]string{}
+	for _, item := range list.Items {
+		status[item.Id] = string(item.Status)
+	}
+	require.Equal(t, "revoked", status[first.Id], "the replaced grant is retained, not deleted")
+	require.Equal(t, "pending", status[second.Id])
+
+	// Replacement must not leak grant material either.
+	for _, marker := range []string{"install_call", "owner_signature", "carrier_nonce", "installCall", "ownerSignature"} {
+		require.NotContains(t, rec.Body.String(), marker, "grant material leaked")
+	}
+}
+
+// SubmitPolicyResponse is `allOf: [SessionPolicy, {supersededPolicyIds}]`, and
+// oapi-codegen flattens that into a separate struct that submitPolicyToAPI has
+// to fill in by hand. If a field is ever added to SessionPolicy and not copied
+// across, the submit response would silently start omitting it.
+func TestSubmitPolicyResponseCarriesEverySessionPolicyField(t *testing.T) {
+	token := common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
+	router := common.HexToAddress("0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E")
+	owner := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	wallet := common.HexToAddress("0x209eb31c199bEB4c386eF83CF442DE1a00667a1F")
+	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
+
+	// Every optional field populated, so none can pass by being absent in both.
+	policy := &model.SessionPolicy{
+		ID: "01legacygrantaaaaaaaaaaaaa", Owner: &owner, Runner: &wallet,
+		ChainID: policyTestChain, EntityID: 7, SessionSigner: &signer,
+		AgentLabel: "TradingBot", Justification: "because",
+		AllowedActions: []model.AllowedAction{
+			{Target: &router, Selectors: []string{"0x04e45aaf"}},
+			{Target: &token, Selectors: []string{"0x095ea7b3"}},
+		},
+		ERC20SpendCap: &model.ERC20SpendCap{Token: &token, Amount: "500000000", GrantedCap: "500000000"},
+		ValidUntil:    1785541743000,
+		Status:        model.SessionPolicyPending,
+		CreatedAt:     1785441743000,
+	}
+
+	asPolicy, err := json.Marshal(policyToAPI(policy))
+	require.NoError(t, err)
+	asSubmit, err := json.Marshal(submitPolicyToAPI(policy, []string{"01replacedgrantaaaaaaaaaa"}))
+	require.NoError(t, err)
+
+	var policyFields, submitFields map[string]any
+	require.NoError(t, json.Unmarshal(asPolicy, &policyFields))
+	require.NoError(t, json.Unmarshal(asSubmit, &submitFields))
+
+	require.NotEmpty(t, policyFields)
+	for name, want := range policyFields {
+		got, ok := submitFields[name]
+		require.True(t, ok, "submit response drops SessionPolicy field %q — copy it in submitPolicyToAPI", name)
+		require.Equal(t, want, got, "submit response disagrees with the policy on %q", name)
+	}
+	require.Equal(t, []any{"01replacedgrantaaaaaaaaaa"}, submitFields["supersededPolicyIds"])
+}

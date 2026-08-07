@@ -113,7 +113,7 @@ func TestSessionPolicyPrepareSubmitRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, policies)
 
-	stored, err := engine.SubmitSessionPolicy(user, SessionPolicyInput{
+	stored, _, err := engine.SubmitSessionPolicy(user, SessionPolicyInput{
 		Wallet: wallet, ChainID: testPolicyChain,
 		AgentLabel: "TradingBot", Justification: "swaps you approve",
 		Permissions: perms,
@@ -147,7 +147,7 @@ func TestSessionPolicySubmitRejectsTamperedEcho(t *testing.T) {
 	tampered := testPermissions()
 	tampered.SpendCap.Amount = "500000000000" // 1000x the signed cap
 
-	_, err = engine.SubmitSessionPolicy(user, SessionPolicyInput{
+	_, _, err = engine.SubmitSessionPolicy(user, SessionPolicyInput{
 		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "TradingBot", Permissions: tampered,
 	}, prepared.Policy.ID, prepared.Policy.EntityID, prepared.Policy.Grant.Deadline, sig)
 	require.Error(t, err)
@@ -164,7 +164,7 @@ func TestSessionPolicySubmitRejectsWrongSigner(t *testing.T) {
 
 	strangerKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	_, err = engine.SubmitSessionPolicy(user, SessionPolicyInput{
+	_, _, err = engine.SubmitSessionPolicy(user, SessionPolicyInput{
 		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "TradingBot", Permissions: testPermissions(),
 	}, prepared.Policy.ID, prepared.Policy.EntityID, prepared.Policy.Grant.Deadline,
 		signDigest(t, strangerKey, prepared.Digest))
@@ -188,13 +188,13 @@ func TestSessionPolicySubmitDetectsEntityRace(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, preparedA.Policy.EntityID, preparedB.Policy.EntityID, "both prepares saw entity 1")
 
-	_, err = engine.SubmitSessionPolicy(user, SessionPolicyInput{
+	_, _, err = engine.SubmitSessionPolicy(user, SessionPolicyInput{
 		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "A", Permissions: testPermissions(),
 	}, preparedA.Policy.ID, preparedA.Policy.EntityID, preparedA.Policy.Grant.Deadline,
 		signDigest(t, ownerKey, preparedA.Digest))
 	require.NoError(t, err)
 
-	_, err = engine.SubmitSessionPolicy(user, SessionPolicyInput{
+	_, _, err = engine.SubmitSessionPolicy(user, SessionPolicyInput{
 		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "B", Permissions: testPermissions(),
 	}, preparedB.Policy.ID, preparedB.Policy.EntityID, preparedB.Policy.Grant.Deadline,
 		signDigest(t, ownerKey, preparedB.Digest))
@@ -224,7 +224,7 @@ func TestSessionPolicyRevokePendingDeletesOutright(t *testing.T) {
 		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "Bot", Permissions: testPermissions(),
 	})
 	require.NoError(t, err)
-	stored, err := engine.SubmitSessionPolicy(user, SessionPolicyInput{
+	stored, _, err := engine.SubmitSessionPolicy(user, SessionPolicyInput{
 		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "Bot", Permissions: testPermissions(),
 	}, prepared.Policy.ID, prepared.Policy.EntityID, prepared.Policy.Grant.Deadline,
 		signDigest(t, ownerKey, prepared.Digest))
