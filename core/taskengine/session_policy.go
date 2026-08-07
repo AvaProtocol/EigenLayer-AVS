@@ -445,8 +445,9 @@ func onChainTeardownTargets(db storage.Storage, chainID int64, owner, runner com
 			out = append(out, p)
 		}
 	}
-	if len(out) > maxOnChainTeardowns {
-		out = out[:maxOnChainTeardowns]
-	}
+	// Deliberately NOT capped here. The caller drops candidates the chain says
+	// are already clear, and capping first would let cleared slots eat the
+	// budget a live leftover needs — a wallet could then spend several grant
+	// cycles retiring entities that were already gone. Cap after the filter.
 	return out, nil
 }

@@ -296,6 +296,11 @@ func fundToken(ctx context.Context, client *ethclient.Client, key *ecdsa.Private
 		return fmt.Errorf("-fund-usdc %q is not a number", amount)
 	}
 	units, _ := new(big.Float).Mul(f, big.NewFloat(1e6)).Int(nil) // 6 decimals
+	if units.Sign() <= 0 {
+		// "0", "-1" and anything that rounds to nothing would otherwise burn gas
+		// on a transfer of zero and report success.
+		return fmt.Errorf("-fund-usdc %q is %s units; pass a positive amount", amount, units)
+	}
 	token := common.HexToAddress(sepoliaUSDC)
 	from := crypto.PubkeyToAddress(key.PublicKey)
 

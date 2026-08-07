@@ -198,6 +198,13 @@ func PrepareSessionGrant(
 	if err != nil {
 		return nil, err
 	}
+	// Cap what actually rides the batch, now that the cleared ones are gone.
+	// Anything past the cap waits for the next grant (#716's self-heal), and
+	// because the filter ran first, the ones left behind are genuinely still
+	// installed rather than slots already retired.
+	if len(teardownTargets) > maxOnChainTeardowns {
+		teardownTargets = teardownTargets[:maxOnChainTeardowns]
+	}
 	var supersedes []SupersededGrant
 	if len(teardownTargets) > 0 {
 		// Install FIRST: the operation carrying this is validated by the new
@@ -455,25 +462,25 @@ func BuildOnChainRevokeCleanup(policy *model.SessionPolicy) (*OnChainRevokeClean
 // status. onChainCleanupRequired is false until AppliedAt is set.
 //
 // Pending without InstallCall (should not occur after submit): deleted.
-func RevokeSessionGrant(db storage.Storage, policy *model.SessionPolicy) (onChainCleanupRequired bool, err error) {
+func RevokeSessionGrant(db storage.Storage, policy *model.SessionPolicy) (deleted, onChainCleanupRequired bool, err error) {
 	if policy == nil {
-		return false, fmt.Errorf("no policy to revoke")
+		return false, false, fmt.Errorf("no policy to revoke")
 	}
 	key := SessionPolicyKey(policy.ChainID, *policy.Owner, policy.ID)
 	if policy.Grant == nil {
-		return false, db.Delete(key)
+		return true, false, db.Delete(key)
 	}
 	if policy.Grant.Applied() {
 		policy.Status = model.SessionPolicyRevoked
 		// Already verified clear on chain — soft-revoke only, no cleanup payload.
-		return policy.Grant.NeedsOnChainCleanup(), StoreSessionPolicy(db, policy)
+		return false, policy.Grant.NeedsOnChainCleanup(), StoreSessionPolicy(db, policy)
 	}
 	if len(policy.Grant.InstallCall) == 0 {
-		return false, db.Delete(key)
+		return true, false, db.Delete(key)
 	}
 	// Pending with payload: retain for possible late install / cleanup.
 	policy.Status = model.SessionPolicyRevoked
-	return false, StoreSessionPolicy(db, policy)
+	return false, false, StoreSessionPolicy(db, policy)
 }
 
 // verifyGrantSignature checks that the signature recovers to the owner.
@@ -548,6 +555,10 @@ func recheckSupersededGrant(db storage.Storage, prepared *PreparedSessionGrant, 
 //
 // verify nil: return candidates unchanged (offline tests).
 // verify error: fail prepare — packing a maybe-doomed batch is worse.
+//
+// CALLERS MUST HOLD the runner's write lock. Submit already does and prepare
+// takes it for this reason, so the TornDownAt write below uses the Locked
+// marker: retaking a non-reentrant mutex here deadlocks the shard.
 func dropClearedTeardownTargets(
 	ctx context.Context,
 	db storage.Storage,
@@ -562,8 +573,13 @@ func dropClearedTeardownTargets(
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// Bound the multi-read so prepare cannot hang on a stuck RPC.
-	ctx, cancel := context.WithTimeout(ctx, teardownVerifyTimeout)
+	// Bound the reads so prepare cannot hang on a stuck RPC. The budget scales
+	// with the candidate count: teardownVerifyTimeout was sized for the single
+	// post-apply read, and this loop makes one dial-and-read per candidate,
+	// sequentially. One shared budget turns a wallet with several leftovers —
+	// exactly the wallet this exists for — into intermittent prepare failures
+	// under ordinary latency.
+	ctx, cancel := context.WithTimeout(ctx, teardownVerifyTimeout*time.Duration(len(candidates)))
 	defer cancel()
 
 	kept := make([]*model.SessionPolicy, 0, len(candidates))
@@ -576,7 +592,7 @@ func dropClearedTeardownTargets(
 		}
 		if cleared {
 			// Owner (or a prior replace) already cleared it — sync storage.
-			if markErr := MarkEntityTornDown(db, chainID, owner, runner, p.EntityID); markErr != nil {
+			if markErr := markEntityTornDownLocked(db, chainID, owner, runner, p.EntityID); markErr != nil {
 				return nil, fmt.Errorf("marking entity %d torn down after on-chain clear: %w", p.EntityID, markErr)
 			}
 			continue
@@ -665,14 +681,26 @@ func VerifySupersededTeardown(
 	return nil
 }
 
-// MarkEntityTornDown sets TornDownAt on the policy that owns entity on runner.
-// Idempotent when already marked. Takes the runner write lock so a concurrent
-// MarkSessionGrantAppliedByID cannot lose its AppliedUserOpHash write.
+// MarkEntityTornDown sets TornDownAt on the policy that owns entity on runner,
+// for callers that do NOT already hold the runner's write lock — the resolver's
+// post-apply verification is the one that matters. Idempotent when marked.
+//
+// The lock stops a concurrent MarkSessionGrantAppliedByID losing its
+// AppliedUserOpHash write. It is a plain sync.RWMutex and so NOT reentrant:
+// anything already inside it must use markEntityTornDownLocked instead, because
+// taking it twice wedges that (chain, owner, runner) shard for the life of the
+// process rather than failing.
 func MarkEntityTornDown(db storage.Storage, chainID int64, owner, runner common.Address, entity uint32) error {
 	lock := sessionAuthorityLock(chainID, owner, runner)
 	lock.Lock()
 	defer lock.Unlock()
+	return markEntityTornDownLocked(db, chainID, owner, runner, entity)
+}
 
+// markEntityTornDownLocked is MarkEntityTornDown for callers already holding
+// the runner's write lock — prepare and submit both do, and both reach it
+// through dropClearedTeardownTargets.
+func markEntityTornDownLocked(db storage.Storage, chainID int64, owner, runner common.Address, entity uint32) error {
 	policies, err := ListSessionPolicies(db, chainID, owner)
 	if err != nil {
 		return err

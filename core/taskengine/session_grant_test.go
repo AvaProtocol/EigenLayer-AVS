@@ -198,7 +198,7 @@ func TestRevokeSessionGrant(t *testing.T) {
 		if err := StoreSessionPolicy(db, p); err != nil {
 			t.Fatal(err)
 		}
-		onChain, err := RevokeSessionGrant(db, p)
+		_, onChain, err := RevokeSessionGrant(db, p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -217,7 +217,7 @@ func TestRevokeSessionGrant(t *testing.T) {
 		if err := StoreSessionPolicy(db, p); err != nil {
 			t.Fatal(err)
 		}
-		onChain, err := RevokeSessionGrant(db, p)
+		_, onChain, err := RevokeSessionGrant(db, p)
 		if err != nil {
 			t.Fatal(err)
 		}
