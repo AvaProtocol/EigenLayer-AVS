@@ -55,45 +55,25 @@ func grantControllerAuthority(
 	}
 	controller := crypto.PubkeyToAddress(swCfg.ControllerPrivateKey.PublicKey)
 
-	prepared, err := PrepareSessionGrant(db, swCfg.ChainID, controller, "test-grant", SessionGrantRequest{
-		Owner:  owner,
-		Wallet: wallet,
-		// Global with no hooks: a fixture grant, and the API makes that
-		// deliberate rather than accidental. Production grants carry hooks.
-		Selectors: nil,
-		Hooks:     nil,
-		// A bare global grant is refused unless acknowledged. Fixtures may be
-		// self-administering; production grants carry hooks or scoping.
-		AllowSelfAdministration: true,
-	})
-	if err != nil {
-		t.Fatalf("preparing the test grant: %v", err)
-	}
-
-	sig, err := crypto.Sign(prepared.Digest.Bytes(), ownerKey) // raw digest
-	if err != nil {
-		t.Fatalf("signing the grant: %v", err)
-	}
-	sig[64] += 27
-
-	policy, err := SubmitSessionGrant(db, prepared, sig)
-	if err != nil {
-		t.Fatalf("submitting the grant: %v", err)
-	}
-
-	// If the entity already holds the controller on chain, the install has
-	// happened in a previous run. Replaying it would re-run installValidation
-	// on an existing entity.
-	if installedOnChain(t, swCfg, wallet, policy.EntityID, controller) {
-		if err := MarkSessionGrantApplied(db, policy, "pre-existing"); err != nil {
-			t.Fatalf("marking the grant applied: %v", err)
-		}
-		t.Logf("grant: entity %d already installed on %s; not replaying the install",
-			policy.EntityID, wallet.Hex())
-	} else {
-		t.Logf("grant: entity %d pending on %s; the install rides the first operation",
-			policy.EntityID, wallet.Hex())
-	}
+	// A bare grant is only usable on an entity that is itself bare. An entity
+	// carrying hooks from an earlier Studio-shaped grant names the same
+	// controller, so a signer-only check adopts it and then builds operations
+	// the account rejects — see session_fixture_permissions_test.go.
+	resetInitialPermissions(t, db, swCfg, wallet,
+		func(uint32) expectedPermissions { return bareGlobalGrant(controller) },
+		func(policyID string) (*PreparedSessionGrant, error) {
+			return PrepareSessionGrant(db, swCfg.ChainID, controller, policyID, SessionGrantRequest{
+				Owner:  owner,
+				Wallet: wallet,
+				// Global with no hooks: a fixture grant, and the API makes that
+				// deliberate rather than accidental. Production grants carry hooks.
+				Selectors: nil,
+				Hooks:     nil,
+				// A bare global grant is refused unless acknowledged. Fixtures may be
+				// self-administering; production grants carry hooks or scoping.
+				AllowSelfAdministration: true,
+			})
+		})
 
 	installSessionResolver(t, db, swCfg, controller)
 }
@@ -154,59 +134,32 @@ func grantControllerAuthorityWithERC20Approves(
 		t.Fatalf("test grant permissions: %v", err)
 	}
 
-	var policy *model.SessionPolicy
-	for attempt := 0; attempt < 32; attempt++ {
-		policyID := fmt.Sprintf("test-approve-grant-%d", attempt)
-		prepared, err := PrepareSessionGrant(db, swCfg.ChainID, controller, policyID, SessionGrantRequest{
-			Owner:      owner,
-			Wallet:     wallet,
-			AgentLabel: "test-erc20-approves",
-			ValidUntil: perms.ValidUntilMs,
-			HooksFor:   perms.HooksFor,
-		})
-		if err != nil {
-			t.Fatalf("preparing production-shaped test grant (attempt %d): %v", attempt, err)
-		}
-
-		sig, err := crypto.Sign(prepared.Digest.Bytes(), ownerKey)
-		if err != nil {
-			t.Fatalf("signing the grant: %v", err)
-		}
-		sig[64] += 27
-
-		pol, err := SubmitSessionGrant(db, prepared, sig)
-		if err != nil {
-			t.Fatalf("submitting the grant (attempt %d): %v", attempt, err)
-		}
-		attachDeclaredPermissions(pol, perms)
-		if err := StoreSessionPolicy(db, pol); err != nil {
-			t.Fatalf("storing declared permissions on grant: %v", err)
-		}
-
-		// Any non-zero on-chain signer occupies the entity (controller or not).
-		// Reusing a foreign or stale-hook entity breaks MA v2 uniqueness / install.
-		if existing := entitySignerOnChain(t, swCfg, wallet, pol.EntityID); existing != (common.Address{}) {
-			pol.Status = model.SessionPolicyRevoked
-			if err := StoreSessionPolicy(db, pol); err != nil {
-				t.Fatalf("reserving occupied entity %d: %v", pol.EntityID, err)
+	// Unlike the bare fixture, this one can REUSE a matching entity: an entity
+	// already carrying the allowlist + time-range hook set at its own id is the
+	// grant this test wants, so a second run adopts it rather than burning a
+	// fresh entity every time.
+	policy := resetInitialPermissions(t, db, swCfg, wallet,
+		func(entity uint32) expectedPermissions { return hookedGlobalGrant(controller, entity) },
+		func(policyID string) (*PreparedSessionGrant, error) {
+			prepared, err := PrepareSessionGrant(db, swCfg.ChainID, controller, policyID, SessionGrantRequest{
+				Owner:      owner,
+				Wallet:     wallet,
+				AgentLabel: "test-erc20-approves",
+				ValidUntil: perms.ValidUntilMs,
+				HooksFor:   perms.HooksFor,
+			})
+			if err != nil {
+				return nil, err
 			}
-			t.Logf("grant: entity %d already occupied on %s by %s; trying next entity for fresh hooks install",
-				pol.EntityID, wallet.Hex(), existing.Hex())
-			continue
-		}
+			attachDeclaredPermissions(prepared.Policy, perms)
+			return prepared, nil
+		})
 
-		// Free entity: leave pending so the install rides the first UserOp.
-		policy = pol
-		t.Logf("grant: entity %d pending on %s (USDC+WETH-style approves, RequiresExecuteUserOp=%v); install rides first operation",
-			pol.EntityID, wallet.Hex(), pol.Grant != nil && pol.Grant.RequiresExecuteUserOp)
-		break
-	}
-	if policy == nil {
-		t.Fatal("could not allocate a free session entity for a production-shaped grant after 32 attempts")
-	}
 	if policy.Grant == nil || !policy.Grant.RequiresExecuteUserOp {
 		t.Fatal("expected RequiresExecuteUserOp=true (allowlist execution hook); grant shape is wrong")
 	}
+	t.Logf("grant: entity %d on %s (USDC+WETH-style approves, RequiresExecuteUserOp=%v)",
+		policy.EntityID, wallet.Hex(), policy.Grant.RequiresExecuteUserOp)
 
 	installSessionResolver(t, db, swCfg, controller)
 }
@@ -243,12 +196,16 @@ func requireOwnerKey(t *testing.T) *ecdsa.PrivateKey {
 }
 
 // entitySignerOnChain returns the SingleSignerValidationModule signer for
-// (entity, wallet), or the zero address if unset / unreadable.
-func entitySignerOnChain(t *testing.T, swCfg *config.SmartWalletConfig, wallet common.Address, entity uint32) common.Address {
+// (entity, wallet). A zero address means the entity is genuinely unclaimed.
+//
+// Read failures are returned rather than folded into the zero address: callers
+// use zero to mean "free to install on", so a transient RPC error that reads as
+// zero would install a second validation over an existing one.
+func entitySignerOnChain(t *testing.T, swCfg *config.SmartWalletConfig, wallet common.Address, entity uint32) (common.Address, error) {
 	t.Helper()
 	client, err := ethclient.Dial(swCfg.EthRpcUrl)
 	if err != nil {
-		t.Fatalf("dialing the chain to check the grant: %v", err)
+		return common.Address{}, fmt.Errorf("dialing the chain to check the grant: %w", err)
 	}
 	defer client.Close()
 
@@ -256,17 +213,21 @@ func entitySignerOnChain(t *testing.T, swCfg *config.SmartWalletConfig, wallet c
 	data = append(data, common.LeftPadBytes(wallet.Bytes(), 32)...)
 	module := aa.SingleSignerValidationModuleAddress()
 	out, err := client.CallContract(context.Background(), ethereum.CallMsg{To: &module, Data: data}, nil)
-	if err != nil || len(out) < 32 {
-		return common.Address{}
+	if err != nil {
+		return common.Address{}, fmt.Errorf("calling signers(%d, %s): %w", entity, wallet.Hex(), err)
 	}
-	return common.BytesToAddress(out[12:32])
+	if len(out) < 32 {
+		return common.Address{}, fmt.Errorf("signers(%d, %s) returned %d bytes, want at least 32",
+			entity, wallet.Hex(), len(out))
+	}
+	return common.BytesToAddress(out[12:32]), nil
 }
 
-// installedOnChain reports whether the entity already names this signer.
-func installedOnChain(t *testing.T, swCfg *config.SmartWalletConfig, wallet common.Address, entity uint32, signer common.Address) bool {
-	t.Helper()
-	return entitySignerOnChain(t, swCfg, wallet, entity) == signer
-}
+// installedOnChain is deliberately gone. It answered "does this entity name my
+// signer", which fixtures used as "is this entity the grant I need" — and the
+// two differ exactly when a stale grant on a shared runner carries the same
+// controller with different hooks. Compare the whole validation state instead:
+// readValidationState + expectedPermissions in session_fixture_permissions_test.go.
 
 // selectorSSVMSigners is SingleSignerValidationModule.signers(uint32,address).
 const selectorSSVMSigners = "0x217178fb"
