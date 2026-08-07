@@ -77,22 +77,18 @@ func (w *Worker) Start(ctx context.Context) error {
 	// withdrawal failing: without a policy every operation this worker sends
 	// must be paid for by the smart wallet itself, so a wallet holding only
 	// tokens cannot move them.
+	// Say which of the three states this worker is in, once, at boot — rather
+	// than letting it surface later as a user's withdrawal failing.
 	switch {
-	case config.SponsorshipRefusedForEnvironment(w.config.Environment):
-		// Deliberate, and not a misconfiguration to fix: the policy's webhook
-		// points at the production gateway, so a development process asking
-		// for sponsorship would have production approve — and pay for — it.
-		w.logger.Info("Chain worker runs self-funded: sponsorship is refused in a development environment",
-			"chain_id", w.config.ChainID,
-			"chain_name", w.config.ChainName,
-			"hint", "fund the test smart wallet with the chain's native token",
-		)
+	case w.config.DisableGasSponsorship:
+		w.logger.Info("Chain worker runs self-funded: sponsorship disabled by config",
+			"chain_id", w.config.ChainID, "chain_name", w.config.ChainName,
+			"hint", "expected for local/development — the policy's webhook points at the production gateway")
 	case !w.config.SponsorshipConfigured():
-		w.logger.Warn("Chain worker has no Gas Manager policy: operations it sends will be self-funded",
-			"chain_id", w.config.ChainID,
-			"chain_name", w.config.ChainName,
-			"hint", "set alchemy_paymaster_policy_id (and gas_manager_webhook_secret) to match the gateway",
-		)
+		w.logger.Warn("Chain worker will send unsponsored operations",
+			"chain_id", w.config.ChainID, "chain_name", w.config.ChainName,
+			"bundler_provider", w.config.BundlerProvider,
+			"hint", "needs alchemy_paymaster_policy_id, gas_manager_webhook_secret, and bundler_provider: alchemy")
 	}
 
 	// Connect to chain RPC

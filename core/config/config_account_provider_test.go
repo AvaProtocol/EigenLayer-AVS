@@ -96,21 +96,64 @@ func TestTypoIsRejectedAtLoad(t *testing.T) {
 }
 
 // The gateway resolves the same way the worker does, through the same
-// function — including the development refusal. Pinned here as well as in the
-// worker package because the two disagreeing about where sponsorship comes
-// from is the bug this whole path exists to prevent.
-func TestSponsorshipResolutionIsSharedAndEnvironmentGated(t *testing.T) {
+// function. Pinned here as well as in the worker package because the two
+// disagreeing about where sponsorship comes from is the bug this path exists
+// to prevent.
+func TestSponsorshipResolutionIsShared(t *testing.T) {
 	t.Setenv("ALCHEMY_PAYMASTER_POLICY_ID", "")
 	t.Setenv("ALCHEMY_GAS_POLICY_ID", "")
 
-	require.Equal(t, "policy", ResolveAlchemyPaymasterPolicyID("production", "policy", ""))
-	require.Equal(t, "legacy", ResolveAlchemyPaymasterPolicyID("production", "", "legacy"),
+	require.Equal(t, "policy", ResolveAlchemyPaymasterPolicyID("policy", ""))
+	require.Equal(t, "legacy", ResolveAlchemyPaymasterPolicyID("", "legacy"),
 		"the legacy yaml alias must keep working")
-	require.Empty(t, ResolveAlchemyPaymasterPolicyID("development", "policy", ""),
-		"development must not draw on the production policy, however it is configured")
 
 	t.Setenv("ALCHEMY_PAYMASTER_POLICY_ID", "from-env")
-	require.Equal(t, "from-env", ResolveAlchemyPaymasterPolicyID("production", "", ""))
-	require.Empty(t, ResolveAlchemyPaymasterPolicyID("development", "", ""),
-		"an environment-inherited policy is exactly the accident the guard is for")
+	require.Equal(t, "from-env", ResolveAlchemyPaymasterPolicyID("", ""))
+
+	// A blank-but-present yaml value must not swallow a good fallback: trimming
+	// the winner instead of each candidate would select " " and resolve to "",
+	// silently unsponsored.
+	require.Equal(t, "from-env", ResolveAlchemyPaymasterPolicyID("   ", ""),
+		"a whitespace-only yaml value must fall through to the environment")
+	t.Setenv("GAS_MANAGER_WEBHOOK_SECRET", "secret-from-env")
+	require.Equal(t, "secret-from-env", ResolveGasManagerWebhookSecret("  "),
+		"same rule for the webhook secret")
+}
+
+// SponsorshipPolicyID is the single place that decides whether an operation can
+// be sponsored, so every disqualifying condition has to be visible here.
+func TestSponsorshipPolicyIDAppliesEveryCondition(t *testing.T) {
+	alchemy := func() *SmartWalletConfig {
+		return &SmartWalletConfig{
+			ChainID:                  11155111,
+			BundlerProvider:          BundlerProviderAlchemy,
+			AlchemyAPIKey:            "key",
+			AlchemyPaymasterPolicyID: "policy",
+		}
+	}
+
+	require.Equal(t, "policy", alchemy().SponsorshipPolicyID(),
+		"an Alchemy chain with a policy and no opt-out sponsors")
+
+	optedOut := alchemy()
+	optedOut.DisableGasSponsorship = true
+	require.Empty(t, optedOut.SponsorshipPolicyID(),
+		"an explicit opt-out wins over a configured policy — this is what keeps a local run off the production policy")
+
+	// bnb-mainnet is configured exactly this way. Sponsorship is requested with
+	// alchemy_requestGasAndPaymasterAndData, which a self-hosted Voltaire
+	// bundler does not implement, so asking would fail the operation rather
+	// than sponsor it.
+	selfHosted := alchemy()
+	selfHosted.BundlerProvider = BundlerProviderSelfHosted
+	selfHosted.BundlerURL = "http://bundler.internal"
+	require.Empty(t, selfHosted.SponsorshipPolicyID(),
+		"a policy is inert on a non-Alchemy bundler and must not be attempted")
+
+	noPolicy := alchemy()
+	noPolicy.AlchemyPaymasterPolicyID = ""
+	require.Empty(t, noPolicy.SponsorshipPolicyID())
+
+	var nilConfig *SmartWalletConfig
+	require.Empty(t, nilConfig.SponsorshipPolicyID(), "must be nil-safe")
 }

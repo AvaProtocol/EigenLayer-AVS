@@ -154,6 +154,12 @@ type Config struct {
 	// whereas an unmounted route 404s loudly.
 	AlchemyPaymasterPolicyID string
 
+	// DisableGasSponsorship opts the whole process out of Gas Manager
+	// sponsorship. Set it in every local/development config: the policy's
+	// webhook points at the production gateway, so a local process that
+	// requests sponsorship is approved and billed by production.
+	DisableGasSponsorship bool
+
 	// GasManagerWebhookSecret, when set, must be echoed as the webhook
 	// request's webhookData. The webhook cannot sit behind the REST JWT
 	// (Alchemy has no token), so this is its only caller authentication.
@@ -249,6 +255,10 @@ type SmartWalletConfig struct {
 	// legacy v0.6 SimpleAccount fork. See AccountProviderName.
 	AccountProvider string
 
+	// DisableGasSponsorship opts this deployment out of the Gas Manager policy
+	// regardless of what is configured. See SponsorshipPolicyID.
+	DisableGasSponsorship bool
+
 	// AlchemyPaymasterPolicyID is copied down from the top-level config so the
 	// v0.7 send path — which is handed only a SmartWalletConfig — can request
 	// sponsorship without reaching back up. Empty means unsponsored: the
@@ -293,6 +303,39 @@ func (c *SmartWalletConfig) AccountProviderName() string {
 		return AccountProviderModularAccountV2
 	}
 	return p
+}
+
+// SponsorshipPolicyID returns the Gas Manager policy this chain may actually
+// use, or "" when it must run self-funded. Every decision about sponsorship
+// reads this rather than AlchemyPaymasterPolicyID directly, so the conditions
+// cannot be applied in one place and forgotten in another.
+//
+// Two things disqualify a configured policy:
+//
+//   - DisableGasSponsorship. An explicit opt-out for any deployment that must
+//     not draw on the policy. Local development is the reason it exists: the
+//     policy's custom-rules webhook is a single URL pointing at the PRODUCTION
+//     gateway, so a locally-run process asking for sponsorship has production
+//     approve it — deciding against production's wallet records and billing
+//     production's budget for someone's laptop. A policy id can arrive from the
+//     environment as well as from yaml, so an exported
+//     ALCHEMY_PAYMASTER_POLICY_ID is enough to opt in by accident; the local
+//     templates set this so that cannot happen.
+//
+//   - A non-Alchemy bundler. Sponsorship is requested with
+//     alchemy_requestGasAndPaymasterAndData against ActiveBundlerURL, which a
+//     self-hosted Voltaire endpoint does not implement. Sending it there fails
+//     the operation instead of sponsoring it, so a policy on a self_hosted
+//     chain is inert — bnb-mainnet is configured exactly that way today. Better
+//     to run self-funded, which is what that chain already did.
+func (c *SmartWalletConfig) SponsorshipPolicyID() string {
+	if c == nil || c.DisableGasSponsorship {
+		return ""
+	}
+	if c.ProviderName() != BundlerProviderAlchemy {
+		return ""
+	}
+	return c.AlchemyPaymasterPolicyID
 }
 
 // UsesModularAccountV2 reports whether this chain derives MA v2 accounts.
@@ -509,6 +552,9 @@ type ConfigRaw struct {
 	// Alchemy paymaster policy (Gas Manager) + admin API (optional; see Config)
 	AlchemyAPISecret         string `yaml:"alchemy_api_secret"`
 	AlchemyPaymasterPolicyID string `yaml:"alchemy_paymaster_policy_id"`
+	// DisableGasSponsorship opts this process out of the Gas Manager policy.
+	// Local/development configs set it; see SmartWalletConfig.SponsorshipPolicyID.
+	DisableGasSponsorship bool `yaml:"disable_gas_sponsorship"`
 	// GasManagerPolicyID is a legacy yaml alias for alchemy_paymaster_policy_id.
 	// Still resolved as a fallback so existing configs keep sponsorship.
 	GasManagerPolicyID      string `yaml:"gas_manager_policy_id"`
@@ -770,6 +816,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 			WhitelistAddresses:       convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
 			MaxWalletsPerOwner:       configRaw.SmartWallet.MaxWalletsPerOwner,
 			AlchemyPaymasterPolicyID: resolveAlchemyPaymasterPolicyID(configRaw),
+			DisableGasSponsorship:    configRaw.DisableGasSponsorship,
 			GasManagerWebhookSecret:  ResolveGasManagerWebhookSecret(configRaw.GasManagerWebhookSecret),
 			// PaymasterOwnerAddress will be populated below by calling owner() on the paymaster contract
 		},
@@ -791,6 +838,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 		// Alchemy paymaster policy (Gas Manager) + admin API
 		AlchemyAPISecret:         firstNonEmpty(configRaw.AlchemyAPISecret, os.Getenv("ALCHEMY_API_SECRET")),
 		AlchemyPaymasterPolicyID: resolveAlchemyPaymasterPolicyID(configRaw),
+		DisableGasSponsorship:    configRaw.DisableGasSponsorship,
 		// Trim: pasted secrets often carry trailing whitespace; webhook compares
 		// with subtle.ConstantTimeCompare on the raw webhookData body field.
 		GasManagerWebhookSecret: ResolveGasManagerWebhookSecret(configRaw.GasManagerWebhookSecret),
@@ -872,16 +920,20 @@ func NewConfig(configFilePath string) (*Config, error) {
 			"default_chain_id", config.DefaultChainID)
 	}
 
-	// Say once, at boot, whether this process can have operations sponsored.
-	// A development process is refused deliberately — see
-	// SponsorshipRefusedForEnvironment — and that should read as a decision
-	// rather than as a missing policy someone ought to go and set.
-	if SponsorshipRefusedForEnvironment(string(configRaw.Environment)) {
-		logger.Info("Gas Manager sponsorship refused: development environment; operations run self-funded",
-			"hint", "the policy's webhook points at the production gateway; fund the test smart wallet instead")
-	} else if config.AlchemyPaymasterPolicyID == "" {
-		logger.Warn("No Gas Manager policy configured: operations run self-funded",
+	// Say once, at boot, whether this process can have operations sponsored,
+	// and if not, which condition ruled it out. Each of these is a decision
+	// rather than a missing setting, so they read differently.
+	switch {
+	case config.SmartWallet != nil && config.SmartWallet.DisableGasSponsorship:
+		logger.Info("Gas Manager sponsorship disabled by config; operations run self-funded",
+			"hint", "disable_gas_sponsorship is set — expected for local/development, where the policy's webhook points at production")
+	case config.AlchemyPaymasterPolicyID == "":
+		logger.Warn("No Gas Manager policy configured; operations run self-funded",
 			"hint", "set alchemy_paymaster_policy_id or ALCHEMY_PAYMASTER_POLICY_ID")
+	case config.SmartWallet != nil && config.SmartWallet.SponsorshipPolicyID() == "":
+		logger.Warn("Gas Manager policy is set but unusable on this bundler; operations run self-funded",
+			"bundler_provider", config.SmartWallet.ProviderName(),
+			"hint", "sponsorship needs bundler_provider: alchemy — alchemy_requestGasAndPaymasterAndData is not implemented by a self-hosted bundler")
 	}
 
 	// If HttpBindAddress is empty, HTTP server will be disabled (startup code will skip starting it)
@@ -975,48 +1027,28 @@ func firstNonEmpty(values ...string) string {
 // file, and the gateway and worker disagreeing about where sponsorship comes
 // from is exactly how worker-routed operations ended up unsponsored (#722).
 // One resolver, so they cannot drift apart again.
-func ResolveAlchemyPaymasterPolicyID(environment, canonicalYaml, legacyYaml string) string {
-	if SponsorshipRefusedForEnvironment(environment) {
-		return ""
-	}
-	return strings.TrimSpace(firstNonEmpty(
-		canonicalYaml,
-		os.Getenv("ALCHEMY_PAYMASTER_POLICY_ID"),
-		legacyYaml,
-		os.Getenv("ALCHEMY_GAS_POLICY_ID"),
-	))
-}
-
-// SponsorshipRefusedForEnvironment reports whether this process must not ask
-// Alchemy to sponsor, whatever its config says.
-//
-// A development process must not, and the reason is not tidiness. The Gas
-// Manager policy's custom-rules webhook is a single URL pointing at the
-// PRODUCTION gateway, so a locally-run gateway or worker that requests
-// sponsorship has Alchemy call production to approve it. Production then
-// decides using its own wallet records and its own credit ledger — so a local
-// test either gets a confusing denial for a wallet production has never heard
-// of, or, for a shared test wallet production does know, succeeds and bills
-// the production sponsorship budget for someone's laptop.
-//
-// This is a refusal rather than a convention because the policy id resolves
-// from the ENVIRONMENT as well as from yaml: an ALCHEMY_PAYMASTER_POLICY_ID
-// exported in a shell or sitting in a .env is enough to opt a local process in
-// by accident. Development runs self-funded; fund the test wallet instead.
-func SponsorshipRefusedForEnvironment(environment string) bool {
-	return strings.EqualFold(strings.TrimSpace(environment), string(sdklogging.Development))
+func ResolveAlchemyPaymasterPolicyID(canonicalYaml, legacyYaml string) string {
+	// Trim each candidate BEFORE choosing, not after. A yaml value of " " is
+	// non-empty, so trimming the winner would select the blank and discard a
+	// perfectly good environment fallback — silently unsponsored.
+	return firstNonEmpty(
+		strings.TrimSpace(canonicalYaml),
+		strings.TrimSpace(os.Getenv("ALCHEMY_PAYMASTER_POLICY_ID")),
+		strings.TrimSpace(legacyYaml),
+		strings.TrimSpace(os.Getenv("ALCHEMY_GAS_POLICY_ID")),
+	)
 }
 
 // ResolveGasManagerWebhookSecret returns the secret echoed to Alchemy as
-// webhookData. Same reasoning as ResolveAlchemyPaymasterPolicyID: a worker that
+// webhookData. Shared for the same reason as the policy resolver: a worker that
 // requests sponsorship must send the same secret the gateway's webhook checks,
 // or the policy's custom-rules callback rejects every request.
 func ResolveGasManagerWebhookSecret(yamlValue string) string {
-	return strings.TrimSpace(firstNonEmpty(yamlValue, os.Getenv("GAS_MANAGER_WEBHOOK_SECRET")))
+	return firstNonEmpty(strings.TrimSpace(yamlValue), strings.TrimSpace(os.Getenv("GAS_MANAGER_WEBHOOK_SECRET")))
 }
 
 func resolveAlchemyPaymasterPolicyID(raw ConfigRaw) string {
-	return ResolveAlchemyPaymasterPolicyID(string(raw.Environment), raw.AlchemyPaymasterPolicyID, raw.GasManagerPolicyID)
+	return ResolveAlchemyPaymasterPolicyID(raw.AlchemyPaymasterPolicyID, raw.GasManagerPolicyID)
 }
 
 func ReadYamlConfig(path string, o interface{}) error {

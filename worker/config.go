@@ -33,6 +33,10 @@ type WorkerConfig struct {
 	// webhookData and the gateway's webhook rejects any request whose value
 	// does not match.
 	AlchemyPaymasterPolicyID string `yaml:"alchemy_paymaster_policy_id"`
+	// DisableGasSponsorship opts this worker out of the Gas Manager policy.
+	// Local/development worker configs set it — see
+	// config.SmartWalletConfig.SponsorshipPolicyID for why that matters.
+	DisableGasSponsorship bool `yaml:"disable_gas_sponsorship"`
 	// GasManagerPolicyID is the legacy alias, accepted for the same reason the
 	// gateway accepts it: an existing deployment must not silently lose
 	// sponsorship on rename.
@@ -72,7 +76,11 @@ func NewWorkerConfig(configPath string) (*WorkerConfig, error) {
 // False means every operation it sends must be covered by the smart wallet's
 // own balance.
 func (c *WorkerConfig) SponsorshipConfigured() bool {
-	return config.ResolveAlchemyPaymasterPolicyID(c.Environment, c.AlchemyPaymasterPolicyID, c.GasManagerPolicyID) != ""
+	smartWalletConfig, err := c.ToSmartWalletConfig()
+	if err != nil {
+		return false
+	}
+	return smartWalletConfig.SponsorshipPolicyID() != ""
 }
 
 // ToSmartWalletConfig converts the worker's raw config into the shared SmartWalletConfig
@@ -107,7 +115,8 @@ func (c *WorkerConfig) ToSmartWalletConfig() (*config.SmartWalletConfig, error) 
 
 	return &config.SmartWalletConfig{
 		AlchemyPaymasterPolicyID: config.ResolveAlchemyPaymasterPolicyID(
-			c.Environment, c.AlchemyPaymasterPolicyID, c.GasManagerPolicyID),
+			c.AlchemyPaymasterPolicyID, c.GasManagerPolicyID),
+		DisableGasSponsorship:   c.DisableGasSponsorship,
 		GasManagerWebhookSecret: config.ResolveGasManagerWebhookSecret(c.GasManagerWebhookSecret),
 
 		EthRpcUrl:             c.EthRpcUrl,

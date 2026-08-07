@@ -722,7 +722,7 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 	// Sponsorship on MA v2 is the chain's Alchemy Gas Manager policy, applied
 	// inside the send path — there is nothing to attach here. Logged so ops do
 	// not read "no paymaster" as "unsponsored" when a policy is configured.
-	if r.smartWalletConfig != nil && r.smartWalletConfig.AlchemyPaymasterPolicyID != "" {
+	if r.smartWalletConfig.SponsorshipPolicyID() != "" {
 		r.vm.logger.Info("Gas Manager will sponsor (alchemy_paymaster_policy_id set)",
 			"owner", r.owner.Hex())
 	} else {
@@ -762,7 +762,7 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 	// Sponsorship is decided inside the send path by the chain's Gas Manager
 	// policy, so the log records whether one is configured rather than an
 	// attached request.
-	if r.smartWalletConfig != nil && r.smartWalletConfig.AlchemyPaymasterPolicyID != "" {
+	if r.smartWalletConfig.SponsorshipPolicyID() != "" {
 		executionLogBuilder.WriteString("Sponsored by the Alchemy Gas Manager policy\n")
 	} else {
 		executionLogBuilder.WriteString("No sponsorship policy (self-funded transaction)\n")

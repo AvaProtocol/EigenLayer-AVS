@@ -4,8 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 )
 
 // A worker that cannot request sponsorship sends operations the smart wallet
@@ -92,62 +90,65 @@ func TestWorkerPolicyResolutionMatchesTheGateway(t *testing.T) {
 	})
 }
 
-// A development process must never draw on the Gas Manager policy.
+// A worker that must not draw on the production policy says so explicitly.
 //
 // The policy's custom-rules webhook is a single URL pointing at the PRODUCTION
-// gateway, so a locally-run worker that requests sponsorship has production
-// approve it — deciding against production's wallet records and charging
-// production's credit ledger for a laptop. Refused in code rather than by
-// convention, because the policy id also resolves from the environment: an
-// exported ALCHEMY_PAYMASTER_POLICY_ID is enough to opt in by accident.
-func TestDevelopmentRefusesSponsorshipEvenWhenConfigured(t *testing.T) {
+// gateway, so a locally-run worker requesting sponsorship has production
+// approve it — deciding against production's wallet records and billing
+// production's budget for a laptop. The opt-out is a dedicated setting rather
+// than an inference from the logging environment, so a logging change can
+// never move money.
+func TestDisableGasSponsorshipDropsAConfiguredPolicy(t *testing.T) {
 	t.Setenv("ALCHEMY_PAYMASTER_POLICY_ID", "")
 	t.Setenv("ALCHEMY_GAS_POLICY_ID", "")
 
 	cfg := &WorkerConfig{
 		ChainID:                  11155111,
-		Environment:              "development",
+		BundlerProvider:          "alchemy",
+		AlchemyAPIKey:            "key",
 		AlchemyPaymasterPolicyID: "policy-uuid",
 		GasManagerWebhookSecret:  "shhh",
+		DisableGasSponsorship:    true,
 	}
-	require.False(t, cfg.SponsorshipConfigured(),
-		"a development worker must not report itself as able to sponsor")
-
-	smartWalletConfig, err := cfg.ToSmartWalletConfig()
-	require.NoError(t, err)
-	require.Empty(t, smartWalletConfig.AlchemyPaymasterPolicyID,
-		"an explicitly configured policy must still be dropped in development")
-}
-
-// The accident this guards against: the policy is never written to a local
-// config file, it just exists in the developer's environment.
-func TestDevelopmentIgnoresAPolicyInheritedFromTheEnvironment(t *testing.T) {
-	t.Setenv("ALCHEMY_PAYMASTER_POLICY_ID", "leaked-from-shell")
-
-	cfg := &WorkerConfig{ChainID: 11155111, Environment: "development"}
 	require.False(t, cfg.SponsorshipConfigured())
 
 	smartWalletConfig, err := cfg.ToSmartWalletConfig()
 	require.NoError(t, err)
-	require.Empty(t, smartWalletConfig.AlchemyPaymasterPolicyID)
-
-	// Same worker, production environment: the policy applies.
-	cfg.Environment = "production"
-	require.True(t, cfg.SponsorshipConfigured())
-	smartWalletConfig, err = cfg.ToSmartWalletConfig()
-	require.NoError(t, err)
-	require.Equal(t, "leaked-from-shell", smartWalletConfig.AlchemyPaymasterPolicyID,
-		"the guard must key on the environment, not disable sponsorship outright")
+	require.Empty(t, smartWalletConfig.SponsorshipPolicyID(),
+		"an explicitly configured policy must still be dropped when opted out")
 }
 
-// Only development is refused. Anything else — production, staging, an unset
-// value — keeps whatever sponsorship it was given, so the guard cannot quietly
-// switch a deployed chain to self-funded.
-func TestOnlyDevelopmentIsRefused(t *testing.T) {
-	for _, env := range []string{"production", "Production", "staging", ""} {
-		require.False(t, config.SponsorshipRefusedForEnvironment(env), "env %q", env)
+// The accident the opt-out guards against: the policy is never written into a
+// local config file, it just exists in the developer's environment.
+func TestOptOutIgnoresAPolicyInheritedFromTheEnvironment(t *testing.T) {
+	t.Setenv("ALCHEMY_PAYMASTER_POLICY_ID", "leaked-from-shell")
+
+	cfg := &WorkerConfig{
+		ChainID:               11155111,
+		BundlerProvider:       "alchemy",
+		AlchemyAPIKey:         "key",
+		DisableGasSponsorship: true,
 	}
-	for _, env := range []string{"development", "Development", "  development  "} {
-		require.True(t, config.SponsorshipRefusedForEnvironment(env), "env %q", env)
+	require.False(t, cfg.SponsorshipConfigured())
+
+	cfg.DisableGasSponsorship = false
+	require.True(t, cfg.SponsorshipConfigured(),
+		"the opt-out must be what disables it, not sponsorship being broken outright")
+}
+
+// bnb-mainnet runs a self-hosted bundler. Sponsorship there would send an
+// Alchemy-only method to Voltaire and fail the operation, so the worker must
+// report that it cannot sponsor even though a policy is configured.
+func TestSelfHostedBundlerCannotSponsor(t *testing.T) {
+	t.Setenv("ALCHEMY_PAYMASTER_POLICY_ID", "")
+	t.Setenv("ALCHEMY_GAS_POLICY_ID", "")
+
+	cfg := &WorkerConfig{
+		ChainID:                  56,
+		BundlerProvider:          "self_hosted",
+		BundlerURL:               "http://bundler.internal",
+		AlchemyPaymasterPolicyID: "policy-uuid",
 	}
+	require.False(t, cfg.SponsorshipConfigured(),
+		"a policy on a self-hosted bundler is inert; attempting it would fail the send")
 }

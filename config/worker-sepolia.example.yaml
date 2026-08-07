@@ -57,3 +57,15 @@ gas_manager_webhook_secret:  ${GAS_MANAGER_WEBHOOK_SECRET}
 smart_wallet:
   controller_private_key: <testnet-controller-private-key-hex>
   paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
+
+# Gas Manager sponsorship is DISABLED for local/development runs, deliberately.
+#
+# The policy's custom-rules webhook is a single URL pointing at the PRODUCTION
+# gateway, so a locally-run process that requests sponsorship has production
+# approve it — deciding against production's wallet records and billing
+# production's budget for your machine. Leave this true locally and fund the
+# test smart wallet with the chain's native token instead.
+#
+# It is an explicit setting rather than an inference from `environment` so that
+# changing log verbosity can never change who pays for gas.
+disable_gas_sponsorship: true

@@ -75,7 +75,7 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 			"effective_factory", effectiveFactory.Hex(),
 			"config_factory_address", sw.FactoryAddress.Hex(),
 			"entry_point", sw.EntryPointAddress().Hex(),
-			"paymaster_policy_set", sw.AlchemyPaymasterPolicyID != "",
+			"paymaster_policy_set", sw.SponsorshipPolicyID() != "",
 			"legacy_v06_paymaster", sw.PaymasterAddress.Hex(),
 		)
 	}

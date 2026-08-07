@@ -174,7 +174,7 @@ func SendUserOpMAv2(
 	// need no bundler URL. Sponsorship is alchemy_paymaster_policy_id /
 	// ALCHEMY_PAYMASTER_POLICY_ID (config also accepts legacy gas_manager_policy_id /
 	// ALCHEMY_GAS_POLICY_ID); when set, this check is skipped.
-	if smartWalletConfig.AlchemyPaymasterPolicyID == "" {
+	if smartWalletConfig.SponsorshipPolicyID() == "" {
 		if err := ensureSelfFundedPrefund(ctx, chainRPC, entryPoint, sender); err != nil {
 			return nil, nil, err
 		}
@@ -255,7 +255,7 @@ func SendUserOpMAv2(
 		"policy_id", auth.PolicyID,
 		"wrap_execute_user_op", auth.WrapExecuteUserOp,
 		"verification_gas_seed", op.VerificationGasLimit.String(),
-		"paymaster_policy_set", smartWalletConfig.AlchemyPaymasterPolicyID != "",
+		"paymaster_policy_set", smartWalletConfig.SponsorshipPolicyID() != "",
 	)
 
 	// Estimation of a deferred operation must carry the REAL owner grant.
@@ -488,7 +488,7 @@ func priceOperationV07(
 	smartWalletConfig *config.SmartWalletConfig,
 	l logger.Logger,
 ) error {
-	if policyID := smartWalletConfig.AlchemyPaymasterPolicyID; policyID != "" {
+	if policyID := smartWalletConfig.SponsorshipPolicyID(); policyID != "" {
 		if err := RequestSponsorshipV07(ctx, bundlerRPC, op, entryPoint,
 			SponsorshipRequestV07{
 				PolicyID:    policyID,
