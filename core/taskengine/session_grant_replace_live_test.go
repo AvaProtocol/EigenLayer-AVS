@@ -300,8 +300,22 @@ func seedEntitiesConsumedOnChain(
 ) {
 	t.Helper()
 
-	highest := uint32(0)
-	for entity := uint32(1); entity <= 32; entity++ {
+	// Walk until the wallet is clearly exhausted rather than to a fixed bound.
+	//
+	// A constant here is a trap, and it sprang: the bound was 32, the fixture's
+	// used range grew past it, and the scan then reported a highest that was too
+	// low. The allocator handed out entity 33 — clear on every module, deferred
+	// nonce sequence already 1 — and every grant AA23'd during validation with
+	// nothing on chain to say why. The bound has to track the wallet.
+	//
+	// Stopping needs a RUN of free entities, not the first one: a torn-down
+	// entity sitting between two live ones is normal after a replace, and a
+	// single-gap stop would end the walk in the middle of the used range.
+	const freeRunToStop = 8
+	const scanCeiling = 512
+
+	highest, freeRun := uint32(0), 0
+	for entity := uint32(1); entity <= scanCeiling && freeRun < freeRunToStop; entity++ {
 		sequence, err := aa.EntityDeferredNonceSequence(context.Background(), client, runner, entity)
 		require.NoError(t, err, "reading the deferred nonce sequence of entity %d", entity)
 
@@ -309,9 +323,15 @@ func seedEntitiesConsumedOnChain(
 		require.NoError(t, err)
 
 		if sequence != 0 || signer != (common.Address{}) {
-			highest = entity
+			highest, freeRun = entity, 0
+			continue
 		}
+		freeRun++
 	}
+	require.Less(t, highest, uint32(scanCeiling),
+		"runner %s has consumed %d+ entities; rotate this fixture to a fresh salt "+
+			"(scripts/fixture_wallet -salt N -deploy -fund 0.02) — entity ids are never reusable",
+		runner.Hex(), scanCeiling)
 	if highest == 0 {
 		return
 	}

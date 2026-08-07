@@ -146,18 +146,27 @@ func TestGrantReplaceClearsSeveralPriorEntities_Sepolia(t *testing.T) {
 	clearTornDownMark(t, db, chainID.Int64(), owner, *runner, first.EntityID)
 
 	afterCleanup := firstPrepared(t, engine, user)
-	for _, s := range afterCleanup.Supersedes {
-		require.NotEqual(t, first.EntityID, s.EntityID,
-			"entity %d is already clear on chain; batching its uninstall reverts the whole grant",
-			first.EntityID)
-	}
+
+	// Pin the whole set, not just the absence of the stale one. Dropping every
+	// candidate would also satisfy "the cleared entity is gone" while quietly
+	// letting the new grant install over a live one — the stacking this exists
+	// to prevent. Exactly one entity is installed at this point (third), so
+	// exactly one must ride the batch.
+	require.Len(t, afterCleanup.Supersedes, 1,
+		"only the already-clear entity may drop out; the installed grant must still be torn down")
+	require.Equal(t, third.EntityID, afterCleanup.Supersedes[0].EntityID,
+		"the batch must supersede the entity that is actually installed")
 	require.True(t, tornDownOnRecord(t, db, chainID.Int64(), owner, *runner, first.EntityID),
 		"a candidate found clear on chain must be recorded torn down, or every later grant re-reads it")
 
 	fourth := submitPrepared(t, engine, user, ownerKey, afterCleanup)
 	runOperationUnderGrant(t, engine, user, *runner)
+
 	requireEntityClear(t, client, *runner, fourth.EntityID, false)
-	t.Logf("✅ stale candidate %d dropped; grant %d still landed", first.EntityID, fourth.EntityID)
+	requireEntityClear(t, client, *runner, third.EntityID, true)
+	requireEntityClear(t, client, *runner, first.EntityID, true)
+	t.Logf("✅ stale candidate %d dropped, live entity %d still torn down; grant %d landed",
+		first.EntityID, third.EntityID, fourth.EntityID)
 }
 
 // clearTornDownMark removes the TornDownAt marker from whichever policy holds
