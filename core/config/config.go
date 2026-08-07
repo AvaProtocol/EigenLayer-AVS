@@ -770,7 +770,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 			WhitelistAddresses:       convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
 			MaxWalletsPerOwner:       configRaw.SmartWallet.MaxWalletsPerOwner,
 			AlchemyPaymasterPolicyID: resolveAlchemyPaymasterPolicyID(configRaw),
-			GasManagerWebhookSecret:  strings.TrimSpace(firstNonEmpty(configRaw.GasManagerWebhookSecret, os.Getenv("GAS_MANAGER_WEBHOOK_SECRET"))),
+			GasManagerWebhookSecret:  ResolveGasManagerWebhookSecret(configRaw.GasManagerWebhookSecret),
 			// PaymasterOwnerAddress will be populated below by calling owner() on the paymaster contract
 		},
 
@@ -793,7 +793,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 		AlchemyPaymasterPolicyID: resolveAlchemyPaymasterPolicyID(configRaw),
 		// Trim: pasted secrets often carry trailing whitespace; webhook compares
 		// with subtle.ConstantTimeCompare on the raw webhookData body field.
-		GasManagerWebhookSecret: strings.TrimSpace(firstNonEmpty(configRaw.GasManagerWebhookSecret, os.Getenv("GAS_MANAGER_WEBHOOK_SECRET"))),
+		GasManagerWebhookSecret: ResolveGasManagerWebhookSecret(configRaw.GasManagerWebhookSecret),
 
 		// Initialize fee rates - use defaults if no YAML config provided
 		FeeRates: loadFeeRatesFromConfig(configRaw.FeeRates),
@@ -951,17 +951,37 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// resolveAlchemyPaymasterPolicyID returns the Alchemy paymaster policy UUID.
+// ResolveAlchemyPaymasterPolicyID returns the Alchemy paymaster policy UUID
+// from a config's canonical and legacy yaml fields, falling back to the
+// environment in the same order.
+//
 // Canonical: yaml alchemy_paymaster_policy_id / env ALCHEMY_PAYMASTER_POLICY_ID.
 // Legacy aliases still accepted so existing deployments do not silently lose
 // sponsorship: yaml gas_manager_policy_id / env ALCHEMY_GAS_POLICY_ID.
-func resolveAlchemyPaymasterPolicyID(raw ConfigRaw) string {
-	return firstNonEmpty(
-		raw.AlchemyPaymasterPolicyID,
+//
+// Exported because the worker resolves the same setting from its own config
+// file, and the gateway and worker disagreeing about where sponsorship comes
+// from is exactly how worker-routed operations ended up unsponsored (#722).
+// One resolver, so they cannot drift apart again.
+func ResolveAlchemyPaymasterPolicyID(canonicalYaml, legacyYaml string) string {
+	return strings.TrimSpace(firstNonEmpty(
+		canonicalYaml,
 		os.Getenv("ALCHEMY_PAYMASTER_POLICY_ID"),
-		raw.GasManagerPolicyID,
+		legacyYaml,
 		os.Getenv("ALCHEMY_GAS_POLICY_ID"),
-	)
+	))
+}
+
+// ResolveGasManagerWebhookSecret returns the secret echoed to Alchemy as
+// webhookData. Same reasoning as ResolveAlchemyPaymasterPolicyID: a worker that
+// requests sponsorship must send the same secret the gateway's webhook checks,
+// or the policy's custom-rules callback rejects every request.
+func ResolveGasManagerWebhookSecret(yamlValue string) string {
+	return strings.TrimSpace(firstNonEmpty(yamlValue, os.Getenv("GAS_MANAGER_WEBHOOK_SECRET")))
+}
+
+func resolveAlchemyPaymasterPolicyID(raw ConfigRaw) string {
+	return ResolveAlchemyPaymasterPolicyID(raw.AlchemyPaymasterPolicyID, raw.GasManagerPolicyID)
 }
 
 func ReadYamlConfig(path string, o interface{}) error {

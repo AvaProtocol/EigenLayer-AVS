@@ -39,6 +39,20 @@ bundler_url:      ${SEPOLIA_BUNDLER_URL}
 bundler_provider: self_hosted
 alchemy_api_key:  ${ALCHEMY_API_KEY}
 
+# Gas Manager sponsorship — MUST match the gateway, or this worker sends
+# UNSPONSORED operations.
+#
+# Sponsorship is requested only when a policy id is present. Without one, every
+# operation this worker sends has to be paid for out of the smart wallet's own
+# balance, so a wallet holding only tokens cannot move them — which is how
+# withdrawals routed through a worker silently stopped being sponsored (#722).
+#
+# The webhook endpoint itself stays on the gateway (POST /webhooks/gas-manager).
+# What the worker needs is the SECRET: it is echoed to Alchemy as webhookData,
+# and the gateway's webhook rejects any request whose value does not match.
+alchemy_paymaster_policy_id: ${ALCHEMY_PAYMASTER_POLICY_ID}
+gas_manager_webhook_secret:  ${GAS_MANAGER_WEBHOOK_SECRET}
+
 # Smart wallet / account abstraction config.
 smart_wallet:
   controller_private_key: <testnet-controller-private-key-hex>

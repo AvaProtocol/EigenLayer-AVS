@@ -70,7 +70,20 @@ func (w *Worker) Start(ctx context.Context) error {
 		"chain_name", w.config.ChainName,
 		"listen_address", w.config.ListenAddress,
 		"health_address", w.config.HealthAddress,
+		"sponsorship_configured", w.config.SponsorshipConfigured(),
 	)
+
+	// Say it plainly at boot rather than letting it surface as a user's
+	// withdrawal failing: without a policy every operation this worker sends
+	// must be paid for by the smart wallet itself, so a wallet holding only
+	// tokens cannot move them.
+	if !w.config.SponsorshipConfigured() {
+		w.logger.Warn("Chain worker has no Gas Manager policy: operations it sends will be self-funded",
+			"chain_id", w.config.ChainID,
+			"chain_name", w.config.ChainName,
+			"hint", "set alchemy_paymaster_policy_id (and gas_manager_webhook_secret) to match the gateway",
+		)
+	}
 
 	// Connect to chain RPC
 	var err error
