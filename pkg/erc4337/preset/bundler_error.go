@@ -25,9 +25,60 @@ func IsUserOpRevert(err error) bool {
 	return strings.Contains(err.Error(), userOpRevertMarker)
 }
 
+// IsClientUserOpFailure reports failures that are expected outcomes of client
+// state or product configuration — missing/wrong session grant, FeeLedger
+// webhook deny, self-funded prefund empty, Gas Manager simulation of an
+// invalid UserOp — rather than gateway infrastructure faults.
+//
+// Studio/SDK testing against prod (and users with incomplete grants) produce
+// these at high volume. Logging them at Error fans Sentry (EIGENLAYER-AVS-2E
+// and siblings) without an operator action. Warn keeps them in logs for
+// debugging; Error is reserved for true infra (bundler down, RPC, unexpected
+// panic paths).
+//
+// Classification is substring-based because these errors are already
+// fmt.Errorf-wrapped at several layers (send_v07, RequestSponsorshipV07,
+// LogBundlerError callers). Prefer adding a new marker constant here when
+// introducing a new client-facing failure class.
+func IsClientUserOpFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	// Order: specific markers first.
+	switch {
+	case strings.Contains(s, "SESSION_POLICY_TARGET_NOT_ALLOWED"):
+		return true
+	case strings.Contains(s, "SESSION_POLICY_LOOKUP_FAILED"):
+		// Multi-grant / storage races the client can clear by revoking.
+		return true
+	case strings.Contains(s, "no session authorization for smart wallet"):
+		return true
+	case strings.Contains(s, "more than one usable session policy"):
+		return true
+	case strings.Contains(s, "cannot pay gas"):
+		// Self-funded prefund: zero native + no policy (or deposit).
+		return true
+	case strings.Contains(s, "Request was denied by webhook"):
+		// FeeLedger / policy / secret gate — client or config, not bundler down.
+		return true
+	case strings.Contains(s, "gas manager declined to sponsor"):
+		// Alchemy declined after sim or webhook. Almost always AA23 (hooks),
+		// execution revert (swap economics), or webhook deny — not "Gas Manager
+		// is offline". Infra paymaster/RPC failures use different wording.
+		return true
+	case strings.Contains(s, "AA23"):
+		// Session validation / hooks — client grant scope until proven otherwise.
+		return true
+	default:
+		return false
+	}
+}
+
 // LogBundlerError logs a bundler/UserOp failure at the severity appropriate
-// for its cause: Warn for on-chain reverts (see IsUserOpRevert) so they do not
-// page Sentry, Error for real infra/AA failures that operators must see.
+// for its cause: Warn for expected client outcomes (on-chain user reverts,
+// missing grants, Gas Manager deny of an invalid UserOp) so they do not page
+// Sentry; Error for real infra failures that operators must see.
 //
 // Callers pass the error both for classification (the first argument) and,
 // conventionally, as a tag value so the logged record includes the full error.
@@ -35,7 +86,7 @@ func LogBundlerError(lgr logger.Logger, err error, msg string, tags ...any) {
 	if lgr == nil {
 		return
 	}
-	if IsUserOpRevert(err) {
+	if IsUserOpRevert(err) || IsClientUserOpFailure(err) {
 		lgr.Warn(msg, tags...)
 		return
 	}
