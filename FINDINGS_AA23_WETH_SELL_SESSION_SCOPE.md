@@ -5,6 +5,8 @@
 **Related:** `FINDINGS_AA23_FACTORY_MISMATCH.md` (factory mismatch = red herring; packing/`contractAddress` fixed in #706; USDC buy path proven)  
 **Status:** **Studio grant path landed (2026-08-06)** — compile USDC+WETH, coverage = approve(tokenIn)+router, `SESSION_POLICY_TARGET_NOT_ALLOWED` preflight + card copy. On-chain still needs re-authorize once; AVS optional typed prefix.
 
+**Local test default (2026-08-06):** Studio → `http://localhost:8080` + **self-funded** gateway (`alchemy_paymaster_policy_id: ""`; no `ALCHEMY_PAYMASTER_POLICY_ID` / webhook secret). **Do not** use Gas Manager sponsorship on laptop — fund runner with Sepolia ETH.
+
 ---
 
 ## TL;DR
