@@ -1838,7 +1838,7 @@ components:
       properties:
         entityId:
           type: integer
-          format: int32
+          format: int64
           minimum: 1
           description: Validation entity this cleanup removes.
         target:
@@ -2725,13 +2725,17 @@ paths:
       tags: [Policies]
       summary: Revoke a session policy
       description: |
-        A `pending` grant (never used on-chain) is deleted outright — nothing
-        was installed, so nothing remains. An `active` grant stops authorizing
-        immediately, but its on-chain validation still exists until the owner
-        executes `uninstallValidation`. When cleanup is required the response
-        includes `onChainCleanup` — the uninstallValidation call derived from
-        the stored install — so the owner wallet can finish teardown (plain
-        transaction to the runner, or owner-fallback UserOp).
+        Outcomes:
+
+        - `status: deleted` — rare: no InstallCall retained; record removed.
+        - `status: revoked`, `onChainCleanupRequired: false` — pending grant
+          retained so InstallCall survives a late-landing install (orphan
+          path). Not known on chain yet; no cleanup payload.
+        - `status: revoked`, `onChainCleanupRequired: true` — applied grant
+          still believed installed. Response includes `onChainCleanup`
+          (uninstallValidation call for the owner wallet: plain tx to the
+          runner, or owner-fallback UserOp). Once teardown is verified,
+          GET no longer returns cleanup for that policy.
       operationId: revokeWalletPolicy
       responses:
         '200':

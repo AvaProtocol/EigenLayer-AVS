@@ -76,8 +76,13 @@ const (
 	seedVerificationGasModuleEntity  = 100_000
 	seedVerificationGasDeferredBare  = 400_000
 	seedVerificationGasDeferredHooks = 700_000
-	initialCallGasLimit              = 500_000
-	initialPreVerificationGas        = 100_000
+	// Per uninstallValidation inside a deferred replace batch. Measured on
+	// Sepolia as ~98k actualGasUsed delta for install+one-uninstall vs install
+	// alone (#731 review). Headroom for variance; under-seed is AA23/AA26 at
+	// estimation and cannot be recovered by the efficiency tighten.
+	seedVerificationGasPerUninstall = 120_000
+	initialCallGasLimit             = 500_000
+	initialPreVerificationGas       = 100_000
 
 	// verificationGasEfficiencyFloor is Rundler's published threshold.
 	verificationGasEfficiencyFloor = 0.4

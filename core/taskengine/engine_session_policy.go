@@ -330,34 +330,18 @@ func (n *Engine) RevokeSessionPolicyByID(user *model.User, chainID int64, wallet
 		return false, false, nil, err
 	}
 	if cleanupRequired {
-		cleanup, buildErr := BuildOnChainRevokeCleanup(policy)
+		built, buildErr := BuildOnChainRevokeCleanup(policy)
 		if buildErr != nil {
 			return false, true, nil, fmt.Errorf("grant revoked off-chain but on-chain cleanup payload could not be built: %w", buildErr)
 		}
-		return false, true, cleanup, nil
+		return false, true, built, nil
 	}
 	// Pending without InstallCall → deleted. Pending with InstallCall → retained.
+	// Applied already torn down → revoked, no cleanup payload.
 	if !hadInstallCall {
 		return true, false, nil, nil
 	}
 	return false, false, nil, nil
-}
-
-// OnChainCleanupForPolicy builds the owner-executable uninstall for a policy
-// that still needs on-chain teardown (revoked+applied, or active before
-// revoke). Used by GET so clients can finish cleanup without re-revoking.
-func (n *Engine) OnChainCleanupForPolicy(user *model.User, chainID int64, wallet common.Address, policyID string) (*OnChainRevokeCleanup, error) {
-	if err := n.requireOwnedWallet(user, wallet); err != nil {
-		return nil, err
-	}
-	policy, err := n.GetSessionPolicyByID(user, chainID, wallet, policyID)
-	if err != nil {
-		return nil, err
-	}
-	if policy.Grant == nil || !policy.Grant.Applied() {
-		return nil, fmt.Errorf("policy %s has no on-chain install to clean up", policyID)
-	}
-	return BuildOnChainRevokeCleanup(policy)
 }
 
 // attachDeclaredPermissions records the grant's declared shape on the policy

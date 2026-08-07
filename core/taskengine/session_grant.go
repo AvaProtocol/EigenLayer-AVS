@@ -393,7 +393,9 @@ type OnChainRevokeCleanup struct {
 // structs. See aa.SessionSignerUninstallFromInstall for why that matters.
 //
 // Works for already-revoked records too: the retained Grant is what makes a
-// later cleanup attempt possible after the storage-only revoke.
+// later cleanup attempt possible after the storage-only revoke. Returns an
+// error when teardown was already recorded (TornDownAt) so callers do not
+// advertise a no-op cleanup.
 func BuildOnChainRevokeCleanup(policy *model.SessionPolicy) (*OnChainRevokeCleanup, error) {
 	if policy == nil {
 		return nil, fmt.Errorf("no policy to clean up")
@@ -403,6 +405,10 @@ func BuildOnChainRevokeCleanup(policy *model.SessionPolicy) (*OnChainRevokeClean
 	}
 	if policy.Grant == nil || len(policy.Grant.InstallCall) == 0 {
 		return nil, fmt.Errorf("policy %s has no InstallCall to derive uninstall from", policy.ID)
+	}
+	if !policy.Grant.NeedsOnChainCleanup() {
+		return nil, fmt.Errorf("policy %s does not need on-chain cleanup (applied=%v torn_down=%v)",
+			policy.ID, policy.Grant.Applied(), policy.Grant.TornDown())
 	}
 	if policy.EntityID == 0 {
 		return nil, fmt.Errorf("policy %s has entity 0; the owner fallback cannot be uninstalled this way", policy.ID)
@@ -441,7 +447,8 @@ func RevokeSessionGrant(db storage.Storage, policy *model.SessionPolicy) (onChai
 	}
 	if policy.Grant.Applied() {
 		policy.Status = model.SessionPolicyRevoked
-		return true, StoreSessionPolicy(db, policy)
+		// Already verified clear on chain — soft-revoke only, no cleanup payload.
+		return policy.Grant.NeedsOnChainCleanup(), StoreSessionPolicy(db, policy)
 	}
 	if len(policy.Grant.InstallCall) == 0 {
 		return false, db.Delete(key)
@@ -522,7 +529,8 @@ type TeardownVerifier func(ctx context.Context, chainID int64, account common.Ad
 
 // VerifySupersededTeardown checks that the entity a replacement was supposed
 // to remove is actually gone on chain, and returns an error when the check
-// fails or is inconclusive. It logs that outcome; it does not write storage.
+// fails or is inconclusive. On success it records TornDownAt on the storage
+// policy that owns that entity so the next replace batch does not re-target it.
 //
 // This is not belt-and-braces. A replace batch that mines proves the operation
 // executed, NOT that the uninstall did anything: the account catches a hook
@@ -535,9 +543,10 @@ type TeardownVerifier func(ctx context.Context, chainID int64, account common.Ad
 //
 // Callers on the send path must not fail the operation on this error: the new
 // grant is already installed and usable, and there is nothing to roll back.
-// Logging here is what makes a stranded entity visible until the #717 sweep
-// can mark and clear leftovers. db is reserved for that mark and is unused
-// today.
+// Logging here is what makes a stranded entity visible for explicit cleanup.
+//
+// superseded must carry ChainID, Runner, EntityID, and Owner (for the storage
+// mark). Policy ID may be the new grant's id — lookup is by entity on the runner.
 func VerifySupersededTeardown(
 	ctx context.Context,
 	db storage.Storage,
@@ -545,7 +554,6 @@ func VerifySupersededTeardown(
 	superseded *model.SessionPolicy,
 	logger sdklogging.Logger,
 ) error {
-	_ = db // reserved for marking stranded entities once the #717 sweep lands
 	if verify == nil || superseded == nil || superseded.Runner == nil {
 		return nil // no chain client: skip honestly rather than assume success
 	}
@@ -560,18 +568,47 @@ func VerifySupersededTeardown(
 		}
 		return err
 	}
-	if cleared {
-		return nil
+	if !cleared {
+		// Mined, and cleared nothing. The entity is still live authority.
+		if logger != nil {
+			logger.Error("a replaced grant is still installed on chain after its teardown mined",
+				"policy", superseded.ID, "runner", superseded.Runner.Hex(),
+				"entity", superseded.EntityID,
+				"hint", "the account catches onUninstall reverts and strands module state; this entity needs an explicit uninstall")
+		}
+		return fmt.Errorf("entity %d on %s survived its teardown (policy %s)",
+			superseded.EntityID, superseded.Runner.Hex(), superseded.ID)
 	}
 
-	// Mined, and cleared nothing. The entity is still live authority on the
-	// account even though storage has it revoked.
-	if logger != nil {
-		logger.Error("a replaced grant is still installed on chain after its teardown mined",
-			"policy", superseded.ID, "runner", superseded.Runner.Hex(),
-			"entity", superseded.EntityID,
-			"hint", "the account catches onUninstall reverts and strands module state; this entity needs an explicit uninstall")
+	if db != nil && superseded.Owner != nil {
+		if markErr := MarkEntityTornDown(db, superseded.ChainID, *superseded.Owner, *superseded.Runner, superseded.EntityID); markErr != nil {
+			if logger != nil {
+				logger.Warn("entity verified clear on chain but TornDownAt could not be stored",
+					"runner", superseded.Runner.Hex(), "entity", superseded.EntityID, "error", markErr)
+			}
+			// Verification succeeded; a failed mark only means the next grant
+			// may re-attempt uninstall (harmless if already clear).
+		}
 	}
-	return fmt.Errorf("entity %d on %s survived its teardown (policy %s)",
-		superseded.EntityID, superseded.Runner.Hex(), superseded.ID)
+	return nil
+}
+
+// MarkEntityTornDown sets TornDownAt on the policy that owns entity on runner.
+// Idempotent when already marked.
+func MarkEntityTornDown(db storage.Storage, chainID int64, owner, runner common.Address, entity uint32) error {
+	policies, err := ListSessionPolicies(db, chainID, owner)
+	if err != nil {
+		return err
+	}
+	for _, p := range policies {
+		if p.Runner == nil || *p.Runner != runner || p.EntityID != entity || p.Grant == nil {
+			continue
+		}
+		if p.Grant.TornDown() {
+			return nil
+		}
+		p.Grant.TornDownAt = time.Now().UnixMilli()
+		return StoreSessionPolicy(db, p)
+	}
+	return nil // no matching record — nothing to mark
 }

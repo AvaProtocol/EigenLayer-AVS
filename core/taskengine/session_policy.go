@@ -344,6 +344,9 @@ func NewSessionResolver(
 			if entityErr != nil {
 				return nil, fmt.Errorf("session policy %s: reading the teardown targets: %w", policy.ID, entityErr)
 			}
+			// Count for verification-gas seeding (deferred uninstalls run in
+			// validation; flat seed under-seeds N-way batches — #731 review).
+			auth.DeferredTeardownCount = len(replacedEntities)
 			auth.OnApplied = func(userOpHash string) error {
 				if err := MarkSessionGrantAppliedByID(db, policyChain, policyOwner, policyRunner, policyID, userOpHash); err != nil {
 					return err
@@ -354,13 +357,14 @@ func NewSessionResolver(
 				// The batch has mined, which says the operation ran — not that
 				// the uninstall did anything. A failed check does not fail the
 				// send: the new grant is installed and there is nothing to roll
-				// back. VerifySupersededTeardown logs the outcome; we only
-				// bound the RPC so a hung dial cannot stall OnApplied.
+				// back. VerifySupersededTeardown marks TornDownAt when clear.
 				ctx, cancel := context.WithTimeout(context.Background(), teardownVerifyTimeout)
 				defer cancel()
+				ownerAddr := policyOwner
 				for _, replacedEntity := range replacedEntities {
 					replaced := &model.SessionPolicy{
-						ID: policyID, ChainID: policyChain, Runner: &policyRunner, EntityID: replacedEntity,
+						ID: policyID, ChainID: policyChain, Owner: &ownerAddr,
+						Runner: &policyRunner, EntityID: replacedEntity,
 					}
 					_ = VerifySupersededTeardown(ctx, db, verifyTeardown, replaced, globalLogger)
 				}
@@ -402,27 +406,28 @@ func controllerSessionSigner(cfg *config.Config) func(common.Address) (*ecdsa.Pr
 	}
 }
 
-// maxOnChainTeardowns caps how many prior entities one replacement batch
-// uninstalls. Far above any realistic stacked-wallet residue; refuses prepare
-// rather than packing an unbounded UserOp if storage is pathological.
-const maxOnChainTeardowns = 16
+// maxOnChainTeardowns is how many prior entities one replacement batch
+// uninstalls. Bounded by deferred validation gas: each uninstall costs
+// ~100k verification gas (Sepolia measurement, #731 review), and the seed
+// scales with count. Soft-degrades rather than refusing prepare — leftover
+// entities ride the next grant (self-heal), matching #716.
+//
+// Sized for install+hooks (~700k base) plus a few teardowns with headroom
+// under Rundler's efficiency floor after the scaled seed lands.
+const maxOnChainTeardowns = 4
 
-// onChainTeardownTargets returns every grant on this runner whose validation
-// entity is known to be on chain and should be removed when the owner next
-// grants. That is what makes replace leave exactly one installed entity
-// (#717 AC1), including wallets that stacked before on-chain replace shipped.
+// onChainTeardownTargets returns grants on this runner whose validation
+// entity is still believed installed and should be removed when the owner
+// next grants (#717 AC1).
 //
-// Included:
+// Included when Grant.NeedsOnChainCleanup():
 //   - usable + applied — the current grant being replaced
-//   - revoked + applied — leftovers, multi-row residue, and in-flight orphans
-//     whose install landed after storage supersede (AppliedAt set without
-//     resurrecting usable status)
+//   - revoked + applied, not yet torn down — leftovers and late-landing orphans
 //
-// Excluded: pending (install never reached the chain — uninstall would target
-// something that does not exist), revoked without AppliedAt (no evidence the
-// entity is installed).
+// Excluded: never applied, already TornDownAt, missing InstallCall, entity 0.
 //
-// Order is stable (list order) so prepare and recheck compare equal sets.
+// If more than maxOnChainTeardowns remain, the first N (stable list order)
+// are returned; the rest wait for a later grant. Never refuses prepare.
 func onChainTeardownTargets(db storage.Storage, chainID int64, owner, runner common.Address) ([]*model.SessionPolicy, error) {
 	policies, err := ListSessionPolicies(db, chainID, owner)
 	if err != nil {
@@ -430,21 +435,18 @@ func onChainTeardownTargets(db storage.Storage, chainID int64, owner, runner com
 	}
 	out := make([]*model.SessionPolicy, 0)
 	for _, p := range policies {
-		if p.Runner == nil || *p.Runner != runner || p.Grant == nil || !p.Grant.Applied() {
+		if p.Runner == nil || *p.Runner != runner || p.Grant == nil {
 			continue
 		}
-		if len(p.Grant.InstallCall) == 0 || p.EntityID == 0 {
+		if !p.Grant.NeedsOnChainCleanup() || len(p.Grant.InstallCall) == 0 || p.EntityID == 0 {
 			continue
 		}
-		// Usable applied, or revoked-but-applied leftovers / orphans.
 		if p.Usable() || p.Status == model.SessionPolicyRevoked {
 			out = append(out, p)
 		}
 	}
 	if len(out) > maxOnChainTeardowns {
-		return nil, fmt.Errorf(
-			"wallet %s has %d on-chain session entities to tear down (cap %d); clear some with explicit revoke cleanup before granting again",
-			runner.Hex(), len(out), maxOnChainTeardowns)
+		out = out[:maxOnChainTeardowns]
 	}
 	return out, nil
 }

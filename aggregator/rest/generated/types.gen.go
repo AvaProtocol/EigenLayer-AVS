@@ -1098,7 +1098,7 @@ type OnChainRevokeCleanup struct {
 	ChainId int64 `json:"chainId"`
 
 	// EntityId Validation entity this cleanup removes.
-	EntityId int32 `json:"entityId"`
+	EntityId int64 `json:"entityId"`
 
 	// Target Lowercase or checksummed hex EOA / contract address.
 	Target EthereumAddress `json:"target"`

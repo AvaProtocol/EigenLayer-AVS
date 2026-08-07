@@ -195,7 +195,7 @@ func onChainCleanupAPI(c *taskengine.OnChainRevokeCleanup) *generated.OnChainRev
 		return nil
 	}
 	return &generated.OnChainRevokeCleanup{
-		EntityId: int32(c.EntityID),
+		EntityId: int64(c.EntityID),
 		Target:   generated.EthereumAddress(c.Target.Hex()),
 		CallData: generated.Hex("0x" + common.Bytes2Hex(c.CallData)),
 		ChainId:  c.ChainID,
@@ -273,10 +273,15 @@ func policyToAPI(p *model.SessionPolicy) generated.SessionPolicy {
 		ValidUntil: p.ValidUntil,
 		CreatedAt:  p.CreatedAt,
 	}
-	if p.Status == model.SessionPolicyRevoked && p.Grant != nil && p.Grant.Applied() {
+	// Only when still believed installed. TornDownAt means a prior replace
+	// (or cleanup) already verified the entity clear — do not re-advertise.
+	if p.Status == model.SessionPolicyRevoked && p.Grant != nil && p.Grant.NeedsOnChainCleanup() {
 		if c, err := taskengine.BuildOnChainRevokeCleanup(p); err == nil {
 			out.OnChainCleanup = onChainCleanupAPI(c)
 		}
+		// Build failure: omit field. Callers that need diagnostics use revoke,
+		// which surfaces the error. Silent omit is better than claiming no
+		// cleanup is needed when the record is corrupt.
 	}
 	if p.Runner != nil {
 		out.Runner = generated.EthereumAddress(p.Runner.Hex())
