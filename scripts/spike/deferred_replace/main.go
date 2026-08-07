@@ -255,9 +255,13 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("building the new grant's install: %w", err)
 	}
-	uninstallPrior, err := policiedUninstall(prior, token)
+	priorInstall, err := policiedInstall(prior, controller, token)
 	if err != nil {
-		return fmt.Errorf("building the prior grant's uninstall: %w", err)
+		return fmt.Errorf("rebuilding the prior grant's install for teardown: %w", err)
+	}
+	uninstallPrior, err := aa.SessionSignerUninstallFromInstall(prior, priorInstall)
+	if err != nil {
+		return fmt.Errorf("deriving the prior grant's uninstall: %w", err)
 	}
 
 	// Q1 — the batch itself. Both calls target the ACCOUNT, which is what
@@ -386,36 +390,11 @@ func policiedInstall(entity uint32, signer, token common.Address) ([]byte, error
 	})
 }
 
-// policiedUninstall rebuilds the prior grant's teardown.
-//
-// Two things this got wrong the first time, both of which mined a SUCCESSFUL
-// transaction that cleared nothing — the §3.5 hazard exactly:
-//
-//   - PackSessionSignerUninstall already packs the validation module's own
-//     teardown (PackSingleSignerUninstallData) as uninstallData. Passing it
-//     AGAIN as a hook entry displaced the allowlist's payload, so the
-//     allowlist was handed data meant for a different module.
-//   - hookUninstallData is one entry per installed hook in the ACCOUNT's
-//     STORED order — the reverse of install, because the hook set is a
-//     prepend-on-add list. Install order is [allowlist-validation,
-//     allowlist-exec, time-range], so stored order is [time-range,
-//     allowlist-exec, allowlist-validation].
-//
-// The allowlist's teardown is the SAME (entityId, inputs) tuple it was
-// installed with; its exec-hook entry carries no install data, so its slot is
-// empty. A misrouted entry does not revert — onUninstall reverts are caught
-// and the state stranded — which is why every probe reads the cap back.
-func policiedUninstall(entity uint32, token common.Address) ([]byte, error) {
-	timeRange, err := aa.PackTimeRangeUninstallData(entity)
-	if err != nil {
-		return nil, err
-	}
-	allowlist, err := aa.PackAllowlistInstallData(entity, allowlistInputs(token))
-	if err != nil {
-		return nil, err
-	}
-	return aa.PackSessionSignerUninstall(entity, [][]byte{timeRange, nil, allowlist})
-}
+// The teardown now comes from aa.SessionSignerUninstallFromInstall, derived
+// from the very install call this spike built — so the spike exercises the
+// production deriver rather than a parallel hand-rolled copy. The payload that
+// mined and cleared state on salt 15 is what that function reproduces; if it
+// ever stops matching, this probe stops clearing and says so in the readback.
 
 // attemptDeferred sends one probe: `deferred` runs during validation under the
 // owner's fallback authority; the op itself is validated by outerEntity.
