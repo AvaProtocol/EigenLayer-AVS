@@ -274,6 +274,9 @@ func SendUserOpMAv2(
 	}
 
 	if err := priceOperationV07(ctx, chainRPC, bundlerRPC, op, entryPoint, smartWalletConfig, l); err != nil {
+		if auth.Deferred() {
+			return nil, nil, wrapDeferredGrantInstallError(err)
+		}
 		return nil, nil, err
 	}
 
@@ -312,7 +315,11 @@ func SendUserOpMAv2(
 	}
 	if err != nil {
 		InvalidateNonce(sender, nonceEntity, nonceOptions)
-		return op, nil, fmt.Errorf("sending user operation: %w", annotatePrefundError(err, sender))
+		err = fmt.Errorf("sending user operation: %w", annotatePrefundError(err, sender))
+		if auth.Deferred() {
+			err = wrapDeferredGrantInstallError(err)
+		}
+		return op, nil, err
 	}
 	// Record acceptance NOW — the bundler holds the operation, so the next
 	// one on this key must use the following sequence even though nothing has
@@ -366,6 +373,30 @@ func SendUserOpMAv2(
 		}
 	}
 	return op, receipt, nil
+}
+
+// wrapDeferredGrantInstallError renames opaque AA23 / simulation failures on
+// the first operation that carries a session-grant deferred install (or
+// install+uninstall replace batch) so clients see that neither the new grant
+// nor the prior teardown landed — not a bare bundler AA23 (#717 failure
+// semantics).
+func wrapDeferredGrantInstallError(err error) error {
+	if err == nil {
+		return nil
+	}
+	s := err.Error()
+	if strings.Contains(s, "SESSION_GRANT_INSTALL_FAILED") {
+		return err
+	}
+	if strings.Contains(s, "AA23") ||
+		strings.Contains(s, "validation reverted") ||
+		strings.Contains(s, "execution reverted") ||
+		strings.Contains(s, "Request was denied by webhook") {
+		return fmt.Errorf(
+			"SESSION_GRANT_INSTALL_FAILED: deferred grant install/replace did not land "+
+				"(new entity not installed; prior entities not torn down): %w", err)
+	}
+	return err
 }
 
 // checkDeferredCarrierNonce refuses a deferred operation whose live nonce

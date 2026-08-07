@@ -189,6 +189,19 @@ func (s *Server) GetWalletPolicy(ctx echo.Context, address generated.EthereumAdd
 	return ctx.JSON(http.StatusOK, policyToAPI(policy))
 }
 
+// onChainCleanupAPI maps the engine cleanup payload to the OpenAPI type.
+func onChainCleanupAPI(c *taskengine.OnChainRevokeCleanup) *generated.OnChainRevokeCleanup {
+	if c == nil {
+		return nil
+	}
+	return &generated.OnChainRevokeCleanup{
+		EntityId: int32(c.EntityID),
+		Target:   generated.EthereumAddress(c.Target.Hex()),
+		CallData: generated.Hex("0x" + common.Bytes2Hex(c.CallData)),
+		ChainId:  c.ChainID,
+	}
+}
+
 // RevokeWalletPolicy revokes one grant.
 func (s *Server) RevokeWalletPolicy(ctx echo.Context, address generated.EthereumAddress, policyID generated.Ulid, params generated.RevokeWalletPolicyParams) error {
 	user, wallet, err := s.policyAuth(ctx, address)
@@ -216,12 +229,7 @@ func (s *Server) RevokeWalletPolicy(ctx echo.Context, address generated.Ethereum
 		// Owner-executable uninstallValidation. Studio (or any wallet client)
 		// sends this as a plain call to the runner — the controller cannot
 		// self-uninstall a policied grant (spike R4 / #717).
-		resp.OnChainCleanup = &generated.OnChainRevokeCleanup{
-			EntityId: int32(cleanup.EntityID),
-			Target:   generated.EthereumAddress(cleanup.Target.Hex()),
-			CallData: generated.Hex("0x" + common.Bytes2Hex(cleanup.CallData)),
-			ChainId:  cleanup.ChainID,
-		}
+		resp.OnChainCleanup = onChainCleanupAPI(cleanup)
 	}
 	return ctx.JSON(http.StatusOK, resp)
 }
@@ -251,8 +259,10 @@ func permissionsFromAPI(actions []generated.AllowedAction, spendCap *generated.E
 	return perms, nil
 }
 
-// policyToAPI renders a policy for responses. Grant material — calldata,
-// nonce, the owner's signature — is secret-grade and never leaves storage.
+// policyToAPI renders a policy for responses. Grant material — install
+// calldata, carrier nonce, owner signature — is secret-grade and never leaves
+// storage. Revoked+applied policies may include onChainCleanup (derived
+// uninstall only) so clients can finish teardown without re-revoking.
 func policyToAPI(p *model.SessionPolicy) generated.SessionPolicy {
 	out := generated.SessionPolicy{
 		Id:         generated.Ulid(p.ID),
@@ -262,6 +272,11 @@ func policyToAPI(p *model.SessionPolicy) generated.SessionPolicy {
 		AgentLabel: p.AgentLabel,
 		ValidUntil: p.ValidUntil,
 		CreatedAt:  p.CreatedAt,
+	}
+	if p.Status == model.SessionPolicyRevoked && p.Grant != nil && p.Grant.Applied() {
+		if c, err := taskengine.BuildOnChainRevokeCleanup(p); err == nil {
+			out.OnChainCleanup = onChainCleanupAPI(c)
+		}
 	}
 	if p.Runner != nil {
 		out.Runner = generated.EthereumAddress(p.Runner.Hex())

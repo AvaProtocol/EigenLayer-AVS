@@ -226,15 +226,17 @@ func TestPoliciesPrepareSignSubmitOverHTTP(t *testing.T) {
 	require.Contains(t, rec.Body.String(), string(prepared.PolicyId))
 	require.NotContains(t, rec.Body.String(), "ownerSignature")
 
-	// Revoke: pending → deleted outright, no on-chain cleanup.
+	// Revoke: pending is retained as revoked (InstallCall survives for a late
+	// install mark / cleanup); no on-chain entity is known yet.
 	rec = rig.call(t, nil, func(c echo.Context) error {
 		return rig.server.RevokeWalletPolicy(c, address, prepared.PolicyId, generated.RevokeWalletPolicyParams{})
 	}, nil)
 	require.Equal(t, http.StatusOK, rec.Code)
 	var revoked generated.RevokePolicyResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &revoked))
-	require.Equal(t, "deleted", string(revoked.Status))
+	require.Equal(t, "revoked", string(revoked.Status))
 	require.False(t, revoked.OnChainCleanupRequired)
+	require.Nil(t, revoked.OnChainCleanup)
 }
 
 func TestPoliciesSubmitRejectsTamperedCapOverHTTP(t *testing.T) {

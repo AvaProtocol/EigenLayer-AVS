@@ -1790,6 +1790,13 @@ components:
           type: integer
           format: int64
           description: Unix milliseconds.
+        onChainCleanup:
+          allOf:
+            - $ref: '#/components/schemas/OnChainRevokeCleanup'
+          description: |
+            Present when status is revoked and the validation entity is still
+            installed on chain. Owner-executable uninstallValidation so clients
+            can finish teardown without re-calling DELETE (#717).
 
     SubmitPolicyResponse:
       allOf:

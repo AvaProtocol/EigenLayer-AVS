@@ -62,14 +62,20 @@ func usableOn(t *testing.T, db storage.Storage, owner, wallet common.Address) []
 
 // seedUsablePolicy writes a usable grant directly, bypassing submit — the only
 // way to reproduce a runner that stacked grants before replacement existed.
+// InstallCall is a real installValidation so N-way teardown can derive uninstall.
 func seedUsablePolicy(t *testing.T, db storage.Storage, owner, wallet common.Address, id string, entity uint32) {
 	t.Helper()
 	ownerAddr, walletAddr, signer := owner, wallet, common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
+	install, err := aa.PackSessionSignerInstall(aa.SessionGrant{
+		EntityID: entity, Signer: signer, Global: true,
+		Hooks: [][]byte{aa.AllowlistExecHook(entity)},
+	})
+	require.NoError(t, err)
 	require.NoError(t, StoreSessionPolicy(db, &model.SessionPolicy{
 		ID: id, Owner: &ownerAddr, Runner: &walletAddr, ChainID: testPolicyChain,
 		EntityID: entity, SessionSigner: &signer, Status: model.SessionPolicyActive,
 		Grant: &model.SessionGrantAuthorization{
-			InstallCall:    []byte{0x1b, 0xbf, 0x56, 0x4c, 0x01},
+			InstallCall:    install,
 			CarrierNonce:   big.NewInt(1),
 			Deadline:       1785541743,
 			OwnerSignature: make([]byte, 65),
@@ -446,7 +452,7 @@ func TestFirstGrantCarriesNoTeardown(t *testing.T) {
 		Permissions: testPermissions(),
 	})
 	require.NoError(t, err)
-	require.Nil(t, prepared.Supersedes, "nothing installed, nothing to supersede")
+	require.Empty(t, prepared.Supersedes, "nothing installed, nothing to supersede")
 
 	batch, _, _ := deferredShape(t, prepared.Policy.Grant.InstallCall)
 	require.False(t, batch, "a first grant is a plain installValidation")
@@ -467,7 +473,7 @@ func TestReplacingAPendingGrantCarriesNoTeardown(t *testing.T) {
 		Permissions: testPermissions(),
 	})
 	require.NoError(t, err)
-	require.Nil(t, prepared.Supersedes,
+	require.Empty(t, prepared.Supersedes,
 		"a pending grant's install never reached the chain — there is nothing to uninstall")
 	batch, _, _ := deferredShape(t, prepared.Policy.Grant.InstallCall)
 	require.False(t, batch)
@@ -489,9 +495,9 @@ func TestReplacingAnAppliedGrantBatchesItsTeardown(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.NotNil(t, prepared.Supersedes, "an installed grant must be superseded on chain too")
-	require.Equal(t, first.ID, prepared.Supersedes.PolicyID)
-	require.Equal(t, first.EntityID, prepared.Supersedes.EntityID)
+	require.Len(t, prepared.Supersedes, 1, "an installed grant must be superseded on chain too")
+	require.Equal(t, first.ID, prepared.Supersedes[0].PolicyID)
+	require.Equal(t, first.EntityID, prepared.Supersedes[0].EntityID)
 
 	batch, installs, uninstalls := deferredShape(t, prepared.Policy.Grant.InstallCall)
 	require.True(t, batch, "a replacement is a batch")
@@ -507,28 +513,27 @@ func TestReplacingAnAppliedGrantBatchesItsTeardown(t *testing.T) {
 		"the stored call is the batch; the install is inside it")
 }
 
-// The regression this nearly shipped: #716 made granting SELF-HEALING for a
-// wallet stuck with stacked grants. A replacement can only remove one entity,
-// so a stacked wallet must fall back to install-only rather than refuse —
-// otherwise the wallets most in need of repair are the ones that cannot be.
-func TestStackedInstalledGrantsStillAllowGranting(t *testing.T) {
+// Stacked applied grants (pre-#729 residue) are cleaned N-way: one owner
+// signature installs the new entity and uninstalls every known applied prior.
+// Storage supersede still collapses usable to one; the batch clears the chain.
+func TestStackedInstalledGrantsBatchAllTeardowns(t *testing.T) {
 	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
 	user := &model.User{Address: owner}
 
-	for _, id := range []string{"01stackedaaaaaaaaaaaaaaaaa", "01stackedbbbbbbbbbbbbbbbbb"} {
-		seedUsablePolicy(t, db, owner, wallet, id, uint32(len(id)%3+1))
-	}
+	seedUsablePolicy(t, db, owner, wallet, "01stackedaaaaaaaaaaaaaaaaa", 1)
+	seedUsablePolicy(t, db, owner, wallet, "01stackedbbbbbbbbbbbbbbbbb", 2)
 	require.Len(t, usableOn(t, db, owner, wallet), 2, "precondition: the broken state")
 
 	prepared, err := engine.PrepareSessionPolicy(user, SessionPolicyInput{
 		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "TradingBot",
 		Permissions: testPermissions(),
 	})
-	require.NoError(t, err, "a stacked wallet must still be grantable — that is how it gets repaired")
-	require.Nil(t, prepared.Supersedes,
-		"with two installed grants a replacement removes neither; the leftovers stay on chain")
-	batch, _, _ := deferredShape(t, prepared.Policy.Grant.InstallCall)
-	require.False(t, batch)
+	require.NoError(t, err, "a stacked wallet must still be grantable")
+	require.Len(t, prepared.Supersedes, 2, "both applied entities ride the replace batch")
+	batch, installs, uninstalls := deferredShape(t, prepared.Policy.Grant.InstallCall)
+	require.True(t, batch)
+	require.Equal(t, 1, installs)
+	require.Equal(t, 2, uninstalls)
 
 	// And the storage-level repair from #716 still lands.
 	fresh, superseded := grantOn(t, engine, ownerKey, owner, wallet)
@@ -536,4 +541,31 @@ func TestStackedInstalledGrantsStillAllowGranting(t *testing.T) {
 	usable := usableOn(t, db, owner, wallet)
 	require.Len(t, usable, 1)
 	require.Equal(t, fresh.ID, usable[0].ID)
+}
+
+// Revoked-but-applied leftovers (orphans / pre-replace residue) are also
+// uninstalled on the next grant — not only the current usable policy.
+func TestRevokedAppliedLeftoversAreTornDownOnNextGrant(t *testing.T) {
+	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	user := &model.User{Address: owner}
+
+	first, _ := grantOn(t, engine, ownerKey, owner, wallet)
+	require.NoError(t, MarkSessionGrantApplied(db, first, "0xfirst"))
+	// Soft-revoke without on-chain cleanup — the entity is still "installed"
+	// as far as storage knows (AppliedAt set).
+	_, cleanupRequired, _, err := engine.RevokeSessionPolicyByID(user, testPolicyChain, wallet, first.ID)
+	require.NoError(t, err)
+	require.True(t, cleanupRequired)
+
+	prepared, err := engine.PrepareSessionPolicy(user, SessionPolicyInput{
+		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "TradingBot",
+		Permissions: testPermissions(),
+	})
+	require.NoError(t, err)
+	require.Len(t, prepared.Supersedes, 1)
+	require.Equal(t, first.EntityID, prepared.Supersedes[0].EntityID)
+	batch, _, uninstalls := deferredShape(t, prepared.Policy.Grant.InstallCall)
+	require.True(t, batch)
+	require.Equal(t, 1, uninstalls)
+	_ = ownerKey
 }

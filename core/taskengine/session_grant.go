@@ -101,19 +101,17 @@ type PreparedSessionGrant struct {
 	// DeferredData is the encoded action the signature authorizes.
 	DeferredData []byte
 
-	// Supersedes is the grant this one replaces ON CHAIN, when the deferred
-	// action carries its uninstall. Empty when there was nothing installed to
-	// remove — a first grant, or a prior grant still pending, which has no
-	// on-chain entity.
+	// Supersedes lists every on-chain grant this replacement tears down in the
+	// deferred batch (usable applied + revoked-applied leftovers). Empty when
+	// nothing installed is known — a first grant, or only pending priors.
 	//
-	// Echoed to Submit so the write can re-check that the grant it is about to
-	// remove is still the one the owner signed away. The signature commits to
-	// a specific entity's teardown; if a different grant occupies that entity
-	// by then, the payload is stale in the same way a taken entity is.
-	Supersedes *SupersededGrant
+	// Echoed to Submit so the write can re-check that the set the owner signed
+	// away is still the set storage believes is installed. The signature
+	// commits to specific entities' teardowns; if the set moved, prepare again.
+	Supersedes []SupersededGrant
 }
 
-// SupersededGrant identifies the on-chain grant a prepared replacement removes.
+// SupersededGrant identifies one on-chain grant a prepared replacement removes.
 type SupersededGrant struct {
 	PolicyID string
 	EntityID uint32
@@ -168,36 +166,37 @@ func PrepareSessionGrant(
 		return nil, fmt.Errorf("building the grant for wallet %s: %w", req.Wallet.Hex(), err)
 	}
 
-	// A grant REPLACES the runner's previous one, and #716 made that true in
-	// storage. Here it becomes true on chain: when a prior grant is actually
-	// installed, the owner's one signature carries its uninstall alongside the
-	// new install, so the account ends up holding exactly one entity rather
-	// than one per grant ever issued.
+	// A grant REPLACES prior authority, and #716 made that true in storage.
+	// Here it becomes true on chain: every applied entity on the runner —
+	// the current usable grant and any revoked leftovers / landed orphans —
+	// is uninstalled in the same deferred batch as the new install, so the
+	// account ends holding exactly one entity (#717 AC1), not one per re-grant.
 	//
-	// Proven on Sepolia (#717): the batch composes with the NEW entity as the
-	// outer validation and needs no second owner signature. §3.6's refusal was
-	// specific to removing the validation that was validating the operation —
-	// a replace removes a different one.
+	// Proven on Sepolia for install+one-uninstall (#717 R-A): the batch
+	// composes with the NEW entity as the outer validation and needs no second
+	// owner signature. N-way is the same composition with more uninstalls.
 	deferredCall := installCall
-	superseded, ambiguous, err := supersededOnChainGrant(db, chainID, req.Owner, req.Wallet)
+	teardownTargets, err := onChainTeardownTargets(db, chainID, req.Owner, req.Wallet)
 	if err != nil {
 		return nil, err
 	}
-	// ambiguous: more than one grant is installed. Install only, so granting
-	// still repairs the wallet in storage (#716) instead of refusing the very
-	// wallets that need repairing. The leftovers stay on chain.
-	if superseded != nil && !ambiguous {
-		uninstallCall, err := aa.SessionSignerUninstallFromInstall(
-			superseded.EntityID, superseded.Grant.InstallCall)
-		if err != nil {
-			return nil, fmt.Errorf("building the teardown for the grant being replaced: %w", err)
-		}
+	var supersedes []SupersededGrant
+	if len(teardownTargets) > 0 {
 		// Install FIRST: the operation carrying this is validated by the new
 		// entity, which has to exist by the time the outer validation runs.
-		deferredCall, err = aa.PackExecuteBatchMAv2([]aa.Call{
-			{Target: req.Wallet, Value: big.NewInt(0), Data: installCall},
-			{Target: req.Wallet, Value: big.NewInt(0), Data: uninstallCall},
-		})
+		calls := make([]aa.Call, 0, 1+len(teardownTargets))
+		calls = append(calls, aa.Call{Target: req.Wallet, Value: big.NewInt(0), Data: installCall})
+		for _, prior := range teardownTargets {
+			uninstallCall, err := aa.SessionSignerUninstallFromInstall(
+				prior.EntityID, prior.Grant.InstallCall)
+			if err != nil {
+				return nil, fmt.Errorf("building the teardown for grant %s (entity %d): %w",
+					prior.ID, prior.EntityID, err)
+			}
+			calls = append(calls, aa.Call{Target: req.Wallet, Value: big.NewInt(0), Data: uninstallCall})
+			supersedes = append(supersedes, SupersededGrant{PolicyID: prior.ID, EntityID: prior.EntityID})
+		}
+		deferredCall, err = aa.PackExecuteBatchMAv2(calls)
 		if err != nil {
 			return nil, fmt.Errorf("packing the replace batch: %w", err)
 		}
@@ -234,10 +233,6 @@ func PrepareSessionGrant(
 	}
 
 	owner, wallet, signer := req.Owner, req.Wallet, sessionSigner
-	var supersedes *SupersededGrant
-	if superseded != nil {
-		supersedes = &SupersededGrant{PolicyID: superseded.ID, EntityID: superseded.EntityID}
-	}
 	return &PreparedSessionGrant{
 		Digest:       digest,
 		DeferredData: deferredData,
@@ -330,23 +325,16 @@ func MarkSessionGrantApplied(db storage.Storage, policy *model.SessionPolicy, us
 
 // MarkSessionGrantAppliedByID is MarkSessionGrantApplied for callers that
 // held the policy EARLIER — the resolver's callback fires after an operation
-// confirms, and by then the record may have moved. It re-reads and only
-// transitions pending → active:
+// confirms, and by then the record may have moved. It re-reads under the
+// runner's write lock:
 //
-//   - Record gone: the grant was revoked (pending revokes delete outright)
-//     while its install was in flight. Nothing to update — though if the
-//     operation mined, the entity now exists on-chain with no record behind
-//     it, an orphan only the owner's uninstallValidation can clear. Reported
-//     as nil because there is no state left to make consistent.
-//   - Status not pending: never overwrite. Re-storing a stale in-memory
-//     policy here could resurrect a revoked grant as active, which is why
-//     this exists instead of handing the callback the old pointer.
-//
-// The re-read and the write happen under the runner's write lock, because
-// re-reading alone is not enough: a submit that supersedes this grant between
-// the read and the store would be overwritten by the store, resurrecting a
-// grant the user just replaced and leaving the runner with two usable ones.
-// Replacement is routine, so that window is reachable in normal use.
+//   - Record gone: nothing to update (legacy pending deletes). Prefer retaining
+//     revoked records so InstallCall survives.
+//   - Still pending: normal pending → active transition.
+//   - Revoked, not yet Applied: the install landed after supersede/revoke.
+//     Record AppliedAt WITHOUT resurrecting usable status — the entity is an
+//     on-chain orphan the next replace batch (or explicit cleanup) must remove.
+//   - Already applied / other status: no-op.
 //
 // Safe to take here because the resolver has already released its read lock by
 // the time this callback fires — it is invoked after the operation confirms,
@@ -358,7 +346,7 @@ func MarkSessionGrantAppliedByID(db storage.Storage, chainID int64, owner, runne
 
 	raw, err := db.GetKey(SessionPolicyKey(chainID, owner, policyID))
 	if errors.Is(err, badger.ErrKeyNotFound) {
-		return nil // no record — revoked while in flight; see above
+		return nil // no record — see above
 	}
 	if err != nil {
 		return fmt.Errorf("reading session policy %s: %w", policyID, err)
@@ -367,10 +355,21 @@ func MarkSessionGrantAppliedByID(db storage.Storage, chainID int64, owner, runne
 	if err := policy.FromStorageData(raw); err != nil {
 		return fmt.Errorf("session policy %s is unreadable: %w", policyID, err)
 	}
-	if policy.Status != model.SessionPolicyPending || policy.Grant.Applied() {
+	if policy.Grant == nil || policy.Grant.Applied() {
 		return nil
 	}
-	return MarkSessionGrantApplied(db, policy, userOpHash)
+	switch policy.Status {
+	case model.SessionPolicyPending:
+		return MarkSessionGrantApplied(db, policy, userOpHash)
+	case model.SessionPolicyRevoked:
+		// Landed after supersede: entity is on chain; keep revoked, mark applied
+		// so onChainTeardownTargets / BuildOnChainRevokeCleanup can see it.
+		policy.Grant.AppliedAt = time.Now().UnixMilli()
+		policy.Grant.AppliedUserOpHash = userOpHash
+		return StoreSessionPolicy(db, policy)
+	default:
+		return nil
+	}
 }
 
 // OnChainRevokeCleanup is the owner-executable call that clears an applied
@@ -422,22 +421,34 @@ func BuildOnChainRevokeCleanup(policy *model.SessionPolicy) (*OnChainRevokeClean
 
 // RevokeSessionGrant removes a grant.
 //
-// Before the install reaches the chain this is complete on its own: nothing
-// was installed, so deleting the record removes the authority. After it has
-// applied, this only stops the gateway from using the grant — the module is
-// still installed on the account, and clearing it needs uninstallValidation.
-// The record is retained in that case so the cleanup payload survives;
-// BuildOnChainRevokeCleanup rebuilds it from Grant.InstallCall.
+// Applied grants: soft-revoke in storage and require owner uninstallValidation.
+// The record is retained so BuildOnChainRevokeCleanup can rebuild the payload.
+//
+// Pending grants with an InstallCall: also retained as revoked (not deleted).
+// A pending install may still be in flight; deleting would drop InstallCall and
+// leave a true on-chain orphan with no cleanup path. Retaining lets a late
+// MarkSessionGrantAppliedByID set AppliedAt without resurrecting usable
+// status. onChainCleanupRequired is false until AppliedAt is set.
+//
+// Pending without InstallCall (should not occur after submit): deleted.
 func RevokeSessionGrant(db storage.Storage, policy *model.SessionPolicy) (onChainCleanupRequired bool, err error) {
 	if policy == nil {
 		return false, fmt.Errorf("no policy to revoke")
 	}
 	key := SessionPolicyKey(policy.ChainID, *policy.Owner, policy.ID)
-	if policy.Grant == nil || !policy.Grant.Applied() {
+	if policy.Grant == nil {
 		return false, db.Delete(key)
 	}
+	if policy.Grant.Applied() {
+		policy.Status = model.SessionPolicyRevoked
+		return true, StoreSessionPolicy(db, policy)
+	}
+	if len(policy.Grant.InstallCall) == 0 {
+		return false, db.Delete(key)
+	}
+	// Pending with payload: retain for possible late install / cleanup.
 	policy.Status = model.SessionPolicyRevoked
-	return true, StoreSessionPolicy(db, policy)
+	return false, StoreSessionPolicy(db, policy)
 }
 
 // verifyGrantSignature checks that the signature recovers to the owner.
@@ -467,46 +478,39 @@ func verifyGrantSignature(digest common.Hash, signature []byte, owner common.Add
 // layer can map it to a 400 with errors.Is rather than matching error text.
 var ErrGrantSignerMismatch = errors.New("grant was signed by the wrong key")
 
-// recheckSupersededGrant refuses a replacement whose target moved between
-// prepare and submit.
+// recheckSupersededGrant refuses a replacement whose teardown set moved
+// between prepare and submit.
 //
-// Three ways it can move, all treated alike: the grant was revoked outright,
-// it was itself replaced by another submit, or a grant now occupies the entity
-// that is different from the one prepared against. In every case the owner
-// signed away a specific entity's authority and that is no longer what the
-// payload would do, so it is refused the way a taken entity is — prepare
-// again, which rebuilds the batch against whatever is actually installed.
+// The owner signed away a specific set of entities. If storage now believes a
+// different set is on chain, the batch would remove the wrong thing (or leave
+// a new leftover), so it is refused the way a taken entity is — prepare again.
 func recheckSupersededGrant(db storage.Storage, prepared *PreparedSessionGrant, policy *model.SessionPolicy) error {
-	current, ambiguous, err := supersededOnChainGrant(db, policy.ChainID, *policy.Owner, *policy.Runner)
+	current, err := onChainTeardownTargets(db, policy.ChainID, *policy.Owner, *policy.Runner)
 	if err != nil {
 		return err
 	}
-	if ambiguous {
-		// Same reasoning as prepare: a stacked wallet is repaired, not refused.
-		// The payload installs only, so there is no teardown target to re-check.
+	want := prepared.Supersedes
+	if len(want) == 0 && len(current) == 0 {
 		return nil
 	}
-
-	switch {
-	case prepared.Supersedes == nil && current == nil:
-		return nil // nothing to replace then, nothing now
-	case prepared.Supersedes == nil && current != nil:
+	if len(want) != len(current) {
 		return fmt.Errorf(
-			"%w: grant %s (entity %d) was installed on %s while this one was being signed, "+
-				"so this payload would leave it in place; prepare again to replace it",
-			ErrSessionEntityTaken, current.ID, current.EntityID, policy.Runner.Hex())
-	case prepared.Supersedes != nil && current == nil:
-		return fmt.Errorf(
-			"%w: the grant this replaces (%s, entity %d) is no longer installed on %s; "+
-				"prepare again",
-			ErrSessionEntityTaken, prepared.Supersedes.PolicyID, prepared.Supersedes.EntityID,
-			policy.Runner.Hex())
-	case !strings.EqualFold(prepared.Supersedes.PolicyID, current.ID) ||
-		prepared.Supersedes.EntityID != current.EntityID:
-		return fmt.Errorf(
-			"%w: this replaces grant %s (entity %d) but %s now holds %s (entity %d); prepare again",
-			ErrSessionEntityTaken, prepared.Supersedes.PolicyID, prepared.Supersedes.EntityID,
-			policy.Runner.Hex(), current.ID, current.EntityID)
+			"%w: on-chain teardown set changed on %s while signing (prepared %d entities, now %d); prepare again",
+			ErrSessionEntityTaken, policy.Runner.Hex(), len(want), len(current))
+	}
+	// Match by entity id (stable) and policy id. Order may differ if list
+	// order shuffled; index by entity.
+	byEntity := make(map[uint32]string, len(current))
+	for _, p := range current {
+		byEntity[p.EntityID] = p.ID
+	}
+	for _, s := range want {
+		id, ok := byEntity[s.EntityID]
+		if !ok || !strings.EqualFold(id, s.PolicyID) {
+			return fmt.Errorf(
+				"%w: prepared teardown of grant %s (entity %d) on %s no longer matches storage; prepare again",
+				ErrSessionEntityTaken, s.PolicyID, s.EntityID, policy.Runner.Hex())
+		}
 	}
 	return nil
 }

@@ -100,7 +100,7 @@ func TestGrantReplaceClearsThePriorEntity_Sepolia(t *testing.T) {
 	// ── 1. First grant. Nothing installed yet, so the payload is a plain
 	// install and the entity it claims must be free on chain.
 	first := grantThroughEngine(t, engine, user, ownerKey, *runner)
-	require.Nil(t, firstPrepared(t, engine, user).Supersedes,
+	require.Empty(t, firstPrepared(t, engine, user).Supersedes,
 		"precondition: nothing installed to supersede")
 	requireEntityClear(t, client, *runner, first.EntityID, true)
 
@@ -113,8 +113,8 @@ func TestGrantReplaceClearsThePriorEntity_Sepolia(t *testing.T) {
 	// ── 3. Replace it. This is the assertion that matters: the gateway must
 	// now build a batch, not a bare install.
 	prepared := firstPrepared(t, engine, user)
-	require.NotNil(t, prepared.Supersedes, "an installed grant must be superseded on chain too")
-	require.Equal(t, first.EntityID, prepared.Supersedes.EntityID)
+	require.Len(t, prepared.Supersedes, 1, "an installed grant must be superseded on chain too")
+	require.Equal(t, first.EntityID, prepared.Supersedes[0].EntityID)
 
 	second := submitPrepared(t, engine, user, ownerKey, prepared)
 	require.NotEqual(t, first.EntityID, second.EntityID, "the replacement takes a fresh entity")

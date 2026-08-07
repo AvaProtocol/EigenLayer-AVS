@@ -1390,6 +1390,11 @@ type SessionPolicy struct {
 	Id            Ulid    `json:"id"`
 	Justification *string `json:"justification,omitempty"`
 
+	// OnChainCleanup Present when status is revoked and the validation entity is still
+	// installed on chain. Owner-executable uninstallValidation so clients
+	// can finish teardown without re-calling DELETE (#717).
+	OnChainCleanup *OnChainRevokeCleanup `json:"onChainCleanup,omitempty"`
+
 	// Runner Lowercase or checksummed hex EOA / contract address.
 	Runner EthereumAddress `json:"runner"`
 
@@ -1491,6 +1496,11 @@ type SubmitPolicyResponse struct {
 	// Id ULID identifier (26-char Crockford base32).
 	Id            Ulid    `json:"id"`
 	Justification *string `json:"justification,omitempty"`
+
+	// OnChainCleanup Present when status is revoked and the validation entity is still
+	// installed on chain. Owner-executable uninstallValidation so clients
+	// can finish teardown without re-calling DELETE (#717).
+	OnChainCleanup *OnChainRevokeCleanup `json:"onChainCleanup,omitempty"`
 
 	// Runner Lowercase or checksummed hex EOA / contract address.
 	Runner EthereumAddress `json:"runner"`

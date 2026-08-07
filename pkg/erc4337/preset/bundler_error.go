@@ -76,6 +76,10 @@ func IsClientUserOpFailure(err error) bool {
 			strings.Contains(s, "validation reverted") ||
 			strings.Contains(s, "execution reverted")):
 		return true
+	case strings.Contains(s, "SESSION_GRANT_INSTALL_FAILED"):
+		// Deferred install/replace batch failed validation or simulation —
+		// new grant did not land and prior entities were not torn down.
+		return true
 	default:
 		return false
 	}
