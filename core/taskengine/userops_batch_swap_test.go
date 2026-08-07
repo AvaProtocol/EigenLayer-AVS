@@ -176,12 +176,11 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 		Salt:    big.NewInt(0),
 	}), "Failed to store wallet")
 
-	// Real execution (is_simulated=false). Sponsorship follows config
-	// (alchemy_paymaster_policy_id); when empty, self-funded prefund applies.
-	// Force paymaster flag is legacy v0.6; MA v2 uses the policy id path.
-	usePaymaster := true
-	t.Logf("🚀 Submitting atomic batch as one UserOp (real path)...")
-	result, err := engine.RunNodeImmediately("contractWrite", batchConfig, inputVars, user, false, &usePaymaster)
+	// Real execution: second arg is simulationMode only (false = real UserOp).
+	// Sponsorship follows SmartWalletConfig.AlchemyPaymasterPolicyID (empty →
+	// self-funded). There is no usePaymaster variadic on RunNodeImmediately.
+	t.Logf("🚀 Submitting atomic batch as one UserOp (real path, simulationMode=false)...")
+	result, err := engine.RunNodeImmediately("contractWrite", batchConfig, inputVars, user, false)
 	require.NoError(t, err, "batch RunNodeImmediately should not error")
 	require.NotNil(t, result, "batch result should not be nil")
 

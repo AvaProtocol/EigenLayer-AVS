@@ -183,15 +183,15 @@ func grantControllerAuthorityWithERC20Approves(
 			t.Fatalf("storing declared permissions on grant: %v", err)
 		}
 
-		if installedOnChain(t, swCfg, wallet, pol.EntityID, controller) {
-			// Occupied on-chain — cannot reinstall different hooks on this entity.
-			// Mark revoked in DB so NextSessionEntityID advances.
+		// Any non-zero on-chain signer occupies the entity (controller or not).
+		// Reusing a foreign or stale-hook entity breaks MA v2 uniqueness / install.
+		if existing := entitySignerOnChain(t, swCfg, wallet, pol.EntityID); existing != (common.Address{}) {
 			pol.Status = model.SessionPolicyRevoked
 			if err := StoreSessionPolicy(db, pol); err != nil {
 				t.Fatalf("reserving occupied entity %d: %v", pol.EntityID, err)
 			}
-			t.Logf("grant: entity %d already holds controller on %s; trying next entity for fresh hooks install",
-				pol.EntityID, wallet.Hex())
+			t.Logf("grant: entity %d already occupied on %s by %s; trying next entity for fresh hooks install",
+				pol.EntityID, wallet.Hex(), existing.Hex())
 			continue
 		}
 
@@ -242,8 +242,9 @@ func requireOwnerKey(t *testing.T) *ecdsa.PrivateKey {
 	return key
 }
 
-// installedOnChain reports whether the entity already names this signer.
-func installedOnChain(t *testing.T, swCfg *config.SmartWalletConfig, wallet common.Address, entity uint32, signer common.Address) bool {
+// entitySignerOnChain returns the SingleSignerValidationModule signer for
+// (entity, wallet), or the zero address if unset / unreadable.
+func entitySignerOnChain(t *testing.T, swCfg *config.SmartWalletConfig, wallet common.Address, entity uint32) common.Address {
 	t.Helper()
 	client, err := ethclient.Dial(swCfg.EthRpcUrl)
 	if err != nil {
@@ -256,9 +257,15 @@ func installedOnChain(t *testing.T, swCfg *config.SmartWalletConfig, wallet comm
 	module := aa.SingleSignerValidationModuleAddress()
 	out, err := client.CallContract(context.Background(), ethereum.CallMsg{To: &module, Data: data}, nil)
 	if err != nil || len(out) < 32 {
-		return false
+		return common.Address{}
 	}
-	return common.BytesToAddress(out[12:32]) == signer
+	return common.BytesToAddress(out[12:32])
+}
+
+// installedOnChain reports whether the entity already names this signer.
+func installedOnChain(t *testing.T, swCfg *config.SmartWalletConfig, wallet common.Address, entity uint32, signer common.Address) bool {
+	t.Helper()
+	return entitySignerOnChain(t, swCfg, wallet, entity) == signer
 }
 
 // selectorSSVMSigners is SingleSignerValidationModule.signers(uint32,address).
