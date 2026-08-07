@@ -60,17 +60,28 @@ func grantControllerAuthority(
 	// controller, so a signer-only check adopts it and then builds operations
 	// the account rejects — see session_fixture_permissions_test.go.
 	resetInitialPermissions(t, db, swCfg, wallet,
-		func(uint32) expectedPermissions { return bareGlobalGrant(controller) },
+		func(entity uint32) expectedPermissions { return timeBoxedGlobalGrant(controller, entity) },
 		func(policyID string) (*PreparedSessionGrant, error) {
 			return PrepareSessionGrant(db, swCfg.ChainID, controller, policyID, SessionGrantRequest{
 				Owner:  owner,
 				Wallet: wallet,
-				// Global with no hooks: a fixture grant, and the API makes that
-				// deliberate rather than accidental. Production grants carry hooks.
+				// Globally authorized, so a fixture can move ETH or call
+				// anything — but NOT hookless. A global validation with an
+				// empty hooks array is refused as a deferred action (#734), so
+				// a hookless fixture only ever worked by adopting an entity a
+				// previous run had installed. TimeRange is the hook that adds
+				// no restriction on what may be called.
 				Selectors: nil,
-				Hooks:     nil,
-				// A bare global grant is refused unless acknowledged. Fixtures may be
-				// self-administering; production grants carry hooks or scoping.
+				HooksFor: func(entity uint32) ([][]byte, error) {
+					hook, err := aa.TimeRangeValidationHook(entity, fixtureGrantValidUntil, 0)
+					if err != nil {
+						return nil, fmt.Errorf("time-range hook for entity %d: %w", entity, err)
+					}
+					return [][]byte{hook}, nil
+				},
+				ValidUntil: int64(fixtureGrantValidUntil) * 1000,
+				// Global with no selector scoping still counts as
+				// self-administering, and for a fixture that is deliberate.
 				AllowSelfAdministration: true,
 			})
 		})

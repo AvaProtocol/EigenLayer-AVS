@@ -53,7 +53,10 @@ func TestDecodeValidationDataFromSepolia(t *testing.T) {
 // and nothing else, so it adopted this entity for a test that needed a bare
 // grant. The signer does match. Everything that decides whether the account
 // accepts the operation does not.
-func TestBareGrantFixtureRejectsTheStaleHookedEntity(t *testing.T) {
+// fixtureEntity is the entity the captured validation data above describes.
+const fixtureEntity = uint32(1)
+
+func TestFixtureGrantRejectsTheStaleHookedEntity(t *testing.T) {
 	state, err := decodeValidationData(common.FromHex(sepoliaEntity1ValidationData))
 	require.NoError(t, err)
 	state.Installed = true
@@ -62,8 +65,8 @@ func TestBareGrantFixtureRejectsTheStaleHookedEntity(t *testing.T) {
 	require.Equal(t, fixtureController, state.Signer,
 		"precondition: the signer matches, which is all the old check looked at")
 
-	want := bareGlobalGrant(fixtureController)
-	require.False(t, want.matches(state), "a bare-grant fixture must not adopt a hooked entity")
+	want := timeBoxedGlobalGrant(fixtureController, fixtureEntity)
+	require.False(t, want.matches(state), "a fixture grant must not adopt an entity carrying a different hook set")
 
 	diff := want.diff(state)
 	require.Contains(t, diff, "validation hooks")
@@ -97,7 +100,7 @@ func TestHookedGrantFixtureDoesNotAdoptOnAShapeMatch(t *testing.T) {
 // The bare fixture is the one shape that may be adopted: no hooks means no
 // module state hiding behind the comparison.
 func TestBareGrantFixtureIsTheOnlyReusableShape(t *testing.T) {
-	require.True(t, bareGlobalGrant(fixtureController).Reusable)
+	require.True(t, timeBoxedGlobalGrant(fixtureController, fixtureEntity).Reusable)
 	require.False(t, hookedGlobalGrant(fixtureController, 1).Reusable)
 }
 
@@ -111,7 +114,7 @@ func TestFixturePermissionDiffs(t *testing.T) {
 	}
 
 	t.Run("a free entity is reported as free, not as a mismatch", func(t *testing.T) {
-		want := bareGlobalGrant(fixtureController)
+		want := timeBoxedGlobalGrant(fixtureController, fixtureEntity)
 		require.Equal(t, "entity is free (no signer installed)", want.diff(validationState{Installed: false}))
 	})
 

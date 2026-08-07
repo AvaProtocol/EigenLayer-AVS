@@ -93,8 +93,12 @@ func setupUserOpWithdrawalTest(t *testing.T) (*config.Config, common.Address, *c
 		SmartAccountAddress: smartWalletAddress,
 	}
 
-	// Register the smart wallet in the database
-	err = StoreWallet(db, int64(11155111), ownerAddress, &model.SmartWallet{
+	// Chain-scoped, and this helper is the BASE one — it loads
+	// aggregator-base.yaml. Take the chain from the config rather than naming
+	// one: a wallet stored under the wrong chain is invisible to ListWallets,
+	// and runner validation then falls back to deriving salts 0-4, which
+	// silently worked only while every fixture was salt 0.
+	err = StoreWallet(db, cfg.SmartWallet.ChainID, ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddress,
 		Salt:    big.NewInt(fixtureSaltWithdrawal),

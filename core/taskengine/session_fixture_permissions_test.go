@@ -107,17 +107,39 @@ type expectedPermissions struct {
 	Reusable bool
 }
 
-// bareGlobalGrant is the fixture shape grantControllerAuthority installs: a
-// global grant with no hooks at all.
+// fixtureGrantValidUntil bounds every fixture grant's TimeRange hook.
 //
-// Reusable, and it is the only shape that safely can be: "no hooks" is a
-// complete description. There is no module holding configuration behind it, so
-// a match here is a match on everything that decides whether an operation
-// validates.
-func bareGlobalGrant(controller common.Address) expectedPermissions {
+// Fixed rather than time.Now()-relative, and that is deliberate: submit re-runs
+// PrepareSessionGrant and verifies the owner's signature against the digest it
+// rebuilds, so any input that drifts between prepare and submit changes the
+// digest and the signature recovers to a stranger. TimeRange stores unix
+// SECONDS, so a relative value only misbehaves when the two calls land either
+// side of a second boundary — rare enough to look like a flake.
+//
+// 2030-01-01. Far enough out to outlive the fixtures, near enough to be a
+// plausible grant rather than a permanent one.
+const fixtureGrantValidUntil = uint64(1893456000)
+
+// timeBoxedGlobalGrant is the fixture shape grantControllerAuthority installs:
+// globally authorized — no target or selector scoping, so a fixture can move
+// ETH or call anything — carrying a single TimeRange validation hook.
+//
+// The hook is not decoration. A global validation installed with an EMPTY hooks
+// array is refused when it arrives as a DEFERRED action: measured on Sepolia
+// (#734), the same wallet accepts that identical installValidation as a direct
+// self-call and rejects it deferred, as an opaque AA23. Any hook is enough, and
+// TimeRange is the one that restricts nothing about what the grant may call.
+//
+// Reusable: TimeRange holds a validUntil per entity, but every fixture asks for
+// the same far-future window, so a match on the HookConfig is a match on what
+// decides validation. That is not true of the allowlist — see Reusable.
+func timeBoxedGlobalGrant(controller common.Address, entity uint32) expectedPermissions {
 	return expectedPermissions{
-		Signer:   controller,
-		Flags:    aa.ValidationFlagUserOp | aa.ValidationFlagGlobal,
+		Signer: controller,
+		Flags:  aa.ValidationFlagUserOp | aa.ValidationFlagGlobal,
+		ValidationHooks: []hookRef{
+			{Module: aa.TimeRangeModuleAddress(), Entity: entity, Flags: aa.HookFlagValidation},
+		},
 		Global:   true,
 		Reusable: true,
 	}
