@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -19,6 +20,12 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
+
+// teardownVerifyTimeout bounds the post-apply chain read that checks a
+// replaced entity is gone. OnApplied must not hang on a slow or stuck RPC:
+// the new grant is already installed, verification is best-effort, and a
+// hung dial would stall the send path's applied callback.
+const teardownVerifyTimeout = 10 * time.Second
 
 // Session-policy storage and the resolver that connects it to the send path.
 //
@@ -348,15 +355,14 @@ func NewSessionResolver(
 				// The batch has mined, which says the operation ran — not that
 				// the uninstall did anything. A failed check does not fail the
 				// send: the new grant is installed and there is nothing to roll
-				// back. It makes a stranded entity visible instead of assumed.
+				// back. VerifySupersededTeardown logs the outcome; we only
+				// bound the RPC so a hung dial cannot stall OnApplied.
 				replaced := &model.SessionPolicy{
 					ID: policyID, ChainID: policyChain, Runner: &policyRunner, EntityID: replacedEntity,
 				}
-				if err := VerifySupersededTeardown(context.Background(), db, verifyTeardown, replaced, globalLogger); err != nil {
-					if globalLogger != nil {
-						globalLogger.Warn("replacement teardown unverified", "policy", policyID, "error", err)
-					}
-				}
+				ctx, cancel := context.WithTimeout(context.Background(), teardownVerifyTimeout)
+				defer cancel()
+				_ = VerifySupersededTeardown(ctx, db, verifyTeardown, replaced, globalLogger)
 				return nil
 			}
 		}

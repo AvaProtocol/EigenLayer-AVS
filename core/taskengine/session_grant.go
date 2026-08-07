@@ -469,7 +469,8 @@ func recheckSupersededGrant(db storage.Storage, prepared *PreparedSessionGrant, 
 type TeardownVerifier func(ctx context.Context, chainID int64, account common.Address, entity uint32) (cleared bool, err error)
 
 // VerifySupersededTeardown checks that the entity a replacement was supposed
-// to remove is actually gone, and records the answer on the superseded policy.
+// to remove is actually gone on chain, and returns an error when the check
+// fails or is inconclusive. It logs that outcome; it does not write storage.
 //
 // This is not belt-and-braces. A replace batch that mines proves the operation
 // executed, NOT that the uninstall did anything: the account catches a hook
@@ -480,10 +481,11 @@ type TeardownVerifier func(ctx context.Context, chainID int64, account common.Ad
 // report an entity revoked on the strength of a transaction that removed
 // nothing.
 //
-// A failed verification does not error the caller. The new grant is already
-// installed and usable, and the operation has mined — there is nothing to roll
-// back. What matters is that the stranded entity stops being invisible, so it
-// is marked and logged for the sweep that #717 tracks.
+// Callers on the send path must not fail the operation on this error: the new
+// grant is already installed and usable, and there is nothing to roll back.
+// Logging here is what makes a stranded entity visible until the #717 sweep
+// can mark and clear leftovers. db is reserved for that mark and is unused
+// today.
 func VerifySupersededTeardown(
 	ctx context.Context,
 	db storage.Storage,
@@ -491,13 +493,14 @@ func VerifySupersededTeardown(
 	superseded *model.SessionPolicy,
 	logger sdklogging.Logger,
 ) error {
+	_ = db // reserved for marking stranded entities once the #717 sweep lands
 	if verify == nil || superseded == nil || superseded.Runner == nil {
 		return nil // no chain client: skip honestly rather than assume success
 	}
 
 	cleared, err := verify(ctx, superseded.ChainID, *superseded.Runner, superseded.EntityID)
 	if err != nil {
-		// Unknown is not cleared. Say so rather than recording either answer.
+		// Unknown is not cleared. Say so rather than treating the read as success.
 		if logger != nil {
 			logger.Warn("could not verify that a replaced grant was torn down on chain",
 				"policy", superseded.ID, "runner", superseded.Runner.Hex(),
