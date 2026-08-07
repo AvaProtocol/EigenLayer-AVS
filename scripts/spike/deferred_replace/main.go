@@ -50,10 +50,30 @@
 // be zero AND its spend cap cleared; new entity's signer must be the
 // controller.
 //
-// Env: SPIKE_OWNER_KEY, SPIKE_CONTROLLER_KEY, SPIKE_BUNDLER_URL,
+// What it needs. The account is derived from the owner + a salt, prefunded
+// from the owner EOA, and — if the salt is fresh — bootstrapped with the prior
+// policied grant before any probe runs. So a dedicated salt is genuinely all
+// that is required; nothing has to be set up by hand.
 //
-//	SPIKE_RPC_URL (opt), SPIKE_SALT (opt, default 9),
-//	SPIKE_TOKEN (opt, default the §3.4 SpikeToken).
+//	SPIKE_OWNER_KEY       owner's private key. Falls back to TEST_PRIVATE_KEY,
+//	                      so the repo's own .env works unchanged.
+//	SPIKE_CONTROLLER_KEY  controller's private key. Falls back to
+//	                      CONTROLLER_PRIVATE_KEY (config/test.yaml has it).
+//	SPIKE_BUNDLER_URL     any ERC-4337 bundler for Sepolia. This is only where
+//	                      UserOperations are submitted — the spike is not
+//	                      testing the bundler. Use the Alchemy endpoint the
+//	                      fleet now runs on:
+//	                      https://eth-sepolia.g.alchemy.com/v2/<ALCHEMY_API_KEY>
+//	SPIKE_SALT            optional, default 9. Pick one nothing else uses; the
+//	                      probes install and remove validation entities on it.
+//	SPIKE_RPC_URL         optional. Default is a public endpoint — prefer the
+//	                      paid Dwellir one, per the no-public-RPC rule.
+//	SPIKE_TOKEN           optional, default the §3.4 SpikeToken. Only used as
+//	                      an allowlisted call target; no balance is needed
+//	                      because the probes transfer zero.
+//
+// Cost: ~0.006 ETH prefunded to the account, plus gas for up to four
+// operations. No paymaster — sponsorship is not what this measures.
 //
 // Run: go run ./scripts/spike/deferred_replace
 package main
@@ -70,6 +90,7 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -85,7 +106,13 @@ const (
 	defaultSalt  = 9
 )
 
-var oneToken = new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+var (
+	oneToken = new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+	// prefundWei covers the probes' gas; the account pays its own way (no
+	// paymaster here — sponsorship is not what this spike is testing).
+	prefundWei = big.NewInt(6_000_000_000_000_000) // 0.006 ETH
+	spikeSalt  *big.Int
+)
 
 func main() {
 	if err := run(); err != nil {
@@ -101,10 +128,16 @@ func env(name, fallback string) string {
 	return fallback
 }
 
-func requireKey(name string) (*ecdsa.PrivateKey, common.Address, error) {
-	raw := strings.TrimPrefix(strings.TrimSpace(os.Getenv(name)), "0x")
+func requireKey(names ...string) (*ecdsa.PrivateKey, common.Address, error) {
+	var raw, name string
+	for _, n := range names {
+		if v := strings.TrimPrefix(strings.TrimSpace(os.Getenv(n)), "0x"); v != "" {
+			raw, name = v, n
+			break
+		}
+	}
 	if raw == "" {
-		return nil, common.Address{}, fmt.Errorf("%s is required", name)
+		return nil, common.Address{}, fmt.Errorf("set one of: %s", strings.Join(names, ", "))
 	}
 	key, err := crypto.HexToECDSA(raw)
 	if err != nil {
@@ -116,11 +149,13 @@ func requireKey(name string) (*ecdsa.PrivateKey, common.Address, error) {
 func run() error {
 	ctx := context.Background()
 
-	ownerKey, owner, err := requireKey("SPIKE_OWNER_KEY")
+	// SPIKE_OWNER_KEY falls back to TEST_PRIVATE_KEY so this runs straight from
+	// the repo's .env — it is the same key, the smart wallet's owner.
+	ownerKey, owner, err := requireKey("SPIKE_OWNER_KEY", "TEST_PRIVATE_KEY")
 	if err != nil {
 		return err
 	}
-	controllerKey, controller, err := requireKey("SPIKE_CONTROLLER_KEY")
+	controllerKey, controller, err := requireKey("SPIKE_CONTROLLER_KEY", "CONTROLLER_PRIVATE_KEY")
 	if err != nil {
 		return err
 	}
@@ -138,6 +173,7 @@ func run() error {
 		}
 		salt = parsed
 	}
+	spikeSalt = salt
 
 	chain, err := ethclient.Dial(env("SPIKE_RPC_URL", defaultRPC))
 	if err != nil {
@@ -184,11 +220,25 @@ func run() error {
 		return fmt.Errorf("reading prior signer: %w", err)
 	}
 	if priorSigner == (common.Address{}) {
-		return fmt.Errorf(
-			"entity %d on %s is unset — this spike needs an EXISTING policied grant to replace.\n"+
-				"Install one first (scripts/spike/permission_hooks installs the §3.4 shape), or\n"+
-				"point SPIKE_SALT at an account that already carries one",
-			prior, account.Hex())
+		// Bootstrap: a fresh salt has no grant to replace, so install one. This
+		// is the ordinary grant flow (§3.2) and doubles as the R-0 control —
+		// if it fails, the fixture is wrong and no probe result means anything.
+		fmt.Printf("entity %d is free — installing the prior policied grant to replace (bootstrap)\n", prior)
+		if err := sendETH(ctx, chain, chainID, ownerKey, owner, *account, prefundWei); err != nil {
+			return fmt.Errorf("prefunding %s: %w", account.Hex(), err)
+		}
+		bootstrap, err := policiedInstall(prior, controller, token)
+		if err != nil {
+			return fmt.Errorf("building the bootstrap grant: %w", err)
+		}
+		if err := attemptDeferred(ctx, chain, chainRPC, bundler, entryPoint, chainID,
+			*account, owner, ownerKey, prior, controllerKey, bootstrap, true, token, controller, true); err != nil {
+			return fmt.Errorf("bootstrap install failed — the fixture is wrong, not the hypothesis: %w", err)
+		}
+		if priorSigner, err = readSigner(ctx, chain, prior, *account); err != nil {
+			return fmt.Errorf("re-reading prior signer: %w", err)
+		}
+		fmt.Printf("bootstrap done: entity %d now holds %s\n\n", prior, short(priorSigner))
 	}
 	if priorSigner != controller {
 		return fmt.Errorf("entity %d is held by %s, not the controller %s — refusing to touch it",
@@ -267,7 +317,7 @@ func run() error {
 			continue
 		}
 		err := attemptDeferred(ctx, chain, chainRPC, bundler, entryPoint, chainID,
-			*account, owner, ownerKey, p.outerEnt, p.outerKey, p.deferred, p.wrap, token, controller)
+			*account, owner, ownerKey, p.outerEnt, p.outerKey, p.deferred, p.wrap, token, controller, false)
 		if err != nil {
 			fmt.Printf("   RESULT: refused — %v\n", firstLine(err.Error()))
 		} else {
@@ -351,7 +401,7 @@ func policiedUninstall(entity uint32) ([]byte, error) {
 func attemptDeferred(ctx context.Context, chain *ethclient.Client, chainRPC, bundler *rpc.Client,
 	entryPoint common.Address, chainID *big.Int, account, owner common.Address,
 	ownerKey *ecdsa.PrivateKey, outerEntity uint32, outerKey *ecdsa.PrivateKey,
-	deferred []byte, wrap bool, token, controller common.Address) error {
+	deferred []byte, wrap bool, token, controller common.Address, deploy bool) error {
 
 	opts := uint8(userop.ValidationOptionGlobal | userop.ValidationOptionDeferredAction)
 	nonce, err := preset.NextNonceV07(ctx, chainRPC, entryPoint, account, outerEntity, opts)
@@ -378,8 +428,12 @@ func attemptDeferred(ctx context.Context, chain *ethclient.Client, chainRPC, bun
 	// allowlist VALIDATION hook inspects this calldata, so it must be an
 	// allowlisted action — a token transfer, as in the §3.6 harness — not an
 	// arbitrary call.
+	// Zero amount on purpose: the allowlist hook checks target + selector and
+	// the spend cap permits 0, so the probe needs no token balance — only ETH
+	// for gas. The question is whether VALIDATION composes; the transfer is
+	// just a call the hooks will accept.
 	transfer := append([]byte{0xa9, 0x05, 0x9c, 0xbb}, common.LeftPadBytes(controller.Bytes(), 32)...)
-	transfer = append(transfer, common.LeftPadBytes(oneToken.Bytes(), 32)...)
+	transfer = append(transfer, common.LeftPadBytes(big.NewInt(0).Bytes(), 32)...)
 	exec, err := aa.PackExecute(token, big.NewInt(0), transfer)
 	if err != nil {
 		return err
@@ -396,6 +450,13 @@ func attemptDeferred(ctx context.Context, chain *ethclient.Client, chainRPC, bun
 		Nonce:                nonce,
 		CallData:             callData,
 		VerificationGasLimit: big.NewInt(900_000), // batches verify heavier than a lone install
+	}
+	if deploy {
+		factory, factoryData, err := aa.GetInitCodeMAv2(owner, spikeSalt)
+		if err != nil {
+			return err
+		}
+		op.Factory, op.FactoryData = &factory, factoryData
 	}
 	if err := priceOp(ctx, chain, bundler, op, entryPoint, encoded, ownerSig); err != nil {
 		return fmt.Errorf("pricing: %w", err)
@@ -524,3 +585,45 @@ func waitReceipt(ctx context.Context, bundler *rpc.Client, opHash common.Hash) (
 }
 
 func trim0x(s string) string { return strings.TrimPrefix(s, "0x") }
+
+func sendETH(ctx context.Context, chain *ethclient.Client, chainID *big.Int,
+	ownerKey *ecdsa.PrivateKey, owner, to common.Address, amount *big.Int) error {
+	if bal, err := chain.BalanceAt(ctx, to, nil); err == nil && bal.Cmp(amount) >= 0 {
+		return nil
+	}
+	nonce, err := chain.PendingNonceAt(ctx, owner)
+	if err != nil {
+		return err
+	}
+	gp, err := chain.SuggestGasPrice(ctx)
+	if err != nil {
+		return err
+	}
+	gl, err := chain.EstimateGas(ctx, ethereum.CallMsg{From: owner, To: &to, Value: amount})
+	if err != nil {
+		return err
+	}
+	tx := types.NewTransaction(nonce, to, amount, gl+10_000, gp, nil)
+	signed, err := types.SignTx(tx, types.LatestSignerForChainID(chainID), ownerKey)
+	if err != nil {
+		return err
+	}
+	if err := chain.SendTransaction(ctx, signed); err != nil {
+		return err
+	}
+	_, err = waitMined(ctx, chain, signed.Hash())
+	return err
+}
+
+func waitMined(ctx context.Context, chain *ethclient.Client, hash common.Hash) (*types.Receipt, error) {
+	for range 60 {
+		if r, err := chain.TransactionReceipt(ctx, hash); err == nil {
+			if r.Status != types.ReceiptStatusSuccessful {
+				return nil, fmt.Errorf("tx %s failed", hash)
+			}
+			return r, nil
+		}
+		time.Sleep(3 * time.Second)
+	}
+	return nil, fmt.Errorf("tx %s not mined in 3m", hash)
+}
