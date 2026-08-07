@@ -94,7 +94,7 @@ func setupUserOpWithdrawalTest(t *testing.T) (*config.Config, common.Address, *c
 	err = StoreWallet(db, int64(1), ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddress,
-		Salt:    big.NewInt(0),
+		Salt:    big.NewInt(fixtureSaltWithdrawal),
 	})
 	require.NoError(t, err, "Failed to store wallet in database")
 
@@ -470,7 +470,7 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 	if len(code) == 0 {
 		t.Logf("⚠️  Wallet not deployed, deploying it first...")
 		controllerPrivateKey := testutil.GetTestControllerPrivateKey()
-		err = testutil.EnsureWalletDeployed(client, cfg.SmartWallet.FactoryAddress, ownerAddress, big.NewInt(0), controllerPrivateKey)
+		err = testutil.EnsureWalletDeployed(client, cfg.SmartWallet.FactoryAddress, ownerAddress, big.NewInt(fixtureSaltWithdrawal), controllerPrivateKey)
 		if err != nil {
 			t.Fatalf("Failed to deploy wallet: %v\n   Hint: The wallet needs to be deployed before testing withdrawals. Ensure the controller has sufficient funds to deploy.", err)
 		}
@@ -521,7 +521,7 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 	err = StoreWallet(db, int64(1), ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddress,
-		Salt:    big.NewInt(0),
+		Salt:    big.NewInt(fixtureSaltWithdrawal),
 	})
 	require.NoError(t, err, "Failed to store wallet in database")
 

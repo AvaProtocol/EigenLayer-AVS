@@ -81,7 +81,7 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 	require.NoError(t, err, "Failed to check wallet deployment status")
 	if len(code) == 0 {
 		t.Logf("⚠️  Wallet not deployed, deploying it first...")
-		err = testutil.EnsureWalletDeployed(client, cfg.SmartWallet.FactoryAddress, ownerAddress, big.NewInt(0), testutil.GetTestControllerPrivateKey())
+		err = testutil.EnsureWalletDeployed(client, cfg.SmartWallet.FactoryAddress, ownerAddress, big.NewInt(fixtureSaltBatchSwap), testutil.GetTestControllerPrivateKey())
 		require.NoError(t, err, "Failed to deploy wallet (controller needs funds to deploy)")
 		t.Logf("✅ Wallet deployed")
 	}
@@ -167,7 +167,7 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 	require.NoError(t, StoreWallet(db, sepoliaChainID, ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddress,
-		Salt:    big.NewInt(0),
+		Salt:    big.NewInt(fixtureSaltBatchSwap),
 	}), "Failed to store wallet")
 
 	// Real execution: second arg is simulationMode only (false = real UserOp).

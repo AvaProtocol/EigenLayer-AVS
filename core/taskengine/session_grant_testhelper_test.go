@@ -196,12 +196,16 @@ func requireOwnerKey(t *testing.T) *ecdsa.PrivateKey {
 }
 
 // entitySignerOnChain returns the SingleSignerValidationModule signer for
-// (entity, wallet), or the zero address if unset / unreadable.
-func entitySignerOnChain(t *testing.T, swCfg *config.SmartWalletConfig, wallet common.Address, entity uint32) common.Address {
+// (entity, wallet). A zero address means the entity is genuinely unclaimed.
+//
+// Read failures are returned rather than folded into the zero address: callers
+// use zero to mean "free to install on", so a transient RPC error that reads as
+// zero would install a second validation over an existing one.
+func entitySignerOnChain(t *testing.T, swCfg *config.SmartWalletConfig, wallet common.Address, entity uint32) (common.Address, error) {
 	t.Helper()
 	client, err := ethclient.Dial(swCfg.EthRpcUrl)
 	if err != nil {
-		t.Fatalf("dialing the chain to check the grant: %v", err)
+		return common.Address{}, fmt.Errorf("dialing the chain to check the grant: %w", err)
 	}
 	defer client.Close()
 
@@ -209,10 +213,14 @@ func entitySignerOnChain(t *testing.T, swCfg *config.SmartWalletConfig, wallet c
 	data = append(data, common.LeftPadBytes(wallet.Bytes(), 32)...)
 	module := aa.SingleSignerValidationModuleAddress()
 	out, err := client.CallContract(context.Background(), ethereum.CallMsg{To: &module, Data: data}, nil)
-	if err != nil || len(out) < 32 {
-		return common.Address{}
+	if err != nil {
+		return common.Address{}, fmt.Errorf("calling signers(%d, %s): %w", entity, wallet.Hex(), err)
 	}
-	return common.BytesToAddress(out[12:32])
+	if len(out) < 32 {
+		return common.Address{}, fmt.Errorf("signers(%d, %s) returned %d bytes, want at least 32",
+			entity, wallet.Hex(), len(out))
+	}
+	return common.BytesToAddress(out[12:32]), nil
 }
 
 // installedOnChain is deliberately gone. It answered "does this entity name my

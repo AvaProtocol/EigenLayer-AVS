@@ -83,7 +83,7 @@ func TestExecuteTask_SequentialContractWrites_Sepolia(t *testing.T) {
 		Owner:   &ownerAddress,
 		Address: smartWalletAddr,
 		Factory: &cfg.SmartWallet.FactoryAddress,
-		Salt:    big.NewInt(0),
+		Salt:    big.NewInt(fixtureSaltSequentialWrites),
 	})
 	require.NoError(t, err, "Failed to register smart wallet")
 	t.Logf("   ✅ Smart wallet registered in database")

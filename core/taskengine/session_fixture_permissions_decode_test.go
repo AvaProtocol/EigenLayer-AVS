@@ -36,15 +36,17 @@ func TestDecodeValidationDataFromSepolia(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, []hookRef{
-		{Module: aa.AllowlistModuleAddress(), Entity: 1},
-		{Module: aa.TimeRangeModuleAddress(), Entity: 1},
+		{Module: aa.AllowlistModuleAddress(), Entity: 1, Flags: aa.HookFlagValidation},
+		{Module: aa.TimeRangeModuleAddress(), Entity: 1, Flags: aa.HookFlagValidation},
 	}, state.ValidationHooks, "entity 1 carries the allowlist and time-range validation hooks")
 
 	require.Equal(t, []hookRef{
-		{Module: aa.AllowlistModuleAddress(), Entity: 1},
+		{Module: aa.AllowlistModuleAddress(), Entity: 1, Flags: aa.HookFlagExecHasPre},
 	}, state.ExecutionHooks, "and an allowlist EXECUTION hook — the half that forces executeUserOp wrapping")
 
 	require.Zero(t, state.SelectorCount, "the validation is global")
+	require.Equal(t, aa.ValidationFlagUserOp|aa.ValidationFlagGlobal, state.Flags,
+		"the validation itself is UserOp + Global; flags are not inferable from the selector list")
 }
 
 // The regression in one assertion: the old fixture check compared the signer
@@ -70,17 +72,33 @@ func TestBareGrantFixtureRejectsTheStaleHookedEntity(t *testing.T) {
 		"the diff names the module that is actually installed, so the reader does not need a block explorer")
 }
 
-// The production-shaped fixture describes exactly this entity, so a later run
-// reuses it instead of burning a fresh one. This is what keeps a fixture wallet
-// at one entity rather than growing by one per CI run.
-func TestHookedGrantFixtureAdoptsAMatchingEntity(t *testing.T) {
+// The production-shaped fixture describes this entity's MODULES exactly — and
+// still must not adopt it.
+//
+// A HookConfig names a module and an entity and says nothing about the
+// configuration that module holds. The allowlist on entity 1 could permit
+// approve() on USDC only while the fixture needs USDC and WETH, and nothing
+// readable from the account tells them apart. Adopting on a shape match would
+// reintroduce the stale-allowlist AA23 that #714 fixed by always installing
+// fresh.
+func TestHookedGrantFixtureDoesNotAdoptOnAShapeMatch(t *testing.T) {
 	state, err := decodeValidationData(common.FromHex(sepoliaEntity1ValidationData))
 	require.NoError(t, err)
 	state.Installed = true
 	state.Signer = fixtureController
 
 	want := hookedGlobalGrant(fixtureController, 1)
-	require.True(t, want.matches(state), "expected reuse, got: %s", want.diff(state))
+	require.True(t, want.matches(state),
+		"precondition: the modules do match, which is exactly why matching alone is not enough: %s", want.diff(state))
+	require.False(t, want.Reusable,
+		"a fixture whose hooks carry module state must install fresh, never adopt")
+}
+
+// The bare fixture is the one shape that may be adopted: no hooks means no
+// module state hiding behind the comparison.
+func TestBareGrantFixtureIsTheOnlyReusableShape(t *testing.T) {
+	require.True(t, bareGlobalGrant(fixtureController).Reusable)
+	require.False(t, hookedGlobalGrant(fixtureController, 1).Reusable)
 }
 
 func TestFixturePermissionDiffs(t *testing.T) {
@@ -123,5 +141,29 @@ func TestFixturePermissionDiffs(t *testing.T) {
 		state := hooked()
 		state.SelectorCount = 3
 		require.Contains(t, hookedGlobalGrant(fixtureController, 1).diff(state), "want global")
+	})
+
+	// An empty selector list does not imply global authority, and signature
+	// authority is invisible in it — both live in the validation flags.
+	t.Run("validation flags are compared, not inferred from selectors", func(t *testing.T) {
+		state := hooked()
+		state.Flags = aa.ValidationFlagUserOp // no Global bit, still no selectors
+		require.Contains(t, hookedGlobalGrant(fixtureController, 1).diff(state), "validation flags are 0x01")
+
+		state = hooked()
+		state.Flags = aa.ValidationFlagUserOp | aa.ValidationFlagGlobal | aa.ValidationFlagSignature
+		require.Contains(t, hookedGlobalGrant(fixtureController, 1).diff(state), "validation flags are 0x07",
+			"signature authority this fixture never asked for must not pass unnoticed")
+	})
+
+	// The same module registered for a different callback is a different
+	// authorization: a post-only execution hook does not enforce what a
+	// pre-execution hook enforces.
+	t.Run("hook callback flags are compared", func(t *testing.T) {
+		state := hooked()
+		state.ExecutionHooks = []hookRef{{
+			Module: aa.AllowlistModuleAddress(), Entity: 1, Flags: aa.HookFlagExecHasPost,
+		}}
+		require.Contains(t, hookedGlobalGrant(fixtureController, 1).diff(state), "execution hooks")
 	})
 }

@@ -89,7 +89,7 @@ func TestSimulateTask_StopLossWorkflow_Sepolia(t *testing.T) {
 			Owner:   &ownerAddress,
 			Address: smartWalletAddr,
 			Factory: &cfg.SmartWallet.FactoryAddress,
-			Salt:    big.NewInt(0),
+			Salt:    big.NewInt(fixtureSaltUniswapSimulation),
 		}),
 		"register smart wallet",
 	)

@@ -49,21 +49,30 @@ import (
 // it strands module state instead of clearing it. Skipping to a free entity is
 // what is actually available.
 
-// hookRef is one installed hook, reduced to what a fixture needs to compare:
-// which module, at which entity. Flags are deliberately excluded — they encode
-// which callbacks the module registered, which is the module's business.
+// hookRef is one installed hook: which module, at which entity, registered for
+// which callbacks. The flags matter — they select validation versus execution
+// and, for execution hooks, pre versus post — so an allowlist registered
+// post-only is not the same authorization as the same module registered as a
+// pre-execution hook, and must not compare equal to it.
 type hookRef struct {
 	Module common.Address
 	Entity uint32
+	Flags  byte
 }
 
-func (h hookRef) String() string { return fmt.Sprintf("%s#%d", h.Module.Hex(), h.Entity) }
+func (h hookRef) String() string {
+	return fmt.Sprintf("%s#%d/0x%02x", h.Module.Hex(), h.Entity, h.Flags)
+}
 
 // validationState is an account's answer for one validation entity.
 type validationState struct {
 	// Installed is false when the entity names no signer — free to claim.
 	Installed bool
 	Signer    common.Address
+
+	// Flags is the validation's own configuration: which of UserOp /
+	// Signature / Global authority it carries (aa.ValidationFlag*).
+	Flags byte
 
 	ValidationHooks []hookRef
 	ExecutionHooks  []hookRef
@@ -78,28 +87,63 @@ type validationState struct {
 // list, so install order and stored order differ by design.
 type expectedPermissions struct {
 	Signer          common.Address
+	Flags           byte
 	ValidationHooks []hookRef
 	ExecutionHooks  []hookRef
 	// Global means the validation carries no selector scoping.
 	Global bool
+
+	// Reusable allows an entity in exactly this state to be adopted instead of
+	// stepped over.
+	//
+	// It is false whenever the expected state includes a STATEFUL hook, and
+	// that is the whole point. A HookConfig names a module and an entity; it
+	// says nothing about the configuration that module holds for that entity.
+	// Two grants can present an identical allowlist HookConfig while one
+	// permits approve() on USDC only and the other on USDC and WETH, and
+	// nothing readable from the account distinguishes them. Adopting on a
+	// HookConfig match would reintroduce exactly the stale-allowlist AA23 that
+	// #714 fixed by always installing fresh.
+	Reusable bool
 }
 
 // bareGlobalGrant is the fixture shape grantControllerAuthority installs: a
 // global grant with no hooks at all.
+//
+// Reusable, and it is the only shape that safely can be: "no hooks" is a
+// complete description. There is no module holding configuration behind it, so
+// a match here is a match on everything that decides whether an operation
+// validates.
 func bareGlobalGrant(controller common.Address) expectedPermissions {
-	return expectedPermissions{Signer: controller, Global: true}
+	return expectedPermissions{
+		Signer:   controller,
+		Flags:    aa.ValidationFlagUserOp | aa.ValidationFlagGlobal,
+		Global:   true,
+		Reusable: true,
+	}
 }
 
 // hookedGlobalGrant is the production-shaped fixture: allowlist + time range as
-// validation hooks, allowlist again as the execution hook that makes the grant
-// executeUserOp-wrapped.
+// validation hooks, allowlist again as the pre-execution hook that makes the
+// grant executeUserOp-wrapped.
+//
+// NOT reusable — see expectedPermissions.Reusable. This shape describes which
+// modules are installed, not what they were configured to permit, so a
+// matching entity is stepped over and a fresh one is installed. That keeps
+// #714's behaviour while giving its failures a readable diff.
 func hookedGlobalGrant(controller common.Address, entity uint32) expectedPermissions {
-	allowlist := hookRef{Module: aa.AllowlistModuleAddress(), Entity: entity}
+	allowlist := func(flags byte) hookRef {
+		return hookRef{Module: aa.AllowlistModuleAddress(), Entity: entity, Flags: flags}
+	}
 	return expectedPermissions{
-		Signer:          controller,
-		ValidationHooks: []hookRef{allowlist, {Module: aa.TimeRangeModuleAddress(), Entity: entity}},
-		ExecutionHooks:  []hookRef{allowlist},
-		Global:          true,
+		Signer: controller,
+		Flags:  aa.ValidationFlagUserOp | aa.ValidationFlagGlobal,
+		ValidationHooks: []hookRef{
+			allowlist(aa.HookFlagValidation),
+			{Module: aa.TimeRangeModuleAddress(), Entity: entity, Flags: aa.HookFlagValidation},
+		},
+		ExecutionHooks: []hookRef{allowlist(aa.HookFlagExecHasPre)},
+		Global:         true,
 	}
 }
 
@@ -113,6 +157,12 @@ func (want expectedPermissions) diff(got validationState) string {
 	var problems []string
 	if got.Signer != want.Signer {
 		problems = append(problems, fmt.Sprintf("signer is %s, want %s", got.Signer.Hex(), want.Signer.Hex()))
+	}
+	if got.Flags != want.Flags {
+		// An entity without ValidationFlagGlobal authorizes no global call, and
+		// one with ValidationFlagSignature carries signing authority this
+		// fixture never asked for. Neither is visible in the selector list.
+		problems = append(problems, fmt.Sprintf("validation flags are 0x%02x, want 0x%02x", got.Flags, want.Flags))
 	}
 	if d := hookDiff("validation hooks", want.ValidationHooks, got.ValidationHooks); d != "" {
 		problems = append(problems, d)
@@ -197,6 +247,7 @@ func decodeValidationData(raw []byte) (validationState, error) {
 		return validationState{}, fmt.Errorf("getValidationData returned %T, not a ValidationDataView", values[0])
 	}
 	return validationState{
+		Flags:           view.ValidationFlags,
 		ValidationHooks: hookRefsFrom(view.ValidationHooks),
 		ExecutionHooks:  hookRefsFrom(view.ExecutionHooks),
 		SelectorCount:   len(view.Selectors),
@@ -208,7 +259,7 @@ func hookRefsFrom(configs [][25]uint8) []hookRef {
 	out := make([]hookRef, 0, len(configs))
 	for _, c := range configs {
 		entity := uint32(c[20])<<24 | uint32(c[21])<<16 | uint32(c[22])<<8 | uint32(c[23])
-		out = append(out, hookRef{Module: common.BytesToAddress(c[:20]), Entity: entity})
+		out = append(out, hookRef{Module: common.BytesToAddress(c[:20]), Entity: entity, Flags: c[24]})
 	}
 	return out
 }
@@ -226,7 +277,13 @@ func readValidationState(
 ) validationState {
 	t.Helper()
 
-	signer := entitySignerOnChain(t, swCfg, wallet, entity)
+	// A read failure must never present as a free entity: claiming an entity
+	// that is actually occupied installs a second validation over the first.
+	// Only a successful zero answer means free.
+	signer, err := entitySignerOnChain(t, swCfg, wallet, entity)
+	if err != nil {
+		t.Fatalf("reading the signer of entity %d on %s: %v", entity, wallet.Hex(), err)
+	}
 	if signer == (common.Address{}) {
 		return validationState{Installed: false}
 	}
@@ -347,7 +404,7 @@ func resetInitialPermissions(
 				policy.EntityID, wallet.Hex())
 			return policy
 
-		case want(policy.EntityID).matches(state):
+		case want(policy.EntityID).Reusable && want(policy.EntityID).matches(state):
 			if err := MarkSessionGrantApplied(db, policy, "pre-existing"); err != nil {
 				t.Fatalf("adopting the installed grant at entity %d: %v", policy.EntityID, err)
 			}
@@ -360,6 +417,10 @@ func resetInitialPermissions(
 			// attempt so the allocator moves on, and remember why for the
 			// failure message if nothing works out.
 			reason := want(policy.EntityID).diff(state)
+			if reason == "" {
+				reason = "the modules match but their configuration is not readable from the account, " +
+					"so this fixture installs fresh rather than trusting a hook set it cannot inspect"
+			}
 			policy.Status = model.SessionPolicyRevoked
 			if err := StoreSessionPolicy(db, policy); err != nil {
 				t.Fatalf("stepping over occupied entity %d: %v", policy.EntityID, err)
