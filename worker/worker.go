@@ -11,6 +11,7 @@ import (
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
@@ -43,11 +44,24 @@ func RunWithConfig(configPath string) error {
 }
 
 func New(cfg *WorkerConfig) (*Worker, error) {
-	logLevel := sdklogging.Development
+	// Stack traces at Error, never at Warn.
+	//
+	// sdklogging.NewZapLogger builds zap's DEVELOPMENT config outside
+	// production, and zap attaches a stack trace to every Warn when
+	// Development is set. So a boot notice that is merely informative — a
+	// worker running unsponsored, say — prints a dozen frames and reads like a
+	// crash, which is exactly how it was read. The gateway already pins this
+	// to Error (core/config/config.go); the worker had been left on the
+	// default because nothing warned at boot until it did.
+	//
+	// AddCallerSkip(1) is what NewZapLogger passes, and is kept so log lines
+	// still name their real call site rather than this constructor.
+	zapConfig := zap.NewDevelopmentConfig()
 	if cfg.Environment == "production" {
-		logLevel = sdklogging.Production
+		zapConfig = zap.NewProductionConfig()
 	}
-	logger, err := sdklogging.NewZapLogger(logLevel)
+	logger, err := sdklogging.NewZapLoggerByConfig(zapConfig,
+		zap.AddCallerSkip(1), zap.AddStacktrace(zap.ErrorLevel))
 	if err != nil {
 		return nil, fmt.Errorf("creating logger: %w", err)
 	}
