@@ -157,3 +157,43 @@ func TestSponsorshipPolicyIDAppliesEveryCondition(t *testing.T) {
 	var nilConfig *SmartWalletConfig
 	require.Empty(t, nilConfig.SponsorshipPolicyID(), "must be nil-safe")
 }
+
+// A policy on a non-Alchemy bundler is refused at load rather than silently
+// running self-funded. Sponsorship is requested with
+// alchemy_requestGasAndPaymasterAndData, which a self-hosted Voltaire bundler
+// does not implement — so the config promises sponsorship the chain cannot
+// deliver, and the first symptom would be a user's operation failing for a
+// wallet nobody thought needed a gas balance.
+func TestSponsorshipValidationRefusesANonAlchemyBundler(t *testing.T) {
+	withPolicy := func(provider string) *SmartWalletConfig {
+		return &SmartWalletConfig{
+			ChainID:                  56,
+			BundlerProvider:          provider,
+			BundlerURL:               "http://bundler.internal",
+			AlchemyAPIKey:            "key",
+			AlchemyPaymasterPolicyID: "policy",
+		}
+	}
+
+	err := withPolicy(BundlerProviderSelfHosted).ValidateSponsorship()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), BundlerProviderAlchemy, "the error must name the fix")
+	require.Contains(t, err.Error(), "disable_gas_sponsorship", "and the other way out")
+
+	require.NoError(t, withPolicy(BundlerProviderAlchemy).ValidateSponsorship())
+
+	// An explicit opt-out settles it: the policy is not to be used, so which
+	// bundler serves the chain no longer matters.
+	optedOut := withPolicy(BundlerProviderSelfHosted)
+	optedOut.DisableGasSponsorship = true
+	require.NoError(t, optedOut.ValidateSponsorship(),
+		"an opted-out chain must still boot on a self-hosted bundler")
+
+	// No policy, no promise to break.
+	noPolicy := withPolicy(BundlerProviderSelfHosted)
+	noPolicy.AlchemyPaymasterPolicyID = ""
+	require.NoError(t, noPolicy.ValidateSponsorship())
+
+	var nilConfig *SmartWalletConfig
+	require.NoError(t, nilConfig.ValidateSponsorship(), "must be nil-safe")
+}

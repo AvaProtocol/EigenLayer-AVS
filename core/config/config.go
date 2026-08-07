@@ -338,6 +338,36 @@ func (c *SmartWalletConfig) SponsorshipPolicyID() string {
 	return c.AlchemyPaymasterPolicyID
 }
 
+// ValidateSponsorship refuses a Gas Manager policy the chain cannot use.
+//
+// Sponsorship is requested with alchemy_requestGasAndPaymasterAndData against
+// ActiveBundlerURL. A self-hosted Voltaire bundler does not implement it, so
+// the request fails the operation instead of sponsoring it. Configuring a
+// policy on such a chain is therefore always a mistake — either the policy
+// does not belong there or the bundler should be Alchemy.
+//
+// Refused at load rather than tolerated, because the alternative is a chain
+// that looks sponsored in config and silently is not: the send path would fall
+// back to self-funded, and the first symptom is a user's operation failing for
+// a wallet nobody thought needed a gas balance. Naming the two config lines is
+// better than that.
+//
+// An opted-out chain is exempt — disable_gas_sponsorship already says the
+// policy is not to be used, so the bundler is irrelevant.
+func (c *SmartWalletConfig) ValidateSponsorship() error {
+	if c == nil || c.DisableGasSponsorship || c.AlchemyPaymasterPolicyID == "" {
+		return nil
+	}
+	if c.ProviderName() != BundlerProviderAlchemy {
+		return fmt.Errorf(
+			"chain_id=%d has a Gas Manager policy but bundler_provider is %q: sponsorship needs %q "+
+				"(alchemy_requestGasAndPaymasterAndData is not implemented by a self-hosted bundler). "+
+				"Set bundler_provider: %s, or set disable_gas_sponsorship: true to run self-funded",
+			c.ChainID, c.ProviderName(), BundlerProviderAlchemy, BundlerProviderAlchemy)
+	}
+	return nil
+}
+
 // UsesModularAccountV2 reports whether this chain derives MA v2 accounts.
 func (c *SmartWalletConfig) UsesModularAccountV2() bool {
 	return c.AccountProviderName() == AccountProviderModularAccountV2
@@ -880,6 +910,9 @@ func NewConfig(configFilePath string) (*Config, error) {
 	// at startup where it's diagnosable, not hours later on a real workflow.
 	// Same fail-at-boot rule for the top-level smart_wallet as for each chain.
 	if config.SmartWallet != nil {
+		if err := config.SmartWallet.ValidateSponsorship(); err != nil {
+			return nil, err
+		}
 		if err := config.SmartWallet.ValidateAccountProvider(); err != nil {
 			return nil, fmt.Errorf("top-level smart_wallet: %w", err)
 		}
@@ -930,10 +963,6 @@ func NewConfig(configFilePath string) (*Config, error) {
 	case config.AlchemyPaymasterPolicyID == "":
 		logger.Warn("No Gas Manager policy configured; operations run self-funded",
 			"hint", "set alchemy_paymaster_policy_id or ALCHEMY_PAYMASTER_POLICY_ID")
-	case config.SmartWallet != nil && config.SmartWallet.SponsorshipPolicyID() == "":
-		logger.Warn("Gas Manager policy is set but unusable on this bundler; operations run self-funded",
-			"bundler_provider", config.SmartWallet.ProviderName(),
-			"hint", "sponsorship needs bundler_provider: alchemy — alchemy_requestGasAndPaymasterAndData is not implemented by a self-hosted bundler")
 	}
 
 	// If HttpBindAddress is empty, HTTP server will be disabled (startup code will skip starting it)
@@ -1187,6 +1216,9 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 	// derivation. A typo silently reads as simple_account, so a chain the
 	// operator believed was on MA v2 would quietly hand users v0.6 addresses —
 	// visible only much later, and not obviously as a config error.
+	if err := chainCfg.SmartWallet.ValidateSponsorship(); err != nil {
+		return nil, err
+	}
 	if err := chainCfg.SmartWallet.ValidateAccountProvider(); err != nil {
 		return nil, fmt.Errorf("chain %s (chain_id=%d): %w", raw.Name, raw.ChainID, err)
 	}
