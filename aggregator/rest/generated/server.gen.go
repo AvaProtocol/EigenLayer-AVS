@@ -1990,7 +1990,7 @@ type SubmitWalletPolicyResponseObject interface {
 	VisitSubmitWalletPolicyResponse(w http.ResponseWriter) error
 }
 
-type SubmitWalletPolicy201JSONResponse SessionPolicy
+type SubmitWalletPolicy201JSONResponse SubmitPolicyResponse
 
 func (response SubmitWalletPolicy201JSONResponse) VisitSubmitWalletPolicyResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")

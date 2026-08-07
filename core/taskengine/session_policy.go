@@ -4,6 +4,8 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"strings"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -56,13 +58,87 @@ func StoreSessionPolicy(db storage.Storage, policy *model.SessionPolicy) error {
 	return db.Set(SessionPolicyKey(policy.ChainID, *policy.Owner, policy.ID), body)
 }
 
+// Authority on one runner is a SINGLETON, and these locks are what make that
+// true at write time rather than merely checked at read time.
+//
+// A grant is not additive: the send path resolves exactly one usable policy per
+// runner and refuses the rest (see ActiveSessionPolicyForWallet), so a second
+// stacked grant cannot be used — it can only break the wallet. Submitting one
+// therefore REPLACES the others, and the whole read-decide-write sequence has
+// to be indivisible or two writers interleave into the broken state the
+// replacement exists to prevent.
+//
+// An in-process lock is sufficient here, and that is a property of the
+// deployment rather than an assumption: the store is an embedded BadgerDB
+// opened once per aggregator (aggregator.go, storage.NewWithPath), and Badger
+// holds an exclusive lock on its directory — a second writer process cannot
+// exist to be raced with. Nothing distributed is needed unless that changes.
+const sessionAuthorityLockShards = 64
+
+// sessionAuthorityLocks is sharded so a fixed set of mutexes bounds memory;
+// the same runner always maps to the same shard. Unrelated wallets that
+// collide on a shard merely serialize, which costs nothing at this rate.
+var sessionAuthorityLocks [sessionAuthorityLockShards]sync.RWMutex
+
+// sessionAuthorityLock guards the policy set of one (chainID, owner, runner).
+//
+// Writers (submit, revoke) take it exclusively; readers (the resolver and the
+// contract-write preflight) take it shared, which is what keeps submit's
+// store-then-supersede window invisible to an executing workflow.
+//
+// It is NOT reentrant: a write-lock holder must never call anything that takes
+// the read lock — ActiveSessionPolicyForWallet above all.
+func sessionAuthorityLock(chainID int64, owner, runner common.Address) *sync.RWMutex {
+	// FNV-1a over the raw bytes: allocation-free, and deterministic in the way
+	// that matters — the same runner must always reach the same mutex, or two
+	// writers would serialize on different locks and not serialize at all.
+	//
+	// Hashing the address VALUES rather than their hex avoids both the
+	// allocation and the question of checksum casing: common.Address is already
+	// a canonical 20 bytes, so there is no normalization to get wrong.
+	var hash uint32 = 2166136261
+	for i := 0; i < 8; i++ {
+		hash ^= uint32(byte(chainID >> (8 * i)))
+		hash *= 16777619
+	}
+	for i := 0; i < common.AddressLength; i++ {
+		hash ^= uint32(owner[i])
+		hash *= 16777619
+	}
+	for i := 0; i < common.AddressLength; i++ {
+		hash ^= uint32(runner[i])
+		hash *= 16777619
+	}
+	return &sessionAuthorityLocks[hash%sessionAuthorityLockShards]
+}
+
+// SessionPolicyAmbiguousCode prefixes the refusal when a runner carries more
+// than one usable grant. Clients branch on the code, not the prose — same
+// contract as SESSION_POLICY_TARGET_NOT_ALLOWED (see session_grant_coverage.go).
+//
+// Submitting a grant now supersedes the others, so reaching this needs records
+// that predate that, or a supersede that failed partway. Both are cleared by
+// granting again.
+const SessionPolicyAmbiguousCode = "SESSION_POLICY_AMBIGUOUS"
+
 // ActiveSessionPolicyForWallet returns the usable grant for one wallet.
 //
 // Exactly one usable grant per wallet is expected. More than one is refused
 // rather than resolved by picking: two grants mean two entities, and silently
 // choosing would sign under one while the caller may have provisioned the
-// other — an authority question is not a place for a heuristic.
+// other — an authority question is not a place for a heuristic. Submit keeps
+// the set to one; this stays as the backstop that fails closed if it ever
+// isn't.
 func ActiveSessionPolicyForWallet(db storage.Storage, chainID int64, owner, wallet common.Address) (*model.SessionPolicy, error) {
+	lock := sessionAuthorityLock(chainID, owner, wallet)
+	lock.RLock()
+	defer lock.RUnlock()
+	return activeSessionPolicyLocked(db, chainID, owner, wallet)
+}
+
+// activeSessionPolicyLocked is ActiveSessionPolicyForWallet's body, split out
+// for callers that already hold the runner's lock.
+func activeSessionPolicyLocked(db storage.Storage, chainID int64, owner, wallet common.Address) (*model.SessionPolicy, error) {
 	policies, err := ListSessionPolicies(db, chainID, owner)
 	if err != nil {
 		return nil, err
@@ -74,12 +150,48 @@ func ActiveSessionPolicyForWallet(db storage.Storage, chainID int64, owner, wall
 		}
 		if found != nil {
 			return nil, fmt.Errorf(
-				"wallet %s has more than one usable session policy (%s, %s); revoke one before executing",
-				wallet.Hex(), found.ID, p.ID)
+				"%s: wallet %s has more than one usable session policy (%s, %s); grant again to replace them, or revoke one before executing",
+				SessionPolicyAmbiguousCode, wallet.Hex(), found.ID, p.ID)
 		}
 		found = p
 	}
 	return found, nil
+}
+
+// supersedeUsablePolicies revokes every usable grant on one runner except
+// keepID, and reports what it revoked. The caller must hold the runner's write
+// lock.
+//
+// Revoked, never deleted — even for a pending grant, which RevokeSessionGrant
+// would delete outright. NextSessionEntityID derives the next entity by
+// scanning stored records and counts revoked ones deliberately, so a deleted
+// record frees its entity for reuse. Superseding a pending grant whose install
+// is already in flight would then hand that entity to the next grant, whose
+// installValidation would land on an entity the chain already has. Keeping the
+// record keeps the entity spoken for.
+func supersedeUsablePolicies(db storage.Storage, chainID int64, owner, runner common.Address, keepID string) ([]string, error) {
+	policies, err := ListSessionPolicies(db, chainID, owner)
+	if err != nil {
+		return nil, err
+	}
+	superseded := make([]string, 0, len(policies))
+	for _, p := range policies {
+		if p.Runner == nil || *p.Runner != runner || !p.Usable() {
+			continue
+		}
+		if strings.EqualFold(p.ID, keepID) {
+			continue
+		}
+		p.Status = model.SessionPolicyRevoked
+		if err := StoreSessionPolicy(db, p); err != nil {
+			// Partial supersede: report what landed so the caller can name the
+			// rest. Reporting success here would leave the runner ambiguous
+			// behind a 201.
+			return superseded, fmt.Errorf("superseding session policy %s: %w", p.ID, err)
+		}
+		superseded = append(superseded, p.ID)
+	}
+	return superseded, nil
 }
 
 // NextSessionEntityID picks an unused validation entity for a wallet.
@@ -184,8 +296,9 @@ func NewSessionResolver(
 				auth.CarrierNonce = new(big.Int).Set(policy.Grant.CarrierNonce)
 			}
 			policyID, policyChain, policyOwner := policy.ID, policy.ChainID, *policy.Owner
+			policyRunner := *policy.Runner
 			auth.OnApplied = func(userOpHash string) error {
-				return MarkSessionGrantAppliedByID(db, policyChain, policyOwner, policyID, userOpHash)
+				return MarkSessionGrantAppliedByID(db, policyChain, policyOwner, policyRunner, policyID, userOpHash)
 			}
 		}
 		return auth, nil

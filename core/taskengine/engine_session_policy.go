@@ -34,6 +34,12 @@ var (
 	// refused at prepare/submit so clients never collect a doomed owner signature.
 	// Studio filters Auto to MA v2; this is the gateway belt-and-braces half.
 	ErrSessionWalletNotMAv2 = errors.New("session grants require a Modular Account v2 smart wallet; legacy SimpleAccount cannot host session policies")
+	// ErrSessionPolicySupersedeFailed: the new grant is stored and usable, but
+	// revoking a previous one failed, so the runner is left ambiguous and
+	// execute will refuse it. Distinct from a plain rejection because the
+	// submit DID take effect — the client must not retry it (the entity is
+	// spent), only clear the named leftovers.
+	ErrSessionPolicySupersedeFailed = errors.New("the grant was stored but replacing the previous grant failed")
 )
 
 // SessionPolicyInput carries one grant's declared shape between prepare and
@@ -176,7 +182,8 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 }
 
 // SubmitSessionPolicy verifies the owner's signature over a deterministic
-// re-preparation of the grant and stores it as pending.
+// re-preparation of the grant, stores it as pending, and REPLACES whatever the
+// runner had before. superseded lists the grants it revoked to do so.
 //
 // The client's echo is input, never truth: the install calldata, digest, and
 // carrier nonce are all recomputed here from the declared permissions and the
@@ -184,6 +191,21 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 // signature recovery or is a differently-shaped grant that must survive full
 // validation on its own merits — there is no path on which stored bytes
 // diverge from what the owner's wallet displayed and signed.
+//
+// Replacement is unconditional rather than a flag the client sets. The send
+// path uses exactly one grant per runner and refuses the rest, so a stacked
+// second grant is unusable by construction — an opt-in would only mean the
+// default leaves the wallet broken, and every client that never learned the
+// flag (scripts, partners) would keep recreating the dual-grant failure.
+// Scoping is per runner, matching what the send path resolves; it is
+// deliberately NOT per capability, which would permit a pair the send path
+// then refuses.
+//
+// The write lock spans the entity re-check, the store, and the supersede.
+// Store-then-supersede is the order that matters on a crash: it can leave two
+// usable grants, which fails closed and is repaired by granting again, whereas
+// superseding first can leave zero — working authority destroyed for a
+// replacement that never landed.
 func (n *Engine) SubmitSessionPolicy(
 	user *model.User,
 	in SessionPolicyInput,
@@ -191,23 +213,27 @@ func (n *Engine) SubmitSessionPolicy(
 	entityID uint32,
 	deadline uint64,
 	ownerSignature []byte,
-) (*model.SessionPolicy, error) {
+) (policy *model.SessionPolicy, superseded []string, err error) {
 	if err := in.validate(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := n.requireMAv2SessionWallet(user, in.ChainID, in.Wallet); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if _, err := ulid.ParseStrict(strings.ToUpper(policyID)); err != nil {
-		return nil, fmt.Errorf("policy id %q is not a ULID", policyID)
+		return nil, nil, fmt.Errorf("policy id %q is not a ULID", policyID)
 	}
 	if deadline <= uint64(time.Now().Unix()) {
-		return nil, fmt.Errorf("the signing window (deadline %d) has expired; prepare the grant again", deadline)
+		return nil, nil, fmt.Errorf("the signing window (deadline %d) has expired; prepare the grant again", deadline)
 	}
 	signer, err := n.sessionSignerAddress()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
+	lock := sessionAuthorityLock(in.ChainID, user.Address, in.Wallet)
+	lock.Lock()
+	defer lock.Unlock()
 
 	prepared, err := PrepareSessionGrant(n.db, in.ChainID, signer, strings.ToLower(policyID), SessionGrantRequest{
 		Owner:         user.Address,
@@ -219,14 +245,25 @@ func (n *Engine) SubmitSessionPolicy(
 		Deadline:      deadline,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if prepared.Policy.EntityID != entityID {
-		return nil, fmt.Errorf("%w: prepared entity %d, next free is now %d",
+		return nil, nil, fmt.Errorf("%w: prepared entity %d, next free is now %d",
 			ErrSessionEntityTaken, entityID, prepared.Policy.EntityID)
 	}
 	attachDeclaredPermissions(prepared.Policy, in.Permissions)
-	return SubmitSessionGrant(n.db, prepared, ownerSignature)
+
+	stored, err := SubmitSessionGrant(n.db, prepared, ownerSignature)
+	if err != nil {
+		return nil, nil, err
+	}
+	superseded, err = supersedeUsablePolicies(n.db, in.ChainID, user.Address, in.Wallet, stored.ID)
+	if err != nil {
+		// The grant landed; the runner is ambiguous. Say so rather than
+		// returning a 201 the send path will refuse.
+		return nil, superseded, fmt.Errorf("%w: %w", ErrSessionPolicySupersedeFailed, err)
+	}
+	return stored, superseded, nil
 }
 
 // ListSessionPoliciesForWallet returns the wallet's policies, newest first.
@@ -268,7 +305,18 @@ func (n *Engine) GetSessionPolicyByID(user *model.User, chainID int64, wallet co
 // case (record removed outright); cleanupRequired reports that the grant's
 // validation is still installed on the account and needs the owner's
 // uninstallValidation.
+//
+// Takes the runner's write lock for the same reason submit does: it changes
+// which grant the send path will resolve, and must not interleave with a
+// submit deciding the same question.
 func (n *Engine) RevokeSessionPolicyByID(user *model.User, chainID int64, wallet common.Address, policyID string) (deleted, cleanupRequired bool, err error) {
+	if err := n.requireOwnedWallet(user, wallet); err != nil {
+		return false, false, err
+	}
+	lock := sessionAuthorityLock(chainID, user.Address, wallet)
+	lock.Lock()
+	defer lock.Unlock()
+
 	policy, err := n.GetSessionPolicyByID(user, chainID, wallet, policyID)
 	if err != nil {
 		return false, false, err

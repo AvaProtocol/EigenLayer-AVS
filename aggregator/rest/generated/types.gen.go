@@ -202,8 +202,8 @@ const (
 
 // Defines values for RevokePolicyResponseStatus.
 const (
-	Deleted RevokePolicyResponseStatus = "deleted"
-	Revoked RevokePolicyResponseStatus = "revoked"
+	RevokePolicyResponseStatusDeleted RevokePolicyResponseStatus = "deleted"
+	RevokePolicyResponseStatusRevoked RevokePolicyResponseStatus = "revoked"
 )
 
 // Defines values for SecretScope.
@@ -224,6 +224,13 @@ const (
 const (
 	Approve SignalExecutionRequestDecision = "approve"
 	Reject  SignalExecutionRequestDecision = "reject"
+)
+
+// Defines values for SubmitPolicyResponseStatus.
+const (
+	SubmitPolicyResponseStatusActive  SubmitPolicyResponseStatus = "active"
+	SubmitPolicyResponseStatusPending SubmitPolicyResponseStatus = "pending"
+	SubmitPolicyResponseStatusRevoked SubmitPolicyResponseStatus = "revoked"
 )
 
 // Defines values for TokenMetadataResponseSource.
@@ -1438,6 +1445,56 @@ type SubmitPolicyRequest struct {
 	// ValidUntil The ABSOLUTE expiry from prepare. It is baked into the signed calldata; recomputing it would change the digest.
 	ValidUntil int64 `json:"validUntil"`
 }
+
+// SubmitPolicyResponse defines model for SubmitPolicyResponse.
+type SubmitPolicyResponse struct {
+	AgentLabel     string           `json:"agentLabel"`
+	AllowedActions *[]AllowedAction `json:"allowedActions,omitempty"`
+
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId `json:"chainId"`
+
+	// CreatedAt Unix milliseconds.
+	CreatedAt int64 `json:"createdAt"`
+	EntityId  int64 `json:"entityId"`
+
+	// Erc20SpendCap Cumulative ERC-20 spend cap, enforced on-chain at execution. The
+	// token must appear as an `allowedActions` target.
+	Erc20SpendCap *Erc20SpendCap `json:"erc20SpendCap,omitempty"`
+
+	// Id ULID identifier (26-char Crockford base32).
+	Id            Ulid    `json:"id"`
+	Justification *string `json:"justification,omitempty"`
+
+	// Runner Lowercase or checksummed hex EOA / contract address.
+	Runner EthereumAddress `json:"runner"`
+
+	// SessionSigner Lowercase or checksummed hex EOA / contract address.
+	SessionSigner EthereumAddress `json:"sessionSigner"`
+
+	// Status pending = signed and stored, install not yet on-chain (revocable
+	// for free). active = install applied. revoked = grants nothing.
+	Status SubmitPolicyResponseStatus `json:"status"`
+
+	// SupersededPolicyIds Grants revoked to keep this runner's authority a singleton —
+	// the previous grants this submit replaced. Their `status` now
+	// reads `revoked`; the array distinguishes a replacement the
+	// gateway performed from one the user asked for via
+	// `DELETE .../policies/{policyId}`.
+	//
+	// Empty on a first grant. Non-empty means the user's earlier
+	// permission is gone, which is worth reflecting in the UI.
+	SupersededPolicyIds []Ulid `json:"supersededPolicyIds"`
+
+	// ValidUntil Unix milliseconds.
+	ValidUntil int64 `json:"validUntil"`
+}
+
+// SubmitPolicyResponseStatus pending = signed and stored, install not yet on-chain (revocable
+// for free). active = install applied. revoked = grants nothing.
+type SubmitPolicyResponseStatus string
 
 // Timestamp RFC 3339 timestamp.
 type Timestamp = time.Time
