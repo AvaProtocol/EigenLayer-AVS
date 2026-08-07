@@ -410,3 +410,16 @@ func requireFundedRunner(
 			new(big.Float).Quo(new(big.Float).SetInt(short), big.NewFloat(1e18)))
 	}
 }
+
+// requireFixtureBalance is requireFundedRunner for balances that are not the
+// runner's native ETH — an ERC-20 holding, an EntryPoint deposit — where the
+// caller has already read the number and only needs the same hard-fail rule
+// applied to it.
+func requireFixtureBalance(t *testing.T, what string, holder common.Address, have, need *big.Int) {
+	t.Helper()
+	if have.Cmp(need) < 0 {
+		t.Fatalf("%s of %s is %s but this test needs %s — top it up by %s and re-run",
+			what, holder.Hex(), have.String(), need.String(),
+			new(big.Int).Sub(need, have).String())
+	}
+}

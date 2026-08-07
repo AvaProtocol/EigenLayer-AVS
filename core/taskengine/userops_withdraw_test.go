@@ -28,15 +28,11 @@ func setupUserOpWithdrawalTest(t *testing.T) (*config.Config, common.Address, *c
 
 	// Load configuration for Base
 	cfg, err := config.NewConfig("../../config/aggregator-base.yaml")
-	if err != nil {
-		t.Skipf("Failed to load aggregator-base.yaml: %v", err)
-	}
+	require.NoError(t, err, "TEST_CHAIN=base was requested but aggregator-base.yaml will not load")
 
 	// Use explicit Owner EOA for automation (controller signs the UserOp)
 	ownerEOAHex := os.Getenv("OWNER_EOA")
-	if ownerEOAHex == "" {
-		t.Skip("OWNER_EOA environment variable not set")
-	}
+	require.NotEmpty(t, ownerEOAHex, "OWNER_EOA must be set: this test executes against that owner's smart wallet")
 	ownerAddress := common.HexToAddress(ownerEOAHex)
 
 	// Destination address - defaults to owner EOA, but can be overridden with RECIPIENT_ADDRESS
@@ -108,7 +104,7 @@ func setupUserOpWithdrawalTest(t *testing.T) (*config.Config, common.Address, *c
 // Test 1: ETH Transfer with Paymaster Sponsorship
 // Tests ETH transfer using ethTransfer node type with paymaster sponsorship
 func TestUserOpETHTransferWithPaymaster(t *testing.T) {
-	_, _, smartWalletAddress, destinationAddress, client, engine, user := setupUserOpWithdrawalTest(t)
+	cfg, _, smartWalletAddress, destinationAddress, client, engine, user := setupUserOpWithdrawalTest(t)
 
 	t.Logf("🔄 STEP 1: ETH Transfer with Paymaster Sponsorship")
 
@@ -117,21 +113,11 @@ func TestUserOpETHTransferWithPaymaster(t *testing.T) {
 	require.NoError(t, err, "Failed to get smart wallet balance")
 	t.Logf("💰 Smart Wallet ETH Balance: %s wei (%.6f ETH)", smartWalletBalance.String(), float64(smartWalletBalance.Int64())/1e18)
 
-	// Skip if no ETH balance to transfer
-	if smartWalletBalance.Cmp(big.NewInt(0)) <= 0 {
-		t.Skip("No ETH balance to transfer")
-	}
-
 	// Use a tiny transfer amount to allow ~100+ test runs
 	// Transfer 0.000001 ETH (1 microether) per test
 	transferAmount := big.NewInt(1000000000000) // 0.000001 ETH in wei (1 microether)
 
-	// Skip if balance is less than transfer amount
-	if smartWalletBalance.Cmp(transferAmount) < 0 {
-		t.Skipf("Insufficient ETH balance: have %.6f ETH, need %.6f ETH",
-			float64(smartWalletBalance.Int64())/1e18,
-			float64(transferAmount.Int64())/1e18)
-	}
+	requireFundedRunner(t, cfg.SmartWallet, *smartWalletAddress, transferAmount)
 
 	t.Logf("💸 Transferring %s wei (%.6f ETH) to %s", transferAmount.String(), float64(transferAmount.Int64())/1e18, destinationAddress.Hex())
 	t.Logf("   (Using ethTransfer node type with paymaster sponsorship)")
@@ -222,21 +208,11 @@ func TestUserOpUSDCWithdrawalWithPaymaster(t *testing.T) {
 		}
 	}
 
-	// Skip if no USDC balance
-	if usdcBalance.Cmp(big.NewInt(0)) <= 0 {
-		t.Skip("No USDC balance to transfer")
-	}
-
 	// Use a tiny transfer amount to allow ~100+ test runs with 10 USDC
 	// Transfer 0.01 USDC (1 cent) per test
 	transferAmount := big.NewInt(10000) // 0.01 USDC (6 decimals)
 
-	// Skip if balance is less than transfer amount
-	if usdcBalance.Cmp(transferAmount) < 0 {
-		t.Skipf("Insufficient USDC balance: have %.6f USDC, need %.6f USDC",
-			float64(usdcBalance.Int64())/1e6,
-			float64(transferAmount.Int64())/1e6)
-	}
+	requireFixtureBalance(t, "USDC balance (6 decimals)", *smartWalletAddress, usdcBalance, transferAmount)
 
 	usdcFloat := float64(transferAmount.Int64()) / 1e6
 	t.Logf("💰 USDC Balance: %s (raw = %.6f USDC)", usdcBalance.String(), float64(usdcBalance.Int64())/1e6)
@@ -339,21 +315,11 @@ func TestUserOpEntryPointWithdrawalWithPaymaster(t *testing.T) {
 
 	t.Logf("🏦 EntryPoint Deposit: %s wei (%.6f ETH)", depositInfo.Deposit.String(), float64(depositInfo.Deposit.Int64())/1e18)
 
-	// Skip if no deposit to withdraw
-	if depositInfo.Deposit.Cmp(big.NewInt(0)) <= 0 {
-		t.Skip("No EntryPoint deposit to withdraw")
-	}
-
 	// Use a tiny withdraw amount to allow ~100+ test runs with 0.001 ETH deposit
 	// Withdraw 0.000001 ETH (1 microether) per test
 	withdrawAmount := big.NewInt(1000000000000) // 0.000001 ETH in wei (1 microether)
 
-	// Skip if deposit is less than withdraw amount
-	if depositInfo.Deposit.Cmp(withdrawAmount) < 0 {
-		t.Skipf("Insufficient EntryPoint deposit: have %.6f ETH, need %.6f ETH",
-			float64(depositInfo.Deposit.Int64())/1e18,
-			float64(withdrawAmount.Int64())/1e18)
-	}
+	requireFixtureBalance(t, "EntryPoint deposit (wei)", *smartWalletAddress, depositInfo.Deposit, withdrawAmount)
 
 	t.Logf("💸 Withdrawing %s wei (%.6f ETH) from EntryPoint deposit", withdrawAmount.String(), float64(withdrawAmount.Int64())/1e18)
 	t.Logf("   (Tiny amount to allow ~1000 test runs with 0.001 ETH deposit)")
@@ -445,21 +411,15 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 	if err != nil {
 		// Fallback to explicit path if GetConfigPath fails
 		cfg, err = config.NewConfig("../../config/test.yaml")
-		if err != nil {
-			t.Skipf("Failed to load test.yaml: %v", err)
-		}
+		require.NoError(t, err, "config/test.yaml will not load; copy it from test.example.yaml")
 	}
 
 	// Connect to RPC to determine the actual chain
 	tempClient, err := ethclient.Dial(cfg.SmartWallet.EthRpcUrl)
-	if err != nil {
-		t.Skipf("Cannot connect to RPC: %v", err)
-	}
+	require.NoError(t, err, "cannot reach the configured RPC; a live test with no chain proves nothing")
 	chainID, err := tempClient.ChainID(context.Background())
 	tempClient.Close()
-	if err != nil {
-		t.Skipf("Cannot get chain ID from RPC: %v", err)
-	}
+	require.NoError(t, err, "the configured RPC will not report its chain id")
 
 	// Skip if not running on Sepolia (chain ID 11155111)
 	sepoliaChainID := int64(11155111)
@@ -469,9 +429,7 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 
 	// Use explicit Owner EOA for automation (controller signs the UserOp)
 	ownerEOAHex := os.Getenv("OWNER_EOA")
-	if ownerEOAHex == "" {
-		t.Skip("OWNER_EOA environment variable not set")
-	}
+	require.NotEmpty(t, ownerEOAHex, "OWNER_EOA must be set: this test executes against that owner's smart wallet")
 	ownerAddress := common.HexToAddress(ownerEOAHex)
 
 	// Destination address - defaults to owner EOA, but can be overridden with RECIPIENT_ADDRESS

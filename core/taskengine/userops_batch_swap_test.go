@@ -44,20 +44,16 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 	if err != nil {
 		cfg, err = config.NewConfig("../../config/test.yaml")
 		if err != nil {
-			t.Skipf("Failed to load test.yaml: %v", err)
+			require.NoError(t, err, "config/test.yaml will not load; copy it from test.example.yaml")
 		}
 	}
 
 	// Confirm we're actually connected to Sepolia before spending testnet funds.
 	tempClient, err := ethclient.Dial(cfg.SmartWallet.EthRpcUrl)
-	if err != nil {
-		t.Skipf("Cannot connect to RPC: %v", err)
-	}
+	require.NoError(t, err, "cannot reach the configured RPC; a live test with no chain proves nothing")
 	chainID, err := tempClient.ChainID(context.Background())
 	tempClient.Close()
-	if err != nil {
-		t.Skipf("Cannot get chain ID from RPC: %v", err)
-	}
+	require.NoError(t, err, "the configured RPC will not report its chain id")
 	const sepoliaChainID = int64(11155111)
 	if chainID.Int64() != sepoliaChainID {
 		t.Skipf("Test requires Sepolia (current chain ID: %d)", chainID.Int64())
@@ -65,7 +61,7 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 
 	ownerEOAHex := os.Getenv("OWNER_EOA")
 	if ownerEOAHex == "" {
-		t.Skip("OWNER_EOA environment variable not set")
+		t.Fatal("OWNER_EOA must be set: this test executes against that owner's smart wallet")
 	}
 	ownerAddress := common.HexToAddress(ownerEOAHex)
 
@@ -94,9 +90,7 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 	balance, err := client.BalanceAt(context.Background(), *smartWalletAddress, nil)
 	require.NoError(t, err, "Failed to get wallet balance")
 	t.Logf("💰 Smart Wallet ETH: %s wei", balance.String())
-	if balance.Sign() == 0 {
-		t.Skip("Smart wallet has 0 ETH — fund it so it can reimburse paymaster gas")
-	}
+	requireFundedRunner(t, cfg.SmartWallet, *smartWalletAddress, big.NewInt(1))
 
 	router := common.HexToAddress(SEPOLIA_SWAPROUTER)
 	usdc := common.HexToAddress(SEPOLIA_USDC)

@@ -29,7 +29,7 @@ func TestExecuteTask_SequentialContractWrites_Sepolia(t *testing.T) {
 
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
 	if !ok {
-		t.Skip("Owner EOA address not set, skipping real execution test")
+		t.Fatal("OWNER_EOA must be set: this test executes against that owner's smart wallet")
 	}
 	ownerAddress := *ownerAddr
 
@@ -61,9 +61,10 @@ func TestExecuteTask_SequentialContractWrites_Sepolia(t *testing.T) {
 	require.NoError(t, err, "Failed to get wallet balance")
 	t.Logf("   ETH Balance: %s wei", balance.String())
 
-	if balance.Cmp(big.NewInt(0)) == 0 {
-		t.Skip("Smart wallet has 0 ETH balance - fund it to run real execution test")
-	}
+	// The wallet reimburses the paymaster for gas, so it needs a non-zero
+	// balance. Hard-fail: a skipped live test reads as a passing suite that
+	// never exercised the path.
+	requireFundedRunner(t, cfg.SmartWallet, *smartWalletAddr, big.NewInt(1))
 
 	// Initialize test database and engine
 	db := testutil.TestMustDB()
