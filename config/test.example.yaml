@@ -25,6 +25,10 @@ ecdsa_private_key: <testnet-ecdsa-private-key-hex>
 
 # EigenLayer contracts live on Sepolia (the AVS registration chain).
 # Set via .env.local / env.
+# Supply a chain RPC you control. Do NOT point this at a free public endpoint
+# (publicnode, *.base.org, ankr, llamarpc, ...): they rate-limit under load,
+# which makes runs fail nondeterministically on whichever request happens to be
+# in flight rather than on anything real.
 eth_rpc_url: ${ETH_RPC_URL}
 eth_ws_url:  ${ETH_WS_URL}
 

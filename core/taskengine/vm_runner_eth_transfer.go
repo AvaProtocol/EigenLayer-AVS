@@ -3,7 +3,6 @@ package taskengine
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/big"
 	"strings"
 	"time"
@@ -162,9 +161,16 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 
 	// Real transactions only when not in simulation context
 	if p.smartWalletConfig != nil && !p.vm.IsSimulation {
-		// MAX transfers require paymaster to cover gas, since the full balance is being sent
-		if isMaxTransfer && !p.shouldUsePaymaster() {
-			err = fmt.Errorf("cannot use MAX amount without paymaster: wallet needs gas reserve for self-funded transactions")
+		// A MAX transfer sends the whole balance, so it can only work if
+		// something else covers gas. That is the chain's Gas Manager policy —
+		// NOT smart_wallet.paymaster_address, which named the v0.6 verifying
+		// paymaster and is inert. Gating on the old field got both cases
+		// wrong: a sponsored chain with no legacy address was refused, and a
+		// self-funded chain that still carried a stale address was allowed to
+		// try and then failed on chain.
+		if isMaxTransfer && p.smartWalletConfig.AlchemyPaymasterPolicyID == "" {
+			err = fmt.Errorf("cannot use MAX amount without sponsorship: set alchemy_paymaster_policy_id, " +
+				"or leave a gas reserve and transfer a fixed amount")
 			return executionLog, err
 		}
 
@@ -318,24 +324,15 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		return executionLog, err
 	}
 
-	// Determine if paymaster should be used (similar to contract write logic)
-	var paymasterReq *preset.VerifyingPaymasterRequest
-	if p.shouldUsePaymaster() {
-		paymasterReq = preset.GetVerifyingPaymasterRequestForDuration(
-			p.smartWalletConfig.PaymasterAddress,
-			15*time.Minute, // 15 minute validity window
-		)
-		// For MAX transfers, skip reimbursement so the full balance can be sent.
-		// Paymaster absorbs gas costs, matching the withdrawal RPC behavior.
-		if isMaxTransfer {
-			paymasterReq.SkipReimbursement = true
-		}
-		p.vm.logger.Info("🎫 Using paymaster for sponsored ETH transfer",
-			"paymaster", p.smartWalletConfig.PaymasterAddress.Hex(),
-			"owner", p.taskOwner.Hex(),
-			"skipReimbursement", isMaxTransfer)
+	// Sponsorship on MA v2 is the chain's Alchemy Gas Manager policy, applied
+	// inside the send path. A MAX transfer used to need the v0.6 paymaster's
+	// SkipReimbursement so the whole balance could move; with reimbursement
+	// gone there is nothing to skip.
+	if p.smartWalletConfig != nil && p.smartWalletConfig.AlchemyPaymasterPolicyID != "" {
+		p.vm.logger.Info("Gas Manager will sponsor the ETH transfer",
+			"owner", p.taskOwner.Hex())
 	} else {
-		p.vm.logger.Info("💰 Using regular ETH transfer (no paymaster)",
+		p.vm.logger.Info("Self-funded ETH transfer (no alchemy_paymaster_policy_id)",
 			"owner", p.taskOwner.Hex())
 	}
 
@@ -355,10 +352,8 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		p.smartWalletConfig,
 		*p.taskOwner,
 		smartWalletCallData,
-		paymasterReq,
 		senderOverride,
 		saltOverride,
-		p.vm.executionFeeWei, // Execution fee in Wei (nil = no fee)
 		p.vm.logger,
 	)
 
@@ -503,22 +498,4 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	finalizeStep(executionLog, true, nil, "", logMessage)
 
 	return executionLog, nil
-}
-
-// shouldUsePaymaster determines if paymaster should be used for this ETH transfer
-// - ALWAYS use paymaster if configured (no more balance/deposit checking or override flags)
-// - Paymaster sponsors gas upfront, wallet reimburses via executeBatchWithValues
-// - If reimbursement fails (insufficient wallet balance), UserOp still completes without reimbursement
-func (p *ETHTransferProcessor) shouldUsePaymaster() bool {
-	// If no paymaster configured, must self-fund
-	if p.smartWalletConfig.PaymasterAddress == (common.Address{}) {
-		log.Printf("[ETHTransfer] No paymaster configured, must self-fund")
-		return false
-	}
-
-	// ALWAYS use paymaster if configured
-	// Paymaster sponsors gas, wallet reimburses via executeBatchWithValues
-	// If wallet can't reimburse, UserOp still completes (paymaster absorbs cost)
-	log.Printf("[ETHTransfer] Using paymaster for gas sponsorship (with automatic reimbursement)")
-	return true
 }

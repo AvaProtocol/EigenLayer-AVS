@@ -22,6 +22,10 @@ operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
 # RPC endpoints for AVS operations (Sepolia). Set via .env.local / env.
 # eth_ws_url must support eth_call over WebSocket (not only eth_subscribe);
 # the EigenLayer SDK calls ServiceManager on the WS client at startup.
+# Supply a chain RPC you control. Do NOT point this at a free public endpoint
+# (publicnode, *.base.org, ankr, llamarpc, ...): they rate-limit under load,
+# which makes runs fail nondeterministically on whichever request happens to be
+# in flight rather than on anything real.
 eth_rpc_url: ${ETH_RPC_URL}
 eth_ws_url:  ${ETH_WS_URL}
 

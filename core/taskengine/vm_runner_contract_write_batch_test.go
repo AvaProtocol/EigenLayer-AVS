@@ -75,7 +75,7 @@ func TestAtomicBatchOnDemand(t *testing.T) {
 	}
 
 	countingSender := func(callCount *int, captured *[]byte, status uint64) SendUserOpFunc {
-		return func(_ *config.SmartWalletConfig, _ common.Address, callData []byte, _ *preset.VerifyingPaymasterRequest, _ *common.Address, _ *big.Int, _ *big.Int, _ logger.Logger) (*preset.SentUserOp, *types.Receipt, error) {
+		return func(_ *config.SmartWalletConfig, _ common.Address, callData []byte, _ *common.Address, _ *big.Int, _ logger.Logger) (*preset.SentUserOp, *types.Receipt, error) {
 			*callCount++
 			if captured != nil {
 				*captured = callData

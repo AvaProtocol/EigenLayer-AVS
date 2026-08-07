@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
-	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -85,22 +84,28 @@ func (s *Server) ExecuteUserOp(ctx context.Context, req *avsproto.ExecuteUserOpR
 		senderOverride = &addr
 	}
 
-	var paymasterReq *preset.VerifyingPaymasterRequest
-	if req.UsePaymaster && s.worker.smartWalletCfg.PaymasterAddress != (common.Address{}) {
-		paymasterReq = preset.GetVerifyingPaymasterRequestForDuration(
-			s.worker.smartWalletCfg.PaymasterAddress,
-			15*time.Minute,
-		)
-	}
-
+	// req.UsePaymaster selected the v0.6 verifying paymaster, which went with
+	// the EntryPoint v0.7 cutover, so it no longer chooses anything. Left on
+	// the wire for older callers and ignored.
+	//
+	// It is worth being precise about what that means here, because the
+	// obvious reading is wrong: operations sent through this path are NOT
+	// sponsored. Gas Manager sponsorship needs AlchemyPaymasterPolicyID on the
+	// SmartWalletConfig, and worker config carries no such field for
+	// ToSmartWalletConfig to copy — so priceOperationV07 never requests it and
+	// the operation takes the self-funded prefund path, which fails for a
+	// zero-balance wallet.
+	//
+	// This is not new. The MA v2 branch never received the paymaster request
+	// either, so worker-routed operations were already unsponsored before the
+	// v0.6 removal; only the misleading plumbing is gone. Wiring the policy
+	// through worker config is tracked separately.
 	userOp, receipt, err := preset.SendUserOpAuto(
 		s.worker.smartWalletCfg,
 		ownerAddr,
 		req.CallData,
-		paymasterReq,
 		senderOverride,
 		nil, // saltOverride: not exposed in ExecuteUserOpReq; sender override is used instead
-		nil, // executionFeeWei: value-capture fee not yet wired through worker RPC
 		s.worker.logger,
 	)
 	if err != nil {
