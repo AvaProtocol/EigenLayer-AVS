@@ -197,3 +197,34 @@ func TestSponsorshipValidationRefusesANonAlchemyBundler(t *testing.T) {
 	var nilConfig *SmartWalletConfig
 	require.NoError(t, nilConfig.ValidateSponsorship(), "must be nil-safe")
 }
+
+// Gateway chains inherit sponsorship from the top-level config, so both the
+// opt-out and the validation have to account for that — checking a chain
+// before it inherits only ever sees an empty policy and passes.
+//
+// This is the shape production actually runs (gateway mode, several chains)
+// and the shape local development runs, so a hole here is a hole everywhere.
+func TestChainsInheritSponsorshipAndAreValidatedAfterwards(t *testing.T) {
+	t.Run("a chain inherits the opt-out, not just the policy", func(t *testing.T) {
+		// Reproduces the hole: inheriting the policy alone left every chain
+		// sponsoring even though the gateway had opted out.
+		chain := &SmartWalletConfig{ChainID: 11155111, BundlerProvider: BundlerProviderAlchemy, AlchemyAPIKey: "k"}
+		chain.AlchemyPaymasterPolicyID = "policy"
+		chain.DisableGasSponsorship = true
+		require.Empty(t, chain.SponsorshipPolicyID(),
+			"an opted-out gateway must not sponsor on any of its chains")
+	})
+
+	t.Run("validation sees the inherited policy", func(t *testing.T) {
+		// Before inheritance a self-hosted chain looks fine, because it carries
+		// no policy of its own. It is only a misconfiguration once it inherits.
+		chain := &SmartWalletConfig{
+			ChainID: 56, BundlerProvider: BundlerProviderSelfHosted, BundlerURL: "http://bundler.internal",
+		}
+		require.NoError(t, chain.ValidateSponsorship(), "nothing to object to yet")
+
+		chain.AlchemyPaymasterPolicyID = "policy" // as the gateway pushes down
+		require.Error(t, chain.ValidateSponsorship(),
+			"once inherited, a policy on a self-hosted bundler must be refused")
+	})
+}

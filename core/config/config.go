@@ -942,9 +942,24 @@ func NewConfig(configFilePath string) (*Config, error) {
 			}
 			// Sponsorship is configured once for the gateway, not per chain, but
 			// the v0.7 send path is only ever handed a SmartWalletConfig. Push
-			// the policy and webhook secret down so every chain can reach them.
+			// the policy, webhook secret and opt-out down so every chain reaches
+			// the same answer the top-level config would give.
+			//
+			// The opt-out has to travel with the policy. Without it a gateway
+			// that set disable_gas_sponsorship would still sponsor on every
+			// chain, because the chains inherited the policy and nothing else —
+			// which is precisely the local-development case the opt-out exists
+			// for, and gateway mode is how local development runs.
 			chainCfg.SmartWallet.AlchemyPaymasterPolicyID = config.AlchemyPaymasterPolicyID
 			chainCfg.SmartWallet.GasManagerWebhookSecret = config.GasManagerWebhookSecret
+			chainCfg.SmartWallet.DisableGasSponsorship = config.SmartWallet.DisableGasSponsorship
+
+			// Validated here rather than inside parseChainConfig: the policy a
+			// chain ends up with is the inherited one, so checking before the
+			// lines above would only ever see an empty policy and pass.
+			if err := chainCfg.SmartWallet.ValidateSponsorship(); err != nil {
+				return nil, fmt.Errorf("chain %s (chain_id=%d): %w", chainRaw.Name, chainRaw.ChainID, err)
+			}
 			config.Chains = append(config.Chains, chainCfg)
 		}
 
@@ -1216,9 +1231,6 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 	// derivation. A typo silently reads as simple_account, so a chain the
 	// operator believed was on MA v2 would quietly hand users v0.6 addresses —
 	// visible only much later, and not obviously as a config error.
-	if err := chainCfg.SmartWallet.ValidateSponsorship(); err != nil {
-		return nil, err
-	}
 	if err := chainCfg.SmartWallet.ValidateAccountProvider(); err != nil {
 		return nil, fmt.Errorf("chain %s (chain_id=%d): %w", raw.Name, raw.ChainID, err)
 	}
