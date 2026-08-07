@@ -368,18 +368,11 @@ const maxFixtureEntityScan = 16
 //	go run ./scripts/fixture_wallet -salt N -deploy -fund 0.02
 //
 // which also prints each entity's signer and deferred nonce sequence.
-// KNOWN RED, and deliberately so: the two fixtures below grant BARE global
-// authority (grantControllerAuthority), and a bare grant's deferred install
-// AA23s on a wallet where its entity is actually free. They passed on shared
-// salt 0 only by ADOPTING a bare grant some earlier run had already installed
-// — "entity 3 already grants exactly what this test needs; reusing it" — so
-// they never ran the install path at all. Isolating them made that visible,
-// which is the point: #719 asks that a live test pass from a COLD fixture.
 //
-// Not the gas seed (raising seedVerificationGasDeferredBare to the hooked
-// value changes nothing), and not the isolation: the batch-swap fixture below
-// takes a HOOKED grant and installs cleanly on its own cold wallet. Tracked
-// separately; do not re-point these at salt 0 to make them green.
+// A swap fixture needs a token balance too, or the router reverts with STF —
+// which reads like a permissions failure and is not one:
+//
+//	go run ./scripts/fixture_wallet -salt N -fund-usdc 2
 const (
 	fixtureSaltWithdrawal       = 21
 	fixtureSaltSequentialWrites = 22
