@@ -67,6 +67,11 @@ templates and workflow (mirror this repo's hard-fail on missing
   `bundler-base-sepolia`, `bundler-ethereum`, `bundler-proxy`) and Route53 DNS
   — avs-infra + MFA session.
 
+## Follow-ups folded into this PR (Claude #726)
+
+- Deleted `scripts/clear-staging-mempool.sh` — Voltaire-only `debug_bundler_clearState` helper that grepped `bundler_url` from legacy `aggregator-*.yaml`.
+- Taskengine logs now emit `BundlerEndpointLabel()` (resolved endpoint with secrets redacted) + `bundler_provider`, instead of the raw `BundlerURL` field (empty on the alchemy path).
+
 ## Code path that stays
 
 `bundler_provider: self_hosted` remains a valid option for a **locally-run**
