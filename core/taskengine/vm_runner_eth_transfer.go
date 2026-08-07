@@ -168,7 +168,7 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 		// wrong: a sponsored chain with no legacy address was refused, and a
 		// self-funded chain that still carried a stale address was allowed to
 		// try and then failed on chain.
-		if isMaxTransfer && p.smartWalletConfig.AlchemyPaymasterPolicyID == "" {
+		if isMaxTransfer && p.smartWalletConfig.SponsorshipPolicyID() == "" {
 			err = fmt.Errorf("cannot use MAX amount without sponsorship: set alchemy_paymaster_policy_id, " +
 				"or leave a gas reserve and transfer a fixed amount")
 			return executionLog, err
@@ -328,7 +328,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	// inside the send path. A MAX transfer used to need the v0.6 paymaster's
 	// SkipReimbursement so the whole balance could move; with reimbursement
 	// gone there is nothing to skip.
-	if p.smartWalletConfig != nil && p.smartWalletConfig.AlchemyPaymasterPolicyID != "" {
+	if p.smartWalletConfig.SponsorshipPolicyID() != "" {
 		p.vm.logger.Info("Gas Manager will sponsor the ETH transfer",
 			"owner", p.taskOwner.Hex())
 	} else {

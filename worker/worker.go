@@ -65,12 +65,34 @@ func New(cfg *WorkerConfig) (*Worker, error) {
 }
 
 func (w *Worker) Start(ctx context.Context) error {
+	// Read sponsorship off the SmartWalletConfig the send path will actually
+	// use — w.smartWalletCfg, built once in NewWorker — rather than deriving a
+	// second answer from the raw config. Two sources for one question is the
+	// shape of the bug this change exists to fix, and it would also re-parse
+	// the controller key on every call.
+	sponsorshipPolicy := w.smartWalletCfg.SponsorshipPolicyID()
+
 	w.logger.Info("Starting chain worker",
 		"chain_id", w.config.ChainID,
 		"chain_name", w.config.ChainName,
 		"listen_address", w.config.ListenAddress,
 		"health_address", w.config.HealthAddress,
+		"sponsorship_configured", sponsorshipPolicy != "",
 	)
+
+	// Say which of the three states this worker is in, once, at boot — rather
+	// than letting it surface later as a user's withdrawal failing.
+	switch {
+	case w.smartWalletCfg.DisableGasSponsorship:
+		w.logger.Info("Chain worker runs self-funded: sponsorship disabled by config",
+			"chain_id", w.config.ChainID, "chain_name", w.config.ChainName,
+			"hint", "expected for local/development — the policy's webhook points at the production gateway")
+	case sponsorshipPolicy == "":
+		w.logger.Warn("Chain worker will send unsponsored operations",
+			"chain_id", w.config.ChainID, "chain_name", w.config.ChainName,
+			"bundler_provider", w.smartWalletCfg.ProviderName(),
+			"hint", "needs alchemy_paymaster_policy_id, gas_manager_webhook_secret, and bundler_provider: alchemy")
+	}
 
 	// Connect to chain RPC
 	var err error
