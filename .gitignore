@@ -92,5 +92,6 @@ tmp/rehearsal-gateway-backup/
 
 # spike harness build outputs
 /deferred_action
+/deferred_replace
 /permission_hooks
 /revoke

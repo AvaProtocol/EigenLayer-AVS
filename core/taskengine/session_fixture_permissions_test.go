@@ -345,6 +345,11 @@ const (
 	fixtureSaltSequentialWrites  = 0
 	fixtureSaltUniswapSimulation = 0
 	fixtureSaltBatchSwap         = 0
+	// Salt 13 is funded and its entity space is clean, so unlike the fixtures
+	// above this one is genuinely isolated. The replace check installs and
+	// removes entities; doing that on a shared runner would churn another
+	// test's entity layout.
+	fixtureSaltGrantReplace = 13
 )
 
 // resetInitialPermissions brings the fixture's runner to the permission state
