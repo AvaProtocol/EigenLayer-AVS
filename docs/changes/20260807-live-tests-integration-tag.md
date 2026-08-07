@@ -15,6 +15,7 @@ Tagged the live-chain suite with `//go:build integration`:
 - `execute_sequential_contract_writes_test.go`, `simulate_sequential_contract_writes_test.go`
 - `eth_transfer_integration_test.go`, `uniswap_sepolia_constants_test.go`
 - `tenderly_client_sepolia_test.go` (extracted WETH Sepolia case from the mixed Tenderly unit file)
+- `tenderly_client_live_integration_test.go` (live Tenderly EndToEnd / Comprehensive / REAL + Benchmark, Claude #727)
 
 `userops_withdraw_all_test.go` stays `//go:build manual` (explicit opt-in only).
 
