@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 package taskengine
 
 // Sepolia Uniswap V3 constants shared by the Sepolia approve+swap tests.
