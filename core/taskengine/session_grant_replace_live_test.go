@@ -318,11 +318,21 @@ func seedEntitiesConsumedOnChain(
 	for entity := uint32(1); entity <= scanCeiling && freeRun < freeRunToStop; entity++ {
 		sequence, err := aa.EntityDeferredNonceSequence(context.Background(), client, runner, entity)
 		require.NoError(t, err, "reading the deferred nonce sequence of entity %d", entity)
+		if sequence != 0 {
+			// Spent, and unusable forever. Who signs it changes nothing, so
+			// skip that read — this walk is two calls per entity over a range
+			// that grows with the fixture.
+			highest, freeRun = entity, 0
+			continue
+		}
 
+		// A zero sequence is not the same as free. An entity installed by
+		// anything other than a deferred action — an owner calling
+		// installValidation directly, as the explicit-cleanup flow's inverse —
+		// holds a signer while its deferred nonce key is untouched.
 		signer, err := aa.EntitySignerOnChain(context.Background(), client, runner, entity)
 		require.NoError(t, err)
-
-		if sequence != 0 || signer != (common.Address{}) {
+		if signer != (common.Address{}) {
 			highest, freeRun = entity, 0
 			continue
 		}
