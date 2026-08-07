@@ -6,11 +6,20 @@ on:
     branches:
       - main
       - staging
+    # Every directory holding production Go code belongs here. A package left
+    # off does not fail — it runs no tests at all and the PR reports green,
+    # which is worse. This PR is an example: it changes worker/ and, before
+    # worker/** was added, ran no unit tests and no lint.
     paths:
       - "core/**"
       - "pkg/**"
       - "aggregator/**"
       - "operator/**"
+      - "worker/**"
+      - "storage/**"
+      - "migrations/**"
+      - "protobuf/**"
+      - "metrics/**"
       - "model/**"
       - "cmd/**"
       - "version/**"
