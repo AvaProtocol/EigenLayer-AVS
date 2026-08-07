@@ -272,7 +272,21 @@ func MarkSessionGrantApplied(db storage.Storage, policy *model.SessionPolicy, us
 //   - Status not pending: never overwrite. Re-storing a stale in-memory
 //     policy here could resurrect a revoked grant as active, which is why
 //     this exists instead of handing the callback the old pointer.
-func MarkSessionGrantAppliedByID(db storage.Storage, chainID int64, owner common.Address, policyID, userOpHash string) error {
+//
+// The re-read and the write happen under the runner's write lock, because
+// re-reading alone is not enough: a submit that supersedes this grant between
+// the read and the store would be overwritten by the store, resurrecting a
+// grant the user just replaced and leaving the runner with two usable ones.
+// Replacement is routine, so that window is reachable in normal use.
+//
+// Safe to take here because the resolver has already released its read lock by
+// the time this callback fires — it is invoked after the operation confirms,
+// not while authority is being resolved.
+func MarkSessionGrantAppliedByID(db storage.Storage, chainID int64, owner, runner common.Address, policyID, userOpHash string) error {
+	lock := sessionAuthorityLock(chainID, owner, runner)
+	lock.Lock()
+	defer lock.Unlock()
+
 	raw, err := db.GetKey(SessionPolicyKey(chainID, owner, policyID))
 	if errors.Is(err, badger.ErrKeyNotFound) {
 		return nil // no record — revoked while in flight; see above

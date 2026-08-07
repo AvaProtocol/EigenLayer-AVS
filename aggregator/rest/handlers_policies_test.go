@@ -340,12 +340,11 @@ func TestPoliciesSubmitReplacesThePreviousGrantOverHTTP(t *testing.T) {
 	address := generated.EthereumAddress(rig.wallet.Hex())
 
 	first := rig.grantOverHTTP(t)
-	require.NotNil(t, first.SupersededPolicyIds)
-	require.Empty(t, *first.SupersededPolicyIds, "a first grant replaces nothing, and says so with an empty array")
+	require.NotNil(t, first.SupersededPolicyIds, "the field is required, so it is present even when empty")
+	require.Empty(t, first.SupersededPolicyIds, "a first grant replaces nothing, and says so with an empty array")
 
 	second := rig.grantOverHTTP(t)
-	require.NotNil(t, second.SupersededPolicyIds)
-	require.Equal(t, []generated.Ulid{first.Id}, *second.SupersededPolicyIds)
+	require.Equal(t, []generated.Ulid{first.Id}, second.SupersededPolicyIds)
 
 	// The list shows both records — one usable, one revoked for audit.
 	rec := rig.call(t, nil, func(c echo.Context) error {

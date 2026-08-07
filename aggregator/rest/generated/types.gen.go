@@ -1486,7 +1486,7 @@ type SubmitPolicyResponse struct {
 	//
 	// Empty on a first grant. Non-empty means the user's earlier
 	// permission is gone, which is worth reflecting in the UI.
-	SupersededPolicyIds *[]Ulid `json:"supersededPolicyIds,omitempty"`
+	SupersededPolicyIds []Ulid `json:"supersededPolicyIds"`
 
 	// ValidUntil Unix milliseconds.
 	ValidUntil int64 `json:"validUntil"`

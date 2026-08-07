@@ -305,14 +305,14 @@ func submitPolicyToAPI(p *model.SessionPolicy, superseded []string) generated.Su
 		ValidUntil:     base.ValidUntil,
 		CreatedAt:      base.CreatedAt,
 	}
-	// Always present, empty on a first grant: a client checking "did this
-	// replace anything" should read an empty array, not have to treat a
-	// missing key as the same thing.
+	// Required in the schema and always emitted, empty on a first grant: a
+	// client asking "did this replace anything" reads an empty array rather
+	// than having to treat a missing key as the same thing.
 	ids := make([]generated.Ulid, 0, len(superseded))
 	for _, id := range superseded {
 		ids = append(ids, generated.Ulid(id))
 	}
-	out.SupersededPolicyIds = &ids
+	out.SupersededPolicyIds = ids
 	return out
 }
 

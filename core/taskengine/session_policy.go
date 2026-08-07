@@ -4,7 +4,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -90,17 +89,26 @@ var sessionAuthorityLocks [sessionAuthorityLockShards]sync.RWMutex
 // It is NOT reentrant: a write-lock holder must never call anything that takes
 // the read lock — ActiveSessionPolicyForWallet above all.
 func sessionAuthorityLock(chainID int64, owner, runner common.Address) *sync.RWMutex {
-	// FNV-1a — allocation-free, deterministic (same runner → same shard).
+	// FNV-1a over the raw bytes: allocation-free, and deterministic in the way
+	// that matters — the same runner must always reach the same mutex, or two
+	// writers would serialize on different locks and not serialize at all.
+	//
+	// Hashing the address VALUES rather than their hex avoids both the
+	// allocation and the question of checksum casing: common.Address is already
+	// a canonical 20 bytes, so there is no normalization to get wrong.
 	var hash uint32 = 2166136261
-	mix := func(s string) {
-		for i := 0; i < len(s); i++ {
-			hash ^= uint32(s[i])
-			hash *= 16777619
-		}
+	for i := 0; i < 8; i++ {
+		hash ^= uint32(byte(chainID >> (8 * i)))
+		hash *= 16777619
 	}
-	mix(strconv.FormatInt(chainID, 10))
-	mix(strings.ToLower(owner.Hex()))
-	mix(strings.ToLower(runner.Hex()))
+	for i := 0; i < common.AddressLength; i++ {
+		hash ^= uint32(owner[i])
+		hash *= 16777619
+	}
+	for i := 0; i < common.AddressLength; i++ {
+		hash ^= uint32(runner[i])
+		hash *= 16777619
+	}
 	return &sessionAuthorityLocks[hash%sessionAuthorityLockShards]
 }
 
@@ -288,8 +296,9 @@ func NewSessionResolver(
 				auth.CarrierNonce = new(big.Int).Set(policy.Grant.CarrierNonce)
 			}
 			policyID, policyChain, policyOwner := policy.ID, policy.ChainID, *policy.Owner
+			policyRunner := *policy.Runner
 			auth.OnApplied = func(userOpHash string) error {
-				return MarkSessionGrantAppliedByID(db, policyChain, policyOwner, policyID, userOpHash)
+				return MarkSessionGrantAppliedByID(db, policyChain, policyOwner, policyRunner, policyID, userOpHash)
 			}
 		}
 		return auth, nil

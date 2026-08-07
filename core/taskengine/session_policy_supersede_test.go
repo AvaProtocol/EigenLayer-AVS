@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
@@ -303,4 +304,100 @@ func TestFailedSupersedeIsReportedRatherThanSwallowed(t *testing.T) {
 
 	// The new grant IS stored — which is exactly why this cannot report success.
 	require.Len(t, usableOn(t, db, owner, wallet), 2)
+}
+
+// The same runner must always reach the same mutex. Sharding is only safe
+// because of this: two writers that hashed differently would each hold a lock
+// and neither would exclude the other.
+func TestRunnerAuthorityLockIsStable(t *testing.T) {
+	owner := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	wallet := common.HexToAddress("0x209eb31c199bEB4c386eF83CF442DE1a00667a1F")
+
+	first := sessionAuthorityLock(testPolicyChain, owner, wallet)
+	for i := 0; i < 32; i++ {
+		require.Same(t, first, sessionAuthorityLock(testPolicyChain, owner, wallet),
+			"the same runner must always resolve to the same lock")
+	}
+
+	// All three components participate, so unrelated runners are not forced to
+	// serialize on one shard. (A collision is possible and harmless — this
+	// asserts the inputs are used at all, not that they never collide.)
+	spread := map[*sync.RWMutex]struct{}{}
+	for i := 0; i < 64; i++ {
+		var other common.Address
+		other[19] = byte(i)
+		spread[sessionAuthorityLock(testPolicyChain, owner, other)] = struct{}{}
+		spread[sessionAuthorityLock(int64(i+1), owner, wallet)] = struct{}{}
+		spread[sessionAuthorityLock(testPolicyChain, other, wallet)] = struct{}{}
+	}
+	require.Greater(t, len(spread), 1, "chain, owner and runner must all feed the shard")
+}
+
+// A grant's install can confirm after a later grant has already replaced it.
+// Ordered that way, the re-read alone is enough: the record already reads
+// revoked, so the mark is a no-op. See the concurrent case below for the half
+// the lock is actually there for.
+func TestLateInstallConfirmationCannotResurrectASupersededGrant(t *testing.T) {
+	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+
+	first, _ := grantOn(t, engine, ownerKey, owner, wallet)
+	require.Equal(t, model.SessionPolicyPending, first.Status)
+
+	// The replacement lands while the first grant's install is still in flight.
+	second, superseded := grantOn(t, engine, ownerKey, owner, wallet)
+	require.Equal(t, []string{first.ID}, superseded)
+
+	// Now the in-flight operation confirms and reports the install applied.
+	require.NoError(t, MarkSessionGrantAppliedByID(db, testPolicyChain, owner, wallet, first.ID, "0xlate"))
+
+	usable := usableOn(t, db, owner, wallet)
+	require.Len(t, usable, 1, "the late confirmation must not add a second usable grant")
+	require.Equal(t, second.ID, usable[0].ID)
+
+	stale, err := engine.GetSessionPolicyByID(&model.User{Address: owner}, testPolicyChain, wallet, first.ID)
+	require.NoError(t, err)
+	require.Equal(t, model.SessionPolicyRevoked, stale.Status, "the superseded grant stays revoked")
+}
+
+// The lock is asserted directly, because the race it closes cannot be won
+// reliably from a test: the confirmation's read-then-write is a few
+// microseconds, while the submit racing it spends far longer in signature
+// recovery before it supersedes anything, so the interleaving effectively
+// never occurs on demand.
+//
+// What is checkable is the property that was actually changed — that marking a
+// grant applied acquires the runner's write lock, and therefore cannot run
+// between a submit's store and its supersede. Hold the lock, and the
+// confirmation must wait for it.
+func TestApplyingAGrantWaitsForTheRunnersWriteLock(t *testing.T) {
+	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	pending, _ := grantOn(t, engine, ownerKey, owner, wallet)
+
+	lock := sessionAuthorityLock(testPolicyChain, owner, wallet)
+	lock.Lock()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- MarkSessionGrantAppliedByID(db, testPolicyChain, owner, wallet, pending.ID, "0xinflight")
+	}()
+
+	select {
+	case <-done:
+		lock.Unlock()
+		t.Fatal("marking a grant applied did not wait for the runner's write lock: a replacement " +
+			"landing between its read and its write would be overwritten, resurrecting a superseded grant")
+	case <-time.After(150 * time.Millisecond):
+		// Still blocked, which is the point. Without the lock this completes
+		// in microseconds.
+	}
+
+	lock.Unlock()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("still blocked after the runner's lock was released")
+	}
+
+	require.Len(t, usableOn(t, db, owner, wallet), 1)
 }
