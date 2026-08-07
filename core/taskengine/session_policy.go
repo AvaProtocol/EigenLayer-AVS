@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
@@ -9,7 +10,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
@@ -234,7 +237,31 @@ func NextSessionEntityID(db storage.Storage, chainID int64, owner, wallet common
 // explicitly; tests that need one install their own scoped to their own
 // database.
 func (n *Engine) InstallSessionResolver() {
-	preset.SetSessionResolver(NewSessionResolver(n.db, controllerSessionSigner(n.config)))
+	preset.SetSessionResolver(NewSessionResolver(n.db, controllerSessionSigner(n.config), n.teardownVerifier()))
+}
+
+// teardownVerifier reads a validation entity's signer on the chain the grant
+// lives on. Dialled per check rather than held open: verification runs once
+// per replacement, and the alternative is a pool of long-lived clients for
+// every configured chain to serve a call that happens rarely.
+func (n *Engine) teardownVerifier() TeardownVerifier {
+	return func(ctx context.Context, chainID int64, account common.Address, entity uint32) (bool, error) {
+		swCfg := n.ResolveSmartWalletConfig(chainID)
+		if swCfg == nil || swCfg.EthRpcUrl == "" {
+			return false, fmt.Errorf("no RPC configured for chain %d", chainID)
+		}
+		client, err := ethclient.DialContext(ctx, swCfg.EthRpcUrl)
+		if err != nil {
+			return false, fmt.Errorf("dialing chain %d: %w", chainID, err)
+		}
+		defer client.Close()
+
+		signer, err := aa.EntitySignerOnChain(ctx, client, account, entity)
+		if err != nil {
+			return false, err
+		}
+		return signer == (common.Address{}), nil
+	}
 }
 
 // NewSessionResolver builds the resolver the send path consults, backed by
@@ -243,9 +270,16 @@ func (n *Engine) InstallSessionResolver() {
 // signerKeyFor maps a session-signer ADDRESS to its private key. It is a
 // callback rather than a map so key material stays wherever the gateway keeps
 // it and never has to live on this record.
+// verifyTeardown, when supplied, closes the loop on a replacement: after the
+// grant's deferred action reaches the chain it reads back whether the entity
+// the batch was supposed to remove is actually gone. nil disables the check —
+// tests and any process without a chain client skip it honestly rather than
+// assume it passed. See VerifySupersededTeardown for why a receipt is not
+// enough.
 func NewSessionResolver(
 	db storage.Storage,
 	signerKeyFor func(signer common.Address) (*ecdsa.PrivateKey, error),
+	verifyTeardown TeardownVerifier,
 ) preset.SessionResolver {
 	return func(chainID int64, owner, wallet common.Address) (*preset.SessionAuthorization, error) {
 		policy, err := ActiveSessionPolicyForWallet(db, chainID, owner, wallet)
@@ -297,8 +331,33 @@ func NewSessionResolver(
 			}
 			policyID, policyChain, policyOwner := policy.ID, policy.ChainID, *policy.Owner
 			policyRunner := *policy.Runner
+			// Captured now, from the payload the owner signed: if this grant
+			// replaced an installed one, its batch carries that entity's
+			// uninstall, and the entity it names is what must be verified gone.
+			replacedEntity, replacedSomething, entityErr := aa.UninstalledEntityWithin(policy.Grant.InstallCall)
+			if entityErr != nil {
+				return nil, fmt.Errorf("session policy %s: reading the teardown target: %w", policy.ID, entityErr)
+			}
 			auth.OnApplied = func(userOpHash string) error {
-				return MarkSessionGrantAppliedByID(db, policyChain, policyOwner, policyRunner, policyID, userOpHash)
+				if err := MarkSessionGrantAppliedByID(db, policyChain, policyOwner, policyRunner, policyID, userOpHash); err != nil {
+					return err
+				}
+				if !replacedSomething || verifyTeardown == nil {
+					return nil
+				}
+				// The batch has mined, which says the operation ran — not that
+				// the uninstall did anything. A failed check does not fail the
+				// send: the new grant is installed and there is nothing to roll
+				// back. It makes a stranded entity visible instead of assumed.
+				replaced := &model.SessionPolicy{
+					ID: policyID, ChainID: policyChain, Runner: &policyRunner, EntityID: replacedEntity,
+				}
+				if err := VerifySupersededTeardown(context.Background(), db, verifyTeardown, replaced, globalLogger); err != nil {
+					if globalLogger != nil {
+						globalLogger.Warn("replacement teardown unverified", "policy", policyID, "error", err)
+					}
+				}
+				return nil
 			}
 		}
 		return auth, nil

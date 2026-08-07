@@ -466,7 +466,7 @@ func recheckSupersededGrant(db storage.Storage, prepared *PreparedSessionGrant, 
 // TeardownVerifier reads back whether a validation entity is clear on chain.
 // Supplied by the aggregator, which owns the chain client; nil in tests and in
 // any process without one, where verification is skipped rather than faked.
-type TeardownVerifier func(ctx context.Context, account common.Address, entity uint32) (cleared bool, err error)
+type TeardownVerifier func(ctx context.Context, chainID int64, account common.Address, entity uint32) (cleared bool, err error)
 
 // VerifySupersededTeardown checks that the entity a replacement was supposed
 // to remove is actually gone, and records the answer on the superseded policy.
@@ -495,7 +495,7 @@ func VerifySupersededTeardown(
 		return nil // no chain client: skip honestly rather than assume success
 	}
 
-	cleared, err := verify(ctx, *superseded.Runner, superseded.EntityID)
+	cleared, err := verify(ctx, superseded.ChainID, *superseded.Runner, superseded.EntityID)
 	if err != nil {
 		// Unknown is not cleared. Say so rather than recording either answer.
 		if logger != nil {

@@ -166,3 +166,37 @@ func decodeUninstallHookData(t *testing.T, uninstallCall []byte) [][]byte {
 	require.True(t, ok)
 	return hookData
 }
+
+// Verification reads its target from the payload the owner signed, not from a
+// separately-stored field that could disagree with those bytes.
+func TestUninstalledEntityWithinReadsTheSignedTarget(t *testing.T) {
+	install, _, _, _ := testGrantInstall(t, 2)
+	priorInstall, _, _, _ := testGrantInstall(t, 1)
+	account := common.HexToAddress("0x209eb31c199bEB4c386eF83CF442DE1a00667a1F")
+
+	// A plain install replaced nothing.
+	entity, found, err := UninstalledEntityWithin(install)
+	require.NoError(t, err)
+	require.False(t, found, "a first grant tears nothing down")
+	require.Zero(t, entity)
+
+	// A replace batch names the entity it removes.
+	uninstall, err := SessionSignerUninstallFromInstall(1, priorInstall)
+	require.NoError(t, err)
+	batch, err := PackExecuteBatchMAv2([]Call{
+		{Target: account, Value: big.NewInt(0), Data: install},
+		{Target: account, Value: big.NewInt(0), Data: uninstall},
+	})
+	require.NoError(t, err)
+
+	entity, found, err = UninstalledEntityWithin(batch)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint32(1), entity, "the entity read back must be the one the batch removes")
+
+	// And the install is still recoverable from the same batch, for teardown
+	// of THIS grant later.
+	inner, err := InstallValidationWithin(batch)
+	require.NoError(t, err)
+	require.Equal(t, install, inner)
+}

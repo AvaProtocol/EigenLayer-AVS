@@ -37,7 +37,7 @@ func teardownFixture(t *testing.T) (storage.Storage, *model.SessionPolicy) {
 
 func TestTeardownVerificationAcceptsAClearedEntity(t *testing.T) {
 	db, superseded := teardownFixture(t)
-	verify := func(context.Context, common.Address, uint32) (bool, error) { return true, nil }
+	verify := func(context.Context, int64, common.Address, uint32) (bool, error) { return true, nil }
 
 	require.NoError(t, VerifySupersededTeardown(context.Background(), db, verify, superseded, nil))
 }
@@ -45,7 +45,7 @@ func TestTeardownVerificationAcceptsAClearedEntity(t *testing.T) {
 // The failure the spike surfaced: the operation mined and the entity survived.
 func TestTeardownVerificationRejectsASurvivingEntity(t *testing.T) {
 	db, superseded := teardownFixture(t)
-	verify := func(context.Context, common.Address, uint32) (bool, error) { return false, nil }
+	verify := func(context.Context, int64, common.Address, uint32) (bool, error) { return false, nil }
 
 	err := VerifySupersededTeardown(context.Background(), db, verify, superseded, nil)
 	require.Error(t, err, "a surviving entity is live authority and must not pass silently")
@@ -57,7 +57,7 @@ func TestTeardownVerificationRejectsASurvivingEntity(t *testing.T) {
 // that would report an entity revoked while it is still spendable.
 func TestTeardownVerificationTreatsAReadFailureAsUnverified(t *testing.T) {
 	db, superseded := teardownFixture(t)
-	verify := func(context.Context, common.Address, uint32) (bool, error) {
+	verify := func(context.Context, int64, common.Address, uint32) (bool, error) {
 		return false, fmt.Errorf("rpc unavailable")
 	}
 
@@ -77,7 +77,7 @@ func TestTeardownVerificationSkipsWithoutAChainClient(t *testing.T) {
 func TestTeardownVerificationIgnoresAFirstGrant(t *testing.T) {
 	db, _ := teardownFixture(t)
 	called := false
-	verify := func(context.Context, common.Address, uint32) (bool, error) { called = true; return true, nil }
+	verify := func(context.Context, int64, common.Address, uint32) (bool, error) { called = true; return true, nil }
 
 	require.NoError(t, VerifySupersededTeardown(context.Background(), db, verify, nil, nil))
 	require.False(t, called, "a first grant removes nothing, so nothing is read")

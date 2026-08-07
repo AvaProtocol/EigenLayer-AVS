@@ -41,7 +41,7 @@ func TestResolverMarksAppliedAndStopsAttachingTheInstall(t *testing.T) {
 	engine, user, wallet, stored := storedPendingGrant(t)
 	controllerKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	resolver := NewSessionResolver(engine.db, testResolverKey(controllerKey))
+	resolver := NewSessionResolver(engine.db, testResolverKey(controllerKey), nil)
 
 	// First resolution: pending grant → deferred install attached, with the
 	// callback that will record its landing.

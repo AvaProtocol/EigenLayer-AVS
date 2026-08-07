@@ -144,3 +144,51 @@ func InstallValidationWithin(deferredCall []byte) ([]byte, error) {
 	}
 	return nil, fmt.Errorf("no installValidation found among the batch's %d calls", len(datas))
 }
+
+// UninstalledEntityWithin returns the entity a stored deferred call tears
+// down, when it carries one.
+//
+// The payload is the source of truth for what the owner's signature actually
+// authorized, so verification reads the target from it rather than from a
+// separately-stored field that could disagree with the bytes that were signed.
+// Returns found=false for a plain install — a grant that replaced nothing.
+func UninstalledEntityWithin(deferredCall []byte) (entity uint32, found bool, err error) {
+	if err := ensureUninstallABI(); err != nil {
+		return 0, false, err
+	}
+	method, ok := uninstallABI.Methods["uninstallValidation"]
+	if !ok {
+		return 0, false, fmt.Errorf("uninstallValidation is missing from the ABI")
+	}
+	if len(deferredCall) < 4 {
+		return 0, false, nil
+	}
+
+	candidates := [][]byte{deferredCall}
+	if string(deferredCall[:4]) != string(method.ID) {
+		_, _, datas, unpackErr := UnpackExecuteCalldata(deferredCall)
+		if unpackErr != nil {
+			return 0, false, nil // a plain install, or something that is not a batch
+		}
+		candidates = datas
+	}
+
+	for _, data := range candidates {
+		if len(data) < 4 || string(data[:4]) != string(method.ID) {
+			continue
+		}
+		args, err := method.Inputs.Unpack(data[4:])
+		if err != nil {
+			return 0, false, fmt.Errorf("decoding uninstallValidation: %w", err)
+		}
+		moduleEntity, ok := args[0].([24]byte)
+		if !ok {
+			return 0, false, fmt.Errorf("uninstallValidation target decoded to %T, not bytes24", args[0])
+		}
+		// ModuleEntity is module (20) ++ entityId (4, big-endian).
+		e := uint32(moduleEntity[20])<<24 | uint32(moduleEntity[21])<<16 |
+			uint32(moduleEntity[22])<<8 | uint32(moduleEntity[23])
+		return e, true, nil
+	}
+	return 0, false, nil
+}

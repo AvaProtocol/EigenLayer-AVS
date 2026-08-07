@@ -176,7 +176,7 @@ func installSessionResolver(
 			return nil, fmt.Errorf("no key for session signer %s", a.Hex())
 		}
 		return swCfg.ControllerPrivateKey, nil
-	}))
+	}, nil))
 	t.Cleanup(func() { preset.SetSessionResolver(nil) })
 }
 
