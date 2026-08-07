@@ -9,7 +9,7 @@ This directory contains comprehensive integration tests for the operator reconne
 - Often fail due to timing and race condition sensitivity  
 - Are meant for debugging specific scenarios, not regular CI/CD
 
-They use the `//go:build integration` tag and must be run explicitly with `make test/integration`.
+They use the `//go:build integration` tag. Local `make test` includes `-tags=integration` so they run with the full suite; CI unit jobs omit that tag so PR signal stays deterministic. To run only these packages: `make test/integration`.
 
 ## Test Files
 

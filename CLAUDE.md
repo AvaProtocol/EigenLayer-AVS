@@ -22,12 +22,10 @@ make dev-live               # Live reload during development
 ### Testing
 
 ```bash
-make test                              # All standard tests (excludes long-running integration tests)
-make test/cover                        # Tests with coverage
-make test/quick                        # No race detection, fast feedback
-make test/package PKG=./core/taskengine # Specific package tests
-make test/clean                        # Tests with clean cache
-make test/integration                  # Integration tests (often fail, debugging only)
+make test                              # All tests INCLUDING //go:build integration (live Sepolia)
+make test/unit                         # Unit only (matches CI; no live-chain suite)
+make test/package PKG=./core/taskengine # Specific package (TAGS=integration for live tests)
+make test/integration                  # Only packages with //go:build integration tests
 ```
 
 ### Code Quality

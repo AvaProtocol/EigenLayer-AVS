@@ -64,7 +64,7 @@ sync-tokens:
 	cp $$TMP/package/dist/tokens/*.json core/taskengine/tokenwhitelist/ ; \
 	echo "✅ synced core/taskengine/tokenwhitelist/ from @avaprotocol/protocols@$(PROTOCOLS_VERSION) ($$tarball)"
 
-## audit: run quality control checks (excluding long-running integration tests)
+## audit: quality checks + unit tests only (no //go:build integration live-chain suite)
 .PHONY: audit
 audit:
 	go mod verify
@@ -75,35 +75,38 @@ audit:
 	go test -race -buildvcs -vet=off $(shell go list ./... | grep -v '/scripts$$')
 
 
-## test: run all tests with coverage (excluding long-running integration tests)
+## test: run ALL tests with coverage, including //go:build integration (live Sepolia).
+## CI unit jobs omit -tags=integration so PR signal stays deterministic (#690).
 .PHONY: test
 test:
 	go clean -testcache
 	go clean -cache
 	go mod tidy
 	go build $(shell go list ./... | grep -v '/scripts$$')
-	go test -v -race -buildvcs -coverprofile=/tmp/coverage.out $(shell go list ./... | grep -v '/scripts$$')
+	go test -v -race -buildvcs -tags=integration -coverprofile=/tmp/coverage.out $(shell go list ./... | grep -v '/scripts$$')
 	go tool cover -html=/tmp/coverage.out
 
-## test/integration: run long-running integration tests (usually failing, for debugging only)
+## test/unit: unit tests only (same set CI runs; no live-chain suite)
+.PHONY: test/unit
+test/unit:
+	go test -v -race -buildvcs $(shell go list ./... | grep -v '/scripts$$')
+
+## test/integration: only packages that host //go:build integration tests
 .PHONY: test/integration
 test/integration:
-	@echo "⚠️  Running long-running integration tests that often fail..."
-	@echo "⚠️  These are excluded from regular test runs and are for debugging purposes only"
-	go clean -cache
-	go mod tidy
-	go build $(shell go list ./... | grep -v '/scripts$$')
+	@echo "Running //go:build integration tests (live chain / Tenderly / funded wallets)..."
 	go test -v -race -buildvcs -tags=integration ./integration_test/ ./core/taskengine/...
 
 
 ## test/package: run tests for a specific package (usage: make test/package PKG=./core/taskengine)
+## Add TAGS=integration to include live-chain tests in that package.
 .PHONY: test/package
 test/package:
 	go clean -testcache
 	go clean -cache
 	go mod tidy
 	go build $(shell go list ./... | grep -v '/scripts$$')
-	go test -v -race -buildvcs $(PKG)
+	go test -v -race -buildvcs $(if $(TAGS),-tags=$(TAGS),) $(PKG)
 
 
 ## cicd-failed: print cleaned test failures from GitHub Actions logs (usage: make cicd-failed RUN_ID=123456789)
