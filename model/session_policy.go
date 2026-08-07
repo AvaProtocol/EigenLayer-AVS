@@ -81,8 +81,15 @@ type ERC20SpendCap struct {
 
 // SessionGrantAuthorization is the owner's signed deferred action.
 type SessionGrantAuthorization struct {
-	// InstallCall is the exact installValidation calldata the signature
-	// commits to.
+	// InstallCall is the exact deferred calldata the signature commits to, and
+	// must be re-encoded verbatim — the resolver rebuilds the signed payload
+	// from it, so any difference invalidates the owner's signature.
+	//
+	// Usually installValidation. When the grant REPLACES one that was already
+	// installed on chain, it is an executeBatch carrying that install AND the
+	// prior entity's uninstall, so a single owner signature makes the
+	// replacement true on both sides (#717). Readers that want the install
+	// alone must unwrap the batch — see aa.InstallValidationWithin.
 	InstallCall []byte `json:"install_call"`
 
 	// CarrierNonce is the FULL 256-bit nonce of the operation that will carry

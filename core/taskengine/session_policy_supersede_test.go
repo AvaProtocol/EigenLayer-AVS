@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
@@ -400,4 +402,138 @@ func TestApplyingAGrantWaitsForTheRunnersWriteLock(t *testing.T) {
 	}
 
 	require.Len(t, usableOn(t, db, owner, wallet), 1)
+}
+
+// A replacement carries the prior grant's teardown, so one owner signature
+// makes the replacement true on chain as well as in storage (#717). Proven on
+// Sepolia; these tests pin the payload the gateway builds.
+
+// installValidationCount reports how many installValidation calls a deferred
+// payload carries, and whether it is a batch.
+func deferredShape(t *testing.T, deferred []byte) (batch bool, installs, uninstalls int) {
+	t.Helper()
+	installSel := crypto.Keccak256([]byte("installValidation(bytes25,bytes4[],bytes,bytes[])"))[:4]
+	uninstallSel := crypto.Keccak256([]byte("uninstallValidation(bytes24,bytes,bytes[])"))[:4]
+
+	if len(deferred) >= 4 && string(deferred[:4]) == string(installSel) {
+		return false, 1, 0
+	}
+	_, _, datas, err := aa.UnpackExecuteCalldata(deferred)
+	require.NoError(t, err, "a non-install deferred payload must be an unpackable batch")
+	for _, d := range datas {
+		if len(d) < 4 {
+			continue
+		}
+		switch string(d[:4]) {
+		case string(installSel):
+			installs++
+		case string(uninstallSel):
+			uninstalls++
+		}
+	}
+	return true, installs, uninstalls
+}
+
+// A first grant has nothing installed to remove, so it stays a bare install —
+// the payload shape, and therefore the digest the owner signs, is unchanged
+// from before this feature.
+func TestFirstGrantCarriesNoTeardown(t *testing.T) {
+	engine, _, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	user := &model.User{Address: owner}
+
+	prepared, err := engine.PrepareSessionPolicy(user, SessionPolicyInput{
+		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "TradingBot",
+		Permissions: testPermissions(),
+	})
+	require.NoError(t, err)
+	require.Nil(t, prepared.Supersedes, "nothing installed, nothing to supersede")
+
+	batch, _, _ := deferredShape(t, prepared.Policy.Grant.InstallCall)
+	require.False(t, batch, "a first grant is a plain installValidation")
+	_ = ownerKey
+}
+
+// A grant that is only PENDING has no on-chain entity, so replacing it must
+// not batch a teardown for something that was never installed.
+func TestReplacingAPendingGrantCarriesNoTeardown(t *testing.T) {
+	engine, _, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	user := &model.User{Address: owner}
+
+	first, _ := grantOn(t, engine, ownerKey, owner, wallet)
+	require.Equal(t, model.SessionPolicyPending, first.Status, "precondition: not applied")
+
+	prepared, err := engine.PrepareSessionPolicy(user, SessionPolicyInput{
+		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "TradingBot",
+		Permissions: testPermissions(),
+	})
+	require.NoError(t, err)
+	require.Nil(t, prepared.Supersedes,
+		"a pending grant's install never reached the chain — there is nothing to uninstall")
+	batch, _, _ := deferredShape(t, prepared.Policy.Grant.InstallCall)
+	require.False(t, batch)
+}
+
+// The feature: replacing an APPLIED grant batches its teardown into the same
+// owner signature. Install first — the operation carrying this is validated by
+// the new entity, which must exist before the outer validation runs.
+func TestReplacingAnAppliedGrantBatchesItsTeardown(t *testing.T) {
+	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	user := &model.User{Address: owner}
+
+	first, _ := grantOn(t, engine, ownerKey, owner, wallet)
+	require.NoError(t, MarkSessionGrantApplied(db, first, "0xapplied"))
+
+	prepared, err := engine.PrepareSessionPolicy(user, SessionPolicyInput{
+		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "TradingBot",
+		Permissions: testPermissions(),
+	})
+	require.NoError(t, err)
+
+	require.NotNil(t, prepared.Supersedes, "an installed grant must be superseded on chain too")
+	require.Equal(t, first.ID, prepared.Supersedes.PolicyID)
+	require.Equal(t, first.EntityID, prepared.Supersedes.EntityID)
+
+	batch, installs, uninstalls := deferredShape(t, prepared.Policy.Grant.InstallCall)
+	require.True(t, batch, "a replacement is a batch")
+	require.Equal(t, 1, installs)
+	require.Equal(t, 1, uninstalls)
+
+	// The stored payload must remain replayable as-is: the resolver rebuilds
+	// the signed data from it, so the batch — not the bare install — is what
+	// the owner's signature covers.
+	install, err := aa.InstallValidationWithin(prepared.Policy.Grant.InstallCall)
+	require.NoError(t, err)
+	require.NotEqual(t, prepared.Policy.Grant.InstallCall, install,
+		"the stored call is the batch; the install is inside it")
+}
+
+// The regression this nearly shipped: #716 made granting SELF-HEALING for a
+// wallet stuck with stacked grants. A replacement can only remove one entity,
+// so a stacked wallet must fall back to install-only rather than refuse —
+// otherwise the wallets most in need of repair are the ones that cannot be.
+func TestStackedInstalledGrantsStillAllowGranting(t *testing.T) {
+	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	user := &model.User{Address: owner}
+
+	for _, id := range []string{"01stackedaaaaaaaaaaaaaaaaa", "01stackedbbbbbbbbbbbbbbbbb"} {
+		seedUsablePolicy(t, db, owner, wallet, id, uint32(len(id)%3+1))
+	}
+	require.Len(t, usableOn(t, db, owner, wallet), 2, "precondition: the broken state")
+
+	prepared, err := engine.PrepareSessionPolicy(user, SessionPolicyInput{
+		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "TradingBot",
+		Permissions: testPermissions(),
+	})
+	require.NoError(t, err, "a stacked wallet must still be grantable — that is how it gets repaired")
+	require.Nil(t, prepared.Supersedes,
+		"with two installed grants a replacement removes neither; the leftovers stay on chain")
+	batch, _, _ := deferredShape(t, prepared.Policy.Grant.InstallCall)
+	require.False(t, batch)
+
+	// And the storage-level repair from #716 still lands.
+	fresh, superseded := grantOn(t, engine, ownerKey, owner, wallet)
+	require.Len(t, superseded, 2)
+	usable := usableOn(t, db, owner, wallet)
+	require.Len(t, usable, 1)
+	require.Equal(t, fresh.ID, usable[0].ID)
 }

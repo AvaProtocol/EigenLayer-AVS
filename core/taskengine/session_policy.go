@@ -335,3 +335,40 @@ func controllerSessionSigner(cfg *config.Config) func(common.Address) (*ecdsa.Pr
 		return cfg.SmartWallet.ControllerPrivateKey, nil
 	}
 }
+
+// supersededOnChainGrant returns the runner's grant whose install has actually
+// REACHED THE CHAIN, so a replacement can carry its teardown.
+//
+// Only an applied grant qualifies. A pending one has no on-chain entity — its
+// install is still riding an operation, or never will — so batching an
+// uninstall for it would tear down something that does not exist. Superseding
+// a pending grant stays what #716 made it: a storage-only revoke.
+//
+// ambiguous reports that the runner carries MORE THAN ONE installed grant, in
+// which case no policy is returned and the caller must NOT batch a teardown.
+// This is the deliberate half. #716 gave granting a self-healing property — a
+// wallet stuck with stacked usable grants is repaired by granting again — and
+// refusing here would take that away precisely from the wallets that need it
+// most. A replacement can only remove one entity, so it removes none, the
+// storage-level supersede still collapses the set to one usable grant, and the
+// on-chain leftovers stay exactly as they were. Degraded, not broken: no worse
+// than before replacement carried teardown at all.
+//
+// Clearing those leftovers needs an N-way batch or a sweep, tracked on #717.
+func supersededOnChainGrant(db storage.Storage, chainID int64, owner, runner common.Address) (policy *model.SessionPolicy, ambiguous bool, err error) {
+	policies, err := ListSessionPolicies(db, chainID, owner)
+	if err != nil {
+		return nil, false, err
+	}
+	var found *model.SessionPolicy
+	for _, p := range policies {
+		if p.Runner == nil || *p.Runner != runner || !p.Usable() || !p.Grant.Applied() {
+			continue
+		}
+		if found != nil {
+			return nil, true, nil
+		}
+		found = p
+	}
+	return found, false, nil
+}

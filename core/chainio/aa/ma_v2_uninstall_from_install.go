@@ -39,6 +39,10 @@ import (
 //
 // Wrong ordering does not error here or on chain. It mines and does nothing.
 func SessionSignerUninstallFromInstall(entityID uint32, installCall []byte) ([]byte, error) {
+	installCall, err := InstallValidationWithin(installCall)
+	if err != nil {
+		return nil, fmt.Errorf("locating the install for entity %d: %w", entityID, err)
+	}
 	hooks, err := DecodeInstallValidationHooks(installCall)
 	if err != nil {
 		return nil, fmt.Errorf("recovering hooks for entity %d: %w", entityID, err)
@@ -104,4 +108,39 @@ func DecodeInstallValidationHooks(installCall []byte) ([][]byte, error) {
 		return nil, fmt.Errorf("installValidation hooks decoded to %T, not [][]byte", args[3])
 	}
 	return hooks, nil
+}
+
+// InstallValidationWithin returns the installValidation calldata inside a
+// stored deferred call, unwrapping an executeBatch when it finds one.
+//
+// A grant that replaced another stores its deferred call as a batch of
+// [install(new), uninstall(prior)] — the shape the owner signed. Anything
+// reading that record for the INSTALL alone, teardown included, has to look
+// past the wrapper. Anything replaying it as a payload must not: the signature
+// commits to the batch.
+func InstallValidationWithin(deferredCall []byte) ([]byte, error) {
+	if err := ensureInstallABIs(); err != nil {
+		return nil, err
+	}
+	method, ok := installValidationABI.Methods["installValidation"]
+	if !ok {
+		return nil, fmt.Errorf("installValidation is missing from the ABI")
+	}
+	if len(deferredCall) < 4 {
+		return nil, fmt.Errorf("deferred call is %d bytes, shorter than a selector", len(deferredCall))
+	}
+	if string(deferredCall[:4]) == string(method.ID) {
+		return deferredCall, nil
+	}
+
+	_, _, datas, err := UnpackExecuteCalldata(deferredCall)
+	if err != nil {
+		return nil, fmt.Errorf("deferred call is neither installValidation nor an unpackable batch: %w", err)
+	}
+	for _, data := range datas {
+		if len(data) >= 4 && string(data[:4]) == string(method.ID) {
+			return data, nil
+		}
+	}
+	return nil, fmt.Errorf("no installValidation found among the batch's %d calls", len(datas))
 }

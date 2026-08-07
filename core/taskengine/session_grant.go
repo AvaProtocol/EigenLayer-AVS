@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	badger "github.com/dgraph-io/badger/v4"
@@ -97,6 +98,23 @@ type PreparedSessionGrant struct {
 
 	// DeferredData is the encoded action the signature authorizes.
 	DeferredData []byte
+
+	// Supersedes is the grant this one replaces ON CHAIN, when the deferred
+	// action carries its uninstall. Empty when there was nothing installed to
+	// remove — a first grant, or a prior grant still pending, which has no
+	// on-chain entity.
+	//
+	// Echoed to Submit so the write can re-check that the grant it is about to
+	// remove is still the one the owner signed away. The signature commits to
+	// a specific entity's teardown; if a different grant occupies that entity
+	// by then, the payload is stale in the same way a taken entity is.
+	Supersedes *SupersededGrant
+}
+
+// SupersededGrant identifies the on-chain grant a prepared replacement removes.
+type SupersededGrant struct {
+	PolicyID string
+	EntityID uint32
 }
 
 // PrepareSessionGrant allocates the grant and returns the payload to sign.
@@ -148,6 +166,41 @@ func PrepareSessionGrant(
 		return nil, fmt.Errorf("building the grant for wallet %s: %w", req.Wallet.Hex(), err)
 	}
 
+	// A grant REPLACES the runner's previous one, and #716 made that true in
+	// storage. Here it becomes true on chain: when a prior grant is actually
+	// installed, the owner's one signature carries its uninstall alongside the
+	// new install, so the account ends up holding exactly one entity rather
+	// than one per grant ever issued.
+	//
+	// Proven on Sepolia (#717): the batch composes with the NEW entity as the
+	// outer validation and needs no second owner signature. §3.6's refusal was
+	// specific to removing the validation that was validating the operation —
+	// a replace removes a different one.
+	deferredCall := installCall
+	superseded, ambiguous, err := supersededOnChainGrant(db, chainID, req.Owner, req.Wallet)
+	if err != nil {
+		return nil, err
+	}
+	// ambiguous: more than one grant is installed. Install only, so granting
+	// still repairs the wallet in storage (#716) instead of refusing the very
+	// wallets that need repairing. The leftovers stay on chain.
+	if superseded != nil && !ambiguous {
+		uninstallCall, err := aa.SessionSignerUninstallFromInstall(
+			superseded.EntityID, superseded.Grant.InstallCall)
+		if err != nil {
+			return nil, fmt.Errorf("building the teardown for the grant being replaced: %w", err)
+		}
+		// Install FIRST: the operation carrying this is validated by the new
+		// entity, which has to exist by the time the outer validation runs.
+		deferredCall, err = aa.PackExecuteBatchMAv2([]aa.Call{
+			{Target: req.Wallet, Value: big.NewInt(0), Data: installCall},
+			{Target: req.Wallet, Value: big.NewInt(0), Data: uninstallCall},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("packing the replace batch: %w", err)
+		}
+	}
+
 	deadline := req.Deadline
 	if deadline == 0 {
 		window := req.SigningWindow
@@ -167,21 +220,26 @@ func PrepareSessionGrant(
 	}
 
 	digest, err := userop.DeferredActionDigest(
-		big.NewInt(chainID), req.Wallet, carrierNonce, deadline, installCall)
+		big.NewInt(chainID), req.Wallet, carrierNonce, deadline, deferredCall)
 	if err != nil {
 		return nil, fmt.Errorf("building the grant digest: %w", err)
 	}
 
 	deferredData, err := userop.EncodeDeferredActionData(
-		userop.FallbackSignerLocator(), deadline, installCall)
+		userop.FallbackSignerLocator(), deadline, deferredCall)
 	if err != nil {
 		return nil, fmt.Errorf("encoding the deferred action: %w", err)
 	}
 
 	owner, wallet, signer := req.Owner, req.Wallet, sessionSigner
+	var supersedes *SupersededGrant
+	if superseded != nil {
+		supersedes = &SupersededGrant{PolicyID: superseded.ID, EntityID: superseded.EntityID}
+	}
 	return &PreparedSessionGrant{
 		Digest:       digest,
 		DeferredData: deferredData,
+		Supersedes:   supersedes,
 		Policy: &model.SessionPolicy{
 			ID:            policyID,
 			Owner:         &owner,
@@ -195,7 +253,7 @@ func PrepareSessionGrant(
 			Status:        model.SessionPolicyPending,
 			CreatedAt:     time.Now().UnixMilli(),
 			Grant: &model.SessionGrantAuthorization{
-				InstallCall:           installCall,
+				InstallCall:           deferredCall,
 				CarrierNonce:          carrierNonce,
 				Deadline:              deadline,
 				RequiresExecuteUserOp: grant.HasExecutionHook(),
@@ -235,6 +293,15 @@ func SubmitSessionGrant(db storage.Storage, prepared *PreparedSessionGrant, owne
 		return nil, fmt.Errorf(
 			"entity %d was taken while this grant was being signed (next free is %d); prepare it again",
 			policy.EntityID, entity)
+	}
+
+	// Re-check what this grant REPLACES, for the same reason and with the same
+	// remedy. The signature commits to tearing down one specific entity, so a
+	// payload prepared against a grant that has since been revoked or replaced
+	// would remove something the owner did not agree to remove — or nothing at
+	// all, which is worse, because it mines.
+	if err := recheckSupersededGrant(db, prepared, policy); err != nil {
+		return nil, err
 	}
 
 	policy.Grant.OwnerSignature = ownerSignature
@@ -349,3 +416,47 @@ func verifyGrantSignature(digest common.Hash, signature []byte, owner common.Add
 // address other than the wallet owner. Exposed as a sentinel so the REST
 // layer can map it to a 400 with errors.Is rather than matching error text.
 var ErrGrantSignerMismatch = errors.New("grant was signed by the wrong key")
+
+// recheckSupersededGrant refuses a replacement whose target moved between
+// prepare and submit.
+//
+// Three ways it can move, all treated alike: the grant was revoked outright,
+// it was itself replaced by another submit, or a grant now occupies the entity
+// that is different from the one prepared against. In every case the owner
+// signed away a specific entity's authority and that is no longer what the
+// payload would do, so it is refused the way a taken entity is — prepare
+// again, which rebuilds the batch against whatever is actually installed.
+func recheckSupersededGrant(db storage.Storage, prepared *PreparedSessionGrant, policy *model.SessionPolicy) error {
+	current, ambiguous, err := supersededOnChainGrant(db, policy.ChainID, *policy.Owner, *policy.Runner)
+	if err != nil {
+		return err
+	}
+	if ambiguous {
+		// Same reasoning as prepare: a stacked wallet is repaired, not refused.
+		// The payload installs only, so there is no teardown target to re-check.
+		return nil
+	}
+
+	switch {
+	case prepared.Supersedes == nil && current == nil:
+		return nil // nothing to replace then, nothing now
+	case prepared.Supersedes == nil && current != nil:
+		return fmt.Errorf(
+			"%w: grant %s (entity %d) was installed on %s while this one was being signed, "+
+				"so this payload would leave it in place; prepare again to replace it",
+			ErrSessionEntityTaken, current.ID, current.EntityID, policy.Runner.Hex())
+	case prepared.Supersedes != nil && current == nil:
+		return fmt.Errorf(
+			"%w: the grant this replaces (%s, entity %d) is no longer installed on %s; "+
+				"prepare again",
+			ErrSessionEntityTaken, prepared.Supersedes.PolicyID, prepared.Supersedes.EntityID,
+			policy.Runner.Hex())
+	case !strings.EqualFold(prepared.Supersedes.PolicyID, current.ID) ||
+		prepared.Supersedes.EntityID != current.EntityID:
+		return fmt.Errorf(
+			"%w: this replaces grant %s (entity %d) but %s now holds %s (entity %d); prepare again",
+			ErrSessionEntityTaken, prepared.Supersedes.PolicyID, prepared.Supersedes.EntityID,
+			policy.Runner.Hex(), current.ID, current.EntityID)
+	}
+	return nil
+}
