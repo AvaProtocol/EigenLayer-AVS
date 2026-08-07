@@ -64,7 +64,7 @@ func setupUserOpWithdrawalTest(t *testing.T) (*config.Config, common.Address, *c
 
 	// Always derive smart wallet address from owner + salt:0
 	// This ensures consistency and tests the auto-creation flow
-	smartWalletAddress, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(0))
+	smartWalletAddress, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(fixtureSaltWithdrawal))
 	require.NoError(t, err, "Failed to derive smart wallet address")
 
 	t.Logf("🔑 Owner EOA: %s", ownerAddress.Hex())
@@ -499,7 +499,7 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 	t.Logf("🔧 Set factory address: %s", cfg.SmartWallet.FactoryAddress.Hex())
 
 	// Always derive smart wallet address from owner + salt:0
-	smartWalletAddress, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(0))
+	smartWalletAddress, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(fixtureSaltWithdrawal))
 	require.NoError(t, err, "Failed to derive smart wallet address")
 
 	t.Logf("🔑 Owner EOA: %s", ownerAddress.Hex())
@@ -529,12 +529,11 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 	// Fixed withdrawal amount: 0.00001 ETH (small, to conserve testnet ETH across runs)
 	withdrawalAmount := big.NewInt(10000000000000) // 0.00001 ETH in wei
 
-	// Skip if balance is insufficient
-	if smartWalletBalance.Cmp(withdrawalAmount) < 0 {
-		t.Skipf("Insufficient ETH balance: have %.9f ETH, need %.9f ETH",
-			float64(smartWalletBalance.Int64())/1e18,
-			float64(withdrawalAmount.Int64())/1e18)
-	}
+	// Hard-fail rather than skip: a skipped live test reads as a passing suite
+	// that never exercised the path. The message names the runner and the
+	// shortfall, which is what makes moving this fixture to its own salt a
+	// matter of funding one named address.
+	requireFundedRunner(t, cfg.SmartWallet, *smartWalletAddress, withdrawalAmount)
 
 	t.Logf("💸 Withdrawing %s wei (%.9f ETH) to %s", withdrawalAmount.String(), float64(withdrawalAmount.Int64())/1e18, destinationAddress.Hex())
 	t.Logf("   (Using ethTransfer node type with paymaster sponsorship)")

@@ -75,7 +75,7 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 
 	setGlobalFactory(t, cfg.SmartWallet)
 
-	smartWalletAddress, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(0))
+	smartWalletAddress, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(fixtureSaltBatchSwap))
 	require.NoError(t, err, "Failed to derive smart wallet address")
 	t.Logf("🔑 Owner EOA: %s", ownerAddress.Hex())
 	t.Logf("💼 Smart Wallet (salt:0): %s", smartWalletAddress.Hex())

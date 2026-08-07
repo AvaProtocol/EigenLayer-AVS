@@ -52,7 +52,7 @@ func TestExecuteTask_SequentialContractWrites_Sepolia(t *testing.T) {
 	defer client.Close()
 
 	// Compute the salt:0 smart wallet address for this owner
-	smartWalletAddr, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(0))
+	smartWalletAddr, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(fixtureSaltSequentialWrites))
 	require.NoError(t, err, "Failed to derive smart wallet address")
 	t.Logf("   ✅ Smart Wallet (salt:0): %s", smartWalletAddr.Hex())
 
