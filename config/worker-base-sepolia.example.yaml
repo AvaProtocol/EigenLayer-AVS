@@ -14,7 +14,8 @@ chain_id:   84532
 chain_name: base-sepolia
 
 # Internal gRPC listen address (gateway connects here).
-# In production (Railway): worker-base-sepolia.railway.internal:50051
+# In a hosted deployment this is reached over the platform's private network;
+# the gateway's chain registry holds the address.
 listen_address: "0.0.0.0:50052"
 
 # Health check endpoint (Railway requires HTTP health checks).
