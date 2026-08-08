@@ -70,19 +70,25 @@ run.
 
 ### Aggregator Address
 
-The aggregator is currently run and managed by the Ava Protocol team. Depend on
-testnet or mainnet, you would need to point your operator to the right address
-in the operator config file.
+The aggregator is run and managed by the Ava Protocol team. Point your operator
+at it in the operator config file:
 
-#### Sepolia Testnet
+```yaml
+aggregator_server_ip_port_address: "aggregator.avaprotocol.org:57376"
+```
 
-- aggregator-sepolia.avaprotocol.org:2206
-- [https://api-explorer-sepolia.avaprotocol.org/](https://api-explorer-sepolia.avaprotocol.org/)
+One endpoint serves every chain. The gateway is a single deployment that routes
+per-chain internally, so there is no longer a separate testnet and mainnet
+address — Ethereum, Sepolia, Base, Base Sepolia and BNB all arrive over the
+same gRPC connection.
 
-#### Mainnet
+The port is not a typo. `aggregator.avaprotocol.org` is a CNAME onto the
+gateway's TCP proxy, and the proxy chooses the public port; DNS cannot carry a
+port, so it has to be written out here.
 
-- aggregator.avaprotocol.org:2206
-- [https://api-explorer.avaprotocol.org/](https://api-explorer.avaprotocol.org/)
+The REST API for workflows lives at `https://api.avaprotocol.org/api/v1`, and
+the operator dashboard at
+[https://api.avaprotocol.org/telemetry](https://api.avaprotocol.org/telemetry).
 
 ## Operators
 
@@ -105,16 +111,14 @@ Currently, Ava Protocol has deployed our operator on the testnet. Community memb
 
 ## Telemetry Dashboard
 
-Operator that is connected to Ava Protocol aggregator can also check their
-operator on our telemetry dashboard as below
+An operator connected to the Ava Protocol gateway can see itself on the
+telemetry dashboard:
 
-### Testnet
+https://api.avaprotocol.org/telemetry
 
-https://aggregator-sepolia.avaprotocol.org/telemetry
-
-### Mainnet
-
-https://aggregator.avaprotocol.org/telemetry
+One dashboard covers every chain. The gateway is unified — a single deployment
+serves all chains and routes per-chain internally — so the previous per-chain
+`aggregator-*.avaprotocol.org/telemetry` hosts no longer exist.
 
 ## Branching Strategy
 
