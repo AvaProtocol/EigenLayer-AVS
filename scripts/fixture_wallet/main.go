@@ -48,6 +48,7 @@ func run() error {
 	saltArg := flag.String("salt", "", "fixture salt (see fixtureSalt* in session_fixture_permissions_test.go)")
 	doDeploy := flag.Bool("deploy", false, "deploy the account if it has no code")
 	fundEth := flag.String("fund", "", "top the runner up by this many ETH")
+	fundUsdc := flag.String("fund-usdc", "", "send this many Sepolia USDC from the owner EOA to the runner")
 	flag.Parse()
 
 	if *saltArg == "" {
@@ -105,6 +106,11 @@ func run() error {
 
 	if *fundEth != "" {
 		if err := fund(ctx, client, key, *sender, *fundEth); err != nil {
+			return err
+		}
+	}
+	if *fundUsdc != "" {
+		if err := fundToken(ctx, client, key, *sender, *fundUsdc); err != nil {
 			return err
 		}
 	}
@@ -273,5 +279,76 @@ func reportEntities(ctx context.Context, client *ethclient.Client, account commo
 		}
 		fmt.Printf("%-7d %-44s %d%s\n", entity, signer.Hex(), sequence, state)
 	}
+	return nil
+}
+
+// sepoliaUSDC is the test token the live swap fixtures trade. Not Circle's.
+const sepoliaUSDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+
+// fundToken sends USDC from the owner EOA to the runner.
+//
+// A swap fixture needs a token balance as well as gas: without it the router
+// reverts with STF (its safeTransferFrom of the input token fails), which reads
+// like a permissions problem and is not one.
+func fundToken(ctx context.Context, client *ethclient.Client, key *ecdsa.PrivateKey, to common.Address, amount string) error {
+	f, ok := new(big.Float).SetString(amount)
+	if !ok {
+		return fmt.Errorf("-fund-usdc %q is not a number", amount)
+	}
+	units, _ := new(big.Float).Mul(f, big.NewFloat(1e6)).Int(nil) // 6 decimals
+	if units.Sign() <= 0 {
+		// "0", "-1" and anything that rounds to nothing would otherwise burn gas
+		// on a transfer of zero and report success.
+		return fmt.Errorf("-fund-usdc %q is %s units; pass a positive amount", amount, units)
+	}
+	token := common.HexToAddress(sepoliaUSDC)
+	from := crypto.PubkeyToAddress(key.PublicKey)
+
+	// transfer(address,uint256)
+	data := crypto.Keccak256([]byte("transfer(address,uint256)"))[:4]
+	data = append(data, common.LeftPadBytes(to.Bytes(), 32)...)
+	data = append(data, common.LeftPadBytes(units.Bytes(), 32)...)
+
+	chainID, err := client.ChainID(ctx)
+	if err != nil {
+		return err
+	}
+	nonce, err := client.PendingNonceAt(ctx, from)
+	if err != nil {
+		return err
+	}
+	tip, err := client.SuggestGasTipCap(ctx)
+	if err != nil {
+		return err
+	}
+	head, err := client.HeaderByNumber(ctx, nil)
+	if err != nil {
+		return err
+	}
+	gas, err := client.EstimateGas(ctx, ethereum.CallMsg{From: from, To: &token, Data: data})
+	if err != nil {
+		return fmt.Errorf("estimating USDC transfer (owner balance too low?): %w", err)
+	}
+	tx := types.NewTx(&types.DynamicFeeTx{
+		ChainID: chainID, Nonce: nonce, To: &token, Gas: gas * 12 / 10,
+		GasFeeCap: new(big.Int).Add(tip, new(big.Int).Mul(head.BaseFee, big.NewInt(2))),
+		GasTipCap: tip, Data: data,
+	})
+	signed, err := types.SignTx(tx, types.LatestSignerForChainID(chainID), key)
+	if err != nil {
+		return err
+	}
+	if err := client.SendTransaction(ctx, signed); err != nil {
+		return err
+	}
+	fmt.Printf("\nsending %s USDC to %s\nhttps://sepolia.etherscan.io/tx/%s\n", amount, to.Hex(), signed.Hash().Hex())
+	receipt, err := waitMined(ctx, client, signed.Hash())
+	if err != nil {
+		return err
+	}
+	if receipt.Status != 1 {
+		return fmt.Errorf("USDC transfer reverted")
+	}
+	fmt.Printf("✅ %s now holds %s USDC units\n", to.Hex(), units)
 	return nil
 }

@@ -3,11 +3,13 @@ package taskengine
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -81,4 +83,188 @@ func TestTeardownVerificationIgnoresAFirstGrant(t *testing.T) {
 
 	require.NoError(t, VerifySupersededTeardown(context.Background(), db, verify, nil, nil))
 	require.False(t, called, "a first grant removes nothing, so nothing is read")
+}
+
+// Explicit revoke rebuilds uninstallValidation from the stored install call
+// (#717 AC3). That is what onChainCleanupRequired used to report into the void.
+func TestBuildOnChainRevokeCleanupDerivesUninstallFromInstall(t *testing.T) {
+	install, err := aa.PackSessionSignerInstall(aa.SessionGrant{
+		EntityID: 4,
+		Signer:   common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB"),
+		Global:   true,
+		Hooks:    [][]byte{aa.AllowlistExecHook(4)},
+	})
+	require.NoError(t, err)
+
+	owner := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	runner := common.HexToAddress("0x209eb31c199bEB4c386eF83CF442DE1a00667a1F")
+	policy := &model.SessionPolicy{
+		ID: "01revokecleanupaaaaaaaaaa", Owner: &owner, Runner: &runner,
+		ChainID: testPolicyChain, EntityID: 4, Status: model.SessionPolicyRevoked,
+		Grant: &model.SessionGrantAuthorization{InstallCall: install, AppliedAt: 1},
+	}
+
+	cleanup, err := BuildOnChainRevokeCleanup(policy)
+	require.NoError(t, err)
+	require.Equal(t, uint32(4), cleanup.EntityID)
+	require.Equal(t, runner, cleanup.Target)
+	require.Equal(t, int64(testPolicyChain), cleanup.ChainID)
+	require.NotEmpty(t, cleanup.CallData)
+
+	// Same bytes SessionSignerUninstallFromInstall would produce — the product
+	// path must not invent its own packing.
+	want, err := aa.SessionSignerUninstallFromInstall(4, install)
+	require.NoError(t, err)
+	require.Equal(t, want, cleanup.CallData)
+}
+
+func TestBuildOnChainRevokeCleanupUnwrapsAReplaceBatch(t *testing.T) {
+	// A grant that replaced another stores InstallCall as executeBatch
+	// [install(new), uninstall(prior)]. Cleanup for THIS grant must still
+	// tear down its own entity, peeling the install out of the batch.
+	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
+	runner := common.HexToAddress("0x209eb31c199bEB4c386eF83CF442DE1a00667a1F")
+	installNew, err := aa.PackSessionSignerInstall(aa.SessionGrant{
+		EntityID: 2, Signer: signer, Global: true, Hooks: [][]byte{aa.AllowlistExecHook(2)},
+	})
+	require.NoError(t, err)
+	installPrior, err := aa.PackSessionSignerInstall(aa.SessionGrant{
+		EntityID: 1, Signer: signer, Global: true, Hooks: [][]byte{aa.AllowlistExecHook(1)},
+	})
+	require.NoError(t, err)
+	uninstallPrior, err := aa.SessionSignerUninstallFromInstall(1, installPrior)
+	require.NoError(t, err)
+
+	batch, err := aa.PackExecuteBatchMAv2([]aa.Call{
+		{Target: runner, Data: installNew},
+		{Target: runner, Data: uninstallPrior},
+	})
+	require.NoError(t, err)
+
+	owner := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	policy := &model.SessionPolicy{
+		ID: "01revokebatchaaaaaaaaaaaa", Owner: &owner, Runner: &runner,
+		ChainID: testPolicyChain, EntityID: 2, Status: model.SessionPolicyRevoked,
+		Grant: &model.SessionGrantAuthorization{InstallCall: batch, AppliedAt: 1},
+	}
+
+	cleanup, err := BuildOnChainRevokeCleanup(policy)
+	require.NoError(t, err)
+	require.Equal(t, uint32(2), cleanup.EntityID, "cleanup targets this grant's entity, not the prior in the batch")
+	// Must equal uninstall of the install peel, not of the prior entity.
+	want, err := aa.SessionSignerUninstallFromInstall(2, installNew)
+	require.NoError(t, err)
+	require.Equal(t, want, cleanup.CallData)
+	// And must not match entity 1's uninstall.
+	notPrior, err := aa.SessionSignerUninstallFromInstall(1, installPrior)
+	require.NoError(t, err)
+	require.NotEqual(t, notPrior, cleanup.CallData)
+}
+
+func TestTornDownEntitiesAreExcludedFromReplaceBatchAndCleanup(t *testing.T) {
+	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	user := &model.User{Address: owner}
+
+	first, _ := grantOn(t, engine, ownerKey, owner, wallet)
+	require.NoError(t, MarkSessionGrantApplied(db, first, "0xfirst"))
+	require.NoError(t, MarkEntityTornDown(db, testPolicyChain, owner, wallet, first.EntityID))
+
+	// Next prepare must not try to uninstall an already-cleared entity.
+	prepared, err := engine.PrepareSessionPolicy(user, SessionPolicyInput{
+		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "TradingBot",
+		Permissions: testPermissions(),
+	})
+	require.NoError(t, err)
+	require.Empty(t, prepared.Supersedes, "torn-down entity is not a teardown target")
+
+	// Explicit cleanup refuses once TornDownAt is set.
+	stored, err := engine.GetSessionPolicyByID(user, testPolicyChain, wallet, first.ID)
+	// first is still usable until revoke — mark applied+torn on usable, then revoke
+	require.NoError(t, err)
+	// Soft-revoke the first for cleanup API shape
+	_, cleanupReq, cleanup, err := engine.RevokeSessionPolicyByID(user, testPolicyChain, wallet, first.ID)
+	require.NoError(t, err)
+	require.False(t, cleanupReq, "already torn down: no cleanup payload")
+	require.Nil(t, cleanup)
+	_ = stored
+}
+
+// dropClearedTeardownTargets must not pack uninstall of an entity that is
+// already clear on chain — that reverts the whole replace batch (#731 re-audit).
+func TestDropClearedTeardownTargetsSkipsAndMarks(t *testing.T) {
+	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	user := &model.User{Address: owner}
+
+	first, _ := grantOn(t, engine, ownerKey, owner, wallet)
+	require.NoError(t, MarkSessionGrantApplied(db, first, "0xfirst"))
+
+	// Storage still believes entity needs cleanup; chain says clear (owner ran
+	// onChainCleanup offline).
+	verify := func(_ context.Context, _ int64, _ common.Address, entity uint32) (bool, error) {
+		return entity == first.EntityID, nil
+	}
+	prepared, err := PrepareSessionGrant(db, testPolicyChain,
+		common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB"),
+		"01dropclearedaaaaaaaaaaaaa",
+		SessionGrantRequest{
+			Owner: owner, Wallet: wallet, AgentLabel: "Bot",
+			Hooks:         [][]byte{aa.AllowlistExecHook(1)},
+			TeardownCheck: verify,
+		})
+	require.NoError(t, err)
+	require.Empty(t, prepared.Supersedes, "cleared entity must not ride the batch")
+
+	all, err := ListSessionPolicies(db, testPolicyChain, owner)
+	require.NoError(t, err)
+	var found *model.SessionPolicy
+	for _, p := range all {
+		if p.ID == first.ID {
+			found = p
+			break
+		}
+	}
+	require.NotNil(t, found)
+	require.True(t, found.Grant.TornDown(), "chain-clear must set TornDownAt so recheck matches")
+	_ = user
+}
+
+func TestDropClearedTeardownTargetsFailsPrepareOnReadError(t *testing.T) {
+	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	first, _ := grantOn(t, engine, ownerKey, owner, wallet)
+	require.NoError(t, MarkSessionGrantApplied(db, first, "0xfirst"))
+
+	verify := func(context.Context, int64, common.Address, uint32) (bool, error) {
+		return false, fmt.Errorf("rpc down")
+	}
+	_, err := PrepareSessionGrant(db, testPolicyChain,
+		common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB"),
+		"01droprpcfailaaaaaaaaaaaaaa",
+		SessionGrantRequest{
+			Owner: owner, Wallet: wallet, AgentLabel: "Bot",
+			Hooks:         [][]byte{aa.AllowlistExecHook(1)},
+			TeardownCheck: verify,
+		})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "still installed")
+	require.Contains(t, err.Error(), "prepare again")
+}
+
+func TestVerifySupersededTeardownMarksTornDownAt(t *testing.T) {
+	db, superseded := teardownFixture(t)
+	// Fixture has revoked status but no AppliedAt — set applied so mark path runs.
+	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
+	superseded.SessionSigner = &signer
+	superseded.Grant = &model.SessionGrantAuthorization{
+		InstallCall: []byte{0x01}, AppliedAt: 1, OwnerSignature: make([]byte, 65),
+		CarrierNonce: big.NewInt(1), Deadline: 1785541743,
+	}
+	require.NoError(t, StoreSessionPolicy(db, superseded))
+
+	verify := func(context.Context, int64, common.Address, uint32) (bool, error) { return true, nil }
+	require.NoError(t, VerifySupersededTeardown(context.Background(), db, verify, superseded, nil))
+
+	all, err := ListSessionPolicies(db, testPolicyChain, *superseded.Owner)
+	require.NoError(t, err)
+	require.Len(t, all, 1)
+	require.True(t, all[0].Grant.TornDown())
 }

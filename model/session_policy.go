@@ -111,6 +111,14 @@ type SessionGrantAuthorization struct {
 	AppliedAt         int64  `json:"applied_at,omitempty"`
 	AppliedUserOpHash string `json:"applied_userop_hash,omitempty"`
 
+	// TornDownAt records when the entity was verified clear on chain (or
+	// marked after a successful replace-batch verification). Non-zero means
+	// the entity is no longer believed installed: exclude it from the next
+	// replace batch and from onChainCleanup. Without this, every historical
+	// applied grant stays a teardown target forever and batches grow without
+	// bound. Unix milliseconds. Additive storage field.
+	TornDownAt int64 `json:"torn_down_at,omitempty"`
+
 	// RequiresExecuteUserOp is true when the grant installs an EXECUTION hook
 	// (an ERC-20 spend cap does; a time range does not). Every operation under
 	// such a grant must be executeUserOp-wrapped, including the one carrying
@@ -136,6 +144,17 @@ const (
 // Applied reports whether the deferred action has already been consumed.
 func (g *SessionGrantAuthorization) Applied() bool {
 	return g != nil && g.AppliedAt > 0
+}
+
+// TornDown reports whether the entity was recorded as cleared on chain.
+func (g *SessionGrantAuthorization) TornDown() bool {
+	return g != nil && g.TornDownAt > 0
+}
+
+// NeedsOnChainCleanup is true when the install reached the chain and teardown
+// has not been verified. Used for replace-batch targets and onChainCleanup.
+func (g *SessionGrantAuthorization) NeedsOnChainCleanup() bool {
+	return g.Applied() && !g.TornDown()
 }
 
 // Usable reports whether this policy can authorize an operation right now.

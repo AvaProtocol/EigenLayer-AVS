@@ -127,6 +127,16 @@ func TestSeedVerificationGasScalesWithGrantContents(t *testing.T) {
 	if hooksDeploying.Cmp(wantMin) != 0 {
 		t.Errorf("deploy+hooks seed = %s, want hooks + deploying seed = %s", hooksDeploying, wantMin)
 	}
+
+	// N-way replace: each uninstallValidation is charged in validation.
+	// Flat hooks seed alone only covers install + ~1 teardown.
+	nway := seedVerificationGasFor(op, &SessionAuthorization{
+		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
+		WrapExecuteUserOp: true, DeferredTeardownCount: 3})
+	wantNway := new(big.Int).Add(hooks, big.NewInt(3*seedVerificationGasPerUninstall))
+	if nway.Cmp(wantNway) != 0 {
+		t.Errorf("N-way seed = %s, want hooks + 3*per-uninstall = %s", nway, wantNway)
+	}
 }
 
 // The resolver is the only way storage reaches the send path. An unset

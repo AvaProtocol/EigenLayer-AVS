@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -154,7 +155,19 @@ func (n *Engine) lookupOwnedWalletRecord(user *model.User, chainID int64, wallet
 }
 
 // PrepareSessionPolicy allocates a grant and returns what the owner signs.
-// Nothing is stored; an abandoned prepare leaves no state.
+//
+// No grant is stored, and an abandoned prepare leaves no grant behind. It is
+// not entirely free of writes, though: the teardown check reads each candidate
+// entity on chain and records TornDownAt for any the owner already cleared by
+// hand. That write only syncs storage to what the chain already says, and is
+// idempotent, so repeated or abandoned prepares are still safe — but a caller
+// cannot assume prepare touches nothing.
+//
+// Takes the runner's write lock for the same reason submit does. Beyond
+// serialising that write against a concurrent submit, it makes lock ownership
+// uniform across everything that reaches dropClearedTeardownTargets, which is
+// what lets that path use the non-locking marker: the mutex is not reentrant,
+// and taking it twice wedges the shard instead of failing.
 func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (*PreparedSessionGrant, error) {
 	if err := in.validate(); err != nil {
 		return nil, err
@@ -166,6 +179,10 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 	if err != nil {
 		return nil, err
 	}
+
+	lock := sessionAuthorityLock(in.ChainID, user.Address, in.Wallet)
+	lock.Lock()
+	defer lock.Unlock()
 	prepared, err := PrepareSessionGrant(n.db, in.ChainID, signer, strings.ToLower(ulid.Make().String()), SessionGrantRequest{
 		Owner:         user.Address,
 		Wallet:        in.Wallet,
@@ -173,6 +190,8 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		Justification: in.Justification,
 		ValidUntil:    in.Permissions.ValidUntilMs,
 		HooksFor:      in.Permissions.HooksFor,
+		TeardownCheck: n.teardownVerifier(),
+		TeardownCtx:   context.Background(),
 	})
 	if err != nil {
 		return nil, err
@@ -243,6 +262,8 @@ func (n *Engine) SubmitSessionPolicy(
 		ValidUntil:    in.Permissions.ValidUntilMs,
 		HooksFor:      in.Permissions.HooksFor,
 		Deadline:      deadline,
+		TeardownCheck: n.teardownVerifier(),
+		TeardownCtx:   context.Background(),
 	})
 	if err != nil {
 		return nil, nil, err
@@ -301,17 +322,20 @@ func (n *Engine) GetSessionPolicyByID(user *model.User, chainID int64, wallet co
 	return nil, ErrSessionPolicyNotFound
 }
 
-// RevokeSessionPolicyByID revokes one policy. deleted reports the pending
-// case (record removed outright); cleanupRequired reports that the grant's
-// validation is still installed on the account and needs the owner's
-// uninstallValidation.
+// RevokeSessionPolicyByID revokes one policy.
+//
+//   - deleted: the storage record was removed (empty grant with no InstallCall).
+//   - cleanupRequired + cleanup: applied grant still installed on chain; owner
+//     must execute the returned uninstallValidation call (#717 AC3).
+//   - neither: pending grant retained as revoked so a late install can mark
+//     AppliedAt and later cleanup; no entity is known on chain yet.
 //
 // Takes the runner's write lock for the same reason submit does: it changes
 // which grant the send path will resolve, and must not interleave with a
 // submit deciding the same question.
-func (n *Engine) RevokeSessionPolicyByID(user *model.User, chainID int64, wallet common.Address, policyID string) (deleted, cleanupRequired bool, err error) {
+func (n *Engine) RevokeSessionPolicyByID(user *model.User, chainID int64, wallet common.Address, policyID string) (deleted, cleanupRequired bool, cleanup *OnChainRevokeCleanup, err error) {
 	if err := n.requireOwnedWallet(user, wallet); err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
 	lock := sessionAuthorityLock(chainID, user.Address, wallet)
 	lock.Lock()
@@ -319,13 +343,24 @@ func (n *Engine) RevokeSessionPolicyByID(user *model.User, chainID int64, wallet
 
 	policy, err := n.GetSessionPolicyByID(user, chainID, wallet, policyID)
 	if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
-	cleanupRequired, err = RevokeSessionGrant(n.db, policy)
+	deleted, cleanupRequired, err = RevokeSessionGrant(n.db, policy)
 	if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
-	return !cleanupRequired, cleanupRequired, nil
+	if cleanupRequired {
+		built, buildErr := BuildOnChainRevokeCleanup(policy)
+		if buildErr != nil {
+			return false, true, nil, fmt.Errorf("grant revoked off-chain but on-chain cleanup payload could not be built: %w", buildErr)
+		}
+		return false, true, built, nil
+	}
+	// Whether the record was removed is reported by RevokeSessionGrant rather
+	// than re-derived here: inferring it from the policy's shape stays correct
+	// only while "applied implies InstallCall" holds, and a caller that reads
+	// deleted=true for a record still sitting in storage has no way to notice.
+	return deleted, false, nil, nil
 }
 
 // attachDeclaredPermissions records the grant's declared shape on the policy

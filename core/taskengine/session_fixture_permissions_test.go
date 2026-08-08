@@ -107,17 +107,39 @@ type expectedPermissions struct {
 	Reusable bool
 }
 
-// bareGlobalGrant is the fixture shape grantControllerAuthority installs: a
-// global grant with no hooks at all.
+// fixtureGrantValidUntil bounds every fixture grant's TimeRange hook.
 //
-// Reusable, and it is the only shape that safely can be: "no hooks" is a
-// complete description. There is no module holding configuration behind it, so
-// a match here is a match on everything that decides whether an operation
-// validates.
-func bareGlobalGrant(controller common.Address) expectedPermissions {
+// Fixed rather than time.Now()-relative, and that is deliberate: submit re-runs
+// PrepareSessionGrant and verifies the owner's signature against the digest it
+// rebuilds, so any input that drifts between prepare and submit changes the
+// digest and the signature recovers to a stranger. TimeRange stores unix
+// SECONDS, so a relative value only misbehaves when the two calls land either
+// side of a second boundary — rare enough to look like a flake.
+//
+// 2030-01-01. Far enough out to outlive the fixtures, near enough to be a
+// plausible grant rather than a permanent one.
+const fixtureGrantValidUntil = uint64(1893456000)
+
+// timeBoxedGlobalGrant is the fixture shape grantControllerAuthority installs:
+// globally authorized — no target or selector scoping, so a fixture can move
+// ETH or call anything — carrying a single TimeRange validation hook.
+//
+// The hook is not decoration. A global validation installed with an EMPTY hooks
+// array is refused when it arrives as a DEFERRED action: measured on Sepolia
+// (#734), the same wallet accepts that identical installValidation as a direct
+// self-call and rejects it deferred, as an opaque AA23. Any hook is enough, and
+// TimeRange is the one that restricts nothing about what the grant may call.
+//
+// Reusable: TimeRange holds a validUntil per entity, but every fixture asks for
+// the same far-future window, so a match on the HookConfig is a match on what
+// decides validation. That is not true of the allowlist — see Reusable.
+func timeBoxedGlobalGrant(controller common.Address, entity uint32) expectedPermissions {
 	return expectedPermissions{
-		Signer:   controller,
-		Flags:    aa.ValidationFlagUserOp | aa.ValidationFlagGlobal,
+		Signer: controller,
+		Flags:  aa.ValidationFlagUserOp | aa.ValidationFlagGlobal,
+		ValidationHooks: []hookRef{
+			{Module: aa.TimeRangeModuleAddress(), Entity: entity, Flags: aa.HookFlagValidation},
+		},
 		Global:   true,
 		Reusable: true,
 	}
@@ -326,31 +348,55 @@ func readValidationState(
 // investigate, not to keep piling onto.
 const maxFixtureEntityScan = 16
 
-// Fixture runner salts.
+// Fixture runner salts — one wallet per test that writes (#719).
 //
-// Every live fixture derives its runner from salt 0 today, which is why one
-// test's leftover validation entities become another test's problem: the wallet
-// is shared, and the entity layout on it belongs to whichever test installed
-// first. Verifying permissions (above) removes the failure mode; separate salts
-// would remove the coupling.
+// Sharing salt 0 meant the entity layout on the wallet belonged to whichever
+// test installed first, so one test's leftovers decided another's outcome.
+// Verifying permissions (above) removed the failure mode; separate salts remove
+// the coupling that caused it.
 //
-// They are all still 0 because a new salt is an undeployed, unfunded
-// counterfactual wallet. Flipping one without funding its runner turns a
-// passing live test into a failing one, so the salt and the funding have to
-// move together: pick a fresh value here, run the test once to have
-// requireFundedRunner print the runner address and the shortfall, fund it, and
-// it stays isolated from then on.
+// Only the tests that SEND get their own salt. The Uniswap simulation grants a
+// policy but never sends an operation, so its install never reaches the chain
+// and it installs nothing: it reads the wallet, it does not write it. Leaving it
+// on salt 0 makes that wallet exclusively its own — including the real USDC
+// balance it needs, which a fresh counterfactual would not have.
+//
+// A salt and its funding move together. A new value is an undeployed, unfunded
+// counterfactual, and flipping one alone turns a passing live test into a
+// failing one:
+//
+//	go run ./scripts/fixture_wallet -salt N -deploy -fund 0.02
+//
+// which also prints each entity's signer and deferred nonce sequence.
+//
+// A swap fixture needs a token balance too, or the router reverts with STF —
+// which reads like a permissions failure and is not one:
+//
+//	go run ./scripts/fixture_wallet -salt N -fund-usdc 2
 const (
-	fixtureSaltWithdrawal        = 0
-	fixtureSaltSequentialWrites  = 0
+	fixtureSaltWithdrawal       = 21
+	fixtureSaltSequentialWrites = 22
+	fixtureSaltBatchSwap        = 23
+	// The one non-writer: salt 0 is now its private wallet, USDC balance and all.
 	fixtureSaltUniswapSimulation = 0
-	fixtureSaltBatchSwap         = 0
-	// Salt 13 is funded and its entity space is clean, so unlike the fixtures
-	// above this one is genuinely isolated. The replace check installs and
-	// removes entities; doing that on a shared runner would churn another
-	// test's entity layout.
+	// The replace checks install and remove entities several at a time, which
+	// would churn any layout they shared.
 	fixtureSaltGrantReplace = 13
 )
+
+// Entities are consumed, never recycled — by design, not by neglect.
+//
+// A torn-down entity reads clear on every module while its EntryPoint deferred
+// nonce sequence keeps its value forever, and a grant signs a carrier nonce at
+// sequence 0. So reissuing an id signs a nonce the EntryPoint has already
+// consumed, and the operation AA23s during validation with nothing on chain to
+// explain why. NextSessionEntityID allocating max+1 over retained records is
+// what prevents that (see aa.EntryPointNonce), which means every run on a
+// fixture moves its entity ids up and none of them ever come back.
+//
+// The remedy is a fresh salt, not reuse. When a fixture's entity space gets
+// crowded, `scripts/fixture_wallet -salt N` shows how far it has walked and
+// which ids are spent; pick a new salt, deploy and fund it, and move on.
 
 // resetInitialPermissions brings the fixture's runner to the permission state
 // the test declares, and returns the stored grant to run under.

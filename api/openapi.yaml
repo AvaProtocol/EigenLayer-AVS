@@ -1790,6 +1790,13 @@ components:
           type: integer
           format: int64
           description: Unix milliseconds.
+        onChainCleanup:
+          allOf:
+            - $ref: '#/components/schemas/OnChainRevokeCleanup'
+          description: |
+            Present when status is revoked and the validation entity is still
+            installed on chain. Owner-executable uninstallValidation so clients
+            can finish teardown without re-calling DELETE (#717).
 
     SubmitPolicyResponse:
       allOf:
@@ -1818,6 +1825,33 @@ components:
           type: array
           items: { $ref: '#/components/schemas/SessionPolicy' }
 
+    OnChainRevokeCleanup:
+      type: object
+      required: [entityId, target, callData, chainId]
+      description: |
+        Owner-executable call that clears an applied grant's validation entity
+        and hooks from the runner. Production grants are policied: the gateway
+        controller cannot self-uninstall (allowlist blocks uninstallValidation).
+        The owner sends this as a plain transaction to `target` (or a UserOp
+        validated by the owner fallback). Derived from the retained
+        `Grant.InstallCall`, never from live permission structs.
+      properties:
+        entityId:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Validation entity this cleanup removes.
+        target:
+          $ref: '#/components/schemas/EthereumAddress'
+          description: The smart wallet (runner) to call.
+        callData:
+          $ref: '#/components/schemas/Hex'
+          description: uninstallValidation calldata (0x-prefixed).
+        chainId:
+          type: integer
+          format: int64
+          description: Chain the runner lives on.
+
     RevokePolicyResponse:
       type: object
       required: [status, onChainCleanupRequired]
@@ -1831,6 +1865,12 @@ components:
           description: |
             True when the grant's validation is still installed on the
             account and needs the owner's uninstallValidation to clear.
+        onChainCleanup:
+          allOf:
+            - $ref: '#/components/schemas/OnChainRevokeCleanup'
+          description: |
+            Present when onChainCleanupRequired is true. The wallet client
+            executes this call to finish on-chain teardown (#717).
 
   responses:
     BadRequest:
@@ -2685,10 +2725,17 @@ paths:
       tags: [Policies]
       summary: Revoke a session policy
       description: |
-        A `pending` grant (never used on-chain) is deleted outright — nothing
-        was installed, so nothing remains. An `active` grant stops authorizing
-        immediately, but its on-chain validation still exists until the owner
-        executes `uninstallValidation`; the response says which case applied.
+        Outcomes:
+
+        - `status: deleted` — rare: no InstallCall retained; record removed.
+        - `status: revoked`, `onChainCleanupRequired: false` — pending grant
+          retained so InstallCall survives a late-landing install (orphan
+          path). Not known on chain yet; no cleanup payload.
+        - `status: revoked`, `onChainCleanupRequired: true` — applied grant
+          still believed installed. Response includes `onChainCleanup`
+          (uninstallValidation call for the owner wallet: plain tx to the
+          runner, or owner-fallback UserOp). Once teardown is verified,
+          GET no longer returns cleanup for that policy.
       operationId: revokeWalletPolicy
       responses:
         '200':

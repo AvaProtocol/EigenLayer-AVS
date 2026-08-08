@@ -1084,6 +1084,26 @@ type NonceResponse struct {
 	Nonce string `json:"nonce"`
 }
 
+// OnChainRevokeCleanup Owner-executable call that clears an applied grant's validation entity
+// and hooks from the runner. Production grants are policied: the gateway
+// controller cannot self-uninstall (allowlist blocks uninstallValidation).
+// The owner sends this as a plain transaction to `target` (or a UserOp
+// validated by the owner fallback). Derived from the retained
+// `Grant.InstallCall`, never from live permission structs.
+type OnChainRevokeCleanup struct {
+	// CallData Arbitrary-length hex-encoded byte string.
+	CallData Hex `json:"callData"`
+
+	// ChainId Chain the runner lives on.
+	ChainId int64 `json:"chainId"`
+
+	// EntityId Validation entity this cleanup removes.
+	EntityId int64 `json:"entityId"`
+
+	// Target Lowercase or checksummed hex EOA / contract address.
+	Target EthereumAddress `json:"target"`
+}
+
 // OperatorCapabilities defines model for OperatorCapabilities.
 type OperatorCapabilities struct {
 	BlockMonitoring *bool `json:"blockMonitoring,omitempty"`
@@ -1255,6 +1275,10 @@ type RestAPINodeConfig_Options struct {
 
 // RevokePolicyResponse defines model for RevokePolicyResponse.
 type RevokePolicyResponse struct {
+	// OnChainCleanup Present when onChainCleanupRequired is true. The wallet client
+	// executes this call to finish on-chain teardown (#717).
+	OnChainCleanup *OnChainRevokeCleanup `json:"onChainCleanup,omitempty"`
+
 	// OnChainCleanupRequired True when the grant's validation is still installed on the
 	// account and needs the owner's uninstallValidation to clear.
 	OnChainCleanupRequired bool `json:"onChainCleanupRequired"`
@@ -1366,6 +1390,11 @@ type SessionPolicy struct {
 	Id            Ulid    `json:"id"`
 	Justification *string `json:"justification,omitempty"`
 
+	// OnChainCleanup Present when status is revoked and the validation entity is still
+	// installed on chain. Owner-executable uninstallValidation so clients
+	// can finish teardown without re-calling DELETE (#717).
+	OnChainCleanup *OnChainRevokeCleanup `json:"onChainCleanup,omitempty"`
+
 	// Runner Lowercase or checksummed hex EOA / contract address.
 	Runner EthereumAddress `json:"runner"`
 
@@ -1467,6 +1496,11 @@ type SubmitPolicyResponse struct {
 	// Id ULID identifier (26-char Crockford base32).
 	Id            Ulid    `json:"id"`
 	Justification *string `json:"justification,omitempty"`
+
+	// OnChainCleanup Present when status is revoked and the validation entity is still
+	// installed on chain. Owner-executable uninstallValidation so clients
+	// can finish teardown without re-calling DELETE (#717).
+	OnChainCleanup *OnChainRevokeCleanup `json:"onChainCleanup,omitempty"`
 
 	// Runner Lowercase or checksummed hex EOA / contract address.
 	Runner EthereumAddress `json:"runner"`

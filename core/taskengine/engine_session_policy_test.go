@@ -2,7 +2,6 @@ package taskengine
 
 import (
 	"crypto/ecdsa"
-	"errors"
 	"math/big"
 	"testing"
 	"time"
@@ -216,7 +215,7 @@ func TestSessionPolicyOwnershipGate(t *testing.T) {
 	require.ErrorIs(t, err, ErrWalletNotOwned)
 }
 
-func TestSessionPolicyRevokePendingDeletesOutright(t *testing.T) {
+func TestSessionPolicyRevokePendingRetainsForPossibleLateInstall(t *testing.T) {
 	engine, _, ownerKey, owner, wallet := newPolicyTestEngine(t)
 	user := &model.User{Address: owner}
 
@@ -230,13 +229,18 @@ func TestSessionPolicyRevokePendingDeletesOutright(t *testing.T) {
 		signDigest(t, ownerKey, prepared.Digest))
 	require.NoError(t, err)
 
-	deleted, cleanupRequired, err := engine.RevokeSessionPolicyByID(user, testPolicyChain, wallet, stored.ID)
+	// Pending with InstallCall is retained as revoked so a late-landing install
+	// can mark AppliedAt without resurrecting usable status (#717 orphan).
+	deleted, cleanupRequired, cleanup, err := engine.RevokeSessionPolicyByID(user, testPolicyChain, wallet, stored.ID)
 	require.NoError(t, err)
-	require.True(t, deleted, "a pending grant was never on-chain; revoke deletes it")
-	require.False(t, cleanupRequired)
+	require.False(t, deleted, "InstallCall must survive for possible late apply / cleanup")
+	require.False(t, cleanupRequired, "entity is not known on chain until AppliedAt")
+	require.Nil(t, cleanup)
 
-	_, err = engine.GetSessionPolicyByID(user, testPolicyChain, wallet, stored.ID)
-	require.True(t, errors.Is(err, ErrSessionPolicyNotFound))
+	got, err := engine.GetSessionPolicyByID(user, testPolicyChain, wallet, stored.ID)
+	require.NoError(t, err)
+	require.Equal(t, model.SessionPolicyRevoked, got.Status)
+	require.False(t, got.Usable())
 }
 
 func TestSessionPermissionsValidation(t *testing.T) {
