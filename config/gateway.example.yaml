@@ -112,8 +112,8 @@ smart_wallet:
   paymaster_address:
 
 # Chain worker registry — gateway routes tasks to workers by chain_id.
-# In production (Railway): worker-sepolia.railway.internal:50051
-# Locally: workers run on different localhost ports.
+# Locally, workers run on different localhost ports. A hosted deployment puts
+# them on a private network and sets worker_addr accordingly.
 chains:
   - chain_id: 11155111
     name: sepolia
