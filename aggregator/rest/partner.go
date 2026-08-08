@@ -9,44 +9,35 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
-	"github.com/AvaProtocol/EigenLayer-AVS/model"
 )
 
-// Partner-delegated auth for the no-fund "simulate" family.
+// Partner assertion verification for tenant-gated REST routes.
 //
-// A partner (tenant) such as Studio authenticates its own end users in its
-// own system and then vouches for them to the AVS for operations that move
-// no funds — workflows:simulate, nodes:run, triggers:run. Because simulate
-// skips wallet-ownership (engine.SimulateTask) and the authKey chain is
-// cosmetic, the partner does NOT need a per-user wallet signature for these.
+// A partner (tenant) such as Studio authenticates with a short-lived
+// Ed25519-signed assertion in X-Partner-Assertion (private_key_jwt style),
+// kept separate from Authorization: Bearer user JWTs.
 //
-// The partner proves its identity with a short-lived Ed25519-signed
-// assertion (private_key_jwt style) sent in the X-Partner-Assertion header,
-// kept deliberately separate from the user `Authorization: Bearer` path so
-// the existing user-JWT flow is untouched. The assertion's claims are the
-// stable contract that a future RFC 8693 token-exchange endpoint will reuse:
+// Which operations accept partner credentials is defined in permission.go
+// (permissionMap + ensurePermission), not by calling these helpers from
+// handlers directly. Partner-sufficient classes today:
 //
-//	{ "iss": "<partner_id>",        // selects the registered partner + keys
-//	  "sub": "<end-user address>",   // attribution; may be empty/opaque
-//	  "scope": "simulate",           // required scope for the call
-//	  "exp": <unix>, "iat": <unix> } // short-lived
+//   - scope "read": token metadata (partner only) and preview wallet
+//     list/create (partner with EOA sub, or user JWT)
 //
-// Fund-moving operations (createTask/execute) are NEVER authorized by a
-// partner assertion — those require real on-chain fund authority (the
-// controller-signed path today, Uniswap Calibur later). See
-// PLAN_PARTNER_PAYMENTS.md.
+// Simulate / runNode / runTrigger require a user JWT (LevelUser) — partner
+// alone is not enough. Fund-moving and session policies never accept
+// partner. See GATEWAY_CHANGE_REQUIRED_PARTNER_GATED_READS.md.
 const (
 	// partnerAssertionHeader carries the partner's Ed25519-signed JWT.
 	partnerAssertionHeader = "X-Partner-Assertion"
 
-	// scopeSimulate is the only delegation scope honored today.
-	scopeSimulate = "simulate"
+	// scopeRead is the partner scope for non-fund reads and preview wallet resolve.
+	scopeRead = "read"
 
 	// maxPartnerAssertionTTL bounds how far in the future an assertion's
 	// `exp` may sit. Assertions are meant to be minted per session/call and
@@ -66,75 +57,6 @@ type partnerPrincipal struct {
 	subject   string
 }
 
-// requireSimulateAuth authorizes a simulate-family request via EITHER an
-// end-user JWT (the existing path) OR a partner assertion (the delegated
-// path). It returns the *model.User the engine expects.
-//
-//   - User JWT present  → behaves exactly like requireUser.
-//   - Else partner assertion present and valid → a User keyed on the
-//     assertion's `sub` (zero address when `sub` is empty/non-address;
-//     simulate tolerates this since it skips ownership).
-//   - Else → 401.
-func (s *Server) requireSimulateAuth(ctx echo.Context) (*model.User, error) {
-	// Any presented end-user JWT goes through the user path. requireUser
-	// rejects a missing/invalid subject — we must NOT silently fall through to
-	// the partner path for a structurally-valid-but-empty-subject token.
-	if authed := restmw.UserFromContext(ctx); authed != nil {
-		return s.requireUser(ctx)
-	}
-
-	principal, err := s.verifyPartnerAssertion(ctx, scopeSimulate)
-	if err != nil {
-		return nil, err
-	}
-	if principal != nil {
-		user := &model.User{}
-		// `sub` is attribution only. Use it as the acting address when it's
-		// a real EOA; otherwise leave the zero address — simulate runs
-		// against any address and never checks ownership.
-		if common.IsHexAddress(principal.subject) {
-			user.Address = common.HexToAddress(principal.subject)
-		}
-		s.logger.Info("partner-delegated simulate call",
-			"partner_id", principal.partnerID,
-			"subject", principal.subject,
-		)
-		return user, nil
-	}
-
-	// Neither credential present.
-	return nil, &restmw.HTTPError{
-		Status: http.StatusUnauthorized,
-		Code:   "AUTH_REQUIRED",
-		Title:  "Authentication required",
-		Detail: "This endpoint requires a Bearer JWT (POST /api/v1/auth:exchange) or a partner assertion (X-Partner-Assertion).",
-	}
-}
-
-// requireWalletDeriveAuth authorizes the no-fund wallet derivation/list step
-// (runner resolution during a preview) via the same either/or path as
-// requireSimulateAuth, but additionally requires a concrete owner EOA: a smart
-// wallet is derived deterministically from its owner, so an empty/opaque
-// subject cannot be served. Partner assertions used here must carry a real
-// `sub` address. This unblocks Studio's `$SMART_WALLET$` placeholder
-// resolution (getWallets) for partner-delegated previews; it stays no-fund and
-// needs no ownership check — derivation only reads (owner, salt, factory).
-func (s *Server) requireWalletDeriveAuth(ctx echo.Context) (*model.User, error) {
-	user, err := s.requireSimulateAuth(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if user.Address == (common.Address{}) {
-		return nil, &restmw.HTTPError{
-			Status: http.StatusBadRequest,
-			Code:   "PARTNER_SUBJECT_REQUIRED",
-			Title:  "Owner address required",
-			Detail: "Wallet derivation requires the assertion `sub` to be the end-user's 0x EOA address.",
-		}
-	}
-	return user, nil
-}
-
 // refusePartnerAssertion explicitly rejects a request that presents
 // X-Partner-Assertion on an endpoint partner delegation may never reach.
 //
@@ -152,9 +74,8 @@ func (s *Server) requireWalletDeriveAuth(ctx echo.Context) (*model.User, error) 
 // validity-dependent response would make this endpoint an oracle for
 // assertion validity.
 //
-// MUST be the first line of every /policies handler (avs-infra master doc
-// §7.4a; the decision predates the routes). Returns nil when no assertion is
-// present — user-JWT requests pass through untouched.
+// Invoked via ensurePermission for LevelUserRefusePartner routes. Returns
+// nil when no assertion is present — user-JWT requests pass through.
 func refusePartnerAssertion(ctx echo.Context, capability string) error {
 	if strings.TrimSpace(ctx.Request().Header.Get(partnerAssertionHeader)) == "" {
 		return nil
@@ -162,8 +83,7 @@ func refusePartnerAssertion(ctx echo.Context, capability string) error {
 	return partnerError(http.StatusForbidden, "PARTNER_DELEGATION_UNSUPPORTED",
 		"Partner delegation not supported here",
 		fmt.Sprintf("%s is fund authority and cannot be exercised through a partner assertion. "+
-			"Partner delegation covers the no-fund simulate family only; use the end-user's "+
-			"Bearer JWT (POST /api/v1/auth:exchange) for this endpoint.", capability))
+			"Use the end-user's Bearer JWT (POST /api/v1/auth:exchange) for this endpoint.", capability))
 }
 
 // verifyPartnerAssertion validates the X-Partner-Assertion header against the

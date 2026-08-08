@@ -28,12 +28,13 @@ import (
 // No-fund: lists the smart wallets derived/owned by the authenticated owner
 // (the JWT subject, or a partner assertion's `sub`). Scoped to that owner, so
 // it never exposes another user's wallets. Partner-delegatable to resolve a
-// preview's runner — see requireWalletDeriveAuth.
+// preview's runner — see ensurePermission (partner_wallet_preview).
 func (s *Server) ListWallets(ctx echo.Context) error {
-	user, err := s.requireWalletDeriveAuth(ctx)
+	p, err := s.ensurePermission(ctx, OpListWallets)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	resp, err := s.engine.ListWallets(user.Address, &avsproto.ListWalletReq{})
 	if err != nil {
@@ -70,11 +71,12 @@ func (s *Server) CreateWallet(ctx echo.Context) error {
 	// No-fund: derives the counterfactual CREATE2 address from (owner, salt,
 	// factory) and records it. Partner-delegatable so a preview can resolve a
 	// social user's runner before any wallet is deployed — see
-	// requireWalletDeriveAuth.
-	user, err := s.requireWalletDeriveAuth(ctx)
+	// ensurePermission (partner_wallet_preview).
+	p, err := s.ensurePermission(ctx, OpCreateWallet)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	var body generated.CreateWalletRequest
 	if err := ctx.Bind(&body); err != nil {
@@ -109,10 +111,11 @@ func (s *Server) CreateWallet(ctx echo.Context) error {
 // is identified by (salt, factory) — we re-resolve those from the
 // address via GetWallet and then SetWallet with the new isHidden.
 func (s *Server) UpdateWallet(ctx echo.Context, address generated.EthereumAddress) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpUpdateWallet)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	var body struct {
 		IsHidden *bool `json:"isHidden"`
@@ -156,10 +159,11 @@ func (s *Server) UpdateWallet(ctx echo.Context, address generated.EthereumAddres
 // in at startup. The full UserOp + paymaster + balance-checking
 // pipeline lives in aggregator package — REST is a thin adapter.
 func (s *Server) WithdrawWallet(ctx echo.Context, address generated.EthereumAddress) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpWithdrawWallet)
 	if err != nil {
 		return err
 	}
+	user := p.User
 	if s.withdraws == nil {
 		return &restmw.HTTPError{
 			Status: http.StatusServiceUnavailable,
@@ -273,10 +277,11 @@ func (s *Server) WithdrawWallet(ctx echo.Context, address generated.EthereumAddr
 // Chain routing precedence: ?chainId= override → JWT aud → gateway
 // default. Same pattern as CreateWallet / WithdrawWallet.
 func (s *Server) GetWalletNonce(ctx echo.Context, address generated.EthereumAddress, params generated.GetWalletNonceParams) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpGetWalletNonce)
 	if err != nil {
 		return err
 	}
+	user := p.User
 	if !common.IsHexAddress(string(address)) {
 		return badRequest("WALLETS_BAD_ADDRESS", "Invalid wallet address", "The {address} path parameter must be a valid 0x-prefixed hex address.")
 	}
