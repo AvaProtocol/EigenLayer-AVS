@@ -6,65 +6,68 @@ import (
 	"testing"
 )
 
-// allOperationIDs is the exhaustive list of OpenAPI operationIds the REST
-// server implements. Keep in sync with permissionMap / api/openapi.yaml.
-var allOperationIDs = []string{
-	OpGetHealth,
-	OpAuthExchange,
-	OpCreateWorkflow,
-	OpListWorkflows,
-	OpGetWorkflow,
-	OpCancelWorkflow,
-	OpPauseWorkflow,
-	OpResumeWorkflow,
-	OpTriggerWorkflow,
-	OpSimulateWorkflow,
-	OpEstimateWorkflowFees,
-	OpCountWorkflows,
-	OpListExecutions,
-	OpListExecutionsForWorkflow,
-	OpGetExecution,
-	OpGetExecutionStatus,
-	OpSignalExecution,
-	OpStreamExecution,
-	OpCountExecutions,
-	OpExecutionStats,
-	OpListWallets,
-	OpCreateWallet,
-	OpUpdateWallet,
-	OpWithdrawWallet,
-	OpGetWalletNonce,
-	OpPrepareWalletPolicy,
-	OpSubmitWalletPolicy,
-	OpListWalletPolicies,
-	OpGetWalletPolicy,
-	OpRevokeWalletPolicy,
-	OpListSecrets,
-	OpPutSecret,
-	OpDeleteSecret,
-	OpGetToken,
-	OpRunNode,
-	OpRunTrigger,
-	OpListOperators,
+// expectedPermissionLevels is the authorization policy matrix. Keep in sync
+// with permissionMap and api/openapi.yaml security overrides.
+var expectedPermissionLevels = map[string]Level{
+	OpGetHealth:     LevelPublic,
+	OpAuthExchange:  LevelPublic,
+	OpListOperators: LevelPublic,
+
+	OpGetToken: LevelPartnerRead,
+
+	OpListWallets:  LevelPartnerWalletPreview,
+	OpCreateWallet: LevelPartnerWalletPreview,
+
+	OpSimulateWorkflow: LevelUser,
+	OpRunNode:          LevelUser,
+	OpRunTrigger:       LevelUser,
+
+	OpCreateWorkflow:            LevelUser,
+	OpListWorkflows:             LevelUser,
+	OpGetWorkflow:               LevelUser,
+	OpCancelWorkflow:            LevelUser,
+	OpPauseWorkflow:             LevelUser,
+	OpResumeWorkflow:            LevelUser,
+	OpTriggerWorkflow:           LevelUser,
+	OpEstimateWorkflowFees:      LevelUser,
+	OpCountWorkflows:            LevelUser,
+	OpListExecutions:            LevelUser,
+	OpListExecutionsForWorkflow: LevelUser,
+	OpGetExecution:              LevelUser,
+	OpGetExecutionStatus:        LevelUser,
+	OpSignalExecution:           LevelUser,
+	OpStreamExecution:           LevelUser,
+	OpCountExecutions:           LevelUser,
+	OpExecutionStats:            LevelUser,
+	OpListSecrets:               LevelUser,
+	OpPutSecret:                 LevelUser,
+	OpDeleteSecret:              LevelUser,
+	OpUpdateWallet:              LevelUser,
+	OpWithdrawWallet:            LevelUser,
+	OpGetWalletNonce:            LevelUser,
+
+	OpPrepareWalletPolicy: LevelUserRefusePartner,
+	OpSubmitWalletPolicy:  LevelUserRefusePartner,
+	OpListWalletPolicies:  LevelUserRefusePartner,
+	OpGetWalletPolicy:     LevelUserRefusePartner,
+	OpRevokeWalletPolicy:  LevelUserRefusePartner,
 }
 
-func TestPermissionMap_CoversAllOperations(t *testing.T) {
-	for _, op := range allOperationIDs {
-		if _, ok := permissionMap[op]; !ok {
+func TestPermissionMap_CoversAllOperationsAndLevels(t *testing.T) {
+	for op, want := range expectedPermissionLevels {
+		got, ok := permissionMap[op]
+		if !ok {
 			t.Errorf("permissionMap missing operation %q", op)
+			continue
+		}
+		if got != want {
+			t.Errorf("permissionMap[%q] = %q, want %q", op, got, want)
 		}
 	}
-	if len(permissionMap) != len(allOperationIDs) {
-		t.Errorf("permissionMap has %d entries, expected %d — extra keys?", len(permissionMap), len(allOperationIDs))
+	if len(permissionMap) != len(expectedPermissionLevels) {
+		t.Errorf("permissionMap has %d entries, expected %d", len(permissionMap), len(expectedPermissionLevels))
 		for op := range permissionMap {
-			found := false
-			for _, want := range allOperationIDs {
-				if op == want {
-					found = true
-					break
-				}
-			}
-			if !found {
+			if _, ok := expectedPermissionLevels[op]; !ok {
 				t.Errorf("permissionMap has unexpected key %q", op)
 			}
 		}
@@ -164,6 +167,13 @@ func TestEnsurePermission_WalletPreview(t *testing.T) {
 	t.Run("empty JWT subject not partner fallthrough", func(t *testing.T) {
 		_, err := s.ensurePermission(ctxWithUser(""), OpListWallets)
 		assertHTTPStatus(t, err, http.StatusUnauthorized)
+	})
+
+	t.Run("zero address sub rejected", func(t *testing.T) {
+		c := validClaims()
+		c["sub"] = "0x0000000000000000000000000000000000000000"
+		_, err := s.ensurePermission(ctxWithAssertion(signAssertion(t, priv, c)), OpListWallets)
+		assertHTTPStatus(t, err, http.StatusBadRequest)
 	})
 }
 

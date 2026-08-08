@@ -247,7 +247,7 @@ func TestVerifyPartnerAssertion_Audience(t *testing.T) {
 }
 
 // Preview wallet resolve must reject a partner assertion whose `sub` is not a
-// concrete EOA — a smart wallet can't be derived without an owner.
+// concrete non-zero EOA — a smart wallet can't be derived without an owner.
 func TestEnsurePermission_WalletPreview_OpaqueSubjectRejected(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	s := newPartnerServer(t, pub, []string{scopeRead}, partnerStatusActive)
@@ -255,6 +255,11 @@ func TestEnsurePermission_WalletPreview_OpaqueSubjectRejected(t *testing.T) {
 	c := validClaims()
 	c["sub"] = "studio-user-42" // not an address
 	_, err := s.ensurePermission(ctxWithAssertion(signAssertion(t, priv, c)), OpListWallets)
+	assertHTTPStatus(t, err, http.StatusBadRequest)
+
+	c = validClaims()
+	c["sub"] = "0x0000000000000000000000000000000000000000"
+	_, err = s.ensurePermission(ctxWithAssertion(signAssertion(t, priv, c)), OpListWallets)
 	assertHTTPStatus(t, err, http.StatusBadRequest)
 
 	// With a real EOA sub it resolves to that owner.

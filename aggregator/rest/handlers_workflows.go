@@ -283,7 +283,7 @@ func (s *Server) TriggerWorkflow(ctx echo.Context, id generated.Ulid) error {
 // by the Studio UI's "Run once" affordance. The result is a transient
 // Execution echoing what an operator-driven run would have produced.
 func (s *Server) SimulateWorkflow(ctx echo.Context) error {
-	// No-fund operation: a user JWT or a partner assertion both authorize it.
+	// User JWT required (LevelUser). Partner assertion alone does not authorize.
 	p, err := s.ensurePermission(ctx, OpSimulateWorkflow)
 	if err != nil {
 		return err

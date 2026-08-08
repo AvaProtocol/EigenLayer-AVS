@@ -21,7 +21,7 @@ import (
 // without persisting a workflow. Used by SDK testing flows and the
 // agent-CLI verify command.
 func (s *Server) RunNode(ctx echo.Context) error {
-	// No-fund operation: a user JWT or a partner assertion both authorize it.
+	// User JWT required (LevelUser). Partner assertion alone does not authorize.
 	p, err := s.ensurePermission(ctx, OpRunNode)
 	if err != nil {
 		return err

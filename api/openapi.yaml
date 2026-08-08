@@ -61,6 +61,9 @@ tags:
   - name: Operators
     description: Connected operator status (read-only)
 
+# Default: end-user JWT. Operations that accept partner assertions (or
+# require them exclusively) override `security` per path. See
+# aggregator/rest/permission.go and GATEWAY_CHANGE_REQUIRED_PARTNER_GATED_READS.md.
 security:
   - bearerAuth: []
 
@@ -75,6 +78,16 @@ components:
         signature flow) or via the operator-run `create-api-key` CLI
         (long-lived, server-to-server). Send on every request as
         `Authorization: Bearer <jwt>`.
+    partnerAssertion:
+      type: apiKey
+      in: header
+      name: X-Partner-Assertion
+      description: |
+        Short-lived Ed25519-signed partner assertion (JWT). `iss` must
+        match a registered partner id; `scope` must include the required
+        scope for the route (typically `read`); short-lived `exp` is
+        required. For preview wallet list/create, `sub` must be the
+        end-user's non-zero 0x EOA. See partners[] in gateway config.
 
   parameters:
     PageBefore:
@@ -2179,8 +2192,11 @@ paths:
       description: |
         Run a workflow definition end-to-end against the engine (Tenderly
         simulation for chain-writing nodes) and return the full Execution.
-        Nothing is persisted.
+        Nothing is persisted. Requires a user Bearer JWT; partner assertion
+        alone is not sufficient.
       operationId: simulateWorkflow
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -2468,7 +2484,13 @@ paths:
     get:
       tags: [Wallets]
       summary: List the authenticated user's smart wallets
+      description: |
+        Preview wallet resolve. Authorize with a user Bearer JWT **or** a
+        partner assertion (`scope: read`) whose `sub` is the owner EOA.
       operationId: listWallets
+      security:
+        - bearerAuth: []
+        - partnerAssertion: []
       responses:
         '200':
           description: All wallets for the authenticated user.
@@ -2482,8 +2504,12 @@ paths:
       description: |
         Idempotent "ensure exists". Returns the deterministic CREATE2-derived
         address. POST (not GET) because it persists a wallet record server-side
-        as a side effect of the derivation.
+        as a side effect of the derivation. Authorize with a user Bearer JWT
+        **or** a partner assertion (`scope: read`) whose `sub` is the owner EOA.
       operationId: createWallet
+      security:
+        - bearerAuth: []
+        - partnerAssertion: []
       requestBody:
         required: true
         content:
@@ -2828,7 +2854,13 @@ paths:
     get:
       tags: [Tokens]
       summary: Retrieve ERC-20 token metadata
+      description: |
+        Partner-gated public-ish chain data. Requires a partner assertion
+        with `scope: read` (`X-Partner-Assertion`). A user Bearer JWT alone
+        is not sufficient.
       operationId: getToken
+      security:
+        - partnerAssertion: []
       parameters:
         - $ref: '#/components/parameters/ChainIdQuery'
       responses:
@@ -2850,8 +2882,11 @@ paths:
       description: |
         Useful for SDK testing flows — run a node definition against
         provided input variables without persisting a workflow. Honors
-        `node.config.chainId` (overrides body `chainId`).
+        `node.config.chainId` (overrides body `chainId`). Requires a user
+        Bearer JWT; partner assertion alone is not sufficient.
       operationId: runNode
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -2870,7 +2905,11 @@ paths:
     post:
       tags: [Triggers]
       summary: Evaluate a trigger definition with inline input
+      description: |
+        Requires a user Bearer JWT; partner assertion alone is not sufficient.
       operationId: runTrigger
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -2897,11 +2936,12 @@ paths:
         Read-only monitoring endpoint. Returns each operator's
         `supportedChainIds`, `capabilities`, `lastSeen`, and `version`.
         Useful for dashboards and debugging multi-chain task routing.
+        Currently unauthenticated (public monitoring).
       operationId: listOperators
+      security: []
       responses:
         '200':
           description: Connected operators.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/OperatorList' }
-        '401': { $ref: '#/components/responses/Unauthorized' }

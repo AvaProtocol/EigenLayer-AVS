@@ -249,12 +249,15 @@ func (s *Server) authPartnerWalletPreview(ctx echo.Context, level Level) (*Princ
 			Detail: "This endpoint requires a Bearer JWT (POST /api/v1/auth:exchange) or a partner assertion (X-Partner-Assertion) with scope \"read\" and sub set to the owner EOA.",
 		}
 	}
-	if !common.IsHexAddress(pp.subject) {
+	// Concrete owner EOA required: opaque ids and the zero address are
+	// rejected (zero would collapse every misconfigured partner call onto
+	// one shared non-user owner). Mirrors the pre-permission-map check.
+	if !common.IsHexAddress(pp.subject) || common.HexToAddress(pp.subject) == (common.Address{}) {
 		return nil, &restmw.HTTPError{
 			Status: http.StatusBadRequest,
 			Code:   "PARTNER_SUBJECT_REQUIRED",
 			Title:  "Owner address required",
-			Detail: "Wallet derivation requires the assertion `sub` to be the end-user's 0x EOA address.",
+			Detail: "Wallet derivation requires the assertion `sub` to be the end-user's non-zero 0x EOA address.",
 		}
 	}
 	user := userFromPartnerSubject(pp.subject)

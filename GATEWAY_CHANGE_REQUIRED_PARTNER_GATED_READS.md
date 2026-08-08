@@ -1,16 +1,19 @@
 # Gateway change required: partner-gated reads & permission levels
 
-**Status:** Required change — not yet implemented  
+**Status:** **Implemented (gateway)** — `permission.go` / `ensurePermission` +  
+OpenAPI security overrides on PR #739.  
+**Remaining (external):** Studio + ava-sdk-js e2e mint/send partner `scope: read`  
+for token metadata; deploy configs with `scopes: [read]`; **per-partner rate  
+limits deferred** (see §4.4 — still JWT-subject / shared `anonymous` today).  
 **Repo:** EigenLayer-AVS (gateway / aggregator REST)  
 **Date:** 2026-08-08  
 **Related (Studio):** deposit / fund_wallet UX; `getTokenMetadataAction` fails with  
 `No valid auth key … wallet must sign in again` when the user has a live wallet  
 socket (AutoConnect) but no fresh **AVS user JWT** for the connected chain  
 (Position D).  
-**Related (existing):** `PLAN_PARTNER_PAYMENTS.md` (partner assertion — Phase 1  
-either/or simulate is **superseded** for auth policy below),  
-`aggregator/rest/partner.go`, `aggregator/rest/handlers_tokens.go`,  
-`aggregator/rest/handlers_wallets.go`
+**Related (code):** `aggregator/rest/permission.go`, `aggregator/rest/partner.go`,  
+`api/openapi.yaml`, `PLAN_PARTNER_PAYMENTS.md` (Phase 1 partner-only simulate  
+**superseded**).
 
 ---
 
@@ -272,15 +275,19 @@ user, err := s.requireUser(ctx) // not requireSimulateAuth
 
 ### 4.4 Rate limiting
 
-| Layer | Suggestion |
-|-------|------------|
-| Per partner | QPS / daily on partner-sufficient routes (`/tokens/*`, preview wallets) |
-| Per subject | When JWT present, or partner `sub` when set |
-| Global | Existing gateway limits |
+| Layer | Suggestion | Status |
+|-------|------------|--------|
+| Per partner | QPS / daily on partner-sufficient routes (`/tokens/*`, preview wallets) | **Deferred** (follow-up) |
+| Per subject | When JWT present, or partner `sub` when set | Partial (JWT subject only) |
+| Global | Existing gateway limits | Live |
 
-Partner-first is what makes anonymous scrapers fail at Gate 1; implement  
-per-partner limits with the auth change (today’s limiter is mostly per JWT  
-subject / shared anonymous).
+**Deferred note (PR #739 / Copilot):** rate-limit middleware still runs  
+*before* `ensurePermission` and keys only on JWT subject or the shared  
+`anonymous` bucket. Partner-only token/wallet traffic therefore shares  
+`anonymous` with unauthenticated noise. Fix requires verifying (or  
+peeking) partner identity before the limiter — separate change; not  
+blocking the permission-map merge. Partner Gate 1 still rejects unknown  
+apps at the handler.
 
 ### 4.5 Studio follow-up
 
