@@ -82,9 +82,15 @@ per-chain internally, so there is no longer a separate testnet and mainnet
 address — Ethereum, Sepolia, Base, Base Sepolia and BNB all arrive over the
 same gRPC connection.
 
-The port is not a typo. `aggregator.avaprotocol.org` is a CNAME onto the
-gateway's TCP proxy, and the proxy chooses the public port; DNS cannot carry a
-port, so it has to be written out here.
+The port is not a typo, and it is not ours to choose. The name is a CNAME onto
+the gateway's Railway TCP proxy, which maps a public port Railway assigns onto
+the gateway's own `2206`. Railway's API takes no port argument when a proxy is
+created, so `57376` is what that proxy was given — stable for the life of the
+proxy, and different if one is ever recreated. DNS cannot carry a port, so it
+has to be written out here.
+
+Port `2206` is the gateway's internal listen address and is not reachable from
+outside; operators inside Railway's private network use `gateway.railway.internal:2206`.
 
 The REST API for workflows lives at `https://api.avaprotocol.org/api/v1`, and
 the operator dashboard at
