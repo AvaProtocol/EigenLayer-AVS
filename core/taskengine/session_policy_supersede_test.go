@@ -579,3 +579,38 @@ func TestRevokedAppliedLeftoversAreTornDownOnNextGrant(t *testing.T) {
 	require.Equal(t, 1, uninstalls)
 	_ = ownerKey
 }
+
+// A wallet can hold more cleanup candidates than one batch may carry. Prepare
+// caps what rides the batch; the submit re-check must apply the same cap before
+// comparing, or it measures a capped set against an uncapped one, mismatches
+// every time, and the wallet can never submit — preparing again reproduces the
+// failure exactly, so there is no way out.
+func TestRecheckToleratesMoreCandidatesThanTheTeardownCap(t *testing.T) {
+	_, db, _, owner, wallet := newPolicyTestEngine(t)
+
+	const extra = 2
+	total := maxOnChainTeardowns + extra
+	for i := 1; i <= total; i++ {
+		seedUsablePolicy(t, db, owner, wallet,
+			fmt.Sprintf("01candidate%014d", i), uint32(i))
+	}
+
+	candidates, err := onChainTeardownTargets(db, testPolicyChain, owner, wallet)
+	require.NoError(t, err)
+	require.Len(t, candidates, total, "precondition: more candidates than the cap")
+
+	// What prepare would sign: the first maxOnChainTeardowns, stable order.
+	prepared := &PreparedSessionGrant{}
+	for _, p := range candidates[:maxOnChainTeardowns] {
+		prepared.Supersedes = append(prepared.Supersedes, SupersededGrant{
+			PolicyID: p.ID, EntityID: p.EntityID,
+		})
+	}
+
+	ownerAddr, walletAddr := owner, wallet
+	policy := &model.SessionPolicy{
+		ChainID: testPolicyChain, Owner: &ownerAddr, Runner: &walletAddr,
+	}
+	require.NoError(t, recheckSupersededGrant(db, prepared, policy),
+		"the uncapped storage set must not read as a change the owner did not sign")
+}

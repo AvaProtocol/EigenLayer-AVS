@@ -522,6 +522,15 @@ func recheckSupersededGrant(db storage.Storage, prepared *PreparedSessionGrant, 
 	if err != nil {
 		return err
 	}
+	// Cap it the way prepare did, in the same stable order. Prepare signs at
+	// most maxOnChainTeardowns entities and leaves the rest for the next grant,
+	// so comparing that against an uncapped storage read reports a change the
+	// owner never made. For a wallet with more candidates than the cap that is
+	// every submit, and preparing again reproduces it exactly — the wallet
+	// could never grant.
+	if len(current) > maxOnChainTeardowns {
+		current = current[:maxOnChainTeardowns]
+	}
 	want := prepared.Supersedes
 	if len(want) == 0 && len(current) == 0 {
 		return nil
