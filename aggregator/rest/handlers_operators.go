@@ -23,6 +23,9 @@ import (
 // work still in flight) — it returns as an empty array until that
 // lands. Clients should treat empty as "unknown", not "none".
 func (s *Server) ListOperators(ctx echo.Context) error {
+	if _, err := s.ensurePermission(ctx, OpListOperators); err != nil {
+		return err
+	}
 	if s.operators == nil {
 		return ctx.JSON(http.StatusOK, generated.OperatorList{Data: []generated.OperatorInfo{}})
 	}

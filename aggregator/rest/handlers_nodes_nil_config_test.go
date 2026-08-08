@@ -34,7 +34,7 @@ func runNodeCtx(body string) echo.Context {
 // the Config pointer directly; the rest already errored cleanly.
 func TestRunNodeRejectsNilConfigWithoutPanicking(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(nil)
-	s := newPartnerServer(t, pub, []string{scopeSimulate}, partnerStatusActive)
+	s := newPartnerServer(t, pub, []string{scopeRead}, partnerStatusActive)
 
 	cases := []struct {
 		name string

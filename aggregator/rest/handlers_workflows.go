@@ -18,7 +18,7 @@ import (
 //
 // Every handler is the same shape:
 //
-//	1. requireUser — pull the JWT subject from echo context.
+//	1. ensurePermission(op) — authorize via permissionMap.
 //	2. (for writes) decode the request body and translate via mapping/.
 //	3. Call the engine method.
 //	4. Translate the response back via mapping/ (or shape a tiny envelope).
@@ -28,10 +28,11 @@ import (
 
 // CreateWorkflow — POST /api/v1/workflows
 func (s *Server) CreateWorkflow(ctx echo.Context) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpCreateWorkflow)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	var body generated.CreateWorkflowRequest
 	if err := ctx.Bind(&body); err != nil {
@@ -61,10 +62,11 @@ func (s *Server) CreateWorkflow(ctx echo.Context) error {
 
 // ListWorkflows — GET /api/v1/workflows
 func (s *Server) ListWorkflows(ctx echo.Context, params generated.ListWorkflowsParams) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpListWorkflows)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	req := &avsproto.ListTasksReq{
 		IncludeNodes: true,
@@ -108,10 +110,11 @@ func (s *Server) ListWorkflows(ctx echo.Context, params generated.ListWorkflowsP
 
 // GetWorkflow — GET /api/v1/workflows/{id}
 func (s *Server) GetWorkflow(ctx echo.Context, id generated.Ulid) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpGetWorkflow)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	workflow, err := s.engine.GetWorkflow(user, string(id))
 	if err != nil {
@@ -130,10 +133,11 @@ func (s *Server) GetWorkflow(ctx echo.Context, id generated.Ulid) error {
 // caller's perspective (idempotent, returns 204) but the engine removes
 // the underlying record so the operator stops monitoring.
 func (s *Server) CancelWorkflow(ctx echo.Context, id generated.Ulid) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpCancelWorkflow)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	if _, err := s.engine.DeleteWorkflowByUser(user, string(id)); err != nil {
 		return notFoundOrError(err)
@@ -143,10 +147,11 @@ func (s *Server) CancelWorkflow(ctx echo.Context, id generated.Ulid) error {
 
 // PauseWorkflow — POST /api/v1/workflows/{id}:pause
 func (s *Server) PauseWorkflow(ctx echo.Context, id generated.Ulid) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpPauseWorkflow)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	if _, err := s.engine.SetWorkflowEnabledByUser(user, string(id), false); err != nil {
 		return notFoundOrError(err)
@@ -166,10 +171,11 @@ func (s *Server) PauseWorkflow(ctx echo.Context, id generated.Ulid) error {
 
 // ResumeWorkflow — POST /api/v1/workflows/{id}:resume
 func (s *Server) ResumeWorkflow(ctx echo.Context, id generated.Ulid) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpResumeWorkflow)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	if _, err := s.engine.SetWorkflowEnabledByUser(user, string(id), true); err != nil {
 		return notFoundOrError(err)
@@ -193,10 +199,11 @@ func (s *Server) ResumeWorkflow(ctx echo.Context, id generated.Ulid) error {
 // what the operator would have reported; if omitted, the engine fills
 // it with placeholder values.
 func (s *Server) TriggerWorkflow(ctx echo.Context, id generated.Ulid) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpTriggerWorkflow)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	var body generated.TriggerWorkflowRequest
 	if err := ctx.Bind(&body); err != nil {
@@ -277,10 +284,11 @@ func (s *Server) TriggerWorkflow(ctx echo.Context, id generated.Ulid) error {
 // Execution echoing what an operator-driven run would have produced.
 func (s *Server) SimulateWorkflow(ctx echo.Context) error {
 	// No-fund operation: a user JWT or a partner assertion both authorize it.
-	user, err := s.requireSimulateAuth(ctx)
+	p, err := s.ensurePermission(ctx, OpSimulateWorkflow)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	var body generated.SimulateWorkflowRequest
 	if err := ctx.Bind(&body); err != nil {
@@ -347,10 +355,11 @@ func (s *Server) SimulateWorkflow(ctx echo.Context) error {
 // platform fee + per-node COGS + value-capture fee + any active
 // discount.
 func (s *Server) EstimateWorkflowFees(ctx echo.Context) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpEstimateWorkflowFees)
 	if err != nil {
 		return err
 	}
+	user := p.User
 	var body generated.EstimateFeesRequest
 	if err := ctx.Bind(&body); err != nil {
 		return badRequest("FEES_BAD_REQUEST", "Invalid request body", err.Error())
@@ -475,10 +484,11 @@ func openAPIInputVarsOrNil(in *generated.InputVariables) (map[string]*structpb.V
 // Returns the total number of workflows owned by the authenticated user,
 // optionally narrowed by smartWalletAddress.
 func (s *Server) CountWorkflows(ctx echo.Context, params generated.CountWorkflowsParams) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpCountWorkflows)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	req := &avsproto.GetWorkflowCountReq{}
 	if params.SmartWalletAddress != nil {

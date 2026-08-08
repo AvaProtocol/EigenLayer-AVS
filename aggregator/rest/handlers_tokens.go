@@ -20,10 +20,11 @@ import (
 // fallback succeeded — there's no 404 here because partial information
 // (just the address) is still useful to the caller.
 func (s *Server) GetToken(ctx echo.Context, address generated.EthereumAddress, params generated.GetTokenParams) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpGetToken)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	req := &avsproto.GetTokenMetadataReq{Address: string(address)}
 	if params.ChainId != nil {

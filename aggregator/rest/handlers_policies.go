@@ -26,11 +26,8 @@ import (
 // submit trusts nothing — the grant is recomputed from the echoed fields and
 // the signature is the only authority.
 //
-// Every handler leads with refusePartnerAssertion: a policy is fund
-// authority, and the refusal must be explicit rather than a handler that
-// silently never consults the header.
-
-const policyCapability = "Session-policy management"
+// Every handler authorizes via ensurePermission (LevelUserRefusePartner):
+// partner assertions are refused; user JWT is required.
 
 // policyChainID resolves the chain: explicit value wins, then the JWT's
 // audience chain. Zero means unresolvable (single-chain deployments have an
@@ -45,13 +42,10 @@ func policyChainID(ctx echo.Context, explicit *int64) int64 {
 	return 0
 }
 
-// policyAuth is the shared preamble: partner refusal, then user auth, then
-// path-address validation.
-func (s *Server) policyAuth(ctx echo.Context, address generated.EthereumAddress) (*model.User, common.Address, error) {
-	if err := refusePartnerAssertion(ctx, policyCapability); err != nil {
-		return nil, common.Address{}, err
-	}
-	user, err := s.requireUser(ctx)
+// policyAuth is the shared preamble: permission level for the operation,
+// then path-address validation.
+func (s *Server) policyAuth(ctx echo.Context, op string, address generated.EthereumAddress) (*model.User, common.Address, error) {
+	p, err := s.ensurePermission(ctx, op)
 	if err != nil {
 		return nil, common.Address{}, err
 	}
@@ -59,12 +53,12 @@ func (s *Server) policyAuth(ctx echo.Context, address generated.EthereumAddress)
 		return nil, common.Address{}, badRequest("POLICIES_BAD_ADDRESS", "Invalid wallet address",
 			"The {address} path parameter must be a valid 0x-prefixed hex address.")
 	}
-	return user, common.HexToAddress(string(address)), nil
+	return p.User, common.HexToAddress(string(address)), nil
 }
 
 // PrepareWalletPolicy allocates a grant and returns the payload to sign.
 func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.EthereumAddress) error {
-	user, wallet, err := s.policyAuth(ctx, address)
+	user, wallet, err := s.policyAuth(ctx, OpPrepareWalletPolicy, address)
 	if err != nil {
 		return err
 	}
@@ -112,7 +106,7 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 
 // SubmitWalletPolicy verifies the owner's signature and stores the grant.
 func (s *Server) SubmitWalletPolicy(ctx echo.Context, address generated.EthereumAddress) error {
-	user, wallet, err := s.policyAuth(ctx, address)
+	user, wallet, err := s.policyAuth(ctx, OpSubmitWalletPolicy, address)
 	if err != nil {
 		return err
 	}
@@ -151,7 +145,7 @@ func (s *Server) SubmitWalletPolicy(ctx echo.Context, address generated.Ethereum
 
 // ListWalletPolicies lists the wallet's grants, newest first.
 func (s *Server) ListWalletPolicies(ctx echo.Context, address generated.EthereumAddress, params generated.ListWalletPoliciesParams) error {
-	user, wallet, err := s.policyAuth(ctx, address)
+	user, wallet, err := s.policyAuth(ctx, OpListWalletPolicies, address)
 	if err != nil {
 		return err
 	}
@@ -173,7 +167,7 @@ func (s *Server) ListWalletPolicies(ctx echo.Context, address generated.Ethereum
 
 // GetWalletPolicy returns one grant.
 func (s *Server) GetWalletPolicy(ctx echo.Context, address generated.EthereumAddress, policyID generated.Ulid, params generated.GetWalletPolicyParams) error {
-	user, wallet, err := s.policyAuth(ctx, address)
+	user, wallet, err := s.policyAuth(ctx, OpGetWalletPolicy, address)
 	if err != nil {
 		return err
 	}
@@ -204,7 +198,7 @@ func onChainCleanupAPI(c *taskengine.OnChainRevokeCleanup) *generated.OnChainRev
 
 // RevokeWalletPolicy revokes one grant.
 func (s *Server) RevokeWalletPolicy(ctx echo.Context, address generated.EthereumAddress, policyID generated.Ulid, params generated.RevokeWalletPolicyParams) error {
-	user, wallet, err := s.policyAuth(ctx, address)
+	user, wallet, err := s.policyAuth(ctx, OpRevokeWalletPolicy, address)
 	if err != nil {
 		return err
 	}

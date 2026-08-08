@@ -541,17 +541,15 @@ type ChainConfigRaw struct {
 	SmartWallet SmartWalletConfigRaw `yaml:"smart_wallet"`
 }
 
-// PartnerConfig is a registered partner (tenant) permitted to call
-// delegated, no-fund operations — currently the simulate family
-// (workflows:simulate / nodes:run / triggers:run) — on behalf of its own
-// authenticated end users, without those users producing a wallet
-// signature. Partners authenticate with a short-lived Ed25519-signed
-// assertion (private_key_jwt style) whose `iss` claim equals ID and whose
+// PartnerConfig is a registered partner (tenant). Registration is manual
+// (YAML only). Partners authenticate with a short-lived Ed25519-signed
+// assertion (private_key_jwt style) whose `iss` equals ID and whose
 // signature verifies against one of PublicKeys.
 //
-// Simulate moves no funds and skips wallet-ownership, so partner trust is
-// sufficient for it; fund-moving operations (createTask/execute) are never
-// authorized by a partner assertion alone. See PLAN_PARTNER_PAYMENTS.md.
+// Scope "read" covers partner-gated token metadata and preview wallet
+// list/create. Simulate/runNode require a user JWT; fund-moving and
+// session policies never accept partner. Which REST ops accept partner
+// credentials is defined in aggregator/rest/permission.go.
 type PartnerConfig struct {
 	// ID is the partner identifier; it must equal the `iss` claim of the
 	// partner's assertions (e.g. "studio").
@@ -560,9 +558,8 @@ type PartnerConfig struct {
 	// "ed25519:"-prefixed). Multiple entries allow key rotation — any
 	// listed key may verify an assertion.
 	PublicKeys []string `yaml:"public_keys"`
-	// Scopes are the delegation scopes granted to this partner, e.g.
-	// ["simulate"]. A request is allowed only if its required scope is
-	// present here.
+	// Scopes are the scopes granted to this partner, e.g. ["read"].
+	// A request is allowed only if its required scope is present here.
 	Scopes []string `yaml:"scopes"`
 	// Status gates the partner; only "active" partners are honored.
 	Status string `yaml:"status"`
