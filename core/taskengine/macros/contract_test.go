@@ -1,6 +1,7 @@
 package macros
 
 import (
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -45,7 +46,12 @@ func TestExpression(t *testing.T) {
 	rpc := testutil.GetTestRPCURL()
 	SetRpc(rpc)
 
-	p, e := CompileExpression(`priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306")`)
+	// Pass the max-age override so these live-feed assertions don't flake when the
+	// Sepolia feed is stale (the case guarded against in the staleness logic). This
+	// also exercises the optional maxAgeSeconds argument through the expr path.
+	price := fmt.Sprintf(`priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306", %d)`, testNoStaleBound)
+
+	p, e := CompileExpression(price)
 	if e != nil {
 		t.Errorf("Compile expression error: %v", e)
 	}
@@ -61,12 +67,7 @@ func TestExpression(t *testing.T) {
 
 	t.Logf("Exp Run Result: %v", r.(*big.Int))
 
-	match, e := RunExpressionQuery(`
-		bigCmp(
-		  priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306"),
-		  toBigInt("2000")
-		) > 0
-	`)
+	match, e := RunExpressionQuery(fmt.Sprintf(`bigCmp(%s, toBigInt("2000")) > 0`, price))
 	if e != nil {
 		t.Errorf("Run expr error: %v %v", e, r)
 	}
@@ -74,12 +75,7 @@ func TestExpression(t *testing.T) {
 		t.Error("Evaluate error. Expected: true, received: false")
 	}
 
-	match, e = RunExpressionQuery(`
-		bigCmp(
-		  priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306"),
-		  toBigInt("9262391230023")
-		) > 0
-	`)
+	match, e = RunExpressionQuery(fmt.Sprintf(`bigCmp(%s, toBigInt("9262391230023")) > 0`, price))
 	if e != nil {
 		t.Errorf("Run expr error: %v %v", e, r)
 	}
