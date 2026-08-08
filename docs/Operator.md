@@ -32,9 +32,10 @@ eth_rpc_url: <your_ethereum_mainnet_rpc_url>
 ecdsa_private_key_store_path: <path_to_operator_ecdsa_key_json>
 bls_private_key_store_path: <path_to_operator_bls_key_json>
 
-# Unified aggregator endpoint — serves all mainnet chains (Ethereum, Base, ...)
-# from a single gRPC connection. The gateway routes per-chain internally.
-aggregator_server_ip_port_address: "aggregator.avaprotocol.org:2206"
+# Unified aggregator endpoint — one gRPC connection serves every chain
+# (Ethereum, Sepolia, Base, Base Sepolia, BNB); the gateway routes per-chain
+# internally, so there is no separate testnet address.
+aggregator_server_ip_port_address: "zephyr.proxy.rlwy.net:57376"
 
 # avs node spec compliance https://eigen.nethermind.io/docs/spec/intro
 eigen_metrics_ip_port_address: <operator_public_ip>:9090
