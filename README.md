@@ -74,13 +74,17 @@ The aggregator is run and managed by the Ava Protocol team. Point your operator
 at it in the operator config file:
 
 ```yaml
-aggregator_server_ip_port_address: "zephyr.proxy.rlwy.net:57376"
+aggregator_server_ip_port_address: "aggregator.avaprotocol.org:57376"
 ```
 
 One endpoint serves every chain. The gateway is a single deployment that routes
 per-chain internally, so there is no longer a separate testnet and mainnet
 address — Ethereum, Sepolia, Base, Base Sepolia and BNB all arrive over the
 same gRPC connection.
+
+The port is not a typo. `aggregator.avaprotocol.org` is a CNAME onto the
+gateway's TCP proxy, and the proxy chooses the public port; DNS cannot carry a
+port, so it has to be written out here.
 
 The REST API for workflows lives at `https://api.avaprotocol.org/api/v1`, and
 the operator dashboard at
