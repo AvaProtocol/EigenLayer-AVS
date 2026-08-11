@@ -174,19 +174,57 @@ controller-signed authKey path. **Seam to preserve now:** the execute authorizat
 single, swappable check (today: "controller can sign for this wallet"; tomorrow: "Calibur permission
 exists") so dropping Calibur in does not touch the partner/scope layer.
 
-**Why Calibur, and not a 4337-routed EIP-7702 account: no EntryPoint migration.** We run **EntryPoint
-v0.6** today ([client.go:25](pkg/erc4337/bundler/client.go#L25), `EntryPointV06Address`), while every
-EIP-7702 delegation candidate surveyed in
-[discussion #658](https://github.com/AvaProtocol/EigenLayer-AVS/discussions/658) targets EntryPoint v0.7+.
-Forcing 7702 accounts through our 4337/bundler rails would drag in a v0.6→v0.7 migration we have not
-scoped. Calibur's relayer-native / direct-transaction model instead lets the aggregator EOA sign and
-submit the call directly — **no bundler, no EntryPoint upgrade** — which is the decisive reason it is the
-pick over a bundler-routed 7702 account. This reinforces the seam above: only the swappable authority
-check changes; the execution transport stays put and forces no infra migration. **De-risking next step
-(small + verifiable, not a full build):** a minimal Sepolia PoC of a Calibur-delegated EOA executing a
-single scoped call directly from the aggregator EOA (no bundler) and then revoking that authority — tx
-hashes proving the direct-transaction path works, no EntryPoint migration is needed, and revocation
-behaves — before any production code lands.
+**Why Calibur: it automates a different wallet than MA v2 does.** MA v2 operates the **smart wallet we
+derive from the user's EOA** — a separate contract at a factory address, which the user must fund before
+we can automate anything in it. Calibur automates the **user's EOA itself**, via EIP-7702 delegation: the
+account is the address the user already has, holding the assets they already hold, with no second address
+and no funding step. These are complementary products, not competing implementations of one product. The
+seam above stays the same either way — only the authority check swaps.
+
+**Superseded rationale — the EntryPoint v0.6 argument no longer applies.** An earlier revision of this
+section argued for Calibur on the grounds that we ran EntryPoint v0.6 while every 7702 candidate targeted
+v0.7+, making a bundler-routed 7702 account a forced migration. **We have since completed that cutover.**
+MA v2 on EntryPoint v0.7 is the only account provider we allow
+([config.go:58](core/config/config.go#L58) pins `EntryPointV07AddressHex`,
+[config.go:385](core/config/config.go#L385) returns v0.7 for MA v2 chains,
+[config.go:407](core/config/config.go#L407) rejects anything but `modular_account_v2`); see
+[docs/changes/20260807-retire-v06-send-path.md](docs/changes/20260807-retire-v06-send-path.md). The v0.6
+constant survives only as legacy in [bundler/client.go:25](pkg/erc4337/bundler/client.go#L25). Do not
+cite the migration cost as a reason for anything.
+
+**The comparison that does remain: Calibur vs MA v2's own 7702 mode.** MA v2 also ships a 7702 flavor
+that delegates the user's EOA to the MA v2 implementation — same wallet type Calibur targets, so the
+choice is genuine and lives entirely in the EOA lane. Trade-off, now that the migration argument is gone:
+Calibur's relayer-native model lets the aggregator sign and submit `execute()` directly (**no bundler, no
+EntryPoint**), while MA v2 7702 routes every op as a UserOp through EntryPoint v0.7 and a bundler but
+keeps us on **one account system with first-class validation modules** instead of a second, parallel one
+whose scoping we would own. Verify MA v2 7702 module semantics against current Alchemy docs before
+deciding — that is the least-settled input.
+
+**De-risking step: DONE.** The Sepolia PoC landed and was independently verified —
+[calibur-7702-poc](https://github.com/Antrikshgwal/calibur-7702-poc), verification branch and write-up at
+[chrisli30/calibur-7702-poc @ verify/ava-protocol-standalone](https://github.com/chrisli30/calibur-7702-poc/tree/verify/ava-protocol-standalone).
+Direct-transaction path works (aggregator-relayed scoped `execute()`, 128,296 gas, no bundler); revocation
+and expiry are total. **Three findings that must shape any production build:**
+
+1. **Scoping does not cover the signature path.** The policy hook is address-flag dispatched, and the
+   execution flags (`0x18`) leave `AFTER_IS_VALID_SIGNATURE_FLAG` (`1 << 2`) clear. Calibur's
+   `isValidSignature` admits any registered, unexpired key with no target or value scoping, so a
+   "scoped" key can mint arbitrary ERC-1271 account signatures — Permit2 approvals, Seaport orders — a
+   token drain that never reaches `beforeExecute`. **This is worse here than it would be on a derived
+   smart wallet**, precisely because of the wallet-type distinction above: the EOA is the user's primary
+   asset store, not a purpose-funded automation wallet. A production hook must mine for `0x1f` and
+   explicitly deny the validation callbacks.
+2. **Hook scoping is fail-open.** `KeyManagement.update` accepts any hook with code and any nonzero flag
+   bit, so a mis-flagged hook is accepted, *looks* attached in `getKeySettings`, and silently enforces
+   nothing. Assert the hook's address bits at registration, not just at deploy.
+3. **Sponsored delegation fails silently on forge ≥ 1.2.** `vm.signAndAttachDelegation` signs
+   `accountNonce + 1`, valid only for a self-send; with the aggregator as sender the authorization is
+   *skipped* rather than rejected, the type-4 tx lands status 1, and nothing is delegated. Sponsored
+   relay is exactly our model — confirm delegation by reading `code(account)`, never by tx status.
+
+Common shape across all three: the bound is absent and the system reports success. Any Calibur
+integration needs positive assertions that each bound is live.
 
 **4.2 Partner attribution on tasks.** Add `string partner_id = NN [json_name="partnerId"]` to
 `protobuf/avs.proto` (additive/`omitempty`; old tasks load via the existing `DiscardUnknown` path,
