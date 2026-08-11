@@ -209,9 +209,34 @@ routes every op as a UserOp through EntryPoint v0.7 and a bundler. Against that,
 account system whose permission layer is already audited** (ChainLight 2024-12-03, Quantstamp 2024-12-11)
 rather than a second, parallel one **whose scoping we author and audit ourselves** — and the three
 findings below are concrete evidence that the DIY path is easy to get wrong in ways that fail open. That
-re-weighting postdates #658 and warrants a re-score rather than inheriting its finalist. Verify MA v2 7702
-module semantics and the exact account↔EntryPoint pairing against current Alchemy docs before deciding —
-that is the least-settled input.
+re-weighting postdates #658 and warrants a re-score rather than inheriting its finalist.
+
+**MA v2 7702 semantics — VERIFIED 2026-08-10, no longer the open input.** An earlier revision of this
+paragraph called this the least-settled question. It has since been answered on a Sepolia fork against
+the canonical deployed contracts ([chrisli30/mav2-7702-poc](https://github.com/chrisli30/mav2-7702-poc)):
+
+- **`SemiModularAccount7702`** at `0x69007702764179f14F51cdce752f4f775d74E139` (`alchemy.sma-7702.1.0.0`);
+  its `entryPoint()` returns `0x0000000071727De22E5E9d8BAf0edAc6f37da032` — **byte-identical to the v0.7
+  EntryPoint we already run** ([config.go:58](core/config/config.go#L58)). The account↔EntryPoint pairing
+  question is closed: no migration, no new infra. Delegate only to this variant — Alchemy warns the other
+  MA v2 variants have unprotected initializers.
+- **Signing authority is opt-in and account-enforced.** ERC-6900 makes it a per-validation flag and
+  requires the account to honour it; MA v2 implements that in `ModularAccountBase._exec1271Validation`.
+  A session key installed without `isSignatureValidation` reverts `SignatureValidationInvalid` when used
+  to sign. **This is the exact inverse of finding 1 below** — where Calibur admits any registered key by
+  default, MA v2 refuses by default, so on the property #658 called non-negotiable MA v2 is correct by
+  construction and Calibur requires us to build it.
+- **A grant is upgradeable but never self-upgradeable.** The owner can widen scope later; a scoped key
+  cannot install another validation. Consistent with the guardrail already enforced in our own code —
+  `aa.SessionGrant.Validate()` ([ma_v2_install.go](core/chainio/aa/ma_v2_install.go)) refuses to pack a
+  global grant carrying no execution hook, and `PackSessionSignerInstall` calls it on every path.
+
+Still open: whether Alchemy's **managed** session-key API leaves `isSignatureValidation` unset — its eight
+documented permission types are all execution-scoped and none mentions signing, so the flag is not exposed
+there. The contract enforces it; the managed default is unverified. Resolve before using that path.
+
+The EOA-side consent flow this would require of Studio (two approvals, component ownership, re-consent) is
+out of scope here and documented privately in avs-infra, `EOA_7702_Delegation_Consent_Model.md`.
 
 **De-risking step: DONE.** The Sepolia PoC landed and was independently verified —
 [calibur-7702-poc](https://github.com/Antrikshgwal/calibur-7702-poc), verification branch and write-up at
