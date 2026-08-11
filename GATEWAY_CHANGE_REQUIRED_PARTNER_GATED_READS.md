@@ -310,7 +310,7 @@ apps at the handler.
 |--------|------------|
 | Open internet scrapes `/tokens` or lists wallets | Gate 1: unknown partners rejected |
 | Leaked partner private key | Short TTL assertions; key rotation; scope limited to `read` / preview resolve — **not** simulate, execute, or policies |
-| Partner-only scrape of metadata | Per-partner rate limits + TTL (accepted blast radius: RPC cost, not funds) |
+| Partner-only scrape of metadata | Short-lived assertions, scoped access, and the existing shared global rate limit; per-partner limits are deferred (see §4.4). |
 | Partner-only simulate abuse | **Rejected** — JWT required for simulate/runNode |
 | Partner used for fund moves / policies | Existing refuse / requireUser; unchanged |
 | Leaked user JWT | Same as today for JWT routes; partner-sufficient routes do not need JWT |
