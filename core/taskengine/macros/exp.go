@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -62,46 +63,92 @@ func readContractData(contractAddress string, data string, method string, contra
 // QueryContract
 //const taskCondition = `cmp(chainlinkPrice("0x694AA1769357215DE4FAC081bf1f309aDC325306"), parseUnit("2621.99", 8)) > 1`
 
-func chainlinkLatestRoundData(tokenPair string) *big.Int {
+// chainlinkDefaultMaxAge bounds how stale a feed's updatedAt may be before its
+// answer is rejected. Chainlink heartbeats vary by feed (ETH/USD ~1h, some feeds
+// up to 24h), so the default is deliberately loose to avoid rejecting a healthy
+// slow feed. Callers on a faster feed should pass an explicit max age in seconds.
+const chainlinkDefaultMaxAge = 24 * time.Hour
+
+// chainlinkRound is the decoded latestRoundData tuple:
+// (roundId, answer, startedAt, updatedAt, answeredInRound).
+type chainlinkRound struct {
+	roundID         *big.Int
+	answer          *big.Int
+	updatedAt       *big.Int
+	answeredInRound *big.Int
+}
+
+// validateChainlinkRound returns the round's answer, or an error if the round is
+// incomplete, reports a non-positive price, or is older than maxAge relative to
+// now. Keeping the checks separate from the RPC call makes them unit-testable
+// without a live feed. See https://docs.chain.link/data-feeds/api-reference.
+func validateChainlinkRound(r chainlinkRound, maxAge time.Duration, now time.Time) (*big.Int, error) {
+	if r.answer == nil || r.updatedAt == nil {
+		return nil, fmt.Errorf("incomplete round data")
+	}
+	if r.answer.Sign() <= 0 {
+		return nil, fmt.Errorf("invalid price %s: must be > 0", r.answer)
+	}
+	// updatedAt == 0 means the round has not been answered yet.
+	if r.updatedAt.Sign() == 0 {
+		return nil, fmt.Errorf("round not complete: updatedAt is 0")
+	}
+	// answeredInRound < roundId means the answer was carried over from an earlier
+	// round — a stalled feed on legacy aggregators.
+	if r.answeredInRound != nil && r.roundID != nil && r.answeredInRound.Cmp(r.roundID) < 0 {
+		return nil, fmt.Errorf("stale round: answeredInRound %s < roundId %s", r.answeredInRound, r.roundID)
+	}
+	updatedAt := time.Unix(r.updatedAt.Int64(), 0)
+	if age := now.Sub(updatedAt); age > maxAge {
+		return nil, fmt.Errorf("stale price: last updated %s ago, exceeds max age %s", age.Truncate(time.Second), maxAge)
+	}
+	return r.answer, nil
+}
+
+// chainlinkMaxAge resolves an optional caller-supplied max age (seconds) to a
+// duration, falling back to chainlinkDefaultMaxAge.
+func chainlinkMaxAge(maxAgeSeconds []int) time.Duration {
+	if len(maxAgeSeconds) > 0 && maxAgeSeconds[0] > 0 {
+		return time.Duration(maxAgeSeconds[0]) * time.Second
+	}
+	return chainlinkDefaultMaxAge
+}
+
+// bigFromABI safely extracts a *big.Int from an ABI-decoded value.
+func bigFromABI(v any) *big.Int {
+	b, _ := v.(*big.Int)
+	return b
+}
+
+// chainlinkLatestRoundData reads a Chainlink feed's latest round and returns its
+// price, panicking if the feed is unreachable or the round is stale or invalid.
+// The expr VM recovers the panic, so a bad feed fails the task loudly instead of
+// silently evaluating a condition against outdated or zero data. An optional
+// second argument overrides the staleness window (in seconds).
+func chainlinkLatestRoundData(tokenPair string, maxAgeSeconds ...int) *big.Int {
 	output, err := QueryContract(
 		rpcConn,
-		// https://docs.chain.link/data-feeds/price-feeds/addresses?network=ethereum&page=1&search=et#sepolia-testnet
-		// ETH-USD pair on sepolia
 		common.HexToAddress(tokenPair),
 		chainlinkABI,
 		"latestRoundData",
 	)
-
 	if err != nil {
 		panic(fmt.Errorf("Error when querying contract through rpc. contract: %s. error: %w", tokenPair, err))
 	}
-
-	// TODO: Check round and answer to prevent the case where chainlink down we
-	// may got outdated data
-	if len(output) < 2 || output[1] == nil {
-		return big.NewInt(0)
+	if len(output) < 5 {
+		panic(fmt.Errorf("chainlink feed %s: unexpected latestRoundData output (%d fields)", tokenPair, len(output)))
 	}
-	return output[1].(*big.Int)
-}
 
-func chainlinkLatestAnswer(tokenPair string) *big.Int {
-	output, err := QueryContract(
-		rpcConn,
-		// https://docs.chain.link/data-feeds/price-feeds/addresses?network=ethereum&page=1&search=et#sepolia-testnet
-		// ETH-USD pair on sepolia
-		common.HexToAddress(tokenPair),
-		chainlinkABI,
-		"latestAnswer",
-	)
-
+	answer, err := validateChainlinkRound(chainlinkRound{
+		roundID:         bigFromABI(output[0]),
+		answer:          bigFromABI(output[1]),
+		updatedAt:       bigFromABI(output[3]),
+		answeredInRound: bigFromABI(output[4]),
+	}, chainlinkMaxAge(maxAgeSeconds), time.Now())
 	if err != nil {
-		panic(fmt.Errorf("Error when querying contract through rpc. contract: %s. error: %w", tokenPair, err))
+		panic(fmt.Errorf("chainlink feed %s: %w", tokenPair, err))
 	}
-
-	if len(output) == 0 || output[0] == nil {
-		return big.NewInt(0)
-	}
-	return output[0].(*big.Int)
+	return answer
 }
 
 func BigCmp(a *big.Int, b *big.Int) (r int) {
@@ -176,11 +223,8 @@ func (bi *Builtin) ToBigInt(val string) *big.Int {
 	return ToBigInt(val)
 }
 
-func (bi *Builtin) ChainlinkLatestRoundData(tokenPair string) *big.Int {
-	return chainlinkLatestRoundData(tokenPair)
-}
-func (bi *Builtin) ChainlinkLatestAnswer(tokenPair string) *big.Int {
-	return chainlinkLatestAnswer(tokenPair)
+func (bi *Builtin) ChainlinkLatestRoundData(tokenPair string, maxAgeSeconds ...int) *big.Int {
+	return chainlinkLatestRoundData(tokenPair, maxAgeSeconds...)
 }
 
 func (bi *Builtin) BigCmp(a *big.Int, b *big.Int) (r int) {
@@ -207,8 +251,11 @@ var (
 		// macro to do IO from JS
 		"readContractData": readContractData,
 
-		"priceChainlink":           chainlinkLatestAnswer,
-		"chainlinkPrice":           chainlinkLatestAnswer,
+		// priceChainlink / chainlinkPrice historically used the deprecated
+		// latestAnswer (no round or timestamp, so staleness was undetectable).
+		// They now route through latestRoundData, which validates freshness.
+		"priceChainlink":           chainlinkLatestRoundData,
+		"chainlinkPrice":           chainlinkLatestRoundData,
 		"latestRoundDataChainlink": chainlinkLatestRoundData,
 
 		"bigCmp":    BigCmp,
