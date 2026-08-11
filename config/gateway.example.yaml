@@ -112,8 +112,8 @@ smart_wallet:
   paymaster_address:
 
 # Chain worker registry — gateway routes tasks to workers by chain_id.
-# In production (Railway): worker-sepolia.railway.internal:50051
-# Locally: workers run on different localhost ports.
+# Locally, workers run on different localhost ports. A hosted deployment puts
+# them on a private network and sets worker_addr accordingly.
 chains:
   - chain_id: 11155111
     name: sepolia
@@ -139,24 +139,22 @@ chains:
       paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
       max_wallets_per_owner:  3
 
-# Optional: delegated partners (tenants). A partner authenticates its own
-# end users in its own system and may call the no-fund simulate family
-# (workflows:simulate / nodes:run / triggers:run) AND no-fund wallet
-# derivation (GET /wallets, POST /wallets) on their behalf WITHOUT a per-user
-# wallet signature, by sending a short-lived Ed25519-signed assertion in the
-# `X-Partner-Assertion` header. The assertion's `iss` must equal `id`, its
-# signature must verify against one of `public_keys`, it must declare a `scope`
-# granted below, carry a short-lived `exp`, and (if partner_assertion_audience
-# is set) an `aud` matching it. For wallet derivation `sub` must be the end
-# user's 0x EOA. Fund-moving operations are never authorized this way.
-# See PLAN_PARTNER_PAYMENTS.md. Omit this block to disable partner delegation.
+# Optional: delegated partners (tenants). Manual registration only (no API).
+# A partner sends a short-lived Ed25519 assertion in `X-Partner-Assertion`.
+# Scope "read" authorizes partner-gated reads (GET /tokens/{address}) and
+# preview wallet resolve (GET/POST /wallets; assertion `sub` must be the
+# owner EOA). Simulate / runNode / runTrigger require a user JWT — partner
+# alone is not enough. Fund-moving and session policies never accept partner.
+# Assertion `iss` must equal `id`; signature must verify against `public_keys`;
+# short-lived `exp` required; `aud` must match partner_assertion_audience when set.
+# See GATEWAY_CHANGE_REQUIRED_PARTNER_GATED_READS.md. Omit to disable partner auth.
 partners:
   - id: studio
     # Base64-encoded Ed25519 public key(s); list several to rotate.
     public_keys:
       - "${STUDIO_PARTNER_PUBLIC_KEY_BASE64}"
     scopes:
-      - simulate
+      - read
     status: active
 # Bind partner assertions to this gateway/environment so a captured assertion
 # can't be replayed elsewhere; assertions must carry a matching `aud`.

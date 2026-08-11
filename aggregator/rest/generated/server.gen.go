@@ -364,8 +364,6 @@ func (w *ServerInterfaceWrapper) RunNode(ctx echo.Context) error {
 func (w *ServerInterfaceWrapper) ListOperators(ctx echo.Context) error {
 	var err error
 
-	ctx.Set(BearerAuthScopes, []string{})
-
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.ListOperators(ctx)
 	return err
@@ -482,7 +480,7 @@ func (w *ServerInterfaceWrapper) GetToken(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter address: %s", err))
 	}
 
-	ctx.Set(BearerAuthScopes, []string{})
+	ctx.Set(PartnerAssertionScopes, []string{})
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params GetTokenParams
@@ -515,6 +513,8 @@ func (w *ServerInterfaceWrapper) ListWallets(ctx echo.Context) error {
 
 	ctx.Set(BearerAuthScopes, []string{})
 
+	ctx.Set(PartnerAssertionScopes, []string{})
+
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.ListWallets(ctx)
 	return err
@@ -525,6 +525,8 @@ func (w *ServerInterfaceWrapper) CreateWallet(ctx echo.Context) error {
 	var err error
 
 	ctx.Set(BearerAuthScopes, []string{})
+
+	ctx.Set(PartnerAssertionScopes, []string{})
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.CreateWallet(ctx)
@@ -1452,17 +1454,6 @@ type ListOperators200JSONResponse OperatorList
 func (response ListOperators200JSONResponse) VisitListOperatorsResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type ListOperators401ApplicationProblemPlusJSONResponse struct {
-	UnauthorizedApplicationProblemPlusJSONResponse
-}
-
-func (response ListOperators401ApplicationProblemPlusJSONResponse) VisitListOperatorsResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(401)
 
 	return json.NewEncoder(w).Encode(response)
 }

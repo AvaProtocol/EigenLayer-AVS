@@ -15,10 +15,11 @@ import (
 
 // ListSecrets — GET /api/v1/secrets
 func (s *Server) ListSecrets(ctx echo.Context, params generated.ListSecretsParams) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpListSecrets)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	req := &avsproto.ListSecretsReq{IncludeTimestamps: true}
 	if params.WorkflowId != nil {
@@ -55,10 +56,11 @@ func (s *Server) ListSecrets(ctx echo.Context, params generated.ListSecretsParam
 // if a secret with the same (name, scope) already exists; in that case
 // we fall through to UpdateSecret so PUT semantics hold.
 func (s *Server) PutSecret(ctx echo.Context, name string) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpPutSecret)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	var body generated.PutSecretRequest
 	if err := ctx.Bind(&body); err != nil {
@@ -96,10 +98,11 @@ func (s *Server) PutSecret(ctx echo.Context, name string) error {
 
 // DeleteSecret — DELETE /api/v1/secrets/{name}
 func (s *Server) DeleteSecret(ctx echo.Context, name string, params generated.DeleteSecretParams) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpDeleteSecret)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	req := &avsproto.DeleteSecretReq{Name: name}
 	if params.WorkflowId != nil {

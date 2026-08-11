@@ -40,10 +40,11 @@ const streamMinInterval = 250 * time.Millisecond
 // scan. Without workflowId we return 400 pointing the caller at the
 // nested route that does the same thing more explicitly.
 func (s *Server) ListExecutions(ctx echo.Context, params generated.ListExecutionsParams) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpListExecutions)
 	if err != nil {
 		return err
 	}
+	user := p.User
 	if params.WorkflowId == nil || len(*params.WorkflowId) == 0 {
 		return badRequest("EXECUTIONS_WORKFLOW_REQUIRED",
 			"workflowId filter required",
@@ -63,10 +64,11 @@ func (s *Server) ListExecutions(ctx echo.Context, params generated.ListExecution
 // Nested convenience route. The path parameter `id` pins the workflowId
 // so the handler can hand the engine a single TaskIds entry.
 func (s *Server) ListExecutionsForWorkflow(ctx echo.Context, id generated.Ulid, params generated.ListExecutionsForWorkflowParams) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpListExecutionsForWorkflow)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	req := buildListExecutionsReq([]generated.Ulid{id}, params.After, params.Before, params.Limit)
 	resp, err := s.engine.ListExecutions(user, req)
@@ -83,10 +85,11 @@ func (s *Server) ListExecutionsForWorkflow(ctx echo.Context, id generated.Ulid, 
 // global index. Callers that already know the workflow can use the
 // nested form (`GET /workflows/{id}/executions`) too.
 func (s *Server) GetExecution(ctx echo.Context, id generated.Ulid, params generated.GetExecutionParams) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpGetExecution)
 	if err != nil {
 		return err
 	}
+	user := p.User
 	workflowID := string(params.WorkflowId)
 	exec, err := s.engine.GetExecution(user, &avsproto.ExecutionReq{
 		TaskId:      workflowID,
@@ -108,10 +111,11 @@ func (s *Server) GetExecution(ctx echo.Context, id generated.Ulid, params genera
 // The caller must own the workflow; the engine's gate (DeliverSignal) rejects a
 // signal with no pending wait, a mismatched kind, or one that has timed out.
 func (s *Server) SignalExecution(ctx echo.Context, id generated.Ulid, params generated.SignalExecutionParams) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpSignalExecution)
 	if err != nil {
 		return err
 	}
+	user := p.User
 	var body generated.SignalExecutionRequest
 	if err := ctx.Bind(&body); err != nil {
 		return badRequest("SIGNAL_BAD_REQUEST", "Invalid request body", err.Error())
@@ -145,10 +149,11 @@ func (s *Server) SignalExecution(ctx echo.Context, id generated.Ulid, params gen
 // clients polling for terminal state without paying the cost of
 // fetching the full execution record.
 func (s *Server) GetExecutionStatus(ctx echo.Context, id generated.Ulid, params generated.GetExecutionStatusParams) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpGetExecutionStatus)
 	if err != nil {
 		return err
 	}
+	user := p.User
 	workflowID := string(params.WorkflowId)
 	statusResp, err := s.engine.GetExecutionStatus(user, &avsproto.ExecutionReq{
 		TaskId:      workflowID,
@@ -177,10 +182,11 @@ func (s *Server) GetExecutionStatus(ctx echo.Context, id generated.Ulid, params 
 // when the status changes. Closes on terminal status, after
 // streamMaxDuration, or when the client disconnects.
 func (s *Server) StreamExecution(ctx echo.Context, id generated.Ulid, params generated.StreamExecutionParams) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpStreamExecution)
 	if err != nil {
 		return err
 	}
+	user := p.User
 	workflowID := string(params.WorkflowId)
 
 	interval := time.Second
@@ -302,10 +308,11 @@ func (s *Server) StreamExecution(ctx echo.Context, id generated.Ulid, params gen
 
 // CountExecutions — GET /api/v1/executions:count
 func (s *Server) CountExecutions(ctx echo.Context, params generated.CountExecutionsParams) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpCountExecutions)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	req := &avsproto.GetExecutionCountReq{}
 	if params.WorkflowId != nil {
@@ -322,10 +329,11 @@ func (s *Server) CountExecutions(ctx echo.Context, params generated.CountExecuti
 
 // ExecutionStats — GET /api/v1/executions:stats
 func (s *Server) ExecutionStats(ctx echo.Context, params generated.ExecutionStatsParams) error {
-	user, err := s.requireUser(ctx)
+	p, err := s.ensurePermission(ctx, OpExecutionStats)
 	if err != nil {
 		return err
 	}
+	user := p.User
 
 	req := &avsproto.GetExecutionStatsReq{}
 	if params.WorkflowId != nil {

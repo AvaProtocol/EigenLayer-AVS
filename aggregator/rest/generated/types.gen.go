@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	BearerAuthScopes = "bearerAuth.Scopes"
+	BearerAuthScopes       = "bearerAuth.Scopes"
+	PartnerAssertionScopes = "partnerAssertion.Scopes"
 )
 
 // Defines values for AwaitNodeType.

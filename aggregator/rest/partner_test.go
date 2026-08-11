@@ -74,31 +74,10 @@ func validClaims() jwt.MapClaims {
 	return jwt.MapClaims{
 		"iss":   "studio",
 		"sub":   testPartnerSubject,
-		"scope": "simulate",
+		"scope": "read",
 		"iat":   time.Now().Unix(),
 		"exp":   time.Now().Add(5 * time.Minute).Unix(),
 	}
-}
-
-func TestRequireSimulateAuth_PartnerHappyPath(t *testing.T) {
-	pub, priv, _ := ed25519.GenerateKey(nil)
-	s := newPartnerServer(t, pub, []string{scopeSimulate}, partnerStatusActive)
-
-	user, err := s.requireSimulateAuth(ctxWithAssertion(signAssertion(t, priv, validClaims())))
-	if err != nil {
-		t.Fatalf("expected success, got error: %v", err)
-	}
-	if got := user.Address.Hex(); got != testPartnerSubject {
-		t.Fatalf("expected acting address %s, got %s", testPartnerSubject, got)
-	}
-}
-
-func TestRequireSimulateAuth_NoCredential(t *testing.T) {
-	pub, _, _ := ed25519.GenerateKey(nil)
-	s := newPartnerServer(t, pub, []string{scopeSimulate}, partnerStatusActive)
-
-	_, err := s.requireSimulateAuth(ctxWithAssertion(""))
-	assertHTTPStatus(t, err, http.StatusUnauthorized)
 }
 
 // ctxWithUser builds an Echo context as the JWT middleware would leave it —
@@ -109,25 +88,6 @@ func ctxWithUser(subject string) echo.Context {
 	c := e.NewContext(req, httptest.NewRecorder())
 	c.Set("auth.user", &restmw.AuthenticatedUser{Subject: subject})
 	return c
-}
-
-func TestRequireSimulateAuth_PrefersUserJWT(t *testing.T) {
-	pub, _, _ := ed25519.GenerateKey(nil)
-	s := newPartnerServer(t, pub, []string{scopeSimulate}, partnerStatusActive)
-
-	const subject = "0x2222222222222222222222222222222222222222"
-	user, err := s.requireSimulateAuth(ctxWithUser(subject))
-	if err != nil {
-		t.Fatalf("valid user JWT should succeed, got: %v", err)
-	}
-	if user.Address.Hex() != subject {
-		t.Fatalf("expected user %s, got %s", subject, user.Address.Hex())
-	}
-
-	// A present-but-empty-subject JWT must be rejected, NOT silently fall
-	// through to the partner path.
-	_, err = s.requireSimulateAuth(ctxWithUser(""))
-	assertHTTPStatus(t, err, http.StatusUnauthorized)
 }
 
 func TestDecodeEd25519Keys_TolerantAndMultiEncoding(t *testing.T) {
@@ -171,7 +131,7 @@ func TestVerifyPartnerAssertion_Rejections(t *testing.T) {
 		{
 			name: "wrong signing key",
 			server: func(t *testing.T) *Server {
-				return newPartnerServer(t, pub, []string{scopeSimulate}, partnerStatusActive)
+				return newPartnerServer(t, pub, []string{scopeRead}, partnerStatusActive)
 			},
 			// Signed by a key the registry doesn't know.
 			assertion:  func(t *testing.T) string { return signAssertion(t, otherPriv, validClaims()) },
@@ -180,7 +140,7 @@ func TestVerifyPartnerAssertion_Rejections(t *testing.T) {
 		{
 			name: "unknown issuer",
 			server: func(t *testing.T) *Server {
-				return newPartnerServer(t, pub, []string{scopeSimulate}, partnerStatusActive)
+				return newPartnerServer(t, pub, []string{scopeRead}, partnerStatusActive)
 			},
 			assertion: func(t *testing.T) string {
 				c := validClaims()
@@ -191,7 +151,7 @@ func TestVerifyPartnerAssertion_Rejections(t *testing.T) {
 		},
 		{
 			name:       "suspended partner",
-			server:     func(t *testing.T) *Server { return newPartnerServer(t, pub, []string{scopeSimulate}, "suspended") },
+			server:     func(t *testing.T) *Server { return newPartnerServer(t, pub, []string{scopeRead}, "suspended") },
 			assertion:  func(t *testing.T) string { return signAssertion(t, priv, validClaims()) },
 			wantStatus: http.StatusForbidden,
 		},
@@ -204,7 +164,7 @@ func TestVerifyPartnerAssertion_Rejections(t *testing.T) {
 		{
 			name: "scope not declared in token",
 			server: func(t *testing.T) *Server {
-				return newPartnerServer(t, pub, []string{scopeSimulate}, partnerStatusActive)
+				return newPartnerServer(t, pub, []string{scopeRead}, partnerStatusActive)
 			},
 			assertion: func(t *testing.T) string {
 				c := validClaims()
@@ -216,7 +176,7 @@ func TestVerifyPartnerAssertion_Rejections(t *testing.T) {
 		{
 			name: "expired assertion",
 			server: func(t *testing.T) *Server {
-				return newPartnerServer(t, pub, []string{scopeSimulate}, partnerStatusActive)
+				return newPartnerServer(t, pub, []string{scopeRead}, partnerStatusActive)
 			},
 			assertion: func(t *testing.T) string {
 				c := validClaims()
@@ -228,7 +188,7 @@ func TestVerifyPartnerAssertion_Rejections(t *testing.T) {
 		{
 			name: "ttl too long",
 			server: func(t *testing.T) *Server {
-				return newPartnerServer(t, pub, []string{scopeSimulate}, partnerStatusActive)
+				return newPartnerServer(t, pub, []string{scopeRead}, partnerStatusActive)
 			},
 			assertion: func(t *testing.T) string {
 				c := validClaims()
@@ -240,7 +200,7 @@ func TestVerifyPartnerAssertion_Rejections(t *testing.T) {
 		{
 			name: "missing expiry",
 			server: func(t *testing.T) *Server {
-				return newPartnerServer(t, pub, []string{scopeSimulate}, partnerStatusActive)
+				return newPartnerServer(t, pub, []string{scopeRead}, partnerStatusActive)
 			},
 			assertion: func(t *testing.T) string {
 				c := validClaims()
@@ -254,7 +214,7 @@ func TestVerifyPartnerAssertion_Rejections(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := tc.server(t)
-			_, err := s.verifyPartnerAssertion(ctxWithAssertion(tc.assertion(t)), scopeSimulate)
+			_, err := s.verifyPartnerAssertion(ctxWithAssertion(tc.assertion(t)), scopeRead)
 			assertHTTPStatus(t, err, tc.wantStatus)
 		})
 	}
@@ -264,10 +224,10 @@ func TestVerifyPartnerAssertion_Audience(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 
 	t.Run("matching audience accepted", func(t *testing.T) {
-		s := newPartnerServerAud(t, pub, []string{scopeSimulate}, partnerStatusActive, "avs-gateway-staging")
+		s := newPartnerServerAud(t, pub, []string{scopeRead}, partnerStatusActive, "avs-gateway-staging")
 		c := validClaims()
 		c["aud"] = "avs-gateway-staging"
-		principal, err := s.verifyPartnerAssertion(ctxWithAssertion(signAssertion(t, priv, c)), scopeSimulate)
+		principal, err := s.verifyPartnerAssertion(ctxWithAssertion(signAssertion(t, priv, c)), scopeRead)
 		if err != nil {
 			t.Fatalf("expected success, got: %v", err)
 		}
@@ -277,41 +237,46 @@ func TestVerifyPartnerAssertion_Audience(t *testing.T) {
 	})
 
 	t.Run("missing/mismatched audience rejected", func(t *testing.T) {
-		s := newPartnerServerAud(t, pub, []string{scopeSimulate}, partnerStatusActive, "avs-gateway-staging")
+		s := newPartnerServerAud(t, pub, []string{scopeRead}, partnerStatusActive, "avs-gateway-staging")
 		// Assertion targets prod, gateway expects staging.
 		c := validClaims()
 		c["aud"] = "avs-gateway-prod"
-		_, err := s.verifyPartnerAssertion(ctxWithAssertion(signAssertion(t, priv, c)), scopeSimulate)
+		_, err := s.verifyPartnerAssertion(ctxWithAssertion(signAssertion(t, priv, c)), scopeRead)
 		assertHTTPStatus(t, err, http.StatusUnauthorized)
 	})
 }
 
-// requireWalletDeriveAuth must reject a partner assertion whose `sub` is not a
-// concrete EOA — a smart wallet can't be derived without an owner.
-func TestRequireWalletDeriveAuth_OpaqueSubjectRejected(t *testing.T) {
+// Preview wallet resolve must reject a partner assertion whose `sub` is not a
+// concrete non-zero EOA — a smart wallet can't be derived without an owner.
+func TestEnsurePermission_WalletPreview_OpaqueSubjectRejected(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
-	s := newPartnerServer(t, pub, []string{scopeSimulate}, partnerStatusActive)
+	s := newPartnerServer(t, pub, []string{scopeRead}, partnerStatusActive)
 
 	c := validClaims()
 	c["sub"] = "studio-user-42" // not an address
-	_, err := s.requireWalletDeriveAuth(ctxWithAssertion(signAssertion(t, priv, c)))
+	_, err := s.ensurePermission(ctxWithAssertion(signAssertion(t, priv, c)), OpListWallets)
+	assertHTTPStatus(t, err, http.StatusBadRequest)
+
+	c = validClaims()
+	c["sub"] = "0x0000000000000000000000000000000000000000"
+	_, err = s.ensurePermission(ctxWithAssertion(signAssertion(t, priv, c)), OpListWallets)
 	assertHTTPStatus(t, err, http.StatusBadRequest)
 
 	// With a real EOA sub it resolves to that owner.
-	user, err := s.requireWalletDeriveAuth(ctxWithAssertion(signAssertion(t, priv, validClaims())))
+	p, err := s.ensurePermission(ctxWithAssertion(signAssertion(t, priv, validClaims())), OpListWallets)
 	if err != nil {
 		t.Fatalf("expected success with address sub, got: %v", err)
 	}
-	if user.Address.Hex() != testPartnerSubject {
-		t.Fatalf("expected owner %s, got %s", testPartnerSubject, user.Address.Hex())
+	if p.User.Address.Hex() != testPartnerSubject {
+		t.Fatalf("expected owner %s, got %s", testPartnerSubject, p.User.Address.Hex())
 	}
 }
 
 func TestVerifyPartnerAssertion_AbsentHeaderFallsThrough(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(nil)
-	s := newPartnerServer(t, pub, []string{scopeSimulate}, partnerStatusActive)
+	s := newPartnerServer(t, pub, []string{scopeRead}, partnerStatusActive)
 
-	principal, err := s.verifyPartnerAssertion(ctxWithAssertion(""), scopeSimulate)
+	principal, err := s.verifyPartnerAssertion(ctxWithAssertion(""), scopeRead)
 	if err != nil {
 		t.Fatalf("absent header must not error, got: %v", err)
 	}

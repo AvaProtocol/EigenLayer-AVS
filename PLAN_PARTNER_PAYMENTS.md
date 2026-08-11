@@ -174,19 +174,102 @@ controller-signed authKey path. **Seam to preserve now:** the execute authorizat
 single, swappable check (today: "controller can sign for this wallet"; tomorrow: "Calibur permission
 exists") so dropping Calibur in does not touch the partner/scope layer.
 
-**Why Calibur, and not a 4337-routed EIP-7702 account: no EntryPoint migration.** We run **EntryPoint
-v0.6** today ([client.go:25](pkg/erc4337/bundler/client.go#L25), `EntryPointV06Address`), while every
-EIP-7702 delegation candidate surveyed in
-[discussion #658](https://github.com/AvaProtocol/EigenLayer-AVS/discussions/658) targets EntryPoint v0.7+.
-Forcing 7702 accounts through our 4337/bundler rails would drag in a v0.6→v0.7 migration we have not
-scoped. Calibur's relayer-native / direct-transaction model instead lets the aggregator EOA sign and
-submit the call directly — **no bundler, no EntryPoint upgrade** — which is the decisive reason it is the
-pick over a bundler-routed 7702 account. This reinforces the seam above: only the swappable authority
-check changes; the execution transport stays put and forces no infra migration. **De-risking next step
-(small + verifiable, not a full build):** a minimal Sepolia PoC of a Calibur-delegated EOA executing a
-single scoped call directly from the aggregator EOA (no bundler) and then revoking that authority — tx
-hashes proving the direct-transaction path works, no EntryPoint migration is needed, and revocation
-behaves — before any production code lands.
+**Why Calibur: it automates a different wallet than MA v2 does.** MA v2 operates the **smart wallet we
+derive from the user's EOA** — a separate contract at a factory address, which the user must fund before
+we can automate anything in it. Calibur automates the **user's EOA itself**, via EIP-7702 delegation: the
+account is the address the user already has, holding the assets they already hold, with no second address
+and no funding step. These are complementary products, not competing implementations of one product. The
+seam above stays the same either way — only the authority check swaps.
+
+**Superseded rationale — the EntryPoint v0.6 argument no longer applies.** An earlier revision of this
+section argued for Calibur on the grounds that we ran EntryPoint v0.6 while every 7702 candidate targeted
+v0.7+, making a bundler-routed 7702 account a forced migration. **We have since completed that cutover.**
+MA v2 on EntryPoint v0.7 is the only account provider we allow
+([config.go:58](core/config/config.go#L58) pins `EntryPointV07AddressHex`,
+[config.go:385](core/config/config.go#L385) returns v0.7 for MA v2 chains,
+[config.go:407](core/config/config.go#L407) rejects anything but `modular_account_v2`); see
+[docs/changes/20260807-retire-v06-send-path.md](docs/changes/20260807-retire-v06-send-path.md). The `EntryPointV06Address` constant survives only as legacy in [bundler/client.go:25](pkg/erc4337/bundler/client.go#L25). Do not
+cite the migration cost as a reason for anything.
+
+**The comparison that does remain: Calibur vs MA v2's own 7702 mode.** MA v2 also ships a 7702 flavor
+that delegates the user's EOA to the MA v2 implementation — same wallet type Calibur targets, so the
+choice is genuine and lives entirely in the EOA lane. **This was already surfaced in
+[discussion #658](https://github.com/AvaProtocol/EigenLayer-AVS/discussions/658) §4.4** — "In Alchemy's
+Account Kit, 7702 is the default mode for new accounts", with "session keys with allowlists, ERC-20 and
+native spend limits, expiries", which that survey itself called "precisely the scoped-controller shape we
+need" — but MA v2 was ranked *credible third* rather than finalist on three counterweights: smaller
+ERC-6900 module ecosystem, a 4337-first design that makes direct transactions less natural, and tooling
+gravity toward Alchemy's stack. **Two of those three have since evaporated:** the EntryPoint migration
+cost is gone (above), and we now run Alchemy's bundler and Gas Manager by default, so "gravity toward
+Alchemy's stack" describes where we already are.
+
+What survives is the one real trade-off: Calibur's relayer-native model lets the aggregator sign and
+submit `execute()` directly (**no bundler, no EntryPoint** — verified at 128,296 gas), while MA v2 7702
+routes every op as a UserOp through EntryPoint v0.7 and a bundler. Against that, MA v2 keeps us on **one
+account system whose permission layer is already audited** (ChainLight 2024-12-03, Quantstamp 2024-12-11)
+rather than a second, parallel one **whose scoping we author and audit ourselves** — and the three
+findings below are concrete evidence that the DIY path is easy to get wrong in ways that fail open. That
+re-weighting postdates #658 and warrants a re-score rather than inheriting its finalist.
+
+**MA v2 7702 semantics — VERIFIED 2026-08-10, no longer the open input.** An earlier revision of this
+paragraph called this the least-settled question. It has since been answered on a Sepolia fork against
+the canonical deployed contracts ([chrisli30/mav2-7702-poc](https://github.com/chrisli30/mav2-7702-poc)):
+
+- **`SemiModularAccount7702`** at `0x69007702764179f14F51cdce752f4f775d74E139` (`alchemy.sma-7702.1.0.0`);
+  its `entryPoint()` returns `0x0000000071727De22E5E9d8BAf0edAc6f37da032` — **byte-identical to the v0.7
+  EntryPoint we already run** ([config.go:58](core/config/config.go#L58)). The account↔EntryPoint pairing
+  question is closed: no migration, no new infra. Delegate only to this variant — Alchemy warns the other
+  MA v2 variants have unprotected initializers.
+- **Signing authority is opt-in and account-enforced.** ERC-6900 makes it a per-validation flag and
+  requires the account to honour it; MA v2 implements that in `ModularAccountBase._exec1271Validation`.
+  A session key installed without `isSignatureValidation` reverts `SignatureValidationInvalid` when used
+  to sign. **This is the exact inverse of finding 1 below** — where Calibur admits any registered key by
+  default, MA v2 refuses by default, so on the property #658 called non-negotiable MA v2 is correct by
+  construction and Calibur requires us to build it.
+- **A grant is upgradeable but never self-upgradeable.** The owner can widen scope later; a scoped key
+  cannot install another validation. Consistent with the guardrail already enforced in our own code —
+  `aa.SessionGrant.Validate()` ([ma_v2_install.go](core/chainio/aa/ma_v2_install.go)) refuses to pack a
+  global grant carrying no execution hook, and `PackSessionSignerInstall` calls it on every path.
+
+- **Alchemy's managed session-key path never grants signing either — not even `root`.** aa-sdk's
+  `PermissionBuilder` (`packages/smart-accounts/src/ma-v2/permissionBuilder.ts`) hardcodes
+  `isSignatureValidation: false` in both places it appears — the default config and the per-permission
+  config — and no branch mutates it. The `root` permission, which its own docs call "very dangerous",
+  sets `isGlobal = true` **and nothing else**. So even a root-scoped Alchemy session key can execute
+  anything yet still cannot answer `isValidSignature` as the user. Signature authority is reachable only
+  through the low-level `installValidation` decorator, where the caller supplies the flag byte
+  explicitly — a deliberate act, never a default. This closes the last open input in the re-score.
+
+The EOA-side consent flow this would require of Studio (two approvals, component ownership, re-consent) is
+out of scope here and documented privately in avs-infra, `EOA_7702_Delegation_Consent_Model.md`.
+
+**De-risking step: DONE.** The Sepolia PoC landed and was independently verified —
+[calibur-7702-poc](https://github.com/Antrikshgwal/calibur-7702-poc), verification branch and write-up at
+[chrisli30/calibur-7702-poc @ verify/ava-protocol-standalone](https://github.com/chrisli30/calibur-7702-poc/tree/verify/ava-protocol-standalone).
+Direct-transaction path works (aggregator-relayed scoped `execute()`, 128,296 gas, no bundler); revocation
+and expiry are total. **Three findings that must shape any production build:**
+
+1. **Scoping does not cover the signature path.** The policy hook is address-flag dispatched, and the
+   execution flags (`0x18`) leave `AFTER_IS_VALID_SIGNATURE_FLAG` (`1 << 2`) clear. Calibur's
+   `isValidSignature` admits any registered, unexpired key with no target or value scoping, so a
+   "scoped" key can mint arbitrary ERC-1271 account signatures — Permit2 approvals, Seaport orders — a
+   token drain that never reaches `beforeExecute`. **This is worse here than it would be on a derived
+   smart wallet**, precisely because of the wallet-type distinction above: the EOA is the user's primary
+   asset store, not a purpose-funded automation wallet. That is exactly the hazard #658 named as its
+   second hard constraint — "on a delegated EOA the blast radius is *everything the user owns* … the
+   controller must hold a scoped, expiring, user-revocable key — never root-equivalent access. This is
+   non-negotiable" — so the PoC as built does not yet clear the bar the survey set for it. A production
+   hook must mine for `0x1f` and explicitly deny the validation callbacks.
+2. **Hook scoping is fail-open.** `KeyManagement.update` accepts any hook with code and any nonzero flag
+   bit, so a mis-flagged hook is accepted, *looks* attached in `getKeySettings`, and silently enforces
+   nothing. Assert the hook's address bits at registration, not just at deploy.
+3. **Sponsored delegation fails silently on forge ≥ 1.2.** `vm.signAndAttachDelegation` signs
+   `accountNonce + 1`, valid only for a self-send; with the aggregator as sender the authorization is
+   *skipped* rather than rejected, the type-4 tx lands status 1, and nothing is delegated. Sponsored
+   relay is exactly our model — confirm delegation by reading `code(account)`, never by tx status.
+
+Common shape across all three: the bound is absent and the system reports success. Any Calibur
+integration needs positive assertions that each bound is live.
 
 **4.2 Partner attribution on tasks.** Add `string partner_id = NN [json_name="partnerId"]` to
 `protobuf/avs.proto` (additive/`omitempty`; old tasks load via the existing `DiscardUnknown` path,

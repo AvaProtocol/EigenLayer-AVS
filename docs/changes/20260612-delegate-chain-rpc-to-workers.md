@@ -76,7 +76,7 @@ Two implementations:
    the `ChainRegistry` already maintained at `aggregator/chain_registry.go`,
    calls `ChainWorker.GetTokenMetadata` over the existing gRPC
    connection. The registry already knows the mapping
-   (`worker-bnb-mainnet.railway.internal:50051` → chain 56 etc.) —
+   (one worker address per chain_id, e.g. chain 56) —
    we'd just expose a getter.
 2. **Local-fallback** (single-binary, integration tests): falls back
    to the existing `TokenEnrichmentService` for callers that don't
@@ -104,7 +104,7 @@ Once Phase 2 is live and confirmed in production:
 
 1. Remove the per-chain RPC + bundler entries from
    `gateway-railway.yaml`'s `chains:` block. Each entry collapses to
-   just `worker_addr: worker-X.railway.internal:50051` + the static
+   just `worker_addr: <worker-host>:50051` + the static
    AVS contract addresses.
 2. Delete `SEPOLIA_RPC`, `BASE_RPC`, `ETHEREUM_RPC`, `BASE_SEPOLIA_RPC`,
    `BNB_RPC` env vars from the **gateway** Railway service. (The
@@ -137,7 +137,7 @@ ripping out the gateway's RPC config.
 ## Risks & rollback
 
 - **Worker-routed lookup latency**: adds 1 gRPC round-trip per token
-  lookup. Workers are on Railway's private network (`<svc>.railway.internal`),
+  lookup. Workers sit on the deployment's private network,
   so single-digit milliseconds. The local
   `TokenEnrichmentService` cache lives on the worker side now —
   consider whether the gateway also needs a thin LRU in front to

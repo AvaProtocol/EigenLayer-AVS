@@ -16,6 +16,9 @@ import (
 // authentication absence (security: []) so monitoring tools can probe
 // without credentials.
 func (s *Server) GetHealth(ctx echo.Context) error {
+	if _, err := s.ensurePermission(ctx, OpGetHealth); err != nil {
+		return err
+	}
 	status := generated.Ok
 	httpStatus := http.StatusOK
 

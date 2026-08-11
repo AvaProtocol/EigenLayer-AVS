@@ -37,6 +37,9 @@ const authMessageRequired = 8
 // the EigenLayer registration chain id (chain-agnostic auth). SDKs
 // construct the message locally; there is no GetSignatureFormat endpoint.
 func (s *Server) AuthExchange(ctx echo.Context) error {
+	if _, err := s.ensurePermission(ctx, OpAuthExchange); err != nil {
+		return err
+	}
 	var body generated.AuthExchangeRequest
 	if err := ctx.Bind(&body); err != nil {
 		return &restmw.HTTPError{
