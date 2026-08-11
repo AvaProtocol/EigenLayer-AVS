@@ -188,8 +188,7 @@ MA v2 on EntryPoint v0.7 is the only account provider we allow
 ([config.go:58](core/config/config.go#L58) pins `EntryPointV07AddressHex`,
 [config.go:385](core/config/config.go#L385) returns v0.7 for MA v2 chains,
 [config.go:407](core/config/config.go#L407) rejects anything but `modular_account_v2`); see
-[docs/changes/20260807-retire-v06-send-path.md](docs/changes/20260807-retire-v06-send-path.md). The v0.6
-constant survives only as legacy in [bundler/client.go:25](pkg/erc4337/bundler/client.go#L25). Do not
+[docs/changes/20260807-retire-v06-send-path.md](docs/changes/20260807-retire-v06-send-path.md). The `EntryPointV06Address` constant survives only as legacy in [bundler/client.go:25](pkg/erc4337/bundler/client.go#L25). Do not
 cite the migration cost as a reason for anything.
 
 **The comparison that does remain: Calibur vs MA v2's own 7702 mode.** MA v2 also ships a 7702 flavor
