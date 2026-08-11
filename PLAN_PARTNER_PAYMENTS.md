@@ -194,12 +194,25 @@ cite the migration cost as a reason for anything.
 
 **The comparison that does remain: Calibur vs MA v2's own 7702 mode.** MA v2 also ships a 7702 flavor
 that delegates the user's EOA to the MA v2 implementation — same wallet type Calibur targets, so the
-choice is genuine and lives entirely in the EOA lane. Trade-off, now that the migration argument is gone:
-Calibur's relayer-native model lets the aggregator sign and submit `execute()` directly (**no bundler, no
-EntryPoint**), while MA v2 7702 routes every op as a UserOp through EntryPoint v0.7 and a bundler but
-keeps us on **one account system with first-class validation modules** instead of a second, parallel one
-whose scoping we would own. Verify MA v2 7702 module semantics against current Alchemy docs before
-deciding — that is the least-settled input.
+choice is genuine and lives entirely in the EOA lane. **This was already surfaced in
+[discussion #658](https://github.com/AvaProtocol/EigenLayer-AVS/discussions/658) §4.4** — "In Alchemy's
+Account Kit, 7702 is the default mode for new accounts", with "session keys with allowlists, ERC-20 and
+native spend limits, expiries", which that survey itself called "precisely the scoped-controller shape we
+need" — but MA v2 was ranked *credible third* rather than finalist on three counterweights: smaller
+ERC-6900 module ecosystem, a 4337-first design that makes direct transactions less natural, and tooling
+gravity toward Alchemy's stack. **Two of those three have since evaporated:** the EntryPoint migration
+cost is gone (above), and we now run Alchemy's bundler and Gas Manager by default, so "gravity toward
+Alchemy's stack" describes where we already are.
+
+What survives is the one real trade-off: Calibur's relayer-native model lets the aggregator sign and
+submit `execute()` directly (**no bundler, no EntryPoint** — verified at 128,296 gas), while MA v2 7702
+routes every op as a UserOp through EntryPoint v0.7 and a bundler. Against that, MA v2 keeps us on **one
+account system whose permission layer is already audited** (ChainLight 2024-12-03, Quantstamp 2024-12-11)
+rather than a second, parallel one **whose scoping we author and audit ourselves** — and the three
+findings below are concrete evidence that the DIY path is easy to get wrong in ways that fail open. That
+re-weighting postdates #658 and warrants a re-score rather than inheriting its finalist. Verify MA v2 7702
+module semantics and the exact account↔EntryPoint pairing against current Alchemy docs before deciding —
+that is the least-settled input.
 
 **De-risking step: DONE.** The Sepolia PoC landed and was independently verified —
 [calibur-7702-poc](https://github.com/Antrikshgwal/calibur-7702-poc), verification branch and write-up at
@@ -213,8 +226,11 @@ and expiry are total. **Three findings that must shape any production build:**
    "scoped" key can mint arbitrary ERC-1271 account signatures — Permit2 approvals, Seaport orders — a
    token drain that never reaches `beforeExecute`. **This is worse here than it would be on a derived
    smart wallet**, precisely because of the wallet-type distinction above: the EOA is the user's primary
-   asset store, not a purpose-funded automation wallet. A production hook must mine for `0x1f` and
-   explicitly deny the validation callbacks.
+   asset store, not a purpose-funded automation wallet. That is exactly the hazard #658 named as its
+   second hard constraint — "on a delegated EOA the blast radius is *everything the user owns* … the
+   controller must hold a scoped, expiring, user-revocable key — never root-equivalent access. This is
+   non-negotiable" — so the PoC as built does not yet clear the bar the survey set for it. A production
+   hook must mine for `0x1f` and explicitly deny the validation callbacks.
 2. **Hook scoping is fail-open.** `KeyManagement.update` accepts any hook with code and any nonzero flag
    bit, so a mis-flagged hook is accepted, *looks* attached in `getKeySettings`, and silently enforces
    nothing. Assert the hook's address bits at registration, not just at deploy.
