@@ -231,9 +231,14 @@ the canonical deployed contracts ([chrisli30/mav2-7702-poc](https://github.com/c
   `aa.SessionGrant.Validate()` ([ma_v2_install.go](core/chainio/aa/ma_v2_install.go)) refuses to pack a
   global grant carrying no execution hook, and `PackSessionSignerInstall` calls it on every path.
 
-Still open: whether Alchemy's **managed** session-key API leaves `isSignatureValidation` unset — its eight
-documented permission types are all execution-scoped and none mentions signing, so the flag is not exposed
-there. The contract enforces it; the managed default is unverified. Resolve before using that path.
+- **Alchemy's managed session-key path never grants signing either — not even `root`.** aa-sdk's
+  `PermissionBuilder` (`packages/smart-accounts/src/ma-v2/permissionBuilder.ts`) hardcodes
+  `isSignatureValidation: false` in both places it appears — the default config and the per-permission
+  config — and no branch mutates it. The `root` permission, which its own docs call "very dangerous",
+  sets `isGlobal = true` **and nothing else**. So even a root-scoped Alchemy session key can execute
+  anything yet still cannot answer `isValidSignature` as the user. Signature authority is reachable only
+  through the low-level `installValidation` decorator, where the caller supplies the flag byte
+  explicitly — a deliberate act, never a default. This closes the last open input in the re-score.
 
 The EOA-side consent flow this would require of Studio (two approvals, component ownership, re-consent) is
 out of scope here and documented privately in avs-infra, `EOA_7702_Delegation_Consent_Model.md`.
