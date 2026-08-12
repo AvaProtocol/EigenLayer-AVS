@@ -5,10 +5,12 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"google.golang.org/grpc/status"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
@@ -45,8 +47,13 @@ const (
 	// consecutive misses before we call one gone.
 	operatorStaleAfter = 60 * time.Second
 
+	// One lowercase vocabulary for every status field in the payload. The
+	// worker RPC answers in uppercase ("OK"/"DEGRADED") and is normalized on
+	// the way in, so a consumer never has to case-match two conventions in
+	// the same document.
 	deepHealthOK       = "ok"
 	deepHealthDegraded = "degraded"
+	deepHealthDown     = "down"
 )
 
 type workerHealth struct {
@@ -80,6 +87,15 @@ type deepHealthCache struct {
 // lock is held across collection on purpose: concurrent callers that arrive
 // during a refresh wait for that one refresh rather than each starting their
 // own fan-out.
+//
+// The collection deliberately drops the caller's cancellation. Whichever
+// request wins the mutex triggers the refresh, but its result is served to
+// every caller for the rest of the TTL — so if that one client disconnected
+// mid-refresh, its canceled context would fail every WorkerHealthCheck and
+// cache a false "degraded" for everyone. On an unauthenticated endpoint that
+// is trivially reproducible, and it would make the monitor report an outage
+// that isn't happening. Values (tracing, Sentry) are preserved; the per-worker
+// timeout still bounds how long collection can run.
 func (c *deepHealthCache) get(ctx context.Context, agg *Aggregator) *deepHealthResp {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -88,7 +104,7 @@ func (c *deepHealthCache) get(ctx context.Context, agg *Aggregator) *deepHealthR
 		return c.result
 	}
 
-	c.result = agg.collectDeepHealth(ctx)
+	c.result = agg.collectDeepHealth(context.WithoutCancel(ctx))
 	c.at = time.Now()
 	return c.result
 }
@@ -122,9 +138,9 @@ func (agg *Aggregator) collectDeepHealth(ctx context.Context) *deepHealthResp {
 		resp.Workers = agg.checkWorkers(ctx)
 	}
 	for _, w := range resp.Workers {
-		// The worker reports DEGRADED when it cannot reach its chain RPC,
+		// The worker reports "degraded" when it cannot reach its chain RPC,
 		// which is as execution-fatal for that chain as being unreachable.
-		if w.Status != "OK" {
+		if w.Status != deepHealthOK {
 			resp.Status = deepHealthDegraded
 		}
 	}
@@ -158,7 +174,7 @@ func (agg *Aggregator) checkWorkers(ctx context.Context) []workerHealth {
 }
 
 func (agg *Aggregator) checkWorker(ctx context.Context, chainID int64) workerHealth {
-	out := workerHealth{ChainID: chainID, Status: "down"}
+	out := workerHealth{ChainID: chainID, Status: deepHealthDown}
 
 	if chainCfg, err := agg.chainRegistry.GetChainConfig(chainID); err == nil && chainCfg != nil {
 		out.ChainName = chainCfg.Name
@@ -178,11 +194,16 @@ func (agg *Aggregator) checkWorker(ctx context.Context, chainID int64) workerHea
 
 	health, err := entry.Client.WorkerHealthCheck(callCtx, &avsproto.WorkerHealthCheckReq{})
 	if err != nil {
-		out.Error = err.Error()
+		// Report the gRPC code, not err.Error(): transport failures embed the
+		// dialed target ("dial tcp 10.x.x.x:50051: connect: connection
+		// refused"), and this route is unauthenticated, so the raw string
+		// would hand internal worker addressing to anonymous callers. The code
+		// still distinguishes unreachable from timed-out from misconfigured.
+		out.Error = status.Code(err).String()
 		return out
 	}
 
-	out.Status = health.GetStatus()
+	out.Status = strings.ToLower(health.GetStatus())
 	out.LatestBlock = health.GetLatestBlock()
 	return out
 }
