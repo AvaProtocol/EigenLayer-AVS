@@ -108,8 +108,8 @@ func GetMoralisService(apiKey string, logger sdklogging.Logger) *MoralisService 
 // CONFIGURATION AND INITIALIZATION
 // =============================================================================
 
-// getChainTokenMapping returns native token information for supported chains
-// Only includes chains that the aggregator actually supports: Ethereum and Base
+// getChainTokenMapping returns native token information for supported chains.
+// Keep in lockstep with chainIDToMoralisChain.
 func getChainTokenMapping() map[int64]ChainToken {
 	return map[int64]ChainToken{
 		// Ethereum Mainnet and Testnet
@@ -135,6 +135,20 @@ func getChainTokenMapping() map[int64]ChainToken {
 			Decimals:     18,
 			ContractAddr: "0x4200000000000000000000000000000000000006", // WETH on Base Sepolia
 		},
+
+		// BNB Smart Chain — native is BNB; Moralis prices via WBNB.
+		56: {
+			Symbol:       "BNB",
+			Decimals:     18,
+			ContractAddr: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+		},
+
+		// Arbitrum One — native is ETH; price via WETH.
+		42161: {
+			Symbol:       "ETH",
+			Decimals:     18,
+			ContractAddr: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+		},
 	}
 }
 
@@ -154,11 +168,11 @@ func getChainTokenMapping() map[int64]ChainToken {
 // verified to return data for it. Mainnet chains where ETH is the
 // native token reuse Ethereum's price under the same fallback.
 var nativePricingSupportedChains = map[int64]bool{
-	1:    true, // Ethereum mainnet
-	8453: true, // Base mainnet
+	1:     true, // Ethereum mainnet
+	8453:  true, // Base mainnet
+	56:    true, // BNB Smart Chain
+	42161: true, // Arbitrum One
 	// Testnets intentionally absent: 11155111 (Sepolia), 84532 (Base-Sepolia).
-	// BNB Smart Chain (56) is also absent until its allowlist entry in
-	// chainIDToMoralisChain lands and is verified to return data.
 }
 
 // GetNativeTokenPriceUSD implements PriceService interface
@@ -330,8 +344,7 @@ func (ms *MoralisService) fetchTokenPrice(chainID int64, chainToken ChainToken) 
 	return big.NewFloat(result.UsdPrice), nil
 }
 
-// chainIDToMoralisChain converts chain ID to Moralis chain identifier
-// Only supports Ethereum and Base chains that the aggregator works with
+// chainIDToMoralisChain converts chain ID to Moralis chain identifier.
 func (ms *MoralisService) chainIDToMoralisChain(chainID int64) string {
 	switch chainID {
 	case 1:
@@ -342,6 +355,10 @@ func (ms *MoralisService) chainIDToMoralisChain(chainID int64) string {
 		return "base"
 	case 84532:
 		return "base-sepolia"
+	case 56:
+		return "bsc"
+	case 42161:
+		return "arbitrum"
 	default:
 		return ""
 	}
