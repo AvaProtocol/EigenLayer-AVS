@@ -53,23 +53,6 @@ func TestLookupTokenInCatalog_BNBMainnet(t *testing.T) {
 	}
 }
 
-func TestLookupTokenInCatalog_ArbitrumOne(t *testing.T) {
-	resetTokenCatalogForTesting()
-	t.Cleanup(resetTokenCatalogForTesting)
-
-	const arbUSDC = "0xaf88d065e77c8cc2239327c5edb3a432268e5831"
-	got := LookupTokenInCatalog(ChainIDArbitrumOne, arbUSDC, nil)
-	if got == nil {
-		t.Fatalf("expected catalog to resolve Arbitrum native USDC, got nil")
-	}
-	if got.Symbol != "USDC" {
-		t.Errorf("expected symbol USDC, got %q", got.Symbol)
-	}
-	if got.Decimals != 6 {
-		t.Errorf("expected decimals 6 for native Circle USDC, got %d", got.Decimals)
-	}
-}
-
 func TestLookupTokenInCatalog_ChainSpecificMatchPreferred(t *testing.T) {
 	resetTokenCatalogForTesting()
 	t.Cleanup(resetTokenCatalogForTesting)

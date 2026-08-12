@@ -46,7 +46,7 @@ tidy:
 # core/taskengine/tokenwhitelist/fs.go), so the runtime has no
 # filesystem dependency at all — sync-tokens is purely a build-time
 # concern.
-PROTOCOLS_VERSION ?= 0.10.0
+PROTOCOLS_VERSION ?= 0.5.0
 
 ## sync-tokens: refresh core/taskengine/tokenwhitelist/ from @avaprotocol/protocols
 .PHONY: sync-tokens

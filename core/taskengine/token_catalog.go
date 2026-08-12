@@ -51,7 +51,6 @@ var catalogFileNameToChainID = map[string]uint64{
 	"base.json":         ChainIDBase,
 	"base-sepolia.json": ChainIDBaseSepolia,
 	"bnb-mainnet.json":  ChainIDBNBMainnet,
-	"arbitrum.json":     ChainIDArbitrumOne,
 }
 
 // loadTokenCatalog walks the embedded whitelist FS and populates the

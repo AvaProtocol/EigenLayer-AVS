@@ -228,8 +228,6 @@ func (t *TokenEnrichmentService) LoadWhitelist() error {
 		filename = "base-sepolia.json"
 	case ChainIDBNBMainnet:
 		filename = "bnb-mainnet.json"
-	case ChainIDArbitrumOne:
-		filename = "arbitrum.json"
 	default:
 		// For unknown chains, try ethereum.json as fallback
 		filename = "ethereum.json"
