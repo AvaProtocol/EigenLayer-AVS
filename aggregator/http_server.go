@@ -126,6 +126,11 @@ func (agg *Aggregator) startHttpServer(ctx context.Context, extraMounts []HTTPMo
 	e.GET("/health", healthProbe)
 	e.GET("/up", healthProbe)
 
+	// Component-level health for uptime monitoring. The probes above only
+	// report whether this process is serving; this one asks the workers and
+	// operators whether the system can actually execute. See health_deep.go.
+	agg.registerDeepHealth(e)
+
 	e.GET("/operator", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, &HttpJsonResp[[]*OperatorNode]{
 			Data: agg.operatorPool.GetAll(),
