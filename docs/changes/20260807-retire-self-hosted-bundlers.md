@@ -1,5 +1,9 @@
 # Retire self-hosted Voltaire bundlers (in-repo path) — #725
 
+> **Completed 2026-08-12.** The observation gate passed and the fleet is gone. See
+> [Teardown (2026-08-12)](#teardown-2026-08-12) at the bottom for what was actually deleted.
+> Everything under "Out of scope" below is now done.
+
 ## Thesis
 
 Every production chain already runs `bundler_provider: alchemy`. The remaining
@@ -76,3 +80,56 @@ templates and workflow (mirror this repo's hard-fail on missing
 
 `bundler_provider: self_hosted` remains a valid option for a **locally-run**
 Voltaire. Only the shared public hosts and the CI silent-fallback are retired.
+
+## Teardown (2026-08-12)
+
+### The observation gate
+
+`bundler-sepolia` served **131** `eth_sendUserOperation` calls over Aug 5–7 (19 / 56 / 56),
+the last at **Aug 07 07:43 UTC** — roughly four hours after #724/#726 merged. Nothing after
+that, on any of the four backends. The last request of any kind from a Go client was also
+Aug 07; for the final 48 hours the only traffic was 576 `eth_chainId` health checks from a
+Better Stack uptime monitor.
+
+The issue warned this had already been misread three times, so each alternative was ruled out
+before deleting: the log pipeline was still live (all four backends emitting minutes before the
+check), retention was not truncating the window (the same filtered query still returned Aug 05
+hits), and the silence was under load — ava-sdk-js E2E ran Aug 8 (×3) and Aug 9 against the new
+stack, logging `bundler_provider: alchemy` for chain 11155111 and reaching 38/43 tests passing,
+so it exercised the send path rather than dying at boot.
+
+Caveat recorded for honesty: Aug 10–12 had no E2E runs (it is `pull_request`-triggered and there
+were no PRs), so the load-bearing evidence is Aug 8–9. This repo has no live-test workflow in CI
+at all — the Sepolia live suite runs locally via `make test` — so "days of PR traffic" was never
+going to be the signal here.
+
+### Deleted
+
+| What | Detail |
+| --- | --- |
+| Route 53 | 8 records in `avaprotocol.org` — 4 `bundler-*` CNAMEs + 4 `_railway-verify` TXT. Zone went 36 → 28 records. Deleted **first**, so no CNAME was left dangling at a freed `*.up.railway.app` target (subdomain-takeover risk). |
+| Railway services | `bundler-proxy` first, then `bundler-sepolia`, `bundler-base-sepolia`, `bundler-ethereum`, `bundler-base`. Project went 13 → 8 services. |
+| Railway vars | `BUNDLER_URL` on the four workers; `BASE_BUNDLER_URL`, `BASE_SEPOLIA_BUNDLER_URL`, `ETHEREUM_BUNDLER_URL`, `SEPOLIA_BUNDLER_URL` on the gateway. Dropped with `--skip-deploys` — they were already dead, and a cosmetic cleanup does not justify five production redeploys. Deployment IDs unchanged, all eight services still `SUCCESS`. |
+| GitHub secrets | `BUNDLER_URL` (ava-sdk-js, `dev` env — carried the shared apikey) and `BUNDLER_RPC` (EigenLayer-AVS, `Test` env). Both confirmed unreferenced by any workflow first. |
+
+Done with [`railway/retire-bundlers.sh`](https://github.com/AvaProtocol/avs-infra/blob/main/railway/retire-bundlers.sh)
+in avs-infra, which resolves service IDs by name from the Railway API and refuses to run if it
+resolves anything outside the five targets. Worth knowing: `railway service status --all` prints
+**deployment** IDs, not service IDs, and the CLI's `railway delete` deletes an entire *project* —
+there is no `service delete` subcommand, so the teardown goes through the GraphQL `serviceDelete`
+mutation.
+
+### Not lost
+
+The bundler EOA keys survive: `VOLTAIRE_BUNDLER_SECRET` on the deleted services was a copy of
+`environment_configs.*.bundler_private_key` in
+`terraform/environments/{staging,production}/terraform.tfvars` (verified by hash before deleting —
+one shared key per pair, sepolia + base-sepolia and ethereum + base). Both mainnet EOAs are dust
+(0.000024 ETH on Ethereum, 0.0000007 on Base); the two testnet EOAs never tripped the 0.05 ETH
+minimum-balance warning, so that Sepolia / Base-Sepolia ETH is still reclaimable.
+
+### Left for a human
+
+The four **Better Stack uptime monitors** on `bundler-*.avaprotocol.org` are manual UI objects —
+not in terraform, no API token in avs-infra — so they could not be removed programmatically and
+will now be alerting against dead hostnames. Delete them in the Better Stack dashboard.
