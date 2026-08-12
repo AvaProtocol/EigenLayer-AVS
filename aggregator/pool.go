@@ -68,15 +68,19 @@ func GetOperatorName(address string) string {
 	return "Unknown"
 }
 
+// LastSeenAt returns the operator's most recent ping. Records written by
+// older aggregators store the epoch in seconds and newer ones in
+// milliseconds, so both are normalized here.
+func (o *OperatorNode) LastSeenAt() time.Time {
+	if o.LastPingEpoch > 1e12 { // Threshold for milliseconds (timestamps after 2001)
+		return time.Unix(o.LastPingEpoch/1000, 0)
+	}
+	return time.Unix(o.LastPingEpoch, 0)
+}
+
 func (o *OperatorNode) LastSeen() string {
 	now := time.Now()
-
-	var last time.Time
-	if o.LastPingEpoch > 1e12 { // Threshold for milliseconds (timestamps after 2001)
-		last = time.Unix(o.LastPingEpoch/1000, 0)
-	} else {
-		last = time.Unix(o.LastPingEpoch, 0)
-	}
+	last := o.LastSeenAt()
 
 	duration := now.Sub(last)
 
