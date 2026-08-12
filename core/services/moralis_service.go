@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -165,8 +166,9 @@ func getChainTokenMapping() map[int64]ChainToken {
 // hardcoded fallback price directly.
 //
 // Add a chain here ONLY when Moralis's /erc20/.../price endpoint is
-// verified to return data for it. Mainnet chains where ETH is the
-// native token reuse Ethereum's price under the same fallback.
+// verified to return data for it. ETH-native mainnets (Ethereum, Base,
+// Arbitrum) may reuse the ETH hardcoded fallback if Moralis is down.
+// BNB must not — see getFallbackPrice.
 var nativePricingSupportedChains = map[int64]bool{
 	1:     true, // Ethereum mainnet
 	8453:  true, // Base mainnet
@@ -202,7 +204,10 @@ func (ms *MoralisService) GetNativeTokenPriceUSD(chainID int64) (*big.Float, err
 	// trip of latency or a Sentry capture. Cache the fallback so subsequent
 	// calls within the cache window hit the warm path.
 	if !nativePricingSupportedChains[chainID] {
-		fallback := ms.getFallbackPrice(chainToken.Symbol)
+		fallback, fbErr := ms.getFallbackPrice(chainToken.Symbol)
+		if fbErr != nil {
+			return nil, fbErr
+		}
 		ms.setCachedPrice(cacheKey, fallback, chainToken.Symbol)
 		return fallback, nil
 	}
@@ -215,8 +220,11 @@ func (ms *MoralisService) GetNativeTokenPriceUSD(chainID int64) (*big.Float, err
 			"symbol", chainToken.Symbol,
 			"error", err)
 
-		// Return fallback price based on token type
-		return ms.getFallbackPrice(chainToken.Symbol), nil
+		fallback, fbErr := ms.getFallbackPrice(chainToken.Symbol)
+		if fbErr != nil {
+			return nil, fmt.Errorf("moralis price fetch failed and no safe fallback for %s: %w", chainToken.Symbol, err)
+		}
+		return fallback, nil
 	}
 
 	// Cache the result
@@ -395,15 +403,19 @@ func (ms *MoralisService) getETHPrice() (*big.Float, error) {
 	return ms.GetNativeTokenPriceUSD(1) // Ethereum mainnet
 }
 
-// getFallbackPrice returns hardcoded fallback prices for supported tokens
-// Only includes ETH since aggregator only supports Ethereum and Base chains
-func (ms *MoralisService) getFallbackPrice(symbol string) *big.Float {
-	// Only ETH is supported across all chains (Ethereum and Base)
-	if symbol == "ETH" {
-		return big.NewFloat(2500.0)
+// getFallbackPrice returns a hardcoded USD price when Moralis is unavailable.
+// Only ETH has a fallback: it is the native on Ethereum / Base / Arbitrum, and
+// the existing testnet skip path depends on it. Non-ETH natives (BNB) must
+// not inherit $2500 — ConvertUSDToWei divides by this number, so an ETH-shaped
+// BNB price would silently undercharge. Callers treat a non-nil error as
+// "no price", not "use ETH anyway".
+func (ms *MoralisService) getFallbackPrice(symbol string) (*big.Float, error) {
+	switch strings.ToUpper(strings.TrimSpace(symbol)) {
+	case "ETH":
+		return big.NewFloat(2500.0), nil
+	default:
+		return nil, fmt.Errorf("no hardcoded fallback price for native token %q", symbol)
 	}
-
-	return big.NewFloat(2500.0) // Default to ETH price
 }
 
 // CleanupCache removes expired cache entries (called periodically)

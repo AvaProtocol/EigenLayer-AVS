@@ -130,6 +130,7 @@ var chainBlockTime = map[int64]time.Duration{
 	8453:     2 * time.Second,        // Base
 	84532:    2 * time.Second,        // Base Sepolia
 	56:       750 * time.Millisecond, // BNB Smart Chain (post-Maxwell sub-second blocks)
+	42161:    250 * time.Millisecond, // Arbitrum One (~250ms; under-estimate vs typical 200–300ms)
 }
 
 // defaultBlockTime is used for a chain absent from the table. Deliberately
