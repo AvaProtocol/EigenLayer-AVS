@@ -232,7 +232,9 @@ func whitelistFileForChain(chainID uint64) (filename string, skip bool) {
 	case ChainIDArbitrumOne:
 		return "", true
 	default:
-		return "ethereum.json", false
+		// Unknown chain: skip, don't inherit Ethereum's list. A CREATE2
+		// address that exists on both would otherwise get ETH metadata.
+		return "", true
 	}
 }
 
