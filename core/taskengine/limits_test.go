@@ -295,6 +295,12 @@ func TestBlockTimeForChain(t *testing.T) {
 	if got := blockTimeForChain(1); got != 12*time.Second {
 		t.Errorf("Ethereum block time = %v, want 12s", got)
 	}
+	if got := blockTimeForChain(42161); got != 250*time.Millisecond {
+		t.Errorf("Arbitrum block time = %v, want 250ms (must under-estimate, not use the 1s default)", got)
+	}
+	if got := blockTimeForChain(56); got != 750*time.Millisecond {
+		t.Errorf("BNB block time = %v, want 750ms", got)
+	}
 	// An unlisted chain must fall back to the *strict* default, never a
 	// permissive one — overestimating block time would open a hole.
 	if got := blockTimeForChain(424242); got != defaultBlockTime {

@@ -95,6 +95,7 @@ const (
 	ChainIDBase        uint64 = 8453
 	ChainIDBaseSepolia uint64 = 84532
 	ChainIDBNBMainnet  uint64 = 56
+	ChainIDArbitrumOne uint64 = 42161
 )
 
 // Native token sentinel address used by Moralis and other services
@@ -213,23 +214,39 @@ func newTokenEnrichmentService(
 	return service, nil
 }
 
+// whitelistFileForChain returns the embedded token-list filename for chainID.
+// skip=true means this chain has no sidecar yet — do not load another chain's
+// list (CREATE2-shared addresses would be attributed to the wrong chain).
+func whitelistFileForChain(chainID uint64) (filename string, skip bool) {
+	switch chainID {
+	case ChainIDEthereum:
+		return "ethereum.json", false
+	case ChainIDSepolia:
+		return "sepolia.json", false
+	case ChainIDBase:
+		return "base.json", false
+	case ChainIDBaseSepolia:
+		return "base-sepolia.json", false
+	case ChainIDBNBMainnet:
+		return "bnb-mainnet.json", false
+	case ChainIDArbitrumOne:
+		return "", true
+	default:
+		// Unknown chain: skip, don't inherit Ethereum's list. A CREATE2
+		// address that exists on both would otherwise get ETH metadata.
+		return "", true
+	}
+}
+
 // LoadWhitelist loads token metadata from whitelist files
 func (t *TokenEnrichmentService) LoadWhitelist() error {
-	var filename string
-	switch t.chainID {
-	case ChainIDEthereum:
-		filename = "ethereum.json"
-	case ChainIDSepolia:
-		filename = "sepolia.json"
-	case ChainIDBase:
-		filename = "base.json"
-	case ChainIDBaseSepolia:
-		filename = "base-sepolia.json"
-	case ChainIDBNBMainnet:
-		filename = "bnb-mainnet.json"
-	default:
-		// For unknown chains, try ethereum.json as fallback
-		filename = "ethereum.json"
+	filename, skip := whitelistFileForChain(t.chainID)
+	if skip {
+		if t.logger != nil {
+			t.logger.Info("No token whitelist sidecar for chain; metadata will come from RPC",
+				"chainID", t.chainID)
+		}
+		return nil
 	}
 
 	// Read from the embedded FS — see core/taskengine/tokenwhitelist for

@@ -89,6 +89,14 @@ var chainIDMap = map[string]string{
 	"binance": "bsc",
 	"56":      "bsc",
 	"0x38":    "bsc",
+
+	// Arbitrum One
+	"arbitrum":     "arbitrum",
+	"arbitrum-one": "arbitrum",
+	"arbitrum one": "arbitrum",
+	"arb":          "arbitrum",
+	"42161":        "arbitrum",
+	"0xa4b1":       "arbitrum",
 }
 
 // normalizeChainID converts various chain identifier formats to Moralis chain name
