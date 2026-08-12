@@ -553,6 +553,24 @@ func TestBalanceNode_ChainNormalization(t *testing.T) {
 			shouldError:   false,
 		},
 		{
+			name:          "BNB by chain ID",
+			inputChain:    "56",
+			expectedChain: "bsc",
+			shouldError:   false,
+		},
+		{
+			name:          "Arbitrum by name",
+			inputChain:    "arbitrum",
+			expectedChain: "arbitrum",
+			shouldError:   false,
+		},
+		{
+			name:          "Arbitrum by chain ID",
+			inputChain:    "42161",
+			expectedChain: "arbitrum",
+			shouldError:   false,
+		},
+		{
 			name:        "Unsupported chain",
 			inputChain:  "unsupported-chain",
 			shouldError: true,

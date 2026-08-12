@@ -95,6 +95,7 @@ const (
 	ChainIDBase        uint64 = 8453
 	ChainIDBaseSepolia uint64 = 84532
 	ChainIDBNBMainnet  uint64 = 56
+	ChainIDArbitrumOne uint64 = 42161
 )
 
 // Native token sentinel address used by Moralis and other services
@@ -227,6 +228,8 @@ func (t *TokenEnrichmentService) LoadWhitelist() error {
 		filename = "base-sepolia.json"
 	case ChainIDBNBMainnet:
 		filename = "bnb-mainnet.json"
+	case ChainIDArbitrumOne:
+		filename = "arbitrum.json"
 	default:
 		// For unknown chains, try ethereum.json as fallback
 		filename = "ethereum.json"
