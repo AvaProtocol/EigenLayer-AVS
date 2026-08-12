@@ -73,6 +73,21 @@ func BenchmarkGetTokenMetadata(b *testing.B) {
 	b.Skip("Skipping metadata benchmark - requires RPC client in new implementation")
 }
 
+func TestWhitelistFileForChain(t *testing.T) {
+	filename, skip := whitelistFileForChain(ChainIDArbitrumOne)
+	if !skip || filename != "" {
+		t.Errorf("Arbitrum must skip the Ethereum whitelist, got file=%q skip=%v", filename, skip)
+	}
+	filename, skip = whitelistFileForChain(ChainIDBNBMainnet)
+	if skip || filename != "bnb-mainnet.json" {
+		t.Errorf("BNB must use bnb-mainnet.json, got file=%q skip=%v", filename, skip)
+	}
+	filename, skip = whitelistFileForChain(ChainIDEthereum)
+	if skip || filename != "ethereum.json" {
+		t.Errorf("Ethereum must use ethereum.json, got file=%q skip=%v", filename, skip)
+	}
+}
+
 func TestIsNativeToken(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -20,9 +20,10 @@ Production is adding Arbitrum One (42161) as a chain worker and graduating BNB (
 
 - Add `ChainIDArbitrumOne = 42161`.
 - Map Moralis slugs `56 → bsc`, `42161 → arbitrum`. Enable native pricing for both mainnets.
-- Do **not** hand-seed `tokenwhitelist/arbitrum.json`. The drift gate (`make sync-tokens`) requires that directory to match `@avaprotocol/protocols@$PROTOCOLS_VERSION`, and 0.10.0 has no Arb tokens sidecar. Enrichment on 42161 falls back to RPC until a sidecar lands.
+- Do **not** hand-seed `tokenwhitelist/arbitrum.json`. The drift gate (`make sync-tokens`) requires that directory to match `@avaprotocol/protocols@$PROTOCOLS_VERSION`, and 0.10.0 has no Arb tokens sidecar. `LoadWhitelist` **skips** 42161 (empty cache, RPC fetch) instead of loading `ethereum.json`.
 - Add Arbitrum aliases to the balance-node chain map.
 - Add `config/worker-arbitrum.example.yaml` for local-dev.
+- Review follow-ups (#749 comment): `getFallbackPrice` no longer returns $2500 for BNB; `chainBlockTime[42161]=250ms`; Moralis mapping tests.
 
 Production Railway YAML stays in avs-infra.
 
