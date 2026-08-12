@@ -86,6 +86,10 @@ func TestWhitelistFileForChain(t *testing.T) {
 	if skip || filename != "ethereum.json" {
 		t.Errorf("Ethereum must use ethereum.json, got file=%q skip=%v", filename, skip)
 	}
+	filename, skip = whitelistFileForChain(10) // Optimism — no sidecar yet
+	if !skip || filename != "" {
+		t.Errorf("unmapped chain must skip, not inherit ethereum.json; got file=%q skip=%v", filename, skip)
+	}
 }
 
 func TestIsNativeToken(t *testing.T) {
