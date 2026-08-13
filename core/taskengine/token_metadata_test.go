@@ -94,6 +94,10 @@ func TestWhitelistFileForChain(t *testing.T) {
 	if !skip || filename != "" {
 		t.Errorf("unmapped chain must skip, not inherit ethereum.json; got file=%q skip=%v", filename, skip)
 	}
+	filename, skip = whitelistFileForChain(ChainIDRobinhoodMainnet)
+	if !skip || filename != "" {
+		t.Errorf("Robinhood whitelist = (%q, skip=%v), want skip", filename, skip)
+	}
 }
 
 func TestIsNativeToken(t *testing.T) {

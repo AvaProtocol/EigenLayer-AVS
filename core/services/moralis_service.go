@@ -157,10 +157,10 @@ func getChainTokenMapping() map[int64]ChainToken {
 			Decimals:     18,
 			ContractAddr: "0x4200000000000000000000000000000000000006",
 		},
-		// Unichain (130) is deliberately absent: Moralis Data API does not
-		// list it. GetNativeTokenPriceUSD then uses getETHPrice() (live ETH
-		// on chain 1) — correct because Unichain gas is ETH. Do not add it
-		// here just to hit the $2500 hardcoded fallback.
+		// Unichain (130) and Robinhood (4663) are deliberately absent: Moralis
+		// Data API does not list them. GetNativeTokenPriceUSD then uses
+		// getETHPrice() (live ETH on chain 1) — correct because both natives
+		// are ETH. Do not add them here just to hit the $2500 hardcoded fallback.
 	}
 }
 
@@ -186,7 +186,7 @@ var nativePricingSupportedChains = map[int64]bool{
 	56:    true, // BNB Smart Chain
 	42161: true, // Arbitrum One
 	10:    true, // OP Mainnet
-	// Unichain (130) intentionally absent — Moralis Data API does not list it.
+	// Unichain (130) and Robinhood (4663) intentionally absent — Moralis Data API does not list them.
 	// Testnets intentionally absent: 11155111 (Sepolia), 84532 (Base-Sepolia).
 }
 

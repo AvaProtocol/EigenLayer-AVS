@@ -588,6 +588,11 @@ func TestBalanceNode_ChainNormalization(t *testing.T) {
 			shouldError: true,
 		},
 		{
+			name:        "Robinhood is not a Moralis Data API chain",
+			inputChain:  "4663",
+			shouldError: true,
+		},
+		{
 			name:        "Unsupported chain",
 			inputChain:  "unsupported-chain",
 			shouldError: true,
