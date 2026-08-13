@@ -133,6 +133,7 @@ var chainBlockTime = map[int64]time.Duration{
 	42161:    250 * time.Millisecond, // Arbitrum One (~250ms; under-estimate vs typical 200–300ms)
 	10:       2 * time.Second,        // OP Mainnet (OP-stack, same family as Base)
 	130:      200 * time.Millisecond, // Unichain flashblocks ~200ms; 1s sealed blocks. Under-estimate.
+	4663:     100 * time.Millisecond, // Robinhood Chain (Arb Orbit; advertised 100ms).
 }
 
 // defaultBlockTime is used for a chain absent from the table. Deliberately

@@ -19,6 +19,7 @@ func TestChainIDToMoralisChain(t *testing.T) {
 		{42161, "arbitrum"},
 		{10, "optimism"},
 		{130, ""},
+		{4663, ""},
 	}
 	for _, tc := range cases {
 		if got := ms.chainIDToMoralisChain(tc.chainID); got != tc.want {
@@ -74,6 +75,12 @@ func TestGetChainTokenMappingWaveA(t *testing.T) {
 	}
 	if nativePricingSupportedChains[130] {
 		t.Error("Unichain must not be in nativePricingSupportedChains")
+	}
+	if _, ok := m[4663]; ok {
+		t.Error("Robinhood must not be in chainTokens — Moralis Data API does not list 4663; leave it on getETHPrice()")
+	}
+	if nativePricingSupportedChains[4663] {
+		t.Error("Robinhood must not be in nativePricingSupportedChains")
 	}
 }
 

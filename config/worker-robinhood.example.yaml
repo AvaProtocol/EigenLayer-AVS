@@ -1,0 +1,36 @@
+# Worker configuration TEMPLATE for Robinhood Chain (chain 4663).
+#
+# This is a checked-in template. The real file is gitignored — copy it
+# and fill in the placeholder values:
+#
+#   cp config/worker-robinhood.example.yaml config/worker-robinhood.yaml
+#   $EDITOR config/worker-robinhood.yaml
+#
+# Handles chain-specific execution: UserOps, contract writes, token
+# enrichment. Stateless — no local DB (gateway owns storage).
+#
+# Production config lives in avs-infra/railway/configs/worker-robinhood-railway.yaml.
+environment: development
+
+chain_id:   4663
+chain_name: robinhood
+
+listen_address: "0.0.0.0:50058"
+health_address: "0.0.0.0:8097"
+gateway_address: "127.0.0.1:2206"
+
+# Chain RPC. Set via .env.local / env. Do NOT point this at a free public
+# endpoint — they rate-limit under load.
+eth_rpc_url: ${ROBINHOOD_RPC_URL}
+eth_ws_url:  ${ROBINHOOD_WS_URL}
+
+# alchemy derives the endpoint from alchemy_api_key + robinhood-mainnet.
+bundler_provider: alchemy
+alchemy_api_key:  ${ALCHEMY_API_KEY}
+
+# Local workers must not draw on the production Gas Manager policy.
+disable_gas_sponsorship: true
+
+# Shared mainnet controller (same key as other mainnet workers).
+smart_wallet:
+  controller_private_key: ${MAINNET_CONTROLLER_PRIVATE_KEY}
