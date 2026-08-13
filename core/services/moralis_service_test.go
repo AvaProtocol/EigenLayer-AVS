@@ -17,7 +17,8 @@ func TestChainIDToMoralisChain(t *testing.T) {
 		{84532, "base-sepolia"},
 		{56, "bsc"},
 		{42161, "arbitrum"},
-		{10, ""},
+		{10, "optimism"},
+		{130, ""},
 	}
 	for _, tc := range cases {
 		if got := ms.chainIDToMoralisChain(tc.chainID); got != tc.want {
@@ -53,6 +54,26 @@ func TestGetChainTokenMappingWaveA(t *testing.T) {
 
 	if !nativePricingSupportedChains[56] || !nativePricingSupportedChains[42161] {
 		t.Error("Wave A mainnets must be in nativePricingSupportedChains")
+	}
+
+	op, ok := m[10]
+	if !ok {
+		t.Fatal("missing chain 10")
+	}
+	if op.Symbol != "ETH" || op.Decimals != 18 {
+		t.Errorf("OP native = %+v", op)
+	}
+	if !strings.EqualFold(op.ContractAddr, "0x4200000000000000000000000000000000000006") {
+		t.Errorf("OP WETH address = %s", op.ContractAddr)
+	}
+	if !nativePricingSupportedChains[10] {
+		t.Error("OP Mainnet must be in nativePricingSupportedChains")
+	}
+	if _, ok := m[130]; ok {
+		t.Error("Unichain must not be in chainTokens — Moralis Data API does not list 130; leave it on getETHPrice()")
+	}
+	if nativePricingSupportedChains[130] {
+		t.Error("Unichain must not be in nativePricingSupportedChains")
 	}
 }
 

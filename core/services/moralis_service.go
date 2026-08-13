@@ -150,6 +150,17 @@ func getChainTokenMapping() map[int64]ChainToken {
 			Decimals:     18,
 			ContractAddr: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
 		},
+
+		// OP Mainnet — native is ETH; price via OP-stack WETH predeploy.
+		10: {
+			Symbol:       "ETH",
+			Decimals:     18,
+			ContractAddr: "0x4200000000000000000000000000000000000006",
+		},
+		// Unichain (130) is deliberately absent: Moralis Data API does not
+		// list it. GetNativeTokenPriceUSD then uses getETHPrice() (live ETH
+		// on chain 1) — correct because Unichain gas is ETH. Do not add it
+		// here just to hit the $2500 hardcoded fallback.
 	}
 }
 
@@ -174,6 +185,8 @@ var nativePricingSupportedChains = map[int64]bool{
 	8453:  true, // Base mainnet
 	56:    true, // BNB Smart Chain
 	42161: true, // Arbitrum One
+	10:    true, // OP Mainnet
+	// Unichain (130) intentionally absent — Moralis Data API does not list it.
 	// Testnets intentionally absent: 11155111 (Sepolia), 84532 (Base-Sepolia).
 }
 
@@ -367,6 +380,8 @@ func (ms *MoralisService) chainIDToMoralisChain(chainID int64) string {
 		return "bsc"
 	case 42161:
 		return "arbitrum"
+	case 10:
+		return "optimism"
 	default:
 		return ""
 	}

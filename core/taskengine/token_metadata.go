@@ -90,12 +90,14 @@ const (
 
 // Chain ID constants
 const (
-	ChainIDEthereum    uint64 = 1
-	ChainIDSepolia     uint64 = 11155111
-	ChainIDBase        uint64 = 8453
-	ChainIDBaseSepolia uint64 = 84532
-	ChainIDBNBMainnet  uint64 = 56
-	ChainIDArbitrumOne uint64 = 42161
+	ChainIDEthereum        uint64 = 1
+	ChainIDSepolia         uint64 = 11155111
+	ChainIDBase            uint64 = 8453
+	ChainIDBaseSepolia     uint64 = 84532
+	ChainIDBNBMainnet      uint64 = 56
+	ChainIDArbitrumOne     uint64 = 42161
+	ChainIDOptimismMainnet uint64 = 10
+	ChainIDUnichainMainnet uint64 = 130
 )
 
 // Native token sentinel address used by Moralis and other services
@@ -229,7 +231,7 @@ func whitelistFileForChain(chainID uint64) (filename string, skip bool) {
 		return "base-sepolia.json", false
 	case ChainIDBNBMainnet:
 		return "bnb-mainnet.json", false
-	case ChainIDArbitrumOne:
+	case ChainIDArbitrumOne, ChainIDOptimismMainnet, ChainIDUnichainMainnet:
 		return "", true
 	default:
 		// Unknown chain: skip, don't inherit Ethereum's list. A CREATE2
