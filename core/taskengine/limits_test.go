@@ -301,6 +301,15 @@ func TestBlockTimeForChain(t *testing.T) {
 	if got := blockTimeForChain(56); got != 750*time.Millisecond {
 		t.Errorf("BNB block time = %v, want 750ms", got)
 	}
+	if got := blockTimeForChain(10); got != 2*time.Second {
+		t.Errorf("Optimism block time = %v, want 2s", got)
+	}
+	if got := blockTimeForChain(130); got != 200*time.Millisecond {
+		t.Errorf("Unichain block time = %v, want 200ms (flashblock under-estimate, not the 1s default)", got)
+	}
+	if got := blockTimeForChain(4663); got != 100*time.Millisecond {
+		t.Errorf("Robinhood block time = %v, want 100ms (must under-estimate, not use the 1s default)", got)
+	}
 	// An unlisted chain must fall back to the *strict* default, never a
 	// permissive one — overestimating block time would open a hole.
 	if got := blockTimeForChain(424242); got != defaultBlockTime {
