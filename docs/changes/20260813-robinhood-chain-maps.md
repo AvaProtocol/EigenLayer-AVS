@@ -1,7 +1,7 @@
 # Robinhood Chain (4663) maps
 
 - **Date**: 2026-08-13
-- **Status**: Proposed
+- **Status**: Implemented (`v4.16.0`)
 - **Branch**: feat/robinhood-chain-maps
 - **Related**: avs-infra `docs/changes/20260813-chain-expansion-wave-b.md`, `@avaprotocol/protocols` Robinhood catalog PR
 
