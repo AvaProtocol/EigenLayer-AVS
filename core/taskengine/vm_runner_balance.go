@@ -97,6 +97,15 @@ var chainIDMap = map[string]string{
 	"arb":          "arbitrum",
 	"42161":        "arbitrum",
 	"0xa4b1":       "arbitrum",
+
+	// OP Mainnet — Moralis slug "optimism"
+	"optimism":   "optimism",
+	"op":         "optimism",
+	"op-mainnet": "optimism",
+	"10":         "optimism",
+	"0xa":        "optimism",
+	// Unichain is not in Moralis Data API — do not add aliases that would
+	// send "unichain" to Moralis and 400.
 }
 
 // normalizeChainID converts various chain identifier formats to Moralis chain name

@@ -130,6 +130,8 @@ func TestExpansionChainsHaveAlchemySubdomains(t *testing.T) {
 	}{
 		{56, "https://bnb-mainnet.g.alchemy.com/v2/K"},
 		{42161, "https://arb-mainnet.g.alchemy.com/v2/K"},
+		{10, "https://opt-mainnet.g.alchemy.com/v2/K"},
+		{130, "https://unichain-mainnet.g.alchemy.com/v2/K"},
 		{999, "https://hyperliquid-mainnet.g.alchemy.com/v2/K"},
 		{4663, "https://robinhood-mainnet.g.alchemy.com/v2/K"},
 	} {

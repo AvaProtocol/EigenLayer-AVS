@@ -433,6 +433,8 @@ var alchemyNetworkSubdomain = map[int64]string{
 	// standard addresses — byte-identical to Sepolia, where operations have
 	// actually landed.
 	42161: "arb-mainnet",
+	10:    "opt-mainnet",
+	130:   "unichain-mainnet",
 	999:   "hyperliquid-mainnet",
 	4663:  "robinhood-mainnet",
 }

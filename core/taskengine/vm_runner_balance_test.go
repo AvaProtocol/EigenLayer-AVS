@@ -571,6 +571,23 @@ func TestBalanceNode_ChainNormalization(t *testing.T) {
 			shouldError:   false,
 		},
 		{
+			name:          "Optimism by name",
+			inputChain:    "optimism",
+			expectedChain: "optimism",
+			shouldError:   false,
+		},
+		{
+			name:          "Optimism by chain ID",
+			inputChain:    "10",
+			expectedChain: "optimism",
+			shouldError:   false,
+		},
+		{
+			name:        "Unichain is not a Moralis Data API chain",
+			inputChain:  "130",
+			shouldError: true,
+		},
+		{
 			name:        "Unsupported chain",
 			inputChain:  "unsupported-chain",
 			shouldError: true,

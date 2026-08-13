@@ -86,7 +86,11 @@ func TestWhitelistFileForChain(t *testing.T) {
 	if skip || filename != "ethereum.json" {
 		t.Errorf("Ethereum must use ethereum.json, got file=%q skip=%v", filename, skip)
 	}
-	filename, skip = whitelistFileForChain(10) // Optimism — no sidecar yet
+	filename, skip = whitelistFileForChain(ChainIDOptimismMainnet)
+	if !skip || filename != "" {
+		t.Errorf("Optimism whitelist = (%q, skip=%v), want skip", filename, skip)
+	}
+	filename, skip = whitelistFileForChain(ChainIDUnichainMainnet)
 	if !skip || filename != "" {
 		t.Errorf("unmapped chain must skip, not inherit ethereum.json; got file=%q skip=%v", filename, skip)
 	}
