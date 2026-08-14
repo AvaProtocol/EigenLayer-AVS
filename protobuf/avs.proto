@@ -733,9 +733,13 @@ message TaskEdge {
 message TaskNode {
   string id   = 2;
   string name = 3;
-  
+
   // NEW: Use the enum for type identification (Phase 1: add alongside existing)
   NodeType type = 1;
+
+  // Optional per-node retry policy for transient failures. Additive (field 4);
+  // absent = single attempt. Honored only for the read/off-chain node allowlist.
+  RetryPolicy retry_policy = 4;
 
   // based on node_type one and only one of these field are set
   oneof task_type {
@@ -1546,4 +1550,17 @@ message EventCondition {
   string operator = 2;          // Comparison operator: "gt", "gte", "lt", "lte", "eq", "ne"
   string value = 3;             // Value to compare against (as string, parsed based on type)
   string field_type = 4;        // Field type: "uint256", "int256", "address", "bool", "bytes32", etc.
+}
+
+// RetryPolicy configures automatic retries for transient node failures (RPC
+// blips, HTTP 429/5xx, timeouts). It is opt-in and additive: an absent policy
+// means a single attempt, i.e. today's behavior. The policy is honored only for
+// an allowlist of idempotent read/off-chain nodes (REST, GraphQL, ContractRead,
+// Balance); it is ignored on control-flow, stateful, and on-chain write nodes.
+message RetryPolicy {
+  uint32 max_attempts = 1;        // total attempts including the first (default 1 = no retry)
+  uint32 backoff_ms = 2;          // initial backoff before the second attempt
+  double backoff_multiplier = 3;  // exponential factor applied each attempt (default 2.0)
+  uint32 max_backoff_ms = 4;      // upper bound on any single backoff
+  repeated string retry_on = 5;   // retryable error classes, e.g. ["timeout","http_5xx","http_429","rpc_error"]
 }
