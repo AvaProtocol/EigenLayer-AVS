@@ -95,3 +95,6 @@ tmp/rehearsal-gateway-backup/
 /deferred_replace
 /permission_hooks
 /revoke
+
+# Editor-local settings
+.vscode/
