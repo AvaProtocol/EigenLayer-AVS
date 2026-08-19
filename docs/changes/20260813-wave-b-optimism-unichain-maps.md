@@ -1,7 +1,7 @@
 # Wave B: Optimism + Unichain chain maps
 
 - **Date**: 2026-08-13
-- **Status**: Proposed
+- **Status**: Implemented (`v4.15.0`, maps live; `v4.16.0` added Robinhood)
 - **Branch**: feat/wave-b-optimism-unichain
 - **Related**: avs-infra `docs/changes/20260813-chain-expansion-wave-b.md`, `@avaprotocol/protocols` Unichain catalog PR
 

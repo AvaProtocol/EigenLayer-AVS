@@ -98,13 +98,10 @@ type OperatorConfig struct {
 
 	PublicMetricsPort int32
 
-	// Usually we don't need this, but on testnet, our target chain might be
-	// differen from the chain where EigenLayer contract is deployed.
-	// EigenLayer contracts are deployed on Holesky, but on holesky there isn't
-	// much tooling around it: no official rpc bundler or erc4337 explorer, no
-	// uniswap etc
-	//
-	// Therefore on testnet we will need this option when running in Holesky.
+	// The chain an operator monitors can differ from the chain the EigenLayer
+	// AVS contracts are deployed on — a testnet operator registers against the
+	// Sepolia AVS while watching whichever destination chains it is assigned.
+	// This field carries that destination chain.
 	//
 	// Legacy single-chain config — superseded by Chains below for multi-chain
 	// operators. Still honored when Chains is empty so existing operator

@@ -388,6 +388,27 @@ func TestGetExecutionContext(t *testing.T) {
 			expectedProvider:  "chain_rpc",
 			expectedSimulated: false,
 		},
+		{
+			name:              "Optimism simulated execution",
+			chainID:           10,
+			isSimulated:       true,
+			expectedProvider:  "tenderly",
+			expectedSimulated: true,
+		},
+		{
+			name:              "Unichain simulated execution",
+			chainID:           130,
+			isSimulated:       true,
+			expectedProvider:  "tenderly",
+			expectedSimulated: true,
+		},
+		{
+			name:              "Robinhood simulated execution",
+			chainID:           4663,
+			isSimulated:       true,
+			expectedProvider:  "tenderly",
+			expectedSimulated: true,
+		},
 	}
 
 	for _, tt := range tests {
