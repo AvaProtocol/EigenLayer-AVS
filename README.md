@@ -377,20 +377,6 @@ Coming soon
 
 ## Contract address
 
-### Holesky Testnet (Deprecated)
-
-| Name                   | Address                                                                                                                         |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| ProxyAdmin             | [`0x26CF7A7DF7d1E00D83A5Ca24385f697a3ca4577d`](https://holesky.etherscan.io/address/0x26CF7A7DF7d1E00D83A5Ca24385f697a3ca4577d) |
-| ServiceManager         | [`0xEA3E82F9Ae371A6a372A6DCffB1a9bD17e0608eF`](https://holesky.etherscan.io/address/0xEA3E82F9Ae371A6a372A6DCffB1a9bD17e0608eF) |
-| RegistryCoordinator    | [`0x90c6d6f2A78d5Ce22AB8631Ddb142C03AC87De7a`](https://holesky.etherscan.io/address/0x90c6d6f2A78d5Ce22AB8631Ddb142C03AC87De7a) |
-| BLSApkRegistry         | [`0x6752F8BeeE5BF45c9d11FDBC4F8aFfF879925585`](https://holesky.etherscan.io/address/0x6752F8BeeE5BF45c9d11FDBC4F8aFfF879925585) |
-| IndexRegistry          | [`0x298a5d3C8F8Db30E8292C9e2BF92292de469C8FF`](https://holesky.etherscan.io/address/0x298a5d3C8F8Db30E8292C9e2BF92292de469C8FF) |
-| OperatorStateRetriever | [`0xb7bb920538e038DFFEfcB55caBf713652ED2031F`](https://holesky.etherscan.io/address/0xb7bb920538e038DFFEfcB55caBf713652ED2031F) |
-| PauserRegistry         | [`0x3A8ea6e4202CdDe4a9e0cCE19c4Dc1739ba2cF0b`](https://holesky.etherscan.io/address/0x3A8ea6e4202CdDe4a9e0cCE19c4Dc1739ba2cF0b) |
-| StakeRegistry          | [`0x7BacD5dd5A7C3acf8bf1a3c88fB0D00B68EE626A`](https://holesky.etherscan.io/address/0x7BacD5dd5A7C3acf8bf1a3c88fB0D00B68EE626A) |
-| ApConfig               | [`0xb8abbb082ecaae8d1cd68378cf3b060f6f0e07eb`](https://holesky.etherscan.io/address/0xb8abbb082ecaae8d1cd68378cf3b060f6f0e07eb) |
-
 ### Sepolia Testnet
 | Name                   | Address                                                                                                                         |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------- |

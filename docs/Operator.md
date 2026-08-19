@@ -32,9 +32,8 @@ eth_rpc_url: <your_ethereum_mainnet_rpc_url>
 ecdsa_private_key_store_path: <path_to_operator_ecdsa_key_json>
 bls_private_key_store_path: <path_to_operator_bls_key_json>
 
-# One endpoint, and it is the mainnet one — see the note below on third-party
-# operators. The gateway routes per-chain internally, so there is no separate
-# address to switch to.
+# One endpoint for every network. The gateway routes per-chain internally, so
+# testnet operators dial this same address — see the note below.
 aggregator_server_ip_port_address: "aggregator.avaprotocol.org:57376"
 
 # avs node spec compliance https://eigen.nethermind.io/docs/spec/intro
@@ -44,7 +43,7 @@ node_api_ip_port_address: <operator_public_ip>:9010
 enable_node_api: true
 ```
 
-> **Note**: Third-party operator support is mainnet-only. Sepolia/Holesky testnet operator coordination is handled internally by Ava Protocol and is not open to external operators.
+> **Note**: To rehearse a setup before committing mainnet stake, register against the Sepolia AVS instead (`avs_registry_coordinator_address: 0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD`, `operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605`) and point `eth_rpc_url` at Sepolia. The aggregator address is unchanged — one gateway serves every chain, so what selects the network is the AVS you registered against, not the address you dial. The `sepolia` directory in [ap-operator-setup](https://github.com/AvaProtocol/ap-operator-setup) has a ready-made config. Holesky is retired; EigenLayer has sunset it.
 
 Configure 2 env var for your ECDSA and BLS password. Recall that these are generated when you onboard your operator to EigenLayer. In case your password contains special characters to the command-line, here we export both variables by disabling history expansion temporarily.
 ```
