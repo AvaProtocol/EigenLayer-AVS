@@ -73,8 +73,16 @@ func newPolicyRig(t *testing.T) *policyTestRig {
 	}
 }
 
-// call builds an authed request, runs the handler, and returns the recorder.
+// call builds an authed request whose JWT audience is the gateway's own
+// chain, runs the handler, and returns the recorder.
 func (r *policyTestRig) call(t *testing.T, body any, handler func(echo.Context) error, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	return r.callAs(t, policyTestChain, body, handler, headers)
+}
+
+// callAs is call with an explicit JWT audience, for the cross-chain cases
+// where the token's aud and the chain the request names are not the same.
+func (r *policyTestRig) callAs(t *testing.T, audChainID int64, body any, handler func(echo.Context) error, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	var buf bytes.Buffer
 	if body != nil {
@@ -87,7 +95,7 @@ func (r *policyTestRig) call(t *testing.T, body any, handler func(echo.Context) 
 	}
 	rec := httptest.NewRecorder()
 	ctx := echo.New().NewContext(req, rec)
-	ctx.Set("auth.user", &restmw.AuthenticatedUser{Subject: r.owner.Hex(), ChainID: policyTestChain})
+	ctx.Set("auth.user", &restmw.AuthenticatedUser{Subject: r.owner.Hex(), ChainID: audChainID})
 
 	if err := handler(ctx); err != nil {
 		// Match production behavior enough to assert on: structured errors
@@ -158,6 +166,29 @@ func TestPoliciesRefusePartnerAssertionsEverywhere(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, rec.Code, "%s must refuse partner assertions", name)
 		require.Contains(t, rec.Body.String(), "PARTNER_DELEGATION_UNSUPPORTED", "%s refusal must be explicit", name)
 	}
+}
+
+// R4b: prepare routes on the request body's chainId, not the JWT's audience.
+// This is the Studio exit case — a grant on one chain held by a token minted
+// for another — so the body names a chain that is neither the token's aud nor
+// the gateway's own chain. Pinning it to either source fails the assertion.
+func TestPoliciesPrepareUsesBodyChainIdNotJwtAud(t *testing.T) {
+	rig := newPolicyRig(t)
+	address := generated.EthereumAddress(rig.wallet.Hex())
+	// Served by the test gateway (config/test.yaml), and deliberately not
+	// policyTestChain, which is both the aud below and the default chain.
+	const grantChain = int64(84532)
+	require.NotEqual(t, int64(policyTestChain), grantChain, "the grant chain must differ from the default")
+
+	rec := rig.callAs(t, policyTestChain, prepareBody(grantChain), func(c echo.Context) error {
+		return rig.server.PrepareWalletPolicy(c, address)
+	}, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var prepared generated.PreparedPolicy
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &prepared))
+	require.EqualValues(t, grantChain, prepared.ChainId,
+		"grant must install on the body's chainId, not the JWT aud and not the gateway default (both %d)", policyTestChain)
 }
 
 func TestPoliciesPrepareSignSubmitOverHTTP(t *testing.T) {
