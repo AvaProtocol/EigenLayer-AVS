@@ -1900,6 +1900,13 @@ type GetTokenParams struct {
 	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
+// ListWalletsParams defines parameters for ListWallets.
+type ListWalletsParams struct {
+	// ChainId The chain to operate on (a single value). Omit to use the aggregator
+	// default (the request's JWT `aud` chain, then the gateway default).
+	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
+}
+
 // ListWalletPoliciesParams defines parameters for ListWalletPolicies.
 type ListWalletPoliciesParams struct {
 	// ChainId The chain to operate on (a single value). Omit to use the aggregator

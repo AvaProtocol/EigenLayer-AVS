@@ -27,7 +27,7 @@ func TestSetWalletHiddenStatus(t *testing.T) {
 	}
 
 	// Check it's initially not hidden
-	listResp, err := n.ListWallets(u.Address, &avsproto.ListWalletReq{})
+	listResp, err := n.ListWallets(u, &avsproto.ListWalletReq{})
 	if err != nil {
 		t.Fatalf("ListWallets failed: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestSetWalletHiddenStatus(t *testing.T) {
 	}
 
 	// Check it's now hidden in the list
-	listResp, err = n.ListWallets(u.Address, &avsproto.ListWalletReq{})
+	listResp, err = n.ListWallets(u, &avsproto.ListWalletReq{})
 	if err != nil {
 		t.Fatalf("ListWallets after hiding failed: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestSetWalletHiddenStatus(t *testing.T) {
 	}
 
 	// Check it's no longer hidden
-	listResp, err = n.ListWallets(u.Address, &avsproto.ListWalletReq{})
+	listResp, err = n.ListWallets(u, &avsproto.ListWalletReq{})
 	if err != nil {
 		t.Fatalf("ListWallets after unhiding failed: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestSetWalletHiddenStatusWithCustomFactory(t *testing.T) {
 	}
 
 	// Check it's initially not hidden
-	listResp, err := n.ListWallets(u.Address, &avsproto.ListWalletReq{FactoryAddress: customFactoryAddress})
+	listResp, err := n.ListWallets(u, &avsproto.ListWalletReq{FactoryAddress: customFactoryAddress})
 	if err != nil {
 		t.Fatalf("ListWallets failed for custom factory: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestSetWalletHiddenStatusWithCustomFactory(t *testing.T) {
 	}
 
 	// Check it's now hidden in the list
-	listResp, err = n.ListWallets(u.Address, &avsproto.ListWalletReq{FactoryAddress: customFactoryAddress})
+	listResp, err = n.ListWallets(u, &avsproto.ListWalletReq{FactoryAddress: customFactoryAddress})
 	if err != nil {
 		t.Fatalf("ListWallets for custom factory after hiding failed: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestSetWalletHiddenStatusWithCustomFactory(t *testing.T) {
 		t.Fatalf("Failed to unhide wallet with custom factory: %v", err)
 	}
 
-	listResp, err = n.ListWallets(u.Address, &avsproto.ListWalletReq{FactoryAddress: customFactoryAddress})
+	listResp, err = n.ListWallets(u, &avsproto.ListWalletReq{FactoryAddress: customFactoryAddress})
 	if err != nil {
 		t.Fatalf("ListWallets for custom factory after unhiding failed: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestHideDefaultWallet(t *testing.T) {
 	}
 
 	// Check it's now hidden
-	listResp, err := n.ListWallets(u.Address, &avsproto.ListWalletReq{})
+	listResp, err := n.ListWallets(u, &avsproto.ListWalletReq{})
 	if err != nil {
 		t.Fatalf("ListWallets after hiding default wallet failed: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestHideDefaultWallet(t *testing.T) {
 	}
 
 	// Check it's no longer hidden
-	listResp, err = n.ListWallets(u.Address, &avsproto.ListWalletReq{})
+	listResp, err = n.ListWallets(u, &avsproto.ListWalletReq{})
 	if err != nil {
 		t.Fatalf("ListWallets after unhiding default wallet failed: %v", err)
 	}

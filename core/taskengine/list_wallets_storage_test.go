@@ -1,7 +1,12 @@
 package taskengine
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/ethereum/go-ethereum/common"
+
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
@@ -10,6 +15,59 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// Wallets are stored per chain, so the listing follows the caller's chain
+// rather than the gateway's. user.ChainID is what REST sets from ?chainId,
+// on the same precedence as CreateWallet — so a token minted for one chain
+// reaches another's wallets without a second signature.
+func TestListWalletsFollowsTheResolvedChain(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	const defaultChain = int64(11155111)
+	const otherChain = int64(84532)
+
+	cfg := testutil.GetAggregatorConfig()
+	cfg.SmartWallet.ChainID = defaultChain
+	otherChainWallet := *cfg.SmartWallet
+	otherChainWallet.ChainID = otherChain
+	cfg.IsGateway = true
+	cfg.Chains = []*config.ChainConfig{
+		{ChainID: defaultChain, Name: "sepolia", SmartWallet: cfg.SmartWallet},
+		{ChainID: otherChain, Name: "base-sepolia", SmartWallet: &otherChainWallet},
+	}
+	engine := New(db, cfg, nil, testutil.GetLogger())
+
+	owner := testutil.TestUser1().Address
+	factory := effectiveFactoryAddr(t, cfg.SmartWallet)
+	onDefault := common.HexToAddress("0xDDDDddddDDDDddddDDDDddddDDDDddddDDDDdddd")
+	onOther := common.HexToAddress("0xEEEEeeeeEEEEeeeeEEEEeeeeEEEEeeeeEEEEeeee")
+	require.NoError(t, StoreWallet(db, defaultChain, owner, mkWallet(owner, factory, onDefault, 100)))
+	require.NoError(t, StoreWallet(db, otherChain, owner, mkWallet(owner, factory, onOther, 200)))
+
+	listed := func(chainID int64) map[string]bool {
+		t.Helper()
+		resp, err := engine.ListWallets(&model.User{Address: owner, ChainID: chainID}, &avsproto.ListWalletReq{})
+		require.NoError(t, err)
+		out := map[string]bool{}
+		for _, w := range resp.GetItems() {
+			out[strings.ToLower(w.GetAddress())] = true
+		}
+		return out
+	}
+
+	fromDefault := listed(defaultChain)
+	require.True(t, fromDefault[strings.ToLower(onDefault.Hex())], "the default chain's wallet must be listed on that chain")
+	require.False(t, fromDefault[strings.ToLower(onOther.Hex())], "another chain's wallet must not leak into this one")
+
+	fromOther := listed(otherChain)
+	require.True(t, fromOther[strings.ToLower(onOther.Hex())], "naming the other chain must reach its wallets")
+	require.False(t, fromOther[strings.ToLower(onDefault.Hex())], "the default chain's wallet must not leak into the other")
+
+	// ChainID 0 is the no-context case (gRPC, or a JWT with no aud): it
+	// resolves to the gateway default rather than erroring or listing nothing.
+	require.True(t, listed(0)[strings.ToLower(onDefault.Hex())], "no chain context falls back to the gateway default")
+}
 
 // TestListWalletsStoresDefaultWallet tests that ListWallets stores the default salt:0 wallet
 // in the database when it doesn't exist yet.
@@ -27,7 +85,7 @@ func TestListWalletsStoresDefaultWallet(t *testing.T) {
 	assert.Equal(t, 0, len(dbItems), "Database should be empty initially")
 
 	// Call ListWallets - this should create and store the default salt:0 wallet
-	listResp, err := engine.ListWallets(user.Address, &avsproto.ListWalletReq{})
+	listResp, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
 	require.NoError(t, err, "ListWallets should succeed")
 	require.Greater(t, len(listResp.Items), 0, "ListWallets should return at least the default wallet")
 
@@ -79,7 +137,7 @@ func TestListWalletsDoesNotDuplicateExistingWallet(t *testing.T) {
 	assert.Equal(t, 1, len(dbItems), "Database should contain exactly 1 wallet after GetWallet")
 
 	// Call ListWallets - this should NOT create a duplicate
-	listResp, err := engine.ListWallets(user.Address, &avsproto.ListWalletReq{})
+	listResp, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
 	require.NoError(t, err, "ListWallets should succeed")
 
 	// Verify the wallet is still only stored once
@@ -115,7 +173,7 @@ func TestListWalletsWithMultipleWallets(t *testing.T) {
 	user := testutil.TestUser1()
 
 	// Step 1: Call ListWallets first - this should create salt:0
-	listResp1, err := engine.ListWallets(user.Address, &avsproto.ListWalletReq{})
+	listResp1, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
 	require.NoError(t, err, "First ListWallets call should succeed")
 
 	// Verify salt:0 is stored
@@ -160,7 +218,7 @@ func TestListWalletsWithMultipleWallets(t *testing.T) {
 	assert.Equal(t, 3, len(dbItems), "Should have 3 wallets (salt:0, salt:1, salt:2) after second GetWallet")
 
 	// Step 4: Call ListWallets again - should return all 3 wallets and not create duplicates
-	listResp2, err := engine.ListWallets(user.Address, &avsproto.ListWalletReq{})
+	listResp2, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
 	require.NoError(t, err, "Second ListWallets call should succeed")
 
 	// Verify we still have exactly 3 wallets (no duplicates)
@@ -215,7 +273,7 @@ func TestListWalletsBeforeAndAfterGetWallet(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, len(dbItems), "Database should be empty initially")
 
-	listResp1, err := engine.ListWallets(user.Address, &avsproto.ListWalletReq{})
+	listResp1, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
 	require.NoError(t, err, "ListWallets should succeed when owner has no wallets")
 
 	// Verify salt:0 is now stored
@@ -260,7 +318,7 @@ func TestListWalletsBeforeAndAfterGetWallet(t *testing.T) {
 	assert.Equal(t, 3, len(dbItems), "Should have 3 wallets after GetWallet for salt:2")
 
 	// Phase 4: Call ListWallets again - should return all 3 wallets
-	listResp2, err := engine.ListWallets(user.Address, &avsproto.ListWalletReq{})
+	listResp2, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
 	require.NoError(t, err, "Second ListWallets call should succeed")
 
 	// Verify response contains all 3 wallets
@@ -318,7 +376,7 @@ func TestListWalletsDatabaseStateVerification(t *testing.T) {
 	_ = verifyDatabaseState(t, 0, "Initial state - no wallets")
 
 	// Step 1: ListWallets should create salt:0
-	_, err := engine.ListWallets(user.Address, &avsproto.ListWalletReq{})
+	_, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
 	require.NoError(t, err)
 	wallets1 := verifyDatabaseState(t, 1, "After ListWallets - should have salt:0")
 
@@ -351,7 +409,7 @@ func TestListWalletsDatabaseStateVerification(t *testing.T) {
 	assert.Equal(t, "2", wallets3[getResp2.Address].Salt.String(), "Third wallet should have salt 2")
 
 	// Step 4: ListWallets again should not create duplicates
-	listResp2, err := engine.ListWallets(user.Address, &avsproto.ListWalletReq{})
+	listResp2, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
 	require.NoError(t, err)
 	wallets4 := verifyDatabaseState(t, 3, "After second ListWallets - should still have 3 wallets (no duplicates)")
 

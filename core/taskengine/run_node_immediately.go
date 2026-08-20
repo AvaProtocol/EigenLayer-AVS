@@ -2576,7 +2576,8 @@ func (n *Engine) runProcessingNodeWithInputs(ctx context.Context, user *model.Us
 	// config (the first chain in chains[]), so a contractRead against a
 	// sepolia address would actually query mainnet RPC.
 	vmSmartWalletConfig := n.smartWalletConfig
-	if settingsChainID := extractSettingsChainID(inputVariables); settingsChainID != 0 {
+	settingsChainID := extractSettingsChainID(inputVariables)
+	if settingsChainID != 0 {
 		if resolved := n.ResolveSmartWalletConfig(settingsChainID); resolved != nil {
 			vmSmartWalletConfig = resolved
 		}
@@ -2649,7 +2650,18 @@ func (n *Engine) runProcessingNodeWithInputs(ctx context.Context, user *model.Us
 				// Validate runner belongs to owner
 				// For runNodeImmediately, we allow smart wallets that haven't been created yet
 				// The paymaster will sponsor their creation if needed (same as deployed workflows)
-				resp, err := n.ListWallets(vm.TaskOwner, &avsproto.ListWalletReq{})
+				// Wallets are listed on the chain this node actually runs on
+				// (settings.chain_id, the same value vmSmartWalletConfig came
+				// from), not the JWT audience. A runner registered only on the
+				// requested chain would otherwise read as unknown.
+				walletUser := &model.User{Address: vm.TaskOwner}
+				if user != nil {
+					walletUser.ChainID = user.ChainID
+				}
+				if settingsChainID != 0 {
+					walletUser.ChainID = settingsChainID
+				}
+				resp, err := n.ListWallets(walletUser, &avsproto.ListWalletReq{})
 				if err != nil {
 					return nil, fmt.Errorf("failed to list wallets for owner %s: %w", vm.TaskOwner.Hex(), err)
 				}

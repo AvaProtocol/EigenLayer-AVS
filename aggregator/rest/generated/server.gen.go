@@ -67,7 +67,7 @@ type ServerInterface interface {
 	RunTrigger(ctx echo.Context) error
 	// List the authenticated user's smart wallets
 	// (GET /wallets)
-	ListWallets(ctx echo.Context) error
+	ListWallets(ctx echo.Context, params ListWalletsParams) error
 	// Derive (and persist) a smart wallet address from (owner, salt, factory)
 	// (POST /wallets)
 	CreateWallet(ctx echo.Context) error
@@ -515,8 +515,17 @@ func (w *ServerInterfaceWrapper) ListWallets(ctx echo.Context) error {
 
 	ctx.Set(PartnerAssertionScopes, []string{})
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListWalletsParams
+	// ------------- Optional query parameter "chainId" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "chainId", ctx.QueryParams(), &params.ChainId)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter chainId: %s", err))
+	}
+
 	// Invoke the callback with all the unmarshaled arguments
-	err = w.Handler.ListWallets(ctx)
+	err = w.Handler.ListWallets(ctx, params)
 	return err
 }
 
@@ -1641,6 +1650,7 @@ func (response RunTrigger401ApplicationProblemPlusJSONResponse) VisitRunTriggerR
 }
 
 type ListWalletsRequestObject struct {
+	Params ListWalletsParams
 }
 
 type ListWalletsResponseObject interface {
@@ -3193,8 +3203,10 @@ func (sh *strictHandler) RunTrigger(ctx echo.Context) error {
 }
 
 // ListWallets operation middleware
-func (sh *strictHandler) ListWallets(ctx echo.Context) error {
+func (sh *strictHandler) ListWallets(ctx echo.Context, params ListWalletsParams) error {
 	var request ListWalletsRequestObject
+
+	request.Params = params
 
 	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
 		return sh.ssi.ListWallets(ctx.Request().Context(), request.(ListWalletsRequestObject))

@@ -77,7 +77,7 @@ func TestWalletCountLimitDoesNotBlockExistingWalletAccess(t *testing.T) {
 	})
 
 	t.Run("ListWallets should work for existing wallets at limit", func(t *testing.T) {
-		listResp, err := engine.ListWallets(user.Address, &avsproto.ListWalletReq{})
+		listResp, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(listResp.Items), 2, "Should be able to list existing wallets even at limit")
 	})
@@ -196,7 +196,7 @@ func TestWalletCountLimitReproducesOriginalWithdrawFundsBug(t *testing.T) {
 
 	t.Run("All wallet management operations work at limit", func(t *testing.T) {
 		// List wallets
-		listResp, err := engine.ListWallets(user.Address, &avsproto.ListWalletReq{})
+		listResp, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(listResp.Items), 3, "Should list all wallets")
 
