@@ -21,6 +21,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
@@ -32,7 +33,15 @@ import (
 // typed data hashes to the returned digest — what the wallet signs is what
 // submit verifies), and the secret-grade handling of grant material.
 
-const policyTestChain = int64(11155111)
+const (
+	// The gateway's own chain: the JWT audience these tests authenticate with.
+	policyTestChain = int64(11155111)
+	// A second served chain, so "the body's chainId decides" is a property
+	// with somewhere to point. A grant on a chain the gateway does not serve
+	// is refused outright (ErrSessionChainNotServed), so the cross-chain case
+	// only exists on a rig that serves more than one.
+	policyGrantChain = int64(84532)
+)
 
 type policyTestRig struct {
 	server   *Server
@@ -51,6 +60,15 @@ func newPolicyRig(t *testing.T) *policyTestRig {
 	require.NoError(t, err)
 	cfg.SmartWallet.ControllerPrivateKey = controllerKey
 	cfg.SmartWallet.ChainID = policyTestChain
+	// Gateway mode with two chains: policyTestChain is the default, and
+	// policyGrantChain is reachable only by naming it in a request body.
+	grantChainWallet := *cfg.SmartWallet
+	grantChainWallet.ChainID = policyGrantChain
+	cfg.IsGateway = true
+	cfg.Chains = []*config.ChainConfig{
+		{ChainID: policyTestChain, Name: "sepolia", SmartWallet: cfg.SmartWallet},
+		{ChainID: policyGrantChain, Name: "base-sepolia", SmartWallet: &grantChainWallet},
+	}
 	engine := taskengine.New(db, cfg, nil, testutil.GetLogger())
 
 	logger, err := sdklogging.NewZapLogger(sdklogging.Development)
@@ -175,10 +193,10 @@ func TestPoliciesRefusePartnerAssertionsEverywhere(t *testing.T) {
 func TestPoliciesPrepareUsesBodyChainIdNotJwtAud(t *testing.T) {
 	rig := newPolicyRig(t)
 	address := generated.EthereumAddress(rig.wallet.Hex())
-	// Served by the test gateway (config/test.yaml), and deliberately not
-	// policyTestChain, which is both the aud below and the default chain.
-	const grantChain = int64(84532)
-	require.NotEqual(t, int64(policyTestChain), grantChain, "the grant chain must differ from the default")
+	// Served by the rig, and deliberately not policyTestChain — which is both
+	// the aud below and the gateway default.
+	const grantChain = policyGrantChain
+	require.NotEqual(t, int64(policyTestChain), int64(grantChain), "the grant chain must differ from the default")
 
 	rec := rig.callAs(t, policyTestChain, prepareBody(grantChain), func(c echo.Context) error {
 		return rig.server.PrepareWalletPolicy(c, address)
@@ -189,6 +207,20 @@ func TestPoliciesPrepareUsesBodyChainIdNotJwtAud(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &prepared))
 	require.EqualValues(t, grantChain, prepared.ChainId,
 		"grant must install on the body's chainId, not the JWT aud and not the gateway default (both %d)", policyTestChain)
+}
+
+// The unserved chain surfaces at the HTTP layer under its own code, so a
+// client can tell "re-prepare on a chain we serve" from a malformed grant.
+func TestPoliciesPrepareRefusesUnservedChain(t *testing.T) {
+	rig := newPolicyRig(t)
+	address := generated.EthereumAddress(rig.wallet.Hex())
+	const unservedChain = int64(8453)
+
+	rec := rig.call(t, prepareBody(unservedChain), func(c echo.Context) error {
+		return rig.server.PrepareWalletPolicy(c, address)
+	}, nil)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "POLICIES_CHAIN_NOT_SERVED")
 }
 
 func TestPoliciesPrepareSignSubmitOverHTTP(t *testing.T) {

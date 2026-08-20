@@ -35,6 +35,10 @@ var (
 	// refused at prepare/submit so clients never collect a doomed owner signature.
 	// Studio filters Auto to MA v2; this is the gateway belt-and-braces half.
 	ErrSessionWalletNotMAv2 = errors.New("session grants require a Modular Account v2 smart wallet; legacy SimpleAccount cannot host session policies")
+	// ErrSessionChainNotServed: the grant names a chain this gateway has no
+	// config for → 400. Refused at prepare so no owner signature is ever
+	// collected for a grant nothing here could send under.
+	ErrSessionChainNotServed = errors.New("session grants must name a chain this gateway serves")
 	// ErrSessionPolicySupersedeFailed: the new grant is stored and usable, but
 	// revoking a previous one failed, so the runner is left ambiguous and
 	// execute will refuse it. Distinct from a plain rejection because the
@@ -90,6 +94,40 @@ func (n *Engine) requireOwnedWallet(user *model.User, wallet common.Address) err
 		return ErrWalletNotOwned
 	}
 	return nil
+}
+
+// requireServedChain refuses a grant naming a chain this gateway does not
+// serve.
+//
+// The chain arrives in the request body, unsigned — a weaker input than the
+// JWT `aud` that resolveUserChainID already validates against this same set,
+// and for the same reason: grants are stored chain-scoped (SessionPolicyKey,
+// sp:<chainID>:*), so an unserved chain writes records no read path here ever
+// comes back for.
+//
+// Refused rather than resolved to the default chain, which is what
+// resolveUserChainID does for a wallet read. Falling back is the wrong remedy
+// for a grant — worse than the bug: the owner asks for one chain, signs a
+// prompt naming it, and is handed spending authority on another. The chain is
+// knowable here, before anything is asked of the wallet, so this fails ahead
+// of the signing prompt rather than at the first send — where the grant reads
+// as active and the failure names neither the chain nor the mismatch.
+//
+// Skipped when no positive chain is configured at all: knownChainIDs() is
+// then [0] (placeholder configs), and every real chain would be refused.
+func (n *Engine) requireServedChain(chainID int64) error {
+	served := n.knownChainIDs()
+	configured := false
+	for _, id := range served {
+		if id > 0 {
+			configured = true
+			break
+		}
+	}
+	if !configured || n.isChainConfigured(chainID) {
+		return nil
+	}
+	return fmt.Errorf("%w: chain %d is not one of %v", ErrSessionChainNotServed, chainID, served)
 }
 
 // requireMAv2SessionWallet refuses prepare/submit when the target runner is
@@ -172,6 +210,9 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
+	if err := n.requireServedChain(in.ChainID); err != nil {
+		return nil, err
+	}
 	if err := n.requireMAv2SessionWallet(user, in.ChainID, in.Wallet); err != nil {
 		return nil, err
 	}
@@ -234,6 +275,12 @@ func (n *Engine) SubmitSessionPolicy(
 	ownerSignature []byte,
 ) (policy *model.SessionPolicy, superseded []string, err error) {
 	if err := in.validate(); err != nil {
+		return nil, nil, err
+	}
+	// Submit re-derives the grant from the client's echo, so it re-checks the
+	// chain too: prepare's verdict does not carry over to a body that names a
+	// different one.
+	if err := n.requireServedChain(in.ChainID); err != nil {
 		return nil, nil, err
 	}
 	if err := n.requireMAv2SessionWallet(user, in.ChainID, in.Wallet); err != nil {

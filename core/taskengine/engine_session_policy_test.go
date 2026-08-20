@@ -93,6 +93,44 @@ func TestSessionPolicyPrepareRejectsSimpleAccountRunner(t *testing.T) {
 	require.ErrorIs(t, err, ErrSessionWalletNotMAv2)
 }
 
+// A grant naming a chain this gateway does not serve is refused at prepare —
+// before any owner signature is collected — and again at submit, which
+// re-derives the grant from the client's echo and so cannot inherit prepare's
+// verdict on a body that names a different chain. Letting one through would
+// store sp:<chain>:* records nothing here ever reads back, for authority no
+// configured bundler could ever send under.
+func TestSessionPolicyRefusesUnservedChain(t *testing.T) {
+	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	user := &model.User{Address: owner}
+	// Base mainnet: a real chain, deliberately not one config/test.yaml serves.
+	const unservedChain = int64(8453)
+	require.False(t, engine.isChainConfigured(unservedChain), "fixture must not serve the chain under test")
+
+	_, err := engine.PrepareSessionPolicy(user, SessionPolicyInput{
+		Wallet: wallet, ChainID: unservedChain,
+		AgentLabel: "TradingBot", Permissions: testPermissions(),
+	})
+	require.ErrorIs(t, err, ErrSessionChainNotServed)
+
+	// Submit is gated on its own: prepare against a chain we serve, then echo
+	// a body naming one we do not.
+	prepared, err := engine.PrepareSessionPolicy(user, SessionPolicyInput{
+		Wallet: wallet, ChainID: testPolicyChain,
+		AgentLabel: "TradingBot", Permissions: testPermissions(),
+	})
+	require.NoError(t, err)
+	_, _, err = engine.SubmitSessionPolicy(user, SessionPolicyInput{
+		Wallet: wallet, ChainID: unservedChain,
+		AgentLabel: "TradingBot", Permissions: testPermissions(),
+	}, prepared.Policy.ID, prepared.Policy.EntityID, prepared.Policy.Grant.Deadline,
+		signDigest(t, ownerKey, prepared.Digest))
+	require.ErrorIs(t, err, ErrSessionChainNotServed)
+
+	stranded, err := ListSessionPolicies(db, unservedChain, owner)
+	require.NoError(t, err)
+	require.Empty(t, stranded, "a refused grant must leave nothing under sp:%d:*", unservedChain)
+}
+
 func TestSessionPolicyPrepareSubmitRoundTrip(t *testing.T) {
 	engine, _, ownerKey, owner, wallet := newPolicyTestEngine(t)
 	user := &model.User{Address: owner}

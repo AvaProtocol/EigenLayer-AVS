@@ -390,6 +390,10 @@ func mapPolicyError(err error) error {
 	switch {
 	case errors.Is(err, taskengine.ErrSessionWalletNotMAv2):
 		return badRequest("SESSION_WALLET_NOT_MA_V2", err.Error(), "")
+	case errors.Is(err, taskengine.ErrSessionChainNotServed):
+		// Distinct from POLICIES_REJECTED so a client can tell "wrong chain"
+		// from "bad grant" and re-prepare against a chain we serve.
+		return badRequest("POLICIES_CHAIN_NOT_SERVED", "Chain not served", err.Error())
 	case errors.Is(err, taskengine.ErrWalletNotOwned), errors.Is(err, taskengine.ErrSessionPolicyNotFound):
 		// Existence is not confirmed to non-owners: both cases read as 404.
 		return &restmw.HTTPError{Status: http.StatusNotFound, Code: "POLICIES_NOT_FOUND",
