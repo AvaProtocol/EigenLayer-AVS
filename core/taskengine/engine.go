@@ -3839,9 +3839,19 @@ func (n *Engine) SimulateWorkflowWithContext(ctx context.Context, user *model.Us
 				}
 			}
 
+			// Wallets are listed on the chain being SIMULATED, not the JWT
+			// audience. simChainID is what the VM's smart-wallet config was
+			// resolved from, so a runner registered only on that chain has to
+			// be visible here too — otherwise an explicitly cross-chain
+			// simulation rejects its own valid runner, or silently falls
+			// through to the derivation below and simulates as the wrong
+			// sender.
+			simUser := *user
+			simUser.ChainID = simChainID
+
 			// Validate the runner against registered wallets
 			if runnerStr != "" {
-				resp, err := n.ListWallets(user, &avsproto.ListWalletReq{})
+				resp, err := n.ListWallets(&simUser, &avsproto.ListWalletReq{})
 				if err == nil {
 					for _, w := range resp.GetItems() {
 						if strings.EqualFold(w.GetAddress(), runnerStr) {
@@ -3859,7 +3869,7 @@ func (n *Engine) SimulateWorkflowWithContext(ctx context.Context, user *model.Us
 					chosenSender = *user.SmartAccountAddress
 				} else {
 					// As a last resort, pick the first wallet owned by the user (if any)
-					if resp, err := n.ListWallets(user, &avsproto.ListWalletReq{}); err == nil && len(resp.GetItems()) > 0 {
+					if resp, err := n.ListWallets(&simUser, &avsproto.ListWalletReq{}); err == nil && len(resp.GetItems()) > 0 {
 						chosenSender = common.HexToAddress(resp.GetItems()[0].GetAddress())
 					}
 				}
