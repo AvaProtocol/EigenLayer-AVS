@@ -115,6 +115,13 @@ func (n *Engine) requireOwnedWallet(user *model.User, wallet common.Address) err
 //
 // Skipped when no positive chain is configured at all: knownChainIDs() is
 // then [0] (placeholder configs), and every real chain would be refused.
+//
+// The refusal names only the chain the caller asked for. Which OTHER chains
+// this gateway serves is gateway-wide config, and this check runs before
+// wallet ownership is established (deliberately — it is the cheap one), so
+// echoing the set would hand it to any authenticated caller rather than to
+// the wallet's owner. It goes to the log instead, where an operator
+// debugging a refusal can still see it.
 func (n *Engine) requireServedChain(chainID int64) error {
 	served := n.knownChainIDs()
 	configured := false
@@ -127,7 +134,9 @@ func (n *Engine) requireServedChain(chainID int64) error {
 	if !configured || n.isChainConfigured(chainID) {
 		return nil
 	}
-	return fmt.Errorf("%w: chain %d is not one of %v", ErrSessionChainNotServed, chainID, served)
+	n.logger.Warn("session grant refused: chain not served",
+		"requested_chain_id", chainID, "served_chain_ids", served)
+	return fmt.Errorf("%w: chain %d", ErrSessionChainNotServed, chainID)
 }
 
 // requireMAv2SessionWallet refuses prepare/submit when the target runner is
