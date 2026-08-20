@@ -1087,34 +1087,57 @@ func (n *Engine) storeDefaultWalletForListWallets(chainID int64, owner common.Ad
 
 // ListWallets corresponds to the ListWallets RPC.
 //
-// Wallet records are chain-scoped. The ListWalletReq proto does not carry a
-// chain_id yet, so this handler queries the gateway's default chain only.
-// Adding multi-chain enumeration (or a chain_id field on ListWalletReq) is
-// a follow-up.
-func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletReq) (*avsproto.ListWalletResp, error) {
-	// ListWallets takes owner directly (legacy signature) — JWT chain
-	// context isn't plumbed through here yet, so fall back to the
-	// gateway default. Migrating to take *model.User is a follow-up.
-	chainID := n.defaultChainID()
+// Wallet records are chain-scoped, so the listing is too: the chain comes
+// from resolveUserChainID — the caller's explicit choice (REST sets
+// user.ChainID from the ?chainId query), then the JWT `aud` chain, then the
+// gateway default. Same precedence as GetWallet, so a wallet created on one
+// chain is listed by naming that chain rather than by holding a second JWT.
+//
+// Everything chain-dependent is resolved from that chain, not from the
+// gateway default: the factory the default wallet is derived against, the
+// per-owner wallet cap, and the storage prefix scanned.
+func (n *Engine) ListWallets(user *model.User, payload *avsproto.ListWalletReq) (*avsproto.ListWalletResp, error) {
+	if user == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "ListWallets requires an authenticated user")
+	}
+	owner := user.Address
+	chainID := n.resolveUserChainID(user)
+	swCfg := n.ResolveSmartWalletConfig(chainID)
 	walletsToReturnProto := []*avsproto.SmartWallet{}
 	processedAddresses := make(map[string]bool)
 
 	// The chain's CURRENT factory, not the raw configured one: on an MA v2
 	// chain those differ, and deriving against the configured SimpleAccount
 	// factory would hand the user their pre-cutover address.
-	defaultSystemFactory, factoryErr := aa.EffectiveFactory(n.smartWalletConfig)
+	defaultSystemFactory, factoryErr := aa.EffectiveFactory(swCfg)
 	var defaultDerivedAddress *common.Address
 	var deriveErr error
 
-	// Only try to derive default address if rpcConn is available
-	if factoryErr != nil {
+	// Derivation must run against THIS chain. A per-chain reader is the
+	// worker-routed path GetWallet prefers; the package-level rpcConn is the
+	// default chain's client, so it is only sound when that is the chain
+	// being listed. With neither, the default wallet is left out rather than
+	// derived against the wrong chain's factory — a wrong address here would
+	// be indistinguishable from a real one in the response. Stored wallets
+	// are unaffected: they come from the prefix scan below.
+	switch {
+	case factoryErr != nil:
 		deriveErr = factoryErr
-	} else if rpcConn != nil {
+	case GetChainStateReaderForChain(uint64(chainID)) != nil:
+		reader := GetChainStateReaderForChain(uint64(chainID))
+		var addr common.Address
+		addr, deriveErr = reader.GetSmartWalletAddress(context.Background(), owner, defaultSystemFactory, defaultSalt)
+		if deriveErr == nil {
+			defaultDerivedAddress = &addr
+		}
+	case rpcConn != nil && chainID == n.defaultChainID():
 		defaultDerivedAddress, deriveErr = aa.DeriveSenderAddressAuto(rpcConn, owner, defaultSystemFactory, defaultSalt)
-	} else {
-		// In test environment or when RPC is unavailable, skip default derivation
-		n.logger.Debug("Skipping default wallet derivation due to nil rpcConn (test environment)", "owner", owner.Hex())
-		deriveErr = fmt.Errorf("rpc connection not available")
+	default:
+		// Test/CI (rpcConn nil), or a non-default chain with no reader
+		// registered.
+		n.logger.Debug("ListWallets: skipping default wallet derivation — no chain reader for this chain",
+			"owner", owner.Hex(), "chain_id", chainID, "has_rpc_conn", rpcConn != nil)
+		deriveErr = fmt.Errorf("no chain reader available for chain %d", chainID)
 	}
 
 	if deriveErr != nil {
@@ -1148,8 +1171,8 @@ func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletR
 			} else if dbGetErr == badger.ErrKeyNotFound {
 				// Wallet not found in DB - we need to store it since we're returning it to the client
 				// Enforce max smart wallet count per owner before creating a new wallet entry
-				if n.smartWalletConfig != nil {
-					maxAllowed := n.smartWalletConfig.MaxWalletsPerOwner
+				if swCfg != nil {
+					maxAllowed := swCfg.MaxWalletsPerOwner
 					if maxAllowed <= 0 {
 						maxAllowed = config.DefaultMaxWalletsPerOwner
 					}
@@ -3818,7 +3841,7 @@ func (n *Engine) SimulateWorkflowWithContext(ctx context.Context, user *model.Us
 
 			// Validate the runner against registered wallets
 			if runnerStr != "" {
-				resp, err := n.ListWallets(owner, &avsproto.ListWalletReq{})
+				resp, err := n.ListWallets(user, &avsproto.ListWalletReq{})
 				if err == nil {
 					for _, w := range resp.GetItems() {
 						if strings.EqualFold(w.GetAddress(), runnerStr) {
@@ -3836,7 +3859,7 @@ func (n *Engine) SimulateWorkflowWithContext(ctx context.Context, user *model.Us
 					chosenSender = *user.SmartAccountAddress
 				} else {
 					// As a last resort, pick the first wallet owned by the user (if any)
-					if resp, err := n.ListWallets(owner, &avsproto.ListWalletReq{}); err == nil && len(resp.GetItems()) > 0 {
+					if resp, err := n.ListWallets(user, &avsproto.ListWalletReq{}); err == nil && len(resp.GetItems()) > 0 {
 						chosenSender = common.HexToAddress(resp.GetItems()[0].GetAddress())
 					}
 				}

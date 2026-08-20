@@ -29,14 +29,23 @@ import (
 // (the JWT subject, or a partner assertion's `sub`). Scoped to that owner, so
 // it never exposes another user's wallets. Partner-delegatable to resolve a
 // preview's runner — see ensurePermission (partner_wallet_preview).
-func (s *Server) ListWallets(ctx echo.Context) error {
+//
+// Chain routing precedence: ?chainId override → JWT aud → gateway default,
+// matching CreateWallet. Wallets are stored per chain, so without the
+// override a token minted for one chain could never see another's — which
+// would force a second signature purely to read a list.
+func (s *Server) ListWallets(ctx echo.Context, params generated.ListWalletsParams) error {
 	p, err := s.ensurePermission(ctx, OpListWallets)
 	if err != nil {
 		return err
 	}
 	user := p.User
 
-	resp, err := s.engine.ListWallets(user.Address, &avsproto.ListWalletReq{})
+	if params.ChainId != nil {
+		user.ChainID = int64(*params.ChainId)
+	}
+
+	resp, err := s.engine.ListWallets(user, &avsproto.ListWalletReq{})
 	if err != nil {
 		return err
 	}

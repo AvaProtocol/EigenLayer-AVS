@@ -2487,10 +2487,19 @@ paths:
       description: |
         Preview wallet resolve. Authorize with a user Bearer JWT **or** a
         partner assertion (`scope: read`) whose `sub` is the owner EOA.
+
+        Wallets are stored per chain, so the listing is per chain too. The
+        `chainId` query selects which one, on the same precedence as
+        `POST /wallets`: explicit value, then the JWT `aud` chain, then the
+        gateway default. A JWT minted for one chain can therefore list
+        another's wallets without a second signature — it proves EOA
+        ownership, which is chain-independent.
       operationId: listWallets
       security:
         - bearerAuth: []
         - partnerAssertion: []
+      parameters:
+        - $ref: '#/components/parameters/ChainIdQuery'
       responses:
         '200':
           description: All wallets for the authenticated user.

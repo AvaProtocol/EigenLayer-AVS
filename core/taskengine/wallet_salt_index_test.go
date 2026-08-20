@@ -256,7 +256,7 @@ func TestListWallets_HardFiltersStaleRows(t *testing.T) {
 	// Flag b as stale.
 	require.NoError(t, MarkWalletStale(db, int64(1), owner, b.Hex()))
 
-	resp, err := engine.ListWallets(owner, &avsproto.ListWalletReq{})
+	resp, err := engine.ListWallets(&model.User{Address: owner}, &avsproto.ListWalletReq{})
 	require.NoError(t, err)
 
 	addresses := make(map[string]bool)

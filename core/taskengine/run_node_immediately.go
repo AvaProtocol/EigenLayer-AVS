@@ -2649,7 +2649,7 @@ func (n *Engine) runProcessingNodeWithInputs(ctx context.Context, user *model.Us
 				// Validate runner belongs to owner
 				// For runNodeImmediately, we allow smart wallets that haven't been created yet
 				// The paymaster will sponsor their creation if needed (same as deployed workflows)
-				resp, err := n.ListWallets(vm.TaskOwner, &avsproto.ListWalletReq{})
+				resp, err := n.ListWallets(user, &avsproto.ListWalletReq{})
 				if err != nil {
 					return nil, fmt.Errorf("failed to list wallets for owner %s: %w", vm.TaskOwner.Hex(), err)
 				}
