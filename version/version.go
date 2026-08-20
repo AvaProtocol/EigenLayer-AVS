@@ -22,7 +22,7 @@ var (
 	// tag meant a `chore: bump version.go` commit on main after every release,
 	// which then had to be synced back to staging — upkeep for a value nothing
 	// reads in production.
-	semver   = "4.16.0"
+	semver   = "4.17.0"
 	revision = "unknown"
 )
 
