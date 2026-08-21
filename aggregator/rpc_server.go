@@ -141,6 +141,14 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 	if swErr != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "resolve chain %d: %v", requestedChainID, swErr)
 	}
+	// Checked here, not at the point of use further down: in single-chain mode
+	// resolveSmartWalletConfigForChain returns r.config.SmartWallet with a nil
+	// error, so an aggregator started without a smart wallet config yields a
+	// nil swCfg and no signal. Everything below reads it — the native-ETH
+	// refusal calls UsesModularAccountV2, which has no nil receiver guard.
+	if swCfg == nil {
+		return nil, status.Errorf(codes.Internal, "smart wallet configuration not available")
+	}
 
 	// Validate required parameters
 	if payload.RecipientAddress == "" {
@@ -170,7 +178,7 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 	if strings.EqualFold(strings.TrimSpace(payload.Token), "ETH") && swCfg.UsesModularAccountV2() {
 		recipient := common.HexToAddress(payload.RecipientAddress)
 		policyID := ""
-		if r.db != nil {
+		if r.db != nil && common.IsHexAddress(payload.SmartWalletAddress) {
 			if wallet := common.HexToAddress(payload.SmartWalletAddress); wallet != (common.Address{}) {
 				if policy, perr := taskengine.ActiveSessionPolicyForWallet(r.db, swCfg.ChainID, user.Address, wallet); perr == nil && policy != nil {
 					policyID = policy.ID
@@ -258,11 +266,6 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 	}
 
 	smartWalletAddress := params.SmartWalletAddress
-
-	// Check if smart wallet config is available
-	if swCfg == nil {
-		return nil, status.Errorf(codes.Internal, "smart wallet configuration not available")
-	}
 
 	// Withdrawals used to attach the v0.6 verifying paymaster with
 	// SkipReimbursement so a user could move their full balance without

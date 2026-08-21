@@ -116,3 +116,25 @@ func TestExecuteWithdraw_InvalidRecipientTakesPrecedence(t *testing.T) {
 		t.Fatalf("recipient validation should win over the native refusal, got %v", err)
 	}
 }
+
+// resolveSmartWalletConfigForChain returns (r.config.SmartWallet, nil) — no
+// error — in single-chain mode, so a gateway started without a smart wallet
+// config hands ExecuteWithdraw a nil swCfg. The native-ETH refusal reads that
+// config, and SmartWalletConfig.AccountProviderName has no nil receiver guard,
+// so the refusal must not run before the nil check.
+func TestExecuteWithdraw_NilSmartWalletConfigDoesNotPanic(t *testing.T) {
+	server := &RpcServer{config: &config.Config{Logger: logger.NewNoOpLogger()}}
+	user := &model.User{Address: common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")}
+
+	_, err := server.ExecuteWithdraw(context.Background(), user, &avsproto.WithdrawFundsReq{
+		RecipientAddress: "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
+		Amount:           "1",
+		Token:            "ETH",
+	})
+	if err == nil {
+		t.Fatal("expected an error when no smart wallet config is configured")
+	}
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("expected Internal for a missing smart wallet config, got %s: %v", status.Code(err), err)
+	}
+}

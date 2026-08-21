@@ -77,9 +77,14 @@ func MissingGrantCalls(allowed []model.AllowedAction, planned []PlannedCall) []P
 }
 
 // SessionPolicyNativeNotAllowedCode marks a refused native-value operation.
-// Exported because the REST withdraw handler maps it to a problem+json `code`
-// and preset.IsClientUserOpFailure classifies it as client-fixable — three
-// packages agreeing on one symbol rather than three copies of the literal.
+// Exported so the producers and the REST layer share one symbol: this package
+// formats the message, and aggregator/rest keys the problem+json `code` off it.
+//
+// preset.IsClientUserOpFailure matches the same text as a bare string literal
+// and cannot use this constant — taskengine imports preset (the send path), so
+// preset importing taskengine back would be a cycle. Renaming this constant
+// therefore has to be paired with editing that literal in
+// pkg/erc4337/preset/bundler_error.go by hand; the compiler will not catch it.
 const SessionPolicyNativeNotAllowedCode = "SESSION_POLICY_NATIVE_NOT_ALLOWED"
 
 // FormatSessionPolicyNativeNotAllowed builds the refusal for an inner call

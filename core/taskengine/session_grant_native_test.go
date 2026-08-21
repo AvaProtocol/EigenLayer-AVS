@@ -3,10 +3,12 @@ package taskengine
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 )
 
 // A native transfer under a session grant cannot be made to work by editing
@@ -81,4 +83,45 @@ func TestETHTransferPreflightSessionGrant(t *testing.T) {
 			t.Fatalf("expected skip with no config, got %q", msg)
 		}
 	})
+}
+
+// The native-ETH refusals refuse on MA v2 unconditionally, which is only
+// correct while every grant this package builds is selector-scoped: the
+// AllowlistModule skips its `data.length < 4` check only when
+// hasSelectorAllowlist is false, so a false entry WOULD authorize an empty
+// calldata inner call and make the blanket refusal wrong.
+//
+// That coupling used to live only in comments across two files. If this test
+// fails because a new grant shape sets HasSelectorAllowlist=false, the fix is
+// not to loosen the assertion — it is to narrow preflightSessionGrant and the
+// ExecuteWithdraw check to consider the actual grant instead of the chain.
+func TestHooksForAlwaysScopesSelectors(t *testing.T) {
+	usdc := common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
+	weth := common.HexToAddress("0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14")
+
+	permissions := SessionPermissions{
+		AllowedActions: []model.AllowedAction{
+			{Target: &usdc, Selectors: []string{"0x095ea7b3"}},
+			{Target: &weth, Selectors: []string{"0xa9059cbb", "0x095ea7b3"}},
+		},
+		SpendCap:     &model.ERC20SpendCap{Token: &usdc, Amount: "1000000"},
+		ValidUntilMs: time.Now().Add(time.Hour).UnixMilli(),
+	}
+
+	inputs, err := permissions.allowlistInputs()
+	if err != nil {
+		t.Fatalf("allowlistInputs: %v", err)
+	}
+	if len(inputs) != len(permissions.AllowedActions) {
+		t.Fatalf("expected one input per allowed action, got %d", len(inputs))
+	}
+	for _, input := range inputs {
+		if !input.HasSelectorAllowlist {
+			t.Fatalf("target %s is not selector-scoped; the blanket native-ETH refusal "+
+				"in preflightSessionGrant/ExecuteWithdraw is no longer sound", input.Target.Hex())
+		}
+		if len(input.Selectors) == 0 {
+			t.Fatalf("target %s is selector-scoped with an empty selector set", input.Target.Hex())
+		}
+	}
 }
