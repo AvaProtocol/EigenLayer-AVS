@@ -382,3 +382,166 @@ func TestCreateWorkflowDefaultsNonPositiveMaxExecution(t *testing.T) {
 		t.Errorf("explicit maxExecution 7 became %d", created.MaxExecution)
 	}
 }
+
+// retryTestNode names a minimal node of the given shape and attaches a policy.
+func retryTestNode(name string, policy *avsproto.RetryPolicy, node *avsproto.TaskNode) *avsproto.TaskNode {
+	node.Id = name
+	node.Name = name
+	node.RetryPolicy = policy
+	return node
+}
+
+func restTestNode() *avsproto.TaskNode {
+	return &avsproto.TaskNode{TaskType: &avsproto.TaskNode_RestApi{RestApi: &avsproto.RestAPINode{}}}
+}
+
+func writeTestNode() *avsproto.TaskNode {
+	return &avsproto.TaskNode{TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{}}}
+}
+
+func transferTestNode() *avsproto.TaskNode {
+	return &avsproto.TaskNode{TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: &avsproto.ETHTransferNode{}}}
+}
+
+func customCodeTestNode() *avsproto.TaskNode {
+	return &avsproto.TaskNode{TaskType: &avsproto.TaskNode_CustomCode{CustomCode: &avsproto.CustomCodeNode{}}}
+}
+
+func loopOverRestTestNode() *avsproto.TaskNode {
+	return &avsproto.TaskNode{TaskType: &avsproto.TaskNode_Loop{Loop: &avsproto.LoopNode{
+		Runner: &avsproto.LoopNode_RestApi{RestApi: &avsproto.RestAPINode{}},
+	}}}
+}
+
+func loopOverWriteTestNode() *avsproto.TaskNode {
+	return &avsproto.TaskNode{TaskType: &avsproto.TaskNode_Loop{Loop: &avsproto.LoopNode{
+		Runner: &avsproto.LoopNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{}},
+	}}}
+}
+
+func TestValidateRetryPolicies(t *testing.T) {
+	tests := []struct {
+		name    string
+		node    *avsproto.TaskNode
+		wantErr string // substring; empty means the policy must be accepted
+	}{
+		{
+			name: "no policy is always fine",
+			node: retryTestNode("write1", nil, writeTestNode()),
+		},
+		{
+			name: "modest policy on a read node",
+			node: retryTestNode("rest1", &avsproto.RetryPolicy{MaxAttempts: 3, BackoffMs: 500}, restTestNode()),
+		},
+		{
+			name: "bare max_attempts is accepted (backoff_ms is defaulted)",
+			node: retryTestNode("rest1", &avsproto.RetryPolicy{MaxAttempts: MaxRetryAttempts}, restTestNode()),
+		},
+		{
+			name: "policy on a loop over a read runner",
+			node: retryTestNode("loop1", &avsproto.RetryPolicy{MaxAttempts: 3, BackoffMs: 500}, loopOverRestTestNode()),
+		},
+		{
+			// The #676 exclusion, enforced at create time as well as structurally:
+			// a write node must never carry a policy that looks like it works.
+			name:    "policy on a contract write is rejected",
+			node:    retryTestNode("write1", &avsproto.RetryPolicy{MaxAttempts: 3}, writeTestNode()),
+			wantErr: "only supported on idempotent read/off-chain nodes",
+		},
+		{
+			name:    "policy on an eth transfer is rejected",
+			node:    retryTestNode("transfer1", &avsproto.RetryPolicy{MaxAttempts: 3}, transferTestNode()),
+			wantErr: "only supported on idempotent read/off-chain nodes",
+		},
+		{
+			name:    "policy on a loop over a write runner is rejected",
+			node:    retryTestNode("loop1", &avsproto.RetryPolicy{MaxAttempts: 3}, loopOverWriteTestNode()),
+			wantErr: "only supported on idempotent read/off-chain nodes",
+		},
+		{
+			name:    "policy on a node with no runner support is rejected",
+			node:    retryTestNode("code1", &avsproto.RetryPolicy{MaxAttempts: 2}, customCodeTestNode()),
+			wantErr: "only supported on idempotent read/off-chain nodes",
+		},
+		{
+			// The reviewed shape: 100 attempts x 60s backoff is 1h39m of sleeping
+			// inside one node, on the async path where nothing cancels it.
+			name:    "over-limit max_attempts is rejected, not clamped",
+			node:    retryTestNode("rest1", &avsproto.RetryPolicy{MaxAttempts: 100, BackoffMs: 60000}, restTestNode()),
+			wantErr: "above the maximum of 5",
+		},
+		{
+			name:    "over-limit backoff_ms is rejected",
+			node:    retryTestNode("rest1", &avsproto.RetryPolicy{MaxAttempts: 2, BackoffMs: 60000}, restTestNode()),
+			wantErr: "above the 30s maximum for a single backoff",
+		},
+		{
+			name:    "over-limit max_backoff_ms is rejected",
+			node:    retryTestNode("rest1", &avsproto.RetryPolicy{MaxAttempts: 2, BackoffMs: 100, MaxBackoffMs: 45000}, restTestNode()),
+			wantErr: "above the 30s maximum for a single backoff",
+		},
+		{
+			name:    "unknown retry_on class is rejected",
+			node:    retryTestNode("rest1", &avsproto.RetryPolicy{MaxAttempts: 2, RetryOn: []string{"http_500"}}, restTestNode()),
+			wantErr: `unknown retry_policy.retry_on class "http_500"`,
+		},
+		{
+			name:    "negative multiplier is rejected",
+			node:    retryTestNode("rest1", &avsproto.RetryPolicy{MaxAttempts: 2, BackoffMultiplier: -2}, restTestNode()),
+			wantErr: "must not be negative",
+		},
+		{
+			// Each knob passes on its own; the schedule they combine into does not.
+			name: "combined total delay above the cap is rejected",
+			node: retryTestNode("rest1", &avsproto.RetryPolicy{
+				MaxAttempts: 5, BackoffMs: 20000, BackoffMultiplier: 1,
+			}, restTestNode()),
+			wantErr: "above the 1m0s maximum",
+		},
+		{
+			// max_attempts <= 1 means the other fields never take effect.
+			name: "inert policy is not measured against the ceilings",
+			node: retryTestNode("rest1", &avsproto.RetryPolicy{MaxAttempts: 1, BackoffMs: 600000}, restTestNode()),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateRetryPolicies([]*avsproto.TaskNode{tt.node})
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected the policy to be accepted, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected an error containing %q, got nil", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestWorstCaseRetryDelay checks that validation measures the schedule
+// executeWithRetry actually runs, defaults and caps included.
+func TestWorstCaseRetryDelay(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy *avsproto.RetryPolicy
+		want   time.Duration
+	}{
+		{"no retries", &avsproto.RetryPolicy{MaxAttempts: 1}, 0},
+		{"defaults: 1s, 2s, 4s, 8s", &avsproto.RetryPolicy{MaxAttempts: 5}, 15 * time.Second},
+		{"flat multiplier", &avsproto.RetryPolicy{MaxAttempts: 3, BackoffMs: 2000, BackoffMultiplier: 1}, 4 * time.Second},
+		{"capped by max_backoff_ms", &avsproto.RetryPolicy{MaxAttempts: 4, BackoffMs: 1000, BackoffMultiplier: 100, MaxBackoffMs: 3000}, 7 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := worstCaseRetryDelay(tt.policy); got != tt.want {
+				t.Fatalf("worstCaseRetryDelay() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

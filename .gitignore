@@ -89,6 +89,3 @@ tmp/rehearsal-gateway-backup/
 
 # Local Claude Code agent state (session locks, project-local skills, etc.)
 .claude/
-
-# Editor-local settings
-.vscode/

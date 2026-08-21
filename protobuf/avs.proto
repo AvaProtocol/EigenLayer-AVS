@@ -738,7 +738,9 @@ message TaskNode {
   NodeType type = 1;
 
   // Optional per-node retry policy for transient failures. Additive (field 4);
-  // absent = single attempt. Honored only for the read/off-chain node allowlist.
+  // absent = single attempt. Honored only for the read/off-chain node allowlist
+  // (see RetryPolicy); setting it on any other node type is rejected at task
+  // creation rather than silently ignored.
   RetryPolicy retry_policy = 4;
 
   // based on node_type one and only one of these field are set
@@ -1554,13 +1556,35 @@ message EventCondition {
 
 // RetryPolicy configures automatic retries for transient node failures (RPC
 // blips, HTTP 429/5xx, timeouts). It is opt-in and additive: an absent policy
-// means a single attempt, i.e. today's behavior. The policy is honored only for
-// an allowlist of idempotent read/off-chain nodes (REST, GraphQL, ContractRead,
-// Balance); it is ignored on control-flow, stateful, and on-chain write nodes.
+// means a single attempt, i.e. today's behavior.
+//
+// Honored only for an allowlist of idempotent read/off-chain nodes: REST,
+// GraphQL, ContractRead, Balance, and a Loop whose runner is one of REST,
+// GraphQL, or ContractRead — there each iteration is retried under the policy.
+// On-chain write nodes (ContractWrite, EthTransfer) are excluded, because
+// re-invoking one could resubmit a UserOp, and so is a Loop over them. Setting a
+// policy on a node that cannot honor it is rejected at task creation rather than
+// silently ignored.
+//
+// Every field is bounded; an over-limit policy is rejected at task creation
+// rather than clamped, so a stored task always means what it says. Retries also
+// draw on a per-execution delay budget shared by every node, which bounds the
+// loop fan-out case a per-node limit cannot see.
 message RetryPolicy {
-  uint32 max_attempts = 1;        // total attempts including the first (default 1 = no retry)
-  uint32 backoff_ms = 2;          // initial backoff before the second attempt
-  double backoff_multiplier = 3;  // exponential factor applied each attempt (default 2.0)
-  uint32 max_backoff_ms = 4;      // upper bound on any single backoff
-  repeated string retry_on = 5;   // retryable error classes, e.g. ["timeout","http_5xx","http_429","rpc_error"]
+  // Total attempts including the first. 0 and 1 both mean no retry. Maximum 5.
+  uint32 max_attempts = 1;
+  // Initial backoff before the second attempt. Defaults to 1000ms whenever
+  // max_attempts > 1 — 0 would retry with no delay at all. Maximum 30000ms.
+  uint32 backoff_ms = 2;
+  // Exponential factor applied to the backoff after each attempt. Default 2.0.
+  double backoff_multiplier = 3;
+  // Upper bound on any single backoff. Defaults to, and is capped at, 30000ms.
+  uint32 max_backoff_ms = 4;
+  // Retryable error classes. Empty enables all of them. Valid values are
+  // "timeout", "http_429", "http_5xx" and "rpc_error"; anything else is rejected
+  // at task creation. A failure matching no class is never retried.
+  repeated string retry_on = 5;
+
+  // The total time one policy can sleep (the sum of its backoffs) is capped at
+  // 60s per node, and at 5 minutes across a whole execution.
 }

@@ -1982,7 +1982,9 @@ type TaskNode struct {
 	// NEW: Use the enum for type identification (Phase 1: add alongside existing)
 	Type NodeType `protobuf:"varint,1,opt,name=type,proto3,enum=aggregator.NodeType" json:"type,omitempty"`
 	// Optional per-node retry policy for transient failures. Additive (field 4);
-	// absent = single attempt. Honored only for the read/off-chain node allowlist.
+	// absent = single attempt. Honored only for the read/off-chain node allowlist
+	// (see RetryPolicy); setting it on any other node type is rejected at task
+	// creation rather than silently ignored.
 	RetryPolicy *RetryPolicy `protobuf:"bytes,4,opt,name=retry_policy,json=retryPolicy,proto3" json:"retry_policy,omitempty"`
 	// based on node_type one and only one of these field are set
 	//
@@ -7216,18 +7218,37 @@ func (x *EventCondition) GetFieldType() string {
 
 // RetryPolicy configures automatic retries for transient node failures (RPC
 // blips, HTTP 429/5xx, timeouts). It is opt-in and additive: an absent policy
-// means a single attempt, i.e. today's behavior. The policy is honored only for
-// an allowlist of idempotent read/off-chain nodes (REST, GraphQL, ContractRead,
-// Balance); it is ignored on control-flow, stateful, and on-chain write nodes.
+// means a single attempt, i.e. today's behavior.
+//
+// Honored only for an allowlist of idempotent read/off-chain nodes: REST,
+// GraphQL, ContractRead, Balance, and a Loop whose runner is one of REST,
+// GraphQL, or ContractRead — there each iteration is retried under the policy.
+// On-chain write nodes (ContractWrite, EthTransfer) are excluded, because
+// re-invoking one could resubmit a UserOp, and so is a Loop over them. Setting a
+// policy on a node that cannot honor it is rejected at task creation rather than
+// silently ignored.
+//
+// Every field is bounded; an over-limit policy is rejected at task creation
+// rather than clamped, so a stored task always means what it says. Retries also
+// draw on a per-execution delay budget shared by every node, which bounds the
+// loop fan-out case a per-node limit cannot see.
 type RetryPolicy struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	MaxAttempts       uint32                 `protobuf:"varint,1,opt,name=max_attempts,json=maxAttempts,proto3" json:"max_attempts,omitempty"`                    // total attempts including the first (default 1 = no retry)
-	BackoffMs         uint32                 `protobuf:"varint,2,opt,name=backoff_ms,json=backoffMs,proto3" json:"backoff_ms,omitempty"`                          // initial backoff before the second attempt
-	BackoffMultiplier float64                `protobuf:"fixed64,3,opt,name=backoff_multiplier,json=backoffMultiplier,proto3" json:"backoff_multiplier,omitempty"` // exponential factor applied each attempt (default 2.0)
-	MaxBackoffMs      uint32                 `protobuf:"varint,4,opt,name=max_backoff_ms,json=maxBackoffMs,proto3" json:"max_backoff_ms,omitempty"`               // upper bound on any single backoff
-	RetryOn           []string               `protobuf:"bytes,5,rep,name=retry_on,json=retryOn,proto3" json:"retry_on,omitempty"`                                 // retryable error classes, e.g. ["timeout","http_5xx","http_429","rpc_error"]
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Total attempts including the first. 0 and 1 both mean no retry. Maximum 5.
+	MaxAttempts uint32 `protobuf:"varint,1,opt,name=max_attempts,json=maxAttempts,proto3" json:"max_attempts,omitempty"`
+	// Initial backoff before the second attempt. Defaults to 1000ms whenever
+	// max_attempts > 1 — 0 would retry with no delay at all. Maximum 30000ms.
+	BackoffMs uint32 `protobuf:"varint,2,opt,name=backoff_ms,json=backoffMs,proto3" json:"backoff_ms,omitempty"`
+	// Exponential factor applied to the backoff after each attempt. Default 2.0.
+	BackoffMultiplier float64 `protobuf:"fixed64,3,opt,name=backoff_multiplier,json=backoffMultiplier,proto3" json:"backoff_multiplier,omitempty"`
+	// Upper bound on any single backoff. Defaults to, and is capped at, 30000ms.
+	MaxBackoffMs uint32 `protobuf:"varint,4,opt,name=max_backoff_ms,json=maxBackoffMs,proto3" json:"max_backoff_ms,omitempty"`
+	// Retryable error classes. Empty enables all of them. Valid values are
+	// "timeout", "http_429", "http_5xx" and "rpc_error"; anything else is rejected
+	// at task creation. A failure matching no class is never retried.
+	RetryOn       []string `protobuf:"bytes,5,rep,name=retry_on,json=retryOn,proto3" json:"retry_on,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RetryPolicy) Reset() {

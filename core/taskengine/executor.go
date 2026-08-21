@@ -266,6 +266,10 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 	if x.engine != nil {
 		vm.WithChainConfigResolver(x.engine.ResolveSmartWalletConfig)
 	}
+	// Retry backoffs sleep against this context, so a cancelled request aborts a
+	// pending backoff instead of holding the execution open. The async queue path
+	// passes context.Background() and is bounded by the retry ceilings alone.
+	vm.WithContext(ctx)
 
 	// Merge input variables from trigger execution (overrides task-level input variables)
 	if queueData != nil && len(queueData.InputVariables) > 0 {
