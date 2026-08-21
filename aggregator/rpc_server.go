@@ -12,7 +12,6 @@ import (
 	"github.com/allegro/bigcache/v3"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/getsentry/sentry-go"
@@ -143,23 +142,6 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 		return nil, status.Errorf(codes.InvalidArgument, "resolve chain %d: %v", requestedChainID, swErr)
 	}
 
-	// Balance preflight reads route through the chain's worker (gateway
-	// mode) so the gateway holds no direct chain-RPC connection for the
-	// withdraw flow. Fall back to a direct-RPC reader only when no
-	// worker-routed reader is registered (single-chain mode / startup
-	// race) — that path lazily dials the chain RPC via resolveSmartWalletForChain.
-	chainReader := taskengine.GetChainStateReaderForChain(uint64(requestedChainID))
-	if chainReader == nil {
-		_, swRpc, rpcErr := r.resolveSmartWalletForChain(requestedChainID)
-		if rpcErr != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "resolve chain %d rpc: %v", requestedChainID, rpcErr)
-		}
-		if swRpc == nil {
-			return nil, status.Errorf(codes.Internal, "no chain-state reader or RPC client available for chain %d", requestedChainID)
-		}
-		chainReader = taskengine.NewDirectChainStateReader(swRpc, requestedChainID)
-	}
-
 	// Validate required parameters
 	if payload.RecipientAddress == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "recipient address is required")
@@ -174,6 +156,57 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 	// Validate recipient address format
 	if !common.IsHexAddress(payload.RecipientAddress) {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid recipient address format")
+	}
+
+	// Native withdrawals build execute(recipient, amount, 0x) — empty inner
+	// calldata — which an MA v2 account cannot validate under a session grant:
+	// every REST grant is selector-scoped and the allowlist hook reverts on
+	// calldata shorter than 4 bytes. Refuse here rather than let the bundler
+	// answer with AA23. Checked against this chain's config, not assumed
+	// globally, so a chain that later gains native-value support (a native
+	// limit module rather than the selector allowlist) starts working without
+	// touching this branch. ERC-20 withdrawals carry a real transfer selector
+	// and are unaffected.
+	if strings.EqualFold(strings.TrimSpace(payload.Token), "ETH") && swCfg.UsesModularAccountV2() {
+		recipient := common.HexToAddress(payload.RecipientAddress)
+		policyID := ""
+		if r.db != nil {
+			if wallet := common.HexToAddress(payload.SmartWalletAddress); wallet != (common.Address{}) {
+				if policy, perr := taskengine.ActiveSessionPolicyForWallet(r.db, swCfg.ChainID, user.Address, wallet); perr == nil && policy != nil {
+					policyID = policy.ID
+				}
+			}
+		}
+		r.config.Logger.Warn("refusing native ETH withdraw: session grants cannot authorize it",
+			"user", user.Address.String(),
+			"smart_wallet", payload.SmartWalletAddress,
+			"recipient", payload.RecipientAddress,
+			"chain_id", swCfg.ChainID,
+		)
+		return nil, status.Error(codes.InvalidArgument,
+			taskengine.FormatSessionPolicyNativeNotAllowed(recipient, policyID))
+	}
+
+	// Balance preflight reads route through the chain's worker (gateway
+	// mode). Fall back to a direct-RPC reader only when no worker-routed
+	// reader is registered (single-chain mode / startup race) — that path
+	// lazily dials the chain RPC via resolveSmartWalletForChain.
+	//
+	// This no longer means the withdraw flow is worker-only: the send below
+	// runs in-process and dials this chain's RPC and bundler directly,
+	// because the session grant it needs lives in gateway storage. Keeping
+	// the READS worker-routed is still worth it — they are the high-frequency
+	// part, and the worker already holds a warm connection.
+	chainReader := taskengine.GetChainStateReaderForChain(uint64(requestedChainID))
+	if chainReader == nil {
+		_, swRpc, rpcErr := r.resolveSmartWalletForChain(requestedChainID)
+		if rpcErr != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "resolve chain %d rpc: %v", requestedChainID, rpcErr)
+		}
+		if swRpc == nil {
+			return nil, status.Errorf(codes.Internal, "no chain-state reader or RPC client available for chain %d", requestedChainID)
+		}
+		chainReader = taskengine.NewDirectChainStateReader(swRpc, requestedChainID)
 	}
 
 	// Parse amount - support "max" (case-insensitive) for "withdraw all"
@@ -334,12 +367,27 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 		"token", payload.Token,
 	)
 
-	// Send UserOp via preset.SendUserOp with global WebSocket client
-	userOp, receipt, err := r.sendUserOpWithGlobalWs(
+	// Sent in-process, NOT through the chain worker.
+	//
+	// Session grants live in the gateway's BadgerDB and the resolver that
+	// reads them is installed on the gateway (Engine.InstallSessionResolver).
+	// A worker has neither, so preset.SendUserOpAuto there resolved no
+	// authorization and every withdraw died on "no session authorization for
+	// smart wallet …" while a perfectly good grant sat in gateway storage.
+	//
+	// Passing swCfg (this chain's config, resolved above) is what the worker
+	// hop used to provide; the send path dials that chain's RPC and bundler
+	// itself. auth is left nil deliberately — SendUserOpMAv2 resolves the
+	// grant AFTER it derives the real sender, because grants are keyed by
+	// smart-wallet address and resolving earlier against the owner EOA finds
+	// nothing.
+	userOp, receipt, err := preset.SendUserOpAuto(
+		swCfg,
 		user.Address,
 		callData,
 		smartWalletAddress,
-		requestedChainID,
+		nil, // saltOverride: withdraws operate on already-deployed wallets
+		r.config.Logger,
 	)
 
 	if err != nil {
@@ -420,90 +468,6 @@ func (r *RpcServer) validateSmartWalletOwnership(owner common.Address, smartWall
 	}
 
 	return nil
-}
-
-// sendUserOpWithGlobalWs sends a UserOp using the global WebSocket client for efficient transaction monitoring.
-// In gateway mode, it delegates to the appropriate chain worker instead.
-// requestedChainID picks the worker in gateway mode; pass 0 to use the
-// gateway's default chain (single-chain mode ignores the argument).
-// The shared WebSocket client is no longer threaded through: the MA v2 send
-// path opens its own connection for receipt watching, so the v0.6-era
-// SendUserOpAutoWithWsClient variant that existed to reuse the aggregator's
-// long-lived socket had nothing left to reuse.
-func (r *RpcServer) sendUserOpWithGlobalWs(
-	owner common.Address,
-	callData []byte,
-	smartWalletAddress *common.Address,
-	requestedChainID int64,
-) (*preset.SentUserOp, *types.Receipt, error) {
-	// Gateway mode: route to worker
-	if r.chainRegistry != nil {
-		return r.sendUserOpViaWorker(owner, callData, smartWalletAddress, requestedChainID)
-	}
-
-	// Note: salt=nil here because rpc_server callers (e.g. WithdrawFunds) operate on already-deployed wallets
-	return preset.SendUserOpAuto(
-		r.config.SmartWallet,
-		owner,
-		callData,
-		smartWalletAddress,
-		nil,             // saltOverride - not needed for already-deployed wallets
-		r.config.Logger, // Pass logger for debug/verbose logging
-	)
-}
-
-// sendUserOpViaWorker delegates UserOp execution to a chain worker in gateway mode.
-// It converts the worker response into the same types returned by preset.SendUserOp.
-func (r *RpcServer) sendUserOpViaWorker(
-	owner common.Address,
-	callData []byte,
-	smartWalletAddress *common.Address,
-	chainID int64,
-) (*preset.SentUserOp, *types.Receipt, error) {
-	worker, err := r.chainRegistry.GetWorker(chainID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("no worker for chain %d: %w", chainID, err)
-	}
-
-	// UsePaymaster selected the v0.6 verifying paymaster and is ignored by the
-	// worker now that sponsorship is the chain's Gas Manager policy. Left off
-	// rather than set to a value that decides nothing.
-	req := &avsproto.ExecuteUserOpReq{
-		Owner:    owner.Hex(),
-		CallData: callData,
-	}
-	if smartWalletAddress != nil {
-		req.SmartWalletAddress = smartWalletAddress.Hex()
-	}
-
-	resp, err := worker.Client.ExecuteUserOp(context.Background(), req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("worker ExecuteUserOp failed: %w", err)
-	}
-	if !resp.Success {
-		return nil, nil, fmt.Errorf("worker ExecuteUserOp error: %s", resp.Error)
-	}
-
-	// Convert worker response to local types for caller compatibility
-	receipt := &types.Receipt{
-		TxHash:  common.HexToHash(resp.TxHash),
-		GasUsed: resp.GasUsed,
-	}
-	if resp.GasCostWei != "" {
-		gasCost, ok := new(big.Int).SetString(resp.GasCostWei, 10)
-		if ok && resp.GasUsed > 0 {
-			receipt.EffectiveGasPrice = new(big.Int).Div(gasCost, new(big.Int).SetUint64(resp.GasUsed))
-		}
-	}
-
-	// The worker already reports the hash; discarding the operation here left
-	// resp.UserOpHash empty in gateway mode. Only the hash crosses the RPC
-	// boundary, so the rest of SentUserOp stays zero.
-	sent := &preset.SentUserOp{UserOpHash: common.HexToHash(resp.UserOpHash)}
-	if smartWalletAddress != nil {
-		sent.Sender = *smartWalletAddress
-	}
-	return sent, receipt, nil
 }
 
 // (Aggregator-service gRPC handlers — CreateTask, ListTasks, GetTask,

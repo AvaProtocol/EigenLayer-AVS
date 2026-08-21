@@ -5,9 +5,11 @@ import (
 	"math/big"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/labstack/echo/v4"
+	"google.golang.org/grpc/status"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
@@ -243,6 +245,17 @@ func (s *Server) WithdrawWallet(ctx echo.Context, address generated.EthereumAddr
 
 	result, err := s.withdraws.Withdraw(ctx.Request().Context(), req)
 	if err != nil {
+		// ExecuteWithdraw refuses a native withdraw the account's session
+		// hooks cannot validate. It signals that as a gRPC InvalidArgument,
+		// which the problem middleware would render as a 400 with an empty
+		// `code` — leaving clients to substring-match the detail. Re-wrap it
+		// so the machine-readable code travels in the field built for it,
+		// alongside WITHDRAW_BAD_TOKEN and friends above.
+		if strings.Contains(err.Error(), taskengine.SessionPolicyNativeNotAllowedCode) {
+			return badRequest(taskengine.SessionPolicyNativeNotAllowedCode,
+				"Native ETH withdraw not authorized",
+				status.Convert(err).Message())
+		}
 		return err
 	}
 	// Echo enough of the request back on the response that callers can

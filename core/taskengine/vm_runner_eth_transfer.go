@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -286,11 +287,64 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	return executionLog, nil
 }
 
+// preflightSessionGrant refuses a native ETH send that the account's session
+// hooks cannot validate, before it reaches the bundler as opaque AA23. It is
+// the ETHTransfer counterpart to ContractWriteProcessor.preflightSessionGrantCoverage.
+//
+// Where the contract-write preflight asks "does the grant cover these calls?",
+// this one has a fixed answer: no grant can. A native transfer is
+// execute(to, value, 0x), and every REST grant is selector-scoped, so the
+// AllowlistModule reverts on its `data.length < 4` check regardless of what
+// the allowlist contains. That is why this does not call MissingGrantCalls —
+// running a coverage check whose result cannot change the outcome would only
+// invite a re-grant that still fails.
+//
+// Returns "" when the check does not apply: a chain not on MA v2 has no
+// session hooks to trip.
+func (p *ETHTransferProcessor) preflightSessionGrant(destination common.Address) string {
+	if p == nil || p.smartWalletConfig == nil || !p.smartWalletConfig.UsesModularAccountV2() {
+		return ""
+	}
+
+	// The active policy id is decoration only — the refusal stands whether or
+	// not a grant exists, so a lookup failure is swallowed rather than
+	// promoted to SESSION_POLICY_LOOKUP_FAILED the way the contract-write
+	// preflight does. There, coverage depends on reading the policy; here it
+	// does not, and failing closed on a Badger hiccup would replace an
+	// accurate message with a worse one.
+	policyID := ""
+	if p.vm != nil && p.vm.db != nil && p.taskOwner != nil {
+		if sender := getAASenderAddress(p.vm); sender != nil {
+			chainID := p.smartWalletConfig.ChainID
+			if chainID <= 0 {
+				chainID = p.vm.vmDefaultChainID()
+			}
+			if policy, err := ActiveSessionPolicyForWallet(p.vm.db, chainID, *p.taskOwner, *sender); err == nil && policy != nil {
+				policyID = policy.ID
+			}
+		}
+	}
+	return FormatSessionPolicyNativeNotAllowed(destination, policyID)
+}
+
 // executeRealETHTransfer executes a real UserOp transaction for ETH transfers
 func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amountStr string, isMaxTransfer bool, executionLog *avsproto.Execution_Step, finalized *bool) (*avsproto.Execution_Step, error) {
 	p.vm.logger.Info("🔍 REAL ETH TRANSFER DEBUG - Starting real UserOp ETH transfer execution",
 		"destination", destination,
 		"amount", amountStr)
+
+	// Refuse before packing/pricing: an MA v2 account cannot validate a native
+	// transfer under a session grant, and the bundler reports that as AA23.
+	if msg := p.preflightSessionGrant(common.HexToAddress(destination)); msg != "" {
+		p.vm.logger.Warn("session grant cannot authorize a native ETH transfer",
+			"destination", destination,
+			"amount", amountStr,
+			"chain_id", p.smartWalletConfig.ChainID)
+		err := errors.New(msg)
+		*finalized = true
+		finalizeStep(executionLog, false, err, msg, "")
+		return executionLog, err
+	}
 
 	// Parse amount to big.Int
 	amount, ok := new(big.Int).SetString(amountStr, 10)

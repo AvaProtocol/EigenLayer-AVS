@@ -36,9 +36,6 @@ func (f *fakeChainWorkerClient) GetTokenMetadata(
 func (f *fakeChainWorkerClient) WorkerHealthCheck(context.Context, *avsproto.WorkerHealthCheckReq, ...grpc.CallOption) (*avsproto.WorkerHealthCheckResp, error) {
 	panic("unused")
 }
-func (f *fakeChainWorkerClient) ExecuteUserOp(context.Context, *avsproto.ExecuteUserOpReq, ...grpc.CallOption) (*avsproto.ExecuteUserOpResp, error) {
-	panic("unused")
-}
 func (f *fakeChainWorkerClient) GetNonce(context.Context, *avsproto.WorkerGetNonceReq, ...grpc.CallOption) (*avsproto.WorkerGetNonceResp, error) {
 	panic("unused")
 }

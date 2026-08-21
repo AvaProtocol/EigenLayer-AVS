@@ -11,9 +11,6 @@ service ChainWorker {
   // Health check - gateway verifies worker connectivity and chain status
   rpc WorkerHealthCheck(WorkerHealthCheckReq) returns (WorkerHealthCheckResp);
 
-  // Execute a UserOp on this chain via the bundler
-  rpc ExecuteUserOp(ExecuteUserOpReq) returns (ExecuteUserOpResp);
-
   // Get the nonce for a smart wallet on this chain
   rpc GetNonce(WorkerGetNonceReq) returns (WorkerGetNonceResp);
 
@@ -93,23 +90,6 @@ message WorkerHealthCheckResp {
   int64 chain_id = 2;
   string chain_name = 3;
   int64 latest_block = 4;   // Latest block number from chain RPC
-}
-
-// UserOp execution
-message ExecuteUserOpReq {
-  string owner = 1;                 // Owner EOA address (hex)
-  bytes call_data = 2;              // Encoded calldata for execute/executeBatch
-  string smart_wallet_address = 3;  // Smart wallet address override (hex, optional)
-  bool use_paymaster = 4;           // Whether to use paymaster for gas sponsorship
-}
-
-message ExecuteUserOpResp {
-  bool success = 1;
-  string tx_hash = 2;          // On-chain transaction hash
-  string error = 3;            // Error message if failed
-  string user_op_hash = 4;     // ERC-4337 UserOp hash
-  uint64 gas_used = 5;
-  string gas_cost_wei = 6;     // Total gas cost in wei (big.Int as string)
 }
 
 // Nonce query
