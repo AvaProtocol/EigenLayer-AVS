@@ -101,6 +101,44 @@ const (
 	// quietly processed the first 100 of 5,000 addresses would report success
 	// while skipping most of its job.
 	MaxLoopIterations = 100
+
+	// MaxRetryAttempts bounds a node's RetryPolicy for the same reason
+	// MaxLoopIterations bounds a Loop: retry is a client-controlled multiplier
+	// on metered provider calls *inside* a single execution, which no trigger
+	// floor can reach. Unbounded, `{max_attempts: 100, backoff_ms: 60000}` is
+	// 1h39m of sleeping inside one node.
+	//
+	// 5 attempts is where retrying stops buying anything: with the default 1s
+	// backoff and 2x growth that is 15s of waiting, long enough to ride out a
+	// provider blip or a rate-limit window, and a failure still standing after
+	// four retries is not transient.
+	MaxRetryAttempts = 5
+
+	// DefaultRetryBackoff applies when a policy enables retries without setting
+	// backoff_ms. Without a default, `{max_attempts: 5}` — the most natural
+	// policy to write — retried with *zero* delay, turning one 429 into five
+	// immediate hits.
+	DefaultRetryBackoff = time.Second
+
+	// MaxRetryBackoff caps any single backoff, whether it came from backoff_ms,
+	// max_backoff_ms, or exponential growth. Capping the growing value itself
+	// (not a per-attempt copy) is also what keeps the multiplication from
+	// overflowing time.Duration.
+	MaxRetryBackoff = 30 * time.Second
+
+	// MaxTotalRetryDelay bounds one node's worst-case *total* time asleep, so
+	// the three retry knobs cannot be combined into a long stall that each knob
+	// individually passes. Checked at create time against the exact schedule the
+	// policy produces.
+	MaxTotalRetryDelay = 60 * time.Second
+
+	// MaxExecutionRetryDelay bounds retry sleeping across a whole execution.
+	// Per-node validation cannot see fan-out: a Loop runs its retryable runner
+	// once per element, so MaxLoopIterations nodes each within MaxTotalRetryDelay
+	// still multiply to 100 minutes. Enforced at runtime by retryBudget; once
+	// spent, later nodes fail on their first attempt instead of extending the
+	// execution.
+	MaxExecutionRetryDelay = 5 * time.Minute
 )
 
 // cronSamples is how many consecutive fire times to inspect when deriving a
@@ -277,4 +315,151 @@ func validateTriggerFrequency(trigger *avsproto.TaskTrigger, fallbackChainID int
 	}
 
 	return nil
+}
+
+// validateRetryPolicies rejects any node whose retry_policy exceeds the retry
+// ceilings, or that sets one where it can never apply.
+//
+// Following MaxLoopIterations' reasoning, an over-limit policy is an error
+// rather than a silent clamp: a task that quietly retried 5 times when it asked
+// for 100 would report success while doing something other than what it was
+// configured to do, and the caller would never learn the ceiling exists.
+func validateRetryPolicies(nodes []*avsproto.TaskNode) error {
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		label := node.GetName()
+		if label == "" {
+			label = node.GetId()
+		}
+		if err := validateRetryPolicy(label, node.GetRetryPolicy(), nodeSupportsRetry(node)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateRetryPolicy checks a single node's policy. supported reports whether
+// the node's runner is on the retry allowlist.
+func validateRetryPolicy(nodeLabel string, policy *avsproto.RetryPolicy, supported bool) error {
+	if policy == nil {
+		return nil
+	}
+
+	// A policy on a node that can never honor it is rejected rather than
+	// ignored. The allowlist is enforced structurally at execution time, so an
+	// accepted policy on (say) a ContractWrite would do nothing forever, with no
+	// error and no warning — the user would believe they had retries.
+	if !supported {
+		return fmt.Errorf(
+			"node %q sets retry_policy, but retries are only supported on idempotent read/off-chain nodes (REST, GraphQL, ContractRead, Balance, and Loops over those): re-invoking an on-chain write could submit the transaction twice",
+			nodeLabel)
+	}
+
+	if policy.GetMaxAttempts() <= 1 {
+		// 0 and 1 both mean "one attempt"; the other fields are inert.
+		return nil
+	}
+
+	if policy.GetMaxAttempts() > MaxRetryAttempts {
+		return fmt.Errorf(
+			"node %q sets retry_policy.max_attempts=%d, above the maximum of %d: each attempt spends metered provider quota, so retries are bounded like every other per-execution multiplier",
+			nodeLabel, policy.GetMaxAttempts(), MaxRetryAttempts)
+	}
+
+	if backoff := time.Duration(policy.GetBackoffMs()) * time.Millisecond; backoff > MaxRetryBackoff {
+		return fmt.Errorf(
+			"node %q sets retry_policy.backoff_ms=%d (%s), above the %s maximum for a single backoff",
+			nodeLabel, policy.GetBackoffMs(), backoff, MaxRetryBackoff)
+	}
+	if maxBackoff := time.Duration(policy.GetMaxBackoffMs()) * time.Millisecond; maxBackoff > MaxRetryBackoff {
+		return fmt.Errorf(
+			"node %q sets retry_policy.max_backoff_ms=%d (%s), above the %s maximum for a single backoff",
+			nodeLabel, policy.GetMaxBackoffMs(), maxBackoff, MaxRetryBackoff)
+	}
+	if multiplier := policy.GetBackoffMultiplier(); multiplier < 0 {
+		return fmt.Errorf(
+			"node %q sets retry_policy.backoff_multiplier=%v: must not be negative (omit it for the default of %v)",
+			nodeLabel, multiplier, defaultBackoffMultiplier)
+	}
+
+	for _, class := range policy.GetRetryOn() {
+		if !isKnownRetryClass(class) {
+			return fmt.Errorf(
+				"node %q sets an unknown retry_policy.retry_on class %q: valid classes are %s",
+				nodeLabel, class, strings.Join(defaultRetryClasses, ", "))
+		}
+	}
+
+	// The individual knobs can each pass while their combination stalls the
+	// execution, so bound the schedule the policy actually produces.
+	if total := worstCaseRetryDelay(policy); total > MaxTotalRetryDelay {
+		return fmt.Errorf(
+			"node %q has a retry_policy that can sleep %s in total (%d attempts starting at %s, x%v), above the %s maximum: lower max_attempts, backoff_ms, or set max_backoff_ms",
+			nodeLabel, total, policy.GetMaxAttempts(),
+			effectiveInitialBackoff(policy), effectiveMultiplier(policy), MaxTotalRetryDelay)
+	}
+
+	return nil
+}
+
+func isKnownRetryClass(class string) bool {
+	for _, c := range defaultRetryClasses {
+		if c == class {
+			return true
+		}
+	}
+	return false
+}
+
+// effectiveInitialBackoff / effectiveMultiplier resolve the defaults
+// executeWithRetry applies, so validation measures the same schedule that will
+// actually run.
+func effectiveInitialBackoff(policy *avsproto.RetryPolicy) time.Duration {
+	backoff := time.Duration(policy.GetBackoffMs()) * time.Millisecond
+	if backoff <= 0 {
+		backoff = DefaultRetryBackoff
+	}
+	if cap := effectiveMaxBackoff(policy); backoff > cap {
+		backoff = cap
+	}
+	return backoff
+}
+
+func effectiveMultiplier(policy *avsproto.RetryPolicy) float64 {
+	multiplier := policy.GetBackoffMultiplier()
+	if multiplier <= 0 {
+		multiplier = defaultBackoffMultiplier
+	}
+	return multiplier
+}
+
+func effectiveMaxBackoff(policy *avsproto.RetryPolicy) time.Duration {
+	maxBackoff := time.Duration(policy.GetMaxBackoffMs()) * time.Millisecond
+	if maxBackoff <= 0 || maxBackoff > MaxRetryBackoff {
+		maxBackoff = MaxRetryBackoff
+	}
+	return maxBackoff
+}
+
+// worstCaseRetryDelay sums every backoff a fully-exhausted policy would sleep:
+// max_attempts-1 gaps, growing by the multiplier and clamped by the per-backoff
+// cap. This is the worst case by construction — an attempt that succeeds, or
+// fails with a non-retryable error, sleeps less.
+func worstCaseRetryDelay(policy *avsproto.RetryPolicy) time.Duration {
+	attempts := int(policy.GetMaxAttempts())
+	if attempts > MaxRetryAttempts {
+		attempts = MaxRetryAttempts
+	}
+	backoff := effectiveInitialBackoff(policy)
+	multiplier := effectiveMultiplier(policy)
+	maxBackoff := effectiveMaxBackoff(policy)
+
+	total := time.Duration(0)
+	for i := 0; i < attempts-1; i++ {
+		total += backoff
+		backoff = nextBackoff(backoff, multiplier, maxBackoff)
+	}
+	return total
 }

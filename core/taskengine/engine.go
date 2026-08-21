@@ -1819,6 +1819,13 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 		return nil, status.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 
+	// Constant retry ceilings (limits.go). Retry is a per-execution multiplier on
+	// metered provider calls, so it is bounded like every other one; an over-limit
+	// policy is rejected here rather than silently clamped at execution time.
+	if err := validateRetryPolicies(task.Nodes); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%s", err.Error())
+	}
+
 	// Default chain_id to the aggregator's SmartWallet chain when not specified.
 	// In gateway mode the top-level SmartWallet is populated from chains[0]
 	// (mainnet by convention), so a missing chain_id silently routes the task
