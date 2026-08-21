@@ -87,9 +87,6 @@ type chainStateFakeClient struct {
 func (f *chainStateFakeClient) WorkerHealthCheck(context.Context, *avsproto.WorkerHealthCheckReq, ...grpc.CallOption) (*avsproto.WorkerHealthCheckResp, error) {
 	panic("unused")
 }
-func (f *chainStateFakeClient) ExecuteUserOp(context.Context, *avsproto.ExecuteUserOpReq, ...grpc.CallOption) (*avsproto.ExecuteUserOpResp, error) {
-	panic("unused")
-}
 func (f *chainStateFakeClient) GetNonce(context.Context, *avsproto.WorkerGetNonceReq, ...grpc.CallOption) (*avsproto.WorkerGetNonceResp, error) {
 	panic("unused")
 }

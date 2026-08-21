@@ -20,7 +20,6 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	ChainWorker_WorkerHealthCheck_FullMethodName      = "/aggregator.ChainWorker/WorkerHealthCheck"
-	ChainWorker_ExecuteUserOp_FullMethodName          = "/aggregator.ChainWorker/ExecuteUserOp"
 	ChainWorker_GetNonce_FullMethodName               = "/aggregator.ChainWorker/GetNonce"
 	ChainWorker_GetSmartWalletAddress_FullMethodName  = "/aggregator.ChainWorker/GetSmartWalletAddress"
 	ChainWorker_GetTokenMetadata_FullMethodName       = "/aggregator.ChainWorker/GetTokenMetadata"
@@ -49,8 +48,6 @@ const (
 type ChainWorkerClient interface {
 	// Health check - gateway verifies worker connectivity and chain status
 	WorkerHealthCheck(ctx context.Context, in *WorkerHealthCheckReq, opts ...grpc.CallOption) (*WorkerHealthCheckResp, error)
-	// Execute a UserOp on this chain via the bundler
-	ExecuteUserOp(ctx context.Context, in *ExecuteUserOpReq, opts ...grpc.CallOption) (*ExecuteUserOpResp, error)
 	// Get the nonce for a smart wallet on this chain
 	GetNonce(ctx context.Context, in *WorkerGetNonceReq, opts ...grpc.CallOption) (*WorkerGetNonceResp, error)
 	// Get the smart wallet address for an owner on this chain
@@ -120,16 +117,6 @@ func (c *chainWorkerClient) WorkerHealthCheck(ctx context.Context, in *WorkerHea
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WorkerHealthCheckResp)
 	err := c.cc.Invoke(ctx, ChainWorker_WorkerHealthCheck_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *chainWorkerClient) ExecuteUserOp(ctx context.Context, in *ExecuteUserOpReq, opts ...grpc.CallOption) (*ExecuteUserOpResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ExecuteUserOpResp)
-	err := c.cc.Invoke(ctx, ChainWorker_ExecuteUserOp_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -297,8 +284,6 @@ func (c *chainWorkerClient) GetStorageAt(ctx context.Context, in *WorkerGetStora
 type ChainWorkerServer interface {
 	// Health check - gateway verifies worker connectivity and chain status
 	WorkerHealthCheck(context.Context, *WorkerHealthCheckReq) (*WorkerHealthCheckResp, error)
-	// Execute a UserOp on this chain via the bundler
-	ExecuteUserOp(context.Context, *ExecuteUserOpReq) (*ExecuteUserOpResp, error)
 	// Get the nonce for a smart wallet on this chain
 	GetNonce(context.Context, *WorkerGetNonceReq) (*WorkerGetNonceResp, error)
 	// Get the smart wallet address for an owner on this chain
@@ -366,9 +351,6 @@ type UnimplementedChainWorkerServer struct{}
 
 func (UnimplementedChainWorkerServer) WorkerHealthCheck(context.Context, *WorkerHealthCheckReq) (*WorkerHealthCheckResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method WorkerHealthCheck not implemented")
-}
-func (UnimplementedChainWorkerServer) ExecuteUserOp(context.Context, *ExecuteUserOpReq) (*ExecuteUserOpResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ExecuteUserOp not implemented")
 }
 func (UnimplementedChainWorkerServer) GetNonce(context.Context, *WorkerGetNonceReq) (*WorkerGetNonceResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetNonce not implemented")
@@ -450,24 +432,6 @@ func _ChainWorker_WorkerHealthCheck_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ChainWorkerServer).WorkerHealthCheck(ctx, req.(*WorkerHealthCheckReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _ChainWorker_ExecuteUserOp_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ExecuteUserOpReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ChainWorkerServer).ExecuteUserOp(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ChainWorker_ExecuteUserOp_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ChainWorkerServer).ExecuteUserOp(ctx, req.(*ExecuteUserOpReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -752,10 +716,6 @@ var ChainWorker_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "WorkerHealthCheck",
 			Handler:    _ChainWorker_WorkerHealthCheck_Handler,
-		},
-		{
-			MethodName: "ExecuteUserOp",
-			Handler:    _ChainWorker_ExecuteUserOp_Handler,
 		},
 		{
 			MethodName: "GetNonce",

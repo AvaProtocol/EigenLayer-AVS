@@ -57,6 +57,12 @@ func IsClientUserOpFailure(err error) bool {
 	case strings.Contains(s, "SESSION_POLICY_TARGET_NOT_ALLOWED"):
 		// Typed preflight: batch target/selector outside the active grant.
 		return true
+	case strings.Contains(s, "SESSION_POLICY_NATIVE_NOT_ALLOWED"):
+		// Typed preflight: native ETH under a selector-scoped grant. Refused
+		// before the bundler, so this never reflects gateway health — and it
+		// is high-volume by nature (any ETH transfer node on an MA v2 chain
+		// produces one), which is exactly the shape that fans Sentry.
+		return true
 	case strings.Contains(s, "no session authorization for smart wallet"):
 		return true
 	case strings.Contains(s, "more than one usable session policy"):

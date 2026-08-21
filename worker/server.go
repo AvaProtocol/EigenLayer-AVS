@@ -13,7 +13,6 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
@@ -63,74 +62,6 @@ func (s *Server) WorkerHealthCheck(ctx context.Context, req *avsproto.WorkerHeal
 		resp.Status = "DEGRADED"
 	} else {
 		resp.LatestBlock = int64(blockNumber)
-	}
-
-	return resp, nil
-}
-
-func (s *Server) ExecuteUserOp(ctx context.Context, req *avsproto.ExecuteUserOpReq) (*avsproto.ExecuteUserOpResp, error) {
-	if s.worker.smartWalletCfg == nil {
-		return &avsproto.ExecuteUserOpResp{
-			Success: false,
-			Error:   "smart wallet config not initialized",
-		}, nil
-	}
-
-	ownerAddr := common.HexToAddress(req.Owner)
-
-	var senderOverride *common.Address
-	if req.SmartWalletAddress != "" {
-		addr := common.HexToAddress(req.SmartWalletAddress)
-		senderOverride = &addr
-	}
-
-	// req.UsePaymaster selected the v0.6 verifying paymaster, which went with
-	// the EntryPoint v0.7 cutover, so it no longer chooses anything. Left on
-	// the wire for older callers and ignored.
-	//
-	// It is worth being precise about what that means here, because the
-	// obvious reading is wrong: operations sent through this path are NOT
-	// sponsored. Gas Manager sponsorship needs AlchemyPaymasterPolicyID on the
-	// SmartWalletConfig, and worker config carries no such field for
-	// ToSmartWalletConfig to copy — so priceOperationV07 never requests it and
-	// the operation takes the self-funded prefund path, which fails for a
-	// zero-balance wallet.
-	//
-	// This is not new. The MA v2 branch never received the paymaster request
-	// either, so worker-routed operations were already unsponsored before the
-	// v0.6 removal; only the misleading plumbing is gone. Wiring the policy
-	// through worker config is tracked separately.
-	userOp, receipt, err := preset.SendUserOpAuto(
-		s.worker.smartWalletCfg,
-		ownerAddr,
-		req.CallData,
-		senderOverride,
-		nil, // saltOverride: not exposed in ExecuteUserOpReq; sender override is used instead
-		s.worker.logger,
-	)
-	if err != nil {
-		return &avsproto.ExecuteUserOpResp{
-			Success: false,
-			Error:   fmt.Sprintf("UserOp execution failed: %v", err),
-		}, nil
-	}
-
-	resp := &avsproto.ExecuteUserOpResp{
-		Success: true,
-	}
-
-	if userOp != nil {
-		resp.UserOpHash = userOp.UserOpHash.Hex()
-	}
-
-	if receipt != nil {
-		resp.TxHash = receipt.TxHash.Hex()
-		resp.GasUsed = receipt.GasUsed
-		gasCost := new(big.Int).Mul(
-			new(big.Int).SetUint64(receipt.GasUsed),
-			receipt.EffectiveGasPrice,
-		)
-		resp.GasCostWei = gasCost.String()
 	}
 
 	return resp, nil

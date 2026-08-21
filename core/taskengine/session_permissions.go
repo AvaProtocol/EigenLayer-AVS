@@ -70,15 +70,19 @@ func (p SessionPermissions) Validate() error {
 	return nil
 }
 
-// HooksFor builds the grant's hook entries for its allocated entity:
-// the allowlist validation hook (targets, selectors, and the cap's limit in
-// one install payload), the allowlist execution hook that enforces the cap,
-// and the time-range hook that expires the grant.
-func (p SessionPermissions) HooksFor(entityID uint32) ([][]byte, error) {
-	if err := p.Validate(); err != nil {
-		return nil, err
-	}
-
+// allowlistInputs is the allowlist half of HooksFor, split out so the
+// selector-scoping invariant is observable to a test rather than only asserted
+// in comments.
+//
+// HasSelectorAllowlist is true for EVERY entry, unconditionally, and a good
+// deal depends on that: because the module skips its `data.length < 4` check
+// only when the flag is false, a selector-scoped entry can never authorize an
+// empty-calldata (native value) inner call. The native-ETH refusals in
+// ExecuteWithdraw and ETHTransferProcessor.preflightSessionGrant are blanket
+// refusals on MA v2 chains precisely because this is unconditional; if a grant
+// shape ever sets it false, those refusals become overly broad and must be
+// narrowed to match. TestHooksForAlwaysScopesSelectors guards the coupling.
+func (p SessionPermissions) allowlistInputs() ([]aa.AllowlistInput, error) {
 	inputs := make([]aa.AllowlistInput, 0, len(p.AllowedActions))
 	capAmount, _ := new(big.Int).SetString(p.SpendCap.Amount, 10)
 	for _, action := range p.AllowedActions {
@@ -100,6 +104,22 @@ func (p SessionPermissions) HooksFor(entityID uint32) ([][]byte, error) {
 			input.ERC20SpendLimit = capAmount
 		}
 		inputs = append(inputs, input)
+	}
+	return inputs, nil
+}
+
+// HooksFor builds the grant's hook entries for its allocated entity:
+// the allowlist validation hook (targets, selectors, and the cap's limit in
+// one install payload), the allowlist execution hook that enforces the cap,
+// and the time-range hook that expires the grant.
+func (p SessionPermissions) HooksFor(entityID uint32) ([][]byte, error) {
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
+
+	inputs, err := p.allowlistInputs()
+	if err != nil {
+		return nil, err
 	}
 
 	allowlistHook, err := aa.AllowlistValidationHook(entityID, inputs)
