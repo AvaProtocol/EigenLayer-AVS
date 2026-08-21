@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -163,6 +164,30 @@ func (p *SessionPolicy) Usable() bool {
 		return false
 	}
 	return p.Status == SessionPolicyPending || p.Status == SessionPolicyActive
+}
+
+// Expired reports whether the grant's own TimeRangeModule window has closed.
+//
+// Deliberately NOT folded into Usable(). Usable answers "does this record
+// still represent the owner's permission", which is what supersede and the
+// ambiguity check need — an expired grant is still the record that occupies
+// its validation entity, and treating it as absent would let a re-grant hand
+// that entity out again while the account still has it installed.
+//
+// Expiry is instead a send-time concern: the send path refuses an expired
+// grant with a typed error rather than letting the account reject it, because
+// the chain's answer ("User Operation expired or has an invalid time range")
+// arrives from the bundler with no policy id and no hint that re-granting is
+// the fix.
+//
+// ValidUntil is unix MILLISECONDS. Zero means no recorded expiry — older
+// records predate the field, and reading that as "expired at the epoch" would
+// refuse every one of them.
+func (p *SessionPolicy) Expired(now time.Time) bool {
+	if p == nil || p.ValidUntil <= 0 {
+		return false
+	}
+	return now.UnixMilli() >= p.ValidUntil
 }
 
 // Validate rejects a record that cannot produce a working authorization.
