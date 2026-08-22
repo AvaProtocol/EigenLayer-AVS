@@ -18,8 +18,8 @@ import (
 //
 //   - The grant is a BEARER authorization for exactly its committed calldata.
 //     It authorizes execution against the user's wallet, so it gets the same
-//     handling as a secret: not logged, not returned in list responses,
-//     deleted on revoke.
+//     handling as a secret: not logged, not returned in list responses.
+//     Revoke retains the record so the entity stays reserved (#763 B).
 //
 //   - InstallCall is stored rather than re-derived. Re-building it from the
 //     policy fields at execution time would let a later code change silently
@@ -126,6 +126,11 @@ type SessionGrantAuthorization struct {
 	// this install. Recorded at grant time so the send path does not have to
 	// re-parse the install calldata to find out.
 	RequiresExecuteUserOp bool `json:"requires_execute_user_op,omitempty"`
+
+	// ChainWindowChecked is set after the send path has read the entity's
+	// installed TimeRangeModule window and found it agrees with ValidUntil.
+	// Cached so the chain read is not paid on every UserOp (#763 C).
+	ChainWindowChecked bool `json:"chain_window_checked,omitempty"`
 }
 
 // SessionPolicyStatus tracks how far a grant has got.
@@ -203,6 +208,13 @@ func (p *SessionPolicy) Validate() error {
 	}
 	if p.EntityID == 0 {
 		return fmt.Errorf("session policy %s uses entity 0, which is the owner's fallback signer", p.ID)
+	}
+	// Revoked records exist to keep the entity reserved (#763 B). They do
+	// not authorize anything, so incomplete grant material is allowed —
+	// otherwise RevokeSessionGrant could not retain a pending-without-
+	// InstallCall row and NextSessionEntityID would reuse that entity.
+	if p.Status == SessionPolicyRevoked {
+		return nil
 	}
 	if p.SessionSigner == nil || *p.SessionSigner == (common.Address{}) {
 		return fmt.Errorf("session policy %s has no session signer", p.ID)

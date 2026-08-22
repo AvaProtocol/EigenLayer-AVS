@@ -234,14 +234,16 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 	lock.Lock()
 	defer lock.Unlock()
 	prepared, err := PrepareSessionGrant(n.db, in.ChainID, signer, strings.ToLower(ulid.Make().String()), SessionGrantRequest{
-		Owner:         user.Address,
-		Wallet:        in.Wallet,
-		AgentLabel:    in.AgentLabel,
-		Justification: in.Justification,
-		ValidUntil:    in.Permissions.ValidUntilMs,
-		HooksFor:      in.Permissions.HooksFor,
-		TeardownCheck: n.teardownVerifier(),
-		TeardownCtx:   context.Background(),
+		Owner:          user.Address,
+		Wallet:         in.Wallet,
+		AgentLabel:     in.AgentLabel,
+		Justification:  in.Justification,
+		ValidUntil:     in.Permissions.ValidUntilMs,
+		HooksFor:       in.Permissions.HooksFor,
+		TeardownCheck:  n.teardownVerifier(),
+		TeardownCtx:    context.Background(),
+		OccupancyCheck: n.occupancyFor(in.ChainID),
+		OccupancyCtx:   context.Background(),
 	})
 	if err != nil {
 		return nil, err
@@ -311,15 +313,17 @@ func (n *Engine) SubmitSessionPolicy(
 	defer lock.Unlock()
 
 	prepared, err := PrepareSessionGrant(n.db, in.ChainID, signer, strings.ToLower(policyID), SessionGrantRequest{
-		Owner:         user.Address,
-		Wallet:        in.Wallet,
-		AgentLabel:    in.AgentLabel,
-		Justification: in.Justification,
-		ValidUntil:    in.Permissions.ValidUntilMs,
-		HooksFor:      in.Permissions.HooksFor,
-		Deadline:      deadline,
-		TeardownCheck: n.teardownVerifier(),
-		TeardownCtx:   context.Background(),
+		Owner:          user.Address,
+		Wallet:         in.Wallet,
+		AgentLabel:     in.AgentLabel,
+		Justification:  in.Justification,
+		ValidUntil:     in.Permissions.ValidUntilMs,
+		HooksFor:       in.Permissions.HooksFor,
+		Deadline:       deadline,
+		TeardownCheck:  n.teardownVerifier(),
+		TeardownCtx:    context.Background(),
+		OccupancyCheck: n.occupancyFor(in.ChainID),
+		OccupancyCtx:   context.Background(),
 	})
 	if err != nil {
 		return nil, nil, err
@@ -380,7 +384,8 @@ func (n *Engine) GetSessionPolicyByID(user *model.User, chainID int64, wallet co
 
 // RevokeSessionPolicyByID revokes one policy.
 //
-//   - deleted: the storage record was removed (empty grant with no InstallCall).
+//   - deleted: always false after #763 B. Records are retained so the
+//     entity stays reserved even when the grant had no InstallCall.
 //   - cleanupRequired + cleanup: applied grant still installed on chain; owner
 //     must execute the returned uninstallValidation call (#717 AC3).
 //   - neither: pending grant retained as revoked so a late install can mark

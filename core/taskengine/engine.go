@@ -268,6 +268,11 @@ type Engine struct {
 	assignmentMutex      *sync.RWMutex     // protects task assignments
 
 	smartWalletConfig *config.SmartWalletConfig
+	// sessionChainReads is set by InstallSessionResolver. When true,
+	// prepare/submit probe on-chain entity occupancy and the send path
+	// verifies TimeRange windows (#763 A/C). Unit tests that construct
+	// engines and never install a resolver stay offline.
+	sessionChainReads bool
 	// chainConfigs maps chain_id to ChainConfig in gateway mode.
 	// nil in single-chain mode.
 	chainConfigs map[int64]*config.ChainConfig
