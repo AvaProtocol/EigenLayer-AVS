@@ -149,6 +149,22 @@ const SessionPolicyEntityOccupiedCode = "SESSION_POLICY_ENTITY_OCCUPIED"
 // chain read can.
 const SessionPolicyChainWindowMismatchCode = "SESSION_POLICY_CHAIN_WINDOW_MISMATCH"
 
+// SessionPolicyChainWindowMissingCode marks the special case of that drift
+// where the entity has NO TimeRange hook at all: timeRanges() reads zero while
+// storage promises a real expiry.
+//
+// Separate from the mismatch code on purpose. It is a different failure with a
+// different remedy, and folding the two renders "no hook installed" as
+// "chain validUntil 1970-01-01T00:00:00Z" — which reads as a corrupt timestamp
+// and sends whoever is on call hunting for one.
+//
+// It is also strictly MORE permissive than storage claims rather than less: no
+// time-range hook means the grant never expires on chain, where the mismatch
+// case usually means it expired early. Refused all the same — a grant that does
+// not enforce the expiry the owner approved is not one to sign under — but an
+// operator needs to be able to tell the two apart when triaging.
+const SessionPolicyChainWindowMissingCode = "SESSION_POLICY_CHAIN_WINDOW_MISSING"
+
 // maxEntityOccupancyProbes bounds how many on-chain occupancy reads
 // NextFreeSessionEntityID will make. NextSessionEntityID returns
 // max(stored)+1; each bump is an RPC. An account with several unstored
@@ -630,6 +646,14 @@ func checkAppliedChainWindow(db storage.Storage, policy *model.SessionPolicy, ve
 			policy.ID, policy.EntityID, policy.Runner.Hex(), err)
 	}
 	storedSec := uint64(policy.ValidUntil / 1000)
+	if untilSec == 0 {
+		return fmt.Errorf(
+			"%s: session policy %s entity %d on %s has no TimeRange hook installed, "+
+				"while storage promises validUntil %s; the grant does not expire on chain. "+
+				"Grant again onto a free entity",
+			SessionPolicyChainWindowMissingCode, policy.ID, policy.EntityID, policy.Runner.Hex(),
+			time.UnixMilli(policy.ValidUntil).UTC().Format(time.RFC3339))
+	}
 	if untilSec != storedSec {
 		return fmt.Errorf(
 			"%s: session policy %s entity %d on %s: stored validUntil %s, chain validUntil %s; grant again onto a free entity",
@@ -679,6 +703,11 @@ type DriftedSessionGrant struct {
 	ChainUntilSec  uint64
 	ChainAfterSec  uint64
 	ReadErr        error
+	// WindowMissing is the ChainUntilSec == 0 case: no TimeRange hook on the
+	// entity at all. Broken out so a pre-deploy sweep can count it separately —
+	// it is the population the send path will start refusing, and it is not
+	// visibly different from "expired in 1970" in the raw numbers.
+	WindowMissing bool
 }
 
 // FindDriftedSessionGrants walks applied usable grants on chainID and
@@ -721,6 +750,7 @@ func FindDriftedSessionGrants(ctx context.Context, db storage.Storage, chainID i
 			out = append(out, DriftedSessionGrant{
 				Policy: policy, StoredUntilSec: storedSec,
 				ChainUntilSec: untilSec, ChainAfterSec: afterSec,
+				WindowMissing: untilSec == 0,
 			})
 		}
 	}

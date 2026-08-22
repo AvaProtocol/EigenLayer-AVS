@@ -295,3 +295,71 @@ func TestFindDriftedSessionGrantsIgnoresMatchingWindows(t *testing.T) {
 		t.Fatalf("matching windows are not drift, got %d", len(drifted))
 	}
 }
+
+// The Sepolia e2e fixture is in exactly this state right now: entity 3 has a
+// signer installed and its stored grant runs to 2027, but the account carries
+// NO TimeRange hook for it — timeRanges() reads zero. Measured against
+// production, not hypothesised.
+//
+// It must be refused (a grant that does not enforce the expiry the owner
+// approved is not one to sign under), but with its own code: folding it into
+// the mismatch case prints "chain validUntil 1970-01-01T00:00:00Z", which reads
+// as a corrupt timestamp rather than "the hook was never installed".
+func TestSessionResolverRefusesMissingChainWindowDistinctly(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer := crypto.PubkeyToAddress(key.PublicKey)
+	storedUntil := time.Now().Add(365 * 24 * time.Hour).UnixMilli()
+	policy := storeExpiryPolicy(t, db, spChain, spOwner, spWallet, signer, storedUntil)
+
+	verify := func(_ context.Context, _ int64, _ common.Address, _ uint32) (uint64, uint64, error) {
+		return 0, 0, nil // no hook installed
+	}
+	resolve := newSessionResolver(db, func(common.Address) (*ecdsa.PrivateKey, error) { return key, nil }, nil, verify)
+	auth, err := resolve(spChain, spOwner, spWallet)
+	if err == nil || auth != nil {
+		t.Fatal("a grant whose entity has no TimeRange hook must not authorize a send")
+	}
+	if !strings.Contains(err.Error(), SessionPolicyChainWindowMissingCode) {
+		t.Fatalf("expected %s, got %v", SessionPolicyChainWindowMissingCode, err)
+	}
+	if strings.Contains(err.Error(), "1970") {
+		t.Fatalf("must not render the absent hook as an epoch date: %v", err)
+	}
+	if !strings.Contains(err.Error(), policy.ID) {
+		t.Fatalf("error should name the policy: %v", err)
+	}
+}
+
+// The sweep has to count the missing-hook rows separately: that is the
+// population the send path starts refusing on deploy, and in raw numbers it is
+// indistinguishable from a window that expired at the epoch.
+func TestFindDriftedSessionGrantsFlagsMissingWindow(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer := crypto.PubkeyToAddress(key.PublicKey)
+	storeExpiryPolicy(t, db, spChain, spOwner, spWallet, signer,
+		time.Now().Add(365*24*time.Hour).UnixMilli())
+
+	verify := func(_ context.Context, _ int64, _ common.Address, _ uint32) (uint64, uint64, error) {
+		return 0, 0, nil
+	}
+	drifted, err := FindDriftedSessionGrants(context.Background(), db, spChain, verify)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(drifted) != 1 {
+		t.Fatalf("expected 1 drifted grant, got %d", len(drifted))
+	}
+	if !drifted[0].WindowMissing {
+		t.Fatal("a zero chain window must be reported as WindowMissing")
+	}
+}

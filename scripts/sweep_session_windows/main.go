@@ -79,6 +79,7 @@ func run() error {
 	}
 
 	fmt.Printf("drifted session grants on chain %d: %d\n", *chainID, len(drifted))
+	missing := 0
 	for _, d := range drifted {
 		p := d.Policy
 		runner := ""
@@ -90,10 +91,26 @@ func run() error {
 				p.ID, p.EntityID, runner, d.StoredUntilSec, d.ReadErr)
 			continue
 		}
+		if d.WindowMissing {
+			// Printing chainUntil here would render as 1970-01-01 and read as a
+			// corrupt date rather than "the hook was never installed".
+			fmt.Printf("  policy=%s entity=%d runner=%s storedUntil=%s chainUntil=NO HOOK INSTALLED\n",
+				p.ID, p.EntityID, runner,
+				time.Unix(int64(d.StoredUntilSec), 0).UTC().Format(time.RFC3339))
+			missing++
+			continue
+		}
 		fmt.Printf("  policy=%s entity=%d runner=%s storedUntil=%s chainUntil=%s\n",
 			p.ID, p.EntityID, runner,
 			time.Unix(int64(d.StoredUntilSec), 0).UTC().Format(time.RFC3339),
 			time.Unix(int64(d.ChainUntilSec), 0).UTC().Format(time.RFC3339))
+	}
+	if missing > 0 {
+		// This is the number that decides whether it is safe to deploy: these
+		// are the grants the send path will begin refusing.
+		fmt.Printf("\n%d of %d have NO TimeRange hook installed.\n", missing, len(drifted))
+		fmt.Printf("Those are refused as %s once this build is live — re-grant them first.\n",
+			taskengine.SessionPolicyChainWindowMissingCode)
 	}
 	log.Printf("re-grant each drifted runner onto a free entity; this script does not write")
 	return nil
