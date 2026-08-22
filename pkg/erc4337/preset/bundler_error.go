@@ -61,6 +61,10 @@ func IsClientUserOpFailure(err error) bool {
 		// Typed preflight: the grant's TimeRangeModule window closed. The
 		// owner renews it by granting again; nothing here is operable.
 		return true
+	case strings.Contains(s, "SESSION_POLICY_CHAIN_WINDOW_MISMATCH"):
+		// Typed preflight: stored ValidUntil disagrees with the entity's
+		// installed TimeRange (#763 C). Re-grant onto a free entity.
+		return true
 	case strings.Contains(s, "SESSION_POLICY_NATIVE_NOT_ALLOWED"):
 		// Typed preflight: native ETH under a selector-scoped grant. Refused
 		// before the bundler, so this never reflects gateway health — and it

@@ -52,6 +52,36 @@ func EntitySignerOnChain(ctx context.Context, client ContractCaller, account com
 	return common.BytesToAddress(out[12:32]), nil
 }
 
+// EntityTimeRangeOnChain returns the TimeRangeModule window for
+// (entity, account). validUntil / validAfter are unix seconds (uint48 on
+// chain, ABI-encoded as two 32-byte words). Both zero means the entity
+// has no time-range hook installed.
+//
+// A read failure is returned rather than folded into zeros: zeros mean
+// "no window", and a caller acting on a transient RPC error would treat
+// a live grant as unwindowed (#763).
+func EntityTimeRangeOnChain(ctx context.Context, client ContractCaller, account common.Address, entity uint32) (validUntilSec, validAfterSec uint64, err error) {
+	if client == nil {
+		return 0, 0, fmt.Errorf("no chain client")
+	}
+	data := crypto.Keccak256([]byte("timeRanges(uint32,address)"))[:4]
+	data = append(data, common.LeftPadBytes([]byte{
+		byte(entity >> 24), byte(entity >> 16), byte(entity >> 8), byte(entity),
+	}, 32)...)
+	data = append(data, common.LeftPadBytes(account.Bytes(), 32)...)
+
+	module := TimeRangeModuleAddress()
+	out, err := client.CallContract(ctx, ethereum.CallMsg{To: &module, Data: data}, nil)
+	if err != nil {
+		return 0, 0, fmt.Errorf("reading time range of entity %d on %s: %w", entity, account.Hex(), err)
+	}
+	if len(out) < 64 {
+		return 0, 0, fmt.Errorf("timeRanges(%d, %s) returned %d bytes, want at least 64",
+			entity, account.Hex(), len(out))
+	}
+	return new(big.Int).SetBytes(out[:32]).Uint64(), new(big.Int).SetBytes(out[32:64]).Uint64(), nil
+}
+
 // EntryPointNonce returns the EntryPoint's current nonce for (account, key) —
 // the full 256-bit value, whose low 64 bits are the sequence.
 //

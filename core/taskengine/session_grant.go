@@ -89,6 +89,15 @@ type SessionGrantRequest struct {
 	TeardownCheck TeardownVerifier
 	// TeardownCtx bounds chain reads during prepare. Ignored when TeardownCheck is nil.
 	TeardownCtx context.Context
+
+	// OccupancyCheck, when set, reads whether the candidate validation
+	// entity is already spoken for on the account (#763 A). Occupied
+	// means a non-zero signer or a non-zero deferred nonce sequence (or
+	// a failed read); the allocator bumps and retries, bounded. Nil
+	// skips the chain read (offline tests).
+	OccupancyCheck EntityOccupancyChecker
+	// OccupancyCtx bounds occupancy reads. Ignored when OccupancyCheck is nil.
+	OccupancyCtx context.Context
 }
 
 // defaultSigningWindow bounds the gap between signing a grant and its first
@@ -153,7 +162,7 @@ func PrepareSessionGrant(
 		return nil, fmt.Errorf("session signer is required")
 	}
 
-	entity, err := NextSessionEntityID(db, chainID, req.Owner, req.Wallet)
+	entity, err := NextFreeSessionEntityID(req.OccupancyCtx, db, chainID, req.Owner, req.Wallet, req.OccupancyCheck)
 	if err != nil {
 		return nil, err
 	}
@@ -307,14 +316,18 @@ func SubmitSessionGrant(db storage.Storage, prepared *PreparedSessionGrant, owne
 	// allocation was provisional: another grant on this wallet may have
 	// landed in between, and reusing its entity would overwrite that grant's
 	// signer on chain.
-	entity, err := NextSessionEntityID(db, policy.ChainID, *policy.Owner, *policy.Runner)
+	//
+	// Occupancy-aware prepare may skip on-chain-occupied ids, so the
+	// storage-only NextSessionEntityID (max+1) is not comparable to the
+	// prepared id. "Taken" means another stored policy already occupies it.
+	taken, err := sessionEntityTaken(db, policy.ChainID, *policy.Owner, *policy.Runner, policy.EntityID)
 	if err != nil {
 		return nil, err
 	}
-	if entity != policy.EntityID {
+	if taken {
 		return nil, fmt.Errorf(
-			"entity %d was taken while this grant was being signed (next free is %d); prepare it again",
-			policy.EntityID, entity)
+			"entity %d was taken while this grant was being signed; prepare it again",
+			policy.EntityID)
 	}
 
 	// Re-check what this grant REPLACES, for the same reason and with the same
@@ -461,25 +474,18 @@ func BuildOnChainRevokeCleanup(policy *model.SessionPolicy) (*OnChainRevokeClean
 // MarkSessionGrantAppliedByID set AppliedAt without resurrecting usable
 // status. onChainCleanupRequired is false until AppliedAt is set.
 //
-// Pending without InstallCall (should not occur after submit): deleted.
+// Pending without InstallCall (or Grant): also retained as revoked. Deleting
+// would free the entity for NextSessionEntityID while the account may still
+// have it installed (#763 B). The record occupies the id; it grants nothing.
 func RevokeSessionGrant(db storage.Storage, policy *model.SessionPolicy) (deleted, onChainCleanupRequired bool, err error) {
 	if policy == nil {
 		return false, false, fmt.Errorf("no policy to revoke")
 	}
-	key := SessionPolicyKey(policy.ChainID, *policy.Owner, policy.ID)
-	if policy.Grant == nil {
-		return true, false, db.Delete(key)
-	}
-	if policy.Grant.Applied() {
-		policy.Status = model.SessionPolicyRevoked
+	policy.Status = model.SessionPolicyRevoked
+	if policy.Grant != nil && policy.Grant.Applied() {
 		// Already verified clear on chain — soft-revoke only, no cleanup payload.
 		return false, policy.Grant.NeedsOnChainCleanup(), StoreSessionPolicy(db, policy)
 	}
-	if len(policy.Grant.InstallCall) == 0 {
-		return true, false, db.Delete(key)
-	}
-	// Pending with payload: retain for possible late install / cleanup.
-	policy.Status = model.SessionPolicyRevoked
 	return false, false, StoreSessionPolicy(db, policy)
 }
 
