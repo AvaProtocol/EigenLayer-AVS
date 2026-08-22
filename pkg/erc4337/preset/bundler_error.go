@@ -57,6 +57,10 @@ func IsClientUserOpFailure(err error) bool {
 	case strings.Contains(s, "SESSION_POLICY_TARGET_NOT_ALLOWED"):
 		// Typed preflight: batch target/selector outside the active grant.
 		return true
+	case strings.Contains(s, "SESSION_POLICY_EXPIRED"):
+		// Typed preflight: the grant's TimeRangeModule window closed. The
+		// owner renews it by granting again; nothing here is operable.
+		return true
 	case strings.Contains(s, "SESSION_POLICY_NATIVE_NOT_ALLOWED"):
 		// Typed preflight: native ETH under a selector-scoped grant. Refused
 		// before the bundler, so this never reflects gateway health — and it

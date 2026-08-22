@@ -131,6 +131,13 @@ func sessionAuthorityLock(chainID int64, owner, runner common.Address) *sync.RWM
 // granting again.
 const SessionPolicyAmbiguousCode = "SESSION_POLICY_AMBIGUOUS"
 
+// SessionPolicyExpiredCode marks a grant whose TimeRangeModule window has
+// closed. Client-fixable by granting again, which is the whole reason it is
+// typed: without it the account rejects the operation and the bundler reports
+// "User Operation expired or has an invalid time range" with no policy id and
+// no indication that a re-grant is the remedy.
+const SessionPolicyExpiredCode = "SESSION_POLICY_EXPIRED"
+
 // ActiveSessionPolicyForWallet returns the usable grant for one wallet.
 //
 // Exactly one usable grant per wallet is expected. More than one is refused
@@ -297,6 +304,23 @@ func NewSessionResolver(
 			// No grant. SendUserOpMAv2 fails fast on nil rather than estimating
 			// a controller-as-fallback UserOp that always AA23s.
 			return nil, nil
+		}
+		// Refuse an expired grant here rather than letting the account do it.
+		// The grant installs a TimeRangeValidationHook, so once ValidUntil
+		// passes the operation is rejected on chain as "User Operation expired
+		// or has an invalid time range" — a bundler-shaped error with no
+		// policy id, which reads as an infrastructure fault and hides the fact
+		// that granting again fixes it.
+		//
+		// Returning an error (not nil) is deliberate: nil would produce "no
+		// session authorization ... requires a session grant", which is wrong
+		// and actively misleading when the owner HAS granted and simply needs
+		// to renew.
+		if policy.Expired(time.Now()) {
+			return nil, fmt.Errorf(
+				"%s: session policy %s on wallet %s expired at %s; grant again to keep executing",
+				SessionPolicyExpiredCode, policy.ID, wallet.Hex(),
+				time.UnixMilli(policy.ValidUntil).UTC().Format(time.RFC3339))
 		}
 		key, err := signerKeyFor(*policy.SessionSigner)
 		if err != nil {
