@@ -90,9 +90,26 @@ func (a *withdrawServiceAdapter) Withdraw(ctx context.Context, req avsclient.Wit
 	if err != nil {
 		return avsclient.WithdrawResult{}, err
 	}
+	return withdrawResultFrom(resp), nil
+}
+
+// withdrawResultFrom projects the gRPC response onto the client result.
+//
+// Split out of Withdraw so a test can hold it to every field: the previous
+// inline literal quietly omitted Message and SubmittedAt, and nothing failed.
+// That is not cosmetic. ExecuteWithdraw composes a real reason on the failure
+// path ("failed to send withdrawal transaction: <cause>") and the REST handler
+// already renders both fields, so dropping them made every failed withdraw
+// arrive as {"status":"failed"} and nothing else — while the underlying send
+// errors are classified client-fixable and never page. The failure was
+// invisible from the API and from Sentry at the same time, which is how a
+// broken session grant on the funded fixture went unexplained.
+func withdrawResultFrom(resp *avsproto.WithdrawFundsResp) avsclient.WithdrawResult {
 	return avsclient.WithdrawResult{
 		UserOpHash:      resp.GetUserOpHash(),
 		TransactionHash: resp.GetTransactionHash(),
 		Status:          resp.GetStatus(),
-	}, nil
+		Message:         resp.GetMessage(),
+		SubmittedAt:     resp.GetSubmittedAt(),
+	}
 }
