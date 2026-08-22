@@ -5222,6 +5222,13 @@ func (n *Engine) NewSeqID() (string, error) {
 	return strconv.FormatInt(int64(num), 10), nil
 }
 
+// CanStreamCheck reports whether an operator may be sent tasks.
+//
+// The address is trustworthy here: the Node service authenticates every
+// RPC against the operator key before a handler runs (see
+// aggregator/operator_auth_interceptor.go). Before that existed this
+// allowlist was decorative — anyone could claim one of the addresses
+// below and be streamed every task on the platform.
 func (n *Engine) CanStreamCheck(address string) bool {
 	// If no approved operators configured, use default hardcoded list for backward compatibility
 	if len(n.config.ApprovedOperators) == 0 {

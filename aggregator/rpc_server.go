@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/getsentry/sentry-go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -596,8 +597,6 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		panic(fmt.Errorf("failed to listen to %v", err))
 	}
 
-	s := grpc.NewServer()
-
 	ethrpc, err := ethclient.Dial(agg.config.EthHttpRpcUrl)
 
 	if err != nil {
@@ -654,12 +653,32 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 	// parse error. Handler methods on RpcServer that implemented
 	// the removed interface are dead code in this commit; they get
 	// deleted in a follow-up alongside the proto service block.
+
+	// Every Node RPC is authenticated by these interceptors — see
+	// operator_auth_interceptor.go. They are attached at construction so
+	// there is no window in which the service is registered without
+	// them, and so a handler added later inherits the check instead of
+	// having to remember it.
+	s := grpc.NewServer(
+		grpc.UnaryInterceptor(rpcServer.operatorUnaryInterceptor()),
+		grpc.StreamInterceptor(rpcServer.operatorStreamInterceptor()),
+	)
+
 	avsproto.RegisterNodeServer(s, rpcServer)
 
-	// Register reflection service on gRPC server.
-	// This allow clien to discover url endpoint
-	// https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md
-	reflection.Register(s)
+	// Reflection lets any client enumerate the service and every message
+	// shape on it. That is worth having while developing and is pure
+	// attack surface in production, where operators speak to us through
+	// generated stubs and never ask the server what it offers.
+	// Gated on the `environment:` config field rather than an env var:
+	// APP_ENV is set in no deployment, so a check against it would leave
+	// reflection on everywhere it matters.
+	if agg.config != nil && agg.config.Environment == sdklogging.Development {
+		// Register reflection service on gRPC server.
+		// This allow clien to discover url endpoint
+		// https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md
+		reflection.Register(s)
+	}
 
 	agg.logger.Info("start grpc server",
 		"address", lis.Addr(),

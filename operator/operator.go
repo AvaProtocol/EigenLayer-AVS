@@ -27,6 +27,7 @@ import (
 	"github.com/Layr-Labs/eigensdk-go/signerv2"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	gocron "github.com/go-co-op/gocron/v2"
 
@@ -777,6 +778,21 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 			logger.Infof("   💡 Set correct password: export OPERATOR_ECDSA_KEY_PASSWORD=your_password")
 		}
 		return nil, fmt.Errorf("failed to decrypt ECDSA key file %s: %w", c.EcdsaPrivateKeyStorePath, err)
+	}
+
+	// The aggregator authenticates us by ecrecovering the signature we
+	// send and comparing it to the operator_address we claim, so the two
+	// have to describe the same key. Checking at boot turns a silent
+	// "the aggregator refuses every RPC" into a config error naming both
+	// addresses.
+	keystoreAddress := crypto.PubkeyToAddress(operatorEcdsaPrivateKey.PublicKey)
+	if !strings.EqualFold(keystoreAddress.Hex(), c.OperatorAddress) {
+		logger.Errorf("❌ operator_address does not match the ECDSA keystore")
+		logger.Errorf("   operator_address: %s", c.OperatorAddress)
+		logger.Errorf("   keystore address: %s", keystoreAddress.Hex())
+		return nil, fmt.Errorf(
+			"operator_address %s does not match the address derived from %s (%s)",
+			c.OperatorAddress, c.EcdsaPrivateKeyStorePath, keystoreAddress.Hex())
 	}
 
 	sdkClients, err := clients.BuildAll(chainioConfig, operatorEcdsaPrivateKey, logger)
