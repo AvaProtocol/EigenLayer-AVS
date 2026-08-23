@@ -70,8 +70,9 @@ type operatorHealth struct {
 }
 
 // apconfigHealth is one APConfig deployment the aggregator consults
-// for operator alias keys. A down source is a new startup dependency:
-// without it, alias-key operators on that AVS chain cannot authenticate.
+// for operator alias keys. A down source after bind means alias lookups
+// on that chain will fail; startup itself skips empty-code sources and
+// only refuses to start when none bind.
 type apconfigHealth struct {
 	ChainID int64  `json:"chain_id"`
 	Name    string `json:"name"`
