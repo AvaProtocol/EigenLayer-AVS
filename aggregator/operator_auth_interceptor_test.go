@@ -22,10 +22,16 @@ import (
 )
 
 // newAuthTestServer builds the minimal RpcServer the interceptors touch —
-// they only ever reach config.Logger.
+// config.Logger and config.ApprovedOperators / IsApprovedOperator.
 func newAuthTestServer() *RpcServer {
 	return &RpcServer{
 		config: &config.Config{Logger: testutil.GetLogger()},
+	}
+}
+
+func approveOperators(server *RpcServer, addresses ...string) {
+	for _, a := range addresses {
+		server.config.ApprovedOperators = append(server.config.ApprovedOperators, common.HexToAddress(a))
 	}
 }
 
@@ -125,6 +131,7 @@ func TestNodeRPCsRejectUnauthenticatedCallers(t *testing.T) {
 func TestNodeRPCAcceptsSignedOperator(t *testing.T) {
 	server := newAuthTestServer()
 	key, address := newOperatorKey(t)
+	approveOperators(server, address)
 	ctx := operatorCredentials(t, key, time.Now().Unix())
 
 	reached, err := callUnary(t, server, ctx,
@@ -136,6 +143,30 @@ func TestNodeRPCAcceptsSignedOperator(t *testing.T) {
 	if !reached {
 		t.Fatal("handler did not run for a signed operator")
 	}
+}
+
+// Signature-only is not enough: a random self-signed key must not reach
+// NotifyTriggers or ReportEventOverload.
+func TestSignedUnapprovedOperatorIsRefused(t *testing.T) {
+	server := newAuthTestServer()
+	key, address := newOperatorKey(t)
+	ctx := operatorCredentials(t, key, time.Now().Unix())
+
+	reached, err := callUnary(t, server, ctx,
+		avsproto.Node_NotifyTriggers_FullMethodName,
+		&avsproto.NotifyTriggersReq{Address: address})
+	requireUnauthenticated(t, reached, err)
+}
+
+func TestReportEventOverloadRejectsSignedUnapprovedOperator(t *testing.T) {
+	server := newAuthTestServer()
+	key, address := newOperatorKey(t)
+	ctx := operatorCredentials(t, key, time.Now().Unix())
+
+	reached, err := callUnary(t, server, ctx,
+		avsproto.Node_ReportEventOverload_FullMethodName,
+		&avsproto.EventOverloadAlert{OperatorAddress: address, TaskId: "01JZ0000000000000000000000"})
+	requireUnauthenticated(t, reached, err)
 }
 
 // The core of the escalation: holding one key must not let you speak as
@@ -272,6 +303,7 @@ func TestSyncMessagesRejectsSpoofedAddress(t *testing.T) {
 func TestSyncMessagesAcceptsSignedOperator(t *testing.T) {
 	server := newAuthTestServer()
 	key, address := newOperatorKey(t)
+	approveOperators(server, address)
 
 	ctx := operatorCredentials(t, key, time.Now().Unix())
 	reached, err := callSyncMessages(t, server, ctx, address)
@@ -302,6 +334,7 @@ func TestAliasKeyOperatorIsAccepted(t *testing.T) {
 	server := newAuthTestServer()
 	aliasKey, aliasAddress := newOperatorKey(t)
 	_, operatorAddress := newOperatorKey(t)
+	approveOperators(server, operatorAddress)
 	server.aliasResolver = withCachedAlias(operatorAddress, aliasAddress)
 
 	// ClientAuth signs the message naming the operator, using the alias key.

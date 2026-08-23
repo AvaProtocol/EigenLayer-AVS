@@ -326,12 +326,14 @@ func NextFreeSessionEntityID(
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(ctx, occupancyProbeTimeout*time.Duration(maxEntityOccupancyProbes))
+	overall, cancel := context.WithTimeout(ctx, occupancyProbeTimeout*time.Duration(maxEntityOccupancyProbes))
 	defer cancel()
 	var lastOccErr error
 	for i := uint32(0); i < maxEntityOccupancyProbes; i++ {
 		cand := start + i
-		occupied, occErr := check(ctx, wallet, cand)
+		probeCtx, probeCancel := context.WithTimeout(overall, occupancyProbeTimeout)
+		occupied, occErr := check(probeCtx, wallet, cand)
+		probeCancel()
 		if occErr != nil {
 			// Fail-closed: unknown is occupied, same as VerifySupersededTeardown.
 			lastOccErr = occErr

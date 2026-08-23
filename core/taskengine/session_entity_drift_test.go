@@ -95,6 +95,33 @@ func TestNextFreeSessionEntityIDBoundsTheProbe(t *testing.T) {
 	}
 }
 
+func TestNextFreeSessionEntityIDPerCandidateTimeout(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	check := func(ctx context.Context, _ common.Address, entity uint32) (bool, error) {
+		if entity == 1 {
+			<-ctx.Done()
+			return false, ctx.Err()
+		}
+		return false, nil
+	}
+	start := time.Now()
+	got, err := NextFreeSessionEntityID(context.Background(), db, spChain, spOwner, spWallet, check)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 2 {
+		t.Errorf("got entity %d, want 2 after the hung first probe", got)
+	}
+	if elapsed < occupancyProbeTimeout {
+		t.Errorf("elapsed %s, expected the first probe to consume occupancyProbeTimeout", elapsed)
+	}
+	if elapsed > occupancyProbeTimeout+2*time.Second {
+		t.Errorf("elapsed %s; one stuck candidate must not consume the 40s overall budget", elapsed)
+	}
+}
+
 func TestPrepareSessionGrantSkipsOnChainOccupiedEntity(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))

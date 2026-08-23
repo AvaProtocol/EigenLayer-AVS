@@ -55,9 +55,10 @@ func operatorAddressFromRequest(req any) (string, bool) {
 }
 
 // authorizeOperator verifies that the caller holds the key for the
-// operator address its request claims. Until this ran, that address was
-// an unauthenticated assertion: the aggregator's approved-operator
-// allowlist only means something once the claim behind it is proven.
+// operator address its request claims, then that the address is on the
+// aggregator's approved-operator allowlist. Signature-only would let any
+// self-signed key reach ReportEventOverload or NotifyTriggers; the
+// allowlist is what CanStreamCheck uses outbound, applied here inbound.
 //
 // Every failure returns the same opaque error. The reason is logged, not
 // returned — an unauthenticated caller should not learn whether an
@@ -85,6 +86,12 @@ func (r *RpcServer) authorizeOperator(ctx context.Context, fullMethod string, re
 	if err != nil || !verified {
 		r.config.Logger.Warn("refusing Node RPC with unverified operator signature",
 			"method", fullMethod, "claimed_address", claimedAddress, "error", err)
+		return status.Error(codes.Unauthenticated, refusal)
+	}
+
+	if !r.config.IsApprovedOperator(claimedAddress) {
+		r.config.Logger.Warn("refusing Node RPC from operator not on the approved list",
+			"method", fullMethod, "claimed_address", claimedAddress)
 		return status.Error(codes.Unauthenticated, refusal)
 	}
 
