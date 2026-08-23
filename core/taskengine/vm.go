@@ -1433,7 +1433,8 @@ func (v *VM) executeIndependentPath(startStep *Step) {
 // loop-iteration paths). Every other node type calls its runner directly and is
 // never retried, regardless of any retry_policy set on it: the allowlist is
 // enforced structurally by which branches call this helper, and
-// TestRetryAllowlist_WriteNodesRunExactlyOnce locks that in.
+// TestRetryAllowlist_WriteNodesRunExactlyOnce locks the (dispatcher, guard)
+// pairs in.
 //
 // Retry re-invokes the runner, so it is only sound for idempotent reads. On-chain
 // write nodes (ContractWrite, EthTransfer) are deliberately excluded to avoid

@@ -24,6 +24,27 @@ var retryAllowlistGuards = map[string]bool{
 	"GetBalance":      true,
 }
 
+// retryAllowlistSites is every (dispatcher, guard) pair that must wrap its
+// runner in executeNodeWithRetry. Coverage is per pair, not a union of
+// guards: losing REST retry in executeNode while the loop dispatchers still
+// set GetRestApi would otherwise leave both tests green.
+//
+// executeNodeWithIsolatedVars has no Balance branch because Loop has no
+// Balance runner; Balance is a top-level TaskNode type only.
+var retryAllowlistSites = []struct{ fn, guard string }{
+	{"executeNode", "GetRestApi"},
+	{"executeNode", "GetGraphqlQuery"},
+	{"executeNode", "GetContractRead"},
+	{"executeNode", "GetBalance"},
+	{"executeNodeWithIsolatedVars", "GetRestApi"},
+	{"executeNodeWithIsolatedVars", "GetGraphqlQuery"},
+	{"executeNodeWithIsolatedVars", "GetContractRead"},
+	{"executeNodeDirect", "GetRestApi"},
+	{"executeNodeDirect", "GetGraphqlQuery"},
+	{"executeNodeDirect", "GetContractRead"},
+	{"executeNodeDirect", "GetBalance"},
+}
+
 // TestRetryAllowlist_WriteNodesRunExactlyOnce is the test the safety argument
 // rests on.
 //
@@ -42,6 +63,7 @@ func TestRetryAllowlist_WriteNodesRunExactlyOnce(t *testing.T) {
 	}
 
 	type site struct {
+		fn    string
 		guard string
 		pos   token.Position
 	}
@@ -68,6 +90,7 @@ func TestRetryAllowlist_WriteNodesRunExactlyOnce(t *testing.T) {
 			return true
 		}
 
+		fn := enclosingFuncName(stack)
 		guard := ""
 		for i := len(stack) - 1; i >= 0; i-- {
 			ifStmt, ok := stack[i].(*ast.IfStmt)
@@ -82,7 +105,7 @@ func TestRetryAllowlist_WriteNodesRunExactlyOnce(t *testing.T) {
 			guard = nodeTypeGuard(ifStmt.Cond)
 			break
 		}
-		sites = append(sites, site{guard: guard, pos: fset.Position(call.Pos())})
+		sites = append(sites, site{fn: fn, guard: guard, pos: fset.Position(call.Pos())})
 		return true
 	})
 
@@ -90,7 +113,7 @@ func TestRetryAllowlist_WriteNodesRunExactlyOnce(t *testing.T) {
 		t.Fatal("found no executeNodeWithRetry call sites in vm.go — either the helper was renamed or retry was removed; update this test deliberately")
 	}
 
-	covered := map[string]bool{}
+	found := map[string]bool{}
 	for _, s := range sites {
 		if s.guard == "" {
 			t.Errorf("%s: executeNodeWithRetry is called outside any node-type branch, so the allowlist no longer bounds what can be retried", s.pos)
@@ -100,20 +123,32 @@ func TestRetryAllowlist_WriteNodesRunExactlyOnce(t *testing.T) {
 			t.Errorf("%s: node branch %s() routes its runner through executeNodeWithRetry, but only idempotent reads may be retried — re-invoking a write can resubmit a UserOp (#676)", s.pos, s.guard)
 			continue
 		}
-		covered[s.guard] = true
+		found[s.fn+":"+s.guard] = true
 	}
 
-	// The allowlist must not silently shrink either: a read branch that loses
-	// its retry wiring makes the feature a no-op there with no other signal.
+	want := map[string]bool{}
+	for _, p := range retryAllowlistSites {
+		want[p.fn+":"+p.guard] = true
+	}
 	var missing []string
-	for guard := range retryAllowlistGuards {
-		if !covered[guard] {
-			missing = append(missing, guard)
+	for key := range want {
+		if !found[key] {
+			missing = append(missing, key)
 		}
 	}
 	sort.Strings(missing)
 	if len(missing) > 0 {
-		t.Errorf("no dispatch branch retries %s — the retry allowlist lost a read node type", strings.Join(missing, ", "))
+		t.Errorf("lost retry wiring at %s — coverage is per (dispatcher, guard), not a union of guards", strings.Join(missing, ", "))
+	}
+	var extra []string
+	for key := range found {
+		if !want[key] {
+			extra = append(extra, key)
+		}
+	}
+	sort.Strings(extra)
+	if len(extra) > 0 {
+		t.Errorf("unexpected retry wiring at %s — add it to retryAllowlistSites deliberately", strings.Join(extra, ", "))
 	}
 }
 
@@ -177,6 +212,16 @@ func TestNodeSupportsRetry(t *testing.T) {
 			}
 		})
 	}
+}
+
+// enclosingFuncName returns the name of the innermost FuncDecl on stack.
+func enclosingFuncName(stack []ast.Node) string {
+	for i := len(stack) - 1; i >= 0; i-- {
+		if fn, ok := stack[i].(*ast.FuncDecl); ok {
+			return fn.Name.Name
+		}
+	}
+	return ""
 }
 
 // nodeTypeGuard extracts the "GetX" method name from a branch condition of the
