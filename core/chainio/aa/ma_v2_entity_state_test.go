@@ -116,3 +116,33 @@ func TestEntityDeferredNonceSequenceReportsReadFailures(t *testing.T) {
 		common.HexToAddress("0x0643f9d156e2CE584825511C548649F3289619c3"), 1)
 	require.Error(t, err, "no client is not evidence that an entity is free")
 }
+
+func TestEntityTimeRangeOnChainDecodesBothWords(t *testing.T) {
+	account := common.HexToAddress("0x209eb31c199bEB4c386eF83CF442DE1a00667a1F")
+	const entity = uint32(2)
+	until := uint64(1785541473) // 2026-08-13-ish
+	after := uint64(0)
+
+	result := append(word(new(big.Int).SetUint64(until)), word(new(big.Int).SetUint64(after))...)
+	caller := &recordingCaller{result: result}
+
+	gotUntil, gotAfter, err := EntityTimeRangeOnChain(context.Background(), caller, account, entity)
+	require.NoError(t, err)
+	require.Equal(t, until, gotUntil)
+	require.Equal(t, after, gotAfter)
+
+	require.Equal(t, TimeRangeModuleAddress(), caller.to)
+	require.Len(t, caller.data, 4+32+32, "timeRanges(uint32,address)")
+	require.Equal(t, account, common.BytesToAddress(caller.data[4+32+12:4+32+32]))
+	require.Equal(t, big.NewInt(int64(entity)), new(big.Int).SetBytes(caller.data[4:4+32]))
+}
+
+func TestEntityTimeRangeOnChainReportsReadFailures(t *testing.T) {
+	account := common.HexToAddress("0x209eb31c199bEB4c386eF83CF442DE1a00667a1F")
+	caller := &recordingCaller{result: word(big.NewInt(1))} // 32 bytes, need 64
+	_, _, err := EntityTimeRangeOnChain(context.Background(), caller, account, 1)
+	require.Error(t, err)
+
+	_, _, err = EntityTimeRangeOnChain(context.Background(), nil, account, 1)
+	require.Error(t, err, "no client is not evidence that an entity has no window")
+}
