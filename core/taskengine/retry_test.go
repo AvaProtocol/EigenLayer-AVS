@@ -112,7 +112,7 @@ func TestClassifyGRPCStatus(t *testing.T) {
 	}
 }
 
-func TestIsRetryableError(t *testing.T) {
+func TestRetryClassEnabled(t *testing.T) {
 	timeoutErr := errors.New("i/o timeout")
 	rpcErr := errors.New("connection refused")
 	fatalErr := errors.New("nonsense")
@@ -132,8 +132,11 @@ func TestIsRetryableError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isRetryableError(tt.err, tt.policy); got != tt.want {
-				t.Fatalf("isRetryableError(%v, %v) = %v, want %v", tt.err, tt.policy, got, tt.want)
+			// Same decision executeWithRetry makes: classify the attempt, then
+			// ask whether the policy opted into that class.
+			got := retryClassEnabled(retryClassFor(nil, tt.err), tt.policy)
+			if got != tt.want {
+				t.Fatalf("retryClassEnabled(retryClassFor(nil, %v), %v) = %v, want %v", tt.err, tt.policy, got, tt.want)
 			}
 		})
 	}
@@ -457,5 +460,50 @@ func TestExecuteWithRetry_HonorsExecutionBudget(t *testing.T) {
 	})
 	if calls != 1 {
 		t.Fatalf("expected a drained budget to leave one attempt, got %d", calls)
+	}
+}
+
+// TestExecuteWithRetry_RetriesFailedRESTStepWithoutError pins the REST runner
+// shape through the loop that actually retries: HTTP ≥400 is (step, nil) with
+// success=false, so a classifier that only looked at err would never sleep.
+func TestExecuteWithRetry_RetriesFailedRESTStepWithoutError(t *testing.T) {
+	restFail := func(statusCode int) *avsproto.Execution_Step {
+		data, err := structpb.NewValue(map[string]interface{}{
+			"status":     statusCode,
+			"statusText": "",
+			"url":        "https://api.example.com/v2/tokens?limit=500",
+			"data":       "",
+		})
+		if err != nil {
+			t.Fatalf("structpb.NewValue: %v", err)
+		}
+		return &avsproto.Execution_Step{
+			Id:      "rest1",
+			Success: false,
+			Error:   fmt.Sprintf("HTTP %d", statusCode),
+			OutputData: &avsproto.Execution_Step_RestApi{
+				RestApi: &avsproto.RestAPINode_Output{Data: data},
+			},
+		}
+	}
+
+	var calls int
+	var waits []time.Duration
+	policy := &avsproto.RetryPolicy{MaxAttempts: 3, BackoffMs: 10, RetryOn: []string{retryClassHTTP5xx}}
+	step, err := executeWithRetry(context.Background(), policy, nil, recordingSleep(&waits), func() (*avsproto.Execution_Step, error) {
+		calls++
+		return restFail(502), nil
+	})
+	if err != nil {
+		t.Fatalf("REST reports HTTP failures as (step, nil), got err %v", err)
+	}
+	if calls != 3 {
+		t.Fatalf("expected 3 attempts for a 502 envelope, got %d", calls)
+	}
+	if len(waits) != 2 {
+		t.Fatalf("expected 2 sleeps, got %v", waits)
+	}
+	if step.GetId() != "rest1" {
+		t.Fatalf("expected the last REST step, got %v", step)
 	}
 }

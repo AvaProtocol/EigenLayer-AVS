@@ -217,12 +217,6 @@ func retryClassEnabled(class string, policy *avsproto.RetryPolicy) bool {
 	return false
 }
 
-// isRetryableError reports whether err is a transient failure whose class is
-// enabled by policy.
-func isRetryableError(err error, policy *avsproto.RetryPolicy) bool {
-	return retryClassEnabled(classifyRetryableError(err), policy)
-}
-
 // retryBudget bounds the total time one execution may spend sleeping between
 // retries, across every node it runs.
 //
@@ -353,8 +347,9 @@ func executeWithRetry(
 		if !retryClassEnabled(retryClassFor(step, err), policy) {
 			break
 		}
-		// The execution-wide budget is spent: stop retrying rather than extend
-		// this execution any further.
+		// Reserve before sleep so a sibling node in the same execution cannot
+		// also claim this delay. A ctx cancel mid-backoff still keeps the
+		// deduction: the execution is ending and the budget dies with it.
 		if !budget.reserve(backoff) {
 			break
 		}
