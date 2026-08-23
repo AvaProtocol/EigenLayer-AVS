@@ -57,6 +57,10 @@ type aliasSource struct {
 
 type operatorAliasResolver struct {
 	sources []aliasSource
+	// skipped is every bind that failed at startup. Those chains are
+	// not consulted for aliases, so ping reports them as down rather
+	// than omitting them (which would look healthy).
+	skipped []apconfigHealth
 	logger  sdklogging.Logger
 
 	mu    sync.Mutex
@@ -71,6 +75,54 @@ func newOperatorAliasResolver(sources []aliasSource, logger sdklogging.Logger) *
 	}
 }
 
+// aliasBindAttempt is one APConfig bind, success or not. mergeAliasSources
+// skips failures so a missing testnet deployment cannot take the gateway
+// down when mainnet APConfig (where the alias-key operators actually
+// declared) is reachable.
+type aliasBindAttempt struct {
+	name string
+	src  aliasSource
+	err  error
+}
+
+// mergeAliasSources keeps every successful bind and logs the rest.
+// Startup fails only when nothing bound — that is the case that would
+// refuse the whole operator fleet.
+func mergeAliasSources(logger sdklogging.Logger, attempts ...aliasBindAttempt) ([]aliasSource, []apconfigHealth, error) {
+	sources := make([]aliasSource, 0, len(attempts))
+	skipped := make([]apconfigHealth, 0)
+	var lastErr error
+	for _, a := range attempts {
+		if a.err != nil {
+			lastErr = a.err
+			if logger != nil {
+				logger.Warn("skipping APConfig source for operator alias resolution",
+					"source", a.name, "error", a.err)
+			}
+			addr := ""
+			if a.src.address != (common.Address{}) {
+				addr = a.src.address.Hex()
+			}
+			skipped = append(skipped, apconfigHealth{
+				ChainID: a.src.chainID,
+				Name:    a.name,
+				Address: addr,
+				Status:  deepHealthDown,
+				Error:   a.err.Error(),
+			})
+			continue
+		}
+		sources = append(sources, a.src)
+	}
+	if len(sources) == 0 {
+		if lastErr != nil {
+			return nil, skipped, fmt.Errorf("operator alias resolution cannot start: no APConfig source bound: %w", lastErr)
+		}
+		return nil, skipped, fmt.Errorf("operator alias resolution cannot start: no APConfig source bound")
+	}
+	return sources, skipped, nil
+}
+
 // bindAliasSources dials every APConfig this aggregator must consult.
 //
 // avsRPC is the top-level EigenLayer registration RPC (eth_rpc_url).
@@ -78,50 +130,73 @@ func newOperatorAliasResolver(sources []aliasSource, logger sdklogging.Logger) *
 // bound too — production's two alias-key operators declared on mainnet
 // APConfig, not on Sepolia.
 //
-// A source with no contract code, or that cannot answer ChainID, is a
-// hard failure: a degraded resolver would refuse most of the fleet.
+// An individual source with no contract code is skipped. v4.17.3
+// pointed at a stale Sepolia proxy, fail-closed, and took the gateway
+// down with it. The live Sepolia address is compiled in; this skip is
+// the belt so a future empty bind cannot do that again. Failure is
+// reserved for "no source bound at all".
 func bindAliasSources(
 	ctx context.Context,
 	avsRPC *ethclient.Client,
 	registry *ChainRegistry,
 	logger sdklogging.Logger,
-) ([]aliasSource, error) {
+) ([]aliasSource, []apconfigHealth, error) {
+	attempts := make([]aliasBindAttempt, 0, 2)
+	var avsChainID int64
+
 	if avsRPC == nil {
-		return nil, fmt.Errorf("AVS-chain RPC is required to resolve operator aliases")
+		attempts = append(attempts, aliasBindAttempt{
+			name: "avs",
+			err:  fmt.Errorf("AVS-chain RPC is required to resolve operator aliases"),
+		})
+	} else {
+		id, err := avsRPC.ChainID(ctx)
+		if err != nil {
+			attempts = append(attempts, aliasBindAttempt{
+				name: "avs",
+				err:  fmt.Errorf("reading AVS chain id for operator alias resolution: %w", err),
+			})
+		} else {
+			avsChainID = id.Int64()
+			addr := apconfig.AddressForChain(id)
+			src, bindErr := bindOneAliasSource(ctx, avsRPC, avsChainID, "avs", addr)
+			if bindErr != nil {
+				src = aliasSource{chainID: avsChainID, name: "avs", address: addr}
+			}
+			attempts = append(attempts, aliasBindAttempt{name: "avs", src: src, err: bindErr})
+		}
 	}
-	sources := make([]aliasSource, 0, 2)
 
-	avsChainID, err := avsRPC.ChainID(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("reading AVS chain id for operator alias resolution: %w", err)
-	}
-	src, err := bindOneAliasSource(ctx, avsRPC, avsChainID.Int64(), "avs", apconfig.AddressForChain(avsChainID))
-	if err != nil {
-		return nil, err
-	}
-	sources = append(sources, src)
-
-	if registry != nil {
+	if registry != nil && avsChainID != 1 {
 		if chainCfg, cfgErr := registry.GetChainConfig(1); cfgErr == nil && chainCfg != nil &&
-			chainCfg.SmartWallet != nil && chainCfg.SmartWallet.EthRpcUrl != "" && avsChainID.Int64() != 1 {
+			chainCfg.SmartWallet != nil && chainCfg.SmartWallet.EthRpcUrl != "" {
 			ethRPC, dialErr := ethclient.DialContext(ctx, chainCfg.SmartWallet.EthRpcUrl)
 			if dialErr != nil {
-				return nil, fmt.Errorf("dialing Ethereum RPC for mainnet APConfig: %w", dialErr)
-			}
-			mainnet, bindErr := bindOneAliasSource(ctx, ethRPC, 1, "ethereum", apconfig.MainnetAddress)
-			if bindErr != nil {
-				ethRPC.Close()
-				return nil, bindErr
-			}
-			sources = append(sources, mainnet)
-			if logger != nil {
-				logger.Info("operator alias resolution will consult mainnet APConfig",
-					"apconfig_address", apconfig.MainnetAddress.Hex())
+				attempts = append(attempts, aliasBindAttempt{
+					name: "ethereum",
+					err:  fmt.Errorf("dialing Ethereum RPC for mainnet APConfig: %w", dialErr),
+				})
+			} else {
+				mainnet, bindErr := bindOneAliasSource(ctx, ethRPC, 1, "ethereum", apconfig.MainnetAddress)
+				if bindErr != nil {
+					ethRPC.Close()
+					attempts = append(attempts, aliasBindAttempt{
+						name: "ethereum",
+						src:  aliasSource{chainID: 1, name: "ethereum", address: apconfig.MainnetAddress},
+						err:  bindErr,
+					})
+				} else {
+					attempts = append(attempts, aliasBindAttempt{name: "ethereum", src: mainnet})
+					if logger != nil {
+						logger.Info("operator alias resolution will consult mainnet APConfig",
+							"apconfig_address", apconfig.MainnetAddress.Hex())
+					}
+				}
 			}
 		}
 	}
 
-	return sources, nil
+	return mergeAliasSources(logger, attempts...)
 }
 
 func bindOneAliasSource(ctx context.Context, rpc *ethclient.Client, chainID int64, name string, address common.Address) (aliasSource, error) {
@@ -130,7 +205,7 @@ func bindOneAliasSource(ctx context.Context, rpc *ethclient.Client, chainID int6
 		return aliasSource{}, fmt.Errorf("reading APConfig code at %s on %s (chain %d): %w", address.Hex(), name, chainID, err)
 	}
 	if len(code) == 0 {
-		return aliasSource{}, fmt.Errorf("no contract code at APConfig %s on %s (chain %d); operator alias resolution cannot start", address.Hex(), name, chainID)
+		return aliasSource{}, fmt.Errorf("no contract code at APConfig %s on %s (chain %d)", address.Hex(), name, chainID)
 	}
 	contract, err := apconfig.NewAPConfig(address, rpc)
 	if err != nil {
@@ -226,7 +301,8 @@ func (r *operatorAliasResolver) ping(ctx context.Context) []apconfigHealth {
 	if r == nil {
 		return nil
 	}
-	out := make([]apconfigHealth, 0, len(r.sources))
+	out := make([]apconfigHealth, 0, len(r.sources)+len(r.skipped))
+	out = append(out, r.skipped...)
 	for _, src := range r.sources {
 		h := apconfigHealth{
 			ChainID: src.chainID,

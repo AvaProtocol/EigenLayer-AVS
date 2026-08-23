@@ -649,14 +649,19 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 	// fatal: a degraded resolver is a silent outage.
 	bindCtx, bindCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer bindCancel()
-	aliasSources, err := bindAliasSources(bindCtx, ethrpc, agg.chainRegistry, agg.logger)
+	aliasSources, skipped, err := bindAliasSources(bindCtx, ethrpc, agg.chainRegistry, agg.logger)
 	if err != nil {
 		return fmt.Errorf("operator alias resolution: %w", err)
 	}
 	rpcServer.aliasResolver = newOperatorAliasResolver(aliasSources, agg.logger)
+	rpcServer.aliasResolver.skipped = skipped
 	for _, src := range aliasSources {
 		agg.logger.Info("operator alias resolution enabled",
 			"source", src.name, "apconfig_address", src.address.Hex(), "chain_id", src.chainID)
+	}
+	for _, s := range skipped {
+		agg.logger.Warn("operator alias source unbound at startup; /health/deep will report it down",
+			"source", s.Name, "apconfig_address", s.Address, "chain_id", s.ChainID, "error", s.Error)
 	}
 
 	// Expose the smart-wallet clients + rpcServer to the rest of the
