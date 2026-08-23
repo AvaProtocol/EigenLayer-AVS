@@ -23,7 +23,6 @@ import (
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/apconfig"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
@@ -642,23 +641,23 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		chainRegistry: agg.chainRegistry,
 	}
 
-	// Operator authentication has to resolve alias keys, which lives in
-	// the APConfig contract on the AVS chain (the one ethrpc points at,
-	// not the smart-wallet chain). A failure here is fatal rather than
-	// degraded: without it, every operator running an alias key would be
-	// refused, which is most of the fleet.
-	avsChainID, err := ethrpc.ChainID(context.Background())
+	// Operator authentication has to resolve alias keys. Those live on
+	// the APConfig of the AVS chain the operator registered on — Sepolia
+	// for the testnet operator, Ethereum for the two alias-key mainnet
+	// operators. Binding only eth_rpc_url (Sepolia in production) would
+	// refuse most of the fleet at first heartbeat. A failure here is
+	// fatal: a degraded resolver is a silent outage.
+	bindCtx, bindCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer bindCancel()
+	aliasSources, err := bindAliasSources(bindCtx, ethrpc, agg.chainRegistry, agg.logger)
 	if err != nil {
-		return fmt.Errorf("reading AVS chain id for operator alias resolution: %w", err)
+		return fmt.Errorf("operator alias resolution: %w", err)
 	}
-	apConfigAddress := apconfig.AddressForChain(avsChainID)
-	apConfigContract, err := apconfig.NewAPConfig(apConfigAddress, ethrpc)
-	if err != nil {
-		return fmt.Errorf("binding APConfig at %s: %w", apConfigAddress.Hex(), err)
+	rpcServer.aliasResolver = newOperatorAliasResolver(aliasSources, agg.logger)
+	for _, src := range aliasSources {
+		agg.logger.Info("operator alias resolution enabled",
+			"source", src.name, "apconfig_address", src.address.Hex(), "chain_id", src.chainID)
 	}
-	rpcServer.aliasResolver = newOperatorAliasResolver(apConfigContract, agg.logger)
-	agg.logger.Info("operator alias resolution enabled",
-		"apconfig_address", apConfigAddress.Hex(), "avs_chain_id", avsChainID.String())
 
 	// Expose the smart-wallet clients + rpcServer to the rest of the
 	// aggregator (specifically the REST layer's WithdrawService /
