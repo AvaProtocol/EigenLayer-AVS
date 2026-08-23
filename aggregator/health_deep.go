@@ -69,12 +69,24 @@ type operatorHealth struct {
 	Addresses []string `json:"addresses"`
 }
 
+// apconfigHealth is one APConfig deployment the aggregator consults
+// for operator alias keys. A down source is a new startup dependency:
+// without it, alias-key operators on that AVS chain cannot authenticate.
+type apconfigHealth struct {
+	ChainID int64  `json:"chain_id"`
+	Name    string `json:"name"`
+	Address string `json:"address"`
+	Status  string `json:"status"`
+	Error   string `json:"error,omitempty"`
+}
+
 type deepHealthResp struct {
-	Status    string         `json:"status"`
-	Version   string         `json:"version"`
-	CheckedAt time.Time      `json:"checked_at"`
-	Workers   []workerHealth `json:"workers"`
-	Operators operatorHealth `json:"operators"`
+	Status    string           `json:"status"`
+	Version   string           `json:"version"`
+	CheckedAt time.Time        `json:"checked_at"`
+	Workers   []workerHealth   `json:"workers"`
+	Operators operatorHealth   `json:"operators"`
+	APConfig  []apconfigHealth `json:"apconfig,omitempty"`
 }
 
 type deepHealthCache struct {
@@ -150,6 +162,15 @@ func (agg *Aggregator) collectDeepHealth(ctx context.Context) *deepHealthResp {
 	// trigger will ever fire, no matter how healthy the rest looks.
 	if resp.Operators.Connected == 0 {
 		resp.Status = deepHealthDegraded
+	}
+
+	if agg.rpcServer != nil && agg.rpcServer.aliasResolver != nil {
+		resp.APConfig = agg.rpcServer.aliasResolver.ping(ctx)
+		for _, src := range resp.APConfig {
+			if src.Status != deepHealthOK {
+				resp.Status = deepHealthDegraded
+			}
+		}
 	}
 
 	return resp

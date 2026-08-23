@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/getsentry/sentry-go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -50,6 +51,11 @@ type RpcServer struct {
 	// chainRegistry is set in gateway mode to route chain-specific operations to workers.
 	// nil in single-chain aggregator mode.
 	chainRegistry *ChainRegistry
+
+	// aliasResolver maps an operator's registered address to the alias
+	// key it signs with. Required to authenticate operators that keep
+	// their registered key cold — see operator_alias.go.
+	aliasResolver *operatorAliasResolver
 }
 
 // resolveSmartWalletForChain returns the SmartWalletConfig + RPC client
@@ -596,8 +602,6 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		panic(fmt.Errorf("failed to listen to %v", err))
 	}
 
-	s := grpc.NewServer()
-
 	ethrpc, err := ethclient.Dial(agg.config.EthHttpRpcUrl)
 
 	if err != nil {
@@ -637,6 +641,24 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		chainRegistry: agg.chainRegistry,
 	}
 
+	// Operator authentication has to resolve alias keys. Those live on
+	// the APConfig of the AVS chain the operator registered on — Sepolia
+	// for the testnet operator, Ethereum for the two alias-key mainnet
+	// operators. Binding only eth_rpc_url (Sepolia in production) would
+	// refuse most of the fleet at first heartbeat. A failure here is
+	// fatal: a degraded resolver is a silent outage.
+	bindCtx, bindCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer bindCancel()
+	aliasSources, err := bindAliasSources(bindCtx, ethrpc, agg.chainRegistry, agg.logger)
+	if err != nil {
+		return fmt.Errorf("operator alias resolution: %w", err)
+	}
+	rpcServer.aliasResolver = newOperatorAliasResolver(aliasSources, agg.logger)
+	for _, src := range aliasSources {
+		agg.logger.Info("operator alias resolution enabled",
+			"source", src.name, "apconfig_address", src.address.Hex(), "chain_id", src.chainID)
+	}
+
 	// Expose the smart-wallet clients + rpcServer to the rest of the
 	// aggregator (specifically the REST layer's WithdrawService /
 	// EstimateFees / GetWalletNonce handlers). startHttpServer runs
@@ -654,12 +676,32 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 	// parse error. Handler methods on RpcServer that implemented
 	// the removed interface are dead code in this commit; they get
 	// deleted in a follow-up alongside the proto service block.
+
+	// Every Node RPC is authenticated by these interceptors — see
+	// operator_auth_interceptor.go. They are attached at construction so
+	// there is no window in which the service is registered without
+	// them, and so a handler added later inherits the check instead of
+	// having to remember it.
+	s := grpc.NewServer(
+		grpc.UnaryInterceptor(rpcServer.operatorUnaryInterceptor()),
+		grpc.StreamInterceptor(rpcServer.operatorStreamInterceptor()),
+	)
+
 	avsproto.RegisterNodeServer(s, rpcServer)
 
-	// Register reflection service on gRPC server.
-	// This allow clien to discover url endpoint
-	// https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md
-	reflection.Register(s)
+	// Reflection lets any client enumerate the service and every message
+	// shape on it. That is worth having while developing and is pure
+	// attack surface in production, where operators speak to us through
+	// generated stubs and never ask the server what it offers.
+	// Gated on the `environment:` config field rather than an env var:
+	// APP_ENV is set in no deployment, so a check against it would leave
+	// reflection on everywhere it matters.
+	if agg.config != nil && agg.config.Environment == sdklogging.Development {
+		// Register reflection service on gRPC server.
+		// This allow clien to discover url endpoint
+		// https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md
+		reflection.Register(s)
+	}
 
 	agg.logger.Info("start grpc server",
 		"address", lis.Addr(),

@@ -3,6 +3,9 @@ package aggregator
 import (
 	"context"
 	"fmt"
+	"strings"
+
+	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
 	"google.golang.org/grpc/metadata"
@@ -14,17 +17,18 @@ import (
 // helper they shared with the other Aggregator handlers is no longer
 // needed because REST middleware verifies JWTs in the handler stack.
 //
-// What stays in this file: verifyOperator, the operator-stream gRPC
-// auth check used by the Node service. Operators continue to speak
-// gRPC.
+// What stays in this file: verifyOperator, the operator gRPC auth check
+// used by the Node service. Operators continue to speak gRPC. It is
+// applied to every Node RPC by the interceptors in
+// operator_auth_interceptor.go, not by individual handlers.
 
-// verifyOperator checks validity of the signature submit by operator related request
+// verifyOperator checks validity of the signature submit by operator related request.
+//
+// Callers get (false, err) on every failure; there is no configuration
+// that turns this into a pass. It used to short-circuit on an
+// `enforceAuth = false` constant left over from the 1.3 operator
+// rollout, which made the whole Node service callable by anyone.
 func (r *RpcServer) verifyOperator(ctx context.Context, operatorAddr string) (bool, error) {
-	// TODO: Temporary not enforce auth
-	if !enforceAuth {
-		return true, nil
-	}
-
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return false, fmt.Errorf("cannot read metadata from request")
@@ -35,9 +39,33 @@ func (r *RpcServer) verifyOperator(ctx context.Context, operatorAddr string) (bo
 		return false, fmt.Errorf("missing auth header")
 	}
 
-	return auth.VerifyOperator(authRawHeaders[0], operatorAddr)
-}
+	signerAddress, err := auth.OperatorSignerFromAuthHeader(authRawHeaders[0], operatorAddr)
+	if err != nil {
+		return false, err
+	}
 
-// enforceAuth toggles operator-side auth enforcement. Same default as
-// the legacy file: false until all operators upgrade past 1.3.
-const enforceAuth = false
+	// The common case: the operator signed with its own registered key.
+	if strings.EqualFold(signerAddress.Hex(), operatorAddr) {
+		return true, nil
+	}
+
+	// Otherwise the signature only counts if it came from the alias key
+	// this operator declared on chain. Resolving that mapping is what
+	// makes an alias-key operator distinguishable from an impostor.
+	if r.aliasResolver == nil {
+		return false, fmt.Errorf("signature is not from operator %s and alias resolution is unavailable", operatorAddr)
+	}
+
+	alias, err := r.aliasResolver.aliasFor(ctx, common.HexToAddress(operatorAddr))
+	if err != nil {
+		return false, fmt.Errorf("resolving alias for operator %s: %w", operatorAddr, err)
+	}
+	if alias == (common.Address{}) {
+		return false, fmt.Errorf("operator %s declared no alias and did not sign with its own key", operatorAddr)
+	}
+	if alias != signerAddress {
+		return false, fmt.Errorf("signature is from neither operator %s nor its declared alias", operatorAddr)
+	}
+
+	return true, nil
+}
