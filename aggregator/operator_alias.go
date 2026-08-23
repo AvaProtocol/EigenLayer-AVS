@@ -57,6 +57,10 @@ type aliasSource struct {
 
 type operatorAliasResolver struct {
 	sources []aliasSource
+	// skipped is every bind that failed at startup. Those chains are
+	// not consulted for aliases, so ping reports them as down rather
+	// than omitting them (which would look healthy).
+	skipped []apconfigHealth
 	logger  sdklogging.Logger
 
 	mu    sync.Mutex
@@ -84,8 +88,9 @@ type aliasBindAttempt struct {
 // mergeAliasSources keeps every successful bind and logs the rest.
 // Startup fails only when nothing bound — that is the case that would
 // refuse the whole operator fleet.
-func mergeAliasSources(logger sdklogging.Logger, attempts ...aliasBindAttempt) ([]aliasSource, error) {
+func mergeAliasSources(logger sdklogging.Logger, attempts ...aliasBindAttempt) ([]aliasSource, []apconfigHealth, error) {
 	sources := make([]aliasSource, 0, len(attempts))
+	skipped := make([]apconfigHealth, 0)
 	var lastErr error
 	for _, a := range attempts {
 		if a.err != nil {
@@ -94,17 +99,28 @@ func mergeAliasSources(logger sdklogging.Logger, attempts ...aliasBindAttempt) (
 				logger.Warn("skipping APConfig source for operator alias resolution",
 					"source", a.name, "error", a.err)
 			}
+			addr := ""
+			if a.src.address != (common.Address{}) {
+				addr = a.src.address.Hex()
+			}
+			skipped = append(skipped, apconfigHealth{
+				ChainID: a.src.chainID,
+				Name:    a.name,
+				Address: addr,
+				Status:  deepHealthDown,
+				Error:   a.err.Error(),
+			})
 			continue
 		}
 		sources = append(sources, a.src)
 	}
 	if len(sources) == 0 {
 		if lastErr != nil {
-			return nil, fmt.Errorf("operator alias resolution cannot start: no APConfig source bound: %w", lastErr)
+			return nil, skipped, fmt.Errorf("operator alias resolution cannot start: no APConfig source bound: %w", lastErr)
 		}
-		return nil, fmt.Errorf("operator alias resolution cannot start: no APConfig source bound")
+		return nil, skipped, fmt.Errorf("operator alias resolution cannot start: no APConfig source bound")
 	}
-	return sources, nil
+	return sources, skipped, nil
 }
 
 // bindAliasSources dials every APConfig this aggregator must consult.
@@ -124,7 +140,7 @@ func bindAliasSources(
 	avsRPC *ethclient.Client,
 	registry *ChainRegistry,
 	logger sdklogging.Logger,
-) ([]aliasSource, error) {
+) ([]aliasSource, []apconfigHealth, error) {
 	attempts := make([]aliasBindAttempt, 0, 2)
 	var avsChainID int64
 
@@ -142,7 +158,11 @@ func bindAliasSources(
 			})
 		} else {
 			avsChainID = id.Int64()
-			src, bindErr := bindOneAliasSource(ctx, avsRPC, avsChainID, "avs", apconfig.AddressForChain(id))
+			addr := apconfig.AddressForChain(id)
+			src, bindErr := bindOneAliasSource(ctx, avsRPC, avsChainID, "avs", addr)
+			if bindErr != nil {
+				src = aliasSource{chainID: avsChainID, name: "avs", address: addr}
+			}
 			attempts = append(attempts, aliasBindAttempt{name: "avs", src: src, err: bindErr})
 		}
 	}
@@ -160,7 +180,11 @@ func bindAliasSources(
 				mainnet, bindErr := bindOneAliasSource(ctx, ethRPC, 1, "ethereum", apconfig.MainnetAddress)
 				if bindErr != nil {
 					ethRPC.Close()
-					attempts = append(attempts, aliasBindAttempt{name: "ethereum", err: bindErr})
+					attempts = append(attempts, aliasBindAttempt{
+						name: "ethereum",
+						src:  aliasSource{chainID: 1, name: "ethereum", address: apconfig.MainnetAddress},
+						err:  bindErr,
+					})
 				} else {
 					attempts = append(attempts, aliasBindAttempt{name: "ethereum", src: mainnet})
 					if logger != nil {
@@ -277,7 +301,8 @@ func (r *operatorAliasResolver) ping(ctx context.Context) []apconfigHealth {
 	if r == nil {
 		return nil
 	}
-	out := make([]apconfigHealth, 0, len(r.sources))
+	out := make([]apconfigHealth, 0, len(r.sources)+len(r.skipped))
+	out = append(out, r.skipped...)
 	for _, src := range r.sources {
 		h := apconfigHealth{
 			ChainID: src.chainID,

@@ -53,8 +53,12 @@ func TestMergeAliasSourcesKeepsMainnetWhenSepoliaHasNoCode(t *testing.T) {
 	}
 	sepoliaErr := fmt.Errorf("no contract code at APConfig 0xB8aBBB082eCAAe8d1Cd68378cf3b060f6f0E07eb on avs (chain 11155111)")
 
-	got, err := mergeAliasSources(logger,
-		aliasBindAttempt{name: "avs", err: sepoliaErr},
+	got, skipped, err := mergeAliasSources(logger,
+		aliasBindAttempt{
+			name: "avs",
+			src:  aliasSource{chainID: 11155111, name: "avs", address: common.HexToAddress("0xB8aBBB082eCAAe8d1Cd68378cf3b060f6f0E07eb")},
+			err:  sepoliaErr,
+		},
 		aliasBindAttempt{name: "ethereum", src: mainnet},
 	)
 	if err != nil {
@@ -63,13 +67,19 @@ func TestMergeAliasSourcesKeepsMainnetWhenSepoliaHasNoCode(t *testing.T) {
 	if len(got) != 1 || got[0].name != "ethereum" {
 		t.Fatalf("got %+v, want the mainnet source only", got)
 	}
+	if len(skipped) != 1 || skipped[0].Status != deepHealthDown {
+		t.Fatalf("skipped %+v, want the sepolia source reported down", skipped)
+	}
 }
 
 func TestMergeAliasSourcesFailsWhenNothingBound(t *testing.T) {
 	logger := testutil.GetLogger()
 	sepoliaErr := fmt.Errorf("no contract code at APConfig 0xB8aBBB082eCAAe8d1Cd68378cf3b060f6f0E07eb on avs (chain 11155111)")
 
-	_, err := mergeAliasSources(logger, aliasBindAttempt{name: "avs", err: sepoliaErr})
+	_, skipped, err := mergeAliasSources(logger, aliasBindAttempt{name: "avs", err: sepoliaErr})
+	if len(skipped) != 1 {
+		t.Fatalf("skipped %d, want 1 so health can report the failed bind", len(skipped))
+	}
 	if err == nil {
 		t.Fatal("expected startup to fail when no APConfig source bound")
 	}
@@ -86,7 +96,7 @@ func TestMergeAliasSourcesKeepsEverySuccessfulBind(t *testing.T) {
 	avs := aliasSource{chainID: 11155111, name: "avs"}
 	eth := aliasSource{chainID: 1, name: "ethereum"}
 
-	got, err := mergeAliasSources(logger,
+	got, skipped, err := mergeAliasSources(logger,
 		aliasBindAttempt{name: "avs", src: avs},
 		aliasBindAttempt{name: "ethereum", src: eth},
 	)
@@ -95,6 +105,32 @@ func TestMergeAliasSourcesKeepsEverySuccessfulBind(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("got %d sources, want 2", len(got))
+	}
+	if len(skipped) != 0 {
+		t.Fatalf("skipped %d, want 0", len(skipped))
+	}
+}
+
+func TestPingIncludesSkippedStartupBinds(t *testing.T) {
+	r := newOperatorAliasResolver([]aliasSource{{
+		chainID: 1,
+		name:    "ethereum",
+		address: common.HexToAddress("0x9c02dfc92eea988902a98919bf4f035e4aaefced"),
+	}}, testutil.GetLogger())
+	r.skipped = []apconfigHealth{{
+		ChainID: 11155111,
+		Name:    "avs",
+		Address: "0xB8aBBB082eCAAe8d1Cd68378cf3b060f6f0E07eb",
+		Status:  deepHealthDown,
+		Error:   "no contract code",
+	}}
+
+	got := r.ping(context.Background())
+	if len(got) < 2 {
+		t.Fatalf("got %d health rows, want skipped + bound", len(got))
+	}
+	if got[0].Name != "avs" || got[0].Status != deepHealthDown {
+		t.Fatalf("first row %+v, want the skipped sepolia source down", got[0])
 	}
 }
 
