@@ -71,6 +71,42 @@ func newOperatorAliasResolver(sources []aliasSource, logger sdklogging.Logger) *
 	}
 }
 
+// aliasBindAttempt is one APConfig bind, success or not. mergeAliasSources
+// skips failures so a missing testnet deployment cannot take the gateway
+// down when mainnet APConfig (where the alias-key operators actually
+// declared) is reachable.
+type aliasBindAttempt struct {
+	name string
+	src  aliasSource
+	err  error
+}
+
+// mergeAliasSources keeps every successful bind and logs the rest.
+// Startup fails only when nothing bound — that is the case that would
+// refuse the whole operator fleet.
+func mergeAliasSources(logger sdklogging.Logger, attempts ...aliasBindAttempt) ([]aliasSource, error) {
+	sources := make([]aliasSource, 0, len(attempts))
+	var lastErr error
+	for _, a := range attempts {
+		if a.err != nil {
+			lastErr = a.err
+			if logger != nil {
+				logger.Warn("skipping APConfig source for operator alias resolution",
+					"source", a.name, "error", a.err)
+			}
+			continue
+		}
+		sources = append(sources, a.src)
+	}
+	if len(sources) == 0 {
+		if lastErr != nil {
+			return nil, fmt.Errorf("operator alias resolution cannot start: no APConfig source bound: %w", lastErr)
+		}
+		return nil, fmt.Errorf("operator alias resolution cannot start: no APConfig source bound")
+	}
+	return sources, nil
+}
+
 // bindAliasSources dials every APConfig this aggregator must consult.
 //
 // avsRPC is the top-level EigenLayer registration RPC (eth_rpc_url).
@@ -78,50 +114,65 @@ func newOperatorAliasResolver(sources []aliasSource, logger sdklogging.Logger) *
 // bound too — production's two alias-key operators declared on mainnet
 // APConfig, not on Sepolia.
 //
-// A source with no contract code, or that cannot answer ChainID, is a
-// hard failure: a degraded resolver would refuse most of the fleet.
+// An individual source with no contract code is skipped. v4.17.3
+// pointed at a stale Sepolia proxy, fail-closed, and took the gateway
+// down with it. The live Sepolia address is compiled in; this skip is
+// the belt so a future empty bind cannot do that again. Failure is
+// reserved for "no source bound at all".
 func bindAliasSources(
 	ctx context.Context,
 	avsRPC *ethclient.Client,
 	registry *ChainRegistry,
 	logger sdklogging.Logger,
 ) ([]aliasSource, error) {
+	attempts := make([]aliasBindAttempt, 0, 2)
+	var avsChainID int64
+
 	if avsRPC == nil {
-		return nil, fmt.Errorf("AVS-chain RPC is required to resolve operator aliases")
+		attempts = append(attempts, aliasBindAttempt{
+			name: "avs",
+			err:  fmt.Errorf("AVS-chain RPC is required to resolve operator aliases"),
+		})
+	} else {
+		id, err := avsRPC.ChainID(ctx)
+		if err != nil {
+			attempts = append(attempts, aliasBindAttempt{
+				name: "avs",
+				err:  fmt.Errorf("reading AVS chain id for operator alias resolution: %w", err),
+			})
+		} else {
+			avsChainID = id.Int64()
+			src, bindErr := bindOneAliasSource(ctx, avsRPC, avsChainID, "avs", apconfig.AddressForChain(id))
+			attempts = append(attempts, aliasBindAttempt{name: "avs", src: src, err: bindErr})
+		}
 	}
-	sources := make([]aliasSource, 0, 2)
 
-	avsChainID, err := avsRPC.ChainID(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("reading AVS chain id for operator alias resolution: %w", err)
-	}
-	src, err := bindOneAliasSource(ctx, avsRPC, avsChainID.Int64(), "avs", apconfig.AddressForChain(avsChainID))
-	if err != nil {
-		return nil, err
-	}
-	sources = append(sources, src)
-
-	if registry != nil {
+	if registry != nil && avsChainID != 1 {
 		if chainCfg, cfgErr := registry.GetChainConfig(1); cfgErr == nil && chainCfg != nil &&
-			chainCfg.SmartWallet != nil && chainCfg.SmartWallet.EthRpcUrl != "" && avsChainID.Int64() != 1 {
+			chainCfg.SmartWallet != nil && chainCfg.SmartWallet.EthRpcUrl != "" {
 			ethRPC, dialErr := ethclient.DialContext(ctx, chainCfg.SmartWallet.EthRpcUrl)
 			if dialErr != nil {
-				return nil, fmt.Errorf("dialing Ethereum RPC for mainnet APConfig: %w", dialErr)
-			}
-			mainnet, bindErr := bindOneAliasSource(ctx, ethRPC, 1, "ethereum", apconfig.MainnetAddress)
-			if bindErr != nil {
-				ethRPC.Close()
-				return nil, bindErr
-			}
-			sources = append(sources, mainnet)
-			if logger != nil {
-				logger.Info("operator alias resolution will consult mainnet APConfig",
-					"apconfig_address", apconfig.MainnetAddress.Hex())
+				attempts = append(attempts, aliasBindAttempt{
+					name: "ethereum",
+					err:  fmt.Errorf("dialing Ethereum RPC for mainnet APConfig: %w", dialErr),
+				})
+			} else {
+				mainnet, bindErr := bindOneAliasSource(ctx, ethRPC, 1, "ethereum", apconfig.MainnetAddress)
+				if bindErr != nil {
+					ethRPC.Close()
+					attempts = append(attempts, aliasBindAttempt{name: "ethereum", err: bindErr})
+				} else {
+					attempts = append(attempts, aliasBindAttempt{name: "ethereum", src: mainnet})
+					if logger != nil {
+						logger.Info("operator alias resolution will consult mainnet APConfig",
+							"apconfig_address", apconfig.MainnetAddress.Hex())
+					}
+				}
 			}
 		}
 	}
 
-	return sources, nil
+	return mergeAliasSources(logger, attempts...)
 }
 
 func bindOneAliasSource(ctx context.Context, rpc *ethclient.Client, chainID int64, name string, address common.Address) (aliasSource, error) {
@@ -130,7 +181,7 @@ func bindOneAliasSource(ctx context.Context, rpc *ethclient.Client, chainID int6
 		return aliasSource{}, fmt.Errorf("reading APConfig code at %s on %s (chain %d): %w", address.Hex(), name, chainID, err)
 	}
 	if len(code) == 0 {
-		return aliasSource{}, fmt.Errorf("no contract code at APConfig %s on %s (chain %d); operator alias resolution cannot start", address.Hex(), name, chainID)
+		return aliasSource{}, fmt.Errorf("no contract code at APConfig %s on %s (chain %d)", address.Hex(), name, chainID)
 	}
 	contract, err := apconfig.NewAPConfig(address, rpc)
 	if err != nil {

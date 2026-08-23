@@ -2,6 +2,8 @@ package aggregator
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,6 +41,60 @@ func TestAliasForFallsBackToStaleCacheWhenSourcesFail(t *testing.T) {
 	}
 	if got != alias {
 		t.Fatalf("got %s, want %s", got.Hex(), alias.Hex())
+	}
+}
+
+func TestMergeAliasSourcesKeepsMainnetWhenSepoliaHasNoCode(t *testing.T) {
+	logger := testutil.GetLogger()
+	mainnet := aliasSource{
+		chainID: 1,
+		name:    "ethereum",
+		address: common.HexToAddress("0x9c02dfc92eea988902a98919bf4f035e4aaefced"),
+	}
+	sepoliaErr := fmt.Errorf("no contract code at APConfig 0xB8aBBB082eCAAe8d1Cd68378cf3b060f6f0E07eb on avs (chain 11155111)")
+
+	got, err := mergeAliasSources(logger,
+		aliasBindAttempt{name: "avs", err: sepoliaErr},
+		aliasBindAttempt{name: "ethereum", src: mainnet},
+	)
+	if err != nil {
+		t.Fatalf("mainnet APConfig must be enough to start: %v", err)
+	}
+	if len(got) != 1 || got[0].name != "ethereum" {
+		t.Fatalf("got %+v, want the mainnet source only", got)
+	}
+}
+
+func TestMergeAliasSourcesFailsWhenNothingBound(t *testing.T) {
+	logger := testutil.GetLogger()
+	sepoliaErr := fmt.Errorf("no contract code at APConfig 0xB8aBBB082eCAAe8d1Cd68378cf3b060f6f0E07eb on avs (chain 11155111)")
+
+	_, err := mergeAliasSources(logger, aliasBindAttempt{name: "avs", err: sepoliaErr})
+	if err == nil {
+		t.Fatal("expected startup to fail when no APConfig source bound")
+	}
+	if !strings.Contains(err.Error(), "no APConfig source bound") {
+		t.Fatalf("error %q should say no source bound", err)
+	}
+	if !strings.Contains(err.Error(), sepoliaErr.Error()) {
+		t.Fatalf("error %q should wrap the last bind failure", err)
+	}
+}
+
+func TestMergeAliasSourcesKeepsEverySuccessfulBind(t *testing.T) {
+	logger := testutil.GetLogger()
+	avs := aliasSource{chainID: 11155111, name: "avs"}
+	eth := aliasSource{chainID: 1, name: "ethereum"}
+
+	got, err := mergeAliasSources(logger,
+		aliasBindAttempt{name: "avs", src: avs},
+		aliasBindAttempt{name: "ethereum", src: eth},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d sources, want 2", len(got))
 	}
 }
 
