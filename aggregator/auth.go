@@ -3,6 +3,9 @@ package aggregator
 import (
 	"context"
 	"fmt"
+	"strings"
+
+	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
 	"google.golang.org/grpc/metadata"
@@ -36,5 +39,33 @@ func (r *RpcServer) verifyOperator(ctx context.Context, operatorAddr string) (bo
 		return false, fmt.Errorf("missing auth header")
 	}
 
-	return auth.VerifyOperator(authRawHeaders[0], operatorAddr)
+	signerAddress, err := auth.OperatorSignerFromAuthHeader(authRawHeaders[0], operatorAddr)
+	if err != nil {
+		return false, err
+	}
+
+	// The common case: the operator signed with its own registered key.
+	if strings.EqualFold(signerAddress.Hex(), operatorAddr) {
+		return true, nil
+	}
+
+	// Otherwise the signature only counts if it came from the alias key
+	// this operator declared on chain. Resolving that mapping is what
+	// makes an alias-key operator distinguishable from an impostor.
+	if r.aliasResolver == nil {
+		return false, fmt.Errorf("signature is not from operator %s and alias resolution is unavailable", operatorAddr)
+	}
+
+	alias, err := r.aliasResolver.aliasFor(ctx, common.HexToAddress(operatorAddr))
+	if err != nil {
+		return false, fmt.Errorf("resolving alias for operator %s: %w", operatorAddr, err)
+	}
+	if alias == (common.Address{}) {
+		return false, fmt.Errorf("operator %s declared no alias and did not sign with its own key", operatorAddr)
+	}
+	if alias != signerAddress {
+		return false, fmt.Errorf("signature is from neither operator %s nor its declared alias", operatorAddr)
+	}
+
+	return true, nil
 }

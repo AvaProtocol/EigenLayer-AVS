@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -32,8 +33,14 @@ func newAuthTestServer() *RpcServer {
 // client sends (core/auth.ClientAuth), for the given key and epoch.
 func operatorCredentials(t *testing.T, key *ecdsa.PrivateKey, epoch int64) context.Context {
 	t.Helper()
-	address := crypto.PubkeyToAddress(key.PublicKey)
-	token, err := signer.SignMessageAsHex(key, auth.GetOperatorSigninMessage(address.Hex(), epoch))
+	return operatorCredentialsFor(t, key, crypto.PubkeyToAddress(key.PublicKey).Hex(), epoch)
+}
+
+// operatorCredentialsFor signs as `key` while naming `operatorAddress` as
+// the operator being acted for — the alias-key shape.
+func operatorCredentialsFor(t *testing.T, key *ecdsa.PrivateKey, operatorAddress string, epoch int64) context.Context {
+	t.Helper()
+	token, err := signer.SignMessageAsHex(key, auth.GetOperatorSigninMessage(operatorAddress, epoch))
 	if err != nil {
 		t.Fatalf("signing operator message: %v", err)
 	}
@@ -274,4 +281,69 @@ func TestSyncMessagesAcceptsSignedOperator(t *testing.T) {
 	if !reached {
 		t.Fatal("stream handler did not run for a signed operator")
 	}
+}
+
+// withCachedAlias builds a resolver whose mapping is already cached, so
+// the test never needs a chain connection. A nil contract is only
+// consulted on a cache miss.
+func withCachedAlias(operator, alias string) *operatorAliasResolver {
+	resolver := newOperatorAliasResolver(nil, testutil.GetLogger())
+	resolver.cache[common.HexToAddress(operator)] = aliasEntry{
+		alias:     common.HexToAddress(alias),
+		fetchedAt: time.Now(),
+	}
+	return resolver
+}
+
+// Two of the three operators approved on mainnet run with an alias key:
+// the registered address stays cold and a separate hot key signs. That
+// signature must be accepted for the operator it was declared against.
+func TestAliasKeyOperatorIsAccepted(t *testing.T) {
+	server := newAuthTestServer()
+	aliasKey, aliasAddress := newOperatorKey(t)
+	_, operatorAddress := newOperatorKey(t)
+	server.aliasResolver = withCachedAlias(operatorAddress, aliasAddress)
+
+	// ClientAuth signs the message naming the operator, using the alias key.
+	ctx := operatorCredentialsFor(t, aliasKey, operatorAddress, time.Now().Unix())
+
+	reached, err := callUnary(t, server, ctx,
+		avsproto.Node_NotifyTriggers_FullMethodName,
+		&avsproto.NotifyTriggersReq{Address: operatorAddress})
+	if err != nil {
+		t.Fatalf("alias-key operator was refused: %v", err)
+	}
+	if !reached {
+		t.Fatal("handler did not run for an alias-key operator")
+	}
+}
+
+// A key that is neither the operator's nor its declared alias is refused.
+func TestUndeclaredKeyRejectedForAliasOperator(t *testing.T) {
+	server := newAuthTestServer()
+	_, declaredAlias := newOperatorKey(t)
+	_, operatorAddress := newOperatorKey(t)
+	server.aliasResolver = withCachedAlias(operatorAddress, declaredAlias)
+
+	attackerKey, _ := newOperatorKey(t)
+	ctx := operatorCredentialsFor(t, attackerKey, operatorAddress, time.Now().Unix())
+
+	reached, err := callUnary(t, server, ctx,
+		avsproto.Node_NotifyTriggers_FullMethodName,
+		&avsproto.NotifyTriggersReq{Address: operatorAddress})
+	requireUnauthenticated(t, reached, err)
+}
+
+// An operator that declared no alias must sign with its own key.
+func TestOperatorWithoutAliasMustSignWithOwnKey(t *testing.T) {
+	server := newAuthTestServer()
+	_, operatorAddress := newOperatorKey(t)
+	server.aliasResolver = withCachedAlias(operatorAddress, "0x0000000000000000000000000000000000000000")
+
+	otherKey, _ := newOperatorKey(t)
+	ctx := operatorCredentialsFor(t, otherKey, operatorAddress, time.Now().Unix())
+
+	reached, err := callUnary(t, server, ctx,
+		avsproto.Node_Ping_FullMethodName, &avsproto.Checkin{Address: operatorAddress})
+	requireUnauthenticated(t, reached, err)
 }

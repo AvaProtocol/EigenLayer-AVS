@@ -23,6 +23,7 @@ import (
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/apconfig"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
@@ -51,6 +52,11 @@ type RpcServer struct {
 	// chainRegistry is set in gateway mode to route chain-specific operations to workers.
 	// nil in single-chain aggregator mode.
 	chainRegistry *ChainRegistry
+
+	// aliasResolver maps an operator's registered address to the alias
+	// key it signs with. Required to authenticate operators that keep
+	// their registered key cold — see operator_alias.go.
+	aliasResolver *operatorAliasResolver
 }
 
 // resolveSmartWalletForChain returns the SmartWalletConfig + RPC client
@@ -635,6 +641,24 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		chainID:       smartWalletChainID,
 		chainRegistry: agg.chainRegistry,
 	}
+
+	// Operator authentication has to resolve alias keys, which lives in
+	// the APConfig contract on the AVS chain (the one ethrpc points at,
+	// not the smart-wallet chain). A failure here is fatal rather than
+	// degraded: without it, every operator running an alias key would be
+	// refused, which is most of the fleet.
+	avsChainID, err := ethrpc.ChainID(context.Background())
+	if err != nil {
+		return fmt.Errorf("reading AVS chain id for operator alias resolution: %w", err)
+	}
+	apConfigAddress := apconfig.AddressForChain(avsChainID)
+	apConfigContract, err := apconfig.NewAPConfig(apConfigAddress, ethrpc)
+	if err != nil {
+		return fmt.Errorf("binding APConfig at %s: %w", apConfigAddress.Hex(), err)
+	}
+	rpcServer.aliasResolver = newOperatorAliasResolver(apConfigContract, agg.logger)
+	agg.logger.Info("operator alias resolution enabled",
+		"apconfig_address", apConfigAddress.Hex(), "avs_chain_id", avsChainID.String())
 
 	// Expose the smart-wallet clients + rpcServer to the rest of the
 	// aggregator (specifically the REST layer's WithdrawService /
