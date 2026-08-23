@@ -268,6 +268,11 @@ type Engine struct {
 	assignmentMutex      *sync.RWMutex     // protects task assignments
 
 	smartWalletConfig *config.SmartWalletConfig
+	// sessionChainReads is set by InstallSessionResolver. When true,
+	// prepare/submit probe on-chain entity occupancy and the send path
+	// verifies TimeRange windows (#763 A/C). Unit tests that construct
+	// engines and never install a resolver stay offline.
+	sessionChainReads bool
 	// chainConfigs maps chain_id to ChainConfig in gateway mode.
 	// nil in single-chain mode.
 	chainConfigs map[int64]*config.ChainConfig
@@ -5222,21 +5227,21 @@ func (n *Engine) NewSeqID() (string, error) {
 	return strconv.FormatInt(int64(num), 10), nil
 }
 
+// CanStreamCheck reports whether an operator may be sent tasks.
+//
+// The address is trustworthy here: the Node service authenticates every
+// RPC against the operator key and this same allowlist before a handler
+// runs (see aggregator/operator_auth_interceptor.go). Before that existed
+// the list was decorative — anyone could claim one of the addresses and
+// be streamed every task on the platform.
 func (n *Engine) CanStreamCheck(address string) bool {
-	// If no approved operators configured, use default hardcoded list for backward compatibility
-	if len(n.config.ApprovedOperators) == 0 {
-		n.logger.Debug("Using hardcoded operator approval list", "operator", address)
-		return strings.EqualFold(address, "0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d") ||
-			strings.EqualFold(address, "0xc6b87cc9e85b07365b6abefff061f237f7cf7dc3") ||
-			strings.EqualFold(address, "0xa026265a0f01a6e1a19b04655519429df0a57c4e")
-	}
-
-	// Check against configured approved operators (case-insensitive)
-	for _, approvedAddr := range n.config.ApprovedOperators {
-		if strings.EqualFold(address, approvedAddr.Hex()) {
+	if n.config.IsApprovedOperator(address) {
+		if len(n.config.ApprovedOperators) == 0 {
+			n.logger.Debug("Using hardcoded operator approval list", "operator", address)
+		} else {
 			n.logger.Debug("Operator approved via configuration", "operator", address)
-			return true
 		}
+		return true
 	}
 
 	n.logger.Debug("Operator not found in approved list", "operator", address, "approved_count", len(n.config.ApprovedOperators))

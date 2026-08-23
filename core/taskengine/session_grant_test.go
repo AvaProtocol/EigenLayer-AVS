@@ -198,16 +198,33 @@ func TestRevokeSessionGrant(t *testing.T) {
 		if err := StoreSessionPolicy(db, p); err != nil {
 			t.Fatal(err)
 		}
-		_, onChain, err := RevokeSessionGrant(db, p)
+		deleted, onChain, err := RevokeSessionGrant(db, p)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if deleted {
+			t.Error("revoking must not delete the record; the entity stays reserved (#763 B)")
 		}
 		if onChain {
 			t.Error("an unapplied grant needs no on-chain cleanup")
 		}
 		got, _ := ActiveSessionPolicyForWallet(db, spChain, spOwner, spWallet)
 		if got != nil {
-			t.Error("the record should be gone")
+			t.Error("a revoked grant must not authorize anything")
+		}
+		listed, err := ListSessionPolicies(db, spChain, spOwner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(listed) != 1 || listed[0].Status != model.SessionPolicyRevoked {
+			t.Errorf("revoked record must stay stored, got %d policies", len(listed))
+		}
+		next, err := NextSessionEntityID(db, spChain, spOwner, spWallet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if next != 2 {
+			t.Errorf("next entity = %d, want 2 — deleting would free entity 1 for reuse", next)
 		}
 	})
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/apconfig"
 )
 
 // Default contract addresses for Ethereum mainnet (chainId = 1)
@@ -28,7 +28,7 @@ var (
 func (o *Operator) PopulateKnownConfigByChainID(chainID *big.Int) error {
 	if chainID.Cmp(mainnetChainID) == 0 {
 		// Ethereum mainnet configuration
-		o.apConfigAddr = common.HexToAddress("0x9c02dfc92eea988902a98919bf4f035e4aaefced")
+		o.apConfigAddr = apconfig.MainnetAddress
 
 		// Apply default contract addresses for mainnet if not provided
 		if o.config.AVSRegistryCoordinatorAddress == "" {
@@ -46,7 +46,7 @@ func (o *Operator) PopulateKnownConfigByChainID(chainID *big.Int) error {
 		}
 	} else {
 		// Testnet configuration
-		o.apConfigAddr = common.HexToAddress("0xb8abbb082ecaae8d1cd68378cf3b060f6f0e07eb")
+		o.apConfigAddr = apconfig.TestnetAddress
 
 		// For testnets, we don't have default addresses - they must be provided in config
 		if o.config.AVSRegistryCoordinatorAddress == "" {

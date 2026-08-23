@@ -416,6 +416,12 @@ func FeeRecordPrefix(chainID int64, owner common.Address) []byte {
 	return []byte(fmt.Sprintf("fr:%d:%s:", chainID, strings.ToLower(owner.Hex())))
 }
 
+// SessionPolicyChainPrefix scans every session policy on a chain, any owner.
+// Used by the #763 drift sweep. Same `sp:` namespace as SessionPolicyPrefix.
+func SessionPolicyChainPrefix(chainID int64) []byte {
+	return []byte(fmt.Sprintf("sp:%d:", chainID))
+}
+
 // SessionPolicyPrefix scans every session policy an owner holds on a chain.
 // Fresh `sp:` namespace — additive, no migration (avs-infra §7.4a).
 func SessionPolicyPrefix(chainID int64, owner common.Address) []byte {

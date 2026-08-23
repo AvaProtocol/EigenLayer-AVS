@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
-	"os"
 	"text/template"
 
 	"context"
@@ -177,8 +176,16 @@ func (agg *Aggregator) startHttpServer(ctx context.Context, extraMounts []HTTPMo
 	// sponsorship". See gas_manager_webhook.go.
 	agg.registerGasManagerWebhook(e)
 
-	// Register debug endpoints only if not in production
-	if os.Getenv("APP_ENV") != "production" {
+	// Register debug endpoints only in development.
+	//
+	// This used to key off `APP_ENV != "production"`, but APP_ENV is set
+	// in no deployment, so the condition was always true and both routes
+	// were live in production — unauthenticated, and one of them panics
+	// on request while the other writes caller-supplied text straight
+	// into Sentry. isDev comes from the `environment:` config field,
+	// which production actually sets, and an unset value reads as
+	// not-development.
+	if isDev {
 		// Debug endpoints to validate Sentry wiring from a running instance
 		// These are lightweight and safe: they are no-ops if Sentry isn't initialized
 		e.GET("/_debug/sentry/message", func(c echo.Context) error {

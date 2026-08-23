@@ -138,6 +138,52 @@ const SessionPolicyAmbiguousCode = "SESSION_POLICY_AMBIGUOUS"
 // no indication that a re-grant is the remedy.
 const SessionPolicyExpiredCode = "SESSION_POLICY_EXPIRED"
 
+// SessionPolicyEntityOccupiedCode is returned when every candidate entity
+// in the bounded occupancy probe is already installed on the account
+// (#763 A). Client-fixable only by cleaning leftover entities on chain.
+const SessionPolicyEntityOccupiedCode = "SESSION_POLICY_ENTITY_OCCUPIED"
+
+// SessionPolicyChainWindowMismatchCode marks a stored grant whose
+// ValidUntil disagrees with the TimeRangeModule window actually
+// installed on the entity (#763 C). Storage cannot see this; only a
+// chain read can.
+const SessionPolicyChainWindowMismatchCode = "SESSION_POLICY_CHAIN_WINDOW_MISMATCH"
+
+// SessionPolicyChainWindowMissingCode marks the special case of that drift
+// where the entity has NO TimeRange hook at all: timeRanges() reads zero while
+// storage promises a real expiry.
+//
+// Separate from the mismatch code on purpose. It is a different failure with a
+// different remedy, and folding the two renders "no hook installed" as
+// "chain validUntil 1970-01-01T00:00:00Z" — which reads as a corrupt timestamp
+// and sends whoever is on call hunting for one.
+//
+// It is also strictly MORE permissive than storage claims rather than less: no
+// time-range hook means the grant never expires on chain, where the mismatch
+// case usually means it expired early. Refused all the same — a grant that does
+// not enforce the expiry the owner approved is not one to sign under — but an
+// operator needs to be able to tell the two apart when triaging.
+const SessionPolicyChainWindowMissingCode = "SESSION_POLICY_CHAIN_WINDOW_MISSING"
+
+// maxEntityOccupancyProbes bounds how many on-chain occupancy reads
+// NextFreeSessionEntityID will make. NextSessionEntityID returns
+// max(stored)+1; each bump is an RPC. An account with several unstored
+// leftovers would otherwise loop without bound.
+const maxEntityOccupancyProbes = 8
+
+// occupancyProbeTimeout bounds one occupancy candidate (signer + nonce
+// sequence). The loop's overall budget is this times the probe cap.
+const occupancyProbeTimeout = 5 * time.Second
+
+// EntityOccupancyChecker reports whether a validation entity is already
+// installed on the account. A failed read must be reported as an error
+// (not occupied=false): the allocator treats errors as occupied.
+type EntityOccupancyChecker func(ctx context.Context, account common.Address, entity uint32) (occupied bool, err error)
+
+// WindowVerifier reads the TimeRangeModule window for (account, entity).
+// validUntil / validAfter are unix seconds (uint48 on chain).
+type WindowVerifier func(ctx context.Context, chainID int64, account common.Address, entity uint32) (validUntilSec, validAfterSec uint64, err error)
+
 // ActiveSessionPolicyForWallet returns the usable grant for one wallet.
 //
 // Exactly one usable grant per wallet is expected. More than one is refused
@@ -238,6 +284,75 @@ func NextSessionEntityID(db storage.Storage, chainID int64, owner, wallet common
 	return next, nil
 }
 
+// sessionEntityTaken reports whether any stored policy on this runner
+// already occupies entity. Used by submit instead of comparing against
+// storage-only NextSessionEntityID, which would false-collide after an
+// occupancy-aware prepare skipped on-chain leftovers (#763 A).
+func sessionEntityTaken(db storage.Storage, chainID int64, owner, wallet common.Address, entity uint32) (bool, error) {
+	policies, err := ListSessionPolicies(db, chainID, owner)
+	if err != nil {
+		return false, err
+	}
+	for _, p := range policies {
+		if p.Runner == nil || *p.Runner != wallet {
+			continue
+		}
+		if p.EntityID == entity {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// NextFreeSessionEntityID is NextSessionEntityID plus an on-chain occupancy
+// probe (#763 A). When check is nil the result is the storage-only id
+// (offline tests). A failed occupancy read is occupied, never free.
+// After maxEntityOccupancyProbes occupied candidates it returns a typed
+// SESSION_POLICY_ENTITY_OCCUPIED error rather than looping.
+func NextFreeSessionEntityID(
+	ctx context.Context,
+	db storage.Storage,
+	chainID int64,
+	owner, wallet common.Address,
+	check EntityOccupancyChecker,
+) (uint32, error) {
+	start, err := NextSessionEntityID(db, chainID, owner, wallet)
+	if err != nil {
+		return 0, err
+	}
+	if check == nil {
+		return start, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	overall, cancel := context.WithTimeout(ctx, occupancyProbeTimeout*time.Duration(maxEntityOccupancyProbes))
+	defer cancel()
+	var lastOccErr error
+	for i := uint32(0); i < maxEntityOccupancyProbes; i++ {
+		cand := start + i
+		probeCtx, probeCancel := context.WithTimeout(overall, occupancyProbeTimeout)
+		occupied, occErr := check(probeCtx, wallet, cand)
+		probeCancel()
+		if occErr != nil {
+			// Fail-closed: unknown is occupied, same as VerifySupersededTeardown.
+			lastOccErr = occErr
+			continue
+		}
+		if !occupied {
+			return cand, nil
+		}
+	}
+	if lastOccErr != nil {
+		return 0, fmt.Errorf(
+			"%s: no free validation entity on %s after %d probes (last occupancy read: %w)",
+			SessionPolicyEntityOccupiedCode, wallet.Hex(), maxEntityOccupancyProbes, lastOccErr)
+	}
+	return 0, fmt.Errorf(
+		"%s: no free validation entity on %s after %d probes starting at %d; leftover entities are still installed on the account",
+		SessionPolicyEntityOccupiedCode, wallet.Hex(), maxEntityOccupancyProbes, start)
+}
+
 // InstallSessionResolver wires the send path to this engine's session-policy
 // storage. Without it every MA v2 operation fails fast with "no session
 // authorization" — the gateway cannot sign as the owner fallback, and
@@ -251,7 +366,8 @@ func NextSessionEntityID(db storage.Storage, chainID int64, owner, wallet common
 // explicitly; tests that need one install their own scoped to their own
 // database.
 func (n *Engine) InstallSessionResolver() {
-	preset.SetSessionResolver(NewSessionResolver(n.db, controllerSessionSigner(n.config), n.teardownVerifier()))
+	n.sessionChainReads = true
+	preset.SetSessionResolver(newSessionResolver(n.db, controllerSessionSigner(n.config), n.teardownVerifier(), n.windowVerifier()))
 }
 
 // teardownVerifier reads a validation entity's signer on the chain the grant
@@ -278,6 +394,65 @@ func (n *Engine) teardownVerifier() TeardownVerifier {
 	}
 }
 
+// entityOccupancyChecker reports whether a validation entity is already
+// spoken for on chain (#763 A). Occupied means a non-zero signer OR a
+// non-zero deferred nonce sequence — the same definition
+// seedEntitiesConsumedOnChain uses. Teardown can zero the signer while
+// the EntryPoint sequence stays > 0, and PrepareSessionGrant assumes
+// sequence 0.
+func (n *Engine) entityOccupancyChecker(chainID int64) EntityOccupancyChecker {
+	return func(ctx context.Context, account common.Address, entity uint32) (bool, error) {
+		swCfg := n.ResolveSmartWalletConfig(chainID)
+		if swCfg == nil || swCfg.EthRpcUrl == "" {
+			return false, fmt.Errorf("no RPC configured for chain %d", chainID)
+		}
+		client, err := ethclient.DialContext(ctx, swCfg.EthRpcUrl)
+		if err != nil {
+			return false, fmt.Errorf("dialing chain %d: %w", chainID, err)
+		}
+		defer client.Close()
+
+		signer, err := aa.EntitySignerOnChain(ctx, client, account, entity)
+		if err != nil {
+			return false, err
+		}
+		if signer != (common.Address{}) {
+			return true, nil
+		}
+		seq, err := aa.EntityDeferredNonceSequence(ctx, client, account, entity)
+		if err != nil {
+			return false, err
+		}
+		return seq > 0, nil
+	}
+}
+
+// occupancyFor is the occupancy checker PrepareSessionPolicy/SubmitSessionPolicy
+// pass down. Nil unless InstallSessionResolver has run, so unit tests that
+// never install a resolver stay offline.
+func (n *Engine) occupancyFor(chainID int64) EntityOccupancyChecker {
+	if n == nil || !n.sessionChainReads {
+		return nil
+	}
+	return n.entityOccupancyChecker(chainID)
+}
+
+// windowVerifier reads TimeRangeModule.timeRanges for (account, entity).
+func (n *Engine) windowVerifier() WindowVerifier {
+	return func(ctx context.Context, chainID int64, account common.Address, entity uint32) (uint64, uint64, error) {
+		swCfg := n.ResolveSmartWalletConfig(chainID)
+		if swCfg == nil || swCfg.EthRpcUrl == "" {
+			return 0, 0, fmt.Errorf("no RPC configured for chain %d", chainID)
+		}
+		client, err := ethclient.DialContext(ctx, swCfg.EthRpcUrl)
+		if err != nil {
+			return 0, 0, fmt.Errorf("dialing chain %d: %w", chainID, err)
+		}
+		defer client.Close()
+		return aa.EntityTimeRangeOnChain(ctx, client, account, entity)
+	}
+}
+
 // NewSessionResolver builds the resolver the send path consults, backed by
 // storage and a key lookup.
 //
@@ -294,6 +469,15 @@ func NewSessionResolver(
 	db storage.Storage,
 	signerKeyFor func(signer common.Address) (*ecdsa.PrivateKey, error),
 	verifyTeardown TeardownVerifier,
+) preset.SessionResolver {
+	return newSessionResolver(db, signerKeyFor, verifyTeardown, nil)
+}
+
+func newSessionResolver(
+	db storage.Storage,
+	signerKeyFor func(signer common.Address) (*ecdsa.PrivateKey, error),
+	verifyTeardown TeardownVerifier,
+	verifyWindow WindowVerifier,
 ) preset.SessionResolver {
 	return func(chainID int64, owner, wallet common.Address) (*preset.SessionAuthorization, error) {
 		policy, err := ActiveSessionPolicyForWallet(db, chainID, owner, wallet)
@@ -321,6 +505,14 @@ func NewSessionResolver(
 				"%s: session policy %s on wallet %s expired at %s; grant again to keep executing",
 				SessionPolicyExpiredCode, policy.ID, wallet.Hex(),
 				time.UnixMilli(policy.ValidUntil).UTC().Format(time.RFC3339))
+		}
+		// Applied grants: the stored ValidUntil can disagree with the
+		// TimeRangeModule window actually installed on the entity — the
+		// entity-reuse drift #763 filed from. A+B close allocation; they
+		// cannot heal a record that is already stored wrong. Check once
+		// after install and cache the match so this is not paid per UserOp.
+		if err := checkAppliedChainWindow(db, policy, verifyWindow); err != nil {
+			return nil, err
 		}
 		key, err := signerKeyFor(*policy.SessionSigner)
 		if err != nil {
@@ -428,6 +620,143 @@ func controllerSessionSigner(cfg *config.Config) func(common.Address) (*ecdsa.Pr
 		}
 		return cfg.SmartWallet.ControllerPrivateKey, nil
 	}
+}
+
+// checkAppliedChainWindow compares a stored grant's ValidUntil against the
+// TimeRangeModule window on the entity (#763 C). Pending grants skip: the
+// install has not landed. Already-checked grants skip: the match is cached
+// on ChainWindowChecked. verifyWindow nil skips (offline tests).
+//
+// A read failure is returned as-is (infra), not as a mismatch. A mismatch
+// is the typed SESSION_POLICY_CHAIN_WINDOW_MISMATCH so the send never
+// reaches the bundler's opaque expiry string.
+func checkAppliedChainWindow(db storage.Storage, policy *model.SessionPolicy, verifyWindow WindowVerifier) error {
+	if policy == nil || policy.Grant == nil || !policy.Grant.Applied() {
+		return nil
+	}
+	if policy.Grant.ChainWindowChecked || verifyWindow == nil || policy.ValidUntil <= 0 {
+		return nil
+	}
+	if policy.Owner == nil || policy.Runner == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), teardownVerifyTimeout)
+	defer cancel()
+	untilSec, _, err := verifyWindow(ctx, policy.ChainID, *policy.Runner, policy.EntityID)
+	if err != nil {
+		return fmt.Errorf("reading TimeRange for session policy %s entity %d on %s: %w",
+			policy.ID, policy.EntityID, policy.Runner.Hex(), err)
+	}
+	storedSec := uint64(policy.ValidUntil / 1000)
+	if untilSec == 0 {
+		return fmt.Errorf(
+			"%s: session policy %s entity %d on %s has no TimeRange hook installed, "+
+				"while storage promises validUntil %s; the grant does not expire on chain. "+
+				"Grant again onto a free entity",
+			SessionPolicyChainWindowMissingCode, policy.ID, policy.EntityID, policy.Runner.Hex(),
+			time.UnixMilli(policy.ValidUntil).UTC().Format(time.RFC3339))
+	}
+	if untilSec != storedSec {
+		return fmt.Errorf(
+			"%s: session policy %s entity %d on %s: stored validUntil %s, chain validUntil %s; grant again onto a free entity",
+			SessionPolicyChainWindowMismatchCode, policy.ID, policy.EntityID, policy.Runner.Hex(),
+			time.UnixMilli(policy.ValidUntil).UTC().Format(time.RFC3339),
+			time.Unix(int64(untilSec), 0).UTC().Format(time.RFC3339))
+	}
+	if markErr := MarkChainWindowChecked(db, policy.ChainID, *policy.Owner, *policy.Runner, policy.ID); markErr != nil {
+		// The send is still good — the windows matched. A failed mark
+		// only means the next UserOp re-reads the chain.
+		if globalLogger != nil {
+			globalLogger.Warn("chain window matched but ChainWindowChecked could not be stored",
+				"policy", policy.ID, "error", markErr)
+		}
+	} else {
+		policy.Grant.ChainWindowChecked = true
+	}
+	return nil
+}
+
+// MarkChainWindowChecked records that the send path has confirmed the
+// entity's installed TimeRange agrees with storage. Idempotent.
+func MarkChainWindowChecked(db storage.Storage, chainID int64, owner, runner common.Address, policyID string) error {
+	lock := sessionAuthorityLock(chainID, owner, runner)
+	lock.Lock()
+	defer lock.Unlock()
+	raw, err := db.GetKey(SessionPolicyKey(chainID, owner, policyID))
+	if err != nil {
+		return err
+	}
+	policy := &model.SessionPolicy{}
+	if err := policy.FromStorageData(raw); err != nil {
+		return err
+	}
+	if policy.Grant == nil || policy.Grant.ChainWindowChecked {
+		return nil
+	}
+	policy.Grant.ChainWindowChecked = true
+	return StoreSessionPolicy(db, policy)
+}
+
+// DriftedSessionGrant is one stored policy whose ValidUntil disagrees
+// with the TimeRangeModule window on its entity (#763 sweep).
+type DriftedSessionGrant struct {
+	Policy         *model.SessionPolicy
+	StoredUntilSec uint64
+	ChainUntilSec  uint64
+	ChainAfterSec  uint64
+	ReadErr        error
+	// WindowMissing is the ChainUntilSec == 0 case: no TimeRange hook on the
+	// entity at all. Broken out so a pre-deploy sweep can count it separately —
+	// it is the population the send path will start refusing, and it is not
+	// visibly different from "expired in 1970" in the raw numbers.
+	WindowMissing bool
+}
+
+// FindDriftedSessionGrants walks applied usable grants on chainID and
+// reports those whose installed window disagrees with storage. A+B do
+// not heal already-stored records; this is how operators find them so
+// the owner can re-grant onto a free entity.
+//
+// verify nil: nothing to compare, empty result.
+// A read failure is recorded on the row rather than aborting the sweep.
+func FindDriftedSessionGrants(ctx context.Context, db storage.Storage, chainID int64, verify WindowVerifier) ([]DriftedSessionGrant, error) {
+	if verify == nil {
+		return nil, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	items, err := db.GetByPrefix(SessionPolicyChainPrefix(chainID))
+	if err != nil {
+		return nil, fmt.Errorf("listing session policies on chain %d: %w", chainID, err)
+	}
+	out := make([]DriftedSessionGrant, 0)
+	for _, item := range items {
+		policy := &model.SessionPolicy{}
+		if err := policy.FromStorageData(item.Value); err != nil {
+			return nil, fmt.Errorf("session policy at %s is unreadable: %w", string(item.Key), err)
+		}
+		if !policy.Usable() || policy.Grant == nil || !policy.Grant.Applied() || policy.ValidUntil <= 0 {
+			continue
+		}
+		if policy.Runner == nil {
+			continue
+		}
+		storedSec := uint64(policy.ValidUntil / 1000)
+		untilSec, afterSec, readErr := verify(ctx, chainID, *policy.Runner, policy.EntityID)
+		if readErr != nil {
+			out = append(out, DriftedSessionGrant{Policy: policy, StoredUntilSec: storedSec, ReadErr: readErr})
+			continue
+		}
+		if untilSec != storedSec {
+			out = append(out, DriftedSessionGrant{
+				Policy: policy, StoredUntilSec: storedSec,
+				ChainUntilSec: untilSec, ChainAfterSec: afterSec,
+				WindowMissing: untilSec == 0,
+			})
+		}
+	}
+	return out, nil
 }
 
 // maxOnChainTeardowns is how many prior entities one replacement batch

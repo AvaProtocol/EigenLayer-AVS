@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math/big"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -411,6 +412,11 @@ func mapPolicyError(err error) error {
 				" List this wallet's policies and revoke the older usable ones, or grant again to replace them."}
 	case errors.Is(err, taskengine.ErrGrantSignerMismatch):
 		return badRequest("POLICIES_BAD_SIGNATURE", "Signature does not match", err.Error())
+	case strings.Contains(err.Error(), taskengine.SessionPolicyEntityOccupiedCode):
+		// Bounded occupancy probe exhausted (#763 A). The account still has
+		// leftover entities; granting cannot allocate a free one. 400 so
+		// the owner is not asked to sign a doomed payload.
+		return badRequest(taskengine.SessionPolicyEntityOccupiedCode, "Validation entity occupied", err.Error())
 	default:
 		return badRequest("POLICIES_REJECTED", "Policy request rejected", err.Error())
 	}
