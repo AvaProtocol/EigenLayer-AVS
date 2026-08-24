@@ -2,6 +2,7 @@ package trigger
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -340,12 +341,19 @@ func (t *TimeTrigger) RemoveCheck(taskID string) error {
 		return nil
 	}
 
-	// Remove all jobs from scheduler if they exist
+	// Limited-run jobs delete themselves after firing, so ErrJobNotFound
+	// is already-gone. Warn rather than Error so it does not page Sentry.
 	if task.TimeData != nil && len(task.TimeData.Jobs) > 0 {
 		for i, job := range task.TimeData.Jobs {
 			if job != nil {
 				if err := t.scheduler.RemoveJob(job.ID()); err != nil {
-					t.logger.Error("failed to remove job", "task_id", taskID, "job_index", i, "error", err)
+					if errors.Is(err, gocron.ErrJobNotFound) {
+						t.logger.Warn("scheduler job already removed",
+							"task_id", taskID, "job_index", i, "error", err)
+					} else {
+						t.logger.Error("failed to remove job",
+							"task_id", taskID, "job_index", i, "error", err)
+					}
 				}
 			}
 		}

@@ -2,11 +2,13 @@ package trigger
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	gocron "github.com/go-co-op/gocron/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -191,6 +193,88 @@ func TestTimeTrigger_RemoveCheck_NonExistentTask(t *testing.T) {
 	require.NoError(t, err) // Should not error
 
 	assert.Equal(t, 0, timeTrigger.registry.GetTimeTaskCount())
+}
+
+// recordingLogger captures Warn/Error so tests can assert that already-gone
+// gocron jobs do not page at Error (SentryLogger only captures Error).
+type recordingLogger struct {
+	mu     sync.Mutex
+	warns  []string
+	errors []string
+}
+
+func (l *recordingLogger) record(level, msg string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if level == "Warn" {
+		l.warns = append(l.warns, msg)
+	} else {
+		l.errors = append(l.errors, msg)
+	}
+}
+
+func (l *recordingLogger) Debug(string, ...any)          {}
+func (l *recordingLogger) Debugf(string, ...any)         {}
+func (l *recordingLogger) Info(string, ...any)           {}
+func (l *recordingLogger) Infof(string, ...any)          {}
+func (l *recordingLogger) Warn(msg string, _ ...any)     { l.record("Warn", msg) }
+func (l *recordingLogger) Warnf(string, ...any)          {}
+func (l *recordingLogger) Error(msg string, _ ...any)    { l.record("Error", msg) }
+func (l *recordingLogger) Errorf(string, ...any)         {}
+func (l *recordingLogger) Fatal(string, ...any)          {}
+func (l *recordingLogger) Fatalf(string, ...any)         {}
+func (l *recordingLogger) With(...any) sdklogging.Logger { return l }
+
+func (l *recordingLogger) snapshot() (warns, errors []string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.warns...), append([]string(nil), l.errors...)
+}
+
+// TestTimeTrigger_RemoveCheck_AlreadyRemovedJob covers the EIGENLAYER-AVS-37
+// path: the task is still in the registry but gocron already dropped the job
+// (FixedTime WithLimitedRuns(1) after fire, or a prior RemoveJob). RemoveCheck
+// must return nil and log Warn, not Error.
+func TestTimeTrigger_RemoveCheck_AlreadyRemovedJob(t *testing.T) {
+	triggerCh := make(chan TriggerMetadata[uint64], 10)
+	logger := &recordingLogger{}
+	timeTrigger := NewTimeTrigger(triggerCh, logger)
+
+	taskMetadata := &avsproto.SyncMessagesResp_TaskMetadata{
+		TaskId: "test-already-removed-job",
+		Trigger: &avsproto.TaskTrigger{
+			TriggerType: &avsproto.TaskTrigger_Cron{
+				Cron: &avsproto.CronTrigger{
+					Config: &avsproto.CronTrigger_Config{
+						Schedules: []string{"0 0 * * *"},
+					},
+				},
+			},
+		},
+	}
+
+	err := timeTrigger.AddCheck(taskMetadata)
+	require.NoError(t, err)
+
+	task, exists := timeTrigger.registry.GetTask("test-already-removed-job")
+	require.True(t, exists)
+	require.NotNil(t, task.TimeData)
+	require.NotEmpty(t, task.TimeData.Jobs)
+	job := task.TimeData.Jobs[0]
+	require.NotNil(t, job)
+
+	err = timeTrigger.scheduler.RemoveJob(job.ID())
+	require.NoError(t, err)
+	require.ErrorIs(t, timeTrigger.scheduler.RemoveJob(job.ID()), gocron.ErrJobNotFound)
+
+	err = timeTrigger.RemoveCheck("test-already-removed-job")
+	require.NoError(t, err)
+	assert.Equal(t, 0, timeTrigger.registry.GetTimeTaskCount())
+
+	warns, errors := logger.snapshot()
+	assert.Empty(t, errors, "already-removed jobs must not log Error (that pages Sentry)")
+	require.NotEmpty(t, warns)
+	assert.Contains(t, warns, "scheduler job already removed")
 }
 
 func TestTimeTrigger_LegacyMigration(t *testing.T) {
