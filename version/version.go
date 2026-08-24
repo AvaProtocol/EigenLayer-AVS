@@ -35,3 +35,11 @@ func Get() string {
 func GetRevision() string {
 	return revision
 }
+
+// SentryRelease is the release string both the aggregator and the operator
+// send as sentry.ClientOptions.Release. Same scheme on purpose: one binary,
+// one ldflags stamp, so "resolved in next release" can match operator events
+// the same way it already matches gateway events.
+func SentryRelease() string {
+	return Get() + "@" + GetRevision()
+}

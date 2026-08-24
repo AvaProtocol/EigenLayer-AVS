@@ -611,16 +611,18 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		if c.SentryEnvironment != "" {
 			sentryEnv = c.SentryEnvironment
 		}
+		release := version.SentryRelease()
 		if err := sentry.Init(sentry.ClientOptions{
 			Dsn:              c.SentryDsn,
 			ServerName:       serverName,
 			Environment:      sentryEnv,
+			Release:          release,
 			AttachStacktrace: true,
 			TracesSampleRate: 1.0,
 		}); err != nil {
 			logger.Errorf("Sentry initialization failed: %v", err)
 		} else {
-			logger.Infof("Sentry initialized for operator: %s (env: %s)", serverName, sentryEnv)
+			logger.Infof("Sentry initialized for operator: %s (env: %s, release: %s)", serverName, sentryEnv, release)
 		}
 	} else if c.SentryDsn != "" {
 		logger.Info("Sentry disabled in development environment")
