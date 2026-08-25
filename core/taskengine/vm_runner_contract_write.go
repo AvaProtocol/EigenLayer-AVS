@@ -1033,6 +1033,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 			Success:    false,
 			Error:      userErrorMsg,
 			MethodName: methodName,
+			Receipt:    failedReceiptWithInnerCalls(smartWalletCallData),
 		}
 	}
 
@@ -1050,7 +1051,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	}
 
 	// Create result from real transaction
-	result := r.createRealTransactionResult(methodName, contractAddress.Hex(), callData, parsedABI, userOp, receipt)
+	result := r.createRealTransactionResult(methodName, contractAddress.Hex(), callData, parsedABI, userOp, receipt, smartWalletCallData)
 
 	// Error field should contain only the summary (first sentence)
 	// Detailed logs are already in the execution log (log field)
@@ -1314,7 +1315,9 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 	executionLogBuilder.WriteString(fmt.Sprintf("Atomic batch UserOp for %d calls (%s)\n", n, packKind))
 	userOp, receipt, userErrorMsg := r.submitSmartWalletUserOp(ctx, smartWalletCallData, logLabel, logTarget, &executionLogBuilder)
 	if userErrorMsg != "" {
-		return failAll(userErrorMsg, nil)
+		out := failAll(userErrorMsg, nil)
+		attachFailedInnerCalls(out, smartWalletCallData)
+		return out
 	}
 
 	// Fan the single receipt into one result per sub-call: all share the same tx identity
@@ -1324,13 +1327,15 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 	results = make([]*avsproto.ContractWriteNode_MethodResult, n)
 	for i := range methodCalls {
 		callDataHex := "0x" + common.Bytes2Hex(datas[i])
-		results[i] = r.createRealTransactionResult(methodNames[i], perCallTargets[i].Hex(), callDataHex, parsedABI, userOp, receipt)
+		results[i] = r.createRealTransactionResult(methodNames[i], perCallTargets[i].Hex(), callDataHex, parsedABI, userOp, receipt, smartWalletCallData)
 	}
 	return results
 }
 
-// createRealTransactionResult creates a result from a real UserOp transaction
-func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contractAddress, callData string, parsedABI *abi.ABI, userOp *preset.SentUserOp, receipt *types.Receipt) *avsproto.ContractWriteNode_MethodResult {
+// createRealTransactionResult creates a result from a real UserOp transaction.
+// packedExecute is the smart-wallet execute / executeBatch calldata we submitted
+// (N14.a): unpacked into receipt.calls so Troubleshoot does not re-decode it.
+func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contractAddress, callData string, parsedABI *abi.ABI, userOp *preset.SentUserOp, receipt *types.Receipt, packedExecute []byte) *avsproto.ContractWriteNode_MethodResult {
 	r.vm.logger.Info("🔍 DEPLOYED WORKFLOW: Creating real transaction result",
 		"method_name", methodName,
 		"contract_address", contractAddress,
@@ -1495,6 +1500,9 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 		} else if !userOpInnerSuccess && foundUserOpEvent {
 			// AA transaction succeeded at EntryPoint level but inner call failed
 			errorMsg = "UserOperation inner execution failed (likely insufficient token balance or other contract error)"
+			if calls, unpackErr := InnerCallsFromExecuteCalldata(packedExecute); unpackErr == nil && len(calls) == 1 {
+				errorMsg = fmt.Sprintf("UserOperation inner execution failed (to %s selector %s)", calls[0].To, calls[0].Selector)
+			}
 		}
 	}
 
@@ -1506,6 +1514,7 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 		if _, hasHash := receiptMap["userOpHash"]; !hasHash && userOp != nil && r.smartWalletConfig != nil {
 			receiptMap["userOpHash"] = userOp.UserOpHash.Hex()
 		}
+		stampInnerCalls(receiptMap, packedExecute, !success && !pending)
 		if v, err := structpb.NewValue(receiptMap); err == nil {
 			receiptValue = v
 		}

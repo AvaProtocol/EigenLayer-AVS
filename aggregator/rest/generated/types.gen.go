@@ -250,6 +250,13 @@ const (
 	TriggerTypeManual    TriggerType = "manual"
 )
 
+// Defines values for UserOpStatusResponseExecutionStatus.
+const (
+	UserOpStatusResponseExecutionStatusConfirmed UserOpStatusResponseExecutionStatus = "confirmed"
+	UserOpStatusResponseExecutionStatusFailed    UserOpStatusResponseExecutionStatus = "failed"
+	UserOpStatusResponseExecutionStatusPending   UserOpStatusResponseExecutionStatus = "pending"
+)
+
 // Defines values for ValueFeeClassificationMethod.
 const (
 	Llm       ValueFeeClassificationMethod = "llm"
@@ -272,11 +279,11 @@ const (
 
 // Defines values for WorkflowStatus.
 const (
-	WorkflowStatusCompleted WorkflowStatus = "completed"
-	WorkflowStatusDisabled  WorkflowStatus = "disabled"
-	WorkflowStatusEnabled   WorkflowStatus = "enabled"
-	WorkflowStatusFailed    WorkflowStatus = "failed"
-	WorkflowStatusRunning   WorkflowStatus = "running"
+	Completed WorkflowStatus = "completed"
+	Disabled  WorkflowStatus = "disabled"
+	Enabled   WorkflowStatus = "enabled"
+	Failed    WorkflowStatus = "failed"
+	Running   WorkflowStatus = "running"
 )
 
 // AllowedAction One contract the agent may call, scoped to selectors.
@@ -426,6 +433,9 @@ type BranchNodeType string
 type BranchNodeConfig struct {
 	Conditions []BranchCondition `json:"conditions"`
 }
+
+// Bytes32 32-byte hex hash (UserOp hash, transaction hash).
+type Bytes32 = string
 
 // ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
 // chain-aware trigger/node configs this is required and must be a
@@ -1617,6 +1627,49 @@ type UpdateWalletRequest struct {
 	IsHidden *bool `json:"isHidden,omitempty"`
 }
 
+// UserOpInnerCall defines model for UserOpInnerCall.
+type UserOpInnerCall struct {
+	// Data Arbitrary-length hex-encoded byte string.
+	Data Hex `json:"data"`
+
+	// Selector 4-byte function selector of `data` (`0x00000000` for a value-only call).
+	Selector string `json:"selector"`
+
+	// To Lowercase or checksummed hex EOA / contract address.
+	To EthereumAddress `json:"to"`
+
+	// Value Native value in wei (decimal string).
+	Value string `json:"value"`
+}
+
+// UserOpStatusResponse defines model for UserOpStatusResponse.
+type UserOpStatusResponse struct {
+	// BlockNumber Block number as a hex string when mined.
+	BlockNumber *string            `json:"blockNumber,omitempty"`
+	Calls       *[]UserOpInnerCall `json:"calls,omitempty"`
+
+	// ExecutionStatus `pending` means the bundler accepted the op and it is not yet
+	// mined. It is not a failure.
+	ExecutionStatus UserOpStatusResponseExecutionStatus `json:"executionStatus"`
+	FailedCall      *UserOpInnerCall                    `json:"failedCall,omitempty"`
+
+	// Sender Lowercase or checksummed hex EOA / contract address.
+	Sender *EthereumAddress `json:"sender,omitempty"`
+
+	// Success Inner UserOp success from the bundler receipt. Absent while pending.
+	Success *bool `json:"success,omitempty"`
+
+	// TransactionHash Arbitrary-length hex-encoded byte string.
+	TransactionHash *Hex `json:"transactionHash,omitempty"`
+
+	// UserOpHash 32-byte hex hash (UserOp hash, transaction hash).
+	UserOpHash Bytes32 `json:"userOpHash"`
+}
+
+// UserOpStatusResponseExecutionStatus `pending` means the bundler accepted the op and it is not yet
+// mined. It is not a failure.
+type UserOpStatusResponseExecutionStatus string
+
 // ValueFee defines model for ValueFee.
 type ValueFee struct {
 	ClassificationMethod *ValueFeeClassificationMethod `json:"classificationMethod,omitempty"`
@@ -1895,6 +1948,13 @@ type DeleteSecretParams struct {
 
 // GetTokenParams defines parameters for GetToken.
 type GetTokenParams struct {
+	// ChainId The chain to operate on (a single value). Omit to use the aggregator
+	// default (the request's JWT `aud` chain, then the gateway default).
+	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
+}
+
+// GetUserOpParams defines parameters for GetUserOp.
+type GetUserOpParams struct {
 	// ChainId The chain to operate on (a single value). Omit to use the aggregator
 	// default (the request's JWT `aud` chain, then the gateway default).
 	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`

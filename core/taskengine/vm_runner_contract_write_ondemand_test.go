@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
@@ -78,7 +79,7 @@ func TestCreateRealTransactionResultExecutionStatus(t *testing.T) {
 	}
 
 	t.Run("mined success -> confirmed", func(t *testing.T) {
-		mr := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, minedReceipt(1))
+		mr := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, minedReceipt(1), nil)
 		assert.True(t, mr.Success)
 		assert.Empty(t, mr.Error)
 		rm := receiptMapOf(t, mr)
@@ -87,7 +88,7 @@ func TestCreateRealTransactionResultExecutionStatus(t *testing.T) {
 	})
 
 	t.Run("mined revert -> failed", func(t *testing.T) {
-		mr := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, minedReceipt(0))
+		mr := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, minedReceipt(0), nil)
 		assert.False(t, mr.Success)
 		assert.NotEmpty(t, mr.Error)
 		rm := receiptMapOf(t, mr)
@@ -95,13 +96,39 @@ func TestCreateRealTransactionResultExecutionStatus(t *testing.T) {
 	})
 
 	t.Run("submitted but not mined -> pending, not failure", func(t *testing.T) {
-		mr := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, nil)
+		mr := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, nil, nil)
 		assert.False(t, mr.Success, "pending is not confirmed-success")
 		assert.Empty(t, mr.Error, "pending must not be reported as an error")
 		rm := receiptMapOf(t, mr)
 		assert.Equal(t, "pending", rm["executionStatus"])
 		assert.Equal(t, "pending", rm["transactionHash"])
 		assert.NotEmpty(t, rm["userOpHash"], "pending result must carry a userOpHash to poll")
+	})
+
+	t.Run("packed execute stamps inner calls on pending and mined", func(t *testing.T) {
+		inner := common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8")
+		packed, err := aa.PackExecute(contractAddr, big.NewInt(0), inner)
+		require.NoError(t, err)
+
+		pending := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, nil, packed)
+		pendingMap := receiptMapOf(t, pending)
+		assert.Equal(t, "pending", pendingMap["executionStatus"])
+		calls, ok := pendingMap["calls"].([]interface{})
+		require.True(t, ok)
+		require.Len(t, calls, 1)
+		call0 := calls[0].(map[string]interface{})
+		assert.Equal(t, contractAddr.Hex(), call0["to"])
+		assert.Equal(t, "0xa9059cbb", call0["selector"])
+		assert.Equal(t, "0", call0["value"])
+		_, hasFailed := pendingMap["failedCall"]
+		assert.False(t, hasFailed)
+
+		mined := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, minedReceipt(1), packed)
+		minedMap := receiptMapOf(t, mined)
+		assert.Equal(t, "confirmed", minedMap["executionStatus"])
+		minedCalls := minedMap["calls"].([]interface{})
+		require.Len(t, minedCalls, 1)
+		assert.Equal(t, contractAddr.Hex(), minedCalls[0].(map[string]interface{})["to"])
 	})
 }
 
