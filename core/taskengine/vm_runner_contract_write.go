@@ -1514,7 +1514,7 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 		if _, hasHash := receiptMap["userOpHash"]; !hasHash && userOp != nil && r.smartWalletConfig != nil {
 			receiptMap["userOpHash"] = userOp.UserOpHash.Hex()
 		}
-		stampInnerCalls(receiptMap, packedExecute, !success && !pending)
+		stampInnerCalls(receiptMap, packedExecute, foundUserOpEvent && !userOpInnerSuccess)
 		if v, err := structpb.NewValue(receiptMap); err == nil {
 			receiptValue = v
 		}

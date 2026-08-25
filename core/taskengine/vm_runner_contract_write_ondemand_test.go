@@ -129,7 +129,32 @@ func TestCreateRealTransactionResultExecutionStatus(t *testing.T) {
 		minedCalls := minedMap["calls"].([]interface{})
 		require.Len(t, minedCalls, 1)
 		assert.Equal(t, contractAddr.Hex(), minedCalls[0].(map[string]interface{})["to"])
+
+		outerFail := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, minedReceipt(0), packed)
+		outerMap := receiptMapOf(t, outerFail)
+		assert.Equal(t, "failed", outerMap["executionStatus"])
+		assert.NotEmpty(t, outerMap["calls"])
+		_, hasFailed = outerMap["failedCall"]
+		assert.False(t, hasFailed, "outer tx failure is not an inner revert")
+
+		innerFail := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, userOpInnerFailReceipt(), packed)
+		innerMap := receiptMapOf(t, innerFail)
+		assert.Equal(t, "failed", innerMap["executionStatus"])
+		failedCall, ok := innerMap["failedCall"].(map[string]interface{})
+		require.True(t, ok, "observed inner revert names failedCall")
+		assert.Equal(t, contractAddr.Hex(), failedCall["to"])
+		assert.Equal(t, "0xa9059cbb", failedCall["selector"])
 	})
+}
+
+func userOpInnerFailReceipt() *types.Receipt {
+	r := minedReceipt(1)
+	topic := common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f")
+	r.Logs = []*types.Log{{
+		Topics: []common.Hash{topic, common.Hash{}, common.Hash{}},
+		Data:   make([]byte, 128), // success word at bytes 32-64 is zero
+	}}
+	return r
 }
 
 // G1: the real UserOp path must forward the node's native ETH value into the

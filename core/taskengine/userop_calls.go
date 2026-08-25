@@ -70,8 +70,9 @@ func innerCallsAsInterface(calls []InnerCall) []interface{} {
 	return out
 }
 
-// stampInnerCalls writes receipt.calls (and receipt.failedCall when a single
-// inner call reverted or was refused) onto an existing receipt map.
+// stampInnerCalls writes receipt.calls onto an existing receipt map.
+// failedCall is set only when innerFailed is true (observed inner revert)
+// and there is a single inner call.
 func stampInnerCalls(receiptMap map[string]interface{}, packed []byte, innerFailed bool) {
 	if receiptMap == nil || len(packed) == 0 {
 		return
@@ -88,11 +89,12 @@ func stampInnerCalls(receiptMap map[string]interface{}, packed []byte, innerFail
 
 // failedReceiptWithInnerCalls builds a failed receipt that still carries the
 // inner calls we packed — used on AA23 / bundler reject after calldata exists.
+// Those paths never ran the inner call, so failedCall is omitted.
 func failedReceiptWithInnerCalls(packed []byte) *structpb.Value {
 	receiptMap := map[string]interface{}{
 		"executionStatus": "failed",
 	}
-	stampInnerCalls(receiptMap, packed, true)
+	stampInnerCalls(receiptMap, packed, false)
 	v, err := structpb.NewValue(receiptMap)
 	if err != nil {
 		return nil
@@ -119,7 +121,7 @@ func attachFailedInnerCalls(results []*avsproto.ContractWriteNode_MethodResult, 
 			mr.Receipt = failedReceiptWithInnerCalls(packed)
 			continue
 		}
-		stampInnerCalls(m, packed, true)
+		stampInnerCalls(m, packed, false)
 		if v, err := structpb.NewValue(m); err == nil {
 			mr.Receipt = v
 		}

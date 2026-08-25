@@ -37,6 +37,9 @@ func (s *Server) GetUserOp(ctx echo.Context, userOpHash generated.Bytes32, param
 		if errors.Is(err, taskengine.ErrUserOpHashInvalid) {
 			return badRequest("USEROP_BAD_HASH", "Invalid userOpHash", err.Error())
 		}
+		if errors.Is(err, taskengine.ErrUserOpChainUnsupported) {
+			return badRequest("USEROP_BAD_CHAIN", "Unsupported chain", err.Error())
+		}
 		if errors.Is(err, taskengine.ErrUserOpNotFound) {
 			return &restmw.HTTPError{
 				Status: http.StatusNotFound,

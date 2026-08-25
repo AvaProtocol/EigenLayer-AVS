@@ -51,7 +51,7 @@ func TestInnerCallsFromExecuteCalldata_Empty(t *testing.T) {
 	assert.Nil(t, calls)
 }
 
-func TestFailedReceiptWithInnerCalls_SingleCallSetsFailedCall(t *testing.T) {
+func TestFailedReceiptWithInnerCalls_SingleCallOmitsFailedCall(t *testing.T) {
 	token := common.HexToAddress("0xaaaa000000000000000000000000000000000001")
 	packed, err := aa.PackExecute(token, big.NewInt(0), []byte{0xa9, 0x05, 0x9c, 0xbb})
 	require.NoError(t, err)
@@ -64,10 +64,8 @@ func TestFailedReceiptWithInnerCalls_SingleCallSetsFailedCall(t *testing.T) {
 	calls, ok := m["calls"].([]interface{})
 	require.True(t, ok)
 	require.Len(t, calls, 1)
-	failed, ok := m["failedCall"].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, token.Hex(), failed["to"])
-	assert.Equal(t, "0xa9059cbb", failed["selector"])
+	_, hasFailed := m["failedCall"]
+	assert.False(t, hasFailed, "submission reject is not an inner revert")
 }
 
 func TestFailedReceiptWithInnerCalls_BatchOmitsFailedCall(t *testing.T) {

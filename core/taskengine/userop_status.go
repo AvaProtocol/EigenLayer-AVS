@@ -32,6 +32,10 @@ var ErrUserOpNotFound = fmt.Errorf("user operation not found")
 // ErrUserOpHashInvalid is a 400: the path param is not a 32-byte hex hash.
 var ErrUserOpHashInvalid = fmt.Errorf("invalid userOpHash")
 
+// ErrUserOpChainUnsupported is a 400: the caller named a chain this
+// aggregator does not serve. Do not fall back to the default bundler.
+var ErrUserOpChainUnsupported = fmt.Errorf("unsupported chain")
+
 type userOpBundler interface {
 	GetUserOperationByHash(ctx context.Context, hash string) (interface{}, error)
 	GetUserOperationReceipt(ctx context.Context, hash string) (interface{}, error)
@@ -59,6 +63,9 @@ func (n *Engine) LookupUserOpStatus(ctx context.Context, user *model.User, userO
 	if chainID <= 0 && user.ChainID > 0 {
 		chainID = user.ChainID
 	}
+	if chainID > 0 && !n.isChainConfigured(chainID) {
+		return nil, fmt.Errorf("%w: %d", ErrUserOpChainUnsupported, chainID)
+	}
 	sw := n.ResolveSmartWalletConfig(chainID)
 	if sw == nil {
 		return nil, fmt.Errorf("smart wallet config is not available for chain %d", chainID)
@@ -82,7 +89,10 @@ func (n *Engine) LookupUserOpStatus(ctx context.Context, user *model.User, userO
 		return nil, ErrUserOpNotFound
 	}
 
-	owns, err := n.userOwnsWalletOnAnyChain(user, sender)
+	if n.db == nil {
+		return nil, fmt.Errorf("wallet storage is not available")
+	}
+	owns, err := ValidWalletOwner(n.db, sw.ChainID, user, sender)
 	if err != nil {
 		return nil, err
 	}
@@ -102,9 +112,7 @@ func (n *Engine) LookupUserOpStatus(ctx context.Context, user *model.User, userO
 
 	rawReceipt, recErr := client.GetUserOperationReceipt(ctx, normalized)
 	if recErr != nil {
-		// Receipt lookup failing while the op itself exists is still pending
-		// (bundler lag / method not implemented). Do not convert that to failed.
-		return out, nil
+		return nil, fmt.Errorf("eth_getUserOperationReceipt: %w", recErr)
 	}
 	success, txHash, blockNumber := parseBundlerReceipt(rawReceipt)
 	if txHash == "" && txFromOp != "" {
