@@ -26,9 +26,11 @@ on:
       - "config/**"
       - "go.mod"
       - "go.sum"
+      - ".github/workflows/run-test-on-pr.yml"
+      - ".github/actions/**"
+      - ".github/scripts/**"
       - "!scripts/**"
       - "!**.md"
-      - "!.github/**"
       - "!docs/**"
   workflow_dispatch:
     inputs:
@@ -114,9 +116,10 @@ jobs:
           alchemy-api-key: ${{ secrets.ALCHEMY_API_KEY }}
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: "1.24"
+          cache: true
 
       - name: Cache golangci-lint binary
         uses: actions/cache@v3
@@ -197,8 +200,39 @@ jobs:
           # Required: CI uses Alchemy (production path). Missing key fails closed.
           alchemy-api-key: ${{ secrets.ALCHEMY_API_KEY }}
 
+      # The matrix job used to skip setup-go and compile from a cold
+      # module cache. operator (and anything that pulls
+      # core/taskengine/macros → dop251/goja) then failed setup on a
+      # proxy.golang.org HTTP/2 INTERNAL_ERROR — not a test assertion.
+      # Cache modules, fall back to VCS if the proxy flakes, and retry
+      # the download a couple of times.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Download modules
+        env:
+          GOPROXY: https://proxy.golang.org,direct
+        run: |
+          ok=0
+          for i in 1 2 3; do
+            if go mod download; then
+              ok=1
+              break
+            fi
+            echo "go mod download failed (attempt $i/3)"
+            sleep $((i * 3))
+          done
+          if [ "$ok" != 1 ]; then
+            echo "go mod download failed after 3 attempts"
+            exit 1
+          fi
+
       - name: Run Go test
         env:
+          GOPROXY: https://proxy.golang.org,direct
           OWNER_EOA: ${{ vars.OWNER_EOA }}
         run: |
           cd ./${{ matrix.test }}
