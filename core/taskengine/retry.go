@@ -347,6 +347,11 @@ func executeWithRetry(
 		if !retryClassEnabled(retryClassFor(step, err), policy) {
 			break
 		}
+		// A cancelled iteration (loop collector timeout) must not reserve
+		// budget or start another attempt the caller is no longer waiting for.
+		if ctx.Err() != nil {
+			break
+		}
 		// Reserve before sleep so a sibling node in the same execution cannot
 		// also claim this delay. A ctx cancel mid-backoff still keeps the
 		// deduction: the execution is ending and the budget dies with it.
@@ -372,8 +377,16 @@ func executeWithRetry(
 // instead of wrapping to a negative Duration.
 func nextBackoff(cur time.Duration, multiplier float64, max time.Duration) time.Duration {
 	next := float64(cur) * multiplier
-	if math.IsNaN(next) || next <= 0 || next >= float64(max) {
+	if math.IsNaN(next) || math.IsInf(next, 0) || next >= float64(max) {
 		return max
+	}
+	// A positive product below 1ns truncates to Duration 0. Treating that as
+	// overflow jumped the next wait to max (1ms × 1e-10 → 0 → 30s). Keep a
+	// 1ns floor so growth stays monotonic and tiny multipliers cannot skip
+	// to the cap. Non-positive products (negative multiplier, already
+	// rejected at create) also stay at 1ns rather than jumping to max.
+	if next < 1 {
+		return 1
 	}
 	return time.Duration(next)
 }

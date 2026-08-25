@@ -386,6 +386,24 @@ func TestNextBackoff_SaturatesInsteadOfOverflowing(t *testing.T) {
 	}
 }
 
+// TestNextBackoff_SubNanosecondProductDoesNotJumpToMax: a valid tiny
+// multiplier can make the float64 product smaller than 1ns. Truncating that
+// to Duration 0 used to take the overflow branch on the next call and jump
+// to max (1ms × 1e-10 → 0 → 30s).
+func TestNextBackoff_SubNanosecondProductDoesNotJumpToMax(t *testing.T) {
+	got := nextBackoff(time.Millisecond, 1e-10, 30*time.Second)
+	if got != 1 {
+		t.Fatalf("expected a 1ns floor for a sub-nanosecond product, got %v", got)
+	}
+	next := nextBackoff(got, 1e-10, 30*time.Second)
+	if next == 30*time.Second {
+		t.Fatal("sub-nanosecond truncation jumped to max on the next growth step")
+	}
+	if next != 1 {
+		t.Fatalf("expected the floor to hold under a tiny multiplier, got %v", next)
+	}
+}
+
 // TestExecuteWithRetry_ClampsAboveCeilingPolicy is defense in depth: creation
 // rejects such a policy, but a task stored before validation existed must still
 // be bounded at execution time.

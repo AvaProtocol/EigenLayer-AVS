@@ -1451,7 +1451,9 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 			// If this is a UserOperationEvent for THIS UserOp, decode success.
 			// Bundlers can include multiple UserOps in one handleOps tx; topics[1]
 			// is the indexed userOpHash. Ignore sibling events.
-			if len(log.Topics) > 1 && log.Topics[0] == userOpEventTopic {
+			// Require ≥3 topics before reading sender (topics[2]): a log can reuse
+			// this signature with only userOpHash indexed, and Topics[2] would panic.
+			if len(log.Topics) >= 3 && log.Topics[0] == userOpEventTopic {
 				if userOp == nil || log.Topics[1] != userOp.UserOpHash {
 					continue
 				}

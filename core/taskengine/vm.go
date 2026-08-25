@@ -52,6 +52,10 @@ type ExecutionTask struct {
 	ParentStepID   string
 	IterationIndex int                   // For loop iterations
 	ResultChannel  chan *ExecutionResult // Channel to send result back to parent
+	// Ctx is the per-iteration context. When the loop collector times out, it
+	// cancels this so retry backoffs stop and the worker can pick up the next
+	// iteration. Nil means "use the VM context" (non-loop queue work).
+	Ctx context.Context
 }
 
 // ExecutionResult represents the result of an execution task
@@ -301,6 +305,12 @@ type VM struct {
 	// retries, across all nodes. Lazily created (guarded by mu) so every VM
 	// constructor gets one without changing its signature. See MaxExecutionRetryDelay.
 	retryBudgetOnce *retryBudget
+
+	// iterationCtx holds per-loop-iteration contexts keyed by nested node id.
+	// executeNodeWithRetry prefers this over ctx so a collector timeout can
+	// cancel that iteration's retry sleep without cancelling the rest of the
+	// execution. Set by executeTask; deleted when the worker finishes the task.
+	iterationCtx sync.Map
 }
 
 // WithContext attaches a caller context to the VM. Optional: without it the VM
@@ -1444,7 +1454,10 @@ func (v *VM) executeIndependentPath(startStep *Step) {
 //
 // Backoffs sleep against the VM context (cancellable) and draw on the
 // execution-wide retry budget, so loop fan-out cannot multiply the per-node
-// ceiling into an unbounded stall.
+// ceiling into an unbounded stall. Loop iterations overlay a per-iteration
+// context (iterationCtx) so a collector timeout cancels that iteration's
+// remaining attempts instead of leaving the worker occupied while later
+// iterations' clocks keep ticking.
 func (v *VM) executeNodeWithRetry(
 	node *avsproto.TaskNode,
 	run func(*avsproto.TaskNode) (*avsproto.Execution_Step, error),
@@ -1455,10 +1468,24 @@ func (v *VM) executeNodeWithRetry(
 		// common path is byte-for-byte the pre-retry behavior.
 		return run(node)
 	}
-	return executeWithRetry(v.context(), policy, v.retryDelayBudget(), contextSleep,
+	return executeWithRetry(v.retryContext(node), policy, v.retryDelayBudget(), contextSleep,
 		func() (*avsproto.Execution_Step, error) {
 			return run(node)
 		})
+}
+
+// retryContext is the context executeNodeWithRetry sleeps against. A loop
+// iteration's collector-timeout cancel lives in iterationCtx; everything else
+// uses the VM-wide context.
+func (v *VM) retryContext(node *avsproto.TaskNode) context.Context {
+	if node != nil {
+		if raw, ok := v.iterationCtx.Load(node.Id); ok {
+			if ic, ok := raw.(context.Context); ok && ic != nil {
+				return ic
+			}
+		}
+	}
+	return v.context()
 }
 
 func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
@@ -4595,6 +4622,15 @@ func (eq *ExecutionQueue) executeTask(task *ExecutionTask) *ExecutionResult {
 		}
 	}
 
+	if task.Ctx != nil && eq.vm != nil {
+		key := task.StepID
+		if task.Node.Id != "" {
+			key = task.Node.Id
+		}
+		eq.vm.iterationCtx.Store(key, task.Ctx)
+		defer eq.vm.iterationCtx.Delete(key)
+	}
+
 	// Execute the node with temporary variables to avoid race conditions in parallel execution
 	step, err := eq.vm.executeNodeDirectWithVars(task.Node, task.StepID, task.InputVariables)
 
@@ -5123,6 +5159,14 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 		log.WriteString(fmt.Sprintf("\nExecuting loop iterations in %s with %d workers", executionModeLog, workers))
 		// Parallel execution using the queue
 		resultChannels := make([]chan *ExecutionResult, len(inputArray))
+		cancels := make([]context.CancelFunc, len(inputArray))
+		defer func() {
+			for _, c := range cancels {
+				if c != nil {
+					c()
+				}
+			}
+		}()
 
 		for i := range inputArray {
 			// Use a closure to properly capture loop variables for each iteration
@@ -5153,6 +5197,8 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 
 				resultChannel := make(chan *ExecutionResult, 1)
 				resultChannels[iterationIndex] = resultChannel
+				iterCtx, cancel := context.WithCancel(v.context())
+				cancels[iterationIndex] = cancel
 
 				task := &ExecutionTask{
 					Node:           nestedNode,
@@ -5161,9 +5207,12 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 					Depth:          1, // Loop iterations are depth 1
 					ResultChannel:  resultChannel,
 					IterationIndex: iterationIndex,
+					Ctx:            iterCtx,
 				}
 
 				if err := eq.Submit(task); err != nil {
+					cancel()
+					cancels[iterationIndex] = nil
 					log.WriteString(fmt.Sprintf("\nError submitting iteration %d: %s", iterationIndex, err.Error()))
 					success = false
 					infraFailure = true
@@ -5193,6 +5242,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 					iterationSteps = append(iterationSteps, result.Step)
 				}
 			case <-time.After(iterationTimeout):
+				if cancels[i] != nil {
+					cancels[i]()
+				}
 				success = false
 				infraFailure = true
 				err := fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
@@ -5202,7 +5254,8 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				log.WriteString(fmt.Sprintf("\nTimeout in iteration %d", i))
 				// Do NOT close the channel here — the worker goroutine may still
 				// send to it. The buffered channel will be GC'd once both sides
-				// drop their references.
+				// drop their references. Cancelling the iteration ctx stops
+				// retry backoffs so the worker can pick up later iterations.
 			}
 		}
 	} else {
@@ -5220,6 +5273,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 			propagateRetryPolicyToIteration(taskNode, nestedNode)
 
 			resultChannel := make(chan *ExecutionResult, 1)
+			iterCtx, cancel := context.WithCancel(v.context())
 			task := &ExecutionTask{
 				Node:           nestedNode,
 				InputVariables: iterInputs,
@@ -5227,9 +5281,11 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				Depth:          1,
 				ResultChannel:  resultChannel,
 				IterationIndex: i,
+				Ctx:            iterCtx,
 			}
 
 			if err := eq.Submit(task); err != nil {
+				cancel()
 				success = false
 				infraFailure = true
 				if firstError == nil {
@@ -5242,6 +5298,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 			// Wait for result
 			select {
 			case result := <-resultChannel:
+				cancel()
 				if result.Error != nil {
 					if firstError == nil {
 						firstError = result.Error
@@ -5256,6 +5313,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 					iterationSteps = append(iterationSteps, result.Step)
 				}
 			case <-time.After(iterationTimeout):
+				cancel()
 				success = false
 				infraFailure = true
 				err := fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
@@ -5265,7 +5323,8 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				log.WriteString(fmt.Sprintf("\nTimeout in iteration %d", i))
 				// Do NOT close the channel here — the worker goroutine may still
 				// send to it. The buffered channel will be GC'd once both sides
-				// drop their references.
+				// drop their references. Cancelling the iteration ctx stops
+				// retry backoffs so the single worker can pick up the next item.
 			}
 		}
 	}
