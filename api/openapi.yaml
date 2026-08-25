@@ -361,6 +361,15 @@ components:
         - running
         - completed
         - failed
+      # Prefix Go constants (WorkflowStatusEnabled, …). oapi-codegen only
+      # prefixes when names collide; these five don't, so they landed as
+      # Enabled/Completed/Failed and can be confused with ExecutionStatus.
+      x-enum-varnames:
+        - WorkflowStatusEnabled
+        - WorkflowStatusDisabled
+        - WorkflowStatusRunning
+        - WorkflowStatusCompleted
+        - WorkflowStatusFailed
       description: |
         Lifecycle status. `enabled` means actively monitored; `disabled` is
         paused. `running`, `completed`, `failed` are terminal-ish states

@@ -340,6 +340,16 @@ func validateRetryPolicies(nodes []*avsproto.TaskNode) error {
 	return nil
 }
 
+// rejectRetryPolicies is the create / simulate / nodes:run boundary: an
+// over-limit policy is InvalidArgument, not a silent clamp. executeWithRetry
+// still clamps as defense in depth for tasks stored before this existed.
+func rejectRetryPolicies(nodes []*avsproto.TaskNode) error {
+	if err := validateRetryPolicies(nodes); err != nil {
+		return status.Errorf(codes.InvalidArgument, "%s", err.Error())
+	}
+	return nil
+}
+
 // validateRetryPolicy checks a single node's policy. supported reports whether
 // the node's runner is on the retry allowlist.
 func validateRetryPolicy(nodeLabel string, policy *avsproto.RetryPolicy, supported bool) error {
