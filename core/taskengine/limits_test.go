@@ -10,6 +10,8 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestMinCronInterval(t *testing.T) {
@@ -536,6 +538,51 @@ func TestValidateRetryPolicies(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestRunNodeImmediatelyRPC_RejectsOverLimitRetryPolicy(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	engine := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+
+	node := retryTestNode("rest1", &avsproto.RetryPolicy{MaxAttempts: 100, BackoffMs: 60000}, restTestNode())
+	_, err := engine.RunNodeImmediatelyRPC(&model.User{}, &avsproto.RunNodeWithInputsReq{Node: node})
+	if err == nil {
+		t.Fatal("expected nodes:run to reject an over-limit retry_policy, not clamp it")
+	}
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.InvalidArgument {
+		t.Fatalf("expected InvalidArgument, got %v", err)
+	}
+	if !strings.Contains(st.Message(), "above the maximum of 5") {
+		t.Fatalf("error %q does not name the ceiling", st.Message())
+	}
+}
+
+func TestSimulateWorkflow_RejectsOverLimitRetryPolicy(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	engine := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+
+	node := retryTestNode("rest1", &avsproto.RetryPolicy{MaxAttempts: 100, BackoffMs: 60000}, restTestNode())
+	_, err := engine.SimulateWorkflow(&model.User{}, &avsproto.TaskTrigger{
+		TriggerType: &avsproto.TaskTrigger_Manual{Manual: &avsproto.ManualTrigger{}},
+	}, []*avsproto.TaskNode{node}, nil, map[string]interface{}{
+		"settings": map[string]interface{}{
+			"name":   "retry-sim",
+			"runner": "0x0000000000000000000000000000000000000001",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected simulate to reject an over-limit retry_policy")
+	}
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.InvalidArgument {
+		t.Fatalf("expected InvalidArgument, got %v", err)
+	}
+	if !strings.Contains(st.Message(), "above the maximum of 5") {
+		t.Fatalf("error %q does not name the ceiling", st.Message())
 	}
 }
 
