@@ -65,6 +65,9 @@ type ServerInterface interface {
 	// Evaluate a trigger definition with inline input
 	// (POST /triggers:run)
 	RunTrigger(ctx echo.Context) error
+	// Look up a UserOp this user submitted
+	// (GET /userops/{userOpHash})
+	GetUserOp(ctx echo.Context, userOpHash Bytes32, params GetUserOpParams) error
 	// List the authenticated user's smart wallets
 	// (GET /wallets)
 	ListWallets(ctx echo.Context, params ListWalletsParams) error
@@ -504,6 +507,33 @@ func (w *ServerInterfaceWrapper) RunTrigger(ctx echo.Context) error {
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.RunTrigger(ctx)
+	return err
+}
+
+// GetUserOp converts echo context to params.
+func (w *ServerInterfaceWrapper) GetUserOp(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "userOpHash" -------------
+	var userOpHash Bytes32
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userOpHash", ctx.Param("userOpHash"), &userOpHash, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter userOpHash: %s", err))
+	}
+
+	ctx.Set(BearerAuthScopes, []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetUserOpParams
+	// ------------- Optional query parameter "chainId" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "chainId", ctx.QueryParams(), &params.ChainId)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter chainId: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetUserOp(ctx, userOpHash, params)
 	return err
 }
 
@@ -1021,6 +1051,7 @@ func RegisterHandlersWithBaseURL(router EchoRouter, si ServerInterface, baseURL 
 	router.PUT(baseURL+"/secrets/:name", wrapper.PutSecret)
 	router.GET(baseURL+"/tokens/:address", wrapper.GetToken)
 	router.POST(baseURL+"/triggers:run", wrapper.RunTrigger)
+	router.GET(baseURL+"/userops/:userOpHash", wrapper.GetUserOp)
 	router.GET(baseURL+"/wallets", wrapper.ListWallets)
 	router.POST(baseURL+"/wallets", wrapper.CreateWallet)
 	router.PATCH(baseURL+"/wallets/:address", wrapper.UpdateWallet)
@@ -1645,6 +1676,57 @@ type RunTrigger401ApplicationProblemPlusJSONResponse struct {
 func (response RunTrigger401ApplicationProblemPlusJSONResponse) VisitRunTriggerResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetUserOpRequestObject struct {
+	UserOpHash Bytes32 `json:"userOpHash"`
+	Params     GetUserOpParams
+}
+
+type GetUserOpResponseObject interface {
+	VisitGetUserOpResponse(w http.ResponseWriter) error
+}
+
+type GetUserOp200JSONResponse UserOpStatusResponse
+
+func (response GetUserOp200JSONResponse) VisitGetUserOpResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetUserOp400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetUserOp400ApplicationProblemPlusJSONResponse) VisitGetUserOpResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetUserOp401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetUserOp401ApplicationProblemPlusJSONResponse) VisitGetUserOpResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetUserOp404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetUserOp404ApplicationProblemPlusJSONResponse) VisitGetUserOpResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -2699,6 +2781,9 @@ type StrictServerInterface interface {
 	// Evaluate a trigger definition with inline input
 	// (POST /triggers:run)
 	RunTrigger(ctx context.Context, request RunTriggerRequestObject) (RunTriggerResponseObject, error)
+	// Look up a UserOp this user submitted
+	// (GET /userops/{userOpHash})
+	GetUserOp(ctx context.Context, request GetUserOpRequestObject) (GetUserOpResponseObject, error)
 	// List the authenticated user's smart wallets
 	// (GET /wallets)
 	ListWallets(ctx context.Context, request ListWalletsRequestObject) (ListWalletsResponseObject, error)
@@ -3196,6 +3281,32 @@ func (sh *strictHandler) RunTrigger(ctx echo.Context) error {
 		return err
 	} else if validResponse, ok := response.(RunTriggerResponseObject); ok {
 		return validResponse.VisitRunTriggerResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetUserOp operation middleware
+func (sh *strictHandler) GetUserOp(ctx echo.Context, userOpHash Bytes32, params GetUserOpParams) error {
+	var request GetUserOpRequestObject
+
+	request.UserOpHash = userOpHash
+	request.Params = params
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetUserOp(ctx.Request().Context(), request.(GetUserOpRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetUserOp")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetUserOpResponseObject); ok {
+		return validResponse.VisitGetUserOpResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}

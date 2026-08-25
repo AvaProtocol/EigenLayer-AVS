@@ -82,6 +82,7 @@ const (
 	OpGetToken = "getToken"
 
 	OpRunNode    = "runNode"
+	OpGetUserOp  = "getUserOp"
 	OpRunTrigger = "runTrigger"
 
 	OpListOperators = "listOperators"
@@ -103,6 +104,7 @@ var permissionMap = map[string]Level{
 	// Simulate family: user JWT only (partner alone insufficient).
 	OpSimulateWorkflow: LevelUser,
 	OpRunNode:          LevelUser,
+	OpGetUserOp:        LevelUser,
 	OpRunTrigger:       LevelUser,
 
 	// User-owned workflows / executions / secrets / wallet fund surface.

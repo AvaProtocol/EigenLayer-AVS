@@ -3,7 +3,6 @@ package aggregator
 import (
 	"bytes"
 	"embed"
-	"fmt"
 	"text/template"
 
 	"context"
@@ -69,7 +68,7 @@ func (agg *Aggregator) startHttpServer(ctx context.Context, extraMounts []HTTPMo
 
 		agg.logger.Infof("Sentry ServerName from config: %s", serverName)
 
-		release := fmt.Sprintf("%s@%s", version.Get(), version.GetRevision())
+		release := version.SentryRelease()
 
 		// Sentry's `environment` tag is driven from config so that
 		// feature-branch / staging deployments don't bucket into the

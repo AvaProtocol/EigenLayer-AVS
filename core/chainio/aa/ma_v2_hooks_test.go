@@ -134,4 +134,12 @@ func TestWrapExecuteUserOp(t *testing.T) {
 	if _, err := WrapExecuteUserOp([]byte{0x01}); err == nil {
 		t.Error("expected sub-selector calldata to be rejected")
 	}
+
+	unwrapped := UnwrapExecuteUserOp(wrapped)
+	if !bytes.Equal(unwrapped, inner) {
+		t.Fatal("UnwrapExecuteUserOp did not restore inner execute calldata")
+	}
+	if !bytes.Equal(UnwrapExecuteUserOp(inner), inner) {
+		t.Fatal("UnwrapExecuteUserOp must leave unwrapped execute calldata unchanged")
+	}
 }

@@ -124,6 +124,15 @@ func TestAtomicBatchOnDemand(t *testing.T) {
 		assert.Equal(t, true, results[1]["success"])
 		assert.True(t, step.Success)
 
+		// N14.a: each sub-call receipt carries the full unpacked batch, not
+		// only that method's inner calldata.
+		calls0, ok := receipt0["calls"].([]interface{})
+		require.True(t, ok)
+		require.Len(t, calls0, 2)
+		assert.Equal(t, tokenA.Hex(), calls0[0].(map[string]interface{})["to"])
+		assert.Equal(t, tokenB.Hex(), calls0[1].(map[string]interface{})["to"])
+		assert.Equal(t, receipt0["calls"], receipt1["calls"])
+
 		// The two results share one on-chain receipt (gasUsed 21000), so step gas must be counted
 		// once — not summed per sub-call. Guards against the fan-out double-counting gas.
 		assert.Equal(t, "21000", step.GasUsed, "batch gas must be counted once across sub-calls, not 2x")

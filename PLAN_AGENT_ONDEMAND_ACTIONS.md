@@ -176,6 +176,7 @@ The deployed-task executor adds a platform `executionFeeWei` batch transfer ([ex
 2. ✅ **G5 (idempotency)** — shipped: `Idempotency-Key` header dedupes retries/double-clicks. (commit `feat(taskengine): idempotent nodes:run via Idempotency-Key header`)
 3. ✅ **G4 (atomic batch)** — shipped: on-demand multi-call real execution submits one `executeBatch` UserOp, composes with the reimbursement wrapper, gated on the run-node route. Heterogeneous targets via a per-call `contract_address`.
 4. ✅ **G7 (fee)** — decided fee-free for v1 (confirmed); monetization is a separate design (see G7 analysis).
+5. 🟡 **N14.a typed inner calls + status GET** — `receipt.calls` from `UnpackExecuteCalldata` on pending and mined `nodes:run` results; JWT-gated `GET /userops/{userOpHash}` (sender must be the caller's wallet). Branch `feat/userop-unwrap`.
 
 Deferred (later hardening): server-side spend/fund-authorization policy; fee monetization (G7).
 

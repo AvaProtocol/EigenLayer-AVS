@@ -31,6 +31,20 @@ func TestUnpackExecuteCalldata_Roundtrip(t *testing.T) {
 		assert.True(t, bytes.Equal(dataA, datas[0]))
 	})
 
+	t.Run("executeUserOp-wrapped execute -> one entry", func(t *testing.T) {
+		packed, err := PackExecute(tokenA, big.NewInt(7), dataA)
+		require.NoError(t, err)
+		wrapped, err := WrapExecuteUserOp(packed)
+		require.NoError(t, err)
+
+		targets, values, datas, err := UnpackExecuteCalldata(wrapped)
+		require.NoError(t, err)
+		require.Len(t, targets, 1)
+		assert.Equal(t, tokenA, targets[0])
+		assert.Equal(t, int64(7), values[0].Int64())
+		assert.True(t, bytes.Equal(dataA, datas[0]))
+	})
+
 	t.Run("executeBatch -> N entries, values default to 0", func(t *testing.T) {
 		packed, err := PackExecuteBatch([]common.Address{tokenA, router}, [][]byte{dataA, dataB})
 		require.NoError(t, err)
