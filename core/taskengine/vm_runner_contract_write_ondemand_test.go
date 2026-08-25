@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
@@ -78,7 +79,7 @@ func TestCreateRealTransactionResultExecutionStatus(t *testing.T) {
 	}
 
 	t.Run("mined success -> confirmed", func(t *testing.T) {
-		mr := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, minedReceipt(1))
+		mr := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, minedReceipt(1), nil)
 		assert.True(t, mr.Success)
 		assert.Empty(t, mr.Error)
 		rm := receiptMapOf(t, mr)
@@ -87,7 +88,7 @@ func TestCreateRealTransactionResultExecutionStatus(t *testing.T) {
 	})
 
 	t.Run("mined revert -> failed", func(t *testing.T) {
-		mr := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, minedReceipt(0))
+		mr := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, minedReceipt(0), nil)
 		assert.False(t, mr.Success)
 		assert.NotEmpty(t, mr.Error)
 		rm := receiptMapOf(t, mr)
@@ -95,7 +96,7 @@ func TestCreateRealTransactionResultExecutionStatus(t *testing.T) {
 	})
 
 	t.Run("submitted but not mined -> pending, not failure", func(t *testing.T) {
-		mr := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, nil)
+		mr := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, nil, nil)
 		assert.False(t, mr.Success, "pending is not confirmed-success")
 		assert.Empty(t, mr.Error, "pending must not be reported as an error")
 		rm := receiptMapOf(t, mr)
@@ -103,6 +104,78 @@ func TestCreateRealTransactionResultExecutionStatus(t *testing.T) {
 		assert.Equal(t, "pending", rm["transactionHash"])
 		assert.NotEmpty(t, rm["userOpHash"], "pending result must carry a userOpHash to poll")
 	})
+
+	t.Run("packed execute stamps inner calls on pending and mined", func(t *testing.T) {
+		inner := common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8")
+		packed, err := aa.PackExecute(contractAddr, big.NewInt(0), inner)
+		require.NoError(t, err)
+
+		pending := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, nil, packed)
+		pendingMap := receiptMapOf(t, pending)
+		assert.Equal(t, "pending", pendingMap["executionStatus"])
+		calls, ok := pendingMap["calls"].([]interface{})
+		require.True(t, ok)
+		require.Len(t, calls, 1)
+		call0 := calls[0].(map[string]interface{})
+		assert.Equal(t, contractAddr.Hex(), call0["to"])
+		assert.Equal(t, "0xa9059cbb", call0["selector"])
+		assert.Equal(t, "0", call0["value"])
+		_, hasFailed := pendingMap["failedCall"]
+		assert.False(t, hasFailed)
+
+		mined := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, minedReceipt(1), packed)
+		minedMap := receiptMapOf(t, mined)
+		assert.Equal(t, "confirmed", minedMap["executionStatus"])
+		minedCalls := minedMap["calls"].([]interface{})
+		require.Len(t, minedCalls, 1)
+		assert.Equal(t, contractAddr.Hex(), minedCalls[0].(map[string]interface{})["to"])
+
+		outerFail := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, minedReceipt(0), packed)
+		outerMap := receiptMapOf(t, outerFail)
+		assert.Equal(t, "failed", outerMap["executionStatus"])
+		assert.NotEmpty(t, outerMap["calls"])
+		_, hasFailed = outerMap["failedCall"]
+		assert.False(t, hasFailed, "outer tx failure is not an inner revert")
+
+		innerFail := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, userOpInnerFailReceipt(), packed)
+		innerMap := receiptMapOf(t, innerFail)
+		assert.Equal(t, "failed", innerMap["executionStatus"])
+		failedCall, ok := innerMap["failedCall"].(map[string]interface{})
+		require.True(t, ok, "observed inner revert names failedCall")
+		assert.Equal(t, contractAddr.Hex(), failedCall["to"])
+		assert.Equal(t, "0xa9059cbb", failedCall["selector"])
+	})
+
+	t.Run("sibling UserOp event does not stamp failedCall", func(t *testing.T) {
+		inner := common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8")
+		packed, err := aa.PackExecute(contractAddr, big.NewInt(0), inner)
+		require.NoError(t, err)
+		ours := common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
+		other := common.HexToHash("0x2222222222222222222222222222222222222222222222222222222222222222")
+		userOp.UserOpHash = ours
+		rec := minedReceipt(1)
+		topic := common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f")
+		rec.Logs = []*types.Log{{
+			Topics: []common.Hash{topic, other, common.Hash{}},
+			Data:   make([]byte, 128), // sibling inner fail
+		}}
+		mr := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, rec, packed)
+		assert.True(t, mr.Success)
+		rm := receiptMapOf(t, mr)
+		assert.Equal(t, "confirmed", rm["executionStatus"])
+		_, hasFailed := rm["failedCall"]
+		assert.False(t, hasFailed)
+	})
+}
+
+func userOpInnerFailReceipt() *types.Receipt {
+	r := minedReceipt(1)
+	topic := common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f")
+	r.Logs = []*types.Log{{
+		Topics: []common.Hash{topic, common.Hash{}, common.Hash{}},
+		Data:   make([]byte, 128), // success word at bytes 32-64 is zero
+	}}
+	return r
 }
 
 // G1: the real UserOp path must forward the node's native ETH value into the

@@ -56,6 +56,8 @@ tags:
     description: ERC-20 metadata lookup
   - name: Nodes
     description: Stand-alone node execution
+  - name: UserOps
+    description: Status lookup for UserOps this user submitted (not a public AA explorer)
   - name: Triggers
     description: Stand-alone trigger evaluation
   - name: Operators
@@ -146,6 +148,58 @@ components:
       type: string
       pattern: '^0x[a-fA-F0-9]*$'
       description: Arbitrary-length hex-encoded byte string.
+
+    Bytes32:
+      type: string
+      pattern: '^0x[a-fA-F0-9]{64}$'
+      description: 32-byte hex hash (UserOp hash, transaction hash).
+      example: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+
+    UserOpInnerCall:
+      type: object
+      required: [to, value, selector, data]
+      properties:
+        to:
+          $ref: '#/components/schemas/EthereumAddress'
+        value:
+          type: string
+          description: Native value in wei (decimal string).
+        selector:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{8}$'
+          description: 4-byte function selector of `data` (`0x00000000` for a value-only call).
+        data:
+          $ref: '#/components/schemas/Hex'
+
+    UserOpStatusResponse:
+      type: object
+      required: [userOpHash, executionStatus]
+      properties:
+        userOpHash:
+          $ref: '#/components/schemas/Bytes32'
+        sender:
+          $ref: '#/components/schemas/EthereumAddress'
+        executionStatus:
+          type: string
+          enum: [pending, confirmed, failed]
+          description: |
+            `pending` means the bundler accepted the op and it is not yet
+            mined. It is not a failure.
+        transactionHash:
+          $ref: '#/components/schemas/Hex'
+        blockNumber:
+          type: string
+          description: Block number as a hex string when mined.
+        success:
+          type: boolean
+          description: Inner UserOp success from the bundler receipt. Absent while pending.
+        calls:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserOpInnerCall'
+        failedCall:
+          $ref: '#/components/schemas/UserOpInnerCall'
+          description: Present when the inner call reverted and there is a single inner call.
 
     Ulid:
       type: string
@@ -2909,6 +2963,40 @@ paths:
               schema: { $ref: '#/components/schemas/RunNodeResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /userops/{userOpHash}:
+    get:
+      tags: [UserOps]
+      summary: Look up a UserOp this user submitted
+      description: |
+        Re-poll a UserOp by hash (G3 / N14.a). Same gate as `nodes:run`
+        (user Bearer JWT; partner assertion alone is not sufficient). The
+        sender must be one of the caller's smart wallets — this is **not**
+        a public AA explorer. Unknown hashes and hashes that belong to
+        another user both return 404.
+
+        Inner `calls` are unpacked from the UserOp `callData` via the
+        gateway's existing `UnpackExecuteCalldata` (execute / executeBatch
+        / MA v2). Pending is not failed.
+      operationId: getUserOp
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userOpHash
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Bytes32'
+        - $ref: '#/components/parameters/ChainIdQuery'
+      responses:
+        '200':
+          description: Typed UserOp status and inner calls.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserOpStatusResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /triggers:run:
     post:

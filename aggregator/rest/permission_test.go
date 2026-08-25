@@ -20,6 +20,7 @@ var expectedPermissionLevels = map[string]Level{
 
 	OpSimulateWorkflow: LevelUser,
 	OpRunNode:          LevelUser,
+	OpGetUserOp:        LevelUser,
 	OpRunTrigger:       LevelUser,
 
 	OpCreateWorkflow:            LevelUser,
@@ -125,6 +126,8 @@ func TestEnsurePermission_SimulateRequiresUserJWT(t *testing.T) {
 		_, err := s.ensurePermission(ctxWithAssertion(signAssertion(t, priv, validClaims())), OpSimulateWorkflow)
 		assertHTTPStatus(t, err, http.StatusUnauthorized)
 		_, err = s.ensurePermission(ctxWithAssertion(signAssertion(t, priv, validClaims())), OpRunNode)
+		assertHTTPStatus(t, err, http.StatusUnauthorized)
+		_, err = s.ensurePermission(ctxWithAssertion(signAssertion(t, priv, validClaims())), OpGetUserOp)
 		assertHTTPStatus(t, err, http.StatusUnauthorized)
 	})
 

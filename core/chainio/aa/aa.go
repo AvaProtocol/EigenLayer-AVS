@@ -367,6 +367,7 @@ func PackExecuteBatchWithValues(targetAddresses []common.Address, values []*big.
 // It is the inverse the paymaster reimbursement wrapper needs to append its own batch entries onto
 // an already-batched call without having to know how that call was originally packed.
 func UnpackExecuteCalldata(calldata []byte) (targets []common.Address, values []*big.Int, datas [][]byte, err error) {
+	calldata = UnwrapExecuteUserOp(calldata)
 	if len(calldata) < 4 {
 		return nil, nil, nil, fmt.Errorf("calldata too short: %d bytes", len(calldata))
 	}
