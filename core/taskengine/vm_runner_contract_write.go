@@ -1448,8 +1448,13 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 				"topics_count", len(log.Topics),
 				"data_length", len(log.Data))
 
-			// If this is a UserOperationEvent, decode the success field
-			if len(log.Topics) > 0 && log.Topics[0] == userOpEventTopic {
+			// If this is a UserOperationEvent for THIS UserOp, decode success.
+			// Bundlers can include multiple UserOps in one handleOps tx; topics[1]
+			// is the indexed userOpHash. Ignore sibling events.
+			if len(log.Topics) > 1 && log.Topics[0] == userOpEventTopic {
+				if userOp == nil || log.Topics[1] != userOp.UserOpHash {
+					continue
+				}
 				foundUserOpEvent = true
 				// UserOperationEvent(bytes32 indexed userOpHash, address indexed sender, address indexed paymaster, uint256 nonce, bool success, uint256 actualGasCost, uint256 actualGasUsed)
 				// Data contains: nonce (32 bytes), success (32 bytes), actualGasCost (32 bytes), actualGasUsed (32 bytes)

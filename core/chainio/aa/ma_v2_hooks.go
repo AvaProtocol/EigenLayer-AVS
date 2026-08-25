@@ -1,6 +1,7 @@
 package aa
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 	"sync"
@@ -224,4 +225,16 @@ func WrapExecuteUserOp(execCallData []byte) ([]byte, error) {
 		return nil, fmt.Errorf("execution calldata is %d bytes, shorter than a selector", len(execCallData))
 	}
 	return append(selectorExecuteUserOp[:], execCallData...), nil
+}
+
+// UnwrapExecuteUserOp strips a leading executeUserOp selector if present.
+// The send path prepends that selector when a grant has execution hooks
+// (WrapExecuteUserOp); bundler eth_getUserOperationByHash then returns the
+// wrapped bytes. Callers that unpack execute/executeBatch must strip first.
+// Unwrapped calldata is returned unchanged.
+func UnwrapExecuteUserOp(callData []byte) []byte {
+	if len(callData) >= 4 && bytes.Equal(callData[:4], selectorExecuteUserOp[:]) {
+		return callData[4:]
+	}
+	return callData
 }

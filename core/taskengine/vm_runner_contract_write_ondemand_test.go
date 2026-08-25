@@ -145,6 +145,27 @@ func TestCreateRealTransactionResultExecutionStatus(t *testing.T) {
 		assert.Equal(t, contractAddr.Hex(), failedCall["to"])
 		assert.Equal(t, "0xa9059cbb", failedCall["selector"])
 	})
+
+	t.Run("sibling UserOp event does not stamp failedCall", func(t *testing.T) {
+		inner := common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8")
+		packed, err := aa.PackExecute(contractAddr, big.NewInt(0), inner)
+		require.NoError(t, err)
+		ours := common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
+		other := common.HexToHash("0x2222222222222222222222222222222222222222222222222222222222222222")
+		userOp.UserOpHash = ours
+		rec := minedReceipt(1)
+		topic := common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f")
+		rec.Logs = []*types.Log{{
+			Topics: []common.Hash{topic, other, common.Hash{}},
+			Data:   make([]byte, 128), // sibling inner fail
+		}}
+		mr := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, rec, packed)
+		assert.True(t, mr.Success)
+		rm := receiptMapOf(t, mr)
+		assert.Equal(t, "confirmed", rm["executionStatus"])
+		_, hasFailed := rm["failedCall"]
+		assert.False(t, hasFailed)
+	})
 }
 
 func userOpInnerFailReceipt() *types.Receipt {

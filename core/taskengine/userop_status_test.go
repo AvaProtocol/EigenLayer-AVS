@@ -166,6 +166,22 @@ func TestLookupUserOpStatus(t *testing.T) {
 		},
 	}
 
+	t.Run("executeUserOp-wrapped calldata still unpacks calls", func(t *testing.T) {
+		wrapped, err := aa.WrapExecuteUserOp(packedTransfer(t, token))
+		require.NoError(t, err)
+		installMockBundler(t, &mockUserOpBundler{op: map[string]interface{}{
+			"userOperation": map[string]interface{}{
+				"sender":   sender.Hex(),
+				"callData": "0x" + common.Bytes2Hex(wrapped),
+			},
+		}})
+		got, err := engine.LookupUserOpStatus(context.Background(), user, lookupHash, 11155111)
+		require.NoError(t, err)
+		require.Len(t, got.Calls, 1)
+		assert.Equal(t, token.Hex(), got.Calls[0].To)
+		assert.Equal(t, "0xa9059cbb", got.Calls[0].Selector)
+	})
+
 	t.Run("pending when receipt is null", func(t *testing.T) {
 		installMockBundler(t, &mockUserOpBundler{op: op})
 		got, err := engine.LookupUserOpStatus(context.Background(), user, lookupHash, 11155111)

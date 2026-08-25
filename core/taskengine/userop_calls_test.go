@@ -26,6 +26,22 @@ func TestInnerCallsFromExecuteCalldata_Execute(t *testing.T) {
 	assert.Equal(t, "0x095ea7b3010203", calls[0].Data)
 }
 
+func TestInnerCallsFromExecuteCalldata_ExecuteUserOpWrapped(t *testing.T) {
+	token := common.HexToAddress("0xaaaa000000000000000000000000000000000001")
+	data := []byte{0x09, 0x5e, 0xa7, 0xb3, 0x01, 0x02, 0x03}
+	packed, err := aa.PackExecute(token, big.NewInt(7), data)
+	require.NoError(t, err)
+	wrapped, err := aa.WrapExecuteUserOp(packed)
+	require.NoError(t, err)
+
+	calls, err := InnerCallsFromExecuteCalldata(wrapped)
+	require.NoError(t, err)
+	require.Len(t, calls, 1)
+	assert.Equal(t, token.Hex(), calls[0].To)
+	assert.Equal(t, "7", calls[0].Value)
+	assert.Equal(t, "0x095ea7b3", calls[0].Selector)
+}
+
 func TestInnerCallsFromExecuteCalldata_ExecuteBatch(t *testing.T) {
 	token := common.HexToAddress("0xaaaa000000000000000000000000000000000001")
 	router := common.HexToAddress("0xbbbb000000000000000000000000000000000002")
