@@ -184,13 +184,8 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 	// duplicate MonitorTaskTrigger messages or direct re-enable).
 	if existing, exists := t.registry.GetTask(taskID); exists {
 		if existing.TimeData != nil {
-			for _, job := range existing.TimeData.Jobs {
-				if job != nil {
-					if err := t.scheduler.RemoveJob(job.ID()); err != nil {
-						t.logger.Warn("failed to remove existing job during AddCheck cleanup",
-							"task_id", taskID, "error", err)
-					}
-				}
+			for i, job := range existing.TimeData.Jobs {
+				t.removeSchedulerJob(taskID, i, job)
 			}
 		}
 		t.registry.RemoveTask(taskID)
@@ -317,16 +312,27 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 	return nil
 }
 
-// RemoveCheck removes a scheduled job associated with the given taskID.
-// It locks the mutex to ensure thread-safe access to the jobs map, checks if
-// a job exists for the provided taskID, and removes it from the scheduler and
-// the jobs map. If the job does not exist, the method does nothing.
-//
-// Parameters:
-// - taskID: The unique identifier of the task whose associated job should be removed.
-//
-// Returns:
-// - An error if the job removal from the scheduler fails. The error is logged but not returned.
+// removeSchedulerJob drops a gocron job. Caller must hold t.mu.
+// Nil job/scheduler, t.shutdown, and ErrJobNotFound are no-ops (the
+// job is already gone). Other RemoveJob errors log Error (Sentry).
+func (t *TimeTrigger) removeSchedulerJob(taskID string, jobIndex int, job gocron.Job) {
+	if job == nil || t.scheduler == nil || t.shutdown {
+		return
+	}
+	if err := t.scheduler.RemoveJob(job.ID()); err != nil {
+		if errors.Is(err, gocron.ErrJobNotFound) {
+			t.logger.Debug("scheduler job already removed",
+				"task_id", taskID, "job_index", jobIndex)
+			return
+		}
+		t.logger.Error("failed to remove job",
+			"task_id", taskID, "job_index", jobIndex, "error", err)
+	}
+}
+
+// RemoveCheck removes scheduled jobs for taskID from gocron and the registry.
+// Missing tasks and already-removed jobs are no-ops. Always returns nil;
+// scheduler failures are logged rather than propagated.
 func (t *TimeTrigger) RemoveCheck(taskID string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -341,21 +347,9 @@ func (t *TimeTrigger) RemoveCheck(taskID string) error {
 		return nil
 	}
 
-	// Limited-run jobs delete themselves after firing, so ErrJobNotFound
-	// is already-gone. Warn rather than Error so it does not page Sentry.
-	if task.TimeData != nil && len(task.TimeData.Jobs) > 0 {
+	if task.TimeData != nil {
 		for i, job := range task.TimeData.Jobs {
-			if job != nil {
-				if err := t.scheduler.RemoveJob(job.ID()); err != nil {
-					if errors.Is(err, gocron.ErrJobNotFound) {
-						t.logger.Warn("scheduler job already removed",
-							"task_id", taskID, "job_index", i, "error", err)
-					} else {
-						t.logger.Error("failed to remove job",
-							"task_id", taskID, "job_index", i, "error", err)
-					}
-				}
-			}
+			t.removeSchedulerJob(taskID, i, job)
 		}
 	}
 
@@ -374,19 +368,21 @@ func (t *TimeTrigger) Run(ctx context.Context) error {
 	t.scheduler.Start()
 
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				if err := t.scheduler.Shutdown(); err != nil {
-					t.logger.Error("failed to shutdown scheduler on context done", "error", err)
-				}
-				return
-			case <-t.done:
-				if err := t.scheduler.Shutdown(); err != nil {
-					t.logger.Error("failed to shutdown scheduler on done signal", "error", err)
-				}
-				return
-			}
+		select {
+		case <-ctx.Done():
+		case <-t.done:
+		}
+		// Mark closed before Shutdown so concurrent RemoveCheck skips
+		// gocron instead of racing a stopped scheduler (EIGENLAYER-AVS-37).
+		t.mu.Lock()
+		t.shutdown = true
+		sched := t.scheduler
+		t.mu.Unlock()
+		if sched == nil {
+			return
+		}
+		if err := sched.Shutdown(); err != nil {
+			t.logger.Error("failed to shutdown scheduler", "error", err)
 		}
 	}()
 
