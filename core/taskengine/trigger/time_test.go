@@ -1,6 +1,7 @@
 package trigger
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -231,17 +232,10 @@ func (l *recordingLogger) snapshot() (warns, errors []string) {
 	return append([]string(nil), l.warns...), append([]string(nil), l.errors...)
 }
 
-// TestTimeTrigger_RemoveCheck_AlreadyRemovedJob covers the EIGENLAYER-AVS-37
-// path: the task is still in the registry but gocron already dropped the job
-// (FixedTime WithLimitedRuns(1) after fire, or a prior RemoveJob). RemoveCheck
-// must return nil and log Warn, not Error.
-func TestTimeTrigger_RemoveCheck_AlreadyRemovedJob(t *testing.T) {
-	triggerCh := make(chan TriggerMetadata[uint64], 10)
-	logger := &recordingLogger{}
-	timeTrigger := NewTimeTrigger(triggerCh, logger)
-
-	taskMetadata := &avsproto.SyncMessagesResp_TaskMetadata{
-		TaskId: "test-already-removed-job",
+func cronTaskMetadata(taskID string) *avsproto.SyncMessagesResp_TaskMetadata {
+	return &avsproto.SyncMessagesResp_TaskMetadata{
+		TaskId:  taskID,
+		StartAt: time.Now().UnixMilli(),
 		Trigger: &avsproto.TaskTrigger{
 			TriggerType: &avsproto.TaskTrigger_Cron{
 				Cron: &avsproto.CronTrigger{
@@ -252,8 +246,18 @@ func TestTimeTrigger_RemoveCheck_AlreadyRemovedJob(t *testing.T) {
 			},
 		},
 	}
+}
 
-	err := timeTrigger.AddCheck(taskMetadata)
+// TestTimeTrigger_RemoveCheck_AlreadyRemovedJob covers the EIGENLAYER-AVS-37
+// path: the task is still in the registry but gocron already dropped the job
+// (FixedTime WithLimitedRuns(1) after fire, or a prior RemoveJob). RemoveCheck
+// must return nil and not log Warn/Error — already-absent is the desired state.
+func TestTimeTrigger_RemoveCheck_AlreadyRemovedJob(t *testing.T) {
+	triggerCh := make(chan TriggerMetadata[uint64], 10)
+	logger := &recordingLogger{}
+	timeTrigger := NewTimeTrigger(triggerCh, logger)
+
+	err := timeTrigger.AddCheck(cronTaskMetadata("test-already-removed-job"))
 	require.NoError(t, err)
 
 	task, exists := timeTrigger.registry.GetTask("test-already-removed-job")
@@ -273,8 +277,58 @@ func TestTimeTrigger_RemoveCheck_AlreadyRemovedJob(t *testing.T) {
 
 	warns, errors := logger.snapshot()
 	assert.Empty(t, errors, "already-removed jobs must not log Error (that pages Sentry)")
-	require.NotEmpty(t, warns)
-	assert.Contains(t, warns, "scheduler job already removed")
+	assert.Empty(t, warns, "already-removed jobs are a no-op, not a warning")
+}
+
+// TestTimeTrigger_RemoveCheck_AfterSchedulerShutdown covers runWorkLoop
+// calling RemoveCheck after TimeTrigger.Run has shut the gocron scheduler
+// down (ctx cancel). gocron.RemoveJob then returns ErrJobNotFound; that
+// must not page Sentry.
+func TestTimeTrigger_RemoveCheck_AfterSchedulerShutdown(t *testing.T) {
+	triggerCh := make(chan TriggerMetadata[uint64], 10)
+	logger := &recordingLogger{}
+	timeTrigger := NewTimeTrigger(triggerCh, logger)
+
+	err := timeTrigger.AddCheck(cronTaskMetadata("test-shutdown-remove"))
+	require.NoError(t, err)
+
+	err = timeTrigger.scheduler.Shutdown()
+	require.NoError(t, err)
+
+	err = timeTrigger.RemoveCheck("test-shutdown-remove")
+	require.NoError(t, err)
+	assert.Equal(t, 0, timeTrigger.registry.GetTimeTaskCount())
+
+	warns, errors := logger.snapshot()
+	assert.Empty(t, errors, "RemoveJob after Shutdown must not log Error")
+	assert.Empty(t, warns, "RemoveJob after Shutdown is a no-op")
+}
+
+func TestTimeTrigger_RemoveCheck_AfterRunContextCancel(t *testing.T) {
+	triggerCh := make(chan TriggerMetadata[uint64], 10)
+	logger := &recordingLogger{}
+	timeTrigger := NewTimeTrigger(triggerCh, logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	require.NoError(t, timeTrigger.Run(ctx))
+
+	err := timeTrigger.AddCheck(cronTaskMetadata("test-run-cancel-remove"))
+	require.NoError(t, err)
+
+	cancel()
+	require.Eventually(t, func() bool {
+		timeTrigger.mu.Lock()
+		defer timeTrigger.mu.Unlock()
+		return timeTrigger.shutdown
+	}, 2*time.Second, 10*time.Millisecond)
+
+	err = timeTrigger.RemoveCheck("test-run-cancel-remove")
+	require.NoError(t, err)
+	assert.Equal(t, 0, timeTrigger.registry.GetTimeTaskCount())
+
+	warns, errors := logger.snapshot()
+	assert.Empty(t, errors, "RemoveCheck after Run cancel must not log Error")
+	assert.Empty(t, warns, "closed-scheduler RemoveCheck is a no-op")
 }
 
 func TestTimeTrigger_LegacyMigration(t *testing.T) {
