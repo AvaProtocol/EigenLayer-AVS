@@ -90,15 +90,17 @@ const (
 
 // Chain ID constants
 const (
-	ChainIDEthereum         uint64 = 1
-	ChainIDSepolia          uint64 = 11155111
-	ChainIDBase             uint64 = 8453
-	ChainIDBaseSepolia      uint64 = 84532
-	ChainIDBNBMainnet       uint64 = 56
-	ChainIDArbitrumOne      uint64 = 42161
-	ChainIDOptimismMainnet  uint64 = 10
-	ChainIDUnichainMainnet  uint64 = 130
-	ChainIDRobinhoodMainnet uint64 = 4663
+	ChainIDEthereum           uint64 = 1
+	ChainIDSepolia            uint64 = 11155111
+	ChainIDBase               uint64 = 8453
+	ChainIDBaseSepolia        uint64 = 84532
+	ChainIDBNBMainnet         uint64 = 56
+	ChainIDArbitrumOne        uint64 = 42161
+	ChainIDOptimismMainnet    uint64 = 10
+	ChainIDUnichainMainnet    uint64 = 130
+	ChainIDRobinhoodMainnet   uint64 = 4663
+	ChainIDPolygonMainnet     uint64 = 137
+	ChainIDHyperliquidMainnet uint64 = 999
 )
 
 // Native token sentinel address used by Moralis and other services
@@ -114,16 +116,29 @@ func isNativeToken(address string) bool {
 	return strings.ToLower(address) == NativeTokenAddress
 }
 
-// getNativeTokenMetadata returns metadata for native token (ETH)
-// Same metadata across all Ethereum-based chains
-func getNativeTokenMetadata() *TokenMetadata {
-	return &TokenMetadata{
+// nativeTokenMetadataForChain returns metadata for the native gas token
+// on chainID. ETH-native chains (and unknown IDs) return Ether; BNB, POL,
+// and HYPE are the named exceptions.
+func nativeTokenMetadataForChain(chainID uint64) *TokenMetadata {
+	meta := &TokenMetadata{
 		Id:       NativeTokenAddress,
 		Name:     "Ether",
 		Symbol:   "ETH",
 		Decimals: 18,
 		Source:   "native",
 	}
+	switch chainID {
+	case ChainIDBNBMainnet:
+		meta.Name = "BNB"
+		meta.Symbol = "BNB"
+	case ChainIDPolygonMainnet:
+		meta.Name = "POL"
+		meta.Symbol = "POL"
+	case ChainIDHyperliquidMainnet:
+		meta.Name = "HYPE"
+		meta.Symbol = "HYPE"
+	}
+	return meta
 }
 
 // NewTokenEnrichmentService creates a token enrichment service that talks
@@ -232,7 +247,7 @@ func whitelistFileForChain(chainID uint64) (filename string, skip bool) {
 		return "base-sepolia.json", false
 	case ChainIDBNBMainnet:
 		return "bnb-mainnet.json", false
-	case ChainIDArbitrumOne, ChainIDOptimismMainnet, ChainIDUnichainMainnet, ChainIDRobinhoodMainnet:
+	case ChainIDArbitrumOne, ChainIDOptimismMainnet, ChainIDUnichainMainnet, ChainIDRobinhoodMainnet, ChainIDPolygonMainnet, ChainIDHyperliquidMainnet:
 		return "", true
 	default:
 		// Unknown chain: skip, don't inherit Ethereum's list. A CREATE2
@@ -319,11 +334,11 @@ func (t *TokenEnrichmentService) GetTokenMetadata(contractAddress string) (*Toke
 
 	// Check if this is the native token sentinel address
 	if isNativeToken(normalizedAddr) {
+		metadata := nativeTokenMetadataForChain(t.chainID)
 		if t.logger != nil {
-			t.logger.Debug("Detected native token sentinel address, returning ETH metadata",
-				"address", normalizedAddr)
+			t.logger.Debug("Detected native token sentinel address",
+				"address", normalizedAddr, "symbol", metadata.Symbol, "chainID", t.chainID)
 		}
-		metadata := getNativeTokenMetadata()
 
 		// Cache it for consistency
 		t.cacheMux.Lock()

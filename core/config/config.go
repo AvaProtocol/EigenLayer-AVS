@@ -326,8 +326,7 @@ func (c *SmartWalletConfig) AccountProviderName() string {
 //     alchemy_requestGasAndPaymasterAndData against ActiveBundlerURL, which a
 //     self-hosted Voltaire endpoint does not implement. Sending it there fails
 //     the operation instead of sponsoring it, so a policy on a self_hosted
-//     chain is inert — bnb-mainnet is configured exactly that way today. Better
-//     to run self-funded, which is what that chain already did.
+//     chain is inert. Every production chain runs bundler_provider: alchemy.
 func (c *SmartWalletConfig) SponsorshipPolicyID() string {
 	if c == nil || c.DisableGasSponsorship {
 		return ""
@@ -435,6 +434,7 @@ var alchemyNetworkSubdomain = map[int64]string{
 	42161: "arb-mainnet",
 	10:    "opt-mainnet",
 	130:   "unichain-mainnet",
+	137:   "polygon-mainnet",
 	999:   "hyperliquid-mainnet",
 	4663:  "robinhood-mainnet",
 }

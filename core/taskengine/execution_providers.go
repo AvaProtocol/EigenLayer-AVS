@@ -37,6 +37,10 @@ func GetNetworkName(chainID int64) string {
 		return "unichain"
 	case ChainIDRobinhoodMainnet:
 		return "robinhood"
+	case ChainIDPolygonMainnet:
+		return "polygon"
+	case ChainIDHyperliquidMainnet:
+		return "hyperliquid"
 	default:
 		return "unknown"
 	}
