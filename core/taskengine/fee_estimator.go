@@ -598,6 +598,14 @@ func (fe *FeeEstimator) generateWarnings(cogs []*avsproto.NodeCOGS) []string {
 	return warnings
 }
 
+// nativeUsdPriceIsGuaranteedMissing is true when GetNativeTokenPriceUSD cannot
+// succeed for this chain: non-ETH native with no Moralis Data API source.
+// Callers must fail closed rather than proceed unbilled or skip credit checks.
+// BNB/POL have live Moralis pricing and stay fail-open on an outage.
+func nativeUsdPriceIsGuaranteedMissing(chainID int64) bool {
+	return uint64(chainID) == ChainIDHyperliquidMainnet
+}
+
 // ConvertUSDToWei converts a USD amount to Wei using the price service.
 // Used by the billing system to convert execution_fee (USD) to native token at execution time.
 func ConvertUSDToWei(usdAmount float64, priceService PriceService, chainID int64) (*big.Int, error) {

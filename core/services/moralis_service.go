@@ -281,6 +281,18 @@ func (ms *MoralisService) GetNativeTokenSymbol(chainID int64) string {
 	return "ETH" // Default fallback
 }
 
+// HasLiveNativeUsdPrice reports whether GetNativeTokenPriceUSD can obtain a
+// native USD price for chainID. Unmapped IDs and ETH-natives inherit the ETH
+// fallback. Non-ETH natives without a Moralis Data API source (Hyperliquid
+// HYPE today) return false — fee/credit callers must fail closed.
+func (ms *MoralisService) HasLiveNativeUsdPrice(chainID int64) bool {
+	tok, ok := getChainTokenMapping()[chainID]
+	if !ok || strings.EqualFold(tok.Symbol, "ETH") {
+		return true
+	}
+	return nativePricingSupportedChains[chainID]
+}
+
 // GetERC20PriceUSD fetches the USD price for an ERC20 contract on the given
 // chain. Returns an error when the price isn't available — callers render
 // "$?" rather than fabricate a number. No internal $1.00 / fallback.

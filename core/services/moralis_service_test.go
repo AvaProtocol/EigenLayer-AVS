@@ -142,3 +142,22 @@ func TestGetFallbackPriceRefusesNonETH(t *testing.T) {
 		t.Fatal("HYPE must not inherit the $2500 ETH fallback")
 	}
 }
+
+func TestHasLiveNativeUsdPrice(t *testing.T) {
+	ms := &MoralisService{chainTokens: getChainTokenMapping()}
+	if !ms.HasLiveNativeUsdPrice(1) {
+		t.Error("ETH mainnet must have a live/fallback native USD price")
+	}
+	if !ms.HasLiveNativeUsdPrice(56) {
+		t.Error("BNB has Moralis pricing")
+	}
+	if !ms.HasLiveNativeUsdPrice(137) {
+		t.Error("Polygon has Moralis pricing")
+	}
+	if !ms.HasLiveNativeUsdPrice(130) {
+		t.Error("Unichain is ETH-native and inherits the ETH fallback")
+	}
+	if ms.HasLiveNativeUsdPrice(999) {
+		t.Error("Hyperliquid HYPE has no Moralis source; callers must fail closed")
+	}
+}
