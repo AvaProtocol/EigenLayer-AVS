@@ -357,16 +357,24 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 
 	vm.WithLogger(x.logger).WithDb(x.db)
 
-	// Convert execution fee (USD) → Wei and set on VM for UserOp injection
-	if x.priceService != nil && x.engine.config.FeeRates != nil {
-		chainID := int64(0)
-		if x.smartWalletConfig != nil {
-			chainID = x.smartWalletConfig.ChainID
-		}
-		if feeWei, convErr := ConvertUSDToWei(x.engine.config.FeeRates.ExecutionFeeUSD, x.priceService, chainID); convErr == nil {
+	// Convert execution fee (USD) → Wei and set on VM for UserOp injection.
+	// Non-ETH natives with no live price source (Hyperliquid HYPE) must not
+	// proceed unbilled — that is the steady state, not an outage. BNB/POL
+	// still warn-and-proceed if Moralis is down.
+	var unbilledNativeErr error
+	feeChainID := int64(0)
+	if x.smartWalletConfig != nil {
+		feeChainID = x.smartWalletConfig.ChainID
+	}
+	if x.priceService != nil && x.engine != nil && x.engine.config != nil && x.engine.config.FeeRates != nil {
+		if feeWei, convErr := ConvertUSDToWei(x.engine.config.FeeRates.ExecutionFeeUSD, x.priceService, feeChainID); convErr == nil {
 			vm.executionFeeWei = feeWei
-			x.logger.Debug("Execution fee set on VM", "fee_wei", feeWei.String(), "fee_usd", x.engine.config.FeeRates.ExecutionFeeUSD)
-		} else {
+			if x.logger != nil {
+				x.logger.Debug("Execution fee set on VM", "fee_wei", feeWei.String(), "fee_usd", x.engine.config.FeeRates.ExecutionFeeUSD)
+			}
+		} else if nativeUsdPriceIsGuaranteedMissing(feeChainID) {
+			unbilledNativeErr = convErr
+		} else if x.logger != nil {
 			x.logger.Warn("Failed to convert execution fee to Wei, proceeding without fee", "error", convErr)
 		}
 	}
@@ -438,6 +446,14 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 		Error:   "",                                                // Will be populated if there are errors
 		Steps:   []*avsproto.Execution_Step{},                      // Will be populated during execution
 		Index:   executionIndex,                                    // Atomic execution index assignment
+	}
+
+	if unbilledNativeErr != nil {
+		execution.EndAt = time.Now().UnixMilli()
+		execution.Error = fmt.Sprintf("cannot price native token on chain %d: %v", feeChainID, unbilledNativeErr)
+		execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
+		x.persistFailedExecution(task, execution, initialTaskStatus)
+		return execution, nil
 	}
 
 	// Wallet validation - if this fails, we'll record the failure and return the execution record
@@ -545,6 +561,13 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 			var convErr error
 			creditLimitWei, convErr = ConvertUSDToWei(creditLimitUSD, x.priceService, chainID)
 			if convErr != nil {
+				if nativeUsdPriceIsGuaranteedMissing(chainID) {
+					execution.EndAt = time.Now().UnixMilli()
+					execution.Error = fmt.Sprintf("cannot convert credit limit to native wei on chain %d: %v", chainID, convErr)
+					execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
+					x.persistFailedExecution(task, execution, initialTaskStatus)
+					return execution, nil
+				}
 				x.logger.Warn("Failed to convert credit limit to Wei, skipping check", "error", convErr)
 				creditLimitWei = nil
 			}

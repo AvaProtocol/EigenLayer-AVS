@@ -593,6 +593,23 @@ func TestBalanceNode_ChainNormalization(t *testing.T) {
 			shouldError: true,
 		},
 		{
+			name:          "Polygon by chain ID",
+			inputChain:    "137",
+			expectedChain: "polygon",
+			shouldError:   false,
+		},
+		{
+			name:          "Polygon by name",
+			inputChain:    "polygon",
+			expectedChain: "polygon",
+			shouldError:   false,
+		},
+		{
+			name:        "Hyperliquid is not a Moralis Data API chain",
+			inputChain:  "999",
+			shouldError: true,
+		},
+		{
 			name:        "Unsupported chain",
 			inputChain:  "unsupported-chain",
 			shouldError: true,

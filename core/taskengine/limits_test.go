@@ -312,6 +312,12 @@ func TestBlockTimeForChain(t *testing.T) {
 	if got := blockTimeForChain(4663); got != 100*time.Millisecond {
 		t.Errorf("Robinhood block time = %v, want 100ms (must under-estimate, not use the 1s default)", got)
 	}
+	if got := blockTimeForChain(137); got != 2*time.Second {
+		t.Errorf("Polygon block time = %v, want 2s", got)
+	}
+	if got := blockTimeForChain(999); got != time.Second {
+		t.Errorf("Hyperliquid block time = %v, want 1s (small-block under-estimate)", got)
+	}
 	// An unlisted chain must fall back to the *strict* default, never a
 	// permissive one — overestimating block time would open a hole.
 	if got := blockTimeForChain(424242); got != defaultBlockTime {

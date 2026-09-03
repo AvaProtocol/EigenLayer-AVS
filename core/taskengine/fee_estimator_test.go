@@ -34,6 +34,21 @@ func (mock *mockPriceService) GetERC20PriceUSD(chainID int64, contractAddress st
 	return nil, fmt.Errorf("ERC20 price lookup not supported in tests")
 }
 
+func TestNativeUsdPriceIsGuaranteedMissing(t *testing.T) {
+	if nativeUsdPriceIsGuaranteedMissing(1) {
+		t.Error("ETH must not fail closed")
+	}
+	if nativeUsdPriceIsGuaranteedMissing(56) {
+		t.Error("BNB has Moralis; outage stay fail-open")
+	}
+	if nativeUsdPriceIsGuaranteedMissing(137) {
+		t.Error("Polygon has Moralis; outage stay fail-open")
+	}
+	if !nativeUsdPriceIsGuaranteedMissing(999) {
+		t.Error("Hyperliquid HYPE has no price source; must fail closed")
+	}
+}
+
 func TestFeeEstimator_ChainIDDetection(t *testing.T) {
 	logger, err := sdklogging.NewZapLogger(sdklogging.Development)
 	require.NoError(t, err)

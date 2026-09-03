@@ -104,8 +104,15 @@ var chainIDMap = map[string]string{
 	"op-mainnet": "optimism",
 	"10":         "optimism",
 	"0xa":        "optimism",
-	// Unichain is not in Moralis Data API — do not add aliases that would
-	// send "unichain" to Moralis and 400.
+
+	// Polygon PoS — Moralis slug "polygon"
+	"polygon":     "polygon",
+	"matic":       "polygon",
+	"polygon-pos": "polygon",
+	"137":         "polygon",
+	"0x89":        "polygon",
+	// Unichain / Robinhood / Hyperliquid are not in Moralis Data API —
+	// do not add aliases that would 400.
 }
 
 // normalizeChainID converts various chain identifier formats to Moralis chain name

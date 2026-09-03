@@ -18,8 +18,10 @@ func TestChainIDToMoralisChain(t *testing.T) {
 		{56, "bsc"},
 		{42161, "arbitrum"},
 		{10, "optimism"},
+		{137, "polygon"},
 		{130, ""},
 		{4663, ""},
+		{999, ""},
 	}
 	for _, tc := range cases {
 		if got := ms.chainIDToMoralisChain(tc.chainID); got != tc.want {
@@ -82,6 +84,39 @@ func TestGetChainTokenMappingWaveA(t *testing.T) {
 	if nativePricingSupportedChains[4663] {
 		t.Error("Robinhood must not be in nativePricingSupportedChains")
 	}
+
+	pol, ok := m[137]
+	if !ok {
+		t.Fatal("missing chain 137")
+	}
+	if pol.Symbol != "POL" || pol.Decimals != 18 {
+		t.Errorf("POL token = %+v", pol)
+	}
+	if !strings.EqualFold(pol.ContractAddr, "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270") {
+		t.Errorf("WPOL address = %s", pol.ContractAddr)
+	}
+	if !nativePricingSupportedChains[137] {
+		t.Error("Polygon must be in nativePricingSupportedChains")
+	}
+
+	hype, ok := m[999]
+	if !ok {
+		t.Fatal("missing chain 999 — HYPE must be in chainTokens so GetNativeTokenPriceUSD does not ETH-fallback")
+	}
+	if hype.Symbol != "HYPE" {
+		t.Errorf("HYPE token = %+v", hype)
+	}
+	if nativePricingSupportedChains[999] {
+		t.Error("Hyperliquid must not be in nativePricingSupportedChains until Moralis Data API lists 999")
+	}
+
+	ms := &MoralisService{chainTokens: m}
+	if got := ms.GetNativeTokenSymbol(137); got != "POL" {
+		t.Errorf("GetNativeTokenSymbol(137) = %q, want POL", got)
+	}
+	if got := ms.GetNativeTokenSymbol(999); got != "HYPE" {
+		t.Errorf("GetNativeTokenSymbol(999) = %q, want HYPE", got)
+	}
 }
 
 func TestGetFallbackPriceRefusesNonETH(t *testing.T) {
@@ -99,5 +134,30 @@ func TestGetFallbackPriceRefusesNonETH(t *testing.T) {
 	}
 	if _, err := ms.getFallbackPrice("bnb"); err == nil {
 		t.Fatal("bnb (lowercase) must not inherit the ETH fallback")
+	}
+	if _, err := ms.getFallbackPrice("POL"); err == nil {
+		t.Fatal("POL must not inherit the $2500 ETH fallback")
+	}
+	if _, err := ms.getFallbackPrice("HYPE"); err == nil {
+		t.Fatal("HYPE must not inherit the $2500 ETH fallback")
+	}
+}
+
+func TestHasLiveNativeUsdPrice(t *testing.T) {
+	ms := &MoralisService{chainTokens: getChainTokenMapping()}
+	if !ms.HasLiveNativeUsdPrice(1) {
+		t.Error("ETH mainnet must have a live/fallback native USD price")
+	}
+	if !ms.HasLiveNativeUsdPrice(56) {
+		t.Error("BNB has Moralis pricing")
+	}
+	if !ms.HasLiveNativeUsdPrice(137) {
+		t.Error("Polygon has Moralis pricing")
+	}
+	if !ms.HasLiveNativeUsdPrice(130) {
+		t.Error("Unichain is ETH-native and inherits the ETH fallback")
+	}
+	if ms.HasLiveNativeUsdPrice(999) {
+		t.Error("Hyperliquid HYPE has no Moralis source; callers must fail closed")
 	}
 }
