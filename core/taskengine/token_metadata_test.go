@@ -98,6 +98,14 @@ func TestWhitelistFileForChain(t *testing.T) {
 	if !skip || filename != "" {
 		t.Errorf("Robinhood whitelist = (%q, skip=%v), want skip", filename, skip)
 	}
+	filename, skip = whitelistFileForChain(ChainIDPolygonMainnet)
+	if !skip || filename != "" {
+		t.Errorf("Polygon whitelist = (%q, skip=%v), want skip", filename, skip)
+	}
+	filename, skip = whitelistFileForChain(ChainIDHyperliquidMainnet)
+	if !skip || filename != "" {
+		t.Errorf("Hyperliquid whitelist = (%q, skip=%v), want skip", filename, skip)
+	}
 }
 
 func TestIsNativeToken(t *testing.T) {
@@ -181,13 +189,20 @@ func TestLoadTokensIntoCacheValidation(t *testing.T) {
 	assert.Contains(t, logger.warns[1], "decimals=0")
 }
 
-func TestGetNativeTokenMetadata(t *testing.T) {
-	metadata := getNativeTokenMetadata()
+func TestNativeTokenMetadataForChain(t *testing.T) {
+	eth := nativeTokenMetadataForChain(ChainIDEthereum)
+	assert.Equal(t, "ETH", eth.Symbol)
+	assert.Equal(t, "Ether", eth.Name)
 
-	assert.NotNil(t, metadata)
-	assert.Equal(t, NativeTokenAddress, metadata.Id)
-	assert.Equal(t, "Ether", metadata.Name)
-	assert.Equal(t, "ETH", metadata.Symbol)
-	assert.Equal(t, uint32(18), metadata.Decimals)
-	assert.Equal(t, "native", metadata.Source)
+	bnb := nativeTokenMetadataForChain(ChainIDBNBMainnet)
+	assert.Equal(t, "BNB", bnb.Symbol)
+	assert.Equal(t, "BNB", bnb.Name)
+
+	pol := nativeTokenMetadataForChain(ChainIDPolygonMainnet)
+	assert.Equal(t, "POL", pol.Symbol)
+	assert.Equal(t, NativeTokenAddress, pol.Id)
+
+	hype := nativeTokenMetadataForChain(ChainIDHyperliquidMainnet)
+	assert.Equal(t, "HYPE", hype.Symbol)
+	assert.Equal(t, uint32(18), hype.Decimals)
 }

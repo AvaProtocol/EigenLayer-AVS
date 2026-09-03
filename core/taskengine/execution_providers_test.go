@@ -16,6 +16,8 @@ func TestGetNetworkName(t *testing.T) {
 		{10, "optimism"},
 		{130, "unichain"},
 		{4663, "robinhood"},
+		{137, "polygon"},
+		{999, "hyperliquid"},
 		{424242, "unknown"},
 	}
 	for _, tt := range tests {

@@ -279,11 +279,11 @@ const (
 
 // Defines values for WorkflowStatus.
 const (
-	Completed WorkflowStatus = "completed"
-	Disabled  WorkflowStatus = "disabled"
-	Enabled   WorkflowStatus = "enabled"
-	Failed    WorkflowStatus = "failed"
-	Running   WorkflowStatus = "running"
+	WorkflowStatusCompleted WorkflowStatus = "completed"
+	WorkflowStatusDisabled  WorkflowStatus = "disabled"
+	WorkflowStatusEnabled   WorkflowStatus = "enabled"
+	WorkflowStatusFailed    WorkflowStatus = "failed"
+	WorkflowStatusRunning   WorkflowStatus = "running"
 )
 
 // AllowedAction One contract the agent may call, scoped to selectors.

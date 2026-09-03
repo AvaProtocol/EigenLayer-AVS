@@ -34,23 +34,30 @@ func (s *Server) GetUserOp(ctx echo.Context, userOpHash generated.Bytes32, param
 
 	status, err := s.engine.LookupUserOpStatus(ctx.Request().Context(), user, string(userOpHash), chainID)
 	if err != nil {
-		if errors.Is(err, taskengine.ErrUserOpHashInvalid) {
-			return badRequest("USEROP_BAD_HASH", "Invalid userOpHash", err.Error())
-		}
-		if errors.Is(err, taskengine.ErrUserOpChainUnsupported) {
-			return badRequest("USEROP_BAD_CHAIN", "Unsupported chain", err.Error())
-		}
-		if errors.Is(err, taskengine.ErrUserOpNotFound) {
-			return &restmw.HTTPError{
-				Status: http.StatusNotFound,
-				Code:   "USEROP_NOT_FOUND",
-				Title:  "User operation not found",
-				Detail: "No UserOp with this hash for the authenticated user.",
-			}
-		}
-		return err
+		return mapUserOpLookupError(err)
 	}
 	return ctx.JSON(http.StatusOK, userOpStatusToOpenAPI(status))
+}
+
+// mapUserOpLookupError translates engine lookup sentinels to the REST
+// problem codes. errors.Is (not string match) so a `%w` wrap upstream
+// still maps; a `%v` wrap would fall through as 500.
+func mapUserOpLookupError(err error) error {
+	if errors.Is(err, taskengine.ErrUserOpHashInvalid) {
+		return badRequest("USEROP_BAD_HASH", "Invalid userOpHash", err.Error())
+	}
+	if errors.Is(err, taskengine.ErrUserOpChainUnsupported) {
+		return badRequest("USEROP_BAD_CHAIN", "Unsupported chain", err.Error())
+	}
+	if errors.Is(err, taskengine.ErrUserOpNotFound) {
+		return &restmw.HTTPError{
+			Status: http.StatusNotFound,
+			Code:   "USEROP_NOT_FOUND",
+			Title:  "User operation not found",
+			Detail: "No UserOp with this hash for the authenticated user.",
+		}
+	}
+	return err
 }
 
 func userOpStatusToOpenAPI(in *taskengine.UserOpStatus) generated.UserOpStatusResponse {

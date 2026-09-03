@@ -49,7 +49,6 @@ func NewBlockTrigger(o *RpcOption, triggerCh chan TriggerMetadata[int64], logger
 	b := BlockTrigger{
 		CommonTrigger: &CommonTrigger{
 			done:      make(chan bool),
-			shutdown:  false,
 			rpcOption: o,
 
 			logger: logger,

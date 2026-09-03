@@ -3,6 +3,7 @@ package trigger
 import (
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
@@ -27,7 +28,7 @@ type CommonTrigger struct {
 
 	// channel to track shutdown
 	done     chan bool
-	shutdown bool
+	shutdown atomic.Bool
 	mu       sync.Mutex
 
 	// a counter to track progress of the trigger. the counter will increase everytime a processing happen
@@ -36,7 +37,7 @@ type CommonTrigger struct {
 
 func (b *CommonTrigger) retryConnectToRpc() error {
 	for {
-		if b.shutdown {
+		if b.shutdown.Load() {
 			return nil
 		}
 
@@ -51,7 +52,7 @@ func (b *CommonTrigger) retryConnectToRpc() error {
 }
 
 func (b *CommonTrigger) Shutdown() {
-	b.shutdown = true
+	b.shutdown.Store(true)
 	b.done <- true
 }
 

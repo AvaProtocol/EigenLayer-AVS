@@ -7,6 +7,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/services"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	ethereum "github.com/ethereum/go-ethereum"
@@ -47,6 +48,10 @@ type PriceService interface {
 	// when the price isn't available — callers render "$?" rather than
 	// fabricate a number.
 	GetERC20PriceUSD(chainID int64, contractAddress string) (*big.Float, error)
+	// HasLiveNativeUsdPrice reports whether GetNativeTokenPriceUSD can obtain
+	// a native USD price for chainID. False means callers must fail closed
+	// rather than proceed unbilled (Hyperliquid HYPE today).
+	HasLiveNativeUsdPrice(chainID int64) bool
 }
 
 // FeeRates holds the fee configuration for the estimator.
@@ -596,6 +601,24 @@ func (fe *FeeEstimator) generateWarnings(cogs []*avsproto.NodeCOGS) []string {
 	}
 
 	return warnings
+}
+
+// liveNativeUsdPrice reports whether chainID has a native USD price source.
+// When priceService is nil (no Moralis key), the decision still comes from
+// the Moralis chain-token map so Hyperliquid cannot bypass fail-closed.
+func liveNativeUsdPrice(priceService PriceService, chainID int64) bool {
+	if priceService != nil {
+		return priceService.HasLiveNativeUsdPrice(chainID)
+	}
+	return services.NativeUsdPriceIsLive(chainID)
+}
+
+// nativeUsdPriceIsGuaranteedMissing is true when GetNativeTokenPriceUSD cannot
+// succeed for this chain: non-ETH native with no Moralis Data API source.
+// Callers must fail closed rather than proceed unbilled or skip credit checks.
+// BNB/POL have live Moralis pricing and stay fail-open on an outage.
+func nativeUsdPriceIsGuaranteedMissing(priceService PriceService, chainID int64) bool {
+	return !liveNativeUsdPrice(priceService, chainID)
 }
 
 // ConvertUSDToWei converts a USD amount to Wei using the price service.

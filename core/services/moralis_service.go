@@ -157,10 +157,28 @@ func getChainTokenMapping() map[int64]ChainToken {
 			Decimals:     18,
 			ContractAddr: "0x4200000000000000000000000000000000000006",
 		},
+
+		// Polygon PoS — native is POL; Moralis prices via WPOL (legacy WMATIC).
+		137: {
+			Symbol:       "POL",
+			Decimals:     18,
+			ContractAddr: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270",
+		},
+
+		// Hyperliquid EVM — native is HYPE. Moralis Data API does not list 999,
+		// so nativePricingSupportedChains omits it and getFallbackPrice("HYPE")
+		// fails closed (never the $2500 ETH fallback). ContractAddr is WHYPE
+		// for if/when a price probe lands.
+		999: {
+			Symbol:       "HYPE",
+			Decimals:     18,
+			ContractAddr: "0x5555555555555555555555555555555555555555",
+		},
 		// Unichain (130) and Robinhood (4663) are deliberately absent: Moralis
 		// Data API does not list them. GetNativeTokenPriceUSD then uses
 		// getETHPrice() (live ETH on chain 1) — correct because both natives
 		// are ETH. Do not add them here just to hit the $2500 hardcoded fallback.
+		// Hyperliquid is listed above because its native is HYPE, not ETH.
 	}
 }
 
@@ -186,7 +204,11 @@ var nativePricingSupportedChains = map[int64]bool{
 	56:    true, // BNB Smart Chain
 	42161: true, // Arbitrum One
 	10:    true, // OP Mainnet
-	// Unichain (130) and Robinhood (4663) intentionally absent — Moralis Data API does not list them.
+	137:   true, // Polygon PoS
+	// Unichain (130), Robinhood (4663), Hyperliquid (999) intentionally
+	// absent — Moralis Data API does not list them. Hyperliquid is still in
+	// chainTokens so GetNativeTokenSymbol returns HYPE and the ETH $2500
+	// fallback cannot fire.
 	// Testnets intentionally absent: 11155111 (Sepolia), 84532 (Base-Sepolia).
 }
 
@@ -257,6 +279,31 @@ func (ms *MoralisService) GetNativeTokenSymbol(chainID int64) string {
 		return chainToken.Symbol
 	}
 	return "ETH" // Default fallback
+}
+
+// NativeUsdPriceIsLive reports whether GetNativeTokenPriceUSD can obtain a
+// native USD price for chainID. Unmapped IDs and ETH-natives inherit the ETH
+// fallback. Non-ETH natives without a Moralis Data API source (Hyperliquid
+// HYPE today) return false — fee/credit callers must fail closed.
+//
+// Instance-free so taskengine can still fail closed when priceService is nil
+// (no Moralis API key). MoralisService.HasLiveNativeUsdPrice uses the same
+// rule against the instance map.
+func NativeUsdPriceIsLive(chainID int64) bool {
+	return nativeUsdPriceIsLive(getChainTokenMapping(), chainID)
+}
+
+// HasLiveNativeUsdPrice implements taskengine.PriceService.
+func (ms *MoralisService) HasLiveNativeUsdPrice(chainID int64) bool {
+	return nativeUsdPriceIsLive(ms.chainTokens, chainID)
+}
+
+func nativeUsdPriceIsLive(chainTokens map[int64]ChainToken, chainID int64) bool {
+	tok, ok := chainTokens[chainID]
+	if !ok || strings.EqualFold(tok.Symbol, "ETH") {
+		return true
+	}
+	return nativePricingSupportedChains[chainID]
 }
 
 // GetERC20PriceUSD fetches the USD price for an ERC20 contract on the given
@@ -382,6 +429,8 @@ func (ms *MoralisService) chainIDToMoralisChain(chainID int64) string {
 		return "arbitrum"
 	case 10:
 		return "optimism"
+	case 137:
+		return "polygon"
 	default:
 		return ""
 	}

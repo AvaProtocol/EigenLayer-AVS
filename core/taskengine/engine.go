@@ -1827,8 +1827,8 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	// Constant retry ceilings (limits.go). Retry is a per-execution multiplier on
 	// metered provider calls, so it is bounded like every other one; an over-limit
 	// policy is rejected here rather than silently clamped at execution time.
-	if err := validateRetryPolicies(task.Nodes); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "%s", err.Error())
+	if err := rejectRetryPolicies(task.Nodes); err != nil {
+		return nil, err
 	}
 
 	// Default chain_id to the aggregator's SmartWallet chain when not specified.
@@ -3719,6 +3719,10 @@ func (n *Engine) SimulateWorkflowWithContext(ctx context.Context, user *model.Us
 	// Validate all node names for JavaScript compatibility
 	if err := validateAllNodeNamesForJavaScript(task); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "node name validation failed: %v", err)
+	}
+
+	if err := rejectRetryPolicies(task.Nodes); err != nil {
+		return nil, err
 	}
 
 	// Step 1: Simulate the trigger to get trigger output data

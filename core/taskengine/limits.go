@@ -172,6 +172,8 @@ var chainBlockTime = map[int64]time.Duration{
 	10:       2 * time.Second,        // OP Mainnet (OP-stack, same family as Base)
 	130:      200 * time.Millisecond, // Unichain flashblocks ~200ms; 1s sealed blocks. Under-estimate.
 	4663:     100 * time.Millisecond, // Robinhood Chain (Arb Orbit; advertised 100ms).
+	137:      2 * time.Second,        // Polygon PoS (~2s).
+	999:      time.Second,            // HyperEVM small blocks ~1s (big blocks are 60s; under-estimate).
 }
 
 // defaultBlockTime is used for a chain absent from the table. Deliberately
@@ -336,6 +338,16 @@ func validateRetryPolicies(nodes []*avsproto.TaskNode) error {
 		if err := validateRetryPolicy(label, node.GetRetryPolicy(), nodeSupportsRetry(node)); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// rejectRetryPolicies is the create / simulate / nodes:run boundary: an
+// over-limit policy is InvalidArgument, not a silent clamp. executeWithRetry
+// still clamps as defense in depth for tasks stored before this existed.
+func rejectRetryPolicies(nodes []*avsproto.TaskNode) error {
+	if err := validateRetryPolicies(nodes); err != nil {
+		return status.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 	return nil
 }

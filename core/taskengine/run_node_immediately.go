@@ -3180,6 +3180,12 @@ func (n *Engine) RunNodeImmediatelyRPCWithContext(ctx context.Context, user *mod
 		}, nil
 	}
 
+	// Same ceiling as CreateWorkflow / Simulate: reject rather than clamp so
+	// nodes:run callers see the bound instead of a silently truncated retry.
+	if err := rejectRetryPolicies([]*avsproto.TaskNode{node}); err != nil {
+		return nil, err
+	}
+
 	// Convert input variables from protobuf to Go map
 	inputVariables := make(map[string]interface{})
 	for k, v := range req.InputVariables {
