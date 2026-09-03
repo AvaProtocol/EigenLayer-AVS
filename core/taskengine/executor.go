@@ -358,24 +358,36 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 	vm.WithLogger(x.logger).WithDb(x.db)
 
 	// Convert execution fee (USD) → Wei and set on VM for UserOp injection.
-	// Non-ETH natives with no live price source (Hyperliquid HYPE) must not
-	// proceed unbilled — that is the steady state, not an outage. BNB/POL
-	// still warn-and-proceed if Moralis is down.
+	// Gate on the UserOp chain(s), not the gateway default: a contract-write
+	// on 999 in an ETH-default gateway must fail closed, not convert ETH and
+	// proceed. Nil priceService (no Moralis key) is still fail-closed for
+	// unpriceable natives. BNB/POL stay fail-open on a Moralis outage.
 	var unbilledNativeErr error
 	feeChainID := int64(0)
 	if x.smartWalletConfig != nil {
 		feeChainID = x.smartWalletConfig.ChainID
 	}
-	if x.priceService != nil && x.engine != nil && x.engine.config != nil && x.engine.config.FeeRates != nil {
-		if feeWei, convErr := ConvertUSDToWei(x.engine.config.FeeRates.ExecutionFeeUSD, x.priceService, feeChainID); convErr == nil {
-			vm.executionFeeWei = feeWei
-			if x.logger != nil {
-				x.logger.Debug("Execution fee set on VM", "fee_wei", feeWei.String(), "fee_usd", x.engine.config.FeeRates.ExecutionFeeUSD)
+	billableChains := billableExecutionChainIDs(task)
+	if len(billableChains) == 1 {
+		feeChainID = billableChains[0]
+	}
+	if x.engine != nil && x.engine.config != nil && x.engine.config.FeeRates != nil {
+		for _, id := range billableChains {
+			if nativeUsdPriceIsGuaranteedMissing(x.priceService, id) {
+				unbilledNativeErr = fmt.Errorf("no live native USD price for chain %d", id)
+				feeChainID = id
+				break
 			}
-		} else if nativeUsdPriceIsGuaranteedMissing(feeChainID) {
-			unbilledNativeErr = convErr
-		} else if x.logger != nil {
-			x.logger.Warn("Failed to convert execution fee to Wei, proceeding without fee", "error", convErr)
+		}
+		if unbilledNativeErr == nil && x.priceService != nil {
+			if feeWei, convErr := ConvertUSDToWei(x.engine.config.FeeRates.ExecutionFeeUSD, x.priceService, feeChainID); convErr == nil {
+				vm.executionFeeWei = feeWei
+				if x.logger != nil {
+					x.logger.Debug("Execution fee set on VM", "fee_wei", feeWei.String(), "fee_usd", x.engine.config.FeeRates.ExecutionFeeUSD)
+				}
+			} else if x.logger != nil {
+				x.logger.Warn("Failed to convert execution fee to Wei, proceeding without fee", "error", convErr, "chain_id", feeChainID)
+			}
 		}
 	}
 
@@ -548,52 +560,37 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 	// and recording a new fee after execution. Two concurrent executions for the same
 	// owner can both pass this check before either records its fee. Acceptable for V1
 	// where value fees are not auto-recorded; needs per-owner locking when V2 lands.
-	if x.feeLedger != nil && x.priceService != nil && x.engine.config.FeeRates != nil {
+	if x.feeLedger != nil && x.engine != nil && x.engine.config != nil && x.engine.config.FeeRates != nil {
 		creditLimitUSD := x.engine.config.FeeRates.CreditLimitUSD
-		chainID := int64(0)
-		if x.smartWalletConfig != nil {
-			chainID = x.smartWalletConfig.ChainID
-		}
-
-		// Convert credit limit to Wei. If 0 (default), creditLimitWei = 0 → block on any outstanding.
-		var creditLimitWei *big.Int
-		if creditLimitUSD > 0 {
-			var convErr error
-			creditLimitWei, convErr = ConvertUSDToWei(creditLimitUSD, x.priceService, chainID)
+		taskOwner := common.HexToAddress(task.Owner)
+		// Value fees accrue per execution chain (fl:<chain>:<owner>). Convert the
+		// USD limit with that chain's native price so a Hyperliquid balance is not
+		// compared against an ETH wei amount. Unpriceable chains fail closed only
+		// when outstanding > 0 — a zero HYPE balance must not block ETH tasks on
+		// a gateway that also lists 999 in knownChainIDs.
+		for _, feeChainID := range x.engine.knownChainIDs() {
+			creditLimitWei, convErr := x.creditLimitWeiForChain(feeChainID, creditLimitUSD, taskOwner)
 			if convErr != nil {
-				if nativeUsdPriceIsGuaranteedMissing(chainID) {
-					execution.EndAt = time.Now().UnixMilli()
-					execution.Error = fmt.Sprintf("cannot convert credit limit to native wei on chain %d: %v", chainID, convErr)
-					execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
-					x.persistFailedExecution(task, execution, initialTaskStatus)
-					return execution, nil
-				}
-				x.logger.Warn("Failed to convert credit limit to Wei, skipping check", "error", convErr)
-				creditLimitWei = nil
+				execution.EndAt = time.Now().UnixMilli()
+				execution.Error = convErr.Error()
+				execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
+				x.persistFailedExecution(task, execution, initialTaskStatus)
+				return execution, nil
 			}
-		} else {
-			creditLimitWei = big.NewInt(0) // Zero tolerance: block on any outstanding balance
-		}
-
-		if creditLimitWei != nil {
-			taskOwner := common.HexToAddress(task.Owner)
-			// Value fees accrue per execution chain (fl:<chain>:<owner>) and a task's
-			// nodes can act on different chains, so an outstanding balance may sit on a
-			// non-default chain. Gate against every configured chain rather than just
-			// the gateway default, so credit limits can't be bypassed cross-chain.
-			for _, feeChainID := range x.engine.knownChainIDs() {
-				withinLimit, outstanding, checkErr := x.feeLedger.CheckCreditLimit(feeChainID, taskOwner, creditLimitWei)
-				if checkErr != nil {
-					x.logger.Warn("Fee ledger check failed, proceeding with execution", "chain_id", feeChainID, "error", checkErr)
-					continue
-				}
-				if !withinLimit {
-					execution.EndAt = time.Now().UnixMilli()
-					execution.Error = fmt.Sprintf("[INSUFFICIENT_CREDIT] outstanding value fees (%s wei) exceed credit limit", outstanding.String())
-					execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
-					x.persistFailedExecution(task, execution, initialTaskStatus)
-					return execution, nil
-				}
+			if creditLimitWei == nil {
+				continue
+			}
+			withinLimit, outstanding, checkErr := x.feeLedger.CheckCreditLimit(feeChainID, taskOwner, creditLimitWei)
+			if checkErr != nil {
+				x.logger.Warn("Fee ledger check failed, proceeding with execution", "chain_id", feeChainID, "error", checkErr)
+				continue
+			}
+			if !withinLimit {
+				execution.EndAt = time.Now().UnixMilli()
+				execution.Error = fmt.Sprintf("[INSUFFICIENT_CREDIT] outstanding value fees (%s wei) exceed credit limit", outstanding.String())
+				execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
+				x.persistFailedExecution(task, execution, initialTaskStatus)
+				return execution, nil
 			}
 		}
 	}
@@ -1383,6 +1380,40 @@ func isPermanentValidationError(errorMsg string) bool {
 		}
 	}
 	return false
+}
+
+// creditLimitWeiForChain converts the USD credit limit to native wei for
+// feeChainID. A nil *big.Int with a nil error means skip this chain
+// (fail-open outage, or unpriceable chain with zero outstanding). A
+// non-nil error means fail closed.
+func (x *WorkflowExecutor) creditLimitWeiForChain(feeChainID int64, creditLimitUSD float64, owner common.Address) (*big.Int, error) {
+	if creditLimitUSD <= 0 {
+		return big.NewInt(0), nil
+	}
+	if nativeUsdPriceIsGuaranteedMissing(x.priceService, feeChainID) {
+		outstanding, err := x.feeLedger.GetOutstandingBalance(feeChainID, owner)
+		if err != nil {
+			return nil, fmt.Errorf("cannot read outstanding fees on unpriceable chain %d: %w", feeChainID, err)
+		}
+		if outstanding.Sign() > 0 {
+			return nil, fmt.Errorf("cannot convert credit limit to native wei on chain %d with outstanding %s wei", feeChainID, outstanding.String())
+		}
+		return nil, nil
+	}
+	if x.priceService == nil {
+		if x.logger != nil {
+			x.logger.Warn("No price service, skipping credit check", "chain_id", feeChainID)
+		}
+		return nil, nil
+	}
+	wei, err := ConvertUSDToWei(creditLimitUSD, x.priceService, feeChainID)
+	if err != nil {
+		if x.logger != nil {
+			x.logger.Warn("Failed to convert credit limit to Wei, skipping check", "chain_id", feeChainID, "error", err)
+		}
+		return nil, nil
+	}
+	return wei, nil
 }
 
 // persistFailedExecution persists a failed execution record to the database

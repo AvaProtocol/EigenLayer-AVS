@@ -55,8 +55,8 @@ func TestBuildFilterQueriesOptimization(t *testing.T) {
 		checks:     sync.Map{},
 		legacyMode: false,
 		CommonTrigger: &CommonTrigger{
-			done:      make(chan bool),
-			shutdown:  false,
+			done: make(chan bool),
+
 			rpcOption: &RpcOption{},
 			logger:    &MockLogger{},
 		},
@@ -135,8 +135,8 @@ func TestBuildFilterQueriesDistinguishFromTo(t *testing.T) {
 		checks:     sync.Map{},
 		legacyMode: false,
 		CommonTrigger: &CommonTrigger{
-			done:      make(chan bool),
-			shutdown:  false,
+			done: make(chan bool),
+
 			rpcOption: &RpcOption{},
 			logger:    &MockLogger{},
 		},
@@ -781,8 +781,8 @@ func TestEventTriggerCooldown(t *testing.T) {
 		checks:     sync.Map{},
 		legacyMode: false,
 		CommonTrigger: &CommonTrigger{
-			done:      make(chan bool),
-			shutdown:  false,
+			done: make(chan bool),
+
 			rpcOption: &RpcOption{},
 			logger:    &MockLogger{},
 		},
@@ -986,8 +986,8 @@ func newTestEventTrigger() *EventTrigger {
 		checks:     sync.Map{},
 		legacyMode: false,
 		CommonTrigger: &CommonTrigger{
-			done:      make(chan bool),
-			shutdown:  false,
+			done: make(chan bool),
+
 			rpcOption: &RpcOption{},
 			logger:    &MockLogger{},
 		},

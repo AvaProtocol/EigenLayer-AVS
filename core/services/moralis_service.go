@@ -281,12 +281,25 @@ func (ms *MoralisService) GetNativeTokenSymbol(chainID int64) string {
 	return "ETH" // Default fallback
 }
 
-// HasLiveNativeUsdPrice reports whether GetNativeTokenPriceUSD can obtain a
+// NativeUsdPriceIsLive reports whether GetNativeTokenPriceUSD can obtain a
 // native USD price for chainID. Unmapped IDs and ETH-natives inherit the ETH
 // fallback. Non-ETH natives without a Moralis Data API source (Hyperliquid
 // HYPE today) return false — fee/credit callers must fail closed.
+//
+// Instance-free so taskengine can still fail closed when priceService is nil
+// (no Moralis API key). MoralisService.HasLiveNativeUsdPrice uses the same
+// rule against the instance map.
+func NativeUsdPriceIsLive(chainID int64) bool {
+	return nativeUsdPriceIsLive(getChainTokenMapping(), chainID)
+}
+
+// HasLiveNativeUsdPrice implements taskengine.PriceService.
 func (ms *MoralisService) HasLiveNativeUsdPrice(chainID int64) bool {
-	tok, ok := getChainTokenMapping()[chainID]
+	return nativeUsdPriceIsLive(ms.chainTokens, chainID)
+}
+
+func nativeUsdPriceIsLive(chainTokens map[int64]ChainToken, chainID int64) bool {
+	tok, ok := chainTokens[chainID]
 	if !ok || strings.EqualFold(tok.Symbol, "ETH") {
 		return true
 	}

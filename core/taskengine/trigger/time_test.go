@@ -319,7 +319,7 @@ func TestTimeTrigger_RemoveCheck_AfterRunContextCancel(t *testing.T) {
 	require.Eventually(t, func() bool {
 		timeTrigger.mu.Lock()
 		defer timeTrigger.mu.Unlock()
-		return timeTrigger.shutdown
+		return timeTrigger.shutdown.Load()
 	}, 2*time.Second, 10*time.Millisecond)
 
 	err = timeTrigger.RemoveCheck("test-run-cancel-remove")
@@ -329,6 +329,28 @@ func TestTimeTrigger_RemoveCheck_AfterRunContextCancel(t *testing.T) {
 	warns, errors := logger.snapshot()
 	assert.Empty(t, errors, "RemoveCheck after Run cancel must not log Error")
 	assert.Empty(t, warns, "closed-scheduler RemoveCheck is a no-op")
+}
+
+func TestTimeTrigger_Shutdown_ConcurrentWithRemoveCheck(t *testing.T) {
+	triggerCh := make(chan TriggerMetadata[uint64], 10)
+	logger := &recordingLogger{}
+	timeTrigger := NewTimeTrigger(triggerCh, logger)
+	require.NoError(t, timeTrigger.Run(context.Background()))
+	require.NoError(t, timeTrigger.AddCheck(cronTaskMetadata("race-shutdown-remove")))
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		timeTrigger.Shutdown()
+	}()
+	go func() {
+		defer wg.Done()
+		_ = timeTrigger.RemoveCheck("race-shutdown-remove")
+	}()
+	wg.Wait()
+
+	assert.True(t, timeTrigger.shutdown.Load())
 }
 
 func TestTimeTrigger_LegacyMigration(t *testing.T) {

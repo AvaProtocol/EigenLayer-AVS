@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/services"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
@@ -34,18 +35,29 @@ func (mock *mockPriceService) GetERC20PriceUSD(chainID int64, contractAddress st
 	return nil, fmt.Errorf("ERC20 price lookup not supported in tests")
 }
 
+func (mock *mockPriceService) HasLiveNativeUsdPrice(chainID int64) bool {
+	return services.NativeUsdPriceIsLive(chainID)
+}
+
 func TestNativeUsdPriceIsGuaranteedMissing(t *testing.T) {
-	if nativeUsdPriceIsGuaranteedMissing(1) {
+	ps := &mockPriceService{}
+	if nativeUsdPriceIsGuaranteedMissing(ps, 1) {
 		t.Error("ETH must not fail closed")
 	}
-	if nativeUsdPriceIsGuaranteedMissing(56) {
+	if nativeUsdPriceIsGuaranteedMissing(ps, 56) {
 		t.Error("BNB has Moralis; outage stay fail-open")
 	}
-	if nativeUsdPriceIsGuaranteedMissing(137) {
+	if nativeUsdPriceIsGuaranteedMissing(ps, 137) {
 		t.Error("Polygon has Moralis; outage stay fail-open")
 	}
-	if !nativeUsdPriceIsGuaranteedMissing(999) {
+	if !nativeUsdPriceIsGuaranteedMissing(ps, 999) {
 		t.Error("Hyperliquid HYPE has no price source; must fail closed")
+	}
+	if nativeUsdPriceIsGuaranteedMissing(nil, 1) {
+		t.Error("nil price service must still treat ETH as priceable")
+	}
+	if !nativeUsdPriceIsGuaranteedMissing(nil, 999) {
+		t.Error("nil price service must still fail closed for HYPE")
 	}
 }
 

@@ -46,10 +46,9 @@ func NewTimeTrigger(triggerCh chan TriggerMetadata[uint64], logger sdklogging.Lo
 
 	t := TimeTrigger{
 		CommonTrigger: &CommonTrigger{
-			done:     make(chan bool),
-			shutdown: false,
-			logger:   logger,
-			mu:       sync.Mutex{},
+			done:   make(chan bool),
+			logger: logger,
+			mu:     sync.Mutex{},
 		},
 		registry:        NewTaskRegistry(),
 		scheduler:       scheduler,
@@ -316,7 +315,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 // Nil job/scheduler, t.shutdown, and ErrJobNotFound are no-ops (the
 // job is already gone). Other RemoveJob errors log Error (Sentry).
 func (t *TimeTrigger) removeSchedulerJob(taskID string, jobIndex int, job gocron.Job) {
-	if job == nil || t.scheduler == nil || t.shutdown {
+	if job == nil || t.scheduler == nil || t.shutdown.Load() {
 		return
 	}
 	if err := t.scheduler.RemoveJob(job.ID()); err != nil {
@@ -375,7 +374,7 @@ func (t *TimeTrigger) Run(ctx context.Context) error {
 		// Mark closed before Shutdown so concurrent RemoveCheck skips
 		// gocron instead of racing a stopped scheduler (EIGENLAYER-AVS-37).
 		t.mu.Lock()
-		t.shutdown = true
+		t.shutdown.Store(true)
 		sched := t.scheduler
 		t.mu.Unlock()
 		if sched == nil {

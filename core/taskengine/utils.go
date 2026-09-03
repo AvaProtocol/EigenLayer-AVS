@@ -12,6 +12,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/modules"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/bigint"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -930,4 +931,46 @@ func taskNodesRequireAASender(nodes []*avsproto.TaskNode) bool {
 		}
 	}
 	return false
+}
+
+// billableExecutionChainIDs returns unique chain IDs from contract-write and
+// ETH-transfer nodes (including loop runners). These are the UserOp chains
+// that would be charged. chain_id 0 is skipped — those nodes fail later at
+// resolveSmartWalletForNode. Off-chain-only workflows return nil.
+func billableExecutionChainIDs(task *model.Workflow) []int64 {
+	if task == nil || task.Task == nil {
+		return nil
+	}
+	seen := make(map[int64]struct{})
+	var out []int64
+	add := func(id int64) {
+		if id <= 0 {
+			return
+		}
+		if _, dup := seen[id]; dup {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	for _, node := range task.Nodes {
+		if node == nil {
+			continue
+		}
+		if cw := node.GetContractWrite(); cw != nil && cw.Config != nil {
+			add(cw.Config.GetChainId())
+		}
+		if et := node.GetEthTransfer(); et != nil && et.Config != nil {
+			add(et.Config.GetChainId())
+		}
+		if loop := node.GetLoop(); loop != nil {
+			if cw := loop.GetContractWrite(); cw != nil && cw.Config != nil {
+				add(cw.Config.GetChainId())
+			}
+			if et := loop.GetEthTransfer(); et != nil && et.Config != nil {
+				add(et.Config.GetChainId())
+			}
+		}
+	}
+	return out
 }

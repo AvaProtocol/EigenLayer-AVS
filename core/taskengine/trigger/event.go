@@ -169,7 +169,6 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 	b := EventTrigger{
 		CommonTrigger: &CommonTrigger{
 			done:      make(chan bool),
-			shutdown:  false,
 			rpcOption: o,
 			logger:    logger,
 		},
@@ -895,7 +894,7 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 				backoff := time.Second
 				for {
 					t.retryConnectToRpc()
-					if t.shutdown {
+					if t.shutdown.Load() {
 						return
 					}
 					t.logger.Info("🔌 Reconnected, rebuilding subscriptions")
@@ -1933,7 +1932,7 @@ func (t *EventTrigger) convertToFilterQuery(query *avsproto.EventTrigger_Query) 
 // Stop stops the event trigger
 func (t *EventTrigger) Stop() {
 	t.logger.Info("🛑 Stopping EventTrigger")
-	t.shutdown = true
+	t.shutdown.Store(true)
 	close(t.done)
 }
 

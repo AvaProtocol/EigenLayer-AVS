@@ -160,4 +160,10 @@ func TestHasLiveNativeUsdPrice(t *testing.T) {
 	if ms.HasLiveNativeUsdPrice(999) {
 		t.Error("Hyperliquid HYPE has no Moralis source; callers must fail closed")
 	}
+	if NativeUsdPriceIsLive(999) {
+		t.Error("package-level NativeUsdPriceIsLive must match the instance method for HYPE")
+	}
+	if !NativeUsdPriceIsLive(1) {
+		t.Error("package-level NativeUsdPriceIsLive must treat ETH as live")
+	}
 }
