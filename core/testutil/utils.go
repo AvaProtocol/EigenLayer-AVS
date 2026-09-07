@@ -51,9 +51,10 @@ var testConfig *config.Config
 // so tests can resolve ${VAR} references in config/test.yaml (e.g.
 // ${ALCHEMY_API_KEY}, ${ETH_RPC_URL}) and read secrets like OWNER_EOA.
 //
-// Files are loaded in order: .env.local first, then .env. The first file to set
-// a given key wins, so .env.local overrides .env (dotenv convention), and a real
-// process environment variable overrides both. Each file is optional.
+// Files are loaded in order: leftover `.env.local` first, then `.env`.
+// Keys already in the process env (or an earlier file) are skipped, so
+// `.env.local` wins when both exist. Real process env overrides both.
+// Canonical local-dev file is `.env`; `.env.local` is an optional leftover.
 //
 // Note: both files are gitignored. In a fresh git worktree they are absent, so
 // ${VAR} references resolve to empty — that is the cause of alchemy-path
@@ -80,7 +81,7 @@ func LoadDotEnv() error {
 	if !loadedAny {
 		// Not fatal — vars may come from the real environment (e.g. CI) — but
 		// surface it so a missing dotenv in a worktree isn't a silent mystery.
-		log.Printf("testutil: no .env.local or .env found under %s; ${VAR} refs in test.yaml rely on the process environment", repoRoot)
+		log.Printf("testutil: no .env or .env.local found under %s; ${VAR} refs in test.yaml rely on the process environment", repoRoot)
 	}
 
 	return nil

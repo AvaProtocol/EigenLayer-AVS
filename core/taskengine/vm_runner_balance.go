@@ -304,22 +304,6 @@ func (v *VM) runBalance(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, 
 		return executionLogStep, err
 	}
 
-	// Debug logging for CI/testing (show first 20 chars of API key to verify it's loaded)
-	if len(moralisAPIKey) > 20 {
-		fmt.Printf("DEBUG: Moralis API key loaded: %s... (length: %d)\n", moralisAPIKey[:20], len(moralisAPIKey))
-	} else {
-		fmt.Printf("DEBUG: Moralis API key loaded (length: %d)\n", len(moralisAPIKey))
-	}
-
-	// Additional debug: check if it looks like a JWT
-	if strings.HasPrefix(moralisAPIKey, "eyJ") {
-		fmt.Printf("DEBUG: Moralis API key format: JWT (starts with eyJ)\n")
-	} else if moralisAPIKey == "test-api-key" {
-		fmt.Printf("DEBUG: Moralis API key format: test/mock key\n")
-	} else {
-		fmt.Printf("DEBUG: Moralis API key format: unknown/other\n")
-	}
-
 	// Fetch balances from Moralis
 	// Note: If client specifies tokenAddresses, we need a two-phase approach:
 	// 1. Get all tokens first (to include native token)

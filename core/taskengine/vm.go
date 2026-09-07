@@ -539,11 +539,18 @@ func NewVMWithDataAndTransferLog(task *model.Workflow, triggerData *TriggerData,
 	// Initialize logger if it's nil to prevent panic (using shared utility)
 	v.logger = logger.EnsureLogger(v.logger)
 
-	// Initialize apContext with configVars containing secrets and macro variables
+	// Initialize apContext with configVars containing user/workflow secrets.
+	// Platform keys (Moralis, GoPlus app credentials) stay in macros.secrets
+	// for engine code (BalanceNode, restApi options.auth.provider=moralis
+	// / goplus) and are never copied here — a restApi/customCode template
+	// must not be able to send {{apContext.configVars.moralis_api_key}} at
+	// deep-index.moralis.io (or dump goplus_app_secret to a webhook).
 	configVars := make(map[string]string)
-	// Add secrets (they override macro variables if there are conflicts)
-	for k, v := range secrets {
-		configVars[k] = v
+	for k, val := range secrets {
+		if isPlatformSecretName(k) {
+			continue
+		}
+		configVars[k] = val
 	}
 
 	v.AddVar(APContextVarName, map[string]map[string]string{

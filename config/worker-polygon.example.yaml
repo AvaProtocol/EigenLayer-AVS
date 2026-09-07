@@ -19,7 +19,7 @@ listen_address: "0.0.0.0:50059"
 health_address: "0.0.0.0:8098"
 gateway_address: "127.0.0.1:2206"
 
-# Chain RPC. Set via .env.local / env. Do NOT point this at a free public
+# Chain RPC. Set via .env / env. Do NOT point this at a free public
 # endpoint — they rate-limit under load.
 eth_rpc_url: ${POLYGON_RPC_URL}
 eth_ws_url:  ${POLYGON_WS_URL}

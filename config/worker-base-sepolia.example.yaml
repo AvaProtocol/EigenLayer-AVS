@@ -24,7 +24,7 @@ health_address: "0.0.0.0:8091"
 # Gateway address (worker registers with gateway on startup).
 gateway_address: "127.0.0.1:2206"
 
-# Chain RPC endpoints (Base Sepolia). Set via .env.local / env.
+# Chain RPC endpoints (Base Sepolia). Set via .env / env.
 # Supply a chain RPC you control. Do NOT point this at a free public endpoint
 # (publicnode, *.base.org, ankr, llamarpc, ...): they rate-limit under load,
 # which makes runs fail nondeterministically on whichever request happens to be
@@ -34,7 +34,7 @@ eth_ws_url:  ${BASE_SEPOLIA_WS_URL}
 
 # Bundler. alchemy (matching production) derives the endpoint from
 # alchemy_api_key + the chain subdomain and never reads bundler_url. Set
-# ALCHEMY_API_KEY in .env.local before launching. self_hosted remains only for
+# ALCHEMY_API_KEY in .env before launching. self_hosted remains only for
 # a locally-run Voltaire — the shared bundler-*.avaprotocol.org hosts are retired.
 bundler_provider: alchemy
 alchemy_api_key:  ${ALCHEMY_API_KEY}

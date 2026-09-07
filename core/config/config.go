@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -100,6 +101,9 @@ type Config struct {
 
 	DbPath    string
 	BackupDir string
+	// BackupInterval is 0 when periodic backups are off (migration-only).
+	// Set from yaml backup_interval_hours.
+	BackupInterval time.Duration
 
 	JwtSecret []byte
 
@@ -512,10 +516,30 @@ func redactBundlerURLForLog(u string) string {
 	return u
 }
 
-type BackupConfig struct {
-	Enabled         bool   // Whether periodic backups are enabled
-	IntervalMinutes int    // Interval between backups in minutes
-	BackupDir       string // Directory to store backups
+// resolveBackupDir picks the on-disk backup directory.
+//
+// yaml `backup_dir` is honored when set. If it is empty, the historical
+// default is `{db_path}_backup` (e.g. /data/gateway → /data/gateway_backup).
+// A previous bug ignored yaml backup_dir entirely, so production's real
+// directory is the derived underscore path even when yaml said
+// /data/gateway-backup.
+func resolveBackupDir(dbPath, backupDir string) string {
+	if dir := strings.TrimSpace(backupDir); dir != "" {
+		return dir
+	}
+	if dbPath == "" {
+		return ""
+	}
+	return dbPath + "_backup"
+}
+
+// resolveBackupInterval converts yaml backup_interval_hours to a duration.
+// 0 or negative means periodic backups are off (migration-triggered only).
+func resolveBackupInterval(hours int) time.Duration {
+	if hours <= 0 {
+		return 0
+	}
+	return time.Duration(hours) * time.Hour
 }
 
 // SmartWalletConfigRaw represents the raw YAML config for smart wallet operations.
@@ -583,8 +607,10 @@ type ConfigRaw struct {
 	OperatorStateRetrieverAddr string `yaml:"operator_state_retriever_address"`
 	AVSRegistryCoordinatorAddr string `yaml:"avs_registry_coordinator_address"`
 
-	DbPath    string `yaml:"db_path"`
-	JwtSecret string `yaml:"jwt_secret"`
+	DbPath              string `yaml:"db_path"`
+	BackupDir           string `yaml:"backup_dir"`
+	BackupIntervalHours int    `yaml:"backup_interval_hours"`
+	JwtSecret           string `yaml:"jwt_secret"`
 
 	// REST rate-limit overrides; see Config.RestRateLimitPerSecond.
 	RestRateLimitPerSecond float64 `yaml:"rest_rate_limit_per_second"`
@@ -849,9 +875,10 @@ func NewConfig(configFilePath string) (*Config, error) {
 		TxMgr:                             txMgr,
 		AggregatorAddress:                 aggregatorAddr,
 
-		DbPath:    configRaw.DbPath,
-		BackupDir: configRaw.DbPath + "_backup",
-		JwtSecret: []byte(configRaw.JwtSecret),
+		DbPath:         configRaw.DbPath,
+		BackupDir:      resolveBackupDir(configRaw.DbPath, configRaw.BackupDir),
+		BackupInterval: resolveBackupInterval(configRaw.BackupIntervalHours),
+		JwtSecret:      []byte(configRaw.JwtSecret),
 
 		RestRateLimitPerSecond: configRaw.RestRateLimitPerSecond,
 		RestRateLimitBurst:     configRaw.RestRateLimitBurst,

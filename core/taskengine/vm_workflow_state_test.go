@@ -119,7 +119,7 @@ func TestWorkflowStateBinding_SimulationDoesNotPersist(t *testing.T) {
 }
 
 // TestRestAuthProvider covers the options.auth.provider parsing that gates
-// server-side GoPlus token injection.
+// server-side GoPlus / Moralis credential injection.
 func TestRestAuthProvider(t *testing.T) {
 	mk := func(opts map[string]interface{}) *avsproto.RestAPINode {
 		var o *structpb.Value
@@ -131,11 +131,14 @@ func TestRestAuthProvider(t *testing.T) {
 		return &avsproto.RestAPINode{Config: &avsproto.RestAPINode_Config{Options: o}}
 	}
 
-	require.Equal(t, "goplus", restAuthProvider(mk(map[string]interface{}{
-		"auth": map[string]interface{}{"provider": "goplus"},
+	require.Equal(t, restAuthProviderGoplus, restAuthProvider(mk(map[string]interface{}{
+		"auth": map[string]interface{}{"provider": restAuthProviderGoplus},
+	})))
+	require.Equal(t, restAuthProviderMoralis, restAuthProvider(mk(map[string]interface{}{
+		"auth": map[string]interface{}{"provider": restAuthProviderMoralis},
 	})))
 	// Trimmed + lower-cased.
-	require.Equal(t, "goplus", restAuthProvider(mk(map[string]interface{}{
+	require.Equal(t, restAuthProviderGoplus, restAuthProvider(mk(map[string]interface{}{
 		"auth": map[string]interface{}{"provider": "  GoPlus "},
 	})))
 	// No auth key.

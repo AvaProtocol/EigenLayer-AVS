@@ -218,7 +218,7 @@ build:
 gateway: build
 	@echo "🚀 Starting local-dev gateway (config/gateway.yaml)..."
 	@echo "📝 Logs will be written to gateway.log"
-	@set -a; [ -f .env.local ] && . ./.env.local; set +a; ./out/ap aggregator --config=config/gateway.yaml 2>&1 | tee gateway.log
+	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; ./out/ap aggregator --config=config/gateway.yaml 2>&1 | tee gateway.log
 
 # Legacy per-chain aggregator targets retained as redirects so muscle
 # memory and old runbooks still work. They print a deprecation notice
@@ -274,42 +274,42 @@ operator-default: build
 
 
 ## run-*: BUILD-FREE pure-exec targets — the single source of truth for each
-## local-dev process's command (config + .env.local). studio/scripts/start.sh
+## local-dev process's command (config + .env). studio/scripts/start.sh
 ## (tmux panes) and `make dev-stack` both invoke these, so config paths / ports /
 ## env can't drift between them. Build-free so callers that already ran
 ## `make build` don't fire concurrent go builds racing on ./out/ap. Output goes
 ## to the caller's terminal/pane; callers that want files redirect (dev-stack →
-## logs/, start.sh → tee). Each sources .env.local so ${ALCHEMY_API_KEY} and
+## logs/, start.sh → tee). Each sources .env so ${ALCHEMY_API_KEY} and
 ## the per-chain RPC refs in the YAML resolve.
 .PHONY: run-gateway run-worker-sepolia run-worker-ethereum run-worker-base run-worker-base-sepolia run-operator-sepolia run-operator-ethereum
 run-gateway:
-	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap aggregator --config=config/gateway.yaml
+	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap aggregator --config=config/gateway.yaml
 run-worker-sepolia:
-	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap worker --config=config/worker-sepolia.yaml
+	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap worker --config=config/worker-sepolia.yaml
 # MAINNET workers — move REAL funds, pay REAL gas (no paymaster). Need these in
-# .env.local: ETHEREUM_RPC_URL/WS, BASE_RPC_URL/WS, MAINNET_CONTROLLER_PRIVATE_KEY.
+# .env: ETHEREUM_RPC_URL/WS, BASE_RPC_URL/WS, MAINNET_CONTROLLER_PRIVATE_KEY.
 # No *_BUNDLER_URL: every chain runs bundler_provider: alchemy, which derives the
 # endpoint from ALCHEMY_API_KEY and never reads bundler_url — the self-hosted
 # Voltaire tunnels these used to need are retired. start.sh skips these two panes
 # when the mainnet vars are absent, so a Sepolia-only stack still boots.
 run-worker-ethereum:
-	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap worker --config=config/worker-ethereum.yaml
+	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap worker --config=config/worker-ethereum.yaml
 run-worker-base:
-	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap worker --config=config/worker-base.yaml
+	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap worker --config=config/worker-base.yaml
 # Retired from the default local stack (see studio scripts/start.sh); kept runnable.
 run-worker-base-sepolia:
-	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap worker --config=config/worker-base-sepolia.yaml
+	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap worker --config=config/worker-base-sepolia.yaml
 run-operator-sepolia:
-	@set -a; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap operator --config=config/operator-sepolia.yaml
+	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap operator --config=config/operator-sepolia.yaml
 # Second operator, registered against the Ethereum mainnet AVS. Binds its
 # metrics/node-api on 9091/9011 because operator-sepolia already holds
 # 9090/9010 — running both with the stock ports fails on bind, not on config.
 #
 # Mainnet operator keys (alias 0x4f061d46 for operator 0xc6B87) use a DIFFERENT
 # password than Sepolia/vinh. Prefer MAINNET_OPERATOR_{ECDSA,BLS}_KEY_PASSWORD
-# from .env.local so the shared OPERATOR_* vars keep working for sepolia.
+# from .env so the shared OPERATOR_* vars keep working for sepolia.
 run-operator-ethereum:
-	@set -a; [ -f .env.local ] && . ./.env.local; set +a; \
+	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; \
 	if [ -n "$${MAINNET_OPERATOR_ECDSA_KEY_PASSWORD:-}" ]; then \
 		export OPERATOR_ECDSA_KEY_PASSWORD="$$MAINNET_OPERATOR_ECDSA_KEY_PASSWORD"; \
 	fi; \
@@ -355,9 +355,9 @@ dev-stack: build
 	@echo "   Tail with:  tail -f logs/*.log"
 	@echo "   Stop with:  Ctrl-C  (kills the whole stack)"
 	@echo ""
-	@set -a; [ -f .env.local ] && . ./.env.local; set +a; \
+	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; \
 		if [ -z "$$ALCHEMY_API_KEY" ]; then \
-			echo "❌ Missing ALCHEMY_API_KEY — add it to .env.local (bundler endpoint is derived from the key)"; \
+			echo "❌ Missing ALCHEMY_API_KEY — add it to .env (bundler endpoint is derived from the key)"; \
 			exit 1; \
 		fi; \
 		set -m; \

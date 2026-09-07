@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
@@ -152,6 +153,7 @@ func TestSecretAccessInCustomCode(t *testing.T) {
 	}
 
 	processor := NewJSProcessor(vm)
+
 	executionLog, err := processor.Execute("test_node", node)
 
 	if err != nil {
@@ -253,5 +255,58 @@ func TestCollectInputsIncludesSecrets(t *testing.T) {
 	if _, exists := inputs["test_var.data"]; !exists {
 		keys := testGetStringMapKeys(inputs)
 		t.Errorf("test_var.data not found in CollectInputs output, available keys: %v", keys)
+	}
+}
+
+// TestPlatformSecretsOmittedFromConfigVars: macros.secrets.moralis_api_key
+// (and GoPlus app credentials) must stay engine-internal. A restApi node
+// with X-API-Key: {{apContext.configVars.moralis_api_key}} must not be able
+// to spend the platform Moralis quota.
+func TestPlatformSecretsOmittedFromConfigVars(t *testing.T) {
+	secrets := map[string]string{
+		"moralis_api_key":     "platform-moralis-should-not-leak",
+		"goplus_app_key":      "platform-goplus-key",
+		"goplus_app_secret":   "platform-goplus-secret",
+		"sendgrid_key":        "user-visible-sendgrid",
+		"ap_notify_bot_token": "user-visible-telegram",
+	}
+
+	vm, err := NewVMWithData(&model.Workflow{
+		Task: &avsproto.Task{
+			Id: "test_platform_secrets",
+			Trigger: &avsproto.TaskTrigger{
+				Id:   "trigger1",
+				Name: "test_trigger",
+			},
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), secrets)
+	if err != nil {
+		t.Fatalf("Failed to create VM: %v", err)
+	}
+
+	vm.mu.Lock()
+	apContextValue := vm.vars[APContextVarName]
+	vm.mu.Unlock()
+	apContextMap, ok := apContextValue.(map[string]map[string]string)
+	if !ok {
+		t.Fatalf("apContext type %T", apContextValue)
+	}
+	configVars := apContextMap[ConfigVarsPath]
+
+	for _, k := range []string{"moralis_api_key", "goplus_app_key", "goplus_app_secret"} {
+		if _, exists := configVars[k]; exists {
+			t.Errorf("platform secret %q must not appear in apContext.configVars", k)
+		}
+	}
+	if configVars["sendgrid_key"] != "user-visible-sendgrid" {
+		t.Errorf("sendgrid_key should remain in configVars for restApi notify templates")
+	}
+	if configVars["ap_notify_bot_token"] != "user-visible-telegram" {
+		t.Errorf("ap_notify_bot_token should remain in configVars for restApi notify templates")
+	}
+
+	got := vm.preprocessText("X-API-Key: {{apContext.configVars.moralis_api_key}}")
+	if strings.Contains(got, "platform-moralis-should-not-leak") {
+		t.Errorf("template expanded the platform Moralis key: %q", got)
 	}
 }

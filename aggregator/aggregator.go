@@ -332,6 +332,12 @@ func (agg *Aggregator) Start(ctx context.Context, opts ...StartOption) error {
 
 	agg.migrate()
 
+	if agg.config.BackupInterval > 0 {
+		if err := agg.backup.StartPeriodicBackup(agg.config.BackupInterval); err != nil {
+			agg.logger.Error("failed to start periodic backup", "error", err, "dir", agg.config.BackupDir)
+		}
+	}
+
 	// In gateway mode, create chain registry and connect to workers
 	if agg.config.IsGateway {
 		agg.chainRegistry = NewChainRegistry(
@@ -378,6 +384,10 @@ func (agg *Aggregator) Start(ctx context.Context, opts ...StartOption) error {
 
 	if agg.chainRegistry != nil {
 		agg.chainRegistry.Close()
+	}
+
+	if agg.backup != nil {
+		agg.backup.StopPeriodicBackup()
 	}
 
 	agg.db.Close()

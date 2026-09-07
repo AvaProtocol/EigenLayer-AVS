@@ -4,7 +4,7 @@
 // (e.g. the legacy "send eth" node-name and missing-trigger-config cohorts).
 //
 // READ-ONLY in intent, but BadgerDB takes an exclusive directory lock, so run
-// this against a COPY/backup of the gateway DB (e.g. /data/gateway-backup),
+// this against a COPY/backup of the gateway DB (e.g. /data/gateway_backup),
 // NOT the live directory while the gateway is running.
 //
 // Usage:
