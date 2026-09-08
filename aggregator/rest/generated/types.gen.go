@@ -1624,8 +1624,9 @@ type TriggerWorkflowResponse struct {
 	Status ExecutionStatus `json:"status"`
 
 	// Steps Execution steps. Populated when isBlocking=true (same as gRPC
-	// TriggerTaskResp.steps). The per-step `error` / `errorCode` is
-	// the source of the envelope `error` summary.
+	// TriggerTaskResp.steps). The envelope `error` summary is built
+	// from each failed step's `error` string. `errorCode` is copied
+	// onto the step only; it is not concatenated into `error`.
 	Steps *[]ExecutionStep `json:"steps,omitempty"`
 }
 

@@ -267,6 +267,8 @@ func normalizeStepType(t string) string {
 		return "customCode"
 	case "NODE_TYPE_BALANCE":
 		return "balance"
+	case "NODE_TYPE_AWAIT":
+		return "await"
 	}
 	return t
 }

@@ -84,6 +84,36 @@ func TestProtoToOpenAPITriggerWorkflow_ErrorCopiesVmCauseAndSteps(t *testing.T) 
 	assert.Equal(t, "eth_sendUserOperation: replacement underpriced", *(*out.Steps)[0].Error)
 }
 
+func TestProtoToOpenAPITriggerWorkflow_WaitingNormalizesAwaitStepType(t *testing.T) {
+	in := &avsproto.TriggerTaskResp{
+		ExecutionId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		Status:      avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING,
+		Steps: []*avsproto.Execution_Step{
+			{
+				Id:      "trigger",
+				Type:    avsproto.TriggerType_TRIGGER_TYPE_MANUAL.String(),
+				Name:    "manual",
+				Success: true,
+			},
+			{
+				Id:      "approve",
+				Type:    avsproto.NodeType_NODE_TYPE_AWAIT.String(),
+				Name:    "approve",
+				Success: true,
+			},
+		},
+	}
+
+	out, err := ProtoToOpenAPITriggerWorkflow(in)
+	require.NoError(t, err)
+	assert.Equal(t, "waiting", string(out.Status))
+	require.NotNil(t, out.Steps)
+	require.Len(t, *out.Steps, 2)
+	assert.Equal(t, "manual", (*out.Steps)[0].Type)
+	assert.Equal(t, "await", (*out.Steps)[1].Type)
+	assert.NotEqual(t, "NODE_TYPE_AWAIT", (*out.Steps)[1].Type)
+}
+
 func TestProtoToOpenAPITriggerWorkflow_SuccessOmitsErrorAndEmptySteps(t *testing.T) {
 	in := &avsproto.TriggerTaskResp{
 		ExecutionId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",

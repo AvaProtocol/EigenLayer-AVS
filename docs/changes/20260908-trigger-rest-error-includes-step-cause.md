@@ -35,3 +35,4 @@ No retry. The gateway still does not wait-and-resend on `replacement underpriced
 - `TestAnalyzeExecutionResult_SomeStepsFailed` / `_AllFailure` now assert the step cause is in the summary
 - `TestProtoToOpenAPITriggerWorkflow_CopiesErrorAndSteps` (`status: failed`)
 - `TestProtoToOpenAPITriggerWorkflow_ErrorCopiesVmCauseAndSteps` (`status: error` — `VM execution error: …` plus steps)
+- `TestProtoToOpenAPITriggerWorkflow_WaitingNormalizesAwaitStepType` (`status: waiting` → `steps[].type` is `await`, not `NODE_TYPE_AWAIT`)
