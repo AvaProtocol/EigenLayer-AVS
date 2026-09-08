@@ -19,7 +19,7 @@ operator_address: <operator-eoa-address>
 avs_registry_coordinator_address: 0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD
 operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
 
-# RPC endpoints for AVS operations (Sepolia). Set via .env.local / env.
+# RPC endpoints for AVS operations (Sepolia). Set via .env / env.
 # eth_ws_url must support eth_call over WebSocket (not only eth_subscribe);
 # the EigenLayer SDK calls ServiceManager on the WS client at startup.
 # Supply a chain RPC you control. Do NOT point this at a free public endpoint

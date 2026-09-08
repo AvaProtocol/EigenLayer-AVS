@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,7 +43,17 @@ func NewProductionHTTPExecutor() *ProductionHTTPExecutor {
 }
 
 func (p *ProductionHTTPExecutor) ExecuteRequest(method, url, body string, headers map[string]string) (*resty.Response, error) {
-	request := p.client.R()
+	client := p.client
+	if isMoralisDataAPIURL(url) {
+		// Don't follow redirects while carrying X-API-Key (resty forwards
+		// custom headers off-host). Use a per-call client so other restApi
+		// traffic still follows redirects.
+		c := resty.New()
+		c.SetTimeout(30 * time.Second)
+		c.SetRedirectPolicy(resty.NoRedirectPolicy())
+		client = c
+	}
+	request := client.R()
 
 	// Set headers
 	for key, value := range headers {
@@ -576,10 +587,10 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		processedHeaders[processedKey] = processedValue
 	}
 
-	// Server-side auth providers (options.auth): mint + attach a provider token so the
-	// credential never lives in the workflow JSON. GoPlus first; on "" (keys unset or
-	// mint failed) we send no Authorization header — GoPlus still answers keyless.
-	if restAuthProvider(node) == "goplus" {
+	// Server-side auth providers (options.auth): attach a provider credential
+	// so the secret never lives in the workflow JSON / apContext.configVars.
+	switch restAuthProvider(node) {
+	case restAuthProviderGoplus:
 		if token := goplusTokenProvider(); token != "" {
 			processedHeaders["Authorization"] = token
 			if r.vm.logger != nil {
@@ -588,6 +599,19 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		} else if r.vm.logger != nil {
 			// Keys unset or mint failed: GoPlus still answers keyless (lower limits).
 			r.vm.logger.Warn("REST: GoPlus auth requested but no token minted; falling back to keyless", "stepID", stepID)
+		}
+	case restAuthProviderMoralis:
+		if key := moralisAPIKeyHeader(url); key != "" {
+			processedHeaders["X-API-Key"] = key
+			if r.vm.logger != nil {
+				r.vm.logger.Debug("REST: attached Moralis API key (authed)", "stepID", stepID)
+			}
+		} else if r.vm.logger != nil {
+			if isMoralisDataAPIURL(url) {
+				r.vm.logger.Warn("REST: Moralis auth requested but macros.secrets.moralis_api_key is empty", "stepID", stepID)
+			} else {
+				r.vm.logger.Warn("REST: Moralis auth requested but URL is not https://deep-index.moralis.io; skipping key", "stepID", stepID)
+			}
 		}
 	}
 
@@ -885,11 +909,16 @@ func detectNotificationProvider(u string) string {
 // ── REST auth providers ─────────────────────────────────────────────────────
 // A restApi node can request server-side credential injection with
 //
-//	config.options.auth = { "provider": "goplus" }
+//	config.options.auth = { "provider": "goplus" | "moralis" }
 //
-// The gateway mints the provider's token from macros.secrets and attaches it as
-// the Authorization header at execution time, so the secret never appears in the
-// (client-visible) workflow JSON. GoPlus is the first provider; add more here.
+// The gateway reads the provider's secret from macros.secrets and attaches it
+// at execution time, so the secret never appears in the workflow JSON or in
+// apContext.configVars (templates cannot spend or exfiltrate it).
+const (
+	restAuthProviderGoplus  = "goplus"
+	restAuthProviderMoralis = "moralis"
+	moralisDataAPIHost      = "deep-index.moralis.io"
+)
 
 // restAuthProvider returns the lower-cased options.auth.provider (e.g. "goplus"),
 // or "" when none is set. Mirrors shouldSummarize's options-bag read.
@@ -907,6 +936,29 @@ func restAuthProvider(node *avsproto.RestAPINode) string {
 	}
 	provider, _ := auth["provider"].(string)
 	return strings.ToLower(strings.TrimSpace(provider))
+}
+
+// isMoralisDataAPIURL is true only for https://deep-index.moralis.io/...
+// Host-pin so options.auth.provider=moralis cannot exfiltrate the platform
+// key to an attacker-controlled URL.
+func isMoralisDataAPIURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	if !strings.EqualFold(u.Scheme, "https") {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), moralisDataAPIHost)
+}
+
+// moralisAPIKeyHeader returns the platform Moralis key when destURL is the
+// Moralis Data API, else "". Callers attach it as X-API-Key.
+func moralisAPIKeyHeader(destURL string) string {
+	if !isMoralisDataAPIURL(destURL) {
+		return ""
+	}
+	return GetMacroSecret(platformSecretMoralisAPIKey)
 }
 
 // goplusTokenProvider is the seam the REST runner calls to obtain a GoPlus
@@ -933,8 +985,8 @@ var goplusTokenCache struct {
 // Returns "" to fall back to keyless GoPlus access (lower rate limits) when the
 // keys are unset or minting fails — the caller then sends no Authorization header.
 func goplusAuthHeader() string {
-	appKey := GetMacroSecret("goplus_app_key")
-	appSecret := GetMacroSecret("goplus_app_secret")
+	appKey := GetMacroSecret(platformSecretGoplusAppKey)
+	appSecret := GetMacroSecret(platformSecretGoplusAppSecret)
 	if appKey == "" || appSecret == "" {
 		return ""
 	}

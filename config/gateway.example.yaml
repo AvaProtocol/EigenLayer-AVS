@@ -12,14 +12,17 @@
 environment: development
 
 db_path: /tmp/ap-avs/gateway
+# Honored when set. Empty → `{db_path}_backup`. Periodic writes only when
+# backup_interval_hours > 0; otherwise backups run on migration only.
 backup_dir: /tmp/ap-avs-gateway-backup
+backup_interval_hours: 0
 
 # AVS operator EOA private key (testnet). Anything funded on Sepolia
 # will do — this signs EigenLayer registration + task-aggregation txs.
 ecdsa_private_key: <testnet-ecdsa-private-key-hex>
 
 # EigenLayer contracts live on Sepolia (the AVS registration chain).
-# Set via .env.local / env.
+# Set via .env / env.
 # Supply a chain RPC you control. Do NOT point this at a free public endpoint
 # (publicnode, *.base.org, ankr, llamarpc, ...): they rate-limit under load,
 # which makes runs fail nondeterministically on whichever request happens to be
@@ -78,7 +81,9 @@ alchemy_paymaster_policy_id: ""
 gas_manager_webhook_secret: ""
 
 # Token price service for fee USD lines / estimateFees. Env: MORALIS_API_KEY.
-# Distinct from macros.secrets.moralis_api_key (workflow templates only).
+# Distinct from macros.secrets.moralis_api_key (engine-internal: BalanceNode
+# and restApi options.auth.provider=moralis). Never interpolated into
+# apContext.configVars.
 moralis_api_key: ${MORALIS_API_KEY}
 
 # Top-level smart_wallet — required by the aa package globals (factory +
@@ -160,7 +165,10 @@ partners:
 # can't be replayed elsewhere; assertions must carry a matching `aud`.
 partner_assertion_audience: "avs-gateway-staging"
 
-# Optional: per-macro secret values referenced from workflow JSON.
+# Optional: per-macro secret values.
+# Notify tokens (sendgrid, telegram) interpolate via apContext.configVars.
+# Platform keys (moralis_api_key, goplus_app_*) stay engine-internal —
+# BalanceNode / options.auth.provider; they are NOT copied into configVars.
 # Leave keys empty unless your local workflows actually use them.
 macros:
   secrets:

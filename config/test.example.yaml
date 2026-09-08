@@ -24,7 +24,7 @@ backup_dir: /tmp/ap-avs-test-backup
 ecdsa_private_key: <testnet-ecdsa-private-key-hex>
 
 # EigenLayer contracts live on Sepolia (the AVS registration chain).
-# Set via .env.local / env.
+# Set via .env / env.
 # Supply a chain RPC you control. Do NOT point this at a free public endpoint
 # (publicnode, *.base.org, ankr, llamarpc, ...): they rate-limit under load,
 # which makes runs fail nondeterministically on whichever request happens to be
@@ -94,7 +94,9 @@ chains:
       paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
       max_wallets_per_owner:  3
 
-# Optional: per-macro secret values referenced from workflow JSON.
+# Optional: per-macro secret values. Notify tokens interpolate via
+# apContext.configVars. Platform keys (moralis_api_key, goplus_app_*) stay
+# engine-internal and are NOT copied into configVars.
 macros:
   secrets:
     ap_notify_bot_token: ""
