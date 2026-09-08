@@ -15,7 +15,7 @@ var (
 		Long: `Initialize and run aggregator.
 
 Use --config=path-to-your-config-file. default is=./config/aggregator.yaml `,
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			// The REST API surface (api/openapi.yaml) is mounted here at
 			// the cmd layer rather than inside the aggregator package so
 			// the aggregator core never imports aggregator/rest. That
@@ -31,7 +31,9 @@ Use --config=path-to-your-config-file. default is=./config/aggregator.yaml `,
 				srv.Mount(e)
 			}
 
-			aggregator.RunWithConfig(config, aggregator.WithHTTPMount(mountRest))
+			// RunE so Start errors (e.g. fail-closed periodic backup dir)
+			// reach rootCmd.Execute and os.Exit(1). Bare Run discarded them.
+			return aggregator.RunWithConfig(config, aggregator.WithHTTPMount(mountRest))
 		},
 	}
 )
