@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -30,8 +31,10 @@ var platformSecretNames = map[string]struct{}{
 	platformSecretGoplusAppSecret: {},
 }
 
+// isPlatformSecretName is case-insensitive, matching the ap_ prefix rule
+// in CreateSecret. Map keys are stored lowercase.
 func isPlatformSecretName(name string) bool {
-	_, ok := platformSecretNames[name]
+	_, ok := platformSecretNames[strings.ToLower(name)]
 	return ok
 }
 

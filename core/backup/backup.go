@@ -21,6 +21,7 @@ type Service struct {
 	backupEnabled bool
 	interval      time.Duration
 	stop          chan struct{}
+	wg            sync.WaitGroup
 }
 
 func NewService(logger logging.Logger, db storage.Storage, backupDir string) *Service {
@@ -52,8 +53,12 @@ func (s *Service) StartPeriodicBackup(interval time.Duration) error {
 	s.interval = interval
 	s.stop = make(chan struct{})
 	s.backupEnabled = true
-
-	go s.backupLoop(s.stop)
+	s.wg.Add(1)
+	stop := s.stop
+	go func() {
+		defer s.wg.Done()
+		s.backupLoop(stop)
+	}()
 
 	s.logger.Infof("Started periodic backup every %v to %s", interval, s.backupDir)
 	return nil
@@ -65,10 +70,13 @@ func (s *Service) StopPeriodicBackup() {
 	if !s.backupEnabled {
 		return
 	}
-
 	s.backupEnabled = false
 	close(s.stop)
 	s.stop = nil
+	// backupLoop / PerformBackup never take mu, so waiting here is safe
+	// and serializes Stop with a concurrent Start. aggregator shutdown
+	// then db.Close() cannot race an in-flight db.Backup.
+	s.wg.Wait()
 	s.logger.Infof("Stopped periodic backup")
 }
 

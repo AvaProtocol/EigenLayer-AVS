@@ -3,6 +3,7 @@ package taskengine
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
@@ -12,6 +13,30 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 )
+
+// reservedSecretNameCases is every platform secret name plus an uppercase
+// variant so Create/Update reject the same case-insensitive set as ap_.
+func reservedSecretNameCases() []string {
+	base := []string{platformSecretMoralisAPIKey, platformSecretGoplusAppKey, platformSecretGoplusAppSecret}
+	out := make([]string, 0, len(base)*2)
+	for _, n := range base {
+		out = append(out, n, strings.ToUpper(n))
+	}
+	return out
+}
+
+func TestIsPlatformSecretName(t *testing.T) {
+	for _, name := range reservedSecretNameCases() {
+		if !isPlatformSecretName(name) {
+			t.Errorf("%q should be a reserved platform secret name", name)
+		}
+	}
+	for _, name := range []string{"sendgrid_key", "telegram_bot", "ap_notify_bot_token", "my_secret"} {
+		if isPlatformSecretName(name) {
+			t.Errorf("%q should not be reserved", name)
+		}
+	}
+}
 
 // Helper function to create a test engine with proper cleanup
 func createSecretTestEngine(t *testing.T) *Engine {
@@ -78,7 +103,7 @@ func TestCreateSecret(t *testing.T) {
 	})
 
 	t.Run("Create reserved platform secret name should fail", func(t *testing.T) {
-		for _, name := range []string{platformSecretMoralisAPIKey, platformSecretGoplusAppKey, platformSecretGoplusAppSecret} {
+		for _, name := range reservedSecretNameCases() {
 			success, err := engine.CreateSecret(user, &avsproto.CreateOrUpdateSecretReq{
 				Name:   name,
 				Secret: "nope",
@@ -119,12 +144,14 @@ func TestUpdateSecret(t *testing.T) {
 	assert.NoError(t, err)
 
 	t.Run("Update reserved platform secret name should fail", func(t *testing.T) {
-		success, err := engine.UpdateSecret(user, &avsproto.CreateOrUpdateSecretReq{
-			Name:   platformSecretMoralisAPIKey,
-			Secret: "nope",
-		})
-		assert.Error(t, err)
-		assert.False(t, success)
+		for _, name := range reservedSecretNameCases() {
+			success, err := engine.UpdateSecret(user, &avsproto.CreateOrUpdateSecretReq{
+				Name:   name,
+				Secret: "nope",
+			})
+			assert.Error(t, err, name)
+			assert.False(t, success, name)
+		}
 	})
 
 	t.Run("Update existing secret", func(t *testing.T) {
