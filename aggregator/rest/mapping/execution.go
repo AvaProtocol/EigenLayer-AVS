@@ -85,6 +85,39 @@ func ProtoToOpenAPIExecution(in *avsproto.Execution, workflowID string) (generat
 	return out, nil
 }
 
+// ProtoToOpenAPITriggerWorkflow lifts engine TriggerTaskResp into the REST
+// trigger envelope. gRPC already carries steps when isBlocking=true; REST
+// used to copy only executionId/status/timestamps/error, so clients that
+// only called :trigger never saw step.error (bundler "replacement
+// underpriced" and similar).
+func ProtoToOpenAPITriggerWorkflow(in *avsproto.TriggerTaskResp) (generated.TriggerWorkflowResponse, error) {
+	out := generated.TriggerWorkflowResponse{
+		ExecutionId: generated.Ulid(in.GetExecutionId()),
+		Status:      generated.ExecutionStatus(ExecutionStatusProtoToWire(in.GetStatus())),
+	}
+	if v := in.GetStartAt(); v != 0 {
+		out.StartAt = &v
+	}
+	if v := in.GetEndAt(); v != 0 {
+		out.EndAt = &v
+	}
+	if msg := in.GetError(); msg != "" {
+		out.Error = &msg
+	}
+	if steps := in.GetSteps(); len(steps) > 0 {
+		mapped := make([]generated.ExecutionStep, 0, len(steps))
+		for _, s := range steps {
+			step, err := protoExecutionStepToOpenAPI(s)
+			if err != nil {
+				return out, fmt.Errorf("step %s: %w", s.GetId(), err)
+			}
+			mapped = append(mapped, step)
+		}
+		out.Steps = &mapped
+	}
+	return out, nil
+}
+
 // ProtoExecutionToOpenAPISummary lifts a full Execution into the lightweight
 // status summary shape (skips the steps/cogs/fee payload to keep responses
 // small). Status goes through the shared ExecutionStatusProtoToWire so every

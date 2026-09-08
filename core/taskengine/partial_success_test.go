@@ -99,10 +99,15 @@ func TestAnalyzeExecutionResult_SomeStepsFailed(t *testing.T) {
 		t.Errorf("Expected resultStatus=ExecutionFailed, got resultStatus=%v", resultStatus)
 	}
 
-	// Check that error message contains failure information
+	// Check that error message contains failure information and the
+	// step's own error — name-only summaries hid bundler/node causes
+	// on REST :trigger.
 	expectedSubstring := "1 of 4 steps failed"
 	if !strings.HasPrefix(errorMessage, expectedSubstring) {
 		t.Errorf("Expected error message to start with '%s', got: %s", expectedSubstring, errorMessage)
+	}
+	if !strings.Contains(errorMessage, "Database Query: Connection timeout") {
+		t.Errorf("Expected error message to include step cause, got: %s", errorMessage)
 	}
 }
 
@@ -150,6 +155,42 @@ func TestAnalyzeExecutionResult_AllFailure(t *testing.T) {
 	expectedSubstring := "3 of 3 steps failed"
 	if len(errorMessage) == 0 || !strings.Contains(errorMessage, expectedSubstring) {
 		t.Errorf("Expected error message to contain '%s', got: %s", expectedSubstring, errorMessage)
+	}
+	if !strings.Contains(errorMessage, "HTTP Request: HTTP 500 error") {
+		t.Errorf("Expected error message to include step cause, got: %s", errorMessage)
+	}
+}
+
+// TestAnalyzeExecutionResult_IncludesBundlerCause pins the UserOp-contention
+// case: REST :trigger copies execution.error and used to say only
+// "1 of 2 steps failed: w", dropping "replacement underpriced".
+func TestAnalyzeExecutionResult_IncludesBundlerCause(t *testing.T) {
+	vm := NewVM()
+	vm.logger = testutil.GetLogger()
+	vm.ExecutionLogs = []*avsproto.Execution_Step{
+		{
+			Id:      "trigger",
+			Success: true,
+			Name:    "blockTrigger",
+		},
+		{
+			Id:      "w",
+			Success: false,
+			Error:   "eth_sendUserOperation: replacement underpriced",
+			Name:    "w",
+		},
+	}
+
+	errorMessage, failedCount, resultStatus := vm.AnalyzeExecutionResult()
+	if resultStatus != ExecutionFailed {
+		t.Errorf("Expected ExecutionFailed, got %v", resultStatus)
+	}
+	if failedCount != 1 {
+		t.Errorf("Expected failedCount=1, got %d", failedCount)
+	}
+	want := "1 of 2 steps failed: w: eth_sendUserOperation: replacement underpriced"
+	if errorMessage != want {
+		t.Errorf("got %q, want %q", errorMessage, want)
 	}
 }
 
