@@ -12,6 +12,10 @@ import (
 // restApi options.auth.provider=moralis / goplus) but must NEVER copy
 // into apContext.configVars. restApi / customCode templates would
 // otherwise let a workflow spend or exfiltrate the platform keys.
+//
+// This is a denylist: a new macros.secrets credential that is engine-only
+// MUST be added here, or it fails open into configVars. Notify tokens
+// (sendgrid, telegram) stay interpolable on purpose.
 const (
 	platformSecretMoralisAPIKey   = "moralis_api_key"
 	platformSecretGoplusAppKey    = "goplus_app_key"

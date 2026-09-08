@@ -43,7 +43,17 @@ func NewProductionHTTPExecutor() *ProductionHTTPExecutor {
 }
 
 func (p *ProductionHTTPExecutor) ExecuteRequest(method, url, body string, headers map[string]string) (*resty.Response, error) {
-	request := p.client.R()
+	client := p.client
+	if isMoralisDataAPIURL(url) {
+		// Don't follow redirects while carrying X-API-Key (resty forwards
+		// custom headers off-host). Use a per-call client so other restApi
+		// traffic still follows redirects.
+		c := resty.New()
+		c.SetTimeout(30 * time.Second)
+		c.SetRedirectPolicy(resty.NoRedirectPolicy())
+		client = c
+	}
+	request := client.R()
 
 	// Set headers
 	for key, value := range headers {
@@ -975,8 +985,8 @@ var goplusTokenCache struct {
 // Returns "" to fall back to keyless GoPlus access (lower rate limits) when the
 // keys are unset or minting fails — the caller then sends no Authorization header.
 func goplusAuthHeader() string {
-	appKey := GetMacroSecret("goplus_app_key")
-	appSecret := GetMacroSecret("goplus_app_secret")
+	appKey := GetMacroSecret(platformSecretGoplusAppKey)
+	appSecret := GetMacroSecret(platformSecretGoplusAppSecret)
 	if appKey == "" || appSecret == "" {
 		return ""
 	}

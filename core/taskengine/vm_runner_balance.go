@@ -296,7 +296,7 @@ func (v *VM) runBalance(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, 
 	// Get Moralis API key from macro secrets (global package variable set by SetMacroSecrets)
 	moralisAPIKey := ""
 	if macroSecrets != nil {
-		moralisAPIKey = macroSecrets["moralis_api_key"]
+		moralisAPIKey = macroSecrets[platformSecretMoralisAPIKey]
 	}
 	if moralisAPIKey == "" {
 		err = fmt.Errorf("moralis API key is not configured in macros.secrets")
@@ -517,6 +517,9 @@ func (vm *VM) fetchMoralisBalances(
 
 	// Create HTTP client with timeout to prevent indefinite blocking
 	client := resty.New().SetTimeout(30 * time.Second)
+	// Don't follow redirects while carrying X-API-Key (resty forwards custom
+	// headers off-host). Moralis does not redirect off-host today.
+	client.SetRedirectPolicy(resty.NoRedirectPolicy())
 	request := client.R().
 		SetHeader("X-API-Key", apiKey).
 		SetQueryParam("chain", chain)

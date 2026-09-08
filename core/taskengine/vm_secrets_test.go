@@ -264,11 +264,11 @@ func TestCollectInputsIncludesSecrets(t *testing.T) {
 // to spend the platform Moralis quota.
 func TestPlatformSecretsOmittedFromConfigVars(t *testing.T) {
 	secrets := map[string]string{
-		"moralis_api_key":     "platform-moralis-should-not-leak",
-		"goplus_app_key":      "platform-goplus-key",
-		"goplus_app_secret":   "platform-goplus-secret",
-		"sendgrid_key":        "user-visible-sendgrid",
-		"ap_notify_bot_token": "user-visible-telegram",
+		platformSecretMoralisAPIKey:   "platform-moralis-should-not-leak",
+		platformSecretGoplusAppKey:    "platform-goplus-key",
+		platformSecretGoplusAppSecret: "platform-goplus-secret",
+		"sendgrid_key":                "user-visible-sendgrid",
+		"ap_notify_bot_token":         "user-visible-telegram",
 	}
 
 	vm, err := NewVMWithData(&model.Workflow{
@@ -293,7 +293,7 @@ func TestPlatformSecretsOmittedFromConfigVars(t *testing.T) {
 	}
 	configVars := apContextMap[ConfigVarsPath]
 
-	for _, k := range []string{"moralis_api_key", "goplus_app_key", "goplus_app_secret"} {
+	for k := range platformSecretNames {
 		if _, exists := configVars[k]; exists {
 			t.Errorf("platform secret %q must not appear in apContext.configVars", k)
 		}

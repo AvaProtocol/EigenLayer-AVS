@@ -12,8 +12,8 @@
 
 ## Decision
 
-- Denylist `moralis_api_key`, `goplus_app_key`, `goplus_app_secret` from configVars. BalanceNode and GoPlus mint still read `macros.secrets` / `GetMacroSecret`. Notify tokens stay interpolable.
-- First-party Moralis restApi uses `options.auth.provider: moralis`. The gateway attaches `X-API-Key` only when the URL host is `https://deep-index.moralis.io`.
+- Denylist `moralis_api_key`, `goplus_app_key`, `goplus_app_secret` from configVars. BalanceNode and GoPlus mint still read `macros.secrets` / `GetMacroSecret` via `platformSecret*` constants. Notify tokens stay interpolable. New engine-only secrets must be added to `platformSecretNames` or they fail open into configVars.
+- First-party Moralis restApi uses `options.auth.provider: moralis`. The gateway attaches `X-API-Key` only when the URL host is `https://deep-index.moralis.io`, and that request does not follow redirects (resty would otherwise forward `X-API-Key` off-host).
 - Honor yaml `backup_dir` (fallback `{db_path}_backup`). yaml `backup_interval_hours` > 0 starts the existing periodic ticker (retention 3). Production yaml (avs-infra) is `/data/gateway_backup` + 24h; that field is ignored until this binary is deployed.
 
 ## Verification
