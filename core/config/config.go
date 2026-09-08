@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -542,6 +543,23 @@ func resolveBackupInterval(hours int) time.Duration {
 	return time.Duration(hours) * time.Hour
 }
 
+// validatePeriodicBackup fail-closes config load when periodic backups are
+// enabled but the resolved dir is empty or not absolute. Interval 0
+// (migration-only) skips this so local/dev configs without a backup
+// volume still load. MkdirAll is still the runtime check in StartPeriodicBackup.
+func validatePeriodicBackup(dir string, interval time.Duration) error {
+	if interval <= 0 {
+		return nil
+	}
+	if dir == "" {
+		return fmt.Errorf("backup_interval_hours is set but backup dir is empty")
+	}
+	if !filepath.IsAbs(dir) {
+		return fmt.Errorf("backup_dir must be an absolute path when periodic backups are enabled, got %q", dir)
+	}
+	return nil
+}
+
 // SmartWalletConfigRaw represents the raw YAML config for smart wallet operations.
 // Used both in the top-level aggregator config and in per-chain gateway configs.
 type SmartWalletConfigRaw struct {
@@ -1037,6 +1055,9 @@ func NewConfig(configFilePath string) (*Config, error) {
 
 	// If HttpBindAddress is empty, HTTP server will be disabled (startup code will skip starting it)
 	config.validate()
+	if err := validatePeriodicBackup(config.BackupDir, config.BackupInterval); err != nil {
+		return nil, err
+	}
 	return config, nil
 }
 

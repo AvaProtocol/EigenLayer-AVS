@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -16,9 +17,11 @@ type Service struct {
 	logger        logging.Logger
 	db            storage.Storage
 	backupDir     string
+	mu            sync.Mutex
 	backupEnabled bool
 	interval      time.Duration
 	stop          chan struct{}
+	wg            sync.WaitGroup
 }
 
 func NewService(logger logging.Logger, db storage.Storage, backupDir string) *Service {
@@ -27,39 +30,57 @@ func NewService(logger logging.Logger, db storage.Storage, backupDir string) *Se
 		db:            db,
 		backupDir:     backupDir,
 		backupEnabled: false,
-		stop:          make(chan struct{}),
 	}
 }
 
 func (s *Service) StartPeriodicBackup(interval time.Duration) error {
-	if s.backupEnabled {
-		return fmt.Errorf("backup service already running")
+	if interval <= 0 {
+		return fmt.Errorf("backup interval must be positive")
 	}
-
+	if s.backupDir == "" {
+		return fmt.Errorf("backup directory is empty")
+	}
 	if err := os.MkdirAll(s.backupDir, 0755); err != nil {
 		return fmt.Errorf("failed to create backup directory: %v", err)
 	}
 
-	s.interval = interval
-	s.backupEnabled = true
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.backupEnabled {
+		return fmt.Errorf("backup service already running")
+	}
 
-	go s.backupLoop()
+	s.interval = interval
+	s.stop = make(chan struct{})
+	s.backupEnabled = true
+	s.wg.Add(1)
+	stop := s.stop
+	go func() {
+		defer s.wg.Done()
+		s.backupLoop(stop)
+	}()
 
 	s.logger.Infof("Started periodic backup every %v to %s", interval, s.backupDir)
 	return nil
 }
 
 func (s *Service) StopPeriodicBackup() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if !s.backupEnabled {
 		return
 	}
-
 	s.backupEnabled = false
 	close(s.stop)
+	s.stop = nil
+	// backupLoop / PerformBackup never take mu, so waiting here is safe
+	// and serializes Stop with a concurrent Start. aggregator shutdown
+	// then db.Close() cannot race an in-flight db.Backup.
+	s.wg.Wait()
 	s.logger.Infof("Stopped periodic backup")
 }
 
-func (s *Service) backupLoop() {
+func (s *Service) backupLoop(stop <-chan struct{}) {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 
@@ -71,7 +92,7 @@ func (s *Service) backupLoop() {
 			} else {
 				s.logger.Infof("Periodic backup completed successfully to %s", backupFile)
 			}
-		case <-s.stop:
+		case <-stop:
 			return
 		}
 	}

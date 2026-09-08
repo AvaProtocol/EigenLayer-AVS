@@ -334,7 +334,7 @@ func (agg *Aggregator) Start(ctx context.Context, opts ...StartOption) error {
 
 	if agg.config.BackupInterval > 0 {
 		if err := agg.backup.StartPeriodicBackup(agg.config.BackupInterval); err != nil {
-			agg.logger.Error("failed to start periodic backup", "error", err, "dir", agg.config.BackupDir)
+			return fmt.Errorf("periodic backup to %s: %w", agg.config.BackupDir, err)
 		}
 	}
 

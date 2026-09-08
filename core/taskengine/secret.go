@@ -2,10 +2,13 @@ package taskengine
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/common"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Platform secret names the engine may read internally (BalanceNode,
@@ -28,9 +31,21 @@ var platformSecretNames = map[string]struct{}{
 	platformSecretGoplusAppSecret: {},
 }
 
+// isPlatformSecretName is case-insensitive, matching the ap_ prefix rule
+// in CreateSecret. Map keys are stored lowercase.
 func isPlatformSecretName(name string) bool {
-	_, ok := platformSecretNames[name]
+	_, ok := platformSecretNames[strings.ToLower(name)]
 	return ok
+}
+
+// rejectReservedSecretName refuses user/workflow secrets that share a
+// platform key name. Those names are omitted from apContext.configVars, so
+// a write would succeed and then silently fail to interpolate.
+func rejectReservedSecretName(name string) error {
+	if isPlatformSecretName(name) {
+		return status.Errorf(codes.InvalidArgument, "secret name %q is reserved for platform use", name)
+	}
+	return nil
 }
 
 func LoadSecretForTask(db storage.Storage, task *model.Workflow) (map[string]string, error) {
