@@ -256,22 +256,9 @@ func (s *Server) TriggerWorkflow(ctx echo.Context, id generated.Ulid) error {
 		return notFoundOrError(err)
 	}
 
-	// The proto TriggerTaskResp shape closely mirrors the OpenAPI
-	// response; lift it field-by-field rather than via the JSON
-	// roundtrip helper because the proto Status field is an enum we
-	// translate to a lowercase string.
-	out := generated.TriggerWorkflowResponse{
-		ExecutionId: generated.Ulid(resp.GetExecutionId()),
-		Status:      generated.ExecutionStatus(mapping.ExecutionStatusProtoToWire(resp.GetStatus())),
-	}
-	if v := resp.GetStartAt(); v != 0 {
-		out.StartAt = &v
-	}
-	if v := resp.GetEndAt(); v != 0 {
-		out.EndAt = &v
-	}
-	if msg := resp.GetError(); msg != "" {
-		out.Error = &msg
+	out, mapErr := mapping.ProtoToOpenAPITriggerWorkflow(resp)
+	if mapErr != nil {
+		return mapErr
 	}
 	return ctx.JSON(http.StatusOK, out)
 }

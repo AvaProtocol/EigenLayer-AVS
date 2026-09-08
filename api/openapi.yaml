@@ -1176,7 +1176,21 @@ components:
         status: { $ref: '#/components/schemas/ExecutionStatus' }
         startAt: { type: integer, format: int64 }
         endAt: { type: integer, format: int64 }
-        error: { type: string }
+        error:
+          type: string
+          description: |
+            Empty when status is success. On failed, a summary of the form
+            `N of M steps failed: <name>: <step.error>, …` so the cause
+            (e.g. a bundler `replacement underpriced`) is on this envelope,
+            not only on GET /executions/{id}. On error, the system message.
+        steps:
+          type: array
+          items: { $ref: '#/components/schemas/ExecutionStep' }
+          description: |
+            Execution steps. Populated when isBlocking=true (same as gRPC
+            TriggerTaskResp.steps). The envelope `error` summary is built
+            from each failed step's `error` string. `errorCode` is copied
+            onto the step only; it is not concatenated into `error`.
 
     SimulateWorkflowRequest:
       type: object

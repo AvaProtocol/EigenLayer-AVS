@@ -26,6 +26,26 @@ func TestResolveBackupDir(t *testing.T) {
 	}
 }
 
+func TestValidatePeriodicBackup(t *testing.T) {
+	t.Parallel()
+
+	if err := validatePeriodicBackup("", 0); err != nil {
+		t.Errorf("interval 0 should skip validation: %v", err)
+	}
+	if err := validatePeriodicBackup("relative", 0); err != nil {
+		t.Errorf("interval 0 allows relative dir: %v", err)
+	}
+	if err := validatePeriodicBackup("", 24*time.Hour); err == nil {
+		t.Error("empty dir with interval > 0 should fail")
+	}
+	if err := validatePeriodicBackup("gateway_backup", 24*time.Hour); err == nil {
+		t.Error("relative dir with interval > 0 should fail")
+	}
+	if err := validatePeriodicBackup("/data/gateway_backup", 24*time.Hour); err != nil {
+		t.Errorf("absolute dir should pass: %v", err)
+	}
+}
+
 func TestResolveBackupInterval(t *testing.T) {
 	t.Parallel()
 
