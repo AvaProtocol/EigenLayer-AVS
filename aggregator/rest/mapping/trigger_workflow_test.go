@@ -56,6 +56,34 @@ func TestProtoToOpenAPITriggerWorkflow_CopiesErrorAndSteps(t *testing.T) {
 	assert.Equal(t, "eth_sendUserOperation: replacement underpriced", *write.Error)
 }
 
+func TestProtoToOpenAPITriggerWorkflow_ErrorCopiesVmCauseAndSteps(t *testing.T) {
+	errMsg := "VM execution error: context canceled (step analysis: 1 of 2 steps failed: w: eth_sendUserOperation: replacement underpriced)"
+	in := &avsproto.TriggerTaskResp{
+		ExecutionId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		Status:      avsproto.ExecutionStatus_EXECUTION_STATUS_ERROR,
+		Error:       &errMsg,
+		Steps: []*avsproto.Execution_Step{
+			{
+				Id:      "w",
+				Type:    avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
+				Name:    "w",
+				Success: false,
+				Error:   "eth_sendUserOperation: replacement underpriced",
+			},
+		},
+	}
+
+	out, err := ProtoToOpenAPITriggerWorkflow(in)
+	require.NoError(t, err)
+	assert.Equal(t, "error", string(out.Status))
+	require.NotNil(t, out.Error)
+	assert.Equal(t, errMsg, *out.Error)
+	require.NotNil(t, out.Steps)
+	require.Len(t, *out.Steps, 1)
+	require.NotNil(t, (*out.Steps)[0].Error)
+	assert.Equal(t, "eth_sendUserOperation: replacement underpriced", *(*out.Steps)[0].Error)
+}
+
 func TestProtoToOpenAPITriggerWorkflow_SuccessOmitsErrorAndEmptySteps(t *testing.T) {
 	in := &avsproto.TriggerTaskResp{
 		ExecutionId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
