@@ -1602,7 +1602,12 @@ type TriggerWorkflowRequest struct {
 
 // TriggerWorkflowResponse defines model for TriggerWorkflowResponse.
 type TriggerWorkflowResponse struct {
-	EndAt *int64  `json:"endAt,omitempty"`
+	EndAt *int64 `json:"endAt,omitempty"`
+
+	// Error Empty when status is success. On failed, a summary of the form
+	// `N of M steps failed: <name>: <step.error>, …` so the cause
+	// (e.g. a bundler `replacement underpriced`) is on this envelope,
+	// not only on GET /executions/{id}. On error, the system message.
 	Error *string `json:"error,omitempty"`
 
 	// ExecutionId ULID identifier (26-char Crockford base32).
@@ -1617,6 +1622,12 @@ type TriggerWorkflowResponse struct {
 	// logical failure (e.g., a node returned an error, or a wait timed out);
 	// `error` is a system / infrastructure failure (e.g., RPC unreachable).
 	Status ExecutionStatus `json:"status"`
+
+	// Steps Execution steps. Populated when isBlocking=true (same as gRPC
+	// TriggerTaskResp.steps). The envelope `error` summary is built
+	// from each failed step's `error` string. `errorCode` is copied
+	// onto the step only; it is not concatenated into `error`.
+	Steps *[]ExecutionStep `json:"steps,omitempty"`
 }
 
 // Ulid ULID identifier (26-char Crockford base32).

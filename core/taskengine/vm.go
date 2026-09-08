@@ -3621,6 +3621,17 @@ func getStepDisplayName(step *avsproto.Execution_Step) string {
 	return stepName
 }
 
+// failedStepLabel is the per-step fragment in execution.error. Name-only
+// summaries hid the cause (e.g. bundler "replacement underpriced") on
+// REST :trigger, which copies execution.error and used to omit steps.
+func failedStepLabel(step *avsproto.Execution_Step) string {
+	name := getStepDisplayName(step)
+	if msg := strings.TrimSpace(step.GetError()); msg != "" {
+		return name + ": " + msg
+	}
+	return name
+}
+
 // AnalyzeExecutionResult examines all execution steps and determines overall success/failure status.
 // Returns (errorMessage, failedStepCount, resultStatus)
 func (v *VM) AnalyzeExecutionResult() (string, int, ExecutionResultStatus) {
@@ -3631,15 +3642,15 @@ func (v *VM) AnalyzeExecutionResult() (string, int, ExecutionResultStatus) {
 		return "no execution steps found", 0, ExecutionFailed
 	}
 
-	var failedStepNames []string
+	var failedStepLabels []string
 
 	for _, step := range v.ExecutionLogs {
 		if !step.Success && step.Error != "" {
-			failedStepNames = append(failedStepNames, getStepDisplayName(step))
+			failedStepLabels = append(failedStepLabels, failedStepLabel(step))
 		}
 	}
 
-	failedCount := len(failedStepNames)
+	failedCount := len(failedStepLabels)
 
 	if failedCount == 0 {
 		// All executed steps succeeded. Branch/conditional skips are normal
@@ -3649,7 +3660,7 @@ func (v *VM) AnalyzeExecutionResult() (string, int, ExecutionResultStatus) {
 	}
 
 	// One or more steps failed (covers both partial and total failure).
-	errorMessage := formatExecutionErrorMessage("", failedCount, len(v.ExecutionLogs), failedStepNames)
+	errorMessage := formatExecutionErrorMessage("", failedCount, len(v.ExecutionLogs), failedStepLabels)
 	return errorMessage, failedCount, ExecutionFailed
 }
 
