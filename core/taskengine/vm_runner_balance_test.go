@@ -177,13 +177,13 @@ func setupBalanceVM(t *testing.T, config *avsproto.BalanceNode_Config) (*VM, *av
 			fmt.Printf("TEST SETUP: Loaded real Moralis API key: %s... (length: %d)\n", moralisAPIKey[:20], len(moralisAPIKey))
 		}
 		SetMacroSecrets(map[string]string{
-			"moralis_api_key": moralisAPIKey,
+			platformSecretMoralisAPIKey: moralisAPIKey,
 		})
 	} else {
 		// Fallback for tests that don't need real API
 		fmt.Printf("TEST SETUP: No real Moralis API key found, using test-api-key\n")
 		SetMacroSecrets(map[string]string{
-			"moralis_api_key": "test-api-key",
+			platformSecretMoralisAPIKey: "test-api-key",
 		})
 	}
 
@@ -909,7 +909,7 @@ func TestBalanceNode_MissingAPIKey(t *testing.T) {
 
 	// Restore API key for other tests
 	SetMacroSecrets(map[string]string{
-		"moralis_api_key": "test-api-key",
+		platformSecretMoralisAPIKey: "test-api-key",
 	})
 }
 
@@ -987,7 +987,7 @@ func TestBalanceNode_TokenAddressesWithTemplateVariables(t *testing.T) {
 		t.Skip("real moralis API key not configured in macros.secrets - skipping integration test")
 	}
 	SetMacroSecrets(map[string]string{
-		"moralis_api_key": moralisAPIKey,
+		platformSecretMoralisAPIKey: moralisAPIKey,
 	})
 
 	t.Log("Running BalanceNode with template variables in tokenAddresses...")
@@ -1272,7 +1272,7 @@ func TestBalanceNode_ExtractAddressFromObject(t *testing.T) {
 
 			// Set up mock API key
 			SetMacroSecrets(map[string]string{
-				"moralis_api_key": "test-api-key",
+				platformSecretMoralisAPIKey: "test-api-key",
 			})
 
 			// Create mock Moralis server
@@ -1342,7 +1342,7 @@ func TestBalanceNode_MultipleTokenAddresses(t *testing.T) {
 	// Get real Moralis API key from macro secrets (already set in setupBalanceVM)
 	moralisAPIKey := ""
 	if macroSecrets != nil {
-		moralisAPIKey = macroSecrets["moralis_api_key"]
+		moralisAPIKey = macroSecrets[platformSecretMoralisAPIKey]
 	}
 	if moralisAPIKey == "" || moralisAPIKey == "test-api-key" {
 		t.Skip("real moralis API key not configured in macros.secrets - skipping integration test")

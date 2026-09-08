@@ -296,28 +296,12 @@ func (v *VM) runBalance(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, 
 	// Get Moralis API key from macro secrets (global package variable set by SetMacroSecrets)
 	moralisAPIKey := ""
 	if macroSecrets != nil {
-		moralisAPIKey = macroSecrets["moralis_api_key"]
+		moralisAPIKey = macroSecrets[platformSecretMoralisAPIKey]
 	}
 	if moralisAPIKey == "" {
 		err = fmt.Errorf("moralis API key is not configured in macros.secrets")
 		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
 		return executionLogStep, err
-	}
-
-	// Debug logging for CI/testing (show first 20 chars of API key to verify it's loaded)
-	if len(moralisAPIKey) > 20 {
-		fmt.Printf("DEBUG: Moralis API key loaded: %s... (length: %d)\n", moralisAPIKey[:20], len(moralisAPIKey))
-	} else {
-		fmt.Printf("DEBUG: Moralis API key loaded (length: %d)\n", len(moralisAPIKey))
-	}
-
-	// Additional debug: check if it looks like a JWT
-	if strings.HasPrefix(moralisAPIKey, "eyJ") {
-		fmt.Printf("DEBUG: Moralis API key format: JWT (starts with eyJ)\n")
-	} else if moralisAPIKey == "test-api-key" {
-		fmt.Printf("DEBUG: Moralis API key format: test/mock key\n")
-	} else {
-		fmt.Printf("DEBUG: Moralis API key format: unknown/other\n")
 	}
 
 	// Fetch balances from Moralis
@@ -533,6 +517,9 @@ func (vm *VM) fetchMoralisBalances(
 
 	// Create HTTP client with timeout to prevent indefinite blocking
 	client := resty.New().SetTimeout(30 * time.Second)
+	// Don't follow redirects while carrying X-API-Key (resty forwards custom
+	// headers off-host). Moralis does not redirect off-host today.
+	client.SetRedirectPolicy(resty.NoRedirectPolicy())
 	request := client.R().
 		SetHeader("X-API-Key", apiKey).
 		SetQueryParam("chain", chain)

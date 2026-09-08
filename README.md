@@ -317,7 +317,7 @@ func main() {
 Production and local development use Alchemy's ERC-4337 bundler. With
 `bundler_provider: alchemy`, the endpoint is derived as
 `https://<network>.g.alchemy.com/v2/<ALCHEMY_API_KEY>` (e.g. `eth-sepolia`,
-`base-sepolia`, `eth-mainnet`). Set `ALCHEMY_API_KEY` in `.env.local`.
+`base-sepolia`, `eth-mainnet`). Set `ALCHEMY_API_KEY` in `.env`.
 
 ### Basic Connectivity Test
 

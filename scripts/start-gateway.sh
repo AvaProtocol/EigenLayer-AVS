@@ -19,7 +19,7 @@
 #   2 (top-right)    Worker Sepolia       — :50051
 #   3 (bottom-right) Worker Base Sepolia  — :50052
 #
-# Bundler: ALCHEMY_API_KEY is sourced from ./.env.local and exported into the
+# Bundler: ALCHEMY_API_KEY is sourced from ./.env and exported into the
 # tmux session so the YAMLs' ${ALCHEMY_API_KEY} placeholders resolve. Every
 # chain uses bundler_provider: alchemy (endpoint derived from the key).
 
@@ -52,16 +52,16 @@ command -v tmux >/dev/null 2>&1 || { echo "❌ tmux not found. Run: brew install
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Source env from .env.local (so YAML ${VAR} expansion resolves).
-if [[ -f "$PROJECT_DIR/.env.local" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$PROJECT_DIR/.env.local"
-    set +a
-fi
+# Source env from .env (so YAML ${VAR} expansion resolves). Optional leftover
+# .env.local still overrides if present.
+set -a
+# shellcheck disable=SC1090
+[[ -f "$PROJECT_DIR/.env" ]] && source "$PROJECT_DIR/.env"
+[[ -f "$PROJECT_DIR/.env.local" ]] && source "$PROJECT_DIR/.env.local"
+set +a
 
 if [[ -z "$ALCHEMY_API_KEY" ]]; then
-    echo "❌ Missing ALCHEMY_API_KEY. Set in $PROJECT_DIR/.env.local:"
+    echo "❌ Missing ALCHEMY_API_KEY. Set in $PROJECT_DIR/.env:"
     echo "     ALCHEMY_API_KEY=..."
     echo ""
     echo "   The bundler endpoint is derived from this key (bundler_provider: alchemy)."

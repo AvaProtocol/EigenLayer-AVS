@@ -21,9 +21,10 @@ import (
 // with a summarizer enabled spends an LLM call per run. Occurrence *is* the
 // cost, so these ceilings are universal rather than conditional on which
 // providers a workflow happens to reference. That also sidesteps a detection
-// problem: BalanceNode reads `macroSecrets["moralis_api_key"]` directly rather
-// than through an `{{apContext.configVars.*}}` template, so no static scan of
-// the task body can reliably tell which tasks spend which quota.
+// problem: BalanceNode reads macros.secrets[platformSecretMoralisAPIKey]
+// directly rather than through an `{{apContext.configVars.*}}` template, so
+// no static scan of the task body can reliably tell which tasks spend which
+// quota.
 //
 // These are deliberately compile-time constants, not config: the point is a
 // bound that holds in every environment without an operator having to set it,
