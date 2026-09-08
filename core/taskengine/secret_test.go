@@ -77,6 +77,17 @@ func TestCreateSecret(t *testing.T) {
 		assert.Equal(t, "workflow123", workflowSecret.WorkflowId)
 	})
 
+	t.Run("Create reserved platform secret name should fail", func(t *testing.T) {
+		for _, name := range []string{platformSecretMoralisAPIKey, platformSecretGoplusAppKey, platformSecretGoplusAppSecret} {
+			success, err := engine.CreateSecret(user, &avsproto.CreateOrUpdateSecretReq{
+				Name:   name,
+				Secret: "nope",
+			})
+			assert.Error(t, err, name)
+			assert.False(t, success, name)
+		}
+	})
+
 	t.Run("Create secret with empty name should fail", func(t *testing.T) {
 		success, err := engine.CreateSecret(user, &avsproto.CreateOrUpdateSecretReq{
 			Name:   "",
@@ -106,6 +117,15 @@ func TestUpdateSecret(t *testing.T) {
 		Secret: "original_value",
 	})
 	assert.NoError(t, err)
+
+	t.Run("Update reserved platform secret name should fail", func(t *testing.T) {
+		success, err := engine.UpdateSecret(user, &avsproto.CreateOrUpdateSecretReq{
+			Name:   platformSecretMoralisAPIKey,
+			Secret: "nope",
+		})
+		assert.Error(t, err)
+		assert.False(t, success)
+	})
 
 	t.Run("Update existing secret", func(t *testing.T) {
 		success, err := engine.UpdateSecret(user, &avsproto.CreateOrUpdateSecretReq{

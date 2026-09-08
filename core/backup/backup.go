@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -16,6 +17,7 @@ type Service struct {
 	logger        logging.Logger
 	db            storage.Storage
 	backupDir     string
+	mu            sync.Mutex
 	backupEnabled bool
 	interval      time.Duration
 	stop          chan struct{}
@@ -27,39 +29,50 @@ func NewService(logger logging.Logger, db storage.Storage, backupDir string) *Se
 		db:            db,
 		backupDir:     backupDir,
 		backupEnabled: false,
-		stop:          make(chan struct{}),
 	}
 }
 
 func (s *Service) StartPeriodicBackup(interval time.Duration) error {
-	if s.backupEnabled {
-		return fmt.Errorf("backup service already running")
+	if interval <= 0 {
+		return fmt.Errorf("backup interval must be positive")
 	}
-
+	if s.backupDir == "" {
+		return fmt.Errorf("backup directory is empty")
+	}
 	if err := os.MkdirAll(s.backupDir, 0755); err != nil {
 		return fmt.Errorf("failed to create backup directory: %v", err)
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.backupEnabled {
+		return fmt.Errorf("backup service already running")
+	}
+
 	s.interval = interval
+	s.stop = make(chan struct{})
 	s.backupEnabled = true
 
-	go s.backupLoop()
+	go s.backupLoop(s.stop)
 
 	s.logger.Infof("Started periodic backup every %v to %s", interval, s.backupDir)
 	return nil
 }
 
 func (s *Service) StopPeriodicBackup() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if !s.backupEnabled {
 		return
 	}
 
 	s.backupEnabled = false
 	close(s.stop)
+	s.stop = nil
 	s.logger.Infof("Stopped periodic backup")
 }
 
-func (s *Service) backupLoop() {
+func (s *Service) backupLoop(stop <-chan struct{}) {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 
@@ -71,7 +84,7 @@ func (s *Service) backupLoop() {
 			} else {
 				s.logger.Infof("Periodic backup completed successfully to %s", backupFile)
 			}
-		case <-s.stop:
+		case <-stop:
 			return
 		}
 	}

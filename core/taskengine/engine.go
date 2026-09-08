@@ -4935,6 +4935,9 @@ func (n *Engine) CreateSecret(user *model.User, payload *avsproto.CreateOrUpdate
 	if strings.HasPrefix(strings.ToLower(payload.Name), "ap_") {
 		return false, status.Errorf(codes.InvalidArgument, "secret name cannot start with ap_")
 	}
+	if err := rejectReservedSecretName(payload.Name); err != nil {
+		return false, err
+	}
 
 	if len(payload.Name) == 0 || len(payload.Name) > MaxSecretNameLength {
 		return false, status.Errorf(codes.InvalidArgument, "secret name length is invalid: should be 1-255 character")
@@ -4951,6 +4954,9 @@ func (n *Engine) CreateSecret(user *model.User, payload *avsproto.CreateOrUpdate
 }
 
 func (n *Engine) UpdateSecret(user *model.User, payload *avsproto.CreateOrUpdateSecretReq) (bool, error) {
+	if err := rejectReservedSecretName(payload.Name); err != nil {
+		return false, err
+	}
 	updates := map[string][]byte{}
 	secret := &model.Secret{
 		User:       user,

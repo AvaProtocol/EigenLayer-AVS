@@ -57,6 +57,15 @@ func TestBackup(t *testing.T) {
 
 		// Test stopping when not running (should be a no-op)
 		service.StopPeriodicBackup()
+
+		// Start after stop must recreate the stop channel, not panic.
+		if err := service.StartPeriodicBackup(1 * time.Hour); err != nil {
+			t.Fatalf("restart after stop: %v", err)
+		}
+		if !service.backupEnabled {
+			t.Error("backup service should be enabled after restart")
+		}
+		service.StopPeriodicBackup()
 	})
 
 	t.Run("PerformBackup", func(t *testing.T) {
