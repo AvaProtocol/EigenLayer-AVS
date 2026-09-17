@@ -195,6 +195,93 @@ This is the Studio handoff that `FINDINGS_AA23` already named: call `uniswapV3Ca
 
 If a planned call is still missing at execute, preflight `SESSION_POLICY_TARGET_NOT_ALLOWED` / native codes — **re-grant with the complete purpose**, never silent widening.
 
+#### A.0.1 UI component: per-chain permission configuration
+
+This is the Studio `/wallets` permission card / modal. It is **not** Alchemy Gas Manager (one policy ID, many networks, gas sponsorship). Session grants are **per chain and per runner**. Enabling on Base does not enable Ethereum.
+
+##### Unit of configuration
+
+```
+permission card = (chainId, smartWalletAddress)
+```
+
+- `smartWalletAddress` is the MA v2 runner on **that** chain (CREATE2 may look the same across chains; the grant is still chain-scoped).
+- Gateway key is `sp:{chainId}:{owner}:{policyId}`; list filters by runner.
+- One **usable** grant per `(chainId, owner, runner)` (singleton). A new Enable **replaces** the previous usable grant (`supersededPolicyIds`). Toggles that look independent (Uniswap / Send ERC-20 / Send ETH) are **purposes compiled into that one grant**, not three gateway rows.
+
+##### What the card must pass on every call
+
+Every `policies.list` / `prepare` / `submit` / `DELETE` **must** send the **card’s** `chainId`, never the session/JWT `aud` as a substitute.
+
+| Call | Required |
+|---|---|
+| `GET /wallets/{runner}/policies?chainId={card}` | `chainId` query = card chain |
+| `POST …/policies:prepare` body | `chainId` = card chain; `allowedActions` / caps compiled for **that** chain’s catalog (USDC, WETH, router addresses differ) |
+| EIP-712 typed data | Domain `chainId` + `verifyingContract` = **this** runner. Do not sign Base typed data while the card is Ethereum. |
+| `POST …/policies:submit` | Echo prepare’s `chainId`, `policyId`, `entityId`, `deadline`, `validUntil`, permissions, signature |
+| `DELETE …/policies/{id}?chainId={card}` | Same card chain. **Do not DELETE** unless the user turned that grant off. Submit-then-DELETE (~6s) is why Enable looked On then Off. |
+
+On/Off is **not** an on-chain read and **not** Alchemy’s policy toggle.
+
+```
+On  = list items on this (chainId, runner) with status pending or active
+      whose compiled purposes cover the row (Uniswap / ERC-20 send / Send ETH)
+Off = no such usable grant (empty list, only revoked, or grant is a different purpose)
+```
+
+`pending` = signed, install may not have mined yet → still **On**. First UserOp installs on-chain; UI must not wait for that.
+
+A wallet **auth** signature (JWT / “Sign in to continue”) is **not** a grant. Off until Enable + EIP-712 **permission** signature + `submit` 201.
+
+##### Layout (per chain — do not copy Alchemy’s “15 networks” dropdown)
+
+Alchemy’s Gas Manager page: one sponsorship policy, multi-network checklist, 10‑minute signature timeout. **Do not reuse that as this component.**
+
+This component:
+
+1. **Chain is the page/card, not a multi-select.** User is already on “this wallet on Base” (or Ethereum, …). No “apply same session grant to 15 networks.”
+2. **Purpose rows** (toggles), not raw selectors. Each row is On/Off from the list mapping above.
+   - **Uniswap** — purpose-complete for that `chainId` (router + cap token + catalog WETH approve/deposit/withdraw). One consent. No extra “allow wrap / allow ETH-in” toggle.
+   - **Send ERC-20** — `transfer` on the cap token (and only that, unless the workflow names more tokens).
+   - **Send ETH** — only if that purpose is in the workflow or the user explicitly wants withdraw/`ethTransfer`. Recipients + native cap. Not implied by Uniswap.
+3. **Cap + expiry** for the compiled grant (ERC-20 cap always when ERC-20/Uniswap present; native cap only when Send ETH is on).
+4. **Advanced** (optional): show `allowedActions` targets/selectors, `validUntil`, `status` (`pending` / `active` / `revoked`), policy id.
+
+Turning **on** a purpose that is already Off: compile **union of currently On purposes ∪ the new one** (K0, singleton). Turning Uniswap on while Send ERC-20 is On must **merge**, not replace with Uniswap-only (that would gate ERC-20). Turning **off** a purpose: compile the remaining purposes and Enable again (replace), or if none remain, `DELETE` the usable policy.
+
+##### Enable sequence (this chain only)
+
+1. User toggles a purpose On on **this card**.
+2. Studio compiles `PreparePolicyRequest` with `chainId` = card, addresses from **that chain’s** token/router catalog.
+3. `policies:prepare` → show EIP-712 (wallet). Copy: this authorizes the agent on **this network** only.
+4. `policies:submit` → 201. Optimistically set that purpose **On**. Re-fetch `list?chainId={card}`; usable `pending`/`active` covering that purpose confirms.
+5. **Do not** `DELETE` on modal close. **Do not** list a different `chainId` and paint this card from that response.
+6. If list for this chain is empty after a 201, that is a bug (wrong chain on list, or immediate revoke) — do not tell the user to “sign the other capability.”
+
+##### Per-chain catalog (compiler, not user-picked networks)
+
+| Chain | USDC (example) | WETH / wrapped native | Uniswap router |
+|---|---|---|---|
+| Base `8453` | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` | `0x4200000000000000000000000000000000000006` | SwapRouter02 for 8453 |
+| Ethereum `1` | mainnet USDC | WETH `0xC02a…` | mainnet router |
+| Sepolia `11155111` | test USDC | test WETH | test router |
+
+Same purpose on another chain = **another Enable** (another typed-data popup). Do not silently copy a Base signature onto Ethereum.
+
+##### Copy to pin
+
+- Card subtitle: “Permissions apply only on {network name}.”
+- Enable: “Allow Uniswap swaps on {network}, including wrapping ETH if needed.”
+- After submit: “Saved. The agent can use this on the next action on {network}. It is not enabled on other networks.”
+- Off with revoked rows present: “Not active on {network}.” Do not show revoked as On.
+- JWT-only: “Signed in. This wallet has no agent permission on {network} yet.”
+
+##### Out of scope for this component
+
+- Alchemy Gas Manager network checklist (`alchemy_paymaster_policy_id`) — ops/config, not the user grant screen.
+- 7702 EOA delegation (Track B) — same REST vocabulary later, still **per chain**, plus a code(`EOA`) check; not this card’s first ship.
+- Installing on-chain at Enable — gateway holds the EIP-712 until the first UserOp on **this** chain.
+
 #### A.1 Exact on-chain module configuration
 
 **AllowlistModule** (already packed in `core/chainio/aa/ma_v2_hooks.go`):
@@ -560,6 +647,8 @@ Coverage helpers (`actionsCover` / `missingActions`) grow a native analog: an `e
 Do not add `nativeTransfer` (or `nativeRecipients`) to `uniswapV3Capability`. That would be a **different purpose** (send ETH to people). `nativeValueCap` is **optional** and not required for Uniswap to work.
 
 **Studio grant screen (handoff, copy to pin):**
+
+Per-chain card, list/prepare/submit `chainId`, On/Off mapping, and merge-on-toggle: **§A.0.1**. Below is purpose copy only.
 
 Purpose first. The primary question is “what should this agent be allowed to do?”, compiled from the workflow.
 
@@ -1118,7 +1207,7 @@ Independently reviewable PRs, all targeting **`staging`**. Conventional Commit t
 
 - **Files/components:** `SDK_HANDOFF_NATIVE_ETH_SESSION_GRANT.md` (new, this repo); pointer from `docs/changes/20260917-native-eth-and-eoa-permissions.md` once approved.
 - **Dependencies:** A1 (stable OpenAPI).
-- **Description:** K0 purpose-matched compile. `uniswapV3Capability` is complete (router + cap token + WETH approve/deposit/withdraw). `nativeTransfer` only when send-ETH is a purpose. Merge = **union of recipients, max of caps**. Uniswap ETH-in is not native-send. Grant-screen copy is purpose-first. Error maps including `SESSION_POLICY_RECIPIENT_NOT_EOA` and Uniswap `TARGET_NOT_ALLOWED` → re-authorize Uniswap. No Go behavior.
+- **Description:** K0 purpose-matched compile. **§A.0.1** is the UI contract (per-chain card, `chainId` on every list/prepare/submit, On = pending|active covering the purpose, no DELETE on modal close, no Alchemy multi-network dropdown). `uniswapV3Capability` is complete (router + cap token + WETH approve/deposit/withdraw). `nativeTransfer` only when send-ETH is a purpose. Merge = **union of recipients, max of caps**. Uniswap ETH-in is not native-send. No Go behavior.
 
 #### PR A6 — **cancelled / out of scope**
 
