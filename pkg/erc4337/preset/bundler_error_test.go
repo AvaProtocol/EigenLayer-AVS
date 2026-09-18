@@ -39,7 +39,7 @@ func TestIsClientUserOpFailure(t *testing.T) {
 		{"grant install failed", errors.New("SESSION_GRANT_INSTALL_FAILED: deferred grant install/replace did not land: AA23"), true},
 		{"erc20 cap", errors.New("execution reverted: ExceededTokenLimit"), true},
 		{"spend-limit short calldata", errors.New("execution reverted: InvalidCalldataLength"), true},
-		{"spend-limit bad selector", errors.New("execution reverted: SelectorNotAllowed"), true},
+		{"allowlist miss", errors.New("execution reverted: SelectorNotAllowed"), false},
 		// Must stay Error → Sentry (infra / ambiguous)
 		{"bare AA23", errors.New("validation reverted: [reason]: AA23 reverted"), false},
 		{"SESSION_POLICY_LOOKUP_FAILED storage", errors.New("SESSION_POLICY_LOOKUP_FAILED: listing session policies: connection refused"), false},

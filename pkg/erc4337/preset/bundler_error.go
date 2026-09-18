@@ -99,11 +99,12 @@ func IsClientUserOpFailure(err error) bool {
 		// this is the client's remaining-cap miss, not a bundler outage.
 		return true
 	case strings.Contains(s, "InvalidCalldataLength"):
-		// Spend-limit row on calldata shorter than transfer/approve (deposit).
-		return true
-	case strings.Contains(s, "SelectorNotAllowed"):
-		// Spend-limit row on a non-transfer/approve selector, or an
-		// allowlist miss that preflight did not catch.
+		// Spend-limit path only: calldata shorter than transfer/approve
+		// (deposit/withdraw on a capped token). Defence-in-depth for grants
+		// that slipped Validate. Do not also match SelectorNotAllowed —
+		// that is the validation-hook allowlist miss preflight is supposed
+		// to catch; if it reaches the bundler it is packing/preflight, and
+		// must stay Error → Sentry (same policy as bare AA23).
 		return true
 	case strings.Contains(s, "SESSION_GRANT_INSTALL_FAILED"):
 		// Deferred install/replace batch failed validation or simulation —

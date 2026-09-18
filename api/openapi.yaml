@@ -1897,7 +1897,8 @@ components:
           description: |
             Per-token ERC-20 caps. Omitted on singular-only grants; present
             when the client submitted `erc20SpendCaps`. The alias
-            `erc20SpendCap` is the submitted singular (not list[0]).
+            `erc20SpendCap` is the submitted singular when submitted;
+            otherwise the first list entry.
         validUntil:
           type: integer
           format: int64
