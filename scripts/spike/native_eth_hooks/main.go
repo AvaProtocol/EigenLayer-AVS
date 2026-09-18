@@ -69,8 +69,8 @@ const (
 )
 
 var (
-	prefundWei  = big.NewInt(8_000_000_000_000_000) // 0.008 ETH
-	nativeCapX  = big.NewInt(100_000_000_000_000)   // 0.0001 ETH
+	prefundWei  = big.NewInt(30_000_000_000_000_000) // 0.03 ETH — first-op gas + native probes
+	nativeCapX  = big.NewInt(10_000_000_000_000_000) // 0.01 ETH; first UserOp gas must fit under this
 	oneWei      = big.NewInt(1)
 	depositSel  = [4]byte{0xd0, 0xe3, 0x0d, 0xb0} // deposit()
 	transferSel = [4]byte{0xa9, 0x05, 0x9c, 0xbb}
@@ -241,7 +241,7 @@ func packUpdateLimits(entity uint32, limit *big.Int) []byte {
 }
 
 func readNativeLimit(ctx context.Context, chain *ethclient.Client, entity uint32, account common.Address) (*big.Int, error) {
-	sel := crypto.Keccak256([]byte("limits(uint32,address)"))[:4]
+	sel := crypto.Keccak256([]byte("limits(uint256,address)"))[:4]
 	data := append(sel, common.LeftPadBytes(big.NewInt(int64(entity)).Bytes(), 32)...)
 	data = append(data, common.LeftPadBytes(account.Bytes(), 32)...)
 	mod := nativeModule()
@@ -267,7 +267,7 @@ func run() error {
 	if bundlerURL == "" {
 		return fmt.Errorf("set SPIKE_BUNDLER_URL or SEPOLIA_BUNDLER_URL")
 	}
-	salt := big.NewInt(17)
+	salt := big.NewInt(19)
 	if s := os.Getenv("SPIKE_SALT"); s != "" {
 		v, ok := new(big.Int).SetString(s, 10)
 		if !ok {
@@ -336,7 +336,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if err := h.installDeferred(e1, hooks1, 400_000); err != nil {
+	if err := h.installDeferred(e1, hooks1, 1_200_000); err != nil {
 		return fmt.Errorf("proof 1 install: %w", err)
 	}
 	h.factoryNeeded = false
@@ -372,27 +372,31 @@ func run() error {
 	}
 	fmt.Printf("PROOF 3 PASS: unlisted recipient refused\n  %s\n\n", firstLine(err3.Error()))
 
-	over := new(big.Int).Add(nativeCapX, oneWei)
+	remaining, err := readNativeLimit(ctx, chain, e2, account)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("  NT remaining after first send: %s wei\n", remaining)
+	over := new(big.Int).Add(remaining, oneWei)
 	err4a := h.estimateNative(e2, alice, over)
 	if err4a == nil {
-		// Estimator may still allow; send and require revert / AA23.
 		r, _, sendErr := h.sendNative(e2, alice, over, 200_000)
 		if sendErr == nil && r != nil && r.Success {
-			return fmt.Errorf("PROOF 4 FAIL: value X+1 succeeded")
+			return fmt.Errorf("PROOF 4 FAIL: value remaining+1 succeeded")
 		}
-		fmt.Printf("PROOF 4a PASS: X+1 did not succeed (%v)\n", firstLine(fmt.Sprint(sendErr)))
+		fmt.Printf("PROOF 4a PASS: remaining+1 did not succeed (%v)\n", firstLine(fmt.Sprint(sendErr)))
 	} else {
-		fmt.Printf("PROOF 4a PASS: X+1 refused at estimate\n  %s\n", firstLine(err4a.Error()))
+		fmt.Printf("PROOF 4a PASS: remaining+1 refused at estimate\n  %s\n", firstLine(err4a.Error()))
 	}
-	err4b := h.estimateNative(e2, alice, nativeCapX)
+	err4b := h.estimateNative(e2, alice, remaining)
 	if err4b == nil {
-		r, _, sendErr := h.sendNative(e2, alice, nativeCapX, 200_000)
+		r, _, sendErr := h.sendNative(e2, alice, remaining, 200_000)
 		if sendErr == nil && r != nil && r.Success {
-			return fmt.Errorf("PROOF 4 FAIL: self-funded value==X succeeded (gas should have consumed the remainder)")
+			return fmt.Errorf("PROOF 4 FAIL: self-funded value==remaining succeeded (gas should consume the rest)")
 		}
-		fmt.Printf("PROOF 4b PASS: value==X did not succeed (gas burns remainder)\n")
+		fmt.Printf("PROOF 4b PASS: value==remaining did not succeed (gas burns remainder)\n")
 	} else {
-		fmt.Printf("PROOF 4b PASS: value==X refused at estimate (gas)\n  %s\n", firstLine(err4b.Error()))
+		fmt.Printf("PROOF 4b PASS: value==remaining refused at estimate (gas)\n  %s\n", firstLine(err4b.Error()))
 	}
 	fmt.Println()
 
@@ -645,9 +649,9 @@ func (h *harness) installCall(entity uint32, hooks [][]byte) ([]byte, error) {
 }
 
 func (h *harness) installDeferred(entity uint32, hooks [][]byte, vgl int64) error {
-	// In-policy transfer(0) so validation passes. Dummy USDC may revert at
-	// execution; deferred install still lands in the validation frame.
-	inner := append(transferSel[:], make([]byte, 64)...)
+	// In-policy approve(controller, 0) — real Sepolia USDC reverts transfer(0,0).
+	inner := append(approveSel[:], common.LeftPadBytes(h.controllerAddr.Bytes(), 32)...)
+	inner = append(inner, make([]byte, 32)...)
 	exec, err := aa.PackExecute(common.HexToAddress(dummyToken), big.NewInt(0), inner)
 	if err != nil {
 		return err
