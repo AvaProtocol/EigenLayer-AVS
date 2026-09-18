@@ -58,8 +58,31 @@ type RpcServer struct {
 	aliasResolver *operatorAliasResolver
 
 	// withdrawNativeReader is a test-injected CodeAndFeeReader for covering
-	// grant preflight. Production resolves from chain RPC.
+	// grant preflight. Production uses nativeCodeAndFee (pooled chain
+	// reader + the same RPC as balance).
 	withdrawNativeReader taskengine.CodeAndFeeReader
+}
+
+// nativeCodeAndFee is the covering-grant reader for native withdraw.
+// Tests inject withdrawNativeReader. Production uses the same chain RPC
+// as the balance preflight (GetChainStateReaderForChain, else a direct
+// reader over resolveSmartWalletForChain).
+func (r *RpcServer) nativeCodeAndFee(chainID int64) taskengine.CodeAndFeeReader {
+	if r != nil && r.withdrawNativeReader != nil {
+		return r.withdrawNativeReader
+	}
+	reader := taskengine.GetChainStateReaderForChain(uint64(chainID))
+	var eth *ethclient.Client
+	if r != nil {
+		_, swRpc, err := r.resolveSmartWalletForChain(chainID)
+		if err == nil {
+			eth = swRpc
+			if reader == nil && swRpc != nil {
+				reader = taskengine.NewDirectChainStateReader(swRpc, chainID)
+			}
+		}
+	}
+	return taskengine.NewCodeAndFeeReader(reader, eth)
 }
 
 // resolveSmartWalletForChain returns the SmartWalletConfig + RPC client
@@ -169,7 +192,7 @@ func (r *RpcServer) preflightNativeWithdraw(
 		Amount:    intentAmount,
 		Kind:      taskengine.NativeSend,
 		Sponsored: swCfg.SponsorshipPolicyID() != "",
-	}, r.withdrawNativeReader)
+	}, r.nativeCodeAndFee(swCfg.ChainID))
 	if msg == "" {
 		return nil
 	}

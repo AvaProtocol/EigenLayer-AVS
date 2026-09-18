@@ -1,12 +1,17 @@
 package taskengine
 
 import (
+	"math/big"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 func addr(s string) *common.Address {
@@ -55,6 +60,49 @@ func TestMissingGrantCalls_USDCCovered_WETHMissing(t *testing.T) {
 	}
 	if m := MissingGrantCalls(allowed, buy); len(m) != 0 {
 		t.Fatalf("USDC buy should be covered, missing %+v", m)
+	}
+}
+
+func TestPreflightSessionGrantCoverageNativeOnlyRefusesContractWrite(t *testing.T) {
+	db := testutil.TestMustDB()
+	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
+
+	owner := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	wallet := common.HexToAddress("0x209eb31c199bEB4c386eF83CF442DE1a00667a1F")
+	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
+	policy := &model.SessionPolicy{
+		ID: "01nativeonlyaaaaaaaaaaaaaa", Owner: &owner, Runner: &wallet,
+		ChainID: 11155111, EntityID: 1, SessionSigner: &signer,
+		Status:           model.SessionPolicyPending,
+		NativeRecipients: []*common.Address{&owner},
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "1", GrantedCap: "1"},
+		Grant: &model.SessionGrantAuthorization{
+			InstallCall:    []byte{0x1b, 0xbf, 0x56, 0x4c, 0x01},
+			CarrierNonce:   big.NewInt(1),
+			Deadline:       1785541743,
+			OwnerSignature: make([]byte, 65),
+		},
+	}
+	if err := StoreSessionPolicy(db, policy); err != nil {
+		t.Fatal(err)
+	}
+
+	vm := &VM{
+		db: db, TaskOwner: owner, mu: new(sync.Mutex),
+		vars: map[string]any{"aa_sender": wallet.Hex()},
+	}
+	r := &ContractWriteProcessor{
+		CommonProcessor:   &CommonProcessor{vm: vm},
+		smartWalletConfig: &config.SmartWalletConfig{ChainID: 11155111},
+		owner:             owner,
+	}
+	msg := r.preflightSessionGrantCoverage([]PlannedCall{{
+		Target:   common.HexToAddress("0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E"),
+		Selector: "0x04e45aaf",
+		Label:    "exactInputSingle",
+	}})
+	if !strings.HasPrefix(msg, "SESSION_POLICY_TARGET_NOT_ALLOWED:") {
+		t.Fatalf("native-only grant must refuse contractWrite, got %q", msg)
 	}
 }
 

@@ -21,7 +21,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/bigint"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
@@ -1118,20 +1117,23 @@ func (r *ContractWriteProcessor) preflightSessionGrantCoverage(planned []Planned
 	if policy == nil {
 		return ""
 	}
-	if len(policy.AllowedActions) > 0 {
-		missing := MissingGrantCalls(policy.AllowedActions, planned)
-		if len(missing) > 0 {
-			if r.vm.logger != nil {
-				r.vm.logger.Warn("session grant does not cover planned contract calls",
-					"policy_id", policy.ID,
-					"wallet", sender.Hex(),
-					"missing_count", len(missing),
-				)
-			}
-			return FormatSessionPolicyTargetNotAllowed(missing, policy.ID)
+	if len(policy.AllowedActions) == 0 {
+		if len(policy.NativeRecipients) == 0 {
+			return ""
 		}
-	} else if len(policy.NativeRecipients) == 0 {
-		return ""
+		// Native-only grant: every contractWrite is outside the allowlist.
+		return FormatSessionPolicyTargetNotAllowed(planned, policy.ID)
+	}
+	missing := MissingGrantCalls(policy.AllowedActions, planned)
+	if len(missing) > 0 {
+		if r.vm.logger != nil {
+			r.vm.logger.Warn("session grant does not cover planned contract calls",
+				"policy_id", policy.ID,
+				"wallet", sender.Hex(),
+				"missing_count", len(missing),
+			)
+		}
+		return FormatSessionPolicyTargetNotAllowed(missing, policy.ID)
 	}
 
 	if policy.NativeSpendCap == nil {
@@ -1154,39 +1156,7 @@ func (r *ContractWriteProcessor) nativeCodeAndFee() CodeAndFeeReader {
 	if r == nil {
 		return nil
 	}
-	if r.client == nil {
-		return nil
-	}
-	return chainCodeAndFee{reader: r.client}
-}
-
-// chainCodeAndFee adapts ChainStateReader for native preflight. NativeValue
-// does not CodeAt (no recipient). MaxFeePerGas uses SuggestGasPrice floored
-// at eip1559.MinGweiFloor when no ethclient is on the processor.
-type chainCodeAndFee struct {
-	reader ChainStateReader
-}
-
-func (c chainCodeAndFee) CodeAt(ctx context.Context, addr common.Address) ([]byte, error) {
-	if c.reader == nil {
-		return nil, fmt.Errorf("no chain reader")
-	}
-	return c.reader.CodeAt(ctx, addr)
-}
-
-func (c chainCodeAndFee) MaxFeePerGas(ctx context.Context) (*big.Int, error) {
-	if c.reader == nil {
-		return nil, fmt.Errorf("no chain reader")
-	}
-	p, err := c.reader.SuggestGasPrice(ctx)
-	if err != nil {
-		return nil, err
-	}
-	floor := eip1559.MinGweiFloor()
-	if p == nil || p.Cmp(floor) < 0 {
-		return floor, nil
-	}
-	return p, nil
+	return NewCodeAndFeeReader(r.client, nil)
 }
 
 // uniqueTargetHexes returns the distinct target addresses (hex, order-preserving) — used to label

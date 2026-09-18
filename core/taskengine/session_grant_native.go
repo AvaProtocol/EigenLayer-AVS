@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -49,6 +50,7 @@ const (
 	// has not yet estimated. Do not use the seed sum (500k+100k+700k).
 	nativePreflightGasUnitsSteady  = 500_000   // installed grant ethTransfer
 	nativePreflightGasUnitsFirstOp = 2_000_000 // deferred hooks, 5-row window
+	nativePreflightRPCTimeout      = 15 * time.Second
 )
 
 // PreflightNativePermission returns a client-parseable error, or "" if the
@@ -73,7 +75,9 @@ func PreflightNativePermission(policy *model.SessionPolicy, intent NativeIntent,
 				return fmt.Sprintf("%s: cannot verify native recipient %s is an EOA (no chain reader); fail closed",
 					SessionPolicyRecipientNotEOACode, intent.Recipient.Hex())
 			}
-			code, err := reader.CodeAt(context.Background(), intent.Recipient)
+			ctx, cancel := context.WithTimeout(context.Background(), nativePreflightRPCTimeout)
+			code, err := reader.CodeAt(ctx, intent.Recipient)
+			cancel()
 			if err != nil {
 				return fmt.Sprintf("%s: looking up native recipient %s: %v",
 					SessionPolicyRecipientNotEOACode, intent.Recipient.Hex(), err)
@@ -86,9 +90,6 @@ func PreflightNativePermission(policy *model.SessionPolicy, intent NativeIntent,
 
 	if policy == nil || policy.NativeSpendCap == nil {
 		// Payable write with no NT module: trust the allowlisted selector.
-		return ""
-	}
-	if intent.Kind == NativeValue && policy.NativeSpendCap == nil {
 		return ""
 	}
 
@@ -104,7 +105,9 @@ func PreflightNativePermission(policy *model.SessionPolicy, intent NativeIntent,
 				return fmt.Sprintf("%s: cannot price gas for a self-funded native cap check (no chain reader); fail closed",
 					SessionPolicyNativeCapExceededCode)
 			}
-			maxFee, feeErr := reader.MaxFeePerGas(context.Background())
+			ctx, cancel := context.WithTimeout(context.Background(), nativePreflightRPCTimeout)
+			maxFee, feeErr := reader.MaxFeePerGas(ctx)
+			cancel()
 			if feeErr != nil || maxFee == nil || maxFee.Sign() <= 0 {
 				return fmt.Sprintf("%s: cannot price gas: %v", SessionPolicyNativeCapExceededCode, feeErr)
 			}
@@ -185,34 +188,43 @@ func FormatSessionPolicyNativeCapExceeded(need, cap *big.Int, policyID string) s
 	return msg
 }
 
-// ethCodeAndFee is the production CodeAndFeeReader over an ethclient.
-type ethCodeAndFee struct {
-	client *ethclient.Client
+// codeAndFee is the production CodeAndFeeReader. CodeAt prefers the pooled
+// ChainStateReader; MaxFeePerGas uses the signed-op formula (tip + 2*baseFee)
+// off an ethclient, matching send_v07 / NativeTokenLimitModule.
+type codeAndFee struct {
+	reader ChainStateReader
+	eth    *ethclient.Client
 }
 
-func (e ethCodeAndFee) CodeAt(ctx context.Context, addr common.Address) ([]byte, error) {
-	if e.client == nil {
-		return nil, fmt.Errorf("no ethclient")
+// NewCodeAndFeeReader builds a production reader. Either argument may be
+// nil; both nil returns nil. MaxFeePerGas requires eth (the signed-op
+// formula); CodeAt uses reader if set, else eth.
+func NewCodeAndFeeReader(reader ChainStateReader, eth *ethclient.Client) CodeAndFeeReader {
+	if reader == nil && eth == nil {
+		return nil
 	}
-	return e.client.CodeAt(ctx, addr, nil)
+	return codeAndFee{reader: reader, eth: eth}
 }
 
-func (e ethCodeAndFee) MaxFeePerGas(ctx context.Context) (*big.Int, error) {
-	if e.client == nil {
-		return nil, fmt.Errorf("no ethclient")
+func (c codeAndFee) CodeAt(ctx context.Context, addr common.Address) ([]byte, error) {
+	if c.reader != nil {
+		return c.reader.CodeAt(ctx, addr)
 	}
-	maxFee, _, err := eip1559.SuggestFee(e.client)
-	if err != nil {
-		return nil, err
+	if c.eth == nil {
+		return nil, fmt.Errorf("no chain reader")
 	}
-	return maxFee, nil
+	return c.eth.CodeAt(ctx, addr, nil)
+}
+
+func (c codeAndFee) MaxFeePerGas(ctx context.Context) (*big.Int, error) {
+	if c.eth == nil {
+		return nil, fmt.Errorf("no ethclient for signed-op maxFeePerGas")
+	}
+	return eip1559.SignedOpMaxFeePerGas(ctx, c.eth)
 }
 
 func codeAndFeeFromEthClient(client *ethclient.Client) CodeAndFeeReader {
-	if client == nil {
-		return nil
-	}
-	return ethCodeAndFee{client: client}
+	return NewCodeAndFeeReader(nil, client)
 }
 
 func sponsoredFromConfig(cfg *config.SmartWalletConfig) bool {
