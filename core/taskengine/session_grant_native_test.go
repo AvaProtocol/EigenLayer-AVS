@@ -7,6 +7,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 )
@@ -123,5 +124,45 @@ func TestHooksForAlwaysScopesSelectors(t *testing.T) {
 		if len(input.Selectors) == 0 {
 			t.Fatalf("target %s is selector-scoped with an empty selector set", input.Target.Hex())
 		}
+	}
+}
+
+func TestAllowlistInputsCapsEachSpendToken(t *testing.T) {
+	usdc := common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
+	weth := common.HexToAddress("0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14")
+	router := common.HexToAddress("0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E")
+
+	permissions := SessionPermissions{
+		AllowedActions: []model.AllowedAction{
+			{Target: &router, Selectors: []string{"0x04e45aaf"}},
+			{Target: &usdc, Selectors: []string{"0x095ea7b3"}},
+			{Target: &weth, Selectors: []string{"0x095ea7b3", "0xd0e30db0"}},
+		},
+		SpendCap: &model.ERC20SpendCap{Token: &usdc, Amount: "500000000"},
+		SpendCaps: []model.ERC20SpendCap{
+			{Token: &usdc, Amount: "500000000"},
+			{Token: &weth, Amount: "1000000000000000000"},
+		},
+		ValidUntilMs: time.Now().Add(time.Hour).UnixMilli(),
+	}
+	if err := permissions.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	inputs, err := permissions.allowlistInputs()
+	if err != nil {
+		t.Fatalf("allowlistInputs: %v", err)
+	}
+	byTarget := map[common.Address]aa.AllowlistInput{}
+	for _, input := range inputs {
+		byTarget[input.Target] = input
+	}
+	if !byTarget[usdc].HasERC20SpendLimit || byTarget[usdc].ERC20SpendLimit.String() != "500000000" {
+		t.Fatalf("USDC cap: %+v", byTarget[usdc])
+	}
+	if !byTarget[weth].HasERC20SpendLimit || byTarget[weth].ERC20SpendLimit.String() != "1000000000000000000" {
+		t.Fatalf("WETH cap: %+v", byTarget[weth])
+	}
+	if byTarget[router].HasERC20SpendLimit {
+		t.Fatal("router must not carry an ERC-20 spend limit")
 	}
 }

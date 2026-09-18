@@ -26,8 +26,12 @@ import (
 // selector-scoping instead, which is not yet exercised on-chain.
 type SessionPermissions struct {
 	AllowedActions []model.AllowedAction
-	SpendCap       *model.ERC20SpendCap
-	ValidUntilMs   int64
+	// SpendCap is the one-token alias (OpenAPI erc20SpendCap). SpendCaps is
+	// the full per-token list. Validate accepts either; if both are set they
+	// must agree (singular matches one list entry).
+	SpendCap     *model.ERC20SpendCap
+	SpendCaps    []model.ERC20SpendCap
+	ValidUntilMs int64
 }
 
 // Validate rejects a permission set the grant screen could not have produced.
@@ -48,21 +52,35 @@ func (p SessionPermissions) Validate() error {
 			}
 		}
 	}
-	if p.SpendCap == nil || p.SpendCap.Token == nil {
+	caps, err := p.resolvedSpendCaps()
+	if err != nil {
+		return err
+	}
+	if len(caps) == 0 {
 		return fmt.Errorf("a grant needs an ERC-20 spend cap")
 	}
-	if amount, ok := new(big.Int).SetString(p.SpendCap.Amount, 10); !ok || amount.Sign() <= 0 {
-		return fmt.Errorf("spend cap amount %q is not a positive decimal integer", p.SpendCap.Amount)
-	}
-	capCovered := false
-	for _, action := range p.AllowedActions {
-		if action.Target != nil && *action.Target == *p.SpendCap.Token {
-			capCovered = true
-			break
+	seen := make(map[common.Address]struct{}, len(caps))
+	for i, cap := range caps {
+		if cap.Token == nil || *cap.Token == (common.Address{}) {
+			return fmt.Errorf("spend cap %d has no token", i)
 		}
-	}
-	if !capCovered {
-		return fmt.Errorf("the cap token %s is not an allowed-action target; cap a token the agent may actually call", p.SpendCap.Token.Hex())
+		if amount, ok := new(big.Int).SetString(cap.Amount, 10); !ok || amount.Sign() <= 0 {
+			return fmt.Errorf("spend cap amount %q is not a positive decimal integer", cap.Amount)
+		}
+		if _, dup := seen[*cap.Token]; dup {
+			return fmt.Errorf("spend cap token %s is listed twice; merge amounts before submit", cap.Token.Hex())
+		}
+		seen[*cap.Token] = struct{}{}
+		covered := false
+		for _, action := range p.AllowedActions {
+			if action.Target != nil && *action.Target == *cap.Token {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return fmt.Errorf("the cap token %s is not an allowed-action target; cap a token the agent may actually call", cap.Token.Hex())
+		}
 	}
 	if p.ValidUntilMs <= time.Now().UnixMilli() {
 		return fmt.Errorf("validUntil is in the past")
@@ -83,8 +101,22 @@ func (p SessionPermissions) Validate() error {
 // shape ever sets it false, those refusals become overly broad and must be
 // narrowed to match. TestHooksForAlwaysScopesSelectors guards the coupling.
 func (p SessionPermissions) allowlistInputs() ([]aa.AllowlistInput, error) {
+	caps, err := p.resolvedSpendCaps()
+	if err != nil {
+		return nil, err
+	}
+	limitByToken := make(map[common.Address]*big.Int, len(caps))
+	for _, cap := range caps {
+		if cap.Token == nil {
+			continue
+		}
+		amount, ok := new(big.Int).SetString(cap.Amount, 10)
+		if !ok {
+			return nil, fmt.Errorf("spend cap amount %q is not a positive decimal integer", cap.Amount)
+		}
+		limitByToken[*cap.Token] = amount
+	}
 	inputs := make([]aa.AllowlistInput, 0, len(p.AllowedActions))
-	capAmount, _ := new(big.Int).SetString(p.SpendCap.Amount, 10)
 	for _, action := range p.AllowedActions {
 		selectors := make([][4]byte, 0, len(action.Selectors))
 		for _, s := range action.Selectors {
@@ -99,13 +131,38 @@ func (p SessionPermissions) allowlistInputs() ([]aa.AllowlistInput, error) {
 			HasSelectorAllowlist: true,
 			Selectors:            selectors,
 		}
-		if *action.Target == *p.SpendCap.Token {
+		if limit, ok := limitByToken[*action.Target]; ok {
 			input.HasERC20SpendLimit = true
-			input.ERC20SpendLimit = capAmount
+			input.ERC20SpendLimit = limit
 		}
 		inputs = append(inputs, input)
 	}
 	return inputs, nil
+}
+
+// resolvedSpendCaps returns the per-token list. SpendCaps wins when non-empty;
+// otherwise SpendCap is the one-element alias. When both are set, the singular
+// token+amount must match one list entry.
+func (p SessionPermissions) resolvedSpendCaps() ([]model.ERC20SpendCap, error) {
+	if len(p.SpendCaps) > 0 {
+		if p.SpendCap != nil && p.SpendCap.Token != nil {
+			matched := false
+			for _, cap := range p.SpendCaps {
+				if cap.Token != nil && *cap.Token == *p.SpendCap.Token && cap.Amount == p.SpendCap.Amount {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return nil, fmt.Errorf("erc20SpendCap %s/%s is not an entry of erc20SpendCaps", p.SpendCap.Token.Hex(), p.SpendCap.Amount)
+			}
+		}
+		return p.SpendCaps, nil
+	}
+	if p.SpendCap != nil {
+		return []model.ERC20SpendCap{*p.SpendCap}, nil
+	}
+	return nil, nil
 }
 
 // HooksFor builds the grant's hook entries for its allocated entity:

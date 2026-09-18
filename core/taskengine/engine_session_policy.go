@@ -432,9 +432,21 @@ func attachDeclaredPermissions(policy *model.SessionPolicy, perms SessionPermiss
 		return
 	}
 	policy.AllowedActions = perms.AllowedActions
-	if perms.SpendCap != nil {
-		spendCap := *perms.SpendCap
-		spendCap.GrantedCap = spendCap.Amount
-		policy.ERC20SpendCap = &spendCap
+	caps, err := perms.resolvedSpendCaps()
+	if err != nil || len(caps) == 0 {
+		if perms.SpendCap != nil {
+			spendCap := *perms.SpendCap
+			spendCap.GrantedCap = spendCap.Amount
+			policy.ERC20SpendCap = &spendCap
+		}
+		return
 	}
+	stored := make([]model.ERC20SpendCap, len(caps))
+	for i, cap := range caps {
+		stored[i] = cap
+		stored[i].GrantedCap = cap.Amount
+	}
+	policy.ERC20SpendCaps = stored
+	first := stored[0]
+	policy.ERC20SpendCap = &first
 }

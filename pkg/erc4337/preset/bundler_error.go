@@ -94,6 +94,10 @@ func IsClientUserOpFailure(err error) bool {
 			strings.Contains(s, "validation reverted") ||
 			strings.Contains(s, "execution reverted")):
 		return true
+	case strings.Contains(s, "ExceededTokenLimit"):
+		// AllowlistModule ERC-20 spend cap. Amounts are on-chain only (A7);
+		// this is the client's remaining-cap miss, not a bundler outage.
+		return true
 	case strings.Contains(s, "SESSION_GRANT_INSTALL_FAILED"):
 		// Deferred install/replace batch failed validation or simulation —
 		// new grant did not land and prior entities were not torn down.

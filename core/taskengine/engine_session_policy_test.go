@@ -301,4 +301,26 @@ func TestSessionPermissionsValidation(t *testing.T) {
 	expired := base
 	expired.ValidUntilMs = time.Now().Add(-time.Hour).UnixMilli()
 	require.Error(t, expired.Validate())
+
+	weth := common.HexToAddress("0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14")
+	two := base
+	two.AllowedActions = append(two.AllowedActions, model.AllowedAction{Target: &weth, Selectors: []string{"0x095ea7b3"}})
+	two.SpendCaps = []model.ERC20SpendCap{
+		{Token: &token, Amount: "500000000"},
+		{Token: &weth, Amount: "1"},
+	}
+	two.SpendCap = &two.SpendCaps[0]
+	require.NoError(t, two.Validate())
+
+	mismatch := two
+	mismatch.SpendCap = &model.ERC20SpendCap{Token: &token, Amount: "1"}
+	require.Error(t, mismatch.Validate(), "singular cap must match an erc20SpendCaps entry")
+
+	dup := two
+	dup.SpendCaps = []model.ERC20SpendCap{
+		{Token: &token, Amount: "1"},
+		{Token: &token, Amount: "2"},
+	}
+	dup.SpendCap = nil
+	require.Error(t, dup.Validate(), "duplicate cap tokens")
 }

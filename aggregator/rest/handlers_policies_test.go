@@ -454,9 +454,12 @@ func TestSubmitPolicyResponseCarriesEverySessionPolicyField(t *testing.T) {
 			{Target: &token, Selectors: []string{"0x095ea7b3"}},
 		},
 		ERC20SpendCap: &model.ERC20SpendCap{Token: &token, Amount: "500000000", GrantedCap: "500000000"},
-		ValidUntil:    1785541743000,
-		Status:        model.SessionPolicyPending,
-		CreatedAt:     1785441743000,
+		ERC20SpendCaps: []model.ERC20SpendCap{
+			{Token: &token, Amount: "500000000", GrantedCap: "500000000"},
+		},
+		ValidUntil: 1785541743000,
+		Status:     model.SessionPolicyPending,
+		CreatedAt:  1785441743000,
 	}
 
 	asPolicy, err := json.Marshal(policyToAPI(policy))

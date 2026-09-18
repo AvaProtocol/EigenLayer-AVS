@@ -3,6 +3,7 @@ package rest
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"strings"
@@ -72,7 +73,7 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 	if req.ExpiresInSeconds < 60 {
 		return badRequest("POLICIES_BAD_EXPIRY", "Invalid expiry", "expiresInSeconds must be at least 60.")
 	}
-	perms, err := permissionsFromAPI(req.AllowedActions, &req.Erc20SpendCap, nowMs()+req.ExpiresInSeconds*1000)
+	perms, err := permissionsFromAPI(req.AllowedActions, &req.Erc20SpendCap, req.Erc20SpendCaps, nowMs()+req.ExpiresInSeconds*1000)
 	if err != nil {
 		return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
 	}
@@ -126,7 +127,7 @@ func (s *Server) SubmitWalletPolicy(ctx echo.Context, address generated.Ethereum
 	if req.Deadline <= 0 {
 		return badRequest("POLICIES_BAD_DEADLINE", "Invalid deadline", "deadline must be positive.")
 	}
-	perms, err := permissionsFromAPI(req.AllowedActions, &req.Erc20SpendCap, req.ValidUntil)
+	perms, err := permissionsFromAPI(req.AllowedActions, &req.Erc20SpendCap, req.Erc20SpendCaps, req.ValidUntil)
 	if err != nil {
 		return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
 	}
@@ -232,7 +233,7 @@ func (s *Server) RevokeWalletPolicy(ctx echo.Context, address generated.Ethereum
 // ── mapping ───────────────────────────────────────────────────────────────
 
 // permissionsFromAPI translates wire permissions into the engine's set.
-func permissionsFromAPI(actions []generated.AllowedAction, spendCap *generated.Erc20SpendCap, validUntilMs int64) (taskengine.SessionPermissions, error) {
+func permissionsFromAPI(actions []generated.AllowedAction, spendCap *generated.Erc20SpendCap, spendCaps *[]generated.Erc20SpendCap, validUntilMs int64) (taskengine.SessionPermissions, error) {
 	perms := taskengine.SessionPermissions{ValidUntilMs: validUntilMs}
 	for _, a := range actions {
 		if !common.IsHexAddress(string(a.Target)) {
@@ -245,13 +246,31 @@ func permissionsFromAPI(actions []generated.AllowedAction, spendCap *generated.E
 		})
 	}
 	if spendCap != nil {
-		if !common.IsHexAddress(string(spendCap.Token)) {
-			return perms, errors.New("spend cap token is not a valid address")
+		cap, err := erc20SpendCapFromAPI(*spendCap)
+		if err != nil {
+			return perms, err
 		}
-		token := common.HexToAddress(string(spendCap.Token))
-		perms.SpendCap = &model.ERC20SpendCap{Token: &token, Amount: spendCap.Amount}
+		perms.SpendCap = cap
+	}
+	if spendCaps != nil && len(*spendCaps) > 0 {
+		perms.SpendCaps = make([]model.ERC20SpendCap, 0, len(*spendCaps))
+		for i, raw := range *spendCaps {
+			cap, err := erc20SpendCapFromAPI(raw)
+			if err != nil {
+				return perms, fmt.Errorf("erc20SpendCaps[%d]: %w", i, err)
+			}
+			perms.SpendCaps = append(perms.SpendCaps, *cap)
+		}
 	}
 	return perms, nil
+}
+
+func erc20SpendCapFromAPI(spendCap generated.Erc20SpendCap) (*model.ERC20SpendCap, error) {
+	if !common.IsHexAddress(string(spendCap.Token)) {
+		return nil, errors.New("spend cap token is not a valid address")
+	}
+	token := common.HexToAddress(string(spendCap.Token))
+	return &model.ERC20SpendCap{Token: &token, Amount: spendCap.Amount}, nil
 }
 
 // policyToAPI renders a policy for responses. Grant material — install
@@ -306,6 +325,21 @@ func policyToAPI(p *model.SessionPolicy) generated.SessionPolicy {
 			Amount: p.ERC20SpendCap.Amount,
 		}
 	}
+	if len(p.ERC20SpendCaps) > 0 {
+		caps := make([]generated.Erc20SpendCap, 0, len(p.ERC20SpendCaps))
+		for _, cap := range p.ERC20SpendCaps {
+			if cap.Token == nil {
+				continue
+			}
+			caps = append(caps, generated.Erc20SpendCap{
+				Token:  generated.EthereumAddress(cap.Token.Hex()),
+				Amount: cap.Amount,
+			})
+		}
+		if len(caps) > 0 {
+			out.Erc20SpendCaps = &caps
+		}
+	}
 	return out
 }
 
@@ -329,6 +363,7 @@ func submitPolicyToAPI(p *model.SessionPolicy, superseded []string) generated.Su
 		Justification:  base.Justification,
 		AllowedActions: base.AllowedActions,
 		Erc20SpendCap:  base.Erc20SpendCap,
+		Erc20SpendCaps: base.Erc20SpendCaps,
 		ValidUntil:     base.ValidUntil,
 		CreatedAt:      base.CreatedAt,
 	}
