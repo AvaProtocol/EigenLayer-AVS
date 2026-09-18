@@ -13,6 +13,12 @@ var minGweiFloor = big.NewInt(2_000_000_000) // 2 gwei in wei
 
 // SetMinGweiFloor allows overriding the minimum gas floor (in wei).
 // Pass nil to reset to default 2 gwei.
+// MinGweiFloor is the live floor SuggestFee honors. Native preflight
+// must read this rather than copy 2e9.
+func MinGweiFloor() *big.Int {
+	return new(big.Int).Set(minGweiFloor)
+}
+
 func SetMinGweiFloor(wei *big.Int) {
 	if wei == nil || wei.Sign() <= 0 {
 		minGweiFloor = big.NewInt(2_000_000_000)

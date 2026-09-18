@@ -18,6 +18,12 @@ var sessionERC20OnchainCapExceeded = promauto.NewCounter(prometheus.CounterOpts{
 	Help:      "UserOps that reverted ExceededTokenLimit (ERC-20 session cap remaining). Client-actionable; not a bundler outage.",
 })
 
+var sessionNativeOnchainCapExceeded = promauto.NewCounter(prometheus.CounterOpts{
+	Namespace: "ap",
+	Name:      "session_native_onchain_cap_exceeded_total",
+	Help:      "UserOps that reverted ExceededNativeTokenLimit (native session cap remaining). Client-actionable; pager for preflight bugs.",
+})
+
 // userOpRevertMarker identifies errors returned by SendUserOp when the UserOp
 // was included on-chain but the target contract call reverted. The marker
 // string is emitted from waitForUserOpConfirmation via fmt.Errorf.
@@ -82,10 +88,14 @@ func IsClientUserOpFailure(err error) bool {
 		// installed TimeRange (#763 C). Re-grant onto a free entity.
 		return true
 	case strings.Contains(s, "SESSION_POLICY_NATIVE_NOT_ALLOWED"):
-		// Typed preflight: native ETH under a selector-scoped grant. Refused
-		// before the bundler, so this never reflects gateway health — and it
-		// is high-volume by nature (any ETH transfer node on an MA v2 chain
-		// produces one), which is exactly the shape that fans Sentry.
+		return true
+	case strings.Contains(s, "SESSION_POLICY_RECIPIENT_NOT_ALLOWED"):
+		return true
+	case strings.Contains(s, "SESSION_POLICY_RECIPIENT_NOT_EOA"):
+		return true
+	case strings.Contains(s, "SESSION_POLICY_NATIVE_CAP_EXCEEDED"):
+		return true
+	case strings.Contains(s, "ExceededNativeTokenLimit"):
 		return true
 	case strings.Contains(s, "no session authorization for smart wallet"):
 		return true
@@ -137,6 +147,9 @@ func IsClientUserOpFailure(err error) bool {
 func LogBundlerError(lgr logger.Logger, err error, msg string, tags ...any) {
 	if err != nil && strings.Contains(err.Error(), "ExceededTokenLimit") {
 		sessionERC20OnchainCapExceeded.Inc()
+	}
+	if err != nil && strings.Contains(err.Error(), "ExceededNativeTokenLimit") {
+		sessionNativeOnchainCapExceeded.Inc()
 	}
 	if lgr == nil {
 		return

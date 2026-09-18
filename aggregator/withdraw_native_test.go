@@ -72,7 +72,7 @@ func TestExecuteWithdraw_NativeRefusalIsCaseInsensitive(t *testing.T) {
 
 	_, err := server.ExecuteWithdraw(context.Background(), user, &avsproto.WithdrawFundsReq{
 		RecipientAddress: "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
-		Amount:           "max",
+		Amount:           "1",
 		Token:            "eth",
 	})
 	if err == nil || !strings.Contains(err.Error(), taskengine.SessionPolicyNativeNotAllowedCode) {

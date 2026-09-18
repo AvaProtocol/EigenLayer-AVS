@@ -14,6 +14,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -154,10 +155,17 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	}
 
 	// Validate amount (assuming it's in wei)
-	_, ok := new(big.Int).SetString(amountStr, 10)
+	amountWei, ok := new(big.Int).SetString(amountStr, 10)
 	if !ok {
 		err = fmt.Errorf("invalid amount: %s", amountStr)
 		return executionLog, err
+	}
+
+	if p.vm != nil && p.vm.IsSimulation && p.vm.db != nil {
+		if msg := p.preflightSessionGrant(common.HexToAddress(destination), amountWei); msg != "" {
+			err = errors.New(msg)
+			return executionLog, err
+		}
 	}
 
 	// Real transactions only when not in simulation context
@@ -287,44 +295,36 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	return executionLog, nil
 }
 
-// preflightSessionGrant refuses a native ETH send that the account's session
-// hooks cannot validate, before it reaches the bundler as opaque AA23. It is
-// the ETHTransfer counterpart to ContractWriteProcessor.preflightSessionGrantCoverage.
-//
-// Where the contract-write preflight asks "does the grant cover these calls?",
-// this one has a fixed answer: no grant can. A native transfer is
-// execute(to, value, 0x), and every REST grant is selector-scoped, so the
-// AllowlistModule reverts on its `data.length < 4` check regardless of what
-// the allowlist contains. That is why this does not call MissingGrantCalls —
-// running a coverage check whose result cannot change the outcome would only
-// invite a re-grant that still fails.
-//
-// Returns "" when the check does not apply: a chain not on MA v2 has no
-// session hooks to trip.
-func (p *ETHTransferProcessor) preflightSessionGrant(destination common.Address) string {
+// preflightSessionGrant refuses a native ETH send the active grant cannot
+// cover, before the bundler returns opaque AA23.
+func (p *ETHTransferProcessor) preflightSessionGrant(destination common.Address, amount *big.Int) string {
 	if p == nil || p.smartWalletConfig == nil || !p.smartWalletConfig.UsesModularAccountV2() {
 		return ""
 	}
-
-	// The active policy id is decoration only — the refusal stands whether or
-	// not a grant exists, so a lookup failure is swallowed rather than
-	// promoted to SESSION_POLICY_LOOKUP_FAILED the way the contract-write
-	// preflight does. There, coverage depends on reading the policy; here it
-	// does not, and failing closed on a Badger hiccup would replace an
-	// accurate message with a worse one.
-	policyID := ""
+	var policy *model.SessionPolicy
 	if p.vm != nil && p.vm.db != nil && p.taskOwner != nil {
 		if sender := getAASenderAddress(p.vm); sender != nil {
 			chainID := p.smartWalletConfig.ChainID
 			if chainID <= 0 {
 				chainID = p.vm.vmDefaultChainID()
 			}
-			if policy, err := ActiveSessionPolicyForWallet(p.vm.db, chainID, *p.taskOwner, *sender); err == nil && policy != nil {
-				policyID = policy.ID
+			got, err := ActiveSessionPolicyForWallet(p.vm.db, chainID, *p.taskOwner, *sender)
+			if err != nil {
+				return fmt.Sprintf("SESSION_POLICY_LOOKUP_FAILED: %v", err)
 			}
+			policy = got
 		}
 	}
-	return FormatSessionPolicyNativeNotAllowed(destination, policyID)
+	if policy == nil {
+		// No usable grant: the send path fails "no session authorization".
+		return ""
+	}
+	return PreflightNativePermission(policy, NativeIntent{
+		Recipient: destination,
+		Amount:    amount,
+		Kind:      NativeSend,
+		Sponsored: sponsoredFromConfig(p.smartWalletConfig),
+	}, codeAndFeeFromEthClient(p.ethClient))
 }
 
 // executeRealETHTransfer executes a real UserOp transaction for ETH transfers
@@ -333,9 +333,14 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		"destination", destination,
 		"amount", amountStr)
 
-	// Refuse before packing/pricing: an MA v2 account cannot validate a native
-	// transfer under a session grant, and the bundler reports that as AA23.
-	if msg := p.preflightSessionGrant(common.HexToAddress(destination)); msg != "" {
+	amount, ok := new(big.Int).SetString(amountStr, 10)
+	if !ok {
+		err := fmt.Errorf("failed to parse amount: %s", amountStr)
+		finalizeStep(executionLog, false, nil, err.Error(), "")
+		return executionLog, err
+	}
+
+	if msg := p.preflightSessionGrant(common.HexToAddress(destination), amount); msg != "" {
 		p.vm.logger.Warn("session grant cannot authorize a native ETH transfer",
 			"destination", destination,
 			"amount", amountStr,
@@ -343,14 +348,6 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		err := errors.New(msg)
 		*finalized = true
 		finalizeStep(executionLog, false, err, msg, "")
-		return executionLog, err
-	}
-
-	// Parse amount to big.Int
-	amount, ok := new(big.Int).SetString(amountStr, 10)
-	if !ok {
-		err := fmt.Errorf("failed to parse amount: %s", amountStr)
-		finalizeStep(executionLog, false, nil, err.Error(), "")
 		return executionLog, err
 	}
 

@@ -21,6 +21,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/bigint"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
@@ -436,6 +437,25 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			"contract", contractAddress.Hex(),
 			"method", methodName,
 			"reason", "vm_is_simulation")
+
+		simValue := big.NewInt(0)
+		if raw := r.extractTransactionValue(node); raw != "" && raw != "0" {
+			if parsed, parseErr := bigint.Parse(raw); parseErr == nil {
+				simValue = parsed
+			}
+		}
+		if msg := r.preflightSessionGrantCoverage([]PlannedCall{{
+			Target:   contractAddress,
+			Selector: SelectorFromCalldata(calldata),
+			Label:    methodName,
+			Value:    simValue,
+		}}); msg != "" {
+			return &avsproto.ContractWriteNode_MethodResult{
+				MethodName: methodName,
+				Success:    false,
+				Error:      msg,
+			}
+		}
 
 		// Use shared Tenderly client from VM
 		tenderlyClient := r.vm.tenderlyClient
@@ -985,6 +1005,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		Target:   contractAddress,
 		Selector: SelectorFromCalldata(callDataBytes),
 		Label:    methodName,
+		Value:    transactionValue,
 	}}); msg != "" {
 		executionLogBuilder.WriteString(msg + "\n")
 		return &avsproto.ContractWriteNode_MethodResult{
@@ -1094,21 +1115,78 @@ func (r *ContractWriteProcessor) preflightSessionGrantCoverage(planned []Planned
 		// Storage / multi-grant errors should fail closed with a clear message.
 		return fmt.Sprintf("SESSION_POLICY_LOOKUP_FAILED: %v", err)
 	}
-	if policy == nil || len(policy.AllowedActions) == 0 {
+	if policy == nil {
 		return ""
 	}
-	missing := MissingGrantCalls(policy.AllowedActions, planned)
-	if len(missing) == 0 {
+	if len(policy.AllowedActions) > 0 {
+		missing := MissingGrantCalls(policy.AllowedActions, planned)
+		if len(missing) > 0 {
+			if r.vm.logger != nil {
+				r.vm.logger.Warn("session grant does not cover planned contract calls",
+					"policy_id", policy.ID,
+					"wallet", sender.Hex(),
+					"missing_count", len(missing),
+				)
+			}
+			return FormatSessionPolicyTargetNotAllowed(missing, policy.ID)
+		}
+	} else if len(policy.NativeRecipients) == 0 {
 		return ""
 	}
-	if r.vm.logger != nil {
-		r.vm.logger.Warn("session grant does not cover planned contract calls",
-			"policy_id", policy.ID,
-			"wallet", sender.Hex(),
-			"missing_count", len(missing),
-		)
+
+	if policy.NativeSpendCap == nil {
+		return ""
 	}
-	return FormatSessionPolicyTargetNotAllowed(missing, policy.ID)
+	sum := big.NewInt(0)
+	for _, c := range planned {
+		if c.Value != nil {
+			sum.Add(sum, c.Value)
+		}
+	}
+	return PreflightNativePermission(policy, NativeIntent{
+		Amount:    sum,
+		Kind:      NativeValue,
+		Sponsored: sponsoredFromConfig(r.smartWalletConfig),
+	}, r.nativeCodeAndFee())
+}
+
+func (r *ContractWriteProcessor) nativeCodeAndFee() CodeAndFeeReader {
+	if r == nil {
+		return nil
+	}
+	if r.client == nil {
+		return nil
+	}
+	return chainCodeAndFee{reader: r.client}
+}
+
+// chainCodeAndFee adapts ChainStateReader for native preflight. NativeValue
+// does not CodeAt (no recipient). MaxFeePerGas uses SuggestGasPrice floored
+// at eip1559.MinGweiFloor when no ethclient is on the processor.
+type chainCodeAndFee struct {
+	reader ChainStateReader
+}
+
+func (c chainCodeAndFee) CodeAt(ctx context.Context, addr common.Address) ([]byte, error) {
+	if c.reader == nil {
+		return nil, fmt.Errorf("no chain reader")
+	}
+	return c.reader.CodeAt(ctx, addr)
+}
+
+func (c chainCodeAndFee) MaxFeePerGas(ctx context.Context) (*big.Int, error) {
+	if c.reader == nil {
+		return nil, fmt.Errorf("no chain reader")
+	}
+	p, err := c.reader.SuggestGasPrice(ctx)
+	if err != nil {
+		return nil, err
+	}
+	floor := eip1559.MinGweiFloor()
+	if p == nil || p.Cmp(floor) < 0 {
+		return floor, nil
+	}
+	return p, nil
 }
 
 // uniqueTargetHexes returns the distinct target addresses (hex, order-preserving) — used to label
@@ -1270,6 +1348,7 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 			Target:   targets[i],
 			Selector: SelectorFromCalldata(datas[i]),
 			Label:    methodNames[i],
+			Value:    values[i],
 		}
 	}
 	if msg := r.preflightSessionGrantCoverage(planned); msg != "" {

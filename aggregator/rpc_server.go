@@ -56,6 +56,10 @@ type RpcServer struct {
 	// key it signs with. Required to authenticate operators that keep
 	// their registered key cold — see operator_alias.go.
 	aliasResolver *operatorAliasResolver
+
+	// withdrawNativeReader is a test-injected CodeAndFeeReader for covering
+	// grant preflight. Production resolves from chain RPC.
+	withdrawNativeReader taskengine.CodeAndFeeReader
 }
 
 // resolveSmartWalletForChain returns the SmartWalletConfig + RPC client
@@ -123,6 +127,55 @@ func (r *RpcServer) resolveSmartWalletForChain(requestedChainID int64) (*config.
 // *model.User and the same payload shape; the response is the same
 // protobuf result type and gets translated to the OpenAPI
 // WithdrawResponse on the REST side.
+func (r *RpcServer) preflightNativeWithdraw(
+	user *model.User,
+	swCfg *config.SmartWalletConfig,
+	payload *avsproto.WithdrawFundsReq,
+	amount *big.Int,
+	withdrawAll bool,
+) error {
+	if swCfg == nil || !strings.EqualFold(strings.TrimSpace(payload.Token), "ETH") || !swCfg.UsesModularAccountV2() {
+		return nil
+	}
+	if withdrawAll && swCfg.SponsorshipPolicyID() == "" {
+		return status.Errorf(codes.InvalidArgument,
+			"cannot use MAX amount without sponsorship: set alchemy_paymaster_policy_id, or leave a gas reserve and transfer a fixed amount")
+	}
+	recipient := common.HexToAddress(payload.RecipientAddress)
+	if r.db == nil {
+		return status.Error(codes.InvalidArgument,
+			taskengine.FormatSessionPolicyNativeNotAllowed(recipient, ""))
+	}
+	var policy *model.SessionPolicy
+	if common.IsHexAddress(payload.SmartWalletAddress) {
+		wallet := common.HexToAddress(payload.SmartWalletAddress)
+		if wallet != (common.Address{}) {
+			got, err := taskengine.ActiveSessionPolicyForWallet(r.db, swCfg.ChainID, user.Address, wallet)
+			if err != nil {
+				return status.Errorf(codes.Internal, "SESSION_POLICY_LOOKUP_FAILED: %v", err)
+			}
+			policy = got
+		}
+	}
+	if policy == nil {
+		return nil
+	}
+	intentAmount := amount
+	if intentAmount == nil {
+		intentAmount = big.NewInt(0)
+	}
+	msg := taskengine.PreflightNativePermission(policy, taskengine.NativeIntent{
+		Recipient: recipient,
+		Amount:    intentAmount,
+		Kind:      taskengine.NativeSend,
+		Sponsored: swCfg.SponsorshipPolicyID() != "",
+	}, r.withdrawNativeReader)
+	if msg == "" {
+		return nil
+	}
+	return status.Error(codes.InvalidArgument, msg)
+}
+
 func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, payload *avsproto.WithdrawFundsReq) (*avsproto.WithdrawFundsResp, error) {
 	requestedChainID := payload.GetChainId()
 	r.config.Logger.Info("process withdraw funds",
@@ -172,33 +225,26 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 		return nil, status.Errorf(codes.InvalidArgument, "invalid recipient address format")
 	}
 
-	// Native withdrawals build execute(recipient, amount, 0x) — empty inner
-	// calldata — which an MA v2 account cannot validate under a session grant:
-	// every REST grant is selector-scoped and the allowlist hook reverts on
-	// calldata shorter than 4 bytes. Refuse here rather than let the bundler
-	// answer with AA23. Checked against this chain's config, not assumed
-	// globally, so a chain that later gains native-value support (a native
-	// limit module rather than the selector allowlist) starts working without
-	// touching this branch. ERC-20 withdrawals carry a real transfer selector
-	// and are unaffected.
-	if strings.EqualFold(strings.TrimSpace(payload.Token), "ETH") && swCfg.UsesModularAccountV2() {
-		recipient := common.HexToAddress(payload.RecipientAddress)
-		policyID := ""
-		if r.db != nil && common.IsHexAddress(payload.SmartWalletAddress) {
-			if wallet := common.HexToAddress(payload.SmartWalletAddress); wallet != (common.Address{}) {
-				if policy, perr := taskengine.ActiveSessionPolicyForWallet(r.db, swCfg.ChainID, user.Address, wallet); perr == nil && policy != nil {
-					policyID = policy.ID
-				}
-			}
+	// Parse amount - support "max" (case-insensitive) for "withdraw all"
+	amountStr := strings.TrimSpace(strings.ToLower(payload.Amount))
+	withdrawAll := amountStr == "max"
+
+	var requestedAmount *big.Int
+	if withdrawAll {
+		requestedAmount = nil
+	} else {
+		var success bool
+		requestedAmount, success = new(big.Int).SetString(payload.Amount, 10)
+		if !success || requestedAmount == nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid amount: must be a positive integer or 'max'")
 		}
-		r.config.Logger.Warn("refusing native ETH withdraw: session grants cannot authorize it",
-			"user", user.Address.String(),
-			"smart_wallet", payload.SmartWalletAddress,
-			"recipient", payload.RecipientAddress,
-			"chain_id", swCfg.ChainID,
-		)
-		return nil, status.Error(codes.InvalidArgument,
-			taskengine.FormatSessionPolicyNativeNotAllowed(recipient, policyID))
+		if requestedAmount.Cmp(big.NewInt(0)) <= 0 {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid amount: must be a positive integer or 'max'")
+		}
+	}
+
+	if err := r.preflightNativeWithdraw(user, swCfg, payload, requestedAmount, withdrawAll); err != nil {
+		return nil, err
 	}
 
 	// Balance preflight reads route through the chain's worker (gateway
@@ -221,26 +267,6 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 			return nil, status.Errorf(codes.Internal, "no chain-state reader or RPC client available for chain %d", requestedChainID)
 		}
 		chainReader = taskengine.NewDirectChainStateReader(swRpc, requestedChainID)
-	}
-
-	// Parse amount - support "max" (case-insensitive) for "withdraw all"
-	amountStr := strings.TrimSpace(strings.ToLower(payload.Amount))
-	withdrawAll := amountStr == "max"
-
-	var requestedAmount *big.Int
-	if withdrawAll {
-		// Will be calculated later based on balance and gas reimbursement
-		requestedAmount = nil // Use nil to indicate it needs to be calculated
-	} else {
-		var success bool
-		requestedAmount, success = new(big.Int).SetString(payload.Amount, 10)
-		if !success || requestedAmount == nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid amount: must be a positive integer or 'max'")
-		}
-		// Validate that numeric amount must be positive (not zero)
-		if requestedAmount.Cmp(big.NewInt(0)) <= 0 {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid amount: must be a positive integer or 'max'")
-		}
 	}
 
 	// Build withdrawal parameters (amount will be adjusted if "withdraw all" is requested)
@@ -296,6 +322,9 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 				return nil, status.Errorf(codes.InvalidArgument, "wallet has zero balance")
 			}
 			finalAmount = balance
+			if err := r.preflightNativeWithdraw(user, swCfg, payload, finalAmount, false); err != nil {
+				return nil, err
+			}
 			r.config.Logger.Info("withdraw all requested (no reimbursement)",
 				"balance", balance.String())
 		} else {
