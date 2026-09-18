@@ -6,15 +6,7 @@
 **Related:** [discussion #658](https://github.com/AvaProtocol/EigenLayer-AVS/discussions/658), `PLAN_PARTNER_PAYMENTS.md` §4.1 / Phase 4, `FINDINGS_AA23_WETH_SELL_SESSION_SCOPE.md`, `docs/changes/20260806-session-grant-replace-on-submit.md`
 
 
-| Field | Value |
-| --- | --- |
-| **Author** | TBD |
-| **Date** | 2026-09-17 |
-| **Status** | Proposed |
-| **Repo** | EigenLayer-AVS (Ava Protocol Automation AVS) |
-| **Feature branch** | `docs/native-eth-and-eoa-permissions` |
-| **Branch policy** | PRs target `staging`. Conventional Commits. `make storage-check` before anything that touches persisted models/keys. |
-| **Related** | [discussion #658](https://github.com/AvaProtocol/EigenLayer-AVS/discussions/658), `PLAN_PARTNER_PAYMENTS.md` §4.1 / Phase 4, `FINDINGS_AA23_WETH_SELL_SESSION_SCOPE.md`, `docs/changes/20260806-session-grant-replace-on-submit.md`, `core/taskengine/session_grant_native_test.go` |
+PRs target `staging`. Conventional Commits. `make storage-check` before anything that touches persisted models/keys. PR #788 audit (2026-09-17) is folded into K7, K14, A0, A1, A3.
 
 This is **one design covering two independently-shippable tracks**. They are complementary products, not competing implementations of one product.
 
@@ -84,7 +76,7 @@ Listing the recipient with selector `0x00000000` does **not** help: the length c
 | Payable `contractWrite`: `execute(router, value, exactInputSingle…)` | Allowed if target+selector listed | **None** — unbounded ETH as `value` |
 | ERC-20 `transfer`/`approve` | Allowed + `AllowlistModule` ERC-20 exec cap | n/a |
 
-A Uniswap grant that allowlists the router can attach `value` to `exactInputSingle`. **Trust that signed grant.** Uniswap ETH-in is a payable `contractWrite` on an allowlisted selector — **not** an `ethTransfer`, and it does **not** need a native-send grant. Do not install `NativeTokenLimitModule` on ERC-20/Uniswap-only grants (not even exec-only limit=0). Gateway preflight of payable `value` on an **already-allowlisted** target+selector **passes** without `nativeSpendCap`. Native-send permission (`nativeRecipients` + `nativeSpendCap` + NT module) is only for empty-calldata sends (`ethTransfer` / withdraw ETH). NativeTokenLimitModule is installed only when the owner explicitly adds that native-send permission.
+A Uniswap grant that allowlists the router can attach `value` to `exactInputSingle`. **Trust that signed grant.** Uniswap ETH-in is a payable `contractWrite` on an allowlisted selector — **not** an `ethTransfer`, and it does **not** need a native-send grant. Do not install `NativeTokenLimitModule` on ERC-20/Uniswap-only grants (not even exec-only limit=0). Gateway preflight of payable `value` on an **already-allowlisted** target+selector **passes** without `nativeSpendCap`. Empty-calldata send (`ethTransfer` / withdraw ETH) requires **`nativeRecipients`** (K7 gate). `nativeSpendCap` alone is a payable-value cap and still installs NT (gas burns on self-funded ops). NativeTokenLimitModule is installed only when `nativeSpendCap` is present.
 
 You never put two grants on one wallet. One usable grant per runner (singleton). If the user wants **both** Uniswap and ETH-send, Studio compiles **one** `PreparePolicyRequest` (merge). Adding native-send to a Uniswap user replaces the previous grant; it does not stack.
 
@@ -140,18 +132,19 @@ Discussion #658 called scoped / expiring / user-revocable (never root-equivalent
 | --- | --- | --- |
 | K0 | **Purpose-matched grants.** Compile the permission set that makes the user's stated intent succeed. Prefer a slightly wider *capability* over a grant that AA23s / preflights after they said yes. The gateway still never invents rows at execute time — completeness is the **compiler's** job (Studio/SDK), from the purpose (workflow nodes + explicit capabilities), not a menu of raw selectors the user must get right. | Anti-pattern: Uniswap Auto granted router + **USDC approve only**; demote ETH→WETH then AA23'd on WETH approve (`FINDINGS_AA23_WETH_SELL_SESSION_SCOPE.md`). The user intended a Uniswap swap. Missing WETH was a gate on that intention, not least-privilege. Least privilege applies **to the purpose** (Uniswap, not “send ETH anywhere”), not to omitting steps the purpose requires. |
 | K1 | **On-chain native send = AllowlistModule row with `HasSelectorAllowlist=false` on each explicit recipient + `NativeTokenLimitModule` cap + existing `TimeRangeModule`.** `NativeTokenLimitModule` is installed **only** when `nativeSpendCap` is present (both validation + execution hooks). ERC-20/Uniswap-only grants do **not** get that module — not even exec-only limit=0. Uniswap ETH-in does **not** require native-send permission. | The AllowlistModule length check makes selector `0x00000000` useless. The only way to authorize `data.length < 4` is wildcard-selectors on a **specific** address — and that is **any-function** on that address, not ETH-send. Alchemy `NativeTokenLimitModule` (`0x00000000000001e541f0D090868FBe24b59Fbe06`). **Trust the signed Uniswap grant:** payable `value` on allowlisted router/WETH selectors is authorized by those selectors. Gateway preflight must not demand `nativeSpendCap` for that. Empty-calldata send is a different capability. |
-| K2 | **REST: additive `nativeRecipients` + `nativeSpendCap` (+ optional `allowContractRecipient`). Do not break `allowedActions` / `erc20SpendCap`.** Native-only **omits** `allowedActions` (present `[]` is 400). | Relax `required` (server-side) so native-only grants can omit ERC-20 fields. Old clients that still send them keep working. Not a JSON rename. OpenAPI `minItems: 1` applies only when the array is **present**. |
+| K2 | **REST: additive `nativeRecipients` + `nativeSpendCap` (+ optional `allowContractRecipient`). Do not rename `allowedActions` / `erc20SpendCap`.** Native-only **omits** `allowedActions` (present `[]` is 400). Dropping those two from OpenAPI `required` is **JSON-additive but a breaking Go codegen change** (`[]AllowedAction` / `Erc20SpendCap` → pointers). A1 must nil-guard `permissionsFromAPI` in the **same** PR. | Old JSON clients that still send the fields keep working. Generated Go does not. |
 | K3 | **One composable grant class, not two grants on the wallet.** Uniswap works with the Uniswap grant **alone**. Native-send is a second *capability*, compiled into the **same** `SessionPolicy` only when the user also wants `ethTransfer` / withdraw. SDK `merge`: Uniswap builders **never** set a native cap. Two `nativeTransfer` builders → **union of recipients** (dedupe, max 20) and **max of caps**. NativeTokenLimitModule is one scalar, so per-recipient caps cannot be preserved; max is the honest “more generous of the two send permissions.” Not min (silently shrinks), not sum (invents budget neither builder stated). | Two grants would recreate the dual-grant brick `20260806-session-grant-replace-on-submit.md` fixed. Uniswap+nativeTransfer has exactly one native cap (from the native builder). Side effect: once NT is installed, Uniswap payable `value` **also** decrements that cap on-chain — the module cannot tell swap-value from send-value. |
-| K4 | **`HasSelectorAllowlist=false` is legal only on `nativeRecipients` rows, and those recipients must be EOAs.** ERC-20/router `allowedActions` stay `true` with non-empty selectors. Overlap with an allowed-action target is refused. Gateway `Validate` and native-send preflight require `eth_getCode(recipient)==0` unless `allowContractRecipient` is **true** (default **false**, logged). | `_checkCallPermission` with `hasSelectorAllowlist=false` skips the length check **and** does not consult selectors — `transfer`/`approve`/`withdraw` on that address are authorized, and NativeTokenLimit only subtracts `execute` **value** (a `value=0` ERC-20 transfer does not touch the native cap; native rows set `HasERC20SpendLimit=false`). Safe/treasury contracts use `contractWrite`, not `nativeRecipients`. Studio copy is not a control. |
-| K5 | **Always install `AllowlistExecHook` on every REST grant, including native-only with no ERC-20 cap.** `NativeTokenLimitExecHook` is value accounting only — never the self-admin latch. | `aa.SessionGrant.Validate()` only checks that **some** exec-hook bit is set. On chain, AllowlistModule `preExecutionHook` reverts `SpendingRequestNotAllowed` for every selector that is not `execute`/`executeBatch`. NativeTokenLimit `preExecutionHook` does **not**: for any other selector `value` stays 0 and the hook returns success. REST grants are already global; Allowlist **validation** also no-ops on non-execute selectors. Without `AllowlistExecHook`, a native-only session key can `installValidation` / `uninstallValidation` / `NativeTokenLimitModule.updateLimits`. Native recipient rows have `HasERC20SpendLimit=false`, so Allowlist exec is a no-op on `execute` and still rejects self-admin. |
+| K4 | **`HasSelectorAllowlist=false` is legal only on `nativeRecipients` rows, and those recipients must be EOAs.** ERC-20/router `allowedActions` stay `true` with non-empty selectors. Overlap with an allowed-action target is refused. Gateway `Validate` and native-send preflight require `eth_getCode(recipient)==0` unless `allowContractRecipient` is **true** (default **false**, logged). | `_checkCallPermission` with `hasSelectorAllowlist=false` skips the length check **and** does not consult selectors — any function on that address is authorized. NativeTokenLimit **exec** hook only subtracts `execute` **value** (a `value=0` ERC-20 transfer does not touch the exec cap). The **validation** hook still burns **gas** from the same `limits[]` on every self-funded UserOp, including zero-value ERC-20 (K7). Safe/treasury contracts use `contractWrite`, not `nativeRecipients`. |
+| K5 | **Always install `AllowlistExecHook` on every REST grant, including native-only with no ERC-20 cap.** `NativeTokenLimitExecHook` is value accounting only — never the self-admin latch. | `aa.SessionGrant.Validate()` only checks that **some** exec-hook bit is set. On chain, AllowlistModule `preExecutionHook` reverts `SpendingRequestNotAllowed` for every selector that is not `execute`/`executeBatch`. NativeTokenLimit `preExecutionHook` does **not**: for any other selector `value` stays 0 and the hook returns success. REST grants are already global; Allowlist **validation** also no-ops on non-execute selectors. Without `AllowlistExecHook`, a native-only session key can `installValidation` / `uninstallValidation` / `NativeTokenLimitModule.updateLimits`. Native recipient rows have `HasERC20SpendLimit=false`, so Allowlist exec is a no-op on `execute` and still rejects self-admin. Latch does not brick ETH send because `_decrementLimitIfApplies` returns on `!hasERC20SpendLimit` **before** `innerCalldata.length < 68` (`InvalidCalldataLength`). A0 item 7 pins that order. |
 | K6 | **Preflight reads the actual grant.** Blanket MA v2 refusal is deleted. Simulation (`ethTransfer` **and** payable `contractWrite`) and `nodes:run` run the same preflight when a policy is resolvable. Formatter rewrite and grant-aware **withdraw** land in the **same PR**. | `TestHooksForAlwaysScopesSelectors` predicted this. Shipping the new “re-grant” copy on the old blanket withdraw path recreates the non-converging loop. |
-| K7 | **Native cap is NativeTokenLimitModule's unified limit: self-funded = `value + gas`; sponsored = value only.** Preflight uses **GrantedCap** plus that inequality. **Do not** read on-chain remaining cap on every send in v1. | Module: no paymaster ⇒ validation hook subtracts gas, exec subtracts `value`. `SendUserOpMAv2` seeds `MaxFeePerGas=0` until bundler pricing. Map on-chain `ExceededNativeTokenLimit`. |
+| K7 | **NT cap = signed-op gas (self-funded) + execute value. Preflight must not use send-path seeds as that gas.** `builder_v07.go` overwrites CGL/VGL/PVG with `eth_estimateUserOperationGas`; `SendUserOpV07WithRetry` tightens VGL again and **re-signs**. The module (`_decreaseLimit`) charges `(preVerificationGas + vgl + cgl [+ paymaster gas]) * maxFeePerGas` off the **signed** op. `1_300_000` (`500k+100k+700k`) never reaches the signed op. `seedVerificationGasDeferredHooks` (700k) applies only under `auth.Deferred() && WrapExecuteUserOp`; installed grants seed `seedVerificationGasModuleEntity` (100k). Sponsored (paymaster present, not `specialPaymasters`): gas not charged; preflight value only. Self-funded: prefer estimated gas fields × `eip1559.SuggestFee` maxFee (read `minGweiFloor`, do not duplicate). If estimate is not available yet, use **A0-measured ceilings** (first-op vs steady-state), never the seed sum. Any grant with `nativeSpendCap` installs the NT **validation** hook, so **every** self-funded UserOp burns gas from the cap — including zero-value ERC-20 under `nativeValueCap`. | False `SESSION_POLICY_NATIVE_CAP_EXCEEDED` if we over-count 600k units; on-chain revert if we under-count first-op + teardowns. |
 | K8 | **Vendor is Alchemy Modular Account v2 for both tracks.** Derived SW: SemiModularAccountBytecode / factory (Track A). EOA: `SemiModularAccount7702` (Track B). Same modules (Allowlist, NativeTokenLimit, TimeRange, SingleSigner). **Calibur is not used** — no Phase 2, no dual-run. Track B first production chains: **Sepolia and Base**. Shared controller as today (no per-user controller keys in v1). | We already run MA v2 + EntryPoint v0.7 + Alchemy bundler/Gas Manager. Audited modules; `isSignatureValidation` stays false. **Yes, Alchemy MA v2 works for both EOA (7702 mode) and smart-wallet permissions.** Calibur’s fail-opens (ERC-1271 admit-any-key, mis-flagged hook, sponsored delegation success-without-code) are why it is rejected, not deferred. |
 | K9 | **Track B execute path is 4337 UserOp with `sender = EOA`, signed by the same shared controller session key, under the same session-grant hooks.** A user may hold both a derived SW and a 7702 EOA; the runner address distinguishes them. **B5 must add a derivation-check exception** — today's `SendUserOpMAv2` refuses `sender != DeriveSenderAddressAuto(owner, factory, salt)`. | Same SessionResolver / bundler stack. `senderOverride` does **not** bypass the factory match (`pkg/erc4337/preset/send_v07.go`). |
 | K10 | **Revocation/expiry/replace reuse today's machinery, but uninstall hook data is not a flat reverse of the install array.** Teardown is: **validation hooks in reverse-install (stored) order, then execution hooks in reverse-install order**, one slot per hook. NativeTokenLimit val slot = `abi.encode(uint32 entityId)`; exec slot empty. | Account `_uninstallValidation` applies val-then-exec (`ma_v2_uninstall.go` package comment). Today's 3-hook flat reverse happens to work because the swapped slots are the **same AllowlistModule**. Mixed `[AL-val, AL-exec, NT-val, NT-exec, TR-val]` is different modules: flat reverse routes NT install data onto Allowlist and empty slots onto NativeTokenLimit. The account **catches** `onUninstall` reverts and mines `success=true` while stranding `limits[entity][account]` — the #717 class of bug. |
 | K11 | **Controller never gets ERC-1271 / `isSignatureValidation` on either wallet type.** | #658 non-negotiable. Alchemy `PermissionBuilder` already hardcodes `isSignatureValidation: false` even for `root`. |
 | K12 | **Hook entity ID equals the session validation entity** for every module we install (Allowlist, TimeRange, NativeTokenLimit), on derived SW and 7702 EOA. **Do not use Alchemy's example `hookEntityId: 0`.** | This repo already packs `PackHookConfig(..., entityID, ...)` with the grant entity (`MinSessionEntityID` ≥ 1). Entity IDs are per-module, so session entity 1 on Allowlist is independent of SingleSigner entity 1. Copying Alchemy's `sessionKeyEntityId: 1` / `hookEntityId: 0` would pack NT at 0 while Allowlist/TimeRange stay at 1, split teardown keys, and collide with leftover `limits[0][account]`. Derived-SW entity 1 vs EOA entity 1 do not collide (different `account` keys); that does **not** license a hook/validation ID split. |
 | K13 | **EIP-7702 delegation check is exact:** `len(code) >= 23 && code[0:3]==0xef0100 && code[3:23]==canonical SMA-7702`, plus bytecode hash of that implementation. Never assert on tx status. | EIP-7702 designated code is `0xef0100 \|\| address`. The sloppy `code == 0xef0100 \|\| sma7702` notation is not a comparison. |
+| K14 | **Verification-gas seed scales with grant contents.** `builder_v07.go` already says every allowlist entry is a cold SSTORE; the 700k deferred-hooks seed was measured on 2–3-row grants. Max **20** native recipients is **A0-gated**, not a product constant that packing may assume. A0 measures a 20-row native grant (and 5-hook teardown). If estimate AA26s, either lower `max native recipients` or add `seedVerificationGasPerAllowlistRow` (and scale `seedVerificationGasPerUninstall` for 5-hook/20-row teardown). Do not merge A2 until that proof exists. | Flat 700k + 20 extra rows (~400–600k) → AA26 at estimation, which the efficiency tighten cannot recover (`builder_v07.go` ~82). |
 
 ---
 
@@ -184,7 +177,7 @@ erc20SpendCap: capToken
 
 Payable `value` on those allowlisted WETH/router calls is authorized by the Uniswap purpose (K1). ETH-in and wrap/unwrap must not require a second “allow ETH” toggle.
 
-This is the Studio handoff that `FINDINGS_AA23` already named: call `uniswapV3Capability({ approveTokens: [capToken, weth] })`, not `merge(swap, approve(USDC only))`. Existing USDC-only grants fail closed with `SESSION_POLICY_TARGET_NOT_ALLOWED` until the user re-grants the complete capability — that is intentional, not a new gate on first consent.
+Studio already compiles cap-token **+ WETH `approve`** (`FINDINGS_AA23` 2026-08-06). K0 **new** work is `WETH.deposit` / `withdraw` and treating payable ETH-in as covered by those Uniswap selectors (not a native-send grant). Existing USDC-only grants fail closed with `SESSION_POLICY_TARGET_NOT_ALLOWED` until re-grant.
 
 **Compiler input** (Studio, in order):
 
@@ -396,8 +389,16 @@ A0/L7 remain release-blocking and must read `NativeTokenLimitModule.limits(entit
    - `installValidation` / `uninstallValidation` (global selector, not wrapped in `execute`) reverts `SpendingRequestNotAllowed` — **AllowlistExecHook**, not NT exec.
    - `execute(NativeTokenLimitModule, 0, updateLimits(...))` reverts `AddressNotAllowed` (NT is not an allowlisted target). Do not expect `SpendingRequestNotAllowed` here: Allowlist exec only reverts that error for non-`execute`/`executeBatch` **outer** selectors; `updateLimits` rides `execute` and would succeed if the target were allowed.
    If either call succeeds, K5 is wrong — stop.
+   **Pin:** Allowlist `_decrementLimitIfApplies` returns on `!hasERC20SpendLimit` **before** `if (innerCalldata.length < 68) revert InvalidCalldataLength()`. Native recipient rows set `HasERC20SpendLimit=false`. If that order were reversed, every empty-calldata native send would revert. A0 must confirm native send still succeeds with this order (it is why K5's latch does not brick ETH send).
+8. **Verification gas (A0-blocking for A2):** record `actualGasUsed` / bundler `verificationGasLimit` for:
+   - first-op deferred install, 2–3 allowlist rows (today's 700k calibration);
+   - first-op deferred install, **20 native-recipient rows** (plus TimeRange + NT + AllowlistExec);
+   - first-op **replace** with 5-hook teardown of a 20-row grant;
+   - **steady-state** (already installed) `ethTransfer` (expect ~module-entity 100k class, not 700k);
+   - NT `limits[]` delta vs `(cgl+vgl+pvg)*maxFee` on the **signed** op (K7), first-op and steady-state, self-funded.
+   If (20-row) AA26s or efficiency < 0.4, **cut max recipients** or introduce per-row seed **in A2** from these numbers. Do not invent `1_300_000` as the module formula.
 
-Until (1)–(7) are green on Sepolia, Track A does not merge hook packing into the REST path.
+Until (1)–(8) are green on **Sepolia and Base**, Track A does not merge hook packing into the REST path.
 
 #### A.2 REST / OpenAPI / storage shape
 
@@ -472,7 +473,7 @@ if NativeSpendCap != nil && NativeSpendCap.amount is not a positive decimal:
 
 Uniswap-only (ETH-in included): `allowedActions` + `erc20SpendCap`; **omit** `nativeRecipients` / `nativeSpendCap`. Empty-calldata sends stay refused. Payable `contractWrite` on those selectors is trusted — no native-send grant.
 
-Optional payable-write cap without ETH-send recipients (`nativeValueCap`): `allowedActions` + `erc20SpendCap` + `nativeSpendCap`; **omit** `nativeRecipients`. Only if the owner **explicitly** wants an on-chain native budget on top of Uniswap. Not required for Uniswap to work. Empty-calldata sends stay refused.
+Optional payable-write cap without ETH-send recipients (`nativeValueCap`): `allowedActions` + `erc20SpendCap` + `nativeSpendCap`; **omit** `nativeRecipients`. Not required for Uniswap (K0). **Trap:** installing `nativeSpendCap` still attaches NT's **validation** hook, which burns **gas** from the cap on every self-funded UserOp, including `value=0` ERC-20 `approve`/`transfer`. Empty-calldata `ethTransfer` stays refused (gate on `nativeRecipients`, not on the cap). Studio copy for this shape **must** say gas counts against the cap on self-funded runs. Preflight of **every** self-funded op under this grant uses K7 gas, not value-only.
 
 Native-only (`ethTransfer` / withdraw ETH, no ERC-20): `nativeRecipients` + `nativeSpendCap`; **omit** `allowedActions` / `erc20SpendCap`. `AllowlistExecHook` is still installed (K5).
 
@@ -507,7 +508,7 @@ type NativeIntent struct {
     Amount       *big.Int
     Kind         NativeIntentKind // NativeSend (ethTransfer/withdraw) | NativeValue (payable write)
     Sponsored    bool             // SponsorshipPolicyID() != ""
-    EstimatedGas *big.Int         // wei; production fills from eip1559.SuggestFee × 1_300_000 gas units; tests inject
+    EstimatedGas *big.Int         // wei; see K7 — estimated signed-op gas, not seed sum
 }
 
 func PreflightNativePermission(policy *model.SessionPolicy, intent NativeIntent) string
@@ -519,50 +520,59 @@ When MA v2 and no usable policy: existing send path already fails "no session au
 
 | Condition | Code | Re-grant? |
 | --- | --- | --- |
-| Empty-calldata send (`ethTransfer` / withdraw) and policy has no `nativeSpendCap` | `SESSION_POLICY_NATIVE_NOT_ALLOWED` | **Yes** — "re-grant with nativeSpendCap and nativeRecipients" |
-| Native send and recipient not in `nativeRecipients` | `SESSION_POLICY_RECIPIENT_NOT_ALLOWED` (new) | Yes — add this recipient |
+| Empty-calldata send (`ethTransfer` / withdraw) and `len(nativeRecipients)==0` | `SESSION_POLICY_NATIVE_NOT_ALLOWED` | **Yes** — "re-grant with nativeRecipients" (a `nativeSpendCap` alone is payable-value, not ETH send — do **not** emit `RECIPIENT_NOT_ALLOWED`) |
+| Native send (`nativeRecipients` non-empty) and recipient not in the list | `SESSION_POLICY_RECIPIENT_NOT_ALLOWED` (new) | Yes — add this recipient |
 | Native send, `allowContractRecipient=false`, `eth_getCode(recipient) != 0` | `SESSION_POLICY_RECIPIENT_NOT_EOA` (new) | Use `contractWrite`, or re-grant with the flag |
 | Native send, self-funded: `amount + estimatedGas > GrantedCap`. Sponsored: `amount > GrantedCap` | `SESSION_POLICY_NATIVE_CAP_EXCEEDED` (new) | Yes — raise the cap (replace grant) or send less / sponsor |
 | Payable write `value > 0`, selector **covered**, **no** `nativeSpendCap` | **pass** | Uniswap-only / trusted allowlisted call. Do not demand native-send permission. |
-| Payable write `value > 0`, selector covered, **`nativeSpendCap` present** (batch: **sum** of per-call `values` vs cap) | cap check; else pass | NT module will decrement this value; preflight must match |
+| Payable write `value > 0`, selector covered, **`nativeSpendCap` present** (batch: **sum** of per-call `values` vs cap; **self-funded: + K7 gas**) | cap check; else pass | NT exec decrements value; NT val decrements gas on self-funded |
+| Any self-funded UserOp (including `value=0` ERC-20) when `nativeSpendCap` is present | K7 gas vs GrantedCap | NT val hook burns gas even when exec value is 0 |
 | Payable write target/selector missing | `SESSION_POLICY_TARGET_NOT_ALLOWED` (unchanged) | Yes — existing copy |
 
-**Cap inequality (K7), not `amount > GrantedCap` alone.**
+**Cap inequality (K7).** Do **not** sum send-path seeds (`500_000 + 100_000 + 700_000`). Those are overwritten by `eth_estimateUserOperationGas` (`builder_v07.go` ~252–254) and VGL is tightened again in `SendUserOpV07WithRetry` before re-sign. NativeTokenLimitModule charges the **signed** fields.
 
 Named fee source — do not use the unpriced UserOp (`MaxFeePerGas=0` at `send_v07.go` ~149).
 
 ```
-nativePreflightGasUnits = initialCallGasLimit             // 500_000  (builder_v07.go)
-                        + initialPreVerificationGas       // 100_000
-                        + seedVerificationGasDeferredHooks // 700_000
-                        = 1_300_000
+maxFeePerGas = eip1559.SuggestFee(client).maxFeePerGas
+               // already floors at pkg/eip1559 minGweiFloor (2 gwei default;
+               // SetMinGweiFloor can change it — read the package, do not copy 2e9)
 ```
 
-Production grants always carry `AllowlistExecHook`, so the deferred-hooks seed is the right one (not `seedVerificationGasDeployed` 60_000). If the send path has already estimated, use those numbers instead of seeds.
+**When the send path already has an estimate** (node / withdraw after `priceOperationV07`):
 
 ```
-maxFeePerGas = max(eip1559.SuggestFee(client).maxFeePerGas, NativePreflightFeeFloorWei)
-NativePreflightFeeFloorWei = 2_000_000_000  // 2 gwei — same as pkg/eip1559 minGweiFloor
-estimatedGasWei = nativePreflightGasUnits * maxFeePerGas
+estimatedGasWei = (CallGasLimit + VerificationGasLimit + PreVerificationGas
+                   [+ paymaster verification/post-op if present]) * maxFeePerGas
 ```
 
-`eip1559.SuggestFee` already computes `(2 * baseFee) + tip` with a 2 gwei floor. Reuse it; do not invent a third fee formula. **Production always has a chain RPC** (the same reader withdraw already uses for balance; the node path already has `ethClient`). If `SuggestFee` or `CodeAt` fails: **fail closed** (typed infra error or `SESSION_POLICY_LOOKUP_FAILED` / native cap code — do not skip the check, do not treat fee as 0).
+**When it does not** (cheap preflight, tests without a bundler): use **A0-measured ceilings**, stored as named constants after the spike — at least:
 
-- Self-funded (`SponsorshipPolicyID() == ""`): preflight `amount + estimatedGasWei <= GrantedCap`.
-- Sponsored (Gas Manager policy set; paymaster not in `specialPaymasters`): preflight `amount <= GrantedCap` (value only) — still needs `CodeAt` for K4 unless `allowContractRecipient`.
-- Studio copy: "If this wallet pays its own gas, the cap is ETH sent **plus** gas. Leave headroom. Sponsored runs count ETH sent only."
-- Map bundler `ExceededNativeTokenLimit` → `SESSION_POLICY_NATIVE_CAP_EXCEEDED` in `pkg/erc4337/preset/bundler_error.go`. **No remaining-cap chain read in v1** (K7).
+| Shape | What to measure | Do not use |
+| --- | --- | --- |
+| Steady-state installed `ethTransfer` | NT delta on signed op | `seedVerificationGasDeferredHooks` (700k) |
+| First-op deferred + hooks, 2–3 rows | NT delta + bundler VGL | `seedVerificationGasDeployed` (60k; unreachable when `auth != nil`) |
+| First-op, 20 native recipients | same | flat 700k |
+| First-op replace, 5-hook teardown | same | `seedVerificationGasPerUninstall` × 1 only |
+
+- Self-funded: `amount + estimatedGasWei <= GrantedCap` for native send / payable value; for **any** self-funded op under `nativeSpendCap` (including `value=0` ERC-20) `estimatedGasWei <= GrantedCap` even when amount is 0.
+- Sponsored (Gas Manager policy set; paymaster not in `specialPaymasters`): `amount <= GrantedCap` (value only) — still `CodeAt` for K4 unless `allowContractRecipient`.
+- Studio copy: "If this wallet pays its own gas, the native cap is ETH sent **plus** gas, including on ERC-20 calls when a native cap is installed. Sponsored runs count ETH sent only."
+- Map bundler `ExceededNativeTokenLimit` → `SESSION_POLICY_NATIVE_CAP_EXCEEDED` in `pkg/erc4337/preset/bundler_error.go`. **Also** increment a dedicated counter at A3 (`session_native_onchain_cap_exceeded`). `IsClientUserOpFailure` returning true **keeps this out of Sentry** — that is correct for user-facing volume, but the **pager** must be the counter, not a Sentry issue. Do not defer the counter to a "follow-up metrics" PR.
+- **No remaining-cap chain read in v1** (Q8).
+
+If `SuggestFee` or `CodeAt` fails: **fail closed**.
 
 **`CodeAndFeeReader` (injected in unit tests, real RPC in production):**
 
 ```go
 type CodeAndFeeReader interface {
     CodeAt(ctx context.Context, addr common.Address) ([]byte, error)
-    MaxFeePerGas(ctx context.Context) (*big.Int, error) // eip1559.SuggestFee maxFee
+    MaxFeePerGas(ctx context.Context) (*big.Int, error) // eip1559.SuggestFee maxFee (honors minGweiFloor)
 }
 ```
 
-Unit tests **inject** this. A covering-grant case mocks `CodeAt → []byte{}` and `MaxFeePerGas → 2 gwei` (or a test-controlled fee). **Do not** claim covering-grant numeric preflight returns `""` with `withdrawTestServer`'s nil RPC as-is — that server has no reader, so K4/K7 would fail closed, not pass. Uncovering-grant (no `nativeSpendCap`, or recipient not in list) still 400 **before** any RPC: those checks run first.
+Unit tests **inject** this. A covering-grant case mocks `CodeAt → []byte{}` and `MaxFeePerGas → 2 gwei` (or a test-controlled fee). **Do not** claim covering-grant numeric preflight returns `""` with `withdrawTestServer`'s nil RPC as-is — that server has no reader, so K4/K7 would fail closed, not pass. Uncovering-grant (`len(nativeRecipients)==0` for ETH send, or recipient not in list) still 400 **before** any RPC.
 
 **Message contract change (intentional, same PR as withdraw):** today's `FormatSessionPolicyNativeNotAllowed` must **not** say "re-grant" because no REST shape could converge. After Track A, the same **code** is reused for "grant has no native permission", and the message **must** advise re-grant. `TestFormatSessionPolicyNativeNotAllowed` is rewritten, not loosened. **Do not land this formatter rewrite while `ExecuteWithdraw` is still a blanket MA v2 refusal** — that would tell Studio to re-grant a native withdraw that still cannot succeed. One PR owns both (PR A3 below). Two formatters until withdraw is grant-aware is the only acceptable split; this spec picks **one PR**.
 
@@ -578,7 +588,7 @@ Unit tests **inject** this. A covering-grant case mocks `CodeAt → []byte{}` an
 2. Parse amount: numeric positive int, or `MAX` (case-insensitive). Invalid amount here.
 3. If token is ETH (case-insensitive) and `UsesModularAccountV2()`:
    - **MAX without sponsorship** (`SponsorshipPolicyID() == ""`): refuse, matching `ETHTransferProcessor` (`cannot use MAX amount without sponsorship`). No reader needed.
-   - **Cheap preflight (no RPC):** no usable policy / no `nativeSpendCap` → `SESSION_POLICY_NATIVE_NOT_ALLOWED`; recipient not in `nativeRecipients` → `SESSION_POLICY_RECIPIENT_NOT_ALLOWED`. Uncovering-grant unit tests still 400 here with nil RPC.
+   - **Cheap preflight (no RPC):** no usable policy / `len(nativeRecipients)==0` → `SESSION_POLICY_NATIVE_NOT_ALLOWED`; recipient not in `nativeRecipients` → `SESSION_POLICY_RECIPIENT_NOT_ALLOWED`. Uncovering-grant unit tests still 400 here with nil RPC.
    - **Resolve `CodeAndFeeReader`.** Production: the same chain RPC withdraw already uses for balance (move that resolution **before** covering-grant preflight). Missing reader / RPC error → fail closed, not skip. Unit tests: inject `CodeAndFeeReader`.
    - **Covering-grant preflight** (needs reader): `CodeAt` unless `allowContractRecipient`; self-funded `amount + estimatedGasWei`; sponsored value-only. Covering-grant tests mock empty code + 2 gwei fee; they **must not** assert `""` on `withdrawTestServer` as-is (nil RPC).
    - MAX **with** sponsorship: resolve balance via the same reader, then preflight that amount (value-only vs cap, plus `CodeAt`).
@@ -590,7 +600,7 @@ REST mapping in `handlers_wallets.go` already keys `badRequest` off `SESSION_POL
 
 **Payable `contractWrite`:** after selector coverage passes:
 - **No `nativeSpendCap`:** pass. Trust the allowlisted call (Uniswap ETH-in). Do **not** treat this as a native-send coverage miss.
-- **`nativeSpendCap` present:** run native preflight with `Kind=NativeValue` (recipient zero) against that cap. Batch: compare **sum** of per-call `values` to the cap (`NativeTokenLimitModule` sums `executeBatch` values; node-level value is applied to the last sub-call today). Do **not** treat the contract as a native recipient.
+- **`nativeSpendCap` present:** run native preflight with `Kind=NativeValue` (recipient zero) against that cap. Batch: **sum** of per-call `values`; **self-funded: add K7 gas**. Do **not** treat the contract as a native recipient. Zero-value ERC-20 under the same grant still needs the gas check.
 
 Uniswap ETH-in therefore works on a Uniswap-only grant. It only shares the native cap when the owner also opted into native-send (NT module is then installed and cannot distinguish swap-value from send-value).
 
@@ -933,7 +943,7 @@ Handoff doc (see PR plan): builders, merge semantics (recipients = union, cap = 
 | Item | Additive? | Notes |
 | --- | --- | --- |
 | `SessionPolicy.NativeRecipients` / `NativeSpendCap` / `AllowContractRecipient` | Yes (`omitempty`) | Same `sp:%d:%s:%s` key |
-| OpenAPI required-array relaxation | Yes (weaker server) | Old payloads still valid |
+| OpenAPI required-array relaxation | JSON-additive; **breaking generated Go** | `AllowedActions` / `Erc20SpendCap` become pointers. Nil-guard `permissionsFromAPI` in A1. |
 | `SmartWallet.Kind` / `Delegate` (Track B) | Yes (`omitempty`) | Empty Kind = derived, today's records |
 | New `eoa:` namespace | Not in v1 | Reconsider if we need delegation history |
 | `FeeLedgerKey` | Unchanged | Out of scope |
@@ -1021,14 +1031,14 @@ Grant material stays secret-grade (not logged, not listed). Native recipients/ca
 | `session grant cannot authorize a native ETH transfer` | `ETHTransferProcessor` Warn today | Change to structured: `code`, `policy_id`, `recipient`, `amount`, `has_native_cap`, `recipient_listed` |
 | Withdraw native refusal | `rpc_server.go` Warn | Same fields |
 | Payable value refusal | contract-write Warn (new) | `value`, `target`, `policy_id` |
-| `ExceededNativeTokenLimit` | bundler error mapper | Client failure, not Sentry-fan (same as today's native code in `IsClientUserOpFailure`) |
+| `ExceededNativeTokenLimit` | bundler error mapper + **A3 counter `session_native_onchain_cap_exceeded`** | `IsClientUserOpFailure` true → **not** Sentry (correct). Pager = the counter, **in A3**, not a follow-up. Preflight-only `session_native_preflight` cannot see this. |
 | Track B `EOA_DELEGATION_MISSING` | execute path Error/Warn | Include `code_hash`, `expected_delegate` |
 | `allowContractRecipient=true` | prepare/submit Warn | `policy_id`, `recipients`, `code_hashes` — exception is auditable |
 | Metrics (follow-up) | `metrics/` | counters: `session_native_preflight{code=...}`, `eoa_delegation_check{result=ok\|missing\|wrong_impl}` |
 
 Do not log `InstallCall`, signatures, or controller keys.
 
-Alerting: a sudden spike in `SESSION_POLICY_NATIVE_NOT_ALLOWED` after Track A ships is **expected** (Studio not yet compiling native fields) — treat as a client-adoption dashboard, not a pager, for one release. A spike in `ExceededNativeTokenLimit` **after** preflight is a preflight bug (pager).
+Alerting: a sudden spike in `SESSION_POLICY_NATIVE_NOT_ALLOWED` after Track A ships is **expected** (Studio not yet compiling native fields) — client-adoption dashboard, not a pager, for one release. A spike in `session_native_onchain_cap_exceeded` (on-chain NT revert after preflight passed) **is** a preflight bug — **pager, wired in A3**. Do not rely on Sentry: `IsClientUserOpFailure` swallows it.
 
 ---
 
@@ -1036,7 +1046,7 @@ Alerting: a sudden spike in `SESSION_POLICY_NATIVE_NOT_ALLOWED` after Track A sh
 
 ### Track A
 
-1. **Spike PR (no REST):** Sepolia proofs A.1 **(1)–(7)** (includes self-admin L11). Feature-flag not needed; spike is `scripts/spike/` or `//go:build integration`.
+1. **Spike PR (no REST):** Sepolia **and Base** proofs A.1 **(1)–(8)** (self-admin + verification-gas / NT-delta measurements). Do not start A2 until (8) has numbers.
 2. **Types/OpenAPI PR:** additive fields, Validate, generated types. Old grants still pack identically if native fields absent — **must be byte-identical** for ERC-20-only `HooksFor` (test: golden install calldata unchanged).
 3. **Hook packing PR:** NativeTokenLimit packers + **uninstall val-then-exec rewrite**. Update `TestUninstallReversesIntoStoredOrder` to `[TR-val, AL-val, empty]`. Do not merge until A0 (6)(7) and the 5-hook unit test are green.
 4. **Preflight + withdraw PR (one PR):** grant-aware preflight, formatter rewrite with re-grant copy, `ExecuteWithdraw` control flow, simulation paths. Do not ship the new copy on the old blanket withdraw. Production always has `CodeAndFeeReader`; unit tests inject it.
@@ -1093,9 +1103,9 @@ Must be green before calling Track A **done**. Pattern: `session_grant_replace_l
 | L11 | Native-only key: `installValidation` → `SpendingRequestNotAllowed`; `execute(NT, updateLimits)` → `AddressNotAllowed` | Self-admin |
 | L8 | Mixed grant **with** native cap: payable `contractWrite` value under cap succeeds; over cap refused. Uniswap-only (no native cap): payable value succeeds with no NT module | Mixed grant lets over-cap swap value through; Uniswap-only ETH-in refused |
 | L9 | Controller `isValidSignature` as the account still reverts (flag off) | 1271 accidentally enabled |
-| L10 | Bytecode presence of NativeTokenLimitModule at the v2.0.0 address on Sepolia | Wrong address packed |
+| L10 | Bytecode presence of NativeTokenLimitModule at the v2.0.0 address on **Sepolia and Base** | Wrong address packed |
 
-L1–L7 and L11 are **release-blocking** for Track A. L8–L10 can land in the same integration binary.
+L1–L7 and L11 are **release-blocking** for Track A. L8–L10 (both chains) can land in the same integration binary. A0 item (8) is **A2-blocking**.
 
 ### Track B — spike (not production)
 
@@ -1121,7 +1131,7 @@ Production Track B execute is **not** done when B1–B7 pass; it is done when th
 | --- | --- | --- |
 | Q1 | **No** native module on Uniswap/ERC-20-only grants. Trust the signed Uniswap grant (K0: purpose-complete, including WETH wrap/unwrap). Uniswap works **without** a native-send grant. Gateway must **not** refuse payable `value` on allowlisted Uniswap selectors. Follow-up PR A6 **cancelled**. | K0, K1 |
 | Q2 | Uniswap does not need native-send. Two `nativeTransfer` builders → **union of recipients, max of caps** (not min, not sum). Max 20 recipients. | K3 |
-| Q3 | Max native recipients = **20**. | K3 |
+| Q3 | Max native recipients = **20**, **A0-gated (K14)**. Cut if 20-row install AA26s. | K3, K14 |
 | Q4 | EOA-only native recipients; `allowContractRecipient` off by default (earlier). | K4 |
 | Q5 | Track B production: **Sepolia and Base**. Other mainnets wait. | K8 |
 | Q6 | **Drop Calibur.** Alchemy MA v2 for both EOA (7702) and derived smart wallet. No Phase 2. | K8, Alternatives D |
@@ -1139,10 +1149,12 @@ Production Track B execute is **not** done when B1–B7 pass; it is done when th
 | **High** | Uniswap grant omits WETH / wrap (gates the swap) | K0: `uniswapV3Capability` includes cap token **and** WETH approve/deposit/withdraw; preflight `TARGET_NOT_ALLOWED` until re-grant |
 | **High** | Studio adds `nativeTransfer` to every Uniswap grant (over-purpose) | Uniswap purpose must not emit `nativeRecipients`. Send-ETH is a separate purpose. |
 | **Med** | Message change for `SESSION_POLICY_NATIVE_NOT_ALLOWED` breaks Studio maps that look for "do not re-grant" | Same PR as grant-aware withdraw; pin new copy in tests; Studio coordinated in the same milestone |
-| **Med** | Self-funded gas consumes native cap; users think cap is "ETH sent" | Preflight `amount+estimatedGas`; grant-screen copy; MAX self-funded refused |
+| **High** | Preflight uses seed sum (1.3M) instead of signed-op gas | K7: estimate or A0 ceilings; A0 item (8) before A2 |
+| **High** | 20-row grant AA26s on flat 700k VGL seed | K14: A0 max-size measurement; scale seed or cut max |
+| **Med** | Self-funded gas consumes native cap (incl. ERC-20 under `nativeValueCap`) | K7 gas on every self-funded op when NT val hook is installed; copy |
 | **Med** | Uniswap-only payable `value` unbounded **on-chain** | **Accepted.** Trust signed Uniswap grant. Gateway preflight does not demand native-send for allowlisted payable calls. |
 | **Med** | NativeTokenLimitModule address wrong on a chain | L10 bytecode check; same presence-verify pattern as AllowlistModule comments |
-| **Low** | OpenAPI required-array relaxation surprises generated clients | Fields remain sendable; SDK regen in handoff |
+| **Low** | OpenAPI `required` drop is a **breaking Go codegen** change | A1 nil-guards `permissionsFromAPI`; JSON stays additive |
 | **Low** | Replace batch gas grows with extra hooks | Already capped by `maxOnChainTeardowns`; native adds 2 hook entries |
 
 ---
@@ -1163,7 +1175,7 @@ Production Track B execute is **not** done when B1–B7 pass; it is done when th
 
 ## docs/changes entry outline
 
-This spec **is** `docs/changes/20260917-native-eth-and-eoa-permissions.md` (Status: Proposed, Branch: staging). Header: Date 2026-09-17. Vendor: Alchemy MA v2 for both tracks. No Calibur. No NT module on Uniswap-only grants. Track B first chains: Sepolia and Base.
+This spec **is** `docs/changes/20260917-native-eth-and-eoa-permissions.md` (Status: Proposed, Branch: `docs/native-eth-and-eoa-permissions`, PRs target staging). Header: Date 2026-09-17. Vendor: Alchemy MA v2 for both tracks. No Calibur (`PLAN_PARTNER_PAYMENTS.md` §4.1 amended). No NT module on Uniswap-only grants. Track B first chains: Sepolia and Base. A0 includes verification-gas measurement before A2.
 
 ---
 
@@ -1173,41 +1185,41 @@ Independently reviewable PRs, all targeting **`staging`**. Conventional Commit t
 
 ### Track A
 
-#### PR A0 — `test: spike native ETH session hooks on Sepolia`
+#### PR A0 — `test: spike native ETH session hooks on Sepolia and Base`
 
 - **Files/components:** `scripts/spike/native_eth_hooks/` (new), possibly `core/chainio/aa/ma_v2_hooks.go` packers if the spike needs them (prefer packing in the spike first, promote in A2).
-- **Dependencies:** none.
-- **Description:** Live Sepolia script proving A.1 (1)–(7): empty calldata to a listed **EOA** recipient; unlisted reverts; NT cap `X+1` and **self-funded `amount==X`**; ERC-20 rows stay selector-scoped; teardown reads `NativeTokenLimitModule.limits`; **native-only key cannot `installValidation` or `updateLimits`**. Does not change REST or preflight. Evidence (tx hashes, revert data) in the PR body. Self-funded; no Gas Manager.
+- **Dependencies:** none. **A2-blocking.**
+- **Description:** Live Sepolia **and Base** proving A.1 (1)–(**8**): empty calldata to a listed **EOA**; unlisted reverts; NT cap; ERC-20 rows stay selector-scoped; teardown reads `limits`; native-only cannot self-admin; **`!hasERC20SpendLimit` before `InvalidCalldataLength`**; **verification-gas + NT-delta for 2–3-row, 20-row, replace/teardown, and steady-state signed ops**. PR body = hashes + gas table. If 20-row AA26s, this PR names the new max or the per-row seed A2 must implement. Self-funded; no Gas Manager.
 
 #### PR A1 — `feat: add native session-grant fields to OpenAPI and storage model`
 
 - **Files/components:** `api/openapi.yaml`; `make` oapi-codegen outputs under `aggregator/rest/generated/`; `model/session_policy.go`; `core/taskengine/session_permissions.go` (`Validate` only; `HooksFor` errors **"native permission packing is not implemented" before `allowlistInputs`** if native fields are set); `aggregator/rest/handlers_policies.go` mapping; `aggregator/rest/handlers_policies_test.go`; `core/taskengine/engine_session_policy_test.go` (`TestSessionPermissionsValidation`).
 - **Dependencies:** none (can parallel A0).
-- **Description:** Additive `nativeRecipients` / `nativeSpendCap` / `allowContractRecipient`. Relax OpenAPI `required`. **Omit vs `[]`:** present empty arrays are 400. Validate rules (K2/K3/K4) including `eth_getCode==0`. `attachDeclaredPermissions` copies new fields. ERC-20-only `HooksFor` stays byte-identical. `make storage-check` green.
+- **Description:** Additive `nativeRecipients` / `nativeSpendCap` / `allowContractRecipient`. Relax OpenAPI `required` (**JSON-additive; breaking generated Go** — nil-guard `permissionsFromAPI` / tests in this PR). **Omit vs `[]`:** present empty arrays are 400. Validate rules (K2/K3/K4) including `eth_getCode==0`. `attachDeclaredPermissions` copies new fields. ERC-20-only `HooksFor` stays byte-identical. `make storage-check` green.
 
 #### PR A2 — `feat: pack NativeTokenLimitModule and fix uninstall hook order`
 
 - **Files/components:** `core/chainio/aa/ma_v2_hooks.go`, `ma_v2_hooks_test.go` (golden); `core/chainio/aa/ma_v2_uninstall_from_install.go` (**val-then-exec rewrite**); `ma_v2_uninstall_from_install_test.go` (`TestUninstallMixedNativeGrantValThenExecOrder`; **`TestUninstallReversesIntoStoredOrder` updated to `[TR-val, AL-val, empty]`**); `core/taskengine/session_permissions.go` (`allowlistInputs` nil-safe, `HooksFor` always includes `AllowlistExecHook`); split of `session_grant_native_test.go`.
-- **Dependencies:** A0 (evidence, including (6)(7)), A1 (types).
-- **Description:** Implement K1 hook order and K5 (AllowlistExec always). ERC-20-only `HooksFor` byte-identical to pre-A2 (golden). Native-only and mixed pack NT hooks. Promote spike packers into `aa`. **One uninstall splitter; no 3-hook flat-reverse compatibility path.** **Do not merge until** the 5-hook uninstall unit test is green **and** A0 reads `limits(entity,account)==0` after replace. `TestHooksForAlwaysScopesSelectors` replaced by the split tests.
+- **Dependencies:** A0 (evidence, including (6)(7)(**8**)), A1 (types).
+- **Description:** Implement K1 hook order and K5 (AllowlistExec always). ERC-20-only `HooksFor` byte-identical to pre-A2 (golden). Native-only and mixed pack NT hooks. Promote spike packers into `aa`. **VGL seed scales with allowlist rows / teardowns using A0 numbers (K14)** — do not ship a flat 700k if (8) showed AA26 at 20 rows. **One uninstall splitter; no 3-hook flat-reverse compatibility path.** **Do not merge until** the 5-hook uninstall unit test is green **and** A0 reads `limits(entity,account)==0` after replace. `TestHooksForAlwaysScopesSelectors` replaced by the split tests.
 
 #### PR A3 — `feat: grant-aware native preflight for ethTransfer and withdraw`
 
 - **Files/components:** `core/taskengine/session_grant_coverage.go` (or `session_grant_native.go`); `session_grant_native_test.go`; `session_grant_coverage_test.go`; `core/taskengine/vm_runner_eth_transfer.go` (real **and** simulation); `core/taskengine/vm_runner_contract_write.go` (value on real **and** simulation; batch sum); `aggregator/rpc_server.go` (`ExecuteWithdraw` control flow); `aggregator/withdraw_native_test.go`; `aggregator/rest/handlers_wallets.go`; `pkg/erc4337/preset/bundler_error.go` (+ test).
 - **Dependencies:** A2.
-- **Description:** Delete blanket MA v2 refusal. `PreflightNativePermission` with K7 inequality (`eip1559.SuggestFee`, 1_300_000 gas units, 2 gwei floor). **Rewrite native error copy and grant-aware withdraw in this same PR.** New codes `SESSION_POLICY_RECIPIENT_NOT_ALLOWED`, `SESSION_POLICY_RECIPIENT_NOT_EOA`, `SESSION_POLICY_NATIVE_CAP_EXCEEDED`. ExecuteWithdraw: cheap no-RPC checks first; covering grant uses injected/`CodeAndFeeReader`. Payable `value>0` preflight. Simulation paths included. Studio maps `SESSION_POLICY_RECIPIENT_NOT_EOA`.
+- **Description:** Delete blanket MA v2 refusal. `PreflightNativePermission` with K7 (**estimated signed-op gas × `eip1559.SuggestFee`**, or A0 ceilings — **not** 1_300_000). Gate empty-calldata on `len(nativeRecipients)`, not `nativeSpendCap`. Self-funded ops under `nativeSpendCap` include gas even at `value=0`. **Rewrite native error copy and grant-aware withdraw in this same PR.** New codes + `session_native_onchain_cap_exceeded` counter (pager; `IsClientUserOpFailure` still true). ExecuteWithdraw: cheap no-RPC checks first; covering grant uses injected/`CodeAndFeeReader`. Payable `value>0` preflight. Simulation paths included.
 
 #### PR A4 — `test: live Sepolia native ETH session grant`
 
 - **Files/components:** `core/taskengine/session_grant_native_live_test.go` (`//go:build integration`) covering L1–L11 as practical; reuse `session_grant_testhelper_test.go` patterns.
 - **Dependencies:** A2–A3.
-- **Description:** Release-blocking live proofs. On-demand, not per-PR CI (same as replace live test). Track A is **not done** until L1–L7 and L11 pass on Sepolia.
+- **Description:** Release-blocking live proofs. On-demand, not per-PR CI (same as replace live test). Track A is **not done** until L1–L7 and L11 pass on Sepolia. L10 on **Base** as well.
 
 #### PR A5 — `docs: SDK/Studio handoff for native ETH session grants`
 
 - **Files/components:** `SDK_HANDOFF_NATIVE_ETH_SESSION_GRANT.md` (new, this repo); pointer from `docs/changes/20260917-native-eth-and-eoa-permissions.md` once approved.
 - **Dependencies:** A1 (stable OpenAPI).
-- **Description:** K0 purpose-matched compile. **§A.0.1** is the UI contract (per-chain card, `chainId` on every list/prepare/submit, On = pending|active covering the purpose, no DELETE on modal close, no Alchemy multi-network dropdown). `uniswapV3Capability` is complete (router + cap token + WETH approve/deposit/withdraw). `nativeTransfer` only when send-ETH is a purpose. Merge = **union of recipients, max of caps**. Uniswap ETH-in is not native-send. No Go behavior.
+- **Description:** K0 purpose-matched compile. **§A.0.1** UI contract. Cap-token+WETH **approve** already landed in Studio 2026-08-06; handoff adds `deposit`/`withdraw` + payable ETH-in as Uniswap (not native-send). `nativeTransfer` only when send-ETH is a purpose. Merge = union of recipients, max of caps. No Go behavior.
 
 #### PR A6 — **cancelled / out of scope**
 

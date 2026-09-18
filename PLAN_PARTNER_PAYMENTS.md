@@ -166,20 +166,25 @@ registry namespace, an auth middleware, and an `either/or` gate on three handler
 
 Captured so the urgent work leaves the right seams. None of this is in the urgent scope.
 
-**4.1 Execute authority via Uniswap Calibur (replaces any mandate-module idea).** When funds must move,
-the user **signs with their own EOA via Calibur** to grant AVS permission to move funds — **no custody**.
-This becomes the authority check for `scope: execute`: AVS may execute for `sub` iff a valid Calibur
-permission exists (bounded/revocable per Calibur's terms). Until Calibur lands, execute keeps using the
-controller-signed authKey path. **Seam to preserve now:** the execute authorization decision must be a
-single, swappable check (today: "controller can sign for this wallet"; tomorrow: "Calibur permission
-exists") so dropping Calibur in does not touch the partner/scope layer.
+**4.1 Execute authority (seam only).** When funds must move, AVS may execute for `sub` iff a
+**wallet/fund authority** exists — **no partner credential, no custody**.
 
-**Why Calibur: it automates a different wallet than MA v2 does.** MA v2 operates the **smart wallet we
-derive from the user's EOA** — a separate contract at a factory address, which the user must fund before
-we can automate anything in it. Calibur automates the **user's EOA itself**, via EIP-7702 delegation: the
-account is the address the user already has, holding the assets they already hold, with no second address
-and no funding step. These are complementary products, not competing implementations of one product. The
-seam above stays the same either way — only the authority check swaps.
+**Vendor (2026-09-17):** **Alchemy Modular Account v2** for both the derived smart wallet (session
+grant / controller UserOp — **today**) and the user's EOA (`SemiModularAccount7702` — Track B).
+**Calibur is not used.** Full plan: [`docs/changes/20260917-native-eth-and-eoa-permissions.md`](docs/changes/20260917-native-eth-and-eoa-permissions.md) (K8).
+Calibur PoC fail-opens (ERC-1271 admit-any-key, mis-flagged hooks, sponsored delegation
+success-without-code) are a production ship blocker, not a deferred Phase 2.
+
+Until Track B lands, execute keeps using the controller-signed MA v2 session grant on the **derived**
+wallet. **Seam to preserve now:** the execute authorization decision must be a single, swappable
+check (today: "controller can sign for this derived MA v2 wallet under the session grant"; tomorrow:
+"same check against the 7702-delegated EOA") so swapping account type does not touch the
+partner/scope layer.
+
+**Why EOA-side 7702 at all:** MA v2 **derived** accounts operate a **second** address the user must fund.
+Automating the **EOA itself** (existing assets, no funding step) is a complementary product. That is
+Track B via `SemiModularAccount7702`, not Calibur. The seam above stays the same — only the account
+type behind the authority check swaps.
 
 **Superseded rationale — the EntryPoint v0.6 argument no longer applies.** An earlier revision of this
 section argued for Calibur on the grounds that we ran EntryPoint v0.6 while every 7702 candidate targeted
