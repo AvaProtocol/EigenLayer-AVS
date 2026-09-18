@@ -156,11 +156,17 @@ func TestSessionResolverSeedsAllowlistRowsFromInstall(t *testing.T) {
 }
 
 // A predating or malformed InstallCall must not brick every send. The row
-// count is a gas hint; zero falls back to the 700k seed.
+// count is a gas hint; zero falls back to the 700k seed. Decode misses
+// return 0, nil, so the guessed-seed warn is this path's only signal.
 func TestSessionResolverAllowlistRowCountFailureDoesNotBrickSend(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 	keyFor, _ := spKeyFor(t)
+
+	spy := &warnSpy{MockLogger: &testutil.MockLogger{}}
+	prev := globalLogger
+	SetLogger(spy)
+	t.Cleanup(func() { SetLogger(prev) })
 
 	p := spPolicy("p1", spWallet, 1, model.SessionPolicyPending)
 	p.Grant.InstallCall = append([]byte{0x1b, 0xbf, 0x56, 0x4c}, make([]byte, 40)...)
@@ -181,6 +187,18 @@ func TestSessionResolverAllowlistRowCountFailureDoesNotBrickSend(t *testing.T) {
 	if !auth.Deferred() {
 		t.Error("pending grant must still carry the install")
 	}
+	if len(spy.warns) == 0 {
+		t.Error("expected a warn that this grant is on the guessed 700k seed")
+	}
+}
+
+type warnSpy struct {
+	*testutil.MockLogger
+	warns []string
+}
+
+func (s *warnSpy) Warn(msg string, keysAndValues ...interface{}) {
+	s.warns = append(s.warns, msg)
 }
 
 // The install is a bearer authorization for exactly its calldata. Replaying it

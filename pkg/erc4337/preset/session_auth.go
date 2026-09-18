@@ -80,10 +80,10 @@ type SessionAuthorization struct {
 	DeferredTeardownCount int
 
 	// AllowlistRows is how many AllowlistModule inputs the deferred install
-	// packs. Zero means "unknown — use the 2–3 row seed". Seed adds
-	// seedVerificationGasPerAllowlistRow per row past 3. Product max native
-	// recipients is aa.MaxNativeRecipients (5): 20-row first-op install
-	// worked; 20-row deferred replace AA23'd.
+	// packs. Zero means "unknown — use the 2–3 row seed" (700k; scale only
+	// past 3). An undecodable >3-row install therefore under-seeds and
+	// AA26s at estimation — fail-open restores ≤3-row sends, not those.
+	// Product max native recipients is aa.MaxNativeRecipients (5).
 	AllowlistRows int
 }
 
