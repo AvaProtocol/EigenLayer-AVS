@@ -98,6 +98,13 @@ func IsClientUserOpFailure(err error) bool {
 		// AllowlistModule ERC-20 spend cap. Amounts are on-chain only (A7);
 		// this is the client's remaining-cap miss, not a bundler outage.
 		return true
+	case strings.Contains(s, "InvalidCalldataLength"):
+		// Spend-limit row on calldata shorter than transfer/approve (deposit).
+		return true
+	case strings.Contains(s, "SelectorNotAllowed"):
+		// Spend-limit row on a non-transfer/approve selector, or an
+		// allowlist miss that preflight did not catch.
+		return true
 	case strings.Contains(s, "SESSION_GRANT_INSTALL_FAILED"):
 		// Deferred install/replace batch failed validation or simulation —
 		// new grant did not land and prior entities were not torn down.

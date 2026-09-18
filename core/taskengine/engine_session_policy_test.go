@@ -323,4 +323,39 @@ func TestSessionPermissionsValidation(t *testing.T) {
 	}
 	dup.SpendCap = nil
 	require.Error(t, dup.Validate(), "duplicate cap tokens")
+
+	padded := two
+	padded.SpendCap = &model.ERC20SpendCap{Token: &token, Amount: "0500000000"}
+	require.NoError(t, padded.Validate(), "alias amount must compare as integer, not string")
+}
+
+func TestAttachDeclaredPermissionsCapAlias(t *testing.T) {
+	token := testTokenAddr
+	weth := common.HexToAddress("0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14")
+	until := time.Now().Add(time.Hour).UnixMilli()
+
+	singular := testPermissions()
+	policy := &model.SessionPolicy{}
+	attachDeclaredPermissions(policy, singular)
+	require.NotNil(t, policy.ERC20SpendCap)
+	require.Empty(t, policy.ERC20SpendCaps, "singular-only grant must not invent erc20SpendCaps")
+
+	listed := SessionPermissions{
+		AllowedActions: []model.AllowedAction{
+			{Target: &token, Selectors: []string{"0xa9059cbb"}},
+			{Target: &weth, Selectors: []string{"0xa9059cbb"}},
+		},
+		SpendCap: &model.ERC20SpendCap{Token: &weth, Amount: "1"},
+		SpendCaps: []model.ERC20SpendCap{
+			{Token: &token, Amount: "500000000"},
+			{Token: &weth, Amount: "1"},
+		},
+		ValidUntilMs: until,
+	}
+	require.NoError(t, listed.Validate())
+	listedPolicy := &model.SessionPolicy{}
+	attachDeclaredPermissions(listedPolicy, listed)
+	require.Len(t, listedPolicy.ERC20SpendCaps, 2)
+	require.NotNil(t, listedPolicy.ERC20SpendCap.Token)
+	require.Equal(t, weth, *listedPolicy.ERC20SpendCap.Token, "alias must keep the submitted singular, not list[0]")
 }

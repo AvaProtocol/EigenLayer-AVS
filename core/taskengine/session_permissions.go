@@ -13,17 +13,23 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 )
 
-// SessionPermissions is the declared §7.2 permission set — allowed actions,
-// ERC-20 spend cap, expiry — and its translation into the hook entries a
+// SessionPermissions is the declared permission set — allowed actions,
+// ERC-20 spend cap(s), expiry — and its translation into the hook entries a
 // grant installs. This is the only place that translation lives: the REST
 // layer hands over declared permissions, never raw hook bytes, so a client
 // cannot smuggle an encoding the grant screen did not show.
 //
-// v1 requires all three permissions. That is not just product scope: the cap
-// installs the allowlist's EXECUTION hook, and per the revoke spike (results
-// doc §3.5) that hook is what stops a global session validation from
-// self-administering the account. A capless global grant would need
-// selector-scoping instead, which is not yet exercised on-chain.
+// A grant still needs at least one allowed action, at least one ERC-20 cap,
+// and a future validUntil. The cap(s) install the allowlist EXECUTION hook,
+// which is what stops a global session validation from self-administering
+// the account (revoke spike §3.5). A capless global grant would need
+// selector-scoping instead.
+//
+// AllowlistModule's ERC-20 spend limit only meters transfer(address,uint256)
+// and approve(address,uint256). deposit/withdraw (and any other selector) on
+// a capped token revert InvalidCalldataLength / SelectorNotAllowed. Validate
+// therefore refuses to cap a token whose allowedActions are not a subset of
+// those two selectors — Uniswap wrap/unwrap on WETH cannot also cap WETH.
 type SessionPermissions struct {
 	AllowedActions []model.AllowedAction
 	// SpendCap is the one-token alias (OpenAPI erc20SpendCap). SpendCaps is
@@ -81,6 +87,9 @@ func (p SessionPermissions) Validate() error {
 		if !covered {
 			return fmt.Errorf("the cap token %s is not an allowed-action target; cap a token the agent may actually call", cap.Token.Hex())
 		}
+		if err := spendLimitSelectorsOK(*cap.Token, p.AllowedActions); err != nil {
+			return err
+		}
 	}
 	if p.ValidUntilMs <= time.Now().UnixMilli() {
 		return fmt.Errorf("validUntil is in the past")
@@ -100,6 +109,10 @@ func (p SessionPermissions) Validate() error {
 // refusals on MA v2 chains precisely because this is unconditional; if a grant
 // shape ever sets it false, those refusals become overly broad and must be
 // narrowed to match. TestHooksForAlwaysScopesSelectors guards the coupling.
+//
+// HasERC20SpendLimit is set on every capped token (not only the singular
+// alias). The module then meters transfer/approve on that target and reverts
+// on any other selector — Validate has already refused those shapes.
 func (p SessionPermissions) allowlistInputs() ([]aa.AllowlistInput, error) {
 	caps, err := p.resolvedSpendCaps()
 	if err != nil {
@@ -148,7 +161,7 @@ func (p SessionPermissions) resolvedSpendCaps() ([]model.ERC20SpendCap, error) {
 		if p.SpendCap != nil && p.SpendCap.Token != nil {
 			matched := false
 			for _, cap := range p.SpendCaps {
-				if cap.Token != nil && *cap.Token == *p.SpendCap.Token && cap.Amount == p.SpendCap.Amount {
+				if cap.Token != nil && *cap.Token == *p.SpendCap.Token && spendAmountsEqual(cap.Amount, p.SpendCap.Amount) {
 					matched = true
 					break
 				}
@@ -165,10 +178,43 @@ func (p SessionPermissions) resolvedSpendCaps() ([]model.ERC20SpendCap, error) {
 	return nil, nil
 }
 
+// erc20TransferSelector / erc20ApproveSelector are the only functions
+// AllowlistModule._isAllowedERC20Function accepts. A spend-limit row on any
+// other selector reverts SelectorNotAllowed; calldata shorter than 68 bytes
+// (deposit, withdraw) reverts InvalidCalldataLength.
+var (
+	erc20TransferSelector = [4]byte{0xa9, 0x05, 0x9c, 0xbb}
+	erc20ApproveSelector  = [4]byte{0x09, 0x5e, 0xa7, 0xb3}
+)
+
+func spendLimitSelectorsOK(token common.Address, actions []model.AllowedAction) error {
+	for _, action := range actions {
+		if action.Target == nil || *action.Target != token {
+			continue
+		}
+		for _, raw := range action.Selectors {
+			sel, err := parseSelector(raw)
+			if err != nil {
+				return fmt.Errorf("cap token %s: %w", token.Hex(), err)
+			}
+			if sel != erc20TransferSelector && sel != erc20ApproveSelector {
+				return fmt.Errorf("cannot cap %s: AllowlistModule only meters transfer/approve; %s would revert on-chain (deposit/withdraw and wrap paths cannot share a spend-limit row)", token.Hex(), raw)
+			}
+		}
+	}
+	return nil
+}
+
+func spendAmountsEqual(a, b string) bool {
+	x, okX := new(big.Int).SetString(strings.TrimSpace(a), 10)
+	y, okY := new(big.Int).SetString(strings.TrimSpace(b), 10)
+	return okX && okY && x.Cmp(y) == 0
+}
+
 // HooksFor builds the grant's hook entries for its allocated entity:
-// the allowlist validation hook (targets, selectors, and the cap's limit in
-// one install payload), the allowlist execution hook that enforces the cap,
-// and the time-range hook that expires the grant.
+// the allowlist validation hook (targets, selectors, and per-token spend
+// limits in one install payload), the allowlist execution hook that enforces
+// those limits, and the time-range hook that expires the grant.
 func (p SessionPermissions) HooksFor(entityID uint32) ([][]byte, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err

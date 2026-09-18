@@ -136,7 +136,7 @@ func TestAllowlistInputsCapsEachSpendToken(t *testing.T) {
 		AllowedActions: []model.AllowedAction{
 			{Target: &router, Selectors: []string{"0x04e45aaf"}},
 			{Target: &usdc, Selectors: []string{"0x095ea7b3"}},
-			{Target: &weth, Selectors: []string{"0x095ea7b3", "0xd0e30db0"}},
+			{Target: &weth, Selectors: []string{"0x095ea7b3", "0xa9059cbb"}},
 		},
 		SpendCap: &model.ERC20SpendCap{Token: &usdc, Amount: "500000000"},
 		SpendCaps: []model.ERC20SpendCap{
@@ -164,5 +164,23 @@ func TestAllowlistInputsCapsEachSpendToken(t *testing.T) {
 	}
 	if byTarget[router].HasERC20SpendLimit {
 		t.Fatal("router must not carry an ERC-20 spend limit")
+	}
+}
+
+func TestValidateRejectsSpendCapOnWrapSelectors(t *testing.T) {
+	weth := common.HexToAddress("0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14")
+	permissions := SessionPermissions{
+		AllowedActions: []model.AllowedAction{
+			{Target: &weth, Selectors: []string{"0x095ea7b3", "0xd0e30db0"}}, // approve + deposit
+		},
+		SpendCap:     &model.ERC20SpendCap{Token: &weth, Amount: "1"},
+		ValidUntilMs: time.Now().Add(time.Hour).UnixMilli(),
+	}
+	err := permissions.Validate()
+	if err == nil {
+		t.Fatal("capping WETH with deposit() must fail: AllowlistModule would revert InvalidCalldataLength")
+	}
+	if !strings.Contains(err.Error(), "cannot cap") {
+		t.Fatalf("want cannot-cap copy, got %q", err.Error())
 	}
 }
