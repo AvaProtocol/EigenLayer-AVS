@@ -537,7 +537,7 @@ func run() error {
 	ntNeedle := exceededNTNeedle()
 	// Always send so requireMinedRevert actually runs when the op is
 	// included (R10). Estimate-only "execution reverted" is not a selector.
-	r4a, _, send4a := h.sendNative(e2, alice, over, 200_000)
+	r4a, _, send4a := h.sendNativeNoEstimate(e2, alice, over, 200_000)
 	switch {
 	case r4a != nil && !r4a.Success:
 		if err := requireMinedRevert(r4a, "PROOF 4a remaining+1", "ExceededNativeTokenLimit", ntNeedle); err != nil {
@@ -1040,6 +1040,46 @@ func (h *harness) sendNative(entity uint32, to common.Address, value *big.Int, v
 		return nil, nil, err
 	}
 	return h.sendExec(entity, exec, vgl)
+}
+
+// sendNativeNoEstimate signs with seed gas so a value-hook revert can still
+// be included (R10). EstimateUserOpGasV07 would abort before send.
+func (h *harness) sendNativeNoEstimate(entity uint32, to common.Address, value *big.Int, vgl int64) (*userOpReceipt, *userop.UserOperationV07, error) {
+	exec, err := aa.PackExecute(to, value, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	call, err := aa.WrapExecuteUserOp(exec)
+	if err != nil {
+		return nil, nil, err
+	}
+	nonce, err := preset.NextNonceV07(h.ctx, h.chainRPC, h.entryPoint, h.account, entity, userop.ValidationOptionGlobal)
+	if err != nil {
+		return nil, nil, err
+	}
+	maxFee, tip, err := eip1559.SuggestFee(h.chain)
+	if err != nil {
+		return nil, nil, err
+	}
+	op := &userop.UserOperationV07{
+		Sender:               h.account,
+		Nonce:                nonce,
+		CallData:             call,
+		CallGasLimit:         big.NewInt(500_000),
+		VerificationGasLimit: big.NewInt(vgl),
+		PreVerificationGas:   big.NewInt(100_000),
+		MaxFeePerGas:         maxFee,
+		MaxPriorityFeePerGas: tip,
+	}
+	if err := preset.SignUserOpV07(op, h.entryPoint, h.chainID, h.controllerKey); err != nil {
+		return nil, op, err
+	}
+	hash, err := preset.SendUserOpV07(h.ctx, h.bundler, op, h.entryPoint)
+	if err != nil {
+		return nil, op, err
+	}
+	r, err := waitReceipt(h.ctx, h.bundler, hash)
+	return r, op, err
 }
 
 func (h *harness) sendExec(entity uint32, exec []byte, vgl int64) (*userOpReceipt, *userop.UserOperationV07, error) {
