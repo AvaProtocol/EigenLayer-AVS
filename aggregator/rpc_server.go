@@ -75,12 +75,21 @@ func (r *RpcServer) nativeCodeAndFee(chainID int64) taskengine.CodeAndFeeReader 
 	var eth *ethclient.Client
 	if r != nil {
 		_, swRpc, err := r.resolveSmartWalletForChain(chainID)
-		if err == nil {
+		if err != nil {
+			if r.config != nil && r.config.Logger != nil {
+				r.config.Logger.Warn("native preflight: CodeAt reader available but signed-op maxFee has no ethclient; self-funded cap check will fail closed",
+					"chain", chainID, "error", err, "has_code_reader", reader != nil)
+			}
+		} else {
 			eth = swRpc
 			if reader == nil && swRpc != nil {
 				reader = taskengine.NewDirectChainStateReader(swRpc, chainID)
 			}
 		}
+	}
+	if reader != nil && eth == nil && r != nil && r.config != nil && r.config.Logger != nil {
+		r.config.Logger.Warn("native preflight: CodeAt works but maxFeePerGas cannot; self-funded cap check will fail closed",
+			"chain", chainID)
 	}
 	return taskengine.NewCodeAndFeeReader(reader, eth)
 }

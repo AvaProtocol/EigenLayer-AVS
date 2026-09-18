@@ -10,12 +10,14 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
@@ -51,6 +53,11 @@ type ContractWriteProcessor struct {
 	smartWalletConfig *config.SmartWalletConfig
 	owner             common.Address
 	sendUserOpFunc    SendUserOpFunc
+	// nativeReader is a test-injected CodeAndFeeReader. Production uses
+	// nativeCodeAndFee (chain reader + signed-op maxFee from ethclient).
+	nativeReader CodeAndFeeReader
+	feeEthOnce   sync.Once
+	feeEth       *ethclient.Client
 }
 
 func NewContractWriteProcessor(vm *VM, client ChainStateReader, smartWalletConfig *config.SmartWalletConfig, owner common.Address) *ContractWriteProcessor {
@@ -1156,7 +1163,44 @@ func (r *ContractWriteProcessor) nativeCodeAndFee() CodeAndFeeReader {
 	if r == nil {
 		return nil
 	}
-	return NewCodeAndFeeReader(r.client, nil)
+	if r.nativeReader != nil {
+		return r.nativeReader
+	}
+	return NewCodeAndFeeReader(r.client, r.ethForFees())
+}
+
+type ethClientSource interface {
+	EthClient() *ethclient.Client
+}
+
+// ethForFees is the *ethclient.Client used for signed-op maxFee (tip +
+// 2*baseFee). Prefer the DirectChainStateReader's client (no extra dial);
+// otherwise one lazy Dial of smartWalletConfig.EthRpcUrl (worker-routed
+// readers have no ethclient).
+func (r *ContractWriteProcessor) ethForFees() *ethclient.Client {
+	if r == nil {
+		return nil
+	}
+	if src, ok := r.client.(ethClientSource); ok {
+		if c := src.EthClient(); c != nil {
+			return c
+		}
+	}
+	r.feeEthOnce.Do(func() {
+		if r.smartWalletConfig == nil || r.smartWalletConfig.EthRpcUrl == "" {
+			return
+		}
+		c, err := ethclient.Dial(r.smartWalletConfig.EthRpcUrl)
+		if err != nil {
+			if r.vm != nil && r.vm.logger != nil {
+				r.vm.logger.Warn("native preflight could not dial RPC for signed-op maxFee; self-funded cap check will fail closed",
+					"error", err)
+			}
+			return
+		}
+		r.feeEth = c
+	})
+	return r.feeEth
 }
 
 // uniqueTargetHexes returns the distinct target addresses (hex, order-preserving) — used to label

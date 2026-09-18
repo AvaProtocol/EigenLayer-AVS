@@ -93,8 +93,13 @@ func MaxFeeFromTipAndBase(tip, baseFee *big.Int) *big.Int {
 }
 
 // SignedOpMaxFeePerGas reads chain tip and baseFee and returns the signed-op
-// maxFee (no bundler floor — that is applied only at send). Fail closed if
-// either RPC call errors.
+// maxFee. It omits the bundler priority-fee floor that priceOperationV07
+// applies at send (tip = max(chainTip, bundlerTip)). That under-prices
+// relative to the signed op when the bundler floor exceeds the chain tip
+// (Sepolia today ~0.1 vs ~0.001 gwei, about 4% of the total). Preflight
+// still nets conservative: A0 measured ~400k actual against the 500k
+// steady-state ceiling and ~0.8–1M against the 2M first-op ceiling. Fail
+// closed if either RPC call errors.
 func SignedOpMaxFeePerGas(ctx context.Context, client *ethclient.Client) (*big.Int, error) {
 	if client == nil {
 		return nil, fmt.Errorf("no ethclient")
