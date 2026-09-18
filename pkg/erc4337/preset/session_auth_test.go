@@ -137,6 +137,44 @@ func TestSeedVerificationGasScalesWithGrantContents(t *testing.T) {
 	if nway.Cmp(wantNway) != 0 {
 		t.Errorf("N-way seed = %s, want hooks + 3*per-uninstall = %s", nway, wantNway)
 	}
+
+	// Resolver fail-open sets AllowlistRows=0 when the install cannot be
+	// counted. That must be the 700k base, same as the measured 2–3 row
+	// grants (scale only fires past 3).
+	if hooks.Int64() != seedVerificationGasDeferredHooks {
+		t.Errorf("AllowlistRows omitted seed = %s, want %d", hooks, seedVerificationGasDeferredHooks)
+	}
+	unknown := seedVerificationGasFor(op, &SessionAuthorization{
+		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
+		WrapExecuteUserOp: true, AllowlistRows: 0})
+	if unknown.Cmp(hooks) != 0 {
+		t.Errorf("AllowlistRows=0 seed = %s, want the 700k hooks seed %s", unknown, hooks)
+	}
+	three := seedVerificationGasFor(op, &SessionAuthorization{
+		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
+		WrapExecuteUserOp: true, AllowlistRows: 3})
+	if three.Cmp(hooks) != 0 {
+		t.Errorf("AllowlistRows=3 seed = %s, want the 700k base (no per-row add)", three)
+	}
+
+	// Product max is 5 native recipients (20-row replace AA23s). 5 rows =
+	// 700k + 2×45k. The 20-row formula is kept as a unit check of the
+	// interpolation (3 rows ≈ 700k, 20 rows ≈ 1.5M) even though production
+	// must not ship 20.
+	five := seedVerificationGasFor(op, &SessionAuthorization{
+		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
+		WrapExecuteUserOp: true, AllowlistRows: 5})
+	wantFive := new(big.Int).Add(hooks, big.NewInt(2*seedVerificationGasPerAllowlistRow))
+	if five.Cmp(wantFive) != 0 {
+		t.Errorf("5-row seed = %s, want hooks + 2*per-row = %s", five, wantFive)
+	}
+	wide := seedVerificationGasFor(op, &SessionAuthorization{
+		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
+		WrapExecuteUserOp: true, AllowlistRows: 20})
+	wantWide := new(big.Int).Add(hooks, big.NewInt(17*seedVerificationGasPerAllowlistRow))
+	if wide.Cmp(wantWide) != 0 {
+		t.Errorf("20-row seed = %s, want hooks + 17*per-row = %s", wide, wantWide)
+	}
 }
 
 // The resolver is the only way storage reaches the send path. An unset

@@ -78,6 +78,62 @@ func TestPackTimeRangeInstallDataGolden(t *testing.T) {
 	}
 }
 
+func TestPackNativeTokenLimitInstallDataGolden(t *testing.T) {
+	// cast abi-encode "f(uint32,uint256)" 1 10000000000000000
+	want := "0000000000000000000000000000000000000000000000000000000000000001" +
+		"000000000000000000000000000000000000000000000000002386f26fc10000"
+	got, err := PackNativeTokenLimitInstallData(1, big.NewInt(10_000_000_000_000_000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hex.EncodeToString(got) != want {
+		t.Fatalf("NT install data = %x, want %s", got, want)
+	}
+	if _, err := PackNativeTokenLimitInstallData(1, big.NewInt(0)); err == nil {
+		t.Error("expected a zero native limit to be rejected")
+	}
+	hook, err := NativeTokenLimitValidationHook(2, big.NewInt(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := common.BytesToAddress(hook[:20]); got != NativeTokenLimitModuleAddress() {
+		t.Fatalf("NT val hook module %s", got)
+	}
+	if hook[24]&HookFlagValidation == 0 {
+		t.Fatal("NT val hook must set the validation flag")
+	}
+	exec := NativeTokenLimitExecHook(2)
+	if len(exec) != 25 {
+		t.Fatalf("NT exec hook is config-only, got %d bytes", len(exec))
+	}
+	if exec[24] != HookFlagExecHasPre {
+		t.Fatalf("NT exec flags = %x, want exec-pre (%x)", exec[24], HookFlagExecHasPre)
+	}
+	if exec[24]&HookFlagExecHasPost != 0 {
+		t.Fatal("NT exec must not set the post bit; postExecutionHook reverts NotImplemented")
+	}
+}
+
+func TestPackNativeTokenLimitUninstallDataGolden(t *testing.T) {
+	// cast abi-encode "f(uint32)" 1 — entityId only, not the install tuple.
+	want := "0000000000000000000000000000000000000000000000000000000000000001"
+	got, err := PackNativeTokenLimitUninstallData(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hex.EncodeToString(got) != want {
+		t.Fatalf("NT uninstall data = %x, want %s", got, want)
+	}
+}
+
+func TestMaxNativeRecipientsFollowsReplaceNotInstall(t *testing.T) {
+	// Tripwire for the A0 replace-AA23 decision. Nothing enforces this
+	// until A1 Validate; this is not coverage of a cap.
+	if MaxNativeRecipients != 5 {
+		t.Fatalf("MaxNativeRecipients = %d, want 5 (A0: 20-row deferred replace AA23s)", MaxNativeRecipients)
+	}
+}
+
 func TestHookEntryLayout(t *testing.T) {
 	entry, err := TimeRangeValidationHook(3, 1790000000, 0)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -97,6 +98,107 @@ func TestSessionResolverReturnsTheWalletsGrant(t *testing.T) {
 		t.Errorf("DeferredData should be InstallCall plus locator+deadline prefix; got %d bytes for a %d-byte install",
 			len(auth.DeferredData), len(pending.Grant.InstallCall))
 	}
+	if auth.AllowlistRows != 0 {
+		t.Errorf("stub InstallCall AllowlistRows = %d, want 0 (unknown → 700k seed)", auth.AllowlistRows)
+	}
+}
+
+// K14: AllowlistRows must come from the packed install, or seedVerificationGasFor
+// always reads 0 and the 45k/row scale never fires in production.
+func TestSessionResolverSeedsAllowlistRowsFromInstall(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	keyFor, _ := spKeyFor(t)
+
+	token := common.HexToAddress("0xaA4D01B75fdEB5fbbD98276EC7755eF71801c2E7")
+	inputs := []aa.AllowlistInput{
+		{Target: token, HasSelectorAllowlist: true, Selectors: [][4]byte{{0xa9, 0x05, 0x9c, 0xbb}}},
+		{Target: common.HexToAddress("0x000000000000000000000000000000000000a11c"), HasSelectorAllowlist: false},
+		{Target: common.HexToAddress("0x000000000000000000000000000000000000b0b0"), HasSelectorAllowlist: false},
+		{Target: common.HexToAddress("0x000000000000000000000000000000000000c0de"), HasSelectorAllowlist: false},
+		{Target: common.HexToAddress("0x000000000000000000000000000000000000d00d"), HasSelectorAllowlist: false},
+	}
+	allow, err := aa.AllowlistValidationHook(1, inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := aa.TimeRangeValidationHook(1, 1785541743, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := aa.PackSessionSignerInstall(aa.SessionGrant{
+		EntityID: 1, Signer: spSigner, Global: true,
+		Hooks: [][]byte{allow, aa.AllowlistExecHook(1), tr},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p := spPolicy("p1", spWallet, 1, model.SessionPolicyPending)
+	p.Grant.InstallCall = call
+	p.Grant.RequiresExecuteUserOp = true
+	if err := StoreSessionPolicy(db, p); err != nil {
+		t.Fatal(err)
+	}
+	auth, err := NewSessionResolver(db, keyFor, nil)(spChain, spOwner, spWallet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auth == nil {
+		t.Fatal("expected an authorization")
+	}
+	if auth.AllowlistRows != 5 {
+		t.Errorf("AllowlistRows = %d, want 5 (packed inputs, not AllowedActions)", auth.AllowlistRows)
+	}
+	if auth.DeferredTeardownCount != 0 {
+		t.Errorf("plain install teardown count = %d, want 0", auth.DeferredTeardownCount)
+	}
+}
+
+// A predating or malformed InstallCall must not brick every send. The row
+// count is a gas hint; zero falls back to the 700k seed. Decode misses
+// return 0, nil, so the guessed-seed warn is this path's only signal.
+func TestSessionResolverAllowlistRowCountFailureDoesNotBrickSend(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	keyFor, _ := spKeyFor(t)
+
+	spy := &warnSpy{MockLogger: &testutil.MockLogger{}}
+	prev := globalLogger
+	SetLogger(spy)
+	t.Cleanup(func() { SetLogger(prev) })
+
+	p := spPolicy("p1", spWallet, 1, model.SessionPolicyPending)
+	p.Grant.InstallCall = append([]byte{0x1b, 0xbf, 0x56, 0x4c}, make([]byte, 40)...)
+	p.Grant.RequiresExecuteUserOp = true
+	if err := StoreSessionPolicy(db, p); err != nil {
+		t.Fatal(err)
+	}
+	auth, err := NewSessionResolver(db, keyFor, nil)(spChain, spOwner, spWallet)
+	if err != nil {
+		t.Fatalf("a predating/malformed install must still resolve: %v", err)
+	}
+	if auth == nil {
+		t.Fatal("expected an authorization")
+	}
+	if auth.AllowlistRows != 0 {
+		t.Errorf("AllowlistRows = %d, want 0 (unknown → 700k seed)", auth.AllowlistRows)
+	}
+	if !auth.Deferred() {
+		t.Error("pending grant must still carry the install")
+	}
+	if len(spy.warns) == 0 {
+		t.Error("expected a warn that this grant is on the guessed 700k seed")
+	}
+}
+
+type warnSpy struct {
+	*testutil.MockLogger
+	warns []string
+}
+
+func (s *warnSpy) Warn(msg string, keysAndValues ...interface{}) {
+	s.warns = append(s.warns, msg)
 }
 
 // The install is a bearer authorization for exactly its calldata. Replaying it

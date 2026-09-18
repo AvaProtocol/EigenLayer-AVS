@@ -563,6 +563,23 @@ func newSessionResolver(
 			// Count for verification-gas seeding (deferred uninstalls run in
 			// validation; flat seed under-seeds N-way batches — #731 review).
 			auth.DeferredTeardownCount = len(replacedEntities)
+			// Packed AllowlistModule inputs, not len(AllowedActions): native
+			// recipient rows (A1) are extra SSTOREs that are not allowedActions.
+			// Zero means "unknown — use the 2–3 row 700k seed". A missed
+			// count must not brick a grant that previously sent: under-seed
+			// is AA26 at estimation, not a fund risk. Rescues ≤3-row grants;
+			// an undecodable >3-row install still AA26s at 700k.
+			rows, rowErr := aa.CountAllowlistInputs(policy.Grant.InstallCall)
+			if rowErr != nil {
+				rows = 0
+			}
+			auth.AllowlistRows = rows
+			// Hook-carrying grant with no counted rows is a guessed seed.
+			// Decode misses return 0, nil so this is the signal, not rowErr.
+			// Engine.SetLogger runs before the send path; tests omit it.
+			if rows == 0 && policy.Grant.RequiresExecuteUserOp {
+				logGuessedAllowlistSeed(policy.ID, rowErr)
+			}
 			auth.OnApplied = func(userOpHash string) error {
 				if err := MarkSessionGrantAppliedByID(db, policyChain, policyOwner, policyRunner, policyID, userOpHash); err != nil {
 					return err
@@ -589,6 +606,22 @@ func newSessionResolver(
 		}
 		return auth, nil
 	}
+}
+
+// logGuessedAllowlistSeed is the only signal that a hook-carrying grant is
+// running on the 700k unknown seed. No-op when the logger is unset (tests);
+// Engine.SetLogger runs before the production send path.
+func logGuessedAllowlistSeed(policyID string, err error) {
+	if globalLogger == nil {
+		return
+	}
+	if err != nil {
+		globalLogger.Warn("allowlist row count unknown; using the 700k deferred-hooks seed",
+			"policy", policyID, "error", err)
+		return
+	}
+	globalLogger.Warn("allowlist row count unknown; using the 700k deferred-hooks seed",
+		"policy", policyID)
 }
 
 // controllerSessionSigner resolves a session signer to its key.

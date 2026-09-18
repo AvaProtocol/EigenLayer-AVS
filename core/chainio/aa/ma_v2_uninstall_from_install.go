@@ -2,6 +2,9 @@ package aa
 
 import (
 	"fmt"
+	"reflect"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // Deriving a grant's teardown from the call that created it.
@@ -31,11 +34,11 @@ import (
 // that reverses installCall — the calldata a grant was created with.
 //
 // hookUninstallData must carry one entry per installed hook in the ACCOUNT's
-// STORED order. The account keeps hooks as a prepend-on-add list, so stored
-// order is the REVERSE of install order. A hook that carried install data is
-// torn down with that same data; one that carried none (the allowlist's
-// execution-hook entry, whose module state belongs to its validation-hook
-// entry) takes an empty slot.
+// STORED order: validation hooks reversed, then execution hooks reversed.
+// A flat reverse of install order strands NativeTokenLimitModule.limits
+// (A0 proof 6b). A hook that carried install data is torn down with that
+// same data except NativeTokenLimit validation (entityId only). Exec-hook
+// entries that installed no state take an empty slot.
 //
 // Wrong ordering does not error here or on chain. It mines and does nothing.
 func SessionSignerUninstallFromInstall(entityID uint32, installCall []byte) ([]byte, error) {
@@ -48,27 +51,52 @@ func SessionSignerUninstallFromInstall(entityID uint32, installCall []byte) ([]b
 		return nil, fmt.Errorf("recovering hooks for entity %d: %w", entityID, err)
 	}
 
-	// Reverse into the account's stored order, keeping each hook's own install
-	// data as its teardown payload.
-	teardown := make([][]byte, 0, len(hooks))
-	for i := len(hooks) - 1; i >= 0; i-- {
-		entry := hooks[i]
+	// Account stored order is validation hooks (reverse of install), then
+	// execution hooks (same reversal) — not a flat reverse of the install
+	// array. Flat reverse only worked when every val/exec pair shared a
+	// module (allowlist). NativeTokenLimitModule on a mixed grant strands
+	// limits[] under that order (A0 proof 6b).
+	var val, exec [][]byte
+	for i, entry := range hooks {
 		if len(entry) < hookConfigLen {
 			return nil, fmt.Errorf("hook %d of entity %d is %d bytes, shorter than a hook config",
 				i, entityID, len(entry))
 		}
-		// Everything after the 25-byte config is the module's install data,
-		// which is exactly what its onUninstall expects back. An entry that is
-		// config-only yields nil, not an empty non-nil slice — the ABI encodes
-		// both as zero-length bytes, and nil states the intent.
-		if data := entry[hookConfigLen:]; len(data) > 0 {
-			teardown = append(teardown, append([]byte(nil), data...))
-		} else {
-			teardown = append(teardown, nil)
+		payload, err := hookUninstallPayload(entityID, entry)
+		if err != nil {
+			return nil, err
 		}
+		if entry[hookConfigLen-1]&HookFlagValidation != 0 {
+			val = append(val, payload)
+		} else {
+			exec = append(exec, payload)
+		}
+	}
+	teardown := make([][]byte, 0, len(val)+len(exec))
+	for i := len(val) - 1; i >= 0; i-- {
+		teardown = append(teardown, val[i])
+	}
+	for i := len(exec) - 1; i >= 0; i-- {
+		teardown = append(teardown, exec[i])
 	}
 
 	return PackSessionSignerUninstall(entityID, teardown)
+}
+
+// hookUninstallPayload is the onUninstall bytes for one installed hook.
+// Allowlist and TimeRange reuse their install tuple. NativeTokenLimit
+// onUninstall is abi.encode(uint32 entityId) only — not the install
+// (entityId, limit) pair.
+func hookUninstallPayload(entityID uint32, entry []byte) ([]byte, error) {
+	mod := common.BytesToAddress(entry[:20])
+	data := entry[hookConfigLen:]
+	if mod == NativeTokenLimitModuleAddress() && entry[hookConfigLen-1]&HookFlagValidation != 0 {
+		return PackNativeTokenLimitUninstallData(entityID)
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	return append([]byte(nil), data...), nil
 }
 
 // hookConfigLen is the packed HookConfig width: module (20) ++ entityId (4) ++
@@ -108,6 +136,55 @@ func DecodeInstallValidationHooks(installCall []byte) ([][]byte, error) {
 		return nil, fmt.Errorf("installValidation hooks decoded to %T, not [][]byte", args[3])
 	}
 	return hooks, nil
+}
+
+// CountAllowlistInputs returns how many AllowlistModule inputs the stored
+// install packs. Used to scale verificationGasLimit (K14): each input is a
+// cold SSTORE.
+//
+// Zero means unknown — use the 2–3 row 700k seed. Decode failure is not an
+// error: stored installs may predate current packing, and this count is a
+// gas hint, not an authority check. That restores sends for grants of ≤3
+// rows. An undecodable install that actually carries more than 3 still
+// seeds 700k and fails at estimation with AA26 — better than bricking
+// every send, but not a working send. Predating REST grants are 2–3
+// targets (Uniswap: router, cap token, WETH). A 4+ target grant whose
+// InstallCall we cannot decode already ran on the unwired 700k seed
+// before AllowlistRows was populated; a miss puts it back there.
+func CountAllowlistInputs(installCall []byte) (int, error) {
+	inner, err := InstallValidationWithin(installCall)
+	if err != nil {
+		return 0, nil
+	}
+	hooks, err := DecodeInstallValidationHooks(inner)
+	if err != nil {
+		return 0, nil
+	}
+	if err := ensureHookABIs(); err != nil {
+		return 0, err
+	}
+	allowlist := AllowlistModuleAddress()
+	for _, entry := range hooks {
+		if len(entry) < hookConfigLen {
+			return 0, nil
+		}
+		if common.BytesToAddress(entry[:20]) != allowlist {
+			continue
+		}
+		if entry[hookConfigLen-1]&HookFlagValidation == 0 {
+			continue
+		}
+		unpacked, unpackErr := allowlistDataArgs.Unpack(entry[hookConfigLen:])
+		if unpackErr != nil || len(unpacked) != 2 {
+			return 0, nil
+		}
+		inputs := reflect.ValueOf(unpacked[1])
+		if inputs.Kind() != reflect.Slice {
+			return 0, nil
+		}
+		return inputs.Len(), nil
+	}
+	return 0, nil
 }
 
 // InstallValidationWithin returns the installValidation calldata inside a
