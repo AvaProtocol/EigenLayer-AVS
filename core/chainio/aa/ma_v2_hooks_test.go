@@ -78,6 +78,36 @@ func TestPackTimeRangeInstallDataGolden(t *testing.T) {
 	}
 }
 
+func TestPackNativeTokenLimitInstallDataGolden(t *testing.T) {
+	// cast abi-encode "f(uint32,uint256)" 1 10000000000000000
+	want := "0000000000000000000000000000000000000000000000000000000000000001" +
+		"000000000000000000000000000000000000000000000000002386f26fc10000"
+	got, err := PackNativeTokenLimitInstallData(1, big.NewInt(10_000_000_000_000_000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hex.EncodeToString(got) != want {
+		t.Fatalf("NT install data = %x, want %s", got, want)
+	}
+	if _, err := PackNativeTokenLimitInstallData(1, big.NewInt(0)); err == nil {
+		t.Error("expected a zero native limit to be rejected")
+	}
+	hook, err := NativeTokenLimitValidationHook(2, big.NewInt(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := common.BytesToAddress(hook[:20]); got != NativeTokenLimitModuleAddress() {
+		t.Fatalf("NT val hook module %s", got)
+	}
+	if hook[24]&HookFlagValidation == 0 {
+		t.Fatal("NT val hook must set the validation flag")
+	}
+	exec := NativeTokenLimitExecHook(2)
+	if len(exec) != 25 {
+		t.Fatalf("NT exec hook is config-only, got %d bytes", len(exec))
+	}
+}
+
 func TestHookEntryLayout(t *testing.T) {
 	entry, err := TimeRangeValidationHook(3, 1790000000, 0)
 	if err != nil {

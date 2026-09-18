@@ -72,9 +72,8 @@ func TestDecodeInstallValidationHooksRecoversInstallOrder(t *testing.T) {
 	require.Equal(t, timeRangeData, hooks[2][hookConfigLen:], "hook 2 carries the time range")
 }
 
-// The ordering finding, stated as an assertion. Install order is
-// [allowlist-validation, allowlist-exec, time-range]; the account stores hooks
-// prepend-on-add, so teardown must be the reverse.
+// Install [AL-val, AL-exec, TR-val] → val-then-exec teardown
+// [TR-val, AL-val, empty], not the flat reverse [TR, empty, AL].
 func TestUninstallReversesIntoStoredOrder(t *testing.T) {
 	call, _, allowlistData, timeRangeData := testGrantInstall(t, testEntity)
 
@@ -84,12 +83,11 @@ func TestUninstallReversesIntoStoredOrder(t *testing.T) {
 	hookData := decodeUninstallHookData(t, uninstall)
 	require.Len(t, hookData, 3, "one entry per installed hook, or the account reverts ArrayLengthMismatch")
 
-	require.Equal(t, timeRangeData, hookData[0],
-		"stored order puts the LAST-installed hook first — time range")
-	require.Empty(t, hookData[1],
-		"the allowlist's exec-hook entry installed no state, so its teardown slot is empty")
-	require.Equal(t, allowlistData, hookData[2],
-		"the allowlist's teardown is the same (entityId, inputs) tuple it was installed with")
+	require.Equal(t, timeRangeData, hookData[0], "validation group reversed: time range first")
+	require.Equal(t, allowlistData, hookData[1],
+		"validation group reversed: allowlist tuple (not the exec slot)")
+	require.Empty(t, hookData[2],
+		"execution group: allowlist exec installed no state")
 }
 
 // Rebuilding the payload from current code instead of the stored call is the
@@ -125,15 +123,15 @@ func TestTeardownFollowsTheStoredCallNotCurrentCode(t *testing.T) {
 
 	otherAllowlistData, err := PackAllowlistInstallData(testEntity, otherInputs)
 	require.NoError(t, err)
-	require.Equal(t, otherAllowlistData, otherData[2],
+	require.Equal(t, otherAllowlistData, otherData[1],
 		"teardown must reproduce the cap the entity was installed with, not the current one")
-	require.NotEqual(t, allowlistData, otherData[2],
+	require.NotEqual(t, allowlistData, otherData[1],
 		"precondition: the two grants really do differ")
 
 	// And the round trip is stable for the original.
 	teardown, err := SessionSignerUninstallFromInstall(testEntity, call)
 	require.NoError(t, err)
-	require.Equal(t, allowlistData, decodeUninstallHookData(t, teardown)[2])
+	require.Equal(t, allowlistData, decodeUninstallHookData(t, teardown)[1])
 }
 
 func TestUninstallFromInstallRejectsUnusableInput(t *testing.T) {
@@ -199,4 +197,47 @@ func TestUninstalledEntityWithinReadsTheSignedTarget(t *testing.T) {
 	inner, err := InstallValidationWithin(batch)
 	require.NoError(t, err)
 	require.Equal(t, install, inner)
+}
+
+func TestUninstallMixedNativeGrantValThenExecOrder(t *testing.T) {
+	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
+	token := common.HexToAddress("0xaA4D01B75fdEB5fbbD98276EC7755eF71801c2E7")
+	alice := common.HexToAddress("0x000000000000000000000000000000000000a11c")
+	cap := big.NewInt(10_000_000_000_000_000)
+
+	allow, err := AllowlistValidationHook(testEntity, []AllowlistInput{
+		{Target: token, HasSelectorAllowlist: true, HasERC20SpendLimit: true, ERC20SpendLimit: big.NewInt(1), Selectors: [][4]byte{{0xa9, 0x05, 0x9c, 0xbb}}},
+		{Target: alice, HasSelectorAllowlist: false},
+	})
+	require.NoError(t, err)
+	ntVal, err := NativeTokenLimitValidationHook(testEntity, cap)
+	require.NoError(t, err)
+	tr, err := TimeRangeValidationHook(testEntity, 1785541743, 0)
+	require.NoError(t, err)
+	call, err := PackSessionSignerInstall(SessionGrant{
+		EntityID: testEntity, Signer: signer, Global: true,
+		Hooks: [][]byte{allow, AllowlistExecHook(testEntity), ntVal, NativeTokenLimitExecHook(testEntity), tr},
+	})
+	require.NoError(t, err)
+
+	uninstall, err := SessionSignerUninstallFromInstall(testEntity, call)
+	require.NoError(t, err)
+	hookData := decodeUninstallHookData(t, uninstall)
+	require.Len(t, hookData, 5)
+
+	trData, err := PackTimeRangeInstallData(testEntity, 1785541743, 0)
+	require.NoError(t, err)
+	ntUninst, err := PackNativeTokenLimitUninstallData(testEntity)
+	require.NoError(t, err)
+	alData, err := PackAllowlistInstallData(testEntity, []AllowlistInput{
+		{Target: token, HasSelectorAllowlist: true, HasERC20SpendLimit: true, ERC20SpendLimit: big.NewInt(1), Selectors: [][4]byte{{0xa9, 0x05, 0x9c, 0xbb}}},
+		{Target: alice, HasSelectorAllowlist: false},
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, trData, hookData[0], "val reversed: TimeRange")
+	require.Equal(t, ntUninst, hookData[1], "val reversed: NT uninstall is entityId only")
+	require.Equal(t, alData, hookData[2], "val reversed: allowlist")
+	require.Empty(t, hookData[3], "exec reversed: NT exec")
+	require.Empty(t, hookData[4], "exec reversed: allowlist exec")
 }

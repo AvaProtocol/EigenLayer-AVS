@@ -137,6 +137,15 @@ func TestSeedVerificationGasScalesWithGrantContents(t *testing.T) {
 	if nway.Cmp(wantNway) != 0 {
 		t.Errorf("N-way seed = %s, want hooks + 3*per-uninstall = %s", nway, wantNway)
 	}
+
+	// A0: 20-row native grant needed 1.5M seed (actual ~1.19M).
+	wide := seedVerificationGasFor(op, &SessionAuthorization{
+		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
+		WrapExecuteUserOp: true, AllowlistRows: 20})
+	wantWide := new(big.Int).Add(hooks, big.NewInt(17*seedVerificationGasPerAllowlistRow))
+	if wide.Cmp(wantWide) != 0 {
+		t.Errorf("20-row seed = %s, want hooks + 17*per-row = %s", wide, wantWide)
+	}
 }
 
 // The resolver is the only way storage reaches the send path. An unset

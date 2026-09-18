@@ -44,8 +44,9 @@ const (
 // verified on Sepolia). AllowlistModule is the v2.0.1 redeploy, matching the
 // v2.0.1 source its encoding here was written against.
 const (
-	AllowlistModuleAddressHex = "0x00000000003e826473a313e600b5b9b791f5a59a"
-	TimeRangeModuleAddressHex = "0x00000000000082B8e2012be914dFA4f62A0573eA"
+	AllowlistModuleAddressHex        = "0x00000000003e826473a313e600b5b9b791f5a59a"
+	TimeRangeModuleAddressHex        = "0x00000000000082B8e2012be914dFA4f62A0573eA"
+	NativeTokenLimitModuleAddressHex = "0x00000000000001e541f0D090868FBe24b59Fbe06" // v2.0.0; not redeployed in v2.0.1
 )
 
 // AllowlistModuleAddress returns the v2.0.1 AllowlistModule address.
@@ -53,6 +54,11 @@ func AllowlistModuleAddress() common.Address { return common.HexToAddress(Allowl
 
 // TimeRangeModuleAddress returns the TimeRangeModule address.
 func TimeRangeModuleAddress() common.Address { return common.HexToAddress(TimeRangeModuleAddressHex) }
+
+// NativeTokenLimitModuleAddress returns the v2.0.0 NativeTokenLimitModule.
+func NativeTokenLimitModuleAddress() common.Address {
+	return common.HexToAddress(NativeTokenLimitModuleAddressHex)
+}
 
 // selectorExecuteUserOp is IAccountExecute.executeUserOp(PackedUserOperation,
 // bytes32) — the v0.7 EntryPoint special-cases callData beginning with it and
@@ -84,10 +90,11 @@ type AllowlistInput struct {
 }
 
 var (
-	hooksArgsOnce     sync.Once
-	allowlistDataArgs abi.Arguments
-	timeRangeDataArgs abi.Arguments
-	hooksArgsErr      error
+	hooksArgsOnce               sync.Once
+	allowlistDataArgs           abi.Arguments
+	timeRangeDataArgs           abi.Arguments
+	nativeTokenLimitInstallArgs abi.Arguments
+	hooksArgsErr                error
 )
 
 func ensureHookABIs() error {
@@ -113,8 +120,14 @@ func ensureHookABIs() error {
 			hooksArgsErr = err
 			return
 		}
+		uint256Type, err := abi.NewType("uint256", "", nil)
+		if err != nil {
+			hooksArgsErr = err
+			return
+		}
 		allowlistDataArgs = abi.Arguments{{Type: uint32Type}, {Type: allowlistInputType}}
 		timeRangeDataArgs = abi.Arguments{{Type: uint32Type}, {Type: uint48Type}, {Type: uint48Type}}
+		nativeTokenLimitInstallArgs = abi.Arguments{{Type: uint32Type}, {Type: uint256Type}}
 	})
 	return hooksArgsErr
 }
@@ -214,6 +227,42 @@ func TimeRangeValidationHook(entityID uint32, validUntil, validAfter uint64) ([]
 	}
 	config := PackHookConfig(TimeRangeModuleAddress(), entityID, HookFlagValidation)
 	return append(config[:], data...), nil
+}
+
+// PackNativeTokenLimitInstallData encodes NativeTokenLimitModule.onInstall:
+// abi.encode(uint32 entityId, uint256 spendLimit).
+func PackNativeTokenLimitInstallData(entityID uint32, spendLimit *big.Int) ([]byte, error) {
+	if err := ensureHookABIs(); err != nil {
+		return nil, err
+	}
+	if spendLimit == nil || spendLimit.Sign() <= 0 {
+		return nil, fmt.Errorf("native spend limit must be positive")
+	}
+	return nativeTokenLimitInstallArgs.Pack(entityID, spendLimit)
+}
+
+// PackNativeTokenLimitUninstallData encodes NativeTokenLimitModule.onUninstall:
+// abi.encode(uint32 entityId) — not the install (entityId, limit) tuple.
+func PackNativeTokenLimitUninstallData(entityID uint32) ([]byte, error) {
+	return PackSingleSignerUninstallData(entityID)
+}
+
+// NativeTokenLimitValidationHook installs the native cap at validation.
+// State is shared with the exec hook, so onInstall runs once here.
+func NativeTokenLimitValidationHook(entityID uint32, spendLimit *big.Int) ([]byte, error) {
+	data, err := PackNativeTokenLimitInstallData(entityID, spendLimit)
+	if err != nil {
+		return nil, err
+	}
+	config := PackHookConfig(NativeTokenLimitModuleAddress(), entityID, HookFlagValidation)
+	return append(config[:], data...), nil
+}
+
+// NativeTokenLimitExecHook is the pre-execution hook that subtracts execute
+// value from the cap. No install data (state belongs to the validation hook).
+func NativeTokenLimitExecHook(entityID uint32) []byte {
+	config := PackHookConfig(NativeTokenLimitModuleAddress(), entityID, HookFlagExecHasPre)
+	return config[:]
 }
 
 // WrapExecuteUserOp prefixes execution calldata with the executeUserOp
