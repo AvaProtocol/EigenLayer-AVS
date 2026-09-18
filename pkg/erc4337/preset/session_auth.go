@@ -83,7 +83,7 @@ type SessionAuthorization struct {
 	// packs. Zero means "unknown — use the 2–3 row seed" (700k; scale only
 	// past 3). An undecodable >3-row install therefore under-seeds and
 	// AA26s at estimation — fail-open restores ≤3-row sends, not those.
-	// Product max native recipients is aa.MaxNativeRecipients (5).
+	// Product max native recipients is MaxNativeRecipients (5).
 	AllowlistRows int
 }
 

@@ -437,6 +437,65 @@ func (n *Engine) occupancyFor(chainID int64) EntityOccupancyChecker {
 	return n.entityOccupancyChecker(chainID)
 }
 
+// bindNativeRecipientChecks attaches the session signer (refused as a
+// native recipient) and a memoized CodeAt that uses the pooled
+// ChainStateReader. A missing controller key is an error: swallowing it
+// would skip the reservation. Does not replace a test-injected CodeAt, but
+// wraps it so Validate + HooksFor share one lookup per address. Production
+// InstallSessionResolver enables sessionChainReads; without it CodeAt stays
+// nil and Validate fail-closes naming the resolver.
+func (n *Engine) bindNativeRecipientChecks(chainID int64, perms *SessionPermissions) error {
+	if n == nil || perms == nil {
+		return nil
+	}
+	if perms.SessionSigner == nil {
+		signer, err := n.sessionSignerAddress()
+		if err != nil {
+			return fmt.Errorf("cannot bind session signer for native-recipient reservation: %w", err)
+		}
+		perms.SessionSigner = &signer
+	}
+	if perms.CodeAt != nil {
+		perms.CodeAt = memoizeCodeAt(perms.CodeAt)
+		return nil
+	}
+	if !n.sessionChainReads {
+		return nil
+	}
+	perms.CodeAt = memoizeCodeAt(func(addr common.Address) ([]byte, error) {
+		reader := GetChainStateReaderForChain(uint64(chainID))
+		if reader == nil {
+			return nil, fmt.Errorf("no ChainStateReader registered for chain %d", chainID)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return reader.CodeAt(ctx, addr)
+	})
+	return nil
+}
+
+// memoizeCodeAt caches lookups for one request. The map is unsynchronized:
+// SessionPermissions copies share the closure, so callers must not Validate
+// concurrently on the same bound CodeAt.
+func memoizeCodeAt(inner func(common.Address) ([]byte, error)) func(common.Address) ([]byte, error) {
+	if inner == nil {
+		return nil
+	}
+	type result struct {
+		code []byte
+		err  error
+	}
+	cache := make(map[common.Address]result)
+	return func(addr common.Address) ([]byte, error) {
+		if got, ok := cache[addr]; ok {
+			return got.code, got.err
+		}
+		code, err := inner(addr)
+		cache[addr] = result{code: code, err: err}
+		return code, err
+	}
+}
+
 // windowVerifier reads TimeRangeModule.timeRanges for (account, entity).
 func (n *Engine) windowVerifier() WindowVerifier {
 	return func(ctx context.Context, chainID int64, account common.Address, entity uint32) (uint64, uint64, error) {

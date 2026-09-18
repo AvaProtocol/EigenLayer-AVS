@@ -69,6 +69,17 @@ func (in *SessionPolicyInput) validate() error {
 	return in.Permissions.Validate()
 }
 
+func (n *Engine) logContractRecipientException(in SessionPolicyInput) {
+	if n == nil || n.logger == nil {
+		return
+	}
+	if !in.Permissions.AllowContractRecipient || len(in.Permissions.NativeRecipients) == 0 {
+		return
+	}
+	n.logger.Warn("session grant allows contract native recipients (any-function, ERC-20 uncapped)",
+		"chain", in.ChainID, "wallet", in.Wallet.Hex())
+}
+
 // sessionSignerAddress is the signer the gateway assigns to new grants —
 // today always the controller (see controllerSessionSigner for why that
 // interim holds the model).
@@ -216,9 +227,13 @@ func (n *Engine) lookupOwnedWalletRecord(user *model.User, chainID int64, wallet
 // what lets that path use the non-locking marker: the mutex is not reentrant,
 // and taking it twice wedges the shard instead of failing.
 func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (*PreparedSessionGrant, error) {
+	if err := n.bindNativeRecipientChecks(in.ChainID, &in.Permissions); err != nil {
+		return nil, err
+	}
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
+	n.logContractRecipientException(in)
 	if err := n.requireServedChain(in.ChainID); err != nil {
 		return nil, err
 	}
@@ -285,9 +300,13 @@ func (n *Engine) SubmitSessionPolicy(
 	deadline uint64,
 	ownerSignature []byte,
 ) (policy *model.SessionPolicy, superseded []string, err error) {
+	if err := n.bindNativeRecipientChecks(in.ChainID, &in.Permissions); err != nil {
+		return nil, nil, err
+	}
 	if err := in.validate(); err != nil {
 		return nil, nil, err
 	}
+	n.logContractRecipientException(in)
 	// Submit re-derives the grant from the client's echo, so it re-checks the
 	// chain too: prepare's verdict does not carry over to a body that names a
 	// different one.
@@ -432,6 +451,13 @@ func attachDeclaredPermissions(policy *model.SessionPolicy, perms SessionPermiss
 		return
 	}
 	policy.AllowedActions = perms.AllowedActions
+	policy.NativeRecipients = perms.NativeRecipients
+	policy.AllowContractRecipient = perms.AllowContractRecipient
+	if perms.NativeSpendCap != nil {
+		native := *perms.NativeSpendCap
+		native.GrantedCap = native.Amount
+		policy.NativeSpendCap = &native
+	}
 	if perms.SpendCap != nil {
 		spendCap := *perms.SpendCap
 		spendCap.GrantedCap = spendCap.Amount
