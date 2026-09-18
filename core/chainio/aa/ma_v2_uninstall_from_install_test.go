@@ -241,3 +241,46 @@ func TestUninstallMixedNativeGrantValThenExecOrder(t *testing.T) {
 	require.Empty(t, hookData[3], "exec reversed: NT exec")
 	require.Empty(t, hookData[4], "exec reversed: allowlist exec")
 }
+
+func TestCountAllowlistInputs(t *testing.T) {
+	call, _, _, _ := testGrantInstall(t, testEntity)
+	n, err := CountAllowlistInputs(call)
+	require.NoError(t, err)
+	require.Equal(t, 1, n, "testGrantInstall packs one allowlist input")
+
+	// Stub selector used by session_policy tests — not a packed install.
+	n, err = CountAllowlistInputs([]byte{0x1b, 0xbf, 0x56, 0x4c, 0x01})
+	require.NoError(t, err)
+	require.Zero(t, n)
+
+	alice := common.HexToAddress("0x000000000000000000000000000000000000a11c")
+	token := common.HexToAddress("0xaA4D01B75fdEB5fbbD98276EC7755eF71801c2E7")
+	allow, err := AllowlistValidationHook(testEntity, []AllowlistInput{
+		{Target: token, HasSelectorAllowlist: true, HasERC20SpendLimit: true, ERC20SpendLimit: big.NewInt(1), Selectors: [][4]byte{{0xa9, 0x05, 0x9c, 0xbb}}},
+		{Target: alice, HasSelectorAllowlist: false},
+	})
+	require.NoError(t, err)
+	tr, err := TimeRangeValidationHook(testEntity, 1785541743, 0)
+	require.NoError(t, err)
+	mixed, err := PackSessionSignerInstall(SessionGrant{
+		EntityID: testEntity, Signer: common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB"), Global: true,
+		Hooks: [][]byte{allow, AllowlistExecHook(testEntity), tr},
+	})
+	require.NoError(t, err)
+	n, err = CountAllowlistInputs(mixed)
+	require.NoError(t, err)
+	require.Equal(t, 2, n, "native recipient rows count as allowlist inputs")
+
+	// Replace batch: count the NEW grant's rows, not the teardown.
+	uninstall, err := SessionSignerUninstallFromInstall(testEntity, call)
+	require.NoError(t, err)
+	account := common.HexToAddress("0x209eb31c199bEB4c386eF83CF442DE1a00667a1F")
+	batch, err := PackExecuteBatchMAv2([]Call{
+		{Target: account, Value: big.NewInt(0), Data: mixed},
+		{Target: account, Value: big.NewInt(0), Data: uninstall},
+	})
+	require.NoError(t, err)
+	n, err = CountAllowlistInputs(batch)
+	require.NoError(t, err)
+	require.Equal(t, 2, n, "replace batch must count the incoming install")
+}

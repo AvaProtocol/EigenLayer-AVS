@@ -2,6 +2,7 @@ package aa
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -135,6 +136,53 @@ func DecodeInstallValidationHooks(installCall []byte) ([][]byte, error) {
 		return nil, fmt.Errorf("installValidation hooks decoded to %T, not [][]byte", args[3])
 	}
 	return hooks, nil
+}
+
+// CountAllowlistInputs returns how many AllowlistModule inputs the stored
+// install packs. Used to scale verificationGasLimit (K14): each input is a
+// cold SSTORE. Zero when the call is not a packed install (tests store a
+// selector stub) or has no allowlist validation hook.
+func CountAllowlistInputs(installCall []byte) (int, error) {
+	inner, err := InstallValidationWithin(installCall)
+	if err != nil {
+		return 0, nil
+	}
+	hooks, err := DecodeInstallValidationHooks(inner)
+	if err != nil {
+		// Tests store a 5-byte selector stub; a real install is config plus ABI.
+		if len(inner) < hookConfigLen+4 {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("recovering hooks to count allowlist rows: %w", err)
+	}
+	if err := ensureHookABIs(); err != nil {
+		return 0, err
+	}
+	allowlist := AllowlistModuleAddress()
+	for i, entry := range hooks {
+		if len(entry) < hookConfigLen {
+			return 0, fmt.Errorf("hook %d is %d bytes, shorter than a hook config", i, len(entry))
+		}
+		if common.BytesToAddress(entry[:20]) != allowlist {
+			continue
+		}
+		if entry[hookConfigLen-1]&HookFlagValidation == 0 {
+			continue
+		}
+		unpacked, unpackErr := allowlistDataArgs.Unpack(entry[hookConfigLen:])
+		if unpackErr != nil {
+			return 0, fmt.Errorf("decoding allowlist install data: %w", unpackErr)
+		}
+		if len(unpacked) != 2 {
+			return 0, fmt.Errorf("allowlist install decoded to %d arguments, want 2", len(unpacked))
+		}
+		inputs := reflect.ValueOf(unpacked[1])
+		if inputs.Kind() != reflect.Slice {
+			return 0, fmt.Errorf("allowlist inputs decoded to %T, not a slice", unpacked[1])
+		}
+		return inputs.Len(), nil
+	}
+	return 0, nil
 }
 
 // InstallValidationWithin returns the installValidation calldata inside a

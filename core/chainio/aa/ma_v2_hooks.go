@@ -47,6 +47,14 @@ const (
 	AllowlistModuleAddressHex        = "0x00000000003e826473a313e600b5b9b791f5a59a"
 	TimeRangeModuleAddressHex        = "0x00000000000082B8e2012be914dFA4f62A0573eA"
 	NativeTokenLimitModuleAddressHex = "0x00000000000001e541f0D090868FBe24b59Fbe06" // v2.0.0; not redeployed in v2.0.1
+
+	// MaxNativeRecipients is the product cap A1 Validate and the SDK merge
+	// must enforce. A0: a 20-row first-op install mined at 1.5M VGL (~1.19M
+	// actual), but a 20-row deferred replace AA23'd 3/3 at 2.2M (one lucky
+	// 1.8M mine). SubmitSessionPolicy supersedes on every re-grant, so
+	// replace is the normal path. Five rows stay inside the 700k + 45k/row
+	// seed window. Do not raise this because the install passed.
+	MaxNativeRecipients = 5
 )
 
 // AllowlistModuleAddress returns the v2.0.1 AllowlistModule address.
@@ -93,6 +101,7 @@ var (
 	hooksArgsOnce               sync.Once
 	allowlistDataArgs           abi.Arguments
 	timeRangeDataArgs           abi.Arguments
+	uint32OnlyArgs              abi.Arguments
 	nativeTokenLimitInstallArgs abi.Arguments
 	hooksArgsErr                error
 )
@@ -127,6 +136,7 @@ func ensureHookABIs() error {
 		}
 		allowlistDataArgs = abi.Arguments{{Type: uint32Type}, {Type: allowlistInputType}}
 		timeRangeDataArgs = abi.Arguments{{Type: uint32Type}, {Type: uint48Type}, {Type: uint48Type}}
+		uint32OnlyArgs = abi.Arguments{{Type: uint32Type}}
 		nativeTokenLimitInstallArgs = abi.Arguments{{Type: uint32Type}, {Type: uint256Type}}
 	})
 	return hooksArgsErr
@@ -243,8 +253,13 @@ func PackNativeTokenLimitInstallData(entityID uint32, spendLimit *big.Int) ([]by
 
 // PackNativeTokenLimitUninstallData encodes NativeTokenLimitModule.onUninstall:
 // abi.encode(uint32 entityId) — not the install (entityId, limit) tuple.
+// Packed from this module's own uint32 ABI, not via PackSingleSignerUninstallData:
+// a wrong teardown mines and does nothing (see SessionSignerUninstallFromInstall).
 func PackNativeTokenLimitUninstallData(entityID uint32) ([]byte, error) {
-	return PackSingleSignerUninstallData(entityID)
+	if err := ensureHookABIs(); err != nil {
+		return nil, err
+	}
+	return uint32OnlyArgs.Pack(entityID)
 }
 
 // NativeTokenLimitValidationHook installs the native cap at validation.

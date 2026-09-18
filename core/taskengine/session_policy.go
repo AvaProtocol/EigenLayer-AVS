@@ -563,6 +563,14 @@ func newSessionResolver(
 			// Count for verification-gas seeding (deferred uninstalls run in
 			// validation; flat seed under-seeds N-way batches — #731 review).
 			auth.DeferredTeardownCount = len(replacedEntities)
+			// Packed AllowlistModule inputs, not len(AllowedActions): native
+			// recipient rows (A1) are extra SSTOREs that are not allowedActions.
+			// Zero means "unknown — use the 2–3 row 700k seed".
+			rows, rowErr := aa.CountAllowlistInputs(policy.Grant.InstallCall)
+			if rowErr != nil {
+				return nil, fmt.Errorf("session policy %s: counting allowlist rows: %w", policy.ID, rowErr)
+			}
+			auth.AllowlistRows = rows
 			auth.OnApplied = func(userOpHash string) error {
 				if err := MarkSessionGrantAppliedByID(db, policyChain, policyOwner, policyRunner, policyID, userOpHash); err != nil {
 					return err

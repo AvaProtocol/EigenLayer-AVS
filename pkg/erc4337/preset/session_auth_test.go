@@ -138,7 +138,17 @@ func TestSeedVerificationGasScalesWithGrantContents(t *testing.T) {
 		t.Errorf("N-way seed = %s, want hooks + 3*per-uninstall = %s", nway, wantNway)
 	}
 
-	// A0: 20-row native grant needed 1.5M seed (actual ~1.19M).
+	// Product max is 5 native recipients (20-row replace AA23s). 5 rows =
+	// 700k + 2×45k. The 20-row formula is kept as a unit check of the
+	// interpolation (3 rows ≈ 700k, 20 rows ≈ 1.5M) even though production
+	// must not ship 20.
+	five := seedVerificationGasFor(op, &SessionAuthorization{
+		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
+		WrapExecuteUserOp: true, AllowlistRows: 5})
+	wantFive := new(big.Int).Add(hooks, big.NewInt(2*seedVerificationGasPerAllowlistRow))
+	if five.Cmp(wantFive) != 0 {
+		t.Errorf("5-row seed = %s, want hooks + 2*per-row = %s", five, wantFive)
+	}
 	wide := seedVerificationGasFor(op, &SessionAuthorization{
 		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
 		WrapExecuteUserOp: true, AllowlistRows: 20})

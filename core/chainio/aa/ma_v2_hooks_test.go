@@ -106,6 +106,30 @@ func TestPackNativeTokenLimitInstallDataGolden(t *testing.T) {
 	if len(exec) != 25 {
 		t.Fatalf("NT exec hook is config-only, got %d bytes", len(exec))
 	}
+	if exec[24] != HookFlagExecHasPre {
+		t.Fatalf("NT exec flags = %x, want exec-pre (%x)", exec[24], HookFlagExecHasPre)
+	}
+	if exec[24]&HookFlagExecHasPost != 0 {
+		t.Fatal("NT exec must not set the post bit; postExecutionHook reverts NotImplemented")
+	}
+}
+
+func TestPackNativeTokenLimitUninstallDataGolden(t *testing.T) {
+	// cast abi-encode "f(uint32)" 1 — entityId only, not the install tuple.
+	want := "0000000000000000000000000000000000000000000000000000000000000001"
+	got, err := PackNativeTokenLimitUninstallData(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hex.EncodeToString(got) != want {
+		t.Fatalf("NT uninstall data = %x, want %s", got, want)
+	}
+}
+
+func TestMaxNativeRecipientsFollowsReplaceNotInstall(t *testing.T) {
+	if MaxNativeRecipients != 5 {
+		t.Fatalf("MaxNativeRecipients = %d, want 5 (A0: 20-row deferred replace AA23s)", MaxNativeRecipients)
+	}
 }
 
 func TestHookEntryLayout(t *testing.T) {
