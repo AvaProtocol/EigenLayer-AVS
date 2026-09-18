@@ -410,7 +410,7 @@ A0/L7 remain release-blocking and must read `NativeTokenLimitModule.limits(entit
 
 9. **`nativeValueCap` (studio#1674):** grant with `nativeSpendCap` and **empty** `nativeRecipients`. Payable `contractWrite` (e.g. Lido `submit`) with `value` under the cap **succeeds**; empty-calldata `ethTransfer` still **refused** (`len(nativeRecipients)==0`). Self-funded zero-value ERC-20 on that grant burns NT **gas**. This is **not** A7.
 
-Until (1)–(9) are green on **Sepolia and Base**, Track A does not merge hook packing into the REST path.
+Until (1)–(9) are green on **Sepolia**, Track A may merge hook packing (A2). Module-semantic proofs (1–7, 9, K10) are identical bytecode on Base. **Proof 8 / K7 / K14 are gas measurements:** Base is OP-stack, so `preVerificationGas` includes an L1 DA term that Sepolia does not, and NT burns `(pvg+vgl+cgl)×maxFeePerGas`. Sepolia’s higher `maxFee` is not a proxy for Base `pvg`. **Re-run A0 on Base before enabling native send on 8453 (A4)** — do not block A2 packing on Base ETH.
 
 #### A.2 REST / OpenAPI / storage shape
 
@@ -1238,8 +1238,8 @@ Independently reviewable PRs, all targeting **`staging`**. Conventional Commit t
 #### PR A0 — `test: spike native ETH session hooks on Sepolia and Base`
 
 - **Files/components:** `scripts/spike/native_eth_hooks/` (new), possibly `core/chainio/aa/ma_v2_hooks.go` packers if the spike needs them (prefer packing in the spike first, promote in A2).
-- **Dependencies:** none. **A2-blocking.**
-- **Description:** Live Sepolia **and Base** proving A.1 (1)–(**9**): (8) gas table; **(9) nativeValueCap** — payable write under NT, `ethTransfer` still refused ([studio#1674](https://github.com/AvaProtocol/studio/issues/1674)). Self-funded; no Gas Manager.
+- **Dependencies:** none. **A2-blocking on Sepolia evidence.** Base gas table is **A4-blocking** for 8453 native send (OP-stack `pvg`), not A2 packing.
+- **Description:** Live **Sepolia** proving A.1 (1)–(**9**). Re-run on Base when the owner EOA is funded (~0.03 ETH). Self-funded; no Gas Manager. K14 seeds from **worst-case replace trial + headroom**, not a single lucky 1.8M VGL.
 
 #### PR A1 — `feat: add native session-grant fields to OpenAPI and storage model`
 

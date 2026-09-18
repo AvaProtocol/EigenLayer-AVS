@@ -72,7 +72,7 @@ const (
 )
 
 var (
-	prefundWei  = big.NewInt(30_000_000_000_000_000) // 0.03 ETH — first-op gas + native probes
+	prefundWei  = big.NewInt(50_000_000_000_000_000) // 0.05 ETH — replace trials + probes
 	nativeCapX  = big.NewInt(10_000_000_000_000_000) // 0.01 ETH; first UserOp gas must fit under this
 	oneWei      = big.NewInt(1)
 	depositSel  = [4]byte{0xd0, 0xe3, 0x0d, 0xb0} // deposit()
@@ -535,20 +535,22 @@ func run() error {
 	fmt.Printf("  NT remaining after first send: %s wei\n", remaining)
 	over := new(big.Int).Add(remaining, oneWei)
 	ntNeedle := exceededNTNeedle()
-	err4a := h.estimateNative(e2, alice, over)
-	if err4a != nil {
-		if err := requireRevert(err4a, "PROOF 4a remaining+1", "ExceededNativeTokenLimit", ntNeedle, "execution reverted"); err != nil {
+	// Always send so requireMinedRevert actually runs when the op is
+	// included (R10). Estimate-only "execution reverted" is not a selector.
+	r4a, _, send4a := h.sendNative(e2, alice, over, 200_000)
+	switch {
+	case r4a != nil && !r4a.Success:
+		if err := requireMinedRevert(r4a, "PROOF 4a remaining+1", "ExceededNativeTokenLimit", ntNeedle); err != nil {
 			return err
 		}
-	} else {
-		r, _, sendErr := h.sendNative(e2, alice, over, 200_000)
-		if sendErr != nil && (r == nil || r.Success) {
-			if err := requireRevert(sendErr, "PROOF 4a remaining+1", "ExceededNativeTokenLimit", ntNeedle, "execution reverted"); err != nil {
-				return err
-			}
-		} else if err := requireMinedRevert(r, "PROOF 4a remaining+1", "ExceededNativeTokenLimit", ntNeedle); err != nil {
+	case send4a != nil:
+		if err := requireRevert(send4a, "PROOF 4a remaining+1", "ExceededNativeTokenLimit", ntNeedle, "execution reverted"); err != nil {
 			return err
 		}
+	case r4a != nil && r4a.Success:
+		return fmt.Errorf("PROOF 4a FAIL: remaining+1 succeeded")
+	default:
+		return fmt.Errorf("PROOF 4a FAIL: no receipt and no send error")
 	}
 	err4b := h.estimateNative(e2, alice, remaining)
 	if err4b != nil {
@@ -688,25 +690,63 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	rRep, opRep, err := h.deferredOp(e9, batch, execNew, 1_800_000)
-	if err != nil {
-		fmt.Printf("  FINDING: deferred replace batch AA23 (%s) — same open question as scripts/spike/deferred_replace R-A\n", firstLine(err.Error()))
-		fmt.Println("  A2 cannot take a UserOp VGL for 20-row teardown from this run; proof 6 already shows val-then-exec clears limits.")
-	} else {
-		fmt.Printf("  replace 20-row+5-hook teardown success=%v gasUsed=%s vgl=%s tx=%s\n",
-			rRep.Success, rRep.ActualGasUsed, opRep.VerificationGasLimit, rRep.TxHash)
-		h.noteGas("first-op replace 20-row 5-hook teardown", rRep, opRep)
-		left8, err := readNativeLimit(ctx, chain, e8, account)
+	// R9: 1.8M mined once and AA23'd once on the same seed. Retry with
+	// headroom and report the spread; A2 must seed from the worst case.
+	const replaceTrials = 3
+	const replaceVGL = int64(2_200_000)
+	var okN, failN int
+	var maxActual, maxVGL uint64
+	curEnt, curHooks := e8, wide
+	nextEnt := e9
+	nextHooks := wide2
+	nextUninst, nextInst := uninst, inst9
+	nextBatch := batch
+	for trial := 1; trial <= replaceTrials; trial++ {
+		rRep, opRep, err := h.deferredOp(nextEnt, nextBatch, execNew, replaceVGL)
+		if err != nil {
+			failN++
+			fmt.Printf("  replace trial %d FAIL vgl=%d: %s\n", trial, replaceVGL, firstLine(err.Error()))
+			continue
+		}
+		okN++
+		fmt.Printf("  replace trial %d success=%v gasUsed=%s vgl=%s tx=%s\n",
+			trial, rRep.Success, rRep.ActualGasUsed, opRep.VerificationGasLimit, rRep.TxHash)
+		h.noteGas(fmt.Sprintf("replace trial %d", trial), rRep, opRep)
+		if rRep.ActualGasUsed != nil && rRep.ActualGasUsed.Uint64() > maxActual {
+			maxActual = rRep.ActualGasUsed.Uint64()
+		}
+		if opRep.VerificationGasLimit != nil && opRep.VerificationGasLimit.Uint64() > maxVGL {
+			maxVGL = opRep.VerificationGasLimit.Uint64()
+		}
+		curEnt, curHooks = nextEnt, nextHooks
+		nextEnt++
+		nextHooks, err = wideNativeHooks(nextEnt, 20, nativeCapX)
 		if err != nil {
 			return err
 		}
-		if left8.Sign() != 0 {
-			fmt.Printf("  NOTE: old 20-row entity limits still %s after replace\n", left8)
+		nextUninst, err = packUninstallCall(curEnt, curHooks, true)
+		if err != nil {
+			return err
 		}
+		nextInst, err = h.installCall(nextEnt, nextHooks)
+		if err != nil {
+			return err
+		}
+		nextBatch, err = aa.PackExecuteBatchMAv2([]aa.Call{
+			{Target: h.account, Data: nextUninst},
+			{Target: h.account, Data: nextInst},
+		})
+		if err != nil {
+			return err
+		}
+	}
+	fmt.Printf("  R9 replace spread: ok=%d fail=%d maxActual=%d maxVGL=%d (A2 seed from max+headroom, not the lucky 1.8M)\n",
+		okN, failN, maxActual, maxVGL)
+	if okN == 0 {
+		fmt.Println("  FINDING: every deferred replace AA23'd — use eth_estimateGas 20-row uninstall for K14 exec cost")
 	}
 
 	fmt.Println("\nA0 spike finished. Record the PROOF lines and gas table in the PR body.")
-	fmt.Println("Re-run with SPIKE_RPC_URL pointing at Base before calling A0 done.")
 	return nil
 }
 
