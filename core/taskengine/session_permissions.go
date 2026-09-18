@@ -70,8 +70,8 @@ func (p SessionPermissions) Validate() error {
 		if cap.Token == nil || *cap.Token == (common.Address{}) {
 			return fmt.Errorf("spend cap %d has no token", i)
 		}
-		if amount, ok := new(big.Int).SetString(cap.Amount, 10); !ok || amount.Sign() <= 0 {
-			return fmt.Errorf("spend cap amount %q is not a positive decimal integer", cap.Amount)
+		if _, err := parseCapAmount(cap.Amount); err != nil {
+			return fmt.Errorf("spend cap %d: %w", i, err)
 		}
 		if _, dup := seen[*cap.Token]; dup {
 			return fmt.Errorf("spend cap token %s is listed twice; merge amounts before submit", cap.Token.Hex())
@@ -123,9 +123,9 @@ func (p SessionPermissions) allowlistInputs() ([]aa.AllowlistInput, error) {
 		if cap.Token == nil {
 			continue
 		}
-		amount, ok := new(big.Int).SetString(cap.Amount, 10)
-		if !ok {
-			return nil, fmt.Errorf("spend cap amount %q is not a positive decimal integer", cap.Amount)
+		amount, err := parseCapAmount(cap.Amount)
+		if err != nil {
+			return nil, err
 		}
 		limitByToken[*cap.Token] = amount
 	}
@@ -206,9 +206,26 @@ func spendLimitSelectorsOK(token common.Address, actions []model.AllowedAction) 
 }
 
 func spendAmountsEqual(a, b string) bool {
-	x, okX := new(big.Int).SetString(strings.TrimSpace(a), 10)
-	y, okY := new(big.Int).SetString(strings.TrimSpace(b), 10)
-	return okX && okY && x.Cmp(y) == 0
+	x, errX := parseCapAmount(a)
+	y, errY := parseCapAmount(b)
+	return errX == nil && errY == nil && x.Cmp(y) == 0
+}
+
+// parseCapAmount accepts OpenAPI ^[0-9]+$ only — no surrounding whitespace.
+func parseCapAmount(s string) (*big.Int, error) {
+	if s == "" {
+		return nil, fmt.Errorf("spend cap amount %q is not a positive decimal integer", s)
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return nil, fmt.Errorf("spend cap amount %q is not a positive decimal integer", s)
+		}
+	}
+	n, ok := new(big.Int).SetString(s, 10)
+	if !ok || n.Sign() <= 0 {
+		return nil, fmt.Errorf("spend cap amount %q is not a positive decimal integer", s)
+	}
+	return n, nil
 }
 
 // HooksFor builds the grant's hook entries for its allocated entity:

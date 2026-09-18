@@ -252,6 +252,9 @@ func permissionsFromAPI(actions []generated.AllowedAction, spendCap *generated.E
 		}
 		perms.SpendCap = cap
 	}
+	if spendCaps != nil && len(*spendCaps) == 0 {
+		return perms, errors.New("erc20SpendCaps must contain at least one cap when present")
+	}
 	if spendCaps != nil && len(*spendCaps) > 0 {
 		perms.SpendCaps = make([]model.ERC20SpendCap, 0, len(*spendCaps))
 		for i, raw := range *spendCaps {

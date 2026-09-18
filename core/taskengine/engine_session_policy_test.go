@@ -327,6 +327,10 @@ func TestSessionPermissionsValidation(t *testing.T) {
 	padded := two
 	padded.SpendCap = &model.ERC20SpendCap{Token: &token, Amount: "0500000000"}
 	require.NoError(t, padded.Validate(), "alias amount must compare as integer, not string")
+
+	spaced := two
+	spaced.SpendCap = &model.ERC20SpendCap{Token: &token, Amount: " 500000000 "}
+	require.Error(t, spaced.Validate(), "whitespace in amount must not match OpenAPI ^[0-9]+$")
 }
 
 func TestAttachDeclaredPermissionsCapAlias(t *testing.T) {

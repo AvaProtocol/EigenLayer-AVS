@@ -4,6 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 )
 
 func TestIsUserOpRevert(t *testing.T) {
@@ -52,5 +56,17 @@ func TestIsClientUserOpFailure(t *testing.T) {
 				t.Fatalf("IsClientUserOpFailure(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLogBundlerErrorCountsExceededTokenLimit(t *testing.T) {
+	before := testutil.ToFloat64(sessionERC20OnchainCapExceeded)
+	LogBundlerError(&logger.NoOpLogger{}, errors.New("execution reverted: ExceededTokenLimit"), "send")
+	if got := testutil.ToFloat64(sessionERC20OnchainCapExceeded); got != before+1 {
+		t.Fatalf("counter = %v, want %v", got, before+1)
+	}
+	LogBundlerError(&logger.NoOpLogger{}, errors.New("AA23 reverted"), "send")
+	if got := testutil.ToFloat64(sessionERC20OnchainCapExceeded); got != before+1 {
+		t.Fatalf("AA23 must not bump the ERC-20 cap counter, got %v", got)
 	}
 }
