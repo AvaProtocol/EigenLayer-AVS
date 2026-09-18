@@ -18,12 +18,15 @@
 //
 // Self-funded. No Gas Manager.
 //
-// Env: SPIKE_OWNER_KEY, SPIKE_CONTROLLER_KEY, SPIKE_BUNDLER_URL,
+// Env (loads repo-root .env / .env.local first; process env wins):
 //
-//	SPIKE_RPC_URL (opt; default Sepolia publicnode),
-//	SPIKE_SALT (opt, default 17 — unused by earlier spikes),
-//	SPIKE_SKIP_WIDE=1 to skip the 20-recipient gas probe (still A0-blocking
-//	for A2; skip only if you will re-run with it).
+//	SPIKE_OWNER_KEY / TEST_PRIVATE_KEY     owner EOA (signs the grant, prefunds)
+//	SPIKE_CONTROLLER_KEY / CONTROLLER_PRIVATE_KEY / TEST_PRIVATE_KEY
+//	                                      session signer (same key is fine for a spike)
+//	SPIKE_BUNDLER_URL / SEPOLIA_BUNDLER_URL
+//	SPIKE_RPC_URL (opt; default Sepolia publicnode)
+//	SPIKE_SALT (opt, default 17)
+//	SPIKE_SKIP_WIDE=1 to skip the 20-recipient gas probe
 //
 // Run:
 //
@@ -32,12 +35,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
 	"math/big"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -86,16 +91,75 @@ func env(name, fallback string) string {
 	return fallback
 }
 
-func requireKey(name string) (*ecdsa.PrivateKey, common.Address, error) {
-	raw := os.Getenv(name)
-	if raw == "" {
-		return nil, common.Address{}, fmt.Errorf("%s is not set", name)
+func requireKey(names ...string) (*ecdsa.PrivateKey, common.Address, error) {
+	var raw, name string
+	for _, n := range names {
+		if v := strings.TrimPrefix(strings.TrimSpace(os.Getenv(n)), "0x"); v != "" {
+			raw, name = v, n
+			break
+		}
 	}
-	key, err := crypto.HexToECDSA(trim0x(raw))
+	if raw == "" {
+		return nil, common.Address{}, fmt.Errorf("set one of: %s", strings.Join(names, ", "))
+	}
+	key, err := crypto.HexToECDSA(raw)
 	if err != nil {
-		return nil, common.Address{}, fmt.Errorf("parsing %s: %w", name, err)
+		return nil, common.Address{}, fmt.Errorf("%s is not a private key: %w", name, err)
 	}
 	return key, crypto.PubkeyToAddress(key.PublicKey), nil
+}
+
+func firstNonEmpty(names ...string) string {
+	for _, n := range names {
+		if v := strings.TrimSpace(os.Getenv(n)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func loadDotEnv() {
+	dir, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	for i := 0; i < 8; i++ {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			for _, name := range []string{".env.local", ".env"} {
+				loadDotEnvFile(filepath.Join(dir, name))
+			}
+			return
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return
+		}
+		dir = parent
+	}
+}
+
+func loadDotEnvFile(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		val = strings.Trim(strings.TrimSpace(val), `"'`)
+		if key != "" && os.Getenv(key) == "" {
+			_ = os.Setenv(key, val)
+		}
+	}
 }
 
 func trim0x(s string) string {
@@ -190,17 +254,18 @@ func readNativeLimit(ctx context.Context, chain *ethclient.Client, entity uint32
 
 func run() error {
 	ctx := context.Background()
-	ownerKey, ownerAddr, err := requireKey("SPIKE_OWNER_KEY")
+	loadDotEnv()
+	ownerKey, ownerAddr, err := requireKey("SPIKE_OWNER_KEY", "TEST_PRIVATE_KEY")
 	if err != nil {
 		return err
 	}
-	controllerKey, controllerAddr, err := requireKey("SPIKE_CONTROLLER_KEY")
+	controllerKey, controllerAddr, err := requireKey("SPIKE_CONTROLLER_KEY", "CONTROLLER_PRIVATE_KEY", "TEST_PRIVATE_KEY")
 	if err != nil {
 		return err
 	}
-	bundlerURL := os.Getenv("SPIKE_BUNDLER_URL")
+	bundlerURL := firstNonEmpty("SPIKE_BUNDLER_URL", "SEPOLIA_BUNDLER_URL")
 	if bundlerURL == "" {
-		return fmt.Errorf("SPIKE_BUNDLER_URL is not set")
+		return fmt.Errorf("set SPIKE_BUNDLER_URL or SEPOLIA_BUNDLER_URL")
 	}
 	salt := big.NewInt(17)
 	if s := os.Getenv("SPIKE_SALT"); s != "" {
