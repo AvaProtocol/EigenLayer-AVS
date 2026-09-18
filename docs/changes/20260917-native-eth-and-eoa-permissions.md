@@ -6,7 +6,7 @@
 **Related:** [discussion #658](https://github.com/AvaProtocol/EigenLayer-AVS/discussions/658), `PLAN_PARTNER_PAYMENTS.md` §4.1 / Phase 4, `FINDINGS_AA23_WETH_SELL_SESSION_SCOPE.md`, `docs/changes/20260806-session-grant-replace-on-submit.md`
 
 
-PRs target `staging`. Conventional Commits. `make storage-check` before anything that touches persisted models/keys. PR #788 audit (2026-09-17) is folded into K7, K14, A0, A1, A3. Multi-token ERC-20 caps are **A7** (K15), not A1.
+PRs target `staging`. Conventional Commits. `make storage-check` before anything that touches persisted models/keys. PR #788 audit (2026-09-17) is folded into K7, K14, A0, A1, A3. Multi-token ERC-20 caps are **A7** (K15): **UI-blocking**, independent of native send, **not** after A3.
 
 This is **one design covering two independently-shippable tracks**. They are complementary products, not competing implementations of one product.
 
@@ -120,7 +120,7 @@ Discussion #658 called scoped / expiring / user-revocable (never root-equivalent
 - Do **not** reshape existing `allowedActions` / `erc20SpendCap` JSON field names (breaking API). Additive fields only.
 - Do **not** put native ETH in `erc20SpendCap` / a future `erc20SpendCaps[]`. ETH send is `nativeSpendCap` + `NativeTokenLimitModule`.
 - Do **not** add a second “Send ERC-20” catalog row (or a second grant) to cap another token. One usable grant per `(chainId, runner)`; another submit **replaces**.
-- Do **not** implement `erc20SpendCaps[]` in A1. Track A keeps **one** `{ token, amount }`. Multi-token is **A7** after A3.
+- Do **not** implement `erc20SpendCaps[]` inside A1 (native fields). A7 is its own PR and **blocks Studio** from adopting the shared-grant amount list. Do **not** wait for A3.
 - Do **not** silently install native-send (`nativeRecipients` / `ethTransfer`) onto a Uniswap grant at execute time.
 - Do **not** install `NativeTokenLimitModule` on Uniswap/ERC-20-only grants (not even exec-only limit=0). Trust the signed Uniswap grant.
 - Do **not** make the user toggle WETH approve / wrap / payable ETH as extra gates when they already consented to Uniswap. That is under-authorizing the stated purpose (`FINDINGS_AA23_WETH_SELL_SESSION_SCOPE.md`).
@@ -148,7 +148,7 @@ Discussion #658 called scoped / expiring / user-revocable (never root-equivalent
 | K12 | **Hook entity ID equals the session validation entity** for every module we install (Allowlist, TimeRange, NativeTokenLimit), on derived SW and 7702 EOA. **Do not use Alchemy's example `hookEntityId: 0`.** | This repo already packs `PackHookConfig(..., entityID, ...)` with the grant entity (`MinSessionEntityID` ≥ 1). Entity IDs are per-module, so session entity 1 on Allowlist is independent of SingleSigner entity 1. Copying Alchemy's `sessionKeyEntityId: 1` / `hookEntityId: 0` would pack NT at 0 while Allowlist/TimeRange stay at 1, split teardown keys, and collide with leftover `limits[0][account]`. Derived-SW entity 1 vs EOA entity 1 do not collide (different `account` keys); that does **not** license a hook/validation ID split. |
 | K13 | **EIP-7702 delegation check is exact:** `len(code) >= 23 && code[0:3]==0xef0100 && code[3:23]==canonical SMA-7702`, plus bytecode hash of that implementation. Never assert on tx status. | EIP-7702 designated code is `0xef0100 \|\| address`. The sloppy `code == 0xef0100 \|\| sma7702` notation is not a comparison. |
 | K14 | **Verification-gas seed scales with grant contents.** `builder_v07.go` already says every allowlist entry is a cold SSTORE; the 700k deferred-hooks seed was measured on 2–3-row grants. Max **20** native recipients is **A0-gated**, not a product constant that packing may assume. A0 measures a 20-row native grant (and 5-hook teardown). If estimate AA26s, either lower `max native recipients` or add `seedVerificationGasPerAllowlistRow` (and scale `seedVerificationGasPerUninstall` for 5-hook/20-row teardown). Do not merge A2 until that proof exists. | Flat 700k + 20 extra rows (~400–600k) → AA26 at estimation, which the efficiency tighten cannot recover (`builder_v07.go` ~82). |
-| K15 | **Track A keeps a single `erc20SpendCap { token, amount }`.** Alchemy AllowlistModule already caps **per token** (`HasERC20SpendLimit` + `erc20SpendLimit` on each `AllowlistInput`; `erc20SpendLimits[entity][token][account]`). We only set the flag when `target == SpendCap.Token`. Allowlisting WETH without a WETH cap leaves WETH **uncapped** (#1674 / #1676). **A7** (after A3) adds `erc20SpendCaps[]`, packs the flag per token, preflights the token being moved. Native ETH stays `NativeTokenLimitModule` — never an ERC-20 cap row. A second Send ERC-20 enable on the same chain **merges purposes and keeps the existing cap token** until A7. | Same install, same exec hook; extra SSTORE per extra capped token. Not a second grant. Not A1 (A1 is already a breaking Go codegen change). |
+| K15 | **`erc20SpendCaps[]` (A7) is required for Studio to adopt this grant UI.** Alchemy AllowlistModule already caps **per token**. The wire is still one `{ token, amount }`, so a merged Uniswap+Send-ERC-20 grant cannot cap WETH, and a second catalog row cannot add a token (singleton). Studio’s amount list / “cap USDC and WETH on one grant” **cannot ship honestly** until A7. A7 does **not** need native ETH (no A0, no NT). It **must not wait for A3**. Run **in parallel with A0**; Studio consumes A7 before (or with) the per-chain permission card. Native ETH stays `NativeTokenLimitModule` — never an ERC-20 cap row. Keep singular `erc20SpendCap` as a one-token alias. | Same install + exec hook; extra SSTORE per extra capped token. Not a second grant. Not inside A1. |
 
 ---
 
@@ -246,7 +246,7 @@ This component:
 
 Turning **on** a purpose that is already Off: compile **union of currently On purposes ∪ the new one** (K0, singleton). Turning Uniswap on while Send ERC-20 is On must **merge**, not replace with Uniswap-only (that would gate ERC-20). Turning **off** a purpose: compile the remaining purposes and Enable again (replace), or if none remain, `DELETE` the usable policy.
 
-**ERC-20 amount (until A7):** one `erc20SpendCap` token per grant. A second Send ERC-20 row does **not** add another token; merge **keeps the existing cap token**. Amount is an input on a **new** grant; on a merged/already-On grant it is **read-only** (shared with the live grant). Copy: “USDC spending only; it does not cap other assets” (or whatever the cap token is). Native ETH is **not** this field.
+**ERC-20 amounts (A7-blocking for this card):** Studio cannot ship a multi-token amount list, or a merged Uniswap grant that caps WETH, until `erc20SpendCaps[]` is on the gateway. Until A7: one `erc20SpendCap` token; a second Send ERC-20 row does **not** add another token; merge keeps the existing cap token. After A7: list of amount inputs on **this** grant (not another catalog row); new grant editable; already-On still read-only in the first UI slice (edit = replace + new signature, later). Native ETH is **not** this field. Expiry copy stays (one `TimeRange` for the shared grant).
 
 ##### Enable sequence (this chain only)
 
@@ -745,9 +745,9 @@ sequenceDiagram
 
 ---
 
-#### A.7 Follow-up — per-token ERC-20 caps (`erc20SpendCaps[]`) (K15)
+#### A.7 Per-token ERC-20 caps (`erc20SpendCaps[]`) — **blocks Studio UI** (K15)
 
-**Not Track A. Not A1. After A3 (or parallel once A1 native fields have shipped).**
+**Not native ETH. Not inside A1. Does not wait for A3.** Independent of A0–A4. **Studio’s per-chain permission card cannot adopt this design** (merged purposes + honest per-token amounts + Uniswap capping WETH) until A7 is on `staging`.
 
 Alchemy’s AllowlistModule already enforces spend limits **per token**. Our packer walks `allowedActions[]` into that ABI and only sets `HasERC20SpendLimit` when `target == erc20SpendCap.token`. One grant can **allow** `transfer`/`approve` on USDC **and** WETH; the cap still names **one** token. That is why weekly ETH swaps had no WETH cap (#1674 / #1676).
 
@@ -771,7 +771,7 @@ There is **no** dedicated ETH grant in `erc20SpendCap`. Native send is Track A (
 5. Studio: amount list on the shared grant. Uniswap that can spend WETH **caps WETH** here. Expiry copy stays: one `TimeRange` for the shared grant.
 6. `make storage-check` green (`omitempty` slice).
 
-Do **not** wait for A7 before A0–A5. Do **not** put A7 into A1.
+Do **not** put A7 into A1. Do **not** park A7 after native send — that parks the UI. A0 (native spike) and A7 (cap list) run **in parallel**.
 
 ### Track B — Permissions on the user's EOA (EIP-7702)
 
@@ -977,7 +977,7 @@ Handoff doc (see PR plan): builders, merge semantics (recipients = union, cap = 
 | Item | Additive? | Notes |
 | --- | --- | --- |
 | `SessionPolicy.NativeRecipients` / `NativeSpendCap` / `AllowContractRecipient` | Yes (`omitempty`) | Same `sp:%d:%s:%s` key |
-| `SessionPolicy.ERC20SpendCaps` (A7) | Yes (`omitempty`) | After A3. Singular `ERC20SpendCap` remains alias |
+| `SessionPolicy.ERC20SpendCaps` (A7) | Yes (`omitempty`) | **UI-blocking.** Parallel with A0. Singular `ERC20SpendCap` remains alias |
 | OpenAPI required-array relaxation | JSON-additive; **breaking generated Go** | `AllowedActions` / `Erc20SpendCap` become pointers. Nil-guard `permissionsFromAPI` in A1. |
 | `SmartWallet.Kind` / `Delegate` (Track B) | Yes (`omitempty`) | Empty Kind = derived, today's records |
 | New `eoa:` namespace | Not in v1 | Reconsider if we need delegation history |
@@ -1174,7 +1174,7 @@ Production Track B execute is **not** done when B1–B7 pass; it is done when th
 | Q6 | **Drop Calibur.** Alchemy MA v2 for both EOA (7702) and derived smart wallet. No Phase 2. | K8, Alternatives D |
 | Q7 | Per-user controller keys **not** in Track B v1. Shared controller as today. | K8, K9 |
 | Q8 | Do **not** read on-chain remaining cap every send in v1. GrantedCap + K7 value+gas. | K7 |
-| Q9 | Single `erc20SpendCap` in Track A. Multi-token caps = **A7 after A3**. ETH is never in that list. | K15 |
+| Q9 | `erc20SpendCaps[]` is **A7, UI-blocking**, parallel with A0, not after A3. ETH is never in that list. | K15 |
 
 ---
 
@@ -1266,9 +1266,9 @@ Would have installed NativeTokenLimit exec-only limit=0 on ERC-20/Uniswap-only g
 
 #### PR A7 — `feat: per-token ERC-20 spend caps on the session grant`
 
-- **Files/components:** `api/openapi.yaml` (`erc20SpendCaps[]` + singular alias); `model/session_policy.go`; `session_permissions.go` `allowlistInputs` / `Validate`; `handlers_policies.go`; coverage preflight by token; SDK/Studio handoff (amount list, not a second catalog row).
-- **Dependencies:** A3 (native Track A wire stable). Must **not** start before A1 has shipped — do not combine with A1.
-- **Description:** K15. Pack `HasERC20SpendLimit` per capped token. Different tokens merge as union; same token min. Native ETH stays `nativeSpendCap`. Closes the “WETH allowlisted, uncapped” hole (#1674 / #1676). `make storage-check` green.
+- **Files/components:** `api/openapi.yaml` (`erc20SpendCaps[]` + singular alias); `model/session_policy.go`; `session_permissions.go` `allowlistInputs` / `Validate`; `handlers_policies.go`; coverage preflight by token; SDK/Studio handoff (amount list on one grant, not a second catalog row).
+- **Dependencies:** **none** from Track A (A0–A4). Must **not** be combined with A1 (native fields). **Blocks Studio** permission-card adoption.
+- **Description:** K15. Pack `HasERC20SpendLimit` per capped token. Different tokens merge as union; same token min. Native ETH stays off this array. Closes “WETH allowlisted, uncapped” (#1674 / #1676). Studio can ship the amount list only after this is on `staging`. `make storage-check` green.
 
 ### Track B
 
@@ -1317,13 +1317,15 @@ Would have installed NativeTokenLimit exec-only limit=0 on ERC-20/Uniswap-only g
 ### Suggested merge order
 
 ```
-A0 ──┐
-A1 ──┼── A2 ── A3 (preflight+withdraw) ── A4 (live)     (Track A native send done)
-     └── A5 (docs, after A1)
-              └── A7 (erc20SpendCaps[] — after A3; not in A1)
+A7 (erc20SpendCaps[]) ── Studio per-chain UI (amount list, Uniswap+WETH cap)
+                         **UI-blocking; start now; no native ETH dependency**
 
-B0  (parallel, any time; does not patch SendUserOpMAv2)
+A0 ──┐
+A1 ──┼── A2 ── A3 (preflight+withdraw) ── A4 (live)     (Track A native send)
+     └── A5 (native handoff, after A1)
+
+B0  (parallel)
 B0 + A2 ── B1 ── B2 ── B3 ── B4 ── B5 (flag off) ── B6
 ```
 
-Track A **native send** is live after **A3 + A4 + Studio consuming A5**. **PR A6 is cancelled.** **A7** (multi-token ERC-20 caps) is **not** required to call Track A done. Track B production fund movement is **only B5 with the flag on** (Sepolia and Base first), which should not be in the same release train as A3.
+**Studio cannot adopt the shared-grant amount-list design until A7 is on `staging`.** Native send (A0–A5) is a separate train. **PR A6 is cancelled.** Track B production fund movement is **only B5 with the flag on**.
