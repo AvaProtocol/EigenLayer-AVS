@@ -155,6 +155,34 @@ func TestSessionResolverSeedsAllowlistRowsFromInstall(t *testing.T) {
 	}
 }
 
+// A predating or malformed InstallCall must not brick every send. The row
+// count is a gas hint; zero falls back to the 700k seed.
+func TestSessionResolverAllowlistRowCountFailureDoesNotBrickSend(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	keyFor, _ := spKeyFor(t)
+
+	p := spPolicy("p1", spWallet, 1, model.SessionPolicyPending)
+	p.Grant.InstallCall = append([]byte{0x1b, 0xbf, 0x56, 0x4c}, make([]byte, 40)...)
+	p.Grant.RequiresExecuteUserOp = true
+	if err := StoreSessionPolicy(db, p); err != nil {
+		t.Fatal(err)
+	}
+	auth, err := NewSessionResolver(db, keyFor, nil)(spChain, spOwner, spWallet)
+	if err != nil {
+		t.Fatalf("a predating/malformed install must still resolve: %v", err)
+	}
+	if auth == nil {
+		t.Fatal("expected an authorization")
+	}
+	if auth.AllowlistRows != 0 {
+		t.Errorf("AllowlistRows = %d, want 0 (unknown → 700k seed)", auth.AllowlistRows)
+	}
+	if !auth.Deferred() {
+		t.Error("pending grant must still carry the install")
+	}
+}
+
 // The install is a bearer authorization for exactly its calldata. Replaying it
 // would re-run installValidation on an entity that already exists.
 func TestSessionResolverDoesNotReplayAnAppliedGrant(t *testing.T) {

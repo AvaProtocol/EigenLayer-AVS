@@ -54,6 +54,7 @@ const (
 	// 1.8M mine). SubmitSessionPolicy supersedes on every re-grant, so
 	// replace is the normal path. Five rows stay inside the 700k + 45k/row
 	// seed window. Do not raise this because the install passed.
+	// Nothing enforces this until A1; packing does not cap recipient count.
 	MaxNativeRecipients = 5
 )
 

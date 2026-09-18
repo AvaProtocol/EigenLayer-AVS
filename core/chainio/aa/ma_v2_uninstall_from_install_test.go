@@ -253,6 +253,13 @@ func TestCountAllowlistInputs(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, n)
 
+	// Real-looking but unpackable install (≥29 bytes). A missed count is
+	// unknown, not a hard error — stored bytes may predate current packing.
+	malformed := append([]byte{0x1b, 0xbf, 0x56, 0x4c}, make([]byte, 40)...)
+	n, err = CountAllowlistInputs(malformed)
+	require.NoError(t, err)
+	require.Zero(t, n)
+
 	alice := common.HexToAddress("0x000000000000000000000000000000000000a11c")
 	token := common.HexToAddress("0xaA4D01B75fdEB5fbbD98276EC7755eF71801c2E7")
 	allow, err := AllowlistValidationHook(testEntity, []AllowlistInput{

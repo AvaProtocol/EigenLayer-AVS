@@ -565,10 +565,16 @@ func newSessionResolver(
 			auth.DeferredTeardownCount = len(replacedEntities)
 			// Packed AllowlistModule inputs, not len(AllowedActions): native
 			// recipient rows (A1) are extra SSTOREs that are not allowedActions.
-			// Zero means "unknown — use the 2–3 row 700k seed".
+			// Zero means "unknown — use the 2–3 row 700k seed". A missed
+			// count must not brick a grant that previously sent: under-seed
+			// is AA26 at estimation, not a fund risk.
 			rows, rowErr := aa.CountAllowlistInputs(policy.Grant.InstallCall)
 			if rowErr != nil {
-				return nil, fmt.Errorf("session policy %s: counting allowlist rows: %w", policy.ID, rowErr)
+				if globalLogger != nil {
+					globalLogger.Warn("could not count allowlist rows; using the 700k deferred-hooks seed",
+						"policy", policy.ID, "error", rowErr)
+				}
+				rows = 0
 			}
 			auth.AllowlistRows = rows
 			auth.OnApplied = func(userOpHash string) error {

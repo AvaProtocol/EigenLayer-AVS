@@ -127,6 +127,8 @@ func TestPackNativeTokenLimitUninstallDataGolden(t *testing.T) {
 }
 
 func TestMaxNativeRecipientsFollowsReplaceNotInstall(t *testing.T) {
+	// Tripwire for the A0 replace-AA23 decision. Nothing enforces this
+	// until A1 Validate; this is not coverage of a cap.
 	if MaxNativeRecipients != 5 {
 		t.Fatalf("MaxNativeRecipients = %d, want 5 (A0: 20-row deferred replace AA23s)", MaxNativeRecipients)
 	}

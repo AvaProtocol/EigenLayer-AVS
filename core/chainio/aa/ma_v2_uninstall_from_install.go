@@ -140,8 +140,13 @@ func DecodeInstallValidationHooks(installCall []byte) ([][]byte, error) {
 
 // CountAllowlistInputs returns how many AllowlistModule inputs the stored
 // install packs. Used to scale verificationGasLimit (K14): each input is a
-// cold SSTORE. Zero when the call is not a packed install (tests store a
-// selector stub) or has no allowlist validation hook.
+// cold SSTORE.
+//
+// Zero means unknown — use the 2–3 row 700k seed. Decode failure is not an
+// error: stored installs may predate current packing, and this count is a
+// gas hint, not an authority check. Under-seeding surfaces as AA26 at
+// estimation. Callers on the send path must not turn a missed count into a
+// hard fail.
 func CountAllowlistInputs(installCall []byte) (int, error) {
 	inner, err := InstallValidationWithin(installCall)
 	if err != nil {
@@ -149,19 +154,15 @@ func CountAllowlistInputs(installCall []byte) (int, error) {
 	}
 	hooks, err := DecodeInstallValidationHooks(inner)
 	if err != nil {
-		// Tests store a 5-byte selector stub; a real install is config plus ABI.
-		if len(inner) < hookConfigLen+4 {
-			return 0, nil
-		}
-		return 0, fmt.Errorf("recovering hooks to count allowlist rows: %w", err)
+		return 0, nil
 	}
 	if err := ensureHookABIs(); err != nil {
 		return 0, err
 	}
 	allowlist := AllowlistModuleAddress()
-	for i, entry := range hooks {
+	for _, entry := range hooks {
 		if len(entry) < hookConfigLen {
-			return 0, fmt.Errorf("hook %d is %d bytes, shorter than a hook config", i, len(entry))
+			return 0, nil
 		}
 		if common.BytesToAddress(entry[:20]) != allowlist {
 			continue
@@ -170,15 +171,12 @@ func CountAllowlistInputs(installCall []byte) (int, error) {
 			continue
 		}
 		unpacked, unpackErr := allowlistDataArgs.Unpack(entry[hookConfigLen:])
-		if unpackErr != nil {
-			return 0, fmt.Errorf("decoding allowlist install data: %w", unpackErr)
-		}
-		if len(unpacked) != 2 {
-			return 0, fmt.Errorf("allowlist install decoded to %d arguments, want 2", len(unpacked))
+		if unpackErr != nil || len(unpacked) != 2 {
+			return 0, nil
 		}
 		inputs := reflect.ValueOf(unpacked[1])
 		if inputs.Kind() != reflect.Slice {
-			return 0, fmt.Errorf("allowlist inputs decoded to %T, not a slice", unpacked[1])
+			return 0, nil
 		}
 		return inputs.Len(), nil
 	}
