@@ -437,6 +437,29 @@ func (n *Engine) occupancyFor(chainID int64) EntityOccupancyChecker {
 	return n.entityOccupancyChecker(chainID)
 }
 
+// bindNativeRecipientCodeAt attaches the chain CodeAt used to refuse
+// contract native recipients (K4). Does not overwrite a test-injected
+// stub. Production InstallSessionResolver enables sessionChainReads.
+func (n *Engine) bindNativeRecipientCodeAt(chainID int64, perms *SessionPermissions) {
+	if n == nil || perms == nil || perms.CodeAt != nil || !n.sessionChainReads {
+		return
+	}
+	perms.CodeAt = func(addr common.Address) ([]byte, error) {
+		swCfg := n.ResolveSmartWalletConfig(chainID)
+		if swCfg == nil || swCfg.EthRpcUrl == "" {
+			return nil, fmt.Errorf("no RPC configured for chain %d", chainID)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		client, err := ethclient.DialContext(ctx, swCfg.EthRpcUrl)
+		if err != nil {
+			return nil, fmt.Errorf("dialing chain %d: %w", chainID, err)
+		}
+		defer client.Close()
+		return client.CodeAt(ctx, addr, nil)
+	}
+}
+
 // windowVerifier reads TimeRangeModule.timeRanges for (account, entity).
 func (n *Engine) windowVerifier() WindowVerifier {
 	return func(ctx context.Context, chainID int64, account common.Address, entity uint32) (uint64, uint64, error) {

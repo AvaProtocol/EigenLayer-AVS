@@ -47,15 +47,6 @@ const (
 	AllowlistModuleAddressHex        = "0x00000000003e826473a313e600b5b9b791f5a59a"
 	TimeRangeModuleAddressHex        = "0x00000000000082B8e2012be914dFA4f62A0573eA"
 	NativeTokenLimitModuleAddressHex = "0x00000000000001e541f0D090868FBe24b59Fbe06" // v2.0.0; not redeployed in v2.0.1
-
-	// MaxNativeRecipients is the product cap A1 Validate and the SDK merge
-	// must enforce. A0: a 20-row first-op install mined at 1.5M VGL (~1.19M
-	// actual), but a 20-row deferred replace AA23'd 3/3 at 2.2M (one lucky
-	// 1.8M mine). SubmitSessionPolicy supersedes on every re-grant, so
-	// replace is the normal path. Five rows stay inside the 700k + 45k/row
-	// seed window. Do not raise this because the install passed.
-	// Nothing enforces this until A1; packing does not cap recipient count.
-	MaxNativeRecipients = 5
 )
 
 // AllowlistModuleAddress returns the v2.0.1 AllowlistModule address.

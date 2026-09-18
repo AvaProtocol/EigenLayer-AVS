@@ -216,6 +216,11 @@ func (n *Engine) lookupOwnedWalletRecord(user *model.User, chainID int64, wallet
 // what lets that path use the non-locking marker: the mutex is not reentrant,
 // and taking it twice wedges the shard instead of failing.
 func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (*PreparedSessionGrant, error) {
+	n.bindNativeRecipientCodeAt(in.ChainID, &in.Permissions)
+	if in.Permissions.AllowContractRecipient && n != nil && n.logger != nil {
+		n.logger.Warn("session grant allows contract native recipients (any-function, ERC-20 uncapped)",
+			"chain", in.ChainID, "wallet", in.Wallet.Hex())
+	}
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
@@ -285,6 +290,11 @@ func (n *Engine) SubmitSessionPolicy(
 	deadline uint64,
 	ownerSignature []byte,
 ) (policy *model.SessionPolicy, superseded []string, err error) {
+	n.bindNativeRecipientCodeAt(in.ChainID, &in.Permissions)
+	if in.Permissions.AllowContractRecipient && n != nil && n.logger != nil {
+		n.logger.Warn("session grant allows contract native recipients (any-function, ERC-20 uncapped)",
+			"chain", in.ChainID, "wallet", in.Wallet.Hex())
+	}
 	if err := in.validate(); err != nil {
 		return nil, nil, err
 	}
@@ -432,6 +442,13 @@ func attachDeclaredPermissions(policy *model.SessionPolicy, perms SessionPermiss
 		return
 	}
 	policy.AllowedActions = perms.AllowedActions
+	policy.NativeRecipients = perms.NativeRecipients
+	policy.AllowContractRecipient = perms.AllowContractRecipient
+	if perms.NativeSpendCap != nil {
+		native := *perms.NativeSpendCap
+		native.GrantedCap = native.Amount
+		policy.NativeSpendCap = &native
+	}
 	if perms.SpendCap != nil {
 		spendCap := *perms.SpendCap
 		spendCap.GrantedCap = spendCap.Amount

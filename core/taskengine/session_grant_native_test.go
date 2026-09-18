@@ -96,6 +96,37 @@ func TestETHTransferPreflightSessionGrant(t *testing.T) {
 // fails because a new grant shape sets HasSelectorAllowlist=false, the fix is
 // not to loosen the assertion — it is to narrow preflightSessionGrant and the
 // ExecuteWithdraw check to consider the actual grant instead of the chain.
+func TestHooksForNativeRecipientRowsAreUnscoped(t *testing.T) {
+	alice := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	permissions := SessionPermissions{
+		NativeRecipients: []*common.Address{&alice},
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "10000000000000000"},
+		ValidUntilMs:     time.Now().Add(time.Hour).UnixMilli(),
+		CodeAt:           func(common.Address) ([]byte, error) { return nil, nil },
+	}
+	inputs, err := permissions.allowlistInputs()
+	if err != nil {
+		t.Fatalf("allowlistInputs: %v", err)
+	}
+	if len(inputs) != 1 {
+		t.Fatalf("native-only grant: got %d inputs, want 1", len(inputs))
+	}
+	if inputs[0].HasSelectorAllowlist {
+		t.Fatal("native recipient rows must set HasSelectorAllowlist=false")
+	}
+	if inputs[0].HasERC20SpendLimit {
+		t.Fatal("native recipient rows must not set an ERC-20 spend limit")
+	}
+
+	hooks, err := permissions.HooksFor(1)
+	if err != nil {
+		t.Fatalf("HooksFor: %v", err)
+	}
+	if len(hooks) != 5 {
+		t.Fatalf("native-only grant: got %d hooks, want 5 (AL-val, AL-exec, NT-val, NT-exec, TR)", len(hooks))
+	}
+}
+
 func TestHooksForAlwaysScopesSelectors(t *testing.T) {
 	usdc := common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
 	weth := common.HexToAddress("0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14")
@@ -118,8 +149,8 @@ func TestHooksForAlwaysScopesSelectors(t *testing.T) {
 	}
 	for _, input := range inputs {
 		if !input.HasSelectorAllowlist {
-			t.Fatalf("target %s is not selector-scoped; the blanket native-ETH refusal "+
-				"in preflightSessionGrant/ExecuteWithdraw is no longer sound", input.Target.Hex())
+			t.Fatalf("ERC-20/router target %s is not selector-scoped; A3 must then "+
+				"read the actual grant instead of a chain-level native refusal", input.Target.Hex())
 		}
 		if len(input.Selectors) == 0 {
 			t.Fatalf("target %s is selector-scoped with an empty selector set", input.Target.Hex())

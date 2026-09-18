@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -129,6 +130,32 @@ func TestSessionPolicyRefusesUnservedChain(t *testing.T) {
 	stranded, err := ListSessionPolicies(db, unservedChain, owner)
 	require.NoError(t, err)
 	require.Empty(t, stranded, "a refused grant must leave nothing under sp:%d:*", unservedChain)
+}
+
+func TestSessionPolicyPrepareSubmitNativeRoundTrip(t *testing.T) {
+	engine, _, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	user := &model.User{Address: owner}
+	alice := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	perms := SessionPermissions{
+		NativeRecipients: []*common.Address{&alice},
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "10000000000000000"},
+		ValidUntilMs:     time.Now().Add(30 * 24 * time.Hour).UnixMilli(),
+		CodeAt:           func(common.Address) ([]byte, error) { return nil, nil },
+	}
+
+	prepared, err := engine.PrepareSessionPolicy(user, SessionPolicyInput{
+		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "SendETH", Permissions: perms,
+	})
+	require.NoError(t, err)
+	require.True(t, prepared.Policy.Grant.RequiresExecuteUserOp)
+	require.Equal(t, alice, *prepared.Policy.NativeRecipients[0])
+
+	stored, _, err := engine.SubmitSessionPolicy(user, SessionPolicyInput{
+		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "SendETH", Permissions: perms,
+	}, prepared.Policy.ID, prepared.Policy.EntityID, prepared.Policy.Grant.Deadline,
+		signDigest(t, ownerKey, prepared.Digest))
+	require.NoError(t, err)
+	require.Equal(t, "10000000000000000", stored.NativeSpendCap.GrantedCap)
 }
 
 func TestSessionPolicyPrepareSubmitRoundTrip(t *testing.T) {
@@ -331,6 +358,60 @@ func TestSessionPermissionsValidation(t *testing.T) {
 	spaced := two
 	spaced.SpendCap = &model.ERC20SpendCap{Token: &token, Amount: " 500000000 "}
 	require.Error(t, spaced.Validate(), "whitespace in amount must not match OpenAPI ^[0-9]+$")
+
+	alice := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	native := SessionPermissions{
+		NativeRecipients: []*common.Address{&alice},
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "10000000000000000"},
+		ValidUntilMs:     time.Now().Add(time.Hour).UnixMilli(),
+		CodeAt:           func(common.Address) ([]byte, error) { return nil, nil },
+	}
+	require.NoError(t, native.Validate())
+
+	noCap := native
+	noCap.NativeSpendCap = nil
+	require.Error(t, noCap.Validate(), "nativeRecipients require a nativeSpendCap")
+
+	tooMany := native
+	recs := make([]*common.Address, MaxNativeRecipients+1)
+	for i := range recs {
+		a := common.BigToAddress(big.NewInt(int64(i + 1)))
+		recs[i] = &a
+	}
+	tooMany.NativeRecipients = recs
+	require.Error(t, tooMany.Validate(), "max 5 native recipients")
+
+	module := native
+	mod := aa.AllowlistModuleAddress()
+	module.NativeRecipients = []*common.Address{&mod}
+	require.Error(t, module.Validate(), "known module")
+
+	overlap := base
+	overlap.NativeRecipients = []*common.Address{&token}
+	overlap.NativeSpendCap = &model.NativeSpendCap{Amount: "1"}
+	overlap.CodeAt = native.CodeAt
+	require.Error(t, overlap.Validate(), "native recipient must not be an allowed-action target")
+
+	noReader := native
+	noReader.CodeAt = nil
+	require.Error(t, noReader.Validate(), "fail closed without CodeAt")
+
+	contract := native
+	contract.CodeAt = func(common.Address) ([]byte, error) { return []byte{0x60, 0x00}, nil }
+	require.Error(t, contract.Validate(), "contract recipient")
+
+	flagged := contract
+	flagged.AllowContractRecipient = true
+	require.NoError(t, flagged.Validate(), "allowContractRecipient skips code check")
+
+	neither := SessionPermissions{ValidUntilMs: time.Now().Add(time.Hour).UnixMilli()}
+	require.Error(t, neither.Validate(), "needs allowedActions and/or nativeRecipients")
+}
+
+func TestMaxNativeRecipientsFollowsReplaceNotInstall(t *testing.T) {
+	if MaxNativeRecipients != 5 {
+		t.Fatalf("MaxNativeRecipients = %d, want 5 (A0: 20-row deferred replace AA23s)", MaxNativeRecipients)
+	}
 }
 
 func TestAttachDeclaredPermissionsCapAlias(t *testing.T) {
@@ -362,4 +443,17 @@ func TestAttachDeclaredPermissionsCapAlias(t *testing.T) {
 	require.Len(t, listedPolicy.ERC20SpendCaps, 2)
 	require.NotNil(t, listedPolicy.ERC20SpendCap.Token)
 	require.Equal(t, weth, *listedPolicy.ERC20SpendCap.Token, "alias must keep the submitted singular, not list[0]")
+
+	alice := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	native := SessionPermissions{
+		NativeRecipients:       []*common.Address{&alice},
+		NativeSpendCap:         &model.NativeSpendCap{Amount: "10000000000000000"},
+		AllowContractRecipient: true,
+		ValidUntilMs:           until,
+	}
+	nativePolicy := &model.SessionPolicy{}
+	attachDeclaredPermissions(nativePolicy, native)
+	require.Len(t, nativePolicy.NativeRecipients, 1)
+	require.Equal(t, "10000000000000000", nativePolicy.NativeSpendCap.GrantedCap)
+	require.True(t, nativePolicy.AllowContractRecipient)
 }

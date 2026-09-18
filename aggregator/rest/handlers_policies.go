@@ -73,7 +73,7 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 	if req.ExpiresInSeconds < 60 {
 		return badRequest("POLICIES_BAD_EXPIRY", "Invalid expiry", "expiresInSeconds must be at least 60.")
 	}
-	perms, err := permissionsFromAPI(req.AllowedActions, &req.Erc20SpendCap, req.Erc20SpendCaps, nowMs()+req.ExpiresInSeconds*1000)
+	perms, err := permissionsFromAPI(req.AllowedActions, req.Erc20SpendCap, req.Erc20SpendCaps, req.NativeRecipients, req.NativeSpendCap, req.AllowContractRecipient, nowMs()+req.ExpiresInSeconds*1000)
 	if err != nil {
 		return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
 	}
@@ -127,7 +127,7 @@ func (s *Server) SubmitWalletPolicy(ctx echo.Context, address generated.Ethereum
 	if req.Deadline <= 0 {
 		return badRequest("POLICIES_BAD_DEADLINE", "Invalid deadline", "deadline must be positive.")
 	}
-	perms, err := permissionsFromAPI(req.AllowedActions, &req.Erc20SpendCap, req.Erc20SpendCaps, req.ValidUntil)
+	perms, err := permissionsFromAPI(req.AllowedActions, req.Erc20SpendCap, req.Erc20SpendCaps, req.NativeRecipients, req.NativeSpendCap, req.AllowContractRecipient, req.ValidUntil)
 	if err != nil {
 		return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
 	}
@@ -233,17 +233,30 @@ func (s *Server) RevokeWalletPolicy(ctx echo.Context, address generated.Ethereum
 // ── mapping ───────────────────────────────────────────────────────────────
 
 // permissionsFromAPI translates wire permissions into the engine's set.
-func permissionsFromAPI(actions []generated.AllowedAction, spendCap *generated.Erc20SpendCap, spendCaps *[]generated.Erc20SpendCap, validUntilMs int64) (taskengine.SessionPermissions, error) {
+func permissionsFromAPI(
+	actions *[]generated.AllowedAction,
+	spendCap *generated.Erc20SpendCap,
+	spendCaps *[]generated.Erc20SpendCap,
+	nativeRecipients *[]generated.EthereumAddress,
+	nativeSpendCap *generated.NativeSpendCap,
+	allowContractRecipient *bool,
+	validUntilMs int64,
+) (taskengine.SessionPermissions, error) {
 	perms := taskengine.SessionPermissions{ValidUntilMs: validUntilMs}
-	for _, a := range actions {
-		if !common.IsHexAddress(string(a.Target)) {
-			return perms, errors.New("allowed action target is not a valid address")
+	if actions != nil && len(*actions) == 0 {
+		return perms, errors.New("allowedActions must contain at least one action when present")
+	}
+	if actions != nil {
+		for _, a := range *actions {
+			if !common.IsHexAddress(string(a.Target)) {
+				return perms, errors.New("allowed action target is not a valid address")
+			}
+			target := common.HexToAddress(string(a.Target))
+			perms.AllowedActions = append(perms.AllowedActions, model.AllowedAction{
+				Target:    &target,
+				Selectors: a.Selectors,
+			})
 		}
-		target := common.HexToAddress(string(a.Target))
-		perms.AllowedActions = append(perms.AllowedActions, model.AllowedAction{
-			Target:    &target,
-			Selectors: a.Selectors,
-		})
 	}
 	if spendCap != nil {
 		cap, err := erc20SpendCapFromAPI(*spendCap)
@@ -264,6 +277,24 @@ func permissionsFromAPI(actions []generated.AllowedAction, spendCap *generated.E
 			}
 			perms.SpendCaps = append(perms.SpendCaps, *cap)
 		}
+	}
+	if nativeRecipients != nil && len(*nativeRecipients) == 0 {
+		return perms, errors.New("nativeRecipients must contain at least one address when present")
+	}
+	if nativeRecipients != nil {
+		for i, raw := range *nativeRecipients {
+			if !common.IsHexAddress(string(raw)) {
+				return perms, fmt.Errorf("native recipient %d is not a valid address", i)
+			}
+			addr := common.HexToAddress(string(raw))
+			perms.NativeRecipients = append(perms.NativeRecipients, &addr)
+		}
+	}
+	if nativeSpendCap != nil {
+		perms.NativeSpendCap = &model.NativeSpendCap{Amount: nativeSpendCap.Amount}
+	}
+	if allowContractRecipient != nil {
+		perms.AllowContractRecipient = *allowContractRecipient
 	}
 	return perms, nil
 }
@@ -343,6 +374,25 @@ func policyToAPI(p *model.SessionPolicy) generated.SessionPolicy {
 			out.Erc20SpendCaps = &caps
 		}
 	}
+	if len(p.NativeRecipients) > 0 {
+		recs := make([]generated.EthereumAddress, 0, len(p.NativeRecipients))
+		for _, rec := range p.NativeRecipients {
+			if rec == nil {
+				continue
+			}
+			recs = append(recs, generated.EthereumAddress(rec.Hex()))
+		}
+		if len(recs) > 0 {
+			out.NativeRecipients = &recs
+		}
+	}
+	if p.NativeSpendCap != nil {
+		out.NativeSpendCap = &generated.NativeSpendCap{Amount: p.NativeSpendCap.Amount}
+	}
+	if p.AllowContractRecipient {
+		allow := true
+		out.AllowContractRecipient = &allow
+	}
 	return out
 }
 
@@ -356,19 +406,22 @@ func policyToAPI(p *model.SessionPolicy) generated.SessionPolicy {
 func submitPolicyToAPI(p *model.SessionPolicy, superseded []string) generated.SubmitPolicyResponse {
 	base := policyToAPI(p)
 	out := generated.SubmitPolicyResponse{
-		Id:             base.Id,
-		Runner:         base.Runner,
-		ChainId:        base.ChainId,
-		Status:         generated.SubmitPolicyResponseStatus(base.Status),
-		EntityId:       base.EntityId,
-		SessionSigner:  base.SessionSigner,
-		AgentLabel:     base.AgentLabel,
-		Justification:  base.Justification,
-		AllowedActions: base.AllowedActions,
-		Erc20SpendCap:  base.Erc20SpendCap,
-		Erc20SpendCaps: base.Erc20SpendCaps,
-		ValidUntil:     base.ValidUntil,
-		CreatedAt:      base.CreatedAt,
+		Id:                     base.Id,
+		Runner:                 base.Runner,
+		ChainId:                base.ChainId,
+		Status:                 generated.SubmitPolicyResponseStatus(base.Status),
+		EntityId:               base.EntityId,
+		SessionSigner:          base.SessionSigner,
+		AgentLabel:             base.AgentLabel,
+		Justification:          base.Justification,
+		AllowedActions:         base.AllowedActions,
+		Erc20SpendCap:          base.Erc20SpendCap,
+		Erc20SpendCaps:         base.Erc20SpendCaps,
+		NativeRecipients:       base.NativeRecipients,
+		NativeSpendCap:         base.NativeSpendCap,
+		AllowContractRecipient: base.AllowContractRecipient,
+		ValidUntil:             base.ValidUntil,
+		CreatedAt:              base.CreatedAt,
 	}
 	// Required in the schema and always emitted, empty on a first grant: a
 	// client asking "did this replace anything" reads an empty array rather

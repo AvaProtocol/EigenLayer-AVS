@@ -1764,11 +1764,25 @@ components:
         execution. The token must appear as an `allowedActions` target.
         Prefer `erc20SpendCaps` when capping more than one token; this
         field remains the one-token alias (must match one entry of that
-        array when both are sent).
+        array when both are sent). Native ETH is not this list.
+
+    NativeSpendCap:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: string
+          pattern: '^[0-9]+$'
+          description: |
+            Cumulative native-token cap in wei (decimal string, no reset).
+            Enforced on-chain by NativeTokenLimitModule. Self-funded UserOps
+            also decrement this cap by gas; sponsored UserOps decrement only
+            the ETH value sent.
+          example: '10000000000000000'
 
     PreparePolicyRequest:
       type: object
-      required: [chainId, agentLabel, allowedActions, erc20SpendCap, expiresInSeconds]
+      required: [chainId, agentLabel, expiresInSeconds]
       properties:
         chainId: { $ref: '#/components/schemas/ChainId' }
         agentLabel:
@@ -1782,6 +1796,9 @@ components:
           type: array
           minItems: 1
           items: { $ref: '#/components/schemas/AllowedAction' }
+          description: |
+            Selector-scoped contract calls. Native-only grants omit this
+            field. A present empty array is 400.
         erc20SpendCap: { $ref: '#/components/schemas/Erc20SpendCap' }
         erc20SpendCaps:
           type: array
@@ -1793,6 +1810,24 @@ components:
             match one entry. A capped token's allowedActions may only be
             transfer and/or approve — deposit/withdraw on the same target
             reverts on-chain. Native ETH is not this list.
+        nativeRecipients:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items: { $ref: '#/components/schemas/EthereumAddress' }
+          description: |
+            EOAs this grant may send native ETH to (empty-calldata execute).
+            Omit for Uniswap/ERC-20-only and for payable-write-only
+            (nativeValueCap). A present empty array is 400. Max 5
+            (deferred replace of 20-row grants AA23s).
+        nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
+        allowContractRecipient:
+          type: boolean
+          default: false
+          description: |
+            When true, nativeRecipients may be contracts (any-function on
+            that address, ERC-20 uncapped). Default false: each recipient
+            must have empty code. Logged when true.
         expiresInSeconds:
           type: integer
           format: int64
@@ -1830,7 +1865,7 @@ components:
 
     SubmitPolicyRequest:
       type: object
-      required: [chainId, policyId, entityId, deadline, validUntil, agentLabel, allowedActions, erc20SpendCap, signature]
+      required: [chainId, policyId, entityId, deadline, validUntil, agentLabel, signature]
       properties:
         chainId: { $ref: '#/components/schemas/ChainId' }
         policyId: { $ref: '#/components/schemas/Ulid' }
@@ -1855,12 +1890,24 @@ components:
           type: array
           minItems: 1
           items: { $ref: '#/components/schemas/AllowedAction' }
+          description: |
+            Selector-scoped contract calls. Native-only grants omit this
+            field. A present empty array is 400. Echo prepare verbatim.
         erc20SpendCap: { $ref: '#/components/schemas/Erc20SpendCap' }
         erc20SpendCaps:
           type: array
           minItems: 1
           items: { $ref: '#/components/schemas/Erc20SpendCap' }
           description: Per-token ERC-20 caps. Source of truth when present; erc20SpendCap must match one entry.
+        nativeRecipients:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items: { $ref: '#/components/schemas/EthereumAddress' }
+        nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
+        allowContractRecipient:
+          type: boolean
+          default: false
         signature:
           type: string
           pattern: '^0x[a-fA-F0-9]{130}$'
@@ -1899,6 +1946,13 @@ components:
             when the client submitted `erc20SpendCaps`. The alias
             `erc20SpendCap` is the submitted singular when submitted;
             otherwise the first list entry.
+        nativeRecipients:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/EthereumAddress' }
+        nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
+        allowContractRecipient:
+          type: boolean
         validUntil:
           type: integer
           format: int64
