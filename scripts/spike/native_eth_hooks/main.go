@@ -379,7 +379,7 @@ func run() error {
 
 	e1 := uint32(1)
 	if deployed {
-		e1 = 31
+		e1 = uint32(100 + time.Now().Unix()%800)
 	}
 	hooks1, err := erc20OnlyHooks(e1, token)
 	if err != nil {
@@ -631,17 +631,19 @@ func run() error {
 	}
 	rRep, opRep, err := h.deferredOp(e9, batch, execNew, 1_800_000)
 	if err != nil {
-		return fmt.Errorf("PROOF 8 replace+20-row teardown failed (K14): %w", err)
-	}
-	fmt.Printf("  replace 20-row+5-hook teardown success=%v gasUsed=%s vgl=%s tx=%s\n",
-		rRep.Success, rRep.ActualGasUsed, opRep.VerificationGasLimit, rRep.TxHash)
-	h.noteGas("first-op replace 20-row 5-hook teardown", rRep, opRep)
-	left8, err := readNativeLimit(ctx, chain, e8, account)
-	if err != nil {
-		return err
-	}
-	if left8.Sign() != 0 {
-		fmt.Printf("  NOTE: old 20-row entity limits still %s after replace\n", left8)
+		fmt.Printf("  FINDING: deferred replace batch AA23 (%s) — same open question as scripts/spike/deferred_replace R-A\n", firstLine(err.Error()))
+		fmt.Println("  A2 cannot take a UserOp VGL for 20-row teardown from this run; proof 6 already shows val-then-exec clears limits.")
+	} else {
+		fmt.Printf("  replace 20-row+5-hook teardown success=%v gasUsed=%s vgl=%s tx=%s\n",
+			rRep.Success, rRep.ActualGasUsed, opRep.VerificationGasLimit, rRep.TxHash)
+		h.noteGas("first-op replace 20-row 5-hook teardown", rRep, opRep)
+		left8, err := readNativeLimit(ctx, chain, e8, account)
+		if err != nil {
+			return err
+		}
+		if left8.Sign() != 0 {
+			fmt.Printf("  NOTE: old 20-row entity limits still %s after replace\n", left8)
+		}
 	}
 
 	fmt.Println("\nA0 spike finished. Record the PROOF lines and gas table in the PR body.")
