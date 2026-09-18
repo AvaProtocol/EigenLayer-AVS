@@ -227,7 +227,9 @@ func (n *Engine) lookupOwnedWalletRecord(user *model.User, chainID int64, wallet
 // what lets that path use the non-locking marker: the mutex is not reentrant,
 // and taking it twice wedges the shard instead of failing.
 func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (*PreparedSessionGrant, error) {
-	n.bindNativeRecipientChecks(in.ChainID, &in.Permissions)
+	if err := n.bindNativeRecipientChecks(in.ChainID, &in.Permissions); err != nil {
+		return nil, err
+	}
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
@@ -298,7 +300,9 @@ func (n *Engine) SubmitSessionPolicy(
 	deadline uint64,
 	ownerSignature []byte,
 ) (policy *model.SessionPolicy, superseded []string, err error) {
-	n.bindNativeRecipientChecks(in.ChainID, &in.Permissions)
+	if err := n.bindNativeRecipientChecks(in.ChainID, &in.Permissions); err != nil {
+		return nil, nil, err
+	}
 	if err := in.validate(); err != nil {
 		return nil, nil, err
 	}

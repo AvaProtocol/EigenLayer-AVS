@@ -119,6 +119,20 @@ func TestHooksForDoesNotRepeatCodeAt(t *testing.T) {
 	}
 }
 
+func TestHooksForRefusesUnprovenNativeRecipients(t *testing.T) {
+	alice := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	permissions := SessionPermissions{
+		NativeRecipients: []*common.Address{&alice},
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "10000000000000000"},
+		ValidUntilMs:     time.Now().Add(time.Hour).UnixMilli(),
+	}
+	if _, err := permissions.HooksFor(1); err == nil {
+		t.Fatal("expected packing without CodeAt to fail closed")
+	} else if !strings.Contains(err.Error(), "CodeAt is unset") {
+		t.Fatalf("got %q, want CodeAt is unset", err)
+	}
+}
+
 func TestHooksForNativeRecipientRowsAreUnscoped(t *testing.T) {
 	alice := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
 	permissions := SessionPermissions{

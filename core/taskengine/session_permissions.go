@@ -327,6 +327,13 @@ func (p SessionPermissions) HooksFor(entityID uint32) ([][]byte, error) {
 	if err := p.validate(false); err != nil {
 		return nil, err
 	}
+	// Fail closed if a future caller (Track B) packs without Validate():
+	// HasSelectorAllowlist=false on an unproven address is the K4 High risk.
+	// Nil-check only — no lookup — so the memoized engine path stays one RPC
+	// per recipient.
+	if len(p.NativeRecipients) > 0 && !p.AllowContractRecipient && p.CodeAt == nil {
+		return nil, fmt.Errorf("cannot pack native recipients: CodeAt is unset; Validate must run first (InstallSessionResolver)")
+	}
 
 	inputs, err := p.allowlistInputs()
 	if err != nil {

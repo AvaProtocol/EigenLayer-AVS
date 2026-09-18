@@ -439,28 +439,31 @@ func (n *Engine) occupancyFor(chainID int64) EntityOccupancyChecker {
 
 // bindNativeRecipientChecks attaches the session signer (refused as a
 // native recipient) and a memoized CodeAt that uses the pooled
-// ChainStateReader. Does not replace a test-injected CodeAt, but wraps it
-// so Validate + HooksFor share one lookup per address. Production
+// ChainStateReader. A missing controller key is an error: swallowing it
+// would skip the reservation. Does not replace a test-injected CodeAt, but
+// wraps it so Validate + HooksFor share one lookup per address. Production
 // InstallSessionResolver enables sessionChainReads; without it CodeAt stays
 // nil and Validate fail-closes naming the resolver.
-func (n *Engine) bindNativeRecipientChecks(chainID int64, perms *SessionPermissions) {
+func (n *Engine) bindNativeRecipientChecks(chainID int64, perms *SessionPermissions) error {
 	if n == nil || perms == nil {
-		return
+		return nil
 	}
 	if perms.SessionSigner == nil {
-		if signer, err := n.sessionSignerAddress(); err == nil {
-			perms.SessionSigner = &signer
+		signer, err := n.sessionSignerAddress()
+		if err != nil {
+			return fmt.Errorf("cannot bind session signer for native-recipient reservation: %w", err)
 		}
+		perms.SessionSigner = &signer
 	}
 	if perms.CodeAt != nil {
 		perms.CodeAt = memoizeCodeAt(perms.CodeAt)
-		return
+		return nil
 	}
 	if !n.sessionChainReads {
-		return
+		return nil
 	}
-	reader := GetChainStateReaderForChain(uint64(chainID))
 	perms.CodeAt = memoizeCodeAt(func(addr common.Address) ([]byte, error) {
+		reader := GetChainStateReaderForChain(uint64(chainID))
 		if reader == nil {
 			return nil, fmt.Errorf("no ChainStateReader registered for chain %d", chainID)
 		}
@@ -468,8 +471,12 @@ func (n *Engine) bindNativeRecipientChecks(chainID int64, perms *SessionPermissi
 		defer cancel()
 		return reader.CodeAt(ctx, addr)
 	})
+	return nil
 }
 
+// memoizeCodeAt caches lookups for one request. The map is unsynchronized:
+// SessionPermissions copies share the closure, so callers must not Validate
+// concurrently on the same bound CodeAt.
 func memoizeCodeAt(inner func(common.Address) ([]byte, error)) func(common.Address) ([]byte, error) {
 	if inner == nil {
 		return nil
