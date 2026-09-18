@@ -49,6 +49,9 @@ type SessionPolicy struct {
 	// never be re-encoded into it after signing.
 	AllowedActions []AllowedAction `json:"allowed_actions,omitempty"`
 	ERC20SpendCap  *ERC20SpendCap  `json:"erc20_spend_cap,omitempty"`
+	// ERC20SpendCaps is the per-token list (A7). ERC20SpendCap remains the
+	// one-token alias (typically the first entry) for older clients.
+	ERC20SpendCaps []ERC20SpendCap `json:"erc20_spend_caps,omitempty"`
 
 	// Grant is the owner's authorization. Absent once applied is not a valid
 	// state: it is retained so revocation can reproduce the module cleanup

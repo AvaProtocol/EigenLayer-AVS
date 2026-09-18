@@ -1760,8 +1760,11 @@ components:
           description: Total cap in the token's smallest unit (decimal string, no reset).
           example: '500000000'
       description: |
-        Cumulative ERC-20 spend cap, enforced on-chain at execution. The
-        token must appear as an `allowedActions` target.
+        Cumulative ERC-20 spend cap for one token, enforced on-chain at
+        execution. The token must appear as an `allowedActions` target.
+        Prefer `erc20SpendCaps` when capping more than one token; this
+        field remains the one-token alias (must match one entry of that
+        array when both are sent).
 
     PreparePolicyRequest:
       type: object
@@ -1780,6 +1783,16 @@ components:
           minItems: 1
           items: { $ref: '#/components/schemas/AllowedAction' }
         erc20SpendCap: { $ref: '#/components/schemas/Erc20SpendCap' }
+        erc20SpendCaps:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/Erc20SpendCap' }
+          description: |
+            Per-token ERC-20 caps (AllowlistModule HasERC20SpendLimit per
+            target). Source of truth when present. `erc20SpendCap` must
+            match one entry. A capped token's allowedActions may only be
+            transfer and/or approve — deposit/withdraw on the same target
+            reverts on-chain. Native ETH is not this list.
         expiresInSeconds:
           type: integer
           format: int64
@@ -1843,6 +1856,11 @@ components:
           minItems: 1
           items: { $ref: '#/components/schemas/AllowedAction' }
         erc20SpendCap: { $ref: '#/components/schemas/Erc20SpendCap' }
+        erc20SpendCaps:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/Erc20SpendCap' }
+          description: Per-token ERC-20 caps. Source of truth when present; erc20SpendCap must match one entry.
         signature:
           type: string
           pattern: '^0x[a-fA-F0-9]{130}$'
@@ -1872,6 +1890,15 @@ components:
           type: array
           items: { $ref: '#/components/schemas/AllowedAction' }
         erc20SpendCap: { $ref: '#/components/schemas/Erc20SpendCap' }
+        erc20SpendCaps:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/Erc20SpendCap' }
+          description: |
+            Per-token ERC-20 caps. Omitted on singular-only grants; present
+            when the client submitted `erc20SpendCaps`. The alias
+            `erc20SpendCap` is the submitted singular when submitted;
+            otherwise the first list entry.
         validUntil:
           type: integer
           format: int64

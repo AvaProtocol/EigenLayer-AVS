@@ -3,8 +3,20 @@ package preset
 import (
 	"strings"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 )
+
+// sessionERC20OnchainCapExceeded counts AllowlistModule ExceededTokenLimit
+// after a UserOp was sent. Sentry is suppressed (client failure); this is
+// the operator signal A7 required.
+var sessionERC20OnchainCapExceeded = promauto.NewCounter(prometheus.CounterOpts{
+	Namespace: "ap",
+	Name:      "session_erc20_onchain_cap_exceeded_total",
+	Help:      "UserOps that reverted ExceededTokenLimit (ERC-20 session cap remaining). Client-actionable; not a bundler outage.",
+})
 
 // userOpRevertMarker identifies errors returned by SendUserOp when the UserOp
 // was included on-chain but the target contract call reverted. The marker
@@ -94,6 +106,18 @@ func IsClientUserOpFailure(err error) bool {
 			strings.Contains(s, "validation reverted") ||
 			strings.Contains(s, "execution reverted")):
 		return true
+	case strings.Contains(s, "ExceededTokenLimit"):
+		// AllowlistModule ERC-20 spend cap. Amounts are on-chain only (A7);
+		// this is the client's remaining-cap miss, not a bundler outage.
+		return true
+	case strings.Contains(s, "InvalidCalldataLength"):
+		// Spend-limit path only: calldata shorter than transfer/approve
+		// (deposit/withdraw on a capped token). Defence-in-depth for grants
+		// that slipped Validate. Do not also match SelectorNotAllowed —
+		// that is the validation-hook allowlist miss preflight is supposed
+		// to catch; if it reaches the bundler it is packing/preflight, and
+		// must stay Error → Sentry (same policy as bare AA23).
+		return true
 	case strings.Contains(s, "SESSION_GRANT_INSTALL_FAILED"):
 		// Deferred install/replace batch failed validation or simulation —
 		// new grant did not land and prior entities were not torn down.
@@ -111,6 +135,9 @@ func IsClientUserOpFailure(err error) bool {
 // Callers pass the error both for classification (the first argument) and,
 // conventionally, as a tag value so the logged record includes the full error.
 func LogBundlerError(lgr logger.Logger, err error, msg string, tags ...any) {
+	if err != nil && strings.Contains(err.Error(), "ExceededTokenLimit") {
+		sessionERC20OnchainCapExceeded.Inc()
+	}
 	if lgr == nil {
 		return
 	}

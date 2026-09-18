@@ -437,6 +437,18 @@ func TestPoliciesSubmitReplacesThePreviousGrantOverHTTP(t *testing.T) {
 // oapi-codegen flattens that into a separate struct that submitPolicyToAPI has
 // to fill in by hand. If a field is ever added to SessionPolicy and not copied
 // across, the submit response would silently start omitting it.
+func TestPermissionsFromAPIRejectsEmptySpendCapsList(t *testing.T) {
+	token := generated.EthereumAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
+	actions := []generated.AllowedAction{{
+		Target: token, Selectors: []string{"0xa9059cbb"},
+	}}
+	singular := generated.Erc20SpendCap{Token: token, Amount: "1"}
+	empty := []generated.Erc20SpendCap{}
+	_, err := permissionsFromAPI(actions, &singular, &empty, time.Now().Add(time.Hour).UnixMilli())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "at least one cap")
+}
+
 func TestSubmitPolicyResponseCarriesEverySessionPolicyField(t *testing.T) {
 	token := common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
 	router := common.HexToAddress("0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E")
@@ -454,9 +466,12 @@ func TestSubmitPolicyResponseCarriesEverySessionPolicyField(t *testing.T) {
 			{Target: &token, Selectors: []string{"0x095ea7b3"}},
 		},
 		ERC20SpendCap: &model.ERC20SpendCap{Token: &token, Amount: "500000000", GrantedCap: "500000000"},
-		ValidUntil:    1785541743000,
-		Status:        model.SessionPolicyPending,
-		CreatedAt:     1785441743000,
+		ERC20SpendCaps: []model.ERC20SpendCap{
+			{Token: &token, Amount: "500000000", GrantedCap: "500000000"},
+		},
+		ValidUntil: 1785541743000,
+		Status:     model.SessionPolicyPending,
+		CreatedAt:  1785441743000,
 	}
 
 	asPolicy, err := json.Marshal(policyToAPI(policy))

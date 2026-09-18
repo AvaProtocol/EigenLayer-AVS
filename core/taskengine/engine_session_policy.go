@@ -437,4 +437,21 @@ func attachDeclaredPermissions(policy *model.SessionPolicy, perms SessionPermiss
 		spendCap.GrantedCap = spendCap.Amount
 		policy.ERC20SpendCap = &spendCap
 	}
+	// Only persist the list when the client sent it. A singular-only grant
+	// must not grow erc20SpendCaps: the schema says the array is present when
+	// the grant capped more than the alias field.
+	if len(perms.SpendCaps) == 0 {
+		return
+	}
+	stored := make([]model.ERC20SpendCap, len(perms.SpendCaps))
+	for i, cap := range perms.SpendCaps {
+		stored[i] = cap
+		stored[i].GrantedCap = cap.Amount
+	}
+	policy.ERC20SpendCaps = stored
+	if policy.ERC20SpendCap != nil {
+		return
+	}
+	first := stored[0]
+	policy.ERC20SpendCap = &first
 }

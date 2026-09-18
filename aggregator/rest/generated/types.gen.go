@@ -629,8 +629,11 @@ type Edge struct {
 	Target string `json:"target"`
 }
 
-// Erc20SpendCap Cumulative ERC-20 spend cap, enforced on-chain at execution. The
-// token must appear as an `allowedActions` target.
+// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
+// execution. The token must appear as an `allowedActions` target.
+// Prefer `erc20SpendCaps` when capping more than one token; this
+// field remains the one-token alias (must match one entry of that
+// array when both are sent).
 type Erc20SpendCap struct {
 	// Amount Total cap in the token's smallest unit (decimal string, no reset).
 	Amount string `json:"amount"`
@@ -1162,9 +1165,17 @@ type PreparePolicyRequest struct {
 	// configured chain; on query/filter params it is optional.
 	ChainId ChainId `json:"chainId"`
 
-	// Erc20SpendCap Cumulative ERC-20 spend cap, enforced on-chain at execution. The
-	// token must appear as an `allowedActions` target.
+	// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
+	// execution. The token must appear as an `allowedActions` target.
+	// Prefer `erc20SpendCaps` when capping more than one token; this
+	// field remains the one-token alias (must match one entry of that
+	// array when both are sent).
 	Erc20SpendCap Erc20SpendCap `json:"erc20SpendCap"`
+
+	// Erc20SpendCaps Per-token ERC-20 caps (AllowlistModule HasERC20SpendLimit per
+	// target). Source of truth when present. `erc20SpendCap` must
+	// match one entry. Native ETH is not this list.
+	Erc20SpendCaps *[]Erc20SpendCap `json:"erc20SpendCaps,omitempty"`
 
 	// ExpiresInSeconds Grant lifetime, relative (skew-proof). Becomes an absolute validUntil.
 	ExpiresInSeconds int64   `json:"expiresInSeconds"`
@@ -1393,9 +1404,15 @@ type SessionPolicy struct {
 	CreatedAt int64 `json:"createdAt"`
 	EntityId  int64 `json:"entityId"`
 
-	// Erc20SpendCap Cumulative ERC-20 spend cap, enforced on-chain at execution. The
-	// token must appear as an `allowedActions` target.
+	// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
+	// execution. The token must appear as an `allowedActions` target.
+	// Prefer `erc20SpendCaps` when capping more than one token; this
+	// field remains the one-token alias (must match one entry of that
+	// array when both are sent).
 	Erc20SpendCap *Erc20SpendCap `json:"erc20SpendCap,omitempty"`
+
+	// Erc20SpendCaps Per-token ERC-20 caps. Present when the grant capped more than the alias field.
+	Erc20SpendCaps *[]Erc20SpendCap `json:"erc20SpendCaps,omitempty"`
 
 	// Id ULID identifier (26-char Crockford base32).
 	Id            Ulid    `json:"id"`
@@ -1471,10 +1488,16 @@ type SubmitPolicyRequest struct {
 	Deadline int64   `json:"deadline"`
 	EntityId int64   `json:"entityId"`
 
-	// Erc20SpendCap Cumulative ERC-20 spend cap, enforced on-chain at execution. The
-	// token must appear as an `allowedActions` target.
+	// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
+	// execution. The token must appear as an `allowedActions` target.
+	// Prefer `erc20SpendCaps` when capping more than one token; this
+	// field remains the one-token alias (must match one entry of that
+	// array when both are sent).
 	Erc20SpendCap Erc20SpendCap `json:"erc20SpendCap"`
-	Justification *string       `json:"justification,omitempty"`
+
+	// Erc20SpendCaps Per-token ERC-20 caps. Source of truth when present; erc20SpendCap must match one entry.
+	Erc20SpendCaps *[]Erc20SpendCap `json:"erc20SpendCaps,omitempty"`
+	Justification  *string          `json:"justification,omitempty"`
 
 	// PolicyId ULID identifier (26-char Crockford base32).
 	PolicyId Ulid `json:"policyId"`
@@ -1500,9 +1523,15 @@ type SubmitPolicyResponse struct {
 	CreatedAt int64 `json:"createdAt"`
 	EntityId  int64 `json:"entityId"`
 
-	// Erc20SpendCap Cumulative ERC-20 spend cap, enforced on-chain at execution. The
-	// token must appear as an `allowedActions` target.
+	// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
+	// execution. The token must appear as an `allowedActions` target.
+	// Prefer `erc20SpendCaps` when capping more than one token; this
+	// field remains the one-token alias (must match one entry of that
+	// array when both are sent).
 	Erc20SpendCap *Erc20SpendCap `json:"erc20SpendCap,omitempty"`
+
+	// Erc20SpendCaps Per-token ERC-20 caps. Present when the grant capped more than the alias field.
+	Erc20SpendCaps *[]Erc20SpendCap `json:"erc20SpendCaps,omitempty"`
 
 	// Id ULID identifier (26-char Crockford base32).
 	Id            Ulid    `json:"id"`
