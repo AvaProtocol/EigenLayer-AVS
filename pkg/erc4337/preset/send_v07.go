@@ -14,6 +14,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 )
@@ -563,7 +564,11 @@ func priceOperationV07(
 	}
 
 	op.MaxPriorityFeePerGas = tip
-	op.MaxFeePerGas = new(big.Int).Add(tip, new(big.Int).Mul(head.BaseFee, big.NewInt(2)))
+	var baseFee *big.Int
+	if head != nil {
+		baseFee = head.BaseFee
+	}
+	op.MaxFeePerGas = eip1559.MaxFeeFromTipAndBase(tip, baseFee)
 
 	estimate, err := EstimateUserOpGasV07(ctx, bundlerRPC, op, entryPoint)
 	if err != nil {

@@ -1,6 +1,8 @@
 package taskengine
 
 import (
+	"context"
+	"math/big"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,20 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 )
+
+type stubCodeAndFee struct {
+	code    []byte
+	codeErr error
+	fee     *big.Int
+	feeErr  error
+}
+
+func (s stubCodeAndFee) CodeAt(context.Context, common.Address) ([]byte, error) {
+	return s.code, s.codeErr
+}
+func (s stubCodeAndFee) MaxFeePerGas(context.Context) (*big.Int, error) {
+	return s.fee, s.feeErr
+}
 
 // A native transfer under a session grant cannot be made to work by editing
 // the grant, so the refusal must be a distinct code from the coverage miss and
@@ -27,18 +43,12 @@ func TestFormatSessionPolicyNativeNotAllowed(t *testing.T) {
 	if !strings.Contains(msg, recipient.Hex()) {
 		t.Fatalf("message should name the recipient, got %q", msg)
 	}
-	// Derive the coverage code from its own formatter rather than restating
-	// the literal, so this keeps testing "the two codes differ" even if
-	// either string is renamed.
 	coverageCode := strings.SplitN(FormatSessionPolicyTargetNotAllowed(nil, ""), ":", 2)[0]
 	if strings.HasPrefix(msg, coverageCode+":") {
 		t.Fatalf("native refusal must not reuse the coverage code %q, got %q", coverageCode, msg)
 	}
-	// The coverage error tells callers to "re-grant the session policy".
-	// Repeating that here would be actively wrong: no REST grant shape
-	// authorizes empty inner calldata.
-	if strings.Contains(strings.ToLower(msg), "re-grant") {
-		t.Fatalf("native refusal must not advise re-granting, got %q", msg)
+	if !strings.Contains(strings.ToLower(msg), "re-grant") {
+		t.Fatalf("native refusal must advise re-granting with nativeRecipients, got %q", msg)
 	}
 
 	withPolicy := FormatSessionPolicyNativeNotAllowed(recipient, "01m0hf01w")
@@ -52,19 +62,15 @@ func TestFormatSessionPolicyNativeNotAllowed(t *testing.T) {
 // the way anywhere else.
 func TestETHTransferPreflightSessionGrant(t *testing.T) {
 	recipient := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	amount := big.NewInt(1)
 
-	t.Run("refuses on modular account v2", func(t *testing.T) {
+	t.Run("skips when there is no usable policy", func(t *testing.T) {
 		p := &ETHTransferProcessor{
-			CommonProcessor: &CommonProcessor{},
-			// Empty AccountProvider defaults to modular_account_v2.
+			CommonProcessor:   &CommonProcessor{},
 			smartWalletConfig: &config.SmartWalletConfig{ChainID: 11155111},
 		}
-		msg := p.preflightSessionGrant(recipient)
-		if msg == "" {
-			t.Fatal("expected a refusal on an MA v2 chain")
-		}
-		if !strings.HasPrefix(msg, SessionPolicyNativeNotAllowedCode+":") {
-			t.Fatalf("expected the native code, got %q", msg)
+		if msg := p.preflightSessionGrant(recipient, amount); msg != "" {
+			t.Fatalf("no policy: send path fails no session authorization, got %q", msg)
 		}
 	})
 
@@ -73,29 +79,94 @@ func TestETHTransferPreflightSessionGrant(t *testing.T) {
 			CommonProcessor:   &CommonProcessor{},
 			smartWalletConfig: &config.SmartWalletConfig{ChainID: 11155111, AccountProvider: "something_else"},
 		}
-		if msg := p.preflightSessionGrant(recipient); msg != "" {
+		if msg := p.preflightSessionGrant(recipient, amount); msg != "" {
 			t.Fatalf("non-MA-v2 chain has no session hooks to trip, got %q", msg)
 		}
 	})
 
 	t.Run("skips when there is no smart wallet config", func(t *testing.T) {
 		p := &ETHTransferProcessor{CommonProcessor: &CommonProcessor{}}
-		if msg := p.preflightSessionGrant(recipient); msg != "" {
+		if msg := p.preflightSessionGrant(recipient, amount); msg != "" {
 			t.Fatalf("expected skip with no config, got %q", msg)
 		}
 	})
 }
 
-// The native-ETH refusals refuse on MA v2 unconditionally, which is only
-// correct while every grant this package builds is selector-scoped: the
-// AllowlistModule skips its `data.length < 4` check only when
-// hasSelectorAllowlist is false, so a false entry WOULD authorize an empty
-// calldata inner call and make the blanket refusal wrong.
-//
-// That coupling used to live only in comments across two files. If this test
-// fails because a new grant shape sets HasSelectorAllowlist=false, the fix is
-// not to loosen the assertion — it is to narrow preflightSessionGrant and the
-// ExecuteWithdraw check to consider the actual grant instead of the chain.
+func TestPreflightNativePermission(t *testing.T) {
+	alice := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	bob := common.HexToAddress("0x000000000000000000000000000000000000b0b0")
+	twoGwei := big.NewInt(2_000_000_000)
+	reader := stubCodeAndFee{fee: twoGwei}
+	policy := &model.SessionPolicy{
+		ID:               "01native",
+		NativeRecipients: []*common.Address{&alice},
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "100000000000000000", GrantedCap: "100000000000000000"}, // 0.1 ETH
+	}
+
+	t.Run("no policy native send", func(t *testing.T) {
+		msg := PreflightNativePermission(nil, NativeIntent{Recipient: alice, Amount: big.NewInt(1), Kind: NativeSend}, nil)
+		if !strings.HasPrefix(msg, SessionPolicyNativeNotAllowedCode+":") {
+			t.Fatalf("got %q", msg)
+		}
+		if !strings.Contains(msg, "re-grant") {
+			t.Fatalf("must advise re-grant, got %q", msg)
+		}
+	})
+	t.Run("no nativeRecipients", func(t *testing.T) {
+		p := &model.SessionPolicy{ID: "01caponly", NativeSpendCap: &model.NativeSpendCap{Amount: "1"}}
+		msg := PreflightNativePermission(p, NativeIntent{Recipient: alice, Amount: big.NewInt(1), Kind: NativeSend}, nil)
+		if !strings.HasPrefix(msg, SessionPolicyNativeNotAllowedCode+":") {
+			t.Fatalf("nativeSpendCap alone is not an ETH send, got %q", msg)
+		}
+	})
+	t.Run("recipient not in list", func(t *testing.T) {
+		msg := PreflightNativePermission(policy, NativeIntent{Recipient: bob, Amount: big.NewInt(1), Kind: NativeSend}, nil)
+		if !strings.HasPrefix(msg, SessionPolicyRecipientNotAllowedCode+":") {
+			t.Fatalf("got %q", msg)
+		}
+	})
+	t.Run("covering send sponsored", func(t *testing.T) {
+		msg := PreflightNativePermission(policy, NativeIntent{
+			Recipient: alice, Amount: big.NewInt(1), Kind: NativeSend, Sponsored: true,
+		}, reader)
+		if msg != "" {
+			t.Fatalf("covering sponsored send: %q", msg)
+		}
+	})
+	t.Run("contract recipient", func(t *testing.T) {
+		msg := PreflightNativePermission(policy, NativeIntent{
+			Recipient: alice, Amount: big.NewInt(1), Kind: NativeSend, Sponsored: true,
+		}, stubCodeAndFee{code: []byte{0x60}, fee: twoGwei})
+		if !strings.HasPrefix(msg, SessionPolicyRecipientNotEOACode+":") {
+			t.Fatalf("got %q", msg)
+		}
+	})
+	t.Run("payable write without native cap passes", func(t *testing.T) {
+		uniswap := &model.SessionPolicy{ID: "01uni"}
+		msg := PreflightNativePermission(uniswap, NativeIntent{
+			Amount: big.NewInt(1e18), Kind: NativeValue,
+		}, nil)
+		if msg != "" {
+			t.Fatalf("Uniswap ETH-in without NT: %q", msg)
+		}
+	})
+	t.Run("self-funded cap exceeded", func(t *testing.T) {
+		tiny := &model.SessionPolicy{
+			ID:               "01tiny",
+			NativeRecipients: []*common.Address{&alice},
+			NativeSpendCap:   &model.NativeSpendCap{Amount: "1", GrantedCap: "1"},
+		}
+		msg := PreflightNativePermission(tiny, NativeIntent{
+			Recipient: alice, Amount: big.NewInt(1), Kind: NativeSend,
+		}, reader)
+		if !strings.HasPrefix(msg, SessionPolicyNativeCapExceededCode+":") {
+			t.Fatalf("got %q", msg)
+		}
+	})
+}
+
+// Native recipient rows set HasSelectorAllowlist=false. Empty-calldata
+// preflight must read nativeRecipients, not refuse every MA v2 chain.
 func TestHooksForDoesNotRepeatCodeAt(t *testing.T) {
 	alice := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
 	var lookups int

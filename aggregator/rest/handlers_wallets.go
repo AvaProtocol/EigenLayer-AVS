@@ -256,6 +256,21 @@ func (s *Server) WithdrawWallet(ctx echo.Context, address generated.EthereumAddr
 				"Native ETH withdraw not authorized",
 				status.Convert(err).Message())
 		}
+		if strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotAllowedCode) {
+			return badRequest(taskengine.SessionPolicyRecipientNotAllowedCode,
+				"Recipient not in native allowlist",
+				status.Convert(err).Message())
+		}
+		if strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotEOACode) {
+			return badRequest(taskengine.SessionPolicyRecipientNotEOACode,
+				"Native recipient is a contract",
+				status.Convert(err).Message())
+		}
+		if strings.Contains(err.Error(), taskengine.SessionPolicyNativeCapExceededCode) {
+			return badRequest(taskengine.SessionPolicyNativeCapExceededCode,
+				"Native ETH cap exceeded",
+				status.Convert(err).Message())
+		}
 		return err
 	}
 	// Echo enough of the request back on the response that callers can

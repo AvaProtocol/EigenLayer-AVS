@@ -2,6 +2,7 @@ package aggregator
 
 import (
 	"context"
+	"math/big"
 	"strings"
 	"testing"
 
@@ -11,9 +12,11 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 // withdrawTestServer is the smallest RpcServer that can reach the native-ETH
@@ -72,7 +75,7 @@ func TestExecuteWithdraw_NativeRefusalIsCaseInsensitive(t *testing.T) {
 
 	_, err := server.ExecuteWithdraw(context.Background(), user, &avsproto.WithdrawFundsReq{
 		RecipientAddress: "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
-		Amount:           "max",
+		Amount:           "1",
 		Token:            "eth",
 	})
 	if err == nil || !strings.Contains(err.Error(), taskengine.SessionPolicyNativeNotAllowedCode) {
@@ -136,5 +139,87 @@ func TestExecuteWithdraw_NilSmartWalletConfigDoesNotPanic(t *testing.T) {
 	}
 	if status.Code(err) != codes.Internal {
 		t.Fatalf("expected Internal for a missing smart wallet config, got %s: %v", status.Code(err), err)
+	}
+}
+
+type stubWithdrawReader struct {
+	code []byte
+	fee  *big.Int
+}
+
+func (s stubWithdrawReader) CodeAt(context.Context, common.Address) ([]byte, error) {
+	return s.code, nil
+}
+func (s stubWithdrawReader) MaxFeePerGas(context.Context) (*big.Int, error) {
+	return s.fee, nil
+}
+
+func TestExecuteWithdraw_CoveringGrantPassesPreflight(t *testing.T) {
+	db := testutil.TestMustDB()
+	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
+
+	owner := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	wallet := common.HexToAddress("0x209eb31c199bEB4c386eF83CF442DE1a00667a1F")
+	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
+	policy := &model.SessionPolicy{
+		ID: "01coveringgrantaaaaaaaaaaa", Owner: &owner, Runner: &wallet,
+		ChainID: 11155111, EntityID: 1, SessionSigner: &signer,
+		Status:           model.SessionPolicyPending,
+		NativeRecipients: []*common.Address{&owner},
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "100000000000000000", GrantedCap: "100000000000000000"},
+		Grant: &model.SessionGrantAuthorization{
+			InstallCall:    []byte{0x1b, 0xbf, 0x56, 0x4c, 0x01},
+			CarrierNonce:   big.NewInt(1),
+			Deadline:       1785541743,
+			OwnerSignature: make([]byte, 65),
+		},
+	}
+	if err := taskengine.StoreSessionPolicy(db, policy); err != nil {
+		t.Fatal(err)
+	}
+
+	server := withdrawTestServer(t, "")
+	server.db = db
+	server.withdrawNativeReader = stubWithdrawReader{
+		code: nil,
+		fee:  big.NewInt(2_000_000_000),
+	}
+
+	err := server.preflightNativeWithdraw(
+		&model.User{Address: owner},
+		server.config.SmartWallet,
+		&avsproto.WithdrawFundsReq{
+			RecipientAddress:   owner.Hex(),
+			Amount:             "1000000000000000",
+			Token:              "ETH",
+			SmartWalletAddress: wallet.Hex(),
+		},
+		big.NewInt(1_000_000_000_000_000),
+		false,
+	)
+	if err != nil {
+		t.Fatalf("covering grant with injected reader must pass preflight, got %v", err)
+	}
+
+	// Without a reader the same grant fail-closes — the F1 hole.
+	server.withdrawNativeReader = nil
+	err = server.preflightNativeWithdraw(
+		&model.User{Address: owner},
+		server.config.SmartWallet,
+		&avsproto.WithdrawFundsReq{
+			RecipientAddress:   owner.Hex(),
+			Amount:             "1000000000000000",
+			Token:              "ETH",
+			SmartWalletAddress: wallet.Hex(),
+		},
+		big.NewInt(1_000_000_000_000_000),
+		false,
+	)
+	if err == nil {
+		t.Fatal("covering grant without a reader must fail closed")
+	}
+	if !strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotEOACode) &&
+		!strings.Contains(err.Error(), taskengine.SessionPolicyNativeCapExceededCode) {
+		t.Fatalf("expected EOA or cap fail-closed, got %v", err)
 	}
 }
