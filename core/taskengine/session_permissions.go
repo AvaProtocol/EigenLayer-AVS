@@ -15,9 +15,11 @@ import (
 )
 
 // MaxNativeRecipients is the product cap Validate and the SDK merge enforce.
-// A0: 20-row first-op install mined at 1.5M VGL, but 20-row deferred replace
-// AA23'd 3/3 at 2.2M. Singleton re-grant is replace, so the max follows
-// replace. Five rows stay inside the 700k + 45k/row seed window.
+// Keep in sync with OpenAPI nativeRecipients maxItems on PreparePolicyRequest
+// and SubmitPolicyRequest. A0: 20-row first-op install mined at 1.5M VGL, but
+// 20-row deferred replace AA23'd 3/3 at 2.2M. Singleton re-grant is replace,
+// so the max follows replace. Five rows stay inside the 700k + 45k/row seed
+// window.
 const MaxNativeRecipients = 5
 
 // SessionPermissions is the declared permission set — allowed actions,
@@ -49,15 +51,23 @@ type SessionPermissions struct {
 	NativeRecipients       []*common.Address
 	NativeSpendCap         *model.NativeSpendCap
 	AllowContractRecipient bool
+	// SessionSigner, when set, is refused as a native recipient — the
+	// gateway's shared controller. Bound at prepare/submit from
+	// sessionSignerAddress.
+	SessionSigner *common.Address
 	// CodeAt looks up bytecode for native-recipient EOA checks (K4).
 	// Required when native recipients are set and AllowContractRecipient
 	// is false. Nil is fail-closed. Tests inject an empty-code stub;
-	// production prepare/submit bind the chain reader.
+	// production prepare/submit bind a pooled chain reader.
 	CodeAt func(common.Address) ([]byte, error)
 }
 
 // Validate rejects a permission set the grant screen could not have produced.
 func (p SessionPermissions) Validate() error {
+	return p.validate(true)
+}
+
+func (p SessionPermissions) validate(withChain bool) error {
 	erc20Class := len(p.AllowedActions) > 0
 	nativeSend := len(p.NativeRecipients) > 0
 	if !erc20Class && !nativeSend {
@@ -140,14 +150,17 @@ func (p SessionPermissions) Validate() error {
 			if reservedNativeRecipient(*rec) {
 				return fmt.Errorf("native recipient %s is a known module, factory, or EntryPoint", rec.Hex())
 			}
+			if p.SessionSigner != nil && *rec == *p.SessionSigner {
+				return fmt.Errorf("native recipient %s is the session signer", rec.Hex())
+			}
 			for _, action := range p.AllowedActions {
 				if action.Target != nil && *action.Target == *rec {
 					return fmt.Errorf("list contracts as allowed actions with selectors; native recipients are for empty-calldata sends")
 				}
 			}
-			if !p.AllowContractRecipient {
+			if withChain && !p.AllowContractRecipient {
 				if p.CodeAt == nil {
-					return fmt.Errorf("cannot verify native recipient %s is an EOA (no chain reader); fail closed", rec.Hex())
+					return fmt.Errorf("cannot verify native recipient %s is an EOA: session resolver is not installed (InstallSessionResolver); fail closed", rec.Hex())
 				}
 				code, err := p.CodeAt(*rec)
 				if err != nil {
@@ -309,7 +322,9 @@ func parseCapAmount(s string) (*big.Int, error) {
 // limits in one install payload), the allowlist execution hook that enforces
 // those limits, and the time-range hook that expires the grant.
 func (p SessionPermissions) HooksFor(entityID uint32) ([][]byte, error) {
-	if err := p.Validate(); err != nil {
+	// Static checks only: Prepare/Submit already ran Validate() with chain
+	// lookups. Repeating eth_getCode here doubled RPC on every grant.
+	if err := p.validate(false); err != nil {
 		return nil, err
 	}
 
@@ -348,7 +363,6 @@ func reservedNativeRecipient(addr common.Address) bool {
 		aa.TimeRangeModuleAddress(),
 		aa.SingleSignerValidationModuleAddress(),
 		aa.MAv2FactoryAddress(),
-		aa.EntrypointAddress,
 		common.HexToAddress(config.EntryPointV07AddressHex):
 		return true
 	}

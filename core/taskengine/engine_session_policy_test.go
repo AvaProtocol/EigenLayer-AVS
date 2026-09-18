@@ -132,6 +132,45 @@ func TestSessionPolicyRefusesUnservedChain(t *testing.T) {
 	require.Empty(t, stranded, "a refused grant must leave nothing under sp:%d:*", unservedChain)
 }
 
+func TestPrepareSessionPolicyLooksUpEachRecipientOnce(t *testing.T) {
+	engine, _, _, owner, wallet := newPolicyTestEngine(t)
+	user := &model.User{Address: owner}
+	alice := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	var lookups int
+	perms := SessionPermissions{
+		NativeRecipients: []*common.Address{&alice},
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "10000000000000000"},
+		ValidUntilMs:     time.Now().Add(30 * 24 * time.Hour).UnixMilli(),
+		CodeAt: func(common.Address) ([]byte, error) {
+			lookups++
+			return nil, nil
+		},
+	}
+	_, err := engine.PrepareSessionPolicy(user, SessionPolicyInput{
+		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "SendETH", Permissions: perms,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, lookups, "Validate+HooksFor must share one CodeAt per recipient")
+}
+
+func TestPrepareSessionPolicyRefusesControllerAsNativeRecipient(t *testing.T) {
+	engine, _, _, owner, wallet := newPolicyTestEngine(t)
+	user := &model.User{Address: owner}
+	signer, err := engine.sessionSignerAddress()
+	require.NoError(t, err)
+	perms := SessionPermissions{
+		NativeRecipients: []*common.Address{&signer},
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "10000000000000000"},
+		ValidUntilMs:     time.Now().Add(30 * 24 * time.Hour).UnixMilli(),
+		CodeAt:           func(common.Address) ([]byte, error) { return nil, nil },
+	}
+	_, err = engine.PrepareSessionPolicy(user, SessionPolicyInput{
+		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "SendETH", Permissions: perms,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "session signer")
+}
+
 func TestSessionPolicyPrepareSubmitNativeRoundTrip(t *testing.T) {
 	engine, _, ownerKey, owner, wallet := newPolicyTestEngine(t)
 	user := &model.User{Address: owner}
@@ -394,7 +433,13 @@ func TestSessionPermissionsValidation(t *testing.T) {
 
 	noReader := native
 	noReader.CodeAt = nil
-	require.Error(t, noReader.Validate(), "fail closed without CodeAt")
+	err := noReader.Validate()
+	require.Error(t, err, "fail closed without CodeAt")
+	require.Contains(t, err.Error(), "InstallSessionResolver")
+
+	controller := native
+	controller.SessionSigner = &alice
+	require.Error(t, controller.Validate(), "session signer is not a native recipient")
 
 	contract := native
 	contract.CodeAt = func(common.Address) ([]byte, error) { return []byte{0x60, 0x00}, nil }

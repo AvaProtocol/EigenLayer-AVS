@@ -437,26 +437,55 @@ func (n *Engine) occupancyFor(chainID int64) EntityOccupancyChecker {
 	return n.entityOccupancyChecker(chainID)
 }
 
-// bindNativeRecipientCodeAt attaches the chain CodeAt used to refuse
-// contract native recipients (K4). Does not overwrite a test-injected
-// stub. Production InstallSessionResolver enables sessionChainReads.
-func (n *Engine) bindNativeRecipientCodeAt(chainID int64, perms *SessionPermissions) {
-	if n == nil || perms == nil || perms.CodeAt != nil || !n.sessionChainReads {
+// bindNativeRecipientChecks attaches the session signer (refused as a
+// native recipient) and a memoized CodeAt that uses the pooled
+// ChainStateReader. Does not replace a test-injected CodeAt, but wraps it
+// so Validate + HooksFor share one lookup per address. Production
+// InstallSessionResolver enables sessionChainReads; without it CodeAt stays
+// nil and Validate fail-closes naming the resolver.
+func (n *Engine) bindNativeRecipientChecks(chainID int64, perms *SessionPermissions) {
+	if n == nil || perms == nil {
 		return
 	}
-	perms.CodeAt = func(addr common.Address) ([]byte, error) {
-		swCfg := n.ResolveSmartWalletConfig(chainID)
-		if swCfg == nil || swCfg.EthRpcUrl == "" {
-			return nil, fmt.Errorf("no RPC configured for chain %d", chainID)
+	if perms.SessionSigner == nil {
+		if signer, err := n.sessionSignerAddress(); err == nil {
+			perms.SessionSigner = &signer
+		}
+	}
+	if perms.CodeAt != nil {
+		perms.CodeAt = memoizeCodeAt(perms.CodeAt)
+		return
+	}
+	if !n.sessionChainReads {
+		return
+	}
+	reader := GetChainStateReaderForChain(uint64(chainID))
+	perms.CodeAt = memoizeCodeAt(func(addr common.Address) ([]byte, error) {
+		if reader == nil {
+			return nil, fmt.Errorf("no ChainStateReader registered for chain %d", chainID)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		client, err := ethclient.DialContext(ctx, swCfg.EthRpcUrl)
-		if err != nil {
-			return nil, fmt.Errorf("dialing chain %d: %w", chainID, err)
+		return reader.CodeAt(ctx, addr)
+	})
+}
+
+func memoizeCodeAt(inner func(common.Address) ([]byte, error)) func(common.Address) ([]byte, error) {
+	if inner == nil {
+		return nil
+	}
+	type result struct {
+		code []byte
+		err  error
+	}
+	cache := make(map[common.Address]result)
+	return func(addr common.Address) ([]byte, error) {
+		if got, ok := cache[addr]; ok {
+			return got.code, got.err
 		}
-		defer client.Close()
-		return client.CodeAt(ctx, addr, nil)
+		code, err := inner(addr)
+		cache[addr] = result{code: code, err: err}
+		return code, err
 	}
 }
 

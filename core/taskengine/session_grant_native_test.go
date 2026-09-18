@@ -96,6 +96,29 @@ func TestETHTransferPreflightSessionGrant(t *testing.T) {
 // fails because a new grant shape sets HasSelectorAllowlist=false, the fix is
 // not to loosen the assertion — it is to narrow preflightSessionGrant and the
 // ExecuteWithdraw check to consider the actual grant instead of the chain.
+func TestHooksForDoesNotRepeatCodeAt(t *testing.T) {
+	alice := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	var lookups int
+	permissions := SessionPermissions{
+		NativeRecipients: []*common.Address{&alice},
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "10000000000000000"},
+		ValidUntilMs:     time.Now().Add(time.Hour).UnixMilli(),
+		CodeAt: func(common.Address) ([]byte, error) {
+			lookups++
+			return nil, nil
+		},
+	}
+	if err := permissions.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if _, err := permissions.HooksFor(1); err != nil {
+		t.Fatalf("HooksFor: %v", err)
+	}
+	if lookups != 1 {
+		t.Fatalf("CodeAt lookups = %d, want 1 (HooksFor must not re-run chain Validate)", lookups)
+	}
+}
+
 func TestHooksForNativeRecipientRowsAreUnscoped(t *testing.T) {
 	alice := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
 	permissions := SessionPermissions{
