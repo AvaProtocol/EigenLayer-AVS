@@ -385,7 +385,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if err := h.installDeferred(e1, hooks1, 1_200_000); err != nil {
+	vgl1 := int64(700_000)
+	if h.factoryNeeded {
+		vgl1 = 1_200_000
+	}
+	if err := h.installDeferred(e1, hooks1, vgl1); err != nil {
 		return fmt.Errorf("proof 1 install: %w", err)
 	}
 	h.factoryNeeded = false
