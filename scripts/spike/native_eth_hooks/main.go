@@ -38,6 +38,9 @@ import (
 	"bufio"
 	"context"
 	"crypto/ecdsa"
+	"crypto/rand"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -156,10 +159,61 @@ func loadDotEnvFile(path string) {
 		}
 		key = strings.TrimSpace(key)
 		val = strings.Trim(strings.TrimSpace(val), `"'`)
-		if key != "" && os.Getenv(key) == "" {
-			_ = os.Setenv(key, val)
+		if !dotenvKeyOK(key) || os.Getenv(key) != "" {
+			continue
+		}
+		_ = os.Setenv(key, val)
+	}
+}
+
+func dotenvKeyOK(key string) bool {
+	switch key {
+	case "SPIKE_OWNER_KEY", "SPIKE_CONTROLLER_KEY", "SPIKE_BUNDLER_URL", "SPIKE_RPC_URL",
+		"SPIKE_SALT", "SPIKE_ENTITY_BASE",
+		"TEST_PRIVATE_KEY", "CONTROLLER_PRIVATE_KEY",
+		"SEPOLIA_BUNDLER_URL", "SEPOLIA_RPC_URL", "ALCHEMY_API_KEY",
+		"BASE_RPC_URL", "ETH_RPC_URL":
+		return true
+	default:
+		return strings.HasPrefix(key, "SPIKE_")
+	}
+}
+
+func pickEntityBase(deployed bool) uint32 {
+	if v := strings.TrimSpace(os.Getenv("SPIKE_ENTITY_BASE")); v != "" {
+		n, ok := new(big.Int).SetString(v, 10)
+		if ok && n.Sign() > 0 && n.IsUint64() && n.Uint64() < 1<<32 {
+			return uint32(n.Uint64())
 		}
 	}
+	if !deployed {
+		return 1
+	}
+	b := make([]byte, 4)
+	_, _ = rand.Read(b)
+	return 10_000 + binary.BigEndian.Uint32(b)%1_000_000
+}
+
+func exceededNTNeedle() string {
+	sel := crypto.Keccak256([]byte("ExceededNativeTokenLimit()"))[:4]
+	return "0x" + hex.EncodeToString(sel)
+}
+
+func requireMinedRevert(r *userOpReceipt, proof string, needles ...string) error {
+	if r == nil {
+		return fmt.Errorf("%s FAIL: nil receipt", proof)
+	}
+	if r.Success {
+		return fmt.Errorf("%s FAIL: mined success=true, want revert", proof)
+	}
+	blob := r.Reason
+	for _, n := range needles {
+		if containsAny(blob, n) {
+			fmt.Printf("%s PASS (mined revert %s)\n  %s\n", proof, n, firstLine(blob))
+			return nil
+		}
+	}
+	return fmt.Errorf("%s FAIL: mined success=false reason %q (want %v)", proof, firstLine(blob), needles)
 }
 
 func trim0x(s string) string {
@@ -375,12 +429,13 @@ func run() error {
 		controllerKey: controllerKey, controllerAddr: controllerAddr,
 		salt: salt, factoryNeeded: !deployed,
 	}
-	defer func() { _ = h.sweepToOwner() }()
+	defer func() {
+		if err := h.sweepToOwner(); err != nil {
+			fmt.Fprintf(os.Stderr, "sweep failed: %v\n", err)
+		}
+	}()
 
-	e1 := uint32(1)
-	if deployed {
-		e1 = uint32(100 + time.Now().Unix()%800)
-	}
+	e1 := pickEntityBase(deployed)
 	hooks1, err := erc20OnlyHooks(e1, token)
 	if err != nil {
 		return err
@@ -398,7 +453,43 @@ func run() error {
 	}
 	fmt.Println()
 
-	// ── Proofs 2–5, 7, pin: mixed grant ────────────────────────────────
+	// Allowlist-only entity (no NT) so proofs 3/5/7 cannot be NT-cap AA23 (R3).
+	eA := e1 + 10
+	alOnly, err := allowlistOnlyHooks(eA, token, alice)
+	if err != nil {
+		return err
+	}
+	if err := h.installDeferred(eA, alOnly, 700_000); err != nil {
+		return fmt.Errorf("allowlist-only install: %w", err)
+	}
+	if err := requireRevert(h.estimateNative(eA, bob, oneWei), "PROOF 3", "AddressNotAllowed", "AA23"); err != nil {
+		return err
+	}
+	if err := requireRevert(h.estimateNative(eA, token, oneWei), "PROOF 5", "NoSelectorSpecified", "AA23"); err != nil {
+		return err
+	}
+	installCall, err := aa.PackSessionSignerInstall(aa.SessionGrant{
+		EntityID: 99, Signer: controllerAddr, Global: true,
+		Hooks: [][]byte{aa.AllowlistExecHook(99)},
+	})
+	if err != nil {
+		return err
+	}
+	if err := requireRevert(h.estimateRaw(eA, installCall, 200_000), "PROOF 7a",
+		"SpendingRequestNotAllowed", "RequireUserOperationContext", "AA23"); err != nil {
+		return err
+	}
+	upd := packUpdateLimits(eA, big.NewInt(0))
+	execNT, err := aa.PackExecute(nativeModule(), big.NewInt(0), upd)
+	if err != nil {
+		return err
+	}
+	if err := requireRevert(h.estimateExec(eA, execNT, 200_000), "PROOF 7b", "AddressNotAllowed", "AA23"); err != nil {
+		return err
+	}
+	fmt.Println()
+
+	// ── Mixed grant + NT (proofs 2, 4, 6, 8) ───────────────────────────
 	e2 := e1 + 1
 	mixed, err := mixedHooks(e2, token, alice, nativeCapX)
 	if err != nil {
@@ -423,7 +514,11 @@ func run() error {
 	}
 	signedGas := signedGasWei(op2)
 	delta := new(big.Int).Sub(nativeCapX, after2)
-	fmt.Printf("  K7 NT delta=%s signedGasWei=%s (want similar)\n", delta, signedGas)
+	wantK7 := new(big.Int).Add(signedGas, oneWei)
+	if delta.Cmp(wantK7) != 0 {
+		return fmt.Errorf("K7 FAIL: NT delta %s != signedGasWei+value %s", delta, wantK7)
+	}
+	fmt.Printf("PROOF K7 PASS: NT delta == signedGasWei + 1 wei (%s)\n", delta)
 
 	rSS, opSS, err := h.sendNative(e2, alice, oneWei, 200_000)
 	if err != nil || rSS == nil || !rSS.Success {
@@ -433,87 +528,42 @@ func run() error {
 		rSS.ActualGasUsed, opSS.VerificationGasLimit)
 	h.noteGas("steady-state ethTransfer", rSS, opSS)
 
-	if err := requireRevert(h.estimateNative(e2, bob, oneWei), "PROOF 3", "AddressNotAllowed", "AA23"); err != nil {
-		return err
-	}
-	fmt.Println()
-
 	remaining, err := readNativeLimit(ctx, chain, e2, account)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("  NT remaining after first send: %s wei\n", remaining)
 	over := new(big.Int).Add(remaining, oneWei)
+	ntNeedle := exceededNTNeedle()
 	err4a := h.estimateNative(e2, alice, over)
 	if err4a != nil {
-		if err := requireRevert(err4a, "PROOF 4a remaining+1", "ExceededNativeTokenLimit", "execution reverted"); err != nil {
+		if err := requireRevert(err4a, "PROOF 4a remaining+1", "ExceededNativeTokenLimit", ntNeedle, "execution reverted"); err != nil {
 			return err
 		}
 	} else {
 		r, _, sendErr := h.sendNative(e2, alice, over, 200_000)
-		if sendErr == nil && r != nil && r.Success {
-			return fmt.Errorf("PROOF 4a FAIL: remaining+1 succeeded")
-		}
-		if sendErr == nil && r == nil {
-			return fmt.Errorf("PROOF 4a FAIL: no receipt and no error")
-		}
-		if err := requireRevert(sendErr, "PROOF 4a remaining+1", "ExceededNativeTokenLimit", "execution reverted"); err != nil && r != nil && !r.Success {
-			fmt.Printf("PROOF 4a PASS (mined success=false)\n")
-		} else if err != nil {
+		if sendErr != nil && (r == nil || r.Success) {
+			if err := requireRevert(sendErr, "PROOF 4a remaining+1", "ExceededNativeTokenLimit", ntNeedle, "execution reverted"); err != nil {
+				return err
+			}
+		} else if err := requireMinedRevert(r, "PROOF 4a remaining+1", "ExceededNativeTokenLimit", ntNeedle); err != nil {
 			return err
 		}
 	}
 	err4b := h.estimateNative(e2, alice, remaining)
 	if err4b != nil {
-		if err := requireRevert(err4b, "PROOF 4b remaining (gas)", "ExceededNativeTokenLimit", "AA23", "execution reverted"); err != nil {
+		if err := requireRevert(err4b, "PROOF 4b remaining (gas)", "ExceededNativeTokenLimit", ntNeedle, "AA23"); err != nil {
 			return err
 		}
 	} else {
 		r, _, sendErr := h.sendNative(e2, alice, remaining, 200_000)
-		if sendErr == nil && r != nil && r.Success {
-			return fmt.Errorf("PROOF 4b FAIL: value==remaining succeeded")
-		}
-		if sendErr == nil && r == nil {
-			return fmt.Errorf("PROOF 4b FAIL: no receipt and no error")
-		}
-		if err := requireRevert(sendErr, "PROOF 4b remaining (gas)", "ExceededNativeTokenLimit", "AA23", "execution reverted"); err != nil && !(r != nil && !r.Success) {
+		if sendErr != nil && (r == nil || r.Success) {
+			if err := requireRevert(sendErr, "PROOF 4b remaining (gas)", "ExceededNativeTokenLimit", ntNeedle, "AA23"); err != nil {
+				return err
+			}
+		} else if err := requireMinedRevert(r, "PROOF 4b remaining (gas)", "ExceededNativeTokenLimit", ntNeedle); err != nil {
 			return err
 		}
-		if r != nil && !r.Success {
-			fmt.Printf("PROOF 4b PASS (mined success=false)\n")
-		}
-	}
-	fmt.Println()
-
-	// Token transfer (approve/transfer) to the dummy token would revert at
-	// the token. Probe 5 is packing: native row must not set
-	// HasSelectorAllowlist=false on the token target. Re-read by decoding
-	// is covered by unit tests; on-chain: empty-calldata to the TOKEN
-	// (selector-scoped) must still refuse.
-	if err := requireRevert(h.estimateNative(e2, token, oneWei), "PROOF 5", "NoSelectorSpecified", "AA23"); err != nil {
-		return err
-	}
-	fmt.Println()
-
-	// ── Proof 7: cannot self-admin ──────────────────────────────────────
-	installCall, err := aa.PackSessionSignerInstall(aa.SessionGrant{
-		EntityID: 99, Signer: controllerAddr, Global: true,
-		Hooks: [][]byte{aa.AllowlistExecHook(99)},
-	})
-	if err != nil {
-		return err
-	}
-	if err := requireRevert(h.estimateRaw(e2, installCall, 200_000), "PROOF 7a",
-		"SpendingRequestNotAllowed", "RequireUserOperationContext", "AA23"); err != nil {
-		return err
-	}
-	upd := packUpdateLimits(e2, big.NewInt(0))
-	execNT, err := aa.PackExecute(nativeModule(), big.NewInt(0), upd)
-	if err != nil {
-		return err
-	}
-	if err := requireRevert(h.estimateExec(e2, execNT, 200_000), "PROOF 7b", "AddressNotAllowed", "AA23"); err != nil {
-		return err
 	}
 	fmt.Println()
 
@@ -604,6 +654,15 @@ func run() error {
 	fmt.Printf("  20-row first-op success=%v gasUsed=%s vgl=%s tx=%s\n",
 		r8.Success, r8.ActualGasUsed, op8.VerificationGasLimit, r8.TxHash)
 	h.noteGas("first-op 20 native recipients", r8, op8)
+	uninstGas, err := packUninstallCall(e8, wide, true)
+	if err != nil {
+		return err
+	}
+	est, err := chain.EstimateGas(ctx, ethereum.CallMsg{From: ownerAddr, To: &account, Data: uninstGas})
+	if err != nil {
+		return fmt.Errorf("PROOF 8 20-row uninstall eth_estimateGas: %w", err)
+	}
+	fmt.Printf("  K14 20-row 5-hook val-then-exec uninstall eth_estimateGas=%d\n", est)
 
 	e9 := e8 + 1
 	wide2, err := wideNativeHooks(e9, 20, nativeCapX)
@@ -729,6 +788,30 @@ func mixedHooks(entity uint32, token, alice common.Address, cap *big.Int) ([][]b
 		return nil, err
 	}
 	return [][]byte{allow, aa.AllowlistExecHook(entity), ntVal, packNTExecHook(entity), tr}, nil
+}
+
+func allowlistOnlyHooks(entity uint32, token, alice common.Address) ([][]byte, error) {
+	allow, err := aa.AllowlistValidationHook(entity, []aa.AllowlistInput{
+		{
+			Target:               token,
+			HasSelectorAllowlist: true,
+			HasERC20SpendLimit:   true,
+			ERC20SpendLimit:      big.NewInt(1),
+			Selectors:            [][4]byte{transferSel, approveSel},
+		},
+		{
+			Target:               alice,
+			HasSelectorAllowlist: false,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	tr, err := aa.TimeRangeValidationHook(entity, uint64(time.Now().Add(24*time.Hour).Unix()), 0)
+	if err != nil {
+		return nil, err
+	}
+	return [][]byte{allow, aa.AllowlistExecHook(entity), tr}, nil
 }
 
 func nativeValueCapHooks(entity uint32, weth common.Address, cap *big.Int) ([][]byte, error) {
@@ -1141,6 +1224,7 @@ type userOpReceipt struct {
 	Success       bool
 	ActualGasUsed *big.Int
 	TxHash        string
+	Reason        string
 }
 
 func waitReceipt(ctx context.Context, bundler *rpc.Client, opHash common.Hash) (*userOpReceipt, error) {
@@ -1152,6 +1236,8 @@ func waitReceipt(ctx context.Context, bundler *rpc.Client, opHash common.Hash) (
 			var parsed struct {
 				Success       bool   `json:"success"`
 				ActualGasUsed string `json:"actualGasUsed"`
+				Reason        string `json:"reason"`
+				RevertReason  string `json:"revertReason"`
 				Receipt       struct {
 					TransactionHash string `json:"transactionHash"`
 				} `json:"receipt"`
@@ -1160,10 +1246,15 @@ func waitReceipt(ctx context.Context, bundler *rpc.Client, opHash common.Hash) (
 				return nil, err
 			}
 			gasUsed, _ := new(big.Int).SetString(trim0x(parsed.ActualGasUsed), 16)
+			reason := parsed.Reason
+			if reason == "" {
+				reason = parsed.RevertReason
+			}
 			return &userOpReceipt{
 				Success:       parsed.Success,
 				ActualGasUsed: gasUsed,
 				TxHash:        parsed.Receipt.TransactionHash,
+				Reason:        reason + " " + string(raw),
 			}, nil
 		}
 		time.Sleep(4 * time.Second)
