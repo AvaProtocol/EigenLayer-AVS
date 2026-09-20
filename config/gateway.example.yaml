@@ -111,6 +111,15 @@ smart_wallet:
   account_provider:       modular_account_v2
   alchemy_api_key:        ${ALCHEMY_API_KEY}
   controller_private_key: <testnet-controller-private-key-hex>
+  # Track B (not enabled). Spike: scripts/spike/mav2_7702_eoa
+  # Canonical delegate: SemiModularAccount7702
+  #   0x69007702764179f14F51cdce752f4f775d74E139 (alchemy.sma-7702.1.0.0)
+  # K13: code[0:3]==0xef0100 && code[3:23]==that address && keccak256(impl).
+  # Never assert on type-4 tx status. Production execute is B5 with
+  # eoa_7702_execute: false until the spike evidence is in. Do not patch
+  # SendUserOpMAv2 here.
+  # eoa_7702_execute: false
+  # sma_7702_delegate: 0x69007702764179f14F51cdce752f4f775d74E139
   # paymaster_address is INERT. It named the v0.6 verifying paymaster, removed
   # with the EntryPoint v0.7 cutover; sponsorship is alchemy_paymaster_policy_id.
   # Still parsed so older configs load, and logged once as ignored. Leave unset.

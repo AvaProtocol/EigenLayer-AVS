@@ -95,3 +95,4 @@ tmp/rehearsal-gateway-backup/
 /deferred_replace
 /permission_hooks
 /revoke
+scripts/spike/mav2_7702_eoa/.eoa.key
