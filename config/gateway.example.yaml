@@ -118,6 +118,10 @@ smart_wallet:
   # Never assert on type-4 tx status. Production execute is B5 with
   # eoa_7702_execute: false until the spike evidence is in. Do not patch
   # SendUserOpMAv2 here.
+  #
+  # The two keys below are comments only. load uses yaml.Unmarshal, which
+  # drops unknown fields — uncommenting them here currently does nothing.
+  # B1 will add typed config fields that the loader actually reads.
   # eoa_7702_execute: false
   # sma_7702_delegate: 0x69007702764179f14F51cdce752f4f775d74E139
   # paymaster_address is INERT. It named the v0.6 verifying paymaster, removed

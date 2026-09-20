@@ -9,12 +9,14 @@
 //	B1  type-4 delegate to SemiModularAccount7702; K13 (ef0100||impl + hash),
 //	    never tx status
 //	B2  install session grant (Track A vocabulary); isSignatureValidation=false
-//	B3  Permit2-shaped isValidSignature(controllerSig) reverts
-//	    SignatureValidationInvalid
+//	B3  on-chain getValidationData: isSignatureValidation bit is 0 on THIS
+//	    entity; located isValidSignature reverts SignatureValidationInvalid
+//	    naming the session ModuleEntity (not a bare 65-byte locator miss)
 //	B4  scoped native UserOp succeeds
 //	B5  unlisted recipient / over-cap fail
 //	B6  owner uninstall; subsequent session UserOp fails
-//	B7  derived MA v2 runner on the same owner is a different address
+//	B7  CREATE2(owner=eoa, salt=0) != EOA and has no 7702 designation
+//	    (address inequality, not a live derived-path send)
 //
 // Self-funded. No Gas Manager.
 //
@@ -41,12 +43,14 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -185,12 +189,10 @@ func run() error {
 	if err := ensureDelegated(ctx, chain, gotID, ownerKey, eoa, sma, implCode); err != nil {
 		return err
 	}
-
-	already, err := chain.CodeAt(ctx, eoa, nil)
-	if err != nil {
-		return err
-	}
-	entity := pickEntityBase(is7702Designation(already, sma))
+	// ensureDelegated only returns after K13, so the EOA is always delegated.
+	// Randomize the entity unless SPIKE_ENTITY_BASE is set — leftover grants
+	// from prior runs occupy previous ids.
+	entity := pickEntityBase()
 	fmt.Printf("session entity=%d\n", entity)
 
 	h := &harness{
@@ -246,9 +248,9 @@ func run() error {
 		"AddressNotAllowed", "AA23"); err != nil {
 		return err
 	}
-	over := new(big.Int).Add(nativeCap, oneWei)
+	over := new(big.Int).Add(afterInstall, oneWei)
 	ntNeedle := exceededNTNeedle()
-	if err := requireRevert(h.estimateNative(alice, over), "B5 over-cap",
+	if err := requireRevert(h.estimateNative(alice, over), "B5 over-cap remaining+1",
 		"ExceededNativeTokenLimit", ntNeedle, "AA23", "execution reverted"); err != nil {
 		return err
 	}
@@ -287,7 +289,7 @@ func run() error {
 	if is7702Designation(dcode, sma) {
 		return fmt.Errorf("B7 FAIL: derived runner has 7702 designation")
 	}
-	fmt.Printf("B7 PASS: derived runner %s != EOA %s (7702 code stays on the EOA)\n", derived.Hex(), eoa.Hex())
+	fmt.Printf("B7 PASS: CREATE2(owner=eoa, salt=0) %s != EOA %s and has no 7702 designation (address inequality, not a live derived-path send)\n", derived.Hex(), eoa.Hex())
 	fmt.Println("\nB0 spike finished. Record K13 implHash and proof lines in the PR body.")
 	fmt.Printf("B1 config pin: sma_7702_delegate=%s impl_hash=%s chain=%s impl_bytes=%d\n", sma.Hex(), implHash, chainName, len(implCode))
 	return nil
@@ -496,23 +498,96 @@ func (h *harness) estimateNative(to common.Address, value *big.Int) error {
 }
 
 func (h *harness) prove1271Deny() error {
-	digest := permit2ShapedDigest(h.chainID, h.eoa)
-	if err := h.call1271(digest, h.ctrlKey, false); err != nil {
+	if err := h.assertSessionValidationFlags(); err != nil {
 		return err
 	}
-	// Contrast: SMA-7702 raw 1271 admits EOA ECDSA. Not a fail either way.
-	if err := h.call1271(digest, h.ownerKey, true); err != nil {
-		fmt.Printf("B3 note: owner ECDSA 1271: %s\n", firstLine(err.Error()))
+	return h.assertLocated1271Reverts()
+}
+
+// assertSessionValidationFlags is B3(a): read THIS entity's stored flags off
+// the account. A bare 65-byte isValidSignature never reaches them.
+func (h *harness) assertSessionValidationFlags() error {
+	flags, valHooks, execHooks, err := h.readValidationData()
+	if err != nil {
+		return fmt.Errorf("B3 getValidationData: %w", err)
 	}
+	if flags&aa.ValidationFlagSignature != 0 {
+		return fmt.Errorf("B3 FAIL: isSignatureValidation is set (flags=0x%02x); session entity must not speak as the user", flags)
+	}
+	wantFlags := aa.ValidationFlagUserOp | aa.ValidationFlagGlobal
+	if flags != wantFlags {
+		return fmt.Errorf("B3 FAIL: validation flags 0x%02x want 0x%02x (UserOp|Global, no Signature)", flags, wantFlags)
+	}
+	wantVal, wantExec := expectedNativeGrantHooks(h.entity)
+	order := "install"
+	if !hooksEqual(valHooks, wantVal) || !hooksEqual(execHooks, wantExec) {
+		revVal, revExec := reverseHooks(wantVal), reverseHooks(wantExec)
+		if hooksEqual(valHooks, revVal) && hooksEqual(execHooks, revExec) {
+			order = "reverse-of-install"
+			wantVal, wantExec = revVal, revExec
+		} else {
+			return fmt.Errorf("B3 FAIL: stored hooks val=%s exec=%s want val=%s exec=%s (or reverse)",
+				formatHooks(valHooks), formatHooks(execHooks), formatHooks(wantVal), formatHooks(wantExec))
+		}
+	}
+	fmt.Printf("B3 PASS: getValidationData entity=%d flags=0x%02x (isSignatureValidation=0)\n", h.entity, flags)
+	fmt.Printf("B3 K10 stored order (%s): val=%s exec=%s\n", order, formatHooks(valHooks), formatHooks(execHooks))
 	return nil
 }
 
-func (h *harness) call1271(digest common.Hash, key *ecdsa.PrivateKey, expectMagic bool) error {
-	sig, err := crypto.Sign(digest.Bytes(), key)
+func (h *harness) readValidationData() (uint8, []hookRef, []hookRef, error) {
+	parsed, err := abi.JSON(strings.NewReader(`[
+	  {"type":"function","name":"getValidationData","stateMutability":"view",
+	   "inputs":[{"name":"validationFunction","type":"bytes24"}],
+	   "outputs":[{"name":"","type":"tuple","components":[
+	     {"name":"validationFlags","type":"uint8"},
+	     {"name":"validationHooks","type":"bytes25[]"},
+	     {"name":"executionHooks","type":"bytes25[]"},
+	     {"name":"selectors","type":"bytes4[]"}]}]}]`))
 	if err != nil {
-		return err
+		return 0, nil, nil, err
 	}
-	sig[64] += 27
+	moduleEntity := aa.PackModuleEntity(aa.SingleSignerValidationModuleAddress(), h.entity)
+	data, err := parsed.Pack("getValidationData", moduleEntity)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	out, err := h.chain.CallContract(h.ctx, ethereum.CallMsg{To: &h.eoa, Data: data}, nil)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	values, err := parsed.Methods["getValidationData"].Outputs.Unpack(out)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	if len(values) != 1 {
+		return 0, nil, nil, fmt.Errorf("getValidationData returned %d values", len(values))
+	}
+	view, ok := values[0].(struct {
+		ValidationFlags uint8       `json:"validationFlags"`
+		ValidationHooks [][25]uint8 `json:"validationHooks"`
+		ExecutionHooks  [][25]uint8 `json:"executionHooks"`
+		Selectors       [][4]uint8  `json:"selectors"`
+	})
+	if !ok {
+		return 0, nil, nil, fmt.Errorf("getValidationData returned %T", values[0])
+	}
+	return view.ValidationFlags, hooksFrom25(view.ValidationHooks), hooksFrom25(view.ExecutionHooks), nil
+}
+
+// assertLocated1271Reverts is B3(b): locator 0x01||entity||0xFF so the account
+// looks up THIS session entity. Bare ECDSA is 65 bytes and never gets here
+// (SMA-7702 v1.1.0 raw-mode, or v1.0.0 loadFromSignature of r[1:5] as a
+// random entity). 0xFF is RESERVED_VALIDATION_DATA_INDEX; without it
+// getFinalSegment reverts ValidationSignatureSegmentMissing before the flag
+// check. Hooks are no-ops; empty per-hook segments are skipped when the next
+// index is 0xFF.
+func (h *harness) assertLocated1271Reverts() error {
+	digest := permit2ShapedDigest(h.chainID, h.eoa)
+	loc := make([]byte, 6)
+	loc[0] = userop.ValidationOptionGlobal
+	binary.BigEndian.PutUint32(loc[1:5], h.entity)
+	loc[5] = userop.SigSegmentValidationData // 0xFF — final segment marker
 	bytes32, err := abi.NewType("bytes32", "", nil)
 	if err != nil {
 		return err
@@ -521,39 +596,130 @@ func (h *harness) call1271(digest common.Hash, key *ecdsa.PrivateKey, expectMagi
 	if err != nil {
 		return err
 	}
-	payload, err := abi.Arguments{{Type: bytes32}, {Type: bytesT}}.Pack(digest, sig)
+	payload, err := abi.Arguments{{Type: bytes32}, {Type: bytesT}}.Pack(digest, loc)
 	if err != nil {
 		return err
 	}
 	sel := crypto.Keccak256([]byte("isValidSignature(bytes32,bytes)"))[:4]
 	out, err := h.chain.CallContract(h.ctx, ethereum.CallMsg{To: &h.eoa, Data: append(sel, payload...)}, nil)
-	invalidSel := "0x" + hex.EncodeToString(crypto.Keccak256([]byte("SignatureValidationInvalid()"))[:4])
-	if expectMagic {
-		if err != nil {
-			return fmt.Errorf("owner 1271 reverted (SMA-7702 may not admit raw ECDSA here): %s", firstLine(err.Error()))
-		}
-		if len(out) >= 4 && hex.EncodeToString(out[:4]) == "1626ba7e" {
-			fmt.Println("B3 note: owner ECDSA isValidSignature returned MAGICVALUE (SMA-7702 admits EOA ECDSA)")
-			return nil
-		}
-		fmt.Printf("B3 note: owner 1271 returned %s (not MAGICVALUE)\n", hex.EncodeToString(out))
-		return nil
-	}
 	if err == nil {
-		return fmt.Errorf("B3 FAIL: isValidSignature succeeded for controller sig (1271 must deny); ret=%s", hex.EncodeToString(out))
-	}
-	if containsAny(err.Error(), "SignatureValidationInvalid", invalidSel) {
-		fmt.Printf("B3 PASS: Permit2-shaped isValidSignature reverted SignatureValidationInvalid (%s)\n", firstLine(err.Error()))
-		return nil
+		return fmt.Errorf("B3 FAIL: located isValidSignature succeeded for session entity %d; ret=%s", h.entity, hex.EncodeToString(out))
 	}
 	if isInfraError(err) {
-		return fmt.Errorf("B3 FAIL: infra error, not a 1271 deny: %s", firstLine(err.Error()))
+		return fmt.Errorf("B3 FAIL: infra error, not a 1271 deny: %s", showErr(err))
 	}
-	if containsAny(err.Error(), "execution reverted") {
-		fmt.Printf("B3 PASS: Permit2-shaped isValidSignature reverted (%s; selector may be stripped)\n", firstLine(err.Error()))
+	invalidSel := crypto.Keccak256([]byte("SignatureValidationInvalid(bytes24)"))[:4]
+	wantEntity := aa.PackModuleEntity(aa.SingleSignerValidationModuleAddress(), h.entity)
+	data := revertData(err)
+	if len(data) >= 28 && bytes.Equal(data[:4], invalidSel) && bytes.Equal(data[4:28], wantEntity[:]) {
+		fmt.Printf("B3 PASS: located isValidSignature reverted SignatureValidationInvalid(session entity %d) data=%s\n",
+			h.entity, hex.EncodeToString(data[:min(36, len(data))]))
 		return nil
 	}
-	return fmt.Errorf("B3 FAIL: unexpected revert: %s", firstLine(err.Error()))
+	if len(data) >= 4 && bytes.Equal(data[:4], invalidSel) {
+		return fmt.Errorf("B3 FAIL: SignatureValidationInvalid but ModuleEntity %s want %s",
+			hex.EncodeToString(data[4:min(28, len(data))]), hex.EncodeToString(wantEntity[:]))
+	}
+	// geth jsonError.Error() is "execution reverted" and may still carry data
+	// on ErrorData(); if even that is empty, the flag read above is the proof.
+	fmt.Printf("B3 note: located 1271 reverted (%s) data=%s (flag read is the evidence if selector stripped)\n",
+		showErr(err), hex.EncodeToString(data))
+	return nil
+}
+
+type hookRef struct {
+	module common.Address
+	entity uint32
+	flags  byte
+}
+
+func hooksFrom25(configs [][25]uint8) []hookRef {
+	out := make([]hookRef, 0, len(configs))
+	for _, c := range configs {
+		out = append(out, hookRef{
+			module: common.BytesToAddress(c[:20]),
+			entity: binary.BigEndian.Uint32(c[20:24]),
+			flags:  c[24],
+		})
+	}
+	return out
+}
+
+func expectedNativeGrantHooks(entity uint32) (val, exec []hookRef) {
+	val = []hookRef{
+		{aa.AllowlistModuleAddress(), entity, aa.HookFlagValidation},
+		{aa.NativeTokenLimitModuleAddress(), entity, aa.HookFlagValidation},
+		{aa.TimeRangeModuleAddress(), entity, aa.HookFlagValidation},
+	}
+	exec = []hookRef{
+		{aa.AllowlistModuleAddress(), entity, aa.HookFlagExecHasPre},
+		{aa.NativeTokenLimitModuleAddress(), entity, aa.HookFlagExecHasPre},
+	}
+	return val, exec
+}
+
+func reverseHooks(in []hookRef) []hookRef {
+	out := make([]hookRef, len(in))
+	for i := range in {
+		out[len(in)-1-i] = in[i]
+	}
+	return out
+}
+
+func hooksEqual(a, b []hookRef) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func formatHooks(hooks []hookRef) string {
+	parts := make([]string, 0, len(hooks))
+	for _, h := range hooks {
+		name := h.module.Hex()
+		switch h.module {
+		case aa.AllowlistModuleAddress():
+			name = "Allowlist"
+		case aa.NativeTokenLimitModuleAddress():
+			name = "NT"
+		case aa.TimeRangeModuleAddress():
+			name = "TimeRange"
+		}
+		kind := "exec"
+		if h.flags&aa.HookFlagValidation != 0 {
+			kind = "val"
+		}
+		parts = append(parts, fmt.Sprintf("%s-%s@%d/0x%02x", name, kind, h.entity, h.flags))
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func revertData(err error) []byte {
+	if err == nil {
+		return nil
+	}
+	type dataError interface{ ErrorData() interface{} }
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		d, ok := e.(dataError)
+		if !ok {
+			continue
+		}
+		switch v := d.ErrorData().(type) {
+		case []byte:
+			return v
+		case string:
+			b, decErr := hex.DecodeString(strings.TrimPrefix(v, "0x"))
+			if decErr == nil {
+				return b
+			}
+		}
+	}
+	return nil
 }
 
 func permit2ShapedDigest(chainID *big.Int, eoa common.Address) common.Hash {
@@ -647,16 +813,16 @@ func requireRevert(err error, proof string, needles ...string) error {
 		return fmt.Errorf("%s FAIL: expected revert", proof)
 	}
 	if isInfraError(err) {
-		return fmt.Errorf("%s FAIL: infra error, not a module revert: %s", proof, firstLine(err.Error()))
+		return fmt.Errorf("%s FAIL: infra error, not a module revert: %s", proof, showErr(err))
 	}
 	msg := err.Error()
 	for _, n := range needles {
 		if containsAny(msg, n) {
-			fmt.Printf("%s PASS (%s)\n  %s\n", proof, n, firstLine(msg))
+			fmt.Printf("%s PASS (%s)\n  %s\n", proof, n, showErr(err))
 			return nil
 		}
 	}
-	return fmt.Errorf("%s FAIL: %s (want %v)", proof, firstLine(msg), needles)
+	return fmt.Errorf("%s FAIL: %s (want %v)", proof, showErr(err), needles)
 }
 
 func isInfraError(err error) bool {
@@ -666,6 +832,7 @@ func isInfraError(err error) bool {
 	return containsAny(err.Error(),
 		"timeout", "timed out", "429", "rate limit", "too many requests",
 		"no such host", "connection refused", "connection reset", "eof",
+		"401", "403", "unauthorized",
 		"502", "503", "dial tcp", "i/o timeout", "context deadline")
 }
 
@@ -764,6 +931,13 @@ func firstLine(s string) string {
 	return s
 }
 
+func showErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	return redactSecrets(firstLine(err.Error()))
+}
+
 func env(name, fallback string) string {
 	if v := os.Getenv(name); v != "" {
 		return v
@@ -853,8 +1027,8 @@ func requireKey(names ...string) (*ecdsa.PrivateKey, common.Address, error) {
 }
 
 func resolveDelegatedEOA() (*ecdsa.PrivateKey, common.Address, error) {
-	if _, _, err := requireKey("SPIKE_7702_KEY"); err == nil {
-		return requireKey("SPIKE_7702_KEY")
+	if key, addr, err := requireKey("SPIKE_7702_KEY"); err == nil {
+		return key, addr, nil
 	}
 	if truthyEnv("SPIKE_7702_USE_TEST_KEY") {
 		key, addr, err := requireKey("TEST_PRIVATE_KEY")
@@ -919,7 +1093,10 @@ func resolveController(eoa common.Address) (*ecdsa.PrivateKey, common.Address, e
 		}
 		return key, addr, nil
 	}
-	if key, addr, err := requireKey("CONTROLLER_PRIVATE_KEY"); err == nil && addr != eoa {
+	if key, addr, err := requireKey("CONTROLLER_PRIVATE_KEY"); err == nil {
+		if addr == eoa {
+			return nil, common.Address{}, fmt.Errorf("CONTROLLER_PRIVATE_KEY is the delegated EOA; B3 needs a distinct session key (not falling back to ephemeral)")
+		}
 		fmt.Printf("session signer from CONTROLLER_PRIVATE_KEY %s\n", addr)
 		return key, addr, nil
 	}
@@ -982,15 +1159,12 @@ func sendETH(ctx context.Context, chain *ethclient.Client, chainID *big.Int,
 	return nil
 }
 
-func pickEntityBase(delegated bool) uint32 {
+func pickEntityBase() uint32 {
 	if v := strings.TrimSpace(os.Getenv("SPIKE_ENTITY_BASE")); v != "" {
 		n, ok := new(big.Int).SetString(v, 10)
 		if ok && n.Sign() > 0 && n.IsUint64() && n.Uint64() < 1<<32 {
 			return uint32(n.Uint64())
 		}
-	}
-	if !delegated {
-		return 1
 	}
 	b := make([]byte, 4)
 	_, _ = rand.Read(b)
