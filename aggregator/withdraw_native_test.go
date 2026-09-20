@@ -223,3 +223,55 @@ func TestExecuteWithdraw_CoveringGrantPassesPreflight(t *testing.T) {
 		t.Fatalf("expected EOA or cap fail-closed, got %v", err)
 	}
 }
+
+func TestDerivationSaltForWallet(t *testing.T) {
+	db := testutil.TestMustDB()
+	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
+
+	owner := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	wallet := common.HexToAddress("0x16b4b3624CC88AAafE3Df54955d19AEB2840670C")
+	factory := common.HexToAddress("0x00000000000017c61b5bEe81050EC8eFc9c6fecd")
+	const chainID int64 = 11155111
+	if err := taskengine.StoreWallet(db, chainID, owner, &model.SmartWallet{
+		Owner: &owner, Address: &wallet, Factory: &factory, Salt: big.NewInt(25),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	server := &RpcServer{db: db, config: &config.Config{Logger: logger.NewNoOpLogger()}}
+	salt, err := server.derivationSaltForWallet(chainID, owner, wallet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if salt == nil || salt.Int64() != 25 {
+		t.Fatalf("stored salt = %v, want 25", salt)
+	}
+
+	_, err = server.derivationSaltForWallet(chainID, owner, common.HexToAddress("0x000000000000000000000000000000000000dEaD"))
+	if err == nil {
+		t.Fatal("missing wallet must error, not fall back to salt 0")
+	}
+	if !strings.Contains(err.Error(), "looking up derivation salt") {
+		t.Fatalf("missing wallet: %v", err)
+	}
+
+	nilSaltWallet := common.HexToAddress("0x00000000000000000000000000000000000000a1")
+	if err := taskengine.StoreWallet(db, chainID, owner, &model.SmartWallet{
+		Owner: &owner, Address: &nilSaltWallet, Factory: &factory, Salt: nil,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = server.derivationSaltForWallet(chainID, owner, nilSaltWallet)
+	if err == nil {
+		t.Fatal("nil Salt must error, not fall back to salt 0")
+	}
+	if !strings.Contains(err.Error(), "no derivation salt recorded") {
+		t.Fatalf("nil Salt: %v", err)
+	}
+
+	noDB := &RpcServer{config: &config.Config{Logger: logger.NewNoOpLogger()}}
+	_, err = noDB.derivationSaltForWallet(chainID, owner, wallet)
+	if err == nil {
+		t.Fatal("no storage must error, not assume salt 0")
+	}
+}

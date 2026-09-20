@@ -94,6 +94,23 @@ func (r *RpcServer) nativeCodeAndFee(chainID int64) taskengine.CodeAndFeeReader 
 	return taskengine.NewCodeAndFeeReader(reader, eth)
 }
 
+// derivationSaltForWallet is the salt SendUserOpAuto must use. A missing
+// record or nil Salt used to silently become salt 0 and fail the MA v2
+// derivation guard with "wrong account type, salt, or factory".
+func (r *RpcServer) derivationSaltForWallet(chainID int64, owner, wallet common.Address) (*big.Int, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("no storage to look up derivation salt for wallet %s", wallet.Hex())
+	}
+	stored, err := taskengine.GetWallet(r.db, chainID, owner, wallet.Hex())
+	if err != nil {
+		return nil, fmt.Errorf("looking up derivation salt for wallet %s: %w", wallet.Hex(), err)
+	}
+	if stored == nil || stored.Salt == nil {
+		return nil, fmt.Errorf("wallet %s has no derivation salt recorded; refusing withdraw rather than assuming salt 0", wallet.Hex())
+	}
+	return stored.Salt, nil
+}
+
 // resolveSmartWalletForChain returns the SmartWalletConfig + RPC client
 // for the requested chain. In single-chain mode (no chainRegistry) it
 // always returns the aggregator's defaults. In gateway mode, when
@@ -453,13 +470,11 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 	// nothing.
 	//
 	// Salt must be the stored derivation salt. nil saltOverride is salt 0,
-	// which only matches the first wallet. Non-zero salts (live fixtures,
-	// extra GetWallet runners) fail the MA v2 sender-derivation guard.
-	var saltOverride *big.Int
-	if r.db != nil && smartWalletAddress != nil {
-		if stored, werr := taskengine.GetWallet(r.db, swCfg.ChainID, user.Address, smartWalletAddress.Hex()); werr == nil && stored != nil && stored.Salt != nil {
-			saltOverride = stored.Salt
-		}
+	// which only matches the first wallet — the L6 live failure. Do not
+	// fall back to 0 on a lookup miss.
+	saltOverride, saltErr := r.derivationSaltForWallet(swCfg.ChainID, user.Address, *smartWalletAddress)
+	if saltErr != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "%v", saltErr)
 	}
 	userOp, receipt, err := preset.SendUserOpAuto(
 		swCfg,
