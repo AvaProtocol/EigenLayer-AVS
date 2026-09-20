@@ -142,6 +142,8 @@ POLICIES_BAD_PERMISSIONS  title "Invalid permissions"  detail = Go err.Error()
 
 There is no per-rule `code`. **Pre-validate the client-side rules below. For everything else, surface `detail` verbatim** — do not substring-match to invent a second code table.
 
+OpenAPI `minItems: 1` / `maxItems: 5` are **documentation**. There is no `OapiRequestValidator` / kin-openapi middleware; every rejection — including over-5 recipients — is Go `POLICIES_BAD_PERMISSIONS` + detail, not a schema-shaped 400.
+
 ### Pre-validate client-side (do not round-trip)
 
 - Grant needs `allowedActions` and/or `nativeRecipients`. Native-only omits `allowedActions`; present `[]` on `allowedActions` / `nativeRecipients` / `erc20SpendCaps` is 400 (`must contain at least one … when present`).
@@ -161,6 +163,8 @@ There is no per-rule `code`. **Pre-validate the client-side rules below. For eve
 | `session resolver is not installed (InstallSessionResolver)` | Infrastructure, not a user error. Still a 400 on the grant screen. |
 | `cannot verify native recipient … is an EOA` | Same: no chain reader. |
 | `validUntil is in the past` | Clock skew vs `expiresInSeconds`. |
+
+Builders that emit well-formed actions will not hit `allowed action N has no target` / `has no selectors` / `selector %q is not 4 bytes`. Those still exist on the verbatim path if a hand-built payload is wrong.
 
 ---
 
