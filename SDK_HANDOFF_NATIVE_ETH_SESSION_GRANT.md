@@ -125,14 +125,46 @@ Toggles that look independent (Uniswap / Send ERC-20 / Send ETH) are **purposes 
 
 - Card subtitle: “Permissions apply only on {network name}.”
 - Uniswap Enable: “Allow Uniswap swaps on {network}, including wrapping ETH to WETH if needed.” One consent. No second toggle for wrap / ETH-in.
-- Send ETH: “Allow this agent to send ETH.” Body: “Only to the addresses you list, up to the cap, until expiry. If this wallet pays its own gas, gas counts against the cap. Sponsored runs only count ETH sent. This is not Uniswap and not wrapping to WETH — wrapping is part of Allow Uniswap.”
+- Send ETH: “Allow this agent to send ETH.” Body: “Only to the addresses you list, up to the cap, until expiry. If this wallet pays its own gas, gas counts against the cap. Sponsored runs only count ETH sent. Withdraw-all / MAX is unavailable unless gas is sponsored. This is not Uniswap and not wrapping to WETH — wrapping is part of Allow Uniswap.”
 - Recipients are EOAs. If `allowContractRecipient`: **mandatory** copy — “This agent may call **any function** on this address. ERC-20 transfers from it are not capped by the token spend limit.” A toast is not a control. Safe/treasury: `contractWrite`, not a native recipient.
 - After submit: “Saved. The agent can use this on the next action on {network}. It is not enabled on other networks.”
 - JWT-only: “Signed in. This wallet has no agent permission on {network} yet.”
 
 ---
 
-## Error mapping (REST `code`)
+## Prepare / submit rejections (`POLICIES_BAD_PERMISSIONS`)
+
+The grant screen hits these **more often** than the execute-time codes below. Prepare and submit both run `SessionPermissions.Validate` (and the REST mapper) and return **one** problem code:
+
+```
+POLICIES_BAD_PERMISSIONS  title "Invalid permissions"  detail = Go err.Error()
+```
+
+There is no per-rule `code`. **Pre-validate the client-side rules below. For everything else, surface `detail` verbatim** — do not substring-match to invent a second code table.
+
+### Pre-validate client-side (do not round-trip)
+
+- Grant needs `allowedActions` and/or `nativeRecipients`. Native-only omits `allowedActions`; present `[]` on `allowedActions` / `nativeRecipients` / `erc20SpendCaps` is 400 (`must contain at least one … when present`).
+- `nativeRecipients` require `nativeSpendCap` with `amount` matching `^[0-9]+$` and `> 0`.
+- At most **5** native recipients. Dedupe; refuse the zero address.
+- A native recipient must not also be an `allowedActions` target (“list contracts as allowed actions with selectors…”).
+- ERC-20 class needs a spend cap; `erc20SpendCap` without `allowedActions` is refused. Duplicate cap tokens: merge amounts before submit. Cap token must be an allowed-action target. Cap only tokens whose unioned selectors ⊆ `{transfer, approve}` (wrap vs WETH cap).
+- `erc20SpendCap` must match one `erc20SpendCaps` entry when both are sent.
+
+### Surface `detail` verbatim (cannot fully pre-validate)
+
+| Detail contains | Why Studio cannot catch it |
+|---|---|
+| `native recipient … is the session signer` | Gateway shared controller. Not in OpenAPI. A user who pastes it gets an unanticipatable 400. |
+| `native recipient … is a known module, factory, or EntryPoint` | Allowlist / NativeTokenLimit / TimeRange / SingleSigner modules, MA v2 factory, EntryPoint v0.7. Hexes are in `core/chainio/aa`; hardcoding them is optional, not required. |
+| `native recipient is a contract` | `eth_getCode` at prepare. |
+| `session resolver is not installed (InstallSessionResolver)` | Infrastructure, not a user error. Still a 400 on the grant screen. |
+| `cannot verify native recipient … is an EOA` | Same: no chain reader. |
+| `validUntil is in the past` | Clock skew vs `expiresInSeconds`. |
+
+---
+
+## Error mapping (execute-time REST `code`)
 
 Stop mapping native failures to “do not re-grant / send with the owner key only.”
 
@@ -141,8 +173,14 @@ Stop mapping native failures to “do not re-grant / send with the owner key onl
 | `SESSION_POLICY_NATIVE_NOT_ALLOWED` | This agent cannot send ETH to an address. Re-authorize send-ETH (this is not a Uniswap permission). |
 | `SESSION_POLICY_RECIPIENT_NOT_ALLOWED` | This recipient is not on the native allow-list. Re-authorize and add it. |
 | `SESSION_POLICY_RECIPIENT_NOT_EOA` | This address is a contract. Send via a contract write, or re-authorize with the contract-recipient exception (any function, ERC-20 uncapped). |
-| `SESSION_POLICY_NATIVE_CAP_EXCEEDED` | This send exceeds the remaining ETH cap. Re-authorize with a higher cap, or send less. |
+| `SESSION_POLICY_NATIVE_CAP_EXCEEDED` | This send exceeds the **granted** ETH cap. Re-authorize with a higher cap, or send less. |
 | `SESSION_POLICY_TARGET_NOT_ALLOWED` on a Uniswap node | This swap needs a token that was not in the Uniswap permission (often WETH after wrapping). Re-authorize Uniswap. |
+
+**Granted, not remaining.** v1 preflight compares `need` to `GrantedCap` (K7: no on-chain remaining-cap read). A grant already 90% spent on-chain can pass preflight and revert on chain. Do not tell the user the gateway knows the remainder.
+
+**No “used X of Y” for native in v1.** OpenAPI `NativeSpendCap` exposes only `amount`. `GrantedCap` is storage-internal (unlike the ERC-20 field of the same name, which exists for that rendering). There is no remaining-cap API.
+
+**MAX / “withdraw all” is unavailable self-funded.** `ethTransfer` and `ExecuteWithdraw` refuse `MAX` when there is no Gas Manager policy (`cannot use MAX amount without sponsorship…`). That string has **no** `SESSION_POLICY_*` code; REST passes it through unmapped. Send a fixed wei amount, or leave a gas reserve. Sponsored runs may use MAX.
 
 ---
 
@@ -173,3 +211,5 @@ Once NT is installed (because send-ETH is on), Uniswap payable `value` **also** 
 - Cap WETH while wrap selectors are on the same grant.
 - Use JWT `aud` as `chainId`.
 - Wait for on-chain install before painting On.
+- Substring-match `POLICIES_BAD_PERMISSIONS` detail into invented codes; show the detail.
+- Promise a live “remaining” native cap in the UI (v1 has none).
