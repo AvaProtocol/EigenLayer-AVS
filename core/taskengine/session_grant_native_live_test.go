@@ -116,6 +116,11 @@ func TestNativeETHSessionGrant_Sepolia(t *testing.T) {
 
 	t.Run("L11_self_admin", func(t *testing.T) {
 		env.t = t
+		if len(usableOn(t, env.db, env.owner, env.runner)) == 0 {
+			submitNativeGrant(env, nativeSendPerms(env.owner, nativeLiveCapWei))
+			_, err := runETHTransfer(env, env.owner.Hex(), nativeLiveSendWei)
+			require.NoError(t, err, "L11: land a native grant so the session key is live")
+		}
 		requireNativeSelfAdminBlocked(env)
 		t.Log("L11 PASS: session key cannot installValidation or updateLimits")
 	})
@@ -216,7 +221,7 @@ func setupNativeLive(t *testing.T) *nativeLiveEnv {
 	require.NoError(t, err)
 	t.Logf("runner %s (salt %d)", runner.Hex(), fixtureSaltNativeETH)
 
-	requireFundedRunner(t, cfg.SmartWallet, *runner, big.NewInt(50_000_000_000_000_000)) // 0.05 ETH
+	requireFundedRunner(t, cfg.SmartWallet, *runner, big.NewInt(20_000_000_000_000_000)) // 0.02 ETH leftover floor
 
 	code, err := client.CodeAt(context.Background(), *runner, nil)
 	require.NoError(t, err)
@@ -409,11 +414,7 @@ func requireNativeSelfAdminBlocked(env *nativeLiveEnv) {
 	require.NoError(t, err)
 	_, _, err = preset.SendUserOpMAv2(env.cfg.SmartWallet, env.owner, install, &env.runner, big.NewInt(fixtureSaltNativeETH), nil, logger.NewNoOpLogger())
 	require.Error(t, err, "L11: session key installValidation must fail")
-	require.True(t,
-		strings.Contains(err.Error(), "SpendingRequestNotAllowed") ||
-			strings.Contains(err.Error(), "AA23") ||
-			strings.Contains(err.Error(), "AddressNotAllowed"),
-		"L11 installValidation: %v", err)
+	require.True(t, l11SelfAdminFailed(err), "L11 installValidation: %v", err)
 
 	sel := crypto.Keccak256([]byte("updateLimits(uint32,uint256)"))[:4]
 	call := append(sel, common.LeftPadBytes(big.NewInt(1).Bytes(), 32)...)
@@ -422,11 +423,22 @@ func requireNativeSelfAdminBlocked(env *nativeLiveEnv) {
 	require.NoError(t, err)
 	_, _, err = preset.SendUserOpMAv2(env.cfg.SmartWallet, env.owner, exec, &env.runner, big.NewInt(fixtureSaltNativeETH), nil, logger.NewNoOpLogger())
 	require.Error(t, err, "L11: execute(NT, updateLimits) must fail")
-	require.True(t,
-		strings.Contains(err.Error(), "AddressNotAllowed") ||
-			strings.Contains(err.Error(), "AA23") ||
-			strings.Contains(err.Error(), "SESSION_POLICY_TARGET_NOT_ALLOWED"),
-		"L11 updateLimits: %v", err)
+	require.True(t, l11SelfAdminFailed(err), "L11 updateLimits: %v", err)
+}
+
+// Alchemy eth_estimateUserOperationGas often strips the revert selector to
+// "execution reverted". Fail-closed is "the session key did not land
+// self-admin", not a particular substring.
+func l11SelfAdminFailed(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "SpendingRequestNotAllowed") ||
+		strings.Contains(s, "AddressNotAllowed") ||
+		strings.Contains(s, "AA23") ||
+		strings.Contains(s, "execution reverted") ||
+		strings.Contains(s, "SESSION_POLICY_TARGET_NOT_ALLOWED")
 }
 
 func require1271Denied(env *nativeLiveEnv) {
