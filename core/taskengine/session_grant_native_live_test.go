@@ -35,7 +35,12 @@ import (
 //	OWNER_EOA, TEST_PRIVATE_KEY, config/test.yaml
 //	go test -tags=integration ./core/taskengine -run 'TestNativeETHSessionGrant_Sepolia|TestNativeTokenLimitModuleBytecode' -v -count=1
 //
-// L1–L7 and L11 are release-blocking. L10 also checks Base when BASE_RPC_URL is set.
+// L1–L7 and L11 are release-blocking. L10 also checks Base (BASE_RPC_URL required).
+//
+// L2/L3/L4 (and L6 unlisted) are gateway preflight: they fire before the
+// bundler. On-chain module semantics (NoSelectorSpecified, AddressNotAllowed,
+// ExceededNativeTokenLimit) were proven in A0 proofs 1–7 and 9. Do not read
+// this suite as live confirmation of those revert selectors.
 
 var nativeLiveValidUntilMs = time.Now().Add(7 * 24 * time.Hour).UnixMilli()
 
@@ -68,9 +73,7 @@ func TestNativeTokenLimitModuleBytecode_SepoliaAndBase(t *testing.T) {
 	requireNTModuleCode(t, sepolia, "Sepolia")
 
 	baseURL := strings.TrimSpace(os.Getenv("BASE_RPC_URL"))
-	if baseURL == "" {
-		t.Skip("L10 Base: set BASE_RPC_URL to check NativeTokenLimitModule on 8453")
-	}
+	require.NotEmpty(t, baseURL, "BASE_RPC_URL must be set: L10 checks NativeTokenLimitModule on 8453")
 	base, err := ethclient.Dial(baseURL)
 	require.NoError(t, err)
 	t.Cleanup(func() { base.Close() })
@@ -173,11 +176,15 @@ func TestNativeETHSessionGrant_Sepolia(t *testing.T) {
 
 	t.Run("L8_payable_under_native_cap", func(t *testing.T) {
 		env.t = t
-		// Mixed grant from L5 still usable (unless L5 failed).
+		submitNativeGrant(env, mixedPerms(env.owner))
 		require.NoError(t, runWETHDeposit(env, nativeLiveSendWei),
 			"L8: payable under cap on mixed grant")
 		err := runWETHDeposit(env, nativeLiveCapWei) // 0.03 ETH value + gas > cap
 		require.Error(t, err, "L8: over-cap payable must fail")
+		require.True(t,
+			strings.Contains(err.Error(), SessionPolicyNativeCapExceededCode) ||
+				strings.Contains(err.Error(), "ExceededNativeTokenLimit"),
+			"L8 over-cap: %v", err)
 		t.Log("L8 PASS: mixed payable under cap works, over cap refused")
 	})
 
@@ -186,13 +193,16 @@ func TestNativeETHSessionGrant_Sepolia(t *testing.T) {
 		usable := usableOn(t, env.db, env.owner, env.runner)
 		require.NotEmpty(t, usable, "L7 needs an installed native grant")
 		oldEntity := usable[0].EntityID
+		before, err := readNativeLimit(env.client, oldEntity, env.runner)
+		require.NoError(t, err)
+		require.True(t, before.Sign() > 0, "L7: limits(%d) before replace = %s, want > 0", oldEntity, before)
 		submitNativeGrant(env, uniswapPerms())
 		require.NoError(t, runApprove(env, SEPOLIA_USDC), "L7: landing the replacement")
 		limit, err := readNativeLimit(env.client, oldEntity, env.runner)
 		require.NoError(t, err)
 		require.True(t, limit.Sign() == 0, "L7: limits(%d, runner) = %s, want 0", oldEntity, limit)
 		requireEntityClear(t, env.client, env.runner, oldEntity, true)
-		t.Logf("L7 PASS: entity %d NT limits cleared", oldEntity)
+		t.Logf("L7 PASS: entity %d NT limits cleared (was %s)", oldEntity, before)
 	})
 }
 
@@ -406,39 +416,36 @@ func readNativeLimit(client *ethclient.Client, entity uint32, account common.Add
 func requireNativeSelfAdminBlocked(env *nativeLiveEnv) {
 	t := env.t
 	t.Helper()
+	ctx := context.Background()
+	const probeEntity uint32 = 99
 	controller := crypto.PubkeyToAddress(env.cfg.SmartWallet.ControllerPrivateKey.PublicKey)
 	install, err := aa.PackSessionSignerInstall(aa.SessionGrant{
-		EntityID: 999, Signer: controller, Global: true,
-		Hooks: [][]byte{aa.AllowlistExecHook(999)},
+		EntityID: probeEntity, Signer: controller, Global: true,
+		Hooks: [][]byte{aa.AllowlistExecHook(probeEntity)},
 	})
 	require.NoError(t, err)
 	_, _, err = preset.SendUserOpMAv2(env.cfg.SmartWallet, env.owner, install, &env.runner, big.NewInt(fixtureSaltNativeETH), nil, logger.NewNoOpLogger())
 	require.Error(t, err, "L11: session key installValidation must fail")
-	require.True(t, l11SelfAdminFailed(err), "L11 installValidation: %v", err)
+	signer, err := aa.EntitySignerOnChain(ctx, env.client, env.runner, probeEntity)
+	require.NoError(t, err)
+	require.Equal(t, common.Address{}, signer, "L11: entity %d must not be installed after failed installValidation", probeEntity)
+
+	usable := usableOn(t, env.db, env.owner, env.runner)
+	require.NotEmpty(t, usable, "L11: need a live grant to read NT limits")
+	liveEntity := usable[0].EntityID
+	before, err := readNativeLimit(env.client, liveEntity, env.runner)
+	require.NoError(t, err)
 
 	sel := crypto.Keccak256([]byte("updateLimits(uint32,uint256)"))[:4]
-	call := append(sel, common.LeftPadBytes(big.NewInt(1).Bytes(), 32)...)
+	call := append(sel, common.LeftPadBytes(big.NewInt(int64(liveEntity)).Bytes(), 32)...)
 	call = append(call, common.LeftPadBytes(big.NewInt(1).Bytes(), 32)...)
 	exec, err := aa.PackExecute(aa.NativeTokenLimitModuleAddress(), big.NewInt(0), call)
 	require.NoError(t, err)
 	_, _, err = preset.SendUserOpMAv2(env.cfg.SmartWallet, env.owner, exec, &env.runner, big.NewInt(fixtureSaltNativeETH), nil, logger.NewNoOpLogger())
 	require.Error(t, err, "L11: execute(NT, updateLimits) must fail")
-	require.True(t, l11SelfAdminFailed(err), "L11 updateLimits: %v", err)
-}
-
-// Alchemy eth_estimateUserOperationGas often strips the revert selector to
-// "execution reverted". Fail-closed is "the session key did not land
-// self-admin", not a particular substring.
-func l11SelfAdminFailed(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := err.Error()
-	return strings.Contains(s, "SpendingRequestNotAllowed") ||
-		strings.Contains(s, "AddressNotAllowed") ||
-		strings.Contains(s, "AA23") ||
-		strings.Contains(s, "execution reverted") ||
-		strings.Contains(s, "SESSION_POLICY_TARGET_NOT_ALLOWED")
+	after, err := readNativeLimit(env.client, liveEntity, env.runner)
+	require.NoError(t, err)
+	require.Equal(t, before.String(), after.String(), "L11: limits(%d) must be unchanged after failed updateLimits", liveEntity)
 }
 
 func require1271Denied(env *nativeLiveEnv) {

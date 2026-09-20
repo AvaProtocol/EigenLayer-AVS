@@ -451,12 +451,22 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 	// grant AFTER it derives the real sender, because grants are keyed by
 	// smart-wallet address and resolving earlier against the owner EOA finds
 	// nothing.
+	//
+	// Salt must be the stored derivation salt. nil saltOverride is salt 0,
+	// which only matches the first wallet. Non-zero salts (live fixtures,
+	// extra GetWallet runners) fail the MA v2 sender-derivation guard.
+	var saltOverride *big.Int
+	if r.db != nil && smartWalletAddress != nil {
+		if stored, werr := taskengine.GetWallet(r.db, swCfg.ChainID, user.Address, smartWalletAddress.Hex()); werr == nil && stored != nil && stored.Salt != nil {
+			saltOverride = stored.Salt
+		}
+	}
 	userOp, receipt, err := preset.SendUserOpAuto(
 		swCfg,
 		user.Address,
 		callData,
 		smartWalletAddress,
-		nil, // saltOverride: withdraws operate on already-deployed wallets
+		saltOverride,
 		r.config.Logger,
 	)
 
