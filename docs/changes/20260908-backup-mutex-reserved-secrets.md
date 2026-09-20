@@ -19,4 +19,7 @@ Claude's #782 review left three non-blocking follow-ups: periodic backup Start/S
 ## Tests
 
 - `core/backup`: Start after Stop recreates the stop channel; Stop waits for the loop before returning.
+- `TestStopPeriodicBackupWaitsForInFlightBackup`: blocking `storage.Storage` double; Stop cannot return while `Backup` is held.
+- `TestConcurrentStartStop`: 16 goroutines Start/Stop (run under `-race` in CI).
+- `cmd`: aggregator cobra command uses `RunE` so `Start` errors (`periodic backup to …`) exit 1. `Run` discarded them.
 - `core/taskengine`: Create and Update reject all three platform names and their uppercase variants; `TestIsPlatformSecretName` covers the case-insensitive lookup and non-reserved names (notify tokens stay interpolable).

@@ -23,6 +23,7 @@ import (
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
@@ -56,6 +57,130 @@ type RpcServer struct {
 	// key it signs with. Required to authenticate operators that keep
 	// their registered key cold — see operator_alias.go.
 	aliasResolver *operatorAliasResolver
+
+	// withdrawNativeReader is a test-injected CodeAndFeeReader for covering
+	// grant preflight. Production uses nativeCodeAndFee (pooled chain
+	// reader + the same RPC as balance).
+	withdrawNativeReader taskengine.CodeAndFeeReader
+
+	// deriveSalt0, when set, is the salt-0 address for an owner. Tests inject
+	// it; production calls the factory's getAddressSemiModular.
+	deriveSalt0 func(owner common.Address) (common.Address, error)
+}
+
+// nativeCodeAndFee is the covering-grant reader for native withdraw.
+// Tests inject withdrawNativeReader. Production uses the same chain RPC
+// as the balance preflight (GetChainStateReaderForChain, else a direct
+// reader over resolveSmartWalletForChain).
+func (r *RpcServer) nativeCodeAndFee(chainID int64) taskengine.CodeAndFeeReader {
+	if r != nil && r.withdrawNativeReader != nil {
+		return r.withdrawNativeReader
+	}
+	reader := taskengine.GetChainStateReaderForChain(uint64(chainID))
+	var eth *ethclient.Client
+	if r != nil {
+		_, swRpc, err := r.resolveSmartWalletForChain(chainID)
+		if err != nil {
+			if r.config != nil && r.config.Logger != nil {
+				r.config.Logger.Warn("native preflight: CodeAt reader available but signed-op maxFee has no ethclient; self-funded cap check will fail closed",
+					"chain", chainID, "error", err, "has_code_reader", reader != nil)
+			}
+		} else {
+			eth = swRpc
+			if reader == nil && swRpc != nil {
+				reader = taskengine.NewDirectChainStateReader(swRpc, chainID)
+			}
+		}
+	}
+	if reader != nil && eth == nil && r != nil && r.config != nil && r.config.Logger != nil {
+		r.config.Logger.Warn("native preflight: CodeAt works but maxFeePerGas cannot; self-funded cap check will fail closed",
+			"chain", chainID)
+	}
+	return taskengine.NewCodeAndFeeReader(reader, eth)
+}
+
+// derivationSaltForWallet is the salt SendUserOpAuto must use. A missing
+// record or nil Salt used to silently become salt 0 and fail the MA v2
+// derivation guard. Non-zero salts still never become 0: a miss is allowed
+// to proceed only when the wallet is the salt-0 derivation for this owner.
+func (r *RpcServer) derivationSaltForWallet(chainID int64, owner, wallet common.Address) (*big.Int, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("no storage to look up derivation salt for wallet %s", wallet.Hex())
+	}
+	stored, err := taskengine.GetWallet(r.db, chainID, owner, wallet.Hex())
+	if salt := walletRecordSalt(stored); salt != nil {
+		return salt, nil
+	}
+	// Ownership validation keys off the gateway default chain; the same
+	// address may only have a record there.
+	if r.engine != nil {
+		if def, dErr := r.engine.GetWalletFromDB(owner, wallet.Hex()); dErr == nil {
+			if salt := walletRecordSalt(def); salt != nil {
+				return salt, nil
+			}
+		}
+	}
+	salt0, deriveErr := r.salt0DerivedAddress(chainID, owner)
+	if deriveErr != nil {
+		if err != nil {
+			return nil, fmt.Errorf("looking up derivation salt for wallet %s: %w", wallet.Hex(), err)
+		}
+		return nil, fmt.Errorf("wallet %s has no derivation salt recorded; cannot verify it is salt 0: %w", wallet.Hex(), deriveErr)
+	}
+	if salt0 == wallet {
+		if err != nil && r.config != nil && r.config.Logger != nil {
+			r.config.Logger.Warn("proceeding with salt 0 after storage lookup failed; address matches salt-0 derivation",
+				"wallet", wallet.Hex(), "error", err)
+		}
+		return big.NewInt(0), nil
+	}
+	return nil, fmt.Errorf("wallet %s is not the salt-0 address for this owner (salt-0 is %s); refusing withdraw rather than assuming salt 0", wallet.Hex(), salt0.Hex())
+}
+
+func walletRecordSalt(w *model.SmartWallet) *big.Int {
+	// Negative salts are legacy rows the factory ABI cannot pack
+	// (Wallet_Salt_Index_Migration.md). Treat them as missing so the
+	// salt-0 identity check can refuse with an address, not an ABI error.
+	if w == nil || w.Salt == nil || w.Salt.Sign() < 0 {
+		return nil
+	}
+	return w.Salt
+}
+
+func (r *RpcServer) salt0DerivedAddress(chainID int64, owner common.Address) (common.Address, error) {
+	if r != nil && r.deriveSalt0 != nil {
+		return r.deriveSalt0(owner)
+	}
+	if r == nil {
+		return common.Address{}, fmt.Errorf("no RPC to derive salt-0 address")
+	}
+	var swCfg *config.SmartWalletConfig
+	var rpc *ethclient.Client
+	if chainID != 0 {
+		cfg, client, err := r.resolveSmartWalletForChain(chainID)
+		if err != nil {
+			return common.Address{}, fmt.Errorf("deriving salt-0 address on chain %d: %w", chainID, err)
+		}
+		swCfg, rpc = cfg, client
+	} else if r.config != nil {
+		swCfg = r.config.SmartWallet
+		rpc = r.smartWalletRpc
+	}
+	if swCfg == nil || rpc == nil {
+		return common.Address{}, fmt.Errorf("no RPC to derive salt-0 address on chain %d", chainID)
+	}
+	factory, err := aa.EffectiveFactory(swCfg)
+	if err != nil {
+		return common.Address{}, err
+	}
+	addr, err := aa.GetSenderAddressMAv2ForFactory(rpc, owner, factory, big.NewInt(0))
+	if err != nil {
+		return common.Address{}, err
+	}
+	if addr == nil {
+		return common.Address{}, fmt.Errorf("factory returned a nil salt-0 address")
+	}
+	return *addr, nil
 }
 
 // resolveSmartWalletForChain returns the SmartWalletConfig + RPC client
@@ -123,6 +248,55 @@ func (r *RpcServer) resolveSmartWalletForChain(requestedChainID int64) (*config.
 // *model.User and the same payload shape; the response is the same
 // protobuf result type and gets translated to the OpenAPI
 // WithdrawResponse on the REST side.
+func (r *RpcServer) preflightNativeWithdraw(
+	user *model.User,
+	swCfg *config.SmartWalletConfig,
+	payload *avsproto.WithdrawFundsReq,
+	amount *big.Int,
+	withdrawAll bool,
+) error {
+	if swCfg == nil || !strings.EqualFold(strings.TrimSpace(payload.Token), "ETH") || !swCfg.UsesModularAccountV2() {
+		return nil
+	}
+	if withdrawAll && swCfg.SponsorshipPolicyID() == "" {
+		return status.Errorf(codes.InvalidArgument,
+			"cannot use MAX amount without sponsorship: set alchemy_paymaster_policy_id, or leave a gas reserve and transfer a fixed amount")
+	}
+	recipient := common.HexToAddress(payload.RecipientAddress)
+	if r.db == nil {
+		return status.Error(codes.InvalidArgument,
+			taskengine.FormatSessionPolicyNativeNotAllowed(recipient, ""))
+	}
+	var policy *model.SessionPolicy
+	if common.IsHexAddress(payload.SmartWalletAddress) {
+		wallet := common.HexToAddress(payload.SmartWalletAddress)
+		if wallet != (common.Address{}) {
+			got, err := taskengine.ActiveSessionPolicyForWallet(r.db, swCfg.ChainID, user.Address, wallet)
+			if err != nil {
+				return status.Errorf(codes.Internal, "SESSION_POLICY_LOOKUP_FAILED: %v", err)
+			}
+			policy = got
+		}
+	}
+	if policy == nil {
+		return nil
+	}
+	intentAmount := amount
+	if intentAmount == nil {
+		intentAmount = big.NewInt(0)
+	}
+	msg := taskengine.PreflightNativePermission(policy, taskengine.NativeIntent{
+		Recipient: recipient,
+		Amount:    intentAmount,
+		Kind:      taskengine.NativeSend,
+		Sponsored: swCfg.SponsorshipPolicyID() != "",
+	}, r.nativeCodeAndFee(swCfg.ChainID))
+	if msg == "" {
+		return nil
+	}
+	return status.Error(codes.InvalidArgument, msg)
+}
+
 func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, payload *avsproto.WithdrawFundsReq) (*avsproto.WithdrawFundsResp, error) {
 	requestedChainID := payload.GetChainId()
 	r.config.Logger.Info("process withdraw funds",
@@ -172,33 +346,26 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 		return nil, status.Errorf(codes.InvalidArgument, "invalid recipient address format")
 	}
 
-	// Native withdrawals build execute(recipient, amount, 0x) — empty inner
-	// calldata — which an MA v2 account cannot validate under a session grant:
-	// every REST grant is selector-scoped and the allowlist hook reverts on
-	// calldata shorter than 4 bytes. Refuse here rather than let the bundler
-	// answer with AA23. Checked against this chain's config, not assumed
-	// globally, so a chain that later gains native-value support (a native
-	// limit module rather than the selector allowlist) starts working without
-	// touching this branch. ERC-20 withdrawals carry a real transfer selector
-	// and are unaffected.
-	if strings.EqualFold(strings.TrimSpace(payload.Token), "ETH") && swCfg.UsesModularAccountV2() {
-		recipient := common.HexToAddress(payload.RecipientAddress)
-		policyID := ""
-		if r.db != nil && common.IsHexAddress(payload.SmartWalletAddress) {
-			if wallet := common.HexToAddress(payload.SmartWalletAddress); wallet != (common.Address{}) {
-				if policy, perr := taskengine.ActiveSessionPolicyForWallet(r.db, swCfg.ChainID, user.Address, wallet); perr == nil && policy != nil {
-					policyID = policy.ID
-				}
-			}
+	// Parse amount - support "max" (case-insensitive) for "withdraw all"
+	amountStr := strings.TrimSpace(strings.ToLower(payload.Amount))
+	withdrawAll := amountStr == "max"
+
+	var requestedAmount *big.Int
+	if withdrawAll {
+		requestedAmount = nil
+	} else {
+		var success bool
+		requestedAmount, success = new(big.Int).SetString(payload.Amount, 10)
+		if !success || requestedAmount == nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid amount: must be a positive integer or 'max'")
 		}
-		r.config.Logger.Warn("refusing native ETH withdraw: session grants cannot authorize it",
-			"user", user.Address.String(),
-			"smart_wallet", payload.SmartWalletAddress,
-			"recipient", payload.RecipientAddress,
-			"chain_id", swCfg.ChainID,
-		)
-		return nil, status.Error(codes.InvalidArgument,
-			taskengine.FormatSessionPolicyNativeNotAllowed(recipient, policyID))
+		if requestedAmount.Cmp(big.NewInt(0)) <= 0 {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid amount: must be a positive integer or 'max'")
+		}
+	}
+
+	if err := r.preflightNativeWithdraw(user, swCfg, payload, requestedAmount, withdrawAll); err != nil {
+		return nil, err
 	}
 
 	// Balance preflight reads route through the chain's worker (gateway
@@ -221,26 +388,6 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 			return nil, status.Errorf(codes.Internal, "no chain-state reader or RPC client available for chain %d", requestedChainID)
 		}
 		chainReader = taskengine.NewDirectChainStateReader(swRpc, requestedChainID)
-	}
-
-	// Parse amount - support "max" (case-insensitive) for "withdraw all"
-	amountStr := strings.TrimSpace(strings.ToLower(payload.Amount))
-	withdrawAll := amountStr == "max"
-
-	var requestedAmount *big.Int
-	if withdrawAll {
-		// Will be calculated later based on balance and gas reimbursement
-		requestedAmount = nil // Use nil to indicate it needs to be calculated
-	} else {
-		var success bool
-		requestedAmount, success = new(big.Int).SetString(payload.Amount, 10)
-		if !success || requestedAmount == nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid amount: must be a positive integer or 'max'")
-		}
-		// Validate that numeric amount must be positive (not zero)
-		if requestedAmount.Cmp(big.NewInt(0)) <= 0 {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid amount: must be a positive integer or 'max'")
-		}
 	}
 
 	// Build withdrawal parameters (amount will be adjusted if "withdraw all" is requested)
@@ -296,6 +443,9 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 				return nil, status.Errorf(codes.InvalidArgument, "wallet has zero balance")
 			}
 			finalAmount = balance
+			if err := r.preflightNativeWithdraw(user, swCfg, payload, finalAmount, false); err != nil {
+				return nil, err
+			}
 			r.config.Logger.Info("withdraw all requested (no reimbursement)",
 				"balance", balance.String())
 		} else {
@@ -390,12 +540,20 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 	// grant AFTER it derives the real sender, because grants are keyed by
 	// smart-wallet address and resolving earlier against the owner EOA finds
 	// nothing.
+	//
+	// Salt must be the stored derivation salt. nil saltOverride is salt 0,
+	// which only matches the first wallet — the L6 live failure. Do not
+	// fall back to 0 on a lookup miss.
+	saltOverride, saltErr := r.derivationSaltForWallet(swCfg.ChainID, user.Address, *smartWalletAddress)
+	if saltErr != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "%v", saltErr)
+	}
 	userOp, receipt, err := preset.SendUserOpAuto(
 		swCfg,
 		user.Address,
 		callData,
 		smartWalletAddress,
-		nil, // saltOverride: withdraws operate on already-deployed wallets
+		saltOverride,
 		r.config.Logger,
 	)
 

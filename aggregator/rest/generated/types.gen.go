@@ -629,8 +629,11 @@ type Edge struct {
 	Target string `json:"target"`
 }
 
-// Erc20SpendCap Cumulative ERC-20 spend cap, enforced on-chain at execution. The
-// token must appear as an `allowedActions` target.
+// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
+// execution. The token must appear as an `allowedActions` target.
+// Prefer `erc20SpendCaps` when capping more than one token; this
+// field remains the one-token alias (must match one entry of that
+// array when both are sent). Native ETH is not this list.
 type Erc20SpendCap struct {
 	// Amount Total cap in the token's smallest unit (decimal string, no reset).
 	Amount string `json:"amount"`
@@ -1055,6 +1058,15 @@ type MethodCall struct {
 	MethodParams    *[]string        `json:"methodParams,omitempty"`
 }
 
+// NativeSpendCap defines model for NativeSpendCap.
+type NativeSpendCap struct {
+	// Amount Cumulative native-token cap in wei (decimal string, no reset).
+	// Enforced on-chain by NativeTokenLimitModule. Self-funded UserOps
+	// also decrement this cap by gas; sponsored UserOps decrement only
+	// the ETH value sent.
+	Amount string `json:"amount"`
+}
+
 // NativeToken defines model for NativeToken.
 type NativeToken struct {
 	Decimals int32  `json:"decimals"`
@@ -1154,21 +1166,46 @@ type PageInfo struct {
 
 // PreparePolicyRequest defines model for PreparePolicyRequest.
 type PreparePolicyRequest struct {
-	AgentLabel     string          `json:"agentLabel"`
-	AllowedActions []AllowedAction `json:"allowedActions"`
+	AgentLabel string `json:"agentLabel"`
+
+	// AllowContractRecipient When true, nativeRecipients may be contracts (any-function on
+	// that address, ERC-20 uncapped). Default false: each recipient
+	// must have empty code. Logged when true.
+	AllowContractRecipient *bool `json:"allowContractRecipient,omitempty"`
+
+	// AllowedActions Selector-scoped contract calls. Native-only grants omit this
+	// field. A present empty array is 400.
+	AllowedActions *[]AllowedAction `json:"allowedActions,omitempty"`
 
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
 	// chain-aware trigger/node configs this is required and must be a
 	// configured chain; on query/filter params it is optional.
 	ChainId ChainId `json:"chainId"`
 
-	// Erc20SpendCap Cumulative ERC-20 spend cap, enforced on-chain at execution. The
-	// token must appear as an `allowedActions` target.
-	Erc20SpendCap Erc20SpendCap `json:"erc20SpendCap"`
+	// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
+	// execution. The token must appear as an `allowedActions` target.
+	// Prefer `erc20SpendCaps` when capping more than one token; this
+	// field remains the one-token alias (must match one entry of that
+	// array when both are sent). Native ETH is not this list.
+	Erc20SpendCap *Erc20SpendCap `json:"erc20SpendCap,omitempty"`
+
+	// Erc20SpendCaps Per-token ERC-20 caps (AllowlistModule HasERC20SpendLimit per
+	// target). Source of truth when present. `erc20SpendCap` must
+	// match one entry. A capped token's allowedActions may only be
+	// transfer and/or approve — deposit/withdraw on the same target
+	// reverts on-chain. Native ETH is not this list.
+	Erc20SpendCaps *[]Erc20SpendCap `json:"erc20SpendCaps,omitempty"`
 
 	// ExpiresInSeconds Grant lifetime, relative (skew-proof). Becomes an absolute validUntil.
 	ExpiresInSeconds int64   `json:"expiresInSeconds"`
 	Justification    *string `json:"justification,omitempty"`
+
+	// NativeRecipients EOAs this grant may send native ETH to (empty-calldata execute).
+	// Omit for Uniswap/ERC-20-only and for payable-write-only
+	// (nativeValueCap). A present empty array is 400. Max 5
+	// (deferred replace of 20-row grants AA23s).
+	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
+	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
 }
 
 // PreparedPolicy defines model for PreparedPolicy.
@@ -1381,8 +1418,9 @@ type SecretList struct {
 
 // SessionPolicy defines model for SessionPolicy.
 type SessionPolicy struct {
-	AgentLabel     string           `json:"agentLabel"`
-	AllowedActions *[]AllowedAction `json:"allowedActions,omitempty"`
+	AgentLabel             string           `json:"agentLabel"`
+	AllowContractRecipient *bool            `json:"allowContractRecipient,omitempty"`
+	AllowedActions         *[]AllowedAction `json:"allowedActions,omitempty"`
 
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
 	// chain-aware trigger/node configs this is required and must be a
@@ -1393,13 +1431,24 @@ type SessionPolicy struct {
 	CreatedAt int64 `json:"createdAt"`
 	EntityId  int64 `json:"entityId"`
 
-	// Erc20SpendCap Cumulative ERC-20 spend cap, enforced on-chain at execution. The
-	// token must appear as an `allowedActions` target.
+	// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
+	// execution. The token must appear as an `allowedActions` target.
+	// Prefer `erc20SpendCaps` when capping more than one token; this
+	// field remains the one-token alias (must match one entry of that
+	// array when both are sent). Native ETH is not this list.
 	Erc20SpendCap *Erc20SpendCap `json:"erc20SpendCap,omitempty"`
 
+	// Erc20SpendCaps Per-token ERC-20 caps. Omitted on singular-only grants; present
+	// when the client submitted `erc20SpendCaps`. The alias
+	// `erc20SpendCap` is the submitted singular when submitted;
+	// otherwise the first list entry.
+	Erc20SpendCaps *[]Erc20SpendCap `json:"erc20SpendCaps,omitempty"`
+
 	// Id ULID identifier (26-char Crockford base32).
-	Id            Ulid    `json:"id"`
-	Justification *string `json:"justification,omitempty"`
+	Id               Ulid               `json:"id"`
+	Justification    *string            `json:"justification,omitempty"`
+	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
+	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
 
 	// OnChainCleanup Present when status is revoked and the validation entity is still
 	// installed on chain. Owner-executable uninstallValidation so clients
@@ -1461,8 +1510,12 @@ type SimulateWorkflowRequest struct {
 
 // SubmitPolicyRequest defines model for SubmitPolicyRequest.
 type SubmitPolicyRequest struct {
-	AgentLabel     string          `json:"agentLabel"`
-	AllowedActions []AllowedAction `json:"allowedActions"`
+	AgentLabel             string `json:"agentLabel"`
+	AllowContractRecipient *bool  `json:"allowContractRecipient,omitempty"`
+
+	// AllowedActions Selector-scoped contract calls. Native-only grants omit this
+	// field. A present empty array is 400. Echo prepare verbatim.
+	AllowedActions *[]AllowedAction `json:"allowedActions,omitempty"`
 
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
 	// chain-aware trigger/node configs this is required and must be a
@@ -1471,10 +1524,18 @@ type SubmitPolicyRequest struct {
 	Deadline int64   `json:"deadline"`
 	EntityId int64   `json:"entityId"`
 
-	// Erc20SpendCap Cumulative ERC-20 spend cap, enforced on-chain at execution. The
-	// token must appear as an `allowedActions` target.
-	Erc20SpendCap Erc20SpendCap `json:"erc20SpendCap"`
-	Justification *string       `json:"justification,omitempty"`
+	// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
+	// execution. The token must appear as an `allowedActions` target.
+	// Prefer `erc20SpendCaps` when capping more than one token; this
+	// field remains the one-token alias (must match one entry of that
+	// array when both are sent). Native ETH is not this list.
+	Erc20SpendCap *Erc20SpendCap `json:"erc20SpendCap,omitempty"`
+
+	// Erc20SpendCaps Per-token ERC-20 caps. Source of truth when present; erc20SpendCap must match one entry.
+	Erc20SpendCaps   *[]Erc20SpendCap   `json:"erc20SpendCaps,omitempty"`
+	Justification    *string            `json:"justification,omitempty"`
+	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
+	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
 
 	// PolicyId ULID identifier (26-char Crockford base32).
 	PolicyId Ulid `json:"policyId"`
@@ -1488,8 +1549,9 @@ type SubmitPolicyRequest struct {
 
 // SubmitPolicyResponse defines model for SubmitPolicyResponse.
 type SubmitPolicyResponse struct {
-	AgentLabel     string           `json:"agentLabel"`
-	AllowedActions *[]AllowedAction `json:"allowedActions,omitempty"`
+	AgentLabel             string           `json:"agentLabel"`
+	AllowContractRecipient *bool            `json:"allowContractRecipient,omitempty"`
+	AllowedActions         *[]AllowedAction `json:"allowedActions,omitempty"`
 
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
 	// chain-aware trigger/node configs this is required and must be a
@@ -1500,13 +1562,24 @@ type SubmitPolicyResponse struct {
 	CreatedAt int64 `json:"createdAt"`
 	EntityId  int64 `json:"entityId"`
 
-	// Erc20SpendCap Cumulative ERC-20 spend cap, enforced on-chain at execution. The
-	// token must appear as an `allowedActions` target.
+	// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
+	// execution. The token must appear as an `allowedActions` target.
+	// Prefer `erc20SpendCaps` when capping more than one token; this
+	// field remains the one-token alias (must match one entry of that
+	// array when both are sent). Native ETH is not this list.
 	Erc20SpendCap *Erc20SpendCap `json:"erc20SpendCap,omitempty"`
 
+	// Erc20SpendCaps Per-token ERC-20 caps. Omitted on singular-only grants; present
+	// when the client submitted `erc20SpendCaps`. The alias
+	// `erc20SpendCap` is the submitted singular when submitted;
+	// otherwise the first list entry.
+	Erc20SpendCaps *[]Erc20SpendCap `json:"erc20SpendCaps,omitempty"`
+
 	// Id ULID identifier (26-char Crockford base32).
-	Id            Ulid    `json:"id"`
-	Justification *string `json:"justification,omitempty"`
+	Id               Ulid               `json:"id"`
+	Justification    *string            `json:"justification,omitempty"`
+	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
+	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
 
 	// OnChainCleanup Present when status is revoked and the validation entity is still
 	// installed on chain. Owner-executable uninstallValidation so clients

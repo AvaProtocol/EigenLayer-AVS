@@ -1,12 +1,17 @@
 package backup
 
 import (
+	"context"
+	"io"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 func TestBackup(t *testing.T) {
@@ -138,4 +143,93 @@ func TestPruneOldBackups(t *testing.T) {
 	}
 }
 
-// Mock implementations for testing
+// blockingStorage wraps a real store and parks Backup until release is closed.
+// Copilot #786: StopPeriodicBackup's wg.Wait is the shutdown guarantee;
+// an idle-ticker test would still pass if Wait were removed.
+type blockingStorage struct {
+	storage.Storage
+	started chan struct{}
+	once    sync.Once
+	release chan struct{}
+	held    atomic.Bool
+}
+
+func (b *blockingStorage) Backup(ctx context.Context, w io.Writer, since uint64) (uint64, error) {
+	b.held.Store(true)
+	defer b.held.Store(false)
+	b.once.Do(func() { close(b.started) })
+	select {
+	case <-b.release:
+		return 0, nil
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+}
+
+func TestStopPeriodicBackupWaitsForInFlightBackup(t *testing.T) {
+	logger := testutil.GetLogger()
+	inner := testutil.TestMustDB()
+	t.Cleanup(func() { _ = inner.Close() })
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	db := &blockingStorage{
+		Storage: inner,
+		started: started,
+		release: release,
+	}
+	svc := NewService(logger, db, t.TempDir())
+	if err := svc.StartPeriodicBackup(15 * time.Millisecond); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Backup did not start")
+	}
+
+	stopDone := make(chan struct{})
+	go func() {
+		svc.StopPeriodicBackup()
+		close(stopDone)
+	}()
+
+	select {
+	case <-stopDone:
+		t.Fatal("StopPeriodicBackup returned while Backup was still held")
+	case <-time.After(150 * time.Millisecond):
+	}
+	if !db.held.Load() {
+		t.Fatal("expected Backup to still be in flight while Stop waits")
+	}
+
+	close(release)
+	select {
+	case <-stopDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("StopPeriodicBackup did not return after Backup released")
+	}
+}
+
+func TestConcurrentStartStop(t *testing.T) {
+	logger := testutil.GetLogger()
+	db := testutil.TestMustDB()
+	t.Cleanup(func() { _ = db.Close() })
+	svc := NewService(logger, db, t.TempDir())
+
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = svc.StartPeriodicBackup(time.Hour)
+			svc.StopPeriodicBackup()
+		}()
+	}
+	wg.Wait()
+	svc.StopPeriodicBackup()
+	if svc.backupEnabled {
+		t.Error("backup should be stopped after concurrent Start/Stop")
+	}
+}

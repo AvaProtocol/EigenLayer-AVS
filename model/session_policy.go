@@ -49,6 +49,16 @@ type SessionPolicy struct {
 	// never be re-encoded into it after signing.
 	AllowedActions []AllowedAction `json:"allowed_actions,omitempty"`
 	ERC20SpendCap  *ERC20SpendCap  `json:"erc20_spend_cap,omitempty"`
+	// ERC20SpendCaps is the per-token list (A7). ERC20SpendCap remains the
+	// one-token alias (typically the first entry) for older clients.
+	ERC20SpendCaps []ERC20SpendCap `json:"erc20_spend_caps,omitempty"`
+
+	// NativeRecipients / NativeSpendCap / AllowContractRecipient are the
+	// native-ETH send purpose (Track A). Display/rebuild data only — signed
+	// truth remains Grant.InstallCall. omitempty; no new storage key.
+	NativeRecipients       []*common.Address `json:"native_recipients,omitempty"`
+	NativeSpendCap         *NativeSpendCap   `json:"native_spend_cap,omitempty"`
+	AllowContractRecipient bool              `json:"allow_contract_recipient,omitempty"`
 
 	// Grant is the owner's authorization. Absent once applied is not a valid
 	// state: it is retained so revocation can reproduce the module cleanup
@@ -78,6 +88,13 @@ type ERC20SpendCap struct {
 	Token      *common.Address `json:"token"`
 	Amount     string          `json:"amount"`      // smallest unit, decimal string
 	GrantedCap string          `json:"granted_cap"` // == Amount at grant time
+}
+
+// NativeSpendCap is the grant's cumulative native-token cap in wei.
+// GrantedCap preserves the original total for "used X of Y" rendering.
+type NativeSpendCap struct {
+	Amount     string `json:"amount"`      // wei, decimal
+	GrantedCap string `json:"granted_cap"` // == Amount at grant time
 }
 
 // SessionGrantAuthorization is the owner's signed deferred action.

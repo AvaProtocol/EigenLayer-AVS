@@ -437,6 +437,65 @@ func (n *Engine) occupancyFor(chainID int64) EntityOccupancyChecker {
 	return n.entityOccupancyChecker(chainID)
 }
 
+// bindNativeRecipientChecks attaches the session signer (refused as a
+// native recipient) and a memoized CodeAt that uses the pooled
+// ChainStateReader. A missing controller key is an error: swallowing it
+// would skip the reservation. Does not replace a test-injected CodeAt, but
+// wraps it so Validate + HooksFor share one lookup per address. Production
+// InstallSessionResolver enables sessionChainReads; without it CodeAt stays
+// nil and Validate fail-closes naming the resolver.
+func (n *Engine) bindNativeRecipientChecks(chainID int64, perms *SessionPermissions) error {
+	if n == nil || perms == nil {
+		return nil
+	}
+	if perms.SessionSigner == nil {
+		signer, err := n.sessionSignerAddress()
+		if err != nil {
+			return fmt.Errorf("cannot bind session signer for native-recipient reservation: %w", err)
+		}
+		perms.SessionSigner = &signer
+	}
+	if perms.CodeAt != nil {
+		perms.CodeAt = memoizeCodeAt(perms.CodeAt)
+		return nil
+	}
+	if !n.sessionChainReads {
+		return nil
+	}
+	perms.CodeAt = memoizeCodeAt(func(addr common.Address) ([]byte, error) {
+		reader := GetChainStateReaderForChain(uint64(chainID))
+		if reader == nil {
+			return nil, fmt.Errorf("no ChainStateReader registered for chain %d", chainID)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return reader.CodeAt(ctx, addr)
+	})
+	return nil
+}
+
+// memoizeCodeAt caches lookups for one request. The map is unsynchronized:
+// SessionPermissions copies share the closure, so callers must not Validate
+// concurrently on the same bound CodeAt.
+func memoizeCodeAt(inner func(common.Address) ([]byte, error)) func(common.Address) ([]byte, error) {
+	if inner == nil {
+		return nil
+	}
+	type result struct {
+		code []byte
+		err  error
+	}
+	cache := make(map[common.Address]result)
+	return func(addr common.Address) ([]byte, error) {
+		if got, ok := cache[addr]; ok {
+			return got.code, got.err
+		}
+		code, err := inner(addr)
+		cache[addr] = result{code: code, err: err}
+		return code, err
+	}
+}
+
 // windowVerifier reads TimeRangeModule.timeRanges for (account, entity).
 func (n *Engine) windowVerifier() WindowVerifier {
 	return func(ctx context.Context, chainID int64, account common.Address, entity uint32) (uint64, uint64, error) {
@@ -563,6 +622,23 @@ func newSessionResolver(
 			// Count for verification-gas seeding (deferred uninstalls run in
 			// validation; flat seed under-seeds N-way batches — #731 review).
 			auth.DeferredTeardownCount = len(replacedEntities)
+			// Packed AllowlistModule inputs, not len(AllowedActions): native
+			// recipient rows (A1) are extra SSTOREs that are not allowedActions.
+			// Zero means "unknown — use the 2–3 row 700k seed". A missed
+			// count must not brick a grant that previously sent: under-seed
+			// is AA26 at estimation, not a fund risk. Rescues ≤3-row grants;
+			// an undecodable >3-row install still AA26s at 700k.
+			rows, rowErr := aa.CountAllowlistInputs(policy.Grant.InstallCall)
+			if rowErr != nil {
+				rows = 0
+			}
+			auth.AllowlistRows = rows
+			// Hook-carrying grant with no counted rows is a guessed seed.
+			// Decode misses return 0, nil so this is the signal, not rowErr.
+			// Engine.SetLogger runs before the send path; tests omit it.
+			if rows == 0 && policy.Grant.RequiresExecuteUserOp {
+				logGuessedAllowlistSeed(policy.ID, rowErr)
+			}
 			auth.OnApplied = func(userOpHash string) error {
 				if err := MarkSessionGrantAppliedByID(db, policyChain, policyOwner, policyRunner, policyID, userOpHash); err != nil {
 					return err
@@ -589,6 +665,22 @@ func newSessionResolver(
 		}
 		return auth, nil
 	}
+}
+
+// logGuessedAllowlistSeed is the only signal that a hook-carrying grant is
+// running on the 700k unknown seed. No-op when the logger is unset (tests);
+// Engine.SetLogger runs before the production send path.
+func logGuessedAllowlistSeed(policyID string, err error) {
+	if globalLogger == nil {
+		return
+	}
+	if err != nil {
+		globalLogger.Warn("allowlist row count unknown; using the 700k deferred-hooks seed",
+			"policy", policyID, "error", err)
+		return
+	}
+	globalLogger.Warn("allowlist row count unknown; using the 700k deferred-hooks seed",
+		"policy", policyID)
 }
 
 // controllerSessionSigner resolves a session signer to its key.

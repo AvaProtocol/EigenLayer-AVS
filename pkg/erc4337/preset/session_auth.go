@@ -78,6 +78,13 @@ type SessionAuthorization struct {
 	// costs ~100k gas (Sepolia). The flat deferred-hooks seed alone is only
 	// enough for install + ~1 uninstall.
 	DeferredTeardownCount int
+
+	// AllowlistRows is how many AllowlistModule inputs the deferred install
+	// packs. Zero means "unknown — use the 2–3 row seed" (700k; scale only
+	// past 3). An undecodable >3-row install therefore under-seeds and
+	// AA26s at estimation — fail-open restores ≤3-row sends, not those.
+	// Product max native recipients is MaxNativeRecipients (5).
+	AllowlistRows int
 }
 
 // Deferred reports whether this operation carries the grant's install.
@@ -158,6 +165,9 @@ func seedVerificationGasFor(op *userop.UserOperationV07, auth *SessionAuthorizat
 	// only enough for the install itself plus ~1 teardown.
 	if auth != nil && auth.Deferred() && auth.DeferredTeardownCount > 0 {
 		seed += int64(auth.DeferredTeardownCount) * seedVerificationGasPerUninstall
+	}
+	if auth != nil && auth.Deferred() && auth.WrapExecuteUserOp && auth.AllowlistRows > seedVerificationGasAllowlistBase {
+		seed += int64(auth.AllowlistRows-seedVerificationGasAllowlistBase) * seedVerificationGasPerAllowlistRow
 	}
 	// The deferred/module seeds above were measured on already-deployed
 	// accounts. First-use that ALSO deploys the account pays both costs in

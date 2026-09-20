@@ -80,9 +80,20 @@ const (
 	// Sepolia as ~98k actualGasUsed delta for install+one-uninstall vs install
 	// alone (#731 review). Headroom for variance; under-seed is AA23/AA26 at
 	// estimation and cannot be recovered by the efficiency tighten.
+	//
+	// A0 20-row 5-hook val-then-exec uninstall eth_estimateGas was 448,481
+	// (owner-tx, not UserOp VGL) — 3.7× this constant. Do not raise this to
+	// 448k: 20-row deferred replace AA23'd 3/3 at 2.2M, so K14 cuts max
+	// native recipients to 5 instead. Five-row grants stay in the measured
+	// 2–3-row + 45k/row regime this 120k was taken from.
 	seedVerificationGasPerUninstall = 120_000
-	initialCallGasLimit             = 500_000
-	initialPreVerificationGas       = 100_000
+	// Two-point interpolation, not a measured per-row cost: 3-row
+	// deferred-hooks ≈ 700k, 20-row first-op needed 1.5M seed (actual ~1.19M).
+	// Extra rows are cold SSTOREs on AllowlistModule.
+	seedVerificationGasPerAllowlistRow = 45_000
+	seedVerificationGasAllowlistBase   = 3 // rows covered by the 700k hook seed
+	initialCallGasLimit                = 500_000
+	initialPreVerificationGas          = 100_000
 
 	// verificationGasEfficiencyFloor is Rundler's published threshold.
 	verificationGasEfficiencyFloor = 0.4

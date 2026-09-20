@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"fmt"
+	"math/big"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -17,6 +18,7 @@ type PlannedCall struct {
 	Selector string // 0x-prefixed 4-byte hex, lowercase preferred
 	// Label is optional (method name) for error messages only.
 	Label string
+	Value *big.Int // native wei on this inner call; nil/0 is none
 }
 
 // SelectorFromCalldata returns the 4-byte selector of calldata, or
@@ -76,50 +78,11 @@ func MissingGrantCalls(allowed []model.AllowedAction, planned []PlannedCall) []P
 	return missing
 }
 
-// SessionPolicyNativeNotAllowedCode marks a refused native-value operation.
-// Exported so the producers and the REST layer share one symbol: this package
-// formats the message, and aggregator/rest keys the problem+json `code` off it.
-//
-// preset.IsClientUserOpFailure matches the same text as a bare string literal
-// and cannot use this constant — taskengine imports preset (the send path), so
-// preset importing taskengine back would be a cycle. Renaming this constant
-// therefore has to be paired with editing that literal in
-// pkg/erc4337/preset/bundler_error.go by hand; the compiler will not catch it.
+// SessionPolicyNativeNotAllowedCode marks a refused native-ETH send when the
+// grant has no nativeRecipients. After Track A the owner re-grants with that
+// field. preset.IsClientUserOpFailure matches the same text as a bare string
+// literal (taskengine imports preset; the reverse would cycle).
 const SessionPolicyNativeNotAllowedCode = "SESSION_POLICY_NATIVE_NOT_ALLOWED"
-
-// FormatSessionPolicyNativeNotAllowed builds the refusal for an inner call
-// that moves native ETH under a REST session grant.
-//
-// This is not a coverage miss that re-granting can fix, which is why it is a
-// separate code from SESSION_POLICY_TARGET_NOT_ALLOWED. A native transfer is
-// execute(to, value, 0x) — empty inner calldata — and every REST grant
-// installs the allowlist with hasSelectorAllowlist=true (see
-// SessionPermissions.HooksFor). Alchemy's AllowlistModule then rejects the
-// call outright:
-//
-//	if (hasSelectorAllowlist) {
-//	    if (data.length < 4) revert NoSelectorSpecified();
-//
-// So listing the recipient with selector 0x00000000 does NOT help: the module
-// reverts on the length check before it ever consults the selector set. The
-// zero-address wildcard would skip that branch, but SessionPermissions.Validate
-// refuses a zero target. There is no grant shape the REST surface can emit
-// that authorizes this, so the message must not tell the caller to re-grant.
-//
-// Without this refusal the operation reaches the bundler and comes back as
-// opaque AA23, which reads as "your grant is wrong" and sends people to
-// re-grant in a loop that cannot converge.
-func FormatSessionPolicyNativeNotAllowed(recipient common.Address, policyID string) string {
-	msg := SessionPolicyNativeNotAllowedCode +
-		": session grants cannot authorize native ETH transfers (to " + recipient.Hex() + ")" +
-		" — the account's allowlist hook requires a 4-byte selector and a native transfer carries none," +
-		" so no allowlist entry can cover it; move ERC-20 value instead, or send the ETH" +
-		" with the owner key outside the session"
-	if policyID != "" {
-		msg += " (policy " + policyID + ")"
-	}
-	return msg
-}
 
 // FormatSessionPolicyTargetNotAllowed builds a stable, client-parseable error.
 // Prefix SESSION_POLICY_TARGET_NOT_ALLOWED is the machine code for Studio maps.

@@ -16,11 +16,13 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/bigint"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
@@ -51,6 +53,9 @@ type ContractWriteProcessor struct {
 	smartWalletConfig *config.SmartWalletConfig
 	owner             common.Address
 	sendUserOpFunc    SendUserOpFunc
+	// nativeReader is a test-injected CodeAndFeeReader. Production uses
+	// nativeCodeAndFee (chain reader + signed-op maxFee from ethclient).
+	nativeReader CodeAndFeeReader
 }
 
 func NewContractWriteProcessor(vm *VM, client ChainStateReader, smartWalletConfig *config.SmartWalletConfig, owner common.Address) *ContractWriteProcessor {
@@ -436,6 +441,25 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			"contract", contractAddress.Hex(),
 			"method", methodName,
 			"reason", "vm_is_simulation")
+
+		simValue := big.NewInt(0)
+		if raw := r.extractTransactionValue(node); raw != "" && raw != "0" {
+			if parsed, parseErr := bigint.Parse(raw); parseErr == nil {
+				simValue = parsed
+			}
+		}
+		if msg := r.preflightSessionGrantCoverage([]PlannedCall{{
+			Target:   contractAddress,
+			Selector: SelectorFromCalldata(calldata),
+			Label:    methodName,
+			Value:    simValue,
+		}}); msg != "" {
+			return &avsproto.ContractWriteNode_MethodResult{
+				MethodName: methodName,
+				Success:    false,
+				Error:      msg,
+			}
+		}
 
 		// Use shared Tenderly client from VM
 		tenderlyClient := r.vm.tenderlyClient
@@ -985,6 +1009,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		Target:   contractAddress,
 		Selector: SelectorFromCalldata(callDataBytes),
 		Label:    methodName,
+		Value:    transactionValue,
 	}}); msg != "" {
 		executionLogBuilder.WriteString(msg + "\n")
 		return &avsproto.ContractWriteNode_MethodResult{
@@ -1094,21 +1119,94 @@ func (r *ContractWriteProcessor) preflightSessionGrantCoverage(planned []Planned
 		// Storage / multi-grant errors should fail closed with a clear message.
 		return fmt.Sprintf("SESSION_POLICY_LOOKUP_FAILED: %v", err)
 	}
-	if policy == nil || len(policy.AllowedActions) == 0 {
+	if policy == nil {
 		return ""
+	}
+	if len(policy.AllowedActions) == 0 {
+		if len(policy.NativeRecipients) == 0 {
+			return ""
+		}
+		// Native-only grant: every contractWrite is outside the allowlist.
+		return FormatSessionPolicyTargetNotAllowed(planned, policy.ID)
 	}
 	missing := MissingGrantCalls(policy.AllowedActions, planned)
-	if len(missing) == 0 {
+	if len(missing) > 0 {
+		if r.vm.logger != nil {
+			r.vm.logger.Warn("session grant does not cover planned contract calls",
+				"policy_id", policy.ID,
+				"wallet", sender.Hex(),
+				"missing_count", len(missing),
+			)
+		}
+		return FormatSessionPolicyTargetNotAllowed(missing, policy.ID)
+	}
+
+	if policy.NativeSpendCap == nil {
 		return ""
 	}
-	if r.vm.logger != nil {
-		r.vm.logger.Warn("session grant does not cover planned contract calls",
-			"policy_id", policy.ID,
-			"wallet", sender.Hex(),
-			"missing_count", len(missing),
-		)
+	sum := big.NewInt(0)
+	for _, c := range planned {
+		if c.Value != nil {
+			sum.Add(sum, c.Value)
+		}
 	}
-	return FormatSessionPolicyTargetNotAllowed(missing, policy.ID)
+	return PreflightNativePermission(policy, NativeIntent{
+		Amount:    sum,
+		Kind:      NativeValue,
+		Sponsored: sponsoredFromConfig(r.smartWalletConfig),
+	}, r.nativeCodeAndFee())
+}
+
+func (r *ContractWriteProcessor) nativeCodeAndFee() CodeAndFeeReader {
+	if r == nil {
+		return nil
+	}
+	if r.nativeReader != nil {
+		return r.nativeReader
+	}
+	var eth *ethclient.Client
+	if src, ok := r.client.(ethClientSource); ok {
+		eth = src.EthClient()
+	}
+	if eth != nil {
+		return NewCodeAndFeeReader(r.client, eth)
+	}
+	url := ""
+	if r.smartWalletConfig != nil {
+		url = r.smartWalletConfig.EthRpcUrl
+	}
+	return oneShotDialCodeAndFee{reader: r.client, rpcURL: url}
+}
+
+type ethClientSource interface {
+	EthClient() *ethclient.Client
+}
+
+// oneShotDialCodeAndFee dials EthRpcUrl for MaxFeePerGas and closes the
+// client in the same call. Worker-routed ChainStateReaders have no EthClient;
+// caching a Dial on the processor leaked a connection per node execution.
+type oneShotDialCodeAndFee struct {
+	reader ChainStateReader
+	rpcURL string
+}
+
+func (o oneShotDialCodeAndFee) CodeAt(ctx context.Context, addr common.Address) ([]byte, error) {
+	if o.reader != nil {
+		return o.reader.CodeAt(ctx, addr)
+	}
+	return nil, fmt.Errorf("no chain reader")
+}
+
+func (o oneShotDialCodeAndFee) MaxFeePerGas(ctx context.Context) (*big.Int, error) {
+	if o.rpcURL == "" {
+		return nil, fmt.Errorf("no ethclient for signed-op maxFeePerGas")
+	}
+	client, err := ethclient.DialContext(ctx, o.rpcURL)
+	if err != nil {
+		return nil, fmt.Errorf("dialing RPC for signed-op maxFee: %w", err)
+	}
+	defer client.Close()
+	return eip1559.SignedOpMaxFeePerGas(ctx, client)
 }
 
 // uniqueTargetHexes returns the distinct target addresses (hex, order-preserving) — used to label
@@ -1270,6 +1368,7 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 			Target:   targets[i],
 			Selector: SelectorFromCalldata(datas[i]),
 			Label:    methodNames[i],
+			Value:    values[i],
 		}
 	}
 	if msg := r.preflightSessionGrantCoverage(planned); msg != "" {

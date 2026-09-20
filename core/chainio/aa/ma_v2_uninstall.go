@@ -92,16 +92,19 @@ func PackSingleSignerUninstallData(entityID uint32) ([]byte, error) {
 	if err := ensureHookABIs(); err != nil {
 		return nil, err
 	}
-	// Single uint32 argument — reuse the time-range args' first element.
-	uint32Only := abi.Arguments{timeRangeDataArgs[0]}
-	return uint32Only.Pack(entityID)
+	return uint32OnlyArgs.Pack(entityID)
 }
 
 // PackTimeRangeUninstallData encodes TimeRangeModule's onUninstall payload:
 // abi.encode(uint32 entityId) — note NOT the install tuple; the module only
-// needs the entity to delete its range.
+// needs the entity to delete its range. Same encoding as SingleSigner and
+// NativeTokenLimit uninstall (uint32 entityId); each module keeps its own
+// packer so a future ABI split cannot silently share the wrong helper.
 func PackTimeRangeUninstallData(entityID uint32) ([]byte, error) {
-	return PackSingleSignerUninstallData(entityID)
+	if err := ensureHookABIs(); err != nil {
+		return nil, err
+	}
+	return uint32OnlyArgs.Pack(entityID)
 }
 
 // PackSessionSignerUninstall encodes the revocation of a session grant

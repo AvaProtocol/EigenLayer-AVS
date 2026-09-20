@@ -180,6 +180,12 @@ func (d *directChainStateReader) SuggestGasPrice(ctx context.Context) (*big.Int,
 	return d.client.SuggestGasPrice(ctx)
 }
 
+// EthClient is the underlying RPC client. Used by native preflight to
+// compute signed-op maxFee (tip + 2*baseFee) without a second dial.
+func (d *directChainStateReader) EthClient() *ethclient.Client {
+	return d.client
+}
+
 func (d *directChainStateReader) EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error) {
 	return d.client.EstimateGas(ctx, msg)
 }

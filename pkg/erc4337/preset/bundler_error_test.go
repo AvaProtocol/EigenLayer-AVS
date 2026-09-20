@@ -4,6 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 )
 
 func TestIsUserOpRevert(t *testing.T) {
@@ -37,6 +41,12 @@ func TestIsClientUserOpFailure(t *testing.T) {
 		{"AA23 via gas manager", fmt.Errorf("gas manager declined to sponsor: alchemy_requestGasAndPaymasterAndData (policy bf905871): validation reverted: [reason]: AA23 reverted"), true},
 		{"execution reverted via GM", fmt.Errorf("gas manager declined to sponsor: alchemy_requestGasAndPaymasterAndData (policy x): execution reverted"), true},
 		{"grant install failed", errors.New("SESSION_GRANT_INSTALL_FAILED: deferred grant install/replace did not land: AA23"), true},
+		{"erc20 cap", errors.New("execution reverted: ExceededTokenLimit"), true},
+		{"native cap", errors.New("execution reverted: ExceededNativeTokenLimit"), true},
+		{"native preflight cap", errors.New("SESSION_POLICY_NATIVE_CAP_EXCEEDED: this send exceeds the ETH cap"), true},
+		{"native recipient", errors.New("SESSION_POLICY_RECIPIENT_NOT_ALLOWED: recipient 0xabc"), true},
+		{"spend-limit short calldata", errors.New("execution reverted: InvalidCalldataLength"), true},
+		{"allowlist miss", errors.New("execution reverted: SelectorNotAllowed"), false},
 		// Must stay Error → Sentry (infra / ambiguous)
 		{"bare AA23", errors.New("validation reverted: [reason]: AA23 reverted"), false},
 		{"SESSION_POLICY_LOOKUP_FAILED storage", errors.New("SESSION_POLICY_LOOKUP_FAILED: listing session policies: connection refused"), false},
@@ -49,5 +59,25 @@ func TestIsClientUserOpFailure(t *testing.T) {
 				t.Fatalf("IsClientUserOpFailure(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLogBundlerErrorCountsExceededNativeTokenLimit(t *testing.T) {
+	before := testutil.ToFloat64(sessionNativeOnchainCapExceeded)
+	LogBundlerError(&logger.NoOpLogger{}, errors.New("execution reverted: ExceededNativeTokenLimit"), "send")
+	if got := testutil.ToFloat64(sessionNativeOnchainCapExceeded); got != before+1 {
+		t.Fatalf("counter = %v, want %v", got, before+1)
+	}
+}
+
+func TestLogBundlerErrorCountsExceededTokenLimit(t *testing.T) {
+	before := testutil.ToFloat64(sessionERC20OnchainCapExceeded)
+	LogBundlerError(&logger.NoOpLogger{}, errors.New("execution reverted: ExceededTokenLimit"), "send")
+	if got := testutil.ToFloat64(sessionERC20OnchainCapExceeded); got != before+1 {
+		t.Fatalf("counter = %v, want %v", got, before+1)
+	}
+	LogBundlerError(&logger.NoOpLogger{}, errors.New("AA23 reverted"), "send")
+	if got := testutil.ToFloat64(sessionERC20OnchainCapExceeded); got != before+1 {
+		t.Fatalf("AA23 must not bump the ERC-20 cap counter, got %v", got)
 	}
 }
