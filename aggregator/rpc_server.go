@@ -128,13 +128,20 @@ func (r *RpcServer) derivationSaltForWallet(chainID int64, owner, wallet common.
 		return nil, fmt.Errorf("wallet %s has no derivation salt recorded; cannot verify it is salt 0: %w", wallet.Hex(), deriveErr)
 	}
 	if salt0 == wallet {
+		if err != nil && r.config != nil && r.config.Logger != nil {
+			r.config.Logger.Warn("proceeding with salt 0 after storage lookup failed; address matches salt-0 derivation",
+				"wallet", wallet.Hex(), "error", err)
+		}
 		return big.NewInt(0), nil
 	}
 	return nil, fmt.Errorf("wallet %s is not the salt-0 address for this owner (salt-0 is %s); refusing withdraw rather than assuming salt 0", wallet.Hex(), salt0.Hex())
 }
 
 func walletRecordSalt(w *model.SmartWallet) *big.Int {
-	if w == nil || w.Salt == nil {
+	// Negative salts are legacy rows the factory ABI cannot pack
+	// (Wallet_Salt_Index_Migration.md). Treat them as missing so the
+	// salt-0 identity check can refuse with an address, not an ABI error.
+	if w == nil || w.Salt == nil || w.Salt.Sign() < 0 {
 		return nil
 	}
 	return w.Salt
@@ -151,16 +158,16 @@ func (r *RpcServer) salt0DerivedAddress(chainID int64, owner common.Address) (co
 	var rpc *ethclient.Client
 	if chainID != 0 {
 		cfg, client, err := r.resolveSmartWalletForChain(chainID)
-		if err == nil {
-			swCfg, rpc = cfg, client
+		if err != nil {
+			return common.Address{}, fmt.Errorf("deriving salt-0 address on chain %d: %w", chainID, err)
 		}
-	}
-	if swCfg == nil && r.config != nil {
+		swCfg, rpc = cfg, client
+	} else if r.config != nil {
 		swCfg = r.config.SmartWallet
 		rpc = r.smartWalletRpc
 	}
 	if swCfg == nil || rpc == nil {
-		return common.Address{}, fmt.Errorf("no RPC to derive salt-0 address")
+		return common.Address{}, fmt.Errorf("no RPC to derive salt-0 address on chain %d", chainID)
 	}
 	factory, err := aa.EffectiveFactory(swCfg)
 	if err != nil {

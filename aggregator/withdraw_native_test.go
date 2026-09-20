@@ -311,4 +311,18 @@ func TestDerivationSaltForWallet(t *testing.T) {
 	if err == nil {
 		t.Fatal("nil Salt that is not salt-0 must still refuse")
 	}
+
+	negWallet := common.HexToAddress("0x00000000000000000000000000000000000000b1")
+	if err := taskengine.StoreWallet(db, chainID, owner, &model.SmartWallet{
+		Owner: &owner, Address: &negWallet, Factory: &factory, Salt: big.NewInt(-12),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = withHook.derivationSaltForWallet(chainID, owner, negWallet)
+	if err == nil {
+		t.Fatal("negative salt must not be packed; identity check should refuse")
+	}
+	if !strings.Contains(err.Error(), "not the salt-0 address") {
+		t.Fatalf("negative salt: %v", err)
+	}
 }
