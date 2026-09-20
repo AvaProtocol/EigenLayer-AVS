@@ -23,6 +23,7 @@ import (
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
@@ -61,6 +62,10 @@ type RpcServer struct {
 	// grant preflight. Production uses nativeCodeAndFee (pooled chain
 	// reader + the same RPC as balance).
 	withdrawNativeReader taskengine.CodeAndFeeReader
+
+	// deriveSalt0, when set, is the salt-0 address for an owner. Tests inject
+	// it; production calls the factory's getAddressSemiModular.
+	deriveSalt0 func(owner common.Address) (common.Address, error)
 }
 
 // nativeCodeAndFee is the covering-grant reader for native withdraw.
@@ -96,19 +101,79 @@ func (r *RpcServer) nativeCodeAndFee(chainID int64) taskengine.CodeAndFeeReader 
 
 // derivationSaltForWallet is the salt SendUserOpAuto must use. A missing
 // record or nil Salt used to silently become salt 0 and fail the MA v2
-// derivation guard with "wrong account type, salt, or factory".
+// derivation guard. Non-zero salts still never become 0: a miss is allowed
+// to proceed only when the wallet is the salt-0 derivation for this owner.
 func (r *RpcServer) derivationSaltForWallet(chainID int64, owner, wallet common.Address) (*big.Int, error) {
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("no storage to look up derivation salt for wallet %s", wallet.Hex())
 	}
 	stored, err := taskengine.GetWallet(r.db, chainID, owner, wallet.Hex())
+	if salt := walletRecordSalt(stored); salt != nil {
+		return salt, nil
+	}
+	// Ownership validation keys off the gateway default chain; the same
+	// address may only have a record there.
+	if r.engine != nil {
+		if def, dErr := r.engine.GetWalletFromDB(owner, wallet.Hex()); dErr == nil {
+			if salt := walletRecordSalt(def); salt != nil {
+				return salt, nil
+			}
+		}
+	}
+	salt0, deriveErr := r.salt0DerivedAddress(chainID, owner)
+	if deriveErr != nil {
+		if err != nil {
+			return nil, fmt.Errorf("looking up derivation salt for wallet %s: %w", wallet.Hex(), err)
+		}
+		return nil, fmt.Errorf("wallet %s has no derivation salt recorded; cannot verify it is salt 0: %w", wallet.Hex(), deriveErr)
+	}
+	if salt0 == wallet {
+		return big.NewInt(0), nil
+	}
+	return nil, fmt.Errorf("wallet %s is not the salt-0 address for this owner (salt-0 is %s); refusing withdraw rather than assuming salt 0", wallet.Hex(), salt0.Hex())
+}
+
+func walletRecordSalt(w *model.SmartWallet) *big.Int {
+	if w == nil || w.Salt == nil {
+		return nil
+	}
+	return w.Salt
+}
+
+func (r *RpcServer) salt0DerivedAddress(chainID int64, owner common.Address) (common.Address, error) {
+	if r != nil && r.deriveSalt0 != nil {
+		return r.deriveSalt0(owner)
+	}
+	if r == nil {
+		return common.Address{}, fmt.Errorf("no RPC to derive salt-0 address")
+	}
+	var swCfg *config.SmartWalletConfig
+	var rpc *ethclient.Client
+	if chainID != 0 {
+		cfg, client, err := r.resolveSmartWalletForChain(chainID)
+		if err == nil {
+			swCfg, rpc = cfg, client
+		}
+	}
+	if swCfg == nil && r.config != nil {
+		swCfg = r.config.SmartWallet
+		rpc = r.smartWalletRpc
+	}
+	if swCfg == nil || rpc == nil {
+		return common.Address{}, fmt.Errorf("no RPC to derive salt-0 address")
+	}
+	factory, err := aa.EffectiveFactory(swCfg)
 	if err != nil {
-		return nil, fmt.Errorf("looking up derivation salt for wallet %s: %w", wallet.Hex(), err)
+		return common.Address{}, err
 	}
-	if stored == nil || stored.Salt == nil {
-		return nil, fmt.Errorf("wallet %s has no derivation salt recorded; refusing withdraw rather than assuming salt 0", wallet.Hex())
+	addr, err := aa.GetSenderAddressMAv2ForFactory(rpc, owner, factory, big.NewInt(0))
+	if err != nil {
+		return common.Address{}, err
 	}
-	return stored.Salt, nil
+	if addr == nil {
+		return common.Address{}, fmt.Errorf("factory returned a nil salt-0 address")
+	}
+	return *addr, nil
 }
 
 // resolveSmartWalletForChain returns the SmartWalletConfig + RPC client
