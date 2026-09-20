@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -23,6 +22,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/bigint"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
@@ -56,8 +56,6 @@ type ContractWriteProcessor struct {
 	// nativeReader is a test-injected CodeAndFeeReader. Production uses
 	// nativeCodeAndFee (chain reader + signed-op maxFee from ethclient).
 	nativeReader CodeAndFeeReader
-	feeEthOnce   sync.Once
-	feeEth       *ethclient.Client
 }
 
 func NewContractWriteProcessor(vm *VM, client ChainStateReader, smartWalletConfig *config.SmartWalletConfig, owner common.Address) *ContractWriteProcessor {
@@ -1166,41 +1164,49 @@ func (r *ContractWriteProcessor) nativeCodeAndFee() CodeAndFeeReader {
 	if r.nativeReader != nil {
 		return r.nativeReader
 	}
-	return NewCodeAndFeeReader(r.client, r.ethForFees())
+	var eth *ethclient.Client
+	if src, ok := r.client.(ethClientSource); ok {
+		eth = src.EthClient()
+	}
+	if eth != nil {
+		return NewCodeAndFeeReader(r.client, eth)
+	}
+	url := ""
+	if r.smartWalletConfig != nil {
+		url = r.smartWalletConfig.EthRpcUrl
+	}
+	return oneShotDialCodeAndFee{reader: r.client, rpcURL: url}
 }
 
 type ethClientSource interface {
 	EthClient() *ethclient.Client
 }
 
-// ethForFees is the *ethclient.Client used for signed-op maxFee (tip +
-// 2*baseFee). Prefer the DirectChainStateReader's client (no extra dial);
-// otherwise one lazy Dial of smartWalletConfig.EthRpcUrl (worker-routed
-// readers have no ethclient).
-func (r *ContractWriteProcessor) ethForFees() *ethclient.Client {
-	if r == nil {
-		return nil
+// oneShotDialCodeAndFee dials EthRpcUrl for MaxFeePerGas and closes the
+// client in the same call. Worker-routed ChainStateReaders have no EthClient;
+// caching a Dial on the processor leaked a connection per node execution.
+type oneShotDialCodeAndFee struct {
+	reader ChainStateReader
+	rpcURL string
+}
+
+func (o oneShotDialCodeAndFee) CodeAt(ctx context.Context, addr common.Address) ([]byte, error) {
+	if o.reader != nil {
+		return o.reader.CodeAt(ctx, addr)
 	}
-	if src, ok := r.client.(ethClientSource); ok {
-		if c := src.EthClient(); c != nil {
-			return c
-		}
+	return nil, fmt.Errorf("no chain reader")
+}
+
+func (o oneShotDialCodeAndFee) MaxFeePerGas(ctx context.Context) (*big.Int, error) {
+	if o.rpcURL == "" {
+		return nil, fmt.Errorf("no ethclient for signed-op maxFeePerGas")
 	}
-	r.feeEthOnce.Do(func() {
-		if r.smartWalletConfig == nil || r.smartWalletConfig.EthRpcUrl == "" {
-			return
-		}
-		c, err := ethclient.Dial(r.smartWalletConfig.EthRpcUrl)
-		if err != nil {
-			if r.vm != nil && r.vm.logger != nil {
-				r.vm.logger.Warn("native preflight could not dial RPC for signed-op maxFee; self-funded cap check will fail closed",
-					"error", err)
-			}
-			return
-		}
-		r.feeEth = c
-	})
-	return r.feeEth
+	client, err := ethclient.DialContext(ctx, o.rpcURL)
+	if err != nil {
+		return nil, fmt.Errorf("dialing RPC for signed-op maxFee: %w", err)
+	}
+	defer client.Close()
+	return eip1559.SignedOpMaxFeePerGas(ctx, client)
 }
 
 // uniqueTargetHexes returns the distinct target addresses (hex, order-preserving) — used to label

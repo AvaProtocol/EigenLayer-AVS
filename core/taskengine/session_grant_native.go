@@ -50,7 +50,11 @@ const (
 	// has not yet estimated. Do not use the seed sum (500k+100k+700k).
 	nativePreflightGasUnitsSteady  = 500_000   // installed grant ethTransfer
 	nativePreflightGasUnitsFirstOp = 2_000_000 // deferred hooks, 5-row window
-	nativePreflightRPCTimeout      = 15 * time.Second
+	// Payable contractWrite (NativeValue) can exceed ethTransfer gas. These
+	// are conservative bounds, not estimates — under-seed is ExceededNativeTokenLimit.
+	nativePreflightGasUnitsValueSteady  = 1_500_000
+	nativePreflightGasUnitsValueFirstOp = 3_000_000
+	nativePreflightRPCTimeout           = 15 * time.Second
 )
 
 // PreflightNativePermission returns a client-parseable error, or "" if the
@@ -111,10 +115,7 @@ func PreflightNativePermission(policy *model.SessionPolicy, intent NativeIntent,
 			if feeErr != nil || maxFee == nil || maxFee.Sign() <= 0 {
 				return fmt.Sprintf("%s: cannot price gas: %v", SessionPolicyNativeCapExceededCode, feeErr)
 			}
-			units := nativePreflightGasUnitsSteady
-			if policy.Grant == nil || !policy.Grant.Applied() {
-				units = nativePreflightGasUnitsFirstOp
-			}
+			units := nativePreflightGasUnitsFor(intent.Kind, policy)
 			gasWei = new(big.Int).Mul(big.NewInt(int64(units)), maxFee)
 		}
 		need.Add(need, gasWei)
@@ -123,6 +124,20 @@ func PreflightNativePermission(policy *model.SessionPolicy, intent NativeIntent,
 		return FormatSessionPolicyNativeCapExceeded(need, capWei, policy.ID)
 	}
 	return ""
+}
+
+func nativePreflightGasUnitsFor(kind NativeIntentKind, policy *model.SessionPolicy) int64 {
+	firstOp := policy == nil || policy.Grant == nil || !policy.Grant.Applied()
+	if kind == NativeValue {
+		if firstOp {
+			return nativePreflightGasUnitsValueFirstOp
+		}
+		return nativePreflightGasUnitsValueSteady
+	}
+	if firstOp {
+		return nativePreflightGasUnitsFirstOp
+	}
+	return nativePreflightGasUnitsSteady
 }
 
 func nativeRecipientAllowed(policy *model.SessionPolicy, recipient common.Address) bool {

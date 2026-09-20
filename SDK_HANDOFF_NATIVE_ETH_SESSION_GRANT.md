@@ -72,13 +72,18 @@ SessionPolicyActions.nativeTransfer({
   allowContractRecipient?: boolean;   // default false
 })
 
-SessionPolicyActions.nativeValueCap({ capWei: bigint }) // payable-write cap, no ethTransfer
+SessionPolicyActions.nativeValueCap({ capWei: bigint })
+// Payable-write cap without ethTransfer. MUST be merge()d with a builder that
+// emits allowedActions AND an ERC-20 cap. Alone: POLICIES_BAD_PERMISSIONS
+// ("a grant needs allowedActions and/or nativeRecipients", or
+// "a grant needs an ERC-20 spend cap").
 
 SessionPolicyActions.merge([
   SessionPolicyActions.uniswapV3Capability(chainId, { capToken }),
   // only if the workflow also sends ETH to an address:
   SessionPolicyActions.nativeTransfer({ recipients: [treasury], capWei: parseEther("0.05") }),
 ])
+// Payable write without send (e.g. Lido): merge(contractWriteCapability, nativeValueCap)
 ```
 
 ### `merge` rules

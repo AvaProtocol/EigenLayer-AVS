@@ -165,6 +165,23 @@ func TestPreflightNativePermission(t *testing.T) {
 	})
 }
 
+func TestNativePreflightGasUnitsFor(t *testing.T) {
+	pending := &model.SessionPolicy{}
+	if g := nativePreflightGasUnitsFor(NativeSend, pending); g != nativePreflightGasUnitsFirstOp {
+		t.Fatalf("send first-op = %d, want %d", g, nativePreflightGasUnitsFirstOp)
+	}
+	if g := nativePreflightGasUnitsFor(NativeValue, pending); g != nativePreflightGasUnitsValueFirstOp {
+		t.Fatalf("value first-op = %d, want %d", g, nativePreflightGasUnitsValueFirstOp)
+	}
+	applied := &model.SessionPolicy{Grant: &model.SessionGrantAuthorization{AppliedAt: 1}}
+	if g := nativePreflightGasUnitsFor(NativeSend, applied); g != nativePreflightGasUnitsSteady {
+		t.Fatalf("send steady = %d, want %d", g, nativePreflightGasUnitsSteady)
+	}
+	if g := nativePreflightGasUnitsFor(NativeValue, applied); g != nativePreflightGasUnitsValueSteady {
+		t.Fatalf("value steady = %d, want %d", g, nativePreflightGasUnitsValueSteady)
+	}
+}
+
 // Native recipient rows set HasSelectorAllowlist=false. Empty-calldata
 // preflight must read nativeRecipients, not refuse every MA v2 chain.
 func TestHooksForDoesNotRepeatCodeAt(t *testing.T) {
