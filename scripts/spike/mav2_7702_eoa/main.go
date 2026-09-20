@@ -519,19 +519,20 @@ func (h *harness) assertSessionValidationFlags() error {
 		return fmt.Errorf("B3 FAIL: validation flags 0x%02x want 0x%02x (UserOp|Global, no Signature)", flags, wantFlags)
 	}
 	wantVal, wantExec := expectedNativeGrantHooks(h.entity)
-	order := "install"
+	// getValidationData reverseArrs storage before returning, so the view is
+	// install order. Uninstall consumes the raw loaders (no reverseArr) —
+	// TimeRange, NT, Allowlist then NT, Allowlist. Do not treat the view as
+	// teardown order (#717). A future MA v2 that stops reverseArr in the
+	// view must fail here, not silently relabel.
 	if !hooksEqual(valHooks, wantVal) || !hooksEqual(execHooks, wantExec) {
-		revVal, revExec := reverseHooks(wantVal), reverseHooks(wantExec)
-		if hooksEqual(valHooks, revVal) && hooksEqual(execHooks, revExec) {
-			order = "reverse-of-install"
-			wantVal, wantExec = revVal, revExec
-		} else {
-			return fmt.Errorf("B3 FAIL: stored hooks val=%s exec=%s want val=%s exec=%s (or reverse)",
-				formatHooks(valHooks), formatHooks(execHooks), formatHooks(wantVal), formatHooks(wantExec))
-		}
+		return fmt.Errorf("B3 FAIL: getValidationData view val=%s exec=%s want install order val=%s exec=%s",
+			formatHooks(valHooks), formatHooks(execHooks), formatHooks(wantVal), formatHooks(wantExec))
 	}
 	fmt.Printf("B3 PASS: getValidationData entity=%d flags=0x%02x (isSignatureValidation=0)\n", h.entity, flags)
-	fmt.Printf("B3 K10 stored order (%s): val=%s exec=%s\n", order, formatHooks(valHooks), formatHooks(execHooks))
+	fmt.Printf("B3 K10 view order = install (getValidationData un-reverses storage): val=%s exec=%s\n",
+		formatHooks(valHooks), formatHooks(execHooks))
+	fmt.Printf("B3 K10 uninstall-consume order (storage, no reverseArr): val=%s exec=%s\n",
+		formatHooks(reverseHooks(valHooks)), formatHooks(reverseHooks(execHooks)))
 	return nil
 }
 
