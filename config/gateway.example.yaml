@@ -111,19 +111,17 @@ smart_wallet:
   account_provider:       modular_account_v2
   alchemy_api_key:        ${ALCHEMY_API_KEY}
   controller_private_key: <testnet-controller-private-key-hex>
-  # Track B (not enabled). Spike: scripts/spike/mav2_7702_eoa
-  # Canonical delegate: SemiModularAccount7702
-  #   0x69007702764179f14F51cdce752f4f775d74E139 (alchemy.sma-7702.1.0.0)
-  # K13: code[0:3]==0xef0100 && code[3:23]==that address && keccak256(impl).
-  # Never assert on type-4 tx status. Production execute is B5 with
-  # eoa_7702_execute: false until the spike evidence is in. Do not patch
-  # SendUserOpMAv2 here.
-  #
-  # The two keys below are comments only. load uses yaml.Unmarshal, which
-  # drops unknown fields — uncommenting them here currently does nothing.
-  # B1 will add typed config fields that the loader actually reads.
-  # eoa_7702_execute: false
-  # sma_7702_delegate: 0x69007702764179f14F51cdce752f4f775d74E139
+  # Track B pin (K13). Loader reads these. Execute stays false until B5
+  # honors the flag on the send path. Do not patch SendUserOpMAv2 here.
+  # Canonical delegate: SemiModularAccount7702 alchemy.sma-7702.1.0.0
+  # Impl hash: keccak256 of 23741 bytes at that address, byte-identical on
+  # Sepolia and Base (B0). Comparison is code[0:3]==0xef0100 &&
+  # code[3:23]==delegate && keccak256(impl). Never type-4 tx status.
+  # chain_id=0 7702 authorizations are refused. First execute chains:
+  # Sepolia (11155111) and Base (8453).
+  eoa_7702_execute: false
+  sma_7702_delegate:  0x69007702764179f14F51cdce752f4f775d74E139
+  sma_7702_impl_hash: 0xecfc0328ce4d953a4d452e11f54b578fa2d7f2f8126246d1120ca24d11845081
   # paymaster_address is INERT. It named the v0.6 verifying paymaster, removed
   # with the EntryPoint v0.7 cutover; sponsorship is alchemy_paymaster_policy_id.
   # Still parsed so older configs load, and logged once as ignored. Leave unset.
@@ -142,6 +140,9 @@ chains:
       bundler_provider:       alchemy
       alchemy_api_key:        ${ALCHEMY_API_KEY}
       controller_private_key: <testnet-controller-private-key-hex>
+      eoa_7702_execute:       false
+      sma_7702_delegate:      0x69007702764179f14F51cdce752f4f775d74E139
+      sma_7702_impl_hash:     0xecfc0328ce4d953a4d452e11f54b578fa2d7f2f8126246d1120ca24d11845081
       paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
       max_wallets_per_owner:  2000
 
