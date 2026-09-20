@@ -223,3 +223,106 @@ func TestExecuteWithdraw_CoveringGrantPassesPreflight(t *testing.T) {
 		t.Fatalf("expected EOA or cap fail-closed, got %v", err)
 	}
 }
+
+func TestDerivationSaltForWallet(t *testing.T) {
+	db := testutil.TestMustDB()
+	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
+
+	owner := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	wallet := common.HexToAddress("0x16b4b3624CC88AAafE3Df54955d19AEB2840670C")
+	factory := common.HexToAddress("0x00000000000017c61b5bEe81050EC8eFc9c6fecd")
+	const chainID int64 = 11155111
+	if err := taskengine.StoreWallet(db, chainID, owner, &model.SmartWallet{
+		Owner: &owner, Address: &wallet, Factory: &factory, Salt: big.NewInt(25),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	server := &RpcServer{db: db, config: &config.Config{Logger: logger.NewNoOpLogger()}}
+	salt, err := server.derivationSaltForWallet(chainID, owner, wallet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if salt == nil || salt.Int64() != 25 {
+		t.Fatalf("stored salt = %v, want 25", salt)
+	}
+
+	_, err = server.derivationSaltForWallet(chainID, owner, common.HexToAddress("0x000000000000000000000000000000000000dEaD"))
+	if err == nil {
+		t.Fatal("missing wallet must error, not fall back to salt 0")
+	}
+	if !strings.Contains(err.Error(), "looking up derivation salt") {
+		t.Fatalf("missing wallet: %v", err)
+	}
+
+	nilSaltWallet := common.HexToAddress("0x00000000000000000000000000000000000000a1")
+	if err := taskengine.StoreWallet(db, chainID, owner, &model.SmartWallet{
+		Owner: &owner, Address: &nilSaltWallet, Factory: &factory, Salt: nil,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = server.derivationSaltForWallet(chainID, owner, nilSaltWallet)
+	if err == nil {
+		t.Fatal("nil Salt without a salt-0 proof must error, not fall back to salt 0")
+	}
+
+	noDB := &RpcServer{config: &config.Config{Logger: logger.NewNoOpLogger()}}
+	_, err = noDB.derivationSaltForWallet(chainID, owner, wallet)
+	if err == nil {
+		t.Fatal("no storage must error, not assume salt 0")
+	}
+
+	// Miss / nil Salt may proceed only when the address is the salt-0 derivation.
+	salt0 := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	withHook := &RpcServer{
+		db:     db,
+		config: &config.Config{Logger: logger.NewNoOpLogger()},
+		deriveSalt0: func(common.Address) (common.Address, error) {
+			return salt0, nil
+		},
+	}
+	got, err := withHook.derivationSaltForWallet(chainID, owner, salt0)
+	if err != nil {
+		t.Fatalf("salt-0 identity: %v", err)
+	}
+	if got == nil || got.Sign() != 0 {
+		t.Fatalf("salt-0 identity = %v, want 0", got)
+	}
+	_, err = withHook.derivationSaltForWallet(chainID, owner, common.HexToAddress("0x000000000000000000000000000000000000dEaD"))
+	if err == nil {
+		t.Fatal("non-salt-0 miss must still refuse")
+	}
+	if !strings.Contains(err.Error(), "not the salt-0 address") {
+		t.Fatalf("non-salt-0 miss: %v", err)
+	}
+	if err := taskengine.StoreWallet(db, chainID, owner, &model.SmartWallet{
+		Owner: &owner, Address: &salt0, Factory: &factory, Salt: nil,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = withHook.derivationSaltForWallet(chainID, owner, salt0)
+	if err != nil {
+		t.Fatalf("nil Salt that matches salt-0 should proceed: %v", err)
+	}
+	if got == nil || got.Sign() != 0 {
+		t.Fatalf("nil Salt salt-0 identity = %v, want 0", got)
+	}
+	_, err = withHook.derivationSaltForWallet(chainID, owner, nilSaltWallet)
+	if err == nil {
+		t.Fatal("nil Salt that is not salt-0 must still refuse")
+	}
+
+	negWallet := common.HexToAddress("0x00000000000000000000000000000000000000b1")
+	if err := taskengine.StoreWallet(db, chainID, owner, &model.SmartWallet{
+		Owner: &owner, Address: &negWallet, Factory: &factory, Salt: big.NewInt(-12),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = withHook.derivationSaltForWallet(chainID, owner, negWallet)
+	if err == nil {
+		t.Fatal("negative salt must not be packed; identity check should refuse")
+	}
+	if !strings.Contains(err.Error(), "not the salt-0 address") {
+		t.Fatalf("negative salt: %v", err)
+	}
+}

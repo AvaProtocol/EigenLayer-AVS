@@ -382,6 +382,10 @@ const (
 	// The replace checks install and remove entities several at a time, which
 	// would churn any layout they shared.
 	fixtureSaltGrantReplace = 13
+	// Native ETH live proofs (A4). Own salt so replace/n-way fixtures stay intact.
+	fixtureSaltNativeETH = 24
+	// L6 REST withdraw. Separate runner so it does not share entities with L1–L11.
+	fixtureSaltNativeWithdraw = 25
 )
 
 // Entities are consumed, never recycled — by design, not by neglect.
