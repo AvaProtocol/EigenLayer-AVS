@@ -1220,6 +1220,7 @@ Production Track B execute is **not** done when B1–B7 pass; it is done when th
 - MA v2 7702 PoC: [chrisli30/mav2-7702-poc](https://github.com/chrisli30/mav2-7702-poc)
 - Calibur PoC (rejected vendor; cited only in Alternatives D): [chrisli30/calibur-7702-poc @ verify/ava-protocol-standalone](https://github.com/chrisli30/calibur-7702-poc/tree/verify/ava-protocol-standalone)
 - SDK pattern: `SDK_HANDOFF_DURABLE_EXECUTION.md`
+- Track A SDK/Studio handoff (as-built): [`SDK_HANDOFF_NATIVE_ETH_SESSION_GRANT.md`](../../SDK_HANDOFF_NATIVE_ETH_SESSION_GRANT.md)
 
 ---
 
@@ -1267,9 +1268,9 @@ Independently reviewable PRs, all targeting **`staging`**. Conventional Commit t
 
 #### PR A5 — `docs: SDK/Studio handoff for native ETH session grants`
 
-- **Files/components:** `SDK_HANDOFF_NATIVE_ETH_SESSION_GRANT.md` (new, this repo); pointer from `docs/changes/20260917-native-eth-and-eoa-permissions.md` once approved.
-- **Dependencies:** A1 (stable OpenAPI).
-- **Description:** K0 purpose-matched compile. **§A.0.1** UI contract. Cap-token+WETH **approve** already landed in Studio 2026-08-06; handoff adds `deposit`/`withdraw` + payable ETH-in as Uniswap (not native-send). `nativeTransfer` only when send-ETH is a purpose. Merge = union of recipients, max of caps. No Go behavior.
+- **Files/components:** [`SDK_HANDOFF_NATIVE_ETH_SESSION_GRANT.md`](../../SDK_HANDOFF_NATIVE_ETH_SESSION_GRANT.md); pointer from this spec.
+- **Dependencies:** A1 (stable OpenAPI). A2–A4 on `staging`.
+- **Description:** K0 purpose-matched compile. **§A.0.1** UI contract. Cap-token+WETH **approve** already landed in Studio 2026-08-06; handoff adds `deposit`/`withdraw` + payable ETH-in as Uniswap (not native-send). `nativeTransfer` only when send-ETH is a purpose. Merge = union of recipients, max of caps. No Go behavior. **As-built.**
 
 #### PR A6 — **cancelled / out of scope**
 
