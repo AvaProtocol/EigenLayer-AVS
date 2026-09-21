@@ -184,6 +184,33 @@ func TestNativePreflightGasUnitsFor(t *testing.T) {
 
 // Native recipient rows set HasSelectorAllowlist=false. Empty-calldata
 // preflight must read nativeRecipients, not refuse every MA v2 chain.
+func TestValidateNativeRecipient7702Designation(t *testing.T) {
+	alice := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	code := make([]byte, 23)
+	code[0], code[1], code[2] = 0xef, 0x01, 0x00
+	copy(code[3:], config.SMA7702Delegate().Bytes())
+	permissions := SessionPermissions{
+		NativeRecipients: []*common.Address{&alice},
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "10000000000000000"},
+		ValidUntilMs:     time.Now().Add(time.Hour).UnixMilli(),
+		CodeAt:           func(common.Address) ([]byte, error) { return code, nil },
+	}
+	err := permissions.Validate()
+	if err == nil {
+		t.Fatal("7702-designated native recipient must still be refused")
+	}
+	if !strings.Contains(err.Error(), "7702-delegated EOA") {
+		t.Fatalf("got %q, want 7702-delegated EOA diagnosis", err)
+	}
+	if strings.Contains(err.Error(), "send via contractWrite") {
+		t.Fatalf("7702 diagnosis must not tell the user to contractWrite: %v", err)
+	}
+	permissions.AllowContractRecipient = true
+	if err := permissions.Validate(); err != nil {
+		t.Fatalf("allowContractRecipient must admit a 7702-designated recipient: %v", err)
+	}
+}
+
 func TestHooksForDoesNotRepeatCodeAt(t *testing.T) {
 	alice := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
 	var lookups int

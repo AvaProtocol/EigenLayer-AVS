@@ -44,10 +44,12 @@ const (
 
 func sepoliaRPC(t *testing.T) string {
 	t.Helper()
-	if u := os.Getenv("SPIKE_RPC_URL"); u != "" {
-		return u
+	u := strings.TrimSpace(os.Getenv("SPIKE_RPC_URL"))
+	require.NotEmpty(t, u, "SPIKE_RPC_URL must be a paid endpoint; public RPCs are refused")
+	if strings.Contains(strings.ToLower(u), "publicnode") || strings.Contains(strings.ToLower(u), "public-rpc") {
+		t.Fatal("SPIKE_RPC_URL must not be a public RPC")
 	}
-	return "https://ethereum-sepolia-rpc.publicnode.com"
+	return u
 }
 
 func sepoliaMAv2Config(t *testing.T) *config.SmartWalletConfig {
@@ -204,45 +206,6 @@ func TestMAv2SendRejectsZeroBalanceWithoutGasManager_Sepolia(t *testing.T) {
 		"error must point at Alchemy paymaster policy sponsorship: %v", err)
 	require.NotContains(t, strings.ToLower(err.Error()), "aa23",
 		"must not reach bundler estimate: %v", err)
-}
-
-func TestMAv2SendRejectsOwnerSenderWhenExecuteOff_Sepolia(t *testing.T) {
-	swCfg := sepoliaMAv2Config(t)
-	owner := common.HexToAddress(sepoliaOwnerEOA)
-	controllerKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	auth := &preset.SessionAuthorization{EntityID: 1, SignerKey: controllerKey}
-	callData, err := aa.PackExecute(owner, big.NewInt(0), nil)
-	require.NoError(t, err)
-
-	_, _, err = preset.SendUserOpMAv2(swCfg, owner, callData, &owner, big.NewInt(0), auth, logger.NewNoOpLogger())
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "eoa_7702_execute is false",
-		"owner as sender with the flag off must not look like a factory mismatch: %v", err)
-	require.NotContains(t, strings.ToLower(err.Error()), "aa23")
-}
-
-func TestMAv2SendRejectsOwnerSenderWithoutRecord_Sepolia(t *testing.T) {
-	swCfg := sepoliaMAv2Config(t)
-	swCfg.EOA7702Execute = true
-	swCfg.SMA7702Delegate = config.SMA7702Delegate()
-	swCfg.SMA7702ImplHash = config.SMA7702ImplHash()
-	preset.SetEOA7702AccountLookup(func(int64, common.Address, common.Address) (bool, error) {
-		return false, nil
-	})
-	t.Cleanup(func() { preset.SetEOA7702AccountLookup(nil) })
-
-	owner := common.HexToAddress(sepoliaOwnerEOA)
-	controllerKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	auth := &preset.SessionAuthorization{EntityID: 1, SignerKey: controllerKey}
-	callData, err := aa.PackExecute(owner, big.NewInt(0), nil)
-	require.NoError(t, err)
-
-	_, _, err = preset.SendUserOpMAv2(swCfg, owner, callData, &owner, big.NewInt(0), auth, logger.NewNoOpLogger())
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "no eoa_7702 wallet record")
-	require.NotContains(t, strings.ToLower(err.Error()), "aa23")
 }
 
 func TestMAv2SendRejectsOwnerSenderWhenExecuteOff_Sepolia(t *testing.T) {

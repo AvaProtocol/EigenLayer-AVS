@@ -52,6 +52,12 @@ Do not create this via `POST /wallets` (CREATE2 salt). A user may have **both** 
 
 A workflow whose runner is the derived CREATE2 wallet is unaffected. Do not set `aa_sender` to the owner EOA unless that workflow is meant to spend from the EOA.
 
+If `alchemy_paymaster_policy_id` is set, sponsorship is requested with `sender = EOA`. Gas Manager policies are often scoped by account type or sender allowlist; a 7702 EOA may not qualify. If sponsorship is refused the send is self-funded from the EOA's ETH, metered against the native cap (K7). Confirm on Sepolia before turning the flag on.
+
+## Native recipients (Track A interaction)
+
+A 7702-delegated EOA has 23 bytes of designation, so `eth_getCode` is non-empty. Listing it in `nativeRecipients` without `allowContractRecipient` is still refused (K4: unscoped empty-calldata on an account that can `execute`). The error is `native recipient is a 7702-delegated EOA; set allowContractRecipient`, not "send via contractWrite". Already-installed grants are unaffected; re-prepare and new grants hit this.
+
 ## Consent copy (Studio)
 
 Blast radius is the EOA itself. Scoped, expiring, revocable; never root. Two-step UX (delegate vs grant) is Studio-owned; this repo does not quote avs-infra private docs.
