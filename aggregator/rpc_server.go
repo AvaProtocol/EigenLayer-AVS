@@ -108,6 +108,11 @@ func (r *RpcServer) derivationSaltForWallet(chainID int64, owner, wallet common.
 		return nil, fmt.Errorf("no storage to look up derivation salt for wallet %s", wallet.Hex())
 	}
 	stored, err := taskengine.GetWallet(r.db, chainID, owner, wallet.Hex())
+	if stored != nil && stored.IsEOA7702() {
+		// Salt is unused on the 7702 send path; do not treat a nil salt as
+		// "maybe salt 0" and refuse because the EOA is not CREATE2.
+		return nil, nil
+	}
 	if salt := walletRecordSalt(stored); salt != nil {
 		return salt, nil
 	}
@@ -115,6 +120,9 @@ func (r *RpcServer) derivationSaltForWallet(chainID int64, owner, wallet common.
 	// address may only have a record there.
 	if r.engine != nil {
 		if def, dErr := r.engine.GetWalletFromDB(owner, wallet.Hex()); dErr == nil {
+			if def != nil && def.IsEOA7702() {
+				return nil, nil
+			}
 			if salt := walletRecordSalt(def); salt != nil {
 				return salt, nil
 			}

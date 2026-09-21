@@ -205,3 +205,81 @@ func TestMAv2SendRejectsZeroBalanceWithoutGasManager_Sepolia(t *testing.T) {
 	require.NotContains(t, strings.ToLower(err.Error()), "aa23",
 		"must not reach bundler estimate: %v", err)
 }
+
+func TestMAv2SendRejectsOwnerSenderWhenExecuteOff_Sepolia(t *testing.T) {
+	swCfg := sepoliaMAv2Config(t)
+	owner := common.HexToAddress(sepoliaOwnerEOA)
+	controllerKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	auth := &preset.SessionAuthorization{EntityID: 1, SignerKey: controllerKey}
+	callData, err := aa.PackExecute(owner, big.NewInt(0), nil)
+	require.NoError(t, err)
+
+	_, _, err = preset.SendUserOpMAv2(swCfg, owner, callData, &owner, big.NewInt(0), auth, logger.NewNoOpLogger())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "eoa_7702_execute is false",
+		"owner as sender with the flag off must not look like a factory mismatch: %v", err)
+	require.NotContains(t, strings.ToLower(err.Error()), "aa23")
+}
+
+func TestMAv2SendRejectsOwnerSenderWithoutRecord_Sepolia(t *testing.T) {
+	swCfg := sepoliaMAv2Config(t)
+	swCfg.EOA7702Execute = true
+	swCfg.SMA7702Delegate = config.SMA7702Delegate()
+	swCfg.SMA7702ImplHash = config.SMA7702ImplHash()
+	preset.SetEOA7702AccountLookup(func(int64, common.Address, common.Address) (bool, error) {
+		return false, nil
+	})
+	t.Cleanup(func() { preset.SetEOA7702AccountLookup(nil) })
+
+	owner := common.HexToAddress(sepoliaOwnerEOA)
+	controllerKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	auth := &preset.SessionAuthorization{EntityID: 1, SignerKey: controllerKey}
+	callData, err := aa.PackExecute(owner, big.NewInt(0), nil)
+	require.NoError(t, err)
+
+	_, _, err = preset.SendUserOpMAv2(swCfg, owner, callData, &owner, big.NewInt(0), auth, logger.NewNoOpLogger())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no eoa_7702 wallet record")
+	require.NotContains(t, strings.ToLower(err.Error()), "aa23")
+}
+
+func TestMAv2SendRejectsOwnerSenderWhenExecuteOff_Sepolia(t *testing.T) {
+	swCfg := sepoliaMAv2Config(t)
+	owner := common.HexToAddress(sepoliaOwnerEOA)
+	controllerKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	auth := &preset.SessionAuthorization{EntityID: 1, SignerKey: controllerKey}
+	callData, err := aa.PackExecute(owner, big.NewInt(0), nil)
+	require.NoError(t, err)
+
+	_, _, err = preset.SendUserOpMAv2(swCfg, owner, callData, &owner, big.NewInt(0), auth, logger.NewNoOpLogger())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "eoa_7702_execute is false",
+		"owner as sender with the flag off must not look like a factory mismatch: %v", err)
+	require.NotContains(t, strings.ToLower(err.Error()), "aa23")
+}
+
+func TestMAv2SendRejectsOwnerSenderWithoutRecord_Sepolia(t *testing.T) {
+	swCfg := sepoliaMAv2Config(t)
+	swCfg.EOA7702Execute = true
+	swCfg.SMA7702Delegate = config.SMA7702Delegate()
+	swCfg.SMA7702ImplHash = config.SMA7702ImplHash()
+	preset.SetEOA7702AccountLookup(func(int64, common.Address, common.Address) (bool, error) {
+		return false, nil
+	})
+	t.Cleanup(func() { preset.SetEOA7702AccountLookup(nil) })
+
+	owner := common.HexToAddress(sepoliaOwnerEOA)
+	controllerKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	auth := &preset.SessionAuthorization{EntityID: 1, SignerKey: controllerKey}
+	callData, err := aa.PackExecute(owner, big.NewInt(0), nil)
+	require.NoError(t, err)
+
+	_, _, err = preset.SendUserOpMAv2(swCfg, owner, callData, &owner, big.NewInt(0), auth, logger.NewNoOpLogger())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no eoa_7702 wallet record")
+	require.NotContains(t, strings.ToLower(err.Error()), "aa23")
+}

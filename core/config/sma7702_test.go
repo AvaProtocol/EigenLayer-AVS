@@ -74,20 +74,17 @@ func TestValidateSMA7702Execute(t *testing.T) {
 		require.ErrorContains(t, c.ValidateSMA7702(), "Sepolia")
 		require.ErrorContains(t, c.eoa7702ExecutePreconditions(), "Sepolia")
 	})
-	t.Run("true on Sepolia with pin hits B5, not the chain/pin guards", func(t *testing.T) {
+	t.Run("true on Sepolia with pin loads", func(t *testing.T) {
 		c := &SmartWalletConfig{
 			ChainID:         SMA7702ChainSepolia,
 			EOA7702Execute:  true,
 			SMA7702Delegate: SMA7702Delegate(),
 			SMA7702ImplHash: SMA7702ImplHash(),
 		}
-		require.NoError(t, c.eoa7702ExecutePreconditions(),
-			"B5 lifts only the blanket refusal; pin+Sepolia must already be legal")
-		err := c.ValidateSMA7702()
-		require.ErrorContains(t, err, "no send path honors it yet (B5)")
-		require.ErrorContains(t, err, "derived smart wallet")
+		require.NoError(t, c.eoa7702ExecutePreconditions())
+		require.NoError(t, c.ValidateSMA7702())
 	})
-	t.Run("true on Base with pin hits B5, not the chain/pin guards", func(t *testing.T) {
+	t.Run("true on Base with pin loads", func(t *testing.T) {
 		c := &SmartWalletConfig{
 			ChainID:         SMA7702ChainBase,
 			EOA7702Execute:  true,
@@ -95,7 +92,7 @@ func TestValidateSMA7702Execute(t *testing.T) {
 			SMA7702ImplHash: SMA7702ImplHash(),
 		}
 		require.NoError(t, c.eoa7702ExecutePreconditions())
-		require.ErrorContains(t, c.ValidateSMA7702(), "B5")
+		require.NoError(t, c.ValidateSMA7702())
 	})
 	t.Run("false with pin is the B1 default shape", func(t *testing.T) {
 		c := &SmartWalletConfig{
@@ -117,14 +114,23 @@ func TestApplySMA7702FromYAML(t *testing.T) {
 		require.False(t, dst.EOA7702Execute)
 		require.False(t, dst.HasSMA7702Pin())
 	})
-	t.Run("execute true is refused at apply even with pin", func(t *testing.T) {
+	t.Run("execute true with pin on Sepolia loads", func(t *testing.T) {
 		dst := &SmartWalletConfig{ChainID: 11155111}
+		require.NoError(t, applySMA7702(dst, SmartWalletConfigRaw{
+			EOA7702Execute:  true,
+			SMA7702Delegate: SMA7702DelegateAddressHex,
+			SMA7702ImplHash: SMA7702ImplHashHex,
+		}))
+		require.True(t, dst.EOA7702Execute)
+	})
+	t.Run("execute true with pin on base-sepolia is refused", func(t *testing.T) {
+		dst := &SmartWalletConfig{ChainID: 84532}
 		err := applySMA7702(dst, SmartWalletConfigRaw{
 			EOA7702Execute:  true,
 			SMA7702Delegate: SMA7702DelegateAddressHex,
 			SMA7702ImplHash: SMA7702ImplHashHex,
 		})
-		require.ErrorContains(t, err, "B5")
+		require.ErrorContains(t, err, "Sepolia")
 	})
 	t.Run("canonical pin parses", func(t *testing.T) {
 		dst := &SmartWalletConfig{ChainID: 11155111}

@@ -111,24 +111,32 @@ func SendUserOpMAv2(
 			sender.Hex(), owner.Hex())
 	}
 
-	// Sender must be the address this chain's factory derives for (owner, salt).
+	eoa7702, eoaErr := allowEOA7702Sender(ctx, smartWalletConfig, chainRPC, owner, sender)
+	if eoaErr != nil {
+		return nil, nil, eoaErr
+	}
+
+	// Sender must be the address this chain's factory derives for (owner, salt),
+	// unless this is a Track B EOA runner (kind=eoa_7702, flag on, K13).
 	// Covers both cases that previously reached the bundler as AA23:
 	//   - undeployed override with the wrong salt/factory (initCode would
 	//     deploy elsewhere)
 	//   - deployed legacy SimpleAccount runner on an MA v2 chain (no initCode,
 	//     v0.7 validation against v0.6 bytecode)
-	derived, derr := aa.DeriveSenderAddressAuto(chainRPC, owner, factory, salt)
-	if derr != nil {
-		return nil, nil, fmt.Errorf("deriving counterfactual address for sender %s: %w", sender.Hex(), derr)
-	}
-	if derived == nil || *derived != sender {
-		want := common.Address{}
-		if derived != nil {
-			want = *derived
+	if !eoa7702 {
+		derived, derr := aa.DeriveSenderAddressAuto(chainRPC, owner, factory, salt)
+		if derr != nil {
+			return nil, nil, fmt.Errorf("deriving counterfactual address for sender %s: %w", sender.Hex(), derr)
 		}
-		return nil, nil, fmt.Errorf(
-			"sender %s does not match the address derived for owner %s salt %s factory %s (derived %s); refusing MA v2 UserOp — wrong account type, salt, or factory (e.g. a legacy SimpleAccount runner on an MA v2 chain)",
-			sender.Hex(), owner.Hex(), salt.String(), factory.Hex(), want.Hex())
+		if derived == nil || *derived != sender {
+			want := common.Address{}
+			if derived != nil {
+				want = *derived
+			}
+			return nil, nil, fmt.Errorf(
+				"sender %s does not match the address derived for owner %s salt %s factory %s (derived %s); refusing MA v2 UserOp — wrong account type, salt, or factory (e.g. a legacy SimpleAccount runner on an MA v2 chain)",
+				sender.Hex(), owner.Hex(), salt.String(), factory.Hex(), want.Hex())
+		}
 	}
 
 	// A grant carrying execution hooks requires user-op context on EVERY
@@ -160,6 +168,9 @@ func SendUserOpMAv2(
 		return nil, nil, fmt.Errorf("checking whether %s is deployed: %w", sender.Hex(), err)
 	}
 	if !deployed {
+		if eoa7702 {
+			return nil, nil, fmt.Errorf("EOA_DELEGATION_MISSING: sender %s has no 7702 designation; initCode is never attached for an eoa_7702 runner", sender.Hex())
+		}
 		deployFactory, factoryData, initErr := aa.DeriveInitCodeAuto(owner, factory, salt)
 		if initErr != nil {
 			return nil, nil, fmt.Errorf("building init code: %w", initErr)
