@@ -90,13 +90,24 @@ func TestWorkflowSimulate(t *testing.T) {
 	user := testutil.TestUser1()
 
 	create := newRestWorkflowRequest(user.SmartAccountAddress.Hex())
-	// SimulateWorkflow compiles the trigger and nodes into a fresh VM;
-	// edges that reference the trigger ID confuse the compiler (it
-	// only sees nodes, not triggers). Drop the edges for the simulate
-	// payload — a single-node workflow doesn't need them.
+	// Simulate runs the trigger immediately. A block trigger calls
+	// GetBlockNumber on a live RPC; this harness is in-process and
+	// must not depend on chain. Manual trigger is the in-process shape.
+	manualType := generated.Manual
+	manual := generated.Trigger{
+		Name: "triggerabcde",
+		Type: generated.TriggerTypeManual,
+	}
+	require.NoError(t, manual.FromManualTrigger(generated.ManualTrigger{
+		Type: &manualType,
+		Config: &generated.ManualTriggerConfig{
+			Lang: generated.Json,
+			Data: &map[string]interface{}{"ok": true},
+		},
+	}))
 	cid := generated.ChainId(h.cfg.SmartWallet.ChainID)
 	simReq := generated.SimulateWorkflowRequest{
-		Trigger:        create.Trigger,
+		Trigger:        manual,
 		Nodes:          create.Nodes,
 		InputVariables: *create.InputVariables,
 		ChainId:        &cid,
