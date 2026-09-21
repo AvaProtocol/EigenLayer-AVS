@@ -26,8 +26,7 @@ func TestHealth(t *testing.T) {
 
 	status := decodeJSON[generated.HealthStatus](t, body)
 	assert.Equal(t, generated.Ok, status.Status, "status should be ok when engine is running")
-	require.NotNil(t, status.Version, "version should be reported")
-	assert.NotEmpty(t, *status.Version)
+	require.NotEmpty(t, status.Version, "version should be reported")
 }
 
 // TestHealthRejectsBadJWT exists to catch the inverse of TestHealth —
