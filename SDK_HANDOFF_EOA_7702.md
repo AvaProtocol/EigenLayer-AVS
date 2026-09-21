@@ -52,7 +52,7 @@ Do not create this via `POST /wallets` (CREATE2 salt). A user may have **both** 
 
 A workflow whose runner is the derived CREATE2 wallet is unaffected. Do not set `aa_sender` to the owner EOA unless that workflow is meant to spend from the EOA.
 
-If `alchemy_paymaster_policy_id` is set, sponsorship is requested with `sender = EOA`. Gas Manager policies are often scoped by account type or sender allowlist; a 7702 EOA may not qualify. If sponsorship is refused the send is self-funded from the EOA's ETH, metered against the native cap (K7). Confirm on Sepolia before turning the flag on.
+If `alchemy_paymaster_policy_id` is set, sponsorship is requested with `sender = EOA`. Refusal is fatal (no silent self-fund). Gas Manager simulated the 7702 EOA the same as a deployed MA v2 runner; **AA23 was missing-grant, not sender-type rejection** (MA v2 takes the entity from the nonce key, so with no grant validation reverts `ValidationFunctionMissing` instead of returning `SIG_VALIDATION_FAILED`; undeployed CREATE2 is **AA20**). `dummySignatureV07` was already correctly framed. A grant-carrying send against the existing production policy is denied by the custom-rules webhook (FeeLedger does not know a throwaway). We are not changing that policy, so sponsored K7 (Paymaster non-zero, EOA Δ = value only, NT Δ = value only) is unobserved on chain. Do not cite the AA23 simulation as "sponsorship was tested." Flag stays false.
 
 ## Native recipients (Track A interaction)
 
