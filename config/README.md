@@ -40,7 +40,7 @@ counterparts are `<role>[-<chain>]-railway.yaml` over in `avs-infra`.
 | Production (any role) | `avs-infra` → `railway/configs/<svc>-railway.yaml`, delivered via `AP_CONFIG_YAML` |
 | Running the Go test suite | `test.yaml` (copy from `test.example.yaml`, fill in RPC + Tenderly). Loaded as `testutil.DefaultConfigPath`; **not** a server config. |
 | Local dev gateway | `gateway.yaml` (copy from `gateway.example.yaml`) — `make gateway` / `make run-gateway` |
-| Studio `scripts/start.sh` Sepolia-only | `gateway-sepolia.yaml` (gitignored; mainnet chain blocks omitted) — `make run-gateway-sepolia`. `start.sh` inserts the SMA-7702 pin (`eoa_7702_execute: false`) before launch. |
+| Studio `scripts/start.sh` Sepolia-only | `gateway-sepolia.yaml` (gitignored; mainnet chain blocks omitted) — `make run-gateway-sepolia`. SMA-7702 pin is on the YAML (copy from `gateway.example.yaml`). |
 | Local dev worker for chain N | `worker-<chain>.yaml` (copy from the template) |
 | Local dev operator for chain N | `operator-<chain>.yaml` (copy from the template) |
 

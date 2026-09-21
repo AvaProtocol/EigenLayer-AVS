@@ -286,8 +286,8 @@ run-gateway:
 	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap aggregator --config=config/gateway.yaml
 # Sepolia-only aggregator (studio scripts/start.sh when mainnet env is absent).
 # Chain blocks for Ethereum/Base must be omitted from this YAML — empty
-# MAINNET_CONTROLLER_PRIVATE_KEY panics at parse. SMA-7702 pin lives on
-# the gitignored YAML; start.sh inserts it before launching.
+# MAINNET_CONTROLLER_PRIVATE_KEY panics at parse. SMA-7702 pin is on the
+# YAML (copy from gateway.example.yaml); this target does not rewrite it.
 run-gateway-sepolia:
 	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap aggregator --config=config/gateway-sepolia.yaml
 run-worker-sepolia:
