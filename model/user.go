@@ -61,6 +61,50 @@ type SmartWallet struct {
 	// from the (owner, factory, salt) secondary index and force-hidden in
 	// list responses.
 	StaleDerivation bool `json:"stale_derivation,omitempty"`
+
+	// Kind is empty/omitted for derived CREATE2 wallets. "eoa_7702" is the
+	// owner's EOA delegated to SemiModularAccount7702 (Track B). Additive;
+	// existing rows stay empty.
+	Kind string `json:"kind,omitempty"`
+	// Delegate is the SMA-7702 implementation the EOA designates. Nil on
+	// derived wallets.
+	Delegate *common.Address `json:"delegate,omitempty"`
+}
+
+// WalletKindEOA7702 is SmartWallet.Kind for a 7702-delegated EOA runner.
+const WalletKindEOA7702 = "eoa_7702"
+
+// IsEOA7702 reports a Track B EOA runner record.
+func (w *SmartWallet) IsEOA7702() bool {
+	return w != nil && w.Kind == WalletKindEOA7702
+}
+
+// ValidateEOA7702Shape checks the B2 record contract: Address==Owner, no
+// factory, no salt, Delegate set. Canonical-delegate equality is enforced
+// at upsert (engine), not here — model must not import config.
+func (w *SmartWallet) ValidateEOA7702Shape() error {
+	if w == nil {
+		return fmt.Errorf("nil eoa_7702 wallet")
+	}
+	if w.Kind != WalletKindEOA7702 {
+		return fmt.Errorf("kind %q is not %s", w.Kind, WalletKindEOA7702)
+	}
+	if w.Owner == nil || w.Address == nil {
+		return fmt.Errorf("eoa_7702 wallet needs owner and address")
+	}
+	if *w.Owner != *w.Address {
+		return fmt.Errorf("eoa_7702 address %s must equal owner %s", w.Address.Hex(), w.Owner.Hex())
+	}
+	if w.Factory != nil && *w.Factory != (common.Address{}) {
+		return fmt.Errorf("eoa_7702 wallet must not record a factory")
+	}
+	if w.Salt != nil {
+		return fmt.Errorf("eoa_7702 wallet must not record a salt")
+	}
+	if w.Delegate == nil || *w.Delegate == (common.Address{}) {
+		return fmt.Errorf("eoa_7702 wallet needs a delegate")
+	}
+	return nil
 }
 
 func (w *SmartWallet) ToJSON() ([]byte, error) {

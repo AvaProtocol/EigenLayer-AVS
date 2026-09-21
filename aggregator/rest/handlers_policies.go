@@ -482,6 +482,9 @@ func mapPolicyError(err error) error {
 	switch {
 	case errors.Is(err, taskengine.ErrSessionWalletNotMAv2):
 		return badRequest("SESSION_WALLET_NOT_MA_V2", err.Error(), "")
+	case errors.Is(err, taskengine.ErrEOADelegationMissing):
+		return &restmw.HTTPError{Status: http.StatusConflict, Code: "EOA_DELEGATION_MISSING",
+			Title: "EOA is not delegated to SMA-7702", Detail: err.Error()}
 	case errors.Is(err, taskengine.ErrSessionChainNotServed):
 		// Distinct from POLICIES_REJECTED so a client can tell "wrong chain"
 		// from "bad grant" and re-prepare against a chain we serve.

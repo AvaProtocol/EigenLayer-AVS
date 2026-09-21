@@ -14,6 +14,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/avsclient"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -138,8 +139,11 @@ func (s *Server) UpdateWallet(ctx echo.Context, address generated.EthereumAddres
 		return badRequest("WALLETS_NO_FIELDS", "No updatable fields supplied", "isHidden is the only supported field today.")
 	}
 
-	// Look up the stored wallet to recover its (salt, factory).
-	stored, err := s.engine.GetWalletFromDB(user.Address, string(address))
+	chainID := user.ChainID
+	stored, err := s.engine.StoredWallet(chainID, user.Address, string(address))
+	if err != nil || stored == nil {
+		stored, err = s.engine.GetWalletFromDB(user.Address, string(address))
+	}
 	if err != nil || stored == nil {
 		return &restmw.HTTPError{
 			Status: http.StatusNotFound,
@@ -147,6 +151,17 @@ func (s *Server) UpdateWallet(ctx echo.Context, address generated.EthereumAddres
 			Title:  "Wallet not found",
 			Detail: "No wallet record found for the supplied address; create it first via POST /wallets.",
 		}
+	}
+
+	if stored.IsEOA7702() {
+		if chainID <= 0 && s.config != nil && s.config.SmartWallet != nil {
+			chainID = s.config.SmartWallet.ChainID
+		}
+		updated, hideErr := s.engine.SetStoredWalletHidden(chainID, user.Address, stored.Address.Hex(), *body.IsHidden)
+		if hideErr != nil {
+			return hideErr
+		}
+		return ctx.JSON(http.StatusOK, modelWalletToOpenAPI(updated))
 	}
 
 	req := &avsproto.SetWalletReq{IsHidden: *body.IsHidden}
@@ -390,6 +405,14 @@ func protoSmartWalletToOpenAPI(in *avsproto.SmartWallet) generated.Wallet {
 		fa := generated.EthereumAddress(f)
 		out.FactoryAddress = &fa
 	}
+	if k := in.GetKind(); k != "" {
+		wk := generated.WalletKind(k)
+		out.Kind = &wk
+	}
+	if d := in.GetDelegate(); d != "" {
+		da := generated.EthereumAddress(d)
+		out.Delegate = &da
+	}
 	return out
 }
 
@@ -410,6 +433,29 @@ func protoWalletRespToOpenAPI(in *avsproto.GetWalletResp) generated.Wallet {
 	if f := in.GetFactoryAddress(); f != "" {
 		fa := generated.EthereumAddress(f)
 		out.FactoryAddress = &fa
+	}
+	return out
+}
+
+func modelWalletToOpenAPI(in *model.SmartWallet) generated.Wallet {
+	out := generated.Wallet{
+		Address:  generated.EthereumAddress(in.Address.Hex()),
+		IsHidden: ptrBool(in.IsHidden),
+	}
+	if in.Salt != nil {
+		out.Salt = in.Salt.String()
+	}
+	if in.Factory != nil {
+		fa := generated.EthereumAddress(in.Factory.Hex())
+		out.FactoryAddress = &fa
+	}
+	if in.IsEOA7702() {
+		k := generated.WalletKind(in.Kind)
+		out.Kind = &k
+		if in.Delegate != nil {
+			d := generated.EthereumAddress(in.Delegate.Hex())
+			out.Delegate = &d
+		}
 	}
 	return out
 }

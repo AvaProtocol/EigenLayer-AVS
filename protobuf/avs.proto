@@ -958,6 +958,10 @@ message SmartWallet {
   string salt = 2;
   string factory = 3;
   bool is_hidden = 4;  // Whether the wallet is hidden
+  // kind is empty for derived CREATE2 wallets; "eoa_7702" for a 7702-delegated EOA.
+  string kind = 5;
+  // delegate is the SMA-7702 implementation when kind is eoa_7702.
+  string delegate = 6;
 }
 
 message ListWalletResp {
@@ -1044,6 +1048,8 @@ message GetWalletResp {
   uint64 completed_task_count = 7;
   uint64 failed_task_count = 8;
   uint64 disabled_task_count = 9;
+  string kind = 10;
+  string delegate = 11;
 }
 
 message SetWalletReq {

@@ -1462,10 +1462,21 @@ components:
         address: { $ref: '#/components/schemas/EthereumAddress' }
         salt:
           type: string
-          description: Salt used in CREATE2 derivation (decimal string).
+          description: |
+            Salt used in CREATE2 derivation (decimal string). Empty for
+            `kind: eoa_7702` (no factory, no salt).
         factoryAddress:
           $ref: '#/components/schemas/EthereumAddress'
-          description: Factory contract used to derive this address.
+          description: Factory contract used to derive this address. Omitted for eoa_7702.
+        kind:
+          type: string
+          description: |
+            Empty/omitted for derived CREATE2 wallets. `eoa_7702` is the owner's
+            EOA delegated to SemiModularAccount7702.
+          enum: [eoa_7702]
+        delegate:
+          $ref: '#/components/schemas/EthereumAddress'
+          description: SMA-7702 implementation the EOA designates. Set when kind is eoa_7702.
         isHidden: { type: boolean }
         totalWorkflowCount: { type: integer, format: int64 }
         enabledWorkflowCount: { type: integer, format: int64 }
@@ -1541,6 +1552,48 @@ components:
         recipientAddress: { $ref: '#/components/schemas/EthereumAddress' }
         amount: { type: string }
         token: { type: string }
+
+    PreparedDelegation:
+      type: object
+      required: [chainId, delegate, nonce, digest]
+      description: |
+        EIP-7702 authorization the owner signs. `digest` is `SetCodeAuthorization.SigHash`
+        (0x05 ‖ rlp([chainId, delegate, nonce])). `chainId` is never 0.
+        Aggregator-broadcast submit uses this nonce as the EOA's nonce (the EOA
+        is the authority, not the type-4 sender).
+      properties:
+        chainId: { $ref: '#/components/schemas/ChainId' }
+        delegate: { $ref: '#/components/schemas/EthereumAddress' }
+        nonce:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Authority (EOA) nonce for the 7702 authorization.
+        digest: { $ref: '#/components/schemas/Hex' }
+
+    SubmitDelegationRequest:
+      type: object
+      required: [chainId, nonce, signature]
+      properties:
+        chainId: { $ref: '#/components/schemas/ChainId' }
+        nonce:
+          type: integer
+          format: int64
+          minimum: 0
+        signature:
+          $ref: '#/components/schemas/Hex'
+          description: 65-byte ECDSA over digest (v 0/1 or 27/28).
+
+    DelegationStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [missing, pending, delegated]
+        delegate: { $ref: '#/components/schemas/EthereumAddress' }
+        codeHash: { $ref: '#/components/schemas/Hex' }
+        chainId: { $ref: '#/components/schemas/ChainId' }
 
     NonceResponse:
       type: object
@@ -2770,6 +2823,106 @@ paths:
               schema: { $ref: '#/components/schemas/NonceResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /wallets/{address}/delegation:prepare:
+    parameters:
+      - name: address
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/EthereumAddress' }
+        description: The owner's EOA (the account that will be 7702-delegated).
+    post:
+      tags: [Wallets]
+      summary: Return the EIP-7702 authorization the owner signs
+      description: |
+        AVS-side consent, first of two approvals (delegate, then session grant).
+        Chain-bound: `chainId=0` is refused. First production chains are Sepolia
+        and Base, and the SMA-7702 pin must be configured. Partner assertions
+        are refused. Does not broadcast and does not install session hooks.
+      operationId: prepareEoaDelegation
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chainId: { $ref: '#/components/schemas/ChainId' }
+      responses:
+        '200':
+          description: Authorization payload to sign.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PreparedDelegation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /wallets/{address}/delegation:submit:
+    parameters:
+      - name: address
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/EthereumAddress' }
+    post:
+      tags: [Wallets]
+      summary: Broadcast the signed 7702 authorization and persist the EOA runner
+      description: |
+        Reconstructs the authorization, recovers the authority (must be the
+        path EOA), broadcasts a type-4 tx from the aggregator (the EOA is not
+        the sender, so the auth nonce is the EOA nonce, not nonce+1), then
+        asserts K13 (`ef0100`‖delegate + impl hash) — never tx status.
+        Upserts `kind=eoa_7702` wallet record. Does not install session hooks.
+      operationId: submitEoaDelegation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitDelegationRequest' }
+      responses:
+        '200':
+          description: EOA is designated to SMA-7702.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationStatus' }
+        '202':
+          description: |
+            Type-4 was broadcast; K13 is not yet visible. Poll GET
+            `/wallets/{address}/delegation` (GET upserts the eoa_7702 row
+            once code matches). Do not resubmit — the EOA nonce has not
+            changed and a second broadcast spends controller gas again.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationStatus' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Code at the EOA is not the pinned SMA-7702 designation.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /wallets/{address}/delegation:
+    parameters:
+      - name: address
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/EthereumAddress' }
+    get:
+      tags: [Wallets]
+      summary: Current 7702 designation of the EOA
+      operationId: getEoaDelegation
+      parameters:
+        - $ref: '#/components/parameters/ChainIdQuery'
+      responses:
+        '200':
+          description: Delegation status from a code read (K13), not tx status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationStatus' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   # =====================================================================
   # Session policies — grants of execution authority on a wallet
