@@ -154,7 +154,7 @@ func (s *Server) UpdateWallet(ctx echo.Context, address generated.EthereumAddres
 	}
 
 	if stored.IsEOA7702() {
-		if chainID <= 0 {
+		if chainID <= 0 && s.config != nil && s.config.SmartWallet != nil {
 			chainID = s.config.SmartWallet.ChainID
 		}
 		updated, hideErr := s.engine.SetStoredWalletHidden(chainID, user.Address, stored.Address.Hex(), *body.IsHidden)
