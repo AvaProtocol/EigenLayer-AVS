@@ -72,8 +72,9 @@ const (
 
 // Defines values for DelegationStatusStatus.
 const (
-	Delegated DelegationStatusStatus = "delegated"
-	Missing   DelegationStatusStatus = "missing"
+	DelegationStatusStatusDelegated DelegationStatusStatus = "delegated"
+	DelegationStatusStatusMissing   DelegationStatusStatus = "missing"
+	DelegationStatusStatusPending   DelegationStatusStatus = "pending"
 )
 
 // Defines values for ETHTransferNodeType.
@@ -276,9 +277,9 @@ const (
 
 // Defines values for WithdrawResponseStatus.
 const (
-	WithdrawResponseStatusConfirmed WithdrawResponseStatus = "confirmed"
-	WithdrawResponseStatusFailed    WithdrawResponseStatus = "failed"
-	WithdrawResponseStatusPending   WithdrawResponseStatus = "pending"
+	Confirmed WithdrawResponseStatus = "confirmed"
+	Failed    WithdrawResponseStatus = "failed"
+	Pending   WithdrawResponseStatus = "pending"
 )
 
 // Defines values for WorkflowCompletionReason.

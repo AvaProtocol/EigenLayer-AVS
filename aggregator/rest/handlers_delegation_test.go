@@ -11,6 +11,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 )
 
@@ -42,4 +43,21 @@ func TestSetCodeDigestMatchesSignSetCode(t *testing.T) {
 	auth, err := parsed.Authority()
 	require.NoError(t, err)
 	require.Equal(t, eoa, auth)
+}
+
+func TestEoaNonceIsCurrent(t *testing.T) {
+	require.True(t, eoaNonceIsCurrent(7, 7))
+	require.False(t, eoaNonceIsCurrent(1_000_000, 7), "a never-current nonce must not be broadcast")
+	require.False(t, eoaNonceIsCurrent(6, 7))
+}
+
+func TestBroadcastSetCodeRequiresControllerKey(t *testing.T) {
+	s := &Server{}
+	err := s.broadcastSetCode(t.Context(), nil, &config.SmartWalletConfig{}, types.SetCodeAuthorization{}, common.Address{})
+	require.Error(t, err)
+	var httpErr *restmw.HTTPError
+	require.ErrorAs(t, err, &httpErr)
+	require.Equal(t, "DELEGATION_NO_SIGNER", httpErr.Code)
+	require.Contains(t, httpErr.Detail, "controller_private_key")
+	require.NotContains(t, httpErr.Detail, "aggregator ECDSA")
 }

@@ -30,7 +30,9 @@ func (s *Server) PrepareEoaDelegation(ctx echo.Context, address generated.Ethere
 		return err
 	}
 	var body generated.PrepareEoaDelegationJSONBody
-	_ = ctx.Bind(&body)
+	if err := ctx.Bind(&body); err != nil && ctx.Request().ContentLength > 0 {
+		return badRequest("DELEGATION_BAD_BODY", "Invalid request body", err.Error())
+	}
 	eoa, chainID, _, rpc, err := s.delegationPreamble(ctx, p.User.Address, address, body.ChainId)
 	if err != nil {
 		return err
@@ -79,19 +81,46 @@ func (s *Server) SubmitEoaDelegation(ctx echo.Context, address generated.Ethereu
 			fmt.Sprintf("recovered %s, path is %s", authority.Hex(), eoa.Hex()))
 	}
 
-	already := s.engine.AssertEOA7702Delegation(ctx.Request().Context(), chainID, eoa)
-	if already != nil {
-		if err := s.broadcastSetCode(ctx.Request().Context(), rpc, sw, auth, eoa); err != nil {
+	var statusCode int
+	var payload generated.DelegationStatus
+	err = s.engine.RunWithSessionAuthorityLock(chainID, eoa, eoa, func() error {
+		reqCtx := ctx.Request().Context()
+		if s.engine.AssertEOA7702Delegation(reqCtx, chainID, eoa) == nil {
+			if err := s.engine.UpsertEOA7702Wallet(chainID, eoa); err != nil {
+				return err
+			}
+			statusCode = http.StatusOK
+			payload = s.delegationStatus(reqCtx, chainID, eoa, sw, rpc)
+			return nil
+		}
+		current, nErr := rpc.PendingNonceAt(reqCtx, eoa)
+		if nErr != nil {
+			return fmt.Errorf("reading EOA nonce: %w", nErr)
+		}
+		if !eoaNonceIsCurrent(uint64(body.Nonce), current) {
+			return badRequest("DELEGATION_STALE_NONCE", "Authorization nonce is not current",
+				fmt.Sprintf("signed nonce %d, EOA pending nonce %d; call prepare again and re-sign. A stale nonce still spends gas if broadcast.", body.Nonce, current))
+		}
+		if err := s.broadcastSetCode(reqCtx, rpc, sw, auth, eoa); err != nil {
 			return err
 		}
-		if err := s.engine.AssertEOA7702Delegation(ctx.Request().Context(), chainID, eoa); err != nil {
-			return mapDelegationError(err)
+		if s.engine.AssertEOA7702Delegation(reqCtx, chainID, eoa) == nil {
+			if err := s.engine.UpsertEOA7702Wallet(chainID, eoa); err != nil {
+				return err
+			}
+			statusCode = http.StatusOK
+			payload = s.delegationStatus(reqCtx, chainID, eoa, sw, rpc)
+			return nil
 		}
+		statusCode = http.StatusAccepted
+		payload = s.delegationStatus(reqCtx, chainID, eoa, sw, rpc)
+		payload.Status = generated.DelegationStatusStatusPending
+		return nil
+	})
+	if err != nil {
+		return mapDelegationError(err)
 	}
-	if err := s.engine.UpsertEOA7702Wallet(chainID, eoa); err != nil {
-		return err
-	}
-	return ctx.JSON(http.StatusOK, s.delegationStatus(ctx.Request().Context(), chainID, eoa, sw, rpc))
+	return ctx.JSON(statusCode, payload)
 }
 
 // GET /wallets/{address}/delegation
@@ -146,13 +175,13 @@ func (s *Server) delegationPreamble(ctx echo.Context, user common.Address, addre
 }
 
 func (s *Server) delegationStatus(ctx context.Context, chainID int64, eoa common.Address, sw *config.SmartWalletConfig, rpc *ethclient.Client) generated.DelegationStatus {
-	out := generated.DelegationStatus{Status: generated.Missing, ChainId: &chainID}
+	out := generated.DelegationStatus{Status: generated.DelegationStatusStatusMissing, ChainId: &chainID}
 	del := generated.EthereumAddress(config.SMA7702Delegate().Hex())
 	out.Delegate = &del
 	if err := s.engine.AssertEOA7702Delegation(ctx, chainID, eoa); err != nil {
 		return out
 	}
-	out.Status = generated.Delegated
+	out.Status = generated.DelegationStatusStatusDelegated
 	if rpc != nil && sw != nil {
 		if impl, err := rpc.CodeAt(ctx, sw.SMA7702Delegate, nil); err == nil {
 			h := crypto.Keccak256Hash(impl).Hex()
@@ -161,6 +190,10 @@ func (s *Server) delegationStatus(ctx context.Context, chainID int64, eoa common
 		}
 	}
 	return out
+}
+
+func eoaNonceIsCurrent(signed, pending uint64) bool {
+	return signed == pending
 }
 
 func setCodeDigest(chainID int64, delegate common.Address, nonce uint64) common.Hash {
@@ -192,14 +225,15 @@ func parseSetCodeAuth(chainID int64, delegate common.Address, nonce uint64, sigH
 }
 
 func (s *Server) broadcastSetCode(ctx context.Context, rpc *ethclient.Client, sw *config.SmartWalletConfig, auth types.SetCodeAuthorization, eoa common.Address) error {
-	if s.config == nil || s.config.EcdsaPrivateKey == nil {
+	if sw == nil || sw.ControllerPrivateKey == nil {
 		return &restmw.HTTPError{Status: http.StatusServiceUnavailable, Code: "DELEGATION_NO_SIGNER",
-			Title: "Aggregator signer unavailable", Detail: "type-4 broadcast needs the aggregator ECDSA key."}
+			Title:  "Controller signer unavailable",
+			Detail: "type-4 broadcast uses the per-chain controller_private_key (funded on this chain), not the AVS identity key."}
 	}
-	from := crypto.PubkeyToAddress(s.config.EcdsaPrivateKey.PublicKey)
+	from := crypto.PubkeyToAddress(sw.ControllerPrivateKey.PublicKey)
 	nonce, err := rpc.PendingNonceAt(ctx, from)
 	if err != nil {
-		return fmt.Errorf("aggregator nonce: %w", err)
+		return fmt.Errorf("controller nonce: %w", err)
 	}
 	tip, err := rpc.SuggestGasTipCap(ctx)
 	if err != nil {
@@ -228,7 +262,7 @@ func (s *Server) broadcastSetCode(ctx context.Context, rpc *ethclient.Client, sw
 		Value:     uint256.NewInt(0),
 		AuthList:  []types.SetCodeAuthorization{auth},
 	}
-	signed, err := types.SignNewTx(s.config.EcdsaPrivateKey, types.LatestSignerForChainID(big.NewInt(chainID)), inner)
+	signed, err := types.SignNewTx(sw.ControllerPrivateKey, types.LatestSignerForChainID(big.NewInt(chainID)), inner)
 	if err != nil {
 		return err
 	}
@@ -241,8 +275,10 @@ func (s *Server) broadcastSetCode(ctx context.Context, rpc *ethclient.Client, sw
 	return nil
 }
 
+const delegationMineWait = 30 * time.Second
+
 func waitMinedIgnoreStatus(ctx context.Context, chain *ethclient.Client, hash common.Hash) (*types.Receipt, error) {
-	deadline := time.Now().Add(3 * time.Minute)
+	deadline := time.Now().Add(delegationMineWait)
 	for time.Now().Before(deadline) {
 		receipt, err := chain.TransactionReceipt(ctx, hash)
 		if err == nil {
@@ -254,7 +290,7 @@ func waitMinedIgnoreStatus(ctx context.Context, chain *ethclient.Client, hash co
 		case <-time.After(3 * time.Second):
 		}
 	}
-	return nil, fmt.Errorf("type-4 %s not mined", hash)
+	return nil, nil
 }
 
 func mapDelegationError(err error) error {

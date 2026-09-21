@@ -20,9 +20,13 @@ Prepare returns `{ chainId, delegate, nonce, digest }`.
 - `nonce` is the **EOA's** nonce. Aggregator broadcasts the type-4, so the EOA is the authority, not the tx sender — **not** `nonce+1` (that is only for self-sponsored type-4).
 - `chainId=0` is refused. First chains: Sepolia `11155111` and Base `8453`.
 
-Submit body: `{ chainId, nonce, signature }` (65-byte ECDSA, v 0/1 or 27/28). Gateway recovers the authority (must be the path EOA), broadcasts type-4, then **K13** (`ef0100‖delegate` + impl hash). Failure → `EOA_DELEGATION_MISSING` (409). Receipt status is not evidence.
+Submit body: `{ chainId, nonce, signature }` (65-byte ECDSA, v 0/1 or 27/28). Gateway recovers the authority (must be the path EOA), **refuses if `nonce` ≠ the EOA's current pending nonce** (`DELEGATION_STALE_NONCE` — a signed-but-unusable nonce must not spend gas), broadcasts a type-4 paid by the **per-chain `controller_private_key`** (not the AVS EigenLayer identity key), then **K13**. Receipt status is not evidence.
 
-GET `/wallets/{eoa}/delegation` reads code, not tx history.
+- `200` + `status: delegated` — code matches the pin; wallet row upserted.
+- `202` + `status: pending` — type-4 was sent; designation not yet visible. **Poll GET. Do not resubmit** (EOA nonce is unchanged; a second broadcast spends controller gas again).
+- `409` `EOA_DELEGATION_MISSING` — code is not the pin.
+
+GET `/wallets/{eoa}/delegation` reads code, not tx history (`missing` or `delegated`).
 
 ## Wallet record
 

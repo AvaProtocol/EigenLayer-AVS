@@ -90,3 +90,12 @@ func (n *Engine) StoredWallet(chainID int64, owner common.Address, addr string) 
 	}
 	return GetWallet(n.db, chainID, owner, addr)
 }
+
+// RunWithSessionAuthorityLock serializes writers for one (chain, owner, runner).
+// Delegation submit uses it so concurrent retries cannot each broadcast a type-4.
+func (n *Engine) RunWithSessionAuthorityLock(chainID int64, owner, runner common.Address, fn func() error) error {
+	lock := sessionAuthorityLock(chainID, owner, runner)
+	lock.Lock()
+	defer lock.Unlock()
+	return fn()
+}

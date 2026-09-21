@@ -2031,6 +2031,15 @@ func (response SubmitEoaDelegation200JSONResponse) VisitSubmitEoaDelegationRespo
 	return json.NewEncoder(w).Encode(response)
 }
 
+type SubmitEoaDelegation202JSONResponse DelegationStatus
+
+func (response SubmitEoaDelegation202JSONResponse) VisitSubmitEoaDelegationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type SubmitEoaDelegation400ApplicationProblemPlusJSONResponse struct {
 	BadRequestApplicationProblemPlusJSONResponse
 }

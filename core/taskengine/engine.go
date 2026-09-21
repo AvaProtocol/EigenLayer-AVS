@@ -1219,7 +1219,9 @@ func (n *Engine) ListWallets(user *model.User, payload *avsproto.ListWalletReq) 
 			// Always include the default wallet in the response (even if storage failed)
 			if modelWallet != nil {
 				isHidden = modelWallet.IsHidden
-				actualSalt = modelWallet.Salt.String()
+				if modelWallet.Salt != nil {
+					actualSalt = modelWallet.Salt.String()
+				}
 				if modelWallet.Factory != nil {
 					actualFactory = modelWallet.Factory.Hex()
 				}

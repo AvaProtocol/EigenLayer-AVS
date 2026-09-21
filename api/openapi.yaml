@@ -1590,7 +1590,7 @@ components:
       properties:
         status:
           type: string
-          enum: [missing, delegated]
+          enum: [missing, pending, delegated]
         delegate: { $ref: '#/components/schemas/EthereumAddress' }
         codeHash: { $ref: '#/components/schemas/Hex' }
         chainId: { $ref: '#/components/schemas/ChainId' }
@@ -2882,6 +2882,14 @@ paths:
       responses:
         '200':
           description: EOA is designated to SMA-7702.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationStatus' }
+        '202':
+          description: |
+            Type-4 was broadcast; K13 is not yet visible. Poll GET
+            `/wallets/{address}/delegation`. Do not resubmit — the EOA nonce
+            has not changed and a second broadcast spends controller gas again.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationStatus' }
