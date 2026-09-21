@@ -2917,7 +2917,13 @@ paths:
         - $ref: '#/components/parameters/ChainIdQuery'
       responses:
         '200':
-          description: Delegation status from a code read (K13), not tx status.
+          description: |
+            Delegation status from a code read (K13), not tx status.
+            GET returns `missing` or `delegated` only — never `pending`.
+            `pending` is the 202 submit body while the type-4 has been
+            broadcast but K13 is not yet visible. Poll GET until
+            `delegated`; `missing` after submit means not visible yet,
+            not that submit failed. Do not resubmit.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationStatus' }
