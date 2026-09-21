@@ -13,6 +13,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 )
 
@@ -160,6 +161,21 @@ func (n *Engine) requireMAv2SessionWallet(user *model.User, chainID int64, walle
 	rec, err := n.lookupOwnedWalletRecord(user, chainID, wallet)
 	if err != nil {
 		return fmt.Errorf("loading wallet %s for session grant: %w", wallet.Hex(), err)
+	}
+	if rec != nil && rec.IsEOA7702() {
+		if err := rec.ValidateEOA7702Shape(); err != nil {
+			return fmt.Errorf("%w: %v", ErrSessionWalletNotMAv2, err)
+		}
+		if rec.Delegate == nil || *rec.Delegate != config.SMA7702Delegate() {
+			return fmt.Errorf("%w: eoa_7702 delegate is not the canonical SMA-7702", ErrSessionWalletNotMAv2)
+		}
+		if *rec.Address != user.Address {
+			return fmt.Errorf("%w: eoa_7702 runner must be the owner EOA", ErrSessionWalletNotMAv2)
+		}
+		if err := n.assertEOA7702OnChain(context.Background(), chainID, wallet); err != nil {
+			return err
+		}
+		return nil
 	}
 	if rec == nil || rec.Factory == nil || *rec.Factory == (common.Address{}) {
 		return fmt.Errorf("%w: no factory recorded for %s", ErrSessionWalletNotMAv2, wallet.Hex())

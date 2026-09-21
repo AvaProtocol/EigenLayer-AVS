@@ -69,6 +69,10 @@ const (
 	OpWithdrawWallet = "withdrawWallet"
 	OpGetWalletNonce = "getWalletNonce"
 
+	OpPrepareEoaDelegation = "prepareEoaDelegation"
+	OpSubmitEoaDelegation  = "submitEoaDelegation"
+	OpGetEoaDelegation     = "getEoaDelegation"
+
 	OpPrepareWalletPolicy = "prepareWalletPolicy"
 	OpSubmitWalletPolicy  = "submitWalletPolicy"
 	OpListWalletPolicies  = "listWalletPolicies"
@@ -131,6 +135,11 @@ var permissionMap = map[string]Level{
 	OpUpdateWallet:              LevelUser,
 	OpWithdrawWallet:            LevelUser,
 	OpGetWalletNonce:            LevelUser,
+
+	// Track B 7702 consent: user JWT + partner refusal (blast radius is the EOA).
+	OpPrepareEoaDelegation: LevelUserRefusePartner,
+	OpSubmitEoaDelegation:  LevelUserRefusePartner,
+	OpGetEoaDelegation:     LevelUserRefusePartner,
 
 	// Fund authority: user JWT + explicit partner refusal.
 	OpPrepareWalletPolicy: LevelUserRefusePartner,

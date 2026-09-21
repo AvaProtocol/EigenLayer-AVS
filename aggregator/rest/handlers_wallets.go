@@ -390,6 +390,14 @@ func protoSmartWalletToOpenAPI(in *avsproto.SmartWallet) generated.Wallet {
 		fa := generated.EthereumAddress(f)
 		out.FactoryAddress = &fa
 	}
+	if k := in.GetKind(); k != "" {
+		wk := generated.WalletKind(k)
+		out.Kind = &wk
+	}
+	if d := in.GetDelegate(); d != "" {
+		da := generated.EthereumAddress(d)
+		out.Delegate = &da
+	}
 	return out
 }
 

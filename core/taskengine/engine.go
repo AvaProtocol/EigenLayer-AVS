@@ -1169,7 +1169,9 @@ func (n *Engine) ListWallets(user *model.User, payload *avsproto.ListWalletReq) 
 
 			if dbGetErr == nil {
 				isHidden = modelWallet.IsHidden
-				actualSalt = modelWallet.Salt.String()
+				if modelWallet.Salt != nil {
+					actualSalt = modelWallet.Salt.String()
+				}
 				if modelWallet.Factory != nil {
 					actualFactory = modelWallet.Factory.Hex()
 				}
@@ -1277,11 +1279,21 @@ func (n *Engine) ListWallets(user *model.User, payload *avsproto.ListWalletReq) 
 		if storedModelWallet.Factory != nil {
 			factoryString = storedModelWallet.Factory.Hex()
 		}
+		saltString := ""
+		if storedModelWallet.Salt != nil {
+			saltString = storedModelWallet.Salt.String()
+		}
+		delegateString := ""
+		if storedModelWallet.Delegate != nil {
+			delegateString = storedModelWallet.Delegate.Hex()
+		}
 		walletsToReturnProto = append(walletsToReturnProto, &avsproto.SmartWallet{
 			Address:  storedModelWallet.Address.Hex(),
-			Salt:     storedModelWallet.Salt.String(),
+			Salt:     saltString,
 			Factory:  factoryString,
 			IsHidden: storedModelWallet.IsHidden,
+			Kind:     storedModelWallet.Kind,
+			Delegate: delegateString,
 		})
 	}
 	return &avsproto.ListWalletResp{Items: walletsToReturnProto}, nil

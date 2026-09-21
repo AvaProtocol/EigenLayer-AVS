@@ -77,6 +77,15 @@ type ServerInterface interface {
 	// Update wallet properties
 	// (PATCH /wallets/{address})
 	UpdateWallet(ctx echo.Context, address EthereumAddress) error
+	// Current 7702 designation of the EOA
+	// (GET /wallets/{address}/delegation)
+	GetEoaDelegation(ctx echo.Context, address EthereumAddress, params GetEoaDelegationParams) error
+	// Return the EIP-7702 authorization the owner signs
+	// (POST /wallets/{address}/delegation:prepare)
+	PrepareEoaDelegation(ctx echo.Context, address EthereumAddress) error
+	// Broadcast the signed 7702 authorization and persist the EOA runner
+	// (POST /wallets/{address}/delegation:submit)
+	SubmitEoaDelegation(ctx echo.Context, address EthereumAddress) error
 	// List the wallet's session policies
 	// (GET /wallets/{address}/policies)
 	ListWalletPolicies(ctx echo.Context, address EthereumAddress, params ListWalletPoliciesParams) error
@@ -590,6 +599,69 @@ func (w *ServerInterfaceWrapper) UpdateWallet(ctx echo.Context) error {
 	return err
 }
 
+// GetEoaDelegation converts echo context to params.
+func (w *ServerInterfaceWrapper) GetEoaDelegation(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "address" -------------
+	var address EthereumAddress
+
+	err = runtime.BindStyledParameterWithOptions("simple", "address", ctx.Param("address"), &address, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter address: %s", err))
+	}
+
+	ctx.Set(BearerAuthScopes, []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetEoaDelegationParams
+	// ------------- Optional query parameter "chainId" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "chainId", ctx.QueryParams(), &params.ChainId)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter chainId: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetEoaDelegation(ctx, address, params)
+	return err
+}
+
+// PrepareEoaDelegation converts echo context to params.
+func (w *ServerInterfaceWrapper) PrepareEoaDelegation(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "address" -------------
+	var address EthereumAddress
+
+	err = runtime.BindStyledParameterWithOptions("simple", "address", ctx.Param("address"), &address, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter address: %s", err))
+	}
+
+	ctx.Set(BearerAuthScopes, []string{})
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.PrepareEoaDelegation(ctx, address)
+	return err
+}
+
+// SubmitEoaDelegation converts echo context to params.
+func (w *ServerInterfaceWrapper) SubmitEoaDelegation(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "address" -------------
+	var address EthereumAddress
+
+	err = runtime.BindStyledParameterWithOptions("simple", "address", ctx.Param("address"), &address, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter address: %s", err))
+	}
+
+	ctx.Set(BearerAuthScopes, []string{})
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.SubmitEoaDelegation(ctx, address)
+	return err
+}
+
 // ListWalletPolicies converts echo context to params.
 func (w *ServerInterfaceWrapper) ListWalletPolicies(ctx echo.Context) error {
 	var err error
@@ -1055,6 +1127,9 @@ func RegisterHandlersWithBaseURL(router EchoRouter, si ServerInterface, baseURL 
 	router.GET(baseURL+"/wallets", wrapper.ListWallets)
 	router.POST(baseURL+"/wallets", wrapper.CreateWallet)
 	router.PATCH(baseURL+"/wallets/:address", wrapper.UpdateWallet)
+	router.GET(baseURL+"/wallets/:address/delegation", wrapper.GetEoaDelegation)
+	router.POST(baseURL+"/wallets/:address/delegation:prepare", wrapper.PrepareEoaDelegation)
+	router.POST(baseURL+"/wallets/:address/delegation:submit", wrapper.SubmitEoaDelegation)
 	router.GET(baseURL+"/wallets/:address/policies", wrapper.ListWalletPolicies)
 	router.DELETE(baseURL+"/wallets/:address/policies/:policyId", wrapper.RevokeWalletPolicy)
 	router.GET(baseURL+"/wallets/:address/policies/:policyId", wrapper.GetWalletPolicy)
@@ -1843,6 +1918,157 @@ type UpdateWallet404ApplicationProblemPlusJSONResponse struct {
 func (response UpdateWallet404ApplicationProblemPlusJSONResponse) VisitUpdateWalletResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetEoaDelegationRequestObject struct {
+	Address EthereumAddress `json:"address"`
+	Params  GetEoaDelegationParams
+}
+
+type GetEoaDelegationResponseObject interface {
+	VisitGetEoaDelegationResponse(w http.ResponseWriter) error
+}
+
+type GetEoaDelegation200JSONResponse DelegationStatus
+
+func (response GetEoaDelegation200JSONResponse) VisitGetEoaDelegationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetEoaDelegation401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetEoaDelegation401ApplicationProblemPlusJSONResponse) VisitGetEoaDelegationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetEoaDelegation403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response GetEoaDelegation403ApplicationProblemPlusJSONResponse) VisitGetEoaDelegationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PrepareEoaDelegationRequestObject struct {
+	Address EthereumAddress `json:"address"`
+	Body    *PrepareEoaDelegationJSONRequestBody
+}
+
+type PrepareEoaDelegationResponseObject interface {
+	VisitPrepareEoaDelegationResponse(w http.ResponseWriter) error
+}
+
+type PrepareEoaDelegation200JSONResponse PreparedDelegation
+
+func (response PrepareEoaDelegation200JSONResponse) VisitPrepareEoaDelegationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PrepareEoaDelegation400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response PrepareEoaDelegation400ApplicationProblemPlusJSONResponse) VisitPrepareEoaDelegationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PrepareEoaDelegation401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response PrepareEoaDelegation401ApplicationProblemPlusJSONResponse) VisitPrepareEoaDelegationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PrepareEoaDelegation403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response PrepareEoaDelegation403ApplicationProblemPlusJSONResponse) VisitPrepareEoaDelegationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SubmitEoaDelegationRequestObject struct {
+	Address EthereumAddress `json:"address"`
+	Body    *SubmitEoaDelegationJSONRequestBody
+}
+
+type SubmitEoaDelegationResponseObject interface {
+	VisitSubmitEoaDelegationResponse(w http.ResponseWriter) error
+}
+
+type SubmitEoaDelegation200JSONResponse DelegationStatus
+
+func (response SubmitEoaDelegation200JSONResponse) VisitSubmitEoaDelegationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SubmitEoaDelegation400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response SubmitEoaDelegation400ApplicationProblemPlusJSONResponse) VisitSubmitEoaDelegationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SubmitEoaDelegation401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response SubmitEoaDelegation401ApplicationProblemPlusJSONResponse) VisitSubmitEoaDelegationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SubmitEoaDelegation403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response SubmitEoaDelegation403ApplicationProblemPlusJSONResponse) VisitSubmitEoaDelegationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SubmitEoaDelegation409ApplicationProblemPlusJSONResponse Problem
+
+func (response SubmitEoaDelegation409ApplicationProblemPlusJSONResponse) VisitSubmitEoaDelegationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -2793,6 +3019,15 @@ type StrictServerInterface interface {
 	// Update wallet properties
 	// (PATCH /wallets/{address})
 	UpdateWallet(ctx context.Context, request UpdateWalletRequestObject) (UpdateWalletResponseObject, error)
+	// Current 7702 designation of the EOA
+	// (GET /wallets/{address}/delegation)
+	GetEoaDelegation(ctx context.Context, request GetEoaDelegationRequestObject) (GetEoaDelegationResponseObject, error)
+	// Return the EIP-7702 authorization the owner signs
+	// (POST /wallets/{address}/delegation:prepare)
+	PrepareEoaDelegation(ctx context.Context, request PrepareEoaDelegationRequestObject) (PrepareEoaDelegationResponseObject, error)
+	// Broadcast the signed 7702 authorization and persist the EOA runner
+	// (POST /wallets/{address}/delegation:submit)
+	SubmitEoaDelegation(ctx context.Context, request SubmitEoaDelegationRequestObject) (SubmitEoaDelegationResponseObject, error)
 	// List the wallet's session policies
 	// (GET /wallets/{address}/policies)
 	ListWalletPolicies(ctx context.Context, request ListWalletPoliciesRequestObject) (ListWalletPoliciesResponseObject, error)
@@ -3392,6 +3627,94 @@ func (sh *strictHandler) UpdateWallet(ctx echo.Context, address EthereumAddress)
 		return err
 	} else if validResponse, ok := response.(UpdateWalletResponseObject); ok {
 		return validResponse.VisitUpdateWalletResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetEoaDelegation operation middleware
+func (sh *strictHandler) GetEoaDelegation(ctx echo.Context, address EthereumAddress, params GetEoaDelegationParams) error {
+	var request GetEoaDelegationRequestObject
+
+	request.Address = address
+	request.Params = params
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetEoaDelegation(ctx.Request().Context(), request.(GetEoaDelegationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetEoaDelegation")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetEoaDelegationResponseObject); ok {
+		return validResponse.VisitGetEoaDelegationResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// PrepareEoaDelegation operation middleware
+func (sh *strictHandler) PrepareEoaDelegation(ctx echo.Context, address EthereumAddress) error {
+	var request PrepareEoaDelegationRequestObject
+
+	request.Address = address
+
+	var body PrepareEoaDelegationJSONRequestBody
+	if err := ctx.Bind(&body); err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.PrepareEoaDelegation(ctx.Request().Context(), request.(PrepareEoaDelegationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PrepareEoaDelegation")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(PrepareEoaDelegationResponseObject); ok {
+		return validResponse.VisitPrepareEoaDelegationResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// SubmitEoaDelegation operation middleware
+func (sh *strictHandler) SubmitEoaDelegation(ctx echo.Context, address EthereumAddress) error {
+	var request SubmitEoaDelegationRequestObject
+
+	request.Address = address
+
+	var body SubmitEoaDelegationJSONRequestBody
+	if err := ctx.Bind(&body); err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.SubmitEoaDelegation(ctx.Request().Context(), request.(SubmitEoaDelegationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SubmitEoaDelegation")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(SubmitEoaDelegationResponseObject); ok {
+		return validResponse.VisitSubmitEoaDelegationResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}

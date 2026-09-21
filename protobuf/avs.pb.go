@@ -2891,11 +2891,15 @@ func (x *ListWalletReq) GetSalt() string {
 }
 
 type SmartWallet struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
-	Salt          string                 `protobuf:"bytes,2,opt,name=salt,proto3" json:"salt,omitempty"`
-	Factory       string                 `protobuf:"bytes,3,opt,name=factory,proto3" json:"factory,omitempty"`
-	IsHidden      bool                   `protobuf:"varint,4,opt,name=is_hidden,json=isHidden,proto3" json:"is_hidden,omitempty"` // Whether the wallet is hidden
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Address  string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Salt     string                 `protobuf:"bytes,2,opt,name=salt,proto3" json:"salt,omitempty"`
+	Factory  string                 `protobuf:"bytes,3,opt,name=factory,proto3" json:"factory,omitempty"`
+	IsHidden bool                   `protobuf:"varint,4,opt,name=is_hidden,json=isHidden,proto3" json:"is_hidden,omitempty"` // Whether the wallet is hidden
+	// kind is empty for derived CREATE2 wallets; "eoa_7702" for a 7702-delegated EOA.
+	Kind string `protobuf:"bytes,5,opt,name=kind,proto3" json:"kind,omitempty"`
+	// delegate is the SMA-7702 implementation when kind is eoa_7702.
+	Delegate      string `protobuf:"bytes,6,opt,name=delegate,proto3" json:"delegate,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2956,6 +2960,20 @@ func (x *SmartWallet) GetIsHidden() bool {
 		return x.IsHidden
 	}
 	return false
+}
+
+func (x *SmartWallet) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *SmartWallet) GetDelegate() string {
+	if x != nil {
+		return x.Delegate
+	}
+	return ""
 }
 
 type ListWalletResp struct {
@@ -3550,6 +3568,8 @@ type GetWalletResp struct {
 	CompletedTaskCount uint64                 `protobuf:"varint,7,opt,name=completed_task_count,json=completedTaskCount,proto3" json:"completed_task_count,omitempty"`
 	FailedTaskCount    uint64                 `protobuf:"varint,8,opt,name=failed_task_count,json=failedTaskCount,proto3" json:"failed_task_count,omitempty"`
 	DisabledTaskCount  uint64                 `protobuf:"varint,9,opt,name=disabled_task_count,json=disabledTaskCount,proto3" json:"disabled_task_count,omitempty"`
+	Kind               string                 `protobuf:"bytes,10,opt,name=kind,proto3" json:"kind,omitempty"`
+	Delegate           string                 `protobuf:"bytes,11,opt,name=delegate,proto3" json:"delegate,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -3645,6 +3665,20 @@ func (x *GetWalletResp) GetDisabledTaskCount() uint64 {
 		return x.DisabledTaskCount
 	}
 	return 0
+}
+
+func (x *GetWalletResp) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *GetWalletResp) GetDelegate() string {
+	if x != nil {
+		return x.Delegate
+	}
+	return ""
 }
 
 type SetWalletReq struct {
@@ -10551,12 +10585,14 @@ const file_avs_proto_rawDesc = "" +
 	"\x05nonce\x18\x01 \x01(\tR\x05nonce\"L\n" +
 	"\rListWalletReq\x12'\n" +
 	"\x0ffactory_address\x18\x01 \x01(\tR\x0efactoryAddress\x12\x12\n" +
-	"\x04salt\x18\x02 \x01(\tR\x04salt\"r\n" +
+	"\x04salt\x18\x02 \x01(\tR\x04salt\"\xa2\x01\n" +
 	"\vSmartWallet\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
 	"\x04salt\x18\x02 \x01(\tR\x04salt\x12\x18\n" +
 	"\afactory\x18\x03 \x01(\tR\afactory\x12\x1b\n" +
-	"\tis_hidden\x18\x04 \x01(\bR\bisHidden\"?\n" +
+	"\tis_hidden\x18\x04 \x01(\bR\bisHidden\x12\x12\n" +
+	"\x04kind\x18\x05 \x01(\tR\x04kind\x12\x1a\n" +
+	"\bdelegate\x18\x06 \x01(\tR\bdelegate\"?\n" +
 	"\x0eListWalletResp\x12-\n" +
 	"\x05items\x18\x01 \x03(\v2\x17.aggregator.SmartWalletR\x05items\"\xce\x01\n" +
 	"\fListTasksReq\x120\n" +
@@ -10592,7 +10628,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x06expiry\x18\x04 \x01(\x04R\x06expiry\"K\n" +
 	"\fGetWalletReq\x12\x12\n" +
 	"\x04salt\x18\x01 \x01(\tR\x04salt\x12'\n" +
-	"\x0ffactory_address\x18\x02 \x01(\tR\x0efactoryAddress\"\xe9\x02\n" +
+	"\x0ffactory_address\x18\x02 \x01(\tR\x0efactoryAddress\"\x99\x03\n" +
 	"\rGetWalletResp\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
 	"\x04salt\x18\x02 \x01(\tR\x04salt\x12'\n" +
@@ -10602,7 +10638,10 @@ const file_avs_proto_rawDesc = "" +
 	"\x12enabled_task_count\x18\x06 \x01(\x04R\x10enabledTaskCount\x120\n" +
 	"\x14completed_task_count\x18\a \x01(\x04R\x12completedTaskCount\x12*\n" +
 	"\x11failed_task_count\x18\b \x01(\x04R\x0ffailedTaskCount\x12.\n" +
-	"\x13disabled_task_count\x18\t \x01(\x04R\x11disabledTaskCount\"h\n" +
+	"\x13disabled_task_count\x18\t \x01(\x04R\x11disabledTaskCount\x12\x12\n" +
+	"\x04kind\x18\n" +
+	" \x01(\tR\x04kind\x12\x1a\n" +
+	"\bdelegate\x18\v \x01(\tR\bdelegate\"h\n" +
 	"\fSetWalletReq\x12\x12\n" +
 	"\x04salt\x18\x01 \x01(\tR\x04salt\x12'\n" +
 	"\x0ffactory_address\x18\x02 \x01(\tR\x0efactoryAddress\x12\x1b\n" +
