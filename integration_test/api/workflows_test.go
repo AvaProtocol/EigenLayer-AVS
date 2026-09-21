@@ -94,11 +94,12 @@ func TestWorkflowSimulate(t *testing.T) {
 	// edges that reference the trigger ID confuse the compiler (it
 	// only sees nodes, not triggers). Drop the edges for the simulate
 	// payload — a single-node workflow doesn't need them.
+	cid := generated.ChainId(h.cfg.SmartWallet.ChainID)
 	simReq := generated.SimulateWorkflowRequest{
 		Trigger:        create.Trigger,
 		Nodes:          create.Nodes,
 		InputVariables: *create.InputVariables,
-		ChainId:        create.ChainId,
+		ChainId:        &cid,
 	}
 
 	resp, body := h.authedRequest(http.MethodPost, "/api/v1/workflows:simulate", simReq)
