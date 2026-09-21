@@ -275,6 +275,20 @@ type SmartWalletConfig struct {
 	// webhookData so the custom-rules webhook can authenticate the call.
 	// Empty omits the field (webhook secret check disabled on the gateway).
 	GasManagerWebhookSecret string
+
+	// EOA7702Execute is the Track B send-path flag. Default false. True is
+	// refused at load until B5 adds the consumer — a true value today would
+	// look honored (typed, logged) while UserOps still go through the
+	// derived smart wallet. avs-infra ships config separately from code.
+	EOA7702Execute bool
+
+	// SMA7702Delegate is the canonical SemiModularAccount7702 address this
+	// chain will K13-check against. Empty means 7702 is not configured here.
+	SMA7702Delegate common.Address
+
+	// SMA7702ImplHash is keccak256 of the bytecode at SMA7702Delegate,
+	// pinned from B0 (Sepolia and Base, 23741 bytes).
+	SMA7702ImplHash common.Hash
 }
 
 // Bundler provider identifiers for SmartWalletConfig.BundlerProvider.
@@ -575,6 +589,9 @@ type SmartWalletConfigRaw struct {
 	PaymasterAddress     string   `yaml:"paymaster_address"`
 	WhitelistAddresses   []string `yaml:"whitelist_addresses"`
 	MaxWalletsPerOwner   int      `yaml:"max_wallets_per_owner"`
+	EOA7702Execute       bool     `yaml:"eoa_7702_execute"`
+	SMA7702Delegate      string   `yaml:"sma_7702_delegate"`
+	SMA7702ImplHash      string   `yaml:"sma_7702_impl_hash"`
 }
 
 // ChainConfigRaw represents a per-chain entry in the gateway's chains[] config.
@@ -989,6 +1006,16 @@ func NewConfig(configFilePath string) (*Config, error) {
 		if err := config.SmartWallet.ValidateAccountProvider(); err != nil {
 			return nil, fmt.Errorf("top-level smart_wallet: %w", err)
 		}
+		if err := applySMA7702(config.SmartWallet, configRaw.SmartWallet); err != nil {
+			return nil, fmt.Errorf("top-level smart_wallet: %w", err)
+		}
+		if config.SmartWallet.HasSMA7702Pin() {
+			logger.Info("SMA-7702 pin",
+				"chain_id", config.SmartWallet.ChainID,
+				"delegate", config.SmartWallet.SMA7702Delegate.Hex(),
+				"impl_hash", config.SmartWallet.SMA7702ImplHash.Hex(),
+				"eoa_7702_execute", config.SmartWallet.EOA7702Execute)
+		}
 	}
 
 	// smart_wallet.paymaster_address is inert. It named the v0.6 verifying
@@ -1310,6 +1337,9 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 	if err := chainCfg.SmartWallet.ValidateAccountProvider(); err != nil {
 		return nil, fmt.Errorf("chain %s (chain_id=%d): %w", raw.Name, raw.ChainID, err)
 	}
+	if err := applySMA7702(chainCfg.SmartWallet, sw); err != nil {
+		return nil, fmt.Errorf("chain %s (chain_id=%d): %w", raw.Name, raw.ChainID, err)
+	}
 	// smart_wallet.paymaster_address is inert per chain for the same reason it
 	// is inert globally: it named the v0.6 verifying paymaster, and sponsorship
 	// is now the chain's Gas Manager policy. Reported rather than probed — the
@@ -1329,7 +1359,9 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 		"account_provider", chainCfg.SmartWallet.AccountProviderName(),
 		"bundler_provider", chainCfg.SmartWallet.ProviderName(),
 		"controller", chainCfg.SmartWallet.ControllerAddress.Hex(),
-		"paymaster_owner", chainCfg.SmartWallet.PaymasterOwnerAddress.Hex())
+		"paymaster_owner", chainCfg.SmartWallet.PaymasterOwnerAddress.Hex(),
+		"eoa_7702_execute", chainCfg.SmartWallet.EOA7702Execute,
+		"sma_7702_pin", chainCfg.SmartWallet.HasSMA7702Pin())
 
 	return chainCfg, nil
 }
