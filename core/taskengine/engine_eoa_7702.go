@@ -31,12 +31,21 @@ func StoreEOA7702Wallet(db storage.Storage, chainID int64, owner, delegate commo
 		return fmt.Errorf("eoa_7702 delegate %s is not the canonical SMA-7702 %s",
 			delegate.Hex(), config.SMA7702DelegateAddressHex)
 	}
+	existing, err := GetWallet(db, chainID, owner, owner.Hex())
+	if err == nil && existing.IsEOA7702() && existing.Delegate != nil && *existing.Delegate == delegate {
+		// Already the row. Do not rewrite — a GET poll would otherwise
+		// reset IsHidden to false.
+		return nil
+	}
 	ownerCopy, addrCopy, delCopy := owner, owner, delegate
 	rec := &model.SmartWallet{
 		Kind:     model.WalletKindEOA7702,
 		Owner:    &ownerCopy,
 		Address:  &addrCopy,
 		Delegate: &delCopy,
+	}
+	if existing != nil && existing.IsEOA7702() {
+		rec.IsHidden = existing.IsHidden
 	}
 	if err := rec.ValidateEOA7702Shape(); err != nil {
 		return err
@@ -87,6 +96,19 @@ func (n *Engine) UpsertEOA7702Wallet(chainID int64, owner common.Address) error 
 func (n *Engine) StoredWallet(chainID int64, owner common.Address, addr string) (*model.SmartWallet, error) {
 	if n == nil || n.db == nil {
 		return nil, fmt.Errorf("storage unavailable")
+	}
+	return GetWallet(n.db, chainID, owner, addr)
+}
+
+// SetStoredWalletHidden toggles IsHidden on the stored row at (chain, owner, addr).
+// Does not re-derive a CREATE2 address — that is what made PATCH /wallets/{eoa}
+// hide the salt-0 derived runner instead of the EOA.
+func (n *Engine) SetStoredWalletHidden(chainID int64, owner common.Address, addr string, hidden bool) (*model.SmartWallet, error) {
+	if n == nil || n.db == nil {
+		return nil, fmt.Errorf("storage unavailable")
+	}
+	if err := SetWalletHiddenStatus(n.db, chainID, owner, addr, hidden); err != nil {
+		return nil, err
 	}
 	return GetWallet(n.db, chainID, owner, addr)
 }

@@ -67,6 +67,17 @@ func TestStoreAndListEOA7702Wallet(t *testing.T) {
 	require.True(t, sawDerived, "derived CREATE2 runner still listed")
 }
 
+func TestStoreEOA7702WalletPreservesHidden(t *testing.T) {
+	engine, db, _, owner, _ := newPolicyTestEngine(t)
+	require.NoError(t, StoreEOA7702Wallet(db, testPolicyChain, owner, config.SMA7702Delegate()))
+	_, err := engine.SetStoredWalletHidden(testPolicyChain, owner, owner.Hex(), true)
+	require.NoError(t, err)
+	require.NoError(t, engine.UpsertEOA7702Wallet(testPolicyChain, owner))
+	got, err := GetWallet(db, testPolicyChain, owner, owner.Hex())
+	require.NoError(t, err)
+	require.True(t, got.IsHidden, "GET/upsert must not un-hide an eoa_7702 row")
+}
+
 func TestStoreEOA7702WalletRejectsNonCanonicalDelegate(t *testing.T) {
 	_, db, _, owner, _ := newPolicyTestEngine(t)
 	err := StoreEOA7702Wallet(db, testPolicyChain, owner, common.HexToAddress("0x000000000000000000000000000000000000dEaD"))

@@ -34,6 +34,7 @@ const (
 
 type walletTestRig struct {
 	server *Server
+	db     storage.Storage
 	owner  common.Address
 	// onDefault and onOther are stored on walletTestChain and
 	// walletOtherChain respectively — one per chain, so any response
@@ -79,6 +80,7 @@ func newWalletRig(t *testing.T) *walletTestRig {
 
 	return &walletTestRig{
 		server:    &Server{engine: engine, logger: logger, config: cfg},
+		db:        db,
 		owner:     owner,
 		onDefault: onDefault,
 		onOther:   onOther,
@@ -134,4 +136,42 @@ func TestListWalletsUsesQueryChainIdOverJwtAud(t *testing.T) {
 	backAgain := rig.list(t, walletOtherChain, &def)
 	require.True(t, backAgain[onDefault])
 	require.False(t, backAgain[onOther])
+}
+
+func TestUpdateWalletHidesEOA7702NotSaltZeroDerived(t *testing.T) {
+	rig := newWalletRig(t)
+	factory := common.HexToAddress("0x00000000000017c61b5bEe81050EC8eFc9c6fecd")
+	saltZero := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	require.NoError(t, taskengine.StoreWallet(rig.db, walletTestChain, rig.owner, &model.SmartWallet{
+		Owner: &rig.owner, Address: &saltZero, Factory: &factory, Salt: big.NewInt(0),
+	}))
+	require.NoError(t, taskengine.StoreEOA7702Wallet(rig.db, walletTestChain, rig.owner, config.SMA7702Delegate()))
+
+	body := `{"isHidden":true}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/wallets/"+rig.owner.Hex(), strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := echo.New().NewContext(req, rec)
+	ctx.SetPath("/api/v1/wallets/:address")
+	ctx.SetParamNames("address")
+	ctx.SetParamValues(rig.owner.Hex())
+	ctx.Set("auth.user", &restmw.AuthenticatedUser{Subject: rig.owner.Hex(), ChainID: walletTestChain})
+
+	require.NoError(t, rig.server.UpdateWallet(ctx, generated.EthereumAddress(rig.owner.Hex())))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var out generated.Wallet
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	require.Equal(t, strings.ToLower(rig.owner.Hex()), strings.ToLower(string(out.Address)),
+		"PATCH must return the EOA, not the salt-0 derived runner")
+	require.NotNil(t, out.Kind)
+	require.Equal(t, generated.WalletKind("eoa_7702"), *out.Kind)
+	require.NotNil(t, out.IsHidden)
+	require.True(t, *out.IsHidden)
+
+	eoaRow, err := taskengine.GetWallet(rig.db, walletTestChain, rig.owner, rig.owner.Hex())
+	require.NoError(t, err)
+	require.True(t, eoaRow.IsHidden)
+	derived, err := taskengine.GetWallet(rig.db, walletTestChain, rig.owner, saltZero.Hex())
+	require.NoError(t, err)
+	require.False(t, derived.IsHidden, "hiding the EOA must not hide the salt-0 derived runner")
 }
