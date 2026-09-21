@@ -26,7 +26,7 @@ Submit body: `{ chainId, nonce, signature }` (65-byte ECDSA, v 0/1 or 27/28). Ga
 - `202` + `status: pending` — type-4 was sent; designation not yet visible. **Poll GET. Do not resubmit** (EOA nonce is unchanged; a second broadcast spends controller gas again).
 - `409` `EOA_DELEGATION_MISSING` — code is not the pin.
 
-GET `/wallets/{eoa}/delegation` reads code, not tx history (`missing` or `delegated`).
+GET `/wallets/{eoa}/delegation` reads code, not tx history (`missing` or `delegated`). When it returns `delegated`, it also **upserts** the `eoa_7702` wallet row (idempotent, owner-gated). That is how a 202 becomes grantable without a second submit.
 
 ## Wallet record
 

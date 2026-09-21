@@ -138,7 +138,19 @@ func (s *Server) GetEoaDelegation(ctx echo.Context, address generated.EthereumAd
 	if err != nil {
 		return err
 	}
-	return ctx.JSON(http.StatusOK, s.delegationStatus(ctx.Request().Context(), chainID, eoa, sw, rpc))
+	reqCtx := ctx.Request().Context()
+	var st generated.DelegationStatus
+	err = s.engine.RunWithSessionAuthorityLock(chainID, eoa, eoa, func() error {
+		st = s.delegationStatus(reqCtx, chainID, eoa, sw, rpc)
+		if st.Status == generated.DelegationStatusStatusDelegated {
+			return s.engine.UpsertEOA7702Wallet(chainID, eoa)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return ctx.JSON(http.StatusOK, st)
 }
 
 func (s *Server) delegationPreamble(ctx echo.Context, user common.Address, address generated.EthereumAddress, explicitChain *int64) (common.Address, int64, *config.SmartWalletConfig, *ethclient.Client, error) {
@@ -169,6 +181,13 @@ func (s *Server) delegationPreamble(ctx echo.Context, user common.Address, addre
 		return common.Address{}, 0, nil, nil, &restmw.HTTPError{
 			Status: http.StatusServiceUnavailable, Code: "DELEGATION_NO_RPC",
 			Title: "Chain RPC unavailable", Detail: "Cannot read or broadcast 7702 without a chain client.",
+		}
+	}
+	if taskengine.GetChainStateReaderForChain(uint64(chainID)) == nil {
+		return common.Address{}, 0, nil, nil, &restmw.HTTPError{
+			Status: http.StatusServiceUnavailable, Code: "DELEGATION_NO_READER",
+			Title:  "Chain state reader unavailable",
+			Detail: fmt.Sprintf("chain_id=%d has an RPC but no registered state reader; K13 cannot run and a 202 would never resolve.", chainID),
 		}
 	}
 	return eoa, chainID, sw, rpc, nil

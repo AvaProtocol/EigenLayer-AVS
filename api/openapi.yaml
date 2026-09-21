@@ -2888,8 +2888,9 @@ paths:
         '202':
           description: |
             Type-4 was broadcast; K13 is not yet visible. Poll GET
-            `/wallets/{address}/delegation`. Do not resubmit — the EOA nonce
-            has not changed and a second broadcast spends controller gas again.
+            `/wallets/{address}/delegation` (GET upserts the eoa_7702 row
+            once code matches). Do not resubmit — the EOA nonce has not
+            changed and a second broadcast spends controller gas again.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationStatus' }
