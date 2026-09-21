@@ -31,6 +31,9 @@ func TestSMA7702PinMatchesLiveBytecode_SepoliaAndBase(t *testing.T) {
 	sepolia, err := ethclient.Dial(sepoliaURL)
 	require.NoError(t, err, "cannot reach Sepolia RPC")
 	t.Cleanup(func() { sepolia.Close() })
+	sepoliaID, err := sepolia.ChainID(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, SMA7702ChainSepolia, sepoliaID.Int64(), "SEPOLIA_RPC_URL/ETH_RPC_URL must be Ethereum Sepolia")
 	requireLiveSMA7702Pin(t, sepolia, SMA7702ChainSepolia, "Sepolia")
 
 	baseURL := strings.TrimSpace(os.Getenv("BASE_RPC_URL"))

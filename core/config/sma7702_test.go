@@ -59,19 +59,42 @@ func TestValidateSMA7702Canonical(t *testing.T) {
 }
 
 func TestValidateSMA7702Execute(t *testing.T) {
-	t.Run("true is refused until B5 even with pin on Sepolia", func(t *testing.T) {
+	t.Run("true without pin is refused", func(t *testing.T) {
+		c := &SmartWalletConfig{ChainID: 11155111, EOA7702Execute: true}
+		require.ErrorContains(t, c.ValidateSMA7702(), "unset")
+		require.ErrorContains(t, c.eoa7702ExecutePreconditions(), "unset")
+	})
+	t.Run("true on base-sepolia is refused", func(t *testing.T) {
+		c := &SmartWalletConfig{
+			ChainID:         84532,
+			EOA7702Execute:  true,
+			SMA7702Delegate: SMA7702Delegate(),
+			SMA7702ImplHash: SMA7702ImplHash(),
+		}
+		require.ErrorContains(t, c.ValidateSMA7702(), "Sepolia")
+		require.ErrorContains(t, c.eoa7702ExecutePreconditions(), "Sepolia")
+	})
+	t.Run("true on Sepolia with pin hits B5, not the chain/pin guards", func(t *testing.T) {
 		c := &SmartWalletConfig{
 			ChainID:         SMA7702ChainSepolia,
 			EOA7702Execute:  true,
 			SMA7702Delegate: SMA7702Delegate(),
 			SMA7702ImplHash: SMA7702ImplHash(),
 		}
+		require.NoError(t, c.eoa7702ExecutePreconditions(),
+			"B5 lifts only the blanket refusal; pin+Sepolia must already be legal")
 		err := c.ValidateSMA7702()
 		require.ErrorContains(t, err, "no send path honors it yet (B5)")
 		require.ErrorContains(t, err, "derived smart wallet")
 	})
-	t.Run("true without pin is refused", func(t *testing.T) {
-		c := &SmartWalletConfig{ChainID: 11155111, EOA7702Execute: true}
+	t.Run("true on Base with pin hits B5, not the chain/pin guards", func(t *testing.T) {
+		c := &SmartWalletConfig{
+			ChainID:         SMA7702ChainBase,
+			EOA7702Execute:  true,
+			SMA7702Delegate: SMA7702Delegate(),
+			SMA7702ImplHash: SMA7702ImplHash(),
+		}
+		require.NoError(t, c.eoa7702ExecutePreconditions())
 		require.ErrorContains(t, c.ValidateSMA7702(), "B5")
 	})
 	t.Run("false with pin is the B1 default shape", func(t *testing.T) {

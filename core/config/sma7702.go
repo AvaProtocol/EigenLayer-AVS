@@ -52,18 +52,47 @@ func (c *SmartWalletConfig) HasSMA7702Pin() bool {
 
 // ValidateSMA7702 checks the pin and execute flag. Empty pin + execute false
 // is fine (7702 not configured on this chain). A partial pin or a pin that
-// is not the B0 canonical values is refused at load. eoa_7702_execute true
-// is refused until B5 adds the send-path consumer — a true value today would
-// look honored while UserOps still go through the derived smart wallet.
+// is not the B0 canonical values is refused at load.
+//
+// eoa_7702_execute true is refused until B5 adds the send-path consumer.
+// The pin-required and Sepolia/Base-only guards run first so they stay
+// executable; B5 deletes only the blanket return below, not those checks.
 func (c *SmartWalletConfig) ValidateSMA7702() error {
 	if c == nil {
 		return nil
 	}
 	if c.EOA7702Execute {
+		if err := c.eoa7702ExecutePreconditions(); err != nil {
+			return err
+		}
 		return fmt.Errorf(
 			"chain_id=%d eoa_7702_execute is true, but no send path honors it yet (B5); leave it false — UserOps still go through the derived smart wallet",
 			c.ChainID)
 	}
+	return c.validateSMA7702Pin()
+}
+
+// eoa7702ExecutePreconditions is the lasting execute=true policy: pin must
+// be present and the chain must be Sepolia or Base. B5 keeps this when it
+// lifts the blanket refusal in ValidateSMA7702.
+func (c *SmartWalletConfig) eoa7702ExecutePreconditions() error {
+	if !c.HasSMA7702Pin() {
+		return fmt.Errorf(
+			"chain_id=%d eoa_7702_execute is true but sma_7702_delegate/sma_7702_impl_hash are unset; pin the B0 hash first",
+			c.ChainID)
+	}
+	if err := c.validateSMA7702Pin(); err != nil {
+		return err
+	}
+	if !SMA7702FirstChain(c.ChainID) {
+		return fmt.Errorf(
+			"chain_id=%d eoa_7702_execute is true, but Track B first chains are Sepolia (%d) and Base (%d)",
+			c.ChainID, SMA7702ChainSepolia, SMA7702ChainBase)
+	}
+	return nil
+}
+
+func (c *SmartWalletConfig) validateSMA7702Pin() error {
 	pinned := c.SMA7702Delegate != (common.Address{})
 	hashed := c.SMA7702ImplHash != (common.Hash{})
 	if pinned != hashed {
