@@ -368,6 +368,16 @@ func NextFreeSessionEntityID(
 func (n *Engine) InstallSessionResolver() {
 	n.sessionChainReads = true
 	preset.SetSessionResolver(newSessionResolver(n.db, controllerSessionSigner(n.config), n.teardownVerifier(), n.windowVerifier()))
+	preset.SetEOA7702AccountLookup(func(chainID int64, owner, sender common.Address) (bool, error) {
+		if n.db == nil {
+			return false, nil
+		}
+		rec, err := GetWallet(n.db, chainID, owner, sender.Hex())
+		if err != nil {
+			return false, nil
+		}
+		return rec.IsEOA7702() && rec.Address != nil && *rec.Address == owner && *rec.Address == sender, nil
+	})
 }
 
 // teardownVerifier reads a validation entity's signer on the chain the grant

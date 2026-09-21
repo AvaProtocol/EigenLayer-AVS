@@ -111,9 +111,9 @@ smart_wallet:
   account_provider:       modular_account_v2
   alchemy_api_key:        ${ALCHEMY_API_KEY}
   controller_private_key: <testnet-controller-private-key-hex>
-  # Track B pin (K13). Loader reads these. eoa_7702_execute must stay
-  # false — true fails boot until B5 honors it on the send path.
-  # Do not patch SendUserOpMAv2 here.
+  # Track B pin (K13). Loader reads these. eoa_7702_execute default false.
+  # True is allowed at boot only on Sepolia/Base with this pin; the send
+  # path then accepts sender=EOA for kind=eoa_7702 after K13. Rollback: false.
   # Canonical delegate: SemiModularAccount7702 alchemy.sma-7702.1.0.0
   # Impl hash: keccak256 of 23741 bytes at that address, byte-identical on
   # Sepolia and Base (B0). Comparison is code[0:3]==0xef0100 &&

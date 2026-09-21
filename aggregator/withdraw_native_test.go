@@ -325,4 +325,16 @@ func TestDerivationSaltForWallet(t *testing.T) {
 	if !strings.Contains(err.Error(), "not the salt-0 address") {
 		t.Fatalf("negative salt: %v", err)
 	}
+
+	eoa := owner
+	if err := taskengine.StoreEOA7702Wallet(db, chainID, owner, config.SMA7702Delegate()); err != nil {
+		t.Fatal(err)
+	}
+	got, err = server.derivationSaltForWallet(chainID, owner, eoa)
+	if err != nil {
+		t.Fatalf("eoa_7702 salt lookup: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("eoa_7702 salt = %v, want nil (unused on the 7702 send path)", got)
+	}
 }

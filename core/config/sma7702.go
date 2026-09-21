@@ -52,29 +52,29 @@ func (c *SmartWalletConfig) HasSMA7702Pin() bool {
 
 // ValidateSMA7702 checks the pin and execute flag. Empty pin + execute false
 // is fine (7702 not configured on this chain). A partial pin or a pin that
-// is not the B0 canonical values is refused at load.
-//
-// eoa_7702_execute true is refused until B5 adds the send-path consumer.
-// The pin-required and Sepolia/Base-only guards run first so they stay
-// executable; B5 deletes only the blanket return below, not those checks.
+// is not the B0 canonical values is refused at load. eoa_7702_execute true
+// is allowed only when eoa7702ExecutePreconditions pass (canonical pin and
+// Sepolia/Base). Default remains false; the send path honors a true value.
 func (c *SmartWalletConfig) ValidateSMA7702() error {
 	if c == nil {
 		return nil
 	}
 	if c.EOA7702Execute {
-		if err := c.eoa7702ExecutePreconditions(); err != nil {
-			return err
-		}
-		return fmt.Errorf(
-			"chain_id=%d eoa_7702_execute is true, but no send path honors it yet (B5); leave it false — UserOps still go through the derived smart wallet",
-			c.ChainID)
+		return c.eoa7702ExecutePreconditions()
 	}
 	return c.validateSMA7702Pin()
 }
 
+// CheckEOA7702Execute is the send-path gate: flag on, canonical pin, Sepolia or Base.
+func (c *SmartWalletConfig) CheckEOA7702Execute() error {
+	if c == nil || !c.EOA7702Execute {
+		return fmt.Errorf("eoa_7702_execute is false")
+	}
+	return c.eoa7702ExecutePreconditions()
+}
+
 // eoa7702ExecutePreconditions is the lasting execute=true policy: pin must
-// be present and the chain must be Sepolia or Base. B5 keeps this when it
-// lifts the blanket refusal in ValidateSMA7702.
+// be present and the chain must be Sepolia or Base.
 func (c *SmartWalletConfig) eoa7702ExecutePreconditions() error {
 	if !c.HasSMA7702Pin() {
 		return fmt.Errorf(

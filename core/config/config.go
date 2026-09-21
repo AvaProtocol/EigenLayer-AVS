@@ -277,9 +277,8 @@ type SmartWalletConfig struct {
 	GasManagerWebhookSecret string
 
 	// EOA7702Execute is the Track B send-path flag. Default false. True is
-	// refused at load until B5 adds the consumer — a true value today would
-	// look honored (typed, logged) while UserOps still go through the
-	// derived smart wallet. avs-infra ships config separately from code.
+	// allowed at load only on Sepolia/Base with the canonical SMA-7702 pin.
+	// SendUserOpMAv2 honors it for kind=eoa_7702 + K13; rollback is flag off.
 	EOA7702Execute bool
 
 	// SMA7702Delegate is the canonical SemiModularAccount7702 address this
