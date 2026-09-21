@@ -11,11 +11,12 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-func TestSMA7702PinConstantsMatchB0(t *testing.T) {
+func TestSMA7702PinConstantsWellFormed(t *testing.T) {
 	require.True(t, common.IsHexAddress(SMA7702DelegateAddressHex))
-	require.Equal(t, "0x69007702764179f14F51cdce752f4f775d74E139", SMA7702Delegate().Hex())
-	require.Equal(t, common.HexToHash(SMA7702ImplHashHex), SMA7702ImplHash())
+	require.Equal(t, common.HexToAddress(SMA7702DelegateAddressHex), SMA7702Delegate())
 	require.Equal(t, 32, len(SMA7702ImplHash().Bytes()))
+	_, err := parseHash32(SMA7702ImplHashHex)
+	require.NoError(t, err)
 }
 
 func TestSMA7702FirstChains(t *testing.T) {
@@ -58,36 +59,20 @@ func TestValidateSMA7702Canonical(t *testing.T) {
 }
 
 func TestValidateSMA7702Execute(t *testing.T) {
-	t.Run("true without pin is refused", func(t *testing.T) {
-		c := &SmartWalletConfig{ChainID: 11155111, EOA7702Execute: true}
-		require.ErrorContains(t, c.ValidateSMA7702(), "unset")
-	})
-	t.Run("true on base-sepolia is refused", func(t *testing.T) {
-		c := &SmartWalletConfig{
-			ChainID:         84532,
-			EOA7702Execute:  true,
-			SMA7702Delegate: SMA7702Delegate(),
-			SMA7702ImplHash: SMA7702ImplHash(),
-		}
-		require.ErrorContains(t, c.ValidateSMA7702(), "Sepolia")
-	})
-	t.Run("true on Sepolia with pin loads", func(t *testing.T) {
+	t.Run("true is refused until B5 even with pin on Sepolia", func(t *testing.T) {
 		c := &SmartWalletConfig{
 			ChainID:         SMA7702ChainSepolia,
 			EOA7702Execute:  true,
 			SMA7702Delegate: SMA7702Delegate(),
 			SMA7702ImplHash: SMA7702ImplHash(),
 		}
-		require.NoError(t, c.ValidateSMA7702())
+		err := c.ValidateSMA7702()
+		require.ErrorContains(t, err, "no send path honors it yet (B5)")
+		require.ErrorContains(t, err, "derived smart wallet")
 	})
-	t.Run("true on Base with pin loads", func(t *testing.T) {
-		c := &SmartWalletConfig{
-			ChainID:         SMA7702ChainBase,
-			EOA7702Execute:  true,
-			SMA7702Delegate: SMA7702Delegate(),
-			SMA7702ImplHash: SMA7702ImplHash(),
-		}
-		require.NoError(t, c.ValidateSMA7702())
+	t.Run("true without pin is refused", func(t *testing.T) {
+		c := &SmartWalletConfig{ChainID: 11155111, EOA7702Execute: true}
+		require.ErrorContains(t, c.ValidateSMA7702(), "B5")
 	})
 	t.Run("false with pin is the B1 default shape", func(t *testing.T) {
 		c := &SmartWalletConfig{
@@ -109,6 +94,15 @@ func TestApplySMA7702FromYAML(t *testing.T) {
 		require.False(t, dst.EOA7702Execute)
 		require.False(t, dst.HasSMA7702Pin())
 	})
+	t.Run("execute true is refused at apply even with pin", func(t *testing.T) {
+		dst := &SmartWalletConfig{ChainID: 11155111}
+		err := applySMA7702(dst, SmartWalletConfigRaw{
+			EOA7702Execute:  true,
+			SMA7702Delegate: SMA7702DelegateAddressHex,
+			SMA7702ImplHash: SMA7702ImplHashHex,
+		})
+		require.ErrorContains(t, err, "B5")
+	})
 	t.Run("canonical pin parses", func(t *testing.T) {
 		dst := &SmartWalletConfig{ChainID: 11155111}
 		require.NoError(t, applySMA7702(dst, SmartWalletConfigRaw{
@@ -127,7 +121,18 @@ func TestApplySMA7702FromYAML(t *testing.T) {
 			SMA7702ImplHash: "0xecfc0328",
 		})
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "32")
+		require.Contains(t, err.Error(), "64")
+	})
+	t.Run("malformed hex is not reported as truncation", func(t *testing.T) {
+		bad := SMA7702ImplHashHex
+		bad = bad[:len(bad)-1] + "z"
+		dst := &SmartWalletConfig{ChainID: 11155111}
+		err := applySMA7702(dst, SmartWalletConfigRaw{
+			SMA7702Delegate: SMA7702DelegateAddressHex,
+			SMA7702ImplHash: bad,
+		})
+		require.ErrorContains(t, err, "is not hex")
+		require.NotContains(t, err.Error(), "want 32")
 	})
 	t.Run("one-sided pin is refused", func(t *testing.T) {
 		dst := &SmartWalletConfig{ChainID: 11155111}
@@ -192,15 +197,17 @@ func TestAssertSMA7702Designation(t *testing.T) {
 func TestCheck7702AuthorizationChainID(t *testing.T) {
 	require.Error(t, Check7702AuthorizationChainID(nil))
 	require.Error(t, Check7702AuthorizationChainID(big.NewInt(0)))
+	require.Error(t, Check7702AuthorizationChainID(big.NewInt(-1)))
 	require.NoError(t, Check7702AuthorizationChainID(big.NewInt(11155111)))
 	require.NoError(t, Check7702AuthorizationChainID(big.NewInt(8453)))
 }
 
-func TestIsSMA7702DesignationIgnoresTrailing(t *testing.T) {
+func TestIsSMA7702DesignationExactLength(t *testing.T) {
 	d := SMA7702Delegate()
-	code := append(designation(d), 0x00)
-	require.True(t, IsSMA7702Designation(code, d))
+	require.True(t, IsSMA7702Designation(designation(d), d))
+	require.False(t, IsSMA7702Designation(append(designation(d), 0x00), d), "trailing bytes are not a designation")
 	require.False(t, IsSMA7702Designation(nil, d))
+	require.False(t, IsSMA7702Designation(designation(d)[:22], d))
 }
 
 func TestParseHash32RejectsUnprefixed(t *testing.T) {

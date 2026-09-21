@@ -276,10 +276,10 @@ type SmartWalletConfig struct {
 	// Empty omits the field (webhook secret check disabled on the gateway).
 	GasManagerWebhookSecret string
 
-	// EOA7702Execute is the Track B send-path flag. Default false. The B5
-	// send path is the only code that may honor a true value; B1 stores it
-	// so the loader actually reads the YAML key. True is refused at load
-	// unless this chain is Sepolia or Base and the SMA-7702 pin is set.
+	// EOA7702Execute is the Track B send-path flag. Default false. True is
+	// refused at load until B5 adds the consumer — a true value today would
+	// look honored (typed, logged) while UserOps still go through the
+	// derived smart wallet. avs-infra ships config separately from code.
 	EOA7702Execute bool
 
 	// SMA7702Delegate is the canonical SemiModularAccount7702 address this

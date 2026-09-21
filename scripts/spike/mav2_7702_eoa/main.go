@@ -68,6 +68,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
@@ -75,11 +76,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 )
 
-const (
-	// Spec K8 / deployments: alchemy.sma-7702.1.0.0 (not v1.1.0).
-	sma7702Hex          = "0x69007702764179f14F51cdce752f4f775d74E139"
-	nativeTokenLimitHex = "0x00000000000001e541f0D090868FBe24b59Fbe06"
-)
+const nativeTokenLimitHex = "0x00000000000001e541f0D090868FBe24b59Fbe06"
 
 var (
 	nativeCap  = big.NewInt(10_000_000_000_000_000) // 0.01 ETH
@@ -171,7 +168,7 @@ func run() error {
 		return fmt.Errorf("RPC chain id %s != %d", gotID, chainID)
 	}
 
-	sma := common.HexToAddress(sma7702Hex)
+	sma := config.SMA7702Delegate()
 	implCode, err := chain.CodeAt(ctx, sma, nil)
 	if err != nil {
 		return err
@@ -180,7 +177,7 @@ func run() error {
 		return fmt.Errorf("SMA-7702 %s has no code on %s", sma, chainName)
 	}
 	implHash := crypto.Keccak256Hash(implCode)
-	fmt.Printf("SMA-7702 impl code=%d bytes keccak256=%s\n", len(implCode), implHash)
+	fmt.Printf("SMA-7702 impl code=%d bytes keccak256=%s pin=%s\n", len(implCode), implHash, config.SMA7702ImplHashHex)
 
 	if err := ensurePrefunded(ctx, chain, gotID, eoa); err != nil {
 		return err
@@ -286,7 +283,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if is7702Designation(dcode, sma) {
+	if config.IsSMA7702Designation(dcode, sma) {
 		return fmt.Errorf("B7 FAIL: derived runner has 7702 designation")
 	}
 	fmt.Printf("B7 PASS: CREATE2(owner=eoa, salt=0) %s != EOA %s and has no 7702 designation (address inequality, not a live derived-path send)\n", derived.Hex(), eoa.Hex())
@@ -324,14 +321,14 @@ func ensureDelegated(ctx context.Context, chain *ethclient.Client, chainID *big.
 	if err != nil {
 		return err
 	}
-	if is7702Designation(code, sma) {
-		if err := assertK13(code, sma, implCode, "already delegated"); err != nil {
+	if config.IsSMA7702Designation(code, sma) {
+		if err := assertK13(code, sma, implCode, chainID.Int64(), "already delegated"); err != nil {
 			return err
 		}
 		return nil
 	}
-	if chainID.Sign() == 0 {
-		return fmt.Errorf("refusing chain_id=0 7702 authorization")
+	if err := config.Check7702AuthorizationChainID(chainID); err != nil {
+		return err
 	}
 	nonce, err := chain.PendingNonceAt(ctx, eoa)
 	if err != nil {
@@ -380,30 +377,22 @@ func ensureDelegated(ctx context.Context, chain *ethclient.Client, chainID *big.
 	if err != nil {
 		return err
 	}
-	return assertK13(code, sma, implCode, "after type-4")
+	return assertK13(code, sma, implCode, chainID.Int64(), "after type-4")
 }
 
-func is7702Designation(code []byte, sma common.Address) bool {
-	if len(code) < 23 {
-		return false
+func assertK13(eoaCode []byte, sma common.Address, implCode []byte, chainID int64, when string) error {
+	pin := &config.SmartWalletConfig{
+		ChainID:         chainID,
+		SMA7702Delegate: config.SMA7702Delegate(),
+		SMA7702ImplHash: config.SMA7702ImplHash(),
 	}
-	return code[0] == 0xef && code[1] == 0x01 && code[2] == 0x00 &&
-		common.BytesToAddress(code[3:23]) == sma
-}
-
-func assertK13(code []byte, sma common.Address, implCode []byte, when string) error {
-	if len(code) < 23 {
-		return fmt.Errorf("B1 FAIL %s: code len %d (not a 7702 designation)", when, len(code))
+	if sma != pin.SMA7702Delegate {
+		return fmt.Errorf("B1 FAIL %s: spike delegate %s != pin %s", when, sma, pin.SMA7702Delegate)
 	}
-	if code[0] != 0xef || code[1] != 0x01 || code[2] != 0x00 {
-		return fmt.Errorf("B1 FAIL %s: prefix %x want ef0100", when, code[:min(3, len(code))])
+	if err := pin.AssertSMA7702Designation(eoaCode, implCode); err != nil {
+		return fmt.Errorf("B1 FAIL %s: %w", when, err)
 	}
-	got := common.BytesToAddress(code[3:23])
-	if got != sma {
-		return fmt.Errorf("B1 FAIL %s: impl %s want %s", when, got, sma)
-	}
-	h := crypto.Keccak256Hash(implCode)
-	fmt.Printf("B1 PASS (%s): K13 ef0100||%s implHash=%s (not tx status)\n", when, got.Hex(), h.Hex())
+	fmt.Printf("B1 PASS (%s): K13 ef0100||%s implHash=%s (not tx status)\n", when, sma.Hex(), pin.SMA7702ImplHash.Hex())
 	return nil
 }
 

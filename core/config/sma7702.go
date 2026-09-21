@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"strings"
@@ -50,12 +51,18 @@ func (c *SmartWalletConfig) HasSMA7702Pin() bool {
 }
 
 // ValidateSMA7702 checks the pin and execute flag. Empty pin + execute false
-// is fine (7702 not configured on this chain). A partial pin, a pin that is
-// not the B0 canonical values, or execute=true without a pin / on a chain
-// that is not Sepolia or Base is refused at load.
+// is fine (7702 not configured on this chain). A partial pin or a pin that
+// is not the B0 canonical values is refused at load. eoa_7702_execute true
+// is refused until B5 adds the send-path consumer — a true value today would
+// look honored while UserOps still go through the derived smart wallet.
 func (c *SmartWalletConfig) ValidateSMA7702() error {
 	if c == nil {
 		return nil
+	}
+	if c.EOA7702Execute {
+		return fmt.Errorf(
+			"chain_id=%d eoa_7702_execute is true, but no send path honors it yet (B5); leave it false — UserOps still go through the derived smart wallet",
+			c.ChainID)
 	}
 	pinned := c.SMA7702Delegate != (common.Address{})
 	hashed := c.SMA7702ImplHash != (common.Hash{})
@@ -76,27 +83,16 @@ func (c *SmartWalletConfig) ValidateSMA7702() error {
 				c.ChainID, c.SMA7702ImplHash.Hex(), SMA7702ImplHashHex)
 		}
 	}
-	if c.EOA7702Execute {
-		if !pinned {
-			return fmt.Errorf(
-				"chain_id=%d eoa_7702_execute is true but sma_7702_delegate/sma_7702_impl_hash are unset; pin the B0 hash first",
-				c.ChainID)
-		}
-		if !SMA7702FirstChain(c.ChainID) {
-			return fmt.Errorf(
-				"chain_id=%d eoa_7702_execute is true, but Track B first chains are Sepolia (%d) and Base (%d)",
-				c.ChainID, SMA7702ChainSepolia, SMA7702ChainBase)
-		}
-	}
 	return nil
 }
 
 // IsSMA7702Designation reports whether code is an EIP-7702 designation for
-// delegate: len>=23, prefix 0xef0100, bytes 3:23 == delegate. Extra trailing
-// bytes are ignored. This is not a comparison of the whole slice to
-// 0xef0100||delegate.
+// delegate: exactly 23 bytes, prefix 0xef0100, bytes 3:23 == delegate.
+// This is not a comparison of the whole slice to 0xef0100||delegate as a
+// string; EIP-3541 forbids deploying code that starts with 0xEF, so no
+// contract can wear this prefix.
 func IsSMA7702Designation(code []byte, delegate common.Address) bool {
-	if len(code) < 23 {
+	if len(code) != 23 {
 		return false
 	}
 	return code[0] == 0xef && code[1] == 0x01 && code[2] == 0x00 &&
@@ -131,7 +127,7 @@ func (c *SmartWalletConfig) AssertSMA7702Designation(eoaCode, implCode []byte) e
 // must not cover every chain. The later delegation API (B3) calls this;
 // B1 exposes it so the rule exists before that API lands.
 func Check7702AuthorizationChainID(chainID *big.Int) error {
-	if chainID == nil || chainID.Sign() == 0 {
+	if chainID == nil || chainID.Sign() <= 0 {
 		return fmt.Errorf("7702 authorization chain_id=0 is refused; authorizations are per-chain")
 	}
 	return nil
@@ -178,12 +174,16 @@ func parseSMA7702Raw(raw SmartWalletConfigRaw) (common.Address, common.Hash, boo
 
 func parseHash32(s string) (common.Hash, error) {
 	s = strings.TrimSpace(s)
-	if len(s) < 2 || (s[0] != '0' || (s[1] != 'x' && s[1] != 'X')) {
+	if len(s) < 2 || s[0] != '0' || (s[1] != 'x' && s[1] != 'X') {
 		return common.Hash{}, fmt.Errorf("sma_7702_impl_hash must be 0x-prefixed 32-byte hex")
 	}
-	b := common.FromHex(s)
-	if len(b) != 32 {
-		return common.Hash{}, fmt.Errorf("sma_7702_impl_hash is %d bytes, want 32", len(b))
+	body := s[2:]
+	if len(body) != 64 {
+		return common.Hash{}, fmt.Errorf("sma_7702_impl_hash is %d hex chars, want 64", len(body))
+	}
+	b, err := hex.DecodeString(body)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("sma_7702_impl_hash is not hex: %w", err)
 	}
 	return common.BytesToHash(b), nil
 }
