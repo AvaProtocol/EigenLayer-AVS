@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"errors"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -81,8 +82,12 @@ func (s *Server) SubmitEoaDelegation(ctx echo.Context, address generated.Ethereu
 			fmt.Sprintf("recovered %s, path is %s", authority.Hex(), eoa.Hex()))
 	}
 
-	var statusCode int
-	var payload generated.DelegationStatus
+	var (
+		statusCode int
+		payload    generated.DelegationStatus
+		txHash     common.Hash
+		broadcast  bool
+	)
 	err = s.engine.RunWithSessionAuthorityLock(chainID, eoa, eoa, func() error {
 		reqCtx := ctx.Request().Context()
 		if s.engine.AssertEOA7702Delegation(reqCtx, chainID, eoa) == nil {
@@ -101,9 +106,23 @@ func (s *Server) SubmitEoaDelegation(ctx echo.Context, address generated.Ethereu
 			return badRequest("DELEGATION_STALE_NONCE", "Authorization nonce is not current",
 				fmt.Sprintf("signed nonce %d, EOA pending nonce %d; call prepare again and re-sign. A stale nonce still spends gas if broadcast.", body.Nonce, current))
 		}
-		if err := s.broadcastSetCode(reqCtx, rpc, sw, auth, eoa); err != nil {
+		h, err := s.broadcastSetCode(reqCtx, rpc, sw, auth, eoa)
+		if err != nil {
 			return err
 		}
+		txHash = h
+		broadcast = true
+		return nil
+	})
+	if err != nil {
+		return mapDelegationError(err)
+	}
+	if !broadcast {
+		return ctx.JSON(statusCode, payload)
+	}
+	reqCtx := ctx.Request().Context()
+	_, _ = waitMinedIgnoreStatus(reqCtx, rpc, txHash)
+	err = s.engine.RunWithSessionAuthorityLock(chainID, eoa, eoa, func() error {
 		if s.engine.AssertEOA7702Delegation(reqCtx, chainID, eoa) == nil {
 			if err := s.engine.UpsertEOA7702Wallet(chainID, eoa); err != nil {
 				return err
@@ -243,31 +262,44 @@ func parseSetCodeAuth(chainID int64, delegate common.Address, nonce uint64, sigH
 	}, nil
 }
 
-func (s *Server) broadcastSetCode(ctx context.Context, rpc *ethclient.Client, sw *config.SmartWalletConfig, auth types.SetCodeAuthorization, eoa common.Address) error {
+// type4ControllerLocks serializes nonce-read + sign + send per controller
+// address. sessionAuthorityLock is per-EOA and does not cover two users
+// sharing one funded controller on the same chain.
+var type4ControllerLocks sync.Map // hex address → *sync.Mutex
+
+func type4ControllerLock(from common.Address) *sync.Mutex {
+	v, _ := type4ControllerLocks.LoadOrStore(from.Hex(), new(sync.Mutex))
+	return v.(*sync.Mutex)
+}
+
+func (s *Server) broadcastSetCode(ctx context.Context, rpc *ethclient.Client, sw *config.SmartWalletConfig, auth types.SetCodeAuthorization, eoa common.Address) (common.Hash, error) {
 	if sw == nil || sw.ControllerPrivateKey == nil {
-		return &restmw.HTTPError{Status: http.StatusServiceUnavailable, Code: "DELEGATION_NO_SIGNER",
+		return common.Hash{}, &restmw.HTTPError{Status: http.StatusServiceUnavailable, Code: "DELEGATION_NO_SIGNER",
 			Title:  "Controller signer unavailable",
 			Detail: "type-4 broadcast uses the per-chain controller_private_key (funded on this chain), not the AVS identity key."}
 	}
 	from := crypto.PubkeyToAddress(sw.ControllerPrivateKey.PublicKey)
+	mu := type4ControllerLock(from)
+	mu.Lock()
+	defer mu.Unlock()
 	nonce, err := rpc.PendingNonceAt(ctx, from)
 	if err != nil {
-		return fmt.Errorf("controller nonce: %w", err)
+		return common.Hash{}, fmt.Errorf("controller nonce: %w", err)
 	}
 	tip, err := rpc.SuggestGasTipCap(ctx)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	head, err := rpc.HeaderByNumber(ctx, nil)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	fee := eip1559.MaxFeeFromTipAndBase(tip, head.BaseFee)
 	chainID := sw.ChainID
 	if chainID == 0 {
 		id, idErr := rpc.ChainID(ctx)
 		if idErr != nil {
-			return idErr
+			return common.Hash{}, idErr
 		}
 		chainID = id.Int64()
 	}
@@ -283,15 +315,12 @@ func (s *Server) broadcastSetCode(ctx context.Context, rpc *ethclient.Client, sw
 	}
 	signed, err := types.SignNewTx(sw.ControllerPrivateKey, types.LatestSignerForChainID(big.NewInt(chainID)), inner)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	if err := rpc.SendTransaction(ctx, signed); err != nil {
-		return fmt.Errorf("broadcast type-4: %w", err)
+		return common.Hash{}, fmt.Errorf("broadcast type-4: %w", err)
 	}
-	if _, err := waitMinedIgnoreStatus(ctx, rpc, signed.Hash()); err != nil {
-		return err
-	}
-	return nil
+	return signed.Hash(), nil
 }
 
 const delegationMineWait = 30 * time.Second

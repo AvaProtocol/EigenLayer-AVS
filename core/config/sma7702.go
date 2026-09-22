@@ -153,8 +153,7 @@ func (c *SmartWalletConfig) AssertSMA7702Designation(eoaCode, implCode []byte) e
 }
 
 // Check7702AuthorizationChainID refuses chain_id=0. One 7702 authorization
-// must not cover every chain. The later delegation API (B3) calls this;
-// B1 exposes it so the rule exists before that API lands.
+// must not cover every chain.
 func Check7702AuthorizationChainID(chainID *big.Int) error {
 	if chainID == nil || chainID.Sign() <= 0 {
 		return fmt.Errorf("7702 authorization chain_id=0 is refused; authorizations are per-chain")
