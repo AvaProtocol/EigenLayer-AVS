@@ -114,7 +114,8 @@ func (n *Engine) SetStoredWalletHidden(chainID int64, owner common.Address, addr
 }
 
 // RunWithSessionAuthorityLock serializes writers for one (chain, owner, runner).
-// Delegation submit uses it so concurrent retries cannot each broadcast a type-4.
+// Delegation submit uses it for stale-nonce / already-delegated / send, not
+// the 30s mine wait. Type-4 controller nonce is a separate per-controller lock.
 func (n *Engine) RunWithSessionAuthorityLock(chainID int64, owner, runner common.Address, fn func() error) error {
 	lock := sessionAuthorityLock(chainID, owner, runner)
 	lock.Lock()

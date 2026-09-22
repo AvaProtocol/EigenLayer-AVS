@@ -53,11 +53,19 @@ func TestEoaNonceIsCurrent(t *testing.T) {
 
 func TestBroadcastSetCodeRequiresControllerKey(t *testing.T) {
 	s := &Server{}
-	err := s.broadcastSetCode(t.Context(), nil, &config.SmartWalletConfig{}, types.SetCodeAuthorization{}, common.Address{})
+	hash, err := s.broadcastSetCode(t.Context(), nil, &config.SmartWalletConfig{}, types.SetCodeAuthorization{}, common.Address{})
 	require.Error(t, err)
+	require.Equal(t, (common.Hash{}), hash)
 	var httpErr *restmw.HTTPError
 	require.ErrorAs(t, err, &httpErr)
 	require.Equal(t, "DELEGATION_NO_SIGNER", httpErr.Code)
 	require.Contains(t, httpErr.Detail, "controller_private_key")
 	require.NotContains(t, httpErr.Detail, "aggregator ECDSA")
+}
+
+func TestType4ControllerLockIsPerAddress(t *testing.T) {
+	a := common.HexToAddress("0x00000000000000000000000000000000000000a1")
+	b := common.HexToAddress("0x00000000000000000000000000000000000000b2")
+	require.Same(t, type4ControllerLock(a), type4ControllerLock(a))
+	require.NotSame(t, type4ControllerLock(a), type4ControllerLock(b))
 }

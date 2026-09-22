@@ -188,8 +188,10 @@ func (n *Engine) requireMAv2SessionWallet(user *model.User, chainID int64, walle
 }
 
 // lookupOwnedWalletRecord loads the stored smart-wallet row for (owner, wallet),
-// preferring the grant's chainID then falling back to any known chain.
-// badger.ErrKeyNotFound is "missing" (nil, nil); any other DB error is returned.
+// preferring the grant's chainID then falling back to any known chain for
+// CREATE2 records. eoa_7702 rows from another chain are skipped — designation
+// is per-chain. badger.ErrKeyNotFound is "missing" (nil, nil); any other DB
+// error is returned.
 func (n *Engine) lookupOwnedWalletRecord(user *model.User, chainID int64, wallet common.Address) (*model.SmartWallet, error) {
 	if n.db == nil || user == nil {
 		return nil, fmt.Errorf("storage unavailable")
@@ -221,9 +223,16 @@ func (n *Engine) lookupOwnedWalletRecord(user *model.User, chainID int64, wallet
 		if err != nil {
 			return nil, err
 		}
-		if rec != nil {
-			return rec, nil
+		if rec == nil {
+			continue
 		}
+		// 7702 designation is per-chain. A Sepolia eoa_7702 row must not
+		// authorize policies:* on Base (CREATE2 addresses are the ones
+		// that are chain-invariant).
+		if rec.IsEOA7702() {
+			continue
+		}
+		return rec, nil
 	}
 	return nil, nil
 }

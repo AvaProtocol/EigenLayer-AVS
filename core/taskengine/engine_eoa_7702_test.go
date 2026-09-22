@@ -84,6 +84,28 @@ func TestStoreEOA7702WalletRejectsNonCanonicalDelegate(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestLookupOwnedWalletRecordSkipsCrossChainEOA7702(t *testing.T) {
+	engine, db, _, owner, derived := newPolicyTestEngine(t)
+	user := &model.User{Address: owner, ChainID: testPolicyChain}
+	otherChain := int64(8453)
+	require.NoError(t, StoreEOA7702Wallet(db, otherChain, owner, config.SMA7702Delegate()))
+
+	rec, err := engine.lookupOwnedWalletRecord(user, testPolicyChain, owner)
+	require.NoError(t, err)
+	require.Nil(t, rec, "a Base eoa_7702 row must not satisfy a Sepolia grant")
+
+	rec, err = engine.lookupOwnedWalletRecord(user, otherChain, owner)
+	require.NoError(t, err)
+	require.NotNil(t, rec)
+	require.True(t, rec.IsEOA7702())
+
+	// CREATE2 fallback across chains is unchanged.
+	rec, err = engine.lookupOwnedWalletRecord(user, otherChain, derived)
+	require.NoError(t, err)
+	require.NotNil(t, rec)
+	require.False(t, rec.IsEOA7702())
+}
+
 func TestRequireMAv2SessionWalletEOA7702(t *testing.T) {
 	engine, db, _, owner, derived := newPolicyTestEngine(t)
 	user := &model.User{Address: owner, ChainID: testPolicyChain}
