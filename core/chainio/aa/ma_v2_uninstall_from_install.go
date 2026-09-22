@@ -34,11 +34,14 @@ import (
 // that reverses installCall — the calldata a grant was created with.
 //
 // hookUninstallData must carry one entry per installed hook in the ACCOUNT's
-// STORED order: validation hooks reversed, then execution hooks reversed.
-// A flat reverse of install order strands NativeTokenLimitModule.limits
-// (A0 proof 6b). A hook that carried install data is torn down with that
-// same data except NativeTokenLimit validation (entityId only). Exec-hook
-// entries that installed no state take an empty slot.
+// STORED / consume order: validation hooks reversed, then execution hooks
+// reversed. _uninstallValidation walks loadValidationHooks then loadExecHooks
+// with no reverseArr. IModularAccountView.getValidationData reverseArrs both
+// arrays, so the view is install order — do not build teardown from that
+// printout (#717). A flat reverse of install order strands
+// NativeTokenLimitModule.limits (A0 proof 6b). A hook that carried install
+// data is torn down with that same data except NativeTokenLimit validation
+// (entityId only). Exec-hook entries that installed no state take an empty slot.
 //
 // Wrong ordering does not error here or on chain. It mines and does nothing.
 func SessionSignerUninstallFromInstall(entityID uint32, installCall []byte) ([]byte, error) {

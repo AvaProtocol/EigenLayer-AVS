@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
@@ -319,7 +321,7 @@ func (s *Server) SimulateWorkflow(ctx echo.Context) error {
 
 	exec, err := s.engine.SimulateWorkflowWithContext(ctx.Request().Context(), user, trigger, nodes, edges, inputVars, chainIDs...)
 	if err != nil {
-		return err
+		return mapSimulateError(err)
 	}
 
 	// Simulate produces a transient Execution with no persisted
@@ -560,6 +562,18 @@ func openAPITriggerTypeToProto(t generated.TriggerType) (avsproto.TriggerType, e
 		return avsproto.TriggerType_TRIGGER_TYPE_MANUAL, nil
 	default:
 		return avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED, errBadTriggerType(t)
+	}
+}
+
+func mapSimulateError(err error) error {
+	if st, ok := status.FromError(err); ok && st.Code() == codes.InvalidArgument {
+		return badRequest("WORKFLOWS_SIMULATE_INVALID", "Invalid simulation payload", st.Message())
+	}
+	return &restmw.HTTPError{
+		Status: http.StatusBadGateway,
+		Code:   "WORKFLOWS_SIMULATE_FAILED",
+		Title:  "Simulation failed",
+		Detail: err.Error(),
 	}
 }
 

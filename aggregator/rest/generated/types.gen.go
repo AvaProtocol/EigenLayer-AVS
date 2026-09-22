@@ -70,6 +70,13 @@ const (
 	CustomCode CustomCodeNodeType = "customCode"
 )
 
+// Defines values for DelegationStatusStatus.
+const (
+	DelegationStatusStatusDelegated DelegationStatusStatus = "delegated"
+	DelegationStatusStatusMissing   DelegationStatusStatus = "missing"
+	DelegationStatusStatusPending   DelegationStatusStatus = "pending"
+)
+
 // Defines values for ETHTransferNodeType.
 const (
 	EthTransfer ETHTransferNodeType = "ethTransfer"
@@ -263,11 +270,16 @@ const (
 	RuleBased ValueFeeClassificationMethod = "ruleBased"
 )
 
+// Defines values for WalletKind.
+const (
+	Eoa7702 WalletKind = "eoa_7702"
+)
+
 // Defines values for WithdrawResponseStatus.
 const (
-	WithdrawResponseStatusConfirmed WithdrawResponseStatus = "confirmed"
-	WithdrawResponseStatusFailed    WithdrawResponseStatus = "failed"
-	WithdrawResponseStatusPending   WithdrawResponseStatus = "pending"
+	Confirmed WithdrawResponseStatus = "confirmed"
+	Failed    WithdrawResponseStatus = "failed"
+	Pending   WithdrawResponseStatus = "pending"
 )
 
 // Defines values for WorkflowCompletionReason.
@@ -570,6 +582,24 @@ type CustomCodeNodeConfig struct {
 	Lang   Lang   `json:"lang"`
 	Source string `json:"source"`
 }
+
+// DelegationStatus defines model for DelegationStatus.
+type DelegationStatus struct {
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId *ChainId `json:"chainId,omitempty"`
+
+	// CodeHash Arbitrary-length hex-encoded byte string.
+	CodeHash *Hex `json:"codeHash,omitempty"`
+
+	// Delegate Lowercase or checksummed hex EOA / contract address.
+	Delegate *EthereumAddress       `json:"delegate,omitempty"`
+	Status   DelegationStatusStatus `json:"status"`
+}
+
+// DelegationStatusStatus defines model for DelegationStatus.Status.
+type DelegationStatusStatus string
 
 // ERC20StateOverride Seeds a token's balanceOf / allowance storage slots for a single simulation. balanceOf[owner] lives at keccak256(abi.encode(owner, balanceSlot)); allowance[owner][spender] at keccak256(abi.encode(spender, keccak256(abi.encode(owner, allowanceSlot)))).
 type ERC20StateOverride struct {
@@ -1203,9 +1233,29 @@ type PreparePolicyRequest struct {
 	// NativeRecipients EOAs this grant may send native ETH to (empty-calldata execute).
 	// Omit for Uniswap/ERC-20-only and for payable-write-only
 	// (nativeValueCap). A present empty array is 400. Max 5
-	// (deferred replace of 20-row grants AA23s).
+	// (MaxNativeRecipients; deferred replace of 20-row grants AA23s).
 	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
 	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
+}
+
+// PreparedDelegation EIP-7702 authorization the owner signs. `digest` is `SetCodeAuthorization.SigHash`
+// (0x05 ‖ rlp([chainId, delegate, nonce])). `chainId` is never 0.
+// Aggregator-broadcast submit uses this nonce as the EOA's nonce (the EOA
+// is the authority, not the type-4 sender).
+type PreparedDelegation struct {
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId `json:"chainId"`
+
+	// Delegate Lowercase or checksummed hex EOA / contract address.
+	Delegate EthereumAddress `json:"delegate"`
+
+	// Digest Arbitrary-length hex-encoded byte string.
+	Digest Hex `json:"digest"`
+
+	// Nonce Authority (EOA) nonce for the 7702 authorization.
+	Nonce int64 `json:"nonce"`
 }
 
 // PreparedPolicy defines model for PreparedPolicy.
@@ -1508,6 +1558,18 @@ type SimulateWorkflowRequest struct {
 	Trigger        Trigger        `json:"trigger"`
 }
 
+// SubmitDelegationRequest defines model for SubmitDelegationRequest.
+type SubmitDelegationRequest struct {
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId `json:"chainId"`
+	Nonce   int64   `json:"nonce"`
+
+	// Signature Arbitrary-length hex-encoded byte string.
+	Signature Hex `json:"signature"`
+}
+
 // SubmitPolicyRequest defines model for SubmitPolicyRequest.
 type SubmitPolicyRequest struct {
 	AgentLabel             string `json:"agentLabel"`
@@ -1776,18 +1838,30 @@ type Wallet struct {
 	// Address Lowercase or checksummed hex EOA / contract address.
 	Address                EthereumAddress `json:"address"`
 	CompletedWorkflowCount *int64          `json:"completedWorkflowCount,omitempty"`
-	DisabledWorkflowCount  *int64          `json:"disabledWorkflowCount,omitempty"`
-	EnabledWorkflowCount   *int64          `json:"enabledWorkflowCount,omitempty"`
+
+	// Delegate Lowercase or checksummed hex EOA / contract address.
+	Delegate              *EthereumAddress `json:"delegate,omitempty"`
+	DisabledWorkflowCount *int64           `json:"disabledWorkflowCount,omitempty"`
+	EnabledWorkflowCount  *int64           `json:"enabledWorkflowCount,omitempty"`
 
 	// FactoryAddress Lowercase or checksummed hex EOA / contract address.
 	FactoryAddress      *EthereumAddress `json:"factoryAddress,omitempty"`
 	FailedWorkflowCount *int64           `json:"failedWorkflowCount,omitempty"`
 	IsHidden            *bool            `json:"isHidden,omitempty"`
 
-	// Salt Salt used in CREATE2 derivation (decimal string).
+	// Kind Empty/omitted for derived CREATE2 wallets. `eoa_7702` is the owner's
+	// EOA delegated to SemiModularAccount7702.
+	Kind *WalletKind `json:"kind,omitempty"`
+
+	// Salt Salt used in CREATE2 derivation (decimal string). Empty for
+	// `kind: eoa_7702` (no factory, no salt).
 	Salt               string `json:"salt"`
 	TotalWorkflowCount *int64 `json:"totalWorkflowCount,omitempty"`
 }
+
+// WalletKind Empty/omitted for derived CREATE2 wallets. `eoa_7702` is the owner's
+// EOA delegated to SemiModularAccount7702.
+type WalletKind string
 
 // WalletList defines model for WalletList.
 type WalletList struct {
@@ -2051,6 +2125,21 @@ type ListWalletsParams struct {
 	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
+// GetEoaDelegationParams defines parameters for GetEoaDelegation.
+type GetEoaDelegationParams struct {
+	// ChainId The chain to operate on (a single value). Omit to use the aggregator
+	// default (the request's JWT `aud` chain, then the gateway default).
+	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
+}
+
+// PrepareEoaDelegationJSONBody defines parameters for PrepareEoaDelegation.
+type PrepareEoaDelegationJSONBody struct {
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId *ChainId `json:"chainId,omitempty"`
+}
+
 // ListWalletPoliciesParams defines parameters for ListWalletPolicies.
 type ListWalletPoliciesParams struct {
 	// ChainId The chain to operate on (a single value). Omit to use the aggregator
@@ -2135,6 +2224,12 @@ type CreateWalletJSONRequestBody = CreateWalletRequest
 
 // UpdateWalletJSONRequestBody defines body for UpdateWallet for application/json ContentType.
 type UpdateWalletJSONRequestBody = UpdateWalletRequest
+
+// PrepareEoaDelegationJSONRequestBody defines body for PrepareEoaDelegation for application/json ContentType.
+type PrepareEoaDelegationJSONRequestBody PrepareEoaDelegationJSONBody
+
+// SubmitEoaDelegationJSONRequestBody defines body for SubmitEoaDelegation for application/json ContentType.
+type SubmitEoaDelegationJSONRequestBody = SubmitDelegationRequest
 
 // PrepareWalletPolicyJSONRequestBody defines body for PrepareWalletPolicy for application/json ContentType.
 type PrepareWalletPolicyJSONRequestBody = PreparePolicyRequest

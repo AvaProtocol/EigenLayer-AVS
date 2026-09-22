@@ -281,9 +281,15 @@ operator-default: build
 ## to the caller's terminal/pane; callers that want files redirect (dev-stack →
 ## logs/, start.sh → tee). Each sources .env so ${ALCHEMY_API_KEY} and
 ## the per-chain RPC refs in the YAML resolve.
-.PHONY: run-gateway run-worker-sepolia run-worker-ethereum run-worker-base run-worker-base-sepolia run-operator-sepolia run-operator-ethereum
+.PHONY: run-gateway run-gateway-sepolia run-worker-sepolia run-worker-ethereum run-worker-base run-worker-base-sepolia run-operator-sepolia run-operator-ethereum
 run-gateway:
 	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap aggregator --config=config/gateway.yaml
+# Sepolia-only aggregator (studio scripts/start.sh when mainnet env is absent).
+# Chain blocks for Ethereum/Base must be omitted from this YAML — empty
+# MAINNET_CONTROLLER_PRIVATE_KEY panics at parse. SMA-7702 pin is on the
+# YAML (copy from gateway.example.yaml); this target does not rewrite it.
+run-gateway-sepolia:
+	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap aggregator --config=config/gateway-sepolia.yaml
 run-worker-sepolia:
 	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; exec ./out/ap worker --config=config/worker-sepolia.yaml
 # MAINNET workers — move REAL funds, pay REAL gas (no paymaster). Need these in

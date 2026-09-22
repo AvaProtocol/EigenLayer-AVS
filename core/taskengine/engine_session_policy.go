@@ -13,6 +13,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 )
 
@@ -161,6 +162,21 @@ func (n *Engine) requireMAv2SessionWallet(user *model.User, chainID int64, walle
 	if err != nil {
 		return fmt.Errorf("loading wallet %s for session grant: %w", wallet.Hex(), err)
 	}
+	if rec != nil && rec.IsEOA7702() {
+		if err := rec.ValidateEOA7702Shape(); err != nil {
+			return fmt.Errorf("%w: %v", ErrSessionWalletNotMAv2, err)
+		}
+		if rec.Delegate == nil || *rec.Delegate != config.SMA7702Delegate() {
+			return fmt.Errorf("%w: eoa_7702 delegate is not the canonical SMA-7702", ErrSessionWalletNotMAv2)
+		}
+		if *rec.Address != user.Address {
+			return fmt.Errorf("%w: eoa_7702 runner must be the owner EOA", ErrSessionWalletNotMAv2)
+		}
+		if err := n.assertEOA7702OnChain(context.Background(), chainID, wallet); err != nil {
+			return err
+		}
+		return nil
+	}
 	if rec == nil || rec.Factory == nil || *rec.Factory == (common.Address{}) {
 		return fmt.Errorf("%w: no factory recorded for %s", ErrSessionWalletNotMAv2, wallet.Hex())
 	}
@@ -172,8 +188,10 @@ func (n *Engine) requireMAv2SessionWallet(user *model.User, chainID int64, walle
 }
 
 // lookupOwnedWalletRecord loads the stored smart-wallet row for (owner, wallet),
-// preferring the grant's chainID then falling back to any known chain.
-// badger.ErrKeyNotFound is "missing" (nil, nil); any other DB error is returned.
+// preferring the grant's chainID then falling back to any known chain for
+// CREATE2 records. eoa_7702 rows from another chain are skipped — designation
+// is per-chain. badger.ErrKeyNotFound is "missing" (nil, nil); any other DB
+// error is returned.
 func (n *Engine) lookupOwnedWalletRecord(user *model.User, chainID int64, wallet common.Address) (*model.SmartWallet, error) {
 	if n.db == nil || user == nil {
 		return nil, fmt.Errorf("storage unavailable")
@@ -205,9 +223,16 @@ func (n *Engine) lookupOwnedWalletRecord(user *model.User, chainID int64, wallet
 		if err != nil {
 			return nil, err
 		}
-		if rec != nil {
-			return rec, nil
+		if rec == nil {
+			continue
 		}
+		// 7702 designation is per-chain. A Sepolia eoa_7702 row must not
+		// authorize policies:* on Base (CREATE2 addresses are the ones
+		// that are chain-invariant).
+		if rec.IsEOA7702() {
+			continue
+		}
+		return rec, nil
 	}
 	return nil, nil
 }

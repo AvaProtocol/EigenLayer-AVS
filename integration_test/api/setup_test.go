@@ -91,7 +91,7 @@ func newHarness(t *testing.T) *testHarness {
 	// the workflow's smartWalletAddress. Production callers reach this
 	// state via POST /wallets; tests skip the RPC-driven derivation
 	// and stuff the record straight into BadgerDB.
-	require.NoError(t, taskengine.StoreWallet(db, user.Address, &model.SmartWallet{
+	require.NoError(t, taskengine.StoreWallet(db, cfg.SmartWallet.ChainID, user.Address, &model.SmartWallet{
 		Owner:   &user.Address,
 		Address: user.SmartAccountAddress,
 		Factory: walletFactoryPointer(cfg),

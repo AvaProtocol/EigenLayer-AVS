@@ -380,6 +380,12 @@ func registerColonActionShimRoutes(api *echo.Group, s *Server) {
 	api.POST("/wallets/:address/policies"+colonActionShim+"submit", func(c echo.Context) error {
 		return s.SubmitWalletPolicy(c, generated.EthereumAddress(c.Param("address")))
 	})
+	api.POST("/wallets/:address/delegation"+colonActionShim+"prepare", func(c echo.Context) error {
+		return s.PrepareEoaDelegation(c, generated.EthereumAddress(c.Param("address")))
+	})
+	api.POST("/wallets/:address/delegation"+colonActionShim+"submit", func(c echo.Context) error {
+		return s.SubmitEoaDelegation(c, generated.EthereumAddress(c.Param("address")))
+	})
 
 	// Collection-level actions. Routed via the generated wrapper so the
 	// oapi-codegen runtime handles query-param binding the same way the

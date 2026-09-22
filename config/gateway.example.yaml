@@ -111,6 +111,18 @@ smart_wallet:
   account_provider:       modular_account_v2
   alchemy_api_key:        ${ALCHEMY_API_KEY}
   controller_private_key: <testnet-controller-private-key-hex>
+  # Track B pin (K13). Loader reads these. eoa_7702_execute default false.
+  # True is allowed at boot only on Sepolia/Base with this pin; the send
+  # path then accepts sender=EOA for kind=eoa_7702 after K13. Rollback: false.
+  # Canonical delegate: SemiModularAccount7702 alchemy.sma-7702.1.0.0
+  # Impl hash: keccak256 of 23741 bytes at that address, byte-identical on
+  # Sepolia and Base (B0). Comparison is code[0:3]==0xef0100 &&
+  # code[3:23]==delegate && keccak256(impl). Never type-4 tx status.
+  # chain_id=0 7702 authorizations are refused. First execute chains:
+  # Sepolia (11155111) and Base (8453).
+  eoa_7702_execute: false
+  sma_7702_delegate:  0x69007702764179f14F51cdce752f4f775d74E139
+  sma_7702_impl_hash: 0xecfc0328ce4d953a4d452e11f54b578fa2d7f2f8126246d1120ca24d11845081
   # paymaster_address is INERT. It named the v0.6 verifying paymaster, removed
   # with the EntryPoint v0.7 cutover; sponsorship is alchemy_paymaster_policy_id.
   # Still parsed so older configs load, and logged once as ignored. Leave unset.
@@ -129,6 +141,9 @@ chains:
       bundler_provider:       alchemy
       alchemy_api_key:        ${ALCHEMY_API_KEY}
       controller_private_key: <testnet-controller-private-key-hex>
+      eoa_7702_execute:       false
+      sma_7702_delegate:      0x69007702764179f14F51cdce752f4f775d74E139
+      sma_7702_impl_hash:     0xecfc0328ce4d953a4d452e11f54b578fa2d7f2f8126246d1120ca24d11845081
       paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
       max_wallets_per_owner:  2000
 

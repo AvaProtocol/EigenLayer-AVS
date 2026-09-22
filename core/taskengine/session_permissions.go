@@ -167,6 +167,9 @@ func (p SessionPermissions) validate(withChain bool) error {
 					return fmt.Errorf("looking up native recipient %s: %w", rec.Hex(), err)
 				}
 				if len(code) != 0 {
+					if config.IsSMA7702Designation(code, config.SMA7702Delegate()) {
+						return fmt.Errorf("native recipient is a 7702-delegated EOA; set allowContractRecipient (any function on this address, ERC-20 uncapped)")
+					}
 					return fmt.Errorf("native recipient is a contract; send via contractWrite, or set allowContractRecipient (any function on this address, ERC-20 uncapped)")
 				}
 			}
