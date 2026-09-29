@@ -321,7 +321,9 @@ func MustGetTestOwnerAddress() (*common.Address, bool) {
 		return nil, false
 	}
 
-	privateKey, err := crypto.HexToECDSA(testPrivateKeyHex)
+	// .env keeps the 0x form; HexToECDSA refuses it. Same trim as the
+	// other TEST_PRIVATE_KEY readers.
+	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(testPrivateKeyHex, "0x"))
 	if err != nil {
 		panic(fmt.Sprintf("TEST_PRIVATE_KEY is not a valid hex private key: %v", err))
 	}
