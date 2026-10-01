@@ -87,6 +87,19 @@ var (
 	bob        = common.HexToAddress("0x000000000000000000000000000000000000b0b0")
 )
 
+// useBaseBudget sizes the run for Base. The 2 gwei SuggestFee floor is ~400x
+// Base's base fee and would demand ~0.003 ETH of prefund per UserOp; 0.05 gwei
+// is still 50x the bundler's 0.001 gwei minimum priority fee, and the whole
+// run then costs well under 0.0005 ETH. The cap stays below the EOA's
+// post-install balance so B5 over-cap reverts on NativeTokenLimit, not on
+// insufficient balance.
+func useBaseBudget() {
+	eip1559.SetMinGweiFloor(big.NewInt(50_000_000)) // 0.05 gwei
+	nativeCap = big.NewInt(1_000_000_000_000_000)   // 0.001 ETH
+	minBalance = big.NewInt(1_500_000_000_000_000)  // 0.0015 ETH
+	prefundWei = big.NewInt(2_000_000_000_000_000)  // 0.002 ETH
+}
+
 func main() {
 	loadDotEnv()
 	if err := run(); err != nil {
@@ -106,6 +119,7 @@ func run() error {
 	case "base":
 		chainID = 8453
 		rpcURL = firstNonEmpty("SPIKE_RPC_URL", "BASE_RPC_URL")
+		useBaseBudget()
 	default:
 		return fmt.Errorf("SPIKE_CHAIN must be sepolia or base, got %q", chainName)
 	}
