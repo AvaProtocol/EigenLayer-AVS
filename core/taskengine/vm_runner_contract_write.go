@@ -453,6 +453,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			Selector: SelectorFromCalldata(calldata),
 			Label:    methodName,
 			Value:    simValue,
+			Calldata: calldata,
 		}}); msg != "" {
 			return &avsproto.ContractWriteNode_MethodResult{
 				MethodName: methodName,
@@ -1010,6 +1011,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		Selector: SelectorFromCalldata(callDataBytes),
 		Label:    methodName,
 		Value:    transactionValue,
+		Calldata: callDataBytes,
 	}}); msg != "" {
 		executionLogBuilder.WriteString(msg + "\n")
 		return &avsproto.ContractWriteNode_MethodResult{
@@ -1114,12 +1116,23 @@ func (r *ContractWriteProcessor) preflightSessionGrantCoverage(planned []Planned
 	if chainID <= 0 {
 		chainID = r.vm.vmDefaultChainID()
 	}
+	report := r.vm.sessionGrantReport
+	if report != nil {
+		report.observeCalls(planned)
+	}
 	policy, err := ActiveSessionPolicyForWallet(r.vm.db, chainID, r.owner, *sender)
 	if err != nil {
 		// Storage / multi-grant errors should fail closed with a clear message.
+		// Report mode does not swallow a lookup failure.
 		return fmt.Sprintf("SESSION_POLICY_LOOKUP_FAILED: %v", err)
 	}
+	if report != nil {
+		report.notePolicy(policy)
+	}
 	if policy == nil {
+		if report != nil {
+			report.noteNoGrant()
+		}
 		return ""
 	}
 	if len(policy.AllowedActions) == 0 {
@@ -1127,7 +1140,12 @@ func (r *ContractWriteProcessor) preflightSessionGrantCoverage(planned []Planned
 			return ""
 		}
 		// Native-only grant: every contractWrite is outside the allowlist.
-		return FormatSessionPolicyTargetNotAllowed(planned, policy.ID)
+		msg := FormatSessionPolicyTargetNotAllowed(planned, policy.ID)
+		if report != nil {
+			report.noteGrantMiss(msg, planned)
+			return ""
+		}
+		return msg
 	}
 	missing := MissingGrantCalls(policy.AllowedActions, planned)
 	if len(missing) > 0 {
@@ -1138,7 +1156,12 @@ func (r *ContractWriteProcessor) preflightSessionGrantCoverage(planned []Planned
 				"missing_count", len(missing),
 			)
 		}
-		return FormatSessionPolicyTargetNotAllowed(missing, policy.ID)
+		msg := FormatSessionPolicyTargetNotAllowed(missing, policy.ID)
+		if report != nil {
+			report.noteGrantMiss(msg, planned)
+			return ""
+		}
+		return msg
 	}
 
 	if policy.NativeSpendCap == nil {
@@ -1150,11 +1173,16 @@ func (r *ContractWriteProcessor) preflightSessionGrantCoverage(planned []Planned
 			sum.Add(sum, c.Value)
 		}
 	}
-	return PreflightNativePermission(policy, NativeIntent{
+	msg := PreflightNativePermission(policy, NativeIntent{
 		Amount:    sum,
 		Kind:      NativeValue,
 		Sponsored: sponsoredFromConfig(r.smartWalletConfig),
 	}, r.nativeCodeAndFee())
+	if report != nil && msg != "" {
+		report.noteGrantMiss(msg, planned)
+		return ""
+	}
+	return msg
 }
 
 func (r *ContractWriteProcessor) nativeCodeAndFee() CodeAndFeeReader {
@@ -1369,6 +1397,7 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 			Selector: SelectorFromCalldata(datas[i]),
 			Label:    methodNames[i],
 			Value:    values[i],
+			Calldata: datas[i],
 		}
 	}
 	if msg := r.preflightSessionGrantCoverage(planned); msg != "" {

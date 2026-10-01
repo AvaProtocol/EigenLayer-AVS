@@ -251,6 +251,11 @@ type VM struct {
 	// send real transactions and should use Tenderly or mock paths instead.
 	IsSimulation bool
 
+	// sessionGrantReport is set only for a simulate VM whose caller opted
+	// into authorizationMode=report. A nil report keeps grant misses as
+	// step failures, including on a real UserOp.
+	sessionGrantReport *SessionGrantReport
+
 	// ExecutionIndex is the 0-based sequential counter for this execution within the task.
 	// Set by executor before node execution begins. Used for email subject formatting ("Run #X:").
 	ExecutionIndex int64

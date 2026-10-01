@@ -102,6 +102,35 @@ func TestProblemClampsGRPCInternalDetail(t *testing.T) {
 // A handler that deliberately builds a 5xx *HTTPError wrote its Detail for
 // the caller — those stay, or operators lose the "this instance isn't
 // configured for that chain" class of message.
+func TestProblemCopiesGrantConflictFields(t *testing.T) {
+	until := int64(1_767_225_600_000)
+	rec, p := serveErr(nil, &HTTPError{
+		Status:          http.StatusConflict,
+		Code:            "SESSION_POLICY_NOT_COVERING",
+		Title:           "Grant does not cover this workflow",
+		Detail:          "Pay is outside the usable grant",
+		PolicyID:        "01GRANT",
+		AffectedTaskIDs: []string{"pay"},
+		MissingActions:  []ProblemAction{{Target: "0x1", Selectors: []string{"0xa9059cbb"}}},
+		Required: &ProblemNeed{
+			Erc20SpendCaps: []ProblemCap{{Token: "0x1", Amount: "19"}},
+			ValidUntil:     &until,
+		},
+	})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", rec.Code)
+	}
+	if p.PolicyID != "01GRANT" || len(p.AffectedTaskIDs) != 1 || p.AffectedTaskIDs[0] != "pay" {
+		t.Fatalf("conflict identity = %#v", p)
+	}
+	if len(p.MissingActions) != 1 || p.MissingActions[0].Selectors[0] != "0xa9059cbb" {
+		t.Fatalf("missing = %#v", p.MissingActions)
+	}
+	if p.Required == nil || p.Required.Erc20SpendCaps[0].Amount != "19" || p.Required.ValidUntil == nil || *p.Required.ValidUntil != until {
+		t.Fatalf("required = %#v", p.Required)
+	}
+}
+
 func TestProblemKeepsAuthored5xxDetail(t *testing.T) {
 	const detail = "This aggregator instance has no smart-wallet config for the requested chain."
 	rec, p := serveErr(nil, &HTTPError{

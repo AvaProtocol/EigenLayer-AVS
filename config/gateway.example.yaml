@@ -80,6 +80,15 @@ alchemy_paymaster_policy_id: ""
 # Empty disables the check.
 gas_manager_webhook_secret: ""
 
+# Refuse POST /workflows and POST /workflows/{id}:resume when the runner's
+# usable grant does not cover the workflow's fund-moving steps
+# (409 SESSION_POLICY_NOT_COVERING). Off by default. Turn it on only after
+# Studio handles that error on every surface that creates a task (Skill
+# page, canvas, chat). A workflow with no writes still passes. policies:submit
+# already refuses a grant that would uncover an enabled task, with or
+# without this flag.
+session_policy_deploy_check: false
+
 # Token price service for fee USD lines / estimateFees. Env: MORALIS_API_KEY.
 # Distinct from macros.secrets.moralis_api_key (engine-internal: BalanceNode
 # and restApi options.auth.provider=moralis). Never interpolated into

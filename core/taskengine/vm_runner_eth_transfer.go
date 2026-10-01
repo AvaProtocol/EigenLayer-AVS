@@ -302,8 +302,13 @@ func (p *ETHTransferProcessor) preflightSessionGrant(destination common.Address,
 		return ""
 	}
 	var policy *model.SessionPolicy
+	lookedUp := false
 	if p.vm != nil && p.vm.db != nil && p.taskOwner != nil {
 		if sender := getAASenderAddress(p.vm); sender != nil {
+			lookedUp = true
+			if p.vm.sessionGrantReport != nil {
+				p.vm.sessionGrantReport.observeNative(destination, amount)
+			}
 			chainID := p.smartWalletConfig.ChainID
 			if chainID <= 0 {
 				chainID = p.vm.vmDefaultChainID()
@@ -315,16 +320,31 @@ func (p *ETHTransferProcessor) preflightSessionGrant(destination common.Address,
 			policy = got
 		}
 	}
-	if policy == nil {
-		// No usable grant: the send path fails "no session authorization".
+	if !lookedUp {
 		return ""
 	}
-	return PreflightNativePermission(policy, NativeIntent{
+	report := p.vm.sessionGrantReport
+	if report != nil {
+		report.notePolicy(policy)
+	}
+	if policy == nil {
+		// No usable grant: the send path fails "no session authorization".
+		if report != nil {
+			report.noteNoGrant()
+		}
+		return ""
+	}
+	msg := PreflightNativePermission(policy, NativeIntent{
 		Recipient: destination,
 		Amount:    amount,
 		Kind:      NativeSend,
 		Sponsored: sponsoredFromConfig(p.smartWalletConfig),
 	}, codeAndFeeFromEthClient(p.ethClient))
+	if report != nil && msg != "" {
+		report.noteGrantMiss(msg, nil)
+		return ""
+	}
+	return msg
 }
 
 // executeRealETHTransfer executes a real UserOp transaction for ETH transfers
