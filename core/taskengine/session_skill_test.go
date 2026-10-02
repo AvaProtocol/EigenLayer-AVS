@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
@@ -295,6 +296,160 @@ func TestDeriveValueZeroIsNotUnsized(t *testing.T) {
 	maxed := DeriveWorkflowNeeds(skillValueTask("max"), nil, scheduleFromTask(skillValueTask("max"), now), skillSepolia)[skillSepolia]
 	if maxed == nil || !maxed.CapNeedsInput || !maxed.NativeUnsized {
 		t.Fatalf("value max must be unsized native, got %#v", maxed)
+	}
+}
+
+// weeklyPayTask is the Weekly USDC Pay shape: a loop whose runner transfers
+// {{settings.token_amount.amount}} of {{settings.token_amount.address}}.
+func weeklyPayTask(t *testing.T, addressExpr string, amount any, recipients []any) *avsproto.Task {
+	t.Helper()
+	settings, err := structpb.NewValue(map[string]any{
+		"recipients": recipients,
+		"token_amount": map[string]any{
+			"address": skillUSDC,
+			"amount":  amount,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &avsproto.Task{
+		Id:           "weekly",
+		Name:         "Weekly USDC Pay",
+		MaxExecution: 12,
+		InputVariables: map[string]*structpb.Value{
+			"settings": settings,
+		},
+		Nodes: []*avsproto.TaskNode{{
+			TaskType: &avsproto.TaskNode_Loop{
+				Loop: &avsproto.LoopNode{
+					Config: &avsproto.LoopNode_Config{InputVariable: "{{settings.recipients}}"},
+					Runner: &avsproto.LoopNode_ContractWrite{
+						ContractWrite: &avsproto.ContractWriteNode{
+							Config: &avsproto.ContractWriteNode_Config{
+								ChainId:         skillSepolia,
+								ContractAddress: addressExpr,
+								MethodCalls: []*avsproto.ContractWriteNode_MethodCall{{
+									MethodName:   "transfer",
+									MethodParams: []string{"{{value}}", "{{settings.token_amount.amount}}"},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}},
+	}
+}
+
+func TestWeeklyPayNestedSettingsDerivesTransferAndCap(t *testing.T) {
+	now := skillNow()
+	one := []any{"0x0000000000000000000000000000000000000001"}
+	task := weeklyPayTask(t, "{{settings.token_amount.address}}", "1000000", one)
+	need := DeriveWorkflowNeeds(task, nil, scheduleFromTask(task, now), skillSepolia)[skillSepolia]
+	if need == nil || need.CapNeedsInput || len(need.Actions) != 1 || len(need.Caps) != 1 {
+		t.Fatalf("nested transfer need = %#v", need)
+	}
+	usdc := common.HexToAddress(skillUSDC)
+	if *need.Actions[0].Target != usdc || need.Actions[0].Selectors[0] != selectorTransfer {
+		t.Fatalf("action = %+v", need.Actions[0])
+	}
+	if need.Caps[0].Amount != "12000000" {
+		t.Fatalf("cap = %s, want 1000000 x 12 runs", need.Caps[0].Amount)
+	}
+
+	two := DeriveWorkflowNeeds(task, map[string]any{
+		"recipients": []any{
+			"0x0000000000000000000000000000000000000001",
+			"0x0000000000000000000000000000000000000002",
+		},
+		"token_amount": map[string]any{"address": skillUSDC, "amount": "1000000"},
+	}, scheduleFromTask(task, now), skillSepolia)[skillSepolia]
+	if two == nil || len(two.Caps) != 1 || two.Caps[0].Amount != "24000000" {
+		t.Fatalf("two recipients cap = %#v", two)
+	}
+
+	numeric := DeriveWorkflowNeeds(weeklyPayTask(t, "${settings.token_amount.address}", float64(1000000), one), nil, scheduleFromTask(task, now), skillSepolia)[skillSepolia]
+	if numeric == nil || numeric.CapNeedsInput || len(numeric.Actions) != 1 || numeric.Caps[0].Amount != "12000000" {
+		t.Fatalf("numeric amount and ${} path = %#v", numeric)
+	}
+
+	huge := DeriveWorkflowNeeds(weeklyPayTask(t, "{{settings.token_amount.address}}", float64(1<<54), one), nil, scheduleFromTask(task, now), skillSepolia)[skillSepolia]
+	if huge == nil || !huge.CapNeedsInput || len(huge.Caps) != 0 || len(huge.Actions) != 1 {
+		t.Fatalf("an inexact JSON amount must keep the action and not invent a cap, got %#v", huge)
+	}
+
+	loopValue := DeriveWorkflowNeeds(weeklyPayTask(t, "{{value}}", "1000000", one), nil, scheduleFromTask(task, now), skillSepolia)[skillSepolia]
+	if loopValue == nil || !loopValue.HasFundMove || len(loopValue.Actions) != 0 {
+		t.Fatalf("{{value}} must not become an allowlist target, got %#v", loopValue)
+	}
+
+	later := now.Add(30 * 24 * time.Hour).UnixMilli()
+	other := usableGrant("01OTHER000000000000000000", later, []model.AllowedAction{skillAction(skillWETH, selectorApprove)}, []model.ERC20SpendCap{skillCap(skillWETH, "1")})
+	if got := CoverageRefusal(other, need); got == nil || got.Code != SessionPolicyNotCoveringCode {
+		t.Fatalf("a resolved transfer outside the grant must refuse, got %#v", got)
+	}
+	covered := usableGrant("01COVERED0000000000000000", later, []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)}, []model.ERC20SpendCap{skillCap(skillUSDC, "12000000")})
+	if got := CoverageRefusal(covered, need); got != nil {
+		t.Fatalf("a grant of the derived transfer must cover it, got %#v", got)
+	}
+	if got := CoverageRefusal(covered, loopValue); got != nil {
+		t.Fatalf("an unresolved loop value must not false-positive, got %#v", got)
+	}
+
+	perms, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{task}, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(perms.AllowedActions) != 1 || perms.AllowedActions[0].Selectors[0] != selectorTransfer {
+		t.Fatalf("merged actions = %+v", perms.AllowedActions)
+	}
+	if len(perms.SpendCaps) != 1 || perms.SpendCaps[0].Amount != "12000000" {
+		t.Fatalf("merged cap = %+v", perms.SpendCaps)
+	}
+}
+
+func TestReportModeRequiredIncludesObservedTransfer(t *testing.T) {
+	now := skillNow()
+	usdc := common.HexToAddress(skillUSDC)
+	router := common.HexToAddress("0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E")
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	// Static walk missed the dotted target, which is the shape Studio hit:
+	// a fund-moving need with a validUntil and no action.
+	missed := &WorkflowNeed{HasFundMove: true, Name: "Weekly USDC Pay", ValidUntilMs: 1798324821519, CapNeedsInput: true}
+	report := &SessionGrantReport{}
+	report.noteNoGrant()
+	report.observeCalls([]PlannedCall{
+		{Target: usdc, Selector: selectorTransfer, Calldata: common.FromHex(transferCalldata(payee, big.NewInt(1_000_000)))},
+		{Target: router, Selector: "0x04e45aaf", Label: "exactInputSingle", Calldata: common.FromHex("0x04e45aaf")},
+	})
+	got := BuildAuthorization(nil, missed, report, SkillSchedule{MaxExecution: 12, Now: now})
+	if got.Status != AuthNoGrant || got.Detail != "no usable grant" || got.Required == nil {
+		t.Fatalf("status = %#v", got)
+	}
+	req := got.Required
+	if req.CapNeedsInput || len(req.Actions) != 1 || len(req.Caps) != 1 {
+		t.Fatalf("required = %#v", req)
+	}
+	if *req.Actions[0].Target != usdc || req.Actions[0].Selectors[0] != selectorTransfer {
+		t.Fatalf("action = %+v", req.Actions[0])
+	}
+	if req.Caps[0].Amount != "12000000" || req.ValidUntilMs != missed.ValidUntilMs {
+		t.Fatalf("cap = %+v validUntil = %d", req.Caps, req.ValidUntilMs)
+	}
+
+	// The static walk already sized this run. The observed spend must not be added again.
+	sized := &WorkflowNeed{
+		HasFundMove: true,
+		Actions:     []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)},
+		Caps:        []model.ERC20SpendCap{skillCap(skillUSDC, "12000000")},
+	}
+	again := BuildAuthorization(nil, sized, report, SkillSchedule{MaxExecution: 12, Now: now})
+	if again.Required == nil || len(again.Required.Caps) != 1 || again.Required.Caps[0].Amount != "12000000" {
+		t.Fatalf("observed spend doubled the static cap: %#v", again.Required)
+	}
+	if len(again.Required.Actions) != 1 {
+		t.Fatalf("router call leaked into actions: %+v", again.Required.Actions)
 	}
 }
 

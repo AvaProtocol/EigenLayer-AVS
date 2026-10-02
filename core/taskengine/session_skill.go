@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"regexp"
 	"sort"
@@ -59,7 +60,11 @@ var (
 	// replacement must not keep the old cap and must not store zero.
 	ErrSessionPolicyUnsized = errors.New("cannot size the remaining spend for an enabled automation")
 
-	settingRef = regexp.MustCompile(`^(?:\{\{settings\.([A-Za-z0-9_]+)\}\}|\$\{settings\.([A-Za-z0-9_]+)\})$`)
+	// settingRef matches a whole-string settings reference, including a dotted
+	// path such as {{settings.token_amount.address}}. A single segment stays
+	// {{settings.recipients}}. {{value}} and node output stay unresolved, so
+	// a coverage check cannot invent a target it did not read.
+	settingRef = regexp.MustCompile(`^(?:\{\{settings\.([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)\}\}|\$\{settings\.([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)\})$`)
 )
 
 // PolicyConflictError is a 409 the REST layer copies onto the problem body.
@@ -201,6 +206,8 @@ func SimulateAuthFrom(ctx context.Context) *SimulateAuth {
 // SessionGrantReport records grant misses while a simulate VM is in report
 // mode. Production sends leave it nil, so they stay fail-closed.
 // Token totals decoded from calldata here are the advisory verdict only.
+// fillObserved copies an observed transfer or approve onto that verdict
+// so a cap is not returned without the call that spent it.
 // MergeSkillGrant sizes a grant the owner signs from the workflow
 // definition, and does not read this report.
 type SessionGrantReport struct {
@@ -298,13 +305,13 @@ func (r *SessionGrantReport) noteGrantMiss(msg string, planned []PlannedCall) {
 	r.Missing = append(r.Missing, planned...)
 }
 
-func (r *SessionGrantReport) snapshot() (policy *model.SessionPolicy, noGrant, saw bool, missing []PlannedCall, nativeMiss bool, nativeDetail string, token map[common.Address]*big.Int, nativeSpend *big.Int) {
+func (r *SessionGrantReport) snapshot() (policy *model.SessionPolicy, noGrant, saw bool, missing []PlannedCall, nativeMiss bool, nativeDetail string, token map[common.Address]*big.Int, nativeSpend *big.Int, planned []PlannedCall) {
 	if r == nil {
-		return nil, false, false, nil, false, "", nil, nil
+		return nil, false, false, nil, false, "", nil, nil, nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.Policy, r.NoGrant, r.SawWrite, append([]PlannedCall(nil), r.Missing...), r.NativeMiss, r.NativeMissDetail, r.TokenSpend, r.NativeSpend
+	return r.Policy, r.NoGrant, r.SawWrite, append([]PlannedCall(nil), r.Missing...), r.NativeMiss, r.NativeMissDetail, r.TokenSpend, r.NativeSpend, append([]PlannedCall(nil), r.Planned...)
 }
 
 func isNativeMessage(msg string) bool {
@@ -619,14 +626,14 @@ func CoverageRefusal(policy *model.SessionPolicy, need *WorkflowNeed) *PolicyCon
 // win over the static walk when the report saw a write. Required is set
 // whenever the workflow moves funds.
 func BuildAuthorization(policy *model.SessionPolicy, need *WorkflowNeed, report *SessionGrantReport, sched SkillSchedule) *SessionAuthorization {
-	repPolicy, noGrant, saw, missingCalls, nativeMiss, nativeDetail, tokenSpend, nativeSpend := report.snapshot()
+	repPolicy, noGrant, saw, missingCalls, nativeMiss, nativeDetail, tokenSpend, nativeSpend, planned := report.snapshot()
 	if policy == nil {
 		policy = repPolicy
 	}
 	if (need == nil || !need.HasFundMove) && !saw {
 		return &SessionAuthorization{Status: AuthCovered}
 	}
-	filled := fillObserved(need, saw, tokenSpend, nativeSpend, sched)
+	filled := fillObserved(need, saw, planned, tokenSpend, nativeSpend, sched)
 	if filled == nil {
 		filled = &WorkflowNeed{HasFundMove: true}
 	}
@@ -1067,13 +1074,45 @@ func resolveString(raw string, settings map[string]any) (string, bool) {
 		if !ok {
 			return "", false
 		}
-		s, ok := v.(string)
-		if !ok {
-			return "", false
-		}
-		return strings.TrimSpace(s), true
+		return scalarString(v)
 	}
 	return raw, true
+}
+
+// scalarString formats a settings leaf. Floats are accepted only when they
+// are an exact integer inside the 53-bit mantissa, so a JSON number cannot
+// size a cap it cannot represent.
+func scalarString(v any) (string, bool) {
+	switch n := v.(type) {
+	case string:
+		return strings.TrimSpace(n), true
+	case int:
+		return strconv.Itoa(n), true
+	case int32:
+		return strconv.FormatInt(int64(n), 10), true
+	case int64:
+		return strconv.FormatInt(n, 10), true
+	case uint32:
+		return strconv.FormatUint(uint64(n), 10), true
+	case uint64:
+		return strconv.FormatUint(n, 10), true
+	case float32:
+		return exactFloatString(float64(n))
+	case float64:
+		return exactFloatString(n)
+	default:
+		return "", false
+	}
+}
+
+func exactFloatString(n float64) (string, bool) {
+	if math.IsNaN(n) || math.IsInf(n, 0) || n != math.Trunc(n) {
+		return "", false
+	}
+	if n > 1<<53 || n < -(1<<53) {
+		return "", false
+	}
+	return strconv.FormatFloat(n, 'f', 0, 64), true
 }
 
 func lookupSetting(expr string, settings map[string]any) (any, bool) {
@@ -1081,12 +1120,22 @@ func lookupSetting(expr string, settings map[string]any) (any, bool) {
 	if m == nil || settings == nil {
 		return nil, false
 	}
-	key := m[1]
-	if key == "" {
-		key = m[2]
+	path := m[1]
+	if path == "" {
+		path = m[2]
 	}
-	v, ok := settings[key]
-	return v, ok
+	var cur any = settings
+	for _, key := range strings.Split(path, ".") {
+		obj, ok := cur.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		cur, ok = obj[key]
+		if !ok {
+			return nil, false
+		}
+	}
+	return cur, true
 }
 
 func loopIterations(cfg *avsproto.LoopNode_Config, settings map[string]any) (int, bool) {
@@ -1510,7 +1559,10 @@ func capShortfall(policy *model.SessionPolicy, need *WorkflowNeed) (tokenShort, 
 	return tokenShort, nativeShort
 }
 
-func fillObserved(need *WorkflowNeed, saw bool, tokenSpend map[common.Address]*big.Int, nativeSpend *big.Int, sched SkillSchedule) *WorkflowNeed {
+// fillObserved copies the static need and adds each transfer or approve
+// the simulation actually ran. The cap is sized from that spend; the
+// action is what makes the cap preparable.
+func fillObserved(need *WorkflowNeed, saw bool, planned []PlannedCall, tokenSpend map[common.Address]*big.Int, nativeSpend *big.Int, sched SkillSchedule) *WorkflowNeed {
 	if need == nil && !saw {
 		return nil
 	}
@@ -1527,8 +1579,18 @@ func fillObserved(need *WorkflowNeed, saw bool, tokenSpend map[common.Address]*b
 	} else {
 		filled.HasFundMove = true
 	}
+	for _, call := range planned {
+		sel, ok := observedSpendSelector(call)
+		if !ok || call.Target == (common.Address{}) {
+			continue
+		}
+		addAction(&filled, call.Target, sel)
+		filled.HasFundMove = true
+	}
+	defer sortNeed(&filled)
 	runs, known := remainingRuns(sched, sched.Crons)
 	if !known || runs <= 0 {
+		markUncappedSpend(&filled)
 		return &filled
 	}
 	for token, perRun := range tokenSpend {
@@ -1565,6 +1627,42 @@ func fillObserved(need *WorkflowNeed, saw bool, tokenSpend map[common.Address]*b
 	}
 	filled.CapNeedsInput = false
 	return &filled
+}
+
+// observedSpendSelector is the transfer or approve the simulation ran.
+// Any other call stays out of the cap's action: a router selector is not
+// a guess for how the token is spent.
+func observedSpendSelector(call PlannedCall) (string, bool) {
+	if strings.TrimSpace(call.Selector) != "" {
+		sel := normalizeSelector(call.Selector)
+		if sel == selectorTransfer || sel == selectorApprove {
+			return sel, true
+		}
+	}
+	if len(call.Calldata) >= 4 {
+		sel := SelectorFromCalldata(call.Calldata)
+		if sel == selectorTransfer || sel == selectorApprove {
+			return sel, true
+		}
+	}
+	return "", false
+}
+
+// markUncappedSpend keeps a transfer or approve that has no number from
+// looking like a finished grant.
+func markUncappedSpend(need *WorkflowNeed) {
+	if need == nil || need.CapNeedsInput {
+		return
+	}
+	for _, action := range need.Actions {
+		if action.Target == nil || !transferApproveOnly(*action.Target, need.Actions) {
+			continue
+		}
+		if capAmount(need, *action.Target) == nil {
+			need.CapNeedsInput = true
+			return
+		}
+	}
 }
 
 func capAmount(need *WorkflowNeed, token common.Address) *big.Int {
@@ -1790,7 +1888,7 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 		}
 		var policy *model.SessionPolicy
 		if report != nil && chain == chainID {
-			policy, _, _, _, _, _, _, _ = report.snapshot()
+			policy, _, _, _, _, _, _, _, _ = report.snapshot()
 		}
 		if policy == nil && vm != nil && vm.db != nil && user != nil {
 			if sender := getAASenderAddress(vm); sender != nil {
