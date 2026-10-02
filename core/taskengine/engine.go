@@ -320,10 +320,11 @@ type Engine struct {
 
 	// skillPrepare remembers a skill-page addition until submit, keyed by the
 	// prepared policy id. Submit re-derives from it. Prepare still stores no
-	// grant. The map is process-local and is not a source of authority: the
-	// owner's signature is.
+	// grant. The cache is process-local, bounded, and is not a source of
+	// authority: the owner's signature is. A missing entry falls back to the
+	// strict per-task coverage check.
 	skillPrepareMu sync.Mutex
-	skillPrepare   map[string]*skillPrepareSnapshot
+	skillPrepare   *skillPrepareCache
 
 	// spendLimitCallerOverride replaces the pooled chain reader when tests
 	// need a scripted remaining-limit read.

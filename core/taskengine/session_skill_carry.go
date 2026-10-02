@@ -692,13 +692,10 @@ func classifyCarriedCoverage(current *model.SessionPolicy, rem GrantRemainder, i
 	return dropped, nil
 }
 
-// skillPrepareTTL is how long a skill prepare can still be checked at submit.
-// It matches the signing window: after that, submit already rejects the deadline.
-const skillPrepareTTL = 30 * 24 * time.Hour
-
 // skillPrepareSnapshot is the addition and the tasks prepare merged, so submit
 // can derive the grant again from a fresh chain read. The client echoes the
 // merged permissions, not the addition. Prepare does not store a grant.
+// The cache that holds these is bounded; see skillPrepareCache.
 type skillPrepareSnapshot struct {
 	owner      common.Address
 	wallet     common.Address
@@ -713,52 +710,6 @@ type skillPrepareSnapshot struct {
 
 func (s *skillPrepareSnapshot) matches(owner common.Address, in SessionPolicyInput) bool {
 	return s != nil && s.chainID == in.ChainID && s.owner == owner && s.wallet == in.Wallet
-}
-
-func (n *Engine) rememberSkillPrepare(policyID string, snap skillPrepareSnapshot) {
-	if n == nil || policyID == "" {
-		return
-	}
-	n.skillPrepareMu.Lock()
-	defer n.skillPrepareMu.Unlock()
-	if n.skillPrepare == nil {
-		n.skillPrepare = map[string]*skillPrepareSnapshot{}
-	}
-	now := time.Now()
-	for id, saved := range n.skillPrepare {
-		if saved == nil || now.Sub(saved.savedAt) > skillPrepareTTL {
-			delete(n.skillPrepare, id)
-		}
-	}
-	snap.savedAt = now
-	copied := snap
-	n.skillPrepare[strings.ToLower(policyID)] = &copied
-}
-
-func (n *Engine) skillPrepareFor(policyID string) *skillPrepareSnapshot {
-	if n == nil || policyID == "" {
-		return nil
-	}
-	n.skillPrepareMu.Lock()
-	defer n.skillPrepareMu.Unlock()
-	snap := n.skillPrepare[strings.ToLower(policyID)]
-	if snap == nil {
-		return nil
-	}
-	if time.Since(snap.savedAt) > skillPrepareTTL {
-		delete(n.skillPrepare, strings.ToLower(policyID))
-		return nil
-	}
-	return snap
-}
-
-func (n *Engine) forgetSkillPrepare(policyID string) {
-	if n == nil || policyID == "" {
-		return
-	}
-	n.skillPrepareMu.Lock()
-	defer n.skillPrepareMu.Unlock()
-	delete(n.skillPrepare, strings.ToLower(policyID))
 }
 
 func cloneTasks(tasks []*avsproto.Task) []*avsproto.Task {

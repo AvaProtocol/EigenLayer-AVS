@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"bytes"
+	"container/heap"
 	"context"
 	"crypto/ecdsa"
 	"errors"
@@ -769,4 +770,168 @@ func TestSkillCarrySubmitCoverage(t *testing.T) {
 	}
 	_, err = submitEcho(t, engine, ownerKey, owner, wallet, dropped, applied.ID)
 	require.NoError(t, err)
+}
+
+func skillPrepareTestSnap(owner, wallet common.Address) skillPrepareSnapshot {
+	return skillPrepareSnapshot{owner: owner, wallet: wallet, chainID: skillSepolia, preparedAt: skillNow()}
+}
+
+func skillPrepareAddr(n int) common.Address {
+	return common.HexToAddress(fmt.Sprintf("0x%040x", n))
+}
+
+func assertSkillPrepareConsistent(t *testing.T, c *skillPrepareCache) {
+	t.Helper()
+	require.NotNil(t, c)
+	require.Equal(t, len(c.byID), c.bySaved.Len())
+	seen := map[string]bool{}
+	for i, node := range c.bySaved {
+		require.NotNil(t, node)
+		require.Equal(t, i, node.index)
+		require.Equal(t, node, c.byID[node.id])
+		require.False(t, seen[node.id])
+		seen[node.id] = true
+		for _, child := range []int{i*2 + 1, i*2 + 2} {
+			if child >= len(c.bySaved) {
+				continue
+			}
+			require.False(t, c.bySaved.Less(child, i), "heap property broken at %d", i)
+		}
+	}
+	runners := map[string]int{}
+	for key, ids := range c.byRunner {
+		require.LessOrEqual(t, len(ids), skillPrepareMaxPerRunner)
+		for _, id := range ids {
+			require.Contains(t, c.byID, id)
+			runners[id]++
+			node := c.byID[id]
+			require.Equal(t, key, skillPrepareRunnerKey(node.snap.owner, node.snap.wallet, node.snap.chainID))
+		}
+	}
+	require.Equal(t, len(c.byID), len(runners))
+	owners := map[string]int{}
+	for key, ids := range c.byOwner {
+		require.LessOrEqual(t, len(ids), skillPrepareMaxPerOwner)
+		for _, id := range ids {
+			require.Contains(t, c.byID, id)
+			owners[id]++
+			require.Equal(t, key, skillPrepareOwnerKey(c.byID[id].snap.owner))
+		}
+	}
+	require.Equal(t, len(c.byID), len(owners))
+}
+
+func TestSkillPrepareCacheIsBounded(t *testing.T) {
+	owner := skillPrepareAddr(1)
+	wallet := skillPrepareAddr(2)
+	otherOwner := skillPrepareAddr(3)
+	otherWallet := skillPrepareAddr(4)
+
+	t.Run("per runner", func(t *testing.T) {
+		engine := &Engine{}
+		engine.rememberSkillPrepare("other", skillPrepareTestSnap(otherOwner, otherWallet))
+		const extra = 3
+		newest := ""
+		for i := 0; i < skillPrepareMaxPerRunner+extra; i++ {
+			id := fmt.Sprintf("runner-%04d", i)
+			engine.rememberSkillPrepare(id, skillPrepareTestSnap(owner, wallet))
+			newest = id
+		}
+		for i := 0; i < extra; i++ {
+			require.Nil(t, engine.skillPrepareFor(fmt.Sprintf("runner-%04d", i)))
+		}
+		require.NotNil(t, engine.skillPrepareFor(newest))
+		require.NotNil(t, engine.skillPrepareFor("other"))
+		runnerKey := skillPrepareRunnerKey(owner, wallet, skillSepolia)
+		require.Len(t, engine.skillPrepare.byRunner[runnerKey], skillPrepareMaxPerRunner)
+		assertSkillPrepareConsistent(t, engine.skillPrepare)
+	})
+
+	t.Run("per owner", func(t *testing.T) {
+		engine := &Engine{}
+		engine.rememberSkillPrepare("other", skillPrepareTestSnap(otherOwner, otherWallet))
+		wallets := skillPrepareMaxPerOwner/skillPrepareMaxPerRunner + 1
+		var first, last string
+		for w := 0; w < wallets; w++ {
+			for i := 0; i < skillPrepareMaxPerRunner; i++ {
+				id := fmt.Sprintf("owner-%02d-%02d", w, i)
+				engine.rememberSkillPrepare(id, skillPrepareTestSnap(owner, skillPrepareAddr(100+w)))
+				if first == "" {
+					first = id
+				}
+				last = id
+			}
+		}
+		require.Nil(t, engine.skillPrepareFor(first))
+		require.NotNil(t, engine.skillPrepareFor(last))
+		require.NotNil(t, engine.skillPrepareFor("other"))
+		require.LessOrEqual(t, len(engine.skillPrepare.byOwner[skillPrepareOwnerKey(owner)]), skillPrepareMaxPerOwner)
+		assertSkillPrepareConsistent(t, engine.skillPrepare)
+	})
+
+	t.Run("global", func(t *testing.T) {
+		engine := &Engine{}
+		owners := skillPrepareMaxEntries / skillPrepareMaxPerOwner
+		runners := skillPrepareMaxPerOwner / skillPrepareMaxPerRunner
+		var oldest string
+		for o := 0; o < owners; o++ {
+			for w := 0; w < runners; w++ {
+				for i := 0; i < skillPrepareMaxPerRunner; i++ {
+					id := fmt.Sprintf("g-%02d-%02d-%02d", o, w, i)
+					engine.rememberSkillPrepare(id, skillPrepareTestSnap(skillPrepareAddr(1000+o), skillPrepareAddr(2000+w)))
+					if oldest == "" {
+						oldest = id
+					}
+				}
+			}
+		}
+		require.Len(t, engine.skillPrepare.byID, skillPrepareMaxEntries)
+		engine.rememberSkillPrepare("overflow", skillPrepareTestSnap(skillPrepareAddr(9000), skillPrepareAddr(9001)))
+		require.Nil(t, engine.skillPrepareFor(oldest))
+		require.NotNil(t, engine.skillPrepareFor("overflow"))
+		require.LessOrEqual(t, len(engine.skillPrepare.byID), skillPrepareMaxEntries)
+		assertSkillPrepareConsistent(t, engine.skillPrepare)
+	})
+
+	t.Run("forget and replace", func(t *testing.T) {
+		engine := &Engine{}
+		engine.rememberSkillPrepare("same", skillPrepareTestSnap(owner, wallet))
+		engine.rememberSkillPrepare("SAME", skillPrepareTestSnap(owner, wallet))
+		require.Len(t, engine.skillPrepare.byID, 1)
+		require.NotNil(t, engine.skillPrepareFor("same"))
+		engine.forgetSkillPrepare("same")
+		require.Nil(t, engine.skillPrepareFor("same"))
+		require.Empty(t, engine.skillPrepare.byID)
+		require.Zero(t, engine.skillPrepare.bySaved.Len())
+		assertSkillPrepareConsistent(t, engine.skillPrepare)
+	})
+
+	t.Run("expired prefix", func(t *testing.T) {
+		engine := &Engine{}
+		engine.rememberSkillPrepare("keep", skillPrepareTestSnap(owner, wallet))
+		engine.rememberSkillPrepare("stale", skillPrepareTestSnap(owner, wallet))
+		engine.skillPrepareMu.Lock()
+		node := engine.skillPrepare.byID["stale"]
+		require.NotNil(t, node)
+		node.savedAt = time.Now().Add(-skillPrepareTTL - time.Second)
+		node.snap.savedAt = node.savedAt
+		heap.Fix(&engine.skillPrepare.bySaved, node.index)
+		engine.skillPrepareMu.Unlock()
+		engine.rememberSkillPrepare("fresh", skillPrepareTestSnap(owner, wallet))
+		_, staleKept := engine.skillPrepare.byID["stale"]
+		require.False(t, staleKept)
+		require.NotNil(t, engine.skillPrepareFor("keep"))
+		require.NotNil(t, engine.skillPrepareFor("fresh"))
+		assertSkillPrepareConsistent(t, engine.skillPrepare)
+	})
+
+	t.Run("zero engine", func(t *testing.T) {
+		var engine Engine
+		engine.forgetSkillPrepare("missing")
+		require.Nil(t, engine.skillPrepareFor("missing"))
+		engine.rememberSkillPrepare("", skillPrepareTestSnap(owner, wallet))
+		require.Nil(t, engine.skillPrepare)
+		engine.rememberSkillPrepare("one", skillPrepareTestSnap(owner, wallet))
+		require.NotNil(t, engine.skillPrepareFor("one"))
+	})
 }
