@@ -788,9 +788,28 @@ func TestWeeklyPayNestedSettingsDerivesTransferAndCap(t *testing.T) {
 		t.Fatalf("an inexact JSON amount must keep the action and not invent a cap, got %#v", huge)
 	}
 
-	loopValue := DeriveWorkflowNeeds(weeklyPayTask(t, "{{value}}", "1000000", one), nil, scheduleFromTask(task, now), skillSepolia)[skillSepolia]
+	// {{value}} over a node output is not a settings list. The token stays
+	// unread, so the walk must not invent an allowlist target.
+	nodeOutput := weeklyPayTask(t, "{{value}}", "1000000", one)
+	nodeOutput.GetNodes()[0].GetLoop().GetConfig().InputVariable = "{{split1.data}}"
+	loopValue := DeriveWorkflowNeeds(nodeOutput, nil, scheduleFromTask(nodeOutput, now), skillSepolia)[skillSepolia]
 	if loopValue == nil || !loopValue.HasFundMove || len(loopValue.Actions) != 0 {
-		t.Fatalf("{{value}} must not become an allowlist target, got %#v", loopValue)
+		t.Fatalf("{{value}} over a node output must not become an allowlist target, got %#v", loopValue)
+	}
+
+	// The same {{value}} over a settings list of token addresses is the
+	// contract the loop calls. Each address is an allowlist target, and the
+	// list length is applied once (1000000 x 12, not x 12 x 2).
+	byValue := DeriveWorkflowNeeds(weeklyPayTask(t, "{{value}}", "1000000", []any{skillUSDC, skillWETH}), nil, scheduleFromTask(task, now), skillSepolia)[skillSepolia]
+	weth := common.HexToAddress(skillWETH)
+	if byValue == nil || byValue.Unresolved || byValue.CapNeedsInput || len(byValue.Actions) != 2 || len(byValue.Caps) != 2 {
+		t.Fatalf("settings-list {{value}} contract = %#v", byValue)
+	}
+	if *byValue.Actions[0].Target != usdc || byValue.Actions[0].Selectors[0] != selectorTransfer {
+		t.Fatalf("first token action = %+v", byValue.Actions[0])
+	}
+	if *byValue.Actions[1].Target != weth || byValue.Caps[0].Amount != "12000000" || byValue.Caps[1].Amount != "12000000" {
+		t.Fatalf("token caps = %+v %+v", byValue.Actions, byValue.Caps)
 	}
 
 	later := now.Add(30 * 24 * time.Hour).UnixMilli()
@@ -803,12 +822,12 @@ func TestWeeklyPayNestedSettingsDerivesTransferAndCap(t *testing.T) {
 		t.Fatalf("a grant of the derived transfer must cover it, got %#v", got)
 	}
 	if loopValue == nil || !loopValue.Unresolved {
-		t.Fatalf("{{value}} must stay unresolved, got %#v", loopValue)
+		t.Fatalf("{{value}} over a node output must stay unresolved, got %#v", loopValue)
 	}
 	if got := CoverageRefusal(covered, loopValue); got == nil {
 		t.Fatal("an unresolved loop value must not be treated as covered")
 	}
-	if _, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{weeklyPayTask(t, "{{value}}", "1000000", one)}, skillSepolia, now, time.Hour); !errors.Is(err, ErrSessionPolicyUnsized) {
+	if _, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{nodeOutput}, skillSepolia, now, time.Hour); !errors.Is(err, ErrSessionPolicyUnsized) {
 		t.Fatalf("an unresolved running task must fail the merge closed, got %v", err)
 	}
 
@@ -821,6 +840,139 @@ func TestWeeklyPayNestedSettingsDerivesTransferAndCap(t *testing.T) {
 	}
 	if len(perms.SpendCaps) != 1 || perms.SpendCaps[0].Amount != "12000000" {
 		t.Fatalf("merged cap = %+v", perms.SpendCaps)
+	}
+}
+
+// loopEthTask is an ETH pay compiled from a loop: destination and amount are
+// templates, and the input is whatever the caller names.
+func loopEthTask(t *testing.T, input, destination, amountExpr string, runs int64, settings map[string]any) *avsproto.Task {
+	t.Helper()
+	raw, err := structpb.NewValue(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &avsproto.Task{
+		Id:           "eth-pay",
+		Name:         "Weekly ETH Pay",
+		MaxExecution: runs,
+		InputVariables: map[string]*structpb.Value{
+			"settings": raw,
+		},
+		Nodes: []*avsproto.TaskNode{{
+			TaskType: &avsproto.TaskNode_Loop{
+				Loop: &avsproto.LoopNode{
+					Config: &avsproto.LoopNode_Config{InputVariable: input},
+					Runner: &avsproto.LoopNode_EthTransfer{
+						EthTransfer: &avsproto.ETHTransferNode{
+							Config: &avsproto.ETHTransferNode_Config{
+								Destination: destination,
+								Amount:      amountExpr,
+								ChainId:     skillSepolia,
+							},
+						},
+					},
+				},
+			},
+		}},
+	}
+}
+
+func TestEthPaySettingsListBindsValue(t *testing.T) {
+	now := skillNow()
+	a1 := "0x0000000000000000000000000000000000000001"
+	a2 := "0x0000000000000000000000000000000000000002"
+	task := loopEthTask(t, "{{settings.recipients}}", "{{value}}", "{{settings.token_amount.amount}}", 12, map[string]any{
+		"recipients": []any{a1, a2},
+		"token_amount": map[string]any{
+			"amount": "1000000000000000",
+		},
+	})
+	need := DeriveWorkflowNeeds(task, nil, scheduleFromTask(task, now), skillSepolia)[skillSepolia]
+	if need == nil || need.Unresolved || need.CapNeedsInput || need.NativeSpendCap == nil {
+		t.Fatalf("eth settings list = %#v", need)
+	}
+	if need.NativeSpendCap.Amount != "24000000000000000" {
+		t.Fatalf("native cap = %s, want 1e15 x 12 x 2", need.NativeSpendCap.Amount)
+	}
+	if len(need.NativeRecipients) != 2 || need.NativeRecipients[0].Hex() != common.HexToAddress(a1).Hex() || need.NativeRecipients[1].Hex() != common.HexToAddress(a2).Hex() {
+		t.Fatalf("recipients = %+v", need.NativeRecipients)
+	}
+	perms, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{task}, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != "24000000000000000" || len(perms.NativeRecipients) != 2 {
+		t.Fatalf("merged eth pay = %+v recipients %d", perms.NativeSpendCap, len(perms.NativeRecipients))
+	}
+
+	for _, input := range []string{"{{split1.data}}", "{{filter1.data}}"} {
+		unread := loopEthTask(t, input, "{{value}}", "{{settings.token_amount.amount}}", 12, map[string]any{
+			"recipients":   []any{a1, a2},
+			"token_amount": map[string]any{"amount": "1000000000000000"},
+		})
+		got := DeriveWorkflowNeeds(unread, nil, scheduleFromTask(unread, now), skillSepolia)[skillSepolia]
+		if got == nil || !got.Unresolved || len(got.NativeRecipients) != 0 {
+			t.Fatalf("%s must stay unresolved with no recipients, got %#v", input, got)
+		}
+		if _, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{unread}, skillSepolia, now, time.Hour); !errors.Is(err, ErrSessionPolicyUnsized) {
+			t.Fatalf("%s must fail the merge closed, got %v", input, err)
+		}
+	}
+
+	rows := loopEthTask(t, "{{settings.rows}}", "{{value.recipient}}", "{{value.amount}}", 1, map[string]any{
+		"rows": []any{
+			map[string]any{"recipient": a1, "amount": "1000000000000000"},
+			map[string]any{"recipient": a2, "amount": "2000000000000000"},
+		},
+	})
+	rowNeed := DeriveWorkflowNeeds(rows, nil, scheduleFromTask(rows, now), skillSepolia)[skillSepolia]
+	if rowNeed == nil || rowNeed.Unresolved || rowNeed.CapNeedsInput || rowNeed.NativeSpendCap == nil || rowNeed.NativeSpendCap.Amount != "3000000000000000" {
+		t.Fatalf("{{value.x}} rows = %#v", rowNeed)
+	}
+	if len(rowNeed.NativeRecipients) != 2 {
+		t.Fatalf("row recipients = %+v", rowNeed.NativeRecipients)
+	}
+	if _, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{rows}, skillSepolia, now, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	// A whole object is not an address. Binding {{value}} must not stringify it.
+	object := loopEthTask(t, "{{settings.rows}}", "{{value}}", "{{value.amount}}", 1, map[string]any{
+		"rows": []any{map[string]any{"recipient": a1, "amount": "1000000000000000"}},
+	})
+	if got := DeriveWorkflowNeeds(object, nil, scheduleFromTask(object, now), skillSepolia)[skillSepolia]; got == nil || !got.Unresolved || len(got.NativeRecipients) != 0 {
+		t.Fatalf("object {{value}} must stay unresolved, got %#v", got)
+	}
+
+	bad := loopEthTask(t, "{{settings.recipients}}", "{{value}}", "{{settings.token_amount.amount}}", 12, map[string]any{
+		"recipients":   []any{a1, "not-an-address"},
+		"token_amount": map[string]any{"amount": "1000000000000000"},
+	})
+	if got := DeriveWorkflowNeeds(bad, nil, scheduleFromTask(bad, now), skillSepolia)[skillSepolia]; got == nil || !got.Unresolved {
+		t.Fatalf("a non-address element must fail closed, got %#v", got)
+	}
+	if _, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{bad}, skillSepolia, now, time.Hour); !errors.Is(err, ErrSessionPolicyUnsized) {
+		t.Fatalf("bad element merge = %v", err)
+	}
+
+	six := make([]any, MaxNativeRecipients+1)
+	for i := range six {
+		six[i] = common.BytesToAddress([]byte{byte(i + 1)}).Hex()
+	}
+	wide := loopEthTask(t, "{{settings.recipients}}", "{{value}}", "{{settings.token_amount.amount}}", 1, map[string]any{
+		"recipients":   six,
+		"token_amount": map[string]any{"amount": "1"},
+	})
+	wideNeed := DeriveWorkflowNeeds(wide, nil, scheduleFromTask(wide, now), skillSepolia)[skillSepolia]
+	if wideNeed == nil || wideNeed.Unresolved || len(wideNeed.NativeRecipients) != MaxNativeRecipients+1 {
+		t.Fatalf("six recipients must still be derived, got %#v", wideNeed)
+	}
+	widePerms, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{wide}, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := widePerms.Validate(); err == nil || !strings.Contains(err.Error(), "at most 5") {
+		t.Fatalf("a list longer than %d native recipients must still fail validation, got %v", MaxNativeRecipients, err)
 	}
 }
 

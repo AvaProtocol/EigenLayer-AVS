@@ -67,9 +67,12 @@ var (
 
 	// settingRef matches a whole-string settings reference, including a dotted
 	// path such as {{settings.token_amount.address}}. A single segment stays
-	// {{settings.recipients}}. {{value}} and node output stay unresolved, so
-	// a coverage check cannot invent a target it did not read.
+	// {{settings.recipients}}.
 	settingRef = regexp.MustCompile(`^(?:\{\{settings\.([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)\}\}|\$\{settings\.([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)\})$`)
+	// valueRef matches a whole-string loop element, {{value}} or {{value.a.b}}.
+	// It binds only while the loop input is a settings list. A loop over a
+	// node output stays unresolved, so coverage cannot invent a target.
+	valueRef = regexp.MustCompile(`^\{\{value(?:\.([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*))?\}\}$`)
 )
 
 // PolicyConflictError is a 409 the REST layer copies onto the problem body.
@@ -942,45 +945,65 @@ type fundSite struct {
 	loopMult      int
 }
 
+// fundScope is the settings map plus, inside a settings-list loop, the
+// current element. hasValue is false outside that loop, so {{value}} on a
+// node-output loop or a node that is not a loop stays unresolved.
+type fundScope struct {
+	settings map[string]any
+	value    any
+	hasValue bool
+}
+
 func walkFundMoves(nodes []*avsproto.TaskNode, settings map[string]any, visit func(fundSite)) {
+	scope := fundScope{settings: settings}
 	for _, node := range nodes {
 		if node == nil {
 			continue
 		}
 		if cw := node.GetContractWrite(); cw != nil {
-			collectContractWrite(cw, settings, false, 1, visit)
+			collectContractWrite(cw, scope, false, 1, visit)
 		}
 		if et := node.GetEthTransfer(); et != nil {
-			collectEth(et, settings, false, 1, visit)
+			collectEth(et, scope, false, 1, visit)
 		}
 		if loop := node.GetLoop(); loop != nil {
-			iters, known := loopIterations(loop.GetConfig(), settings)
-			if known && iters == 0 {
+			list, known := loopElements(loop.GetConfig(), settings)
+			if known && len(list) == 0 {
 				continue
 			}
-			mult := iters
-			if !known || mult < 1 {
-				mult = 1
+			if !known {
+				if cw := loop.GetContractWrite(); cw != nil {
+					collectContractWrite(cw, scope, true, 1, visit)
+				}
+				if et := loop.GetEthTransfer(); et != nil {
+					collectEth(et, scope, true, 1, visit)
+				}
+				continue
 			}
-			if cw := loop.GetContractWrite(); cw != nil {
-				collectContractWrite(cw, settings, !known, mult, visit)
-			}
-			if et := loop.GetEthTransfer(); et != nil {
-				collectEth(et, settings, !known, mult, visit)
+			// One visit per element, and the list length is applied once.
+			// Multiplying each visit by len(list) would square the cap.
+			for _, elem := range list {
+				elemScope := fundScope{settings: settings, value: elem, hasValue: true}
+				if cw := loop.GetContractWrite(); cw != nil {
+					collectContractWrite(cw, elemScope, false, 1, visit)
+				}
+				if et := loop.GetEthTransfer(); et != nil {
+					collectEth(et, elemScope, false, 1, visit)
+				}
 			}
 		}
 	}
 }
 
-func collectContractWrite(cw *avsproto.ContractWriteNode, settings map[string]any, loopUnknown bool, loopMult int, visit func(fundSite)) {
+func collectContractWrite(cw *avsproto.ContractWriteNode, scope fundScope, loopUnknown bool, loopMult int, visit func(fundSite)) {
 	cfg := cw.GetConfig()
 	if cfg == nil {
 		return
 	}
-	nodeTarget, nodeTargetOK := resolveAddress(cfg.GetContractAddress(), settings)
+	nodeTarget, nodeTargetOK := resolveAddress(cfg.GetContractAddress(), scope)
 	calls := cfg.GetMethodCalls()
 	if len(calls) == 0 {
-		sel, selOK, amt, amtOK, amtUnknown := decodeCall(cfg.GetCallData(), "", nil, settings)
+		sel, selOK, amt, amtOK, amtUnknown := decodeCall(cfg.GetCallData(), "", nil, scope)
 		site := fundSite{
 			chain: cfg.GetChainId(), kind: fundCall,
 			target: nodeTarget, targetOK: nodeTargetOK,
@@ -989,7 +1012,7 @@ func collectContractWrite(cw *avsproto.ContractWriteNode, settings map[string]an
 			loopUnknown: loopUnknown, loopMult: loopMult,
 		}
 		visit(site)
-		if v, ok, unknown := resolveAmount(cfg.GetValue(), settings); ok && v.Sign() > 0 || unknown {
+		if v, ok, unknown := resolveAmount(cfg.GetValue(), scope); ok && v.Sign() > 0 || unknown {
 			visit(fundSite{
 				chain: cfg.GetChainId(), kind: fundValue,
 				amount: v, amountOK: ok && v != nil && v.Sign() > 0, amountUnknown: unknown,
@@ -1001,9 +1024,9 @@ func collectContractWrite(cw *avsproto.ContractWriteNode, settings map[string]an
 	for _, mc := range calls {
 		target, targetOK := nodeTarget, nodeTargetOK
 		if override := strings.TrimSpace(mc.GetContractAddress()); override != "" {
-			target, targetOK = resolveAddress(override, settings)
+			target, targetOK = resolveAddress(override, scope)
 		}
-		sel, selOK, amt, amtOK, amtUnknown := decodeCall(mc.GetCallData(), mc.GetMethodName(), mc.GetMethodParams(), settings)
+		sel, selOK, amt, amtOK, amtUnknown := decodeCall(mc.GetCallData(), mc.GetMethodName(), mc.GetMethodParams(), scope)
 		if !selOK {
 			if got, ok := selectorFromABI(cfg.GetContractAbi(), mc.GetMethodName()); ok {
 				sel, selOK = got, true
@@ -1017,7 +1040,7 @@ func collectContractWrite(cw *avsproto.ContractWriteNode, settings map[string]an
 			loopUnknown: loopUnknown, loopMult: loopMult,
 		})
 	}
-	if v, ok, unknown := resolveAmount(cfg.GetValue(), settings); ok && v.Sign() > 0 || unknown {
+	if v, ok, unknown := resolveAmount(cfg.GetValue(), scope); ok && v.Sign() > 0 || unknown {
 		visit(fundSite{
 			chain: cfg.GetChainId(), kind: fundValue,
 			amount: v, amountOK: ok && v != nil && v.Sign() > 0, amountUnknown: unknown,
@@ -1026,13 +1049,13 @@ func collectContractWrite(cw *avsproto.ContractWriteNode, settings map[string]an
 	}
 }
 
-func collectEth(et *avsproto.ETHTransferNode, settings map[string]any, loopUnknown bool, loopMult int, visit func(fundSite)) {
+func collectEth(et *avsproto.ETHTransferNode, scope fundScope, loopUnknown bool, loopMult int, visit func(fundSite)) {
 	cfg := et.GetConfig()
 	if cfg == nil {
 		return
 	}
-	rec, recOK := resolveAddress(cfg.GetDestination(), settings)
-	amt, amtOK, amtUnknown := resolveAmount(cfg.GetAmount(), settings)
+	rec, recOK := resolveAddress(cfg.GetDestination(), scope)
+	amt, amtOK, amtUnknown := resolveAmount(cfg.GetAmount(), scope)
 	visit(fundSite{
 		chain: cfg.GetChainId(), kind: fundEth,
 		recipient: rec, recipientOK: recOK,
@@ -1041,8 +1064,8 @@ func collectEth(et *avsproto.ETHTransferNode, settings map[string]any, loopUnkno
 	})
 }
 
-func decodeCall(calldata, method string, params []string, settings map[string]any) (sel string, selOK bool, amt *big.Int, amtOK, amtUnknown bool) {
-	raw, concrete := resolveString(calldata, settings)
+func decodeCall(calldata, method string, params []string, scope fundScope) (sel string, selOK bool, amt *big.Int, amtOK, amtUnknown bool) {
+	raw, concrete := resolveString(calldata, scope)
 	if concrete {
 		data := common.FromHex(raw)
 		if len(data) >= 4 && !strings.ContainsAny(raw, "{}$") {
@@ -1071,7 +1094,7 @@ func decodeCall(calldata, method string, params []string, settings map[string]an
 		return sel, selOK, nil, false, amtUnknown
 	}
 	if len(params) >= 2 {
-		amt, amtOK, amtUnknown = resolveAmount(params[1], settings)
+		amt, amtOK, amtUnknown = resolveAmount(params[1], scope)
 		return sel, selOK, amt, amtOK, amtUnknown
 	}
 	return sel, selOK, nil, false, true
@@ -1092,8 +1115,8 @@ func decodeTransferAmount(data []byte) (*big.Int, bool) {
 	return amt, true
 }
 
-func resolveAddress(raw string, settings map[string]any) (common.Address, bool) {
-	s, ok := resolveString(raw, settings)
+func resolveAddress(raw string, scope fundScope) (common.Address, bool) {
+	s, ok := resolveString(raw, scope)
 	if !ok || !common.IsHexAddress(s) || strings.ContainsAny(s, "{}$") {
 		return common.Address{}, false
 	}
@@ -1104,12 +1127,12 @@ func resolveAddress(raw string, settings map[string]any) (common.Address, bool) 
 	return addr, true
 }
 
-func resolveAmount(raw string, settings map[string]any) (*big.Int, bool, bool) {
+func resolveAmount(raw string, scope fundScope) (*big.Int, bool, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, false, false
 	}
-	s, ok := resolveString(raw, settings)
+	s, ok := resolveString(raw, scope)
 	if !ok {
 		return nil, false, true
 	}
@@ -1129,19 +1152,50 @@ func resolveAmount(raw string, settings map[string]any) (*big.Int, bool, bool) {
 	return n, true, false
 }
 
-func resolveString(raw string, settings map[string]any) (string, bool) {
+func resolveString(raw string, scope fundScope) (string, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", true
 	}
 	if strings.Contains(raw, "{{") || strings.Contains(raw, "${") {
-		v, ok := lookupSetting(raw, settings)
+		if scope.hasValue {
+			if v, ok := lookupLoopValue(raw, scope.value); ok {
+				return scalarString(v)
+			}
+		}
+		v, ok := lookupSetting(raw, scope.settings)
 		if !ok {
 			return "", false
 		}
 		return scalarString(v)
 	}
 	return raw, true
+}
+
+// lookupLoopValue reads {{value}} or {{value.a.b}} from the current loop
+// element. A non-scalar {{value}} (an object) is returned as-is; the caller
+// leaves it unresolved rather than inventing an address.
+func lookupLoopValue(expr string, value any) (any, bool) {
+	m := valueRef.FindStringSubmatch(strings.TrimSpace(expr))
+	if m == nil {
+		return nil, false
+	}
+	if m[1] == "" {
+		return value, true
+	}
+	cur := value
+	for _, key := range strings.Split(m[1], ".") {
+		obj, ok := cur.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		next, ok := obj[key]
+		if !ok {
+			return nil, false
+		}
+		cur = next
+	}
+	return cur, true
 }
 
 // scalarString formats a settings leaf. Floats are accepted only when they
@@ -1203,21 +1257,28 @@ func lookupSetting(expr string, settings map[string]any) (any, bool) {
 	return cur, true
 }
 
-func loopIterations(cfg *avsproto.LoopNode_Config, settings map[string]any) (int, bool) {
+// loopElements returns the settings list a loop iterates. An input that is
+// not a settings list, including {{split1.data}} and {{filter1.data}}, is
+// unknown: the caller visits once with {{value}} unbound.
+func loopElements(cfg *avsproto.LoopNode_Config, settings map[string]any) ([]any, bool) {
 	if cfg == nil {
-		return 0, false
+		return nil, false
 	}
 	v, ok := lookupSetting(cfg.GetInputVariable(), settings)
 	if !ok {
-		return 0, false
+		return nil, false
 	}
 	switch list := v.(type) {
 	case []any:
-		return len(list), true
+		return list, true
 	case []string:
-		return len(list), true
+		out := make([]any, len(list))
+		for i, s := range list {
+			out[i] = s
+		}
+		return out, true
 	default:
-		return 0, false
+		return nil, false
 	}
 }
 
