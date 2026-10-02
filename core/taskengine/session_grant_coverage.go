@@ -19,6 +19,10 @@ type PlannedCall struct {
 	// Label is optional (method name) for error messages only.
 	Label string
 	Value *big.Int // native wei on this inner call; nil/0 is none
+	// Calldata is the inner call payload when the caller has it. Report
+	// mode uses a 68-byte transfer/approve layout to size a cap. Older
+	// callers leave it nil.
+	Calldata []byte
 }
 
 // SelectorFromCalldata returns the 4-byte selector of calldata, or

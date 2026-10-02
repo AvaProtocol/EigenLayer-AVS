@@ -278,6 +278,26 @@ components:
             switch on this for programmatic handling. Mirrors the gRPC-era
             ErrorCode enum vocabulary.
           example: 'WORKFLOW_NOT_FOUND'
+        policyId:
+          type: string
+          description: |
+            Usable session grant involved in this failure, when there is one.
+            Set on `SESSION_POLICY_BASE_CHANGED` and `SESSION_POLICY_NOT_COVERING`.
+        affectedTaskIds:
+          type: array
+          items: { type: string }
+          description: |
+            Enabled tasks a grant would leave unable to run. Set on
+            `409 SESSION_POLICY_NOT_COVERING` from policies:submit.
+        missingActions:
+          type: array
+          items: { $ref: '#/components/schemas/AllowedAction' }
+          description: Planned calls the grant does not allow.
+        required:
+          $ref: '#/components/schemas/SessionPolicyNeed'
+          description: |
+            Grant the caller still needs. Set on
+            `409 SESSION_POLICY_NOT_COVERING` from create and resume.
 
     # -------------------------------------------------------------------
     # Health
@@ -1205,6 +1225,29 @@ components:
           type: array
           items: { $ref: '#/components/schemas/Edge' }
         inputVariables: { $ref: '#/components/schemas/InputVariables' }
+        authorizationMode:
+          type: string
+          enum: [enforce, report]
+          description: |
+            `enforce` when omitted. Grant preflight fails the step, which is
+            what one-shot Auto paths read as `SESSION_POLICY_TARGET_NOT_ALLOWED`.
+            `report` does not fail steps for a missing or short grant, and the
+            execution includes `authorization`. A storage lookup failure still
+            fails the step.
+        maxExecution:
+          type: integer
+          format: int64
+          description: |
+            Runs this workflow may still make. With a cron trigger and
+            `expiredAt`, the requirement uses whichever allows fewer runs.
+        startAt:
+          type: integer
+          format: int64
+          description: Unix milliseconds. Schedule window start, same clock as create.
+        expiredAt:
+          type: integer
+          format: int64
+          description: Unix milliseconds. Schedule window end, same clock as create.
 
     EstimateFeesRequest:
       type: object
@@ -1408,6 +1451,11 @@ components:
         valueFee:
           $ref: '#/components/schemas/ValueFee'
           description: Value-capture fee charged (post-paid).
+        authorization:
+          $ref: '#/components/schemas/SessionAuthorization'
+          description: |
+            Present on simulate when `authorizationMode` is `report`.
+            Omitted on stored executions and on enforce-mode simulates.
 
     ExecutionList:
       type: object
@@ -1833,6 +1881,152 @@ components:
             the ETH value sent.
           example: '10000000000000000'
 
+    SessionAuthorization:
+      type: object
+      required: [status]
+      description: |
+        Opt-in simulate verdict. Returned only when `authorizationMode` is
+        `report`. It does not replace step errors from anything other than
+        grant coverage.
+      properties:
+        status:
+          type: string
+          enum: [covered, no_grant, not_covered, cap_too_low, expires_too_soon, cap_needs_input]
+          description: |
+            `covered` — the usable grant already allows this workflow, or the
+            workflow moves no funds.
+            `no_grant` — fund-moving steps and no usable grant.
+            `not_covered` — a planned call or native recipient is outside the grant.
+            `cap_too_low` — a sized cap or native budget is short.
+            `expires_too_soon` — the grant ends before this workflow's window.
+            `cap_needs_input` — a spend amount is not a fixed number, so the
+            caller must choose the cap.
+        policyId:
+          type: string
+          description: The runner's current usable grant, when there is one.
+        missingActions:
+          type: array
+          items: { $ref: '#/components/schemas/AllowedAction' }
+        required:
+          $ref: '#/components/schemas/SessionPolicyNeed'
+        detail:
+          type: string
+
+    SessionPolicyNeed:
+      type: object
+      description: |
+        Permissions one workflow still needs, sized to the runs it has left.
+        Cap amounts are totals in the token's smallest unit, not per-run amounts.
+      properties:
+        allowedActions:
+          type: array
+          items: { $ref: '#/components/schemas/AllowedAction' }
+        erc20SpendCaps:
+          type: array
+          items: { $ref: '#/components/schemas/Erc20SpendCap' }
+        nativeRecipients:
+          type: array
+          maxItems: 5
+          items: { $ref: '#/components/schemas/EthereumAddress' }
+        nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
+        validUntil:
+          type: integer
+          format: int64
+          description: Absolute unix milliseconds the grant must last through. 0 when the window is unknown.
+
+    SessionPolicyAddition:
+      type: object
+      description: |
+        What the automation being set up needs. Merged, under the runner
+        lock, with what that runner's enabled tasks on this chain still need.
+        Cap amounts are totals for this automation. They are not added to the
+        previous grant's totals, because a replacement grant starts its caps
+        from zero.
+      properties:
+        allowedActions:
+          type: array
+          items: { $ref: '#/components/schemas/AllowedAction' }
+        erc20SpendCaps:
+          type: array
+          items: { $ref: '#/components/schemas/Erc20SpendCap' }
+        nativeRecipients:
+          type: array
+          maxItems: 5
+          items: { $ref: '#/components/schemas/EthereumAddress' }
+        nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
+        allowContractRecipient:
+          type: boolean
+        validUntil:
+          type: integer
+          format: int64
+          description: |
+            Absolute unix milliseconds this automation needs. Omit to use
+            now + `expiresInSeconds`. The signed expiry is the later of that
+            horizon and every enabled task's end on this chain.
+
+    SessionPolicyCapChange:
+      type: object
+      required: [token, amount]
+      properties:
+        token: { $ref: '#/components/schemas/EthereumAddress' }
+        amount:
+          type: string
+          description: New total, in the token's smallest unit.
+        previousAmount:
+          type: string
+          description: Previous grant's total. Omitted when the token is new.
+
+    SessionPolicyExpiryChange:
+      type: object
+      required: [name, validUntil]
+      properties:
+        taskId: { type: string }
+        name: { type: string }
+        validUntil:
+          type: integer
+          format: int64
+        previousValidUntil:
+          type: integer
+          format: int64
+          description: The wallet grant's previous expiry. One expiry covers every permission.
+
+    SessionPolicyChanges:
+      type: object
+      required: [summary]
+      description: |
+        What the approval screen shows. `summary` is the copy. The structured
+        fields are the same facts.
+      properties:
+        summary:
+          type: array
+          items: { type: string }
+          description: |
+            Approval lines. An expiry change reads
+            "<task name>: until <Mon D>, was <Mon D>" in UTC when both dates
+            are in the same year, for example
+            "Weekly swap: until Dec 28, was Nov 30". When the years differ,
+            both dates include the year.
+        basePolicyId:
+          type: string
+          description: |
+            Usable grant the merge read. Empty when the runner had none.
+            Echo this to submit, including the empty string.
+        keptActions:
+          type: array
+          items: { $ref: '#/components/schemas/AllowedAction' }
+        addedActions:
+          type: array
+          items: { $ref: '#/components/schemas/AllowedAction' }
+        removedActions:
+          type: array
+          items: { $ref: '#/components/schemas/AllowedAction' }
+        capChanges:
+          type: array
+          items: { $ref: '#/components/schemas/SessionPolicyCapChange' }
+        expiryChanges:
+          type: array
+          items: { $ref: '#/components/schemas/SessionPolicyExpiryChange' }
+
     PreparePolicyRequest:
       type: object
       required: [chainId, agentLabel, expiresInSeconds]
@@ -1885,7 +2079,27 @@ components:
           type: integer
           format: int64
           minimum: 60
-          description: Grant lifetime, relative (skew-proof). Becomes an absolute validUntil.
+          maximum: 9223372036
+          description: |
+            Grant lifetime, relative (skew-proof). Becomes an absolute
+            validUntil. When `add` is set, this is the new automation's
+            horizon if `add.validUntil` is omitted. The signed expiry can be
+            later, because the wallet keeps one expiry and it must cover
+            every enabled automation. Values above 9223372036 overflow the
+            duration conversion and are rejected.
+        basePolicyId:
+          type: string
+          description: |
+            Usable grant this prepare was merged against. Omit on a legacy
+            prepare that sends the full permission set and does not compare.
+            Send an empty string when the client believes there is no usable
+            grant. A mismatch is 409 SESSION_POLICY_BASE_CHANGED.
+        add:
+          $ref: '#/components/schemas/SessionPolicyAddition'
+          description: |
+            Create or update in one call. When set, the permission fields
+            above are ignored. The response's permission fields are the
+            merged set and must be echoed to submit.
 
     PreparedPolicy:
       type: object
@@ -1915,6 +2129,27 @@ components:
           type: object
           additionalProperties: true
           description: The exact eth_signTypedData_v4 payload for the owner's wallet.
+        basePolicyId:
+          type: string
+          description: |
+            Set when prepare merged an `add`. Empty means there was no usable
+            grant. Echo `changes.basePolicyId`, including the empty string.
+        changes:
+          $ref: '#/components/schemas/SessionPolicyChanges'
+        allowedActions:
+          type: array
+          items: { $ref: '#/components/schemas/AllowedAction' }
+          description: Merged actions to echo to submit. Present when `add` was sent.
+        erc20SpendCap: { $ref: '#/components/schemas/Erc20SpendCap' }
+        erc20SpendCaps:
+          type: array
+          items: { $ref: '#/components/schemas/Erc20SpendCap' }
+        nativeRecipients:
+          type: array
+          items: { $ref: '#/components/schemas/EthereumAddress' }
+        nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
+        allowContractRecipient:
+          type: boolean
 
     SubmitPolicyRequest:
       type: object
@@ -1965,6 +2200,20 @@ components:
           type: string
           pattern: '^0x[a-fA-F0-9]{130}$'
           description: The owner's 65-byte signature over the prepared digest.
+        basePolicyId:
+          type: string
+          description: |
+            Echo prepare's `basePolicyId` / `changes.basePolicyId`, including
+            an empty string when prepare saw no usable grant. Omit only on a
+            legacy submit that did not compare. A mismatch is
+            409 SESSION_POLICY_BASE_CHANGED.
+        dropTaskIds:
+          type: array
+          items: { type: string }
+          description: |
+            Enabled tasks this grant may leave uncovered. Any other enabled
+            task on this runner whose fund-moving steps are outside the grant
+            is refused with 409 SESSION_POLICY_NOT_COVERING.
 
     SessionPolicy:
       type: object
@@ -2040,6 +2289,13 @@ components:
 
                 Empty on a first grant. Non-empty means the user's earlier
                 permission is gone, which is worth reflecting in the UI.
+            affectedTaskIds:
+              type: array
+              items: { type: string }
+              description: |
+                Enabled tasks this grant leaves uncovered, which the request
+                named in `dropTaskIds`. Empty when every enabled task on the
+                runner is still covered.
 
     SessionPolicyList:
       type: object
@@ -2231,6 +2487,12 @@ paths:
         the server validates those chains and ensures the smart wallet belongs
         to the authenticated user. Returns the persisted Workflow with its
         server-assigned `id` and `createdAt`.
+
+        When the gateway config `session_policy_deploy_check` is on, a workflow
+        whose fund-moving steps the runner's usable grant does not cover is
+        refused with `409 SESSION_POLICY_NOT_COVERING`. `required` is the grant
+        those steps still need. A workflow that only notifies passes with no
+        grant. The flag defaults to off, so today's callers are unchanged.
       operationId: createWorkflow
       requestBody:
         required: true
@@ -2246,6 +2508,15 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: |
+            `SESSION_POLICY_NOT_COVERING` when `session_policy_deploy_check` is
+            on and the runner's usable grant does not cover this workflow's
+            fund-moving steps. `required`, `policyId`, and `missingActions`
+            describe the gap. Notification-only workflows do not hit this.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '429': { $ref: '#/components/responses/RateLimited' }
     get:
       tags: [Workflows]
@@ -2341,7 +2612,12 @@ paths:
     post:
       tags: [Workflows]
       summary: Resume a workflow
-      description: Transition from `disabled` to `enabled`. Idempotent.
+      description: |
+        Transition from `disabled` to `enabled`. Idempotent. When
+        `session_policy_deploy_check` is on, enabling a workflow whose
+        fund-moving steps the runner's usable grant does not cover is
+        `409 SESSION_POLICY_NOT_COVERING`. Disabling is not checked.
+        Notification-only workflows pass with no grant.
       operationId: resumeWorkflow
       responses:
         '200':
@@ -2352,7 +2628,11 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
-          description: Workflow is in a terminal state and cannot be resumed.
+          description: |
+            The workflow is in a terminal state and cannot be resumed, or
+            `session_policy_deploy_check` is on and enabling it would leave its
+            fund-moving steps outside the runner's usable grant
+            (`SESSION_POLICY_NOT_COVERING`; `required` describes the gap).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -2405,6 +2685,12 @@ paths:
         simulation for chain-writing nodes) and return the full Execution.
         Nothing is persisted. Requires a user Bearer JWT; partner assertion
         alone is not sufficient.
+
+        Grant preflight fails fund-moving steps unless `authorizationMode` is
+        `report`. Report mode returns `authorization` and lets the simulation
+        proceed so a test screen can show "it works" and "needs permission"
+        as two results. `maxExecution`, `startAt`, and `expiredAt` size that
+        verdict to the schedule. They do not change the simulated run.
       operationId: simulateWorkflow
       security:
         - bearerAuth: []
@@ -2999,10 +3285,21 @@ paths:
         Replacement is scoped to the runner, not to a capability: submitting a
         grant for one capability revokes the runner's grant for any other.
 
-        Off-chain only. The superseded grants' validation entities and ERC-20
-        spend caps stay installed on the account until the owner signs
-        `uninstallValidation` — replacing a grant does not reduce what the
-        account could authorize on chain, only what this gateway will use.
+        The deferred batch that installs the new grant also uninstalls up to
+        four prior validation entities (#717). The owner signs that batch
+        once, at prepare. Replacing a grant does not leave the old entities
+        installed until a separate `uninstallValidation` signature. `DELETE`
+        of an already-applied grant is different: the controller cannot call
+        `uninstallValidation` itself, so that response still carries
+        `onChainCleanup` for the owner wallet.
+
+        When `basePolicyId` is sent, including an empty string, the runner's
+        usable grant must still be that value or the call is
+        `409 SESSION_POLICY_BASE_CHANGED`.
+
+        The stored grant must still cover every enabled task on this runner,
+        except ids listed in `dropTaskIds`. Otherwise the call is
+        `409 SESSION_POLICY_NOT_COVERING` and nothing is stored.
       operationId: submitWalletPolicy
       requestBody:
         required: true
@@ -3021,8 +3318,15 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: |
-            The validation entity was taken by another grant while this one
-            was being signed. Prepare again.
+            `POLICIES_ENTITY_TAKEN` — the validation entity was taken by
+            another grant while this one was being signed. Prepare again.
+
+            `SESSION_POLICY_BASE_CHANGED` — `basePolicyId` is not the runner's
+            usable grant anymore. Prepare again.
+
+            `SESSION_POLICY_NOT_COVERING` — this grant would leave an enabled
+            task on the runner unable to run, and that task was not listed in
+            `dropTaskIds`. `affectedTaskIds` names them.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }

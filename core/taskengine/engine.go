@@ -1932,6 +1932,16 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 		return nil, err
 	}
 
+	// Off unless session_policy_deploy_check is set. A notification-only
+	// workflow passes; a write workflow with no covering grant is 409.
+	// The returned unlock holds the runner lock until the task is stored,
+	// so a concurrent submit cannot replace the grant in between.
+	unlock, err := n.enforceSessionPolicyDeployCheck(user, task)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
 	updates := map[string][]byte{}
 
 	taskJSON, err := task.ToJSON()
@@ -1945,6 +1955,7 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	if err = n.db.BatchWrite(updates); err != nil {
 		return nil, err
 	}
+	unlock()
 
 	n.lock.Lock()
 	n.tasks[task.Id] = task
@@ -3847,6 +3858,9 @@ func (n *Engine) SimulateWorkflowWithContext(ctx context.Context, user *model.Us
 	vm.tenderlyClient = n.tenderlyClient
 
 	vm.WithLogger(n.logger).WithDb(n.db).WithChainConfigResolver(n.ResolveSmartWalletConfig).SetSimulation(true)
+	if auth := SimulateAuthFrom(ctx); auth != nil && auth.Report {
+		vm.sessionGrantReport = &SessionGrantReport{}
+	}
 	// Resolve AA sender for simulation ONLY if the workflow contains AA-relevant nodes
 	// (contractWrite or ethTransfer, including loop nodes with these runners).
 	// For non-AA workflows (e.g., CustomCode), skip this requirement.
@@ -4119,6 +4133,7 @@ func (n *Engine) SimulateWorkflowWithContext(ctx context.Context, user *model.Us
 		execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_ERROR
 	}
 
+	n.fillSimulateAuthorization(ctx, user, task, vm, simChainID)
 	return execution, nil
 }
 
@@ -4816,7 +4831,15 @@ func (n *Engine) SetWorkflowEnabledByUser(user *model.User, taskID string, enabl
 
 	updates := map[string][]byte{}
 
+	// Disabling is not checked. Enabling is, and only when the flag is on.
+	// Hold the runner lock from the check through the status write.
+	unlock := func() {}
 	if enabled {
+		unlock, err = n.enforceSessionPolicyDeployCheck(user, task)
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
 		task.SetEnabled()
 	} else {
 		task.SetDisabled()
@@ -4845,6 +4868,7 @@ func (n *Engine) SetWorkflowEnabledByUser(user *model.User, taskID string, enabl
 			PreviousStatus: getTaskStatusString(oldStatus),
 		}, nil
 	}
+	unlock()
 
 	// Delete old record if different status
 	if oldStatus != task.Status {

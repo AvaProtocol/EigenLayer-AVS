@@ -52,6 +52,9 @@ func (s *Server) CreateWorkflow(ctx echo.Context) error {
 
 	workflow, err := s.engine.CreateWorkflow(user, req)
 	if err != nil {
+		if mapped := policyConflictFrom(err); mapped != nil {
+			return mapped
+		}
 		return err
 	}
 
@@ -180,6 +183,9 @@ func (s *Server) ResumeWorkflow(ctx echo.Context, id generated.Ulid) error {
 	user := p.User
 
 	if _, err := s.engine.SetWorkflowEnabledByUser(user, string(id), true); err != nil {
+		if mapped := policyConflictFrom(err); mapped != nil {
+			return mapped
+		}
 		return notFoundOrError(err)
 	}
 	workflow, err := s.engine.GetWorkflow(user, string(id))
@@ -319,7 +325,25 @@ func (s *Server) SimulateWorkflow(ctx echo.Context) error {
 		chainIDs = append(chainIDs, authed.ChainID)
 	}
 
-	exec, err := s.engine.SimulateWorkflowWithContext(ctx.Request().Context(), user, trigger, nodes, edges, inputVars, chainIDs...)
+	// Report mode is opt-in. The default still fails the step on a grant
+	// miss, which one-shot Auto paths read as SESSION_POLICY_TARGET_NOT_ALLOWED.
+	simCtx := ctx.Request().Context()
+	var simAuth *taskengine.SimulateAuth
+	if body.AuthorizationMode != nil && *body.AuthorizationMode == generated.Report {
+		simAuth = &taskengine.SimulateAuth{Report: true}
+		if body.MaxExecution != nil {
+			simAuth.MaxExecution = *body.MaxExecution
+		}
+		if body.StartAt != nil {
+			simAuth.StartAt = *body.StartAt
+		}
+		if body.ExpiredAt != nil {
+			simAuth.ExpiredAt = *body.ExpiredAt
+		}
+		simCtx = taskengine.WithSimulateAuth(simCtx, simAuth)
+	}
+
+	exec, err := s.engine.SimulateWorkflowWithContext(simCtx, user, trigger, nodes, edges, inputVars, chainIDs...)
 	if err != nil {
 		return mapSimulateError(err)
 	}
@@ -331,6 +355,10 @@ func (s *Server) SimulateWorkflow(ctx echo.Context) error {
 	resp, mapErr := mapping.ProtoToOpenAPIExecution(exec, "")
 	if mapErr != nil {
 		return mapErr
+	}
+	if simAuth != nil && simAuth.Result != nil {
+		auth := sessionAuthorizationToAPI(simAuth.Result)
+		resp.Authorization = &auth
 	}
 	return ctx.JSON(http.StatusOK, resp)
 }

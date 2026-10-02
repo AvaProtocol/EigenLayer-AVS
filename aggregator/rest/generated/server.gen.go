@@ -2563,6 +2563,15 @@ func (response CreateWorkflow403ApplicationProblemPlusJSONResponse) VisitCreateW
 	return json.NewEncoder(w).Encode(response)
 }
 
+type CreateWorkflow409ApplicationProblemPlusJSONResponse Problem
+
+func (response CreateWorkflow409ApplicationProblemPlusJSONResponse) VisitCreateWorkflowResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type CreateWorkflow429ApplicationProblemPlusJSONResponse struct {
 	RateLimitedApplicationProblemPlusJSONResponse
 }

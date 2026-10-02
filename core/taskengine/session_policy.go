@@ -3,8 +3,10 @@ package taskengine
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -90,15 +92,8 @@ const sessionAuthorityLockShards = 64
 // collide on a shard merely serialize, which costs nothing at this rate.
 var sessionAuthorityLocks [sessionAuthorityLockShards]sync.RWMutex
 
-// sessionAuthorityLock guards the policy set of one (chainID, owner, runner).
-//
-// Writers (submit, revoke) take it exclusively; readers (the resolver and the
-// contract-write preflight) take it shared, which is what keeps submit's
-// store-then-supersede window invisible to an executing workflow.
-//
-// It is NOT reentrant: a write-lock holder must never call anything that takes
-// the read lock — ActiveSessionPolicyForWallet above all.
-func sessionAuthorityLock(chainID int64, owner, runner common.Address) *sync.RWMutex {
+// sessionAuthorityShard is the mutex index for one (chainID, owner, runner).
+func sessionAuthorityShard(chainID int64, owner, runner common.Address) uint32 {
 	// FNV-1a over the raw bytes: allocation-free, and deterministic in the way
 	// that matters — the same runner must always reach the same mutex, or two
 	// writers would serialize on different locks and not serialize at all.
@@ -119,7 +114,50 @@ func sessionAuthorityLock(chainID int64, owner, runner common.Address) *sync.RWM
 		hash ^= uint32(runner[i])
 		hash *= 16777619
 	}
-	return &sessionAuthorityLocks[hash%sessionAuthorityLockShards]
+	return hash % sessionAuthorityLockShards
+}
+
+// sessionAuthorityLock guards the policy set of one (chainID, owner, runner).
+//
+// Writers (submit, revoke) take it exclusively; readers (the resolver and the
+// contract-write preflight) take it shared, which is what keeps submit's
+// store-then-supersede window invisible to an executing workflow.
+//
+// It is NOT reentrant: a write-lock holder must never call anything that takes
+// the read lock — ActiveSessionPolicyForWallet above all.
+func sessionAuthorityLock(chainID int64, owner, runner common.Address) *sync.RWMutex {
+	return &sessionAuthorityLocks[sessionAuthorityShard(chainID, owner, runner)]
+}
+
+// orderedSessionLocks returns one mutex per distinct shard for these chains,
+// sorted by shard index. Two chains can share a shard; that mutex is
+// returned once, because taking it twice on one goroutine deadlocks.
+// Callers that lock more than one shard must use this order. Sorting by
+// chain id instead can cross for two runners and deadlock both creates.
+func orderedSessionLocks(chainIDs []int64, owner, runner common.Address) []*sync.RWMutex {
+	type shardLock struct {
+		index uint32
+		mu    *sync.RWMutex
+	}
+	seen := map[*sync.RWMutex]struct{}{}
+	ordered := make([]shardLock, 0, len(chainIDs))
+	for _, chainID := range chainIDs {
+		mu := sessionAuthorityLock(chainID, owner, runner)
+		if _, ok := seen[mu]; ok {
+			continue
+		}
+		seen[mu] = struct{}{}
+		ordered = append(ordered, shardLock{
+			index: sessionAuthorityShard(chainID, owner, runner),
+			mu:    mu,
+		})
+	}
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].index < ordered[j].index })
+	out := make([]*sync.RWMutex, len(ordered))
+	for i, item := range ordered {
+		out[i] = item.mu
+	}
+	return out
 }
 
 // SessionPolicyAmbiguousCode prefixes the refusal when a runner carries more
@@ -130,6 +168,25 @@ func sessionAuthorityLock(chainID int64, owner, runner common.Address) *sync.RWM
 // that predate that, or a supersede that failed partway. Both are cleared by
 // granting again.
 const SessionPolicyAmbiguousCode = "SESSION_POLICY_AMBIGUOUS"
+
+// ErrSessionPolicyAmbiguous is the sentinel for a runner with more than one
+// usable grant. The error text still starts with SessionPolicyAmbiguousCode.
+// A legacy submit (no basePolicyId) uses errors.Is to treat that state as
+// "replace every usable grant". Any other caller fails closed.
+var ErrSessionPolicyAmbiguous = errors.New("wallet has more than one usable session policy")
+
+type sessionPolicyAmbiguousError struct {
+	wallet common.Address
+	ids    [2]string
+}
+
+func (e *sessionPolicyAmbiguousError) Error() string {
+	return fmt.Sprintf(
+		"%s: wallet %s has more than one usable session policy (%s, %s); grant again to replace them, or revoke one before executing",
+		SessionPolicyAmbiguousCode, e.wallet.Hex(), e.ids[0], e.ids[1])
+}
+
+func (e *sessionPolicyAmbiguousError) Unwrap() error { return ErrSessionPolicyAmbiguous }
 
 // SessionPolicyExpiredCode marks a grant whose TimeRangeModule window has
 // closed. Client-fixable by granting again, which is the whole reason it is
@@ -212,9 +269,7 @@ func activeSessionPolicyLocked(db storage.Storage, chainID int64, owner, wallet 
 			continue
 		}
 		if found != nil {
-			return nil, fmt.Errorf(
-				"%s: wallet %s has more than one usable session policy (%s, %s); grant again to replace them, or revoke one before executing",
-				SessionPolicyAmbiguousCode, wallet.Hex(), found.ID, p.ID)
+			return nil, &sessionPolicyAmbiguousError{wallet: wallet, ids: [2]string{found.ID, p.ID}}
 		}
 		found = p
 	}

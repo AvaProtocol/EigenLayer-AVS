@@ -165,6 +165,14 @@ type Config struct {
 	// requests sponsorship is approved and billed by production.
 	DisableGasSponsorship bool
 
+	// SessionPolicyDeployCheck refuses CreateWorkflow and resume when the
+	// runner's usable grant does not cover the workflow's fund-moving
+	// steps (409 SESSION_POLICY_NOT_COVERING). Default false. Studio must
+	// handle that error on every deploy surface before production sets
+	// this true. A notification-only workflow passes. policies:submit
+	// coverage is separate and always on.
+	SessionPolicyDeployCheck bool
+
 	// GasManagerWebhookSecret, when set, must be echoed as the webhook
 	// request's webhookData. The webhook cannot sit behind the REST JWT
 	// (Alchemy has no token), so this is its only caller authentication.
@@ -673,6 +681,10 @@ type ConfigRaw struct {
 	// DisableGasSponsorship opts this process out of the Gas Manager policy.
 	// Local/development configs set it; see SmartWalletConfig.SponsorshipPolicyID.
 	DisableGasSponsorship bool `yaml:"disable_gas_sponsorship"`
+	// SessionPolicyDeployCheck gates the create/resume coverage refusal.
+	// Leave false until every client that deploys a workflow handles
+	// 409 SESSION_POLICY_NOT_COVERING. See Config.SessionPolicyDeployCheck.
+	SessionPolicyDeployCheck bool `yaml:"session_policy_deploy_check"`
 	// GasManagerPolicyID is a legacy yaml alias for alchemy_paymaster_policy_id.
 	// Still resolved as a fallback so existing configs keep sponsorship.
 	GasManagerPolicyID      string `yaml:"gas_manager_policy_id"`
@@ -958,6 +970,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 		AlchemyAPISecret:         firstNonEmpty(configRaw.AlchemyAPISecret, os.Getenv("ALCHEMY_API_SECRET")),
 		AlchemyPaymasterPolicyID: resolveAlchemyPaymasterPolicyID(configRaw),
 		DisableGasSponsorship:    configRaw.DisableGasSponsorship,
+		SessionPolicyDeployCheck: configRaw.SessionPolicyDeployCheck,
 		// Trim: pasted secrets often carry trailing whitespace; webhook compares
 		// with subtle.ConstantTimeCompare on the raw webhookData body field.
 		GasManagerWebhookSecret: ResolveGasManagerWebhookSecret(configRaw.GasManagerWebhookSecret),

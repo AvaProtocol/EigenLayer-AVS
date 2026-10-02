@@ -221,6 +221,16 @@ const (
 	SecretScopeWorkflow SecretScope = "workflow"
 )
 
+// Defines values for SessionAuthorizationStatus.
+const (
+	CapNeedsInput  SessionAuthorizationStatus = "cap_needs_input"
+	CapTooLow      SessionAuthorizationStatus = "cap_too_low"
+	Covered        SessionAuthorizationStatus = "covered"
+	ExpiresTooSoon SessionAuthorizationStatus = "expires_too_soon"
+	NoGrant        SessionAuthorizationStatus = "no_grant"
+	NotCovered     SessionAuthorizationStatus = "not_covered"
+)
+
 // Defines values for SessionPolicyStatus.
 const (
 	SessionPolicyStatusActive  SessionPolicyStatus = "active"
@@ -232,6 +242,12 @@ const (
 const (
 	Approve SignalExecutionRequestDecision = "approve"
 	Reject  SignalExecutionRequestDecision = "reject"
+)
+
+// Defines values for SimulateWorkflowRequestAuthorizationMode.
+const (
+	Enforce SimulateWorkflowRequestAuthorizationMode = "enforce"
+	Report  SimulateWorkflowRequestAuthorizationMode = "report"
 )
 
 // Defines values for SubmitPolicyResponseStatus.
@@ -792,6 +808,11 @@ type EventTriggerQuery struct {
 
 // Execution defines model for Execution.
 type Execution struct {
+	// Authorization Opt-in simulate verdict. Returned only when `authorizationMode` is
+	// `report`. It does not replace step errors from anything other than
+	// grant coverage.
+	Authorization *SessionAuthorization `json:"authorization,omitempty"`
+
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
 	// chain-aware trigger/node configs this is required and must be a
 	// configured chain; on query/filter params it is optional.
@@ -1196,7 +1217,13 @@ type PageInfo struct {
 
 // PreparePolicyRequest defines model for PreparePolicyRequest.
 type PreparePolicyRequest struct {
-	AgentLabel string `json:"agentLabel"`
+	// Add What the automation being set up needs. Merged, under the runner
+	// lock, with what that runner's enabled tasks on this chain still need.
+	// Cap amounts are totals for this automation. They are not added to the
+	// previous grant's totals, because a replacement grant starts its caps
+	// from zero.
+	Add        *SessionPolicyAddition `json:"add,omitempty"`
+	AgentLabel string                 `json:"agentLabel"`
 
 	// AllowContractRecipient When true, nativeRecipients may be contracts (any-function on
 	// that address, ERC-20 uncapped). Default false: each recipient
@@ -1206,6 +1233,12 @@ type PreparePolicyRequest struct {
 	// AllowedActions Selector-scoped contract calls. Native-only grants omit this
 	// field. A present empty array is 400.
 	AllowedActions *[]AllowedAction `json:"allowedActions,omitempty"`
+
+	// BasePolicyId Usable grant this prepare was merged against. Omit on a legacy
+	// prepare that sends the full permission set and does not compare.
+	// Send an empty string when the client believes there is no usable
+	// grant. A mismatch is 409 SESSION_POLICY_BASE_CHANGED.
+	BasePolicyId *string `json:"basePolicyId,omitempty"`
 
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
 	// chain-aware trigger/node configs this is required and must be a
@@ -1226,7 +1259,12 @@ type PreparePolicyRequest struct {
 	// reverts on-chain. Native ETH is not this list.
 	Erc20SpendCaps *[]Erc20SpendCap `json:"erc20SpendCaps,omitempty"`
 
-	// ExpiresInSeconds Grant lifetime, relative (skew-proof). Becomes an absolute validUntil.
+	// ExpiresInSeconds Grant lifetime, relative (skew-proof). Becomes an absolute
+	// validUntil. When `add` is set, this is the new automation's
+	// horizon if `add.validUntil` is omitted. The signed expiry can be
+	// later, because the wallet keeps one expiry and it must cover
+	// every enabled automation. Values above 9223372036 overflow the
+	// duration conversion and are rejected.
 	ExpiresInSeconds int64   `json:"expiresInSeconds"`
 	Justification    *string `json:"justification,omitempty"`
 
@@ -1260,10 +1298,23 @@ type PreparedDelegation struct {
 
 // PreparedPolicy defines model for PreparedPolicy.
 type PreparedPolicy struct {
+	AllowContractRecipient *bool `json:"allowContractRecipient,omitempty"`
+
+	// AllowedActions Merged actions to echo to submit. Present when `add` was sent.
+	AllowedActions *[]AllowedAction `json:"allowedActions,omitempty"`
+
+	// BasePolicyId Set when prepare merged an `add`. Empty means there was no usable
+	// grant. Echo `changes.basePolicyId`, including the empty string.
+	BasePolicyId *string `json:"basePolicyId,omitempty"`
+
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
 	// chain-aware trigger/node configs this is required and must be a
 	// configured chain; on query/filter params it is optional.
 	ChainId ChainId `json:"chainId"`
+
+	// Changes What the approval screen shows. `summary` is the copy. The structured
+	// fields are the same facts.
+	Changes *SessionPolicyChanges `json:"changes,omitempty"`
 
 	// Deadline Unix seconds; bounds signing → first use, NOT the grant lifetime.
 	Deadline int64 `json:"deadline"`
@@ -1273,6 +1324,16 @@ type PreparedPolicy struct {
 
 	// EntityId The validation entity allocated for this grant (provisional until submit).
 	EntityId int64 `json:"entityId"`
+
+	// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
+	// execution. The token must appear as an `allowedActions` target.
+	// Prefer `erc20SpendCaps` when capping more than one token; this
+	// field remains the one-token alias (must match one entry of that
+	// array when both are sent). Native ETH is not this list.
+	Erc20SpendCap    *Erc20SpendCap     `json:"erc20SpendCap,omitempty"`
+	Erc20SpendCaps   *[]Erc20SpendCap   `json:"erc20SpendCaps,omitempty"`
+	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
+	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
 
 	// PolicyId ULID identifier (26-char Crockford base32).
 	PolicyId Ulid `json:"policyId"`
@@ -1292,6 +1353,10 @@ type PreparedPolicy struct {
 // is human-readable; `instance` is a per-request identifier suitable for
 // log correlation.
 type Problem struct {
+	// AffectedTaskIds Enabled tasks a grant would leave unable to run. Set on
+	// `409 SESSION_POLICY_NOT_COVERING` from policies:submit.
+	AffectedTaskIds *[]string `json:"affectedTaskIds,omitempty"`
+
 	// Code Machine-readable error code. Stable across releases; clients can
 	// switch on this for programmatic handling. Mirrors the gRPC-era
 	// ErrorCode enum vocabulary.
@@ -1302,6 +1367,17 @@ type Problem struct {
 
 	// Instance URI / opaque ID identifying this specific occurrence (e.g., request id).
 	Instance *string `json:"instance,omitempty"`
+
+	// MissingActions Planned calls the grant does not allow.
+	MissingActions *[]AllowedAction `json:"missingActions,omitempty"`
+
+	// PolicyId Usable session grant involved in this failure, when there is one.
+	// Set on `SESSION_POLICY_BASE_CHANGED` and `SESSION_POLICY_NOT_COVERING`.
+	PolicyId *string `json:"policyId,omitempty"`
+
+	// Required Permissions one workflow still needs, sized to the runs it has left.
+	// Cap amounts are totals in the token's smallest unit, not per-run amounts.
+	Required *SessionPolicyNeed `json:"required,omitempty"`
 
 	// Status HTTP status code (echoed for clients that surface only the body).
 	Status int32 `json:"status"`
@@ -1466,6 +1542,41 @@ type SecretList struct {
 	PageInfo PageInfo `json:"pageInfo"`
 }
 
+// SessionAuthorization Opt-in simulate verdict. Returned only when `authorizationMode` is
+// `report`. It does not replace step errors from anything other than
+// grant coverage.
+type SessionAuthorization struct {
+	Detail         *string          `json:"detail,omitempty"`
+	MissingActions *[]AllowedAction `json:"missingActions,omitempty"`
+
+	// PolicyId The runner's current usable grant, when there is one.
+	PolicyId *string `json:"policyId,omitempty"`
+
+	// Required Permissions one workflow still needs, sized to the runs it has left.
+	// Cap amounts are totals in the token's smallest unit, not per-run amounts.
+	Required *SessionPolicyNeed `json:"required,omitempty"`
+
+	// Status `covered` — the usable grant already allows this workflow, or the
+	// workflow moves no funds.
+	// `no_grant` — fund-moving steps and no usable grant.
+	// `not_covered` — a planned call or native recipient is outside the grant.
+	// `cap_too_low` — a sized cap or native budget is short.
+	// `expires_too_soon` — the grant ends before this workflow's window.
+	// `cap_needs_input` — a spend amount is not a fixed number, so the
+	// caller must choose the cap.
+	Status SessionAuthorizationStatus `json:"status"`
+}
+
+// SessionAuthorizationStatus `covered` — the usable grant already allows this workflow, or the
+// workflow moves no funds.
+// `no_grant` — fund-moving steps and no usable grant.
+// `not_covered` — a planned call or native recipient is outside the grant.
+// `cap_too_low` — a sized cap or native budget is short.
+// `expires_too_soon` — the grant ends before this workflow's window.
+// `cap_needs_input` — a spend amount is not a fixed number, so the
+// caller must choose the cap.
+type SessionAuthorizationStatus string
+
 // SessionPolicy defines model for SessionPolicy.
 type SessionPolicy struct {
 	AgentLabel             string           `json:"agentLabel"`
@@ -1523,9 +1634,82 @@ type SessionPolicy struct {
 // for free). active = install applied. revoked = grants nothing.
 type SessionPolicyStatus string
 
+// SessionPolicyAddition What the automation being set up needs. Merged, under the runner
+// lock, with what that runner's enabled tasks on this chain still need.
+// Cap amounts are totals for this automation. They are not added to the
+// previous grant's totals, because a replacement grant starts its caps
+// from zero.
+type SessionPolicyAddition struct {
+	AllowContractRecipient *bool              `json:"allowContractRecipient,omitempty"`
+	AllowedActions         *[]AllowedAction   `json:"allowedActions,omitempty"`
+	Erc20SpendCaps         *[]Erc20SpendCap   `json:"erc20SpendCaps,omitempty"`
+	NativeRecipients       *[]EthereumAddress `json:"nativeRecipients,omitempty"`
+	NativeSpendCap         *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
+
+	// ValidUntil Absolute unix milliseconds this automation needs. Omit to use
+	// now + `expiresInSeconds`. The signed expiry is the later of that
+	// horizon and every enabled task's end on this chain.
+	ValidUntil *int64 `json:"validUntil,omitempty"`
+}
+
+// SessionPolicyCapChange defines model for SessionPolicyCapChange.
+type SessionPolicyCapChange struct {
+	// Amount New total, in the token's smallest unit.
+	Amount string `json:"amount"`
+
+	// PreviousAmount Previous grant's total. Omitted when the token is new.
+	PreviousAmount *string `json:"previousAmount,omitempty"`
+
+	// Token Lowercase or checksummed hex EOA / contract address.
+	Token EthereumAddress `json:"token"`
+}
+
+// SessionPolicyChanges What the approval screen shows. `summary` is the copy. The structured
+// fields are the same facts.
+type SessionPolicyChanges struct {
+	AddedActions *[]AllowedAction `json:"addedActions,omitempty"`
+
+	// BasePolicyId Usable grant the merge read. Empty when the runner had none.
+	// Echo this to submit, including the empty string.
+	BasePolicyId   *string                      `json:"basePolicyId,omitempty"`
+	CapChanges     *[]SessionPolicyCapChange    `json:"capChanges,omitempty"`
+	ExpiryChanges  *[]SessionPolicyExpiryChange `json:"expiryChanges,omitempty"`
+	KeptActions    *[]AllowedAction             `json:"keptActions,omitempty"`
+	RemovedActions *[]AllowedAction             `json:"removedActions,omitempty"`
+
+	// Summary Approval lines. An expiry change reads
+	// "<task name>: until <Mon D>, was <Mon D>" in UTC when both dates
+	// are in the same year, for example
+	// "Weekly swap: until Dec 28, was Nov 30". When the years differ,
+	// both dates include the year.
+	Summary []string `json:"summary"`
+}
+
+// SessionPolicyExpiryChange defines model for SessionPolicyExpiryChange.
+type SessionPolicyExpiryChange struct {
+	Name string `json:"name"`
+
+	// PreviousValidUntil The wallet grant's previous expiry. One expiry covers every permission.
+	PreviousValidUntil *int64  `json:"previousValidUntil,omitempty"`
+	TaskId             *string `json:"taskId,omitempty"`
+	ValidUntil         int64   `json:"validUntil"`
+}
+
 // SessionPolicyList defines model for SessionPolicyList.
 type SessionPolicyList struct {
 	Items []SessionPolicy `json:"items"`
+}
+
+// SessionPolicyNeed Permissions one workflow still needs, sized to the runs it has left.
+// Cap amounts are totals in the token's smallest unit, not per-run amounts.
+type SessionPolicyNeed struct {
+	AllowedActions   *[]AllowedAction   `json:"allowedActions,omitempty"`
+	Erc20SpendCaps   *[]Erc20SpendCap   `json:"erc20SpendCaps,omitempty"`
+	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
+	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
+
+	// ValidUntil Absolute unix milliseconds the grant must last through. 0 when the window is unknown.
+	ValidUntil *int64 `json:"validUntil,omitempty"`
 }
 
 // SignalExecutionRequest defines model for SignalExecutionRequest.
@@ -1542,11 +1726,21 @@ type SignalExecutionRequestDecision string
 
 // SimulateWorkflowRequest defines model for SimulateWorkflowRequest.
 type SimulateWorkflowRequest struct {
+	// AuthorizationMode `enforce` when omitted. Grant preflight fails the step, which is
+	// what one-shot Auto paths read as `SESSION_POLICY_TARGET_NOT_ALLOWED`.
+	// `report` does not fail steps for a missing or short grant, and the
+	// execution includes `authorization`. A storage lookup failure still
+	// fails the step.
+	AuthorizationMode *SimulateWorkflowRequestAuthorizationMode `json:"authorizationMode,omitempty"`
+
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
 	// chain-aware trigger/node configs this is required and must be a
 	// configured chain; on query/filter params it is optional.
 	ChainId *ChainId `json:"chainId,omitempty"`
 	Edges   *[]Edge  `json:"edges,omitempty"`
+
+	// ExpiredAt Unix milliseconds. Schedule window end, same clock as create.
+	ExpiredAt *int64 `json:"expiredAt,omitempty"`
 
 	// InputVariables Free-form key-value bag of values used to resolve `{{variable.path}}`
 	// template references inside trigger and node configs. Conventional
@@ -1554,9 +1748,23 @@ type SimulateWorkflowRequest struct {
 	// `settings.chainId` (chain id). camelCase keys; back-compat support
 	// for snake_case keys exists during the migration window.
 	InputVariables InputVariables `json:"inputVariables"`
-	Nodes          []Node         `json:"nodes"`
-	Trigger        Trigger        `json:"trigger"`
+
+	// MaxExecution Runs this workflow may still make. With a cron trigger and
+	// `expiredAt`, the requirement uses whichever allows fewer runs.
+	MaxExecution *int64 `json:"maxExecution,omitempty"`
+	Nodes        []Node `json:"nodes"`
+
+	// StartAt Unix milliseconds. Schedule window start, same clock as create.
+	StartAt *int64  `json:"startAt,omitempty"`
+	Trigger Trigger `json:"trigger"`
 }
+
+// SimulateWorkflowRequestAuthorizationMode `enforce` when omitted. Grant preflight fails the step, which is
+// what one-shot Auto paths read as `SESSION_POLICY_TARGET_NOT_ALLOWED`.
+// `report` does not fail steps for a missing or short grant, and the
+// execution includes `authorization`. A storage lookup failure still
+// fails the step.
+type SimulateWorkflowRequestAuthorizationMode string
 
 // SubmitDelegationRequest defines model for SubmitDelegationRequest.
 type SubmitDelegationRequest struct {
@@ -1579,12 +1787,23 @@ type SubmitPolicyRequest struct {
 	// field. A present empty array is 400. Echo prepare verbatim.
 	AllowedActions *[]AllowedAction `json:"allowedActions,omitempty"`
 
+	// BasePolicyId Echo prepare's `basePolicyId` / `changes.basePolicyId`, including
+	// an empty string when prepare saw no usable grant. Omit only on a
+	// legacy submit that did not compare. A mismatch is
+	// 409 SESSION_POLICY_BASE_CHANGED.
+	BasePolicyId *string `json:"basePolicyId,omitempty"`
+
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
 	// chain-aware trigger/node configs this is required and must be a
 	// configured chain; on query/filter params it is optional.
 	ChainId  ChainId `json:"chainId"`
 	Deadline int64   `json:"deadline"`
-	EntityId int64   `json:"entityId"`
+
+	// DropTaskIds Enabled tasks this grant may leave uncovered. Any other enabled
+	// task on this runner whose fund-moving steps are outside the grant
+	// is refused with 409 SESSION_POLICY_NOT_COVERING.
+	DropTaskIds *[]string `json:"dropTaskIds,omitempty"`
+	EntityId    int64     `json:"entityId"`
 
 	// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
 	// execution. The token must appear as an `allowedActions` target.
@@ -1611,6 +1830,10 @@ type SubmitPolicyRequest struct {
 
 // SubmitPolicyResponse defines model for SubmitPolicyResponse.
 type SubmitPolicyResponse struct {
+	// AffectedTaskIds Enabled tasks this grant leaves uncovered, which the request
+	// named in `dropTaskIds`. Empty when every enabled task on the
+	// runner is still covered.
+	AffectedTaskIds        *[]string        `json:"affectedTaskIds,omitempty"`
 	AgentLabel             string           `json:"agentLabel"`
 	AllowContractRecipient *bool            `json:"allowContractRecipient,omitempty"`
 	AllowedActions         *[]AllowedAction `json:"allowedActions,omitempty"`

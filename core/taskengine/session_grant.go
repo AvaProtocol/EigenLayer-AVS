@@ -131,6 +131,12 @@ type PreparedSessionGrant struct {
 	// away is still the set storage believes is installed. The signature
 	// commits to specific entities' teardowns; if the set moved, prepare again.
 	Supersedes []SupersededGrant
+
+	// SkillChanges and EchoPermissions are set when prepare merged an
+	// addition. They are not persisted. The client echoes EchoPermissions
+	// and SkillChanges.BasePolicyID, including an empty base id.
+	SkillChanges    *PolicyChanges
+	EchoPermissions *SessionPermissions
 }
 
 // SupersededGrant identifies one on-chain grant a prepared replacement removes.

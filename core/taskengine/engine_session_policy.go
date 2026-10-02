@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 // Engine surface for /policies — ownership-gated wrappers over the session
@@ -48,6 +50,11 @@ var (
 	ErrSessionPolicySupersedeFailed = errors.New("the grant was stored but replacing the previous grant failed")
 )
 
+// MaxSessionExpiresInSeconds is the largest relative lifetime that converts
+// to a time.Duration without overflowing int64. A larger client value wraps
+// and becomes a short or negative grant.
+const MaxSessionExpiresInSeconds int64 = math.MaxInt64 / int64(time.Second)
+
 // SessionPolicyInput carries one grant's declared shape between prepare and
 // submit. On submit every field is the client's echo of what prepare
 // returned; nothing in it is trusted — the grant is recomputed from it and
@@ -58,6 +65,21 @@ type SessionPolicyInput struct {
 	AgentLabel    string
 	Justification string
 	Permissions   SessionPermissions
+
+	// BasePolicyID distinguishes an omitted legacy prepare (nil) from a
+	// client that believes there is no usable grant (pointer to "").
+	BasePolicyID *string
+	// DropTaskIDs are enabled tasks this grant may leave uncovered.
+	DropTaskIDs []string
+	// Addition set means create-or-update: merge with enabled tasks and
+	// ignore Permissions until the merge replaces them.
+	Addition *PolicyAddition
+	// ExpiresInSeconds is the new automation's horizon when Addition is
+	// set and Addition.ValidUntilMs is zero.
+	ExpiresInSeconds int64
+	// AffectedOut receives enabled task ids this grant leaves uncovered
+	// that DropTaskIDs named. Nil skips the report.
+	AffectedOut *[]string
 }
 
 func (in *SessionPolicyInput) validate() error {
@@ -68,6 +90,32 @@ func (in *SessionPolicyInput) validate() error {
 		return fmt.Errorf("agent label is required")
 	}
 	return in.Permissions.Validate()
+}
+
+// bindAndValidatePermissions attaches the session signer, rejects a
+// malformed permission set, and logs a contract-recipient exception.
+// Prepare calls it once on the legacy full set and again on the merged
+// addition, and submit calls it on the echoed set.
+func (n *Engine) bindAndValidatePermissions(in *SessionPolicyInput) error {
+	if in == nil {
+		return fmt.Errorf("missing session policy input")
+	}
+	if err := n.bindNativeRecipientChecks(in.ChainID, &in.Permissions); err != nil {
+		return err
+	}
+	if err := in.validate(); err != nil {
+		return err
+	}
+	n.logContractRecipientException(*in)
+	return nil
+}
+
+// ambiguousLegacyRepair reports whether a stacked grant may be replaced.
+// Only an omitted basePolicyId means "I did not prepare against one grant".
+// A present id, including "", was a claim about a single base and cannot
+// be checked against two.
+func ambiguousLegacyRepair(base *string, err error) bool {
+	return base == nil && errors.Is(err, ErrSessionPolicyAmbiguous)
 }
 
 func (n *Engine) logContractRecipientException(in SessionPolicyInput) {
@@ -252,13 +300,16 @@ func (n *Engine) lookupOwnedWalletRecord(user *model.User, chainID int64, wallet
 // what lets that path use the non-locking marker: the mutex is not reentrant,
 // and taking it twice wedges the shard instead of failing.
 func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (*PreparedSessionGrant, error) {
-	if err := n.bindNativeRecipientChecks(in.ChainID, &in.Permissions); err != nil {
-		return nil, err
+	if in.ExpiresInSeconds < 0 || in.ExpiresInSeconds > MaxSessionExpiresInSeconds {
+		return nil, fmt.Errorf("expiresInSeconds must be between 0 and %d", MaxSessionExpiresInSeconds)
 	}
-	if err := in.validate(); err != nil {
-		return nil, err
+	// An addition is merged under the lock, so its permissions are not
+	// known yet. A legacy prepare still validates the echoed set first.
+	if in.Addition == nil {
+		if err := n.bindAndValidatePermissions(&in); err != nil {
+			return nil, err
+		}
 	}
-	n.logContractRecipientException(in)
 	if err := n.requireServedChain(in.ChainID); err != nil {
 		return nil, err
 	}
@@ -273,6 +324,34 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 	lock := sessionAuthorityLock(in.ChainID, user.Address, in.Wallet)
 	lock.Lock()
 	defer lock.Unlock()
+
+	var current *model.SessionPolicy
+	if in.Addition != nil || in.BasePolicyID != nil {
+		current, err = activeSessionPolicyLocked(n.db, in.ChainID, user.Address, in.Wallet)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if in.BasePolicyID != nil && !policyIDMatches(*in.BasePolicyID, current) {
+		return nil, newBaseChanged(current)
+	}
+	var changes *PolicyChanges
+	if in.Addition != nil {
+		tasks, listErr := n.enabledTasksForRunner(user.Address, in.Wallet)
+		if listErr != nil {
+			return nil, listErr
+		}
+		merged, ch, mergeErr := MergeSkillGrant(current, *in.Addition, workflowTasks(tasks), in.ChainID, time.Now(), time.Duration(in.ExpiresInSeconds)*time.Second)
+		if mergeErr != nil {
+			return nil, mergeErr
+		}
+		in.Permissions = merged
+		changes = &ch
+		if err := n.bindAndValidatePermissions(&in); err != nil {
+			return nil, err
+		}
+	}
+
 	prepared, err := PrepareSessionGrant(n.db, in.ChainID, signer, strings.ToLower(ulid.Make().String()), SessionGrantRequest{
 		Owner:          user.Address,
 		Wallet:         in.Wallet,
@@ -289,7 +368,22 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		return nil, err
 	}
 	attachDeclaredPermissions(prepared.Policy, in.Permissions)
+	if changes != nil {
+		prepared.SkillChanges = changes
+		echo := in.Permissions
+		prepared.EchoPermissions = &echo
+	}
 	return prepared, nil
+}
+
+func workflowTasks(tasks []*model.Workflow) []*avsproto.Task {
+	out := make([]*avsproto.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if task != nil && task.Task != nil {
+			out = append(out, task.Task)
+		}
+	}
+	return out
 }
 
 // SubmitSessionPolicy verifies the owner's signature over a deterministic
@@ -325,13 +419,9 @@ func (n *Engine) SubmitSessionPolicy(
 	deadline uint64,
 	ownerSignature []byte,
 ) (policy *model.SessionPolicy, superseded []string, err error) {
-	if err := n.bindNativeRecipientChecks(in.ChainID, &in.Permissions); err != nil {
+	if err := n.bindAndValidatePermissions(&in); err != nil {
 		return nil, nil, err
 	}
-	if err := in.validate(); err != nil {
-		return nil, nil, err
-	}
-	n.logContractRecipientException(in)
 	// Submit re-derives the grant from the client's echo, so it re-checks the
 	// chain too: prepare's verdict does not carry over to a body that names a
 	// different one.
@@ -355,6 +445,32 @@ func (n *Engine) SubmitSessionPolicy(
 	lock := sessionAuthorityLock(in.ChainID, user.Address, in.Wallet)
 	lock.Lock()
 	defer lock.Unlock()
+
+	current, err := activeSessionPolicyLocked(n.db, in.ChainID, user.Address, in.Wallet)
+	if err != nil {
+		// A stacked wallet has no single base. A legacy submit (no
+		// basePolicyId) is how that state gets repaired: the new grant
+		// replaces every usable one. A client that named a base cannot
+		// be checked against two grants, so that error stands.
+		if !ambiguousLegacyRepair(in.BasePolicyID, err) {
+			return nil, nil, err
+		}
+		current = nil
+	}
+	if in.BasePolicyID != nil && !policyIDMatches(*in.BasePolicyID, current) {
+		return nil, nil, newBaseChanged(current)
+	}
+	tasks, err := n.enabledTasksForRunner(user.Address, in.Wallet)
+	if err != nil {
+		return nil, nil, err
+	}
+	dropped, err := classifyRunnerCoverage(in, workflowTasks(tasks), time.Now())
+	if err != nil {
+		return nil, nil, err
+	}
+	if in.AffectedOut != nil {
+		*in.AffectedOut = dropped
+	}
 
 	prepared, err := PrepareSessionGrant(n.db, in.ChainID, signer, strings.ToLower(policyID), SessionGrantRequest{
 		Owner:          user.Address,
