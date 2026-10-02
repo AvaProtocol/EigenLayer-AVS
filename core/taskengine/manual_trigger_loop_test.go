@@ -254,6 +254,19 @@ func TestLoopNode_SettingsAddressList(t *testing.T) {
 	assert.Equal(t, "0xAddr3", arr[2])
 }
 
+// testOwnerRunner is the current test owner: OWNER_EOA, or the address of
+// TEST_PRIVATE_KEY when that variable is unset. Live Tenderly simulations
+// send from this wallet. The old salt-2 runner belonged to the rotated key
+// and no longer holds Sepolia USDC.
+func testOwnerRunner(t *testing.T) string {
+	t.Helper()
+	owner, ok := testutil.MustGetTestOwnerAddress()
+	if !ok {
+		t.Fatal("OWNER_EOA or TEST_PRIVATE_KEY is required")
+	}
+	return owner.Hex()
+}
+
 func TestLoopNode_ContractWrite_Approve_PerIterationData(t *testing.T) {
 	// Fast, isolated test: simulate a loop over two approve calls and assert per-iteration data is populated
 	logger := testutil.GetLogger()
@@ -276,7 +289,7 @@ func TestLoopNode_ContractWrite_Approve_PerIterationData(t *testing.T) {
 			map[string]interface{}{"spender": "0x0000000000000000000000000000000000000001", "amount": "0"},
 		},
 		"settings": map[string]interface{}{
-			"runner":   "0x5a8A8a79DdF433756D4D97DCCE33334D9E218856",
+			"runner":   testOwnerRunner(t),
 			"chain_id": int64(11155111),
 			"chain":    "sepolia",
 		},
@@ -383,7 +396,7 @@ func TestLoopNode_ContractWrite_InvalidAddress_PartialFailure(t *testing.T) {
 			"", // empty address — should fail calldata generation
 		},
 		"settings": map[string]interface{}{
-			"runner":   "0x5a8A8a79DdF433756D4D97DCCE33334D9E218856",
+			"runner":   testOwnerRunner(t),
 			"chain_id": int64(11155111),
 			"chain":    "sepolia",
 		},
@@ -474,7 +487,7 @@ func TestLoopNode_ContractWrite_MetadataTransactionHash(t *testing.T) {
 			map[string]interface{}{"spender": "0x0000000000000000000000000000000000000001", "amount": "0"},
 		},
 		"settings": map[string]interface{}{
-			"runner":   "0x5a8A8a79DdF433756D4D97DCCE33334D9E218856",
+			"runner":   testOwnerRunner(t),
 			"chain_id": int64(11155111),
 			"chain":    "sepolia",
 		},
@@ -556,7 +569,7 @@ func TestLoopNode_EthTransfer_MetadataTransactionHash(t *testing.T) {
 			"0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
 		},
 		"settings": map[string]interface{}{
-			"runner":   "0x5a8A8a79DdF433756D4D97DCCE33334D9E218856",
+			"runner":   testOwnerRunner(t),
 			"chain_id": int64(11155111),
 			"chain":    "sepolia",
 		},
