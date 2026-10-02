@@ -14,13 +14,43 @@ import (
 // Problem is the RFC 7807 problem+json error shape returned for every
 // 4xx/5xx response from the REST API. Mirrors the OpenAPI schema in
 // api/openapi.yaml (#/components/schemas/Problem).
+// ProblemAction is one contract call a grant does not allow.
+type ProblemAction struct {
+	Target    string   `json:"target"`
+	Selectors []string `json:"selectors"`
+}
+
+// ProblemCap is one ERC-20 total, in the token's smallest unit.
+type ProblemCap struct {
+	Token  string `json:"token"`
+	Amount string `json:"amount"`
+}
+
+// ProblemNativeCap is a native spend total.
+type ProblemNativeCap struct {
+	Amount string `json:"amount"`
+}
+
+// ProblemNeed is the permission set one workflow still needs.
+type ProblemNeed struct {
+	AllowedActions   []ProblemAction   `json:"allowedActions,omitempty"`
+	Erc20SpendCaps   []ProblemCap      `json:"erc20SpendCaps,omitempty"`
+	NativeRecipients []string          `json:"nativeRecipients,omitempty"`
+	NativeSpendCap   *ProblemNativeCap `json:"nativeSpendCap,omitempty"`
+	ValidUntil       *int64            `json:"validUntil,omitempty"`
+}
+
 type Problem struct {
-	Type     string `json:"type"`
-	Title    string `json:"title"`
-	Status   int    `json:"status"`
-	Detail   string `json:"detail,omitempty"`
-	Instance string `json:"instance,omitempty"`
-	Code     string `json:"code,omitempty"`
+	Type            string          `json:"type"`
+	Title           string          `json:"title"`
+	Status          int             `json:"status"`
+	Detail          string          `json:"detail,omitempty"`
+	Instance        string          `json:"instance,omitempty"`
+	Code            string          `json:"code,omitempty"`
+	PolicyID        string          `json:"policyId,omitempty"`
+	AffectedTaskIDs []string        `json:"affectedTaskIds,omitempty"`
+	MissingActions  []ProblemAction `json:"missingActions,omitempty"`
+	Required        *ProblemNeed    `json:"required,omitempty"`
 }
 
 // genericServerErrorDetail replaces any 5xx Problem detail the code didn't
@@ -33,10 +63,14 @@ const genericServerErrorDetail = "An internal error occurred while processing th
 // Problem fields directly. Anything else (echo.HTTPError, plain errors)
 // gets best-effort-mapped to a Problem by ProblemErrorHandler.
 type HTTPError struct {
-	Status int
-	Code   string
-	Title  string
-	Detail string
+	Status          int
+	Code            string
+	Title           string
+	Detail          string
+	PolicyID        string
+	AffectedTaskIDs []string
+	MissingActions  []ProblemAction
+	Required        *ProblemNeed
 }
 
 func (e *HTTPError) Error() string { return e.Title }
@@ -101,6 +135,10 @@ func ProblemErrorHandler(logger sdklogging.Logger) echo.HTTPErrorHandler {
 			p.Code = typed.Code
 			p.Title = typed.Title
 			p.Detail = typed.Detail
+			p.PolicyID = typed.PolicyID
+			p.AffectedTaskIDs = typed.AffectedTaskIDs
+			p.MissingActions = typed.MissingActions
+			p.Required = typed.Required
 			detailIsAuthored = true
 		case errors.As(err, &echoErr):
 			p.Status = echoErr.Code

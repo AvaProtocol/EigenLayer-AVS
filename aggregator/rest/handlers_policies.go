@@ -73,18 +73,31 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 	if req.ExpiresInSeconds < 60 {
 		return badRequest("POLICIES_BAD_EXPIRY", "Invalid expiry", "expiresInSeconds must be at least 60.")
 	}
-	perms, err := permissionsFromAPI(req.AllowedActions, req.Erc20SpendCap, req.Erc20SpendCaps, req.NativeRecipients, req.NativeSpendCap, req.AllowContractRecipient, nowMs()+req.ExpiresInSeconds*1000)
-	if err != nil {
-		return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
+	in := taskengine.SessionPolicyInput{
+		Wallet:           wallet,
+		ChainID:          int64(req.ChainId),
+		AgentLabel:       req.AgentLabel,
+		Justification:    deref(req.Justification),
+		BasePolicyID:     req.BasePolicyId,
+		ExpiresInSeconds: req.ExpiresInSeconds,
+	}
+	if req.Add != nil {
+		// The addition is a fragment. Top-level permission fields are the
+		// legacy full set and are ignored once add is present.
+		addition, err := additionFromAPI(*req.Add)
+		if err != nil {
+			return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
+		}
+		in.Addition = &addition
+	} else {
+		perms, err := permissionsFromAPI(req.AllowedActions, req.Erc20SpendCap, req.Erc20SpendCaps, req.NativeRecipients, req.NativeSpendCap, req.AllowContractRecipient, nowMs()+req.ExpiresInSeconds*1000)
+		if err != nil {
+			return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
+		}
+		in.Permissions = perms
 	}
 
-	prepared, err := s.engine.PrepareSessionPolicy(user, taskengine.SessionPolicyInput{
-		Wallet:        wallet,
-		ChainID:       int64(req.ChainId),
-		AgentLabel:    req.AgentLabel,
-		Justification: deref(req.Justification),
-		Permissions:   perms,
-	})
+	prepared, err := s.engine.PrepareSessionPolicy(user, in)
 	if err != nil {
 		return mapPolicyError(err)
 	}
@@ -94,7 +107,7 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 	if err != nil {
 		return err
 	}
-	return ctx.JSON(http.StatusOK, generated.PreparedPolicy{
+	out := generated.PreparedPolicy{
 		PolicyId:      generated.Ulid(policy.ID),
 		ChainId:       generated.ChainId(policy.ChainID),
 		EntityId:      int64(policy.EntityID),
@@ -103,7 +116,9 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 		ValidUntil:    policy.ValidUntil,
 		Digest:        prepared.Digest.Hex(),
 		TypedData:     typedData,
-	})
+	}
+	applySkillPrepare(&out, prepared)
+	return ctx.JSON(http.StatusOK, out)
 }
 
 // SubmitWalletPolicy verifies the owner's signature and stores the grant.
@@ -132,17 +147,25 @@ func (s *Server) SubmitWalletPolicy(ctx echo.Context, address generated.Ethereum
 		return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
 	}
 
+	var affected []string
 	policy, superseded, err := s.engine.SubmitSessionPolicy(user, taskengine.SessionPolicyInput{
 		Wallet:        wallet,
 		ChainID:       int64(req.ChainId),
 		AgentLabel:    req.AgentLabel,
 		Justification: deref(req.Justification),
 		Permissions:   perms,
+		BasePolicyID:  req.BasePolicyId,
+		DropTaskIDs:   derefStrings(req.DropTaskIds),
+		AffectedOut:   &affected,
 	}, string(req.PolicyId), uint32(req.EntityId), uint64(req.Deadline), signature)
 	if err != nil {
 		return mapPolicyError(err)
 	}
-	return ctx.JSON(http.StatusCreated, submitPolicyToAPI(policy, superseded))
+	resp := submitPolicyToAPI(policy, superseded)
+	if len(affected) > 0 {
+		resp.AffectedTaskIds = &affected
+	}
+	return ctx.JSON(http.StatusCreated, resp)
 }
 
 // ListWalletPolicies lists the wallet's grants, newest first.
@@ -479,7 +502,12 @@ func filterToDeclaredFields(domain interface{}, declared []apitypes.Type) interf
 
 // mapPolicyError translates engine sentinels into REST problems.
 func mapPolicyError(err error) error {
+	var conflict *taskengine.PolicyConflictError
 	switch {
+	case errors.As(err, &conflict):
+		return policyConflictHTTP(conflict)
+	case errors.Is(err, taskengine.ErrSessionPolicyUnsized):
+		return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
 	case errors.Is(err, taskengine.ErrSessionWalletNotMAv2):
 		return badRequest("SESSION_WALLET_NOT_MA_V2", err.Error(), "")
 	case errors.Is(err, taskengine.ErrEOADelegationMissing):
@@ -521,6 +549,346 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+func derefStrings(s *[]string) []string {
+	if s == nil {
+		return nil
+	}
+	return *s
+}
+
+func additionFromAPI(add generated.SessionPolicyAddition) (taskengine.PolicyAddition, error) {
+	validUntil := int64(0)
+	if add.ValidUntil != nil {
+		validUntil = *add.ValidUntil
+	}
+	perms, err := permissionsFromAPI(add.AllowedActions, nil, add.Erc20SpendCaps, add.NativeRecipients, add.NativeSpendCap, add.AllowContractRecipient, validUntil)
+	if err != nil {
+		return taskengine.PolicyAddition{}, err
+	}
+	return taskengine.PolicyAddition{
+		AllowedActions:         perms.AllowedActions,
+		SpendCaps:              perms.SpendCaps,
+		NativeRecipients:       perms.NativeRecipients,
+		NativeSpendCap:         perms.NativeSpendCap,
+		AllowContractRecipient: perms.AllowContractRecipient,
+		ValidUntilMs:           perms.ValidUntilMs,
+	}, nil
+}
+
+func applySkillPrepare(out *generated.PreparedPolicy, prepared *taskengine.PreparedSessionGrant) {
+	if out == nil || prepared == nil || prepared.SkillChanges == nil {
+		return
+	}
+	if echo := prepared.EchoPermissions; echo != nil {
+		actions, cap, caps, recs, native, allow := permissionsFieldsToAPI(*echo)
+		out.AllowedActions = actions
+		out.Erc20SpendCap = cap
+		out.Erc20SpendCaps = caps
+		out.NativeRecipients = recs
+		out.NativeSpendCap = native
+		out.AllowContractRecipient = allow
+	}
+	base := prepared.SkillChanges.BasePolicyID
+	out.BasePolicyId = &base
+	out.Changes = policyChangesToAPI(prepared.SkillChanges)
+}
+
+func permissionsFieldsToAPI(perms taskengine.SessionPermissions) (
+	*[]generated.AllowedAction,
+	*generated.Erc20SpendCap,
+	*[]generated.Erc20SpendCap,
+	*[]generated.EthereumAddress,
+	*generated.NativeSpendCap,
+	*bool,
+) {
+	var actions *[]generated.AllowedAction
+	if converted := allowedActionsToAPI(perms.AllowedActions); len(converted) > 0 {
+		actions = &converted
+	}
+	var cap *generated.Erc20SpendCap
+	if perms.SpendCap != nil && perms.SpendCap.Token != nil {
+		cap = &generated.Erc20SpendCap{
+			Token:  generated.EthereumAddress(perms.SpendCap.Token.Hex()),
+			Amount: perms.SpendCap.Amount,
+		}
+	}
+	var caps *[]generated.Erc20SpendCap
+	if len(perms.SpendCaps) > 0 {
+		list := make([]generated.Erc20SpendCap, 0, len(perms.SpendCaps))
+		for _, item := range perms.SpendCaps {
+			if item.Token == nil {
+				continue
+			}
+			list = append(list, generated.Erc20SpendCap{
+				Token:  generated.EthereumAddress(item.Token.Hex()),
+				Amount: item.Amount,
+			})
+		}
+		if len(list) > 0 {
+			caps = &list
+		}
+	}
+	var recs *[]generated.EthereumAddress
+	if len(perms.NativeRecipients) > 0 {
+		list := make([]generated.EthereumAddress, 0, len(perms.NativeRecipients))
+		for _, rec := range perms.NativeRecipients {
+			if rec == nil {
+				continue
+			}
+			list = append(list, generated.EthereumAddress(rec.Hex()))
+		}
+		if len(list) > 0 {
+			recs = &list
+		}
+	}
+	var native *generated.NativeSpendCap
+	if perms.NativeSpendCap != nil {
+		native = &generated.NativeSpendCap{Amount: perms.NativeSpendCap.Amount}
+	}
+	var allow *bool
+	if perms.AllowContractRecipient {
+		v := true
+		allow = &v
+	}
+	return actions, cap, caps, recs, native, allow
+}
+
+func allowedActionsToAPI(actions []model.AllowedAction) []generated.AllowedAction {
+	out := make([]generated.AllowedAction, 0, len(actions))
+	for _, action := range actions {
+		if action.Target == nil {
+			continue
+		}
+		out = append(out, generated.AllowedAction{
+			Target:    generated.EthereumAddress(action.Target.Hex()),
+			Selectors: action.Selectors,
+		})
+	}
+	return out
+}
+
+func policyChangesToAPI(ch *taskengine.PolicyChanges) *generated.SessionPolicyChanges {
+	if ch == nil {
+		return nil
+	}
+	base := ch.BasePolicyID
+	summary := ch.Summary
+	if summary == nil {
+		summary = []string{}
+	}
+	out := &generated.SessionPolicyChanges{
+		Summary:      summary,
+		BasePolicyId: &base,
+	}
+	if actions := allowedActionsToAPI(ch.KeptActions); len(actions) > 0 {
+		out.KeptActions = &actions
+	}
+	if actions := allowedActionsToAPI(ch.AddedActions); len(actions) > 0 {
+		out.AddedActions = &actions
+	}
+	if actions := allowedActionsToAPI(ch.RemovedActions); len(actions) > 0 {
+		out.RemovedActions = &actions
+	}
+	if len(ch.CapChanges) > 0 {
+		caps := make([]generated.SessionPolicyCapChange, 0, len(ch.CapChanges))
+		for _, cap := range ch.CapChanges {
+			item := generated.SessionPolicyCapChange{
+				Token:  generated.EthereumAddress(cap.Token.Hex()),
+				Amount: cap.Amount,
+			}
+			if cap.PreviousAmount != "" {
+				prev := cap.PreviousAmount
+				item.PreviousAmount = &prev
+			}
+			caps = append(caps, item)
+		}
+		out.CapChanges = &caps
+	}
+	if len(ch.ExpiryChanges) > 0 {
+		expiries := make([]generated.SessionPolicyExpiryChange, 0, len(ch.ExpiryChanges))
+		for _, expiry := range ch.ExpiryChanges {
+			item := generated.SessionPolicyExpiryChange{
+				Name:       expiry.Name,
+				ValidUntil: expiry.ValidUntilMs,
+			}
+			if expiry.TaskID != "" {
+				id := expiry.TaskID
+				item.TaskId = &id
+			}
+			if expiry.PreviousValidUntil > 0 {
+				prev := expiry.PreviousValidUntil
+				item.PreviousValidUntil = &prev
+			}
+			expiries = append(expiries, item)
+		}
+		out.ExpiryChanges = &expiries
+	}
+	return out
+}
+
+func policyConflictHTTP(e *taskengine.PolicyConflictError) *restmw.HTTPError {
+	if e == nil {
+		return nil
+	}
+	title := "Grant does not cover this workflow"
+	if e.Code == taskengine.SessionPolicyBaseChangedCode {
+		title = "Grant changed since prepare"
+	}
+	return &restmw.HTTPError{
+		Status:          http.StatusConflict,
+		Code:            e.Code,
+		Title:           title,
+		Detail:          e.Detail,
+		PolicyID:        e.PolicyID,
+		AffectedTaskIDs: append([]string(nil), e.AffectedTaskIDs...),
+		MissingActions:  problemActions(e.Missing),
+		Required:        problemNeed(e.Required),
+	}
+}
+
+// policyConflictFrom maps a coverage or base-changed failure. A missing
+// runner is a wrapped sentinel rather than a PolicyConflictError, and still
+// has to be a 409 — notFoundOrError would otherwise turn it into a 404.
+func policyConflictFrom(err error) error {
+	if err == nil {
+		return nil
+	}
+	var conflict *taskengine.PolicyConflictError
+	if errors.As(err, &conflict) {
+		return policyConflictHTTP(conflict)
+	}
+	if errors.Is(err, taskengine.ErrSessionPolicyNotCovering) || errors.Is(err, taskengine.ErrSessionPolicyBaseChanged) {
+		code := taskengine.SessionPolicyNotCoveringCode
+		title := "Grant does not cover this workflow"
+		if errors.Is(err, taskengine.ErrSessionPolicyBaseChanged) {
+			code = taskengine.SessionPolicyBaseChangedCode
+			title = "Grant changed since prepare"
+		}
+		return &restmw.HTTPError{
+			Status: http.StatusConflict,
+			Code:   code,
+			Title:  title,
+			Detail: err.Error(),
+		}
+	}
+	return nil
+}
+
+func problemActions(actions []model.AllowedAction) []restmw.ProblemAction {
+	if len(actions) == 0 {
+		return nil
+	}
+	out := make([]restmw.ProblemAction, 0, len(actions))
+	for _, action := range actions {
+		if action.Target == nil {
+			continue
+		}
+		out = append(out, restmw.ProblemAction{
+			Target:    action.Target.Hex(),
+			Selectors: action.Selectors,
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func problemNeed(need *taskengine.WorkflowNeed) *restmw.ProblemNeed {
+	if need == nil {
+		return nil
+	}
+	out := &restmw.ProblemNeed{AllowedActions: problemActions(need.Actions)}
+	if len(need.Caps) > 0 {
+		caps := make([]restmw.ProblemCap, 0, len(need.Caps))
+		for _, cap := range need.Caps {
+			if cap.Token == nil {
+				continue
+			}
+			caps = append(caps, restmw.ProblemCap{Token: cap.Token.Hex(), Amount: cap.Amount})
+		}
+		out.Erc20SpendCaps = caps
+	}
+	if len(need.NativeRecipients) > 0 {
+		recs := make([]string, 0, len(need.NativeRecipients))
+		for _, rec := range need.NativeRecipients {
+			if rec == nil {
+				continue
+			}
+			recs = append(recs, rec.Hex())
+		}
+		out.NativeRecipients = recs
+	}
+	if need.NativeSpendCap != nil {
+		out.NativeSpendCap = &restmw.ProblemNativeCap{Amount: need.NativeSpendCap.Amount}
+	}
+	until := need.ValidUntilMs
+	out.ValidUntil = &until
+	return out
+}
+
+func sessionAuthorizationToAPI(auth *taskengine.SessionAuthorization) generated.SessionAuthorization {
+	out := generated.SessionAuthorization{Status: generated.SessionAuthorizationStatus(auth.Status)}
+	if auth.Detail != "" {
+		detail := auth.Detail
+		out.Detail = &detail
+	}
+	if auth.PolicyID != "" {
+		id := auth.PolicyID
+		out.PolicyId = &id
+	}
+	if actions := allowedActionsToAPI(auth.Missing); len(actions) > 0 {
+		out.MissingActions = &actions
+	}
+	if need := sessionNeedToAPI(auth.Required); need != nil {
+		out.Required = need
+	}
+	return out
+}
+
+func sessionNeedToAPI(need *taskengine.WorkflowNeed) *generated.SessionPolicyNeed {
+	if need == nil {
+		return nil
+	}
+	out := &generated.SessionPolicyNeed{}
+	if actions := allowedActionsToAPI(need.Actions); len(actions) > 0 {
+		out.AllowedActions = &actions
+	}
+	if len(need.Caps) > 0 {
+		caps := make([]generated.Erc20SpendCap, 0, len(need.Caps))
+		for _, cap := range need.Caps {
+			if cap.Token == nil {
+				continue
+			}
+			caps = append(caps, generated.Erc20SpendCap{
+				Token:  generated.EthereumAddress(cap.Token.Hex()),
+				Amount: cap.Amount,
+			})
+		}
+		if len(caps) > 0 {
+			out.Erc20SpendCaps = &caps
+		}
+	}
+	if len(need.NativeRecipients) > 0 {
+		recs := make([]generated.EthereumAddress, 0, len(need.NativeRecipients))
+		for _, rec := range need.NativeRecipients {
+			if rec == nil {
+				continue
+			}
+			recs = append(recs, generated.EthereumAddress(rec.Hex()))
+		}
+		if len(recs) > 0 {
+			out.NativeRecipients = &recs
+		}
+	}
+	if need.NativeSpendCap != nil {
+		out.NativeSpendCap = &generated.NativeSpendCap{Amount: need.NativeSpendCap.Amount}
+	}
+	until := need.ValidUntilMs
+	out.ValidUntil = &until
+	return out
 }
 
 func nowMs() int64 { return time.Now().UnixMilli() }
