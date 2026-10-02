@@ -2299,6 +2299,15 @@ func (response PrepareWalletPolicy404ApplicationProblemPlusJSONResponse) VisitPr
 	return json.NewEncoder(w).Encode(response)
 }
 
+type PrepareWalletPolicy409ApplicationProblemPlusJSONResponse Problem
+
+func (response PrepareWalletPolicy409ApplicationProblemPlusJSONResponse) VisitPrepareWalletPolicyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type SubmitWalletPolicyRequestObject struct {
 	Address EthereumAddress `json:"address"`
 	Body    *SubmitWalletPolicyJSONRequestBody

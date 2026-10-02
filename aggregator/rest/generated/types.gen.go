@@ -223,12 +223,13 @@ const (
 
 // Defines values for SessionAuthorizationStatus.
 const (
-	CapNeedsInput  SessionAuthorizationStatus = "cap_needs_input"
-	CapTooLow      SessionAuthorizationStatus = "cap_too_low"
-	Covered        SessionAuthorizationStatus = "covered"
-	ExpiresTooSoon SessionAuthorizationStatus = "expires_too_soon"
-	NoGrant        SessionAuthorizationStatus = "no_grant"
-	NotCovered     SessionAuthorizationStatus = "not_covered"
+	CapNeedsInput    SessionAuthorizationStatus = "cap_needs_input"
+	CapTooLow        SessionAuthorizationStatus = "cap_too_low"
+	Covered          SessionAuthorizationStatus = "covered"
+	ExpiresTooSoon   SessionAuthorizationStatus = "expires_too_soon"
+	NoGrant          SessionAuthorizationStatus = "no_grant"
+	NotCovered       SessionAuthorizationStatus = "not_covered"
+	TargetUnresolved SessionAuthorizationStatus = "target_unresolved"
 )
 
 // Defines values for SessionPolicyStatus.
@@ -1245,6 +1246,14 @@ type PreparePolicyRequest struct {
 	// configured chain; on query/filter params it is optional.
 	ChainId ChainId `json:"chainId"`
 
+	// DropTaskIds Enabled tasks this prepare may leave out of the merged grant.
+	// Honored only when `add` is set. Send the same ids on submit or
+	// submit returns 409. An enabled task whose target cannot be read
+	// is `409 SESSION_POLICY_TARGET_UNRESOLVED` until it is paused or
+	// named here. Naming it does not copy the current grant's rows
+	// into the new cap.
+	DropTaskIds *[]string `json:"dropTaskIds,omitempty"`
+
 	// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
 	// execution. The token must appear as an `allowedActions` target.
 	// Prefer `erc20SpendCaps` when capping more than one token; this
@@ -1298,7 +1307,10 @@ type PreparedDelegation struct {
 
 // PreparedPolicy defines model for PreparedPolicy.
 type PreparedPolicy struct {
-	AllowContractRecipient *bool `json:"allowContractRecipient,omitempty"`
+	// AffectedTaskIds Enabled tasks this prepare left out because `dropTaskIds` named
+	// them. Echo those ids as submit's `dropTaskIds`.
+	AffectedTaskIds        *[]string `json:"affectedTaskIds,omitempty"`
+	AllowContractRecipient *bool     `json:"allowContractRecipient,omitempty"`
 
 	// AllowedActions Merged actions to echo to submit. Present when `add` was sent.
 	AllowedActions *[]AllowedAction `json:"allowedActions,omitempty"`
@@ -1354,7 +1366,9 @@ type PreparedPolicy struct {
 // log correlation.
 type Problem struct {
 	// AffectedTaskIds Enabled tasks a grant would leave unable to run. Set on
-	// `409 SESSION_POLICY_NOT_COVERING` from policies:submit.
+	// `409 SESSION_POLICY_NOT_COVERING` and
+	// `409 SESSION_POLICY_TARGET_UNRESOLVED` from policies:prepare
+	// and policies:submit.
 	AffectedTaskIds *[]string `json:"affectedTaskIds,omitempty"`
 
 	// Code Machine-readable error code. Stable across releases; clients can
@@ -1372,7 +1386,8 @@ type Problem struct {
 	MissingActions *[]AllowedAction `json:"missingActions,omitempty"`
 
 	// PolicyId Usable session grant involved in this failure, when there is one.
-	// Set on `SESSION_POLICY_BASE_CHANGED` and `SESSION_POLICY_NOT_COVERING`.
+	// Set on `SESSION_POLICY_BASE_CHANGED`, `SESSION_POLICY_NOT_COVERING`,
+	// and `SESSION_POLICY_TARGET_UNRESOLVED`.
 	PolicyId *string `json:"policyId,omitempty"`
 
 	// Required Permissions one workflow still needs, sized to the runs it has left.
@@ -1564,6 +1579,11 @@ type SessionAuthorization struct {
 	// `expires_too_soon` — the grant ends before this workflow's window.
 	// `cap_needs_input` — a spend amount is not a fixed number, so the
 	// caller must choose the cap.
+	// `target_unresolved` — a fund-moving target could not be read from
+	// the stored workflow (a loop over a previous step, not a settings
+	// list). Choosing a spend cap does not name that target. One
+	// observed iteration does not clear this. Pause the automation, or
+	// name it in `dropTaskIds`.
 	Status SessionAuthorizationStatus `json:"status"`
 }
 
@@ -1575,6 +1595,11 @@ type SessionAuthorization struct {
 // `expires_too_soon` — the grant ends before this workflow's window.
 // `cap_needs_input` — a spend amount is not a fixed number, so the
 // caller must choose the cap.
+// `target_unresolved` — a fund-moving target could not be read from
+// the stored workflow (a loop over a previous step, not a settings
+// list). Choosing a spend cap does not name that target. One
+// observed iteration does not clear this. Pause the automation, or
+// name it in `dropTaskIds`.
 type SessionAuthorizationStatus string
 
 // SessionPolicy defines model for SessionPolicy.
@@ -1801,7 +1826,10 @@ type SubmitPolicyRequest struct {
 
 	// DropTaskIds Enabled tasks this grant may leave uncovered. Any other enabled
 	// task on this runner whose fund-moving steps are outside the grant
-	// is refused with 409 SESSION_POLICY_NOT_COVERING.
+	// is refused with 409 SESSION_POLICY_NOT_COVERING. A task whose
+	// target cannot be read is 409 SESSION_POLICY_TARGET_UNRESOLVED
+	// unless it is named here. Naming it does not copy the current
+	// grant's rows into the new cap.
 	DropTaskIds *[]string `json:"dropTaskIds,omitempty"`
 	EntityId    int64     `json:"entityId"`
 
