@@ -92,7 +92,10 @@ func (p SessionPermissions) validate(withChain bool) error {
 		if err != nil {
 			return err
 		}
-		if len(caps) == 0 {
+		// transfer and approve are the only metered selectors. A router row
+		// cannot take a spend limit, and it stays after every capped token
+		// is spent, so that row must still be signable with no ERC-20 cap.
+		if len(caps) == 0 && actionsHaveSpendSelector(p.AllowedActions) {
 			return fmt.Errorf("a grant needs an ERC-20 spend cap")
 		}
 		seen := make(map[common.Address]struct{}, len(caps))
@@ -278,6 +281,21 @@ var (
 	erc20TransferSelector = [4]byte{0xa9, 0x05, 0x9c, 0xbb}
 	erc20ApproveSelector  = [4]byte{0x09, 0x5e, 0xa7, 0xb3}
 )
+
+// actionsHaveSpendSelector reports a transfer or approve. Those are the
+// calls AllowlistModule meters, so a grant that contains one needs a cap.
+// Any other selector is allowed without one.
+func actionsHaveSpendSelector(actions []model.AllowedAction) bool {
+	for _, action := range actions {
+		for _, raw := range action.Selectors {
+			sel, err := parseSelector(raw)
+			if err != nil || sel == erc20TransferSelector || sel == erc20ApproveSelector {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 func spendLimitSelectorsOK(token common.Address, actions []model.AllowedAction) error {
 	for _, action := range actions {

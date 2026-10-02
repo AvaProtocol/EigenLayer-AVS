@@ -381,6 +381,15 @@ func TestUnresolvedTargetMapsToConflict(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, http.StatusBadRequest, bad.Status)
 	require.Equal(t, "POLICIES_BAD_PERMISSIONS", bad.Code)
+
+	// A native cap that cannot be sized is not the "set a spend cap" failure.
+	nativeUnsized := mapPolicyError(fmt.Errorf("%w: task eth (Send ETH): a native cap cannot be added while its payable value cannot be sized", taskengine.ErrSessionNativeCapUnsized))
+	nativeBad, ok := nativeUnsized.(*restmw.HTTPError)
+	require.True(t, ok)
+	require.Equal(t, http.StatusBadRequest, nativeBad.Status)
+	require.Equal(t, "POLICIES_REJECTED", nativeBad.Code)
+	require.Contains(t, nativeBad.Detail, "task eth")
+	require.NotContains(t, nativeBad.Detail, "POLICIES_BAD_PERMISSIONS")
 }
 
 // grantOverHTTP runs prepare → sign → submit and returns the decoded response.
@@ -523,4 +532,26 @@ func TestSubmitPolicyResponseCarriesEverySessionPolicyField(t *testing.T) {
 		require.Equal(t, want, got, "submit response disagrees with the policy on %q", name)
 	}
 	require.Equal(t, []any{"01replacedgrantaaaaaaaaaa"}, submitFields["supersededPolicyIds"])
+}
+
+func TestPolicyChangesMarkADroppedCapRemoved(t *testing.T) {
+	token := common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
+	out := policyChangesToAPI(&taskengine.PolicyChanges{
+		Summary: []string{"Cap 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238: removed (was 60)"},
+		CapChanges: []taskengine.CapChange{{
+			Token: token, Amount: "0", PreviousAmount: "60", Removed: true,
+		}},
+	})
+	require.NotNil(t, out.CapChanges)
+	require.Len(t, *out.CapChanges, 1)
+	change := (*out.CapChanges)[0]
+	require.Equal(t, "0", change.Amount)
+	require.NotNil(t, change.PreviousAmount)
+	require.Equal(t, "60", *change.PreviousAmount)
+	require.NotNil(t, change.Removed)
+	require.True(t, *change.Removed)
+
+	body, err := json.Marshal(change)
+	require.NoError(t, err)
+	require.Contains(t, string(body), `"removed":true`)
 }

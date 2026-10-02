@@ -321,6 +321,30 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		return nil, err
 	}
 
+	// Read the current grant's leftover before taking the write lock. The
+	// lock also blocks sends and preflight on this runner, so a slow eth_call
+	// stays outside it. Submit re-reads while holding the lock; a spend in
+	// this gap is SESSION_POLICY_BASE_CHANGED.
+	var preCurrent *model.SessionPolicy
+	var preRemainder *GrantRemainder
+	preparedAt := time.Now()
+	if in.Addition != nil {
+		preCurrent, err = ActiveSessionPolicyForWallet(n.db, in.ChainID, user.Address, in.Wallet)
+		if err != nil {
+			return nil, err
+		}
+		if preCurrent != nil {
+			readCtx, cancel := context.WithTimeout(context.Background(), occupancyProbeTimeout)
+			rem, readErr := n.resolveGrantRemainder(readCtx, preCurrent, in.Wallet)
+			cancel()
+			if readErr != nil {
+				return nil, readErr
+			}
+			cloned := rem.clone()
+			preRemainder = &cloned
+		}
+	}
+
 	lock := sessionAuthorityLock(in.ChainID, user.Address, in.Wallet)
 	lock.Lock()
 	defer lock.Unlock()
@@ -336,13 +360,33 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		return nil, newBaseChanged(current)
 	}
 	var changes *PolicyChanges
+	var kept []*avsproto.Task
 	if in.Addition != nil {
+		// The grant changed between the pre-lock read and this lock. The
+		// base check above already refused a client that named the old id.
+		// A prepare that did not name one merges against whoever is current,
+		// and that read has to be for this grant.
+		if !sameGrantID(preCurrent, current) {
+			readCtx, cancel := context.WithTimeout(context.Background(), occupancyProbeTimeout)
+			rem, readErr := n.resolveGrantRemainder(readCtx, current, in.Wallet)
+			cancel()
+			if readErr != nil {
+				return nil, readErr
+			}
+			if current == nil {
+				preRemainder = nil
+			} else {
+				cloned := rem.clone()
+				preRemainder = &cloned
+			}
+		}
 		tasks, listErr := n.enabledTasksForRunner(user.Address, in.Wallet)
 		if listErr != nil {
 			return nil, listErr
 		}
-		kept, dropped := tasksExceptDropped(workflowTasks(tasks), in.DropTaskIDs)
-		merged, ch, mergeErr := MergeSkillGrant(current, *in.Addition, kept, in.ChainID, time.Now(), time.Duration(in.ExpiresInSeconds)*time.Second)
+		var dropped []string
+		kept, dropped = tasksExceptDropped(workflowTasks(tasks), in.DropTaskIDs)
+		merged, ch, mergeErr := MergeSkillGrantWithRemainder(current, preRemainder, *in.Addition, kept, in.ChainID, preparedAt, time.Duration(in.ExpiresInSeconds)*time.Second)
 		if mergeErr != nil {
 			return nil, mergeErr
 		}
@@ -376,6 +420,16 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		prepared.SkillChanges = changes
 		echo := in.Permissions
 		prepared.EchoPermissions = &echo
+		n.rememberSkillPrepare(prepared.Policy.ID, skillPrepareSnapshot{
+			owner:      user.Address,
+			wallet:     in.Wallet,
+			chainID:    in.ChainID,
+			addition:   *in.Addition,
+			expiresIn:  time.Duration(in.ExpiresInSeconds) * time.Second,
+			preparedAt: preparedAt,
+			remainder:  preRemainder,
+			tasks:      cloneTasks(kept),
+		})
 	}
 	return prepared, nil
 }
@@ -472,7 +526,40 @@ func (n *Engine) SubmitSessionPolicy(
 	if current != nil {
 		usableID = current.ID
 	}
-	dropped, err := classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID)
+	snap := n.skillPrepareFor(policyID)
+	var dropped []string
+	if snap != nil && snap.matches(user.Address, in) {
+		// One timeout for every token and the native cap. The write lock is
+		// held, and it also blocks sends and preflight on this runner.
+		readCtx, cancel := context.WithTimeout(context.Background(), occupancyProbeTimeout)
+		var remPtr *GrantRemainder
+		if current != nil {
+			rem, readErr := n.resolveGrantRemainder(readCtx, current, in.Wallet)
+			cancel()
+			if readErr != nil {
+				return nil, nil, readErr
+			}
+			cloned := rem.clone()
+			remPtr = &cloned
+		} else {
+			cancel()
+		}
+		kept, _ := tasksExceptDropped(workflowTasks(tasks), in.DropTaskIDs)
+		merged, _, mergeErr := MergeSkillGrantWithRemainder(current, remPtr, snap.addition, kept, in.ChainID, snap.preparedAt, snap.expiresIn)
+		if mergeErr != nil {
+			return nil, nil, skillSubmitMergeError(current, mergeErr, snap.tasks, kept)
+		}
+		if !sameSessionPermissions(merged, in.Permissions) {
+			return nil, nil, explainSkillDrift(current, snap, remPtr, kept, in.Permissions)
+		}
+		if current != nil {
+			dropped, err = classifyCarriedCoverage(current, *remPtr, in, workflowTasks(tasks), time.Now())
+		} else {
+			dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID)
+		}
+	} else {
+		dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -506,6 +593,7 @@ func (n *Engine) SubmitSessionPolicy(
 	if err != nil {
 		return nil, nil, err
 	}
+	n.forgetSkillPrepare(policyID)
 	superseded, err = supersedeUsablePolicies(n.db, in.ChainID, user.Address, in.Wallet, stored.ID)
 	if err != nil {
 		// The grant landed; the runner is ambiguous. Say so rather than

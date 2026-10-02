@@ -2255,9 +2255,7 @@ func (response PrepareWalletPolicy200JSONResponse) VisitPrepareWalletPolicyRespo
 	return json.NewEncoder(w).Encode(response)
 }
 
-type PrepareWalletPolicy400ApplicationProblemPlusJSONResponse struct {
-	BadRequestApplicationProblemPlusJSONResponse
-}
+type PrepareWalletPolicy400ApplicationProblemPlusJSONResponse Problem
 
 func (response PrepareWalletPolicy400ApplicationProblemPlusJSONResponse) VisitPrepareWalletPolicyResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/problem+json")
@@ -2326,9 +2324,7 @@ func (response SubmitWalletPolicy201JSONResponse) VisitSubmitWalletPolicyRespons
 	return json.NewEncoder(w).Encode(response)
 }
 
-type SubmitWalletPolicy400ApplicationProblemPlusJSONResponse struct {
-	BadRequestApplicationProblemPlusJSONResponse
-}
+type SubmitWalletPolicy400ApplicationProblemPlusJSONResponse Problem
 
 func (response SubmitWalletPolicy400ApplicationProblemPlusJSONResponse) VisitSubmitWalletPolicyResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/problem+json")

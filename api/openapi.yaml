@@ -1983,6 +1983,12 @@ components:
         previousAmount:
           type: string
           description: Previous grant's total. Omitted when the token is new.
+        removed:
+          type: boolean
+          description: |
+            True when this token's cap was dropped. `amount` is then "0",
+            and `previousAmount` is what remained. Omitted when the cap is
+            still on the grant.
 
     SessionPolicyExpiryChange:
       type: object
@@ -2107,11 +2113,12 @@ components:
           items: { type: string }
           description: |
             Enabled tasks this prepare may leave out of the merged grant.
-            Honored only when `add` is set. Send the same ids on submit or
-            submit returns 409. An enabled task whose target cannot be read
-            is `409 SESSION_POLICY_TARGET_UNRESOLVED` until it is paused or
-            named here. Naming it does not copy the current grant's rows
-            into the new cap.
+            Honored only when `add` is set. Echo the same ids on submit.
+            When the runner has a usable grant, a task whose target cannot
+            be read does not fail prepare and does not add that target.
+            When there is no usable grant, that task is
+            `409 SESSION_POLICY_TARGET_UNRESOLVED` until it is paused or
+            named here.
         add:
           $ref: '#/components/schemas/SessionPolicyAddition'
           description: |
@@ -2235,12 +2242,17 @@ components:
           type: array
           items: { type: string }
           description: |
-            Enabled tasks this grant may leave uncovered. Any other enabled
-            task on this runner whose fund-moving steps are outside the grant
-            is refused with 409 SESSION_POLICY_NOT_COVERING. A task whose
-            target cannot be read is 409 SESSION_POLICY_TARGET_UNRESOLVED
-            unless it is named here. Naming it does not copy the current
-            grant's rows into the new cap.
+            Enabled tasks this grant may leave uncovered. Echo prepare's
+            `affectedTaskIds`. Naming a task does not fail submit.
+            When a grant was carried, submit refuses with
+            `409 SESSION_POLICY_NOT_COVERING` only when the new grant
+            covers less of an enabled task than the current grant did.
+            A task the current grant already does not cover does not
+            freeze the wallet. When there is no current grant, every
+            other enabled task whose fund-moving steps are outside the
+            grant is `409 SESSION_POLICY_NOT_COVERING`, and a task whose
+            target cannot be read is `409 SESSION_POLICY_TARGET_UNRESOLVED`
+            unless it is named here.
 
     SessionPolicy:
       type: object
@@ -3270,13 +3282,23 @@ paths:
         recomputes everything from them, so tampering only produces a
         signature that no longer verifies.
 
-        When `add` is set, the merged grant includes every enabled task on
-        this runner except ids in `dropTaskIds`. A task whose token or
-        recipient cannot be read from the stored workflow (a loop over a
-        previous step) is `409 SESSION_POLICY_TARGET_UNRESOLVED`. That is
-        not an unsized amount. Pause the automation, or name its id in
-        `dropTaskIds` and echo that id on submit. The current grant's rows
-        are not carried forward.
+        When `add` is set and the runner has a usable grant, the merged
+        grant starts from that grant. Actions, native recipients, and
+        `allowContractRecipient` only grow. Each token cap is what is
+        left on that grant (the on-chain remainder once the grant is
+        applied, otherwise the stored cap), or what enabled automations
+        still need when that is higher, plus the addition. A token with
+        nothing left is omitted. A router action stays. A task whose
+        target cannot be read does not fail prepare and does not add
+        that unknown target.
+
+        When `add` is set and there is no usable grant, the merged grant
+        is the addition plus every enabled task except ids in
+        `dropTaskIds`. A task whose token or recipient cannot be read
+        from the stored workflow (a loop over a previous step) is
+        `409 SESSION_POLICY_TARGET_UNRESOLVED`. That is not an unsized
+        amount. Pause the automation, or name its id in `dropTaskIds`.
+        An unsized amount on this path is `400 POLICIES_BAD_PERMISSIONS`.
       operationId: prepareWalletPolicy
       requestBody:
         required: true
@@ -3289,7 +3311,19 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PreparedPolicy' }
-        '400': { $ref: '#/components/responses/BadRequest' }
+        '400':
+          description: |
+            `POLICIES_BAD_PERMISSIONS` — the grant is not signable. When
+            there is no usable grant, an unsized amount is this code.
+
+            `POLICIES_REJECTED` — `add` would install a native spend cap
+            and a running task's payable value cannot be sized. The
+            detail names the task. The native limit module is not
+            installed. If the current grant already has a native cap,
+            this is not an error.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -3298,11 +3332,12 @@ paths:
             `SESSION_POLICY_BASE_CHANGED` — `basePolicyId` is not the runner's
             usable grant anymore. Prepare again.
 
-            `SESSION_POLICY_TARGET_UNRESOLVED` — an enabled task moves funds
-            to a target this prepare cannot read, and that task was not
-            listed in `dropTaskIds`. `affectedTaskIds` names them. Pausing
-            the task, or naming it in `dropTaskIds`, is the way through.
-            The current grant's cap is not added on.
+            `SESSION_POLICY_TARGET_UNRESOLVED` — there is no usable grant,
+            and an enabled task moves funds to a target this prepare cannot
+            read, and that task was not listed in `dropTaskIds`.
+            `affectedTaskIds` names them. Pausing the task, or naming it
+            in `dropTaskIds`, is the way through. When a usable grant
+            exists, an unresolved task does not fail prepare.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -3343,11 +3378,20 @@ paths:
 
         When `basePolicyId` is sent, including an empty string, the runner's
         usable grant must still be that value or the call is
-        `409 SESSION_POLICY_BASE_CHANGED`.
+        `409 SESSION_POLICY_BASE_CHANGED`. That code also covers a carried
+        grant whose signed permissions no longer match a fresh merge: the
+        remaining limit moved, the running set changed, or both. The grant
+        id can be unchanged. Prepare again.
 
-        The stored grant must still cover every enabled task on this runner,
-        except ids listed in `dropTaskIds`. Otherwise the call is
-        `409 SESSION_POLICY_NOT_COVERING` and nothing is stored.
+        When a grant was carried, the stored grant is refused with
+        `409 SESSION_POLICY_NOT_COVERING` only when it covers less of an
+        enabled task than the current grant did. Tasks listed in
+        `dropTaskIds` are the ones this grant may leave uncovered.
+        When there is no current grant, the stored grant must still cover
+        every enabled task on this runner except those ids, or the call
+        is `409 SESSION_POLICY_NOT_COVERING` and nothing is stored.
+        A missing prepare snapshot (restart, or the prepare was evicted)
+        uses that same per-task check.
       operationId: submitWalletPolicy
       requestBody:
         required: true
@@ -3360,7 +3404,18 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SubmitPolicyResponse' }
-        '400': { $ref: '#/components/responses/BadRequest' }
+        '400':
+          description: |
+            `POLICIES_BAD_PERMISSIONS` — the echoed grant is not signable,
+            or, when there is no usable grant, an amount cannot be sized.
+
+            `POLICIES_REJECTED` — the echoed grant would install a native
+            spend cap and a running task's payable value cannot be sized.
+            The detail names the task. If the current grant already has a
+            native cap, this is not an error.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -3370,15 +3425,21 @@ paths:
             another grant while this one was being signed. Prepare again.
 
             `SESSION_POLICY_BASE_CHANGED` — `basePolicyId` is not the runner's
-            usable grant anymore. Prepare again.
+            usable grant anymore, or a carried grant's remaining limit or
+            running set moved after prepare. The grant id can be unchanged.
+            Prepare again.
 
-            `SESSION_POLICY_NOT_COVERING` — this grant would leave an enabled
-            task on the runner unable to run, and that task was not listed in
-            `dropTaskIds`. `affectedTaskIds` names them.
+            `SESSION_POLICY_NOT_COVERING` — when a grant was carried, the
+            new grant covers less of an enabled task than the current grant
+            did. When there is no current grant, an enabled task on the
+            runner would be unable to run. Tasks listed in `dropTaskIds`
+            are excluded. `affectedTaskIds` names the tasks.
 
-            `SESSION_POLICY_TARGET_UNRESOLVED` — an enabled task moves funds
-            to a target the grant cannot read, and that task was not listed
-            in `dropTaskIds`. `affectedTaskIds` names them.
+            `SESSION_POLICY_TARGET_UNRESOLVED` — there is no usable grant,
+            and an enabled task moves funds to a target the grant cannot
+            read, and that task was not listed in `dropTaskIds`.
+            `affectedTaskIds` names them. When a usable grant exists, an
+            unresolved task does not fail submit by itself.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }

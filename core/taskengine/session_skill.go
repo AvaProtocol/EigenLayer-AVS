@@ -24,13 +24,16 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
-// Skill-page session grants (EigenLayer-AVS #812).
+// Skill-page session grants (EigenLayer-AVS #812, carry-forward #815).
 //
-// One usable grant per runner. A replacement starts its on-chain caps at
-// zero, so a merged grant is sized from what enabled tasks still have left
-// to spend plus the automation being added — never from the previous
-// grant's totals. The wallet keeps one expiry, the latest end date any
-// enabled automation needs. Simulate's permission verdict is opt-in
+// One usable grant per runner. When that grant exists, a replacement keeps
+// its actions and sizes each cap as max(remaining, what enabled automations
+// still need) plus the addition. Remaining is the stored cap until the
+// grant's first run, and the on-chain limit after that. The wallet expiry
+// is the latest of the current grant, the addition, and enabled automations,
+// so a known earlier end does not shorten it. With no current grant, caps
+// are the addition plus enabled tasks, and an unsized or unresolved fund
+// move fails the merge. Simulate's permission verdict is opt-in
 // (authorizationMode=report); the default still fails the step.
 
 const (
@@ -66,10 +69,17 @@ const (
 var (
 	ErrSessionPolicyBaseChanged = errors.New("the runner's usable grant changed since this request was prepared")
 	ErrSessionPolicyNotCovering = errors.New("this grant would leave an enabled automation uncovered")
-	// ErrSessionPolicyUnsized is a prepare-merge failure: an enabled task
-	// still moves a token whose remaining total cannot be computed. The
-	// replacement must not keep the old cap and must not store zero.
+	// ErrSessionPolicyUnsized is a prepare-merge failure on a wallet with no
+	// usable grant: an enabled task still moves a token whose remaining
+	// total cannot be computed. A carried grant does not use this error for
+	// that task; it keeps the token only when the remainder, a sized need,
+	// or the addition already gives it a positive cap.
 	ErrSessionPolicyUnsized = errors.New("cannot size the remaining spend for an enabled automation")
+	// ErrSessionNativeCapUnsized is a prepare failure when the addition would
+	// install NativeTokenLimitModule and a running automation's payable value
+	// cannot be sized. It is not ErrSessionPolicyUnsized: that sentinel is the
+	// "set a spend cap" failure, and this one must not be shown as that.
+	ErrSessionNativeCapUnsized = errors.New("a native cap cannot be added while a running automation has a payable value that cannot be sized")
 
 	// settingRef matches a whole-string settings reference, including a dotted
 	// path such as {{settings.token_amount.address}}. A single segment stays
@@ -436,10 +446,35 @@ func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched Ski
 }
 
 // MergeSkillGrant unions the addition with what enabled tasks on chainID
-// still need. Caps start at zero. An unsized remaining spend fails closed.
+// still need. With no current grant, caps start at zero and an unsized or
+// unresolved fund move fails closed. With a current grant, pass nil
+// remainder only when the grant has not been applied: the stored caps are
+// the remainder, because nothing can have been spent. An applied grant must
+// pass the chain read. Nil there is refused so a missed read cannot be
+// treated as nothing left.
 func MergeSkillGrant(current *model.SessionPolicy, addition PolicyAddition, tasks []*avsproto.Task, chainID int64, now time.Time, expiresIn time.Duration) (SessionPermissions, PolicyChanges, error) {
+	return MergeSkillGrantWithRemainder(current, nil, addition, tasks, chainID, now, expiresIn)
+}
+
+// MergeSkillGrantWithRemainder is MergeSkillGrant with the current grant's
+// usable leftover supplied by the caller. remainder is ignored when current
+// is nil.
+func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *GrantRemainder, addition PolicyAddition, tasks []*avsproto.Task, chainID int64, now time.Time, expiresIn time.Duration) (SessionPermissions, PolicyChanges, error) {
 	if now.IsZero() {
 		now = time.Now()
+	}
+	if current != nil {
+		if current.Grant.Applied() && remainder == nil {
+			return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("applied grant %s has no remaining-limit read", current.ID)
+		}
+		if remainder == nil {
+			stored, err := storedGrantRemainder(current)
+			if err != nil {
+				return SessionPermissions{}, PolicyChanges{}, err
+			}
+			remainder = &stored
+		}
+		return mergeCarriedSkillGrant(current, *remainder, addition, tasks, chainID, now, expiresIn)
 	}
 	actions := map[string]map[string]struct{}{}
 	caps := map[common.Address]*big.Int{}
@@ -627,7 +662,7 @@ func MergeSkillGrant(current *model.SessionPolicy, addition PolicyAddition, task
 	}
 	perms.ValidUntilMs = latest
 
-	changes := diffGrant(current, perms, taskNeeds, latest)
+	changes := diffGrant(current, nil, perms, taskNeeds, latest)
 	return perms, changes, nil
 }
 
@@ -1533,7 +1568,7 @@ func dedupeRecipients(in []*common.Address) []*common.Address {
 	return out
 }
 
-func diffGrant(current *model.SessionPolicy, perms SessionPermissions, taskNeeds []*WorkflowNeed, newExpiry int64) PolicyChanges {
+func diffGrant(current *model.SessionPolicy, remainder *GrantRemainder, perms SessionPermissions, taskNeeds []*WorkflowNeed, newExpiry int64) PolicyChanges {
 	var prev []model.AllowedAction
 	prevCaps := map[common.Address]string{}
 	var prevExpiry int64
@@ -1542,9 +1577,19 @@ func diffGrant(current *model.SessionPolicy, perms SessionPermissions, taskNeeds
 		base = current.ID
 		prev = current.AllowedActions
 		prevExpiry = current.ValidUntil
-		for _, cap := range policyCaps(current) {
-			if cap.Token != nil {
-				prevCaps[*cap.Token] = cap.Amount
+		if remainder != nil {
+			for token, amt := range remainder.ERC20 {
+				if amt == nil {
+					prevCaps[token] = "0"
+					continue
+				}
+				prevCaps[token] = amt.String()
+			}
+		} else {
+			for _, cap := range policyCaps(current) {
+				if cap.Token != nil {
+					prevCaps[*cap.Token] = cap.Amount
+				}
 			}
 		}
 	}

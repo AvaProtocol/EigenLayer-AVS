@@ -1247,11 +1247,12 @@ type PreparePolicyRequest struct {
 	ChainId ChainId `json:"chainId"`
 
 	// DropTaskIds Enabled tasks this prepare may leave out of the merged grant.
-	// Honored only when `add` is set. Send the same ids on submit or
-	// submit returns 409. An enabled task whose target cannot be read
-	// is `409 SESSION_POLICY_TARGET_UNRESOLVED` until it is paused or
-	// named here. Naming it does not copy the current grant's rows
-	// into the new cap.
+	// Honored only when `add` is set. Echo the same ids on submit.
+	// When the runner has a usable grant, a task whose target cannot
+	// be read does not fail prepare and does not add that target.
+	// When there is no usable grant, that task is
+	// `409 SESSION_POLICY_TARGET_UNRESOLVED` until it is paused or
+	// named here.
 	DropTaskIds *[]string `json:"dropTaskIds,omitempty"`
 
 	// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
@@ -1685,6 +1686,11 @@ type SessionPolicyCapChange struct {
 	// PreviousAmount Previous grant's total. Omitted when the token is new.
 	PreviousAmount *string `json:"previousAmount,omitempty"`
 
+	// Removed True when this token's cap was dropped. `amount` is then "0",
+	// and `previousAmount` is what remained. Omitted when the cap is
+	// still on the grant.
+	Removed *bool `json:"removed,omitempty"`
+
 	// Token Lowercase or checksummed hex EOA / contract address.
 	Token EthereumAddress `json:"token"`
 }
@@ -1824,12 +1830,17 @@ type SubmitPolicyRequest struct {
 	ChainId  ChainId `json:"chainId"`
 	Deadline int64   `json:"deadline"`
 
-	// DropTaskIds Enabled tasks this grant may leave uncovered. Any other enabled
-	// task on this runner whose fund-moving steps are outside the grant
-	// is refused with 409 SESSION_POLICY_NOT_COVERING. A task whose
-	// target cannot be read is 409 SESSION_POLICY_TARGET_UNRESOLVED
-	// unless it is named here. Naming it does not copy the current
-	// grant's rows into the new cap.
+	// DropTaskIds Enabled tasks this grant may leave uncovered. Echo prepare's
+	// `affectedTaskIds`. Naming a task does not fail submit.
+	// When a grant was carried, submit refuses with
+	// `409 SESSION_POLICY_NOT_COVERING` only when the new grant
+	// covers less of an enabled task than the current grant did.
+	// A task the current grant already does not cover does not
+	// freeze the wallet. When there is no current grant, every
+	// other enabled task whose fund-moving steps are outside the
+	// grant is `409 SESSION_POLICY_NOT_COVERING`, and a task whose
+	// target cannot be read is `409 SESSION_POLICY_TARGET_UNRESOLVED`
+	// unless it is named here.
 	DropTaskIds *[]string `json:"dropTaskIds,omitempty"`
 	EntityId    int64     `json:"entityId"`
 
