@@ -303,7 +303,8 @@ func spendAmountsEqual(a, b string) bool {
 	return errX == nil && errY == nil && x.Cmp(y) == 0
 }
 
-// parseCapAmount accepts OpenAPI ^[0-9]+$ only — no surrounding whitespace.
+// parseCapAmount accepts OpenAPI ^[0-9]+$ only — no surrounding whitespace —
+// and rejects a value the uint256 hooks cannot store.
 func parseCapAmount(s string) (*big.Int, error) {
 	if s == "" {
 		return nil, fmt.Errorf("spend cap amount %q is not a positive decimal integer", s)
@@ -316,6 +317,9 @@ func parseCapAmount(s string) (*big.Int, error) {
 	n, ok := new(big.Int).SetString(s, 10)
 	if !ok || n.Sign() <= 0 {
 		return nil, fmt.Errorf("spend cap amount %q is not a positive decimal integer", s)
+	}
+	if n.Cmp(maxUint256) > 0 {
+		return nil, fmt.Errorf("spend cap amount %q exceeds uint256", s)
 	}
 	return n, nil
 }

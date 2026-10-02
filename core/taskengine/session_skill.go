@@ -1,7 +1,10 @@
 package taskengine
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -13,7 +16,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -120,6 +125,10 @@ type WorkflowNeed struct {
 	ValidUntilMs     int64
 	HasFundMove      bool
 	CapNeedsInput    bool
+	// Unresolved is a fund move whose target or recipient could not be
+	// read. A merge must not drop that automation, and a grant must not
+	// be treated as covering it.
+	Unresolved bool
 	// NativeUnsized is set when a native amount could not be computed.
 	// An observed simulate total can clear it; a merge cannot.
 	NativeUnsized bool
@@ -208,8 +217,11 @@ func SimulateAuthFrom(ctx context.Context) *SimulateAuth {
 // Token totals decoded from calldata here are the advisory verdict only.
 // fillObserved copies an observed transfer or approve onto that verdict
 // so a cap is not returned without the call that spent it.
-// MergeSkillGrant sizes a grant the owner signs from the workflow
-// definition, and does not read this report.
+// Studio sends that required object back as the grant addition, so when
+// the static walk cannot size a new Skill these observed totals are what
+// the owner signs. They have to fit in uint256, the same as a static cap.
+// MergeSkillGrant does not read this report; it sizes enabled tasks from
+// the stored workflow.
 type SessionGrantReport struct {
 	mu               sync.Mutex
 	Policy           *model.SessionPolicy
@@ -362,15 +374,37 @@ func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched Ski
 		}
 		need := ensure(chain)
 		need.HasFundMove = true
-		if !site.targetOK || !site.selectorOK {
-			if site.kind == fundEth && site.recipientOK {
-				addRecipient(need, site.recipient)
-			}
-			if site.amountUnknown || site.loopUnknown || (site.kind != fundCall && !runsKnown) {
-				need.CapNeedsInput = true
-				if site.kind == fundEth || site.kind == fundValue {
-					need.NativeUnsized = true
+		// ETH send and payable value have no contract target. Size them
+		// before the unresolved-call return, which would drop the cap.
+		if site.kind == fundEth || site.kind == fundValue {
+			if site.kind == fundEth {
+				if site.recipientOK {
+					addRecipient(need, site.recipient)
+				} else {
+					need.Unresolved = true
 				}
+			}
+			if site.amountUnknown || site.loopUnknown || !runsKnown {
+				need.CapNeedsInput = true
+				need.NativeUnsized = true
+				return
+			}
+			if site.amountOK {
+				total, ok := scaleSpend(site.amount, runs, site.loopMult)
+				if !ok || !addNative(need, total) {
+					need.CapNeedsInput = true
+					need.NativeUnsized = true
+					need.NativeSpendCap = nil
+				}
+			}
+			return
+		}
+		if !site.targetOK || !site.selectorOK {
+			// A template the walk cannot read still moves funds. Leaving
+			// it off the need would let a new grant drop it.
+			need.Unresolved = true
+			if site.amountUnknown || site.loopUnknown || !runsKnown {
+				need.CapNeedsInput = true
 			}
 			return
 		}
@@ -379,24 +413,11 @@ func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched Ski
 		if spendLimited && (site.amountUnknown || site.loopUnknown || !runsKnown) {
 			need.CapNeedsInput = true
 		} else if spendLimited && site.amountOK && runsKnown {
-			total := new(big.Int).Mul(site.amount, big.NewInt(runs))
-			if site.loopMult > 1 {
-				total.Mul(total, big.NewInt(int64(site.loopMult)))
+			total, ok := scaleSpend(site.amount, runs, site.loopMult)
+			if !ok || !addCap(need, site.target, total) {
+				need.CapNeedsInput = true
+				removeCap(need, site.target)
 			}
-			addCap(need, site.target, total)
-		}
-		if site.kind == fundEth && site.recipientOK {
-			addRecipient(need, site.recipient)
-		}
-		if (site.kind == fundEth || site.kind == fundValue) && (site.amountUnknown || site.loopUnknown || !runsKnown) {
-			need.CapNeedsInput = true
-			need.NativeUnsized = true
-		} else if (site.kind == fundEth || site.kind == fundValue) && site.amountOK && runsKnown {
-			total := new(big.Int).Mul(site.amount, big.NewInt(runs))
-			if site.loopMult > 1 {
-				total.Mul(total, big.NewInt(int64(site.loopMult)))
-			}
-			addNative(need, total)
 		}
 	})
 	for _, need := range needs {
@@ -445,6 +466,9 @@ func MergeSkillGrant(current *model.SessionPolicy, addition PolicyAddition, task
 			caps[*cap.Token] = big.NewInt(0)
 		}
 		caps[*cap.Token].Add(caps[*cap.Token], amt)
+		if caps[*cap.Token].Cmp(maxUint256) > 0 {
+			return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: new automation cap %s exceeds uint256", ErrSessionPolicyUnsized, cap.Token.Hex())
+		}
 	}
 	recipients = append(recipients, addition.NativeRecipients...)
 	if addition.NativeSpendCap != nil {
@@ -453,6 +477,9 @@ func MergeSkillGrant(current *model.SessionPolicy, addition PolicyAddition, task
 			return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: new automation native cap: %v", ErrSessionPolicyUnsized, err)
 		}
 		native.Add(native, amt)
+		if native.Cmp(maxUint256) > 0 {
+			return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: new automation native cap exceeds uint256", ErrSessionPolicyUnsized)
+		}
 		nativeSet = true
 	}
 
@@ -464,6 +491,9 @@ func MergeSkillGrant(current *model.SessionPolicy, addition PolicyAddition, task
 		need := derived[chainID]
 		if need == nil || !need.HasFundMove {
 			continue
+		}
+		if need.Unresolved {
+			return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: task %s (%s) has a fund-moving target that could not be resolved", ErrSessionPolicyUnsized, task.GetId(), displayName(task.GetName()))
 		}
 		if need.CapNeedsInput {
 			return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: task %s (%s)", ErrSessionPolicyUnsized, task.GetId(), displayName(task.GetName()))
@@ -482,6 +512,9 @@ func MergeSkillGrant(current *model.SessionPolicy, addition PolicyAddition, task
 				caps[*cap.Token] = big.NewInt(0)
 			}
 			caps[*cap.Token].Add(caps[*cap.Token], amt)
+			if caps[*cap.Token].Cmp(maxUint256) > 0 {
+				return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: task %s cap exceeds uint256", ErrSessionPolicyUnsized, task.GetId())
+			}
 		}
 		recipients = append(recipients, need.NativeRecipients...)
 		if need.NativeSpendCap != nil {
@@ -490,6 +523,9 @@ func MergeSkillGrant(current *model.SessionPolicy, addition PolicyAddition, task
 				return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: task %s native: %v", ErrSessionPolicyUnsized, task.GetId(), err)
 			}
 			native.Add(native, amt)
+			if native.Cmp(maxUint256) > 0 {
+				return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: task %s native cap exceeds uint256", ErrSessionPolicyUnsized, task.GetId())
+			}
 			nativeSet = true
 		}
 	}
@@ -541,10 +577,19 @@ func MergeSkillGrant(current *model.SessionPolicy, addition PolicyAddition, task
 		horizon = now.Add(expiresIn).UnixMilli()
 	}
 	latest := horizon
+	unknownEnd := false
 	for _, need := range taskNeeds {
 		if need.ValidUntilMs > latest {
 			latest = need.ValidUntilMs
 		}
+		if need.ValidUntilMs == 0 {
+			// An enabled automation with no computable end must not let a
+			// new skill pull the wallet's single expiry earlier.
+			unknownEnd = true
+		}
+	}
+	if unknownEnd && current != nil && current.ValidUntil > latest {
+		latest = current.ValidUntil
 	}
 	floor := now.Add(60 * time.Second).UnixMilli()
 	if latest < floor {
@@ -556,10 +601,10 @@ func MergeSkillGrant(current *model.SessionPolicy, addition PolicyAddition, task
 	return perms, changes, nil
 }
 
-// CoverageRefusal reports a concrete gap. A notification-only need, and a
-// need whose targets could not be resolved, return nil. An unsized amount
-// does not refuse when the actions are covered. No grant plus any fund
-// move refuses.
+// CoverageRefusal reports a concrete gap. A notification-only need returns
+// nil. A fund move whose target could not be resolved refuses, so a new
+// grant cannot drop that automation. An unsized amount does not refuse
+// when the actions are covered. No grant plus any fund move refuses.
 func CoverageRefusal(policy *model.SessionPolicy, need *WorkflowNeed) *PolicyConflictError {
 	if need == nil || !need.HasFundMove {
 		return nil
@@ -569,6 +614,16 @@ func CoverageRefusal(policy *model.SessionPolicy, need *WorkflowNeed) *PolicyCon
 			Sentinel:        ErrSessionPolicyNotCovering,
 			Code:            SessionPolicyNotCoveringCode,
 			Detail:          fmt.Sprintf("%s moves funds and the runner has no usable grant", displayName(need.Name)),
+			AffectedTaskIDs: nonEmptyID(need.TaskID),
+			Required:        need,
+		}
+	}
+	if need.Unresolved {
+		return &PolicyConflictError{
+			Sentinel:        ErrSessionPolicyNotCovering,
+			Code:            SessionPolicyNotCoveringCode,
+			Detail:          fmt.Sprintf("%s moves funds to a target the grant cannot resolve", displayName(need.Name)),
+			PolicyID:        policy.ID,
 			AffectedTaskIDs: nonEmptyID(need.TaskID),
 			Required:        need,
 		}
@@ -662,6 +717,11 @@ func BuildAuthorization(policy *model.SessionPolicy, need *WorkflowNeed, report 
 		out.Status = AuthNotCovered
 		out.Missing = missing
 		out.Detail = "a planned call is outside the usable grant"
+		return out
+	}
+	if filled.Unresolved {
+		out.Status = AuthCapNeedsInput
+		out.Detail = "a fund-moving target could not be resolved"
 		return out
 	}
 	if filled.CapNeedsInput {
@@ -944,6 +1004,11 @@ func collectContractWrite(cw *avsproto.ContractWriteNode, settings map[string]an
 			target, targetOK = resolveAddress(override, settings)
 		}
 		sel, selOK, amt, amtOK, amtUnknown := decodeCall(mc.GetCallData(), mc.GetMethodName(), mc.GetMethodParams(), settings)
+		if !selOK {
+			if got, ok := selectorFromABI(cfg.GetContractAbi(), mc.GetMethodName()); ok {
+				sel, selOK = got, true
+			}
+		}
 		visit(fundSite{
 			chain: cfg.GetChainId(), kind: fundCall,
 			target: target, targetOK: targetOK,
@@ -1185,9 +1250,9 @@ func addAction(need *WorkflowNeed, target common.Address, selector string) {
 	need.Actions = append(need.Actions, model.AllowedAction{Target: &t, Selectors: []string{selector}})
 }
 
-func addCap(need *WorkflowNeed, token common.Address, amt *big.Int) {
-	if amt == nil || amt.Sign() <= 0 {
-		return
+func addCap(need *WorkflowNeed, token common.Address, amt *big.Int) bool {
+	if amt == nil || amt.Sign() <= 0 || amt.Cmp(maxUint256) > 0 {
+		return false
 	}
 	for i, cap := range need.Caps {
 		if cap.Token != nil && *cap.Token == token {
@@ -1196,28 +1261,97 @@ func addCap(need *WorkflowNeed, token common.Address, amt *big.Int) {
 				cur = big.NewInt(0)
 			}
 			cur.Add(cur, amt)
+			if cur.Cmp(maxUint256) > 0 {
+				return false
+			}
 			need.Caps[i].Amount = cur.String()
-			return
+			return true
 		}
 	}
 	t := token
 	need.Caps = append(need.Caps, model.ERC20SpendCap{Token: &t, Amount: amt.String()})
+	return true
 }
 
-func addNative(need *WorkflowNeed, amt *big.Int) {
-	if amt == nil || amt.Sign() <= 0 {
-		return
+func removeCap(need *WorkflowNeed, token common.Address) {
+	out := need.Caps[:0]
+	for _, cap := range need.Caps {
+		if cap.Token != nil && *cap.Token == token {
+			continue
+		}
+		out = append(out, cap)
+	}
+	need.Caps = out
+}
+
+func addNative(need *WorkflowNeed, amt *big.Int) bool {
+	if amt == nil || amt.Sign() <= 0 || amt.Cmp(maxUint256) > 0 {
+		return false
 	}
 	if need.NativeSpendCap == nil {
 		need.NativeSpendCap = &model.NativeSpendCap{Amount: amt.String()}
-		return
+		return true
 	}
 	cur, err := parseCapAmount(need.NativeSpendCap.Amount)
 	if err != nil {
 		cur = big.NewInt(0)
 	}
 	cur.Add(cur, amt)
+	if cur.Cmp(maxUint256) > 0 {
+		return false
+	}
 	need.NativeSpendCap.Amount = cur.String()
+	return true
+}
+
+// scaleSpend is per-run amount times the runs still left. A product the
+// hooks cannot store is unsized: packing it would wrap, and the summary
+// would not be what the chain enforces.
+func scaleSpend(perRun *big.Int, runs int64, loopMult int) (*big.Int, bool) {
+	if perRun == nil || perRun.Sign() <= 0 || runs <= 0 || perRun.Cmp(maxUint256) > 0 {
+		return nil, false
+	}
+	total := new(big.Int).Mul(perRun, big.NewInt(runs))
+	if loopMult > 1 {
+		total.Mul(total, big.NewInt(int64(loopMult)))
+	}
+	if total.Cmp(maxUint256) > 0 {
+		return nil, false
+	}
+	return total, true
+}
+
+// selectorFromABI reads the 4-byte selector of method from the node's ABI.
+// A swap named exactInputSingle has no calldata; without this it never
+// becomes an allowed action.
+func selectorFromABI(items []*structpb.Value, method string) (string, bool) {
+	method = strings.TrimSpace(method)
+	if method == "" || len(items) == 0 {
+		return "", false
+	}
+	rawItems := make([]any, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		rawItems = append(rawItems, item.AsInterface())
+	}
+	if len(rawItems) == 0 {
+		return "", false
+	}
+	encoded, err := json.Marshal(rawItems)
+	if err != nil {
+		return "", false
+	}
+	parsed, err := abi.JSON(bytes.NewReader(encoded))
+	if err != nil {
+		return "", false
+	}
+	m, ok := parsed.Methods[method]
+	if !ok || len(m.ID) < 4 {
+		return "", false
+	}
+	return "0x" + hex.EncodeToString(m.ID[:4]), true
 }
 
 func addRecipient(need *WorkflowNeed, addr common.Address) {
@@ -1600,13 +1734,20 @@ func fillObserved(need *WorkflowNeed, saw bool, planned []PlannedCall, tokenSpen
 		if capAmount(&filled, token) != nil {
 			continue
 		}
-		total := new(big.Int).Mul(perRun, big.NewInt(runs))
-		addCap(&filled, token, total)
+		total, ok := scaleSpend(perRun, runs, 1)
+		if !ok || !addCap(&filled, token, total) {
+			filled.CapNeedsInput = true
+			continue
+		}
 	}
 	if filled.NativeSpendCap == nil && nativeSpend != nil && nativeSpend.Sign() > 0 {
-		total := new(big.Int).Mul(nativeSpend, big.NewInt(runs))
-		addNative(&filled, total)
-		filled.NativeUnsized = false
+		total, ok := scaleSpend(nativeSpend, runs, 1)
+		if !ok || !addNative(&filled, total) {
+			filled.CapNeedsInput = true
+			filled.NativeUnsized = true
+		} else {
+			filled.NativeUnsized = false
+		}
 	}
 	if !filled.CapNeedsInput {
 		return &filled
@@ -1978,9 +2119,13 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 	}
 
 	// Shards are shared. Two chains can hash to one mutex, and locking
-	// that mutex twice on this goroutine deadlocks. Acquire each shard
-	// once, in ascending chain order, so overlapping creates agree.
-	seen := map[*sync.RWMutex]struct{}{}
+	// that mutex twice on this goroutine deadlocks. Distinct shards are
+	// taken in shard-index order so two multi-chain creates cannot cross.
+	chainIDs := make([]int64, len(mav2))
+	for i, item := range mav2 {
+		chainIDs[i] = item.chain
+	}
+	locks := orderedSessionLocks(chainIDs, user.Address, runner)
 	var held []*sync.RWMutex
 	released := false
 	unlock := func() {
@@ -1993,12 +2138,7 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 		}
 		held = nil
 	}
-	for _, item := range mav2 {
-		mu := sessionAuthorityLock(item.chain, user.Address, runner)
-		if _, ok := seen[mu]; ok {
-			continue
-		}
-		seen[mu] = struct{}{}
+	for _, mu := range locks {
 		mu.Lock()
 		held = append(held, mu)
 	}

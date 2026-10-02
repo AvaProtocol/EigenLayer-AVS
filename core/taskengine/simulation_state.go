@@ -440,6 +440,8 @@ func (s *SimulationStateMap) InjectETHBalanceChange(
 }
 
 // maxUint256 is 2^256 - 1, the largest value an EVM storage word can hold.
+// Session-grant caps use the same bound: a larger decimal wraps when the
+// allowlist and native-limit hooks pack it.
 var maxUint256 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
 
 // parseUint256 parses a balance/allowance override value supplied as either a

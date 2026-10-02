@@ -249,8 +249,11 @@ func TestCoverageRefusal(t *testing.T) {
 	unresolved := skillWriteTask("tmpl", "Template", "{{settings.token}}", data, skillSepolia, 1, 0, 0)
 	unresolvedNeed := DeriveWorkflowNeeds(unresolved, nil, scheduleFromTask(unresolved, now), skillSepolia)[skillSepolia]
 	grant := usableGrant("01GRANT000000000000000000", later, []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)}, []model.ERC20SpendCap{skillCap(skillUSDC, "100")})
-	if got := CoverageRefusal(grant, unresolvedNeed); got != nil {
-		t.Fatalf("unresolved target with a grant must not refuse, got %#v", got)
+	if unresolvedNeed == nil || !unresolvedNeed.Unresolved {
+		t.Fatalf("template target must be unresolved, got %#v", unresolvedNeed)
+	}
+	if got := CoverageRefusal(grant, unresolvedNeed); got == nil || got.Code != SessionPolicyNotCoveringCode {
+		t.Fatalf("unresolved target with a grant must refuse, got %#v", got)
 	}
 	if got := CoverageRefusal(nil, unresolvedNeed); got == nil {
 		t.Fatal("no grant must refuse even when the target is a template")
@@ -297,6 +300,412 @@ func TestDeriveValueZeroIsNotUnsized(t *testing.T) {
 	if maxed == nil || !maxed.CapNeedsInput || !maxed.NativeUnsized {
 		t.Fatalf("value max must be unsized native, got %#v", maxed)
 	}
+}
+
+const (
+	skillRouter              = "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E"
+	selectorExactInputSingle = "0x04e45aaf"
+)
+
+func exactInputSingleABI(t *testing.T) []*structpb.Value {
+	t.Helper()
+	entry, err := structpb.NewValue(map[string]any{
+		"inputs": []any{
+			map[string]any{
+				"name": "params",
+				"type": "tuple",
+				"components": []any{
+					map[string]any{"name": "tokenIn", "type": "address"},
+					map[string]any{"name": "tokenOut", "type": "address"},
+					map[string]any{"name": "fee", "type": "uint24"},
+					map[string]any{"name": "recipient", "type": "address"},
+					map[string]any{"name": "amountIn", "type": "uint256"},
+					map[string]any{"name": "amountOutMinimum", "type": "uint256"},
+					map[string]any{"name": "sqrtPriceLimitX96", "type": "uint160"},
+				},
+			},
+		},
+		"name":            "exactInputSingle",
+		"outputs":         []any{map[string]any{"name": "amountOut", "type": "uint256"}},
+		"stateMutability": "payable",
+		"type":            "function",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []*structpb.Value{entry}
+}
+
+// swapSkillTask is an approve of 1 USDC plus exactInputSingle named in the
+// ABI, with no router calldata. That is the Studio swap shape.
+func swapSkillTask(t *testing.T, maxExec int64) *avsproto.Task {
+	t.Helper()
+	usdc := skillUSDC
+	return &avsproto.Task{
+		Id:           "swap",
+		Name:         "Recurring swap",
+		MaxExecution: maxExec,
+		Nodes: []*avsproto.TaskNode{{
+			TaskType: &avsproto.TaskNode_ContractWrite{
+				ContractWrite: &avsproto.ContractWriteNode{
+					Config: &avsproto.ContractWriteNode_Config{
+						ChainId:         skillSepolia,
+						ContractAddress: skillRouter,
+						ContractAbi:     exactInputSingleABI(t),
+						MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
+							{
+								ContractAddress: &usdc,
+								MethodName:      "approve",
+								MethodParams:    []string{skillRouter, "1"},
+							},
+							{MethodName: "exactInputSingle"},
+						},
+					},
+				},
+			},
+		}},
+	}
+}
+
+func actionHasSelector(actions []model.AllowedAction, token, selector string) bool {
+	want := common.HexToAddress(token)
+	selector = normalizeSelector(selector)
+	for _, action := range actions {
+		if action.Target == nil || *action.Target != want {
+			continue
+		}
+		for _, sel := range action.Selectors {
+			if normalizeSelector(sel) == selector {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestSwapMethodNameResolvesRouterSelector(t *testing.T) {
+	now := skillNow()
+	task := swapSkillTask(t, 12)
+	need := DeriveWorkflowNeeds(task, nil, scheduleFromTask(task, now), skillSepolia)[skillSepolia]
+	if need == nil || need.CapNeedsInput || need.Unresolved {
+		t.Fatalf("swap need = %#v", need)
+	}
+	if !actionHasSelector(need.Actions, skillUSDC, selectorApprove) {
+		t.Fatalf("missing USDC approve: %+v", need.Actions)
+	}
+	if !actionHasSelector(need.Actions, skillRouter, selectorExactInputSingle) {
+		t.Fatalf("missing router exactInputSingle: %+v", need.Actions)
+	}
+	router := common.HexToAddress(skillRouter)
+	for _, cap := range need.Caps {
+		if cap.Token != nil && *cap.Token == router {
+			t.Fatalf("router must not be an ERC-20 spend cap: %+v", need.Caps)
+		}
+	}
+	if len(need.Caps) != 1 || need.Caps[0].Amount != "12" {
+		t.Fatalf("approve cap = %+v, want 1 x 12", need.Caps)
+	}
+
+	later := now.Add(30 * 24 * time.Hour).UnixMilli()
+	approveOnly := usableGrant("01APPROVE000000000000000", later,
+		[]model.AllowedAction{skillAction(skillUSDC, selectorApprove)},
+		[]model.ERC20SpendCap{skillCap(skillUSDC, "12")})
+	if got := CoverageRefusal(approveOnly, need); got == nil || got.Code != SessionPolicyNotCoveringCode {
+		t.Fatalf("a grant without the router must refuse the swap, got %#v", got)
+	}
+	covered := usableGrant("01SWAP000000000000000000", later,
+		[]model.AllowedAction{
+			skillAction(skillUSDC, selectorApprove),
+			skillAction(skillRouter, selectorExactInputSingle),
+		},
+		[]model.ERC20SpendCap{skillCap(skillUSDC, "12")})
+	if got := CoverageRefusal(covered, need); got != nil {
+		t.Fatalf("router plus approve must cover the swap, got %#v", got)
+	}
+
+	// A new skill replaces the grant. The running swap's router has to
+	// stay, because the replacement is sized from what enabled tasks need.
+	perms, changes, err := MergeSkillGrant(covered, PolicyAddition{
+		AllowedActions: []model.AllowedAction{skillAction(skillWETH, selectorTransfer)},
+		SpendCaps:      []model.ERC20SpendCap{skillCap(skillWETH, "1")},
+		ValidUntilMs:   later,
+	}, []*avsproto.Task{task}, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !actionHasSelector(perms.AllowedActions, skillRouter, selectorExactInputSingle) {
+		t.Fatalf("merge dropped the router: %+v", perms.AllowedActions)
+	}
+	if !actionHasSelector(perms.AllowedActions, skillUSDC, selectorApprove) {
+		t.Fatalf("merge dropped the approve: %+v", perms.AllowedActions)
+	}
+	for _, line := range changes.Summary {
+		if strings.Contains(line, "Removed") && strings.Contains(strings.ToLower(line), "04e45aaf") {
+			t.Fatalf("summary removed the running swap: %q", line)
+		}
+	}
+}
+
+func TestEthSendCapIsRemainingTimesRuns(t *testing.T) {
+	now := skillNow()
+	dest := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	task := &avsproto.Task{
+		Id:           "eth",
+		Name:         "Send ETH",
+		MaxExecution: 12,
+		Nodes: []*avsproto.TaskNode{{
+			TaskType: &avsproto.TaskNode_EthTransfer{
+				EthTransfer: &avsproto.ETHTransferNode{
+					Config: &avsproto.ETHTransferNode_Config{
+						Destination: dest.Hex(),
+						Amount:      "1000000000000000",
+						ChainId:     skillSepolia,
+					},
+				},
+			},
+		}},
+	}
+	need := DeriveWorkflowNeeds(task, nil, scheduleFromTask(task, now), skillSepolia)[skillSepolia]
+	if need == nil || need.CapNeedsInput || need.Unresolved || need.NativeSpendCap == nil {
+		t.Fatalf("eth need = %#v", need)
+	}
+	if need.NativeSpendCap.Amount != "12000000000000000" {
+		t.Fatalf("native cap = %s, want 1e15 x 12", need.NativeSpendCap.Amount)
+	}
+	if len(need.NativeRecipients) != 1 || *need.NativeRecipients[0] != dest {
+		t.Fatalf("recipients = %+v", need.NativeRecipients)
+	}
+
+	perms, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{task}, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != "12000000000000000" {
+		t.Fatalf("task alone must supply the native total, got %+v", perms.NativeSpendCap)
+	}
+
+	withAdd, _, err := MergeSkillGrant(nil, PolicyAddition{
+		NativeRecipients: []*common.Address{&dest},
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "5"},
+	}, []*avsproto.Task{task}, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withAdd.NativeSpendCap == nil || withAdd.NativeSpendCap.Amount != "12000000000000005" {
+		t.Fatalf("merged native = %+v", withAdd.NativeSpendCap)
+	}
+
+	later := now.Add(30 * 24 * time.Hour).UnixMilli()
+	short := usableGrant("01ETH0000000000000000000", later, nil, nil)
+	short.NativeRecipients = []*common.Address{&dest}
+	short.NativeSpendCap = &model.NativeSpendCap{Amount: "5"}
+	if got := CoverageRefusal(short, need); got == nil || !strings.Contains(got.Detail, "native cap") {
+		t.Fatalf("native shortfall = %#v", got)
+	}
+	full := usableGrant(short.ID, later, nil, nil)
+	full.NativeRecipients = []*common.Address{&dest}
+	full.NativeSpendCap = &model.NativeSpendCap{Amount: "12000000000000000"}
+	if got := CoverageRefusal(full, need); got != nil {
+		t.Fatalf("full native cap must cover the send, got %#v", got)
+	}
+}
+
+func TestSpendCapRejectsAboveUint256(t *testing.T) {
+	got, err := parseCapAmount(maxUint256.String())
+	if err != nil || got.Cmp(maxUint256) != 0 {
+		t.Fatalf("MaxUint256 must be a legal cap, got %v %v", got, err)
+	}
+	over := new(big.Int).Add(maxUint256, big.NewInt(5))
+	if _, err := parseCapAmount(over.String()); err == nil || !strings.Contains(err.Error(), "uint256") {
+		t.Fatalf("MaxUint256+5 must be rejected, got %v", err)
+	}
+
+	now := skillNow()
+	router := common.HexToAddress(skillRouter)
+	approveMax := func(runs int64) *avsproto.Task {
+		return &avsproto.Task{
+			Id:           "approve-max",
+			Name:         "Approve",
+			MaxExecution: runs,
+			Nodes: []*avsproto.TaskNode{{
+				TaskType: &avsproto.TaskNode_ContractWrite{
+					ContractWrite: &avsproto.ContractWriteNode{
+						Config: &avsproto.ContractWriteNode_Config{
+							ContractAddress: skillUSDC,
+							ChainId:         skillSepolia,
+							MethodCalls: []*avsproto.ContractWriteNode_MethodCall{{
+								MethodName:   "approve",
+								MethodParams: []string{router.Hex(), maxUint256.String()},
+							}},
+						},
+					},
+				},
+			}},
+		}
+	}
+	twelve := DeriveWorkflowNeeds(approveMax(12), nil, scheduleFromTask(approveMax(12), now), skillSepolia)[skillSepolia]
+	if twelve == nil || !twelve.CapNeedsInput || len(twelve.Caps) != 0 || len(twelve.Actions) != 1 {
+		t.Fatalf("MaxUint256 x 12 must be unsized and keep the action, got %#v", twelve)
+	}
+	once := DeriveWorkflowNeeds(approveMax(1), nil, scheduleFromTask(approveMax(1), now), skillSepolia)[skillSepolia]
+	if once == nil || once.CapNeedsInput || len(once.Caps) != 1 || once.Caps[0].Amount != maxUint256.String() {
+		t.Fatalf("MaxUint256 x 1 must fit, got %#v", once)
+	}
+
+	unit := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(router, big.NewInt(1)), skillSepolia, 1, 0, 0)
+	if _, _, err := MergeSkillGrant(nil, PolicyAddition{
+		AllowedActions: []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)},
+		SpendCaps:      []model.ERC20SpendCap{skillCap(skillUSDC, maxUint256.String())},
+	}, []*avsproto.Task{unit}, skillSepolia, now, time.Hour); !errors.Is(err, ErrSessionPolicyUnsized) || !strings.Contains(err.Error(), "uint256") {
+		t.Fatalf("MaxUint256 plus a running transfer must fail closed, got %v", err)
+	}
+	if _, _, err := MergeSkillGrant(nil, PolicyAddition{
+		AllowedActions: []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)},
+		SpendCaps:      []model.ERC20SpendCap{skillCap(skillUSDC, over.String())},
+	}, nil, skillSepolia, now, time.Hour); !errors.Is(err, ErrSessionPolicyUnsized) || !strings.Contains(err.Error(), "uint256") {
+		t.Fatalf("a client cap above uint256 must fail closed, got %v", err)
+	}
+
+	report := &SessionGrantReport{}
+	report.noteNoGrant()
+	report.observeCalls([]PlannedCall{{
+		Target:   common.HexToAddress(skillUSDC),
+		Calldata: common.FromHex(transferCalldata(router, maxUint256)),
+	}})
+	auth := BuildAuthorization(nil, &WorkflowNeed{HasFundMove: true, Name: "Approve"}, report, SkillSchedule{MaxExecution: 12, Now: now})
+	if auth.Status != AuthNoGrant || auth.Required == nil || !auth.Required.CapNeedsInput || len(auth.Required.Caps) != 0 {
+		t.Fatalf("observed MaxUint256 x 12 must not become a wrapped cap: %#v", auth)
+	}
+}
+
+func TestUnknownEndDoesNotShortenWalletExpiry(t *testing.T) {
+	now := skillNow()
+	oct2 := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	oct15 := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
+	nov1 := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	dec28 := time.Date(2026, 12, 28, 0, 0, 0, 0, time.UTC)
+	// exactInputSingle only. An approve with no run count is unsized and
+	// the merge would fail before the expiry floor.
+	running := swapSkillTask(t, 0)
+	running.Nodes[0].GetContractWrite().Config.MethodCalls = []*avsproto.ContractWriteNode_MethodCall{
+		{MethodName: "exactInputSingle"},
+	}
+	need := DeriveWorkflowNeeds(running, nil, scheduleFromTask(running, now), skillSepolia)[skillSepolia]
+	if need == nil || need.ValidUntilMs != 0 || !actionHasSelector(need.Actions, skillRouter, selectorExactInputSingle) {
+		t.Fatalf("unlimited swap need = %#v", need)
+	}
+
+	current := usableGrant("01SWAP000000000000000000", nov1.UnixMilli(),
+		[]model.AllowedAction{skillAction(skillRouter, selectorExactInputSingle)}, nil)
+	addition := PolicyAddition{
+		AllowedActions: []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)},
+		SpendCaps:      []model.ERC20SpendCap{skillCap(skillUSDC, "12")},
+		ValidUntilMs:   oct2.UnixMilli(),
+	}
+	perms, changes, err := MergeSkillGrant(current, addition, []*avsproto.Task{running}, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perms.ValidUntilMs != nov1.UnixMilli() {
+		t.Fatalf("wallet expiry = %d, want Nov 1 (%d)", perms.ValidUntilMs, nov1.UnixMilli())
+	}
+	for _, line := range changes.Summary {
+		if strings.Contains(line, "was Nov") || strings.Contains(line, "Oct 2") {
+			t.Fatalf("summary shortened the wallet: %q", line)
+		}
+	}
+
+	later := addition
+	later.ValidUntilMs = dec28.UnixMilli()
+	extended, _, err := MergeSkillGrant(current, later, []*avsproto.Task{running}, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if extended.ValidUntilMs != dec28.UnixMilli() {
+		t.Fatalf("a later skill must still extend, got %d", extended.ValidUntilMs)
+	}
+
+	open := usableGrant(current.ID, 0, current.AllowedActions, nil)
+	unfloored, _, err := MergeSkillGrant(open, addition, []*avsproto.Task{running}, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unfloored.ValidUntilMs != oct2.UnixMilli() {
+		t.Fatalf("a current expiry of 0 must not act as forever, got %d", unfloored.ValidUntilMs)
+	}
+
+	known := swapSkillTask(t, 1)
+	known.Nodes[0].GetContractWrite().Config.MethodCalls = []*avsproto.ContractWriteNode_MethodCall{
+		{MethodName: "exactInputSingle"},
+	}
+	known.ExpiredAt = oct15.UnixMilli()
+	shortened, _, err := MergeSkillGrant(current, addition, []*avsproto.Task{known}, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shortened.ValidUntilMs != oct15.UnixMilli() {
+		t.Fatalf("a known earlier end stays the latest end the tasks need, got %d", shortened.ValidUntilMs)
+	}
+}
+
+func TestOrderedSessionLocksSortByShardIndex(t *testing.T) {
+	owner := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	const base = int64(8453)
+	type shardPair struct{ base, sep uint32 }
+	seen := map[shardPair]common.Address{}
+	var runnerA, runnerB common.Address
+	found := false
+	for i := 1; i <= 20000 && !found; i++ {
+		runner := common.BigToAddress(big.NewInt(int64(i)))
+		b := sessionAuthorityShard(base, owner, runner)
+		s := sessionAuthorityShard(skillSepolia, owner, runner)
+		if b == s {
+			continue
+		}
+		if other, ok := seen[shardPair{base: s, sep: b}]; ok {
+			runnerA, runnerB = other, runner
+			found = true
+			break
+		}
+		seen[shardPair{base: b, sep: s}] = runner
+	}
+	if !found {
+		t.Fatal("expected two runners whose Base/Sepolia shards are the same pair in opposite chain order")
+	}
+	aChainBase := sessionAuthorityShard(base, owner, runnerA)
+	aChainSep := sessionAuthorityShard(skillSepolia, owner, runnerA)
+	bChainBase := sessionAuthorityShard(base, owner, runnerB)
+	bChainSep := sessionAuthorityShard(skillSepolia, owner, runnerB)
+	if aChainBase != bChainSep || aChainSep != bChainBase {
+		t.Fatalf("pair did not cross: A %d/%d B %d/%d", aChainBase, aChainSep, bChainBase, bChainSep)
+	}
+	// Pass chains in chain-id order. That order deadlocks these two
+	// runners; shard order must lock the shared mutexes the same way.
+	aLocks := orderedSessionLocks([]int64{base, skillSepolia}, owner, runnerA)
+	bLocks := orderedSessionLocks([]int64{base, skillSepolia}, owner, runnerB)
+	if len(aLocks) != 2 || len(bLocks) != 2 {
+		t.Fatalf("locks A %d B %d", len(aLocks), len(bLocks))
+	}
+	if aLocks[0] != bLocks[0] || aLocks[1] != bLocks[1] {
+		t.Fatalf("shared shards locked in different orders: A %d,%d B %d,%d",
+			shardIndex(aLocks[0]), shardIndex(aLocks[1]), shardIndex(bLocks[0]), shardIndex(bLocks[1]))
+	}
+	if shardIndex(aLocks[0]) > shardIndex(aLocks[1]) {
+		t.Fatalf("shard order %d then %d", shardIndex(aLocks[0]), shardIndex(aLocks[1]))
+	}
+	same := orderedSessionLocks([]int64{skillSepolia, skillSepolia}, owner, runnerA)
+	if len(same) != 1 {
+		t.Fatalf("a repeated chain must lock its shard once, got %d", len(same))
+	}
+}
+
+func shardIndex(mu *sync.RWMutex) int {
+	for i := range sessionAuthorityLocks {
+		if mu == &sessionAuthorityLocks[i] {
+			return i
+		}
+	}
+	return -1
 }
 
 // weeklyPayTask is the Weekly USDC Pay shape: a loop whose runner transfers
@@ -393,8 +802,14 @@ func TestWeeklyPayNestedSettingsDerivesTransferAndCap(t *testing.T) {
 	if got := CoverageRefusal(covered, need); got != nil {
 		t.Fatalf("a grant of the derived transfer must cover it, got %#v", got)
 	}
-	if got := CoverageRefusal(covered, loopValue); got != nil {
-		t.Fatalf("an unresolved loop value must not false-positive, got %#v", got)
+	if loopValue == nil || !loopValue.Unresolved {
+		t.Fatalf("{{value}} must stay unresolved, got %#v", loopValue)
+	}
+	if got := CoverageRefusal(covered, loopValue); got == nil {
+		t.Fatal("an unresolved loop value must not be treated as covered")
+	}
+	if _, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{weeklyPayTask(t, "{{value}}", "1000000", one)}, skillSepolia, now, time.Hour); !errors.Is(err, ErrSessionPolicyUnsized) {
+		t.Fatalf("an unresolved running task must fail the merge closed, got %v", err)
 	}
 
 	perms, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{task}, skillSepolia, now, time.Hour)
@@ -535,8 +950,15 @@ func TestBuildAuthorizationStatuses(t *testing.T) {
 	unsized := *need
 	unsized.Caps = nil
 	unsized.CapNeedsInput = true
-	if got := BuildAuthorization(open, &unsized, nil, SkillSchedule{}); got.Status != AuthCapNeedsInput {
+	if got := BuildAuthorization(open, &unsized, nil, SkillSchedule{}); got.Status != AuthCapNeedsInput || strings.Contains(got.Detail, "could not be resolved") {
 		t.Fatalf("needs input: %#v", got)
+	}
+	unresolved := &WorkflowNeed{HasFundMove: true, Unresolved: true, Name: "Template"}
+	if got := BuildAuthorization(nil, unresolved, nil, SkillSchedule{}); got.Status != AuthNoGrant {
+		t.Fatalf("no grant still wins when the target is unresolved: %#v", got)
+	}
+	if got := BuildAuthorization(open, unresolved, nil, SkillSchedule{}); got.Status != AuthCapNeedsInput || got.Detail != "a fund-moving target could not be resolved" {
+		t.Fatalf("unresolved target with a grant: %#v", got)
 	}
 }
 
