@@ -381,6 +381,15 @@ func TestUnresolvedTargetMapsToConflict(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, http.StatusBadRequest, bad.Status)
 	require.Equal(t, "POLICIES_BAD_PERMISSIONS", bad.Code)
+
+	// A native cap that cannot be sized is not the "set a spend cap" failure.
+	nativeUnsized := mapPolicyError(fmt.Errorf("%w: task eth (Send ETH): a native cap cannot be added while its payable value cannot be sized", taskengine.ErrSessionNativeCapUnsized))
+	nativeBad, ok := nativeUnsized.(*restmw.HTTPError)
+	require.True(t, ok)
+	require.Equal(t, http.StatusBadRequest, nativeBad.Status)
+	require.Equal(t, "POLICIES_REJECTED", nativeBad.Code)
+	require.Contains(t, nativeBad.Detail, "task eth")
+	require.NotContains(t, nativeBad.Detail, "POLICIES_BAD_PERMISSIONS")
 }
 
 // grantOverHTTP runs prepare → sign → submit and returns the decoded response.

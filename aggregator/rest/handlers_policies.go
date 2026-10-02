@@ -520,6 +520,10 @@ func mapPolicyError(err error) error {
 		return policyConflictHTTP(conflict)
 	case errors.Is(err, taskengine.ErrSessionPolicyUnsized):
 		return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
+	case errors.Is(err, taskengine.ErrSessionNativeCapUnsized):
+		// Not POLICIES_BAD_PERMISSIONS: that code is the unsized-cap failure
+		// Studio renders as "set a spend cap". This one names the task.
+		return badRequest("POLICIES_REJECTED", "Invalid permissions", err.Error())
 	case errors.Is(err, taskengine.ErrSessionWalletNotMAv2):
 		return badRequest("SESSION_WALLET_NOT_MA_V2", err.Error(), "")
 	case errors.Is(err, taskengine.ErrEOADelegationMissing):

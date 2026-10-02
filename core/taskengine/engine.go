@@ -317,6 +317,17 @@ type Engine struct {
 	// with a persistent TTL cache (see RunNodeImmediatelyRPCIdempotent) that also
 	// dedupes sequential retries after the first request has completed.
 	idempotencyGroup singleflight.Group
+
+	// skillPrepare remembers a skill-page addition until submit, keyed by the
+	// prepared policy id. Submit re-derives from it. Prepare still stores no
+	// grant. The map is process-local and is not a source of authority: the
+	// owner's signature is.
+	skillPrepareMu sync.Mutex
+	skillPrepare   map[string]*skillPrepareSnapshot
+
+	// spendLimitCallerOverride replaces the pooled chain reader when tests
+	// need a scripted remaining-limit read.
+	spendLimitCallerOverride func(chainID int64) (aa.ContractCaller, error)
 }
 
 // executionLockShards bounds the per-execution resume locks to a fixed set of mutexes.
