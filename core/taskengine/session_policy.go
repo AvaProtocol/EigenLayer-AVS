@@ -3,6 +3,7 @@ package taskengine
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -131,6 +132,25 @@ func sessionAuthorityLock(chainID int64, owner, runner common.Address) *sync.RWM
 // granting again.
 const SessionPolicyAmbiguousCode = "SESSION_POLICY_AMBIGUOUS"
 
+// ErrSessionPolicyAmbiguous is the sentinel for a runner with more than one
+// usable grant. The error text still starts with SessionPolicyAmbiguousCode.
+// A legacy submit (no basePolicyId) uses errors.Is to treat that state as
+// "replace every usable grant". Any other caller fails closed.
+var ErrSessionPolicyAmbiguous = errors.New("wallet has more than one usable session policy")
+
+type sessionPolicyAmbiguousError struct {
+	wallet common.Address
+	ids    [2]string
+}
+
+func (e *sessionPolicyAmbiguousError) Error() string {
+	return fmt.Sprintf(
+		"%s: wallet %s has more than one usable session policy (%s, %s); grant again to replace them, or revoke one before executing",
+		SessionPolicyAmbiguousCode, e.wallet.Hex(), e.ids[0], e.ids[1])
+}
+
+func (e *sessionPolicyAmbiguousError) Unwrap() error { return ErrSessionPolicyAmbiguous }
+
 // SessionPolicyExpiredCode marks a grant whose TimeRangeModule window has
 // closed. Client-fixable by granting again, which is the whole reason it is
 // typed: without it the account rejects the operation and the bundler reports
@@ -212,9 +232,7 @@ func activeSessionPolicyLocked(db storage.Storage, chainID int64, owner, wallet 
 			continue
 		}
 		if found != nil {
-			return nil, fmt.Errorf(
-				"%s: wallet %s has more than one usable session policy (%s, %s); grant again to replace them, or revoke one before executing",
-				SessionPolicyAmbiguousCode, wallet.Hex(), found.ID, p.ID)
+			return nil, &sessionPolicyAmbiguousError{wallet: wallet, ids: [2]string{found.ID, p.ID}}
 		}
 		found = p
 	}

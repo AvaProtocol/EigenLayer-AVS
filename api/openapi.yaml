@@ -2079,12 +2079,14 @@ components:
           type: integer
           format: int64
           minimum: 60
+          maximum: 9223372036
           description: |
             Grant lifetime, relative (skew-proof). Becomes an absolute
             validUntil. When `add` is set, this is the new automation's
             horizon if `add.validUntil` is omitted. The signed expiry can be
             later, because the wallet keeps one expiry and it must cover
-            every enabled automation.
+            every enabled automation. Values above 9223372036 overflow the
+            duration conversion and are rejected.
         basePolicyId:
           type: string
           description: |

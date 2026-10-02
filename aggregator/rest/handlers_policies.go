@@ -68,10 +68,16 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 	if err := ctx.Bind(&req); err != nil {
 		return badRequest("POLICIES_BAD_BODY", "Invalid request body", err.Error())
 	}
-	// Matches the published contract (openapi.yaml minimum: 60): a
-	// sub-minute grant expires before its first operation can mine.
+	// Matches the published contract (openapi.yaml minimum: 60, maximum:
+	// MaxSessionExpiresInSeconds). A sub-minute grant expires before its
+	// first operation can mine. A value past the maximum overflows
+	// time.Duration and would wrap into a short grant.
 	if req.ExpiresInSeconds < 60 {
 		return badRequest("POLICIES_BAD_EXPIRY", "Invalid expiry", "expiresInSeconds must be at least 60.")
+	}
+	if req.ExpiresInSeconds > taskengine.MaxSessionExpiresInSeconds {
+		return badRequest("POLICIES_BAD_EXPIRY", "Invalid expiry",
+			fmt.Sprintf("expiresInSeconds must be at most %d.", taskengine.MaxSessionExpiresInSeconds))
 	}
 	in := taskengine.SessionPolicyInput{
 		Wallet:           wallet,

@@ -42,7 +42,12 @@ const (
 	selectorApprove  = "0x095ea7b3"
 
 	// maxCronWalk bounds a schedule count. Hitting it means the run count
-	// is unknown; callers must not invent a horizon.
+	// is unknown; callers must not invent a horizon. The walk stays
+	// iterative because a short sample of cron.Next cannot prove a
+	// constant step: a weekday schedule looks regular until the weekend.
+	// Prepare and submit run it under the runner lock, so the cap is
+	// also the latency bound. A hit fails closed (unsized) rather than
+	// under-counting the spend.
 	maxCronWalk = 100_000
 )
 
@@ -195,6 +200,9 @@ func SimulateAuthFrom(ctx context.Context) *SimulateAuth {
 
 // SessionGrantReport records grant misses while a simulate VM is in report
 // mode. Production sends leave it nil, so they stay fail-closed.
+// Token totals decoded from calldata here are the advisory verdict only.
+// MergeSkillGrant sizes a grant the owner signs from the workflow
+// definition, and does not read this report.
 type SessionGrantReport struct {
 	mu               sync.Mutex
 	Policy           *model.SessionPolicy
@@ -1676,6 +1684,8 @@ func taskDropped(id string, drop []string) bool {
 	return false
 }
 
+// enabledTasksForRunner lists this owner and runner's task-index keys.
+// It does not scan the whole database.
 func (n *Engine) enabledTasksForRunner(owner, wallet common.Address) ([]*model.Workflow, error) {
 	if n == nil || n.db == nil {
 		return nil, fmt.Errorf("storage unavailable")
@@ -1813,47 +1823,109 @@ func (n *Engine) sessionPolicyDeployCheckEnabled() bool {
 
 // enforceSessionPolicyDeployCheck refuses create and resume when the flag
 // is on and the runner's grant does not cover this workflow. The flag
-// defaults off, so a nil config is a no-op.
-func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.Workflow) error {
+// defaults off, so a nil engine config is a no-op.
+//
+// Needs are derived before any lock: the cron walk reads only the task
+// being saved. On success the returned function holds sessionAuthorityLock
+// for every Modular Account v2 chain this workflow moves funds on, and the
+// caller must persist the task before releasing it. A concurrent submit on
+// one of those chains then sees the new task. The function is safe to call
+// more than once. A refusal or a storage error releases the locks before
+// returning.
+func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.Workflow) (func(), error) {
+	noop := func() {}
 	if !n.sessionPolicyDeployCheckEnabled() || task == nil || task.Task == nil {
-		return nil
+		return noop, nil
 	}
 	needs := DeriveWorkflowNeeds(task.Task, nil, scheduleFromTask(task.Task, time.Now()), n.defaultChainID())
-	var fund bool
-	for _, need := range needs {
+	chains := make([]int64, 0, len(needs))
+	for chainID, need := range needs {
 		if need != nil && need.HasFundMove {
-			fund = true
-			break
+			chains = append(chains, chainID)
 		}
 	}
-	if !fund {
-		return nil
+	if len(chains) == 0 {
+		return noop, nil
 	}
 	if !common.IsHexAddress(task.SmartWalletAddress) {
-		return fmt.Errorf("%w: workflow has no runner", ErrSessionPolicyNotCovering)
+		return noop, fmt.Errorf("%w: workflow has no runner", ErrSessionPolicyNotCovering)
+	}
+	if user == nil {
+		return noop, fmt.Errorf("%w: workflow has no owner", ErrSessionPolicyNotCovering)
 	}
 	runner := common.HexToAddress(task.SmartWalletAddress)
+	sort.Slice(chains, func(i, j int) bool { return chains[i] < chains[j] })
+
+	type checkedChain struct {
+		chain int64
+		need  *WorkflowNeed
+	}
+	var mav2 []checkedChain
+	for _, chainID := range chains {
+		cfg := n.ResolveSmartWalletConfig(chainID)
+		if cfg == nil {
+			if n.logger != nil {
+				n.logger.Warn("session policy deploy check: chain has no smart wallet config",
+					"chain_id", chainID, "task_id", task.GetId())
+			}
+			return noop, fmt.Errorf("%w: chain %d has no smart wallet config", ErrSessionPolicyNotCovering, chainID)
+		}
+		if !cfg.UsesModularAccountV2() {
+			continue
+		}
+		mav2 = append(mav2, checkedChain{chain: chainID, need: needs[chainID]})
+	}
+	if len(mav2) == 0 {
+		return noop, nil
+	}
+
+	// Shards are shared. Two chains can hash to one mutex, and locking
+	// that mutex twice on this goroutine deadlocks. Acquire each shard
+	// once, in ascending chain order, so overlapping creates agree.
+	seen := map[*sync.RWMutex]struct{}{}
+	var held []*sync.RWMutex
+	released := false
+	unlock := func() {
+		if released {
+			return
+		}
+		released = true
+		for i := len(held) - 1; i >= 0; i-- {
+			held[i].Unlock()
+		}
+		held = nil
+	}
+	for _, item := range mav2 {
+		mu := sessionAuthorityLock(item.chain, user.Address, runner)
+		if _, ok := seen[mu]; ok {
+			continue
+		}
+		seen[mu] = struct{}{}
+		mu.Lock()
+		held = append(held, mu)
+	}
+
 	var blocking []string
 	var missing []model.AllowedAction
 	var required *WorkflowNeed
 	var policyID string
-	for chainID, need := range needs {
-		if need == nil || !need.HasFundMove {
-			continue
-		}
-		cfg := n.ResolveSmartWalletConfig(chainID)
-		if cfg == nil || !cfg.UsesModularAccountV2() {
-			continue
-		}
-		policy, err := ActiveSessionPolicyForWallet(n.db, chainID, user.Address, runner)
+	refusals := 0
+	for _, item := range mav2 {
+		// The write lock is already held. ActiveSessionPolicyForWallet
+		// would take the same mutex's read lock and deadlock.
+		policy, err := activeSessionPolicyLocked(n.db, item.chain, user.Address, runner)
 		if err != nil {
-			return err
+			unlock()
+			return noop, err
 		}
-		refusal := CoverageRefusal(policy, need)
+		refusal := CoverageRefusal(policy, item.need)
 		if refusal == nil {
 			continue
 		}
-		blocking = append(blocking, need.TaskID)
+		refusals++
+		if item.need != nil && item.need.TaskID != "" {
+			blocking = append(blocking, item.need.TaskID)
+		}
 		missing = append(missing, refusal.Missing...)
 		if required == nil {
 			required = refusal.Required
@@ -1862,13 +1934,11 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 			policyID = refusal.PolicyID
 		}
 	}
-	if len(blocking) == 0 {
-		return nil
+	if refusals == 0 {
+		return unlock, nil
 	}
-	if len(blocking) == 1 && blocking[0] == "" && task.Id != "" {
-		blocking[0] = task.Id
-	}
-	return &PolicyConflictError{
+	unlock()
+	return noop, &PolicyConflictError{
 		Sentinel:        ErrSessionPolicyNotCovering,
 		Code:            SessionPolicyNotCoveringCode,
 		Detail:          "this workflow's fund-moving steps are outside the runner's usable grant",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -49,6 +50,11 @@ var (
 	ErrSessionPolicySupersedeFailed = errors.New("the grant was stored but replacing the previous grant failed")
 )
 
+// MaxSessionExpiresInSeconds is the largest relative lifetime that converts
+// to a time.Duration without overflowing int64. A larger client value wraps
+// and becomes a short or negative grant.
+const MaxSessionExpiresInSeconds int64 = math.MaxInt64 / int64(time.Second)
+
 // SessionPolicyInput carries one grant's declared shape between prepare and
 // submit. On submit every field is the client's echo of what prepare
 // returned; nothing in it is trusted — the grant is recomputed from it and
@@ -84,6 +90,32 @@ func (in *SessionPolicyInput) validate() error {
 		return fmt.Errorf("agent label is required")
 	}
 	return in.Permissions.Validate()
+}
+
+// bindAndValidatePermissions attaches the session signer, rejects a
+// malformed permission set, and logs a contract-recipient exception.
+// Prepare calls it once on the legacy full set and again on the merged
+// addition, and submit calls it on the echoed set.
+func (n *Engine) bindAndValidatePermissions(in *SessionPolicyInput) error {
+	if in == nil {
+		return fmt.Errorf("missing session policy input")
+	}
+	if err := n.bindNativeRecipientChecks(in.ChainID, &in.Permissions); err != nil {
+		return err
+	}
+	if err := in.validate(); err != nil {
+		return err
+	}
+	n.logContractRecipientException(*in)
+	return nil
+}
+
+// ambiguousLegacyRepair reports whether a stacked grant may be replaced.
+// Only an omitted basePolicyId means "I did not prepare against one grant".
+// A present id, including "", was a claim about a single base and cannot
+// be checked against two.
+func ambiguousLegacyRepair(base *string, err error) bool {
+	return base == nil && errors.Is(err, ErrSessionPolicyAmbiguous)
 }
 
 func (n *Engine) logContractRecipientException(in SessionPolicyInput) {
@@ -268,16 +300,15 @@ func (n *Engine) lookupOwnedWalletRecord(user *model.User, chainID int64, wallet
 // what lets that path use the non-locking marker: the mutex is not reentrant,
 // and taking it twice wedges the shard instead of failing.
 func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (*PreparedSessionGrant, error) {
+	if in.ExpiresInSeconds < 0 || in.ExpiresInSeconds > MaxSessionExpiresInSeconds {
+		return nil, fmt.Errorf("expiresInSeconds must be between 0 and %d", MaxSessionExpiresInSeconds)
+	}
 	// An addition is merged under the lock, so its permissions are not
 	// known yet. A legacy prepare still validates the echoed set first.
 	if in.Addition == nil {
-		if err := n.bindNativeRecipientChecks(in.ChainID, &in.Permissions); err != nil {
+		if err := n.bindAndValidatePermissions(&in); err != nil {
 			return nil, err
 		}
-		if err := in.validate(); err != nil {
-			return nil, err
-		}
-		n.logContractRecipientException(in)
 	}
 	if err := n.requireServedChain(in.ChainID); err != nil {
 		return nil, err
@@ -316,13 +347,9 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		}
 		in.Permissions = merged
 		changes = &ch
-		if err := n.bindNativeRecipientChecks(in.ChainID, &in.Permissions); err != nil {
+		if err := n.bindAndValidatePermissions(&in); err != nil {
 			return nil, err
 		}
-		if err := in.validate(); err != nil {
-			return nil, err
-		}
-		n.logContractRecipientException(in)
 	}
 
 	prepared, err := PrepareSessionGrant(n.db, in.ChainID, signer, strings.ToLower(ulid.Make().String()), SessionGrantRequest{
@@ -392,13 +419,9 @@ func (n *Engine) SubmitSessionPolicy(
 	deadline uint64,
 	ownerSignature []byte,
 ) (policy *model.SessionPolicy, superseded []string, err error) {
-	if err := n.bindNativeRecipientChecks(in.ChainID, &in.Permissions); err != nil {
+	if err := n.bindAndValidatePermissions(&in); err != nil {
 		return nil, nil, err
 	}
-	if err := in.validate(); err != nil {
-		return nil, nil, err
-	}
-	n.logContractRecipientException(in)
 	// Submit re-derives the grant from the client's echo, so it re-checks the
 	// chain too: prepare's verdict does not carry over to a body that names a
 	// different one.
@@ -429,7 +452,7 @@ func (n *Engine) SubmitSessionPolicy(
 		// basePolicyId) is how that state gets repaired: the new grant
 		// replaces every usable one. A client that named a base cannot
 		// be checked against two grants, so that error stands.
-		if in.BasePolicyID != nil || !strings.Contains(err.Error(), SessionPolicyAmbiguousCode) {
+		if !ambiguousLegacyRepair(in.BasePolicyID, err) {
 			return nil, nil, err
 		}
 		current = nil

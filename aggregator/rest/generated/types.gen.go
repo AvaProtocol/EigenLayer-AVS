@@ -1263,7 +1263,8 @@ type PreparePolicyRequest struct {
 	// validUntil. When `add` is set, this is the new automation's
 	// horizon if `add.validUntil` is omitted. The signed expiry can be
 	// later, because the wallet keeps one expiry and it must cover
-	// every enabled automation.
+	// every enabled automation. Values above 9223372036 overflow the
+	// duration conversion and are rejected.
 	ExpiresInSeconds int64   `json:"expiresInSeconds"`
 	Justification    *string `json:"justification,omitempty"`
 

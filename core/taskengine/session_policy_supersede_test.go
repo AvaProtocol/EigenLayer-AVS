@@ -185,6 +185,7 @@ func TestAmbiguousWalletRefusalCarriesItsCode(t *testing.T) {
 
 	_, err := ActiveSessionPolicyForWallet(db, testPolicyChain, owner, wallet)
 	require.Error(t, err)
+	require.ErrorIs(t, err, ErrSessionPolicyAmbiguous)
 	require.Contains(t, err.Error(), SessionPolicyAmbiguousCode)
 }
 

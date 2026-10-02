@@ -388,27 +388,177 @@ func TestBuildAuthorizationStatuses(t *testing.T) {
 func TestDeployCheckFlagOffIsNoop(t *testing.T) {
 	payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
 	write := &model.Workflow{Task: skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(1)), skillSepolia, 1, 0, 0)}
-	if err := (&Engine{}).enforceSessionPolicyDeployCheck(nil, write); err != nil {
+	if _, err := (&Engine{}).enforceSessionPolicyDeployCheck(nil, write); err != nil {
 		t.Fatal(err)
 	}
 	off := &Engine{config: &config.Config{}}
-	if err := off.enforceSessionPolicyDeployCheck(nil, write); err != nil {
+	if _, err := off.enforceSessionPolicyDeployCheck(nil, write); err != nil {
 		t.Fatal(err)
 	}
 	on := &Engine{
 		config:            &config.Config{SessionPolicyDeployCheck: true},
 		smartWalletConfig: &config.SmartWalletConfig{ChainID: skillSepolia},
 	}
-	if err := on.enforceSessionPolicyDeployCheck(nil, &model.Workflow{Task: &avsproto.Task{Id: "note", Name: "Ping"}}); err != nil {
+	if _, err := on.enforceSessionPolicyDeployCheck(nil, &model.Workflow{Task: &avsproto.Task{Id: "note", Name: "Ping"}}); err != nil {
 		t.Fatal(err)
 	}
-	err := on.enforceSessionPolicyDeployCheck(nil, write)
+	_, err := on.enforceSessionPolicyDeployCheck(nil, write)
 	if !errors.Is(err, ErrSessionPolicyNotCovering) {
 		t.Fatalf("write without a runner must fail closed, got %v", err)
 	}
 	var conflict *PolicyConflictError
 	if errors.As(err, &conflict) {
 		t.Fatal("missing runner is a wrapped sentinel, not a structured conflict")
+	}
+}
+
+func TestDeployCheckMissingChainConfigFailsClosed(t *testing.T) {
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	runner := common.HexToAddress("0x0000000000000000000000000000000000000002")
+	owner := common.HexToAddress("0x0000000000000000000000000000000000000003")
+	write := &model.Workflow{Task: skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(1)), skillSepolia, 1, 0, 0)}
+	write.SmartWalletAddress = runner.Hex()
+	on := &Engine{
+		config: &config.Config{SessionPolicyDeployCheck: true},
+		chainConfigs: map[int64]*config.ChainConfig{
+			skillSepolia: {},
+		},
+	}
+	_, err := on.enforceSessionPolicyDeployCheck(&model.User{Address: owner}, write)
+	if !errors.Is(err, ErrSessionPolicyNotCovering) || !strings.Contains(err.Error(), "no smart wallet config") {
+		t.Fatalf("missing chain config must fail closed, got %v", err)
+	}
+	mu := sessionAuthorityLock(skillSepolia, owner, runner)
+	if !mu.TryLock() {
+		t.Fatal("a missing chain config must not leave the runner lock held")
+	}
+	mu.Unlock()
+}
+
+func TestDeployCheckHoldsLockUntilReleaseAndNamesTheTask(t *testing.T) {
+	db := testutil.TestMustDB()
+	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
+
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	runner := common.HexToAddress("0x0000000000000000000000000000000000000002")
+	owner := common.HexToAddress("0x0000000000000000000000000000000000000003")
+	write := &model.Workflow{Task: skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(1)), skillSepolia, 1, 0, 0)}
+	write.SmartWalletAddress = runner.Hex()
+	on := &Engine{
+		db:                db,
+		config:            &config.Config{SessionPolicyDeployCheck: true},
+		smartWalletConfig: &config.SmartWalletConfig{ChainID: skillSepolia},
+	}
+	user := &model.User{Address: owner}
+
+	_, err := on.enforceSessionPolicyDeployCheck(user, write)
+	var conflict *PolicyConflictError
+	if !errors.As(err, &conflict) || len(conflict.AffectedTaskIDs) != 1 || conflict.AffectedTaskIDs[0] != "pay" {
+		t.Fatalf("uncovered task id: %v", err)
+	}
+	mu := sessionAuthorityLock(skillSepolia, owner, runner)
+	if !mu.TryLock() {
+		t.Fatal("a refusal must release the runner lock")
+	}
+	mu.Unlock()
+
+	usdc := common.HexToAddress(skillUSDC)
+	policy := usableGrant("01coveredgrantaaaaaaaaaa", 0, []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)}, []model.ERC20SpendCap{skillCap(skillUSDC, "10")})
+	policy.Owner = &owner
+	policy.Runner = &runner
+	policy.ChainID = skillSepolia
+	policy.EntityID = 1
+	policy.SessionSigner = &usdc
+	policy.Grant = &model.SessionGrantAuthorization{
+		InstallCall:    []byte{0x1b, 0xbf, 0x56, 0x4c, 0x01},
+		CarrierNonce:   big.NewInt(1),
+		Deadline:       1785541743,
+		OwnerSignature: make([]byte, 65),
+	}
+	if err := StoreSessionPolicy(db, policy); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := on.enforceSessionPolicyDeployCheck(user, write)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mu.TryLock() {
+		mu.Unlock()
+		unlock()
+		t.Fatal("a passing deploy check must hold the runner lock until unlock")
+	}
+	unlock()
+	if !mu.TryLock() {
+		t.Fatal("unlock must release the runner lock")
+	}
+	mu.Unlock()
+	unlock()
+}
+
+func TestDeployCheckTwoChainsReleases(t *testing.T) {
+	db := testutil.TestMustDB()
+	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
+
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	runner := common.HexToAddress("0x0000000000000000000000000000000000000004")
+	owner := common.HexToAddress("0x0000000000000000000000000000000000000005")
+	task := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(1)), skillSepolia, 1, 0, 0)
+	other := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(1)), 1, 1, 0, 0)
+	task.Nodes = append(task.Nodes, other.Nodes...)
+	write := &model.Workflow{Task: task}
+	write.SmartWalletAddress = runner.Hex()
+	on := &Engine{
+		db:                db,
+		config:            &config.Config{SessionPolicyDeployCheck: true},
+		smartWalletConfig: &config.SmartWalletConfig{ChainID: skillSepolia},
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := on.enforceSessionPolicyDeployCheck(&model.User{Address: owner}, write)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		var conflict *PolicyConflictError
+		if !errors.As(err, &conflict) {
+			t.Fatalf("two uncovered chains must refuse, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("two-chain deploy check deadlocked on a shared lock shard")
+	}
+}
+
+func TestAmbiguousLegacyRepairOnlyWhenBaseOmitted(t *testing.T) {
+	err := &sessionPolicyAmbiguousError{wallet: common.Address{1}, ids: [2]string{"a", "b"}}
+	if !errors.Is(err, ErrSessionPolicyAmbiguous) {
+		t.Fatal(err)
+	}
+	if !ambiguousLegacyRepair(nil, err) {
+		t.Fatal("an omitted basePolicyId repairs a stacked grant")
+	}
+	empty := ""
+	if ambiguousLegacyRepair(&empty, err) {
+		t.Fatal("an empty basePolicyId is present and must not repair a stacked grant")
+	}
+	id := "01coveredgrantaaaaaaaaaa"
+	if ambiguousLegacyRepair(&id, err) {
+		t.Fatal("a named basePolicyId must not repair a stacked grant")
+	}
+	if ambiguousLegacyRepair(nil, errors.New("db down")) {
+		t.Fatal("a storage error is not a stacked-grant repair")
+	}
+}
+
+func TestExpiresInSecondsRejectsOverflow(t *testing.T) {
+	engine, _, _, owner, wallet := newPolicyTestEngine(t)
+	user := &model.User{Address: owner}
+	_, err := engine.PrepareSessionPolicy(user, SessionPolicyInput{
+		Wallet: wallet, ChainID: testPolicyChain,
+		AgentLabel: "bot", ExpiresInSeconds: MaxSessionExpiresInSeconds + 1,
+		Permissions: testPermissions(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "expiresInSeconds") {
+		t.Fatalf("overflow must be rejected, got %v", err)
 	}
 }
 
