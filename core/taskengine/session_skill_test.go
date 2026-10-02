@@ -1034,21 +1034,164 @@ func TestClassifyRunnerCoverageDrop(t *testing.T) {
 			ValidUntilMs:   later,
 		},
 	}
-	if _, err := classifyRunnerCoverage(in, []*avsproto.Task{covered, other}, now); !errors.Is(err, ErrSessionPolicyNotCovering) {
+	if _, err := classifyRunnerCoverage(in, []*avsproto.Task{covered, other}, now, "01LIVE"); !errors.Is(err, ErrSessionPolicyNotCovering) {
 		t.Fatalf("uncovered swap must 409, got %v", err)
 	}
 	var conflict *PolicyConflictError
-	_, err := classifyRunnerCoverage(in, []*avsproto.Task{covered, other}, now)
-	if !errors.As(err, &conflict) || len(conflict.AffectedTaskIDs) != 1 || conflict.AffectedTaskIDs[0] != "swap" {
+	_, err := classifyRunnerCoverage(in, []*avsproto.Task{covered, other}, now, "01LIVE")
+	if !errors.As(err, &conflict) || len(conflict.AffectedTaskIDs) != 1 || conflict.AffectedTaskIDs[0] != "swap" || conflict.PolicyID != "01LIVE" {
 		t.Fatalf("affected = %#v", err)
 	}
 	in.DropTaskIDs = []string{"swap"}
-	dropped, err := classifyRunnerCoverage(in, []*avsproto.Task{covered, other, {Id: "note", Name: "Ping"}}, now)
+	dropped, err := classifyRunnerCoverage(in, []*avsproto.Task{covered, other, {Id: "note", Name: "Ping"}}, now, "01LIVE")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(dropped) != 1 || dropped[0] != "swap" {
 		t.Fatalf("dropped = %#v", dropped)
+	}
+}
+
+func TestClassifyRunnerCoverageSharedCap(t *testing.T) {
+	now := skillNow()
+	later := now.Add(30 * 24 * time.Hour).UnixMilli()
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	ten := transferCalldata(payee, big.NewInt(10))
+	first := skillWriteTask("a", "Pay A", skillUSDC, ten, skillSepolia, 1, 0, later)
+	second := skillWriteTask("b", "Pay B", skillUSDC, ten, skillSepolia, 1, 0, later)
+	other := skillWriteTask("w", "Pay WETH", skillWETH, ten, skillSepolia, 1, 0, later)
+	usdc := []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)}
+	in := SessionPolicyInput{
+		ChainID: skillSepolia,
+		Permissions: SessionPermissions{
+			AllowedActions: usdc,
+			SpendCaps:      []model.ERC20SpendCap{skillCap(skillUSDC, "10")},
+			ValidUntilMs:   later,
+		},
+	}
+	tasks := []*avsproto.Task{first, other, second}
+	_, err := classifyRunnerCoverage(in, []*avsproto.Task{first, second}, now, "01LIVE")
+	var conflict *PolicyConflictError
+	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyNotCoveringCode || conflict.PolicyID != "01LIVE" {
+		t.Fatalf("shared cap = %#v", err)
+	}
+	if errors.Is(err, ErrSessionPolicyUnsized) || conflict.Code == SessionPolicyTargetUnresolvedCode {
+		t.Fatalf("shared cap must stay not-covering, got %#v", err)
+	}
+	if conflict.Detail != combinedSpendShortDetail {
+		t.Fatalf("detail = %q", conflict.Detail)
+	}
+	if len(conflict.AffectedTaskIDs) != 2 || conflict.AffectedTaskIDs[0] != "a" || conflict.AffectedTaskIDs[1] != "b" {
+		t.Fatalf("affected = %#v", conflict.AffectedTaskIDs)
+	}
+
+	in.DropTaskIDs = []string{"b"}
+	dropped, err := classifyRunnerCoverage(in, []*avsproto.Task{first, second}, now, "01LIVE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dropped) != 1 || dropped[0] != "b" {
+		t.Fatalf("dropped = %#v", dropped)
+	}
+
+	in.DropTaskIDs = nil
+	in.Permissions.SpendCaps = []model.ERC20SpendCap{skillCap(skillUSDC, "20")}
+	if _, err := classifyRunnerCoverage(in, []*avsproto.Task{first, second}, now, "01LIVE"); err != nil {
+		t.Fatalf("a cap of the sum must cover both, got %v", err)
+	}
+
+	// Dropping a task the cap already covers is not echoed.
+	in.DropTaskIDs = []string{"b"}
+	dropped, err = classifyRunnerCoverage(in, []*avsproto.Task{first, second}, now, "01LIVE")
+	if err != nil || len(dropped) != 0 {
+		t.Fatalf("unnecessary drop = %#v err %v", dropped, err)
+	}
+
+	in.DropTaskIDs = nil
+	in.Permissions.AllowedActions = []model.AllowedAction{
+		skillAction(skillUSDC, selectorTransfer),
+		skillAction(skillWETH, selectorTransfer),
+	}
+	in.Permissions.SpendCaps = []model.ERC20SpendCap{skillCap(skillUSDC, "10"), skillCap(skillWETH, "10")}
+	if _, err := classifyRunnerCoverage(in, []*avsproto.Task{first, other}, now, "01LIVE"); err != nil {
+		t.Fatalf("distinct tokens that each fit must pass, got %v", err)
+	}
+
+	in.Permissions.SpendCaps = []model.ERC20SpendCap{skillCap(skillUSDC, "10"), skillCap(skillWETH, "10")}
+	_, err = classifyRunnerCoverage(in, tasks, now, "01LIVE")
+	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyNotCoveringCode {
+		t.Fatalf("shared token beside a fitting token = %#v", err)
+	}
+	if len(conflict.AffectedTaskIDs) != 2 || conflict.AffectedTaskIDs[0] != "a" || conflict.AffectedTaskIDs[1] != "b" {
+		t.Fatalf("only the short token's tasks, in order: %#v", conflict.AffectedTaskIDs)
+	}
+
+	rec := payee
+	ethA := skillEthTask("e1", "Send A", payee.Hex(), "10", 1, later)
+	ethB := skillEthTask("e2", "Send B", payee.Hex(), "10", 1, later)
+	native := SessionPolicyInput{
+		ChainID: skillSepolia,
+		Permissions: SessionPermissions{
+			NativeRecipients: []*common.Address{&rec},
+			NativeSpendCap:   &model.NativeSpendCap{Amount: "10"},
+			ValidUntilMs:     later,
+		},
+	}
+	_, err = classifyRunnerCoverage(native, []*avsproto.Task{ethA, ethB}, now, "01LIVE")
+	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyNotCoveringCode || conflict.Detail != combinedSpendShortDetail {
+		t.Fatalf("shared native cap = %#v", err)
+	}
+	if len(conflict.AffectedTaskIDs) != 2 || conflict.AffectedTaskIDs[0] != "e1" || conflict.AffectedTaskIDs[1] != "e2" {
+		t.Fatalf("native affected = %#v", conflict.AffectedTaskIDs)
+	}
+	native.Permissions.NativeSpendCap = &model.NativeSpendCap{Amount: "20"}
+	if _, err := classifyRunnerCoverage(native, []*avsproto.Task{ethA, ethB}, now, "01LIVE"); err != nil {
+		t.Fatalf("native cap of the sum must cover both, got %v", err)
+	}
+}
+
+func skillEthTask(id, name, dest, amount string, maxExec, expiredAt int64) *avsproto.Task {
+	return &avsproto.Task{
+		Id:           id,
+		Name:         name,
+		MaxExecution: maxExec,
+		ExpiredAt:    expiredAt,
+		Nodes: []*avsproto.TaskNode{{
+			TaskType: &avsproto.TaskNode_EthTransfer{
+				EthTransfer: &avsproto.ETHTransferNode{
+					Config: &avsproto.ETHTransferNode_Config{
+						Destination: dest,
+						Amount:      amount,
+						ChainId:     skillSepolia,
+					},
+				},
+			},
+		}},
+	}
+}
+
+func TestAuthorizationRank(t *testing.T) {
+	order := []string{
+		AuthNotCovered,
+		AuthNoGrant,
+		AuthTargetUnresolved,
+		AuthCapNeedsInput,
+		AuthCapTooLow,
+		AuthExpiresTooSoon,
+		AuthCovered,
+	}
+	prev := 100
+	for _, status := range order {
+		got := authorizationRank(status)
+		if got >= prev {
+			t.Fatalf("%s rank %d is not below the status before it", status, got)
+		}
+		prev = got
+	}
+	if authorizationRank(AuthTargetUnresolved) >= authorizationRank(AuthNotCovered) ||
+		authorizationRank(AuthTargetUnresolved) >= authorizationRank(AuthNoGrant) ||
+		authorizationRank(AuthTargetUnresolved) <= authorizationRank(AuthCapNeedsInput) {
+		t.Fatal("target_unresolved must sit below not_covered and no_grant and above cap_needs_input")
 	}
 }
 
@@ -1169,7 +1312,7 @@ func TestMergeSkillGrantUnresolvedBeatsUnsized(t *testing.T) {
 		t.Fatalf("an unread target must outrank an unsized amount, got %v", err)
 	}
 	var conflict *PolicyConflictError
-	if !errors.As(err, &conflict) || len(conflict.AffectedTaskIDs) != 1 {
+	if !errors.As(err, &conflict) || len(conflict.AffectedTaskIDs) != 1 || conflict.PolicyID != "" {
 		t.Fatalf("unsized task must not be listed as unread, got %#v", err)
 	}
 
@@ -1190,6 +1333,10 @@ func TestMergeSkillGrantUnresolvedBeatsUnsized(t *testing.T) {
 		skillAction(skillUSDC, selectorTransfer),
 		skillAction(skillWETH, selectorApprove),
 	}, []model.ERC20SpendCap{skillCap(skillUSDC, "24"), skillCap(skillWETH, "5")})
+	_, _, err = MergeSkillGrant(current, PolicyAddition{}, []*avsproto.Task{split}, skillSepolia, now, time.Hour)
+	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyTargetUnresolvedCode || conflict.PolicyID != current.ID {
+		t.Fatalf("unresolved merge must name the usable grant, got %#v", err)
+	}
 	kept, dropped := tasksExceptDropped([]*avsproto.Task{unsized, split}, []string{"split"})
 	if len(dropped) != 1 || dropped[0] != "split" || len(kept) != 1 {
 		t.Fatalf("prepare filter = kept %d dropped %#v", len(kept), dropped)
@@ -1241,9 +1388,9 @@ func TestClassifyRunnerCoverageUnresolved(t *testing.T) {
 			ValidUntilMs:   later,
 		},
 	}
-	_, err := classifyRunnerCoverage(in, []*avsproto.Task{covered, split}, now)
+	_, err := classifyRunnerCoverage(in, []*avsproto.Task{covered, split}, now, "01LIVE")
 	var conflict *PolicyConflictError
-	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyTargetUnresolvedCode || !errors.Is(err, ErrSessionPolicyNotCovering) || errors.Is(err, ErrSessionPolicyUnsized) {
+	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyTargetUnresolvedCode || conflict.PolicyID != "01LIVE" || !errors.Is(err, ErrSessionPolicyNotCovering) || errors.Is(err, ErrSessionPolicyUnsized) {
 		t.Fatalf("unread target = %#v", err)
 	}
 	if len(conflict.AffectedTaskIDs) != 1 || conflict.AffectedTaskIDs[0] != "split" {
@@ -1254,7 +1401,7 @@ func TestClassifyRunnerCoverageUnresolved(t *testing.T) {
 	}
 
 	in.DropTaskIDs = []string{"split"}
-	dropped, err := classifyRunnerCoverage(in, []*avsproto.Task{covered, split}, now)
+	dropped, err := classifyRunnerCoverage(in, []*avsproto.Task{covered, split}, now, "01LIVE")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1263,7 +1410,7 @@ func TestClassifyRunnerCoverageUnresolved(t *testing.T) {
 	}
 
 	in.DropTaskIDs = nil
-	_, err = classifyRunnerCoverage(in, []*avsproto.Task{split, batch}, now)
+	_, err = classifyRunnerCoverage(in, []*avsproto.Task{split, batch}, now, "01LIVE")
 	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyTargetUnresolvedCode {
 		t.Fatalf("two unread targets = %v", err)
 	}
@@ -1274,7 +1421,7 @@ func TestClassifyRunnerCoverageUnresolved(t *testing.T) {
 		t.Fatalf("detail = %q", conflict.Detail)
 	}
 
-	_, err = classifyRunnerCoverage(in, []*avsproto.Task{swap, split}, now)
+	_, err = classifyRunnerCoverage(in, []*avsproto.Task{swap, split}, now, "01LIVE")
 	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyTargetUnresolvedCode {
 		t.Fatalf("mixed miss = %v", err)
 	}

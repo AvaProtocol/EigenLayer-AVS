@@ -550,7 +550,11 @@ func MergeSkillGrant(current *model.SessionPolicy, addition PolicyAddition, task
 		}
 	}
 	if len(unresolved) > 0 {
-		return SessionPermissions{}, PolicyChanges{}, unresolvedTargetConflict(unresolved)
+		conflict := unresolvedTargetConflict(unresolved)
+		if current != nil {
+			conflict.PolicyID = current.ID
+		}
+		return SessionPermissions{}, PolicyChanges{}, conflict
 	}
 	if unsized != nil {
 		return SessionPermissions{}, PolicyChanges{}, unsized
@@ -1955,12 +1959,20 @@ func permissionsAsPolicy(in SessionPolicyInput) *model.SessionPolicy {
 
 // classifyRunnerCoverage checks each enabled task against the grant being
 // stored. Tasks named in drop are reported and do not block. Any other
-// concrete gap blocks the submit.
-func classifyRunnerCoverage(in SessionPolicyInput, tasks []*avsproto.Task, now time.Time) (dropped []string, err error) {
+// concrete gap blocks the submit. usablePolicyID is the runner's current
+// grant when one exists; the unsigned replacement has no id yet.
+//
+// A cap that fits each task can still be short of their combined remaining
+// spend. That check runs only after every individual gap is clear, and it
+// skips tasks named in drop. A dropped task is echoed when putting it back
+// would make that combined spend exceed the cap.
+func classifyRunnerCoverage(in SessionPolicyInput, tasks []*avsproto.Task, now time.Time, usablePolicyID string) (dropped []string, err error) {
 	policy := permissionsAsPolicy(in)
 	var blocking []string
 	var missing []model.AllowedAction
 	var required *WorkflowNeed
+	var covered []runnerSpend
+	var spared []runnerSpend
 	code := SessionPolicyNotCoveringCode
 	detail := "this grant would leave an enabled automation uncovered"
 	for _, task := range tasks {
@@ -1971,6 +1983,14 @@ func classifyRunnerCoverage(in SessionPolicyInput, tasks []*avsproto.Task, now t
 		need := derived[in.ChainID]
 		refusal := CoverageRefusal(policy, need)
 		if refusal == nil {
+			if need != nil && need.HasFundMove {
+				row := runnerSpend{id: task.GetId(), need: need}
+				if taskDropped(task.GetId(), in.DropTaskIDs) {
+					spared = append(spared, row)
+				} else {
+					covered = append(covered, row)
+				}
+			}
 			continue
 		}
 		if taskDropped(task.GetId(), in.DropTaskIDs) {
@@ -1987,21 +2007,145 @@ func classifyRunnerCoverage(in SessionPolicyInput, tasks []*avsproto.Task, now t
 			detail = refusal.Detail
 		}
 	}
-	if len(blocking) == 0 {
-		return dropped, nil
+	if len(blocking) > 0 {
+		if code == SessionPolicyTargetUnresolvedCode && len(blocking) > 1 {
+			detail = "enabled automations move funds to a target the grant cannot resolve"
+		}
+		return dropped, &PolicyConflictError{
+			Sentinel:        ErrSessionPolicyNotCovering,
+			Code:            code,
+			Detail:          detail,
+			PolicyID:        usablePolicyID,
+			AffectedTaskIDs: blocking,
+			Missing:         missing,
+			Required:        required,
+		}
 	}
-	if code == SessionPolicyTargetUnresolvedCode && len(blocking) > 1 {
-		detail = "enabled automations move funds to a target the grant cannot resolve"
+	if ids, over := combinedSpendShortfall(policy, covered); over {
+		return dropped, &PolicyConflictError{
+			Sentinel:        ErrSessionPolicyNotCovering,
+			Code:            SessionPolicyNotCoveringCode,
+			Detail:          combinedSpendShortDetail,
+			PolicyID:        usablePolicyID,
+			AffectedTaskIDs: ids,
+		}
 	}
-	return dropped, &PolicyConflictError{
-		Sentinel:        ErrSessionPolicyNotCovering,
-		Code:            code,
-		Detail:          detail,
-		PolicyID:        "",
-		AffectedTaskIDs: blocking,
-		Missing:         missing,
-		Required:        required,
+	for _, extra := range spared {
+		trial := append(append([]runnerSpend{}, covered...), extra)
+		if _, over := combinedSpendShortfall(policy, trial); over {
+			dropped = append(dropped, extra.id)
+		}
 	}
+	return dropped, nil
+}
+
+const combinedSpendShortDetail = "this grant's spend cap is below the combined remaining spend of enabled automations"
+
+// runnerSpend is one enabled task whose own need fits the grant.
+type runnerSpend struct {
+	id   string
+	need *WorkflowNeed
+}
+
+// combinedSpendShortfall reports tasks whose tokens or native value, added
+// together, exceed the grant. Ids stay in task order. A sum above uint256
+// cannot fit any legal cap.
+func combinedSpendShortfall(policy *model.SessionPolicy, tasks []runnerSpend) (ids []string, short bool) {
+	tokenSum := map[common.Address]*big.Int{}
+	var nativeSum *big.Int
+	type spendRow struct {
+		id     string
+		tokens map[common.Address]struct{}
+		native bool
+	}
+	var rows []spendRow
+	for _, task := range tasks {
+		if task.need == nil {
+			continue
+		}
+		row := spendRow{id: task.id, tokens: map[common.Address]struct{}{}}
+		for _, cap := range task.need.Caps {
+			if cap.Token == nil {
+				continue
+			}
+			amt, err := parseCapAmount(cap.Amount)
+			if err != nil {
+				continue
+			}
+			sum := tokenSum[*cap.Token]
+			if sum == nil {
+				sum = new(big.Int)
+				tokenSum[*cap.Token] = sum
+			}
+			sum.Add(sum, amt)
+			row.tokens[*cap.Token] = struct{}{}
+		}
+		if task.need.NativeSpendCap != nil {
+			amt, err := parseCapAmount(task.need.NativeSpendCap.Amount)
+			if err == nil {
+				if nativeSum == nil {
+					nativeSum = new(big.Int)
+				}
+				nativeSum.Add(nativeSum, amt)
+				row.native = true
+			}
+		}
+		if len(row.tokens) > 0 || row.native {
+			rows = append(rows, row)
+		}
+	}
+	if len(rows) == 0 {
+		return nil, false
+	}
+	have := map[common.Address]*big.Int{}
+	for _, cap := range policyCaps(policy) {
+		if cap.Token == nil {
+			continue
+		}
+		amt, err := parseCapAmount(cap.Amount)
+		if err != nil {
+			continue
+		}
+		have[*cap.Token] = amt
+	}
+	shortTokens := map[common.Address]bool{}
+	for token, sum := range tokenSum {
+		if sum.Cmp(maxUint256) > 0 {
+			shortTokens[token] = true
+			continue
+		}
+		got := have[token]
+		if got == nil || got.Cmp(sum) < 0 {
+			shortTokens[token] = true
+		}
+	}
+	nativeShort := false
+	if nativeSum != nil && (nativeSum.Cmp(maxUint256) > 0 || policy == nil || policy.NativeSpendCap == nil) {
+		nativeShort = true
+	} else if nativeSum != nil {
+		got, err := parseCapAmount(policy.NativeSpendCap.Amount)
+		if err != nil || got.Cmp(nativeSum) < 0 {
+			nativeShort = true
+		}
+	}
+	if len(shortTokens) == 0 && !nativeShort {
+		return nil, false
+	}
+	for _, row := range rows {
+		hit := row.native && nativeShort
+		if !hit {
+			for token := range row.tokens {
+				if shortTokens[token] {
+					hit = true
+					break
+				}
+			}
+		}
+		if hit {
+			ids = append(ids, row.id)
+		}
+	}
+	return ids, true
 }
 
 // tasksExceptDropped removes tasks the client named in dropTaskIds. The
@@ -2109,6 +2253,29 @@ func (n *Engine) enabledTasksForRunner(owner, wallet common.Address) ([]*model.W
 	return out, nil
 }
 
+// authorizationRank orders simulate statuses when a workflow spans chains.
+// An unresolved target on one chain must not hide a missing grant or an
+// observed call the grant does not allow on another. One chain still
+// decides inside BuildAuthorization, which returns no_grant first.
+func authorizationRank(status string) int {
+	switch status {
+	case AuthNotCovered:
+		return 7
+	case AuthNoGrant:
+		return 6
+	case AuthTargetUnresolved:
+		return 5
+	case AuthCapNeedsInput:
+		return 4
+	case AuthCapTooLow:
+		return 3
+	case AuthExpiresTooSoon:
+		return 2
+	default:
+		return 1
+	}
+}
+
 // fillSimulateAuthorization writes the opt-in verdict onto the context
 // the handler allocated. Enforce mode leaves it unset.
 func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User, task *model.Workflow, vm *VM, chainID int64) {
@@ -2144,24 +2311,6 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 		auth.Result = BuildAuthorization(nil, nil, report, sched)
 		return
 	}
-	rank := func(status string) int {
-		switch status {
-		case AuthTargetUnresolved:
-			return 7
-		case AuthNotCovered:
-			return 6
-		case AuthNoGrant:
-			return 5
-		case AuthCapNeedsInput:
-			return 4
-		case AuthCapTooLow:
-			return 3
-		case AuthExpiresTooSoon:
-			return 2
-		default:
-			return 1
-		}
-	}
 	var worst *SessionAuthorization
 	for chain, need := range needs {
 		if need == nil || !need.HasFundMove {
@@ -2186,7 +2335,7 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 			chainReport = report
 		}
 		got := BuildAuthorization(policy, need, chainReport, sched)
-		if worst == nil || rank(got.Status) > rank(worst.Status) {
+		if worst == nil || authorizationRank(got.Status) > authorizationRank(worst.Status) {
 			worst = got
 		}
 	}

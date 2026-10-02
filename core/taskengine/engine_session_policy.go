@@ -468,7 +468,11 @@ func (n *Engine) SubmitSessionPolicy(
 	if err != nil {
 		return nil, nil, err
 	}
-	dropped, err := classifyRunnerCoverage(in, workflowTasks(tasks), time.Now())
+	usableID := ""
+	if current != nil {
+		usableID = current.ID
+	}
+	dropped, err := classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID)
 	if err != nil {
 		return nil, nil, err
 	}

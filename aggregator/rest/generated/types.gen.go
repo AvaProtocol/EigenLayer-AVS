@@ -1307,7 +1307,10 @@ type PreparedDelegation struct {
 
 // PreparedPolicy defines model for PreparedPolicy.
 type PreparedPolicy struct {
-	AllowContractRecipient *bool `json:"allowContractRecipient,omitempty"`
+	// AffectedTaskIds Enabled tasks this prepare left out because `dropTaskIds` named
+	// them. Echo those ids as submit's `dropTaskIds`.
+	AffectedTaskIds        *[]string `json:"affectedTaskIds,omitempty"`
+	AllowContractRecipient *bool     `json:"allowContractRecipient,omitempty"`
 
 	// AllowedActions Merged actions to echo to submit. Present when `add` was sent.
 	AllowedActions *[]AllowedAction `json:"allowedActions,omitempty"`
@@ -1320,10 +1323,6 @@ type PreparedPolicy struct {
 	// chain-aware trigger/node configs this is required and must be a
 	// configured chain; on query/filter params it is optional.
 	ChainId ChainId `json:"chainId"`
-
-	// AffectedTaskIds Enabled tasks this prepare left out because `dropTaskIds`
-	// named them. Echo those ids as submit's `dropTaskIds`.
-	AffectedTaskIds *[]string `json:"affectedTaskIds,omitempty"`
 
 	// Changes What the approval screen shows. `summary` is the copy. The structured
 	// fields are the same facts.
@@ -1827,7 +1826,10 @@ type SubmitPolicyRequest struct {
 
 	// DropTaskIds Enabled tasks this grant may leave uncovered. Any other enabled
 	// task on this runner whose fund-moving steps are outside the grant
-	// is refused with 409 SESSION_POLICY_NOT_COVERING.
+	// is refused with 409 SESSION_POLICY_NOT_COVERING. A task whose
+	// target cannot be read is 409 SESSION_POLICY_TARGET_UNRESOLVED
+	// unless it is named here. Naming it does not copy the current
+	// grant's rows into the new cap.
 	DropTaskIds *[]string `json:"dropTaskIds,omitempty"`
 	EntityId    int64     `json:"entityId"`
 
