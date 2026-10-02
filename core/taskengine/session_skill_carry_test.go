@@ -435,6 +435,38 @@ func TestExplainSkillDriftNamesRemainderAndRunningSet(t *testing.T) {
 	}
 }
 
+func TestSkillSubmitMergeErrorKeepsTheCauseWhenTheSetIsUnchanged(t *testing.T) {
+	current := usableGrant("01OLD", time.Now().Add(time.Hour).UnixMilli(), nil, nil)
+	unsized := fmt.Errorf("%w: cap overflows", ErrSessionPolicyUnsized)
+	native := fmt.Errorf("%w: task pay (Pay): a native cap cannot be added while its payable value cannot be sized", ErrSessionNativeCapUnsized)
+	same := []*avsproto.Task{skillWriteTask("pay", "Pay", skillUSDC, "0xa9059cbb", skillSepolia, 1, 0, 0)}
+	reordered := []*avsproto.Task{
+		skillWriteTask("other", "Other", skillUSDC, "0xa9059cbb", skillSepolia, 1, 0, 0),
+		same[0],
+	}
+	prepared := []*avsproto.Task{reordered[1], reordered[0]}
+
+	if err := skillSubmitMergeError(current, nil, same, same); err != nil {
+		t.Fatalf("nil merge error = %v", err)
+	}
+	if err := skillSubmitMergeError(current, native, same, reordered); !errors.Is(err, ErrSessionNativeCapUnsized) {
+		t.Fatalf("native refusal must keep its own error, got %v", err)
+	}
+	if err := skillSubmitMergeError(current, unsized, prepared, reordered); !errors.Is(err, ErrSessionPolicyUnsized) {
+		t.Fatalf("same task ids must keep the merge error, got %v", err)
+	}
+
+	extra := append([]*avsproto.Task{}, same...)
+	extra = append(extra, skillWriteTask("new", "New", skillUSDC, "0xa9059cbb", skillSepolia, 1, 0, 0))
+	var conflict *PolicyConflictError
+	if err := skillSubmitMergeError(current, unsized, same, extra); !errors.As(err, &conflict) || conflict.Detail != "the running set changed and the grant id did not; prepare again" {
+		t.Fatalf("a new task = %#v", err)
+	}
+	if err := skillSubmitMergeError(current, unsized, extra, same); !errors.As(err, &conflict) || conflict.Code != SessionPolicyBaseChangedCode {
+		t.Fatalf("a removed task = %#v", err)
+	}
+}
+
 // limitScript answers erc20SpendLimits and records whether the runner lock
 // was already held. TryRLock is used so a submit-side read cannot deadlock
 // the test on the non-reentrant lock.

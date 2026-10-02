@@ -718,6 +718,10 @@ func policyChangesToAPI(ch *taskengine.PolicyChanges) *generated.SessionPolicyCh
 				prev := cap.PreviousAmount
 				item.PreviousAmount = &prev
 			}
+			if cap.Removed {
+				removed := true
+				item.Removed = &removed
+			}
 			caps = append(caps, item)
 		}
 		out.CapChanges = &caps

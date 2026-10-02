@@ -1686,6 +1686,11 @@ type SessionPolicyCapChange struct {
 	// PreviousAmount Previous grant's total. Omitted when the token is new.
 	PreviousAmount *string `json:"previousAmount,omitempty"`
 
+	// Removed True when this token's cap was dropped. `amount` is then "0",
+	// and `previousAmount` is what remained. Omitted when the cap is
+	// still on the grant.
+	Removed *bool `json:"removed,omitempty"`
+
 	// Token Lowercase or checksummed hex EOA / contract address.
 	Token EthereumAddress `json:"token"`
 }

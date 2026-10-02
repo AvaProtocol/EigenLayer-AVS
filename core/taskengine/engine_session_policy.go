@@ -547,10 +547,7 @@ func (n *Engine) SubmitSessionPolicy(
 		kept, _ := tasksExceptDropped(workflowTasks(tasks), in.DropTaskIDs)
 		merged, _, mergeErr := MergeSkillGrantWithRemainder(current, remPtr, snap.addition, kept, in.ChainID, snap.preparedAt, snap.expiresIn)
 		if mergeErr != nil {
-			if errors.Is(mergeErr, ErrSessionNativeCapUnsized) {
-				return nil, nil, mergeErr
-			}
-			return nil, nil, newRunningSetChanged(current)
+			return nil, nil, skillSubmitMergeError(current, mergeErr, snap.tasks, kept)
 		}
 		if !sameSessionPermissions(merged, in.Permissions) {
 			return nil, nil, explainSkillDrift(current, snap, remPtr, kept, in.Permissions)

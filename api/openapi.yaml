@@ -1983,6 +1983,12 @@ components:
         previousAmount:
           type: string
           description: Previous grant's total. Omitted when the token is new.
+        removed:
+          type: boolean
+          description: |
+            True when this token's cap was dropped. `amount` is then "0",
+            and `previousAmount` is what remained. Omitted when the cap is
+            still on the grant.
 
     SessionPolicyExpiryChange:
       type: object

@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -521,6 +522,43 @@ func newLimitMoved(current *model.SessionPolicy) *PolicyConflictError {
 
 func newRunningSetChanged(current *model.SessionPolicy) *PolicyConflictError {
 	return newBaseDetail(current, "the running set changed and the grant id did not; prepare again")
+}
+
+// skillSubmitMergeError keeps a merge failure that the running set did not
+// cause. A native-cap refusal always keeps its own text. Any other failure
+// keeps its own text when the enabled task ids still match the set prepare
+// signed against. A different set is reported as the running set having
+// changed; the next prepare returns the real error.
+func skillSubmitMergeError(current *model.SessionPolicy, mergeErr error, prepared, now []*avsproto.Task) error {
+	if mergeErr == nil || errors.Is(mergeErr, ErrSessionNativeCapUnsized) || sameRunningTaskIDs(prepared, now) {
+		return mergeErr
+	}
+	return newRunningSetChanged(current)
+}
+
+func sameRunningTaskIDs(prepared, now []*avsproto.Task) bool {
+	left := taskIDCounts(prepared)
+	right := taskIDCounts(now)
+	if len(left) != len(right) {
+		return false
+	}
+	for id, count := range left {
+		if right[id] != count {
+			return false
+		}
+	}
+	return true
+}
+
+func taskIDCounts(tasks []*avsproto.Task) map[string]int {
+	counts := map[string]int{}
+	for _, task := range tasks {
+		if task == nil || task.GetId() == "" {
+			continue
+		}
+		counts[task.GetId()]++
+	}
+	return counts
 }
 
 func newLimitAndSetChanged(current *model.SessionPolicy) *PolicyConflictError {

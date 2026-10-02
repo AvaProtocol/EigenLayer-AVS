@@ -533,3 +533,25 @@ func TestSubmitPolicyResponseCarriesEverySessionPolicyField(t *testing.T) {
 	}
 	require.Equal(t, []any{"01replacedgrantaaaaaaaaaa"}, submitFields["supersededPolicyIds"])
 }
+
+func TestPolicyChangesMarkADroppedCapRemoved(t *testing.T) {
+	token := common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
+	out := policyChangesToAPI(&taskengine.PolicyChanges{
+		Summary: []string{"Cap 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238: removed (was 60)"},
+		CapChanges: []taskengine.CapChange{{
+			Token: token, Amount: "0", PreviousAmount: "60", Removed: true,
+		}},
+	})
+	require.NotNil(t, out.CapChanges)
+	require.Len(t, *out.CapChanges, 1)
+	change := (*out.CapChanges)[0]
+	require.Equal(t, "0", change.Amount)
+	require.NotNil(t, change.PreviousAmount)
+	require.Equal(t, "60", *change.PreviousAmount)
+	require.NotNil(t, change.Removed)
+	require.True(t, *change.Removed)
+
+	body, err := json.Marshal(change)
+	require.NoError(t, err)
+	require.Contains(t, string(body), `"removed":true`)
+}
