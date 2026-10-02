@@ -362,6 +362,27 @@ func TestTypedDataDomainCarriesOnlyDeclaredFields(t *testing.T) {
 	}
 }
 
+func TestUnresolvedTargetMapsToConflict(t *testing.T) {
+	conflict := mapPolicyError(&taskengine.PolicyConflictError{
+		Sentinel:        taskengine.ErrSessionPolicyNotCovering,
+		Code:            taskengine.SessionPolicyTargetUnresolvedCode,
+		Detail:          "Split Incoming Payments moves funds to a target the grant cannot resolve",
+		AffectedTaskIDs: []string{"split", "batch"},
+	})
+	httpErr, ok := conflict.(*restmw.HTTPError)
+	require.True(t, ok)
+	require.Equal(t, http.StatusConflict, httpErr.Status)
+	require.Equal(t, taskengine.SessionPolicyTargetUnresolvedCode, httpErr.Code)
+	require.Equal(t, "A running automation has a target the grant cannot read", httpErr.Title)
+	require.Equal(t, []string{"split", "batch"}, httpErr.AffectedTaskIDs)
+
+	unsized := mapPolicyError(fmt.Errorf("%w: task pay", taskengine.ErrSessionPolicyUnsized))
+	bad, ok := unsized.(*restmw.HTTPError)
+	require.True(t, ok)
+	require.Equal(t, http.StatusBadRequest, bad.Status)
+	require.Equal(t, "POLICIES_BAD_PERMISSIONS", bad.Code)
+}
+
 // grantOverHTTP runs prepare → sign → submit and returns the decoded response.
 func (r *policyTestRig) grantOverHTTP(t *testing.T) generated.SubmitPolicyResponse {
 	t.Helper()

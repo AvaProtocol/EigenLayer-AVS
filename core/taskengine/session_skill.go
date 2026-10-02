@@ -37,12 +37,18 @@ const (
 	SessionPolicyBaseChangedCode = "SESSION_POLICY_BASE_CHANGED"
 	SessionPolicyNotCoveringCode = "SESSION_POLICY_NOT_COVERING"
 
-	AuthCovered        = "covered"
-	AuthNoGrant        = "no_grant"
-	AuthNotCovered     = "not_covered"
-	AuthCapTooLow      = "cap_too_low"
-	AuthExpiresTooSoon = "expires_too_soon"
-	AuthCapNeedsInput  = "cap_needs_input"
+	AuthCovered          = "covered"
+	AuthNoGrant          = "no_grant"
+	AuthNotCovered       = "not_covered"
+	AuthCapTooLow        = "cap_too_low"
+	AuthExpiresTooSoon   = "expires_too_soon"
+	AuthCapNeedsInput    = "cap_needs_input"
+	AuthTargetUnresolved = "target_unresolved"
+
+	// SessionPolicyTargetUnresolvedCode is a 409. The automation moves
+	// funds, and the gateway cannot name the target from the stored
+	// workflow. It is not an unsized amount: typing a cap does not fix it.
+	SessionPolicyTargetUnresolvedCode = "SESSION_POLICY_TARGET_UNRESOLVED"
 
 	selectorTransfer = "0xa9059cbb"
 	selectorApprove  = "0x095ea7b3"
@@ -486,6 +492,8 @@ func MergeSkillGrant(current *model.SessionPolicy, addition PolicyAddition, task
 		nativeSet = true
 	}
 
+	var unresolved []*WorkflowNeed
+	var unsized error
 	for _, task := range tasks {
 		if task == nil {
 			continue
@@ -496,10 +504,19 @@ func MergeSkillGrant(current *model.SessionPolicy, addition PolicyAddition, task
 			continue
 		}
 		if need.Unresolved {
-			return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: task %s (%s) has a fund-moving target that could not be resolved", ErrSessionPolicyUnsized, task.GetId(), displayName(task.GetName()))
+			// Not an amount the caller can type. The previous grant's rows
+			// are not copied in to paper over it.
+			unresolved = append(unresolved, need)
+			continue
 		}
 		if need.CapNeedsInput {
-			return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: task %s (%s)", ErrSessionPolicyUnsized, task.GetId(), displayName(task.GetName()))
+			if unsized == nil {
+				unsized = fmt.Errorf("%w: task %s (%s)", ErrSessionPolicyUnsized, task.GetId(), displayName(task.GetName()))
+			}
+			continue
+		}
+		if len(unresolved) > 0 || unsized != nil {
+			continue
 		}
 		taskNeeds = append(taskNeeds, need)
 		addActions(need.Actions)
@@ -531,6 +548,12 @@ func MergeSkillGrant(current *model.SessionPolicy, addition PolicyAddition, task
 			}
 			nativeSet = true
 		}
+	}
+	if len(unresolved) > 0 {
+		return SessionPermissions{}, PolicyChanges{}, unresolvedTargetConflict(unresolved)
+	}
+	if unsized != nil {
+		return SessionPermissions{}, PolicyChanges{}, unsized
 	}
 
 	mergedActions := actionsFromSet(actions)
@@ -622,14 +645,9 @@ func CoverageRefusal(policy *model.SessionPolicy, need *WorkflowNeed) *PolicyCon
 		}
 	}
 	if need.Unresolved {
-		return &PolicyConflictError{
-			Sentinel:        ErrSessionPolicyNotCovering,
-			Code:            SessionPolicyNotCoveringCode,
-			Detail:          fmt.Sprintf("%s moves funds to a target the grant cannot resolve", displayName(need.Name)),
-			PolicyID:        policy.ID,
-			AffectedTaskIDs: nonEmptyID(need.TaskID),
-			Required:        need,
-		}
+		conflict := unresolvedTargetConflict([]*WorkflowNeed{need})
+		conflict.PolicyID = policy.ID
+		return conflict
 	}
 	missing := missingActions(policy.AllowedActions, need.Actions)
 	var nativeMiss bool
@@ -723,7 +741,9 @@ func BuildAuthorization(policy *model.SessionPolicy, need *WorkflowNeed, report 
 		return out
 	}
 	if filled.Unresolved {
-		out.Status = AuthCapNeedsInput
+		// One observed iteration must not clear this. The call the report
+		// saw can be covered and the status is still target_unresolved.
+		out.Status = AuthTargetUnresolved
 		out.Detail = "a fund-moving target could not be resolved"
 		return out
 	}
@@ -1941,6 +1961,8 @@ func classifyRunnerCoverage(in SessionPolicyInput, tasks []*avsproto.Task, now t
 	var blocking []string
 	var missing []model.AllowedAction
 	var required *WorkflowNeed
+	code := SessionPolicyNotCoveringCode
+	detail := "this grant would leave an enabled automation uncovered"
 	for _, task := range tasks {
 		if task == nil {
 			continue
@@ -1960,18 +1982,73 @@ func classifyRunnerCoverage(in SessionPolicyInput, tasks []*avsproto.Task, now t
 		if required == nil {
 			required = refusal.Required
 		}
+		if refusal.Code == SessionPolicyTargetUnresolvedCode {
+			code = SessionPolicyTargetUnresolvedCode
+			detail = refusal.Detail
+		}
 	}
 	if len(blocking) == 0 {
 		return dropped, nil
 	}
+	if code == SessionPolicyTargetUnresolvedCode && len(blocking) > 1 {
+		detail = "enabled automations move funds to a target the grant cannot resolve"
+	}
 	return dropped, &PolicyConflictError{
 		Sentinel:        ErrSessionPolicyNotCovering,
-		Code:            SessionPolicyNotCoveringCode,
-		Detail:          "this grant would leave an enabled automation uncovered",
+		Code:            code,
+		Detail:          detail,
 		PolicyID:        "",
 		AffectedTaskIDs: blocking,
 		Missing:         missing,
 		Required:        required,
+	}
+}
+
+// tasksExceptDropped removes tasks the client named in dropTaskIds. The
+// merged grant does not include their spend, and submit must receive the
+// same ids or it refuses them as uncovered.
+func tasksExceptDropped(tasks []*avsproto.Task, drop []string) (kept []*avsproto.Task, dropped []string) {
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		if taskDropped(task.GetId(), drop) {
+			if id := strings.TrimSpace(task.GetId()); id != "" {
+				dropped = append(dropped, id)
+			}
+			continue
+		}
+		kept = append(kept, task)
+	}
+	return kept, dropped
+}
+
+func unresolvedTargetConflict(needs []*WorkflowNeed) *PolicyConflictError {
+	var ids []string
+	var first *WorkflowNeed
+	for _, need := range needs {
+		if need == nil {
+			continue
+		}
+		if first == nil {
+			first = need
+		}
+		if id := strings.TrimSpace(need.TaskID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	detail := "moves funds to a target the grant cannot resolve"
+	if len(ids) > 1 {
+		detail = "enabled automations move funds to a target the grant cannot resolve"
+	} else if first != nil {
+		detail = fmt.Sprintf("%s moves funds to a target the grant cannot resolve", displayName(first.Name))
+	}
+	return &PolicyConflictError{
+		Sentinel:        ErrSessionPolicyNotCovering,
+		Code:            SessionPolicyTargetUnresolvedCode,
+		Detail:          detail,
+		AffectedTaskIDs: ids,
+		Required:        first,
 	}
 }
 
@@ -2069,6 +2146,8 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 	}
 	rank := func(status string) int {
 		switch status {
+		case AuthTargetUnresolved:
+			return 7
 		case AuthNotCovered:
 			return 6
 		case AuthNoGrant:

@@ -79,13 +79,16 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 		return badRequest("POLICIES_BAD_EXPIRY", "Invalid expiry",
 			fmt.Sprintf("expiresInSeconds must be at most %d.", taskengine.MaxSessionExpiresInSeconds))
 	}
+	var affected []string
 	in := taskengine.SessionPolicyInput{
 		Wallet:           wallet,
 		ChainID:          int64(req.ChainId),
 		AgentLabel:       req.AgentLabel,
 		Justification:    deref(req.Justification),
 		BasePolicyID:     req.BasePolicyId,
+		DropTaskIDs:      derefStrings(req.DropTaskIds),
 		ExpiresInSeconds: req.ExpiresInSeconds,
+		AffectedOut:      &affected,
 	}
 	if req.Add != nil {
 		// The addition is a fragment. Top-level permission fields are the
@@ -124,6 +127,9 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 		TypedData:     typedData,
 	}
 	applySkillPrepare(&out, prepared)
+	if len(affected) > 0 {
+		out.AffectedTaskIds = &affected
+	}
 	return ctx.JSON(http.StatusOK, out)
 }
 
@@ -739,8 +745,11 @@ func policyConflictHTTP(e *taskengine.PolicyConflictError) *restmw.HTTPError {
 		return nil
 	}
 	title := "Grant does not cover this workflow"
-	if e.Code == taskengine.SessionPolicyBaseChangedCode {
+	switch e.Code {
+	case taskengine.SessionPolicyBaseChangedCode:
 		title = "Grant changed since prepare"
+	case taskengine.SessionPolicyTargetUnresolvedCode:
+		title = "A running automation has a target the grant cannot read"
 	}
 	return &restmw.HTTPError{
 		Status:          http.StatusConflict,

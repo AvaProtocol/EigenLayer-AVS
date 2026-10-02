@@ -252,7 +252,7 @@ func TestCoverageRefusal(t *testing.T) {
 	if unresolvedNeed == nil || !unresolvedNeed.Unresolved {
 		t.Fatalf("template target must be unresolved, got %#v", unresolvedNeed)
 	}
-	if got := CoverageRefusal(grant, unresolvedNeed); got == nil || got.Code != SessionPolicyNotCoveringCode {
+	if got := CoverageRefusal(grant, unresolvedNeed); got == nil || got.Code != SessionPolicyTargetUnresolvedCode || !errors.Is(got, ErrSessionPolicyNotCovering) {
 		t.Fatalf("unresolved target with a grant must refuse, got %#v", got)
 	}
 	if got := CoverageRefusal(nil, unresolvedNeed); got == nil {
@@ -827,7 +827,7 @@ func TestWeeklyPayNestedSettingsDerivesTransferAndCap(t *testing.T) {
 	if got := CoverageRefusal(covered, loopValue); got == nil {
 		t.Fatal("an unresolved loop value must not be treated as covered")
 	}
-	if _, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{nodeOutput}, skillSepolia, now, time.Hour); !errors.Is(err, ErrSessionPolicyUnsized) {
+	if _, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{nodeOutput}, skillSepolia, now, time.Hour); !unresolvedConflict(t, err, "weekly") {
 		t.Fatalf("an unresolved running task must fail the merge closed, got %v", err)
 	}
 
@@ -914,7 +914,7 @@ func TestEthPaySettingsListBindsValue(t *testing.T) {
 		if got == nil || !got.Unresolved || len(got.NativeRecipients) != 0 {
 			t.Fatalf("%s must stay unresolved with no recipients, got %#v", input, got)
 		}
-		if _, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{unread}, skillSepolia, now, time.Hour); !errors.Is(err, ErrSessionPolicyUnsized) {
+		if _, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{unread}, skillSepolia, now, time.Hour); !unresolvedConflict(t, err, "eth-pay") {
 			t.Fatalf("%s must fail the merge closed, got %v", input, err)
 		}
 	}
@@ -951,7 +951,7 @@ func TestEthPaySettingsListBindsValue(t *testing.T) {
 	if got := DeriveWorkflowNeeds(bad, nil, scheduleFromTask(bad, now), skillSepolia)[skillSepolia]; got == nil || !got.Unresolved {
 		t.Fatalf("a non-address element must fail closed, got %#v", got)
 	}
-	if _, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{bad}, skillSepolia, now, time.Hour); !errors.Is(err, ErrSessionPolicyUnsized) {
+	if _, _, err := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{bad}, skillSepolia, now, time.Hour); !unresolvedConflict(t, err, "eth-pay") {
 		t.Fatalf("bad element merge = %v", err)
 	}
 
@@ -1109,9 +1109,195 @@ func TestBuildAuthorizationStatuses(t *testing.T) {
 	if got := BuildAuthorization(nil, unresolved, nil, SkillSchedule{}); got.Status != AuthNoGrant {
 		t.Fatalf("no grant still wins when the target is unresolved: %#v", got)
 	}
-	if got := BuildAuthorization(open, unresolved, nil, SkillSchedule{}); got.Status != AuthCapNeedsInput || got.Detail != "a fund-moving target could not be resolved" {
+	if got := BuildAuthorization(open, unresolved, nil, SkillSchedule{}); got.Status != AuthTargetUnresolved || got.Detail != "a fund-moving target could not be resolved" {
 		t.Fatalf("unresolved target with a grant: %#v", got)
 	}
+	// A covered observed call does not clear the static miss. One iteration
+	// is not the whole loop.
+	report := &SessionGrantReport{}
+	report.observeCalls([]PlannedCall{{
+		Target:   common.HexToAddress(skillUSDC),
+		Selector: selectorTransfer,
+		Calldata: common.FromHex(transferCalldata(common.HexToAddress("0x0000000000000000000000000000000000000001"), big.NewInt(1))),
+	}})
+	if got := BuildAuthorization(open, unresolved, report, SkillSchedule{}); got.Status != AuthTargetUnresolved || got.Required == nil || !got.Required.Unresolved {
+		t.Fatalf("observed call must not clear an unresolved target: %#v", got)
+	}
+	// A call the report saw outside the grant is not_covered first. The
+	// static miss stays on Required so one iteration cannot mark the loop read.
+	outside := usableGrant("01OUT", 0, []model.AllowedAction{skillAction(skillWETH, selectorApprove)}, nil)
+	missed := &SessionGrantReport{}
+	missed.notePolicy(outside)
+	usdcCall := PlannedCall{
+		Target:   common.HexToAddress(skillUSDC),
+		Selector: selectorTransfer,
+		Calldata: common.FromHex(transferCalldata(common.HexToAddress("0x0000000000000000000000000000000000000001"), big.NewInt(1))),
+	}
+	missed.observeCalls([]PlannedCall{usdcCall})
+	missed.noteGrantMiss("a planned call is outside the usable grant", []PlannedCall{usdcCall})
+	if got := BuildAuthorization(outside, unresolved, missed, SkillSchedule{}); got.Status != AuthNotCovered || got.Required == nil || !got.Required.Unresolved {
+		t.Fatalf("an uncovered observed call must stay not_covered and keep the unresolved target: %#v", got)
+	}
+}
+
+func TestTasksExceptDropped(t *testing.T) {
+	pay := skillWriteTask("pay", "Pay", skillUSDC, "0x", skillSepolia, 1, 0, 0)
+	tmpl := skillWriteTask("tmpl", "Template", "{{settings.token}}", "0x", skillSepolia, 1, 0, 0)
+	kept, dropped := tasksExceptDropped([]*avsproto.Task{nil, pay, tmpl, {Name: "blank"}}, []string{" TMPL "})
+	if len(dropped) != 1 || dropped[0] != "tmpl" {
+		t.Fatalf("dropped = %#v", dropped)
+	}
+	if len(kept) != 2 || kept[0].GetId() != "pay" || kept[1].GetId() != "" {
+		t.Fatalf("kept ids = %q %q", kept[0].GetId(), kept[1].GetId())
+	}
+}
+
+func TestMergeSkillGrantUnresolvedBeatsUnsized(t *testing.T) {
+	now := skillNow()
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	// Unknown run count: the amount is not a fixed total, and the token is known.
+	unsized := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(1)), skillSepolia, 0, 0, 0)
+	// Known runs, unreadable contract. Typing a cap cannot name this target.
+	split := skillWriteTask("split", "Split Incoming Payments", "{{value.tokenAddress}}", transferCalldata(payee, big.NewInt(1)), skillSepolia, 5, 0, 0)
+	batch := skillWriteTask("batch", "On-Demand Batch", "{{filter1.data}}", transferCalldata(payee, big.NewInt(1)), skillSepolia, 1, 0, 0)
+
+	_, _, err := MergeSkillGrant(nil, PolicyAddition{
+		AllowedActions: []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)},
+		SpendCaps:      []model.ERC20SpendCap{skillCap(skillUSDC, "12")},
+	}, []*avsproto.Task{unsized, split}, skillSepolia, now, time.Hour)
+	if !unresolvedConflict(t, err, "split") || errors.Is(err, ErrSessionPolicyUnsized) {
+		t.Fatalf("an unread target must outrank an unsized amount, got %v", err)
+	}
+	var conflict *PolicyConflictError
+	if !errors.As(err, &conflict) || len(conflict.AffectedTaskIDs) != 1 {
+		t.Fatalf("unsized task must not be listed as unread, got %#v", err)
+	}
+
+	_, _, err = MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{split, batch}, skillSepolia, now, time.Hour)
+	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyTargetUnresolvedCode {
+		t.Fatalf("two unread targets = %v", err)
+	}
+	if len(conflict.AffectedTaskIDs) != 2 || conflict.AffectedTaskIDs[0] != "split" || conflict.AffectedTaskIDs[1] != "batch" {
+		t.Fatalf("affected = %#v", conflict.AffectedTaskIDs)
+	}
+	if conflict.Detail != "enabled automations move funds to a target the grant cannot resolve" {
+		t.Fatalf("detail = %q", conflict.Detail)
+	}
+
+	// Leaving the unread task out of the merge sizes only what is left.
+	// The previous grant's rows are not added back.
+	current := usableGrant("01OLD", now.Add(24*time.Hour).UnixMilli(), []model.AllowedAction{
+		skillAction(skillUSDC, selectorTransfer),
+		skillAction(skillWETH, selectorApprove),
+	}, []model.ERC20SpendCap{skillCap(skillUSDC, "24"), skillCap(skillWETH, "5")})
+	kept, dropped := tasksExceptDropped([]*avsproto.Task{unsized, split}, []string{"split"})
+	if len(dropped) != 1 || dropped[0] != "split" || len(kept) != 1 {
+		t.Fatalf("prepare filter = kept %d dropped %#v", len(kept), dropped)
+	}
+	// The kept task is still unsized, so the merge stays a 400. Dropping
+	// the unread id must not turn that into the 409, and must not copy
+	// the old cap forward to hide it.
+	_, _, err = MergeSkillGrant(current, PolicyAddition{
+		AllowedActions: []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)},
+		SpendCaps:      []model.ERC20SpendCap{skillCap(skillUSDC, "12")},
+	}, kept, skillSepolia, now, time.Hour)
+	if !errors.Is(err, ErrSessionPolicyUnsized) || unresolvedConflict(t, err, "split") {
+		t.Fatalf("dropped unread target must leave the unsized amount, got %v", err)
+	}
+
+	sized := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(1)), skillSepolia, 1, 0, now.Add(24*time.Hour).UnixMilli())
+	kept, _ = tasksExceptDropped([]*avsproto.Task{sized, split}, []string{"split"})
+	perms, _, err := MergeSkillGrant(current, PolicyAddition{
+		AllowedActions: []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)},
+		SpendCaps:      []model.ERC20SpendCap{skillCap(skillUSDC, "12")},
+	}, kept, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(perms.SpendCaps) != 1 || perms.SpendCaps[0].Amount != "13" {
+		t.Fatalf("cap = %+v, want remaining 1 plus the new 12, not the old 24", perms.SpendCaps)
+	}
+	for _, action := range perms.AllowedActions {
+		if action.Target != nil && action.Target.Hex() == common.HexToAddress(skillWETH).Hex() {
+			t.Fatal("dropping the unread task copied the old WETH row forward")
+		}
+	}
+}
+
+func TestClassifyRunnerCoverageUnresolved(t *testing.T) {
+	now := skillNow()
+	later := now.Add(30 * 24 * time.Hour).UnixMilli()
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	data := transferCalldata(payee, big.NewInt(1))
+	covered := skillWriteTask("pay", "Pay", skillUSDC, data, skillSepolia, 1, 0, later)
+	split := skillWriteTask("split", "Split Incoming Payments", "{{value.tokenAddress}}", data, skillSepolia, 5, 0, 0)
+	batch := skillWriteTask("batch", "On-Demand Batch", "{{filter1.data}}", data, skillSepolia, 1, 0, 0)
+	swap := skillWriteTask("swap", "Swap", skillWETH, data, skillSepolia, 1, 0, later)
+	in := SessionPolicyInput{
+		ChainID: skillSepolia,
+		Permissions: SessionPermissions{
+			AllowedActions: []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)},
+			SpendCaps:      []model.ERC20SpendCap{skillCap(skillUSDC, "100")},
+			ValidUntilMs:   later,
+		},
+	}
+	_, err := classifyRunnerCoverage(in, []*avsproto.Task{covered, split}, now)
+	var conflict *PolicyConflictError
+	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyTargetUnresolvedCode || !errors.Is(err, ErrSessionPolicyNotCovering) || errors.Is(err, ErrSessionPolicyUnsized) {
+		t.Fatalf("unread target = %#v", err)
+	}
+	if len(conflict.AffectedTaskIDs) != 1 || conflict.AffectedTaskIDs[0] != "split" {
+		t.Fatalf("affected = %#v", conflict.AffectedTaskIDs)
+	}
+	if conflict.Detail != "Split Incoming Payments moves funds to a target the grant cannot resolve" {
+		t.Fatalf("detail = %q", conflict.Detail)
+	}
+
+	in.DropTaskIDs = []string{"split"}
+	dropped, err := classifyRunnerCoverage(in, []*avsproto.Task{covered, split}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dropped) != 1 || dropped[0] != "split" {
+		t.Fatalf("dropped = %#v", dropped)
+	}
+
+	in.DropTaskIDs = nil
+	_, err = classifyRunnerCoverage(in, []*avsproto.Task{split, batch}, now)
+	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyTargetUnresolvedCode {
+		t.Fatalf("two unread targets = %v", err)
+	}
+	if len(conflict.AffectedTaskIDs) != 2 || conflict.AffectedTaskIDs[0] != "split" || conflict.AffectedTaskIDs[1] != "batch" {
+		t.Fatalf("affected = %#v", conflict.AffectedTaskIDs)
+	}
+	if conflict.Detail != "enabled automations move funds to a target the grant cannot resolve" {
+		t.Fatalf("detail = %q", conflict.Detail)
+	}
+
+	_, err = classifyRunnerCoverage(in, []*avsproto.Task{swap, split}, now)
+	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyTargetUnresolvedCode {
+		t.Fatalf("mixed miss = %v", err)
+	}
+	if len(conflict.AffectedTaskIDs) != 2 || conflict.AffectedTaskIDs[0] != "swap" || conflict.AffectedTaskIDs[1] != "split" {
+		t.Fatalf("mixed affected = %#v", conflict.AffectedTaskIDs)
+	}
+}
+
+func unresolvedConflict(t *testing.T, err error, taskID string) bool {
+	t.Helper()
+	var conflict *PolicyConflictError
+	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyTargetUnresolvedCode || !errors.Is(err, ErrSessionPolicyNotCovering) {
+		return false
+	}
+	if errors.Is(err, ErrSessionPolicyUnsized) {
+		return false
+	}
+	for _, id := range conflict.AffectedTaskIDs {
+		if id == taskID {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDeployCheckFlagOffIsNoop(t *testing.T) {

@@ -341,9 +341,13 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		if listErr != nil {
 			return nil, listErr
 		}
-		merged, ch, mergeErr := MergeSkillGrant(current, *in.Addition, workflowTasks(tasks), in.ChainID, time.Now(), time.Duration(in.ExpiresInSeconds)*time.Second)
+		kept, dropped := tasksExceptDropped(workflowTasks(tasks), in.DropTaskIDs)
+		merged, ch, mergeErr := MergeSkillGrant(current, *in.Addition, kept, in.ChainID, time.Now(), time.Duration(in.ExpiresInSeconds)*time.Second)
 		if mergeErr != nil {
 			return nil, mergeErr
+		}
+		if in.AffectedOut != nil {
+			*in.AffectedOut = dropped
 		}
 		in.Permissions = merged
 		changes = &ch
