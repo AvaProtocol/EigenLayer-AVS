@@ -454,11 +454,13 @@ func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched Ski
 
 // MergeSkillGrant unions the addition with what enabled tasks on chainID
 // still need. With no current grant, caps start at zero and an unsized or
-// unresolved fund move fails closed. With a current grant, pass nil
-// remainder only when the grant has not been applied: the stored caps are
-// the remainder, because nothing can have been spent. An applied grant must
-// pass the chain read. Nil there is refused so a missed read cannot be
-// treated as nothing left.
+// unresolved fund move fails closed. An unsized payable is
+// SESSION_POLICY_NATIVE_UNSIZED when this merge would install a native cap.
+// Any other unsized amount stays ErrSessionPolicyUnsized. With a current
+// grant, pass nil remainder only when the grant has not been applied: the
+// stored caps are the remainder, because nothing can have been spent. An
+// applied grant must pass the chain read. Nil there is refused so a missed
+// read cannot be treated as nothing left.
 func MergeSkillGrant(current *model.SessionPolicy, addition PolicyAddition, tasks []*avsproto.Task, chainID int64, now time.Time, expiresIn time.Duration) (SessionPermissions, PolicyChanges, error) {
 	return MergeSkillGrantWithRemainder(current, nil, addition, tasks, chainID, now, expiresIn)
 }
@@ -535,7 +537,12 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 	}
 
 	var unresolved []*WorkflowNeed
+	var nativeUnsized []*WorkflowNeed
 	var unsized error
+	// nativeSet is the addition. A sized running payable can install the
+	// module too, including one that sits after an unsized sibling. The
+	// sibling is not merged, but it still decides the error code.
+	wouldInstallNative := nativeSet && native.Sign() > 0
 	for _, task := range tasks {
 		if task == nil {
 			continue
@@ -551,13 +558,21 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 			unresolved = append(unresolved, need)
 			continue
 		}
+		if need.NativeSpendCap != nil && !need.NativeUnsized {
+			if amt, err := parseCapAmount(need.NativeSpendCap.Amount); err == nil && amt.Sign() > 0 {
+				wouldInstallNative = true
+			}
+		}
 		if need.CapNeedsInput {
+			if need.NativeUnsized {
+				nativeUnsized = append(nativeUnsized, need)
+			}
 			if unsized == nil {
 				unsized = fmt.Errorf("%w: task %s (%s)", ErrSessionPolicyUnsized, task.GetId(), displayName(task.GetName()))
 			}
 			continue
 		}
-		if len(unresolved) > 0 || unsized != nil {
+		if len(unresolved) > 0 || unsized != nil || len(nativeUnsized) > 0 {
 			continue
 		}
 		taskNeeds = append(taskNeeds, need)
@@ -597,6 +612,9 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 			conflict.PolicyID = current.ID
 		}
 		return SessionPermissions{}, PolicyChanges{}, conflict
+	}
+	if wouldInstallNative && len(nativeUnsized) > 0 {
+		return SessionPermissions{}, PolicyChanges{}, nativeCapUnsized(nil, nativeUnsized)
 	}
 	if unsized != nil {
 		return SessionPermissions{}, PolicyChanges{}, unsized

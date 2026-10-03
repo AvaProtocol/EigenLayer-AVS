@@ -303,6 +303,74 @@ func TestCarryNativeUsesTheSameMaxAndRefusesAnUnsizedInstall(t *testing.T) {
 	}
 }
 
+func TestCarryRefusesUnsizedNativeWhenASiblingInstallsTheModule(t *testing.T) {
+	now := skillNow()
+	dest := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	current := usableGrant("01ERC", now.Add(30*24*time.Hour).UnixMilli(),
+		[]model.AllowedAction{skillAction(skillUSDC, selectorTransfer)},
+		[]model.ERC20SpendCap{skillCap(skillUSDC, "10")})
+	addition := PolicyAddition{
+		AllowedActions: []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)},
+		SpendCaps:      []model.ERC20SpendCap{skillCap(skillUSDC, "1")},
+	}
+	sized := skillEthTask("sized", "Weekly Pay", dest.Hex(), "1", 12, 0)
+	unsized := skillEthTask("open", "Open ETH", dest.Hex(), "1", 0, 0)
+
+	_, _, err := MergeSkillGrant(current, addition, []*avsproto.Task{sized, unsized}, skillSepolia, now, time.Hour)
+	var conflict *PolicyConflictError
+	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyNativeUnsizedCode || !errors.Is(err, ErrSessionNativeCapUnsized) {
+		t.Fatalf("sibling install = %v", err)
+	}
+	if len(conflict.AffectedTaskIDs) != 1 || conflict.AffectedTaskIDs[0] != "open" || conflict.PolicyID != current.ID {
+		t.Fatalf("affected = %#v", conflict)
+	}
+
+	// No sized payable and no native addition: the module is not installed,
+	// so the unsized send is not this error.
+	perms, _, err := MergeSkillGrant(current, addition, []*avsproto.Task{unsized}, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perms.NativeSpendCap != nil || len(perms.NativeRecipients) != 0 {
+		t.Fatalf("native module installed without a sized cap: %+v", perms.NativeSpendCap)
+	}
+}
+
+func TestFreshGrantUsesNativeUnsizedWhenTheModuleWouldBeInstalled(t *testing.T) {
+	now := skillNow()
+	dest := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	unsized := skillEthTask("open", "Open ETH", dest.Hex(), "1", 0, 0)
+	other := skillEthTask("other", "Other ETH", dest.Hex(), "1", 0, 0)
+	sized := skillEthTask("sized", "Weekly Pay", dest.Hex(), "1", 12, 0)
+	erc20 := PolicyAddition{
+		AllowedActions: []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)},
+		SpendCaps:      []model.ERC20SpendCap{skillCap(skillUSDC, "1")},
+	}
+
+	_, _, err := MergeSkillGrant(nil, PolicyAddition{
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "5"},
+		NativeRecipients: []*common.Address{&dest},
+	}, []*avsproto.Task{unsized, other}, skillSepolia, now, time.Hour)
+	var conflict *PolicyConflictError
+	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyNativeUnsizedCode || conflict.PolicyID != "" || errors.Is(err, ErrSessionPolicyUnsized) {
+		t.Fatalf("fresh native addition = %v", err)
+	}
+	if len(conflict.AffectedTaskIDs) != 2 || conflict.AffectedTaskIDs[0] != "open" || conflict.AffectedTaskIDs[1] != "other" {
+		t.Fatalf("affected = %#v", conflict.AffectedTaskIDs)
+	}
+
+	// The unsized task is listed first, so the sized sibling is easy to miss.
+	_, _, err = MergeSkillGrant(nil, erc20, []*avsproto.Task{unsized, sized}, skillSepolia, now, time.Hour)
+	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyNativeUnsizedCode || len(conflict.AffectedTaskIDs) != 1 || conflict.AffectedTaskIDs[0] != "open" {
+		t.Fatalf("fresh sibling install = %v", err)
+	}
+
+	_, _, err = MergeSkillGrant(nil, erc20, []*avsproto.Task{unsized}, skillSepolia, now, time.Hour)
+	if err == nil || !errors.Is(err, ErrSessionPolicyUnsized) || errors.Is(err, ErrSessionNativeCapUnsized) {
+		t.Fatalf("unsized native with no module = %v", err)
+	}
+}
+
 func TestCarryCoverageRegressionUsesTheRemainder(t *testing.T) {
 	now := skillNow()
 	later := now.Add(60 * 24 * time.Hour).UnixMilli()
@@ -727,6 +795,72 @@ func TestSkillCarryUnappliedSkipsTheChain(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reading the remaining spend limit")
 	require.NotContains(t, err.Error(), "110")
+}
+
+func TestPrepareStaleBaseSkipsTheRemainderRead(t *testing.T) {
+	engine, _, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	usdc := common.HexToAddress(skillUSDC)
+	stored := submitLegacyPerms(t, engine, ownerKey, owner, wallet, tokenPerms(usdc, "100"))
+	require.NoError(t, MarkSessionGrantAppliedByID(engine.db, testPolicyChain, owner, wallet, stored.ID, "0xlanded"))
+	script := &limitScript{err: fmt.Errorf("rpc down")}
+	engine.spendLimitCallerOverride = func(int64) (aa.ContractCaller, error) { return script, nil }
+	stale := "01STALE"
+	_, err := engine.PrepareSessionPolicy(&model.User{Address: owner}, SessionPolicyInput{
+		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "Bot",
+		Addition: &[]PolicyAddition{skillAddition(usdc, "10")}[0], BasePolicyID: &stale,
+		ExpiresInSeconds: 3600,
+	})
+	var conflict *PolicyConflictError
+	require.ErrorAs(t, err, &conflict)
+	require.Equal(t, SessionPolicyBaseChangedCode, conflict.Code)
+	require.Equal(t, stored.ID, conflict.PolicyID)
+	require.Zero(t, script.calls)
+}
+
+func TestSubmitDropListThatChangesTheGrantDoesNotMatch(t *testing.T) {
+	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	usdc := common.HexToAddress(skillUSDC)
+	stored := submitLegacyPerms(t, engine, ownerKey, owner, wallet, tokenPerms(usdc, "10"))
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	pay := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(80)), skillSepolia, 1, 0, 0)
+	seedEnabledSkillTask(t, db, owner, wallet, pay)
+	prepared := prepareSkill(t, engine, owner, wallet, skillAddition(usdc, "1"), stored.ID)
+	got, ok := spendCapAmount(*prepared.EchoPermissions, usdc)
+	require.True(t, ok)
+	require.Equal(t, "81", got)
+
+	user := &model.User{Address: owner}
+	base := stored.ID
+	_, _, err := engine.SubmitSessionPolicy(user, SessionPolicyInput{
+		Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "Bot",
+		Permissions: *prepared.EchoPermissions, BasePolicyID: &base,
+		DropTaskIDs: []string{pay.GetId()},
+	}, prepared.Policy.ID, prepared.Policy.EntityID, prepared.Policy.Grant.Deadline, signDigest(t, ownerKey, prepared.Digest))
+	var conflict *PolicyConflictError
+	require.ErrorAs(t, err, &conflict)
+	require.Equal(t, SessionPolicyBaseChangedCode, conflict.Code)
+
+	storedNext, err := submitEcho(t, engine, ownerKey, owner, wallet, prepared, stored.ID)
+	require.NoError(t, err)
+	require.NotNil(t, storedNext)
+}
+
+func TestSubmitWithoutAPrepareSnapshotUsesThePerTaskCheck(t *testing.T) {
+	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	usdc := common.HexToAddress(skillUSDC)
+	stored := submitLegacyPerms(t, engine, ownerKey, owner, wallet, tokenPerms(usdc, "100"))
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	split := skillWriteTask("split", "Split Incoming Payments", "{{value.tokenAddress}}", transferCalldata(payee, big.NewInt(1)), skillSepolia, 5, 0, 0)
+	seedEnabledSkillTask(t, db, owner, wallet, split)
+	prepared := prepareSkill(t, engine, owner, wallet, skillAddition(usdc, "1"), stored.ID)
+	engine.forgetSkillPrepare(prepared.Policy.ID)
+	require.Nil(t, engine.skillPrepareFor(prepared.Policy.ID))
+
+	_, err := submitEcho(t, engine, ownerKey, owner, wallet, prepared, stored.ID)
+	var conflict *PolicyConflictError
+	require.ErrorAs(t, err, &conflict)
+	require.Equal(t, SessionPolicyTargetUnresolvedCode, conflict.Code)
+	require.Contains(t, conflict.AffectedTaskIDs, split.GetId())
 }
 
 func TestSkillCarrySubmitCoverage(t *testing.T) {
