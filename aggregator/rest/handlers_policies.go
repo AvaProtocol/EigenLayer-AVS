@@ -79,13 +79,16 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 		return badRequest("POLICIES_BAD_EXPIRY", "Invalid expiry",
 			fmt.Sprintf("expiresInSeconds must be at most %d.", taskengine.MaxSessionExpiresInSeconds))
 	}
+	var affected []string
 	in := taskengine.SessionPolicyInput{
 		Wallet:           wallet,
 		ChainID:          int64(req.ChainId),
 		AgentLabel:       req.AgentLabel,
 		Justification:    deref(req.Justification),
 		BasePolicyID:     req.BasePolicyId,
+		DropTaskIDs:      derefStrings(req.DropTaskIds),
 		ExpiresInSeconds: req.ExpiresInSeconds,
+		AffectedOut:      &affected,
 	}
 	if req.Add != nil {
 		// The addition is a fragment. Top-level permission fields are the
@@ -124,6 +127,9 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 		TypedData:     typedData,
 	}
 	applySkillPrepare(&out, prepared)
+	if len(affected) > 0 {
+		out.AffectedTaskIds = &affected
+	}
 	return ctx.JSON(http.StatusOK, out)
 }
 
@@ -514,6 +520,16 @@ func mapPolicyError(err error) error {
 		return policyConflictHTTP(conflict)
 	case errors.Is(err, taskengine.ErrSessionPolicyUnsized):
 		return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
+	case errors.Is(err, taskengine.ErrSessionNativeCapUnsized):
+		// The engine returns this as a PolicyConflictError, which the case
+		// above already copies onto a 409. This branch is the same code for
+		// a bare sentinel, so it cannot fall through to POLICIES_REJECTED.
+		return &restmw.HTTPError{
+			Status: http.StatusConflict,
+			Code:   taskengine.SessionPolicyNativeUnsizedCode,
+			Title:  "A running automation has an ETH amount that cannot be sized",
+			Detail: err.Error(),
+		}
 	case errors.Is(err, taskengine.ErrSessionWalletNotMAv2):
 		return badRequest("SESSION_WALLET_NOT_MA_V2", err.Error(), "")
 	case errors.Is(err, taskengine.ErrEOADelegationMissing):
@@ -708,6 +724,10 @@ func policyChangesToAPI(ch *taskengine.PolicyChanges) *generated.SessionPolicyCh
 				prev := cap.PreviousAmount
 				item.PreviousAmount = &prev
 			}
+			if cap.Removed {
+				removed := true
+				item.Removed = &removed
+			}
 			caps = append(caps, item)
 		}
 		out.CapChanges = &caps
@@ -739,8 +759,13 @@ func policyConflictHTTP(e *taskengine.PolicyConflictError) *restmw.HTTPError {
 		return nil
 	}
 	title := "Grant does not cover this workflow"
-	if e.Code == taskengine.SessionPolicyBaseChangedCode {
+	switch e.Code {
+	case taskengine.SessionPolicyBaseChangedCode:
 		title = "Grant changed since prepare"
+	case taskengine.SessionPolicyTargetUnresolvedCode:
+		title = "A running automation has a target the grant cannot read"
+	case taskengine.SessionPolicyNativeUnsizedCode:
+		title = "A running automation has an ETH amount that cannot be sized"
 	}
 	return &restmw.HTTPError{
 		Status:          http.StatusConflict,
