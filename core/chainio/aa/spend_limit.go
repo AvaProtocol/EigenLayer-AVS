@@ -21,6 +21,11 @@ import (
 // A 32-byte zero is "nothing left". A short return or an RPC error is not
 // a zero — the caller must fail closed rather than treat a failed read as
 // spent.
+//
+// The block number passed to CallContract is nil, so the read is the
+// latest block. A spend between prepare and submit changes this remainder,
+// and submit reports SESSION_POLICY_BASE_CHANGED when the signed grant no
+// longer matches.
 
 // ReadERC20SpendLimit reads AllowlistModule.erc20SpendLimits(entity, token, account).
 func ReadERC20SpendLimit(ctx context.Context, client ContractCaller, entity uint32, token, account common.Address) (*big.Int, error) {

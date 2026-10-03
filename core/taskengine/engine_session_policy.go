@@ -333,6 +333,13 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		if err != nil {
 			return nil, err
 		}
+		// A stale base is already known from this load. Checking it before
+		// the remainder read keeps an RPC failure from hiding
+		// SESSION_POLICY_BASE_CHANGED. The check under the lock still
+		// runs, for a grant that changes after this load.
+		if in.BasePolicyID != nil && !policyIDMatches(*in.BasePolicyID, preCurrent) {
+			return nil, newBaseChanged(preCurrent)
+		}
 		if preCurrent != nil {
 			readCtx, cancel := context.WithTimeout(context.Background(), occupancyProbeTimeout)
 			rem, readErr := n.resolveGrantRemainder(readCtx, preCurrent, in.Wallet)

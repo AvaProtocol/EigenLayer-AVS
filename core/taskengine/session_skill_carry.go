@@ -123,8 +123,9 @@ func (n *Engine) spendLimitCaller(chainID int64) (aa.ContractCaller, error) {
 // mergeCarriedSkillGrant sizes the replacement from the current grant.
 // Actions, native recipients, and allowContractRecipient only grow, except
 // a transfer or approve whose final cap is not positive: that row is omitted
-// rather than installed at zero. An unsized or unresolved running task does
-// not fail this path.
+// rather than installed at zero. An unresolved running task does not fail
+// this path. An unsized payable does, when this merge would install
+// NativeTokenLimitModule and the current grant has no native cap.
 func mergeCarriedSkillGrant(current *model.SessionPolicy, remainder GrantRemainder, addition PolicyAddition, tasks []*avsproto.Task, chainID int64, now time.Time, expiresIn time.Duration) (SessionPermissions, PolicyChanges, error) {
 	addCaps := map[common.Address]*big.Int{}
 	for _, cap := range addition.SpendCaps {
@@ -165,16 +166,6 @@ func mergeCarriedSkillGrant(current *model.SessionPolicy, remainder GrantRemaind
 			continue
 		}
 		fundNeeds = append(fundNeeds, need)
-	}
-
-	// Installing NativeTokenLimitModule is what starts metering payable value
-	// and self-funded gas. An unsized payable on a wallet that has no native
-	// cap yet cannot be given a number, so the module is not installed.
-	// A wallet that already has a native cap keeps that remainder instead.
-	if addNative != nil && remainder.Native == nil {
-		if conflict := nativeCapUnsized(current, fundNeeds); conflict != nil {
-			return SessionPermissions{}, PolicyChanges{}, conflict
-		}
 	}
 
 	actions := map[string]map[string]struct{}{}
@@ -305,6 +296,16 @@ func mergeCarriedSkillGrant(current *model.SessionPolicy, remainder GrantRemaind
 	}
 	if finalNative.Cmp(maxUint256) > 0 {
 		return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: native cap exceeds uint256", ErrSessionPolicyUnsized)
+	}
+	// Installing NativeTokenLimitModule meters payable value and self-funded
+	// gas. The addition or a sized running payable can be what installs it.
+	// An unsized payable on a wallet with no native cap yet cannot be given
+	// a number, so the module is not installed. A wallet that already has a
+	// native cap keeps that remainder instead.
+	if remainder.Native == nil && finalNative.Sign() > 0 {
+		if conflict := nativeCapUnsized(current, fundNeeds); conflict != nil {
+			return SessionPermissions{}, PolicyChanges{}, conflict
+		}
 	}
 
 	var recipients []*common.Address
@@ -773,6 +774,11 @@ type skillPrepareSnapshot struct {
 	savedAt    time.Time
 }
 
+// matches identifies the prepare. DropTaskIDs are not part of it. Submit
+// re-merges with the drop list in the signed body, and the echoed
+// permissions have to match that re-merge. A different list that changes
+// the grant fails that check. A list that does not change the grant is
+// the same signature.
 func (s *skillPrepareSnapshot) matches(owner common.Address, in SessionPolicyInput) bool {
 	return s != nil && s.chainID == in.ChainID && s.owner == owner && s.wallet == in.Wallet
 }

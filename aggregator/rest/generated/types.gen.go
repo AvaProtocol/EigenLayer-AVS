@@ -1664,9 +1664,11 @@ type SessionPolicyStatus string
 
 // SessionPolicyAddition What the automation being set up needs. Merged, under the runner
 // lock, with what that runner's enabled tasks on this chain still need.
-// Cap amounts are totals for this automation. They are not added to the
-// previous grant's totals, because a replacement grant starts its caps
-// from zero.
+// Cap amounts are totals for this automation. When the runner has a
+// usable grant, each cap is the greater of what remains on that grant
+// and what enabled automations still need, plus this addition. With no
+// usable grant, caps start at zero and this addition is added to what
+// enabled automations still need.
 type SessionPolicyAddition struct {
 	AllowContractRecipient *bool              `json:"allowContractRecipient,omitempty"`
 	AllowedActions         *[]AllowedAction   `json:"allowedActions,omitempty"`
