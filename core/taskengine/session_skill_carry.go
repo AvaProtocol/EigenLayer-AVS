@@ -172,12 +172,8 @@ func mergeCarriedSkillGrant(current *model.SessionPolicy, remainder GrantRemaind
 	// cap yet cannot be given a number, so the module is not installed.
 	// A wallet that already has a native cap keeps that remainder instead.
 	if addNative != nil && remainder.Native == nil {
-		for _, need := range fundNeeds {
-			if !need.NativeUnsized {
-				continue
-			}
-			return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: task %s (%s): a native cap cannot be added while its payable value cannot be sized",
-				ErrSessionNativeCapUnsized, need.TaskID, displayName(need.Name))
+		if conflict := nativeCapUnsized(current, fundNeeds); conflict != nil {
+			return SessionPermissions{}, PolicyChanges{}, conflict
 		}
 	}
 
@@ -518,6 +514,37 @@ func sameNativeAmount(a, b *model.NativeSpendCap) bool {
 
 func newLimitMoved(current *model.SessionPolicy) *PolicyConflictError {
 	return newBaseDetail(current, "the remaining limit moved and the grant id did not; prepare again")
+}
+
+// nativeCapUnsized is the 409 for every running payable the new native cap
+// cannot size. The current grant's id is included when there is one.
+// affectedTaskIds is every such task, in workflow order.
+func nativeCapUnsized(current *model.SessionPolicy, needs []*WorkflowNeed) *PolicyConflictError {
+	var ids []string
+	var parts []string
+	for _, need := range needs {
+		if need == nil || !need.NativeUnsized {
+			continue
+		}
+		if need.TaskID != "" {
+			ids = append(ids, need.TaskID)
+		}
+		parts = append(parts, fmt.Sprintf("task %s (%s)", need.TaskID, displayName(need.Name)))
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	policyID := ""
+	if current != nil {
+		policyID = current.ID
+	}
+	return &PolicyConflictError{
+		Sentinel:        ErrSessionNativeCapUnsized,
+		Code:            SessionPolicyNativeUnsizedCode,
+		Detail:          strings.Join(parts, ", ") + ": a native cap cannot be added while its payable value cannot be sized",
+		PolicyID:        policyID,
+		AffectedTaskIDs: ids,
+	}
 }
 
 func newRunningSetChanged(current *model.SessionPolicy) *PolicyConflictError {

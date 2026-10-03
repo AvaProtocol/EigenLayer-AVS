@@ -283,14 +283,16 @@ components:
           description: |
             Usable session grant involved in this failure, when there is one.
             Set on `SESSION_POLICY_BASE_CHANGED`, `SESSION_POLICY_NOT_COVERING`,
-            and `SESSION_POLICY_TARGET_UNRESOLVED`.
+            `SESSION_POLICY_TARGET_UNRESOLVED`, and
+            `SESSION_POLICY_NATIVE_UNSIZED`.
         affectedTaskIds:
           type: array
           items: { type: string }
           description: |
             Enabled tasks a grant would leave unable to run. Set on
-            `409 SESSION_POLICY_NOT_COVERING` and
-            `409 SESSION_POLICY_TARGET_UNRESOLVED` from policies:prepare
+            `409 SESSION_POLICY_NOT_COVERING`,
+            `409 SESSION_POLICY_TARGET_UNRESOLVED`, and
+            `409 SESSION_POLICY_NATIVE_UNSIZED` from policies:prepare
             and policies:submit.
         missingActions:
           type: array
@@ -1982,7 +1984,11 @@ components:
           description: New total, in the token's smallest unit.
         previousAmount:
           type: string
-          description: Previous grant's total. Omitted when the token is new.
+          description: |
+            What remained on the previous grant, in the token's smallest
+            unit. Once that grant is on chain, this is the on-chain
+            remainder. Before then, it is the stored cap. Omitted when
+            the token is new.
         removed:
           type: boolean
           description: |
@@ -3315,12 +3321,6 @@ paths:
           description: |
             `POLICIES_BAD_PERMISSIONS` — the grant is not signable. When
             there is no usable grant, an unsized amount is this code.
-
-            `POLICIES_REJECTED` — `add` would install a native spend cap
-            and a running task's payable value cannot be sized. The
-            detail names the task. The native limit module is not
-            installed. If the current grant already has a native cap,
-            this is not an error.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -3338,6 +3338,13 @@ paths:
             `affectedTaskIds` names them. Pausing the task, or naming it
             in `dropTaskIds`, is the way through. When a usable grant
             exists, an unresolved task does not fail prepare.
+
+            `SESSION_POLICY_NATIVE_UNSIZED` — `add` would install a native
+            spend cap and a running task's payable value cannot be sized.
+            `affectedTaskIds` names those tasks. Pausing one, or naming it
+            in `dropTaskIds`, is the way through. The native limit module
+            is not installed. If the current grant already has a native
+            cap, this is not an error.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -3408,11 +3415,6 @@ paths:
           description: |
             `POLICIES_BAD_PERMISSIONS` — the echoed grant is not signable,
             or, when there is no usable grant, an amount cannot be sized.
-
-            `POLICIES_REJECTED` — the echoed grant would install a native
-            spend cap and a running task's payable value cannot be sized.
-            The detail names the task. If the current grant already has a
-            native cap, this is not an error.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -3440,6 +3442,12 @@ paths:
             read, and that task was not listed in `dropTaskIds`.
             `affectedTaskIds` names them. When a usable grant exists, an
             unresolved task does not fail submit by itself.
+
+            `SESSION_POLICY_NATIVE_UNSIZED` — the echoed grant would install
+            a native spend cap and a running task's payable value cannot be
+            sized. `affectedTaskIds` names those tasks. Pausing one, or
+            naming it in `dropTaskIds`, is the way through. If the current
+            grant already has a native cap, this is not an error.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }

@@ -1367,8 +1367,9 @@ type PreparedPolicy struct {
 // log correlation.
 type Problem struct {
 	// AffectedTaskIds Enabled tasks a grant would leave unable to run. Set on
-	// `409 SESSION_POLICY_NOT_COVERING` and
-	// `409 SESSION_POLICY_TARGET_UNRESOLVED` from policies:prepare
+	// `409 SESSION_POLICY_NOT_COVERING`,
+	// `409 SESSION_POLICY_TARGET_UNRESOLVED`, and
+	// `409 SESSION_POLICY_NATIVE_UNSIZED` from policies:prepare
 	// and policies:submit.
 	AffectedTaskIds *[]string `json:"affectedTaskIds,omitempty"`
 
@@ -1388,7 +1389,8 @@ type Problem struct {
 
 	// PolicyId Usable session grant involved in this failure, when there is one.
 	// Set on `SESSION_POLICY_BASE_CHANGED`, `SESSION_POLICY_NOT_COVERING`,
-	// and `SESSION_POLICY_TARGET_UNRESOLVED`.
+	// `SESSION_POLICY_TARGET_UNRESOLVED`, and
+	// `SESSION_POLICY_NATIVE_UNSIZED`.
 	PolicyId *string `json:"policyId,omitempty"`
 
 	// Required Permissions one workflow still needs, sized to the runs it has left.
@@ -1683,7 +1685,10 @@ type SessionPolicyCapChange struct {
 	// Amount New total, in the token's smallest unit.
 	Amount string `json:"amount"`
 
-	// PreviousAmount Previous grant's total. Omitted when the token is new.
+	// PreviousAmount What remained on the previous grant, in the token's smallest
+	// unit. Once that grant is on chain, this is the on-chain
+	// remainder. Before then, it is the stored cap. Omitted when
+	// the token is new.
 	PreviousAmount *string `json:"previousAmount,omitempty"`
 
 	// Removed True when this token's cap was dropped. `amount` is then "0",

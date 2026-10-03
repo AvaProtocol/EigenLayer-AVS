@@ -382,14 +382,24 @@ func TestUnresolvedTargetMapsToConflict(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, bad.Status)
 	require.Equal(t, "POLICIES_BAD_PERMISSIONS", bad.Code)
 
-	// A native cap that cannot be sized is not the "set a spend cap" failure.
-	nativeUnsized := mapPolicyError(fmt.Errorf("%w: task eth (Send ETH): a native cap cannot be added while its payable value cannot be sized", taskengine.ErrSessionNativeCapUnsized))
+	// A native cap that cannot be sized is its own 409, not the catch-all
+	// POLICIES_REJECTED and not the "set a spend cap" failure.
+	nativeUnsized := mapPolicyError(&taskengine.PolicyConflictError{
+		Sentinel:        taskengine.ErrSessionNativeCapUnsized,
+		Code:            taskengine.SessionPolicyNativeUnsizedCode,
+		Detail:          "task eth (Send ETH): a native cap cannot be added while its payable value cannot be sized",
+		PolicyID:        "01ETH",
+		AffectedTaskIDs: []string{"eth"},
+	})
 	nativeBad, ok := nativeUnsized.(*restmw.HTTPError)
 	require.True(t, ok)
-	require.Equal(t, http.StatusBadRequest, nativeBad.Status)
-	require.Equal(t, "POLICIES_REJECTED", nativeBad.Code)
-	require.Contains(t, nativeBad.Detail, "task eth")
+	require.Equal(t, http.StatusConflict, nativeBad.Status)
+	require.Equal(t, taskengine.SessionPolicyNativeUnsizedCode, nativeBad.Code)
+	require.Equal(t, "A running automation has an ETH amount that cannot be sized", nativeBad.Title)
+	require.Equal(t, []string{"eth"}, nativeBad.AffectedTaskIDs)
+	require.Equal(t, "01ETH", nativeBad.PolicyID)
 	require.NotContains(t, nativeBad.Detail, "POLICIES_BAD_PERMISSIONS")
+	require.NotContains(t, nativeBad.Detail, "POLICIES_REJECTED")
 }
 
 // grantOverHTTP runs prepare → sign → submit and returns the decoded response.
