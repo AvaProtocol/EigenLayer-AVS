@@ -254,17 +254,22 @@ func TestCarryNativeUsesTheSameMaxAndRefusesAnUnsizedInstall(t *testing.T) {
 		[]model.AllowedAction{skillAction(skillUSDC, selectorTransfer)},
 		[]model.ERC20SpendCap{skillCap(skillUSDC, "10")})
 	unsized := skillEthTask("eth", "Send ETH", dest.Hex(), "1", 0, 0)
+	other := skillEthTask("eth2", "Other ETH", dest.Hex(), "1", 0, 0)
 	_, _, err = MergeSkillGrant(plain, PolicyAddition{
 		NativeSpendCap:   &model.NativeSpendCap{Amount: "5"},
 		NativeRecipients: []*common.Address{&dest},
 		AllowedActions:   []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)},
 		SpendCaps:        []model.ERC20SpendCap{skillCap(skillUSDC, "1")},
-	}, []*avsproto.Task{unsized}, skillSepolia, now, time.Hour)
-	if !errors.Is(err, ErrSessionNativeCapUnsized) || errors.Is(err, ErrSessionPolicyUnsized) {
+	}, []*avsproto.Task{unsized, other}, skillSepolia, now, time.Hour)
+	var conflict *PolicyConflictError
+	if !errors.As(err, &conflict) || conflict.Code != SessionPolicyNativeUnsizedCode || !errors.Is(err, ErrSessionNativeCapUnsized) || errors.Is(err, ErrSessionPolicyUnsized) {
 		t.Fatalf("unsized native install = %v", err)
 	}
-	if !strings.Contains(err.Error(), "task eth") || !strings.Contains(err.Error(), "Send ETH") {
-		t.Fatalf("detail = %v", err)
+	if len(conflict.AffectedTaskIDs) != 2 || conflict.AffectedTaskIDs[0] != "eth" || conflict.AffectedTaskIDs[1] != "eth2" || conflict.PolicyID != plain.ID {
+		t.Fatalf("affected = %#v", conflict)
+	}
+	if !strings.Contains(conflict.Detail, "task eth (Send ETH)") || !strings.Contains(conflict.Detail, "task eth2 (Other ETH)") {
+		t.Fatalf("detail = %v", conflict.Detail)
 	}
 
 	// A wallet that already has a native cap keeps the remainder.

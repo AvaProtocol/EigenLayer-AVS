@@ -53,6 +53,13 @@ const (
 	// workflow. It is not an unsized amount: typing a cap does not fix it.
 	SessionPolicyTargetUnresolvedCode = "SESSION_POLICY_TARGET_UNRESOLVED"
 
+	// SessionPolicyNativeUnsizedCode is a 409. The addition would install
+	// a native cap, and a running automation's payable value cannot be
+	// sized. Pausing that automation, or naming it in dropTaskIds, is the
+	// way through. It is not POLICIES_REJECTED: that code is also the
+	// catch-all for an unclassified rejection.
+	SessionPolicyNativeUnsizedCode = "SESSION_POLICY_NATIVE_UNSIZED"
+
 	selectorTransfer = "0xa9059cbb"
 	selectorApprove  = "0x095ea7b3"
 
@@ -75,9 +82,9 @@ var (
 	// that task; it keeps the token only when the remainder, a sized need,
 	// or the addition already gives it a positive cap.
 	ErrSessionPolicyUnsized = errors.New("cannot size the remaining spend for an enabled automation")
-	// ErrSessionNativeCapUnsized is a prepare failure when the addition would
-	// install NativeTokenLimitModule and a running automation's payable value
-	// cannot be sized. It is not ErrSessionPolicyUnsized: that sentinel is the
+	// ErrSessionNativeCapUnsized is a 409 when the addition would install
+	// NativeTokenLimitModule and a running automation's payable value cannot
+	// be sized. It is not ErrSessionPolicyUnsized: that sentinel is the
 	// "set a spend cap" failure, and this one must not be shown as that.
 	ErrSessionNativeCapUnsized = errors.New("a native cap cannot be added while a running automation has a payable value that cannot be sized")
 
