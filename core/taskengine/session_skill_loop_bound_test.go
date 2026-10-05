@@ -134,6 +134,10 @@ func batchLoopTask(t *testing.T, source string, runs int64, transfers []any) *av
 }
 
 func transferRow(token, amount string) map[string]any {
+	return transferRowAmount(token, amount)
+}
+
+func transferRowAmount(token string, amount any) map[string]any {
 	return map[string]any{
 		"recipient": "0x0000000000000000000000000000000000000001",
 		"token_amount": map[string]any{
@@ -369,8 +373,9 @@ func TestBatchNumericSizesFromSettings(t *testing.T) {
 		t.Fatalf("USDT = %q", got)
 	}
 
-	// MAX is not an integer the contract call can send. The sibling total stays.
-	mixed := batchLoopTask(t, batchFundingSource, 2, []any{transferRow(skillUSDC, "100000"), transferRow(skillUSDT, "max")})
+	// The shipped check is amount === 'MAX'. That row is a ceiling, and the
+	// sibling total stays a fixed cap.
+	mixed := batchLoopTask(t, batchFundingSource, 2, []any{transferRow(skillUSDC, "100000"), transferRow(skillUSDT, "MAX")})
 	mix := deriveSepolia(mixed, now)
 	if mix == nil || mix.Unresolved || !mix.CapNeedsInput || !mix.CapCeiling {
 		t.Fatalf("MAX row = %#v", mix)
@@ -422,6 +427,13 @@ func TestBatchNumericSizesFromSettings(t *testing.T) {
 	if got := deriveSepolia(empty, now); got != nil {
 		t.Fatalf("empty transfers must not move funds, got %#v", got)
 	}
+
+	// A JSON number is how structpb stores a numeric amount. An exact integer
+	// still sizes; it is not a ceiling.
+	numbered := batchLoopTask(t, batchFundingSource, 2, []any{transferRowAmount(skillUSDC, float64(100000))})
+	if got, ok := needCap(deriveSepolia(numbered, now), skillUSDC); !ok || got != "200000" {
+		t.Fatalf("JSON number cap = %q", got)
+	}
 }
 
 func TestBatchShapeStaysUnresolved(t *testing.T) {
@@ -436,6 +448,13 @@ func TestBatchShapeStaysUnresolved(t *testing.T) {
 
 	negative := batchLoopTask(t, batchFundingSource, 3, []any{transferRow(skillUSDC, "100000"), transferRow(skillUSDC, "-1")})
 	assertUnresolvedBatch(t, negative, now)
+
+	// code1 only special-cases the exact string MAX. These values make
+	// BigInt throw, so a sibling row must not be sized either.
+	for _, amount := range []any{"max", "hello", "", " 100", "1.5", float64(1.5)} {
+		bad := batchLoopTask(t, batchFundingSource, 3, []any{transferRow(skillUSDC, "100000"), transferRowAmount(skillUSDT, amount)})
+		assertUnresolvedBatch(t, bad, now)
+	}
 
 	sentinel := batchLoopTask(t, batchFundingSource, 3, []any{transferRow("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "100000")})
 	assertUnresolvedBatch(t, sentinel, now)

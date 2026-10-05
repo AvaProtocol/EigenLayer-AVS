@@ -51,6 +51,7 @@ var (
 	nodeOutputRef    = regexp.MustCompile(`^\{\{([A-Za-z_][A-Za-z0-9_]*)\.data\}\}$`)
 	nodeTransfersRef = regexp.MustCompile(`^\{\{([A-Za-z_][A-Za-z0-9_]*)\.data\.transfers\}\}$`)
 	identRE          = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	batchDigits      = regexp.MustCompile(`^[0-9]+$`)
 	ethTokenSentinel = common.HexToAddress("0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE")
 )
 
@@ -398,24 +399,32 @@ func batchTransferTotals(settings map[string]any) (map[common.Address]*batchTota
 	return totals, true
 }
 
+// batchAmount accepts only values the shipped code1 can evaluate. The exact
+// string MAX is the ceiling: the funding check keeps it, and the contract
+// call cannot turn it into a uint256. A non-negative integer, as a digit
+// string or a JSON number inside the 53-bit mantissa, is a sized amount.
+// "max", a blank, whitespace, and any other non-integer make BigInt throw,
+// so the row stays unrecognized.
 func batchAmount(v any) (amount *big.Int, ceiling bool, ok bool) {
-	text, parsed := scalarString(v)
-	if !parsed {
-		switch v.(type) {
-		case float32, float64:
+	if text, isString := v.(string); isString {
+		if text == "MAX" {
 			return nil, true, true
-		default:
+		}
+		if !batchDigits.MatchString(text) {
 			return nil, false, false
 		}
+		n, parsed := new(big.Int).SetString(text, 10)
+		if !parsed || n.Sign() < 0 {
+			return nil, false, false
+		}
+		return n, false, true
 	}
-	if strings.EqualFold(strings.TrimSpace(text), "MAX") || strings.TrimSpace(text) == "" {
-		return nil, true, true
+	text, parsed := scalarString(v)
+	if !parsed || text == "" || strings.HasPrefix(text, "-") {
+		return nil, false, false
 	}
-	n, parsedInt := new(big.Int).SetString(strings.TrimSpace(text), 10)
-	if !parsedInt {
-		return nil, true, true
-	}
-	if n.Sign() < 0 {
+	n, parsedInt := new(big.Int).SetString(text, 10)
+	if !parsedInt || n.Sign() < 0 {
 		return nil, false, false
 	}
 	return n, false, true
