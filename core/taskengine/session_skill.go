@@ -32,8 +32,9 @@ import (
 // grant's first run, and the on-chain limit after that. The wallet expiry
 // is the latest of the current grant, the addition, and enabled automations,
 // so a known earlier end does not shorten it. With no current grant, caps
-// are the addition plus enabled tasks, and an unsized or unresolved fund
-// move fails the merge. Simulate's permission verdict is opt-in
+// are the addition plus enabled tasks. An unresolved fund move fails the
+// merge. An unsized amount fails unless every named transfer or approve
+// already has a positive cap. Simulate's permission verdict is opt-in
 // (authorizationMode=report); the default still fails the step.
 
 const (
@@ -95,6 +96,8 @@ var (
 	// valueRef matches a whole-string loop element, {{value}} or {{value.a.b}}.
 	// It binds only while the loop input is a settings list. A loop over a
 	// node output stays unresolved, so coverage cannot invent a target.
+	// The compiled split and batch templates are the exception: they are
+	// recognized from the stored source, not by binding {{value}}.
 	valueRef = regexp.MustCompile(`^\{\{value(?:\.([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*))?\}\}$`)
 )
 
@@ -151,6 +154,12 @@ type WorkflowNeed struct {
 	ValidUntilMs     int64
 	HasFundMove      bool
 	CapNeedsInput    bool
+	// CapCeiling is a named transfer or approve whose amount is not a fixed
+	// number. One observed run must not become the cap. A positive cap on
+	// the grant is the ceiling the owner signs: it is not a derived total
+	// and it is not multiplied by the runs still left. Unknown runs set
+	// CapNeedsInput without CapCeiling.
+	CapCeiling bool
 	// Unresolved is a fund move whose target or recipient could not be
 	// read. A merge must not drop that automation, and a grant must not
 	// be treated as covering it.
@@ -364,9 +373,10 @@ func isNativeCapMessage(msg string) bool {
 }
 
 // DeriveWorkflowNeeds walks contractWrite and ethTransfer nodes, including
-// loop runners. settings overrides the task's inputVariables; nil reads
-// them from the task. Chain 0 buckets onto fallbackChain. A task with no
-// runs left returns an empty map.
+// loop runners. A loop over the compiled split or on-demand batch template
+// is sized from that shape. settings overrides the task's inputVariables;
+// nil reads them from the task. Chain 0 buckets onto fallbackChain. A task
+// with no runs left returns an empty map.
 func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched SkillSchedule, fallbackChain int64) map[int64]*WorkflowNeed {
 	if task == nil {
 		return nil
@@ -393,7 +403,7 @@ func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched Ski
 		}
 		return needs[chain]
 	}
-	walkFundMoves(task.GetNodes(), settings, func(site fundSite) {
+	walkFundMoves(task.GetNodes(), settings, task.GetTrigger(), func(site fundSite) {
 		chain := site.chain
 		if chain <= 0 {
 			chain = fallbackChain
@@ -436,6 +446,17 @@ func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched Ski
 		}
 		addAction(need, site.target, site.selector)
 		spendLimited := site.selector == selectorTransfer || site.selector == selectorApprove
+		if site.ceiling && spendLimited {
+			// The token is named. The amount is not a total, so it is not
+			// stored and one simulation must not fill it in. Unknown runs
+			// stay cap_needs_input without that ceiling flag: a typed cap
+			// can prepare the grant, and simulate still asks for a run count.
+			need.CapNeedsInput = true
+			if runsKnown {
+				need.CapCeiling = true
+			}
+			return
+		}
 		if spendLimited && (site.amountUnknown || site.loopUnknown || !runsKnown) {
 			need.CapNeedsInput = true
 		} else if spendLimited && site.amountOK && runsKnown {
@@ -567,10 +588,15 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 			if need.NativeUnsized {
 				nativeUnsized = append(nativeUnsized, need)
 			}
-			if unsized == nil {
-				unsized = fmt.Errorf("%w: task %s (%s)", ErrSessionPolicyUnsized, task.GetId(), displayName(task.GetName()))
+			// A named transfer with no derived total contributes nothing.
+			// The addition's positive cap is the ceiling. A missing cap, and
+			// any unsized native amount, still fail closed.
+			if need.NativeUnsized || !namedSpendCovered(need, caps) {
+				if unsized == nil {
+					unsized = fmt.Errorf("%w: task %s (%s)", ErrSessionPolicyUnsized, task.GetId(), displayName(task.GetName()))
+				}
+				continue
 			}
-			continue
 		}
 		if len(unresolved) > 0 || unsized != nil || len(nativeUnsized) > 0 {
 			continue
@@ -762,6 +788,67 @@ func CoverageRefusal(policy *model.SessionPolicy, need *WorkflowNeed) *PolicyCon
 	return nil
 }
 
+// namedSpendCovered reports whether every transfer or approve on need
+// already has a positive cap, either derived onto the need or present in
+// caps. caps is the addition being merged. No such action is not covered:
+// an unsized native amount stays on today's error path.
+func namedSpendCovered(need *WorkflowNeed, caps map[common.Address]*big.Int) bool {
+	if need == nil {
+		return false
+	}
+	sawSpend := false
+	for _, action := range need.Actions {
+		if action.Target == nil || !transferApproveOnly(*action.Target, need.Actions) {
+			continue
+		}
+		sawSpend = true
+		if amt := capAmount(need, *action.Target); amt != nil && amt.Sign() > 0 {
+			continue
+		}
+		got := caps[*action.Target]
+		if got == nil || got.Sign() <= 0 {
+			return false
+		}
+	}
+	return sawSpend
+}
+
+// ceilingGrantCovers is true when every unsized spend token on a ceiling
+// need has a positive grant cap. Tokens the need already sized are left
+// for capShortfall. Unknown runs are not a ceiling, so simulate stays
+// cap_needs_input until the run count is stored.
+func ceilingGrantCovers(policy *model.SessionPolicy, need *WorkflowNeed) bool {
+	if policy == nil || need == nil || !need.CapCeiling {
+		return false
+	}
+	have := map[common.Address]*big.Int{}
+	for _, cap := range policyCaps(policy) {
+		if cap.Token == nil {
+			continue
+		}
+		amt, err := parseCapAmount(cap.Amount)
+		if err != nil || amt.Sign() <= 0 {
+			continue
+		}
+		have[*cap.Token] = amt
+	}
+	sawSpend := false
+	for _, action := range need.Actions {
+		if action.Target == nil || !transferApproveOnly(*action.Target, need.Actions) {
+			continue
+		}
+		sawSpend = true
+		if amt := capAmount(need, *action.Target); amt != nil && amt.Sign() > 0 {
+			continue
+		}
+		got := have[*action.Target]
+		if got == nil || got.Sign() <= 0 {
+			return false
+		}
+	}
+	return sawSpend
+}
+
 // BuildAuthorization picks one simulate status. Simulation-resolved misses
 // win over the static walk when the report saw a write. Required is set
 // whenever the workflow moves funds.
@@ -798,7 +885,9 @@ func BuildAuthorization(policy *model.SessionPolicy, need *WorkflowNeed, report 
 	} else if need != nil {
 		missing = missingActions(policy.AllowedActions, need.Actions)
 	}
-	if len(missing) > 0 {
+	// A ceiling whose static grant lacks the token is cap_needs_input.
+	// An observed call outside the grant still wins as not_covered.
+	if len(missing) > 0 && !(filled.CapCeiling && !saw) {
 		out.Status = AuthNotCovered
 		out.Missing = missing
 		out.Detail = "a planned call is outside the usable grant"
@@ -811,9 +900,15 @@ func BuildAuthorization(policy *model.SessionPolicy, need *WorkflowNeed, report 
 		out.Detail = "a fund-moving target could not be resolved"
 		return out
 	}
-	if filled.CapNeedsInput {
+	if filled.CapNeedsInput && !ceilingGrantCovers(policy, filled) {
 		out.Status = AuthCapNeedsInput
 		out.Detail = "a spend amount is not a fixed number"
+		return out
+	}
+	if len(missing) > 0 {
+		out.Status = AuthNotCovered
+		out.Missing = missing
+		out.Detail = "a planned call is outside the usable grant"
 		return out
 	}
 	short, nativeShort := capShortfall(policy, filled)
@@ -1026,7 +1121,10 @@ type fundSite struct {
 	amountOK      bool
 	amountUnknown bool
 	loopUnknown   bool
-	loopMult      int
+	// ceiling is a named spend whose amount is not a fixed number. The
+	// visit records the action and does not store a derived cap.
+	ceiling  bool
+	loopMult int
 }
 
 // fundScope is the settings map plus, inside a settings-list loop, the
@@ -1038,7 +1136,7 @@ type fundScope struct {
 	hasValue bool
 }
 
-func walkFundMoves(nodes []*avsproto.TaskNode, settings map[string]any, visit func(fundSite)) {
+func walkFundMoves(nodes []*avsproto.TaskNode, settings map[string]any, trigger *avsproto.TaskTrigger, visit func(fundSite)) {
 	scope := fundScope{settings: settings}
 	for _, node := range nodes {
 		if node == nil {
@@ -1056,6 +1154,12 @@ func walkFundMoves(nodes []*avsproto.TaskNode, settings map[string]any, visit fu
 				continue
 			}
 			if !known {
+				if sites, ok := boundNodeOutputLoop(nodes, settings, trigger, loop); ok {
+					for _, site := range sites {
+						visit(site)
+					}
+					continue
+				}
 				if cw := loop.GetContractWrite(); cw != nil {
 					collectContractWrite(cw, scope, true, 1, visit)
 				}
@@ -1342,8 +1446,9 @@ func lookupSetting(expr string, settings map[string]any) (any, bool) {
 }
 
 // loopElements returns the settings list a loop iterates. An input that is
-// not a settings list, including {{split1.data}} and {{filter1.data}}, is
-// unknown: the caller visits once with {{value}} unbound.
+// not a settings list is unknown here. walkFundMoves may still recognize
+// the compiled split or batch template; anything else is visited once
+// with {{value}} unbound.
 func loopElements(cfg *avsproto.LoopNode_Config, settings map[string]any) ([]any, bool) {
 	if cfg == nil {
 		return nil, false
@@ -1868,6 +1973,13 @@ func fillObserved(need *WorkflowNeed, saw bool, planned []PlannedCall, tokenSpen
 	} else {
 		filled.HasFundMove = true
 	}
+	defer sortNeed(&filled)
+	if filled.CapCeiling {
+		// One observed iteration is not the split or the batch total.
+		// Leave the named actions as they are and do not copy the spend.
+		filled.CapNeedsInput = true
+		return &filled
+	}
 	for _, call := range planned {
 		sel, ok := observedSpendSelector(call)
 		if !ok || call.Target == (common.Address{}) {
@@ -1876,7 +1988,6 @@ func fillObserved(need *WorkflowNeed, saw bool, planned []PlannedCall, tokenSpen
 		addAction(&filled, call.Target, sel)
 		filled.HasFundMove = true
 	}
-	defer sortNeed(&filled)
 	runs, known := remainingRuns(sched, sched.Crons)
 	if !known || runs <= 0 {
 		markUncappedSpend(&filled)
