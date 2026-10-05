@@ -234,14 +234,33 @@ func TestMergeSkillGrantFirstGrantHasNoWasLine(t *testing.T) {
 	}
 }
 
-func TestMergeSkillGrantUnsizedTransferFailsClosed(t *testing.T) {
+func TestMergeSkillGrantUnsizedNamedSpend(t *testing.T) {
+	// Any named transfer with no derived total, not only split and batch.
+	// A cap on a different token does not size it. A positive cap on the
+	// same token is the ceiling and is the only amount merged.
 	task := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(common.HexToAddress("0x0000000000000000000000000000000000000001"), big.NewInt(1)), skillSepolia, 0, 0, 0)
+	now := skillNow()
 	_, _, err := MergeSkillGrant(nil, PolicyAddition{
 		AllowedActions: []model.AllowedAction{skillAction(skillUSDC, selectorApprove)},
-		SpendCaps:      []model.ERC20SpendCap{skillCap(skillUSDC, "1")},
-	}, []*avsproto.Task{task}, skillSepolia, skillNow(), time.Hour)
+		SpendCaps:      []model.ERC20SpendCap{skillCap(skillWETH, "1")},
+	}, []*avsproto.Task{task}, skillSepolia, now, time.Hour)
 	if !errors.Is(err, ErrSessionPolicyUnsized) {
 		t.Fatalf("unlimited transfer must fail closed, got %v", err)
+	}
+	// The same token's positive addition is the ceiling. The task adds the
+	// transfer and no derived amount.
+	perms, _, err := MergeSkillGrant(nil, PolicyAddition{
+		AllowedActions: []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)},
+		SpendCaps:      []model.ERC20SpendCap{skillCap(skillUSDC, "40")},
+	}, []*avsproto.Task{task}, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := spendCapAmount(perms, common.HexToAddress(skillUSDC)); !ok || got != "40" {
+		t.Fatalf("known-token ceiling = %q, want the addition only", got)
+	}
+	if !actionHasSelector(perms.AllowedActions, skillUSDC, selectorTransfer) {
+		t.Fatalf("actions = %+v", perms.AllowedActions)
 	}
 }
 
