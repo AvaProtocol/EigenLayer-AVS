@@ -49,6 +49,11 @@ const (
 	AuthCapNeedsInput    = "cap_needs_input"
 	AuthTargetUnresolved = "target_unresolved"
 
+	// ceilingSharedCapDetail is the covered verdict for a ceiling. The cap
+	// is wallet-wide, so a positive amount sized for another automation
+	// also satisfies this one.
+	ceilingSharedCapDetail = "this ceiling shares the token cap with every automation on the wallet"
+
 	// SessionPolicyTargetUnresolvedCode is a 409. The automation moves
 	// funds, and the gateway cannot name the target from the stored
 	// workflow. It is not an unsized amount: typing a cap does not fix it.
@@ -544,6 +549,10 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 			return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: new automation cap %s exceeds uint256", ErrSessionPolicyUnsized, cap.Token.Hex())
 		}
 	}
+	// Later tasks add their derived caps into caps. A ceiling may use only
+	// the addition, so a sibling's total cannot cover it or change with
+	// task order.
+	additionCaps := cloneCaps(caps)
 	recipients = append(recipients, addition.NativeRecipients...)
 	if addition.NativeSpendCap != nil {
 		amt, err := parseCapAmount(addition.NativeSpendCap.Amount)
@@ -589,9 +598,9 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 				nativeUnsized = append(nativeUnsized, need)
 			}
 			// A named transfer with no derived total contributes nothing.
-			// The addition's positive cap is the ceiling. A missing cap, and
-			// any unsized native amount, still fail closed.
-			if need.NativeUnsized || !namedSpendCovered(need, caps) {
+			// Only the addition's positive cap covers it. A sibling task's
+			// derived cap does not, and a missing cap still fails closed.
+			if need.NativeUnsized || !namedSpendCovered(need, additionCaps) {
 				if unsized == nil {
 					unsized = fmt.Errorf("%w: task %s (%s)", ErrSessionPolicyUnsized, task.GetId(), displayName(task.GetName()))
 				}
@@ -790,7 +799,9 @@ func CoverageRefusal(policy *model.SessionPolicy, need *WorkflowNeed) *PolicyCon
 
 // namedSpendCovered reports whether every transfer or approve on need
 // already has a positive cap, either derived onto the need or present in
-// caps. caps is the addition being merged. No such action is not covered:
+// caps. caps must be the addition alone, not caps accumulated from
+// earlier tasks. This applies to every named unsized transfer or approve,
+// not only a recognized split or batch. No such action is not covered:
 // an unsized native amount stays on today's error path.
 func namedSpendCovered(need *WorkflowNeed, caps map[common.Address]*big.Int) bool {
 	if need == nil {
@@ -811,6 +822,17 @@ func namedSpendCovered(need *WorkflowNeed, caps map[common.Address]*big.Int) boo
 		}
 	}
 	return sawSpend
+}
+
+func cloneCaps(caps map[common.Address]*big.Int) map[common.Address]*big.Int {
+	out := make(map[common.Address]*big.Int, len(caps))
+	for token, amt := range caps {
+		if amt == nil {
+			continue
+		}
+		out[token] = new(big.Int).Set(amt)
+	}
+	return out
 }
 
 // ceilingGrantCovers is true when every unsized spend token on a ceiling
@@ -929,6 +951,9 @@ func BuildAuthorization(policy *model.SessionPolicy, need *WorkflowNeed, report 
 		return out
 	}
 	out.Status = AuthCovered
+	if filled.CapCeiling {
+		out.Detail = ceilingSharedCapDetail
+	}
 	return out
 }
 

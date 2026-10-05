@@ -196,12 +196,8 @@ func boundBatchLoop(nodes []*avsproto.TaskNode, settings map[string]any, loop *a
 	}
 	sites := make([]fundSite, 0, len(totals))
 	for token, total := range totals {
-		if total.ceiling {
-			sites = append(sites, transferSite(chain, token, nil, true))
-			continue
-		}
-		if total.sum != nil && total.sum.Sign() > 0 {
-			sites = append(sites, transferSite(chain, token, new(big.Int).Set(total.sum), false))
+		if total != nil && total.Sign() > 0 {
+			sites = append(sites, transferSite(chain, token, new(big.Int).Set(total), false))
 		}
 	}
 	return sites, true
@@ -341,12 +337,7 @@ func splitTargetTokens(spec, triggerName string, trigger *avsproto.TaskTrigger) 
 	return []common.Address{one}, true
 }
 
-type batchTotal struct {
-	sum     *big.Int
-	ceiling bool
-}
-
-func batchTransferTotals(settings map[string]any) (map[common.Address]*batchTotal, bool) {
+func batchTransferTotals(settings map[string]any) (map[common.Address]*big.Int, bool) {
 	if settings == nil {
 		return nil, false
 	}
@@ -358,7 +349,7 @@ func batchTransferTotals(settings map[string]any) (map[common.Address]*batchTota
 	if !ok {
 		return nil, false
 	}
-	totals := map[common.Address]*batchTotal{}
+	totals := map[common.Address]*big.Int{}
 	for _, item := range list {
 		row, ok := item.(map[string]any)
 		if !ok {
@@ -384,75 +375,47 @@ func batchTransferTotals(settings map[string]any) (map[common.Address]*batchTota
 		if !ok {
 			return nil, false
 		}
-		amount, ceiling, ok := batchAmount(amountRaw)
+		amount, ok := batchAmount(amountRaw)
 		if !ok {
 			return nil, false
 		}
-		if ceiling {
-			noteBatchCeiling(totals, token)
-			continue
-		}
 		if amount != nil && amount.Sign() > 0 {
-			noteBatchAmount(totals, token, amount)
+			total := totals[token]
+			if total == nil {
+				total = big.NewInt(0)
+				totals[token] = total
+			}
+			total.Add(total, amount)
 		}
 	}
 	return totals, true
 }
 
-// batchAmount accepts only values the shipped code1 can evaluate. The exact
-// string MAX is the ceiling: the funding check keeps it, and the contract
-// call cannot turn it into a uint256. A non-negative integer, as a digit
-// string or a JSON number inside the 53-bit mantissa, is a sized amount.
-// "max", a blank, whitespace, and any other non-integer make BigInt throw,
-// so the row stays unrecognized.
-func batchAmount(v any) (amount *big.Int, ceiling bool, ok bool) {
+// batchAmount accepts a non-negative integer the contract call can encode:
+// a digit string, or a JSON number inside the 53-bit mantissa. The exact
+// string MAX is what code1 treats as "spend the rest", but transfer's
+// uint256 argument cannot encode it, so that row stays unrecognized.
+// "max", a blank, whitespace, and any other non-integer do too.
+func batchAmount(v any) (amount *big.Int, ok bool) {
 	if text, isString := v.(string); isString {
-		if text == "MAX" {
-			return nil, true, true
-		}
 		if !batchDigits.MatchString(text) {
-			return nil, false, false
+			return nil, false
 		}
 		n, parsed := new(big.Int).SetString(text, 10)
 		if !parsed || n.Sign() < 0 {
-			return nil, false, false
+			return nil, false
 		}
-		return n, false, true
+		return n, true
 	}
 	text, parsed := scalarString(v)
 	if !parsed || text == "" || strings.HasPrefix(text, "-") {
-		return nil, false, false
+		return nil, false
 	}
 	n, parsedInt := new(big.Int).SetString(text, 10)
 	if !parsedInt || n.Sign() < 0 {
-		return nil, false, false
+		return nil, false
 	}
-	return n, false, true
-}
-
-func noteBatchCeiling(totals map[common.Address]*batchTotal, token common.Address) {
-	total := totals[token]
-	if total == nil {
-		total = &batchTotal{}
-		totals[token] = total
-	}
-	total.ceiling = true
-	total.sum = nil
-}
-
-func noteBatchAmount(totals map[common.Address]*batchTotal, token common.Address, amount *big.Int) {
-	total := totals[token]
-	if total == nil {
-		total = &batchTotal{sum: big.NewInt(0)}
-		totals[token] = total
-	}
-	if total.ceiling {
-		return
-	}
-	if total.sum == nil {
-		total.sum = big.NewInt(0)
-	}
-	total.sum.Add(total.sum, amount)
+	return n, true
 }
 
 func normalizeJS(source string) string {

@@ -234,10 +234,10 @@ func TestMergeSkillGrantFirstGrantHasNoWasLine(t *testing.T) {
 	}
 }
 
-func TestMergeSkillGrantUnsizedTransferFailsClosed(t *testing.T) {
-	// Unknown run count on a known token. A cap on a different token does
-	// not size this transfer. A positive cap on the same token is a ceiling
-	// and is covered by the split and batch tests.
+func TestMergeSkillGrantUnsizedNamedSpend(t *testing.T) {
+	// Any named transfer with no derived total, not only split and batch.
+	// A cap on a different token does not size it. A positive cap on the
+	// same token is the ceiling and is the only amount merged.
 	task := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(common.HexToAddress("0x0000000000000000000000000000000000000001"), big.NewInt(1)), skillSepolia, 0, 0, 0)
 	now := skillNow()
 	_, _, err := MergeSkillGrant(nil, PolicyAddition{

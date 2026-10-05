@@ -269,8 +269,8 @@ func TestPercentageSplitAsksForACeiling(t *testing.T) {
 		t.Fatalf("no grant = %#v", auth)
 	}
 	cover := usableGrant("01COVER", later, modelAllowed(skillUSDC, skillUSDT), modelCap(skillUSDC, "10", skillUSDT, "20"))
-	if auth := BuildAuthorization(cover, need, nil, scheduleFromTask(task, now)); auth.Status != AuthCovered {
-		t.Fatalf("a positive ceiling must cover, got %#v", auth)
+	if auth := BuildAuthorization(cover, need, nil, scheduleFromTask(task, now)); auth.Status != AuthCovered || auth.Detail != ceilingSharedCapDetail {
+		t.Fatalf("a positive ceiling must cover and say the cap is shared, got %#v", auth)
 	}
 
 	payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
@@ -373,33 +373,6 @@ func TestBatchNumericSizesFromSettings(t *testing.T) {
 		t.Fatalf("USDT = %q", got)
 	}
 
-	// The shipped check is amount === 'MAX'. That row is a ceiling, and the
-	// sibling total stays a fixed cap.
-	mixed := batchLoopTask(t, batchFundingSource, 2, []any{transferRow(skillUSDC, "100000"), transferRow(skillUSDT, "MAX")})
-	mix := deriveSepolia(mixed, now)
-	if mix == nil || mix.Unresolved || !mix.CapNeedsInput || !mix.CapCeiling {
-		t.Fatalf("MAX row = %#v", mix)
-	}
-	if got, ok := needCap(mix, skillUSDC); !ok || got != "200000" {
-		t.Fatalf("sized sibling = %q", got)
-	}
-	if _, ok := needCap(mix, skillUSDT); ok || !actionHasSelector(mix.Actions, skillUSDT, selectorTransfer) {
-		t.Fatalf("MAX token = caps %+v actions %+v", mix.Caps, mix.Actions)
-	}
-	merged, _, err := MergeSkillGrant(nil, PolicyAddition{
-		AllowedActions: modelAllowed(skillUSDT),
-		SpendCaps:      modelCap(skillUSDT, "50"),
-	}, []*avsproto.Task{mixed}, skillSepolia, now, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, ok := spendCapAmount(merged, common.HexToAddress(skillUSDC)); !ok || got != "200000" {
-		t.Fatalf("merged sibling = %q", got)
-	}
-	if got, ok := spendCapAmount(merged, common.HexToAddress(skillUSDT)); !ok || got != "50" {
-		t.Fatalf("merged ceiling = %q, want the addition only", got)
-	}
-
 	open := batchLoopTask(t, batchFundingSource, 0, rows)
 	unknown := deriveSepolia(open, now)
 	if unknown == nil || unknown.Unresolved || !unknown.CapNeedsInput || unknown.CapCeiling || len(unknown.Caps) != 0 {
@@ -449,9 +422,9 @@ func TestBatchShapeStaysUnresolved(t *testing.T) {
 	negative := batchLoopTask(t, batchFundingSource, 3, []any{transferRow(skillUSDC, "100000"), transferRow(skillUSDC, "-1")})
 	assertUnresolvedBatch(t, negative, now)
 
-	// code1 only special-cases the exact string MAX. These values make
-	// BigInt throw, so a sibling row must not be sized either.
-	for _, amount := range []any{"max", "hello", "", " 100", "1.5", float64(1.5)} {
+	// MAX is code1's "spend the rest" sentinel, and transfer cannot encode
+	// it as a uint256. These values stay unrecognized, sibling rows included.
+	for _, amount := range []any{"MAX", "max", "hello", "", " 100", "1.5", float64(1.5)} {
 		bad := batchLoopTask(t, batchFundingSource, 3, []any{transferRow(skillUSDC, "100000"), transferRowAmount(skillUSDT, amount)})
 		assertUnresolvedBatch(t, bad, now)
 	}
@@ -464,6 +437,39 @@ func TestBatchShapeStaysUnresolved(t *testing.T) {
 
 	missing := batchLoopTask(t, batchFundingSource, 3, nil)
 	assertUnresolvedBatch(t, missing, now)
+}
+
+func TestCeilingCoverageIgnoresSiblingOrder(t *testing.T) {
+	now := skillNow()
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000002")
+	later := now.Add(60 * 24 * time.Hour).UnixMilli()
+	sized := skillWriteTask("pay", "Weekly pay", skillUSDC, transferCalldata(payee, big.NewInt(1_000_000)), skillSepolia, 4, 0, later)
+	split := splitLoopTask(splitTemplateSource, [][]string{{skillUSDC}}, 5)
+	split.Id = "split"
+
+	_, _, sizedFirst := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{sized, split}, skillSepolia, now, time.Hour)
+	_, _, splitFirst := MergeSkillGrant(nil, PolicyAddition{}, []*avsproto.Task{split, sized}, skillSepolia, now, time.Hour)
+	if !errors.Is(sizedFirst, ErrSessionPolicyUnsized) || !errors.Is(splitFirst, ErrSessionPolicyUnsized) {
+		t.Fatalf("empty addition: sized-first %v, split-first %v", sizedFirst, splitFirst)
+	}
+
+	addition := PolicyAddition{
+		AllowedActions: modelAllowed(skillUSDC),
+		SpendCaps:      modelCap(skillUSDC, "10"),
+	}
+	payThenSplit, _, err := MergeSkillGrant(nil, addition, []*avsproto.Task{sized, split}, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	splitThenPay, _, err := MergeSkillGrant(nil, addition, []*avsproto.Task{split, sized}, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, perms := range []SessionPermissions{payThenSplit, splitThenPay} {
+		if got, ok := spendCapAmount(perms, common.HexToAddress(skillUSDC)); !ok || got != "4000010" {
+			t.Fatalf("cap = %q, want the pay's 4000000 plus the addition 10", got)
+		}
+	}
 }
 
 func TestCarriedGrantDoesNotFreezeOnARecognizedSplit(t *testing.T) {
