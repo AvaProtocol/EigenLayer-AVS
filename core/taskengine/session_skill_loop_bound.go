@@ -1,9 +1,11 @@
 package taskengine
 
 import (
+	"bytes"
 	"encoding/json"
 	"math/big"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -15,8 +17,9 @@ import (
 // iterate a settings list. {{value}} stays unbound, and the generic walk
 // would mark the transfer unresolved. These two shapes are recognized from
 // the stored protobuf only: the split source is scanned against the
-// generator's grammar, and the batch source must equal the shipped code1.
-// The code is not executed. A mismatch stays unresolved.
+// generator's grammar, and the batch source must equal the shipped code1
+// in studio templates/on-demand-batch-transfer-telegram.json. A Studio
+// edit that is not copied here stays unresolved. The code is not executed.
 
 const batchFundingSource = `// Multi-token aware funding check. For each transfer row we draw down the
 // available balance of that row's token. Rows are funded in order, so two
@@ -121,6 +124,9 @@ func boundSplitLoop(nodes []*avsproto.TaskNode, trigger *avsproto.TaskTrigger, l
 	spec := rows[0].token
 	unbounded := false
 	sum := new(big.Int)
+	// One percentage or rest row makes the token a ceiling. The fixed
+	// rows' sum is not kept as a floor and is not added to the owner's
+	// cap: the deposit is unknown, and that cap is the whole allowance.
 	for _, row := range rows {
 		if row.token != spec {
 			return nil, false
@@ -194,11 +200,18 @@ func boundBatchLoop(nodes []*avsproto.TaskNode, settings map[string]any, loop *a
 	if !ok {
 		return nil, false
 	}
-	sites := make([]fundSite, 0, len(totals))
+	tokens := make([]common.Address, 0, len(totals))
 	for token, total := range totals {
 		if total != nil && total.Sign() > 0 {
-			sites = append(sites, transferSite(chain, token, new(big.Int).Set(total), false))
+			tokens = append(tokens, token)
 		}
+	}
+	sort.Slice(tokens, func(i, j int) bool {
+		return bytes.Compare(tokens[i].Bytes(), tokens[j].Bytes()) < 0
+	})
+	sites := make([]fundSite, 0, len(tokens))
+	for _, token := range tokens {
+		sites = append(sites, transferSite(chain, token, new(big.Int).Set(totals[token]), false))
 	}
 	return sites, true
 }
@@ -645,6 +658,9 @@ func parseSplitTerm(s string, i int) (int, bool) {
 	return next, true
 }
 
+// parsePercentage matches input * Nn / 100n and does not keep N. Any share
+// of the unknown deposit is unbounded. A divisor other than 100n is not
+// the generator's form and fails the match.
 func parsePercentage(s string, i int) (int, bool) {
 	i = skipSpace(s, i)
 	if !hasIdent(s, i, "input") {

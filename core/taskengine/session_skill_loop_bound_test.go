@@ -294,6 +294,30 @@ func TestPercentageSplitAsksForACeiling(t *testing.T) {
 	}
 }
 
+func TestSplitProgramRejectsEditedExpressions(t *testing.T) {
+	rejects := []string{
+		splitSource(skillUSDC, "200000n") + "\ntrailing",
+		splitSource(skillUSDC, "input - input"),
+		splitSource(skillUSDC, "input - ((200000n))"),
+		splitSource(skillUSDC, "1_000n"),
+		splitSource(skillUSDC, "input * 30n / 99n"),
+		strings.Replace(splitSource(skillUSDC, "200000n"), `name: "team"`, `name: "\q"`, 1),
+		"",
+		"{",
+		"const input = BigInt({{",
+	}
+	for _, src := range rejects {
+		if _, _, ok := parseSplitProgram(src); ok {
+			t.Fatalf("accepted %q", src)
+		}
+	}
+	escaped := strings.Replace(splitSource(skillUSDC, "200000n"), `name: "team"`, `name: "caf\u00e9"`, 1)
+	_, rows, ok := parseSplitProgram(escaped)
+	if !ok || len(rows) != 1 || rows[0].unbounded || rows[0].amount.Cmp(big.NewInt(200000)) != 0 {
+		t.Fatalf("escaped name = ok %v rows %+v", ok, rows)
+	}
+}
+
 func TestSplitShapeStaysUnresolved(t *testing.T) {
 	now := skillNow()
 	queries := [][]string{{skillUSDC, skillUSDT}}
