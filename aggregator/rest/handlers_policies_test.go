@@ -402,6 +402,23 @@ func TestUnresolvedTargetMapsToConflict(t *testing.T) {
 	require.NotContains(t, nativeBad.Detail, "POLICIES_REJECTED")
 }
 
+func TestExpiredGrantDeployCheckMapsToConflict(t *testing.T) {
+	mapped := policyConflictFrom(&taskengine.PolicyConflictError{
+		Sentinel:        taskengine.ErrSessionPolicyNotCovering,
+		Code:            taskengine.SessionPolicyExpiredCode,
+		Detail:          "the runner's grant expired at 2026-10-01T12:00:00Z; grant again before deploying this workflow",
+		PolicyID:        "01EXPIRED",
+		AffectedTaskIDs: []string{"pay"},
+	})
+	httpErr, ok := mapped.(*restmw.HTTPError)
+	require.True(t, ok)
+	require.Equal(t, http.StatusConflict, httpErr.Status)
+	require.Equal(t, taskengine.SessionPolicyExpiredCode, httpErr.Code)
+	require.Equal(t, "Grant has expired", httpErr.Title)
+	require.Equal(t, "01EXPIRED", httpErr.PolicyID)
+	require.Equal(t, []string{"pay"}, httpErr.AffectedTaskIDs)
+}
+
 // grantOverHTTP runs prepare → sign → submit and returns the decoded response.
 func (r *policyTestRig) grantOverHTTP(t *testing.T) generated.SubmitPolicyResponse {
 	t.Helper()

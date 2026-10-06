@@ -1389,8 +1389,8 @@ type Problem struct {
 
 	// PolicyId Usable session grant involved in this failure, when there is one.
 	// Set on `SESSION_POLICY_BASE_CHANGED`, `SESSION_POLICY_NOT_COVERING`,
-	// `SESSION_POLICY_TARGET_UNRESOLVED`, and
-	// `SESSION_POLICY_NATIVE_UNSIZED`.
+	// `SESSION_POLICY_TARGET_UNRESOLVED`, `SESSION_POLICY_NATIVE_UNSIZED`,
+	// and `SESSION_POLICY_EXPIRED`.
 	PolicyId *string `json:"policyId,omitempty"`
 
 	// Required Permissions one workflow still needs, sized to the runs it has left.
@@ -1579,7 +1579,9 @@ type SessionAuthorization struct {
 	// `no_grant` — fund-moving steps and no usable grant.
 	// `not_covered` — a planned call or native recipient is outside the grant.
 	// `cap_too_low` — a sized cap or native budget is short.
-	// `expires_too_soon` — the grant ends before this workflow's window.
+	// `expires_too_soon` — the grant has already expired, or it ends
+	// before this workflow's window. A workflow with no end still
+	// reports this when the grant's own expiry has passed.
 	// `cap_needs_input` — a spend amount is not a fixed number, so the
 	// caller must choose the cap.
 	// `target_unresolved` — a fund-moving target could not be read from
@@ -1595,7 +1597,9 @@ type SessionAuthorization struct {
 // `no_grant` — fund-moving steps and no usable grant.
 // `not_covered` — a planned call or native recipient is outside the grant.
 // `cap_too_low` — a sized cap or native budget is short.
-// `expires_too_soon` — the grant ends before this workflow's window.
+// `expires_too_soon` — the grant has already expired, or it ends
+// before this workflow's window. A workflow with no end still
+// reports this when the grant's own expiry has passed.
 // `cap_needs_input` — a spend amount is not a fixed number, so the
 // caller must choose the cap.
 // `target_unresolved` — a fund-moving target could not be read from
