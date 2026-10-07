@@ -209,6 +209,12 @@ macros:
     # a valid JSON object and MUST be set (an unresolved template in a customCode source
     # hard-fails the node). Single-quote it so the inner double quotes survive YAML.
     guardian_ruleset:    '{"weak":["honeypot_related_address","blacklist_doubt"]}'
+    # Studio /api/notify. Email and Telegram nodes POST here via
+    # {{apContext.configVars.notify_url}}. notify_api_token must match Studio's
+    # SUMMARIZE_AUTH_TOKEN. A deployed gateway also keeps email_url and
+    # email_api_token for tasks compiled before that rename.
+    notify_url:          "http://localhost:3000/api/notify"
+    notify_api_token:    ""
 
 # Optional: post-execution AI summarization. Disabled by default in dev.
 notifications:

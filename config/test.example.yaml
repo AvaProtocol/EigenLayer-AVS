@@ -110,6 +110,9 @@ macros:
     # guardian_ruleset — tunable verdict knobs read via {{apContext.configVars.guardian_ruleset}}
     # (bare-injected as a JS object; must be valid JSON and must be set).
     guardian_ruleset:    '{"weak":["honeypot_related_address","blacklist_doubt"]}'
+    # Studio /api/notify. Same names as config/gateway.example.yaml.
+    notify_url:          "http://localhost:3000/api/notify"
+    notify_api_token:    ""
 
 # Optional: post-execution AI summarization. Disabled by default in tests.
 notifications:
