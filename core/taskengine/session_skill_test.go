@@ -1889,6 +1889,51 @@ func TestDeployCheckRefusesExpiredGrantWithNoEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("live unresolved target outranks an expired grant on another chain", func(t *testing.T) {
+		payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+		// Chain 1 is visited first. Cover both orders so an expired
+		// grant cannot keep policyId just because it was seen first.
+		orders := []struct {
+			name              string
+			owner, runner     string
+			unresolvedChain   int64
+			expiredChain      int64
+			liveID, expiredID string
+		}{
+			{"unresolved chain first", "0x0000000000000000000000000000000000000027", "0x0000000000000000000000000000000000000028", 1, skillSepolia, "01liveunresolvedlow000000", "01expiredhighchain0000001"},
+			{"expired chain first", "0x0000000000000000000000000000000000000029", "0x000000000000000000000000000000000000002a", skillSepolia, 1, "01liveunresolvedhigh00000", "01expiredlowchain00000000"},
+		}
+		for _, order := range orders {
+			t.Run(order.name, func(t *testing.T) {
+				owner := common.HexToAddress(order.owner)
+				runner := common.HexToAddress(order.runner)
+				live := skillWriteTask("tmpl", "Template", "{{settings.token}}", transferCalldata(payee, big.NewInt(1)), order.unresolvedChain, 1, 0, 0)
+				expired := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(1)), order.expiredChain, 1, 0, 0)
+				live.Nodes = append(live.Nodes, expired.Nodes...)
+				storeChainGrant(t, db, order.liveID, owner, runner, order.unresolvedChain, now.Add(24*time.Hour).UnixMilli(), []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)})
+				storeChainGrant(t, db, order.expiredID, owner, runner, order.expiredChain, now.Add(-time.Hour).UnixMilli(), []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)})
+
+				_, err := on.enforceSessionPolicyDeployCheck(&model.User{Address: owner}, skillWorkflow(live, runner))
+				var conflict *PolicyConflictError
+				if !errors.As(err, &conflict) || conflict.Code != SessionPolicyTargetUnresolvedCode || conflict.PolicyID != order.liveID {
+					t.Fatalf("mixed unresolved deploy = %#v", err)
+				}
+				if conflict.Required == nil || conflict.Required.ChainID != order.unresolvedChain {
+					t.Fatalf("required = %#v", conflict.Required)
+				}
+				if strings.Contains(conflict.Detail, "grant again") {
+					t.Fatalf("detail = %q", conflict.Detail)
+				}
+				for _, mu := range orderedSessionLocks([]int64{1, skillSepolia}, owner, runner) {
+					if !mu.TryLock() {
+						t.Fatal("a refusal must release the runner lock")
+					}
+					mu.Unlock()
+				}
+			})
+		}
+	})
+
 	t.Run("live grant with an unresolved target stays not covering", func(t *testing.T) {
 		owner := common.HexToAddress("0x0000000000000000000000000000000000000025")
 		runner := common.HexToAddress("0x0000000000000000000000000000000000000026")

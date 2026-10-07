@@ -2588,9 +2588,11 @@ func (n *Engine) sessionPolicyDeployCheckEnabled() bool {
 // gap must not stay in required or missing, or a client renewing that
 // policy id would sign the wrong actions.
 //
-// An unreadable fund-moving target outranks that expiry. No new grant can
-// name a target the workflow cannot read, so the refusal stays
-// SESSION_POLICY_TARGET_UNRESOLVED.
+// An unreadable fund-moving target outranks expiry on any chain, even
+// when that target's own grant is still live. No new grant can name a
+// target the workflow cannot read, so the refusal stays
+// SESSION_POLICY_TARGET_UNRESOLVED. An ordinary coverage gap still loses
+// to expiry: the owner grants again, then meets that gap.
 //
 // Needs are derived before any lock: the cron walk reads only the task
 // being saved. On success the returned function holds sessionAuthorityLock
@@ -2738,6 +2740,12 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 		return unlock, nil
 	}
 	unlock()
+	// The unreadable chain may hold a live grant. Expiry on another
+	// chain still must not win, or the owner re-signs and then hits
+	// the same unreadable target.
+	if unresolvedRefusal != nil && expiredUntil > 0 {
+		beatExpiry = true
+	}
 	code := SessionPolicyNotCoveringCode
 	detail := "this workflow's fund-moving steps are outside the runner's usable grant"
 	if beatExpiry && unresolvedRefusal != nil && !sawOrdinary {
