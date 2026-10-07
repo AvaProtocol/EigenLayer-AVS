@@ -406,7 +406,7 @@ func TestExpiredGrantDeployCheckMapsToConflict(t *testing.T) {
 	mapped := policyConflictFrom(&taskengine.PolicyConflictError{
 		Sentinel:        taskengine.ErrSessionPolicyNotCovering,
 		Code:            taskengine.SessionPolicyExpiredCode,
-		Detail:          "the runner's grant expired at 2026-10-01T12:00:00Z; grant again before deploying this workflow",
+		Detail:          "the runner's grant expired at 2026-10-01T12:00:00Z; grant again before this workflow can run",
 		PolicyID:        "01EXPIRED",
 		AffectedTaskIDs: []string{"pay"},
 	})

@@ -2543,8 +2543,10 @@ paths:
         refused with `409 SESSION_POLICY_NOT_COVERING`. `required` is the grant
         those steps still need. A fund-moving workflow whose single usable
         grant has already expired is `409 SESSION_POLICY_EXPIRED`, including
-        when the workflow has no end date. A grant with no recorded expiry is
-        not expired. The owner grants again. A workflow that only notifies
+        when the workflow has no end date. A fund-moving step whose target
+        cannot be read stays `409 SESSION_POLICY_TARGET_UNRESOLVED` even when
+        that grant has expired. A grant with no recorded expiry is not
+        expired. The owner grants again. A workflow that only notifies
         passes with no grant. The flag defaults to off, so today's callers
         are unchanged.
       operationId: createWorkflow
@@ -2569,6 +2571,8 @@ paths:
             fund-moving steps. `required`, `policyId`, and `missingActions`
             describe the gap. `SESSION_POLICY_EXPIRED` when that grant has
             already expired, including when the workflow has no end date.
+            `SESSION_POLICY_TARGET_UNRESOLVED` when a fund-moving target cannot
+            be read, including when the grant has also expired.
             Notification-only workflows do not hit this.
           content:
             application/problem+json:
@@ -2674,7 +2678,9 @@ paths:
         fund-moving steps the runner's usable grant does not cover is
         `409 SESSION_POLICY_NOT_COVERING`. A fund-moving workflow whose
         grant has already expired is `409 SESSION_POLICY_EXPIRED`, including
-        when the workflow has no end date. Disabling is not checked.
+        when the workflow has no end date. A fund-moving step whose target
+        cannot be read stays `409 SESSION_POLICY_TARGET_UNRESOLVED` even when
+        that grant has expired. Disabling is not checked.
         Notification-only workflows pass with no grant.
       operationId: resumeWorkflow
       responses:
@@ -2693,6 +2699,8 @@ paths:
             (`SESSION_POLICY_NOT_COVERING`; `required` describes the gap).
             `SESSION_POLICY_EXPIRED` when the runner's grant has already
             expired, including when the workflow has no end date.
+            `SESSION_POLICY_TARGET_UNRESOLVED` when a fund-moving target cannot
+            be read, including when the grant has also expired.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }

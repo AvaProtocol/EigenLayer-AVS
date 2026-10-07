@@ -1759,7 +1759,7 @@ func TestDeployCheckRefusesExpiredGrantWithNoEnd(t *testing.T) {
 			t.Fatalf("expired manual deploy = %#v", err)
 		}
 		wantDetail := fmt.Sprintf(
-			"the runner's grant expired at %s; grant again before deploying this workflow",
+			"the runner's grant expired at %s; grant again before this workflow can run",
 			time.UnixMilli(expiredAt).UTC().Format(time.RFC3339),
 		)
 		if conflict.Detail != wantDetail || len(conflict.AffectedTaskIDs) != 1 || conflict.AffectedTaskIDs[0] != "pay" {
@@ -1866,6 +1866,39 @@ func TestDeployCheckRefusesExpiredGrantWithNoEnd(t *testing.T) {
 				t.Fatal("a refusal must release the runner lock")
 			}
 			mu.Unlock()
+		}
+	})
+
+	t.Run("unresolved target outranks an expired grant", func(t *testing.T) {
+		owner := common.HexToAddress("0x0000000000000000000000000000000000000023")
+		runner := common.HexToAddress("0x0000000000000000000000000000000000000024")
+		payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+		task := skillWriteTask("tmpl", "Template", "{{settings.token}}", transferCalldata(payee, big.NewInt(1)), skillSepolia, 1, 0, 0)
+		need := DeriveWorkflowNeeds(task, nil, scheduleFromTask(task, now), skillSepolia)[skillSepolia]
+		if need == nil || !need.Unresolved {
+			t.Fatalf("template target = %#v", need)
+		}
+		storeCoveringGrant(t, db, "01expiredunresolved000000", owner, runner, now.Add(-time.Hour).UnixMilli())
+		_, err := on.enforceSessionPolicyDeployCheck(&model.User{Address: owner}, skillWorkflow(task, runner))
+		var conflict *PolicyConflictError
+		if !errors.As(err, &conflict) || conflict.Code != SessionPolicyTargetUnresolvedCode || conflict.PolicyID != "01expiredunresolved000000" {
+			t.Fatalf("unresolved expired deploy = %#v", err)
+		}
+		if strings.Contains(conflict.Detail, "grant again") || !strings.Contains(conflict.Detail, "cannot resolve") {
+			t.Fatalf("detail = %q", conflict.Detail)
+		}
+	})
+
+	t.Run("live grant with an unresolved target stays not covering", func(t *testing.T) {
+		owner := common.HexToAddress("0x0000000000000000000000000000000000000025")
+		runner := common.HexToAddress("0x0000000000000000000000000000000000000026")
+		payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+		task := skillWriteTask("tmpl", "Template", "{{settings.token}}", transferCalldata(payee, big.NewInt(1)), skillSepolia, 1, 0, 0)
+		storeCoveringGrant(t, db, "01liveunresolved000000000", owner, runner, now.Add(24*time.Hour).UnixMilli())
+		_, err := on.enforceSessionPolicyDeployCheck(&model.User{Address: owner}, skillWorkflow(task, runner))
+		var conflict *PolicyConflictError
+		if !errors.As(err, &conflict) || conflict.Code != SessionPolicyNotCoveringCode {
+			t.Fatalf("live unresolved deploy = %#v", err)
 		}
 	})
 }
