@@ -1700,11 +1700,16 @@ func skillManualTransfer(id string, expiredAt int64) *avsproto.Task {
 
 func storeCoveringGrant(t *testing.T, db storage.Storage, id string, owner, runner common.Address, until int64) {
 	t.Helper()
+	storeChainGrant(t, db, id, owner, runner, skillSepolia, until, []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)})
+}
+
+func storeChainGrant(t *testing.T, db storage.Storage, id string, owner, runner common.Address, chain, until int64, actions []model.AllowedAction) {
+	t.Helper()
 	usdc := common.HexToAddress(skillUSDC)
-	policy := usableGrant(id, until, []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)}, []model.ERC20SpendCap{skillCap(skillUSDC, "10")})
+	policy := usableGrant(id, until, actions, []model.ERC20SpendCap{skillCap(skillUSDC, "10")})
 	policy.Owner = &owner
 	policy.Runner = &runner
-	policy.ChainID = skillSepolia
+	policy.ChainID = chain
 	policy.EntityID = 1
 	policy.SessionSigner = &usdc
 	policy.Grant = &model.SessionGrantAuthorization{
@@ -1825,6 +1830,42 @@ func TestDeployCheckRefusesExpiredGrantWithNoEnd(t *testing.T) {
 		var conflict *PolicyConflictError
 		if !errors.As(err, &conflict) || conflict.Code != SessionPolicyNotCoveringCode {
 			t.Fatalf("live grant that ends first = %#v", err)
+		}
+	})
+
+	t.Run("uncovered chain then an expired grant", func(t *testing.T) {
+		// Chain ids are visited in order, so chain 1's coverage gap is
+		// recorded before Sepolia's expired grant. required and missing
+		// must follow the expired grant, which is the one policyId names.
+		owner := common.HexToAddress("0x0000000000000000000000000000000000000021")
+		runner := common.HexToAddress("0x0000000000000000000000000000000000000022")
+		payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+		low := skillWriteTask("pay", "Pay", skillWETH, transferCalldata(payee, big.NewInt(1)), 1, 1, 0, 0)
+		high := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(1)), skillSepolia, 1, 0, 0)
+		low.Nodes = append(low.Nodes, high.Nodes...)
+		storeChainGrant(t, db, "01uncoveredlowchain000000", owner, runner, 1, now.Add(24*time.Hour).UnixMilli(), []model.AllowedAction{skillAction(skillWETH, selectorApprove)})
+		expiredAt := now.Add(-time.Hour).UnixMilli()
+		storeChainGrant(t, db, "01expiredhighchain00000000", owner, runner, skillSepolia, expiredAt, []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)})
+
+		_, err := on.enforceSessionPolicyDeployCheck(&model.User{Address: owner}, skillWorkflow(low, runner))
+		var conflict *PolicyConflictError
+		if !errors.As(err, &conflict) || conflict.Code != SessionPolicyExpiredCode || conflict.PolicyID != "01expiredhighchain00000000" {
+			t.Fatalf("mixed-chain expired deploy = %#v", err)
+		}
+		if conflict.Required == nil || conflict.Required.ChainID != skillSepolia {
+			t.Fatalf("required = %#v", conflict.Required)
+		}
+		if len(conflict.Required.Actions) != 1 || conflict.Required.Actions[0].Target == nil || !strings.EqualFold(conflict.Required.Actions[0].Target.Hex(), skillUSDC) {
+			t.Fatalf("required actions = %+v", conflict.Required.Actions)
+		}
+		if len(conflict.Missing) != 0 {
+			t.Fatalf("expired response kept another chain's gaps: %+v", conflict.Missing)
+		}
+		for _, mu := range orderedSessionLocks([]int64{1, skillSepolia}, owner, runner) {
+			if !mu.TryLock() {
+				t.Fatal("a refusal must release the runner lock")
+			}
+			mu.Unlock()
 		}
 	})
 }

@@ -2583,6 +2583,11 @@ func (n *Engine) sessionPolicyDeployCheckEnabled() bool {
 // grant still has to count there. A grant with no recorded expiry is not
 // expired. A notification-only workflow never reaches the check.
 //
+// Chains are visited in chain-id order. The first expired grant owns the
+// response: its policy id and its chain's need. An earlier chain's coverage
+// gap must not stay in required or missing, or a client renewing that
+// policy id would sign the wrong actions.
+//
 // Needs are derived before any lock: the cron walk reads only the task
 // being saved. On success the returned function holds sessionAuthorityLock
 // for every Modular Account v2 chain this workflow moves funds on, and the
@@ -2685,12 +2690,13 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 			if item.need.TaskID != "" {
 				blocking = append(blocking, item.need.TaskID)
 			}
-			if required == nil {
-				required = item.need
-			}
+			// The first expired grant replaces whatever an earlier
+			// coverage gap already stored. Later chains keep their
+			// task ids, but they do not take this policy's need.
 			if expiredUntil == 0 {
 				expiredUntil = policy.ValidUntil
 				policyID = policy.ID
+				required = item.need
 			}
 			continue
 		}
@@ -2722,6 +2728,9 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 			"the runner's grant expired at %s; grant again before deploying this workflow",
 			time.UnixMilli(expiredUntil).UTC().Format(time.RFC3339),
 		)
+		// missing was collected from other chains' coverage gaps. Those
+		// actions belong to a different grant than policyID.
+		missing = nil
 	}
 	return noop, &PolicyConflictError{
 		Sentinel:        ErrSessionPolicyNotCovering,
