@@ -784,6 +784,10 @@ func CoverageRefusal(policy *model.SessionPolicy, need *WorkflowNeed) *PolicyCon
 			Required:        need,
 		}
 	}
+	// A live grant that ends before the workflow. An already-closed grant
+	// is not a refusal here: submit and carry still need that record to
+	// count as the grant occupying its entity. Create and resume call
+	// Expired() themselves.
 	if need.ValidUntilMs > 0 && policy.ValidUntil > 0 && policy.ValidUntil < need.ValidUntilMs {
 		return &PolicyConflictError{
 			Sentinel:        ErrSessionPolicyNotCovering,
@@ -874,6 +878,11 @@ func ceilingGrantCovers(policy *model.SessionPolicy, need *WorkflowNeed) bool {
 // BuildAuthorization picks one simulate status. Simulation-resolved misses
 // win over the static walk when the report saw a write. Required is set
 // whenever the workflow moves funds.
+//
+// sched.Now is the clock. A zero Now means time.Now(). An expired grant is
+// expires_too_soon even when the workflow has no end. A live grant that
+// ends first stays on the window check. A missing call or a short cap
+// still outranks expiry.
 func BuildAuthorization(policy *model.SessionPolicy, need *WorkflowNeed, report *SessionGrantReport, sched SkillSchedule) *SessionAuthorization {
 	repPolicy, noGrant, saw, missingCalls, nativeMiss, nativeDetail, tokenSpend, nativeSpend, planned := report.snapshot()
 	if policy == nil {
@@ -943,6 +952,15 @@ func BuildAuthorization(policy *model.SessionPolicy, need *WorkflowNeed, report 
 		if out.Detail == "" {
 			out.Detail = "a spend cap is lower than the runs still left"
 		}
+		return out
+	}
+	now := sched.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if policy.Expired(now) {
+		out.Status = AuthExpiresTooSoon
+		out.Detail = "the grant has expired"
 		return out
 	}
 	if filled.ValidUntilMs > 0 && policy.ValidUntil > 0 && policy.ValidUntil < filled.ValidUntilMs {
@@ -2559,6 +2577,21 @@ func (n *Engine) sessionPolicyDeployCheckEnabled() bool {
 // is on and the runner's grant does not cover this workflow. The flag
 // defaults off, so a nil engine config is a no-op.
 //
+// An expired grant on a fund-moving workflow is SESSION_POLICY_EXPIRED,
+// including when the workflow has no computable end. That check stays in
+// this caller. CoverageRefusal is also submit and carry, and an expired
+// grant still has to count there. A grant with no recorded expiry is not
+// expired. A notification-only workflow never reaches the check.
+//
+// Chains are visited in chain-id order. The first expired grant owns the
+// response: its policy id and its chain's need. An earlier chain's coverage
+// gap must not stay in required or missing, or a client renewing that
+// policy id would sign the wrong actions.
+//
+// An unreadable fund-moving target outranks that expiry. No new grant can
+// name a target the workflow cannot read, so the refusal stays
+// SESSION_POLICY_TARGET_UNRESOLVED.
+//
 // Needs are derived before any lock: the cron walk reads only the task
 // being saved. On success the returned function holds sessionAuthorityLock
 // for every Modular Account v2 chain this workflow moves funds on, and the
@@ -2642,7 +2675,12 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 	var missing []model.AllowedAction
 	var required *WorkflowNeed
 	var policyID string
+	var expiredUntil int64
+	var unresolvedRefusal *PolicyConflictError
+	beatExpiry := false
+	sawOrdinary := false
 	refusals := 0
+	now := time.Now()
 	for _, item := range mav2 {
 		// The write lock is already held. ActiveSessionPolicyForWallet
 		// would take the same mutex's read lock and deadlock.
@@ -2650,6 +2688,28 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 		if err != nil {
 			unlock()
 			return noop, err
+		}
+		// Expired() is false for a nil policy and for ValidUntil == 0.
+		// Those stay on CoverageRefusal, which is also what submit and
+		// carry use. An already-closed grant is "grant again", unless the
+		// target itself cannot be read: re-signing does not fix that.
+		if item.need != nil && item.need.HasFundMove && policy.Expired(now) && !item.need.Unresolved {
+			refusals++
+			if item.need.TaskID != "" {
+				blocking = append(blocking, item.need.TaskID)
+			}
+			// The first expired grant replaces whatever an earlier
+			// coverage gap already stored. Later chains keep their
+			// task ids, but they do not take this policy's need.
+			if expiredUntil == 0 {
+				expiredUntil = policy.ValidUntil
+				policyID = policy.ID
+				required = item.need
+			}
+			continue
+		}
+		if item.need != nil && item.need.Unresolved && policy.Expired(now) {
+			beatExpiry = true
 		}
 		refusal := CoverageRefusal(policy, item.need)
 		if refusal == nil {
@@ -2663,18 +2723,49 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 		if required == nil {
 			required = refusal.Required
 		}
-		if refusal.PolicyID != "" {
+		if expiredUntil == 0 && refusal.PolicyID != "" {
 			policyID = refusal.PolicyID
+		}
+		if refusal.Code == SessionPolicyTargetUnresolvedCode {
+			if unresolvedRefusal == nil {
+				unresolvedRefusal = refusal
+			}
+		} else {
+			sawOrdinary = true
 		}
 	}
 	if refusals == 0 {
 		return unlock, nil
 	}
 	unlock()
+	code := SessionPolicyNotCoveringCode
+	detail := "this workflow's fund-moving steps are outside the runner's usable grant"
+	if beatExpiry && unresolvedRefusal != nil && !sawOrdinary {
+		code = SessionPolicyTargetUnresolvedCode
+		detail = unresolvedRefusal.Detail
+		// A later chain's expired grant must not replace the unreadable
+		// target's policy. That grant is not the one to renew.
+		if expiredUntil > 0 {
+			policyID = unresolvedRefusal.PolicyID
+			if unresolvedRefusal.Required != nil {
+				required = unresolvedRefusal.Required
+			}
+			missing = nil
+		}
+	} else if expiredUntil > 0 {
+		code = SessionPolicyExpiredCode
+		detail = fmt.Sprintf(
+			"the runner's grant expired at %s; grant again before this workflow can run",
+			time.UnixMilli(expiredUntil).UTC().Format(time.RFC3339),
+		)
+		// missing was collected from other chains' coverage gaps. Those
+		// actions belong to a different grant than policyID.
+		missing = nil
+	}
 	return noop, &PolicyConflictError{
 		Sentinel:        ErrSessionPolicyNotCovering,
-		Code:            SessionPolicyNotCoveringCode,
-		Detail:          "this workflow's fund-moving steps are outside the runner's usable grant",
+		Code:            code,
+		Detail:          detail,
 		PolicyID:        policyID,
 		AffectedTaskIDs: blocking,
 		Missing:         missing,

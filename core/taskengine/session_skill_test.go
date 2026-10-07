@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 	"sync"
@@ -364,6 +365,20 @@ func TestCoverageRefusal(t *testing.T) {
 	open := usableGrant(grant.ID, 0, grant.AllowedActions, grant.ERC20SpendCaps)
 	if got := CoverageRefusal(open, need); got != nil {
 		t.Fatalf("validUntil 0 is not an expiry shortfall, got %#v", got)
+	}
+	// Submit and carry call CoverageRefusal. An already-closed grant with
+	// no workflow end must still count, or a re-grant would lose the entity.
+	noEnd := skillManualTransfer("manual", 0)
+	noEndNeed := DeriveWorkflowNeeds(noEnd, nil, scheduleFromTask(noEnd, now), skillSepolia)[skillSepolia]
+	if noEndNeed == nil || !noEndNeed.HasFundMove || noEndNeed.ValidUntilMs != 0 {
+		t.Fatalf("manual transfer with no end = %#v", noEndNeed)
+	}
+	closed := usableGrant(grant.ID, now.Add(-time.Hour).UnixMilli(), grant.AllowedActions, grant.ERC20SpendCaps)
+	if !closed.Usable() || !closed.Expired(now) {
+		t.Fatal("the closed grant must stay usable and count as expired")
+	}
+	if got := CoverageRefusal(closed, noEndNeed); got != nil {
+		t.Fatalf("an expired grant must still count for submit and carry, got %#v", got)
 	}
 }
 
@@ -1320,12 +1335,26 @@ func TestBuildAuthorizationStatuses(t *testing.T) {
 		t.Fatalf("cap: %#v", got)
 	}
 	early := usableGrant("01G", 100, need.Actions, []model.ERC20SpendCap{skillCap(skillUSDC, "10")})
-	if got := BuildAuthorization(early, need, nil, SkillSchedule{}); got.Status != AuthExpiresTooSoon {
+	if got := BuildAuthorization(early, need, nil, SkillSchedule{Now: time.UnixMilli(0)}); got.Status != AuthExpiresTooSoon || got.Detail != "the grant ends before this workflow's window" {
 		t.Fatalf("expiry: %#v", got)
 	}
 	open := usableGrant("01G", 0, need.Actions, []model.ERC20SpendCap{skillCap(skillUSDC, "10")})
 	if got := BuildAuthorization(open, need, nil, SkillSchedule{}); got.Status != AuthCovered {
 		t.Fatalf("zero expiry must not be too soon: %#v", got)
+	}
+	closedNow := skillNow()
+	noEnd := *need
+	noEnd.ValidUntilMs = 0
+	closed := usableGrant("01G", closedNow.Add(-time.Hour).UnixMilli(), need.Actions, []model.ERC20SpendCap{skillCap(skillUSDC, "10")})
+	if got := BuildAuthorization(closed, &noEnd, nil, SkillSchedule{Now: closedNow}); got.Status != AuthExpiresTooSoon || got.Detail != "the grant has expired" || got.PolicyID != closed.ID {
+		t.Fatalf("expired grant with no end must be expires_too_soon: %#v", got)
+	}
+	if got := BuildAuthorization(open, &noEnd, nil, SkillSchedule{Now: closedNow}); got.Status != AuthCovered {
+		t.Fatalf("no recorded expiry must stay covered with no end: %#v", got)
+	}
+	shortExpired := usableGrant("01G", closedNow.Add(-time.Hour).UnixMilli(), need.Actions, []model.ERC20SpendCap{skillCap(skillUSDC, "1")})
+	if got := BuildAuthorization(shortExpired, need, nil, SkillSchedule{Now: closedNow}); got.Status != AuthCapTooLow {
+		t.Fatalf("a short cap still outranks an expired grant: %#v", got)
 	}
 	unsized := *need
 	unsized.Caps = nil
@@ -1653,6 +1682,225 @@ func TestDeployCheckHoldsLockUntilReleaseAndNamesTheTask(t *testing.T) {
 	}
 	mu.Unlock()
 	unlock()
+}
+
+func skillManualTransfer(id string, expiredAt int64) *avsproto.Task {
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	task := skillWriteTask(id, "Pay", skillUSDC, transferCalldata(payee, big.NewInt(1)), skillSepolia, 0, 0, expiredAt)
+	task.Trigger = &avsproto.TaskTrigger{
+		Id:   "trg",
+		Name: "manual",
+		Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
+		TriggerType: &avsproto.TaskTrigger_Manual{
+			Manual: &avsproto.ManualTrigger{},
+		},
+	}
+	return task
+}
+
+func storeCoveringGrant(t *testing.T, db storage.Storage, id string, owner, runner common.Address, until int64) {
+	t.Helper()
+	storeChainGrant(t, db, id, owner, runner, skillSepolia, until, []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)})
+}
+
+func storeChainGrant(t *testing.T, db storage.Storage, id string, owner, runner common.Address, chain, until int64, actions []model.AllowedAction) {
+	t.Helper()
+	usdc := common.HexToAddress(skillUSDC)
+	policy := usableGrant(id, until, actions, []model.ERC20SpendCap{skillCap(skillUSDC, "10")})
+	policy.Owner = &owner
+	policy.Runner = &runner
+	policy.ChainID = chain
+	policy.EntityID = 1
+	policy.SessionSigner = &usdc
+	policy.Grant = &model.SessionGrantAuthorization{
+		InstallCall:    []byte{0x1b, 0xbf, 0x56, 0x4c, 0x01},
+		CarrierNonce:   big.NewInt(1),
+		Deadline:       1785541743,
+		OwnerSignature: make([]byte, 65),
+	}
+	if err := StoreSessionPolicy(db, policy); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func deployCheckEngine(db storage.Storage) *Engine {
+	return &Engine{
+		db:                db,
+		config:            &config.Config{SessionPolicyDeployCheck: true},
+		smartWalletConfig: &config.SmartWalletConfig{ChainID: skillSepolia},
+	}
+}
+
+func skillWorkflow(task *avsproto.Task, runner common.Address) *model.Workflow {
+	write := &model.Workflow{Task: task}
+	write.SmartWalletAddress = runner.Hex()
+	return write
+}
+
+func TestDeployCheckRefusesExpiredGrantWithNoEnd(t *testing.T) {
+	db := testutil.TestMustDB()
+	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
+	on := deployCheckEngine(db)
+	now := time.Now()
+
+	t.Run("manual trigger with no end", func(t *testing.T) {
+		owner := common.HexToAddress("0x0000000000000000000000000000000000000011")
+		runner := common.HexToAddress("0x0000000000000000000000000000000000000012")
+		task := skillManualTransfer("pay", 0)
+		need := DeriveWorkflowNeeds(task, nil, scheduleFromTask(task, now), skillSepolia)[skillSepolia]
+		if need == nil || !need.HasFundMove || need.ValidUntilMs != 0 {
+			t.Fatalf("manual transfer with no end = %#v", need)
+		}
+		expiredAt := now.Add(-time.Hour).UnixMilli()
+		storeCoveringGrant(t, db, "01expiredmanual0000000000", owner, runner, expiredAt)
+		_, err := on.enforceSessionPolicyDeployCheck(&model.User{Address: owner}, skillWorkflow(task, runner))
+		var conflict *PolicyConflictError
+		if !errors.As(err, &conflict) || conflict.Code != SessionPolicyExpiredCode || conflict.PolicyID != "01expiredmanual0000000000" {
+			t.Fatalf("expired manual deploy = %#v", err)
+		}
+		wantDetail := fmt.Sprintf(
+			"the runner's grant expired at %s; grant again before this workflow can run",
+			time.UnixMilli(expiredAt).UTC().Format(time.RFC3339),
+		)
+		if conflict.Detail != wantDetail || len(conflict.AffectedTaskIDs) != 1 || conflict.AffectedTaskIDs[0] != "pay" {
+			t.Fatalf("conflict = %#v", conflict)
+		}
+		mu := sessionAuthorityLock(skillSepolia, owner, runner)
+		if !mu.TryLock() {
+			t.Fatal("a refusal must release the runner lock")
+		}
+		mu.Unlock()
+	})
+
+	t.Run("no recorded expiry still deploys", func(t *testing.T) {
+		owner := common.HexToAddress("0x0000000000000000000000000000000000000013")
+		runner := common.HexToAddress("0x0000000000000000000000000000000000000014")
+		storeCoveringGrant(t, db, "01openmanual00000000000000", owner, runner, 0)
+		unlock, err := on.enforceSessionPolicyDeployCheck(&model.User{Address: owner}, skillWorkflow(skillManualTransfer("pay", 0), runner))
+		if err != nil {
+			t.Fatal(err)
+		}
+		mu := sessionAuthorityLock(skillSepolia, owner, runner)
+		if mu.TryLock() {
+			mu.Unlock()
+			unlock()
+			t.Fatal("a passing deploy check must hold the runner lock until unlock")
+		}
+		unlock()
+	})
+
+	t.Run("notification still deploys on an expired grant", func(t *testing.T) {
+		owner := common.HexToAddress("0x0000000000000000000000000000000000000015")
+		runner := common.HexToAddress("0x0000000000000000000000000000000000000016")
+		storeCoveringGrant(t, db, "01expirednote0000000000000", owner, runner, now.Add(-time.Hour).UnixMilli())
+		note := skillWorkflow(&avsproto.Task{Id: "note", Name: "Ping"}, runner)
+		if _, err := on.enforceSessionPolicyDeployCheck(&model.User{Address: owner}, note); err != nil {
+			t.Fatal(err)
+		}
+		mu := sessionAuthorityLock(skillSepolia, owner, runner)
+		if !mu.TryLock() {
+			t.Fatal("a notification-only workflow must not take the runner lock")
+		}
+		mu.Unlock()
+	})
+
+	t.Run("future end on an already expired grant", func(t *testing.T) {
+		owner := common.HexToAddress("0x0000000000000000000000000000000000000017")
+		runner := common.HexToAddress("0x0000000000000000000000000000000000000018")
+		storeCoveringGrant(t, db, "01expiredwindow00000000000", owner, runner, now.Add(-time.Hour).UnixMilli())
+		task := skillManualTransfer("pay", now.Add(48*time.Hour).UnixMilli())
+		_, err := on.enforceSessionPolicyDeployCheck(&model.User{Address: owner}, skillWorkflow(task, runner))
+		var conflict *PolicyConflictError
+		if !errors.As(err, &conflict) || conflict.Code != SessionPolicyExpiredCode {
+			t.Fatalf("already-expired grant = %#v", err)
+		}
+	})
+
+	t.Run("live grant that ends first stays not covering", func(t *testing.T) {
+		owner := common.HexToAddress("0x0000000000000000000000000000000000000019")
+		runner := common.HexToAddress("0x000000000000000000000000000000000000001a")
+		storeCoveringGrant(t, db, "01earlywindow0000000000000", owner, runner, now.Add(time.Hour).UnixMilli())
+		task := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(common.HexToAddress("0x0000000000000000000000000000000000000001"), big.NewInt(1)), skillSepolia, 1, 0, now.Add(48*time.Hour).UnixMilli())
+		need := DeriveWorkflowNeeds(task, nil, scheduleFromTask(task, now), skillSepolia)[skillSepolia]
+		grant := usableGrant("01earlywindow0000000000000", now.Add(time.Hour).UnixMilli(), []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)}, []model.ERC20SpendCap{skillCap(skillUSDC, "10")})
+		if got := CoverageRefusal(grant, need); got == nil || got.Code != SessionPolicyNotCoveringCode || !strings.Contains(got.Detail, "expired") {
+			t.Fatalf("a live grant that ends first is still a coverage gap, got %#v", got)
+		}
+		_, err := on.enforceSessionPolicyDeployCheck(&model.User{Address: owner}, skillWorkflow(task, runner))
+		var conflict *PolicyConflictError
+		if !errors.As(err, &conflict) || conflict.Code != SessionPolicyNotCoveringCode {
+			t.Fatalf("live grant that ends first = %#v", err)
+		}
+	})
+
+	t.Run("uncovered chain then an expired grant", func(t *testing.T) {
+		// Chain ids are visited in order, so chain 1's coverage gap is
+		// recorded before Sepolia's expired grant. required and missing
+		// must follow the expired grant, which is the one policyId names.
+		owner := common.HexToAddress("0x0000000000000000000000000000000000000021")
+		runner := common.HexToAddress("0x0000000000000000000000000000000000000022")
+		payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+		low := skillWriteTask("pay", "Pay", skillWETH, transferCalldata(payee, big.NewInt(1)), 1, 1, 0, 0)
+		high := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(1)), skillSepolia, 1, 0, 0)
+		low.Nodes = append(low.Nodes, high.Nodes...)
+		storeChainGrant(t, db, "01uncoveredlowchain000000", owner, runner, 1, now.Add(24*time.Hour).UnixMilli(), []model.AllowedAction{skillAction(skillWETH, selectorApprove)})
+		expiredAt := now.Add(-time.Hour).UnixMilli()
+		storeChainGrant(t, db, "01expiredhighchain00000000", owner, runner, skillSepolia, expiredAt, []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)})
+
+		_, err := on.enforceSessionPolicyDeployCheck(&model.User{Address: owner}, skillWorkflow(low, runner))
+		var conflict *PolicyConflictError
+		if !errors.As(err, &conflict) || conflict.Code != SessionPolicyExpiredCode || conflict.PolicyID != "01expiredhighchain00000000" {
+			t.Fatalf("mixed-chain expired deploy = %#v", err)
+		}
+		if conflict.Required == nil || conflict.Required.ChainID != skillSepolia {
+			t.Fatalf("required = %#v", conflict.Required)
+		}
+		if len(conflict.Required.Actions) != 1 || conflict.Required.Actions[0].Target == nil || !strings.EqualFold(conflict.Required.Actions[0].Target.Hex(), skillUSDC) {
+			t.Fatalf("required actions = %+v", conflict.Required.Actions)
+		}
+		if len(conflict.Missing) != 0 {
+			t.Fatalf("expired response kept another chain's gaps: %+v", conflict.Missing)
+		}
+		for _, mu := range orderedSessionLocks([]int64{1, skillSepolia}, owner, runner) {
+			if !mu.TryLock() {
+				t.Fatal("a refusal must release the runner lock")
+			}
+			mu.Unlock()
+		}
+	})
+
+	t.Run("unresolved target outranks an expired grant", func(t *testing.T) {
+		owner := common.HexToAddress("0x0000000000000000000000000000000000000023")
+		runner := common.HexToAddress("0x0000000000000000000000000000000000000024")
+		payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+		task := skillWriteTask("tmpl", "Template", "{{settings.token}}", transferCalldata(payee, big.NewInt(1)), skillSepolia, 1, 0, 0)
+		need := DeriveWorkflowNeeds(task, nil, scheduleFromTask(task, now), skillSepolia)[skillSepolia]
+		if need == nil || !need.Unresolved {
+			t.Fatalf("template target = %#v", need)
+		}
+		storeCoveringGrant(t, db, "01expiredunresolved000000", owner, runner, now.Add(-time.Hour).UnixMilli())
+		_, err := on.enforceSessionPolicyDeployCheck(&model.User{Address: owner}, skillWorkflow(task, runner))
+		var conflict *PolicyConflictError
+		if !errors.As(err, &conflict) || conflict.Code != SessionPolicyTargetUnresolvedCode || conflict.PolicyID != "01expiredunresolved000000" {
+			t.Fatalf("unresolved expired deploy = %#v", err)
+		}
+		if strings.Contains(conflict.Detail, "grant again") || !strings.Contains(conflict.Detail, "cannot resolve") {
+			t.Fatalf("detail = %q", conflict.Detail)
+		}
+	})
+
+	t.Run("live grant with an unresolved target stays not covering", func(t *testing.T) {
+		owner := common.HexToAddress("0x0000000000000000000000000000000000000025")
+		runner := common.HexToAddress("0x0000000000000000000000000000000000000026")
+		payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+		task := skillWriteTask("tmpl", "Template", "{{settings.token}}", transferCalldata(payee, big.NewInt(1)), skillSepolia, 1, 0, 0)
+		storeCoveringGrant(t, db, "01liveunresolved000000000", owner, runner, now.Add(24*time.Hour).UnixMilli())
+		_, err := on.enforceSessionPolicyDeployCheck(&model.User{Address: owner}, skillWorkflow(task, runner))
+		var conflict *PolicyConflictError
+		if !errors.As(err, &conflict) || conflict.Code != SessionPolicyNotCoveringCode {
+			t.Fatalf("live unresolved deploy = %#v", err)
+		}
+	})
 }
 
 func TestDeployCheckTwoChainsReleases(t *testing.T) {

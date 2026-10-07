@@ -1945,7 +1945,9 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	}
 
 	// Off unless session_policy_deploy_check is set. A notification-only
-	// workflow passes; a write workflow with no covering grant is 409.
+	// workflow passes. A write with no covering grant is 409
+	// SESSION_POLICY_NOT_COVERING. A write whose grant has already expired
+	// is 409 SESSION_POLICY_EXPIRED, even when the workflow has no end.
 	// The returned unlock holds the runner lock until the task is stored,
 	// so a concurrent submit cannot replace the grant in between.
 	unlock, err := n.enforceSessionPolicyDeployCheck(user, task)
@@ -4844,7 +4846,9 @@ func (n *Engine) SetWorkflowEnabledByUser(user *model.User, taskID string, enabl
 	updates := map[string][]byte{}
 
 	// Disabling is not checked. Enabling is, and only when the flag is on.
-	// Hold the runner lock from the check through the status write.
+	// An expired grant is refused the same way as create, including when
+	// the workflow has no end. Hold the runner lock from the check through
+	// the status write.
 	unlock := func() {}
 	if enabled {
 		unlock, err = n.enforceSessionPolicyDeployCheck(user, task)
