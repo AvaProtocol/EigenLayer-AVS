@@ -110,9 +110,7 @@ macros:
     # guardian_ruleset — tunable verdict knobs read via {{apContext.configVars.guardian_ruleset}}
     # (bare-injected as a JS object; must be valid JSON and must be set).
     guardian_ruleset:    '{"weak":["honeypot_related_address","blacklist_doubt"]}'
-    # Studio /api/notify. Same names as config/gateway.example.yaml.
-    # Tests leave notify_api_token empty on purpose. A gateway that calls
-    # Studio must set it to the same non-empty SUMMARIZE_AUTH_TOKEN.
+    # Local Studio notify endpoint for Email/Telegram nodes
     notify_url:          "http://localhost:3000/api/notify"
     notify_api_token:    ""
 
