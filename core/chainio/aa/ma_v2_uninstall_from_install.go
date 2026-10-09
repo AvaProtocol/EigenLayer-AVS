@@ -2,7 +2,6 @@ package aa
 
 import (
 	"fmt"
-	"reflect"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -139,55 +138,6 @@ func DecodeInstallValidationHooks(installCall []byte) ([][]byte, error) {
 		return nil, fmt.Errorf("installValidation hooks decoded to %T, not [][]byte", args[3])
 	}
 	return hooks, nil
-}
-
-// CountAllowlistInputs returns how many AllowlistModule inputs the stored
-// install packs. Used to scale verificationGasLimit (K14): each input is a
-// cold SSTORE.
-//
-// Zero means unknown — use the 2–3 row 700k seed. Decode failure is not an
-// error: stored installs may predate current packing, and this count is a
-// gas hint, not an authority check. That restores sends for grants of ≤3
-// rows. An undecodable install that actually carries more than 3 still
-// seeds 700k and fails at estimation with AA26 — better than bricking
-// every send, but not a working send. Predating REST grants are 2–3
-// targets (Uniswap: router, cap token, WETH). A 4+ target grant whose
-// InstallCall we cannot decode already ran on the unwired 700k seed
-// before AllowlistRows was populated; a miss puts it back there.
-func CountAllowlistInputs(installCall []byte) (int, error) {
-	inner, err := InstallValidationWithin(installCall)
-	if err != nil {
-		return 0, nil
-	}
-	hooks, err := DecodeInstallValidationHooks(inner)
-	if err != nil {
-		return 0, nil
-	}
-	if err := ensureHookABIs(); err != nil {
-		return 0, err
-	}
-	allowlist := AllowlistModuleAddress()
-	for _, entry := range hooks {
-		if len(entry) < hookConfigLen {
-			return 0, nil
-		}
-		if common.BytesToAddress(entry[:20]) != allowlist {
-			continue
-		}
-		if entry[hookConfigLen-1]&HookFlagValidation == 0 {
-			continue
-		}
-		unpacked, unpackErr := allowlistDataArgs.Unpack(entry[hookConfigLen:])
-		if unpackErr != nil || len(unpacked) != 2 {
-			return 0, nil
-		}
-		inputs := reflect.ValueOf(unpacked[1])
-		if inputs.Kind() != reflect.Slice {
-			return 0, nil
-		}
-		return inputs.Len(), nil
-	}
-	return 0, nil
 }
 
 // InstallValidationWithin returns the installValidation calldata inside a
