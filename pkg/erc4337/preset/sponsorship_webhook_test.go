@@ -21,6 +21,9 @@ type stubAlchemySponsorship struct {
 	t      *testing.T
 	params map[string]interface{}
 	srv    *httptest.Server
+	// omit drops these fields from the response, as a Gas Manager that did
+	// not reprice them would.
+	omit map[string]bool
 }
 
 func startStubAlchemy(t *testing.T) *stubAlchemySponsorship {
@@ -43,20 +46,24 @@ func startStubAlchemy(t *testing.T) *stubAlchemySponsorship {
 			}
 		}
 		// Minimal v0.7-shaped success response.
+		result := map[string]string{
+			"paymaster":                     "0x2cc0c7981D846b9F2a16276556f6e8cb52BfB633",
+			"paymasterData":                 "0x",
+			"paymasterVerificationGasLimit": "0x186a0",
+			"paymasterPostOpGasLimit":       "0x0",
+			"callGasLimit":                  "0x5208",
+			"verificationGasLimit":          "0x186a0",
+			"preVerificationGas":            "0xc350",
+			"maxFeePerGas":                  "0x1",
+			"maxPriorityFeePerGas":          "0x1",
+		}
+		for field := range s.omit {
+			delete(result, field)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"jsonrpc": "2.0",
 			"id":      body.ID,
-			"result": map[string]string{
-				"paymaster":                     "0x2cc0c7981D846b9F2a16276556f6e8cb52BfB633",
-				"paymasterData":                 "0x",
-				"paymasterVerificationGasLimit": "0x186a0",
-				"paymasterPostOpGasLimit":       "0x0",
-				"callGasLimit":                  "0x5208",
-				"verificationGasLimit":          "0x186a0",
-				"preVerificationGas":            "0xc350",
-				"maxFeePerGas":                  "0x1",
-				"maxPriorityFeePerGas":          "0x1",
-			},
+			"result":  result,
 		})
 	}))
 	t.Cleanup(s.srv.Close)
@@ -130,5 +137,49 @@ func TestRequestSponsorshipV07_OmitsWebhookDataWhenEmpty(t *testing.T) {
 	// Sanity: request still had required fields
 	if !strings.HasPrefix(stub.params["entryPoint"].(string), "0x") {
 		t.Fatalf("entryPoint unexpected: %v", stub.params["entryPoint"])
+	}
+}
+
+// A session operation asks for its verification and preVerification gas as
+// zero. If the Gas Manager leaves either unpriced, sponsorship must fail here:
+// the zero would be refused at send, and the paymaster's signature covers the
+// gas limits, so they cannot be estimated afterwards.
+func TestRequestSponsorshipV07_RefusesAnUnpricedGasLimit(t *testing.T) {
+	sessionOp := func() *userop.UserOperationV07 {
+		op := sponsorshipTestOp()
+		op.CallGasLimit = big.NewInt(initialCallGasLimit)
+		op.VerificationGasLimit, op.PreVerificationGas = big.NewInt(0), big.NewInt(0)
+		return op
+	}
+	for _, field := range []string{"verificationGasLimit", "preVerificationGas"} {
+		stub := startStubAlchemy(t)
+		stub.omit = map[string]bool{field: true}
+		client, err := rpc.DialHTTP(stub.srv.URL)
+		if err != nil {
+			t.Fatalf("dial stub: %v", err)
+		}
+		t.Cleanup(client.Close)
+
+		err = RequestSponsorshipV07(context.Background(), client, sessionOp(), EntryPointV07(),
+			SponsorshipRequestV07{PolicyID: "p"})
+		if err == nil || !strings.Contains(err.Error(), field) {
+			t.Errorf("Gas Manager omitted %s: err = %v, want an unpriced-%s error", field, err, field)
+		}
+	}
+
+	stub := startStubAlchemy(t)
+	client, err := rpc.DialHTTP(stub.srv.URL)
+	if err != nil {
+		t.Fatalf("dial stub: %v", err)
+	}
+	t.Cleanup(client.Close)
+	op := sessionOp()
+	if err := RequestSponsorshipV07(context.Background(), client, op, EntryPointV07(),
+		SponsorshipRequestV07{PolicyID: "p"}); err != nil {
+		t.Fatalf("fully priced sponsorship: %v", err)
+	}
+	if op.VerificationGasLimit.Sign() == 0 || op.PreVerificationGas.Sign() == 0 {
+		t.Errorf("priced op kept a zero limit: verification %s, preVerification %s",
+			op.VerificationGasLimit, op.PreVerificationGas)
 	}
 }

@@ -132,7 +132,7 @@ func seedPricingGas(op *userop.UserOperationV07, auth *SessionAuthorization) {
 		return
 	}
 	op.VerificationGasLimit = seedVerificationGas(op)
-	op.PreVerificationGas = nil
+	op.PreVerificationGas = big.NewInt(initialPreVerificationGas)
 }
 
 // SessionResolver answers "under what authority may the gateway execute for

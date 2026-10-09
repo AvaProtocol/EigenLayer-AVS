@@ -384,6 +384,22 @@ func RequestSponsorshipV07(ctx context.Context, client *rpc.Client, op *userop.U
 		}
 		*f.dst = v
 	}
+	// A session operation asks for its verification and preVerification gas
+	// as zero, so a field left unpriced would go out as zero and be refused.
+	// It cannot be estimated afterwards either: the paymaster signed over the
+	// gas limits.
+	for _, f := range []struct {
+		v    *big.Int
+		name string
+	}{
+		{op.CallGasLimit, "callGasLimit"},
+		{op.VerificationGasLimit, "verificationGasLimit"},
+		{op.PreVerificationGas, "preVerificationGas"},
+	} {
+		if f.v == nil || f.v.Sign() == 0 {
+			return fmt.Errorf("gas manager left %s unpriced for policy %s", f.name, req.PolicyID)
+		}
+	}
 	return nil
 }
 

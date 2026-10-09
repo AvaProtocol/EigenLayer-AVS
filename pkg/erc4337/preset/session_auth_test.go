@@ -98,7 +98,7 @@ func TestSeedPricingGasLeavesSessionOperationsUnseeded(t *testing.T) {
 	factory := common.HexToAddress("0x00000000000017c61b5bEe81050EC8eFc9c6fecd")
 	for _, deploying := range []bool{false, true} {
 		newOp := func() *userop.UserOperationV07 {
-			op := &userop.UserOperationV07{PreVerificationGas: big.NewInt(100_000)}
+			op := &userop.UserOperationV07{PreVerificationGas: big.NewInt(1)}
 			if deploying {
 				op.Factory = &factory
 			}
@@ -123,10 +123,11 @@ func TestSeedPricingGasLeavesSessionOperationsUnseeded(t *testing.T) {
 			t.Errorf("owner operation (deploying=%t) priced at verification %s, want its seed %s",
 				deploying, op.VerificationGasLimit, want)
 		}
-		// Nil hands preVerificationGas to the estimator's seed, as before.
-		if op.PreVerificationGas != nil {
-			t.Errorf("owner operation (deploying=%t) kept preVerificationGas %s, want nil",
-				deploying, op.PreVerificationGas)
+		// The sponsored path marshals the operation as-is, and a nil field
+		// fails to marshal, so the owner's seed is restored, not cleared.
+		if op.PreVerificationGas == nil || op.PreVerificationGas.Int64() != initialPreVerificationGas {
+			t.Errorf("owner operation (deploying=%t) priced at preVerification %v, want its seed %d",
+				deploying, op.PreVerificationGas, initialPreVerificationGas)
 		}
 	}
 }
