@@ -71,20 +71,6 @@ type SessionAuthorization struct {
 	// succeeded on-chain, and an unrecorded one heals on the next operation
 	// through that same consumed-nonce path.
 	OnApplied func(userOpHash string) error
-
-	// DeferredTeardownCount is how many uninstallValidation calls the deferred
-	// batch carries (N-way replace). Zero for a plain first install. Used to
-	// size verificationGasLimit: each teardown runs inside validation and
-	// costs ~100k gas (Sepolia). The flat deferred-hooks seed alone is only
-	// enough for install + ~1 uninstall.
-	DeferredTeardownCount int
-
-	// AllowlistRows is how many AllowlistModule inputs the deferred install
-	// packs. Zero means "unknown — use the 2–3 row seed" (700k; scale only
-	// past 3). An undecodable >3-row install therefore under-seeds and
-	// AA26s at estimation — fail-open restores ≤3-row sends, not those.
-	// Product max native recipients is MaxNativeRecipients (5).
-	AllowlistRows int
 }
 
 // Deferred reports whether this operation carries the grant's install.
@@ -129,56 +115,24 @@ func (s *SessionAuthorization) nonceEntity() (entityID uint32, options uint8) {
 	return s.EntityID, options
 }
 
-// seedVerificationGasFor sizes the verification limit for what this operation
-// actually does during validation.
-//
-// The numbers come from Sepolia, not from theory (avs-infra
-// MA_v2_Authority_Model_And_Spike_Results.md §3.2–§3.4). Validation cost grows
-// with what the operation installs: a bare deferred install AA26s at 300k
-// because module storage is cold, and a hook-carrying install AA26s at 300k
-// again because every allowlist entry is its own cold SSTORE. Seeding must
-// therefore scale with the grant's contents rather than with a single
-// deploying/deployed flag.
-//
-// Over-seeding is not free either — Rundler refuses an operation whose
-// verification efficiency falls under 0.4 — so these are sized to land inside
-// that window, and SendUserOpV07WithRetry tightens from the bundler's own
-// ratio when they miss.
-func seedVerificationGasFor(op *userop.UserOperationV07, auth *SessionAuthorization) *big.Int {
-	var seed int64
-	switch {
-	case auth.Deferred() && auth.WrapExecuteUserOp:
-		// Hook-carrying grant: allowlist entries plus the exec hook.
-		seed = seedVerificationGasDeferredHooks
-	case auth.Deferred():
-		seed = seedVerificationGasDeferredBare
-	case auth != nil:
-		// Validating as an installed module entity rather than the bytecode
-		// fallback signer: an external call plus, on the entity's first use, a
-		// cold nonce-key slot.
-		seed = seedVerificationGasModuleEntity
-	default:
-		return seedVerificationGas(op)
+// seedPricingGas sets the gas limits an operation is priced with. An operation
+// that validates through a session entity leaves verificationGasLimit and
+// preVerificationGas at zero, so the bundler computes them; given a non-zero
+// value it simulates under it and echoes it back. Both grow with the grant:
+// validation runs the grant's hooks (and, on first use, its install), and the
+// install rides in the signature. Measured on Sepolia, with an eight-target
+// grant on an undeployed account: about 5.7M verification and 194k
+// preVerification for the install, then 221k and 111k verification for the
+// next two calls; fixed seeds of 900k and 100k reverted AA23 and AA26. The
+// owner's fallback signer keeps its measured seeds.
+func seedPricingGas(op *userop.UserOperationV07, auth *SessionAuthorization) {
+	if auth != nil {
+		op.VerificationGasLimit = big.NewInt(0)
+		op.PreVerificationGas = big.NewInt(0)
+		return
 	}
-	// N-way replace: each uninstallValidation runs during deferred validation
-	// and is charged against verificationGasLimit, not call gas. Flat seed is
-	// only enough for the install itself plus ~1 teardown.
-	if auth != nil && auth.Deferred() && auth.DeferredTeardownCount > 0 {
-		seed += int64(auth.DeferredTeardownCount) * seedVerificationGasPerUninstall
-	}
-	if auth != nil && auth.Deferred() && auth.WrapExecuteUserOp && auth.AllowlistRows > seedVerificationGasAllowlistBase {
-		seed += int64(auth.AllowlistRows-seedVerificationGasAllowlistBase) * seedVerificationGasPerAllowlistRow
-	}
-	// The deferred/module seeds above were measured on already-deployed
-	// accounts. First-use that ALSO deploys the account pays both costs in
-	// one validation frame (~160k for createSemiModularAccount alone). Add
-	// the deploying seed rather than inventing a third measured number —
-	// over-seeding is corrected by SendUserOpV07WithRetry's efficiency
-	// tighten, under-seeding is AA23/AA26 at estimation.
-	if op != nil && op.Factory != nil {
-		seed += seedVerificationGasDeploying
-	}
-	return big.NewInt(seed)
+	op.VerificationGasLimit = seedVerificationGas(op)
+	op.PreVerificationGas = big.NewInt(initialPreVerificationGas)
 }
 
 // SessionResolver answers "under what authority may the gateway execute for

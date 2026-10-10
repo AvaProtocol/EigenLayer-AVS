@@ -89,91 +89,46 @@ func TestSessionAuthValidate(t *testing.T) {
 	}
 }
 
-// Seeds are measured, and each tier covers a cost the one below it does not.
-// A seed that is too low AA26s; too high and Rundler refuses the operation for
-// falling under its 0.4 verification-efficiency floor.
-func TestSeedVerificationGasScalesWithGrantContents(t *testing.T) {
-	op := &userop.UserOperationV07{}
+// A session-entity operation is priced with zero verification and
+// preVerification gas so the bundler computes both: a non-zero value is
+// simulated as the cap and echoed, and the grant decides what validation
+// costs. The owner's fallback signer keeps its seeds.
+func TestSeedPricingGasLeavesSessionOperationsUnseeded(t *testing.T) {
 	sig := bytes.Repeat([]byte{0x02}, 65)
-
-	none := seedVerificationGasFor(op, nil)
-	entity := seedVerificationGasFor(op, &SessionAuthorization{EntityID: 1, SignerKey: testKey(t)})
-	bare := seedVerificationGasFor(op, &SessionAuthorization{
-		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig})
-	hooks := seedVerificationGasFor(op, &SessionAuthorization{
-		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
-		WrapExecuteUserOp: true})
-
-	if !(none.Cmp(entity) < 0 && entity.Cmp(bare) < 0 && bare.Cmp(hooks) < 0) {
-		t.Errorf("seeds must increase with validation work: none=%s entity=%s deferred=%s hooks=%s",
-			none, entity, bare, hooks)
-	}
-	// §3.4 measured the hook-carrying install AA26-ing at 300k.
-	if hooks.Cmp(big.NewInt(300_000)) <= 0 {
-		t.Errorf("hook-carrying seed %s is at or below the measured AA26 threshold", hooks)
-	}
-
-	// First-use that also deploys the account pays deploy + install in one
-	// validation frame. The deferred seeds alone under-cover that case.
 	factory := common.HexToAddress("0x00000000000017c61b5bEe81050EC8eFc9c6fecd")
-	deploying := &userop.UserOperationV07{Factory: &factory}
-	hooksDeploying := seedVerificationGasFor(deploying, &SessionAuthorization{
-		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
-		WrapExecuteUserOp: true})
-	if hooksDeploying.Cmp(hooks) <= 0 {
-		t.Errorf("deploy+hooks seed %s must exceed hooks-only seed %s", hooksDeploying, hooks)
-	}
-	wantMin := new(big.Int).Add(hooks, big.NewInt(seedVerificationGasDeploying))
-	if hooksDeploying.Cmp(wantMin) != 0 {
-		t.Errorf("deploy+hooks seed = %s, want hooks + deploying seed = %s", hooksDeploying, wantMin)
-	}
+	for _, deploying := range []bool{false, true} {
+		newOp := func() *userop.UserOperationV07 {
+			op := &userop.UserOperationV07{PreVerificationGas: big.NewInt(1)}
+			if deploying {
+				op.Factory = &factory
+			}
+			return op
+		}
+		install := &SessionAuthorization{
+			EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
+			WrapExecuteUserOp: true}
+		installed := &SessionAuthorization{EntityID: 1, SignerKey: testKey(t), WrapExecuteUserOp: true}
+		for _, auth := range []*SessionAuthorization{install, installed} {
+			op := newOp()
+			seedPricingGas(op, auth)
+			if op.VerificationGasLimit.Sign() != 0 || op.PreVerificationGas.Sign() != 0 {
+				t.Errorf("session operation (deploying=%t, install=%t) priced at verification %s, preVerification %s; want 0 and 0",
+					deploying, auth.Deferred(), op.VerificationGasLimit, op.PreVerificationGas)
+			}
+		}
 
-	// N-way replace: each uninstallValidation is charged in validation.
-	// Flat hooks seed alone only covers install + ~1 teardown.
-	nway := seedVerificationGasFor(op, &SessionAuthorization{
-		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
-		WrapExecuteUserOp: true, DeferredTeardownCount: 3})
-	wantNway := new(big.Int).Add(hooks, big.NewInt(3*seedVerificationGasPerUninstall))
-	if nway.Cmp(wantNway) != 0 {
-		t.Errorf("N-way seed = %s, want hooks + 3*per-uninstall = %s", nway, wantNway)
-	}
-
-	// Resolver fail-open sets AllowlistRows=0 when the install cannot be
-	// counted. That must be the 700k base, same as the measured 2–3 row
-	// grants (scale only fires past 3).
-	if hooks.Int64() != seedVerificationGasDeferredHooks {
-		t.Errorf("AllowlistRows omitted seed = %s, want %d", hooks, seedVerificationGasDeferredHooks)
-	}
-	unknown := seedVerificationGasFor(op, &SessionAuthorization{
-		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
-		WrapExecuteUserOp: true, AllowlistRows: 0})
-	if unknown.Cmp(hooks) != 0 {
-		t.Errorf("AllowlistRows=0 seed = %s, want the 700k hooks seed %s", unknown, hooks)
-	}
-	three := seedVerificationGasFor(op, &SessionAuthorization{
-		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
-		WrapExecuteUserOp: true, AllowlistRows: 3})
-	if three.Cmp(hooks) != 0 {
-		t.Errorf("AllowlistRows=3 seed = %s, want the 700k base (no per-row add)", three)
-	}
-
-	// Product max is 5 native recipients (20-row replace AA23s). 5 rows =
-	// 700k + 2×45k. The 20-row formula is kept as a unit check of the
-	// interpolation (3 rows ≈ 700k, 20 rows ≈ 1.5M) even though production
-	// must not ship 20.
-	five := seedVerificationGasFor(op, &SessionAuthorization{
-		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
-		WrapExecuteUserOp: true, AllowlistRows: 5})
-	wantFive := new(big.Int).Add(hooks, big.NewInt(2*seedVerificationGasPerAllowlistRow))
-	if five.Cmp(wantFive) != 0 {
-		t.Errorf("5-row seed = %s, want hooks + 2*per-row = %s", five, wantFive)
-	}
-	wide := seedVerificationGasFor(op, &SessionAuthorization{
-		EntityID: 1, SignerKey: testKey(t), DeferredData: []byte{0x01}, OwnerSignature: sig,
-		WrapExecuteUserOp: true, AllowlistRows: 20})
-	wantWide := new(big.Int).Add(hooks, big.NewInt(17*seedVerificationGasPerAllowlistRow))
-	if wide.Cmp(wantWide) != 0 {
-		t.Errorf("20-row seed = %s, want hooks + 17*per-row = %s", wide, wantWide)
+		op := newOp()
+		seedPricingGas(op, nil)
+		if want := seedVerificationGas(op); op.VerificationGasLimit.Cmp(want) != 0 {
+			t.Errorf("owner operation (deploying=%t) priced at verification %s, want its seed %s",
+				deploying, op.VerificationGasLimit, want)
+		}
+		// The sponsored path marshals the operation as-is, and a nil field
+		// fails to marshal, so the owner's seed is restored, not cleared.
+		if op.PreVerificationGas == nil || op.PreVerificationGas.Int64() != initialPreVerificationGas {
+			t.Errorf("owner operation (deploying=%t) priced at preVerification %v, want its seed %d",
+				deploying, op.PreVerificationGas, initialPreVerificationGas)
+		}
 	}
 }
 
