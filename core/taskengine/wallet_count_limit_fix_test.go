@@ -276,3 +276,33 @@ func TestWalletCountLimitEdgeCases(t *testing.T) {
 		assert.Contains(t, err.Error(), "max smart wallet count reached for owner (limit=1)")
 	})
 }
+
+// A designated EOA is stored on the same owner prefix as derived wallets.
+// It must not consume MaxWalletsPerOwner, or the first derived wallet is refused.
+func TestEOA7702DoesNotConsumeWalletCap(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	config.SmartWallet.MaxWalletsPerOwner = 1
+	engine := New(db, config, nil, testutil.GetLogger())
+
+	user := testutil.TestUser1()
+	owner := user.Address
+	delegate := common.HexToAddress("0x69007702764179f14F51cdce752f4f775d74E139")
+	require.NoError(t, StoreWallet(db, int64(1), owner, &model.SmartWallet{
+		Kind:     model.WalletKindEOA7702,
+		Owner:    &owner,
+		Address:  &owner,
+		Delegate: &delegate,
+	}))
+
+	resp, err := engine.GetWallet(user, &avsproto.GetWalletReq{Salt: "0"})
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.Address)
+	assert.NotEqual(t, owner.Hex(), resp.Address)
+
+	_, err = engine.GetWallet(user, &avsproto.GetWalletReq{Salt: "1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "max smart wallet count reached for owner (limit=1)")
+}

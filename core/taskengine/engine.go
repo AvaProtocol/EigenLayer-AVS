@@ -1204,7 +1204,7 @@ func (n *Engine) ListWallets(user *model.User, payload *avsproto.ListWalletReq) 
 						unique := make(map[string]struct{})
 						for _, item := range dbItems {
 							storedModelWallet := &model.SmartWallet{}
-							if err := storedModelWallet.FromStorageData(item.Value); err == nil && storedModelWallet.Address != nil {
+							if err := storedModelWallet.FromStorageData(item.Value); err == nil && walletCountsTowardOwnerCap(storedModelWallet) {
 								unique[strings.ToLower(storedModelWallet.Address.Hex())] = struct{}{}
 							}
 						}
@@ -1373,6 +1373,13 @@ func resolveFactoryOverride(swCfg *config.SmartWalletConfig, overrideHex string)
 	return aa.EffectiveFactory(swCfg)
 }
 
+// walletCountsTowardOwnerCap reports a stored derived wallet. A designated EOA
+// (kind eoa_7702) is the owner's existing account, so it does not consume
+// MaxWalletsPerOwner.
+func walletCountsTowardOwnerCap(wallet *model.SmartWallet) bool {
+	return wallet != nil && wallet.Address != nil && !wallet.IsEOA7702()
+}
+
 // GetWallet is the gRPC handler for the GetWallet RPC.
 // It uses the owner (from auth context), salt, and factory_address from payload to derive the wallet address.
 //
@@ -1538,7 +1545,7 @@ func (n *Engine) GetWalletWithContext(ctx context.Context, user *model.User, pay
 				unique := make(map[string]struct{})
 				for _, item := range dbItems {
 					storedModelWallet := &model.SmartWallet{}
-					if err := storedModelWallet.FromStorageData(item.Value); err == nil && storedModelWallet.Address != nil {
+					if err := storedModelWallet.FromStorageData(item.Value); err == nil && walletCountsTowardOwnerCap(storedModelWallet) {
 						unique[strings.ToLower(storedModelWallet.Address.Hex())] = struct{}{}
 					}
 				}
