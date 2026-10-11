@@ -209,6 +209,9 @@ macros:
     # a valid JSON object and MUST be set (an unresolved template in a customCode source
     # hard-fails the node). Single-quote it so the inner double quotes survive YAML.
     guardian_ruleset:    '{"weak":["honeypot_related_address","blacklist_doubt"]}'
+    # Local Studio notify endpoint for Email/Telegram nodes
+    notify_url:          "http://localhost:3000/api/notify"
+    notify_api_token:    ""
 
 # Optional: post-execution AI summarization. Disabled by default in dev.
 notifications:

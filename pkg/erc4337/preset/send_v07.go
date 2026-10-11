@@ -178,7 +178,7 @@ func SendUserOpMAv2(
 		op.Factory = &deployFactory
 		op.FactoryData = factoryData
 	}
-	op.VerificationGasLimit = seedVerificationGasFor(op, auth)
+	seedPricingGas(op, auth)
 
 	// Without a Gas Manager policy the account pays gas from native balance /
 	// EntryPoint deposit. A zero total is a guaranteed prefund failure —
@@ -236,7 +236,7 @@ func SendUserOpMAv2(
 				auth.DeferredData, auth.OwnerSignature = nil, nil
 				nonceEntity, nonceOptions = auth.nonceEntity()
 				op.Signature = nil
-				op.VerificationGasLimit = seedVerificationGasFor(op, auth)
+				seedPricingGas(op, auth)
 				nonce, err = NextNonceV07Managed(ctx, nonceRPC, entryPoint, sender, nonceEntity, nonceOptions)
 			}
 		}
