@@ -242,6 +242,47 @@ func TestDiscoverPoolAddressesFromLogs(t *testing.T) {
 			assert.NotEqual(t, ethTransferLogAddress, common.HexToAddress(addr))
 		}
 	})
+
+	t.Run("a different topic from the system address is still not a pool", func(t *testing.T) {
+		pool := "0x6Ce0896eAE6D4BD668fDe41BB784548fb8F59b50"
+		system := "0xFFffFFffFFfffFFfFFfFFFFFffFFFffffFfFFFfE"
+		swapTopic := "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67"
+		logsArray := []interface{}{
+			map[string]interface{}{
+				"address": system,
+				"topics":  []interface{}{swapTopic},
+			},
+			map[string]interface{}{
+				"address": pool,
+				"topics":  []interface{}{swapTopic},
+			},
+		}
+
+		assert.Equal(t, []string{pool}, processor.discoverPoolAddressesFromLogs(logsArray))
+	})
+
+	t.Run("reads a pool nested under raw and still skips a raw system log", func(t *testing.T) {
+		pool := "0x6Ce0896eAE6D4BD668fDe41BB784548fb8F59b50"
+		system := "0xfffffffffffffffffffffffffffffffffffffffe"
+		logsArray := []interface{}{
+			map[string]interface{}{
+				"raw": map[string]interface{}{
+					"address": pool,
+					"topics":  []interface{}{"0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67"},
+					"data":    "0x",
+				},
+			},
+			map[string]interface{}{
+				"raw": map[string]interface{}{
+					"address": system,
+					"topics":  []interface{}{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"},
+					"data":    "0x",
+				},
+			},
+		}
+
+		assert.Equal(t, []string{pool}, processor.discoverPoolAddressesFromLogs(logsArray))
+	})
 }
 
 func TestPoolDiscoveryIntegration(t *testing.T) {

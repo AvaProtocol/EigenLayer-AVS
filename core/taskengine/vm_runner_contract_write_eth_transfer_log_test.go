@@ -62,6 +62,17 @@ func erc20TransferLog(emitter, from, to string, value *big.Int) map[string]inter
 	}
 }
 
+// nestUnderRaw is the Tenderly shape: address, topics, and data live under raw.
+func nestUnderRaw(log map[string]interface{}) map[string]interface{} {
+	raw := map[string]interface{}{}
+	for _, key := range []string{"address", "topics", "data"} {
+		if value, ok := log[key]; ok {
+			raw[key] = value
+		}
+	}
+	return map[string]interface{}{"raw": raw}
+}
+
 func TestDecodeRelevantMethodEvents_KeepsTokenTransfer(t *testing.T) {
 	const (
 		usdc       = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
@@ -281,6 +292,19 @@ func TestDecodeRelevantMethodEvents_UserOpWindow(t *testing.T) {
 		events := processor.decodeRelevantMethodEvents(logs, usdc, "transfer", parsedABI, missing.Hex(), runnerA)
 		assert.Empty(t, events)
 	})
+
+	t.Run("raw-shaped receipt still scopes to the userOp", func(t *testing.T) {
+		rawLogs := make([]interface{}, 0, len(logs))
+		for _, item := range logs {
+			logMap, ok := item.(map[string]interface{})
+			require.True(t, ok)
+			rawLogs = append(rawLogs, nestUnderRaw(logMap))
+		}
+		events := processor.decodeRelevantMethodEvents(rawLogs, usdc, "transfer", parsedABI, hashA.Hex(), runnerA)
+		assert.Equal(t, common.HexToAddress(runnerA).Hex(), events["from"])
+		assert.Equal(t, paymentA.String(), events["value"])
+		assert.Equal(t, []string{"Transfer"}, eventNames(t, events))
+	})
 }
 
 func TestDecodeRelevantMethodEvents_ApproveDoesNotTakeTransferValue(t *testing.T) {
@@ -367,20 +391,19 @@ func TestDecodeRelevantMethodEvents_RouterKeepsSwapFields(t *testing.T) {
 	amount0 := big.NewInt(12345)
 	payment := big.NewInt(100000)
 	processor := testContractWriteProcessor()
+	swapLog := map[string]interface{}{
+		"address": pool,
+		"topics": []interface{}{
+			swapTopic,
+			addressTopic(router),
+			addressTopic(runner),
+		},
+		"data": abiWords(amount0, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0)),
+	}
+	tokenLog := erc20TransferLog(token, runner, router, payment)
 
 	t.Run("swap fields stay and the token transfer is listed", func(t *testing.T) {
-		logs := []interface{}{
-			map[string]interface{}{
-				"address": pool,
-				"topics": []interface{}{
-					swapTopic,
-					addressTopic(router),
-					addressTopic(runner),
-				},
-				"data": abiWords(amount0, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0)),
-			},
-			erc20TransferLog(token, runner, router, payment),
-		}
+		logs := []interface{}{swapLog, tokenLog}
 		events := processor.decodeRelevantMethodEvents(logs, router, "exactInputSingle", parsedABI, "", "")
 		assert.Equal(t, amount0.String(), events["amount0"])
 		_, hasValue := events["value"]
@@ -391,13 +414,163 @@ func TestDecodeRelevantMethodEvents_RouterKeepsSwapFields(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("a token transfer alone does not replace the return value", func(t *testing.T) {
+	t.Run("pool swap after the token transfer still fills the flat map", func(t *testing.T) {
+		system := "0xFFffFFffFFfffFFfFFfFFFFFffFFFffffFfFFFfE"
+		entryPoint := "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
+		bundler := "0x813781939B0D041A0b8d9d0ACc2f29632B786a27"
 		logs := []interface{}{
-			erc20TransferLog(token, runner, router, payment),
+			tokenLog,
+			swapLog,
+			erc20TransferLog(system, entryPoint, bundler, big.NewInt(584351393496208)),
 		}
+		events := processor.decodeRelevantMethodEvents(logs, router, "exactInputSingle", parsedABI, "", "")
+		assert.Equal(t, amount0.String(), events["amount0"])
+		_, hasValue := events["value"]
+		assert.False(t, hasValue)
+		assert.Equal(t, []string{"Transfer", "Swap"}, eventNames(t, events))
+		assert.Equal(t, payment.String(), eventValue(t, events, 0))
+	})
+
+	t.Run("raw pool swap after a raw token transfer is still merged", func(t *testing.T) {
+		logs := []interface{}{nestUnderRaw(tokenLog), nestUnderRaw(swapLog)}
+		events := processor.decodeRelevantMethodEvents(logs, router, "exactInputSingle", parsedABI, "", "")
+		assert.Equal(t, amount0.String(), events["amount0"])
+		_, hasValue := events["value"]
+		assert.False(t, hasValue)
+		assert.Equal(t, []string{"Transfer", "Swap"}, eventNames(t, events))
+	})
+
+	t.Run("a token transfer alone does not replace the return value", func(t *testing.T) {
+		logs := []interface{}{tokenLog}
 		events := processor.decodeRelevantMethodEvents(logs, router, "exactInputSingle", parsedABI, "", "")
 		assert.Empty(t, events)
 	})
+}
+
+func TestFlattenDecodedEvent_UnwrapsOrDropsEventName(t *testing.T) {
+	wrapped := map[string]interface{}{
+		"Transfer":  map[string]interface{}{"from": "0xabc", "value": "1"},
+		"eventName": "Transfer",
+	}
+	flat := flattenDecodedEvent(wrapped, "Transfer")
+	assert.Equal(t, "0xabc", flat["from"])
+	assert.Equal(t, "1", flat["value"])
+	_, hasName := flat["eventName"]
+	assert.False(t, hasName)
+
+	unwrapped := map[string]interface{}{
+		"from":      "0xdef",
+		"value":     "2",
+		"eventName": "Transfer",
+	}
+	flat = flattenDecodedEvent(unwrapped, "Transfer")
+	assert.Equal(t, "0xdef", flat["from"])
+	_, hasName = flat["eventName"]
+	assert.False(t, hasName)
+
+	// A non-map value under the event name is not a wrapper.
+	notAMap := map[string]interface{}{
+		"Transfer":  "nope",
+		"from":      "0x123",
+		"eventName": "Transfer",
+	}
+	flat = flattenDecodedEvent(notAMap, "Transfer")
+	assert.Equal(t, "nope", flat["Transfer"])
+	assert.Equal(t, "0x123", flat["from"])
+	_, hasName = flat["eventName"]
+	assert.False(t, hasName)
+}
+
+func TestDecodeRelevantMethodEvents_SkipsSelfdestructTopicFromSystemAddress(t *testing.T) {
+	const selfdestructAndTransferABI = `[
+		{"anonymous":false,"inputs":[
+			{"indexed":true,"name":"beneficiary","type":"address"},
+			{"indexed":false,"name":"balance","type":"uint256"}
+		],"name":"Selfdestruct","type":"event"},
+		{"anonymous":false,"inputs":[
+			{"indexed":true,"name":"from","type":"address"},
+			{"indexed":true,"name":"to","type":"address"},
+			{"indexed":false,"name":"value","type":"uint256"}
+		],"name":"Transfer","type":"event"}
+	]`
+	const (
+		usdc       = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+		runner     = "0x46aD59AFc8a21F0dfa3FE74C53A998b7550c7BDd"
+		recipient  = "0x633791DdC147B59345dc56D3A1F0606c23703154"
+		entryPoint = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
+		system     = "0xFFffFFffFFfffFFfFFfFFFFFffFFFffffFfFFFfE"
+	)
+	parsedABI := mustABI(t, selfdestructAndTransferABI)
+	// EIP-7708's historical burn log. The signature does not depend on `indexed`.
+	require.Equal(t,
+		"0x4bfaba3443c1a1836cd362418edc679fc96cae8449cbefccb6457cdf2c943083",
+		parsedABI.Events["Selfdestruct"].ID.Hex(),
+	)
+	burn := map[string]interface{}{
+		"address": system,
+		"topics": []interface{}{
+			parsedABI.Events["Selfdestruct"].ID.Hex(),
+			addressTopic(entryPoint),
+		},
+		"data": uint256Word(big.NewInt(1)),
+	}
+	processor := testContractWriteProcessor()
+
+	t.Run("burn alone is not a method event", func(t *testing.T) {
+		// The method target is the system address, so relevance would accept the
+		// log. The address skip drops it before the ABI is applied.
+		events := processor.decodeRelevantMethodEvents(
+			[]interface{}{burn},
+			ethTransferLogAddress.Hex(),
+			"execute",
+			parsedABI,
+			"",
+			"",
+		)
+		assert.Empty(t, events)
+	})
+
+	t.Run("token transfer stays when the burn log is present", func(t *testing.T) {
+		payment := big.NewInt(100000)
+		logs := []interface{}{
+			burn,
+			erc20TransferLog(usdc, runner, recipient, payment),
+		}
+		events := processor.decodeRelevantMethodEvents(logs, usdc, "transfer", parsedABI, "", runner)
+		assert.Equal(t, payment.String(), events["value"])
+		assert.Equal(t, common.HexToAddress(runner).Hex(), events["from"])
+		assert.Equal(t, []string{"Transfer"}, eventNames(t, events))
+	})
+}
+
+func TestExtractResolvedContractAddressFromMetadata_SkipsEthTransferLog(t *testing.T) {
+	const (
+		usdc   = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+		system = "0xFFffFFffFFfffFFfFFfFFFFFffFFFffffFfFFFfE"
+		router = "0x3333333333333333333333333333333333333333"
+	)
+	withLogs := func(to string, logs []interface{}) []interface{} {
+		receipt := map[string]interface{}{"logs": logs}
+		if to != "" {
+			receipt["to"] = to
+		}
+		return []interface{}{map[string]interface{}{"receipt": receipt}}
+	}
+
+	assert.Equal(t, usdc, extractResolvedContractAddressFromMetadata(withLogs("", []interface{}{
+		map[string]interface{}{"address": system},
+		map[string]interface{}{"address": usdc},
+	})))
+	assert.Equal(t, router, extractResolvedContractAddressFromMetadata(withLogs(router, []interface{}{
+		map[string]interface{}{"address": system},
+	})))
+	assert.Empty(t, extractResolvedContractAddressFromMetadata(withLogs("", []interface{}{
+		map[string]interface{}{"address": system},
+	})))
+	assert.Equal(t, usdc, extractResolvedContractAddressFromMetadata(withLogs("", []interface{}{
+		map[string]interface{}{"raw": map[string]interface{}{"address": system}},
+		map[string]interface{}{"raw": map[string]interface{}{"address": usdc}},
+	})))
 }
 
 func transferABIValues(t *testing.T) []*structpb.Value {
