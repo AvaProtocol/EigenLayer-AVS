@@ -3,6 +3,7 @@ package taskengine
 import (
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -212,6 +213,33 @@ func TestDiscoverPoolAddressesFromLogs(t *testing.T) {
 		assert.Equal(t, len(expectedAddresses), len(poolAddresses))
 		for _, expected := range expectedAddresses {
 			assert.Contains(t, poolAddresses, expected)
+		}
+	})
+
+	t.Run("Should ignore an EIP-7708 ETH transfer log from the system address", func(t *testing.T) {
+		usdc := "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+		// Mixed-case system address. Receipts do not always use the checksum form.
+		system := "0xFFffFFffFFfffFFfFFfFFFFFffFFFffffFfFFFfE"
+		logsArray := []interface{}{
+			map[string]interface{}{
+				"address": usdc,
+				"topics": []interface{}{
+					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+				},
+			},
+			map[string]interface{}{
+				"address": system,
+				"topics": []interface{}{
+					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+				},
+			},
+		}
+
+		poolAddresses := processor.discoverPoolAddressesFromLogs(logsArray)
+
+		assert.Equal(t, []string{usdc}, poolAddresses)
+		for _, addr := range poolAddresses {
+			assert.NotEqual(t, ethTransferLogAddress, common.HexToAddress(addr))
 		}
 	})
 }

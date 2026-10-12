@@ -2408,126 +2408,22 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 				methodName = fmt.Sprintf("method_%d", idx+1)
 			}
 		}
-		methodEvents := make(map[string]interface{})
+		// Seed with THIS method's own target (per-call override or node-level) so a
+		// heterogeneous atomic batch attributes each call's events to the right contract —
+		// Approval to the token, Swap/amountOut to the router/pool. Falls back to the node
+		// contract for the common single-target case.
+		methodTarget := contractAddress
+		if idx < len(perCallTargets) {
+			methodTarget = perCallTargets[idx].Hex()
+		}
+		methodEvents := map[string]interface{}{}
 
 		// Extract logs from receipt if available
 		if methodResult.Receipt != nil {
 			if receiptMap := methodResult.Receipt.AsInterface().(map[string]interface{}); receiptMap != nil {
 				if logs, hasLogs := receiptMap["logs"]; hasLogs {
 					if logsArray, ok := logs.([]interface{}); ok && len(logsArray) > 0 {
-						// First, log ALL addresses in the receipt for debugging
-						r.vm.logger.Debug("🔍 EVENT DEBUG - ALL LOG ADDRESSES IN RECEIPT",
-							"total_logs", len(logsArray),
-							"target_contract", contractAddress)
-						for logIdx, logIface := range logsArray {
-							if logM, ok := logIface.(map[string]interface{}); ok {
-								if addr, hasAddr := logM["address"]; hasAddr {
-									r.vm.logger.Debug("🔍 EVENT DEBUG - Log address",
-										"log_index", logIdx,
-										"address", addr)
-								}
-							}
-						}
-
-						// Decode each event log using contract ABI
-						for _, logInterface := range logsArray {
-							if logMap, ok := logInterface.(map[string]interface{}); ok {
-								if parsedABI != nil {
-									// Convert log map to types.Log structure for parsing
-									if eventLog := r.convertMapToEventLog(logMap); eventLog != nil {
-										r.vm.logger.Debug("🔍 EVENT DEBUG - Converted log",
-											"address", eventLog.Address.Hex(),
-											"topics_count", len(eventLog.Topics),
-											"data_length", len(eventLog.Data),
-											"contract_address", contractAddress)
-
-										// Method 2: Dynamic pool discovery from transaction logs
-										// First pass: collect all unique addresses from logs to build relevant address list.
-										// Seed with THIS method's own target (per-call override or node-level) so a
-										// heterogeneous atomic batch attributes each call's events to the right contract —
-										// Approval to the token, Swap/amountOut to the router/pool. Falls back to the node
-										// contract for the common single-target case.
-										methodTarget := contractAddress
-										if idx < len(perCallTargets) {
-											methodTarget = perCallTargets[idx].Hex()
-										}
-										relevantAddresses := []string{methodTarget} // Always include this method's target contract
-
-										// Scan all logs in this transaction to find pool addresses
-										if poolAddresses := r.discoverPoolAddressesFromLogs(logsArray); len(poolAddresses) > 0 {
-											for _, poolAddr := range poolAddresses {
-												relevantAddresses = append(relevantAddresses, poolAddr)
-											}
-											r.vm.logger.Info("🔍 DYNAMIC POOL DISCOVERY - Found pool addresses from transaction logs",
-												"method", methodResult.MethodName,
-												"pool_count", len(poolAddresses),
-												"pools", poolAddresses)
-										}
-
-										// Check if current log is from any relevant address
-										isRelevantAddress := false
-										for _, addr := range relevantAddresses {
-											if strings.EqualFold(eventLog.Address.Hex(), addr) {
-												isRelevantAddress = true
-												break
-											}
-										}
-
-										if !isRelevantAddress {
-											r.vm.logger.Debug("🔍 EVENT DEBUG - Address not relevant, skipping",
-												"log_address", eventLog.Address.Hex(),
-												"relevant_addresses", relevantAddresses)
-											continue
-										}
-
-										// Parse the log using shared event parsing function
-										decodedEvent, eventName, err := parseEventWithABIShared(eventLog, parsedABI, nil, r.vm.logger)
-										if err != nil {
-											r.vm.logger.Debug("🔍 EVENT DEBUG - Failed to parse event",
-												"contractAddress", eventLog.Address.Hex(),
-												"error", err)
-										} else {
-											r.vm.logger.Debug("🔍 EVENT DEBUG - Successfully parsed event",
-												"event_name", eventName,
-												"decoded_data", decodedEvent)
-
-											// Flatten event fields into methodEvents
-											// Prefer removing the event name wrapper if present, so
-											// output is methodName: { from, to, value } rather than methodName: { Transfer: {...} }
-											if eventName != "" {
-												if only, ok := decodedEvent[eventName]; ok {
-													if inner, ok2 := only.(map[string]interface{}); ok2 {
-														for k, v := range inner {
-															methodEvents[k] = v
-														}
-													} else {
-														// Fallback: copy decodedEvent sans meta key
-														for key, value := range decodedEvent {
-															if key != "eventName" {
-																methodEvents[key] = value
-															}
-														}
-													}
-												} else {
-													// No direct eventName key; copy sans meta key
-													for key, value := range decodedEvent {
-														if key != "eventName" {
-															methodEvents[key] = value
-														}
-													}
-												}
-											} else {
-												for key, value := range decodedEvent {
-													if key != "eventName" {
-														methodEvents[key] = value
-													}
-												}
-											}
-										}
-									}
-								}
-							}
-						}
+						methodEvents = r.decodeRelevantMethodEvents(logsArray, methodTarget, methodName, parsedABI)
 					}
 				}
 			}
@@ -2966,6 +2862,140 @@ func (r *ContractWriteProcessor) computeUniswapV3PoolAddress(tokenA, tokenB comm
 	return addr
 }
 
+// ethTransferLogAddress is the system address that emits an ERC-20-shaped
+// Transfer for a plain ETH value move (EIP-7708). It is not a token or a pool.
+// Sepolia emits these logs today; other chains will once they adopt the same
+// change. Decoding one as the called contract's Transfer reports the gas
+// refund as the payment.
+var ethTransferLogAddress = common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
+
+// decodeRelevantMethodEvents flattens ABI-decoded fields from receipt logs that
+// belong to methodTarget or a pool discovered from the same receipt. Later
+// relevant logs still overwrite earlier fields. Logs from ethTransferLogAddress
+// are skipped: an ETH refund is not an event of the called contract.
+func (r *ContractWriteProcessor) decodeRelevantMethodEvents(
+	logsArray []interface{},
+	methodTarget string,
+	methodName string,
+	parsedABI *abi.ABI,
+) map[string]interface{} {
+	methodEvents := make(map[string]interface{})
+	if len(logsArray) == 0 {
+		return methodEvents
+	}
+
+	r.vm.logger.Debug("🔍 EVENT DEBUG - ALL LOG ADDRESSES IN RECEIPT",
+		"total_logs", len(logsArray),
+		"target_contract", methodTarget)
+	for logIdx, logIface := range logsArray {
+		if logM, ok := logIface.(map[string]interface{}); ok {
+			if addr, hasAddr := logM["address"]; hasAddr {
+				r.vm.logger.Debug("🔍 EVENT DEBUG - Log address",
+					"log_index", logIdx,
+					"address", addr)
+			}
+		}
+	}
+
+	if parsedABI == nil {
+		return methodEvents
+	}
+
+	relevantAddresses := []string{methodTarget}
+
+	// Pool addresses come from the whole receipt, not from the log being decoded.
+	if poolAddresses := r.discoverPoolAddressesFromLogs(logsArray); len(poolAddresses) > 0 {
+		relevantAddresses = append(relevantAddresses, poolAddresses...)
+		r.vm.logger.Info("🔍 DYNAMIC POOL DISCOVERY - Found pool addresses from transaction logs",
+			"method", methodName,
+			"pool_count", len(poolAddresses),
+			"pools", poolAddresses)
+	}
+
+	for _, logInterface := range logsArray {
+		logMap, ok := logInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		eventLog := r.convertMapToEventLog(logMap)
+		if eventLog == nil {
+			continue
+		}
+		r.vm.logger.Debug("🔍 EVENT DEBUG - Converted log",
+			"address", eventLog.Address.Hex(),
+			"topics_count", len(eventLog.Topics),
+			"data_length", len(eventLog.Data),
+			"contract_address", methodTarget)
+
+		// An ETH transfer log shares the ERC-20 Transfer topic. Never decode it
+		// as this method's event, even when the method target is the system address.
+		if eventLog.Address == ethTransferLogAddress {
+			r.vm.logger.Debug("🔍 EVENT DEBUG - Skipping ETH transfer log from system address",
+				"log_address", eventLog.Address.Hex())
+			continue
+		}
+
+		isRelevantAddress := false
+		for _, addr := range relevantAddresses {
+			if strings.EqualFold(eventLog.Address.Hex(), addr) {
+				isRelevantAddress = true
+				break
+			}
+		}
+
+		if !isRelevantAddress {
+			r.vm.logger.Debug("🔍 EVENT DEBUG - Address not relevant, skipping",
+				"log_address", eventLog.Address.Hex(),
+				"relevant_addresses", relevantAddresses)
+			continue
+		}
+
+		decodedEvent, eventName, err := parseEventWithABIShared(eventLog, parsedABI, nil, r.vm.logger)
+		if err != nil {
+			r.vm.logger.Debug("🔍 EVENT DEBUG - Failed to parse event",
+				"contractAddress", eventLog.Address.Hex(),
+				"error", err)
+			continue
+		}
+		r.vm.logger.Debug("🔍 EVENT DEBUG - Successfully parsed event",
+			"event_name", eventName,
+			"decoded_data", decodedEvent)
+
+		// Flatten event fields into methodEvents.
+		// Prefer removing the event name wrapper if present, so
+		// output is methodName: { from, to, value } rather than methodName: { Transfer: {...} }
+		if eventName != "" {
+			if only, ok := decodedEvent[eventName]; ok {
+				if inner, ok2 := only.(map[string]interface{}); ok2 {
+					for k, v := range inner {
+						methodEvents[k] = v
+					}
+				} else {
+					for key, value := range decodedEvent {
+						if key != "eventName" {
+							methodEvents[key] = value
+						}
+					}
+				}
+			} else {
+				for key, value := range decodedEvent {
+					if key != "eventName" {
+						methodEvents[key] = value
+					}
+				}
+			}
+		} else {
+			for key, value := range decodedEvent {
+				if key != "eventName" {
+					methodEvents[key] = value
+				}
+			}
+		}
+	}
+
+	return methodEvents
+}
+
 // discoverPoolAddressesFromLogs scans transaction logs to find pool addresses dynamically
 func (r *ContractWriteProcessor) discoverPoolAddressesFromLogs(logsArray []interface{}) []string {
 	var poolAddresses []string
@@ -2985,6 +3015,11 @@ func (r *ContractWriteProcessor) discoverPoolAddressesFromLogs(logsArray []inter
 			// Extract address and topics
 			if addressInterface, hasAddress := logMap["address"]; hasAddress {
 				if addressStr, ok := addressInterface.(string); ok {
+					// EIP-7708 emits Transfer from the system address for plain ETH
+					// moves, including the EntryPoint's gas refund to the bundler.
+					if common.HexToAddress(addressStr) == ethTransferLogAddress {
+						continue
+					}
 					if topicsInterface, hasTopics := logMap["topics"]; hasTopics {
 						if topicsArray, ok := topicsInterface.([]interface{}); ok && len(topicsArray) > 0 {
 							if topic0Interface, ok := topicsArray[0].(string); ok {
