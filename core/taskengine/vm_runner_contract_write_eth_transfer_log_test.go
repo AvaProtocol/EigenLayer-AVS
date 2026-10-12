@@ -95,6 +95,20 @@ func TestDecodeRelevantMethodEvents_KeepsTokenTransfer(t *testing.T) {
 		assert.Equal(t, []string{"Transfer"}, eventNames(t, events))
 	})
 
+	t.Run("refund before the token transfer", func(t *testing.T) {
+		logs := []interface{}{
+			erc20TransferLog(system, entryPoint, bundler, gasRefund),
+			erc20TransferLog(usdc, runner, recipient, payment),
+		}
+
+		events := processor.decodeRelevantMethodEvents(logs, usdc, "transfer", parsedABI, "", "")
+
+		assert.Equal(t, common.HexToAddress(runner).Hex(), events["from"])
+		assert.Equal(t, common.HexToAddress(recipient).Hex(), events["to"])
+		assert.Equal(t, payment.String(), events["value"])
+		assert.Equal(t, []string{"Transfer"}, eventNames(t, events))
+	})
+
 	t.Run("refund alone is not a payment", func(t *testing.T) {
 		logs := []interface{}{
 			erc20TransferLog(system, entryPoint, bundler, gasRefund),
