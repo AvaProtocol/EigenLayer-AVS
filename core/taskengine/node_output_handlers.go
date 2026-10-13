@@ -2,12 +2,7 @@ package taskengine
 
 import (
 	"fmt"
-	"strings"
 
-	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/types"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
@@ -289,13 +284,12 @@ func (h *ContractReadOutputHandler) CreateEmptyOutput() interface{} {
 	return &avsproto.RunNodeWithInputsResp_ContractRead{ContractRead: &avsproto.ContractReadNode_Output{Data: dataVal}}
 }
 
-// ContractWriteOutputHandler handles ContractWrite node output conversion
-type ContractWriteOutputHandler struct {
-	engine *Engine // Need reference to engine for parseEventWithParsedABI
-}
+// ContractWriteOutputHandler handles ContractWrite node output conversion.
+// Decoded step data comes from the VM. This handler does not parse receipts.
+type ContractWriteOutputHandler struct{}
 
-func NewContractWriteOutputHandler(engine *Engine) *ContractWriteOutputHandler {
-	return &ContractWriteOutputHandler{engine: engine}
+func NewContractWriteOutputHandler(_ *Engine) *ContractWriteOutputHandler {
+	return &ContractWriteOutputHandler{}
 }
 
 func (h *ContractWriteOutputHandler) ExtractFromExecutionStep(step *avsproto.Execution_Step) (map[string]interface{}, error) {
@@ -371,109 +365,10 @@ func (h *ContractWriteOutputHandler) ConvertToProtobuf(chainID int64, result map
 						convertedResult["value"] = nil
 					}
 
+					// The VM already decoded this step into result["data"]. Walking the
+					// receipt here has no UserOp window and would replace that
+					// output with whichever log decoded last.
 					resultsArray = append(resultsArray, convertedResult)
-
-					// Parse events for this specific method
-					methodEvents := make(map[string]interface{})
-					if cleanReceipt != nil {
-						receiptData := cleanReceipt
-						if receiptMap, ok := receiptData.(map[string]interface{}); ok {
-							if logs, hasLogs := receiptMap["logs"]; hasLogs {
-								if logsArray, ok := logs.([]interface{}); ok && len(logsArray) > 0 {
-									var contractABI *abi.ABI
-									if methodResult.MethodAbi != nil {
-										if abiData := methodResult.MethodAbi.AsInterface(); abiData != nil {
-											if abiMap, ok := abiData.(map[string]interface{}); ok {
-												if abiString, hasABI := abiMap["contractABI"]; hasABI {
-													if abiStr, ok := abiString.(string); ok {
-														if parsed, err := abi.JSON(strings.NewReader(abiStr)); err == nil {
-															contractABI = &parsed
-														}
-													}
-												}
-											}
-										}
-									}
-
-									for _, logInterface := range logsArray {
-										if logMap, ok := logInterface.(map[string]interface{}); ok {
-											if contractABI != nil {
-												eventLog := &types.Log{}
-
-												if addr, hasAddr := logMap["address"]; hasAddr {
-													if addrStr, ok := addr.(string); ok {
-														eventLog.Address = common.HexToAddress(addrStr)
-													}
-												}
-
-												if topics, hasTopics := logMap["topics"]; hasTopics {
-													if topicsArray, ok := topics.([]interface{}); ok {
-														for _, topic := range topicsArray {
-															if topicStr, ok := topic.(string); ok {
-																eventLog.Topics = append(eventLog.Topics, common.HexToHash(topicStr))
-															}
-														}
-													}
-												}
-
-												if data, hasData := logMap["data"]; hasData {
-													if dataStr, ok := data.(string); ok {
-														if dataBytes, err := hexutil.Decode(dataStr); err == nil {
-															eventLog.Data = dataBytes
-														}
-													}
-												}
-
-												if decodedEvent, err := h.engine.parseEventWithParsedABI(chainID, eventLog, contractABI, nil); err == nil {
-													// Flatten event data: if decoded map contains the concrete event name as a key,
-													// unwrap it so methodName maps directly to event fields
-													if nameVal, hasName := decodedEvent["eventName"]; hasName {
-														if nameStr, ok := nameVal.(string); ok && nameStr != "" {
-															if inner, ok2 := decodedEvent[nameStr]; ok2 {
-																if innerMap, ok3 := inner.(map[string]interface{}); ok3 {
-																	for k, v := range innerMap {
-																		methodEvents[k] = v
-																	}
-																} else {
-																	for k, v := range decodedEvent {
-																		if k != "eventName" {
-																			methodEvents[k] = v
-																		}
-																	}
-																}
-															} else {
-																for k, v := range decodedEvent {
-																	if k != "eventName" {
-																		methodEvents[k] = v
-																	}
-																}
-															}
-														} else {
-															for k, v := range decodedEvent {
-																if k != "eventName" {
-																	methodEvents[k] = v
-																}
-															}
-														}
-													} else {
-														for k, v := range decodedEvent {
-															if k != "eventName" {
-																methodEvents[k] = v
-															}
-														}
-													}
-												}
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-
-					if len(methodEvents) > 0 {
-						decodedEventsData[methodResult.MethodName] = methodEvents
-					}
 				} else if methodResultMap, ok := resultInterface.(map[string]interface{}); ok {
 					resultsArray = append(resultsArray, methodResultMap)
 				}

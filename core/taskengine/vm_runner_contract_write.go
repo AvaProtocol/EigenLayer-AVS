@@ -2408,126 +2408,30 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 				methodName = fmt.Sprintf("method_%d", idx+1)
 			}
 		}
-		methodEvents := make(map[string]interface{})
+		// Seed with THIS method's own target (per-call override or node-level) so a
+		// heterogeneous atomic batch attributes each call's events to the right contract —
+		// Approval to the token, Swap/amountOut to the router/pool. Falls back to the node
+		// contract for the common single-target case.
+		methodTarget := contractAddress
+		if idx < len(perCallTargets) {
+			methodTarget = perCallTargets[idx].Hex()
+		}
+		methodEvents := map[string]interface{}{}
 
 		// Extract logs from receipt if available
 		if methodResult.Receipt != nil {
 			if receiptMap := methodResult.Receipt.AsInterface().(map[string]interface{}); receiptMap != nil {
 				if logs, hasLogs := receiptMap["logs"]; hasLogs {
 					if logsArray, ok := logs.([]interface{}); ok && len(logsArray) > 0 {
-						// First, log ALL addresses in the receipt for debugging
-						r.vm.logger.Debug("🔍 EVENT DEBUG - ALL LOG ADDRESSES IN RECEIPT",
-							"total_logs", len(logsArray),
-							"target_contract", contractAddress)
-						for logIdx, logIface := range logsArray {
-							if logM, ok := logIface.(map[string]interface{}); ok {
-								if addr, hasAddr := logM["address"]; hasAddr {
-									r.vm.logger.Debug("🔍 EVENT DEBUG - Log address",
-										"log_index", logIdx,
-										"address", addr)
-								}
-							}
-						}
-
-						// Decode each event log using contract ABI
-						for _, logInterface := range logsArray {
-							if logMap, ok := logInterface.(map[string]interface{}); ok {
-								if parsedABI != nil {
-									// Convert log map to types.Log structure for parsing
-									if eventLog := r.convertMapToEventLog(logMap); eventLog != nil {
-										r.vm.logger.Debug("🔍 EVENT DEBUG - Converted log",
-											"address", eventLog.Address.Hex(),
-											"topics_count", len(eventLog.Topics),
-											"data_length", len(eventLog.Data),
-											"contract_address", contractAddress)
-
-										// Method 2: Dynamic pool discovery from transaction logs
-										// First pass: collect all unique addresses from logs to build relevant address list.
-										// Seed with THIS method's own target (per-call override or node-level) so a
-										// heterogeneous atomic batch attributes each call's events to the right contract —
-										// Approval to the token, Swap/amountOut to the router/pool. Falls back to the node
-										// contract for the common single-target case.
-										methodTarget := contractAddress
-										if idx < len(perCallTargets) {
-											methodTarget = perCallTargets[idx].Hex()
-										}
-										relevantAddresses := []string{methodTarget} // Always include this method's target contract
-
-										// Scan all logs in this transaction to find pool addresses
-										if poolAddresses := r.discoverPoolAddressesFromLogs(logsArray); len(poolAddresses) > 0 {
-											for _, poolAddr := range poolAddresses {
-												relevantAddresses = append(relevantAddresses, poolAddr)
-											}
-											r.vm.logger.Info("🔍 DYNAMIC POOL DISCOVERY - Found pool addresses from transaction logs",
-												"method", methodResult.MethodName,
-												"pool_count", len(poolAddresses),
-												"pools", poolAddresses)
-										}
-
-										// Check if current log is from any relevant address
-										isRelevantAddress := false
-										for _, addr := range relevantAddresses {
-											if strings.EqualFold(eventLog.Address.Hex(), addr) {
-												isRelevantAddress = true
-												break
-											}
-										}
-
-										if !isRelevantAddress {
-											r.vm.logger.Debug("🔍 EVENT DEBUG - Address not relevant, skipping",
-												"log_address", eventLog.Address.Hex(),
-												"relevant_addresses", relevantAddresses)
-											continue
-										}
-
-										// Parse the log using shared event parsing function
-										decodedEvent, eventName, err := parseEventWithABIShared(eventLog, parsedABI, nil, r.vm.logger)
-										if err != nil {
-											r.vm.logger.Debug("🔍 EVENT DEBUG - Failed to parse event",
-												"contractAddress", eventLog.Address.Hex(),
-												"error", err)
-										} else {
-											r.vm.logger.Debug("🔍 EVENT DEBUG - Successfully parsed event",
-												"event_name", eventName,
-												"decoded_data", decodedEvent)
-
-											// Flatten event fields into methodEvents
-											// Prefer removing the event name wrapper if present, so
-											// output is methodName: { from, to, value } rather than methodName: { Transfer: {...} }
-											if eventName != "" {
-												if only, ok := decodedEvent[eventName]; ok {
-													if inner, ok2 := only.(map[string]interface{}); ok2 {
-														for k, v := range inner {
-															methodEvents[k] = v
-														}
-													} else {
-														// Fallback: copy decodedEvent sans meta key
-														for key, value := range decodedEvent {
-															if key != "eventName" {
-																methodEvents[key] = value
-															}
-														}
-													}
-												} else {
-													// No direct eventName key; copy sans meta key
-													for key, value := range decodedEvent {
-														if key != "eventName" {
-															methodEvents[key] = value
-														}
-													}
-												}
-											} else {
-												for key, value := range decodedEvent {
-													if key != "eventName" {
-														methodEvents[key] = value
-													}
-												}
-											}
-										}
-									}
-								}
-							}
-						}
+						userOpHash, _ := receiptMap["userOpHash"].(string)
+						runner, _ := receiptMap["from"].(string)
+						// executeAtomicBatch stamps every call in a run-node batch with this
+						// same receipt and userOpHash. Two transfers of one token therefore
+						// both take the first runner Transfer in the window. Deployed
+						// workflows send one UserOp per call, so each of those receipts
+						// holds a single call. The shared data["transfer"] key is older
+						// than this window.
+						methodEvents = r.decodeRelevantMethodEvents(logsArray, methodTarget, methodName, parsedABI, userOpHash, runner)
 					}
 				}
 			}
@@ -2708,33 +2612,129 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	return s, nil
 }
 
-// convertMapToEventLog converts a log map from receipt to types.Log structure for event parsing
-func (r *ContractWriteProcessor) convertMapToEventLog(logMap map[string]interface{}) *types.Log {
-	eventLog := &types.Log{}
+// promoteRawLogFields copies Tenderly's nested raw address, topics, and data
+// onto the log when those keys are absent. Pool discovery, the UserOp window,
+// and event decoding all read the top-level keys. The write is in place.
+// Production receipts come from structpb.AsInterface, which allocates a fresh
+// map, so the write does not alias another goroutine's receipt.
+func promoteRawLogFields(logMap map[string]interface{}) {
+	rawAny, hasRaw := logMap["raw"]
+	if !hasRaw {
+		return
+	}
+	rawMap, isMap := rawAny.(map[string]interface{})
+	if !isMap {
+		return
+	}
+	copyMissingString(logMap, rawMap, "address")
+	copyMissingString(logMap, rawMap, "data")
+	if _, exists := logMap["topics"]; exists {
+		return
+	}
+	switch topics := rawMap["topics"].(type) {
+	case []interface{}, []string:
+		logMap["topics"] = topics
+	}
+}
 
-	// Tenderly HTTP/RPC may nest raw EVM log fields under "raw"
-	// If present, promote nested raw fields for uniform parsing
-	if rawAny, hasRaw := logMap["raw"]; hasRaw {
-		if rawMap, ok := rawAny.(map[string]interface{}); ok {
-			// Merge raw fields on top-level for our parser expectations
-			// Do not overwrite existing top-level keys if already present
-			if _, ok := logMap["address"]; !ok {
-				if v, ok2 := rawMap["address"].(string); ok2 {
-					logMap["address"] = v
-				}
-			}
-			if _, ok := logMap["topics"]; !ok {
-				if v, ok2 := rawMap["topics"].([]interface{}); ok2 {
-					logMap["topics"] = v
-				}
-			}
-			if _, ok := logMap["data"]; !ok {
-				if v, ok2 := rawMap["data"].(string); ok2 {
-					logMap["data"] = v
-				}
+func copyMissingString(dst, src map[string]interface{}, key string) {
+	if _, exists := dst[key]; exists {
+		return
+	}
+	if value, ok := src[key].(string); ok {
+		dst[key] = value
+	}
+}
+
+func topicStrings(topics interface{}) []string {
+	switch topics := topics.(type) {
+	case []string:
+		return topics
+	case []interface{}:
+		out := make([]string, 0, len(topics))
+		for _, topic := range topics {
+			topicStr, ok := topic.(string)
+			if ok {
+				out = append(out, topicStr)
 			}
 		}
+		return out
+	default:
+		return nil
 	}
+}
+
+func normalizeReceiptLogs(logs []interface{}) {
+	for _, logInterface := range logs {
+		logMap, ok := logInterface.(map[string]interface{})
+		if ok {
+			promoteRawLogFields(logMap)
+		}
+	}
+}
+
+// nonSystemReceiptLogAddress returns a log's contract address, reading raw
+// when the top-level field is absent. The EIP-7708 system address is not a
+// contract, so it is never returned.
+func nonSystemReceiptLogAddress(logMap map[string]interface{}) (string, bool) {
+	address, _ := logMap["address"].(string)
+	if address == "" {
+		if raw, ok := logMap["raw"].(map[string]interface{}); ok {
+			address, _ = raw["address"].(string)
+		}
+	}
+	if !common.IsHexAddress(address) || IsEthTransferLogAddress(common.HexToAddress(address)) {
+		return "", false
+	}
+	return address, true
+}
+
+// firstTopicString returns topics[0] when it is a non-empty string.
+// A later string does not stand in for a non-string first element.
+func firstTopicString(topics interface{}) (string, bool) {
+	switch topics := topics.(type) {
+	case []string:
+		if len(topics) == 0 || topics[0] == "" {
+			return "", false
+		}
+		return topics[0], true
+	case []interface{}:
+		if len(topics) == 0 {
+			return "", false
+		}
+		topic0, isString := topics[0].(string)
+		if !isString || topic0 == "" {
+			return "", false
+		}
+		return topic0, true
+	default:
+		return "", false
+	}
+}
+
+// receiptLogAddressAndTopic0 returns the emitter and topic0 for pool discovery.
+// A log from the ETH-transfer system address is skipped for every topic.
+func receiptLogAddressAndTopic0(logMap map[string]interface{}) (address, topic0 string, ok bool) {
+	promoteRawLogFields(logMap)
+	address, ok = logMap["address"].(string)
+	if !ok || address == "" {
+		return "", "", false
+	}
+	if common.IsHexAddress(address) && IsEthTransferLogAddress(common.HexToAddress(address)) {
+		return "", "", false
+	}
+	topic0, ok = firstTopicString(logMap["topics"])
+	if !ok {
+		return "", "", false
+	}
+	return address, topic0, true
+}
+
+// convertMapToEventLog converts a log map from receipt to types.Log structure for event parsing.
+// It returns nil for an EIP-7708 system-address log so no caller can decode that log as a token event.
+func (r *ContractWriteProcessor) convertMapToEventLog(logMap map[string]interface{}) *types.Log {
+	eventLog := &types.Log{}
+	promoteRawLogFields(logMap)
 
 	// Parse address
 	if addr, hasAddr := logMap["address"]; hasAddr {
@@ -2742,16 +2742,15 @@ func (r *ContractWriteProcessor) convertMapToEventLog(logMap map[string]interfac
 			eventLog.Address = common.HexToAddress(addrStr)
 		}
 	}
+	// Any topic from this address is an ETH move (Transfer, or the historical
+	// Selfdestruct burn), never an event of the called contract.
+	if IsEthTransferLogAddress(eventLog.Address) {
+		return nil
+	}
 
 	// Parse topics
-	if topics, hasTopics := logMap["topics"]; hasTopics {
-		if topicsArray, ok := topics.([]interface{}); ok {
-			for _, topic := range topicsArray {
-				if topicStr, ok := topic.(string); ok {
-					eventLog.Topics = append(eventLog.Topics, common.HexToHash(topicStr))
-				}
-			}
-		}
+	for _, topic := range topicStrings(logMap["topics"]) {
+		eventLog.Topics = append(eventLog.Topics, common.HexToHash(topic))
 	}
 
 	// Parse data
@@ -2966,6 +2965,338 @@ func (r *ContractWriteProcessor) computeUniswapV3PoolAddress(tokenA, tokenB comm
 	return addr
 }
 
+// ethTransferLogAddress is the EIP-7708 system address. It emits an
+// ERC-20-shaped Transfer for a plain ETH value move, and the same address
+// emits the historical Selfdestruct log (topic 0x4bfaba34…) for a
+// self-destruct burn. EIP-8246 removes that burn. Any other topic from this
+// address is still not a token or a pool, so callers skip by address.
+// Sepolia emits the Transfer form today. Decoding one as the called
+// contract's Transfer reports the gas refund as the payment.
+var (
+	ethTransferLogAddress   = common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
+	userOperationEventTopic = common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f")
+	beforeExecutionTopic    = common.HexToHash("0xbb47ee3e183a558b1a2ff0874b079f3fc5478b7454eacf2bfc5af2ff5878f972")
+)
+
+// decodeRelevantMethodEvents builds the step output for one contract call.
+//
+// When userOpHash is set, only logs from that UserOp are decoded: after the
+// previous UserOperationEvent (or after BeforeExecution when this op is first)
+// through this op's UserOperationEvent. A hash that is not in the receipt
+// decodes nothing. A receipt with no hash (simulation, a direct transaction)
+// keeps every log. Logs from ethTransferLogAddress are never decoded, whatever
+// their topic. Raw receipt logs are promoted before the window and discovery.
+//
+// The returned map is one chosen event's fields, the shape Studio already
+// reads, plus an events list of every decoded log. A map with no chosen
+// fields is empty, so a return value such as amountOut is left in place.
+func (r *ContractWriteProcessor) decodeRelevantMethodEvents(
+	logsArray []interface{},
+	methodTarget string,
+	methodName string,
+	parsedABI *abi.ABI,
+	userOpHash string,
+	runner string,
+) map[string]interface{} {
+	methodEvents := make(map[string]interface{})
+	if len(logsArray) == 0 || parsedABI == nil {
+		return methodEvents
+	}
+
+	// Discovery and the UserOp window read top-level address and topics.
+	// Tenderly nests those under raw, so promote them before either reader runs.
+	normalizeReceiptLogs(logsArray)
+
+	window, scopedMiss := userOpLogWindow(logsArray, userOpHash)
+	if scopedMiss {
+		r.vm.logger.Debug("🔍 EVENT DEBUG - userOpHash not in receipt, decoding no logs",
+			"userOpHash", userOpHash,
+			"method", methodName)
+		return methodEvents
+	}
+
+	r.vm.logger.Debug("🔍 EVENT DEBUG - ALL LOG ADDRESSES IN RECEIPT",
+		"total_logs", len(logsArray),
+		"window_logs", len(window),
+		"target_contract", methodTarget)
+	for logIdx, logIface := range window {
+		if logM, ok := logIface.(map[string]interface{}); ok {
+			if addr, hasAddr := logM["address"]; hasAddr {
+				r.vm.logger.Debug("🔍 EVENT DEBUG - Log address",
+					"log_index", logIdx,
+					"address", addr)
+			}
+		}
+	}
+
+	relevantAddresses := []string{methodTarget}
+
+	// Pool addresses come from this UserOp's logs, not from other ops in the bundle.
+	if poolAddresses := r.discoverPoolAddressesFromLogs(window); len(poolAddresses) > 0 {
+		relevantAddresses = append(relevantAddresses, poolAddresses...)
+		r.vm.logger.Info("🔍 DYNAMIC POOL DISCOVERY - Found pool addresses from transaction logs",
+			"method", methodName,
+			"pool_count", len(poolAddresses),
+			"pools", poolAddresses)
+	}
+
+	decoded := r.decodeWindowEvents(window, relevantAddresses, parsedABI, methodTarget)
+
+	// No chosen field means "no event output". An events-only map would replace
+	// a return value such as amountOut.
+	flat := chooseMethodEventFields(methodName, methodTarget, runner, decoded)
+	if len(flat) == 0 {
+		return methodEvents
+	}
+	for key, value := range flat {
+		methodEvents[key] = value
+	}
+	events := make([]interface{}, 0, len(decoded))
+	for _, ev := range decoded {
+		events = append(events, map[string]interface{}{
+			"address": ev.address,
+			"name":    ev.name,
+			"fields":  copyEventFields(ev.fields),
+		})
+	}
+	methodEvents["events"] = events
+	return methodEvents
+}
+
+type parsedMethodEvent struct {
+	address string
+	name    string
+	fields  map[string]interface{}
+}
+
+func (r *ContractWriteProcessor) decodeWindowEvents(
+	window []interface{},
+	relevantAddresses []string,
+	parsedABI *abi.ABI,
+	methodTarget string,
+) []parsedMethodEvent {
+	var decoded []parsedMethodEvent
+	for _, logInterface := range window {
+		logMap, ok := logInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		eventLog := r.convertMapToEventLog(logMap)
+		// nil covers a malformed map and an EIP-7708 system-address log.
+		if eventLog == nil {
+			continue
+		}
+		r.vm.logger.Debug("🔍 EVENT DEBUG - Converted log",
+			"address", eventLog.Address.Hex(),
+			"topics_count", len(eventLog.Topics),
+			"data_length", len(eventLog.Data),
+			"contract_address", methodTarget)
+
+		isRelevantAddress := false
+		for _, addr := range relevantAddresses {
+			if strings.EqualFold(eventLog.Address.Hex(), addr) {
+				isRelevantAddress = true
+				break
+			}
+		}
+		if !isRelevantAddress {
+			r.vm.logger.Debug("🔍 EVENT DEBUG - Address not relevant, skipping",
+				"log_address", eventLog.Address.Hex(),
+				"relevant_addresses", relevantAddresses)
+			continue
+		}
+
+		decodedEvent, eventName, err := parseEventWithABIShared(eventLog, parsedABI, nil, r.vm.logger)
+		if err != nil {
+			r.vm.logger.Debug("🔍 EVENT DEBUG - Failed to parse event",
+				"contractAddress", eventLog.Address.Hex(),
+				"error", err)
+			continue
+		}
+		r.vm.logger.Debug("🔍 EVENT DEBUG - Successfully parsed event",
+			"event_name", eventName,
+			"decoded_data", decodedEvent)
+		decoded = append(decoded, parsedMethodEvent{
+			address: eventLog.Address.Hex(),
+			name:    eventName,
+			fields:  flattenDecodedEvent(decodedEvent, eventName),
+		})
+	}
+	return decoded
+}
+
+// userOpLogWindow returns the logs that belong to userOpHash.
+// scopedMiss is true when a hash was required and is not in the receipt.
+func userOpLogWindow(logs []interface{}, userOpHash string) (window []interface{}, scopedMiss bool) {
+	if strings.TrimSpace(userOpHash) == "" {
+		return logs, false
+	}
+	want := common.HexToHash(userOpHash)
+	match := -1
+	for i := range logs {
+		topics := logTopicHashes(logs[i])
+		if len(topics) < 2 || topics[0] != userOperationEventTopic || topics[1] != want {
+			continue
+		}
+		match = i
+		break
+	}
+	if match < 0 {
+		return nil, true
+	}
+	start := 0
+	for i := match - 1; i >= 0; i-- {
+		topics := logTopicHashes(logs[i])
+		if len(topics) == 0 {
+			continue
+		}
+		if topics[0] == userOperationEventTopic || topics[0] == beforeExecutionTopic {
+			start = i + 1
+			break
+		}
+	}
+	return logs[start : match+1], false
+}
+
+func logTopicHashes(logInterface interface{}) []common.Hash {
+	logMap, ok := logInterface.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	promoteRawLogFields(logMap)
+	switch topics := logMap["topics"].(type) {
+	case []interface{}:
+		out := make([]common.Hash, 0, len(topics))
+		for _, topic := range topics {
+			topicStr, _ := topic.(string)
+			out = append(out, common.HexToHash(topicStr))
+		}
+		return out
+	case []string:
+		out := make([]common.Hash, 0, len(topics))
+		for _, topic := range topics {
+			out = append(out, common.HexToHash(topic))
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func flattenDecodedEvent(decoded map[string]interface{}, eventName string) map[string]interface{} {
+	if eventName != "" {
+		if wrapped, ok := decoded[eventName].(map[string]interface{}); ok {
+			return wrapped
+		}
+	}
+	flat := make(map[string]interface{})
+	for key, value := range decoded {
+		if key != "eventName" {
+			flat[key] = value
+		}
+	}
+	return flat
+}
+
+func copyEventFields(fields map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(fields))
+	for key, value := range fields {
+		out[key] = value
+	}
+	return out
+}
+
+func sameHexAddress(left, right string) bool {
+	if !common.IsHexAddress(left) || !common.IsHexAddress(right) {
+		return false
+	}
+	return common.HexToAddress(left) == common.HexToAddress(right)
+}
+
+// chooseMethodEventFields picks the one event whose fields fill the flat
+// output. Field values are copied so later decimal formatting of the flat map
+// does not rewrite the events list.
+//
+// transfer, transferFrom, and approve keep their own event. Any other method
+// leads with its non-token events, such as a swap's amount0. The target's own
+// Transfer, then its Approval, add only keys still missing. A swap through a
+// router keeps its Swap fields, because the router emits no Transfer. mint,
+// burn, safeTransferFrom, increaseAllowance, and permit still expose from, to,
+// and value, including a mint that also emits Mint or a vault deposit that
+// also emits Deposit.
+func chooseMethodEventFields(methodName, methodTarget, runner string, decoded []parsedMethodEvent) map[string]interface{} {
+	switch strings.ToLower(methodName) {
+	case "transfer", "transferfrom":
+		return chooseTransferFields(methodTarget, runner, decoded)
+	case "approve":
+		return chooseApprovalFields(methodTarget, decoded)
+	default:
+		fields := chooseNonTokenFields(decoded)
+		fields = addMissingFields(fields, chooseTransferFields(methodTarget, runner, decoded))
+		return addMissingFields(fields, chooseApprovalFields(methodTarget, decoded))
+	}
+}
+
+// addMissingFields copies each key of extra that fields does not have yet.
+func addMissingFields(fields, extra map[string]interface{}) map[string]interface{} {
+	if len(extra) == 0 {
+		return fields
+	}
+	if fields == nil {
+		fields = make(map[string]interface{}, len(extra))
+	}
+	for key, value := range extra {
+		if _, exists := fields[key]; !exists {
+			fields[key] = value
+		}
+	}
+	return fields
+}
+
+func chooseTransferFields(methodTarget, runner string, decoded []parsedMethodEvent) map[string]interface{} {
+	var first map[string]interface{}
+	for _, ev := range decoded {
+		if !strings.EqualFold(ev.name, "Transfer") || !sameHexAddress(ev.address, methodTarget) {
+			continue
+		}
+		if first == nil {
+			first = ev.fields
+		}
+		if from, ok := ev.fields["from"].(string); ok && sameHexAddress(from, runner) {
+			return copyEventFields(ev.fields)
+		}
+	}
+	return copyEventFields(first)
+}
+
+func chooseApprovalFields(methodTarget string, decoded []parsedMethodEvent) map[string]interface{} {
+	for _, ev := range decoded {
+		if strings.EqualFold(ev.name, "Approval") && sameHexAddress(ev.address, methodTarget) {
+			return copyEventFields(ev.fields)
+		}
+	}
+	return nil
+}
+
+func chooseNonTokenFields(decoded []parsedMethodEvent) map[string]interface{} {
+	merged := make(map[string]interface{})
+	for _, ev := range decoded {
+		if strings.EqualFold(ev.name, "Transfer") || strings.EqualFold(ev.name, "Approval") {
+			continue
+		}
+		for key, value := range ev.fields {
+			if _, exists := merged[key]; exists {
+				continue
+			}
+			merged[key] = value
+		}
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
+}
+
 // discoverPoolAddressesFromLogs scans transaction logs to find pool addresses dynamically
 func (r *ContractWriteProcessor) discoverPoolAddressesFromLogs(logsArray []interface{}) []string {
 	var poolAddresses []string
@@ -2979,32 +3310,28 @@ func (r *ContractWriteProcessor) discoverPoolAddressesFromLogs(logsArray []inter
 		"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef": "ERC20 Transfer",
 	}
 
-	// First pass: scan all logs to identify pool/token addresses
+	// First pass: scan all logs to identify pool/token addresses.
+	// The system address is excluded for every topic, including Transfer and
+	// the historical Selfdestruct burn.
 	for _, logInterface := range logsArray {
-		if logMap, ok := logInterface.(map[string]interface{}); ok {
-			// Extract address and topics
-			if addressInterface, hasAddress := logMap["address"]; hasAddress {
-				if addressStr, ok := addressInterface.(string); ok {
-					if topicsInterface, hasTopics := logMap["topics"]; hasTopics {
-						if topicsArray, ok := topicsInterface.([]interface{}); ok && len(topicsArray) > 0 {
-							if topic0Interface, ok := topicsArray[0].(string); ok {
-								// Check if this log has a DEX-related event signature
-								if eventType, isDexEvent := dexEventSignatures[topic0Interface]; isDexEvent {
-									if !addressSet[addressStr] {
-										addressSet[addressStr] = true
-										poolAddresses = append(poolAddresses, addressStr)
-										r.vm.logger.Info("🔍 DYNAMIC POOL DISCOVERY - Found DEX-related address",
-											"address", addressStr,
-											"event_type", eventType,
-											"topic0", topic0Interface)
-									}
-								}
-							}
-						}
-					}
-				}
-			}
+		logMap, ok := logInterface.(map[string]interface{})
+		if !ok {
+			continue
 		}
+		address, topic0, ok := receiptLogAddressAndTopic0(logMap)
+		if !ok {
+			continue
+		}
+		eventType, isDexEvent := dexEventSignatures[topic0]
+		if !isDexEvent || addressSet[address] {
+			continue
+		}
+		addressSet[address] = true
+		poolAddresses = append(poolAddresses, address)
+		r.vm.logger.Info("🔍 DYNAMIC POOL DISCOVERY - Found DEX-related address",
+			"address", address,
+			"event_type", eventType,
+			"topic0", topic0)
 	}
 
 	return poolAddresses
