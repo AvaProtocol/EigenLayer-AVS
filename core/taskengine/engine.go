@@ -1857,6 +1857,14 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 		return nil, status.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 
+	// An event query with no contract is a match-all subscription. On Sepolia
+	// the Transfer topic is also the ETH-transfer log, so that watch would fire
+	// on every ETH transfer. Same constraint as the frequency floor: not added
+	// to Workflow.ValidateWithError, because that sweep fails stored tasks.
+	if err = ValidateEventTriggerAddresses(task.Trigger); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%s", err.Error())
+	}
+
 	// Constant retry ceilings (limits.go). Retry is a per-execution multiplier on
 	// metered provider calls, so it is bounded like every other one; an over-limit
 	// policy is rejected here rather than silently clamped at execution time.

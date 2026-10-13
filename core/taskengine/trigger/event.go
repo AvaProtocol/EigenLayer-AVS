@@ -516,6 +516,19 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 		return fmt.Errorf("no queries found in event trigger config for task %s", taskID)
 	}
 
+	// Drop queries whose addresses are empty, zero, or the ETH-transfer system
+	// address. Those become match-all filters. Keep the task when another query
+	// still names a contract; refuse it when none do.
+	usableQueries := 0
+	for _, query := range queries {
+		if len(taskengine.UsableEventQueryAddresses(query.GetAddresses())) > 0 {
+			usableQueries++
+		}
+	}
+	if usableQueries == 0 {
+		return fmt.Errorf("queries[].addresses must be a non-empty array")
+	}
+
 	// Extract cooldown_seconds from config (defaults to DefaultEventTriggerCooldownSeconds if not set)
 	// If cooldown_seconds is not set (nil), use the default value
 	// If explicitly set to 0, respect it (no cooldown)
@@ -1306,19 +1319,25 @@ func (t *EventTrigger) logMatchesTaskEntry(log types.Log, entry *TaskEntry) bool
 // logMatchesEventQuery checks if a log matches a specific EventTrigger_Query
 // logMatchesEventQuery checks if a log matches a specific event query (works with both old and new formats)
 func (t *EventTrigger) logMatchesEventQuery(log types.Log, query *avsproto.EventTrigger_Query, eventData *EventTaskData, queryIndex int) bool {
-	// Check addresses
-	addresses := query.GetAddresses()
-	if len(addresses) > 0 {
-		found := false
-		for _, addrStr := range addresses {
-			if addr := common.HexToAddress(addrStr); addr == log.Address {
-				found = true
-				break
-			}
+	// The ETH-transfer system address emits an ERC-20-shaped Transfer. A watch
+	// never matches it. An empty address list used to match every contract;
+	// it now matches nothing, so a topic-only query cannot fire.
+	if taskengine.IsEthTransferLogAddress(log.Address) {
+		return false
+	}
+	addresses := taskengine.UsableEventQueryAddresses(query.GetAddresses())
+	if len(addresses) == 0 {
+		return false
+	}
+	found := false
+	for _, addrStr := range addresses {
+		if common.HexToAddress(addrStr) == log.Address {
+			found = true
+			break
 		}
-		if !found {
-			return false
-		}
+	}
+	if !found {
+		return false
 	}
 
 	// Check topics - now a flat array where each string is a single topic value
@@ -1763,6 +1782,10 @@ func (t *EventTrigger) buildFilterQueries() []QueryInfo {
 		// Convert each EventTrigger_Query to ethereum.FilterQuery and group by criteria
 		for i, query := range entry.EventData.Queries {
 			ethQuery := t.convertToFilterQuery(query)
+			// An empty address list is a match-all eth_subscribe filter.
+			if len(ethQuery.Addresses) == 0 {
+				continue
+			}
 
 			// Create a unique key for this query's filter criteria
 			queryKey := t.createQueryKey(ethQuery)
@@ -1898,10 +1921,8 @@ func (t *EventTrigger) createQueryKey(query ethereum.FilterQuery) string {
 // convertToFilterQuery converts a protobuf EventTrigger_Query to ethereum.FilterQuery
 func (t *EventTrigger) convertToFilterQuery(query *avsproto.EventTrigger_Query) ethereum.FilterQuery {
 	var addresses []common.Address
-	for _, addrStr := range query.GetAddresses() {
-		if addr := common.HexToAddress(addrStr); addr != (common.Address{}) {
-			addresses = append(addresses, addr)
-		}
+	for _, addrStr := range taskengine.UsableEventQueryAddresses(query.GetAddresses()) {
+		addresses = append(addresses, common.HexToAddress(addrStr))
 	}
 
 	var topics [][]common.Hash

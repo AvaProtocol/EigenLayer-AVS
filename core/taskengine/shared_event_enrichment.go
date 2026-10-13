@@ -235,7 +235,7 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 	// gap by looking up the workflow's declared chain ID directly.
 	contractAddr := eventLog.Address.Hex()
 	var tokenMetadata *TokenMetadata
-	if eventLog.Address == ethTransferLogAddress {
+	if IsEthTransferLogAddress(eventLog.Address) {
 		// EIP-7708 emits this Transfer for a plain ETH move, so the value is in
 		// the chain's native token. The system address is not a token contract.
 		tokenMetadata = nativeTokenMetadataForChain(tokenService.GetChainID())
