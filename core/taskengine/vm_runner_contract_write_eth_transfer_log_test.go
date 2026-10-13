@@ -387,6 +387,83 @@ func TestDecodeRelevantMethodEvents_TokenMethodFallsBackToTargetEvent(t *testing
 	}
 }
 
+const tokenWithCustomEventsABI = `[
+	{"anonymous":false,"inputs":[
+		{"indexed":true,"name":"minter","type":"address"},
+		{"indexed":true,"name":"to","type":"address"},
+		{"indexed":false,"name":"amount","type":"uint256"}
+	],"name":"Mint","type":"event"},
+	{"anonymous":false,"inputs":[
+		{"indexed":true,"name":"sender","type":"address"},
+		{"indexed":true,"name":"owner","type":"address"},
+		{"indexed":false,"name":"assets","type":"uint256"},
+		{"indexed":false,"name":"shares","type":"uint256"}
+	],"name":"Deposit","type":"event"},
+	{"anonymous":false,"inputs":[
+		{"indexed":true,"name":"from","type":"address"},
+		{"indexed":true,"name":"to","type":"address"},
+		{"indexed":false,"name":"value","type":"uint256"}
+	],"name":"Transfer","type":"event"}
+]`
+
+func TestDecodeRelevantMethodEvents_CustomEventKeepsTargetTransferFields(t *testing.T) {
+	const (
+		token     = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+		vault     = "0x4444444444444444444444444444444444444444"
+		asset     = "0x5555555555555555555555555555555555555555"
+		runner    = "0x46aD59AFc8a21F0dfa3FE74C53A998b7550c7BDd"
+		recipient = "0x633791DdC147B59345dc56D3A1F0606c23703154"
+		zero      = "0x0000000000000000000000000000000000000000"
+	)
+	parsedABI := mustABI(t, tokenWithCustomEventsABI)
+	processor := testContractWriteProcessor()
+
+	t.Run("a Mint event leads and the token's Transfer adds from and value", func(t *testing.T) {
+		minted := big.NewInt(100000)
+		logs := []interface{}{
+			namedValueLog(parsedABI.Events["Mint"].ID.Hex(), token, runner, recipient, minted),
+			erc20TransferLog(token, zero, recipient, minted),
+		}
+
+		events := processor.decodeRelevantMethodEvents(logs, token, "mint", parsedABI, "", runner)
+
+		assert.Equal(t, common.HexToAddress(runner).Hex(), events["minter"])
+		assert.Equal(t, minted.String(), events["amount"])
+		assert.Equal(t, common.HexToAddress(zero).Hex(), events["from"])
+		assert.Equal(t, common.HexToAddress(recipient).Hex(), events["to"])
+		assert.Equal(t, minted.String(), events["value"])
+		assert.Equal(t, []string{"Mint", "Transfer"}, eventNames(t, events))
+	})
+
+	t.Run("a vault Deposit leads and only the vault's own Transfer adds fields", func(t *testing.T) {
+		assets := big.NewInt(5000)
+		shares := big.NewInt(4999)
+		deposit := map[string]interface{}{
+			"address": vault,
+			"topics": []interface{}{
+				parsedABI.Events["Deposit"].ID.Hex(),
+				addressTopic(runner),
+				addressTopic(runner),
+			},
+			"data": abiWords(assets, shares),
+		}
+		logs := []interface{}{
+			erc20TransferLog(asset, runner, vault, assets),
+			erc20TransferLog(vault, zero, runner, shares),
+			deposit,
+		}
+
+		events := processor.decodeRelevantMethodEvents(logs, vault, "deposit", parsedABI, "", runner)
+
+		assert.Equal(t, assets.String(), events["assets"])
+		assert.Equal(t, shares.String(), events["shares"])
+		assert.Equal(t, common.HexToAddress(zero).Hex(), events["from"])
+		assert.Equal(t, common.HexToAddress(runner).Hex(), events["to"])
+		assert.Equal(t, shares.String(), events["value"])
+		assert.Equal(t, []string{"Transfer", "Transfer", "Deposit"}, eventNames(t, events))
+	})
+}
+
 func TestDecodeRelevantMethodEvents_PrefersRunnerTransfer(t *testing.T) {
 	const (
 		usdc      = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"

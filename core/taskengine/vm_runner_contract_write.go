@@ -3218,10 +3218,12 @@ func sameHexAddress(left, right string) bool {
 // does not rewrite the events list.
 //
 // transfer, transferFrom, and approve keep their own event. Any other method
-// prefers a non-token event, such as a swap's amount0. When the receipt has
-// only Transfer or Approval, it falls back to the target's own event so mint,
+// leads with its non-token events, such as a swap's amount0. The target's own
+// Transfer, then its Approval, add only keys still missing. A swap through a
+// router keeps its Swap fields, because the router emits no Transfer. mint,
 // burn, safeTransferFrom, increaseAllowance, and permit still expose from, to,
-// and value.
+// and value, including a mint that also emits Mint or a vault deposit that
+// also emits Deposit.
 func chooseMethodEventFields(methodName, methodTarget, runner string, decoded []parsedMethodEvent) map[string]interface{} {
 	switch strings.ToLower(methodName) {
 	case "transfer", "transferfrom":
@@ -3229,14 +3231,26 @@ func chooseMethodEventFields(methodName, methodTarget, runner string, decoded []
 	case "approve":
 		return chooseApprovalFields(methodTarget, decoded)
 	default:
-		if fields := chooseNonTokenFields(decoded); len(fields) > 0 {
-			return fields
-		}
-		if fields := chooseTransferFields(methodTarget, runner, decoded); len(fields) > 0 {
-			return fields
-		}
-		return chooseApprovalFields(methodTarget, decoded)
+		fields := chooseNonTokenFields(decoded)
+		fields = addMissingFields(fields, chooseTransferFields(methodTarget, runner, decoded))
+		return addMissingFields(fields, chooseApprovalFields(methodTarget, decoded))
 	}
+}
+
+// addMissingFields copies each key of extra that fields does not have yet.
+func addMissingFields(fields, extra map[string]interface{}) map[string]interface{} {
+	if len(extra) == 0 {
+		return fields
+	}
+	if fields == nil {
+		fields = make(map[string]interface{}, len(extra))
+	}
+	for key, value := range extra {
+		if _, exists := fields[key]; !exists {
+			fields[key] = value
+		}
+	}
+	return fields
 }
 
 func chooseTransferFields(methodTarget, runner string, decoded []parsedMethodEvent) map[string]interface{} {
