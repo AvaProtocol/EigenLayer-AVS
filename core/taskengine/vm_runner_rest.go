@@ -808,18 +808,12 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		if err := json.Unmarshal(response.Body(), &jsonData); err == nil {
 			bodyData = jsonData
 			if isStudioNotify {
-				// /api/notify returns { ok, summary }. Surface the run summary (subject + body
-				// line) to the SDK so the UI keeps showing it — same shape the legacy local
-				// summary produced. Omitted for format=plain (no summary in the response).
-				if m, ok := jsonData.(map[string]interface{}); ok {
-					if summaryVal, ok := m["summary"].(map[string]interface{}); ok {
-						subj, _ := summaryVal["subject"].(string)
-						bodyText := ""
-						if bodyMap, ok := summaryVal["body"].(map[string]interface{}); ok {
-							bodyText, _ = bodyMap["summary"].(string)
-						}
-						bodyData = map[string]interface{}{"subject": subj, "body": bodyText}
-					}
+				// /api/notify returns { ok, summary: { subject, body } }. Keep the
+				// whole reply. body stays the structured report (executions, errors,
+				// notice, counts), not only body.summary. format=plain has no summary
+				// object, so the response is left as returned.
+				if kept, ok := studioNotifyStepData(jsonData); ok {
+					bodyData = kept
 				}
 			}
 		} else {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -82,6 +83,8 @@ func ProtoToOpenAPIExecution(in *avsproto.Execution, workflowID string) (generat
 		out.ValueFee = &f
 	}
 
+	out.Summary = RunSummaryMap(in.GetSummary())
+
 	return out, nil
 }
 
@@ -122,8 +125,9 @@ func ProtoToOpenAPITriggerWorkflow(in *avsproto.TriggerTaskResp) (generated.Trig
 // status summary shape (skips the steps/cogs/fee payload to keep responses
 // small). Status goes through the shared ExecutionStatusProtoToWire so every
 // status surface stays consistent. NOTE: the GetExecutionStatus handler builds
-// this shape inline (it has only the status enum, not a full Execution), so it
-// does not call this helper — keep the two in sync if you change the shape.
+// this shape from ExecutionStatusResp (status plus summary), not a full
+// Execution, so it does not call this helper. Both copy summary through
+// RunSummaryMap.
 func ProtoExecutionToOpenAPISummary(in *avsproto.Execution, workflowID string) generated.ExecutionStatusSummary {
 	out := generated.ExecutionStatusSummary{
 		Id:     generated.Ulid(in.GetId()),
@@ -142,7 +146,21 @@ func ProtoExecutionToOpenAPISummary(in *avsproto.Execution, workflowID string) g
 		wid := generated.Ulid(workflowID)
 		out.WorkflowId = &wid
 	}
+	out.Summary = RunSummaryMap(in.GetSummary())
 	return out
+}
+
+// RunSummaryMap lifts Execution.summary into the OpenAPI free-form object.
+// Nil when the run has not ended, or when the stored value is not an object.
+func RunSummaryMap(v *structpb.Value) *map[string]interface{} {
+	if v == nil {
+		return nil
+	}
+	m, ok := v.AsInterface().(map[string]interface{})
+	if !ok || len(m) == 0 {
+		return nil
+	}
+	return &m
 }
 
 // protoExecutionStepToOpenAPI converts a single step. The step's per-type

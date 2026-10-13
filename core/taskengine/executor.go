@@ -728,6 +728,7 @@ func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.W
 	execution.Status = convertToExecutionStatus(resultStatus) // Based on analysis of all steps
 	execution.Error = executionError                          // Comprehensive error message from failed steps
 	execution.Steps = vm.ExecutionLogs                        // Contains all steps including failed ones
+	attachRunSummary(execution)                               // Summary step, once the run has ended
 	execution.ExecutionFee = buildExecutionFee(x.engine.config.FeeRates)
 	execution.Cogs = buildCOGSFromSteps(vm.ExecutionLogs)
 	execution.ValueFee = buildValueFee(task.Nodes, x.engine.config.FeeRates)
@@ -1037,6 +1038,7 @@ func (x *WorkflowExecutor) Advance(task *model.Workflow, executionID string, sig
 	// Terminal — finalize and GC the durable state.
 	executionError, _, resultStatus := vm.AnalyzeExecutionResult()
 	execution.Steps = vm.ExecutionLogs
+	attachRunSummary(execution)
 	execution.Status = convertToExecutionStatus(resultStatus)
 	execution.Error = executionError
 	execution.EndAt = time.Now().UnixMilli()
@@ -1122,7 +1124,13 @@ func (x *WorkflowExecutor) ExpireWait(task *model.Workflow, executionID string) 
 // NOTE: This function does NOT redact sensitive data - it only handles NaN/Inf for JSON compatibility.
 // The actual execution data is preserved as-is for users. Redaction only happens in aggregator logs.
 func sanitizeExecutionForPersistence(exec *avsproto.Execution) {
-	if exec == nil || len(exec.Steps) == 0 {
+	if exec == nil {
+		return
+	}
+	if exec.Summary != nil {
+		exec.Summary = sanitizeProtoValue(exec.Summary)
+	}
+	if len(exec.Steps) == 0 {
 		return
 	}
 	for _, step := range exec.Steps {

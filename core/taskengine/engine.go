@@ -4645,8 +4645,9 @@ func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.Executio
 		}
 
 		// Return the execution status directly from the stored execution
-		// The status field now contains the proper enum value from AnalyzeExecutionResult
-		return &avsproto.ExecutionStatusResp{Status: exec.Status}, nil
+		// The status field now contains the proper enum value from AnalyzeExecutionResult.
+		// Summary is set only after the run has ended.
+		return &avsproto.ExecutionStatusResp{Status: exec.Status, Summary: exec.Summary}, nil
 	}
 
 	// Check if it's pending in queue

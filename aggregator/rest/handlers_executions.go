@@ -162,13 +162,14 @@ func (s *Server) GetExecutionStatus(ctx echo.Context, id generated.Ulid, params 
 	if err != nil {
 		return notFoundOrError(err)
 	}
-	// engine.GetExecutionStatus returns just the enum; lift it into the
-	// summary envelope the OpenAPI schema documents. Start/end timestamps
-	// require the full Execution, which a polling caller can fetch on
-	// the terminal state via GetExecution.
+	// engine.GetExecutionStatus returns the enum and, once the run has ended,
+	// the summary step's reply. Start/end timestamps require the full
+	// Execution, which a polling caller can fetch on the terminal state
+	// via GetExecution.
 	out := generated.ExecutionStatusSummary{
-		Id:     id,
-		Status: generated.ExecutionStatus(mapping.ExecutionStatusProtoToWire(statusResp.GetStatus())),
+		Id:      id,
+		Status:  generated.ExecutionStatus(mapping.ExecutionStatusProtoToWire(statusResp.GetStatus())),
+		Summary: mapping.RunSummaryMap(statusResp.GetSummary()),
 	}
 	wid := generated.Ulid(workflowID)
 	out.WorkflowId = &wid
@@ -233,6 +234,7 @@ func (s *Server) StreamExecution(ctx echo.Context, id generated.Ulid, params gen
 			if msg := exec.GetError(); msg != "" {
 				summary.Error = &msg
 			}
+			summary.Summary = mapping.RunSummaryMap(exec.GetSummary())
 		}
 		raw, err := json.Marshal(summary)
 		if err != nil {
