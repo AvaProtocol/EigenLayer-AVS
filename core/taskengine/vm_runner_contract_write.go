@@ -2604,50 +2604,156 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	return s, nil
 }
 
-// convertMapToEventLog converts a log map from receipt to types.Log structure for event parsing
-func (r *ContractWriteProcessor) convertMapToEventLog(logMap map[string]interface{}) *types.Log {
-	eventLog := &types.Log{}
+// promoteRawLogFields copies Tenderly's nested raw address, topics, and data
+// onto the log when those keys are absent. Pool discovery and event decoding
+// both read the top-level keys.
+func promoteRawLogFields(logMap map[string]interface{}) {
+	rawAny, hasRaw := logMap["raw"]
+	if !hasRaw {
+		return
+	}
+	rawMap, isMap := rawAny.(map[string]interface{})
+	if !isMap {
+		return
+	}
+	copyMissingString(logMap, rawMap, "address")
+	copyMissingString(logMap, rawMap, "data")
+	if _, exists := logMap["topics"]; exists {
+		return
+	}
+	switch topics := rawMap["topics"].(type) {
+	case []interface{}, []string:
+		logMap["topics"] = topics
+	}
+}
 
-	// Tenderly HTTP/RPC may nest raw EVM log fields under "raw"
-	// If present, promote nested raw fields for uniform parsing
-	if rawAny, hasRaw := logMap["raw"]; hasRaw {
-		if rawMap, ok := rawAny.(map[string]interface{}); ok {
-			// Merge raw fields on top-level for our parser expectations
-			// Do not overwrite existing top-level keys if already present
-			if _, ok := logMap["address"]; !ok {
-				if v, ok2 := rawMap["address"].(string); ok2 {
-					logMap["address"] = v
-				}
-			}
-			if _, ok := logMap["topics"]; !ok {
-				if v, ok2 := rawMap["topics"].([]interface{}); ok2 {
-					logMap["topics"] = v
-				}
-			}
-			if _, ok := logMap["data"]; !ok {
-				if v, ok2 := rawMap["data"].(string); ok2 {
-					logMap["data"] = v
-				}
+func copyMissingString(dst, src map[string]interface{}, key string) {
+	if _, exists := dst[key]; exists {
+		return
+	}
+	if value, isString := src[key].(string); isString {
+		dst[key] = value
+	}
+}
+
+func topicStrings(topics interface{}) []string {
+	switch topics := topics.(type) {
+	case []string:
+		return topics
+	case []interface{}:
+		out := make([]string, 0, len(topics))
+		for _, topic := range topics {
+			topicStr, isString := topic.(string)
+			if isString {
+				out = append(out, topicStr)
 			}
 		}
+		return out
+	default:
+		return nil
 	}
+}
+
+func normalizeReceiptLogs(logs []interface{}) {
+	for _, logInterface := range logs {
+		logMap, isMap := logInterface.(map[string]interface{})
+		if isMap {
+			promoteRawLogFields(logMap)
+		}
+	}
+}
+
+func firstTopicString(topics interface{}) (string, bool) {
+	switch topics := topics.(type) {
+	case []string:
+		if len(topics) == 0 || topics[0] == "" {
+			return "", false
+		}
+		return topics[0], true
+	case []interface{}:
+		if len(topics) == 0 {
+			return "", false
+		}
+		topic0, isString := topics[0].(string)
+		if !isString || topic0 == "" {
+			return "", false
+		}
+		return topic0, true
+	default:
+		return "", false
+	}
+}
+
+// nonSystemReceiptLogAddress returns a log's contract address, reading raw
+// when the top-level field is absent. The EIP-7708 system address is not a contract.
+func nonSystemReceiptLogAddress(logMap map[string]interface{}) (string, bool) {
+	address, _ := logMap["address"].(string)
+	if address == "" {
+		if raw, isMap := logMap["raw"].(map[string]interface{}); isMap {
+			address, _ = raw["address"].(string)
+		}
+	}
+	if !common.IsHexAddress(address) || common.HexToAddress(address) == ethTransferLogAddress {
+		return "", false
+	}
+	return address, true
+}
+
+// receiptLogAddressAndTopic0 returns the emitter and topic0 for pool discovery.
+// A log from the ETH-transfer system address is skipped for every topic.
+func receiptLogAddressAndTopic0(logMap map[string]interface{}) (address, topic0 string, ok bool) {
+	promoteRawLogFields(logMap)
+	address, ok = logMap["address"].(string)
+	if !ok || address == "" {
+		return "", "", false
+	}
+	if common.IsHexAddress(address) && common.HexToAddress(address) == ethTransferLogAddress {
+		return "", "", false
+	}
+	topic0, ok = firstTopicString(logMap["topics"])
+	if !ok {
+		return "", "", false
+	}
+	return address, topic0, true
+}
+
+// flattenDecodedEvent unwraps decoded[eventName] when that value is a map.
+// Otherwise it copies every key except eventName.
+func flattenDecodedEvent(decoded map[string]interface{}, eventName string) map[string]interface{} {
+	if eventName != "" {
+		if wrapped, isMap := decoded[eventName].(map[string]interface{}); isMap {
+			return wrapped
+		}
+	}
+	flat := make(map[string]interface{})
+	for key, value := range decoded {
+		if key != "eventName" {
+			flat[key] = value
+		}
+	}
+	return flat
+}
+
+// convertMapToEventLog converts a log map from receipt to types.Log structure for event parsing.
+// It returns nil for an EIP-7708 system-address log so no caller can decode that log as a token event.
+func (r *ContractWriteProcessor) convertMapToEventLog(logMap map[string]interface{}) *types.Log {
+	eventLog := &types.Log{}
+	promoteRawLogFields(logMap)
 
 	// Parse address
 	if addr, hasAddr := logMap["address"]; hasAddr {
-		if addrStr, ok := addr.(string); ok {
+		if addrStr, isString := addr.(string); isString {
 			eventLog.Address = common.HexToAddress(addrStr)
 		}
 	}
+	// Any topic from this address is an ETH move (Transfer, or the historical
+	// Selfdestruct burn), never an event of the called contract.
+	if eventLog.Address == ethTransferLogAddress {
+		return nil
+	}
 
-	// Parse topics
-	if topics, hasTopics := logMap["topics"]; hasTopics {
-		if topicsArray, ok := topics.([]interface{}); ok {
-			for _, topic := range topicsArray {
-				if topicStr, ok := topic.(string); ok {
-					eventLog.Topics = append(eventLog.Topics, common.HexToHash(topicStr))
-				}
-			}
-		}
+	for _, topic := range topicStrings(logMap["topics"]) {
+		eventLog.Topics = append(eventLog.Topics, common.HexToHash(topic))
 	}
 
 	// Parse data
@@ -2862,17 +2968,19 @@ func (r *ContractWriteProcessor) computeUniswapV3PoolAddress(tokenA, tokenB comm
 	return addr
 }
 
-// ethTransferLogAddress is the system address that emits an ERC-20-shaped
-// Transfer for a plain ETH value move (EIP-7708). It is not a token or a pool.
-// Sepolia emits these logs today; other chains will once they adopt the same
-// change. Decoding one as the called contract's Transfer reports the gas
-// refund as the payment.
+// ethTransferLogAddress is the EIP-7708 system address. It emits an
+// ERC-20-shaped Transfer for a plain ETH value move, and the same address
+// emits the historical Selfdestruct log (topic 0x4bfaba34…) for a
+// self-destruct burn. EIP-8246 removes that burn. Any other topic from this
+// address is still not a token or a pool, so callers skip by address.
+// Sepolia emits the Transfer form today. Decoding one as the called
+// contract's Transfer reports the gas refund as the payment.
 var ethTransferLogAddress = common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
 
 // decodeRelevantMethodEvents flattens ABI-decoded fields from receipt logs that
 // belong to methodTarget or a pool discovered from the same receipt. Later
 // relevant logs still overwrite earlier fields. Logs from ethTransferLogAddress
-// are skipped: an ETH refund is not an event of the called contract.
+// are skipped for every topic. Raw receipt logs are promoted before discovery.
 func (r *ContractWriteProcessor) decodeRelevantMethodEvents(
 	logsArray []interface{},
 	methodTarget string,
@@ -2883,6 +2991,10 @@ func (r *ContractWriteProcessor) decodeRelevantMethodEvents(
 	if len(logsArray) == 0 {
 		return methodEvents
 	}
+
+	// Discovery reads top-level address and topics. Tenderly nests those under
+	// raw, so promote them before discovery runs.
+	normalizeReceiptLogs(logsArray)
 
 	r.vm.logger.Debug("🔍 EVENT DEBUG - ALL LOG ADDRESSES IN RECEIPT",
 		"total_logs", len(logsArray),
@@ -2918,6 +3030,7 @@ func (r *ContractWriteProcessor) decodeRelevantMethodEvents(
 			continue
 		}
 		eventLog := r.convertMapToEventLog(logMap)
+		// nil covers a malformed map and an EIP-7708 system-address log.
 		if eventLog == nil {
 			continue
 		}
@@ -2926,14 +3039,6 @@ func (r *ContractWriteProcessor) decodeRelevantMethodEvents(
 			"topics_count", len(eventLog.Topics),
 			"data_length", len(eventLog.Data),
 			"contract_address", methodTarget)
-
-		// An ETH transfer log shares the ERC-20 Transfer topic. Never decode it
-		// as this method's event, even when the method target is the system address.
-		if eventLog.Address == ethTransferLogAddress {
-			r.vm.logger.Debug("🔍 EVENT DEBUG - Skipping ETH transfer log from system address",
-				"log_address", eventLog.Address.Hex())
-			continue
-		}
 
 		isRelevantAddress := false
 		for _, addr := range relevantAddresses {
@@ -2961,35 +3066,8 @@ func (r *ContractWriteProcessor) decodeRelevantMethodEvents(
 			"event_name", eventName,
 			"decoded_data", decodedEvent)
 
-		// Flatten event fields into methodEvents.
-		// Prefer removing the event name wrapper if present, so
-		// output is methodName: { from, to, value } rather than methodName: { Transfer: {...} }
-		if eventName != "" {
-			if only, ok := decodedEvent[eventName]; ok {
-				if inner, ok2 := only.(map[string]interface{}); ok2 {
-					for k, v := range inner {
-						methodEvents[k] = v
-					}
-				} else {
-					for key, value := range decodedEvent {
-						if key != "eventName" {
-							methodEvents[key] = value
-						}
-					}
-				}
-			} else {
-				for key, value := range decodedEvent {
-					if key != "eventName" {
-						methodEvents[key] = value
-					}
-				}
-			}
-		} else {
-			for key, value := range decodedEvent {
-				if key != "eventName" {
-					methodEvents[key] = value
-				}
-			}
+		for key, value := range flattenDecodedEvent(decodedEvent, eventName) {
+			methodEvents[key] = value
 		}
 	}
 
@@ -3009,37 +3087,27 @@ func (r *ContractWriteProcessor) discoverPoolAddressesFromLogs(logsArray []inter
 		"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef": "ERC20 Transfer",
 	}
 
-	// First pass: scan all logs to identify pool/token addresses
+	// The system address is excluded for every topic, including Transfer and
+	// the historical Selfdestruct burn. Raw fields are promoted first.
 	for _, logInterface := range logsArray {
-		if logMap, ok := logInterface.(map[string]interface{}); ok {
-			// Extract address and topics
-			if addressInterface, hasAddress := logMap["address"]; hasAddress {
-				if addressStr, ok := addressInterface.(string); ok {
-					// EIP-7708 emits Transfer from the system address for plain ETH
-					// moves, including the EntryPoint's gas refund to the bundler.
-					if common.HexToAddress(addressStr) == ethTransferLogAddress {
-						continue
-					}
-					if topicsInterface, hasTopics := logMap["topics"]; hasTopics {
-						if topicsArray, ok := topicsInterface.([]interface{}); ok && len(topicsArray) > 0 {
-							if topic0Interface, ok := topicsArray[0].(string); ok {
-								// Check if this log has a DEX-related event signature
-								if eventType, isDexEvent := dexEventSignatures[topic0Interface]; isDexEvent {
-									if !addressSet[addressStr] {
-										addressSet[addressStr] = true
-										poolAddresses = append(poolAddresses, addressStr)
-										r.vm.logger.Info("🔍 DYNAMIC POOL DISCOVERY - Found DEX-related address",
-											"address", addressStr,
-											"event_type", eventType,
-											"topic0", topic0Interface)
-									}
-								}
-							}
-						}
-					}
-				}
-			}
+		logMap, isMap := logInterface.(map[string]interface{})
+		if !isMap {
+			continue
 		}
+		address, topic0, ok := receiptLogAddressAndTopic0(logMap)
+		if !ok {
+			continue
+		}
+		eventType, isDexEvent := dexEventSignatures[topic0]
+		if !isDexEvent || addressSet[address] {
+			continue
+		}
+		addressSet[address] = true
+		poolAddresses = append(poolAddresses, address)
+		r.vm.logger.Info("🔍 DYNAMIC POOL DISCOVERY - Found DEX-related address",
+			"address", address,
+			"event_type", eventType,
+			"topic0", topic0)
 	}
 
 	return poolAddresses

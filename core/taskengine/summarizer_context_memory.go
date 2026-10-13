@@ -632,10 +632,15 @@ func extractResolvedContractAddressFromMetadata(metadataInterface interface{}) s
 					if logs, hasLogs := receipt["logs"].([]interface{}); hasLogs && len(logs) > 0 {
 						// Find the first log with a valid address (likely the token contract)
 						for _, logEntry := range logs {
-							if logMap, ok := logEntry.(map[string]interface{}); ok {
-								if addr, hasAddr := logMap["address"].(string); hasAddr && common.IsHexAddress(addr) {
-									return addr
-								}
+							logMap, isMap := logEntry.(map[string]interface{})
+							if !isMap {
+								continue
+							}
+							// Skip the EIP-7708 system address. Its Transfer is an
+							// ETH refund, and the token contract may be a later log
+							// or nested under raw.
+							if addr, found := nonSystemReceiptLogAddress(logMap); found {
+								return addr
 							}
 						}
 					}

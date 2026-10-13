@@ -45,6 +45,12 @@ func EnrichEventWithTokenMetadata(params SharedEventEnrichmentParams) (*SharedEv
 		IsTransferEvent: false,
 	}
 
+	// EIP-7708 emits Transfer, and the historical Selfdestruct topic, from the
+	// system address. That log is an ETH move, not a token to enrich.
+	if params.EventLog != nil && params.EventLog.Address == ethTransferLogAddress {
+		return result, nil
+	}
+
 	// Create raw event data structure (the blockchain log structure)
 	if params.EventLog != nil {
 		// Convert topics to string array

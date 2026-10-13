@@ -396,74 +396,12 @@ func (h *ContractWriteOutputHandler) ConvertToProtobuf(chainID int64, result map
 									}
 
 									for _, logInterface := range logsArray {
-										if logMap, ok := logInterface.(map[string]interface{}); ok {
-											if contractABI != nil {
-												eventLog := &types.Log{}
-
-												if addr, hasAddr := logMap["address"]; hasAddr {
-													if addrStr, ok := addr.(string); ok {
-														eventLog.Address = common.HexToAddress(addrStr)
-													}
-												}
-
-												if topics, hasTopics := logMap["topics"]; hasTopics {
-													if topicsArray, ok := topics.([]interface{}); ok {
-														for _, topic := range topicsArray {
-															if topicStr, ok := topic.(string); ok {
-																eventLog.Topics = append(eventLog.Topics, common.HexToHash(topicStr))
-															}
-														}
-													}
-												}
-
-												if data, hasData := logMap["data"]; hasData {
-													if dataStr, ok := data.(string); ok {
-														if dataBytes, err := hexutil.Decode(dataStr); err == nil {
-															eventLog.Data = dataBytes
-														}
-													}
-												}
-
-												if decodedEvent, err := h.engine.parseEventWithParsedABI(chainID, eventLog, contractABI, nil); err == nil {
-													// Flatten event data: if decoded map contains the concrete event name as a key,
-													// unwrap it so methodName maps directly to event fields
-													if nameVal, hasName := decodedEvent["eventName"]; hasName {
-														if nameStr, ok := nameVal.(string); ok && nameStr != "" {
-															if inner, ok2 := decodedEvent[nameStr]; ok2 {
-																if innerMap, ok3 := inner.(map[string]interface{}); ok3 {
-																	for k, v := range innerMap {
-																		methodEvents[k] = v
-																	}
-																} else {
-																	for k, v := range decodedEvent {
-																		if k != "eventName" {
-																			methodEvents[k] = v
-																		}
-																	}
-																}
-															} else {
-																for k, v := range decodedEvent {
-																	if k != "eventName" {
-																		methodEvents[k] = v
-																	}
-																}
-															}
-														} else {
-															for k, v := range decodedEvent {
-																if k != "eventName" {
-																	methodEvents[k] = v
-																}
-															}
-														}
-													} else {
-														for k, v := range decodedEvent {
-															if k != "eventName" {
-																methodEvents[k] = v
-															}
-														}
-													}
-												}
-											}
+										logMap, isMap := logInterface.(map[string]interface{})
+										if !isMap || contractABI == nil {
+											continue
+										}
+										for key, value := range h.flattenReceiptLog(chainID, logMap, contractABI) {
+											methodEvents[key] = value
 										}
 									}
 								}
@@ -518,6 +456,34 @@ func (h *ContractWriteOutputHandler) ConvertToProtobuf(chainID int64, result map
 
 	outputData := &avsproto.RunNodeWithInputsResp_ContractWrite{ContractWrite: contractWriteOutput}
 	return outputData, metadata, nil
+}
+
+// flattenReceiptLog decodes one receipt log into event fields.
+// A log from the EIP-7708 system address is skipped for every topic.
+func (h *ContractWriteOutputHandler) flattenReceiptLog(chainID int64, logMap map[string]interface{}, contractABI *abi.ABI) map[string]interface{} {
+	if h.engine == nil || contractABI == nil {
+		return nil
+	}
+	promoteRawLogFields(logMap)
+	address, _ := logMap["address"].(string)
+	if common.IsHexAddress(address) && common.HexToAddress(address) == ethTransferLogAddress {
+		return nil
+	}
+	eventLog := &types.Log{Address: common.HexToAddress(address)}
+	for _, topic := range topicStrings(logMap["topics"]) {
+		eventLog.Topics = append(eventLog.Topics, common.HexToHash(topic))
+	}
+	if dataStr, isString := logMap["data"].(string); isString {
+		if dataBytes, err := hexutil.Decode(dataStr); err == nil {
+			eventLog.Data = dataBytes
+		}
+	}
+	decodedEvent, err := h.engine.parseEventWithParsedABI(chainID, eventLog, contractABI, nil)
+	if err != nil || decodedEvent == nil {
+		return nil
+	}
+	eventName, _ := decodedEvent["eventName"].(string)
+	return flattenDecodedEvent(decodedEvent, eventName)
 }
 
 func (h *ContractWriteOutputHandler) CreateEmptyOutput() interface{} {
