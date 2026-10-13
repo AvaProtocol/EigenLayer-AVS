@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"encoding/json"
 	"math/big"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 const erc20TransferTopic0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
@@ -327,15 +329,78 @@ func TestExtractResolvedContractAddressFromMetadata_SkipsEthTransferLog(t *testi
 	})))
 }
 
-func TestEnrichEventWithTokenMetadata_SkipsEthTransferSystemLog(t *testing.T) {
-	result, err := EnrichEventWithTokenMetadata(SharedEventEnrichmentParams{
-		EventLog: &types.Log{
-			Address: ethTransferLogAddress,
-			Topics:  []common.Hash{common.HexToHash(erc20TransferTopic0)},
+func transferABIValues(t *testing.T) []*structpb.Value {
+	t.Helper()
+	var items []map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(transferEventABI), &items))
+	values := make([]*structpb.Value, 0, len(items))
+	for _, item := range items {
+		value, err := structpb.NewValue(item)
+		require.NoError(t, err)
+		values = append(values, value)
+	}
+	return values
+}
+
+func TestEnrichEventWithTokenMetadata_EthTransferSystemLogIsNative(t *testing.T) {
+	const (
+		entryPoint = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
+		bundler    = "0x813781939B0D041A0b8d9d0ACc2f29632B786a27"
+	)
+	gasRefund := big.NewInt(584351393496208)
+	refundLog := &types.Log{
+		Address: ethTransferLogAddress,
+		Topics: []common.Hash{
+			common.HexToHash(erc20TransferTopic0),
+			common.HexToHash(addressTopic(entryPoint)),
+			common.HexToHash(addressTopic(bundler)),
 		},
+		Data: common.LeftPadBytes(gasRefund.Bytes(), 32),
+	}
+
+	t.Run("enriched as the native token without a token lookup", func(t *testing.T) {
+		tokenService, err := NewWorkerRoutedTokenEnrichmentService(11155111, func(contractAddress string) (*TokenMetadata, error) {
+			t.Errorf("looked up %s as a token; the system address is not a token contract", contractAddress)
+			return nil, nil
+		}, nil)
+		require.NoError(t, err)
+
+		result, err := EnrichEventWithTokenMetadata(SharedEventEnrichmentParams{
+			EventLog:               refundLog,
+			ContractABI:            transferABIValues(t),
+			TokenEnrichmentService: tokenService,
+			ChainID:                11155111,
+		})
+
+		require.NoError(t, err)
+		assert.True(t, result.IsTransferEvent)
+		assert.Equal(t, "ETH", result.ParsedData["tokenSymbol"])
+		assert.Equal(t, uint32(18), result.ParsedData["tokenDecimals"])
+		assert.Equal(t, gasRefund.String(), result.ParsedData["value"])
+		assert.Equal(t, "0.000584351393496208", result.ParsedData["valueFormatted"])
+		assert.Equal(t, common.HexToAddress(entryPoint).Hex(), result.ParsedData["fromAddress"])
+		assert.Equal(t, common.HexToAddress(bundler).Hex(), result.ParsedData["toAddress"])
+		assert.Equal(t, ethTransferLogAddress.Hex(), result.RawEventData["address"])
 	})
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	assert.False(t, result.IsTransferEvent)
-	assert.Empty(t, result.ParsedData)
+
+	t.Run("decoded fields are kept without a token service", func(t *testing.T) {
+		result, err := EnrichEventWithTokenMetadata(SharedEventEnrichmentParams{
+			EventLog:    refundLog,
+			ContractABI: transferABIValues(t),
+		})
+
+		require.NoError(t, err)
+		transfer, isMap := result.ParsedData["Transfer"].(map[string]interface{})
+		require.True(t, isMap, "parsed data: %#v", result.ParsedData)
+		assert.Equal(t, common.HexToAddress(entryPoint).Hex(), transfer["from"])
+		assert.Equal(t, common.HexToAddress(bundler).Hex(), transfer["to"])
+		assert.Equal(t, gasRefund.String(), transfer["value"])
+	})
+
+	t.Run("basic log metadata is kept without an ABI", func(t *testing.T) {
+		result, err := EnrichEventWithTokenMetadata(SharedEventEnrichmentParams{EventLog: refundLog})
+
+		require.NoError(t, err)
+		assert.Equal(t, ethTransferLogAddress.Hex(), result.ParsedData["contractAddress"])
+	})
 }

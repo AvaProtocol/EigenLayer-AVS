@@ -45,12 +45,6 @@ func EnrichEventWithTokenMetadata(params SharedEventEnrichmentParams) (*SharedEv
 		IsTransferEvent: false,
 	}
 
-	// EIP-7708 emits Transfer, and the historical Selfdestruct topic, from the
-	// system address. That log is an ETH move, not a token to enrich.
-	if params.EventLog != nil && params.EventLog.Address == ethTransferLogAddress {
-		return result, nil
-	}
-
 	// Create raw event data structure (the blockchain log structure)
 	if params.EventLog != nil {
 		// Convert topics to string array
@@ -240,10 +234,18 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 	// fetchTokenMetadataFromRPC. The cross-chain catalog covers that
 	// gap by looking up the workflow's declared chain ID directly.
 	contractAddr := eventLog.Address.Hex()
-	tokenMetadata, err := tokenService.GetTokenMetadata(contractAddr)
-	if err != nil {
-		if logger != nil {
-			logger.Warn("Failed to get token metadata for Transfer event", "error", err, "contract", contractAddr)
+	var tokenMetadata *TokenMetadata
+	if eventLog.Address == ethTransferLogAddress {
+		// EIP-7708 emits this Transfer for a plain ETH move, so the value is in
+		// the chain's native token. The system address is not a token contract.
+		tokenMetadata = nativeTokenMetadataForChain(tokenService.GetChainID())
+	} else {
+		var err error
+		tokenMetadata, err = tokenService.GetTokenMetadata(contractAddr)
+		if err != nil {
+			if logger != nil {
+				logger.Warn("Failed to get token metadata for Transfer event", "error", err, "contract", contractAddr)
+			}
 		}
 	}
 	// When the bound service returns nil or an UNKNOWN-flavoured fallback,
