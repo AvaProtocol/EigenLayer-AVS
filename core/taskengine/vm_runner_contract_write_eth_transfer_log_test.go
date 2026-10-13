@@ -335,6 +335,58 @@ func TestDecodeRelevantMethodEvents_ApproveDoesNotTakeTransferValue(t *testing.T
 	assert.Equal(t, []string{"Approval", "Transfer"}, eventNames(t, transfer))
 }
 
+func TestDecodeRelevantMethodEvents_TokenMethodFallsBackToTargetEvent(t *testing.T) {
+	const (
+		token      = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+		other      = "0x2222222222222222222222222222222222222222"
+		runner     = "0x46aD59AFc8a21F0dfa3FE74C53A998b7550c7BDd"
+		recipient  = "0x633791DdC147B59345dc56D3A1F0606c23703154"
+		minter     = "0x0000000000000000000000000000000000000000"
+		entryPoint = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
+		bundler    = "0x813781939B0D041A0b8d9d0ACc2f29632B786a27"
+		system     = "0xFFffFFffFFfffFFfFFfFFFFFffFFFffffFfFFFfE"
+	)
+	minted := big.NewInt(100000)
+	otherPayment := big.NewInt(1)
+	processor := testContractWriteProcessor()
+	parsedABI := mustABI(t, tokenApprovalTransferABI)
+	logs := []interface{}{
+		erc20TransferLog(system, entryPoint, bundler, big.NewInt(584351393496208)),
+		erc20TransferLog(other, runner, recipient, otherPayment),
+		erc20TransferLog(token, minter, recipient, minted),
+	}
+
+	for _, method := range []string{"mint", "burn", "safeTransferFrom"} {
+		t.Run(method, func(t *testing.T) {
+			events := processor.decodeRelevantMethodEvents(logs, token, method, parsedABI, "", runner)
+			assert.Equal(t, common.HexToAddress(minter).Hex(), events["from"])
+			assert.Equal(t, common.HexToAddress(recipient).Hex(), events["to"])
+			assert.Equal(t, minted.String(), events["value"])
+			assert.NotEqual(t, otherPayment.String(), events["value"])
+			assert.Equal(t, []string{"Transfer", "Transfer"}, eventNames(t, events))
+			assert.Equal(t, otherPayment.String(), eventValue(t, events, 0))
+			assert.Equal(t, minted.String(), eventValue(t, events, 1))
+		})
+	}
+
+	allowance := big.NewInt(999)
+	approvalLogs := []interface{}{
+		namedValueLog(parsedABI.Events["Approval"].ID.Hex(), token, runner, recipient, allowance),
+		erc20TransferLog(system, entryPoint, bundler, big.NewInt(1)),
+	}
+	for _, method := range []string{"permit", "increaseAllowance"} {
+		t.Run(method, func(t *testing.T) {
+			events := processor.decodeRelevantMethodEvents(approvalLogs, token, method, parsedABI, "", runner)
+			assert.Equal(t, allowance.String(), events["value"])
+			assert.Equal(t, common.HexToAddress(runner).Hex(), events["owner"])
+			assert.Equal(t, common.HexToAddress(recipient).Hex(), events["spender"])
+			_, hasFrom := events["from"]
+			assert.False(t, hasFrom)
+			assert.Equal(t, []string{"Approval"}, eventNames(t, events))
+		})
+	}
+}
+
 func TestDecodeRelevantMethodEvents_PrefersRunnerTransfer(t *testing.T) {
 	const (
 		usdc      = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"

@@ -2425,6 +2425,12 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 					if logsArray, ok := logs.([]interface{}); ok && len(logsArray) > 0 {
 						userOpHash, _ := receiptMap["userOpHash"].(string)
 						runner, _ := receiptMap["from"].(string)
+						// executeAtomicBatch stamps every call in a run-node batch with this
+						// same receipt and userOpHash. Two transfers of one token therefore
+						// both take the first runner Transfer in the window. Deployed
+						// workflows send one UserOp per call, so each of those receipts
+						// holds a single call. The shared data["transfer"] key is older
+						// than this window.
 						methodEvents = r.decodeRelevantMethodEvents(logsArray, methodTarget, methodName, parsedABI, userOpHash, runner)
 					}
 				}
@@ -2608,7 +2614,9 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 // promoteRawLogFields copies Tenderly's nested raw address, topics, and data
 // onto the log when those keys are absent. Pool discovery, the UserOp window,
-// and event decoding all read the top-level keys.
+// and event decoding all read the top-level keys. The write is in place.
+// Production receipts come from structpb.AsInterface, which allocates a fresh
+// map, so the write does not alias another goroutine's receipt.
 func promoteRawLogFields(logMap map[string]interface{}) {
 	rawAny, hasRaw := logMap["raw"]
 	if !hasRaw {
@@ -3208,6 +3216,12 @@ func sameHexAddress(left, right string) bool {
 // chooseMethodEventFields picks the one event whose fields fill the flat
 // output. Field values are copied so later decimal formatting of the flat map
 // does not rewrite the events list.
+//
+// transfer, transferFrom, and approve keep their own event. Any other method
+// prefers a non-token event, such as a swap's amount0. When the receipt has
+// only Transfer or Approval, it falls back to the target's own event so mint,
+// burn, safeTransferFrom, increaseAllowance, and permit still expose from, to,
+// and value.
 func chooseMethodEventFields(methodName, methodTarget, runner string, decoded []parsedMethodEvent) map[string]interface{} {
 	switch strings.ToLower(methodName) {
 	case "transfer", "transferfrom":
@@ -3215,7 +3229,13 @@ func chooseMethodEventFields(methodName, methodTarget, runner string, decoded []
 	case "approve":
 		return chooseApprovalFields(methodTarget, decoded)
 	default:
-		return chooseNonTokenFields(decoded)
+		if fields := chooseNonTokenFields(decoded); len(fields) > 0 {
+			return fields
+		}
+		if fields := chooseTransferFields(methodTarget, runner, decoded); len(fields) > 0 {
+			return fields
+		}
+		return chooseApprovalFields(methodTarget, decoded)
 	}
 }
 
