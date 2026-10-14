@@ -172,6 +172,19 @@ type WorkflowNeed struct {
 	// NativeUnsized is set when a native amount could not be computed.
 	// An observed simulate total can clear it; a merge cannot.
 	NativeUnsized bool
+	// NativeSendOps and NativeValueOps are self-funded UserOps still left
+	// on this task. GasUnsized means that count is not known, so a native
+	// cap must not pretend to hold their gas. InstallPremium is the extra
+	// wei of this task's first op, already included in NativeSpendCap.
+	// GasPriced stops a second pass from adding it again.
+	NativeSendOps  int64
+	NativeValueOps int64
+	GasUnsized     bool
+	InstallPremium *big.Int
+	GasPriced      bool
+	// AmountImprecise is a JSON number that was not an exact integer.
+	// The error tells the caller to send a decimal string.
+	AmountImprecise bool
 }
 
 // PolicyAddition is the automation being set up. Cap amounts are totals
@@ -415,6 +428,10 @@ func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched Ski
 		}
 		need := ensure(chain)
 		need.HasFundMove = true
+		noteNativeOps(need, site, runs, runsKnown)
+		if site.amountImprecise {
+			need.AmountImprecise = true
+		}
 		// ETH send and payable value have no contract target. Size them
 		// before the unresolved-call return, which would drop the cap.
 		if site.kind == fundEth || site.kind == fundValue {
@@ -494,7 +511,7 @@ func MergeSkillGrant(current *model.SessionPolicy, addition PolicyAddition, task
 // MergeSkillGrantWithRemainder is MergeSkillGrant with the current grant's
 // usable leftover supplied by the caller. remainder is ignored when current
 // is nil.
-func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *GrantRemainder, addition PolicyAddition, tasks []*avsproto.Task, chainID int64, now time.Time, expiresIn time.Duration) (SessionPermissions, PolicyChanges, error) {
+func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *GrantRemainder, addition PolicyAddition, tasks []*avsproto.Task, chainID int64, now time.Time, expiresIn time.Duration, opts ...mergeOption) (SessionPermissions, PolicyChanges, error) {
 	if now.IsZero() {
 		now = time.Now()
 	}
@@ -509,7 +526,7 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 			}
 			remainder = &stored
 		}
-		return mergeCarriedSkillGrant(current, *remainder, addition, tasks, chainID, now, expiresIn)
+		return mergeCarriedSkillGrant(current, *remainder, addition, tasks, chainID, now, expiresIn, opts...)
 	}
 	actions := map[string]map[string]struct{}{}
 	caps := map[common.Address]*big.Int{}
@@ -602,7 +619,7 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 			// derived cap does not, and a missing cap still fails closed.
 			if need.NativeUnsized || !namedSpendCovered(need, additionCaps) {
 				if unsized == nil {
-					unsized = fmt.Errorf("%w: task %s (%s)", ErrSessionPolicyUnsized, task.GetId(), displayName(task.GetName()))
+					unsized = fmt.Errorf("%w: task %s (%s)%s", ErrSessionPolicyUnsized, task.GetId(), displayName(task.GetName()), impreciseAmountSuffix(need))
 				}
 				continue
 			}
@@ -653,6 +670,19 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 	}
 	if unsized != nil {
 		return SessionPermissions{}, PolicyChanges{}, unsized
+	}
+
+	fee := applyMergeOptions(opts).fee(chainID)
+	gasAdded, gasNotes, gasErr := priceWalletNativeGas(taskNeeds, fee, native.Sign() > 0)
+	if gasErr != nil {
+		return SessionPermissions{}, PolicyChanges{}, gasErr
+	}
+	native.Add(native, gasAdded)
+	if native.Cmp(maxUint256) > 0 {
+		return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: self-funded gas exceeds uint256", ErrSessionPolicyUnsized)
+	}
+	if gasAdded.Sign() > 0 {
+		nativeSet = true
 	}
 
 	mergedActions := actionsFromSet(actions)
@@ -722,8 +752,15 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 	}
 	perms.ValidUntilMs = latest
 
-	changes := diffGrant(current, nil, perms, taskNeeds, latest)
+	changes := appendGasNotes(diffGrant(current, nil, perms, taskNeeds, latest), gasNotes)
 	return perms, changes, nil
+}
+
+func impreciseAmountSuffix(need *WorkflowNeed) string {
+	if need != nil && need.AmountImprecise {
+		return "; send the amount as a decimal string"
+	}
+	return ""
 }
 
 // CoverageRefusal reports a concrete gap. A notification-only need returns
@@ -936,6 +973,14 @@ func BuildAuthorization(policy *model.SessionPolicy, need *WorkflowNeed, report 
 		out.Detail = "a spend amount is not a fixed number"
 		return out
 	}
+	// A low balance can send the graph down the else branch, so the
+	// simulation never notices a recipient the grant does not list.
+	// Create and resume already compare recipients; this verdict does too.
+	if rec := firstMissingNativeRecipient(policy, filled); rec != nil {
+		out.Status = AuthNotCovered
+		out.Detail = FormatSessionPolicyRecipientNotAllowed(*rec, policy.ID)
+		return out
+	}
 	if len(missing) > 0 {
 		out.Status = AuthNotCovered
 		out.Missing = missing
@@ -1066,8 +1111,17 @@ func taskValidUntil(sched SkillSchedule, crons []string) int64 {
 	if !ok || !last.After(now) {
 		return 0
 	}
-	return last.UnixMilli()
+	// Expired is now >= ValidUntil. The last fire is the last run, so the
+	// grant has to stay valid through that run and a queue delay. Gallery
+	// imports and API callers often omit expiredAt; chat-made skills set
+	// their own buffer and take the branch above.
+	return last.Add(cronGrantSlack).UnixMilli()
 }
+
+// cronGrantSlack is how long after the last cron fire a grant with no
+// expiredAt stays valid. One day covers the run itself without leaving the
+// session key open for the rest of the month.
+const cronGrantSlack = 24 * time.Hour
 
 func countCronFires(schedules []string, from time.Time, untilMs int64, limit int) (int64, bool) {
 	until := time.UnixMilli(untilMs)
@@ -1168,6 +1222,11 @@ type fundSite struct {
 	// visit records the action and does not store a derived cap.
 	ceiling  bool
 	loopMult int
+	// userOp is 1 on the first fund site of one on-chain UserOp.
+	// opsUnknown means the walk cannot say how many ops a run sends.
+	userOp          int
+	opsUnknown      bool
+	amountImprecise bool
 }
 
 // fundScope is the settings map plus, inside a settings-list loop, the
@@ -1186,7 +1245,7 @@ func walkFundMoves(nodes []*avsproto.TaskNode, settings map[string]any, trigger 
 			continue
 		}
 		if cw := node.GetContractWrite(); cw != nil {
-			collectContractWrite(cw, scope, false, 1, visit)
+			visitContractWrite(cw, scope, false, 1, visit)
 		}
 		if et := node.GetEthTransfer(); et != nil {
 			collectEth(et, scope, false, 1, visit)
@@ -1204,7 +1263,7 @@ func walkFundMoves(nodes []*avsproto.TaskNode, settings map[string]any, trigger 
 					continue
 				}
 				if cw := loop.GetContractWrite(); cw != nil {
-					collectContractWrite(cw, scope, true, 1, visit)
+					visitContractWrite(cw, scope, true, 1, visit)
 				}
 				if et := loop.GetEthTransfer(); et != nil {
 					collectEth(et, scope, true, 1, visit)
@@ -1216,7 +1275,7 @@ func walkFundMoves(nodes []*avsproto.TaskNode, settings map[string]any, trigger 
 			for _, elem := range list {
 				elemScope := fundScope{settings: settings, value: elem, hasValue: true}
 				if cw := loop.GetContractWrite(); cw != nil {
-					collectContractWrite(cw, elemScope, false, 1, visit)
+					visitContractWrite(cw, elemScope, false, 1, visit)
 				}
 				if et := loop.GetEthTransfer(); et != nil {
 					collectEth(et, elemScope, false, 1, visit)
@@ -1224,6 +1283,19 @@ func walkFundMoves(nodes []*avsproto.TaskNode, settings map[string]any, trigger 
 			}
 		}
 	}
+}
+
+// visitContractWrite marks one UserOp on the node's first call. Later
+// method calls and the payable value ride that same op.
+func visitContractWrite(cw *avsproto.ContractWriteNode, scope fundScope, loopUnknown bool, loopMult int, visit func(fundSite)) {
+	first := true
+	collectContractWrite(cw, scope, loopUnknown, loopMult, func(site fundSite) {
+		if first && site.kind == fundCall {
+			site.userOp = 1
+			first = false
+		}
+		visit(site)
+	})
 }
 
 func collectContractWrite(cw *avsproto.ContractWriteNode, scope fundScope, loopUnknown bool, loopMult int, visit func(fundSite)) {
@@ -1247,7 +1319,8 @@ func collectContractWrite(cw *avsproto.ContractWriteNode, scope fundScope, loopU
 			visit(fundSite{
 				chain: cfg.GetChainId(), kind: fundValue,
 				amount: v, amountOK: ok && v != nil && v.Sign() > 0, amountUnknown: unknown,
-				loopUnknown: loopUnknown, loopMult: loopMult,
+				amountImprecise: unknown && resolvedAmountImprecise(cfg.GetValue(), scope),
+				loopUnknown:     loopUnknown, loopMult: loopMult,
 			})
 		}
 		return
@@ -1263,19 +1336,25 @@ func collectContractWrite(cw *avsproto.ContractWriteNode, scope fundScope, loopU
 				sel, selOK = got, true
 			}
 		}
+		imprecise := false
+		if amtUnknown && len(mc.GetMethodParams()) >= 2 {
+			imprecise = resolvedAmountImprecise(mc.GetMethodParams()[1], scope)
+		}
 		visit(fundSite{
 			chain: cfg.GetChainId(), kind: fundCall,
 			target: target, targetOK: targetOK,
 			selector: sel, selectorOK: selOK,
 			amount: amt, amountOK: amtOK, amountUnknown: amtUnknown,
-			loopUnknown: loopUnknown, loopMult: loopMult,
+			amountImprecise: imprecise,
+			loopUnknown:     loopUnknown, loopMult: loopMult,
 		})
 	}
 	if v, ok, unknown := resolveAmount(cfg.GetValue(), scope); ok && v.Sign() > 0 || unknown {
 		visit(fundSite{
 			chain: cfg.GetChainId(), kind: fundValue,
 			amount: v, amountOK: ok && v != nil && v.Sign() > 0, amountUnknown: unknown,
-			loopUnknown: loopUnknown, loopMult: loopMult,
+			amountImprecise: unknown && resolvedAmountImprecise(cfg.GetValue(), scope),
+			loopUnknown:     loopUnknown, loopMult: loopMult,
 		})
 	}
 }
@@ -1291,7 +1370,9 @@ func collectEth(et *avsproto.ETHTransferNode, scope fundScope, loopUnknown bool,
 		chain: cfg.GetChainId(), kind: fundEth,
 		recipient: rec, recipientOK: recOK,
 		amount: amt, amountOK: amtOK, amountUnknown: amtUnknown,
-		loopUnknown: loopUnknown, loopMult: loopMult,
+		amountImprecise: amtUnknown && resolvedAmountImprecise(cfg.GetAmount(), scope),
+		loopUnknown:     loopUnknown, loopMult: loopMult,
+		userOp: 1,
 	})
 }
 
@@ -1450,8 +1531,58 @@ func scalarString(v any) (string, bool) {
 		return exactFloatString(float64(n))
 	case float64:
 		return exactFloatString(n)
+	case json.Number:
+		return exactIntegerString(string(n))
 	default:
 		return "", false
+	}
+}
+
+// exactIntegerString accepts a decimal integer, including one json.Number
+// preserved past the 53-bit mantissa. Scientific notation and fractions
+// are refused rather than rounded into a cap.
+func exactIntegerString(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.ContainsAny(s, ".eE") {
+		return "", false
+	}
+	n, ok := new(big.Int).SetString(s, 10)
+	if !ok || n.Sign() < 0 {
+		return "", false
+	}
+	return n.String(), true
+}
+
+// resolvedAmountImprecise reports a settings number that cannot size a cap.
+// json.Number is exact. A float64 above the 53-bit mantissa is not, and
+// the caller is told to send a decimal string instead.
+func resolvedAmountImprecise(raw string, scope fundScope) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || (!strings.Contains(raw, "{{") && !strings.Contains(raw, "${")) {
+		return false
+	}
+	var v any
+	var ok bool
+	if scope.hasValue {
+		if looked, found := lookupLoopValue(raw, scope.value); found {
+			v, ok = looked, true
+		}
+	}
+	if !ok {
+		v, ok = lookupSetting(raw, scope.settings)
+	}
+	if !ok {
+		return false
+	}
+	switch n := v.(type) {
+	case float32:
+		_, exact := exactFloatString(float64(n))
+		return !exact
+	case float64:
+		_, exact := exactFloatString(n)
+		return !exact
+	default:
+		return false
 	}
 }
 
@@ -2190,8 +2321,29 @@ func permissionsAsPolicy(in SessionPolicyInput) *model.SessionPolicy {
 // spend. That check runs only after every individual gap is clear, and it
 // skips tasks named in drop. A dropped task is echoed when putting it back
 // would make that combined spend exceed the cap.
-func classifyRunnerCoverage(in SessionPolicyInput, tasks []*avsproto.Task, now time.Time, usablePolicyID string) (dropped []string, err error) {
+func classifyRunnerCoverage(in SessionPolicyInput, tasks []*avsproto.Task, now time.Time, usablePolicyID string, opts ...mergeOption) (dropped []string, err error) {
 	policy := permissionsAsPolicy(in)
+	type coverageRow struct {
+		task *avsproto.Task
+		need *WorkflowNeed
+	}
+	rows := make([]coverageRow, 0, len(tasks))
+	var priced []*WorkflowNeed
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		need := DeriveWorkflowNeeds(task, nil, scheduleFromTask(task, now), in.ChainID)[in.ChainID]
+		rows = append(rows, coverageRow{task: task, need: need})
+		if need != nil {
+			priced = append(priced, need)
+		}
+	}
+	// One price for the whole wallet. Per task would count an install twice
+	// and refuse a grant that merged with a single install.
+	if _, _, priceErr := priceWalletNativeGas(priced, applyMergeOptions(opts).fee(in.ChainID), positiveNativeAmount(in.Permissions.NativeSpendCap)); priceErr != nil {
+		return nil, priceErr
+	}
 	var blocking []string
 	var missing []model.AllowedAction
 	var required *WorkflowNeed
@@ -2199,12 +2351,9 @@ func classifyRunnerCoverage(in SessionPolicyInput, tasks []*avsproto.Task, now t
 	var spared []runnerSpend
 	code := SessionPolicyNotCoveringCode
 	detail := "this grant would leave an enabled automation uncovered"
-	for _, task := range tasks {
-		if task == nil {
-			continue
-		}
-		derived := DeriveWorkflowNeeds(task, nil, scheduleFromTask(task, now), in.ChainID)
-		need := derived[in.ChainID]
+	for _, row := range rows {
+		task := row.task
+		need := row.need
 		refusal := CoverageRefusal(policy, need)
 		if refusal == nil {
 			if need != nil && need.HasFundMove {
@@ -2527,6 +2676,15 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 		chainID = n.defaultChainID()
 	}
 	needs := DeriveWorkflowNeeds(task.Task, settings, sched, chainID)
+	for chain, need := range needs {
+		if need == nil || !need.HasFundMove || n == nil {
+			continue
+		}
+		if _, _, err := priceWalletNativeGas([]*WorkflowNeed{need}, n.selfFundedGrantFee(chain), false); err != nil {
+			auth.Result = &SessionAuthorization{Status: AuthCapTooLow, Detail: err.Error(), Required: need}
+			return
+		}
+	}
 	var report *SessionGrantReport
 	if vm != nil {
 		report = vm.sessionGrantReport
@@ -2646,6 +2804,11 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 	}
 	if len(mav2) == 0 {
 		return noop, nil
+	}
+	for i := range mav2 {
+		if _, _, err := priceWalletNativeGas([]*WorkflowNeed{mav2[i].need}, n.selfFundedGrantFee(mav2[i].chain), false); err != nil {
+			return noop, err
+		}
 	}
 
 	// Shards are shared. Two chains can hash to one mutex, and locking

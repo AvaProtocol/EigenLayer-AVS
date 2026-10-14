@@ -1884,7 +1884,10 @@ components:
             Cumulative native-token cap in wei (decimal string, no reset).
             Enforced on-chain by NativeTokenLimitModule. Self-funded UserOps
             also decrement this cap by gas; sponsored UserOps decrement only
-            the ETH value sent.
+            the ETH value sent. When the chain does not sponsor gas, prepare
+            sizes headroom for those UserOps into this amount: the steady-op
+            ceiling times a per-chain fee assumption, plus one install. That
+            headroom can also be sent as value to the allowed recipients.
           example: '10000000000000000'
 
     SessionAuthorization:
@@ -3349,6 +3352,12 @@ paths:
             `POLICIES_BAD_PERMISSIONS` — the grant is not signable. When
             there is no usable grant, an unsized token amount is this code.
             An unsized native payable that would install a native cap is 409.
+            An amount that was a JSON number past the exact integer range says
+            to send a decimal string.
+            `SESSION_POLICY_TOO_MANY_NATIVE_RECIPIENTS` — more than five native
+            recipients. Finished automations keep their addresses until revoke.
+            `SESSION_POLICY_RECIPIENT_NOT_EOA` — a native recipient is a contract
+            or a 7702-delegated EOA.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -3445,6 +3454,10 @@ paths:
             or, when there is no usable grant, a token amount cannot be sized.
             An unsized native payable that would install a native cap is
             `409 SESSION_POLICY_NATIVE_UNSIZED`.
+            `SESSION_POLICY_TOO_MANY_NATIVE_RECIPIENTS` — more than five native
+            recipients. Finished automations keep their addresses until revoke.
+            `SESSION_POLICY_RECIPIENT_NOT_EOA` — a native recipient is a contract
+            or a 7702-delegated EOA.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }

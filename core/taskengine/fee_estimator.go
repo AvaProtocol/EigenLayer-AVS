@@ -457,7 +457,9 @@ func (fe *FeeEstimator) estimateContractWriteGas(ctx context.Context, node *avsp
 		return nil
 	}
 
-	estimatedGas := big.NewInt(150000) // Conservative estimate for contract write
+	// Same ceiling preflight uses for an installed payable UserOp. A lower
+	// figure under-reports what NativeTokenLimitModule will charge.
+	estimatedGas := big.NewInt(nativePreflightGasUnitsValueSteady)
 	totalCost := new(big.Int).Mul(estimatedGas, gasPrice)
 
 	methodName := "unknown"
@@ -478,7 +480,8 @@ func (fe *FeeEstimator) estimateContractWriteGas(ctx context.Context, node *avsp
 }
 
 func (fe *FeeEstimator) estimateETHTransferGas(ctx context.Context, node *avsproto.TaskNode, runnerAddress common.Address, gasPrice *big.Int) *GasEstimationResult {
-	estimatedGas := big.NewInt(50000) // Conservative estimate for smart wallet ETH transfer
+	// Same ceiling preflight uses for an installed ethTransfer UserOp.
+	estimatedGas := big.NewInt(nativePreflightGasUnitsSteady)
 	totalCost := new(big.Int).Mul(estimatedGas, gasPrice)
 
 	return &GasEstimationResult{
@@ -507,10 +510,12 @@ func (fe *FeeEstimator) estimateLoopGas(ctx context.Context, node *avsproto.Task
 
 	switch {
 	case loopNode.GetContractWrite() != nil:
-		perIterationGas = 150000
+		// One iteration at the MA v2 ceiling. The estimator does not know
+		// the list length, so the displayed fee is not the whole schedule.
+		perIterationGas = nativePreflightGasUnitsValueSteady
 		operationType = "loop_contract_write"
 	case loopNode.GetEthTransfer() != nil:
-		perIterationGas = 50000
+		perIterationGas = nativePreflightGasUnitsSteady
 		operationType = "loop_eth_transfer"
 	default:
 		// Off-chain runner (contract_read, custom_code, rest_api, graphql) — no gas cost

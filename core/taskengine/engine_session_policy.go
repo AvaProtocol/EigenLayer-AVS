@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strings"
 	"time"
 
@@ -393,7 +394,7 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		}
 		var dropped []string
 		kept, dropped = tasksExceptDropped(workflowTasks(tasks), in.DropTaskIDs)
-		merged, ch, mergeErr := MergeSkillGrantWithRemainder(current, preRemainder, *in.Addition, kept, in.ChainID, preparedAt, time.Duration(in.ExpiresInSeconds)*time.Second)
+		merged, ch, mergeErr := MergeSkillGrantWithRemainder(current, preRemainder, *in.Addition, kept, in.ChainID, preparedAt, time.Duration(in.ExpiresInSeconds)*time.Second, n.selfFundedGrantFeeOption(in.ChainID))
 		if mergeErr != nil {
 			return nil, mergeErr
 		}
@@ -439,6 +440,24 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		})
 	}
 	return prepared, nil
+}
+
+// selfFundedGrantFeeOption prices native gas into a grant when this chain
+// does not sponsor UserOps. A sponsored chain, or an engine with no smart
+// wallet config, keeps the cap as the ETH the workflow sends.
+func (n *Engine) selfFundedGrantFeeOption(chainID int64) mergeOption {
+	return WithSelfFundedGrantFee(chainID, n.selfFundedGrantFee(chainID))
+}
+
+func (n *Engine) selfFundedGrantFee(chainID int64) *big.Int {
+	if n == nil {
+		return nil
+	}
+	cfg := n.ResolveSmartWalletConfig(chainID)
+	if cfg == nil || cfg.SponsorshipPolicyID() != "" {
+		return nil
+	}
+	return NativeGrantMaxFee(chainID)
 }
 
 func workflowTasks(tasks []*model.Workflow) []*avsproto.Task {
@@ -552,20 +571,21 @@ func (n *Engine) SubmitSessionPolicy(
 			cancel()
 		}
 		kept, _ := tasksExceptDropped(workflowTasks(tasks), in.DropTaskIDs)
-		merged, _, mergeErr := MergeSkillGrantWithRemainder(current, remPtr, snap.addition, kept, in.ChainID, snap.preparedAt, snap.expiresIn)
+		feeOpt := n.selfFundedGrantFeeOption(in.ChainID)
+		merged, _, mergeErr := MergeSkillGrantWithRemainder(current, remPtr, snap.addition, kept, in.ChainID, snap.preparedAt, snap.expiresIn, feeOpt)
 		if mergeErr != nil {
 			return nil, nil, skillSubmitMergeError(current, mergeErr, snap.tasks, kept)
 		}
 		if !sameSessionPermissions(merged, in.Permissions) {
-			return nil, nil, explainSkillDrift(current, snap, remPtr, kept, in.Permissions)
+			return nil, nil, explainSkillDrift(current, snap, remPtr, kept, in.Permissions, feeOpt)
 		}
 		if current != nil {
-			dropped, err = classifyCarriedCoverage(current, *remPtr, in, workflowTasks(tasks), time.Now())
+			dropped, err = classifyCarriedCoverage(current, *remPtr, in, workflowTasks(tasks), time.Now(), feeOpt)
 		} else {
-			dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID)
+			dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID, feeOpt)
 		}
 	} else {
-		dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID)
+		dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID, n.selfFundedGrantFeeOption(in.ChainID))
 	}
 	if err != nil {
 		return nil, nil, err

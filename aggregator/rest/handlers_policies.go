@@ -561,6 +561,10 @@ func mapPolicyError(err error) error {
 		// leftover entities; granting cannot allocate a free one. 400 so
 		// the owner is not asked to sign a doomed payload.
 		return badRequest(taskengine.SessionPolicyEntityOccupiedCode, "Validation entity occupied", err.Error())
+	case strings.Contains(err.Error(), taskengine.SessionPolicyTooManyNativeRecipientsCode):
+		return badRequest(taskengine.SessionPolicyTooManyNativeRecipientsCode, "Too many native recipients", err.Error())
+	case strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotEOACode):
+		return badRequest(taskengine.SessionPolicyRecipientNotEOACode, "Native recipient is not an EOA", err.Error())
 	default:
 		return badRequest("POLICIES_REJECTED", "Policy request rejected", err.Error())
 	}
