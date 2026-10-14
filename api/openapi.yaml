@@ -1457,6 +1457,13 @@ components:
         valueFee:
           $ref: '#/components/schemas/ValueFee'
           description: Value-capture fee charged (post-paid).
+        summary:
+          additionalProperties: true
+          description: |
+            Studio's summary-step reply, present once the run has ended.
+            `subject` is the report title. `body` is the structured report
+            (summary line, executions, errors, notice, and step counts).
+            Absent on older runs and while the run is still in progress.
         authorization:
           $ref: '#/components/schemas/SessionAuthorization'
           description: |
@@ -1474,7 +1481,9 @@ components:
 
     ExecutionStatusSummary:
       type: object
-      description: Lightweight execution status (no steps payload).
+      description: |
+        Lightweight execution status (no steps payload). Includes the run
+        summary once the run has ended.
       required: [id, status]
       properties:
         id: { $ref: '#/components/schemas/Ulid' }
@@ -1483,6 +1492,10 @@ components:
         startAt: { type: integer, format: int64 }
         endAt: { type: integer, format: int64 }
         error: { type: string }
+        summary:
+          additionalProperties: true
+          description: |
+            Same object as `Execution.summary`. Present once the run has ended.
 
     ExecutionCount:
       type: object
@@ -2919,7 +2932,7 @@ paths:
         schema: { $ref: '#/components/schemas/Ulid' }
     get:
       tags: [Executions]
-      summary: Get execution status (lightweight, no steps)
+      summary: Get execution status (lightweight, no steps; includes the run summary once the run has ended)
       operationId: getExecutionStatus
       responses:
         '200':

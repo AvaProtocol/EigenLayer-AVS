@@ -793,6 +793,12 @@ message Execution {
   string resume_node_id = 11;  // the suspended step; execution resumes at its successors
   string wait_reason    = 12;  // debug/human label for why it is waiting
 
+  // Studio's summary-step reply, copied at finalize once the run has ended.
+  // Shape is {subject, body}. body keeps the summary line, executions, errors,
+  // notice, and step counts. Absent on older runs and while the run is still
+  // in progress, so a chat poll can read it without the step list.
+  google.protobuf.Value summary = 13;
+
   message Step {
     string id = 1;
     
@@ -1009,6 +1015,8 @@ message ExecutionReq {
 
 message ExecutionStatusResp {
   ExecutionStatus status = 1;
+  // Same object as Execution.summary. Set once the run has ended.
+  google.protobuf.Value summary = 2;
 }
 
 message GetKeyReq {
