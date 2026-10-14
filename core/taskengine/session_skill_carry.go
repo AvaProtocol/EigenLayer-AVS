@@ -126,7 +126,7 @@ func (n *Engine) spendLimitCaller(chainID int64) (aa.ContractCaller, error) {
 // rather than installed at zero. An unresolved running task does not fail
 // this path. An unsized payable does, when this merge would install
 // NativeTokenLimitModule and the current grant has no native cap.
-func mergeCarriedSkillGrant(current *model.SessionPolicy, remainder GrantRemainder, addition PolicyAddition, tasks []*avsproto.Task, chainID int64, now time.Time, expiresIn time.Duration) (SessionPermissions, PolicyChanges, error) {
+func mergeCarriedSkillGrant(current *model.SessionPolicy, remainder GrantRemainder, addition PolicyAddition, tasks []*avsproto.Task, chainID int64, now time.Time, expiresIn time.Duration, opts ...mergeOption) (SessionPermissions, PolicyChanges, error) {
 	addCaps := map[common.Address]*big.Int{}
 	for _, cap := range addition.SpendCaps {
 		if cap.Token == nil {
@@ -282,6 +282,33 @@ func mergeCarriedSkillGrant(current *model.SessionPolicy, remainder GrantRemaind
 	}
 	sortSpendCaps(spendCaps)
 
+	var currentCap *model.NativeSpendCap
+	if current != nil {
+		currentCap = current.NativeSpendCap
+	}
+	installsNative := needNative.Sign() > 0 ||
+		(addNative != nil && addNative.Sign() > 0) ||
+		(remainder.Native != nil && remainder.Native.Sign() > 0) ||
+		positiveNativeAmount(currentCap)
+	declaredGas, declaredErr := additionGasWei(addition)
+	if declaredErr != nil {
+		return SessionPermissions{}, PolicyChanges{}, declaredErr
+	}
+	applied := current != nil && current.Grant.Applied()
+	fee := applyMergeOptions(opts).fee(chainID)
+	gasAdded, gasNotes, gasErr := priceWalletNativeGas(fundNeeds, fee, installsNative, !applied)
+	if gasErr != nil {
+		return SessionPermissions{}, PolicyChanges{}, gasErr
+	}
+	needNative.Add(needNative, gasAdded)
+	extra := foldMissingInstall(needNative, fundNeeds, fee, applied, installsNative)
+	gasNotes = noteMissingInstall(gasNotes, extra, fee)
+	gasAdded.Add(gasAdded, extra)
+	if needNative.Cmp(maxUint256) > 0 {
+		return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: self-funded gas exceeds uint256", ErrSessionPolicyUnsized)
+	}
+	reportedGas := new(big.Int).Add(new(big.Int).Set(gasAdded), declaredGas)
+
 	remNative := big.NewInt(0)
 	if remainder.Native != nil {
 		remNative = remainder.Native
@@ -357,7 +384,7 @@ func mergeCarriedSkillGrant(current *model.SessionPolicy, remainder GrantRemaind
 	perms.ValidUntilMs = latest
 
 	remCopy := remainder.clone()
-	changes := diffGrant(current, &remCopy, perms, fundNeeds, latest)
+	changes := withNativeGas(appendGasNotes(diffGrant(current, &remCopy, perms, fundNeeds, latest), gasNotes), reportedGas)
 	return perms, changes, nil
 }
 
@@ -539,10 +566,17 @@ func nativeCapUnsized(current *model.SessionPolicy, needs []*WorkflowNeed) *Poli
 	if current != nil {
 		policyID = current.ID
 	}
+	detail := strings.Join(parts, ", ") + ": a native cap cannot be added while its payable value cannot be sized"
+	for _, need := range needs {
+		if need != nil && need.AmountImprecise {
+			detail += "; send the amount as a decimal string"
+			break
+		}
+	}
 	return &PolicyConflictError{
 		Sentinel:        ErrSessionNativeCapUnsized,
 		Code:            SessionPolicyNativeUnsizedCode,
-		Detail:          strings.Join(parts, ", ") + ": a native cap cannot be added while its payable value cannot be sized",
+		Detail:          detail,
 		PolicyID:        policyID,
 		AffectedTaskIDs: ids,
 	}
@@ -681,12 +715,37 @@ func coverageRegressed(current, proposed *model.SessionPolicy, need *WorkflowNee
 // classifyCarriedCoverage refuses a submit only when the new grant covers
 // less of an enabled task than the current grant's usable remainder did.
 // A task the current grant already does not cover does not freeze the wallet.
-func classifyCarriedCoverage(current *model.SessionPolicy, rem GrantRemainder, in SessionPolicyInput, tasks []*avsproto.Task, now time.Time) (dropped []string, err error) {
+func classifyCarriedCoverage(current *model.SessionPolicy, rem GrantRemainder, in SessionPolicyInput, tasks []*avsproto.Task, now time.Time, opts ...mergeOption) (dropped []string, err error) {
 	usable := usableCoveragePolicy(current, rem)
 	proposed := permissionsAsPolicy(in)
 	usableID := ""
 	if current != nil {
 		usableID = current.ID
+	}
+	type coverageRow struct {
+		task *avsproto.Task
+		need *WorkflowNeed
+	}
+	rows := make([]coverageRow, 0, len(tasks))
+	var priced []*WorkflowNeed
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		need := DeriveWorkflowNeeds(task, nil, scheduleFromTask(task, now), in.ChainID)[in.ChainID]
+		rows = append(rows, coverageRow{task: task, need: need})
+		if need != nil {
+			priced = append(priced, need)
+		}
+	}
+	var currentCap *model.NativeSpendCap
+	if current != nil {
+		currentCap = current.NativeSpendCap
+	}
+	force := positiveNativeAmount(in.Permissions.NativeSpendCap) || positiveNativeAmount(currentCap) || (rem.Native != nil && rem.Native.Sign() > 0)
+	applied := current != nil && current.Grant.Applied()
+	if _, _, priceErr := priceWalletNativeGas(priced, applyMergeOptions(opts).fee(in.ChainID), force, !applied); priceErr != nil {
+		return nil, priceErr
 	}
 	var blocking []string
 	var missing []model.AllowedAction
@@ -694,11 +753,9 @@ func classifyCarriedCoverage(current *model.SessionPolicy, rem GrantRemainder, i
 	var covered []runnerSpend
 	var spared []runnerSpend
 	detail := "this grant would leave an enabled automation uncovered"
-	for _, task := range tasks {
-		if task == nil {
-			continue
-		}
-		need := DeriveWorkflowNeeds(task, nil, scheduleFromTask(task, now), in.ChainID)[in.ChainID]
+	for _, row := range rows {
+		task := row.task
+		need := row.need
 		if need == nil || !need.HasFundMove {
 			continue
 		}
@@ -798,16 +855,16 @@ func cloneTasks(tasks []*avsproto.Task) []*avsproto.Task {
 	return out
 }
 
-func explainSkillDrift(current *model.SessionPolicy, snap *skillPrepareSnapshot, fresh *GrantRemainder, newTasks []*avsproto.Task, signed SessionPermissions) *PolicyConflictError {
+func explainSkillDrift(current *model.SessionPolicy, snap *skillPrepareSnapshot, fresh *GrantRemainder, newTasks []*avsproto.Task, signed SessionPermissions, opts ...mergeOption) *PolicyConflictError {
 	if current == nil || snap == nil {
 		return newRunningSetChanged(current)
 	}
 	// newTasks + the remainder prepare signed against. If this still matches,
 	// the running set is not what moved the grant.
-	byNewTasks, _, errTasks := MergeSkillGrantWithRemainder(current, snap.remainder, snap.addition, newTasks, snap.chainID, snap.preparedAt, snap.expiresIn)
+	byNewTasks, _, errTasks := MergeSkillGrantWithRemainder(current, snap.remainder, snap.addition, newTasks, snap.chainID, snap.preparedAt, snap.expiresIn, opts...)
 	// old tasks + the remainder submit just read. If this still matches, the
 	// remaining limit is not what moved the grant.
-	byNewRem, _, errRem := MergeSkillGrantWithRemainder(current, fresh, snap.addition, snap.tasks, snap.chainID, snap.preparedAt, snap.expiresIn)
+	byNewRem, _, errRem := MergeSkillGrantWithRemainder(current, fresh, snap.addition, snap.tasks, snap.chainID, snap.preparedAt, snap.expiresIn, opts...)
 	tasksMoved := errTasks != nil || !sameSessionPermissions(byNewTasks, signed)
 	remMoved := errRem != nil || !sameSessionPermissions(byNewRem, signed)
 	switch {

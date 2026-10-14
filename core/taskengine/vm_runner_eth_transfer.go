@@ -210,14 +210,14 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	// Get the sender (smart wallet) address for the transfer object
 	fromAddress := getAASenderString(p.vm)
 
-	// Estimated gas for the simulated transfer; populates the same fields a real
-	// receipt would, so downstream cogs/fees handling treats sim and deployed
-	// runs identically.
+	// Local stand-in for a receipt: the hash is made up and nothing is
+	// simulated on Tenderly. Gas units match the installed-grant preflight
+	// ceiling so a displayed fee is not a 21k EOA transfer.
 	var simChainID uint64
 	if p.smartWalletConfig != nil {
 		simChainID = uint64(p.smartWalletConfig.ChainID)
 	}
-	gasUsedBig := new(big.Int).SetUint64(StandardGasCost)
+	gasUsedBig := new(big.Int).SetUint64(nativePreflightGasUnitsSteady)
 	gasPriceBig := new(big.Int).SetUint64(GetDefaultGasPrice(simChainID))
 	totalGasCost := new(big.Int).Mul(gasUsedBig, gasPriceBig)
 	executionLog.GasUsed = gasUsedBig.String()

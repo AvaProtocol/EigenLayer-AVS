@@ -222,6 +222,8 @@ func transferSite(chain int64, token common.Address, amount *big.Int, ceiling bo
 		target: token, targetOK: true,
 		selector: selectorTransfer, selectorOK: true,
 		ceiling: ceiling, loopMult: 1,
+		// The row total is one cap, not one UserOp per run.
+		opsUnknown: true,
 	}
 	if amount != nil && amount.Sign() > 0 && !ceiling {
 		site.amount = amount

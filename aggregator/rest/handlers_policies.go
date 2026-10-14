@@ -561,6 +561,10 @@ func mapPolicyError(err error) error {
 		// leftover entities; granting cannot allocate a free one. 400 so
 		// the owner is not asked to sign a doomed payload.
 		return badRequest(taskengine.SessionPolicyEntityOccupiedCode, "Validation entity occupied", err.Error())
+	case strings.Contains(err.Error(), taskengine.SessionPolicyTooManyNativeRecipientsCode):
+		return badRequest(taskengine.SessionPolicyTooManyNativeRecipientsCode, "Too many native recipients", err.Error())
+	case strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotEOACode):
+		return badRequest(taskengine.SessionPolicyRecipientNotEOACode, "Native recipient is not an EOA", err.Error())
 	default:
 		return badRequest("POLICIES_REJECTED", "Policy request rejected", err.Error())
 	}
@@ -589,12 +593,17 @@ func additionFromAPI(add generated.SessionPolicyAddition) (taskengine.PolicyAddi
 	if err != nil {
 		return taskengine.PolicyAddition{}, err
 	}
+	gasWei := ""
+	if add.NativeGasWei != nil {
+		gasWei = *add.NativeGasWei
+	}
 	return taskengine.PolicyAddition{
 		AllowedActions:         perms.AllowedActions,
 		SpendCaps:              perms.SpendCaps,
 		NativeRecipients:       perms.NativeRecipients,
 		NativeSpendCap:         perms.NativeSpendCap,
 		AllowContractRecipient: perms.AllowContractRecipient,
+		NativeGasWei:           gasWei,
 		ValidUntilMs:           perms.ValidUntilMs,
 	}, nil
 }
@@ -703,6 +712,10 @@ func policyChangesToAPI(ch *taskengine.PolicyChanges) *generated.SessionPolicyCh
 	out := &generated.SessionPolicyChanges{
 		Summary:      summary,
 		BasePolicyId: &base,
+	}
+	if ch.NativeGasWei != "" {
+		gas := ch.NativeGasWei
+		out.NativeGasWei = &gas
 	}
 	if actions := allowedActionsToAPI(ch.KeptActions); len(actions) > 0 {
 		out.KeptActions = &actions
@@ -857,6 +870,9 @@ func problemNeed(need *taskengine.WorkflowNeed) *restmw.ProblemNeed {
 	if need.NativeSpendCap != nil {
 		out.NativeSpendCap = &restmw.ProblemNativeCap{Amount: need.NativeSpendCap.Amount}
 	}
+	if need.NativeGasWei != nil && need.NativeGasWei.Sign() > 0 {
+		out.NativeGasWei = need.NativeGasWei.String()
+	}
 	until := need.ValidUntilMs
 	out.ValidUntil = &until
 	return out
@@ -918,6 +934,10 @@ func sessionNeedToAPI(need *taskengine.WorkflowNeed) *generated.SessionPolicyNee
 	}
 	if need.NativeSpendCap != nil {
 		out.NativeSpendCap = &generated.NativeSpendCap{Amount: need.NativeSpendCap.Amount}
+	}
+	if need.NativeGasWei != nil && need.NativeGasWei.Sign() > 0 {
+		gas := need.NativeGasWei.String()
+		out.NativeGasWei = &gas
 	}
 	until := need.ValidUntilMs
 	out.ValidUntil = &until

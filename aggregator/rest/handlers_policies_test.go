@@ -400,6 +400,19 @@ func TestUnresolvedTargetMapsToConflict(t *testing.T) {
 	require.Equal(t, "01ETH", nativeBad.PolicyID)
 	require.NotContains(t, nativeBad.Detail, "POLICIES_BAD_PERMISSIONS")
 	require.NotContains(t, nativeBad.Detail, "POLICIES_REJECTED")
+
+	tooMany := mapPolicyError(fmt.Errorf("%s: at most 5 native recipients", taskengine.SessionPolicyTooManyNativeRecipientsCode))
+	tooManyHTTP, ok := tooMany.(*restmw.HTTPError)
+	require.True(t, ok)
+	require.Equal(t, http.StatusBadRequest, tooManyHTTP.Status)
+	require.Equal(t, taskengine.SessionPolicyTooManyNativeRecipientsCode, tooManyHTTP.Code)
+
+	notEOA := mapPolicyError(fmt.Errorf("%s: native recipient is a 7702-delegated EOA; set allowContractRecipient", taskengine.SessionPolicyRecipientNotEOACode))
+	notEOAHTTP, ok := notEOA.(*restmw.HTTPError)
+	require.True(t, ok)
+	require.Equal(t, http.StatusBadRequest, notEOAHTTP.Status)
+	require.Equal(t, taskengine.SessionPolicyRecipientNotEOACode, notEOAHTTP.Code)
+	require.NotEqual(t, "POLICIES_REJECTED", notEOAHTTP.Code)
 }
 
 func TestExpiredGrantDeployCheckMapsToConflict(t *testing.T) {

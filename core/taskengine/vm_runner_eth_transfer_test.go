@@ -506,11 +506,12 @@ func TestETHTransferProcessor_Simulation_PopulatesGasFields(t *testing.T) {
 	require.True(t, executionLog.Success)
 
 	// Simulation path lands here when smartWalletConfig is nil. Chain falls back
-	// to GetDefaultGasPrice(0) == DefaultGasPrice (0.5 gwei).
-	wantGasUsed := "21000"
+	// to GetDefaultGasPrice(0) == DefaultGasPrice (0.5 gwei). Gas units are the
+	// installed ethTransfer ceiling; the hash itself is still fabricated.
+	wantGasUsed := "500000"
 	wantGasPrice := "500000000" // DefaultGasPrice = 0.5 gwei
-	wantTotal := "10500000000000"
-	assert.Equal(t, wantGasUsed, executionLog.GasUsed, "GasUsed should be StandardGasCost")
+	wantTotal := "250000000000000"
+	assert.Equal(t, wantGasUsed, executionLog.GasUsed, "GasUsed should be the installed ethTransfer ceiling")
 	assert.Equal(t, wantGasPrice, executionLog.GasPrice, "GasPrice should fall back to DefaultGasPrice for unknown chain")
 	assert.Equal(t, wantTotal, executionLog.TotalGasCost, "TotalGasCost should be GasUsed × GasPrice")
 }

@@ -42,9 +42,10 @@ type CodeAndFeeReader interface {
 }
 
 const (
-	SessionPolicyRecipientNotAllowedCode = "SESSION_POLICY_RECIPIENT_NOT_ALLOWED"
-	SessionPolicyRecipientNotEOACode     = "SESSION_POLICY_RECIPIENT_NOT_EOA"
-	SessionPolicyNativeCapExceededCode   = "SESSION_POLICY_NATIVE_CAP_EXCEEDED"
+	SessionPolicyRecipientNotAllowedCode     = "SESSION_POLICY_RECIPIENT_NOT_ALLOWED"
+	SessionPolicyRecipientNotEOACode         = "SESSION_POLICY_RECIPIENT_NOT_EOA"
+	SessionPolicyTooManyNativeRecipientsCode = "SESSION_POLICY_TOO_MANY_NATIVE_RECIPIENTS"
+	SessionPolicyNativeCapExceededCode       = "SESSION_POLICY_NATIVE_CAP_EXCEEDED"
 
 	// A0-measured gas-unit ceilings for NT cap preflight when the send path
 	// has not yet estimated. Do not use the seed sum (500k+100k+700k).
@@ -74,7 +75,10 @@ func PreflightNativePermission(policy *model.SessionPolicy, intent NativeIntent,
 		if !nativeRecipientAllowed(policy, intent.Recipient) {
 			return FormatSessionPolicyRecipientNotAllowed(intent.Recipient, policy.ID)
 		}
-		if !policy.AllowContractRecipient {
+		// A contract or 7702 recipient is refused when the grant is installed.
+		// An applied grant stays valid if that address later delegates or
+		// becomes a contract. The handoff leaves installed grants alone.
+		if !policy.AllowContractRecipient && !policy.Grant.Applied() {
 			if reader == nil {
 				return fmt.Sprintf("%s: cannot verify native recipient %s is an EOA (no chain reader); fail closed",
 					SessionPolicyRecipientNotEOACode, intent.Recipient.Hex())

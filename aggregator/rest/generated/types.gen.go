@@ -1692,6 +1692,10 @@ type SessionPolicyAddition struct {
 	NativeRecipients       *[]EthereumAddress `json:"nativeRecipients,omitempty"`
 	NativeSpendCap         *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
 
+	// NativeGasWei Wei of this addition's nativeSpendCap that is self-funded
+	// gas rather than ETH sent. Already included in that cap.
+	NativeGasWei *string `json:"nativeGasWei,omitempty"`
+
 	// ValidUntil Absolute unix milliseconds this automation needs. Omit to use
 	// now + `expiresInSeconds`. The signed expiry is the later of that
 	// horizon and every enabled task's end on this chain.
@@ -1731,6 +1735,9 @@ type SessionPolicyChanges struct {
 	KeptActions    *[]AllowedAction             `json:"keptActions,omitempty"`
 	RemovedActions *[]AllowedAction             `json:"removedActions,omitempty"`
 
+	// NativeGasWei Wei of the signed native cap that is self-funded gas.
+	NativeGasWei *string `json:"nativeGasWei,omitempty"`
+
 	// Summary Approval lines. An expiry change reads
 	// "<task name>: until <Mon D>, was <Mon D>" in UTC when both dates
 	// are in the same year, for example
@@ -1761,6 +1768,9 @@ type SessionPolicyNeed struct {
 	Erc20SpendCaps   *[]Erc20SpendCap   `json:"erc20SpendCaps,omitempty"`
 	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
 	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
+
+	// NativeGasWei Wei of nativeSpendCap that is self-funded gas rather than ETH sent.
+	NativeGasWei *string `json:"nativeGasWei,omitempty"`
 
 	// ValidUntil Absolute unix milliseconds the grant must last through. 0 when the window is unknown.
 	ValidUntil *int64 `json:"validUntil,omitempty"`
