@@ -6,12 +6,17 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
+
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
-	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/types/known/structpb"
 )
+
+const studioNotifyURL = "https://studio.example/api/notify"
 
 func TestStudioNotifyKeepsStructuredSummary(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,13 +94,18 @@ func TestAttachRunSummaryUsesLastSummaryStep(t *testing.T) {
 		"data": map[string]interface{}{"ok": true},
 	})
 	require.NoError(t, err)
-	first := summaryStepValue(t, "first", "one")
-	last := summaryStepValue(t, "last", "two")
+	first := summaryStep(t, studioNotifyURL, "first", "one", true)
+	last := summaryStep(t, studioNotifyURL, "last", "two", true)
+	// Later replies with the same shape are not the summary step.
+	unmarked := summaryStep(t, studioNotifyURL, "unmarked", "no", false)
+	otherHost := summaryStep(t, "https://example.com/api/messages", "other-host", "no", true)
 
 	execution := &avsproto.Execution{Steps: []*avsproto.Execution_Step{
 		{OutputData: &avsproto.Execution_Step_RestApi{RestApi: &avsproto.RestAPINode_Output{Data: plain}}},
-		{OutputData: &avsproto.Execution_Step_RestApi{RestApi: &avsproto.RestAPINode_Output{Data: first}}},
-		{OutputData: &avsproto.Execution_Step_RestApi{RestApi: &avsproto.RestAPINode_Output{Data: last}}},
+		first,
+		last,
+		unmarked,
+		otherHost,
 	}}
 	attachRunSummary(execution)
 	got := execution.GetSummary().AsInterface().(map[string]interface{})
@@ -105,10 +115,51 @@ func TestAttachRunSummaryUsesLastSummaryStep(t *testing.T) {
 	require.Equal(t, "last", execution.GetSummary().AsInterface().(map[string]interface{})["subject"])
 }
 
-func summaryStepValue(t *testing.T, subject, line string) *structpb.Value {
+func TestAttachRunSummaryIgnoresUnmarkedRestPayload(t *testing.T) {
+	execution := &avsproto.Execution{Steps: []*avsproto.Execution_Step{
+		summaryStep(t, studioNotifyURL, "Inbox", "you have mail", false),
+		summaryStep(t, "https://example.com/api/messages", "Report", "sent", true),
+	}}
+	attachRunSummary(execution)
+	require.Nil(t, execution.GetSummary())
+}
+
+func TestExpireWaitAttachesRunSummary(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	executor := &WorkflowExecutor{db: db, logger: testutil.GetLogger(), smartWalletConfig: &config.SmartWalletConfig{}}
+
+	task := &model.Workflow{Task: &avsproto.Task{Id: "summary-expire"}}
+	const execID = "exec-summary-expire"
+	execution := &avsproto.Execution{
+		Id:     execID,
+		Status: avsproto.ExecutionStatus_EXECUTION_STATUS_WAITING,
+		Steps: []*avsproto.Execution_Step{
+			summaryStep(t, studioNotifyURL, "Batch pay ran", "Sent 0.25 USDC", true),
+			summaryStep(t, "https://example.com/v1/messages", "not the report", "hello", false),
+		},
+	}
+	raw, err := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}.Marshal(execution)
+	require.NoError(t, err)
+	require.NoError(t, db.Set(TaskExecutionKey(task, execID), raw))
+
+	out, err := executor.ExpireWait(task, execID)
+	require.NoError(t, err)
+	require.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED, out.Status)
+	require.NotNil(t, out.GetSummary())
+	require.Equal(t, "Batch pay ran", out.GetSummary().AsInterface().(map[string]interface{})["subject"])
+
+	// A second expiry is a no-op and still returns the summary already stored.
+	again, err := executor.ExpireWait(task, execID)
+	require.NoError(t, err)
+	require.Equal(t, "Batch pay ran", again.GetSummary().AsInterface().(map[string]interface{})["subject"])
+}
+
+func summaryStep(t *testing.T, requestURL, subject, line string, summarize bool) *avsproto.Execution_Step {
 	t.Helper()
 	value, err := structpb.NewValue(map[string]interface{}{
 		"status": float64(200),
+		"url":    requestURL,
 		"data": map[string]interface{}{
 			"subject": subject,
 			"body": map[string]interface{}{
@@ -119,7 +170,19 @@ func summaryStepValue(t *testing.T, subject, line string) *structpb.Value {
 		},
 	})
 	require.NoError(t, err)
-	return value
+	step := &avsproto.Execution_Step{
+		OutputData: &avsproto.Execution_Step_RestApi{RestApi: &avsproto.RestAPINode_Output{Data: value}},
+	}
+	if summarize {
+		configValue, cfgErr := structpb.NewValue(map[string]interface{}{
+			"url":     requestURL,
+			"method":  "POST",
+			"options": map[string]interface{}{"summarize": true},
+		})
+		require.NoError(t, cfgErr)
+		step.Config = configValue
+	}
+	return step
 }
 
 func runNotifyStep(t *testing.T, url string, summarize bool) *avsproto.Execution_Step {

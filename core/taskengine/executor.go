@@ -1075,7 +1075,8 @@ func (x *WorkflowExecutor) Advance(task *model.Workflow, executionID string, sig
 // ExpireWait fails a WAITING execution whose wake timed out, writing a terminal
 // (FAILED) record and GC'ing the durable state. Idempotent: a non-WAITING execution
 // just GCs any orphaned state. Mirrors Advance's finalize without running the VM —
-// nothing resumes, the wait simply expires.
+// nothing resumes, the wait simply expires. A summary step that already ran is
+// copied onto the execution, same as a resumed run.
 func (x *WorkflowExecutor) ExpireWait(task *model.Workflow, executionID string) (*avsproto.Execution, error) {
 	raw, err := x.db.GetKey(TaskExecutionKey(task, executionID))
 	if err != nil {
@@ -1102,6 +1103,7 @@ func (x *WorkflowExecutor) ExpireWait(task *model.Workflow, executionID string) 
 	execution.EndAt = time.Now().UnixMilli()
 	execution.ResumeNodeId = ""
 	execution.WaitReason = ""
+	attachRunSummary(execution) // finished run, including a timed-out wait
 	sanitizeExecutionForPersistence(execution)
 
 	mo := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}
