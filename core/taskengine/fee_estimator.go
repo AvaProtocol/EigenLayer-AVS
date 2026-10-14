@@ -457,9 +457,10 @@ func (fe *FeeEstimator) estimateContractWriteGas(ctx context.Context, node *avsp
 		return nil
 	}
 
-	// Same ceiling preflight uses for an installed payable UserOp. A lower
-	// figure under-reports what NativeTokenLimitModule will charge.
-	estimatedGas := big.NewInt(nativePreflightGasUnitsValueSteady)
+	// Display estimate for the deploy page. Native-cap sizing uses the
+	// higher preflight ceilings; those would overstate an ordinary fee,
+	// including on chains that sponsor gas.
+	estimatedGas := big.NewInt(150000)
 	totalCost := new(big.Int).Mul(estimatedGas, gasPrice)
 
 	methodName := "unknown"
@@ -480,8 +481,9 @@ func (fe *FeeEstimator) estimateContractWriteGas(ctx context.Context, node *avsp
 }
 
 func (fe *FeeEstimator) estimateETHTransferGas(ctx context.Context, node *avsproto.TaskNode, runnerAddress common.Address, gasPrice *big.Int) *GasEstimationResult {
-	// Same ceiling preflight uses for an installed ethTransfer UserOp.
-	estimatedGas := big.NewInt(nativePreflightGasUnitsSteady)
+	// Display estimate for a smart-wallet ETH transfer. The native cap
+	// uses the 500k steady ceiling instead of this figure.
+	estimatedGas := big.NewInt(50000)
 	totalCost := new(big.Int).Mul(estimatedGas, gasPrice)
 
 	return &GasEstimationResult{
@@ -510,12 +512,12 @@ func (fe *FeeEstimator) estimateLoopGas(ctx context.Context, node *avsproto.Task
 
 	switch {
 	case loopNode.GetContractWrite() != nil:
-		// One iteration at the MA v2 ceiling. The estimator does not know
-		// the list length, so the displayed fee is not the whole schedule.
-		perIterationGas = nativePreflightGasUnitsValueSteady
+		// One iteration at the display estimate. The estimator does not
+		// know the list length. Cap sizing uses the preflight ceiling.
+		perIterationGas = 150000
 		operationType = "loop_contract_write"
 	case loopNode.GetEthTransfer() != nil:
-		perIterationGas = nativePreflightGasUnitsSteady
+		perIterationGas = 50000
 		operationType = "loop_eth_transfer"
 	default:
 		// Off-chain runner (contract_read, custom_code, rest_api, graphql) — no gas cost

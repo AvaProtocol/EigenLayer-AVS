@@ -1945,6 +1945,14 @@ components:
           maxItems: 5
           items: { $ref: '#/components/schemas/EthereumAddress' }
         nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
+        nativeGasWei:
+          type: string
+          pattern: '^[0-9]+$'
+          description: |
+            Wei of `nativeSpendCap` that is self-funded gas rather than ETH
+            this workflow sends. Steady UserOps only. Prepare adds one
+            install for the wallet when the grant is not yet applied.
+            Omitted when this workflow's gas was not priced.
         validUntil:
           type: integer
           format: int64
@@ -1972,6 +1980,14 @@ components:
           maxItems: 5
           items: { $ref: '#/components/schemas/EthereumAddress' }
         nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
+        nativeGasWei:
+          type: string
+          pattern: '^[0-9]+$'
+          description: |
+            Wei of this addition's `nativeSpendCap` that is self-funded gas
+            rather than ETH sent. Already included in that cap. Prepare does
+            not add it again. It lets the approval screen split payments
+            from gas. Omit when the cap is value only.
         allowContractRecipient:
           type: boolean
         validUntil:
@@ -2025,6 +2041,16 @@ components:
         What the approval screen shows. `summary` is the copy. The structured
         fields are the same facts.
       properties:
+        nativeGasWei:
+          type: string
+          pattern: '^[0-9]+$'
+          description: |
+            Wei of the signed native cap that is self-funded gas: enabled
+            automations' steady UserOps, one install when the grant is not
+            yet applied, plus `nativeGasWei` from the addition. Omitted when
+            this prepare did not price gas. The rest of the signed native
+            cap is ETH the automations send. This headroom can also be sent
+            as value to the allowed recipients.
         summary:
           type: array
           items: { type: string }

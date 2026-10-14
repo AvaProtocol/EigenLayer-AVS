@@ -185,6 +185,12 @@ type WorkflowNeed struct {
 	// AmountImprecise is a JSON number that was not an exact integer.
 	// The error tells the caller to send a decimal string.
 	AmountImprecise bool
+	// NativeGasWei is self-funded gas folded into NativeSpendCap,
+	// excluding the ETH this workflow sends.
+	NativeGasWei *big.Int
+	// priceFee prices gas after observed spend is copied onto the
+	// simulate verdict. Nil leaves the cap as the value sent.
+	priceFee *big.Int
 }
 
 // PolicyAddition is the automation being set up. Cap amounts are totals
@@ -195,6 +201,9 @@ type PolicyAddition struct {
 	NativeRecipients       []*common.Address
 	NativeSpendCap         *model.NativeSpendCap
 	AllowContractRecipient bool
+	// NativeGasWei is the portion of NativeSpendCap that is self-funded
+	// gas rather than ETH sent. The cap total already includes it.
+	NativeGasWei string
 	// ValidUntilMs is this automation's horizon. Zero means the caller
 	// supplies expiresIn instead.
 	ValidUntilMs int64
@@ -225,6 +234,10 @@ type PolicyChanges struct {
 	RemovedActions []model.AllowedAction
 	CapChanges     []CapChange
 	ExpiryChanges  []ExpiryChange
+	// NativeGasWei is self-funded gas inside the signed native cap:
+	// enabled tasks' steady gas, one install when the grant is not
+	// applied, and the addition's declared gas portion.
+	NativeGasWei string
 }
 
 // SessionAuthorization is the opt-in simulate verdict.
@@ -673,17 +686,25 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 	}
 
 	fee := applyMergeOptions(opts).fee(chainID)
-	gasAdded, gasNotes, gasErr := priceWalletNativeGas(taskNeeds, fee, native.Sign() > 0)
+	declaredGas, declaredErr := additionGasWei(addition)
+	if declaredErr != nil {
+		return SessionPermissions{}, PolicyChanges{}, declaredErr
+	}
+	gasAdded, gasNotes, gasErr := priceWalletNativeGas(taskNeeds, fee, native.Sign() > 0, true)
 	if gasErr != nil {
 		return SessionPermissions{}, PolicyChanges{}, gasErr
 	}
 	native.Add(native, gasAdded)
+	extra := foldMissingInstall(native, taskNeeds, fee, false, native.Sign() > 0)
+	gasNotes = noteMissingInstall(gasNotes, extra, fee)
+	gasAdded.Add(gasAdded, extra)
 	if native.Cmp(maxUint256) > 0 {
 		return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: self-funded gas exceeds uint256", ErrSessionPolicyUnsized)
 	}
 	if gasAdded.Sign() > 0 {
 		nativeSet = true
 	}
+	reportedGas := new(big.Int).Add(new(big.Int).Set(gasAdded), declaredGas)
 
 	mergedActions := actionsFromSet(actions)
 	var spendCaps []model.ERC20SpendCap
@@ -752,7 +773,7 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 	}
 	perms.ValidUntilMs = latest
 
-	changes := appendGasNotes(diffGrant(current, nil, perms, taskNeeds, latest), gasNotes)
+	changes := withNativeGas(appendGasNotes(diffGrant(current, nil, perms, taskNeeds, latest), gasNotes), reportedGas)
 	return perms, changes, nil
 }
 
@@ -912,6 +933,22 @@ func ceilingGrantCovers(policy *model.SessionPolicy, need *WorkflowNeed) bool {
 	return sawSpend
 }
 
+// priceDraftNativeGas folds steady self-funded gas into a simulate need
+// after observed spend is applied. The draft does not include the wallet's
+// one install; prepare adds that. A runner that already has a native cap
+// is priced even when this draft sends no ETH.
+func priceDraftNativeGas(need *WorkflowNeed, policy *model.SessionPolicy) error {
+	if need == nil || need.priceFee == nil || need.priceFee.Sign() <= 0 || need.GasPriced {
+		return nil
+	}
+	var policyCap *model.NativeSpendCap
+	if policy != nil {
+		policyCap = policy.NativeSpendCap
+	}
+	_, _, err := priceWalletNativeGas([]*WorkflowNeed{need}, need.priceFee, positiveNativeAmount(policyCap), false)
+	return err
+}
+
 // BuildAuthorization picks one simulate status. Simulation-resolved misses
 // win over the static walk when the report saw a write. Required is set
 // whenever the workflow moves funds.
@@ -931,6 +968,13 @@ func BuildAuthorization(policy *model.SessionPolicy, need *WorkflowNeed, report 
 	filled := fillObserved(need, saw, planned, tokenSpend, nativeSpend, sched)
 	if filled == nil {
 		filled = &WorkflowNeed{HasFundMove: true}
+	}
+	if priceErr := priceDraftNativeGas(filled, policy); priceErr != nil {
+		auth := &SessionAuthorization{Status: AuthCapTooLow, Detail: priceErr.Error(), Required: filled}
+		if policy != nil {
+			auth.PolicyID = policy.ID
+		}
+		return auth
 	}
 	out := &SessionAuthorization{Required: filled}
 	if policy != nil {
@@ -1285,14 +1329,13 @@ func walkFundMoves(nodes []*avsproto.TaskNode, settings map[string]any, trigger 
 	}
 }
 
-// visitContractWrite marks one UserOp on the node's first call. Later
-// method calls and the payable value ride that same op.
+// visitContractWrite marks one UserOp per method call. Deployed workflows
+// submit each call on its own. Run-node batches them, and the grant is
+// sized for the deployed path. A node-level value rides those calls.
 func visitContractWrite(cw *avsproto.ContractWriteNode, scope fundScope, loopUnknown bool, loopMult int, visit func(fundSite)) {
-	first := true
 	collectContractWrite(cw, scope, loopUnknown, loopMult, func(site fundSite) {
-		if first && site.kind == fundCall {
+		if site.kind == fundCall {
 			site.userOp = 1
-			first = false
 		}
 		visit(site)
 	})
@@ -2340,8 +2383,10 @@ func classifyRunnerCoverage(in SessionPolicyInput, tasks []*avsproto.Task, now t
 		}
 	}
 	// One price for the whole wallet. Per task would count an install twice
-	// and refuse a grant that merged with a single install.
-	if _, _, priceErr := priceWalletNativeGas(priced, applyMergeOptions(opts).fee(in.ChainID), positiveNativeAmount(in.Permissions.NativeSpendCap)); priceErr != nil {
+	// and refuse a grant that merged with a single install. An applied
+	// grant already paid that install.
+	cfg := applyMergeOptions(opts)
+	if _, _, priceErr := priceWalletNativeGas(priced, cfg.fee(in.ChainID), positiveNativeAmount(in.Permissions.NativeSpendCap), !cfg.applied); priceErr != nil {
 		return nil, priceErr
 	}
 	var blocking []string
@@ -2676,14 +2721,13 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 		chainID = n.defaultChainID()
 	}
 	needs := DeriveWorkflowNeeds(task.Task, settings, sched, chainID)
+	// Price after BuildAuthorization has applied observed spend and chosen
+	// the policy. The fee rides the need into that call.
 	for chain, need := range needs {
-		if need == nil || !need.HasFundMove || n == nil {
+		if need == nil || n == nil {
 			continue
 		}
-		if _, _, err := priceWalletNativeGas([]*WorkflowNeed{need}, n.selfFundedGrantFee(chain), false); err != nil {
-			auth.Result = &SessionAuthorization{Status: AuthCapTooLow, Detail: err.Error(), Required: need}
-			return
-		}
+		need.priceFee = n.selfFundedGrantFee(chain)
 	}
 	var report *SessionGrantReport
 	if vm != nil {
@@ -2805,11 +2849,6 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 	if len(mav2) == 0 {
 		return noop, nil
 	}
-	for i := range mav2 {
-		if _, _, err := priceWalletNativeGas([]*WorkflowNeed{mav2[i].need}, n.selfFundedGrantFee(mav2[i].chain), false); err != nil {
-			return noop, err
-		}
-	}
 
 	// Shards are shared. Two chains can hash to one mutex, and locking
 	// that mutex twice on this goroutine deadlocks. Distinct shards are
@@ -2853,6 +2892,19 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 		if err != nil {
 			unlock()
 			return noop, err
+		}
+		// Price after the grant is known. An ERC-20 workflow on a runner
+		// that already has a native cap still burns that cap. An applied
+		// grant does not pay the install premium again.
+		applied := policy != nil && policy.Grant.Applied()
+		var policyCap *model.NativeSpendCap
+		if policy != nil {
+			policyCap = policy.NativeSpendCap
+		}
+		force := positiveNativeAmount(policyCap) || needsInstallNative([]*WorkflowNeed{item.need})
+		if _, _, priceErr := priceWalletNativeGas([]*WorkflowNeed{item.need}, n.selfFundedGrantFee(item.chain), force, !applied); priceErr != nil {
+			unlock()
+			return noop, priceErr
 		}
 		// Expired() is false for a nil policy and for ValidUntil == 0.
 		// Those stay on CoverageRefusal, which is also what submit and

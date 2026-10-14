@@ -290,14 +290,24 @@ func mergeCarriedSkillGrant(current *model.SessionPolicy, remainder GrantRemaind
 		(addNative != nil && addNative.Sign() > 0) ||
 		(remainder.Native != nil && remainder.Native.Sign() > 0) ||
 		positiveNativeAmount(currentCap)
-	gasAdded, gasNotes, gasErr := priceWalletNativeGas(fundNeeds, applyMergeOptions(opts).fee(chainID), installsNative)
+	declaredGas, declaredErr := additionGasWei(addition)
+	if declaredErr != nil {
+		return SessionPermissions{}, PolicyChanges{}, declaredErr
+	}
+	applied := current != nil && current.Grant.Applied()
+	fee := applyMergeOptions(opts).fee(chainID)
+	gasAdded, gasNotes, gasErr := priceWalletNativeGas(fundNeeds, fee, installsNative, !applied)
 	if gasErr != nil {
 		return SessionPermissions{}, PolicyChanges{}, gasErr
 	}
 	needNative.Add(needNative, gasAdded)
+	extra := foldMissingInstall(needNative, fundNeeds, fee, applied, installsNative)
+	gasNotes = noteMissingInstall(gasNotes, extra, fee)
+	gasAdded.Add(gasAdded, extra)
 	if needNative.Cmp(maxUint256) > 0 {
 		return SessionPermissions{}, PolicyChanges{}, fmt.Errorf("%w: self-funded gas exceeds uint256", ErrSessionPolicyUnsized)
 	}
+	reportedGas := new(big.Int).Add(new(big.Int).Set(gasAdded), declaredGas)
 
 	remNative := big.NewInt(0)
 	if remainder.Native != nil {
@@ -374,7 +384,7 @@ func mergeCarriedSkillGrant(current *model.SessionPolicy, remainder GrantRemaind
 	perms.ValidUntilMs = latest
 
 	remCopy := remainder.clone()
-	changes := appendGasNotes(diffGrant(current, &remCopy, perms, fundNeeds, latest), gasNotes)
+	changes := withNativeGas(appendGasNotes(diffGrant(current, &remCopy, perms, fundNeeds, latest), gasNotes), reportedGas)
 	return perms, changes, nil
 }
 
@@ -733,7 +743,8 @@ func classifyCarriedCoverage(current *model.SessionPolicy, rem GrantRemainder, i
 		currentCap = current.NativeSpendCap
 	}
 	force := positiveNativeAmount(in.Permissions.NativeSpendCap) || positiveNativeAmount(currentCap) || (rem.Native != nil && rem.Native.Sign() > 0)
-	if _, _, priceErr := priceWalletNativeGas(priced, applyMergeOptions(opts).fee(in.ChainID), force); priceErr != nil {
+	applied := current != nil && current.Grant.Applied()
+	if _, _, priceErr := priceWalletNativeGas(priced, applyMergeOptions(opts).fee(in.ChainID), force, !applied); priceErr != nil {
 		return nil, priceErr
 	}
 	var blocking []string

@@ -3,6 +3,7 @@ package taskengine
 import (
 	"fmt"
 	"math/big"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 
@@ -17,8 +18,9 @@ import (
 //
 // Units match nativePreflightGasUnits*: one install ceiling for the grant's
 // first UserOp, then the steady ceiling for every other op. An ethTransfer
-// loop counts one UserOp per recipient per run. A contract write counts one
-// UserOp per run (a batch of method calls is still one op).
+// loop counts one UserOp per recipient per run. A deployed contract write
+// counts one UserOp per method call. Run-node batches those calls; the
+// grant is sized for the deployed path.
 
 const (
 	// nativeGrantFeeMainnetWei is 50 gwei. Ordinary mainnet conditions sit
@@ -57,7 +59,8 @@ func NativeGrantMaxFee(chainID int64) *big.Int {
 type mergeOption func(*mergeConfig)
 
 type mergeConfig struct {
-	fees map[int64]*big.Int
+	fees    map[int64]*big.Int
+	applied bool
 }
 
 // WithSelfFundedGrantFee sizes native gas into the cap for chainID.
@@ -84,11 +87,43 @@ func applyMergeOptions(opts []mergeOption) mergeConfig {
 	return cfg
 }
 
+// WithGrantApplied says the native module is already installed, so this
+// merge does not add another first-op premium.
+func WithGrantApplied(applied bool) mergeOption {
+	return func(cfg *mergeConfig) {
+		if cfg != nil && applied {
+			cfg.applied = true
+		}
+	}
+}
+
 func (cfg mergeConfig) fee(chainID int64) *big.Int {
 	if cfg.fees == nil {
 		return nil
 	}
 	return cfg.fees[chainID]
+}
+
+// nativeInstallPremium is the wei of one first UserOp above its steady
+// ceiling. The send and payable premiums are the same 1.5M units.
+func nativeInstallPremium(fee *big.Int) *big.Int {
+	if fee == nil || fee.Sign() <= 0 {
+		return big.NewInt(0)
+	}
+	units := int64(nativePreflightGasUnitsFirstOp - nativePreflightGasUnitsSteady)
+	return new(big.Int).Mul(big.NewInt(units), fee)
+}
+
+func formatGrantFee(fee *big.Int) string {
+	if fee == nil {
+		return "0"
+	}
+	gwei := big.NewInt(1_000_000_000)
+	quo, rem := new(big.Int).QuoRem(new(big.Int).Set(fee), gwei, new(big.Int))
+	if rem.Sign() == 0 {
+		return quo.String() + " gwei"
+	}
+	return fee.String() + " wei"
 }
 
 // selfFundedGasWei is the wei NativeTokenLimitModule will charge for these
@@ -130,10 +165,12 @@ func positiveNativeAmount(cap *model.NativeSpendCap) bool {
 // priceWalletNativeGas adds self-funded gas onto needs that share one
 // wallet grant. force is set when the addition or the current grant is
 // what installs the native module, so a sibling ERC-20 automation's gas
-// is included too. A nil fee does nothing. One install premium is kept
-// across the set. Needs are mutated. added is the wei of gas newly folded
-// into their caps, which the caller adds to a total it already summed.
-func priceWalletNativeGas(needs []*WorkflowNeed, fee *big.Int, force bool) (added *big.Int, notes []string, err error) {
+// is included too. A nil fee does nothing. includeInstall keeps one
+// first-op premium across the set; false prices steady ops only, which
+// is what an already-applied grant and a simulate draft use. Needs are
+// mutated. added is the wei of gas newly folded into their caps, which
+// the caller adds to a total it already summed.
+func priceWalletNativeGas(needs []*WorkflowNeed, fee *big.Int, force bool, includeInstall bool) (added *big.Int, notes []string, err error) {
 	added = big.NewInt(0)
 	if fee == nil || fee.Sign() <= 0 {
 		return added, nil, nil
@@ -153,7 +190,7 @@ func priceWalletNativeGas(needs []*WorkflowNeed, fee *big.Int, force bool) (adde
 			need.GasPriced = true
 			continue
 		}
-		total, premium := selfFundedGasWei(need.NativeSendOps, need.NativeValueOps, fee, true)
+		total, premium := selfFundedGasWei(need.NativeSendOps, need.NativeValueOps, fee, includeInstall)
 		if total.Sign() <= 0 {
 			need.GasPriced = true
 			continue
@@ -161,6 +198,7 @@ func priceWalletNativeGas(needs []*WorkflowNeed, fee *big.Int, force bool) (adde
 		if !addNative(need, total) {
 			return nil, nil, fmt.Errorf("%w: self-funded gas for %s exceeds uint256", ErrSessionPolicyUnsized, displayName(need.Name))
 		}
+		addGasAccount(need, total)
 		need.InstallPremium = premium
 		need.GasPriced = true
 		added.Add(added, total)
@@ -182,13 +220,111 @@ func priceWalletNativeGas(needs []*WorkflowNeed, fee *big.Int, force bool) (adde
 		if !subtractNative(need, need.InstallPremium) {
 			return nil, nil, fmt.Errorf("%w: self-funded gas for %s", ErrSessionPolicyUnsized, displayName(need.Name))
 		}
+		subGasAccount(need, need.InstallPremium)
 		added.Sub(added, need.InstallPremium)
 		need.InstallPremium = big.NewInt(0)
 	}
 	if added.Sign() > 0 {
-		notes = append([]string{fmt.Sprintf("Native cap includes self-funded gas (%s wei per gas unit) and one install.", fee.String())}, notes...)
+		line := fmt.Sprintf("Native cap includes self-funded gas (%s per gas unit).", formatGrantFee(fee))
+		if keptInstallPremium(priced) {
+			line = fmt.Sprintf("Native cap includes self-funded gas (%s per gas unit) and one install.", formatGrantFee(fee))
+		}
+		notes = append([]string{line}, notes...)
 	}
 	return added, notes, nil
+}
+
+// keptInstallPremium is true when this price kept one first-op premium.
+func keptInstallPremium(needs []*WorkflowNeed) bool {
+	for _, need := range needs {
+		if need != nil && need.InstallPremium != nil && need.InstallPremium.Sign() > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// noteMissingInstall records the install foldMissingInstall added when no
+// priced task already carried that premium.
+func noteMissingInstall(notes []string, extra *big.Int, fee *big.Int) []string {
+	if extra == nil || extra.Sign() <= 0 {
+		return notes
+	}
+	for _, line := range notes {
+		if strings.Contains(line, "one install") {
+			return notes
+		}
+	}
+	return append(notes, fmt.Sprintf("Native cap includes self-funded gas (%s per gas unit) and one install.", formatGrantFee(fee)))
+}
+
+// foldMissingInstall adds one first-op premium when no priced task already
+// carries it. A simulate draft's cap is steady gas plus value, so the
+// wallet's one install is added here, including when the new automation
+// is not an enabled task yet. An applied grant pays no second install.
+func foldMissingInstall(total *big.Int, needs []*WorkflowNeed, fee *big.Int, applied, installing bool) *big.Int {
+	extra := big.NewInt(0)
+	if applied || !installing || fee == nil || fee.Sign() <= 0 || total == nil {
+		return extra
+	}
+	for _, need := range needs {
+		if need != nil && need.InstallPremium != nil && need.InstallPremium.Sign() > 0 {
+			return extra
+		}
+	}
+	prem := nativeInstallPremium(fee)
+	if prem.Sign() <= 0 {
+		return extra
+	}
+	total.Add(total, prem)
+	return prem
+}
+
+func addGasAccount(need *WorkflowNeed, amt *big.Int) {
+	if need == nil || amt == nil || amt.Sign() == 0 {
+		return
+	}
+	if need.NativeGasWei == nil {
+		need.NativeGasWei = big.NewInt(0)
+	}
+	need.NativeGasWei.Add(need.NativeGasWei, amt)
+}
+
+func subGasAccount(need *WorkflowNeed, amt *big.Int) {
+	if need == nil || need.NativeGasWei == nil || amt == nil {
+		return
+	}
+	need.NativeGasWei.Sub(need.NativeGasWei, amt)
+	if need.NativeGasWei.Sign() <= 0 {
+		need.NativeGasWei = nil
+	}
+}
+
+// additionGasWei is the gas portion of an addition's native cap. It is
+// already inside that cap, so callers add it only to the reported split.
+func additionGasWei(addition PolicyAddition) (*big.Int, error) {
+	if addition.NativeGasWei == "" {
+		return big.NewInt(0), nil
+	}
+	amt, err := parseCapAmount(addition.NativeGasWei)
+	if err != nil {
+		return nil, fmt.Errorf("%w: new automation native gas: %v", ErrSessionPolicyUnsized, err)
+	}
+	if addition.NativeSpendCap != nil {
+		cap, capErr := parseCapAmount(addition.NativeSpendCap.Amount)
+		if capErr == nil && amt.Cmp(cap) > 0 {
+			return nil, fmt.Errorf("%w: nativeGasWei exceeds nativeSpendCap", ErrSessionPolicyUnsized)
+		}
+	}
+	return amt, nil
+}
+
+func withNativeGas(changes PolicyChanges, gas *big.Int) PolicyChanges {
+	if gas == nil || gas.Sign() <= 0 {
+		return changes
+	}
+	changes.NativeGasWei = gas.String()
+	return changes
 }
 
 func needsInstallNative(needs []*WorkflowNeed) bool {

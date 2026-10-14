@@ -585,7 +585,7 @@ func (n *Engine) SubmitSessionPolicy(
 			dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID, feeOpt)
 		}
 	} else {
-		dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID, n.selfFundedGrantFeeOption(in.ChainID))
+		dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID, n.selfFundedGrantFeeOption(in.ChainID), WithGrantApplied(current != nil && current.Grant.Applied()))
 	}
 	if err != nil {
 		return nil, nil, err
