@@ -26,7 +26,7 @@ type ServerInterface interface {
 	// Retrieve an execution (full payload with steps)
 	// (GET /executions/{id})
 	GetExecution(ctx echo.Context, id Ulid, params GetExecutionParams) error
-	// Get execution status (lightweight, no steps)
+	// Get execution status (lightweight, no steps; includes the run summary once the run has ended)
 	// (GET /executions/{id}:getStatus)
 	GetExecutionStatus(ctx echo.Context, id Ulid, params GetExecutionStatusParams) error
 	// Deliver an approval/external signal to a waiting execution
@@ -2991,7 +2991,7 @@ type StrictServerInterface interface {
 	// Retrieve an execution (full payload with steps)
 	// (GET /executions/{id})
 	GetExecution(ctx context.Context, request GetExecutionRequestObject) (GetExecutionResponseObject, error)
-	// Get execution status (lightweight, no steps)
+	// Get execution status (lightweight, no steps; includes the run summary once the run has ended)
 	// (GET /executions/{id}:getStatus)
 	GetExecutionStatus(ctx context.Context, request GetExecutionStatusRequestObject) (GetExecutionStatusResponseObject, error)
 	// Deliver an approval/external signal to a waiting execution

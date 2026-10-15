@@ -139,7 +139,7 @@ func (p SessionPermissions) validate(withChain bool) error {
 			return fmt.Errorf("nativeRecipients require a nativeSpendCap")
 		}
 		if len(p.NativeRecipients) > MaxNativeRecipients {
-			return fmt.Errorf("at most %d native recipients", MaxNativeRecipients)
+			return fmt.Errorf("%s: at most %d native recipients; finished automations keep their addresses until the grant is revoked", SessionPolicyTooManyNativeRecipientsCode, MaxNativeRecipients)
 		}
 		seenRecipients := make(map[common.Address]struct{}, len(p.NativeRecipients))
 		for i, rec := range p.NativeRecipients {
@@ -171,9 +171,9 @@ func (p SessionPermissions) validate(withChain bool) error {
 				}
 				if len(code) != 0 {
 					if config.IsSMA7702Designation(code, config.SMA7702Delegate()) {
-						return fmt.Errorf("native recipient is a 7702-delegated EOA; set allowContractRecipient (any function on this address, ERC-20 uncapped)")
+						return fmt.Errorf("%s: native recipient is a 7702-delegated EOA; set allowContractRecipient (any function on this address, ERC-20 uncapped)", SessionPolicyRecipientNotEOACode)
 					}
-					return fmt.Errorf("native recipient is a contract; send via contractWrite, or set allowContractRecipient (any function on this address, ERC-20 uncapped)")
+					return fmt.Errorf("%s: native recipient is a contract; send via contractWrite, or set allowContractRecipient (any function on this address, ERC-20 uncapped)", SessionPolicyRecipientNotEOACode)
 				}
 			}
 		}

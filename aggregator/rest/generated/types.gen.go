@@ -839,9 +839,15 @@ type Execution struct {
 	// can show "awaiting approval"; `success` is full success; `failed` is
 	// logical failure (e.g., a node returned an error, or a wait timed out);
 	// `error` is a system / infrastructure failure (e.g., RPC unreachable).
-	Status   ExecutionStatus  `json:"status"`
-	Steps    *[]ExecutionStep `json:"steps,omitempty"`
-	ValueFee *ValueFee        `json:"valueFee,omitempty"`
+	Status ExecutionStatus  `json:"status"`
+	Steps  *[]ExecutionStep `json:"steps,omitempty"`
+
+	// Summary Studio's summary-step reply, present once the run has ended.
+	// `subject` is the report title. `body` is the structured report
+	// (summary line, executions, errors, notice, and step counts).
+	// Absent on older runs and while the run is still in progress.
+	Summary  *map[string]interface{} `json:"summary,omitempty"`
+	ValueFee *ValueFee               `json:"valueFee,omitempty"`
 
 	// WorkflowId ULID identifier (26-char Crockford base32).
 	WorkflowId Ulid `json:"workflowId"`
@@ -877,7 +883,8 @@ type ExecutionStats struct {
 // `error` is a system / infrastructure failure (e.g., RPC unreachable).
 type ExecutionStatus string
 
-// ExecutionStatusSummary Lightweight execution status (no steps payload).
+// ExecutionStatusSummary Lightweight execution status (no steps payload). Includes the run
+// summary once the run has ended.
 type ExecutionStatusSummary struct {
 	EndAt *int64  `json:"endAt,omitempty"`
 	Error *string `json:"error,omitempty"`
@@ -894,6 +901,9 @@ type ExecutionStatusSummary struct {
 	// logical failure (e.g., a node returned an error, or a wait timed out);
 	// `error` is a system / infrastructure failure (e.g., RPC unreachable).
 	Status ExecutionStatus `json:"status"`
+
+	// Summary Same object as `Execution.summary`. Present once the run has ended.
+	Summary *map[string]interface{} `json:"summary,omitempty"`
 
 	// WorkflowId ULID identifier (26-char Crockford base32).
 	WorkflowId *Ulid `json:"workflowId,omitempty"`
@@ -1220,9 +1230,11 @@ type PageInfo struct {
 type PreparePolicyRequest struct {
 	// Add What the automation being set up needs. Merged, under the runner
 	// lock, with what that runner's enabled tasks on this chain still need.
-	// Cap amounts are totals for this automation. They are not added to the
-	// previous grant's totals, because a replacement grant starts its caps
-	// from zero.
+	// Cap amounts are totals for this automation. When the runner has a
+	// usable grant, each cap is the greater of what remains on that grant
+	// and what enabled automations still need, plus this addition. With no
+	// usable grant, caps start at zero and this addition is added to what
+	// enabled automations still need.
 	Add        *SessionPolicyAddition `json:"add,omitempty"`
 	AgentLabel string                 `json:"agentLabel"`
 
@@ -1680,6 +1692,10 @@ type SessionPolicyAddition struct {
 	NativeRecipients       *[]EthereumAddress `json:"nativeRecipients,omitempty"`
 	NativeSpendCap         *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
 
+	// NativeGasWei Wei of this addition's nativeSpendCap that is self-funded
+	// gas rather than ETH sent. Already included in that cap.
+	NativeGasWei *string `json:"nativeGasWei,omitempty"`
+
 	// ValidUntil Absolute unix milliseconds this automation needs. Omit to use
 	// now + `expiresInSeconds`. The signed expiry is the later of that
 	// horizon and every enabled task's end on this chain.
@@ -1719,6 +1735,9 @@ type SessionPolicyChanges struct {
 	KeptActions    *[]AllowedAction             `json:"keptActions,omitempty"`
 	RemovedActions *[]AllowedAction             `json:"removedActions,omitempty"`
 
+	// NativeGasWei Wei of the signed native cap that is self-funded gas.
+	NativeGasWei *string `json:"nativeGasWei,omitempty"`
+
 	// Summary Approval lines. An expiry change reads
 	// "<task name>: until <Mon D>, was <Mon D>" in UTC when both dates
 	// are in the same year, for example
@@ -1749,6 +1768,9 @@ type SessionPolicyNeed struct {
 	Erc20SpendCaps   *[]Erc20SpendCap   `json:"erc20SpendCaps,omitempty"`
 	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
 	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
+
+	// NativeGasWei Wei of nativeSpendCap that is self-funded gas rather than ETH sent.
+	NativeGasWei *string `json:"nativeGasWei,omitempty"`
 
 	// ValidUntil Absolute unix milliseconds the grant must last through. 0 when the window is unknown.
 	ValidUntil *int64 `json:"validUntil,omitempty"`

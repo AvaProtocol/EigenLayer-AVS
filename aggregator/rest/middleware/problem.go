@@ -37,6 +37,7 @@ type ProblemNeed struct {
 	Erc20SpendCaps   []ProblemCap      `json:"erc20SpendCaps,omitempty"`
 	NativeRecipients []string          `json:"nativeRecipients,omitempty"`
 	NativeSpendCap   *ProblemNativeCap `json:"nativeSpendCap,omitempty"`
+	NativeGasWei     string            `json:"nativeGasWei,omitempty"`
 	ValidUntil       *int64            `json:"validUntil,omitempty"`
 }
 

@@ -141,6 +141,16 @@ func TestPreflightNativePermission(t *testing.T) {
 			t.Fatalf("got %q", msg)
 		}
 	})
+	t.Run("applied grant does not re-check code", func(t *testing.T) {
+		applied := *policy
+		applied.Grant = &model.SessionGrantAuthorization{AppliedAt: 1}
+		msg := PreflightNativePermission(&applied, NativeIntent{
+			Recipient: alice, Amount: big.NewInt(1), Kind: NativeSend, Sponsored: true,
+		}, stubCodeAndFee{code: []byte{0x60}, fee: twoGwei})
+		if msg != "" {
+			t.Fatalf("an applied grant must leave a later contract code alone, got %q", msg)
+		}
+	})
 	t.Run("payable write without native cap passes", func(t *testing.T) {
 		uniswap := &model.SessionPolicy{ID: "01uni"}
 		msg := PreflightNativePermission(uniswap, NativeIntent{
