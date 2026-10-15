@@ -19,11 +19,20 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
 )
 
-// Token lifetime mirrors the legacy GetKey gRPC flow — 48 hours, long
-// enough for SDK callers that mint a token on app launch and short
-// enough that a leaked token expires before it can be silently reused
-// for weeks.
+// authTokenExpirationDuration is the longest a wallet sign-in may last:
+// 48 hours, long enough for SDK callers that mint a token on app launch
+// and short enough that a leaked token expires before it can be silently
+// reused for weeks. The token expires at the signed message's Expire At,
+// so a message that expires later is refused, not clamped. The message
+// stays exchangeable until its own Expire At, so a clamp would let one
+// signature mint a fresh token for as long as the message named; refusing
+// it bounds what one signature unlocks to this window.
 const authTokenExpirationDuration = 48 * time.Hour
+
+// authExpiryClockSkew tolerates a client clock that runs ahead of ours, so
+// a message set to expire exactly 48 hours from the client's now is not
+// refused while that clock is up to 5 minutes fast.
+const authExpiryClockSkew = 5 * time.Minute
 
 // authMessageRequired is the minimum number of lines we need to parse a
 // signed auth message. The canonical template has eight lines; anything
@@ -90,12 +99,24 @@ func (s *Server) AuthExchange(ctx echo.Context) error {
 			Detail: err.Error(),
 		}
 	}
-	if expireAt.Before(time.Now()) {
+	now := time.Now()
+	if expireAt.Before(now) {
 		return &restmw.HTTPError{
 			Status: http.StatusBadRequest,
 			Code:   "AUTH_EXPIRED_MESSAGE",
 			Title:  "Auth message expired",
 			Detail: "The signed message has already passed its Expire At timestamp; sign a fresh one.",
+		}
+	}
+	if expireAt.After(now.Add(authTokenExpirationDuration + authExpiryClockSkew)) {
+		return &restmw.HTTPError{
+			Status: http.StatusBadRequest,
+			Code:   "AUTH_EXPIRY_TOO_FAR",
+			Title:  "Auth message expires too far ahead",
+			Detail: fmt.Sprintf(
+				"Expire At may be at most %g hours from now; sign a message that expires sooner.",
+				authTokenExpirationDuration.Hours(),
+			),
 		}
 	}
 

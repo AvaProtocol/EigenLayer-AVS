@@ -83,7 +83,11 @@ func ProtoToOpenAPIExecution(in *avsproto.Execution, workflowID string) (generat
 		out.ValueFee = &f
 	}
 
-	out.Summary = RunSummaryMap(in.GetSummary())
+	summary, err := RunSummary(in.GetSummary())
+	if err != nil {
+		return out, fmt.Errorf("summary: %w", err)
+	}
+	out.Summary = summary
 
 	return out, nil
 }
@@ -127,8 +131,8 @@ func ProtoToOpenAPITriggerWorkflow(in *avsproto.TriggerTaskResp) (generated.Trig
 // status surface stays consistent. NOTE: the GetExecutionStatus handler builds
 // this shape from ExecutionStatusResp (status plus summary), not a full
 // Execution, so it does not call this helper. Both copy summary through
-// RunSummaryMap.
-func ProtoExecutionToOpenAPISummary(in *avsproto.Execution, workflowID string) generated.ExecutionStatusSummary {
+// RunSummary.
+func ProtoExecutionToOpenAPISummary(in *avsproto.Execution, workflowID string) (generated.ExecutionStatusSummary, error) {
 	out := generated.ExecutionStatusSummary{
 		Id:     generated.Ulid(in.GetId()),
 		Status: generated.ExecutionStatus(ExecutionStatusProtoToWire(in.GetStatus())),
@@ -146,21 +150,38 @@ func ProtoExecutionToOpenAPISummary(in *avsproto.Execution, workflowID string) g
 		wid := generated.Ulid(workflowID)
 		out.WorkflowId = &wid
 	}
-	out.Summary = RunSummaryMap(in.GetSummary())
-	return out
+	summary, err := RunSummary(in.GetSummary())
+	if err != nil {
+		return out, fmt.Errorf("summary: %w", err)
+	}
+	out.Summary = summary
+	return out, nil
 }
 
-// RunSummaryMap lifts Execution.summary into the OpenAPI free-form object.
+// RunSummary lifts Execution.summary into the OpenAPI object.
 // Nil when the run has not ended, or when the stored value is not an object.
-func RunSummaryMap(v *structpb.Value) *map[string]interface{} {
+// subject and body are named fields. Any other key stays on the object.
+// A subject that is not a string, or a body that is not an object, is an
+// error. The engine's run-summary check keeps both in shape, so the error
+// means a writer skipped that check. Callers decide whether to fail the
+// response or log and omit the field.
+func RunSummary(v *structpb.Value) (*generated.ExecutionSummary, error) {
 	if v == nil {
-		return nil
+		return nil, nil
 	}
 	m, ok := v.AsInterface().(map[string]interface{})
 	if !ok || len(m) == 0 {
-		return nil
+		return nil, nil
 	}
-	return &m
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	var out generated.ExecutionSummary
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // protoExecutionStepToOpenAPI converts a single step. The step's per-type

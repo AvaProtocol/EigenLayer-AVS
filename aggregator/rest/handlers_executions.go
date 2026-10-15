@@ -167,9 +167,16 @@ func (s *Server) GetExecutionStatus(ctx echo.Context, id generated.Ulid, params 
 	// Execution, which a polling caller can fetch on the terminal state
 	// via GetExecution.
 	out := generated.ExecutionStatusSummary{
-		Id:      id,
-		Status:  generated.ExecutionStatus(mapping.ExecutionStatusProtoToWire(statusResp.GetStatus())),
-		Summary: mapping.RunSummaryMap(statusResp.GetSummary()),
+		Id:     id,
+		Status: generated.ExecutionStatus(mapping.ExecutionStatusProtoToWire(statusResp.GetStatus())),
+	}
+	// A summary that does not decode is omitted rather than failing the
+	// poll. The run-summary check keeps stored summaries in shape, so this
+	// log means a writer skipped it.
+	if summary, err := mapping.RunSummary(statusResp.GetSummary()); err != nil {
+		s.logger.Warn("execution summary omitted", "executionId", string(id), "workflowId", workflowID, "error", err)
+	} else {
+		out.Summary = summary
 	}
 	wid := generated.Ulid(workflowID)
 	out.WorkflowId = &wid
@@ -234,7 +241,11 @@ func (s *Server) StreamExecution(ctx echo.Context, id generated.Ulid, params gen
 			if msg := exec.GetError(); msg != "" {
 				summary.Error = &msg
 			}
-			summary.Summary = mapping.RunSummaryMap(exec.GetSummary())
+			if runSummary, err := mapping.RunSummary(exec.GetSummary()); err != nil {
+				s.logger.Warn("execution summary omitted", "executionId", string(id), "workflowId", workflowID, "error", err)
+			} else {
+				summary.Summary = runSummary
+			}
 		}
 		raw, err := json.Marshal(summary)
 		if err != nil {
