@@ -22,6 +22,8 @@ on:
       - "metrics/**"
       - "model/**"
       - "cmd/**"
+      - "api/**"
+      - "Makefile"
       - "version/**"
       - "config/**"
       - "integration_test/**"
@@ -79,7 +81,7 @@ jobs:
           # Check if any changes are in relevant directories.
           # `|| true` is required: with bash -e, grep exit 1 (no match) aborts
           # the job as failure instead of setting should_run=false.
-          RELEVANT_CHANGES=$(echo "$CHANGED_FILES" | grep -E '\.go$|go\.mod|go\.sum|^core/|^pkg/|^aggregator/|^operator/|^model/|^cmd/|^version/|^config/|^integration_test/|^\.github/workflows/run-test-on-pr\.yml|^\.github/actions/|^\.github/scripts/' || true)
+          RELEVANT_CHANGES=$(echo "$CHANGED_FILES" | grep -E '\.go$|go\.mod|go\.sum|^core/|^pkg/|^aggregator/|^operator/|^model/|^cmd/|^api/|^Makefile$|^version/|^config/|^integration_test/|^\.github/workflows/run-test-on-pr\.yml|^\.github/actions/|^\.github/scripts/' || true)
 
           if [ -n "$RELEVANT_CHANGES" ]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
@@ -124,6 +126,13 @@ jobs:
 
       - name: Vet with integration build tag
         run: go vet -tags=integration ./...
+
+      # types.gen.go on staging had already drifted from api/openapi.yaml
+      # once. Fail the job when a spec edit is not regenerated.
+      - name: Check generated REST types
+        run: |
+          make rest-gen
+          git diff --exit-code -- aggregator/rest/generated
 
       - name: Cache golangci-lint binary
         uses: actions/cache@v3
