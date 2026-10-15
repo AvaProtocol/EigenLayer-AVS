@@ -80,7 +80,7 @@ func TestAuthExchangeCapsTheSignInLifetime(t *testing.T) {
 	}{
 		{"an hour", now.Add(time.Hour)},
 		{"48 hours", now.Add(authTokenExpirationDuration)},
-		{"48 hours by a client clock a minute ahead", now.Add(authTokenExpirationDuration + time.Minute)},
+		{"48 hours by a client clock 4 minutes ahead", now.Add(authTokenExpirationDuration + 4*time.Minute)},
 	}
 	for _, tc := range accepted {
 		t.Run("accepts "+tc.name, func(t *testing.T) {
@@ -108,6 +108,7 @@ func TestAuthExchangeCapsTheSignInLifetime(t *testing.T) {
 		name     string
 		expireAt time.Time
 	}{
+		{"48 hours by a client clock 6 minutes ahead", now.Add(authTokenExpirationDuration + 6*time.Minute)},
 		{"49 hours", now.Add(authTokenExpirationDuration + time.Hour)},
 		{"a year", now.Add(365 * 24 * time.Hour)},
 	}

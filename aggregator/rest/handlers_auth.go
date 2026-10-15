@@ -31,7 +31,7 @@ const authTokenExpirationDuration = 48 * time.Hour
 
 // authExpiryClockSkew tolerates a client clock that runs ahead of ours, so
 // a message set to expire exactly 48 hours from the client's now is not
-// refused for a few seconds of drift.
+// refused while that clock is up to 5 minutes fast.
 const authExpiryClockSkew = 5 * time.Minute
 
 // authMessageRequired is the minimum number of lines we need to parse a
