@@ -15,17 +15,21 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 // TestWeeklyEthPayAndUsdcShareNativeCap_Sepolia is the live check for a
 // weekly ETH loop and a second ERC-20 automation on one self-funded runner.
 //
-// Both tasks are crons. Prepare sizes one native cap for the ETH the loop
-// sends and for both automations' gas, including one install. The test then
-// sends one ETH transfer and one USDC transfer. The USDC transfer must
-// decrease the same native limit: that is the gas the second automation
-// spends. On-demand, not per-PR CI. Self-funded; no Gas Manager.
+// Both tasks are Monday-noon crons with maxExecution 12 and expiredAt 120
+// days out. Prepare sizes one native cap for the ETH the loop sends and for
+// both automations' gas, including one install. The test then fires the
+// seeded ETH task once through TriggerWorkflow. That is one tick of the
+// executor path a scheduled run uses: the loop binds its recipient and the
+// ETH send runs the session-grant preflight. The USDC cron only sizes the
+// cap. The shared-cap draw is one contractWrite transfer. On-demand, not
+// per-PR CI. Self-funded; no Gas Manager.
 //
 //	CGO_ENABLED=0 go test -tags=integration ./core/taskengine -run TestWeeklyEthPayAndUsdcShareNativeCap_Sepolia -v -count=1
 //
@@ -49,12 +53,14 @@ func TestWeeklyEthPayAndUsdcShareNativeCap_Sepolia(t *testing.T) {
 	usdc := weeklyPayTask(t, "{{settings.token_amount.address}}", "1", []any{env.owner.Hex()})
 	withWeeklyCron(eth, expiredAt)
 	withWeeklyCron(usdc, expiredAt)
+	wireEthLoop(eth)
 	seedEnabledSkillTask(t, env.db, env.owner, env.runner, eth)
 	seedEnabledSkillTask(t, env.db, env.owner, env.runner, usdc)
 
 	prepared, err := env.engine.PrepareSessionPolicy(env.user, SessionPolicyInput{
 		Wallet: env.runner, ChainID: env.chainID, AgentLabel: "WeeklyPayLive",
-		Addition: &PolicyAddition{}, ExpiresInSeconds: 24 * 3600,
+		Addition:         &PolicyAddition{},
+		ExpiresInSeconds: 24 * 3600, // starting horizon; taskValidUntil returns expiredAt, and the merge keeps the later end, so the 120-day tasks win
 	})
 	require.NoError(t, err)
 	require.NotNil(t, prepared.EchoPermissions)
@@ -86,12 +92,24 @@ func TestWeeklyEthPayAndUsdcShareNativeCap_Sepolia(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, before.Sign(), "the new entity is not installed until the first UserOp")
 
-	ethResult, err := runETHTransfer(env, env.owner.Hex(), sendWei)
+	triggered, err := env.engine.TriggerWorkflow(env.user, &avsproto.TriggerTaskReq{
+		TaskId:      eth.Id,
+		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_CRON,
+		TriggerOutput: &avsproto.TriggerTaskReq_CronTrigger{
+			CronTrigger: &avsproto.CronTrigger_Output{},
+		},
+		IsBlocking: true,
+	})
+	logTriggeredRun(t, "ETH loop tick", triggered)
 	if err != nil {
 		logSepoliaBaseFee(t, env)
 	}
-	require.NoError(t, err, "one loop iteration of Weekly ETH Pay")
-	logLiveOp(t, "ETH send", ethResult)
+	require.NoError(t, err, "one tick of the seeded weekly ETH loop")
+	require.NotNil(t, triggered)
+	require.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS, triggered.Status, "ETH loop tick: %s", triggeredError(triggered))
+	// The UserOp send already waited for its receipt. This pause covers RPC
+	// lag before the next read of the native limit.
+	time.Sleep(2 * time.Second)
 	afterETH, err := readNativeLimit(env.client, stored.EntityID, env.runner)
 	require.NoError(t, err)
 	require.Positive(t, afterETH.Sign(), "install must leave a native limit")
@@ -101,6 +119,9 @@ func TestWeeklyEthPayAndUsdcShareNativeCap_Sepolia(t *testing.T) {
 	usdcAmount := "0"
 	if bal := readERC20Balance(t, env, common.HexToAddress(SEPOLIA_USDC)); bal.Sign() > 0 {
 		usdcAmount = "1"
+	}
+	if usdcAmount == "0" {
+		t.Log("USDC transfer moves 0 because the runner holds none; that gas is a lower bound for a real weekly payment")
 	}
 	t.Logf("USDC transfer amount %s", usdcAmount)
 	usdcResult, err := runERC20Transfer(env, SEPOLIA_USDC, env.owner.Hex(), usdcAmount)
@@ -114,13 +135,89 @@ func TestWeeklyEthPayAndUsdcShareNativeCap_Sepolia(t *testing.T) {
 	require.Negative(t, afterUSDC.Cmp(afterETH),
 		"the ERC-20 UserOp must spend gas from the same native cap, before %s after %s", afterETH, afterUSDC)
 	t.Logf("after USDC transfer, native limit %s", afterUSDC)
+	// perRun includes the install, so multiplying it by the remaining runs
+	// overstates what those runs need. The cap must still cover that.
+	perRun := new(big.Int).Sub(new(big.Int).Set(want), afterUSDC)
+	require.Positive(t, perRun.Sign(), "the first run must spend from the cap, spent %s", perRun)
+	need := new(big.Int).Mul(new(big.Int).Set(perRun), big.NewInt(runs-1))
+	require.GreaterOrEqual(t, afterUSDC.Cmp(need), 0,
+		"cap must cover the remaining %d runs at the observed first-run spend: left %s need %s",
+		runs-1, afterUSDC, need)
+	budget := new(big.Int).Mul(
+		big.NewInt(nativePreflightGasUnitsSteady+nativePreflightGasUnitsValueSteady),
+		NativeGrantMaxFee(env.chainID),
+	)
+	headroom := new(big.Float).Quo(new(big.Float).SetInt(budget), new(big.Float).SetInt(perRun))
+	headroomF, _ := headroom.Float64()
+	t.Logf("headroom per run: %.1fx (grant gas budget %s / observed first-run spend %s, install included)", headroomF, budget, perRun)
+	t.Logf("left %s; %d more runs at the observed rate need %s", afterUSDC, runs-1, need)
 	logRunnerBalance(t, env, "after")
-	t.Log("PASS: weekly ETH loop and a second ERC-20 automation share one self-funded native cap")
+	t.Log("PASS: one tick of the weekly ETH loop and a USDC transfer share one self-funded native cap")
+}
+
+// wireEthLoop makes the sized ETH task executable. The sizer reads the loop
+// runner and the cron; it does not need a node id or an edge. TriggerWorkflow
+// does. IterVal is the name the sizer already defaults a blank iter to, so
+// {{value}} binds the recipient when the loop runs.
+func wireEthLoop(task *avsproto.Task) {
+	task.Id = model.GenerateID()
+	node := task.Nodes[0]
+	node.Id = "ethLoop"
+	node.Name = "ethPay"
+	if loop := node.GetLoop(); loop != nil && loop.Config != nil {
+		loop.Config.IterVal = "value"
+	}
+	task.Edges = []*avsproto.TaskEdge{{
+		Id:     "cronToEth",
+		Source: task.Trigger.GetId(),
+		Target: node.Id,
+	}}
+}
+
+func triggeredError(resp *avsproto.TriggerTaskResp) string {
+	if resp == nil || resp.Error == nil {
+		return ""
+	}
+	return *resp.Error
+}
+
+func logTriggeredRun(t *testing.T, label string, resp *avsproto.TriggerTaskResp) {
+	t.Helper()
+	if resp == nil {
+		t.Logf("%s: no response", label)
+		return
+	}
+	t.Logf("%s status %s id %s error %s", label, resp.Status, resp.ExecutionId, triggeredError(resp))
+	for _, step := range resp.Steps {
+		if step == nil {
+			continue
+		}
+		evidence := ""
+		if step.Metadata != nil {
+			evidence = liveOpEvidence(step.Metadata.AsInterface())
+		}
+		if loop := step.GetLoop(); loop != nil && loop.Data != nil {
+			if more := liveOpEvidence(loop.Data.AsInterface()); more != "" {
+				evidence = strings.TrimSpace(evidence + " " + more)
+			}
+		}
+		if ethOut := step.GetEthTransfer(); ethOut != nil && ethOut.Data != nil {
+			if more := liveOpEvidence(ethOut.Data.AsInterface()); more != "" {
+				evidence = strings.TrimSpace(evidence + " " + more)
+			}
+		}
+		if step.GasUsed != "" || step.TotalGasCost != "" {
+			evidence = strings.TrimSpace(evidence + fmt.Sprintf(" gasUsed=%s gasPrice=%s totalGasCost=%s", step.GasUsed, step.GasPrice, step.TotalGasCost))
+		}
+		t.Logf("step %s success=%v error=%s %s", step.Id, step.Success, step.Error, evidence)
+	}
 }
 
 func withWeeklyCron(task *avsproto.Task, expiredAt int64) {
 	task.ExpiredAt = expiredAt
 	task.Trigger = &avsproto.TaskTrigger{
+		Id:   "weeklyCron",
+		Name: "weeklyCron",
 		TriggerType: &avsproto.TaskTrigger_Cron{
 			Cron: &avsproto.CronTrigger{
 				Config: &avsproto.CronTrigger_Config{Schedules: []string{"0 12 * * 1"}},
@@ -178,6 +275,8 @@ func runERC20Transfer(env *nativeLiveEnv, token, dest, amount string) (map[strin
 	if success, ok := result["success"].(bool); ok && !success {
 		return result, fmt.Errorf("transfer failed: %v", result["error"])
 	}
+	// The UserOp send already waited for its receipt. This pause covers RPC
+	// lag before the next read of the native limit.
 	time.Sleep(2 * time.Second)
 	return result, nil
 }

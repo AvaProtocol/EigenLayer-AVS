@@ -335,6 +335,8 @@ func runETHTransfer(env *nativeLiveEnv, dest, amount string) (map[string]interfa
 		}
 		return result, fmt.Errorf("ethTransfer success=false")
 	}
+	// The UserOp send already waited for its receipt. This pause covers RPC
+	// lag before the next read of the native limit.
 	time.Sleep(2 * time.Second)
 	return result, nil
 }
@@ -361,6 +363,8 @@ func runApprove(env *nativeLiveEnv, token string) error {
 	if success, ok := result["success"].(bool); ok && !success {
 		return fmt.Errorf("approve failed: %v", result["error"])
 	}
+	// The UserOp send already waited for its receipt. This pause covers RPC
+	// lag before the next read of the native limit.
 	time.Sleep(2 * time.Second)
 	return nil
 }
@@ -385,6 +389,8 @@ func runWETHDeposit(env *nativeLiveEnv, valueWei string) error {
 	if success, ok := result["success"].(bool); ok && !success {
 		return fmt.Errorf("WETH.deposit failed: %v", result["error"])
 	}
+	// The UserOp send already waited for its receipt. This pause covers RPC
+	// lag before the next read of the native limit.
 	time.Sleep(2 * time.Second)
 	return nil
 }
