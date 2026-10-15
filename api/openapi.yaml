@@ -1429,6 +1429,23 @@ components:
         startAt: { type: integer, format: int64 }
         endAt: { type: integer, format: int64 }
 
+    ExecutionSummary:
+      type: object
+      additionalProperties: true
+      description: |
+        Studio's summary-step reply, present once the run has ended.
+        Absent on older runs and while the run is still in progress.
+      properties:
+        subject:
+          type: string
+          description: Report title.
+        body:
+          type: object
+          additionalProperties: true
+          description: |
+            Structured report. Its fields include the summary line,
+            executions, errors, notice, and step counts.
+
     Execution:
       type: object
       required: [id, workflowId, status, startAt]
@@ -1457,13 +1474,7 @@ components:
         valueFee:
           $ref: '#/components/schemas/ValueFee'
           description: Value-capture fee charged (post-paid).
-        summary:
-          additionalProperties: true
-          description: |
-            Studio's summary-step reply, present once the run has ended.
-            `subject` is the report title. `body` is the structured report
-            (summary line, executions, errors, notice, and step counts).
-            Absent on older runs and while the run is still in progress.
+        summary: { $ref: '#/components/schemas/ExecutionSummary' }
         authorization:
           $ref: '#/components/schemas/SessionAuthorization'
           description: |
@@ -1492,10 +1503,7 @@ components:
         startAt: { type: integer, format: int64 }
         endAt: { type: integer, format: int64 }
         error: { type: string }
-        summary:
-          additionalProperties: true
-          description: |
-            Same object as `Execution.summary`. Present once the run has ended.
+        summary: { $ref: '#/components/schemas/ExecutionSummary' }
 
     ExecutionCount:
       type: object

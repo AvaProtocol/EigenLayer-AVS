@@ -843,11 +843,9 @@ type Execution struct {
 	Steps  *[]ExecutionStep `json:"steps,omitempty"`
 
 	// Summary Studio's summary-step reply, present once the run has ended.
-	// `subject` is the report title. `body` is the structured report
-	// (summary line, executions, errors, notice, and step counts).
 	// Absent on older runs and while the run is still in progress.
-	Summary  *map[string]interface{} `json:"summary,omitempty"`
-	ValueFee *ValueFee               `json:"valueFee,omitempty"`
+	Summary  *ExecutionSummary `json:"summary,omitempty"`
+	ValueFee *ValueFee         `json:"valueFee,omitempty"`
 
 	// WorkflowId ULID identifier (26-char Crockford base32).
 	WorkflowId Ulid `json:"workflowId"`
@@ -902,8 +900,9 @@ type ExecutionStatusSummary struct {
 	// `error` is a system / infrastructure failure (e.g., RPC unreachable).
 	Status ExecutionStatus `json:"status"`
 
-	// Summary Same object as `Execution.summary`. Present once the run has ended.
-	Summary *map[string]interface{} `json:"summary,omitempty"`
+	// Summary Studio's summary-step reply, present once the run has ended.
+	// Absent on older runs and while the run is still in progress.
+	Summary *ExecutionSummary `json:"summary,omitempty"`
 
 	// WorkflowId ULID identifier (26-char Crockford base32).
 	WorkflowId *Ulid `json:"workflowId,omitempty"`
@@ -943,6 +942,18 @@ type ExecutionStep struct {
 	// TotalGasCost gasUsed × gasPrice in wei (decimal string).
 	TotalGasCost *string `json:"totalGasCost,omitempty"`
 	Type         string  `json:"type"`
+}
+
+// ExecutionSummary Studio's summary-step reply, present once the run has ended.
+// Absent on older runs and while the run is still in progress.
+type ExecutionSummary struct {
+	// Body Structured report. Its fields include the summary line,
+	// executions, errors, notice, and step counts.
+	Body *map[string]interface{} `json:"body,omitempty"`
+
+	// Subject Report title.
+	Subject              *string                `json:"subject,omitempty"`
+	AdditionalProperties map[string]interface{} `json:"-"`
 }
 
 // ExecutionTier Pricing group for value-capture fees.
@@ -1125,7 +1136,10 @@ type NativeSpendCap struct {
 	// Amount Cumulative native-token cap in wei (decimal string, no reset).
 	// Enforced on-chain by NativeTokenLimitModule. Self-funded UserOps
 	// also decrement this cap by gas; sponsored UserOps decrement only
-	// the ETH value sent.
+	// the ETH value sent. When the chain does not sponsor gas, prepare
+	// sizes headroom for those UserOps into this amount: the steady-op
+	// ceiling times a per-chain fee assumption, plus one install. That
+	// headroom can also be sent as value to the allowed recipients.
 	Amount string `json:"amount"`
 }
 
@@ -1686,15 +1700,17 @@ type SessionPolicyStatus string
 // usable grant, caps start at zero and this addition is added to what
 // enabled automations still need.
 type SessionPolicyAddition struct {
-	AllowContractRecipient *bool              `json:"allowContractRecipient,omitempty"`
-	AllowedActions         *[]AllowedAction   `json:"allowedActions,omitempty"`
-	Erc20SpendCaps         *[]Erc20SpendCap   `json:"erc20SpendCaps,omitempty"`
-	NativeRecipients       *[]EthereumAddress `json:"nativeRecipients,omitempty"`
-	NativeSpendCap         *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
+	AllowContractRecipient *bool            `json:"allowContractRecipient,omitempty"`
+	AllowedActions         *[]AllowedAction `json:"allowedActions,omitempty"`
+	Erc20SpendCaps         *[]Erc20SpendCap `json:"erc20SpendCaps,omitempty"`
 
-	// NativeGasWei Wei of this addition's nativeSpendCap that is self-funded
-	// gas rather than ETH sent. Already included in that cap.
-	NativeGasWei *string `json:"nativeGasWei,omitempty"`
+	// NativeGasWei Wei of this addition's `nativeSpendCap` that is self-funded gas
+	// rather than ETH sent. Already included in that cap. Prepare does
+	// not add it again. It lets the approval screen split payments
+	// from gas. Omit when the cap is value only.
+	NativeGasWei     *string            `json:"nativeGasWei,omitempty"`
+	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
+	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
 
 	// ValidUntil Absolute unix milliseconds this automation needs. Omit to use
 	// now + `expiresInSeconds`. The signed expiry is the later of that
@@ -1729,14 +1745,19 @@ type SessionPolicyChanges struct {
 
 	// BasePolicyId Usable grant the merge read. Empty when the runner had none.
 	// Echo this to submit, including the empty string.
-	BasePolicyId   *string                      `json:"basePolicyId,omitempty"`
-	CapChanges     *[]SessionPolicyCapChange    `json:"capChanges,omitempty"`
-	ExpiryChanges  *[]SessionPolicyExpiryChange `json:"expiryChanges,omitempty"`
-	KeptActions    *[]AllowedAction             `json:"keptActions,omitempty"`
-	RemovedActions *[]AllowedAction             `json:"removedActions,omitempty"`
+	BasePolicyId  *string                      `json:"basePolicyId,omitempty"`
+	CapChanges    *[]SessionPolicyCapChange    `json:"capChanges,omitempty"`
+	ExpiryChanges *[]SessionPolicyExpiryChange `json:"expiryChanges,omitempty"`
+	KeptActions   *[]AllowedAction             `json:"keptActions,omitempty"`
 
-	// NativeGasWei Wei of the signed native cap that is self-funded gas.
-	NativeGasWei *string `json:"nativeGasWei,omitempty"`
+	// NativeGasWei Wei of the signed native cap that is self-funded gas: enabled
+	// automations' steady UserOps, one install when the grant is not
+	// yet applied, plus `nativeGasWei` from the addition. Omitted when
+	// this prepare did not price gas. The rest of the signed native
+	// cap is ETH the automations send. This headroom can also be sent
+	// as value to the allowed recipients.
+	NativeGasWei   *string          `json:"nativeGasWei,omitempty"`
+	RemovedActions *[]AllowedAction `json:"removedActions,omitempty"`
 
 	// Summary Approval lines. An expiry change reads
 	// "<task name>: until <Mon D>, was <Mon D>" in UTC when both dates
@@ -1764,13 +1785,16 @@ type SessionPolicyList struct {
 // SessionPolicyNeed Permissions one workflow still needs, sized to the runs it has left.
 // Cap amounts are totals in the token's smallest unit, not per-run amounts.
 type SessionPolicyNeed struct {
-	AllowedActions   *[]AllowedAction   `json:"allowedActions,omitempty"`
-	Erc20SpendCaps   *[]Erc20SpendCap   `json:"erc20SpendCaps,omitempty"`
+	AllowedActions *[]AllowedAction `json:"allowedActions,omitempty"`
+	Erc20SpendCaps *[]Erc20SpendCap `json:"erc20SpendCaps,omitempty"`
+
+	// NativeGasWei Wei of `nativeSpendCap` that is self-funded gas rather than ETH
+	// this workflow sends. Steady UserOps only. Prepare adds one
+	// install for the wallet when the grant is not yet applied.
+	// Omitted when this workflow's gas was not priced.
+	NativeGasWei     *string            `json:"nativeGasWei,omitempty"`
 	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
 	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
-
-	// NativeGasWei Wei of nativeSpendCap that is self-funded gas rather than ETH sent.
-	NativeGasWei *string `json:"nativeGasWei,omitempty"`
 
 	// ValidUntil Absolute unix milliseconds the grant must last through. 0 when the window is unknown.
 	ValidUntil *int64 `json:"validUntil,omitempty"`
@@ -2546,6 +2570,89 @@ type EstimateWorkflowFeesJSONRequestBody = EstimateFeesRequest
 
 // SimulateWorkflowJSONRequestBody defines body for SimulateWorkflow for application/json ContentType.
 type SimulateWorkflowJSONRequestBody = SimulateWorkflowRequest
+
+// Getter for additional properties for ExecutionSummary. Returns the specified
+// element and whether it was found
+func (a ExecutionSummary) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for ExecutionSummary
+func (a *ExecutionSummary) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for ExecutionSummary to handle AdditionalProperties
+func (a *ExecutionSummary) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["body"]; found {
+		err = json.Unmarshal(raw, &a.Body)
+		if err != nil {
+			return fmt.Errorf("error reading 'body': %w", err)
+		}
+		delete(object, "body")
+	}
+
+	if raw, found := object["subject"]; found {
+		err = json.Unmarshal(raw, &a.Subject)
+		if err != nil {
+			return fmt.Errorf("error reading 'subject': %w", err)
+		}
+		delete(object, "subject")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for ExecutionSummary to handle AdditionalProperties
+func (a ExecutionSummary) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	if a.Body != nil {
+		object["body"], err = json.Marshal(a.Body)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'body': %w", err)
+		}
+	}
+
+	if a.Subject != nil {
+		object["subject"], err = json.Marshal(a.Subject)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'subject': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
 
 // Getter for additional properties for RestAPINodeConfig_Options. Returns the specified
 // element and whether it was found

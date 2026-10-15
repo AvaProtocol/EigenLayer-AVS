@@ -1,6 +1,7 @@
 package mapping
 
 import (
+	"encoding/json"
 	"testing"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -30,9 +31,19 @@ func TestProtoToOpenAPIExecutionIncludesRunSummary(t *testing.T) {
 	out, err := ProtoToOpenAPIExecution(exec, "01ARZ3NDEKTSV4RRFFQ69G5FAV")
 	require.NoError(t, err)
 	require.NotNil(t, out.Summary)
-	require.Equal(t, "Batch pay ran", (*out.Summary)["subject"])
-	body := (*out.Summary)["body"].(map[string]interface{})
-	require.Len(t, body["executions"].([]interface{}), 1)
+	require.NotNil(t, out.Summary.Subject)
+	require.Equal(t, "Batch pay ran", *out.Summary.Subject)
+	require.NotNil(t, out.Summary.Body)
+	require.Len(t, (*out.Summary.Body)["executions"].([]interface{}), 1)
+
+	raw, err := json.Marshal(out.Summary)
+	require.NoError(t, err)
+	var wire map[string]interface{}
+	require.NoError(t, json.Unmarshal(raw, &wire))
+	require.Equal(t, "Batch pay ran", wire["subject"])
+	wireBody, ok := wire["body"].(map[string]interface{})
+	require.True(t, ok)
+	require.Len(t, wireBody["executions"].([]interface{}), 1)
 
 	status := ProtoExecutionToOpenAPISummary(exec, "01ARZ3NDEKTSV4RRFFQ69G5FAV")
 	require.Equal(t, out.Summary, status.Summary)
