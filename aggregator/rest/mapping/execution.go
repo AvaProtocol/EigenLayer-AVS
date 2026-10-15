@@ -3,6 +3,7 @@ package mapping
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -150,9 +151,13 @@ func ProtoExecutionToOpenAPISummary(in *avsproto.Execution, workflowID string) g
 	return out
 }
 
-// RunSummaryMap lifts Execution.summary into the OpenAPI free-form object.
+// RunSummaryMap lifts Execution.summary into the OpenAPI object.
 // Nil when the run has not ended, or when the stored value is not an object.
-func RunSummaryMap(v *structpb.Value) *map[string]interface{} {
+// subject and body are named fields. Any other key stays on the object.
+// A subject or body that cannot be decoded is omitted, and the error is
+// logged, so a writer that skips the run-summary check does not drop the
+// field quietly.
+func RunSummaryMap(v *structpb.Value) *generated.ExecutionSummary {
 	if v == nil {
 		return nil
 	}
@@ -160,7 +165,17 @@ func RunSummaryMap(v *structpb.Value) *map[string]interface{} {
 	if !ok || len(m) == 0 {
 		return nil
 	}
-	return &m
+	raw, err := json.Marshal(m)
+	if err != nil {
+		log.Printf("execution summary dropped: %v", err)
+		return nil
+	}
+	var out generated.ExecutionSummary
+	if err := json.Unmarshal(raw, &out); err != nil {
+		log.Printf("execution summary dropped: %v", err)
+		return nil
+	}
+	return &out
 }
 
 // protoExecutionStepToOpenAPI converts a single step. The step's per-type

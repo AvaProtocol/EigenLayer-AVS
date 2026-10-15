@@ -1,6 +1,7 @@
 package mapping
 
 import (
+	"encoding/json"
 	"testing"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -11,6 +12,7 @@ import (
 func TestProtoToOpenAPIExecutionIncludesRunSummary(t *testing.T) {
 	summary, err := structpb.NewValue(map[string]interface{}{
 		"subject": "Batch pay ran",
+		"notice":  "kept",
 		"body": map[string]interface{}{
 			"summary": "Sent 0.25 USDC",
 			"executions": []interface{}{
@@ -30,9 +32,21 @@ func TestProtoToOpenAPIExecutionIncludesRunSummary(t *testing.T) {
 	out, err := ProtoToOpenAPIExecution(exec, "01ARZ3NDEKTSV4RRFFQ69G5FAV")
 	require.NoError(t, err)
 	require.NotNil(t, out.Summary)
-	require.Equal(t, "Batch pay ran", (*out.Summary)["subject"])
-	body := (*out.Summary)["body"].(map[string]interface{})
-	require.Len(t, body["executions"].([]interface{}), 1)
+	require.NotNil(t, out.Summary.Subject)
+	require.Equal(t, "Batch pay ran", *out.Summary.Subject)
+	require.NotNil(t, out.Summary.Body)
+	require.Len(t, (*out.Summary.Body)["executions"].([]interface{}), 1)
+
+	raw, err := json.Marshal(out.Summary)
+	require.NoError(t, err)
+	var wire map[string]interface{}
+	require.NoError(t, json.Unmarshal(raw, &wire))
+	require.Equal(t, "Batch pay ran", wire["subject"])
+	require.Equal(t, "kept", wire["notice"])
+	require.Equal(t, "kept", out.Summary.AdditionalProperties["notice"])
+	wireBody, ok := wire["body"].(map[string]interface{})
+	require.True(t, ok)
+	require.Len(t, wireBody["executions"].([]interface{}), 1)
 
 	status := ProtoExecutionToOpenAPISummary(exec, "01ARZ3NDEKTSV4RRFFQ69G5FAV")
 	require.Equal(t, out.Summary, status.Summary)
@@ -43,4 +57,13 @@ func TestProtoToOpenAPIExecutionIncludesRunSummary(t *testing.T) {
 		Status:  exec.Status,
 	}, "01ARZ3NDEKTSV4RRFFQ69G5FAV")
 	require.Nil(t, without.Summary)
+}
+
+func TestRunSummaryMapOmitsASummaryWhoseSubjectIsNotAString(t *testing.T) {
+	summary, err := structpb.NewValue(map[string]interface{}{
+		"subject": float64(1),
+		"body":    map[string]interface{}{"summary": "x"},
+	})
+	require.NoError(t, err)
+	require.Nil(t, RunSummaryMap(summary))
 }
