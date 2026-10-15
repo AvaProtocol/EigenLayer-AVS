@@ -164,7 +164,8 @@ func (n *Engine) runBlockTriggerImmediately(ctx context.Context, triggerConfig m
 	}
 
 	// If no specific block number, get the latest block
-	if blockNumber == 0 {
+	autoLatest := blockNumber == 0
+	if autoLatest {
 		currentBlock, err := reader.GetBlockNumber(ctx)
 		if err != nil {
 			// For simulations, use a mock block number to avoid RPC rate limiting
@@ -186,6 +187,22 @@ func (n *Engine) runBlockTriggerImmediately(ctx context.Context, triggerConfig m
 
 	// Get real block data via the chain's worker
 	header, err := reader.HeaderByNumber(ctx, big.NewInt(int64(blockNumber)))
+	if err != nil && autoLatest && isBlockNotFound(err) {
+		// eth_blockNumber and the header read can land on different nodes
+		// behind one RPC URL, so the newest block's header is "not found" for
+		// a moment (ava-sdk-js E2E on Sepolia, 2026-10-15, three suites). The
+		// caller asked for "latest", and a block or two behind the head is
+		// still that.
+		var settled uint64
+		header, settled, err = latestHeaderBehindLag(ctx, reader, blockNumber)
+		if err == nil {
+			if n.logger != nil {
+				n.logger.Warn("BlockTrigger: head header not found yet, settled on an earlier block",
+					"requested", blockNumber, "settled", settled, "chainID", chainID)
+			}
+			blockNumber = settled
+		}
+	}
 	if err != nil {
 		// For simulations, use mock block data to avoid RPC rate limiting
 		if strings.Contains(err.Error(), "rate limit") || strings.Contains(err.Error(), "429") {

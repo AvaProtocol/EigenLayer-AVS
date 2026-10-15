@@ -222,15 +222,33 @@ const SessionPolicyChainWindowMismatchCode = "SESSION_POLICY_CHAIN_WINDOW_MISMAT
 // operator needs to be able to tell the two apart when triaging.
 const SessionPolicyChainWindowMissingCode = "SESSION_POLICY_CHAIN_WINDOW_MISSING"
 
-// maxEntityOccupancyProbes bounds how many on-chain occupancy reads
-// NextFreeSessionEntityID will make. NextSessionEntityID returns
-// max(stored)+1; each bump is an RPC. An account with several unstored
-// leftovers would otherwise loop without bound.
+// maxEntityOccupancyProbes bounds consecutive candidates whose occupancy
+// could not be read. An unreadable entity is treated as occupied, and a chain
+// that answers nothing for this many candidates in a row is a broken read, not
+// a long used range: NextFreeSessionEntityID stops there with the last error.
 const maxEntityOccupancyProbes = 8
 
+// maxEntityOccupancyWalk bounds how far past entities the chain reports as
+// spent the allocator walks. A spent entity is a fact — a signer is installed,
+// or its deferred-nonce sequence is above zero and it is unusable forever — so
+// skipping it is always safe. The walk is for a gateway whose storage is behind
+// the chain: a fresh database against a runner that was granted before. The SDK
+// E2E suite boots a new gateway per run, so storage said "next is 1" while the
+// chain had spent 1..N, and after eight spent candidates the old cap returned
+// SESSION_POLICY_ENTITY_OCCUPIED for good (ava-sdk-js run 38666525933,
+// 2026-10-15). maxEntityOccupancyProbes now bounds consecutive candidates that
+// could not be READ, which is a broken chain read rather than a long used range.
+const maxEntityOccupancyWalk = 256
+
 // occupancyProbeTimeout bounds one occupancy candidate (signer + nonce
-// sequence). The loop's overall budget is this times the probe cap.
+// sequence). The loop's overall budget is occupancyWalkBudget.
 const occupancyProbeTimeout = 5 * time.Second
+
+// occupancyWalkBudget bounds the whole allocation. A spent candidate is two
+// quick reads, so a full walk fits well inside it at normal RPC latency, while
+// a hung chain still ends: once the budget is gone every probe fails at once
+// and the unread cap returns within maxEntityOccupancyProbes iterations.
+const occupancyWalkBudget = 2 * time.Minute
 
 // EntityOccupancyChecker reports whether a validation entity is already
 // installed on the account. A failed read must be reported as an error
@@ -362,8 +380,12 @@ func sessionEntityTaken(db storage.Storage, chainID int64, owner, wallet common.
 // NextFreeSessionEntityID is NextSessionEntityID plus an on-chain occupancy
 // probe (#763 A). When check is nil the result is the storage-only id
 // (offline tests). A failed occupancy read is occupied, never free.
-// After maxEntityOccupancyProbes occupied candidates it returns a typed
-// SESSION_POLICY_ENTITY_OCCUPIED error rather than looping.
+// Candidates the chain reports as spent are skipped, up to
+// maxEntityOccupancyWalk of them, because storage may be behind the chain.
+// Candidates that cannot be read are skipped too, but only
+// maxEntityOccupancyProbes in a row: after that it returns a typed
+// SESSION_POLICY_ENTITY_OCCUPIED error carrying the last read error rather
+// than walking a chain that is not answering.
 func NextFreeSessionEntityID(
 	ctx context.Context,
 	db storage.Storage,
@@ -381,31 +403,32 @@ func NextFreeSessionEntityID(
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	overall, cancel := context.WithTimeout(ctx, occupancyProbeTimeout*time.Duration(maxEntityOccupancyProbes))
+	overall, cancel := context.WithTimeout(ctx, occupancyWalkBudget)
 	defer cancel()
-	var lastOccErr error
-	for i := uint32(0); i < maxEntityOccupancyProbes; i++ {
+	unread := 0
+	for i := uint32(0); i < maxEntityOccupancyWalk; i++ {
 		cand := start + i
 		probeCtx, probeCancel := context.WithTimeout(overall, occupancyProbeTimeout)
 		occupied, occErr := check(probeCtx, wallet, cand)
 		probeCancel()
 		if occErr != nil {
 			// Fail-closed: unknown is occupied, same as VerifySupersededTeardown.
-			lastOccErr = occErr
+			unread++
+			if unread >= maxEntityOccupancyProbes {
+				return 0, fmt.Errorf(
+					"%s: no free validation entity on %s: %d candidates in a row could not be read, ending at %d (last occupancy read: %w)",
+					SessionPolicyEntityOccupiedCode, wallet.Hex(), unread, cand, occErr)
+			}
 			continue
 		}
+		unread = 0
 		if !occupied {
 			return cand, nil
 		}
 	}
-	if lastOccErr != nil {
-		return 0, fmt.Errorf(
-			"%s: no free validation entity on %s after %d probes (last occupancy read: %w)",
-			SessionPolicyEntityOccupiedCode, wallet.Hex(), maxEntityOccupancyProbes, lastOccErr)
-	}
 	return 0, fmt.Errorf(
-		"%s: no free validation entity on %s after %d probes starting at %d; leftover entities are still installed on the account",
-		SessionPolicyEntityOccupiedCode, wallet.Hex(), maxEntityOccupancyProbes, start)
+		"%s: no free validation entity on %s in %d candidates starting at %d; every one is spent on chain — rotate this runner to a fresh salt",
+		SessionPolicyEntityOccupiedCode, wallet.Hex(), maxEntityOccupancyWalk, start)
 }
 
 // InstallSessionResolver wires the send path to this engine's session-policy
