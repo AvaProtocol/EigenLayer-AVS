@@ -38,6 +38,15 @@ func TestIsBlockNotFound(t *testing.T) {
 	if isBlockNotFound(errors.New("429 rate limit")) {
 		t.Error("a rate limit is not a missing block")
 	}
+	if isBlockNotFound(errors.New("rpc error: code = Unimplemented desc = method not found")) {
+		t.Error("a JSON-RPC method not found is a node that cannot answer, not a missing block")
+	}
+	if isBlockNotFound(errors.New("the method eth_getBlockByNumber does not exist/is not available")) {
+		t.Error("an unsupported method is not a missing block")
+	}
+	if isBlockNotFound(errors.New("not found: connection reset by peer")) {
+		t.Error("only a message that ends in not found counts")
+	}
 	if isBlockNotFound(nil) {
 		t.Error("nil is not an error")
 	}
@@ -83,6 +92,19 @@ func TestLatestHeaderBehindLagGivesUpAfterTheCap(t *testing.T) {
 	}
 	if len(reader.reads) != latestHeaderLagRetries {
 		t.Errorf("reads = %v, want %d", reader.reads, latestHeaderLagRetries)
+	}
+}
+
+// A node that cannot serve the method is not lag: the walk stops at once.
+func TestLatestHeaderBehindLagStopsOnMethodNotFound(t *testing.T) {
+	unimplemented := errors.New("worker GetBlockHeader (chain 11155111): rpc error: code = Unimplemented desc = method not found")
+	reader := &fakeHeaderReader{errs: map[uint64]error{99: unimplemented}}
+	_, _, err := latestHeaderBehindLag(context.Background(), reader, 100)
+	if !errors.Is(err, unimplemented) {
+		t.Fatalf("want the method-not-found error back, got %v", err)
+	}
+	if len(reader.reads) != 1 {
+		t.Errorf("reads = %v, want to stop after the first non-lag error", reader.reads)
 	}
 }
 

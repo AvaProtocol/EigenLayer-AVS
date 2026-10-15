@@ -143,6 +143,34 @@ func TestNextFreeSessionEntityIDStopsAfterConsecutiveReadErrors(t *testing.T) {
 	}
 }
 
+// Alternating spent and unreadable candidates never reach eight unreadable in a
+// row, so the walk runs to its bound. That exhaustion must carry the read error
+// and must not claim every candidate is spent (Copilot on #840).
+func TestNextFreeSessionEntityIDExhaustedWalkKeepsTheReadError(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	check := func(_ context.Context, _ common.Address, entity uint32) (bool, error) {
+		if entity%2 == 0 {
+			return false, errors.New("rpc flapping")
+		}
+		return true, nil
+	}
+	_, err := NextFreeSessionEntityID(context.Background(), db, spChain, spOwner, spWallet, check)
+	if err == nil {
+		t.Fatal("expected a typed occupied error after the walk cap")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, SessionPolicyEntityOccupiedCode) || !strings.Contains(msg, "rpc flapping") {
+		t.Fatalf("expected %s carrying the read error, got %v", SessionPolicyEntityOccupiedCode, err)
+	}
+	if strings.Contains(msg, "every one is spent") {
+		t.Errorf("must not claim the range is spent when candidates could not be read: %v", err)
+	}
+	if !strings.Contains(msg, fmt.Sprintf("%d could not be read", maxEntityOccupancyWalk/2)) {
+		t.Errorf("expected the unreadable count in the message, got %v", err)
+	}
+}
+
 // Spent entities between read errors reset the unread run: the cap is about a
 // chain that is not answering, not about a long used range with a blip in it.
 func TestNextFreeSessionEntityIDReadErrorRunResetsOnAnAnswer(t *testing.T) {

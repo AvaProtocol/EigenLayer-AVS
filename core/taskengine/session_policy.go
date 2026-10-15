@@ -405,7 +405,8 @@ func NextFreeSessionEntityID(
 	}
 	overall, cancel := context.WithTimeout(ctx, occupancyWalkBudget)
 	defer cancel()
-	unread := 0
+	unread, unreadTotal := 0, 0
+	var lastOccErr error
 	for i := uint32(0); i < maxEntityOccupancyWalk; i++ {
 		cand := start + i
 		probeCtx, probeCancel := context.WithTimeout(overall, occupancyProbeTimeout)
@@ -413,7 +414,9 @@ func NextFreeSessionEntityID(
 		probeCancel()
 		if occErr != nil {
 			// Fail-closed: unknown is occupied, same as VerifySupersededTeardown.
+			lastOccErr = occErr
 			unread++
+			unreadTotal++
 			if unread >= maxEntityOccupancyProbes {
 				return 0, fmt.Errorf(
 					"%s: no free validation entity on %s: %d candidates in a row could not be read, ending at %d (last occupancy read: %w)",
@@ -425,6 +428,15 @@ func NextFreeSessionEntityID(
 		if !occupied {
 			return cand, nil
 		}
+	}
+	// The walk is exhausted. "Every one is spent" is only true when every
+	// candidate answered; a read error anywhere in the range travels with the
+	// result, because the operator's remedy is different (fix the RPC, not
+	// rotate the runner).
+	if lastOccErr != nil {
+		return 0, fmt.Errorf(
+			"%s: no free validation entity on %s in %d candidates starting at %d; %d could not be read (last occupancy read: %w)",
+			SessionPolicyEntityOccupiedCode, wallet.Hex(), maxEntityOccupancyWalk, start, unreadTotal, lastOccErr)
 	}
 	return 0, fmt.Errorf(
 		"%s: no free validation entity on %s in %d candidates starting at %d; every one is spent on chain — rotate this runner to a fresh salt",

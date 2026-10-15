@@ -22,11 +22,22 @@ type blockHeaderReader interface {
 
 // isBlockNotFound is true for go-ethereum's NotFound sentinel and for the
 // same text after a worker round-trip has wrapped it into a plain message.
+// The text match is anchored to the end of the message, which is where the
+// serialized sentinel lands, and a JSON-RPC "method not found" (-32601) is
+// excluded by name: that is a node that cannot answer, not a block that is not
+// there yet, and stepping back a block would hide it.
 func isBlockNotFound(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.Is(err, ethereum.NotFound) || strings.Contains(strings.ToLower(err.Error()), "not found")
+	if errors.Is(err, ethereum.NotFound) {
+		return true
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	if strings.HasSuffix(msg, "method not found") {
+		return false
+	}
+	return strings.HasSuffix(msg, "not found")
 }
 
 // latestHeaderBehindLag reads the header of latest-1, then latest-2, after the
