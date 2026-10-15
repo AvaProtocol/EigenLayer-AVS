@@ -114,8 +114,8 @@ func (s *Server) AuthExchange(ctx echo.Context) error {
 			Code:   "AUTH_EXPIRY_TOO_FAR",
 			Title:  "Auth message expires too far ahead",
 			Detail: fmt.Sprintf(
-				"Expire At may be at most %d hours from now; sign a message that expires sooner.",
-				int(authTokenExpirationDuration.Hours()),
+				"Expire At may be at most %g hours from now; sign a message that expires sooner.",
+				authTokenExpirationDuration.Hours(),
 			),
 		}
 	}

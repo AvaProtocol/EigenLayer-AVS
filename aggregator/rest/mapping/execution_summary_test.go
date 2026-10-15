@@ -48,22 +48,36 @@ func TestProtoToOpenAPIExecutionIncludesRunSummary(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, wireBody["executions"].([]interface{}), 1)
 
-	status := ProtoExecutionToOpenAPISummary(exec, "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	status, err := ProtoExecutionToOpenAPISummary(exec, "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	require.NoError(t, err)
 	require.Equal(t, out.Summary, status.Summary)
 
-	without := ProtoExecutionToOpenAPISummary(&avsproto.Execution{
+	without, err := ProtoExecutionToOpenAPISummary(&avsproto.Execution{
 		Id:      exec.Id,
 		StartAt: exec.StartAt,
 		Status:  exec.Status,
 	}, "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	require.NoError(t, err)
 	require.Nil(t, without.Summary)
 }
 
-func TestRunSummaryMapOmitsASummaryWhoseSubjectIsNotAString(t *testing.T) {
+func TestRunSummaryRejectsASubjectThatIsNotAString(t *testing.T) {
 	summary, err := structpb.NewValue(map[string]interface{}{
 		"subject": float64(1),
 		"body":    map[string]interface{}{"summary": "x"},
 	})
 	require.NoError(t, err)
-	require.Nil(t, RunSummaryMap(summary))
+	out, err := RunSummary(summary)
+	require.Error(t, err)
+	require.Nil(t, out)
+
+	// The full execution mapper treats it like any other field that does
+	// not decode.
+	_, err = ProtoToOpenAPIExecution(&avsproto.Execution{
+		Id:      "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		StartAt: 10,
+		Status:  avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS,
+		Summary: summary,
+	}, "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	require.ErrorContains(t, err, "summary:")
 }
