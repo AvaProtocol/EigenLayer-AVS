@@ -75,7 +75,32 @@ func TestNextFreeSessionEntityIDTreatsReadErrorAsOccupied(t *testing.T) {
 	}
 }
 
-func TestNextFreeSessionEntityIDBoundsTheProbe(t *testing.T) {
+// A gateway with fresh storage against a runner the chain remembers: storage
+// says 1, the chain has spent 1..20. The SDK E2E suite is exactly this (a new
+// gateway container per run), and the old eight-candidate cap left such a
+// runner ungrantable for good.
+func TestNextFreeSessionEntityIDWalksPastSpentEntities(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	const spent = 20
+	var probes int
+	check := func(_ context.Context, _ common.Address, entity uint32) (bool, error) {
+		probes++
+		return entity <= spent, nil
+	}
+	got, err := NextFreeSessionEntityID(context.Background(), db, spChain, spOwner, spWallet, check)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != spent+1 {
+		t.Errorf("got entity %d, want %d (1..%d spent on chain)", got, spent+1, spent)
+	}
+	if probes != spent+1 {
+		t.Errorf("probes = %d, want %d", probes, spent+1)
+	}
+}
+
+func TestNextFreeSessionEntityIDBoundsTheWalk(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 	var probes int
@@ -85,13 +110,88 @@ func TestNextFreeSessionEntityIDBoundsTheProbe(t *testing.T) {
 	}
 	_, err := NextFreeSessionEntityID(context.Background(), db, spChain, spOwner, spWallet, check)
 	if err == nil {
-		t.Fatal("expected a typed occupied error after the probe cap")
+		t.Fatal("expected a typed occupied error after the walk cap")
 	}
 	if !strings.Contains(err.Error(), SessionPolicyEntityOccupiedCode) {
 		t.Fatalf("expected %s, got %v", SessionPolicyEntityOccupiedCode, err)
 	}
+	if probes != maxEntityOccupancyWalk {
+		t.Errorf("probes = %d, want %d", probes, maxEntityOccupancyWalk)
+	}
+}
+
+// Unreadable is not spent. A chain that answers nothing for eight candidates
+// in a row is a broken read, and the allocator stops there with the last error
+// instead of walking the whole range.
+func TestNextFreeSessionEntityIDStopsAfterConsecutiveReadErrors(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	var probes int
+	check := func(_ context.Context, _ common.Address, _ uint32) (bool, error) {
+		probes++
+		return false, errors.New("rpc down")
+	}
+	_, err := NextFreeSessionEntityID(context.Background(), db, spChain, spOwner, spWallet, check)
+	if err == nil {
+		t.Fatal("expected a typed occupied error after the unread cap")
+	}
+	if !strings.Contains(err.Error(), SessionPolicyEntityOccupiedCode) || !strings.Contains(err.Error(), "rpc down") {
+		t.Fatalf("expected %s carrying the read error, got %v", SessionPolicyEntityOccupiedCode, err)
+	}
 	if probes != maxEntityOccupancyProbes {
 		t.Errorf("probes = %d, want %d", probes, maxEntityOccupancyProbes)
+	}
+}
+
+// Alternating spent and unreadable candidates never reach eight unreadable in a
+// row, so the walk runs to its bound. That exhaustion must carry the read error
+// and must not claim every candidate is spent (Copilot on #840).
+func TestNextFreeSessionEntityIDExhaustedWalkKeepsTheReadError(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	check := func(_ context.Context, _ common.Address, entity uint32) (bool, error) {
+		if entity%2 == 0 {
+			return false, errors.New("rpc flapping")
+		}
+		return true, nil
+	}
+	_, err := NextFreeSessionEntityID(context.Background(), db, spChain, spOwner, spWallet, check)
+	if err == nil {
+		t.Fatal("expected a typed occupied error after the walk cap")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, SessionPolicyEntityOccupiedCode) || !strings.Contains(msg, "rpc flapping") {
+		t.Fatalf("expected %s carrying the read error, got %v", SessionPolicyEntityOccupiedCode, err)
+	}
+	if strings.Contains(msg, "every one is spent") {
+		t.Errorf("must not claim the range is spent when candidates could not be read: %v", err)
+	}
+	if !strings.Contains(msg, fmt.Sprintf("%d could not be read", maxEntityOccupancyWalk/2)) {
+		t.Errorf("expected the unreadable count in the message, got %v", err)
+	}
+}
+
+// Spent entities between read errors reset the unread run: the cap is about a
+// chain that is not answering, not about a long used range with a blip in it.
+func TestNextFreeSessionEntityIDReadErrorRunResetsOnAnAnswer(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	check := func(_ context.Context, _ common.Address, entity uint32) (bool, error) {
+		switch {
+		case entity%2 == 1 && entity < 30:
+			return false, errors.New("rpc blip")
+		case entity < 30:
+			return true, nil
+		default:
+			return false, nil
+		}
+	}
+	got, err := NextFreeSessionEntityID(context.Background(), db, spChain, spOwner, spWallet, check)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 30 {
+		t.Errorf("got entity %d, want 30", got)
 	}
 }
 
@@ -118,7 +218,7 @@ func TestNextFreeSessionEntityIDPerCandidateTimeout(t *testing.T) {
 		t.Errorf("elapsed %s, expected the first probe to consume occupancyProbeTimeout", elapsed)
 	}
 	if elapsed > occupancyProbeTimeout+2*time.Second {
-		t.Errorf("elapsed %s; one stuck candidate must not consume the 40s overall budget", elapsed)
+		t.Errorf("elapsed %s; one stuck candidate must not consume the overall walk budget", elapsed)
 	}
 }
 
