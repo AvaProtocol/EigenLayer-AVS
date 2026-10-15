@@ -2543,6 +2543,10 @@ paths:
         with the EigenLayer registration chain ID (not the workflow target
         chain). SDKs construct the message locally — there is no
         `GetSignatureFormat` endpoint.
+
+        The token expires at the message's `Expire At`, which may be at most
+        48 hours from now. A message that expires later is refused with
+        `AUTH_EXPIRY_TOO_FAR`.
       operationId: authExchange
       security: []
       requestBody:
