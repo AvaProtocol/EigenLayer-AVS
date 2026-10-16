@@ -1509,6 +1509,15 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		return nil, fmt.Errorf("executeNode called with nil node")
 	}
 
+	// Keep off-chain processing and terminal reports running, but never submit
+	// a dependent transaction after a failed or unresolved upstream write.
+	if isWorkflowWrite(node) {
+		if prerequisite := v.failedWritePrerequisite(node.Id); prerequisite != nil {
+			v.recordSkippedWrite(node, prerequisite)
+			return nil, nil
+		}
+	}
+
 	// Extract and set input data for this node (making it available as node_name.input)
 	inputData := ExtractNodeConfiguration(node)
 	if inputData != nil {
