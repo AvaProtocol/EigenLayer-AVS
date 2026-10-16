@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -62,4 +63,53 @@ func TestStampNodeChainIfUnset(t *testing.T) {
 		stampNodeChainIfUnset(cw, 0)
 		assert.Equal(t, int64(0), cw.GetContractWrite().GetConfig().GetChainId())
 	})
+}
+
+// The immediate-node RPC stamps the protobuf node, then extracts and rebuilds
+// its configuration. Inner runner chain IDs must survive that round trip.
+func TestImmediateLoopRunnerChainRoundTrip(t *testing.T) {
+	for _, runnerType := range []string{"contractRead", "contractWrite", "ethTransfer"} {
+		for _, explicitChainID := range []int64{0, 8453} {
+			name := runnerType + "/stamped"
+			if explicitChainID != 0 {
+				name = runnerType + "/explicit"
+			}
+			t.Run(name, func(t *testing.T) {
+				loop := &avsproto.LoopNode{Config: &avsproto.LoopNode_Config{InputVariable: "{{settings.items}}"}}
+				switch runnerType {
+				case "contractRead":
+					loop.Runner = &avsproto.LoopNode_ContractRead{ContractRead: &avsproto.ContractReadNode{
+						Config: &avsproto.ContractReadNode_Config{ChainId: explicitChainID},
+					}}
+				case "contractWrite":
+					loop.Runner = &avsproto.LoopNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{
+						Config: &avsproto.ContractWriteNode_Config{ChainId: explicitChainID},
+					}}
+				case "ethTransfer":
+					loop.Runner = &avsproto.LoopNode_EthTransfer{EthTransfer: &avsproto.ETHTransferNode{
+						Config: &avsproto.ETHTransferNode_Config{ChainId: explicitChainID},
+					}}
+				}
+				node := &avsproto.TaskNode{
+					Type: avsproto.NodeType_NODE_TYPE_LOOP, TaskType: &avsproto.TaskNode_Loop{Loop: loop},
+				}
+				const requestChainID = int64(11155111)
+				stampNodeChainIfUnset(node, requestChainID)
+				rebuilt, err := CreateNodeFromType("loop", ExtractNodeConfiguration(node), "loop")
+				require.NoError(t, err)
+				want := explicitChainID
+				if want == 0 {
+					want = requestChainID
+				}
+				switch runnerType {
+				case "contractRead":
+					assert.Equal(t, want, rebuilt.GetLoop().GetContractRead().GetConfig().GetChainId())
+				case "contractWrite":
+					assert.Equal(t, want, rebuilt.GetLoop().GetContractWrite().GetConfig().GetChainId())
+				case "ethTransfer":
+					assert.Equal(t, want, rebuilt.GetLoop().GetEthTransfer().GetConfig().GetChainId())
+				}
+			})
+		}
+	}
 }

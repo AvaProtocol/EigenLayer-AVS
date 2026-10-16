@@ -4253,6 +4253,7 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 		configData := map[string]interface{}{
 			"contractAddress": runner.ContractRead.Config.ContractAddress,
 			"contractAbi":     contractAbiArray,
+			"chainId":         runner.ContractRead.Config.ChainId,
 		}
 		// Handle method calls if present
 		if len(runner.ContractRead.Config.MethodCalls) > 0 {
@@ -4298,6 +4299,7 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 		configData := map[string]interface{}{
 			"contractAddress": runner.ContractWrite.Config.ContractAddress,
 			"contractAbi":     contractAbiArray,
+			"chainId":         runner.ContractWrite.Config.ChainId,
 		}
 
 		// Handle method calls if present
@@ -4337,6 +4339,7 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 			"config": map[string]interface{}{
 				"destination": runner.EthTransfer.Config.Destination,
 				"amount":      runner.EthTransfer.Config.Amount,
+				"chainId":     runner.EthTransfer.Config.ChainId,
 			},
 		}
 	case *avsproto.LoopNode_GraphqlDataQuery:
