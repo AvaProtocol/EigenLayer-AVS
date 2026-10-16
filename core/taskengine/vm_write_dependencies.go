@@ -83,7 +83,7 @@ func (v *VM) recordSkippedWrite(node *avsproto.TaskNode, prerequisite *avsproto.
 	}
 	message := fmt.Sprintf("Skipped: prerequisite write %q (%s) failed: %s", prerequisite.Name, prerequisite.Id, reason)
 	step := v.createExecutionStep(node.Id, false, message, "No transaction submitted.", time.Now().UnixMilli())
-	step.ErrorCode = avsproto.ErrorCode_EXECUTION_ENGINE_ERROR
+	step.ErrorCode = avsproto.ErrorCode_WRITE_PREREQUISITE_FAILED
 	step.Metadata, _ = structpb.NewValue(map[string]interface{}{
 		"skipped":            true,
 		"prerequisiteNodeId": prerequisite.Id,

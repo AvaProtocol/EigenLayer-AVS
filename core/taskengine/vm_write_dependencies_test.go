@@ -84,6 +84,7 @@ func TestWriteDependenciesFailedApprovalStillReports(t *testing.T) {
 	for _, id := range []string{"supply", "transfer", "batch"} {
 		step := dependencyStep(t, vm, id)
 		require.False(t, step.Success)
+		require.Equal(t, avsproto.ErrorCode_WRITE_PREREQUISITE_FAILED, step.ErrorCode)
 		require.Contains(t, step.Error, approve.Error)
 		require.Equal(t, true, step.Metadata.AsInterface().(map[string]any)["skipped"])
 		require.Equal(t, "approve", step.Metadata.AsInterface().(map[string]any)["prerequisiteNodeId"])
@@ -93,8 +94,28 @@ func TestWriteDependenciesFailedApprovalStillReports(t *testing.T) {
 	require.NotContains(t, dependencyStep(t, vm, "independent").Error, "Skipped", "an independent write is still attempted")
 	require.True(t, dependencyStep(t, vm, "report").Success)
 	require.EqualValues(t, 1, reports.Load(), "the terminal report still reaches notify")
-	_, _, status := vm.AnalyzeExecutionResult()
+	message, failed, status := vm.AnalyzeExecutionResult()
 	require.Equal(t, ExecutionFailed, status, "a successful report does not hide a failed write")
+	require.Equal(t, 5, failed, "failed and skipped writes remain failed in the execution count")
+	require.Contains(t, message, "; 3 dependent writes skipped")
+	require.NotContains(t, message, "Skipped: prerequisite", "the envelope does not repeat the root error for each skip")
+}
+
+func TestWriteDependenciesPendingNativeTransferStillBlocksInSimulation(t *testing.T) {
+	native := &avsproto.TaskNode{Id: "native", Name: "native", Type: avsproto.NodeType_NODE_TYPE_ETH_TRANSFER,
+		TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: &avsproto.ETHTransferNode{Config: &avsproto.ETHTransferNode_Config{}}}}
+	vm := dependencyVM(t, []*avsproto.TaskNode{native, dependencyWrite("supply"), customCodeNode("report")}, []*avsproto.TaskEdge{
+		{Source: "trigger", Target: "native"}, {Source: "native", Target: "supply"}, {Source: "supply", Target: "report"},
+	})
+	vm.IsSimulation = true
+	metadata, err := structpb.NewValue(map[string]any{"receiptStatus": "pending", "userOpHash": "0xpending"})
+	require.NoError(t, err)
+	vm.ExecutionLogs = []*avsproto.Execution_Step{{Id: "native", Name: "native", Success: true, Metadata: metadata,
+		OutputData: &avsproto.Execution_Step_EthTransfer{EthTransfer: &avsproto.ETHTransferNode_Output{}}}}
+	vm.resumeCompleted = map[string]bool{"native": true}
+	require.NoError(t, vm.Run())
+	require.Equal(t, avsproto.ErrorCode_WRITE_PREREQUISITE_FAILED, dependencyStep(t, vm, "supply").ErrorCode)
+	require.True(t, dependencyStep(t, vm, "report").Success)
 }
 
 func TestWriteDependenciesRestoredOutcomes(t *testing.T) {
