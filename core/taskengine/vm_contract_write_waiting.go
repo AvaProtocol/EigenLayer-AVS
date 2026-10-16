@@ -2,14 +2,18 @@ package taskengine
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 	"time"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	ethereum "github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -27,7 +31,7 @@ func (v *VM) receiptForTx(ctx context.Context, txHash common.Hash) (*types.Recei
 	if reader := GetChainStateReaderForChain(uint64(v.smartWalletConfig.ChainID)); reader != nil {
 		return reader.GetTransactionReceipt(ctx, txHash)
 	}
-	client, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
+	client, err := ethclient.DialContext(ctx, v.smartWalletConfig.EthRpcUrl)
 	if err != nil {
 		return nil, err
 	}
@@ -106,13 +110,21 @@ func extractUserOpHashFromStep(step *avsproto.Execution_Step) string {
 // This is similar to the polling logic in pkg/erc4337/preset/builder.go
 // waitForUserOpConfirmationResult holds the confirmation result including the on-chain receipt.
 type waitForUserOpConfirmationResult struct {
-	TxHash  string
-	Receipt *types.Receipt // Actual on-chain receipt (may be nil if only bundler receipt was available)
-	Success bool
-	Fields  map[string]interface{} // Standard nested Ethereum receipt fields from the bundler.
+	TxHash        string
+	Receipt       *types.Receipt // Actual on-chain receipt (may be nil if only bundler receipt was available)
+	Success       bool
+	Fields        map[string]interface{} // Standard nested Ethereum receipt fields from the bundler.
+	FailureReason string
+	RevertData    string
 }
 
 func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirmationResult, error) {
+	ctx, cancel := context.WithTimeout(v.context(), 5*time.Minute)
+	defer cancel()
+	return v.waitForUserOpConfirmationContext(ctx, userOpHash)
+}
+
+func (v *VM) waitForUserOpConfirmationContext(ctx context.Context, userOpHash string) (*waitForUserOpConfirmationResult, error) {
 	if v.smartWalletConfig == nil {
 		return nil, fmt.Errorf("smart wallet config not available for UserOp confirmation")
 	}
@@ -137,19 +149,17 @@ func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirm
 
 	// Exponential backoff intervals (in seconds): 1s → 2s → 4s → 8s → 15s → 30s → 60s
 	intervals := []time.Duration{1, 2, 4, 8, 15, 30, 60}
-	timeout := 5 * time.Minute
 	startTime := time.Now()
 
 	intervalIndex := 0
 
 	for {
-		// Check if timeout reached
-		if time.Since(startTime) > timeout {
-			return nil, fmt.Errorf("timeout waiting for UserOp confirmation after %v", timeout)
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("timeout or cancellation waiting for UserOp confirmation: %w", err)
 		}
 
 		// Try to get receipt from bundler
-		receipt, err := bundlerClient.GetUserOperationReceipt(context.Background(), userOpHash)
+		receipt, err := bundlerClient.GetUserOperationReceipt(ctx, userOpHash)
 		if err == nil && receipt != nil {
 			// Inclusion of the EntryPoint transaction does not imply that this
 			// UserOperation succeeded. Reuse the parser from the status API,
@@ -171,8 +181,11 @@ func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirm
 			if raw := asStringMap(receipt); raw != nil {
 				result.Fields = asStringMap(raw["receipt"])
 			}
+			if result.Fields["status"] == "0x0" || result.Fields["status"] == "0" {
+				result.Success = false
+			}
 			if txHash != "" {
-				receiptCtx, receiptCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				receiptCtx, receiptCancel := context.WithTimeout(ctx, 30*time.Second)
 				onChainReceipt, receiptErr := v.receiptForTx(receiptCtx, common.HexToHash(txHash))
 				receiptCancel()
 				if receiptErr == nil && onChainReceipt != nil {
@@ -184,6 +197,9 @@ func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirm
 				}
 			}
 
+			if !result.Success {
+				result.FailureReason, result.RevertData = confirmedUserOpFailure(userOpHash, entrypoint, result)
+			}
 			return result, nil
 		}
 
@@ -202,8 +218,60 @@ func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirm
 			"elapsed", time.Since(startTime))
 
 		// Wait before next retry
-		time.Sleep(currentInterval)
+		timer := time.NewTimer(currentInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, fmt.Errorf("timeout or cancellation waiting for UserOp confirmation: %w", ctx.Err())
+		case <-timer.C:
+		}
 	}
+}
+
+// Only the EntryPoint event for this UserOperation can explain its revert.
+// A bundle can contain another wallet's failed operation; do not borrow its
+// reason. Standard Error(string) and Panic(uint256) decode through abi;
+// unknown custom errors keep their raw selector/data for diagnosis.
+func confirmedUserOpFailure(userOpHash string, entrypoint common.Address, result *waitForUserOpConfirmationResult) (string, string) {
+	if (result.Receipt != nil && result.Receipt.Status == types.ReceiptStatusFailed) || result.Fields["status"] == "0x0" || result.Fields["status"] == "0" {
+		return "UserOperation outer transaction reverted after confirmation", ""
+	}
+	var logs []*types.Log
+	if result.Receipt != nil {
+		logs = result.Receipt.Logs
+	} else if raw, err := json.Marshal(result.Fields["logs"]); err == nil {
+		_ = json.Unmarshal(raw, &logs)
+	}
+	parsed, err := aa.EntryPointMetaData.GetAbi()
+	if err == nil {
+		event := parsed.Events["UserOperationRevertReason"]
+		for _, log := range logs {
+			if log == nil || log.Address != entrypoint || len(log.Topics) < 2 || log.Topics[0] != event.ID || log.Topics[1] != common.HexToHash(userOpHash) {
+				continue
+			}
+			values, err := event.Inputs.NonIndexed().Unpack(log.Data)
+			if err != nil || len(values) != 2 {
+				continue
+			}
+			data, ok := values[1].([]byte)
+			if !ok || len(data) == 0 {
+				continue
+			}
+			raw := "0x" + hex.EncodeToString(data)
+			if reason, err := abi.UnpackRevert(data); err == nil {
+				return "UserOperation execution reverted: " + reason, raw
+			}
+			return "UserOperation execution reverted with data " + raw, raw
+		}
+	}
+	return "UserOperation execution reverted after confirmation", ""
+}
+
+func confirmedFailureReason(result *waitForUserOpConfirmationResult) string {
+	if result.FailureReason != "" {
+		return result.FailureReason
+	}
+	return "UserOperation execution reverted after confirmation"
 }
 
 // waitForOnChainConfirmationIfNeeded is the single entry point for receipt-waiting logic.
@@ -305,7 +373,11 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 					step.Error = ""
 					step.ErrorCode = avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED
 					if !result.Success {
-						step.Error = "UserOperation inner execution failed after confirmation"
+						step.Error = confirmedFailureReason(result)
+						step.ErrorCode = avsproto.ErrorCode_USER_OP_EXECUTION_REVERTED
+						if result.RevertData != "" {
+							metaMap["revertData"] = result.RevertData
+						}
 					}
 					metaMap["receiptStatus"] = "confirmed"
 					metaMap["transactionHash"] = result.TxHash
@@ -336,7 +408,7 @@ func (v *VM) markUserOpConfirmationUnresolved(step *avsproto.Execution_Step) {
 	defer v.mu.Unlock()
 	step.Success = false
 	step.Error = "UserOperation confirmation unresolved; check its status before retrying"
-	step.ErrorCode = avsproto.ErrorCode_RPC_NODE_ERROR
+	step.ErrorCode = avsproto.ErrorCode_USER_OP_CONFIRMATION_UNRESOLVED
 	step.EndAt = time.Now().UnixMilli()
 }
 
@@ -370,13 +442,19 @@ func updateConfirmedWriteMetadata(step *avsproto.Execution_Step, userOpHash stri
 			method["error"] = ""
 			if !result.Success {
 				receipt["executionStatus"] = "failed"
-				method["error"] = "UserOperation inner execution failed after confirmation"
+				method["error"] = confirmedFailureReason(result)
+				if result.RevertData != "" {
+					receipt["revertData"] = result.RevertData
+				}
 			}
 		}
 		if method["success"] != true {
 			step.Success = false
 			if message, _ := method["error"].(string); step.Error == "" && message != "" {
 				step.Error = message
+			}
+			if receipt["executionStatus"] == "failed" {
+				step.ErrorCode = avsproto.ErrorCode_USER_OP_EXECUTION_REVERTED
 			}
 		}
 	}
