@@ -67,10 +67,12 @@ func TestConfirmationTimeoutKeepsPendingSiblingsAndCode(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	vm.WithContext(ctx)
 	step := pendingConfirmationStep(t)
 	start := time.Now()
-	require.True(t, vm.waitForOnChainConfirmationIfNeeded(step))
+	result, err := vm.waitForUserOpConfirmationContext(ctx, confirmationTestHash)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Nil(t, result)
+	vm.markUserOpConfirmationUnresolved(step)
 	require.Less(t, time.Since(start), time.Second, "a backoff must not sleep past the confirmation deadline")
 	require.Greater(t, polls.Load(), int32(0), "exercise the real receipt-poll loop")
 	require.Equal(t, avsproto.ErrorCode_USER_OP_CONFIRMATION_UNRESOLVED, step.ErrorCode)
@@ -104,6 +106,36 @@ func TestConfirmationOuterTransactionRevert(t *testing.T) {
 	require.Contains(t, step.Error, "outer transaction reverted")
 }
 
+func TestConfirmationSurvivesBlockingRequestDisconnect(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var polls atomic.Int32
+	txHash := common.HexToHash(confirmationTestOtherHash)
+	vm := confirmationTestVM(t, func(method string) any {
+		switch method {
+		case "eth_getUserOperationReceipt":
+			if polls.Add(1) == 1 {
+				cancel() // The client disconnects while the submitted op is pending.
+				return nil
+			}
+			return map[string]any{"success": true, "receipt": map[string]any{"transactionHash": txHash.Hex(), "status": "0x1"}}
+		case "eth_getTransactionReceipt":
+			return &types.Receipt{Status: types.ReceiptStatusSuccessful, TxHash: txHash, BlockNumber: big.NewInt(10), Logs: []*types.Log{}, EffectiveGasPrice: big.NewInt(1), GasUsed: 21000}
+		}
+		return nil
+	})
+	vm.WithContext(ctx)
+	step := pendingConfirmationStep(t)
+	methods := step.Metadata.AsInterface().([]any)
+	step.Metadata, _ = structpb.NewValue(methods[:1])
+	require.True(t, vm.waitForOnChainConfirmationIfNeeded(step))
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+	require.EqualValues(t, 2, polls.Load())
+	require.True(t, step.Success, "a later confirmation must not become unresolved because the client disconnected")
+	require.Empty(t, step.Error)
+	require.Equal(t, avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED, step.ErrorCode)
+}
+
 func confirmationRevertLog(t *testing.T, entrypoint common.Address, hash string, data []byte) *types.Log {
 	t.Helper()
 	parsed, err := aa.EntryPointMetaData.GetAbi()
@@ -130,7 +162,11 @@ func TestConfirmedRevertReasonMatchesOperationAndEntryPoint(t *testing.T) {
 			logs = append(logs, own)
 		}
 		for _, onChain := range []bool{false, true} {
-			result := &waitForUserOpConfirmationResult{Fields: map[string]any{"logs": logs}}
+			rawLogs, err := json.Marshal(logs)
+			require.NoError(t, err)
+			var bundlerLogs []interface{}
+			require.NoError(t, json.Unmarshal(rawLogs, &bundlerLogs))
+			result := &waitForUserOpConfirmationResult{Fields: map[string]any{"logs": bundlerLogs}}
 			if onChain {
 				result.Receipt = &types.Receipt{Status: types.ReceiptStatusSuccessful, Logs: logs}
 			}
@@ -197,4 +233,32 @@ func TestConfirmedSuccessDoesNotRelabelAnEarlierRPCFailureAsReverted(t *testing.
 	require.False(t, step.Success)
 	require.Contains(t, step.Error, "RPC service unavailable")
 	require.NotEqual(t, avsproto.ErrorCode_USER_OP_EXECUTION_REVERTED, step.ErrorCode)
+}
+
+func TestConfirmedRevertCodeAndMessageSelectTheSameCall(t *testing.T) {
+	step := pendingConfirmationStep(t)
+	methods := step.Metadata.AsInterface().([]any)
+	methods[0] = map[string]any{"methodName": "approve", "success": false, "error": "RPC service unavailable"}
+	step.Metadata, _ = structpb.NewValue(methods)
+	updateConfirmedWriteMetadata(step, confirmationTestOtherHash, &waitForUserOpConfirmationResult{
+		Success: false, FailureReason: "execution reverted: rejected supply", RevertData: "0xdeadbeef",
+	})
+	require.Equal(t, avsproto.ErrorCode_USER_OP_EXECUTION_REVERTED, step.ErrorCode)
+	require.Equal(t, "execution reverted: rejected supply", step.Error)
+	require.Equal(t, "RPC service unavailable", step.Metadata.AsInterface().([]any)[0].(map[string]any)["error"])
+}
+
+func TestConfirmedPanicReason(t *testing.T) {
+	entrypoint := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	uintType, err := abi.NewType("uint256", "", nil)
+	require.NoError(t, err)
+	packed, err := (abi.Arguments{{Type: uintType}}).Pack(big.NewInt(0x11))
+	require.NoError(t, err)
+	data := append(crypto.Keccak256([]byte("Panic(uint256)"))[:4], packed...)
+	revertLog := confirmationRevertLog(t, entrypoint, confirmationTestHash, data)
+	reason, raw := confirmedUserOpFailure(confirmationTestHash, entrypoint, &waitForUserOpConfirmationResult{
+		Receipt: &types.Receipt{Status: types.ReceiptStatusSuccessful, Logs: []*types.Log{revertLog}},
+	})
+	require.Contains(t, reason, "underflow or overflow")
+	require.Equal(t, "0x"+hex.EncodeToString(data), raw)
 }

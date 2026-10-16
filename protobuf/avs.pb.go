@@ -357,6 +357,7 @@ const (
 	ErrorCode_SECRET_ALREADY_EXISTS           ErrorCode = 4005 // Secret with same name exists
 	ErrorCode_USER_OP_CONFIRMATION_UNRESOLVED ErrorCode = 4006 // Submission may still confirm; do not blindly retry
 	ErrorCode_USER_OP_EXECUTION_REVERTED      ErrorCode = 4007 // Confirmed outer transaction or inner operation reverted
+	ErrorCode_WRITE_PREREQUISITE_FAILED       ErrorCode = 4008 // Write skipped because an upstream write did not succeed
 	// 5000-5999: External Service errors
 	ErrorCode_RPC_NODE_ERROR     ErrorCode = 5000 // Blockchain RPC node error
 	ErrorCode_TENDERLY_API_ERROR ErrorCode = 5001 // Tenderly simulation error
@@ -408,6 +409,7 @@ var (
 		4005: "SECRET_ALREADY_EXISTS",
 		4006: "USER_OP_CONFIRMATION_UNRESOLVED",
 		4007: "USER_OP_EXECUTION_REVERTED",
+		4008: "WRITE_PREREQUISITE_FAILED",
 		5000: "RPC_NODE_ERROR",
 		5001: "TENDERLY_API_ERROR",
 		5002: "TOKEN_LOOKUP_ERROR",
@@ -452,6 +454,7 @@ var (
 		"SECRET_ALREADY_EXISTS":           4005,
 		"USER_OP_CONFIRMATION_UNRESOLVED": 4006,
 		"USER_OP_EXECUTION_REVERTED":      4007,
+		"WRITE_PREREQUISITE_FAILED":       4008,
 		"RPC_NODE_ERROR":                  5000,
 		"TENDERLY_API_ERROR":              5001,
 		"TOKEN_LOOKUP_ERROR":              5002,
@@ -9663,7 +9666,9 @@ type LoopNode_Config struct {
 	// Note: ContractWrite operations always run sequentially regardless of this setting
 	ExecutionMode ExecutionMode `protobuf:"varint,4,opt,name=execution_mode,json=executionMode,proto3,enum=aggregator.ExecutionMode" json:"execution_mode,omitempty"`
 	// Per-iteration timeout in seconds. If an iteration does not complete within
-	// this duration, it is marked as failed. Default: 30 seconds.
+	// this duration, it is marked as failed. Off-chain default: 30 seconds.
+	// Write runners use at least nine minutes to collect nonce retries and
+	// the bounded five-minute confirmation result of a submitted operation.
 	IterationTimeout uint32 `protobuf:"varint,5,opt,name=iteration_timeout,json=iterationTimeout,proto3" json:"iteration_timeout,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
@@ -11018,7 +11023,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x0fLANG_JAVASCRIPT\x10\x01\x12\r\n" +
 	"\tLANG_JSON\x10\x02\x12\x10\n" +
 	"\fLANG_GRAPHQL\x10\x03\x12\x13\n" +
-	"\x0fLANG_HANDLEBARS\x10\x04*\xd7\b\n" +
+	"\x0fLANG_HANDLEBARS\x10\x04*\xf7\b\n" +
 	"\tErrorCode\x12\x1a\n" +
 	"\x16ERROR_CODE_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\fUNAUTHORIZED\x10\xe8\a\x12\x0e\n" +
@@ -11044,7 +11049,8 @@ const file_avs_proto_rawDesc = "" +
 	"\x15WALLET_ALREADY_EXISTS\x10\xa4\x1f\x12\x1a\n" +
 	"\x15SECRET_ALREADY_EXISTS\x10\xa5\x1f\x12$\n" +
 	"\x1fUSER_OP_CONFIRMATION_UNRESOLVED\x10\xa6\x1f\x12\x1f\n" +
-	"\x1aUSER_OP_EXECUTION_REVERTED\x10\xa7\x1f\x12\x13\n" +
+	"\x1aUSER_OP_EXECUTION_REVERTED\x10\xa7\x1f\x12\x1e\n" +
+	"\x19WRITE_PREREQUISITE_FAILED\x10\xa8\x1f\x12\x13\n" +
 	"\x0eRPC_NODE_ERROR\x10\x88'\x12\x17\n" +
 	"\x12TENDERLY_API_ERROR\x10\x89'\x12\x17\n" +
 	"\x12TOKEN_LOOKUP_ERROR\x10\x8a'\x12\x15\n" +

@@ -318,6 +318,7 @@ enum ErrorCode {
   SECRET_ALREADY_EXISTS = 4005;     // Secret with same name exists
   USER_OP_CONFIRMATION_UNRESOLVED = 4006; // Submission may still confirm; do not blindly retry
   USER_OP_EXECUTION_REVERTED = 4007; // Confirmed outer transaction or inner operation reverted
+  WRITE_PREREQUISITE_FAILED = 4008;       // Write skipped because an upstream write did not succeed
   
   // 5000-5999: External Service errors
   RPC_NODE_ERROR = 5000;            // Blockchain RPC node error
@@ -696,7 +697,9 @@ message LoopNode {
     // Note: ContractWrite operations always run sequentially regardless of this setting
     ExecutionMode execution_mode = 4;
     // Per-iteration timeout in seconds. If an iteration does not complete within
-    // this duration, it is marked as failed. Default: 30 seconds.
+    // this duration, it is marked as failed. Off-chain default: 30 seconds.
+    // Write runners use at least nine minutes to collect nonce retries and
+    // the bounded five-minute confirmation result of a submitted operation.
     uint32 iteration_timeout = 5;
   }
 

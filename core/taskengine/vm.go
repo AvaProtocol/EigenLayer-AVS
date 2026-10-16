@@ -5086,25 +5086,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	isEthTransfer := node.GetEthTransfer() != nil
 	isOnChainOp := isContractWrite || isEthTransfer
 
-	// Per-iteration timeout from config; default depends on operation type and chain.
-	// On-chain operations need longer timeouts to accommodate:
-	// - UserOp nonce conflict retries (3 retries × up to 60s nonce polling each)
-	// - Receipt confirmation polling (waitForUserOpConfirmation has a 5-min internal timeout)
-	// Defaults:
-	// - Ethereum mainnet (chain 1): 6 min (covers 5-min confirmation + RPC propagation delay)
-	// - Other chains with on-chain ops: 4 min (covers retry budget + faster confirmation)
-	// - Non-on-chain ops: 30s
-	iterationTimeoutSec := node.Config.IterationTimeout
-	if iterationTimeoutSec == 0 {
-		if isOnChainOp && v.smartWalletConfig != nil && v.smartWalletConfig.ChainID == 1 {
-			iterationTimeoutSec = 360 // 6 minutes for Ethereum mainnet on-chain ops
-		} else if isOnChainOp {
-			iterationTimeoutSec = 240 // 4 minutes for other chains (covers 3 paymaster retries)
-		} else {
-			iterationTimeoutSec = 30
-		}
-	}
-	iterationTimeout := time.Duration(iterationTimeoutSec) * time.Second
+	// Short collector timeouts cannot truncate a submitted operation's bounded
+	// confirmation wait. Off-chain runner timeouts keep their configured value.
+	iterationTimeout := loopIterationTimeout(time.Duration(node.Config.IterationTimeout)*time.Second, isOnChainOp)
 
 	// Resolve input variable from template expression (e.g., "{{settings.address_list}}")
 	inputArray, _, resolveErr := resolveLoopInputVariable(v, inputNodeName)
@@ -5379,6 +5363,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	// as a hard step failure.
 	if infraFailure && firstError != nil {
 		finalizeStep(s, false, nil, firstError.Error(), log.String())
+		propagateLoopConfirmationFailure(s, iterationSteps)
 		return s, firstError
 	}
 
@@ -5416,6 +5401,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 			},
 		)
 		finalizeStep(s, false, loopErr, "", log.String())
+		propagateLoopConfirmationFailure(s, iterationSteps)
 		return s, nil // return nil error: the loop itself ran to completion
 	}
 

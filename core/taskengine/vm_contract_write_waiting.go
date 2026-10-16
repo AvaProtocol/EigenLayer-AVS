@@ -118,8 +118,13 @@ type waitForUserOpConfirmationResult struct {
 	RevertData    string
 }
 
+const userOpConfirmationTimeout = 5 * time.Minute
+
 func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirmationResult, error) {
-	ctx, cancel := context.WithTimeout(v.context(), 5*time.Minute)
+	// The operation is already submitted. A blocking-trigger client disconnect
+	// cannot undo it and must not prematurely decide its on-chain outcome.
+	// Keep request values, but use our own bounded confirmation lifetime.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(v.context()), userOpConfirmationTimeout)
 	defer cancel()
 	return v.waitForUserOpConfirmationContext(ctx, userOpHash)
 }
@@ -450,11 +455,15 @@ func updateConfirmedWriteMetadata(step *avsproto.Execution_Step, userOpHash stri
 		}
 		if method["success"] != true {
 			step.Success = false
-			if message, _ := method["error"].(string); step.Error == "" && message != "" {
-				step.Error = message
-			}
+			code := avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED
 			if receipt["executionStatus"] == "failed" {
-				step.ErrorCode = avsproto.ErrorCode_USER_OP_EXECUTION_REVERTED
+				code = avsproto.ErrorCode_USER_OP_EXECUTION_REVERTED
+			}
+			// Keep the selected message and code about the same call. A known
+			// confirmed revert takes precedence over a generic earlier failure.
+			if message, _ := method["error"].(string); message != "" && (step.Error == "" || (code == avsproto.ErrorCode_USER_OP_EXECUTION_REVERTED && step.ErrorCode != code)) {
+				step.Error = message
+				step.ErrorCode = code
 			}
 		}
 	}
