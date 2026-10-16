@@ -517,10 +517,7 @@ type ContractWriteNodeConfig struct {
 	ContractAddress EthereumAddress `json:"contractAddress"`
 
 	// GasLimit Custom gas limit (decimal string).
-	GasLimit *string `json:"gasLimit,omitempty"`
-
-	// IsSimulated When true, use Tenderly simulation instead of sending a real UserOp.
-	IsSimulated *bool         `json:"isSimulated,omitempty"`
+	GasLimit    *string       `json:"gasLimit,omitempty"`
 	MethodCalls *[]MethodCall `json:"methodCalls,omitempty"`
 
 	// Value ETH value to send with the call (wei, decimal string).
@@ -1515,7 +1512,8 @@ type RunNodeRequest struct {
 	// configured chain; on query/filter params it is optional.
 	ChainId *ChainId `json:"chainId,omitempty"`
 
-	// Erc20Overrides Optional ERC20 balance/allowance state overrides applied only during this isolated node simulation. Lets callers seed token balances and approvals so contract-write simulations (e.g. Uniswap swaps) don't revert with "transfer amount exceeds allowance/balance" before the approval/funding transactions have been run. Simulation-only: a real-execution request (isSimulated=false) that sets these is rejected with an error, never silently ignored.
+	// Erc20Overrides Legacy single-node overrides. Nonempty overrides are rejected. Simulate actions as a complete workflow including their prerequisites.
+	// Deprecated:
 	Erc20Overrides *[]ERC20StateOverride `json:"erc20Overrides,omitempty"`
 
 	// InputVariables Free-form key-value bag of values used to resolve `{{variable.path}}`

@@ -140,12 +140,8 @@ func TestContractWriteNode_UniswapV3Quote(t *testing.T) {
 		},
 	}
 
-	// Execute the node. This test validates tuple-parameter calldata generation,
-	// not erc20_overrides: QuoterV2.quoteExactInputSingle is a view function that
-	// reverts by design to return the quote and never performs a transferFrom, so
-	// seeding balances/allowances here would prove nothing. The erc20_overrides
-	// request path is covered end-to-end by
-	// TestRunNodeImmediatelyRPC/ERC20Overrides_UniswapSwap.
+	// This quote-only call validates tuple-parameter calldata generation.
+	// Approval-state propagation requires a workflow with a dependent action.
 	step, err := vm.RunNodeWithInputs(node, inputVars)
 	require.NoError(t, err)
 	require.NotNil(t, step)

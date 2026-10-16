@@ -41,7 +41,7 @@ func stepResults(t *testing.T, step *avsproto.Execution_Step) []map[string]any {
 	return out
 }
 
-// G4: on-demand (nodes:run) real execution of a multi-call node — the approve+swap shape — must
+// Workflow execution of a multi-call node — the approve+swap shape — must
 // submit ONE atomic UserOp (executeBatch) across the per-call targets instead of one UserOp per
 // method. Deployed workflows must keep the existing sequential per-method path unchanged.
 func TestAtomicBatchOnDemand(t *testing.T) {
@@ -51,8 +51,6 @@ func TestAtomicBatchOnDemand(t *testing.T) {
 	tokenB := common.HexToAddress("0xbBbb000000000000000000000000000000000002")
 	router := common.HexToAddress("0xcCcc000000000000000000000000000000000003")
 	swConfig := ondemandTestConfig()
-
-	falsePtr := false
 
 	// A node with two method calls on two DIFFERENT contracts via per-call contract_address:
 	// approve(router)@tokenA + approve(router)@tokenB. Pre-encoded calldata, so no ABI is needed.
@@ -65,7 +63,6 @@ func TestAtomicBatchOnDemand(t *testing.T) {
 			Config: &avsproto.ContractWriteNode_Config{
 				ContractAddress: tokenA.Hex(), // node-level default target
 				ChainId:         swConfig.ChainID,
-				IsSimulated:     &falsePtr, // force the real execution path
 				MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 					{MethodName: "approve", CallData: &cdA, ContractAddress: &addrA},
 					{MethodName: "approve", CallData: &cdB, ContractAddress: &addrB},
@@ -199,7 +196,6 @@ func TestAtomicBatchOnDemand(t *testing.T) {
 			Config: &avsproto.ContractWriteNode_Config{
 				ContractAddress: tokenA.Hex(),
 				ChainId:         swConfig.ChainID,
-				IsSimulated:     &falsePtr,
 				Value:           &value,
 				MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 					{MethodName: "approve", CallData: &cdA, ContractAddress: &addrA},
@@ -241,7 +237,6 @@ func TestAtomicBatchOnDemand(t *testing.T) {
 			Config: &avsproto.ContractWriteNode_Config{
 				ContractAddress: tokenA.Hex(),
 				ChainId:         swConfig.ChainID,
-				IsSimulated:     &falsePtr,
 				MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 					{MethodName: "approve", CallData: &cdA, ContractAddress: &addrA},
 					{MethodName: "approve", CallData: &cdB, ContractAddress: &bad},

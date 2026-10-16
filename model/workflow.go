@@ -245,8 +245,9 @@ func (t *Workflow) ToJSON() ([]byte, error) {
 }
 
 func (t *Workflow) FromStorageData(body []byte) error {
-	// err := json.Unmarshal(body, t)
-	err := protojson.Unmarshal(body, t.Task)
+	// Stored protobuf JSON can outlive removed schema fields. Match the other
+	// workflow loaders without carrying retired fields into the current model.
+	err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(body, t.Task)
 	if err != nil {
 		return err
 	}

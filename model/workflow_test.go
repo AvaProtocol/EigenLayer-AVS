@@ -6,7 +6,28 @@ import (
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestStoredWorkflowDropsRemovedNodeFields(t *testing.T) {
+	workflow := &Workflow{Task: &avsproto.Task{}}
+	err := workflow.FromStorageData([]byte(`{
+		"id": "stored-workflow",
+		"nodes": [{
+			"id": "action",
+			"contractWrite": {"config": {
+				"contractAddress": "0x1111111111111111111111111111111111111111",
+				"chainId": "11155111",
+				"retiredConfigField": true
+			}}
+		}]
+	}`))
+	require.NoError(t, err)
+	require.Equal(t, int64(11155111), workflow.Nodes[0].GetContractWrite().GetConfig().GetChainId())
+	stored, err := workflow.ToJSON()
+	require.NoError(t, err)
+	require.NotContains(t, string(stored), "retiredConfigField")
+}
 
 func TestIsRunable(t *testing.T) {
 	t.Run("task with future startAt should not be runable", func(t *testing.T) {

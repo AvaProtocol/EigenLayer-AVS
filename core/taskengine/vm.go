@@ -2696,10 +2696,8 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 	tempVM.TaskOwner = v.TaskOwner
 	// Propagate shared clients (e.g., Tenderly)
 	tempVM.tenderlyClient = v.tenderlyClient
-	// Share the accumulated simulation state so caller-seeded overrides
-	// (e.g. erc20_overrides) and any earlier nodes' state diffs reach this
-	// node's Tenderly simulation. Without this the node would run against a
-	// fresh, empty state and the seeded balances/allowances would be lost.
+	// Share accumulated state so earlier nodes' storage diffs and successful
+	// simulated approvals reach this node's Tenderly simulation.
 	tempVM.simulationState = v.simulationState
 
 	// Log simulation mode for debugging
@@ -2978,13 +2976,6 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 					}
 					contractConfig.MethodCalls = append(contractConfig.MethodCalls, methodCall)
 				}
-			}
-		}
-
-		// Per-node execution mode: expect camelCase key from clients
-		if v, ok := config["isSimulated"]; ok {
-			if b, ok2 := v.(bool); ok2 {
-				contractConfig.IsSimulated = &b
 			}
 		}
 
@@ -3996,11 +3987,6 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				config["gasLimit"] = *contractWrite.Config.GasLimit
 			}
 
-			// Extract optional isSimulated field (simulation vs real execution)
-			if contractWrite.Config.IsSimulated != nil {
-				config["isSimulated"] = *contractWrite.Config.IsSimulated
-			}
-
 			// Handle method calls - extract fields to simple map for protobuf compatibility
 			if len(contractWrite.Config.MethodCalls) > 0 {
 				methodCallsArray := make([]interface{}, len(contractWrite.Config.MethodCalls))
@@ -4253,6 +4239,7 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 		configData := map[string]interface{}{
 			"contractAddress": runner.ContractRead.Config.ContractAddress,
 			"contractAbi":     contractAbiArray,
+			"chainId":         runner.ContractRead.Config.ChainId,
 		}
 		// Handle method calls if present
 		if len(runner.ContractRead.Config.MethodCalls) > 0 {
@@ -4298,6 +4285,7 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 		configData := map[string]interface{}{
 			"contractAddress": runner.ContractWrite.Config.ContractAddress,
 			"contractAbi":     contractAbiArray,
+			"chainId":         runner.ContractWrite.Config.ChainId,
 		}
 
 		// Handle method calls if present
@@ -4337,6 +4325,7 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 			"config": map[string]interface{}{
 				"destination": runner.EthTransfer.Config.Destination,
 				"amount":      runner.EthTransfer.Config.Amount,
+				"chainId":     runner.EthTransfer.Config.ChainId,
 			},
 		}
 	case *avsproto.LoopNode_GraphqlDataQuery:

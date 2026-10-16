@@ -269,7 +269,7 @@ func TestWithdrawAllETH_Sepolia(t *testing.T) {
 	}
 
 	// Execute withdrawal with paymaster sponsorship (automatic reimbursement)
-	// is_simulated=false ensures real UserOp execution via bundler
+	// Deployed workflow execution submits the UserOp via bundler
 	t.Logf("   Executing withdrawal with calculated max amount...")
 	transferResult, err := engine.RunNodeImmediately("ethTransfer", ethTransferConfig, inputVars, user, false)
 	require.NoError(t, err, "Withdrawal RunNodeImmediately should not return error")
