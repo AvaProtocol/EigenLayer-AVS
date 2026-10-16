@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // receiptForTx fetches a transaction receipt for the VM's chain via the
@@ -87,6 +88,9 @@ func extractUserOpHashFromStep(step *avsproto.Execution_Step) string {
 		for _, result := range resultsArray {
 			if resultMap, ok := result.(map[string]interface{}); ok {
 				if receipt, hasReceipt := resultMap["receipt"].(map[string]interface{}); hasReceipt {
+					if receipt["status"] != "pending" {
+						continue
+					}
 					if userOpHash, hasHash := receipt["userOpHash"].(string); hasHash {
 						return userOpHash
 					}
@@ -104,6 +108,8 @@ func extractUserOpHashFromStep(step *avsproto.Execution_Step) string {
 type waitForUserOpConfirmationResult struct {
 	TxHash  string
 	Receipt *types.Receipt // Actual on-chain receipt (may be nil if only bundler receipt was available)
+	Success bool
+	Fields  map[string]interface{} // Standard nested Ethereum receipt fields from the bundler.
 }
 
 func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirmationResult, error) {
@@ -145,15 +151,12 @@ func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirm
 		// Try to get receipt from bundler
 		receipt, err := bundlerClient.GetUserOperationReceipt(context.Background(), userOpHash)
 		if err == nil && receipt != nil {
-			// Receipt is found, extract block number and tx hash for logging
-			var blockNumber interface{}
-			var txHash string
-
-			if receiptMap, ok := receipt.(map[string]interface{}); ok {
-				blockNumber = receiptMap["blockNumber"]
-				if txHashVal, ok := receiptMap["transactionHash"].(string); ok {
-					txHash = txHashVal
-				}
+			// Inclusion of the EntryPoint transaction does not imply that this
+			// UserOperation succeeded. Reuse the parser from the status API,
+			// including standard bundlers' nested transaction receipt.
+			success, txHash, blockNumber := parseBundlerReceipt(receipt)
+			if success == nil || txHash == "" {
+				return nil, fmt.Errorf("bundler confirmation receipt is missing success or transactionHash")
 			}
 
 			v.logger.Info("✅ UserOp confirmed on-chain",
@@ -164,13 +167,17 @@ func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirm
 
 			// Fetch the actual on-chain receipt to get gas data.
 			// Use a bounded context so a slow/unresponsive RPC node cannot block indefinitely.
-			result := &waitForUserOpConfirmationResult{TxHash: txHash}
+			result := &waitForUserOpConfirmationResult{TxHash: txHash, Success: *success}
+			if raw := asStringMap(receipt); raw != nil {
+				result.Fields = asStringMap(raw["receipt"])
+			}
 			if txHash != "" {
 				receiptCtx, receiptCancel := context.WithTimeout(context.Background(), 30*time.Second)
 				onChainReceipt, receiptErr := v.receiptForTx(receiptCtx, common.HexToHash(txHash))
 				receiptCancel()
 				if receiptErr == nil && onChainReceipt != nil {
 					result.Receipt = onChainReceipt
+					result.Success = result.Success && onChainReceipt.Status == types.ReceiptStatusSuccessful
 				} else if v.logger != nil {
 					v.logger.Warn("Failed to fetch on-chain receipt for gas data",
 						"txHash", txHash, "error", receiptErr)
@@ -220,37 +227,46 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 
 	// Contract write: check for pending status in metadata array
 	if shouldWaitForContractWriteConfirmation(step, false) {
-		userOpHash := extractUserOpHashFromStep(step)
-		if userOpHash == "" {
-			return false
-		}
+		for shouldWaitForContractWriteConfirmation(step, false) {
+			userOpHash := extractUserOpHashFromStep(step)
+			if userOpHash == "" {
+				v.markUserOpConfirmationUnresolved(step)
+				return true
+			}
 
-		v.logger.Info("⏳ On-chain confirmation needed (contractWrite pending)",
-			"stepID", step.Id,
-			"userOpHash", userOpHash)
-
-		result, waitErr := v.waitForUserOpConfirmation(userOpHash)
-		if waitErr != nil {
-			v.logger.Error("❌ Failed to wait for on-chain confirmation",
-				"stepID", step.Id,
-				"userOpHash", userOpHash,
-				"error", waitErr)
-		} else {
-			v.logger.Info("✅ On-chain confirmation received",
+			v.logger.Info("⏳ On-chain confirmation needed (contractWrite pending)",
 				"stepID", step.Id,
 				"userOpHash", userOpHash)
 
-			v.mu.Lock()
-			step.Success = true
-			step.Error = ""
-			// Update gas cost fields from the on-chain receipt if the step doesn't already have them.
-			// Done under v.mu to avoid data races with readers of ExecutionLogs.
-			if result != nil && result.Receipt != nil && (step.TotalGasCost == "" || step.TotalGasCost == "0") {
-				updateStepGasCostFromReceipt(step, result.Receipt, v)
-			}
-			v.mu.Unlock()
+			result, waitErr := v.waitForUserOpConfirmation(userOpHash)
+			if waitErr != nil {
+				v.logger.Error("❌ Failed to wait for on-chain confirmation",
+					"stepID", step.Id,
+					"userOpHash", userOpHash,
+					"error", waitErr)
+				// Keep receipt metadata pending, but fail this workflow's attempt
+				// to confirm it. An empty step error would let AnalyzeExecutionResult
+				// declare success even though the on-chain outcome is unresolved.
+				v.markUserOpConfirmationUnresolved(step)
+				return true
+			} else {
+				v.logger.Info("✅ On-chain confirmation received",
+					"stepID", step.Id,
+					"userOpHash", userOpHash)
 
-			v.addRPCPropagationDelay()
+				v.mu.Lock()
+				updateConfirmedWriteMetadata(step, userOpHash, result)
+				// Update gas cost fields from the on-chain receipt if the step doesn't already have them.
+				// Done under v.mu to avoid data races with readers of ExecutionLogs.
+				if result != nil && result.Receipt != nil && (step.TotalGasCost == "" || step.TotalGasCost == "0") {
+					updateStepGasCostFromReceipt(step, result.Receipt, v)
+				}
+				v.mu.Unlock()
+
+				if result.Success {
+					v.addRPCPropagationDelay()
+				}
+			}
 		}
 		return true
 	}
@@ -258,12 +274,15 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 	// ETH transfer: SendUserOp may have timed out with a nil receipt.
 	// The ethTransfer processor stores receiptStatus="pending" and userOpHash in metadata
 	// when the receipt was not available. Poll for confirmation the same way as contractWrite.
-	if step.GetEthTransfer() != nil && step.Success && step.Metadata != nil {
+	if step.GetEthTransfer() != nil && step.Metadata != nil {
 		meta := step.Metadata.AsInterface()
 		if metaMap, ok := meta.(map[string]interface{}); ok {
 			status, _ := metaMap["receiptStatus"].(string)
 			userOpHash, _ := metaMap["userOpHash"].(string)
 			if status == "pending" && userOpHash != "" {
+				v.mu.Lock()
+				step.Success = false // Submission is not confirmed execution.
+				v.mu.Unlock()
 				v.logger.Info("⏳ On-chain confirmation needed (ethTransfer pending)",
 					"stepID", step.Id,
 					"userOpHash", userOpHash)
@@ -274,6 +293,7 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 						"stepID", step.Id,
 						"userOpHash", userOpHash,
 						"error", waitErr)
+					v.markUserOpConfirmationUnresolved(step)
 				} else {
 					v.logger.Info("✅ ethTransfer confirmed on-chain",
 						"stepID", step.Id,
@@ -281,12 +301,27 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 
 					// Update gas cost fields under v.mu to avoid data races with readers of ExecutionLogs
 					v.mu.Lock()
+					step.Success = result.Success
+					step.Error = ""
+					step.ErrorCode = avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED
+					if !result.Success {
+						step.Error = "UserOperation inner execution failed after confirmation"
+					}
+					metaMap["receiptStatus"] = "confirmed"
+					metaMap["transactionHash"] = result.TxHash
+					if !result.Success {
+						metaMap["receiptStatus"] = "failed"
+					}
+					step.Metadata, _ = structpb.NewValue(metaMap)
+					step.EndAt = time.Now().UnixMilli()
 					if result != nil && result.Receipt != nil && (step.TotalGasCost == "" || step.TotalGasCost == "0") {
 						updateStepGasCostFromReceipt(step, result.Receipt, v)
 					}
 					v.mu.Unlock()
 
-					v.addRPCPropagationDelay()
+					if result.Success {
+						v.addRPCPropagationDelay()
+					}
 				}
 				return true
 			}
@@ -294,6 +329,59 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 	}
 
 	return false
+}
+
+func (v *VM) markUserOpConfirmationUnresolved(step *avsproto.Execution_Step) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	step.Success = false
+	step.Error = "UserOperation confirmation unresolved; check its status before retrying"
+	step.ErrorCode = avsproto.ErrorCode_RPC_NODE_ERROR
+	step.EndAt = time.Now().UnixMilli()
+}
+
+// updateConfirmedWriteMetadata resolves only the matching operation. A node
+// can contain multiple sequential calls, each with its own UserOperation.
+// Preserve method/target/inner-call metadata for the report and recompute the
+// step outcome from all calls rather than declaring the whole step successful
+// when its first receipt arrives. Caller holds v.mu.
+func updateConfirmedWriteMetadata(step *avsproto.Execution_Step, userOpHash string, result *waitForUserOpConfirmationResult) {
+	methods := step.Metadata.AsInterface().([]interface{})
+	step.Success = true
+	step.Error = ""
+	step.ErrorCode = avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED
+	for _, raw := range methods {
+		method, ok := raw.(map[string]interface{})
+		if !ok {
+			step.Success = false
+			continue
+		}
+		receipt, _ := method["receipt"].(map[string]interface{})
+		if receipt != nil && receipt["userOpHash"] == userOpHash && receipt["status"] == "pending" {
+			for key, value := range result.Fields {
+				receipt[key] = value
+			}
+			receipt["transactionHash"] = result.TxHash
+			if _, ok := receipt["status"].(string); !ok || receipt["status"] == "pending" {
+				receipt["status"] = "0x1"
+			}
+			receipt["executionStatus"] = "confirmed"
+			method["success"] = result.Success
+			method["error"] = ""
+			if !result.Success {
+				receipt["executionStatus"] = "failed"
+				method["error"] = "UserOperation inner execution failed after confirmation"
+			}
+		}
+		if method["success"] != true {
+			step.Success = false
+			if message, _ := method["error"].(string); step.Error == "" && message != "" {
+				step.Error = message
+			}
+		}
+	}
+	step.Metadata, _ = structpb.NewValue(methods)
+	step.EndAt = time.Now().UnixMilli()
 }
 
 // updateStepGasCostFromReceipt extracts gas cost information from an on-chain receipt
