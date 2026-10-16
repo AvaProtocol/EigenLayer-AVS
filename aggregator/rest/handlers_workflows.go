@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -593,9 +594,17 @@ func openAPITriggerTypeToProto(t generated.TriggerType) (avsproto.TriggerType, e
 	}
 }
 
+// mapSimulateError turns an engine simulate failure into the REST problem.
+// Caller mistakes — a gRPC InvalidArgument, or a StructuredError in the
+// proto validation band (3000–3999) — are 400s, so the problem handler
+// does not report them to Sentry. Transport and engine failures stay 502.
 func mapSimulateError(err error) error {
 	if st, ok := status.FromError(err); ok && st.Code() == codes.InvalidArgument {
 		return badRequest("WORKFLOWS_SIMULATE_INVALID", "Invalid simulation payload", st.Message())
+	}
+	var structured *taskengine.StructuredError
+	if errors.As(err, &structured) && isClientValidationCode(structured.Code) {
+		return badRequest("WORKFLOWS_SIMULATE_INVALID", "Invalid simulation payload", err.Error())
 	}
 	return &restmw.HTTPError{
 		Status: http.StatusBadGateway,
@@ -603,6 +612,13 @@ func mapSimulateError(err error) error {
 		Title:  "Simulation failed",
 		Detail: err.Error(),
 	}
+}
+
+// isClientValidationCode reports whether code sits in the proto validation
+// band. INVALID_REQUEST is the first code in that band and
+// TASK_ALREADY_EXISTS is the first code of the next one.
+func isClientValidationCode(code avsproto.ErrorCode) bool {
+	return code >= avsproto.ErrorCode_INVALID_REQUEST && code < avsproto.ErrorCode_TASK_ALREADY_EXISTS
 }
 
 func errBadTriggerType(t generated.TriggerType) error {
