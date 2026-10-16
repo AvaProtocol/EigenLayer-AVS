@@ -716,9 +716,6 @@ components:
         methodCalls:
           type: array
           items: { $ref: '#/components/schemas/MethodCall' }
-        isSimulated:
-          type: boolean
-          description: Legacy field retained for compatibility and ignored. Execution mode belongs to the workflow run.
         value:
           type: string
           description: ETH value to send with the call (wei, decimal string).

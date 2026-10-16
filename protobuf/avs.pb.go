@@ -8158,8 +8158,6 @@ type ContractWriteNode_Config struct {
 	ContractAbi []*structpb.Value `protobuf:"bytes,3,rep,name=contract_abi,json=contractAbi,proto3" json:"contract_abi,omitempty"`
 	// Support for multiple method calls in sequence (similar to ContractRead)
 	MethodCalls []*ContractWriteNode_MethodCall `protobuf:"bytes,4,rep,name=method_calls,json=methodCalls,proto3" json:"method_calls,omitempty"`
-	// Legacy field retained for wire compatibility; ignored. The workflow run owns execution mode.
-	IsSimulated *bool `protobuf:"varint,5,opt,name=is_simulated,json=isSimulated,proto3,oneof" json:"is_simulated,omitempty"`
 	// ETH value to send with the transaction (in wei as string)
 	Value *string `protobuf:"bytes,6,opt,name=value,proto3,oneof" json:"value,omitempty"`
 	// Custom gas limit for the transaction (as string to handle large numbers)
@@ -8226,13 +8224,6 @@ func (x *ContractWriteNode_Config) GetMethodCalls() []*ContractWriteNode_MethodC
 		return x.MethodCalls
 	}
 	return nil
-}
-
-func (x *ContractWriteNode_Config) GetIsSimulated() bool {
-	if x != nil && x.IsSimulated != nil {
-		return *x.IsSimulated
-	}
-	return false
 }
 
 func (x *ContractWriteNode_Config) GetValue() string {
@@ -10313,22 +10304,20 @@ const file_avs_proto_rawDesc = "" +
 	"\x06amount\x18\x02 \x01(\tR\x06amount\x12\x19\n" +
 	"\bchain_id\x18\x03 \x01(\x03R\achainId\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xaf\b\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\x8a\b\n" +
 	"\x11ContractWriteNode\x12<\n" +
-	"\x06config\x18\x01 \x01(\v2$.aggregator.ContractWriteNode.ConfigR\x06config\x1a\x81\x03\n" +
+	"\x06config\x18\x01 \x01(\v2$.aggregator.ContractWriteNode.ConfigR\x06config\x1a\xdc\x02\n" +
 	"\x06Config\x12)\n" +
 	"\x10contract_address\x18\x01 \x01(\tR\x0fcontractAddress\x12\x1b\n" +
 	"\tcall_data\x18\x02 \x01(\tR\bcallData\x129\n" +
 	"\fcontract_abi\x18\x03 \x03(\v2\x16.google.protobuf.ValueR\vcontractAbi\x12K\n" +
-	"\fmethod_calls\x18\x04 \x03(\v2(.aggregator.ContractWriteNode.MethodCallR\vmethodCalls\x12&\n" +
-	"\fis_simulated\x18\x05 \x01(\bH\x00R\visSimulated\x88\x01\x01\x12\x19\n" +
-	"\x05value\x18\x06 \x01(\tH\x01R\x05value\x88\x01\x01\x12 \n" +
-	"\tgas_limit\x18\a \x01(\tH\x02R\bgasLimit\x88\x01\x01\x12\x19\n" +
-	"\bchain_id\x18\b \x01(\x03R\achainIdB\x0f\n" +
-	"\r_is_simulatedB\b\n" +
+	"\fmethod_calls\x18\x04 \x03(\v2(.aggregator.ContractWriteNode.MethodCallR\vmethodCalls\x12\x19\n" +
+	"\x05value\x18\x06 \x01(\tH\x00R\x05value\x88\x01\x01\x12 \n" +
+	"\tgas_limit\x18\a \x01(\tH\x01R\bgasLimit\x88\x01\x01\x12\x19\n" +
+	"\bchain_id\x18\b \x01(\x03R\achainIdB\b\n" +
 	"\x06_valueB\f\n" +
 	"\n" +
-	"_gas_limit\x1a\xef\x01\n" +
+	"_gas_limitJ\x04\b\x05\x10\x06R\fis_simulated\x1a\xef\x01\n" +
 	"\n" +
 	"MethodCall\x12 \n" +
 	"\tcall_data\x18\x01 \x01(\tH\x00R\bcallData\x88\x01\x01\x12\x1f\n" +

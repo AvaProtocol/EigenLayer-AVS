@@ -90,11 +90,10 @@ func getRealisticBlockNumberForChain(chainID int64) uint64 {
 	}
 }
 
-// RunNodeImmediately executes a single node immediately with authenticated user context.
-// This is the primary entry point for running nodes that require user authentication.
-// useSimulation defaults to true if not specified.
-// RunNodeImmediately executes a node immediately with optional simulation mode
-// useSimulation parameter (bool): true = simulation (default), false = real execution
+// RunNodeImmediately is an internal executor helper used by node-runner tests.
+// Public callers must use RunNodeImmediatelyRPCWithContext, which rejects actions
+// requiring a complete workflow. useSimulation controls this internal VM only;
+// it is not a node configuration field and defaults to true.
 func (n *Engine) RunNodeImmediately(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, user *model.User, useSimulation ...interface{}) (map[string]interface{}, error) {
 	return n.RunNodeImmediatelyWithContext(context.Background(), nodeType, nodeConfig, inputVariables, user, useSimulation...)
 }
@@ -3196,7 +3195,6 @@ func (n *Engine) RunNodeImmediatelyRPCWithContext(ctx context.Context, user *mod
 	// Standalone runs are read/data operations; workflow actions run as a complete graph.
 	// Execute the node immediately with authenticated user
 	// NOTE: lang field conversion for CustomCode is handled by ParseLanguageFromConfig
-	// Pass the isSimulated flag from node config to control simulation/real execution
 	result, err := n.RunNodeImmediatelyWithContext(ctx, nodeTypeStr, nodeConfig, inputVariables, user, true)
 	if err != nil {
 		if n.logger != nil {

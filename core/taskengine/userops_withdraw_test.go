@@ -145,7 +145,7 @@ func TestUserOpETHTransferWithPaymaster(t *testing.T) {
 		"settings": settings,
 	}
 
-	// ETHTransfer node with is_simulated=false for real UserOp execution
+	// ETHTransfer node for real workflow execution
 	// Paymaster sponsorship is automatically used if configured (no override needed)
 	t.Logf("   Using ethTransfer node with PAYMASTER sponsorship (automatic)...")
 	transferResult, err := engine.RunNodeImmediately("ethTransfer", ethTransferConfig, inputVars, user, false)

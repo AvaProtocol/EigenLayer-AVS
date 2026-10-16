@@ -423,8 +423,8 @@ message ContractWriteNode {
     repeated google.protobuf.Value contract_abi = 3;
     // Support for multiple method calls in sequence (similar to ContractRead)
     repeated MethodCall method_calls = 4;
-    // Legacy field retained for wire compatibility; ignored. The workflow run owns execution mode.
-    optional bool is_simulated = 5;
+    reserved 5;
+    reserved "is_simulated";
     // ETH value to send with the transaction (in wei as string)
     optional string value = 6;
     // Custom gas limit for the transaction (as string to handle large numbers)

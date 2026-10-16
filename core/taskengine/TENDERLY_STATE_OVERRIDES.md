@@ -4,8 +4,8 @@ Execution mode belongs to the complete workflow run:
 
 - `SimulateTask` / `POST /api/v1/workflows:simulate` simulates every action.
 - Deployed workflows execute every action through the real transaction path.
-- The legacy `ContractWriteNode.Config.is_simulated` field is accepted for wire
-  compatibility and ignored. It cannot override either workflow mode.
+- Nodes have no execution-mode setting. Simulation and execution are selected
+  by the workflow API.
 - The `RunNodeWithInputs` RPC / `POST /api/v1/nodes:run` rejects contract writes and
   native transfers, including loops with those runners. Non-transaction nodes
   remain available for isolated tests. Single-node ERC20 overrides are rejected.

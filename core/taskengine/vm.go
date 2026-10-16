@@ -2981,13 +2981,6 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 		}
 
-		// Per-node execution mode: expect camelCase key from clients
-		if v, ok := config["isSimulated"]; ok {
-			if b, ok2 := v.(bool); ok2 {
-				contractConfig.IsSimulated = &b
-			}
-		}
-
 		// Handle value field (ETH to send with transaction)
 		if v, ok := config["value"]; ok {
 			if valueStr, ok2 := v.(string); ok2 {
@@ -3994,11 +3987,6 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 			// Extract optional gas_limit field (custom gas limit)
 			if contractWrite.Config.GasLimit != nil {
 				config["gasLimit"] = *contractWrite.Config.GasLimit
-			}
-
-			// Extract optional isSimulated field (simulation vs real execution)
-			if contractWrite.Config.IsSimulated != nil {
-				config["isSimulated"] = *contractWrite.Config.IsSimulated
 			}
 
 			// Handle method calls - extract fields to simple map for protobuf compatibility

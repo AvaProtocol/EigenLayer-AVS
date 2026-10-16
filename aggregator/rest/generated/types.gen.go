@@ -517,10 +517,7 @@ type ContractWriteNodeConfig struct {
 	ContractAddress EthereumAddress `json:"contractAddress"`
 
 	// GasLimit Custom gas limit (decimal string).
-	GasLimit *string `json:"gasLimit,omitempty"`
-
-	// IsSimulated Legacy field retained for compatibility and ignored. Execution mode belongs to the workflow run.
-	IsSimulated *bool         `json:"isSimulated,omitempty"`
+	GasLimit    *string       `json:"gasLimit,omitempty"`
 	MethodCalls *[]MethodCall `json:"methodCalls,omitempty"`
 
 	// Value ETH value to send with the call (wei, decimal string).

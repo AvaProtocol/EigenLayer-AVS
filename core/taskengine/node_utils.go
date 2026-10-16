@@ -97,7 +97,7 @@ func updateTriggerVariableInVM(vm *VM, triggerVarName string, triggerVarData map
 //
 // Parameters:
 //   - stepID: The ID of the step being executed
-//   - node: The actual TaskNode being executed (used to get nodeType and type-specific config like is_simulated)
+//   - node: The actual TaskNode being executed (used to get nodeType)
 //   - vm: The VM context
 func CreateNodeExecutionStep(stepID string, node *avsproto.TaskNode, vm *VM) *avsproto.Execution_Step {
 	t0 := time.Now()

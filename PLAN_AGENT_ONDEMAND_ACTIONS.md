@@ -2,7 +2,10 @@
 
 - **Date**: 2026-07-09
 - **Owner**: Chris
-- **Status**: Proposed
+- **Status**: Superseded. Blockchain actions now require a complete workflow;
+  per-node execution-mode configuration and public standalone action execution
+  have been removed. See [Workflow simulation state](core/taskengine/TENDERLY_STATE_OVERRIDES.md).
+  The proposal below is retained as historical context.
 - **Anchor repo**: `EigenLayer-AVS` (this doc's focus). `studio` owns the chat UX **and** constructs the `contractWrite` call (intent → node JSON, quotes, slippage, the market-order helper). `ava-sdk-js` only needs to surface the richer response this plan adds.
 - **Motivating use case**: the studio LLM agent watches a user's portfolio and, on-demand through chat, **previews then executes a one-time Uniswap market order** by calling a **single node** (`nodes:run`), not by deploying a workflow.
 

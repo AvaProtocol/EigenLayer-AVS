@@ -29,7 +29,7 @@ func TestContractWriteExecutionContext_RealVsSimulated(t *testing.T) {
 	})
 
 	t.Run("Simulated path sets provider=tenderly and isSimulated=true", func(t *testing.T) {
-		// Test that when isSimulated=true (or default), executionContext reflects Tenderly
+		// Workflow simulation reports Tenderly in executionContext
 
 		// The key assertion is:
 		// - step.ExecutionContext.is_simulated == true
