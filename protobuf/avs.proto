@@ -423,7 +423,7 @@ message ContractWriteNode {
     repeated google.protobuf.Value contract_abi = 3;
     // Support for multiple method calls in sequence (similar to ContractRead)
     repeated MethodCall method_calls = 4;
-    // Execution mode for this contract write node: when true (default), use simulation; when false, execute real UserOp
+    // Legacy field retained for wire compatibility; ignored. The workflow run owns execution mode.
     optional bool is_simulated = 5;
     // ETH value to send with the transaction (in wei as string)
     optional string value = 6;
@@ -1332,13 +1332,8 @@ message RunNodeWithInputsReq {
   // Chain to run the node against. 0 = aggregator default chain.
   // node.config.chain_id (if non-zero) takes precedence over this field.
   int64 chain_id = 4;
-  // Optional ERC20 balance/allowance state overrides applied only during this
-  // isolated node simulation (RunNodeImmediately). Lets callers seed token
-  // balances and approvals so contract-write simulations (e.g. Uniswap swaps)
-  // don't revert with "transfer amount exceeds allowance/balance" before the
-  // approval/funding transactions have been run. Simulation-only: a
-  // real-execution request (isSimulated=false) that sets these is rejected with
-  // an error, never silently ignored.
+  // Legacy single-node overrides. Nonempty overrides are rejected; actions must
+  // be simulated as a complete workflow, including their prerequisites.
   repeated ERC20StateOverride erc20_overrides = 5;
 }
 

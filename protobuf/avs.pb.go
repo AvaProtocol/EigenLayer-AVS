@@ -5577,13 +5577,8 @@ type RunNodeWithInputsReq struct {
 	// Chain to run the node against. 0 = aggregator default chain.
 	// node.config.chain_id (if non-zero) takes precedence over this field.
 	ChainId int64 `protobuf:"varint,4,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
-	// Optional ERC20 balance/allowance state overrides applied only during this
-	// isolated node simulation (RunNodeImmediately). Lets callers seed token
-	// balances and approvals so contract-write simulations (e.g. Uniswap swaps)
-	// don't revert with "transfer amount exceeds allowance/balance" before the
-	// approval/funding transactions have been run. Simulation-only: a
-	// real-execution request (isSimulated=false) that sets these is rejected with
-	// an error, never silently ignored.
+	// Legacy single-node overrides. Nonempty overrides are rejected; actions must
+	// be simulated as a complete workflow, including their prerequisites.
 	Erc20Overrides []*ERC20StateOverride `protobuf:"bytes,5,rep,name=erc20_overrides,json=erc20Overrides,proto3" json:"erc20_overrides,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -8163,7 +8158,7 @@ type ContractWriteNode_Config struct {
 	ContractAbi []*structpb.Value `protobuf:"bytes,3,rep,name=contract_abi,json=contractAbi,proto3" json:"contract_abi,omitempty"`
 	// Support for multiple method calls in sequence (similar to ContractRead)
 	MethodCalls []*ContractWriteNode_MethodCall `protobuf:"bytes,4,rep,name=method_calls,json=methodCalls,proto3" json:"method_calls,omitempty"`
-	// Execution mode for this contract write node: when true (default), use simulation; when false, execute real UserOp
+	// Legacy field retained for wire compatibility; ignored. The workflow run owns execution mode.
 	IsSimulated *bool `protobuf:"varint,5,opt,name=is_simulated,json=isSimulated,proto3,oneof" json:"is_simulated,omitempty"`
 	// ETH value to send with the transaction (in wei as string)
 	Value *string `protobuf:"bytes,6,opt,name=value,proto3,oneof" json:"value,omitempty"`

@@ -519,7 +519,7 @@ type ContractWriteNodeConfig struct {
 	// GasLimit Custom gas limit (decimal string).
 	GasLimit *string `json:"gasLimit,omitempty"`
 
-	// IsSimulated When true, use Tenderly simulation instead of sending a real UserOp.
+	// IsSimulated Legacy field retained for compatibility and ignored. Execution mode belongs to the workflow run.
 	IsSimulated *bool         `json:"isSimulated,omitempty"`
 	MethodCalls *[]MethodCall `json:"methodCalls,omitempty"`
 
@@ -1515,7 +1515,8 @@ type RunNodeRequest struct {
 	// configured chain; on query/filter params it is optional.
 	ChainId *ChainId `json:"chainId,omitempty"`
 
-	// Erc20Overrides Optional ERC20 balance/allowance state overrides applied only during this isolated node simulation. Lets callers seed token balances and approvals so contract-write simulations (e.g. Uniswap swaps) don't revert with "transfer amount exceeds allowance/balance" before the approval/funding transactions have been run. Simulation-only: a real-execution request (isSimulated=false) that sets these is rejected with an error, never silently ignored.
+	// Erc20Overrides Legacy single-node overrides. Nonempty overrides are rejected. Simulate actions as a complete workflow including their prerequisites.
+	// Deprecated:
 	Erc20Overrides *[]ERC20StateOverride `json:"erc20Overrides,omitempty"`
 
 	// InputVariables Free-form key-value bag of values used to resolve `{{variable.path}}`

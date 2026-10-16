@@ -17,9 +17,8 @@ import (
 
 // RunNode — POST /api/v1/nodes:run
 //
-// Execute a single node definition against inline input variables
-// without persisting a workflow. Used by SDK testing flows and the
-// agent-CLI verify command.
+// Run a non-transaction node against inline variables without persisting a
+// workflow. The engine rejects standalone contract writes and native transfers.
 func (s *Server) RunNode(ctx echo.Context) error {
 	// User JWT required (LevelUser). Partner assertion alone does not authorize.
 	p, err := s.ensurePermission(ctx, OpRunNode)
@@ -60,9 +59,8 @@ func (s *Server) RunNode(ctx echo.Context) error {
 		req.Erc20Overrides = openAPIERC20OverridesToProto(*body.Erc20Overrides)
 	}
 
-	// A caller-supplied Idempotency-Key (Stripe-style header) makes a retried or
-	// double-submitted execute safe: the same key returns the first result instead
-	// of broadcasting a second UserOp. Absent the header, behavior is unchanged.
+	// Optional deduplication remains available for utility nodes. Action requests
+	// are rejected by the engine before any previously cached execute is returned.
 	idempotencyKey := ctx.Request().Header.Get("Idempotency-Key")
 	resp, err := s.engine.RunNodeImmediatelyRPCIdempotent(ctx.Request().Context(), user, req, idempotencyKey)
 	if err != nil {

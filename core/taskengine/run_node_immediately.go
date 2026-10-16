@@ -21,14 +21,23 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// erc20OverridesConfigKey is the reserved nodeConfig key used to thread
-// caller-supplied ERC20 state overrides from the RPC request down to the VM's
-// simulation state. It is stripped from the config before the node is built.
-const erc20OverridesConfigKey = "__erc20Overrides"
+const standaloneActionDisabled = "single-node contract writes and native transfers are disabled; simulate the complete workflow with its prerequisites using workflows:simulate"
+
+func rejectStandaloneActionRequest(req *avsproto.RunNodeWithInputsReq) error {
+	if req != nil && taskNodesRequireAASender([]*avsproto.TaskNode{req.GetNode()}) {
+		return status.Error(codes.InvalidArgument, standaloneActionDisabled)
+	}
+	if len(req.GetErc20Overrides()) > 0 {
+		return status.Error(codes.InvalidArgument, "single-node state overrides are disabled; simulate the complete workflow with its prerequisites using workflows:simulate")
+	}
+	return nil
+}
 
 // getRealisticBlockNumberForChain returns a realistic block number for simulation based on chain ID
 // Only includes chains that the aggregator actually supports: Ethereum and Base
@@ -2520,56 +2529,6 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 	return result, nil
 }
 
-// applyERC20Overrides seeds the VM's simulation state with caller-supplied
-// ERC20 balance/allowance overrides. rawOverrides is the value stashed under
-// erc20OverridesConfigKey — a []*avsproto.ERC20StateOverride. Overrides are
-// honored only in simulation mode; in real-execution mode they are rejected so
-// a caller can never silently fake balances/approvals against a live wallet.
-func (n *Engine) applyERC20Overrides(vm *VM, useSimulation bool, rawOverrides interface{}) error {
-	overrides, ok := rawOverrides.([]*avsproto.ERC20StateOverride)
-	if !ok {
-		// The value is only ever stashed by RunNodeImmediatelyRPCWithContext as a
-		// []*avsproto.ERC20StateOverride. A different type here means an internal
-		// wiring/serialization bug — surface it rather than silently dropping the
-		// caller's overrides.
-		return fmt.Errorf("erc20_overrides: internal error, expected []*ERC20StateOverride under %s but got %T", erc20OverridesConfigKey, rawOverrides)
-	}
-	if len(overrides) == 0 {
-		return nil
-	}
-
-	if !useSimulation {
-		return fmt.Errorf("erc20_overrides are only supported in simulation mode")
-	}
-	if vm.simulationState == nil {
-		// Should not happen when useSimulation is true, but guard anyway.
-		return fmt.Errorf("erc20_overrides require an active simulation state")
-	}
-
-	for i, o := range overrides {
-		if o == nil {
-			continue
-		}
-		if err := vm.simulationState.ApplyUserERC20Override(
-			o.GetTokenAddress(),
-			o.GetOwnerAddress(),
-			o.GetSpenderAddress(),
-			o.GetBalance(),
-			o.GetAllowance(),
-			o.BalanceSlot,
-			o.AllowanceSlot,
-		); err != nil {
-			return fmt.Errorf("erc20_overrides[%d]: %w", i, err)
-		}
-	}
-
-	if n.logger != nil {
-		n.logger.Info("Applied caller-supplied ERC20 state overrides for simulation",
-			"count", len(overrides))
-	}
-	return nil
-}
-
 // runProcessingNodeWithInputs handles execution of processing node types
 func (n *Engine) runProcessingNodeWithInputs(ctx context.Context, user *model.User, nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, useSimulation bool) (map[string]interface{}, error) {
 	// Check if this is actually a trigger type that was misrouted
@@ -2804,18 +2763,6 @@ func (n *Engine) runProcessingNodeWithInputs(ctx context.Context, user *model.Us
 	processedInputVariables := inputVariables
 	for key, processedValue := range processedInputVariables {
 		vm.AddVar(key, processedValue)
-	}
-
-	// Apply caller-supplied ERC20 state overrides to the simulation state.
-	// These seed token balances/allowances so contract-write simulations
-	// (e.g. Uniswap swaps) don't revert before approval/funding txs are run.
-	// Only honored in simulation mode — strip the reserved key either way so
-	// it never reaches CreateNodeFromType.
-	if rawOverrides, ok := nodeConfig[erc20OverridesConfigKey]; ok {
-		delete(nodeConfig, erc20OverridesConfigKey)
-		if err := n.applyERC20Overrides(vm, useSimulation, rawOverrides); err != nil {
-			return nil, err
-		}
 	}
 
 	// Create node from type and config
@@ -3057,10 +3004,9 @@ func idempotencyCacheKey(subject, clientKey string) []byte {
 	return []byte(idempotencyCachePrefix + hex.EncodeToString(sum[:]))
 }
 
-// RunNodeImmediatelyRPCIdempotent runs a single node, deduplicating by
-// idempotencyKey so a retried or double-submitted request (e.g. a chat Confirm)
-// does not execute — and broadcast — a second UserOp. An empty key preserves the
-// plain non-idempotent behavior.
+// RunNodeImmediatelyRPCIdempotent deduplicates allowed utility-node requests.
+// Standalone actions are rejected before either cache lookup or execution.
+// An empty key preserves plain non-idempotent behavior.
 //
 // Two layers cooperate: singleflight collapses requests that are in flight
 // concurrently (a double-click), and a persistent TTL cache returns the prior
@@ -3069,35 +3015,18 @@ func idempotencyCacheKey(subject, clientKey string) []byte {
 // a still-pending UserOp) is cached; a transport/engine error caches nothing so
 // the caller may safely retry. Polling a pending UserOp's final status is a
 // separate concern — reuse of the same key returns the cached pending result.
-// contractWriteIsSimulated mirrors the runner's is_simulated resolution for a
-// contractWrite node: the default is SIMULATION unless is_simulated is explicitly
-// set to false. Only contractWrite carries this flag and is the node that
-// broadcasts a real UserOp on this path. Returns false for any other node type so
-// their idempotency behavior is unchanged.
-func contractWriteIsSimulated(node *avsproto.TaskNode) bool {
-	cw := node.GetContractWrite()
-	if cw == nil {
-		return false
-	}
-	cfg := cw.GetConfig()
-	if cfg == nil || cfg.IsSimulated == nil {
-		return true // unset => simulation (matches the runner default)
-	}
-	return cfg.GetIsSimulated()
-}
-
 func (n *Engine) RunNodeImmediatelyRPCIdempotent(ctx context.Context, user *model.User, req *avsproto.RunNodeWithInputsReq, idempotencyKey string) (*avsproto.RunNodeWithInputsResp, error) {
+	// Reject action requests before looking up a previously cached execute.
+	if err := rejectStandaloneActionRequest(req); err != nil {
+		return nil, err
+	}
 	// Idempotency needs a distinct authenticated subject to scope the cache key.
 	// A partner-assertion (simulate-only) caller can resolve to the zero address;
 	// deduping those would let one caller's key cross-replay another's result, so
 	// skip idempotency when there is no real subject. Safe by construction: real
 	// executes (fund-moving) always carry a non-zero authenticated owner.
 	//
-	// Also skip for a SIMULATED contractWrite: idempotency exists to prevent a
-	// second broadcast of a real UserOp, so a preview must never be cached — else a
-	// client that reused a key across a preview and a later real execute could get
-	// the cached preview back in place of the broadcast.
-	if idempotencyKey == "" || user == nil || user.Address == (common.Address{}) || contractWriteIsSimulated(req.GetNode()) {
+	if idempotencyKey == "" || user == nil || user.Address == (common.Address{}) {
 		return n.RunNodeImmediatelyRPCWithContext(ctx, user, req)
 	}
 	cacheKey := idempotencyCacheKey(user.Address.Hex(), idempotencyKey)
@@ -3184,6 +3113,9 @@ func (n *Engine) writeIdempotentResponse(cacheKey []byte, resp *avsproto.RunNode
 // caller-supplied context, propagated to the worker-routed block reads and
 // wallet-salt scan so a cancelled request interrupts them.
 func (n *Engine) RunNodeImmediatelyRPCWithContext(ctx context.Context, user *model.User, req *avsproto.RunNodeWithInputsReq) (*avsproto.RunNodeWithInputsResp, error) {
+	if err := rejectStandaloneActionRequest(req); err != nil {
+		return nil, err
+	}
 	// The request now contains a complete TaskNode, consistent with SimulateTask
 	node := req.Node
 	if node == nil {
@@ -3261,27 +3193,11 @@ func (n *Engine) RunNodeImmediatelyRPCWithContext(ctx context.Context, user *mod
 		}, nil
 	}
 
-	// Carry any caller-supplied ERC20 state overrides through to the VM's
-	// simulation state. These are simulation-only seeds for token
-	// balances/allowances (see runProcessingNodeWithInputs); they are
-	// stashed under a reserved key and stripped before CreateNodeFromType.
-	if len(req.GetErc20Overrides()) > 0 {
-		nodeConfig[erc20OverridesConfigKey] = req.GetErc20Overrides()
-	}
-
-	// Extract isSimulated from node config (defaults to true if not specified)
-	// The runNodeImmediately simulation mode should solely depend on the node input
-	useSimulation := true // Default to simulation mode
-	if isSimulatedVal, ok := nodeConfig["isSimulated"]; ok {
-		if isSimBool, ok := isSimulatedVal.(bool); ok {
-			useSimulation = isSimBool
-		}
-	}
-
+	// Standalone runs are read/data operations; workflow actions run as a complete graph.
 	// Execute the node immediately with authenticated user
 	// NOTE: lang field conversion for CustomCode is handled by ParseLanguageFromConfig
 	// Pass the isSimulated flag from node config to control simulation/real execution
-	result, err := n.RunNodeImmediatelyWithContext(ctx, nodeTypeStr, nodeConfig, inputVariables, user, useSimulation)
+	result, err := n.RunNodeImmediatelyWithContext(ctx, nodeTypeStr, nodeConfig, inputVariables, user, true)
 	if err != nil {
 		if n.logger != nil {
 			if isExpectedValidationError(err) {
