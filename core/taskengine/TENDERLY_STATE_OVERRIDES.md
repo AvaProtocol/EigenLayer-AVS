@@ -25,3 +25,11 @@ seed an allowance merely to make an action with a missing approval pass.
 This policy does not generalize storage-layout discovery or state-aware reads.
 Automatic allowance injection currently uses candidate mapping slots; contract
 reads still use chain RPC. Those limitations are separate from execution mode.
+
+The allowance candidates include slot 5 for `UpgradeableGhoToken`, used by GHO
+on Base. Its verified `transferFrom` subtracts from that allowance directly, so
+missing this slot produces an arithmetic-underflow revert even when the wallet
+has enough GHO and the preceding approve simulation succeeded. The funded
+Studio Aave repay test exercises this case against a position with actual debt
+and zero real Pool allowance. Namespaced layouts are not covered by the numeric
+candidate list.

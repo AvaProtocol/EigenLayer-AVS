@@ -174,8 +174,11 @@ func erc20AllowanceSlot(owner, spender common.Address, mappingSlot int64) common
 var commonBalanceSlots = []int64{0, 1, 2, 3, 9, 51}
 
 // Common ERC20 allowance mapping slot indices across different implementations.
-// 1: OpenZeppelin ERC20 v4/v5, 2-3: legacy implementations, 10: USDC FiatTokenV2.
-var commonAllowanceSlots = []int64{1, 2, 3, 10}
+// 1: standard OpenZeppelin ERC20, 2-3: legacy implementations,
+// 5: UpgradeableGhoToken (Base GHO), 10: USDC FiatTokenV2.
+// ERC-7201 namespaced storage (e.g. OpenZeppelin v5 upgradeable tokens) is not
+// covered by this candidate list.
+var commonAllowanceSlots = []int64{1, 2, 3, 5, 10}
 
 // ProbeERC20BalanceSlot discovers which storage slot a token contract uses for
 // its _balances mapping by comparing eth_getStorageAt results against balanceOf.
