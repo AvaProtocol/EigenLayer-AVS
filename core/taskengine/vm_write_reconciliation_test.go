@@ -212,3 +212,16 @@ func TestNodeExecutionContextUsesRunnerChain(t *testing.T) {
 		require.EqualValues(t, 8453, step.ExecutionContext.AsInterface().(map[string]interface{})["chain_id"])
 	}
 }
+
+func TestLoopConfirmationUsesParentRunnerOverOldCheckpointContext(t *testing.T) {
+	vm := NewVM()
+	resolved := &config.SmartWalletConfig{ChainID: 8453}
+	vm.smartWalletConfig = &config.SmartWalletConfig{ChainID: 11155111}
+	vm.WithChainConfigResolver(func(chain int64) *config.SmartWalletConfig { require.EqualValues(t, 8453, chain); return resolved })
+	vm.TaskNodes = map[string]*avsproto.TaskNode{"batch": {Id: "batch", TaskType: &avsproto.TaskNode_Loop{Loop: &avsproto.LoopNode{Runner: &avsproto.LoopNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{Config: &avsproto.ContractWriteNode_Config{ChainId: 8453}}}}}}}
+	step := singlePendingWrite(t, "batch_iter_0")
+	step.ExecutionContext, _ = structpb.NewValue(map[string]interface{}{"chain_id": 11155111})
+	got, err := vm.confirmationConfig(step)
+	require.NoError(t, err)
+	require.Same(t, resolved, got)
+}

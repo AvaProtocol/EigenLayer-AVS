@@ -42,7 +42,21 @@ func (v *VM) confirmationConfig(step *avsproto.Execution_Step) (*config.SmartWal
 	// The graph is authoritative. Iterations are ephemeral nodes, so their
 	// execution context records the resolved runner chain for a later resume.
 	v.mu.Lock()
-	chain := workflowWriteChainID(v.TaskNodes[step.Id])
+	node := v.TaskNodes[step.Id]
+	// Old loop checkpoints stamped the VM default in executionContext. Recover
+	// the authoritative runner chain from the parent graph when it is available.
+	for id := step.Id; node == nil; {
+		suffix := strings.LastIndex(id, "_iter_")
+		if suffix < 0 {
+			break
+		}
+		if _, err := strconv.Atoi(id[suffix+len("_iter_"):]); err != nil {
+			break
+		}
+		id = id[:suffix]
+		node = v.TaskNodes[id]
+	}
+	chain := workflowWriteChainID(node)
 	v.mu.Unlock()
 	if chain > 0 {
 		return v.resolveSmartWalletForNode(chain)
