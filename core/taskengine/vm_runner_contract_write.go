@@ -2586,8 +2586,8 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		"is_simulated": isSimulated,
 		"provider":     provider,
 	}
-	if r.vm.smartWalletConfig != nil && r.vm.smartWalletConfig.ChainID != 0 {
-		ctxMap["chain_id"] = r.vm.smartWalletConfig.ChainID
+	if r.smartWalletConfig != nil && r.smartWalletConfig.ChainID != 0 {
+		ctxMap["chain_id"] = r.smartWalletConfig.ChainID
 	}
 	if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
 		s.ExecutionContext = ctxVal

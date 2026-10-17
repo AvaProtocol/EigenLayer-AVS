@@ -39,7 +39,7 @@ func propagateLoopConfirmationFailure(parent *avsproto.Execution_Step, iteration
 		if step.ErrorCode != avsproto.ErrorCode_USER_OP_CONFIRMATION_UNRESOLVED && step.ErrorCode != avsproto.ErrorCode_USER_OP_EXECUTION_REVERTED {
 			continue
 		}
-		outcome := map[string]interface{}{"id": step.Id, "error": step.Error, "errorCode": step.ErrorCode.String()}
+		outcome := map[string]interface{}{"id": step.Id, "error": step.Error, "errorCode": step.ErrorCode.String(), "step": confirmationStepSnapshot(step)}
 		if step.Metadata != nil {
 			outcome["metadata"] = step.Metadata.AsInterface()
 		}
@@ -61,6 +61,21 @@ func propagateLoopConfirmationFailure(parent *avsproto.Execution_Step, iteration
 		}
 	}
 	metadata["confirmationOutcomes"] = outcomes
+	// Only clear a loop failure after reconciliation when every missing result
+	// belongs to a retained confirmation failure (not a submit/RPC/other error).
+	onlyConfirmation := false
+	if data := parent.GetLoop().GetData(); data != nil {
+		if results, ok := data.AsInterface().([]interface{}); ok && len(results) == len(iterations) {
+			missing := 0
+			for _, result := range results {
+				if result == nil {
+					missing++
+				}
+			}
+			onlyConfirmation = missing == len(outcomes)
+		}
+	}
+	metadata["confirmationOnlyFailure"] = onlyConfirmation
 	parent.Metadata, _ = structpb.NewValue(metadata)
 }
 

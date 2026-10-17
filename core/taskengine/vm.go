@@ -235,6 +235,8 @@ type VM struct {
 	task              *model.Workflow
 	triggerData       *TriggerData
 	parsedTriggerData *triggerDataType
+	// Published before receipt waiting so a collector timeout retains submitted hashes.
+	iterationWrites   sync.Map // step ID -> *Execution_Step; mutation guarded by mu
 	ExecutionLogs     []*avsproto.Execution_Step
 	Status            VMState
 	mu                *sync.Mutex // Mutex for vars and TaskNodes, and other shared mutable fields like plans, entrypoint, status
@@ -1509,20 +1511,20 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		return nil, fmt.Errorf("executeNode called with nil node")
 	}
 
-	// Keep off-chain processing and terminal reports running, but never submit
-	// a dependent transaction after a failed or unresolved upstream write.
-	if isWorkflowWrite(node) {
-		if prerequisite := v.failedWritePrerequisite(node.Id); prerequisite != nil {
-			v.recordSkippedWrite(node, prerequisite)
-			return nil, nil
-		}
-	}
-
 	// Extract and set input data for this node (making it available as node_name.input)
 	inputData := ExtractNodeConfiguration(node)
 	if inputData != nil {
 		processor := &CommonProcessor{vm: v}
 		processor.SetInputVarForStep(node.Id, inputData)
+	}
+
+	// Keep off-chain processing and terminal reports running, but never submit
+	// a dependent transaction after a failed or unresolved upstream write.
+	if isWorkflowWrite(node) {
+		if prerequisite := v.reconciledWritePrerequisite(node.Id); prerequisite != nil {
+			v.recordSkippedWrite(node, prerequisite)
+			return nil, nil
+		}
 	}
 
 	var nextStep *Step // This is the *next step in the plan to jump to*, not the execution log step
@@ -4964,6 +4966,7 @@ func (v *VM) executeNodeWithIsolatedVars(node *avsproto.TaskNode, stepID string,
 		// Wait for on-chain confirmation before returning to the loop,
 		// so the next iteration can safely use nonce+1.
 		if executionLogForNode != nil && err == nil {
+			v.iterationWrites.Store(stepID, executionLogForNode)
 			v.waitForOnChainConfirmationIfNeeded(executionLogForNode)
 		}
 	} else if node.GetFilter() != nil {
@@ -4973,6 +4976,7 @@ func (v *VM) executeNodeWithIsolatedVars(node *avsproto.TaskNode, stepID string,
 		// Same receipt-waiting as contractWrite: ensure the tx is confirmed
 		// before the next loop iteration submits with nonce+1.
 		if executionLogForNode != nil && err == nil {
+			v.iterationWrites.Store(stepID, executionLogForNode)
 			v.waitForOnChainConfirmationIfNeeded(executionLogForNode)
 		}
 	} else if node.GetLoop() != nil {
@@ -5166,6 +5170,11 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	defer eq.Stop()
 
 	results := make([]interface{}, len(inputArray))
+	defer func() {
+		for i := range inputArray {
+			v.iterationWrites.Delete(fmt.Sprintf("%s_iter_%d", stepID, i))
+		}
+	}()
 	iterationSteps := make([]*avsproto.Execution_Step, 0, len(inputArray)) // Collect iteration steps for gas aggregation
 	success := true
 	infraFailure := false
@@ -5258,6 +5267,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 					iterationSteps = append(iterationSteps, result.Step)
 				}
 			case <-time.After(iterationTimeout):
+				if pending := v.timedOutIterationWrite(fmt.Sprintf("%s_iter_%d", stepID, i)); pending != nil {
+					iterationSteps = append(iterationSteps, pending)
+				}
 				if cancels[i] != nil {
 					cancels[i]()
 				}
@@ -5329,6 +5341,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 					iterationSteps = append(iterationSteps, result.Step)
 				}
 			case <-time.After(iterationTimeout):
+				if pending := v.timedOutIterationWrite(iterationStepID); pending != nil {
+					iterationSteps = append(iterationSteps, pending)
+				}
 				cancel()
 				success = false
 				infraFailure = true

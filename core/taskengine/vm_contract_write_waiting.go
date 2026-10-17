@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	ethereum "github.com/ethereum/go-ethereum"
@@ -20,18 +21,18 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// receiptForTx fetches a transaction receipt for the VM's chain via the
+// receiptForTxOnChain fetches a transaction receipt for the resolved node chain via the
 // per-chain worker (gateway mode) when a reader is registered, falling back
 // to a direct dial otherwise. Returns (nil, nil) when the receipt isn't
 // available yet (pending).
-func (v *VM) receiptForTx(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
-	if v.smartWalletConfig == nil {
+func (v *VM) receiptForTxOnChain(ctx context.Context, txHash common.Hash, sw *config.SmartWalletConfig) (*types.Receipt, error) {
+	if sw == nil {
 		return nil, fmt.Errorf("smart wallet config not available")
 	}
-	if reader := GetChainStateReaderForChain(uint64(v.smartWalletConfig.ChainID)); reader != nil {
+	if reader := GetChainStateReaderForChain(uint64(sw.ChainID)); reader != nil {
 		return reader.GetTransactionReceipt(ctx, txHash)
 	}
-	client, err := ethclient.DialContext(ctx, v.smartWalletConfig.EthRpcUrl)
+	client, err := ethclient.DialContext(ctx, sw.EthRpcUrl)
 	if err != nil {
 		return nil, err
 	}
@@ -120,110 +121,30 @@ type waitForUserOpConfirmationResult struct {
 
 const userOpConfirmationTimeout = 5 * time.Minute
 
-func (v *VM) waitForUserOpConfirmation(userOpHash string) (*waitForUserOpConfirmationResult, error) {
-	// The operation is already submitted. A blocking-trigger client disconnect
-	// cannot undo it and must not prematurely decide its on-chain outcome.
-	// Keep request values, but use our own bounded confirmation lifetime.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(v.context()), userOpConfirmationTimeout)
-	defer cancel()
-	return v.waitForUserOpConfirmationContext(ctx, userOpHash)
+var errMalformedConfirmationReceipt = errors.New("bundler confirmation receipt is missing success or transactionHash")
+
+func (v *VM) waitForUserOpConfirmationContext(ctx context.Context, hash string) (*waitForUserOpConfirmationResult, error) {
+	return v.waitForUserOpConfirmationOnChain(ctx, hash, v.smartWalletConfig)
 }
 
-func (v *VM) waitForUserOpConfirmationContext(ctx context.Context, userOpHash string) (*waitForUserOpConfirmationResult, error) {
-	if v.smartWalletConfig == nil {
-		return nil, fmt.Errorf("smart wallet config not available for UserOp confirmation")
-	}
-
-	// Create bundler client
-	activeBundlerURL, err := v.smartWalletConfig.ActiveBundlerURL()
-	if err != nil {
-		return nil, fmt.Errorf("resolve bundler endpoint: %w", err)
-	}
-	bundlerClient, err := bundler.NewBundlerClient(activeBundlerURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create bundler client: %w", err)
-	}
-
-	// The EntryPoint the operation actually ran against, not the configured
-	// v0.6 address — polling the wrong one just waits out the full timeout.
-	entrypoint := v.smartWalletConfig.EntryPointAddress()
-
-	v.logger.Info("⏳ Waiting for UserOp confirmation",
-		"userOpHash", userOpHash,
-		"entrypoint", entrypoint.Hex())
-
-	// Exponential backoff intervals (in seconds): 1s → 2s → 4s → 8s → 15s → 30s → 60s
-	intervals := []time.Duration{1, 2, 4, 8, 15, 30, 60}
-	startTime := time.Now()
-
-	intervalIndex := 0
-
-	for {
+func (v *VM) waitForUserOpConfirmationOnChain(ctx context.Context, hash string, sw *config.SmartWalletConfig) (*waitForUserOpConfirmationResult, error) {
+	intervals := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 15 * time.Second, 30 * time.Second, time.Minute}
+	for i := 0; ; i++ {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("timeout or cancellation waiting for UserOp confirmation: %w", err)
 		}
-
-		// Try to get receipt from bundler
-		receipt, err := bundlerClient.GetUserOperationReceipt(ctx, userOpHash)
-		if err == nil && receipt != nil {
-			// Inclusion of the EntryPoint transaction does not imply that this
-			// UserOperation succeeded. Reuse the parser from the status API,
-			// including standard bundlers' nested transaction receipt.
-			success, txHash, blockNumber := parseBundlerReceipt(receipt)
-			if success == nil || txHash == "" {
-				return nil, fmt.Errorf("bundler confirmation receipt is missing success or transactionHash")
-			}
-
-			v.logger.Info("✅ UserOp confirmed on-chain",
-				"userOpHash", userOpHash,
-				"blockNumber", blockNumber,
-				"txHash", txHash,
-				"elapsed", time.Since(startTime))
-
-			// Fetch the actual on-chain receipt to get gas data.
-			// Use a bounded context so a slow/unresponsive RPC node cannot block indefinitely.
-			result := &waitForUserOpConfirmationResult{TxHash: txHash, Success: *success}
-			if raw := asStringMap(receipt); raw != nil {
-				result.Fields = asStringMap(raw["receipt"])
-			}
-			if result.Fields["status"] == "0x0" || result.Fields["status"] == "0" {
-				result.Success = false
-			}
-			if txHash != "" {
-				receiptCtx, receiptCancel := context.WithTimeout(ctx, 30*time.Second)
-				onChainReceipt, receiptErr := v.receiptForTx(receiptCtx, common.HexToHash(txHash))
-				receiptCancel()
-				if receiptErr == nil && onChainReceipt != nil {
-					result.Receipt = onChainReceipt
-					result.Success = result.Success && onChainReceipt.Status == types.ReceiptStatusSuccessful
-				} else if v.logger != nil {
-					v.logger.Warn("Failed to fetch on-chain receipt for gas data",
-						"txHash", txHash, "error", receiptErr)
-				}
-			}
-
-			if !result.Success {
-				result.FailureReason, result.RevertData = confirmedUserOpFailure(userOpHash, entrypoint, result)
-			}
-			return result, nil
+		result, err := v.lookupUserOpConfirmation(ctx, hash, sw)
+		if result != nil || errors.Is(err, errMalformedConfirmationReceipt) {
+			return result, err
 		}
-
-		// Determine current interval (use last interval if we've exceeded the array)
-		var currentInterval time.Duration
-		if intervalIndex < len(intervals) {
-			currentInterval = intervals[intervalIndex] * time.Second
-			intervalIndex++
-		} else {
-			currentInterval = intervals[len(intervals)-1] * time.Second
+		if sw == nil {
+			return nil, err
 		}
-
-		v.logger.Debug("UserOp not confirmed yet, retrying",
-			"userOpHash", userOpHash,
-			"nextRetryIn", currentInterval,
-			"elapsed", time.Since(startTime))
-
-		// Wait before next retry
-		timer := time.NewTimer(currentInterval)
+		if _, configErr := sw.ActiveBundlerURL(); configErr != nil {
+			return nil, configErr
+		}
+		interval := intervals[min(i, len(intervals)-1)]
+		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -231,6 +152,64 @@ func (v *VM) waitForUserOpConfirmationContext(ctx context.Context, userOpHash st
 		case <-timer.C:
 		}
 	}
+}
+
+// One receipt request, never a poll/retry loop. The caller bounds the entire
+// lookup, including the optional on-chain receipt used for gas/revert decoding.
+func (v *VM) lookupUserOpConfirmation(ctx context.Context, userOpHash string, sw *config.SmartWalletConfig) (*waitForUserOpConfirmationResult, error) {
+	if sw == nil {
+		return nil, fmt.Errorf("smart wallet config not available for UserOp confirmation")
+	}
+	endpoint, err := sw.ActiveBundlerURL()
+	if err != nil {
+		return nil, err
+	}
+	client, err := bundler.NewBundlerClient(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	receipt, err := client.GetUserOperationReceipt(ctx, userOpHash)
+	if err != nil || receipt == nil {
+		return nil, err
+	}
+	// Inclusion of the EntryPoint transaction does not imply that this
+	// UserOperation succeeded. Reuse the parser from the status API,
+	// including standard bundlers' nested transaction receipt.
+	success, txHash, _ := parseBundlerReceipt(receipt)
+	if success == nil || txHash == "" {
+		return nil, errMalformedConfirmationReceipt
+	}
+
+	// Fetch the actual on-chain receipt to get gas data.
+	// Use a bounded context so a slow/unresponsive RPC node cannot block indefinitely.
+	result := &waitForUserOpConfirmationResult{TxHash: txHash, Success: *success}
+	if raw := asStringMap(receipt); raw != nil {
+		result.Fields = asStringMap(raw["receipt"])
+	}
+	if result.Fields["status"] == "0x0" || result.Fields["status"] == "0" {
+		result.Success = false
+	}
+	if txHash != "" {
+		receiptCtx, receiptCancel := context.WithTimeout(ctx, 30*time.Second)
+		onChainReceipt, receiptErr := v.receiptForTxOnChain(receiptCtx, common.HexToHash(txHash), sw)
+		receiptCancel()
+		if receiptErr == nil && onChainReceipt != nil {
+			result.Receipt = onChainReceipt
+			if result.Fields == nil {
+				result.Fields = map[string]interface{}{}
+			}
+			result.Fields["status"] = fmt.Sprintf("0x%x", onChainReceipt.Status)
+			result.Success = result.Success && onChainReceipt.Status == types.ReceiptStatusSuccessful
+		} else if v.logger != nil {
+			v.logger.Warn("Failed to fetch on-chain receipt for gas data",
+				"txHash", txHash, "error", receiptErr)
+		}
+	}
+
+	if !result.Success {
+		result.FailureReason, result.RevertData = confirmedUserOpFailure(userOpHash, sw.EntryPointAddress(), result)
+	}
+	return result, nil
 }
 
 // Only the EntryPoint event for this UserOperation can explain its revert.
@@ -311,7 +290,7 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 				"stepID", step.Id,
 				"userOpHash", userOpHash)
 
-			result, waitErr := v.waitForUserOpConfirmation(userOpHash)
+			result, waitErr := v.waitForStepUserOpConfirmation(step, userOpHash)
 			if waitErr != nil {
 				v.logger.Error("❌ Failed to wait for on-chain confirmation",
 					"stepID", step.Id,
@@ -327,14 +306,7 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 					"stepID", step.Id,
 					"userOpHash", userOpHash)
 
-				v.mu.Lock()
-				updateConfirmedWriteMetadata(step, userOpHash, result)
-				// Update gas cost fields from the on-chain receipt if the step doesn't already have them.
-				// Done under v.mu to avoid data races with readers of ExecutionLogs.
-				if result != nil && result.Receipt != nil && (step.TotalGasCost == "" || step.TotalGasCost == "0") {
-					updateStepGasCostFromReceipt(step, result.Receipt, v)
-				}
-				v.mu.Unlock()
+				v.applyConfirmedWrite(step, userOpHash, result)
 
 				if result.Success {
 					v.addRPCPropagationDelay()
@@ -360,7 +332,7 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 					"stepID", step.Id,
 					"userOpHash", userOpHash)
 
-				result, waitErr := v.waitForUserOpConfirmation(userOpHash)
+				result, waitErr := v.waitForStepUserOpConfirmation(step, userOpHash)
 				if waitErr != nil {
 					v.logger.Error("❌ Failed to wait for ethTransfer confirmation",
 						"stepID", step.Id,
@@ -372,29 +344,7 @@ func (v *VM) waitForOnChainConfirmationIfNeeded(step *avsproto.Execution_Step) b
 						"stepID", step.Id,
 						"userOpHash", userOpHash)
 
-					// Update gas cost fields under v.mu to avoid data races with readers of ExecutionLogs
-					v.mu.Lock()
-					step.Success = result.Success
-					step.Error = ""
-					step.ErrorCode = avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED
-					if !result.Success {
-						step.Error = confirmedFailureReason(result)
-						step.ErrorCode = avsproto.ErrorCode_USER_OP_EXECUTION_REVERTED
-						if result.RevertData != "" {
-							metaMap["revertData"] = result.RevertData
-						}
-					}
-					metaMap["receiptStatus"] = "confirmed"
-					metaMap["transactionHash"] = result.TxHash
-					if !result.Success {
-						metaMap["receiptStatus"] = "failed"
-					}
-					step.Metadata, _ = structpb.NewValue(metaMap)
-					step.EndAt = time.Now().UnixMilli()
-					if result != nil && result.Receipt != nil && (step.TotalGasCost == "" || step.TotalGasCost == "0") {
-						updateStepGasCostFromReceipt(step, result.Receipt, v)
-					}
-					v.mu.Unlock()
+					v.applyConfirmedWrite(step, userOpHash, result)
 
 					if result.Success {
 						v.addRPCPropagationDelay()
