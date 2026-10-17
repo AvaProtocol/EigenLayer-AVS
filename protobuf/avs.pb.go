@@ -351,10 +351,13 @@ const (
 	ErrorCode_TASK_ALREADY_EXISTS    ErrorCode = 4000 // Task with same ID already exists
 	ErrorCode_TASK_ALREADY_COMPLETED ErrorCode = 4001 // Cannot modify completed task
 	// Deprecated: Marked as deprecated in avs.proto.
-	ErrorCode_TASK_ALREADY_CANCELLED ErrorCode = 4002 // Deprecated: cancelled state replaced by Disabled
-	ErrorCode_EXECUTION_IN_PROGRESS  ErrorCode = 4003 // Operation not allowed during execution
-	ErrorCode_WALLET_ALREADY_EXISTS  ErrorCode = 4004 // Wallet already exists for salt
-	ErrorCode_SECRET_ALREADY_EXISTS  ErrorCode = 4005 // Secret with same name exists
+	ErrorCode_TASK_ALREADY_CANCELLED          ErrorCode = 4002 // Deprecated: cancelled state replaced by Disabled
+	ErrorCode_EXECUTION_IN_PROGRESS           ErrorCode = 4003 // Operation not allowed during execution
+	ErrorCode_WALLET_ALREADY_EXISTS           ErrorCode = 4004 // Wallet already exists for salt
+	ErrorCode_SECRET_ALREADY_EXISTS           ErrorCode = 4005 // Secret with same name exists
+	ErrorCode_USER_OP_CONFIRMATION_UNRESOLVED ErrorCode = 4006 // Submission may still confirm; do not blindly retry
+	ErrorCode_USER_OP_EXECUTION_REVERTED      ErrorCode = 4007 // Confirmed outer transaction or inner operation reverted
+	ErrorCode_WRITE_PREREQUISITE_FAILED       ErrorCode = 4008 // Write skipped because an upstream write did not succeed
 	// 5000-5999: External Service errors
 	ErrorCode_RPC_NODE_ERROR     ErrorCode = 5000 // Blockchain RPC node error
 	ErrorCode_TENDERLY_API_ERROR ErrorCode = 5001 // Tenderly simulation error
@@ -404,6 +407,9 @@ var (
 		4003: "EXECUTION_IN_PROGRESS",
 		4004: "WALLET_ALREADY_EXISTS",
 		4005: "SECRET_ALREADY_EXISTS",
+		4006: "USER_OP_CONFIRMATION_UNRESOLVED",
+		4007: "USER_OP_EXECUTION_REVERTED",
+		4008: "WRITE_PREREQUISITE_FAILED",
 		5000: "RPC_NODE_ERROR",
 		5001: "TENDERLY_API_ERROR",
 		5002: "TOKEN_LOOKUP_ERROR",
@@ -423,46 +429,49 @@ var (
 		8004: "INSUFFICIENT_CREDIT",
 	}
 	ErrorCode_value = map[string]int32{
-		"ERROR_CODE_UNSPECIFIED":        0,
-		"UNAUTHORIZED":                  1000,
-		"FORBIDDEN":                     1001,
-		"INVALID_SIGNATURE":             1002,
-		"EXPIRED_TOKEN":                 1003,
-		"TASK_NOT_FOUND":                2000,
-		"EXECUTION_NOT_FOUND":           2001,
-		"WALLET_NOT_FOUND":              2002,
-		"SECRET_NOT_FOUND":              2003,
-		"TOKEN_METADATA_NOT_FOUND":      2004,
-		"INVALID_REQUEST":               3000,
-		"INVALID_TRIGGER_CONFIG":        3001,
-		"INVALID_NODE_CONFIG":           3002,
-		"INVALID_WORKFLOW":              3003,
-		"INVALID_ADDRESS":               3004,
-		"INVALID_SIGNATURE_FORMAT":      3005,
-		"MISSING_REQUIRED_FIELD":        3006,
-		"TASK_ALREADY_EXISTS":           4000,
-		"TASK_ALREADY_COMPLETED":        4001,
-		"TASK_ALREADY_CANCELLED":        4002,
-		"EXECUTION_IN_PROGRESS":         4003,
-		"WALLET_ALREADY_EXISTS":         4004,
-		"SECRET_ALREADY_EXISTS":         4005,
-		"RPC_NODE_ERROR":                5000,
-		"TENDERLY_API_ERROR":            5001,
-		"TOKEN_LOOKUP_ERROR":            5002,
-		"SIMULATION_ERROR":              5003,
-		"STORAGE_UNAVAILABLE":           6000,
-		"STORAGE_WRITE_ERROR":           6001,
-		"STORAGE_READ_ERROR":            6002,
-		"TASK_DATA_CORRUPTED":           6003,
-		"EXECUTION_ENGINE_ERROR":        6004,
-		"RATE_LIMIT_EXCEEDED":           7000,
-		"QUOTA_EXCEEDED":                7001,
-		"TOO_MANY_REQUESTS":             7002,
-		"SMART_WALLET_RPC_ERROR":        8000,
-		"SMART_WALLET_NOT_FOUND":        8001,
-		"SMART_WALLET_DEPLOYMENT_ERROR": 8002,
-		"INSUFFICIENT_BALANCE":          8003,
-		"INSUFFICIENT_CREDIT":           8004,
+		"ERROR_CODE_UNSPECIFIED":          0,
+		"UNAUTHORIZED":                    1000,
+		"FORBIDDEN":                       1001,
+		"INVALID_SIGNATURE":               1002,
+		"EXPIRED_TOKEN":                   1003,
+		"TASK_NOT_FOUND":                  2000,
+		"EXECUTION_NOT_FOUND":             2001,
+		"WALLET_NOT_FOUND":                2002,
+		"SECRET_NOT_FOUND":                2003,
+		"TOKEN_METADATA_NOT_FOUND":        2004,
+		"INVALID_REQUEST":                 3000,
+		"INVALID_TRIGGER_CONFIG":          3001,
+		"INVALID_NODE_CONFIG":             3002,
+		"INVALID_WORKFLOW":                3003,
+		"INVALID_ADDRESS":                 3004,
+		"INVALID_SIGNATURE_FORMAT":        3005,
+		"MISSING_REQUIRED_FIELD":          3006,
+		"TASK_ALREADY_EXISTS":             4000,
+		"TASK_ALREADY_COMPLETED":          4001,
+		"TASK_ALREADY_CANCELLED":          4002,
+		"EXECUTION_IN_PROGRESS":           4003,
+		"WALLET_ALREADY_EXISTS":           4004,
+		"SECRET_ALREADY_EXISTS":           4005,
+		"USER_OP_CONFIRMATION_UNRESOLVED": 4006,
+		"USER_OP_EXECUTION_REVERTED":      4007,
+		"WRITE_PREREQUISITE_FAILED":       4008,
+		"RPC_NODE_ERROR":                  5000,
+		"TENDERLY_API_ERROR":              5001,
+		"TOKEN_LOOKUP_ERROR":              5002,
+		"SIMULATION_ERROR":                5003,
+		"STORAGE_UNAVAILABLE":             6000,
+		"STORAGE_WRITE_ERROR":             6001,
+		"STORAGE_READ_ERROR":              6002,
+		"TASK_DATA_CORRUPTED":             6003,
+		"EXECUTION_ENGINE_ERROR":          6004,
+		"RATE_LIMIT_EXCEEDED":             7000,
+		"QUOTA_EXCEEDED":                  7001,
+		"TOO_MANY_REQUESTS":               7002,
+		"SMART_WALLET_RPC_ERROR":          8000,
+		"SMART_WALLET_NOT_FOUND":          8001,
+		"SMART_WALLET_DEPLOYMENT_ERROR":   8002,
+		"INSUFFICIENT_BALANCE":            8003,
+		"INSUFFICIENT_CREDIT":             8004,
 	}
 )
 
@@ -11012,7 +11021,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x0fLANG_JAVASCRIPT\x10\x01\x12\r\n" +
 	"\tLANG_JSON\x10\x02\x12\x10\n" +
 	"\fLANG_GRAPHQL\x10\x03\x12\x13\n" +
-	"\x0fLANG_HANDLEBARS\x10\x04*\x90\b\n" +
+	"\x0fLANG_HANDLEBARS\x10\x04*\xf7\b\n" +
 	"\tErrorCode\x12\x1a\n" +
 	"\x16ERROR_CODE_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\fUNAUTHORIZED\x10\xe8\a\x12\x0e\n" +
@@ -11036,7 +11045,10 @@ const file_avs_proto_rawDesc = "" +
 	"\x16TASK_ALREADY_CANCELLED\x10\xa2\x1f\x1a\x02\b\x01\x12\x1a\n" +
 	"\x15EXECUTION_IN_PROGRESS\x10\xa3\x1f\x12\x1a\n" +
 	"\x15WALLET_ALREADY_EXISTS\x10\xa4\x1f\x12\x1a\n" +
-	"\x15SECRET_ALREADY_EXISTS\x10\xa5\x1f\x12\x13\n" +
+	"\x15SECRET_ALREADY_EXISTS\x10\xa5\x1f\x12$\n" +
+	"\x1fUSER_OP_CONFIRMATION_UNRESOLVED\x10\xa6\x1f\x12\x1f\n" +
+	"\x1aUSER_OP_EXECUTION_REVERTED\x10\xa7\x1f\x12\x1e\n" +
+	"\x19WRITE_PREREQUISITE_FAILED\x10\xa8\x1f\x12\x13\n" +
 	"\x0eRPC_NODE_ERROR\x10\x88'\x12\x17\n" +
 	"\x12TENDERLY_API_ERROR\x10\x89'\x12\x17\n" +
 	"\x12TOKEN_LOOKUP_ERROR\x10\x8a'\x12\x15\n" +

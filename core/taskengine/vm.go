@@ -1509,6 +1509,15 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		return nil, fmt.Errorf("executeNode called with nil node")
 	}
 
+	// Keep off-chain processing and terminal reports running, but never submit
+	// a dependent transaction after a failed or unresolved upstream write.
+	if isWorkflowWrite(node) {
+		if prerequisite := v.failedWritePrerequisite(node.Id); prerequisite != nil {
+			v.recordSkippedWrite(node, prerequisite)
+			return nil, nil
+		}
+	}
+
 	// Extract and set input data for this node (making it available as node_name.input)
 	inputData := ExtractNodeConfiguration(node)
 	if inputData != nil {
@@ -3639,14 +3648,19 @@ func (v *VM) AnalyzeExecutionResult() (string, int, ExecutionResultStatus) {
 	}
 
 	var failedStepLabels []string
+	skippedWrites := 0
 
 	for _, step := range v.ExecutionLogs {
 		if !step.Success && step.Error != "" {
+			if step.ErrorCode == avsproto.ErrorCode_WRITE_PREREQUISITE_FAILED {
+				skippedWrites++
+				continue
+			}
 			failedStepLabels = append(failedStepLabels, failedStepLabel(step))
 		}
 	}
 
-	failedCount := len(failedStepLabels)
+	failedCount := len(failedStepLabels) + skippedWrites
 
 	if failedCount == 0 {
 		// All executed steps succeeded. Branch/conditional skips are normal
@@ -3657,6 +3671,12 @@ func (v *VM) AnalyzeExecutionResult() (string, int, ExecutionResultStatus) {
 
 	// One or more steps failed (covers both partial and total failure).
 	errorMessage := formatExecutionErrorMessage("", failedCount, len(v.ExecutionLogs), failedStepLabels)
+	if skippedWrites > 0 {
+		if len(failedStepLabels) == 0 {
+			errorMessage = fmt.Sprintf("%d of %d steps failed", failedCount, len(v.ExecutionLogs))
+		}
+		errorMessage += fmt.Sprintf("; %d dependent writes skipped", skippedWrites)
+	}
 	return errorMessage, failedCount, ExecutionFailed
 }
 
