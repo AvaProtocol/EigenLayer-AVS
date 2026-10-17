@@ -9666,7 +9666,9 @@ type LoopNode_Config struct {
 	// Note: ContractWrite operations always run sequentially regardless of this setting
 	ExecutionMode ExecutionMode `protobuf:"varint,4,opt,name=execution_mode,json=executionMode,proto3,enum=aggregator.ExecutionMode" json:"execution_mode,omitempty"`
 	// Per-iteration timeout in seconds. If an iteration does not complete within
-	// this duration, it is marked as failed. Default: 30 seconds.
+	// this duration, it is marked as failed. Off-chain default: 30 seconds.
+	// Write runners use at least nine minutes to collect nonce retries and
+	// the bounded five-minute confirmation result of a submitted operation.
 	IterationTimeout uint32 `protobuf:"varint,5,opt,name=iteration_timeout,json=iterationTimeout,proto3" json:"iteration_timeout,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache

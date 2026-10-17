@@ -697,7 +697,9 @@ message LoopNode {
     // Note: ContractWrite operations always run sequentially regardless of this setting
     ExecutionMode execution_mode = 4;
     // Per-iteration timeout in seconds. If an iteration does not complete within
-    // this duration, it is marked as failed. Default: 30 seconds.
+    // this duration, it is marked as failed. Off-chain default: 30 seconds.
+    // Write runners use at least nine minutes to collect nonce retries and
+    // the bounded five-minute confirmation result of a submitted operation.
     uint32 iteration_timeout = 5;
   }
 

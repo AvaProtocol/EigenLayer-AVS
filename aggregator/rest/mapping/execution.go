@@ -235,8 +235,14 @@ func protoExecutionStepToOpenAPI(in *avsproto.Execution_Step) (generated.Executi
 		}
 	}
 	if md := in.GetMetadata(); md != nil {
-		if m, ok := md.AsInterface().(map[string]interface{}); ok {
+		switch m := md.AsInterface().(type) {
+		case map[string]interface{}:
 			out.Metadata = &m
+		case []interface{}:
+			// Match nodes:run's object-shaped wrapper for per-method receipts.
+			// Preserve pending hashes and revert data on execution/trigger reads.
+			wrapped := map[string]interface{}{"results": m}
+			out.Metadata = &wrapped
 		}
 	}
 	if ec := in.GetExecutionContext(); ec != nil {

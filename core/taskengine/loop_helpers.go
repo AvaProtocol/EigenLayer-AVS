@@ -4,9 +4,65 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"google.golang.org/protobuf/types/known/structpb"
 )
+
+func loopIterationTimeout(configured time.Duration, onChain bool) time.Duration {
+	if onChain {
+		// The collector must not discard a submitted write before its runner
+		// returns the confirmation outcome. Budget the existing three 60-second
+		// nonce retries, the receipt wait, and one minute for RPC overhead.
+		minimum := 3*time.Minute + userOpConfirmationTimeout + time.Minute
+		if configured < minimum {
+			return minimum
+		}
+	} else if configured <= 0 {
+		return 30 * time.Second
+	}
+	return configured
+}
+
+// Iteration steps are not published separately. Carry their confirmation
+// outcome on the loop, so clients can distinguish an unknown on-chain outcome
+// from a confirmed revert or an ordinary iteration error. Unresolved wins
+// over reverted; keep the selected error and code about the same iteration.
+func propagateLoopConfirmationFailure(parent *avsproto.Execution_Step, iterations []*avsproto.Execution_Step) {
+	var selected *avsproto.Execution_Step
+	var outcomes []interface{}
+	for _, step := range iterations {
+		if step == nil || step.Success {
+			continue
+		}
+		if step.ErrorCode != avsproto.ErrorCode_USER_OP_CONFIRMATION_UNRESOLVED && step.ErrorCode != avsproto.ErrorCode_USER_OP_EXECUTION_REVERTED {
+			continue
+		}
+		outcome := map[string]interface{}{"id": step.Id, "error": step.Error, "errorCode": step.ErrorCode.String()}
+		if step.Metadata != nil {
+			outcome["metadata"] = step.Metadata.AsInterface()
+		}
+		outcomes = append(outcomes, outcome)
+		if selected == nil || (step.ErrorCode == avsproto.ErrorCode_USER_OP_CONFIRMATION_UNRESOLVED && selected.ErrorCode != step.ErrorCode) {
+			selected = step
+		}
+	}
+	if selected == nil {
+		return
+	}
+	parent.Success = false
+	parent.ErrorCode = selected.ErrorCode
+	parent.Error = fmt.Sprintf("Loop iteration %s: %s", selected.Id, selected.Error)
+	metadata := map[string]interface{}{}
+	if parent.Metadata != nil {
+		if current, ok := parent.Metadata.AsInterface().(map[string]interface{}); ok {
+			metadata = current
+		}
+	}
+	metadata["confirmationOutcomes"] = outcomes
+	parent.Metadata, _ = structpb.NewValue(metadata)
+}
 
 // Loop Helper Functions
 //
