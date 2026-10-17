@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
@@ -161,27 +162,56 @@ func (v *VM) reconciledWritePrerequisite(nodeID string) *avsproto.Execution_Step
 			return prior
 		}
 		checked[prior.Id] = true
-		if !v.reconcileWrite(prior) {
-			return prior
-		}
-		// Replace fields on the original step, not its identity; reports and
-		// checkpointing retain its receipts and no duplicate execution is appended.
+		v.reconcileLoggedWriteOnce(prior.Id)
+		// Always scan the canonical logs again, including after an unavailable
+		// receipt. A worker must never decide from its pre-lookup clone.
+	}
+}
+
+func (v *VM) reconcileLoggedWriteOnce(id string) {
+	raw, _ := v.writeReconciliations.LoadOrStore(id, &sync.Once{})
+	raw.(*sync.Once).Do(func() {
+		var before *avsproto.Execution_Step
 		v.mu.Lock()
 		for _, original := range v.ExecutionLogs {
-			if original.Id == prior.Id {
-				proto.Reset(original)
-				proto.Merge(original, prior)
+			if original.Id == id {
+				before = proto.Clone(original).(*avsproto.Execution_Step)
 				break
 			}
 		}
 		v.mu.Unlock()
-		if prior.GetLoop() != nil && prior.GetLoop().Data != nil {
-			(&CommonProcessor{vm: v}).SetOutputVarForStep(prior.Id, prior.GetLoop().Data.AsInterface())
+		if before == nil {
+			return
 		}
-		if !prior.Success {
-			return prior
+		resolved := proto.Clone(before).(*avsproto.Execution_Step)
+		if !v.reconcileWrite(resolved) {
+			return
 		}
-	}
+		if resolved.Success {
+			// Keep success private until propagation finishes. Other successors
+			// still see the unresolved log and wait on this same Once, so none
+			// can submit early or add another propagation delay.
+			v.addRPCPropagationDelay()
+		}
+		v.mu.Lock()
+		for _, original := range v.ExecutionLogs {
+			if original.Id == id {
+				// A waiter may have advanced the canonical receipt during the
+				// lookup. Never replace that newer outcome with a stale snapshot.
+				if proto.Equal(original, before) {
+					proto.Reset(original)
+					proto.Merge(original, resolved)
+					if resolved.GetLoop() != nil && resolved.GetLoop().Data != nil {
+						// Publish loop output and its receipt together; a new worker
+						// may observe success without having joined this Once.
+						(&CommonProcessor{vm: v}).setOutputVarForStepLocked(id, resolved.GetLoop().Data.AsInterface())
+					}
+				}
+				break
+			}
+		}
+		v.mu.Unlock()
+	})
 }
 
 // The collector may time out while the worker is waiting for a receipt. Copy

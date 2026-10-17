@@ -7,15 +7,21 @@ as deployed execution; simulation never looks up or submits a real UserOperation
 Before skipping a dependent write for a pending prerequisite, the VM checks each
 stored UserOperation receipt once, with a five-second deadline for the entire
 prerequisite. It never resubmits the prerequisite or starts another poll loop.
-A confirmed success updates the original execution step and permits the next
-write. A confirmed revert records USER_OP_EXECUTION_REVERTED (4007) and skips the
-write. Pending, unavailable or malformed receipts remain unresolved (4006) and
+A prerequisite is reconciled once per execution leg; parallel successors share
+the lookup and re-read the canonical execution step afterward. A stale lookup
+cannot overwrite a newer confirmation. A newly confirmed success waits for the
+same five-second RPC propagation delay as the live waiter, then updates the
+original execution step and permits dependent writes. Already-confirmed steps
+do not add another delay. A confirmed revert records USER_OP_EXECUTION_REVERTED
+(4007) and skips the write. Pending, unavailable or malformed receipts remain unresolved (4006) and
 skip the write (4008). Check the operation status before starting another run.
 This check also runs when execution resumes after Await.
 
-Loop collector timeouts retain a snapshot of a submitted iteration, including
-its pending operation hash, on metadata.confirmationOutcomes. A resumed dependent
-write can reconcile these snapshots. Resolving every pending iteration only clears
+If a collector timer fires after an iteration has confirmed successfully, both
+collectors preserve its output, receipt and gas instead of failing the loop.
+Still-pending iterations retain a snapshot, including their operation hash, on
+metadata.confirmationOutcomes. A resumed dependent write can reconcile these
+snapshots. Resolving every pending iteration only clears
 the loop failure when no unrelated iteration/collector failures remain. Loop
 iterations keep their existing sequencing and do not become atomic groups.
 

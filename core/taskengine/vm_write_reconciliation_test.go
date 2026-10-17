@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -224,4 +226,218 @@ func TestLoopConfirmationUsesParentRunnerOverOldCheckpointContext(t *testing.T) 
 	got, err := vm.confirmationConfig(step)
 	require.NoError(t, err)
 	require.Same(t, resolved, got)
+}
+
+func TestWriteReconciliationSharedPrerequisiteOnResumedFanout(t *testing.T) {
+	for _, loop := range []bool{false, true} {
+		for _, outcome := range []string{"confirmed", "reverted", "pending"} {
+			t.Run(fmt.Sprintf("loop=%t/%s", loop, outcome), func(t *testing.T) {
+				lookupStarted, releaseLookup := make(chan struct{}), make(chan struct{})
+				extraLookup := make(chan struct{}, 8)
+				var polls atomic.Int32
+				rpc := confirmationTestVM(t, func(method string) any {
+					switch method {
+					case "eth_getUserOperationReceipt":
+						if polls.Add(1) != 1 {
+							extraLookup <- struct{}{}
+							return nil // A lagging replica must not split the successors' outcome.
+						}
+						close(lookupStarted)
+						<-releaseLookup
+						if outcome == "pending" {
+							return nil
+						}
+						return map[string]any{"success": outcome == "confirmed", "receipt": map[string]any{"transactionHash": confirmationTestOtherHash, "status": "0x1"}}
+					case "eth_getTransactionReceipt":
+						return &types.Receipt{Status: 1, TxHash: common.HexToHash(confirmationTestOtherHash), BlockNumber: big.NewInt(10), Logs: []*types.Log{}}
+					}
+					return nil
+				})
+				var release sync.Once
+				t.Cleanup(func() { release.Do(func() { close(releaseLookup) }) })
+				ancestor := dependencyWrite("approve")
+				prefix := singlePendingWrite(t, "approve")
+				if loop {
+					ancestor = &avsproto.TaskNode{Id: "approve", Name: "approve", TaskType: &avsproto.TaskNode_Loop{Loop: &avsproto.LoopNode{
+						Runner: &avsproto.LoopNode_ContractWrite{ContractWrite: dependencyWrite("write").GetContractWrite()},
+					}}}
+					data, _ := structpb.NewValue([]interface{}{nil})
+					prefix = &avsproto.Execution_Step{Id: "approve", Name: "approve", OutputData: &avsproto.Execution_Step_Loop{Loop: &avsproto.LoopNode_Output{Data: data}}}
+					propagateLoopConfirmationFailure(prefix, []*avsproto.Execution_Step{singlePendingWrite(t, "approve_iter_0")})
+				}
+				await := &avsproto.TaskNode{Id: "await", Name: "await", TaskType: &avsproto.TaskNode_Await{Await: &avsproto.AwaitNode{}}}
+				report := customCodeNode("report")
+				if loop && outcome == "confirmed" {
+					report.GetCustomCode().Config.Source = `return {hash: approve.data[0].metadata.transactionHash};`
+				}
+				vm := dependencyVM(t, []*avsproto.TaskNode{ancestor, await, dependencyWrite("supply"), dependencyWrite("repay"), report}, []*avsproto.TaskEdge{
+					{Source: "trigger", Target: "approve"}, {Source: "approve", Target: "await"},
+					{Source: "await", Target: "supply"}, {Source: "await", Target: "repay"},
+					{Source: "supply", Target: "report"}, {Source: "repay", Target: "report"},
+				})
+				vm.smartWalletConfig = rpc.smartWalletConfig
+				vm.ExecutionLogs = []*avsproto.Execution_Step{prefix}
+				vm.resumeCompleted = map[string]bool{"approve": true, "await": true}
+				done := make(chan error, 1)
+				go func() { done <- vm.Run() }()
+				select {
+				case <-lookupStarted:
+				case <-time.After(2 * time.Second):
+					t.Fatal("receipt lookup did not start")
+				}
+				select {
+				case <-extraLookup:
+					t.Error("parallel successors started separate receipt lookups")
+				case <-time.After(100 * time.Millisecond):
+				}
+				started := time.Now()
+				release.Do(func() { close(releaseLookup) })
+				select {
+				case err := <-done:
+					require.NoError(t, err)
+				case <-time.After(8 * time.Second):
+					t.Fatal("fan-out did not finish")
+				}
+				require.EqualValues(t, 1, polls.Load())
+				require.Same(t, prefix, vm.ExecutionLogs[0])
+				require.True(t, dependencyStep(t, vm, "report").Success)
+				if loop && outcome == "confirmed" {
+					require.Equal(t, confirmationTestOtherHash, dependencyStep(t, vm, "report").GetCustomCode().Data.AsInterface().(map[string]interface{})["hash"])
+				}
+				for _, id := range []string{"supply", "repay"} {
+					if outcome == "confirmed" {
+						require.NotEqual(t, avsproto.ErrorCode_WRITE_PREREQUISITE_FAILED, dependencyStep(t, vm, id).ErrorCode)
+					} else {
+						require.Equal(t, avsproto.ErrorCode_WRITE_PREREQUISITE_FAILED, dependencyStep(t, vm, id).ErrorCode)
+					}
+				}
+				if outcome == "confirmed" {
+					require.True(t, prefix.Success)
+					require.GreaterOrEqual(t, time.Since(started), 5*time.Second, "successors wait for propagation")
+				} else {
+					require.Less(t, time.Since(started), 2*time.Second, "no propagation delay for unresolved/reverted receipts")
+				}
+			})
+		}
+	}
+}
+
+func TestWriteReconciliationPreservesNewerCanonicalReceipt(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		for _, confirmed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("partial=%t/confirmed=%t", partial, confirmed), func(t *testing.T) {
+				lookupStarted, releaseLookup := make(chan struct{}), make(chan struct{})
+				var polls atomic.Int32
+				rpc := confirmationTestVM(t, func(method string) any {
+					switch method {
+					case "eth_getUserOperationReceipt":
+						if polls.Add(1) == 1 && partial {
+							return map[string]any{"success": true, "receipt": map[string]any{"transactionHash": confirmationTestOtherHash, "status": "0x1"}}
+						}
+						close(lookupStarted)
+						<-releaseLookup
+					case "eth_getTransactionReceipt":
+						return &types.Receipt{Status: 1, TxHash: common.HexToHash(confirmationTestOtherHash), BlockNumber: big.NewInt(10), Logs: []*types.Log{}}
+					}
+					return nil
+				})
+				var release sync.Once
+				t.Cleanup(func() { release.Do(func() { close(releaseLookup) }) })
+				vm := dependencyVM(t, []*avsproto.TaskNode{dependencyWrite("approve"), dependencyWrite("supply")}, []*avsproto.TaskEdge{
+					{Source: "trigger", Target: "approve"}, {Source: "approve", Target: "supply"},
+				})
+				vm.smartWalletConfig = rpc.smartWalletConfig
+				prefix := singlePendingWrite(t, "approve")
+				if partial {
+					prefix = pendingConfirmationStep(t)
+					prefix.Id, prefix.Name = "approve", "approve"
+					prefix.OutputData = &avsproto.Execution_Step_ContractWrite{ContractWrite: &avsproto.ContractWriteNode_Output{}}
+				}
+				vm.ExecutionLogs = []*avsproto.Execution_Step{prefix}
+				done := make(chan *avsproto.Execution_Step, 1)
+				go func() { done <- vm.reconciledWritePrerequisite("supply") }()
+				select {
+				case <-lookupStarted:
+				case <-time.After(2 * time.Second):
+					t.Fatal("receipt lookup did not start")
+				}
+				if partial {
+					vm.applyConfirmedWrite(prefix, confirmationTestHash, &waitForUserOpConfirmationResult{Success: true, TxHash: confirmationTestOtherHash})
+				}
+				hash := confirmationTestHash
+				if partial {
+					hash = confirmationTestOtherHash
+				}
+				vm.applyConfirmedWrite(prefix, hash, &waitForUserOpConfirmationResult{Success: confirmed, TxHash: confirmationTestOtherHash})
+				newer := proto.Clone(prefix).(*avsproto.Execution_Step)
+				release.Do(func() { close(releaseLookup) })
+				select {
+				case blocked := <-done:
+					if confirmed {
+						require.Nil(t, blocked)
+					} else {
+						require.Equal(t, avsproto.ErrorCode_USER_OP_EXECUTION_REVERTED, blocked.GetErrorCode())
+					}
+				case <-time.After(2 * time.Second):
+					t.Fatal("receipt lookup did not finish")
+				}
+				require.True(t, proto.Equal(newer, prefix), "neither failed nor partial lookups may overwrite a newer receipt")
+			})
+		}
+	}
+}
+
+func TestWriteReconciliationAlreadyConfirmedDoesNotWait(t *testing.T) {
+	var polls atomic.Int32
+	rpc := reconciliationVM(t, "pending", &polls)
+	vm := dependencyVM(t, []*avsproto.TaskNode{dependencyWrite("approve"), dependencyWrite("supply")}, []*avsproto.TaskEdge{
+		{Source: "trigger", Target: "approve"}, {Source: "approve", Target: "supply"},
+	})
+	vm.smartWalletConfig = rpc.smartWalletConfig
+	vm.ExecutionLogs = []*avsproto.Execution_Step{{Id: "approve", Success: true}}
+	started := time.Now()
+	require.Nil(t, vm.reconciledWritePrerequisite("supply"))
+	require.Zero(t, polls.Load())
+	require.Less(t, time.Since(started), time.Second)
+}
+
+func TestLoopCollectorTimeoutUsesConfirmedReceipt(t *testing.T) {
+	for _, outcome := range []string{"confirmed", "reverted", "pending", "not-submitted"} {
+		t.Run(outcome, func(t *testing.T) {
+			var polls atomic.Int32
+			vm := reconciliationVM(t, "pending", &polls)
+			step := singlePendingWrite(t, "batch_iter_0")
+			data, _ := structpb.NewValue(map[string]interface{}{"amount": "1"})
+			step.GetContractWrite().Data = data
+			step.GasUsed, step.TotalGasCost = "21000", "42"
+			if outcome == "confirmed" || outcome == "reverted" {
+				vm.applyConfirmedWrite(step, confirmationTestHash, &waitForUserOpConfirmationResult{Success: outcome == "confirmed", TxHash: confirmationTestOtherHash})
+			}
+			if outcome != "not-submitted" {
+				vm.iterationWrites.Store(step.Id, step)
+			}
+			// No result is sent: force the timer arm used by both collectors.
+			result, timedOut := vm.waitForLoopIterationResult(step.Id, make(chan *ExecutionResult), time.Millisecond)
+			require.Equal(t, outcome != "confirmed", timedOut)
+			if outcome == "not-submitted" {
+				require.Nil(t, result.Step)
+				return
+			}
+			require.NotSame(t, step, result.Step)
+			require.Equal(t, step.GasUsed, result.Step.GasUsed)
+			require.Equal(t, step.TotalGasCost, result.Step.TotalGasCost)
+			if outcome == "confirmed" {
+				require.True(t, result.Step.Success)
+				require.Equal(t, "1", result.Data.(map[string]interface{})["amount"])
+				require.Equal(t, confirmationTestOtherHash, result.Data.(map[string]interface{})["metadata"].(map[string]interface{})["transactionHash"])
+			} else {
+				require.Nil(t, result.Data)
+				code := avsproto.ErrorCode_USER_OP_CONFIRMATION_UNRESOLVED
+				if outcome == "reverted" {
+					code = avsproto.ErrorCode_USER_OP_EXECUTION_REVERTED
+				}
+				require.Equal(t, code, result.Step.ErrorCode)
+			}
+		})
+	}
 }

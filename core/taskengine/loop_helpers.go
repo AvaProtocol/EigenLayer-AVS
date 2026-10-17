@@ -25,6 +25,24 @@ func loopIterationTimeout(configured time.Duration, onChain bool) time.Duration 
 	return configured
 }
 
+// Both collectors use the retained receipt when confirmation wins the race
+// with the timer but the worker has not yet returned its result.
+func (v *VM) waitForLoopIterationResult(id string, ch <-chan *ExecutionResult, timeout time.Duration) (result *ExecutionResult, collectorTimedOut bool) {
+	select {
+	case result := <-ch:
+		return result, false
+	case <-time.After(timeout):
+		step := v.timedOutIterationWrite(id)
+		if step != nil && step.Success {
+			// The waiter may still be in its propagation delay. Honor the same
+			// delay before releasing the loop's next write from this path.
+			v.addRPCPropagationDelay()
+			return &ExecutionResult{StepID: id, Step: step, Data: (&ExecutionQueue{}).extractResultData(step)}, false
+		}
+		return &ExecutionResult{StepID: id, Step: step}, true
+	}
+}
+
 // Iteration steps are not published separately. Carry their confirmation
 // outcome on the loop, so clients can distinguish an unknown on-chain outcome
 // from a confirmed revert or an ordinary iteration error. Unresolved wins
