@@ -146,6 +146,9 @@ func CreateNodeExecutionStep(stepID string, node *avsproto.TaskNode, vm *VM) *av
 			"is_simulated": isSimulated,
 			"provider":     provider,
 		}
+		if resolved := workflowWriteChainID(node); resolved > 0 {
+			chainID = resolved
+		}
 		if chainID != nil {
 			ctxMap["chain_id"] = chainID
 		}

@@ -103,6 +103,12 @@ func (c *CommonProcessor) SetVar(name string, data any) {
 }
 
 func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
+	c.vm.mu.Lock()
+	defer c.vm.mu.Unlock()
+	c.setOutputVarForStepLocked(stepID, data)
+}
+
+func (c *CommonProcessor) setOutputVarForStepLocked(stepID string, data any) {
 	// Skip storing iteration step results in global VM vars to avoid polluting inputsList
 	if strings.Contains(stepID, "_iter_") {
 		// Iteration step results should not be stored as global variables
@@ -110,8 +116,6 @@ func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 		return
 	}
 
-	c.vm.mu.Lock()
-	defer c.vm.mu.Unlock()
 	nodeNameVar := c.vm.getNodeNameAsVarLocked(stepID) // Use locked version to avoid deadlock
 	if c.vm.vars == nil {
 		c.vm.vars = make(map[string]any)
@@ -235,17 +239,21 @@ type VM struct {
 	task              *model.Workflow
 	triggerData       *TriggerData
 	parsedTriggerData *triggerDataType
-	ExecutionLogs     []*avsproto.Execution_Step
-	Status            VMState
-	mu                *sync.Mutex // Mutex for vars and TaskNodes, and other shared mutable fields like plans, entrypoint, status
-	vars              map[string]any
-	secrets           map[string]string
-	plans             map[string]*Step
-	entrypoint        string
-	instructionCount  int64
-	smartWalletConfig *config.SmartWalletConfig
-	logger            logger.Logger
-	db                storage.Storage
+	// Published before receipt waiting so a collector timeout retains submitted hashes.
+	iterationWrites sync.Map // step ID -> *Execution_Step; mutation guarded by mu
+	// Parallel successors share one prerequisite receipt lookup per execution leg.
+	writeReconciliations sync.Map // log step ID -> *sync.Once
+	ExecutionLogs        []*avsproto.Execution_Step
+	Status               VMState
+	mu                   *sync.Mutex // Mutex for vars and TaskNodes, and other shared mutable fields like plans, entrypoint, status
+	vars                 map[string]any
+	secrets              map[string]string
+	plans                map[string]*Step
+	entrypoint           string
+	instructionCount     int64
+	smartWalletConfig    *config.SmartWalletConfig
+	logger               logger.Logger
+	db                   storage.Storage
 	// IsSimulation indicates whether this VM is executing in a simulation context
 	// (SimulateTask or RunNodeImmediately). In simulation, write operations must not
 	// send real transactions and should use Tenderly or mock paths instead.
@@ -1509,20 +1517,20 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		return nil, fmt.Errorf("executeNode called with nil node")
 	}
 
-	// Keep off-chain processing and terminal reports running, but never submit
-	// a dependent transaction after a failed or unresolved upstream write.
-	if isWorkflowWrite(node) {
-		if prerequisite := v.failedWritePrerequisite(node.Id); prerequisite != nil {
-			v.recordSkippedWrite(node, prerequisite)
-			return nil, nil
-		}
-	}
-
 	// Extract and set input data for this node (making it available as node_name.input)
 	inputData := ExtractNodeConfiguration(node)
 	if inputData != nil {
 		processor := &CommonProcessor{vm: v}
 		processor.SetInputVarForStep(node.Id, inputData)
+	}
+
+	// Keep off-chain processing and terminal reports running, but never submit
+	// a dependent transaction after a failed or unresolved upstream write.
+	if isWorkflowWrite(node) {
+		if prerequisite := v.reconciledWritePrerequisite(node.Id); prerequisite != nil {
+			v.recordSkippedWrite(node, prerequisite)
+			return nil, nil
+		}
 	}
 
 	var nextStep *Step // This is the *next step in the plan to jump to*, not the execution log step
@@ -4964,6 +4972,7 @@ func (v *VM) executeNodeWithIsolatedVars(node *avsproto.TaskNode, stepID string,
 		// Wait for on-chain confirmation before returning to the loop,
 		// so the next iteration can safely use nonce+1.
 		if executionLogForNode != nil && err == nil {
+			v.iterationWrites.Store(stepID, executionLogForNode)
 			v.waitForOnChainConfirmationIfNeeded(executionLogForNode)
 		}
 	} else if node.GetFilter() != nil {
@@ -4973,6 +4982,7 @@ func (v *VM) executeNodeWithIsolatedVars(node *avsproto.TaskNode, stepID string,
 		// Same receipt-waiting as contractWrite: ensure the tx is confirmed
 		// before the next loop iteration submits with nonce+1.
 		if executionLogForNode != nil && err == nil {
+			v.iterationWrites.Store(stepID, executionLogForNode)
 			v.waitForOnChainConfirmationIfNeeded(executionLogForNode)
 		}
 	} else if node.GetLoop() != nil {
@@ -5166,6 +5176,11 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	defer eq.Stop()
 
 	results := make([]interface{}, len(inputArray))
+	defer func() {
+		for i := range inputArray {
+			v.iterationWrites.Delete(fmt.Sprintf("%s_iter_%d", stepID, i))
+		}
+	}()
 	iterationSteps := make([]*avsproto.Execution_Step, 0, len(inputArray)) // Collect iteration steps for gas aggregation
 	success := true
 	infraFailure := false
@@ -5241,8 +5256,11 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 
 		// Collect results
 		for i, resultChannel := range resultChannels {
-			select {
-			case result := <-resultChannel:
+			result, timedOut := v.waitForLoopIterationResult(fmt.Sprintf("%s_iter_%d", stepID, i), resultChannel, iterationTimeout)
+			if cancels[i] != nil {
+				cancels[i]()
+			}
+			if !timedOut {
 				if result.Error != nil {
 					if firstError == nil {
 						firstError = result.Error
@@ -5254,13 +5272,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				} else {
 					results[i] = result.Data
 				}
-				if result.Step != nil {
-					iterationSteps = append(iterationSteps, result.Step)
-				}
-			case <-time.After(iterationTimeout):
-				if cancels[i] != nil {
-					cancels[i]()
-				}
+			} else {
 				success = false
 				infraFailure = true
 				err := fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
@@ -5272,6 +5284,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				// send to it. The buffered channel will be GC'd once both sides
 				// drop their references. Cancelling the iteration ctx stops
 				// retry backoffs so the worker can pick up later iterations.
+			}
+			if result.Step != nil {
+				iterationSteps = append(iterationSteps, result.Step)
 			}
 		}
 	} else {
@@ -5312,9 +5327,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 			}
 
 			// Wait for result
-			select {
-			case result := <-resultChannel:
-				cancel()
+			result, timedOut := v.waitForLoopIterationResult(iterationStepID, resultChannel, iterationTimeout)
+			cancel()
+			if !timedOut {
 				if result.Error != nil {
 					if firstError == nil {
 						firstError = result.Error
@@ -5325,11 +5340,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				} else {
 					results[i] = result.Data
 				}
-				if result.Step != nil {
-					iterationSteps = append(iterationSteps, result.Step)
-				}
-			case <-time.After(iterationTimeout):
-				cancel()
+			} else {
 				success = false
 				infraFailure = true
 				err := fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
@@ -5341,6 +5352,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				// send to it. The buffered channel will be GC'd once both sides
 				// drop their references. Cancelling the iteration ctx stops
 				// retry backoffs so the single worker can pick up the next item.
+			}
+			if result.Step != nil {
+				iterationSteps = append(iterationSteps, result.Step)
 			}
 		}
 	}

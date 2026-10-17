@@ -83,19 +83,26 @@ func (v *VM) recordSkippedWrite(node *avsproto.TaskNode, prerequisite *avsproto.
 	}
 	message := fmt.Sprintf("Skipped: prerequisite write %q (%s) failed: %s", prerequisite.Name, prerequisite.Id, reason)
 	step := v.createExecutionStep(node.Id, false, message, "No transaction submitted.", time.Now().UnixMilli())
+	v.mu.Lock()
+	step.Inputs = v.collectInputKeysForLog(node.Id)
+	v.mu.Unlock()
 	step.ErrorCode = avsproto.ErrorCode_WRITE_PREREQUISITE_FAILED
 	step.Metadata, _ = structpb.NewValue(map[string]interface{}{
 		"skipped":            true,
 		"prerequisiteNodeId": prerequisite.Id,
 		"prerequisiteError":  reason,
 	})
+	empty := map[string]interface{}{}
+	data, _ := structpb.NewValue(empty)
+	processor := &CommonProcessor{vm: v}
+	processor.SetOutputVarForStep(node.Id, empty)
 	switch {
 	case node.GetContractWrite() != nil:
-		step.OutputData = &avsproto.Execution_Step_ContractWrite{ContractWrite: &avsproto.ContractWriteNode_Output{}}
+		step.OutputData = &avsproto.Execution_Step_ContractWrite{ContractWrite: &avsproto.ContractWriteNode_Output{Data: data}}
 	case node.GetEthTransfer() != nil:
-		step.OutputData = &avsproto.Execution_Step_EthTransfer{EthTransfer: &avsproto.ETHTransferNode_Output{}}
+		step.OutputData = &avsproto.Execution_Step_EthTransfer{EthTransfer: &avsproto.ETHTransferNode_Output{Data: data}}
 	case node.GetLoop() != nil:
-		step.OutputData = &avsproto.Execution_Step_Loop{Loop: &avsproto.LoopNode_Output{}}
+		step.OutputData = &avsproto.Execution_Step_Loop{Loop: &avsproto.LoopNode_Output{Data: data}}
 	}
 	v.addExecutionLog(step)
 }

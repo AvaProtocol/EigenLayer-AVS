@@ -25,6 +25,24 @@ func loopIterationTimeout(configured time.Duration, onChain bool) time.Duration 
 	return configured
 }
 
+// Both collectors use the retained receipt when confirmation wins the race
+// with the timer but the worker has not yet returned its result.
+func (v *VM) waitForLoopIterationResult(id string, ch <-chan *ExecutionResult, timeout time.Duration) (result *ExecutionResult, collectorTimedOut bool) {
+	select {
+	case result := <-ch:
+		return result, false
+	case <-time.After(timeout):
+		step := v.timedOutIterationWrite(id)
+		if step != nil && step.Success {
+			// The waiter may still be in its propagation delay. Honor the same
+			// delay before releasing the loop's next write from this path.
+			v.addRPCPropagationDelay()
+			return &ExecutionResult{StepID: id, Step: step, Data: (&ExecutionQueue{}).extractResultData(step)}, false
+		}
+		return &ExecutionResult{StepID: id, Step: step}, true
+	}
+}
+
 // Iteration steps are not published separately. Carry their confirmation
 // outcome on the loop, so clients can distinguish an unknown on-chain outcome
 // from a confirmed revert or an ordinary iteration error. Unresolved wins
@@ -39,7 +57,7 @@ func propagateLoopConfirmationFailure(parent *avsproto.Execution_Step, iteration
 		if step.ErrorCode != avsproto.ErrorCode_USER_OP_CONFIRMATION_UNRESOLVED && step.ErrorCode != avsproto.ErrorCode_USER_OP_EXECUTION_REVERTED {
 			continue
 		}
-		outcome := map[string]interface{}{"id": step.Id, "error": step.Error, "errorCode": step.ErrorCode.String()}
+		outcome := map[string]interface{}{"id": step.Id, "error": step.Error, "errorCode": step.ErrorCode.String(), "step": confirmationStepSnapshot(step)}
 		if step.Metadata != nil {
 			outcome["metadata"] = step.Metadata.AsInterface()
 		}
@@ -61,6 +79,21 @@ func propagateLoopConfirmationFailure(parent *avsproto.Execution_Step, iteration
 		}
 	}
 	metadata["confirmationOutcomes"] = outcomes
+	// Only clear a loop failure after reconciliation when every missing result
+	// belongs to a retained confirmation failure (not a submit/RPC/other error).
+	onlyConfirmation := false
+	if data := parent.GetLoop().GetData(); data != nil {
+		if results, ok := data.AsInterface().([]interface{}); ok && len(results) == len(iterations) {
+			missing := 0
+			for _, result := range results {
+				if result == nil {
+					missing++
+				}
+			}
+			onlyConfirmation = missing == len(outcomes)
+		}
+	}
+	metadata["confirmationOnlyFailure"] = onlyConfirmation
 	parent.Metadata, _ = structpb.NewValue(metadata)
 }
 
