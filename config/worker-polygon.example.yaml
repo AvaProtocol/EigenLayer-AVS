@@ -6,8 +6,8 @@
 #   cp config/worker-polygon.example.yaml config/worker-polygon.yaml
 #   $EDITOR config/worker-polygon.yaml
 #
-# Handles chain-specific execution: UserOps, contract writes, token
-# enrichment. Stateless — no local DB (gateway owns storage).
+# Serves chain reads and token metadata. Stateless — no local DB.
+# The gateway executes writes and resolves session grants from its storage.
 #
 # Production config lives in avs-infra/railway/configs/worker-polygon-railway.yaml.
 environment: development
@@ -28,7 +28,7 @@ eth_ws_url:  ${POLYGON_WS_URL}
 bundler_provider: alchemy
 alchemy_api_key:  ${ALCHEMY_API_KEY}
 
-# Local workers must not draw on the production Gas Manager policy.
+# Legacy shared setting; workers do not request sponsorship. Configure it on the gateway.
 disable_gas_sponsorship: true
 
 smart_wallet:

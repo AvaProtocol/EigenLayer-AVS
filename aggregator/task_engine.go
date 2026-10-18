@@ -46,6 +46,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/services"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
@@ -53,6 +54,35 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
+
+// Register each execution chain once, preferring its read-only worker. Direct
+// RPC remains the startup fallback; writes still execute in the gateway.
+func (agg *Aggregator) registerGatewayChainStateReader(chain *config.ChainConfig, chainRPC *ethclient.Client) {
+	var reader taskengine.ChainStateReader
+	workerRouted := false
+	if agg.chainRegistry != nil {
+		if entry, err := agg.chainRegistry.GetWorker(chain.ChainID); err == nil {
+			reader = taskengine.NewWorkerChainStateReader(entry.Client, chain.ChainID, 10*time.Second)
+			workerRouted = true
+		}
+	}
+	if reader == nil {
+		reader = taskengine.NewDirectChainStateReader(chainRPC, chain.ChainID)
+	}
+	taskengine.RegisterChainStateReader(uint64(chain.ChainID), reader)
+	agg.logger.Info("Chain ChainStateReader registered",
+		"chain", chain.Name, "chain_id", chain.ChainID, "worker_routed", workerRouted)
+}
+
+func (agg *Aggregator) registerLegacyChainStateReader(chainID uint64, chainRPC *ethclient.Client) {
+	// The default token service may still be initialized in gateway mode. It
+	// must not overwrite chains[0]'s worker reader with its own direct client.
+	if agg.config.IsGateway || chainID == 0 {
+		return
+	}
+	taskengine.RegisterChainStateReader(chainID, taskengine.NewDirectChainStateReader(chainRPC, int64(chainID)))
+	agg.logger.Info("Global ChainStateReader registered", "chain_id", chainID)
+}
 
 func (agg *Aggregator) stopTaskEngine() {
 	agg.logger.Infof("Stopping task engine")
@@ -118,16 +148,12 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 			if chain.SmartWallet == nil || chain.SmartWallet.EthRpcUrl == "" {
 				continue
 			}
-			// We still dial the chain RPC for smartWalletRpcByChain, but
-			// it's now only a FALLBACK: every live gateway read path
-			// (token metadata, FeeEstimator, EntryPoint nonce, and — as
-			// of Phase 4 — withdraw balance checks) routes through a
-			// worker-routed ChainStateReader / TokenEnrichmentService.
-			// This client is used only when the worker for a chain isn't
-			// reachable at startup (the fallbacks below + the REST/withdraw
-			// direct-reader fallbacks). Dropping the dial + the per-chain
-			// *_RPC env vars is the final Phase 4 cleanup, tracked in
-			// docs/changes/20260612-delegate-chain-rpc-to-workers.md.
+			// This client backs read fallbacks when a worker isn't available
+			// (startup, REST and withdrawal reads). Connected workers are
+			// preferred for token metadata, gas, nonce and balance reads.
+			// The RPC configuration is independently required by gateway-side
+			// VM writes and bundler sends; migrating reads does not permit
+			// stripping those config fields.
 			chainRpc, err := ethclient.Dial(chain.SmartWallet.EthRpcUrl)
 			if err != nil {
 				agg.logger.Warn("Failed to dial chain RPC",
@@ -183,22 +209,7 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 			// price / EstimateGas / CodeAt / EntryPoint-nonce reads.
 			// Fall back to the direct-RPC reader if the worker isn't
 			// reachable (mirrors the TokenEnrichmentService fallback above).
-			var chainStateReader taskengine.ChainStateReader
-			chainStateWorkerRouted := false
-			if agg.chainRegistry != nil {
-				if entry, err := agg.chainRegistry.GetWorker(chain.ChainID); err == nil {
-					chainStateReader = taskengine.NewWorkerChainStateReader(entry.Client, chain.ChainID, 10*time.Second)
-					chainStateWorkerRouted = true
-				}
-			}
-			if chainStateReader == nil {
-				chainStateReader = taskengine.NewDirectChainStateReader(chainRpc, chain.ChainID)
-			}
-			taskengine.RegisterChainStateReader(uint64(chain.ChainID), chainStateReader)
-			agg.logger.Info("Chain ChainStateReader registered",
-				"chain", chain.Name,
-				"chain_id", chain.ChainID,
-				"worker_routed", chainStateWorkerRouted)
+			agg.registerGatewayChainStateReader(chain, chainRpc)
 		}
 	}
 
@@ -220,16 +231,9 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 				agg.logger.Info("Global TokenEnrichmentService initialized",
 					"chainID", tokenService.GetChainID(),
 					"cacheSize", tokenService.GetCacheSize())
-				// Also register a ChainStateReader for this chain so the
-				// REST handlers' per-chain lookup hits an entry in
-				// single-chain mode too. chainID is detected via the
-				// reader's lazy ChainID() call — we register here under
-				// the freshly-initialized tokenService's chainID.
-				if cid := tokenService.GetChainID(); cid != 0 {
-					taskengine.RegisterChainStateReader(cid, taskengine.NewDirectChainStateReader(rpcClient, int64(cid)))
-					agg.logger.Info("Global ChainStateReader registered",
-						"chain_id", cid)
-				}
+				// Legacy single-chain mode needs a reader too. Gateway mode
+				// already registered every chain above and preserves that routing.
+				agg.registerLegacyChainStateReader(tokenService.GetChainID(), rpcClient)
 			}
 		}
 	}
