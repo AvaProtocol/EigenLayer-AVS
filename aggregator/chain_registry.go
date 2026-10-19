@@ -25,8 +25,8 @@ type ChainEntry struct {
 	// only — withdraw balance reads route through the chain worker's
 	// ChainStateReader, so GetRPC is dialed solely when no worker-routed
 	// reader is registered for the chain (single-chain mode / startup
-	// race). It's slated for removal with the rest of the gateway's
-	// per-chain RPC config.
+	// race). Removing this read fallback would not remove the per-chain
+	// RPC/bundler configuration still required for gateway-side writes.
 	//
 	// rpcMu serializes the dial; once `rpc` is non-nil, GetRPC returns it
 	// without taking the lock-critical-section path. Dial failures are NOT
