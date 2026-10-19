@@ -72,15 +72,6 @@ func NewContractWriteProcessor(vm *VM, client ChainStateReader, smartWalletConfi
 	return r
 }
 
-// resolveSimulationMode resolves the effective simulation mode for a contract write node.
-// It returns the per-node is_simulated value if explicitly set, otherwise falls back to the VM's simulation flag.
-func (r *ContractWriteProcessor) resolveSimulationMode(node *avsproto.ContractWriteNode, vmDefault bool) bool {
-	if node != nil && node.Config != nil && node.Config.IsSimulated != nil {
-		return node.Config.GetIsSimulated()
-	}
-	return vmDefault
-}
-
 // isMethodWithParams returns true when methodName matches target (case-insensitive)
 // and resolvedParams has at least minParams entries. Use this to gate post-simulation
 // state injection for specific ERC-20 methods (e.g. "approve" needs spender + amount).
@@ -2088,7 +2079,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// leaving a dangling allowance), submit a single executeBatch UserOp so the whole set is
 	// all-or-nothing. Gated on the run-node route (vm.task == nil) so deployed workflows keep their
 	// existing per-method semantics — this is the shared-loop blast radius G4 was deferred for.
-	batchMode := r.vm.task == nil && len(methodCalls) > 1 && !r.resolveSimulationMode(node, r.vm.IsSimulation)
+	batchMode := r.vm.task == nil && len(methodCalls) > 1 && !r.vm.IsSimulation
 
 	// Execute each method call
 	ctx := context.Background()
@@ -2190,8 +2181,8 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 					}
 				}
 			}()
-			// Resolve shouldSimulate: default to VM flag; allow per-node override via typed config
-			effectiveSim := r.resolveSimulationMode(node, r.vm.IsSimulation)
+			// The run owns execution mode. Legacy per-node flags cannot override it.
+			effectiveSim := r.vm.IsSimulation
 			if effectiveSim {
 				// Surface simulation mode clearly in the node log for users
 				log.WriteString("Simulation Mode is ON — no real transactions will be submitted on-chain.\n")
@@ -2584,7 +2575,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 	// Update ExecutionContext to reflect actual execution mode (simulated vs real)
 	// Use the resolved per-node simulation flag as the source of truth
-	isSimulated := r.resolveSimulationMode(node, r.vm.IsSimulation)
+	isSimulated := r.vm.IsSimulation
 	provider := string(ProviderTenderly)
 	if !isSimulated {
 		provider = string(ProviderBundler) // Real UserOp executed through bundler
@@ -2595,8 +2586,8 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		"is_simulated": isSimulated,
 		"provider":     provider,
 	}
-	if r.vm.smartWalletConfig != nil && r.vm.smartWalletConfig.ChainID != 0 {
-		ctxMap["chain_id"] = r.vm.smartWalletConfig.ChainID
+	if r.smartWalletConfig != nil && r.smartWalletConfig.ChainID != 0 {
+		ctxMap["chain_id"] = r.smartWalletConfig.ChainID
 	}
 	if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
 		s.ExecutionContext = ctxVal

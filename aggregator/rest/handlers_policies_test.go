@@ -362,6 +362,15 @@ func TestTypedDataDomainCarriesOnlyDeclaredFields(t *testing.T) {
 	}
 }
 
+func TestUnverifiedEntityMapsToRetryableServiceUnavailable(t *testing.T) {
+	err := mapPolicyError(fmt.Errorf("%w: occupancy read timed out", taskengine.ErrSessionEntityUnverified))
+	problem, ok := err.(*restmw.HTTPError)
+	require.True(t, ok)
+	require.Equal(t, http.StatusServiceUnavailable, problem.Status)
+	require.Equal(t, taskengine.SessionPolicyEntityUnverifiedCode, problem.Code)
+	require.Contains(t, problem.Detail, "same signature")
+}
+
 func TestUnresolvedTargetMapsToConflict(t *testing.T) {
 	conflict := mapPolicyError(&taskengine.PolicyConflictError{
 		Sentinel:        taskengine.ErrSessionPolicyNotCovering,

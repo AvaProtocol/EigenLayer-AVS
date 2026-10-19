@@ -6,8 +6,8 @@
 #   cp config/gateway.example.yaml config/gateway.yaml
 #   $EDITOR config/gateway.yaml
 #
-# Replaces per-chain aggregator configs. Routes tasks to chain workers
-# based on chain_id. Single DB for all chains; keys are chain-scoped
+# Replaces per-chain aggregator configs. Routes chain reads to workers
+# based on chain_id; writes and session-policy resolution run in the gateway. Single DB for all chains; keys are chain-scoped
 # (t:{chain_id}:{status}:{task_id}).
 environment: development
 
@@ -137,7 +137,8 @@ smart_wallet:
   # Still parsed so older configs load, and logged once as ignored. Leave unset.
   paymaster_address:
 
-# Chain worker registry — gateway routes tasks to workers by chain_id.
+# Chain worker registry — gateway routes chain reads to workers by chain_id.
+# Keep per-chain RPC/bundler/controller settings: the gateway sends UserOps.
 # Locally, workers run on different localhost ports. A hosted deployment puts
 # them on a private network and sets worker_addr accordingly.
 chains:

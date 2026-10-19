@@ -4332,9 +4332,8 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 		tasks[id] = task
 	}
 
-	// Build per-task, per-chain prefixes — chain-scoped history keys share
-	// no common prefix below "history:" so we must enumerate every chain
-	// for each task.
+	// Scan each workflow's history prefix. The key supplies each item's owning
+	// workflow, including historical records that have no embedded workflow ID.
 	prefixes := make([]string, 0, len(payload.TaskIds)*len(n.knownChainIDs()))
 	for _, id := range payload.TaskIds {
 		prefixes = append(prefixes, n.taskExecutionPrefixes(id)...)
@@ -4432,6 +4431,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 			// serializes bodies on import so this matters mainly for
 			// data that was never touched by a merge run.
 			if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(executionValue, exec); err == nil {
+				exec.WorkflowId = TaskIdFromExecutionStorageKey([]byte(key))
 				executioResp.Items = append(executioResp.Items, exec)
 				total += 1
 			}
@@ -4472,6 +4472,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 			// serializes bodies on import so this matters mainly for
 			// data that was never touched by a merge run.
 			if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(executionValue, exec); err == nil {
+				exec.WorkflowId = TaskIdFromExecutionStorageKey([]byte(key))
 				executioResp.Items = append(executioResp.Items, exec)
 				total += 1
 			}

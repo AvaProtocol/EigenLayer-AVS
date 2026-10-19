@@ -351,10 +351,13 @@ const (
 	ErrorCode_TASK_ALREADY_EXISTS    ErrorCode = 4000 // Task with same ID already exists
 	ErrorCode_TASK_ALREADY_COMPLETED ErrorCode = 4001 // Cannot modify completed task
 	// Deprecated: Marked as deprecated in avs.proto.
-	ErrorCode_TASK_ALREADY_CANCELLED ErrorCode = 4002 // Deprecated: cancelled state replaced by Disabled
-	ErrorCode_EXECUTION_IN_PROGRESS  ErrorCode = 4003 // Operation not allowed during execution
-	ErrorCode_WALLET_ALREADY_EXISTS  ErrorCode = 4004 // Wallet already exists for salt
-	ErrorCode_SECRET_ALREADY_EXISTS  ErrorCode = 4005 // Secret with same name exists
+	ErrorCode_TASK_ALREADY_CANCELLED          ErrorCode = 4002 // Deprecated: cancelled state replaced by Disabled
+	ErrorCode_EXECUTION_IN_PROGRESS           ErrorCode = 4003 // Operation not allowed during execution
+	ErrorCode_WALLET_ALREADY_EXISTS           ErrorCode = 4004 // Wallet already exists for salt
+	ErrorCode_SECRET_ALREADY_EXISTS           ErrorCode = 4005 // Secret with same name exists
+	ErrorCode_USER_OP_CONFIRMATION_UNRESOLVED ErrorCode = 4006 // Submission may still confirm; do not blindly retry
+	ErrorCode_USER_OP_EXECUTION_REVERTED      ErrorCode = 4007 // Confirmed outer transaction or inner operation reverted
+	ErrorCode_WRITE_PREREQUISITE_FAILED       ErrorCode = 4008 // Write skipped because an upstream write did not succeed
 	// 5000-5999: External Service errors
 	ErrorCode_RPC_NODE_ERROR     ErrorCode = 5000 // Blockchain RPC node error
 	ErrorCode_TENDERLY_API_ERROR ErrorCode = 5001 // Tenderly simulation error
@@ -404,6 +407,9 @@ var (
 		4003: "EXECUTION_IN_PROGRESS",
 		4004: "WALLET_ALREADY_EXISTS",
 		4005: "SECRET_ALREADY_EXISTS",
+		4006: "USER_OP_CONFIRMATION_UNRESOLVED",
+		4007: "USER_OP_EXECUTION_REVERTED",
+		4008: "WRITE_PREREQUISITE_FAILED",
 		5000: "RPC_NODE_ERROR",
 		5001: "TENDERLY_API_ERROR",
 		5002: "TOKEN_LOOKUP_ERROR",
@@ -423,46 +429,49 @@ var (
 		8004: "INSUFFICIENT_CREDIT",
 	}
 	ErrorCode_value = map[string]int32{
-		"ERROR_CODE_UNSPECIFIED":        0,
-		"UNAUTHORIZED":                  1000,
-		"FORBIDDEN":                     1001,
-		"INVALID_SIGNATURE":             1002,
-		"EXPIRED_TOKEN":                 1003,
-		"TASK_NOT_FOUND":                2000,
-		"EXECUTION_NOT_FOUND":           2001,
-		"WALLET_NOT_FOUND":              2002,
-		"SECRET_NOT_FOUND":              2003,
-		"TOKEN_METADATA_NOT_FOUND":      2004,
-		"INVALID_REQUEST":               3000,
-		"INVALID_TRIGGER_CONFIG":        3001,
-		"INVALID_NODE_CONFIG":           3002,
-		"INVALID_WORKFLOW":              3003,
-		"INVALID_ADDRESS":               3004,
-		"INVALID_SIGNATURE_FORMAT":      3005,
-		"MISSING_REQUIRED_FIELD":        3006,
-		"TASK_ALREADY_EXISTS":           4000,
-		"TASK_ALREADY_COMPLETED":        4001,
-		"TASK_ALREADY_CANCELLED":        4002,
-		"EXECUTION_IN_PROGRESS":         4003,
-		"WALLET_ALREADY_EXISTS":         4004,
-		"SECRET_ALREADY_EXISTS":         4005,
-		"RPC_NODE_ERROR":                5000,
-		"TENDERLY_API_ERROR":            5001,
-		"TOKEN_LOOKUP_ERROR":            5002,
-		"SIMULATION_ERROR":              5003,
-		"STORAGE_UNAVAILABLE":           6000,
-		"STORAGE_WRITE_ERROR":           6001,
-		"STORAGE_READ_ERROR":            6002,
-		"TASK_DATA_CORRUPTED":           6003,
-		"EXECUTION_ENGINE_ERROR":        6004,
-		"RATE_LIMIT_EXCEEDED":           7000,
-		"QUOTA_EXCEEDED":                7001,
-		"TOO_MANY_REQUESTS":             7002,
-		"SMART_WALLET_RPC_ERROR":        8000,
-		"SMART_WALLET_NOT_FOUND":        8001,
-		"SMART_WALLET_DEPLOYMENT_ERROR": 8002,
-		"INSUFFICIENT_BALANCE":          8003,
-		"INSUFFICIENT_CREDIT":           8004,
+		"ERROR_CODE_UNSPECIFIED":          0,
+		"UNAUTHORIZED":                    1000,
+		"FORBIDDEN":                       1001,
+		"INVALID_SIGNATURE":               1002,
+		"EXPIRED_TOKEN":                   1003,
+		"TASK_NOT_FOUND":                  2000,
+		"EXECUTION_NOT_FOUND":             2001,
+		"WALLET_NOT_FOUND":                2002,
+		"SECRET_NOT_FOUND":                2003,
+		"TOKEN_METADATA_NOT_FOUND":        2004,
+		"INVALID_REQUEST":                 3000,
+		"INVALID_TRIGGER_CONFIG":          3001,
+		"INVALID_NODE_CONFIG":             3002,
+		"INVALID_WORKFLOW":                3003,
+		"INVALID_ADDRESS":                 3004,
+		"INVALID_SIGNATURE_FORMAT":        3005,
+		"MISSING_REQUIRED_FIELD":          3006,
+		"TASK_ALREADY_EXISTS":             4000,
+		"TASK_ALREADY_COMPLETED":          4001,
+		"TASK_ALREADY_CANCELLED":          4002,
+		"EXECUTION_IN_PROGRESS":           4003,
+		"WALLET_ALREADY_EXISTS":           4004,
+		"SECRET_ALREADY_EXISTS":           4005,
+		"USER_OP_CONFIRMATION_UNRESOLVED": 4006,
+		"USER_OP_EXECUTION_REVERTED":      4007,
+		"WRITE_PREREQUISITE_FAILED":       4008,
+		"RPC_NODE_ERROR":                  5000,
+		"TENDERLY_API_ERROR":              5001,
+		"TOKEN_LOOKUP_ERROR":              5002,
+		"SIMULATION_ERROR":                5003,
+		"STORAGE_UNAVAILABLE":             6000,
+		"STORAGE_WRITE_ERROR":             6001,
+		"STORAGE_READ_ERROR":              6002,
+		"TASK_DATA_CORRUPTED":             6003,
+		"EXECUTION_ENGINE_ERROR":          6004,
+		"RATE_LIMIT_EXCEEDED":             7000,
+		"QUOTA_EXCEEDED":                  7001,
+		"TOO_MANY_REQUESTS":               7002,
+		"SMART_WALLET_RPC_ERROR":          8000,
+		"SMART_WALLET_NOT_FOUND":          8001,
+		"SMART_WALLET_DEPLOYMENT_ERROR":   8002,
+		"INSUFFICIENT_BALANCE":            8003,
+		"INSUFFICIENT_CREDIT":             8004,
 	}
 )
 
@@ -2273,7 +2282,10 @@ type Execution struct {
 	// Shape is {subject, body}. body keeps the summary line, executions, errors,
 	// notice, and step counts. Absent on older runs and while the run is still
 	// in progress, so a chat poll can read it without the step list.
-	Summary       *structpb.Value   `protobuf:"bytes,13,opt,name=summary,proto3" json:"summary,omitempty"`
+	Summary *structpb.Value `protobuf:"bytes,13,opt,name=summary,proto3" json:"summary,omitempty"`
+	// Owning workflow, populated from the execution's storage key when listed.
+	// Additive: historical stored executions need no backfill.
+	WorkflowId    string            `protobuf:"bytes,14,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
 	Steps         []*Execution_Step `protobuf:"bytes,8,rep,name=steps,proto3" json:"steps,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2391,6 +2403,13 @@ func (x *Execution) GetSummary() *structpb.Value {
 		return x.Summary
 	}
 	return nil
+}
+
+func (x *Execution) GetWorkflowId() string {
+	if x != nil {
+		return x.WorkflowId
+	}
+	return ""
 }
 
 func (x *Execution) GetSteps() []*Execution_Step {
@@ -5577,13 +5596,8 @@ type RunNodeWithInputsReq struct {
 	// Chain to run the node against. 0 = aggregator default chain.
 	// node.config.chain_id (if non-zero) takes precedence over this field.
 	ChainId int64 `protobuf:"varint,4,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
-	// Optional ERC20 balance/allowance state overrides applied only during this
-	// isolated node simulation (RunNodeImmediately). Lets callers seed token
-	// balances and approvals so contract-write simulations (e.g. Uniswap swaps)
-	// don't revert with "transfer amount exceeds allowance/balance" before the
-	// approval/funding transactions have been run. Simulation-only: a
-	// real-execution request (isSimulated=false) that sets these is rejected with
-	// an error, never silently ignored.
+	// Legacy single-node overrides. Nonempty overrides are rejected; actions must
+	// be simulated as a complete workflow, including their prerequisites.
 	Erc20Overrides []*ERC20StateOverride `protobuf:"bytes,5,rep,name=erc20_overrides,json=erc20Overrides,proto3" json:"erc20_overrides,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -8163,8 +8177,6 @@ type ContractWriteNode_Config struct {
 	ContractAbi []*structpb.Value `protobuf:"bytes,3,rep,name=contract_abi,json=contractAbi,proto3" json:"contract_abi,omitempty"`
 	// Support for multiple method calls in sequence (similar to ContractRead)
 	MethodCalls []*ContractWriteNode_MethodCall `protobuf:"bytes,4,rep,name=method_calls,json=methodCalls,proto3" json:"method_calls,omitempty"`
-	// Execution mode for this contract write node: when true (default), use simulation; when false, execute real UserOp
-	IsSimulated *bool `protobuf:"varint,5,opt,name=is_simulated,json=isSimulated,proto3,oneof" json:"is_simulated,omitempty"`
 	// ETH value to send with the transaction (in wei as string)
 	Value *string `protobuf:"bytes,6,opt,name=value,proto3,oneof" json:"value,omitempty"`
 	// Custom gas limit for the transaction (as string to handle large numbers)
@@ -8231,13 +8243,6 @@ func (x *ContractWriteNode_Config) GetMethodCalls() []*ContractWriteNode_MethodC
 		return x.MethodCalls
 	}
 	return nil
-}
-
-func (x *ContractWriteNode_Config) GetIsSimulated() bool {
-	if x != nil && x.IsSimulated != nil {
-		return *x.IsSimulated
-	}
-	return false
 }
 
 func (x *ContractWriteNode_Config) GetValue() string {
@@ -9671,7 +9676,9 @@ type LoopNode_Config struct {
 	// Note: ContractWrite operations always run sequentially regardless of this setting
 	ExecutionMode ExecutionMode `protobuf:"varint,4,opt,name=execution_mode,json=executionMode,proto3,enum=aggregator.ExecutionMode" json:"execution_mode,omitempty"`
 	// Per-iteration timeout in seconds. If an iteration does not complete within
-	// this duration, it is marked as failed. Default: 30 seconds.
+	// this duration, it is marked as failed. Off-chain default: 30 seconds.
+	// Write runners use at least nine minutes to collect nonce retries and
+	// the bounded five-minute confirmation result of a submitted operation.
 	IterationTimeout uint32 `protobuf:"varint,5,opt,name=iteration_timeout,json=iterationTimeout,proto3" json:"iteration_timeout,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
@@ -10318,22 +10325,20 @@ const file_avs_proto_rawDesc = "" +
 	"\x06amount\x18\x02 \x01(\tR\x06amount\x12\x19\n" +
 	"\bchain_id\x18\x03 \x01(\x03R\achainId\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xaf\b\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\x8a\b\n" +
 	"\x11ContractWriteNode\x12<\n" +
-	"\x06config\x18\x01 \x01(\v2$.aggregator.ContractWriteNode.ConfigR\x06config\x1a\x81\x03\n" +
+	"\x06config\x18\x01 \x01(\v2$.aggregator.ContractWriteNode.ConfigR\x06config\x1a\xdc\x02\n" +
 	"\x06Config\x12)\n" +
 	"\x10contract_address\x18\x01 \x01(\tR\x0fcontractAddress\x12\x1b\n" +
 	"\tcall_data\x18\x02 \x01(\tR\bcallData\x129\n" +
 	"\fcontract_abi\x18\x03 \x03(\v2\x16.google.protobuf.ValueR\vcontractAbi\x12K\n" +
-	"\fmethod_calls\x18\x04 \x03(\v2(.aggregator.ContractWriteNode.MethodCallR\vmethodCalls\x12&\n" +
-	"\fis_simulated\x18\x05 \x01(\bH\x00R\visSimulated\x88\x01\x01\x12\x19\n" +
-	"\x05value\x18\x06 \x01(\tH\x01R\x05value\x88\x01\x01\x12 \n" +
-	"\tgas_limit\x18\a \x01(\tH\x02R\bgasLimit\x88\x01\x01\x12\x19\n" +
-	"\bchain_id\x18\b \x01(\x03R\achainIdB\x0f\n" +
-	"\r_is_simulatedB\b\n" +
+	"\fmethod_calls\x18\x04 \x03(\v2(.aggregator.ContractWriteNode.MethodCallR\vmethodCalls\x12\x19\n" +
+	"\x05value\x18\x06 \x01(\tH\x00R\x05value\x88\x01\x01\x12 \n" +
+	"\tgas_limit\x18\a \x01(\tH\x01R\bgasLimit\x88\x01\x01\x12\x19\n" +
+	"\bchain_id\x18\b \x01(\x03R\achainIdB\b\n" +
 	"\x06_valueB\f\n" +
 	"\n" +
-	"_gas_limit\x1a\xef\x01\n" +
+	"_gas_limitJ\x04\b\x05\x10\x06R\fis_simulated\x1a\xef\x01\n" +
 	"\n" +
 	"MethodCall\x12 \n" +
 	"\tcall_data\x18\x01 \x01(\tH\x00R\bcallData\x88\x01\x01\x12\x1f\n" +
@@ -10507,7 +10512,7 @@ const file_avs_proto_rawDesc = "" +
 	"customCode\x123\n" +
 	"\abalance\x18\x13 \x01(\v2\x17.aggregator.BalanceNodeH\x00R\abalance\x12-\n" +
 	"\x05await\x18\x14 \x01(\v2\x15.aggregator.AwaitNodeH\x00R\x05awaitB\v\n" +
-	"\ttask_type\"\x83\x10\n" +
+	"\ttask_type\"\xa4\x10\n" +
 	"\tExecution\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\bstart_at\x18\x02 \x01(\x03R\astartAt\x12\x15\n" +
@@ -10522,7 +10527,9 @@ const file_avs_proto_rawDesc = "" +
 	"\x0eresume_node_id\x18\v \x01(\tR\fresumeNodeId\x12\x1f\n" +
 	"\vwait_reason\x18\f \x01(\tR\n" +
 	"waitReason\x120\n" +
-	"\asummary\x18\r \x01(\v2\x16.google.protobuf.ValueR\asummary\x120\n" +
+	"\asummary\x18\r \x01(\v2\x16.google.protobuf.ValueR\asummary\x12\x1f\n" +
+	"\vworkflow_id\x18\x0e \x01(\tR\n" +
+	"workflowId\x120\n" +
 	"\x05steps\x18\b \x03(\v2\x1a.aggregator.Execution.StepR\x05steps\x1a\x94\f\n" +
 	"\x04Step\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -11028,7 +11035,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x0fLANG_JAVASCRIPT\x10\x01\x12\r\n" +
 	"\tLANG_JSON\x10\x02\x12\x10\n" +
 	"\fLANG_GRAPHQL\x10\x03\x12\x13\n" +
-	"\x0fLANG_HANDLEBARS\x10\x04*\x90\b\n" +
+	"\x0fLANG_HANDLEBARS\x10\x04*\xf7\b\n" +
 	"\tErrorCode\x12\x1a\n" +
 	"\x16ERROR_CODE_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\fUNAUTHORIZED\x10\xe8\a\x12\x0e\n" +
@@ -11052,7 +11059,10 @@ const file_avs_proto_rawDesc = "" +
 	"\x16TASK_ALREADY_CANCELLED\x10\xa2\x1f\x1a\x02\b\x01\x12\x1a\n" +
 	"\x15EXECUTION_IN_PROGRESS\x10\xa3\x1f\x12\x1a\n" +
 	"\x15WALLET_ALREADY_EXISTS\x10\xa4\x1f\x12\x1a\n" +
-	"\x15SECRET_ALREADY_EXISTS\x10\xa5\x1f\x12\x13\n" +
+	"\x15SECRET_ALREADY_EXISTS\x10\xa5\x1f\x12$\n" +
+	"\x1fUSER_OP_CONFIRMATION_UNRESOLVED\x10\xa6\x1f\x12\x1f\n" +
+	"\x1aUSER_OP_EXECUTION_REVERTED\x10\xa7\x1f\x12\x1e\n" +
+	"\x19WRITE_PREREQUISITE_FAILED\x10\xa8\x1f\x12\x13\n" +
 	"\x0eRPC_NODE_ERROR\x10\x88'\x12\x17\n" +
 	"\x12TENDERLY_API_ERROR\x10\x89'\x12\x17\n" +
 	"\x12TOKEN_LOOKUP_ERROR\x10\x8a'\x12\x15\n" +

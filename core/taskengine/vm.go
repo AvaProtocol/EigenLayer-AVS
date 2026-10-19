@@ -103,6 +103,12 @@ func (c *CommonProcessor) SetVar(name string, data any) {
 }
 
 func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
+	c.vm.mu.Lock()
+	defer c.vm.mu.Unlock()
+	c.setOutputVarForStepLocked(stepID, data)
+}
+
+func (c *CommonProcessor) setOutputVarForStepLocked(stepID string, data any) {
 	// Skip storing iteration step results in global VM vars to avoid polluting inputsList
 	if strings.Contains(stepID, "_iter_") {
 		// Iteration step results should not be stored as global variables
@@ -110,8 +116,6 @@ func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 		return
 	}
 
-	c.vm.mu.Lock()
-	defer c.vm.mu.Unlock()
 	nodeNameVar := c.vm.getNodeNameAsVarLocked(stepID) // Use locked version to avoid deadlock
 	if c.vm.vars == nil {
 		c.vm.vars = make(map[string]any)
@@ -235,17 +239,21 @@ type VM struct {
 	task              *model.Workflow
 	triggerData       *TriggerData
 	parsedTriggerData *triggerDataType
-	ExecutionLogs     []*avsproto.Execution_Step
-	Status            VMState
-	mu                *sync.Mutex // Mutex for vars and TaskNodes, and other shared mutable fields like plans, entrypoint, status
-	vars              map[string]any
-	secrets           map[string]string
-	plans             map[string]*Step
-	entrypoint        string
-	instructionCount  int64
-	smartWalletConfig *config.SmartWalletConfig
-	logger            logger.Logger
-	db                storage.Storage
+	// Published before receipt waiting so a collector timeout retains submitted hashes.
+	iterationWrites sync.Map // step ID -> *Execution_Step; mutation guarded by mu
+	// Parallel successors share one prerequisite receipt lookup per execution leg.
+	writeReconciliations sync.Map // log step ID -> *sync.Once
+	ExecutionLogs        []*avsproto.Execution_Step
+	Status               VMState
+	mu                   *sync.Mutex // Mutex for vars and TaskNodes, and other shared mutable fields like plans, entrypoint, status
+	vars                 map[string]any
+	secrets              map[string]string
+	plans                map[string]*Step
+	entrypoint           string
+	instructionCount     int64
+	smartWalletConfig    *config.SmartWalletConfig
+	logger               logger.Logger
+	db                   storage.Storage
 	// IsSimulation indicates whether this VM is executing in a simulation context
 	// (SimulateTask or RunNodeImmediately). In simulation, write operations must not
 	// send real transactions and should use Tenderly or mock paths instead.
@@ -1516,6 +1524,15 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		processor.SetInputVarForStep(node.Id, inputData)
 	}
 
+	// Keep off-chain processing and terminal reports running, but never submit
+	// a dependent transaction after a failed or unresolved upstream write.
+	if isWorkflowWrite(node) {
+		if prerequisite := v.reconciledWritePrerequisite(node.Id); prerequisite != nil {
+			v.recordSkippedWrite(node, prerequisite)
+			return nil, nil
+		}
+	}
+
 	var nextStep *Step // This is the *next step in the plan to jump to*, not the execution log step
 	var err error
 
@@ -2696,10 +2713,8 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 	tempVM.TaskOwner = v.TaskOwner
 	// Propagate shared clients (e.g., Tenderly)
 	tempVM.tenderlyClient = v.tenderlyClient
-	// Share the accumulated simulation state so caller-seeded overrides
-	// (e.g. erc20_overrides) and any earlier nodes' state diffs reach this
-	// node's Tenderly simulation. Without this the node would run against a
-	// fresh, empty state and the seeded balances/allowances would be lost.
+	// Share accumulated state so earlier nodes' storage diffs and successful
+	// simulated approvals reach this node's Tenderly simulation.
 	tempVM.simulationState = v.simulationState
 
 	// Log simulation mode for debugging
@@ -2978,13 +2993,6 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 					}
 					contractConfig.MethodCalls = append(contractConfig.MethodCalls, methodCall)
 				}
-			}
-		}
-
-		// Per-node execution mode: expect camelCase key from clients
-		if v, ok := config["isSimulated"]; ok {
-			if b, ok2 := v.(bool); ok2 {
-				contractConfig.IsSimulated = &b
 			}
 		}
 
@@ -3648,14 +3656,19 @@ func (v *VM) AnalyzeExecutionResult() (string, int, ExecutionResultStatus) {
 	}
 
 	var failedStepLabels []string
+	skippedWrites := 0
 
 	for _, step := range v.ExecutionLogs {
 		if !step.Success && step.Error != "" {
+			if step.ErrorCode == avsproto.ErrorCode_WRITE_PREREQUISITE_FAILED {
+				skippedWrites++
+				continue
+			}
 			failedStepLabels = append(failedStepLabels, failedStepLabel(step))
 		}
 	}
 
-	failedCount := len(failedStepLabels)
+	failedCount := len(failedStepLabels) + skippedWrites
 
 	if failedCount == 0 {
 		// All executed steps succeeded. Branch/conditional skips are normal
@@ -3666,6 +3679,12 @@ func (v *VM) AnalyzeExecutionResult() (string, int, ExecutionResultStatus) {
 
 	// One or more steps failed (covers both partial and total failure).
 	errorMessage := formatExecutionErrorMessage("", failedCount, len(v.ExecutionLogs), failedStepLabels)
+	if skippedWrites > 0 {
+		if len(failedStepLabels) == 0 {
+			errorMessage = fmt.Sprintf("%d of %d steps failed", failedCount, len(v.ExecutionLogs))
+		}
+		errorMessage += fmt.Sprintf("; %d dependent writes skipped", skippedWrites)
+	}
 	return errorMessage, failedCount, ExecutionFailed
 }
 
@@ -3996,11 +4015,6 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				config["gasLimit"] = *contractWrite.Config.GasLimit
 			}
 
-			// Extract optional isSimulated field (simulation vs real execution)
-			if contractWrite.Config.IsSimulated != nil {
-				config["isSimulated"] = *contractWrite.Config.IsSimulated
-			}
-
 			// Handle method calls - extract fields to simple map for protobuf compatibility
 			if len(contractWrite.Config.MethodCalls) > 0 {
 				methodCallsArray := make([]interface{}, len(contractWrite.Config.MethodCalls))
@@ -4253,6 +4267,7 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 		configData := map[string]interface{}{
 			"contractAddress": runner.ContractRead.Config.ContractAddress,
 			"contractAbi":     contractAbiArray,
+			"chainId":         runner.ContractRead.Config.ChainId,
 		}
 		// Handle method calls if present
 		if len(runner.ContractRead.Config.MethodCalls) > 0 {
@@ -4298,6 +4313,7 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 		configData := map[string]interface{}{
 			"contractAddress": runner.ContractWrite.Config.ContractAddress,
 			"contractAbi":     contractAbiArray,
+			"chainId":         runner.ContractWrite.Config.ChainId,
 		}
 
 		// Handle method calls if present
@@ -4337,6 +4353,7 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 			"config": map[string]interface{}{
 				"destination": runner.EthTransfer.Config.Destination,
 				"amount":      runner.EthTransfer.Config.Amount,
+				"chainId":     runner.EthTransfer.Config.ChainId,
 			},
 		}
 	case *avsproto.LoopNode_GraphqlDataQuery:
@@ -4955,6 +4972,7 @@ func (v *VM) executeNodeWithIsolatedVars(node *avsproto.TaskNode, stepID string,
 		// Wait for on-chain confirmation before returning to the loop,
 		// so the next iteration can safely use nonce+1.
 		if executionLogForNode != nil && err == nil {
+			v.iterationWrites.Store(stepID, executionLogForNode)
 			v.waitForOnChainConfirmationIfNeeded(executionLogForNode)
 		}
 	} else if node.GetFilter() != nil {
@@ -4964,6 +4982,7 @@ func (v *VM) executeNodeWithIsolatedVars(node *avsproto.TaskNode, stepID string,
 		// Same receipt-waiting as contractWrite: ensure the tx is confirmed
 		// before the next loop iteration submits with nonce+1.
 		if executionLogForNode != nil && err == nil {
+			v.iterationWrites.Store(stepID, executionLogForNode)
 			v.waitForOnChainConfirmationIfNeeded(executionLogForNode)
 		}
 	} else if node.GetLoop() != nil {
@@ -5097,25 +5116,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	isEthTransfer := node.GetEthTransfer() != nil
 	isOnChainOp := isContractWrite || isEthTransfer
 
-	// Per-iteration timeout from config; default depends on operation type and chain.
-	// On-chain operations need longer timeouts to accommodate:
-	// - UserOp nonce conflict retries (3 retries × up to 60s nonce polling each)
-	// - Receipt confirmation polling (waitForUserOpConfirmation has a 5-min internal timeout)
-	// Defaults:
-	// - Ethereum mainnet (chain 1): 6 min (covers 5-min confirmation + RPC propagation delay)
-	// - Other chains with on-chain ops: 4 min (covers retry budget + faster confirmation)
-	// - Non-on-chain ops: 30s
-	iterationTimeoutSec := node.Config.IterationTimeout
-	if iterationTimeoutSec == 0 {
-		if isOnChainOp && v.smartWalletConfig != nil && v.smartWalletConfig.ChainID == 1 {
-			iterationTimeoutSec = 360 // 6 minutes for Ethereum mainnet on-chain ops
-		} else if isOnChainOp {
-			iterationTimeoutSec = 240 // 4 minutes for other chains (covers 3 paymaster retries)
-		} else {
-			iterationTimeoutSec = 30
-		}
-	}
-	iterationTimeout := time.Duration(iterationTimeoutSec) * time.Second
+	// Short collector timeouts cannot truncate a submitted operation's bounded
+	// confirmation wait. Off-chain runner timeouts keep their configured value.
+	iterationTimeout := loopIterationTimeout(time.Duration(node.Config.IterationTimeout)*time.Second, isOnChainOp)
 
 	// Resolve input variable from template expression (e.g., "{{settings.address_list}}")
 	inputArray, _, resolveErr := resolveLoopInputVariable(v, inputNodeName)
@@ -5173,6 +5176,11 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	defer eq.Stop()
 
 	results := make([]interface{}, len(inputArray))
+	defer func() {
+		for i := range inputArray {
+			v.iterationWrites.Delete(fmt.Sprintf("%s_iter_%d", stepID, i))
+		}
+	}()
 	iterationSteps := make([]*avsproto.Execution_Step, 0, len(inputArray)) // Collect iteration steps for gas aggregation
 	success := true
 	infraFailure := false
@@ -5248,8 +5256,11 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 
 		// Collect results
 		for i, resultChannel := range resultChannels {
-			select {
-			case result := <-resultChannel:
+			result, timedOut := v.waitForLoopIterationResult(fmt.Sprintf("%s_iter_%d", stepID, i), resultChannel, iterationTimeout)
+			if cancels[i] != nil {
+				cancels[i]()
+			}
+			if !timedOut {
 				if result.Error != nil {
 					if firstError == nil {
 						firstError = result.Error
@@ -5261,13 +5272,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				} else {
 					results[i] = result.Data
 				}
-				if result.Step != nil {
-					iterationSteps = append(iterationSteps, result.Step)
-				}
-			case <-time.After(iterationTimeout):
-				if cancels[i] != nil {
-					cancels[i]()
-				}
+			} else {
 				success = false
 				infraFailure = true
 				err := fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
@@ -5279,6 +5284,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				// send to it. The buffered channel will be GC'd once both sides
 				// drop their references. Cancelling the iteration ctx stops
 				// retry backoffs so the worker can pick up later iterations.
+			}
+			if result.Step != nil {
+				iterationSteps = append(iterationSteps, result.Step)
 			}
 		}
 	} else {
@@ -5319,9 +5327,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 			}
 
 			// Wait for result
-			select {
-			case result := <-resultChannel:
-				cancel()
+			result, timedOut := v.waitForLoopIterationResult(iterationStepID, resultChannel, iterationTimeout)
+			cancel()
+			if !timedOut {
 				if result.Error != nil {
 					if firstError == nil {
 						firstError = result.Error
@@ -5332,11 +5340,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				} else {
 					results[i] = result.Data
 				}
-				if result.Step != nil {
-					iterationSteps = append(iterationSteps, result.Step)
-				}
-			case <-time.After(iterationTimeout):
-				cancel()
+			} else {
 				success = false
 				infraFailure = true
 				err := fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
@@ -5348,6 +5352,9 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				// send to it. The buffered channel will be GC'd once both sides
 				// drop their references. Cancelling the iteration ctx stops
 				// retry backoffs so the single worker can pick up the next item.
+			}
+			if result.Step != nil {
+				iterationSteps = append(iterationSteps, result.Step)
 			}
 		}
 	}
@@ -5390,6 +5397,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 	// as a hard step failure.
 	if infraFailure && firstError != nil {
 		finalizeStep(s, false, nil, firstError.Error(), log.String())
+		propagateLoopConfirmationFailure(s, iterationSteps)
 		return s, firstError
 	}
 
@@ -5427,6 +5435,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 			},
 		)
 		finalizeStep(s, false, loopErr, "", log.String())
+		propagateLoopConfirmationFailure(s, iterationSteps)
 		return s, nil // return nil error: the loop itself ran to completion
 	}
 

@@ -4,9 +4,98 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"google.golang.org/protobuf/types/known/structpb"
 )
+
+func loopIterationTimeout(configured time.Duration, onChain bool) time.Duration {
+	if onChain {
+		// The collector must not discard a submitted write before its runner
+		// returns the confirmation outcome. Budget the existing three 60-second
+		// nonce retries, the receipt wait, and one minute for RPC overhead.
+		minimum := 3*time.Minute + userOpConfirmationTimeout + time.Minute
+		if configured < minimum {
+			return minimum
+		}
+	} else if configured <= 0 {
+		return 30 * time.Second
+	}
+	return configured
+}
+
+// Both collectors use the retained receipt when confirmation wins the race
+// with the timer but the worker has not yet returned its result.
+func (v *VM) waitForLoopIterationResult(id string, ch <-chan *ExecutionResult, timeout time.Duration) (result *ExecutionResult, collectorTimedOut bool) {
+	select {
+	case result := <-ch:
+		return result, false
+	case <-time.After(timeout):
+		step := v.timedOutIterationWrite(id)
+		if step != nil && step.Success {
+			// The waiter may still be in its propagation delay. Honor the same
+			// delay before releasing the loop's next write from this path.
+			v.addRPCPropagationDelay()
+			return &ExecutionResult{StepID: id, Step: step, Data: (&ExecutionQueue{}).extractResultData(step)}, false
+		}
+		return &ExecutionResult{StepID: id, Step: step}, true
+	}
+}
+
+// Iteration steps are not published separately. Carry their confirmation
+// outcome on the loop, so clients can distinguish an unknown on-chain outcome
+// from a confirmed revert or an ordinary iteration error. Unresolved wins
+// over reverted; keep the selected error and code about the same iteration.
+func propagateLoopConfirmationFailure(parent *avsproto.Execution_Step, iterations []*avsproto.Execution_Step) {
+	var selected *avsproto.Execution_Step
+	var outcomes []interface{}
+	for _, step := range iterations {
+		if step == nil || step.Success {
+			continue
+		}
+		if step.ErrorCode != avsproto.ErrorCode_USER_OP_CONFIRMATION_UNRESOLVED && step.ErrorCode != avsproto.ErrorCode_USER_OP_EXECUTION_REVERTED {
+			continue
+		}
+		outcome := map[string]interface{}{"id": step.Id, "error": step.Error, "errorCode": step.ErrorCode.String(), "step": confirmationStepSnapshot(step)}
+		if step.Metadata != nil {
+			outcome["metadata"] = step.Metadata.AsInterface()
+		}
+		outcomes = append(outcomes, outcome)
+		if selected == nil || (step.ErrorCode == avsproto.ErrorCode_USER_OP_CONFIRMATION_UNRESOLVED && selected.ErrorCode != step.ErrorCode) {
+			selected = step
+		}
+	}
+	if selected == nil {
+		return
+	}
+	parent.Success = false
+	parent.ErrorCode = selected.ErrorCode
+	parent.Error = fmt.Sprintf("Loop iteration %s: %s", selected.Id, selected.Error)
+	metadata := map[string]interface{}{}
+	if parent.Metadata != nil {
+		if current, ok := parent.Metadata.AsInterface().(map[string]interface{}); ok {
+			metadata = current
+		}
+	}
+	metadata["confirmationOutcomes"] = outcomes
+	// Only clear a loop failure after reconciliation when every missing result
+	// belongs to a retained confirmation failure (not a submit/RPC/other error).
+	onlyConfirmation := false
+	if data := parent.GetLoop().GetData(); data != nil {
+		if results, ok := data.AsInterface().([]interface{}); ok && len(results) == len(iterations) {
+			missing := 0
+			for _, result := range results {
+				if result == nil {
+					missing++
+				}
+			}
+			onlyConfirmation = missing == len(outcomes)
+		}
+	}
+	metadata["confirmationOnlyFailure"] = onlyConfirmation
+	parent.Metadata, _ = structpb.NewValue(metadata)
+}
 
 // Loop Helper Functions
 //

@@ -97,7 +97,7 @@ func updateTriggerVariableInVM(vm *VM, triggerVarName string, triggerVarData map
 //
 // Parameters:
 //   - stepID: The ID of the step being executed
-//   - node: The actual TaskNode being executed (used to get nodeType and type-specific config like is_simulated)
+//   - node: The actual TaskNode being executed (used to get nodeType)
 //   - vm: The VM context
 func CreateNodeExecutionStep(stepID string, node *avsproto.TaskNode, vm *VM) *avsproto.Execution_Step {
 	t0 := time.Now()
@@ -129,23 +129,12 @@ func CreateNodeExecutionStep(stepID string, node *avsproto.TaskNode, vm *VM) *av
 		isSimulated := false
 		provider := string(ProviderChainRPC)
 
-		// For contract write operations, check the node config for is_simulated flag
-		if nodeType == avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE {
-			// Default to simulation for safety
-			isSimulated = true
-
-			// Check if node config explicitly sets is_simulated
-			if node != nil {
-				if contractWrite := node.GetContractWrite(); contractWrite != nil && contractWrite.Config != nil {
-					if contractWrite.Config.IsSimulated != nil {
-						isSimulated = *contractWrite.Config.IsSimulated
-					}
-				}
-			}
+		if nodeType == avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE || nodeType == avsproto.NodeType_NODE_TYPE_ETH_TRANSFER {
+			isSimulated = vm.IsSimulation
 		}
 
 		// Set provider based on simulation flag
-		if isSimulated {
+		if isSimulated && nodeType == avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE {
 			provider = string(ProviderTenderly)
 		}
 
@@ -156,6 +145,9 @@ func CreateNodeExecutionStep(stepID string, node *avsproto.TaskNode, vm *VM) *av
 		ctxMap := map[string]interface{}{
 			"is_simulated": isSimulated,
 			"provider":     provider,
+		}
+		if resolved := workflowWriteChainID(node); resolved > 0 {
+			chainID = resolved
 		}
 		if chainID != nil {
 			ctxMap["chain_id"] = chainID

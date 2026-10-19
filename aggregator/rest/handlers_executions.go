@@ -27,7 +27,7 @@ const streamMinInterval = 250 * time.Millisecond
 
 // Executions resource — see api/openapi.yaml `tags: [Executions]`.
 //
-// Executions are stored under their workflow's chain-scoped key prefix
+// Executions are stored under their workflow's history key prefix
 // in BadgerDB. The engine APIs all require a workflow ID to scope the
 // lookup, so REST endpoints whose URL omits the workflow context
 // (`GET /executions/{id}`, `:stream`) stay stubbed until a future commit
@@ -56,7 +56,15 @@ func (s *Server) ListExecutions(ctx echo.Context, params generated.ListExecution
 	if err != nil {
 		return err
 	}
-	return ctx.JSON(http.StatusOK, executionsRespToOpenAPI(resp, (*params.WorkflowId)[0]))
+	fallback := ""
+	if len(*params.WorkflowId) == 1 {
+		fallback = string((*params.WorkflowId)[0])
+	}
+	out, err := executionsRespToOpenAPI(resp, fallback)
+	if err != nil {
+		return err
+	}
+	return ctx.JSON(http.StatusOK, out)
 }
 
 // ListExecutionsForWorkflow — GET /api/v1/workflows/{id}/executions
@@ -75,13 +83,17 @@ func (s *Server) ListExecutionsForWorkflow(ctx echo.Context, id generated.Ulid, 
 	if err != nil {
 		return err
 	}
-	return ctx.JSON(http.StatusOK, executionsRespToOpenAPI(resp, string(id)))
+	out, err := executionsRespToOpenAPI(resp, string(id))
+	if err != nil {
+		return err
+	}
+	return ctx.JSON(http.StatusOK, out)
 }
 
 // GetExecution — GET /api/v1/executions/{id}?workflowId=...
 //
 // The standalone route requires `workflowId` because executions are
-// stored under `t:<chain>:<workflow_id>:<exec_id>` — there is no
+// stored under `history:<workflow_id>:<exec_id>` — there is no
 // global index. Callers that already know the workflow can use the
 // nested form (`GET /workflows/{id}/executions`) too.
 func (s *Server) GetExecution(ctx echo.Context, id generated.Ulid, params generated.GetExecutionParams) error {
@@ -395,30 +407,34 @@ func buildListExecutionsReq(workflowIDs []generated.Ulid, after *generated.PageA
 }
 
 // executionsRespToOpenAPI maps the engine's ListExecutionsResp to the
-// OpenAPI ExecutionList envelope. Each execution's workflowId is taken
-// from the supplied default — appropriate when listing for a single
-// workflow; multi-workflow listings get the first id as the default and
-// callers should not rely on it (the long-term fix is to thread the
-// per-execution workflowId through from the storage key).
-func executionsRespToOpenAPI(in *avsproto.ListExecutionsResp, defaultWorkflowID string) generated.ExecutionList {
+// OpenAPI ExecutionList envelope. Per-item identity wins; only a single-workflow
+// request may provide a fallback. Refuse missing identity rather than mislabel it.
+func executionsRespToOpenAPI(in *avsproto.ListExecutionsResp, defaultWorkflowID string) (generated.ExecutionList, error) {
 	out := generated.ExecutionList{
 		Data:     make([]generated.Execution, 0, len(in.GetItems())),
 		PageInfo: protoPageInfoToOpenAPI(in.GetPageInfo()),
 	}
 	for _, item := range in.GetItems() {
-		exec, err := mapping.ProtoToOpenAPIExecution(item, defaultWorkflowID)
+		workflowID := item.GetWorkflowId()
+		if workflowID == "" {
+			workflowID = defaultWorkflowID
+		}
+		if workflowID == "" {
+			return generated.ExecutionList{}, fmt.Errorf("execution %s has no owning workflow", item.GetId())
+		}
+		exec, err := mapping.ProtoToOpenAPIExecution(item, workflowID)
 		if err != nil {
 			// A single bad execution should not break the whole page —
 			// emit it with the minimum required fields and let the
 			// caller inspect via the standalone retrieve endpoint.
 			exec = generated.Execution{
 				Id:         generated.Ulid(item.GetId()),
-				WorkflowId: generated.Ulid(defaultWorkflowID),
+				WorkflowId: generated.Ulid(workflowID),
 				StartAt:    item.GetStartAt(),
 				Status:     generated.ExecutionStatus("error"),
 			}
 		}
 		out.Data = append(out.Data, exec)
 	}
-	return out
+	return out, nil
 }

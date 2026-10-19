@@ -12,11 +12,8 @@ import (
 )
 
 // ProtoToOpenAPIExecution lifts an engine *avsproto.Execution into the
-// OpenAPI Execution envelope. The workflowId comes from outside the
-// proto Execution because executions are stored under their workflow's
-// chain-scoped key prefix — there's no Execution.WorkflowId on the
-// proto, so the caller (a handler that already looked the workflow up)
-// passes it explicitly.
+// OpenAPI Execution envelope. The caller supplies each list item's workflow
+// from its storage key, or the known workflow context for a single-item route.
 //
 // Steps and fee fields round-trip via protojson because the camelCase
 // shapes match field-for-field; ExecutionStatus is normalized to the
@@ -235,8 +232,14 @@ func protoExecutionStepToOpenAPI(in *avsproto.Execution_Step) (generated.Executi
 		}
 	}
 	if md := in.GetMetadata(); md != nil {
-		if m, ok := md.AsInterface().(map[string]interface{}); ok {
+		switch m := md.AsInterface().(type) {
+		case map[string]interface{}:
 			out.Metadata = &m
+		case []interface{}:
+			// Match nodes:run's object-shaped wrapper for per-method receipts.
+			// Preserve pending hashes and revert data on execution/trigger reads.
+			wrapped := map[string]interface{}{"results": m}
+			out.Metadata = &wrapped
 		}
 	}
 	if ec := in.GetExecutionContext(); ec != nil {

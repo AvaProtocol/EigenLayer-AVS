@@ -230,10 +230,11 @@ REST handlers migrated:
 
 ### Phase 4a — route withdraw balance reads through workers (delivered)
 
-The last live gateway direct-RPC path was `ExecuteWithdraw`'s preflight
-balance validation. The send path already routed through the worker
+At that stage, the remaining gateway direct-RPC read path was `ExecuteWithdraw`'s
+preflight balance validation. The send path already routed through the worker
 (`sendUserOpViaWorker` → `ChainWorker.ExecuteUserOp`); only the balance
-reads stayed gateway-side.
+reads stayed gateway-side. That worker send path was removed in #762: sends now
+execute in the gateway, while workers provide chain reads.
 
 Shipped:
 

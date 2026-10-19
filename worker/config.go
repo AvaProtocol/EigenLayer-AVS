@@ -23,19 +23,11 @@ type WorkerConfig struct {
 	BundlerProvider string `yaml:"bundler_provider"`
 	AlchemyAPIKey   string `yaml:"alchemy_api_key"`
 
-	// Gas Manager sponsorship. A worker that omits these sends UNSPONSORED
-	// operations: priceOperationV07 only asks Alchemy to sponsor when a policy
-	// id is present, and otherwise requires the smart wallet to cover its own
-	// prefund — which a wallet holding only tokens cannot do.
-	//
-	// The webhook itself stays on the gateway (POST /webhooks/gas-manager);
-	// what the worker needs is the SECRET, because it is echoed to Alchemy as
-	// webhookData and the gateway's webhook rejects any request whose value
-	// does not match.
+	// Legacy shared configuration, still parsed for existing deployments.
+	// Workers no longer send UserOps or request sponsorship (#762). Configure
+	// the policy and webhook secret on the gateway, which owns session grants.
 	AlchemyPaymasterPolicyID string `yaml:"alchemy_paymaster_policy_id"`
-	// DisableGasSponsorship opts this worker out of the Gas Manager policy.
-	// Local/development worker configs set it — see
-	// config.SmartWalletConfig.SponsorshipPolicyID for why that matters.
+	// DisableGasSponsorship is retained with the legacy sponsorship fields.
 	DisableGasSponsorship bool `yaml:"disable_gas_sponsorship"`
 	// GasManagerPolicyID is the legacy alias, accepted for the same reason the
 	// gateway accepts it: an existing deployment must not silently lose

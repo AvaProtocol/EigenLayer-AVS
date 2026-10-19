@@ -316,6 +316,9 @@ enum ErrorCode {
   EXECUTION_IN_PROGRESS = 4003;     // Operation not allowed during execution
   WALLET_ALREADY_EXISTS = 4004;     // Wallet already exists for salt
   SECRET_ALREADY_EXISTS = 4005;     // Secret with same name exists
+  USER_OP_CONFIRMATION_UNRESOLVED = 4006; // Submission may still confirm; do not blindly retry
+  USER_OP_EXECUTION_REVERTED = 4007; // Confirmed outer transaction or inner operation reverted
+  WRITE_PREREQUISITE_FAILED = 4008;       // Write skipped because an upstream write did not succeed
   
   // 5000-5999: External Service errors
   RPC_NODE_ERROR = 5000;            // Blockchain RPC node error
@@ -423,8 +426,8 @@ message ContractWriteNode {
     repeated google.protobuf.Value contract_abi = 3;
     // Support for multiple method calls in sequence (similar to ContractRead)
     repeated MethodCall method_calls = 4;
-    // Execution mode for this contract write node: when true (default), use simulation; when false, execute real UserOp
-    optional bool is_simulated = 5;
+    reserved 5;
+    reserved "is_simulated";
     // ETH value to send with the transaction (in wei as string)
     optional string value = 6;
     // Custom gas limit for the transaction (as string to handle large numbers)
@@ -694,7 +697,9 @@ message LoopNode {
     // Note: ContractWrite operations always run sequentially regardless of this setting
     ExecutionMode execution_mode = 4;
     // Per-iteration timeout in seconds. If an iteration does not complete within
-    // this duration, it is marked as failed. Default: 30 seconds.
+    // this duration, it is marked as failed. Off-chain default: 30 seconds.
+    // Write runners use at least nine minutes to collect nonce retries and
+    // the bounded five-minute confirmation result of a submitted operation.
     uint32 iteration_timeout = 5;
   }
 
@@ -798,6 +803,10 @@ message Execution {
   // notice, and step counts. Absent on older runs and while the run is still
   // in progress, so a chat poll can read it without the step list.
   google.protobuf.Value summary = 13;
+
+  // Owning workflow, populated from the execution's storage key when listed.
+  // Additive: historical stored executions need no backfill.
+  string workflow_id = 14;
 
   message Step {
     string id = 1;
@@ -1332,13 +1341,8 @@ message RunNodeWithInputsReq {
   // Chain to run the node against. 0 = aggregator default chain.
   // node.config.chain_id (if non-zero) takes precedence over this field.
   int64 chain_id = 4;
-  // Optional ERC20 balance/allowance state overrides applied only during this
-  // isolated node simulation (RunNodeImmediately). Lets callers seed token
-  // balances and approvals so contract-write simulations (e.g. Uniswap swaps)
-  // don't revert with "transfer amount exceeds allowance/balance" before the
-  // approval/funding transactions have been run. Simulation-only: a
-  // real-execution request (isSimulated=false) that sets these is rejected with
-  // an error, never silently ignored.
+  // Legacy single-node overrides. Nonempty overrides are rejected; actions must
+  // be simulated as a complete workflow, including their prerequisites.
   repeated ERC20StateOverride erc20_overrides = 5;
 }
 

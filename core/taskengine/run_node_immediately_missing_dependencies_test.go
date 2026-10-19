@@ -100,9 +100,8 @@ func TestRunNodeImmediately_ContractWrite_MissingNodeDependency(t *testing.T) {
 					},
 				},
 			},
-			"value":       "0",
-			"gasLimit":    "210000",
-			"isSimulated": true,
+			"value":    "0",
+			"gasLimit": "210000",
 		}
 
 		// inputVariables only contains settings, NOT get_quote
@@ -174,9 +173,8 @@ func TestRunNodeImmediately_ContractWrite_MissingNodeDependency(t *testing.T) {
 					},
 				},
 			},
-			"value":       "0",
-			"gasLimit":    "100000",
-			"isSimulated": true,
+			"value":    "0",
+			"gasLimit": "100000",
 		}
 
 		inputVariables := map[string]interface{}{
@@ -237,9 +235,8 @@ func TestRunNodeImmediately_ContractWrite_MissingNodeDependency(t *testing.T) {
 					},
 				},
 			},
-			"value":       "0",
-			"gasLimit":    "210000",
-			"isSimulated": true,
+			"value":    "0",
+			"gasLimit": "210000",
 		}
 
 		// Now we provide BOTH settings AND get_quote data

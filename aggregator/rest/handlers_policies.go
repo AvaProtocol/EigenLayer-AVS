@@ -171,6 +171,9 @@ func (s *Server) SubmitWalletPolicy(ctx echo.Context, address generated.Ethereum
 		AffectedOut:   &affected,
 	}, string(req.PolicyId), uint32(req.EntityId), uint64(req.Deadline), signature)
 	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("Policy submit refused", "policy_id", string(req.PolicyId), "chain_id", int64(req.ChainId), "entity_id", req.EntityId, "error", err)
+		}
 		return mapPolicyError(err)
 	}
 	resp := submitPolicyToAPI(policy, superseded)
@@ -546,6 +549,9 @@ func mapPolicyError(err error) error {
 	case errors.Is(err, taskengine.ErrSessionEntityTaken):
 		return &restmw.HTTPError{Status: http.StatusConflict, Code: "POLICIES_ENTITY_TAKEN",
 			Title: "Grant allocation superseded", Detail: err.Error() + " Prepare the grant again."}
+	case errors.Is(err, taskengine.ErrSessionEntityUnverified):
+		return &restmw.HTTPError{Status: http.StatusServiceUnavailable, Code: taskengine.SessionPolicyEntityUnverifiedCode,
+			Title: "Grant allocation could not be verified", Detail: err.Error() + " Retry submit with the same signature before its signing window expires."}
 	case errors.Is(err, taskengine.ErrSessionPolicySupersedeFailed):
 		// The grant IS stored. Do not tell the client to retry the submit —
 		// the entity is spent, so a retry only fails. The wallet now holds
