@@ -2282,7 +2282,10 @@ type Execution struct {
 	// Shape is {subject, body}. body keeps the summary line, executions, errors,
 	// notice, and step counts. Absent on older runs and while the run is still
 	// in progress, so a chat poll can read it without the step list.
-	Summary       *structpb.Value   `protobuf:"bytes,13,opt,name=summary,proto3" json:"summary,omitempty"`
+	Summary *structpb.Value `protobuf:"bytes,13,opt,name=summary,proto3" json:"summary,omitempty"`
+	// Owning workflow, populated from the execution's storage key when listed.
+	// Additive: historical stored executions need no backfill.
+	WorkflowId    string            `protobuf:"bytes,14,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
 	Steps         []*Execution_Step `protobuf:"bytes,8,rep,name=steps,proto3" json:"steps,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2400,6 +2403,13 @@ func (x *Execution) GetSummary() *structpb.Value {
 		return x.Summary
 	}
 	return nil
+}
+
+func (x *Execution) GetWorkflowId() string {
+	if x != nil {
+		return x.WorkflowId
+	}
+	return ""
 }
 
 func (x *Execution) GetSteps() []*Execution_Step {
@@ -10502,7 +10512,7 @@ const file_avs_proto_rawDesc = "" +
 	"customCode\x123\n" +
 	"\abalance\x18\x13 \x01(\v2\x17.aggregator.BalanceNodeH\x00R\abalance\x12-\n" +
 	"\x05await\x18\x14 \x01(\v2\x15.aggregator.AwaitNodeH\x00R\x05awaitB\v\n" +
-	"\ttask_type\"\x83\x10\n" +
+	"\ttask_type\"\xa4\x10\n" +
 	"\tExecution\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\bstart_at\x18\x02 \x01(\x03R\astartAt\x12\x15\n" +
@@ -10517,7 +10527,9 @@ const file_avs_proto_rawDesc = "" +
 	"\x0eresume_node_id\x18\v \x01(\tR\fresumeNodeId\x12\x1f\n" +
 	"\vwait_reason\x18\f \x01(\tR\n" +
 	"waitReason\x120\n" +
-	"\asummary\x18\r \x01(\v2\x16.google.protobuf.ValueR\asummary\x120\n" +
+	"\asummary\x18\r \x01(\v2\x16.google.protobuf.ValueR\asummary\x12\x1f\n" +
+	"\vworkflow_id\x18\x0e \x01(\tR\n" +
+	"workflowId\x120\n" +
 	"\x05steps\x18\b \x03(\v2\x1a.aggregator.Execution.StepR\x05steps\x1a\x94\f\n" +
 	"\x04Step\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
