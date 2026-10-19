@@ -32,6 +32,8 @@ var (
 	// ErrSessionEntityTaken: another grant claimed the entity between prepare
 	// and submit → 409, prepare again.
 	ErrSessionEntityTaken = errors.New("validation entity was taken while the grant was being signed")
+	// The signed entity could not be read; retry submit with the same signature.
+	ErrSessionEntityUnverified = errors.New("could not verify the signed validation entity on chain")
 	// ErrSessionPolicyNotFound → 404.
 	ErrSessionPolicyNotFound = errors.New("session policy not found")
 	// ErrSessionWalletNotMAv2: grants only validate on Modular Account v2 runners.
@@ -50,6 +52,8 @@ var (
 	// spent), only clear the named leftovers.
 	ErrSessionPolicySupersedeFailed = errors.New("the grant was stored but replacing the previous grant failed")
 )
+
+const SessionPolicyEntityUnverifiedCode = "POLICIES_ENTITY_UNVERIFIED"
 
 // MaxSessionExpiresInSeconds is the largest relative lifetime that converts
 // to a time.Duration without overflowing int64. A larger client value wraps
@@ -595,6 +599,7 @@ func (n *Engine) SubmitSessionPolicy(
 	}
 
 	prepared, err := PrepareSessionGrant(n.db, in.ChainID, signer, strings.ToLower(policyID), SessionGrantRequest{
+		EntityID:       &entityID,
 		Owner:          user.Address,
 		Wallet:         in.Wallet,
 		AgentLabel:     in.AgentLabel,
@@ -609,10 +614,6 @@ func (n *Engine) SubmitSessionPolicy(
 	})
 	if err != nil {
 		return nil, nil, err
-	}
-	if prepared.Policy.EntityID != entityID {
-		return nil, nil, fmt.Errorf("%w: prepared entity %d, next free is now %d",
-			ErrSessionEntityTaken, entityID, prepared.Policy.EntityID)
 	}
 	attachDeclaredPermissions(prepared.Policy, in.Permissions)
 
