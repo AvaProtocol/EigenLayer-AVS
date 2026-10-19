@@ -377,6 +377,37 @@ func sessionEntityTaken(db storage.Storage, chainID int64, owner, wallet common.
 	return false, nil
 }
 
+// Submit checks the signed entity, not the allocator's next candidate. An
+// unread probe must not turn into a false concurrent-grant conflict (#853).
+func verifySessionEntityAvailable(ctx context.Context, db storage.Storage, chainID int64, owner, wallet common.Address, entity uint32, check EntityOccupancyChecker) error {
+	if entity == 0 {
+		return fmt.Errorf("validation entity must be positive")
+	}
+	taken, err := sessionEntityTaken(db, chainID, owner, wallet, entity)
+	if err != nil {
+		return err
+	}
+	if taken {
+		return fmt.Errorf("%w: entity %d is stored", ErrSessionEntityTaken, entity)
+	}
+	if check == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, occupancyProbeTimeout)
+	defer cancel()
+	occupied, err := check(probeCtx, wallet, entity)
+	if err != nil {
+		return fmt.Errorf("%w: entity %d on chain %d: %w", ErrSessionEntityUnverified, entity, chainID, err)
+	}
+	if occupied {
+		return fmt.Errorf("%w: entity %d is occupied on chain %d", ErrSessionEntityTaken, entity, chainID)
+	}
+	return nil
+}
+
 // NextFreeSessionEntityID is NextSessionEntityID plus an on-chain occupancy
 // probe (#763 A). When check is nil the result is the storage-only id
 // (offline tests). A failed occupancy read is occupied, never free.

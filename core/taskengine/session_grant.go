@@ -36,6 +36,10 @@ type SessionGrantRequest struct {
 	Owner  common.Address
 	Wallet common.Address // the smart wallet being granted on
 
+	// EntityID pins submit to the entity the owner signed. Nil allocates during
+	// prepare; a pinned entity is checked directly, never replaced by a walk.
+	EntityID *uint32
+
 	AgentLabel    string
 	Justification string
 
@@ -168,7 +172,14 @@ func PrepareSessionGrant(
 		return nil, fmt.Errorf("session signer is required")
 	}
 
-	entity, err := NextFreeSessionEntityID(req.OccupancyCtx, db, chainID, req.Owner, req.Wallet, req.OccupancyCheck)
+	var entity uint32
+	var err error
+	if req.EntityID != nil {
+		entity = *req.EntityID
+		err = verifySessionEntityAvailable(req.OccupancyCtx, db, chainID, req.Owner, req.Wallet, entity, req.OccupancyCheck)
+	} else {
+		entity, err = NextFreeSessionEntityID(req.OccupancyCtx, db, chainID, req.Owner, req.Wallet, req.OccupancyCheck)
+	}
 	if err != nil {
 		return nil, err
 	}

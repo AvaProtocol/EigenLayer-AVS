@@ -2375,6 +2375,15 @@ func (response SubmitWalletPolicy409ApplicationProblemPlusJSONResponse) VisitSub
 	return json.NewEncoder(w).Encode(response)
 }
 
+type SubmitWalletPolicy503ApplicationProblemPlusJSONResponse Problem
+
+func (response SubmitWalletPolicy503ApplicationProblemPlusJSONResponse) VisitSubmitWalletPolicyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetWalletNonceRequestObject struct {
 	Address EthereumAddress `json:"address"`
 	Params  GetWalletNonceParams

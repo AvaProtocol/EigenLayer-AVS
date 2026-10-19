@@ -3539,6 +3539,16 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
+        '503':
+          description: |
+            `POLICIES_ENTITY_UNVERIFIED` — the signed validation entity could
+            not be read from the chain. Nothing was stored. Retry submit with
+            the same signature before its signing window expires; no new
+            prepare or owner signature is needed unless that window expires.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
   /wallets/{address}/policies:
     parameters:
       - name: address
