@@ -804,6 +804,10 @@ message Execution {
   // in progress, so a chat poll can read it without the step list.
   google.protobuf.Value summary = 13;
 
+  // Owning workflow, populated from the execution's storage key when listed.
+  // Additive: historical stored executions need no backfill.
+  string workflow_id = 14;
+
   message Step {
     string id = 1;
     
