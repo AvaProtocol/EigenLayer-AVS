@@ -161,6 +161,10 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 				continue
 			}
 			agg.smartWalletRpcByChain[chain.ChainID] = chainRpc
+			// Reader registration is independent of token enrichment. Even if
+			// metadata initialization below fails, REST and the engine still
+			// need this chain's worker-routed reader (or direct-RPC fallback).
+			agg.registerGatewayChainStateReader(chain, chainRpc)
 
 			// Token enrichment routes through the chain worker via gRPC
 			// (worker/server.go:GetTokenMetadata implements this). We
@@ -202,14 +206,6 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 				"chainID", chainTokenService.GetChainID(),
 				"whitelistTokens", chainTokenService.GetCacheSize(),
 				"worker_routed", workerRouted)
-
-			// Register a ChainStateReader for this chain. In gateway mode
-			// we prefer the worker-routed reader so the gateway itself
-			// doesn't need to keep a chain-RPC connection alive for gas
-			// price / EstimateGas / CodeAt / EntryPoint-nonce reads.
-			// Fall back to the direct-RPC reader if the worker isn't
-			// reachable (mirrors the TokenEnrichmentService fallback above).
-			agg.registerGatewayChainStateReader(chain, chainRpc)
 		}
 	}
 
