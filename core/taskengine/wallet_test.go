@@ -1,9 +1,18 @@
 package taskengine
 
 import (
+	"math/big"
+	"strings"
 	"testing"
 
+	badger "github.com/dgraph-io/badger/v4"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
@@ -108,103 +117,62 @@ func TestSetWalletHiddenStatus(t *testing.T) {
 	}
 }
 
-func TestSetWalletHiddenStatusWithCustomFactory(t *testing.T) {
+// Only the MA v2 factory creates wallets since the EntryPoint v0.7 cutover. A
+// legacy factory must not mint a new record (it would be listed and capped, and
+// the one-off retirement migration does not run again), but a wallet that
+// already has a record stays readable and its hidden flag can still change.
+func TestGetWalletRefusesNewLegacyFactoryWallets(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
 	u := testutil.TestUser1()
+	chainID := n.resolveUserChainID(u)
 
 	saltValue := "67890"
-	customFactoryAddress := "0x9406Cc6185a346906296840746125a0E44976454"
-	// Ensure wallet exists
-	_, err := n.GetWallet(u, &avsproto.GetWalletReq{
-		Salt:           saltValue,
-		FactoryAddress: customFactoryAddress,
-	})
+	legacyFactory := "0x9406Cc6185a346906296840746125a0E44976454"
+
+	_, err := n.GetWallet(u, &avsproto.GetWalletReq{Salt: saltValue, FactoryAddress: legacyFactory})
+	require.Error(t, err, "a new legacy-factory wallet is refused")
+	assert.Contains(t, err.Error(), LegacyFactoryWalletError)
+
+	items, err := db.GetByPrefix(WalletByOwnerPrefix(chainID, u.Address))
 	if err != nil {
-		t.Fatalf("Failed to create/get wallet with custom factory: %v", err)
+		require.ErrorIs(t, err, badger.ErrKeyNotFound)
+	}
+	for _, item := range items {
+		stored := &model.SmartWallet{}
+		require.NoError(t, stored.FromStorageData(item.Value))
+		require.NotNil(t, stored.Factory)
+		assert.NotEqual(t, strings.ToLower(legacyFactory), strings.ToLower(stored.Factory.Hex()), "nothing stored for the refused factory")
 	}
 
-	// Check it's initially not hidden
-	listResp, err := n.ListWallets(u, &avsproto.ListWalletReq{FactoryAddress: customFactoryAddress})
-	if err != nil {
-		t.Fatalf("ListWallets failed for custom factory: %v", err)
-	}
-	found := false
-	var initialWallet *avsproto.SmartWallet
+	// A pre-cutover record (here, one the migration retired) stays readable.
+	factory := common.HexToAddress(legacyFactory)
+	salt, ok := new(big.Int).SetString(saltValue, 10)
+	require.True(t, ok)
+	derived, err := aa.DeriveSenderAddressAuto(rpcConn, u.Address, factory, salt)
+	require.NoError(t, err)
+	require.NoError(t, StoreWallet(db, chainID, u.Address, &model.SmartWallet{
+		Owner: &u.Address, Address: derived, Factory: &factory, Salt: salt, IsHidden: true, Retired: true,
+	}))
+
+	resp, err := n.GetWallet(u, &avsproto.GetWalletReq{Salt: saltValue, FactoryAddress: legacyFactory})
+	require.NoError(t, err, "an existing legacy record is still returned")
+	assert.True(t, strings.EqualFold(derived.Hex(), resp.Address))
+
+	_, err = n.SetWallet(u.Address, &avsproto.SetWalletReq{Salt: saltValue, FactoryAddress: legacyFactory, IsHidden: false})
+	require.NoError(t, err, "the hidden flag of an existing record can still change")
+	stored, err := GetWallet(db, chainID, u.Address, derived.Hex())
+	require.NoError(t, err)
+	assert.False(t, stored.IsHidden)
+	assert.True(t, stored.Retired, "unhiding does not un-retire")
+
+	listResp, err := n.ListWallets(u, &avsproto.ListWalletReq{FactoryAddress: legacyFactory})
+	require.NoError(t, err)
 	for _, w := range listResp.Items {
-		if w.Salt == saltValue && w.Factory == customFactoryAddress {
-			initialWallet = w
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("Wallet with salt %s and factory %s not found in initial list", saltValue, customFactoryAddress)
-	}
-	if initialWallet.IsHidden {
-		t.Errorf("Wallet with salt %s and factory %s should initially not be hidden", saltValue, customFactoryAddress)
-	}
-
-	// Hide the wallet
-	_, err = n.SetWallet(u.Address, &avsproto.SetWalletReq{
-		Salt:           saltValue,
-		FactoryAddress: customFactoryAddress,
-		IsHidden:       true,
-	})
-	if err != nil {
-		t.Fatalf("Failed to hide wallet with custom factory: %v", err)
-	}
-
-	// Check it's now hidden in the list
-	listResp, err = n.ListWallets(u, &avsproto.ListWalletReq{FactoryAddress: customFactoryAddress})
-	if err != nil {
-		t.Fatalf("ListWallets for custom factory after hiding failed: %v", err)
-	}
-	foundAndHidden := false
-	for _, w := range listResp.Items {
-		if w.Salt == saltValue && w.Factory == customFactoryAddress {
-			if w.IsHidden {
-				foundAndHidden = true
-			} else {
-				t.Errorf("Wallet with salt %s and factory %s found but IsHidden is false after setting to true", saltValue, customFactoryAddress)
-			}
-			break
-		}
-	}
-	if !foundAndHidden {
-		t.Errorf("Wallet with salt %s and factory %s not found or not hidden in list after attempting to hide", saltValue, customFactoryAddress)
-	}
-
-	// Unhide the wallet
-	_, err = n.SetWallet(u.Address, &avsproto.SetWalletReq{
-		Salt:           saltValue,
-		FactoryAddress: customFactoryAddress,
-		IsHidden:       false,
-	})
-	if err != nil {
-		t.Fatalf("Failed to unhide wallet with custom factory: %v", err)
-	}
-
-	listResp, err = n.ListWallets(u, &avsproto.ListWalletReq{FactoryAddress: customFactoryAddress})
-	if err != nil {
-		t.Fatalf("ListWallets for custom factory after unhiding failed: %v", err)
-	}
-	foundAndNotHidden := false
-	for _, w := range listResp.Items {
-		if w.Salt == saltValue && w.Factory == customFactoryAddress {
-			if !w.IsHidden {
-				foundAndNotHidden = true
-			} else {
-				t.Errorf("Wallet with salt %s and factory %s found but IsHidden is true after setting to false", saltValue, customFactoryAddress)
-			}
-			break
-		}
-	}
-	if !foundAndNotHidden {
-		t.Errorf("Wallet with salt %s and factory %s not found or still hidden in list after attempting to unhide", saltValue, customFactoryAddress)
+		assert.False(t, strings.EqualFold(w.Address, derived.Hex()), "a retired wallet is never listed")
 	}
 }
 

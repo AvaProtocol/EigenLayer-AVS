@@ -1273,6 +1273,12 @@ func (n *Engine) ListWallets(user *model.User, payload *avsproto.ListWalletReq) 
 			continue
 		}
 
+		// Retired: a legacy-factory wallet the gateway can no longer execute
+		// (see model.SmartWallet.Retired). Kept on disk, never listed.
+		if storedModelWallet.Retired {
+			continue
+		}
+
 		if processedAddresses[strings.ToLower(storedModelWallet.Address.Hex())] {
 			continue
 		}
@@ -1375,9 +1381,10 @@ func resolveFactoryOverride(swCfg *config.SmartWalletConfig, overrideHex string)
 
 // walletCountsTowardOwnerCap reports a stored derived wallet. A designated EOA
 // (kind eoa_7702) is the owner's existing account, so it does not consume
-// MaxWalletsPerOwner.
+// MaxWalletsPerOwner. A retired legacy-factory wallet is never listed and can
+// never execute, so it does not consume it either.
 func walletCountsTowardOwnerCap(wallet *model.SmartWallet) bool {
-	return wallet != nil && wallet.Address != nil && !wallet.IsEOA7702()
+	return wallet != nil && wallet.Address != nil && !wallet.IsEOA7702() && !wallet.Retired
 }
 
 // GetWallet is the gRPC handler for the GetWallet RPC.
@@ -1527,6 +1534,15 @@ func (n *Engine) GetWalletWithContext(ctx context.Context, user *model.User, pay
 	}
 
 	if err == badger.ErrKeyNotFound {
+		// Only MA v2 accounts can be created or executed since the EntryPoint
+		// v0.7 cutover. An explicit legacy factory may still READ a wallet that
+		// already has a record (found above), but must not mint a new one: it
+		// would be listed and use up the cap, and the one-off
+		// 20261020-retire-legacy-factory-wallets migration never runs again.
+		if factoryAddr != aa.MAv2FactoryAddress() {
+			return nil, status.Errorf(codes.InvalidArgument, "%s (factory %s)", LegacyFactoryWalletError, factoryAddr.Hex())
+		}
+
 		// Enforce max smart wallet count per owner before creating a new wallet entry.
 		// This check only applies when creating new wallet entries, not accessing existing ones.
 		// Per-chain limit comes from swCfg (resolved above) — chains can configure different
