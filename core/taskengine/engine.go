@@ -1273,6 +1273,12 @@ func (n *Engine) ListWallets(user *model.User, payload *avsproto.ListWalletReq) 
 			continue
 		}
 
+		// Retired: a legacy-factory wallet the gateway can no longer execute
+		// (see model.SmartWallet.Retired). Kept on disk, never listed.
+		if storedModelWallet.Retired {
+			continue
+		}
+
 		if processedAddresses[strings.ToLower(storedModelWallet.Address.Hex())] {
 			continue
 		}
@@ -1375,9 +1381,10 @@ func resolveFactoryOverride(swCfg *config.SmartWalletConfig, overrideHex string)
 
 // walletCountsTowardOwnerCap reports a stored derived wallet. A designated EOA
 // (kind eoa_7702) is the owner's existing account, so it does not consume
-// MaxWalletsPerOwner.
+// MaxWalletsPerOwner. A retired legacy-factory wallet is never listed and can
+// never execute, so it does not consume it either.
 func walletCountsTowardOwnerCap(wallet *model.SmartWallet) bool {
-	return wallet != nil && wallet.Address != nil && !wallet.IsEOA7702()
+	return wallet != nil && wallet.Address != nil && !wallet.IsEOA7702() && !wallet.Retired
 }
 
 // GetWallet is the gRPC handler for the GetWallet RPC.

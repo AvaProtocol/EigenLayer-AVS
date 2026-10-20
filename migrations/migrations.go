@@ -42,4 +42,12 @@ var Migrations = []migrator.Migration{
 		Name:     "20260626-wipe-chain-bucketed-task-keys",
 		Function: WipeChainBucketedTaskKeys,
 	},
+	{
+		// Only MA v2 accounts can execute since the EntryPoint v0.7 cutover.
+		// Mark every other derived wallet Retired (kept on disk, never listed,
+		// outside the wallet cap). Logs one line per wallet; see
+		// scripts/retired_wallet_funds for the ones still holding funds.
+		Name:     "20261020-retire-legacy-factory-wallets",
+		Function: RetireLegacyFactoryWallets,
+	},
 }
