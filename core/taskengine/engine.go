@@ -1387,6 +1387,17 @@ func walletCountsTowardOwnerCap(wallet *model.SmartWallet) bool {
 	return wallet != nil && wallet.Address != nil && !wallet.IsEOA7702() && !wallet.Retired
 }
 
+// mockDerivedSenderAddress is the address wallet RPCs use when rpcConn is
+// nil. That is the unit-test and CI signal; a production gateway always has
+// a live rpcConn and never takes this path. GetWallet and SetWallet share
+// it so a test that stores a record and then updates the same record looks
+// the address up under the key it wrote.
+func mockDerivedSenderAddress(owner, factory common.Address, salt *big.Int) common.Address {
+	concatenated := append(append(owner.Bytes(), factory.Bytes()...), salt.Bytes()...)
+	hash := crypto.Keccak256(concatenated)
+	return common.BytesToAddress(hash[12:])
+}
+
 // GetWallet is the gRPC handler for the GetWallet RPC.
 // It uses the owner (from auth context), salt, and factory_address from payload to derive the wallet address.
 //
@@ -1469,9 +1480,7 @@ func (n *Engine) GetWalletWithContext(ctx context.Context, user *model.User, pay
 	if rpcConn == nil {
 		n.logger.Debug("GetWallet: test/CI environment (rpcConn nil), using mock derivation",
 			"owner", user.Address.Hex(), "chain_id", chainID, "salt", saltBig.String())
-		concatenated := append(append(user.Address.Bytes(), factoryAddr.Bytes()...), saltBig.Bytes()...)
-		hash := crypto.Keccak256(concatenated)
-		mockAddr := common.BytesToAddress(hash[12:])
+		mockAddr := mockDerivedSenderAddress(user.Address, factoryAddr, saltBig)
 		derivedSenderAddress = &mockAddr
 	} else if reader := GetChainStateReaderForChain(uint64(chainID)); reader != nil {
 		// Preferred path: derive via the per-chain ChainStateReader. In
@@ -1638,10 +1647,22 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 		return nil, err
 	}
 
-	derivedWalletAddress, err := aa.DeriveSenderAddressAuto(rpcConn, owner, factoryAddr, saltBig)
-	if err != nil {
-		n.logger.Error("Failed to derive wallet address for SetWallet", "owner", owner.Hex(), "salt", payload.GetSalt(), "factory", payload.GetFactoryAddress(), "error", err)
-		return nil, status.Errorf(codes.Internal, "Failed to derive wallet address: %v", err)
+	var derivedWalletAddress *common.Address
+	var err error
+	if rpcConn == nil {
+		// Same test/CI stand-in as GetWallet. DeriveSenderAddressAuto dials
+		// the factory, so a unit test cannot update a record it just stored
+		// unless both calls agree with rpcConn left unset.
+		n.logger.Debug("SetWallet: test/CI environment (rpcConn nil), using mock derivation",
+			"owner", owner.Hex(), "salt", payload.GetSalt(), "factory", factoryAddr.Hex())
+		addr := mockDerivedSenderAddress(owner, factoryAddr, saltBig)
+		derivedWalletAddress = &addr
+	} else {
+		derivedWalletAddress, err = aa.DeriveSenderAddressAuto(rpcConn, owner, factoryAddr, saltBig)
+		if err != nil {
+			n.logger.Error("Failed to derive wallet address for SetWallet", "owner", owner.Hex(), "salt", payload.GetSalt(), "factory", payload.GetFactoryAddress(), "error", err)
+			return nil, status.Errorf(codes.Internal, "Failed to derive wallet address: %v", err)
+		}
 	}
 	if derivedWalletAddress == nil || *derivedWalletAddress == (common.Address{}) {
 		n.logger.Error("Derived wallet address is nil or zero for SetWallet", "owner", owner.Hex(), "salt", payload.GetSalt(), "factory", payload.GetFactoryAddress())

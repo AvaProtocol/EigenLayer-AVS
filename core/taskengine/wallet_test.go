@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -121,12 +122,22 @@ func TestSetWalletHiddenStatus(t *testing.T) {
 // legacy factory must not mint a new record (it would be listed and capped, and
 // the one-off retirement migration does not run again), but a wallet that
 // already has a record stays readable and its hidden flag can still change.
+//
+// rpcConn is pinned nil so the test uses mockDerivedSenderAddress. Leaving
+// the package client alone made the existing-record half depend on whichever
+// earlier test had dialed a factory.
 func TestGetWalletRefusesNewLegacyFactoryWallets(t *testing.T) {
+	previousRPC := rpcConn
+	t.Cleanup(func() { rpcConn = previousRPC })
+
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
+	// New dials SmartWallet.EthRpcUrl and stores the client. Pin the mock
+	// after that, or GetWallet derives on chain and misses the stored record.
+	rpcConn = nil
 	u := testutil.TestUser1()
 	chainID := n.resolveUserChainID(u)
 
@@ -152,10 +163,9 @@ func TestGetWalletRefusesNewLegacyFactoryWallets(t *testing.T) {
 	factory := common.HexToAddress(legacyFactory)
 	salt, ok := new(big.Int).SetString(saltValue, 10)
 	require.True(t, ok)
-	derived, err := aa.DeriveSenderAddressAuto(rpcConn, u.Address, factory, salt)
-	require.NoError(t, err)
+	derived := mockDerivedSenderAddress(u.Address, factory, salt)
 	require.NoError(t, StoreWallet(db, chainID, u.Address, &model.SmartWallet{
-		Owner: &u.Address, Address: derived, Factory: &factory, Salt: salt, IsHidden: true, Retired: true,
+		Owner: &u.Address, Address: &derived, Factory: &factory, Salt: salt, IsHidden: true, Retired: true,
 	}))
 
 	resp, err := n.GetWallet(u, &avsproto.GetWalletReq{Salt: saltValue, FactoryAddress: legacyFactory})
@@ -174,6 +184,66 @@ func TestGetWalletRefusesNewLegacyFactoryWallets(t *testing.T) {
 	for _, w := range listResp.Items {
 		assert.False(t, strings.EqualFold(w.Address, derived.Hex()), "a retired wallet is never listed")
 	}
+}
+
+// A retired legacy wallet stays on its own chain. It does not consume that
+// chain's cap, so the same owner can still create an MA v2 wallet there, and
+// a request for a new legacy wallet on another chain is still refused.
+func TestRetiredLegacyWalletDoesNotBlockMAv2OnItsChain(t *testing.T) {
+	previousRPC := rpcConn
+	t.Cleanup(func() { rpcConn = previousRPC })
+
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	const chainA = int64(11155111)
+	const chainB = int64(84532)
+	cfg := testutil.GetAggregatorConfig()
+	cfg.SmartWallet.ChainID = chainA
+	cfg.SmartWallet.MaxWalletsPerOwner = 1
+	other := *cfg.SmartWallet
+	other.ChainID = chainB
+	other.MaxWalletsPerOwner = 1
+	cfg.IsGateway = true
+	cfg.Chains = []*config.ChainConfig{
+		{ChainID: chainA, Name: "sepolia", SmartWallet: cfg.SmartWallet},
+		{ChainID: chainB, Name: "base-sepolia", SmartWallet: &other},
+	}
+	n := New(db, cfg, nil, testutil.GetLogger())
+	rpcConn = nil
+
+	owner := testutil.TestUser1().Address
+	legacyFactory := common.HexToAddress("0x9406Cc6185a346906296840746125a0E44976454")
+	legacySalt := big.NewInt(7)
+	legacyAddr := mockDerivedSenderAddress(owner, legacyFactory, legacySalt)
+	require.NoError(t, StoreWallet(db, chainA, owner, &model.SmartWallet{
+		Owner: &owner, Address: &legacyAddr, Factory: &legacyFactory, Salt: legacySalt,
+		IsHidden: true, Retired: true,
+	}))
+
+	userA := &model.User{Address: owner, ChainID: chainA}
+	resp, err := n.GetWallet(userA, &avsproto.GetWalletReq{Salt: "1"})
+	require.NoError(t, err, "a retired legacy wallet must not consume the cap on its chain")
+	assert.True(t, strings.EqualFold(resp.FactoryAddress, aa.MAv2FactoryAddress().Hex()))
+	storedNew, err := GetWallet(db, chainA, owner, resp.Address)
+	require.NoError(t, err)
+	assert.False(t, storedNew.Retired)
+	_, err = GetWallet(db, chainB, owner, resp.Address)
+	require.ErrorIs(t, err, badger.ErrKeyNotFound)
+
+	userB := &model.User{Address: owner, ChainID: chainB}
+	_, err = n.GetWallet(userB, &avsproto.GetWalletReq{Salt: "1", FactoryAddress: legacyFactory.Hex()})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), LegacyFactoryWalletError)
+	items, err := db.GetByPrefix(WalletByOwnerPrefix(chainB, owner))
+	if err != nil {
+		require.ErrorIs(t, err, badger.ErrKeyNotFound)
+	}
+	assert.Empty(t, items)
+
+	storedLegacy, err := GetWallet(db, chainA, owner, legacyAddr.Hex())
+	require.NoError(t, err)
+	assert.True(t, storedLegacy.Retired)
 }
 
 func TestHideDefaultWallet(t *testing.T) {
