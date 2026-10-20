@@ -1,13 +1,16 @@
 package taskengine
 
 import (
+	"math/big"
 	"testing"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // seedInvalidEnabledTask stores an invalid task (block trigger with no config)
@@ -131,4 +134,28 @@ func TestCreateWorkflow_RejectsInvalidNodeName(t *testing.T) {
 	_, err := n.CreateWorkflow(testutil.TestUser1(), bad)
 	require.Error(t, err, "CreateWorkflow must reject a spaced node name")
 	assert.Contains(t, err.Error(), "JavaScript identifier")
+}
+
+func TestCreateWorkflowRejectsRetiredWallet(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	n := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+	user := testutil.TestUser1()
+	addr := *user.SmartAccountAddress
+	factory := common.HexToAddress("0xB99BC2E399e06CddCF5E725c0ea341E8f0322834")
+	require.NoError(t, StoreWallet(db, n.defaultChainID(), user.Address, &model.SmartWallet{
+		Owner: &user.Address, Address: &addr, Factory: &factory, Salt: big.NewInt(0),
+		IsHidden: true, Retired: true,
+	}))
+
+	_, err := n.CreateWorkflow(user, testutil.RestTask())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), RetiredWalletError)
+
+	live, err := GetWallet(db, n.defaultChainID(), user.Address, addr.Hex())
+	require.NoError(t, err)
+	live.Retired = false
+	require.NoError(t, StoreWallet(db, n.defaultChainID(), user.Address, live))
+	_, err = n.CreateWorkflow(user, testutil.RestTask())
+	require.NoError(t, err, "a wallet that is not retired can still run a new workflow")
 }

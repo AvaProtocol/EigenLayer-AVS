@@ -53,14 +53,17 @@ func RetireLegacyFactoryWallets(db storage.Storage) (int, error) {
 	}
 
 	retired := 0
+	skipped := 0
 	for _, item := range items {
 		key := string(item.Key)
 		chainID, owner, ok := parseWalletKey(key)
 		if !ok {
+			skipped++
 			continue
 		}
 		wallet := &model.SmartWallet{}
 		if err := wallet.FromStorageData(item.Value); err != nil {
+			skipped++
 			log.Printf("%s skipped unreadable record key=%s error=%v", RetireLegacyWalletsLogPrefix, key, err)
 			continue
 		}
@@ -93,6 +96,10 @@ func RetireLegacyFactoryWallets(db storage.Storage) (int, error) {
 			factoryString(wallet), saltString(wallet), workflows, wasHidden, wallet.StaleDerivation)
 	}
 
+	// One grep confirms the run. skipped counts unreadable values and keys
+	// that are not w:<chain>:<owner>:<address>. Already-retired and MA v2
+	// rows are left alone and are not part of that count.
+	log.Printf("%s done retired=%d skipped=%d", RetireLegacyWalletsLogPrefix, retired, skipped)
 	return retired, nil
 }
 

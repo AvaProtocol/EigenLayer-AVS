@@ -14,12 +14,13 @@ Those records still appear in `ListWallets` and still count toward `MaxWalletsPe
 - `model.SmartWallet.Retired` (bool, `omitempty`): a system-set flag. Retired records stay on disk, since the on-chain account may still hold assets and workflows, policies and fee records refer to wallets by address.
 - `ListWallets` skips retired records, as it already skips `StaleDerivation` ones.
 - `walletCountsTowardOwnerCap` ignores retired records, so they no longer use up the cap.
-- `GetWallet` refuses to create a new record under any factory other than MA v2 (`InvalidArgument`, `LegacyFactoryWalletError`). Without this an explicit legacy factory could mint a fresh, listed, cap-consuming record after the one-off migration has run. A wallet that already has a record is still returned, and its hidden flag can still change; unhiding never clears `Retired`.
+- `GetWallet` refuses to create a new record under any factory other than MA v2 (`InvalidArgument`, `LegacyFactoryWalletError`). Without this an explicit legacy factory could mint a fresh, listed, cap-consuming record after the one-off migration has run. A wallet that already has a record is still returned, and its hidden flag can still change; unhiding never clears `Retired`. A missing legacy record is rejected before derivation, so a factory that no longer answers is `InvalidArgument` rather than `Unavailable`.
+- `CreateWorkflow` rejects a new workflow whose runner address is stored only as `Retired` (`InvalidArgument`, `RetiredWalletError`). Existing workflows that already name that wallet are left in place.
 - One-off startup migration `20261020-retire-legacy-factory-wallets` (`migrations.RetireLegacyFactoryWallets`):
   - Marks every derived wallet record whose factory is not MA v2, or has no recorded factory, as `Retired` and `IsHidden`, on every chain and for every owner.
   - Skips `eoa_7702` records.
   - Rewrites only the primary record; the `wsalt:` index is untouched.
-  - Writes one log line per wallet (`retire-legacy-wallets: retired chain=… owner=… wallet=… factory=… salt=… workflows=…`).
+  - Writes one log line per wallet (`retire-legacy-wallets: retired chain=… owner=… wallet=… factory=… salt=… workflows=…`) and one summary (`retire-legacy-wallets: done retired=N skipped=M`). `skipped` counts unreadable values and keys that are not wallet records.
   - Re-running finds nothing to change. The migrator takes a DB backup first.
 - `scripts/retired_wallet_funds`: a read-only report over a copy of the gateway DB. It lists retired or to-be-retired wallets that still hold the chain's native token or any whitelisted token, for manual follow-up. Run before a release it previews what the migration will retire. Each balance read is retried once; a read that still fails, or returns too few bytes to decode, marks the wallet as an error row (with anything already found) rather than a zero, so a funded wallet is never silently dropped.
 

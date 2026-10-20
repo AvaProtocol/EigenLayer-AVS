@@ -500,6 +500,28 @@ func (n *Engine) defaultChainID() int64 {
 // has the same derived address across chains when factories are aligned).
 // On the first non-nil DB error, returns (false, err) — callers can
 // distinguish "wallet not owned anywhere" from "DB problem."
+// runnerWalletIsRetired reports whether every stored record for this
+// owner and address is Retired. No stored record is false: ownership may
+// have passed on the default derived address alone, and that wallet can
+// still be created. One live record on any chain is false.
+func (n *Engine) runnerWalletIsRetired(user *model.User, walletAddr common.Address) (bool, error) {
+	saw := false
+	for _, chainID := range n.knownChainIDs() {
+		wallet, err := GetWallet(n.db, chainID, user.Address, walletAddr.Hex())
+		if err == badger.ErrKeyNotFound {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		saw = true
+		if wallet != nil && !wallet.Retired {
+			return false, nil
+		}
+	}
+	return saw, nil
+}
+
 func (n *Engine) userOwnsWalletOnAnyChain(user *model.User, walletAddr common.Address) (bool, error) {
 	if user.SmartAccountAddress != nil && user.SmartAccountAddress.Hex() == walletAddr.Hex() {
 		return true, nil
@@ -2019,6 +2041,20 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 		}
 		if !valid {
 			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
+		}
+		// A retired legacy wallet can never execute. Existing workflows that
+		// already name it stay; a new one would only sit until it failed.
+		retired, retiredErr := n.runnerWalletIsRetired(user, common.HexToAddress(task.SmartWalletAddress))
+		if retiredErr != nil {
+			n.logger.Error("Retired-wallet check failed (storage error)",
+				"owner", user.Address.Hex(),
+				"smart_wallet", task.SmartWalletAddress,
+				"error", retiredErr)
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE),
+				"failed to validate smart wallet ownership: %v", retiredErr)
+		}
+		if retired {
+			return nil, status.Errorf(codes.InvalidArgument, RetiredWalletError)
 		}
 	}
 

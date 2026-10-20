@@ -129,6 +129,7 @@ func TestRetireLegacyFactoryWallets(t *testing.T) {
 
 	out := logs.String()
 	assert.Equal(t, 4, strings.Count(out, RetireLegacyWalletsLogPrefix+" retired "))
+	assert.Contains(t, out, RetireLegacyWalletsLogPrefix+" done retired=4 skipped=0")
 	assert.Contains(t, out, "wallet="+strings.ToLower(simpleWallet.Hex())+" factory="+strings.ToLower(simpleFactory.Hex())+" salt=0 workflows=2 was_hidden=false")
 	assert.Contains(t, out, "wallet="+strings.ToLower(noFactoryWallet.Hex())+" factory=none salt=1 workflows=0")
 	assert.Contains(t, out, "chain=11155111 owner="+strings.ToLower(owner.Hex()))
@@ -137,6 +138,7 @@ func TestRetireLegacyFactoryWallets(t *testing.T) {
 	n, err = RetireLegacyFactoryWallets(db)
 	require.NoError(t, err)
 	assert.Equal(t, 0, n)
+	assert.Contains(t, logs.String(), RetireLegacyWalletsLogPrefix+" done retired=0 skipped=0")
 }
 
 func TestRetireLegacyFactoryWalletsKeyFormats(t *testing.T) {
