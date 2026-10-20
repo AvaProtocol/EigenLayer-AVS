@@ -248,10 +248,13 @@ func checkAll(wallets []*wallet, clients map[uint64]*ethclient.Client, tokens ma
 	wg.Wait()
 }
 
+// readAttempts bounds retries for one balance read (rate limits, flaky RPCs).
+const readAttempts = 2
+
 func check(w *wallet, client *ethclient.Client, tokens []token) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	native, err := client.BalanceAt(ctx, w.Address, nil)
+	native, err := withRetry(func(ctx context.Context) (*big.Int, error) {
+		return client.BalanceAt(ctx, w.Address, nil)
+	})
 	if err != nil {
 		w.Err = fmt.Sprintf("native balance: %v", err)
 		return
@@ -259,18 +262,55 @@ func check(w *wallet, client *ethclient.Client, tokens []token) {
 	if native.Sign() > 0 {
 		w.Holdings = append(w.Holdings, formatUnits(native, 18)+" native")
 	}
+	var failed []string
 	for _, t := range tokens {
-		data := append(append([]byte{}, balanceOfSelector...), common.LeftPadBytes(w.Address.Bytes(), 32)...)
-		raw, callErr := client.CallContract(ctx, ethereum.CallMsg{To: &t.Address, Data: data}, nil)
-		if callErr != nil || len(raw) < 32 {
-			continue // a token that does not answer balanceOf is not a holding
+		amount, readErr := withRetry(func(ctx context.Context) (*big.Int, error) {
+			return tokenBalance(ctx, client, t.Address, w.Address)
+		})
+		if readErr != nil {
+			failed = append(failed, t.Symbol)
+			continue
 		}
-		amount := new(big.Int).SetBytes(raw[:32])
 		if amount.Sign() > 0 {
 			w.Holdings = append(w.Holdings, formatUnits(amount, t.Decimals)+" "+t.Symbol)
 		}
 	}
+	// A read that failed is unknown, not zero: report the wallet as an error
+	// (with whatever was found) so a funded wallet is never silently dropped.
+	if len(failed) > 0 {
+		w.Err = fmt.Sprintf("%d token read(s) failed: %s", len(failed), strings.Join(failed, ","))
+		return
+	}
 	w.Checked = true
+}
+
+// tokenBalance reads ERC-20 balanceOf. Fewer than 32 bytes back (no code at
+// the address, or a non-standard token) is an error, not a zero balance.
+func tokenBalance(ctx context.Context, client *ethclient.Client, tokenAddress, holder common.Address) (*big.Int, error) {
+	data := append(append([]byte{}, balanceOfSelector...), common.LeftPadBytes(holder.Bytes(), 32)...)
+	raw, err := client.CallContract(ctx, ethereum.CallMsg{To: &tokenAddress, Data: data}, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) < 32 {
+		return nil, fmt.Errorf("balanceOf returned %d bytes", len(raw))
+	}
+	return new(big.Int).SetBytes(raw[:32]), nil
+}
+
+func withRetry(read func(ctx context.Context) (*big.Int, error)) (*big.Int, error) {
+	var lastErr error
+	for attempt := 0; attempt < readAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		value, err := read(ctx)
+		cancel()
+		if err == nil {
+			return value, nil
+		}
+		lastErr = err
+		time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+	}
+	return nil, lastErr
 }
 
 func report(wallets []*wallet, all bool) error {
@@ -282,7 +322,11 @@ func report(wallets []*wallet, all bool) error {
 		switch {
 		case w.Err != "":
 			failed++
-			holdings = "ERROR: " + w.Err
+			if len(w.Holdings) > 0 {
+				holdings = "ERROR: " + w.Err + "; found so far: " + holdings
+			} else {
+				holdings = "ERROR: " + w.Err
+			}
 		case !w.Checked:
 			unchecked++
 			holdings = "unchecked (no --rpc for this chain)"

@@ -1534,6 +1534,15 @@ func (n *Engine) GetWalletWithContext(ctx context.Context, user *model.User, pay
 	}
 
 	if err == badger.ErrKeyNotFound {
+		// Only MA v2 accounts can be created or executed since the EntryPoint
+		// v0.7 cutover. An explicit legacy factory may still READ a wallet that
+		// already has a record (found above), but must not mint a new one: it
+		// would be listed and use up the cap, and the one-off
+		// 20261020-retire-legacy-factory-wallets migration never runs again.
+		if factoryAddr != aa.MAv2FactoryAddress() {
+			return nil, status.Errorf(codes.InvalidArgument, "%s (factory %s)", LegacyFactoryWalletError, factoryAddr.Hex())
+		}
+
 		// Enforce max smart wallet count per owner before creating a new wallet entry.
 		// This check only applies when creating new wallet entries, not accessing existing ones.
 		// Per-chain limit comes from swCfg (resolved above) — chains can configure different
