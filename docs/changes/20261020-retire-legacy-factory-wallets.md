@@ -27,10 +27,10 @@ No new API, endpoint or admin surface.
 
 ## Operating it
 
-Before releasing, preview against a copy of the production DB:
+Before releasing, preview against a production backup. `--backup-file` takes the gateway's own `full-backup.db` (on the volume under `/data/gateway_backup/<YY-MM-DD-HH-MM>/`) and loads it into a temporary directory; `--gateway-path` takes a copied DB directory instead.
 
 ```
-go run ./scripts/retired_wallet_funds --gateway-path /path/to/gateway-db-copy \
+go run ./scripts/retired_wallet_funds --backup-file /path/to/full-backup.db \
   --rpc 1="$ETH_RPC_URL" --rpc 8453="$BASE_RPC_URL" \
   --rpc 11155111="$SEPOLIA_RPC_URL" --rpc 84532="$BASE_SEPOLIA_RPC_URL"
 ```

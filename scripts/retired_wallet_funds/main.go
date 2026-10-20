@@ -10,13 +10,18 @@
 //
 // READ-ONLY in intent, but BadgerDB takes an exclusive directory lock, so run
 // it against a COPY or backup of the gateway DB, never the live directory.
+// --backup-file takes an app-level backup as the gateway writes it
+// (`<backup_dir>/<YY-MM-DD-HH-MM>/full-backup.db`) and loads it into a
+// throwaway directory first, so no separate restore step is needed.
 //
 // Usage:
 //
 //	go run ./scripts/retired_wallet_funds \
-//	  --gateway-path /path/to/gateway-db-copy \
+//	  --backup-file /path/to/full-backup.db \
 //	  --rpc 1="$ETH_RPC_URL" --rpc 8453="$BASE_RPC_URL" \
 //	  --rpc 11155111="$SEPOLIA_RPC_URL" --rpc 84532="$BASE_SEPOLIA_RPC_URL"
+//
+// or --gateway-path /path/to/gateway-db-copy for a copied DB directory.
 //
 // Flags: --owner limits the walk to one owner; --all prints unfunded wallets
 // too. Chains without an --rpc are reported as unchecked, never as empty.
@@ -36,6 +41,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	badger "github.com/dgraph-io/badger/v4"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -104,13 +110,22 @@ func main() {
 func run() error {
 	rpcs := rpcFlags{}
 	gatewayPath := flag.String("gateway-path", "", "Path to a COPY of the gateway BadgerDB directory (not the live DB)")
+	backupFile := flag.String("backup-file", "", "Path to a gateway full-backup.db; loaded into a temporary directory")
 	ownerFilter := flag.String("owner", "", "Only this owner EOA (optional)")
 	all := flag.Bool("all", false, "Also print wallets that hold nothing")
 	concurrency := flag.Int("concurrency", 8, "Parallel wallet balance reads")
 	flag.Var(rpcs, "rpc", "<chainID>=<http RPC URL>; repeat per chain")
 	flag.Parse()
-	if *gatewayPath == "" {
-		return fmt.Errorf("--gateway-path is required")
+	if (*gatewayPath == "") == (*backupFile == "") {
+		return fmt.Errorf("pass exactly one of --gateway-path or --backup-file")
+	}
+	if *backupFile != "" {
+		dir, cleanup, err := restoreBackup(*backupFile)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		*gatewayPath = dir
 	}
 
 	db, err := storage.NewWithPath(*gatewayPath)
@@ -139,6 +154,39 @@ func run() error {
 
 	checkAll(wallets, clients, tokens, *concurrency)
 	return report(wallets, *all)
+}
+
+// restoreBackup loads a Badger backup stream (what core/backup writes) into a
+// new temporary directory and returns it with a cleanup func.
+func restoreBackup(path string) (string, func(), error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", nil, fmt.Errorf("open backup %s: %w", path, err)
+	}
+	defer file.Close()
+
+	dir, err := os.MkdirTemp("", "retired-wallet-funds-")
+	if err != nil {
+		return "", nil, fmt.Errorf("create restore dir: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+
+	restored, err := badger.Open(badger.DefaultOptions(dir).WithLogger(nil))
+	if err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("open restore dir: %w", err)
+	}
+	if err := restored.Load(file, 256); err != nil {
+		_ = restored.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("load backup %s: %w", path, err)
+	}
+	if err := restored.Close(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("close restore dir: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "loaded %s into %s\n", path, dir)
+	return dir, cleanup, nil
 }
 
 // collect returns every record the migration retires or would retire.
