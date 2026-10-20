@@ -1,12 +1,15 @@
 package taskengine
 
 import (
+	"context"
+	"errors"
 	"math/big"
 	"strings"
 	"testing"
 
 	badger "github.com/dgraph-io/badger/v4"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -184,6 +187,64 @@ func TestGetWalletRefusesNewLegacyFactoryWallets(t *testing.T) {
 	for _, w := range listResp.Items {
 		assert.False(t, strings.EqualFold(w.Address, derived.Hex()), "a retired wallet is never listed")
 	}
+}
+
+// failingSmartWalletReader makes derivation fail. A legacy-factory request
+// must be accepted or rejected from storage before this is called.
+type failingSmartWalletReader struct{ ChainStateReader }
+
+func (failingSmartWalletReader) GetSmartWalletAddress(context.Context, common.Address, common.Address, *big.Int) (common.Address, error) {
+	return common.Address{}, errors.New("factory unavailable")
+}
+
+func TestLegacyFactoryRejectsBeforeDerivation(t *testing.T) {
+	previousRPC := rpcConn
+	t.Cleanup(func() { rpcConn = previousRPC })
+
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	cfg := testutil.GetAggregatorConfig()
+	n := New(db, cfg, nil, testutil.GetLogger())
+	// Non-nil so a chain reader is consulted instead of the mock. New has
+	// already dialed the configured RPC; replace that client so this test
+	// cannot succeed by accident on a live factory.
+	rpcConn = new(ethclient.Client)
+	u := testutil.TestUser1()
+	chainID := n.resolveUserChainID(u)
+
+	prev := GetChainStateReaderForChain(uint64(chainID))
+	RegisterChainStateReader(uint64(chainID), failingSmartWalletReader{})
+	t.Cleanup(func() {
+		if prev == nil {
+			unregisterChainStateReader(uint64(chainID))
+		} else {
+			RegisterChainStateReader(uint64(chainID), prev)
+		}
+	})
+
+	legacyFactory := common.HexToAddress("0x9406Cc6185a346906296840746125a0E44976454")
+	_, err := n.GetWallet(u, &avsproto.GetWalletReq{Salt: "4", FactoryAddress: legacyFactory.Hex()})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), LegacyFactoryWalletError)
+	assert.NotContains(t, err.Error(), "Unavailable")
+
+	salt := big.NewInt(4)
+	addr := common.HexToAddress("0x0000000000000000000000000000000000000A11")
+	require.NoError(t, StoreWallet(db, chainID, u.Address, &model.SmartWallet{
+		Owner: &u.Address, Address: &addr, Factory: &legacyFactory, Salt: salt, IsHidden: true, Retired: true,
+	}))
+
+	resp, err := n.GetWallet(u, &avsproto.GetWalletReq{Salt: "4", FactoryAddress: legacyFactory.Hex()})
+	require.NoError(t, err, "an indexed legacy record is returned without derivation")
+	assert.True(t, strings.EqualFold(resp.Address, addr.Hex()))
+
+	_, err = n.SetWallet(u.Address, &avsproto.SetWalletReq{Salt: "4", FactoryAddress: legacyFactory.Hex(), IsHidden: false})
+	require.NoError(t, err, "the hidden flag can change without derivation")
+	stored, err := GetWallet(db, chainID, u.Address, addr.Hex())
+	require.NoError(t, err)
+	assert.False(t, stored.IsHidden)
+	assert.True(t, stored.Retired)
 }
 
 // A retired legacy wallet stays on its own chain. It does not consume that

@@ -1228,7 +1228,9 @@ func (n *Engine) ListWallets(user *model.User, payload *avsproto.ListWalletReq) 
 				n.logger.Warn("DB error fetching default derived wallet for ListWallets", "address", defaultDerivedAddress.Hex(), "error", dbGetErr)
 			}
 
-			// Always include the default wallet in the response (even if storage failed)
+			// Prefer the stored salt, factory, and hidden flag. A missing
+			// record still uses the derived defaults, including when the
+			// store itself failed.
 			if modelWallet != nil {
 				isHidden = modelWallet.IsHidden
 				if modelWallet.Salt != nil {
@@ -1239,13 +1241,19 @@ func (n *Engine) ListWallets(user *model.User, payload *avsproto.ListWalletReq) 
 				}
 			}
 
-			walletsToReturnProto = append(walletsToReturnProto, &avsproto.SmartWallet{
-				Address:  defaultDerivedAddress.Hex(),
-				Salt:     actualSalt,
-				Factory:  actualFactory,
-				IsHidden: isHidden,
-			})
-			processedAddresses[strings.ToLower(defaultDerivedAddress.Hex())] = true
+			// The prefix scan below also skips Retired, but this branch
+			// runs first. A retired record at the default address — a
+			// pre-factory row the migration marks Retired — would
+			// otherwise stay in the list.
+			if modelWallet == nil || !modelWallet.Retired {
+				walletsToReturnProto = append(walletsToReturnProto, &avsproto.SmartWallet{
+					Address:  defaultDerivedAddress.Hex(),
+					Salt:     actualSalt,
+					Factory:  actualFactory,
+					IsHidden: isHidden,
+				})
+				processedAddresses[strings.ToLower(defaultDerivedAddress.Hex())] = true
+			}
 		}
 	}
 
@@ -1398,6 +1406,18 @@ func mockDerivedSenderAddress(owner, factory common.Address, salt *big.Int) comm
 	return common.BytesToAddress(hash[12:])
 }
 
+// loadStoredLegacyWallet reads a non-MA-v2 wallet from the salt index.
+// badger.ErrKeyNotFound means there is no stored record. Callers reject
+// that before derivation: a legacy factory that no longer answers
+// getAddress would otherwise surface as Unavailable.
+func (n *Engine) loadStoredLegacyWallet(chainID int64, owner, factory common.Address, salt *big.Int) (*model.SmartWallet, error) {
+	canonical, err := LookupCanonicalWalletAddress(n.db, chainID, owner, factory, salt)
+	if err != nil {
+		return nil, err
+	}
+	return GetWallet(n.db, chainID, owner, canonical.Hex())
+}
+
 // GetWallet is the gRPC handler for the GetWallet RPC.
 // It uses the owner (from auth context), salt, and factory_address from payload to derive the wallet address.
 //
@@ -1455,145 +1475,160 @@ func (n *Engine) GetWalletWithContext(ctx context.Context, user *model.User, pay
 		return nil, err
 	}
 
-	var derivedSenderAddress *common.Address
-	var err error
-
-	// Wallet derivation is the on-chain source of truth — different
-	// factory deployments produce different initcode and therefore
-	// different CREATE2 addresses for the same (owner, salt). Persisting
-	// a wrong address under the real chain key would permanently corrupt
-	// the (owner, factory, salt) → wallet mapping. So the rules here are:
-	//
-	//  1. In test/CI environments (signalled by the package-level
-	//     `rpcConn == nil` — set by initRPC when the configured RPC URL
-	//     is localhost/mock or when CI dial fails), use a deterministic
-	//     keccak-derived mock. This branch must NEVER fire in prod;
-	//     production gateways always have a working `rpcConn`.
-	//  2. In production, dial the per-chain RPC and derive against the
-	//     real factory. Any failure — missing chain RPC URL, dial error,
-	//     factory call error — is a HARD ERROR. Never fall back to mock.
-	//
-	// Using the package-level `rpcConn` for the test signal (rather than
-	// `swCfg.EthRpcUrl == ""`) matches the legacy gating and avoids a
-	// failure mode where a misconfigured per-chain entry silently
-	// downgrades to mock derivation in production.
-	if rpcConn == nil {
-		n.logger.Debug("GetWallet: test/CI environment (rpcConn nil), using mock derivation",
-			"owner", user.Address.Hex(), "chain_id", chainID, "salt", saltBig.String())
-		mockAddr := mockDerivedSenderAddress(user.Address, factoryAddr, saltBig)
-		derivedSenderAddress = &mockAddr
-	} else if reader := GetChainStateReaderForChain(uint64(chainID)); reader != nil {
-		// Preferred path: derive via the per-chain ChainStateReader. In
-		// gateway mode this is worker-routed, so the gateway issues no
-		// direct chain RPC for wallet derivation; in single-chain mode it's
-		// a direct reader that reuses the existing client (no per-call dial).
-		addr, deriveErr := reader.GetSmartWalletAddress(ctx, user.Address, factoryAddr, saltBig)
-		if deriveErr != nil {
-			n.logger.Error("GetWallet: factory.getAddress() failed (worker-routed)",
-				"chain_id", chainID, "owner", user.Address.Hex(), "factory", factoryAddr.Hex(),
-				"salt", saltBig.String(), "error", deriveErr)
-			return nil, status.Errorf(codes.Unavailable,
-				"GetWallet: derive sender on chain %d via factory %s: %v",
-				chainID, factoryAddr.Hex(), deriveErr)
-		}
-		derivedSenderAddress = &addr
-	} else {
-		// Fallback: no ChainStateReader registered for this chain (single-
-		// chain startup edge / unconfigured chain). Dial the chain RPC
-		// directly, same as before the worker-routing migration.
-		if swCfg.EthRpcUrl == "" {
-			n.logger.Error("GetWallet: no EthRpcUrl configured for chain — refusing to derive (would risk persisting a mock address under a real chain)",
-				"chain_id", chainID, "owner", user.Address.Hex())
-			return nil, status.Errorf(codes.FailedPrecondition,
-				"GetWallet: no EthRpcUrl configured for chain %d", chainID)
-		}
-		chainRPC, dialErr := ethclient.Dial(swCfg.EthRpcUrl)
-		if dialErr != nil {
-			n.logger.Error("GetWallet: failed to dial chain RPC",
-				"chain_id", chainID, "rpc_url", swCfg.EthRpcUrl, "error", dialErr)
-			return nil, status.Errorf(codes.Unavailable,
-				"GetWallet: cannot reach chain %d RPC: %v", chainID, dialErr)
-		}
-		defer chainRPC.Close()
-		derivedSenderAddress, err = aa.DeriveSenderAddressAuto(chainRPC, user.Address, factoryAddr, saltBig)
-		if err != nil {
-			n.logger.Error("GetWallet: factory.getAddress() failed",
-				"chain_id", chainID, "owner", user.Address.Hex(), "factory", factoryAddr.Hex(),
-				"salt", saltBig.String(), "error", err)
-			return nil, status.Errorf(codes.Unavailable,
-				"GetWallet: derive sender on chain %d via factory %s: %v",
-				chainID, factoryAddr.Hex(), err)
-		}
-	}
-
-	if derivedSenderAddress == nil || *derivedSenderAddress == (common.Address{}) {
-		n.logger.Warn("GetWallet: derived sender address is nil or zero",
-			"owner", user.Address.Hex(), "factory", factoryAddr.Hex(), "salt", saltBig.String(),
-			"chain_id", chainID)
-		return nil, status.Errorf(codes.Internal,
-			"GetWallet: derived sender address is nil or zero (chain %d, factory %s)",
-			chainID, factoryAddr.Hex())
-	}
-
-	dbModelWallet, err := GetWallet(n.db, chainID, user.Address, derivedSenderAddress.Hex())
-
-	if err != nil && err != badger.ErrKeyNotFound {
-		n.logger.Error("Error fetching wallet from DB for GetWallet", "owner", user.Address.Hex(), "wallet", derivedSenderAddress.Hex(), "error", err)
-		return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), "Error fetching wallet: %v", err)
-	}
-
-	if err == badger.ErrKeyNotFound {
-		// Only MA v2 accounts can be created or executed since the EntryPoint
-		// v0.7 cutover. An explicit legacy factory may still READ a wallet that
-		// already has a record (found above), but must not mint a new one: it
-		// would be listed and use up the cap, and the one-off
-		// 20261020-retire-legacy-factory-wallets migration never runs again.
-		if factoryAddr != aa.MAv2FactoryAddress() {
+	var dbModelWallet *model.SmartWallet
+	if factoryAddr != aa.MAv2FactoryAddress() {
+		stored, legacyErr := n.loadStoredLegacyWallet(chainID, user.Address, factoryAddr, saltBig)
+		if legacyErr == badger.ErrKeyNotFound {
 			return nil, status.Errorf(codes.InvalidArgument, "%s (factory %s)", LegacyFactoryWalletError, factoryAddr.Hex())
 		}
+		if legacyErr != nil {
+			n.logger.Error("Error fetching legacy wallet from DB for GetWallet", "owner", user.Address.Hex(), "factory", factoryAddr.Hex(), "error", legacyErr)
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), "Error fetching wallet: %v", legacyErr)
+		}
+		dbModelWallet = stored
+	}
 
-		// Enforce max smart wallet count per owner before creating a new wallet entry.
-		// This check only applies when creating new wallet entries, not accessing existing ones.
-		// Per-chain limit comes from swCfg (resolved above) — chains can configure different
-		// quotas; the gateway-default value would over-permit on quota-tightened chains.
-		{
-			maxAllowed := swCfg.MaxWalletsPerOwner
-			if maxAllowed <= 0 {
-				maxAllowed = config.DefaultMaxWalletsPerOwner
+	if dbModelWallet == nil {
+		var derivedSenderAddress *common.Address
+		var err error
+
+		// Wallet derivation is the on-chain source of truth — different
+		// factory deployments produce different initcode and therefore
+		// different CREATE2 addresses for the same (owner, salt). Persisting
+		// a wrong address under the real chain key would permanently corrupt
+		// the (owner, factory, salt) → wallet mapping. So the rules here are:
+		//
+		//  1. In test/CI environments (signalled by the package-level
+		//     `rpcConn == nil` — set by initRPC when the configured RPC URL
+		//     is localhost/mock or when CI dial fails), use a deterministic
+		//     keccak-derived mock. This branch must NEVER fire in prod;
+		//     production gateways always have a working `rpcConn`.
+		//  2. In production, dial the per-chain RPC and derive against the
+		//     real factory. Any failure — missing chain RPC URL, dial error,
+		//     factory call error — is a HARD ERROR. Never fall back to mock.
+		//
+		// Using the package-level `rpcConn` for the test signal (rather than
+		// `swCfg.EthRpcUrl == ""`) matches the legacy gating and avoids a
+		// failure mode where a misconfigured per-chain entry silently
+		// downgrades to mock derivation in production.
+		if rpcConn == nil {
+			n.logger.Debug("GetWallet: test/CI environment (rpcConn nil), using mock derivation",
+				"owner", user.Address.Hex(), "chain_id", chainID, "salt", saltBig.String())
+			mockAddr := mockDerivedSenderAddress(user.Address, factoryAddr, saltBig)
+			derivedSenderAddress = &mockAddr
+		} else if reader := GetChainStateReaderForChain(uint64(chainID)); reader != nil {
+			// Preferred path: derive via the per-chain ChainStateReader. In
+			// gateway mode this is worker-routed, so the gateway issues no
+			// direct chain RPC for wallet derivation; in single-chain mode it's
+			// a direct reader that reuses the existing client (no per-call dial).
+			addr, deriveErr := reader.GetSmartWalletAddress(ctx, user.Address, factoryAddr, saltBig)
+			if deriveErr != nil {
+				n.logger.Error("GetWallet: factory.getAddress() failed (worker-routed)",
+					"chain_id", chainID, "owner", user.Address.Hex(), "factory", factoryAddr.Hex(),
+					"salt", saltBig.String(), "error", deriveErr)
+				return nil, status.Errorf(codes.Unavailable,
+					"GetWallet: derive sender on chain %d via factory %s: %v",
+					chainID, factoryAddr.Hex(), deriveErr)
 			}
-			if maxAllowed > config.HardMaxWalletsPerOwner {
-				maxAllowed = config.HardMaxWalletsPerOwner
+			derivedSenderAddress = &addr
+		} else {
+			// Fallback: no ChainStateReader registered for this chain (single-
+			// chain startup edge / unconfigured chain). Dial the chain RPC
+			// directly, same as before the worker-routing migration.
+			if swCfg.EthRpcUrl == "" {
+				n.logger.Error("GetWallet: no EthRpcUrl configured for chain — refusing to derive (would risk persisting a mock address under a real chain)",
+					"chain_id", chainID, "owner", user.Address.Hex())
+				return nil, status.Errorf(codes.FailedPrecondition,
+					"GetWallet: no EthRpcUrl configured for chain %d", chainID)
 			}
-			// Fetch all wallets for this owner and count unique addresses
-			dbItems, listErr := n.db.GetByPrefix(WalletByOwnerPrefix(chainID, user.Address))
-			if listErr == nil {
-				unique := make(map[string]struct{})
-				for _, item := range dbItems {
-					storedModelWallet := &model.SmartWallet{}
-					if err := storedModelWallet.FromStorageData(item.Value); err == nil && walletCountsTowardOwnerCap(storedModelWallet) {
-						unique[strings.ToLower(storedModelWallet.Address.Hex())] = struct{}{}
+			chainRPC, dialErr := ethclient.Dial(swCfg.EthRpcUrl)
+			if dialErr != nil {
+				n.logger.Error("GetWallet: failed to dial chain RPC",
+					"chain_id", chainID, "rpc_url", swCfg.EthRpcUrl, "error", dialErr)
+				return nil, status.Errorf(codes.Unavailable,
+					"GetWallet: cannot reach chain %d RPC: %v", chainID, dialErr)
+			}
+			defer chainRPC.Close()
+			derivedSenderAddress, err = aa.DeriveSenderAddressAuto(chainRPC, user.Address, factoryAddr, saltBig)
+			if err != nil {
+				n.logger.Error("GetWallet: factory.getAddress() failed",
+					"chain_id", chainID, "owner", user.Address.Hex(), "factory", factoryAddr.Hex(),
+					"salt", saltBig.String(), "error", err)
+				return nil, status.Errorf(codes.Unavailable,
+					"GetWallet: derive sender on chain %d via factory %s: %v",
+					chainID, factoryAddr.Hex(), err)
+			}
+		}
+
+		if derivedSenderAddress == nil || *derivedSenderAddress == (common.Address{}) {
+			n.logger.Warn("GetWallet: derived sender address is nil or zero",
+				"owner", user.Address.Hex(), "factory", factoryAddr.Hex(), "salt", saltBig.String(),
+				"chain_id", chainID)
+			return nil, status.Errorf(codes.Internal,
+				"GetWallet: derived sender address is nil or zero (chain %d, factory %s)",
+				chainID, factoryAddr.Hex())
+		}
+
+		dbModelWallet, err = GetWallet(n.db, chainID, user.Address, derivedSenderAddress.Hex())
+
+		if err != nil && err != badger.ErrKeyNotFound {
+			n.logger.Error("Error fetching wallet from DB for GetWallet", "owner", user.Address.Hex(), "wallet", derivedSenderAddress.Hex(), "error", err)
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), "Error fetching wallet: %v", err)
+		}
+
+		if err == badger.ErrKeyNotFound {
+			// Only MA v2 accounts can be created or executed since the EntryPoint
+			// v0.7 cutover. An explicit legacy factory may still READ a wallet that
+			// already has a record (found above), but must not mint a new one: it
+			// would be listed and use up the cap, and the one-off
+			// 20261020-retire-legacy-factory-wallets migration never runs again.
+			if factoryAddr != aa.MAv2FactoryAddress() {
+				return nil, status.Errorf(codes.InvalidArgument, "%s (factory %s)", LegacyFactoryWalletError, factoryAddr.Hex())
+			}
+
+			// Enforce max smart wallet count per owner before creating a new wallet entry.
+			// This check only applies when creating new wallet entries, not accessing existing ones.
+			// Per-chain limit comes from swCfg (resolved above) — chains can configure different
+			// quotas; the gateway-default value would over-permit on quota-tightened chains.
+			{
+				maxAllowed := swCfg.MaxWalletsPerOwner
+				if maxAllowed <= 0 {
+					maxAllowed = config.DefaultMaxWalletsPerOwner
+				}
+				if maxAllowed > config.HardMaxWalletsPerOwner {
+					maxAllowed = config.HardMaxWalletsPerOwner
+				}
+				// Fetch all wallets for this owner and count unique addresses
+				dbItems, listErr := n.db.GetByPrefix(WalletByOwnerPrefix(chainID, user.Address))
+				if listErr == nil {
+					unique := make(map[string]struct{})
+					for _, item := range dbItems {
+						storedModelWallet := &model.SmartWallet{}
+						if err := storedModelWallet.FromStorageData(item.Value); err == nil && walletCountsTowardOwnerCap(storedModelWallet) {
+							unique[strings.ToLower(storedModelWallet.Address.Hex())] = struct{}{}
+						}
+					}
+					if len(unique) >= maxAllowed {
+						return nil, status.Errorf(codes.ResourceExhausted, "max smart wallet count reached for owner (limit=%d)", maxAllowed)
 					}
 				}
-				if len(unique) >= maxAllowed {
-					return nil, status.Errorf(codes.ResourceExhausted, "max smart wallet count reached for owner (limit=%d)", maxAllowed)
-				}
 			}
-		}
 
-		n.logger.Info("Wallet not found in DB for GetWallet, creating new entry", "owner", user.Address.Hex(), "walletAddress", derivedSenderAddress.Hex())
-		n.markPreviousCanonicalStaleIfAny(chainID, user.Address, factoryAddr, saltBig, *derivedSenderAddress)
-		newModelWallet := &model.SmartWallet{
-			Owner:    &user.Address,
-			Address:  derivedSenderAddress,
-			Factory:  &factoryAddr,
-			Salt:     saltBig,
-			IsHidden: false,
+			n.logger.Info("Wallet not found in DB for GetWallet, creating new entry", "owner", user.Address.Hex(), "walletAddress", derivedSenderAddress.Hex())
+			n.markPreviousCanonicalStaleIfAny(chainID, user.Address, factoryAddr, saltBig, *derivedSenderAddress)
+			newModelWallet := &model.SmartWallet{
+				Owner:    &user.Address,
+				Address:  derivedSenderAddress,
+				Factory:  &factoryAddr,
+				Salt:     saltBig,
+				IsHidden: false,
+			}
+			if storeErr := StoreWallet(n.db, chainID, user.Address, newModelWallet); storeErr != nil {
+				n.logger.Error("Error storing new wallet to DB for GetWallet", "owner", user.Address.Hex(), "walletAddress", derivedSenderAddress.Hex(), "error", storeErr)
+				return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_WRITE_ERROR), "Error storing new wallet: %v", storeErr)
+			}
+			dbModelWallet = newModelWallet
 		}
-		if storeErr := StoreWallet(n.db, chainID, user.Address, newModelWallet); storeErr != nil {
-			n.logger.Error("Error storing new wallet to DB for GetWallet", "owner", user.Address.Hex(), "walletAddress", derivedSenderAddress.Hex(), "error", storeErr)
-			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_WRITE_ERROR), "Error storing new wallet: %v", storeErr)
-		}
-		dbModelWallet = newModelWallet
 	}
 
 	resp := &avsproto.GetWalletResp{
@@ -1649,7 +1684,20 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 
 	var derivedWalletAddress *common.Address
 	var err error
-	if rpcConn == nil {
+	if factoryAddr != aa.MAv2FactoryAddress() {
+		// Same index read as GetWallet. Updating the hidden flag of a
+		// stored legacy wallet must not depend on that factory still
+		// answering getAddress.
+		stored, legacyErr := n.loadStoredLegacyWallet(n.defaultChainID(), owner, factoryAddr, saltBig)
+		if legacyErr == badger.ErrKeyNotFound {
+			return nil, status.Errorf(codes.NotFound, "Wallet not found for the specified salt and factory.")
+		}
+		if legacyErr != nil {
+			n.logger.Error("Error fetching legacy wallet from DB for SetWallet", "owner", owner.Hex(), "factory", factoryAddr.Hex(), "error", legacyErr)
+			return nil, status.Errorf(codes.Internal, "Failed to derive wallet address: %v", legacyErr)
+		}
+		derivedWalletAddress = stored.Address
+	} else if rpcConn == nil {
 		// Same test/CI stand-in as GetWallet. DeriveSenderAddressAuto dials
 		// the factory, so a unit test cannot update a record it just stored
 		// unless both calls agree with rpcConn left unset.

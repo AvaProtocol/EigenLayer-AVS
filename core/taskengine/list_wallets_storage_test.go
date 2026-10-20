@@ -434,6 +434,35 @@ func TestListWalletsDatabaseStateVerification(t *testing.T) {
 	t.Logf("   - Salt:2 wallet: %s", getResp2.Address)
 }
 
+// The default-wallet branch appends before the prefix scan. A retired
+// record at that derived address must still be left out.
+func TestListWalletsOmitsRetiredDefaultWallet(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	cfg := testutil.GetAggregatorConfig()
+	engine := New(db, cfg, nil, testutil.GetLogger())
+	user := testutil.TestUser1()
+	chainID := engine.resolveUserChainID(user)
+
+	first, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
+	require.NoError(t, err)
+	require.Len(t, first.Items, 1, "the default wallet is listed and stored")
+	defaultAddr := first.Items[0].Address
+
+	stored, err := GetWallet(db, chainID, user.Address, defaultAddr)
+	require.NoError(t, err)
+	stored.Retired = true
+	require.NoError(t, StoreWallet(db, chainID, user.Address, stored))
+
+	listed, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
+	require.NoError(t, err)
+	require.Empty(t, listed.Items, "a retired record at the default address is not listed")
+	still, err := GetWallet(db, chainID, user.Address, defaultAddr)
+	require.NoError(t, err)
+	assert.True(t, still.Retired)
+}
+
 // A retired legacy-factory wallet stays on disk but is never listed, and it
 // does not use up the owner's wallet cap (model.SmartWallet.Retired).
 func TestListWalletsSkipsRetiredWalletsAndCapIgnoresThem(t *testing.T) {
