@@ -244,7 +244,7 @@ Trigger → wake → execute pipeline:
   `NotifyTriggers`.
 
 Smart wallet / per-chain execution:
-- `core/chainio/aa/aa.go:99` `computeSmartWalletAddress` (CREATE2 — chain-invariant).
+- `core/chainio/aa/aa.go` `GetSenderAddressForFactory` (factory.getAddress; the deployed CREATE2 address).
 - `core/taskengine/vm_runner_contract_write.go:807` send UserOp via per-chain bundler; output receipt with
   `transactionHash` (→ `{{node.data.transactionHash}}`).
 - `core/config/config.go` `SmartWalletConfig` (per-chain RPC/bundler/factory); `ChainConfigRaw` (gateway

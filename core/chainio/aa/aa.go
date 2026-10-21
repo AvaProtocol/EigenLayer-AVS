@@ -10,7 +10,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	// "github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -117,8 +116,10 @@ func GetInitCode(ownerAddress string, salt *big.Int) (string, error) {
 	return GetInitCodeForFactory(ownerAddress, getFactoryAddress(), salt)
 }
 
-// GetInitCodeForFactory returns initcode for a given address with a given salt
-// factoryAddress should be the factory proxy address
+// GetInitCodeForFactory returns the UserOp initCode: the factory address
+// followed by createAccount calldata. EntryPoint calls that. It is not the
+// proxy's CREATE2 deployment code, so hashing it does not yield the wallet
+// address. Use GetSenderAddressForFactory for the address.
 func GetInitCodeForFactory(ownerAddress string, factoryAddress common.Address, salt *big.Int) (string, error) {
 	var err error
 
@@ -137,36 +138,6 @@ func GetInitCodeForFactory(ownerAddress string, factoryAddress common.Address, s
 
 	return hexutil.Encode(data), nil
 	//return common.Bytes2Hex(data), nil
-}
-
-// computeSmartWalletAddress computes the smart wallet address using the standard CREATE2 formula:
-// keccak256(0xff || factoryAddr || salt || keccak256(initCode))[12:]
-func computeSmartWalletAddress(factoryAddr common.Address, ownerAddress common.Address, salt *big.Int) (common.Address, error) {
-	// Convert salt to bytes32
-	saltBytes := make([]byte, 32)
-	salt.FillBytes(saltBytes)
-
-	// Get the init code for the wallet (factory + calldata)
-	initCodeHex, err := GetInitCodeForFactory(ownerAddress.Hex(), factoryAddr, salt)
-	if err != nil {
-		return common.Address{}, fmt.Errorf("failed to get init code: %w", err)
-	}
-	initCodeBytes, err := hexutil.Decode(initCodeHex)
-	if err != nil {
-		return common.Address{}, fmt.Errorf("failed to decode init code: %w", err)
-	}
-	initCodeHash := crypto.Keccak256(initCodeBytes)
-
-	// CREATE2 formula: keccak256(0xff || factoryAddr || salt || keccak256(initCode))[12:]
-	var b []byte
-	b = append(b, 0xff)
-	b = append(b, factoryAddr.Bytes()...)
-	b = append(b, saltBytes...)
-	b = append(b, initCodeHash...)
-	hash := crypto.Keccak256(b)
-
-	// Take last 20 bytes for address
-	return common.BytesToAddress(hash[12:]), nil
 }
 
 // GetSenderAddress is a wrapper that uses the factory address from config,
