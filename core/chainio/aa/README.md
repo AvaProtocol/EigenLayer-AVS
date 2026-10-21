@@ -8,7 +8,7 @@ This package contains smart contract ABIs and their generated Go bindings for Ac
 
 Each ABI file lives alongside its generated Go binding:
 
-- `account.abi` → `aa.go` (embedded for calldata packing) + `simpleaccount/simpleaccount.go`
+- `account.abi` → embedded in `aa.go` for calldata packing (`PackExecute*`). There is no generated SimpleAccount binding: the old `simpleaccount` package listed `controller()`, and the deployed wallet only has `getController()`.
 - `entrypoint.abi` → `entrypoint.go`
 - `factory.abi` → `simplefactory.go`
 - `paymaster.abi` → `paymaster/paymaster.go`
@@ -20,7 +20,6 @@ Each ABI file lives alongside its generated Go binding:
 The `*.go` files are generated using `abigen` and provide type-safe contract interaction:
 - `NewEntryPoint()` - for nonce management, deposits
 - `NewSimpleFactory()` - for deriving smart wallet addresses
-- `NewSimpleAccount()` - for account operations
 - `NewPayMaster()` - for paymaster interactions
 
 These bindings are **committed to git** and used throughout the codebase.
@@ -36,7 +35,6 @@ When contract ABIs change:
 1. **Replace the ABI file** in this directory
 2. **Regenerate Go bindings** using `abigen` manually:
    ```bash
-   abigen --abi=account.abi --pkg=simpleaccount --type=SimpleAccount --out=simpleaccount/simpleaccount.go
    abigen --abi=entrypoint.abi --pkg=aa --type=EntryPoint --out=entrypoint.go
    abigen --abi=factory.abi --pkg=aa --type=SimpleFactory --out=simplefactory.go
    abigen --abi=paymaster.abi --pkg=paymaster --type=PayMaster --out=paymaster/paymaster.go
