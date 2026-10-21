@@ -7,10 +7,16 @@ const (
 
 	InvalidSmartAccountAddressError = "invalid smart account address"
 	InvalidFactoryAddressError      = "invalid factory address"
-	InvalidSmartAccountSaltError    = "invalid salt value"
-	InvalidTaskIdFormat             = "invalid task id"
-	SmartAccountCreationError       = "cannot determine smart wallet address"
-	NonceFetchingError              = "cannot determine nonce for smart wallet"
+	// LegacyFactoryWalletError refuses a NEW wallet record under a factory
+	// other than MA v2. Existing records stay readable.
+	LegacyFactoryWalletError = "this factory no longer creates smart wallets; only the MA v2 factory does"
+	// RetiredWalletError refuses a new workflow whose runner is retired.
+	// Existing workflows, policies and fee rows that already name it stay.
+	RetiredWalletError           = "this wallet is retired and cannot run new workflows"
+	InvalidSmartAccountSaltError = "invalid salt value"
+	InvalidTaskIdFormat          = "invalid task id"
+	SmartAccountCreationError    = "cannot determine smart wallet address"
+	NonceFetchingError           = "cannot determine nonce for smart wallet"
 
 	MissingSmartWalletAddressError = "Missing smart_wallet_address"
 

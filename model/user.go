@@ -62,6 +62,15 @@ type SmartWallet struct {
 	// list responses.
 	StaleDerivation bool `json:"stale_derivation,omitempty"`
 
+	// Retired is a system-set flag for a derived wallet whose factory is not
+	// the MA v2 factory. The gateway only executes MA v2 accounts since the
+	// EntryPoint v0.7 cutover, so such a wallet can never run anything again.
+	// Retired records stay on disk (the on-chain account may still hold
+	// assets), are excluded from list responses, and do not count toward
+	// MaxWalletsPerOwner. Set by the 20261020-retire-legacy-factory-wallets
+	// migration.
+	Retired bool `json:"retired,omitempty"`
+
 	// Kind is empty/omitted for derived CREATE2 wallets. "eoa_7702" is the
 	// owner's EOA delegated to SemiModularAccount7702 (Track B). Additive;
 	// existing rows stay empty.

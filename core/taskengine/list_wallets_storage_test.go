@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"math/big"
 	"strings"
 	"testing"
 
@@ -431,4 +432,91 @@ func TestListWalletsDatabaseStateVerification(t *testing.T) {
 	t.Logf("   - Salt:0 wallet: %s", salt0Address)
 	t.Logf("   - Salt:1 wallet: %s", getResp1.Address)
 	t.Logf("   - Salt:2 wallet: %s", getResp2.Address)
+}
+
+// The default-wallet branch appends before the prefix scan. A retired
+// record at that derived address must still be left out.
+func TestListWalletsOmitsRetiredDefaultWallet(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	cfg := testutil.GetAggregatorConfig()
+	engine := New(db, cfg, nil, testutil.GetLogger())
+	user := testutil.TestUser1()
+	chainID := engine.resolveUserChainID(user)
+
+	first, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
+	require.NoError(t, err)
+	require.Len(t, first.Items, 1, "the default wallet is listed and stored")
+	defaultAddr := first.Items[0].Address
+
+	stored, err := GetWallet(db, chainID, user.Address, defaultAddr)
+	require.NoError(t, err)
+	stored.Retired = true
+	require.NoError(t, StoreWallet(db, chainID, user.Address, stored))
+
+	listed, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
+	require.NoError(t, err)
+	require.Empty(t, listed.Items, "a retired record at the default address is not listed")
+	still, err := GetWallet(db, chainID, user.Address, defaultAddr)
+	require.NoError(t, err)
+	assert.True(t, still.Retired)
+}
+
+// A retired legacy-factory wallet stays on disk but is never listed, and it
+// does not use up the owner's wallet cap (model.SmartWallet.Retired).
+func TestListWalletsSkipsRetiredWalletsAndCapIgnoresThem(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	cfg := testutil.GetAggregatorConfig()
+	cfg.SmartWallet.MaxWalletsPerOwner = 2
+	engine := New(db, cfg, nil, testutil.GetLogger())
+	user := testutil.TestUser1()
+	chainID := engine.resolveUserChainID(user)
+
+	first, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
+	require.NoError(t, err)
+	require.Len(t, first.Items, 1, "the default wallet is listed and stored")
+
+	legacyFactory := common.HexToAddress("0xB99BC2E399e06CddCF5E725c0ea341E8f0322834")
+	retired := []common.Address{
+		common.HexToAddress("0x0000000000000000000000000000000000000C01"),
+		common.HexToAddress("0x0000000000000000000000000000000000000C02"),
+	}
+	for i, address := range retired {
+		addr := address
+		require.NoError(t, StoreWallet(db, chainID, user.Address, &model.SmartWallet{
+			Owner:    &user.Address,
+			Address:  &addr,
+			Factory:  &legacyFactory,
+			Salt:     big.NewInt(int64(7 + i)),
+			IsHidden: true,
+			Retired:  true,
+		}))
+	}
+
+	listed, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
+	require.NoError(t, err)
+	require.Len(t, listed.Items, 1, "retired wallets are not listed")
+	for _, w := range listed.Items {
+		for _, r := range retired {
+			assert.False(t, strings.EqualFold(w.Address, r.Hex()), "retired %s must not be listed", r.Hex())
+		}
+	}
+
+	// Cap is 2: the default wallet plus one more. The two retired records
+	// would have exhausted it if they counted.
+	_, err = engine.GetWallet(user, &avsproto.GetWalletReq{Salt: "1"})
+	require.NoError(t, err, "retired wallets do not count toward the cap")
+	_, err = engine.GetWallet(user, &avsproto.GetWalletReq{Salt: "2"})
+	require.Error(t, err, "the cap still applies to live wallets")
+	assert.Contains(t, err.Error(), "max smart wallet count reached")
+
+	// The retired records are still on disk.
+	for _, r := range retired {
+		w, getErr := GetWallet(db, chainID, user.Address, r.Hex())
+		require.NoError(t, getErr)
+		assert.True(t, w.Retired)
+	}
 }

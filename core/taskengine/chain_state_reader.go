@@ -665,6 +665,13 @@ func GetChainStateReaderForChain(chainID uint64) ChainStateReader {
 	return chainStateReaderRegistry[chainID]
 }
 
+// unregisterChainStateReader removes one chain's reader. Test-only helper.
+func unregisterChainStateReader(chainID uint64) {
+	chainStateReaderRegistryMutex.Lock()
+	delete(chainStateReaderRegistry, chainID)
+	chainStateReaderRegistryMutex.Unlock()
+}
+
 // ClearChainStateReaderRegistry wipes the registry. Test-only helper —
 // production code never calls this. Mirrors the lifecycle of
 // tokenServiceRegistry which assumes startup-once registration.

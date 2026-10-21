@@ -390,6 +390,8 @@ func SetWalletHiddenStatus(db storage.Storage, chainID int64, owner common.Addre
 		return nil // No change needed
 	}
 
+	// IsHidden is the only field written. Retired stays set, so unhiding
+	// a retired wallet does not put it back in ListWallets.
 	wallet.IsHidden = hidden
 	return StoreWallet(db, chainID, owner, wallet)
 }
