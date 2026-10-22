@@ -3,6 +3,7 @@ package taskengine
 import (
 	"context"
 	"errors"
+	"math/big"
 	"strings"
 	"sync"
 	"testing"
@@ -29,18 +30,90 @@ func retiredSignerEngine(t *testing.T, db storage.Storage) (*Engine, common.Addr
 	return engine, crypto.PubkeyToAddress(key.PublicKey)
 }
 
-// storeCoveringGrantSignedBy is storeCoveringGrant with the installed signer
-// set, so a test can name the gateway's current signer.
-func storeCoveringGrantSignedBy(t *testing.T, db storage.Storage, id string, owner, runner common.Address, until int64, signer common.Address) {
+// storeChainGrantSignedBy is storeChainGrant with the installed signer set,
+// so a test can name the gateway's current signer.
+func storeChainGrantSignedBy(t *testing.T, db storage.Storage, id string, owner, runner common.Address, chain, until int64, actions []model.AllowedAction, signer common.Address) {
 	t.Helper()
-	storeCoveringGrant(t, db, id, owner, runner, until)
-	policy, err := ActiveSessionPolicyForWallet(db, skillSepolia, owner, runner)
+	storeChainGrant(t, db, id, owner, runner, chain, until, actions)
+	policy, err := ActiveSessionPolicyForWallet(db, chain, owner, runner)
 	if err != nil || policy == nil || policy.ID != id {
 		t.Fatalf("reading back %s = %#v, %v", id, policy, err)
 	}
 	policy.SessionSigner = &signer
 	if err := StoreSessionPolicy(db, policy); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func storeCoveringGrantSignedBy(t *testing.T, db storage.Storage, id string, owner, runner common.Address, until int64, signer common.Address) {
+	t.Helper()
+	storeChainGrantSignedBy(t, db, id, owner, runner, skillSepolia, until, []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)}, signer)
+}
+
+// An unreadable target outranks a grant-again refusal on another chain even
+// when a third chain also has an ordinary coverage gap: granting again cannot
+// make the workflow deployable while no grant can name that target. Holds for
+// an expired grant and a retired-signer grant alike.
+func TestDeployCheckUnresolvedTargetOutranksGrantAgainAlongsideOrdinaryGap(t *testing.T) {
+	db := testutil.TestMustDB()
+	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
+	now := time.Now()
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	const grantAgainChain int64 = 10
+
+	cases := []struct {
+		name            string
+		owner, runner   string
+		retired         bool
+		grantAgainUntil int64
+	}{
+		{"expired grant", "0x0000000000000000000000000000000000000051", "0x0000000000000000000000000000000000000052", false, now.Add(-time.Hour).UnixMilli()},
+		{"retired-signer grant", "0x0000000000000000000000000000000000000053", "0x0000000000000000000000000000000000000054", true, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			on := deployCheckEngine(db)
+			// Without a configured signer nothing is retired, so the
+			// expired case keeps every grant usable apart from its expiry.
+			current := common.HexToAddress(skillUSDC)
+			if tc.retired {
+				on, current = retiredSignerEngine(t, db)
+			}
+			owner := common.HexToAddress(tc.owner)
+			runner := common.HexToAddress(tc.runner)
+			live := now.Add(24 * time.Hour).UnixMilli()
+
+			// Chain 1: an ordinary gap (approve granted, transfer needed).
+			task := skillWriteTask("pay", "Pay", skillWETH, transferCalldata(payee, big.NewInt(1)), 1, 1, 0, 0)
+			storeChainGrantSignedBy(t, db, "01ordinarygap"+tc.owner[38:], owner, runner, 1, live, []model.AllowedAction{skillAction(skillWETH, selectorApprove)}, current)
+			// Chain 10: a covering grant the owner must grant again.
+			again := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(1)), grantAgainChain, 1, 0, 0)
+			task.Nodes = append(task.Nodes, again.Nodes...)
+			storeChainGrant(t, db, "01grantagain"+tc.owner[38:], owner, runner, grantAgainChain, tc.grantAgainUntil, []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)})
+			// Sepolia: a live grant and a target no grant can name.
+			unresolved := skillWriteTask("pay", "Pay", "{{settings.token}}", transferCalldata(payee, big.NewInt(1)), skillSepolia, 1, 0, 0)
+			task.Nodes = append(task.Nodes, unresolved.Nodes...)
+			unresolvedID := "01unresolvedtarget" + tc.owner[38:]
+			storeChainGrantSignedBy(t, db, unresolvedID, owner, runner, skillSepolia, live, []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)}, current)
+
+			_, err := on.enforceSessionPolicyDeployCheck(&model.User{Address: owner}, skillWorkflow(task, runner))
+			var conflict *PolicyConflictError
+			if !errors.As(err, &conflict) || conflict.Code != SessionPolicyTargetUnresolvedCode || conflict.PolicyID != unresolvedID {
+				t.Fatalf("three-chain deploy = %#v", err)
+			}
+			if conflict.Required == nil || conflict.Required.ChainID != skillSepolia || conflict.Missing != nil {
+				t.Fatalf("required and missing must follow the unreadable target: %#v", conflict)
+			}
+			if strings.Contains(conflict.Detail, "grant again") {
+				t.Fatalf("detail = %q", conflict.Detail)
+			}
+			for _, mu := range orderedSessionLocks([]int64{1, grantAgainChain, skillSepolia}, owner, runner) {
+				if !mu.TryLock() {
+					t.Fatal("a refusal must release the runner lock")
+				}
+				mu.Unlock()
+			}
+		})
 	}
 }
 
