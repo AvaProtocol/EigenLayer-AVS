@@ -2910,7 +2910,6 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 	var retiredPolicyID string
 	var retiredNeed *WorkflowNeed
 	beatExpiry := false
-	sawOrdinary := false
 	refusals := 0
 	now := time.Now()
 	for _, item := range mav2 {
@@ -2986,38 +2985,33 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 		if expiredUntil == 0 && refusal.PolicyID != "" {
 			policyID = refusal.PolicyID
 		}
-		if refusal.Code == SessionPolicyTargetUnresolvedCode {
-			if unresolvedRefusal == nil {
-				unresolvedRefusal = refusal
-			}
-		} else {
-			sawOrdinary = true
+		if refusal.Code == SessionPolicyTargetUnresolvedCode && unresolvedRefusal == nil {
+			unresolvedRefusal = refusal
 		}
 	}
 	if refusals == 0 {
 		return unlock, nil
 	}
 	unlock()
-	// The unreadable chain may hold a live grant. A grant-again refusal
-	// (expiry or a retired signer) on another chain still must not win,
-	// even beside an ordinary gap, or the owner re-signs and then hits
-	// the same unreadable target.
-	grantAgain := expiredUntil > 0 || retiredPolicyID != ""
+	// A grant-again refusal (expiry or a retired signer) must not win over an
+	// unreadable target, whether it sits on the target's own chain
+	// (beatExpiry) or another one, and even beside an ordinary gap: the owner
+	// would re-sign and then hit the same unreadable target. Without one, an
+	// unreadable target stays an ordinary coverage gap.
+	grantAgain := expiredUntil > 0 || retiredPolicyID != "" || beatExpiry
 	code := SessionPolicyNotCoveringCode
 	detail := "this workflow's fund-moving steps are outside the runner's usable grant"
-	if unresolvedRefusal != nil && (grantAgain || beatExpiry && !sawOrdinary) {
+	if unresolvedRefusal != nil && grantAgain {
 		code = SessionPolicyTargetUnresolvedCode
 		detail = unresolvedRefusal.Detail
-		// A grant-again refusal on another chain must not replace the
-		// unreadable target's policy. That grant is not the one to renew,
-		// and other chains' gaps belong to other grants.
-		if grantAgain {
-			policyID = unresolvedRefusal.PolicyID
-			if unresolvedRefusal.Required != nil {
-				required = unresolvedRefusal.Required
-			}
-			missing = nil
+		// The response names the unreadable target's grant. A grant-again
+		// policy is not the one to renew, and other chains' gaps belong to
+		// other grants, so neither may leak into policyId or required.
+		policyID = unresolvedRefusal.PolicyID
+		if unresolvedRefusal.Required != nil {
+			required = unresolvedRefusal.Required
 		}
+		missing = nil
 	} else if expiredUntil > 0 {
 		code = SessionPolicyExpiredCode
 		detail = fmt.Sprintf(

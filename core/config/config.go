@@ -1191,7 +1191,6 @@ func DeriveWsURL(rpcURL string) string {
 	}
 }
 
-// firstNonEmpty returns the first non-empty string among the arguments.
 // parseSessionSignerKey decodes session_signer_private_key. The key is
 // required: without it the gateway cannot assign a signer to a grant or sign
 // under one, and there is no fallback to a controller key.
@@ -1224,6 +1223,7 @@ func sessionSignerSharedWith(sessionSigner common.Address, cfg *Config) []string
 	return shared
 }
 
+// firstNonEmpty returns the first non-empty string among the arguments.
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if v != "" {
