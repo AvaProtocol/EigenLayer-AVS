@@ -189,6 +189,64 @@ func TestDeployCheckRefusesGrantForRetiredSigner(t *testing.T) {
 	})
 }
 
+// The same holds when the grant-again refusal sits on the unreadable target's
+// own chain and another chain has an ordinary gap. The response must name the
+// unreadable chain's policy and requirement, not mix them with the other
+// chain's gap.
+func TestDeployCheckUnresolvedTargetOutranksSameChainGrantAgainBesideOrdinaryGap(t *testing.T) {
+	db := testutil.TestMustDB()
+	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
+	now := time.Now()
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	const unresolvedChain int64 = 10
+
+	cases := []struct {
+		name          string
+		owner, runner string
+		retired       bool
+		until         int64
+	}{
+		{"expired grant", "0x0000000000000000000000000000000000000061", "0x0000000000000000000000000000000000000062", false, now.Add(-time.Hour).UnixMilli()},
+		{"retired-signer grant", "0x0000000000000000000000000000000000000063", "0x0000000000000000000000000000000000000064", true, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			on := deployCheckEngine(db)
+			current := common.HexToAddress(skillUSDC)
+			if tc.retired {
+				on, current = retiredSignerEngine(t, db)
+			}
+			owner := common.HexToAddress(tc.owner)
+			runner := common.HexToAddress(tc.runner)
+
+			// Chain 1: an ordinary gap (approve granted, transfer needed).
+			task := skillWriteTask("pay", "Pay", skillWETH, transferCalldata(payee, big.NewInt(1)), 1, 1, 0, 0)
+			storeChainGrantSignedBy(t, db, "01sameordinary"+tc.owner[38:], owner, runner, 1, now.Add(24*time.Hour).UnixMilli(), []model.AllowedAction{skillAction(skillWETH, selectorApprove)}, current)
+			// Chain 10: a grant the owner must grant again, and a target no
+			// grant can name.
+			unresolved := skillWriteTask("pay", "Pay", "{{settings.token}}", transferCalldata(payee, big.NewInt(1)), unresolvedChain, 1, 0, 0)
+			task.Nodes = append(task.Nodes, unresolved.Nodes...)
+			unresolvedID := "01sameunresolved" + tc.owner[38:]
+			storeChainGrant(t, db, unresolvedID, owner, runner, unresolvedChain, tc.until, []model.AllowedAction{skillAction(skillUSDC, selectorTransfer)})
+
+			_, err := on.enforceSessionPolicyDeployCheck(&model.User{Address: owner}, skillWorkflow(task, runner))
+			var conflict *PolicyConflictError
+			if !errors.As(err, &conflict) || conflict.Code != SessionPolicyTargetUnresolvedCode || conflict.PolicyID != unresolvedID {
+				t.Fatalf("two-chain deploy = %#v", err)
+			}
+			if conflict.Required == nil || conflict.Required.ChainID != unresolvedChain || conflict.Missing != nil {
+				t.Fatalf("policyId, required and missing must all follow the unreadable chain: %#v", conflict)
+			}
+			for _, mu := range orderedSessionLocks([]int64{1, unresolvedChain}, owner, runner) {
+				if !mu.TryLock() {
+					t.Fatal("a refusal must release the runner lock")
+				}
+				mu.Unlock()
+			}
+		})
+	}
+}
+
 // Readiness (the simulate verdict's authorization) agrees with deploy: a
 // retired-signer grant is no usable grant, which sends the client to its grant
 // step with the same requirement.

@@ -19,6 +19,7 @@ The execution refusal was plain text, with no machine-readable code. `IsClientUs
   - The detail has no colon. Clients that show gateway text keep only what follows the last colon.
 - **Precedence.** Expiry outranks a retired signer, since either way the owner grants again. An unreadable fund-moving target outranks both. A notification-only workflow is not checked.
   - The unreadable target now wins even when a third chain also has an ordinary coverage gap. Previously an ordinary gap suppressed it, so a workflow with an ordinary gap, an unreadable target and an expired grant on three chains returned `SESSION_POLICY_EXPIRED`. The owner then re-signed and still hit the unreadable target.
+  - The same applies when the grant-again refusal is on the unreadable target's own chain and another chain has an ordinary gap. Previously that returned `SESSION_POLICY_NOT_COVERING`, naming one chain's `policyId` and the other chain's `required`.
   - The same condition governs both refusals, so the fix changes that expired case too. Without an unreadable target, an ordinary gap still loses to expiry or a retired signer, as before.
 - **Readiness.** `fillSimulateAuthorization` reports `no_grant`, with the grant's `policyId`, the same `required`, and a "grant again" detail. `no_grant` already means "no usable grant" and sends clients to their grant step, so the status enum is unchanged.
 - **No key configured.** With no session signer configured, nothing is called retired. Production always configures one (#864).
@@ -38,6 +39,7 @@ Studio maps known 409 codes to its own copy. Until it maps `SESSION_POLICY_SIGNE
   - expiry outranks a retired signer;
   - a notification-only workflow still deploys.
 - `TestDeployCheckUnresolvedTargetOutranksGrantAgainAlongsideOrdinaryGap`: across three chains (ordinary gap, grant-again, unreadable target), the unreadable target wins with its own `policyId` and `required` and no `missingActions`, for an expired grant and a retired-signer grant. Both variants failed before the fix.
+- `TestDeployCheckUnresolvedTargetOutranksSameChainGrantAgainBesideOrdinaryGap`: across two chains (an ordinary gap; a grant-again refusal and an unreadable target on the same chain), the unreadable target wins, and `policyId` and `required` both name that chain. Both variants failed before the fix.
 - `TestSimulateAuthorizationReportsRetiredSignerAsNoGrant`: the verdict is `no_grant` with the policy id and `required`; the current-signer control is `covered`.
 - `TestResolverRefusesRetiredSignerWithStableCode`: the resolver error is prefixed with the code; a grant naming another signer, or no signer, is retired; the configured signer is not; with no key configured, nothing is retired.
 - `TestRetiredSignerDeployCheckMapsToConflict`: 409 with the stable wire code and title.
