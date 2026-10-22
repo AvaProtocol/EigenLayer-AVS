@@ -79,6 +79,10 @@ func IsClientUserOpFailure(err error) bool {
 		// Typed preflight: the grant's TimeRangeModule window closed. The
 		// owner renews it by granting again; nothing here is operable.
 		return true
+	case strings.Contains(s, "SESSION_POLICY_SIGNER_RETIRED"):
+		// Typed preflight: the grant names a signer the gateway no longer
+		// holds (session signer replaced). The owner grants again.
+		return true
 	case strings.Contains(s, "SESSION_POLICY_CHAIN_WINDOW_MISSING"):
 		// Entity carries no TimeRange hook while storage promises one. The
 		// owner clears it by granting again; nothing here is operable.

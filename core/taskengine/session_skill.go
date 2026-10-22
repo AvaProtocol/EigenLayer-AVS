@@ -2761,6 +2761,25 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 			chainReport = report
 		}
 		got := BuildAuthorization(policy, need, chainReport, sched)
+		// BuildAuthorization judges coverage only. A grant made for a signer
+		// this gateway no longer holds cannot execute, so it is no usable
+		// grant: the client's grant step, with the same requirement.
+		effective := policy
+		if effective == nil && chainReport != nil {
+			effective, _, _, _, _, _, _, _, _ = chainReport.snapshot()
+		}
+		if n.sessionSignerRetired(effective) {
+			required := got.Required
+			if required == nil {
+				required = need
+			}
+			got = &SessionAuthorization{
+				Status:   AuthNoGrant,
+				Detail:   "the grant was made for a session signer this gateway no longer uses; grant again",
+				PolicyID: effective.ID,
+				Required: required,
+			}
+		}
 		if worst == nil || authorizationRank(got.Status) > authorizationRank(worst.Status) {
 			worst = got
 		}
@@ -2784,6 +2803,11 @@ func (n *Engine) sessionPolicyDeployCheckEnabled() bool {
 // this caller. CoverageRefusal is also submit and carry, and an expired
 // grant still has to count there. A grant with no recorded expiry is not
 // expired. A notification-only workflow never reaches the check.
+//
+// A live grant whose signer is not this gateway's session signer is
+// SESSION_POLICY_SIGNER_RETIRED: covering the workflow does not let the
+// gateway sign for it. Expiry outranks it when both apply, since either way
+// the owner grants again; an unreadable target outranks both.
 //
 // Chains are visited in chain-id order. The first expired grant owns the
 // response: its policy id and its chain's need. An earlier chain's coverage
@@ -2881,6 +2905,8 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 	var policyID string
 	var expiredUntil int64
 	var unresolvedRefusal *PolicyConflictError
+	var retiredPolicyID string
+	var retiredNeed *WorkflowNeed
 	beatExpiry := false
 	sawOrdinary := false
 	refusals := 0
@@ -2925,7 +2951,22 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 			}
 			continue
 		}
-		if item.need != nil && item.need.Unresolved && policy.Expired(now) {
+		// A grant whose signer this gateway no longer holds cannot execute,
+		// however well it covers the workflow. Like expiry, the remedy is
+		// granting again, and the same unreadable-target exception applies.
+		retired := n.sessionSignerRetired(policy)
+		if item.need != nil && item.need.HasFundMove && retired && !item.need.Unresolved {
+			refusals++
+			if item.need.TaskID != "" {
+				blocking = append(blocking, item.need.TaskID)
+			}
+			if retiredPolicyID == "" {
+				retiredPolicyID = policy.ID
+				retiredNeed = item.need
+			}
+			continue
+		}
+		if item.need != nil && item.need.Unresolved && (policy.Expired(now) || retired) {
 			beatExpiry = true
 		}
 		refusal := CoverageRefusal(policy, item.need)
@@ -2958,7 +2999,7 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 	// The unreadable chain may hold a live grant. Expiry on another
 	// chain still must not win, or the owner re-signs and then hits
 	// the same unreadable target.
-	if unresolvedRefusal != nil && expiredUntil > 0 {
+	if unresolvedRefusal != nil && (expiredUntil > 0 || retiredPolicyID != "") {
 		beatExpiry = true
 	}
 	code := SessionPolicyNotCoveringCode
@@ -2983,6 +3024,14 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 		)
 		// missing was collected from other chains' coverage gaps. Those
 		// actions belong to a different grant than policyID.
+		missing = nil
+	} else if retiredPolicyID != "" {
+		// No colon in the detail: clients that show gateway text keep only
+		// what follows the last one.
+		code = SessionPolicySignerRetiredCode
+		detail = "the runner's grant was made for a session signer this gateway no longer uses; grant again before this workflow can run"
+		policyID = retiredPolicyID
+		required = retiredNeed
 		missing = nil
 	}
 	return noop, &PolicyConflictError{

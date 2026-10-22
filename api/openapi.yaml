@@ -284,7 +284,7 @@ components:
             Usable session grant involved in this failure, when there is one.
             Set on `SESSION_POLICY_BASE_CHANGED`, `SESSION_POLICY_NOT_COVERING`,
             `SESSION_POLICY_TARGET_UNRESOLVED`, `SESSION_POLICY_NATIVE_UNSIZED`,
-            and `SESSION_POLICY_EXPIRED`.
+            `SESSION_POLICY_EXPIRED`, and `SESSION_POLICY_SIGNER_RETIRED`.
         affectedTaskIds:
           type: array
           items: { type: string }
@@ -302,8 +302,9 @@ components:
           $ref: '#/components/schemas/SessionPolicyNeed'
           description: |
             Grant the caller still needs. Set on
-            `409 SESSION_POLICY_NOT_COVERING` and
-            `409 SESSION_POLICY_EXPIRED` from create and resume.
+            `409 SESSION_POLICY_NOT_COVERING`,
+            `409 SESSION_POLICY_EXPIRED`, and
+            `409 SESSION_POLICY_SIGNER_RETIRED` from create and resume.
 
     # -------------------------------------------------------------------
     # Health
@@ -1918,7 +1919,8 @@ components:
           description: |
             `covered` — the usable grant already allows this workflow, or the
             workflow moves no funds.
-            `no_grant` — fund-moving steps and no usable grant.
+            `no_grant` — fund-moving steps and no usable grant, including a
+            grant made for a session signer the gateway no longer uses.
             `not_covered` — a planned call or native recipient is outside the grant.
             `cap_too_low` — a sized cap or native budget is short.
             `expires_too_soon` — the grant has already expired, or it ends
@@ -2593,7 +2595,9 @@ paths:
         when the workflow has no end date. A fund-moving step whose target
         cannot be read stays `409 SESSION_POLICY_TARGET_UNRESOLVED` even when
         that grant has expired. A grant with no recorded expiry is not
-        expired. The owner grants again. A workflow that only notifies
+        expired. A grant made for a session signer the gateway no longer
+        uses is `409 SESSION_POLICY_SIGNER_RETIRED`: it cannot execute
+        however well it covers the workflow. The owner grants again. A workflow that only notifies
         passes with no grant. The flag defaults to off, so today's callers
         are unchanged.
       operationId: createWorkflow
@@ -2618,6 +2622,8 @@ paths:
             fund-moving steps. `required`, `policyId`, and `missingActions`
             describe the gap. `SESSION_POLICY_EXPIRED` when that grant has
             already expired, including when the workflow has no end date.
+            `SESSION_POLICY_SIGNER_RETIRED` when that grant was made for a
+            session signer the gateway no longer uses.
             `SESSION_POLICY_TARGET_UNRESOLVED` when a fund-moving target cannot
             be read, including when the grant has also expired.
             Notification-only workflows do not hit this.
@@ -2727,7 +2733,9 @@ paths:
         grant has already expired is `409 SESSION_POLICY_EXPIRED`, including
         when the workflow has no end date. A fund-moving step whose target
         cannot be read stays `409 SESSION_POLICY_TARGET_UNRESOLVED` even when
-        that grant has expired. Disabling is not checked.
+        that grant has expired. A grant made for a session signer the
+        gateway no longer uses is `409 SESSION_POLICY_SIGNER_RETIRED`.
+        Disabling is not checked.
         Notification-only workflows pass with no grant.
       operationId: resumeWorkflow
       responses:
@@ -2746,6 +2754,8 @@ paths:
             (`SESSION_POLICY_NOT_COVERING`; `required` describes the gap).
             `SESSION_POLICY_EXPIRED` when the runner's grant has already
             expired, including when the workflow has no end date.
+            `SESSION_POLICY_SIGNER_RETIRED` when it was made for a session
+            signer the gateway no longer uses.
             `SESSION_POLICY_TARGET_UNRESOLVED` when a fund-moving target cannot
             be read, including when the grant has also expired.
           content:

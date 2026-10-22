@@ -1413,7 +1413,7 @@ type Problem struct {
 	// PolicyId Usable session grant involved in this failure, when there is one.
 	// Set on `SESSION_POLICY_BASE_CHANGED`, `SESSION_POLICY_NOT_COVERING`,
 	// `SESSION_POLICY_TARGET_UNRESOLVED`, `SESSION_POLICY_NATIVE_UNSIZED`,
-	// and `SESSION_POLICY_EXPIRED`.
+	// `SESSION_POLICY_EXPIRED`, and `SESSION_POLICY_SIGNER_RETIRED`.
 	PolicyId *string `json:"policyId,omitempty"`
 
 	// Required Permissions one workflow still needs, sized to the runs it has left.
@@ -1600,7 +1600,8 @@ type SessionAuthorization struct {
 
 	// Status `covered` — the usable grant already allows this workflow, or the
 	// workflow moves no funds.
-	// `no_grant` — fund-moving steps and no usable grant.
+	// `no_grant` — fund-moving steps and no usable grant, including a
+	// grant made for a session signer the gateway no longer uses.
 	// `not_covered` — a planned call or native recipient is outside the grant.
 	// `cap_too_low` — a sized cap or native budget is short.
 	// `expires_too_soon` — the grant has already expired, or it ends
@@ -1618,7 +1619,8 @@ type SessionAuthorization struct {
 
 // SessionAuthorizationStatus `covered` — the usable grant already allows this workflow, or the
 // workflow moves no funds.
-// `no_grant` — fund-moving steps and no usable grant.
+// `no_grant` — fund-moving steps and no usable grant, including a
+// grant made for a session signer the gateway no longer uses.
 // `not_covered` — a planned call or native recipient is outside the grant.
 // `cap_too_low` — a sized cap or native budget is short.
 // `expires_too_soon` — the grant has already expired, or it ends

@@ -144,6 +144,21 @@ func (n *Engine) sessionSignerAddress() (common.Address, error) {
 	return crypto.PubkeyToAddress(n.config.SessionSignerPrivateKey.PublicKey), nil
 }
 
+// sessionSignerRetired reports whether policy names a signer this gateway can
+// no longer produce, so the grant cannot execute however well it covers a
+// workflow. With no session signer configured there is nothing to compare
+// against, so nothing is called retired; production always configures one.
+func (n *Engine) sessionSignerRetired(policy *model.SessionPolicy) bool {
+	if n == nil || policy == nil {
+		return false
+	}
+	configured, err := n.sessionSignerAddress()
+	if err != nil {
+		return false
+	}
+	return policy.SessionSigner == nil || *policy.SessionSigner != configured
+}
+
 // requireOwnedWallet gates every policy operation on wallet ownership. The
 // grant authorizes execution against the wallet, so acting on another
 // owner's wallet — even just listing — is refused as not-found.

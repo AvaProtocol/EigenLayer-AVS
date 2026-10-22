@@ -441,6 +441,23 @@ func TestExpiredGrantDeployCheckMapsToConflict(t *testing.T) {
 	require.Equal(t, []string{"pay"}, httpErr.AffectedTaskIDs)
 }
 
+func TestRetiredSignerDeployCheckMapsToConflict(t *testing.T) {
+	mapped := policyConflictFrom(&taskengine.PolicyConflictError{
+		Sentinel:        taskengine.ErrSessionPolicyNotCovering,
+		Code:            taskengine.SessionPolicySignerRetiredCode,
+		Detail:          "the runner's grant was made for a session signer this gateway no longer uses; grant again before this workflow can run",
+		PolicyID:        "01RETIRED",
+		AffectedTaskIDs: []string{"pay"},
+	})
+	httpErr, ok := mapped.(*restmw.HTTPError)
+	require.True(t, ok)
+	require.Equal(t, http.StatusConflict, httpErr.Status)
+	require.Equal(t, "SESSION_POLICY_SIGNER_RETIRED", httpErr.Code, "the wire code is a stable contract")
+	require.Equal(t, "Grant was made for a retired session signer", httpErr.Title)
+	require.Equal(t, "01RETIRED", httpErr.PolicyID)
+	require.Equal(t, []string{"pay"}, httpErr.AffectedTaskIDs)
+}
+
 // grantOverHTTP runs prepare → sign → submit and returns the decoded response.
 func (r *policyTestRig) grantOverHTTP(t *testing.T) generated.SubmitPolicyResponse {
 	t.Helper()

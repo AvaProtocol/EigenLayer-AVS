@@ -36,6 +36,7 @@ func TestIsClientUserOpFailure(t *testing.T) {
 		{"expired grant", errors.New("SESSION_POLICY_EXPIRED: session policy 01abc on wallet 0xdef expired at 2026-08-13T20:04:33Z; grant again to keep executing"), true},
 		{"chain window mismatch", errors.New("SESSION_POLICY_CHAIN_WINDOW_MISMATCH: session policy p1 entity 2: stored validUntil 2027, chain validUntil 2026"), true},
 		{"chain window missing", errors.New("SESSION_POLICY_CHAIN_WINDOW_MISSING: session policy 01abc entity 3 on 0xdef has no TimeRange hook installed"), true},
+		{"signer retired", errors.New("resolving session authorization for 0xdef: session policy 01abc: SESSION_POLICY_SIGNER_RETIRED: the grant's session signer 0x82f2 is not this gateway's session signer 0x6305; grant again to keep executing"), true},
 		{"prefund", errors.New("smart wallet 0x cannot pay gas: native balance and EntryPoint deposit are both zero"), true},
 		{"webhook deny", fmt.Errorf("gas manager declined to sponsor: alchemy_requestGasAndPaymasterAndData (policy x): Request was denied by webhook"), true},
 		{"AA23 via gas manager", fmt.Errorf("gas manager declined to sponsor: alchemy_requestGasAndPaymasterAndData (policy bf905871): validation reverted: [reason]: AA23 reverted"), true},
