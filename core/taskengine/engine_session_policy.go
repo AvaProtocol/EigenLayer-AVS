@@ -134,14 +134,14 @@ func (n *Engine) logContractRecipientException(in SessionPolicyInput) {
 		"chain", in.ChainID, "wallet", in.Wallet.Hex())
 }
 
-// sessionSignerAddress is the signer the gateway assigns to new grants —
-// today always the controller (see controllerSessionSigner for why that
-// interim holds the model).
+// sessionSignerAddress is the signer the gateway assigns to new grants: the
+// session_signer_private_key address, the same on every chain (see
+// configuredSessionSigner for why one key serves every grant).
 func (n *Engine) sessionSignerAddress() (common.Address, error) {
-	if n.config == nil || n.config.SmartWallet == nil || n.config.SmartWallet.ControllerPrivateKey == nil {
-		return common.Address{}, fmt.Errorf("no controller key configured; cannot assign a session signer")
+	if n.config == nil || n.config.SessionSignerPrivateKey == nil {
+		return common.Address{}, fmt.Errorf("no session_signer_private_key configured; cannot assign a session signer")
 	}
-	return crypto.PubkeyToAddress(n.config.SmartWallet.ControllerPrivateKey.PublicKey), nil
+	return crypto.PubkeyToAddress(n.config.SessionSignerPrivateKey.PublicKey), nil
 }
 
 // requireOwnedWallet gates every policy operation on wallet ownership. The

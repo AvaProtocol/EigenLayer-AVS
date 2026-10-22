@@ -56,9 +56,9 @@ func newPolicyRig(t *testing.T) *policyTestRig {
 	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
 
 	cfg := testutil.GetAggregatorConfig()
-	controllerKey, err := crypto.GenerateKey()
+	sessionSignerKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	cfg.SmartWallet.ControllerPrivateKey = controllerKey
+	cfg.SessionSignerPrivateKey = sessionSignerKey
 	cfg.SmartWallet.ChainID = policyTestChain
 	// Gateway mode with two chains: policyTestChain is the default, and
 	// policyGrantChain is reachable only by naming it in a request body.

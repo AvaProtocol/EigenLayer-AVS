@@ -488,7 +488,7 @@ func NextFreeSessionEntityID(
 // database.
 func (n *Engine) InstallSessionResolver() {
 	n.sessionChainReads = true
-	preset.SetSessionResolver(newSessionResolver(n.db, controllerSessionSigner(n.config), n.teardownVerifier(), n.windowVerifier()))
+	preset.SetSessionResolver(newSessionResolver(n.db, configuredSessionSigner(n.config), n.teardownVerifier(), n.windowVerifier()))
 	preset.SetEOA7702AccountLookup(func(chainID int64, owner, sender common.Address) (bool, error) {
 		if n.db == nil {
 			return false, nil
@@ -570,7 +570,7 @@ func (n *Engine) occupancyFor(chainID int64) EntityOccupancyChecker {
 
 // bindNativeRecipientChecks attaches the session signer (refused as a
 // native recipient) and a memoized CodeAt that uses the pooled
-// ChainStateReader. A missing controller key is an error: swallowing it
+// ChainStateReader. A missing session signer key is an error: swallowing it
 // would skip the reservation. Does not replace a test-injected CodeAt, but
 // wraps it so Validate + HooksFor share one lookup per address. Production
 // InstallSessionResolver enables sessionChainReads; without it CodeAt stays
@@ -778,34 +778,39 @@ func newSessionResolver(
 	}
 }
 
-// controllerSessionSigner resolves a session signer to its key.
+// configuredSessionSigner resolves a session signer to its key.
 //
-// Every policy is signed by the gateway's controller key, so this accepts
-// exactly that address and refuses anything else. This is the DESIGN, not a
-// placeholder — per-policy signer keys are deliberately not planned, because
-// they add key generation, custody, and rotation without changing the trust
-// model. Authority is per grant regardless of the key: each policy occupies
-// its own validation ENTITY, and the entity — not the key — is what carries
-// the hooks, the revocation target, and the nonce space that makes grant-time
-// signing work. A single shared key means a compromised controller reaches
-// every grant, but that is already true of the controller today, so a key per
-// policy would buy complexity, not a smaller blast radius. Revisit only if
-// that blast radius itself becomes the thing to shrink.
+// Every policy is signed by the one key configured as
+// session_signer_private_key, so this accepts exactly that address and
+// refuses anything else. This is the DESIGN, not a placeholder — per-policy
+// signer keys are deliberately not planned, because they add key generation,
+// custody, and rotation without changing the trust model. Authority is per
+// grant regardless of the key: each policy occupies its own validation
+// ENTITY, and the entity — not the key — is what carries the hooks, the
+// revocation target, and the nonce space that makes grant-time signing work.
+// A single shared key means a compromised session signer reaches every grant,
+// so a key per policy would buy complexity, not a smaller blast radius.
+// Revisit only if that blast radius itself becomes the thing to shrink.
+//
+// The key is its own setting, not a smart_wallet controller_private_key.
+// Controllers are per network, while this signer is shared by every chain:
+// reading it from the top-level smart_wallet block, which a gateway points at
+// its default chain, put mainnet grants behind a testnet controller.
 //
 // Refusing an unknown signer is the important half: a policy naming a key we
 // cannot produce must fail loudly here, not sign with the wrong one.
-func controllerSessionSigner(cfg *config.Config) func(common.Address) (*ecdsa.PrivateKey, error) {
+func configuredSessionSigner(cfg *config.Config) func(common.Address) (*ecdsa.PrivateKey, error) {
 	return func(signer common.Address) (*ecdsa.PrivateKey, error) {
-		if cfg == nil || cfg.SmartWallet == nil || cfg.SmartWallet.ControllerPrivateKey == nil {
-			return nil, fmt.Errorf("no controller key configured; cannot sign as session signer %s", signer.Hex())
+		if cfg == nil || cfg.SessionSignerPrivateKey == nil {
+			return nil, fmt.Errorf("no session_signer_private_key configured; cannot sign as session signer %s", signer.Hex())
 		}
-		controller := crypto.PubkeyToAddress(cfg.SmartWallet.ControllerPrivateKey.PublicKey)
-		if signer != controller {
+		configured := crypto.PubkeyToAddress(cfg.SessionSignerPrivateKey.PublicKey)
+		if signer != configured {
 			return nil, fmt.Errorf(
-				"session signer %s is not the gateway controller %s; every policy signs with the shared controller key by design",
-				signer.Hex(), controller.Hex())
+				"session signer %s is not the configured session signer %s; every policy signs with session_signer_private_key by design",
+				signer.Hex(), configured.Hex())
 		}
-		return cfg.SmartWallet.ControllerPrivateKey, nil
+		return cfg.SessionSignerPrivateKey, nil
 	}
 }
 

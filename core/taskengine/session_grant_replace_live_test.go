@@ -95,7 +95,7 @@ func TestGrantReplaceClearsThePriorEntity_Sepolia(t *testing.T) {
 		Salt: big.NewInt(fixtureSaltGrantReplace),
 	}))
 	user := &model.User{Address: owner, SmartAccountAddress: runner}
-	seedEntitiesConsumedOnChain(t, db, client, cfg.SmartWallet, ownerKey, chainID.Int64(), owner, *runner)
+	seedEntitiesConsumedOnChain(t, db, client, crypto.PubkeyToAddress(cfg.SessionSignerPrivateKey.PublicKey), ownerKey, chainID.Int64(), owner, *runner)
 
 	// ── 1. First grant. Nothing installed yet, so the payload is a plain
 	// install and the entity it claims must be free on chain.
@@ -293,7 +293,7 @@ func seedEntitiesConsumedOnChain(
 	t *testing.T,
 	db storage.Storage,
 	client *ethclient.Client,
-	swCfg *config.SmartWalletConfig,
+	sessionSigner common.Address,
 	ownerKey *ecdsa.PrivateKey,
 	chainID int64,
 	owner, runner common.Address,
@@ -348,8 +348,7 @@ func seedEntitiesConsumedOnChain(
 
 	// The allocator takes the maximum, so one record at the highest spent id
 	// covers everything below it.
-	controller := crypto.PubkeyToAddress(swCfg.ControllerPrivateKey.PublicKey)
-	prepared, err := PrepareSessionGrant(db, chainID, controller, "seed-entities-consumed-on-chain",
+	prepared, err := PrepareSessionGrant(db, chainID, sessionSigner, "seed-entities-consumed-on-chain",
 		SessionGrantRequest{
 			Owner: owner, Wallet: runner,
 			AgentLabel:              "seed",
