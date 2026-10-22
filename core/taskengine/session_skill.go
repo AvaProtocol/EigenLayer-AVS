@@ -2761,6 +2761,25 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 			chainReport = report
 		}
 		got := BuildAuthorization(policy, need, chainReport, sched)
+		// BuildAuthorization judges coverage only. A grant made for a signer
+		// this gateway no longer holds cannot execute, so it is no usable
+		// grant: the client's grant step, with the same requirement.
+		effective := policy
+		if effective == nil && chainReport != nil {
+			effective, _, _, _, _, _, _, _, _ = chainReport.snapshot()
+		}
+		if n.sessionSignerRetired(effective) {
+			required := got.Required
+			if required == nil {
+				required = need
+			}
+			got = &SessionAuthorization{
+				Status:   AuthNoGrant,
+				Detail:   "the grant was made for a session signer this gateway no longer uses; grant again",
+				PolicyID: effective.ID,
+				Required: required,
+			}
+		}
 		if worst == nil || authorizationRank(got.Status) > authorizationRank(worst.Status) {
 			worst = got
 		}
@@ -2785,6 +2804,11 @@ func (n *Engine) sessionPolicyDeployCheckEnabled() bool {
 // grant still has to count there. A grant with no recorded expiry is not
 // expired. A notification-only workflow never reaches the check.
 //
+// A live grant whose signer is not this gateway's session signer is
+// SESSION_POLICY_SIGNER_RETIRED: covering the workflow does not let the
+// gateway sign for it. Expiry outranks it when both apply, since either way
+// the owner grants again; an unreadable target outranks both.
+//
 // Chains are visited in chain-id order. The first expired grant owns the
 // response: its policy id and its chain's need. An earlier chain's coverage
 // gap must not stay in required or missing, or a client renewing that
@@ -2793,8 +2817,10 @@ func (n *Engine) sessionPolicyDeployCheckEnabled() bool {
 // An unreadable fund-moving target outranks expiry on any chain, even
 // when that target's own grant is still live. No new grant can name a
 // target the workflow cannot read, so the refusal stays
-// SESSION_POLICY_TARGET_UNRESOLVED. An ordinary coverage gap still loses
-// to expiry: the owner grants again, then meets that gap.
+// SESSION_POLICY_TARGET_UNRESOLVED, also when another chain has an
+// ordinary coverage gap. Without an unreadable target, an ordinary gap
+// still loses to expiry or a retired signer: the owner grants again, then
+// meets that gap.
 //
 // Needs are derived before any lock: the cron walk reads only the task
 // being saved. On success the returned function holds sessionAuthorityLock
@@ -2881,8 +2907,9 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 	var policyID string
 	var expiredUntil int64
 	var unresolvedRefusal *PolicyConflictError
+	var retiredPolicyID string
+	var retiredNeed *WorkflowNeed
 	beatExpiry := false
-	sawOrdinary := false
 	refusals := 0
 	now := time.Now()
 	for _, item := range mav2 {
@@ -2925,7 +2952,22 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 			}
 			continue
 		}
-		if item.need != nil && item.need.Unresolved && policy.Expired(now) {
+		// A grant whose signer this gateway no longer holds cannot execute,
+		// however well it covers the workflow. Like expiry, the remedy is
+		// granting again, and the same unreadable-target exception applies.
+		retired := n.sessionSignerRetired(policy)
+		if item.need != nil && item.need.HasFundMove && retired && !item.need.Unresolved {
+			refusals++
+			if item.need.TaskID != "" {
+				blocking = append(blocking, item.need.TaskID)
+			}
+			if retiredPolicyID == "" {
+				retiredPolicyID = policy.ID
+				retiredNeed = item.need
+			}
+			continue
+		}
+		if item.need != nil && item.need.Unresolved && (policy.Expired(now) || retired) {
 			beatExpiry = true
 		}
 		refusal := CoverageRefusal(policy, item.need)
@@ -2943,38 +2985,33 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 		if expiredUntil == 0 && refusal.PolicyID != "" {
 			policyID = refusal.PolicyID
 		}
-		if refusal.Code == SessionPolicyTargetUnresolvedCode {
-			if unresolvedRefusal == nil {
-				unresolvedRefusal = refusal
-			}
-		} else {
-			sawOrdinary = true
+		if refusal.Code == SessionPolicyTargetUnresolvedCode && unresolvedRefusal == nil {
+			unresolvedRefusal = refusal
 		}
 	}
 	if refusals == 0 {
 		return unlock, nil
 	}
 	unlock()
-	// The unreadable chain may hold a live grant. Expiry on another
-	// chain still must not win, or the owner re-signs and then hits
-	// the same unreadable target.
-	if unresolvedRefusal != nil && expiredUntil > 0 {
-		beatExpiry = true
-	}
+	// A grant-again refusal (expiry or a retired signer) must not win over an
+	// unreadable target, whether it sits on the target's own chain
+	// (beatExpiry) or another one, and even beside an ordinary gap: the owner
+	// would re-sign and then hit the same unreadable target. Without one, an
+	// unreadable target stays an ordinary coverage gap.
+	grantAgain := expiredUntil > 0 || retiredPolicyID != "" || beatExpiry
 	code := SessionPolicyNotCoveringCode
 	detail := "this workflow's fund-moving steps are outside the runner's usable grant"
-	if beatExpiry && unresolvedRefusal != nil && !sawOrdinary {
+	if unresolvedRefusal != nil && grantAgain {
 		code = SessionPolicyTargetUnresolvedCode
 		detail = unresolvedRefusal.Detail
-		// A later chain's expired grant must not replace the unreadable
-		// target's policy. That grant is not the one to renew.
-		if expiredUntil > 0 {
-			policyID = unresolvedRefusal.PolicyID
-			if unresolvedRefusal.Required != nil {
-				required = unresolvedRefusal.Required
-			}
-			missing = nil
+		// The response names the unreadable target's grant. A grant-again
+		// policy is not the one to renew, and other chains' gaps belong to
+		// other grants, so neither may leak into policyId or required.
+		policyID = unresolvedRefusal.PolicyID
+		if unresolvedRefusal.Required != nil {
+			required = unresolvedRefusal.Required
 		}
+		missing = nil
 	} else if expiredUntil > 0 {
 		code = SessionPolicyExpiredCode
 		detail = fmt.Sprintf(
@@ -2983,6 +3020,14 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 		)
 		// missing was collected from other chains' coverage gaps. Those
 		// actions belong to a different grant than policyID.
+		missing = nil
+	} else if retiredPolicyID != "" {
+		// No colon in the detail: clients that show gateway text keep only
+		// what follows the last one.
+		code = SessionPolicySignerRetiredCode
+		detail = "the runner's grant was made for a session signer this gateway no longer uses; grant again before this workflow can run"
+		policyID = retiredPolicyID
+		required = retiredNeed
 		missing = nil
 	}
 	return noop, &PolicyConflictError{

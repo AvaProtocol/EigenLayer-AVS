@@ -34,13 +34,13 @@ func newPolicyTestEngine(t *testing.T) (*Engine, storage.Storage, *ecdsa.Private
 
 	// The full test config: Engine's constructor dials the configured RPC, so
 	// a hand-built config with no URL panics. Nothing in the policy flow
-	// itself touches the chain. The fixture config carries no controller key
-	// and pins chain 1; both are overridable per its own comments — the key
-	// is only ever used here as an ADDRESS (the assigned session signer).
+	// itself touches the chain. The fixture config carries no session signer
+	// key and pins chain 1; both are overridable per its own comments — the
+	// key is only ever used here as an ADDRESS (the assigned session signer).
 	cfg := testutil.GetAggregatorConfig()
-	controllerKey, err := crypto.GenerateKey()
+	sessionSignerKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	cfg.SmartWallet.ControllerPrivateKey = controllerKey
+	cfg.SessionSignerPrivateKey = sessionSignerKey
 	cfg.SmartWallet.ChainID = testPolicyChain
 	engine := New(db, cfg, nil, testutil.GetLogger())
 
@@ -153,7 +153,7 @@ func TestPrepareSessionPolicyLooksUpEachRecipientOnce(t *testing.T) {
 	require.Equal(t, 1, lookups, "Validate+HooksFor must share one CodeAt per recipient")
 }
 
-func TestPrepareSessionPolicyRefusesControllerAsNativeRecipient(t *testing.T) {
+func TestPrepareSessionPolicyRefusesSessionSignerAsNativeRecipient(t *testing.T) {
 	engine, _, _, owner, wallet := newPolicyTestEngine(t)
 	user := &model.User{Address: owner}
 	signer, err := engine.sessionSignerAddress()
@@ -437,9 +437,9 @@ func TestSessionPermissionsValidation(t *testing.T) {
 	require.Error(t, err, "fail closed without CodeAt")
 	require.Contains(t, err.Error(), "InstallSessionResolver")
 
-	controller := native
-	controller.SessionSigner = &alice
-	require.Error(t, controller.Validate(), "session signer is not a native recipient")
+	signerAsRecipient := native
+	signerAsRecipient.SessionSigner = &alice
+	require.Error(t, signerAsRecipient.Validate(), "session signer is not a native recipient")
 
 	contract := native
 	contract.CodeAt = func(common.Address) ([]byte, error) { return []byte{0x60, 0x00}, nil }
@@ -501,4 +501,34 @@ func TestAttachDeclaredPermissionsCapAlias(t *testing.T) {
 	require.Len(t, nativePolicy.NativeRecipients, 1)
 	require.Equal(t, "10000000000000000", nativePolicy.NativeSpendCap.GrantedCap)
 	require.True(t, nativePolicy.AllowContractRecipient)
+}
+
+// The session signer is session_signer_private_key on every chain, never a
+// controller. A gateway's top-level smart_wallet points at its default chain,
+// so taking the signer from there put every chain's grants behind that one
+// network's controller.
+func TestSessionSignerIsTheConfiguredKeyNotTheController(t *testing.T) {
+	engine, _, _, _, _ := newPolicyTestEngine(t)
+	controllerKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	engine.config.SmartWallet.ControllerPrivateKey = controllerKey
+	controller := crypto.PubkeyToAddress(controllerKey.PublicKey)
+	configured := crypto.PubkeyToAddress(engine.config.SessionSignerPrivateKey.PublicKey)
+
+	signer, err := engine.sessionSignerAddress()
+	require.NoError(t, err)
+	require.Equal(t, configured, signer, "new grants name the configured session signer")
+
+	keyFor := configuredSessionSigner(engine.config)
+	key, err := keyFor(configured)
+	require.NoError(t, err)
+	require.Equal(t, configured, crypto.PubkeyToAddress(key.PublicKey))
+	_, err = keyFor(controller)
+	require.Error(t, err, "a grant naming the controller must not be signed")
+
+	engine.config.SessionSignerPrivateKey = nil
+	_, err = engine.sessionSignerAddress()
+	require.ErrorContains(t, err, "session_signer_private_key", "no fallback to the controller")
+	_, err = keyFor(configured)
+	require.ErrorContains(t, err, "session_signer_private_key")
 }

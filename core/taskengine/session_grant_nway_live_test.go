@@ -89,7 +89,7 @@ func TestGrantReplaceClearsSeveralPriorEntities_Sepolia(t *testing.T) {
 		Salt: big.NewInt(fixtureSaltGrantReplace),
 	}))
 	user := &model.User{Address: owner, SmartAccountAddress: runner}
-	seedEntitiesConsumedOnChain(t, db, client, cfg.SmartWallet, ownerKey, chainID.Int64(), owner, *runner)
+	seedEntitiesConsumedOnChain(t, db, client, crypto.PubkeyToAddress(cfg.SessionSignerPrivateKey.PublicKey), ownerKey, chainID.Int64(), owner, *runner)
 
 	// ── 1. Build a wallet carrying TWO installed entities.
 	//

@@ -787,6 +787,8 @@ func policyConflictHTTP(e *taskengine.PolicyConflictError) *restmw.HTTPError {
 		title = "A running automation has an ETH amount that cannot be sized"
 	case taskengine.SessionPolicyExpiredCode:
 		title = "Grant has expired"
+	case taskengine.SessionPolicySignerRetiredCode:
+		title = "Grant was made for a retired session signer"
 	}
 	return &restmw.HTTPError{
 		Status:          http.StatusConflict,

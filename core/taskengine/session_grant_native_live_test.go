@@ -255,7 +255,7 @@ func setupNativeLive(t *testing.T) *nativeLiveEnv {
 		Salt: big.NewInt(fixtureSaltNativeETH),
 	}))
 	user := &model.User{Address: owner, SmartAccountAddress: runner}
-	seedEntitiesConsumedOnChain(t, db, client, cfg.SmartWallet, ownerKey, chainID.Int64(), owner, *runner)
+	seedEntitiesConsumedOnChain(t, db, client, crypto.PubkeyToAddress(cfg.SessionSignerPrivateKey.PublicKey), ownerKey, chainID.Int64(), owner, *runner)
 
 	return &nativeLiveEnv{
 		t: t, cfg: cfg, client: client, engine: engine, user: user,
@@ -424,9 +424,9 @@ func requireNativeSelfAdminBlocked(env *nativeLiveEnv) {
 	t.Helper()
 	ctx := context.Background()
 	const probeEntity uint32 = 99
-	controller := crypto.PubkeyToAddress(env.cfg.SmartWallet.ControllerPrivateKey.PublicKey)
+	sessionSigner := crypto.PubkeyToAddress(env.cfg.SessionSignerPrivateKey.PublicKey)
 	install, err := aa.PackSessionSignerInstall(aa.SessionGrant{
-		EntityID: probeEntity, Signer: controller, Global: true,
+		EntityID: probeEntity, Signer: sessionSigner, Global: true,
 		Hooks: [][]byte{aa.AllowlistExecHook(probeEntity)},
 	})
 	require.NoError(t, err)

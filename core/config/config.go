@@ -122,6 +122,15 @@ type Config struct {
 	// see the ConfigRaw field of the same name.
 	PartnerAssertionAudience string
 
+	// SessionSignerPrivateKey signs every MA v2 session operation, on every
+	// chain, and its address is the signer installed by every session grant
+	// (yaml session_signer_private_key). It is deliberately not a
+	// smart_wallet controller_private_key: those are per network, while one
+	// session signer serves the whole gateway. Taking it from the top-level
+	// smart_wallet block, which a gateway points at its default chain, made a
+	// testnet controller the signer of mainnet grants.
+	SessionSignerPrivateKey *ecdsa.PrivateKey
+
 	// Account abstraction config
 	SmartWallet *SmartWalletConfig
 
@@ -654,6 +663,9 @@ type ConfigRaw struct {
 	BackupIntervalHours int    `yaml:"backup_interval_hours"`
 	JwtSecret           string `yaml:"jwt_secret"`
 
+	// SessionSignerPrivateKey is required; see Config.SessionSignerPrivateKey.
+	SessionSignerPrivateKey string `yaml:"session_signer_private_key"`
+
 	// REST rate-limit overrides; see Config.RestRateLimitPerSecond.
 	RestRateLimitPerSecond float64 `yaml:"rest_rate_limit_per_second"`
 	RestRateLimitBurst     int     `yaml:"rest_rate_limit_burst"`
@@ -892,6 +904,11 @@ func NewConfig(configFilePath string) (*Config, error) {
 			"unresolved ${...}/${{shared.*}} reference produces this: %w", err))
 	}
 
+	sessionSignerPrivateKey, err := parseSessionSignerKey(configRaw.SessionSignerPrivateKey)
+	if err != nil {
+		return nil, err
+	}
+
 	// Enforce sane default for max wallets per owner (no unlimited allowed)
 	if configRaw.SmartWallet.MaxWalletsPerOwner <= 0 {
 		configRaw.SmartWallet.MaxWalletsPerOwner = DefaultMaxWalletsPerOwner
@@ -925,6 +942,8 @@ func NewConfig(configFilePath string) (*Config, error) {
 		BackupDir:      resolveBackupDir(configRaw.DbPath, configRaw.BackupDir),
 		BackupInterval: resolveBackupInterval(configRaw.BackupIntervalHours),
 		JwtSecret:      []byte(configRaw.JwtSecret),
+
+		SessionSignerPrivateKey: sessionSignerPrivateKey,
 
 		RestRateLimitPerSecond: configRaw.RestRateLimitPerSecond,
 		RestRateLimitBurst:     configRaw.RestRateLimitBurst,
@@ -1080,6 +1099,14 @@ func NewConfig(configFilePath string) (*Config, error) {
 			"default_chain_id", config.DefaultChainID)
 	}
 
+	sessionSigner := crypto.PubkeyToAddress(sessionSignerPrivateKey.PublicKey)
+	logger.Info("Session signer derived", "session_signer", sessionSigner.Hex())
+	if shared := sessionSignerSharedWith(sessionSigner, config); len(shared) > 0 {
+		logger.Warn("session_signer_private_key is also a smart_wallet controller key; give the session signer a key of its own",
+			"session_signer", sessionSigner.Hex(),
+			"shared_with", strings.Join(shared, ", "))
+	}
+
 	// Say once, at boot, whether this process can have operations sponsored,
 	// and if not, which condition ruled it out. Each of these is a decision
 	// rather than a missing setting, so they read differently.
@@ -1162,6 +1189,38 @@ func DeriveWsURL(rpcURL string) string {
 		// silently mangling something we don't recognize.
 		return rpcURL
 	}
+}
+
+// parseSessionSignerKey decodes session_signer_private_key. The key is
+// required: without it the gateway cannot assign a signer to a grant or sign
+// under one, and there is no fallback to a controller key.
+func parseSessionSignerKey(raw string) (*ecdsa.PrivateKey, error) {
+	key, err := crypto.HexToECDSA(strings.TrimPrefix(strings.TrimSpace(raw), "0x"))
+	if err != nil {
+		return nil, fmt.Errorf("session_signer_private_key is not a valid 64-hex-char private key — "+
+			"it is required and has no fallback to a controller key; an empty value or an unresolved "+
+			"${...}/${{shared.*}} reference produces this: %w", err)
+	}
+	return key, nil
+}
+
+// sessionSignerSharedWith names each smart_wallet block whose controller key
+// is also the session signer. Sharing still works, but it puts every grant on
+// every chain behind a key that is configured, stored and rotated as one
+// network's controller.
+func sessionSignerSharedWith(sessionSigner common.Address, cfg *Config) []string {
+	var shared []string
+	if cfg.SmartWallet != nil && cfg.SmartWallet.ControllerPrivateKey != nil &&
+		crypto.PubkeyToAddress(cfg.SmartWallet.ControllerPrivateKey.PublicKey) == sessionSigner {
+		shared = append(shared, "smart_wallet")
+	}
+	for _, chain := range cfg.Chains {
+		if chain.SmartWallet != nil && chain.SmartWallet.ControllerPrivateKey != nil &&
+			crypto.PubkeyToAddress(chain.SmartWallet.ControllerPrivateKey.PublicKey) == sessionSigner {
+			shared = append(shared, fmt.Sprintf("chains[%s]", chain.Name))
+		}
+	}
+	return shared
 }
 
 // firstNonEmpty returns the first non-empty string among the arguments.

@@ -56,9 +56,9 @@ func newPolicyRig(t *testing.T) *policyTestRig {
 	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
 
 	cfg := testutil.GetAggregatorConfig()
-	controllerKey, err := crypto.GenerateKey()
+	sessionSignerKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	cfg.SmartWallet.ControllerPrivateKey = controllerKey
+	cfg.SessionSignerPrivateKey = sessionSignerKey
 	cfg.SmartWallet.ChainID = policyTestChain
 	// Gateway mode with two chains: policyTestChain is the default, and
 	// policyGrantChain is reachable only by naming it in a request body.
@@ -438,6 +438,23 @@ func TestExpiredGrantDeployCheckMapsToConflict(t *testing.T) {
 	require.Equal(t, taskengine.SessionPolicyExpiredCode, httpErr.Code)
 	require.Equal(t, "Grant has expired", httpErr.Title)
 	require.Equal(t, "01EXPIRED", httpErr.PolicyID)
+	require.Equal(t, []string{"pay"}, httpErr.AffectedTaskIDs)
+}
+
+func TestRetiredSignerDeployCheckMapsToConflict(t *testing.T) {
+	mapped := policyConflictFrom(&taskengine.PolicyConflictError{
+		Sentinel:        taskengine.ErrSessionPolicyNotCovering,
+		Code:            taskengine.SessionPolicySignerRetiredCode,
+		Detail:          "the runner's grant was made for a session signer this gateway no longer uses; grant again before this workflow can run",
+		PolicyID:        "01RETIRED",
+		AffectedTaskIDs: []string{"pay"},
+	})
+	httpErr, ok := mapped.(*restmw.HTTPError)
+	require.True(t, ok)
+	require.Equal(t, http.StatusConflict, httpErr.Status)
+	require.Equal(t, "SESSION_POLICY_SIGNER_RETIRED", httpErr.Code, "the wire code is a stable contract")
+	require.Equal(t, "Grant was made for a retired session signer", httpErr.Title)
+	require.Equal(t, "01RETIRED", httpErr.PolicyID)
 	require.Equal(t, []string{"pay"}, httpErr.AffectedTaskIDs)
 }
 
