@@ -195,6 +195,14 @@ func (e *sessionPolicyAmbiguousError) Unwrap() error { return ErrSessionPolicyAm
 // no indication that a re-grant is the remedy.
 const SessionPolicyExpiredCode = "SESSION_POLICY_EXPIRED"
 
+// SessionPolicySignerRetiredCode marks a grant whose installed signer is not
+// this gateway's session_signer_private_key — every grant made before that key
+// was replaced. Covering the workflow is not enough: the gateway cannot sign
+// as that entity, so the grant can never execute. Client-fixable by granting
+// again, which installs the current signer; nothing on the gateway side heals
+// it.
+const SessionPolicySignerRetiredCode = "SESSION_POLICY_SIGNER_RETIRED"
+
 // SessionPolicyEntityOccupiedCode is returned when every candidate entity
 // in the bounded occupancy probe is already installed on the account
 // (#763 A). Client-fixable only by cleaning leftover entities on chain.
@@ -807,8 +815,8 @@ func configuredSessionSigner(cfg *config.Config) func(common.Address) (*ecdsa.Pr
 		configured := crypto.PubkeyToAddress(cfg.SessionSignerPrivateKey.PublicKey)
 		if signer != configured {
 			return nil, fmt.Errorf(
-				"session signer %s is not the configured session signer %s; every policy signs with session_signer_private_key by design",
-				signer.Hex(), configured.Hex())
+				"%s: the grant's session signer %s is not this gateway's session signer %s; grant again to keep executing",
+				SessionPolicySignerRetiredCode, signer.Hex(), configured.Hex())
 		}
 		return cfg.SessionSignerPrivateKey, nil
 	}
