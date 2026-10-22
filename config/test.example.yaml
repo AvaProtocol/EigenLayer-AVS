@@ -41,6 +41,11 @@ operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
 # HS256 signing key for client JWTs. Generate locally: `openssl rand -hex 16`
 jwt_secret: <random-hex-string>
 
+# Required. The session signer every grant names. Use a throwaway key of its
+# own (`openssl rand -hex 32`), never a production key; CI generates a fresh
+# one per run.
+session_signer_private_key: <session-signer-private-key-hex>
+
 # Dev REST rate limits — high enough that the full v4 test suite
 # (~80 requests in a couple seconds) doesn't trip the bucket.
 rest_rate_limit_per_second: 200

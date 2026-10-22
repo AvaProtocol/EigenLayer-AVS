@@ -52,7 +52,7 @@ type SessionPermissions struct {
 	NativeSpendCap         *model.NativeSpendCap
 	AllowContractRecipient bool
 	// SessionSigner, when set, is refused as a native recipient — the
-	// gateway's shared controller. Bound at prepare/submit from
+	// gateway's shared session signer. Bound at prepare/submit from
 	// sessionSignerAddress.
 	SessionSigner *common.Address
 	// CodeAt looks up bytecode for native-recipient EOA checks (K4).

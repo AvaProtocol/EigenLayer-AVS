@@ -69,6 +69,11 @@ if ! grep -q "^disable_gas_sponsorship: true" config/test.yaml; then
   printf '\n# CI never draws on the production Gas Manager policy.\ndisable_gas_sponsorship: true\n' >> config/test.yaml
 fi
 sed -i "s|controller_private_key:.*|controller_private_key: ${CONTROLLER_PRIVATE_KEY}|g" config/test.yaml
+# The session signer is a fresh throwaway key per run, never a secret: no CI
+# job holds a key that a production session grant names.
+SESSION_SIGNER_PRIVATE_KEY="$(openssl rand -hex 32)"
+sed -i "s|session_signer_private_key:.*|session_signer_private_key: ${SESSION_SIGNER_PRIVATE_KEY}|g" config/test.yaml
+grep -q "^session_signer_private_key: [0-9a-f]\{64\}$" config/test.yaml || { echo "session_signer_private_key missing from config/test.yaml"; exit 1; }
 sed -i "s|paymaster_address:.*|paymaster_address: 0xd856f532F7C032e6b30d76F19187F25A068D6d92|g" config/test.yaml
 sed -i "s|tenderly_account:.*|tenderly_account: ${TENDERLY_ACCOUNT}|g" config/test.yaml
 sed -i "s|tenderly_project:.*|tenderly_project: ${TENDERLY_PROJECT}|g" config/test.yaml
@@ -80,7 +85,7 @@ echo "pwd=$(pwd)"
 ls -la config/ || true
 echo "Generated config/test.yaml (redacted first 40 lines):"
 if [ -f config/test.yaml ]; then
-  sed -n '1,40p' config/test.yaml | sed -e 's/tenderly_access_key:.*/tenderly_access_key: ***REDACTED***/' -e 's/bundler_url:.*/bundler_url: ***REDACTED***/' -e 's/ecdsa_private_key:.*/ecdsa_private_key: ***REDACTED***/' -e 's/controller_private_key:.*/controller_private_key: ***REDACTED***/'
+  sed -n '1,40p' config/test.yaml | sed -e 's/tenderly_access_key:.*/tenderly_access_key: ***REDACTED***/' -e 's/bundler_url:.*/bundler_url: ***REDACTED***/' -e 's/ecdsa_private_key:.*/ecdsa_private_key: ***REDACTED***/' -e 's/controller_private_key:.*/controller_private_key: ***REDACTED***/' -e 's/session_signer_private_key:.*/session_signer_private_key: ***REDACTED***/'
 fi
 test -s config/test.yaml || (echo "config/test.yaml missing"; exit 1)
 
