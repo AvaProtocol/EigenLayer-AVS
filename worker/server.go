@@ -68,6 +68,9 @@ func (s *Server) WorkerHealthCheck(ctx context.Context, req *avsproto.WorkerHeal
 }
 
 func (s *Server) GetNonce(ctx context.Context, req *avsproto.WorkerGetNonceReq) (*avsproto.WorkerGetNonceResp, error) {
+	if req.Salt < 0 {
+		return nil, fmt.Errorf("invalid salt %d (must be non-negative)", req.Salt)
+	}
 	ownerAddr := common.HexToAddress(req.Owner)
 	salt := big.NewInt(req.Salt)
 

@@ -146,3 +146,24 @@ func TestEntityTimeRangeOnChainReportsReadFailures(t *testing.T) {
 	_, _, err = EntityTimeRangeOnChain(context.Background(), nil, account, 1)
 	require.Error(t, err, "no client is not evidence that an entity has no window")
 }
+
+// The key is encoded with big.Int.Bytes(), which drops the sign. A negative
+// key, or one wider than uint192, must fail rather than read another nonce
+// space.
+func TestEntryPointNonceRejectsKeysOutsideUint192(t *testing.T) {
+	account := common.HexToAddress("0x00000000000000000000000000000000000000a1")
+	tooWide := new(big.Int).Lsh(big.NewInt(1), 192)
+	for _, key := range []*big.Int{big.NewInt(-1), tooWide} {
+		caller := &recordingCaller{result: word(big.NewInt(7))}
+		_, err := EntryPointNonce(context.Background(), caller, account, key)
+		require.Error(t, err, "key %s", key)
+		require.Nil(t, caller.data, "key %s must not reach the chain", key)
+	}
+
+	caller := &recordingCaller{result: word(big.NewInt(7))}
+	maxKey := new(big.Int).Sub(tooWide, big.NewInt(1))
+	nonce, err := EntryPointNonce(context.Background(), caller, account, maxKey)
+	require.NoError(t, err)
+	require.Equal(t, int64(7), nonce.Int64())
+	require.Equal(t, common.HexToAddress(config.EntryPointV07AddressHex), caller.to)
+}

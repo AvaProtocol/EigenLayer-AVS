@@ -108,6 +108,11 @@ func EntryPointNonce(ctx context.Context, client ContractCaller, account common.
 	if key == nil {
 		return nil, fmt.Errorf("no nonce key")
 	}
+	// key.Bytes() drops the sign, so a negative key would read another
+	// nonce space instead of failing.
+	if key.Sign() < 0 || key.BitLen() > 192 {
+		return nil, fmt.Errorf("nonce key %s is outside uint192", key)
+	}
 	data := crypto.Keccak256([]byte("getNonce(address,uint192)"))[:4]
 	data = append(data, common.LeftPadBytes(account.Bytes(), 32)...)
 	data = append(data, common.LeftPadBytes(key.Bytes(), 32)...)
