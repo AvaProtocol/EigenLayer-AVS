@@ -16,6 +16,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/avsclient"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
@@ -322,9 +323,12 @@ func (s *Server) WithdrawWallet(ctx echo.Context, address generated.EthereumAddr
 
 // GetWalletNonce — GET /api/v1/wallets/{address}:getNonce
 //
-// Reads the smart wallet's current nonce off-chain via the
-// entrypoint's getNonce(sender, key=0) call. Used by SDK callers
-// building UserOps client-side.
+// Returns the nonce for the next operation the owner signs: EntryPoint
+// v0.7 getNonce(sender, key) at the owner's fallback-signer key (entity
+// 0, global validation, so key 0x1). Modular Account v2 picks the
+// validation from the nonce key, and key 0 selects none. The value is
+// the full nonce, key<<64 | sequence, ready for userOp.nonce. Used by
+// SDK callers building UserOps client-side.
 //
 // Chain routing precedence: ?chainId= override → JWT aud → gateway
 // default. Same pattern as CreateWallet / WithdrawWallet.
@@ -382,7 +386,11 @@ func (s *Server) GetWalletNonce(ctx echo.Context, address generated.EthereumAddr
 		}
 	}
 
-	nonce, err := chainReader.GetEntryPointNonce(ctx.Request().Context(), walletAddr, big.NewInt(0))
+	ownerKey, err := userop.NonceKeyMAv2(userop.FallbackSignerEntityID, userop.ValidationOptionGlobal)
+	if err != nil {
+		return err
+	}
+	nonce, err := chainReader.GetEntryPointNonce(ctx.Request().Context(), walletAddr, ownerKey)
 	if err != nil {
 		return fmt.Errorf("entrypoint nonce read failed: %w", err)
 	}

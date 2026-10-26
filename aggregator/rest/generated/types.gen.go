@@ -1176,7 +1176,8 @@ type NodeType string
 
 // NonceResponse defines model for NonceResponse.
 type NonceResponse struct {
-	// Nonce Smart wallet nonce as a decimal string.
+	// Nonce The full 256-bit nonce, `key << 64 | sequence`, as a decimal
+	// string. Use it as `userOp.nonce` unchanged.
 	Nonce string `json:"nonce"`
 }
 

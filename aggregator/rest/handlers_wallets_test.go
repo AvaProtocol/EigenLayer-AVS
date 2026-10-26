@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"math/big"
 	"net/http"
@@ -174,4 +175,47 @@ func TestUpdateWalletHidesEOA7702NotSaltZeroDerived(t *testing.T) {
 	derived, err := taskengine.GetWallet(rig.db, walletTestChain, rig.owner, saltZero.Hex())
 	require.NoError(t, err)
 	require.False(t, derived.IsHidden, "hiding the EOA must not hide the salt-0 derived runner")
+}
+
+// nonceKeyRecorder answers GetEntryPointNonce the way EntryPoint v0.7 does,
+// key<<64 | sequence, and records the key it was asked for.
+type nonceKeyRecorder struct {
+	taskengine.ChainStateReader
+	key *big.Int
+}
+
+func (r *nonceKeyRecorder) GetEntryPointNonce(_ context.Context, _ common.Address, key *big.Int) (*big.Int, error) {
+	r.key = new(big.Int).Set(key)
+	return new(big.Int).Or(new(big.Int).Lsh(key, 64), big.NewInt(7)), nil
+}
+
+// The owner signs through the fallback signer, which Modular Account v2
+// selects with nonce key 0x1. Key 0 selects no validation, so a nonce read
+// there builds an operation the account will not validate.
+func TestGetWalletNonceReadsOwnerValidationKey(t *testing.T) {
+	rig := newWalletRig(t)
+	reader := &nonceKeyRecorder{}
+	prev := taskengine.GetChainStateReaderForChain(uint64(walletTestChain))
+	taskengine.RegisterChainStateReader(uint64(walletTestChain), reader)
+	t.Cleanup(func() {
+		if prev == nil {
+			taskengine.ClearChainStateReaderRegistry()
+		} else {
+			taskengine.RegisterChainStateReader(uint64(walletTestChain), prev)
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/wallets/"+rig.onDefault.Hex()+":getNonce", nil)
+	rec := httptest.NewRecorder()
+	ctx := echo.New().NewContext(req, rec)
+	ctx.Set("auth.user", &restmw.AuthenticatedUser{Subject: rig.owner.Hex(), ChainID: walletTestChain})
+
+	require.NoError(t, rig.server.GetWalletNonce(ctx, generated.EthereumAddress(rig.onDefault.Hex()), generated.GetWalletNonceParams{}))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, reader.key)
+	require.Equal(t, "1", reader.key.String(), "must read the fallback signer's nonce key")
+
+	var out generated.NonceResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	require.Equal(t, "18446744073709551623", out.Nonce, "the full nonce, 1<<64 | 7, goes in userOp.nonce as is")
 }
