@@ -1354,8 +1354,8 @@ func (n *Engine) validateNonZeroAddress(factoryAddr common.Address, methodName, 
 // ResolveUserChainID returns the chain context for a wallet RPC.
 //
 // REST sets user.ChainID from the JWT `aud` claim
-// (aggregator/rest/middleware/jwt.go:audienceChainID); that's the
-// authoritative source. Falls back to the gateway's default chain when
+// (aggregator/rest/middleware/jwt.go:audienceChainID), or from ?chainId=
+// on GET /wallets and getNonce. Falls back to the gateway's default chain when
 // user.ChainID is zero (gRPC path) or when it isn't one of the
 // configured chains.
 //

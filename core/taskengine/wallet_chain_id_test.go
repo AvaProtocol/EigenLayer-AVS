@@ -57,11 +57,10 @@ func withGatewayMultiChain(cfg *config.Config) *config.Config {
 	return cfg
 }
 
-// ResolveUserChainID is the chain-resolution helper consulted by the
-// wallet RPC handlers that accept *model.User. Today that's only
-// Engine.GetWallet — SetWallet and ListWallets retain their legacy
-// owner-only signatures and always operate on n.defaultChainID();
-// plumbing *User through them is a follow-up.
+// ResolveUserChainID is the chain-resolution helper for wallet requests
+// that carry a *model.User: Engine.GetWallet, Engine.ListWallets and the
+// REST getNonce handler. SetWallet keeps its owner-only signature and
+// operates on n.defaultChainID().
 //
 // The contract:
 //
