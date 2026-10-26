@@ -77,10 +77,7 @@ func SendUserOpMAv2(
 		salt = big.NewInt(0)
 	}
 
-	factory, err := aa.EffectiveFactory(smartWalletConfig)
-	if err != nil {
-		return nil, nil, fmt.Errorf("resolving account factory: %w", err)
-	}
+	factory := aa.MAv2FactoryAddress()
 
 	sender, err := resolveSenderV07(chainRPC, owner, factory, salt, senderOverride)
 	if err != nil {
@@ -124,7 +121,7 @@ func SendUserOpMAv2(
 	//   - deployed legacy SimpleAccount runner on an MA v2 chain (no initCode,
 	//     v0.7 validation against v0.6 bytecode)
 	if !eoa7702 {
-		derived, derr := aa.DeriveSenderAddressAuto(chainRPC, owner, factory, salt)
+		derived, derr := aa.DeriveSenderAddress(chainRPC, owner, factory, salt)
 		if derr != nil {
 			return nil, nil, fmt.Errorf("deriving counterfactual address for sender %s: %w", sender.Hex(), derr)
 		}
@@ -171,7 +168,7 @@ func SendUserOpMAv2(
 		if eoa7702 {
 			return nil, nil, fmt.Errorf("EOA_DELEGATION_MISSING: sender %s has no 7702 designation; initCode is never attached for an eoa_7702 runner", sender.Hex())
 		}
-		deployFactory, factoryData, initErr := aa.DeriveInitCodeAuto(owner, factory, salt)
+		deployFactory, factoryData, initErr := aa.DeriveInitCode(owner, factory, salt)
 		if initErr != nil {
 			return nil, nil, fmt.Errorf("building init code: %w", initErr)
 		}
@@ -253,9 +250,7 @@ func SendUserOpMAv2(
 	}
 
 	l.Info("v0.7 user operation prepared",
-		"account_provider", smartWalletConfig.AccountProviderName(),
-		"effective_factory", factory.Hex(),
-		"config_factory_address", smartWalletConfig.FactoryAddress.Hex(),
+		"factory", factory.Hex(),
 		"entry_point", entryPoint.Hex(),
 		"owner", owner.Hex(),
 		"sender", sender.Hex(),
@@ -507,7 +502,7 @@ func resolveSenderV07(
 	if senderOverride != nil && *senderOverride != (common.Address{}) {
 		return *senderOverride, nil
 	}
-	derived, err := aa.DeriveSenderAddressAuto(chainRPC, owner, factory, salt)
+	derived, err := aa.DeriveSenderAddress(chainRPC, owner, factory, salt)
 	if err != nil {
 		return common.Address{}, fmt.Errorf("deriving sender for owner %s salt %s: %w",
 			owner.Hex(), salt.String(), err)

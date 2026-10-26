@@ -76,11 +76,7 @@ func run() error {
 	}
 	owner := crypto.PubkeyToAddress(key.PublicKey)
 
-	aa.SetFactoryAddress(cfg.SmartWallet.FactoryAddress)
-	factory, err := aa.EffectiveFactory(cfg.SmartWallet)
-	if err != nil {
-		return fmt.Errorf("resolving effective factory: %w", err)
-	}
+	factory := aa.MAv2FactoryAddress()
 	sender, err := aa.GetSenderAddressMAv2(client, owner, salt)
 	if err != nil {
 		return fmt.Errorf("deriving sender: %w", err)
@@ -125,7 +121,7 @@ func run() error {
 		return nil
 	}
 
-	deployFactory, factoryData, err := aa.DeriveInitCodeAuto(owner, factory, salt)
+	deployFactory, factoryData, err := aa.GetInitCodeMAv2(owner, salt)
 	if err != nil {
 		return fmt.Errorf("building init code: %w", err)
 	}

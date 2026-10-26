@@ -4,6 +4,8 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -31,7 +33,7 @@ func TestWalletCountLimitDoesNotBlockExistingWalletAccess(t *testing.T) {
 	engine := New(db, config, nil, testutil.GetLogger())
 
 	user := testutil.TestUser1()
-	factoryAddr := config.SmartWallet.FactoryAddress
+	factoryAddr := aa.MAv2FactoryAddress()
 
 	// Step 1: Create wallets up to the limit (2 wallets)
 	addr1 := common.HexToAddress("0x1111111111111111111111111111111111111111")
@@ -153,7 +155,7 @@ func TestWalletCountLimitReproducesOriginalWithdrawFundsBug(t *testing.T) {
 	engine := New(db, config, nil, testutil.GetLogger())
 
 	user := testutil.TestUser1()
-	factoryAddr := config.SmartWallet.FactoryAddress
+	factoryAddr := aa.MAv2FactoryAddress()
 
 	// Create exactly 3 wallets to reach the limit
 	wallets := make([]*model.SmartWallet, 3)
@@ -241,7 +243,6 @@ func TestWalletCountLimitEdgeCases(t *testing.T) {
 	engine := New(db, config, nil, testutil.GetLogger())
 
 	user := testutil.TestUser1()
-	_ = config.SmartWallet.FactoryAddress // Avoid unused variable warning
 
 	t.Run("No wallets - should allow first wallet creation", func(t *testing.T) {
 		// Create first wallet should work

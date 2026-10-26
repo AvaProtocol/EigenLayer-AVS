@@ -1,14 +1,12 @@
 package taskengine
 
 import (
-	"os"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -261,15 +259,6 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 					EthRpcUrl:  "http://localhost:99999/definitely-not-a-real-endpoint", // Guaranteed to fail
 					BundlerURL: "https://bundler.test",
 					EthWsUrl:   "wss://localhost:99999/ws",
-					FactoryAddress: common.HexToAddress(func() string {
-						v := os.Getenv("FACTORY_ADDRESS")
-						if v != "" {
-							return v
-						}
-						return config.DefaultFactoryProxyAddressHex
-					}()),
-					EntrypointAddress: common.HexToAddress(config.DefaultEntrypointAddressHex),
-					PaymasterAddress:  common.HexToAddress("0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E"),
 				}
 				v.smartWalletConfig = config
 			},
@@ -309,15 +298,6 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 					EthRpcUrl:  testutil.GetTestRPCURL(),
 					BundlerURL: "https://bundler.test",
 					EthWsUrl:   testutil.GetTestWsRPCURL(),
-					FactoryAddress: common.HexToAddress(func() string {
-						v := os.Getenv("FACTORY_ADDRESS")
-						if v != "" {
-							return v
-						}
-						return config.DefaultFactoryProxyAddressHex
-					}()),
-					EntrypointAddress: common.HexToAddress(config.DefaultEntrypointAddressHex),
-					PaymasterAddress:  common.HexToAddress("0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E"),
 				}
 				v.smartWalletConfig = config
 			},
@@ -345,15 +325,6 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 					EthRpcUrl:  testutil.GetTestRPCURL(),
 					BundlerURL: "https://bundler.test",
 					EthWsUrl:   testutil.GetTestWsRPCURL(),
-					FactoryAddress: common.HexToAddress(func() string {
-						v := os.Getenv("FACTORY_ADDRESS")
-						if v != "" {
-							return v
-						}
-						return config.DefaultFactoryProxyAddressHex
-					}()),
-					EntrypointAddress: common.HexToAddress(config.DefaultEntrypointAddressHex),
-					PaymasterAddress:  common.HexToAddress("0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E"),
 				}
 				v.smartWalletConfig = config
 			},
@@ -381,15 +352,6 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 					EthRpcUrl:  testutil.GetTestRPCURL(),
 					BundlerURL: "https://bundler.test",
 					EthWsUrl:   testutil.GetTestWsRPCURL(),
-					FactoryAddress: common.HexToAddress(func() string {
-						v := os.Getenv("FACTORY_ADDRESS")
-						if v != "" {
-							return v
-						}
-						return config.DefaultFactoryProxyAddressHex
-					}()),
-					EntrypointAddress: common.HexToAddress(config.DefaultEntrypointAddressHex),
-					PaymasterAddress:  common.HexToAddress("0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E"),
 				}
 				v.smartWalletConfig = config
 			},
@@ -563,15 +525,6 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 					EthRpcUrl:  testutil.GetTestRPCURL(),
 					BundlerURL: "https://bundler.test",
 					EthWsUrl:   testutil.GetTestWsRPCURL(),
-					FactoryAddress: common.HexToAddress(func() string {
-						v := os.Getenv("FACTORY_ADDRESS")
-						if v != "" {
-							return v
-						}
-						return config.DefaultFactoryProxyAddressHex
-					}()),
-					EntrypointAddress: common.HexToAddress(config.DefaultEntrypointAddressHex),
-					PaymasterAddress:  common.HexToAddress("0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E"),
 				}
 				v.smartWalletConfig = config
 			},

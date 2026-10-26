@@ -17,7 +17,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
@@ -1804,17 +1803,9 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		"task_owner", v.TaskOwner.Hex())
 
 	if swConfig != nil {
-		effectiveFactory, factoryErr := aa.EffectiveFactory(swConfig)
-		effectiveFactoryHex := ""
-		if factoryErr == nil {
-			effectiveFactoryHex = effectiveFactory.Hex()
-		}
 		v.logger.Info("🔍 VM DEBUG - Smart wallet config details",
 			"bundler_provider", swConfig.ProviderName(),
 			"bundler_url", swConfig.BundlerEndpointLabel(),
-			"account_provider", swConfig.AccountProviderName(),
-			"effective_factory", effectiveFactoryHex,
-			"config_factory_address", swConfig.FactoryAddress.Hex(),
 			"entrypoint_address", swConfig.EntryPointAddress().Hex(),
 			"eth_rpc_url", swConfig.EthRpcUrl)
 	} else {

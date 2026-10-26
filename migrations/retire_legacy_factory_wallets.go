@@ -22,9 +22,8 @@ const walletKeyPrefix = "w:"
 // factory, including records stored before the factory was recorded.
 //
 // The gateway only creates and executes MA v2 accounts since the EntryPoint
-// v0.7 cutover: account_provider can only be modular_account_v2
-// (config.ValidateAccountProvider) and the v0.6 send path is gone. The MA v2
-// factory is the same address on every chain, so this needs no chain config.
+// v0.7 cutover. The MA v2 factory is the same address on every chain, so this
+// needs no chain config.
 // A designated EOA (kind eoa_7702) has no factory and is never legacy.
 func IsLegacyFactoryWallet(w *model.SmartWallet) bool {
 	if w == nil || w.Address == nil || w.IsEOA7702() {

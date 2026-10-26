@@ -165,7 +165,7 @@ func TestAllowlistExecHookIsConfigOnly(t *testing.T) {
 }
 
 func TestWrapExecuteUserOp(t *testing.T) {
-	inner, err := PackExecute(common.HexToAddress("0x2222222222222222222222222222222222222222"), big.NewInt(0), nil)
+	inner, err := PackExecuteMAv2(common.HexToAddress("0x2222222222222222222222222222222222222222"), big.NewInt(0), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

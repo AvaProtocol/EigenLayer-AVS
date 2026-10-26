@@ -9,8 +9,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
-	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 )
 
@@ -76,28 +74,6 @@ func TestCheckDeferredCarrierNonce(t *testing.T) {
 			t.Errorf("error should name the sender: %v", err)
 		}
 	})
-}
-
-// EffectiveFactory must ignore the raw v0.6 smart_wallet.factory_address when
-// account_provider is modular_account_v2 — the false diagnosis in the AA23
-// factory-mismatch findings was rooted in logging the raw field instead.
-func TestEffectiveFactoryIgnoresV06ConfigUnderMAv2(t *testing.T) {
-	v06 := common.HexToAddress(config.DefaultFactoryProxyAddressHex)
-	swCfg := &config.SmartWalletConfig{
-		AccountProvider: config.AccountProviderModularAccountV2,
-		FactoryAddress:  v06,
-	}
-	got, err := aa.EffectiveFactory(swCfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != aa.MAv2FactoryAddress() {
-		t.Errorf("EffectiveFactory = %s, want MA v2 factory %s (raw config was %s)",
-			got.Hex(), aa.MAv2FactoryAddress().Hex(), v06.Hex())
-	}
-	if got == v06 {
-		t.Error("EffectiveFactory must not return the configured v0.6 factory under modular_account_v2")
-	}
 }
 
 // SessionAuthorization.PolicyID / CarrierNonce are optional metadata; Validate

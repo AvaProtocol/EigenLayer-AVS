@@ -138,9 +138,8 @@ func TestConfirmationSurvivesBlockingRequestDisconnect(t *testing.T) {
 
 func confirmationRevertLog(t *testing.T, entrypoint common.Address, hash string, data []byte) *types.Log {
 	t.Helper()
-	parsed, err := aa.EntryPointMetaData.GetAbi()
+	event, err := aa.UserOperationRevertReasonEvent()
 	require.NoError(t, err)
-	event := parsed.Events["UserOperationRevertReason"]
 	encoded, err := event.Inputs.NonIndexed().Pack(big.NewInt(1), data)
 	require.NoError(t, err)
 	return &types.Log{Address: entrypoint, Topics: []common.Hash{event.ID, common.HexToHash(hash), {}}, Data: encoded}

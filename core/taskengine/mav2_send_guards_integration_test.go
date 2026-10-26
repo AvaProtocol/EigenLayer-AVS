@@ -56,10 +56,6 @@ func sepoliaMAv2Config(t *testing.T) *config.SmartWalletConfig {
 	t.Helper()
 	return &config.SmartWalletConfig{
 		EthRpcUrl:       sepoliaRPC(t),
-		AccountProvider: config.AccountProviderModularAccountV2,
-		// Deliberately leave the raw v0.6 default factory — EffectiveFactory
-		// must still resolve to the MA v2 constant (the findings red herring).
-		FactoryAddress:  common.HexToAddress(config.DefaultFactoryProxyAddressHex),
 		ChainID:         11155111,
 		BundlerProvider: config.BundlerProviderSelfHosted,
 		// No bundler URL: guards must fail before dialing the bundler.
@@ -73,7 +69,7 @@ func TestMAv2SendRejectsMissingSessionGrant_Sepolia(t *testing.T) {
 	runner := common.HexToAddress(sepoliaMAv2Runner)
 
 	// Empty calldata is fine — we never reach execution.
-	callData, err := aa.PackExecute(owner, big.NewInt(0), nil)
+	callData, err := aa.PackExecuteMAv2(owner, big.NewInt(0), nil)
 	require.NoError(t, err)
 
 	// No session resolver installed → resolveSession returns nil → hard fail.
@@ -100,11 +96,9 @@ func TestMAv2SendRejectsSimpleAccountRunner_Sepolia(t *testing.T) {
 	require.NoError(t, err)
 	defer chain.Close()
 
-	factory, err := aa.EffectiveFactory(swCfg)
-	require.NoError(t, err)
-	require.Equal(t, aa.MAv2FactoryAddress(), factory)
+	factory := aa.MAv2FactoryAddress()
 
-	derived, err := aa.DeriveSenderAddressAuto(chain, owner, factory, salt)
+	derived, err := aa.DeriveSenderAddress(chain, owner, factory, salt)
 	require.NoError(t, err)
 	require.NotNil(t, derived)
 	require.Equal(t, strings.ToLower(sepoliaMAv2Runner), strings.ToLower(derived.Hex()),
@@ -123,7 +117,7 @@ func TestMAv2SendRejectsSimpleAccountRunner_Sepolia(t *testing.T) {
 	require.NoError(t, err)
 	auth := &preset.SessionAuthorization{EntityID: 1, SignerKey: controllerKey}
 
-	callData, err := aa.PackExecute(owner, big.NewInt(0), nil)
+	callData, err := aa.PackExecuteMAv2(owner, big.NewInt(0), nil)
 	require.NoError(t, err)
 
 	_, _, err = preset.SendUserOpMAv2(swCfg, owner, callData, &v06Runner, salt, auth, logger.NewNoOpLogger())
@@ -147,7 +141,7 @@ func TestMAv2SendRejectsUndeployedWrongSalt_Sepolia(t *testing.T) {
 	require.NoError(t, err)
 	auth := &preset.SessionAuthorization{EntityID: 1, SignerKey: controllerKey}
 
-	callData, err := aa.PackExecute(owner, big.NewInt(0), nil)
+	callData, err := aa.PackExecuteMAv2(owner, big.NewInt(0), nil)
 	require.NoError(t, err)
 
 	_, _, err = preset.SendUserOpMAv2(swCfg, owner, callData, &runner, wrongSalt, auth, logger.NewNoOpLogger())
@@ -155,15 +149,6 @@ func TestMAv2SendRejectsUndeployedWrongSalt_Sepolia(t *testing.T) {
 	require.Contains(t, err.Error(), "does not match the address derived",
 		"salt mismatch must refuse before initCode attach: %v", err)
 	require.NotContains(t, strings.ToLower(err.Error()), "aa23")
-}
-
-func TestMAv2EffectiveFactoryOnSepoliaConfig_IgnoresRawV06Factory(t *testing.T) {
-	swCfg := sepoliaMAv2Config(t)
-	factory, err := aa.EffectiveFactory(swCfg)
-	require.NoError(t, err)
-	require.Equal(t, aa.MAv2FactoryAddress(), factory)
-	require.NotEqual(t, swCfg.FactoryAddress, factory,
-		"raw config factory is the v0.6 default; effective must be MA v2")
 }
 
 // The 16:31 Auto swap failure was diagnosed as AA23, but a live re-probe of
@@ -195,7 +180,7 @@ func TestMAv2SendRejectsZeroBalanceWithoutGasManager_Sepolia(t *testing.T) {
 	// (A real deferred grant is not required to exercise the balance check.)
 	auth := &preset.SessionAuthorization{EntityID: 1, SignerKey: controllerKey}
 
-	callData, err := aa.PackExecute(owner, big.NewInt(0), nil)
+	callData, err := aa.PackExecuteMAv2(owner, big.NewInt(0), nil)
 	require.NoError(t, err)
 
 	_, _, err = preset.SendUserOpMAv2(swCfg, owner, callData, &runner, salt, auth, logger.NewNoOpLogger())
@@ -214,7 +199,7 @@ func TestMAv2SendRejectsOwnerSenderWhenExecuteOff_Sepolia(t *testing.T) {
 	controllerKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	auth := &preset.SessionAuthorization{EntityID: 1, SignerKey: controllerKey}
-	callData, err := aa.PackExecute(owner, big.NewInt(0), nil)
+	callData, err := aa.PackExecuteMAv2(owner, big.NewInt(0), nil)
 	require.NoError(t, err)
 
 	_, _, err = preset.SendUserOpMAv2(swCfg, owner, callData, &owner, big.NewInt(0), auth, logger.NewNoOpLogger())
@@ -238,7 +223,7 @@ func TestMAv2SendRejectsOwnerSenderWithoutRecord_Sepolia(t *testing.T) {
 	controllerKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	auth := &preset.SessionAuthorization{EntityID: 1, SignerKey: controllerKey}
-	callData, err := aa.PackExecute(owner, big.NewInt(0), nil)
+	callData, err := aa.PackExecuteMAv2(owner, big.NewInt(0), nil)
 	require.NoError(t, err)
 
 	_, _, err = preset.SendUserOpMAv2(swCfg, owner, callData, &owner, big.NewInt(0), auth, logger.NewNoOpLogger())

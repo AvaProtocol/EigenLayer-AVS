@@ -24,21 +24,20 @@ import (
 // logger. It deliberately has no chain RPC and no chain-state reader — the
 // refusal must land before any of that is needed, which is also why the
 // validation block sits ahead of chain-reader resolution in ExecuteWithdraw.
-func withdrawTestServer(t *testing.T, accountProvider string) *RpcServer {
+func withdrawTestServer(t *testing.T) *RpcServer {
 	t.Helper()
 	return &RpcServer{
 		config: &config.Config{
 			Logger: logger.NewNoOpLogger(),
 			SmartWallet: &config.SmartWalletConfig{
-				ChainID:         11155111,
-				AccountProvider: accountProvider,
+				ChainID: 11155111,
 			},
 		},
 	}
 }
 
 func TestExecuteWithdraw_RefusesNativeETHOnModularAccountV2(t *testing.T) {
-	server := withdrawTestServer(t, "") // empty defaults to modular_account_v2
+	server := withdrawTestServer(t)
 	user := &model.User{Address: common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")}
 
 	_, err := server.ExecuteWithdraw(context.Background(), user, &avsproto.WithdrawFundsReq{
@@ -70,7 +69,7 @@ func TestExecuteWithdraw_RefusesNativeETHOnModularAccountV2(t *testing.T) {
 // comparing, so the refusal has to match on the same terms or a lowercase
 // token would slip through to the bundler as AA23.
 func TestExecuteWithdraw_NativeRefusalIsCaseInsensitive(t *testing.T) {
-	server := withdrawTestServer(t, "")
+	server := withdrawTestServer(t)
 	user := &model.User{Address: common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")}
 
 	_, err := server.ExecuteWithdraw(context.Background(), user, &avsproto.WithdrawFundsReq{
@@ -87,7 +86,7 @@ func TestExecuteWithdraw_NativeRefusalIsCaseInsensitive(t *testing.T) {
 // must not fire for it. It fails later for want of a chain reader — that it
 // gets that far is the assertion.
 func TestExecuteWithdraw_ERC20NotRefusedAsNative(t *testing.T) {
-	server := withdrawTestServer(t, "")
+	server := withdrawTestServer(t)
 	user := &model.User{Address: common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")}
 
 	_, err := server.ExecuteWithdraw(context.Background(), user, &avsproto.WithdrawFundsReq{
@@ -104,7 +103,7 @@ func TestExecuteWithdraw_ERC20NotRefusedAsNative(t *testing.T) {
 // shadow the recipient check, or a typo'd address would come back as an
 // unrelated session-policy error.
 func TestExecuteWithdraw_InvalidRecipientTakesPrecedence(t *testing.T) {
-	server := withdrawTestServer(t, "")
+	server := withdrawTestServer(t)
 	user := &model.User{Address: common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")}
 
 	_, err := server.ExecuteWithdraw(context.Background(), user, &avsproto.WithdrawFundsReq{
@@ -123,8 +122,7 @@ func TestExecuteWithdraw_InvalidRecipientTakesPrecedence(t *testing.T) {
 // resolveSmartWalletConfigForChain returns (r.config.SmartWallet, nil) — no
 // error — in single-chain mode, so a gateway started without a smart wallet
 // config hands ExecuteWithdraw a nil swCfg. The native-ETH refusal reads that
-// config, and SmartWalletConfig.AccountProviderName has no nil receiver guard,
-// so the refusal must not run before the nil check.
+// config, so the refusal must not run before the nil check.
 func TestExecuteWithdraw_NilSmartWalletConfigDoesNotPanic(t *testing.T) {
 	server := &RpcServer{config: &config.Config{Logger: logger.NewNoOpLogger()}}
 	user := &model.User{Address: common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")}
@@ -178,7 +176,7 @@ func TestExecuteWithdraw_CoveringGrantPassesPreflight(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	server := withdrawTestServer(t, "")
+	server := withdrawTestServer(t)
 	server.db = db
 	server.withdrawNativeReader = stubWithdrawReader{
 		code: nil,

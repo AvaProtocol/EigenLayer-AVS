@@ -44,10 +44,9 @@ func TestEstimateWalletCreationGas_BuildsInitCodeFromDummyOwnerNotWallet(t *test
 
 	stub := &stubCreationChainReader{gasPrice: big.NewInt(1_000_000_000), estimateGas: 300_000}
 	fe := &FeeEstimator{
-		logger: logger,
-		chain:  stub,
-		// MA v2 so EffectiveFactory resolves from config alone (no RPC).
-		smartWalletConfig: &config.SmartWalletConfig{AccountProvider: config.AccountProviderModularAccountV2},
+		logger:            logger,
+		chain:             stub,
+		smartWalletConfig: &config.SmartWalletConfig{},
 	}
 	wallet := common.HexToAddress("0x00000000000000000000000000000000000000a1")
 
@@ -55,13 +54,13 @@ func TestEstimateWalletCreationGas_BuildsInitCodeFromDummyOwnerNotWallet(t *test
 	require.NoError(t, err)
 
 	factory := aa.MAv2FactoryAddress()
-	_, dummyOwnerData, err := aa.DeriveInitCodeAuto(feeEstimationDummyOwner, factory, big.NewInt(0))
+	_, dummyOwnerData, err := aa.DeriveInitCode(feeEstimationDummyOwner, factory, big.NewInt(0))
 	require.NoError(t, err)
-	_, walletOwnedData, err := aa.DeriveInitCodeAuto(wallet, factory, big.NewInt(0))
+	_, walletOwnedData, err := aa.DeriveInitCode(wallet, factory, big.NewInt(0))
 	require.NoError(t, err)
 
 	require.NotNil(t, stub.captured.To)
-	require.Equal(t, factory, *stub.captured.To, "estimate must target the effective factory")
+	require.Equal(t, factory, *stub.captured.To, "estimate must target the MA v2 factory")
 	require.Equal(t, dummyOwnerData, stub.captured.Data,
 		"init code must be built from feeEstimationDummyOwner")
 	require.NotEqual(t, walletOwnedData, stub.captured.Data,

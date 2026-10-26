@@ -18,7 +18,7 @@ import (
 // The factory is the same address on every chain Alchemy supports
 // (verified across eth/base/arb/bnb/hyperliquid/robinhood/sepolia/base-sepolia
 // — see avs-infra Alchemy_Stack_Migration_And_Chain_Expansion.md §1.2), so
-// unlike the v0.6 SimpleAccountFactory there is nothing to deploy per chain.
+// there is nothing to deploy per chain.
 //
 // It exposes two account variants with DIFFERENT addresses for the same
 // (owner, salt), and the choice is unrevisable once users are onboarded:
@@ -63,18 +63,11 @@ func ensureMAv2FactoryABI() (abi.ABI, error) {
 
 // GetSenderAddressMAv2 asks the factory for the counterfactual account address.
 //
-// Deliberately an on-chain call rather than a local CREATE2 computation, for
-// the same reason the v0.6 path does it: the factory's salt derivation mixes
-// in more than the caller-supplied salt, and a local reimplementation that
-// drifts from the contract produces an address that looks right and holds
-// nothing.
+// Deliberately an on-chain call rather than a local CREATE2 computation: the
+// factory's salt derivation mixes in more than the caller-supplied salt, and a
+// local reimplementation that drifts from the contract produces an address
+// that looks right and holds nothing.
 func GetSenderAddressMAv2(conn *ethclient.Client, owner common.Address, salt *big.Int) (*common.Address, error) {
-	return GetSenderAddressMAv2ForFactory(conn, owner, MAv2FactoryAddress(), salt)
-}
-
-// GetSenderAddressMAv2ForFactory is GetSenderAddressMAv2 against an explicit
-// factory — useful for tests and for pinning a specific audited deployment.
-func GetSenderAddressMAv2ForFactory(conn *ethclient.Client, owner common.Address, factory common.Address, salt *big.Int) (*common.Address, error) {
 	if conn == nil {
 		return nil, fmt.Errorf("nil eth client")
 	}
@@ -89,6 +82,7 @@ func GetSenderAddressMAv2ForFactory(conn *ethclient.Client, owner common.Address
 	if err != nil {
 		return nil, fmt.Errorf("packing getAddressSemiModular: %w", err)
 	}
+	factory := MAv2FactoryAddress()
 	out, err := conn.CallContract(context.Background(), ethereum.CallMsg{To: &factory, Data: callData}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("getAddressSemiModular on factory %s for owner %s salt %s: %w",
@@ -112,11 +106,6 @@ func GetSenderAddressMAv2ForFactory(conn *ethclient.Client, owner common.Address
 // separate UserOperation fields, so they are returned separately rather than
 // joined and re-split by the caller.
 func GetInitCodeMAv2(owner common.Address, salt *big.Int) (common.Address, []byte, error) {
-	return GetInitCodeMAv2ForFactory(owner, MAv2FactoryAddress(), salt)
-}
-
-// GetInitCodeMAv2ForFactory is GetInitCodeMAv2 against an explicit factory.
-func GetInitCodeMAv2ForFactory(owner common.Address, factory common.Address, salt *big.Int) (common.Address, []byte, error) {
 	if salt == nil {
 		return common.Address{}, nil, fmt.Errorf("salt is nil")
 	}
@@ -128,5 +117,5 @@ func GetInitCodeMAv2ForFactory(owner common.Address, factory common.Address, sal
 	if err != nil {
 		return common.Address{}, nil, fmt.Errorf("packing createSemiModularAccount: %w", err)
 	}
-	return factory, data, nil
+	return MAv2FactoryAddress(), data, nil
 }

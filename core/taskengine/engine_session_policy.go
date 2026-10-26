@@ -248,7 +248,7 @@ func (n *Engine) requireMAv2SessionWallet(user *model.User, chainID int64, walle
 	if rec == nil || rec.Factory == nil || *rec.Factory == (common.Address{}) {
 		return fmt.Errorf("%w: no factory recorded for %s", ErrSessionWalletNotMAv2, wallet.Hex())
 	}
-	if aa.ProviderForFactory(*rec.Factory) != aa.ProviderModularAccountV2 {
+	if aa.RequireMAv2Factory(*rec.Factory) != nil {
 		return fmt.Errorf("%w: wallet %s uses factory %s",
 			ErrSessionWalletNotMAv2, wallet.Hex(), rec.Factory.Hex())
 	}

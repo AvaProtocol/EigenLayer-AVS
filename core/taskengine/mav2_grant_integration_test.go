@@ -84,18 +84,13 @@ func TestMAv2SessionGrantEndToEnd(t *testing.T) {
 		EthRpcUrl:            rpcURL,
 		BundlerURL:           bundlerURL,
 		BundlerProvider:      config.BundlerProviderSelfHosted, // BundlerURL is used verbatim
-		AccountProvider:      config.AccountProviderModularAccountV2,
 		ChainID:              chainID.Int64(),
 		ControllerPrivateKey: controllerKey,
-		FactoryAddress:       common.HexToAddress(config.DefaultFactoryProxyAddressHex),
 	}
 
-	factory, err := aa.EffectiveFactory(swCfg)
-	require.NoError(t, err)
-	require.Equal(t, aa.MAv2FactoryAddress(), factory,
-		"an MA v2 chain must resolve to the MA v2 factory")
+	factory := aa.MAv2FactoryAddress()
 
-	account, err := aa.DeriveSenderAddressAuto(chain, owner, factory, salt)
+	account, err := aa.DeriveSenderAddress(chain, owner, factory, salt)
 	require.NoError(t, err, "deriving the account address")
 	t.Logf("owner=%s controller=%s account=%s salt=%s",
 		owner.Hex(), controller.Hex(), account.Hex(), salt)
@@ -168,7 +163,7 @@ func TestMAv2SessionGrantEndToEnd(t *testing.T) {
 	require.NoError(t, auth.Validate())
 	require.True(t, auth.Deferred(), "this operation must carry the install")
 
-	callData, err := aa.PackExecute(owner, big.NewInt(0), nil)
+	callData, err := aa.PackExecuteMAv2(owner, big.NewInt(0), nil)
 	require.NoError(t, err, "packing the executed call")
 
 	op, receipt, err := preset.SendUserOpMAv2(swCfg, owner, callData, account, salt, auth, logger.NewNoOpLogger())

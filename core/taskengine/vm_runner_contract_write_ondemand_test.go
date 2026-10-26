@@ -30,13 +30,10 @@ func wellFormedUserOp(sender common.Address) *preset.SentUserOp {
 }
 
 // ondemandTestConfig builds a smart-wallet config sufficient to drive the real
-// UserOp path in-process. PaymasterAddress is left zero so nothing
-// short-circuits to self-funded (no bundler gas estimation needed under the mock).
+// UserOp path in-process.
 func ondemandTestConfig() *config.SmartWalletConfig {
 	return &config.SmartWalletConfig{
-		EntrypointAddress: common.HexToAddress(config.DefaultEntrypointAddressHex),
-		FactoryAddress:    common.HexToAddress("0x0000000000000000000000000000000000009999"),
-		ChainID:           11155111,
+		ChainID: 11155111,
 	}
 }
 
@@ -107,7 +104,7 @@ func TestCreateRealTransactionResultExecutionStatus(t *testing.T) {
 
 	t.Run("packed execute stamps inner calls on pending and mined", func(t *testing.T) {
 		inner := common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8")
-		packed, err := aa.PackExecute(contractAddr, big.NewInt(0), inner)
+		packed, err := aa.PackExecuteMAv2(contractAddr, big.NewInt(0), inner)
 		require.NoError(t, err)
 
 		pending := processor.createRealTransactionResult("transfer", contractAddr.Hex(), "0x", nil, userOp, nil, packed)
@@ -148,7 +145,7 @@ func TestCreateRealTransactionResultExecutionStatus(t *testing.T) {
 
 	t.Run("sibling UserOp event does not stamp failedCall", func(t *testing.T) {
 		inner := common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8")
-		packed, err := aa.PackExecute(contractAddr, big.NewInt(0), inner)
+		packed, err := aa.PackExecuteMAv2(contractAddr, big.NewInt(0), inner)
 		require.NoError(t, err)
 		ours := common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
 		other := common.HexToHash("0x2222222222222222222222222222222222222222222222222222222222222222")

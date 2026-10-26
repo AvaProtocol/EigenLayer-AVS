@@ -116,14 +116,6 @@ smart_wallet:
   # time. 'self_hosted' remains only for a locally-run Voltaire; the shared
   # bundler-*.avaprotocol.org hosts were retired (#725).
   bundler_provider:       alchemy
-  # account_provider selects the smart-account implementation. modular_account_v2
-  # is the only supported value and the default when the line is absent; this
-  # line names it rather than opting in to it.
-  #
-  # simple_account is REFUSED at config load. It named the legacy v0.6
-  # derivation whose send path was removed with the EntryPoint v0.7 cutover, so
-  # a chain pinned to it would derive wallets nothing can execute against.
-  account_provider:       modular_account_v2
   alchemy_api_key:        ${ALCHEMY_API_KEY}
   controller_private_key: <testnet-controller-private-key-hex>
   # Track B pin (K13). Loader reads these. eoa_7702_execute default false.
@@ -138,10 +130,6 @@ smart_wallet:
   eoa_7702_execute: false
   sma_7702_delegate:  0x69007702764179f14F51cdce752f4f775d74E139
   sma_7702_impl_hash: 0xecfc0328ce4d953a4d452e11f54b578fa2d7f2f8126246d1120ca24d11845081
-  # paymaster_address is INERT. It named the v0.6 verifying paymaster, removed
-  # with the EntryPoint v0.7 cutover; sponsorship is alchemy_paymaster_policy_id.
-  # Still parsed so older configs load, and logged once as ignored. Leave unset.
-  paymaster_address:
 
 # Chain worker registry — gateway routes chain reads to workers by chain_id.
 # Keep per-chain RPC/bundler/controller settings: the gateway sends UserOps.
@@ -160,7 +148,6 @@ chains:
       eoa_7702_execute:       false
       sma_7702_delegate:      0x69007702764179f14F51cdce752f4f775d74E139
       sma_7702_impl_hash:     0xecfc0328ce4d953a4d452e11f54b578fa2d7f2f8126246d1120ca24d11845081
-      paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
       max_wallets_per_owner:  2000
 
   - chain_id: 84532
@@ -172,7 +159,6 @@ chains:
       bundler_provider:       alchemy
       alchemy_api_key:        ${ALCHEMY_API_KEY}
       controller_private_key: <testnet-controller-private-key-hex>
-      paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
       max_wallets_per_owner:  3
 
 # Optional: delegated partners (tenants). Manual registration only (no API).

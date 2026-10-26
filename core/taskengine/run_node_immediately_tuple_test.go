@@ -33,7 +33,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 	}
 
 	ownerEOA := *ownerAddr
-	factory := effectiveFactoryAddr(t, config.SmartWallet)
+	factory := aa.MAv2FactoryAddress()
 
 	// Connect to RPC client for GetSenderAddress
 	client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
@@ -41,8 +41,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 	defer client.Close()
 
 	// Derive actual salt:0 smart wallet address
-	aa.SetFactoryAddress(factory)
-	runnerAddr, err := aa.GetSenderAddress(client, ownerEOA, big.NewInt(0))
+	runnerAddr, err := aa.GetSenderAddressMAv2(client, ownerEOA, big.NewInt(0))
 	require.NoError(t, err, "Failed to derive smart wallet address")
 
 	user := &model.User{

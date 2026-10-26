@@ -298,7 +298,7 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 // preflightSessionGrant refuses a native ETH send the active grant cannot
 // cover, before the bundler returns opaque AA23.
 func (p *ETHTransferProcessor) preflightSessionGrant(destination common.Address, amount *big.Int) string {
-	if p == nil || p.smartWalletConfig == nil || !p.smartWalletConfig.UsesModularAccountV2() {
+	if p == nil || p.smartWalletConfig == nil {
 		return ""
 	}
 	var policy *model.SessionPolicy
@@ -374,17 +374,9 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	// Parse destination address
 	destinationAddr := common.HexToAddress(destination)
 
-	// Use the aa and preset packages that should already be imported
-
-	// Set up factory address for AA operations
-	if err := aa.SetFactoryAddressForConfig(p.smartWalletConfig); err != nil {
-		return nil, fmt.Errorf("cannot resolve account factory: %w", err)
-	}
-	aa.SetEntrypointAddress(p.smartWalletConfig.EntrypointAddress)
-
 	// For ETH transfers, we need to create a call to the smart wallet's execute function
 	// execute(target, value, data) where data is empty for pure ETH transfers
-	smartWalletCallData, err := aa.PackExecute(
+	smartWalletCallData, err := aa.PackExecuteMAv2(
 		destinationAddr, // target address
 		amount,          // ETH value to send
 		[]byte{},        // empty data for pure ETH transfer

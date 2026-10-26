@@ -434,7 +434,7 @@ func attemptDeferred(ctx context.Context, chain *ethclient.Client, chainRPC, bun
 	// just a call the hooks will accept.
 	transfer := append([]byte{0xa9, 0x05, 0x9c, 0xbb}, common.LeftPadBytes(controller.Bytes(), 32)...)
 	transfer = append(transfer, common.LeftPadBytes(big.NewInt(0).Bytes(), 32)...)
-	exec, err := aa.PackExecute(token, big.NewInt(0), transfer)
+	exec, err := aa.PackExecuteMAv2(token, big.NewInt(0), transfer)
 	if err != nil {
 		return err
 	}

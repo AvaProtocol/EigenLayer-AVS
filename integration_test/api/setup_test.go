@@ -30,6 +30,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
@@ -108,14 +109,13 @@ func newHarness(t *testing.T) *testHarness {
 	}
 }
 
-// walletFactoryPointer returns a pointer to the configured factory
-// address, or nil when the YAML didn't set one. StoreWallet accepts
-// nil so the record persists even in single-chain test configs.
+// walletFactoryPointer returns a pointer to the MA v2 factory, which every
+// stored wallet record names.
 func walletFactoryPointer(cfg *config.Config) *common.Address {
 	if cfg == nil || cfg.SmartWallet == nil {
 		return nil
 	}
-	addr := cfg.SmartWallet.FactoryAddress
+	addr := aa.MAv2FactoryAddress()
 	return &addr
 }
 

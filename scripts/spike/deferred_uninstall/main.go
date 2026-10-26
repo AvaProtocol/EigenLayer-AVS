@@ -282,7 +282,7 @@ func installPoliciedGrant(ctx context.Context, chain *ethclient.Client, chainRPC
 	// allowlisted action (a token transfer), not an arbitrary call.
 	transfer := append([]byte{0xa9, 0x05, 0x9c, 0xbb}, common.LeftPadBytes(controller.Bytes(), 32)...)
 	transfer = append(transfer, common.LeftPadBytes(oneToken.Bytes(), 32)...) // 1 SPIKE
-	exec, err := aa.PackExecute(token, big.NewInt(0), transfer)
+	exec, err := aa.PackExecuteMAv2(token, big.NewInt(0), transfer)
 	if err != nil {
 		return err
 	}
@@ -353,7 +353,7 @@ func attemptDeferredUninstall(ctx context.Context, chain *ethclient.Client, chai
 		return err
 	}
 
-	exec, err := aa.PackExecute(owner, big.NewInt(0), nil) // outer op is a no-op; the uninstall rides the deferred action
+	exec, err := aa.PackExecuteMAv2(owner, big.NewInt(0), nil) // outer op is a no-op; the uninstall rides the deferred action
 	if err != nil {
 		return err
 	}

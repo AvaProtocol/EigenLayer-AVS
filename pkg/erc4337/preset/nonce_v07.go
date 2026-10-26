@@ -19,7 +19,7 @@ import (
 // sequential contract writes sends the second operation while the first sits
 // in the bundler's mempool — a fresh getNonce returns the same sequence and
 // the send dies AA25 invalid account nonce. The v0.6 path solved this with a
-// per-sender cache (bundler.NonceManager); this is its v0.7 counterpart, with
+// per-sender cache; this is its v0.7 counterpart, with
 // one structural difference that is the whole reason it is a separate type:
 //
 // MA v2 sequences are per NONCE KEY, not per sender. The 192-bit key encodes

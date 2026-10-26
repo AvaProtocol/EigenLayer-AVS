@@ -66,14 +66,6 @@ func SendUserOpAuto(
 	if smartWalletConfig == nil {
 		return nil, nil, fmt.Errorf("nil smart wallet config")
 	}
-	if !smartWalletConfig.UsesModularAccountV2() {
-		return nil, nil, fmt.Errorf(
-			"chain %d is configured for account provider %q; only %s can execute — "+
-				"the v0.6 send path was removed with the EntryPoint v0.7 cutover",
-			smartWalletConfig.ChainID, smartWalletConfig.AccountProviderName(),
-			config.AccountProviderModularAccountV2)
-	}
-
 	// nil auth: SendUserOpMAv2 resolves the session grant itself, AFTER it has
 	// resolved the actual sender. Grants are stored per smart-wallet address,
 	// and callers do not always pass an override — resolving here against the
