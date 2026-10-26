@@ -189,28 +189,59 @@ func (r *nonceKeyRecorder) GetEntryPointNonce(_ context.Context, _ common.Addres
 	return new(big.Int).Or(new(big.Int).Lsh(key, 64), big.NewInt(7)), nil
 }
 
+// registerNonceReader serves both rig chains from one recorder. Nothing else
+// in this package registers readers, so cleanup clears the registry and
+// restores what was there.
+func registerNonceReader(t *testing.T) *nonceKeyRecorder {
+	t.Helper()
+	reader := &nonceKeyRecorder{}
+	prev := map[uint64]taskengine.ChainStateReader{}
+	for _, chainID := range []uint64{uint64(walletTestChain), uint64(walletOtherChain)} {
+		prev[chainID] = taskengine.GetChainStateReaderForChain(chainID)
+		taskengine.RegisterChainStateReader(chainID, reader)
+	}
+	t.Cleanup(func() {
+		taskengine.ClearChainStateReaderRegistry()
+		for chainID, previous := range prev {
+			taskengine.RegisterChainStateReader(chainID, previous)
+		}
+	})
+	return reader
+}
+
+// getNonce runs GET /wallets/{address}:getNonce with the given JWT audience
+// and ?chainId.
+func (r *walletTestRig) getNonce(t *testing.T, wallet common.Address, audChainID int64, chainIDQuery *int64) (*httptest.ResponseRecorder, error) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/wallets/"+wallet.Hex()+":getNonce", nil)
+	rec := httptest.NewRecorder()
+	ctx := echo.New().NewContext(req, rec)
+	ctx.Set("auth.user", &restmw.AuthenticatedUser{Subject: r.owner.Hex(), ChainID: audChainID})
+
+	var params generated.GetWalletNonceParams
+	if chainIDQuery != nil {
+		q := generated.ChainIdQuery(*chainIDQuery)
+		params.ChainId = &q
+	}
+	return rec, r.server.GetWalletNonce(ctx, generated.EthereumAddress(wallet.Hex()), params)
+}
+
+func requireWalletNotFound(t *testing.T, err error) {
+	t.Helper()
+	var httpErr *restmw.HTTPError
+	require.ErrorAs(t, err, &httpErr)
+	require.Equal(t, http.StatusNotFound, httpErr.Status)
+}
+
 // The owner signs through the fallback signer, which Modular Account v2
 // selects with nonce key 0x1. Key 0 selects no validation, so a nonce read
 // there builds an operation the account will not validate.
 func TestGetWalletNonceReadsOwnerValidationKey(t *testing.T) {
 	rig := newWalletRig(t)
-	reader := &nonceKeyRecorder{}
-	prev := taskengine.GetChainStateReaderForChain(uint64(walletTestChain))
-	taskengine.RegisterChainStateReader(uint64(walletTestChain), reader)
-	t.Cleanup(func() {
-		if prev == nil {
-			taskengine.ClearChainStateReaderRegistry()
-		} else {
-			taskengine.RegisterChainStateReader(uint64(walletTestChain), prev)
-		}
-	})
+	reader := registerNonceReader(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/wallets/"+rig.onDefault.Hex()+":getNonce", nil)
-	rec := httptest.NewRecorder()
-	ctx := echo.New().NewContext(req, rec)
-	ctx.Set("auth.user", &restmw.AuthenticatedUser{Subject: rig.owner.Hex(), ChainID: walletTestChain})
-
-	require.NoError(t, rig.server.GetWalletNonce(ctx, generated.EthereumAddress(rig.onDefault.Hex()), generated.GetWalletNonceParams{}))
+	rec, err := rig.getNonce(t, rig.onDefault, walletTestChain, nil)
+	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.NotNil(t, reader.key)
 	require.Equal(t, "1", reader.key.String(), "must read the fallback signer's nonce key")
@@ -218,4 +249,31 @@ func TestGetWalletNonceReadsOwnerValidationKey(t *testing.T) {
 	var out generated.NonceResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
 	require.Equal(t, "18446744073709551623", out.Nonce, "the full nonce, 1<<64 | 7, goes in userOp.nonce as is")
+}
+
+// The ownership check reads the record on the chain whose nonce is read, not
+// the gateway's default chain.
+func TestGetWalletNonceChecksOwnershipOnTheReadChain(t *testing.T) {
+	rig := newWalletRig(t)
+	registerNonceReader(t)
+	other := walletOtherChain
+	def := walletTestChain
+
+	// Registered only on the other chain: readable there via ?chainId,
+	// though the aud is the default chain.
+	rec, err := rig.getNonce(t, rig.onOther, walletTestChain, &other)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	// And via the aud alone.
+	_, err = rig.getNonce(t, rig.onOther, walletOtherChain, nil)
+	require.NoError(t, err)
+
+	// A default-chain record does not open another chain's nonce.
+	_, err = rig.getNonce(t, rig.onDefault, walletTestChain, &other)
+	requireWalletNotFound(t, err)
+
+	// Nor the reverse.
+	_, err = rig.getNonce(t, rig.onOther, walletOtherChain, &def)
+	requireWalletNotFound(t, err)
 }

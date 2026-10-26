@@ -374,10 +374,13 @@ func (s *Server) GetWalletNonce(ctx echo.Context, address generated.EthereumAddr
 		chainReader = taskengine.NewDirectChainStateReader(rpc, chainID)
 	}
 
-	// Ownership check — the engine's GetWalletFromDB lookup is the
-	// canonical source of truth that this wallet belongs to the
-	// authenticated user.
-	if stored, dbErr := s.engine.GetWalletFromDB(user.Address, walletAddr.Hex()); dbErr != nil || stored == nil {
+	// Ownership check against the record on the chain being read.
+	// Wallet records are per chain, as in GET /wallets.
+	recordChainID := chainID
+	if recordChainID <= 0 && s.config != nil && s.config.SmartWallet != nil {
+		recordChainID = s.config.SmartWallet.ChainID
+	}
+	if stored, dbErr := s.engine.StoredWallet(recordChainID, user.Address, walletAddr.Hex()); dbErr != nil || stored == nil {
 		return &restmw.HTTPError{
 			Status: http.StatusNotFound,
 			Code:   "WALLETS_NOT_FOUND",

@@ -40,7 +40,9 @@ The REST endpoint also read key 0. Modular Account v2 selects the validation fro
   - The client keeps `GetUserOperationByHash` and `GetUserOperationReceipt`.
   - `go.mod` drops `go-playground/validator` and the direct `mapstructure` requirement, which only the parser used.
 - **Nonce reads** use `aa.EntryPointNonce`, which reads the v0.7 EntryPoint. This covers the REST endpoint and both worker RPCs. It rejects keys outside uint192, and the worker's `GetNonce` rejects a negative salt.
-- **`GET /wallets/{address}:getNonce`** reads the owner's key `0x1`. It returns the full nonce, `key << 64 | sequence`, for use as `userOp.nonce` unchanged. The OpenAPI description says so. Workflow execution was not affected: the send path already read the nonce at its validation entity's key.
+- **`GET /wallets/{address}:getNonce`:**
+  - Reads the owner's key `0x1`. It returns the full nonce, `key << 64 | sequence`, for use as `userOp.nonce` unchanged. The OpenAPI description says so. Workflow execution was not affected: the send path already read the nonce at its validation entity's key.
+  - Checks ownership against the wallet record on the chain being read. It checked the gateway's default chain, so a wallet registered only on another chain returned 404, and a default-chain record opened every chain's nonce.
 - **Config:**
   - Removed `factory_address`, `entrypoint_address`, `paymaster_address` and `account_provider` from `smart_wallet` (top level and per chain), and from the worker's `smart_wallet`.
   - YAML loading ignores unknown keys, so existing configs still load. A config that sets these keys now gets no boot warning and no refusal.
@@ -59,7 +61,10 @@ The REST endpoint also read key 0. Modular Account v2 selects the validation fro
 - **Removed:** tests of the dual-provider routing and of `account_provider` validation; the v0.6 EntryPoint-deposit withdrawal test, whose single-argument `withdrawTo` exists on neither EntryPoint; and the manual "withdraw all" test of the v0.6 paymaster reimbursement.
 - **`testutil`:** removed the v0.6 helpers `EnsureWalletDeployed` and `GetTestSmartWalletAddress`. The live tests that used them now require a deployed fixture, and the failure message names `scripts/fixture_wallet -deploy`.
 - **Moved to MA v2:** the `aa` round-trip and inner-call tests now pack MA v2 batches.
-- **Added:** `TestGetWalletNonceReadsOwnerValidationKey` pins the REST nonce key to `0x1` and the response to the full nonce. `TestEntryPointNonceRejectsKeysOutsideUint192` covers negative and oversized keys.
+- **Added:**
+  - `TestGetWalletNonceReadsOwnerValidationKey` pins the REST nonce key to `0x1` and the response to the full nonce.
+  - `TestGetWalletNonceChecksOwnershipOnTheReadChain` covers both directions of the per-chain ownership check.
+  - `TestEntryPointNonceRejectsKeysOutsideUint192` covers negative and oversized keys.
 
 ## Deploying
 
