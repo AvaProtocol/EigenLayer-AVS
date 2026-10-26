@@ -65,7 +65,7 @@ func buildETHWithdrawalCalldata(recipient common.Address, amount *big.Int) ([]by
 	// - target: recipient address
 	// - value: amount to transfer
 	// - data: empty (no additional calldata needed)
-	return aa.PackExecute(recipient, amount, []byte{})
+	return aa.PackExecuteMAv2(recipient, amount, []byte{})
 }
 
 // buildERC20WithdrawalCalldata builds calldata for ERC20 token withdrawal
@@ -86,5 +86,5 @@ func buildERC20WithdrawalCalldata(tokenAddress, recipient common.Address, amount
 	// - target: token contract address
 	// - value: 0 (no ETH transfer needed for ERC20)
 	// - data: transfer function calldata
-	return aa.PackExecute(tokenAddress, big.NewInt(0), transferCalldata)
+	return aa.PackExecuteMAv2(tokenAddress, big.NewInt(0), transferCalldata)
 }

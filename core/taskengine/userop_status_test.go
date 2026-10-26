@@ -33,7 +33,7 @@ func TestNormalizeUserOpHash(t *testing.T) {
 
 func TestParseBundlerUserOp_Envelope(t *testing.T) {
 	token := common.HexToAddress("0xaaaa000000000000000000000000000000000001")
-	packed, err := aa.PackExecute(token, big.NewInt(0), []byte{0xa9, 0x05, 0x9c, 0xbb})
+	packed, err := aa.PackExecuteMAv2(token, big.NewInt(0), []byte{0xa9, 0x05, 0x9c, 0xbb})
 	require.NoError(t, err)
 
 	sender := common.HexToAddress("0x2222222222222222222222222222222222222222")
@@ -143,7 +143,7 @@ func lookupTestEngine(t *testing.T) (*Engine, storage.Storage, common.Address, c
 
 func packedTransfer(t *testing.T, to common.Address) []byte {
 	t.Helper()
-	packed, err := aa.PackExecute(to, big.NewInt(0), []byte{0xa9, 0x05, 0x9c, 0xbb})
+	packed, err := aa.PackExecuteMAv2(to, big.NewInt(0), []byte{0xa9, 0x05, 0x9c, 0xbb})
 	require.NoError(t, err)
 	return packed
 }

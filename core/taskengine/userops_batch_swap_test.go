@@ -72,22 +72,16 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 	require.NoError(t, err, "Failed to connect to RPC")
 	t.Cleanup(func() { client.Close() })
 
-	setGlobalFactory(t, cfg.SmartWallet)
-
-	smartWalletAddress, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(fixtureSaltBatchSwap))
+	smartWalletAddress, err := aa.GetSenderAddressMAv2(client, ownerAddress, big.NewInt(fixtureSaltBatchSwap))
 	require.NoError(t, err, "Failed to derive smart wallet address")
 	t.Logf("🔑 Owner EOA: %s", ownerAddress.Hex())
 	t.Logf("💼 Smart Wallet (salt:0): %s", smartWalletAddress.Hex())
 
-	// Ensure the wallet is deployed (executeBatch is called on the deployed account).
+	// executeBatch is called on the deployed account.
 	code, err := client.CodeAt(context.Background(), *smartWalletAddress, nil)
 	require.NoError(t, err, "Failed to check wallet deployment status")
-	if len(code) == 0 {
-		t.Logf("⚠️  Wallet not deployed, deploying it first...")
-		err = testutil.EnsureWalletDeployed(client, cfg.SmartWallet.FactoryAddress, ownerAddress, big.NewInt(fixtureSaltBatchSwap), testutil.GetTestControllerPrivateKey())
-		require.NoError(t, err, "Failed to deploy wallet (controller needs funds to deploy)")
-		t.Logf("✅ Wallet deployed")
-	}
+	require.NotEmpty(t, code, "fixture wallet %s is not deployed: go run ./scripts/fixture_wallet -salt %d -deploy",
+		smartWalletAddress.Hex(), fixtureSaltBatchSwap)
 
 	// The wallet reimburses the paymaster for gas, so it needs a little ETH.
 	balance, err := client.BalanceAt(context.Background(), *smartWalletAddress, nil)

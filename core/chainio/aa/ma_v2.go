@@ -12,8 +12,9 @@ import (
 
 // Execution calldata encoding for Alchemy Modular Account v2.
 //
-// How this differs from the v0.6 SimpleAccount encoding in aa.go, verified
-// against the deployed SemiModularAccountBytecode implementation
+// How this differs from the v0.6 SimpleAccount encoding the gateway used
+// before the EntryPoint v0.7 cutover, verified against the deployed
+// SemiModularAccountBytecode implementation
 // (0x000000000000c5A9089039570Dd36455b5C07383):
 //
 //	execute(address,uint256,bytes)                      0xb61d27f6  present — unchanged
@@ -68,9 +69,7 @@ func ensureModularAccountABI() (abi.ABI, error) {
 	return modularAccountABI, modularAccountABIErr
 }
 
-// PackExecuteMAv2 encodes a single call. Identical on the wire to the v0.6
-// PackExecute; kept as its own symbol so call sites read unambiguously and so
-// the v0.6 helper can be deleted at cutover without touching these.
+// PackExecuteMAv2 encodes a single call.
 func PackExecuteMAv2(target common.Address, value *big.Int, data []byte) ([]byte, error) {
 	parsed, err := ensureModularAccountABI()
 	if err != nil {

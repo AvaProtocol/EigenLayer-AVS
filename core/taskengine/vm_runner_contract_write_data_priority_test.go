@@ -32,21 +32,18 @@ func TestContractWriteDataPriority(t *testing.T) {
 		config := testutil.GetAggregatorConfig()
 		engine := New(db, config, nil, testutil.GetLogger())
 
-		smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
-		setGlobalFactory(t, smartWalletConfig)
-
 		ownerAddr, ok := testutil.MustGetTestOwnerAddress()
 		if !ok {
 			t.Skip("Owner EOA address not set, skipping test")
 		}
 		ownerEOA := *ownerAddr
-		factory := effectiveFactoryAddr(t, config.SmartWallet)
+		factory := aa.MAv2FactoryAddress()
 
 		client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
 		require.NoError(t, err, "Failed to connect to RPC")
 		t.Cleanup(func() { client.Close() })
 
-		runnerAddr, err := aa.GetSenderAddress(client, ownerEOA, big.NewInt(0))
+		runnerAddr, err := aa.GetSenderAddressMAv2(client, ownerEOA, big.NewInt(0))
 		require.NoError(t, err, "Failed to derive smart wallet address")
 
 		_ = StoreWallet(db, int64(1), ownerEOA, &model.SmartWallet{

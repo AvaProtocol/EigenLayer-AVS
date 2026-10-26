@@ -1246,11 +1246,7 @@ func (x *WorkflowExecutor) validateWalletOwnership(ctx context.Context, chainID 
 	if swCfg != nil {
 		if reader := GetChainStateReaderForChain(uint64(chainID)); reader != nil {
 			// Gateway mode: derive salt:0 via the chain worker (no gateway dial).
-			defaultFactory, factoryErr := aa.EffectiveFactory(swCfg)
-			if factoryErr != nil {
-				x.logger.Warn("Failed to resolve factory for validation",
-					"chain_id", chainID, "error", factoryErr)
-			} else if addr, derr := reader.GetSmartWalletAddress(ctx, user.Address, defaultFactory, big.NewInt(0)); derr == nil {
+			if addr, derr := reader.GetSmartWalletAddress(ctx, user.Address, aa.MAv2FactoryAddress(), big.NewInt(0)); derr == nil {
 				user.SmartAccountAddress = &addr
 			} else {
 				x.logger.Warn("Failed to load default smart wallet for validation",
@@ -1299,14 +1295,11 @@ func (x *WorkflowExecutor) validateWalletOwnership(ctx context.Context, chainID 
 // passing it in (rather than reading x.smartWalletConfig) is what makes
 // this work in gateway mode where the executor is shared across chains.
 func (x *WorkflowExecutor) validateDerivedWallet(ctx context.Context, chainID int64, swCfg *config.SmartWalletConfig, owner common.Address, smartWalletAddr common.Address) (bool, error) {
-	// Scans this chain's CURRENT factory only. After the v0.7 cutover that is
-	// the MA v2 factory, so a pre-cutover v0.6 wallet no longer validates by
-	// derivation — it validates through its stored record in step 2 of
-	// validateWalletOwnership, which is where existing wallets are recognised.
-	factoryAddr, factoryErr := aa.EffectiveFactory(swCfg)
-	if factoryErr != nil {
-		return false, factoryErr
-	}
+	// Scans the MA v2 factory only, so a pre-cutover v0.6 wallet never
+	// validates by derivation — it validates through its stored record in
+	// step 2 of validateWalletOwnership, which is where existing wallets are
+	// recognised.
+	factoryAddr := aa.MAv2FactoryAddress()
 
 	// Try salt values from 0 to max_wallets_per_owner to see if any produce the target wallet address
 	// This uses the configured limit from aggregator.yaml
@@ -1341,7 +1334,7 @@ func (x *WorkflowExecutor) validateDerivedWallet(ctx context.Context, chainID in
 	defer rpcClient.Close()
 
 	for salt := int64(0); salt < maxWallets; salt++ {
-		derivedAddr, derr := aa.DeriveSenderAddressAuto(rpcClient, owner, factoryAddr, big.NewInt(salt))
+		derivedAddr, derr := aa.DeriveSenderAddress(rpcClient, owner, factoryAddr, big.NewInt(salt))
 		if derr != nil {
 			x.logger.Debug("Failed to derive wallet address",
 				"owner", owner.Hex(), "factory", factoryAddr.Hex(), "salt", salt, "error", derr)
@@ -1500,31 +1493,22 @@ func (x *WorkflowExecutor) persistFailedExecution(task *model.Workflow, executio
 // rather than rolling into a single noisy one. The event is logged at Warn
 // in addition; SentryLogger.Warn does not double-capture.
 //
-// The Warn log and the Sentry scope both carry owner, smart_wallet,
+// The Warn log and the Sentry scope both carry owner, smart_wallet and
 // created_at (derived from the ULID task id since Task has no created_at
-// field) and factory_address (resolved here via resolveSmartWalletConfig
-// for the task's chain — the same lookup the validation path used moments
-// earlier; config doesn't drift mid-process, so the values match). Without
-// those, an operator triaging a burst of these alerts (e.g.
+// field). Without those, an operator triaging a burst of these alerts (e.g.
 // EIGENLAYER-AVS-1Y..28) can't tell at a glance whether it's one
-// customer's wallet-migration mistake, a cohort from a SDK regression, or
-// a chain-config drift — the same observability gap 460292b closed for
-// the startup invalid-task log.
+// customer's wallet-migration mistake or a cohort from a SDK regression —
+// the same observability gap 460292b closed for the startup invalid-task log.
 func (x *WorkflowExecutor) reportTaskAutoDisabled(task *model.Workflow, reason string) {
 	createdAt := "unknown"
 	if parsed, perr := ulid.Parse(strings.ToUpper(task.Id)); perr == nil {
 		createdAt = time.UnixMilli(int64(parsed.Time())).UTC().Format(time.RFC3339)
-	}
-	factoryAddress := ""
-	if swCfg := x.resolveSmartWalletConfig(x.engine.defaultChainID()); swCfg != nil {
-		factoryAddress = swCfg.FactoryAddress.Hex()
 	}
 
 	x.logger.Warn("task auto-disabled after consecutive validation failures",
 		"task_id", task.Id,
 		"owner", task.Owner,
 		"smart_wallet", task.SmartWalletAddress,
-		"factory_address", factoryAddress,
 		"created_at", createdAt,
 		"consecutive_failures", task.ConsecutiveValidationFailures,
 		"reason", reason)
@@ -1533,9 +1517,6 @@ func (x *WorkflowExecutor) reportTaskAutoDisabled(task *model.Workflow, reason s
 		scope.SetTag("task_id", task.Id)
 		scope.SetTag("owner", task.Owner)
 		scope.SetTag("smart_wallet", task.SmartWalletAddress)
-		if factoryAddress != "" {
-			scope.SetTag("factory_address", factoryAddress)
-		}
 		scope.SetExtra("created_at", createdAt)
 		scope.SetExtra("consecutive_failures", task.ConsecutiveValidationFailures)
 		scope.SetExtra("reason", reason)

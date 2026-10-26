@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
-	"github.com/ethereum/go-ethereum/common"
 )
 
 // TestResolveSmartWalletForNode_TaskChainIDFallback exercises the
@@ -25,14 +24,12 @@ func TestResolveSmartWalletForNode_TaskChainIDFallback(t *testing.T) {
 	)
 
 	mainnetCfg := &config.SmartWalletConfig{
-		ChainID:          mainnetChainID,
-		EthRpcUrl:        "https://mainnet.example/rpc",
-		PaymasterAddress: common.HexToAddress("0xf023eA291F5bEDA4Bf59BbDC9004F1d18be19D6f"),
+		ChainID:   mainnetChainID,
+		EthRpcUrl: "https://mainnet.example/rpc",
 	}
 	sepoliaCfg := &config.SmartWalletConfig{
-		ChainID:          sepoliaChainID,
-		EthRpcUrl:        "https://sepolia.example/rpc",
-		PaymasterAddress: common.HexToAddress("0xd856f532F7C032e6b30d76F19187F25A068D6d92"),
+		ChainID:   sepoliaChainID,
+		EthRpcUrl: "https://sepolia.example/rpc",
 	}
 	baseCfg := &config.SmartWalletConfig{
 		ChainID:   baseChainID,

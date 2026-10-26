@@ -165,7 +165,7 @@ func run() error {
 		return err
 	}
 
-	execNoop, err := aa.PackExecute(owner, big.NewInt(0), nil) // 0xb61d27f6 — an allowed selector
+	execNoop, err := aa.PackExecuteMAv2(owner, big.NewInt(0), nil) // 0xb61d27f6 — an allowed selector
 	if err != nil {
 		return err
 	}

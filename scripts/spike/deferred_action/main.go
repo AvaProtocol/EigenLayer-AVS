@@ -219,7 +219,7 @@ func run() error {
 	}
 
 	// ── First use: controller builds, signs, sends — deploy + install + execute ──
-	callData, err := aa.PackExecute(ownerAddr, big.NewInt(0), nil)
+	callData, err := aa.PackExecuteMAv2(ownerAddr, big.NewInt(0), nil)
 	if err != nil {
 		return err
 	}
@@ -270,7 +270,7 @@ func proveInstallPersists(ctx context.Context, chain *ethclient.Client, chainRPC
 	bundler *rpc.Client, entryPoint common.Address, chainID *big.Int,
 	account, ownerAddr common.Address, controllerKey *ecdsa.PrivateKey) error {
 
-	callData, err := aa.PackExecute(ownerAddr, big.NewInt(0), nil)
+	callData, err := aa.PackExecuteMAv2(ownerAddr, big.NewInt(0), nil)
 	if err != nil {
 		return err
 	}

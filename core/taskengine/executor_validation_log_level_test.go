@@ -119,7 +119,7 @@ func kvLookup(kvs []interface{}, key string) (interface{}, bool) {
 // TestReportTaskAutoDisabledIncludesOwnerContext is the regression for the
 // EIGENLAYER-AVS-1Y..28 burst: the auto-disable Warn log (and the matching
 // Sentry scope, which is populated from the same data) must carry owner,
-// smart_wallet, factory_address and created_at so an operator can triage
+// smart_wallet and created_at so an operator can triage
 // without dropping into BadgerDB.
 func TestReportTaskAutoDisabledIncludesOwnerContext(t *testing.T) {
 	db := testutil.TestMustDB()
@@ -175,12 +175,5 @@ func TestReportTaskAutoDisabledIncludesOwnerContext(t *testing.T) {
 	}
 	if s, _ := createdAt.(string); s == "" || s == "unknown" {
 		t.Fatalf("created_at should derive from the ULID id, got %v", createdAt)
-	}
-	factoryAddress, found := kvLookup(kvs, "factory_address")
-	if !found {
-		t.Fatalf("auto-disable Warn missing factory_address; got kvs=%v", kvs)
-	}
-	if s, _ := factoryAddress.(string); s == "" {
-		t.Fatalf("factory_address should resolve from smartWalletConfig in test env, got empty string")
 	}
 }

@@ -48,7 +48,6 @@ gas_manager_webhook_secret:  ${GAS_MANAGER_WEBHOOK_SECRET}
 # Smart wallet / account abstraction config.
 smart_wallet:
   controller_private_key: <testnet-controller-private-key-hex>
-  paymaster_address:      0xd856f532F7C032e6b30d76F19187F25A068D6d92
 
 # Legacy shared setting; inert in a read-only worker. Disable sponsorship
 # on the local gateway itself when it must not use a production policy.

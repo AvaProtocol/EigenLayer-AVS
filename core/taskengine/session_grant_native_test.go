@@ -58,8 +58,8 @@ func TestFormatSessionPolicyNativeNotAllowed(t *testing.T) {
 }
 
 // The preflight is what keeps a native transfer from reaching the bundler and
-// coming back as opaque AA23. It must fire on an MA v2 chain and stay out of
-// the way anywhere else.
+// coming back as opaque AA23. It must stay out of the way when it has nothing
+// to check against.
 func TestETHTransferPreflightSessionGrant(t *testing.T) {
 	recipient := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
 	amount := big.NewInt(1)
@@ -71,16 +71,6 @@ func TestETHTransferPreflightSessionGrant(t *testing.T) {
 		}
 		if msg := p.preflightSessionGrant(recipient, amount); msg != "" {
 			t.Fatalf("no policy: send path fails no session authorization, got %q", msg)
-		}
-	})
-
-	t.Run("skips when the chain is not modular account v2", func(t *testing.T) {
-		p := &ETHTransferProcessor{
-			CommonProcessor:   &CommonProcessor{},
-			smartWalletConfig: &config.SmartWalletConfig{ChainID: 11155111, AccountProvider: "something_else"},
-		}
-		if msg := p.preflightSessionGrant(recipient, amount); msg != "" {
-			t.Fatalf("non-MA-v2 chain has no session hooks to trip, got %q", msg)
 		}
 	})
 

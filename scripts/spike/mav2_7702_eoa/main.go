@@ -229,7 +229,7 @@ func run() error {
 	}
 	fmt.Println("B2 packing: Track A SessionPermissions.HooksFor; AllowSignatureValidation=false")
 
-	exec, err := aa.PackExecute(alice, oneWei, nil)
+	exec, err := aa.PackExecuteMAv2(alice, oneWei, nil)
 	if err != nil {
 		return err
 	}
@@ -472,7 +472,7 @@ func (h *harness) deferredInstall(hooks [][]byte, exec []byte, vgl int64) (*user
 }
 
 func (h *harness) estimateNative(to common.Address, value *big.Int) error {
-	exec, err := aa.PackExecute(to, value, nil)
+	exec, err := aa.PackExecuteMAv2(to, value, nil)
 	if err != nil {
 		return err
 	}

@@ -51,9 +51,9 @@ type ChainStateReader interface {
 	// nil-equivalent blockNumber per ethclient semantics.
 	CodeAt(ctx context.Context, addr common.Address) ([]byte, error)
 
-	// GetEntryPointNonce reads the ERC-4337 EntryPoint nonce for the
-	// given smart wallet address. key is the 192-bit nonce-space key
-	// (typically 0 for the default space). Mirrors aa.GetNonce.
+	// GetEntryPointNonce reads the v0.7 EntryPoint nonce for the given
+	// smart wallet address. key is the 192-bit nonce-space key (typically
+	// 0 for the default space). Mirrors aa.EntryPointNonce.
 	GetEntryPointNonce(ctx context.Context, walletAddr common.Address, key *big.Int) (*big.Int, error)
 
 	// GetBalance reads the native-coin balance (wei) at addr, latest block.
@@ -66,9 +66,7 @@ type ChainStateReader interface {
 
 	// GetSmartWalletAddress derives the CREATE2 smart-wallet address for
 	// (owner, salt) under the given factory on this chain. Mirrors
-	// aa.DeriveSenderAddressAuto — the factory determines which account
-	// implementation (and therefore which derivation ABI) is used, so callers
-	// must pass the factory they actually mean. See aa.EffectiveFactory.
+	// aa.DeriveSenderAddress, which refuses any factory but MA v2.
 	GetSmartWalletAddress(ctx context.Context, owner, factory common.Address, salt *big.Int) (common.Address, error)
 
 	// CallContract executes a read-only contract call (eth_call) at the
@@ -194,13 +192,8 @@ func (d *directChainStateReader) CodeAt(ctx context.Context, addr common.Address
 	return d.client.CodeAt(ctx, addr, nil)
 }
 
-func (d *directChainStateReader) GetEntryPointNonce(_ context.Context, walletAddr common.Address, key *big.Int) (*big.Int, error) {
-	// aa.GetNonce uses bind.CallOpts internally; it doesn't take ctx
-	// (legacy signature). Context cancellation here is therefore a
-	// best-effort no-op — the underlying eth_call may still be in
-	// flight when the caller cancels. Worth fixing in aa as a
-	// separate follow-up; out of scope for this layer.
-	return getEntryPointNonceDirect(d.client, walletAddr, key)
+func (d *directChainStateReader) GetEntryPointNonce(ctx context.Context, walletAddr common.Address, key *big.Int) (*big.Int, error) {
+	return aa.EntryPointNonce(ctx, d.client, walletAddr, key)
 }
 
 func (d *directChainStateReader) GetBalance(ctx context.Context, addr common.Address) (*big.Int, error) {
@@ -227,7 +220,7 @@ func (d *directChainStateReader) GetSmartWalletAddress(_ context.Context, owner,
 	if salt == nil {
 		salt = big.NewInt(0)
 	}
-	addr, err := aa.DeriveSenderAddressAuto(d.client, owner, factory, salt)
+	addr, err := aa.DeriveSenderAddress(d.client, owner, factory, salt)
 	if err != nil {
 		return common.Address{}, err
 	}
@@ -285,13 +278,16 @@ func (d *directChainStateReader) FindMatchingWalletSalt(ctx context.Context, own
 	if maxSalts > maxDirectWalletSaltScan {
 		return false, 0, fmt.Errorf("max_salts %d exceeds cap %d", maxSalts, maxDirectWalletSaltScan)
 	}
+	if err := aa.RequireMAv2Factory(factory); err != nil {
+		return false, 0, err
+	}
 	var lastErr error
 	errCount := int64(0)
 	for salt := int64(0); salt < maxSalts; salt++ {
 		if err := ctx.Err(); err != nil {
 			return false, 0, err
 		}
-		addr, err := aa.DeriveSenderAddressAuto(d.client, owner, factory, big.NewInt(salt))
+		addr, err := aa.DeriveSenderAddress(d.client, owner, factory, big.NewInt(salt))
 		if err != nil {
 			lastErr = err
 			errCount++

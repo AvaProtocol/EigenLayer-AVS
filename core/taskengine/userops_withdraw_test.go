@@ -58,12 +58,9 @@ func setupUserOpWithdrawalTest(t *testing.T) (*config.Config, common.Address, *c
 	require.NoError(t, err, "Failed to connect to RPC")
 	t.Cleanup(func() { client.Close() })
 
-	// Set factory address for smart wallet derivation
-	setGlobalFactory(t, cfg.SmartWallet)
-
 	// Always derive smart wallet address from owner + salt:0
 	// This ensures consistency and tests the auto-creation flow
-	smartWalletAddress, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(fixtureSaltWithdrawal))
+	smartWalletAddress, err := aa.GetSenderAddressMAv2(client, ownerAddress, big.NewInt(fixtureSaltWithdrawal))
 	require.NoError(t, err, "Failed to derive smart wallet address")
 
 	t.Logf("🔑 Owner EOA: %s", ownerAddress.Hex())
@@ -186,7 +183,7 @@ func TestUserOpETHTransferWithPaymaster(t *testing.T) {
 // Test 1: USDC Transfer with Paymaster Sponsorship
 // Tests transferring USDC using paymaster sponsorship
 func TestUserOpUSDCWithdrawalWithPaymaster(t *testing.T) {
-	cfg, _, smartWalletAddress, destinationAddress, client, engine, user := setupUserOpWithdrawalTest(t)
+	_, _, smartWalletAddress, destinationAddress, client, engine, user := setupUserOpWithdrawalTest(t)
 
 	t.Logf("🔄 STEP 1: USDC Transfer with Paymaster Sponsorship")
 
@@ -224,7 +221,6 @@ func TestUserOpUSDCWithdrawalWithPaymaster(t *testing.T) {
 	usdcFloat := float64(transferAmount.Int64()) / 1e6
 	t.Logf("💰 USDC Balance: %s (raw = %.6f USDC)", usdcBalance.String(), float64(usdcBalance.Int64())/1e6)
 	t.Logf("💸 Transferring %s (raw), %.6f USDC to %s", transferAmount.String(), usdcFloat, destinationAddress.Hex())
-	t.Logf("💳 Paymaster: %s (FIXED - no senderNonce increment)", cfg.SmartWallet.PaymasterAddress.Hex())
 
 	// Target the USDC contract directly - vm_runner_contract_write will wrap it in smart wallet execute()
 	// This creates: smartWallet.execute(USDC, 0, USDC.transfer(...))
@@ -302,114 +298,6 @@ func TestUserOpUSDCWithdrawalWithPaymaster(t *testing.T) {
 	t.Logf("🎉 USDC transfer with paymaster sponsorship completed!")
 }
 
-// Test 2: EntryPoint Deposit Withdrawal (Paymaster-Sponsored)
-// Tests withdrawing EntryPoint deposit using paymaster-sponsored UserOps
-// Note: Paymaster pays for the gas, while the deposit itself is withdrawn to destination
-func TestUserOpEntryPointWithdrawalWithPaymaster(t *testing.T) {
-	cfg, _, smartWalletAddress, destinationAddress, client, engine, user := setupUserOpWithdrawalTest(t)
-
-	t.Logf("🔄 STEP 2: EntryPoint Deposit Withdrawal (Paymaster-Sponsored Gas)")
-
-	// Check EntryPoint deposit
-	entryPointContract, err := aa.NewEntryPoint(cfg.SmartWallet.EntrypointAddress, client)
-	require.NoError(t, err, "Failed to initialize EntryPoint contract")
-
-	depositInfo, err := entryPointContract.GetDepositInfo(nil, *smartWalletAddress)
-	if err != nil {
-		t.Logf("⚠️  Could not get EntryPoint deposit: %v", err)
-		depositInfo.Deposit = big.NewInt(0)
-	}
-
-	t.Logf("🏦 EntryPoint Deposit: %s wei (%.6f ETH)", depositInfo.Deposit.String(), float64(depositInfo.Deposit.Int64())/1e18)
-
-	// Use a tiny withdraw amount to allow ~100+ test runs with 0.001 ETH deposit
-	// Withdraw 0.000001 ETH (1 microether) per test
-	withdrawAmount := big.NewInt(1000000000000) // 0.000001 ETH in wei (1 microether)
-
-	requireFixtureBalance(t, "EntryPoint deposit (wei)", *smartWalletAddress, depositInfo.Deposit, withdrawAmount)
-
-	t.Logf("💸 Withdrawing %s wei (%.6f ETH) from EntryPoint deposit", withdrawAmount.String(), float64(withdrawAmount.Int64())/1e18)
-	t.Logf("   (Tiny amount to allow ~1000 test runs with 0.001 ETH deposit)")
-
-	// EntryPoint withdrawTo ABI
-	withdrawABI := []interface{}{
-		map[string]interface{}{
-			"inputs": []interface{}{
-				map[string]interface{}{"name": "withdrawAddress", "type": "address"},
-			},
-			"name":            "withdrawTo",
-			"outputs":         []interface{}{},
-			"stateMutability": "nonpayable",
-			"type":            "function",
-		},
-	}
-
-	// Call EntryPoint withdrawTo function directly (self-funded, no paymaster needed)
-	withdrawConfig := map[string]interface{}{
-		"contractAddress": cfg.SmartWallet.EntrypointAddress.Hex(),
-		"contractAbi":     withdrawABI,
-		"methodCalls": []interface{}{
-			map[string]interface{}{
-				"methodName":   "withdrawTo",
-				"methodParams": []interface{}{destinationAddress.Hex()},
-				"callData":     "",
-			},
-		},
-	}
-
-	settings := map[string]interface{}{
-		"runner":      smartWalletAddress.Hex(),
-		"smartWallet": smartWalletAddress.Hex(),
-		"destination": destinationAddress.Hex(),
-		"amount":      withdrawAmount.String(),
-		"entryPoint":  cfg.SmartWallet.EntrypointAddress.Hex(),
-		"chain_id":    int64(8453), // Base chain ID
-	}
-
-	inputVars := map[string]interface{}{
-		"settings": settings,
-	}
-
-	// Use paymaster to sponsor the gas for withdrawal transaction
-	// Note: The EntryPoint deposit is separate from gas payment
-	// Paymaster pays gas, and we withdraw the deposit to destination
-	usePaymaster := true
-	t.Logf("   Using PAYMASTER to sponsor gas for withdrawal transaction...")
-	withdrawResult, err := engine.RunNodeImmediately("contractWrite", withdrawConfig, inputVars, user, false, &usePaymaster)
-
-	require.NoError(t, err, "EntryPoint withdrawal RunNodeImmediately should not return error")
-	require.NotNil(t, withdrawResult, "EntryPoint withdrawal result should not be nil")
-
-	// Check if the execution succeeded
-	if successVal, ok := withdrawResult["success"]; ok {
-		if success, isBool := successVal.(bool); isBool && !success {
-			if errorVal, hasError := withdrawResult["error"]; hasError {
-				if errorStr, isString := errorVal.(string); isString {
-					t.Fatalf("❌ EntryPoint withdrawal execution failed: %s", errorStr)
-				}
-			}
-			t.Fatalf("❌ EntryPoint withdrawal execution failed with success=false")
-		}
-	}
-
-	t.Logf("✅ EntryPoint withdrawal confirmed on-chain")
-	t.Logf("   Result: %+v", withdrawResult)
-
-	// Verify the remaining deposit
-	newDepositInfo, err := entryPointContract.GetDepositInfo(nil, *smartWalletAddress)
-	if err == nil {
-		t.Logf("📊 Remaining EntryPoint Deposit: %s wei (%f ETH)", newDepositInfo.Deposit.String(), float64(newDepositInfo.Deposit.Int64())/1e18)
-	}
-
-	// Check destination received funds
-	destinationBalance, err := client.BalanceAt(context.Background(), destinationAddress, nil)
-	if err == nil {
-		t.Logf("💰 Destination Balance: %s wei (%f ETH)", destinationBalance.String(), float64(destinationBalance.Int64())/1e18)
-	}
-
-	t.Logf("🎉 EntryPoint deposit withdrawal completed!")
-}
-
 // TestUserOpETHWithdrawal_Sepolia tests a fixed-amount ETH withdrawal on Sepolia
 // This test withdraws exactly 0.001 ETH from the smart wallet using paymaster sponsorship
 func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
@@ -459,32 +347,18 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 	require.NoError(t, err, "Failed to connect to RPC")
 	t.Cleanup(func() { client.Close() })
 
-	// Set factory address for smart wallet derivation
-	setGlobalFactory(t, cfg.SmartWallet)
-	t.Logf("🔧 Set factory address: %s", cfg.SmartWallet.FactoryAddress.Hex())
-
 	// Always derive smart wallet address from owner + salt:0
-	smartWalletAddress, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(fixtureSaltWithdrawal))
+	smartWalletAddress, err := aa.GetSenderAddressMAv2(client, ownerAddress, big.NewInt(fixtureSaltWithdrawal))
 	require.NoError(t, err, "Failed to derive smart wallet address")
 
 	t.Logf("🔑 Owner EOA: %s", ownerAddress.Hex())
 	t.Logf("💼 Smart Wallet (salt:%d): %s", fixtureSaltWithdrawal, smartWalletAddress.Hex())
 	t.Logf("💰 Destination: %s", destinationAddress.Hex())
 
-	// Check if wallet is deployed, and deploy it if needed
 	code, err := client.CodeAt(context.Background(), *smartWalletAddress, nil)
 	require.NoError(t, err, "Failed to check wallet deployment status")
-	if len(code) == 0 {
-		t.Logf("⚠️  Wallet not deployed, deploying it first...")
-		controllerPrivateKey := testutil.GetTestControllerPrivateKey()
-		err = testutil.EnsureWalletDeployed(client, cfg.SmartWallet.FactoryAddress, ownerAddress, big.NewInt(fixtureSaltWithdrawal), controllerPrivateKey)
-		if err != nil {
-			t.Fatalf("Failed to deploy wallet: %v\n   Hint: The wallet needs to be deployed before testing withdrawals. Ensure the controller has sufficient funds to deploy.", err)
-		}
-		t.Logf("✅ Wallet deployed successfully")
-	} else {
-		t.Logf("✅ Wallet is already deployed (code length: %d bytes)", len(code))
-	}
+	require.NotEmpty(t, code, "fixture wallet %s is not deployed: go run ./scripts/fixture_wallet -salt %d -deploy",
+		smartWalletAddress.Hex(), fixtureSaltWithdrawal)
 
 	// Check smart wallet ETH balance
 	smartWalletBalance, err := client.BalanceAt(context.Background(), *smartWalletAddress, nil)

@@ -50,9 +50,6 @@ func withGatewayMultiChain(cfg *config.Config) *config.Config {
 				ChainID:            chainIDOverrideForTest,
 				EthRpcUrl:          cfg.SmartWallet.EthRpcUrl,
 				EthWsUrl:           cfg.SmartWallet.EthWsUrl,
-				FactoryAddress:     cfg.SmartWallet.FactoryAddress,
-				EntrypointAddress:  cfg.SmartWallet.EntrypointAddress,
-				PaymasterAddress:   cfg.SmartWallet.PaymasterAddress,
 				WhitelistAddresses: cfg.SmartWallet.WhitelistAddresses,
 			},
 		},
@@ -60,11 +57,10 @@ func withGatewayMultiChain(cfg *config.Config) *config.Config {
 	return cfg
 }
 
-// resolveUserChainID is the chain-resolution helper consulted by the
-// wallet RPC handlers that accept *model.User. Today that's only
-// Engine.GetWallet — SetWallet and ListWallets retain their legacy
-// owner-only signatures and always operate on n.defaultChainID();
-// plumbing *User through them is a follow-up.
+// ResolveUserChainID is the chain-resolution helper for wallet requests
+// that carry a *model.User: Engine.GetWallet, Engine.ListWallets and the
+// REST getNonce handler. SetWallet keeps its owner-only signature and
+// operates on n.defaultChainID().
 //
 // The contract:
 //
@@ -90,14 +86,14 @@ func TestResolveUserChainID(t *testing.T) {
 	defaultChain := n.defaultChainID()
 
 	t.Run("nil user falls back to default", func(t *testing.T) {
-		if got := n.resolveUserChainID(nil); got != defaultChain {
+		if got := n.ResolveUserChainID(nil); got != defaultChain {
 			t.Errorf("nil user: got chainID %d, want default %d", got, defaultChain)
 		}
 	})
 
 	t.Run("user with ChainID=0 falls back to default", func(t *testing.T) {
 		u := &model.User{Address: testutil.TestUser1().Address}
-		if got := n.resolveUserChainID(u); got != defaultChain {
+		if got := n.ResolveUserChainID(u); got != defaultChain {
 			t.Errorf("ChainID=0: got %d, want default %d", got, defaultChain)
 		}
 	})
@@ -122,7 +118,7 @@ func TestResolveUserChainID(t *testing.T) {
 
 	t.Run("configured non-default ChainID wins over default", func(t *testing.T) {
 		u := &model.User{Address: testutil.TestUser1().Address, ChainID: chainIDOverrideForTest}
-		if got := n.resolveUserChainID(u); got != chainIDOverrideForTest {
+		if got := n.ResolveUserChainID(u); got != chainIDOverrideForTest {
 			t.Errorf("ChainID=%d: got %d, want %d (configured override must win)", chainIDOverrideForTest, got, chainIDOverrideForTest)
 		}
 	})
@@ -139,7 +135,7 @@ func TestResolveUserChainID(t *testing.T) {
 			}
 		}
 		u := &model.User{Address: testutil.TestUser1().Address, ChainID: malicious}
-		got := n.resolveUserChainID(u)
+		got := n.ResolveUserChainID(u)
 		if got != defaultChain {
 			t.Errorf("unconfigured chain %d should fall back to default %d, got %d (would allow orphan storage)", malicious, defaultChain, got)
 		}
@@ -149,7 +145,7 @@ func TestResolveUserChainID(t *testing.T) {
 		// End-to-end assertion: a GetWallet call for a configured
 		// non-default chain must persist its wallet record under that
 		// chain's storage prefix. Regression guard if a future change
-		// stops routing through resolveUserChainID.
+		// stops routing through ResolveUserChainID.
 		user := &model.User{Address: testutil.TestUser1().Address, ChainID: chainIDOverrideForTest}
 		// Use a salt unlikely to collide with anything pre-existing
 		// in the in-memory DB.

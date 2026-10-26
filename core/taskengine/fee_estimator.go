@@ -363,23 +363,13 @@ func (fe *FeeEstimator) estimateWalletCreationGas(ctx context.Context, walletAdd
 		gasPrice = big.NewInt(int64(DefaultGasPrice))
 	}
 
-	// Build account-creation calldata against the factory this chain actually
-	// deploys with — the method differs between SimpleAccount and MA v2, so
-	// estimating against the configured SimpleAccount factory on an MA v2
-	// chain would price a deployment that never happens.
-	factoryAddress, err := aa.EffectiveFactory(fe.smartWalletConfig)
-	if err != nil {
-		fe.logger.Warn("Failed to resolve account factory, using fallback gas estimate",
-			"error", err, "fallback_gas", fallbackCreationGas)
-		return big.NewInt(fallbackCreationGas), gasPrice, nil
-	}
 	// Deploy gas is independent of the owner baked into the CREATE2 init code,
 	// and the real owner is not in scope on this estimation path — so use a
 	// fixed placeholder rather than walletAddress. Passing the wallet as its
 	// own owner prices creation of a *different*, wallet-owned account; the gas
 	// happens to match, which is why this was latent, but it is misleading and
 	// should not be relied on.
-	factoryAddress, calldata, err := aa.DeriveInitCodeAuto(feeEstimationDummyOwner, factoryAddress, big.NewInt(0))
+	factoryAddress, calldata, err := aa.GetInitCodeMAv2(feeEstimationDummyOwner, big.NewInt(0))
 	if err != nil {
 		fe.logger.Warn("Failed to build account-creation calldata, using fallback gas estimate",
 			"error", err, "fallback_gas", fallbackCreationGas)

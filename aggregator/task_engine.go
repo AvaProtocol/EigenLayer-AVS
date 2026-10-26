@@ -51,7 +51,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
@@ -94,19 +93,10 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 	if sw == nil {
 		agg.logger.Info("Start execution engine", "smart_wallet", "nil")
 	} else {
-		effectiveFactory := common.Address{}
-		if f, err := aa.EffectiveFactory(sw); err == nil {
-			effectiveFactory = f
-		}
-		// Prefer effective (provider-aware) values over raw yaml fields so boot
-		// logs do not look like a v0.6 SimpleAccount stack when MA v2 is on.
 		agg.logger.Info("Start execution engine",
-			"account_provider", sw.AccountProviderName(),
-			"effective_factory", effectiveFactory.Hex(),
-			"config_factory_address", sw.FactoryAddress.Hex(),
+			"factory", aa.MAv2FactoryAddress().Hex(),
 			"entry_point", sw.EntryPointAddress().Hex(),
 			"paymaster_policy_set", sw.SponsorshipPolicyID() != "",
-			"legacy_v06_paymaster", sw.PaymasterAddress.Hex(),
 		)
 	}
 

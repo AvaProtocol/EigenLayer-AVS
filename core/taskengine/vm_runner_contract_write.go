@@ -395,17 +395,9 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		"contract_address", contractAddress.Hex())
 
 	if r.smartWalletConfig != nil {
-		effectiveFactory, factoryErr := aa.EffectiveFactory(r.smartWalletConfig)
-		effectiveFactoryHex := ""
-		if factoryErr == nil {
-			effectiveFactoryHex = effectiveFactory.Hex()
-		}
 		r.vm.logger.Info("🔍 CONTRACT WRITE DEBUG - Smart Wallet Config Details",
 			"bundler_provider", r.smartWalletConfig.ProviderName(),
 			"bundler_url", r.smartWalletConfig.BundlerEndpointLabel(),
-			"account_provider", r.smartWalletConfig.AccountProviderName(),
-			"effective_factory", effectiveFactoryHex,
-			"config_factory_address", r.smartWalletConfig.FactoryAddress.Hex(),
 			"entrypoint_address", r.smartWalletConfig.EntryPointAddress().Hex())
 	} else {
 		r.vm.logger.Warn("⚠️ CONTRACT WRITE DEBUG - Smart wallet config is NIL!")
@@ -707,12 +699,6 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 	logTarget string,
 	executionLogBuilder *strings.Builder,
 ) (*preset.SentUserOp, *types.Receipt, string) {
-	// Set up factory address for AA operations
-	if err := aa.SetFactoryAddressForConfig(r.smartWalletConfig); err != nil {
-		return nil, nil, fmt.Sprintf("cannot resolve account factory: %v", err)
-	}
-	aa.SetEntrypointAddress(r.smartWalletConfig.EntrypointAddress)
-
 	// Optional runner validation: if task.SmartWalletAddress is set, ensure it matches
 	// one of the owner EOA's known smart wallets (authoritative). If wallet list cannot be checked,
 	// fall back to checking the derived salt:0 address as a best-effort sanity check.
@@ -721,17 +707,10 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 		// Derive sender at salt:0 via the per-chain reader (worker-routed in
 		// gateway mode) instead of a direct dial. Best-effort sanity check;
 		// the authoritative wallet-list validation runs in the run_node path.
-		// A factory-resolution failure only costs us the sanity check; the
-		// authoritative validation still runs in run_node. Skipping beats
-		// failing the write on a diagnostic.
-		if defaultFactory, factoryErr := aa.EffectiveFactory(r.smartWalletConfig); factoryErr != nil {
-			r.vm.logger.Warn("skipping runner sanity check: cannot resolve factory", "error", factoryErr)
-		} else {
-			sender, derr := r.client.GetSmartWalletAddress(ctx, r.owner, defaultFactory, big.NewInt(0))
-			if derr == nil && (sender != common.Address{}) {
-				if !strings.EqualFold(sender.Hex(), runnerStr) {
-					r.vm.logger.Warn("runner does not match derived salt:0; proceeding (wallet list validation applies in run_node)", "expected", sender.Hex(), "runner", runnerStr)
-				}
+		sender, derr := r.client.GetSmartWalletAddress(ctx, r.owner, aa.MAv2FactoryAddress(), big.NewInt(0))
+		if derr == nil && (sender != common.Address{}) {
+			if !strings.EqualFold(sender.Hex(), runnerStr) {
+				r.vm.logger.Warn("runner does not match derived salt:0; proceeding (wallet list validation applies in run_node)", "expected", sender.Hex(), "runner", runnerStr)
 			}
 		}
 	}
@@ -1018,7 +997,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	executionLogBuilder.WriteString(fmt.Sprintf("  ETH value: %s wei\n", transactionValue.String()))
 	executionLogBuilder.WriteString(fmt.Sprintf("  Method calldata: %d bytes\n", len(callDataBytes)))
 
-	smartWalletCallData, err := aa.PackExecute(
+	smartWalletCallData, err := aa.PackExecuteMAv2(
 		contractAddress,  // target contract
 		transactionValue, // ETH value to send with the call (0 for non-payable calls)
 		callDataBytes,    // contract method calldata
@@ -1079,21 +1058,20 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 }
 
 // executeAtomicBatch encodes every method call and submits them as a SINGLE atomic UserOp
-// (executeBatch / executeBatchWithValues), then fans the one resulting receipt into one
-// MethodResult per call. This is the on-demand approve+swap path: either every sub-call lands or
-// the whole UserOp reverts — no dangling allowance from an approve that succeeded while its swap
-// failed. It composes with the paymaster reimbursement wrapper (which now appends its entries onto
-// this batch) and is used only on the run-node route for real (non-simulated) multi-call execution;
-// deployed workflows keep the sequential per-method path.
+// (executeBatch), then fans the one resulting receipt into one MethodResult per call. This is the
+// on-demand approve+swap path: either every sub-call lands or the whole UserOp reverts — no
+// dangling allowance from an approve that succeeded while its swap failed. It is used only on the
+// run-node route for real (non-simulated) multi-call execution; deployed workflows keep the
+// sequential per-method path.
 // preflightSessionGrantCoverage refuses MA v2 UserOps whose planned inner
 // calls are outside the active session grant's allowlist — before the bundler
 // returns opaque AA23 (WETH sell under a USDC-only Uniswap grant).
 //
 // Returns "" when the check is skipped or the grant covers the calls.
-// Skips when: not MA v2, no db, no aa_sender, no usable policy, or the policy
+// Skips when: no smart wallet config, no db, no aa_sender, no usable policy, or the policy
 // has empty AllowedActions (legacy / incomplete records).
 func (r *ContractWriteProcessor) preflightSessionGrantCoverage(planned []PlannedCall) string {
-	if r == nil || r.smartWalletConfig == nil || !r.smartWalletConfig.UsesModularAccountV2() {
+	if r == nil || r.smartWalletConfig == nil {
 		return ""
 	}
 	if r.vm == nil || r.vm.db == nil || len(planned) == 0 {
@@ -1316,7 +1294,6 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 	values := make([]*big.Int, n)
 	datas := make([][]byte, n)
 	methodNames := make([]string, n)
-	anyValue := false
 
 	for i, mc := range methodCalls {
 		callDataHex, _, errResult := r.resolveMethodCallData(parsedABI, mc)
@@ -1345,9 +1322,6 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 		value := big.NewInt(0)
 		if i == n-1 {
 			value = nodeValue
-		}
-		if value.Sign() > 0 {
-			anyValue = true
 		}
 
 		targets[i] = perCallTargets[i]
@@ -1396,22 +1370,12 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 		return failAll(msg, nil)
 	}
 
-	// Pack the atomic batch. Prefer executeBatch (no per-call values) when every value is zero — its
-	// selector is bundler-estimatable, unlike executeBatchWithValues (0xc3ff72fc) which the bundler
-	// can't simulate. Only fall back to executeBatchWithValues when a call actually carries value.
-	// Routed on the chain's account implementation. Batching is the one call
-	// shape that did NOT carry over to MA v2 — see aa.PackExecuteBatchAuto —
-	// so packing v0.6 batch calldata here reverts in validation as AA23,
-	// naming neither the batch nor the account type.
-	batchFactory, factoryErr := aa.EffectiveFactory(r.smartWalletConfig)
-	if factoryErr != nil {
-		return failAll(fmt.Sprintf("failed to resolve account factory for batch: %v", factoryErr), nil)
+	// Pack the atomic batch. MA v2's executeBatch carries a value per call.
+	calls := make([]aa.Call, n)
+	for i := range targets {
+		calls[i] = aa.Call{Target: targets[i], Value: values[i], Data: datas[i]}
 	}
-	packKind := "executeBatch"
-	if anyValue && aa.ProviderForFactory(batchFactory) != aa.ProviderModularAccountV2 {
-		packKind = "executeBatchWithValues"
-	}
-	smartWalletCallData, packErr := aa.PackExecuteBatchAuto(batchFactory, targets, values, datas)
+	smartWalletCallData, packErr := aa.PackExecuteBatchMAv2(calls)
 	if packErr != nil {
 		return failAll(fmt.Sprintf("failed to pack atomic batch calldata: %v", packErr), nil)
 	}
@@ -1424,14 +1388,13 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 		r.vm.logger.Info("submitting atomic batch UserOp",
 			"methods", logLabel,
 			"targets", logTarget,
-			"pack_kind", packKind,
 			"num_calls", n,
 		)
 	}
-	log.WriteString(fmt.Sprintf("Submitting atomic batch of %d calls as one UserOp (%s)\n", n, packKind))
+	log.WriteString(fmt.Sprintf("Submitting atomic batch of %d calls as one UserOp (executeBatch)\n", n))
 
 	var executionLogBuilder strings.Builder
-	executionLogBuilder.WriteString(fmt.Sprintf("Atomic batch UserOp for %d calls (%s)\n", n, packKind))
+	executionLogBuilder.WriteString(fmt.Sprintf("Atomic batch UserOp for %d calls (executeBatch)\n", n))
 	userOp, receipt, userErrorMsg := r.submitSmartWalletUserOp(ctx, smartWalletCallData, logLabel, logTarget, &executionLogBuilder)
 	if userErrorMsg != "" {
 		out := failAll(userErrorMsg, nil)
@@ -2264,9 +2227,6 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 					if label := r.smartWalletConfig.BundlerEndpointLabel(); label != "" {
 						log.WriteString(fmt.Sprintf("  Bundler (%s): %s\n", r.smartWalletConfig.ProviderName(), label))
 					}
-					if (r.smartWalletConfig.PaymasterAddress != common.Address{}) {
-						log.WriteString(fmt.Sprintf("  Paymaster: %s\n", r.smartWalletConfig.PaymasterAddress.Hex()))
-					}
 				}
 				log.WriteString(fmt.Sprintf("  Method: %s\n", result.MethodName))
 				log.WriteString(fmt.Sprintf("  Contract: %s\n", contractAddr.Hex()))
@@ -2276,7 +2236,6 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			if strings.Contains(result.Error, "Bundler failed") || strings.Contains(result.Error, "AA21") {
 				log.WriteString("BUNDLER FAILURE DETAILS:\n")
 				log.WriteString(fmt.Sprintf("  Entry Point: %s\n", r.smartWalletConfig.EntryPointAddress().Hex()))
-				log.WriteString(fmt.Sprintf("  Factory: %s\n", r.smartWalletConfig.FactoryAddress.Hex()))
 
 				if strings.Contains(result.Error, "AA21") {
 					log.WriteString("AA21 ERROR EXPLANATION:\n")

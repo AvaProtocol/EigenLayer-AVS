@@ -2867,9 +2867,6 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 			}
 			return noop, fmt.Errorf("%w: chain %d has no smart wallet config", ErrSessionPolicyNotCovering, chainID)
 		}
-		if !cfg.UsesModularAccountV2() {
-			continue
-		}
 		mav2 = append(mav2, checkedChain{chain: chainID, need: needs[chainID]})
 	}
 	if len(mav2) == 0 {

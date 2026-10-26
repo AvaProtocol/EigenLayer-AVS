@@ -68,10 +68,13 @@ func (s *Server) WorkerHealthCheck(ctx context.Context, req *avsproto.WorkerHeal
 }
 
 func (s *Server) GetNonce(ctx context.Context, req *avsproto.WorkerGetNonceReq) (*avsproto.WorkerGetNonceResp, error) {
+	if req.Salt < 0 {
+		return nil, fmt.Errorf("invalid salt %d (must be non-negative)", req.Salt)
+	}
 	ownerAddr := common.HexToAddress(req.Owner)
 	salt := big.NewInt(req.Salt)
 
-	nonce, err := aa.GetNonce(s.worker.rpcClient, ownerAddr, salt)
+	nonce, err := aa.EntryPointNonce(ctx, s.worker.rpcClient, ownerAddr, salt)
 	if err != nil {
 		return nil, fmt.Errorf("getting nonce for %s: %w", req.Owner, err)
 	}
@@ -111,13 +114,9 @@ func (s *Server) GetSmartWalletAddress(ctx context.Context, req *avsproto.Worker
 	}
 
 	// Honor the caller's factory override when provided; otherwise use the
-	// worker's configured factory. The gateway passes its per-chain /
-	// per-request factory so worker-derived addresses match the gateway's
-	// direct-RPC derivation exactly.
-	factory, factoryErr := aa.EffectiveFactory(s.worker.smartWalletCfg)
-	if factoryErr != nil {
-		return nil, factoryErr
-	}
+	// MA v2 factory. The gateway passes the factory of the wallet it is
+	// resolving, and derivation refuses any factory but MA v2.
+	factory := aa.MAv2FactoryAddress()
 	if req.FactoryAddress != "" {
 		if !common.IsHexAddress(req.FactoryAddress) {
 			return nil, fmt.Errorf("invalid factory address %q", req.FactoryAddress)
@@ -125,7 +124,7 @@ func (s *Server) GetSmartWalletAddress(ctx context.Context, req *avsproto.Worker
 		factory = common.HexToAddress(req.FactoryAddress)
 	}
 
-	addr, err := aa.DeriveSenderAddressAuto(
+	addr, err := aa.DeriveSenderAddress(
 		s.worker.rpcClient,
 		ownerAddr,
 		factory,
@@ -194,7 +193,7 @@ func (s *Server) GetNonceByAddress(ctx context.Context, req *avsproto.WorkerGetN
 		key = parsed
 	}
 
-	nonce, err := aa.GetNonce(s.worker.rpcClient, walletAddr, key)
+	nonce, err := aa.EntryPointNonce(ctx, s.worker.rpcClient, walletAddr, key)
 	if err != nil {
 		return nil, fmt.Errorf("getting nonce for %s: %w", req.WalletAddress, err)
 	}
@@ -395,15 +394,15 @@ func (s *Server) FindMatchingWalletSalt(ctx context.Context, req *avsproto.Worke
 		return nil, fmt.Errorf("max_salts %d exceeds cap %d", req.MaxSalts, maxWalletSaltScan)
 	}
 
-	factory, factoryErr := aa.EffectiveFactory(s.worker.smartWalletCfg)
-	if factoryErr != nil {
-		return nil, factoryErr
-	}
+	factory := aa.MAv2FactoryAddress()
 	if req.FactoryAddress != "" {
 		if !common.IsHexAddress(req.FactoryAddress) {
 			return nil, fmt.Errorf("invalid factory address %q", req.FactoryAddress)
 		}
 		factory = common.HexToAddress(req.FactoryAddress)
+	}
+	if err := aa.RequireMAv2Factory(factory); err != nil {
+		return nil, err
 	}
 
 	owner := common.HexToAddress(req.Owner)
@@ -413,7 +412,7 @@ func (s *Server) FindMatchingWalletSalt(ctx context.Context, req *avsproto.Worke
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		addr, err := aa.DeriveSenderAddressAuto(s.worker.rpcClient, owner, factory, big.NewInt(salt))
+		addr, err := aa.DeriveSenderAddress(s.worker.rpcClient, owner, factory, big.NewInt(salt))
 		if err != nil {
 			// A single failed derivation shouldn't abort the whole scan.
 			continue

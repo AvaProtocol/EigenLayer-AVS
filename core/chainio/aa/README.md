@@ -1,45 +1,16 @@
 # Account Abstraction (AA) Package
 
-## ABI Files and Go Bindings
+Helpers for Alchemy Modular Account v2 accounts on the ERC-4337 v0.7 EntryPoint.
 
-This package contains smart contract ABIs and their generated Go bindings for Account Abstraction contracts.
+## Files
 
-### Structure
+- `ma_v2.go`: `execute` / `executeBatch` calldata packing (`PackExecuteMAv2`, `PackExecuteBatchMAv2`).
+- `aa.go`: `UnpackExecuteCalldata`, the inverse of the packers.
+- `ma_v2_account.go`: counterfactual address and init code from the MA v2 factory (`GetSenderAddressMAv2`, `GetInitCodeMAv2`).
+- `derive.go`: `DeriveSenderAddress` / `DeriveInitCode` for a factory taken from a wallet record or request. Any factory but MA v2 is refused with `ErrLegacyFactory`.
+- `ma_v2_*.go`: session-grant module install, uninstall, hooks and on-chain entity state.
+- `entrypoint_events.go`: the EntryPoint `UserOperationRevertReason` event.
 
-Each ABI file lives alongside its generated Go binding:
+## ABIs
 
-- `account.abi` → embedded in `aa.go` for calldata packing (`PackExecute*`). There is no generated SimpleAccount binding: the old `simpleaccount` package listed `controller()`, and the deployed wallet only has `getController()`.
-- `entrypoint.abi` → `entrypoint.go`
-- `factory.abi` → `simplefactory.go`
-- `paymaster.abi` → `paymaster/paymaster.go`
-
-### How It Works
-
-**1. Generated Go Bindings (for contract calls)**
-
-The `*.go` files are generated using `abigen` and provide type-safe contract interaction:
-- `NewEntryPoint()` - for nonce management, deposits
-- `NewSimpleFactory()` - for deriving smart wallet addresses
-- `NewPayMaster()` - for paymaster interactions
-
-These bindings are **committed to git** and used throughout the codebase.
-
-**2. Embedded ABI (for calldata encoding)**
-
-The `account.abi` file is embedded at compile-time using `//go:embed` in `aa.go`. This is used by the `PackExecute*` functions to manually encode calldata for complex batch operations that require precise ABI encoding control.
-
-## Updating ABIs
-
-When contract ABIs change:
-
-1. **Replace the ABI file** in this directory
-2. **Regenerate Go bindings** using `abigen` manually:
-   ```bash
-   abigen --abi=entrypoint.abi --pkg=aa --type=EntryPoint --out=entrypoint.go
-   abigen --abi=factory.abi --pkg=aa --type=SimpleFactory --out=simplefactory.go
-   abigen --abi=paymaster.abi --pkg=paymaster --type=PayMaster --out=paymaster/paymaster.go
-   ```
-3. **Commit both** the ABI file and updated bindings
-4. **Test** contract interactions to verify compatibility
-
-> **Note:** ABI files are manually managed. Each ABI lives with its Go binding - no separate `abis/` directory needed.
+Every ABI is a small inline JSON constant next to the code that uses it, covering only the methods and events the gateway calls. There are no generated bindings. When a contract changes, edit the constant and the tests that pin its selectors.

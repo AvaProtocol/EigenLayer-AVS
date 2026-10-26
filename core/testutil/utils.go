@@ -10,23 +10,16 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"testing"
 	"time"
-
-	"math/big"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/allegro/bigcache/v3"
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/stretchr/testify/require"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
-	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa/paymaster"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -348,44 +341,6 @@ func GetTestControllerPrivateKey() string {
 	return fmt.Sprintf("%x", testConfig.SmartWallet.ControllerPrivateKey.D)
 }
 
-// GetTestFactoryAddress returns the factory address for tests from aggregator config
-// Panics if config is not loaded or SmartWallet is nil
-func GetTestFactoryAddress() string {
-	if testConfig == nil {
-		panic("testConfig is nil - test.yaml config must be loaded")
-	}
-	if testConfig.SmartWallet == nil {
-		panic("SmartWallet config is nil in test.yaml")
-	}
-	return testConfig.SmartWallet.FactoryAddress.Hex()
-}
-
-// GetTestEntrypointAddress returns the entrypoint address for tests from aggregator config
-// Panics if config is not loaded or SmartWallet is nil
-func GetTestEntrypointAddress() string {
-	if testConfig == nil {
-		panic("testConfig is nil - test.yaml config must be loaded")
-	}
-	if testConfig.SmartWallet == nil {
-		panic("SmartWallet config is nil in test.yaml")
-	}
-	return testConfig.SmartWallet.EntrypointAddress.Hex()
-}
-
-// GetTestPaymasterAddress returns the paymaster address for tests from aggregator config
-// Panics if config is not loaded or SmartWallet is nil
-func GetTestPaymasterAddress() string {
-	if testConfig == nil {
-		panic("testConfig is nil - test.yaml config must be loaded")
-	}
-
-	if testConfig.SmartWallet == nil {
-		panic("SmartWallet config is nil in test.yaml")
-	}
-
-	return testConfig.SmartWallet.PaymasterAddress.Hex()
-}
-
 // GetTestMoralisApiKey returns the Moralis API key for tests from aggregator config
 // Returns empty string if config is not loaded or key is not configured
 func GetTestMoralisApiKey() string {
@@ -560,9 +515,6 @@ func GetAggregatorConfig() *config.Config {
 			ChainID:            1,
 			EthRpcUrl:          GetTestRPCURL(),
 			EthWsUrl:           GetTestWsRPCURL(),
-			FactoryAddress:     common.HexToAddress(GetTestFactoryAddress()),
-			EntrypointAddress:  common.HexToAddress(GetTestEntrypointAddress()),
-			PaymasterAddress:   common.HexToAddress(GetTestPaymasterAddress()),
 			WhitelistAddresses: []common.Address{},
 		},
 		// Include Tenderly credentials for tests
@@ -778,9 +730,6 @@ func baseTestSmartWalletConfig() *config.SmartWalletConfig {
 		BundlerProvider:       GetTestBundlerProvider(),
 		AlchemyAPIKey:         GetTestAlchemyAPIKey(),
 		ChainID:               GetTestChainID(),
-		FactoryAddress:        common.HexToAddress(GetTestFactoryAddress()),
-		EntrypointAddress:     common.HexToAddress(GetTestEntrypointAddress()),
-		PaymasterAddress:      common.HexToAddress(GetTestPaymasterAddress()),
 		WhitelistAddresses:    []common.Address{},
 		DisableGasSponsorship: disableSponsorship,
 	}
@@ -801,23 +750,6 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 
 	smartWalletConfig := baseTestSmartWalletConfig()
 	smartWalletConfig.ControllerPrivateKey = controllerPrivateKey
-	paymasterAddress := smartWalletConfig.PaymasterAddress
-
-	// Fetch paymaster owner address by calling owner() on the paymaster contract.
-	// Reimbursement sends ETH to the owner EOA, not the paymaster contract itself.
-	if paymasterAddress != (common.Address{}) {
-		client, dialErr := ethclient.Dial(GetTestRPC())
-		if dialErr == nil {
-			defer client.Close()
-			paymasterContract, bindErr := paymaster.NewPayMaster(paymasterAddress, client)
-			if bindErr == nil {
-				if ownerAddr, callErr := paymasterContract.Owner(nil); callErr == nil {
-					smartWalletConfig.PaymasterOwnerAddress = ownerAddr
-				}
-			}
-		}
-	}
-
 	return smartWalletConfig
 }
 
@@ -858,124 +790,6 @@ func CheckBundlerAvailability(bundlerURL string) error {
 
 	// If we got here, bundler is available
 	return nil
-}
-
-// EnsureWalletDeployed ensures that a smart wallet is deployed for the given owner and salt.
-// If the wallet is already deployed, it returns immediately. Otherwise, it deploys it using
-// a regular transaction (not a UserOp) via the factory contract.
-// This is useful for integration tests that need wallets to be deployed before testing UserOp execution.
-// It uses GetSenderAddress to compute the wallet address, which is what the system actually uses.
-func EnsureWalletDeployed(client *ethclient.Client, factoryAddress common.Address, ownerAddress common.Address, salt *big.Int, controllerPrivateKey string) error {
-	// Derive against the passed factory explicitly rather than parking it in
-	// the package global first. That global is process-wide: setting it here
-	// changed which factory unrelated tests derived against for the rest of
-	// the run, depending only on execution order.
-	//
-	// The provider is pinned to SimpleAccount because that is what this helper
-	// can actually deploy — it goes through NewSimpleFactory below. It is not
-	// a stand-in for the chain's configured provider.
-	expectedWalletPtr, err := aa.DeriveSenderAddressForFactory(
-		client, ownerAddress, factoryAddress, salt, aa.ProviderSimpleAccount)
-	if err != nil {
-		return fmt.Errorf("failed to derive SimpleAccount address: %w", err)
-	}
-	expectedWallet := *expectedWalletPtr
-
-	// Create factory binding for deployment
-	factory, err := aa.NewSimpleFactory(factoryAddress, client)
-	if err != nil {
-		return fmt.Errorf("failed to create factory binding: %w", err)
-	}
-
-	// Check if already deployed
-	code, err := client.CodeAt(context.Background(), expectedWallet, nil)
-	if err != nil {
-		return fmt.Errorf("failed to check wallet code: %w", err)
-	}
-
-	if len(code) > 0 {
-		// Wallet is already deployed
-		return nil
-	}
-
-	// Wallet needs to be deployed - use factory.createAccount() via regular transaction
-	chainID, err := client.ChainID(context.Background())
-	if err != nil {
-		return fmt.Errorf("failed to get chain ID: %w", err)
-	}
-
-	// Create auth from controller private key
-	privateKey, err := crypto.HexToECDSA(controllerPrivateKey)
-	if err != nil {
-		return fmt.Errorf("invalid controller private key: %w", err)
-	}
-
-	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
-	if err != nil {
-		return fmt.Errorf("failed to create transactor: %w", err)
-	}
-
-	// Deploy wallet
-	tx, err := factory.CreateAccount(auth, ownerAddress, salt)
-	if err != nil {
-		return fmt.Errorf("failed to create account transaction: %w", err)
-	}
-
-	// Wait for transaction with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	receipt, err := bind.WaitMined(ctx, client, tx)
-	if err != nil {
-		return fmt.Errorf("failed to wait for transaction: %w", err)
-	}
-
-	if receipt.Status == 0 {
-		return fmt.Errorf("wallet deployment transaction failed: tx %s", tx.Hash().Hex())
-	}
-
-	// Wait a bit for state to propagate (some RPC nodes may have slight delay)
-	time.Sleep(2 * time.Second)
-
-	// Verify deployment - try multiple times with increasing delays
-	var codeAfter []byte
-	for i := 0; i < 3; i++ {
-		codeAfter, err = client.CodeAt(context.Background(), expectedWallet, nil)
-		if err != nil {
-			return fmt.Errorf("failed to verify deployment: %w", err)
-		}
-		if len(codeAfter) > 0 {
-			break
-		}
-		if i < 2 {
-			time.Sleep(1 * time.Second)
-		}
-	}
-
-	if len(codeAfter) == 0 {
-		return fmt.Errorf("wallet deployment failed - no code at address %s after transaction %s (status: %d, gasUsed: %d)",
-			expectedWallet.Hex(), tx.Hash().Hex(), receipt.Status, receipt.GasUsed)
-	}
-
-	return nil
-}
-
-// GetTestSmartWalletAddress returns the smart wallet address for the given owner and salt,
-// ensuring the wallet is deployed. This is useful for tests that need a secondary wallet
-// (e.g., with a different salt) to send funds between wallets without draining to an EOA.
-func GetTestSmartWalletAddress(t *testing.T, client *ethclient.Client, factoryAddress common.Address, owner common.Address, salt *big.Int) common.Address {
-	t.Helper()
-
-	controllerPrivateKey := GetTestControllerPrivateKey()
-	err := EnsureWalletDeployed(client, factoryAddress, owner, salt, controllerPrivateKey)
-	require.NoError(t, err, "Failed to ensure wallet is deployed for salt %s", salt.String())
-
-	// Same factory and provider EnsureWalletDeployed just deployed with, rather
-	// than whatever the package global happens to hold.
-	walletAddress, err := aa.DeriveSenderAddressForFactory(
-		client, owner, factoryAddress, salt, aa.ProviderSimpleAccount)
-	require.NoError(t, err, "Failed to get wallet address for salt %s", salt.String())
-
-	return *walletAddress
 }
 
 func GetTestEventTriggerData() *TriggerData {

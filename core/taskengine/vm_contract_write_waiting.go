@@ -226,9 +226,8 @@ func confirmedUserOpFailure(userOpHash string, entrypoint common.Address, result
 	} else if raw, err := json.Marshal(result.Fields["logs"]); err == nil {
 		_ = json.Unmarshal(raw, &logs)
 	}
-	parsed, err := aa.EntryPointMetaData.GetAbi()
+	event, err := aa.UserOperationRevertReasonEvent()
 	if err == nil {
-		event := parsed.Events["UserOperationRevertReason"]
 		for _, log := range logs {
 			if log == nil || log.Address != entrypoint || len(log.Topics) < 2 || log.Topics[0] != event.ID || log.Topics[1] != common.HexToHash(userOpHash) {
 				continue

@@ -252,7 +252,7 @@ func run() error {
 		time.Unix(int64(validUntil), 0).UTC().Format(time.RFC3339), digest)
 
 	// ── Op C: in-policy transfer, carries the deferred install ────────────
-	execC, err := aa.PackExecute(token, big.NewInt(0), packTransfer(controllerAddr, inPolicyAmount))
+	execC, err := aa.PackExecuteMAv2(token, big.NewInt(0), packTransfer(controllerAddr, inPolicyAmount))
 	if err != nil {
 		return err
 	}
@@ -305,7 +305,7 @@ func run() error {
 	}
 
 	// ── Op D: off-allowlist target — must die at validation ───────────────
-	execD, err := aa.PackExecute(ownerAddr, big.NewInt(0), nil)
+	execD, err := aa.PackExecuteMAv2(ownerAddr, big.NewInt(0), nil)
 	if err != nil {
 		return err
 	}
@@ -328,7 +328,7 @@ func run() error {
 	fmt.Printf("op D refused at validation, as required (target not on allowlist)\n  %s\n\n", firstLine(errD.Error()))
 
 	// ── Op E: over the remaining cap — mines, reverts at execution ────────
-	execE, err := aa.PackExecute(token, big.NewInt(0), packTransfer(controllerAddr, overCapAmount))
+	execE, err := aa.PackExecuteMAv2(token, big.NewInt(0), packTransfer(controllerAddr, overCapAmount))
 	if err != nil {
 		return err
 	}
@@ -381,7 +381,7 @@ func run() error {
 		fmt.Printf("waiting %s for the grant to expire…\n", wait.Round(time.Second))
 		time.Sleep(wait)
 	}
-	execF, err := aa.PackExecute(token, big.NewInt(0), packTransfer(controllerAddr, expiryAmount))
+	execF, err := aa.PackExecuteMAv2(token, big.NewInt(0), packTransfer(controllerAddr, expiryAmount))
 	if err != nil {
 		return err
 	}

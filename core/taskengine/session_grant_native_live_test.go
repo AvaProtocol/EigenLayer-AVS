@@ -226,7 +226,6 @@ func setupNativeLive(t *testing.T) *nativeLiveEnv {
 	require.Equal(t, owner, crypto.PubkeyToAddress(ownerKey.PublicKey),
 		"TEST_PRIVATE_KEY must be OWNER_EOA's key")
 
-	setGlobalFactory(t, cfg.SmartWallet)
 	runner, err := aa.GetSenderAddressMAv2(client, owner, big.NewInt(fixtureSaltNativeETH))
 	require.NoError(t, err)
 	t.Logf("runner %s (salt %d)", runner.Hex(), fixtureSaltNativeETH)
@@ -249,7 +248,7 @@ func setupNativeLive(t *testing.T) *nativeLiveEnv {
 	RegisterChainStateReader(uint64(11155111), NewDirectChainStateReader(client, 11155111))
 	t.Cleanup(ClearChainStateReaderRegistry)
 
-	factoryAddr := effectiveFactoryAddr(t, cfg.SmartWallet)
+	factoryAddr := aa.MAv2FactoryAddress()
 	require.NoError(t, StoreWallet(db, chainID.Int64(), owner, &model.SmartWallet{
 		Owner: &owner, Address: runner, Factory: &factoryAddr,
 		Salt: big.NewInt(fixtureSaltNativeETH),
@@ -445,7 +444,7 @@ func requireNativeSelfAdminBlocked(env *nativeLiveEnv) {
 	sel := crypto.Keccak256([]byte("updateLimits(uint32,uint256)"))[:4]
 	call := append(sel, common.LeftPadBytes(big.NewInt(int64(liveEntity)).Bytes(), 32)...)
 	call = append(call, common.LeftPadBytes(big.NewInt(1).Bytes(), 32)...)
-	exec, err := aa.PackExecute(aa.NativeTokenLimitModuleAddress(), big.NewInt(0), call)
+	exec, err := aa.PackExecuteMAv2(aa.NativeTokenLimitModuleAddress(), big.NewInt(0), call)
 	require.NoError(t, err)
 	_, _, err = preset.SendUserOpMAv2(env.cfg.SmartWallet, env.owner, exec, &env.runner, big.NewInt(fixtureSaltNativeETH), nil, logger.NewNoOpLogger())
 	require.Error(t, err, "L11: execute(NT, updateLimits) must fail")

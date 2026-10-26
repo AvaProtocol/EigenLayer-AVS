@@ -1674,7 +1674,9 @@ components:
       properties:
         nonce:
           type: string
-          description: Smart wallet nonce as a decimal string.
+          description: |
+            The full 256-bit nonce, `key << 64 | sequence`, as a decimal
+            string. Use it as `userOp.nonce` unchanged.
 
     # -------------------------------------------------------------------
     # Secret domain
@@ -3225,6 +3227,12 @@ paths:
     get:
       tags: [Wallets]
       summary: Get the smart wallet's current nonce
+      description: |
+        The nonce for the next operation the owner signs. It is read from
+        EntryPoint v0.7 at the owner's validation key (`0x1`: entity 0,
+        global validation). Modular Account v2 selects the validation from
+        the nonce key, so a nonce read at key 0 is not one the account
+        accepts from its owner. Reflects mined state only.
       operationId: getWalletNonce
       responses:
         '200':
