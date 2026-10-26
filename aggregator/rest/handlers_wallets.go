@@ -343,17 +343,14 @@ func (s *Server) GetWalletNonce(ctx echo.Context, address generated.EthereumAddr
 	}
 	walletAddr := common.HexToAddress(string(address))
 
-	// Pick the chain to read the nonce against. Explicit ?chainId=
-	// wins; otherwise fall back to the JWT audience. Without one of
-	// these, gateway-mode requests from a Sepolia wallet would hit
-	// the chains[0]=mainnet RPC and return an empty nonce (no
-	// entrypoint deployed there).
-	chainID := int64(0)
+	// Resolve the chain as GET /wallets does: ?chainId=, then the JWT
+	// aud, then the gateway default, and an unconfigured chain falls
+	// back to the default. The ownership check and the nonce read both
+	// use it, so a record is only read on its own chain.
 	if params.ChainId != nil {
-		chainID = int64(*params.ChainId)
-	} else if authed := restmw.UserFromContext(ctx); authed != nil {
-		chainID = authed.ChainID
+		user.ChainID = int64(*params.ChainId)
 	}
+	chainID := s.engine.ResolveUserChainID(user)
 	// Prefer the per-chain ChainStateReader — in gateway mode this is
 	// a worker-routed reader so the gateway no longer issues the
 	// EntryPoint nonce eth_call itself. Falls back to the direct-RPC
@@ -375,12 +372,7 @@ func (s *Server) GetWalletNonce(ctx echo.Context, address generated.EthereumAddr
 	}
 
 	// Ownership check against the record on the chain being read.
-	// Wallet records are per chain, as in GET /wallets.
-	recordChainID := chainID
-	if recordChainID <= 0 && s.config != nil && s.config.SmartWallet != nil {
-		recordChainID = s.config.SmartWallet.ChainID
-	}
-	if stored, dbErr := s.engine.StoredWallet(recordChainID, user.Address, walletAddr.Hex()); dbErr != nil || stored == nil {
+	if stored, dbErr := s.engine.StoredWallet(chainID, user.Address, walletAddr.Hex()); dbErr != nil || stored == nil {
 		return &restmw.HTTPError{
 			Status: http.StatusNotFound,
 			Code:   "WALLETS_NOT_FOUND",

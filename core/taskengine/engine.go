@@ -1124,7 +1124,7 @@ func (n *Engine) storeDefaultWalletForListWallets(chainID int64, owner common.Ad
 // ListWallets corresponds to the ListWallets RPC.
 //
 // Wallet records are chain-scoped, so the listing is too: the chain comes
-// from resolveUserChainID — the caller's explicit choice (REST sets
+// from ResolveUserChainID — the caller's explicit choice (REST sets
 // user.ChainID from the ?chainId query), then the JWT `aud` chain, then the
 // gateway default. Same precedence as GetWallet, so a wallet created on one
 // chain is listed by naming that chain rather than by holding a second JWT.
@@ -1137,7 +1137,7 @@ func (n *Engine) ListWallets(user *model.User, payload *avsproto.ListWalletReq) 
 		return nil, status.Errorf(codes.InvalidArgument, "ListWallets requires an authenticated user")
 	}
 	owner := user.Address
-	chainID := n.resolveUserChainID(user)
+	chainID := n.ResolveUserChainID(user)
 	swCfg := n.ResolveSmartWalletConfig(chainID)
 	walletsToReturnProto := []*avsproto.SmartWallet{}
 	processedAddresses := make(map[string]bool)
@@ -1351,7 +1351,7 @@ func (n *Engine) validateNonZeroAddress(factoryAddr common.Address, methodName, 
 	return nil
 }
 
-// resolveUserChainID returns the chain context for a wallet RPC.
+// ResolveUserChainID returns the chain context for a wallet RPC.
 //
 // REST sets user.ChainID from the JWT `aud` claim
 // (aggregator/rest/middleware/jwt.go:audienceChainID); that's the
@@ -1367,7 +1367,7 @@ func (n *Engine) validateNonZeroAddress(factoryAddr common.Address, methodName, 
 // abused. Logging the fallback at Warn surfaces the anomaly so we can
 // detect either a configuration drift (chain removed) or a deliberate
 // probe.
-func (n *Engine) resolveUserChainID(user *model.User) int64 {
+func (n *Engine) ResolveUserChainID(user *model.User) int64 {
 	if user == nil || user.ChainID <= 0 {
 		return n.defaultChainID()
 	}
@@ -1376,7 +1376,7 @@ func (n *Engine) resolveUserChainID(user *model.User) int64 {
 			return user.ChainID
 		}
 	}
-	n.logger.Warn("resolveUserChainID: user.ChainID is not a configured chain — falling back to default",
+	n.logger.Warn("ResolveUserChainID: user.ChainID is not a configured chain — falling back to default",
 		"requested_chain_id", user.ChainID,
 		"default_chain_id", n.defaultChainID(),
 		"owner", user.Address.Hex(),
@@ -1431,7 +1431,7 @@ func (n *Engine) loadStoredLegacyWallet(chainID int64, owner, factory common.Add
 // It uses the owner (from auth context), salt, and factory_address from payload to derive the wallet address.
 //
 // Wallet records are chain-scoped. The chain context is resolved via
-// resolveUserChainID — REST callers route by their JWT `aud` chain,
+// ResolveUserChainID — REST callers route by their JWT `aud` chain,
 // gRPC callers fall back to the gateway's default chain.
 func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
 	return n.GetWalletWithContext(context.Background(), user, payload)
@@ -1442,7 +1442,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 // the worker-routed CREATE2 derivation; the worker reader's withTimeout still
 // bounds the call when ctx carries no deadline.
 func (n *Engine) GetWalletWithContext(ctx context.Context, user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
-	chainID := n.resolveUserChainID(user)
+	chainID := n.ResolveUserChainID(user)
 	// Resolve the per-chain smart wallet config. In single-chain mode
 	// this returns n.smartWalletConfig (the gateway default); in
 	// gateway/multi-chain mode it returns the config for the JWT-derived

@@ -180,13 +180,13 @@ func (n *Engine) requireOwnedWallet(user *model.User, wallet common.Address) err
 // serve.
 //
 // The chain arrives in the request body, unsigned — a weaker input than the
-// JWT `aud` that resolveUserChainID already validates against this same set,
+// JWT `aud` that ResolveUserChainID already validates against this same set,
 // and for the same reason: grants are stored chain-scoped (SessionPolicyKey,
 // sp:<chainID>:*), so an unserved chain writes records no read path here ever
 // comes back for.
 //
 // Refused rather than resolved to the default chain, which is what
-// resolveUserChainID does for a wallet read. Falling back is the wrong remedy
+// ResolveUserChainID does for a wallet read. Falling back is the wrong remedy
 // for a grant — worse than the bug: the owner asks for one chain, signs a
 // prompt naming it, and is handed spending authority on another. The chain is
 // knowable here, before anything is asked of the wallet, so this fails ahead

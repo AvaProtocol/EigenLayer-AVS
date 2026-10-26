@@ -445,7 +445,7 @@ func TestListWalletsOmitsRetiredDefaultWallet(t *testing.T) {
 	cfg := testutil.GetAggregatorConfig()
 	engine := New(db, cfg, nil, testutil.GetLogger())
 	user := testutil.TestUser1()
-	chainID := engine.resolveUserChainID(user)
+	chainID := engine.ResolveUserChainID(user)
 
 	first, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
 	require.NoError(t, err)
@@ -475,7 +475,7 @@ func TestListWalletsSkipsRetiredWalletsAndCapIgnoresThem(t *testing.T) {
 	cfg.SmartWallet.MaxWalletsPerOwner = 2
 	engine := New(db, cfg, nil, testutil.GetLogger())
 	user := testutil.TestUser1()
-	chainID := engine.resolveUserChainID(user)
+	chainID := engine.ResolveUserChainID(user)
 
 	first, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
 	require.NoError(t, err)

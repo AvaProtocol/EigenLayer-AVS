@@ -43,6 +43,7 @@ The REST endpoint also read key 0. Modular Account v2 selects the validation fro
 - **`GET /wallets/{address}:getNonce`:**
   - Reads the owner's key `0x1`. It returns the full nonce, `key << 64 | sequence`, for use as `userOp.nonce` unchanged. The OpenAPI description says so. Workflow execution was not affected: the send path already read the nonce at its validation entity's key.
   - Checks ownership against the wallet record on the chain being read. It checked the gateway's default chain, so a wallet registered only on another chain returned 404, and a default-chain record opened every chain's nonce.
+  - Resolves the chain as `GET /wallets` does, through the engine's `ResolveUserChainID` (exported for this): `?chainId=`, then the JWT aud, then the default chain. An unconfigured chain id falls back to the default for both the ownership check and the nonce read.
 - **Config:**
   - Removed `factory_address`, `entrypoint_address`, `paymaster_address` and `account_provider` from `smart_wallet` (top level and per chain), and from the worker's `smart_wallet`.
   - YAML loading ignores unknown keys, so existing configs still load. A config that sets these keys now gets no boot warning and no refusal.
@@ -64,6 +65,7 @@ The REST endpoint also read key 0. Modular Account v2 selects the validation fro
 - **Added:**
   - `TestGetWalletNonceReadsOwnerValidationKey` pins the REST nonce key to `0x1` and the response to the full nonce.
   - `TestGetWalletNonceChecksOwnershipOnTheReadChain` covers both directions of the per-chain ownership check.
+  - `TestGetWalletNonceUnconfiguredChainUsesDefault` covers an unconfigured `?chainId=` and aud.
   - `TestEntryPointNonceRejectsKeysOutsideUint192` covers negative and oversized keys.
 
 ## Deploying
