@@ -16,6 +16,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/avsclient"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
@@ -322,9 +323,12 @@ func (s *Server) WithdrawWallet(ctx echo.Context, address generated.EthereumAddr
 
 // GetWalletNonce — GET /api/v1/wallets/{address}:getNonce
 //
-// Reads the smart wallet's current nonce off-chain via the
-// entrypoint's getNonce(sender, key=0) call. Used by SDK callers
-// building UserOps client-side.
+// Returns the nonce for the next operation the owner signs: EntryPoint
+// v0.7 getNonce(sender, key) at the owner's fallback-signer key (entity
+// 0, global validation, so key 0x1). Modular Account v2 picks the
+// validation from the nonce key, and key 0 selects none. The value is
+// the full nonce, key<<64 | sequence, ready for userOp.nonce. Used by
+// SDK callers building UserOps client-side.
 //
 // Chain routing precedence: ?chainId= override → JWT aud → gateway
 // default. Same pattern as CreateWallet / WithdrawWallet.
@@ -339,17 +343,14 @@ func (s *Server) GetWalletNonce(ctx echo.Context, address generated.EthereumAddr
 	}
 	walletAddr := common.HexToAddress(string(address))
 
-	// Pick the chain to read the nonce against. Explicit ?chainId=
-	// wins; otherwise fall back to the JWT audience. Without one of
-	// these, gateway-mode requests from a Sepolia wallet would hit
-	// the chains[0]=mainnet RPC and return an empty nonce (no
-	// entrypoint deployed there).
-	chainID := int64(0)
+	// Resolve the chain as GET /wallets does: ?chainId=, then the JWT
+	// aud, then the gateway default, and an unconfigured chain falls
+	// back to the default. The ownership check and the nonce read both
+	// use it, so a record is only read on its own chain.
 	if params.ChainId != nil {
-		chainID = int64(*params.ChainId)
-	} else if authed := restmw.UserFromContext(ctx); authed != nil {
-		chainID = authed.ChainID
+		user.ChainID = int64(*params.ChainId)
 	}
+	chainID := s.engine.ResolveUserChainID(user)
 	// Prefer the per-chain ChainStateReader — in gateway mode this is
 	// a worker-routed reader so the gateway no longer issues the
 	// EntryPoint nonce eth_call itself. Falls back to the direct-RPC
@@ -370,10 +371,8 @@ func (s *Server) GetWalletNonce(ctx echo.Context, address generated.EthereumAddr
 		chainReader = taskengine.NewDirectChainStateReader(rpc, chainID)
 	}
 
-	// Ownership check — the engine's GetWalletFromDB lookup is the
-	// canonical source of truth that this wallet belongs to the
-	// authenticated user.
-	if stored, dbErr := s.engine.GetWalletFromDB(user.Address, walletAddr.Hex()); dbErr != nil || stored == nil {
+	// Ownership check against the record on the chain being read.
+	if stored, dbErr := s.engine.StoredWallet(chainID, user.Address, walletAddr.Hex()); dbErr != nil || stored == nil {
 		return &restmw.HTTPError{
 			Status: http.StatusNotFound,
 			Code:   "WALLETS_NOT_FOUND",
@@ -382,7 +381,11 @@ func (s *Server) GetWalletNonce(ctx echo.Context, address generated.EthereumAddr
 		}
 	}
 
-	nonce, err := chainReader.GetEntryPointNonce(ctx.Request().Context(), walletAddr, big.NewInt(0))
+	ownerKey, err := userop.NonceKeyMAv2(userop.FallbackSignerEntityID, userop.ValidationOptionGlobal)
+	if err != nil {
+		return err
+	}
+	nonce, err := chainReader.GetEntryPointNonce(ctx.Request().Context(), walletAddr, ownerKey)
 	if err != nil {
 		return fmt.Errorf("entrypoint nonce read failed: %w", err)
 	}

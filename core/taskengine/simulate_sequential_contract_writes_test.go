@@ -42,11 +42,10 @@ func TestSimulateTask_SequentialContractWrites_Sepolia(t *testing.T) {
 
 	t.Logf("📋 Sepolia Sequential Contract Writes Test Configuration:")
 	t.Logf("   Owner EOA (derives wallet address): %s", ownerAddress.Hex())
-	t.Logf("   Factory: %s", cfg.SmartWallet.FactoryAddress.Hex())
+	t.Logf("   Factory: %s", aa.MAv2FactoryAddress().Hex())
 	t.Logf("   Chain: Sepolia (ID: %d)", cfg.SmartWallet.ChainID)
 
 	// Set factory for AA library
-	setGlobalFactory(t, cfg.SmartWallet)
 	t.Logf("   Computing salt:0 smart wallet address...")
 
 	// Connect to Sepolia
@@ -55,7 +54,8 @@ func TestSimulateTask_SequentialContractWrites_Sepolia(t *testing.T) {
 	defer client.Close()
 
 	// Compute the salt:0 smart wallet address for this owner
-	smartWalletAddr, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(0))
+	factory := aa.MAv2FactoryAddress()
+	smartWalletAddr, err := aa.GetSenderAddressMAv2(client, ownerAddress, big.NewInt(0))
 	require.NoError(t, err, "Failed to derive smart wallet address")
 	t.Logf("   ✅ Smart Wallet (salt:0): %s", smartWalletAddr.Hex())
 
@@ -85,7 +85,7 @@ func TestSimulateTask_SequentialContractWrites_Sepolia(t *testing.T) {
 	err = StoreWallet(db, int64(1), ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddr,
-		Factory: &cfg.SmartWallet.FactoryAddress,
+		Factory: &factory,
 		Salt:    big.NewInt(0),
 	})
 	require.NoError(t, err, "Failed to register smart wallet")

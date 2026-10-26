@@ -37,12 +37,12 @@ func TestExecuteTask_UniswapApprovalAndSwap_DifferentApprovalAmounts_Sepolia(t *
 
 	// Derive smart wallet address from OWNER_EOA + salt:2. That wallet must
 	// hold ETH and USDC; fund it with scripts/fixture_wallet.
-	setGlobalFactory(t, config.SmartWallet)
 	client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
 	require.NoError(t, err, "Failed to connect to RPC")
 	defer client.Close()
 
-	smartWalletAddr, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(2))
+	factory := aa.MAv2FactoryAddress()
+	smartWalletAddr, err := aa.GetSenderAddressMAv2(client, ownerAddress, big.NewInt(2))
 	require.NoError(t, err, "Failed to derive smart wallet address")
 
 	// Create user with derived addresses
@@ -55,7 +55,7 @@ func TestExecuteTask_UniswapApprovalAndSwap_DifferentApprovalAmounts_Sepolia(t *
 	err = StoreWallet(db, int64(1), ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddr,
-		Factory: &config.SmartWallet.FactoryAddress,
+		Factory: &factory,
 		Salt:    big.NewInt(2),
 	})
 	require.NoError(t, err, "Failed to store wallet in database")

@@ -40,9 +40,6 @@ type WorkerConfig struct {
 
 type SmartWalletRaw struct {
 	ControllerPrivateKey string `yaml:"controller_private_key"`
-	PaymasterAddress     string `yaml:"paymaster_address"`
-	FactoryAddress       string `yaml:"factory_address"`
-	EntrypointAddress    string `yaml:"entrypoint_address"`
 }
 
 func NewWorkerConfig(configPath string) (*WorkerConfig, error) {
@@ -65,7 +62,7 @@ func NewWorkerConfig(configPath string) (*WorkerConfig, error) {
 }
 
 // ToSmartWalletConfig converts the worker's raw config into the shared SmartWalletConfig
-// used by existing execution code (preset.SendUserOp, aa.GetNonce, etc.)
+// used by existing execution code (preset.SendUserOp, aa.EntryPointNonce, etc.)
 func (c *WorkerConfig) ToSmartWalletConfig() (*config.SmartWalletConfig, error) {
 	var controllerKey *ecdsa.PrivateKey
 	var controllerAddr common.Address
@@ -79,38 +76,19 @@ func (c *WorkerConfig) ToSmartWalletConfig() (*config.SmartWalletConfig, error) 
 		controllerAddr = crypto.PubkeyToAddress(key.PublicKey)
 	}
 
-	factoryAddr := common.HexToAddress(config.DefaultFactoryProxyAddressHex)
-	if c.SmartWallet.FactoryAddress != "" {
-		factoryAddr = common.HexToAddress(c.SmartWallet.FactoryAddress)
-	}
-
-	entrypointAddr := common.HexToAddress(config.DefaultEntrypointAddressHex)
-	if c.SmartWallet.EntrypointAddress != "" {
-		entrypointAddr = common.HexToAddress(c.SmartWallet.EntrypointAddress)
-	}
-
-	// paymaster_address must be specified explicitly per chain — see the
-	// note on the removed config.DefaultPaymasterAddressHex. An empty
-	// address means "no paymaster"; the smart wallet pays its own gas.
-	paymasterAddr := common.HexToAddress(c.SmartWallet.PaymasterAddress)
-
 	return &config.SmartWalletConfig{
 		AlchemyPaymasterPolicyID: config.ResolveAlchemyPaymasterPolicyID(
 			c.AlchemyPaymasterPolicyID, c.GasManagerPolicyID),
 		DisableGasSponsorship:   c.DisableGasSponsorship,
 		GasManagerWebhookSecret: config.ResolveGasManagerWebhookSecret(c.GasManagerWebhookSecret),
 
-		EthRpcUrl:             c.EthRpcUrl,
-		EthWsUrl:              c.EthWsUrl,
-		BundlerURL:            c.BundlerURL,
-		BundlerProvider:       c.BundlerProvider,
-		AlchemyAPIKey:         c.AlchemyAPIKey,
-		FactoryAddress:        factoryAddr,
-		EntrypointAddress:     entrypointAddr,
-		ChainID:               c.ChainID,
-		ControllerPrivateKey:  controllerKey,
-		ControllerAddress:     controllerAddr,
-		PaymasterAddress:      paymasterAddr,
-		PaymasterOwnerAddress: controllerAddr,
+		EthRpcUrl:            c.EthRpcUrl,
+		EthWsUrl:             c.EthWsUrl,
+		BundlerURL:           c.BundlerURL,
+		BundlerProvider:      c.BundlerProvider,
+		AlchemyAPIKey:        c.AlchemyAPIKey,
+		ChainID:              c.ChainID,
+		ControllerPrivateKey: controllerKey,
+		ControllerAddress:    controllerAddr,
 	}, nil
 }

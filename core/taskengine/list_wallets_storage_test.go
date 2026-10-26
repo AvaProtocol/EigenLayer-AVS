@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+
 	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
@@ -40,7 +42,7 @@ func TestListWalletsFollowsTheResolvedChain(t *testing.T) {
 	engine := New(db, cfg, nil, testutil.GetLogger())
 
 	owner := testutil.TestUser1().Address
-	factory := effectiveFactoryAddr(t, cfg.SmartWallet)
+	factory := aa.MAv2FactoryAddress()
 	onDefault := common.HexToAddress("0xDDDDddddDDDDddddDDDDddddDDDDddddDDDDdddd")
 	onOther := common.HexToAddress("0xEEEEeeeeEEEEeeeeEEEEeeeeEEEEeeeeEEEEeeee")
 	require.NoError(t, StoreWallet(db, defaultChain, owner, mkWallet(owner, factory, onDefault, 100)))
@@ -93,7 +95,7 @@ func TestListWalletsStoresDefaultWallet(t *testing.T) {
 	// Find the default wallet in the response
 	var defaultWallet *avsproto.SmartWallet
 	for _, w := range listResp.Items {
-		if w.Salt == "0" && w.Factory == effectiveFactoryHex(t, config.SmartWallet) {
+		if w.Salt == "0" && w.Factory == aa.MAv2FactoryAddress().Hex() {
 			defaultWallet = w
 			break
 		}
@@ -111,7 +113,7 @@ func TestListWalletsStoresDefaultWallet(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, defaultWallet.Address, storedWallet.Address.Hex(), "Stored wallet address should match")
 	assert.Equal(t, "0", storedWallet.Salt.String(), "Stored wallet salt should be 0")
-	assert.Equal(t, effectiveFactoryHex(t, config.SmartWallet), storedWallet.Factory.Hex(), "Stored wallet factory should match")
+	assert.Equal(t, aa.MAv2FactoryAddress().Hex(), storedWallet.Factory.Hex(), "Stored wallet factory should match")
 	assert.False(t, storedWallet.IsHidden, "Default wallet should not be hidden")
 }
 
@@ -253,7 +255,7 @@ func TestListWalletsWithMultipleWallets(t *testing.T) {
 	// Verify all wallets belong to the same owner
 	for address, wallet := range storedAddresses {
 		assert.Equal(t, user.Address, *wallet.Owner, "Wallet %s should belong to test user", address)
-		assert.Equal(t, effectiveFactoryHex(t, config.SmartWallet), wallet.Factory.Hex(), "Wallet %s should use default factory", address)
+		assert.Equal(t, aa.MAv2FactoryAddress().Hex(), wallet.Factory.Hex(), "Wallet %s should use default factory", address)
 	}
 }
 
@@ -386,7 +388,7 @@ func TestListWalletsDatabaseStateVerification(t *testing.T) {
 	for addr, wallet := range wallets1 {
 		salt0Address = addr
 		assert.Equal(t, "0", wallet.Salt.String(), "First wallet should have salt 0")
-		assert.Equal(t, effectiveFactoryHex(t, config.SmartWallet), wallet.Factory.Hex(), "Wallet should use default factory")
+		assert.Equal(t, aa.MAv2FactoryAddress().Hex(), wallet.Factory.Hex(), "Wallet should use default factory")
 		assert.Equal(t, user.Address, *wallet.Owner, "Wallet should belong to test user")
 		assert.False(t, wallet.IsHidden, "Wallet should not be hidden")
 		break
@@ -443,7 +445,7 @@ func TestListWalletsOmitsRetiredDefaultWallet(t *testing.T) {
 	cfg := testutil.GetAggregatorConfig()
 	engine := New(db, cfg, nil, testutil.GetLogger())
 	user := testutil.TestUser1()
-	chainID := engine.resolveUserChainID(user)
+	chainID := engine.ResolveUserChainID(user)
 
 	first, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
 	require.NoError(t, err)
@@ -473,7 +475,7 @@ func TestListWalletsSkipsRetiredWalletsAndCapIgnoresThem(t *testing.T) {
 	cfg.SmartWallet.MaxWalletsPerOwner = 2
 	engine := New(db, cfg, nil, testutil.GetLogger())
 	user := testutil.TestUser1()
-	chainID := engine.resolveUserChainID(user)
+	chainID := engine.ResolveUserChainID(user)
 
 	first, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
 	require.NoError(t, err)

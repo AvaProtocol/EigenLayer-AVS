@@ -1,348 +1,26 @@
 package aa
 
 import (
-	_ "embed"
 	"fmt"
 	"math/big"
-	"strings"
-	"sync"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/ethclient"
-
-	// "github.com/ethereum/go-ethereum/accounts/abi/bind"
-
-	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 )
 
-//go:embed account.abi
-var simpleAccountABIJSON string
-
-var (
-	factoryABI  abi.ABI
-	defaultSalt = big.NewInt(0)
-
-	simpleAccountABI     *abi.ABI
-	simpleAccountABIOnce sync.Once
-	simpleAccountABIErr  error
-	EntrypointAddress    = common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789")
-
-	// factoryAddress is set via SetFactoryAddress() from config
-	// It uses the default from config.DefaultFactoryProxyAddressHex if not overridden in YAML
-	factoryAddress   common.Address
-	factoryAddressMu sync.RWMutex
-)
-
-// SetFactoryAddress sets the factory proxy address used by the global-factory
-// helpers (GetSenderAddress, GetNonce...).
+// UnpackExecuteCalldata decodes smart-wallet execution calldata back into
+// per-call (target, value, data) tuples. It dispatches on the 4-byte function
+// selector, so it stays correct whichever pack helper produced the calldata:
+//   - execute(address,uint256,bytes)          → one entry
+//   - executeBatch((address,uint256,bytes)[]) → N entries, per-tuple values
 //
-// Prefer SetFactoryAddressForConfig. Passing config.SmartWallet.FactoryAddress
-// straight in is now wrong on any chain running Modular Account v2: that field
-// is the SimpleAccount factory, and since GetSenderAddress infers the account
-// implementation from this value, an MA v2 chain would silently derive v0.6
-// addresses everywhere the global factory is used.
-func SetFactoryAddress(address common.Address) {
-	factoryAddressMu.Lock()
-	defer factoryAddressMu.Unlock()
-	factoryAddress = address
-}
-
-// SetFactoryAddressForConfig sets the global factory to the one this chain's
-// configured account provider actually creates accounts at, which is the only
-// value the global-factory helpers can derive correctly against.
-func SetFactoryAddressForConfig(swCfg *config.SmartWalletConfig) error {
-	effective, err := EffectiveFactory(swCfg)
-	if err != nil {
-		return err
-	}
-	SetFactoryAddress(effective)
-	return nil
-}
-
-// getFactoryAddress returns the current factory address, falling back to the
-// factory of the DEFAULT account provider when nothing has been set.
-//
-// The fallback must track config's default account_provider, which is
-// modular_account_v2. It used to be config.DefaultFactoryProxyAddressHex — the
-// v0.6 SimpleAccountFactory — and that became wrong the moment GetSenderAddress
-// started inferring the account implementation from this value: any caller
-// reaching the global before SetFactoryAddressForConfig ran would derive a v0.6
-// address on an MA v2 chain, silently and with no error to notice.
-//
-// That is not a hypothetical ordering problem. model.LoadDefaultSmartWallet and
-// the preset builders all go through GetSenderAddress, and the whole Go test
-// suite hits this path because most tests never construct an Engine.
-func getFactoryAddress() common.Address {
-	factoryAddressMu.RLock()
-	defer factoryAddressMu.RUnlock()
-	if factoryAddress != (common.Address{}) {
-		return factoryAddress
-	}
-	return defaultProviderFactory()
-}
-
-// defaultProviderFactory is the factory belonging to config's default
-// account_provider. Resolved through the same routing every other caller uses,
-// so it cannot drift from it.
-func defaultProviderFactory() common.Address {
-	var swCfg config.SmartWalletConfig // zero value == unset provider == the default
-	factory, err := FactoryAddressForProvider(
-		AccountProvider(swCfg.AccountProviderName()),
-		common.HexToAddress(config.DefaultFactoryProxyAddressHex),
-	)
-	if err != nil {
-		// Unreachable: the default provider is by definition a known one.
-		return common.HexToAddress(config.DefaultFactoryProxyAddressHex)
-	}
-	return factory
-}
-
-func SetEntrypointAddress(address common.Address) {
-	EntrypointAddress = address
-}
-
-func buildFactoryABI() {
-	var err error
-	factoryABI, err = abi.JSON(strings.NewReader(SimpleFactoryMetaData.ABI))
-	if err != nil {
-		panic(fmt.Errorf("invalid factory ABI: %w", err))
-	}
-}
-
-// GetInitCode returns initcode for a given address with a given salt using the factory address from config
-func GetInitCode(ownerAddress string, salt *big.Int) (string, error) {
-	return GetInitCodeForFactory(ownerAddress, getFactoryAddress(), salt)
-}
-
-// GetInitCodeForFactory returns the UserOp initCode: the factory address
-// followed by createAccount calldata. EntryPoint calls that. It is not the
-// proxy's CREATE2 deployment code, so hashing it does not yield the wallet
-// address. Use GetSenderAddressForFactory for the address.
-func GetInitCodeForFactory(ownerAddress string, factoryAddress common.Address, salt *big.Int) (string, error) {
-	var err error
-
-	buildFactoryABI()
-
-	var data []byte
-	data = append(data, factoryAddress.Bytes()...)
-
-	calldata, err := factoryABI.Pack("createAccount", common.HexToAddress(ownerAddress), salt)
-
-	if err != nil {
-		return "", err
-	}
-
-	data = append(data, calldata...)
-
-	return hexutil.Encode(data), nil
-	//return common.Bytes2Hex(data), nil
-}
-
-// GetSenderAddress is a wrapper that uses the factory address from config,
-// set via SetFactoryAddress().
-//
-// It routes through DeriveSenderAddressAuto rather than calling
-// GetSenderAddressForFactory directly, so the account implementation follows
-// the configured factory. Callers of SetFactoryAddress must therefore pass the
-// EFFECTIVE factory (see EffectiveFactory) — passing the raw
-// smart_wallet.factory_address on an MA v2 chain would derive the wrong
-// address here, and every global-factory caller would inherit the mistake.
-func GetSenderAddress(conn *ethclient.Client, ownerAddress common.Address, salt *big.Int) (*common.Address, error) {
-	return DeriveSenderAddressAuto(conn, ownerAddress, getFactoryAddress(), salt)
-}
-
-// GetSenderAddressForFactory computes the smart wallet address using the factory proxy address
-// Callers should pass the default factory address from config.DefaultFactoryProxyAddressHex
-// or a custom factory address if needed.
-//
-// NOTE: This function always uses the on-chain factory.getAddress() method as the source of truth,
-// because the factory contract uses CREATE2 with ERC1967Proxy creation code, which is different
-// from the init code format used in UserOps (factory address + calldata). The factory's getAddress
-// method correctly calculates the address that will actually be deployed.
-func GetSenderAddressForFactory(conn *ethclient.Client, ownerAddress common.Address, factoryAddress common.Address, salt *big.Int) (*common.Address, error) {
-	// Always use on-chain factory.getAddress() as the source of truth
-	// The factory contract's getAddress method uses CREATE2 with ERC1967Proxy creation code,
-	// which is different from the init code format (factory address + calldata) used in UserOps.
-	// This ensures we get the correct address that will actually be deployed.
-	simpleFactory, err := NewSimpleFactory(factoryAddress, conn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create factory instance at %s: %w", factoryAddress.Hex(), err)
-	}
-
-	sender, err := simpleFactory.GetAddress(nil, ownerAddress, salt)
-	if err != nil {
-		return nil, fmt.Errorf("failed to derive wallet address from factory %s for owner %s with salt %s: %w",
-			factoryAddress.Hex(), ownerAddress.Hex(), salt.String(), err)
-	}
-	return &sender, nil
-}
-
-func GetNonce(conn *ethclient.Client, ownerAddress common.Address, salt *big.Int) (*big.Int, error) {
-	if salt == nil {
-		salt = defaultSalt
-	}
-
-	entrypoint, err := NewEntryPoint(EntrypointAddress, conn)
-	if err != nil {
-		return nil, err
-	}
-
-	return entrypoint.GetNonce(nil, ownerAddress, salt)
-}
-
-func MustNonce(conn *ethclient.Client, ownerAddress common.Address, salt *big.Int) *big.Int {
-	nonce, e := GetNonce(conn, ownerAddress, salt)
-	if e != nil {
-		panic(e)
-	}
-
-	return nonce
-}
-
-// loadSimpleAccountABI loads the SimpleAccount ABI from embedded JSON
-// This ensures we always use the latest ABI file, even if Go bindings are outdated
-func loadSimpleAccountABI() (*abi.ABI, error) {
-	parsedABI, err := abi.JSON(strings.NewReader(simpleAccountABIJSON))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse SimpleAccount ABI: %w", err)
-	}
-	return &parsedABI, nil
-}
-
-// ensureSimpleAccountABI lazily parses and caches the embedded SimpleAccount ABI exactly once.
-// The parse is deterministic, so a sync.Once is enough — and it removes the check-then-set data
-// race on the package-level simpleAccountABI that the pack/unpack helpers previously shared (now
-// hit on every paymaster-sponsored send via UnpackExecuteCalldata, not just batches).
-func ensureSimpleAccountABI() (*abi.ABI, error) {
-	simpleAccountABIOnce.Do(func() {
-		simpleAccountABI, simpleAccountABIErr = loadSimpleAccountABI()
-	})
-	return simpleAccountABI, simpleAccountABIErr
-}
-
-// Generate calldata for UserOps
-func PackExecute(targetAddress common.Address, ethValue *big.Int, calldata []byte) ([]byte, error) {
-	parsedABI, err := ensureSimpleAccountABI()
-	if err != nil {
-		return nil, err
-	}
-
-	return parsedABI.Pack("execute", targetAddress, ethValue, calldata)
-}
-
-// Generate calldata for batch UserOps - executes multiple contract calls in one transaction
-func PackExecuteBatch(targetAddresses []common.Address, calldataArray [][]byte) ([]byte, error) {
-	parsedABI, err := ensureSimpleAccountABI()
-	if err != nil {
-		return nil, err
-	}
-
-	return parsedABI.Pack("executeBatch", targetAddresses, calldataArray)
-}
-
-// PackExecuteBatchWithValues generates calldata for batch UserOps with ETH values per call
-// Supports atomic batching of operations with different ETH amounts (e.g., contract call + paymaster reimbursement)
-// Uses manual ABI encoding to bypass Go's ABI encoder bug with empty []byte slices
-func PackExecuteBatchWithValues(targetAddresses []common.Address, values []*big.Int, calldataArray [][]byte) ([]byte, error) {
-	// Manual ABI encoding to bypass Go's ABI encoder bug
-	// Function selector: executeBatchWithValues(address[],uint256[],bytes[])
-	selector := []byte{0xc3, 0xff, 0x72, 0xfc}
-
-	// Build the calldata manually using a simpler, correct approach
-	var result []byte
-	result = append(result, selector...)
-
-	// Calculate offsets for dynamic arrays
-	// Layout: selector + offset1 + offset2 + offset3 + data1 + data2 + data3
-	offset1 := 96                                                      // After selector + 3 offsets (32 bytes each)
-	offset2 := 96 + 32 + len(targetAddresses)*32                       // After targets array
-	offset3 := 96 + 32 + len(targetAddresses)*32 + 32 + len(values)*32 // After values array
-
-	// Add offsets (32 bytes each)
-	result = append(result, common.LeftPadBytes(big.NewInt(int64(offset1)).Bytes(), 32)...)
-	result = append(result, common.LeftPadBytes(big.NewInt(int64(offset2)).Bytes(), 32)...)
-	result = append(result, common.LeftPadBytes(big.NewInt(int64(offset3)).Bytes(), 32)...)
-
-	// Add targets array
-	result = append(result, common.LeftPadBytes(big.NewInt(int64(len(targetAddresses))).Bytes(), 32)...)
-	for _, addr := range targetAddresses {
-		result = append(result, common.LeftPadBytes(addr.Bytes(), 32)...)
-	}
-
-	// Add values array
-	result = append(result, common.LeftPadBytes(big.NewInt(int64(len(values))).Bytes(), 32)...)
-	for _, value := range values {
-		result = append(result, common.LeftPadBytes(value.Bytes(), 32)...)
-	}
-
-	// Add calldata array
-	result = append(result, common.LeftPadBytes(big.NewInt(int64(len(calldataArray))).Bytes(), 32)...)
-
-	// CRITICAL FIX: Offsets in the func[] array must be RELATIVE to the position right after the array length
-	// The func[] array structure is:
-	// [array_length (32 bytes)][offset_0 (32 bytes)][offset_1 (32 bytes)]...[data_0][data_1]...
-	// Each offset points to the start of its data element, RELATIVE to the position right after the array length
-	// This means the offset must account for the space taken by ALL the offset slots themselves
-
-	// Calculate the starting position for the first calldata element
-	// This is RELATIVE to the position right after the array length field
-	// The data section starts AFTER: array_length (not counted) + all offset slots
-	calldataContentStart := len(calldataArray) * 32 // Space for all offset slots (Func[0] starts after these)
-
-	// First, calculate all the relative offsets
-	relativeOffsets := make([]int, len(calldataArray))
-	for i, calldata := range calldataArray {
-		relativeOffsets[i] = calldataContentStart
-		// Move to next calldata element position
-		calldataContentStart += 32 // length field
-		if len(calldata) > 0 {
-			// Pad to 32-byte boundary
-			paddedLength := ((len(calldata) + 31) / 32) * 32
-			calldataContentStart += paddedLength
-		}
-	}
-
-	// Add the offsets (each offset is relative to the start of data section)
-	for _, offset := range relativeOffsets {
-		offsetBytes := common.LeftPadBytes(big.NewInt(int64(offset)).Bytes(), 32)
-		result = append(result, offsetBytes...)
-	}
-
-	// Add actual calldata contents
-	for _, calldata := range calldataArray {
-		lengthBytes := common.LeftPadBytes(big.NewInt(int64(len(calldata))).Bytes(), 32)
-		result = append(result, lengthBytes...)
-
-		if len(calldata) > 0 {
-			// Pad to 32-byte boundary
-			paddedLength := ((len(calldata) + 31) / 32) * 32
-			padded := make([]byte, paddedLength)
-			copy(padded, calldata)
-			result = append(result, padded...)
-		}
-	}
-	return result, nil
-}
-
-// UnpackExecuteCalldata decodes smart-wallet execution calldata — produced by any of the pack
-// helpers, v0.6 or MA v2 — back into per-call (target, value, data) tuples. It dispatches on the
-// 4-byte function selector via the embedded ABIs, so it stays correct regardless of which pack
-// helper produced the calldata:
-//   - execute(address,uint256,bytes)                  → one entry (identical in both accounts)
-//   - executeBatch(address[],bytes[])                 → N entries, all values 0 (v0.6)
-//   - executeBatchWithValues(address[],uint256[],bytes[]) → N entries with explicit values (v0.6 fork)
-//   - executeBatch((address,uint256,bytes)[])         → N entries, per-tuple values (MA v2)
-//
-// It is the inverse the paymaster reimbursement wrapper needs to append its own batch entries onto
-// an already-batched call without having to know how that call was originally packed.
+// Calldata wrapped in executeUserOp is unwrapped first.
 func UnpackExecuteCalldata(calldata []byte) (targets []common.Address, values []*big.Int, datas [][]byte, err error) {
 	calldata = UnwrapExecuteUserOp(calldata)
 	if len(calldata) < 4 {
 		return nil, nil, nil, fmt.Errorf("calldata too short: %d bytes", len(calldata))
 	}
-	parsedABI, err := ensureSimpleAccountABI()
+	parsedABI, err := ensureModularAccountABI()
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -350,11 +28,8 @@ func UnpackExecuteCalldata(calldata []byte) (targets []common.Address, values []
 	selector := calldata[:4]
 	method, err := parsedABI.MethodById(selector)
 	if err != nil {
-		// Not a v0.6 SimpleAccount method — try the MA v2 account, whose
-		// batch selector differs (tuple-array form; see ma_v2.go).
-		return unpackExecuteCalldataMAv2(calldata, selector)
+		return nil, nil, nil, fmt.Errorf("unrecognized smart-wallet method selector 0x%x: %w", selector, err)
 	}
-
 	args, err := method.Inputs.Unpack(calldata[4:])
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to unpack %s calldata: %w", method.Name, err)
@@ -377,72 +52,21 @@ func UnpackExecuteCalldata(calldata []byte) (targets []common.Address, values []
 		return []common.Address{dest}, []*big.Int{value}, [][]byte{data}, nil
 
 	case "executeBatch":
-		dest, ok := args[0].([]common.Address)
-		if !ok {
-			return nil, nil, nil, fmt.Errorf("executeBatch: unexpected dest type %T", args[0])
+		if len(args) != 1 {
+			return nil, nil, nil, fmt.Errorf("executeBatch: unexpected argument count %d", len(args))
 		}
-		data, ok := args[1].([][]byte)
-		if !ok {
-			return nil, nil, nil, fmt.Errorf("executeBatch: unexpected data type %T", args[1])
+		calls := *abi.ConvertType(args[0], new([]Call)).(*[]Call)
+		targets = make([]common.Address, len(calls))
+		values = make([]*big.Int, len(calls))
+		datas = make([][]byte, len(calls))
+		for i, call := range calls {
+			targets[i] = call.Target
+			values[i] = call.Value
+			datas[i] = call.Data
 		}
-		if len(dest) != len(data) {
-			return nil, nil, nil, fmt.Errorf("executeBatch: dest/func length mismatch (%d vs %d)", len(dest), len(data))
-		}
-		vals := make([]*big.Int, len(dest))
-		for i := range vals {
-			vals[i] = big.NewInt(0)
-		}
-		return dest, vals, data, nil
-
-	case "executeBatchWithValues":
-		dest, ok := args[0].([]common.Address)
-		if !ok {
-			return nil, nil, nil, fmt.Errorf("executeBatchWithValues: unexpected dest type %T", args[0])
-		}
-		vals, ok := args[1].([]*big.Int)
-		if !ok {
-			return nil, nil, nil, fmt.Errorf("executeBatchWithValues: unexpected values type %T", args[1])
-		}
-		data, ok := args[2].([][]byte)
-		if !ok {
-			return nil, nil, nil, fmt.Errorf("executeBatchWithValues: unexpected data type %T", args[2])
-		}
-		if len(dest) != len(vals) || len(dest) != len(data) {
-			return nil, nil, nil, fmt.Errorf("executeBatchWithValues: array length mismatch (dest=%d values=%d func=%d)", len(dest), len(vals), len(data))
-		}
-		return dest, vals, data, nil
+		return targets, values, datas, nil
 
 	default:
-		return nil, nil, nil, fmt.Errorf("unsupported smart-wallet method %q for reimbursement wrapping", method.Name)
+		return nil, nil, nil, fmt.Errorf("unsupported smart-wallet method %q", method.Name)
 	}
-}
-
-// unpackExecuteCalldataMAv2 decodes the MA v2 executeBatch tuple form.
-// (MA v2's `execute` shares the v0.6 selector and never reaches here.)
-func unpackExecuteCalldataMAv2(calldata, selector []byte) (targets []common.Address, values []*big.Int, datas [][]byte, err error) {
-	parsedABI, err := ensureModularAccountABI()
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	method, err := parsedABI.MethodById(selector)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("unrecognized smart-wallet method selector 0x%x: %w", selector, err)
-	}
-	args, err := method.Inputs.Unpack(calldata[4:])
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to unpack MA v2 %s calldata: %w", method.Name, err)
-	}
-	if method.Name != "executeBatch" || len(args) != 1 {
-		return nil, nil, nil, fmt.Errorf("unsupported MA v2 smart-wallet method %q", method.Name)
-	}
-	calls := *abi.ConvertType(args[0], new([]Call)).(*[]Call)
-	targets = make([]common.Address, len(calls))
-	values = make([]*big.Int, len(calls))
-	datas = make([][]byte, len(calls))
-	for i, call := range calls {
-		targets[i] = call.Target
-		values[i] = call.Value
-		datas[i] = call.Data
-	}
-	return targets, values, datas, nil
 }

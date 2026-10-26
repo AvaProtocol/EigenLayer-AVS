@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"math/big"
 	"net/http"
@@ -174,4 +175,128 @@ func TestUpdateWalletHidesEOA7702NotSaltZeroDerived(t *testing.T) {
 	derived, err := taskengine.GetWallet(rig.db, walletTestChain, rig.owner, saltZero.Hex())
 	require.NoError(t, err)
 	require.False(t, derived.IsHidden, "hiding the EOA must not hide the salt-0 derived runner")
+}
+
+// nonceKeyRecorder answers GetEntryPointNonce the way EntryPoint v0.7 does,
+// key<<64 | sequence, and records the key it was asked for.
+type nonceKeyRecorder struct {
+	taskengine.ChainStateReader
+	key *big.Int
+}
+
+func (r *nonceKeyRecorder) GetEntryPointNonce(_ context.Context, _ common.Address, key *big.Int) (*big.Int, error) {
+	r.key = new(big.Int).Set(key)
+	return new(big.Int).Or(new(big.Int).Lsh(key, 64), big.NewInt(7)), nil
+}
+
+// registerNonceReaders gives each rig chain its own recorder, so a test can
+// tell which chain was read. Nothing else in this package registers readers,
+// so cleanup clears the registry and restores what was there.
+func registerNonceReaders(t *testing.T) map[int64]*nonceKeyRecorder {
+	t.Helper()
+	readers := map[int64]*nonceKeyRecorder{}
+	prev := map[uint64]taskengine.ChainStateReader{}
+	for _, chainID := range []int64{walletTestChain, walletOtherChain} {
+		readers[chainID] = &nonceKeyRecorder{}
+		prev[uint64(chainID)] = taskengine.GetChainStateReaderForChain(uint64(chainID))
+		taskengine.RegisterChainStateReader(uint64(chainID), readers[chainID])
+	}
+	t.Cleanup(func() {
+		taskengine.ClearChainStateReaderRegistry()
+		for chainID, previous := range prev {
+			taskengine.RegisterChainStateReader(chainID, previous)
+		}
+	})
+	return readers
+}
+
+// getNonce runs GET /wallets/{address}:getNonce with the given JWT audience
+// and ?chainId.
+func (r *walletTestRig) getNonce(t *testing.T, wallet common.Address, audChainID int64, chainIDQuery *int64) (*httptest.ResponseRecorder, error) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/wallets/"+wallet.Hex()+":getNonce", nil)
+	rec := httptest.NewRecorder()
+	ctx := echo.New().NewContext(req, rec)
+	ctx.Set("auth.user", &restmw.AuthenticatedUser{Subject: r.owner.Hex(), ChainID: audChainID})
+
+	var params generated.GetWalletNonceParams
+	if chainIDQuery != nil {
+		q := generated.ChainIdQuery(*chainIDQuery)
+		params.ChainId = &q
+	}
+	return rec, r.server.GetWalletNonce(ctx, generated.EthereumAddress(wallet.Hex()), params)
+}
+
+func requireWalletNotFound(t *testing.T, err error) {
+	t.Helper()
+	var httpErr *restmw.HTTPError
+	require.ErrorAs(t, err, &httpErr)
+	require.Equal(t, http.StatusNotFound, httpErr.Status)
+}
+
+// The owner signs through the fallback signer, which Modular Account v2
+// selects with nonce key 0x1. Key 0 selects no validation, so a nonce read
+// there builds an operation the account will not validate.
+func TestGetWalletNonceReadsOwnerValidationKey(t *testing.T) {
+	rig := newWalletRig(t)
+	reader := registerNonceReaders(t)[walletTestChain]
+
+	rec, err := rig.getNonce(t, rig.onDefault, walletTestChain, nil)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, reader.key)
+	require.Equal(t, "1", reader.key.String(), "must read the fallback signer's nonce key")
+
+	var out generated.NonceResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	require.Equal(t, "18446744073709551623", out.Nonce, "the full nonce, 1<<64 | 7, goes in userOp.nonce as is")
+}
+
+// The ownership check reads the record on the chain whose nonce is read, not
+// the gateway's default chain.
+func TestGetWalletNonceChecksOwnershipOnTheReadChain(t *testing.T) {
+	rig := newWalletRig(t)
+	registerNonceReaders(t)
+	other := walletOtherChain
+	def := walletTestChain
+
+	// Registered only on the other chain: readable there via ?chainId,
+	// though the aud is the default chain.
+	rec, err := rig.getNonce(t, rig.onOther, walletTestChain, &other)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	// And via the aud alone.
+	_, err = rig.getNonce(t, rig.onOther, walletOtherChain, nil)
+	require.NoError(t, err)
+
+	// A default-chain record does not open another chain's nonce.
+	_, err = rig.getNonce(t, rig.onDefault, walletTestChain, &other)
+	requireWalletNotFound(t, err)
+
+	// Nor the reverse.
+	_, err = rig.getNonce(t, rig.onOther, walletOtherChain, &def)
+	requireWalletNotFound(t, err)
+}
+
+// An unconfigured chain id resolves to the default chain, as in GET /wallets,
+// for both the ownership check and the nonce read.
+func TestGetWalletNonceUnconfiguredChainUsesDefault(t *testing.T) {
+	rig := newWalletRig(t)
+	readers := registerNonceReaders(t)
+	unconfigured := int64(999999)
+
+	rec, err := rig.getNonce(t, rig.onDefault, walletTestChain, &unconfigured)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, readers[walletTestChain].key, "the nonce must be read on the default chain")
+	require.Nil(t, readers[walletOtherChain].key)
+
+	// The same holds for an unconfigured aud.
+	_, err = rig.getNonce(t, rig.onDefault, unconfigured, nil)
+	require.NoError(t, err)
+
+	// The default chain holds no record of the other chain's wallet.
+	_, err = rig.getNonce(t, rig.onOther, walletTestChain, &unconfigured)
+	requireWalletNotFound(t, err)
 }

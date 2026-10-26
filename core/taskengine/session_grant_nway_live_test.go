@@ -61,7 +61,6 @@ func TestGrantReplaceClearsSeveralPriorEntities_Sepolia(t *testing.T) {
 	require.Equal(t, owner, crypto.PubkeyToAddress(ownerKey.PublicKey),
 		"TEST_PRIVATE_KEY must be OWNER_EOA's key — only the owner can authorize a grant")
 
-	setGlobalFactory(t, cfg.SmartWallet)
 	runner, err := aa.GetSenderAddressMAv2(client, owner, big.NewInt(fixtureSaltGrantReplace))
 	require.NoError(t, err)
 	t.Logf("runner %s (salt %d)", runner.Hex(), fixtureSaltGrantReplace)
@@ -83,7 +82,7 @@ func TestGrantReplaceClearsSeveralPriorEntities_Sepolia(t *testing.T) {
 	engine.InstallSessionResolver()
 	t.Cleanup(func() { preset.SetSessionResolver(nil) })
 
-	factoryAddr := effectiveFactoryAddr(t, cfg.SmartWallet)
+	factoryAddr := aa.MAv2FactoryAddress()
 	require.NoError(t, StoreWallet(db, chainID.Int64(), owner, &model.SmartWallet{
 		Owner: &owner, Address: runner, Factory: &factoryAddr,
 		Salt: big.NewInt(fixtureSaltGrantReplace),

@@ -28,7 +28,7 @@ func TestSetWalletHiddenStatus(t *testing.T) {
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
 	u := testutil.TestUser1()
-	defaultFactory := effectiveFactoryHex(t, n.smartWalletConfig)
+	defaultFactory := aa.MAv2FactoryAddress().Hex()
 
 	saltValue := "12345"
 	// Ensure wallet exists
@@ -142,7 +142,7 @@ func TestGetWalletRefusesNewLegacyFactoryWallets(t *testing.T) {
 	// after that, or GetWallet derives on chain and misses the stored record.
 	rpcConn = nil
 	u := testutil.TestUser1()
-	chainID := n.resolveUserChainID(u)
+	chainID := n.ResolveUserChainID(u)
 
 	saltValue := "67890"
 	legacyFactory := "0x9406Cc6185a346906296840746125a0E44976454"
@@ -211,7 +211,7 @@ func TestLegacyFactoryRejectsBeforeDerivation(t *testing.T) {
 	// cannot succeed by accident on a live factory.
 	rpcConn = new(ethclient.Client)
 	u := testutil.TestUser1()
-	chainID := n.resolveUserChainID(u)
+	chainID := n.ResolveUserChainID(u)
 
 	prev := GetChainStateReaderForChain(uint64(chainID))
 	RegisterChainStateReader(uint64(chainID), failingSmartWalletReader{})
@@ -314,7 +314,7 @@ func TestHideDefaultWallet(t *testing.T) {
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
 	u := testutil.TestUser1()
-	defaultFactory := effectiveFactoryHex(t, n.smartWalletConfig)
+	defaultFactory := aa.MAv2FactoryAddress().Hex()
 	defaultSalt := "0"
 
 	// Ensure default wallet exists and get its address

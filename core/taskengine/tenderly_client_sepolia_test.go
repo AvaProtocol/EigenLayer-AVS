@@ -44,7 +44,7 @@ func TestContractWrite_WETHDeposit_WithETHValue_Sepolia(t *testing.T) {
 		require.NoError(t, err, "Failed to connect to Sepolia RPC")
 		defer ethClient.Close()
 
-		smartWalletAddress, err := aa.GetSenderAddress(ethClient, *ownerEOA, big.NewInt(0))
+		smartWalletAddress, err := aa.GetSenderAddressMAv2(ethClient, *ownerEOA, big.NewInt(0))
 		require.NoError(t, err, "Failed to derive smart wallet address")
 
 		t.Logf("📋 Test Configuration:")

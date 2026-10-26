@@ -83,8 +83,7 @@ func TestTickerContextRaceCondition(t *testing.T) {
 			common.HexToAddress("0x997E5D40a32c44a3D93E59fC55C4Fd20b7d2d49D"),
 		},
 		SmartWallet: &config.SmartWalletConfig{
-			EthRpcUrl:      "http://localhost:8545",
-			FactoryAddress: common.HexToAddress("0x1234567890123456789012345678901234567890"),
+			EthRpcUrl: "http://localhost:8545",
 		},
 	}
 
@@ -180,8 +179,7 @@ func TestOperatorConnectionStabilization(t *testing.T) {
 			common.HexToAddress("0x997E5D40a32c44a3D93E59fC55C4Fd20b7d2d49D"),
 		},
 		SmartWallet: &config.SmartWalletConfig{
-			EthRpcUrl:      "http://localhost:8545",
-			FactoryAddress: common.HexToAddress("0x1234567890123456789012345678901234567890"),
+			EthRpcUrl: "http://localhost:8545",
 		},
 	}
 

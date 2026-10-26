@@ -406,9 +406,6 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	SetMacroSecrets(config.MacroSecrets)
 
 	SetRpc(config.SmartWallet.EthRpcUrl)
-	if err := aa.SetFactoryAddressForConfig(config.SmartWallet); err != nil {
-		panic(fmt.Sprintf("smart_wallet: cannot resolve account factory: %v", err))
-	}
 
 	//SetWsRpc(config.SmartWallet.EthWsUrl)
 
@@ -1127,7 +1124,7 @@ func (n *Engine) storeDefaultWalletForListWallets(chainID int64, owner common.Ad
 // ListWallets corresponds to the ListWallets RPC.
 //
 // Wallet records are chain-scoped, so the listing is too: the chain comes
-// from resolveUserChainID — the caller's explicit choice (REST sets
+// from ResolveUserChainID — the caller's explicit choice (REST sets
 // user.ChainID from the ?chainId query), then the JWT `aud` chain, then the
 // gateway default. Same precedence as GetWallet, so a wallet created on one
 // chain is listed by naming that chain rather than by holding a second JWT.
@@ -1140,15 +1137,12 @@ func (n *Engine) ListWallets(user *model.User, payload *avsproto.ListWalletReq) 
 		return nil, status.Errorf(codes.InvalidArgument, "ListWallets requires an authenticated user")
 	}
 	owner := user.Address
-	chainID := n.resolveUserChainID(user)
+	chainID := n.ResolveUserChainID(user)
 	swCfg := n.ResolveSmartWalletConfig(chainID)
 	walletsToReturnProto := []*avsproto.SmartWallet{}
 	processedAddresses := make(map[string]bool)
 
-	// The chain's CURRENT factory, not the raw configured one: on an MA v2
-	// chain those differ, and deriving against the configured SimpleAccount
-	// factory would hand the user their pre-cutover address.
-	defaultSystemFactory, factoryErr := aa.EffectiveFactory(swCfg)
+	defaultSystemFactory := aa.MAv2FactoryAddress()
 	var defaultDerivedAddress *common.Address
 	var deriveErr error
 
@@ -1160,8 +1154,6 @@ func (n *Engine) ListWallets(user *model.User, payload *avsproto.ListWalletReq) 
 	// be indistinguishable from a real one in the response. Stored wallets
 	// are unaffected: they come from the prefix scan below.
 	switch {
-	case factoryErr != nil:
-		deriveErr = factoryErr
 	case GetChainStateReaderForChain(uint64(chainID)) != nil:
 		reader := GetChainStateReaderForChain(uint64(chainID))
 		var addr common.Address
@@ -1170,7 +1162,7 @@ func (n *Engine) ListWallets(user *model.User, payload *avsproto.ListWalletReq) 
 			defaultDerivedAddress = &addr
 		}
 	case rpcConn != nil && chainID == n.defaultChainID():
-		defaultDerivedAddress, deriveErr = aa.DeriveSenderAddressAuto(rpcConn, owner, defaultSystemFactory, defaultSalt)
+		defaultDerivedAddress, deriveErr = aa.DeriveSenderAddress(rpcConn, owner, defaultSystemFactory, defaultSalt)
 	default:
 		// Test/CI (rpcConn nil), or a non-default chain with no reader
 		// registered.
@@ -1359,11 +1351,11 @@ func (n *Engine) validateNonZeroAddress(factoryAddr common.Address, methodName, 
 	return nil
 }
 
-// resolveUserChainID returns the chain context for a wallet RPC.
+// ResolveUserChainID returns the chain context for a wallet RPC.
 //
 // REST sets user.ChainID from the JWT `aud` claim
-// (aggregator/rest/middleware/jwt.go:audienceChainID); that's the
-// authoritative source. Falls back to the gateway's default chain when
+// (aggregator/rest/middleware/jwt.go:audienceChainID), or from ?chainId=
+// on GET /wallets and getNonce. Falls back to the gateway's default chain when
 // user.ChainID is zero (gRPC path) or when it isn't one of the
 // configured chains.
 //
@@ -1375,7 +1367,7 @@ func (n *Engine) validateNonZeroAddress(factoryAddr common.Address, methodName, 
 // abused. Logging the fallback at Warn surfaces the anomaly so we can
 // detect either a configuration drift (chain removed) or a deliberate
 // probe.
-func (n *Engine) resolveUserChainID(user *model.User) int64 {
+func (n *Engine) ResolveUserChainID(user *model.User) int64 {
 	if user == nil || user.ChainID <= 0 {
 		return n.defaultChainID()
 	}
@@ -1384,7 +1376,7 @@ func (n *Engine) resolveUserChainID(user *model.User) int64 {
 			return user.ChainID
 		}
 	}
-	n.logger.Warn("resolveUserChainID: user.ChainID is not a configured chain — falling back to default",
+	n.logger.Warn("ResolveUserChainID: user.ChainID is not a configured chain — falling back to default",
 		"requested_chain_id", user.ChainID,
 		"default_chain_id", n.defaultChainID(),
 		"owner", user.Address.Hex(),
@@ -1392,21 +1384,16 @@ func (n *Engine) resolveUserChainID(user *model.User) int64 {
 	return n.defaultChainID()
 }
 
-// resolveFactoryOverride picks the factory a wallet operation should use.
-//
-// An explicit override always wins: it is how a caller reaches a wallet
-// created under the pre-cutover factory (its provider is inferred from the
-// address rather than this chain's config), and it lets a chain with no
-// configured default factory still serve a caller who supplies one. Only when
-// there is no override does the chain default (EffectiveFactory) apply — whose
-// error is fatal solely in that case. The override's format must already be
-// validated by the caller. Shared by GetWallet and SetWallet so the "override
-// wins" rule lives in one place.
-func resolveFactoryOverride(swCfg *config.SmartWalletConfig, overrideHex string) (common.Address, error) {
+// resolveFactoryOverride picks the factory a wallet operation should use: an
+// explicit override, which is how a caller reaches a stored wallet created
+// under a pre-cutover factory, or else the MA v2 factory. The override's
+// format must already be validated by the caller. Shared by GetWallet and
+// SetWallet so the "override wins" rule lives in one place.
+func resolveFactoryOverride(overrideHex string) common.Address {
 	if overrideHex != "" {
-		return common.HexToAddress(overrideHex), nil
+		return common.HexToAddress(overrideHex)
 	}
-	return aa.EffectiveFactory(swCfg)
+	return aa.MAv2FactoryAddress()
 }
 
 // walletCountsTowardOwnerCap reports a stored derived wallet. A designated EOA
@@ -1444,7 +1431,7 @@ func (n *Engine) loadStoredLegacyWallet(chainID int64, owner, factory common.Add
 // It uses the owner (from auth context), salt, and factory_address from payload to derive the wallet address.
 //
 // Wallet records are chain-scoped. The chain context is resolved via
-// resolveUserChainID — REST callers route by their JWT `aud` chain,
+// ResolveUserChainID — REST callers route by their JWT `aud` chain,
 // gRPC callers fall back to the gateway's default chain.
 func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
 	return n.GetWalletWithContext(context.Background(), user, payload)
@@ -1455,7 +1442,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 // the worker-routed CREATE2 derivation; the worker reader's withTimeout still
 // bounds the call when ctx carries no deadline.
 func (n *Engine) GetWalletWithContext(ctx context.Context, user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
-	chainID := n.resolveUserChainID(user)
+	chainID := n.ResolveUserChainID(user)
 	// Resolve the per-chain smart wallet config. In single-chain mode
 	// this returns n.smartWalletConfig (the gateway default); in
 	// gateway/multi-chain mode it returns the config for the JWT-derived
@@ -1488,10 +1475,7 @@ func (n *Engine) GetWalletWithContext(ctx context.Context, user *model.User, pay
 		}
 	}
 
-	factoryAddr, factoryErr := resolveFactoryOverride(swCfg, payload.GetFactoryAddress())
-	if factoryErr != nil {
-		return nil, status.Errorf(codes.Internal, "GetWallet: resolve factory: %v", factoryErr)
-	}
+	factoryAddr := resolveFactoryOverride(payload.GetFactoryAddress())
 
 	if err := n.validateNonZeroAddress(factoryAddr, "GetWallet", user.Address.Hex(), saltBig.String()); err != nil {
 		return nil, err
@@ -1571,7 +1555,7 @@ func (n *Engine) GetWalletWithContext(ctx context.Context, user *model.User, pay
 					"GetWallet: cannot reach chain %d RPC: %v", chainID, dialErr)
 			}
 			defer chainRPC.Close()
-			derivedSenderAddress, err = aa.DeriveSenderAddressAuto(chainRPC, user.Address, factoryAddr, saltBig)
+			derivedSenderAddress, err = aa.DeriveSenderAddress(chainRPC, user.Address, factoryAddr, saltBig)
 			if err != nil {
 				n.logger.Error("GetWallet: factory.getAddress() failed",
 					"chain_id", chainID, "owner", user.Address.Hex(), "factory", factoryAddr.Hex(),
@@ -1695,10 +1679,7 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid salt format: %s", payload.GetSalt())
 	}
 
-	factoryAddr, factoryErr := resolveFactoryOverride(n.smartWalletConfig, payload.GetFactoryAddress())
-	if factoryErr != nil {
-		return nil, status.Errorf(codes.Internal, "SetWallet: resolve factory: %v", factoryErr)
-	}
+	factoryAddr := resolveFactoryOverride(payload.GetFactoryAddress())
 
 	if err := n.validateNonZeroAddress(factoryAddr, "SetWallet", owner.Hex(), payload.GetSalt()); err != nil {
 		return nil, err
@@ -1720,7 +1701,7 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 		}
 		derivedWalletAddress = stored.Address
 	} else if rpcConn == nil {
-		// Same test/CI stand-in as GetWallet. DeriveSenderAddressAuto dials
+		// Same test/CI stand-in as GetWallet. DeriveSenderAddress dials
 		// the factory, so a unit test cannot update a record it just stored
 		// unless both calls agree with rpcConn left unset.
 		n.logger.Debug("SetWallet: test/CI environment (rpcConn nil), using mock derivation",
@@ -1728,7 +1709,7 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 		addr := mockDerivedSenderAddress(owner, factoryAddr, saltBig)
 		derivedWalletAddress = &addr
 	} else {
-		derivedWalletAddress, err = aa.DeriveSenderAddressAuto(rpcConn, owner, factoryAddr, saltBig)
+		derivedWalletAddress, err = aa.DeriveSenderAddress(rpcConn, owner, factoryAddr, saltBig)
 		if err != nil {
 			n.logger.Error("Failed to derive wallet address for SetWallet", "owner", owner.Hex(), "salt", payload.GetSalt(), "factory", payload.GetFactoryAddress(), "error", err)
 			return nil, status.Errorf(codes.Internal, "Failed to derive wallet address: %v", err)

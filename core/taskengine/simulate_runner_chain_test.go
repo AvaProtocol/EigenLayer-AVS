@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -117,7 +119,7 @@ func TestSimulateResolvesRunnerOnTheSimulatedChain(t *testing.T) {
 	engine, db := newRunnerChainEngine(t)
 
 	owner := common.HexToAddress("0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788")
-	factory := effectiveFactoryAddr(t, engine.smartWalletConfig)
+	factory := aa.MAv2FactoryAddress()
 	runner := common.HexToAddress("0x00000000000000000000000000000000000000f1")
 	// Registered ONLY on the non-audience chain, so the two chains cannot
 	// agree by accident.
@@ -151,7 +153,7 @@ func TestRunNodeResolvesRunnerOnTheSettingsChain(t *testing.T) {
 	engine, db := newRunnerChainEngine(t)
 
 	owner := common.HexToAddress("0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788")
-	factory := effectiveFactoryAddr(t, engine.smartWalletConfig)
+	factory := aa.MAv2FactoryAddress()
 	runner := common.HexToAddress("0x00000000000000000000000000000000000000f2")
 	require.NoError(t, StoreWallet(db, runnerOtherChain, owner, mkWallet(owner, factory, runner, 2)))
 

@@ -20,9 +20,8 @@ type InnerCall struct {
 	Data     string
 }
 
-// InnerCallsFromExecuteCalldata unpacks smart-wallet execute calldata
-// (v0.6 execute / executeBatch / executeBatchWithValues, or MA v2 tuple-batch)
-// into typed inner calls. Empty input yields a nil slice, not an error.
+// InnerCallsFromExecuteCalldata unpacks smart-wallet execute / executeBatch
+// calldata into typed inner calls. Empty input yields a nil slice, not an error.
 func InnerCallsFromExecuteCalldata(packed []byte) ([]InnerCall, error) {
 	if len(packed) == 0 {
 		return nil, nil

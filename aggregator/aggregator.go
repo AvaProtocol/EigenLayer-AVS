@@ -28,7 +28,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio"
-	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
@@ -278,12 +277,6 @@ func (agg *Aggregator) init() {
 	} else {
 		config.CurrentChainEnv = config.SepoliaEnv
 	}
-
-	// Setup account abstraction config
-	if err := aa.SetFactoryAddressForConfig(agg.config.SmartWallet); err != nil {
-		panic(fmt.Sprintf("smart_wallet: cannot resolve account factory: %v", err))
-	}
-	aa.SetEntrypointAddress(agg.config.SmartWallet.EntrypointAddress)
 }
 
 func (agg *Aggregator) migrate() {

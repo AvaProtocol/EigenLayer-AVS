@@ -2672,10 +2672,7 @@ func (n *Engine) runProcessingNodeWithInputs(ctx context.Context, user *model.Us
 					// runs the scan server-side. Fall back to a direct dial +
 					// local loop when no reader is registered.
 					const runnerSaltScan = int64(5)
-					factoryAddr, factoryErr := aa.EffectiveFactory(n.smartWalletConfig)
-					if factoryErr != nil {
-						return nil, fmt.Errorf("failed to resolve factory for runner validation: %w", factoryErr)
-					}
+					factoryAddr := aa.MAv2FactoryAddress()
 					runnerAddr := common.HexToAddress(runnerStr)
 					if reader := GetChainStateReaderForChain(uint64(n.smartWalletConfig.ChainID)); reader != nil {
 						found, salt, derr := reader.FindMatchingWalletSalt(ctx, vm.TaskOwner, factoryAddr, runnerAddr, runnerSaltScan)
@@ -2692,7 +2689,7 @@ func (n *Engine) runProcessingNodeWithInputs(ctx context.Context, user *model.Us
 							return nil, fmt.Errorf("failed to connect to RPC for address derivation: %w", err)
 						}
 						for salt := int64(0); salt < runnerSaltScan; salt++ {
-							derivedAddr, derr := aa.DeriveSenderAddressAuto(client, vm.TaskOwner, factoryAddr, big.NewInt(salt))
+							derivedAddr, derr := aa.DeriveSenderAddress(client, vm.TaskOwner, factoryAddr, big.NewInt(salt))
 							if derr != nil {
 								if n.logger != nil {
 									n.logger.Debug("Failed to derive address for salt", "salt", salt, "error", derr)
@@ -2724,8 +2721,7 @@ func (n *Engine) runProcessingNodeWithInputs(ctx context.Context, user *model.Us
 						n.logger.Info("RunNodeImmediately: Smart wallet will be created on first use with paymaster sponsorship",
 							"sender", chosenSender.Hex(),
 							"owner", vm.TaskOwner.Hex(),
-							"salt", matchedSalt.Int64(),
-							"paymaster", n.smartWalletConfig.PaymasterAddress.Hex())
+							"salt", matchedSalt.Int64())
 					}
 				}
 

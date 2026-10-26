@@ -24,16 +24,11 @@ import (
 // sponsorship: every operation from it is denied, with a message about an
 // unknown sender rather than anything pointing at the missing record.
 //
-// There is deliberately no MA v2-specific creation function. There was one,
-// and the v0.7 cutover made it redundant: Engine.GetWallet now derives through
-// aa.EffectiveFactory and stores whatever factory that returns, so on an MA v2
-// chain the ordinary path already registers MA v2 wallets under the MA v2
-// factory. A parallel creation path would have been a second way to do the
-// same thing, differing only in forcing MA v2 on chains pinned to
-// simple_account — where forcing it is wrong. Use aa.ProviderForFactory to ask
-// what a stored record is.
+// There is deliberately no MA v2-specific creation function: Engine.GetWallet
+// derives under the MA v2 factory and stores it on the record, so the ordinary
+// path already registers MA v2 wallets. Use aa.RequireMAv2Factory to ask what a
+// stored record is.
 
 // MAv2WalletFactory returns the factory address MA v2 wallets are recorded
-// under. Distinct from config.DefaultFactoryProxyAddressHex, which is the
-// v0.6 SimpleAccountFactory.
+// under.
 func MAv2WalletFactory() common.Address { return aa.MAv2FactoryAddress() }

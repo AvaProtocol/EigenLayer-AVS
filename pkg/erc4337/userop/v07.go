@@ -24,11 +24,6 @@ import (
 //
 // UserOperationV07 models the unpacked form because that is what callers build
 // and what the bundler consumes; Pack* produce the packed encoding on demand.
-//
-// This is deliberately a separate type from the v0.6 UserOperation rather than
-// a set of extra fields on it. The two hashing schemes are incompatible, and a
-// single struct carrying both would make it possible to sign under the wrong
-// one -- an error that only shows up as an on-chain AA24 revert.
 type UserOperationV07 struct {
 	Sender   common.Address `json:"sender"`
 	Nonce    *big.Int       `json:"nonce"`

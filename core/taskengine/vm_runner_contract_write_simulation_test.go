@@ -94,7 +94,7 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		}
 		ownerEOA := *ownerAddr
 		// Factory address is automatically set by engine.New() from config.SmartWallet.FactoryAddress
-		factory := effectiveFactoryAddr(t, config.SmartWallet)
+		factory := aa.MAv2FactoryAddress()
 
 		// Derive actual salt:0 smart wallet address (no mock needed)
 		// Connect to RPC to derive address
@@ -102,7 +102,7 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		require.NoError(t, err, "Failed to connect to RPC")
 		defer client.Close()
 
-		runnerAddr, err := aa.GetSenderAddress(client, ownerEOA, big.NewInt(0))
+		runnerAddr, err := aa.GetSenderAddressMAv2(client, ownerEOA, big.NewInt(0))
 		require.NoError(t, err, "Failed to derive smart wallet address")
 
 		_ = StoreWallet(db, int64(1), ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: runnerAddr, Factory: &factory, Salt: big.NewInt(0)})
@@ -161,14 +161,14 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 			t.Skip("Owner EOA address not set, skipping simulation test")
 		}
 		ownerEOA := *ownerAddr
-		factory := effectiveFactoryAddr(t, config.SmartWallet)
+		factory := aa.MAv2FactoryAddress()
 
 		// Derive actual salt:0 smart wallet address (need ethclient)
 		client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
 		require.NoError(t, err, "Failed to connect to RPC")
 		defer client.Close()
 
-		runnerAddr, err := aa.GetSenderAddress(client, ownerEOA, big.NewInt(0))
+		runnerAddr, err := aa.GetSenderAddressMAv2(client, ownerEOA, big.NewInt(0))
 		require.NoError(t, err, "Failed to derive smart wallet address")
 
 		// Seed wallet for validation
@@ -298,8 +298,8 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		}
 		ethc, err := ethclient.Dial(rpcURL)
 		require.NoError(t, err, "Failed to connect RPC for derivation")
-		factory := effectiveFactoryAddr(t, config.SmartWallet)
-		derivedRunner, derr := aa.GetSenderAddress(ethc, ownerEOA, big.NewInt(0))
+		factory := aa.MAv2FactoryAddress()
+		derivedRunner, derr := aa.GetSenderAddressMAv2(ethc, ownerEOA, big.NewInt(0))
 		require.NoError(t, derr, "Failed to derive runner")
 
 		// Seed wallet for validation

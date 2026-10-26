@@ -37,35 +37,11 @@ const DefaultMaxWalletsPerOwner = 5
 // Any configured value above this will be clamped down to this hard limit.
 const HardMaxWalletsPerOwner = 2000
 
-// DefaultFactoryProxyAddressHex is the default smart wallet factory Proxy address
-// deployed across supported chains. If the aggregator config omits the
-// smart_wallet.factory_address field, this value will be used.
-const DefaultFactoryProxyAddressHex = "0xB99BC2E399e06CddCF5E725c0ea341E8f0322834"
-
-// DefaultEntrypointAddressHex is the default ERC-4337 EntryPoint address used
-// across supported chains. If the aggregator config omits the
-// smart_wallet.entrypoint_address field, this value will be used.
-//
-// This is the v0.6 EntryPoint, and smart_wallet.entrypoint_address configures
-// only the v0.6 path. Modular Account v2 operations run against
-// EntryPointV07AddressHex regardless of what the YAML says — read
-// SmartWalletConfig.EntryPointAddress() rather than the field, or you will
-// address the wrong contract on an MA v2 chain.
-const DefaultEntrypointAddressHex = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
-
 // EntryPointV07AddressHex is the canonical ERC-4337 v0.7 EntryPoint, the same
 // address on every chain that has one. It is deliberately NOT configurable:
 // unlike the v0.6 deployment there is nothing per-chain to point at, and a
 // YAML override could only ever be wrong.
 const EntryPointV07AddressHex = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
-
-// NOTE: there is no DefaultPaymasterAddressHex. The paymaster contract
-// is deployed per network (mainnet and testnet have different addresses),
-// so silently defaulting any chain's paymaster to a single hardcoded
-// value silently misroutes that chain's UserOps. The YAML must specify
-// paymaster_address explicitly for every chain that wants sponsored
-// transactions; chains that omit it run without a paymaster and rely on
-// the smart wallet's own balance for gas.
 
 // Config contains all of the configuration information for a credible squaring aggregators and challengers.
 // Operators use a separate config. (see config-files/operator.anvil.yaml)
@@ -256,26 +232,17 @@ type SmartWalletConfig struct {
 	BundlerProvider string
 	// AlchemyAPIKey is the Alchemy app key for the alchemy provider. The bundler
 	// URL is derived as https://<subdomain>.g.alchemy.com/v2/<AlchemyAPIKey>.
-	AlchemyAPIKey     string
-	FactoryAddress    common.Address
-	EntrypointAddress common.Address
+	AlchemyAPIKey string
 	// ChainID of the connected network (derived at runtime from RPC)
 	ChainID int64
 
-	ControllerPrivateKey  *ecdsa.PrivateKey
-	ControllerAddress     common.Address // Derived from ControllerPrivateKey (for signature verification)
-	PaymasterAddress      common.Address
-	PaymasterOwnerAddress common.Address // Owner of the paymaster contract (for gas reimbursement)
-	WhitelistAddresses    []common.Address
+	ControllerPrivateKey *ecdsa.PrivateKey
+	ControllerAddress    common.Address // Derived from ControllerPrivateKey (for signature verification)
+	WhitelistAddresses   []common.Address
 
 	// Maximum number of smart wallets allowed per EOA owner
 	// Unlimited is NOT supported. If zero or negative, the default limit is applied.
 	MaxWalletsPerOwner int
-
-	// AccountProvider selects which smart-account implementation this chain
-	// derives and deploys: Alchemy Modular Account v2 (the default), or the
-	// legacy v0.6 SimpleAccount fork. See AccountProviderName.
-	AccountProvider string
 
 	// DisableGasSponsorship opts this deployment out of the Gas Manager policy
 	// regardless of what is configured. See SponsorshipPolicyID.
@@ -312,33 +279,6 @@ const (
 	BundlerProviderAlchemy    = "alchemy"
 	BundlerProviderSelfHosted = "self_hosted"
 )
-
-// Account provider identifiers for SmartWalletConfig.AccountProvider.
-const (
-	AccountProviderSimpleAccount    = "simple_account"
-	AccountProviderModularAccountV2 = "modular_account_v2"
-)
-
-// AccountProviderName returns the effective smart-account implementation,
-// defaulting to modular_account_v2 when unset.
-//
-// This default was flipped as part of the EntryPoint v0.7 cutover. Be aware of
-// what it means: the provider changes the DERIVED ADDRESS for every
-// (owner, salt), so a chain that omits account_provider resolves its users to
-// different wallets than it did under simple_account. That is the intended
-// migration, taken deliberately across all chains at once after an audit found
-// no meaningful balances in the v0.6 wallets.
-//
-// simple_account is no longer selectable — ValidateAccountProvider refuses it.
-// It named a derivation whose send path was removed with the v0.7 cutover, so
-// pinning a chain to it would derive wallets that nothing can execute against.
-func (c *SmartWalletConfig) AccountProviderName() string {
-	p := strings.ToLower(strings.TrimSpace(c.AccountProvider))
-	if p == "" {
-		return AccountProviderModularAccountV2
-	}
-	return p
-}
 
 // SponsorshipPolicyID returns the Gas Manager policy this chain may actually
 // use, or "" when it must run self-funded. Every decision about sponsorship
@@ -402,53 +342,10 @@ func (c *SmartWalletConfig) ValidateSponsorship() error {
 	return nil
 }
 
-// UsesModularAccountV2 reports whether this chain derives MA v2 accounts.
-func (c *SmartWalletConfig) UsesModularAccountV2() bool {
-	return c.AccountProviderName() == AccountProviderModularAccountV2
-}
-
-// EntryPointAddress returns the EntryPoint this chain's operations actually
-// run against: the canonical v0.7 contract on an MA v2 chain, otherwise the
-// configured (v0.6) address.
-//
-// Prefer this over reading EntrypointAddress directly. That field is the v0.6
-// EntryPoint, and using it on an MA v2 chain addresses a contract the
-// operation never touches — which does not fail loudly. It produces userOp
-// hashes that match nothing on chain, and receipt polling that waits out its
-// full timeout looking for an event emitted somewhere else.
+// EntryPointAddress returns the canonical v0.7 EntryPoint, which every chain's
+// operations run against.
 func (c *SmartWalletConfig) EntryPointAddress() common.Address {
-	if c.UsesModularAccountV2() {
-		return common.HexToAddress(EntryPointV07AddressHex)
-	}
-	return c.EntrypointAddress
-}
-
-// ValidateAccountProvider rejects anything but modular_account_v2.
-//
-// An unrecognised value has always been refused rather than silently falling
-// back: a typo would otherwise derive v0.6 addresses on a chain the operator
-// believed was on MA v2, and the mistake surfaces only as users receiving
-// unexpected addresses.
-//
-// simple_account is now refused for a stronger reason. Its send path was
-// removed with the EntryPoint v0.7 cutover, so a chain pinned to it would
-// derive legacy wallets and then fail every operation at send time. Failing at
-// boot names the config line; failing at send names nothing. No deployed chain
-// sets this — every avs-infra config omits account_provider and takes the
-// modular_account_v2 default — so this refuses a value nothing is using.
-func (c *SmartWalletConfig) ValidateAccountProvider() error {
-	switch c.AccountProviderName() {
-	case AccountProviderModularAccountV2:
-		return nil
-	case AccountProviderSimpleAccount:
-		return fmt.Errorf(
-			"account_provider %q (chain_id=%d) is no longer supported: the v0.6 send path was removed "+
-				"with the EntryPoint v0.7 cutover. Remove the line to take the %q default",
-			AccountProviderSimpleAccount, c.ChainID, AccountProviderModularAccountV2)
-	default:
-		return fmt.Errorf("unknown account_provider %q (chain_id=%d); expected %q",
-			c.AccountProvider, c.ChainID, AccountProviderModularAccountV2)
-	}
+	return common.HexToAddress(EntryPointV07AddressHex)
 }
 
 // alchemyNetworkSubdomain maps a chain ID to its Alchemy JSON-RPC/bundler
@@ -597,12 +494,8 @@ type SmartWalletConfigRaw struct {
 	EthWsUrl             string   `yaml:"eth_ws_url"`
 	BundlerURL           string   `yaml:"bundler_url"`
 	BundlerProvider      string   `yaml:"bundler_provider"`
-	AccountProvider      string   `yaml:"account_provider"`
 	AlchemyAPIKey        string   `yaml:"alchemy_api_key"`
-	FactoryAddress       string   `yaml:"factory_address"`
-	EntrypointAddress    string   `yaml:"entrypoint_address"`
 	ControllerPrivateKey string   `yaml:"controller_private_key"`
-	PaymasterAddress     string   `yaml:"paymaster_address"`
 	WhitelistAddresses   []string `yaml:"whitelist_addresses"`
 	MaxWalletsPerOwner   int      `yaml:"max_wallets_per_owner"`
 	EOA7702Execute       bool     `yaml:"eoa_7702_execute"`
@@ -828,10 +721,8 @@ func NewConfig(configFilePath string) (*Config, error) {
 		return nil, err
 	}
 
-	// Validate that the top-level smart_wallet is configured. This block is
-	// shared by the aa package globals (factory + entrypoint addresses), the
-	// startup paymaster probe, and any code path that explicitly takes the
-	// aggregator's default chain context.
+	// Validate that the top-level smart_wallet is configured. Any code path
+	// that explicitly takes the aggregator's default chain context reads it.
 	//
 	// In gateway mode there is no implicit fallback to chains[0] — the
 	// operator picks which chain the top-level represents and sets it
@@ -956,19 +847,14 @@ func NewConfig(configFilePath string) (*Config, error) {
 			EthWsUrl:                 configRaw.SmartWallet.EthWsUrl,
 			BundlerURL:               configRaw.SmartWallet.BundlerURL,
 			BundlerProvider:          configRaw.SmartWallet.BundlerProvider,
-			AccountProvider:          configRaw.SmartWallet.AccountProvider,
 			AlchemyAPIKey:            configRaw.SmartWallet.AlchemyAPIKey,
-			FactoryAddress:           common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.FactoryAddress, DefaultFactoryProxyAddressHex)),
-			EntrypointAddress:        common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.EntrypointAddress, DefaultEntrypointAddressHex)),
 			ChainID:                  smartWalletChainId.Int64(), // Use smart wallet chain ID, not EigenLayer chain ID (prevents cross-chain configuration errors for Base aggregator)
 			ControllerPrivateKey:     controllerPrivateKey,
-			PaymasterAddress:         common.HexToAddress(configRaw.SmartWallet.PaymasterAddress),
 			WhitelistAddresses:       convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
 			MaxWalletsPerOwner:       configRaw.SmartWallet.MaxWalletsPerOwner,
 			AlchemyPaymasterPolicyID: resolveAlchemyPaymasterPolicyID(configRaw),
 			DisableGasSponsorship:    configRaw.DisableGasSponsorship,
 			GasManagerWebhookSecret:  ResolveGasManagerWebhookSecret(configRaw.GasManagerWebhookSecret),
-			// PaymasterOwnerAddress will be populated below by calling owner() on the paymaster contract
 		},
 
 		SocketPath:        configRaw.SocketPath,
@@ -1017,25 +903,10 @@ func NewConfig(configFilePath string) (*Config, error) {
 		logger.Info("Controller address derived", "controller", config.SmartWallet.ControllerAddress.Hex())
 	}
 
-	// Fetch the paymaster owner address by calling owner() on the paymaster contract.
-	// This is needed for gas reimbursement — we send ETH to the owner (EOA), not the
-	// contract itself.
-	//
-	// The probe doubles as a sanity check on the (RPC, paymaster_address) pairing:
-	// if the address has no contract code on the connected RPC, owner() returns an
-	// empty result and unpacking fails. Treat that as a fatal startup error rather
-	// than a warning — previously this was a logger.Warn that let the aggregator
-	// boot with a mismatched config, and every UserOp downstream failed at
-	// "no contract code at given address" (Sentry EIGENLAYER-AVS-1N/1M, user-reported
-	// failure 2026-05-30 01:55 UTC on Sepolia). Fail-fast surfaces the same problem
-	// at startup where it's diagnosable, not hours later on a real workflow.
-	// Same fail-at-boot rule for the top-level smart_wallet as for each chain.
+	// Same fail-at-boot rules for the top-level smart_wallet as for each chain.
 	if config.SmartWallet != nil {
 		if err := config.SmartWallet.ValidateSponsorship(); err != nil {
 			return nil, err
-		}
-		if err := config.SmartWallet.ValidateAccountProvider(); err != nil {
-			return nil, fmt.Errorf("top-level smart_wallet: %w", err)
 		}
 		if err := applySMA7702(config.SmartWallet, configRaw.SmartWallet); err != nil {
 			return nil, fmt.Errorf("top-level smart_wallet: %w", err)
@@ -1047,17 +918,6 @@ func NewConfig(configFilePath string) (*Config, error) {
 				"impl_hash", config.SmartWallet.SMA7702ImplHash.Hex(),
 				"eoa_7702_execute", config.SmartWallet.EOA7702Execute)
 		}
-	}
-
-	// smart_wallet.paymaster_address is inert. It named the v0.6 verifying
-	// paymaster, which went with the EntryPoint v0.7 cutover; sponsorship is
-	// now the chain's Gas Manager policy. Left readable so an existing config
-	// still loads, and reported once so nobody funds a contract nothing calls.
-	if config.SmartWallet != nil && config.SmartWallet.PaymasterAddress != (common.Address{}) {
-		logger.Warn("smart_wallet.paymaster_address is ignored: the v0.6 verifying paymaster was removed with the EntryPoint v0.7 cutover",
-			"paymaster_address_ignored", config.SmartWallet.PaymasterAddress.Hex(),
-			"paymaster_policy_set", config.AlchemyPaymasterPolicyID != "",
-		)
 	}
 
 	// Gateway mode: parse per-chain configs
@@ -1388,49 +1248,24 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 			EthWsUrl:             wsURL,
 			BundlerURL:           sw.BundlerURL,
 			BundlerProvider:      sw.BundlerProvider,
-			AccountProvider:      sw.AccountProvider,
 			AlchemyAPIKey:        sw.AlchemyAPIKey,
-			FactoryAddress:       common.HexToAddress(firstNonEmpty(sw.FactoryAddress, DefaultFactoryProxyAddressHex)),
-			EntrypointAddress:    common.HexToAddress(firstNonEmpty(sw.EntrypointAddress, DefaultEntrypointAddressHex)),
 			ChainID:              raw.ChainID,
 			ControllerPrivateKey: controllerPrivateKey,
 			ControllerAddress:    crypto.PubkeyToAddress(controllerPrivateKey.PublicKey),
-			PaymasterAddress:     common.HexToAddress(sw.PaymasterAddress),
 			WhitelistAddresses:   convertToAddressSlice(sw.WhitelistAddresses),
 			MaxWalletsPerOwner:   maxWallets,
 		},
 	}
 
-	// Reject an unrecognised account_provider at boot rather than at the first
-	// derivation. A typo silently reads as simple_account, so a chain the
-	// operator believed was on MA v2 would quietly hand users v0.6 addresses —
-	// visible only much later, and not obviously as a config error.
-	if err := chainCfg.SmartWallet.ValidateAccountProvider(); err != nil {
-		return nil, fmt.Errorf("chain %s (chain_id=%d): %w", raw.Name, raw.ChainID, err)
-	}
 	if err := applySMA7702(chainCfg.SmartWallet, sw); err != nil {
 		return nil, fmt.Errorf("chain %s (chain_id=%d): %w", raw.Name, raw.ChainID, err)
 	}
-	// smart_wallet.paymaster_address is inert per chain for the same reason it
-	// is inert globally: it named the v0.6 verifying paymaster, and sponsorship
-	// is now the chain's Gas Manager policy. Reported rather than probed — the
-	// boot no longer depends on an RPC call to a contract nothing invokes.
-	if chainCfg.SmartWallet.PaymasterAddress != (common.Address{}) {
-		logger.Warn("smart_wallet.paymaster_address is ignored on this chain: the v0.6 verifying paymaster was removed with the EntryPoint v0.7 cutover",
-			"chain_id", chainCfg.ChainID,
-			"name", chainCfg.Name,
-			"paymaster_address_ignored", chainCfg.SmartWallet.PaymasterAddress.Hex(),
-		)
-	}
-
 	logger.Info("Parsed chain config",
 		"chain_id", chainCfg.ChainID,
 		"name", chainCfg.Name,
 		"worker_addr", chainCfg.WorkerAddr,
-		"account_provider", chainCfg.SmartWallet.AccountProviderName(),
 		"bundler_provider", chainCfg.SmartWallet.ProviderName(),
 		"controller", chainCfg.SmartWallet.ControllerAddress.Hex(),
-		"paymaster_owner", chainCfg.SmartWallet.PaymasterOwnerAddress.Hex(),
 		"eoa_7702_execute", chainCfg.SmartWallet.EOA7702Execute,
 		"sma_7702_pin", chainCfg.SmartWallet.HasSMA7702Pin())
 

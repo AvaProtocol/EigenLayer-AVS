@@ -54,14 +54,13 @@ func TestSimulateTask_StopLossWorkflow_Sepolia(t *testing.T) {
 	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
 	require.NoError(t, err, "load aggregator config")
 
-	setGlobalFactory(t, cfg.SmartWallet)
-
 	client, err := ethclient.Dial(cfg.SmartWallet.EthRpcUrl)
 	require.NoError(t, err, "connect to Sepolia RPC")
 	defer client.Close()
 
 	// salt:0 — zero on-chain allowance to SwapRouter02
-	smartWalletAddr, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(fixtureSaltUniswapSimulation))
+	factory := aa.MAv2FactoryAddress()
+	smartWalletAddr, err := aa.GetSenderAddressMAv2(client, ownerAddress, big.NewInt(fixtureSaltUniswapSimulation))
 	require.NoError(t, err, "derive smart wallet address")
 	t.Logf("Owner EOA:    %s", ownerAddress.Hex())
 	t.Logf("Smart wallet: %s (salt:0)", smartWalletAddr.Hex())
@@ -91,7 +90,7 @@ func TestSimulateTask_StopLossWorkflow_Sepolia(t *testing.T) {
 		StoreWallet(db, int64(11155111), ownerAddress, &model.SmartWallet{
 			Owner:   &ownerAddress,
 			Address: smartWalletAddr,
-			Factory: &cfg.SmartWallet.FactoryAddress,
+			Factory: &factory,
 			Salt:    big.NewInt(fixtureSaltUniswapSimulation),
 		}),
 		"register smart wallet",

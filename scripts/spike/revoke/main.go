@@ -203,7 +203,7 @@ func run() error {
 	fmt.Printf("  module signer cleared: signers(%d, bare) = 0x0\n\n", entity)
 
 	// ── R2: the controller's authority is gone ────────────────────────────
-	probe, err := aa.PackExecute(ownerAddr, big.NewInt(0), nil)
+	probe, err := aa.PackExecuteMAv2(ownerAddr, big.NewInt(0), nil)
 	if err != nil {
 		return err
 	}

@@ -14,7 +14,7 @@ func TestInnerCallsFromExecuteCalldata_Execute(t *testing.T) {
 	token := common.HexToAddress("0xaaaa000000000000000000000000000000000001")
 	data := []byte{0x09, 0x5e, 0xa7, 0xb3, 0x01, 0x02, 0x03}
 
-	packed, err := aa.PackExecute(token, big.NewInt(7), data)
+	packed, err := aa.PackExecuteMAv2(token, big.NewInt(7), data)
 	require.NoError(t, err)
 
 	calls, err := InnerCallsFromExecuteCalldata(packed)
@@ -29,7 +29,7 @@ func TestInnerCallsFromExecuteCalldata_Execute(t *testing.T) {
 func TestInnerCallsFromExecuteCalldata_ExecuteUserOpWrapped(t *testing.T) {
 	token := common.HexToAddress("0xaaaa000000000000000000000000000000000001")
 	data := []byte{0x09, 0x5e, 0xa7, 0xb3, 0x01, 0x02, 0x03}
-	packed, err := aa.PackExecute(token, big.NewInt(7), data)
+	packed, err := aa.PackExecuteMAv2(token, big.NewInt(7), data)
 	require.NoError(t, err)
 	wrapped, err := aa.WrapExecuteUserOp(packed)
 	require.NoError(t, err)
@@ -48,7 +48,7 @@ func TestInnerCallsFromExecuteCalldata_ExecuteBatch(t *testing.T) {
 	dataA := []byte{0x09, 0x5e, 0xa7, 0xb3}
 	dataB := []byte{0x12, 0x34, 0x56, 0x78, 0x00}
 
-	packed, err := aa.PackExecuteBatch([]common.Address{token, router}, [][]byte{dataA, dataB})
+	packed, err := aa.PackExecuteBatchMAv2([]aa.Call{{Target: token, Data: dataA}, {Target: router, Data: dataB}})
 	require.NoError(t, err)
 
 	calls, err := InnerCallsFromExecuteCalldata(packed)
@@ -69,7 +69,7 @@ func TestInnerCallsFromExecuteCalldata_Empty(t *testing.T) {
 
 func TestFailedReceiptWithInnerCalls_SingleCallOmitsFailedCall(t *testing.T) {
 	token := common.HexToAddress("0xaaaa000000000000000000000000000000000001")
-	packed, err := aa.PackExecute(token, big.NewInt(0), []byte{0xa9, 0x05, 0x9c, 0xbb})
+	packed, err := aa.PackExecuteMAv2(token, big.NewInt(0), []byte{0xa9, 0x05, 0x9c, 0xbb})
 	require.NoError(t, err)
 
 	receipt := failedReceiptWithInnerCalls(packed)
@@ -87,10 +87,10 @@ func TestFailedReceiptWithInnerCalls_SingleCallOmitsFailedCall(t *testing.T) {
 func TestFailedReceiptWithInnerCalls_BatchOmitsFailedCall(t *testing.T) {
 	token := common.HexToAddress("0xaaaa000000000000000000000000000000000001")
 	router := common.HexToAddress("0xbbbb000000000000000000000000000000000002")
-	packed, err := aa.PackExecuteBatch(
-		[]common.Address{token, router},
-		[][]byte{{0x09, 0x5e, 0xa7, 0xb3}, {0x12, 0x34, 0x56, 0x78}},
-	)
+	packed, err := aa.PackExecuteBatchMAv2([]aa.Call{
+		{Target: token, Data: []byte{0x09, 0x5e, 0xa7, 0xb3}},
+		{Target: router, Data: []byte{0x12, 0x34, 0x56, 0x78}},
+	})
 	require.NoError(t, err)
 
 	receipt := failedReceiptWithInnerCalls(packed)

@@ -177,11 +177,7 @@ func (r *RpcServer) salt0DerivedAddress(chainID int64, owner common.Address) (co
 	if swCfg == nil || rpc == nil {
 		return common.Address{}, fmt.Errorf("no RPC to derive salt-0 address on chain %d", chainID)
 	}
-	factory, err := aa.EffectiveFactory(swCfg)
-	if err != nil {
-		return common.Address{}, err
-	}
-	addr, err := aa.GetSenderAddressMAv2ForFactory(rpc, owner, factory, big.NewInt(0))
+	addr, err := aa.GetSenderAddressMAv2(rpc, owner, big.NewInt(0))
 	if err != nil {
 		return common.Address{}, err
 	}
@@ -263,7 +259,7 @@ func (r *RpcServer) preflightNativeWithdraw(
 	amount *big.Int,
 	withdrawAll bool,
 ) error {
-	if swCfg == nil || !strings.EqualFold(strings.TrimSpace(payload.Token), "ETH") || !swCfg.UsesModularAccountV2() {
+	if swCfg == nil || !strings.EqualFold(strings.TrimSpace(payload.Token), "ETH") {
 		return nil
 	}
 	if withdrawAll && swCfg.SponsorshipPolicyID() == "" {
@@ -332,8 +328,7 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 	// Checked here, not at the point of use further down: in single-chain mode
 	// resolveSmartWalletConfigForChain returns r.config.SmartWallet with a nil
 	// error, so an aggregator started without a smart wallet config yields a
-	// nil swCfg and no signal. Everything below reads it — the native-ETH
-	// refusal calls UsesModularAccountV2, which has no nil receiver guard.
+	// nil swCfg and no signal. Everything below reads it.
 	if swCfg == nil {
 		return nil, status.Errorf(codes.Internal, "smart wallet configuration not available")
 	}
@@ -529,7 +524,6 @@ func (r *RpcServer) ExecuteWithdraw(ctx context.Context, user *model.User, paylo
 	r.config.Logger.Info("processing withdrawal with paymaster sponsorship",
 		"user", user.Address.String(),
 		"smartWallet", smartWalletAddress.Hex(),
-		"paymaster", swCfg.PaymasterAddress.Hex(),
 		"amount", payload.Amount,
 		"token", payload.Token,
 	)

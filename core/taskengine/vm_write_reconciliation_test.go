@@ -124,7 +124,7 @@ func TestWriteReconciliationPreservesOtherLoopFailures(t *testing.T) {
 	require.False(t, parent.Success, "resolving one pending op cannot erase another iteration's failure")
 }
 
-func TestWriteReconciliationUsesNodeChainAndEntryPoint(t *testing.T) {
+func TestWriteReconciliationUsesNodeChain(t *testing.T) {
 	var polls atomic.Int32
 	var log *types.Log
 	vm := confirmationTestVM(t, func(method string) any {
@@ -139,8 +139,6 @@ func TestWriteReconciliationUsesNodeChainAndEntryPoint(t *testing.T) {
 	})
 	resolved := *vm.smartWalletConfig
 	resolved.ChainID = 8453
-	resolved.AccountProvider = config.AccountProviderSimpleAccount
-	resolved.EntrypointAddress = common.HexToAddress("0x1111111111111111111111111111111111111111")
 	log = confirmationRevertLog(t, resolved.EntryPointAddress(), confirmationTestHash, []byte{0xde, 0xad, 0xbe, 0xef})
 	vm.smartWalletConfig = &config.SmartWalletConfig{ChainID: 11155111}
 	vm.WithChainConfigResolver(func(chain int64) *config.SmartWalletConfig { require.EqualValues(t, 8453, chain); return &resolved })

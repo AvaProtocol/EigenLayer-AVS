@@ -480,7 +480,7 @@ func run() error {
 		return err
 	}
 	upd := packUpdateLimits(eA, big.NewInt(0))
-	execNT, err := aa.PackExecute(nativeModule(), big.NewInt(0), upd)
+	execNT, err := aa.PackExecuteMAv2(nativeModule(), big.NewInt(0), upd)
 	if err != nil {
 		return err
 	}
@@ -624,7 +624,7 @@ func run() error {
 		return err
 	}
 	depositCall := depositSel[:]
-	execDep, err := aa.PackExecute(weth, oneWei, depositCall)
+	execDep, err := aa.PackExecuteMAv2(weth, oneWei, depositCall)
 	if err != nil {
 		return err
 	}
@@ -686,7 +686,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	execNew, err := aa.PackExecute(wideRecipient(0), oneWei, nil)
+	execNew, err := aa.PackExecuteMAv2(wideRecipient(0), oneWei, nil)
 	if err != nil {
 		return err
 	}
@@ -919,7 +919,7 @@ func (h *harness) installDeferred(entity uint32, hooks [][]byte, vgl int64) erro
 	// In-policy approve(controller, 0) — real Sepolia USDC reverts transfer(0,0).
 	inner := append(approveSel[:], common.LeftPadBytes(h.controllerAddr.Bytes(), 32)...)
 	inner = append(inner, make([]byte, 32)...)
-	exec, err := aa.PackExecute(common.HexToAddress(dummyToken), big.NewInt(0), inner)
+	exec, err := aa.PackExecuteMAv2(common.HexToAddress(dummyToken), big.NewInt(0), inner)
 	if err != nil {
 		return err
 	}
@@ -935,7 +935,7 @@ func (h *harness) installDeferred(entity uint32, hooks [][]byte, vgl int64) erro
 }
 
 func (h *harness) installDeferredNative(entity uint32, hooks [][]byte, to common.Address, value *big.Int, vgl int64) (*userOpReceipt, *userop.UserOperationV07, error) {
-	exec, err := aa.PackExecute(to, value, nil)
+	exec, err := aa.PackExecuteMAv2(to, value, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1007,7 +1007,7 @@ func (h *harness) deferredOp(entity uint32, deferredCall, exec []byte, vgl int64
 }
 
 func (h *harness) estimateNative(entity uint32, to common.Address, value *big.Int) error {
-	exec, err := aa.PackExecute(to, value, nil)
+	exec, err := aa.PackExecuteMAv2(to, value, nil)
 	if err != nil {
 		return err
 	}
@@ -1035,7 +1035,7 @@ func (h *harness) estimateRaw(entity uint32, callData []byte, vgl int64) error {
 }
 
 func (h *harness) sendNative(entity uint32, to common.Address, value *big.Int, vgl int64) (*userOpReceipt, *userop.UserOperationV07, error) {
-	exec, err := aa.PackExecute(to, value, nil)
+	exec, err := aa.PackExecuteMAv2(to, value, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1045,7 +1045,7 @@ func (h *harness) sendNative(entity uint32, to common.Address, value *big.Int, v
 // sendNativeNoEstimate signs with seed gas so a value-hook revert can still
 // be included (R10). EstimateUserOpGasV07 would abort before send.
 func (h *harness) sendNativeNoEstimate(entity uint32, to common.Address, value *big.Int, vgl int64) (*userOpReceipt, *userop.UserOperationV07, error) {
-	exec, err := aa.PackExecute(to, value, nil)
+	exec, err := aa.PackExecuteMAv2(to, value, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1225,7 +1225,7 @@ func (h *harness) sweepToOwner() error {
 	}
 	leave := big.NewInt(100_000_000_000_000) // 0.0001 ETH
 	amt := new(big.Int).Sub(bal, leave)
-	call, err := aa.PackExecute(h.ownerAddr, amt, nil)
+	call, err := aa.PackExecuteMAv2(h.ownerAddr, amt, nil)
 	if err != nil {
 		return err
 	}

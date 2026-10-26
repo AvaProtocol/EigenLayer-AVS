@@ -22,16 +22,13 @@ func TestContractWrite_WithSettingsAndUserAuth(t *testing.T) {
 		config := testutil.GetAggregatorConfig()
 		engine := New(db, config, nil, testutil.GetLogger())
 
-		smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
-		setGlobalFactory(t, smartWalletConfig)
-
 		// Create test user (simulating authenticated user from JWT)
 		ownerAddr, ok := testutil.MustGetTestOwnerAddress()
 		if !ok {
 			t.Skip("Owner EOA address not set, skipping settings validation test")
 		}
 		ownerEOA := *ownerAddr
-		factory := testutil.GetAggregatorConfig().SmartWallet.FactoryAddress
+		factory := aa.MAv2FactoryAddress()
 
 		// Connect to RPC client for GetSenderAddress
 		client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
@@ -39,8 +36,7 @@ func TestContractWrite_WithSettingsAndUserAuth(t *testing.T) {
 		defer client.Close()
 
 		// Derive actual salt:0 smart wallet address
-		aa.SetFactoryAddress(factory)
-		runnerAddr, err := aa.GetSenderAddress(client, ownerEOA, big.NewInt(0))
+		runnerAddr, err := aa.GetSenderAddressMAv2(client, ownerEOA, big.NewInt(0))
 		require.NoError(t, err, "Failed to derive smart wallet address")
 
 		// Create authenticated user model
