@@ -2,12 +2,15 @@ package rest
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/mapping"
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -46,7 +49,7 @@ func (s *Server) PrepareWorkflow(ctx echo.Context) error {
 	}
 	prepared, err := s.engine.PrepareOwnerWorkflow(ctx.Request().Context(), p.User, trigger, nodes, edges, map[string]interface{}(body.InputVariables), body.ChainId)
 	if err != nil {
-		return mapOwnerExecutionError(err)
+		return s.reportOwnerExecutionError(err)
 	}
 	execution, err := mapping.ProtoToOpenAPIExecution(prepared.Execution, "")
 	if err != nil {
@@ -94,7 +97,7 @@ func (s *Server) SubmitExecution(ctx echo.Context, id generated.Ulid) error {
 	}
 	submitted, err := s.engine.SubmitOwnerExecution(ctx.Request().Context(), p.User, string(id), signature)
 	if err != nil {
-		return mapOwnerExecutionError(err)
+		return s.reportOwnerExecutionError(err)
 	}
 	return ctx.JSON(http.StatusAccepted, submitted)
 }
@@ -111,21 +114,39 @@ func decodeOwnerExecutionBody(ctx echo.Context, body interface{}) error {
 	return nil
 }
 
+func (s *Server) reportOwnerExecutionError(err error) error {
+	mapped := mapOwnerExecutionError(err)
+	var httpErr *restmw.HTTPError
+	if errors.As(mapped, &httpErr) && httpErr.Status >= 500 && s != nil && s.logger != nil {
+		s.logger.Error("owner execution failed", "error", err, "status", httpErr.Status, "code", httpErr.Code)
+	}
+	return mapped
+}
+
 func mapOwnerExecutionError(err error) error {
 	st, ok := status.FromError(err)
 	if ok {
 		switch st.Code() {
 		case codes.InvalidArgument:
 			return badRequest("OWNER_EXECUTION_INVALID", "Invalid owner execution request", st.Message())
+		case codes.Unauthenticated:
+			return &restmw.HTTPError{Status: http.StatusUnauthorized, Code: "OWNER_EXECUTION_UNAUTHENTICATED", Title: "Owner authentication required", Detail: st.Message()}
 		case codes.PermissionDenied:
 			return &restmw.HTTPError{Status: http.StatusForbidden, Code: "OWNER_EXECUTION_SOURCE_FORBIDDEN", Title: "Source wallet is not supported for this owner", Detail: st.Message()}
 		case codes.NotFound:
 			return &restmw.HTTPError{Status: http.StatusNotFound, Code: "OWNER_EXECUTION_NOT_FOUND", Title: "Prepared execution not found", Detail: st.Message()}
 		case codes.FailedPrecondition:
+			if ownerExecutionDisabled(st.Message()) {
+				return &restmw.HTTPError{Status: http.StatusForbidden, Code: "OWNER_EXECUTION_DISABLED", Title: "Owner execution is disabled", Detail: st.Message()}
+			}
 			return &restmw.HTTPError{Status: http.StatusPreconditionFailed, Code: "OWNER_EXECUTION_PREPARE_REQUIRED", Title: "Prepare and review again", Detail: st.Message()}
 		case codes.ResourceExhausted:
 			return &restmw.HTTPError{Status: http.StatusTooManyRequests, Code: "OWNER_EXECUTION_LIMIT", Title: "Too many owner executions", Detail: st.Message()}
 		}
 	}
 	return &restmw.HTTPError{Status: http.StatusBadGateway, Code: "OWNER_EXECUTION_FAILED", Title: "Owner execution unavailable"}
+}
+
+func ownerExecutionDisabled(message string) bool {
+	return message == taskengine.OwnerExecutionDisabledDetail || strings.Contains(message, "eoa_7702_execute is false")
 }

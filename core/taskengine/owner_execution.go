@@ -34,6 +34,24 @@ const (
 	ownerExecutionRetention     = 24 * time.Hour
 	ownerPreparationMaxPerOwner = 64
 	ownerBatchMaxCalls          = 32
+	// A bundler lookup that fails is not "unknown". Leave the record submitting.
+	ownerBundlerLookupTimeout = 15 * time.Second
+)
+
+// OwnerExecutionDisabledDetail is configuration, not a stale preparation.
+// Preparing again does not turn the feature on. REST maps this exact
+// message to OWNER_EXECUTION_DISABLED.
+const OwnerExecutionDisabledDetail = "owner execution is disabled on this gateway"
+
+// Stored submission states. The success response only returns submitting,
+// submitted, or unknown. rejected and unsent are errors that ask for a new prepare.
+const (
+	ownerSubmissionPrepared   = "prepared"
+	ownerSubmissionSubmitting = "submitting"
+	ownerSubmissionSubmitted  = "submitted"
+	ownerSubmissionUnknown    = "unknown"
+	ownerSubmissionRejected   = "rejected"
+	ownerSubmissionUnsent     = "unsent"
 )
 
 type ownerPreparationContextKey struct{}
@@ -91,6 +109,10 @@ type ownerExecutionBackend interface {
 	Prepare(context.Context, *config.SmartWalletConfig, common.Address, common.Address, *big.Int, []aa.Call, logger.Logger) (*preset.PreparedOwnerUserOp, error)
 	Validate(context.Context, *config.SmartWalletConfig, common.Address, *big.Int, *preset.PreparedOwnerUserOp) error
 	Submit(context.Context, *config.SmartWalletConfig, *userop.UserOperationV07) (common.Hash, error)
+	// UserOpKnown reports whether the bundler already has this hash.
+	// false, nil means the bundler returned no operation. A non-nil error
+	// means the lookup itself failed and the caller must not change state.
+	UserOpKnown(context.Context, *config.SmartWalletConfig, common.Hash) (bool, error)
 }
 
 type defaultOwnerExecutionBackend struct{}
@@ -103,6 +125,26 @@ func (defaultOwnerExecutionBackend) Validate(ctx context.Context, sw *config.Sma
 }
 func (defaultOwnerExecutionBackend) Submit(ctx context.Context, sw *config.SmartWalletConfig, op *userop.UserOperationV07) (common.Hash, error) {
 	return preset.SubmitOwnerUserOp(ctx, sw, op)
+}
+func (defaultOwnerExecutionBackend) UserOpKnown(ctx context.Context, sw *config.SmartWalletConfig, hash common.Hash) (bool, error) {
+	if sw == nil {
+		return false, fmt.Errorf("nil owner execution chain configuration")
+	}
+	url, err := sw.ActiveBundlerURL()
+	if err != nil {
+		return false, err
+	}
+	client, err := newUserOpBundler(url)
+	if err != nil {
+		return false, err
+	}
+	defer client.Close()
+	raw, err := client.GetUserOperationByHash(ctx, hash.Hex())
+	if err != nil {
+		return false, err
+	}
+	_, _, _, found := parseBundlerUserOp(raw)
+	return found, nil
 }
 func (n *Engine) ownerBackend() ownerExecutionBackend {
 	if n.ownerExecutionBackend != nil {
@@ -148,6 +190,10 @@ func validateOwnerGraph(trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNod
 				return "", fmt.Errorf("owner read chain must match the prepared chain")
 			}
 		case avsproto.NodeType_NODE_TYPE_CUSTOM_CODE:
+			// Same runner as ordinary simulation. Prepare calls
+			// SimulateWorkflowWithContext, which executes CustomCode through
+			// JSProcessor and its Goja runtime. There is no second sandbox
+			// and no separate time limit for this path.
 			if node.GetCustomCode() == nil {
 				return "", fmt.Errorf("invalid owner workflow CustomCode node")
 			}
@@ -167,6 +213,8 @@ func validateOwnerGraph(trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNod
 		return "", fmt.Errorf("owner execution requires exactly one ContractWrite node")
 	}
 	for _, edge := range edges {
+		// A branch or filter output is "nodeId.port". The node id is the
+		// segment before the first dot; a plain source is the whole string.
 		if edge == nil || !ids[edge.Target] || !ids[strings.SplitN(edge.Source, ".", 2)[0]] {
 			return "", fmt.Errorf("invalid owner workflow edge")
 		}
@@ -228,7 +276,7 @@ func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, tri
 		return nil, status.Error(codes.Unauthenticated, "owner JWT required")
 	}
 	if n.config == nil || !n.config.OwnerExecutionEnabled {
-		return nil, status.Error(codes.FailedPrecondition, "owner execution is disabled on this gateway")
+		return nil, status.Error(codes.FailedPrecondition, OwnerExecutionDisabledDetail)
 	}
 	if chainID <= 0 || !n.isChainConfigured(chainID) {
 		return nil, status.Error(codes.InvalidArgument, "unsupported owner execution chain")
@@ -250,16 +298,19 @@ func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, tri
 	if err := checkOwnerWalletConfig(sw, wallet, chainID); err != nil {
 		return nil, status.Error(codes.FailedPrecondition, err.Error())
 	}
-	// Serialize the bounded insertion check, not just the eventual DB write.
+	// Serialize this owner's cap check with the insert. executionMutex is a
+	// fixed 256-shard array, not a map that grows with execution ids, and
+	// defer releases the shard when prepare returns. The lock stays held
+	// across simulation so two prepares cannot both pass the cap.
 	lock := n.executionMutex("owner-prepare:" + user.Address.Hex())
 	lock.Lock()
 	defer lock.Unlock()
-	count, err := n.db.CountKeysByPrefix(ownerExecutionPrefix(user.Address))
+	count, err := n.countPreparedOwnerExecutions(user.Address)
 	if err != nil {
 		return nil, err
 	}
 	if count >= ownerPreparationMaxPerOwner {
-		return nil, status.Error(codes.ResourceExhausted, "too many retained owner executions; retry after expiry")
+		return nil, status.Error(codes.ResourceExhausted, "too many prepared owner executions; retry after one expires")
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
@@ -296,7 +347,7 @@ func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, tri
 		return nil, err
 	}
 	expires := time.Now().Add(ownerPreparationTTL).UnixMilli()
-	record := &ownerExecutionRecord{Owner: user.Address, ChainID: chainID, Salt: wallet.Salt, Operation: (*storedOwnerOperation)(op), Identity: prepared.Identity, UserOpHash: hash, ExpiresAt: expires, SubmissionState: "prepared", Definition: definition, InputJSON: inputJSON, WriteNodeID: writeID}
+	record := &ownerExecutionRecord{Owner: user.Address, ChainID: chainID, Salt: wallet.Salt, Operation: (*storedOwnerOperation)(op), Identity: prepared.Identity, UserOpHash: hash, ExpiresAt: expires, SubmissionState: ownerSubmissionPrepared, Definition: definition, InputJSON: inputJSON, WriteNodeID: writeID}
 	if err := n.saveOwnerExecution(execution.Id, record, ownerPreparationTTL); err != nil {
 		return nil, err
 	}
@@ -346,6 +397,55 @@ func sameOwnerWalletSalt(a, b *big.Int) bool {
 	return a.Cmp(b) == 0
 }
 
+// countPreparedOwnerExecutions ignores submitted, rejected, unknown and
+// unsent records. Those are kept for 24h and must not block a new prepare.
+func (n *Engine) countPreparedOwnerExecutions(owner common.Address) (int, error) {
+	items, err := n.db.GetByPrefix(ownerExecutionPrefix(owner))
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, item := range items {
+		var record ownerExecutionRecord
+		if json.Unmarshal(item.Value, &record) != nil {
+			continue
+		}
+		if record.SubmissionState == ownerSubmissionPrepared {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// reconcileSubmittingOwnerExecution runs when a retry finds the pre-send
+// marker. A bundler hit becomes submitted. An unknown hash past the signing
+// window becomes unsent, which asks for a new prepare. A lookup error leaves
+// the marker alone: absence is not the same as a failed read.
+func (n *Engine) reconcileSubmittingOwnerExecution(ctx context.Context, id string, record *ownerExecutionRecord) error {
+	lookupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ownerBundlerLookupTimeout)
+	defer cancel()
+	sw := n.ResolveSmartWalletConfig(record.ChainID)
+	known, err := n.ownerBackend().UserOpKnown(lookupCtx, sw, record.UserOpHash)
+	if err != nil {
+		if n.logger != nil {
+			n.logger.Warn("owner execution bundler lookup failed; leaving submitting", "execution_id", id, "user_op_hash", record.UserOpHash.Hex(), "error", err)
+		}
+		return nil
+	}
+	if known {
+		record.SubmissionState = ownerSubmissionSubmitted
+		return n.saveOwnerExecution(id, record, ownerExecutionRetention)
+	}
+	if time.Now().UnixMilli() < record.ExpiresAt {
+		return nil
+	}
+	record.SubmissionState = ownerSubmissionUnsent
+	if err := n.saveOwnerExecution(id, record, ownerExecutionRetention); err != nil {
+		return err
+	}
+	return status.Error(codes.FailedPrecondition, "owner operation was not sent; prepare and sign again")
+}
+
 func (n *Engine) saveOwnerExecution(id string, record *ownerExecutionRecord, ttl time.Duration) error {
 	data, err := json.Marshal(record)
 	if err != nil {
@@ -386,22 +486,33 @@ func (n *Engine) SubmitOwnerExecution(ctx context.Context, user *model.User, id 
 	if err != nil || hash != record.UserOpHash {
 		return nil, fmt.Errorf("stored owner operation failed its integrity check")
 	}
+	// Recovers the signer and requires it to equal user.Address. REST also
+	// rejects a non-65-byte body; this is the check every caller hits,
+	// including a gRPC entry that bypasses that body check.
 	framed, err := preset.FrameOwnerSignature(hash, signature, user.Address)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	out := &OwnerWorkflowSubmission{ExecutionID: id, UserOpHash: hash.Hex(), ChainID: record.ChainID, SubmissionState: record.SubmissionState}
-	if record.SubmissionState != "prepared" {
-		if record.SubmissionState == "rejected" {
+	if record.SubmissionState != ownerSubmissionPrepared {
+		switch record.SubmissionState {
+		case ownerSubmissionRejected:
 			return nil, status.Error(codes.FailedPrecondition, "operation was rejected; prepare and sign again")
+		case ownerSubmissionUnsent:
+			return nil, status.Error(codes.FailedPrecondition, "owner operation was not sent; prepare and sign again")
+		case ownerSubmissionSubmitting:
+			if err := n.reconcileSubmittingOwnerExecution(ctx, id, &record); err != nil {
+				return nil, err
+			}
+			out.SubmissionState = record.SubmissionState
 		}
-		return out, nil // includes submitting/unknown after a restart or timeout
+		return out, nil // includes submitting/unknown/submitted after a restart or timeout
 	}
 	if time.Now().UnixMilli() >= record.ExpiresAt {
 		return nil, status.Error(codes.FailedPrecondition, "owner preparation expired; prepare and sign again")
 	}
 	if n.config == nil || !n.config.OwnerExecutionEnabled {
-		return nil, status.Error(codes.FailedPrecondition, "owner execution is disabled on this gateway")
+		return nil, status.Error(codes.FailedPrecondition, OwnerExecutionDisabledDetail)
 	}
 	if !n.isChainConfigured(record.ChainID) {
 		return nil, status.Error(codes.FailedPrecondition, "owner execution chain is no longer configured")
@@ -441,21 +552,25 @@ func (n *Engine) SubmitOwnerExecution(ctx context.Context, user *model.User, id 
 	if err := n.ownerBackend().Validate(ctx, sw, user.Address, record.Salt, prepared); err != nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "owner preparation is stale: %v", err)
 	}
-	record.SubmissionState = "submitting"
+	record.SubmissionState = ownerSubmissionSubmitting
 	// Keep the stored operation unsigned; signatures are neither logged nor
 	// needed for reconciliation. The client can poll the already known hash.
 	op.Signature = nil
 	if err := n.saveOwnerExecution(id, &record, ownerExecutionRetention); err != nil {
 		return nil, err
 	}
+	// The marker is durable. A client disconnect must not cancel the relay
+	// or turn a sent operation into "unknown" via context.Canceled.
+	relayCtx, relayCancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+	defer relayCancel()
 	op.Signature = framed
-	sentHash, sendErr := n.ownerBackend().Submit(ctx, sw, op)
+	sentHash, sendErr := n.ownerBackend().Submit(relayCtx, sw, op)
 	op.Signature = nil
-	record.SubmissionState = "submitted"
+	record.SubmissionState = ownerSubmissionSubmitted
 	if sendErr != nil || sentHash != hash {
-		record.SubmissionState = "unknown"
+		record.SubmissionState = ownerSubmissionUnknown
 		if ownerBundlerRejected(sendErr) {
-			record.SubmissionState = "rejected"
+			record.SubmissionState = ownerSubmissionRejected
 		}
 	}
 	if err := n.saveOwnerExecution(id, &record, ownerExecutionRetention); err != nil {
@@ -464,7 +579,7 @@ func (n *Engine) SubmitOwnerExecution(ctx context.Context, user *model.User, id 
 	if n.logger != nil {
 		n.logger.Info("owner workflow relay outcome", "execution_id", id, "chain_id", record.ChainID, "user_op_hash", hash.Hex(), "submission_state", record.SubmissionState)
 	}
-	if record.SubmissionState == "rejected" {
+	if record.SubmissionState == ownerSubmissionRejected {
 		return nil, status.Error(codes.FailedPrecondition, "bundler rejected the operation; prepare, review and sign again")
 	}
 	out.SubmissionState = record.SubmissionState

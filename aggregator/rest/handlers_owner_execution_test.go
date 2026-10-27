@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -56,18 +57,32 @@ func TestOwnerExecutionSignatureOnlyBodyIsStrict(t *testing.T) {
 func TestOwnerExecutionProblemMapping(t *testing.T) {
 	for _, tc := range []struct {
 		code       codes.Code
+		message    string
 		httpStatus int
+		problem    string
 	}{
-		{codes.InvalidArgument, http.StatusBadRequest},
-		{codes.PermissionDenied, http.StatusForbidden},
-		{codes.NotFound, http.StatusNotFound},
-		{codes.FailedPrecondition, http.StatusPreconditionFailed},
-		{codes.ResourceExhausted, http.StatusTooManyRequests},
+		{codes.InvalidArgument, "failure", http.StatusBadRequest, "OWNER_EXECUTION_INVALID"},
+		{codes.PermissionDenied, "failure", http.StatusForbidden, "OWNER_EXECUTION_SOURCE_FORBIDDEN"},
+		{codes.NotFound, "failure", http.StatusNotFound, "OWNER_EXECUTION_NOT_FOUND"},
+		{codes.FailedPrecondition, "failure", http.StatusPreconditionFailed, "OWNER_EXECUTION_PREPARE_REQUIRED"},
+		{codes.FailedPrecondition, "owner operation was not sent; prepare and sign again", http.StatusPreconditionFailed, "OWNER_EXECUTION_PREPARE_REQUIRED"},
+		{codes.FailedPrecondition, taskengine.OwnerExecutionDisabledDetail, http.StatusForbidden, "OWNER_EXECUTION_DISABLED"},
+		{codes.FailedPrecondition, "eoa_7702_execute is false", http.StatusForbidden, "OWNER_EXECUTION_DISABLED"},
+		{codes.FailedPrecondition, "the feature is disabled for this wallet", http.StatusPreconditionFailed, "OWNER_EXECUTION_PREPARE_REQUIRED"},
+		{codes.ResourceExhausted, "failure", http.StatusTooManyRequests, "OWNER_EXECUTION_LIMIT"},
+		{codes.Unauthenticated, "owner JWT required", http.StatusUnauthorized, "OWNER_EXECUTION_UNAUTHENTICATED"},
 	} {
 		var httpErr *restmw.HTTPError
-		require.ErrorAs(t, mapOwnerExecutionError(status.Error(tc.code, "failure")), &httpErr)
-		require.Equal(t, tc.httpStatus, httpErr.Status)
+		require.ErrorAs(t, mapOwnerExecutionError(status.Error(tc.code, tc.message)), &httpErr)
+		require.Equal(t, tc.httpStatus, httpErr.Status, tc.message)
+		require.Equal(t, tc.problem, httpErr.Code, tc.message)
 	}
+	err := (&Server{}).reportOwnerExecutionError(errors.New("database unavailable"))
+	var httpErr *restmw.HTTPError
+	require.ErrorAs(t, err, &httpErr)
+	require.Equal(t, http.StatusBadGateway, httpErr.Status)
+	require.Equal(t, "OWNER_EXECUTION_FAILED", httpErr.Code)
+	require.Empty(t, httpErr.Detail)
 }
 
 func TestOwnerPrepareDisabledIsActionable(t *testing.T) {
@@ -81,6 +96,7 @@ func TestOwnerPrepareDisabledIsActionable(t *testing.T) {
 	err := s.PrepareWorkflow(ctx)
 	var httpErr *restmw.HTTPError
 	require.ErrorAs(t, err, &httpErr)
-	require.Equal(t, http.StatusPreconditionFailed, httpErr.Status)
-	require.Contains(t, httpErr.Detail, "disabled")
+	require.Equal(t, http.StatusForbidden, httpErr.Status)
+	require.Equal(t, "OWNER_EXECUTION_DISABLED", httpErr.Code)
+	require.Equal(t, taskengine.OwnerExecutionDisabledDetail, httpErr.Detail)
 }

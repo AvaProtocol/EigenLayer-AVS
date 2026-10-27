@@ -154,21 +154,31 @@ discarding a signing request broadcasts nothing through this gateway.
 
 Before the first send, a durable `submitting` marker is saved under the existing
 per-execution lock. Failure to save that marker prevents the broadcast. Submitted,
-uncertain and rejected records are retained for 24 hours; all retained records
-are capped at 64 per owner. Concurrent/repeated submissions and restart recovery
-return the existing hash without rebroadcasting. A known bundler precheck
-rejection requires fresh consent. Transport/internal errors and already-known
-responses remain uncertain and must be reconciled by that hash. No automatic
-second operation is constructed.
+uncertain, rejected, and unsent records are retained for 24 hours. The cap of 64
+counts `prepared` records only, so a day of submits does not block the next
+prepare. Concurrent submissions and restart recovery return the existing hash
+without rebroadcasting. A known bundler precheck rejection requires fresh consent.
+Transport errors and already-known responses remain uncertain and must be
+reconciled by that hash. No automatic second operation is constructed.
 
-A crash after the marker but before the RPC can leave an operation unsent and
-its preparation ID unable to broadcast again. Poll the hash returned by prepare.
-Another broadcast needs a new prepare/review/signature. A storage failure after
-a successful send returns an error, while the original marker remains
-`submitting`; repeating submit returns that same hash without another send.
-A status lookup returning 404 is still unresolved: it may not be indexed or
-may never have been accepted. SDK/UI polling must retain that uncertainty
-instead of claiming failure or automatically preparing a replacement.
+A crash after the marker and before the RPC leaves the id in `submitting`.
+A later submit asks the bundler whether that hash is already known. A hit is
+stored as `submitted`. A miss stays `submitting` until the ten-minute signing
+window (`ExpiresAt`) passes, then the record becomes `unsent` and submit returns
+FailedPrecondition so the client prepares again. A lookup error leaves the
+record `submitting`: the gateway keeps the marker when it cannot tell whether
+the operation was accepted. The relay after the marker uses a context that
+outlives client disconnect, with its own one-minute timeout, so a dropped
+request does not by itself mark the send unknown. A storage failure after a
+successful send returns an error while the marker remains `submitting`.
+Repeating submit returns that same hash without another send while the window
+is open and the bundler has no operation for the hash.
+
+An empty bundler result stays unresolved until the signing window ends. SDK and
+UI polling should keep that uncertainty through the window. After the window,
+`unsent` means this gateway got an empty result and the client should prepare
+again. A bundler that reports an RPC error for an unknown hash stays
+`submitting`, because that response is a failed read rather than an empty result.
 
 Every submit request still needs a valid owner signature, including repeats for
 `submitting`, `unknown` and `submitted` records. The gateway does not retain
@@ -182,7 +192,9 @@ flow into two transfer calls, raw-hash signatures and framing, exact priced
 fields on keyless relay, owner/account/nonce/funding changes, stale read results,
 wrong signer, malformed/extra submit fields, expiration, feature rollback,
 storage failure before and after send, concurrent retries, restart/uncertain
-broadcasts, cached-submit signature checks, unverified implementation refusal,
+broadcasts, bundler reconcile of a `submitting` marker, a canceled client during
+relay, a prepare cap that counts only `prepared` records, cached-submit signature
+checks, unverified implementation refusal,
 gas rejection,
 sponsorship refusal, bounds and existing UserOp status reuse. External chain and
 bundler calls in these tests use local HTTP fixtures; no live sweep is broadcast.

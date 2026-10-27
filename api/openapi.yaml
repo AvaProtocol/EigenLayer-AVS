@@ -3066,8 +3066,12 @@ paths:
         the 32 raw userOpHash bytes, owner nonce entity 0/global option 1.
         A canonical delegated EOA can also sign for its derived smart wallet.
         Up to 32 calls; no native value, write Loop or post-write nodes.
-        Retained preparations are capped at 64 per owner. Ordinary Auto/session
-        and simulate behavior is unchanged.
+        Unsigned preparations are capped at 64 per owner. Submitted, uncertain,
+        rejected, and unsent records do not consume that cap. A gateway with
+        owner execution disabled returns 403 OWNER_EXECUTION_DISABLED;
+        preparing again does not enable it. Other precondition failures return
+        412 and ask for a fresh prepare. Ordinary Auto/session and simulate
+        behavior is unchanged.
       operationId: prepareWorkflow
       security:
         - bearerAuth: []
@@ -3104,12 +3108,17 @@ paths:
         Material changes or bundler rejection require fresh prepare/review/signing.
         Repeat calls still require a valid signature and reconcile the existing
         hash without rebroadcasting. Status polling requires the JWT only.
-        A durable submitting marker precedes the send: a crash before the RPC
-        leaves this id unretryable, even if it was never sent. A post-send
-        storage failure also preserves the marker. Poll the prepared hash;
-        404 remains unresolved and is not proof that no operation was sent.
-        Uncertain/submitted records are retained for 24 hours. A response is
-        not a receipt; reuse GET /userops/{userOpHash} for confirmation.
+        A durable submitting marker precedes the send. The relay after that
+        marker keeps running when the client disconnects. A crash before the
+        RPC leaves the id submitting. A retry looks the hash up at the bundler:
+        a hit is stored as submitted; an unknown hash stays submitting until
+        the ten-minute signing window ends, then becomes unsent and requires a
+        new prepare. A lookup error leaves the marker submitting. A post-send
+        storage failure also preserves the marker. Poll the prepared hash. An
+        empty bundler result during the window is unresolved. Uncertain and
+        submitted records are retained for 24 hours and do not count toward
+        the 64 prepared-record cap. A response is not a receipt; reuse
+        GET /userops/{userOpHash} for confirmation.
       operationId: submitExecution
       security:
         - bearerAuth: []

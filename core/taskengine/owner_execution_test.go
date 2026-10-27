@@ -34,11 +34,21 @@ import (
 )
 
 type ownerBackendFixture struct {
-	prepared      atomic.Int32
-	sent          atomic.Int32
-	validateError error
-	sendError     error
-	signed        *userop.UserOperationV07
+	prepared       atomic.Int32
+	sent           atomic.Int32
+	lookups        atomic.Int32
+	validateError  error
+	sendError      error
+	signed         *userop.UserOperationV07
+	userOpKnown    bool
+	userOpKnownErr error
+	// enteredSubmit is closed on the first Submit, before releaseSubmit.
+	// Tests use the pair to overlap a second caller, or to cancel the
+	// request, while the relay is inside the bundler call.
+	enteredSubmit chan struct{}
+	releaseSubmit chan struct{}
+	enterOnce     sync.Once
+	submitCtxErr  error
 }
 
 func (f *ownerBackendFixture) Prepare(_ context.Context, _ *config.SmartWalletConfig, _, sender common.Address, _ *big.Int, calls []aa.Call, _ logger.Logger) (*preset.PreparedOwnerUserOp, error) {
@@ -56,7 +66,19 @@ func (f *ownerBackendFixture) Prepare(_ context.Context, _ *config.SmartWalletCo
 func (f *ownerBackendFixture) Validate(context.Context, *config.SmartWalletConfig, common.Address, *big.Int, *preset.PreparedOwnerUserOp) error {
 	return f.validateError
 }
-func (f *ownerBackendFixture) Submit(_ context.Context, sw *config.SmartWalletConfig, op *userop.UserOperationV07) (common.Hash, error) {
+func (f *ownerBackendFixture) UserOpKnown(context.Context, *config.SmartWalletConfig, common.Hash) (bool, error) {
+	f.lookups.Add(1)
+	return f.userOpKnown, f.userOpKnownErr
+}
+
+func (f *ownerBackendFixture) Submit(ctx context.Context, sw *config.SmartWalletConfig, op *userop.UserOperationV07) (common.Hash, error) {
+	if f.enteredSubmit != nil {
+		f.enterOnce.Do(func() { close(f.enteredSubmit) })
+	}
+	if f.releaseSubmit != nil {
+		<-f.releaseSubmit
+	}
+	f.submitCtxErr = ctx.Err()
 	f.sent.Add(1)
 	copy := *op
 	copy.Signature = append([]byte(nil), op.Signature...)
@@ -510,16 +532,172 @@ func TestOwnerWorkflowPostSendStorageFailurePreservesMarker(t *testing.T) {
 }
 
 func TestOwnerWorkflowFlagAndRetentionCap(t *testing.T) {
-	n, user, _, backend := ownerEngineFixture(t)
 	trigger, nodes, edges, input := ownerWorkflowFixture()
-	n.config.OwnerExecutionEnabled = false
-	_, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
-	require.Equal(t, codes.FailedPrecondition, status.Code(err))
-	n.config.OwnerExecutionEnabled = true
-	for i := 0; i < ownerPreparationMaxPerOwner; i++ {
-		require.NoError(t, n.db.SetWithTTL(ownerExecutionKey(user.Address, model.GenerateID()), []byte("{}"), time.Minute))
+	t.Run("disabled", func(t *testing.T) {
+		n, user, _, backend := ownerEngineFixture(t)
+		n.config.OwnerExecutionEnabled = false
+		_, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
+		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+		require.Equal(t, OwnerExecutionDisabledDetail, status.Convert(err).Message())
+		require.Zero(t, backend.prepared.Load())
+	})
+	t.Run("submitted and invalid records do not consume the cap", func(t *testing.T) {
+		n, user, _, backend := ownerEngineFixture(t)
+		submitted, err := json.Marshal(ownerExecutionRecord{SubmissionState: ownerSubmissionSubmitted, Owner: user.Address})
+		require.NoError(t, err)
+		for i := 0; i < ownerPreparationMaxPerOwner; i++ {
+			require.NoError(t, n.db.SetWithTTL(ownerExecutionKey(user.Address, model.GenerateID()), []byte("{}"), time.Minute))
+			require.NoError(t, n.db.SetWithTTL(ownerExecutionKey(user.Address, model.GenerateID()), []byte("not-json"), time.Minute))
+			require.NoError(t, n.db.SetWithTTL(ownerExecutionKey(user.Address, model.GenerateID()), submitted, time.Minute))
+		}
+		_, err = n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, backend.prepared.Load())
+	})
+	t.Run("prepared records consume the cap", func(t *testing.T) {
+		n, user, _, backend := ownerEngineFixture(t)
+		prepared, err := json.Marshal(ownerExecutionRecord{SubmissionState: ownerSubmissionPrepared})
+		require.NoError(t, err)
+		for i := 0; i < ownerPreparationMaxPerOwner; i++ {
+			require.NoError(t, n.db.SetWithTTL(ownerExecutionKey(user.Address, model.GenerateID()), prepared, time.Minute))
+		}
+		_, err = n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
+		require.Equal(t, codes.ResourceExhausted, status.Code(err))
+		require.Contains(t, err.Error(), "prepared")
+		require.Zero(t, backend.prepared.Load())
+	})
+}
+
+func patchOwnerSubmission(t *testing.T, n *Engine, user *model.User, id string, state string, expiresAt int64) {
+	t.Helper()
+	data, err := n.db.GetKey(ownerExecutionKey(user.Address, id))
+	require.NoError(t, err)
+	var record ownerExecutionRecord
+	require.NoError(t, json.Unmarshal(data, &record))
+	record.SubmissionState = state
+	if expiresAt != 0 {
+		record.ExpiresAt = expiresAt
 	}
-	_, err = n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
-	require.Equal(t, codes.ResourceExhausted, status.Code(err))
-	require.Zero(t, backend.prepared.Load())
+	require.NoError(t, n.saveOwnerExecution(id, &record, time.Hour))
+}
+
+func loadOwnerSubmission(t *testing.T, n *Engine, user *model.User, id string) ownerExecutionRecord {
+	t.Helper()
+	data, err := n.db.GetKey(ownerExecutionKey(user.Address, id))
+	require.NoError(t, err)
+	var record ownerExecutionRecord
+	require.NoError(t, json.Unmarshal(data, &record))
+	return record
+}
+
+func TestOwnerWorkflowReconcilesSubmittingMarker(t *testing.T) {
+	for _, scenario := range []string{"known after window", "unknown during window", "unknown after window", "lookup error after window"} {
+		t.Run(scenario, func(t *testing.T) {
+			n, user, key, backend := ownerEngineFixture(t)
+			p := prepareOwnerFixture(t, n, user)
+			sig := signOwnerFixture(t, p, key)
+			expires := time.Now().Add(-time.Second).UnixMilli()
+			switch scenario {
+			case "known after window":
+				backend.userOpKnown = true
+			case "unknown during window":
+				expires = time.Now().Add(time.Minute).UnixMilli()
+			case "lookup error after window":
+				backend.userOpKnownErr = errors.New("bundler unavailable")
+			}
+			patchOwnerSubmission(t, n, user, p.Execution.Id, ownerSubmissionSubmitting, expires)
+			out, err := n.SubmitOwnerExecution(context.Background(), user, p.Execution.Id, sig)
+			stored := loadOwnerSubmission(t, n, user, p.Execution.Id)
+			require.Zero(t, backend.sent.Load())
+			switch scenario {
+			case "known after window":
+				require.NoError(t, err)
+				require.Equal(t, ownerSubmissionSubmitted, out.SubmissionState)
+				require.Equal(t, ownerSubmissionSubmitted, stored.SubmissionState)
+				require.Equal(t, p.UserOpHash, out.UserOpHash)
+			case "unknown during window":
+				require.NoError(t, err)
+				require.Equal(t, ownerSubmissionSubmitting, out.SubmissionState)
+				require.Equal(t, ownerSubmissionSubmitting, stored.SubmissionState)
+			case "unknown after window":
+				require.Equal(t, codes.FailedPrecondition, status.Code(err))
+				require.Contains(t, err.Error(), "not sent")
+				require.Equal(t, ownerSubmissionUnsent, stored.SubmissionState)
+				_, err = n.SubmitOwnerExecution(context.Background(), user, p.Execution.Id, sig)
+				require.Equal(t, codes.FailedPrecondition, status.Code(err))
+				require.EqualValues(t, 1, backend.lookups.Load(), "an unsent record does not ask the bundler again")
+			case "lookup error after window":
+				require.NoError(t, err)
+				require.Equal(t, ownerSubmissionSubmitting, out.SubmissionState)
+				require.Equal(t, ownerSubmissionSubmitting, stored.SubmissionState)
+			}
+			require.Zero(t, backend.sent.Load())
+		})
+	}
+}
+
+func TestOwnerWorkflowOneInFlightSubmit(t *testing.T) {
+	n, user, key, backend := ownerEngineFixture(t)
+	p := prepareOwnerFixture(t, n, user)
+	sig := signOwnerFixture(t, p, key)
+	backend.enteredSubmit = make(chan struct{})
+	backend.releaseSubmit = make(chan struct{})
+	type result struct {
+		out *OwnerWorkflowSubmission
+		err error
+	}
+	results := make(chan result, 2)
+	go func() {
+		out, err := n.SubmitOwnerExecution(context.Background(), user, p.Execution.Id, sig)
+		results <- result{out, err}
+	}()
+	select {
+	case <-backend.enteredSubmit:
+	case <-time.After(20 * time.Second):
+		t.Fatal("first submit did not reach the bundler")
+	}
+	go func() {
+		out, err := n.SubmitOwnerExecution(context.Background(), user, p.Execution.Id, sig)
+		results <- result{out, err}
+	}()
+	close(backend.releaseSubmit)
+	for i := 0; i < 2; i++ {
+		got := <-results
+		require.NoError(t, got.err)
+		require.Equal(t, ownerSubmissionSubmitted, got.out.SubmissionState)
+		require.Equal(t, p.UserOpHash, got.out.UserOpHash)
+	}
+	require.EqualValues(t, 1, backend.sent.Load())
+	require.Equal(t, ownerSubmissionSubmitted, loadOwnerSubmission(t, n, user, p.Execution.Id).SubmissionState)
+}
+
+func TestOwnerWorkflowClientCancelDoesNotDropRelay(t *testing.T) {
+	n, user, key, backend := ownerEngineFixture(t)
+	p := prepareOwnerFixture(t, n, user)
+	sig := signOwnerFixture(t, p, key)
+	backend.enteredSubmit = make(chan struct{})
+	backend.releaseSubmit = make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	type result struct {
+		out *OwnerWorkflowSubmission
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, err := n.SubmitOwnerExecution(ctx, user, p.Execution.Id, sig)
+		done <- result{out, err}
+	}()
+	select {
+	case <-backend.enteredSubmit:
+	case <-time.After(20 * time.Second):
+		t.Fatal("submit did not reach the bundler")
+	}
+	cancel()
+	close(backend.releaseSubmit)
+	got := <-done
+	require.NoError(t, got.err)
+	require.NoError(t, backend.submitCtxErr)
+	require.Equal(t, ownerSubmissionSubmitted, got.out.SubmissionState)
+	require.EqualValues(t, 1, backend.sent.Load())
+	require.Equal(t, ownerSubmissionSubmitted, loadOwnerSubmission(t, n, user, p.Execution.Id).SubmissionState)
 }
