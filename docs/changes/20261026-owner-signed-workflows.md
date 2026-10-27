@@ -1,7 +1,7 @@
 # Owner-signed Manual workflow handoff
 
 Date: 2026-10-26
-Status: Draft implementation; live owner-signed execution not yet verified
+Status: Owner-signed HTTP execution verified on Sepolia; SDK/browser integration pending
 Branch: `feat/1987-owner-signed-workflows`
 Related: [Studio #1987](https://github.com/AvaProtocol/studio/issues/1987),
 [SDK workflow/simulation draft #289](https://github.com/AvaProtocol/ava-sdk-js/pull/289)
@@ -17,7 +17,6 @@ keep their behavior.
 Enable `owner_execution_enabled: true` in a local gateway config to expose the
 handoff; the default is false. Disabling it prevents new preparations and first
 submissions while preserving reconciliation of already attempted submissions.
-The shared local gateway is not restarted by this change.
 
 ## Existing execution interfaces and the added contract
 
@@ -201,8 +200,40 @@ go test -race -short ./core/taskengine ./pkg/erc4337/preset ./aggregator/rest \
 ```
 
 The broad affected-package run in this fresh worktree cannot complete existing
-configuration-dependent tests without `config/test.yaml`. Pure preset, account
-encoding and config suites run independently. Live Sepolia owner signing,
-bundler acceptance/inclusion and browser-wallet behavior still require separate
-verification after the SDK integration. Local HTTP fixtures do not establish
-those outcomes.
+configuration-dependent tests without `config/test.yaml`. CI run
+[40432706488](https://github.com/AvaProtocol/EigenLayer-AVS/actions/runs/40432706488)
+passed the full affected package suites, including taskengine, preset and REST.
+
+### Live owner-signed Sepolia execution
+
+On 2026-10-26, the local stack's gateway was replaced with this branch's
+`cd61c382` binary, retaining the existing configuration, database, ports, workers
+and operators and enabling the feature for that launch. A separate HTTP probe
+used the existing development fixture owner to sign the raw 32-byte prepared
+hash with ethers `signMessage(getBytes(userOpHash))`.
+
+- Source: `0x60aCdE1B4fC1848647eaB6F1460a33F4cA2b520E`.
+- Recipient: the fixture owner,
+  `0x2FB186De3d32F4EB45A58F6dD7133A2442f9830e`.
+- One source-funded UserOperation:
+  `0xd5970d7a3ed0f15bc17d90b380b0691ab5e92757056f569468c11d360e8404da`.
+- Confirmed transaction:
+  [0xd3630746…3140e661](https://sepolia.etherscan.io/tx/0xd3630746908f6366904afc6482fd6cd66771e2d31368d0a1fa3f392b3140e661),
+  block `12002748`, successful UserOperation event with the prepared owner nonce
+  and two matching ERC-20 Transfer events in that transaction.
+
+| Token |        Source before | Source after | Recipient before |      Recipient after |
+| ----- | -------------------: | -----------: | ---------------: | -------------------: |
+| USDC  |                 13.3 |            0 |         1.500489 |            14.800489 |
+| WETH  | 0.000002877930532126 |            0 |                0 | 0.000002877930532126 |
+
+Both balance deltas matched the exact prepared base-unit amounts. Repeating
+signature-only submit returned the same hash and submitted state. Session
+policies were unchanged. Actual gas cost was `0.000038235905353026` Sepolia ETH,
+below the signed maximum of `0.000043129212076176` ETH.
+
+The independent chain RPC initially lagged the bundler's confirmed status;
+read-only receipt verification subsequently passed without another broadcast.
+No owner signature, private key or JWT was stored in the probe artifacts.
+Live counterfactual deployment, sponsorship and browser-wallet signing remain
+separate verification cases. The SDK example still previews/simulates only.
