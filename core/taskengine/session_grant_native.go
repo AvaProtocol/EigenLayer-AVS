@@ -42,8 +42,16 @@ type CodeAndFeeReader interface {
 }
 
 const (
-	SessionPolicyRecipientNotAllowedCode      = "SESSION_POLICY_RECIPIENT_NOT_ALLOWED"
-	SessionPolicyRecipientNotEOACode          = "SESSION_POLICY_RECIPIENT_NOT_EOA"
+	SessionPolicyRecipientNotAllowedCode = "SESSION_POLICY_RECIPIENT_NOT_ALLOWED"
+	// SessionPolicyRecipientNotEOACode is a native recipient that is a
+	// contract, or whose code could not be checked before the grant was
+	// applied.
+	SessionPolicyRecipientNotEOACode = "SESSION_POLICY_RECIPIENT_NOT_EOA"
+	// SessionPolicyRecipientNotAcknowledgedCode is a native recipient whose
+	// code is an EIP-7702 designation the grant does not acknowledge in
+	// delegatedNativeRecipients. It was NOT_EOA until clients needed to tell
+	// it from a contract without reading the message.
+	SessionPolicyRecipientNotAcknowledgedCode = "SESSION_POLICY_RECIPIENT_NOT_ACKNOWLEDGED"
 	SessionPolicyRecipientDelegateChangedCode = "SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED"
 	// SessionPolicyRecipientCodeUnreadableCode is an installed grant whose
 	// recipient code could not be read. It is not a client failure: the
@@ -319,6 +327,28 @@ func policyIDOf(policy *model.SessionPolicy) string {
 	return policy.ID
 }
 
+// NativeRecipientRefusal is prepare or submit refusing a native recipient
+// for its code. Error() is the refusal's text. REST copies the code and the
+// addresses onto the problem, so a client can name the recipient without
+// reading the text. The recipient can be another enabled task's: the merged
+// grant carries every running automation's recipients.
+type NativeRecipientRefusal struct {
+	// Code is SESSION_POLICY_RECIPIENT_NOT_EOA,
+	// SESSION_POLICY_RECIPIENT_NOT_ACKNOWLEDGED, or
+	// SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED.
+	Code      string
+	Recipient common.Address
+	// Delegate is the delegate the recipient's designation names now. Nil
+	// for a plain contract.
+	Delegate *common.Address
+	// AcknowledgedDelegate is the delegate the grant acknowledged. Set only
+	// for SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED.
+	AcknowledgedDelegate *common.Address
+	message              string
+}
+
+func (e *NativeRecipientRefusal) Error() string { return e.message }
+
 // formatGrantTimeNativeCodeRefusal is the prepare/submit wording. A plain
 // contract keeps the contractWrite hint. A designation to any delegate is
 // "7702-delegated", including our own SMA delegate.
@@ -327,18 +357,35 @@ func formatGrantTimeNativeCodeRefusal(recipient common.Address, ack *common.Addr
 	case nativeCodeOK:
 		return nil
 	case nativeCodeDelegatedUnacked:
-		return fmt.Errorf("%s: native recipient %s is 7702-delegated to %s; acknowledge that delegate in delegatedNativeRecipients, or set allowContractRecipient (any function on this address, ERC-20 uncapped)",
-			SessionPolicyRecipientNotEOACode, recipient.Hex(), onChain.Hex())
+		delegate := onChain
+		return &NativeRecipientRefusal{
+			Code:      SessionPolicyRecipientNotAcknowledgedCode,
+			Recipient: recipient,
+			Delegate:  &delegate,
+			message: fmt.Sprintf("%s: native recipient %s is 7702-delegated to %s; acknowledge that delegate in delegatedNativeRecipients, or set allowContractRecipient (any function on this address, ERC-20 uncapped)",
+				SessionPolicyRecipientNotAcknowledgedCode, recipient.Hex(), onChain.Hex()),
+		}
 	case nativeCodeDelegateChanged:
 		acknowledged := common.Address{}
 		if ack != nil {
 			acknowledged = *ack
 		}
-		return fmt.Errorf("%s: native recipient %s was acknowledged as delegated to %s; it now designates %s",
-			SessionPolicyRecipientDelegateChangedCode, recipient.Hex(), acknowledged.Hex(), onChain.Hex())
+		delegate := onChain
+		return &NativeRecipientRefusal{
+			Code:                 SessionPolicyRecipientDelegateChangedCode,
+			Recipient:            recipient,
+			Delegate:             &delegate,
+			AcknowledgedDelegate: &acknowledged,
+			message: fmt.Sprintf("%s: native recipient %s was acknowledged as delegated to %s; it now designates %s",
+				SessionPolicyRecipientDelegateChangedCode, recipient.Hex(), acknowledged.Hex(), onChain.Hex()),
+		}
 	default:
-		return fmt.Errorf("%s: native recipient is a contract; send via contractWrite, or set allowContractRecipient (any function on this address, ERC-20 uncapped)",
-			SessionPolicyRecipientNotEOACode)
+		return &NativeRecipientRefusal{
+			Code:      SessionPolicyRecipientNotEOACode,
+			Recipient: recipient,
+			message: fmt.Sprintf("%s: native recipient %s is a contract; send via contractWrite, or set allowContractRecipient (any function on this address, ERC-20 uncapped)",
+				SessionPolicyRecipientNotEOACode, recipient.Hex()),
+		}
 	}
 }
 
@@ -348,7 +395,7 @@ func formatPreflightNativeCodeRefusal(recipient common.Address, ack *common.Addr
 		return ""
 	case nativeCodeDelegatedUnacked:
 		return withPolicyID(fmt.Sprintf("%s: native recipient %s is 7702-delegated to %s; acknowledge that delegate in delegatedNativeRecipients, or re-grant with allowContractRecipient (any function on this address, ERC-20 uncapped)",
-			SessionPolicyRecipientNotEOACode, recipient.Hex(), onChain.Hex()), policyID)
+			SessionPolicyRecipientNotAcknowledgedCode, recipient.Hex(), onChain.Hex()), policyID)
 	case nativeCodeDelegateChanged:
 		acknowledged := common.Address{}
 		if ack != nil {

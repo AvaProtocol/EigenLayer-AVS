@@ -402,6 +402,7 @@ func isNativeMessage(msg string) bool {
 	return strings.Contains(msg, SessionPolicyNativeNotAllowedCode) ||
 		strings.Contains(msg, SessionPolicyRecipientNotAllowedCode) ||
 		strings.Contains(msg, SessionPolicyRecipientNotEOACode) ||
+		strings.Contains(msg, SessionPolicyRecipientNotAcknowledgedCode) ||
 		strings.Contains(msg, SessionPolicyRecipientDelegateChangedCode) ||
 		strings.Contains(msg, SessionPolicyNativeCapExceededCode)
 }

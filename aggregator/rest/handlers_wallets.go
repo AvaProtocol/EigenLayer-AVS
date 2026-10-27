@@ -261,33 +261,7 @@ func (s *Server) WithdrawWallet(ctx echo.Context, address generated.EthereumAddr
 
 	result, err := s.withdraws.Withdraw(ctx.Request().Context(), req)
 	if err != nil {
-		// ExecuteWithdraw refuses a native withdraw the account's session
-		// hooks cannot validate. It signals that as a gRPC InvalidArgument,
-		// which the problem middleware would render as a 400 with an empty
-		// `code` — leaving clients to substring-match the detail. Re-wrap it
-		// so the machine-readable code travels in the field built for it,
-		// alongside WITHDRAW_BAD_TOKEN and friends above.
-		if strings.Contains(err.Error(), taskengine.SessionPolicyNativeNotAllowedCode) {
-			return badRequest(taskengine.SessionPolicyNativeNotAllowedCode,
-				"Native ETH withdraw not authorized",
-				status.Convert(err).Message())
-		}
-		if strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotAllowedCode) {
-			return badRequest(taskengine.SessionPolicyRecipientNotAllowedCode,
-				"Recipient not in native allowlist",
-				status.Convert(err).Message())
-		}
-		if strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotEOACode) {
-			return badRequest(taskengine.SessionPolicyRecipientNotEOACode,
-				"Native recipient is a contract",
-				status.Convert(err).Message())
-		}
-		if strings.Contains(err.Error(), taskengine.SessionPolicyNativeCapExceededCode) {
-			return badRequest(taskengine.SessionPolicyNativeCapExceededCode,
-				"Native ETH cap exceeded",
-				status.Convert(err).Message())
-		}
-		return err
+		return mapWithdrawError(err)
 	}
 	// Echo enough of the request back on the response that callers can
 	// correlate the result without needing to re-state it locally.
@@ -319,6 +293,48 @@ func (s *Server) WithdrawWallet(ctx echo.Context, address generated.EthereumAddr
 		out.SubmittedAt = &ts
 	}
 	return ctx.JSON(http.StatusOK, out)
+}
+
+// mapWithdrawError gives a session-grant refusal from ExecuteWithdraw its
+// machine-readable code. Anything else is returned as is.
+func mapWithdrawError(err error) error {
+	// ExecuteWithdraw refuses a native withdraw the account's session
+	// hooks cannot validate. It signals that as a gRPC InvalidArgument,
+	// which the problem middleware would render as a 400 with an empty
+	// `code` — leaving clients to substring-match the detail. Re-wrap it
+	// so the machine-readable code travels in the field built for it,
+	// alongside the handler's WITHDRAW_BAD_TOKEN and friends.
+	if strings.Contains(err.Error(), taskengine.SessionPolicyNativeNotAllowedCode) {
+		return badRequest(taskengine.SessionPolicyNativeNotAllowedCode,
+			"Native ETH withdraw not authorized",
+			status.Convert(err).Message())
+	}
+	if strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotAllowedCode) {
+		return badRequest(taskengine.SessionPolicyRecipientNotAllowedCode,
+			"Recipient not in native allowlist",
+			status.Convert(err).Message())
+	}
+	if strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotAcknowledgedCode) {
+		return badRequest(taskengine.SessionPolicyRecipientNotAcknowledgedCode,
+			"Delegated native recipient not acknowledged",
+			status.Convert(err).Message())
+	}
+	if strings.Contains(err.Error(), taskengine.SessionPolicyRecipientDelegateChangedCode) {
+		return badRequest(taskengine.SessionPolicyRecipientDelegateChangedCode,
+			"Acknowledged delegate changed",
+			status.Convert(err).Message())
+	}
+	if strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotEOACode) {
+		return badRequest(taskengine.SessionPolicyRecipientNotEOACode,
+			"Native recipient is a contract",
+			status.Convert(err).Message())
+	}
+	if strings.Contains(err.Error(), taskengine.SessionPolicyNativeCapExceededCode) {
+		return badRequest(taskengine.SessionPolicyNativeCapExceededCode,
+			"Native ETH cap exceeded",
+			status.Convert(err).Message())
+	}
+	return err
 }
 
 // GetWalletNonce — GET /api/v1/wallets/{address}:getNonce

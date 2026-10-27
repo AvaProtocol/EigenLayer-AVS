@@ -303,6 +303,25 @@ components:
             `409 SESSION_POLICY_NOT_COVERING`,
             `409 SESSION_POLICY_EXPIRED`, and
             `409 SESSION_POLICY_SIGNER_RETIRED` from create and resume.
+        recipient:
+          $ref: '#/components/schemas/EthereumAddress'
+          description: |
+            Native recipient a policies:prepare or policies:submit refused
+            for its code. Set on `400 SESSION_POLICY_RECIPIENT_NOT_EOA`,
+            `400 SESSION_POLICY_RECIPIENT_NOT_ACKNOWLEDGED`, and
+            `400 SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED`. It can be an
+            enabled task's recipient rather than one the request added.
+        delegate:
+          $ref: '#/components/schemas/EthereumAddress'
+          description: |
+            Delegate the recipient's EIP-7702 designation names now. Set on
+            `SESSION_POLICY_RECIPIENT_NOT_ACKNOWLEDGED` and
+            `SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED`.
+        acknowledgedDelegate:
+          $ref: '#/components/schemas/EthereumAddress'
+          description: |
+            Delegate the grant acknowledged for `recipient`. Set on
+            `SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED`.
 
     # -------------------------------------------------------------------
     # Health
@@ -3708,11 +3727,17 @@ paths:
             to send a decimal string.
             `SESSION_POLICY_TOO_MANY_NATIVE_RECIPIENTS` — more than five native
             recipients. Finished automations keep their addresses until revoke.
-            `SESSION_POLICY_RECIPIENT_NOT_EOA` — a native recipient is a contract,
-            or a 7702-delegated EOA the owner did not acknowledge.
+            `SESSION_POLICY_RECIPIENT_NOT_EOA` — a native recipient is a
+            contract.
+            `SESSION_POLICY_RECIPIENT_NOT_ACKNOWLEDGED` — a native recipient is
+            a 7702-delegated EOA that `delegatedNativeRecipients` does not
+            acknowledge.
             `SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED` — an acknowledged
-            recipient's designation now names a different delegate, or its
-            code is no longer that designation.
+            recipient's designation now names a different delegate.
+            All three set `recipient`, which can be another enabled task's
+            recipient: the merged grant carries every running automation's.
+            The last two also set `delegate`, and a changed delegate sets
+            `acknowledgedDelegate`.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -3811,11 +3836,17 @@ paths:
             `409 SESSION_POLICY_NATIVE_UNSIZED`.
             `SESSION_POLICY_TOO_MANY_NATIVE_RECIPIENTS` — more than five native
             recipients. Finished automations keep their addresses until revoke.
-            `SESSION_POLICY_RECIPIENT_NOT_EOA` — a native recipient is a contract,
-            or a 7702-delegated EOA the owner did not acknowledge.
+            `SESSION_POLICY_RECIPIENT_NOT_EOA` — a native recipient is a
+            contract.
+            `SESSION_POLICY_RECIPIENT_NOT_ACKNOWLEDGED` — a native recipient is
+            a 7702-delegated EOA that `delegatedNativeRecipients` does not
+            acknowledge.
             `SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED` — an acknowledged
-            recipient's designation now names a different delegate, or its
-            code is no longer that designation.
+            recipient's designation now names a different delegate.
+            All three set `recipient`, which can be another enabled task's
+            recipient: the merged grant carries every running automation's.
+            The last two also set `delegate`, and a changed delegate sets
+            `acknowledgedDelegate`.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }

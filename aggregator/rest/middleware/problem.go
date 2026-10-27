@@ -52,6 +52,11 @@ type Problem struct {
 	AffectedTaskIDs []string        `json:"affectedTaskIds,omitempty"`
 	MissingActions  []ProblemAction `json:"missingActions,omitempty"`
 	Required        *ProblemNeed    `json:"required,omitempty"`
+	// Recipient, Delegate and AcknowledgedDelegate name the native
+	// recipient a prepare or submit refused for its code.
+	Recipient            string `json:"recipient,omitempty"`
+	Delegate             string `json:"delegate,omitempty"`
+	AcknowledgedDelegate string `json:"acknowledgedDelegate,omitempty"`
 }
 
 // genericServerErrorDetail replaces any 5xx Problem detail the code didn't
@@ -72,6 +77,10 @@ type HTTPError struct {
 	AffectedTaskIDs []string
 	MissingActions  []ProblemAction
 	Required        *ProblemNeed
+	// Native recipient refusals (Problem.Recipient and friends).
+	Recipient            string
+	Delegate             string
+	AcknowledgedDelegate string
 }
 
 func (e *HTTPError) Error() string { return e.Title }
@@ -140,6 +149,9 @@ func ProblemErrorHandler(logger sdklogging.Logger) echo.HTTPErrorHandler {
 			p.AffectedTaskIDs = typed.AffectedTaskIDs
 			p.MissingActions = typed.MissingActions
 			p.Required = typed.Required
+			p.Recipient = typed.Recipient
+			p.Delegate = typed.Delegate
+			p.AcknowledgedDelegate = typed.AcknowledgedDelegate
 			detailIsAuthored = true
 		case errors.As(err, &echoErr):
 			p.Status = echoErr.Code

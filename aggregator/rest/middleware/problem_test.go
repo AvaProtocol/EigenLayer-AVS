@@ -178,3 +178,26 @@ func TestProblemKeepsGRPCInvalidArgumentDetail(t *testing.T) {
 		t.Fatalf("4xx gRPC detail must survive, got %q", p.Detail)
 	}
 }
+
+func TestProblemCopiesNativeRecipientRefusalFields(t *testing.T) {
+	rec, p := serveErr(nil, &HTTPError{
+		Status:               http.StatusBadRequest,
+		Code:                 "SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED",
+		Title:                "Acknowledged delegate changed",
+		Detail:               "native recipient 0xR was acknowledged as delegated to 0xA; it now designates 0xB",
+		Recipient:            "0x00000000000000000000000000000000000000a1",
+		Delegate:             "0x00000000000000000000000000000000000000b2",
+		AcknowledgedDelegate: "0x00000000000000000000000000000000000000c3",
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	if p.Recipient != "0x00000000000000000000000000000000000000a1" ||
+		p.Delegate != "0x00000000000000000000000000000000000000b2" ||
+		p.AcknowledgedDelegate != "0x00000000000000000000000000000000000000c3" {
+		t.Fatalf("recipient fields = %#v", p)
+	}
+	if !strings.Contains(rec.Body.String(), `"acknowledgedDelegate":"0x00000000000000000000000000000000000000c3"`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
