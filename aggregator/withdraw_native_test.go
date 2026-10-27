@@ -2,6 +2,7 @@ package aggregator
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"strings"
 	"testing"
@@ -141,12 +142,13 @@ func TestExecuteWithdraw_NilSmartWalletConfigDoesNotPanic(t *testing.T) {
 }
 
 type stubWithdrawReader struct {
-	code []byte
-	fee  *big.Int
+	code    []byte
+	codeErr error
+	fee     *big.Int
 }
 
 func (s stubWithdrawReader) CodeAt(context.Context, common.Address) ([]byte, error) {
-	return s.code, nil
+	return s.code, s.codeErr
 }
 func (s stubWithdrawReader) MaxFeePerGas(context.Context) (*big.Int, error) {
 	return s.fee, nil
@@ -216,9 +218,76 @@ func TestExecuteWithdraw_CoveringGrantPassesPreflight(t *testing.T) {
 	if err == nil {
 		t.Fatal("covering grant without a reader must fail closed")
 	}
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("a grant that is not installed yet must stay InvalidArgument, got %s: %v", status.Code(err), err)
+	}
 	if !strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotEOACode) &&
 		!strings.Contains(err.Error(), taskengine.SessionPolicyNativeCapExceededCode) {
 		t.Fatalf("expected EOA or cap fail-closed, got %v", err)
+	}
+}
+
+func TestExecuteWithdraw_InstalledGrantCodeReadIsUnavailable(t *testing.T) {
+	db := testutil.TestMustDB()
+	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
+
+	owner := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	wallet := common.HexToAddress("0x209eb31c199bEB4c386eF83CF442DE1a00667a1F")
+	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
+	delegate := common.HexToAddress("0x7702cb554e6bfb442cb743a7df23154544a7176c")
+	other := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	policy := &model.SessionPolicy{
+		ID: "01installedgrantaaaaaaaaaa", Owner: &owner, Runner: &wallet,
+		ChainID: 11155111, EntityID: 1, SessionSigner: &signer,
+		Status:           model.SessionPolicyActive,
+		NativeRecipients: []*common.Address{&owner},
+		DelegatedNativeRecipients: []model.DelegatedNativeRecipient{{
+			Recipient: &owner,
+			Delegate:  &delegate,
+		}},
+		NativeSpendCap: &model.NativeSpendCap{Amount: "100000000000000000", GrantedCap: "100000000000000000"},
+		Grant: &model.SessionGrantAuthorization{
+			InstallCall:    []byte{0x1b, 0xbf, 0x56, 0x4c, 0x01},
+			CarrierNonce:   big.NewInt(1),
+			Deadline:       1785541743,
+			OwnerSignature: make([]byte, 65),
+			AppliedAt:      1,
+		},
+	}
+	if err := taskengine.StoreSessionPolicy(db, policy); err != nil {
+		t.Fatal(err)
+	}
+
+	server := withdrawTestServer(t)
+	server.db = db
+	req := &avsproto.WithdrawFundsReq{
+		RecipientAddress:   owner.Hex(),
+		Amount:             "1000000000000000",
+		Token:              "ETH",
+		SmartWalletAddress: wallet.Hex(),
+	}
+	amount := big.NewInt(1_000_000_000_000_000)
+	user := &model.User{Address: owner}
+
+	server.withdrawNativeReader = nil
+	err := server.preflightNativeWithdraw(user, server.config.SmartWallet, req, amount, false)
+	if status.Code(err) != codes.Unavailable || !strings.Contains(err.Error(), taskengine.SessionPolicyRecipientCodeUnreadableCode) {
+		t.Fatalf("missing reader = %v", err)
+	}
+
+	server.withdrawNativeReader = stubWithdrawReader{codeErr: fmt.Errorf("rpc timeout"), fee: big.NewInt(2_000_000_000)}
+	err = server.preflightNativeWithdraw(user, server.config.SmartWallet, req, amount, false)
+	if status.Code(err) != codes.Unavailable || !strings.Contains(err.Error(), taskengine.SessionPolicyRecipientCodeUnreadableCode) || !strings.Contains(err.Error(), "rpc timeout") {
+		t.Fatalf("rpc error = %v", err)
+	}
+
+	code := make([]byte, 23)
+	code[0], code[1], code[2] = 0xef, 0x01, 0x00
+	copy(code[3:], other.Bytes())
+	server.withdrawNativeReader = stubWithdrawReader{code: code, fee: big.NewInt(2_000_000_000)}
+	err = server.preflightNativeWithdraw(user, server.config.SmartWallet, req, amount, false)
+	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), taskengine.SessionPolicyRecipientDelegateChangedCode) {
+		t.Fatalf("changed delegate = %v", err)
 	}
 }
 

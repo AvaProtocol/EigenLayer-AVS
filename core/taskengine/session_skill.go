@@ -394,9 +394,15 @@ func (r *SessionGrantReport) snapshot() (policy *model.SessionPolicy, noGrant, s
 }
 
 func isNativeMessage(msg string) bool {
+	// SESSION_POLICY_RECIPIENT_CODE_UNREADABLE stays off this list. An RPC
+	// blip must not fail a Skill Test, and before acknowledgements were
+	// re-read an installed grant was never looked up at test time. A
+	// changed delegate is a real miss: the Test has to say not covered so
+	// the owner can allow the new delegate.
 	return strings.Contains(msg, SessionPolicyNativeNotAllowedCode) ||
 		strings.Contains(msg, SessionPolicyRecipientNotAllowedCode) ||
 		strings.Contains(msg, SessionPolicyRecipientNotEOACode) ||
+		strings.Contains(msg, SessionPolicyRecipientDelegateChangedCode) ||
 		strings.Contains(msg, SessionPolicyNativeCapExceededCode)
 }
 
