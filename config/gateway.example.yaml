@@ -11,6 +11,10 @@
 # (t:{chain_id}:{status}:{task_id}).
 environment: development
 
+# Manual owner-signed workflow handoff. Default false. Enable locally only
+# after configuring the chain/bundler; Auto/session execution is unaffected.
+owner_execution_enabled: false
+
 db_path: /tmp/ap-avs/gateway
 # Honored when set. Empty → `{db_path}_backup`. Periodic writes only when
 # backup_interval_hours > 0; otherwise backups run on migration only.

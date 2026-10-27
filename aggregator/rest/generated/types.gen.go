@@ -192,6 +192,17 @@ const (
 	NodeTypeRestApi       NodeType = "restApi"
 )
 
+// Defines values for PrepareWorkflowResponseGasFunding.
+const (
+	Source    PrepareWorkflowResponseGasFunding = "source"
+	Sponsored PrepareWorkflowResponseGasFunding = "sponsored"
+)
+
+// Defines values for PrepareWorkflowResponseSigningMethod.
+const (
+	PersonalSign PrepareWorkflowResponseSigningMethod = "personal_sign"
+)
+
 // Defines values for RestAPINodeType.
 const (
 	RestApi RestAPINodeType = "restApi"
@@ -249,6 +260,13 @@ const (
 const (
 	Enforce SimulateWorkflowRequestAuthorizationMode = "enforce"
 	Report  SimulateWorkflowRequestAuthorizationMode = "report"
+)
+
+// Defines values for SubmitExecutionResponseSubmissionState.
+const (
+	Submitted  SubmitExecutionResponseSubmissionState = "submitted"
+	Submitting SubmitExecutionResponseSubmissionState = "submitting"
+	Unknown    SubmitExecutionResponseSubmissionState = "unknown"
 )
 
 // Defines values for SubmitPolicyResponseStatus.
@@ -1227,6 +1245,56 @@ type OperatorList struct {
 	Data []OperatorInfo `json:"data"`
 }
 
+// OwnerUserOperationV07 Finalized ERC-4337 v0.7 bundler-wire operation. Quantity fields are hex
+// strings, never JSON numbers. Signature is empty (0x) until continuation;
+// no operation field can be supplied or changed by submitExecution.
+type OwnerUserOperationV07 struct {
+	// CallData Arbitrary-length hex-encoded byte string.
+	CallData Hex `json:"callData"`
+
+	// CallGasLimit Arbitrary-length hex-encoded byte string.
+	CallGasLimit Hex `json:"callGasLimit"`
+
+	// Factory Lowercase or checksummed hex EOA / contract address.
+	Factory *EthereumAddress `json:"factory,omitempty"`
+
+	// FactoryData Arbitrary-length hex-encoded byte string.
+	FactoryData *Hex `json:"factoryData,omitempty"`
+
+	// MaxFeePerGas Arbitrary-length hex-encoded byte string.
+	MaxFeePerGas Hex `json:"maxFeePerGas"`
+
+	// MaxPriorityFeePerGas Arbitrary-length hex-encoded byte string.
+	MaxPriorityFeePerGas Hex `json:"maxPriorityFeePerGas"`
+
+	// Nonce Arbitrary-length hex-encoded byte string.
+	Nonce Hex `json:"nonce"`
+
+	// Paymaster Lowercase or checksummed hex EOA / contract address.
+	Paymaster *EthereumAddress `json:"paymaster,omitempty"`
+
+	// PaymasterData Arbitrary-length hex-encoded byte string.
+	PaymasterData *Hex `json:"paymasterData,omitempty"`
+
+	// PaymasterPostOpGasLimit Arbitrary-length hex-encoded byte string.
+	PaymasterPostOpGasLimit *Hex `json:"paymasterPostOpGasLimit,omitempty"`
+
+	// PaymasterVerificationGasLimit Arbitrary-length hex-encoded byte string.
+	PaymasterVerificationGasLimit *Hex `json:"paymasterVerificationGasLimit,omitempty"`
+
+	// PreVerificationGas Arbitrary-length hex-encoded byte string.
+	PreVerificationGas Hex `json:"preVerificationGas"`
+
+	// Sender Lowercase or checksummed hex EOA / contract address.
+	Sender EthereumAddress `json:"sender"`
+
+	// Signature Arbitrary-length hex-encoded byte string.
+	Signature Hex `json:"signature"`
+
+	// VerificationGasLimit Arbitrary-length hex-encoded byte string.
+	VerificationGasLimit Hex `json:"verificationGasLimit"`
+}
+
 // PageInfo defines model for PageInfo.
 type PageInfo struct {
 	// EndCursor Cursor for the last item in the current page; pass to `after` for the next page.
@@ -1309,6 +1377,81 @@ type PreparePolicyRequest struct {
 	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
 	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
 }
+
+// PrepareWorkflowRequest A Manual definition with read/check nodes and exactly one terminal
+// ContractWrite. The initial owner path supports one configured chain,
+// MA v2 derived wallets with an EOA fallback owner, and zero native value.
+// No persistent/Auto workflow or session grant is created.
+// Requires gateway owner_execution_enabled: true (default false).
+type PrepareWorkflowRequest struct {
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId `json:"chainId"`
+	Edges   *[]Edge `json:"edges,omitempty"`
+
+	// InputVariables Free-form key-value bag of values used to resolve `{{variable.path}}`
+	// template references inside trigger and node configs. Conventional
+	// well-known keys: `settings.runner` (smart wallet address),
+	// `settings.chainId` (chain id). camelCase keys; back-compat support
+	// for snake_case keys exists during the migration window.
+	InputVariables InputVariables `json:"inputVariables"`
+	Nodes          []Node         `json:"nodes"`
+	Trigger        Trigger        `json:"trigger"`
+}
+
+// PrepareWorkflowResponse defines model for PrepareWorkflowResponse.
+type PrepareWorkflowResponse struct {
+	Calls []UserOpInnerCall `json:"calls"`
+
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId `json:"chainId"`
+
+	// EntryPoint Lowercase or checksummed hex EOA / contract address.
+	EntryPoint EthereumAddress `json:"entryPoint"`
+
+	// Execution Transient execution in waiting status. Steps contain completed
+	// reads/checks only; the terminal write is in calls, not reported as
+	// completed. No deployed workflow/history record exists for this run.
+	Execution Execution `json:"execution"`
+
+	// ExpiresAt Gateway continuation deadline, Unix milliseconds (10 minutes).
+	// This is not an on-chain signature expiry or revocation mechanism.
+	ExpiresAt int64 `json:"expiresAt"`
+
+	// GasFunding Final funding choice; sponsorship refusal never silently charges the source.
+	GasFunding PrepareWorkflowResponseGasFunding `json:"gasFunding"`
+
+	// MaxGasCostWei Signed maximum gas cost in decimal wei, before any paymaster sponsorship.
+	MaxGasCostWei string `json:"maxGasCostWei"`
+
+	// Owner Lowercase or checksummed hex EOA / contract address.
+	Owner EthereumAddress `json:"owner"`
+
+	// SigningMethod Sign the 32 raw bytes of userOpHash, with the EIP-191 prefix applied
+	// once; ethers signMessage(getBytes(userOpHash)). Offered only for
+	// the verified alchemy.sma-bytecode.1.0.0 implementation.
+	SigningMethod PrepareWorkflowResponseSigningMethod `json:"signingMethod"`
+
+	// UserOpHash 32-byte hex hash (UserOp hash, transaction hash).
+	UserOpHash Bytes32 `json:"userOpHash"`
+
+	// UserOperation Finalized ERC-4337 v0.7 bundler-wire operation. Quantity fields are hex
+	// strings, never JSON numbers. Signature is empty (0x) until continuation;
+	// no operation field can be supplied or changed by submitExecution.
+	UserOperation OwnerUserOperationV07 `json:"userOperation"`
+	WriteNodeId   string                `json:"writeNodeId"`
+}
+
+// PrepareWorkflowResponseGasFunding Final funding choice; sponsorship refusal never silently charges the source.
+type PrepareWorkflowResponseGasFunding string
+
+// PrepareWorkflowResponseSigningMethod Sign the 32 raw bytes of userOpHash, with the EIP-191 prefix applied
+// once; ethers signMessage(getBytes(userOpHash)). Offered only for
+// the verified alchemy.sma-bytecode.1.0.0 implementation.
+type PrepareWorkflowResponseSigningMethod string
 
 // PreparedDelegation EIP-7702 authorization the owner signs. `digest` is `SetCodeAuthorization.SigHash`
 // (0x05 ‖ rlp([chainId, delegate, nonce])). `chainId` is never 0.
@@ -1866,6 +2009,38 @@ type SubmitDelegationRequest struct {
 	// Signature Arbitrary-length hex-encoded byte string.
 	Signature Hex `json:"signature"`
 }
+
+// SubmitExecutionRequest defines model for SubmitExecutionRequest.
+type SubmitExecutionRequest struct {
+	// Signature 65-byte EOA personal signature of the prepared hash. Recovery byte 0/1 or 27/28; gateway verifies and frames it for MA v2.
+	Signature string `json:"signature"`
+}
+
+// SubmitExecutionResponse defines model for SubmitExecutionResponse.
+type SubmitExecutionResponse struct {
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId `json:"chainId"`
+
+	// ExecutionId ULID identifier (26-char Crockford base32).
+	ExecutionId Ulid `json:"executionId"`
+
+	// SubmissionState Relay progress, not transaction success. Poll GET /userops/{userOpHash}
+	// with chainId for the existing receipt status. Unknown/submitting
+	// can survive a transport failure or restart; repeating submit never
+	// changes the operation or starts another broadcast.
+	SubmissionState SubmitExecutionResponseSubmissionState `json:"submissionState"`
+
+	// UserOpHash 32-byte hex hash (UserOp hash, transaction hash).
+	UserOpHash Bytes32 `json:"userOpHash"`
+}
+
+// SubmitExecutionResponseSubmissionState Relay progress, not transaction success. Poll GET /userops/{userOpHash}
+// with chainId for the existing receipt status. Unknown/submitting
+// can survive a transport failure or restart; repeating submit never
+// changes the operation or starts another broadcast.
+type SubmitExecutionResponseSubmissionState string
 
 // SubmitPolicyRequest defines model for SubmitPolicyRequest.
 type SubmitPolicyRequest struct {
@@ -2530,6 +2705,9 @@ type AuthExchangeJSONRequestBody = AuthExchangeRequest
 // SignalExecutionJSONRequestBody defines body for SignalExecution for application/json ContentType.
 type SignalExecutionJSONRequestBody = SignalExecutionRequest
 
+// SubmitExecutionJSONRequestBody defines body for SubmitExecution for application/json ContentType.
+type SubmitExecutionJSONRequestBody = SubmitExecutionRequest
+
 // RunNodeJSONRequestBody defines body for RunNode for application/json ContentType.
 type RunNodeJSONRequestBody = RunNodeRequest
 
@@ -2568,6 +2746,9 @@ type TriggerWorkflowJSONRequestBody = TriggerWorkflowRequest
 
 // EstimateWorkflowFeesJSONRequestBody defines body for EstimateWorkflowFees for application/json ContentType.
 type EstimateWorkflowFeesJSONRequestBody = EstimateFeesRequest
+
+// PrepareWorkflowJSONRequestBody defines body for PrepareWorkflow for application/json ContentType.
+type PrepareWorkflowJSONRequestBody = PrepareWorkflowRequest
 
 // SimulateWorkflowJSONRequestBody defines body for SimulateWorkflow for application/json ContentType.
 type SimulateWorkflowJSONRequestBody = SimulateWorkflowRequest

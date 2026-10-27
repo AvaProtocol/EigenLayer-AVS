@@ -35,6 +35,9 @@ type ServerInterface interface {
 	// Stream execution status changes (Server-Sent Events)
 	// (GET /executions/{id}:stream)
 	StreamExecution(ctx echo.Context, id Ulid, params StreamExecutionParams) error
+	// Continue a prepared execution with its owner's transaction signature
+	// (POST /executions/{id}:submit)
+	SubmitExecution(ctx echo.Context, id Ulid) error
 	// Count executions
 	// (GET /executions:count)
 	CountExecutions(ctx echo.Context, params CountExecutionsParams) error
@@ -137,6 +140,9 @@ type ServerInterface interface {
 	// Estimate per-execution fees for a workflow definition
 	// (POST /workflows:estimateFees)
 	EstimateWorkflowFees(ctx echo.Context) error
+	// Prepare a Manual workflow for one owner-signed batch
+	// (POST /workflows:prepare)
+	PrepareWorkflow(ctx echo.Context) error
 	// Simulate a workflow without persisting it
 	// (POST /workflows:simulate)
 	SimulateWorkflow(ctx echo.Context) error
@@ -309,6 +315,24 @@ func (w *ServerInterfaceWrapper) StreamExecution(ctx echo.Context) error {
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.StreamExecution(ctx, id, params)
+	return err
+}
+
+// SubmitExecution converts echo context to params.
+func (w *ServerInterfaceWrapper) SubmitExecution(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "id" -------------
+	var id Ulid
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", ctx.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter id: %s", err))
+	}
+
+	ctx.Set(BearerAuthScopes, []string{})
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.SubmitExecution(ctx, id)
 	return err
 }
 
@@ -1068,6 +1092,17 @@ func (w *ServerInterfaceWrapper) EstimateWorkflowFees(ctx echo.Context) error {
 	return err
 }
 
+// PrepareWorkflow converts echo context to params.
+func (w *ServerInterfaceWrapper) PrepareWorkflow(ctx echo.Context) error {
+	var err error
+
+	ctx.Set(BearerAuthScopes, []string{})
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.PrepareWorkflow(ctx)
+	return err
+}
+
 // SimulateWorkflow converts echo context to params.
 func (w *ServerInterfaceWrapper) SimulateWorkflow(ctx echo.Context) error {
 	var err error
@@ -1113,6 +1148,7 @@ func RegisterHandlersWithBaseURL(router EchoRouter, si ServerInterface, baseURL 
 	router.GET(baseURL+"/executions/:id:getStatus", wrapper.GetExecutionStatus)
 	router.POST(baseURL+"/executions/:id:signal", wrapper.SignalExecution)
 	router.GET(baseURL+"/executions/:id:stream", wrapper.StreamExecution)
+	router.POST(baseURL+"/executions/:id:submit", wrapper.SubmitExecution)
 	router.GET(baseURL+"/executions:count", wrapper.CountExecutions)
 	router.GET(baseURL+"/executions:stats", wrapper.ExecutionStats)
 	router.GET(baseURL+"/health", wrapper.GetHealth)
@@ -1147,6 +1183,7 @@ func RegisterHandlersWithBaseURL(router EchoRouter, si ServerInterface, baseURL 
 	router.POST(baseURL+"/workflows/:id:trigger", wrapper.TriggerWorkflow)
 	router.GET(baseURL+"/workflows:count", wrapper.CountWorkflows)
 	router.POST(baseURL+"/workflows:estimateFees", wrapper.EstimateWorkflowFees)
+	router.POST(baseURL+"/workflows:prepare", wrapper.PrepareWorkflow)
 	router.POST(baseURL+"/workflows:simulate", wrapper.SimulateWorkflow)
 
 }
@@ -1433,6 +1470,66 @@ type StreamExecution404ApplicationProblemPlusJSONResponse struct {
 func (response StreamExecution404ApplicationProblemPlusJSONResponse) VisitStreamExecutionResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SubmitExecutionRequestObject struct {
+	Id   Ulid `json:"id"`
+	Body *SubmitExecutionJSONRequestBody
+}
+
+type SubmitExecutionResponseObject interface {
+	VisitSubmitExecutionResponse(w http.ResponseWriter) error
+}
+
+type SubmitExecution202JSONResponse SubmitExecutionResponse
+
+func (response SubmitExecution202JSONResponse) VisitSubmitExecutionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SubmitExecution400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response SubmitExecution400ApplicationProblemPlusJSONResponse) VisitSubmitExecutionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SubmitExecution401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response SubmitExecution401ApplicationProblemPlusJSONResponse) VisitSubmitExecutionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SubmitExecution404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response SubmitExecution404ApplicationProblemPlusJSONResponse) VisitSubmitExecutionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SubmitExecution412ApplicationProblemPlusJSONResponse Problem
+
+func (response SubmitExecution412ApplicationProblemPlusJSONResponse) VisitSubmitExecutionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(412)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -2950,6 +3047,80 @@ func (response EstimateWorkflowFees401ApplicationProblemPlusJSONResponse) VisitE
 	return json.NewEncoder(w).Encode(response)
 }
 
+type PrepareWorkflowRequestObject struct {
+	Body *PrepareWorkflowJSONRequestBody
+}
+
+type PrepareWorkflowResponseObject interface {
+	VisitPrepareWorkflowResponse(w http.ResponseWriter) error
+}
+
+type PrepareWorkflow200JSONResponse PrepareWorkflowResponse
+
+func (response PrepareWorkflow200JSONResponse) VisitPrepareWorkflowResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PrepareWorkflow400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response PrepareWorkflow400ApplicationProblemPlusJSONResponse) VisitPrepareWorkflowResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PrepareWorkflow401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response PrepareWorkflow401ApplicationProblemPlusJSONResponse) VisitPrepareWorkflowResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PrepareWorkflow403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response PrepareWorkflow403ApplicationProblemPlusJSONResponse) VisitPrepareWorkflowResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PrepareWorkflow412ApplicationProblemPlusJSONResponse Problem
+
+func (response PrepareWorkflow412ApplicationProblemPlusJSONResponse) VisitPrepareWorkflowResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(412)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PrepareWorkflow429ApplicationProblemPlusJSONResponse struct {
+	RateLimitedApplicationProblemPlusJSONResponse
+}
+
+func (response PrepareWorkflow429ApplicationProblemPlusJSONResponse) VisitPrepareWorkflowResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-RateLimit-Limit", fmt.Sprint(response.Headers.XRateLimitLimit))
+	w.Header().Set("X-RateLimit-Remaining", fmt.Sprint(response.Headers.XRateLimitRemaining))
+	w.Header().Set("X-RateLimit-Reset", fmt.Sprint(response.Headers.XRateLimitReset))
+	w.WriteHeader(429)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type SimulateWorkflowRequestObject struct {
 	Body *SimulateWorkflowJSONRequestBody
 }
@@ -3009,6 +3180,9 @@ type StrictServerInterface interface {
 	// Stream execution status changes (Server-Sent Events)
 	// (GET /executions/{id}:stream)
 	StreamExecution(ctx context.Context, request StreamExecutionRequestObject) (StreamExecutionResponseObject, error)
+	// Continue a prepared execution with its owner's transaction signature
+	// (POST /executions/{id}:submit)
+	SubmitExecution(ctx context.Context, request SubmitExecutionRequestObject) (SubmitExecutionResponseObject, error)
 	// Count executions
 	// (GET /executions:count)
 	CountExecutions(ctx context.Context, request CountExecutionsRequestObject) (CountExecutionsResponseObject, error)
@@ -3111,6 +3285,9 @@ type StrictServerInterface interface {
 	// Estimate per-execution fees for a workflow definition
 	// (POST /workflows:estimateFees)
 	EstimateWorkflowFees(ctx context.Context, request EstimateWorkflowFeesRequestObject) (EstimateWorkflowFeesResponseObject, error)
+	// Prepare a Manual workflow for one owner-signed batch
+	// (POST /workflows:prepare)
+	PrepareWorkflow(ctx context.Context, request PrepareWorkflowRequestObject) (PrepareWorkflowResponseObject, error)
 	// Simulate a workflow without persisting it
 	// (POST /workflows:simulate)
 	SimulateWorkflow(ctx context.Context, request SimulateWorkflowRequestObject) (SimulateWorkflowResponseObject, error)
@@ -3286,6 +3463,37 @@ func (sh *strictHandler) StreamExecution(ctx echo.Context, id Ulid, params Strea
 		return err
 	} else if validResponse, ok := response.(StreamExecutionResponseObject); ok {
 		return validResponse.VisitStreamExecutionResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// SubmitExecution operation middleware
+func (sh *strictHandler) SubmitExecution(ctx echo.Context, id Ulid) error {
+	var request SubmitExecutionRequestObject
+
+	request.Id = id
+
+	var body SubmitExecutionJSONRequestBody
+	if err := ctx.Bind(&body); err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.SubmitExecution(ctx.Request().Context(), request.(SubmitExecutionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SubmitExecution")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(SubmitExecutionResponseObject); ok {
+		return validResponse.VisitSubmitExecutionResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}
@@ -4211,6 +4419,35 @@ func (sh *strictHandler) EstimateWorkflowFees(ctx echo.Context) error {
 		return err
 	} else if validResponse, ok := response.(EstimateWorkflowFeesResponseObject); ok {
 		return validResponse.VisitEstimateWorkflowFeesResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// PrepareWorkflow operation middleware
+func (sh *strictHandler) PrepareWorkflow(ctx echo.Context) error {
+	var request PrepareWorkflowRequestObject
+
+	var body PrepareWorkflowJSONRequestBody
+	if err := ctx.Bind(&body); err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.PrepareWorkflow(ctx.Request().Context(), request.(PrepareWorkflowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PrepareWorkflow")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(PrepareWorkflowResponseObject); ok {
+		return validResponse.VisitPrepareWorkflowResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}

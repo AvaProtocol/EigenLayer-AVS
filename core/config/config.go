@@ -107,6 +107,10 @@ type Config struct {
 	// testnet controller the signer of mainnet grants.
 	SessionSignerPrivateKey *ecdsa.PrivateKey
 
+	// OwnerExecutionEnabled gates the new per-run owner-signature handoff.
+	// Default false; enabling it does not change session/Auto execution.
+	OwnerExecutionEnabled bool
+
 	// Account abstraction config
 	SmartWallet *SmartWalletConfig
 
@@ -558,6 +562,7 @@ type ConfigRaw struct {
 
 	// SessionSignerPrivateKey is required; see Config.SessionSignerPrivateKey.
 	SessionSignerPrivateKey string `yaml:"session_signer_private_key"`
+	OwnerExecutionEnabled   bool   `yaml:"owner_execution_enabled"`
 
 	// REST rate-limit overrides; see Config.RestRateLimitPerSecond.
 	RestRateLimitPerSecond float64 `yaml:"rest_rate_limit_per_second"`
@@ -835,6 +840,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 		JwtSecret:      []byte(configRaw.JwtSecret),
 
 		SessionSignerPrivateKey: sessionSignerPrivateKey,
+		OwnerExecutionEnabled:   configRaw.OwnerExecutionEnabled,
 
 		RestRateLimitPerSecond: configRaw.RestRateLimitPerSecond,
 		RestRateLimitBurst:     configRaw.RestRateLimitBurst,

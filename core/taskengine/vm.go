@@ -263,6 +263,10 @@ type VM struct {
 	// step failures, including on a real UserOp.
 	sessionGrantReport *SessionGrantReport
 
+	// Only the authenticated owner-prepare entry point supplies this collector.
+	// It captures the terminal write's resolved calls without executing them.
+	ownerPreparation *ownerWorkflowCollector
+
 	// ExecutionIndex is the 0-based sequential counter for this execution within the task.
 	// Set by executor before node execution begins. Used for email subject formatting ("Run #X:").
 	ExecutionIndex int64

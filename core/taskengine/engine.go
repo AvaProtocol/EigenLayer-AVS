@@ -329,6 +329,9 @@ type Engine struct {
 	// spendLimitCallerOverride replaces the pooled chain reader when tests
 	// need a scripted remaining-limit read.
 	spendLimitCallerOverride func(chainID int64) (aa.ContractCaller, error)
+
+	// nil selects the production owner prepare/validate/keyless-relay service.
+	ownerExecutionBackend ownerExecutionBackend
 }
 
 // executionLockShards bounds the per-execution resume locks to a fixed set of mutexes.
@@ -3989,6 +3992,10 @@ func (n *Engine) SimulateWorkflowWithContext(ctx context.Context, user *model.Us
 	vm.tenderlyClient = n.tenderlyClient
 
 	vm.WithLogger(n.logger).WithDb(n.db).WithChainConfigResolver(n.ResolveSmartWalletConfig).SetSimulation(true)
+	if preparation, ok := ctx.Value(ownerPreparationContextKey{}).(*ownerWorkflowCollector); ok {
+		vm.ownerPreparation = preparation
+		vm.WithContext(ctx)
+	}
 	if auth := SimulateAuthFrom(ctx); auth != nil && auth.Report {
 		vm.sessionGrantReport = &SessionGrantReport{}
 	}

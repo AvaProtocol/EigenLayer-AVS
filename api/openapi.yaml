@@ -1251,6 +1251,122 @@ components:
           format: int64
           description: Unix milliseconds. Schedule window end, same clock as create.
 
+    PrepareWorkflowRequest:
+      type: object
+      additionalProperties: false
+      required: [chainId, trigger, nodes, inputVariables]
+      description: |
+        A Manual definition with read/check nodes and exactly one terminal
+        ContractWrite. The initial owner path supports one configured chain,
+        MA v2 derived wallets with an EOA fallback owner, and zero native value.
+        No persistent/Auto workflow or session grant is created.
+        Requires gateway owner_execution_enabled: true (default false).
+      properties:
+        chainId: { $ref: '#/components/schemas/ChainId' }
+        trigger: { $ref: '#/components/schemas/Trigger' }
+        nodes:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items: { $ref: '#/components/schemas/Node' }
+        edges:
+          type: array
+          maxItems: 128
+          items: { $ref: '#/components/schemas/Edge' }
+        inputVariables: { $ref: '#/components/schemas/InputVariables' }
+
+    OwnerUserOperationV07:
+      type: object
+      additionalProperties: false
+      description: |
+        Finalized ERC-4337 v0.7 bundler-wire operation. Quantity fields are hex
+        strings, never JSON numbers. Signature is empty (0x) until continuation;
+        no operation field can be supplied or changed by submitExecution.
+      required: [sender, nonce, callData, callGasLimit, verificationGasLimit, preVerificationGas, maxFeePerGas, maxPriorityFeePerGas, signature]
+      properties:
+        sender: { $ref: '#/components/schemas/EthereumAddress' }
+        nonce: { $ref: '#/components/schemas/Hex' }
+        callData: { $ref: '#/components/schemas/Hex' }
+        callGasLimit: { $ref: '#/components/schemas/Hex' }
+        verificationGasLimit: { $ref: '#/components/schemas/Hex' }
+        preVerificationGas: { $ref: '#/components/schemas/Hex' }
+        maxFeePerGas: { $ref: '#/components/schemas/Hex' }
+        maxPriorityFeePerGas: { $ref: '#/components/schemas/Hex' }
+        factory: { $ref: '#/components/schemas/EthereumAddress' }
+        factoryData: { $ref: '#/components/schemas/Hex' }
+        paymaster: { $ref: '#/components/schemas/EthereumAddress' }
+        paymasterData: { $ref: '#/components/schemas/Hex' }
+        paymasterVerificationGasLimit: { $ref: '#/components/schemas/Hex' }
+        paymasterPostOpGasLimit: { $ref: '#/components/schemas/Hex' }
+        signature: { $ref: '#/components/schemas/Hex' }
+
+    PrepareWorkflowResponse:
+      type: object
+      required: [execution, userOperation, userOpHash, owner, chainId, entryPoint, signingMethod, expiresAt, writeNodeId, calls, gasFunding, maxGasCostWei]
+      properties:
+        execution:
+          allOf:
+            - $ref: '#/components/schemas/Execution'
+          description: |
+            Transient execution in waiting status. Steps contain completed
+            reads/checks only; the terminal write is in calls, not reported as
+            completed. No deployed workflow/history record exists for this run.
+        userOperation: { $ref: '#/components/schemas/OwnerUserOperationV07' }
+        userOpHash: { $ref: '#/components/schemas/Bytes32' }
+        owner: { $ref: '#/components/schemas/EthereumAddress' }
+        chainId: { $ref: '#/components/schemas/ChainId' }
+        entryPoint: { $ref: '#/components/schemas/EthereumAddress' }
+        signingMethod:
+          type: string
+          enum: [personal_sign]
+          description: |
+            Sign the 32 raw bytes of userOpHash, with the EIP-191 prefix applied
+            once; ethers signMessage(getBytes(userOpHash)). Offered only for
+            the verified alchemy.sma-bytecode.1.0.0 implementation.
+        expiresAt:
+          type: integer
+          format: int64
+          description: |
+            Gateway continuation deadline, Unix milliseconds (10 minutes).
+            This is not an on-chain signature expiry or revocation mechanism.
+        writeNodeId: { type: string }
+        calls:
+          type: array
+          items: { $ref: '#/components/schemas/UserOpInnerCall' }
+        gasFunding:
+          type: string
+          enum: [source, sponsored]
+          description: Final funding choice; sponsorship refusal never silently charges the source.
+        maxGasCostWei:
+          type: string
+          description: Signed maximum gas cost in decimal wei, before any paymaster sponsorship.
+
+    SubmitExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [signature]
+      properties:
+        signature:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{130}$'
+          description: 65-byte EOA personal signature of the prepared hash. Recovery byte 0/1 or 27/28; gateway verifies and frames it for MA v2.
+
+    SubmitExecutionResponse:
+      type: object
+      required: [executionId, userOpHash, chainId, submissionState]
+      properties:
+        executionId: { $ref: '#/components/schemas/Ulid' }
+        userOpHash: { $ref: '#/components/schemas/Bytes32' }
+        chainId: { $ref: '#/components/schemas/ChainId' }
+        submissionState:
+          type: string
+          enum: [submitting, submitted, unknown]
+          description: |
+            Relay progress, not transaction success. Poll GET /userops/{userOpHash}
+            with chainId for the existing receipt status. Unknown/submitting
+            can survive a transport failure or restart; repeating submit never
+            changes the operation or starts another broadcast.
+
     EstimateFeesRequest:
       type: object
       required: [trigger, nodes, createdAt, expireAt, maxExecution]
@@ -2835,6 +2951,91 @@ paths:
                 additionalProperties: true
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /workflows:prepare:
+    post:
+      tags: [Workflows]
+      summary: Prepare a Manual workflow for one owner-signed batch
+      description: |
+        Resolve existing read/check nodes, capture the terminal ContractWrite
+        calls, and build/price one MA v2 batch without signing or broadcasting.
+        Requires the concrete owner's Bearer JWT and a registered supported
+        source wallet. Current on-chain owner, implementation and gas funding
+        are checked independently of the stored wallet association.
+        The factory implementation must be the verified personal_sign build
+        0x000000000000c5A9089039570Dd36455b5C07383; other builds are refused.
+        Up to 32 calls; no native value, EIP-7702, write Loop or post-write nodes.
+        Retained preparations are capped at 64 per owner. Ordinary Auto/session
+        and simulate behavior is unchanged.
+      operationId: prepareWorkflow
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PrepareWorkflowRequest' }
+      responses:
+        '200':
+          description: Priced operation awaiting an owner signature; no transaction has been submitted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PrepareWorkflowResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '412':
+          description: Checks, source compatibility, funding or pricing failed; refresh the preparation.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /executions/{id}:submit:
+    post:
+      tags: [Executions]
+      summary: Continue a prepared execution with its owner's transaction signature
+      description: |
+        Submit the exact priced operation from prepareWorkflow. Accepts only
+        the signature, not caller-supplied UserOperation fields. Rechecks the
+        current owner/account identity, nonce and funding before first relay.
+        Uses SendUserOpV07 without a server signing key or gas/nonce retry.
+        Material changes or bundler rejection require fresh prepare/review/signing.
+        Repeat calls still require a valid signature and reconcile the existing
+        hash without rebroadcasting. Status polling requires the JWT only.
+        A durable submitting marker precedes the send: a crash before the RPC
+        leaves this id unretryable, even if it was never sent. A post-send
+        storage failure also preserves the marker. Poll the prepared hash;
+        404 remains unresolved and is not proof that no operation was sent.
+        Uncertain/submitted records are retained for 24 hours. A response is
+        not a receipt; reuse GET /userops/{userOpHash} for confirmation.
+      operationId: submitExecution
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Ulid' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitExecutionRequest' }
+      responses:
+        '202':
+          description: Relay accepted or uncertain; use the existing UserOp status route.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubmitExecutionResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412':
+          description: Preparation is stale or rejected; prepare, review and sign again.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
   /workflows:estimateFees:
     post:
