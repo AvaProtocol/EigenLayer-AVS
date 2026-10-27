@@ -170,6 +170,131 @@ func TestOwnerWorkflowResolvesCallsAndSubmitsExactlyOnce(t *testing.T) {
 	require.EqualValues(t, 1, backend.sent.Load())
 }
 
+func ownerEOAEngineFixture(t *testing.T) (*Engine, *model.User, *ecdsa.PrivateKey, *ownerBackendFixture) {
+	t.Helper()
+	n, user, key, backend := ownerEngineFixture(t)
+	require.NoError(t, StoreEOA7702Wallet(n.db, 11155111, user.Address, config.SMA7702Delegate()))
+	sw := n.ResolveSmartWalletConfig(11155111)
+	sw.EOA7702Execute = true
+	sw.SMA7702Delegate, sw.SMA7702ImplHash = config.SMA7702Delegate(), config.SMA7702ImplHash()
+	return n, user, key, backend
+}
+
+func prepareOwnerEOAFixture(t *testing.T, n *Engine, user *model.User) *OwnerWorkflowPreparation {
+	t.Helper()
+	trigger, nodes, edges, input := ownerWorkflowFixture()
+	input["settings"].(map[string]interface{})["runner"] = user.Address.Hex()
+	p, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
+	require.NoError(t, err)
+	return p
+}
+
+func TestOwnerEOAWorkflowResolvesAndSubmitsOnceWithoutSession(t *testing.T) {
+	n, user, key, backend := ownerEOAEngineFixture(t)
+	p := prepareOwnerEOAFixture(t, n, user)
+	require.Equal(t, user.Address, p.Operation.Sender)
+	require.Nil(t, p.Operation.Factory)
+	require.Len(t, p.Calls, 2)
+	require.Zero(t, backend.sent.Load())
+	sig := signOwnerFixture(t, p, key)
+	first, err := n.SubmitOwnerExecution(context.Background(), user, p.Execution.Id, sig)
+	require.NoError(t, err)
+	require.Equal(t, p.UserOpHash, first.UserOpHash)
+	require.EqualValues(t, 1, backend.sent.Load())
+	n2 := &Engine{db: n.db, config: n.config, smartWalletConfig: n.smartWalletConfig, ownerExecutionBackend: backend}
+	repeated, err := n2.SubmitOwnerExecution(context.Background(), user, p.Execution.Id, sig)
+	require.NoError(t, err)
+	require.Equal(t, first, repeated)
+	require.EqualValues(t, 1, backend.sent.Load())
+	stored, err := n.db.GetKey(ownerExecutionKey(user.Address, p.Execution.Id))
+	require.NoError(t, err)
+	var record ownerExecutionRecord
+	require.NoError(t, json.Unmarshal(stored, &record))
+	require.Nil(t, record.Salt, "EOA continuation must round-trip a nil salt")
+	require.Empty(t, record.Operation.Signature)
+}
+
+func TestOwnerEOAWorkflowHonorsFlagAndStoredAssociation(t *testing.T) {
+	for _, scenario := range []string{"prepare flag off", "submit flag off", "delegate changed", "retired", "salt changed in record"} {
+		t.Run(scenario, func(t *testing.T) {
+			n, user, key, backend := ownerEOAEngineFixture(t)
+			if scenario == "prepare flag off" {
+				n.ResolveSmartWalletConfig(11155111).EOA7702Execute = false
+				trigger, nodes, edges, input := ownerWorkflowFixture()
+				input["settings"].(map[string]interface{})["runner"] = user.Address.Hex()
+				_, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
+				require.Equal(t, codes.FailedPrecondition, status.Code(err))
+				require.Contains(t, err.Error(), "eoa_7702_execute is false")
+				require.Zero(t, backend.prepared.Load(), "disabled execution must stop before graph capture/pricing")
+				return
+			}
+			p := prepareOwnerEOAFixture(t, n, user)
+			sig := signOwnerFixture(t, p, key)
+			switch scenario {
+			case "submit flag off":
+				n.ResolveSmartWalletConfig(11155111).EOA7702Execute = false
+			case "delegate changed", "retired":
+				wallet, err := GetWallet(n.db, 11155111, user.Address, user.Address.Hex())
+				require.NoError(t, err)
+				if scenario == "delegate changed" {
+					other := common.HexToAddress("0x1234")
+					wallet.Delegate = &other
+				} else {
+					wallet.Retired = true
+				}
+				require.NoError(t, StoreWallet(n.db, 11155111, user.Address, wallet))
+			case "salt changed in record":
+				stored, err := n.db.GetKey(ownerExecutionKey(user.Address, p.Execution.Id))
+				require.NoError(t, err)
+				var record ownerExecutionRecord
+				require.NoError(t, json.Unmarshal(stored, &record))
+				record.Salt = big.NewInt(0)
+				require.NoError(t, n.saveOwnerExecution(p.Execution.Id, &record, time.Minute))
+			}
+			_, err := n.SubmitOwnerExecution(context.Background(), user, p.Execution.Id, sig)
+			require.Equal(t, codes.FailedPrecondition, status.Code(err))
+			require.Zero(t, backend.sent.Load())
+		})
+	}
+}
+
+func TestOwnerWalletAssociationDistinguishesEOAAndDerived(t *testing.T) {
+	owner := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	delegate := config.SMA7702Delegate()
+	base := model.SmartWallet{Kind: model.WalletKindEOA7702, Owner: &owner, Address: &owner, Delegate: &delegate}
+	require.True(t, validOwnerWallet(&base, owner, owner))
+	for _, scenario := range []string{"other owner", "other sender", "other delegate", "missing delegate", "factory", "salt", "retired", "stale", "unknown kind", "derived kind"} {
+		t.Run(scenario, func(t *testing.T) {
+			wallet := base
+			other := common.HexToAddress("0x1234")
+			switch scenario {
+			case "other owner":
+				wallet.Owner = &other
+			case "other sender":
+				wallet.Address = &other
+			case "other delegate":
+				wallet.Delegate = &other
+			case "missing delegate":
+				wallet.Delegate = nil
+			case "factory":
+				wallet.Factory = &other
+			case "salt":
+				wallet.Salt = big.NewInt(0)
+			case "retired":
+				wallet.Retired = true
+			case "stale":
+				wallet.StaleDerivation = true
+			case "unknown kind":
+				wallet.Kind = "unknown"
+			case "derived kind":
+				factory := aa.MAv2FactoryAddress()
+				wallet.Kind, wallet.Factory, wallet.Salt = "", &factory, big.NewInt(0)
+			}
+			require.False(t, validOwnerWallet(&wallet, owner, owner))
+		})
+	}
+}
+
 func TestOwnerWorkflowRefusesStaleOrTamperedContinuations(t *testing.T) {
 	for _, scenario := range []string{"wrong owner", "wrong signature", "expired", "changed nonce", "tampered storage", "disabled flag"} {
 		t.Run(scenario, func(t *testing.T) {

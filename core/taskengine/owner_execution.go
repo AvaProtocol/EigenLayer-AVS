@@ -244,7 +244,11 @@ func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, tri
 	}
 	wallet, err := GetWallet(n.db, chainID, user.Address, source)
 	if err != nil || !validOwnerWallet(wallet, user.Address, common.HexToAddress(source)) {
-		return nil, status.Error(codes.PermissionDenied, "source must be a registered MA v2 derived wallet for this owner")
+		return nil, status.Error(codes.PermissionDenied, "source must be a registered MA v2 derived or eoa_7702 wallet for this owner")
+	}
+	sw := n.ResolveSmartWalletConfig(chainID)
+	if err := checkOwnerWalletConfig(sw, wallet, chainID); err != nil {
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
 	}
 	// Serialize the bounded insertion check, not just the eventual DB write.
 	lock := n.executionMutex("owner-prepare:" + user.Address.Hex())
@@ -274,10 +278,6 @@ func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, tri
 	}
 	if execution.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS || len(collector.calls) == 0 {
 		return nil, status.Error(codes.FailedPrecondition, "owner workflow checks failed or did not reach its terminal write; refresh and simulate again")
-	}
-	sw := n.ResolveSmartWalletConfig(chainID)
-	if sw == nil || sw.ChainID != chainID {
-		return nil, status.Error(codes.FailedPrecondition, "owner execution chain configuration changed")
 	}
 	prepared, err := n.ownerBackend().Prepare(ctx, sw, user.Address, *wallet.Address, wallet.Salt, collector.calls, n.logger)
 	if err != nil {
@@ -320,7 +320,30 @@ func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, tri
 }
 
 func validOwnerWallet(wallet *model.SmartWallet, owner, sender common.Address) bool {
-	return wallet != nil && wallet.Owner != nil && *wallet.Owner == owner && wallet.Address != nil && *wallet.Address == sender && wallet.Factory != nil && *wallet.Factory == aa.MAv2FactoryAddress() && wallet.Salt != nil && !wallet.Retired && !wallet.StaleDerivation && wallet.Kind == ""
+	if wallet == nil || owner == (common.Address{}) || wallet.Owner == nil || *wallet.Owner != owner || wallet.Address == nil || *wallet.Address != sender || wallet.Retired || wallet.StaleDerivation {
+		return false
+	}
+	if wallet.IsEOA7702() {
+		return wallet.ValidateEOA7702Shape() == nil && *wallet.Delegate == config.SMA7702Delegate()
+	}
+	return sender != owner && wallet.Kind == "" && wallet.Factory != nil && *wallet.Factory == aa.MAv2FactoryAddress() && wallet.Salt != nil && wallet.Salt.Sign() >= 0 && wallet.Salt.BitLen() <= 256
+}
+
+func checkOwnerWalletConfig(sw *config.SmartWalletConfig, wallet *model.SmartWallet, chainID int64) error {
+	if sw == nil || sw.ChainID != chainID {
+		return fmt.Errorf("owner execution chain configuration changed")
+	}
+	if wallet.IsEOA7702() {
+		return sw.CheckEOA7702Execute()
+	}
+	return nil
+}
+
+func sameOwnerWalletSalt(a, b *big.Int) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Cmp(b) == 0
 }
 
 func (n *Engine) saveOwnerExecution(id string, record *ownerExecutionRecord, ttl time.Duration) error {
@@ -384,14 +407,14 @@ func (n *Engine) SubmitOwnerExecution(ctx context.Context, user *model.User, id 
 		return nil, status.Error(codes.FailedPrecondition, "owner execution chain is no longer configured")
 	}
 	wallet, err := GetWallet(n.db, record.ChainID, user.Address, op.Sender.Hex())
-	if err != nil || !validOwnerWallet(wallet, user.Address, op.Sender) || wallet.Salt.Cmp(record.Salt) != 0 {
+	if err != nil || !validOwnerWallet(wallet, user.Address, op.Sender) || !sameOwnerWalletSalt(wallet.Salt, record.Salt) {
 		return nil, status.Error(codes.FailedPrecondition, "owner source wallet association changed; prepare again")
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	sw := n.ResolveSmartWalletConfig(record.ChainID)
-	if sw == nil || sw.ChainID != record.ChainID {
-		return nil, status.Error(codes.FailedPrecondition, "owner execution chain configuration changed")
+	if err := checkOwnerWalletConfig(sw, wallet, record.ChainID); err != nil {
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
 	}
 	// Re-run only read/check preparation and require byte-identical calls. The
 	// original operation is never replaced or repriced after the owner signs.

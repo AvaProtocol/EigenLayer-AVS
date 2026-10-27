@@ -72,6 +72,10 @@ type ownerRPCFixture struct {
 	sender, owner, implementation                 common.Address
 	chainID                                       int64
 	deployed, disabled, changedImpl, ownerHasCode bool
+	ownerCode, delegateCode                       []byte
+	fallbackOwner                                 *common.Address
+	wrongEntry                                    bool
+	factoryReads                                  int
 	nonce                                         *big.Int
 	balance                                       string
 	sendError                                     string
@@ -109,7 +113,9 @@ func newOwnerRPCFixture(t *testing.T) (*ownerRPCFixture, *config.SmartWalletConf
 			switch address {
 			case f.owner:
 				result = "0x"
-				if f.ownerHasCode {
+				if f.ownerCode != nil {
+					result = hexutil.Encode(f.ownerCode)
+				} else if f.ownerHasCode {
 					result = "0xef01000000000000000000000000000000000000000001"
 				}
 			case f.sender:
@@ -119,6 +125,9 @@ func newOwnerRPCFixture(t *testing.T) (*ownerRPCFixture, *config.SmartWalletConf
 				}
 			default:
 				result = "0x6001"
+				if address == config.SMA7702Delegate() && f.delegateCode != nil {
+					result = hexutil.Encode(f.delegateCode)
+				}
 			}
 		case "eth_getStorageAt":
 			address := f.implementation
@@ -142,17 +151,26 @@ func newOwnerRPCFixture(t *testing.T) (*ownerRPCFixture, *config.SmartWalletConf
 			selector := data[:10]
 			switch selector {
 			case hexutil.Encode(crypto.Keccak256([]byte("getAddressSemiModular(address,uint256)"))[:4]):
+				f.factoryReads++
 				result = hexutil.Encode(common.LeftPadBytes(f.sender.Bytes(), 32))
 			case hexutil.Encode(crypto.Keccak256([]byte("SEMI_MODULAR_ACCOUNT_IMPL()"))[:4]):
 				result = hexutil.Encode(common.LeftPadBytes(f.implementation.Bytes(), 32))
 			case hexutil.Encode(crypto.Keccak256([]byte("getFallbackSignerData()"))[:4]):
-				out := append(common.LeftPadBytes(f.owner.Bytes(), 32), make([]byte, 32)...)
+				fallback := f.owner
+				if f.fallbackOwner != nil {
+					fallback = *f.fallbackOwner
+				}
+				out := append(common.LeftPadBytes(fallback.Bytes(), 32), make([]byte, 32)...)
 				if f.disabled {
 					out[63] = 1
 				}
 				result = hexutil.Encode(out)
 			case hexutil.Encode(crypto.Keccak256([]byte("entryPoint()"))[:4]):
-				result = hexutil.Encode(common.LeftPadBytes(EntryPointV07().Bytes(), 32))
+				entry := EntryPointV07()
+				if f.wrongEntry {
+					entry = common.Address{}
+				}
+				result = hexutil.Encode(common.LeftPadBytes(entry.Bytes(), 32))
 			case selectorGetNonce:
 				// Pin the full key passed to EntryPoint, not just the sequence.
 				decoded := common.FromHex(data)

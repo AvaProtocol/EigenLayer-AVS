@@ -22,6 +22,7 @@ import (
 // Wallet storage is an association, not proof of the current on-chain owner.
 type OwnerAccountIdentity struct {
 	CodeHash           common.Hash    `json:"codeHash"`
+	OwnerCodeHash      common.Hash    `json:"ownerCodeHash"`
 	Implementation     common.Address `json:"implementation"`
 	ImplementationHash common.Hash    `json:"implementationHash"`
 	FactoryHash        common.Hash    `json:"factoryHash"`
@@ -41,20 +42,63 @@ var implementationSlot = common.HexToHash("0x360894a13ba1a3210667c828492db98dca3
 // even on a fresh prepare. Add support only after auditing that implementation.
 const ownerPersonalSignImplementation = "0x000000000000c5A9089039570Dd36455b5C07383"
 
-// inspectOwnerAccount supports the verified semi-modular bytecode account with
-// an enabled EOA fallback owner. Other implementations, contract owners and
-// EIP-7702 runners require their own account-specific integration.
-func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, chainID int64, owner, sender common.Address, salt *big.Int) (*OwnerAccountIdentity, error) {
+// A nil salt selects an already delegated EOA, never a counterfactual account.
+// The engine separately requires its stored kind=eoa_7702 wallet association.
+func validateOwnerAccountParameters(sw *config.SmartWalletConfig, owner, sender common.Address, salt *big.Int) error {
+	if sw == nil || sw.ChainID <= 0 || owner == (common.Address{}) || sender == (common.Address{}) {
+		return fmt.Errorf("invalid owner execution chain or account")
+	}
+	if sender == owner {
+		if salt != nil {
+			return fmt.Errorf("EOA owner execution must not specify a CREATE2 salt")
+		}
+		return sw.CheckEOA7702Execute()
+	}
+	if salt == nil || salt.Sign() < 0 || salt.BitLen() > 256 {
+		return fmt.Errorf("invalid owner execution CREATE2 salt")
+	}
+	return nil
+}
+
+// inspectOwnerAccount supports the pinned bytecode account and SMA-7702, both
+// with enabled EOA fallback signing. Delegation is an explicit prior action;
+// prepare/submit never install it or create a session grant.
+func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, sw *config.SmartWalletConfig, owner, sender common.Address, salt *big.Int) (*OwnerAccountIdentity, error) {
 	actualChain, err := chain.ChainID(ctx)
-	if err != nil || actualChain.Cmp(big.NewInt(chainID)) != 0 {
-		return nil, fmt.Errorf("owner execution chain RPC does not match chain %d", chainID)
+	if err != nil || actualChain.Cmp(big.NewInt(sw.ChainID)) != 0 {
+		return nil, fmt.Errorf("owner execution chain RPC does not match chain %d", sw.ChainID)
 	}
 	ownerCode, err := chain.CodeAt(ctx, owner, nil)
 	if err != nil {
 		return nil, fmt.Errorf("checking owner code: %w", err)
 	}
 	if len(ownerCode) != 0 {
-		return nil, fmt.Errorf("owner execution currently requires an undelegated EOA signer")
+		// A delegated EOA still holds the private key used by signature type 0.
+		// This also preserves derived-wallet execution after that owner delegates.
+		if !config.SMA7702FirstChain(sw.ChainID) {
+			return nil, fmt.Errorf("delegated owner execution is supported only on Sepolia and Base")
+		}
+		if err := sw.ValidateSMA7702(); err != nil {
+			return nil, err
+		}
+		implCode, err := chain.CodeAt(ctx, sw.SMA7702Delegate, nil)
+		if err != nil {
+			return nil, fmt.Errorf("reading owner SMA-7702 implementation: %w", err)
+		}
+		if err := sw.AssertSMA7702Designation(ownerCode, implCode); err != nil {
+			return nil, err
+		}
+		if sender == owner {
+			if err := inspectOwnerValidation(ctx, chain, sender, owner); err != nil {
+				return nil, err
+			}
+			return &OwnerAccountIdentity{
+				CodeHash: crypto.Keccak256Hash(ownerCode), OwnerCodeHash: crypto.Keccak256Hash(ownerCode),
+				Implementation: sw.SMA7702Delegate, ImplementationHash: crypto.Keccak256Hash(implCode),
+			}, nil
+		}
+	} else if sender == owner {
+		return nil, fmt.Errorf("EOA_DELEGATION_MISSING: owner EOA must already designate the pinned SMA-7702 implementation")
 	}
 	derived, err := aa.GetSenderAddressMAv2WithContext(ctx, chain, owner, salt)
 	if err != nil {
@@ -85,7 +129,7 @@ func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, chainID i
 		return nil, fmt.Errorf("checking owner account code: %w", err)
 	}
 	identity := &OwnerAccountIdentity{
-		CodeHash: crypto.Keccak256Hash(code), Implementation: impl,
+		CodeHash: crypto.Keccak256Hash(code), OwnerCodeHash: crypto.Keccak256Hash(ownerCode), Implementation: impl,
 		ImplementationHash: crypto.Keccak256Hash(implCode), FactoryHash: crypto.Keccak256Hash(factoryCode),
 	}
 	if len(code) == 0 {
@@ -95,15 +139,22 @@ func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, chainID i
 	if err != nil || common.BytesToAddress(storedImpl) != impl {
 		return nil, fmt.Errorf("owner account is not the factory's supported MA v2 implementation")
 	}
+	if err := inspectOwnerValidation(ctx, chain, sender, owner); err != nil {
+		return nil, err
+	}
+	return identity, nil
+}
+
+func inspectOwnerValidation(ctx context.Context, chain *ethclient.Client, sender, owner common.Address) error {
 	fallback, err := ownerView(ctx, chain, sender, "getFallbackSignerData()")
 	if err != nil || len(fallback) != 64 || common.BytesToAddress(fallback[:32]) != owner || new(big.Int).SetBytes(fallback[32:]).Sign() != 0 {
-		return nil, fmt.Errorf("MA v2 fallback owner changed, is disabled, or is unavailable")
+		return fmt.Errorf("MA v2 fallback owner changed, is disabled, or is unavailable")
 	}
 	entry, err := ownerView(ctx, chain, sender, "entryPoint()")
 	if err != nil || len(entry) != 32 || common.BytesToAddress(entry) != EntryPointV07() {
-		return nil, fmt.Errorf("owner account has an unsupported EntryPoint")
+		return fmt.Errorf("owner account has an unsupported EntryPoint")
 	}
-	return identity, nil
+	return nil
 }
 
 func ownerView(ctx context.Context, chain *ethclient.Client, to common.Address, signature string) ([]byte, error) {
@@ -113,8 +164,8 @@ func ownerView(ctx context.Context, chain *ethclient.Client, to common.Address, 
 // PrepareOwnerUserOp builds and prices a batch without signing or broadcasting.
 // Pricing and sponsorship are the SAME functions used by session execution.
 func PrepareOwnerUserOp(ctx context.Context, sw *config.SmartWalletConfig, owner, sender common.Address, salt *big.Int, calls []aa.Call, l logger.Logger) (*PreparedOwnerUserOp, error) {
-	if sw == nil || sw.ChainID <= 0 || salt == nil || salt.Sign() < 0 || salt.BitLen() > 256 {
-		return nil, fmt.Errorf("invalid owner execution chain or salt")
+	if err := validateOwnerAccountParameters(sw, owner, sender, salt); err != nil {
+		return nil, err
 	}
 	for _, call := range calls {
 		if call.Value != nil && call.Value.Sign() != 0 {
@@ -130,7 +181,7 @@ func PrepareOwnerUserOp(ctx context.Context, sw *config.SmartWalletConfig, owner
 		return nil, fmt.Errorf("dialing owner execution chain RPC: %w", err)
 	}
 	defer chain.Close()
-	identity, err := inspectOwnerAccount(ctx, chain, sw.ChainID, owner, sender, salt)
+	identity, err := inspectOwnerAccount(ctx, chain, sw, owner, sender, salt)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +201,7 @@ func PrepareOwnerUserOp(ctx context.Context, sw *config.SmartWalletConfig, owner
 		CallGasLimit: big.NewInt(0), VerificationGasLimit: big.NewInt(0), PreVerificationGas: big.NewInt(0),
 		MaxFeePerGas: big.NewInt(0), MaxPriorityFeePerGas: big.NewInt(0),
 	}
-	if identity.CodeHash == crypto.Keccak256Hash(nil) {
+	if sender != owner && identity.CodeHash == crypto.Keccak256Hash(nil) {
 		factory, data, err := aa.GetInitCodeMAv2(owner, salt)
 		if err != nil {
 			return nil, err
@@ -215,16 +266,22 @@ func checkOwnerPrefund(ctx context.Context, chain *ethclient.Client, op *userop.
 // ValidateOwnerUserOp rechecks live authority, code, nonce and funding. It never
 // repairs the operation; a change requires another prepare/review/signature.
 func ValidateOwnerUserOp(ctx context.Context, sw *config.SmartWalletConfig, owner common.Address, salt *big.Int, prepared *PreparedOwnerUserOp) error {
-	if sw == nil || sw.ChainID <= 0 || salt == nil || prepared == nil || prepared.Operation == nil {
+	if prepared == nil || prepared.Operation == nil {
 		return fmt.Errorf("invalid prepared owner operation or chain")
+	}
+	op := prepared.Operation
+	if err := validateOwnerAccountParameters(sw, owner, op.Sender, salt); err != nil {
+		return err
+	}
+	if op.Sender == owner && (op.Factory != nil || len(op.FactoryData) != 0) {
+		return fmt.Errorf("EOA owner operation must not contain factory deployment data")
 	}
 	chain, err := ethclient.DialContext(ctx, sw.EthRpcUrl)
 	if err != nil {
 		return err
 	}
 	defer chain.Close()
-	op := prepared.Operation
-	identity, err := inspectOwnerAccount(ctx, chain, sw.ChainID, owner, op.Sender, salt)
+	identity, err := inspectOwnerAccount(ctx, chain, sw, owner, op.Sender, salt)
 	if err != nil {
 		return err
 	}
