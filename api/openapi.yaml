@@ -30,10 +30,8 @@ info:
     `Authorization: Bearer <jwt>`.
 
 servers:
-  - url: https://gateway.avaprotocol.org/api/v1
+  - url: https://api.avaprotocol.org/api/v1
     description: Production gateway
-  - url: https://gateway-staging.avaprotocol.org/api/v1
-    description: Staging gateway
   - url: http://localhost:8080/api/v1
     description: Local dev
 
