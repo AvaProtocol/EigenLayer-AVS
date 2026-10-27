@@ -46,6 +46,8 @@ func TestIsClientUserOpFailure(t *testing.T) {
 		{"native cap", errors.New("execution reverted: ExceededNativeTokenLimit"), true},
 		{"native preflight cap", errors.New("SESSION_POLICY_NATIVE_CAP_EXCEEDED: this send exceeds the ETH cap"), true},
 		{"native recipient", errors.New("SESSION_POLICY_RECIPIENT_NOT_ALLOWED: recipient 0xabc"), true},
+		{"delegated recipient changed", errors.New("SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED: native recipient 0xR was acknowledged as delegated to 0xA; it now designates 0xB"), true},
+		{"installed recipient code unreadable", errors.New("SESSION_POLICY_RECIPIENT_CODE_UNREADABLE: cannot read code at native recipient 0xR: rpc timeout (policy 01applied)"), false},
 		{"spend-limit short calldata", errors.New("execution reverted: InvalidCalldataLength"), true},
 		{"allowlist miss", errors.New("execution reverted: SelectorNotAllowed"), false},
 		// Must stay Error → Sentry (infra / ambiguous)

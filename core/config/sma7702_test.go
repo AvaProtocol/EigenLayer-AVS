@@ -239,6 +239,27 @@ func TestIsSMA7702DesignationExactLength(t *testing.T) {
 	require.False(t, IsSMA7702Designation(designation(d)[:22], d))
 }
 
+func TestEIP7702DesignationDelegateAnyDelegate(t *testing.T) {
+	ours := SMA7702Delegate()
+	got, ok := EIP7702DesignationDelegate(designation(ours))
+	require.True(t, ok)
+	require.Equal(t, ours, got)
+
+	// Coinbase Smart Wallet's public delegate. A designation to it is still
+	// a designation; it is not our SMA-7702 delegate.
+	coinbase := common.HexToAddress("0x7702cb554e6bfb442cb743a7df23154544a7176c")
+	got, ok = EIP7702DesignationDelegate(designation(coinbase))
+	require.True(t, ok)
+	require.Equal(t, coinbase, got)
+	require.False(t, IsSMA7702Designation(designation(coinbase), ours))
+
+	lookalike := designation(coinbase)
+	lookalike[2] = 0x01
+	_, ok = EIP7702DesignationDelegate(lookalike)
+	require.False(t, ok, "only the ef0100 prefix is a designation")
+	require.False(t, IsSMA7702Designation(lookalike, coinbase))
+}
+
 func TestParseHash32RejectsUnprefixed(t *testing.T) {
 	_, err := parseHash32(strings.TrimPrefix(SMA7702ImplHashHex, "0x"))
 	require.Error(t, err)

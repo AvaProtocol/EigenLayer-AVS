@@ -2021,6 +2021,21 @@ components:
             headroom can also be sent as value to the allowed recipients.
           example: '10000000000000000'
 
+    DelegatedNativeRecipient:
+      type: object
+      required: [recipient, delegate]
+      description: |
+        The owner acknowledged that `recipient` is an EIP-7702 delegated EOA
+        and that its designation named `delegate`. The recipient must also be
+        in `nativeRecipients`. One entry per recipient. Listing an address
+        here does not authorize a plain contract, and it does not set
+        `allowContractRecipient`. Trusting the delegate is the client's job;
+        this record only checks that the designation still names the
+        acknowledged delegate. The ETH send stays an empty-calldata transfer.
+      properties:
+        recipient: { $ref: '#/components/schemas/EthereumAddress' }
+        delegate: { $ref: '#/components/schemas/EthereumAddress' }
+
     SessionAuthorization:
       type: object
       required: [status]
@@ -2111,6 +2126,21 @@ components:
           type: array
           maxItems: 5
           items: { $ref: '#/components/schemas/EthereumAddress' }
+        delegatedNativeRecipients:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items: { $ref: '#/components/schemas/DelegatedNativeRecipient' }
+          description: |
+            Per-recipient EIP-7702 acknowledgements for native ETH recipients
+            in this addition. Carried per recipient when grants merge; when
+            the current grant and this addition name different delegates for
+            the same recipient, the gateway records this addition's delegate.
+            The owner signs the install call. The ETH row in that call is not
+            limited to the delegate, and the acknowledgement is not part of
+            the signature. The gateway checks it again when it sends. A
+            present empty array is 400. Does not change
+            `allowContractRecipient`, and does not authorize a plain contract.
         nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
         nativeGasWei:
           type: string
@@ -2253,14 +2283,30 @@ components:
             Omit for Uniswap/ERC-20-only and for payable-write-only
             (nativeValueCap). A present empty array is 400. Max 5
             (MaxNativeRecipients; deferred replace of 20-row grants AA23s).
+        delegatedNativeRecipients:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items: { $ref: '#/components/schemas/DelegatedNativeRecipient' }
+          description: |
+            Owner acknowledgements of EIP-7702 delegations on native ETH
+            recipients. A recipient with code is allowed only when that code
+            is a designation (`0xef0100` plus a 20-byte delegate), this list
+            names that recipient, and the designation still points at the
+            acknowledged delegate. A plain contract stays refused, even if
+            it is listed. Empty code stays allowed. A present empty array is
+            400. This does not change `allowContractRecipient`, and the send
+            stays an empty-calldata transfer.
         nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
         allowContractRecipient:
           type: boolean
           default: false
           description: |
-            When true, nativeRecipients may be contracts (any-function on
-            that address, ERC-20 uncapped). Default false: each recipient
-            must have empty code. Logged when true.
+            When true, every native recipient may be a contract (any function
+            on that address, ERC-20 uncapped). Default false: each recipient
+            must have empty code, or be an acknowledged EIP-7702 delegation
+            (`delegatedNativeRecipients`). Logged when true. An
+            acknowledgement is not this flag.
         expiresInSeconds:
           type: integer
           format: int64
@@ -2350,6 +2396,15 @@ components:
         nativeRecipients:
           type: array
           items: { $ref: '#/components/schemas/EthereumAddress' }
+        delegatedNativeRecipients:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items: { $ref: '#/components/schemas/DelegatedNativeRecipient' }
+          description: |
+            Merged EIP-7702 acknowledgements to echo to submit. Present when
+            `add` was sent and the merged grant has any. See
+            DelegatedNativeRecipient.
         nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
         allowContractRecipient:
           type: boolean
@@ -2395,6 +2450,16 @@ components:
           minItems: 1
           maxItems: 5 # keep in sync with MaxNativeRecipients in session_permissions.go
           items: { $ref: '#/components/schemas/EthereumAddress' }
+        delegatedNativeRecipients:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items: { $ref: '#/components/schemas/DelegatedNativeRecipient' }
+          description: |
+            Echo prepare's `delegatedNativeRecipients`. A recipient with code
+            is allowed only when its designation still names the acknowledged
+            delegate. A plain contract stays refused. A present empty array
+            is 400. Does not change `allowContractRecipient`.
         nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
         allowContractRecipient:
           type: boolean
@@ -2463,6 +2528,16 @@ components:
           type: array
           minItems: 1
           items: { $ref: '#/components/schemas/EthereumAddress' }
+        delegatedNativeRecipients:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items: { $ref: '#/components/schemas/DelegatedNativeRecipient' }
+          description: |
+            EIP-7702 acknowledgements stored with this grant. A native send
+            to one of these recipients is refused once the designation names
+            a different delegate. A plain contract is not authorized by being
+            listed here. Does not change `allowContractRecipient`.
         nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
         allowContractRecipient:
           type: boolean
@@ -3577,7 +3652,13 @@ paths:
 
         When `add` is set and the runner has a usable grant, the merged
         grant starts from that grant. Actions, native recipients, and
-        `allowContractRecipient` only grow. Each token cap is what is
+        `allowContractRecipient` only grow. `delegatedNativeRecipients` is
+        carried per recipient; when both grants name a delegate for the same
+        recipient, the gateway records the addition's delegate. The owner
+        signs the install call; that call's ETH row is not limited to the
+        delegate. The acknowledgement is gateway state, checked again when
+        the gateway sends. Each token cap
+        is what is
         left on that grant (the on-chain remainder once the grant is
         applied, otherwise the stored cap), or what enabled automations
         still need when that is higher, plus the addition. A token with
@@ -3587,7 +3668,10 @@ paths:
 
         When `add` is set and there is no usable grant, the merged grant
         is the addition plus every enabled task except ids in
-        `dropTaskIds`. A task whose token or recipient cannot be read
+        `dropTaskIds`. Acknowledgements for those running recipients come
+        from the wallet's last stored grant, including one that was
+        revoked. The chain read still applies, and this addition's
+        delegate wins when both name one. A task whose token or recipient cannot be read
         from the stored workflow (a loop over a previous step) is
         `409 SESSION_POLICY_TARGET_UNRESOLVED`. That is not an unsized
         amount. Pause the automation, or name its id in `dropTaskIds`.
@@ -3617,8 +3701,11 @@ paths:
             to send a decimal string.
             `SESSION_POLICY_TOO_MANY_NATIVE_RECIPIENTS` — more than five native
             recipients. Finished automations keep their addresses until revoke.
-            `SESSION_POLICY_RECIPIENT_NOT_EOA` — a native recipient is a contract
-            or a 7702-delegated EOA.
+            `SESSION_POLICY_RECIPIENT_NOT_EOA` — a native recipient is a contract,
+            or a 7702-delegated EOA the owner did not acknowledge.
+            `SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED` — an acknowledged
+            recipient's designation now names a different delegate, or its
+            code is no longer that designation.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -3717,8 +3804,11 @@ paths:
             `409 SESSION_POLICY_NATIVE_UNSIZED`.
             `SESSION_POLICY_TOO_MANY_NATIVE_RECIPIENTS` — more than five native
             recipients. Finished automations keep their addresses until revoke.
-            `SESSION_POLICY_RECIPIENT_NOT_EOA` — a native recipient is a contract
-            or a 7702-delegated EOA.
+            `SESSION_POLICY_RECIPIENT_NOT_EOA` — a native recipient is a contract,
+            or a 7702-delegated EOA the owner did not acknowledge.
+            `SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED` — an acknowledged
+            recipient's designation now names a different delegate, or its
+            code is no longer that designation.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }

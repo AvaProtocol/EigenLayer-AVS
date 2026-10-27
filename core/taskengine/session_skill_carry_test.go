@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -208,6 +209,242 @@ func TestCarryNeverCappedTokenIsNotSpent(t *testing.T) {
 		if change.Token == weth && change.PreviousAmount != "" {
 			t.Fatalf("never-capped WETH was treated as spent: %+v", change)
 		}
+	}
+}
+
+func TestCarryKeepsDelegatedNativeRecipients(t *testing.T) {
+	now := skillNow()
+	dest := common.HexToAddress("0x00000000000000000000000000000000000000a1")
+	other := common.HexToAddress("0x00000000000000000000000000000000000000b2")
+	delegateA := common.HexToAddress("0x7702cb554e6bfb442cb743a7df23154544a7176c")
+	delegateB := common.HexToAddress("0x1111111111111111111111111111111111111111")
+
+	current := usableGrant("01ETH", now.Add(30*24*time.Hour).UnixMilli(), nil, nil)
+	current.NativeSpendCap = &model.NativeSpendCap{Amount: "100"}
+	current.NativeRecipients = []*common.Address{&dest}
+	current.DelegatedNativeRecipients = []model.DelegatedNativeRecipient{nativeAck(dest, delegateA)}
+
+	kept, _, err := MergeSkillGrantWithRemainder(current, &GrantRemainder{Native: big.NewInt(8)}, PolicyAddition{
+		NativeSpendCap:            &model.NativeSpendCap{Amount: "5"},
+		NativeRecipients:          []*common.Address{&other},
+		DelegatedNativeRecipients: []model.DelegatedNativeRecipient{nativeAck(other, delegateB)},
+	}, nil, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := acknowledgedDelegate(kept.DelegatedNativeRecipients, dest); got == nil || *got != delegateA {
+		t.Fatalf("current acknowledgement = %v, want %s", got, delegateA.Hex())
+	}
+	if got := acknowledgedDelegate(kept.DelegatedNativeRecipients, other); got == nil || *got != delegateB {
+		t.Fatalf("added acknowledgement = %v, want %s", got, delegateB.Hex())
+	}
+
+	overridden, _, err := MergeSkillGrantWithRemainder(current, &GrantRemainder{Native: big.NewInt(8)}, PolicyAddition{
+		NativeSpendCap:            &model.NativeSpendCap{Amount: "5"},
+		NativeRecipients:          []*common.Address{&dest},
+		DelegatedNativeRecipients: []model.DelegatedNativeRecipient{nativeAck(dest, delegateB)},
+	}, nil, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := acknowledgedDelegate(overridden.DelegatedNativeRecipients, dest); got == nil || *got != delegateB {
+		t.Fatalf("addition must replace the delegate, got %v", got)
+	}
+	changed := kept
+	changed.DelegatedNativeRecipients = []model.DelegatedNativeRecipient{
+		nativeAck(dest, delegateB),
+		nativeAck(other, delegateB),
+	}
+	if sameSessionPermissions(kept, changed) {
+		t.Fatal("a different acknowledged delegate must not compare equal")
+	}
+	if len(kept.DelegatedNativeRecipients) != 2 {
+		t.Fatalf("acks = %d, want 2", len(kept.DelegatedNativeRecipients))
+	}
+	flipped := kept
+	flipped.DelegatedNativeRecipients = []model.DelegatedNativeRecipient{
+		kept.DelegatedNativeRecipients[1],
+		kept.DelegatedNativeRecipients[0],
+	}
+	if !sameSessionPermissions(kept, flipped) {
+		t.Fatal("acknowledgement order must not affect equality")
+	}
+
+	fresh, _, err := MergeSkillGrant(nil, PolicyAddition{
+		NativeSpendCap:            &model.NativeSpendCap{Amount: "5"},
+		NativeRecipients:          []*common.Address{&dest},
+		DelegatedNativeRecipients: []model.DelegatedNativeRecipient{nativeAck(dest, delegateA)},
+	}, nil, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := acknowledgedDelegate(fresh.DelegatedNativeRecipients, dest); got == nil || *got != delegateA {
+		t.Fatalf("a first grant dropped the acknowledgement, got %v", got)
+	}
+
+	asPolicy := permissionsAsPolicy(SessionPolicyInput{
+		Wallet: dest,
+		Permissions: SessionPermissions{
+			DelegatedNativeRecipients: fresh.DelegatedNativeRecipients,
+		},
+	})
+	if got := acknowledgedDelegate(asPolicy.DelegatedNativeRecipients, dest); got == nil || *got != delegateA {
+		t.Fatal("coverage policy dropped the acknowledgement")
+	}
+
+	spent := usableCoveragePolicy(current, GrantRemainder{Native: big.NewInt(0)})
+	if len(spent.NativeRecipients) != 0 || len(spent.DelegatedNativeRecipients) != 0 {
+		t.Fatalf("spent native coverage kept recipients=%d acks=%d", len(spent.NativeRecipients), len(spent.DelegatedNativeRecipients))
+	}
+	still := usableCoveragePolicy(current, GrantRemainder{Native: big.NewInt(3)})
+	if len(still.DelegatedNativeRecipients) != 1 {
+		t.Fatalf("positive remainder dropped acknowledgements: %+v", still.DelegatedNativeRecipients)
+	}
+}
+
+func TestFreshGrantKeepsPriorDelegatedRecipients(t *testing.T) {
+	now := skillNow()
+	running := common.HexToAddress("0x00000000000000000000000000000000000000a1")
+	added := common.HexToAddress("0x00000000000000000000000000000000000000b2")
+	gone := common.HexToAddress("0x00000000000000000000000000000000000000c3")
+	delegateA := common.HexToAddress("0x7702cb554e6bfb442cb743a7df23154544a7176c")
+	delegateB := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	task := skillEthTask("skill-a", "Send A", running.Hex(), "1", 12, 0)
+	addition := PolicyAddition{
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "5"},
+		NativeRecipients: []*common.Address{&added},
+	}
+	prior := []model.DelegatedNativeRecipient{
+		nativeAck(running, delegateA),
+		nativeAck(gone, delegateA),
+	}
+	// The option copies addresses. Mutating the caller's ack after the option
+	// is built must not change the merge.
+	opt := WithPriorDelegatedRecipients(prior)
+	*prior[0].Delegate = delegateB
+
+	fresh, _, err := MergeSkillGrantWithRemainder(nil, nil, addition, []*avsproto.Task{task}, skillSepolia, now, time.Hour, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := acknowledgedDelegate(fresh.DelegatedNativeRecipients, running); got == nil || *got != delegateA {
+		t.Fatalf("running skill acknowledgement = %v, want %s", got, delegateA.Hex())
+	}
+	if got := acknowledgedDelegate(fresh.DelegatedNativeRecipients, gone); got != nil {
+		t.Fatalf("recipient not on the fresh grant kept an acknowledgement: %v", got)
+	}
+	if got := acknowledgedDelegate(fresh.DelegatedNativeRecipients, added); got != nil {
+		t.Fatalf("added recipient had no acknowledgement, got %v", got)
+	}
+
+	over := addition
+	over.NativeRecipients = []*common.Address{&running}
+	over.DelegatedNativeRecipients = []model.DelegatedNativeRecipient{nativeAck(running, delegateB)}
+	won, _, err := MergeSkillGrantWithRemainder(nil, nil, over, []*avsproto.Task{task}, skillSepolia, now, time.Hour, WithPriorDelegatedRecipients([]model.DelegatedNativeRecipient{nativeAck(running, delegateA)}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := acknowledgedDelegate(won.DelegatedNativeRecipients, running); got == nil || *got != delegateB {
+		t.Fatalf("addition must replace the prior delegate, got %v", got)
+	}
+
+	dropped, _, err := MergeSkillGrant(nil, addition, []*avsproto.Task{task}, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := acknowledgedDelegate(dropped.DelegatedNativeRecipients, running); got != nil {
+		t.Fatalf("without a prior grant the running acknowledgement stays dropped, got %v", got)
+	}
+
+	current := usableGrant("01ETH", now.Add(30*24*time.Hour).UnixMilli(), nil, nil)
+	current.NativeSpendCap = &model.NativeSpendCap{Amount: "100"}
+	current.NativeRecipients = []*common.Address{&running}
+	current.DelegatedNativeRecipients = []model.DelegatedNativeRecipient{nativeAck(running, delegateA)}
+	kept, _, err := MergeSkillGrantWithRemainder(current, &GrantRemainder{Native: big.NewInt(8)}, PolicyAddition{
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "5"},
+		NativeRecipients: []*common.Address{&added},
+	}, []*avsproto.Task{task}, skillSepolia, now, time.Hour, WithPriorDelegatedRecipients([]model.DelegatedNativeRecipient{nativeAck(running, delegateB)}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := acknowledgedDelegate(kept.DelegatedNativeRecipients, running); got == nil || *got != delegateA {
+		t.Fatalf("a usable grant must keep its own acknowledgement, got %v", got)
+	}
+}
+
+func TestLatestRunnerPolicyFeedsAFreshGrant(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer db.Close()
+	chainID := int64(11155111)
+	owner := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	runner := common.HexToAddress("0x209eb31c199bEB4c386eF83CF442DE1a00667a1F")
+	otherRunner := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	dest := common.HexToAddress("0x00000000000000000000000000000000000000a1")
+	delegate := common.HexToAddress("0x7702cb554e6bfb442cb743a7df23154544a7176c")
+
+	store := func(id string, wallet common.Address, entity uint32, acks []model.DelegatedNativeRecipient) {
+		t.Helper()
+		policy := &model.SessionPolicy{
+			ID:                        id,
+			ChainID:                   chainID,
+			Owner:                     &owner,
+			Runner:                    &wallet,
+			EntityID:                  entity,
+			Status:                    model.SessionPolicyRevoked,
+			DelegatedNativeRecipients: acks,
+		}
+		if err := StoreSessionPolicy(db, policy); err != nil {
+			t.Fatalf("store %s: %v", id, err)
+		}
+	}
+	// Stored out of id order. The greatest id on this runner wins, even
+	// when an older grant is the one that still names a delegate, and even
+	// when a newer grant belongs to another runner.
+	store("01j00000000000000000000002", otherRunner, 3, []model.DelegatedNativeRecipient{nativeAck(dest, delegate)})
+	store("01j00000000000000000000000", runner, 1, []model.DelegatedNativeRecipient{nativeAck(dest, delegate)})
+	store("01J00000000000000000000001", runner, 2, nil)
+
+	latest, err := latestRunnerSessionPolicyLocked(db, chainID, owner, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest == nil || !strings.EqualFold(latest.ID, "01J00000000000000000000001") {
+		t.Fatalf("latest = %v, want the greatest id on this runner", latest)
+	}
+	opt, err := priorDelegatedMergeOption(db, chainID, owner, runner, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opt != nil {
+		t.Fatal("the last grant has no acknowledgements, so an older grant must not supply them")
+	}
+	current := &model.SessionPolicy{ID: "01live"}
+	opt, err = priorDelegatedMergeOption(db, chainID, owner, runner, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opt != nil {
+		t.Fatal("a usable grant carries its own acknowledgements")
+	}
+
+	store("01j00000000000000000000003", runner, 4, []model.DelegatedNativeRecipient{nativeAck(dest, delegate)})
+	opt, err = priorDelegatedMergeOption(db, chainID, owner, runner, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opt == nil {
+		t.Fatal("the newest grant's acknowledgement must be offered to a fresh merge")
+	}
+	now := skillNow()
+	task := skillEthTask("skill-a", "Send A", dest.Hex(), "1", 12, 0)
+	fresh, _, err := MergeSkillGrantWithRemainder(nil, nil, PolicyAddition{
+		NativeSpendCap: &model.NativeSpendCap{Amount: "5"},
+	}, []*avsproto.Task{task}, skillSepolia, now, time.Hour, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := acknowledgedDelegate(fresh.DelegatedNativeRecipients, dest); got == nil || *got != delegate {
+		t.Fatalf("fresh grant acknowledgement = %v, want %s", got, delegate.Hex())
 	}
 }
 

@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"strings"
 	"testing"
@@ -197,17 +198,232 @@ func TestValidateNativeRecipient7702Designation(t *testing.T) {
 	}
 	err := permissions.Validate()
 	if err == nil {
-		t.Fatal("7702-designated native recipient must still be refused")
+		t.Fatal("an unacknowledged 7702-designated native recipient must be refused")
 	}
-	if !strings.Contains(err.Error(), "7702-delegated EOA") {
-		t.Fatalf("got %q, want 7702-delegated EOA diagnosis", err)
+	if !strings.Contains(err.Error(), "7702-delegated") {
+		t.Fatalf("got %q, want a 7702-delegated diagnosis", err)
 	}
-	if strings.Contains(err.Error(), "send via contractWrite") {
-		t.Fatalf("7702 diagnosis must not tell the user to contractWrite: %v", err)
+	if !strings.Contains(err.Error(), config.SMA7702Delegate().Hex()) {
+		t.Fatalf("got %q, want the delegate address", err)
 	}
+	if strings.Contains(err.Error(), "is a contract") || strings.Contains(err.Error(), "send via contractWrite") {
+		t.Fatalf("a designation must not be called a contract: %v", err)
+	}
+	permissions.DelegatedNativeRecipients = []model.DelegatedNativeRecipient{
+		nativeAck(alice, config.SMA7702Delegate()),
+	}
+	if err := permissions.Validate(); err != nil {
+		t.Fatalf("an acknowledgement of the current delegate must admit the recipient: %v", err)
+	}
+	permissions.DelegatedNativeRecipients = nil
 	permissions.AllowContractRecipient = true
 	if err := permissions.Validate(); err != nil {
 		t.Fatalf("allowContractRecipient must admit a 7702-designated recipient: %v", err)
+	}
+}
+
+func nativeDesignation(delegate common.Address) []byte {
+	code := make([]byte, 23)
+	code[0], code[1], code[2] = 0xef, 0x01, 0x00
+	copy(code[3:], delegate.Bytes())
+	return code
+}
+
+func nativeAck(recipient, delegate common.Address) model.DelegatedNativeRecipient {
+	who, to := recipient, delegate
+	return model.DelegatedNativeRecipient{Recipient: &who, Delegate: &to}
+}
+
+// The acceptance matrix for #872. A native recipient with code is allowed
+// only when that code is an EIP-7702 designation and the owner acknowledged
+// that exact delegate. Our own delegate is not special here.
+func TestNativeRecipientDelegation(t *testing.T) {
+	alice := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	outsider := common.HexToAddress("0x0000000000000000000000000000000000000abc")
+	ours := config.SMA7702Delegate()
+	coinbase := common.HexToAddress("0x7702cb554e6bfb442cb743a7df23154544a7176c")
+	other := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	contractCode := []byte{0x60, 0x80}
+	lookalike := nativeDesignation(coinbase)
+	lookalike[2] = 0x01
+
+	type codeCase struct {
+		name          string
+		code          []byte
+		acks          []model.DelegatedNativeRecipient
+		allowContract bool
+		wantOK        bool
+		want          []string
+		forbid        []string
+	}
+	cases := []codeCase{
+		{name: "plain EOA", wantOK: true},
+		{name: "plain EOA with an acknowledgement", acks: []model.DelegatedNativeRecipient{nativeAck(alice, coinbase)}, wantOK: true},
+		{name: "plain contract", code: contractCode, want: []string{SessionPolicyRecipientNotEOACode, "is a contract"}, forbid: []string{SessionPolicyRecipientDelegateChangedCode, "7702-delegated"}},
+		{name: "plain contract listed as delegated", code: contractCode, acks: []model.DelegatedNativeRecipient{nativeAck(alice, coinbase)}, want: []string{SessionPolicyRecipientNotEOACode, "is a contract"}, forbid: []string{SessionPolicyRecipientDelegateChangedCode}},
+		{name: "plain contract with allowContractRecipient", code: contractCode, allowContract: true, wantOK: true},
+		{name: "lookalike prefix is a contract", code: lookalike, want: []string{SessionPolicyRecipientNotEOACode, "is a contract"}, forbid: []string{"7702-delegated"}},
+		{name: "our delegate unacknowledged", code: nativeDesignation(ours), want: []string{SessionPolicyRecipientNotEOACode, "7702-delegated", ours.Hex()}, forbid: []string{"is a contract", "send via contractWrite"}},
+		{name: "our delegate acknowledged", code: nativeDesignation(ours), acks: []model.DelegatedNativeRecipient{nativeAck(alice, ours)}, wantOK: true},
+		{name: "our delegate with allowContractRecipient", code: nativeDesignation(ours), allowContract: true, wantOK: true},
+		{name: "another delegate unacknowledged", code: nativeDesignation(coinbase), want: []string{SessionPolicyRecipientNotEOACode, "7702-delegated", coinbase.Hex()}, forbid: []string{"is a contract", "send via contractWrite"}},
+		{name: "another delegate acknowledged", code: nativeDesignation(coinbase), acks: []model.DelegatedNativeRecipient{nativeAck(alice, coinbase)}, wantOK: true},
+		{name: "another delegate acknowledged as someone else", code: nativeDesignation(coinbase), acks: []model.DelegatedNativeRecipient{nativeAck(alice, other)}, want: []string{SessionPolicyRecipientDelegateChangedCode, other.Hex(), coinbase.Hex()}, forbid: []string{SessionPolicyRecipientNotEOACode, "is a contract"}},
+	}
+
+	for _, tc := range cases {
+		t.Run("validate "+tc.name, func(t *testing.T) {
+			permissions := SessionPermissions{
+				NativeRecipients:          []*common.Address{&alice},
+				DelegatedNativeRecipients: tc.acks,
+				NativeSpendCap:            &model.NativeSpendCap{Amount: "10000000000000000"},
+				AllowContractRecipient:    tc.allowContract,
+				ValidUntilMs:              time.Now().Add(time.Hour).UnixMilli(),
+				CodeAt: func(common.Address) ([]byte, error) {
+					return tc.code, nil
+				},
+			}
+			err := permissions.Validate()
+			assertNativeCodeCase(t, errString(err), tc.wantOK, tc.want, tc.forbid)
+		})
+		t.Run("preflight "+tc.name, func(t *testing.T) {
+			policy := &model.SessionPolicy{
+				ID:                        "01native",
+				NativeRecipients:          []*common.Address{&alice},
+				DelegatedNativeRecipients: tc.acks,
+				NativeSpendCap:            &model.NativeSpendCap{Amount: "100000000000000000"},
+				AllowContractRecipient:    tc.allowContract,
+			}
+			msg := PreflightNativePermission(policy, NativeIntent{
+				Recipient: alice, Amount: big.NewInt(1), Kind: NativeSend, Sponsored: true,
+			}, stubCodeAndFee{code: tc.code})
+			assertNativeCodeCase(t, msg, tc.wantOK, tc.want, tc.forbid)
+		})
+	}
+
+	t.Run("validate acknowledgement must name a native recipient", func(t *testing.T) {
+		permissions := SessionPermissions{
+			NativeRecipients:          []*common.Address{&alice},
+			DelegatedNativeRecipients: []model.DelegatedNativeRecipient{nativeAck(outsider, coinbase)},
+			NativeSpendCap:            &model.NativeSpendCap{Amount: "1"},
+			ValidUntilMs:              time.Now().Add(time.Hour).UnixMilli(),
+			CodeAt:                    func(common.Address) ([]byte, error) { return nil, nil },
+		}
+		err := permissions.Validate()
+		if err == nil || !strings.Contains(err.Error(), "not in nativeRecipients") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("validate duplicate acknowledgement", func(t *testing.T) {
+		permissions := SessionPermissions{
+			NativeRecipients: []*common.Address{&alice},
+			DelegatedNativeRecipients: []model.DelegatedNativeRecipient{
+				nativeAck(alice, coinbase), nativeAck(alice, other),
+			},
+			NativeSpendCap: &model.NativeSpendCap{Amount: "1"},
+			ValidUntilMs:   time.Now().Add(time.Hour).UnixMilli(),
+			CodeAt:         func(common.Address) ([]byte, error) { return nil, nil },
+		}
+		err := permissions.Validate()
+		if err == nil || !strings.Contains(err.Error(), "listed twice") {
+			t.Fatalf("got %v", err)
+		}
+	})
+
+	applied := &model.SessionPolicy{
+		ID:                        "01applied",
+		NativeRecipients:          []*common.Address{&alice},
+		DelegatedNativeRecipients: []model.DelegatedNativeRecipient{nativeAck(alice, coinbase)},
+		NativeSpendCap:            &model.NativeSpendCap{Amount: "100000000000000000"},
+		Grant:                     &model.SessionGrantAuthorization{AppliedAt: 1},
+	}
+	send := NativeIntent{Recipient: alice, Amount: big.NewInt(1), Kind: NativeSend, Sponsored: true}
+
+	t.Run("applied unacknowledged recipient is not re-read", func(t *testing.T) {
+		policy := *applied
+		policy.DelegatedNativeRecipients = nil
+		msg := PreflightNativePermission(&policy, send, stubCodeAndFee{code: contractCode})
+		if msg != "" {
+			t.Fatalf("an applied grant must leave a later contract code alone, got %q", msg)
+		}
+	})
+	t.Run("applied acknowledged recipient still designates the same delegate", func(t *testing.T) {
+		msg := PreflightNativePermission(applied, send, stubCodeAndFee{code: nativeDesignation(coinbase)})
+		if msg != "" {
+			t.Fatalf("matching delegate: %q", msg)
+		}
+	})
+	t.Run("applied acknowledged recipient is an EOA again", func(t *testing.T) {
+		msg := PreflightNativePermission(applied, send, stubCodeAndFee{})
+		if msg != "" {
+			t.Fatalf("empty code: %q", msg)
+		}
+	})
+	t.Run("applied acknowledged recipient changed delegate", func(t *testing.T) {
+		msg := PreflightNativePermission(applied, send, stubCodeAndFee{code: nativeDesignation(other)})
+		assertNativeCodeCase(t, msg, false, []string{SessionPolicyRecipientDelegateChangedCode, coinbase.Hex(), other.Hex(), "now designates"}, nil)
+	})
+	t.Run("applied acknowledged recipient is no longer a designation", func(t *testing.T) {
+		msg := PreflightNativePermission(applied, send, stubCodeAndFee{code: contractCode})
+		assertNativeCodeCase(t, msg, false, []string{SessionPolicyRecipientDelegateChangedCode, "no longer that designation"}, []string{SessionPolicyRecipientNotEOACode})
+	})
+	t.Run("applied acknowledged recipient fails closed without a reader", func(t *testing.T) {
+		msg := PreflightNativePermission(applied, send, nil)
+		assertNativeCodeCase(t, msg, false, []string{SessionPolicyRecipientCodeUnreadableCode, "no chain reader", applied.ID}, []string{SessionPolicyRecipientNotEOACode, SessionPolicyRecipientDelegateChangedCode})
+	})
+	t.Run("applied acknowledged recipient cannot be read", func(t *testing.T) {
+		msg := PreflightNativePermission(applied, send, stubCodeAndFee{codeErr: fmt.Errorf("rpc timeout")})
+		assertNativeCodeCase(t, msg, false, []string{SessionPolicyRecipientCodeUnreadableCode, "rpc timeout", applied.ID}, []string{SessionPolicyRecipientNotEOACode, SessionPolicyRecipientDelegateChangedCode})
+	})
+	t.Run("before apply a missing reader stays not an EOA", func(t *testing.T) {
+		policy := *applied
+		policy.Grant = nil
+		msg := PreflightNativePermission(&policy, send, nil)
+		assertNativeCodeCase(t, msg, false, []string{SessionPolicyRecipientNotEOACode, "fail closed"}, []string{SessionPolicyRecipientCodeUnreadableCode, SessionPolicyRecipientDelegateChangedCode})
+	})
+	t.Run("before apply a failed read stays not an EOA", func(t *testing.T) {
+		policy := *applied
+		policy.Grant = nil
+		msg := PreflightNativePermission(&policy, send, stubCodeAndFee{codeErr: fmt.Errorf("rpc timeout")})
+		assertNativeCodeCase(t, msg, false, []string{SessionPolicyRecipientNotEOACode, "looking up", "rpc timeout"}, []string{SessionPolicyRecipientCodeUnreadableCode, SessionPolicyRecipientDelegateChangedCode})
+	})
+	t.Run("allowContractRecipient skips the applied re-check", func(t *testing.T) {
+		policy := *applied
+		policy.AllowContractRecipient = true
+		msg := PreflightNativePermission(&policy, send, stubCodeAndFee{code: nativeDesignation(other)})
+		if msg != "" {
+			t.Fatalf("allowContractRecipient: %q", msg)
+		}
+	})
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func assertNativeCodeCase(t *testing.T, msg string, wantOK bool, want, forbid []string) {
+	t.Helper()
+	if wantOK {
+		if msg != "" {
+			t.Fatalf("got %q", msg)
+		}
+		return
+	}
+	if msg == "" {
+		t.Fatal("expected a refusal")
+	}
+	for _, part := range want {
+		if !strings.Contains(msg, part) {
+			t.Fatalf("got %q, want %q", msg, part)
+		}
+	}
+	for _, part := range forbid {
+		if strings.Contains(msg, part) {
+			t.Fatalf("got %q, must not contain %q", msg, part)
+		}
 	}
 }
 
@@ -268,6 +484,23 @@ func TestHooksForNativeRecipientRowsAreUnscoped(t *testing.T) {
 	}
 	if inputs[0].HasERC20SpendLimit {
 		t.Fatal("native recipient rows must not set an ERC-20 spend limit")
+	}
+
+	// An acknowledgement does not add a selector allowlist. Empty calldata
+	// has no selector the module can list.
+	delegate := config.SMA7702Delegate()
+	acknowledged := permissions
+	acknowledged.DelegatedNativeRecipients = []model.DelegatedNativeRecipient{nativeAck(alice, delegate)}
+	acknowledged.CodeAt = func(common.Address) ([]byte, error) { return nativeDesignation(delegate), nil }
+	if err := acknowledged.Validate(); err != nil {
+		t.Fatalf("acknowledged designation: %v", err)
+	}
+	ackedInputs, err := acknowledged.allowlistInputs()
+	if err != nil {
+		t.Fatalf("allowlistInputs: %v", err)
+	}
+	if len(ackedInputs) != 1 || ackedInputs[0].HasSelectorAllowlist || len(ackedInputs[0].Selectors) != 0 {
+		t.Fatalf("acknowledged native row = %+v, want an unscoped row", ackedInputs)
 	}
 
 	hooks, err := permissions.HooksFor(1)
