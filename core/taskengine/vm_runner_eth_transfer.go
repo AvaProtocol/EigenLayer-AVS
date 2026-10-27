@@ -374,8 +374,10 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	// Parse destination address
 	destinationAddr := common.HexToAddress(destination)
 
-	// For ETH transfers, we need to create a call to the smart wallet's execute function
-	// execute(target, value, data) where data is empty for pure ETH transfers
+	// execute(target, value, data). data stays empty. A native recipient is
+	// not an allowedActions target, and AllowlistModule cannot scope the
+	// native row to empty calldata, so this packing is what keeps the send
+	// a plain transfer — including a send to an acknowledged 7702 recipient.
 	smartWalletCallData, err := aa.PackExecuteMAv2(
 		destinationAddr, // target address
 		amount,          // ETH value to send

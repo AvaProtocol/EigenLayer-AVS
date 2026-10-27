@@ -123,7 +123,9 @@ func (n *Engine) spendLimitCaller(chainID int64) (aa.ContractCaller, error) {
 // mergeCarriedSkillGrant sizes the replacement from the current grant.
 // Actions, native recipients, and allowContractRecipient only grow, except
 // a transfer or approve whose final cap is not positive: that row is omitted
-// rather than installed at zero. An unresolved running task does not fail
+// rather than installed at zero. delegatedNativeRecipients is carried per
+// recipient. When the current grant and the addition disagree on the
+// delegate, the addition wins. An unresolved running task does not fail
 // this path. An unsized payable does, when this merge would install
 // NativeTokenLimitModule and the current grant has no native cap.
 func mergeCarriedSkillGrant(current *model.SessionPolicy, remainder GrantRemainder, addition PolicyAddition, tasks []*avsproto.Task, chainID int64, now time.Time, expiresIn time.Duration, opts ...mergeOption) (SessionPermissions, PolicyChanges, error) {
@@ -350,11 +352,16 @@ func mergeCarriedSkillGrant(current *model.SessionPolicy, remainder GrantRemaind
 		recipients = dedupeRecipients(recipients)
 	}
 
+	var currentAcks []model.DelegatedNativeRecipient
+	if current != nil {
+		currentAcks = current.DelegatedNativeRecipients
+	}
 	perms := SessionPermissions{
-		AllowedActions:         mergedActions,
-		SpendCaps:              spendCaps,
-		NativeRecipients:       recipients,
-		AllowContractRecipient: addition.AllowContractRecipient || (current != nil && current.AllowContractRecipient),
+		AllowedActions:            mergedActions,
+		SpendCaps:                 spendCaps,
+		NativeRecipients:          recipients,
+		DelegatedNativeRecipients: carriedDelegatedRecipients(currentAcks, addition.DelegatedNativeRecipients, recipients),
+		AllowContractRecipient:    addition.AllowContractRecipient || (current != nil && current.AllowContractRecipient),
 	}
 	if len(spendCaps) > 0 {
 		first := spendCaps[0]
@@ -439,7 +446,92 @@ func sameSessionPermissions(a, b SessionPermissions) bool {
 	if !sameRecipientSets(a.NativeRecipients, b.NativeRecipients) {
 		return false
 	}
+	if !sameDelegatedRecipientSets(a.DelegatedNativeRecipients, b.DelegatedNativeRecipients) {
+		return false
+	}
 	return sameNativeAmount(a.NativeSpendCap, b.NativeSpendCap)
+}
+
+// carriedDelegatedRecipients unions acknowledgements per recipient. addition
+// wins when both name a delegate. An acknowledgement whose recipient is not
+// on the merged grant is dropped, except one that came from the addition:
+// that one stays so Validate can refuse a recipient that is not in
+// nativeRecipients. Addresses are copied.
+func carriedDelegatedRecipients(current, addition []model.DelegatedNativeRecipient, recipients []*common.Address) []model.DelegatedNativeRecipient {
+	onGrant := make(map[common.Address]struct{}, len(recipients))
+	for _, rec := range recipients {
+		if rec != nil && *rec != (common.Address{}) {
+			onGrant[*rec] = struct{}{}
+		}
+	}
+	byRecipient := map[common.Address]model.DelegatedNativeRecipient{}
+	var order []common.Address
+	put := func(list []model.DelegatedNativeRecipient, fromAddition bool) {
+		for _, ack := range list {
+			if ack.Recipient == nil {
+				zero := common.Address{}
+				ack.Recipient = &zero
+			}
+			key := *ack.Recipient
+			if _, ok := onGrant[key]; !ok && !fromAddition {
+				continue
+			}
+			if _, seen := byRecipient[key]; !seen {
+				order = append(order, key)
+			}
+			if _, seen := byRecipient[key]; !seen || fromAddition {
+				byRecipient[key] = cloneDelegatedNativeRecipient(ack)
+			}
+		}
+	}
+	put(current, false)
+	put(addition, true)
+	if len(order) == 0 {
+		return nil
+	}
+	out := make([]model.DelegatedNativeRecipient, 0, len(order))
+	for _, key := range order {
+		out = append(out, byRecipient[key])
+	}
+	return out
+}
+
+func cloneDelegatedNativeRecipient(ack model.DelegatedNativeRecipient) model.DelegatedNativeRecipient {
+	out := model.DelegatedNativeRecipient{}
+	if ack.Recipient != nil {
+		recipient := *ack.Recipient
+		out.Recipient = &recipient
+	}
+	if ack.Delegate != nil {
+		delegate := *ack.Delegate
+		out.Delegate = &delegate
+	}
+	return out
+}
+
+func sameDelegatedRecipientSets(a, b []model.DelegatedNativeRecipient) bool {
+	left, right := delegatedRecipientSet(a), delegatedRecipientSet(b)
+	if len(left) != len(right) {
+		return false
+	}
+	for recipient, delegate := range left {
+		other, ok := right[recipient]
+		if !ok || other != delegate {
+			return false
+		}
+	}
+	return true
+}
+
+func delegatedRecipientSet(acks []model.DelegatedNativeRecipient) map[common.Address]common.Address {
+	out := map[common.Address]common.Address{}
+	for _, ack := range acks {
+		if ack.Recipient == nil || *ack.Recipient == (common.Address{}) || ack.Delegate == nil {
+			continue
+		}
+		out[*ack.Recipient] = *ack.Delegate
+	}
+	return out
 }
 
 func sameActionSets(a, b []model.AllowedAction) bool {
@@ -699,6 +791,7 @@ func usableCoveragePolicy(policy *model.SessionPolicy, rem GrantRemainder) *mode
 	if rem.Native == nil || rem.Native.Sign() <= 0 {
 		clone.NativeSpendCap = nil
 		clone.NativeRecipients = nil
+		clone.DelegatedNativeRecipients = nil
 	} else {
 		clone.NativeSpendCap = &model.NativeSpendCap{Amount: rem.Native.String()}
 	}

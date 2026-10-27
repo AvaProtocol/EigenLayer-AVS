@@ -95,6 +95,8 @@ func IsClientUserOpFailure(err error) bool {
 		return true
 	case strings.Contains(s, "SESSION_POLICY_RECIPIENT_NOT_ALLOWED"):
 		return true
+	case strings.Contains(s, "SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED"):
+		return true
 	case strings.Contains(s, "SESSION_POLICY_RECIPIENT_NOT_EOA"):
 		return true
 	case strings.Contains(s, "SESSION_POLICY_NATIVE_CAP_EXCEEDED"):

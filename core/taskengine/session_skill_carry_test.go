@@ -211,6 +211,96 @@ func TestCarryNeverCappedTokenIsNotSpent(t *testing.T) {
 	}
 }
 
+func TestCarryKeepsDelegatedNativeRecipients(t *testing.T) {
+	now := skillNow()
+	dest := common.HexToAddress("0x00000000000000000000000000000000000000a1")
+	other := common.HexToAddress("0x00000000000000000000000000000000000000b2")
+	delegateA := common.HexToAddress("0x7702cb554e6bfb442cb743a7df23154544a7176c")
+	delegateB := common.HexToAddress("0x1111111111111111111111111111111111111111")
+
+	current := usableGrant("01ETH", now.Add(30*24*time.Hour).UnixMilli(), nil, nil)
+	current.NativeSpendCap = &model.NativeSpendCap{Amount: "100"}
+	current.NativeRecipients = []*common.Address{&dest}
+	current.DelegatedNativeRecipients = []model.DelegatedNativeRecipient{nativeAck(dest, delegateA)}
+
+	kept, _, err := MergeSkillGrantWithRemainder(current, &GrantRemainder{Native: big.NewInt(8)}, PolicyAddition{
+		NativeSpendCap:            &model.NativeSpendCap{Amount: "5"},
+		NativeRecipients:          []*common.Address{&other},
+		DelegatedNativeRecipients: []model.DelegatedNativeRecipient{nativeAck(other, delegateB)},
+	}, nil, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := acknowledgedDelegate(kept.DelegatedNativeRecipients, dest); got == nil || *got != delegateA {
+		t.Fatalf("current acknowledgement = %v, want %s", got, delegateA.Hex())
+	}
+	if got := acknowledgedDelegate(kept.DelegatedNativeRecipients, other); got == nil || *got != delegateB {
+		t.Fatalf("added acknowledgement = %v, want %s", got, delegateB.Hex())
+	}
+
+	overridden, _, err := MergeSkillGrantWithRemainder(current, &GrantRemainder{Native: big.NewInt(8)}, PolicyAddition{
+		NativeSpendCap:            &model.NativeSpendCap{Amount: "5"},
+		NativeRecipients:          []*common.Address{&dest},
+		DelegatedNativeRecipients: []model.DelegatedNativeRecipient{nativeAck(dest, delegateB)},
+	}, nil, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := acknowledgedDelegate(overridden.DelegatedNativeRecipients, dest); got == nil || *got != delegateB {
+		t.Fatalf("addition must replace the delegate, got %v", got)
+	}
+	changed := kept
+	changed.DelegatedNativeRecipients = []model.DelegatedNativeRecipient{
+		nativeAck(dest, delegateB),
+		nativeAck(other, delegateB),
+	}
+	if sameSessionPermissions(kept, changed) {
+		t.Fatal("a different acknowledged delegate must not compare equal")
+	}
+	if len(kept.DelegatedNativeRecipients) != 2 {
+		t.Fatalf("acks = %d, want 2", len(kept.DelegatedNativeRecipients))
+	}
+	flipped := kept
+	flipped.DelegatedNativeRecipients = []model.DelegatedNativeRecipient{
+		kept.DelegatedNativeRecipients[1],
+		kept.DelegatedNativeRecipients[0],
+	}
+	if !sameSessionPermissions(kept, flipped) {
+		t.Fatal("acknowledgement order must not affect equality")
+	}
+
+	fresh, _, err := MergeSkillGrant(nil, PolicyAddition{
+		NativeSpendCap:            &model.NativeSpendCap{Amount: "5"},
+		NativeRecipients:          []*common.Address{&dest},
+		DelegatedNativeRecipients: []model.DelegatedNativeRecipient{nativeAck(dest, delegateA)},
+	}, nil, skillSepolia, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := acknowledgedDelegate(fresh.DelegatedNativeRecipients, dest); got == nil || *got != delegateA {
+		t.Fatalf("a first grant dropped the acknowledgement, got %v", got)
+	}
+
+	asPolicy := permissionsAsPolicy(SessionPolicyInput{
+		Wallet: dest,
+		Permissions: SessionPermissions{
+			DelegatedNativeRecipients: fresh.DelegatedNativeRecipients,
+		},
+	})
+	if got := acknowledgedDelegate(asPolicy.DelegatedNativeRecipients, dest); got == nil || *got != delegateA {
+		t.Fatal("coverage policy dropped the acknowledgement")
+	}
+
+	spent := usableCoveragePolicy(current, GrantRemainder{Native: big.NewInt(0)})
+	if len(spent.NativeRecipients) != 0 || len(spent.DelegatedNativeRecipients) != 0 {
+		t.Fatalf("spent native coverage kept recipients=%d acks=%d", len(spent.NativeRecipients), len(spent.DelegatedNativeRecipients))
+	}
+	still := usableCoveragePolicy(current, GrantRemainder{Native: big.NewInt(3)})
+	if len(still.DelegatedNativeRecipients) != 1 {
+		t.Fatalf("positive remainder dropped acknowledgements: %+v", still.DelegatedNativeRecipients)
+	}
+}
+
 func TestCarryAppliedGrantRefusesAMissingRead(t *testing.T) {
 	now := skillNow()
 	current := usableGrant("01APPLIED", now.Add(24*time.Hour).UnixMilli(),

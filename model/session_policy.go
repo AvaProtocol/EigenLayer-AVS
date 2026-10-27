@@ -59,6 +59,11 @@ type SessionPolicy struct {
 	NativeRecipients       []*common.Address `json:"native_recipients,omitempty"`
 	NativeSpendCap         *NativeSpendCap   `json:"native_spend_cap,omitempty"`
 	AllowContractRecipient bool              `json:"allow_contract_recipient,omitempty"`
+	// DelegatedNativeRecipients is the owner's per-recipient acknowledgement
+	// that a native recipient is an EIP-7702 EOA and which delegate it named.
+	// It does not authorize a plain contract and it does not change
+	// AllowContractRecipient. omitempty; no new storage key.
+	DelegatedNativeRecipients []DelegatedNativeRecipient `json:"delegated_native_recipients,omitempty"`
 
 	// Grant is the owner's authorization. Absent once applied is not a valid
 	// state: it is retained so revocation can reproduce the module cleanup
@@ -95,6 +100,14 @@ type ERC20SpendCap struct {
 type NativeSpendCap struct {
 	Amount     string `json:"amount"`      // wei, decimal
 	GrantedCap string `json:"granted_cap"` // == Amount at grant time
+}
+
+// DelegatedNativeRecipient is one owner's acknowledgement that Recipient is
+// an EIP-7702 EOA whose designation named Delegate. Listing a recipient here
+// does not make a plain contract sendable.
+type DelegatedNativeRecipient struct {
+	Recipient *common.Address `json:"recipient"`
+	Delegate  *common.Address `json:"delegate"`
 }
 
 // SessionGrantAuthorization is the owner's signed deferred action.

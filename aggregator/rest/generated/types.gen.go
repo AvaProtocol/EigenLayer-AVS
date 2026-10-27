@@ -615,6 +615,21 @@ type CustomCodeNodeConfig struct {
 	Source string `json:"source"`
 }
 
+// DelegatedNativeRecipient The owner acknowledged that `recipient` is an EIP-7702 delegated EOA
+// and that its designation named `delegate`. The recipient must also be
+// in `nativeRecipients`. One entry per recipient. Listing an address
+// here does not authorize a plain contract, and it does not set
+// `allowContractRecipient`. Trusting the delegate is the client's job;
+// this record only checks that the designation still names the
+// acknowledged delegate. The ETH send stays an empty-calldata transfer.
+type DelegatedNativeRecipient struct {
+	// Delegate Lowercase or checksummed hex EOA / contract address.
+	Delegate EthereumAddress `json:"delegate"`
+
+	// Recipient Lowercase or checksummed hex EOA / contract address.
+	Recipient EthereumAddress `json:"recipient"`
+}
+
 // DelegationStatus defines model for DelegationStatus.
 type DelegationStatus struct {
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
@@ -1318,9 +1333,11 @@ type PreparePolicyRequest struct {
 	Add        *SessionPolicyAddition `json:"add,omitempty"`
 	AgentLabel string                 `json:"agentLabel"`
 
-	// AllowContractRecipient When true, nativeRecipients may be contracts (any-function on
-	// that address, ERC-20 uncapped). Default false: each recipient
-	// must have empty code. Logged when true.
+	// AllowContractRecipient When true, every native recipient may be a contract (any function
+	// on that address, ERC-20 uncapped). Default false: each recipient
+	// must have empty code, or be an acknowledged EIP-7702 delegation
+	// (`delegatedNativeRecipients`). Logged when true. An
+	// acknowledgement is not this flag.
 	AllowContractRecipient *bool `json:"allowContractRecipient,omitempty"`
 
 	// AllowedActions Selector-scoped contract calls. Native-only grants omit this
@@ -1337,6 +1354,16 @@ type PreparePolicyRequest struct {
 	// chain-aware trigger/node configs this is required and must be a
 	// configured chain; on query/filter params it is optional.
 	ChainId ChainId `json:"chainId"`
+
+	// DelegatedNativeRecipients Owner acknowledgements of EIP-7702 delegations on native ETH
+	// recipients. A recipient with code is allowed only when that code
+	// is a designation (`0xef0100` plus a 20-byte delegate), this list
+	// names that recipient, and the designation still points at the
+	// acknowledged delegate. A plain contract stays refused, even if
+	// it is listed. Empty code stays allowed. A present empty array is
+	// 400. This does not change `allowContractRecipient`, and the send
+	// stays an empty-calldata transfer.
+	DelegatedNativeRecipients *[]DelegatedNativeRecipient `json:"delegatedNativeRecipients,omitempty"`
 
 	// DropTaskIds Enabled tasks this prepare may leave out of the merged grant.
 	// Honored only when `add` is set. Echo the same ids on submit.
@@ -1498,6 +1525,11 @@ type PreparedPolicy struct {
 
 	// Deadline Unix seconds; bounds signing → first use, NOT the grant lifetime.
 	Deadline int64 `json:"deadline"`
+
+	// DelegatedNativeRecipients Merged EIP-7702 acknowledgements to echo to submit. Present when
+	// `add` was sent and the merged grant has any. See
+	// DelegatedNativeRecipient.
+	DelegatedNativeRecipients *[]DelegatedNativeRecipient `json:"delegatedNativeRecipients,omitempty"`
 
 	// Digest The EIP-712 hash the typed data produces, for client-side verification.
 	Digest string `json:"digest"`
@@ -1792,7 +1824,13 @@ type SessionPolicy struct {
 
 	// CreatedAt Unix milliseconds.
 	CreatedAt int64 `json:"createdAt"`
-	EntityId  int64 `json:"entityId"`
+
+	// DelegatedNativeRecipients EIP-7702 acknowledgements stored with this grant. A native send
+	// to one of these recipients is refused once the designation names
+	// a different delegate. A plain contract is not authorized by being
+	// listed here. Does not change `allowContractRecipient`.
+	DelegatedNativeRecipients *[]DelegatedNativeRecipient `json:"delegatedNativeRecipients,omitempty"`
+	EntityId                  int64                       `json:"entityId"`
 
 	// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
 	// execution. The token must appear as an `allowedActions` target.
@@ -1846,7 +1884,15 @@ type SessionPolicyStatus string
 type SessionPolicyAddition struct {
 	AllowContractRecipient *bool            `json:"allowContractRecipient,omitempty"`
 	AllowedActions         *[]AllowedAction `json:"allowedActions,omitempty"`
-	Erc20SpendCaps         *[]Erc20SpendCap `json:"erc20SpendCaps,omitempty"`
+
+	// DelegatedNativeRecipients Per-recipient EIP-7702 acknowledgements for native ETH recipients
+	// in this addition. Carried per recipient when grants merge; when
+	// the current grant and this addition name different delegates for
+	// the same recipient, this addition's delegate is the one signed.
+	// A present empty array is 400. Does not change
+	// `allowContractRecipient`, and does not authorize a plain contract.
+	DelegatedNativeRecipients *[]DelegatedNativeRecipient `json:"delegatedNativeRecipients,omitempty"`
+	Erc20SpendCaps            *[]Erc20SpendCap            `json:"erc20SpendCaps,omitempty"`
 
 	// NativeGasWei Wei of this addition's `nativeSpendCap` that is self-funded gas
 	// rather than ETH sent. Already included in that cap. Prepare does
@@ -2063,6 +2109,12 @@ type SubmitPolicyRequest struct {
 	ChainId  ChainId `json:"chainId"`
 	Deadline int64   `json:"deadline"`
 
+	// DelegatedNativeRecipients Echo prepare's `delegatedNativeRecipients`. A recipient with code
+	// is allowed only when its designation still names the acknowledged
+	// delegate. A plain contract stays refused. A present empty array
+	// is 400. Does not change `allowContractRecipient`.
+	DelegatedNativeRecipients *[]DelegatedNativeRecipient `json:"delegatedNativeRecipients,omitempty"`
+
 	// DropTaskIds Enabled tasks this grant may leave uncovered. Echo prepare's
 	// `affectedTaskIds`. Naming a task does not fail submit.
 	// When a grant was carried, submit refuses with
@@ -2117,7 +2169,13 @@ type SubmitPolicyResponse struct {
 
 	// CreatedAt Unix milliseconds.
 	CreatedAt int64 `json:"createdAt"`
-	EntityId  int64 `json:"entityId"`
+
+	// DelegatedNativeRecipients EIP-7702 acknowledgements stored with this grant. A native send
+	// to one of these recipients is refused once the designation names
+	// a different delegate. A plain contract is not authorized by being
+	// listed here. Does not change `allowContractRecipient`.
+	DelegatedNativeRecipients *[]DelegatedNativeRecipient `json:"delegatedNativeRecipients,omitempty"`
+	EntityId                  int64                       `json:"entityId"`
 
 	// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
 	// execution. The token must appear as an `allowedActions` target.

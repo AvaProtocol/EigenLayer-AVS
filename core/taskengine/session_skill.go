@@ -196,11 +196,12 @@ type WorkflowNeed struct {
 // PolicyAddition is the automation being set up. Cap amounts are totals
 // for that automation; the gateway does not multiply them again.
 type PolicyAddition struct {
-	AllowedActions         []model.AllowedAction
-	SpendCaps              []model.ERC20SpendCap
-	NativeRecipients       []*common.Address
-	NativeSpendCap         *model.NativeSpendCap
-	AllowContractRecipient bool
+	AllowedActions            []model.AllowedAction
+	SpendCaps                 []model.ERC20SpendCap
+	NativeRecipients          []*common.Address
+	DelegatedNativeRecipients []model.DelegatedNativeRecipient
+	NativeSpendCap            *model.NativeSpendCap
+	AllowContractRecipient    bool
 	// NativeGasWei is the portion of NativeSpendCap that is self-funded
 	// gas rather than ETH sent. The cap total already includes it.
 	NativeGasWei string
@@ -724,10 +725,11 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 
 	recipients = dedupeRecipients(recipients)
 	perms := SessionPermissions{
-		AllowedActions:         mergedActions,
-		SpendCaps:              spendCaps,
-		NativeRecipients:       recipients,
-		AllowContractRecipient: addition.AllowContractRecipient || (current != nil && current.AllowContractRecipient),
+		AllowedActions:            mergedActions,
+		SpendCaps:                 spendCaps,
+		NativeRecipients:          recipients,
+		DelegatedNativeRecipients: carriedDelegatedRecipients(nil, addition.DelegatedNativeRecipients, recipients),
+		AllowContractRecipient:    addition.AllowContractRecipient || (current != nil && current.AllowContractRecipient),
 	}
 	if len(spendCaps) > 0 {
 		first := spendCaps[0]
@@ -2340,17 +2342,18 @@ func newBaseChanged(current *model.SessionPolicy) *PolicyConflictError {
 
 func permissionsAsPolicy(in SessionPolicyInput) *model.SessionPolicy {
 	p := &model.SessionPolicy{
-		AllowedActions:         in.Permissions.AllowedActions,
-		ERC20SpendCap:          in.Permissions.SpendCap,
-		ERC20SpendCaps:         in.Permissions.SpendCaps,
-		NativeRecipients:       in.Permissions.NativeRecipients,
-		NativeSpendCap:         in.Permissions.NativeSpendCap,
-		AllowContractRecipient: in.Permissions.AllowContractRecipient,
-		ValidUntil:             in.Permissions.ValidUntilMs,
-		ChainID:                in.ChainID,
-		Runner:                 &in.Wallet,
-		Status:                 model.SessionPolicyPending,
-		Grant:                  &model.SessionGrantAuthorization{},
+		AllowedActions:            in.Permissions.AllowedActions,
+		ERC20SpendCap:             in.Permissions.SpendCap,
+		ERC20SpendCaps:            in.Permissions.SpendCaps,
+		NativeRecipients:          in.Permissions.NativeRecipients,
+		DelegatedNativeRecipients: in.Permissions.DelegatedNativeRecipients,
+		NativeSpendCap:            in.Permissions.NativeSpendCap,
+		AllowContractRecipient:    in.Permissions.AllowContractRecipient,
+		ValidUntil:                in.Permissions.ValidUntilMs,
+		ChainID:                   in.ChainID,
+		Runner:                    &in.Wallet,
+		Status:                    model.SessionPolicyPending,
+		Grant:                     &model.SessionGrantAuthorization{},
 	}
 	return p
 }

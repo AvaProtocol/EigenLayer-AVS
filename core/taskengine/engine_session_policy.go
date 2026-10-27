@@ -732,6 +732,7 @@ func attachDeclaredPermissions(policy *model.SessionPolicy, perms SessionPermiss
 	}
 	policy.AllowedActions = perms.AllowedActions
 	policy.NativeRecipients = perms.NativeRecipients
+	policy.DelegatedNativeRecipients = perms.DelegatedNativeRecipients
 	policy.AllowContractRecipient = perms.AllowContractRecipient
 	if perms.NativeSpendCap != nil {
 		native := *perms.NativeSpendCap

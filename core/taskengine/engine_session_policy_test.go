@@ -490,17 +490,21 @@ func TestAttachDeclaredPermissionsCapAlias(t *testing.T) {
 	require.Equal(t, weth, *listedPolicy.ERC20SpendCap.Token, "alias must keep the submitted singular, not list[0]")
 
 	alice := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	delegate := common.HexToAddress("0x7702cb554e6bfb442cb743a7df23154544a7176c")
 	native := SessionPermissions{
-		NativeRecipients:       []*common.Address{&alice},
-		NativeSpendCap:         &model.NativeSpendCap{Amount: "10000000000000000"},
-		AllowContractRecipient: true,
-		ValidUntilMs:           until,
+		NativeRecipients:          []*common.Address{&alice},
+		DelegatedNativeRecipients: []model.DelegatedNativeRecipient{nativeAck(alice, delegate)},
+		NativeSpendCap:            &model.NativeSpendCap{Amount: "10000000000000000"},
+		AllowContractRecipient:    true,
+		ValidUntilMs:              until,
 	}
 	nativePolicy := &model.SessionPolicy{}
 	attachDeclaredPermissions(nativePolicy, native)
 	require.Len(t, nativePolicy.NativeRecipients, 1)
 	require.Equal(t, "10000000000000000", nativePolicy.NativeSpendCap.GrantedCap)
 	require.True(t, nativePolicy.AllowContractRecipient)
+	require.Len(t, nativePolicy.DelegatedNativeRecipients, 1)
+	require.Equal(t, delegate, *nativePolicy.DelegatedNativeRecipients[0].Delegate)
 }
 
 // The session signer is session_signer_private_key on every chain, never a
