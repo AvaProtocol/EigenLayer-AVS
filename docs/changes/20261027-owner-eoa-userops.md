@@ -1,7 +1,7 @@
 # Owner-signed UserOperations from an EOA
 
 Date: 2026-10-27
-Status: Implementation and local verification; live delegation/inclusion pending
+Status: Owner-signed EOA round trip verified live on Sepolia
 Branch: `feat/1987-owner-eoa-userops`
 Related: [Studio #1987](https://github.com/AvaProtocol/studio/issues/1987),
 [SDK #289](https://github.com/AvaProtocol/ava-sdk-js/pull/289), gateway #871
@@ -95,9 +95,65 @@ Local checks passed:
 The local-EVM tests use go-ethereum's existing version; `go mod tidy` adds the
 indirect dependencies needed to execute its in-memory state/runtime packages.
 
-No real EOA has been delegated or swept through this new path yet. The earlier
-SDK round trip used an ordinary EOA transaction out and a derived-wallet UserOp
-back. That result does not establish EOA UserOp inclusion. A live check must
-separately review/apply delegation, prepare the EOA transfer batch, sign/submit
-it once, and verify the receipt and token deltas. A live test must also check
-the same owner's derived-wallet return leg.
+## Live Sepolia verification
+
+The source at `b4ff8a9677c03f4a389fff24b1590c8f7d8e5f2f` passed the real SDK CLI
+round trip against a source-built local gateway on 2026-10-27. Unlike the earlier
+SDK test's ordinary EOA transaction, both sweep directions here used the
+owner-signed prepare/sign/submit handoff. The gateway and Sepolia worker run in
+the local `studio` tmux session. Only the gateway was built from this branch;
+the worker uses the existing local stack binary/config.
+
+Accounts:
+
+- EOA: `0x2FB186De3d32F4EB45A58F6dD7133A2442f9830e` (`TEST_PRIVATE_KEY`).
+- Its derived smart wallet: `0x60aCdE1B4fC1848647eaB6F1460a33F4cA2b520E`.
+
+The test completed these steps, with source-funded UserOperations:
+
+1. Apply the separately signed, chain-bound SMA-7702 authorization at EOA nonce
+   15 using the existing delegation API. Assert the actual designation,
+   implementation hash, enabled fallback owner and v0.7 EntryPoint.
+   [Delegation transaction](https://sepolia.etherscan.io/tx/0xf844063bc39d8f3362605e5aae74f18bb6415af956e183a92c894b52b13383f5).
+2. Move the smart wallet's `0.000002877930532126 WETH` to its owner through one
+   owner-signed UserOperation, to exercise both tokens in the EOA sweep.
+   [WETH setup](https://sepolia.etherscan.io/tx/0x165b808802a7ae29ed33c3d3ec28a847f9cfab81c1550500098038e5662d744b).
+3. Run the actual SDK sweep CLI with the EOA as source. One owner-signed
+   UserOperation transfers `1.560489 USDC` and `0.000002877930532126 WETH` to
+   its smart wallet. Verify both exact token deltas and EOA owner nonce +1.
+   [EOA sweep](https://sepolia.etherscan.io/tx/0x8107f5d1ecf1ea76a31a5c0c4efecb03ff58b06a5b9df0993e5db24decaa00cd).
+   UserOp: `0xe1ee076737414ddc98e439137f9d98fc78fb8dbdd2e4a398a5e7737e92294af8`.
+4. Restart only the gateway with `eoa_7702_execute: false`. An EOA preparation
+   is refused with HTTP 412, `OWNER_EXECUTION_PREPARE_REQUIRED`, and detail
+   `eoa_7702_execute is false`.
+5. With that flag still false, run the actual CLI from the derived wallet back
+   to the EOA. One UserOperation transfers `14.780489 USDC` and the WETH balance
+   successfully. This also returns the preexisting smart-wallet test funds.
+   [Derived-wallet return](https://sepolia.etherscan.io/tx/0xbaa8d87aa756eaf5c07a4995dddf04fa49060f54f966427979c94bbdb05c2005).
+   UserOp: `0x64340d3eeac14099a7026b7ecb7634f6517db2e05b18807da60b2a2f765c7ae6`.
+6. Re-enable EOA execution locally and return the preexisting `13.22 USDC` and
+   WETH to the shared smart-wallet fixture with one fixed-amount owner batch.
+   Both accounts' ERC-20 balances exactly match their starting values.
+   [Fixture restoration](https://sepolia.etherscan.io/tx/0x8cdbdff8c7db4b617809a580b5e10d65f984e3c88cc9b612c539e9a49347513e).
+7. Clear the EOA's delegation with a self-funded type-4 transaction. Its outer
+   transaction nonce is 16 and the self-sponsored authorization nonce is 17.
+   Assert `eth_getCode(EOA) == 0x` and delegation status `missing` afterward.
+   [Account-code restoration](https://sepolia.etherscan.io/tx/0xcfca3519247f819642e5231fc8408415bd1f08451101702fc7f16e480e040e31).
+
+No session grant was installed: the EOA's policy list stayed empty and the
+derived wallet's policies were unchanged. Including setup and cleanup, each
+account's owner UserOp nonce increased by exactly two. Gateway logs contain
+one relay outcome per prepared operation and no unexpected warnings/errors
+in the test window. The worker stayed healthy; it emitted no additional logs.
+
+Final balances are again `1.560489 USDC` and zero WETH at the EOA, and
+`13.22 USDC` plus `0.000002877930532126 WETH` at its smart wallet. Native ETH
+paid gas. The new EOA wallet association remains stored but is hidden after
+clearing the designation, preserving the previous default wallet list. No new
+private key was needed. The unsigned operation reviews, transaction hashes and
+balance assertions are retained in the local SDK's ignored
+`logs/20261027-eoa-userop-roundtrip-proof.json`.
+
+The local gateway remains on this feature binary with both owner/EOA flags
+enabled for Sepolia. Live evidence covers source-funded Sepolia execution;
+Base and sponsored execution still need their own live checks.
