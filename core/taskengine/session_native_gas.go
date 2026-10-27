@@ -59,8 +59,9 @@ func NativeGrantMaxFee(chainID int64) *big.Int {
 type mergeOption func(*mergeConfig)
 
 type mergeConfig struct {
-	fees    map[int64]*big.Int
-	applied bool
+	fees           map[int64]*big.Int
+	applied        bool
+	priorDelegated []model.DelegatedNativeRecipient
 }
 
 // WithSelfFundedGrantFee sizes native gas into the cap for chainID.
@@ -85,6 +86,28 @@ func applyMergeOptions(opts []mergeOption) mergeConfig {
 		}
 	}
 	return cfg
+}
+
+// WithPriorDelegatedRecipients carries EIP-7702 acknowledgements from a
+// grant that is no longer usable. Only a merge with no current grant reads
+// them, and only for recipients that are on that fresh grant. The addition
+// wins when both name a delegate. A usable grant already carries its own
+// acknowledgements, so this option is ignored on that path. Addresses are
+// copied.
+func WithPriorDelegatedRecipients(acks []model.DelegatedNativeRecipient) mergeOption {
+	if len(acks) == 0 {
+		return func(*mergeConfig) {}
+	}
+	cloned := make([]model.DelegatedNativeRecipient, len(acks))
+	for i, ack := range acks {
+		cloned[i] = cloneDelegatedNativeRecipient(ack)
+	}
+	return func(cfg *mergeConfig) {
+		if cfg == nil {
+			return
+		}
+		cfg.priorDelegated = cloned
+	}
 }
 
 // WithGrantApplied says the native module is already installed, so this

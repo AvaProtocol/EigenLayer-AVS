@@ -60,6 +60,10 @@ func IsUserOpRevert(err error) bool {
 // introducing a new client-facing failure class.
 //
 // Deliberately NOT matched (must stay Error → Sentry):
+//   - SESSION_POLICY_RECIPIENT_CODE_UNREADABLE — an installed grant could not
+//     read the recipient's code. An RPC blip, not a recipient the owner
+//     should change. Do not match it: the message must not be folded into
+//     NOT_EOA or DELEGATE_CHANGED either.
 //   - SESSION_POLICY_LOOKUP_FAILED — wraps Badger GetByPrefix / corrupt records
 //     as well as multi-grant; multi-grant has its own marker below
 //   - bare "gas manager declined to sponsor" without a known denial reason —

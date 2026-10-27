@@ -45,8 +45,14 @@ const (
 	SessionPolicyRecipientNotAllowedCode      = "SESSION_POLICY_RECIPIENT_NOT_ALLOWED"
 	SessionPolicyRecipientNotEOACode          = "SESSION_POLICY_RECIPIENT_NOT_EOA"
 	SessionPolicyRecipientDelegateChangedCode = "SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED"
-	SessionPolicyTooManyNativeRecipientsCode  = "SESSION_POLICY_TOO_MANY_NATIVE_RECIPIENTS"
-	SessionPolicyNativeCapExceededCode        = "SESSION_POLICY_NATIVE_CAP_EXCEEDED"
+	// SessionPolicyRecipientCodeUnreadableCode is an installed grant whose
+	// recipient code could not be read. It is not a client failure: the
+	// recipient may be fine, and the owner should not be told to change it.
+	// Before the grant is applied, the same failure stays
+	// SESSION_POLICY_RECIPIENT_NOT_EOA.
+	SessionPolicyRecipientCodeUnreadableCode = "SESSION_POLICY_RECIPIENT_CODE_UNREADABLE"
+	SessionPolicyTooManyNativeRecipientsCode = "SESSION_POLICY_TOO_MANY_NATIVE_RECIPIENTS"
+	SessionPolicyNativeCapExceededCode       = "SESSION_POLICY_NATIVE_CAP_EXCEEDED"
 
 	// A0-measured gas-unit ceilings for NT cap preflight when the send path
 	// has not yet estimated. Do not use the seed sum (500k+100k+700k).
@@ -88,8 +94,11 @@ func PreflightNativePermission(policy *model.SessionPolicy, intent NativeIntent,
 		//     recipients are re-read. Empty code or the same delegate still
 		//     sends. Any other code is SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED.
 		//
-		// A missing reader or a CodeAt error fails closed as NOT_EOA. That is
-		// a lookup failure, not a delegate change, so Studio can tell them apart.
+		// A missing reader or a CodeAt error fails closed. Before apply that
+		// is NOT_EOA, because prepare is in front of the owner. After apply
+		// it is SESSION_POLICY_RECIPIENT_CODE_UNREADABLE. That code is not a
+		// client failure: an RPC blip must not be logged as a warning, and
+		// it must not tell the owner to change a recipient that is fine.
 		//
 		// The on-chain native row stays HasSelectorAllowlist=false.
 		// AllowlistModule has no empty-calldata flag, and empty calldata has
@@ -271,6 +280,9 @@ func nativeRecipientCodeMode(policy *model.SessionPolicy, recipient common.Addre
 
 func preflightNativeRecipientCode(policy *model.SessionPolicy, recipient common.Address, ack *common.Address, mode nativeCodeMode, reader CodeAndFeeReader) string {
 	if reader == nil {
+		if mode == nativeCodeRecheckApplied {
+			return recipientCodeUnreadable(recipient, policy, "no chain reader")
+		}
 		return fmt.Sprintf("%s: cannot verify native recipient %s is an EOA (no chain reader); fail closed",
 			SessionPolicyRecipientNotEOACode, recipient.Hex())
 	}
@@ -278,6 +290,9 @@ func preflightNativeRecipientCode(policy *model.SessionPolicy, recipient common.
 	code, err := reader.CodeAt(ctx, recipient)
 	cancel()
 	if err != nil {
+		if mode == nativeCodeRecheckApplied {
+			return recipientCodeUnreadable(recipient, policy, err.Error())
+		}
 		return fmt.Sprintf("%s: looking up native recipient %s: %v",
 			SessionPolicyRecipientNotEOACode, recipient.Hex(), err)
 	}
@@ -290,6 +305,11 @@ func preflightNativeRecipientCode(policy *model.SessionPolicy, recipient common.
 		return formatAppliedDelegateRefusal(recipient, acknowledged, onChain, verdict, policyIDOf(policy))
 	}
 	return formatPreflightNativeCodeRefusal(recipient, ack, onChain, verdict, policyIDOf(policy))
+}
+
+func recipientCodeUnreadable(recipient common.Address, policy *model.SessionPolicy, detail string) string {
+	return withPolicyID(fmt.Sprintf("%s: cannot read code at native recipient %s: %s",
+		SessionPolicyRecipientCodeUnreadableCode, recipient.Hex(), detail), policyIDOf(policy))
 }
 
 func policyIDOf(policy *model.SessionPolicy) string {

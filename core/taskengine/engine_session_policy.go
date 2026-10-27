@@ -413,7 +413,11 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		}
 		var dropped []string
 		kept, dropped = tasksExceptDropped(workflowTasks(tasks), in.DropTaskIDs)
-		merged, ch, mergeErr := MergeSkillGrantWithRemainder(current, preRemainder, *in.Addition, kept, in.ChainID, preparedAt, time.Duration(in.ExpiresInSeconds)*time.Second, n.selfFundedGrantFeeOption(in.ChainID))
+		priorOpt, priorErr := priorDelegatedMergeOption(n.db, in.ChainID, user.Address, in.Wallet, current)
+		if priorErr != nil {
+			return nil, priorErr
+		}
+		merged, ch, mergeErr := MergeSkillGrantWithRemainder(current, preRemainder, *in.Addition, kept, in.ChainID, preparedAt, time.Duration(in.ExpiresInSeconds)*time.Second, n.selfFundedGrantFeeOption(in.ChainID), priorOpt)
 		if mergeErr != nil {
 			return nil, mergeErr
 		}
@@ -591,12 +595,16 @@ func (n *Engine) SubmitSessionPolicy(
 		}
 		kept, _ := tasksExceptDropped(workflowTasks(tasks), in.DropTaskIDs)
 		feeOpt := n.selfFundedGrantFeeOption(in.ChainID)
-		merged, _, mergeErr := MergeSkillGrantWithRemainder(current, remPtr, snap.addition, kept, in.ChainID, snap.preparedAt, snap.expiresIn, feeOpt)
+		priorOpt, priorErr := priorDelegatedMergeOption(n.db, in.ChainID, user.Address, in.Wallet, current)
+		if priorErr != nil {
+			return nil, nil, priorErr
+		}
+		merged, _, mergeErr := MergeSkillGrantWithRemainder(current, remPtr, snap.addition, kept, in.ChainID, snap.preparedAt, snap.expiresIn, feeOpt, priorOpt)
 		if mergeErr != nil {
 			return nil, nil, skillSubmitMergeError(current, mergeErr, snap.tasks, kept)
 		}
 		if !sameSessionPermissions(merged, in.Permissions) {
-			return nil, nil, explainSkillDrift(current, snap, remPtr, kept, in.Permissions, feeOpt)
+			return nil, nil, explainSkillDrift(current, snap, remPtr, kept, in.Permissions, feeOpt, priorOpt)
 		}
 		if current != nil {
 			dropped, err = classifyCarriedCoverage(current, *remPtr, in, workflowTasks(tasks), time.Now(), feeOpt)

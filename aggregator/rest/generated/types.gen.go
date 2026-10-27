@@ -1888,8 +1888,11 @@ type SessionPolicyAddition struct {
 	// DelegatedNativeRecipients Per-recipient EIP-7702 acknowledgements for native ETH recipients
 	// in this addition. Carried per recipient when grants merge; when
 	// the current grant and this addition name different delegates for
-	// the same recipient, this addition's delegate is the one signed.
-	// A present empty array is 400. Does not change
+	// the same recipient, the gateway records this addition's delegate.
+	// The owner signs the install call. The ETH row in that call is not
+	// limited to the delegate, and the acknowledgement is not part of
+	// the signature. The gateway checks it again when it sends. A
+	// present empty array is 400. Does not change
 	// `allowContractRecipient`, and does not authorize a plain contract.
 	DelegatedNativeRecipients *[]DelegatedNativeRecipient `json:"delegatedNativeRecipients,omitempty"`
 	Erc20SpendCaps            *[]Erc20SpendCap            `json:"erc20SpendCaps,omitempty"`

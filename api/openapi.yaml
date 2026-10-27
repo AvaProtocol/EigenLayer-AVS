@@ -2135,8 +2135,11 @@ components:
             Per-recipient EIP-7702 acknowledgements for native ETH recipients
             in this addition. Carried per recipient when grants merge; when
             the current grant and this addition name different delegates for
-            the same recipient, this addition's delegate is the one signed.
-            A present empty array is 400. Does not change
+            the same recipient, the gateway records this addition's delegate.
+            The owner signs the install call. The ETH row in that call is not
+            limited to the delegate, and the acknowledgement is not part of
+            the signature. The gateway checks it again when it sends. A
+            present empty array is 400. Does not change
             `allowContractRecipient`, and does not authorize a plain contract.
         nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
         nativeGasWei:
@@ -3651,7 +3654,10 @@ paths:
         grant starts from that grant. Actions, native recipients, and
         `allowContractRecipient` only grow. `delegatedNativeRecipients` is
         carried per recipient; when both grants name a delegate for the same
-        recipient, the addition's delegate is the one signed. Each token cap
+        recipient, the gateway records the addition's delegate. The owner
+        signs the install call; that call's ETH row is not limited to the
+        delegate. The acknowledgement is gateway state, checked again when
+        the gateway sends. Each token cap
         is what is
         left on that grant (the on-chain remainder once the grant is
         applied, otherwise the stored cap), or what enabled automations
@@ -3662,7 +3668,10 @@ paths:
 
         When `add` is set and there is no usable grant, the merged grant
         is the addition plus every enabled task except ids in
-        `dropTaskIds`. A task whose token or recipient cannot be read
+        `dropTaskIds`. Acknowledgements for those running recipients come
+        from the wallet's last stored grant, including one that was
+        revoked. The chain read still applies, and this addition's
+        delegate wins when both name one. A task whose token or recipient cannot be read
         from the stored workflow (a loop over a previous step) is
         `409 SESSION_POLICY_TARGET_UNRESOLVED`. That is not an unsized
         amount. Pause the automation, or name its id in `dropTaskIds`.

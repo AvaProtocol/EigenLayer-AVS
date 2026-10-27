@@ -511,7 +511,9 @@ func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched Ski
 
 // MergeSkillGrant unions the addition with what enabled tasks on chainID
 // still need. With no current grant, caps start at zero and an unsized or
-// unresolved fund move fails closed. An unsized payable is
+// unresolved fund move fails closed. Acknowledgements on that path are the
+// addition's, plus WithPriorDelegatedRecipients when the caller has the
+// wallet's last grant. An unsized payable is
 // SESSION_POLICY_NATIVE_UNSIZED when this merge would install a native cap.
 // Any other unsized amount stays ErrSessionPolicyUnsized. With a current
 // grant, pass nil remainder only when the grant has not been applied: the
@@ -686,7 +688,8 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 		return SessionPermissions{}, PolicyChanges{}, unsized
 	}
 
-	fee := applyMergeOptions(opts).fee(chainID)
+	mergeCfg := applyMergeOptions(opts)
+	fee := mergeCfg.fee(chainID)
 	declaredGas, declaredErr := additionGasWei(addition)
 	if declaredErr != nil {
 		return SessionPermissions{}, PolicyChanges{}, declaredErr
@@ -728,7 +731,7 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 		AllowedActions:            mergedActions,
 		SpendCaps:                 spendCaps,
 		NativeRecipients:          recipients,
-		DelegatedNativeRecipients: carriedDelegatedRecipients(nil, addition.DelegatedNativeRecipients, recipients),
+		DelegatedNativeRecipients: carriedDelegatedRecipients(mergeCfg.priorDelegated, addition.DelegatedNativeRecipients, recipients),
 		AllowContractRecipient:    addition.AllowContractRecipient || (current != nil && current.AllowContractRecipient),
 	}
 	if len(spendCaps) > 0 {

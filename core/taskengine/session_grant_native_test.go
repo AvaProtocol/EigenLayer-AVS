@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"strings"
 	"testing"
@@ -368,7 +369,23 @@ func TestNativeRecipientDelegation(t *testing.T) {
 	})
 	t.Run("applied acknowledged recipient fails closed without a reader", func(t *testing.T) {
 		msg := PreflightNativePermission(applied, send, nil)
-		assertNativeCodeCase(t, msg, false, []string{SessionPolicyRecipientNotEOACode, "fail closed"}, []string{SessionPolicyRecipientDelegateChangedCode})
+		assertNativeCodeCase(t, msg, false, []string{SessionPolicyRecipientCodeUnreadableCode, "no chain reader", applied.ID}, []string{SessionPolicyRecipientNotEOACode, SessionPolicyRecipientDelegateChangedCode})
+	})
+	t.Run("applied acknowledged recipient cannot be read", func(t *testing.T) {
+		msg := PreflightNativePermission(applied, send, stubCodeAndFee{codeErr: fmt.Errorf("rpc timeout")})
+		assertNativeCodeCase(t, msg, false, []string{SessionPolicyRecipientCodeUnreadableCode, "rpc timeout", applied.ID}, []string{SessionPolicyRecipientNotEOACode, SessionPolicyRecipientDelegateChangedCode})
+	})
+	t.Run("before apply a missing reader stays not an EOA", func(t *testing.T) {
+		policy := *applied
+		policy.Grant = nil
+		msg := PreflightNativePermission(&policy, send, nil)
+		assertNativeCodeCase(t, msg, false, []string{SessionPolicyRecipientNotEOACode, "fail closed"}, []string{SessionPolicyRecipientCodeUnreadableCode, SessionPolicyRecipientDelegateChangedCode})
+	})
+	t.Run("before apply a failed read stays not an EOA", func(t *testing.T) {
+		policy := *applied
+		policy.Grant = nil
+		msg := PreflightNativePermission(&policy, send, stubCodeAndFee{codeErr: fmt.Errorf("rpc timeout")})
+		assertNativeCodeCase(t, msg, false, []string{SessionPolicyRecipientNotEOACode, "looking up", "rpc timeout"}, []string{SessionPolicyRecipientCodeUnreadableCode, SessionPolicyRecipientDelegateChangedCode})
 	})
 	t.Run("allowContractRecipient skips the applied re-check", func(t *testing.T) {
 		policy := *applied
