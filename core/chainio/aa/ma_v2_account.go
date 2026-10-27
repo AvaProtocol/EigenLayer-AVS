@@ -68,6 +68,12 @@ func ensureMAv2FactoryABI() (abi.ABI, error) {
 // local reimplementation that drifts from the contract produces an address
 // that looks right and holds nothing.
 func GetSenderAddressMAv2(conn *ethclient.Client, owner common.Address, salt *big.Int) (*common.Address, error) {
+	return GetSenderAddressMAv2WithContext(context.Background(), conn, owner, salt)
+}
+
+// GetSenderAddressMAv2WithContext derives through the factory with the caller's
+// deadline. Owner preparation must not outlive an abandoned signing request.
+func GetSenderAddressMAv2WithContext(ctx context.Context, conn *ethclient.Client, owner common.Address, salt *big.Int) (*common.Address, error) {
 	if conn == nil {
 		return nil, fmt.Errorf("nil eth client")
 	}
@@ -83,7 +89,7 @@ func GetSenderAddressMAv2(conn *ethclient.Client, owner common.Address, salt *bi
 		return nil, fmt.Errorf("packing getAddressSemiModular: %w", err)
 	}
 	factory := MAv2FactoryAddress()
-	out, err := conn.CallContract(context.Background(), ethereum.CallMsg{To: &factory, Data: callData}, nil)
+	out, err := conn.CallContract(ctx, ethereum.CallMsg{To: &factory, Data: callData}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("getAddressSemiModular on factory %s for owner %s salt %s: %w",
 			factory.Hex(), owner.Hex(), salt.String(), err)

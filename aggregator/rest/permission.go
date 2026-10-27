@@ -51,6 +51,8 @@ const (
 	OpResumeWorkflow       = "resumeWorkflow"
 	OpTriggerWorkflow      = "triggerWorkflow"
 	OpSimulateWorkflow     = "simulateWorkflow"
+	OpPrepareWorkflow      = "prepareWorkflow"
+	OpSubmitExecution      = "submitExecution"
 	OpEstimateWorkflowFees = "estimateWorkflowFees"
 	OpCountWorkflows       = "countWorkflows"
 
@@ -107,6 +109,8 @@ var permissionMap = map[string]Level{
 
 	// Simulate family: user JWT only (partner alone insufficient).
 	OpSimulateWorkflow: LevelUser,
+	OpPrepareWorkflow:  LevelUser,
+	OpSubmitExecution:  LevelUser,
 	OpRunNode:          LevelUser,
 	OpGetUserOp:        LevelUser,
 	OpRunTrigger:       LevelUser,

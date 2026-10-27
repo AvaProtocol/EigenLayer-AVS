@@ -324,6 +324,9 @@ func registerColonActionShimRoutes(api *echo.Group, s *Server) {
 	wrapper := generated.ServerInterfaceWrapper{Handler: s}
 
 	// Item-level actions
+	api.POST("/executions/:id"+colonActionShim+"submit", func(c echo.Context) error {
+		return s.SubmitExecution(c, generated.Ulid(c.Param("id")))
+	})
 	api.POST("/workflows/:id"+colonActionShim+"pause", func(c echo.Context) error {
 		return s.PauseWorkflow(c, generated.Ulid(c.Param("id")))
 	})
@@ -392,6 +395,7 @@ func registerColonActionShimRoutes(api *echo.Group, s *Server) {
 	// non-shim routes would.
 	api.POST("/auth"+colonActionShim+"exchange", wrapper.AuthExchange)
 	api.POST("/workflows"+colonActionShim+"simulate", wrapper.SimulateWorkflow)
+	api.POST("/workflows"+colonActionShim+"prepare", wrapper.PrepareWorkflow)
 	api.POST("/workflows"+colonActionShim+"estimateFees", wrapper.EstimateWorkflowFees)
 	api.GET("/workflows"+colonActionShim+"count", wrapper.CountWorkflows)
 	api.GET("/executions"+colonActionShim+"count", wrapper.CountExecutions)
