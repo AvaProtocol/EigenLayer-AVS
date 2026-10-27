@@ -709,3 +709,52 @@ func TestPolicyChangesMarkADroppedCapRemoved(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(body), `"removed":true`)
 }
+
+// Prepare and submit return a typed refusal. Its addresses go on the problem,
+// so a client can tell its own recipient from an enabled task's without
+// reading the detail.
+func TestMapPolicyErrorNamesTheRefusedRecipient(t *testing.T) {
+	recipient := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	coinbase := common.HexToAddress("0x7702cb554e6bfb442cb743a7df23154544a7176c")
+	other := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	refuse := func(code []byte, acks []model.DelegatedNativeRecipient) *restmw.HTTPError {
+		t.Helper()
+		err := taskengine.SessionPermissions{
+			NativeRecipients:          []*common.Address{&recipient},
+			DelegatedNativeRecipients: acks,
+			NativeSpendCap:            &model.NativeSpendCap{Amount: "1"},
+			ValidUntilMs:              time.Now().Add(time.Hour).UnixMilli(),
+			CodeAt:                    func(common.Address) ([]byte, error) { return code, nil },
+		}.Validate()
+		require.Error(t, err)
+		var httpErr *restmw.HTTPError
+		require.ErrorAs(t, mapPolicyError(err), &httpErr)
+		require.Equal(t, http.StatusBadRequest, httpErr.Status)
+		require.Equal(t, recipient.Hex(), httpErr.Recipient)
+		require.Equal(t, err.Error(), httpErr.Detail)
+		return httpErr
+	}
+	designation := append([]byte{0xef, 0x01, 0x00}, coinbase.Bytes()...)
+
+	contract := refuse([]byte{0x60, 0x80}, nil)
+	require.Equal(t, taskengine.SessionPolicyRecipientNotEOACode, contract.Code)
+	require.Empty(t, contract.Delegate)
+	require.Empty(t, contract.AcknowledgedDelegate)
+
+	unacked := refuse(designation, nil)
+	require.Equal(t, taskengine.SessionPolicyRecipientNotAcknowledgedCode, unacked.Code)
+	require.Equal(t, coinbase.Hex(), unacked.Delegate)
+	require.Empty(t, unacked.AcknowledgedDelegate)
+
+	ack := model.DelegatedNativeRecipient{Recipient: &recipient, Delegate: &other}
+	changed := refuse(designation, []model.DelegatedNativeRecipient{ack})
+	require.Equal(t, taskengine.SessionPolicyRecipientDelegateChangedCode, changed.Code)
+	require.Equal(t, coinbase.Hex(), changed.Delegate)
+	require.Equal(t, other.Hex(), changed.AcknowledgedDelegate)
+
+	// A NOT_ACKNOWLEDGED string from a path with no typed refusal keeps its own code.
+	plain := mapPolicyError(fmt.Errorf("%s: native recipient %s is 7702-delegated to %s", taskengine.SessionPolicyRecipientNotAcknowledgedCode, recipient.Hex(), coinbase.Hex()))
+	var plainHTTP *restmw.HTTPError
+	require.ErrorAs(t, plain, &plainHTTP)
+	require.Equal(t, taskengine.SessionPolicyRecipientNotAcknowledgedCode, plainHTTP.Code)
+}

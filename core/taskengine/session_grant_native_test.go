@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -263,10 +264,10 @@ func TestNativeRecipientDelegation(t *testing.T) {
 		{name: "plain contract listed as delegated", code: contractCode, acks: []model.DelegatedNativeRecipient{nativeAck(alice, coinbase)}, want: []string{SessionPolicyRecipientNotEOACode, "is a contract"}, forbid: []string{SessionPolicyRecipientDelegateChangedCode}},
 		{name: "plain contract with allowContractRecipient", code: contractCode, allowContract: true, wantOK: true},
 		{name: "lookalike prefix is a contract", code: lookalike, want: []string{SessionPolicyRecipientNotEOACode, "is a contract"}, forbid: []string{"7702-delegated"}},
-		{name: "our delegate unacknowledged", code: nativeDesignation(ours), want: []string{SessionPolicyRecipientNotEOACode, "7702-delegated", ours.Hex()}, forbid: []string{"is a contract", "send via contractWrite"}},
+		{name: "our delegate unacknowledged", code: nativeDesignation(ours), want: []string{SessionPolicyRecipientNotAcknowledgedCode, "7702-delegated", ours.Hex()}, forbid: []string{SessionPolicyRecipientNotEOACode, "is a contract", "send via contractWrite"}},
 		{name: "our delegate acknowledged", code: nativeDesignation(ours), acks: []model.DelegatedNativeRecipient{nativeAck(alice, ours)}, wantOK: true},
 		{name: "our delegate with allowContractRecipient", code: nativeDesignation(ours), allowContract: true, wantOK: true},
-		{name: "another delegate unacknowledged", code: nativeDesignation(coinbase), want: []string{SessionPolicyRecipientNotEOACode, "7702-delegated", coinbase.Hex()}, forbid: []string{"is a contract", "send via contractWrite"}},
+		{name: "another delegate unacknowledged", code: nativeDesignation(coinbase), want: []string{SessionPolicyRecipientNotAcknowledgedCode, "7702-delegated", coinbase.Hex()}, forbid: []string{SessionPolicyRecipientNotEOACode, "is a contract", "send via contractWrite"}},
 		{name: "another delegate acknowledged", code: nativeDesignation(coinbase), acks: []model.DelegatedNativeRecipient{nativeAck(alice, coinbase)}, wantOK: true},
 		{name: "another delegate acknowledged as someone else", code: nativeDesignation(coinbase), acks: []model.DelegatedNativeRecipient{nativeAck(alice, other)}, want: []string{SessionPolicyRecipientDelegateChangedCode, other.Hex(), coinbase.Hex()}, forbid: []string{SessionPolicyRecipientNotEOACode, "is a contract"}},
 	}
@@ -598,5 +599,52 @@ func TestValidateRejectsSpendCapOnWrapSelectors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cannot cap") {
 		t.Fatalf("want cannot-cap copy, got %q", err.Error())
+	}
+}
+
+// Prepare checks every recipient on the merged grant, so a refusal can be
+// about another enabled task's recipient. The typed refusal names it, and
+// REST copies the addresses onto the problem.
+func TestNativeRecipientRefusalNamesTheRecipient(t *testing.T) {
+	alice := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	coinbase := common.HexToAddress("0x7702cb554e6bfb442cb743a7df23154544a7176c")
+	other := common.HexToAddress("0x1111111111111111111111111111111111111111")
+
+	validate := func(code []byte, acks []model.DelegatedNativeRecipient) *NativeRecipientRefusal {
+		t.Helper()
+		err := SessionPermissions{
+			NativeRecipients:          []*common.Address{&alice},
+			DelegatedNativeRecipients: acks,
+			NativeSpendCap:            &model.NativeSpendCap{Amount: "1"},
+			ValidUntilMs:              time.Now().Add(time.Hour).UnixMilli(),
+			CodeAt:                    func(common.Address) ([]byte, error) { return code, nil },
+		}.Validate()
+		var refusal *NativeRecipientRefusal
+		if !errors.As(err, &refusal) {
+			t.Fatalf("want a NativeRecipientRefusal, got %T %v", err, err)
+		}
+		if refusal.Recipient != alice || !strings.HasPrefix(refusal.Error(), refusal.Code+": ") {
+			t.Fatalf("refusal = %+v (%q)", refusal, refusal.Error())
+		}
+		return refusal
+	}
+
+	contract := validate([]byte{0x60, 0x80}, nil)
+	if contract.Code != SessionPolicyRecipientNotEOACode || contract.Delegate != nil || contract.AcknowledgedDelegate != nil {
+		t.Fatalf("contract = %+v", contract)
+	}
+	if !strings.Contains(contract.Error(), alice.Hex()) {
+		t.Fatalf("contract refusal must name the recipient: %q", contract.Error())
+	}
+
+	unacked := validate(nativeDesignation(coinbase), nil)
+	if unacked.Code != SessionPolicyRecipientNotAcknowledgedCode || unacked.Delegate == nil || *unacked.Delegate != coinbase || unacked.AcknowledgedDelegate != nil {
+		t.Fatalf("unacknowledged = %+v", unacked)
+	}
+
+	changed := validate(nativeDesignation(coinbase), []model.DelegatedNativeRecipient{nativeAck(alice, other)})
+	if changed.Code != SessionPolicyRecipientDelegateChangedCode || changed.Delegate == nil || *changed.Delegate != coinbase ||
+		changed.AcknowledgedDelegate == nil || *changed.AcknowledgedDelegate != other {
+		t.Fatalf("changed = %+v", changed)
 	}
 }

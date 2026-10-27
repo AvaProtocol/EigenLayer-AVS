@@ -542,9 +542,12 @@ func filterToDeclaredFields(domain interface{}, declared []apitypes.Type) interf
 // mapPolicyError translates engine sentinels into REST problems.
 func mapPolicyError(err error) error {
 	var conflict *taskengine.PolicyConflictError
+	var refusal *taskengine.NativeRecipientRefusal
 	switch {
 	case errors.As(err, &conflict):
 		return policyConflictHTTP(conflict)
+	case errors.As(err, &refusal):
+		return nativeRecipientRefusalHTTP(refusal)
 	case errors.Is(err, taskengine.ErrSessionPolicyUnsized):
 		return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
 	case errors.Is(err, taskengine.ErrSessionNativeCapUnsized):
@@ -597,11 +600,43 @@ func mapPolicyError(err error) error {
 		// Before NOT_EOA. A changed delegate is a different refusal Studio
 		// can parse, and its text must not be swallowed by the broader code.
 		return badRequest(taskengine.SessionPolicyRecipientDelegateChangedCode, "Acknowledged delegate changed", err.Error())
+	case strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotAcknowledgedCode):
+		return badRequest(taskengine.SessionPolicyRecipientNotAcknowledgedCode, nativeRecipientNotAcknowledgedTitle, err.Error())
 	case strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotEOACode):
 		return badRequest(taskengine.SessionPolicyRecipientNotEOACode, "Native recipient is not an EOA", err.Error())
 	default:
 		return badRequest("POLICIES_REJECTED", "Policy request rejected", err.Error())
 	}
+}
+
+const nativeRecipientNotAcknowledgedTitle = "Delegated native recipient not acknowledged"
+
+// nativeRecipientRefusalHTTP is a 400 that names the refused recipient, so a
+// client can tell this Skill's recipient from another enabled task's without
+// reading the detail. Delegate is what the designation names now;
+// AcknowledgedDelegate is set only when that changed.
+func nativeRecipientRefusalHTTP(e *taskengine.NativeRecipientRefusal) *restmw.HTTPError {
+	title := "Native recipient is not an EOA"
+	switch e.Code {
+	case taskengine.SessionPolicyRecipientNotAcknowledgedCode:
+		title = nativeRecipientNotAcknowledgedTitle
+	case taskengine.SessionPolicyRecipientDelegateChangedCode:
+		title = "Acknowledged delegate changed"
+	}
+	out := &restmw.HTTPError{
+		Status:    http.StatusBadRequest,
+		Code:      e.Code,
+		Title:     title,
+		Detail:    e.Error(),
+		Recipient: e.Recipient.Hex(),
+	}
+	if e.Delegate != nil {
+		out.Delegate = e.Delegate.Hex()
+	}
+	if e.AcknowledgedDelegate != nil {
+		out.AcknowledgedDelegate = e.AcknowledgedDelegate.Hex()
+	}
+	return out
 }
 
 func deref(s *string) string {

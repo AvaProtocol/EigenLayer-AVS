@@ -1565,6 +1565,9 @@ type PreparedPolicy struct {
 // is human-readable; `instance` is a per-request identifier suitable for
 // log correlation.
 type Problem struct {
+	// AcknowledgedDelegate Lowercase or checksummed hex EOA / contract address.
+	AcknowledgedDelegate *EthereumAddress `json:"acknowledgedDelegate,omitempty"`
+
 	// AffectedTaskIds Enabled tasks a grant would leave unable to run. Set on
 	// `409 SESSION_POLICY_NOT_COVERING`,
 	// `409 SESSION_POLICY_TARGET_UNRESOLVED`, and
@@ -1576,6 +1579,9 @@ type Problem struct {
 	// switch on this for programmatic handling. Mirrors the gRPC-era
 	// ErrorCode enum vocabulary.
 	Code *string `json:"code,omitempty"`
+
+	// Delegate Lowercase or checksummed hex EOA / contract address.
+	Delegate *EthereumAddress `json:"delegate,omitempty"`
 
 	// Detail Human-readable explanation specific to this occurrence.
 	Detail *string `json:"detail,omitempty"`
@@ -1591,6 +1597,9 @@ type Problem struct {
 	// `SESSION_POLICY_TARGET_UNRESOLVED`, `SESSION_POLICY_NATIVE_UNSIZED`,
 	// `SESSION_POLICY_EXPIRED`, and `SESSION_POLICY_SIGNER_RETIRED`.
 	PolicyId *string `json:"policyId,omitempty"`
+
+	// Recipient Lowercase or checksummed hex EOA / contract address.
+	Recipient *EthereumAddress `json:"recipient,omitempty"`
 
 	// Required Permissions one workflow still needs, sized to the runs it has left.
 	// Cap amounts are totals in the token's smallest unit, not per-run amounts.
