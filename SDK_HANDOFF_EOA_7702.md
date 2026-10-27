@@ -6,6 +6,10 @@ B2–B5: wallet record, delegation API, `policies:*` against `runner == EOA`, an
 
 ## Two approvals
 
+These are the approvals for **session-authorized Auto execution**. The
+owner-signed Manual handoff below uses delegation followed by an operation
+signature, and does not require the session grant in step 2.
+
 1. **Delegate** — `POST /api/v1/wallets/{eoa}/delegation:prepare` then `:submit`. User signs an EIP-7702 authorization (not a session grant). Partner assertions are refused (`LevelUserRefusePartner`).
 2. **Grant** — same `policies:prepare` / `policies:submit` as Track A, with `{address}` = the EOA. `SessionPolicyActions.*` are wallet-kind agnostic.
 
@@ -53,6 +57,41 @@ Do not create this via `POST /wallets` (CREATE2 salt). A user may have **both** 
 A workflow whose runner is the derived CREATE2 wallet is unaffected. Do not set `aa_sender` to the owner EOA unless that workflow is meant to spend from the EOA.
 
 If `alchemy_paymaster_policy_id` is set, sponsorship is requested with `sender = EOA`. Refusal is fatal (no silent self-fund). Gas Manager simulated the 7702 EOA the same as a deployed MA v2 runner; **AA23 was missing-grant, not sender-type rejection** (MA v2 takes the entity from the nonce key, so with no grant validation reverts `ValidationFunctionMissing` instead of returning `SIG_VALIDATION_FAILED`; undeployed CREATE2 is **AA20**). `dummySignatureV07` was already correctly framed. A grant-carrying send against the existing production policy is denied by the custom-rules webhook (FeeLedger does not know a throwaway). We are not changing that policy, so sponsored K7 (Paymaster non-zero, EOA Δ = value only, NT Δ = value only) is unobserved on chain. Do not cite the AA23 simulation as "sponsorship was tested." Flag stays false.
+
+## Owner-signed Manual execution
+
+`POST /workflows:prepare` and signature-only `POST /executions/{id}:submit`
+also accept a stored `kind=eoa_7702` source. Both `owner_execution_enabled`
+and the chain's `eoa_7702_execute` must be true. Defaults remain false.
+
+1. Complete the existing explicit delegation action and K13 registration.
+   An undelegated EOA cannot execute a UserOperation. Prepare never signs or
+   broadcasts a type-4 transaction and never changes the EOA's account code.
+2. Capture the allowlisted token balances once and compile fixed amounts into
+   the Manual workflow's terminal ContractWrite, as in SDK #289. The gateway
+   resolves/prices those calls with `sender=owner=EOA`, no salt or factory data.
+3. Review the priced operation, then `personal_sign` the **32 raw bytes** of
+   `userOpHash` (ethers `signMessage(getBytes(userOpHash))`). Submit only the
+   65-byte signature; the gateway verifies it and adds `0xFF 0x00` framing.
+4. Poll the existing UserOp status route. Never prepare or send another operation
+   to resolve a timeout or missing receipt.
+
+The pin is still `alchemy.sma-7702.1.0.0`, not the later raw-hash validator.
+The owner nonce is entity 0 with global option 1. No session is resolved or
+installed. Enabled fallback signer and EntryPoint are checked on the delegated
+EOA itself, in addition to K13. A changed or disabled fallback is refused.
+Pricing, sponsorship refusal, maximum gas prefund, immutable continuation,
+the durable submitting marker and keyless relay follow the derived-wallet
+handoff. This does not add native-value sweeps or initial delegation bundled
+inside the UserOperation.
+
+An EOA with this canonical delegation can still sign for its derived MA v2
+wallet. That derived-wallet action does not require `eoa_7702_execute`, because
+its source is the derived wallet. The signing EOA's designation must pass K13
+and its code hash is bound to the preparation. Arbitrary contract owners and
+unverified delegation implementations remain unsupported.
+
+See [the implementation and verification note](docs/changes/20261027-owner-eoa-userops.md).
 
 ## Native recipients (Track A interaction)
 

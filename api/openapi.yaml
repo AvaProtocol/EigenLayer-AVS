@@ -3037,9 +3037,16 @@ paths:
         Requires the concrete owner's Bearer JWT and a registered supported
         source wallet. Current on-chain owner, implementation and gas funding
         are checked independently of the stored wallet association.
-        The factory implementation must be the verified personal_sign build
-        0x000000000000c5A9089039570Dd36455b5C07383; other builds are refused.
-        Up to 32 calls; no native value, EIP-7702, write Loop or post-write nodes.
+        Derived wallets require the verified factory personal_sign build
+        0x000000000000c5A9089039570Dd36455b5C07383. An EOA source must already be
+        delegated to the pinned SMA-7702 1.0.0 implementation, registered as
+        kind=eoa_7702, and enabled by eoa_7702_execute on Sepolia or Base.
+        EOA operations use sender=owner and omit factory deployment fields.
+        Delegation is a separate explicit wallet action; prepare never installs
+        delegation or a session grant. Both account kinds use personal_sign of
+        the 32 raw userOpHash bytes, owner nonce entity 0/global option 1.
+        A canonical delegated EOA can also sign for its derived smart wallet.
+        Up to 32 calls; no native value, write Loop or post-write nodes.
         Retained preparations are capped at 64 per owner. Ordinary Auto/session
         and simulate behavior is unchanged.
       operationId: prepareWorkflow

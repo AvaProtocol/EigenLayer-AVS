@@ -17,6 +17,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil/fixtures"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
@@ -35,10 +36,21 @@ import (
 // decoder. Only the external chain/bundler are local HTTP fixtures. No real
 // network, controller/session key, testnet wallet or transaction is used.
 func TestOwnerWorkflowHTTPPrepareSignSubmitAndExistingStatus(t *testing.T) {
+	t.Run("derived", func(t *testing.T) { ownerWorkflowHTTPRoundTrip(t, false) })
+	t.Run("delegated EOA", func(t *testing.T) { ownerWorkflowHTTPRoundTrip(t, true) })
+}
+
+func ownerWorkflowHTTPRoundTrip(t *testing.T, eoa bool) {
+	t.Helper()
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	owner := crypto.PubkeyToAddress(key.PublicKey)
 	sender := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	destination := owner
+	if eoa {
+		sender = owner
+		destination = common.HexToAddress("0x8888888888888888888888888888888888888888")
+	}
 	implementation := common.HexToAddress("0x000000000000c5A9089039570Dd36455b5C07383")
 	factory := aa.MAv2FactoryAddress()
 	token1 := "0x6666666666666666666666666666666666666666"
@@ -64,6 +76,11 @@ func TestOwnerWorkflowHTTPPrepareSignSubmitAndExistingStatus(t *testing.T) {
 			result = "0x6000"
 			if address == owner {
 				result = "0x"
+				if eoa {
+					result = "0xef0100" + strings.ToLower(config.SMA7702Delegate().Hex()[2:])
+				}
+			} else if address == config.SMA7702Delegate() {
+				result = hexutil.Encode(fixtures.SMA7702Runtime())
 			}
 		case "eth_getStorageAt":
 			result = hexutil.Encode(common.LeftPadBytes(implementation.Bytes(), 32))
@@ -144,8 +161,14 @@ func TestOwnerWorkflowHTTPPrepareSignSubmitAndExistingStatus(t *testing.T) {
 	db, err := storage.NewWithPath(t.TempDir())
 	require.NoError(t, err)
 	defer db.Close()
-	require.NoError(t, taskengine.StoreWallet(db, 11155111, owner, &model.SmartWallet{Owner: &owner, Address: &sender, Factory: &factory, Salt: big.NewInt(0)}))
 	cfg := &config.Config{OwnerExecutionEnabled: true, SmartWallet: &config.SmartWalletConfig{ChainID: 11155111, EthRpcUrl: chain.URL, BundlerURL: chain.URL, BundlerProvider: config.BundlerProviderSelfHosted, DisableGasSponsorship: true}}
+	if eoa {
+		require.NoError(t, taskengine.StoreEOA7702Wallet(db, 11155111, owner, config.SMA7702Delegate()))
+		cfg.SmartWallet.EOA7702Execute = true
+		cfg.SmartWallet.SMA7702Delegate, cfg.SmartWallet.SMA7702ImplHash = config.SMA7702Delegate(), config.SMA7702ImplHash()
+	} else {
+		require.NoError(t, taskengine.StoreWallet(db, 11155111, owner, &model.SmartWallet{Owner: &owner, Address: &sender, Factory: &factory, Salt: big.NewInt(0)}))
+	}
 	engine := taskengine.New(db, cfg, nil, testutil.GetLogger())
 	e := echo.New()
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -182,8 +205,8 @@ func TestOwnerWorkflowHTTPPrepareSignSubmitAndExistingStatus(t *testing.T) {
 			map[string]interface{}{"id": "usdc", "name": "usdc", "type": "contractRead", "config": map[string]interface{}{"chainId": 11155111, "contractAddress": token1, "contractAbi": readABI, "methodCalls": []interface{}{map[string]interface{}{"methodName": "balanceOf", "methodParams": []string{sender.Hex()}}}}},
 			map[string]interface{}{"id": "weth", "name": "weth", "type": "contractRead", "config": map[string]interface{}{"chainId": 11155111, "contractAddress": token2, "contractAbi": readABI, "methodCalls": []interface{}{map[string]interface{}{"methodName": "balanceOf", "methodParams": []string{sender.Hex()}}}}},
 			map[string]interface{}{"id": "transfer", "name": "transfer", "type": "contractWrite", "config": map[string]interface{}{"chainId": 11155111, "contractAddress": token1, "contractAbi": writeABI, "methodCalls": []interface{}{
-				map[string]interface{}{"methodName": "transfer", "methodParams": []string{owner.Hex(), "{{usdc.data.balanceOf}}"}},
-				map[string]interface{}{"methodName": "transfer", "contractAddress": token2, "methodParams": []string{owner.Hex(), "{{weth.data.balanceOf}}"}},
+				map[string]interface{}{"methodName": "transfer", "methodParams": []string{destination.Hex(), "{{usdc.data.balanceOf}}"}},
+				map[string]interface{}{"methodName": "transfer", "contractAddress": token2, "methodParams": []string{destination.Hex(), "{{weth.data.balanceOf}}"}},
 			}}},
 		},
 		"edges": []interface{}{map[string]string{"id": "a", "source": "start", "target": "usdc"}, map[string]string{"id": "b", "source": "usdc", "target": "weth"}, map[string]string{"id": "c", "source": "weth", "target": "transfer"}},
@@ -194,6 +217,10 @@ func TestOwnerWorkflowHTTPPrepareSignSubmitAndExistingStatus(t *testing.T) {
 	require.Equal(t, "waiting", string(prepared.Execution.Status))
 	require.Len(t, prepared.Calls, 2)
 	require.Equal(t, "0x", prepared.UserOperation.Signature)
+	require.Equal(t, sender.Hex(), prepared.UserOperation.Sender)
+	require.Nil(t, prepared.UserOperation.Factory)
+	require.Nil(t, prepared.UserOperation.FactoryData)
+	require.Equal(t, destination, common.BytesToAddress(common.FromHex(prepared.Calls[0].Data)[4:36]))
 	require.Equal(t, "1000000", new(big.Int).SetBytes(common.FromHex(prepared.Calls[0].Data)[36:68]).String())
 	require.Equal(t, "20000000000000000", new(big.Int).SetBytes(common.FromHex(prepared.Calls[1].Data)[36:68]).String())
 	sig, err := crypto.Sign(accounts.TextHash(common.HexToHash(prepared.UserOpHash).Bytes()), key)
