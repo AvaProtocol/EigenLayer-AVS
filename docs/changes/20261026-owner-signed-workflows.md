@@ -165,7 +165,11 @@ A crash after the marker and before the RPC leaves the id in `submitting`.
 A later submit asks the bundler whether that hash is already known. A hit is
 stored as `submitted`. A miss stays `submitting` until the ten-minute signing
 window (`ExpiresAt`) passes, then the record becomes `unsent` and submit returns
-FailedPrecondition so the client prepares again. A lookup error leaves the
+FailedPrecondition so the client prepares again. The replacement reads
+EntryPoint.getNonce for entity 0 plus ValidationOptionGlobal on the same sender
+and does not use the session nonce cache, so until that nonce is mined the new
+operation carries the same full nonce and only one of the two can be included.
+A lookup error leaves the
 record `submitting`: the gateway keeps the marker when it cannot tell whether
 the operation was accepted. The relay after the marker uses a context that
 outlives client disconnect, with its own one-minute timeout, so a dropped

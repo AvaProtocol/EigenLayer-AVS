@@ -3113,7 +3113,10 @@ paths:
         RPC leaves the id submitting. A retry looks the hash up at the bundler:
         a hit is stored as submitted; an unknown hash stays submitting until
         the ten-minute signing window ends, then becomes unsent and requires a
-        new prepare. A lookup error leaves the marker submitting. A post-send
+        new prepare. That prepare uses the same sender and owner nonce key
+        (entity 0, global), read from EntryPoint.getNonce with no session
+        nonce cache, so an unmined operation and its replacement cannot both
+        be included. A lookup error leaves the marker submitting. A post-send
         storage failure also preserves the marker. Poll the prepared hash. An
         empty bundler result during the window is unresolved. Uncertain and
         submitted records are retained for 24 hours and do not count toward

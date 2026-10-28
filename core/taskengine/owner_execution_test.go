@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -246,7 +247,7 @@ func TestOwnerEOAWorkflowHonorsFlagAndStoredAssociation(t *testing.T) {
 				input["settings"].(map[string]interface{})["runner"] = user.Address.Hex()
 				_, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
 				require.Equal(t, codes.FailedPrecondition, status.Code(err))
-				require.Contains(t, err.Error(), "eoa_7702_execute is false")
+				require.Equal(t, config.EOA7702ExecuteDisabledDetail, status.Convert(err).Message())
 				require.Zero(t, backend.prepared.Load(), "disabled execution must stop before graph capture/pricing")
 				return
 			}
@@ -634,6 +635,15 @@ func TestOwnerWorkflowReconcilesSubmittingMarker(t *testing.T) {
 			require.Zero(t, backend.sent.Load())
 		})
 	}
+}
+
+func TestOwnerPreconditionKeepsEOADisabledSentinel(t *testing.T) {
+	wrapped := fmt.Errorf("owner operation could not be prepared: %w", config.ErrEOA7702ExecuteDisabled)
+	err := ownerPreconditionError(wrapped, "owner operation could not be prepared: %v")
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	require.Equal(t, config.EOA7702ExecuteDisabledDetail, status.Convert(err).Message())
+	other := ownerPreconditionError(errors.New("nonce changed"), "owner preparation is stale: %v")
+	require.Contains(t, status.Convert(other).Message(), "nonce changed")
 }
 
 func TestOwnerWorkflowOneInFlightSubmit(t *testing.T) {

@@ -5,11 +5,11 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/mapping"
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -142,11 +142,13 @@ func mapOwnerExecutionError(err error) error {
 			return &restmw.HTTPError{Status: http.StatusPreconditionFailed, Code: "OWNER_EXECUTION_PREPARE_REQUIRED", Title: "Prepare and review again", Detail: st.Message()}
 		case codes.ResourceExhausted:
 			return &restmw.HTTPError{Status: http.StatusTooManyRequests, Code: "OWNER_EXECUTION_LIMIT", Title: "Too many owner executions", Detail: st.Message()}
+		case codes.Unavailable:
+			return &restmw.HTTPError{Status: http.StatusServiceUnavailable, Code: "OWNER_EXECUTION_UNAVAILABLE", Title: "Owner execution temporarily unavailable", Detail: st.Message()}
 		}
 	}
 	return &restmw.HTTPError{Status: http.StatusBadGateway, Code: "OWNER_EXECUTION_FAILED", Title: "Owner execution unavailable"}
 }
 
 func ownerExecutionDisabled(message string) bool {
-	return message == taskengine.OwnerExecutionDisabledDetail || strings.Contains(message, "eoa_7702_execute is false")
+	return message == taskengine.OwnerExecutionDisabledDetail || message == config.EOA7702ExecuteDisabledDetail
 }

@@ -296,7 +296,7 @@ func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, tri
 	}
 	sw := n.ResolveSmartWalletConfig(chainID)
 	if err := checkOwnerWalletConfig(sw, wallet, chainID); err != nil {
-		return nil, status.Error(codes.FailedPrecondition, err.Error())
+		return nil, ownerPreconditionError(err, "")
 	}
 	// Serialize this owner's cap check with the insert. executionMutex is a
 	// fixed 256-shard array, not a map that grows with execution ids, and
@@ -332,7 +332,7 @@ func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, tri
 	}
 	prepared, err := n.ownerBackend().Prepare(ctx, sw, user.Address, *wallet.Address, wallet.Salt, collector.calls, n.logger)
 	if err != nil {
-		return nil, status.Errorf(codes.FailedPrecondition, "owner operation could not be prepared: %v", err)
+		return nil, ownerPreconditionError(err, "owner operation could not be prepared: %v")
 	}
 	packed, err := aa.PackExecuteBatchMAv2(collector.calls)
 	if err != nil {
@@ -390,6 +390,22 @@ func checkOwnerWalletConfig(sw *config.SmartWalletConfig, wallet *model.SmartWal
 	return nil
 }
 
+// ownerPreconditionError keeps the disabled EOA flag as its own exact
+// FailedPrecondition. A longer wrapper would make REST ask the client to
+// prepare again for a flag that prepare cannot turn on.
+func ownerPreconditionError(err error, format string) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, config.ErrEOA7702ExecuteDisabled) {
+		return status.Error(codes.FailedPrecondition, config.EOA7702ExecuteDisabledDetail)
+	}
+	if format == "" {
+		return status.Error(codes.FailedPrecondition, err.Error())
+	}
+	return status.Errorf(codes.FailedPrecondition, format, err)
+}
+
 func sameOwnerWalletSalt(a, b *big.Int) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
@@ -399,6 +415,8 @@ func sameOwnerWalletSalt(a, b *big.Int) bool {
 
 // countPreparedOwnerExecutions ignores submitted, rejected, unknown and
 // unsent records. Those are kept for 24h and must not block a new prepare.
+// The prefix is at most 64 prepared records plus that day of retained
+// submissions, so the prepare shard reads the values directly.
 func (n *Engine) countPreparedOwnerExecutions(owner common.Address) (int, error) {
 	items, err := n.db.GetByPrefix(ownerExecutionPrefix(owner))
 	if err != nil {
@@ -420,7 +438,16 @@ func (n *Engine) countPreparedOwnerExecutions(owner common.Address) (int, error)
 // reconcileSubmittingOwnerExecution runs when a retry finds the pre-send
 // marker. A bundler hit becomes submitted. An unknown hash past the signing
 // window becomes unsent, which asks for a new prepare. A lookup error leaves
-// the marker alone: absence is not the same as a failed read.
+// the marker alone: a failed read is not an empty result.
+//
+// A new prepare after unsent uses the same sender and the same owner nonce
+// key: entity 0 (the fallback signer) with ValidationOptionGlobal.
+// PrepareOwnerUserOp reads EntryPoint.getNonce for that key and refuses any
+// other key. It does not consult the session nonce cache, and owner submit
+// does not record acceptance there. Until that nonce is mined, the
+// replacement carries the same full nonce, so the EntryPoint includes at
+// most one of the two operations. After it is mined, getNonce advances and
+// the new prepare is a separate signed operation.
 func (n *Engine) reconcileSubmittingOwnerExecution(ctx context.Context, id string, record *ownerExecutionRecord) error {
 	lookupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ownerBundlerLookupTimeout)
 	defer cancel()
@@ -525,7 +552,7 @@ func (n *Engine) SubmitOwnerExecution(ctx context.Context, user *model.User, id 
 	defer cancel()
 	sw := n.ResolveSmartWalletConfig(record.ChainID)
 	if err := checkOwnerWalletConfig(sw, wallet, record.ChainID); err != nil {
-		return nil, status.Error(codes.FailedPrecondition, err.Error())
+		return nil, ownerPreconditionError(err, "")
 	}
 	// Re-run only read/check preparation and require byte-identical calls. The
 	// original operation is never replaced or repriced after the owner signs.
@@ -550,7 +577,7 @@ func (n *Engine) SubmitOwnerExecution(ctx context.Context, user *model.User, id 
 	}
 	prepared := &preset.PreparedOwnerUserOp{Operation: op, Identity: record.Identity}
 	if err := n.ownerBackend().Validate(ctx, sw, user.Address, record.Salt, prepared); err != nil {
-		return nil, status.Errorf(codes.FailedPrecondition, "owner preparation is stale: %v", err)
+		return nil, ownerPreconditionError(err, "owner preparation is stale: %v")
 	}
 	record.SubmissionState = ownerSubmissionSubmitting
 	// Keep the stored operation unsigned; signatures are neither logged nor

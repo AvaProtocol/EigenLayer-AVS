@@ -67,10 +67,12 @@ func TestOwnerExecutionProblemMapping(t *testing.T) {
 		{codes.FailedPrecondition, "failure", http.StatusPreconditionFailed, "OWNER_EXECUTION_PREPARE_REQUIRED"},
 		{codes.FailedPrecondition, "owner operation was not sent; prepare and sign again", http.StatusPreconditionFailed, "OWNER_EXECUTION_PREPARE_REQUIRED"},
 		{codes.FailedPrecondition, taskengine.OwnerExecutionDisabledDetail, http.StatusForbidden, "OWNER_EXECUTION_DISABLED"},
-		{codes.FailedPrecondition, "eoa_7702_execute is false", http.StatusForbidden, "OWNER_EXECUTION_DISABLED"},
+		{codes.FailedPrecondition, config.EOA7702ExecuteDisabledDetail, http.StatusForbidden, "OWNER_EXECUTION_DISABLED"},
+		{codes.FailedPrecondition, "owner operation could not be prepared: " + config.EOA7702ExecuteDisabledDetail, http.StatusPreconditionFailed, "OWNER_EXECUTION_PREPARE_REQUIRED"},
 		{codes.FailedPrecondition, "the feature is disabled for this wallet", http.StatusPreconditionFailed, "OWNER_EXECUTION_PREPARE_REQUIRED"},
 		{codes.ResourceExhausted, "failure", http.StatusTooManyRequests, "OWNER_EXECUTION_LIMIT"},
 		{codes.Unauthenticated, "owner JWT required", http.StatusUnauthorized, "OWNER_EXECUTION_UNAUTHENTICATED"},
+		{codes.Unavailable, "bundler unavailable", http.StatusServiceUnavailable, "OWNER_EXECUTION_UNAVAILABLE"},
 	} {
 		var httpErr *restmw.HTTPError
 		require.ErrorAs(t, mapOwnerExecutionError(status.Error(tc.code, tc.message)), &httpErr)

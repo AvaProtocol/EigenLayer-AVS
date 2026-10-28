@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -65,10 +66,18 @@ func (c *SmartWalletConfig) ValidateSMA7702() error {
 	return c.validateSMA7702Pin()
 }
 
+// EOA7702ExecuteDisabledDetail is the exact text of ErrEOA7702ExecuteDisabled.
+// Owner-execution REST matches this string for OWNER_EXECUTION_DISABLED.
+const EOA7702ExecuteDisabledDetail = "eoa_7702_execute is false"
+
+// ErrEOA7702ExecuteDisabled means the execute flag is off. Callers that add
+// context must wrap it with %w so errors.Is still finds this sentinel.
+var ErrEOA7702ExecuteDisabled = errors.New(EOA7702ExecuteDisabledDetail)
+
 // CheckEOA7702Execute is the send-path gate: flag on, canonical pin, Sepolia or Base.
 func (c *SmartWalletConfig) CheckEOA7702Execute() error {
 	if c == nil || !c.EOA7702Execute {
-		return fmt.Errorf("eoa_7702_execute is false")
+		return ErrEOA7702ExecuteDisabled
 	}
 	return c.eoa7702ExecutePreconditions()
 }
