@@ -576,3 +576,172 @@ func modelCap(pairs ...string) []model.ERC20SpendCap {
 func bigInt(n int64) *big.Int {
 	return big.NewInt(n)
 }
+
+const (
+	skillETH        = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	batchSendAlice  = "0x00000000000000000000000000000000000000a1"
+	batchSendBob    = "0x00000000000000000000000000000000000000b2"
+	batchSendCarol  = "0x00000000000000000000000000000000000000c3"
+	batchSendDaniel = "0x00000000000000000000000000000000000000d4"
+)
+
+func loopEthNode(name, input, iter, recipient, amount string) *avsproto.TaskNode {
+	return &avsproto.TaskNode{
+		Name: name,
+		TaskType: &avsproto.TaskNode_Loop{
+			Loop: &avsproto.LoopNode{
+				Config: &avsproto.LoopNode_Config{InputVariable: input, IterVal: iter},
+				Runner: &avsproto.LoopNode_EthTransfer{
+					EthTransfer: &avsproto.ETHTransferNode{
+						Config: &avsproto.ETHTransferNode_Config{ChainId: skillSepolia, Destination: recipient, Amount: amount},
+					},
+				},
+			},
+		},
+	}
+}
+
+// batchSendTask is the compiled Batch send to wallets graph: code1 splits the
+// funded rows, one loop sends the ERC-20 rows and one the ETH rows.
+func batchSendTask(t *testing.T, source string, runs int64, transfers []any) *avsproto.Task {
+	t.Helper()
+	task := &avsproto.Task{
+		Id:           "batch-send",
+		Name:         "Batch send to wallets",
+		MaxExecution: runs,
+		Nodes: []*avsproto.TaskNode{
+			{
+				Name: "code1",
+				TaskType: &avsproto.TaskNode_CustomCode{
+					CustomCode: &avsproto.CustomCodeNode{
+						Config: &avsproto.CustomCodeNode_Config{Source: source},
+					},
+				},
+			},
+			loopTransferNode("sendTokens", "{{code1.data.tokenSends}}", "value", "{{value.token_amount.address}}", "{{value.recipient}}", "{{value.token_amount.amount}}"),
+			loopEthNode("sendEth", "{{code1.data.ethSends}}", "value", "{{value.recipient}}", "{{value.token_amount.amount}}"),
+		},
+	}
+	if transfers == nil {
+		return task
+	}
+	raw, err := structpb.NewValue(map[string]any{"transfers": transfers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.InputVariables = map[string]*structpb.Value{"settings": raw}
+	return task
+}
+
+func batchSendRow(token, recipient string, amount any) map[string]any {
+	return map[string]any{
+		"recipient":    recipient,
+		"token_amount": map[string]any{"address": token, "amount": amount, "decimals": "18"},
+	}
+}
+
+func nativeRecipientSet(need *WorkflowNeed) []string {
+	out := make([]string, 0, len(need.NativeRecipients))
+	for _, rec := range need.NativeRecipients {
+		if rec != nil {
+			out = append(out, strings.ToLower(rec.Hex()))
+		}
+	}
+	return out
+}
+
+func TestBatchSendSizesTokensAndEthFromSettings(t *testing.T) {
+	now := skillNow()
+	rows := []any{
+		batchSendRow(skillUSDC, batchSendAlice, "100000"),
+		batchSendRow(skillUSDT, batchSendBob, "200000"),
+		batchSendRow(skillETH, batchSendCarol, "1000"),
+		// The same wallet twice is one recipient on the grant, both amounts in the cap.
+		batchSendRow(skillETH, batchSendCarol, "2000"),
+		// code1 never sends a zero row.
+		batchSendRow(skillETH, batchSendDaniel, "0"),
+	}
+	need := deriveSepolia(batchSendTask(t, batchSendFundingSource, 3, rows), now)
+	if need == nil || need.Unresolved || need.CapNeedsInput || need.CapCeiling || need.NativeUnsized {
+		t.Fatalf("batch send = %#v", need)
+	}
+	if got := needCapAmount(need, skillUSDC); got != "300000" {
+		t.Fatalf("USDC cap = %q, want 100000 x 3", got)
+	}
+	if got := needCapAmount(need, skillUSDT); got != "600000" {
+		t.Fatalf("USDT cap = %q, want 200000 x 3", got)
+	}
+	if !actionHasSelector(need.Actions, skillUSDC, selectorTransfer) || !actionHasSelector(need.Actions, skillUSDT, selectorTransfer) {
+		t.Fatalf("actions = %+v", need.Actions)
+	}
+	if got := nativeRecipientSet(need); len(got) != 1 || got[0] != batchSendCarol {
+		t.Fatalf("native recipients = %v, want only %s", got, batchSendCarol)
+	}
+	if need.NativeSpendCap == nil || need.NativeSpendCap.Amount != "9000" {
+		t.Fatalf("native cap = %#v, want (1000+2000) x 3", need.NativeSpendCap)
+	}
+	if need.NativeSendOps != 6 {
+		t.Fatalf("native send ops = %d, want 2 ETH rows x 3 runs", need.NativeSendOps)
+	}
+
+	crlf := batchSendTask(t, strings.ReplaceAll(batchSendFundingSource, "\n", "\r\n"), 3, rows)
+	if got := deriveSepolia(crlf, now); got == nil || got.Unresolved || needCapAmount(got, skillUSDC) != "300000" {
+		t.Fatalf("CRLF code1 = %#v", got)
+	}
+
+	ethOnly := deriveSepolia(batchSendTask(t, batchSendFundingSource, 1, []any{batchSendRow(skillETH, batchSendAlice, "5")}), now)
+	if ethOnly == nil || ethOnly.Unresolved || len(ethOnly.Actions) != 0 || len(ethOnly.Caps) != 0 {
+		t.Fatalf("ETH only = %#v", ethOnly)
+	}
+	if got := nativeRecipientSet(ethOnly); len(got) != 1 || got[0] != batchSendAlice || ethOnly.NativeSpendCap.Amount != "5" {
+		t.Fatalf("ETH only recipients = %v, cap = %#v", got, ethOnly.NativeSpendCap)
+	}
+
+	tokenOnly := deriveSepolia(batchSendTask(t, batchSendFundingSource, 2, []any{batchSendRow(skillUSDC, batchSendAlice, "7")}), now)
+	if tokenOnly == nil || tokenOnly.Unresolved || len(tokenOnly.NativeRecipients) != 0 || tokenOnly.NativeSpendCap != nil {
+		t.Fatalf("ERC-20 only = %#v", tokenOnly)
+	}
+	if got := needCapAmount(tokenOnly, skillUSDC); got != "14" {
+		t.Fatalf("ERC-20 only cap = %q", got)
+	}
+
+	if got := deriveSepolia(batchSendTask(t, batchSendFundingSource, 3, []any{}), now); got != nil {
+		t.Fatalf("empty transfers must not move funds, got %#v", got)
+	}
+}
+
+func TestBatchSendShapeStaysUnresolved(t *testing.T) {
+	now := skillNow()
+	rows := []any{batchSendRow(skillUSDC, batchSendAlice, "100"), batchSendRow(skillETH, batchSendBob, "100")}
+	assertUnresolved := func(name string, task *avsproto.Task) {
+		t.Helper()
+		got := deriveSepolia(task, now)
+		if got == nil || !got.Unresolved {
+			t.Fatalf("%s = %#v", name, got)
+		}
+	}
+
+	assertUnresolved("edited code1", batchSendTask(t, strings.Replace(batchSendFundingSource, "ethSends", "ethSendz", 1), 3, rows))
+	assertUnresolved("old batch code1", batchSendTask(t, batchFundingSource, 3, rows))
+
+	swapped := batchSendTask(t, batchSendFundingSource, 3, rows)
+	swapped.Nodes[1].GetLoop().Config.InputVariable = "{{code1.data.ethSends}}"
+	swapped.Nodes[2].GetLoop().Config.InputVariable = "{{code1.data.tokenSends}}"
+	assertUnresolved("runners swapped", swapped)
+
+	wrongAmount := batchSendTask(t, batchSendFundingSource, 3, rows)
+	wrongAmount.Nodes[2].GetLoop().GetEthTransfer().Config.Amount = "{{value.amount}}"
+	assertUnresolved("ETH amount expression", wrongAmount)
+
+	for name, row := range map[string]map[string]any{
+		"ETH row without a recipient": batchSendRow(skillETH, "", "100"),
+		"ETH row to the zero address": batchSendRow(skillETH, "0x0000000000000000000000000000000000000000", "100"),
+		"ETH row with MAX":            batchSendRow(skillETH, batchSendBob, "MAX"),
+		"token row with a fraction":   batchSendRow(skillUSDC, batchSendAlice, "1.5"),
+		"row with no token":           batchSendRow("", batchSendAlice, "100"),
+	} {
+		assertUnresolved(name, batchSendTask(t, batchSendFundingSource, 3, []any{rows[0], row}))
+	}
+
+	assertUnresolved("no settings", batchSendTask(t, batchSendFundingSource, 3, nil))
+}

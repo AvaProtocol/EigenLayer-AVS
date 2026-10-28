@@ -13,13 +13,14 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
-// Compiled Split Incoming Payments and On-Demand Batch Transfer loops do not
-// iterate a settings list. {{value}} stays unbound, and the generic walk
-// would mark the transfer unresolved. These two shapes are recognized from
-// the stored protobuf only: the split source is scanned against the
-// generator's grammar, and the batch source must equal the shipped code1
-// in studio templates/on-demand-batch-transfer-telegram.json. A Studio
-// edit that is not copied here stays unresolved. The code is not executed.
+// Compiled Split Incoming Payments, On-Demand Batch Transfer and Batch send
+// to wallets loops do not iterate a settings list. {{value}} stays unbound,
+// and the generic walk would mark the transfer unresolved. These shapes are
+// recognized from the stored protobuf only: the split source is scanned
+// against the generator's grammar, and each batch source must equal the
+// shipped code1 in studio templates/on-demand-batch-transfer-telegram.json or
+// templates/on-demand-batch-send.json. A Studio edit that is not copied here
+// stays unresolved. The code is not executed.
 
 const batchFundingSource = `// Multi-token aware funding check. For each transfer row we draw down the
 // available balance of that row's token. Rows are funded in order, so two
@@ -50,9 +51,55 @@ const transfers = settings.transfers.map((t) => {
 
 return { transfers, fundedCount, skippedCount: transfers.length - fundedCount };`
 
+// batchSendFundingSource is code1 of studio templates/on-demand-batch-send.json
+// and templates/recurring-batch-send.json, which share it. It funds the rows
+// of settings.transfers in order and splits the funded ones in two, because a
+// loop compiles one runner: ERC-20 rows to {{code1.data.tokenSends}} and ETH
+// rows to {{code1.data.ethSends}}.
+const batchSendFundingSource = `// Funds each transfer in order from the smart wallet's balances. Rows on
+// the same token share its balance. A funded row goes to the ETH loop or
+// the token loop: a loop sends every row with one runner, so ETH and
+// ERC-20 rows can't share one. skippedTokens names each token a skipped
+// row needed, once, so the run can say which one ran short.
+const NATIVE = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+const remaining = {};
+for (const b of balance1.data) {
+  if (!b) continue;
+  const addr = typeof b.tokenAddress === 'string' ? b.tokenAddress.toLowerCase() : '';
+  const key = b.nativeToken === true || addr === '' || addr === NATIVE ? NATIVE : addr;
+  remaining[key] = BigInt(b.balance || '0');
+}
+
+let fundedCount = 0;
+const tokenSends = [];
+const ethSends = [];
+const skippedTokens = [];
+for (const t of settings.transfers) {
+  const addr = (t && t.token_amount && t.token_amount.address ? t.token_amount.address : '').toLowerCase();
+  const raw = t && t.token_amount ? String(t.token_amount.amount || '') : '';
+  const need = /^[0-9]+$/.test(raw) ? BigInt(raw) : BigInt(0);
+  const have = remaining[addr] !== undefined ? remaining[addr] : BigInt(0);
+  if (addr && need > BigInt(0) && have >= need) {
+    remaining[addr] = have - need;
+    fundedCount++;
+    (addr === NATIVE ? ethSends : tokenSends).push(t);
+  } else if (addr && !skippedTokens.includes(addr)) {
+    skippedTokens.push(addr);
+  }
+}
+
+return { tokenSends, ethSends, fundedCount, skippedCount: settings.transfers.length - fundedCount, skippedTokens };`
+
+// The two outputs of batchSendFundingSource a Batch send to wallets loop reads.
+const (
+	batchSendTokens = "tokenSends"
+	batchSendEth    = "ethSends"
+)
+
 var (
 	nodeOutputRef    = regexp.MustCompile(`^\{\{([A-Za-z_][A-Za-z0-9_]*)\.data\}\}$`)
 	nodeTransfersRef = regexp.MustCompile(`^\{\{([A-Za-z_][A-Za-z0-9_]*)\.data\.transfers\}\}$`)
+	nodeSendsRef     = regexp.MustCompile(`^\{\{([A-Za-z_][A-Za-z0-9_]*)\.data\.(` + batchSendTokens + `|` + batchSendEth + `)\}\}$`)
 	identRE          = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	batchDigits      = regexp.MustCompile(`^[0-9]+$`)
 	ethTokenSentinel = common.HexToAddress("0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE")
@@ -77,6 +124,9 @@ func boundNodeOutputLoop(nodes []*avsproto.TaskNode, settings map[string]any, tr
 		return nil, false
 	}
 	if sites, ok := boundSplitLoop(nodes, trigger, loop); ok {
+		return sites, true
+	}
+	if sites, ok := boundBatchSendLoop(nodes, settings, loop); ok {
 		return sites, true
 	}
 	return boundBatchLoop(nodes, settings, loop)
@@ -200,6 +250,12 @@ func boundBatchLoop(nodes []*avsproto.TaskNode, settings map[string]any, loop *a
 	if !ok {
 		return nil, false
 	}
+	return tokenTotalSites(chain, totals), true
+}
+
+// tokenTotalSites is one transfer site per token, in address order, sized
+// to the total of that token's rows.
+func tokenTotalSites(chain int64, totals map[common.Address]*big.Int) []fundSite {
 	tokens := make([]common.Address, 0, len(totals))
 	for token, total := range totals {
 		if total != nil && total.Sign() > 0 {
@@ -213,7 +269,156 @@ func boundBatchLoop(nodes []*avsproto.TaskNode, settings map[string]any, loop *a
 	for _, token := range tokens {
 		sites = append(sites, transferSite(chain, token, new(big.Int).Set(totals[token]), false))
 	}
-	return sites, true
+	return sites
+}
+
+// boundBatchSendLoop recognizes either loop of the compiled Batch send to
+// wallets graph. Each loop is sized from every row of its kind in
+// settings.transfers: the most one run can send, since code1 may skip rows
+// the wallet can't fund but never adds one. The ERC-20 loop gets one transfer
+// site per token. The ETH loop gets one native site per row, so every
+// recipient is listed on the grant and each send counts as one UserOp.
+func boundBatchSendLoop(nodes []*avsproto.TaskNode, settings map[string]any, loop *avsproto.LoopNode) ([]fundSite, bool) {
+	cfg := loop.GetConfig()
+	if cfg == nil {
+		return nil, false
+	}
+	ref := nodeSendsRef.FindStringSubmatch(strings.TrimSpace(cfg.GetInputVariable()))
+	if ref == nil {
+		return nil, false
+	}
+	codeNode := nodeByName(nodes, ref[1])
+	if codeNode == nil || codeNode.GetCustomCode() == nil || codeNode.GetCustomCode().GetConfig() == nil {
+		return nil, false
+	}
+	if normalizeJS(codeNode.GetCustomCode().GetConfig().GetSource()) != normalizeJS(batchSendFundingSource) {
+		return nil, false
+	}
+	iter, ok := loopIter(cfg.GetIterVal())
+	if !ok {
+		return nil, false
+	}
+	plan, ok := batchSendRows(settings)
+	if !ok {
+		return nil, false
+	}
+	switch ref[2] {
+	case batchSendTokens:
+		chain, ok := loopTransferRunner(loop,
+			"{{"+iter+".token_amount.address}}",
+			"{{"+iter+".recipient}}",
+			"{{"+iter+".token_amount.amount}}",
+		)
+		if !ok {
+			return nil, false
+		}
+		return tokenTotalSites(chain, plan.tokenTotals), true
+	case batchSendEth:
+		chain, ok := loopEthRunner(loop, "{{"+iter+".recipient}}", "{{"+iter+".token_amount.amount}}")
+		if !ok {
+			return nil, false
+		}
+		sites := make([]fundSite, 0, len(plan.eth))
+		for _, row := range plan.eth {
+			sites = append(sites, fundSite{
+				chain: chain, kind: fundEth,
+				recipient: row.recipient, recipientOK: true,
+				amount: new(big.Int).Set(row.amount), amountOK: true,
+				loopMult: 1, userOp: 1,
+			})
+		}
+		return sites, true
+	default:
+		return nil, false
+	}
+}
+
+// loopEthRunner matches a loop whose runner is a native transfer of exactly
+// recipientExpr and amountExpr, and returns its chain.
+func loopEthRunner(loop *avsproto.LoopNode, recipientExpr, amountExpr string) (int64, bool) {
+	et := loop.GetEthTransfer()
+	if et == nil || et.GetConfig() == nil {
+		return 0, false
+	}
+	cfg := et.GetConfig()
+	if strings.TrimSpace(cfg.GetDestination()) != recipientExpr || strings.TrimSpace(cfg.GetAmount()) != amountExpr {
+		return 0, false
+	}
+	return cfg.GetChainId(), true
+}
+
+type batchSendEthRow struct {
+	recipient common.Address
+	amount    *big.Int
+}
+
+// batchSendPlan is settings.transfers read for sizing: a total per ERC-20
+// token, and each ETH row with its recipient.
+type batchSendPlan struct {
+	tokenTotals map[common.Address]*big.Int
+	eth         []batchSendEthRow
+}
+
+// batchSendRows reads settings.transfers the way code1 splits it. An ETH row
+// is the 0xeeee sentinel and needs a concrete recipient. A row code1 never
+// sends (amount zero) adds nothing. Any row that can't be read leaves the
+// whole loop unrecognized, as batchTransferTotals does.
+func batchSendRows(settings map[string]any) (batchSendPlan, bool) {
+	plan := batchSendPlan{tokenTotals: map[common.Address]*big.Int{}}
+	if settings == nil {
+		return plan, false
+	}
+	list, ok := settings["transfers"].([]any)
+	if !ok {
+		return plan, false
+	}
+	for _, item := range list {
+		row, ok := item.(map[string]any)
+		if !ok {
+			return plan, false
+		}
+		tokenAmount, ok := row["token_amount"].(map[string]any)
+		if !ok {
+			return plan, false
+		}
+		addrText, ok := scalarString(tokenAmount["address"])
+		if !ok || !common.IsHexAddress(strings.TrimSpace(addrText)) {
+			return plan, false
+		}
+		amountRaw, ok := tokenAmount["amount"]
+		if !ok {
+			return plan, false
+		}
+		amount, ok := batchAmount(amountRaw)
+		if !ok {
+			return plan, false
+		}
+		if common.HexToAddress(strings.TrimSpace(addrText)) == ethTokenSentinel {
+			recipientText, ok := scalarString(row["recipient"])
+			if !ok || !common.IsHexAddress(strings.TrimSpace(recipientText)) {
+				return plan, false
+			}
+			recipient := common.HexToAddress(strings.TrimSpace(recipientText))
+			if recipient == (common.Address{}) {
+				return plan, false
+			}
+			if amount.Sign() > 0 {
+				plan.eth = append(plan.eth, batchSendEthRow{recipient: recipient, amount: amount})
+			}
+			continue
+		}
+		token, ok := concreteToken(addrText)
+		if !ok {
+			return plan, false
+		}
+		if amount.Sign() > 0 {
+			if plan.tokenTotals[token] == nil {
+				plan.tokenTotals[token] = big.NewInt(0)
+			}
+			plan.tokenTotals[token].Add(plan.tokenTotals[token], amount)
+		}
+	}
+	return plan, true
 }
 
 func transferSite(chain int64, token common.Address, amount *big.Int, ceiling bool) fundSite {
