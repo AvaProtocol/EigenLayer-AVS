@@ -1399,8 +1399,8 @@ type PreparePolicyRequest struct {
 
 	// NativeRecipients EOAs this grant may send native ETH to (empty-calldata execute).
 	// Omit for Uniswap/ERC-20-only and for payable-write-only
-	// (nativeValueCap). A present empty array is 400. Max 5
-	// (MaxNativeRecipients; deferred replace of 20-row grants AA23s).
+	// (nativeValueCap). A present empty array is 400. Max 20
+	// (MaxNativeRecipients; a 20-row replace with four teardowns mines, measured on Sepolia).
 	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
 	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
 }

@@ -102,6 +102,13 @@ type SessionGrantRequest struct {
 	OccupancyCheck EntityOccupancyChecker
 	// OccupancyCtx bounds occupancy reads. Ignored when OccupancyCheck is nil.
 	OccupancyCtx context.Context
+	// Teardowns, when TeardownsResolved is set, is the set
+	// resolveTeardownTargets returned for this request. The engine prices the
+	// native cap from it and passes it here, so the batch, the pricing and
+	// the grant's recorded PricedTeardowns are one set. Unset,
+	// PrepareSessionGrant resolves it.
+	Teardowns         []*model.SessionPolicy
+	TeardownsResolved bool
 }
 
 // defaultSigningWindow bounds the gap between signing a grant and its first
@@ -147,6 +154,31 @@ type PreparedSessionGrant struct {
 type SupersededGrant struct {
 	PolicyID string
 	EntityID uint32
+}
+
+// resolveTeardownTargets is the set a new install on the runner tears down:
+// its applied grants that need cleanup, minus those the chain says are
+// already clear (marked torn down here), capped at maxOnChainTeardowns.
+// Anything past the cap waits for the next grant (#716's self-heal), and
+// because the filter runs first, the ones left behind are genuinely still
+// installed rather than slots already retired. The engine prices the native
+// cap from this set before PrepareSessionGrant packs it, so a prepare's own
+// cleanup can't change what its submit recalculates.
+//
+// CALLERS MUST HOLD the runner's write lock (dropClearedTeardownTargets).
+func resolveTeardownTargets(ctx context.Context, db storage.Storage, chainID int64, owner, wallet common.Address, check TeardownVerifier) ([]*model.SessionPolicy, error) {
+	targets, err := onChainTeardownTargets(db, chainID, owner, wallet)
+	if err != nil {
+		return nil, err
+	}
+	targets, err = dropClearedTeardownTargets(ctx, db, chainID, owner, wallet, targets, check)
+	if err != nil {
+		return nil, err
+	}
+	if len(targets) > maxOnChainTeardowns {
+		targets = targets[:maxOnChainTeardowns]
+	}
+	return targets, nil
 }
 
 // PrepareSessionGrant allocates the grant and returns the payload to sign.
@@ -215,21 +247,12 @@ func PrepareSessionGrant(
 	// composes with the NEW entity as the outer validation and needs no second
 	// owner signature. N-way is the same composition with more uninstalls.
 	deferredCall := installCall
-	teardownTargets, err := onChainTeardownTargets(db, chainID, req.Owner, req.Wallet)
-	if err != nil {
-		return nil, err
-	}
-	teardownTargets, err = dropClearedTeardownTargets(
-		req.TeardownCtx, db, chainID, req.Owner, req.Wallet, teardownTargets, req.TeardownCheck)
-	if err != nil {
-		return nil, err
-	}
-	// Cap what actually rides the batch, now that the cleared ones are gone.
-	// Anything past the cap waits for the next grant (#716's self-heal), and
-	// because the filter ran first, the ones left behind are genuinely still
-	// installed rather than slots already retired.
-	if len(teardownTargets) > maxOnChainTeardowns {
-		teardownTargets = teardownTargets[:maxOnChainTeardowns]
+	teardownTargets := req.Teardowns
+	if !req.TeardownsResolved {
+		teardownTargets, err = resolveTeardownTargets(req.TeardownCtx, db, chainID, req.Owner, req.Wallet, req.TeardownCheck)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var supersedes []SupersededGrant
 	if len(teardownTargets) > 0 {
@@ -305,6 +328,7 @@ func PrepareSessionGrant(
 				CarrierNonce:          carrierNonce,
 				Deadline:              deadline,
 				RequiresExecuteUserOp: grant.HasExecutionHook(),
+				PricedTeardowns:       recordedTeardowns(teardownShapes(teardownTargets)),
 			},
 		},
 	}, nil

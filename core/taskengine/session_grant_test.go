@@ -1,9 +1,12 @@
 package taskengine
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"math/big"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
@@ -251,4 +255,126 @@ func TestRevokeSessionGrant(t *testing.T) {
 			t.Error("a revoked grant must not authorize anything")
 		}
 	})
+}
+
+// Prepare records the teardowns its batch packs, so the pending-grant
+// checks rebuild the same first op.
+func TestPrepareSessionGrantRecordsPricedTeardowns(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	owner := common.HexToAddress("0x1234")
+	prior, signer := storedAppliedPrior(t, db, owner, model.SessionPolicyActive)
+	prepared, err := PrepareSessionGrant(db, skillSepolia, signer, "next", SessionGrantRequest{
+		Owner:         owner,
+		Wallet:        *prior.Runner,
+		Hooks:         [][]byte{aa.AllowlistExecHook(5)},
+		TeardownCheck: func(context.Context, int64, common.Address, uint32) (bool, error) { return false, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prepared.Supersedes) != 1 {
+		t.Fatalf("supersedes = %+v, want the installed prior", prepared.Supersedes)
+	}
+	got := prepared.Policy.Grant.PricedTeardowns
+	if len(got) != 1 || got[0] != (model.GrantGasShape{NativeRows: 1}) {
+		t.Fatalf("priced teardowns = %+v", got)
+	}
+}
+
+// A prior the chain says is already clear is dropped and marked torn down
+// before pricing, so the set prepare prices, packs and records is the one
+// submit recalculates (review of #877: prepare priced 3,209,281 wei, then its
+// own cleanup made submit recalculate 3,383,401 and reject the echo).
+func TestPrepareCleanupDoesNotChangeSubmitPricing(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	owner := common.HexToAddress("0x1234")
+	prior, signer := storedAppliedPrior(t, db, owner, model.SessionPolicyRevoked)
+	wallet := *prior.Runner
+	recipient := *prior.NativeRecipients[0]
+	cleared := func(context.Context, int64, common.Address, uint32) (bool, error) { return true, nil }
+
+	now := skillNow()
+	task := loopEthTask(t, "{{settings.recipients}}", "{{value}}", "{{settings.token_amount.amount}}", 1, map[string]any{
+		"recipients": []any{recipient.Hex()}, "token_amount": map[string]any{"amount": "1"},
+	})
+	merge := func(shapes []grantGasShape) SessionPermissions {
+		perms, _, err := MergeSkillGrantWithRemainder(nil, nil, PolicyAddition{}, []*avsproto.Task{task}, skillSepolia, now, time.Hour,
+			WithSelfFundedGrantFee(skillSepolia, big.NewInt(1)), WithTeardowns(shapes))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return perms
+	}
+
+	// Prepare: resolve (dropping and marking the cleared prior), price, pack.
+	targets, err := resolveTeardownTargets(context.Background(), db, skillSepolia, owner, wallet, cleared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 0 {
+		t.Fatalf("a cleared prior must not be priced: %+v", targets)
+	}
+	before := merge(teardownShapes(targets))
+	prepared, err := PrepareSessionGrant(db, skillSepolia, signer, "next", SessionGrantRequest{
+		Owner: owner, Wallet: wallet, Hooks: [][]byte{aa.AllowlistExecHook(5)},
+		Teardowns: targets, TeardownsResolved: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prepared.Supersedes) != 0 || len(prepared.Policy.Grant.PricedTeardowns) != 0 {
+		t.Fatalf("the cleared prior rode the batch: supersedes %+v, priced %+v", prepared.Supersedes, prepared.Policy.Grant.PricedTeardowns)
+	}
+
+	// Submit: the same resolution now reads the prior as torn down.
+	again, err := resolveTeardownTargets(context.Background(), db, skillSepolia, owner, wallet, cleared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after := merge(teardownShapes(again)); !sameSessionPermissions(before, after) {
+		t.Fatalf("submit recalculated a different cap: prepared %s, recalculated %s", before.NativeSpendCap.Amount, after.NativeSpendCap.Amount)
+	}
+}
+
+// storedAppliedPrior stores an applied one-recipient grant on a runner, with a
+// real install call so a replacement can pack its teardown.
+func storedAppliedPrior(t *testing.T, db storage.Storage, owner common.Address, status model.SessionPolicyStatus) (*model.SessionPolicy, common.Address) {
+	t.Helper()
+	wallet := common.HexToAddress("0x5678")
+	recipient := common.HexToAddress("0xa11c")
+	signerKey, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer := crypto.PubkeyToAddress(signerKey.PublicKey)
+	perms := SessionPermissions{
+		NativeRecipients: []*common.Address{&recipient},
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "10000000"},
+		SessionSigner:    &signer,
+		ValidUntilMs:     time.Now().Add(time.Hour).UnixMilli(),
+		CodeAt:           func(common.Address) ([]byte, error) { return nil, nil },
+	}
+	hooks, err := perms.HooksFor(4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := aa.PackSessionSignerInstall(aa.SessionGrant{EntityID: 4, Signer: signer, Global: true, Hooks: hooks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := &model.SessionPolicy{
+		ID: "prior", ChainID: skillSepolia, Owner: &owner, Runner: &wallet, EntityID: 4, Status: status, SessionSigner: &signer,
+		NativeRecipients: []*common.Address{&recipient}, NativeSpendCap: perms.NativeSpendCap,
+		ValidUntil: perms.ValidUntilMs,
+		Grant: &model.SessionGrantAuthorization{
+			AppliedAt: 1, InstallCall: call,
+			OwnerSignature: make([]byte, 65), CarrierNonce: big.NewInt(1),
+		},
+	}
+	if err := StoreSessionPolicy(db, prior); err != nil {
+		t.Fatal(err)
+	}
+	return prior, signer
 }

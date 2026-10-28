@@ -14,13 +14,20 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 )
 
-// MaxNativeRecipients is the product cap Validate and the SDK merge enforce.
-// Keep in sync with OpenAPI nativeRecipients maxItems on PreparePolicyRequest
-// and SubmitPolicyRequest. A0: 20-row first-op install mined at 1.5M VGL, but
-// 20-row deferred replace AA23'd 3/3 at 2.2M. Singleton re-grant is replace,
-// so the max follows replace. Five rows stay inside the 700k + 45k/row seed
-// window.
-const MaxNativeRecipients = 5
+// MaxNativeRecipients is the product cap Validate enforces, the only place it
+// lives: the SDK does not count, since one builder call can't see the rest of
+// the wallet's merged grant. Keep OpenAPI nativeRecipients maxItems on
+// PreparePolicyRequest and SubmitPolicyRequest in step (documentation only).
+//
+// 20 follows the bundler-priced replace (#828), measured on Sepolia with
+// scripts/spike/native_recipient_cap through HooksFor, an install-first
+// replace and SendUserOpMAv2. Every case mined (actual gas):
+// 20-row first install with deploy 4.41M, 20-row replace of a 20-row grant
+// 4.76M, 20-row replace tearing down four 20-row grants (the
+// maxOnChainTeardowns worst case) 6.84M, and 20 rows plus 8 capped ERC-20
+// targets 8.43M. The old 5 came from A0's fixed verification-gas seeds,
+// which #828 removed.
+const MaxNativeRecipients = 20
 
 // SessionPermissions is the declared permission set — allowed actions,
 // ERC-20 spend cap(s), expiry — and its translation into the hook entries a
