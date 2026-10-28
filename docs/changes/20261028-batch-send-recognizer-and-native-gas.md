@@ -17,7 +17,9 @@ Studio's new Batch send to wallets Skills (`on-demand-batch-send`, `recurring-ba
 
 1. **`boundBatchSendLoop`** (`session_skill_loop_bound.go`) recognizes either loop of the compiled Batch send graph.
    - **Match:** `code1` must equal the shipped source, `batchSendFundingSource`. Each loop's runner must match: an ERC-20 `transfer` over `{{code1.data.tokenSends}}`, or a native transfer over `{{code1.data.ethSends}}`.
-   - **Sizing:** from `settings.transfers`, giving one transfer site per token (`tokenTotalSites`, shared with the old batch) and one native site per ETH row. Every recipient is listed, and each send counts as one UserOp.
+   - **Sizing from `settings.transfers`:**
+     - ERC-20 rows give one transfer site per token. It counts one UserOp per row of that token, so their gas is priced on the native cap. The old batch matcher leaves its ops unsized.
+     - ETH rows give one native site per row: every recipient is listed, and each send is one UserOp.
    - **Refusal:** a row it can't read leaves the loop unrecognized, as for the old batch. A Studio edit to `code1` needs this copy updated first.
 2. **`MaxNativeRecipients = 20`**, measured with `scripts/spike/native_recipient_cap`. It uses the production path: `HooksFor`, an install-first replace, and `SendUserOpMAv2` with bundler-priced gas, self-funded. Every case mined on Sepolia:
 
@@ -27,20 +29,24 @@ Studio's new Batch send to wallets Skills (`on-demand-batch-send`, `recurring-ba
    | 20 rows, replace of a 20-row grant | 5,805,602 | 4,757,279 |
    | 20 rows, replace tearing down four 20-row grants | 8,580,582 | 6,840,893 |
    | 20 rows + 8 capped ERC-20 targets, replace of the same shape | 10,797,774 | 8,967,288 |
+   | 1 row, replace of 20 rows + 8 targets | 3,807,242 | 2,940,794 |
+   | 1 row, replace of a 1-row grant | 2,674,960 | 1,911,992 |
    | Steady send on an installed grant, any size | 767,036 | 316,114 – 492,386 |
 
    The OpenAPI `maxItems` for `nativeRecipients` and `delegatedNativeRecipients` moves to 20; `make rest-gen` changes comments only. The SDK no longer counts recipients (ava-sdk-js removes `MAX_NATIVE_RECIPIENTS`): one builder call can't see the wallet's merged grant.
 3. **Self-funded gas is sized from the grant** (`grantGasShape`, `session_grant_native.go`).
-   - **First operation:** `(2,550,000 + 163,000 × native rows + 624,000 × allowed-action targets) × 120%`. It is fitted to the larger of a first install with deploy and a replace of a same-shape grant.
-   - **One number everywhere.** It is a pure function of the grant's permissions, so the merge, the carried merge, both coverage checks, the per-task price and the send preflight compute the same number.
+   - **First-op formula:** install `2.301M + 136.3k × native rows + 627.4k × targets`, plus either the deploy (382k, a first grant) or each teardown (`208.5k + 28.6k × rows + 73.6k × targets`), all × 120%. The fit is within 2k units of every measured case.
+   - **Which teardowns are priced:** the engine reads the runner's applied grants from storage (`onChainTeardownTargets`). It prices the costliest of them up to `maxOnChainTeardowns` (`teardownShapes`), which bounds any batch `PrepareSessionGrant` packs after the chain drops the cleared ones.
+   - **One teardown set per request:** prepare and submit pass that set to every merge, drift explanation and coverage check (`WithTeardowns`), so they compute the same native cap.
+   - **Plumbing:**
      - `selfFundedGasWei`, `priceWalletNativeGas` and `foldMissingInstall` take the shape.
      - The carried merge reads its recipients from `carriedNativeRecipients`, which also builds the merged permissions.
    - **Steady send:** `nativePreflightGasUnitsSteady` is 900,000 (measured 767k). The payable steady stays 1.5M.
 
 ## Not covered
 
-- **Leftover teardowns.** A replace that also tears down leftover grants (up to `maxOnChainTeardowns`) can sign more than the budget: four 20-row teardowns signed 8.58M against 6.97M.
-- **The bundler ceiling.** Alchemy priced the largest replace at exactly 10,000,000 verification gas, likely its ceiling. Grants with many ERC-20 targets are near it whatever the native cap.
+- **The bundler ceiling.** Alchemy priced the 20-row, 8-target same-shape replace at exactly 10,000,000 verification gas, while this model puts it at about 11.4M units. It mined, but grants that large sit at the bundler's ceiling.
+- **Preflight undercounts teardowns.** The send preflight still sizes a pending grant's first op from its own shape, so for a replace it expects the deploy rather than the teardowns. The cap includes the teardowns, so this only makes the preflight lenient; it never refuses a covered op.
 - **Base.** Not measured yet; its pre-verification gas includes L1 data cost.
 - **The sponsored path.** Not re-measured. Sponsored operations are charged value only, so the budget doesn't apply.
 
@@ -48,8 +54,9 @@ Studio's new Batch send to wallets Skills (`on-demand-batch-send`, `recurring-ba
 
 - `go test ./core/taskengine ./aggregator/...` and `go vet ./...`, including `-tags integration`.
 - New tests:
-  - `TestBatchSendSizesTokensAndEthFromSettings` and `TestBatchSendShapeStaysUnresolved`;
-  - `TestNativeGasBudgetsCoverSepoliaMeasurement`, which pins every measured case under its budget;
+  - `TestBatchSendSizesTokensAndEthFromSettings`, `TestBatchSendShapeStaysUnresolved` and `TestBatchSendPricesERC20OpsOnTheNativeCap` (two ERC-20 rows and one ETH row over 12 runs: 24 ERC-20 ops and 12 sends priced);
+  - `TestNativeGasBudgetsCoverSepoliaMeasurement`, which pins every measured case under its budget, with its teardowns;
+  - `TestTeardownShapesBoundTheBatch` and `TestReplacePricesItsTeardowns` (merge and coverage agree; a first-grant cap doesn't cover four teardowns);
   - `TestMaxNativeRecipientsFollowsReplaceNotInstall`, which now pins 20 and four teardowns.
 - The gas tests now compute their expected caps (`gasAt1Wei`) instead of hard-coding them.
 - Studio's gateway spike (`scripts/tests/established.batch-send.gateway.test.ts`) passes 12/12 against a local gateway built from this branch. Both new templates list their ETH recipients in `authorization.required.nativeRecipients`.
