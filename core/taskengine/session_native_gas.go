@@ -127,14 +127,13 @@ func (cfg mergeConfig) fee(chainID int64) *big.Int {
 	return cfg.fees[chainID]
 }
 
-// nativeInstallPremium is the wei of one first UserOp above its steady
-// ceiling. The send and payable premiums are the same 1.5M units.
-func nativeInstallPremium(fee *big.Int) *big.Int {
+// nativeInstallPremium is the wei of the grant's first UserOp above its
+// steady ceiling. The send and payable premiums are the same.
+func nativeInstallPremium(fee *big.Int, shape grantGasShape) *big.Int {
 	if fee == nil || fee.Sign() <= 0 {
 		return big.NewInt(0)
 	}
-	units := int64(nativePreflightGasUnitsFirstOp - nativePreflightGasUnitsSteady)
-	return new(big.Int).Mul(big.NewInt(units), fee)
+	return new(big.Int).Mul(big.NewInt(shape.installPremiumUnits()), fee)
 }
 
 func formatGrantFee(fee *big.Int) string {
@@ -150,10 +149,10 @@ func formatGrantFee(fee *big.Int) string {
 }
 
 // selfFundedGasWei is the wei NativeTokenLimitModule will charge for these
-// ops at fee. includeInstall replaces one steady op with the first-op
-// ceiling. The premium is that difference, so a wallet with several
+// ops at fee. A non-nil install replaces one steady op with that grant's
+// first op. The premium is that difference, so a wallet with several
 // automations can keep a single install.
-func selfFundedGasWei(sendOps, valueOps int64, fee *big.Int, includeInstall bool) (total, premium *big.Int) {
+func selfFundedGasWei(sendOps, valueOps int64, fee *big.Int, install *grantGasShape) (total, premium *big.Int) {
 	zero := big.NewInt(0)
 	if fee == nil || fee.Sign() <= 0 || sendOps < 0 || valueOps < 0 || sendOps+valueOps == 0 {
 		return zero, new(big.Int)
@@ -161,12 +160,8 @@ func selfFundedGasWei(sendOps, valueOps int64, fee *big.Int, includeInstall bool
 	units := new(big.Int).Mul(big.NewInt(sendOps), big.NewInt(nativePreflightGasUnitsSteady))
 	units.Add(units, new(big.Int).Mul(big.NewInt(valueOps), big.NewInt(nativePreflightGasUnitsValueSteady)))
 	var premiumUnits int64
-	if includeInstall {
-		if valueOps > 0 {
-			premiumUnits = nativePreflightGasUnitsValueFirstOp - nativePreflightGasUnitsValueSteady
-		} else {
-			premiumUnits = nativePreflightGasUnitsFirstOp - nativePreflightGasUnitsSteady
-		}
+	if install != nil {
+		premiumUnits = install.installPremiumUnits()
 		units.Add(units, big.NewInt(premiumUnits))
 	}
 	if units.Sign() <= 0 {
@@ -188,12 +183,13 @@ func positiveNativeAmount(cap *model.NativeSpendCap) bool {
 // priceWalletNativeGas adds self-funded gas onto needs that share one
 // wallet grant. force is set when the addition or the current grant is
 // what installs the native module, so a sibling ERC-20 automation's gas
-// is included too. A nil fee does nothing. includeInstall keeps one
-// first-op premium across the set; false prices steady ops only, which
-// is what an already-applied grant and a simulate draft use. Needs are
-// mutated. added is the wei of gas newly folded into their caps, which
-// the caller adds to a total it already summed.
-func priceWalletNativeGas(needs []*WorkflowNeed, fee *big.Int, force bool, includeInstall bool) (added *big.Int, notes []string, err error) {
+// is included too. A nil fee does nothing. A non-nil install keeps one
+// first-op premium across the set, sized for the grant that shape
+// describes; nil prices steady ops only, which is what an already-applied
+// grant and a simulate draft use. Needs are mutated. added is the wei of
+// gas newly folded into their caps, which the caller adds to a total it
+// already summed.
+func priceWalletNativeGas(needs []*WorkflowNeed, fee *big.Int, force bool, install *grantGasShape) (added *big.Int, notes []string, err error) {
 	added = big.NewInt(0)
 	if fee == nil || fee.Sign() <= 0 {
 		return added, nil, nil
@@ -213,7 +209,7 @@ func priceWalletNativeGas(needs []*WorkflowNeed, fee *big.Int, force bool, inclu
 			need.GasPriced = true
 			continue
 		}
-		total, premium := selfFundedGasWei(need.NativeSendOps, need.NativeValueOps, fee, includeInstall)
+		total, premium := selfFundedGasWei(need.NativeSendOps, need.NativeValueOps, fee, install)
 		if total.Sign() <= 0 {
 			need.GasPriced = true
 			continue
@@ -285,7 +281,7 @@ func noteMissingInstall(notes []string, extra *big.Int, fee *big.Int) []string {
 // carries it. A simulate draft's cap is steady gas plus value, so the
 // wallet's one install is added here, including when the new automation
 // is not an enabled task yet. An applied grant pays no second install.
-func foldMissingInstall(total *big.Int, needs []*WorkflowNeed, fee *big.Int, applied, installing bool) *big.Int {
+func foldMissingInstall(total *big.Int, needs []*WorkflowNeed, fee *big.Int, applied, installing bool, shape grantGasShape) *big.Int {
 	extra := big.NewInt(0)
 	if applied || !installing || fee == nil || fee.Sign() <= 0 || total == nil {
 		return extra
@@ -295,7 +291,7 @@ func foldMissingInstall(total *big.Int, needs []*WorkflowNeed, fee *big.Int, app
 			return extra
 		}
 	}
-	prem := nativeInstallPremium(fee)
+	prem := nativeInstallPremium(fee, shape)
 	if prem.Sign() <= 0 {
 		return extra
 	}

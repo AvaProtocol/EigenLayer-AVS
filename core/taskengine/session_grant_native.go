@@ -62,16 +62,82 @@ const (
 	SessionPolicyTooManyNativeRecipientsCode = "SESSION_POLICY_TOO_MANY_NATIVE_RECIPIENTS"
 	SessionPolicyNativeCapExceededCode       = "SESSION_POLICY_NATIVE_CAP_EXCEEDED"
 
-	// A0-measured gas-unit ceilings for NT cap preflight when the send path
-	// has not yet estimated. Do not use the seed sum (500k+100k+700k).
-	nativePreflightGasUnitsSteady  = 500_000   // installed grant ethTransfer
-	nativePreflightGasUnitsFirstOp = 2_000_000 // deferred hooks, 5-row window
-	// Payable contractWrite (NativeValue) can exceed ethTransfer gas. These
-	// are conservative bounds, not estimates — under-seed is ExceededNativeTokenLimit.
-	nativePreflightGasUnitsValueSteady  = 1_500_000
-	nativePreflightGasUnitsValueFirstOp = 3_000_000
-	nativePreflightRPCTimeout           = 15 * time.Second
+	// Gas units a self-funded operation signs, which NativeTokenLimitModule
+	// charges against the native cap at maxFee: verification + call +
+	// pre-verification gas. Since #828 the bundler prices verification and
+	// pre-verification, so these are measured, not seeds. A send on an
+	// installed grant signed 767k on Sepolia (500k call, 225k verification,
+	// 42k pre-verification) whatever the grant installs
+	// (scripts/spike/native_recipient_cap). The first operation is sized
+	// from the grant: grantGasShape.firstOpUnits.
+	nativePreflightGasUnitsSteady = 900_000
+	// Payable contractWrite (NativeValue) can exceed ethTransfer gas. Not
+	// re-measured since A0: a conservative bound, not an estimate.
+	// Under-seed is ExceededNativeTokenLimit.
+	nativePreflightGasUnitsValueSteady = 1_500_000
+	nativePreflightRPCTimeout          = 15 * time.Second
 )
+
+// The first operation of a grant carries its install. On a re-grant it also
+// tears down the grant it replaces, and on a new wallet it deploys the
+// account. The units are fitted to the larger of a first install with
+// deploy and a replace of a grant of the same shape, measured on Sepolia
+// (scripts/spike/native_recipient_cap, signed units): 5 rows 3.36M, 10 rows
+// 4.16M, 20 rows 5.81M, 20 rows with 8 capped ERC-20 targets 10.80M. The
+// margin covers the bundler's spread. Tearing down several leftover grants
+// at once (up to maxOnChainTeardowns) is not covered: four 20-row
+// teardowns signed 8.58M.
+const (
+	firstOpGasUnitsBase      = 2_550_000
+	firstOpGasUnitsPerRow    = 163_000
+	firstOpGasUnitsPerTarget = 624_000
+	firstOpGasMarginPercent  = 120
+)
+
+// grantGasShape is what a grant's first operation installs: one allowlist
+// row per native recipient and per allowed-action target.
+type grantGasShape struct {
+	nativeRows int
+	targets    int
+}
+
+func shapeOfPermissions(p SessionPermissions) grantGasShape {
+	return grantGasShape{nativeRows: len(p.NativeRecipients), targets: len(p.AllowedActions)}
+}
+
+func shapeOfPolicy(policy *model.SessionPolicy) grantGasShape {
+	if policy == nil {
+		return grantGasShape{}
+	}
+	return grantGasShape{nativeRows: len(policy.NativeRecipients), targets: len(policy.AllowedActions)}
+}
+
+// shapeOfNeed is one automation's own install, for a runner with no grant.
+func shapeOfNeed(need *WorkflowNeed) grantGasShape {
+	if need == nil {
+		return grantGasShape{}
+	}
+	return grantGasShape{nativeRows: len(need.NativeRecipients), targets: len(need.Actions)}
+}
+
+// firstOpUnits is the gas units the grant's first operation signs. A
+// payable first operation adds what a payable steady operation adds.
+func (s grantGasShape) firstOpUnits(kind NativeIntentKind) int64 {
+	units := int64(firstOpGasUnitsBase) +
+		int64(s.nativeRows)*firstOpGasUnitsPerRow +
+		int64(s.targets)*firstOpGasUnitsPerTarget
+	units = units * firstOpGasMarginPercent / 100
+	if kind == NativeValue {
+		units += nativePreflightGasUnitsValueSteady - nativePreflightGasUnitsSteady
+	}
+	return units
+}
+
+// installPremiumUnits is how much more the first operation signs than a
+// steady one. It is the same for a send and a payable call.
+func (s grantGasShape) installPremiumUnits() int64 {
+	return s.firstOpUnits(NativeSend) - nativePreflightGasUnitsSteady
+}
 
 // PreflightNativePermission returns a client-parseable error, or "" if the
 // grant covers the intent. policy nil is "no usable grant".
@@ -157,15 +223,11 @@ func PreflightNativePermission(policy *model.SessionPolicy, intent NativeIntent,
 }
 
 func nativePreflightGasUnitsFor(kind NativeIntentKind, policy *model.SessionPolicy) int64 {
-	firstOp := policy == nil || policy.Grant == nil || !policy.Grant.Applied()
-	if kind == NativeValue {
-		if firstOp {
-			return nativePreflightGasUnitsValueFirstOp
-		}
-		return nativePreflightGasUnitsValueSteady
+	if policy == nil || policy.Grant == nil || !policy.Grant.Applied() {
+		return shapeOfPolicy(policy).firstOpUnits(kind)
 	}
-	if firstOp {
-		return nativePreflightGasUnitsFirstOp
+	if kind == NativeValue {
+		return nativePreflightGasUnitsValueSteady
 	}
 	return nativePreflightGasUnitsSteady
 }

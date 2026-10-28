@@ -169,11 +169,21 @@ func TestPreflightNativePermission(t *testing.T) {
 
 func TestNativePreflightGasUnitsFor(t *testing.T) {
 	pending := &model.SessionPolicy{}
-	if g := nativePreflightGasUnitsFor(NativeSend, pending); g != nativePreflightGasUnitsFirstOp {
-		t.Fatalf("send first-op = %d, want %d", g, nativePreflightGasUnitsFirstOp)
+	if g, want := nativePreflightGasUnitsFor(NativeSend, pending), (grantGasShape{}).firstOpUnits(NativeSend); g != want {
+		t.Fatalf("send first-op = %d, want %d", g, want)
 	}
-	if g := nativePreflightGasUnitsFor(NativeValue, pending); g != nativePreflightGasUnitsValueFirstOp {
-		t.Fatalf("value first-op = %d, want %d", g, nativePreflightGasUnitsValueFirstOp)
+	if g, want := nativePreflightGasUnitsFor(NativeValue, pending), (grantGasShape{}).firstOpUnits(NativeValue); g != want {
+		t.Fatalf("value first-op = %d, want %d", g, want)
+	}
+	// A pending grant's first op is sized from what it installs.
+	alice, bob := common.HexToAddress("0xa1"), common.HexToAddress("0xb2")
+	token := common.HexToAddress("0x7000")
+	wide := &model.SessionPolicy{
+		NativeRecipients: []*common.Address{&alice, &bob},
+		AllowedActions:   []model.AllowedAction{{Target: &token, Selectors: []string{"0xa9059cbb"}}},
+	}
+	if g, want := nativePreflightGasUnitsFor(NativeSend, wide), (grantGasShape{nativeRows: 2, targets: 1}).firstOpUnits(NativeSend); g != want {
+		t.Fatalf("2-row 1-target first-op = %d, want %d", g, want)
 	}
 	applied := &model.SessionPolicy{Grant: &model.SessionGrantAuthorization{AppliedAt: 1}}
 	if g := nativePreflightGasUnitsFor(NativeSend, applied); g != nativePreflightGasUnitsSteady {
@@ -181,6 +191,34 @@ func TestNativePreflightGasUnitsFor(t *testing.T) {
 	}
 	if g := nativePreflightGasUnitsFor(NativeValue, applied); g != nativePreflightGasUnitsValueSteady {
 		t.Fatalf("value steady = %d, want %d", g, nativePreflightGasUnitsValueSteady)
+	}
+}
+
+// The budgets cover every operation measured on Sepolia with bundler-priced
+// gas (scripts/spike/native_recipient_cap, signed units: what
+// NativeTokenLimitModule charges a self-funded op).
+func TestNativeGasBudgetsCoverSepoliaMeasurement(t *testing.T) {
+	for _, m := range []struct {
+		name   string
+		shape  grantGasShape
+		signed int64
+	}{
+		{"5 rows, first install with deploy", grantGasShape{nativeRows: 5}, 3_364_553},
+		{"5 rows, replace", grantGasShape{nativeRows: 5}, 3_333_765},
+		{"10 rows, first install with deploy", grantGasShape{nativeRows: 10}, 4_045_508},
+		{"10 rows, replace", grantGasShape{nativeRows: 10}, 4_157_472},
+		{"20 rows, first install with deploy", grantGasShape{nativeRows: 20}, 5_407_610},
+		{"20 rows, replace", grantGasShape{nativeRows: 20}, 5_805_602},
+		{"20 rows + 8 ERC-20 targets, first install with deploy", grantGasShape{nativeRows: 20, targets: 8}, 10_426_614},
+		{"20 rows + 8 ERC-20 targets, replace a mixed grant", grantGasShape{nativeRows: 20, targets: 8}, 10_797_774},
+	} {
+		if got := m.shape.firstOpUnits(NativeSend); got < m.signed {
+			t.Errorf("%s: budget %d < measured %d", m.name, got, m.signed)
+		}
+	}
+	const steadySigned = 767_036 // a send on an installed grant, any size
+	if nativePreflightGasUnitsSteady < steadySigned {
+		t.Errorf("steady budget %d < measured %d", nativePreflightGasUnitsSteady, steadySigned)
 	}
 }
 

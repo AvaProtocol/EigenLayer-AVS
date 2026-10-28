@@ -120,6 +120,24 @@ func (n *Engine) spendLimitCaller(chainID int64) (aa.ContractCaller, error) {
 	return reader, nil
 }
 
+// carriedNativeRecipients is the native recipients a carried grant lists:
+// the current grant's, the addition's, and every resolved running
+// automation's. Pricing and the merged permissions read the same list.
+func carriedNativeRecipients(current *model.SessionPolicy, addition PolicyAddition, needs []*WorkflowNeed) []*common.Address {
+	var recipients []*common.Address
+	if current != nil {
+		recipients = append(recipients, current.NativeRecipients...)
+	}
+	recipients = append(recipients, addition.NativeRecipients...)
+	for _, need := range needs {
+		if need.Unresolved {
+			continue
+		}
+		recipients = append(recipients, need.NativeRecipients...)
+	}
+	return dedupeRecipients(recipients)
+}
+
 // mergeCarriedSkillGrant sizes the replacement from the current grant.
 // Actions, native recipients, and allowContractRecipient only grow, except
 // a transfer or approve whose final cap is not positive: that row is omitted
@@ -298,12 +316,18 @@ func mergeCarriedSkillGrant(current *model.SessionPolicy, remainder GrantRemaind
 	}
 	applied := current != nil && current.Grant.Applied()
 	fee := applyMergeOptions(opts).fee(chainID)
-	gasAdded, gasNotes, gasErr := priceWalletNativeGas(fundNeeds, fee, installsNative, !applied)
+	// The install is sized for the grant this carry produces.
+	shape := grantGasShape{nativeRows: len(carriedNativeRecipients(current, addition, fundNeeds)), targets: len(mergedActions)}
+	var install *grantGasShape
+	if !applied {
+		install = &shape
+	}
+	gasAdded, gasNotes, gasErr := priceWalletNativeGas(fundNeeds, fee, installsNative, install)
 	if gasErr != nil {
 		return SessionPermissions{}, PolicyChanges{}, gasErr
 	}
 	needNative.Add(needNative, gasAdded)
-	extra := foldMissingInstall(needNative, fundNeeds, fee, applied, installsNative)
+	extra := foldMissingInstall(needNative, fundNeeds, fee, applied, installsNative, shape)
 	gasNotes = noteMissingInstall(gasNotes, extra, fee)
 	gasAdded.Add(gasAdded, extra)
 	if needNative.Cmp(maxUint256) > 0 {
@@ -339,17 +363,7 @@ func mergeCarriedSkillGrant(current *model.SessionPolicy, remainder GrantRemaind
 
 	var recipients []*common.Address
 	if finalNative.Sign() > 0 {
-		if current != nil {
-			recipients = append(recipients, current.NativeRecipients...)
-		}
-		recipients = append(recipients, addition.NativeRecipients...)
-		for _, need := range fundNeeds {
-			if need.Unresolved {
-				continue
-			}
-			recipients = append(recipients, need.NativeRecipients...)
-		}
-		recipients = dedupeRecipients(recipients)
+		recipients = carriedNativeRecipients(current, addition, fundNeeds)
 	}
 
 	var currentAcks []model.DelegatedNativeRecipient
@@ -837,7 +851,12 @@ func classifyCarriedCoverage(current *model.SessionPolicy, rem GrantRemainder, i
 	}
 	force := positiveNativeAmount(in.Permissions.NativeSpendCap) || positiveNativeAmount(currentCap) || (rem.Native != nil && rem.Native.Sign() > 0)
 	applied := current != nil && current.Grant.Applied()
-	if _, _, priceErr := priceWalletNativeGas(priced, applyMergeOptions(opts).fee(in.ChainID), force, !applied); priceErr != nil {
+	var install *grantGasShape
+	if !applied {
+		shape := shapeOfPermissions(in.Permissions)
+		install = &shape
+	}
+	if _, _, priceErr := priceWalletNativeGas(priced, applyMergeOptions(opts).fee(in.ChainID), force, install); priceErr != nil {
 		return nil, priceErr
 	}
 	var blocking []string
