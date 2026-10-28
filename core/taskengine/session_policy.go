@@ -302,6 +302,48 @@ func activeSessionPolicyLocked(db storage.Storage, chainID int64, owner, wallet 
 	return found, nil
 }
 
+// latestRunnerSessionPolicyLocked returns the newest stored grant for one
+// runner, including revoked grants. A usable grant is the send path's
+// current grant. This is only for acknowledgements a fresh grant still
+// needs after that current grant is gone. Newest is the greatest policy
+// id: ids are ULIDs, and a later id sorts after an earlier one once both
+// are lowercased. The caller must hold the runner lock.
+func latestRunnerSessionPolicyLocked(db storage.Storage, chainID int64, owner, wallet common.Address) (*model.SessionPolicy, error) {
+	policies, err := ListSessionPolicies(db, chainID, owner)
+	if err != nil {
+		return nil, err
+	}
+	var latest *model.SessionPolicy
+	for _, p := range policies {
+		if p == nil || p.ID == "" || p.Runner == nil || *p.Runner != wallet {
+			continue
+		}
+		if latest == nil || strings.ToLower(p.ID) > strings.ToLower(latest.ID) {
+			latest = p
+		}
+	}
+	return latest, nil
+}
+
+// priorDelegatedMergeOption carries acknowledgements from the newest stored
+// grant when the runner has no usable grant. A usable grant already carries
+// its own, so a non-nil current returns no option. The caller must hold the
+// runner lock. A storage error is returned so a failed read cannot silently
+// drop the acknowledgements.
+func priorDelegatedMergeOption(db storage.Storage, chainID int64, owner, wallet common.Address, current *model.SessionPolicy) (mergeOption, error) {
+	if current != nil {
+		return nil, nil
+	}
+	latest, err := latestRunnerSessionPolicyLocked(db, chainID, owner, wallet)
+	if err != nil {
+		return nil, err
+	}
+	if latest == nil || len(latest.DelegatedNativeRecipients) == 0 {
+		return nil, nil
+	}
+	return WithPriorDelegatedRecipients(latest.DelegatedNativeRecipients), nil
+}
+
 // supersedeUsablePolicies revokes every usable grant on one runner except
 // keepID, and reports what it revoked. The caller must hold the runner's write
 // lock.

@@ -196,11 +196,12 @@ type WorkflowNeed struct {
 // PolicyAddition is the automation being set up. Cap amounts are totals
 // for that automation; the gateway does not multiply them again.
 type PolicyAddition struct {
-	AllowedActions         []model.AllowedAction
-	SpendCaps              []model.ERC20SpendCap
-	NativeRecipients       []*common.Address
-	NativeSpendCap         *model.NativeSpendCap
-	AllowContractRecipient bool
+	AllowedActions            []model.AllowedAction
+	SpendCaps                 []model.ERC20SpendCap
+	NativeRecipients          []*common.Address
+	DelegatedNativeRecipients []model.DelegatedNativeRecipient
+	NativeSpendCap            *model.NativeSpendCap
+	AllowContractRecipient    bool
 	// NativeGasWei is the portion of NativeSpendCap that is self-funded
 	// gas rather than ETH sent. The cap total already includes it.
 	NativeGasWei string
@@ -393,9 +394,16 @@ func (r *SessionGrantReport) snapshot() (policy *model.SessionPolicy, noGrant, s
 }
 
 func isNativeMessage(msg string) bool {
+	// SESSION_POLICY_RECIPIENT_CODE_UNREADABLE stays off this list. An RPC
+	// blip must not fail a Skill Test, and before acknowledgements were
+	// re-read an installed grant was never looked up at test time. A
+	// changed delegate is a real miss: the Test has to say not covered so
+	// the owner can allow the new delegate.
 	return strings.Contains(msg, SessionPolicyNativeNotAllowedCode) ||
 		strings.Contains(msg, SessionPolicyRecipientNotAllowedCode) ||
 		strings.Contains(msg, SessionPolicyRecipientNotEOACode) ||
+		strings.Contains(msg, SessionPolicyRecipientNotAcknowledgedCode) ||
+		strings.Contains(msg, SessionPolicyRecipientDelegateChangedCode) ||
 		strings.Contains(msg, SessionPolicyNativeCapExceededCode)
 }
 
@@ -510,7 +518,9 @@ func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched Ski
 
 // MergeSkillGrant unions the addition with what enabled tasks on chainID
 // still need. With no current grant, caps start at zero and an unsized or
-// unresolved fund move fails closed. An unsized payable is
+// unresolved fund move fails closed. Acknowledgements on that path are the
+// addition's, plus WithPriorDelegatedRecipients when the caller has the
+// wallet's last grant. An unsized payable is
 // SESSION_POLICY_NATIVE_UNSIZED when this merge would install a native cap.
 // Any other unsized amount stays ErrSessionPolicyUnsized. With a current
 // grant, pass nil remainder only when the grant has not been applied: the
@@ -685,7 +695,8 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 		return SessionPermissions{}, PolicyChanges{}, unsized
 	}
 
-	fee := applyMergeOptions(opts).fee(chainID)
+	mergeCfg := applyMergeOptions(opts)
+	fee := mergeCfg.fee(chainID)
 	declaredGas, declaredErr := additionGasWei(addition)
 	if declaredErr != nil {
 		return SessionPermissions{}, PolicyChanges{}, declaredErr
@@ -724,10 +735,11 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 
 	recipients = dedupeRecipients(recipients)
 	perms := SessionPermissions{
-		AllowedActions:         mergedActions,
-		SpendCaps:              spendCaps,
-		NativeRecipients:       recipients,
-		AllowContractRecipient: addition.AllowContractRecipient || (current != nil && current.AllowContractRecipient),
+		AllowedActions:            mergedActions,
+		SpendCaps:                 spendCaps,
+		NativeRecipients:          recipients,
+		DelegatedNativeRecipients: carriedDelegatedRecipients(mergeCfg.priorDelegated, addition.DelegatedNativeRecipients, recipients),
+		AllowContractRecipient:    addition.AllowContractRecipient || (current != nil && current.AllowContractRecipient),
 	}
 	if len(spendCaps) > 0 {
 		first := spendCaps[0]
@@ -2340,17 +2352,18 @@ func newBaseChanged(current *model.SessionPolicy) *PolicyConflictError {
 
 func permissionsAsPolicy(in SessionPolicyInput) *model.SessionPolicy {
 	p := &model.SessionPolicy{
-		AllowedActions:         in.Permissions.AllowedActions,
-		ERC20SpendCap:          in.Permissions.SpendCap,
-		ERC20SpendCaps:         in.Permissions.SpendCaps,
-		NativeRecipients:       in.Permissions.NativeRecipients,
-		NativeSpendCap:         in.Permissions.NativeSpendCap,
-		AllowContractRecipient: in.Permissions.AllowContractRecipient,
-		ValidUntil:             in.Permissions.ValidUntilMs,
-		ChainID:                in.ChainID,
-		Runner:                 &in.Wallet,
-		Status:                 model.SessionPolicyPending,
-		Grant:                  &model.SessionGrantAuthorization{},
+		AllowedActions:            in.Permissions.AllowedActions,
+		ERC20SpendCap:             in.Permissions.SpendCap,
+		ERC20SpendCaps:            in.Permissions.SpendCaps,
+		NativeRecipients:          in.Permissions.NativeRecipients,
+		DelegatedNativeRecipients: in.Permissions.DelegatedNativeRecipients,
+		NativeSpendCap:            in.Permissions.NativeSpendCap,
+		AllowContractRecipient:    in.Permissions.AllowContractRecipient,
+		ValidUntil:                in.Permissions.ValidUntilMs,
+		ChainID:                   in.ChainID,
+		Runner:                    &in.Wallet,
+		Status:                    model.SessionPolicyPending,
+		Grant:                     &model.SessionGrantAuthorization{},
 	}
 	return p
 }

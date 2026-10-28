@@ -30,10 +30,8 @@ info:
     `Authorization: Bearer <jwt>`.
 
 servers:
-  - url: https://gateway.avaprotocol.org/api/v1
+  - url: https://api.avaprotocol.org/api/v1
     description: Production gateway
-  - url: https://gateway-staging.avaprotocol.org/api/v1
-    description: Staging gateway
   - url: http://localhost:8080/api/v1
     description: Local dev
 
@@ -305,6 +303,25 @@ components:
             `409 SESSION_POLICY_NOT_COVERING`,
             `409 SESSION_POLICY_EXPIRED`, and
             `409 SESSION_POLICY_SIGNER_RETIRED` from create and resume.
+        recipient:
+          $ref: '#/components/schemas/EthereumAddress'
+          description: |
+            Native recipient a policies:prepare or policies:submit refused
+            for its code. Set on `400 SESSION_POLICY_RECIPIENT_NOT_EOA`,
+            `400 SESSION_POLICY_RECIPIENT_NOT_ACKNOWLEDGED`, and
+            `400 SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED`. It can be an
+            enabled task's recipient rather than one the request added.
+        delegate:
+          $ref: '#/components/schemas/EthereumAddress'
+          description: |
+            Delegate the recipient's EIP-7702 designation names now. Set on
+            `SESSION_POLICY_RECIPIENT_NOT_ACKNOWLEDGED` and
+            `SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED`.
+        acknowledgedDelegate:
+          $ref: '#/components/schemas/EthereumAddress'
+          description: |
+            Delegate the grant acknowledged for `recipient`. Set on
+            `SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED`.
 
     # -------------------------------------------------------------------
     # Health
@@ -1253,6 +1270,122 @@ components:
           format: int64
           description: Unix milliseconds. Schedule window end, same clock as create.
 
+    PrepareWorkflowRequest:
+      type: object
+      additionalProperties: false
+      required: [chainId, trigger, nodes, inputVariables]
+      description: |
+        A Manual definition with read/check nodes and exactly one terminal
+        ContractWrite. The initial owner path supports one configured chain,
+        MA v2 derived wallets with an EOA fallback owner, and zero native value.
+        No persistent/Auto workflow or session grant is created.
+        Requires gateway owner_execution_enabled: true (default false).
+      properties:
+        chainId: { $ref: '#/components/schemas/ChainId' }
+        trigger: { $ref: '#/components/schemas/Trigger' }
+        nodes:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items: { $ref: '#/components/schemas/Node' }
+        edges:
+          type: array
+          maxItems: 128
+          items: { $ref: '#/components/schemas/Edge' }
+        inputVariables: { $ref: '#/components/schemas/InputVariables' }
+
+    OwnerUserOperationV07:
+      type: object
+      additionalProperties: false
+      description: |
+        Finalized ERC-4337 v0.7 bundler-wire operation. Quantity fields are hex
+        strings, never JSON numbers. Signature is empty (0x) until continuation;
+        no operation field can be supplied or changed by submitExecution.
+      required: [sender, nonce, callData, callGasLimit, verificationGasLimit, preVerificationGas, maxFeePerGas, maxPriorityFeePerGas, signature]
+      properties:
+        sender: { $ref: '#/components/schemas/EthereumAddress' }
+        nonce: { $ref: '#/components/schemas/Hex' }
+        callData: { $ref: '#/components/schemas/Hex' }
+        callGasLimit: { $ref: '#/components/schemas/Hex' }
+        verificationGasLimit: { $ref: '#/components/schemas/Hex' }
+        preVerificationGas: { $ref: '#/components/schemas/Hex' }
+        maxFeePerGas: { $ref: '#/components/schemas/Hex' }
+        maxPriorityFeePerGas: { $ref: '#/components/schemas/Hex' }
+        factory: { $ref: '#/components/schemas/EthereumAddress' }
+        factoryData: { $ref: '#/components/schemas/Hex' }
+        paymaster: { $ref: '#/components/schemas/EthereumAddress' }
+        paymasterData: { $ref: '#/components/schemas/Hex' }
+        paymasterVerificationGasLimit: { $ref: '#/components/schemas/Hex' }
+        paymasterPostOpGasLimit: { $ref: '#/components/schemas/Hex' }
+        signature: { $ref: '#/components/schemas/Hex' }
+
+    PrepareWorkflowResponse:
+      type: object
+      required: [execution, userOperation, userOpHash, owner, chainId, entryPoint, signingMethod, expiresAt, writeNodeId, calls, gasFunding, maxGasCostWei]
+      properties:
+        execution:
+          allOf:
+            - $ref: '#/components/schemas/Execution'
+          description: |
+            Transient execution in waiting status. Steps contain completed
+            reads/checks only; the terminal write is in calls, not reported as
+            completed. No deployed workflow/history record exists for this run.
+        userOperation: { $ref: '#/components/schemas/OwnerUserOperationV07' }
+        userOpHash: { $ref: '#/components/schemas/Bytes32' }
+        owner: { $ref: '#/components/schemas/EthereumAddress' }
+        chainId: { $ref: '#/components/schemas/ChainId' }
+        entryPoint: { $ref: '#/components/schemas/EthereumAddress' }
+        signingMethod:
+          type: string
+          enum: [personal_sign]
+          description: |
+            Sign the 32 raw bytes of userOpHash, with the EIP-191 prefix applied
+            once; ethers signMessage(getBytes(userOpHash)). Offered only for
+            the verified alchemy.sma-bytecode.1.0.0 implementation.
+        expiresAt:
+          type: integer
+          format: int64
+          description: |
+            Gateway continuation deadline, Unix milliseconds (10 minutes).
+            This is not an on-chain signature expiry or revocation mechanism.
+        writeNodeId: { type: string }
+        calls:
+          type: array
+          items: { $ref: '#/components/schemas/UserOpInnerCall' }
+        gasFunding:
+          type: string
+          enum: [source, sponsored]
+          description: Final funding choice; sponsorship refusal never silently charges the source.
+        maxGasCostWei:
+          type: string
+          description: Signed maximum gas cost in decimal wei, before any paymaster sponsorship.
+
+    SubmitExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [signature]
+      properties:
+        signature:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{130}$'
+          description: 65-byte EOA personal signature of the prepared hash. Recovery byte 0/1 or 27/28; gateway verifies and frames it for MA v2.
+
+    SubmitExecutionResponse:
+      type: object
+      required: [executionId, userOpHash, chainId, submissionState]
+      properties:
+        executionId: { $ref: '#/components/schemas/Ulid' }
+        userOpHash: { $ref: '#/components/schemas/Bytes32' }
+        chainId: { $ref: '#/components/schemas/ChainId' }
+        submissionState:
+          type: string
+          enum: [submitting, submitted, unknown]
+          description: |
+            Relay progress, not transaction success. Poll GET /userops/{userOpHash}
+            with chainId for the existing receipt status. Unknown/submitting
+            can survive a transport failure or restart; repeating submit never
+            changes the operation or starts another broadcast.
+
     EstimateFeesRequest:
       type: object
       required: [trigger, nodes, createdAt, expireAt, maxExecution]
@@ -1907,6 +2040,21 @@ components:
             headroom can also be sent as value to the allowed recipients.
           example: '10000000000000000'
 
+    DelegatedNativeRecipient:
+      type: object
+      required: [recipient, delegate]
+      description: |
+        The owner acknowledged that `recipient` is an EIP-7702 delegated EOA
+        and that its designation named `delegate`. The recipient must also be
+        in `nativeRecipients`. One entry per recipient. Listing an address
+        here does not authorize a plain contract, and it does not set
+        `allowContractRecipient`. Trusting the delegate is the client's job;
+        this record only checks that the designation still names the
+        acknowledged delegate. The ETH send stays an empty-calldata transfer.
+      properties:
+        recipient: { $ref: '#/components/schemas/EthereumAddress' }
+        delegate: { $ref: '#/components/schemas/EthereumAddress' }
+
     SessionAuthorization:
       type: object
       required: [status]
@@ -1997,6 +2145,21 @@ components:
           type: array
           maxItems: 5
           items: { $ref: '#/components/schemas/EthereumAddress' }
+        delegatedNativeRecipients:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items: { $ref: '#/components/schemas/DelegatedNativeRecipient' }
+          description: |
+            Per-recipient EIP-7702 acknowledgements for native ETH recipients
+            in this addition. Carried per recipient when grants merge; when
+            the current grant and this addition name different delegates for
+            the same recipient, the gateway records this addition's delegate.
+            The owner signs the install call. The ETH row in that call is not
+            limited to the delegate, and the acknowledgement is not part of
+            the signature. The gateway checks it again when it sends. A
+            present empty array is 400. Does not change
+            `allowContractRecipient`, and does not authorize a plain contract.
         nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
         nativeGasWei:
           type: string
@@ -2139,14 +2302,30 @@ components:
             Omit for Uniswap/ERC-20-only and for payable-write-only
             (nativeValueCap). A present empty array is 400. Max 5
             (MaxNativeRecipients; deferred replace of 20-row grants AA23s).
+        delegatedNativeRecipients:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items: { $ref: '#/components/schemas/DelegatedNativeRecipient' }
+          description: |
+            Owner acknowledgements of EIP-7702 delegations on native ETH
+            recipients. A recipient with code is allowed only when that code
+            is a designation (`0xef0100` plus a 20-byte delegate), this list
+            names that recipient, and the designation still points at the
+            acknowledged delegate. A plain contract stays refused, even if
+            it is listed. Empty code stays allowed. A present empty array is
+            400. This does not change `allowContractRecipient`, and the send
+            stays an empty-calldata transfer.
         nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
         allowContractRecipient:
           type: boolean
           default: false
           description: |
-            When true, nativeRecipients may be contracts (any-function on
-            that address, ERC-20 uncapped). Default false: each recipient
-            must have empty code. Logged when true.
+            When true, every native recipient may be a contract (any function
+            on that address, ERC-20 uncapped). Default false: each recipient
+            must have empty code, or be an acknowledged EIP-7702 delegation
+            (`delegatedNativeRecipients`). Logged when true. An
+            acknowledgement is not this flag.
         expiresInSeconds:
           type: integer
           format: int64
@@ -2236,6 +2415,15 @@ components:
         nativeRecipients:
           type: array
           items: { $ref: '#/components/schemas/EthereumAddress' }
+        delegatedNativeRecipients:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items: { $ref: '#/components/schemas/DelegatedNativeRecipient' }
+          description: |
+            Merged EIP-7702 acknowledgements to echo to submit. Present when
+            `add` was sent and the merged grant has any. See
+            DelegatedNativeRecipient.
         nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
         allowContractRecipient:
           type: boolean
@@ -2281,6 +2469,16 @@ components:
           minItems: 1
           maxItems: 5 # keep in sync with MaxNativeRecipients in session_permissions.go
           items: { $ref: '#/components/schemas/EthereumAddress' }
+        delegatedNativeRecipients:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items: { $ref: '#/components/schemas/DelegatedNativeRecipient' }
+          description: |
+            Echo prepare's `delegatedNativeRecipients`. A recipient with code
+            is allowed only when its designation still names the acknowledged
+            delegate. A plain contract stays refused. A present empty array
+            is 400. Does not change `allowContractRecipient`.
         nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
         allowContractRecipient:
           type: boolean
@@ -2349,6 +2547,16 @@ components:
           type: array
           minItems: 1
           items: { $ref: '#/components/schemas/EthereumAddress' }
+        delegatedNativeRecipients:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items: { $ref: '#/components/schemas/DelegatedNativeRecipient' }
+          description: |
+            EIP-7702 acknowledgements stored with this grant. A native send
+            to one of these recipients is refused once the designation names
+            a different delegate. A plain contract is not authorized by being
+            listed here. Does not change `allowContractRecipient`.
         nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
         allowContractRecipient:
           type: boolean
@@ -2837,6 +3045,110 @@ paths:
                 additionalProperties: true
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /workflows:prepare:
+    post:
+      tags: [Workflows]
+      summary: Prepare a Manual workflow for one owner-signed batch
+      description: |
+        Resolve existing read/check nodes, capture the terminal ContractWrite
+        calls, and build/price one MA v2 batch without signing or broadcasting.
+        Requires the concrete owner's Bearer JWT and a registered supported
+        source wallet. Current on-chain owner, implementation and gas funding
+        are checked independently of the stored wallet association.
+        Derived wallets require the verified factory personal_sign build
+        0x000000000000c5A9089039570Dd36455b5C07383. An EOA source must already be
+        delegated to the pinned SMA-7702 1.0.0 implementation, registered as
+        kind=eoa_7702, and enabled by eoa_7702_execute on Sepolia or Base.
+        EOA operations use sender=owner and omit factory deployment fields.
+        Delegation is a separate explicit wallet action; prepare never installs
+        delegation or a session grant. Both account kinds use personal_sign of
+        the 32 raw userOpHash bytes, owner nonce entity 0/global option 1.
+        A canonical delegated EOA can also sign for its derived smart wallet.
+        Up to 32 calls; no native value, write Loop or post-write nodes.
+        Unsigned preparations are capped at 64 per owner. Submitted, uncertain,
+        rejected, and unsent records do not consume that cap. A gateway with
+        owner execution disabled returns 403 OWNER_EXECUTION_DISABLED;
+        preparing again does not enable it. Other precondition failures return
+        412 and ask for a fresh prepare. Ordinary Auto/session and simulate
+        behavior is unchanged.
+      operationId: prepareWorkflow
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PrepareWorkflowRequest' }
+      responses:
+        '200':
+          description: Priced operation awaiting an owner signature; no transaction has been submitted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PrepareWorkflowResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '412':
+          description: Checks, source compatibility, funding or pricing failed; refresh the preparation.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /executions/{id}:submit:
+    post:
+      tags: [Executions]
+      summary: Continue a prepared execution with its owner's transaction signature
+      description: |
+        Submit the exact priced operation from prepareWorkflow. Accepts only
+        the signature, not caller-supplied UserOperation fields. Rechecks the
+        current owner/account identity, nonce and funding before first relay.
+        Uses SendUserOpV07 without a server signing key or gas/nonce retry.
+        Material changes or bundler rejection require fresh prepare/review/signing.
+        Repeat calls still require a valid signature and reconcile the existing
+        hash without rebroadcasting. Status polling requires the JWT only.
+        A durable submitting marker precedes the send. The relay after that
+        marker keeps running when the client disconnects. A crash before the
+        RPC leaves the id submitting. A retry looks the hash up at the bundler:
+        a hit is stored as submitted; an unknown hash stays submitting until
+        the ten-minute signing window ends, then becomes unsent and requires a
+        new prepare. That prepare uses the same sender and owner nonce key
+        (entity 0, global), read from EntryPoint.getNonce with no session
+        nonce cache, so an unmined operation and its replacement cannot both
+        be included. A lookup error leaves the marker submitting. A post-send
+        storage failure also preserves the marker. Poll the prepared hash. An
+        empty bundler result during the window is unresolved. Uncertain and
+        submitted records are retained for 24 hours and do not count toward
+        the 64 prepared-record cap. A response is not a receipt; reuse
+        GET /userops/{userOpHash} for confirmation.
+      operationId: submitExecution
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Ulid' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitExecutionRequest' }
+      responses:
+        '202':
+          description: Relay accepted or uncertain; use the existing UserOp status route.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubmitExecutionResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412':
+          description: Preparation is stale or rejected; prepare, review and sign again.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
   /workflows:estimateFees:
     post:
@@ -3378,7 +3690,13 @@ paths:
 
         When `add` is set and the runner has a usable grant, the merged
         grant starts from that grant. Actions, native recipients, and
-        `allowContractRecipient` only grow. Each token cap is what is
+        `allowContractRecipient` only grow. `delegatedNativeRecipients` is
+        carried per recipient; when both grants name a delegate for the same
+        recipient, the gateway records the addition's delegate. The owner
+        signs the install call; that call's ETH row is not limited to the
+        delegate. The acknowledgement is gateway state, checked again when
+        the gateway sends. Each token cap
+        is what is
         left on that grant (the on-chain remainder once the grant is
         applied, otherwise the stored cap), or what enabled automations
         still need when that is higher, plus the addition. A token with
@@ -3388,7 +3706,10 @@ paths:
 
         When `add` is set and there is no usable grant, the merged grant
         is the addition plus every enabled task except ids in
-        `dropTaskIds`. A task whose token or recipient cannot be read
+        `dropTaskIds`. Acknowledgements for those running recipients come
+        from the wallet's last stored grant, including one that was
+        revoked. The chain read still applies, and this addition's
+        delegate wins when both name one. A task whose token or recipient cannot be read
         from the stored workflow (a loop over a previous step) is
         `409 SESSION_POLICY_TARGET_UNRESOLVED`. That is not an unsized
         amount. Pause the automation, or name its id in `dropTaskIds`.
@@ -3418,8 +3739,17 @@ paths:
             to send a decimal string.
             `SESSION_POLICY_TOO_MANY_NATIVE_RECIPIENTS` — more than five native
             recipients. Finished automations keep their addresses until revoke.
-            `SESSION_POLICY_RECIPIENT_NOT_EOA` — a native recipient is a contract
-            or a 7702-delegated EOA.
+            `SESSION_POLICY_RECIPIENT_NOT_EOA` — a native recipient is a
+            contract.
+            `SESSION_POLICY_RECIPIENT_NOT_ACKNOWLEDGED` — a native recipient is
+            a 7702-delegated EOA that `delegatedNativeRecipients` does not
+            acknowledge.
+            `SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED` — an acknowledged
+            recipient's designation now names a different delegate.
+            All three set `recipient`, which can be another enabled task's
+            recipient: the merged grant carries every running automation's.
+            The last two also set `delegate`, and a changed delegate sets
+            `acknowledgedDelegate`.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -3518,8 +3848,17 @@ paths:
             `409 SESSION_POLICY_NATIVE_UNSIZED`.
             `SESSION_POLICY_TOO_MANY_NATIVE_RECIPIENTS` — more than five native
             recipients. Finished automations keep their addresses until revoke.
-            `SESSION_POLICY_RECIPIENT_NOT_EOA` — a native recipient is a contract
-            or a 7702-delegated EOA.
+            `SESSION_POLICY_RECIPIENT_NOT_EOA` — a native recipient is a
+            contract.
+            `SESSION_POLICY_RECIPIENT_NOT_ACKNOWLEDGED` — a native recipient is
+            a 7702-delegated EOA that `delegatedNativeRecipients` does not
+            acknowledge.
+            `SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED` — an acknowledged
+            recipient's designation now names a different delegate.
+            All three set `recipient`, which can be another enabled task's
+            recipient: the merged grant carries every running automation's.
+            The last two also set `delegate`, and a changed delegate sets
+            `acknowledgedDelegate`.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }

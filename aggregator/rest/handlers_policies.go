@@ -99,7 +99,7 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 		}
 		in.Addition = &addition
 	} else {
-		perms, err := permissionsFromAPI(req.AllowedActions, req.Erc20SpendCap, req.Erc20SpendCaps, req.NativeRecipients, req.NativeSpendCap, req.AllowContractRecipient, nowMs()+req.ExpiresInSeconds*1000)
+		perms, err := permissionsFromAPI(req.AllowedActions, req.Erc20SpendCap, req.Erc20SpendCaps, req.NativeRecipients, req.NativeSpendCap, req.AllowContractRecipient, req.DelegatedNativeRecipients, nowMs()+req.ExpiresInSeconds*1000)
 		if err != nil {
 			return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
 		}
@@ -154,7 +154,7 @@ func (s *Server) SubmitWalletPolicy(ctx echo.Context, address generated.Ethereum
 	if req.Deadline <= 0 {
 		return badRequest("POLICIES_BAD_DEADLINE", "Invalid deadline", "deadline must be positive.")
 	}
-	perms, err := permissionsFromAPI(req.AllowedActions, req.Erc20SpendCap, req.Erc20SpendCaps, req.NativeRecipients, req.NativeSpendCap, req.AllowContractRecipient, req.ValidUntil)
+	perms, err := permissionsFromAPI(req.AllowedActions, req.Erc20SpendCap, req.Erc20SpendCaps, req.NativeRecipients, req.NativeSpendCap, req.AllowContractRecipient, req.DelegatedNativeRecipients, req.ValidUntil)
 	if err != nil {
 		return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
 	}
@@ -278,6 +278,7 @@ func permissionsFromAPI(
 	nativeRecipients *[]generated.EthereumAddress,
 	nativeSpendCap *generated.NativeSpendCap,
 	allowContractRecipient *bool,
+	delegatedNativeRecipients *[]generated.DelegatedNativeRecipient,
 	validUntilMs int64,
 ) (taskengine.SessionPermissions, error) {
 	perms := taskengine.SessionPermissions{ValidUntilMs: validUntilMs}
@@ -333,6 +334,25 @@ func permissionsFromAPI(
 	}
 	if allowContractRecipient != nil {
 		perms.AllowContractRecipient = *allowContractRecipient
+	}
+	if delegatedNativeRecipients != nil && len(*delegatedNativeRecipients) == 0 {
+		return perms, errors.New("delegatedNativeRecipients must contain at least one acknowledgement when present")
+	}
+	if delegatedNativeRecipients != nil {
+		for i, raw := range *delegatedNativeRecipients {
+			if !common.IsHexAddress(string(raw.Recipient)) {
+				return perms, fmt.Errorf("delegated native recipient %d is not a valid address", i)
+			}
+			if !common.IsHexAddress(string(raw.Delegate)) {
+				return perms, fmt.Errorf("delegated native recipient %d delegate is not a valid address", i)
+			}
+			recipient := common.HexToAddress(string(raw.Recipient))
+			delegate := common.HexToAddress(string(raw.Delegate))
+			perms.DelegatedNativeRecipients = append(perms.DelegatedNativeRecipients, model.DelegatedNativeRecipient{
+				Recipient: &recipient,
+				Delegate:  &delegate,
+			})
+		}
 	}
 	return perms, nil
 }
@@ -431,6 +451,9 @@ func policyToAPI(p *model.SessionPolicy) generated.SessionPolicy {
 		allow := true
 		out.AllowContractRecipient = &allow
 	}
+	if acks := delegatedNativeRecipientsToAPI(p.DelegatedNativeRecipients); len(acks) > 0 {
+		out.DelegatedNativeRecipients = &acks
+	}
 	return out
 }
 
@@ -444,22 +467,23 @@ func policyToAPI(p *model.SessionPolicy) generated.SessionPolicy {
 func submitPolicyToAPI(p *model.SessionPolicy, superseded []string) generated.SubmitPolicyResponse {
 	base := policyToAPI(p)
 	out := generated.SubmitPolicyResponse{
-		Id:                     base.Id,
-		Runner:                 base.Runner,
-		ChainId:                base.ChainId,
-		Status:                 generated.SubmitPolicyResponseStatus(base.Status),
-		EntityId:               base.EntityId,
-		SessionSigner:          base.SessionSigner,
-		AgentLabel:             base.AgentLabel,
-		Justification:          base.Justification,
-		AllowedActions:         base.AllowedActions,
-		Erc20SpendCap:          base.Erc20SpendCap,
-		Erc20SpendCaps:         base.Erc20SpendCaps,
-		NativeRecipients:       base.NativeRecipients,
-		NativeSpendCap:         base.NativeSpendCap,
-		AllowContractRecipient: base.AllowContractRecipient,
-		ValidUntil:             base.ValidUntil,
-		CreatedAt:              base.CreatedAt,
+		Id:                        base.Id,
+		Runner:                    base.Runner,
+		ChainId:                   base.ChainId,
+		Status:                    generated.SubmitPolicyResponseStatus(base.Status),
+		EntityId:                  base.EntityId,
+		SessionSigner:             base.SessionSigner,
+		AgentLabel:                base.AgentLabel,
+		Justification:             base.Justification,
+		AllowedActions:            base.AllowedActions,
+		Erc20SpendCap:             base.Erc20SpendCap,
+		Erc20SpendCaps:            base.Erc20SpendCaps,
+		NativeRecipients:          base.NativeRecipients,
+		DelegatedNativeRecipients: base.DelegatedNativeRecipients,
+		NativeSpendCap:            base.NativeSpendCap,
+		AllowContractRecipient:    base.AllowContractRecipient,
+		ValidUntil:                base.ValidUntil,
+		CreatedAt:                 base.CreatedAt,
 	}
 	// Required in the schema and always emitted, empty on a first grant: a
 	// client asking "did this replace anything" reads an empty array rather
@@ -518,9 +542,12 @@ func filterToDeclaredFields(domain interface{}, declared []apitypes.Type) interf
 // mapPolicyError translates engine sentinels into REST problems.
 func mapPolicyError(err error) error {
 	var conflict *taskengine.PolicyConflictError
+	var refusal *taskengine.NativeRecipientRefusal
 	switch {
 	case errors.As(err, &conflict):
 		return policyConflictHTTP(conflict)
+	case errors.As(err, &refusal):
+		return nativeRecipientRefusalHTTP(refusal)
 	case errors.Is(err, taskengine.ErrSessionPolicyUnsized):
 		return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
 	case errors.Is(err, taskengine.ErrSessionNativeCapUnsized):
@@ -569,11 +596,47 @@ func mapPolicyError(err error) error {
 		return badRequest(taskengine.SessionPolicyEntityOccupiedCode, "Validation entity occupied", err.Error())
 	case strings.Contains(err.Error(), taskengine.SessionPolicyTooManyNativeRecipientsCode):
 		return badRequest(taskengine.SessionPolicyTooManyNativeRecipientsCode, "Too many native recipients", err.Error())
+	case strings.Contains(err.Error(), taskengine.SessionPolicyRecipientDelegateChangedCode):
+		// Before NOT_EOA. A changed delegate is a different refusal Studio
+		// can parse, and its text must not be swallowed by the broader code.
+		return badRequest(taskengine.SessionPolicyRecipientDelegateChangedCode, "Acknowledged delegate changed", err.Error())
+	case strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotAcknowledgedCode):
+		return badRequest(taskengine.SessionPolicyRecipientNotAcknowledgedCode, nativeRecipientNotAcknowledgedTitle, err.Error())
 	case strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotEOACode):
 		return badRequest(taskengine.SessionPolicyRecipientNotEOACode, "Native recipient is not an EOA", err.Error())
 	default:
 		return badRequest("POLICIES_REJECTED", "Policy request rejected", err.Error())
 	}
+}
+
+const nativeRecipientNotAcknowledgedTitle = "Delegated native recipient not acknowledged"
+
+// nativeRecipientRefusalHTTP is a 400 that names the refused recipient, so a
+// client can tell this Skill's recipient from another enabled task's without
+// reading the detail. Delegate is what the designation names now;
+// AcknowledgedDelegate is set only when that changed.
+func nativeRecipientRefusalHTTP(e *taskengine.NativeRecipientRefusal) *restmw.HTTPError {
+	title := "Native recipient is not an EOA"
+	switch e.Code {
+	case taskengine.SessionPolicyRecipientNotAcknowledgedCode:
+		title = nativeRecipientNotAcknowledgedTitle
+	case taskengine.SessionPolicyRecipientDelegateChangedCode:
+		title = "Acknowledged delegate changed"
+	}
+	out := &restmw.HTTPError{
+		Status:    http.StatusBadRequest,
+		Code:      e.Code,
+		Title:     title,
+		Detail:    e.Error(),
+		Recipient: e.Recipient.Hex(),
+	}
+	if e.Delegate != nil {
+		out.Delegate = e.Delegate.Hex()
+	}
+	if e.AcknowledgedDelegate != nil {
+		out.AcknowledgedDelegate = e.AcknowledgedDelegate.Hex()
+	}
+	return out
 }
 
 func deref(s *string) string {
@@ -595,7 +658,7 @@ func additionFromAPI(add generated.SessionPolicyAddition) (taskengine.PolicyAddi
 	if add.ValidUntil != nil {
 		validUntil = *add.ValidUntil
 	}
-	perms, err := permissionsFromAPI(add.AllowedActions, nil, add.Erc20SpendCaps, add.NativeRecipients, add.NativeSpendCap, add.AllowContractRecipient, validUntil)
+	perms, err := permissionsFromAPI(add.AllowedActions, nil, add.Erc20SpendCaps, add.NativeRecipients, add.NativeSpendCap, add.AllowContractRecipient, add.DelegatedNativeRecipients, validUntil)
 	if err != nil {
 		return taskengine.PolicyAddition{}, err
 	}
@@ -604,13 +667,14 @@ func additionFromAPI(add generated.SessionPolicyAddition) (taskengine.PolicyAddi
 		gasWei = *add.NativeGasWei
 	}
 	return taskengine.PolicyAddition{
-		AllowedActions:         perms.AllowedActions,
-		SpendCaps:              perms.SpendCaps,
-		NativeRecipients:       perms.NativeRecipients,
-		NativeSpendCap:         perms.NativeSpendCap,
-		AllowContractRecipient: perms.AllowContractRecipient,
-		NativeGasWei:           gasWei,
-		ValidUntilMs:           perms.ValidUntilMs,
+		AllowedActions:            perms.AllowedActions,
+		SpendCaps:                 perms.SpendCaps,
+		NativeRecipients:          perms.NativeRecipients,
+		DelegatedNativeRecipients: perms.DelegatedNativeRecipients,
+		NativeSpendCap:            perms.NativeSpendCap,
+		AllowContractRecipient:    perms.AllowContractRecipient,
+		NativeGasWei:              gasWei,
+		ValidUntilMs:              perms.ValidUntilMs,
 	}, nil
 }
 
@@ -619,13 +683,14 @@ func applySkillPrepare(out *generated.PreparedPolicy, prepared *taskengine.Prepa
 		return
 	}
 	if echo := prepared.EchoPermissions; echo != nil {
-		actions, cap, caps, recs, native, allow := permissionsFieldsToAPI(*echo)
+		actions, cap, caps, recs, native, allow, delegated := permissionsFieldsToAPI(*echo)
 		out.AllowedActions = actions
 		out.Erc20SpendCap = cap
 		out.Erc20SpendCaps = caps
 		out.NativeRecipients = recs
 		out.NativeSpendCap = native
 		out.AllowContractRecipient = allow
+		out.DelegatedNativeRecipients = delegated
 	}
 	base := prepared.SkillChanges.BasePolicyID
 	out.BasePolicyId = &base
@@ -639,6 +704,7 @@ func permissionsFieldsToAPI(perms taskengine.SessionPermissions) (
 	*[]generated.EthereumAddress,
 	*generated.NativeSpendCap,
 	*bool,
+	*[]generated.DelegatedNativeRecipient,
 ) {
 	var actions *[]generated.AllowedAction
 	if converted := allowedActionsToAPI(perms.AllowedActions); len(converted) > 0 {
@@ -689,7 +755,25 @@ func permissionsFieldsToAPI(perms taskengine.SessionPermissions) (
 		v := true
 		allow = &v
 	}
-	return actions, cap, caps, recs, native, allow
+	var delegated *[]generated.DelegatedNativeRecipient
+	if acks := delegatedNativeRecipientsToAPI(perms.DelegatedNativeRecipients); len(acks) > 0 {
+		delegated = &acks
+	}
+	return actions, cap, caps, recs, native, allow, delegated
+}
+
+func delegatedNativeRecipientsToAPI(acks []model.DelegatedNativeRecipient) []generated.DelegatedNativeRecipient {
+	out := make([]generated.DelegatedNativeRecipient, 0, len(acks))
+	for _, ack := range acks {
+		if ack.Recipient == nil || ack.Delegate == nil {
+			continue
+		}
+		out = append(out, generated.DelegatedNativeRecipient{
+			Recipient: generated.EthereumAddress(ack.Recipient.Hex()),
+			Delegate:  generated.EthereumAddress(ack.Delegate.Hex()),
+		})
+	}
+	return out
 }
 
 func allowedActionsToAPI(actions []model.AllowedAction) []generated.AllowedAction {

@@ -298,6 +298,11 @@ func (r *RpcServer) preflightNativeWithdraw(
 	if msg == "" {
 		return nil
 	}
+	// A failed code read is the chain not answering. InvalidArgument would
+	// tell the client the withdraw itself is wrong.
+	if strings.Contains(msg, taskengine.SessionPolicyRecipientCodeUnreadableCode) {
+		return status.Error(codes.Unavailable, msg)
+	}
 	return status.Error(codes.InvalidArgument, msg)
 }
 

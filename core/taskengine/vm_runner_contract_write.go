@@ -2037,6 +2037,16 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		}
 	}
 
+	if r.vm.ownerPreparation != nil {
+		err = r.collectOwnerWrite(stepID, node, parsedABI, methodCalls, perCallTargets)
+		if err != nil {
+			return s, err
+		}
+		finalizeSuccess = true // call preparation only; no write receipt is fabricated
+		log.WriteString("Resolved owner batch; awaiting wallet signature. No transaction submitted.\n")
+		return s, nil
+	}
+
 	// Atomic-batch route: on-demand (nodes:run) real execution of more than one method call. Instead
 	// of one UserOp per method (sequential, non-atomic — approve could land while swap reverts,
 	// leaving a dangling allowance), submit a single executeBatch UserOp so the whole set is

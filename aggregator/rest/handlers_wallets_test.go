@@ -14,6 +14,8 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
@@ -299,4 +301,23 @@ func TestGetWalletNonceUnconfiguredChainUsesDefault(t *testing.T) {
 	// The default chain holds no record of the other chain's wallet.
 	_, err = rig.getNonce(t, rig.onOther, walletTestChain, &unconfigured)
 	requireWalletNotFound(t, err)
+}
+
+// A delegated recipient's refusal keeps its own code on withdraw, and a code
+// read the chain did not answer stays the gRPC Unavailable it was.
+func TestMapWithdrawErrorKeepsRecipientCodes(t *testing.T) {
+	for _, code := range []string{
+		taskengine.SessionPolicyRecipientNotAcknowledgedCode,
+		taskengine.SessionPolicyRecipientDelegateChangedCode,
+		taskengine.SessionPolicyRecipientNotEOACode,
+	} {
+		mapped := mapWithdrawError(status.Error(codes.InvalidArgument, code+": native recipient 0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557"))
+		var httpErr *restmw.HTTPError
+		require.ErrorAs(t, mapped, &httpErr, code)
+		require.Equal(t, http.StatusBadRequest, httpErr.Status)
+		require.Equal(t, code, httpErr.Code)
+	}
+
+	unreadable := status.Error(codes.Unavailable, taskengine.SessionPolicyRecipientCodeUnreadableCode+": cannot read code at native recipient 0xR: rpc timeout")
+	require.Equal(t, unreadable, mapWithdrawError(unreadable))
 }

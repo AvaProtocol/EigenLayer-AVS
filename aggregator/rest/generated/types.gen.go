@@ -192,6 +192,17 @@ const (
 	NodeTypeRestApi       NodeType = "restApi"
 )
 
+// Defines values for PrepareWorkflowResponseGasFunding.
+const (
+	Source    PrepareWorkflowResponseGasFunding = "source"
+	Sponsored PrepareWorkflowResponseGasFunding = "sponsored"
+)
+
+// Defines values for PrepareWorkflowResponseSigningMethod.
+const (
+	PersonalSign PrepareWorkflowResponseSigningMethod = "personal_sign"
+)
+
 // Defines values for RestAPINodeType.
 const (
 	RestApi RestAPINodeType = "restApi"
@@ -249,6 +260,13 @@ const (
 const (
 	Enforce SimulateWorkflowRequestAuthorizationMode = "enforce"
 	Report  SimulateWorkflowRequestAuthorizationMode = "report"
+)
+
+// Defines values for SubmitExecutionResponseSubmissionState.
+const (
+	Submitted  SubmitExecutionResponseSubmissionState = "submitted"
+	Submitting SubmitExecutionResponseSubmissionState = "submitting"
+	Unknown    SubmitExecutionResponseSubmissionState = "unknown"
 )
 
 // Defines values for SubmitPolicyResponseStatus.
@@ -595,6 +613,21 @@ type CustomCodeNodeConfig struct {
 	// `LANG_` prefix. Wire values are lowercase.
 	Lang   Lang   `json:"lang"`
 	Source string `json:"source"`
+}
+
+// DelegatedNativeRecipient The owner acknowledged that `recipient` is an EIP-7702 delegated EOA
+// and that its designation named `delegate`. The recipient must also be
+// in `nativeRecipients`. One entry per recipient. Listing an address
+// here does not authorize a plain contract, and it does not set
+// `allowContractRecipient`. Trusting the delegate is the client's job;
+// this record only checks that the designation still names the
+// acknowledged delegate. The ETH send stays an empty-calldata transfer.
+type DelegatedNativeRecipient struct {
+	// Delegate Lowercase or checksummed hex EOA / contract address.
+	Delegate EthereumAddress `json:"delegate"`
+
+	// Recipient Lowercase or checksummed hex EOA / contract address.
+	Recipient EthereumAddress `json:"recipient"`
 }
 
 // DelegationStatus defines model for DelegationStatus.
@@ -1227,6 +1260,56 @@ type OperatorList struct {
 	Data []OperatorInfo `json:"data"`
 }
 
+// OwnerUserOperationV07 Finalized ERC-4337 v0.7 bundler-wire operation. Quantity fields are hex
+// strings, never JSON numbers. Signature is empty (0x) until continuation;
+// no operation field can be supplied or changed by submitExecution.
+type OwnerUserOperationV07 struct {
+	// CallData Arbitrary-length hex-encoded byte string.
+	CallData Hex `json:"callData"`
+
+	// CallGasLimit Arbitrary-length hex-encoded byte string.
+	CallGasLimit Hex `json:"callGasLimit"`
+
+	// Factory Lowercase or checksummed hex EOA / contract address.
+	Factory *EthereumAddress `json:"factory,omitempty"`
+
+	// FactoryData Arbitrary-length hex-encoded byte string.
+	FactoryData *Hex `json:"factoryData,omitempty"`
+
+	// MaxFeePerGas Arbitrary-length hex-encoded byte string.
+	MaxFeePerGas Hex `json:"maxFeePerGas"`
+
+	// MaxPriorityFeePerGas Arbitrary-length hex-encoded byte string.
+	MaxPriorityFeePerGas Hex `json:"maxPriorityFeePerGas"`
+
+	// Nonce Arbitrary-length hex-encoded byte string.
+	Nonce Hex `json:"nonce"`
+
+	// Paymaster Lowercase or checksummed hex EOA / contract address.
+	Paymaster *EthereumAddress `json:"paymaster,omitempty"`
+
+	// PaymasterData Arbitrary-length hex-encoded byte string.
+	PaymasterData *Hex `json:"paymasterData,omitempty"`
+
+	// PaymasterPostOpGasLimit Arbitrary-length hex-encoded byte string.
+	PaymasterPostOpGasLimit *Hex `json:"paymasterPostOpGasLimit,omitempty"`
+
+	// PaymasterVerificationGasLimit Arbitrary-length hex-encoded byte string.
+	PaymasterVerificationGasLimit *Hex `json:"paymasterVerificationGasLimit,omitempty"`
+
+	// PreVerificationGas Arbitrary-length hex-encoded byte string.
+	PreVerificationGas Hex `json:"preVerificationGas"`
+
+	// Sender Lowercase or checksummed hex EOA / contract address.
+	Sender EthereumAddress `json:"sender"`
+
+	// Signature Arbitrary-length hex-encoded byte string.
+	Signature Hex `json:"signature"`
+
+	// VerificationGasLimit Arbitrary-length hex-encoded byte string.
+	VerificationGasLimit Hex `json:"verificationGasLimit"`
+}
+
 // PageInfo defines model for PageInfo.
 type PageInfo struct {
 	// EndCursor Cursor for the last item in the current page; pass to `after` for the next page.
@@ -1250,9 +1333,11 @@ type PreparePolicyRequest struct {
 	Add        *SessionPolicyAddition `json:"add,omitempty"`
 	AgentLabel string                 `json:"agentLabel"`
 
-	// AllowContractRecipient When true, nativeRecipients may be contracts (any-function on
-	// that address, ERC-20 uncapped). Default false: each recipient
-	// must have empty code. Logged when true.
+	// AllowContractRecipient When true, every native recipient may be a contract (any function
+	// on that address, ERC-20 uncapped). Default false: each recipient
+	// must have empty code, or be an acknowledged EIP-7702 delegation
+	// (`delegatedNativeRecipients`). Logged when true. An
+	// acknowledgement is not this flag.
 	AllowContractRecipient *bool `json:"allowContractRecipient,omitempty"`
 
 	// AllowedActions Selector-scoped contract calls. Native-only grants omit this
@@ -1269,6 +1354,16 @@ type PreparePolicyRequest struct {
 	// chain-aware trigger/node configs this is required and must be a
 	// configured chain; on query/filter params it is optional.
 	ChainId ChainId `json:"chainId"`
+
+	// DelegatedNativeRecipients Owner acknowledgements of EIP-7702 delegations on native ETH
+	// recipients. A recipient with code is allowed only when that code
+	// is a designation (`0xef0100` plus a 20-byte delegate), this list
+	// names that recipient, and the designation still points at the
+	// acknowledged delegate. A plain contract stays refused, even if
+	// it is listed. Empty code stays allowed. A present empty array is
+	// 400. This does not change `allowContractRecipient`, and the send
+	// stays an empty-calldata transfer.
+	DelegatedNativeRecipients *[]DelegatedNativeRecipient `json:"delegatedNativeRecipients,omitempty"`
 
 	// DropTaskIds Enabled tasks this prepare may leave out of the merged grant.
 	// Honored only when `add` is set. Echo the same ids on submit.
@@ -1309,6 +1404,81 @@ type PreparePolicyRequest struct {
 	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
 	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
 }
+
+// PrepareWorkflowRequest A Manual definition with read/check nodes and exactly one terminal
+// ContractWrite. The initial owner path supports one configured chain,
+// MA v2 derived wallets with an EOA fallback owner, and zero native value.
+// No persistent/Auto workflow or session grant is created.
+// Requires gateway owner_execution_enabled: true (default false).
+type PrepareWorkflowRequest struct {
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId `json:"chainId"`
+	Edges   *[]Edge `json:"edges,omitempty"`
+
+	// InputVariables Free-form key-value bag of values used to resolve `{{variable.path}}`
+	// template references inside trigger and node configs. Conventional
+	// well-known keys: `settings.runner` (smart wallet address),
+	// `settings.chainId` (chain id). camelCase keys; back-compat support
+	// for snake_case keys exists during the migration window.
+	InputVariables InputVariables `json:"inputVariables"`
+	Nodes          []Node         `json:"nodes"`
+	Trigger        Trigger        `json:"trigger"`
+}
+
+// PrepareWorkflowResponse defines model for PrepareWorkflowResponse.
+type PrepareWorkflowResponse struct {
+	Calls []UserOpInnerCall `json:"calls"`
+
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId `json:"chainId"`
+
+	// EntryPoint Lowercase or checksummed hex EOA / contract address.
+	EntryPoint EthereumAddress `json:"entryPoint"`
+
+	// Execution Transient execution in waiting status. Steps contain completed
+	// reads/checks only; the terminal write is in calls, not reported as
+	// completed. No deployed workflow/history record exists for this run.
+	Execution Execution `json:"execution"`
+
+	// ExpiresAt Gateway continuation deadline, Unix milliseconds (10 minutes).
+	// This is not an on-chain signature expiry or revocation mechanism.
+	ExpiresAt int64 `json:"expiresAt"`
+
+	// GasFunding Final funding choice; sponsorship refusal never silently charges the source.
+	GasFunding PrepareWorkflowResponseGasFunding `json:"gasFunding"`
+
+	// MaxGasCostWei Signed maximum gas cost in decimal wei, before any paymaster sponsorship.
+	MaxGasCostWei string `json:"maxGasCostWei"`
+
+	// Owner Lowercase or checksummed hex EOA / contract address.
+	Owner EthereumAddress `json:"owner"`
+
+	// SigningMethod Sign the 32 raw bytes of userOpHash, with the EIP-191 prefix applied
+	// once; ethers signMessage(getBytes(userOpHash)). Offered only for
+	// the verified alchemy.sma-bytecode.1.0.0 implementation.
+	SigningMethod PrepareWorkflowResponseSigningMethod `json:"signingMethod"`
+
+	// UserOpHash 32-byte hex hash (UserOp hash, transaction hash).
+	UserOpHash Bytes32 `json:"userOpHash"`
+
+	// UserOperation Finalized ERC-4337 v0.7 bundler-wire operation. Quantity fields are hex
+	// strings, never JSON numbers. Signature is empty (0x) until continuation;
+	// no operation field can be supplied or changed by submitExecution.
+	UserOperation OwnerUserOperationV07 `json:"userOperation"`
+	WriteNodeId   string                `json:"writeNodeId"`
+}
+
+// PrepareWorkflowResponseGasFunding Final funding choice; sponsorship refusal never silently charges the source.
+type PrepareWorkflowResponseGasFunding string
+
+// PrepareWorkflowResponseSigningMethod Sign the 32 raw bytes of userOpHash, with the EIP-191 prefix applied
+// once; ethers signMessage(getBytes(userOpHash)). Offered only for
+// the verified alchemy.sma-bytecode.1.0.0 implementation.
+type PrepareWorkflowResponseSigningMethod string
 
 // PreparedDelegation EIP-7702 authorization the owner signs. `digest` is `SetCodeAuthorization.SigHash`
 // (0x05 ‖ rlp([chainId, delegate, nonce])). `chainId` is never 0.
@@ -1356,6 +1526,11 @@ type PreparedPolicy struct {
 	// Deadline Unix seconds; bounds signing → first use, NOT the grant lifetime.
 	Deadline int64 `json:"deadline"`
 
+	// DelegatedNativeRecipients Merged EIP-7702 acknowledgements to echo to submit. Present when
+	// `add` was sent and the merged grant has any. See
+	// DelegatedNativeRecipient.
+	DelegatedNativeRecipients *[]DelegatedNativeRecipient `json:"delegatedNativeRecipients,omitempty"`
+
 	// Digest The EIP-712 hash the typed data produces, for client-side verification.
 	Digest string `json:"digest"`
 
@@ -1390,6 +1565,9 @@ type PreparedPolicy struct {
 // is human-readable; `instance` is a per-request identifier suitable for
 // log correlation.
 type Problem struct {
+	// AcknowledgedDelegate Lowercase or checksummed hex EOA / contract address.
+	AcknowledgedDelegate *EthereumAddress `json:"acknowledgedDelegate,omitempty"`
+
 	// AffectedTaskIds Enabled tasks a grant would leave unable to run. Set on
 	// `409 SESSION_POLICY_NOT_COVERING`,
 	// `409 SESSION_POLICY_TARGET_UNRESOLVED`, and
@@ -1401,6 +1579,9 @@ type Problem struct {
 	// switch on this for programmatic handling. Mirrors the gRPC-era
 	// ErrorCode enum vocabulary.
 	Code *string `json:"code,omitempty"`
+
+	// Delegate Lowercase or checksummed hex EOA / contract address.
+	Delegate *EthereumAddress `json:"delegate,omitempty"`
 
 	// Detail Human-readable explanation specific to this occurrence.
 	Detail *string `json:"detail,omitempty"`
@@ -1416,6 +1597,9 @@ type Problem struct {
 	// `SESSION_POLICY_TARGET_UNRESOLVED`, `SESSION_POLICY_NATIVE_UNSIZED`,
 	// `SESSION_POLICY_EXPIRED`, and `SESSION_POLICY_SIGNER_RETIRED`.
 	PolicyId *string `json:"policyId,omitempty"`
+
+	// Recipient Lowercase or checksummed hex EOA / contract address.
+	Recipient *EthereumAddress `json:"recipient,omitempty"`
 
 	// Required Permissions one workflow still needs, sized to the runs it has left.
 	// Cap amounts are totals in the token's smallest unit, not per-run amounts.
@@ -1649,7 +1833,13 @@ type SessionPolicy struct {
 
 	// CreatedAt Unix milliseconds.
 	CreatedAt int64 `json:"createdAt"`
-	EntityId  int64 `json:"entityId"`
+
+	// DelegatedNativeRecipients EIP-7702 acknowledgements stored with this grant. A native send
+	// to one of these recipients is refused once the designation names
+	// a different delegate. A plain contract is not authorized by being
+	// listed here. Does not change `allowContractRecipient`.
+	DelegatedNativeRecipients *[]DelegatedNativeRecipient `json:"delegatedNativeRecipients,omitempty"`
+	EntityId                  int64                       `json:"entityId"`
 
 	// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
 	// execution. The token must appear as an `allowedActions` target.
@@ -1703,7 +1893,18 @@ type SessionPolicyStatus string
 type SessionPolicyAddition struct {
 	AllowContractRecipient *bool            `json:"allowContractRecipient,omitempty"`
 	AllowedActions         *[]AllowedAction `json:"allowedActions,omitempty"`
-	Erc20SpendCaps         *[]Erc20SpendCap `json:"erc20SpendCaps,omitempty"`
+
+	// DelegatedNativeRecipients Per-recipient EIP-7702 acknowledgements for native ETH recipients
+	// in this addition. Carried per recipient when grants merge; when
+	// the current grant and this addition name different delegates for
+	// the same recipient, the gateway records this addition's delegate.
+	// The owner signs the install call. The ETH row in that call is not
+	// limited to the delegate, and the acknowledgement is not part of
+	// the signature. The gateway checks it again when it sends. A
+	// present empty array is 400. Does not change
+	// `allowContractRecipient`, and does not authorize a plain contract.
+	DelegatedNativeRecipients *[]DelegatedNativeRecipient `json:"delegatedNativeRecipients,omitempty"`
+	Erc20SpendCaps            *[]Erc20SpendCap            `json:"erc20SpendCaps,omitempty"`
 
 	// NativeGasWei Wei of this addition's `nativeSpendCap` that is self-funded gas
 	// rather than ETH sent. Already included in that cap. Prepare does
@@ -1867,6 +2068,38 @@ type SubmitDelegationRequest struct {
 	Signature Hex `json:"signature"`
 }
 
+// SubmitExecutionRequest defines model for SubmitExecutionRequest.
+type SubmitExecutionRequest struct {
+	// Signature 65-byte EOA personal signature of the prepared hash. Recovery byte 0/1 or 27/28; gateway verifies and frames it for MA v2.
+	Signature string `json:"signature"`
+}
+
+// SubmitExecutionResponse defines model for SubmitExecutionResponse.
+type SubmitExecutionResponse struct {
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId `json:"chainId"`
+
+	// ExecutionId ULID identifier (26-char Crockford base32).
+	ExecutionId Ulid `json:"executionId"`
+
+	// SubmissionState Relay progress, not transaction success. Poll GET /userops/{userOpHash}
+	// with chainId for the existing receipt status. Unknown/submitting
+	// can survive a transport failure or restart; repeating submit never
+	// changes the operation or starts another broadcast.
+	SubmissionState SubmitExecutionResponseSubmissionState `json:"submissionState"`
+
+	// UserOpHash 32-byte hex hash (UserOp hash, transaction hash).
+	UserOpHash Bytes32 `json:"userOpHash"`
+}
+
+// SubmitExecutionResponseSubmissionState Relay progress, not transaction success. Poll GET /userops/{userOpHash}
+// with chainId for the existing receipt status. Unknown/submitting
+// can survive a transport failure or restart; repeating submit never
+// changes the operation or starts another broadcast.
+type SubmitExecutionResponseSubmissionState string
+
 // SubmitPolicyRequest defines model for SubmitPolicyRequest.
 type SubmitPolicyRequest struct {
 	AgentLabel             string `json:"agentLabel"`
@@ -1887,6 +2120,12 @@ type SubmitPolicyRequest struct {
 	// configured chain; on query/filter params it is optional.
 	ChainId  ChainId `json:"chainId"`
 	Deadline int64   `json:"deadline"`
+
+	// DelegatedNativeRecipients Echo prepare's `delegatedNativeRecipients`. A recipient with code
+	// is allowed only when its designation still names the acknowledged
+	// delegate. A plain contract stays refused. A present empty array
+	// is 400. Does not change `allowContractRecipient`.
+	DelegatedNativeRecipients *[]DelegatedNativeRecipient `json:"delegatedNativeRecipients,omitempty"`
 
 	// DropTaskIds Enabled tasks this grant may leave uncovered. Echo prepare's
 	// `affectedTaskIds`. Naming a task does not fail submit.
@@ -1942,7 +2181,13 @@ type SubmitPolicyResponse struct {
 
 	// CreatedAt Unix milliseconds.
 	CreatedAt int64 `json:"createdAt"`
-	EntityId  int64 `json:"entityId"`
+
+	// DelegatedNativeRecipients EIP-7702 acknowledgements stored with this grant. A native send
+	// to one of these recipients is refused once the designation names
+	// a different delegate. A plain contract is not authorized by being
+	// listed here. Does not change `allowContractRecipient`.
+	DelegatedNativeRecipients *[]DelegatedNativeRecipient `json:"delegatedNativeRecipients,omitempty"`
+	EntityId                  int64                       `json:"entityId"`
 
 	// Erc20SpendCap Cumulative ERC-20 spend cap for one token, enforced on-chain at
 	// execution. The token must appear as an `allowedActions` target.
@@ -2530,6 +2775,9 @@ type AuthExchangeJSONRequestBody = AuthExchangeRequest
 // SignalExecutionJSONRequestBody defines body for SignalExecution for application/json ContentType.
 type SignalExecutionJSONRequestBody = SignalExecutionRequest
 
+// SubmitExecutionJSONRequestBody defines body for SubmitExecution for application/json ContentType.
+type SubmitExecutionJSONRequestBody = SubmitExecutionRequest
+
 // RunNodeJSONRequestBody defines body for RunNode for application/json ContentType.
 type RunNodeJSONRequestBody = RunNodeRequest
 
@@ -2568,6 +2816,9 @@ type TriggerWorkflowJSONRequestBody = TriggerWorkflowRequest
 
 // EstimateWorkflowFeesJSONRequestBody defines body for EstimateWorkflowFees for application/json ContentType.
 type EstimateWorkflowFeesJSONRequestBody = EstimateFeesRequest
+
+// PrepareWorkflowJSONRequestBody defines body for PrepareWorkflow for application/json ContentType.
+type PrepareWorkflowJSONRequestBody = PrepareWorkflowRequest
 
 // SimulateWorkflowJSONRequestBody defines body for SimulateWorkflow for application/json ContentType.
 type SimulateWorkflowJSONRequestBody = SimulateWorkflowRequest

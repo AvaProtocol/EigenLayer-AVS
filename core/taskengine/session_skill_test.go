@@ -1397,6 +1397,46 @@ func TestBuildAuthorizationStatuses(t *testing.T) {
 	}
 }
 
+func TestBuildAuthorizationDelegateChangeIsNotCovered(t *testing.T) {
+	dest := common.HexToAddress("0x00000000000000000000000000000000000000a1")
+	delegate := common.HexToAddress("0x7702cb554e6bfb442cb743a7df23154544a7176c")
+	other := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	policy := &model.SessionPolicy{
+		ID:                        "01applied",
+		NativeRecipients:          []*common.Address{&dest},
+		DelegatedNativeRecipients: []model.DelegatedNativeRecipient{nativeAck(dest, delegate)},
+		NativeSpendCap:            &model.NativeSpendCap{Amount: "100"},
+		Grant:                     &model.SessionGrantAuthorization{AppliedAt: 1},
+	}
+	need := &WorkflowNeed{
+		HasFundMove:      true,
+		NativeRecipients: []*common.Address{&dest},
+		NativeSpendCap:   &model.NativeSpendCap{Amount: "1"},
+	}
+	changed := fmt.Sprintf("%s: native recipient %s was acknowledged as delegated to %s; it now designates %s",
+		SessionPolicyRecipientDelegateChangedCode, dest.Hex(), delegate.Hex(), other.Hex())
+	unread := fmt.Sprintf("%s: cannot read code at native recipient %s: rpc timeout (policy %s)",
+		SessionPolicyRecipientCodeUnreadableCode, dest.Hex(), policy.ID)
+
+	reportChanged := &SessionGrantReport{}
+	reportChanged.notePolicy(policy)
+	reportChanged.observeNative(dest, big.NewInt(1))
+	reportChanged.noteGrantMiss(changed, nil)
+	got := BuildAuthorization(policy, need, reportChanged, SkillSchedule{})
+	if got.Status != AuthNotCovered || !strings.Contains(got.Detail, SessionPolicyRecipientDelegateChangedCode) || !strings.Contains(got.Detail, other.Hex()) {
+		t.Fatalf("changed delegate = %#v", got)
+	}
+
+	reportUnread := &SessionGrantReport{}
+	reportUnread.notePolicy(policy)
+	reportUnread.observeNative(dest, big.NewInt(1))
+	reportUnread.noteGrantMiss(unread, nil)
+	got = BuildAuthorization(policy, need, reportUnread, SkillSchedule{})
+	if got.Status != AuthCovered || strings.Contains(got.Detail, SessionPolicyRecipientCodeUnreadableCode) {
+		t.Fatalf("unreadable code must stay covered, got %#v", got)
+	}
+}
+
 func TestTasksExceptDropped(t *testing.T) {
 	pay := skillWriteTask("pay", "Pay", skillUSDC, "0x", skillSepolia, 1, 0, 0)
 	tmpl := skillWriteTask("tmpl", "Template", "{{settings.token}}", "0x", skillSepolia, 1, 0, 0)

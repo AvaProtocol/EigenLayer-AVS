@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -542,16 +544,98 @@ func TestPermissionsFromAPIRejectsEmptySpendCapsList(t *testing.T) {
 	}}
 	singular := generated.Erc20SpendCap{Token: token, Amount: "1"}
 	empty := []generated.Erc20SpendCap{}
-	_, err := permissionsFromAPI(&actions, &singular, &empty, nil, nil, nil, time.Now().Add(time.Hour).UnixMilli())
+	_, err := permissionsFromAPI(&actions, &singular, &empty, nil, nil, nil, nil, time.Now().Add(time.Hour).UnixMilli())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "at least one cap")
 }
 
 func TestPermissionsFromAPIRejectsEmptyNativeRecipients(t *testing.T) {
 	empty := []generated.EthereumAddress{}
-	_, err := permissionsFromAPI(nil, nil, nil, &empty, nil, nil, time.Now().Add(time.Hour).UnixMilli())
+	_, err := permissionsFromAPI(nil, nil, nil, &empty, nil, nil, nil, time.Now().Add(time.Hour).UnixMilli())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "at least one address")
+}
+
+func TestPermissionsFromAPIReadsDelegatedNativeRecipients(t *testing.T) {
+	recipient := generated.EthereumAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	delegate := generated.EthereumAddress("0x7702cb554e6bfb442cb743a7df23154544a7176c")
+	recs := []generated.EthereumAddress{recipient}
+	acks := []generated.DelegatedNativeRecipient{{Recipient: recipient, Delegate: delegate}}
+	cap := generated.NativeSpendCap{Amount: "1"}
+	until := time.Now().Add(time.Hour).UnixMilli()
+
+	perms, err := permissionsFromAPI(nil, nil, nil, &recs, &cap, nil, &acks, until)
+	require.NoError(t, err)
+	require.Len(t, perms.DelegatedNativeRecipients, 1)
+	require.Equal(t, common.HexToAddress(string(delegate)), *perms.DelegatedNativeRecipients[0].Delegate)
+
+	empty := []generated.DelegatedNativeRecipient{}
+	_, err = permissionsFromAPI(nil, nil, nil, &recs, &cap, nil, &empty, until)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "at least one acknowledgement")
+}
+
+func TestMapPolicyErrorSeparatesDelegateChanged(t *testing.T) {
+	err := mapPolicyError(fmt.Errorf("%s: native recipient 0xR was acknowledged as delegated to 0xA; it now designates 0xB", taskengine.SessionPolicyRecipientDelegateChangedCode))
+	var httpErr *restmw.HTTPError
+	require.ErrorAs(t, err, &httpErr)
+	require.Equal(t, http.StatusBadRequest, httpErr.Status)
+	require.Equal(t, taskengine.SessionPolicyRecipientDelegateChangedCode, httpErr.Code)
+
+	notEOA := mapPolicyError(errors.New(taskengine.SessionPolicyRecipientNotEOACode + ": native recipient is a contract"))
+	require.ErrorAs(t, notEOA, &httpErr)
+	require.Equal(t, taskengine.SessionPolicyRecipientNotEOACode, httpErr.Code)
+}
+
+func TestOpenAPIDelegatedNativeRecipients(t *testing.T) {
+	// Every grant schema that carries allowContractRecipient also carries the
+	// acknowledgement. Compile fails if a generated field is dropped.
+	var (
+		prepare  generated.PreparePolicyRequest
+		submit   generated.SubmitPolicyRequest
+		prepared generated.PreparedPolicy
+		policy   generated.SessionPolicy
+		addition generated.SessionPolicyAddition
+		response generated.SubmitPolicyResponse
+	)
+	acks := []generated.DelegatedNativeRecipient{{
+		Recipient: "0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557",
+		Delegate:  "0x7702cb554e6bfb442cb743a7df23154544a7176c",
+	}}
+	prepare.DelegatedNativeRecipients = &acks
+	submit.DelegatedNativeRecipients = &acks
+	prepared.DelegatedNativeRecipients = &acks
+	policy.DelegatedNativeRecipients = &acks
+	addition.DelegatedNativeRecipients = &acks
+	response.DelegatedNativeRecipients = &acks
+	require.NotNil(t, prepare.DelegatedNativeRecipients)
+	require.NotNil(t, submit.DelegatedNativeRecipients)
+	require.NotNil(t, prepared.DelegatedNativeRecipients)
+	require.NotNil(t, policy.DelegatedNativeRecipients)
+	require.NotNil(t, addition.DelegatedNativeRecipients)
+	require.NotNil(t, response.DelegatedNativeRecipients)
+
+	body, err := os.ReadFile("../../api/openapi.yaml")
+	require.NoError(t, err)
+	text := string(body)
+	require.Equal(t, countYAMLKey(text, "allowContractRecipient"), countYAMLKey(text, "delegatedNativeRecipients"))
+	require.Equal(t, 5, countYAMLKey(text, "delegatedNativeRecipients"))
+	require.Contains(t, text, "SESSION_POLICY_RECIPIENT_DELEGATE_CHANGED")
+
+	start := strings.Index(text, "\n    SessionPolicyNeed:")
+	end := strings.Index(text, "\n    SessionPolicyAddition:")
+	require.Greater(t, end, start)
+	require.NotContains(t, text[start:end], "delegatedNativeRecipients")
+}
+
+func countYAMLKey(body, key string) int {
+	n := 0
+	for _, line := range strings.Split(body, "\n") {
+		if strings.TrimSpace(line) == key+":" {
+			n++
+		}
+	}
+	return n
 }
 
 func TestSubmitPolicyResponseCarriesEverySessionPolicyField(t *testing.T) {
@@ -574,7 +658,11 @@ func TestSubmitPolicyResponseCarriesEverySessionPolicyField(t *testing.T) {
 		ERC20SpendCaps: []model.ERC20SpendCap{
 			{Token: &token, Amount: "500000000", GrantedCap: "500000000"},
 		},
-		NativeRecipients:       []*common.Address{&owner},
+		NativeRecipients: []*common.Address{&owner},
+		DelegatedNativeRecipients: []model.DelegatedNativeRecipient{{
+			Recipient: &owner,
+			Delegate:  &signer,
+		}},
 		NativeSpendCap:         &model.NativeSpendCap{Amount: "10000000000000000", GrantedCap: "10000000000000000"},
 		AllowContractRecipient: true,
 		ValidUntil:             1785541743000,
@@ -620,4 +708,53 @@ func TestPolicyChangesMarkADroppedCapRemoved(t *testing.T) {
 	body, err := json.Marshal(change)
 	require.NoError(t, err)
 	require.Contains(t, string(body), `"removed":true`)
+}
+
+// Prepare and submit return a typed refusal. Its addresses go on the problem,
+// so a client can tell its own recipient from an enabled task's without
+// reading the detail.
+func TestMapPolicyErrorNamesTheRefusedRecipient(t *testing.T) {
+	recipient := common.HexToAddress("0x804e49e8C4eDb560AE7c48B554f6d2e27Bb81557")
+	coinbase := common.HexToAddress("0x7702cb554e6bfb442cb743a7df23154544a7176c")
+	other := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	refuse := func(code []byte, acks []model.DelegatedNativeRecipient) *restmw.HTTPError {
+		t.Helper()
+		err := taskengine.SessionPermissions{
+			NativeRecipients:          []*common.Address{&recipient},
+			DelegatedNativeRecipients: acks,
+			NativeSpendCap:            &model.NativeSpendCap{Amount: "1"},
+			ValidUntilMs:              time.Now().Add(time.Hour).UnixMilli(),
+			CodeAt:                    func(common.Address) ([]byte, error) { return code, nil },
+		}.Validate()
+		require.Error(t, err)
+		var httpErr *restmw.HTTPError
+		require.ErrorAs(t, mapPolicyError(err), &httpErr)
+		require.Equal(t, http.StatusBadRequest, httpErr.Status)
+		require.Equal(t, recipient.Hex(), httpErr.Recipient)
+		require.Equal(t, err.Error(), httpErr.Detail)
+		return httpErr
+	}
+	designation := append([]byte{0xef, 0x01, 0x00}, coinbase.Bytes()...)
+
+	contract := refuse([]byte{0x60, 0x80}, nil)
+	require.Equal(t, taskengine.SessionPolicyRecipientNotEOACode, contract.Code)
+	require.Empty(t, contract.Delegate)
+	require.Empty(t, contract.AcknowledgedDelegate)
+
+	unacked := refuse(designation, nil)
+	require.Equal(t, taskengine.SessionPolicyRecipientNotAcknowledgedCode, unacked.Code)
+	require.Equal(t, coinbase.Hex(), unacked.Delegate)
+	require.Empty(t, unacked.AcknowledgedDelegate)
+
+	ack := model.DelegatedNativeRecipient{Recipient: &recipient, Delegate: &other}
+	changed := refuse(designation, []model.DelegatedNativeRecipient{ack})
+	require.Equal(t, taskengine.SessionPolicyRecipientDelegateChangedCode, changed.Code)
+	require.Equal(t, coinbase.Hex(), changed.Delegate)
+	require.Equal(t, other.Hex(), changed.AcknowledgedDelegate)
+
+	// A NOT_ACKNOWLEDGED string from a path with no typed refusal keeps its own code.
+	plain := mapPolicyError(fmt.Errorf("%s: native recipient %s is 7702-delegated to %s", taskengine.SessionPolicyRecipientNotAcknowledgedCode, recipient.Hex(), coinbase.Hex()))
+	var plainHTTP *restmw.HTTPError
+	require.ErrorAs(t, plain, &plainHTTP)
+	require.Equal(t, taskengine.SessionPolicyRecipientNotAcknowledgedCode, plainHTTP.Code)
 }

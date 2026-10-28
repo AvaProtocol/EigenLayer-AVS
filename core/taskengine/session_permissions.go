@@ -48,17 +48,19 @@ type SessionPermissions struct {
 	SpendCaps    []model.ERC20SpendCap
 	ValidUntilMs int64
 
-	NativeRecipients       []*common.Address
-	NativeSpendCap         *model.NativeSpendCap
-	AllowContractRecipient bool
+	NativeRecipients          []*common.Address
+	DelegatedNativeRecipients []model.DelegatedNativeRecipient
+	NativeSpendCap            *model.NativeSpendCap
+	AllowContractRecipient    bool
 	// SessionSigner, when set, is refused as a native recipient — the
 	// gateway's shared session signer. Bound at prepare/submit from
 	// sessionSignerAddress.
 	SessionSigner *common.Address
-	// CodeAt looks up bytecode for native-recipient EOA checks (K4).
+	// CodeAt looks up bytecode for native-recipient checks.
 	// Required when native recipients are set and AllowContractRecipient
-	// is false. Nil is fail-closed. Tests inject an empty-code stub;
-	// production prepare/submit bind a pooled chain reader.
+	// is false, including when a recipient is an acknowledged 7702
+	// delegation. Nil is fail-closed. Tests inject a stub; production
+	// prepare/submit bind a pooled chain reader.
 	CodeAt func(common.Address) ([]byte, error)
 }
 
@@ -161,7 +163,19 @@ func (p SessionPermissions) validate(withChain bool) error {
 					return fmt.Errorf("list contracts as allowed actions with selectors; native recipients are for empty-calldata sends")
 				}
 			}
-			if withChain && !p.AllowContractRecipient {
+		}
+		// Structural even when the chain is not read, and even when
+		// allowContractRecipient is set. An acknowledgement does not widen
+		// that flag, and a recipient that is not in nativeRecipients is not
+		// an acknowledgement of anything.
+		if err := p.validateDelegatedNativeRecipients(); err != nil {
+			return err
+		}
+		if withChain && !p.AllowContractRecipient {
+			for _, rec := range p.NativeRecipients {
+				if rec == nil {
+					continue
+				}
 				if p.CodeAt == nil {
 					return fmt.Errorf("cannot verify native recipient %s is an EOA: session resolver is not installed (InstallSessionResolver); fail closed", rec.Hex())
 				}
@@ -169,14 +183,15 @@ func (p SessionPermissions) validate(withChain bool) error {
 				if err != nil {
 					return fmt.Errorf("looking up native recipient %s: %w", rec.Hex(), err)
 				}
-				if len(code) != 0 {
-					if config.IsSMA7702Designation(code, config.SMA7702Delegate()) {
-						return fmt.Errorf("%s: native recipient is a 7702-delegated EOA; set allowContractRecipient (any function on this address, ERC-20 uncapped)", SessionPolicyRecipientNotEOACode)
-					}
-					return fmt.Errorf("%s: native recipient is a contract; send via contractWrite, or set allowContractRecipient (any function on this address, ERC-20 uncapped)", SessionPolicyRecipientNotEOACode)
+				ack := acknowledgedDelegate(p.DelegatedNativeRecipients, *rec)
+				verdict, onChain := classifyNativeRecipientCode(code, ack)
+				if err := formatGrantTimeNativeCodeRefusal(*rec, ack, onChain, verdict); err != nil {
+					return err
 				}
 			}
 		}
+	} else if err := p.validateDelegatedNativeRecipients(); err != nil {
+		return err
 	}
 
 	if p.ValidUntilMs <= time.Now().UnixMilli() {
@@ -190,11 +205,15 @@ func (p SessionPermissions) validate(withChain bool) error {
 // in comments.
 //
 // HasSelectorAllowlist is true for every allowedActions entry. Native
-// recipient rows set it false (K1/K4): that is the only way to authorize
-// empty-calldata execute. A3 must then read the actual grant instead of
-// refusing all MA v2 native sends. TestHooksForAlwaysScopesSelectors still
-// covers ERC-20-only grants; TestHooksForNativeRecipientRowsAreUnscoped
-// covers the native rows.
+// recipient rows set it false, including an acknowledged 7702 recipient:
+// that is the only way to authorize empty-calldata execute. AllowlistInput
+// has no empty-calldata flag, and empty calldata has no 4-byte selector, so
+// the module cannot scope the row to a plain transfer. The gateway keeps
+// the send empty (PackExecuteMAv2 with no calldata) and refuses the same
+// address as an allowedActions target. A3 must then read the actual grant
+// instead of refusing all MA v2 native sends.
+// TestHooksForAlwaysScopesSelectors still covers ERC-20-only grants;
+// TestHooksForNativeRecipientRowsAreUnscoped covers the native rows.
 //
 // HasERC20SpendLimit is set on every capped token (not only the singular
 // alias). The module then meters transfer/approve on that target and reverts
@@ -399,6 +418,35 @@ func reservedNativeRecipient(addr common.Address) bool {
 		return true
 	}
 	return false
+}
+
+func (p SessionPermissions) validateDelegatedNativeRecipients() error {
+	if len(p.DelegatedNativeRecipients) == 0 {
+		return nil
+	}
+	listed := make(map[common.Address]struct{}, len(p.NativeRecipients))
+	for _, rec := range p.NativeRecipients {
+		if rec != nil {
+			listed[*rec] = struct{}{}
+		}
+	}
+	seen := make(map[common.Address]struct{}, len(p.DelegatedNativeRecipients))
+	for i, ack := range p.DelegatedNativeRecipients {
+		if ack.Recipient == nil || *ack.Recipient == (common.Address{}) {
+			return fmt.Errorf("delegated native recipient %d is the zero address", i)
+		}
+		if ack.Delegate == nil || *ack.Delegate == (common.Address{}) {
+			return fmt.Errorf("delegated native recipient %s names the zero delegate", ack.Recipient.Hex())
+		}
+		if _, dup := seen[*ack.Recipient]; dup {
+			return fmt.Errorf("delegated native recipient %s is listed twice", ack.Recipient.Hex())
+		}
+		seen[*ack.Recipient] = struct{}{}
+		if _, ok := listed[*ack.Recipient]; !ok {
+			return fmt.Errorf("delegated native recipient %s is not in nativeRecipients", ack.Recipient.Hex())
+		}
+	}
+	return nil
 }
 
 func parseSelector(s string) ([4]byte, error) {

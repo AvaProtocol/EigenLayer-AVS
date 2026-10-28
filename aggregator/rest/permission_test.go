@@ -19,6 +19,8 @@ var expectedPermissionLevels = map[string]Level{
 	OpCreateWallet: LevelPartnerWalletPreview,
 
 	OpSimulateWorkflow: LevelUser,
+	OpPrepareWorkflow:  LevelUser,
+	OpSubmitExecution:  LevelUser,
 	OpRunNode:          LevelUser,
 	OpGetUserOp:        LevelUser,
 	OpRunTrigger:       LevelUser,

@@ -44,10 +44,12 @@ func TestColonActionRouting(t *testing.T) {
 		{"POST", "/wallets/:address/delegation:submit", "DELEGATION_SUBMIT"},
 		{"GET", "/executions/:id:getStatus", "EXECUTION_GET_STATUS"},
 		{"POST", "/executions/:id:signal", "EXECUTION_SIGNAL"},
+		{"POST", "/executions/:id:submit", "EXECUTION_SUBMIT"},
 		{"GET", "/executions/:id:stream", "EXECUTION_STREAM"},
 		// Collection-level — these are the ones the original bug missed
 		{"POST", "/auth:exchange", "AUTH_EXCHANGE"},
 		{"POST", "/workflows:simulate", "WORKFLOW_SIMULATE"},
+		{"POST", "/workflows:prepare", "WORKFLOW_PREPARE"},
 		{"POST", "/workflows:estimateFees", "WORKFLOW_ESTIMATE_FEES"},
 		{"GET", "/workflows:count", "WORKFLOW_COUNT"},
 		{"GET", "/executions:count", "EXECUTION_COUNT"},
