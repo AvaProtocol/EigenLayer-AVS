@@ -417,7 +417,11 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		if priorErr != nil {
 			return nil, priorErr
 		}
-		merged, ch, mergeErr := MergeSkillGrantWithRemainder(current, preRemainder, *in.Addition, kept, in.ChainID, preparedAt, time.Duration(in.ExpiresInSeconds)*time.Second, n.selfFundedGrantFeeOption(in.ChainID), priorOpt)
+		teardownOpt, teardownErr := n.teardownGasOption(in.ChainID, user.Address, in.Wallet)
+		if teardownErr != nil {
+			return nil, teardownErr
+		}
+		merged, ch, mergeErr := MergeSkillGrantWithRemainder(current, preRemainder, *in.Addition, kept, in.ChainID, preparedAt, time.Duration(in.ExpiresInSeconds)*time.Second, n.selfFundedGrantFeeOption(in.ChainID), priorOpt, teardownOpt)
 		if mergeErr != nil {
 			return nil, mergeErr
 		}
@@ -468,6 +472,16 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 // selfFundedGrantFeeOption prices native gas into a grant when this chain
 // does not sponsor UserOps. A sponsored chain, or an engine with no smart
 // wallet config, keeps the cap as the ETH the workflow sends.
+// teardownGasOption prices the prior grants this runner's next install tears
+// down, from storage (teardownShapes). Prepare and submit read the same set.
+func (n *Engine) teardownGasOption(chainID int64, owner, runner common.Address) (mergeOption, error) {
+	priors, err := onChainTeardownTargets(n.db, chainID, owner, runner)
+	if err != nil {
+		return nil, err
+	}
+	return WithTeardowns(teardownShapes(priors)), nil
+}
+
 func (n *Engine) selfFundedGrantFeeOption(chainID int64) mergeOption {
 	return WithSelfFundedGrantFee(chainID, n.selfFundedGrantFee(chainID))
 }
@@ -599,20 +613,28 @@ func (n *Engine) SubmitSessionPolicy(
 		if priorErr != nil {
 			return nil, nil, priorErr
 		}
-		merged, _, mergeErr := MergeSkillGrantWithRemainder(current, remPtr, snap.addition, kept, in.ChainID, snap.preparedAt, snap.expiresIn, feeOpt, priorOpt)
+		teardownOpt, teardownErr := n.teardownGasOption(in.ChainID, user.Address, in.Wallet)
+		if teardownErr != nil {
+			return nil, nil, teardownErr
+		}
+		merged, _, mergeErr := MergeSkillGrantWithRemainder(current, remPtr, snap.addition, kept, in.ChainID, snap.preparedAt, snap.expiresIn, feeOpt, priorOpt, teardownOpt)
 		if mergeErr != nil {
 			return nil, nil, skillSubmitMergeError(current, mergeErr, snap.tasks, kept)
 		}
 		if !sameSessionPermissions(merged, in.Permissions) {
-			return nil, nil, explainSkillDrift(current, snap, remPtr, kept, in.Permissions, feeOpt, priorOpt)
+			return nil, nil, explainSkillDrift(current, snap, remPtr, kept, in.Permissions, feeOpt, priorOpt, teardownOpt)
 		}
 		if current != nil {
-			dropped, err = classifyCarriedCoverage(current, *remPtr, in, workflowTasks(tasks), time.Now(), feeOpt)
+			dropped, err = classifyCarriedCoverage(current, *remPtr, in, workflowTasks(tasks), time.Now(), feeOpt, teardownOpt)
 		} else {
-			dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID, feeOpt)
+			dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID, feeOpt, teardownOpt)
 		}
 	} else {
-		dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID, n.selfFundedGrantFeeOption(in.ChainID), WithGrantApplied(current != nil && current.Grant.Applied()))
+		teardownOpt, teardownErr := n.teardownGasOption(in.ChainID, user.Address, in.Wallet)
+		if teardownErr != nil {
+			return nil, nil, teardownErr
+		}
+		dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID, n.selfFundedGrantFeeOption(in.ChainID), WithGrantApplied(current != nil && current.Grant.Applied()), teardownOpt)
 	}
 	if err != nil {
 		return nil, nil, err

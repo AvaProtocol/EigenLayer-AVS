@@ -702,7 +702,7 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 		return SessionPermissions{}, PolicyChanges{}, declaredErr
 	}
 	// The install is sized for the grant this merge produces.
-	shape := grantGasShape{nativeRows: len(dedupeRecipients(recipients)), targets: len(actions)}
+	shape := mergeCfg.installShape(grantGasShape{nativeRows: len(dedupeRecipients(recipients)), targets: len(actions)})
 	gasAdded, gasNotes, gasErr := priceWalletNativeGas(taskNeeds, fee, native.Sign() > 0, &shape)
 	if gasErr != nil {
 		return SessionPermissions{}, PolicyChanges{}, gasErr
@@ -2403,7 +2403,7 @@ func classifyRunnerCoverage(in SessionPolicyInput, tasks []*avsproto.Task, now t
 	cfg := applyMergeOptions(opts)
 	var install *grantGasShape
 	if !cfg.applied {
-		shape := shapeOfPermissions(in.Permissions)
+		shape := cfg.installShape(shapeOfPermissions(in.Permissions))
 		install = &shape
 	}
 	if _, _, priceErr := priceWalletNativeGas(priced, cfg.fee(in.ChainID), positiveNativeAmount(in.Permissions.NativeSpendCap), install); priceErr != nil {

@@ -196,21 +196,33 @@ func TestNativePreflightGasUnitsFor(t *testing.T) {
 
 // The budgets cover every operation measured on Sepolia with bundler-priced
 // gas (scripts/spike/native_recipient_cap, signed units: what
-// NativeTokenLimitModule charges a self-funded op).
+// NativeTokenLimitModule charges a self-funded op). A first grant prices
+// the deploy; a replace prices each grant it tears down.
 func TestNativeGasBudgetsCoverSepoliaMeasurement(t *testing.T) {
+	rows := func(n int) grantGasShape { return grantGasShape{nativeRows: n} }
+	mixed := grantGasShape{nativeRows: 20, targets: 8}
+	replacing := func(shape grantGasShape, priors ...grantGasShape) grantGasShape {
+		shape.teardowns = priors
+		return shape
+	}
 	for _, m := range []struct {
 		name   string
 		shape  grantGasShape
 		signed int64
 	}{
-		{"5 rows, first install with deploy", grantGasShape{nativeRows: 5}, 3_364_553},
-		{"5 rows, replace", grantGasShape{nativeRows: 5}, 3_333_765},
-		{"10 rows, first install with deploy", grantGasShape{nativeRows: 10}, 4_045_508},
-		{"10 rows, replace", grantGasShape{nativeRows: 10}, 4_157_472},
-		{"20 rows, first install with deploy", grantGasShape{nativeRows: 20}, 5_407_610},
-		{"20 rows, replace", grantGasShape{nativeRows: 20}, 5_805_602},
-		{"20 rows + 8 ERC-20 targets, first install with deploy", grantGasShape{nativeRows: 20, targets: 8}, 10_426_614},
-		{"20 rows + 8 ERC-20 targets, replace a mixed grant", grantGasShape{nativeRows: 20, targets: 8}, 10_797_774},
+		{"5 rows, first install with deploy", rows(5), 3_364_553},
+		{"5 rows, replace", replacing(rows(5), rows(5)), 3_333_765},
+		{"10 rows, first install with deploy", rows(10), 4_045_508},
+		{"10 rows, replace", replacing(rows(10), rows(10)), 4_157_472},
+		{"20 rows, first install with deploy", rows(20), 5_407_610},
+		{"20 rows, install on a deployed wallet", rows(20), 5_025_428},
+		{"20 rows, replace", replacing(rows(20), rows(20)), 5_805_602},
+		{"20 rows, replace tearing down four 20-row grants", replacing(rows(20), rows(20), rows(20), rows(20), rows(20)), 8_580_582},
+		{"20 rows + 8 targets, first install with deploy", mixed, 10_426_614},
+		{"20 rows + 8 targets, replace a 20-row grant", replacing(mixed, rows(20)), 10_418_622},
+		{"20 rows + 8 targets, replace the same shape", replacing(mixed, mixed), 10_797_774},
+		{"1 row, replace 20 rows + 8 targets", replacing(rows(1), mixed), 3_807_242},
+		{"1 row, replace a 1-row grant", replacing(rows(1), rows(1)), 2_674_960},
 	} {
 		if got := m.shape.firstOpUnits(NativeSend); got < m.signed {
 			t.Errorf("%s: budget %d < measured %d", m.name, got, m.signed)
@@ -219,6 +231,26 @@ func TestNativeGasBudgetsCoverSepoliaMeasurement(t *testing.T) {
 	const steadySigned = 767_036 // a send on an installed grant, any size
 	if nativePreflightGasUnitsSteady < steadySigned {
 		t.Errorf("steady budget %d < measured %d", nativePreflightGasUnitsSteady, steadySigned)
+	}
+}
+
+// teardownShapes prices the costliest candidates PrepareSessionGrant could
+// pack, up to maxOnChainTeardowns, so any batch it builds fits the budget.
+func TestTeardownShapesBoundTheBatch(t *testing.T) {
+	a, b := common.HexToAddress("0xa1"), common.HexToAddress("0xb2")
+	token := common.HexToAddress("0x7000")
+	small := &model.SessionPolicy{NativeRecipients: []*common.Address{&a}}
+	wide := &model.SessionPolicy{NativeRecipients: []*common.Address{&a, &b}, AllowedActions: []model.AllowedAction{{Target: &token}}}
+	priors := []*model.SessionPolicy{small, small, wide, small, nil, small, wide}
+	got := teardownShapes(priors)
+	if len(got) != maxOnChainTeardowns {
+		t.Fatalf("teardowns = %d, want the cap %d", len(got), maxOnChainTeardowns)
+	}
+	if got[0].targets != 1 || got[1].targets != 1 {
+		t.Fatalf("the costliest priors come first: %+v", got)
+	}
+	if shapes := teardownShapes(nil); len(shapes) != 0 {
+		t.Fatalf("a first grant tears nothing down: %+v", shapes)
 	}
 }
 

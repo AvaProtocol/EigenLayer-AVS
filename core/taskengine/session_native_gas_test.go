@@ -559,3 +559,37 @@ func summaryHas(changes PolicyChanges, part string) bool {
 	}
 	return false
 }
+
+// A replace prices the grants it tears down. Merge and coverage given the
+// same teardowns agree, and a grant priced without them doesn't cover.
+func TestReplacePricesItsTeardowns(t *testing.T) {
+	now := skillNow()
+	fee := WithSelfFundedGrantFee(skillSepolia, big.NewInt(1))
+	a1 := "0x0000000000000000000000000000000000000001"
+	task := loopEthTask(t, "{{settings.recipients}}", "{{value}}", "{{settings.token_amount.amount}}", 12, map[string]any{
+		"recipients":   []any{a1},
+		"token_amount": map[string]any{"amount": "1"},
+	})
+	priors := []grantGasShape{{nativeRows: 20}, {nativeRows: 20}, {nativeRows: 20}, {nativeRows: 20}}
+	replace, _, err := MergeSkillGrantWithRemainder(nil, nil, PolicyAddition{}, []*avsproto.Task{task}, skillSepolia, now, time.Hour, fee, WithTeardowns(priors))
+	if err != nil {
+		t.Fatal(err)
+	}
+	install := shapeOfPermissions(replace)
+	install.teardowns = priors
+	if want := plusWei("12", gasAt1Wei(12, 0, &install)); replace.NativeSpendCap == nil || replace.NativeSpendCap.Amount != want {
+		t.Fatalf("replace cap = %+v, want %s", replace.NativeSpendCap, want)
+	}
+	in := SessionPolicyInput{ChainID: skillSepolia, Permissions: replace}
+	if _, err := classifyRunnerCoverage(in, []*avsproto.Task{task}, now, "", fee, WithTeardowns(priors)); err != nil {
+		t.Fatalf("the same teardowns must cover, got %v", err)
+	}
+	first, _, err := MergeSkillGrantWithRemainder(nil, nil, PolicyAddition{}, []*avsproto.Task{task}, skillSepolia, now, time.Hour, fee)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Permissions = first
+	if _, err := classifyRunnerCoverage(in, []*avsproto.Task{task}, now, "", fee, WithTeardowns(priors)); err == nil {
+		t.Fatal("a cap priced as a first grant must not cover four teardowns")
+	}
+}

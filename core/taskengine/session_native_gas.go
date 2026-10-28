@@ -62,6 +62,27 @@ type mergeConfig struct {
 	fees           map[int64]*big.Int
 	applied        bool
 	priorDelegated []model.DelegatedNativeRecipient
+	// teardowns are the prior grants the install's first operation tears
+	// down, priced into its gas. Nil is a first grant, which deploys.
+	teardowns []grantGasShape
+}
+
+// WithTeardowns prices the prior grants this grant's install tears down
+// (teardownShapes). Pass the same set to every merge and coverage check of
+// one prepare or submit, so they compute the same native cap.
+func WithTeardowns(shapes []grantGasShape) mergeOption {
+	return func(cfg *mergeConfig) {
+		if cfg != nil {
+			cfg.teardowns = shapes
+		}
+	}
+}
+
+// installShape is the grant's install as priced: its own rows and targets,
+// and the teardowns this merge was given.
+func (cfg mergeConfig) installShape(shape grantGasShape) grantGasShape {
+	shape.teardowns = cfg.teardowns
+	return shape
 }
 
 // WithSelfFundedGrantFee sizes native gas into the cap for chainID.

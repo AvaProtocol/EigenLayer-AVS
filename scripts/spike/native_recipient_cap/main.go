@@ -184,6 +184,25 @@ func run() error {
 		h.printTable()
 	}()
 
+	// MEASURE_MODE=teardown isolates what tearing down ERC-20 targets costs,
+	// under the bundler's verification ceiling: a 1-row grant replacing a
+	// mixed grant, then a 1-row grant replacing a 1-row grant.
+	if strings.TrimSpace(os.Getenv("MEASURE_MODE")) == "teardown" {
+		acct, err := h.newAccount(new(big.Int).Add(saltBase, big.NewInt(5)), ether("0.05"))
+		if err != nil {
+			return err
+		}
+		accounts = append(accounts, acct)
+		n := taskengine.MaxNativeRecipients
+		if err := h.grant(acct, fmt.Sprintf("%d rows + %d ERC-20: first install (deploy)", n, mixedERC20Targets), n, mixedERC20Targets, 0); err != nil {
+			return err
+		}
+		if err := h.grant(acct, fmt.Sprintf("1 row: replace a %d rows + %d ERC-20 grant", n, mixedERC20Targets), 1, 0, -1); err != nil {
+			return err
+		}
+		return h.grant(acct, "1 row: replace a 1-row grant", 1, 0, -1)
+	}
+
 	// MEASURE_MODE=extra measures what the first run left out: a steady send
 	// on an installed grant, and a replace that tears down a mixed grant.
 	if strings.TrimSpace(os.Getenv("MEASURE_MODE")) == "extra" {

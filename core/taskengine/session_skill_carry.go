@@ -317,7 +317,7 @@ func mergeCarriedSkillGrant(current *model.SessionPolicy, remainder GrantRemaind
 	applied := current != nil && current.Grant.Applied()
 	fee := applyMergeOptions(opts).fee(chainID)
 	// The install is sized for the grant this carry produces.
-	shape := grantGasShape{nativeRows: len(carriedNativeRecipients(current, addition, fundNeeds)), targets: len(mergedActions)}
+	shape := applyMergeOptions(opts).installShape(grantGasShape{nativeRows: len(carriedNativeRecipients(current, addition, fundNeeds)), targets: len(mergedActions)})
 	var install *grantGasShape
 	if !applied {
 		install = &shape
@@ -853,7 +853,7 @@ func classifyCarriedCoverage(current *model.SessionPolicy, rem GrantRemainder, i
 	applied := current != nil && current.Grant.Applied()
 	var install *grantGasShape
 	if !applied {
-		shape := shapeOfPermissions(in.Permissions)
+		shape := applyMergeOptions(opts).installShape(shapeOfPermissions(in.Permissions))
 		install = &shape
 	}
 	if _, _, priceErr := priceWalletNativeGas(priced, applyMergeOptions(opts).fee(in.ChainID), force, install); priceErr != nil {

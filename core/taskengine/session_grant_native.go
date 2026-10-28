@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"sort"
 	"strings"
 	"time"
 
@@ -78,27 +79,41 @@ const (
 	nativePreflightRPCTimeout          = 15 * time.Second
 )
 
-// The first operation of a grant carries its install. On a re-grant it also
-// tears down the grant it replaces, and on a new wallet it deploys the
-// account. The units are fitted to the larger of a first install with
-// deploy and a replace of a grant of the same shape, measured on Sepolia
-// (scripts/spike/native_recipient_cap, signed units): 5 rows 3.36M, 10 rows
-// 4.16M, 20 rows 5.81M, 20 rows with 8 capped ERC-20 targets 10.80M. The
-// margin covers the bundler's spread. Tearing down several leftover grants
-// at once (up to maxOnChainTeardowns) is not covered: four 20-row
-// teardowns signed 8.58M.
+// The first operation of a grant carries its install. A re-grant also tears
+// down the grants PrepareSessionGrant packs into the same batch (up to
+// maxOnChainTeardowns); a first grant deploys the account instead. Signed
+// units measured on Sepolia (scripts/spike/native_recipient_cap):
+//
+//   - install on a deployed wallet: 2.30M, plus 136k per native row and 627k
+//     per allowed-action target (20 rows 5.03M);
+//   - deploying the account: 382k (20 rows with deploy 5.41M);
+//   - tearing down a prior grant: 208k, plus 28.6k per row and 73.6k per
+//     target (a 20-row replace 5.81M; four 20-row teardowns 8.58M; a 1-row
+//     grant replacing 20 rows with 8 targets 3.81M).
+//
+// The margin covers the bundler's spread, including the extra calldata of a
+// batch with several teardowns. Alchemy priced verification gas at exactly
+// 10M on a 20-row, 8-target grant replacing one of the same shape (about
+// 11.4M by this model); it mined, but grants that large sit at the
+// bundler's ceiling.
 const (
-	firstOpGasUnitsBase      = 2_550_000
-	firstOpGasUnitsPerRow    = 163_000
-	firstOpGasUnitsPerTarget = 624_000
-	firstOpGasMarginPercent  = 120
+	firstOpInstallUnitsBase       = 2_301_000
+	firstOpInstallUnitsPerRow     = 136_300
+	firstOpInstallUnitsPerTarget  = 627_400
+	firstOpDeployUnits            = 382_200
+	firstOpTeardownUnitsBase      = 208_500
+	firstOpTeardownUnitsPerRow    = 28_600
+	firstOpTeardownUnitsPerTarget = 73_600
+	firstOpGasMarginPercent       = 120
 )
 
 // grantGasShape is what a grant's first operation installs: one allowlist
-// row per native recipient and per allowed-action target.
+// row per native recipient and per allowed-action target, and the prior
+// grants the same operation tears down.
 type grantGasShape struct {
 	nativeRows int
 	targets    int
+	teardowns  []grantGasShape
 }
 
 func shapeOfPermissions(p SessionPermissions) grantGasShape {
@@ -112,6 +127,24 @@ func shapeOfPolicy(policy *model.SessionPolicy) grantGasShape {
 	return grantGasShape{nativeRows: len(policy.NativeRecipients), targets: len(policy.AllowedActions)}
 }
 
+// teardownShapes prices the prior grants an install tears down. Storage says
+// which applied grants are candidates. The chain may have cleared some, and
+// PrepareSessionGrant packs at most maxOnChainTeardowns of the rest, so the
+// most expensive candidates up to that cap bound any batch it can build.
+func teardownShapes(priors []*model.SessionPolicy) []grantGasShape {
+	shapes := make([]grantGasShape, 0, len(priors))
+	for _, prior := range priors {
+		if prior != nil {
+			shapes = append(shapes, shapeOfPolicy(prior))
+		}
+	}
+	sort.SliceStable(shapes, func(i, j int) bool { return shapes[i].teardownUnits() > shapes[j].teardownUnits() })
+	if len(shapes) > maxOnChainTeardowns {
+		shapes = shapes[:maxOnChainTeardowns]
+	}
+	return shapes
+}
+
 // shapeOfNeed is one automation's own install, for a runner with no grant.
 func shapeOfNeed(need *WorkflowNeed) grantGasShape {
 	if need == nil {
@@ -120,12 +153,26 @@ func shapeOfNeed(need *WorkflowNeed) grantGasShape {
 	return grantGasShape{nativeRows: len(need.NativeRecipients), targets: len(need.Actions)}
 }
 
-// firstOpUnits is the gas units the grant's first operation signs. A
+// teardownUnits is what uninstalling this grant adds to another's first op.
+func (s grantGasShape) teardownUnits() int64 {
+	return firstOpTeardownUnitsBase +
+		int64(s.nativeRows)*firstOpTeardownUnitsPerRow +
+		int64(s.targets)*firstOpTeardownUnitsPerTarget
+}
+
+// firstOpUnits is the gas units the grant's first operation signs: its
+// install, and either its teardowns or, for a first grant, the deploy. A
 // payable first operation adds what a payable steady operation adds.
 func (s grantGasShape) firstOpUnits(kind NativeIntentKind) int64 {
-	units := int64(firstOpGasUnitsBase) +
-		int64(s.nativeRows)*firstOpGasUnitsPerRow +
-		int64(s.targets)*firstOpGasUnitsPerTarget
+	units := int64(firstOpInstallUnitsBase) +
+		int64(s.nativeRows)*firstOpInstallUnitsPerRow +
+		int64(s.targets)*firstOpInstallUnitsPerTarget
+	if len(s.teardowns) == 0 {
+		units += firstOpDeployUnits
+	}
+	for _, prior := range s.teardowns {
+		units += prior.teardownUnits()
+	}
 	units = units * firstOpGasMarginPercent / 100
 	if kind == NativeValue {
 		units += nativePreflightGasUnitsValueSteady - nativePreflightGasUnitsSteady
