@@ -36,8 +36,10 @@ Studio's new Batch send to wallets Skills (`on-demand-batch-send`, `recurring-ba
    The OpenAPI `maxItems` for `nativeRecipients` and `delegatedNativeRecipients` moves to 20; `make rest-gen` changes comments only. The SDK no longer counts recipients (ava-sdk-js removes `MAX_NATIVE_RECIPIENTS`): one builder call can't see the wallet's merged grant.
 3. **Self-funded gas is sized from the grant** (`grantGasShape`, `session_grant_native.go`).
    - **First-op formula:** install `2.301M + 136.3k × native rows + 627.4k × targets`, plus either the deploy (382k, a first grant) or each teardown (`208.5k + 28.6k × rows + 73.6k × targets`), all × 120%. The fit is within 2k units of every measured case.
-   - **Which teardowns are priced:** the engine reads the runner's applied grants from storage (`onChainTeardownTargets`). It prices the costliest of them up to `maxOnChainTeardowns` (`teardownShapes`), which bounds any batch `PrepareSessionGrant` packs after the chain drops the cleared ones.
-   - **One teardown set per request:** prepare and submit pass that set to every merge, drift explanation and coverage check (`WithTeardowns`), so they compute the same native cap.
+   - **Which teardowns are priced: the exact batch.** `resolveTeardownTargets` lists the runner's applied grants that need cleanup, drops and marks those the chain says are already clear, and caps the rest at `maxOnChainTeardowns`. The engine runs it once under the runner lock, before pricing.
+   - **One teardown set per request:** prepare and submit price that set into every merge, drift explanation and coverage check (`WithTeardowns`), and hand the same set to `PrepareSessionGrant` (`Teardowns`, `TeardownsResolved`). A prepare's own cleanup therefore can't change what its submit recalculates. Before this, prepare priced a prior that `PrepareSessionGrant` then found cleared and marked: submit recalculated without it (3,209,281 wei prepared, 3,383,401 recalculated) and rejected the echo.
+   - **The set is recorded on the pending grant** (`SessionGrantAuthorization.PricedTeardowns`, an additive storage field), from the targets the batch actually packs. The pending-grant preflight and the deploy-time coverage check rebuild the same first op from it (`pendingInstallShape`), so a cap prepare accepted passes the preflight. Before this, a 1-row replacement of a 1-row grant prepared a cap of 3,209,281 wei at 1 wei per gas, but the preflight asked for 3,383,401.
+   - **Every prepared grant pays an install, the replacement of an applied grant included.** Each prepare allocates a new entity whose first op installs it and uninstalls the current one (#717). The carried merge, the carried coverage check and the raw-permission submit used to skip the premium when the current grant was applied. `WithGrantApplied` is removed. Only the deploy-time check against an installed grant skips it, as before.
    - **Plumbing:**
      - `selfFundedGasWei`, `priceWalletNativeGas` and `foldMissingInstall` take the shape.
      - The carried merge reads its recipients from `carriedNativeRecipients`, which also builds the merged permissions.
@@ -46,17 +48,19 @@ Studio's new Batch send to wallets Skills (`on-demand-batch-send`, `recurring-ba
 ## Not covered
 
 - **The bundler ceiling.** Alchemy priced the 20-row, 8-target same-shape replace at exactly 10,000,000 verification gas, while this model puts it at about 11.4M units. It mined, but grants that large sit at the bundler's ceiling.
-- **Preflight undercounts teardowns.** The send preflight still sizes a pending grant's first op from its own shape, so for a replace it expects the deploy rather than the teardowns. The cap includes the teardowns, so this only makes the preflight lenient; it never refuses a covered op.
+- **Pending grants recorded before this change** have no `PricedTeardowns`. Their preflight uses the deploy budget, as their cap was priced.
 - **Base.** Not measured yet; its pre-verification gas includes L1 data cost.
 - **The sponsored path.** Not re-measured. Sponsored operations are charged value only, so the budget doesn't apply.
 
 ## Verification
 
-- `go test ./core/taskengine ./aggregator/...` and `go vet ./...`, including `-tags integration`.
+- `go test ./core/taskengine ./aggregator/... ./model` and `go vet ./...`, including `-tags integration`. `make storage-check` against `origin/staging`: the new field is additive and backward-compatible.
 - New tests:
   - `TestBatchSendSizesTokensAndEthFromSettings`, `TestBatchSendShapeStaysUnresolved` and `TestBatchSendPricesERC20OpsOnTheNativeCap` (two ERC-20 rows and one ETH row over 12 runs: 24 ERC-20 ops and 12 sends priced);
   - `TestNativeGasBudgetsCoverSepoliaMeasurement`, which pins every measured case under its budget, with its teardowns;
-  - `TestTeardownShapesBoundTheBatch` and `TestReplacePricesItsTeardowns` (merge and coverage agree; a first-grant cap doesn't cover four teardowns);
+  - `TestReplacePricesItsTeardowns` (merge and coverage agree; a first-grant cap doesn't cover four teardowns);
+  - `TestReplacingAnAppliedGrantPricesItsInstall` and `TestReplacingAnAppliedGrantKeepsTheInstallWithNothingLeft` (the reviewed applied-current case: 3,209,281 wei, not 900,001);
+  - `TestPendingReplacementPreflightUsesThePricedTeardowns`, `TestPrepareSessionGrantRecordsPricedTeardowns`, `TestPrepareCleanupDoesNotChangeSubmitPricing` (the reviewed cleared-prior case) and `TestTeardownShapesFollowTheBatch`;
   - `TestMaxNativeRecipientsFollowsReplaceNotInstall`, which now pins 20 and four teardowns.
 - The gas tests now compute their expected caps (`gasAt1Wei`) instead of hard-coding them.
 - Studio's gateway spike (`scripts/tests/established.batch-send.gateway.test.ts`) passes 12/12 against a local gateway built from this branch. Both new templates list their ETH recipients in `authorization.required.nativeRecipients`.
