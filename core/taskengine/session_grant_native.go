@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"sort"
 	"strings"
 	"time"
 
@@ -127,10 +126,9 @@ func shapeOfPolicy(policy *model.SessionPolicy) grantGasShape {
 	return grantGasShape{nativeRows: len(policy.NativeRecipients), targets: len(policy.AllowedActions)}
 }
 
-// teardownShapes prices the prior grants an install tears down. Storage says
-// which applied grants are candidates. The chain may have cleared some, and
-// PrepareSessionGrant packs at most maxOnChainTeardowns of the rest, so the
-// most expensive candidates up to that cap bound any batch it can build.
+// teardownShapes prices the prior grants an install tears down: the set
+// resolveTeardownTargets returned, in batch order. Past maxOnChainTeardowns
+// they wait for the next grant, as in that set.
 func teardownShapes(priors []*model.SessionPolicy) []grantGasShape {
 	shapes := make([]grantGasShape, 0, len(priors))
 	for _, prior := range priors {
@@ -138,11 +136,34 @@ func teardownShapes(priors []*model.SessionPolicy) []grantGasShape {
 			shapes = append(shapes, shapeOfPolicy(prior))
 		}
 	}
-	sort.SliceStable(shapes, func(i, j int) bool { return shapes[i].teardownUnits() > shapes[j].teardownUnits() })
 	if len(shapes) > maxOnChainTeardowns {
 		shapes = shapes[:maxOnChainTeardowns]
 	}
 	return shapes
+}
+
+// pendingInstallShape is a pending grant's first operation as prepare priced
+// it: the grant's own rows and the teardowns recorded on it.
+func pendingInstallShape(policy *model.SessionPolicy) grantGasShape {
+	shape := shapeOfPolicy(policy)
+	if policy == nil || policy.Grant == nil {
+		return shape
+	}
+	for _, prior := range policy.Grant.PricedTeardowns {
+		shape.teardowns = append(shape.teardowns, grantGasShape{nativeRows: prior.NativeRows, targets: prior.Targets})
+	}
+	return shape
+}
+
+func recordedTeardowns(shapes []grantGasShape) []model.GrantGasShape {
+	if len(shapes) == 0 {
+		return nil
+	}
+	out := make([]model.GrantGasShape, len(shapes))
+	for i, shape := range shapes {
+		out[i] = model.GrantGasShape{NativeRows: shape.nativeRows, Targets: shape.targets}
+	}
+	return out
 }
 
 // shapeOfNeed is one automation's own install, for a runner with no grant.
@@ -271,7 +292,7 @@ func PreflightNativePermission(policy *model.SessionPolicy, intent NativeIntent,
 
 func nativePreflightGasUnitsFor(kind NativeIntentKind, policy *model.SessionPolicy) int64 {
 	if policy == nil || policy.Grant == nil || !policy.Grant.Applied() {
-		return shapeOfPolicy(policy).firstOpUnits(kind)
+		return pendingInstallShape(policy).firstOpUnits(kind)
 	}
 	if kind == NativeValue {
 		return nativePreflightGasUnitsValueSteady

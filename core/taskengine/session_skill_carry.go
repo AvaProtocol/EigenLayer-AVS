@@ -314,20 +314,16 @@ func mergeCarriedSkillGrant(current *model.SessionPolicy, remainder GrantRemaind
 	if declaredErr != nil {
 		return SessionPermissions{}, PolicyChanges{}, declaredErr
 	}
-	applied := current != nil && current.Grant.Applied()
 	fee := applyMergeOptions(opts).fee(chainID)
-	// The install is sized for the grant this carry produces.
+	// The replacement is a new entity, so its first operation installs it
+	// and tears down the current grant, applied or not (#717).
 	shape := applyMergeOptions(opts).installShape(grantGasShape{nativeRows: len(carriedNativeRecipients(current, addition, fundNeeds)), targets: len(mergedActions)})
-	var install *grantGasShape
-	if !applied {
-		install = &shape
-	}
-	gasAdded, gasNotes, gasErr := priceWalletNativeGas(fundNeeds, fee, installsNative, install)
+	gasAdded, gasNotes, gasErr := priceWalletNativeGas(fundNeeds, fee, installsNative, &shape)
 	if gasErr != nil {
 		return SessionPermissions{}, PolicyChanges{}, gasErr
 	}
 	needNative.Add(needNative, gasAdded)
-	extra := foldMissingInstall(needNative, fundNeeds, fee, applied, installsNative, shape)
+	extra := foldMissingInstall(needNative, fundNeeds, fee, installsNative, shape)
 	gasNotes = noteMissingInstall(gasNotes, extra, fee)
 	gasAdded.Add(gasAdded, extra)
 	if needNative.Cmp(maxUint256) > 0 {
@@ -850,13 +846,9 @@ func classifyCarriedCoverage(current *model.SessionPolicy, rem GrantRemainder, i
 		currentCap = current.NativeSpendCap
 	}
 	force := positiveNativeAmount(in.Permissions.NativeSpendCap) || positiveNativeAmount(currentCap) || (rem.Native != nil && rem.Native.Sign() > 0)
-	applied := current != nil && current.Grant.Applied()
-	var install *grantGasShape
-	if !applied {
-		shape := applyMergeOptions(opts).installShape(shapeOfPermissions(in.Permissions))
-		install = &shape
-	}
-	if _, _, priceErr := priceWalletNativeGas(priced, applyMergeOptions(opts).fee(in.ChainID), force, install); priceErr != nil {
+	// The submitted grant replaces the current one: a new install.
+	install := applyMergeOptions(opts).installShape(shapeOfPermissions(in.Permissions))
+	if _, _, priceErr := priceWalletNativeGas(priced, applyMergeOptions(opts).fee(in.ChainID), force, &install); priceErr != nil {
 		return nil, priceErr
 	}
 	var blocking []string

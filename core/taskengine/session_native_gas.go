@@ -60,7 +60,6 @@ type mergeOption func(*mergeConfig)
 
 type mergeConfig struct {
 	fees           map[int64]*big.Int
-	applied        bool
 	priorDelegated []model.DelegatedNativeRecipient
 	// teardowns are the prior grants the install's first operation tears
 	// down, priced into its gas. Nil is a first grant, which deploys.
@@ -128,16 +127,6 @@ func WithPriorDelegatedRecipients(acks []model.DelegatedNativeRecipient) mergeOp
 			return
 		}
 		cfg.priorDelegated = cloned
-	}
-}
-
-// WithGrantApplied says the native module is already installed, so this
-// merge does not add another first-op premium.
-func WithGrantApplied(applied bool) mergeOption {
-	return func(cfg *mergeConfig) {
-		if cfg != nil && applied {
-			cfg.applied = true
-		}
 	}
 }
 
@@ -301,10 +290,11 @@ func noteMissingInstall(notes []string, extra *big.Int, fee *big.Int) []string {
 // foldMissingInstall adds one first-op premium when no priced task already
 // carries it. A simulate draft's cap is steady gas plus value, so the
 // wallet's one install is added here, including when the new automation
-// is not an enabled task yet. An applied grant pays no second install.
-func foldMissingInstall(total *big.Int, needs []*WorkflowNeed, fee *big.Int, applied, installing bool, shape grantGasShape) *big.Int {
+// is not an enabled task yet. A replacement of an applied grant is a new
+// entity, so it pays an install too.
+func foldMissingInstall(total *big.Int, needs []*WorkflowNeed, fee *big.Int, installing bool, shape grantGasShape) *big.Int {
 	extra := big.NewInt(0)
-	if applied || !installing || fee == nil || fee.Sign() <= 0 || total == nil {
+	if !installing || fee == nil || fee.Sign() <= 0 || total == nil {
 		return extra
 	}
 	for _, need := range needs {

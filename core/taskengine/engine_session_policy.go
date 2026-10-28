@@ -376,6 +376,11 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 	lock.Lock()
 	defer lock.Unlock()
 
+	teardownTargets, teardowns, teardownErr := n.resolveTeardowns(in.ChainID, user.Address, in.Wallet)
+	if teardownErr != nil {
+		return nil, teardownErr
+	}
+
 	var current *model.SessionPolicy
 	if in.Addition != nil || in.BasePolicyID != nil {
 		current, err = activeSessionPolicyLocked(n.db, in.ChainID, user.Address, in.Wallet)
@@ -417,11 +422,7 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		if priorErr != nil {
 			return nil, priorErr
 		}
-		teardownOpt, teardownErr := n.teardownGasOption(in.ChainID, user.Address, in.Wallet)
-		if teardownErr != nil {
-			return nil, teardownErr
-		}
-		merged, ch, mergeErr := MergeSkillGrantWithRemainder(current, preRemainder, *in.Addition, kept, in.ChainID, preparedAt, time.Duration(in.ExpiresInSeconds)*time.Second, n.selfFundedGrantFeeOption(in.ChainID), priorOpt, teardownOpt)
+		merged, ch, mergeErr := MergeSkillGrantWithRemainder(current, preRemainder, *in.Addition, kept, in.ChainID, preparedAt, time.Duration(in.ExpiresInSeconds)*time.Second, n.selfFundedGrantFeeOption(in.ChainID), priorOpt, WithTeardowns(teardowns))
 		if mergeErr != nil {
 			return nil, mergeErr
 		}
@@ -436,16 +437,18 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 	}
 
 	prepared, err := PrepareSessionGrant(n.db, in.ChainID, signer, strings.ToLower(ulid.Make().String()), SessionGrantRequest{
-		Owner:          user.Address,
-		Wallet:         in.Wallet,
-		AgentLabel:     in.AgentLabel,
-		Justification:  in.Justification,
-		ValidUntil:     in.Permissions.ValidUntilMs,
-		HooksFor:       in.Permissions.HooksFor,
-		TeardownCheck:  n.teardownVerifier(),
-		TeardownCtx:    context.Background(),
-		OccupancyCheck: n.occupancyFor(in.ChainID),
-		OccupancyCtx:   context.Background(),
+		Owner:             user.Address,
+		Wallet:            in.Wallet,
+		AgentLabel:        in.AgentLabel,
+		Justification:     in.Justification,
+		ValidUntil:        in.Permissions.ValidUntilMs,
+		HooksFor:          in.Permissions.HooksFor,
+		TeardownCheck:     n.teardownVerifier(),
+		TeardownCtx:       context.Background(),
+		OccupancyCheck:    n.occupancyFor(in.ChainID),
+		OccupancyCtx:      context.Background(),
+		Teardowns:         teardownTargets,
+		TeardownsResolved: true,
 	})
 	if err != nil {
 		return nil, err
@@ -472,14 +475,16 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 // selfFundedGrantFeeOption prices native gas into a grant when this chain
 // does not sponsor UserOps. A sponsored chain, or an engine with no smart
 // wallet config, keeps the cap as the ETH the workflow sends.
-// teardownGasOption prices the prior grants this runner's next install tears
-// down, from storage (teardownShapes). Prepare and submit read the same set.
-func (n *Engine) teardownGasOption(chainID int64, owner, runner common.Address) (mergeOption, error) {
-	priors, err := onChainTeardownTargets(n.db, chainID, owner, runner)
+// resolveTeardowns is the set this runner's next install tears down, with
+// already-cleared grants filtered and marked first (resolveTeardownTargets).
+// One prepare or submit prices it into every merge and coverage check and
+// hands the same set to PrepareSessionGrant. Callers hold the runner lock.
+func (n *Engine) resolveTeardowns(chainID int64, owner, runner common.Address) ([]*model.SessionPolicy, []grantGasShape, error) {
+	targets, err := resolveTeardownTargets(context.Background(), n.db, chainID, owner, runner, n.teardownVerifier())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return WithTeardowns(teardownShapes(priors)), nil
+	return targets, teardownShapes(targets), nil
 }
 
 func (n *Engine) selfFundedGrantFeeOption(chainID int64) mergeOption {
@@ -567,6 +572,12 @@ func (n *Engine) SubmitSessionPolicy(
 	lock.Lock()
 	defer lock.Unlock()
 
+	teardownTargets, teardowns, teardownErr := n.resolveTeardowns(in.ChainID, user.Address, in.Wallet)
+	if teardownErr != nil {
+		return nil, nil, teardownErr
+	}
+	teardownOpt := WithTeardowns(teardowns)
+
 	current, err := activeSessionPolicyLocked(n.db, in.ChainID, user.Address, in.Wallet)
 	if err != nil {
 		// A stacked wallet has no single base. A legacy submit (no
@@ -613,10 +624,6 @@ func (n *Engine) SubmitSessionPolicy(
 		if priorErr != nil {
 			return nil, nil, priorErr
 		}
-		teardownOpt, teardownErr := n.teardownGasOption(in.ChainID, user.Address, in.Wallet)
-		if teardownErr != nil {
-			return nil, nil, teardownErr
-		}
 		merged, _, mergeErr := MergeSkillGrantWithRemainder(current, remPtr, snap.addition, kept, in.ChainID, snap.preparedAt, snap.expiresIn, feeOpt, priorOpt, teardownOpt)
 		if mergeErr != nil {
 			return nil, nil, skillSubmitMergeError(current, mergeErr, snap.tasks, kept)
@@ -630,11 +637,7 @@ func (n *Engine) SubmitSessionPolicy(
 			dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID, feeOpt, teardownOpt)
 		}
 	} else {
-		teardownOpt, teardownErr := n.teardownGasOption(in.ChainID, user.Address, in.Wallet)
-		if teardownErr != nil {
-			return nil, nil, teardownErr
-		}
-		dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID, n.selfFundedGrantFeeOption(in.ChainID), WithGrantApplied(current != nil && current.Grant.Applied()), teardownOpt)
+		dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID, n.selfFundedGrantFeeOption(in.ChainID), teardownOpt)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -644,18 +647,20 @@ func (n *Engine) SubmitSessionPolicy(
 	}
 
 	prepared, err := PrepareSessionGrant(n.db, in.ChainID, signer, strings.ToLower(policyID), SessionGrantRequest{
-		EntityID:       &entityID,
-		Owner:          user.Address,
-		Wallet:         in.Wallet,
-		AgentLabel:     in.AgentLabel,
-		Justification:  in.Justification,
-		ValidUntil:     in.Permissions.ValidUntilMs,
-		HooksFor:       in.Permissions.HooksFor,
-		Deadline:       deadline,
-		TeardownCheck:  n.teardownVerifier(),
-		TeardownCtx:    context.Background(),
-		OccupancyCheck: n.occupancyFor(in.ChainID),
-		OccupancyCtx:   context.Background(),
+		EntityID:          &entityID,
+		Owner:             user.Address,
+		Wallet:            in.Wallet,
+		AgentLabel:        in.AgentLabel,
+		Justification:     in.Justification,
+		ValidUntil:        in.Permissions.ValidUntilMs,
+		HooksFor:          in.Permissions.HooksFor,
+		Deadline:          deadline,
+		TeardownCheck:     n.teardownVerifier(),
+		TeardownCtx:       context.Background(),
+		OccupancyCheck:    n.occupancyFor(in.ChainID),
+		OccupancyCtx:      context.Background(),
+		Teardowns:         teardownTargets,
+		TeardownsResolved: true,
 	})
 	if err != nil {
 		return nil, nil, err

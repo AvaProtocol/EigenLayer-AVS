@@ -708,7 +708,7 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 		return SessionPermissions{}, PolicyChanges{}, gasErr
 	}
 	native.Add(native, gasAdded)
-	extra := foldMissingInstall(native, taskNeeds, fee, false, native.Sign() > 0, shape)
+	extra := foldMissingInstall(native, taskNeeds, fee, native.Sign() > 0, shape)
 	gasNotes = noteMissingInstall(gasNotes, extra, fee)
 	gasAdded.Add(gasAdded, extra)
 	if native.Cmp(maxUint256) > 0 {
@@ -2400,13 +2400,11 @@ func classifyRunnerCoverage(in SessionPolicyInput, tasks []*avsproto.Task, now t
 	// One price for the whole wallet. Per task would count an install twice
 	// and refuse a grant that merged with a single install. An applied
 	// grant already paid that install.
+	// The permissions are the grant being prepared or submitted: a new
+	// entity whose first operation installs it, whatever the current grant.
 	cfg := applyMergeOptions(opts)
-	var install *grantGasShape
-	if !cfg.applied {
-		shape := cfg.installShape(shapeOfPermissions(in.Permissions))
-		install = &shape
-	}
-	if _, _, priceErr := priceWalletNativeGas(priced, cfg.fee(in.ChainID), positiveNativeAmount(in.Permissions.NativeSpendCap), install); priceErr != nil {
+	install := cfg.installShape(shapeOfPermissions(in.Permissions))
+	if _, _, priceErr := priceWalletNativeGas(priced, cfg.fee(in.ChainID), positiveNativeAmount(in.Permissions.NativeSpendCap), &install); priceErr != nil {
 		return nil, priceErr
 	}
 	var blocking []string
@@ -2948,8 +2946,9 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 		force := positiveNativeAmount(policyCap) || needsInstallNative([]*WorkflowNeed{item.need})
 		var install *grantGasShape
 		if !applied {
-			// The grant's install, or this automation's own when no grant exists.
-			shape := shapeOfPolicy(policy)
+			// The pending grant's install as prepare priced it, or this
+			// automation's own when no grant exists.
+			shape := pendingInstallShape(policy)
 			if policy == nil {
 				shape = shapeOfNeed(item.need)
 			}

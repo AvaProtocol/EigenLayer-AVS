@@ -161,6 +161,21 @@ type SessionGrantAuthorization struct {
 	// installed TimeRangeModule window and found it agrees with ValidUntil.
 	// Cached so the chain read is not paid on every UserOp (#763 C).
 	ChainWindowChecked bool `json:"chain_window_checked,omitempty"`
+
+	// PricedTeardowns are the prior grants whose teardown the native cap's
+	// first operation was priced for, recorded at prepare. The pending-grant
+	// preflight and deploy check rebuild the same install from them, so a
+	// cap prepare accepted can execute. Empty is a first grant, priced with
+	// the deploy, and every grant priced before this field. Additive storage
+	// field.
+	PricedTeardowns []GrantGasShape `json:"priced_teardowns,omitempty"`
+}
+
+// GrantGasShape is the allowlist rows of a grant, as its native-gas pricing
+// counts them: one per native recipient and one per allowed-action target.
+type GrantGasShape struct {
+	NativeRows int `json:"native_rows"`
+	Targets    int `json:"targets"`
 }
 
 // SessionPolicyStatus tracks how far a grant has got.

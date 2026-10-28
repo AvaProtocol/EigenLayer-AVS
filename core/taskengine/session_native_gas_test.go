@@ -391,7 +391,10 @@ func TestSkillAddedAfterNativeGrantPricesGas(t *testing.T) {
 	}
 }
 
-func TestAppliedGrantDoesNotChargeInstallAgain(t *testing.T) {
+// Replacing an applied grant installs a new entity and tears the current one
+// down in the same first operation (#717), so the replacement pays an
+// install too, sized with the teardown it carries.
+func TestReplacingAnAppliedGrantPricesItsInstall(t *testing.T) {
 	now := skillNow()
 	fee := big.NewInt(1)
 	a1 := "0x0000000000000000000000000000000000000001"
@@ -413,26 +416,61 @@ func TestAppliedGrantDoesNotChargeInstallAgain(t *testing.T) {
 	})
 	current.Grant.AppliedAt = 1
 	// The remaining limit has been spent down to the ETH value. Steady gas
-	// for the ETH task is still required. The install is already on chain.
+	// for the ETH task is still required, and so is the replacement's install.
 	remainderNative, ok := new(big.Int).SetString("24000000000000000", 10)
 	if !ok {
 		t.Fatal("remainder")
 	}
+	teardowns := []grantGasShape{shapeOfPolicy(current)}
 	usdcDraft := studioDraftAddition(t, usdc, current)
-	perms, changes, err := MergeSkillGrantWithRemainder(current, &GrantRemainder{Native: remainderNative}, usdcDraft, []*avsproto.Task{eth}, skillSepolia, now, time.Hour, WithSelfFundedGrantFee(skillSepolia, fee))
+	perms, changes, err := MergeSkillGrantWithRemainder(current, &GrantRemainder{Native: remainderNative}, usdcDraft, []*avsproto.Task{eth}, skillSepolia, now, time.Hour, WithSelfFundedGrantFee(skillSepolia, fee), WithTeardowns(teardowns))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != plusWei("24000000000000000", gasAt1Wei(24, 12, nil)) {
-		t.Fatalf("applied grant = %+v, want value + ETH steady + USDC steady and no second install", perms.NativeSpendCap)
+	install := shapeOfPermissions(perms)
+	install.teardowns = teardowns
+	if want := plusWei("24000000000000000", gasAt1Wei(24, 12, &install)); perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != want {
+		t.Fatalf("replacement = %+v, want value + ETH steady + USDC steady + one install, %s", perms.NativeSpendCap, want)
 	}
-	// The addition does not echo nativeGasWei, so the split is the ETH
-	// task's steady gas only.
-	if changes.NativeGasWei != gasAt1Wei(24, 0, nil).String() {
-		t.Fatalf("applied gas split = %s", changes.NativeGasWei)
+	if !summaryHas(changes, "one install") {
+		t.Fatalf("a replacement must claim its install: %#v", changes.Summary)
 	}
-	if summaryHas(changes, "one install") {
-		t.Fatalf("an applied grant must not claim a new install: %#v", changes.Summary)
+	in := SessionPolicyInput{ChainID: skillSepolia, Permissions: perms}
+	if _, err := classifyCarriedCoverage(current, GrantRemainder{Native: remainderNative}, in, []*avsproto.Task{eth}, now, WithSelfFundedGrantFee(skillSepolia, fee), WithTeardowns(teardowns)); err != nil {
+		t.Fatalf("the replacement must cover its own tasks, got %v", err)
+	}
+}
+
+// The reviewed case: an applied one-recipient grant with nothing left, one
+// 1-wei send to go, replaced at 1 wei per gas. The cap is that send plus the
+// replacement's first op, its install and the old grant's teardown.
+func TestReplacingAnAppliedGrantKeepsTheInstallWithNothingLeft(t *testing.T) {
+	now := skillNow()
+	a1 := "0x0000000000000000000000000000000000000001"
+	task := loopEthTask(t, "{{settings.recipients}}", "{{value}}", "{{settings.token_amount.amount}}", 1, map[string]any{
+		"recipients":   []any{a1},
+		"token_amount": map[string]any{"amount": "1"},
+	})
+	current := permissionsAsPolicy(SessionPolicyInput{
+		ChainID: skillSepolia,
+		Permissions: SessionPermissions{
+			NativeSpendCap:   &model.NativeSpendCap{Amount: "1"},
+			NativeRecipients: []*common.Address{ptrAddr(t, a1)},
+		},
+	})
+	current.Grant.AppliedAt = 1
+	teardowns := []grantGasShape{{nativeRows: 1}}
+	perms, _, err := MergeSkillGrantWithRemainder(current, &GrantRemainder{Native: big.NewInt(0)}, PolicyAddition{}, []*avsproto.Task{task}, skillSepolia, now, time.Hour, WithSelfFundedGrantFee(skillSepolia, big.NewInt(1)), WithTeardowns(teardowns))
+	if err != nil {
+		t.Fatal(err)
+	}
+	install := grantGasShape{nativeRows: 1, teardowns: teardowns}
+	want := plusWei("1", big.NewInt(install.firstOpUnits(NativeSend)))
+	if want != "3209281" {
+		t.Fatalf("model changed: expected 3209281 for this case, computed %s", want)
+	}
+	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != want {
+		t.Fatalf("replacement cap = %+v, want %s", perms.NativeSpendCap, want)
 	}
 }
 

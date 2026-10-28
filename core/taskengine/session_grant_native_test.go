@@ -14,6 +14,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 type stubCodeAndFee struct {
@@ -234,20 +235,18 @@ func TestNativeGasBudgetsCoverSepoliaMeasurement(t *testing.T) {
 	}
 }
 
-// teardownShapes prices the costliest candidates PrepareSessionGrant could
-// pack, up to maxOnChainTeardowns, so any batch it builds fits the budget.
-func TestTeardownShapesBoundTheBatch(t *testing.T) {
+// teardownShapes prices the resolved set in batch order, capped like it.
+func TestTeardownShapesFollowTheBatch(t *testing.T) {
 	a, b := common.HexToAddress("0xa1"), common.HexToAddress("0xb2")
 	token := common.HexToAddress("0x7000")
 	small := &model.SessionPolicy{NativeRecipients: []*common.Address{&a}}
 	wide := &model.SessionPolicy{NativeRecipients: []*common.Address{&a, &b}, AllowedActions: []model.AllowedAction{{Target: &token}}}
-	priors := []*model.SessionPolicy{small, small, wide, small, nil, small, wide}
-	got := teardownShapes(priors)
+	got := teardownShapes([]*model.SessionPolicy{small, nil, wide, small, small, wide})
 	if len(got) != maxOnChainTeardowns {
 		t.Fatalf("teardowns = %d, want the cap %d", len(got), maxOnChainTeardowns)
 	}
-	if got[0].targets != 1 || got[1].targets != 1 {
-		t.Fatalf("the costliest priors come first: %+v", got)
+	if got[0].nativeRows != 1 || got[1].targets != 1 || got[2].targets != 0 {
+		t.Fatalf("batch order = %+v", got)
 	}
 	if shapes := teardownShapes(nil); len(shapes) != 0 {
 		t.Fatalf("a first grant tears nothing down: %+v", shapes)
@@ -716,5 +715,35 @@ func TestNativeRecipientRefusalNamesTheRecipient(t *testing.T) {
 	if changed.Code != SessionPolicyRecipientDelegateChangedCode || changed.Delegate == nil || *changed.Delegate != coinbase ||
 		changed.AcknowledgedDelegate == nil || *changed.AcknowledgedDelegate != other {
 		t.Fatalf("changed = %+v", changed)
+	}
+}
+
+// A pending replacement records the teardowns prepare priced, and the
+// preflight rebuilds the same first op from them, so a cap prepare accepted
+// can send. The reviewed case: one recipient, one 1-recipient teardown, one
+// 1-wei send at 1 wei per gas.
+func TestPendingReplacementPreflightUsesThePricedTeardowns(t *testing.T) {
+	now := skillNow()
+	a1 := "0x0000000000000000000000000000000000000001"
+	task := loopEthTask(t, "{{settings.recipients}}", "{{value}}", "{{settings.token_amount.amount}}", 1, map[string]any{
+		"recipients":   []any{a1},
+		"token_amount": map[string]any{"amount": "1"},
+	})
+	teardowns := []grantGasShape{{nativeRows: 1}}
+	perms, _, err := MergeSkillGrantWithRemainder(nil, nil, PolicyAddition{}, []*avsproto.Task{task}, skillSepolia, now, time.Hour, WithSelfFundedGrantFee(skillSepolia, big.NewInt(1)), WithTeardowns(teardowns))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != "3209281" {
+		t.Fatalf("prepared cap = %+v", perms.NativeSpendCap)
+	}
+	pending := permissionsAsPolicy(SessionPolicyInput{ChainID: skillSepolia, Permissions: perms})
+	pending.Grant.PricedTeardowns = recordedTeardowns(teardowns)
+	if got := pendingInstallShape(pending); len(got.teardowns) != 1 || got.teardowns[0].nativeRows != 1 {
+		t.Fatalf("pending install = %+v", got)
+	}
+	intent := NativeIntent{Recipient: common.HexToAddress(a1), Amount: big.NewInt(1), Kind: NativeSend}
+	if msg := PreflightNativePermission(pending, intent, stubCodeAndFee{fee: big.NewInt(1)}); msg != "" {
+		t.Fatalf("a cap prepare accepted must pass preflight, got %q", msg)
 	}
 }
