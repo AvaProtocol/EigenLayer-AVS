@@ -276,8 +276,10 @@ func tokenTotalSites(chain int64, totals map[common.Address]*big.Int) []fundSite
 // wallets graph. Each loop is sized from every row of its kind in
 // settings.transfers: the most one run can send, since code1 may skip rows
 // the wallet can't fund but never adds one. The ERC-20 loop gets one transfer
-// site per token. The ETH loop gets one native site per row, so every
-// recipient is listed on the grant and each send counts as one UserOp.
+// site per token, counting one UserOp per row of that token. The ETH loop
+// gets one native site per row, so every recipient is listed on the grant
+// and each send counts as one UserOp. Both kinds of op spend the native cap
+// on a self-funded chain.
 func boundBatchSendLoop(nodes []*avsproto.TaskNode, settings map[string]any, loop *avsproto.LoopNode) ([]fundSite, bool) {
 	cfg := loop.GetConfig()
 	if cfg == nil {
@@ -312,7 +314,14 @@ func boundBatchSendLoop(nodes []*avsproto.TaskNode, settings map[string]any, loo
 		if !ok {
 			return nil, false
 		}
-		return tokenTotalSites(chain, plan.tokenTotals), true
+		// A deployed loop submits one transfer per row. Unlike the old batch,
+		// the row count is known here, so the ops are priced, not unsized.
+		sites := tokenTotalSites(chain, plan.tokenTotals)
+		for i := range sites {
+			sites[i].opsUnknown = false
+			sites[i].userOp = plan.tokenRows[sites[i].target]
+		}
+		return sites, true
 	case batchSendEth:
 		chain, ok := loopEthRunner(loop, "{{"+iter+".recipient}}", "{{"+iter+".token_amount.amount}}")
 		if !ok {
@@ -352,10 +361,11 @@ type batchSendEthRow struct {
 	amount    *big.Int
 }
 
-// batchSendPlan is settings.transfers read for sizing: a total per ERC-20
-// token, and each ETH row with its recipient.
+// batchSendPlan is settings.transfers read for sizing: a total and a row
+// count per ERC-20 token, and each ETH row with its recipient.
 type batchSendPlan struct {
 	tokenTotals map[common.Address]*big.Int
+	tokenRows   map[common.Address]int
 	eth         []batchSendEthRow
 }
 
@@ -364,7 +374,7 @@ type batchSendPlan struct {
 // sends (amount zero) adds nothing. Any row that can't be read leaves the
 // whole loop unrecognized, as batchTransferTotals does.
 func batchSendRows(settings map[string]any) (batchSendPlan, bool) {
-	plan := batchSendPlan{tokenTotals: map[common.Address]*big.Int{}}
+	plan := batchSendPlan{tokenTotals: map[common.Address]*big.Int{}, tokenRows: map[common.Address]int{}}
 	if settings == nil {
 		return plan, false
 	}
@@ -416,6 +426,7 @@ func batchSendRows(settings map[string]any) (batchSendPlan, bool) {
 				plan.tokenTotals[token] = big.NewInt(0)
 			}
 			plan.tokenTotals[token].Add(plan.tokenTotals[token], amount)
+			plan.tokenRows[token]++
 		}
 	}
 	return plan, true

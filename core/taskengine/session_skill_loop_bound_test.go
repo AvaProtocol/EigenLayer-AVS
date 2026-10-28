@@ -745,3 +745,34 @@ func TestBatchSendShapeStaysUnresolved(t *testing.T) {
 
 	assertUnresolved("no settings", batchSendTask(t, batchSendFundingSource, 3, nil))
 }
+
+// Mixed rows share the native cap on a self-funded chain, so each ERC-20 row
+// is a priced UserOp, not unsized gas: two ERC-20 rows and one ETH row over
+// 12 runs are 24 transfer ops and 12 native sends.
+func TestBatchSendPricesERC20OpsOnTheNativeCap(t *testing.T) {
+	now := skillNow()
+	rows := []any{
+		batchSendRow(skillUSDC, batchSendAlice, "100"),
+		batchSendRow(skillUSDT, batchSendBob, "200"),
+		batchSendRow(skillETH, batchSendCarol, "1000"),
+	}
+	task := batchSendTask(t, batchSendFundingSource, 12, rows)
+	need := deriveSepolia(task, now)
+	if need == nil || need.Unresolved || need.GasUnsized {
+		t.Fatalf("mixed batch = %#v", need)
+	}
+	if need.NativeValueOps != 24 || need.NativeSendOps != 12 {
+		t.Fatalf("ops = %d ERC-20, %d native; want 24 and 12", need.NativeValueOps, need.NativeSendOps)
+	}
+	perms, changes, err := MergeSkillGrantWithRemainder(nil, nil, PolicyAddition{}, []*avsproto.Task{task}, skillSepolia, now, time.Hour, WithSelfFundedGrantFee(skillSepolia, big.NewInt(1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := plusWei("12000", gasAt1Wei(12, 24, installOf(perms)))
+	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != want {
+		t.Fatalf("native cap = %+v, want %s", perms.NativeSpendCap, want)
+	}
+	if summaryHas(changes, "remaining runs are unknown") {
+		t.Fatalf("a known batch must not be unsized: %#v", changes.Summary)
+	}
+}
