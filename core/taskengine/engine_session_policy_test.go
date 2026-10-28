@@ -418,7 +418,7 @@ func TestSessionPermissionsValidation(t *testing.T) {
 		recs[i] = &a
 	}
 	tooMany.NativeRecipients = recs
-	require.Error(t, tooMany.Validate(), "max 5 native recipients")
+	require.Error(t, tooMany.Validate(), "at most MaxNativeRecipients native recipients")
 
 	module := native
 	mod := aa.AllowlistModuleAddress()
@@ -453,9 +453,16 @@ func TestSessionPermissionsValidation(t *testing.T) {
 	require.Error(t, neither.Validate(), "needs allowedActions and/or nativeRecipients")
 }
 
+// The cap is the replace measurement, not the install one: a re-grant is a
+// replace, and it carries the teardown of every prior grant (up to
+// maxOnChainTeardowns). Raise it only with a new Sepolia measurement from
+// scripts/spike/native_recipient_cap, recorded on the constant.
 func TestMaxNativeRecipientsFollowsReplaceNotInstall(t *testing.T) {
-	if MaxNativeRecipients != 5 {
-		t.Fatalf("MaxNativeRecipients = %d, want 5 (A0: 20-row deferred replace AA23s)", MaxNativeRecipients)
+	if MaxNativeRecipients != 20 {
+		t.Fatalf("MaxNativeRecipients = %d, want 20 (measured: a 20-row replace with four teardowns mines at 6.84M gas)", MaxNativeRecipients)
+	}
+	if maxOnChainTeardowns != 4 {
+		t.Fatalf("maxOnChainTeardowns = %d; the 20-row measurement covers four teardowns", maxOnChainTeardowns)
 	}
 }
 

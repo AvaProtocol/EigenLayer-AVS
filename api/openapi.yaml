@@ -2108,7 +2108,7 @@ components:
           items: { $ref: '#/components/schemas/Erc20SpendCap' }
         nativeRecipients:
           type: array
-          maxItems: 5
+          maxItems: 20
           items: { $ref: '#/components/schemas/EthereumAddress' }
         nativeSpendCap: { $ref: '#/components/schemas/NativeSpendCap' }
         nativeGasWei:
@@ -2143,12 +2143,12 @@ components:
           items: { $ref: '#/components/schemas/Erc20SpendCap' }
         nativeRecipients:
           type: array
-          maxItems: 5
+          maxItems: 20
           items: { $ref: '#/components/schemas/EthereumAddress' }
         delegatedNativeRecipients:
           type: array
           minItems: 1
-          maxItems: 5
+          maxItems: 20
           items: { $ref: '#/components/schemas/DelegatedNativeRecipient' }
           description: |
             Per-recipient EIP-7702 acknowledgements for native ETH recipients
@@ -2295,17 +2295,17 @@ components:
         nativeRecipients:
           type: array
           minItems: 1
-          maxItems: 5 # keep in sync with MaxNativeRecipients in session_permissions.go
+          maxItems: 20 # keep in sync with MaxNativeRecipients in session_permissions.go
           items: { $ref: '#/components/schemas/EthereumAddress' }
           description: |
             EOAs this grant may send native ETH to (empty-calldata execute).
             Omit for Uniswap/ERC-20-only and for payable-write-only
-            (nativeValueCap). A present empty array is 400. Max 5
-            (MaxNativeRecipients; deferred replace of 20-row grants AA23s).
+            (nativeValueCap). A present empty array is 400. Max 20
+            (MaxNativeRecipients; a 20-row replace with four teardowns mines, measured on Sepolia).
         delegatedNativeRecipients:
           type: array
           minItems: 1
-          maxItems: 5
+          maxItems: 20
           items: { $ref: '#/components/schemas/DelegatedNativeRecipient' }
           description: |
             Owner acknowledgements of EIP-7702 delegations on native ETH
@@ -2418,7 +2418,7 @@ components:
         delegatedNativeRecipients:
           type: array
           minItems: 1
-          maxItems: 5
+          maxItems: 20
           items: { $ref: '#/components/schemas/DelegatedNativeRecipient' }
           description: |
             Merged EIP-7702 acknowledgements to echo to submit. Present when
@@ -2467,12 +2467,12 @@ components:
         nativeRecipients:
           type: array
           minItems: 1
-          maxItems: 5 # keep in sync with MaxNativeRecipients in session_permissions.go
+          maxItems: 20 # keep in sync with MaxNativeRecipients in session_permissions.go
           items: { $ref: '#/components/schemas/EthereumAddress' }
         delegatedNativeRecipients:
           type: array
           minItems: 1
-          maxItems: 5
+          maxItems: 20
           items: { $ref: '#/components/schemas/DelegatedNativeRecipient' }
           description: |
             Echo prepare's `delegatedNativeRecipients`. A recipient with code
@@ -2550,7 +2550,7 @@ components:
         delegatedNativeRecipients:
           type: array
           minItems: 1
-          maxItems: 5
+          maxItems: 20
           items: { $ref: '#/components/schemas/DelegatedNativeRecipient' }
           description: |
             EIP-7702 acknowledgements stored with this grant. A native send
@@ -3737,7 +3737,7 @@ paths:
             An unsized native payable that would install a native cap is 409.
             An amount that was a JSON number past the exact integer range says
             to send a decimal string.
-            `SESSION_POLICY_TOO_MANY_NATIVE_RECIPIENTS` — more than five native
+            `SESSION_POLICY_TOO_MANY_NATIVE_RECIPIENTS` — more than twenty native
             recipients. Finished automations keep their addresses until revoke.
             `SESSION_POLICY_RECIPIENT_NOT_EOA` — a native recipient is a
             contract.
@@ -3846,7 +3846,7 @@ paths:
             or, when there is no usable grant, a token amount cannot be sized.
             An unsized native payable that would install a native cap is
             `409 SESSION_POLICY_NATIVE_UNSIZED`.
-            `SESSION_POLICY_TOO_MANY_NATIVE_RECIPIENTS` — more than five native
+            `SESSION_POLICY_TOO_MANY_NATIVE_RECIPIENTS` — more than twenty native
             recipients. Finished automations keep their addresses until revoke.
             `SESSION_POLICY_RECIPIENT_NOT_EOA` — a native recipient is a
             contract.
