@@ -54,6 +54,30 @@
     "decimals": 18
   },
   {
+    "id": "0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42",
+    "name": "EURC",
+    "symbol": "EURC",
+    "decimals": 6
+  },
+  {
+    "id": "0x2416092f143378750bb29b79ed961ab195cceea5",
+    "name": "Renzo Restaked ETH",
+    "symbol": "ezETH",
+    "decimals": 18
+  },
+  {
+    "id": "0x6bb7a212910682dcfdbd5bcbb3e28fb4e8da10ee",
+    "name": "GHO",
+    "symbol": "GHO",
+    "decimals": 18
+  },
+  {
+    "id": "0xecac9c5f704e954931349da37f60e39f515c11c1",
+    "name": "Lombard Staked Bitcoin",
+    "symbol": "LBTC",
+    "decimals": 8
+  },
+  {
     "id": "0x88fb150bdc53a65fe94dea0c9ba0a6daf8c6e196",
     "name": "Chainlink",
     "symbol": "LINK",
@@ -72,9 +96,39 @@
     "decimals": 18
   },
   {
+    "id": "0x8d58c0c60b8d6b88fa98b291a646db34d0f98258",
+    "name": "Ripple USD",
+    "symbol": "RLUSD",
+    "decimals": 18
+  },
+  {
     "id": "0xab36452dbac151be02b16ca17d8919826072f64a",
     "name": "Reserve Rights",
     "symbol": "RSR",
+    "decimals": 18
+  },
+  {
+    "id": "0x211cc4dd073734da055fbf44a2b4667d5e5fe5d2",
+    "name": "Staked USDe",
+    "symbol": "sUSDe",
+    "decimals": 18
+  },
+  {
+    "id": "0x5875eee11cf8398102fdad704c9e96607675467a",
+    "name": "Savings USDS",
+    "symbol": "sUSDS",
+    "decimals": 18
+  },
+  {
+    "id": "0x660975730059246a68521a3e2fbd4740173100f5",
+    "name": "Syrup USDC",
+    "symbol": "syrupUSDC",
+    "decimals": 6
+  },
+  {
+    "id": "0x236aa50979d5f3de3bd1eeb40e81137f22ab794b",
+    "name": "Base tBTC v2",
+    "symbol": "tBTC",
     "decimals": 18
   },
   {
@@ -102,6 +156,18 @@
     "decimals": 6
   },
   {
+    "id": "0x5d3a1ff2b6bab83b63cd9ad0787074081a52ef34",
+    "name": "USDe",
+    "symbol": "USDe",
+    "decimals": 18
+  },
+  {
+    "id": "0x820c137fa70c8691f0e44dc420a5e53c168921dc",
+    "name": "USDS Stablecoin",
+    "symbol": "USDS",
+    "decimals": 18
+  },
+  {
     "id": "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2",
     "name": "Bridged Tether USD",
     "symbol": "USDT",
@@ -114,6 +180,18 @@
     "decimals": 18
   },
   {
+    "id": "0x1cea84203673764244e05693e42e6ace62be9ba5",
+    "name": "Wrapped BTC",
+    "symbol": "WBTC",
+    "decimals": 8
+  },
+  {
+    "id": "0x04c0599ae5a44757c0af6f9ec3b93da8976c150a",
+    "name": "Wrapped eETH",
+    "symbol": "weETH",
+    "decimals": 18
+  },
+  {
     "id": "0xa88594d404727625a9437c3f886c7643872296ae",
     "name": "WELL",
     "symbol": "WELL",
@@ -123,6 +201,12 @@
     "id": "0x4200000000000000000000000000000000000006",
     "name": "Wrapped Ether",
     "symbol": "WETH",
+    "decimals": 18
+  },
+  {
+    "id": "0xedfa23602d0ec14714057867a78d01e94176bea0",
+    "name": "Wrapped rsETH",
+    "symbol": "wrsETH",
     "decimals": 18
   },
   {
