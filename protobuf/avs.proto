@@ -408,6 +408,9 @@ message ETHTransferNode {
     string amount = 2;
     // Chain to execute the transfer on. Required: a task carries no chain to inherit.
     int64 chain_id = 3;
+    // Owner preparation only: amount is a captured upper bound. Deduct the
+    // priced operation's maximum fee before signing (zero when sponsored).
+    bool reserve_gas = 4;
   }
 
   message Output {

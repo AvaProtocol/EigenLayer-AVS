@@ -8069,7 +8069,10 @@ type ETHTransferNode_Config struct {
 	Destination string                 `protobuf:"bytes,1,opt,name=destination,proto3" json:"destination,omitempty"`
 	Amount      string                 `protobuf:"bytes,2,opt,name=amount,proto3" json:"amount,omitempty"`
 	// Chain to execute the transfer on. Required: a task carries no chain to inherit.
-	ChainId       int64 `protobuf:"varint,3,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	ChainId int64 `protobuf:"varint,3,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	// Owner preparation only: amount is a captured upper bound. Deduct the
+	// priced operation's maximum fee before signing (zero when sponsored).
+	ReserveGas    bool `protobuf:"varint,4,opt,name=reserve_gas,json=reserveGas,proto3" json:"reserve_gas,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8123,6 +8126,13 @@ func (x *ETHTransferNode_Config) GetChainId() int64 {
 		return x.ChainId
 	}
 	return 0
+}
+
+func (x *ETHTransferNode_Config) GetReserveGas() bool {
+	if x != nil {
+		return x.ReserveGas
+	}
+	return false
 }
 
 type ETHTransferNode_Output struct {
@@ -10317,13 +10327,15 @@ const file_avs_proto_rawDesc = "" +
 	"\x05block\x18\x05 \x01(\v2\x18.aggregator.BlockTriggerH\x00R\x05block\x120\n" +
 	"\x05event\x18\x06 \x01(\v2\x18.aggregator.EventTriggerH\x00R\x05event\x12\x0e\n" +
 	"\x02id\x18\a \x01(\tR\x02idB\x0e\n" +
-	"\ftrigger_type\"\xe2\x01\n" +
+	"\ftrigger_type\"\x83\x02\n" +
 	"\x0fETHTransferNode\x12:\n" +
-	"\x06config\x18\x01 \x01(\v2\".aggregator.ETHTransferNode.ConfigR\x06config\x1a]\n" +
+	"\x06config\x18\x01 \x01(\v2\".aggregator.ETHTransferNode.ConfigR\x06config\x1a~\n" +
 	"\x06Config\x12 \n" +
 	"\vdestination\x18\x01 \x01(\tR\vdestination\x12\x16\n" +
 	"\x06amount\x18\x02 \x01(\tR\x06amount\x12\x19\n" +
-	"\bchain_id\x18\x03 \x01(\x03R\achainId\x1a4\n" +
+	"\bchain_id\x18\x03 \x01(\x03R\achainId\x12\x1f\n" +
+	"\vreserve_gas\x18\x04 \x01(\bR\n" +
+	"reserveGas\x1a4\n" +
 	"\x06Output\x12*\n" +
 	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\x8a\b\n" +
 	"\x11ContractWriteNode\x12<\n" +

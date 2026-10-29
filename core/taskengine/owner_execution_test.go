@@ -52,17 +52,22 @@ type ownerBackendFixture struct {
 	submitCtxErr  error
 }
 
-func (f *ownerBackendFixture) Prepare(_ context.Context, _ *config.SmartWalletConfig, _, sender common.Address, _ *big.Int, calls []aa.Call, _ logger.Logger) (*preset.PreparedOwnerUserOp, error) {
+func (f *ownerBackendFixture) Prepare(_ context.Context, _ *config.SmartWalletConfig, _, sender common.Address, _ *big.Int, batch preset.OwnerBatch, _ logger.Logger) (*preset.PreparedOwnerUserOp, error) {
 	f.prepared.Add(1)
-	packed, err := aa.PackExecuteBatchMAv2(calls)
-	if err != nil {
-		return nil, err
-	}
 	nonce, err := userop.EncodeNonceMAv2(0, userop.ValidationOptionGlobal, 0)
 	if err != nil {
 		return nil, err
 	}
-	return &preset.PreparedOwnerUserOp{Operation: &userop.UserOperationV07{Sender: sender, Nonce: nonce, CallData: packed, CallGasLimit: big.NewInt(100000), VerificationGasLimit: big.NewInt(50000), PreVerificationGas: big.NewInt(30000), MaxFeePerGas: big.NewInt(1000000000), MaxPriorityFeePerGas: big.NewInt(100000000)}}, nil
+	op := &userop.UserOperationV07{Sender: sender, Nonce: nonce, CallGasLimit: big.NewInt(100000), VerificationGasLimit: big.NewInt(50000), PreVerificationGas: big.NewInt(30000), MaxFeePerGas: big.NewInt(1000000000), MaxPriorityFeePerGas: big.NewInt(100000000)}
+	calls, err := batch.Resolve(op)
+	if err != nil {
+		return nil, err
+	}
+	op.CallData, err = aa.PackExecuteBatchMAv2(calls)
+	if err != nil {
+		return nil, err
+	}
+	return &preset.PreparedOwnerUserOp{Operation: op}, nil
 }
 func (f *ownerBackendFixture) Validate(context.Context, *config.SmartWalletConfig, common.Address, *big.Int, *preset.PreparedOwnerUserOp) error {
 	return f.validateError
@@ -440,9 +445,10 @@ func TestOwnerWorkflowRejectsUnsupportedGraphsBeforeRunning(t *testing.T) {
 	require.Zero(t, backend.sent.Load())
 }
 
-func TestOwnerWorkflowRechecksRealReadWithoutReplacingSignedCalls(t *testing.T) {
+func TestOwnerWorkflowKeepsCapturedReadWithoutResimulation(t *testing.T) {
 	n, user, key, backend := ownerEngineFixture(t)
 	var balance atomic.Int64
+	var reads atomic.Int32
 	balance.Store(1000000)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -453,6 +459,7 @@ func TestOwnerWorkflowRechecksRealReadWithoutReplacingSignedCalls(t *testing.T) 
 		var result interface{}
 		switch req.Method {
 		case "eth_call":
+			reads.Add(1)
 			result = hexutil.Encode(common.LeftPadBytes(big.NewInt(balance.Load()).Bytes(), 32))
 		case "eth_blockNumber":
 			result = "0x1"
@@ -477,12 +484,66 @@ func TestOwnerWorkflowRechecksRealReadWithoutReplacingSignedCalls(t *testing.T) 
 	p, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
 	require.NoError(t, err)
 	sig := signOwnerFixture(t, p, key)
+	require.EqualValues(t, 1, reads.Load())
 	balance.Store(2000000)
-	_, err = n.SubmitOwnerExecution(context.Background(), user, p.Execution.Id, sig)
-	require.Equal(t, codes.FailedPrecondition, status.Code(err))
-	require.Contains(t, err.Error(), "calls changed")
-	require.Zero(t, backend.sent.Load())
+	// The workflow's read endpoint may disappear while the owner signs. The
+	// separate authority/nonce/funding validation backend is still called.
+	server.Close()
+	result, err := n.SubmitOwnerExecution(context.Background(), user, p.Execution.Id, sig)
+	require.NoError(t, err)
+	require.Equal(t, p.UserOpHash, result.UserOpHash)
+	require.Equal(t, p.Operation.CallData, backend.signed.CallData)
+	require.EqualValues(t, 1, reads.Load(), "submit must not re-run the read graph")
+	require.EqualValues(t, 1, backend.sent.Load())
 	require.EqualValues(t, 1, backend.prepared.Load(), "continuation must not reprice the operation")
+}
+
+func TestOwnerWorkflowRefusesMissingOrChangedCapturedBatch(t *testing.T) {
+	for _, change := range []string{"legacy preparation", "changed call", "invalid batch"} {
+		t.Run(change, func(t *testing.T) {
+			n, user, key, backend := ownerEngineFixture(t)
+			p := prepareOwnerFixture(t, n, user)
+			raw, err := n.db.GetKey(ownerExecutionKey(user.Address, p.Execution.Id))
+			require.NoError(t, err)
+			var record ownerExecutionRecord
+			require.NoError(t, json.Unmarshal(raw, &record))
+			require.NotNil(t, record.Batch)
+			switch change {
+			case "legacy preparation":
+				record.Batch = nil
+			case "changed call":
+				record.Batch.Calls[0].Data[0] ^= 1
+			case "invalid batch":
+				record.Batch.Calls = nil
+			}
+			require.NoError(t, n.saveOwnerExecution(p.Execution.Id, &record, time.Minute))
+			_, err = n.SubmitOwnerExecution(context.Background(), user, p.Execution.Id, signOwnerFixture(t, p, key))
+			require.Equal(t, codes.FailedPrecondition, status.Code(err))
+			require.Zero(t, backend.sent.Load())
+			raw, err = n.db.GetKey(ownerExecutionKey(user.Address, p.Execution.Id))
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(raw, &record))
+			require.Equal(t, ownerSubmissionPrepared, record.SubmissionState, "a refused continuation must not claim submission")
+		})
+	}
+}
+
+func TestOwnerWorkflowLegacySubmittedRecordStillReturnsOriginalHash(t *testing.T) {
+	n, user, key, backend := ownerEngineFixture(t)
+	p := prepareOwnerFixture(t, n, user)
+	sig := signOwnerFixture(t, p, key)
+	_, err := n.SubmitOwnerExecution(context.Background(), user, p.Execution.Id, sig)
+	require.NoError(t, err)
+	raw, err := n.db.GetKey(ownerExecutionKey(user.Address, p.Execution.Id))
+	require.NoError(t, err)
+	var record ownerExecutionRecord
+	require.NoError(t, json.Unmarshal(raw, &record))
+	record.Batch = nil
+	require.NoError(t, n.saveOwnerExecution(p.Execution.Id, &record, time.Minute))
+	result, err := n.SubmitOwnerExecution(context.Background(), user, p.Execution.Id, sig)
+	require.NoError(t, err)
+	require.Equal(t, p.UserOpHash, result.UserOpHash)
+	require.EqualValues(t, 1, backend.sent.Load())
 }
 
 type ownerFailingStorage struct {

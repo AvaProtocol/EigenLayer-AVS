@@ -693,6 +693,9 @@ type ETHTransferNodeConfig struct {
 
 	// Destination Lowercase or checksummed hex EOA / contract address.
 	Destination EthereumAddress `json:"destination"`
+
+	// ReserveGas Owner preparation only. Treat amount as a captured balance cap and deduct the signed maximum gas cost; sponsored operations reserve zero. This node must be terminal.
+	ReserveGas *bool `json:"reserveGas,omitempty"`
 }
 
 // Edge defines model for Edge.

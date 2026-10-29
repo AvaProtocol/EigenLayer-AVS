@@ -386,6 +386,8 @@ const (
 	fixtureSaltNativeETH = 24
 	// L6 REST withdraw. Separate runner so it does not share entities with L1–L11.
 	fixtureSaltNativeWithdraw = 25
+	// Owner-signed native sweep. No session grants; sweeps only this runner.
+	fixtureSaltOwnerNativeSweep = 26
 )
 
 // Entities are consumed, never recycled — by design, not by neglect.
