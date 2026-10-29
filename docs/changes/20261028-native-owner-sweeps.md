@@ -18,7 +18,8 @@ The additive ETHTransfer config field `reserveGas: true` means:
 
 - `amount` is a captured upper bound, not an instruction to read the balance again.
 - Self-funded: final native value = cap minus the operation's signed maximum gas
-  cost. The conservative reserve does not spend an existing EntryPoint deposit.
+  cost. The transfer amount never includes an existing EntryPoint deposit; gas
+  may still be paid from that deposit.
 - Sponsored: final native value = cap. Sponsorship is finalized against that exact
   calldata before hashing; a policy refusal never falls back to self funding.
 - Any unused prefund may remain in the source account's EntryPoint gas deposit;
@@ -41,6 +42,10 @@ remaining balance plus EntryPoint deposit to cover the maximum unsponsored fee.
 A paymaster covers gas only: native call values must still fit account balance.
 Sponsored zero-value/ERC-20 batches do not read native balance or EntryPoint
 deposit. Native batches and all self-funded batches retain their funding checks.
+If the deposit covers the full prefund, no prefund leaves the wallet: the signed
+reserve remains in its native balance and the deposit pays actual gas. With a
+zero deposit, the wallet pays the full prefund before the transfer, its native
+balance reaches zero, and unused prefund remains in the EntryPoint deposit.
 
 Prepare persists the captured batch, including the raw native cap. Submit resolves
 that stored batch using the stored operation's fee fields, compares exact calldata,
@@ -65,14 +70,25 @@ All owner tests run with the race detector; the REST, pricing and AA package sui
 also run. These tests use local RPC fixtures; the live Sepolia check below also
 passed against the real chain and bundler.
 
-`TestOwnerNativeSweepWithEntryPointDeposit_Sepolia` is the opt-in live E2E check.
-It uses the real owner preparation, pricing, signature-only submit and bundler
-relay paths on a dedicated MA-v2 runner at salt 26, without a session grant. It
-ensures the runner has a real EntryPoint deposit of at least 0.001 Sepolia ETH,
-captures its entire native balance as the cap, and sends cap minus the signed
-maximum fee to the owner. It waits for a successful on-chain `UserOperationEvent`
-for the reviewed hash, checks the exact recipient amount and runner/deposit gas
-accounting, and verifies a repeated submit retains the same unsigned operation.
+The opt-in live Sepolia suite has two cases:
+
+- `TestOwnerNativeSweepWithEntryPointDeposit_Sepolia` uses the dedicated salt-26
+  runner with a deposit of at least 0.001 ETH, explicitly requiring that it covers
+  the entire signed prefund.
+- `TestOwnerNativeSweepWithoutEntryPointDeposit_Sepolia` derives a fresh random
+  salt each run and requires zero deposit before prepare. This exercises the
+  account's payment of `missingAccountFunds` from its native balance. A previous
+  run's gas refund cannot accidentally fund this case.
+
+Both use real owner preparation, pricing, signature-only submit and bundler relay
+without a session grant. A count-only wrapper delegates to the production backend
+and asserts exactly one relay across repeated submit calls. Each case captures
+the runner's entire native balance and sends cap minus the signed maximum fee
+to the owner. A successful `UserOperationEvent` under the reviewed hash, the exact
+reviewed recipient/value and separate wallet/deposit balance assertions prove
+execution and funding. The owner's overall balance delta is diagnostic because
+unrelated transfers or bundle beneficiary payments may affect it. Stored unsigned
+operation bytes and the original cap must remain unchanged.
 
 Local tests load `.env.local`, then `.env`, through `testutil.LoadDotEnv`; existing
 process variables take precedence. `requireOwnerKey` reads `TEST_PRIVATE_KEY`
@@ -84,40 +100,47 @@ the owner key is not read from `config/test.yaml` or the controller key. If
 With `config/test.yaml` configured for Sepolia and a funded test owner:
 
 ```sh
-go run ./scripts/fixture_wallet -salt 26 -deploy
-go run ./scripts/fixture_wallet -salt 26 -fund 0.02
 OWNER_NATIVE_SWEEP_E2E=1 go test -tags=integration ./core/taskengine \
-  -run '^TestOwnerNativeSweepWithEntryPointDeposit_Sepolia$' -v -count=1 -timeout=6m
+  -run '^TestOwnerNativeSweep(With|Without)EntryPointDeposit_Sepolia$' -v -count=1 -timeout=12m
 ```
 
-The fixture command needs the key in its process environment; unlike the test
-binary, it does not load dotenv files. A worktree's `config/test.yaml` symlink
-does not load the main checkout's dotenv files either; export their values into
-the process or provide dotenv files in the worktree. Deploy before funding: the
-helper funds first when both flags are supplied, and its fixed 120,000-gas fund
+Setup uses the owner key to deploy each missing fixture before funding it,
+estimates setup transaction gas, and tops each runner up to 0.02 ETH if needed.
+The deposit-present case may also top up its EntryPoint deposit by at most
+0.001 ETH. The spendable native value returns to the owner; unused prefund remains
+in the owner-controlled runner/deposit. The test logs the fresh salt and address.
+It does not withdraw deposits, install grants or delegate the owner's EOA.
+
+A worktree's `config/test.yaml` symlink does not load the main checkout's dotenv
+files; export their values into the process or provide dotenv files in the
+worktree. The separate `scripts/fixture_wallet` CLI does not load dotenv files.
+When using it manually, deploy before funding: its fixed 120,000-gas fund
 transaction can run out of gas while creating an empty recipient account.
-The test is self-funded and transfers
-the dedicated runner's spendable ETH back to its owner. It may top up the
-EntryPoint deposit from the owner by at most 0.001 ETH plus transaction gas;
-it does not withdraw that deposit or delegate the owner's EOA. Run it without
-concurrent use of the fixture or owner. The integration tag plus explicit
-`OWNER_NATIVE_SWEEP_E2E=1` opt-in are required, and `-short` always skips it.
+Run without concurrent use of the fixture or owner. The integration tag plus
+explicit `OWNER_NATIVE_SWEEP_E2E=1` opt-in are required, and `-short` always skips it.
 
-The live run on 2026-10-29 UTC passed in 43.14 seconds. It exercised the derived
-MA-v2 wallet path, including owner signing and successful on-chain execution;
-it did not exercise a sweep directly from a delegated EOA.
+Both live cases passed on 2026-10-29 UTC, capturing `20,000,000,000,000,000` wei
+each. The deposit-covered case took 76.31 seconds; the zero-deposit case took
+70.88 seconds. All amounts below are wei.
 
-- Runner (salt 26): `0x6e4Ee980350e251FB19bdCacBD5E07B01Aa4f856`.
-- UserOp: `0xb0fab1030383a42229238aaa33a1ef6ad6adb4d3882c5e5127df6f8e6505dea6`.
-- Transaction: [0x2595d8554e1166d78ee3f054f02ee94cb1c037d09e493d7bf68a92c41b25ab59](https://sepolia.etherscan.io/tx/0x2595d8554e1166d78ee3f054f02ee94cb1c037d09e493d7bf68a92c41b25ab59).
-- Captured balance: `20,000,000,000,000,000` wei; recipient received exactly
-  `19,975,074,392,522,320` wei (99.875% of that balance).
-- Signed maximum gas reserve: `24,925,607,477,680` wei; actual gas cost:
-  `20,808,603,121,290` wei.
-- EntryPoint deposit before/after: `1,000,000,000,000,000` /
-  `979,191,396,878,710` wei. Runner plus deposit reconciled exactly to the
-  transfer and actual gas cost, and repeated submit preserved the unsigned
-  operation and original hash.
+| Case | Prefund paid from wallet | Wallet after | EntryPoint deposit after | Transaction |
+| --- | ---: | ---: | ---: | --- |
+| Deposit covers gas | 0 | 14,062,104,218,630 | 988,982,198,347,330 | [Sepolia transaction](https://sepolia.etherscan.io/tx/0x754b65feab8411e471368e2b1b8cf75633bf755b3f1cd58de0f64d7f4edffab7) |
+| Zero deposit | 34,718,410,415,520 | 0 | 3,014,605,659,950 | [Sepolia transaction](https://sepolia.etherscan.io/tx/0x49f4ab2e0dc5e278ff57f34c731ed302d086e9b461aa9d2fd6a9587adee778d9) |
+
+- Deposit-covered runner (salt 26): `0x6e4Ee980350e251FB19bdCacBD5E07B01Aa4f856`.
+  Its initial deposit was `1,000,000,000,000,000`; the reviewed transfer was
+  `19,985,937,895,781,370`, reserve `14,062,104,218,630`, and actual gas cost
+  `11,017,801,652,670`.
+- Zero-deposit runner: `0xC4eb2D5495615C8a9948eA3973CeABd7D81a7893`, fresh salt
+  `239944039285481479654117800643082486269`. Its reviewed transfer was
+  `19,965,281,589,584,480`, reserve `34,718,410,415,520`, and actual gas cost
+  `31,703,804,755,570`.
+
+Both cases matched the exact wallet/deposit split and counted one real relay
+after repeated submit, with unchanged stored unsigned bytes and original hash.
+The owner's observed balance delta also matched the transfer in both runs.
+These runs cover derived MA-v2 wallets, not a sweep directly from a delegated EOA.
 
 Balance discovery requests the provider's 100-row single-response limit. A
 nonempty cursor fails the node; a response at/above the limit without an explicit
@@ -130,6 +153,8 @@ simulation, and stored Auto/session workflows, even when owner execution is
 disabled. This deliberately changes ordinary workflows that previously accepted
 partial results or treated a failed requested-token lookup as a zero balance.
 Bare arrays and wrappers without a cursor still pass below 100 rows; at the cap,
-an explicit final cursor of `null` or `""` proves completion. Tests cover capped
-responses, final-page markers, failed lookups and a complete 1,024-row fixture
+an explicit final cursor of `null` or `""` proves completion. A cursor-less wrapper
+with 100 or more rows fails. A provider that silently caps an array below 100
+rows cannot be detected without an explicit completion marker or pagination.
+Tests cover capped responses, final-page markers, failed lookups and a complete 1,024-row fixture
 whose rows are neither truncated nor rounded.
