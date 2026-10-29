@@ -717,6 +717,10 @@ components:
         amount:
           type: string
           description: Amount in wei (decimal string for big-int safety). Special value `max` withdraws the entire balance.
+        reserveGas:
+          type: boolean
+          default: false
+          description: Owner preparation only. Treat amount as a captured balance cap and deduct the signed maximum gas cost; sponsored operations reserve zero. This node must be terminal.
         chainId:
           $ref: '#/components/schemas/ChainId'
           description: Chain to execute on. Required — a workflow carries no chain to inherit.

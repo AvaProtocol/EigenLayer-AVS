@@ -104,6 +104,17 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	// Log resolved config values for debugging
 	logBuilder.WriteString(fmt.Sprintf("Resolved: destination=%s, amount=%s\n", destination, amountStr))
 
+	// Owner collection resolves the authored amount but never reads a live MAX
+	// balance or enters the session/simulation/submission path.
+	if p.vm.ownerPreparation != nil {
+		err = p.collectOwnerETH(stepID, config, destination, amountStr)
+		return executionLog, err
+	}
+	if config.GetReserveGas() {
+		err = fmt.Errorf("reserveGas is supported only by owner preparation")
+		return executionLog, err
+	}
+
 	// Resolve "MAX" (case-insensitive) to smart wallet's full ETH balance
 	isMaxTransfer := false
 	if strings.EqualFold(amountStr, "MAX") {
@@ -564,4 +575,31 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	finalizeStep(executionLog, true, nil, "", logMessage)
 
 	return executionLog, nil
+}
+
+func (p *ETHTransferProcessor) collectOwnerETH(stepID string, config *avsproto.ETHTransferNode_Config, destination, amount string) error {
+	c := p.vm.ownerPreparation
+	if c.nativeID != stepID || c.nativeCollected || (c.contractID != "" && !c.contractCollected) {
+		return fmt.Errorf("unexpected owner native transfer")
+	}
+	if !strings.EqualFold(getAASenderString(p.vm), c.source.Hex()) {
+		return fmt.Errorf("owner workflow source changed during preparation")
+	}
+	if !common.IsHexAddress(destination) {
+		return fmt.Errorf("invalid owner native destination")
+	}
+	target := common.HexToAddress(destination)
+	if target == (common.Address{}) || target == c.source {
+		return fmt.Errorf("choose a different nonzero native destination")
+	}
+	value, ok := new(big.Int).SetString(amount, 10)
+	if !ok || value.Sign() <= 0 || value.BitLen() > 256 {
+		return fmt.Errorf("owner ETHTransfer needs a positive captured amount in wei; MAX is not supported")
+	}
+	if len(c.calls) >= ownerBatchMaxCalls {
+		return fmt.Errorf("owner batch exceeds call limit")
+	}
+	c.calls = append(c.calls, aa.Call{Target: target, Value: value, Data: []byte{}})
+	c.reserveGas, c.nativeCollected = config.GetReserveGas(), true
+	return nil
 }

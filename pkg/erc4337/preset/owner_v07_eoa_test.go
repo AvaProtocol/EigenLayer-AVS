@@ -68,7 +68,7 @@ func TestOwnerEOAPrepareAndKeylessRelay(t *testing.T) {
 }
 
 func TestOwnerEOAPrepareRefusesUnsupportedAuthority(t *testing.T) {
-	for _, scenario := range []string{"flag off", "missing pin", "different pin", "wrong chain", "wrong RPC chain", "undelegated", "different delegate", "different implementation code", "disabled fallback", "different fallback", "different EntryPoint", "CREATE2 salt", "wrong nonce key", "insufficient prefund", "native value"} {
+	for _, scenario := range []string{"flag off", "missing pin", "different pin", "wrong chain", "wrong RPC chain", "undelegated", "different delegate", "different implementation code", "disabled fallback", "different fallback", "different EntryPoint", "CREATE2 salt", "wrong nonce key", "insufficient prefund"} {
 		t.Run(scenario, func(t *testing.T) {
 			f, sw := newOwnerEOARPCFixture(t)
 			var salt *big.Int
@@ -103,8 +103,6 @@ func TestOwnerEOAPrepareRefusesUnsupportedAuthority(t *testing.T) {
 				f.nonce = big.NewInt(0)
 			case "insufficient prefund":
 				f.balance = "0x0"
-			case "native value":
-				calls[0].Value = big.NewInt(1)
 			}
 			p, err := PrepareOwnerUserOp(context.Background(), sw, f.owner, f.sender, salt, calls, nil)
 			require.Error(t, err)

@@ -265,7 +265,7 @@ func TestOwnerPrepareAndKeylessRelayKeepPricedFields(t *testing.T) {
 }
 
 func TestOwnerPrepareCompatibilityAndFundingGuards(t *testing.T) {
-	for _, scenario := range []string{"undeployed", "insufficient prefund", "disabled owner", "different signer", "changed implementation", "wrong chain", "delegated owner", "wrong nonce key", "native value"} {
+	for _, scenario := range []string{"undeployed", "insufficient prefund", "disabled owner", "different signer", "changed implementation", "wrong chain", "delegated owner", "wrong nonce key"} {
 		t.Run(scenario, func(t *testing.T) {
 			f, sw := newOwnerRPCFixture(t)
 			owner := f.owner
@@ -287,8 +287,6 @@ func TestOwnerPrepareCompatibilityAndFundingGuards(t *testing.T) {
 				f.ownerHasCode = true
 			case "wrong nonce key":
 				f.nonce = big.NewInt(0)
-			case "native value":
-				calls[0].Value = big.NewInt(1)
 			}
 			prepared, err := PrepareOwnerUserOp(context.Background(), sw, owner, f.sender, big.NewInt(0), calls, nil)
 			if scenario == "undeployed" {
@@ -364,6 +362,8 @@ func TestOwnerSponsorshipIsFinalizedBeforeSigning(t *testing.T) {
 	chain := ethclient.NewClient(client)
 	op := testOp()
 	op.Sender, op.Nonce = f.sender, f.nonce
+	op.CallData, err = aa.PackExecuteBatchMAv2(ownerTestCalls())
+	require.NoError(t, err)
 	err = priceOperationV07(context.Background(), chain, client, op, EntryPointV07(), sw, logger.EnsureLogger(nil))
 	require.NoError(t, err)
 	require.NoError(t, checkOwnerPrefund(context.Background(), chain, op))

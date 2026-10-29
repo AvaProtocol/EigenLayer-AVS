@@ -52,17 +52,22 @@ type ownerBackendFixture struct {
 	submitCtxErr  error
 }
 
-func (f *ownerBackendFixture) Prepare(_ context.Context, _ *config.SmartWalletConfig, _, sender common.Address, _ *big.Int, calls []aa.Call, _ logger.Logger) (*preset.PreparedOwnerUserOp, error) {
+func (f *ownerBackendFixture) Prepare(_ context.Context, _ *config.SmartWalletConfig, _, sender common.Address, _ *big.Int, batch preset.OwnerBatch, _ logger.Logger) (*preset.PreparedOwnerUserOp, error) {
 	f.prepared.Add(1)
-	packed, err := aa.PackExecuteBatchMAv2(calls)
-	if err != nil {
-		return nil, err
-	}
 	nonce, err := userop.EncodeNonceMAv2(0, userop.ValidationOptionGlobal, 0)
 	if err != nil {
 		return nil, err
 	}
-	return &preset.PreparedOwnerUserOp{Operation: &userop.UserOperationV07{Sender: sender, Nonce: nonce, CallData: packed, CallGasLimit: big.NewInt(100000), VerificationGasLimit: big.NewInt(50000), PreVerificationGas: big.NewInt(30000), MaxFeePerGas: big.NewInt(1000000000), MaxPriorityFeePerGas: big.NewInt(100000000)}}, nil
+	op := &userop.UserOperationV07{Sender: sender, Nonce: nonce, CallGasLimit: big.NewInt(100000), VerificationGasLimit: big.NewInt(50000), PreVerificationGas: big.NewInt(30000), MaxFeePerGas: big.NewInt(1000000000), MaxPriorityFeePerGas: big.NewInt(100000000)}
+	calls, err := batch.Resolve(op)
+	if err != nil {
+		return nil, err
+	}
+	op.CallData, err = aa.PackExecuteBatchMAv2(calls)
+	if err != nil {
+		return nil, err
+	}
+	return &preset.PreparedOwnerUserOp{Operation: op}, nil
 }
 func (f *ownerBackendFixture) Validate(context.Context, *config.SmartWalletConfig, common.Address, *big.Int, *preset.PreparedOwnerUserOp) error {
 	return f.validateError

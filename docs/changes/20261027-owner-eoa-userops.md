@@ -1,5 +1,7 @@
 # Owner-signed UserOperations from an EOA
 
+Native support was added later; see [Native owner sweeps](20261028-native-owner-sweeps.md). The original limits below describe the initial implementation.
+
 Date: 2026-10-27
 Status: Owner-signed EOA round trip verified live on Sepolia
 Branch: `feat/1987-owner-eoa-userops`

@@ -164,13 +164,16 @@ func ownerView(ctx context.Context, chain *ethclient.Client, to common.Address, 
 // PrepareOwnerUserOp builds and prices a batch without signing or broadcasting.
 // Pricing and sponsorship are the SAME functions used by session execution.
 func PrepareOwnerUserOp(ctx context.Context, sw *config.SmartWalletConfig, owner, sender common.Address, salt *big.Int, calls []aa.Call, l logger.Logger) (*PreparedOwnerUserOp, error) {
-	if err := validateOwnerAccountParameters(sw, owner, sender, salt); err != nil {
+	return PrepareOwnerBatch(ctx, sw, owner, sender, salt, OwnerBatch{Calls: calls}, l)
+}
+
+func PrepareOwnerBatch(ctx context.Context, sw *config.SmartWalletConfig, owner, sender common.Address, salt *big.Int, batch OwnerBatch, l logger.Logger) (*PreparedOwnerUserOp, error) {
+	calls, err := batch.estimationCalls()
+	if err != nil {
 		return nil, err
 	}
-	for _, call := range calls {
-		if call.Value != nil && call.Value.Sign() != 0 {
-			return nil, fmt.Errorf("native-value calls are not supported by owner execution yet")
-		}
+	if err := validateOwnerAccountParameters(sw, owner, sender, salt); err != nil {
+		return nil, err
 	}
 	packed, err := aa.PackExecuteBatchMAv2(calls)
 	if err != nil {
@@ -222,7 +225,9 @@ func PrepareOwnerUserOp(ctx context.Context, sw *config.SmartWalletConfig, owner
 		return nil, fmt.Errorf("dialing owner execution bundler: %w", err)
 	}
 	defer bundler.Close()
-	if err := priceOperationV07(ctx, chain, bundler, op, EntryPointV07(), sw, logger.EnsureLogger(l)); err != nil {
+	if err := priceOwnerBatch(batch, op, sw.SponsorshipPolicyID() != "", func() error {
+		return priceOperationV07(ctx, chain, bundler, op, EntryPointV07(), sw, logger.EnsureLogger(l))
+	}); err != nil {
 		return nil, err
 	}
 	if err := checkOwnerPrefund(ctx, chain, op); err != nil {
@@ -243,12 +248,23 @@ func MaxOwnerGasCost(op *userop.UserOperationV07) *big.Int {
 }
 
 func checkOwnerPrefund(ctx context.Context, chain *ethclient.Client, op *userop.UserOperationV07) error {
-	if op.Paymaster != nil {
-		return nil
+	_, values, _, err := aa.UnpackExecuteCalldata(op.CallData)
+	if err != nil {
+		return err
+	}
+	value := new(big.Int)
+	for _, v := range values {
+		value.Add(value, v)
 	}
 	balance, err := chain.BalanceAt(ctx, op.Sender, nil)
 	if err != nil {
 		return err
+	}
+	if balance.Cmp(value) < 0 {
+		return fmt.Errorf("owner execution native transfers need %s wei; available %s wei", value, balance)
+	}
+	if op.Paymaster != nil {
+		return nil
 	}
 	entry := EntryPointV07()
 	data := append(crypto.Keccak256([]byte("balanceOf(address)"))[:4], common.LeftPadBytes(op.Sender.Bytes(), 32)...)
@@ -256,7 +272,7 @@ func checkOwnerPrefund(ctx context.Context, chain *ethclient.Client, op *userop.
 	if err != nil || len(deposit) != 32 {
 		return fmt.Errorf("reading owner execution EntryPoint prefund")
 	}
-	available := new(big.Int).Add(balance, new(big.Int).SetBytes(deposit))
+	available := new(big.Int).Add(new(big.Int).Sub(balance, value), new(big.Int).SetBytes(deposit))
 	if available.Cmp(MaxOwnerGasCost(op)) < 0 {
 		return fmt.Errorf("owner execution needs native gas prefund of at least %s wei; available %s wei", MaxOwnerGasCost(op), available)
 	}

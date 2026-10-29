@@ -1,5 +1,7 @@
 # Owner-signed Manual workflow handoff
 
+Native support was added later; see [Native owner sweeps](20261028-native-owner-sweeps.md). The original limits below describe the initial implementation.
+
 Date: 2026-10-26
 Status: Owner-signed HTTP execution verified on Sepolia; SDK/browser integration pending
 Branch: `feat/1987-owner-signed-workflows`
