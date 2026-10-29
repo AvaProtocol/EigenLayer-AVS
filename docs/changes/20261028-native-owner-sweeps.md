@@ -74,7 +74,9 @@ The opt-in live Sepolia suite has two cases:
 
 - `TestOwnerNativeSweepWithEntryPointDeposit_Sepolia` uses the dedicated salt-26
   runner with a deposit of at least 0.001 ETH, explicitly requiring that it covers
-  the entire signed prefund.
+  the entire signed prefund. That fixed deposit was about 70 times the observed
+  reserve; if Sepolia fees rise past it, the test fails after prepare and before
+  signing, naming both amounts.
 - `TestOwnerNativeSweepWithoutEntryPointDeposit_Sepolia` derives a fresh random
   salt each run and requires zero deposit before prepare. This exercises the
   account's payment of `missingAccountFunds` from its native balance. A previous
@@ -104,12 +106,15 @@ OWNER_NATIVE_SWEEP_E2E=1 go test -tags=integration ./core/taskengine \
   -run '^TestOwnerNativeSweep(With|Without)EntryPointDeposit_Sepolia$' -v -count=1 -timeout=12m
 ```
 
-Setup uses the owner key to deploy each missing fixture before funding it,
-estimates setup transaction gas, and tops each runner up to 0.02 ETH if needed.
-The deposit-present case may also top up its EntryPoint deposit by at most
-0.001 ETH. The spendable native value returns to the owner; unused prefund remains
-in the owner-controlled runner/deposit. The test logs the fresh salt and address.
-It does not withdraw deposits, install grants or delegate the owner's EOA.
+Setup uses the owner key to deploy each missing fixture before funding it and
+estimates setup transaction gas. Per run the owner pays setup gas, tops the runner
+up to 0.02 ETH and, in the deposit-present case only, tops its EntryPoint deposit
+up to 0.001 ETH. The spendable native value returns to the owner; unused prefund
+remains in the owner-controlled runner/deposit. The test logs the salt and runner
+address, and repeats them if it fails. Funds left by a failed or zero-deposit run
+stay owner-controlled and are recovered with an owner-signed UserOp from that
+runner. The test does not withdraw deposits, install grants or delegate the
+owner's EOA.
 
 A worktree's `config/test.yaml` symlink does not load the main checkout's dotenv
 files; export their values into the process or provide dotenv files in the

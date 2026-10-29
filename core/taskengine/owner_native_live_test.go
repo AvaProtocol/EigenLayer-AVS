@@ -37,8 +37,9 @@ import (
 // TestOwnerNativeSweepWithEntryPointDeposit_Sepolia exercises the production
 // prepare/sign/submit path against a real bundler and EntryPoint, without a
 // session grant. A counting wrapper delegates every call to the production
-// backend. The salt-26 runner retains the signed gas reserve when its existing
-// deposit covers the prefund.
+// backend. The salt-26 runner's existing deposit must cover the whole signed
+// prefund (checked after prepare, before signing), so the runner retains the
+// signed gas reserve.
 //
 // Local .env loading and CI's TEST_PRIVATE_KEY export are shared with the other
 // live tests; requireOwnerKey reads that environment value, never the controller
@@ -107,6 +108,12 @@ func runOwnerNativeSweepSepolia(t *testing.T, salt *big.Int, depositCoversGas bo
 	require.NotNil(t, runner)
 	require.NotEqual(t, owner, *runner)
 	t.Logf("owner native fixture runner=%s salt=%s depositCoversGas=%v", runner.Hex(), salt, depositCoversGas)
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("runner %s (owner %s, salt %s) may still hold this run's native balance or EntryPoint deposit; both stay owner-controlled and are recovered with an owner-signed UserOp from that runner",
+				runner.Hex(), owner.Hex(), salt)
+		}
+	})
 
 	// Check or arrange the real EntryPoint deposit before prepare, not an RPC
 	// fixture that merely reports one. Never install a session grant.
@@ -187,7 +194,9 @@ func runOwnerNativeSweepSepolia(t *testing.T, salt *big.Int, depositCoversGas bo
 	reserve := preset.MaxOwnerGasCost(op)
 	require.Positive(t, reserve.Sign())
 	if depositCoversGas {
-		require.GreaterOrEqual(t, depositBefore.Cmp(reserve), 0, "this fixture must cover the entire prefund from its deposit")
+		require.GreaterOrEqual(t, depositBefore.Cmp(reserve), 0,
+			"deposit %s must cover the entire signed prefund %s; Sepolia fees exceed the 0.001 ETH fixture deposit, so rerun when they fall or raise minimumDeposit",
+			depositBefore, reserve)
 	}
 	targets, values, data, err := aa.UnpackExecuteCalldata(op.CallData)
 	require.NoError(t, err)
@@ -199,7 +208,7 @@ func runOwnerNativeSweepSepolia(t *testing.T, salt *big.Int, depositCoversGas bo
 	require.Positive(t, wantValue.Sign())
 	require.GreaterOrEqual(t, new(big.Int).Mul(new(big.Int).Set(wantValue), big.NewInt(100)).Cmp(new(big.Int).Mul(new(big.Int).Set(balanceCap), big.NewInt(90))), 0,
 		"this scenario must transfer at least 90% of the runner's native balance")
-	require.Equal(t, wantValue, values[0], "reviewed value must equal the captured cap minus the signed reserve")
+	requireOwnerNativeWei(t, wantValue, values[0], "reviewed value must equal the captured cap minus the signed reserve")
 	unsigned, err := json.Marshal((*storedOwnerOperation)(op))
 	require.NoError(t, err)
 	hash, err := op.GetUserOpHash(entryPoint, chainID)
@@ -222,8 +231,8 @@ func runOwnerNativeSweepSepolia(t *testing.T, salt *big.Int, depositCoversGas bo
 	require.Equal(t, common.BytesToHash(runner.Bytes()), event.Topics[2])
 	require.Equal(t, common.Hash{}, event.Topics[3], "native sweep must be self-funded")
 	require.Len(t, event.Data, 128)
-	require.Equal(t, op.Nonce, new(big.Int).SetBytes(event.Data[:32]))
-	require.Equal(t, big.NewInt(1), new(big.Int).SetBytes(event.Data[32:64]), "UserOp must execute successfully, not just be included")
+	requireOwnerNativeWei(t, op.Nonce, new(big.Int).SetBytes(event.Data[:32]), "event nonce must match the signed operation")
+	requireOwnerNativeWei(t, big.NewInt(1), new(big.Int).SetBytes(event.Data[32:64]), "UserOp must execute successfully, not just be included")
 	actualGasCost := new(big.Int).SetBytes(event.Data[64:96])
 	require.Positive(t, actualGasCost.Sign())
 	require.LessOrEqual(t, actualGasCost.Cmp(reserve), 0)
@@ -242,16 +251,15 @@ func runOwnerNativeSweepSepolia(t *testing.T, salt *big.Int, depositCoversGas bo
 	depositAfter := ownerNativeEntryPointDeposit(t, ctx, client, entryABI, *runner, receipt.BlockNumber)
 	wantRemaining := new(big.Int).Sub(new(big.Int).Add(new(big.Int).Set(balanceCap), depositBefore), wantValue)
 	wantRemaining.Sub(wantRemaining, actualGasCost)
-	require.Equal(t, wantRemaining, new(big.Int).Add(balanceAfter, depositAfter), "only the transfer and actual gas may leave the runner plus deposit")
+	requireOwnerNativeWei(t, wantRemaining, new(big.Int).Add(balanceAfter, depositAfter), "only the transfer and actual gas may leave the runner plus deposit")
 	missingPrefund := new(big.Int)
 	if !depositCoversGas {
 		missingPrefund.Set(reserve)
 	}
 	wantBalanceAfter := new(big.Int).Sub(new(big.Int).Set(reserve), missingPrefund)
 	wantDepositAfter := new(big.Int).Sub(new(big.Int).Add(new(big.Int).Set(depositBefore), missingPrefund), actualGasCost)
-	require.Equal(t, wantBalanceAfter, balanceAfter, "runner pays only missing prefund plus the reviewed transfer")
-	require.Equal(t, wantDepositAfter, depositAfter, "unused prefund is refunded to the EntryPoint deposit")
-	require.Equal(t, wantValue, new(big.Int).Sub(new(big.Int).Sub(new(big.Int).Set(balanceCap), balanceAfter), missingPrefund), "exact reviewed value must leave the runner after its prefund payment")
+	requireOwnerNativeWei(t, wantBalanceAfter, balanceAfter, "runner pays only missing prefund plus the reviewed transfer")
+	requireOwnerNativeWei(t, wantDepositAfter, depositAfter, "unused prefund is refunded to the EntryPoint deposit")
 
 	// Repeated submission uses the durable continuation, even after inclusion
 	// has advanced the nonce. It must neither reprice nor relay another op.
@@ -265,7 +273,7 @@ func runOwnerNativeSweepSepolia(t *testing.T, salt *big.Int, depositCoversGas bo
 	require.NoError(t, json.Unmarshal(raw, &record))
 	require.NotNil(t, record.Batch)
 	require.Len(t, record.Batch.Calls, 1)
-	require.Equal(t, balanceCap, record.Batch.Calls[0].Value, "stored cap must remain the originally reviewed balance")
+	requireOwnerNativeWei(t, balanceCap, record.Batch.Calls[0].Value, "stored cap must remain the originally reviewed balance")
 	storedUnsigned, err := json.Marshal(record.Operation)
 	require.NoError(t, err)
 	require.Equal(t, unsigned, storedUnsigned, "the stored operation must remain unsigned and byte-for-byte equivalent")
@@ -311,6 +319,15 @@ func ensureOwnerNativeRunner(t *testing.T, ctx context.Context, client *ethclien
 		require.NoError(t, err)
 		require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status, "fixture funding reverted")
 	}
+}
+
+// Compare amounts by value. require.Equal falls back to reflect.DeepEqual, which
+// also compares big.Int's internal limbs: a nil and an empty slice are both zero
+// but unequal, so such a check passes or fails by how each value was built.
+func requireOwnerNativeWei(t *testing.T, want, got *big.Int, msg string) {
+	t.Helper()
+	require.NotNil(t, got, msg)
+	require.Zero(t, want.Cmp(got), "%s: want %s, got %s", msg, want, got)
 }
 
 func ownerNativeEntryPointDeposit(t *testing.T, ctx context.Context, client *ethclient.Client, entryABI abi.ABI, runner common.Address, block *big.Int) *big.Int {
