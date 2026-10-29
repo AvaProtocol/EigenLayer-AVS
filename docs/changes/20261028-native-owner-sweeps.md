@@ -29,7 +29,9 @@ The additive ETHTransfer config field `reserveGas: true` means:
 
 All pricing finishes before returning a hash. A self-funded reserve is first
 estimated with a 1-wei native call, then the final amount is estimated with gas
-limits reset to zero. Ceilings only increase between rounds; this covers extra
+limits reset to zero. One padded fee quote is reused for those estimates, so a
+moving base fee does not drive the reserve loop. Gas ceilings only increase
+between rounds; this covers extra
 nonzero calldata bytes without reserve oscillation. At most eight adjustment
 rounds are allowed; failure to converge refuses prepare. No post-sign repricing
 or repair is added. Recipients whose behavior rejects estimation are refused.
@@ -37,12 +39,22 @@ or repair is added. Recipients whose behavior rejects estimation are refused.
 Funding checks subtract all native call values from account balance, then require
 remaining balance plus EntryPoint deposit to cover the maximum unsponsored fee.
 A paymaster covers gas only: native call values must still fit account balance.
+Sponsored zero-value/ERC-20 batches do not read native balance or EntryPoint
+deposit. Native batches and all self-funded batches retain their funding checks.
 
-Submit replays the stored graph and resolves the cap using the stored operation's
-fee fields, compares exact calldata, and rechecks existing authority/nonce/funding
+Prepare persists the captured batch, including the raw native cap. Submit resolves
+that stored batch using the stored operation's fee fields, compares exact calldata,
+and rechecks existing authority/nonce/funding
 conditions. It never changes a transfer amount, operation or hash. Only the
 signature is accepted; the durable submitting marker and uncertain-send behavior
 are unchanged. Collected writes are withheld from completed simulation steps.
+Workflow reads and branch conditions are evaluated only at prepare. An incoming
+transfer while the owner signs does not change the reviewed operation. Old
+unsigned preparations without a captured batch must be prepared again; previously
+attempted submissions remain reconcilable by their original hash.
+
+The owner-only `reserveGas` field is also refused at stored workflow creation,
+including ETHTransfer loop runners, before a session task can be persisted.
 
 ## Validation
 
@@ -53,7 +65,11 @@ All owner tests run with the race detector; the REST, pricing and AA package sui
 also run. These tests use local RPC fixtures. No live signature or broadcast is
 part of this change's validation yet.
 
-Balance discovery requests the provider's 100-row single-response limit and
-preserves every returned row, with raw integer balances. Provider cursors are
-not followed; the provider's response limit still applies. A local fixture
-checks that a returned 1,024-row result is not truncated or rounded.
+Balance discovery requests the provider's 100-row single-response limit. A
+nonempty cursor fails the node; a response at/above the limit without an explicit
+final-page marker also fails rather than being accepted as a complete portfolio.
+No cursor is followed and no pagination is added. A failed lookup of requested
+tokens propagates an error instead of synthesizing zero balances. Successful
+responses retain the same array shape and exact raw amounts. Tests cover capped
+responses, final-page markers, failed lookups and a complete 1,024-row fixture
+whose rows are neither truncated nor rounded.

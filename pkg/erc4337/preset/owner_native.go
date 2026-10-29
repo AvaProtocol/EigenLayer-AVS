@@ -14,8 +14,8 @@ import (
 // ReserveNativeGas applies only to the last, empty-calldata native transfer.
 // Its value is the captured cap; the priced operation determines the reserve.
 type OwnerBatch struct {
-	Calls            []aa.Call
-	ReserveNativeGas bool
+	Calls            []aa.Call `json:"calls"`
+	ReserveNativeGas bool      `json:"reserveNativeGas,omitempty"`
 }
 
 func (b OwnerBatch) validate() error {
@@ -105,7 +105,7 @@ func priceOwnerBatch(b OwnerBatch, op *userop.UserOperationV07, sponsored bool, 
 		if bytes.Equal(packed, op.CallData) {
 			return nil
 		}
-		previous := []*big.Int{op.CallGasLimit, op.VerificationGasLimit, op.PreVerificationGas, op.MaxFeePerGas, op.MaxPriorityFeePerGas}
+		previous := ownerPricingCeilings(op)
 		op.CallData = packed
 		op.CallGasLimit, op.VerificationGasLimit, op.PreVerificationGas = new(big.Int), new(big.Int), new(big.Int)
 		if err := price(); err != nil {
@@ -114,12 +114,23 @@ func priceOwnerBatch(b OwnerBatch, op *userop.UserOperationV07, sponsored bool, 
 		if op.Paymaster != nil {
 			return fmt.Errorf("owner gas funding changed while pricing")
 		}
-		current := []*big.Int{op.CallGasLimit, op.VerificationGasLimit, op.PreVerificationGas, op.MaxFeePerGas, op.MaxPriorityFeePerGas}
+		current := ownerPricingCeilings(op)
 		for i := range current {
 			if current[i].Cmp(previous[i]) < 0 {
-				current[i].Set(previous[i])
+				current[i] = previous[i]
 			}
 		}
+		op.CallGasLimit, op.VerificationGasLimit, op.PreVerificationGas = current[0], current[1], current[2]
+		op.MaxFeePerGas, op.MaxPriorityFeePerGas = current[3], current[4]
 	}
 	return fmt.Errorf("native fee reserve did not converge; prepare again")
+}
+
+// Own both snapshots: an estimator may reuse or mutate its big.Int pointers.
+func ownerPricingCeilings(op *userop.UserOperationV07) [5]*big.Int {
+	return [5]*big.Int{
+		new(big.Int).Set(op.CallGasLimit), new(big.Int).Set(op.VerificationGasLimit),
+		new(big.Int).Set(op.PreVerificationGas), new(big.Int).Set(op.MaxFeePerGas),
+		new(big.Int).Set(op.MaxPriorityFeePerGas),
+	}
 }

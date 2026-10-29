@@ -1841,6 +1841,9 @@ func resolveEventTriggerTemplates(trigger *avsproto.TaskTrigger, inputVariables 
 // CreateTask records submission data
 func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTaskReq) (*model.Workflow, error) {
 	var err error
+	if err = rejectOwnerReserveGas(taskPayload.Nodes); err != nil {
+		return nil, err
+	}
 	userAddr := user.Address.Hex()
 
 	// Log the create task request with detailed information

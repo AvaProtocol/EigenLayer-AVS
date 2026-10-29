@@ -106,7 +106,7 @@ func createMockMoralisServer(t *testing.T, tokens []MoralisTokenBalance) *httpte
 			}
 		}
 		if len(addressList) > 0 {
-			var filtered []MoralisTokenBalance
+			filtered := make([]MoralisTokenBalance, 0)
 			for _, token := range tokens {
 				for _, addr := range addressList {
 					if strings.EqualFold(strings.TrimSpace(addr), token.TokenAddress) {

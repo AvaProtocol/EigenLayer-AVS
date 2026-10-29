@@ -593,7 +593,7 @@ func (p *ETHTransferProcessor) collectOwnerETH(stepID string, config *avsproto.E
 		return fmt.Errorf("choose a different nonzero native destination")
 	}
 	value, ok := new(big.Int).SetString(amount, 10)
-	if !ok || value.Sign() <= 0 || value.BitLen() > 256 {
+	if !ok || strings.HasPrefix(amount, "+") || value.Sign() <= 0 || value.BitLen() > 256 {
 		return fmt.Errorf("owner ETHTransfer needs a positive captured amount in wei; MAX is not supported")
 	}
 	if len(c.calls) >= ownerBatchMaxCalls {

@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"encoding/json"
 	"math/big"
 	"testing"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func ownerNativeNode() *avsproto.TaskNode {
@@ -47,6 +50,20 @@ func TestOwnerNativeWorkflowCollectsOneAtomicBatchAndSubmitsSameHash(t *testing.
 				require.NotEqual(t, "native", step.Id)
 			}
 			before := append([]byte(nil), p.Operation.CallData...)
+			raw, err := n.db.GetKey(ownerExecutionKey(user.Address, p.Execution.Id))
+			require.NoError(t, err)
+			var record ownerExecutionRecord
+			require.NoError(t, json.Unmarshal(raw, &record))
+			require.NotNil(t, record.Batch)
+			require.True(t, record.Batch.ReserveNativeGas)
+			require.Equal(t, "1000000000000000000", record.Batch.Calls[len(record.Batch.Calls)-1].Value.String())
+			require.Empty(t, record.Definition)
+			require.Empty(t, record.InputJSON)
+			resolved, err := record.Batch.Resolve(p.Operation)
+			require.NoError(t, err)
+			packed, err := aa.PackExecuteBatchMAv2(resolved)
+			require.NoError(t, err)
+			require.Equal(t, before, packed)
 			sig := signOwnerFixture(t, p, key)
 			result, err := n.SubmitOwnerExecution(context.Background(), user, p.Execution.Id, sig)
 			require.NoError(t, err)
@@ -56,6 +73,35 @@ func TestOwnerNativeWorkflowCollectsOneAtomicBatchAndSubmitsSameHash(t *testing.
 			require.NoError(t, err)
 			require.EqualValues(t, 1, backend.prepared.Load())
 			require.EqualValues(t, 1, backend.sent.Load())
+		})
+	}
+}
+
+func TestOwnerNativeAmountRejectsLeadingPlus(t *testing.T) {
+	n, user, _, _ := ownerEngineFixture(t)
+	trigger, nodes, edges, input := ownerWorkflowFixture()
+	native := ownerNativeNode()
+	native.GetEthTransfer().Config.Amount = "+1000000000000000000"
+	nodes = append(nodes, native)
+	edges = append(edges, &avsproto.TaskEdge{Id: "nativeEdge", Source: "transfer", Target: "native"})
+	_, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
+	require.Error(t, err)
+}
+
+func TestOwnerReserveGasCannotBeStoredAsSessionWorkflow(t *testing.T) {
+	for _, loop := range []bool{false, true} {
+		t.Run(map[bool]string{false: "transfer", true: "loop runner"}[loop], func(t *testing.T) {
+			n, user, _, _ := ownerEngineFixture(t)
+			native := ownerNativeNode()
+			node := native
+			if loop {
+				node = &avsproto.TaskNode{Id: "loop", Type: avsproto.NodeType_NODE_TYPE_LOOP, TaskType: &avsproto.TaskNode_Loop{Loop: &avsproto.LoopNode{Runner: &avsproto.LoopNode_EthTransfer{EthTransfer: native.GetEthTransfer()}}}}
+			}
+			_, err := n.CreateWorkflow(user, &avsproto.CreateTaskReq{Nodes: []*avsproto.TaskNode{node}})
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			require.ErrorContains(t, err, "reserveGas")
+			native.GetEthTransfer().Config.ReserveGas = false
+			require.NoError(t, rejectOwnerReserveGas([]*avsproto.TaskNode{nil, node}))
 		})
 	}
 }

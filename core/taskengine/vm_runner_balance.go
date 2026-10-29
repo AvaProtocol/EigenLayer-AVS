@@ -348,7 +348,7 @@ func (v *VM) runBalance(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, 
 var testMoralisAPIBaseURL string
 
 // Request a large single response; BalanceNode does not walk provider cursors.
-const balanceResponseLimit = "100"
+const balanceResponseLimit = 100
 
 // fetchMoralisBalancesWithFiltering retrieves token balances with two-phase approach:
 // Phase 1: Get all tokens (to include native token like ETH)
@@ -412,7 +412,7 @@ func (vm *VM) fetchMoralisBalancesWithFiltering(
 	// Normalize client's requested addresses to lowercase for comparison
 	requestedAddrs := make(map[string]string) // lowercase -> checksummed
 	for _, addr := range config.TokenAddresses {
-		if addr != "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" && common.IsHexAddress(addr) {
+		if !strings.EqualFold(addr, NativeTokenAddress) && common.IsHexAddress(addr) {
 			checksummed := common.HexToAddress(addr).Hex()
 			requestedAddrs[strings.ToLower(checksummed)] = checksummed
 		}
@@ -459,8 +459,8 @@ func (vm *VM) fetchMoralisBalancesWithFiltering(
 	if len(missingAddrs) > 0 {
 		missingBalances, err := vm.fetchMoralisBalances(address, chain, apiKey, effectiveConfig, missingAddrs)
 		if err != nil {
-			// Don't fail entirely - just log warning and continue with what we have
-			fmt.Printf("WARNING: Failed to fetch missing token addresses: %v\n", err)
+			// A failed/incomplete lookup is not evidence of a zero balance.
+			return nil, fmt.Errorf("fetching requested token balances: %w", err)
 		} else {
 			result = append(result, missingBalances...)
 
@@ -526,7 +526,7 @@ func (vm *VM) fetchMoralisBalances(
 	request := client.R().
 		SetHeader("X-API-Key", apiKey).
 		SetQueryParam("chain", chain).
-		SetQueryParam("limit", balanceResponseLimit)
+		SetQueryParam("limit", fmt.Sprint(balanceResponseLimit))
 
 	// Add exclude_spam parameter (exclude by default unless includeSpam is true)
 	if !config.IncludeSpam {
@@ -559,6 +559,7 @@ func (vm *VM) fetchMoralisBalances(
 
 	// Parse Moralis response - try direct array first (v2.2 API returns array directly)
 	var tokens []MoralisTokenBalance
+	completeResponse := false
 	if err := json.Unmarshal(resp.Body(), &tokens); err != nil {
 		// If direct array parsing fails, try wrapper object format (older API version)
 		var moralisResp MoralisBalanceResponse
@@ -566,6 +567,22 @@ func (vm *VM) fetchMoralisBalances(
 			return nil, fmt.Errorf("failed to parse Moralis response as array or wrapper: %w", err)
 		}
 		tokens = moralisResp.Result
+		if moralisResp.Cursor != nil && strings.TrimSpace(*moralisResp.Cursor) != "" {
+			return nil, fmt.Errorf("balance provider response is incomplete; more holdings are available and pagination is not performed")
+		}
+		// A final-page marker distinguishes a complete response at the provider
+		// limit from a legacy array or wrapper that could have been capped.
+		var envelope map[string]json.RawMessage
+		if err := json.Unmarshal(resp.Body(), &envelope); err != nil {
+			return nil, fmt.Errorf("reading balance response completeness: %w", err)
+		}
+		_, completeResponse = envelope["cursor"]
+	}
+	if tokens == nil {
+		return nil, fmt.Errorf("balance provider response has no token list")
+	}
+	if len(tokens) >= balanceResponseLimit && !completeResponse {
+		return nil, fmt.Errorf("balance provider response may be incomplete: at least %d rows without a final-page marker; pagination is not performed", balanceResponseLimit)
 	}
 
 	// Convert to simplified format

@@ -15,8 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func nativeOwnerBatch(cap *big.Int) OwnerBatch {
-	return OwnerBatch{Calls: []aa.Call{{Target: common.HexToAddress("0x3333333333333333333333333333333333333333"), Value: cap, Data: []byte{}}}, ReserveNativeGas: true}
+func nativeOwnerBatch(captured *big.Int) OwnerBatch {
+	return OwnerBatch{Calls: []aa.Call{{Target: common.HexToAddress("0x3333333333333333333333333333333333333333"), Value: captured, Data: []byte{}}}, ReserveNativeGas: true}
 }
 
 func TestOwnerNativeReservePricesFinalCalldataAndNeverBroadcasts(t *testing.T) {
@@ -28,8 +28,8 @@ func TestOwnerNativeReservePricesFinalCalldataAndNeverBroadcasts(t *testing.T) {
 				sw.AlchemyPaymasterPolicyID = "test-policy"
 				sw.BundlerProvider = config.BundlerProviderAlchemy
 			}
-			cap := new(big.Int).SetUint64(1_000_000_000_000_000_000)
-			batch := nativeOwnerBatch(cap)
+			captured := new(big.Int).SetUint64(1_000_000_000_000_000_000)
+			batch := nativeOwnerBatch(captured)
 			batch.Calls = append(ownerTestCalls(), batch.Calls...)
 			p, err := prepareNativeTestBatch(t, f, sw, batch, sponsored)
 			require.NoError(t, err)
@@ -41,9 +41,9 @@ func TestOwnerNativeReservePricesFinalCalldataAndNeverBroadcasts(t *testing.T) {
 			if sponsored {
 				reserve.SetInt64(0)
 			}
-			require.Equal(t, new(big.Int).Sub(cap, reserve), values[len(values)-1])
+			require.Equal(t, new(big.Int).Sub(captured, reserve), values[len(values)-1])
 			require.Empty(t, data[len(data)-1])
-			require.Equal(t, cap, batch.Calls[len(batch.Calls)-1].Value, "captured cap is immutable")
+			require.Equal(t, captured, batch.Calls[len(batch.Calls)-1].Value, "captured cap is immutable")
 			packed, err := aa.PackExecuteBatchMAv2(resolved)
 			require.NoError(t, err)
 			require.Equal(t, packed, p.Operation.CallData)
@@ -123,8 +123,8 @@ func TestOwnerNativeReserveConvergesBeforeSigningOrRefuses(t *testing.T) {
 }
 
 func TestOwnerNativeReserveRejectsAmbiguousAndInvalidCaps(t *testing.T) {
-	for _, cap := range []*big.Int{nil, big.NewInt(-1), big.NewInt(0), new(big.Int).Lsh(big.NewInt(1), 256)} {
-		_, err := nativeOwnerBatch(cap).estimationCalls()
+	for _, captured := range []*big.Int{nil, big.NewInt(-1), big.NewInt(0), new(big.Int).Lsh(big.NewInt(1), 256)} {
+		_, err := nativeOwnerBatch(captured).estimationCalls()
 		require.Error(t, err)
 	}
 	batch := nativeOwnerBatch(big.NewInt(1000))
@@ -135,6 +135,84 @@ func TestOwnerNativeReserveRejectsAmbiguousAndInvalidCaps(t *testing.T) {
 	batch.Calls = append([]aa.Call{{Target: batch.Calls[0].Target, Value: big.NewInt(1)}}, batch.Calls...)
 	_, err = batch.estimationCalls()
 	require.ErrorContains(t, err, "another native")
+}
+
+func TestOwnerNativeReserveKeepsOneFeeQuoteAcrossFinalCalldataEstimates(t *testing.T) {
+	f, sw := newOwnerRPCFixture(t)
+	f.risingBaseFee = true
+	p, err := PrepareOwnerBatch(context.Background(), sw, f.owner, f.sender, big.NewInt(0), nativeOwnerBatch(big.NewInt(1_000_000_000_000_000_000)), nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, f.headerReads)
+	require.Equal(t, 2, f.tipReads, "quote chain and bundler priority fees once each")
+	require.GreaterOrEqual(t, f.estimateReads, 2, "still estimate the actual final transfer calldata")
+	require.Empty(t, p.Operation.Signature)
+	require.Zero(t, f.sendCount)
+}
+
+func TestOwnerNativeReserveDoesNotMutateAliasedEstimatorIntegers(t *testing.T) {
+	batch := nativeOwnerBatch(big.NewInt(1_000_000_000))
+	calls, err := batch.estimationCalls()
+	require.NoError(t, err)
+	packed, err := aa.PackExecuteBatchMAv2(calls)
+	require.NoError(t, err)
+	op := &userop.UserOperationV07{CallData: packed}
+	sharedGas := big.NewInt(1)
+	sharedFee := big.NewInt(2)
+	rounds := 0
+	err = priceOwnerBatch(batch, op, false, func() error {
+		rounds++
+		if rounds == 1 {
+			op.CallGasLimit, op.VerificationGasLimit, op.PreVerificationGas = big.NewInt(100), big.NewInt(50), big.NewInt(30)
+		} else {
+			op.CallGasLimit, op.VerificationGasLimit, op.PreVerificationGas = sharedGas, sharedGas, sharedGas
+			sharedFee.SetInt64(1)
+		}
+		op.MaxFeePerGas, op.MaxPriorityFeePerGas = sharedFee, sharedFee
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, rounds)
+	require.Equal(t, "100", op.CallGasLimit.String())
+	require.Equal(t, "50", op.VerificationGasLimit.String())
+	require.Equal(t, "30", op.PreVerificationGas.String())
+	require.Equal(t, "2", op.MaxFeePerGas.String())
+	require.Equal(t, "1", sharedGas.String())
+	require.Equal(t, "1", sharedFee.String())
+	require.NotSame(t, sharedGas, op.CallGasLimit)
+	require.NotSame(t, sharedFee, op.MaxFeePerGas)
+}
+
+func TestOwnerSponsoredZeroValueSkipsBalanceRPC(t *testing.T) {
+	for _, sponsored := range []bool{false, true} {
+		for _, native := range []bool{false, true} {
+			t.Run(map[bool]string{false: "self-funded", true: "sponsored"}[sponsored]+map[bool]string{false: "/ERC20", true: "/native"}[native], func(t *testing.T) {
+				f, sw := newOwnerRPCFixture(t)
+				f.balanceUnavailable = true
+				calls := ownerTestCalls()
+				if native {
+					calls = nativeOwnerBatch(big.NewInt(1)).Calls
+				}
+				packed, err := aa.PackExecuteBatchMAv2(calls)
+				require.NoError(t, err)
+				op := &userop.UserOperationV07{Sender: f.sender, CallData: packed}
+				if sponsored {
+					paymaster := common.HexToAddress("0x5555555555555555555555555555555555555555")
+					op.Paymaster = &paymaster
+				}
+				chain, err := ethclient.DialContext(context.Background(), sw.EthRpcUrl)
+				require.NoError(t, err)
+				defer chain.Close()
+				err = checkOwnerPrefund(context.Background(), chain, op)
+				if sponsored && !native {
+					require.NoError(t, err)
+					require.Zero(t, f.balanceReads)
+				} else {
+					require.ErrorContains(t, err, "balance unavailable")
+					require.Equal(t, 1, f.balanceReads)
+				}
+			})
+		}
+	}
 }
 
 // The production Alchemy URL is derived from its API key. Exercise sponsored
