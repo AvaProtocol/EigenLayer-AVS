@@ -69,6 +69,8 @@ func TestBalanceNode_RejectsIncompleteResponsesWithoutPagination(t *testing.T) {
 		{"explicit final page at cap", map[string]interface{}{"result": tokens, "cursor": nil}, balanceResponseLimit},
 		{"empty final cursor at cap", map[string]interface{}{"result": tokens, "cursor": ""}, balanceResponseLimit},
 		{"short legacy array", tokens[:1], 1},
+		{"legacy array below cap", tokens[:balanceResponseLimit-1], balanceResponseLimit - 1},
+		{"wrapper without completion marker below cap", map[string]interface{}{"result": tokens[:balanceResponseLimit-1]}, balanceResponseLimit - 1},
 		{"complete empty array", []MoralisTokenBalance{}, 0},
 		{"missing token list", map[string]interface{}{"cursor": nil}, -1},
 		{"null response", nil, -1},
