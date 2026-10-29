@@ -52,3 +52,8 @@ identity, REST/protobuf field round trips, and submit-once with unchanged callda
 All owner tests run with the race detector; the REST, pricing and AA package suites
 also run. These tests use local RPC fixtures. No live signature or broadcast is
 part of this change's validation yet.
+
+Balance discovery requests the provider's 100-row single-response limit and
+preserves every returned row, with raw integer balances. Provider cursors are
+not followed; the provider's response limit still applies. A local fixture
+checks that a returned 1,024-row result is not truncated or rounded.

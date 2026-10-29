@@ -347,6 +347,9 @@ func (v *VM) runBalance(taskNode *avsproto.TaskNode) (*avsproto.Execution_Step, 
 // testMoralisAPIBaseURL allows tests to override the Moralis API base URL
 var testMoralisAPIBaseURL string
 
+// Request a large single response; BalanceNode does not walk provider cursors.
+const balanceResponseLimit = "100"
+
 // fetchMoralisBalancesWithFiltering retrieves token balances with two-phase approach:
 // Phase 1: Get all tokens (to include native token like ETH)
 // Phase 2: If client specified tokenAddresses and some are missing, query them specifically
@@ -522,7 +525,8 @@ func (vm *VM) fetchMoralisBalances(
 	client.SetRedirectPolicy(resty.NoRedirectPolicy())
 	request := client.R().
 		SetHeader("X-API-Key", apiKey).
-		SetQueryParam("chain", chain)
+		SetQueryParam("chain", chain).
+		SetQueryParam("limit", balanceResponseLimit)
 
 	// Add exclude_spam parameter (exclude by default unless includeSpam is true)
 	if !config.IncludeSpam {
