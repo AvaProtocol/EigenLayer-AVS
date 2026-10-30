@@ -360,11 +360,12 @@ WALLET_BUDGET_FEASIBILITY=1 go test -race -tags=integration ./core/taskengine \
   -count=1 -v
 ```
 
-Post-review verification: the HTTP/offline race checks and updated router
-parent passed. The approval positive cases, zero-cap checks and estimator
-refusals passed in the combined review run. The strengthened, fully signed
-stripping attack and the reason-checked mined rollback then passed in focused
-race reruns after their final edits; the final combined command was not rerun.
+Post-review verification: the HTTP/offline race checks passed. Both complete
+live test groups and all their subtests were then rerun together on the
+unchanged code at `bf5822a0` with the race detector and passed in 259.455 seconds.
+That combined run includes the fully signed stripping attack, reason-checked
+mined rollback, both swaps, gas-budget assertions and fixture cleanup. CI also
+passed on `bf5822a0`.
 Static checks passed with
 `go vet -tags=integration ./aggregator/rest ./core/taskengine`, Go formatting
 and whitespace checks. The repository build also passed through the Make
