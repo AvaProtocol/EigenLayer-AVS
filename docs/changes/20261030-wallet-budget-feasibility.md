@@ -8,12 +8,21 @@ schema or Studio code changes.
 
 ## Decision
 
-**Use mechanism 1: put the approval resets and installation in the owner's
-signed deferred batch.** The Sepolia Alchemy bundler accepted it, the USDC
-allowance became zero, and the new session validation was installed. A reverting
-reset was rejected during validation, with the earlier reset rolled back and
-the new entity absent. Mechanism 2 also works as an alternative owner-signed
-UserOperation, but requires a separate operation and fee review.
+**Mechanism 1 is a provisional candidate for the tested Alchemy route, not a
+settled portable default.** The Sepolia Alchemy bundler accepted an owner-signed
+deferred reset/install batch, the USDC allowance became zero, and the new
+session validation was installed. A reverting reset was rejected during gas
+estimation: no transaction was sent and the on-chain approval/install state was
+unchanged. Only mechanism 2's deliberately mined failure demonstrates a real
+transaction rolling back the reset and install.
+
+Before selecting mechanism 1 for production, confirm Alchemy's validation
+storage policy or reproduce acceptance on a second strict bundler, and define
+immediate activation in the step 2 contract. Mechanism 2 is the execution-phase
+alternative if that portability or activation requirement cannot be met. It
+does not put token reset storage accesses in validation, but needs its own
+owner operation and fee review. No second bundler or Alchemy policy confirmation
+has been obtained by this spike.
 
 This unblocks drafting the interface contract (step 2). Gateway budget mode and
 Studio implementation still wait for that contract and gateway-owner review.
@@ -25,8 +34,8 @@ agreed phase 1 approach of explicitly consenting to unmetered protocol actions.
 
 | Spike | Result | Evidence |
 | --- | --- | --- |
-| S1 deferred resets + install | Works on a deployed MA v2 wallet, through the real Alchemy bundler | `TestWalletBudgetApprovalMechanisms_Sepolia/S1DeferredResetsAndInstall`, `S1DeferredFailingResetRollsBack` |
-| S2 owner UserOperation batch | Works; both estimator refusal and mined execution rollback verified | Same test, `S2OwnerResetsAndInstall`, `S2OwnerFailingResetRollsBack`, `S2OwnerMinedFailureRollsBack` |
+| S1 deferred resets + install | Observed working on Alchemy; strict-bundler portability remains unconfirmed | `TestWalletBudgetApprovalMechanisms_Sepolia/S1DeferredResetsAndInstall`, `S1DeferredFailingResetRefused`, `S1SessionCannotStripOwnerSignedResets` |
+| S2 owner UserOperation batch | Works; both estimator refusal and mined execution rollback verified | Same test, `S2OwnerResetsAndInstall`, `S2OwnerFailingResetRefused`, `S2OwnerMinedFailureRollsBack` |
 | S3 zero cap | Works on the stock deployed AllowlistModule; gateway currently rejects zero in two places | Same test, `S3ZeroCap`, including `approve1` and `transfer1`; `TestWalletBudgetZeroCapPrototypePreservesProductionGuards` |
 | S4 no workflow end | Partial: HTTP create, persistence, execution and expired-permission refusal work; the renewal instruction is truncated. | `TestWalletBudgetManualWorkflowWithoutEndDateOverHTTP`, including its expired-permission subtest; existing resolver/deploy tests |
 | S5 router swaps with finite WETH cap | Both directions work without direct wallet WETH deposit/withdraw permissions | `TestWalletBudgetRouterWithoutWETHWrapPermissions_Sepolia` |
@@ -46,7 +55,7 @@ The execution call carried by the session operation is separately
 `executeUserOp`-wrapped so the new validation's execution hooks run. This matters
 even for the first operation that installs it.
 
-Fixture: `0x59755510CB6783AA6506f9E55241B3d924658bFF`, owned by the existing
+Fixture: `0xa0F7dD863b2Dd9C82B47728c83eE07D75E867C35`, owned by the existing
 Sepolia test owner. A preliminary owner operation seeds a real USDC allowance
 of 123 base units to SwapRouter02. The signed deferred call resets it, then
 installs entity 101 with Allowlist validation/execution hooks and TimeRange.
@@ -54,8 +63,8 @@ The first session execution only approves zero, so it cannot conceal a failed
 reset by setting a nonzero allowance later.
 
 - Successful reset/install UserOp:
-  `0x6cd51161b649e683370dc4e03ef23e4c9d9bf350727a4a125fe3a0a2a957c52d`.
-  [Sepolia transaction](https://sepolia.etherscan.io/tx/0xcdf93cec1958117aea5973aea8196b75b538ea7223c2fea7d569c5ef54127eb8).
+  `0xbfd256ebc147fd79d34ae0b22d3e7257e7351f843444796de98087a4243c8763`.
+  [Sepolia transaction](https://sepolia.etherscan.io/tx/0x9d23db8896f5a533687c8437577aa893f16af495f598325768d6cb6b09109729).
   Readbacks assert allowance zero and entity signer installed.
 - Failing case: reset the live router approval, then call USDC
   `approve(address(0), 0)`, then install entity 102. The bundler refuses it with
@@ -64,10 +73,36 @@ reset by setting a nonzero allowance later.
 
 The result demonstrates acceptance by this bundler for this deployed wallet
 and USDC proxy, not universal acceptance for every token or bundler. The
-[ERC-7562 storage rules](https://ercs.ethereum.org/ERCS/erc-7562) permit associated
-account storage for an existing sender. Tokens with extra unrelated storage
-access still need a provider test. This experiment deploys the wallet before
-installing; it does not test counterfactual deployment and resets in one op.
+[ERC-7562 storage rules](https://ercs.ethereum.org/ERCS/erc-7562) allow associated
+storage of an existing sender, but this does **not** establish that the whole
+USDC approval call satisfies strict validation rules. Circle's
+[approval implementation](https://github.com/circlefin/stablecoin-evm/blob/master/contracts/v1/FiatTokenV1.sol)
+also checks the paused flag and the spender's blacklist state. Those reads are
+not tied to the sender. The fixture checks that the fresh sender is unstaked;
+the operation is deployed and self-funded, with no factory/paymaster frame to
+justify arbitrary external reads under STO-033.
+
+Alchemy's acceptance may rely on provider-specific exemptions, policy, or
+validation tracing behavior. We have not traced the deployed implementation's
+storage accesses or obtained provider confirmation, so this is a portability
+risk, not a confirmed Alchemy defect. A wallet-associated allowance slot alone
+does not resolve it. Before using mechanism 1 beyond this tested route, obtain
+Alchemy confirmation or run the same signed operation shape against an
+independent strict bundler and record the result. This experiment does not test
+counterfactual deployment and resets in one op.
+
+`S1SessionCannotStripOwnerSignedResets` signs the reset/install batch with the
+owner key, then reuses that signature with an install-only deferred batch and
+a session-key operation. It prices the valid original batch as a control, then
+signs the altered operation with the session key and submits it through
+`eth_sendUserOperation`. It requires the deployed account's
+`DeferredActionSignatureInvalid()` refusal, with the allowance unchanged and
+entity 107 absent. This exercises EVM validation through the real bundler,
+rather than relying only on the Go digest helper or an unsigned estimation
+attempt. The rejected submission has no transaction. The signed-submission
+rerun used wallet `0xB0BC272fC090455cd928D20478161753276bA899` and returned
+`AA23 reverted` with `revertData: 0x01334f77`, the expected signature-error
+selector. Both its approval and entity readbacks passed.
 
 The deferred batch is in validation. If the later Skill execution fails, a
 successful reset/install still persists. A failure in a reset inside the
@@ -81,19 +116,33 @@ The existing `preset.PrepareOwnerUserOp` successfully prices
 The account permits that self-call under owner authority. The same allowance
 and signer readbacks pass for entity 103.
 
-- UserOp: `0x6b9cb0bc2c0a2518b1f50017702d3deb77ec36c57bf9bdef408ac0a7d6ee6c46`.
-  [Sepolia transaction](https://sepolia.etherscan.io/tx/0x8adfe8868fd5488cf8e928c30bd14a5f165f05652fcac084a093db08f49cd2cd).
+- UserOp: `0xb317adf6ea4e015fd7cf2e5ec033e080f0e4e42c6f1af2fcf5cb5631ab121016`.
+  [Sepolia transaction](https://sepolia.etherscan.io/tx/0x6283510fe7294675b61b709136301e06d230098b3f1647cd29cf7d5c277a7728).
 - The reset-to-zero-spender variant is refused during gas estimation, with the
   live allowance unchanged and entity 104 absent.
 - Mined negative case: `S2OwnerMinedFailureRollsBack` deliberately puts an
   install of entity 106 before the failing reset, signs the final larger batch
-  with sufficient gas headroom, and sends it once. UserOp
-  `0x4fcb0f549b48a7069822bca1e4b2c0cb88a6b4f69273e32677841348bf363eb4` was
-  [included](https://sepolia.etherscan.io/tx/0xe12196b88bf7eab45c585b9431b9b22f65bf1cdeae1700c1eb970d013678ff43)
+  using the valid control's gas estimate plus 500k call-gas headroom and 100k
+  pre-verification headroom, and sends it once. This rerun used wallet
+  `0x5512eFa59932113F942f7b1C08Efe989118691e1`. UserOp
+  `0xd76ec2aeaeda1b17350ce09708dc3d2eabf5bb830a0f9a96056f02c3c08e8b4d` was
+  [included](https://sepolia.etherscan.io/tx/0x206e0592eb41ef8300d1261aa2de975208442d9641123dee60cea439258974e4)
   with UserOp success **false**. The allowance remains 123 and entity 106 is
-  absent, proving execution rollback after installation had begun. The outer
+  absent. The test decodes the matching EntryPoint `UserOperationRevertReason`
+  event and requires `ERC20: approve to the zero address`, excluding an
+  out-of-gas failure before the install. This proves execution rollback after
+  installation had begun. The outer
   EntryPoint transaction succeeds while this inner UserOp fails; these are
   distinct statuses. This case also passed with Go's race detector.
+
+**Correction to the original report:** the previously cited
+[failure transaction](https://sepolia.etherscan.io/tx/0xe12196b88bf7eab45c585b9431b9b22f65bf1cdeae1700c1eb970d013678ff43)
+does not prove reset-triggered rollback. A `debug_traceTransaction` call trace
+shows out of gas inside `installValidation`; no `UserOperationRevertReason`
+event was emitted. Its fixed 900k execution limit was below what installation
+needed. The earlier rollback claim is withdrawn and replaced by the
+reason-checked transaction above. The test no longer reduces the successful
+control's gas estimate to a fixed value.
 
 The wallet signs `personal_sign` of the **32 raw bytes** of the EntryPoint v0.7
 UserOp hash, prefixed once with EIP-191 and framed by the gateway. The wallet
@@ -118,11 +167,11 @@ zero-amount calls and refuses positive amounts. It is not an unlimited row.
 
 Entity 105 is installed with cap zero and both selectors permitted:
 
-- Install UserOp `0xdaba50d60e86d92a04d1f6fa046358cc3badc3b190d29e2a3dac0e8ff3507b67`;
-  [transaction](https://sepolia.etherscan.io/tx/0x0b3594e46006995b9520a15c5629b946f9a931dd97ccb9ae8d745062fbaed1b2).
+- Install UserOp `0xd86c04aef0897981b8bbfa9e482f585d614afaf31a1ba7a2c6d681a31f79785a`;
+  [transaction](https://sepolia.etherscan.io/tx/0x9733c0f1bc20b018dba0c180f323768cce840bc3a5d3063cfe3339381d6ad27c).
 - `approve(router, 0)` succeeds: UserOp
-  `0x523e2e04f0f7530b2a79ac1e5acbbc16752236be0d3c1c68f9cba4c31fbd9e4d`;
-  [transaction](https://sepolia.etherscan.io/tx/0x6ba416e4d5b87976c685a701636ac8a70d9d41a2bc2c68fb56412a60b8e67263).
+  `0xabc6fabe90b59fe87b8bc1abb12cc80e128ea8cb26d4451207e32c6fe81c08aa`;
+  [transaction](https://sepolia.etherscan.io/tx/0xfa9f6efb438346dbeba6e49dfd756c11da79ac606c09160691e5aa018a9dba68).
 - Nonzero approve and transfer are refused by the real bundler. It hides the
   inner execution error, so the tests additionally call the deployed execution
   hook against the same wallet/entity and assert the exact
@@ -160,27 +209,33 @@ message. Keep the structured expiry code and a concise, actionable reason
 through the execution result when building the budget verdict. No production
 error handling is changed here.
 
+The HTTP characterization test now explicitly asserts the generic error code,
+the truncated suffix and the absent renewal instruction. A future fix must
+update those expectations rather than silently changing this spike's finding.
+
 ## S5: keep a finite WETH row, wrap/unwrap in the router
 
-Fixture: `0x6D8a181fc88FAcB6F119c37c9A9f79dF035f8FcA`. The permission includes a
+Fixture: `0x423eAc6626f7F153f85144D8A8e562e4DBdC4C64`. The permission includes a
 finite 0.1 WETH cap and **only** WETH approve/transfer selectors, capped USDC,
 SwapRouter02 `multicall(bytes[])`, a 0.01 ETH NativeTokenLimit including gas,
 and TimeRange. The WETH row contains neither deposit nor withdraw.
 
 1. Send exactly 0.00001 Sepolia ETH to router multicall: `exactInputSingle`
    with WETH input and USDC output to the wallet, then `refundETH`.
-   It receives 382267 USDC base units.
-   UserOp `0xd8e8612666fc1c420e13683abe5f0d203746833fd6017c6fd96ed28a75635a04`;
-   [transaction](https://sepolia.etherscan.io/tx/0x93800c4d494aa41532acc9dca96e1d1e87f61f07791f47ce3d31b24358eb9ce1).
+   It receives 380010 USDC base units.
+   UserOp `0x0087363ce4d58d543e48d0dfd8ce51860804542b75eaa815965d76fc1ea0310f`;
+   [transaction](https://sepolia.etherscan.io/tx/0xfd38161a7a22af38f65dc4520e1d23b3b51078ad83d3d1e84fe8cbdfd9d30012).
 2. Approve exactly the purchased amount and call router multicall:
    `exactInputSingle` with USDC input, WETH output to the router, then
    `unwrapWETH9` to the wallet.
-   UserOp `0xc2b822edbf36e4708a00797b7f8c7183e356575948b84f3b465bada24ff71bd2`;
-   [transaction](https://sepolia.etherscan.io/tx/0xe288bb4c0c4443b842589fbfd378c8b3cc3e05d02b9894d6affea570f0b3bf9c).
+   UserOp `0x2f573cbc26f6f35bcb3356c1fa98758bf05f99fce7a98c3558f10047e2347d0f`;
+   [transaction](https://sepolia.etherscan.io/tx/0x0e7977ab54108db17771648614504991a1fbc38716f438a459cac598f1dbefa0).
 
 The test asserts all purchased USDC is sold, no WETH remains in the wallet,
 the WETH allowance-module remainder is still 0.1 WETH, and the separate native
-remainder decreased. Router [payment helpers](https://github.com/Uniswap/v3-periphery/blob/main/contracts/base/PeripheryPayments.sol)
+budget charges gas. After the first swap, its decrease must exceed the ETH
+input; after the second, zero-value batch, it must decrease again. A decrease
+from the ETH input alone is insufficient. Router [payment helpers](https://github.com/Uniswap/v3-periphery/blob/main/contracts/base/PeripheryPayments.sol)
 do wrapping/unwrapping in the router's own context. The finite WETH cap does
 not meter that native input; native value and gas need their own limit.
 
@@ -235,6 +290,22 @@ Deployment/audit dollars cannot be estimated reliably without code and quotes.
 
 ## Boundaries for the interface contract
 
+- Define activation separately from the Skill schedule. A deferred signature
+  changes nothing on chain until a session operation carrying it is included.
+  Existing approvals and the previous permission stay live until then. The
+  fixture activates immediately and signs only a ten-minute deadline; it does
+  not prove that a first scheduled run hours or days later can activate safely.
+- Step 2 must distinguish signed/pending activation from on-chain active, bind
+  an explicit activation operation to the reviewed reset/install, define a
+  short activation deadline, confirmation/failure recovery and who pays gas.
+  Do not label a new budget active or a scheduled Skill enabled before the
+  activation is confirmed. Prove a safe activation call for every permission
+  shape; this spike does not specify or test a generic no-op activator.
+- Do not silently extend the owner signature to cover a far-future first run.
+  If delayed activation is deliberately supported, disclose the live old
+  approvals and expiry window, keep the state pending, and obtain a fresh
+  signature after expiration. Choose mechanism 2 if immediate deferred
+  activation or the required bundler storage policy cannot be supported.
 - Sign the exact ordered resets and install/old-entity retirements, not only
   the displayed budget totals. These spikes prove reset + new install; full
   migration/replacement of old entities remains feature integration work.
@@ -243,8 +314,13 @@ Deployment/audit dollars cannot be estimated reliably without code and quotes.
   return or prove a no-op token set allowance to zero. This result covers the
   tested reverting USDC implementation. Supporting false/no-op tokens would
   need an on-chain zero-allowance assertion, not merely a read after install.
-- Owner prepare still prices first, then one owner signature binds the final
-  bytes. No mutation or signing-key relay repair after an owner signature.
+- For mechanism 2, owner prepare prices first, then the owner signature binds
+  the final UserOperation bytes. No mutation or signing-key relay repair after
+  that signature. Mechanism 1 instead binds `DeferredAction(nonce, deadline,
+  call)`: it does not sign the outer session operation's execution or gas
+  fields. Its installed permission hooks constrain that operation. The step 2
+  contract must describe that difference and the activation fee policy rather
+  than claiming that a deferred signature freezes the entire UserOperation.
 - First installs on undeployed accounts, multiple reset tokens/spenders,
   existing unlimited approvals and real prior-grant migration need their own
   end-to-end feature tests. The live reset fixture here used a nonzero finite
@@ -263,7 +339,7 @@ WALLET_BUDGET_FEASIBILITY=1 make test/package TAGS=integration \
   PKG='./core/taskengine -run TestWalletBudget -count=1'
 
 go test -race ./aggregator/rest ./core/taskengine \
-  -run 'TestWalletBudgetManualWorkflowWithoutEndDateOverHTTP|TestWalletBudgetZeroCapPrototype|TestSessionResolverRefusesExpiredGrant|TestDeployCheckRefusesExpiredGrantWithNoEnd' \
+  -run 'TestWalletBudgetManualWorkflowWithoutEndDateOverHTTP|TestWalletBudgetZeroCapPrototype|TestWalletBudgetCleanup|TestSessionResolverRefusesExpiredGrant|TestDeployCheckRefusesExpiredGrantWithNoEnd' \
   -count=1
 ```
 
@@ -276,8 +352,7 @@ and the send helper waits for nonce consumption before the next preparation.
 This changes only test synchronization, not execution logic. No production
 server was restarted.
 
-Final verification: both live parents and all their subtests passed together
-with the race detector:
+Live verification can be reproduced with:
 
 ```sh
 WALLET_BUDGET_FEASIBILITY=1 go test -race -tags=integration ./core/taskengine \
@@ -285,7 +360,12 @@ WALLET_BUDGET_FEASIBILITY=1 go test -race -tags=integration ./core/taskengine \
   -count=1 -v
 ```
 
-The HTTP/offline race command above passed. Static checks passed with
+Post-review verification: the HTTP/offline race checks and updated router
+parent passed. The approval positive cases, zero-cap checks and estimator
+refusals passed in the combined review run. The strengthened, fully signed
+stripping attack and the reason-checked mined rollback then passed in focused
+race reruns after their final edits; the final combined command was not rerun.
+Static checks passed with
 `go vet -tags=integration ./aggregator/rest ./core/taskengine`, Go formatting
 and whitespace checks. The repository build also passed through the Make
 target's build prerequisite; its earlier test run exposed the stale-read issue
@@ -295,6 +375,10 @@ Each live fixture uses a fresh salt, deploys before funding and receives at
 most 0.02 ETH initial wallet funding. Cleanup returns remaining wallet ETH and
 test tokens to the same owner and clears the USDC router approval. Unused
 EntryPoint prefund refunds remain owner-controlled and are logged separately.
+If ETH is zero while tokens or an approval remain, cleanup fails with the exact
+residual amounts and fixture address/salt; it cannot log successful recovery.
+After sending cleanup, token and allowance readbacks must be zero. Unit tests
+cover the zero-ETH residual cases.
 `TestWalletBudgetRecoverFixture_Sepolia` accepts an explicitly supplied
 `WALLET_BUDGET_SALT` to recover an interrupted fixture without funding it.
 

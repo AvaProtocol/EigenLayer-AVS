@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -9,6 +10,36 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 )
+
+// A zero native balance must not turn cleanup into a silent success when
+// recoverable tokens or a live approval remain. EntryPoint gas refunds are
+// reported separately and are not evidence that wallet cleanup ran.
+func budgetCleanupError(native, usdc, weth, allowance *big.Int) error {
+	if native.Sign() == 0 && (usdc.Sign() > 0 || weth.Sign() > 0 || allowance.Sign() > 0) {
+		return fmt.Errorf("zero ETH prevents cleanup: remaining USDC=%s WETH=%s USDC router allowance=%s", usdc, weth, allowance)
+	}
+	return nil
+}
+
+func TestWalletBudgetCleanupRefusesUnfundedResiduals(t *testing.T) {
+	for _, tc := range []struct {
+		name                          string
+		native, usdc, weth, allowance int64
+		refuse                        bool
+	}{
+		{"empty wallet", 0, 0, 0, 0, false}, {"funded wallet", 1, 1, 1, 1, false},
+		{"USDC remains", 0, 1, 0, 0, true}, {"WETH remains", 0, 0, 1, 0, true}, {"approval remains", 0, 0, 0, 123, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := budgetCleanupError(big.NewInt(tc.native), big.NewInt(tc.usdc), big.NewInt(tc.weth), big.NewInt(tc.allowance))
+			if tc.refuse {
+				require.ErrorContains(t, err, "zero ETH prevents cleanup")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
 
 // Test-only prototype of AllowlistModule.onInstall's ABI. The production
 // parser AND encoder reject zero today; accepting zero is not a default change

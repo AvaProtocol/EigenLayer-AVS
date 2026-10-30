@@ -3,10 +3,12 @@
 package taskengine
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -22,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -40,6 +43,7 @@ type budgetSpike struct {
 	owner, wallet        common.Address
 	salt                 *big.Int
 	readBlock            *big.Int
+	lastReceipt          *types.Receipt
 }
 
 func TestWalletBudgetFeasibilityPreflight_Sepolia(t *testing.T) {
@@ -206,14 +210,18 @@ func (f *budgetSpike) recoverFunds(t *testing.T) {
 	// Recover only this fixture's assets, to its existing owner. A small unused
 	// EntryPoint refund can remain owner-controlled; report it explicitly.
 	calls := []aa.Call{f.call(common.HexToAddress(SEPOLIA_USDC), budgetTokenCall("approve(address,uint256)", common.HexToAddress(SEPOLIA_SWAPROUTER), big.NewInt(0)))}
+	var tokenBalances []*big.Int
 	for _, token := range []common.Address{common.HexToAddress(SEPOLIA_USDC), common.HexToAddress(SEPOLIA_WETH)} {
 		balance := f.tokenBalance(t, token)
+		tokenBalances = append(tokenBalances, balance)
 		if balance.Sign() > 0 {
 			calls = append(calls, f.call(token, budgetTokenCall("transfer(address,uint256)", f.owner, balance)))
 		}
 	}
 	balance, err := f.chain.BalanceAt(f.ctx, f.wallet, f.readBlock)
 	require.NoError(t, err)
+	require.NoError(t, budgetCleanupError(balance, tokenBalances[0], tokenBalances[1], f.allowance(t)),
+		"fixture recovery incomplete: wallet=%s salt=%s; fund this owner-controlled wallet before retrying recovery", f.wallet, f.salt)
 	if balance.Sign() > 0 {
 		calls = append(calls, aa.Call{Target: f.owner, Value: balance})
 		prepared, err := preset.PrepareOwnerBatch(f.ctx, f.sw, f.owner, f.wallet, f.salt, preset.OwnerBatch{Calls: calls, ReserveNativeGas: true}, testutil.GetLogger())
@@ -222,6 +230,9 @@ func (f *budgetSpike) recoverFunds(t *testing.T) {
 		_, err = f.send(t, prepared.Operation)
 		require.NoError(t, err)
 	}
+	require.Zero(t, f.tokenBalance(t, common.HexToAddress(SEPOLIA_USDC)).Sign(), "USDC remains after recovery")
+	require.Zero(t, f.tokenBalance(t, common.HexToAddress(SEPOLIA_WETH)).Sign(), "WETH remains after recovery")
+	require.Zero(t, f.allowance(t).Sign(), "USDC router approval remains after recovery")
 	entryABI, err := abi.JSON(strings.NewReader(`[{"type":"function","name":"balanceOf","stateMutability":"view","inputs":[{"name":"account","type":"address"}],"outputs":[{"type":"uint256"}]}]`))
 	require.NoError(t, err)
 	deposit := ownerNativeEntryPointDeposit(t, f.ctx, f.chain, entryABI, f.wallet, f.readBlock)
@@ -230,8 +241,15 @@ func (f *budgetSpike) recoverFunds(t *testing.T) {
 
 func (f *budgetSpike) session(t *testing.T, entity uint32, calls []aa.Call, deferred []byte) (common.Hash, error) {
 	t.Helper()
+	return f.sessionSigningDeferred(t, entity, calls, deferred, deferred)
+}
+
+// Keep what the owner signs distinct from what the session key submits so the
+// negative test can reuse the real owner signature with stripped reset bytes.
+func (f *budgetSpike) sessionSigningDeferred(t *testing.T, entity uint32, calls []aa.Call, submittedDeferred, ownerSignedDeferred []byte) (common.Hash, error) {
+	t.Helper()
 	opts := uint8(userop.ValidationOptionGlobal)
-	if deferred != nil {
+	if submittedDeferred != nil {
 		opts |= userop.ValidationOptionDeferredAction
 	}
 	nonce, err := preset.NextNonceV07(f.ctx, f.chain.Client(), preset.EntryPointV07(), f.wallet, entity, opts)
@@ -249,9 +267,9 @@ func (f *budgetSpike) session(t *testing.T, entity uint32, calls []aa.Call, defe
 	op := &userop.UserOperationV07{Sender: f.wallet, Nonce: nonce, CallData: data,
 		CallGasLimit: big.NewInt(0), VerificationGasLimit: big.NewInt(0), PreVerificationGas: big.NewInt(0)}
 	var encoded, ownerSig []byte
-	if deferred != nil {
+	if submittedDeferred != nil {
 		deadline := uint64(time.Now().Add(10 * time.Minute).Unix())
-		digest, e := userop.DeferredActionDigest(big.NewInt(11155111), f.wallet, nonce, deadline, deferred)
+		digest, e := userop.DeferredActionDigest(big.NewInt(11155111), f.wallet, nonce, deadline, ownerSignedDeferred)
 		if e != nil {
 			return common.Hash{}, e
 		}
@@ -260,11 +278,23 @@ func (f *budgetSpike) session(t *testing.T, entity uint32, calls []aa.Call, defe
 			return common.Hash{}, e
 		}
 		ownerSig[64] += 27
-		encoded, e = userop.EncodeDeferredActionData(userop.FallbackSignerLocator(), deadline, deferred)
+		encoded, e = userop.EncodeDeferredActionData(userop.FallbackSignerLocator(), deadline, submittedDeferred)
 		if e != nil {
 			return common.Hash{}, e
 		}
-		op.Signature, e = preset.DeferredEstimationSignature(encoded, ownerSig)
+		// Price the genuinely owner-authorized batch as a positive control.
+		// For the attack test, the shorter stripped batch is installed only in
+		// the final signature below, then signed by the session key and sent
+		// to eth_sendUserOperation. A failed estimate with a dummy outer
+		// signature alone is not the signed session-key attack we want to test.
+		pricingEncoded := encoded
+		if !bytes.Equal(submittedDeferred, ownerSignedDeferred) {
+			pricingEncoded, e = userop.EncodeDeferredActionData(userop.FallbackSignerLocator(), deadline, ownerSignedDeferred)
+			if e != nil {
+				return common.Hash{}, e
+			}
+		}
+		op.Signature, e = preset.DeferredEstimationSignature(pricingEncoded, ownerSig)
 		if e != nil {
 			return common.Hash{}, e
 		}
@@ -272,7 +302,7 @@ func (f *budgetSpike) session(t *testing.T, entity uint32, calls []aa.Call, defe
 	if err = f.price(op); err != nil {
 		return common.Hash{}, err
 	}
-	if deferred != nil {
+	if submittedDeferred != nil {
 		err = preset.SignUserOpV07Deferred(op, preset.EntryPointV07(), big.NewInt(11155111), f.sessionKey, encoded, ownerSig)
 	} else {
 		err = preset.SignUserOpV07(op, preset.EntryPointV07(), big.NewInt(11155111), f.sessionKey)
@@ -317,6 +347,7 @@ func (f *budgetSpike) send(t *testing.T, op *userop.UserOperationV07) (common.Ha
 				chainReceipt, readErr := f.chain.TransactionReceipt(ctx, common.HexToHash(receipt.Receipt.TransactionHash))
 				if readErr == nil && chainReceipt != nil {
 					f.readBlock = new(big.Int).Set(chainReceipt.BlockNumber)
+					f.lastReceipt = chainReceipt
 					break
 				}
 				if readErr != nil && readErr != ethereum.NotFound {
@@ -377,6 +408,13 @@ func TestWalletBudgetApprovalMechanisms_Sepolia(t *testing.T) {
 	until := uint64(time.Now().Add(time.Hour).Unix())
 	t.Run("S1DeferredResetsAndInstall", func(t *testing.T) {
 		seed(t)
+		entrypoint := preset.EntryPointV07()
+		stakeCall := append(crypto.Keccak256([]byte("getDepositInfo(address)"))[:4], common.LeftPadBytes(f.wallet.Bytes(), 32)...)
+		stake, err := f.chain.CallContract(f.ctx, ethereum.CallMsg{To: &entrypoint, Data: stakeCall}, f.readBlock)
+		require.NoError(t, err)
+		require.Len(t, stake, 160)
+		require.Zero(t, new(big.Int).SetBytes(stake[32:64]).Sign(), "sender must not be staked")
+		require.Zero(t, new(big.Int).SetBytes(stake[64:96]).Sign(), "sender stake must be zero")
 		install := f.install(t, 101, big.NewInt(100), until, nil)
 		batch, err := aa.PackExecuteBatchMAv2([]aa.Call{approve(router, 0), f.call(f.wallet, install)})
 		require.NoError(t, err)
@@ -385,7 +423,7 @@ func TestWalletBudgetApprovalMechanisms_Sepolia(t *testing.T) {
 		require.Equal(t, "0", f.allowance(t).String())
 		f.assertEntity(t, 101, false)
 	})
-	t.Run("S1DeferredFailingResetRollsBack", func(t *testing.T) {
+	t.Run("S1DeferredFailingResetRefused", func(t *testing.T) {
 		seed(t)
 		batch, err := aa.PackExecuteBatchMAv2([]aa.Call{approve(router, 0), approve(common.Address{}, 0), f.call(f.wallet, f.install(t, 102, big.NewInt(100), until, nil))})
 		require.NoError(t, err)
@@ -396,6 +434,27 @@ func TestWalletBudgetApprovalMechanisms_Sepolia(t *testing.T) {
 		require.Equal(t, "123", f.allowance(t).String())
 		f.assertEntity(t, 102, true)
 	})
+	t.Run("S1SessionCannotStripOwnerSignedResets", func(t *testing.T) {
+		seed(t)
+		install := f.call(f.wallet, f.install(t, 107, big.NewInt(100), until, nil))
+		signed, err := aa.PackExecuteBatchMAv2([]aa.Call{approve(router, 0), install})
+		require.NoError(t, err)
+		stripped, err := aa.PackExecuteBatchMAv2([]aa.Call{install})
+		require.NoError(t, err)
+		_, err = f.sessionSigningDeferred(t, 107, []aa.Call{approve(router, 0)}, stripped, signed)
+		require.Error(t, err)
+		detail := err.Error()
+		var rpcErr rpc.DataError
+		if errors.As(err, &rpcErr) {
+			detail += " " + fmt.Sprint(rpcErr.ErrorData())
+		}
+		selector := common.Bytes2Hex(crypto.Keccak256([]byte("DeferredActionSignatureInvalid()"))[:4])
+		require.True(t, strings.Contains(detail, "DeferredActionSignatureInvalid") || strings.Contains(detail, selector),
+			"must fail the account's owner-signature check, not an unrelated RPC failure: %s", detail)
+		t.Logf("stripped-reset batch rejected by owner signature validation: %s", detail)
+		require.Equal(t, "123", f.allowance(t).String())
+		f.assertEntity(t, 107, true)
+	})
 	t.Run("S2OwnerResetsAndInstall", func(t *testing.T) {
 		seed(t)
 		_, err := f.ownerBatch(t, []aa.Call{approve(router, 0), f.call(f.wallet, f.install(t, 103, big.NewInt(100), until, nil))})
@@ -403,7 +462,7 @@ func TestWalletBudgetApprovalMechanisms_Sepolia(t *testing.T) {
 		require.Equal(t, "0", f.allowance(t).String())
 		f.assertEntity(t, 103, false)
 	})
-	t.Run("S2OwnerFailingResetRollsBack", func(t *testing.T) {
+	t.Run("S2OwnerFailingResetRefused", func(t *testing.T) {
 		seed(t)
 		_, err := f.ownerBatch(t, []aa.Call{approve(router, 0), approve(common.Address{}, 0), f.call(f.wallet, f.install(t, 104, big.NewInt(100), until, nil))})
 		require.Error(t, err)
@@ -455,13 +514,21 @@ func TestWalletBudgetApprovalMechanisms_Sepolia(t *testing.T) {
 		bad, err := aa.PackExecuteBatchMAv2([]aa.Call{approve(router, 0), install, approve(common.Address{}, 0)})
 		require.NoError(t, err)
 		op := prepared.Operation
-		op.CallData, op.CallGasLimit = bad, big.NewInt(900_000)
+		op.CallData = bad
+		// Never lower the valid control's estimate: a fixed 900k limit ran
+		// out inside installValidation and did not test the failing reset.
+		op.CallGasLimit.Add(op.CallGasLimit, big.NewInt(500_000))
 		// The failing batch is larger than the successful pricing control.
 		// Give its calldata overhead headroom BEFORE the owner signs it.
 		op.PreVerificationGas.Add(op.PreVerificationGas, big.NewInt(100_000))
 		require.NoError(t, preset.SignUserOpV07(op, preset.EntryPointV07(), big.NewInt(11155111), f.ownerKey))
-		_, err = f.send(t, op)
+		hash, err := f.send(t, op)
 		require.EqualError(t, err, "UserOperation execution reverted")
+		require.NotNil(t, f.lastReceipt)
+		reason, revertData := confirmedUserOpFailure(hash.Hex(), preset.EntryPointV07(), &waitForUserOpConfirmationResult{Receipt: f.lastReceipt})
+		require.Equal(t, "UserOperation execution reverted: ERC20: approve to the zero address", reason,
+			"a generic failure or out of gas does not prove install rollback; revertData=%s", revertData)
+		t.Logf("matched EntryPoint revert reason for %s: %s", hash, reason)
 		require.Equal(t, "123", f.allowance(t).String(), "the earlier reset must roll back")
 		f.assertEntity(t, 106, true)
 	})
@@ -514,6 +581,7 @@ func TestWalletBudgetRouterWithoutWETHWrapPermissions_Sepolia(t *testing.T) {
 	before := f.tokenBalance(t, usdc)
 	amountIn := big.NewInt(10_000_000_000_000) // 0.00001 Sepolia ETH, never increased on failure
 	var bought *big.Int
+	var nativeAfterFirst *big.Int
 	t.Run("S5ETHToToken", func(t *testing.T) {
 		data, err := multiABI.Pack("multicall", [][]byte{budgetExactInput(weth, usdc, f.wallet, amountIn), crypto.Keccak256([]byte("refundETH()"))[:4]})
 		require.NoError(t, err)
@@ -521,6 +589,10 @@ func TestWalletBudgetRouterWithoutWETHWrapPermissions_Sepolia(t *testing.T) {
 		require.NoError(t, err)
 		bought = new(big.Int).Sub(f.tokenBalance(t, usdc), before)
 		require.Positive(t, bought.Sign(), "the wallet must actually receive tokens")
+		nativeAfterFirst, err = aa.ReadNativeSpendLimit(f.ctx, budgetBlockReader{f.chain, f.readBlock}, 201, f.wallet)
+		require.NoError(t, err)
+		spent := new(big.Int).Sub(nativeCap, nativeAfterFirst)
+		require.Greater(t, spent.Cmp(amountIn), 0, "native budget must charge more than just ETH input: gas must also be charged")
 		t.Logf("received USDC base units=%s for %s wei", bought, amountIn)
 	})
 	t.Run("S5TokenToETH", func(t *testing.T) {
@@ -542,7 +614,8 @@ func TestWalletBudgetRouterWithoutWETHWrapPermissions_Sepolia(t *testing.T) {
 		require.Equal(t, wethCap.String(), remaining.String(), "no direct WETH action may be charged")
 		remainingNative, err := aa.ReadNativeSpendLimit(f.ctx, budgetBlockReader{f.chain, f.readBlock}, 201, f.wallet)
 		require.NoError(t, err)
-		require.Less(t, remainingNative.Cmp(nativeCap), 0, "native input/gas is metered separately from WETH")
+		require.NotNil(t, nativeAfterFirst)
+		require.Less(t, remainingNative.Cmp(nativeAfterFirst), 0, "zero-value token-to-ETH calls must consume native budget for gas")
 		t.Logf("finite WETH remaining=%s native remaining=%s", remaining, remainingNative)
 	})
 }
