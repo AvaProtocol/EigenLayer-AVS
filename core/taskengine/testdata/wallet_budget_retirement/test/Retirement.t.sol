@@ -3,6 +3,7 @@ pragma solidity 0.8.26;
 
 interface Vm {
     function envString(string calldata) external returns (string memory);
+    function envBytes(string calldata) external returns (bytes memory);
     function createSelectFork(string calldata) external returns (uint256);
     function addr(uint256) external returns (address);
     function prank(address) external;
@@ -70,6 +71,10 @@ interface TimeModule {
     function timeRanges(uint32, address) external view returns (uint48, uint48);
 }
 
+interface NativeModule {
+    function limits(uint256, address) external view returns (uint256);
+}
+
 interface EntryPoint {
     function getUserOpHash(PackedUserOperation calldata) external view returns (bytes32);
 }
@@ -92,6 +97,7 @@ contract RetirementTest {
     address constant SIGNER = 0x00000000000099DE0BF6fA90dEB851E2A2df7d83;
     address constant ALLOWLIST = 0x00000000003e826473A313E600b5b9B791f5a59a;
     address constant TIME = 0x00000000000082B8e2012be914dFA4f62A0573eA;
+    address constant NATIVE = 0x00000000000001e541f0D090868FBe24b59Fbe06;
     address constant ENTRYPOINT = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
     address constant TOKEN = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
     uint32 constant ENTITY = 7;
@@ -109,19 +115,9 @@ contract RetirementTest {
         address session = vm.addr(SESSION_KEY);
         Account account = Account(Factory(FACTORY).createSemiModularAccount(owner, 0xB0D6E7));
         bytes24 entity = bytes24(abi.encodePacked(SIGNER, ENTITY));
-        bytes4[] memory tokenSelectors = new bytes4[](2);
-        tokenSelectors[0] = 0xa9059cbb;
-        tokenSelectors[1] = 0x095ea7b3;
-        AllowlistInput[] memory rows = new AllowlistInput[](1);
-        rows[0] = AllowlistInput(TOKEN, true, true, 500, tokenSelectors);
-        bytes memory allowlistData = abi.encode(ENTITY, rows);
-        bytes memory timeData = abi.encode(ENTITY, uint48(block.timestamp + 1 days), uint48(0));
-        bytes[] memory hooks = new bytes[](3);
-        hooks[0] = abi.encodePacked(config(ALLOWLIST, 1), allowlistData);
-        hooks[1] = abi.encodePacked(config(ALLOWLIST, 4));
-        hooks[2] = abi.encodePacked(config(TIME, 1), timeData);
         vm.prank(owner);
-        account.installValidation(config(SIGNER, 5), new bytes4[](0), abi.encode(ENTITY, session), hooks);
+        (bool installed,) = address(account).call(vm.envBytes("WALLET_BUDGET_FORK_INSTALL"));
+        require(installed, "Go-encoded install failed");
         require(account.getValidationData(entity).validationFlags == 5, "install did not register");
 
         // A real signature is accepted before removal; this rules out a malformed
@@ -142,12 +138,10 @@ contract RetirementTest {
 
         bytes memory originalTimeCode = TIME.code;
         vm.etch(TIME, address(new RevertingCleanup()).code);
-        bytes[] memory cleanup = new bytes[](3);
-        cleanup[0] = timeData; // first in the account's stored hook order
-        cleanup[1] = allowlistData;
-        cleanup[2] = "";
+        bytes memory uninstall = vm.envBytes("WALLET_BUDGET_FORK_UNINSTALL");
         vm.prank(owner);
-        account.uninstallValidation(entity, abi.encode(ENTITY), cleanup);
+        (bool removed,) = address(account).call(uninstall);
+        require(removed, "Go-encoded uninstall failed");
         ValidationData memory gone = account.getValidationData(entity);
         require(gone.validationFlags == 0 && gone.selectors.length == 0, "registration remained");
         require(gone.validationHooks.length == 0 && gone.executionHooks.length == 0, "hooks remained");
@@ -156,6 +150,7 @@ contract RetirementTest {
             AllowlistModule(ALLOWLIST).erc20SpendLimits(ENTITY, TOKEN, address(account)) == 500,
             "missing residual limit control"
         );
+        require(NativeModule(NATIVE).limits(ENTITY, address(account)) > 0, "missing residual native limit control");
 
         vm.prank(ENTRYPOINT);
         (bool accepted, bytes memory reason) =
@@ -169,18 +164,14 @@ contract RetirementTest {
 
         vm.etch(TIME, originalTimeCode);
         vm.prank(owner);
-        (bool repeatUninstall,) =
-            address(account).call(abi.encodeCall(Account.uninstallValidation, (entity, abi.encode(ENTITY), cleanup)));
+        (bool repeatUninstall,) = address(account).call(uninstall);
         require(!repeatUninstall, "old hook list unexpectedly reusable");
         require(SignerModule(SIGNER).signers(ENTITY, address(account)) == session, "repeat uninstall cleared residue");
         // With hook lists gone, do not call account.uninstallValidation again.
         // The owner has the ACCOUNT call each module's onUninstall directly.
-        Call[] memory direct = new Call[](3);
-        direct[0] = Call(ALLOWLIST, 0, abi.encodeWithSignature("onUninstall(bytes)", allowlistData));
-        direct[1] = Call(TIME, 0, abi.encodeWithSignature("onUninstall(bytes)", abi.encode(ENTITY)));
-        direct[2] = Call(SIGNER, 0, abi.encodeWithSignature("onUninstall(bytes)", abi.encode(ENTITY)));
         vm.prank(owner);
-        account.executeBatch(direct);
+        (bool cleaned,) = address(account).call(vm.envBytes("WALLET_BUDGET_FORK_CLEANUP"));
+        require(cleaned, "Go-encoded owner module cleanup failed");
         require(SignerModule(SIGNER).signers(ENTITY, address(account)) == address(0), "signer residue remained");
         require(
             AllowlistModule(ALLOWLIST).erc20SpendLimits(ENTITY, TOKEN, address(account)) == 0, "limit residue remained"
@@ -194,5 +185,6 @@ contract RetirementTest {
         );
         (uint48 until, uint48 after_) = TimeModule(TIME).timeRanges(ENTITY, address(account));
         require(until == 0 && after_ == 0, "time residue remained");
+        require(NativeModule(NATIVE).limits(ENTITY, address(account)) == 0, "native residue remained");
     }
 }

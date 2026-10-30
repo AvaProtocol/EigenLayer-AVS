@@ -119,15 +119,13 @@ func IsStructuredError(err error) (*StructuredError, bool) {
 	return nil, false
 }
 
-// GetErrorCode extracts error code from an error, returns UNSPECIFIED if not a structured error
+// GetErrorCode prefers an explicit structured code. Only legacy text-only
+// method results fall back to the tagged permission-refusal message.
 func GetErrorCode(err error) avsproto.ErrorCode {
-	if code := permissionRefusalCode(err); code != avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED {
-		return code
-	}
 	if structErr, ok := IsStructuredError(err); ok {
 		return structErr.GetCode()
 	}
-	return avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED
+	return permissionRefusalCode(err)
 }
 
 // Contract-write method results currently carry text between the send and

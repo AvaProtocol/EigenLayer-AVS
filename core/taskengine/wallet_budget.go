@@ -19,6 +19,7 @@ import (
 )
 
 const BudgetReadUnavailableCode = "BUDGET_READ_UNAVAILABLE"
+const budgetRetirementReadTimeout = 3 * time.Second
 
 var ErrBudgetReadUnavailable = errors.New("wallet budget remainder unavailable")
 
@@ -85,37 +86,21 @@ type WalletBudget struct {
 	ReadAt               int64                     `json:"readAt"`
 }
 
-// GetWalletBudget keeps the authority lock through the read so a concurrent
-// revoke/replacement cannot mix stored metadata from different permissions.
+// GetWalletBudget snapshots stored metadata under the authority lock. Chain
+// reads use that snapshot without blocking revoke/create/send on RPC latency.
 func (n *Engine) GetWalletBudget(ctx context.Context, user *model.User, chainID int64, wallet common.Address) (*WalletBudget, error) {
 	if err := n.requireOwnedWallet(user, wallet); err != nil {
 		return nil, err
 	}
-	lock := sessionAuthorityLock(chainID, user.Address, wallet)
-	lock.RLock()
-	defer lock.RUnlock()
-	policy, err := activeSessionPolicyLocked(n.db, chainID, user.Address, wallet)
+	policy, retired, err := n.walletBudgetPolicySnapshot(chainID, user.Address, wallet)
 	if err != nil {
 		return nil, err
 	}
-	if policy == nil {
-		return nil, ErrSessionPolicyNotFound
-	}
-	all, err := ListSessionPolicies(n.db, chainID, user.Address)
-	if err != nil {
-		return nil, err
-	}
-	var retired []*model.SessionPolicy
-	for _, p := range all {
-		if p.Runner != nil && *p.Runner == wallet && p.Status == model.SessionPolicyRevoked && p.Grant.Applied() {
-			retired = append(retired, p) // TornDownAt proves registration only, not residue.
-		}
-	}
-	readCtx, cancel := context.WithTimeout(ctx, teardownVerifyTimeout)
-	defer cancel()
 	var client *ethclient.Client
 	if cfg := n.ResolveSmartWalletConfig(chainID); cfg != nil && cfg.EthRpcUrl != "" {
-		client, err = ethclient.DialContext(readCtx, cfg.EthRpcUrl)
+		dialCtx, cancel := context.WithTimeout(ctx, teardownVerifyTimeout)
+		client, err = ethclient.DialContext(dialCtx, cfg.EthRpcUrl)
+		cancel()
 		if err == nil {
 			defer client.Close()
 		}
@@ -126,7 +111,33 @@ func (n *Engine) GetWalletBudget(ctx context.Context, user *model.User, chainID 
 	if client != nil {
 		caller = client
 	}
-	return ReadWalletBudget(readCtx, policy, retired, caller, time.Now())
+	return ReadWalletBudget(ctx, policy, retired, caller, time.Now())
+}
+
+func (n *Engine) walletBudgetPolicySnapshot(chainID int64, owner, wallet common.Address) (*model.SessionPolicy, []*model.SessionPolicy, error) {
+	lock := sessionAuthorityLock(chainID, owner, wallet)
+	lock.RLock()
+	defer lock.RUnlock()
+	policy, err := activeSessionPolicyLocked(n.db, chainID, owner, wallet)
+	if err != nil {
+		return nil, nil, err
+	}
+	if policy == nil {
+		return nil, nil, ErrSessionPolicyNotFound
+	}
+	all, err := ListSessionPolicies(n.db, chainID, owner)
+	if err != nil {
+		return nil, nil, err
+	}
+	var retired []*model.SessionPolicy
+	for _, p := range all {
+		if p.Runner != nil && *p.Runner == wallet && p.Status == model.SessionPolicyRevoked && p.Grant.Applied() {
+			retired = append(retired, p) // TornDownAt proves registration only, not residue.
+		}
+	}
+	// Storage decoding returns detached records; nothing is read from them again
+	// under a different authority snapshot during this request.
+	return policy, retired, nil
 }
 
 // ReadWalletBudget is also used by the live probe against a real permission.
@@ -144,6 +155,8 @@ func ReadWalletBudget(ctx context.Context, policy *model.SessionPolicy, retired 
 	if out.Sizing == model.BudgetSizingBudget {
 		out.StartedAt = policy.BudgetStartedAt
 	}
+	remainderCtx, cancelRemainders := context.WithTimeout(ctx, teardownVerifyTimeout)
+	defer cancelRemainders()
 	for _, cap := range policyCaps(policy) {
 		if cap.Token == nil {
 			return nil, fmt.Errorf("%w: cap without token", ErrBudgetReadUnavailable)
@@ -160,7 +173,7 @@ func ReadWalletBudget(ctx context.Context, policy *model.SessionPolicy, retired 
 		}
 		remaining, err := parseBudgetAmount(total)
 		if policy.Status != model.SessionPolicyPending {
-			remaining, err = aa.ReadERC20SpendLimit(ctx, client, policy.EntityID, *cap.Token, *policy.Runner)
+			remaining, err = aa.ReadERC20SpendLimit(remainderCtx, client, policy.EntityID, *cap.Token, *policy.Runner)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%w: token %s: %v", ErrBudgetReadUnavailable, cap.Token.Hex(), err)
@@ -181,7 +194,7 @@ func ReadWalletBudget(ctx context.Context, policy *model.SessionPolicy, retired 
 		}
 		remaining, err := parseBudgetAmount(total)
 		if policy.Status != model.SessionPolicyPending {
-			remaining, err = aa.ReadNativeSpendLimit(ctx, client, policy.EntityID, *policy.Runner)
+			remaining, err = aa.ReadNativeSpendLimit(remainderCtx, client, policy.EntityID, *policy.Runner)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%w: native: %v", ErrBudgetReadUnavailable, err)
@@ -193,8 +206,16 @@ func ReadWalletBudget(ctx context.Context, policy *model.SessionPolicy, retired 
 		out.Native = &BudgetNativeRow{Amount: amount, Remaining: remaining.String(), Used: used, Unlimited: unlimited}
 		// No persisted gas breakdown exists yet. Never guess gasWei.
 	}
+	cancelRemainders()
+	// Optional retirement health has its own bounded window, after all required
+	// amounts are known. Don't cache clean entities or assume skipped ones clear.
+	retirementCtx, cancelRetirements := context.WithTimeout(ctx, budgetRetirementReadTimeout)
+	defer cancelRetirements()
 	for _, p := range retired {
-		state := inspectRetirement(ctx, client, p)
+		state := RetirementUnverified
+		if retirementCtx.Err() == nil {
+			state = inspectRetirement(retirementCtx, client, p)
+		}
 		if state == "" {
 			continue
 		}

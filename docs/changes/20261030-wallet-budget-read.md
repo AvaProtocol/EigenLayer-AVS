@@ -6,6 +6,9 @@ Implements brief 3a against Studio's contract at `a1859828d`.
 
 - `GET /wallets/{address}/budget?chainId=` uses the existing policy ownership
   check and user JWT guard, including explicit partner refusal.
+- Policy metadata is snapshotted under the authority read lock, which is released
+  before dialing or reading RPC. A blocked-RPC regression proves an authority
+  writer can proceed and the response retains its original metadata snapshot.
 - Workflow-sized permissions work immediately. Active remainders come from the
   stock Allowlist and NativeTokenLimit modules. Pending deferred permissions
   report stored totals. Used amounts never go negative; the unlimited boundary
@@ -13,6 +16,10 @@ Implements brief 3a against Studio's contract at `a1859828d`.
 - A failed remainder read returns `503 BUDGET_READ_UNAVAILABLE`. Retirement
   failures appear as `unverified` in a 200 response. Missing permissions are 404;
   ambiguous authority remains a conflict rather than choosing a grant.
+- Required remainders are read first, with their own deadline. Optional retirement
+  health then has a separate three-second window. Uninspected entities are
+  reported as unverified, never cleared. Clean states are not cached because an
+  external owner can change on-chain registration or module storage.
 - `gasWei` is absent because current records have no gas breakdown. The native
   amount still contains the combined installed limit. `liveApprovals` and
   `pendingChange` are optional and omitted until their slices exist.
@@ -53,6 +60,9 @@ Expired-permission errors retain `SESSION_POLICY_EXPIRED` and their complete
 renewal instruction through contract-write method results and REST step mapping.
 The S4 regression now asserts that behavior. Structured budget errors have
 constructors and REST field mapping; send guards will emit them in a later slice.
+An explicit structured code takes precedence over tagged legacy text. Unexpected
+Go detail values fall back to visible strings rather than silently dropping all
+details; large integer strings remain exact and reused steps clear stale details.
 
 ## Verification
 
@@ -79,6 +89,21 @@ constructors and REST field mapping; send guards will emit them in a later slice
   failure of another account uninstall using the old hook list; and successful
   owner-directed module cleanup after restoring the module code. It also passes
   when launched from the race-enabled Go suite.
+
+The updated fork consumes the Go-generated install, account uninstall and
+`ModuleCleanupFromInstall`/`PackExecuteBatchMAv2` cleanup calldata. It includes the
+NativeTokenLimit hook and checks that the native residue is nonzero after the
+failed uninstall and zero after direct cleanup. This connects the Go encoder to
+the real modules instead of using a hand-built Solidity cleanup batch. The Go
+residue reader has individual nonzero/error regressions for signer, address,
+selector, token cap, time range and native cap. Classification of actual fork
+residue through the HTTP endpoint is still not claimed; the fork proves contract
+behavior and Go-produced cleanup bytes, while classification is unit-tested.
+
+The contract's unlimited threshold is `amount >= 2^128 - 1`, including uint256 max,
+and boundary tests pin both. A stored foreign-owner permission is also covered
+by the HTTP ownership regression. Missing budget start metadata remains a 503
+failure until the later installation slice validates and persists that metadata.
 
 Reproduce opt-in checks (both require `-tags integration`):
 

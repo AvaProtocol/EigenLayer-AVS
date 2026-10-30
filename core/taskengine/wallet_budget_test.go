@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +26,12 @@ type budgetCaller func(ethereum.CallMsg) ([]byte, error)
 
 func (f budgetCaller) CallContract(_ context.Context, call ethereum.CallMsg, _ *big.Int) ([]byte, error) {
 	return f(call)
+}
+
+type budgetContextCaller func(context.Context, ethereum.CallMsg) ([]byte, error)
+
+func (f budgetContextCaller) CallContract(ctx context.Context, call ethereum.CallMsg, _ *big.Int) ([]byte, error) {
+	return f(ctx, call)
 }
 func budgetWord(n int64) []byte { return common.LeftPadBytes(big.NewInt(n).Bytes(), 32) }
 
@@ -86,6 +93,10 @@ func TestBudgetAmountsBoundaryAndCarriedTotals(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, delta >= 0, unlimited)
 	}
+	max256 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+	_, _, unlimited, err := budgetAmounts(max256.String(), max256)
+	require.NoError(t, err)
+	require.True(t, unlimited, "the contract threshold also includes uint256 max")
 	_, used, _, err := budgetAmounts("10", big.NewInt(20))
 	require.NoError(t, err)
 	require.Equal(t, "0", used)
@@ -228,6 +239,107 @@ func TestBudgetRefusalDetailsAndWrappedExpiry(t *testing.T) {
 	finalizeStep(step, false, nil, err.Error(), "")
 	require.Equal(t, avsproto.ErrorCode_SESSION_POLICY_EXPIRED, step.ErrorCode)
 	require.Contains(t, step.Error, "grant again")
+	explicit := NewStructuredError(avsproto.ErrorCode_INVALID_ADDRESS, err.Error())
+	require.Equal(t, avsproto.ErrorCode_INVALID_ADDRESS, GetErrorCode(fmt.Errorf("wrapped: %w", explicit)), "text cannot override an explicit code")
+	large := new(big.Int).Lsh(big.NewInt(1), 200)
+	finalizeStep(step, false, NewStructuredError(avsproto.ErrorCode_BUDGET_USED_UP, "refused", map[string]interface{}{
+		"needed": large, "targets": []common.Address{testTokenAddr}, "remaining": "10",
+	}), "", "")
+	require.Equal(t, large.String(), step.ErrorDetails.AsMap()["needed"])
+	require.Contains(t, step.ErrorDetails.AsMap()["targets"], testTokenAddr.Hex())
+	require.Equal(t, "10", step.ErrorDetails.AsMap()["remaining"])
+	finalizeStep(step, true, nil, "", "")
+	require.Nil(t, step.ErrorDetails, "a reused step cannot retain stale refusal details")
+}
+
+func TestWalletBudgetReleasesAuthorityLockBeforeRPC(t *testing.T) {
+	engine, db, _, owner, wallet := newPolicyTestEngine(t)
+	p := budgetPolicy()
+	p.Owner, p.Runner, p.NativeSpendCap = &owner, &wallet, nil
+	p.SessionSigner = &owner
+	p.Grant = &model.SessionGrantAuthorization{InstallCall: []byte{1}, OwnerSignature: []byte{1}, CarrierNonce: big.NewInt(1), AppliedAt: 1}
+	require.NoError(t, StoreSessionPolicy(db, p))
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	rpc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID interface{} `json:"id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+			return
+		}
+		close(entered)
+		<-release
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": req.ID, "result": "0x" + common.Bytes2Hex(budgetWord(380))})
+	}))
+	defer rpc.Close()
+	defer unblock()
+	engine.config.SmartWallet.EthRpcUrl = rpc.URL
+	type result struct {
+		budget *WalletBudget
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		b, err := engine.GetWalletBudget(context.Background(), &model.User{Address: owner}, testPolicyChain, wallet)
+		done <- result{b, err}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("budget RPC did not start")
+	}
+	changed := make(chan error, 1)
+	go func() {
+		lock := sessionAuthorityLock(testPolicyChain, owner, wallet)
+		lock.Lock()
+		defer lock.Unlock()
+		p.ERC20SpendCap.GrantedCap = "900"
+		changed <- StoreSessionPolicy(db, p)
+	}()
+	select {
+	case err := <-changed:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("authority writer blocked on the budget RPC")
+	}
+	unblock()
+	got := <-done
+	require.NoError(t, got.err)
+	require.Equal(t, "500", got.budget.ERC20[0].Amount, "the request keeps its detached metadata snapshot")
+}
+
+func TestWalletBudgetRetirementDeadlineDoesNotBlockAmounts(t *testing.T) {
+	current, retired := budgetPolicy(), budgetPolicy()
+	retired.EntityID, retired.Status = 7, model.SessionPolicyRevoked
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	amountCalls, retirementCalls := 0, 0
+	caller := budgetContextCaller(func(callCtx context.Context, call ethereum.CallMsg) ([]byte, error) {
+		deadline, ok := callCtx.Deadline()
+		require.True(t, ok)
+		if *call.To != *retired.Runner {
+			amountCalls++
+			require.Greater(t, time.Until(deadline), budgetRetirementReadTimeout)
+			return budgetWord(100), nil
+		}
+		retirementCalls++
+		require.Equal(t, 2, amountCalls, "required balances are read before optional retirement health")
+		require.LessOrEqual(t, time.Until(deadline), budgetRetirementReadTimeout)
+		cancel()
+		return nil, context.DeadlineExceeded
+	})
+	budget, err := ReadWalletBudget(ctx, current, []*model.SessionPolicy{retired, retired}, caller, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, "100", budget.ERC20[0].Remaining)
+	require.Equal(t, "100", budget.Native.Remaining)
+	require.Equal(t, 1, retirementCalls, "no more RPCs after the retirement context ends")
+	require.Len(t, budget.Retirements, 2)
+	for _, row := range budget.Retirements {
+		require.Equal(t, RetirementUnverified, row.State)
+	}
 }
 
 // Stored synthetic entities in the supersede unit test are registered by this

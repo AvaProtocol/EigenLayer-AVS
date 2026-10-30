@@ -78,8 +78,33 @@ func TestWalletBudgetRetirementCleanup_SepoliaFork(t *testing.T) {
 	require.EqualValues(t, 11155111, cfg.SmartWallet.ChainID)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
+	// Feed the actual Go encoders' bytes into the fork. The fixture must not
+	// prove cleanup using a separately hand-written Solidity batch.
+	const entity = uint32(7)
+	token := common.HexToAddress(SEPOLIA_USDC)
+	sessionKey, err := crypto.HexToECDSA(strings.Repeat("0", 60) + "0b0b") // fork-only key, matching SESSION_KEY
+	require.NoError(t, err)
+	permissions := SessionPermissions{
+		AllowedActions: []model.AllowedAction{{Target: &token, Selectors: []string{"0xa9059cbb", "0x095ea7b3"}}},
+		SpendCap:       &model.ERC20SpendCap{Token: &token, Amount: "500"},
+		NativeSpendCap: &model.NativeSpendCap{Amount: "1000000000000000000"},
+		ValidUntilMs:   time.Now().Add(24 * time.Hour).UnixMilli(),
+	}
+	hooks, err := permissions.HooksFor(entity)
+	require.NoError(t, err)
+	install, err := aa.PackSessionSignerInstall(aa.SessionGrant{EntityID: entity, Signer: crypto.PubkeyToAddress(sessionKey.PublicKey), Global: true, Hooks: hooks})
+	require.NoError(t, err)
+	uninstall, err := aa.SessionSignerUninstallFromInstall(entity, install)
+	require.NoError(t, err)
+	calls, err := aa.ModuleCleanupFromInstall(entity, install)
+	require.NoError(t, err)
+	cleanup, err := aa.PackExecuteBatchMAv2(calls)
+	require.NoError(t, err)
 	command := exec.CommandContext(ctx, forge, "test", "--root", "testdata/wallet_budget_retirement", "--match-test", "testRetirementAfterFailingHook", "-vv")
-	command.Env = append(os.Environ(), "WALLET_BUDGET_FORK_RPC_URL="+cfg.SmartWallet.EthRpcUrl)
+	command.Env = append(os.Environ(), "WALLET_BUDGET_FORK_RPC_URL="+cfg.SmartWallet.EthRpcUrl,
+		"WALLET_BUDGET_FORK_INSTALL=0x"+common.Bytes2Hex(install),
+		"WALLET_BUDGET_FORK_UNINSTALL=0x"+common.Bytes2Hex(uninstall),
+		"WALLET_BUDGET_FORK_CLEANUP=0x"+common.Bytes2Hex(cleanup))
 	out, err := command.CombinedOutput()
 	log := strings.ReplaceAll(string(out), cfg.SmartWallet.EthRpcUrl, "[Sepolia RPC]")
 	t.Log(log)
