@@ -173,7 +173,11 @@ func finalizeStep(step *avsproto.Execution_Step, success bool, err error, errorM
 	if err == nil && !success && strings.TrimSpace(errorMessage) != "" {
 		// Create a structured error with INVALID_REQUEST code for validation errors
 		// This ensures proper error code propagation to the response
-		err = NewInvalidRequestError(errorMessage)
+		if code := permissionRefusalCode(fmt.Errorf("%s", errorMessage)); code != avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED {
+			err = NewStructuredError(code, errorMessage)
+		} else {
+			err = NewInvalidRequestError(errorMessage)
+		}
 	}
 
 	step.EndAt = time.Now().UnixMilli()
@@ -181,6 +185,9 @@ func finalizeStep(step *avsproto.Execution_Step, success bool, err error, errorM
 	if err != nil {
 		step.Error = err.Error()
 		step.ErrorCode = GetErrorCode(err)
+		if structured, ok := IsStructuredError(err); ok && len(structured.Details) != 0 {
+			step.ErrorDetails, _ = structpb.NewStruct(structured.Details)
+		}
 	} else if !success {
 		// If step failed but no error was provided, use errorMessage directly
 		// This ensures error message is always set when step fails

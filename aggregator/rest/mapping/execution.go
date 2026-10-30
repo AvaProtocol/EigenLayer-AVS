@@ -205,6 +205,13 @@ func protoExecutionStepToOpenAPI(in *avsproto.Execution_Step) (generated.Executi
 	if code := in.GetErrorCode().String(); code != "" && code != "ERROR_CODE_UNSPECIFIED" {
 		out.ErrorCode = &code
 	}
+	if details := in.GetErrorDetails(); details != nil {
+		var mapped generated.ExecutionStep_ErrorDetails
+		if err := protoRetargetJSON(details, &mapped); err != nil {
+			return out, fmt.Errorf("errorDetails: %w", err)
+		}
+		out.ErrorDetails = &mapped
+	}
 	if v := in.GetLog(); v != "" {
 		out.Log = &v
 	}

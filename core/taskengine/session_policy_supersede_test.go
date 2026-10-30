@@ -525,6 +525,8 @@ func TestReplacingAnAppliedGrantBatchesItsTeardown(t *testing.T) {
 // Storage supersede still collapses usable to one; the batch clears the chain.
 func TestStackedInstalledGrantsBatchAllTeardowns(t *testing.T) {
 	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	rpc := budgetRegistrationRPC(t)
+	engine.config.SmartWallet.EthRpcUrl = rpc.URL
 
 	seedUsablePolicy(t, db, owner, wallet, "01stackedaaaaaaaaaaaaaaaaa", 1)
 	seedUsablePolicy(t, db, owner, wallet, "01stackedbbbbbbbbbbbbbbbbb", 2)

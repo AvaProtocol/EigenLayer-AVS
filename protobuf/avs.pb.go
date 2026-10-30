@@ -358,6 +358,9 @@ const (
 	ErrorCode_USER_OP_CONFIRMATION_UNRESOLVED ErrorCode = 4006 // Submission may still confirm; do not blindly retry
 	ErrorCode_USER_OP_EXECUTION_REVERTED      ErrorCode = 4007 // Confirmed outer transaction or inner operation reverted
 	ErrorCode_WRITE_PREREQUISITE_FAILED       ErrorCode = 4008 // Write skipped because an upstream write did not succeed
+	ErrorCode_SESSION_POLICY_EXPIRED          ErrorCode = 4009 // The permission ended; owner must renew it
+	ErrorCode_BUDGET_USED_UP                  ErrorCode = 4010 // error_details: token, needed, remaining
+	ErrorCode_BUDGET_ENDED                    ErrorCode = 4011 // error_details: validUntil (unix milliseconds)
 	// 5000-5999: External Service errors
 	ErrorCode_RPC_NODE_ERROR     ErrorCode = 5000 // Blockchain RPC node error
 	ErrorCode_TENDERLY_API_ERROR ErrorCode = 5001 // Tenderly simulation error
@@ -410,6 +413,9 @@ var (
 		4006: "USER_OP_CONFIRMATION_UNRESOLVED",
 		4007: "USER_OP_EXECUTION_REVERTED",
 		4008: "WRITE_PREREQUISITE_FAILED",
+		4009: "SESSION_POLICY_EXPIRED",
+		4010: "BUDGET_USED_UP",
+		4011: "BUDGET_ENDED",
 		5000: "RPC_NODE_ERROR",
 		5001: "TENDERLY_API_ERROR",
 		5002: "TOKEN_LOOKUP_ERROR",
@@ -455,6 +461,9 @@ var (
 		"USER_OP_CONFIRMATION_UNRESOLVED": 4006,
 		"USER_OP_EXECUTION_REVERTED":      4007,
 		"WRITE_PREREQUISITE_FAILED":       4008,
+		"SESSION_POLICY_EXPIRED":          4009,
+		"BUDGET_USED_UP":                  4010,
+		"BUDGET_ENDED":                    4011,
 		"RPC_NODE_ERROR":                  5000,
 		"TENDERLY_API_ERROR":              5001,
 		"TOKEN_LOOKUP_ERROR":              5002,
@@ -9807,13 +9816,14 @@ type Execution_Step struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// Unified type field - can be trigger type (MANUAL, BLOCK, etc) or node type (CUSTOM_CODE, REST_API, etc)
-	Type      string    `protobuf:"bytes,17,opt,name=type,proto3" json:"type,omitempty"`
-	Name      string    `protobuf:"bytes,18,opt,name=name,proto3" json:"name,omitempty"`
-	Success   bool      `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
-	Error     string    `protobuf:"bytes,13,opt,name=error,proto3" json:"error,omitempty"`
-	ErrorCode ErrorCode `protobuf:"varint,31,opt,name=error_code,json=errorCode,proto3,enum=aggregator.ErrorCode" json:"error_code,omitempty"`
-	Log       string    `protobuf:"bytes,12,opt,name=log,proto3" json:"log,omitempty"`
-	Inputs    []string  `protobuf:"bytes,16,rep,name=inputs,proto3" json:"inputs,omitempty"`
+	Type         string           `protobuf:"bytes,17,opt,name=type,proto3" json:"type,omitempty"`
+	Name         string           `protobuf:"bytes,18,opt,name=name,proto3" json:"name,omitempty"`
+	Success      bool             `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
+	Error        string           `protobuf:"bytes,13,opt,name=error,proto3" json:"error,omitempty"`
+	ErrorCode    ErrorCode        `protobuf:"varint,31,opt,name=error_code,json=errorCode,proto3,enum=aggregator.ErrorCode" json:"error_code,omitempty"`
+	ErrorDetails *structpb.Struct `protobuf:"bytes,32,opt,name=error_details,json=errorDetails,proto3" json:"error_details,omitempty"` // Structured refusal fields, absent on historical steps
+	Log          string           `protobuf:"bytes,12,opt,name=log,proto3" json:"log,omitempty"`
+	Inputs       []string         `protobuf:"bytes,16,rep,name=inputs,proto3" json:"inputs,omitempty"`
 	// Configuration data that was set on this trigger/node
 	Config *structpb.Value `protobuf:"bytes,19,opt,name=config,proto3" json:"config,omitempty"`
 	// Optional structured metadata for testing/debugging; not consumed by subsequent nodes
@@ -9923,6 +9933,13 @@ func (x *Execution_Step) GetErrorCode() ErrorCode {
 		return x.ErrorCode
 	}
 	return ErrorCode_ERROR_CODE_UNSPECIFIED
+}
+
+func (x *Execution_Step) GetErrorDetails() *structpb.Struct {
+	if x != nil {
+		return x.ErrorDetails
+	}
+	return nil
 }
 
 func (x *Execution_Step) GetLog() string {
@@ -10524,7 +10541,7 @@ const file_avs_proto_rawDesc = "" +
 	"customCode\x123\n" +
 	"\abalance\x18\x13 \x01(\v2\x17.aggregator.BalanceNodeH\x00R\abalance\x12-\n" +
 	"\x05await\x18\x14 \x01(\v2\x15.aggregator.AwaitNodeH\x00R\x05awaitB\v\n" +
-	"\ttask_type\"\xa4\x10\n" +
+	"\ttask_type\"\xe2\x10\n" +
 	"\tExecution\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\bstart_at\x18\x02 \x01(\x03R\astartAt\x12\x15\n" +
@@ -10542,7 +10559,7 @@ const file_avs_proto_rawDesc = "" +
 	"\asummary\x18\r \x01(\v2\x16.google.protobuf.ValueR\asummary\x12\x1f\n" +
 	"\vworkflow_id\x18\x0e \x01(\tR\n" +
 	"workflowId\x120\n" +
-	"\x05steps\x18\b \x03(\v2\x1a.aggregator.Execution.StepR\x05steps\x1a\x94\f\n" +
+	"\x05steps\x18\b \x03(\v2\x1a.aggregator.Execution.StepR\x05steps\x1a\xd2\f\n" +
 	"\x04Step\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x11 \x01(\tR\x04type\x12\x12\n" +
@@ -10550,7 +10567,8 @@ const file_avs_proto_rawDesc = "" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x14\n" +
 	"\x05error\x18\r \x01(\tR\x05error\x124\n" +
 	"\n" +
-	"error_code\x18\x1f \x01(\x0e2\x15.aggregator.ErrorCodeR\terrorCode\x12\x10\n" +
+	"error_code\x18\x1f \x01(\x0e2\x15.aggregator.ErrorCodeR\terrorCode\x12<\n" +
+	"\rerror_details\x18  \x01(\v2\x17.google.protobuf.StructR\ferrorDetails\x12\x10\n" +
 	"\x03log\x18\f \x01(\tR\x03log\x12\x16\n" +
 	"\x06inputs\x18\x10 \x03(\tR\x06inputs\x12.\n" +
 	"\x06config\x18\x13 \x01(\v2\x16.google.protobuf.ValueR\x06config\x122\n" +
@@ -11047,7 +11065,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x0fLANG_JAVASCRIPT\x10\x01\x12\r\n" +
 	"\tLANG_JSON\x10\x02\x12\x10\n" +
 	"\fLANG_GRAPHQL\x10\x03\x12\x13\n" +
-	"\x0fLANG_HANDLEBARS\x10\x04*\xf7\b\n" +
+	"\x0fLANG_HANDLEBARS\x10\x04*\xbc\t\n" +
 	"\tErrorCode\x12\x1a\n" +
 	"\x16ERROR_CODE_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\fUNAUTHORIZED\x10\xe8\a\x12\x0e\n" +
@@ -11074,7 +11092,10 @@ const file_avs_proto_rawDesc = "" +
 	"\x15SECRET_ALREADY_EXISTS\x10\xa5\x1f\x12$\n" +
 	"\x1fUSER_OP_CONFIRMATION_UNRESOLVED\x10\xa6\x1f\x12\x1f\n" +
 	"\x1aUSER_OP_EXECUTION_REVERTED\x10\xa7\x1f\x12\x1e\n" +
-	"\x19WRITE_PREREQUISITE_FAILED\x10\xa8\x1f\x12\x13\n" +
+	"\x19WRITE_PREREQUISITE_FAILED\x10\xa8\x1f\x12\x1b\n" +
+	"\x16SESSION_POLICY_EXPIRED\x10\xa9\x1f\x12\x13\n" +
+	"\x0eBUDGET_USED_UP\x10\xaa\x1f\x12\x11\n" +
+	"\fBUDGET_ENDED\x10\xab\x1f\x12\x13\n" +
 	"\x0eRPC_NODE_ERROR\x10\x88'\x12\x17\n" +
 	"\x12TENDERLY_API_ERROR\x10\x89'\x12\x17\n" +
 	"\x12TOKEN_LOOKUP_ERROR\x10\x8a'\x12\x15\n" +
@@ -11276,6 +11297,7 @@ var file_avs_proto_goTypes = []any{
 	nil,                                                   // 145: aggregator.SimulateTaskReq.InputVariablesEntry
 	nil,                                                   // 146: aggregator.EstimateFeesReq.InputVariablesEntry
 	(*structpb.Value)(nil),                                // 147: google.protobuf.Value
+	(*structpb.Struct)(nil),                               // 148: google.protobuf.Struct
 }
 var file_avs_proto_depIdxs = []int32{
 	9,   // 0: aggregator.GetTokenMetadataResp.token:type_name -> aggregator.TokenMetadata
@@ -11443,36 +11465,37 @@ var file_avs_proto_depIdxs = []int32{
 	3,   // 162: aggregator.LoopNode.Config.execution_mode:type_name -> aggregator.ExecutionMode
 	147, // 163: aggregator.LoopNode.Output.data:type_name -> google.protobuf.Value
 	5,   // 164: aggregator.Execution.Step.error_code:type_name -> aggregator.ErrorCode
-	147, // 165: aggregator.Execution.Step.config:type_name -> google.protobuf.Value
-	147, // 166: aggregator.Execution.Step.metadata:type_name -> google.protobuf.Value
-	147, // 167: aggregator.Execution.Step.execution_context:type_name -> google.protobuf.Value
-	100, // 168: aggregator.Execution.Step.block_trigger:type_name -> aggregator.BlockTrigger.Output
-	96,  // 169: aggregator.Execution.Step.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
-	98,  // 170: aggregator.Execution.Step.cron_trigger:type_name -> aggregator.CronTrigger.Output
-	104, // 171: aggregator.Execution.Step.event_trigger:type_name -> aggregator.EventTrigger.Output
-	106, // 172: aggregator.Execution.Step.manual_trigger:type_name -> aggregator.ManualTrigger.Output
-	110, // 173: aggregator.Execution.Step.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
-	121, // 174: aggregator.Execution.Step.graphql:type_name -> aggregator.GraphQLQueryNode.Output
-	118, // 175: aggregator.Execution.Step.contract_read:type_name -> aggregator.ContractReadNode.Output
-	113, // 176: aggregator.Execution.Step.contract_write:type_name -> aggregator.ContractWriteNode.Output
-	127, // 177: aggregator.Execution.Step.custom_code:type_name -> aggregator.CustomCodeNode.Output
-	124, // 178: aggregator.Execution.Step.rest_api:type_name -> aggregator.RestAPINode.Output
-	134, // 179: aggregator.Execution.Step.branch:type_name -> aggregator.BranchNode.Output
-	136, // 180: aggregator.Execution.Step.filter:type_name -> aggregator.FilterNode.Output
-	138, // 181: aggregator.Execution.Step.loop:type_name -> aggregator.LoopNode.Output
-	129, // 182: aggregator.Execution.Step.balance:type_name -> aggregator.BalanceNode.Output
-	147, // 183: aggregator.Task.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	147, // 184: aggregator.CreateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	147, // 185: aggregator.TriggerTaskReq.TriggerInputEntry.value:type_name -> google.protobuf.Value
-	147, // 186: aggregator.RunNodeWithInputsReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	147, // 187: aggregator.RunTriggerReq.TriggerInputEntry.value:type_name -> google.protobuf.Value
-	147, // 188: aggregator.SimulateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	147, // 189: aggregator.EstimateFeesReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	190, // [190:190] is the sub-list for method output_type
-	190, // [190:190] is the sub-list for method input_type
-	190, // [190:190] is the sub-list for extension type_name
-	190, // [190:190] is the sub-list for extension extendee
-	0,   // [0:190] is the sub-list for field type_name
+	148, // 165: aggregator.Execution.Step.error_details:type_name -> google.protobuf.Struct
+	147, // 166: aggregator.Execution.Step.config:type_name -> google.protobuf.Value
+	147, // 167: aggregator.Execution.Step.metadata:type_name -> google.protobuf.Value
+	147, // 168: aggregator.Execution.Step.execution_context:type_name -> google.protobuf.Value
+	100, // 169: aggregator.Execution.Step.block_trigger:type_name -> aggregator.BlockTrigger.Output
+	96,  // 170: aggregator.Execution.Step.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
+	98,  // 171: aggregator.Execution.Step.cron_trigger:type_name -> aggregator.CronTrigger.Output
+	104, // 172: aggregator.Execution.Step.event_trigger:type_name -> aggregator.EventTrigger.Output
+	106, // 173: aggregator.Execution.Step.manual_trigger:type_name -> aggregator.ManualTrigger.Output
+	110, // 174: aggregator.Execution.Step.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
+	121, // 175: aggregator.Execution.Step.graphql:type_name -> aggregator.GraphQLQueryNode.Output
+	118, // 176: aggregator.Execution.Step.contract_read:type_name -> aggregator.ContractReadNode.Output
+	113, // 177: aggregator.Execution.Step.contract_write:type_name -> aggregator.ContractWriteNode.Output
+	127, // 178: aggregator.Execution.Step.custom_code:type_name -> aggregator.CustomCodeNode.Output
+	124, // 179: aggregator.Execution.Step.rest_api:type_name -> aggregator.RestAPINode.Output
+	134, // 180: aggregator.Execution.Step.branch:type_name -> aggregator.BranchNode.Output
+	136, // 181: aggregator.Execution.Step.filter:type_name -> aggregator.FilterNode.Output
+	138, // 182: aggregator.Execution.Step.loop:type_name -> aggregator.LoopNode.Output
+	129, // 183: aggregator.Execution.Step.balance:type_name -> aggregator.BalanceNode.Output
+	147, // 184: aggregator.Task.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	147, // 185: aggregator.CreateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	147, // 186: aggregator.TriggerTaskReq.TriggerInputEntry.value:type_name -> google.protobuf.Value
+	147, // 187: aggregator.RunNodeWithInputsReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	147, // 188: aggregator.RunTriggerReq.TriggerInputEntry.value:type_name -> google.protobuf.Value
+	147, // 189: aggregator.SimulateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	147, // 190: aggregator.EstimateFeesReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	191, // [191:191] is the sub-list for method output_type
+	191, // [191:191] is the sub-list for method input_type
+	191, // [191:191] is the sub-list for extension type_name
+	191, // [191:191] is the sub-list for extension extendee
+	0,   // [0:191] is the sub-list for field type_name
 }
 
 func init() { file_avs_proto_init() }

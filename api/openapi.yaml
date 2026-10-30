@@ -1536,6 +1536,15 @@ components:
         success: { type: boolean }
         error: { type: string }
         errorCode: { type: string }
+        errorDetails:
+          type: object
+          properties:
+            token: { $ref: '#/components/schemas/EthereumAddress' }
+            needed: { type: string }
+            remaining: { type: string }
+            validUntil: { type: integer, format: int64 }
+          additionalProperties: true
+          description: Structured refusal fields. BUDGET_USED_UP has token/needed/remaining; BUDGET_ENDED has validUntil.
         log: { type: string }
         inputs:
           type: array
@@ -2534,6 +2543,15 @@ components:
           $ref: '#/components/schemas/EthereumAddress'
         agentLabel: { type: string }
         justification: { type: string }
+        sizing:
+          allOf:
+            - $ref: '#/components/schemas/BudgetSizing'
+          description: Absent means workflow sizing. Budget fields are additive and not written yet.
+        budgetStartedAt: { type: integer, format: int64 }
+        budgetStartAmounts:
+          type: array
+          items: { $ref: '#/components/schemas/Erc20SpendCap' }
+        budgetStartNative: { $ref: '#/components/schemas/NativeSpendCap' }
         allowedActions:
           type: array
           items: { $ref: '#/components/schemas/AllowedAction' }
@@ -2579,6 +2597,107 @@ components:
             Present when status is revoked and the validation entity is still
             installed on chain. Owner-executable uninstallValidation so clients
             can finish teardown without re-calling DELETE (#717).
+
+    BudgetSizing:
+      type: string
+      enum: [workflow, budget]
+
+    BudgetTokenRow:
+      type: object
+      required: [token, amount, remaining, used, unlimited]
+      properties:
+        token: { $ref: '#/components/schemas/EthereumAddress' }
+        amount: { type: string }
+        remaining: { type: string }
+        used: { type: string }
+        unlimited: { type: boolean }
+
+    BudgetNativeRow:
+      type: object
+      required: [amount, remaining, used, unlimited]
+      properties:
+        amount: { type: string }
+        remaining: { type: string }
+        used: { type: string }
+        unlimited: { type: boolean }
+        gasWei:
+          type: string
+          description: Recorded gas reserve inside amount. Omitted when the stored breakdown is unknown; never reconstructed.
+
+    UnmeteredPermission:
+      type: object
+      required: [kind, target, selectors, added]
+      properties:
+        kind:
+          type: string
+          enum: [aave_withdraw, aave_borrow, wrapped_native, other]
+        target: { $ref: '#/components/schemas/EthereumAddress' }
+        selectors:
+          type: array
+          items: { type: string }
+        token: { $ref: '#/components/schemas/EthereumAddress' }
+        added: { type: boolean }
+
+    BudgetRetirement:
+      type: object
+      required: [entityId, state]
+      properties:
+        entityId: { type: integer, format: int64 }
+        policyId: { $ref: '#/components/schemas/Ulid' }
+        state:
+          type: string
+          enum: [registered, residual, unverified]
+        erc20:
+          type: array
+          items: { $ref: '#/components/schemas/Erc20SpendCap' }
+          description: Remaining limits of an entity confirmed registered; absent otherwise.
+        native: { $ref: '#/components/schemas/NativeSpendCap' }
+
+    LiveApproval:
+      type: object
+      required: [token, spender, amount]
+      properties:
+        token: { $ref: '#/components/schemas/EthereumAddress' }
+        spender: { $ref: '#/components/schemas/EthereumAddress' }
+        amount: { type: string }
+
+    WalletBudget:
+      type: object
+      required: [chainId, policyId, status, sizing, validUntil, erc20, unmeteredPermissions, readAt]
+      properties:
+        chainId: { $ref: '#/components/schemas/ChainId' }
+        policyId: { $ref: '#/components/schemas/Ulid' }
+        status:
+          type: string
+          enum: [pending, active]
+        sizing: { $ref: '#/components/schemas/BudgetSizing' }
+        validUntil: { type: integer, format: int64 }
+        startedAt: { type: integer, format: int64 }
+        erc20:
+          type: array
+          items: { $ref: '#/components/schemas/BudgetTokenRow' }
+        native: { $ref: '#/components/schemas/BudgetNativeRow' }
+        unmeteredPermissions:
+          type: array
+          items: { $ref: '#/components/schemas/UnmeteredPermission' }
+        retirements:
+          type: array
+          items: { $ref: '#/components/schemas/BudgetRetirement' }
+        liveApprovals:
+          type: array
+          items: { $ref: '#/components/schemas/LiveApproval' }
+          description: Reserved for approval discovery; omitted in this slice, not an assertion that no approvals exist.
+        pendingChange:
+          type: object
+          required: [policyId, state]
+          properties:
+            policyId: { $ref: '#/components/schemas/Ulid' }
+            state:
+              type: string
+              enum: [prepared, submitting, submitted, reverted, rejected, unsent, superseded]
+            reason: { type: string }
+          description: Reserved for stored budget preparations; omitted in this slice.
+        readAt: { type: integer, format: int64 }
 
     SubmitPolicyResponse:
       allOf:
@@ -3906,6 +4025,51 @@ paths:
             not be read from the chain. Nothing was stored. Retry submit with
             the same signature before its signing window expires; no new
             prepare or owner signature is needed unless that window expires.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /wallets/{address}/budget:
+    get:
+      tags: [Wallets]
+      summary: Read the current permission's remaining token and native limits
+      operationId: getWalletBudget
+      description: |
+        User JWT only; partner assertions are refused. Works for workflow-sized
+        permissions too. Pending deferred installs report stored totals with
+        status pending. Active limits are read on chain; a failed remainder read
+        is 503, never a stored-value fallback. Retirement read failures appear
+        as unverified entries in an otherwise successful response.
+      parameters:
+        - name: address
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/EthereumAddress' }
+        - $ref: '#/components/parameters/ChainIdQuery'
+      responses:
+        '200':
+          description: Current limits and retirement health
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WalletBudget' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No current permission for this wallet and chain
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '409':
+          description: More than one current permission; authority is ambiguous
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503':
+          description: BUDGET_READ_UNAVAILABLE — a remainder could not be read
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }

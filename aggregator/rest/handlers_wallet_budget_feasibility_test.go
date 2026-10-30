@@ -100,19 +100,17 @@ func TestWalletBudgetManualWorkflowWithoutEndDateOverHTTP(t *testing.T) {
 		var failed map[string]interface{}
 		require.NoError(t, json.Unmarshal(refused.Body.Bytes(), &failed))
 		require.Equal(t, "failed", failed["status"], refused.Body.String())
-		// Characterize the known phase 1 gap explicitly. When budget verdicts
-		// fix it, update these assertions to require the actionable message.
+		// The execution result must preserve the refusal code AND recovery copy.
 		steps, ok := failed["steps"].([]interface{})
 		require.True(t, ok)
 		require.NotEmpty(t, steps)
 		last, ok := steps[len(steps)-1].(map[string]interface{})
 		require.True(t, ok)
-		require.Equal(t, "INVALID_REQUEST", last["errorCode"])
+		require.Equal(t, taskengine.SessionPolicyExpiredCode, last["errorCode"])
 		message, ok := last["error"].(string)
 		require.True(t, ok)
 		require.Contains(t, message, taskengine.SessionPolicyExpiredCode)
-		require.True(t, len(message) >= 3 && message[len(message)-3:] == "...", message)
-		require.NotContains(t, message, "grant again")
-		t.Log("S4 GAP asserted: truncated expiry message omits the renewal instruction")
+		require.NotContains(t, message, "...")
+		require.Contains(t, message, "grant again")
 	})
 }
