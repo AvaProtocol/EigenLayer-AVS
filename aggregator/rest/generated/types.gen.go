@@ -2613,7 +2613,9 @@ type WalletBudgetStatus string
 
 // WalletBudgetInput defines model for WalletBudgetInput.
 type WalletBudgetInput struct {
-	// Erc20 Owner totals, not the on-chain remainder. Tokens may appear only once.
+	// Erc20 Owner totals, not the on-chain remainder. Tokens may appear only
+	// once. Plain raises/extensions carry omitted totals unchanged;
+	// startNewTotals requires every existing capped token total.
 	Erc20  *[]Erc20SpendCap `json:"erc20,omitempty"`
 	Native *NativeSpendCap  `json:"native,omitempty"`
 

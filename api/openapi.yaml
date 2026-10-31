@@ -2627,9 +2627,16 @@ components:
         erc20:
           type: array
           items: { $ref: '#/components/schemas/Erc20SpendCap' }
-          description: Owner totals, not the on-chain remainder. Tokens may appear only once.
+          description: |
+            Owner totals, not the on-chain remainder. Tokens may appear only
+            once. Plain raises/extensions carry omitted totals unchanged;
+            startNewTotals requires every existing capped token total.
         native:
           $ref: '#/components/schemas/NativeSpendCap'
+          description: |
+            Combined ETH total, including earlier gas additions. A plain
+            raise/extension may omit it; startNewTotals must include it when
+            the current permission has a native cap.
         validUntil:
           type: integer
           format: int64

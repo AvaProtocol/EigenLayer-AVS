@@ -15,6 +15,9 @@ import (
 
 // BudgetMergeInput contains the trusted remainder snapshot and the owner's
 // unsigned intent. Pricing supplies GasHeadroom; clients never choose it here.
+// GasHeadroom is newly added wei, not a target reserve or an existing allowance.
+// Native owner totals and StartNative already include all earlier gas additions.
+// Repeating a prepare uses the same base snapshot, never its prior unsigned draft.
 type BudgetMergeInput struct {
 	Current     *model.SessionPolicy
 	Remainder   *GrantRemainder

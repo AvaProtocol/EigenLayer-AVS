@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"reflect"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -91,6 +92,9 @@ func CheckBudgetSpend(ctx context.Context, in BudgetSpendCheck) error {
 		tokens = append(tokens, model.ERC20SpendCap{Token: &copyToken})
 	}
 	sortSpendCaps(tokens)
+	if (len(tokens) > 0 || p.NativeSpendCap != nil) && nilBudgetDependency(in.Caller) {
+		return budgetRPCRefusal(fmt.Errorf("no contract reader"))
+	}
 	for _, token := range tokens {
 		left, err := aa.ReadERC20SpendLimit(readCtx, in.Caller, p.EntityID, *token.Token, *p.Runner)
 		if err != nil {
@@ -110,7 +114,7 @@ func CheckBudgetSpend(ctx context.Context, in BudgetSpendCheck) error {
 	if !in.Native.Sponsored {
 		gas := in.Native.EstimatedGas
 		if gas == nil {
-			if in.FeeReader == nil {
+			if nilBudgetDependency(in.FeeReader) {
 				return budgetRPCRefusal(fmt.Errorf("no native fee reader"))
 			}
 			fee, err := in.FeeReader.MaxFeePerGas(readCtx)
@@ -131,4 +135,19 @@ func CheckBudgetSpend(ctx context.Context, in BudgetSpendCheck) error {
 		return NewBudgetUsedUpError(budgetNativeToken, native, left)
 	}
 	return nil
+}
+
+// Interface fields may contain a nil pointer or function even when != nil.
+// Refuse before invoking them so a missing RPC dependency stays a typed error.
+func nilBudgetDependency(value interface{}) bool {
+	if value == nil {
+		return true
+	}
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
 }

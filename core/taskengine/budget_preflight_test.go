@@ -9,6 +9,7 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/require"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
@@ -64,7 +65,10 @@ func TestBudgetPreflightUsesActualBatchSpendAndRemaining(t *testing.T) {
 func TestBudgetPreflightReadFailuresAndExpiryFailClosed(t *testing.T) {
 	p, _ := semanticsBudget()
 	p.NativeSpendCap = nil
-	for _, caller := range []aa.ContractCaller{nil, budgetCaller(func(ethereum.CallMsg) ([]byte, error) { return nil, errors.New("RPC down") }), budgetCaller(func(ethereum.CallMsg) ([]byte, error) { return nil, nil })} {
+	var noEthClient *ethclient.Client
+	var noChainReader *directChainStateReader
+	var noFunction budgetCaller
+	for _, caller := range []aa.ContractCaller{nil, noEthClient, noChainReader, noFunction, budgetCaller(func(ethereum.CallMsg) ([]byte, error) { return nil, errors.New("RPC down") }), budgetCaller(func(ethereum.CallMsg) ([]byte, error) { return nil, nil })} {
 		err := CheckBudgetSpend(context.Background(), BudgetSpendCheck{Policy: p, Calls: []PlannedCall{budgetCall(10, false)}, Caller: caller})
 		require.Equal(t, avsproto.ErrorCode_RPC_NODE_ERROR, GetErrorCode(err))
 		require.Contains(t, err.Error(), BudgetReadUnavailableCode)
@@ -75,6 +79,16 @@ func TestBudgetPreflightReadFailuresAndExpiryFailClosed(t *testing.T) {
 	require.ErrorAs(t, err, &refusal)
 	require.Equal(t, avsproto.ErrorCode_BUDGET_ENDED, refusal.Code)
 	require.Equal(t, p.ValidUntil, refusal.Details["validUntil"])
+}
+
+func TestBudgetNativeTypedNilFeeReaderFailsClosed(t *testing.T) {
+	p, _ := semanticsBudget()
+	var reader *codeAndFee
+	err := CheckBudgetSpend(context.Background(), BudgetSpendCheck{Policy: p,
+		Caller:    budgetCaller(func(ethereum.CallMsg) ([]byte, error) { return budgetWord(100), nil }),
+		FeeReader: reader, Calls: []PlannedCall{{Value: big.NewInt(1)}}, Native: NativeIntent{Kind: NativeSend}})
+	require.Equal(t, avsproto.ErrorCode_RPC_NODE_ERROR, GetErrorCode(err))
+	require.Contains(t, err.Error(), BudgetReadUnavailableCode)
 }
 
 func TestBudgetNativePreflightCountsGasAgainstRemaining(t *testing.T) {

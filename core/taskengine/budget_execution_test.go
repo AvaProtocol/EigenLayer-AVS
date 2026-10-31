@@ -137,3 +137,48 @@ func TestBudgetETHNodeRefusalSurvivesStepFinalization(t *testing.T) {
 		require.Zero(t, unexpected.Load())
 	}
 }
+
+func TestBudgetTypedNilReaderStopsRemainingMethods(t *testing.T) {
+	engine, db, key, owner, wallet := newPolicyTestEngine(t)
+	p, _ := grantOn(t, engine, key, owner, wallet)
+	p.Sizing, p.Status = model.BudgetSizingBudget, model.SessionPolicyActive
+	p.Grant.AppliedAt = 1
+	require.NoError(t, StoreSessionPolicy(db, p))
+	old := GetChainStateReaderForChain(uint64(p.ChainID))
+	var reader *directChainStateReader
+	RegisterChainStateReader(uint64(p.ChainID), reader)
+	t.Cleanup(func() {
+		unregisterChainStateReader(uint64(p.ChainID))
+		RegisterChainStateReader(uint64(p.ChainID), old)
+	})
+	vm, err := NewVMWithData(nil, nil, &config.SmartWalletConfig{ChainID: p.ChainID, EthRpcUrl: "http://127.0.0.1:1"}, nil)
+	require.NoError(t, err)
+	vm.db, vm.TaskOwner = db, owner
+	vm.SetSimulation(true)
+	data := approveCalldataHex(testRouterAddr, 100)
+	node := &avsproto.TaskNode{Id: "pay", Name: "pay", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE, TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{Config: &avsproto.ContractWriteNode_Config{ChainId: p.ChainID, ContractAddress: testTokenAddr.Hex(), MethodCalls: []*avsproto.ContractWriteNode_MethodCall{{MethodName: "approve", CallData: &data}, {MethodName: "approve", CallData: &data}}}}}}
+	step, err := vm.RunNodeWithInputs(node, map[string]interface{}{"aa_sender": wallet.Hex(), "settings": map[string]interface{}{"chain_id": p.ChainID}})
+	require.NoError(t, err)
+	require.False(t, step.Success)
+	require.Equal(t, avsproto.ErrorCode_RPC_NODE_ERROR, step.ErrorCode, step.Error)
+	require.Contains(t, step.Error, BudgetReadUnavailableCode)
+	require.Len(t, stepResults(t, step), 1, "a failed budget read stops the following method")
+}
+
+func TestLegacyContractInputValidationPrecedesGrantCoverage(t *testing.T) {
+	engine, db, key, owner, wallet := newPolicyTestEngine(t)
+	p, _ := grantOn(t, engine, key, owner, wallet)
+	other := common.HexToAddress("0x9999")
+	p.AllowedActions = []model.AllowedAction{{Target: &other, Selectors: []string{selectorApprove}}}
+	require.NoError(t, StoreSessionPolicy(db, p))
+	vm, err := NewVMWithData(nil, nil, &config.SmartWalletConfig{ChainID: p.ChainID, EthRpcUrl: "http://127.0.0.1:1"}, nil)
+	require.NoError(t, err)
+	vm.db, vm.TaskOwner = db, owner
+	data := approveCalldataHex(common.Address{}, 100)
+	node := &avsproto.TaskNode{Id: "pay", Name: "pay", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE, TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{Config: &avsproto.ContractWriteNode_Config{ChainId: p.ChainID, ContractAddress: testTokenAddr.Hex(), MethodCalls: []*avsproto.ContractWriteNode_MethodCall{{MethodName: "approve", CallData: &data}}}}}}
+	step, err := vm.RunNodeWithInputs(node, map[string]interface{}{"aa_sender": wallet.Hex(), "settings": map[string]interface{}{"chain_id": p.ChainID}})
+	require.NoError(t, err)
+	require.False(t, step.Success)
+	require.Contains(t, step.Error, "approve: spender address is zero")
+	require.NotContains(t, step.Error, "SESSION_POLICY_TARGET_NOT_ALLOWED")
+}

@@ -17,12 +17,23 @@ An explicit owner total takes precedence over a same-token addition. Enabled
 Skills contribute actions, recipients and end dates, never run-count-sized caps.
 Unchanged rows, used amounts and the original budget start time carry forward.
 
+Native `amount` is the combined total, including earlier gas additions.
+`GasHeadroom` is an explicit increment of newly priced wei, not a target reserve
+and not a request to add the old allowance again. Repeating prepare against the
+same base is idempotent. After activation, a later explicit gas increment grows
+both the total and the remaining amount by only that increment, preserving used.
+The future review must display that combined result, and an editor must prefill
+the combined total returned by the budget read. With no gas increment, repeating
+that total does not grow it. The two-merge regression pins those cases.
+
 Change/Renew (`startNewTotals`) requires explicit totals for **every existing
 capped token and ETH**. An omitted total is rejected rather than silently reset.
 This includes zero totals. The new period's timestamp is assigned at submit and
 becomes visible only after successful activation; composition leaves it unset.
 Lowering a total, shortening the end, or turning an existing uncapped spending
 right into a cap requires that explicit owner change.
+Plain raises/extensions may omit token and ETH totals; omitted rows carry their
+existing total and live remainder unchanged. This is separate from Change/Renew.
 
 Disable (`removeActions` without new totals) only removes the named selectors.
 It cannot add enabled workflows' rights, gas headroom, recipients or time. All
@@ -54,7 +65,10 @@ approve and transfer charge their full amounts, summed within one atomic batch.
 Native checks count value and self-funded gas; sponsored operations count value.
 Exhausted and ended budgets report `BUDGET_USED_UP` (token, needed, remaining)
 and `BUDGET_ENDED` (validUntil) through method results and the execution step.
-An RPC failure refuses execution. A refused sequential method stops later calls.
+An RPC failure refuses execution. Budget refusals stop later sequential methods;
+unrelated future error codes do not change the legacy sequential behavior.
+Input validation retains its legacy priority before the single-call permission
+preflight. Nil and typed-nil RPC dependencies return a budget read refusal.
 
 ## Signing remains disabled
 
@@ -65,6 +79,16 @@ Legacy full replacement of an existing budget returns
 `409 BUDGET_REPLACE_REFUSED`, including when `basePolicyId` was omitted. Both
 prepare and submit check this under the wallet's authority lock. Non-budget
 wallets keep their existing behavior.
+
+The production call-site trace found only the two policy HTTP handlers calling
+`PrepareSessionPolicy`/`SubmitSessionPolicy`, including the colon-action shims.
+Their `add` input is the shared create-or-update path for Skill, Auto and MCP
+callers; it is refused on a budget by the same guard. The low-level
+`PrepareSessionGrant` builder has only the two guarded Engine call sites, and
+`SubmitSessionGrant` has only the guarded Engine submit caller. No alternate
+production builder or signing route bypasses those checks. The HTTP regression
+covers a full request with no base, an additive request, and an old signed submit
+after the wallet is marked as a budget, including an expired budget.
 
 Slices 3c/3d must add stored priced preparations, signature-only submission,
 approval discovery and atomic resets, durable holds and reconciliation, owner

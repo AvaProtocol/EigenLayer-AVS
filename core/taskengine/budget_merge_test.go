@@ -101,6 +101,88 @@ func TestBudgetOwnerResetRequiresEveryExistingTotal(t *testing.T) {
 	}
 }
 
+func TestBudgetGasHeadroomIsAnExplicitIncrementAcrossMerges(t *testing.T) {
+	p, rem := semanticsBudget()
+	owner := budgetOwnerInput(p, "1000")
+	in := BudgetMergeInput{Current: p, Remainder: rem, Budget: owner, ChainID: p.ChainID, GasHeadroom: big.NewInt(25)}
+	first, err := MergeBudgetPolicy(in)
+	require.NoError(t, err)
+	require.Equal(t, "1025", first.StartNative.Amount)
+	require.Equal(t, "425", first.Permissions.NativeSpendCap.Amount)
+	// Preparing again from the same live base cannot compound a draft's gas.
+	repeated, err := MergeBudgetPolicy(in)
+	require.NoError(t, err)
+	require.Equal(t, first, repeated)
+
+	// Model activation, then 100 wei of spending. The next owner input is the
+	// combined total shown by the budget read, including the earlier 25 wei.
+	p.NativeSpendCap, p.BudgetStartNative = first.Permissions.NativeSpendCap, first.StartNative
+	rem.Native = big.NewInt(325)
+	owner.Native = &model.NativeSpendCap{Amount: first.StartNative.Amount}
+	in.GasHeadroom = big.NewInt(5) // newly priced wei, not the previous reserve
+	second, err := MergeBudgetPolicy(in)
+	require.NoError(t, err)
+	require.Equal(t, "1030", second.StartNative.Amount)
+	require.Equal(t, "330", second.Permissions.NativeSpendCap.Amount)
+	amount, _ := new(big.Int).SetString(second.StartNative.Amount, 10)
+	left, _ := new(big.Int).SetString(second.Permissions.NativeSpendCap.Amount, 10)
+	require.Equal(t, "700", new(big.Int).Sub(amount, left).String())
+	require.Equal(t, p.BudgetStartedAt, second.StartedAt)
+
+	in.GasHeadroom = nil
+	unchanged, err := MergeBudgetPolicy(in)
+	require.NoError(t, err)
+	require.Equal(t, "1025", unchanged.StartNative.Amount)
+	require.Equal(t, "325", unchanged.Permissions.NativeSpendCap.Amount)
+	owner.Native.Amount = "1000" // an old pre-gas value is a lower total
+	_, err = MergeBudgetPolicy(in)
+	var refusal *BudgetPolicyError
+	require.ErrorAs(t, err, &refusal)
+	require.Equal(t, BudgetNarrowingCode, refusal.Code)
+}
+
+func TestBudgetPlainRaiseCarriesOmittedTokenAndNativeTotals(t *testing.T) {
+	for _, nativeOnly := range []bool{false, true} {
+		p, rem := semanticsBudget()
+		other := common.HexToAddress("0x9999")
+		p.ERC20SpendCaps = []model.ERC20SpendCap{*p.ERC20SpendCap, {Token: &other, Amount: "50"}}
+		p.ERC20SpendCap = nil
+		p.BudgetStartAmounts = append(p.BudgetStartAmounts, model.ERC20SpendCap{Token: &other, Amount: "500"})
+		rem.ERC20[other] = big.NewInt(50)
+		owner := &WalletBudgetInput{ValidUntil: p.ValidUntil}
+		if nativeOnly {
+			owner.Native = &model.NativeSpendCap{Amount: "1500"}
+		} else {
+			owner.ERC20 = []model.ERC20SpendCap{{Token: &testTokenAddr, Amount: "1500"}}
+		}
+		draft, err := MergeBudgetPolicy(BudgetMergeInput{Current: p, Remainder: rem, Budget: owner, ChainID: p.ChainID})
+		require.NoError(t, err)
+		for _, cap := range draft.Permissions.SpendCaps {
+			want := "50"
+			if *cap.Token == testTokenAddr {
+				want = "900"
+				if nativeOnly {
+					want = "400"
+				}
+			}
+			require.Equal(t, want, cap.Amount)
+		}
+		if nativeOnly {
+			require.Equal(t, "1500", draft.StartNative.Amount)
+			require.Equal(t, "900", draft.Permissions.NativeSpendCap.Amount)
+		} else {
+			require.Equal(t, "1000", draft.StartNative.Amount)
+			require.Equal(t, "400", draft.Permissions.NativeSpendCap.Amount)
+		}
+		require.Equal(t, p.BudgetStartedAt, draft.StartedAt)
+		owner.StartNewTotals = true
+		_, err = MergeBudgetPolicy(BudgetMergeInput{Current: p, Remainder: rem, Budget: owner, ChainID: p.ChainID})
+		var refusal *BudgetPolicyError
+		require.ErrorAs(t, err, &refusal)
+		require.Equal(t, BudgetInvalidInputCode, refusal.Code, "the same partial request is not a complete Change/Renew")
+	}
+}
+
 func TestBudgetMigrationKeepsUnlimitedAndStartsNewUsage(t *testing.T) {
 	p, rem := semanticsBudget()
 	p.Sizing = model.BudgetSizingWorkflow

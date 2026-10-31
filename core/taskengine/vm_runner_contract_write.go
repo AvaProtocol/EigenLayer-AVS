@@ -958,18 +958,6 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		transactionValue = parsedValue
 	}
 
-	// Session allowlist preflight (single call) — same as atomic batch.
-	if refusal := r.preflightSessionGrantError([]PlannedCall{{
-		Target:   contractAddress,
-		Selector: SelectorFromCalldata(callDataBytes),
-		Label:    methodName,
-		Value:    transactionValue,
-		Calldata: callDataBytes,
-	}}); refusal != nil {
-		executionLogBuilder.WriteString(refusal.Error() + "\n")
-		return contractMethodRefusal(methodName, refusal)
-	}
-
 	// 🔍 PRE-FLIGHT VALIDATION: Check for common failure scenarios before gas estimation
 	if validationErr := r.validateTransactionBeforeGasEstimation(methodName, callData, callDataBytes, contractAddress); validationErr != nil {
 		executionLogBuilder.WriteString(fmt.Sprintf("PRE-FLIGHT VALIDATION FAILED: %v\n", validationErr))
@@ -983,6 +971,19 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 			Success: false,
 			Error:   fmt.Sprintf("Pre-flight validation failed: %v", validationErr),
 		}
+	}
+
+	// Keep input validation ahead of permission checks, as on the legacy path.
+	// Both still run before any gas estimation or submission.
+	if refusal := r.preflightSessionGrantError([]PlannedCall{{
+		Target:   contractAddress,
+		Selector: SelectorFromCalldata(callDataBytes),
+		Label:    methodName,
+		Value:    transactionValue,
+		Calldata: callDataBytes,
+	}}); refusal != nil {
+		executionLogBuilder.WriteString(refusal.Error() + "\n")
+		return contractMethodRefusal(methodName, refusal)
 	}
 
 	// Create smart wallet execute calldata: execute(target, value, data)
@@ -1144,7 +1145,11 @@ func (r *ContractWriteProcessor) preflightSessionGrantError(planned []PlannedCal
 
 	if isWalletBudget(policy) {
 		if report == nil {
-			if err := CheckBudgetSpend(context.Background(), BudgetSpendCheck{Policy: policy, Calls: planned, Caller: r.client, FeeReader: r.nativeCodeAndFee(), Native: NativeIntent{Kind: NativeValue, Sponsored: sponsoredFromConfig(r.smartWalletConfig)}}); err != nil {
+			var feeReader CodeAndFeeReader
+			if !nilBudgetDependency(r.client) {
+				feeReader = r.nativeCodeAndFee()
+			}
+			if err := CheckBudgetSpend(context.Background(), BudgetSpendCheck{Policy: policy, Calls: planned, Caller: r.client, FeeReader: feeReader, Native: NativeIntent{Kind: NativeValue, Sponsored: sponsoredFromConfig(r.smartWalletConfig)}}); err != nil {
 				return err
 			}
 		}
@@ -2208,7 +2213,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		}
 
 		results = append(results, result)
-		if result.ErrorCode != avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED {
+		if isBudgetMethodRefusal(result) {
 			break
 		}
 
@@ -2617,6 +2622,23 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 func contractMethodRefusal(name string, err error) *avsproto.ContractWriteNode_MethodResult {
 	return &avsproto.ContractWriteNode_MethodResult{MethodName: name, Success: false, Error: err.Error(), ErrorCode: GetErrorCode(err), ErrorDetails: structuredErrorDetails(err)}
+}
+
+// Only budget refusals terminate the remaining methods here. Other coded
+// errors retain the existing sequential behavior; adding a code is not itself
+// an instruction to stop the rest of the node.
+func isBudgetMethodRefusal(result *avsproto.ContractWriteNode_MethodResult) bool {
+	if result == nil || result.Success {
+		return false
+	}
+	switch result.ErrorCode {
+	case avsproto.ErrorCode_BUDGET_USED_UP, avsproto.ErrorCode_BUDGET_ENDED:
+		return true
+	case avsproto.ErrorCode_RPC_NODE_ERROR:
+		return strings.HasPrefix(result.Error, BudgetReadUnavailableCode+":")
+	default:
+		return false
+	}
 }
 
 // promoteRawLogFields copies Tenderly's nested raw address, topics, and data
