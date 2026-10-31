@@ -105,6 +105,15 @@ and boundary tests pin both. A stored foreign-owner permission is also covered
 by the HTTP ownership regression. Missing budget start metadata remains a 503
 failure until the later installation slice validates and persists that metadata.
 
+CI also exposed three existing synthetic-grant fixtures in the stacked-grant
+repair and Skill carry tests. They marked entities applied in storage but left
+registration reads pointed at the ordinary RPC, which correctly returns empty
+data for their synthetic account. Those tests now use the deterministic full
+registration-reply fixture. All three failures were reproduced before the fix
+and pass with the race detector afterward; no production read check was relaxed.
+The full `core/taskengine` suite also passes with `-race -short`: 2,166 passing
+tests/subtests and ten skipped checks, in 199.59 seconds.
+
 Reproduce opt-in checks (both require `-tags integration`):
 
 ```sh
