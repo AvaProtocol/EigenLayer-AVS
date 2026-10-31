@@ -431,18 +431,14 @@ func (r *ContractWriteProcessor) executeMethodCall(
 				simValue = parsed
 			}
 		}
-		if msg := r.preflightSessionGrantCoverage([]PlannedCall{{
+		if refusal := r.preflightSessionGrantError([]PlannedCall{{
 			Target:   contractAddress,
 			Selector: SelectorFromCalldata(calldata),
 			Label:    methodName,
 			Value:    simValue,
 			Calldata: calldata,
-		}}); msg != "" {
-			return &avsproto.ContractWriteNode_MethodResult{
-				MethodName: methodName,
-				Success:    false,
-				Error:      msg,
-			}
+		}}); refusal != nil {
+			return contractMethodRefusal(methodName, refusal)
 		}
 
 		// Use shared Tenderly client from VM
@@ -977,20 +973,17 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		}
 	}
 
-	// Session allowlist preflight (single call) — same as atomic batch.
-	if msg := r.preflightSessionGrantCoverage([]PlannedCall{{
+	// Keep input validation ahead of permission checks, as on the legacy path.
+	// Both still run before any gas estimation or submission.
+	if refusal := r.preflightSessionGrantError([]PlannedCall{{
 		Target:   contractAddress,
 		Selector: SelectorFromCalldata(callDataBytes),
 		Label:    methodName,
 		Value:    transactionValue,
 		Calldata: callDataBytes,
-	}}); msg != "" {
-		executionLogBuilder.WriteString(msg + "\n")
-		return &avsproto.ContractWriteNode_MethodResult{
-			Success:    false,
-			Error:      msg,
-			MethodName: methodName,
-		}
+	}}); refusal != nil {
+		executionLogBuilder.WriteString(refusal.Error() + "\n")
+		return contractMethodRefusal(methodName, refusal)
 	}
 
 	// Create smart wallet execute calldata: execute(target, value, data)
@@ -1073,15 +1066,22 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 // Skips when: no smart wallet config, no db, no aa_sender, no usable policy, or the policy
 // has empty AllowedActions (legacy / incomplete records).
 func (r *ContractWriteProcessor) preflightSessionGrantCoverage(planned []PlannedCall) string {
+	if err := r.preflightSessionGrantError(planned); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func (r *ContractWriteProcessor) preflightSessionGrantError(planned []PlannedCall) error {
 	if r == nil || r.smartWalletConfig == nil {
-		return ""
+		return nil
 	}
 	if r.vm == nil || r.vm.db == nil || len(planned) == 0 {
-		return ""
+		return nil
 	}
 	sender := getAASenderAddress(r.vm)
 	if sender == nil {
-		return ""
+		return nil
 	}
 	chainID := r.smartWalletConfig.ChainID
 	if chainID <= 0 {
@@ -1095,7 +1095,7 @@ func (r *ContractWriteProcessor) preflightSessionGrantCoverage(planned []Planned
 	if err != nil {
 		// Storage / multi-grant errors should fail closed with a clear message.
 		// Report mode does not swallow a lookup failure.
-		return fmt.Sprintf("SESSION_POLICY_LOOKUP_FAILED: %v", err)
+		return fmt.Errorf("SESSION_POLICY_LOOKUP_FAILED: %v", err)
 	}
 	if report != nil {
 		report.notePolicy(policy)
@@ -1104,19 +1104,27 @@ func (r *ContractWriteProcessor) preflightSessionGrantCoverage(planned []Planned
 		if report != nil {
 			report.noteNoGrant()
 		}
-		return ""
+		return nil
+	}
+	if isWalletBudget(policy) && len(policy.AllowedActions) == 0 {
+		msg := FormatSessionPolicyTargetNotAllowed(planned, policy.ID)
+		if report != nil {
+			report.noteGrantMiss(msg, planned)
+			return nil
+		}
+		return NewInvalidRequestError(msg)
 	}
 	if len(policy.AllowedActions) == 0 {
 		if len(policy.NativeRecipients) == 0 {
-			return ""
+			return nil
 		}
 		// Native-only grant: every contractWrite is outside the allowlist.
 		msg := FormatSessionPolicyTargetNotAllowed(planned, policy.ID)
 		if report != nil {
 			report.noteGrantMiss(msg, planned)
-			return ""
+			return nil
 		}
-		return msg
+		return fmt.Errorf("%s", msg)
 	}
 	missing := MissingGrantCalls(policy.AllowedActions, planned)
 	if len(missing) > 0 {
@@ -1130,13 +1138,25 @@ func (r *ContractWriteProcessor) preflightSessionGrantCoverage(planned []Planned
 		msg := FormatSessionPolicyTargetNotAllowed(missing, policy.ID)
 		if report != nil {
 			report.noteGrantMiss(msg, planned)
-			return ""
+			return nil
 		}
-		return msg
+		return fmt.Errorf("%s", msg)
 	}
 
+	if isWalletBudget(policy) {
+		if report == nil {
+			var feeReader CodeAndFeeReader
+			if !nilBudgetDependency(r.client) {
+				feeReader = r.nativeCodeAndFee()
+			}
+			if err := CheckBudgetSpend(context.Background(), BudgetSpendCheck{Policy: policy, Calls: planned, Caller: r.client, FeeReader: feeReader, Native: NativeIntent{Kind: NativeValue, Sponsored: sponsoredFromConfig(r.smartWalletConfig)}}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	if policy.NativeSpendCap == nil {
-		return ""
+		return nil
 	}
 	sum := big.NewInt(0)
 	for _, c := range planned {
@@ -1151,9 +1171,12 @@ func (r *ContractWriteProcessor) preflightSessionGrantCoverage(planned []Planned
 	}, r.nativeCodeAndFee())
 	if report != nil && msg != "" {
 		report.noteGrantMiss(msg, planned)
-		return ""
+		return nil
 	}
-	return msg
+	if msg == "" {
+		return nil
+	}
+	return fmt.Errorf("%s", msg)
 }
 
 func (r *ContractWriteProcessor) nativeCodeAndFee() CodeAndFeeReader {
@@ -1367,9 +1390,13 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 			Calldata: datas[i],
 		}
 	}
-	if msg := r.preflightSessionGrantCoverage(planned); msg != "" {
-		log.WriteString(msg + "\n")
-		return failAll(msg, nil)
+	if refusal := r.preflightSessionGrantError(planned); refusal != nil {
+		log.WriteString(refusal.Error() + "\n")
+		out := failAll(refusal.Error(), nil)
+		for i := range out {
+			out[i] = contractMethodRefusal(methodNames[i], refusal)
+		}
+		return out
 	}
 
 	// Pack the atomic batch. MA v2's executeBatch carries a value per call.
@@ -2186,6 +2213,9 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		}
 
 		results = append(results, result)
+		if isBudgetMethodRefusal(result) {
+			break
+		}
 
 		if result.Success {
 			// If we have a receipt, include compact bundler request/response notes
@@ -2275,6 +2305,12 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			"methodName": methodResult.MethodName,
 			"success":    methodResult.Success,
 			"error":      methodResult.Error,
+		}
+		if methodResult.ErrorCode != avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED {
+			resultMap["errorCode"] = methodResult.ErrorCode.String()
+			if methodResult.ErrorDetails != nil {
+				resultMap["errorDetails"] = methodResult.ErrorDetails.AsMap()
+			}
 		}
 
 		// Add methodABI if available
@@ -2571,7 +2607,38 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// Provide values for deferred finalization
 	finalizeSuccess = stepSuccess
 	finalizeErrorMsg = stepErrorMsg
+	for _, result := range results {
+		if result.ErrorCode != avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED {
+			var details map[string]interface{}
+			if result.ErrorDetails != nil {
+				details = result.ErrorDetails.AsMap()
+			}
+			err = NewStructuredError(result.ErrorCode, result.Error, details)
+			break
+		}
+	}
 	return s, nil
+}
+
+func contractMethodRefusal(name string, err error) *avsproto.ContractWriteNode_MethodResult {
+	return &avsproto.ContractWriteNode_MethodResult{MethodName: name, Success: false, Error: err.Error(), ErrorCode: GetErrorCode(err), ErrorDetails: structuredErrorDetails(err)}
+}
+
+// Only budget refusals terminate the remaining methods here. Other coded
+// errors retain the existing sequential behavior; adding a code is not itself
+// an instruction to stop the rest of the node.
+func isBudgetMethodRefusal(result *avsproto.ContractWriteNode_MethodResult) bool {
+	if result == nil || result.Success {
+		return false
+	}
+	switch result.ErrorCode {
+	case avsproto.ErrorCode_BUDGET_USED_UP, avsproto.ErrorCode_BUDGET_ENDED:
+		return true
+	case avsproto.ErrorCode_RPC_NODE_ERROR:
+		return strings.HasPrefix(result.Error, BudgetReadUnavailableCode+":")
+	default:
+		return false
+	}
 }
 
 // promoteRawLogFields copies Tenderly's nested raw address, topics, and data

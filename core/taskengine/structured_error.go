@@ -142,8 +142,7 @@ func permissionRefusalCode(err error) avsproto.ErrorCode {
 	return avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED
 }
 
-// Constructors are available for later budget send guards. This slice emits
-// neither budget refusal; the details stay structured through the step result.
+// Budget send guards keep refusal details structured through the step result.
 func NewBudgetUsedUpError(token common.Address, needed, remaining *big.Int) *StructuredError {
 	return NewStructuredError(avsproto.ErrorCode_BUDGET_USED_UP, "The token budget is used up. Change the budget to continue.",
 		map[string]interface{}{"token": token.Hex(), "needed": needed.String(), "remaining": remaining.String()})

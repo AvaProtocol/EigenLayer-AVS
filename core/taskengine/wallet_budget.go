@@ -258,6 +258,14 @@ func originalCap(amount, granted string) string {
 }
 
 func parseBudgetAmount(raw string) (*big.Int, error) {
+	if raw == "" {
+		return nil, fmt.Errorf("%w: missing stored amount", ErrBudgetReadUnavailable)
+	}
+	for _, digit := range raw {
+		if digit < '0' || digit > '9' {
+			return nil, fmt.Errorf("%w: amount must be a decimal integer", ErrBudgetReadUnavailable)
+		}
+	}
 	value, ok := new(big.Int).SetString(raw, 10)
 	if !ok || value.Sign() < 0 || value.BitLen() > 256 {
 		return nil, fmt.Errorf("%w: invalid stored amount", ErrBudgetReadUnavailable)

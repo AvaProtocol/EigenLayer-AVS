@@ -243,11 +243,13 @@ type PolicyChanges struct {
 
 // SessionAuthorization is the opt-in simulate verdict.
 type SessionAuthorization struct {
-	Status   string
-	PolicyID string
-	Missing  []model.AllowedAction
-	Required *WorkflowNeed
-	Detail   string
+	Status        string
+	PolicyID      string
+	Missing       []model.AllowedAction
+	MissingTokens []common.Address
+	NeedsUntil    int64
+	Required      *WorkflowNeed
+	Detail        string
 }
 
 // SimulateAuth travels on the simulate context. Report false leaves the
@@ -975,6 +977,9 @@ func BuildAuthorization(policy *model.SessionPolicy, need *WorkflowNeed, report 
 	repPolicy, noGrant, saw, missingCalls, nativeMiss, nativeDetail, tokenSpend, nativeSpend, planned := report.snapshot()
 	if policy == nil {
 		policy = repPolicy
+	}
+	if isWalletBudget(policy) {
+		return BuildBudgetAuthorization(BudgetAuthorizationInput{Policy: policy, Need: need, Report: report, Schedule: sched})
 	}
 	if (need == nil || !need.HasFundMove) && !saw {
 		return &SessionAuthorization{Status: AuthCovered}
@@ -2778,7 +2783,12 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 		if chain == chainID || len(needs) == 1 {
 			chainReport = report
 		}
-		got := BuildAuthorization(policy, need, chainReport, sched)
+		var got *SessionAuthorization
+		if isWalletBudget(policy) {
+			got = n.buildBudgetAuthorization(policy, task.Task, settings, chainReport, sched)
+		} else {
+			got = BuildAuthorization(policy, need, chainReport, sched)
+		}
 		// BuildAuthorization judges coverage only. A grant made for a signer
 		// this gateway no longer holds cannot execute, so it is no usable
 		// grant: the client's grant step, with the same requirement.

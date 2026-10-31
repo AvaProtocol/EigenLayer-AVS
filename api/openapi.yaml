@@ -2102,6 +2102,14 @@ components:
         missingActions:
           type: array
           items: { $ref: '#/components/schemas/AllowedAction' }
+        missingTokens:
+          type: array
+          description: Budget mode only. Spending tokens that need a new budget row.
+          items: { $ref: '#/components/schemas/EthereumAddress' }
+        needsUntil:
+          type: integer
+          format: int64
+          description: Budget mode only. The recurring workflow end that exceeds the budget end, in Unix milliseconds.
         required:
           $ref: '#/components/schemas/SessionPolicyNeed'
         detail:
@@ -2110,8 +2118,9 @@ components:
     SessionPolicyNeed:
       type: object
       description: |
-        Permissions one workflow still needs, sized to the runs it has left.
-        Cap amounts are totals in the token's smallest unit, not per-run amounts.
+        Permissions one workflow still needs. Workflow mode sizes the remaining
+        runs. Budget mode reports one run and never sizes the wallet budget from
+        this need. Cap amounts are in the token's smallest unit.
       properties:
         allowedActions:
           type: array
@@ -2279,6 +2288,13 @@ components:
       type: object
       required: [chainId, agentLabel, expiresInSeconds]
       properties:
+        budget:
+          $ref: '#/components/schemas/WalletBudgetInput'
+          description: |
+            Owner totals, independent of workflow run counts. Budget signing
+            requires the stored owner-operation handoff. Until that path is
+            implemented this input returns 409 BUDGET_HANDOFF_REQUIRED and
+            never produces a legacy deferred-install signature.
         chainId: { $ref: '#/components/schemas/ChainId' }
         agentLabel:
           type: string
@@ -2445,6 +2461,12 @@ components:
       type: object
       required: [chainId, policyId, entityId, deadline, validUntil, agentLabel, signature]
       properties:
+        budget:
+          $ref: '#/components/schemas/WalletBudgetInput'
+          description: |
+            Not accepted by this stateless submit route. Presence returns
+            409 BUDGET_HANDOFF_REQUIRED. Budget signatures must continue a
+            stored preparation on the signature-only owner-operation route.
         chainId: { $ref: '#/components/schemas/ChainId' }
         policyId: { $ref: '#/components/schemas/Ulid' }
         entityId:
@@ -2597,6 +2619,39 @@ components:
             Present when status is revoked and the validation entity is still
             installed on chain. Owner-executable uninstallValidation so clients
             can finish teardown without re-calling DELETE (#717).
+
+    WalletBudgetInput:
+      type: object
+      required: [validUntil]
+      properties:
+        erc20:
+          type: array
+          items: { $ref: '#/components/schemas/Erc20SpendCap' }
+          description: |
+            Owner totals, not the on-chain remainder. Tokens may appear only
+            once. Plain raises/extensions carry omitted totals unchanged;
+            startNewTotals requires every existing capped token total.
+        native:
+          $ref: '#/components/schemas/NativeSpendCap'
+          description: |
+            Combined ETH total, including earlier gas additions. A plain
+            raise/extension may omit it; startNewTotals must include it when
+            the current permission has a native cap.
+        validUntil:
+          type: integer
+          format: int64
+          minimum: 1
+        startNewTotals:
+          type: boolean
+          default: false
+          description: |
+            Owner Change/Renew budget. Requires an explicit total for every
+            existing capped token and the native cap; partial resets are
+            refused. Starts usage counting again when activation succeeds.
+        removeActions:
+          type: array
+          items: { $ref: '#/components/schemas/AllowedAction' }
+          description: Owner-only removal of named selectors. Other rows and totals are retained.
 
     BudgetSizing:
       type: string

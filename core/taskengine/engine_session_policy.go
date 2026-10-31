@@ -79,6 +79,8 @@ type SessionPolicyInput struct {
 	// Addition set means create-or-update: merge with enabled tasks and
 	// ignore Permissions until the merge replaces them.
 	Addition *PolicyAddition
+	// Budget is never echoed through the stateless signature route.
+	Budget *WalletBudgetInput
 	// ExpiresInSeconds is the new automation's horizon when Addition is
 	// set and Addition.ValidUntilMs is zero.
 	ExpiresInSeconds int64
@@ -320,6 +322,9 @@ func (n *Engine) lookupOwnedWalletRecord(user *model.User, chainID int64, wallet
 // what lets that path use the non-locking marker: the mutex is not reentrant,
 // and taking it twice wedges the shard instead of failing.
 func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (*PreparedSessionGrant, error) {
+	if err := n.refuseLegacyBudgetInput(user, in); err != nil {
+		return nil, err
+	}
 	if in.ExpiresInSeconds < 0 || in.ExpiresInSeconds > MaxSessionExpiresInSeconds {
 		return nil, fmt.Errorf("expiresInSeconds must be between 0 and %d", MaxSessionExpiresInSeconds)
 	}
@@ -361,6 +366,9 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 			return nil, newBaseChanged(preCurrent)
 		}
 		if preCurrent != nil {
+			if isWalletBudget(preCurrent) {
+				return nil, budgetHandoffRequired()
+			}
 			readCtx, cancel := context.WithTimeout(context.Background(), occupancyProbeTimeout)
 			rem, readErr := n.resolveGrantRemainder(readCtx, preCurrent, in.Wallet)
 			cancel()
@@ -375,6 +383,9 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 	lock := sessionAuthorityLock(in.ChainID, user.Address, in.Wallet)
 	lock.Lock()
 	defer lock.Unlock()
+	if err := n.refuseBudgetStatelessReplacement(user, in); err != nil {
+		return nil, err
+	}
 
 	teardownTargets, teardowns, teardownErr := n.resolveTeardowns(in.ChainID, user.Address, in.Wallet)
 	if teardownErr != nil {
@@ -545,6 +556,9 @@ func (n *Engine) SubmitSessionPolicy(
 	deadline uint64,
 	ownerSignature []byte,
 ) (policy *model.SessionPolicy, superseded []string, err error) {
+	if err := n.refuseLegacyBudgetInput(user, in); err != nil {
+		return nil, nil, err
+	}
 	if err := n.bindAndValidatePermissions(&in); err != nil {
 		return nil, nil, err
 	}
@@ -571,6 +585,9 @@ func (n *Engine) SubmitSessionPolicy(
 	lock := sessionAuthorityLock(in.ChainID, user.Address, in.Wallet)
 	lock.Lock()
 	defer lock.Unlock()
+	if err := n.refuseBudgetStatelessReplacement(user, in); err != nil {
+		return nil, nil, err
+	}
 
 	teardownTargets, teardowns, teardownErr := n.resolveTeardowns(in.ChainID, user.Address, in.Wallet)
 	if teardownErr != nil {

@@ -1455,7 +1455,8 @@ type PreparePolicyRequest struct {
 	// prepare that sends the full permission set and does not compare.
 	// Send an empty string when the client believes there is no usable
 	// grant. A mismatch is 409 SESSION_POLICY_BASE_CHANGED.
-	BasePolicyId *string `json:"basePolicyId,omitempty"`
+	BasePolicyId *string            `json:"basePolicyId,omitempty"`
+	Budget       *WalletBudgetInput `json:"budget,omitempty"`
 
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
 	// chain-aware trigger/node configs this is required and must be a
@@ -1708,8 +1709,9 @@ type Problem struct {
 	// Recipient Lowercase or checksummed hex EOA / contract address.
 	Recipient *EthereumAddress `json:"recipient,omitempty"`
 
-	// Required Permissions one workflow still needs, sized to the runs it has left.
-	// Cap amounts are totals in the token's smallest unit, not per-run amounts.
+	// Required Permissions one workflow still needs. Workflow mode sizes the remaining
+	// runs. Budget mode reports one run and never sizes the wallet budget from
+	// this need. Cap amounts are in the token's smallest unit.
 	Required *SessionPolicyNeed `json:"required,omitempty"`
 
 	// Status HTTP status code (echoed for clients that surface only the body).
@@ -1883,11 +1885,18 @@ type SessionAuthorization struct {
 	Detail         *string          `json:"detail,omitempty"`
 	MissingActions *[]AllowedAction `json:"missingActions,omitempty"`
 
+	// MissingTokens Budget mode only. Spending tokens that need a new budget row.
+	MissingTokens *[]EthereumAddress `json:"missingTokens,omitempty"`
+
+	// NeedsUntil Budget mode only. The recurring workflow end that exceeds the budget end, in Unix milliseconds.
+	NeedsUntil *int64 `json:"needsUntil,omitempty"`
+
 	// PolicyId The runner's current usable grant, when there is one.
 	PolicyId *string `json:"policyId,omitempty"`
 
-	// Required Permissions one workflow still needs, sized to the runs it has left.
-	// Cap amounts are totals in the token's smallest unit, not per-run amounts.
+	// Required Permissions one workflow still needs. Workflow mode sizes the remaining
+	// runs. Budget mode reports one run and never sizes the wallet budget from
+	// this need. Cap amounts are in the token's smallest unit.
 	Required *SessionPolicyNeed `json:"required,omitempty"`
 
 	// Status `covered` — the usable grant already allows this workflow, or the
@@ -2097,8 +2106,9 @@ type SessionPolicyList struct {
 	Items []SessionPolicy `json:"items"`
 }
 
-// SessionPolicyNeed Permissions one workflow still needs, sized to the runs it has left.
-// Cap amounts are totals in the token's smallest unit, not per-run amounts.
+// SessionPolicyNeed Permissions one workflow still needs. Workflow mode sizes the remaining
+// runs. Budget mode reports one run and never sizes the wallet budget from
+// this need. Cap amounts are in the token's smallest unit.
 type SessionPolicyNeed struct {
 	AllowedActions *[]AllowedAction `json:"allowedActions,omitempty"`
 	Erc20SpendCaps *[]Erc20SpendCap `json:"erc20SpendCaps,omitempty"`
@@ -2226,7 +2236,8 @@ type SubmitPolicyRequest struct {
 	// an empty string when prepare saw no usable grant. Omit only on a
 	// legacy submit that did not compare. A mismatch is
 	// 409 SESSION_POLICY_BASE_CHANGED.
-	BasePolicyId *string `json:"basePolicyId,omitempty"`
+	BasePolicyId *string            `json:"basePolicyId,omitempty"`
+	Budget       *WalletBudgetInput `json:"budget,omitempty"`
 
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
 	// chain-aware trigger/node configs this is required and must be a
@@ -2599,6 +2610,24 @@ type WalletBudgetPendingChangeState string
 
 // WalletBudgetStatus defines model for WalletBudget.Status.
 type WalletBudgetStatus string
+
+// WalletBudgetInput defines model for WalletBudgetInput.
+type WalletBudgetInput struct {
+	// Erc20 Owner totals, not the on-chain remainder. Tokens may appear only
+	// once. Plain raises/extensions carry omitted totals unchanged;
+	// startNewTotals requires every existing capped token total.
+	Erc20  *[]Erc20SpendCap `json:"erc20,omitempty"`
+	Native *NativeSpendCap  `json:"native,omitempty"`
+
+	// RemoveActions Owner-only removal of named selectors. Other rows and totals are retained.
+	RemoveActions *[]AllowedAction `json:"removeActions,omitempty"`
+
+	// StartNewTotals Owner Change/Renew budget. Requires an explicit total for every
+	// existing capped token and the native cap; partial resets are
+	// refused. Starts usage counting again when activation succeeds.
+	StartNewTotals *bool `json:"startNewTotals,omitempty"`
+	ValidUntil     int64 `json:"validUntil"`
+}
 
 // WalletList defines model for WalletList.
 type WalletList struct {

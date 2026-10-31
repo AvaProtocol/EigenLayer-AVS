@@ -468,6 +468,8 @@ message ContractWriteNode {
     google.protobuf.Value receipt = 5;        // Flexible receipt as JSON object
     optional uint64 block_number = 6;         // Block number (duplicate from receipt for convenience)
     google.protobuf.Value value = 7;          // Return value from contract method (null if no return)
+    ErrorCode error_code = 8;                 // Structured preflight refusal; absent on historical results
+    google.protobuf.Struct error_details = 9;
   }
 
   // Include Config as field 

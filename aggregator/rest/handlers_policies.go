@@ -68,11 +68,15 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 	if err := ctx.Bind(&req); err != nil {
 		return badRequest("POLICIES_BAD_BODY", "Invalid request body", err.Error())
 	}
+	budget, err := budgetInputFromAPI(req.Budget)
+	if err != nil {
+		return mapPolicyError(err)
+	}
 	// Matches the published contract (openapi.yaml minimum: 60, maximum:
 	// MaxSessionExpiresInSeconds). A sub-minute grant expires before its
 	// first operation can mine. A value past the maximum overflows
 	// time.Duration and would wrap into a short grant.
-	if req.ExpiresInSeconds < 60 {
+	if req.Budget == nil && req.ExpiresInSeconds < 60 {
 		return badRequest("POLICIES_BAD_EXPIRY", "Invalid expiry", "expiresInSeconds must be at least 60.")
 	}
 	if req.ExpiresInSeconds > taskengine.MaxSessionExpiresInSeconds {
@@ -89,6 +93,7 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 		DropTaskIDs:      derefStrings(req.DropTaskIds),
 		ExpiresInSeconds: req.ExpiresInSeconds,
 		AffectedOut:      &affected,
+		Budget:           budget,
 	}
 	if req.Add != nil {
 		// The addition is a fragment. Top-level permission fields are the
@@ -98,7 +103,7 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 			return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
 		}
 		in.Addition = &addition
-	} else {
+	} else if req.Budget == nil {
 		perms, err := permissionsFromAPI(req.AllowedActions, req.Erc20SpendCap, req.Erc20SpendCaps, req.NativeRecipients, req.NativeSpendCap, req.AllowContractRecipient, req.DelegatedNativeRecipients, nowMs()+req.ExpiresInSeconds*1000)
 		if err != nil {
 			return badRequest("POLICIES_BAD_PERMISSIONS", "Invalid permissions", err.Error())
@@ -142,6 +147,21 @@ func (s *Server) SubmitWalletPolicy(ctx echo.Context, address generated.Ethereum
 	var req generated.SubmitPolicyRequest
 	if err := ctx.Bind(&req); err != nil {
 		return badRequest("POLICIES_BAD_BODY", "Invalid request body", err.Error())
+	}
+	if req.Budget != nil {
+		budget, err := budgetInputFromAPI(req.Budget)
+		if err != nil {
+			return mapPolicyError(err)
+		}
+		// Never reinterpret an owner-budget intent as a stateless grant, even
+		// when the caller sends all of the old fields alongside it.
+		_, _, err = s.engine.SubmitSessionPolicy(user, taskengine.SessionPolicyInput{
+			Wallet: wallet, ChainID: int64(req.ChainId), AgentLabel: req.AgentLabel, Budget: budget,
+		}, string(req.PolicyId), uint32(req.EntityId), uint64(req.Deadline), nil)
+		if err != nil {
+			return mapPolicyError(err)
+		}
+		return fmt.Errorf("budget intent unexpectedly accepted by stateless submit")
 	}
 	signature := common.FromHex(req.Signature)
 	if len(signature) != 65 {
@@ -560,9 +580,16 @@ func filterToDeclaredFields(domain interface{}, declared []apitypes.Type) interf
 
 // mapPolicyError translates engine sentinels into REST problems.
 func mapPolicyError(err error) error {
+	var budgetError *taskengine.BudgetPolicyError
 	var conflict *taskengine.PolicyConflictError
 	var refusal *taskengine.NativeRecipientRefusal
 	switch {
+	case errors.As(err, &budgetError):
+		status := http.StatusBadRequest
+		if budgetError.Code == taskengine.BudgetHandoffRequiredCode || budgetError.Code == taskengine.BudgetReplaceRefusedCode {
+			status = http.StatusConflict
+		}
+		return &restmw.HTTPError{Status: status, Code: budgetError.Code, Title: "Budget request refused", Detail: budgetError.Detail}
 	case errors.As(err, &conflict):
 		return policyConflictHTTP(conflict)
 	case errors.As(err, &refusal):
@@ -626,6 +653,42 @@ func mapPolicyError(err error) error {
 	default:
 		return badRequest("POLICIES_REJECTED", "Policy request rejected", err.Error())
 	}
+}
+
+func budgetInputFromAPI(raw *generated.WalletBudgetInput) (*taskengine.WalletBudgetInput, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	out := &taskengine.WalletBudgetInput{ValidUntil: raw.ValidUntil}
+	if raw.StartNewTotals != nil {
+		out.StartNewTotals = *raw.StartNewTotals
+	}
+	if raw.Native != nil {
+		out.Native = &model.NativeSpendCap{Amount: raw.Native.Amount}
+	}
+	if raw.Erc20 != nil {
+		for _, cap := range *raw.Erc20 {
+			if !common.IsHexAddress(string(cap.Token)) {
+				return nil, &taskengine.BudgetPolicyError{Code: taskengine.BudgetInvalidInputCode, Detail: "invalid budget token address"}
+			}
+			token := common.HexToAddress(string(cap.Token))
+			out.ERC20 = append(out.ERC20, model.ERC20SpendCap{Token: &token, Amount: cap.Amount})
+		}
+	}
+	if raw.RemoveActions != nil {
+		for _, action := range *raw.RemoveActions {
+			if !common.IsHexAddress(string(action.Target)) {
+				return nil, &taskengine.BudgetPolicyError{Code: taskengine.BudgetInvalidInputCode, Detail: "invalid removal target address"}
+			}
+			target := common.HexToAddress(string(action.Target))
+			selectors := make([]string, len(action.Selectors))
+			for i, selector := range action.Selectors {
+				selectors[i] = string(selector)
+			}
+			out.RemoveActions = append(out.RemoveActions, model.AllowedAction{Target: &target, Selectors: selectors})
+		}
+	}
+	return out, nil
 }
 
 const nativeRecipientNotAcknowledgedTitle = "Delegated native recipient not acknowledged"
@@ -1001,6 +1064,16 @@ func sessionAuthorizationToAPI(auth *taskengine.SessionAuthorization) generated.
 	}
 	if actions := allowedActionsToAPI(auth.Missing); len(actions) > 0 {
 		out.MissingActions = &actions
+	}
+	if len(auth.MissingTokens) > 0 {
+		tokens := make([]generated.EthereumAddress, 0, len(auth.MissingTokens))
+		for _, token := range auth.MissingTokens {
+			tokens = append(tokens, generated.EthereumAddress(token.Hex()))
+		}
+		out.MissingTokens = &tokens
+	}
+	if auth.NeedsUntil > 0 {
+		out.NeedsUntil = &auth.NeedsUntil
 	}
 	if need := sessionNeedToAPI(auth.Required); need != nil {
 		out.Required = need

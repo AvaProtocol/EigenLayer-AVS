@@ -186,19 +186,7 @@ func finalizeStep(step *avsproto.Execution_Step, success bool, err error, errorM
 	if err != nil {
 		step.Error = err.Error()
 		step.ErrorCode = GetErrorCode(err)
-		if structured, ok := IsStructuredError(err); ok && len(structured.Details) != 0 {
-			fields := make(map[string]*structpb.Value, len(structured.Details))
-			for key, value := range structured.Details {
-				field, conversionErr := structpb.NewValue(value)
-				if conversionErr != nil {
-					// Keep unexpected Go values visible rather than dropping every
-					// detail. Decimal big.Int values stay exact as strings.
-					field = structpb.NewStringValue(fmt.Sprint(value))
-				}
-				fields[key] = field
-			}
-			step.ErrorDetails = &structpb.Struct{Fields: fields}
-		}
+		step.ErrorDetails = structuredErrorDetails(err)
 	} else if !success {
 		// If step failed but no error was provided, use errorMessage directly
 		// This ensures error message is always set when step fails
@@ -218,6 +206,22 @@ func finalizeStep(step *avsproto.Execution_Step, success bool, err error, errorM
 		}
 	}
 	step.Log = logContent
+}
+
+func structuredErrorDetails(err error) *structpb.Struct {
+	structured, ok := IsStructuredError(err)
+	if !ok || len(structured.Details) == 0 {
+		return nil
+	}
+	fields := make(map[string]*structpb.Value, len(structured.Details))
+	for key, value := range structured.Details {
+		field, conversionErr := structpb.NewValue(value)
+		if conversionErr != nil {
+			field = structpb.NewStringValue(fmt.Sprint(value))
+		}
+		fields[key] = field
+	}
+	return &structpb.Struct{Fields: fields}
 }
 
 // formatNodeExecutionLogHeader generates a standardized log header for node execution

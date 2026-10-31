@@ -47,6 +47,10 @@ const MaxNativeRecipients = 20
 // therefore refuses to cap a token whose allowedActions are not a subset of
 // those two selectors — Uniswap wrap/unwrap on WETH cannot also cap WETH.
 type SessionPermissions struct {
+	// Set only by the server's budget compositor, never by a legacy request.
+	// Budget caps may be exhausted, and removed token actions retain inert cap
+	// storage behind an empty selector allowlist.
+	budgetMode     bool
 	AllowedActions []model.AllowedAction
 	// SpendCap is the one-token alias (OpenAPI erc20SpendCap). SpendCaps is
 	// the full per-token list. Validate accepts either; if both are set they
@@ -77,9 +81,9 @@ func (p SessionPermissions) Validate() error {
 }
 
 func (p SessionPermissions) validate(withChain bool) error {
-	erc20Class := len(p.AllowedActions) > 0
+	erc20Class := len(p.AllowedActions) > 0 || p.budgetMode && len(p.SpendCaps) > 0
 	nativeSend := len(p.NativeRecipients) > 0
-	if !erc20Class && !nativeSend {
+	if !erc20Class && !nativeSend && !p.budgetMode {
 		return fmt.Errorf("a grant needs allowedActions and/or nativeRecipients")
 	}
 
@@ -112,7 +116,7 @@ func (p SessionPermissions) validate(withChain bool) error {
 			if cap.Token == nil || *cap.Token == (common.Address{}) {
 				return fmt.Errorf("spend cap %d has no token", i)
 			}
-			if _, err := parseCapAmount(cap.Amount); err != nil {
+			if _, err := p.parseSpendCap(cap.Amount); err != nil {
 				return fmt.Errorf("spend cap %d: %w", i, err)
 			}
 			if _, dup := seen[*cap.Token]; dup {
@@ -126,7 +130,7 @@ func (p SessionPermissions) validate(withChain bool) error {
 					break
 				}
 			}
-			if !covered {
+			if !covered && !p.budgetMode {
 				return fmt.Errorf("the cap token %s is not an allowed-action target; cap a token the agent may actually call", cap.Token.Hex())
 			}
 			if err := spendLimitSelectorsOK(*cap.Token, p.AllowedActions); err != nil {
@@ -138,7 +142,7 @@ func (p SessionPermissions) validate(withChain bool) error {
 	}
 
 	if p.NativeSpendCap != nil {
-		if _, err := parseCapAmount(p.NativeSpendCap.Amount); err != nil {
+		if _, err := p.parseSpendCap(p.NativeSpendCap.Amount); err != nil {
 			return fmt.Errorf("nativeSpendCap: %w", err)
 		}
 	}
@@ -235,7 +239,7 @@ func (p SessionPermissions) allowlistInputs() ([]aa.AllowlistInput, error) {
 		if cap.Token == nil {
 			continue
 		}
-		amount, err := parseCapAmount(cap.Amount)
+		amount, err := p.parseSpendCap(cap.Amount)
 		if err != nil {
 			return nil, err
 		}
@@ -261,6 +265,22 @@ func (p SessionPermissions) allowlistInputs() ([]aa.AllowlistInput, error) {
 			input.ERC20SpendLimit = limit
 		}
 		inputs = append(inputs, input)
+	}
+	if p.budgetMode {
+		for _, cap := range caps {
+			found := false
+			for _, action := range p.AllowedActions {
+				if action.Target != nil && *action.Target == *cap.Token {
+					found = true
+					break
+				}
+			}
+			if !found {
+				// An empty selector allowlist allows no call, while preserving
+				// the token's remainder and budget accounting after Disable.
+				inputs = append(inputs, aa.AllowlistInput{Target: *cap.Token, HasSelectorAllowlist: true, HasERC20SpendLimit: true, ERC20SpendLimit: limitByToken[*cap.Token], Selectors: [][4]byte{}})
+			}
+		}
 	}
 	for _, rec := range p.NativeRecipients {
 		if rec == nil {
@@ -368,6 +388,13 @@ func parseCapAmount(s string) (*big.Int, error) {
 	return n, nil
 }
 
+func (p SessionPermissions) parseSpendCap(s string) (*big.Int, error) {
+	if p.budgetMode {
+		return parseBudgetAmount(s)
+	}
+	return parseCapAmount(s)
+}
+
 // HooksFor builds the grant's hook entries for its allocated entity:
 // the allowlist validation hook (targets, selectors, and per-token spend
 // limits in one install payload), the allowlist execution hook that enforces
@@ -391,7 +418,11 @@ func (p SessionPermissions) HooksFor(entityID uint32) ([][]byte, error) {
 		return nil, err
 	}
 
-	allowlistHook, err := aa.AllowlistValidationHook(entityID, inputs)
+	buildAllowlist := aa.AllowlistValidationHook
+	if p.budgetMode {
+		buildAllowlist = aa.BudgetAllowlistValidationHook
+	}
+	allowlistHook, err := buildAllowlist(entityID, inputs)
 	if err != nil {
 		return nil, fmt.Errorf("building the allowlist hook: %w", err)
 	}
@@ -401,11 +432,15 @@ func (p SessionPermissions) HooksFor(entityID uint32) ([][]byte, error) {
 	}
 	hooks := [][]byte{allowlistHook, aa.AllowlistExecHook(entityID)}
 	if p.NativeSpendCap != nil {
-		limit, err := parseCapAmount(p.NativeSpendCap.Amount)
+		limit, err := p.parseSpendCap(p.NativeSpendCap.Amount)
 		if err != nil {
 			return nil, err
 		}
-		ntVal, err := aa.NativeTokenLimitValidationHook(entityID, limit)
+		buildNative := aa.NativeTokenLimitValidationHook
+		if p.budgetMode {
+			buildNative = aa.BudgetNativeTokenLimitValidationHook
+		}
+		ntVal, err := buildNative(entityID, limit)
 		if err != nil {
 			return nil, fmt.Errorf("building the native-token limit hook: %w", err)
 		}
