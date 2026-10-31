@@ -8413,13 +8413,15 @@ func (x *ContractWriteNode_Output) GetData() *structpb.Value {
 
 type ContractWriteNode_MethodResult struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	MethodName    string                 `protobuf:"bytes,1,opt,name=method_name,json=methodName,proto3" json:"method_name,omitempty"`           // The name of the method called
-	MethodAbi     *structpb.Value        `protobuf:"bytes,2,opt,name=method_abi,json=methodAbi,proto3" json:"method_abi,omitempty"`              // Complete ABI entry for this method
-	Success       bool                   `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`                                  // Whether this specific method call succeeded
-	Error         string                 `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`                                       // Error message if failed (empty if success)
-	Receipt       *structpb.Value        `protobuf:"bytes,5,opt,name=receipt,proto3" json:"receipt,omitempty"`                                   // Flexible receipt as JSON object
-	BlockNumber   *uint64                `protobuf:"varint,6,opt,name=block_number,json=blockNumber,proto3,oneof" json:"block_number,omitempty"` // Block number (duplicate from receipt for convenience)
-	Value         *structpb.Value        `protobuf:"bytes,7,opt,name=value,proto3" json:"value,omitempty"`                                       // Return value from contract method (null if no return)
+	MethodName    string                 `protobuf:"bytes,1,opt,name=method_name,json=methodName,proto3" json:"method_name,omitempty"`                         // The name of the method called
+	MethodAbi     *structpb.Value        `protobuf:"bytes,2,opt,name=method_abi,json=methodAbi,proto3" json:"method_abi,omitempty"`                            // Complete ABI entry for this method
+	Success       bool                   `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`                                                // Whether this specific method call succeeded
+	Error         string                 `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`                                                     // Error message if failed (empty if success)
+	Receipt       *structpb.Value        `protobuf:"bytes,5,opt,name=receipt,proto3" json:"receipt,omitempty"`                                                 // Flexible receipt as JSON object
+	BlockNumber   *uint64                `protobuf:"varint,6,opt,name=block_number,json=blockNumber,proto3,oneof" json:"block_number,omitempty"`               // Block number (duplicate from receipt for convenience)
+	Value         *structpb.Value        `protobuf:"bytes,7,opt,name=value,proto3" json:"value,omitempty"`                                                     // Return value from contract method (null if no return)
+	ErrorCode     ErrorCode              `protobuf:"varint,8,opt,name=error_code,json=errorCode,proto3,enum=aggregator.ErrorCode" json:"error_code,omitempty"` // Structured preflight refusal; absent on historical results
+	ErrorDetails  *structpb.Struct       `protobuf:"bytes,9,opt,name=error_details,json=errorDetails,proto3" json:"error_details,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8499,6 +8501,20 @@ func (x *ContractWriteNode_MethodResult) GetBlockNumber() uint64 {
 func (x *ContractWriteNode_MethodResult) GetValue() *structpb.Value {
 	if x != nil {
 		return x.Value
+	}
+	return nil
+}
+
+func (x *ContractWriteNode_MethodResult) GetErrorCode() ErrorCode {
+	if x != nil {
+		return x.ErrorCode
+	}
+	return ErrorCode_ERROR_CODE_UNSPECIFIED
+}
+
+func (x *ContractWriteNode_MethodResult) GetErrorDetails() *structpb.Struct {
+	if x != nil {
+		return x.ErrorDetails
 	}
 	return nil
 }
@@ -10354,7 +10370,7 @@ const file_avs_proto_rawDesc = "" +
 	"\vreserve_gas\x18\x04 \x01(\bR\n" +
 	"reserveGas\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\x8a\b\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xfe\b\n" +
 	"\x11ContractWriteNode\x12<\n" +
 	"\x06config\x18\x01 \x01(\v2$.aggregator.ContractWriteNode.ConfigR\x06config\x1a\xdc\x02\n" +
 	"\x06Config\x12)\n" +
@@ -10380,7 +10396,7 @@ const file_avs_proto_rawDesc = "" +
 	"_call_dataB\x13\n" +
 	"\x11_contract_address\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\x1a\xaf\x02\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\x1a\xa3\x03\n" +
 	"\fMethodResult\x12\x1f\n" +
 	"\vmethod_name\x18\x01 \x01(\tR\n" +
 	"methodName\x125\n" +
@@ -10390,7 +10406,10 @@ const file_avs_proto_rawDesc = "" +
 	"\x05error\x18\x04 \x01(\tR\x05error\x120\n" +
 	"\areceipt\x18\x05 \x01(\v2\x16.google.protobuf.ValueR\areceipt\x12&\n" +
 	"\fblock_number\x18\x06 \x01(\x04H\x00R\vblockNumber\x88\x01\x01\x12,\n" +
-	"\x05value\x18\a \x01(\v2\x16.google.protobuf.ValueR\x05valueB\x0f\n" +
+	"\x05value\x18\a \x01(\v2\x16.google.protobuf.ValueR\x05value\x124\n" +
+	"\n" +
+	"error_code\x18\b \x01(\x0e2\x15.aggregator.ErrorCodeR\terrorCode\x12<\n" +
+	"\rerror_details\x18\t \x01(\v2\x17.google.protobuf.StructR\ferrorDetailsB\x0f\n" +
 	"\r_block_number\"\x8c\x06\n" +
 	"\x10ContractReadNode\x12;\n" +
 	"\x06config\x18\x01 \x01(\v2#.aggregator.ContractReadNode.ConfigR\x06config\x1a\xaa\x01\n" +
@@ -11445,57 +11464,59 @@ var file_avs_proto_depIdxs = []int32{
 	147, // 142: aggregator.ContractWriteNode.MethodResult.method_abi:type_name -> google.protobuf.Value
 	147, // 143: aggregator.ContractWriteNode.MethodResult.receipt:type_name -> google.protobuf.Value
 	147, // 144: aggregator.ContractWriteNode.MethodResult.value:type_name -> google.protobuf.Value
-	147, // 145: aggregator.ContractReadNode.Config.contract_abi:type_name -> google.protobuf.Value
-	115, // 146: aggregator.ContractReadNode.Config.method_calls:type_name -> aggregator.ContractReadNode.MethodCall
-	119, // 147: aggregator.ContractReadNode.MethodResult.data:type_name -> aggregator.ContractReadNode.MethodResult.StructuredField
-	147, // 148: aggregator.ContractReadNode.Output.data:type_name -> google.protobuf.Value
-	122, // 149: aggregator.GraphQLQueryNode.Config.variables:type_name -> aggregator.GraphQLQueryNode.Config.VariablesEntry
-	147, // 150: aggregator.GraphQLQueryNode.Output.data:type_name -> google.protobuf.Value
-	125, // 151: aggregator.RestAPINode.Config.headers:type_name -> aggregator.RestAPINode.Config.HeadersEntry
-	147, // 152: aggregator.RestAPINode.Config.options:type_name -> google.protobuf.Value
-	147, // 153: aggregator.RestAPINode.Output.data:type_name -> google.protobuf.Value
-	4,   // 154: aggregator.CustomCodeNode.Config.lang:type_name -> aggregator.Lang
-	147, // 155: aggregator.CustomCodeNode.Output.data:type_name -> google.protobuf.Value
-	147, // 156: aggregator.BalanceNode.Output.data:type_name -> google.protobuf.Value
-	103, // 157: aggregator.AwaitNode.Config.chain_event:type_name -> aggregator.EventTrigger.Config
-	147, // 158: aggregator.AwaitNode.Output.data:type_name -> google.protobuf.Value
-	132, // 159: aggregator.BranchNode.Config.conditions:type_name -> aggregator.BranchNode.Condition
-	147, // 160: aggregator.BranchNode.Output.data:type_name -> google.protobuf.Value
-	147, // 161: aggregator.FilterNode.Output.data:type_name -> google.protobuf.Value
-	3,   // 162: aggregator.LoopNode.Config.execution_mode:type_name -> aggregator.ExecutionMode
-	147, // 163: aggregator.LoopNode.Output.data:type_name -> google.protobuf.Value
-	5,   // 164: aggregator.Execution.Step.error_code:type_name -> aggregator.ErrorCode
-	148, // 165: aggregator.Execution.Step.error_details:type_name -> google.protobuf.Struct
-	147, // 166: aggregator.Execution.Step.config:type_name -> google.protobuf.Value
-	147, // 167: aggregator.Execution.Step.metadata:type_name -> google.protobuf.Value
-	147, // 168: aggregator.Execution.Step.execution_context:type_name -> google.protobuf.Value
-	100, // 169: aggregator.Execution.Step.block_trigger:type_name -> aggregator.BlockTrigger.Output
-	96,  // 170: aggregator.Execution.Step.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
-	98,  // 171: aggregator.Execution.Step.cron_trigger:type_name -> aggregator.CronTrigger.Output
-	104, // 172: aggregator.Execution.Step.event_trigger:type_name -> aggregator.EventTrigger.Output
-	106, // 173: aggregator.Execution.Step.manual_trigger:type_name -> aggregator.ManualTrigger.Output
-	110, // 174: aggregator.Execution.Step.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
-	121, // 175: aggregator.Execution.Step.graphql:type_name -> aggregator.GraphQLQueryNode.Output
-	118, // 176: aggregator.Execution.Step.contract_read:type_name -> aggregator.ContractReadNode.Output
-	113, // 177: aggregator.Execution.Step.contract_write:type_name -> aggregator.ContractWriteNode.Output
-	127, // 178: aggregator.Execution.Step.custom_code:type_name -> aggregator.CustomCodeNode.Output
-	124, // 179: aggregator.Execution.Step.rest_api:type_name -> aggregator.RestAPINode.Output
-	134, // 180: aggregator.Execution.Step.branch:type_name -> aggregator.BranchNode.Output
-	136, // 181: aggregator.Execution.Step.filter:type_name -> aggregator.FilterNode.Output
-	138, // 182: aggregator.Execution.Step.loop:type_name -> aggregator.LoopNode.Output
-	129, // 183: aggregator.Execution.Step.balance:type_name -> aggregator.BalanceNode.Output
-	147, // 184: aggregator.Task.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	147, // 185: aggregator.CreateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	147, // 186: aggregator.TriggerTaskReq.TriggerInputEntry.value:type_name -> google.protobuf.Value
-	147, // 187: aggregator.RunNodeWithInputsReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	147, // 188: aggregator.RunTriggerReq.TriggerInputEntry.value:type_name -> google.protobuf.Value
-	147, // 189: aggregator.SimulateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	147, // 190: aggregator.EstimateFeesReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	191, // [191:191] is the sub-list for method output_type
-	191, // [191:191] is the sub-list for method input_type
-	191, // [191:191] is the sub-list for extension type_name
-	191, // [191:191] is the sub-list for extension extendee
-	0,   // [0:191] is the sub-list for field type_name
+	5,   // 145: aggregator.ContractWriteNode.MethodResult.error_code:type_name -> aggregator.ErrorCode
+	148, // 146: aggregator.ContractWriteNode.MethodResult.error_details:type_name -> google.protobuf.Struct
+	147, // 147: aggregator.ContractReadNode.Config.contract_abi:type_name -> google.protobuf.Value
+	115, // 148: aggregator.ContractReadNode.Config.method_calls:type_name -> aggregator.ContractReadNode.MethodCall
+	119, // 149: aggregator.ContractReadNode.MethodResult.data:type_name -> aggregator.ContractReadNode.MethodResult.StructuredField
+	147, // 150: aggregator.ContractReadNode.Output.data:type_name -> google.protobuf.Value
+	122, // 151: aggregator.GraphQLQueryNode.Config.variables:type_name -> aggregator.GraphQLQueryNode.Config.VariablesEntry
+	147, // 152: aggregator.GraphQLQueryNode.Output.data:type_name -> google.protobuf.Value
+	125, // 153: aggregator.RestAPINode.Config.headers:type_name -> aggregator.RestAPINode.Config.HeadersEntry
+	147, // 154: aggregator.RestAPINode.Config.options:type_name -> google.protobuf.Value
+	147, // 155: aggregator.RestAPINode.Output.data:type_name -> google.protobuf.Value
+	4,   // 156: aggregator.CustomCodeNode.Config.lang:type_name -> aggregator.Lang
+	147, // 157: aggregator.CustomCodeNode.Output.data:type_name -> google.protobuf.Value
+	147, // 158: aggregator.BalanceNode.Output.data:type_name -> google.protobuf.Value
+	103, // 159: aggregator.AwaitNode.Config.chain_event:type_name -> aggregator.EventTrigger.Config
+	147, // 160: aggregator.AwaitNode.Output.data:type_name -> google.protobuf.Value
+	132, // 161: aggregator.BranchNode.Config.conditions:type_name -> aggregator.BranchNode.Condition
+	147, // 162: aggregator.BranchNode.Output.data:type_name -> google.protobuf.Value
+	147, // 163: aggregator.FilterNode.Output.data:type_name -> google.protobuf.Value
+	3,   // 164: aggregator.LoopNode.Config.execution_mode:type_name -> aggregator.ExecutionMode
+	147, // 165: aggregator.LoopNode.Output.data:type_name -> google.protobuf.Value
+	5,   // 166: aggregator.Execution.Step.error_code:type_name -> aggregator.ErrorCode
+	148, // 167: aggregator.Execution.Step.error_details:type_name -> google.protobuf.Struct
+	147, // 168: aggregator.Execution.Step.config:type_name -> google.protobuf.Value
+	147, // 169: aggregator.Execution.Step.metadata:type_name -> google.protobuf.Value
+	147, // 170: aggregator.Execution.Step.execution_context:type_name -> google.protobuf.Value
+	100, // 171: aggregator.Execution.Step.block_trigger:type_name -> aggregator.BlockTrigger.Output
+	96,  // 172: aggregator.Execution.Step.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
+	98,  // 173: aggregator.Execution.Step.cron_trigger:type_name -> aggregator.CronTrigger.Output
+	104, // 174: aggregator.Execution.Step.event_trigger:type_name -> aggregator.EventTrigger.Output
+	106, // 175: aggregator.Execution.Step.manual_trigger:type_name -> aggregator.ManualTrigger.Output
+	110, // 176: aggregator.Execution.Step.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
+	121, // 177: aggregator.Execution.Step.graphql:type_name -> aggregator.GraphQLQueryNode.Output
+	118, // 178: aggregator.Execution.Step.contract_read:type_name -> aggregator.ContractReadNode.Output
+	113, // 179: aggregator.Execution.Step.contract_write:type_name -> aggregator.ContractWriteNode.Output
+	127, // 180: aggregator.Execution.Step.custom_code:type_name -> aggregator.CustomCodeNode.Output
+	124, // 181: aggregator.Execution.Step.rest_api:type_name -> aggregator.RestAPINode.Output
+	134, // 182: aggregator.Execution.Step.branch:type_name -> aggregator.BranchNode.Output
+	136, // 183: aggregator.Execution.Step.filter:type_name -> aggregator.FilterNode.Output
+	138, // 184: aggregator.Execution.Step.loop:type_name -> aggregator.LoopNode.Output
+	129, // 185: aggregator.Execution.Step.balance:type_name -> aggregator.BalanceNode.Output
+	147, // 186: aggregator.Task.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	147, // 187: aggregator.CreateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	147, // 188: aggregator.TriggerTaskReq.TriggerInputEntry.value:type_name -> google.protobuf.Value
+	147, // 189: aggregator.RunNodeWithInputsReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	147, // 190: aggregator.RunTriggerReq.TriggerInputEntry.value:type_name -> google.protobuf.Value
+	147, // 191: aggregator.SimulateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	147, // 192: aggregator.EstimateFeesReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	193, // [193:193] is the sub-list for method output_type
+	193, // [193:193] is the sub-list for method input_type
+	193, // [193:193] is the sub-list for extension type_name
+	193, // [193:193] is the sub-list for extension extendee
+	0,   // [0:193] is the sub-list for field type_name
 }
 
 func init() { file_avs_proto_init() }

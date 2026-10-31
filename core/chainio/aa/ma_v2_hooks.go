@@ -147,19 +147,29 @@ type abiAllowlistInput struct {
 // PackAllowlistInstallData encodes AllowlistModule.onInstall's payload:
 // abi.encode(uint32 entityId, AllowlistInput[] inputs).
 func PackAllowlistInstallData(entityID uint32, inputs []AllowlistInput) ([]byte, error) {
+	return packAllowlistInstallData(entityID, inputs, false)
+}
+
+func packAllowlistInstallData(entityID uint32, inputs []AllowlistInput, allowZero bool) ([]byte, error) {
 	if err := ensureHookABIs(); err != nil {
 		return nil, err
 	}
-	if len(inputs) == 0 {
+	if len(inputs) == 0 && !allowZero {
 		return nil, fmt.Errorf("an empty allowlist install allows nothing and masks a bug")
 	}
 	encoded := make([]abiAllowlistInput, len(inputs))
 	for i, in := range inputs {
 		limit := in.ERC20SpendLimit
 		if limit == nil {
+			if in.HasERC20SpendLimit {
+				return nil, fmt.Errorf("input %d: a flagged ERC20 spend limit is required", i)
+			}
 			limit = big.NewInt(0)
 		}
-		if in.HasERC20SpendLimit && limit.Sign() == 0 {
+		if limit.Sign() < 0 || limit.BitLen() > 256 {
+			return nil, fmt.Errorf("input %d: ERC20 spend limit is outside uint256", i)
+		}
+		if in.HasERC20SpendLimit && limit.Sign() == 0 && !allowZero {
 			return nil, fmt.Errorf("input %d: a zero ERC20 spend limit with the flag set caps the token at nothing", i)
 		}
 		selectors := in.Selectors
@@ -210,6 +220,19 @@ func AllowlistValidationHook(entityID uint32, inputs []AllowlistInput) ([]byte, 
 	return append(config[:], data...), nil
 }
 
+// BudgetAllowlistValidationHook preserves exhausted token rows as a real zero
+// limit. Dropping the limit while retaining transfer/approve would uncap them.
+// An empty budget allowlist allows nothing (Disable of the last capability).
+// Ordinary grant builders retain their positive-limit and nonempty guards.
+func BudgetAllowlistValidationHook(entityID uint32, inputs []AllowlistInput) ([]byte, error) {
+	data, err := packAllowlistInstallData(entityID, inputs, true)
+	if err != nil {
+		return nil, err
+	}
+	config := PackHookConfig(AllowlistModuleAddress(), entityID, HookFlagValidation)
+	return append(config[:], data...), nil
+}
+
 // AllowlistExecHook builds the pre-execution hook entry that enforces ERC-20
 // spend limits. No install data — the validation-hook entry installed the
 // module state; a second onInstall with the same inputs would just repeat it.
@@ -234,11 +257,15 @@ func TimeRangeValidationHook(entityID uint32, validUntil, validAfter uint64) ([]
 // PackNativeTokenLimitInstallData encodes NativeTokenLimitModule.onInstall:
 // abi.encode(uint32 entityId, uint256 spendLimit).
 func PackNativeTokenLimitInstallData(entityID uint32, spendLimit *big.Int) ([]byte, error) {
+	return packNativeTokenLimitInstallData(entityID, spendLimit, false)
+}
+
+func packNativeTokenLimitInstallData(entityID uint32, spendLimit *big.Int, allowZero bool) ([]byte, error) {
 	if err := ensureHookABIs(); err != nil {
 		return nil, err
 	}
-	if spendLimit == nil || spendLimit.Sign() <= 0 {
-		return nil, fmt.Errorf("native spend limit must be positive")
+	if spendLimit == nil || spendLimit.Sign() < 0 || spendLimit.BitLen() > 256 || spendLimit.Sign() == 0 && !allowZero {
+		return nil, fmt.Errorf("native spend limit must fit uint256 and be positive unless preserving an exhausted budget")
 	}
 	return nativeTokenLimitInstallArgs.Pack(entityID, spendLimit)
 }
@@ -258,6 +285,17 @@ func PackNativeTokenLimitUninstallData(entityID uint32) ([]byte, error) {
 // State is shared with the exec hook, so onInstall runs once here.
 func NativeTokenLimitValidationHook(entityID uint32, spendLimit *big.Int) ([]byte, error) {
 	data, err := PackNativeTokenLimitInstallData(entityID, spendLimit)
+	if err != nil {
+		return nil, err
+	}
+	config := PackHookConfig(NativeTokenLimitModuleAddress(), entityID, HookFlagValidation)
+	return append(config[:], data...), nil
+}
+
+// BudgetNativeTokenLimitValidationHook preserves an exhausted native budget as
+// a real zero limit; omitting the hook would silently remove the native cap.
+func BudgetNativeTokenLimitValidationHook(entityID uint32, spendLimit *big.Int) ([]byte, error) {
+	data, err := packNativeTokenLimitInstallData(entityID, spendLimit, true)
 	if err != nil {
 		return nil, err
 	}
