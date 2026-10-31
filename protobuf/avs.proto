@@ -319,6 +319,9 @@ enum ErrorCode {
   USER_OP_CONFIRMATION_UNRESOLVED = 4006; // Submission may still confirm; do not blindly retry
   USER_OP_EXECUTION_REVERTED = 4007; // Confirmed outer transaction or inner operation reverted
   WRITE_PREREQUISITE_FAILED = 4008;       // Write skipped because an upstream write did not succeed
+  SESSION_POLICY_EXPIRED = 4009;         // The permission ended; owner must renew it
+  BUDGET_USED_UP = 4010;                 // error_details: token, needed, remaining
+  BUDGET_ENDED = 4011;                   // error_details: validUntil (unix milliseconds)
   
   // 5000-5999: External Service errors
   RPC_NODE_ERROR = 5000;            // Blockchain RPC node error
@@ -820,6 +823,7 @@ message Execution {
     bool success = 2;
     string error = 13;
     ErrorCode error_code = 31;
+    google.protobuf.Struct error_details = 32; // Structured refusal fields, absent on historical steps
     string log = 12;
     repeated string inputs = 16;
     // Configuration data that was set on this trigger/node

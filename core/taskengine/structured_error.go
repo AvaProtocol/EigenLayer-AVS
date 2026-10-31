@@ -1,7 +1,12 @@
 package taskengine
 
 import (
+	"errors"
 	"fmt"
+	"math/big"
+	"strings"
+
+	"github.com/ethereum/go-ethereum/common"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -107,18 +112,46 @@ func NewMethodParamCountError(methodName string, expected, got int) *StructuredE
 
 // IsStructuredError checks if an error is a structured error and returns it
 func IsStructuredError(err error) (*StructuredError, bool) {
-	if structErr, ok := err.(*StructuredError); ok {
+	var structErr *StructuredError
+	if errors.As(err, &structErr) {
 		return structErr, true
 	}
 	return nil, false
 }
 
-// GetErrorCode extracts error code from an error, returns UNSPECIFIED if not a structured error
+// GetErrorCode prefers an explicit structured code. Only legacy text-only
+// method results fall back to the tagged permission-refusal message.
 func GetErrorCode(err error) avsproto.ErrorCode {
 	if structErr, ok := IsStructuredError(err); ok {
 		return structErr.GetCode()
 	}
+	return permissionRefusalCode(err)
+}
+
+// Contract-write method results currently carry text between the send and
+// step-finalization layers. Preserve the machine-tagged expiry refusal there
+// rather than replacing it with INVALID_REQUEST and losing the renewal reason.
+func permissionRefusalCode(err error) avsproto.ErrorCode {
+	if err == nil {
+		return avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED
+	}
+	message := err.Error()
+	if strings.HasPrefix(message, SessionPolicyExpiredCode+":") || strings.Contains(message, ": "+SessionPolicyExpiredCode+":") {
+		return avsproto.ErrorCode_SESSION_POLICY_EXPIRED
+	}
 	return avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED
+}
+
+// Constructors are available for later budget send guards. This slice emits
+// neither budget refusal; the details stay structured through the step result.
+func NewBudgetUsedUpError(token common.Address, needed, remaining *big.Int) *StructuredError {
+	return NewStructuredError(avsproto.ErrorCode_BUDGET_USED_UP, "The token budget is used up. Change the budget to continue.",
+		map[string]interface{}{"token": token.Hex(), "needed": needed.String(), "remaining": remaining.String()})
+}
+
+func NewBudgetEndedError(validUntil int64) *StructuredError {
+	return NewStructuredError(avsproto.ErrorCode_BUDGET_ENDED, "The budget ended. Renew the budget to continue.",
+		map[string]interface{}{"validUntil": validUntil})
 }
 
 // GetErrorCodeForProtobuf extracts error code for protobuf responses

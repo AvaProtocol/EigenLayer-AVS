@@ -920,6 +920,7 @@ func prepareSkill(t *testing.T, engine *Engine, owner, wallet common.Address, ad
 
 func TestSkillCarryChainReadLockAndDrift(t *testing.T) {
 	engine, _, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	engine.config.SmartWallet.EthRpcUrl = budgetRegistrationRPC(t).URL
 	usdc := common.HexToAddress(skillUSDC)
 	weth := common.HexToAddress(skillWETH)
 	perms := SessionPermissions{
@@ -1102,6 +1103,7 @@ func TestSubmitWithoutAPrepareSnapshotUsesThePerTaskCheck(t *testing.T) {
 
 func TestSkillCarrySubmitCoverage(t *testing.T) {
 	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	engine.config.SmartWallet.EthRpcUrl = budgetRegistrationRPC(t).URL
 	user := &model.User{Address: owner}
 	usdc := common.HexToAddress(skillUSDC)
 	weth := common.HexToAddress(skillWETH)

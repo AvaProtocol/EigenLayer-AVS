@@ -15,7 +15,7 @@ import (
 // announce itself. That is why model.SessionPolicy retains Grant.InstallCall:
 // it is the only faithful record of what a given entity actually carries.
 //
-// Getting this wrong produces a SUCCESSFUL transaction that clears nothing.
+// Getting this wrong can produce a SUCCESSFUL transaction with module residue.
 // The account catches onUninstall reverts, flags them only in the
 // ValidationUninstalled event, and strands the module state. Proven on Sepolia
 // while spiking #717: an identical batch mined at 601,275 gas with
@@ -26,8 +26,8 @@ import (
 // Consequences, both non-negotiable for callers:
 //
 //   - Derive from the stored install call, never from live config.
-//   - Treat a mined transaction as no evidence of teardown. Read the module
-//     state back before reporting an entity revoked.
+//   - Read registration to establish revocation, and module storage to establish
+//     cleanup. Residue after registration is gone does not authorize the old key.
 
 // SessionSignerUninstallFromInstall builds the uninstallValidation calldata
 // that reverses installCall — the calldata a grant was created with.

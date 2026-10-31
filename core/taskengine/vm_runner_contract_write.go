@@ -877,7 +877,9 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 		// Create simplified user-facing error message
 		var userErrorMsg string
 		errLower := strings.ToLower(err.Error())
-		if strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "dial tcp") {
+		if permissionRefusalCode(err) != avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED {
+			userErrorMsg = err.Error()
+		} else if strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "dial tcp") {
 			userErrorMsg = "Bundler service unavailable"
 		} else if strings.Contains(err.Error(), "AA21") {
 			userErrorMsg = "Insufficient ETH balance for gas fees"

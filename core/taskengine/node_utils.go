@@ -173,14 +173,32 @@ func finalizeStep(step *avsproto.Execution_Step, success bool, err error, errorM
 	if err == nil && !success && strings.TrimSpace(errorMessage) != "" {
 		// Create a structured error with INVALID_REQUEST code for validation errors
 		// This ensures proper error code propagation to the response
-		err = NewInvalidRequestError(errorMessage)
+		if code := permissionRefusalCode(fmt.Errorf("%s", errorMessage)); code != avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED {
+			err = NewStructuredError(code, errorMessage)
+		} else {
+			err = NewInvalidRequestError(errorMessage)
+		}
 	}
 
 	step.EndAt = time.Now().UnixMilli()
 	step.Success = success
+	step.ErrorDetails = nil
 	if err != nil {
 		step.Error = err.Error()
 		step.ErrorCode = GetErrorCode(err)
+		if structured, ok := IsStructuredError(err); ok && len(structured.Details) != 0 {
+			fields := make(map[string]*structpb.Value, len(structured.Details))
+			for key, value := range structured.Details {
+				field, conversionErr := structpb.NewValue(value)
+				if conversionErr != nil {
+					// Keep unexpected Go values visible rather than dropping every
+					// detail. Decimal big.Int values stay exact as strings.
+					field = structpb.NewStringValue(fmt.Sprint(value))
+				}
+				fields[key] = field
+			}
+			step.ErrorDetails = &structpb.Struct{Fields: fields}
+		}
 	} else if !success {
 		// If step failed but no error was provided, use errorMessage directly
 		// This ensures error message is always set when step fails

@@ -398,6 +398,25 @@ func policyToAPI(p *model.SessionPolicy) generated.SessionPolicy {
 	if p.Justification != "" {
 		out.Justification = &p.Justification
 	}
+	if p.Sizing != "" {
+		sizing := generated.BudgetSizing(p.Sizing)
+		out.Sizing = &sizing
+	}
+	if p.BudgetStartedAt != 0 {
+		out.BudgetStartedAt = &p.BudgetStartedAt
+	}
+	if len(p.BudgetStartAmounts) != 0 {
+		caps := []generated.Erc20SpendCap{}
+		for _, cap := range p.BudgetStartAmounts {
+			if cap.Token != nil {
+				caps = append(caps, generated.Erc20SpendCap{Token: generated.EthereumAddress(cap.Token.Hex()), Amount: cap.Amount})
+			}
+		}
+		out.BudgetStartAmounts = &caps
+	}
+	if p.BudgetStartNative != nil {
+		out.BudgetStartNative = &generated.NativeSpendCap{Amount: p.BudgetStartNative.Amount}
+	}
 	if len(p.AllowedActions) > 0 {
 		actions := make([]generated.AllowedAction, 0, len(p.AllowedActions))
 		for _, a := range p.AllowedActions {

@@ -658,7 +658,8 @@ func dropClearedTeardownTargets(
 	return kept, nil
 }
 
-// TeardownVerifier reads back whether a validation entity is clear on chain.
+// TeardownVerifier reads whether the account's registration is gone. Residual
+// module storage is cleanup, not authority; the budget read reports it separately.
 // Supplied by the aggregator, which owns the chain client; nil in tests and in
 // any process without one, where verification is skipped rather than faked.
 type TeardownVerifier func(ctx context.Context, chainID int64, account common.Address, entity uint32) (cleared bool, err error)
@@ -668,14 +669,10 @@ type TeardownVerifier func(ctx context.Context, chainID int64, account common.Ad
 // fails or is inconclusive. On success it records TornDownAt on the storage
 // policy that owns that entity so the next replace batch does not re-target it.
 //
-// This is not belt-and-braces. A replace batch that mines proves the operation
-// executed, NOT that the uninstall did anything: the account catches a hook
-// module's onUninstall revert and strands the state. Sepolia showed the two
-// outcomes are indistinguishable from a receipt — 601,275 gas and success=true
-// with the entity still holding its signer and its full spend cap, against
-// 636,341 gas and a clean teardown. Without this read, the product would
-// report an entity revoked on the strength of a transaction that removed
-// nothing.
+// The account clears registration even if a module's onUninstall fails. The
+// old key then has no authority, although signer/limit storage may remain.
+// This check concerns registration only. Do not repeat uninstallValidation for
+// residual storage after its hook lists have been removed.
 //
 // Callers on the send path must not fail the operation on this error: the new
 // grant is already installed and usable, and there is nothing to roll back.
@@ -711,12 +708,12 @@ func VerifySupersededTeardown(
 		}
 	}
 	if !cleared {
-		// Mined, and cleared nothing. The entity is still live authority.
+		// The account still registers the entity: this is live authority.
 		if logger != nil {
 			logger.Error("a replaced grant is still installed on chain after its teardown mined",
 				"policy", strandedPolicyID, "runner", superseded.Runner.Hex(),
 				"entity", superseded.EntityID,
-				"hint", "the account catches onUninstall reverts and strands module state; this entity needs an explicit uninstall")
+				"hint", "account registration remains; this entity needs an explicit uninstall")
 		}
 		return fmt.Errorf("entity %d on %s survived its teardown (policy %s)",
 			superseded.EntityID, superseded.Runner.Hex(), strandedPolicyID)

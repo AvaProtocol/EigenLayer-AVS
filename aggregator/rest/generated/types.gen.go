@@ -50,6 +50,19 @@ const (
 	Branch BranchNodeType = "branch"
 )
 
+// Defines values for BudgetRetirementState.
+const (
+	Registered BudgetRetirementState = "registered"
+	Residual   BudgetRetirementState = "residual"
+	Unverified BudgetRetirementState = "unverified"
+)
+
+// Defines values for BudgetSizing.
+const (
+	BudgetSizingBudget   BudgetSizing = "budget"
+	BudgetSizingWorkflow BudgetSizing = "workflow"
+)
+
 // Defines values for ContractReadNodeType.
 const (
 	ContractRead ContractReadNodeType = "contractRead"
@@ -264,9 +277,9 @@ const (
 
 // Defines values for SubmitExecutionResponseSubmissionState.
 const (
-	Submitted  SubmitExecutionResponseSubmissionState = "submitted"
-	Submitting SubmitExecutionResponseSubmissionState = "submitting"
-	Unknown    SubmitExecutionResponseSubmissionState = "unknown"
+	SubmitExecutionResponseSubmissionStateSubmitted  SubmitExecutionResponseSubmissionState = "submitted"
+	SubmitExecutionResponseSubmissionStateSubmitting SubmitExecutionResponseSubmissionState = "submitting"
+	SubmitExecutionResponseSubmissionStateUnknown    SubmitExecutionResponseSubmissionState = "unknown"
 )
 
 // Defines values for SubmitPolicyResponseStatus.
@@ -292,6 +305,14 @@ const (
 	TriggerTypeManual    TriggerType = "manual"
 )
 
+// Defines values for UnmeteredPermissionKind.
+const (
+	AaveBorrow    UnmeteredPermissionKind = "aave_borrow"
+	AaveWithdraw  UnmeteredPermissionKind = "aave_withdraw"
+	Other         UnmeteredPermissionKind = "other"
+	WrappedNative UnmeteredPermissionKind = "wrapped_native"
+)
+
 // Defines values for UserOpStatusResponseExecutionStatus.
 const (
 	UserOpStatusResponseExecutionStatusConfirmed UserOpStatusResponseExecutionStatus = "confirmed"
@@ -310,11 +331,28 @@ const (
 	Eoa7702 WalletKind = "eoa_7702"
 )
 
+// Defines values for WalletBudgetPendingChangeState.
+const (
+	WalletBudgetPendingChangeStatePrepared   WalletBudgetPendingChangeState = "prepared"
+	WalletBudgetPendingChangeStateRejected   WalletBudgetPendingChangeState = "rejected"
+	WalletBudgetPendingChangeStateReverted   WalletBudgetPendingChangeState = "reverted"
+	WalletBudgetPendingChangeStateSubmitted  WalletBudgetPendingChangeState = "submitted"
+	WalletBudgetPendingChangeStateSubmitting WalletBudgetPendingChangeState = "submitting"
+	WalletBudgetPendingChangeStateSuperseded WalletBudgetPendingChangeState = "superseded"
+	WalletBudgetPendingChangeStateUnsent     WalletBudgetPendingChangeState = "unsent"
+)
+
+// Defines values for WalletBudgetStatus.
+const (
+	WalletBudgetStatusActive  WalletBudgetStatus = "active"
+	WalletBudgetStatusPending WalletBudgetStatus = "pending"
+)
+
 // Defines values for WithdrawResponseStatus.
 const (
-	Confirmed WithdrawResponseStatus = "confirmed"
-	Failed    WithdrawResponseStatus = "failed"
-	Pending   WithdrawResponseStatus = "pending"
+	WithdrawResponseStatusConfirmed WithdrawResponseStatus = "confirmed"
+	WithdrawResponseStatusFailed    WithdrawResponseStatus = "failed"
+	WithdrawResponseStatusPending   WithdrawResponseStatus = "pending"
 )
 
 // Defines values for WorkflowCompletionReason.
@@ -479,6 +517,47 @@ type BranchNodeType string
 // BranchNodeConfig defines model for BranchNodeConfig.
 type BranchNodeConfig struct {
 	Conditions []BranchCondition `json:"conditions"`
+}
+
+// BudgetNativeRow defines model for BudgetNativeRow.
+type BudgetNativeRow struct {
+	Amount string `json:"amount"`
+
+	// GasWei Recorded gas reserve inside amount. Omitted when the stored breakdown is unknown; never reconstructed.
+	GasWei    *string `json:"gasWei,omitempty"`
+	Remaining string  `json:"remaining"`
+	Unlimited bool    `json:"unlimited"`
+	Used      string  `json:"used"`
+}
+
+// BudgetRetirement defines model for BudgetRetirement.
+type BudgetRetirement struct {
+	EntityId int64 `json:"entityId"`
+
+	// Erc20 Remaining limits of an entity confirmed registered; absent otherwise.
+	Erc20  *[]Erc20SpendCap `json:"erc20,omitempty"`
+	Native *NativeSpendCap  `json:"native,omitempty"`
+
+	// PolicyId ULID identifier (26-char Crockford base32).
+	PolicyId *Ulid                 `json:"policyId,omitempty"`
+	State    BudgetRetirementState `json:"state"`
+}
+
+// BudgetRetirementState defines model for BudgetRetirement.State.
+type BudgetRetirementState string
+
+// BudgetSizing defines model for BudgetSizing.
+type BudgetSizing string
+
+// BudgetTokenRow defines model for BudgetTokenRow.
+type BudgetTokenRow struct {
+	Amount    string `json:"amount"`
+	Remaining string `json:"remaining"`
+
+	// Token Lowercase or checksummed hex EOA / contract address.
+	Token     EthereumAddress `json:"token"`
+	Unlimited bool            `json:"unlimited"`
+	Used      string          `json:"used"`
 }
 
 // Bytes32 32-byte hex hash (UserOp hash, transaction hash).
@@ -951,6 +1030,9 @@ type ExecutionStep struct {
 	Error     *string                 `json:"error,omitempty"`
 	ErrorCode *string                 `json:"errorCode,omitempty"`
 
+	// ErrorDetails Structured refusal fields. BUDGET_USED_UP has token/needed/remaining; BUDGET_ENDED has validUntil.
+	ErrorDetails *ExecutionStep_ErrorDetails `json:"errorDetails,omitempty"`
+
 	// ExecutionContext Runtime flags and extra info (e.g., `isSimulated`).
 	ExecutionContext *map[string]interface{} `json:"executionContext,omitempty"`
 
@@ -975,6 +1057,17 @@ type ExecutionStep struct {
 	// TotalGasCost gasUsed × gasPrice in wei (decimal string).
 	TotalGasCost *string `json:"totalGasCost,omitempty"`
 	Type         string  `json:"type"`
+}
+
+// ExecutionStep_ErrorDetails Structured refusal fields. BUDGET_USED_UP has token/needed/remaining; BUDGET_ENDED has validUntil.
+type ExecutionStep_ErrorDetails struct {
+	Needed    *string `json:"needed,omitempty"`
+	Remaining *string `json:"remaining,omitempty"`
+
+	// Token Lowercase or checksummed hex EOA / contract address.
+	Token                *EthereumAddress       `json:"token,omitempty"`
+	ValidUntil           *int64                 `json:"validUntil,omitempty"`
+	AdditionalProperties map[string]interface{} `json:"-"`
 }
 
 // ExecutionSummary Studio's summary-step reply, present once the run has ended.
@@ -1097,6 +1190,17 @@ type InputVariables map[string]interface{}
 // manual trigger data). Mirrors the proto `Lang` enum minus the
 // `LANG_` prefix. Wire values are lowercase.
 type Lang string
+
+// LiveApproval defines model for LiveApproval.
+type LiveApproval struct {
+	Amount string `json:"amount"`
+
+	// Spender Lowercase or checksummed hex EOA / contract address.
+	Spender EthereumAddress `json:"spender"`
+
+	// Token Lowercase or checksummed hex EOA / contract address.
+	Token EthereumAddress `json:"token"`
+}
 
 // LoopNode defines model for LoopNode.
 type LoopNode struct {
@@ -1828,6 +1932,9 @@ type SessionPolicy struct {
 	AgentLabel             string           `json:"agentLabel"`
 	AllowContractRecipient *bool            `json:"allowContractRecipient,omitempty"`
 	AllowedActions         *[]AllowedAction `json:"allowedActions,omitempty"`
+	BudgetStartAmounts     *[]Erc20SpendCap `json:"budgetStartAmounts,omitempty"`
+	BudgetStartNative      *NativeSpendCap  `json:"budgetStartNative,omitempty"`
+	BudgetStartedAt        *int64           `json:"budgetStartedAt,omitempty"`
 
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
 	// chain-aware trigger/node configs this is required and must be a
@@ -1873,6 +1980,9 @@ type SessionPolicy struct {
 
 	// SessionSigner Lowercase or checksummed hex EOA / contract address.
 	SessionSigner EthereumAddress `json:"sessionSigner"`
+
+	// Sizing Absent means workflow sizing. Budget fields are additive and not written yet.
+	Sizing *BudgetSizing `json:"sizing,omitempty"`
 
 	// Status pending = signed and stored, install not yet on-chain (revocable
 	// for free). active = install applied. revoked = grants nothing.
@@ -2176,6 +2286,9 @@ type SubmitPolicyResponse struct {
 	AgentLabel             string           `json:"agentLabel"`
 	AllowContractRecipient *bool            `json:"allowContractRecipient,omitempty"`
 	AllowedActions         *[]AllowedAction `json:"allowedActions,omitempty"`
+	BudgetStartAmounts     *[]Erc20SpendCap `json:"budgetStartAmounts,omitempty"`
+	BudgetStartNative      *NativeSpendCap  `json:"budgetStartNative,omitempty"`
+	BudgetStartedAt        *int64           `json:"budgetStartedAt,omitempty"`
 
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
 	// chain-aware trigger/node configs this is required and must be a
@@ -2221,6 +2334,9 @@ type SubmitPolicyResponse struct {
 
 	// SessionSigner Lowercase or checksummed hex EOA / contract address.
 	SessionSigner EthereumAddress `json:"sessionSigner"`
+
+	// Sizing Absent means workflow sizing. Budget fields are additive and not written yet.
+	Sizing *BudgetSizing `json:"sizing,omitempty"`
 
 	// Status pending = signed and stored, install not yet on-chain (revocable
 	// for free). active = install applied. revoked = grants nothing.
@@ -2336,6 +2452,22 @@ type TriggerWorkflowResponse struct {
 // Ulid ULID identifier (26-char Crockford base32).
 type Ulid = string
 
+// UnmeteredPermission defines model for UnmeteredPermission.
+type UnmeteredPermission struct {
+	Added     bool                    `json:"added"`
+	Kind      UnmeteredPermissionKind `json:"kind"`
+	Selectors []string                `json:"selectors"`
+
+	// Target Lowercase or checksummed hex EOA / contract address.
+	Target EthereumAddress `json:"target"`
+
+	// Token Lowercase or checksummed hex EOA / contract address.
+	Token *EthereumAddress `json:"token,omitempty"`
+}
+
+// UnmeteredPermissionKind defines model for UnmeteredPermission.Kind.
+type UnmeteredPermissionKind string
+
 // UpdateWalletRequest defines model for UpdateWalletRequest.
 type UpdateWalletRequest struct {
 	IsHidden *bool `json:"isHidden,omitempty"`
@@ -2430,6 +2562,43 @@ type Wallet struct {
 // WalletKind Empty/omitted for derived CREATE2 wallets. `eoa_7702` is the owner's
 // EOA delegated to SemiModularAccount7702.
 type WalletKind string
+
+// WalletBudget defines model for WalletBudget.
+type WalletBudget struct {
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId          `json:"chainId"`
+	Erc20   []BudgetTokenRow `json:"erc20"`
+
+	// LiveApprovals Reserved for approval discovery; omitted in this slice, not an assertion that no approvals exist.
+	LiveApprovals *[]LiveApproval  `json:"liveApprovals,omitempty"`
+	Native        *BudgetNativeRow `json:"native,omitempty"`
+
+	// PendingChange Reserved for stored budget preparations; omitted in this slice.
+	PendingChange *struct {
+		// PolicyId ULID identifier (26-char Crockford base32).
+		PolicyId Ulid                           `json:"policyId"`
+		Reason   *string                        `json:"reason,omitempty"`
+		State    WalletBudgetPendingChangeState `json:"state"`
+	} `json:"pendingChange,omitempty"`
+
+	// PolicyId ULID identifier (26-char Crockford base32).
+	PolicyId             Ulid                  `json:"policyId"`
+	ReadAt               int64                 `json:"readAt"`
+	Retirements          *[]BudgetRetirement   `json:"retirements,omitempty"`
+	Sizing               BudgetSizing          `json:"sizing"`
+	StartedAt            *int64                `json:"startedAt,omitempty"`
+	Status               WalletBudgetStatus    `json:"status"`
+	UnmeteredPermissions []UnmeteredPermission `json:"unmeteredPermissions"`
+	ValidUntil           int64                 `json:"validUntil"`
+}
+
+// WalletBudgetPendingChangeState defines model for WalletBudget.PendingChange.State.
+type WalletBudgetPendingChangeState string
+
+// WalletBudgetStatus defines model for WalletBudget.Status.
+type WalletBudgetStatus string
 
 // WalletList defines model for WalletList.
 type WalletList struct {
@@ -2693,6 +2862,13 @@ type ListWalletsParams struct {
 	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
+// GetWalletBudgetParams defines parameters for GetWalletBudget.
+type GetWalletBudgetParams struct {
+	// ChainId The chain to operate on (a single value). Omit to use the aggregator
+	// default (the request's JWT `aud` chain, then the gateway default).
+	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
+}
+
 // GetEoaDelegationParams defines parameters for GetEoaDelegation.
 type GetEoaDelegationParams struct {
 	// ChainId The chain to operate on (a single value). Omit to use the aggregator
@@ -2825,6 +3001,119 @@ type PrepareWorkflowJSONRequestBody = PrepareWorkflowRequest
 
 // SimulateWorkflowJSONRequestBody defines body for SimulateWorkflow for application/json ContentType.
 type SimulateWorkflowJSONRequestBody = SimulateWorkflowRequest
+
+// Getter for additional properties for ExecutionStep_ErrorDetails. Returns the specified
+// element and whether it was found
+func (a ExecutionStep_ErrorDetails) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for ExecutionStep_ErrorDetails
+func (a *ExecutionStep_ErrorDetails) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for ExecutionStep_ErrorDetails to handle AdditionalProperties
+func (a *ExecutionStep_ErrorDetails) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["needed"]; found {
+		err = json.Unmarshal(raw, &a.Needed)
+		if err != nil {
+			return fmt.Errorf("error reading 'needed': %w", err)
+		}
+		delete(object, "needed")
+	}
+
+	if raw, found := object["remaining"]; found {
+		err = json.Unmarshal(raw, &a.Remaining)
+		if err != nil {
+			return fmt.Errorf("error reading 'remaining': %w", err)
+		}
+		delete(object, "remaining")
+	}
+
+	if raw, found := object["token"]; found {
+		err = json.Unmarshal(raw, &a.Token)
+		if err != nil {
+			return fmt.Errorf("error reading 'token': %w", err)
+		}
+		delete(object, "token")
+	}
+
+	if raw, found := object["validUntil"]; found {
+		err = json.Unmarshal(raw, &a.ValidUntil)
+		if err != nil {
+			return fmt.Errorf("error reading 'validUntil': %w", err)
+		}
+		delete(object, "validUntil")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for ExecutionStep_ErrorDetails to handle AdditionalProperties
+func (a ExecutionStep_ErrorDetails) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	if a.Needed != nil {
+		object["needed"], err = json.Marshal(a.Needed)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'needed': %w", err)
+		}
+	}
+
+	if a.Remaining != nil {
+		object["remaining"], err = json.Marshal(a.Remaining)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'remaining': %w", err)
+		}
+	}
+
+	if a.Token != nil {
+		object["token"], err = json.Marshal(a.Token)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'token': %w", err)
+		}
+	}
+
+	if a.ValidUntil != nil {
+		object["validUntil"], err = json.Marshal(a.ValidUntil)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'validUntil': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
 
 // Getter for additional properties for ExecutionSummary. Returns the specified
 // element and whether it was found

@@ -57,6 +57,7 @@ var expectedPermissionLevels = map[string]Level{
 	OpSubmitWalletPolicy:  LevelUserRefusePartner,
 	OpListWalletPolicies:  LevelUserRefusePartner,
 	OpGetWalletPolicy:     LevelUserRefusePartner,
+	OpGetWalletBudget:     LevelUserRefusePartner,
 	OpRevokeWalletPolicy:  LevelUserRefusePartner,
 }
 

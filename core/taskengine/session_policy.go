@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"sort"
 	"strings"
@@ -401,6 +402,9 @@ func NextSessionEntityID(db storage.Storage, chainID int64, owner, wallet common
 			continue
 		}
 		if p.EntityID >= next {
+			if p.EntityID == math.MaxUint32 {
+				return 0, fmt.Errorf("%s: validation entity ids exhausted for %s", SessionPolicyEntityOccupiedCode, wallet.Hex())
+			}
 			next = p.EntityID + 1
 		}
 	}
@@ -489,6 +493,9 @@ func NextFreeSessionEntityID(
 	unread, unreadTotal := 0, 0
 	var lastOccErr error
 	for i := uint32(0); i < maxEntityOccupancyWalk; i++ {
+		if i > math.MaxUint32-start {
+			return 0, fmt.Errorf("%s: validation entity ids exhausted for %s", SessionPolicyEntityOccupiedCode, wallet.Hex())
+		}
 		cand := start + i
 		probeCtx, probeCancel := context.WithTimeout(overall, occupancyProbeTimeout)
 		occupied, occErr := check(probeCtx, wallet, cand)
@@ -551,8 +558,9 @@ func (n *Engine) InstallSessionResolver() {
 	})
 }
 
-// teardownVerifier reads a validation entity's signer on the chain the grant
-// lives on. Dialled per check rather than held open: verification runs once
+// teardownVerifier reads the account's registration, not residual module
+// storage. Cleared hook lists must not be targeted by another account uninstall.
+// Dialled per check rather than held open: verification runs once
 // per replacement, and the alternative is a pool of long-lived clients for
 // every configured chain to serve a call that happens rarely.
 func (n *Engine) teardownVerifier() TeardownVerifier {
@@ -567,11 +575,11 @@ func (n *Engine) teardownVerifier() TeardownVerifier {
 		}
 		defer client.Close()
 
-		signer, err := aa.EntitySignerOnChain(ctx, client, account, entity)
+		registered, err := aa.EntityRegisteredOnChain(ctx, client, account, entity)
 		if err != nil {
 			return false, err
 		}
-		return signer == (common.Address{}), nil
+		return !registered, nil
 	}
 }
 

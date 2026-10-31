@@ -42,6 +42,13 @@ type SessionPolicy struct {
 	AgentLabel    string `json:"agent_label,omitempty"`
 	Justification string `json:"justification,omitempty"`
 
+	// Budget metadata is additive. Legacy records omit it and use workflow
+	// sizing. Preparation/activation will populate these in a later slice.
+	Sizing             BudgetSizing    `json:"sizing,omitempty"`
+	BudgetStartedAt    int64           `json:"budget_started_at,omitempty"`
+	BudgetStartAmounts []ERC20SpendCap `json:"budget_start_amounts,omitempty"`
+	BudgetStartNative  *NativeSpendCap `json:"budget_start_native,omitempty"`
+
 	// AllowedActions and ERC20SpendCap are the grant's declared permissions
 	// (master §7.2 P1/P2), stored for the manage screen and for rebuilding
 	// the module-cleanup payload at revocation. Display/rebuild data only:
@@ -181,6 +188,20 @@ type GrantGasShape struct {
 // SessionPolicyStatus tracks how far a grant has got.
 type SessionPolicyStatus string
 
+type BudgetSizing string
+
+const (
+	BudgetSizingWorkflow BudgetSizing = "workflow"
+	BudgetSizingBudget   BudgetSizing = "budget"
+)
+
+func (p *SessionPolicy) EffectiveSizing() BudgetSizing {
+	if p.Sizing == "" {
+		return BudgetSizingWorkflow
+	}
+	return p.Sizing
+}
+
 const (
 	// SessionPolicyPending is signed and stored but not yet on chain.
 	// Revoking is free here: delete the record, nothing was installed.
@@ -197,7 +218,8 @@ func (g *SessionGrantAuthorization) Applied() bool {
 	return g != nil && g.AppliedAt > 0
 }
 
-// TornDown reports whether the entity was recorded as cleared on chain.
+// TornDown reports whether the account registration was recorded as cleared.
+// Module residue is tracked separately by the budget read.
 func (g *SessionGrantAuthorization) TornDown() bool {
 	return g != nil && g.TornDownAt > 0
 }
