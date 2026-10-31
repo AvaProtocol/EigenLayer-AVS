@@ -72,7 +72,7 @@ type SessionPermissions struct {
 	// is false, including when a recipient is an acknowledged 7702
 	// delegation. Nil is fail-closed. Tests inject a stub; production
 	// prepare/submit bind a pooled chain reader.
-	CodeAt func(common.Address) ([]byte, error)
+	CodeAt func(common.Address) ([]byte, error) `json:"-"`
 }
 
 // Validate rejects a permission set the grant screen could not have produced.
@@ -163,6 +163,17 @@ func (p SessionPermissions) validate(withChain bool) error {
 				return fmt.Errorf("native recipient %s is listed twice", rec.Hex())
 			}
 			seenRecipients[*rec] = struct{}{}
+			if p.budgetMode {
+				caps, err := p.resolvedSpendCaps()
+				if err != nil {
+					return err
+				}
+				for _, cap := range caps {
+					if cap.Token != nil && *cap.Token == *rec {
+						return fmt.Errorf("a budget token cannot also be an unrestricted native recipient")
+					}
+				}
+			}
 			if reservedNativeRecipient(*rec) {
 				return fmt.Errorf("native recipient %s is a known module, factory, or EntryPoint", rec.Hex())
 			}

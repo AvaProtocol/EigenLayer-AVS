@@ -476,15 +476,20 @@ func annotatePrefundError(err error, sender common.Address) error {
 	if err == nil {
 		return nil
 	}
-	msg := err.Error()
-	if strings.Contains(msg, "balance and deposit together is 0") ||
-		strings.Contains(msg, "AA21") ||
-		strings.Contains(strings.ToLower(msg), "didn't pay prefund") {
+	if isPrefundError(err) {
 		return fmt.Errorf(
 			"smart wallet %s cannot pay gas (bundler prefund check): %w; set alchemy_paymaster_policy_id / ALCHEMY_PAYMASTER_POLICY_ID or fund the wallet",
 			sender.Hex(), err)
 	}
 	return err
+}
+
+func isPrefundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "balance and deposit together is 0") || strings.Contains(msg, "AA21") || strings.Contains(strings.ToLower(msg), "didn't pay prefund")
 }
 
 // resolveSenderV07 picks the account the operation runs as. An explicit

@@ -72,11 +72,15 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 	if err != nil {
 		return mapPolicyError(err)
 	}
+	discovery, err := budgetDiscoveryFromAPI(req.ApprovalDiscovery)
+	if err != nil {
+		return mapPolicyError(err)
+	}
 	// Matches the published contract (openapi.yaml minimum: 60, maximum:
 	// MaxSessionExpiresInSeconds). A sub-minute grant expires before its
 	// first operation can mine. A value past the maximum overflows
 	// time.Duration and would wrap into a short grant.
-	if req.Budget == nil && req.ExpiresInSeconds < 60 {
+	if req.Budget == nil && req.ApprovalDiscovery == nil && req.ExpiresInSeconds < 60 {
 		return badRequest("POLICIES_BAD_EXPIRY", "Invalid expiry", "expiresInSeconds must be at least 60.")
 	}
 	if req.ExpiresInSeconds > taskengine.MaxSessionExpiresInSeconds {
@@ -85,15 +89,16 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 	}
 	var affected []string
 	in := taskengine.SessionPolicyInput{
-		Wallet:           wallet,
-		ChainID:          int64(req.ChainId),
-		AgentLabel:       req.AgentLabel,
-		Justification:    deref(req.Justification),
-		BasePolicyID:     req.BasePolicyId,
-		DropTaskIDs:      derefStrings(req.DropTaskIds),
-		ExpiresInSeconds: req.ExpiresInSeconds,
-		AffectedOut:      &affected,
-		Budget:           budget,
+		Wallet:            wallet,
+		ChainID:           req.ChainId,
+		AgentLabel:        req.AgentLabel,
+		Justification:     deref(req.Justification),
+		BasePolicyID:      req.BasePolicyId,
+		DropTaskIDs:       derefStrings(req.DropTaskIds),
+		ExpiresInSeconds:  req.ExpiresInSeconds,
+		AffectedOut:       &affected,
+		Budget:            budget,
+		ApprovalDiscovery: discovery,
 	}
 	if req.Add != nil {
 		// The addition is a fragment. Top-level permission fields are the
@@ -111,9 +116,16 @@ func (s *Server) PrepareWalletPolicy(ctx echo.Context, address generated.Ethereu
 		in.Permissions = perms
 	}
 
-	prepared, err := s.engine.PrepareSessionPolicy(user, in)
+	prepared, err := s.engine.PrepareSessionPolicyWithContext(ctx.Request().Context(), user, in)
 	if err != nil {
 		return mapPolicyError(err)
+	}
+	if prepared.BudgetPreparation != nil {
+		out, mappingErr := budgetPreparationToAPI(prepared.BudgetPreparation)
+		if mappingErr != nil {
+			return mappingErr
+		}
+		return ctx.JSON(http.StatusOK, out)
 	}
 
 	policy := prepared.Policy
@@ -586,10 +598,16 @@ func mapPolicyError(err error) error {
 	switch {
 	case errors.As(err, &budgetError):
 		status := http.StatusBadRequest
-		if budgetError.Code == taskengine.BudgetHandoffRequiredCode || budgetError.Code == taskengine.BudgetReplaceRefusedCode {
+		if budgetError.Code == taskengine.BudgetDiscoveryUnavailableCode {
+			status = http.StatusServiceUnavailable
+		} else if budgetError.Code == taskengine.BudgetPreparationLimitCode {
+			status = http.StatusTooManyRequests
+		} else if budgetError.Code == taskengine.BudgetHandoffRequiredCode || budgetError.Code == taskengine.BudgetReplaceRefusedCode || budgetError.Code == taskengine.BudgetDiscoveryRequiredCode || budgetError.Code == taskengine.BudgetResetUnsupportedCode || budgetError.Code == taskengine.BudgetFeeInsufficientCode || budgetError.Code == taskengine.BudgetLegacyGrantPendingCode {
 			status = http.StatusConflict
 		}
-		return &restmw.HTTPError{Status: status, Code: budgetError.Code, Title: "Budget request refused", Detail: budgetError.Detail}
+		return &restmw.HTTPError{Status: status, Code: budgetError.Code, Title: "Budget request refused", Detail: budgetError.Detail, Token: budgetError.Details["token"], Spender: budgetError.Details["spender"], NeededWei: budgetError.Details["neededWei"], AvailableWei: budgetError.Details["availableWei"]}
+	case errors.Is(err, taskengine.ErrBudgetReadUnavailable):
+		return &restmw.HTTPError{Status: http.StatusServiceUnavailable, Code: taskengine.BudgetReadUnavailableCode, Title: "Budget couldn't be prepared", Detail: "A required chain read is unavailable. Try again."}
 	case errors.As(err, &conflict):
 		return policyConflictHTTP(conflict)
 	case errors.As(err, &refusal):
