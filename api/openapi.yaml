@@ -283,6 +283,10 @@ components:
             Set on `SESSION_POLICY_BASE_CHANGED`, `SESSION_POLICY_NOT_COVERING`,
             `SESSION_POLICY_TARGET_UNRESOLVED`, `SESSION_POLICY_NATIVE_UNSIZED`,
             `SESSION_POLICY_EXPIRED`, and `SESSION_POLICY_SIGNER_RETIRED`.
+        token: { $ref: '#/components/schemas/EthereumAddress' }
+        spender: { $ref: '#/components/schemas/EthereumAddress' }
+        neededWei: { type: string, pattern: '^[0-9]+$' }
+        availableWei: { type: string, pattern: '^[0-9]+$' }
         affectedTaskIds:
           type: array
           items: { type: string }
@@ -2286,8 +2290,10 @@ components:
 
     PreparePolicyRequest:
       type: object
-      required: [chainId, agentLabel, expiresInSeconds]
+      required: [chainId, agentLabel]
       properties:
+        approvalDiscovery:
+          $ref: '#/components/schemas/BudgetApprovalDiscovery'
         budget:
           $ref: '#/components/schemas/WalletBudgetInput'
           description: |
@@ -2358,6 +2364,7 @@ components:
         expiresInSeconds:
           type: integer
           format: int64
+          x-go-type-skip-optional-pointer: true
           minimum: 60
           maximum: 9223372036
           description: |
@@ -2394,8 +2401,17 @@ components:
 
     PreparedPolicy:
       type: object
-      required: [policyId, chainId, entityId, sessionSigner, deadline, validUntil, digest, typedData]
+      required: [policyId, chainId, entityId, sessionSigner, deadline, validUntil]
       properties:
+        preparationId: { $ref: '#/components/schemas/Ulid' }
+        signing: { $ref: '#/components/schemas/PolicySigning' }
+        budget: { $ref: '#/components/schemas/WalletBudget' }
+        approvalResets:
+          type: array
+          items: { $ref: '#/components/schemas/BudgetApprovalReset' }
+        unmeteredPermissions:
+          type: array
+          items: { $ref: '#/components/schemas/UnmeteredPermission' }
         policyId: { $ref: '#/components/schemas/Ulid' }
         chainId: { $ref: '#/components/schemas/ChainId' }
         entityId:
@@ -2414,10 +2430,12 @@ components:
           description: Absolute grant expiry, unix milliseconds. Echo verbatim to submit.
         digest:
           type: string
+          x-go-type-skip-optional-pointer: true
           pattern: '^0x[a-fA-F0-9]{64}$'
           description: The EIP-712 hash the typed data produces, for client-side verification.
         typedData:
           type: object
+          x-go-type-skip-optional-pointer: true
           additionalProperties: true
           description: The exact eth_signTypedData_v4 payload for the owner's wallet.
         basePolicyId:
@@ -2619,6 +2637,70 @@ components:
             Present when status is revoked and the validation entity is still
             installed on chain. Owner-executable uninstallValidation so clients
             can finish teardown without re-calling DELETE (#717).
+
+    BudgetApprovalPair:
+      type: object
+      required: [token, spender]
+      properties:
+        token: { $ref: '#/components/schemas/EthereumAddress' }
+        spender: { $ref: '#/components/schemas/EthereumAddress' }
+
+    BudgetApprovalDiscovery:
+      type: object
+      additionalProperties: false
+      required: [owner, wallet, chainId, candidates, allowedContracts, source, fetchedAt, complete, signature]
+      description: |
+        Trusted backend attestation of the full unfiltered approval inventory
+        (every page), plus catalog-token/allowed-contract pairs. No caller's
+        unsigned list is trusted. The gateway verifies the configured service
+        signer and freshness (two minutes), then reads allowances on chain.
+        Signature is EIP-712 ApprovalDiscovery, domain name Ava Wallet Budget
+        Approval Discovery, version 1, chainId, verifyingContract=wallet.
+        The message binds owner, wallet, candidatesHash, allowedContractsHash, source, fetchedAt and
+        complete. candidatesHash is keccak256 of sorted unique token/spender
+        address pairs concatenated as two left-padded 32-byte words per pair.
+      properties:
+        owner: { $ref: '#/components/schemas/EthereumAddress' }
+        wallet: { $ref: '#/components/schemas/EthereumAddress' }
+        chainId: { $ref: '#/components/schemas/ChainId' }
+        candidates:
+          type: array
+          maxItems: 10000
+          items: { $ref: '#/components/schemas/BudgetApprovalPair' }
+        allowedContracts:
+          type: array
+          maxItems: 10000
+          description: Complete resulting callable target set; its sorted unique address words are hashed as allowedContractsHash.
+          items: { $ref: '#/components/schemas/EthereumAddress' }
+        source: { type: string, enum: [moralis] }
+        fetchedAt: { type: integer, format: int64 }
+        complete: { type: boolean }
+        signature: { $ref: '#/components/schemas/Hex' }
+
+    BudgetApprovalReset:
+      type: object
+      required: [token, spender, amount]
+      properties:
+        token: { $ref: '#/components/schemas/EthereumAddress' }
+        spender: { $ref: '#/components/schemas/EthereumAddress' }
+        amount: { type: string, pattern: '^[0-9]+$' }
+
+    PolicySigning:
+      type: object
+      required: [kind]
+      description: |
+        Budget preparations use owner_operation and omit legacy digest and
+        typedData. Preparation is gated off by default. This preparation-only
+        slice never relays a budget operation; signature submit remains refused.
+      properties:
+        kind: { type: string, enum: [deferred_action, owner_operation] }
+        preparationId: { $ref: '#/components/schemas/Ulid' }
+        userOp: { $ref: '#/components/schemas/OwnerUserOperationV07' }
+        userOpHash: { $ref: '#/components/schemas/Bytes32' }
+        maxFeeWei: { type: string, pattern: '^[0-9]+$' }
+        expiresAt: { type: integer, format: int64 }
+        signingMethod: { type: string, enum: [personal_sign] }
+        entryPoint: { $ref: '#/components/schemas/EthereumAddress' }
 
     WalletBudgetInput:
       type: object
@@ -3848,6 +3930,74 @@ paths:
   # before the owner can sign it, and nothing is stored until the signature
   # comes back. Fund authority — never reachable through a partner assertion.
 
+  /wallets/{address}/policies/preparations/{id}:
+    parameters:
+      - name: address
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/EthereumAddress' }
+      - name: id
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Ulid' }
+    get:
+      tags: [Policies]
+      operationId: getWalletBudgetPreparation
+      summary: Read an owned unsigned budget preparation
+      parameters:
+        - $ref: '#/components/parameters/ChainIdQuery'
+      responses:
+        '200':
+          description: Exact stored review and priced owner operation; no usable grant is created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PreparedPolicy' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Budget preparation is disabled.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /wallets/{address}/policies/preparations/{id}:submit:
+    parameters:
+      - name: address
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/EthereumAddress' }
+      - name: id
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Ulid' }
+    post:
+      tags: [Policies]
+      operationId: submitWalletBudgetPreparation
+      summary: Reserved signature-only budget handoff (not enabled yet)
+      description: |
+        This slice always refuses with BUDGET_HANDOFF_REQUIRED. It neither
+        broadcasts nor activates a grant. Holds and activation must land first.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [signature]
+              properties:
+                signature: { $ref: '#/components/schemas/Hex' }
+      responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Budget submission is not enabled.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
   /wallets/{address}/policies:prepare:
     parameters:
       - name: address
@@ -3856,8 +4006,23 @@ paths:
         schema: { $ref: '#/components/schemas/EthereumAddress' }
     post:
       tags: [Policies]
-      summary: Allocate a grant and return the EIP-712 payload the owner signs
+      summary: Prepare a legacy typed grant or a stored unsigned budget operation
       description: |
+        With budget or approvalDiscovery, the experimental off-by-default
+        wallet_budget_preparation_enabled path stores a priced unsigned owner
+        operation and the exact intent/read/derived review. It requires a fresh
+        signed approvalDiscovery, explicitly self-funds, and returns signing.kind
+        owner_operation (personal_sign of raw userOpHash). It creates no usable
+        policy or hold. Budget submit remains refused until activation exists.
+        GET /wallets/{address}/policies/preparations/{id} recovers the same review.
+        Missing/stale discovery returns 409 BUDGET_DISCOVERY_REQUIRED; incomplete
+        discovery or failed reads return 503; 64 live unsigned records per owner
+        returns 429. Only tested token deployments may be reset automatically:
+        v1 Sepolia USDC. Other live allowances requiring reset return 409
+        BUDGET_RESET_UNSUPPORTED_TOKEN with token/spender; insufficient ETH returns
+        409 BUDGET_FEE_INSUFFICIENT_ETH with neededWei/availableWei.
+
+        Legacy path (no budget/discovery, non-budget wallet):
         Allocates the policy id, validation entity, and session signer, builds
         the exact `installValidation` calldata the signature will commit to,
         and returns the typed data for `eth_signTypedData_v4`. Stores nothing:
@@ -3952,6 +4117,12 @@ paths:
             in `dropTaskIds`, is the way through. The native limit module
             is not installed. If the current grant already has a native
             cap, this is not an error.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503':
+          description: A required balance, allowance or complete discovery read is unavailable.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }

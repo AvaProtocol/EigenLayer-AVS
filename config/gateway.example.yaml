@@ -15,6 +15,11 @@ environment: development
 # after configuring the chain/bundler; Auto/session execution is unaffected.
 owner_execution_enabled: false
 
+# Read-only wallet budget preparations. Submit/activation are not enabled yet.
+wallet_budget_preparation_enabled: false
+# Public signer address of the trusted backend approval-inventory service.
+wallet_budget_discovery_signer: ""
+
 db_path: /tmp/ap-avs/gateway
 # Honored when set. Empty → `{db_path}_backup`. Periodic writes only when
 # backup_interval_hours > 0; otherwise backups run on migration only.

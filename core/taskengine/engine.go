@@ -332,6 +332,9 @@ type Engine struct {
 
 	// nil selects the production owner prepare/validate/keyless-relay service.
 	ownerExecutionBackend ownerExecutionBackend
+	// Tests may inject pricing without a live chain. Production always forces
+	// the dedicated self-funded owner preparation service.
+	budgetOwnerPrepareOverride ownerBudgetPrepareFunc
 }
 
 // executionLockShards bounds the per-execution resume locks to a fixed set of mutexes.

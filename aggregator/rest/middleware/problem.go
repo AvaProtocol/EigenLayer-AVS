@@ -42,6 +42,10 @@ type ProblemNeed struct {
 }
 
 type Problem struct {
+	Token           string          `json:"token,omitempty"`
+	Spender         string          `json:"spender,omitempty"`
+	NeededWei       string          `json:"neededWei,omitempty"`
+	AvailableWei    string          `json:"availableWei,omitempty"`
 	Type            string          `json:"type"`
 	Title           string          `json:"title"`
 	Status          int             `json:"status"`
@@ -69,6 +73,10 @@ const genericServerErrorDetail = "An internal error occurred while processing th
 // Problem fields directly. Anything else (echo.HTTPError, plain errors)
 // gets best-effort-mapped to a Problem by ProblemErrorHandler.
 type HTTPError struct {
+	Token           string
+	Spender         string
+	NeededWei       string
+	AvailableWei    string
 	Status          int
 	Code            string
 	Title           string
@@ -141,6 +149,7 @@ func ProblemErrorHandler(logger sdklogging.Logger) echo.HTTPErrorHandler {
 		var echoErr *echo.HTTPError
 		switch {
 		case errors.As(err, &typed):
+			p.Token, p.Spender, p.NeededWei, p.AvailableWei = typed.Token, typed.Spender, typed.NeededWei, typed.AvailableWei
 			p.Status = typed.Status
 			p.Code = typed.Code
 			p.Title = typed.Title

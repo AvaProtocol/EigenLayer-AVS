@@ -50,6 +50,11 @@ const (
 	Branch BranchNodeType = "branch"
 )
 
+// Defines values for BudgetApprovalDiscoverySource.
+const (
+	Moralis BudgetApprovalDiscoverySource = "moralis"
+)
+
 // Defines values for BudgetRetirementState.
 const (
 	Registered BudgetRetirementState = "registered"
@@ -205,6 +210,17 @@ const (
 	NodeTypeRestApi       NodeType = "restApi"
 )
 
+// Defines values for PolicySigningKind.
+const (
+	DeferredAction PolicySigningKind = "deferred_action"
+	OwnerOperation PolicySigningKind = "owner_operation"
+)
+
+// Defines values for PolicySigningSigningMethod.
+const (
+	PolicySigningSigningMethodPersonalSign PolicySigningSigningMethod = "personal_sign"
+)
+
 // Defines values for PrepareWorkflowResponseGasFunding.
 const (
 	Source    PrepareWorkflowResponseGasFunding = "source"
@@ -213,7 +229,7 @@ const (
 
 // Defines values for PrepareWorkflowResponseSigningMethod.
 const (
-	PersonalSign PrepareWorkflowResponseSigningMethod = "personal_sign"
+	PrepareWorkflowResponseSigningMethodPersonalSign PrepareWorkflowResponseSigningMethod = "personal_sign"
 )
 
 // Defines values for RestAPINodeType.
@@ -517,6 +533,61 @@ type BranchNodeType string
 // BranchNodeConfig defines model for BranchNodeConfig.
 type BranchNodeConfig struct {
 	Conditions []BranchCondition `json:"conditions"`
+}
+
+// BudgetApprovalDiscovery Trusted backend attestation of the full unfiltered approval inventory
+// (every page), plus catalog-token/allowed-contract pairs. No caller's
+// unsigned list is trusted. The gateway verifies the configured service
+// signer and freshness (two minutes), then reads allowances on chain.
+// Signature is EIP-712 ApprovalDiscovery, domain name Ava Wallet Budget
+// Approval Discovery, version 1, chainId, verifyingContract=wallet.
+// The message binds owner, wallet, candidatesHash, allowedContractsHash, source, fetchedAt and
+// complete. candidatesHash is keccak256 of sorted unique token/spender
+// address pairs concatenated as two left-padded 32-byte words per pair.
+type BudgetApprovalDiscovery struct {
+	// AllowedContracts Complete resulting callable target set; its sorted unique address words are hashed as allowedContractsHash.
+	AllowedContracts []EthereumAddress    `json:"allowedContracts"`
+	Candidates       []BudgetApprovalPair `json:"candidates"`
+
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId   ChainId `json:"chainId"`
+	Complete  bool    `json:"complete"`
+	FetchedAt int64   `json:"fetchedAt"`
+
+	// Owner Lowercase or checksummed hex EOA / contract address.
+	Owner EthereumAddress `json:"owner"`
+
+	// Signature Arbitrary-length hex-encoded byte string.
+	Signature Hex                           `json:"signature"`
+	Source    BudgetApprovalDiscoverySource `json:"source"`
+
+	// Wallet Lowercase or checksummed hex EOA / contract address.
+	Wallet EthereumAddress `json:"wallet"`
+}
+
+// BudgetApprovalDiscoverySource defines model for BudgetApprovalDiscovery.Source.
+type BudgetApprovalDiscoverySource string
+
+// BudgetApprovalPair defines model for BudgetApprovalPair.
+type BudgetApprovalPair struct {
+	// Spender Lowercase or checksummed hex EOA / contract address.
+	Spender EthereumAddress `json:"spender"`
+
+	// Token Lowercase or checksummed hex EOA / contract address.
+	Token EthereumAddress `json:"token"`
+}
+
+// BudgetApprovalReset defines model for BudgetApprovalReset.
+type BudgetApprovalReset struct {
+	Amount string `json:"amount"`
+
+	// Spender Lowercase or checksummed hex EOA / contract address.
+	Spender EthereumAddress `json:"spender"`
+
+	// Token Lowercase or checksummed hex EOA / contract address.
+	Token EthereumAddress `json:"token"`
 }
 
 // BudgetNativeRow defines model for BudgetNativeRow.
@@ -1428,6 +1499,35 @@ type PageInfo struct {
 	StartCursor *string `json:"startCursor,omitempty"`
 }
 
+// PolicySigning Budget preparations use owner_operation and omit legacy digest and
+// typedData. Preparation is gated off by default. This preparation-only
+// slice never relays a budget operation; signature submit remains refused.
+type PolicySigning struct {
+	// EntryPoint Lowercase or checksummed hex EOA / contract address.
+	EntryPoint *EthereumAddress  `json:"entryPoint,omitempty"`
+	ExpiresAt  *int64            `json:"expiresAt,omitempty"`
+	Kind       PolicySigningKind `json:"kind"`
+	MaxFeeWei  *string           `json:"maxFeeWei,omitempty"`
+
+	// PreparationId ULID identifier (26-char Crockford base32).
+	PreparationId *Ulid                       `json:"preparationId,omitempty"`
+	SigningMethod *PolicySigningSigningMethod `json:"signingMethod,omitempty"`
+
+	// UserOp Finalized ERC-4337 v0.7 bundler-wire operation. Quantity fields are hex
+	// strings, never JSON numbers. Signature is empty (0x) until continuation;
+	// no operation field can be supplied or changed by submitExecution.
+	UserOp *OwnerUserOperationV07 `json:"userOp,omitempty"`
+
+	// UserOpHash 32-byte hex hash (UserOp hash, transaction hash).
+	UserOpHash *Bytes32 `json:"userOpHash,omitempty"`
+}
+
+// PolicySigningKind defines model for PolicySigning.Kind.
+type PolicySigningKind string
+
+// PolicySigningSigningMethod defines model for PolicySigning.SigningMethod.
+type PolicySigningSigningMethod string
+
 // PreparePolicyRequest defines model for PreparePolicyRequest.
 type PreparePolicyRequest struct {
 	// Add What the automation being set up needs. Merged, under the runner
@@ -1450,6 +1550,17 @@ type PreparePolicyRequest struct {
 	// AllowedActions Selector-scoped contract calls. Native-only grants omit this
 	// field. A present empty array is 400.
 	AllowedActions *[]AllowedAction `json:"allowedActions,omitempty"`
+
+	// ApprovalDiscovery Trusted backend attestation of the full unfiltered approval inventory
+	// (every page), plus catalog-token/allowed-contract pairs. No caller's
+	// unsigned list is trusted. The gateway verifies the configured service
+	// signer and freshness (two minutes), then reads allowances on chain.
+	// Signature is EIP-712 ApprovalDiscovery, domain name Ava Wallet Budget
+	// Approval Discovery, version 1, chainId, verifyingContract=wallet.
+	// The message binds owner, wallet, candidatesHash, allowedContractsHash, source, fetchedAt and
+	// complete. candidatesHash is keccak256 of sorted unique token/spender
+	// address pairs concatenated as two left-padded 32-byte words per pair.
+	ApprovalDiscovery *BudgetApprovalDiscovery `json:"approvalDiscovery,omitempty"`
 
 	// BasePolicyId Usable grant this prepare was merged against. Omit on a legacy
 	// prepare that sends the full permission set and does not compare.
@@ -1502,7 +1613,7 @@ type PreparePolicyRequest struct {
 	// later, because the wallet keeps one expiry and it must cover
 	// every enabled automation. Values above 9223372036 overflow the
 	// duration conversion and are rejected.
-	ExpiresInSeconds int64   `json:"expiresInSeconds"`
+	ExpiresInSeconds int64   `json:"expiresInSeconds,omitempty"`
 	Justification    *string `json:"justification,omitempty"`
 
 	// NativeRecipients EOAs this grant may send native ETH to (empty-calldata execute).
@@ -1616,11 +1727,13 @@ type PreparedPolicy struct {
 	AllowContractRecipient *bool     `json:"allowContractRecipient,omitempty"`
 
 	// AllowedActions Merged actions to echo to submit. Present when `add` was sent.
-	AllowedActions *[]AllowedAction `json:"allowedActions,omitempty"`
+	AllowedActions *[]AllowedAction       `json:"allowedActions,omitempty"`
+	ApprovalResets *[]BudgetApprovalReset `json:"approvalResets,omitempty"`
 
 	// BasePolicyId Set when prepare merged an `add`. Empty means there was no usable
 	// grant. Echo `changes.basePolicyId`, including the empty string.
-	BasePolicyId *string `json:"basePolicyId,omitempty"`
+	BasePolicyId *string       `json:"basePolicyId,omitempty"`
+	Budget       *WalletBudget `json:"budget,omitempty"`
 
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
 	// chain-aware trigger/node configs this is required and must be a
@@ -1640,7 +1753,7 @@ type PreparedPolicy struct {
 	DelegatedNativeRecipients *[]DelegatedNativeRecipient `json:"delegatedNativeRecipients,omitempty"`
 
 	// Digest The EIP-712 hash the typed data produces, for client-side verification.
-	Digest string `json:"digest"`
+	Digest string `json:"digest,omitempty"`
 
 	// EntityId The validation entity allocated for this grant (provisional until submit).
 	EntityId int64 `json:"entityId"`
@@ -1658,11 +1771,20 @@ type PreparedPolicy struct {
 	// PolicyId ULID identifier (26-char Crockford base32).
 	PolicyId Ulid `json:"policyId"`
 
+	// PreparationId ULID identifier (26-char Crockford base32).
+	PreparationId *Ulid `json:"preparationId,omitempty"`
+
 	// SessionSigner Lowercase or checksummed hex EOA / contract address.
 	SessionSigner EthereumAddress `json:"sessionSigner"`
 
+	// Signing Budget preparations use owner_operation and omit legacy digest and
+	// typedData. Preparation is gated off by default. This preparation-only
+	// slice never relays a budget operation; signature submit remains refused.
+	Signing *PolicySigning `json:"signing,omitempty"`
+
 	// TypedData The exact eth_signTypedData_v4 payload for the owner's wallet.
-	TypedData map[string]interface{} `json:"typedData"`
+	TypedData            map[string]interface{} `json:"typedData,omitempty"`
+	UnmeteredPermissions *[]UnmeteredPermission `json:"unmeteredPermissions,omitempty"`
 
 	// ValidUntil Absolute grant expiry, unix milliseconds. Echo verbatim to submit.
 	ValidUntil int64 `json:"validUntil"`
@@ -1682,6 +1804,7 @@ type Problem struct {
 	// `409 SESSION_POLICY_NATIVE_UNSIZED` from policies:prepare
 	// and policies:submit.
 	AffectedTaskIds *[]string `json:"affectedTaskIds,omitempty"`
+	AvailableWei    *string   `json:"availableWei,omitempty"`
 
 	// Code Machine-readable error code. Stable across releases; clients can
 	// switch on this for programmatic handling. Mirrors the gRPC-era
@@ -1699,6 +1822,7 @@ type Problem struct {
 
 	// MissingActions Planned calls the grant does not allow.
 	MissingActions *[]AllowedAction `json:"missingActions,omitempty"`
+	NeededWei      *string          `json:"neededWei,omitempty"`
 
 	// PolicyId Usable session grant involved in this failure, when there is one.
 	// Set on `SESSION_POLICY_BASE_CHANGED`, `SESSION_POLICY_NOT_COVERING`,
@@ -1714,11 +1838,17 @@ type Problem struct {
 	// this need. Cap amounts are in the token's smallest unit.
 	Required *SessionPolicyNeed `json:"required,omitempty"`
 
+	// Spender Lowercase or checksummed hex EOA / contract address.
+	Spender *EthereumAddress `json:"spender,omitempty"`
+
 	// Status HTTP status code (echoed for clients that surface only the body).
 	Status int32 `json:"status"`
 
 	// Title Short, human-readable summary.
 	Title string `json:"title"`
+
+	// Token Lowercase or checksummed hex EOA / contract address.
+	Token *EthereumAddress `json:"token,omitempty"`
 
 	// Type URI identifying the problem type.
 	Type string `json:"type"`
@@ -2920,6 +3050,19 @@ type ListWalletPoliciesParams struct {
 	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
+// GetWalletBudgetPreparationParams defines parameters for GetWalletBudgetPreparation.
+type GetWalletBudgetPreparationParams struct {
+	// ChainId The chain to operate on (a single value). Omit to use the aggregator
+	// default (the request's JWT `aud` chain, then the gateway default).
+	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
+}
+
+// SubmitWalletBudgetPreparationJSONBody defines parameters for SubmitWalletBudgetPreparation.
+type SubmitWalletBudgetPreparationJSONBody struct {
+	// Signature Arbitrary-length hex-encoded byte string.
+	Signature Hex `json:"signature"`
+}
+
 // RevokeWalletPolicyParams defines parameters for RevokeWalletPolicy.
 type RevokeWalletPolicyParams struct {
 	// ChainId The chain to operate on (a single value). Omit to use the aggregator
@@ -3006,6 +3149,9 @@ type PrepareEoaDelegationJSONRequestBody PrepareEoaDelegationJSONBody
 
 // SubmitEoaDelegationJSONRequestBody defines body for SubmitEoaDelegation for application/json ContentType.
 type SubmitEoaDelegationJSONRequestBody = SubmitDelegationRequest
+
+// SubmitWalletBudgetPreparationJSONRequestBody defines body for SubmitWalletBudgetPreparation for application/json ContentType.
+type SubmitWalletBudgetPreparationJSONRequestBody SubmitWalletBudgetPreparationJSONBody
 
 // PrepareWalletPolicyJSONRequestBody defines body for PrepareWalletPolicy for application/json ContentType.
 type PrepareWalletPolicyJSONRequestBody = PreparePolicyRequest

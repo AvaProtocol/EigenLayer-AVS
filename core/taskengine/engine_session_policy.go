@@ -80,7 +80,8 @@ type SessionPolicyInput struct {
 	// ignore Permissions until the merge replaces them.
 	Addition *PolicyAddition
 	// Budget is never echoed through the stateless signature route.
-	Budget *WalletBudgetInput
+	Budget            *WalletBudgetInput
+	ApprovalDiscovery *BudgetApprovalDiscovery
 	// ExpiresInSeconds is the new automation's horizon when Addition is
 	// set and Addition.ValidUntilMs is zero.
 	ExpiresInSeconds int64
@@ -322,8 +323,13 @@ func (n *Engine) lookupOwnedWalletRecord(user *model.User, chainID int64, wallet
 // what lets that path use the non-locking marker: the mutex is not reentrant,
 // and taking it twice wedges the shard instead of failing.
 func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (*PreparedSessionGrant, error) {
-	if err := n.refuseLegacyBudgetInput(user, in); err != nil {
-		return nil, err
+	return n.PrepareSessionPolicyWithContext(context.Background(), user, in)
+}
+
+//nolint:gocyclo // Existing legacy compositor; context only adds the separate budget dispatch.
+func (n *Engine) PrepareSessionPolicyWithContext(ctx context.Context, user *model.User, in SessionPolicyInput) (*PreparedSessionGrant, error) {
+	if in.Budget != nil || in.ApprovalDiscovery != nil {
+		return n.prepareBudgetPolicy(ctx, user, in)
 	}
 	if in.ExpiresInSeconds < 0 || in.ExpiresInSeconds > MaxSessionExpiresInSeconds {
 		return nil, fmt.Errorf("expiresInSeconds must be between 0 and %d", MaxSessionExpiresInSeconds)
@@ -367,7 +373,7 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		}
 		if preCurrent != nil {
 			if isWalletBudget(preCurrent) {
-				return nil, budgetHandoffRequired()
+				return n.prepareBudgetPolicy(ctx, user, in)
 			}
 			readCtx, cancel := context.WithTimeout(context.Background(), occupancyProbeTimeout)
 			rem, readErr := n.resolveGrantRemainder(readCtx, preCurrent, in.Wallet)
