@@ -335,6 +335,7 @@ type Engine struct {
 	// Tests may inject pricing without a live chain. Production always forces
 	// the dedicated self-funded owner preparation service.
 	budgetOwnerPrepareOverride ownerBudgetPrepareFunc
+	budgetPreparationLocks     budgetPreparationLockSet
 }
 
 // executionLockShards bounds the per-execution resume locks to a fixed set of mutexes.

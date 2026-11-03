@@ -21,6 +21,12 @@ remainder, enabled tasks and derived rows. It lasts ten minutes, with at most
 `GET /wallets/{address}/policies/preparations/{id}?chainId=` returns that same
 review, without repricing or reading balances again. Corrupt and cross-owner,
 wallet, chain or expired records cannot return an operation.
+Recovery rebuilds the exact reset, retirement and install calls from the
+displayed review and checks the carrier nonce against the operation nonce,
+as well as recomputing its hash and maximum fee. Preparation uses independent
+per-owner, context-aware locks rather than blocking execution-resume shards.
+An unreadable record fails closed until its TTL expires; its key is logged
+without its contents so the blockage can be diagnosed.
 
 The response uses `signing.kind: owner_operation` and advertises the existing
 `personal_sign` of the **32 raw bytes** of `userOpHash`. It omits legacy digest
@@ -30,8 +36,10 @@ generic owner-execution submit can relay a budget preparation.
 
 Known, still-valid stored legacy deferred signatures refuse migration even if
 revoked off chain. Their session nonce differs from the owner nonce, so an
-owner operation cannot silently invalidate them. Wait for the signature window
-to close. Historical registered entities are included in retirement, without
+owner operation cannot silently invalidate them. The refusal includes the
+latest outstanding deadline; today's default signing window can last 30 days.
+Off-chain revocation does not shorten it, and there is no nonce-invalidation
+remedy in this slice. Historical registered entities are included in retirement, without
 truncating an oversized batch or silently marking anything cleared.
 
 ## Discovery and reset scope
@@ -62,12 +70,24 @@ gateway requires a matching owner/wallet/chain and age at most two minutes,
 and rechecks freshness after pricing. Independently computed ethers/Go golden
 vectors agree. A signed partial inventory is unavailable, never an empty list.
 
-The gateway reads actual `allowance(wallet, spender)` for every candidate,
+The gateway reads actual `allowance(wallet, spender)` for reset-scope candidates,
 expanding known token pairs across newly allowed targets (or all targets for
 migration and new totals). Native-recipient targets are included: a contract
 fallback or delegated account can spend an old approval without calldata.
+Pairs for unchanged targets needing no reset do not make redundant RPC reads;
+the full signed inventory remains in the intent record.
 Missing/replayed/forged/stale attestations and failed/malformed reads fail
 closed. No allowance amount from discovery is trusted.
+
+Attestation freshness does not bound Moralis's indexer lag or prove inventory
+completeness. Missing approvals for unknown tokens remain a residual risk;
+adding currently held tokens would help but would not close dormant-token
+gaps. The discovery-completeness policy and live chain coverage must be settled
+before signing is enabled. Direct ERC-20 resets do not inspect Permit2's
+internal/transitive permissions, NFT operator approvals or other mechanisms.
+The mainnet gate must classify allowed spending routes and refuse unsupported
+authority or expose it as explicitly unmetered with owner consent. This slice
+does not claim arbitrary indirect spending is constrained.
 
 Automatic approve-zero resets currently cover **only Sepolia USDC**, address
 `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`, as proven in #880. A positive
@@ -90,6 +110,12 @@ and deduplicate concurrent scans. Never refresh a timestamp without reading
 again, cache failures, or reuse on-chain allowance decisions/priced operations.
 The current 3c Studio module reads its service key through validated `env` and
 still performs discovery on each call; the bounded cache belongs to 3d wiring.
+The scan and signing now share a 45-second bound, leaving 15 seconds of margin
+after a full 60-second gateway prepare inside the two-minute freshness limit.
+Studio skips malformed token data only when the spender is provably unrelated;
+ambiguous or relevant rows still fail closed. Its 100-page limit counts raw
+pages, while the 10,000-pair limit counts matching/catalog pairs; exceeding
+either produces an availability diagnostic, never a partial attestation.
 
 Self-funding shortfalls return `BUDGET_FEE_INSUFFICIENT_ETH` with needed and
 available wei when quoted. Some bundlers reject prefund during estimation;
@@ -108,6 +134,14 @@ chain/bundler fixtures; no real signature or transaction is sent.
 Slice 3d must implement final base/remainder/task/approval/identity/nonce reads,
 the durable wallet/chain hold, signature-only relay, replacement/cancel and
 restart reconciliation, activation and retirement/module-health reporting.
+Final checks must cover newly pending legacy signatures and changed enabled
+tasks as well as the base policy. Reserve the entity with the durable hold,
+use and record a canonical block for allowance reads, verify post-install
+allowances, and reconcile known operation hashes/nonces and unknown on-chain
+entities after direct owner broadcasts. Ten minutes limits signing and first
+send, not on-chain validity; unsettled signed operations need durable records.
+A chain-appropriate configurable fee ceiling and a proven owner remedy for
+legacy pending signatures remain 3d decisions, not arbitrary new limits here.
 Preparing a review is not evidence of a mined installation. The full live gate
 in Studio's `PLAN_WALLET_BUDGET_PERMISSION.md` Phase 1 and
 `docs/WALLET_BUDGET_API.md` §6.6 remains required, including the second Skill

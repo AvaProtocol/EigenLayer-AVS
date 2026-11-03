@@ -247,6 +247,9 @@ func TestBudgetPreparationLegacyOutstandingSignatureAndMigration(t *testing.T) {
 				var e *BudgetPolicyError
 				require.ErrorAs(t, err, &e)
 				require.Equal(t, tc.want, e.Code)
+				require.Contains(t, e.Detail, time.Unix(int64(p.Grant.Deadline), 0).UTC().Format(time.RFC3339))
+				require.Contains(t, e.Detail, "30 days")
+				require.Contains(t, e.Detail, "revoking in Ava does not cancel")
 				require.Zero(t, f.backend.prepared.Load())
 			} else {
 				require.NoError(t, err)
@@ -371,4 +374,62 @@ func TestBudgetPreparationRefusesAttestationForSmallerTargetSet(t *testing.T) {
 	require.ErrorAs(t, err, &refusal)
 	require.Equal(t, BudgetDiscoveryRequiredCode, refusal.Code)
 	require.Zero(t, f.backend.prepared.Load())
+}
+
+func TestBudgetRecoveryBindsCoherentOperationToDisplayedReview(t *testing.T) {
+	for _, name := range []string{"omit reset", "positive approve", "reorder", "install", "native value", "owner nonce", "carrier nonce", "reset target", "retirement"} {
+		t.Run(name, func(t *testing.T) {
+			f := newBudgetPrepareFixture(t)
+			if name == "retirement" {
+				signer := f.user.Address
+				hooks, err := testPermissions().HooksFor(1)
+				require.NoError(t, err)
+				install, err := aa.PackSessionSignerInstall(aa.SessionGrant{EntityID: 1, Signer: signer, Global: true, Hooks: hooks})
+				require.NoError(t, err)
+				retired := &model.SessionPolicy{ID: "retired", Owner: &f.user.Address, Runner: &f.in.Wallet, ChainID: testPolicyChain, EntityID: 1, Status: model.SessionPolicyRevoked, Grant: &model.SessionGrantAuthorization{AppliedAt: 1, InstallCall: install}}
+				require.NoError(t, StoreSessionPolicy(f.n.db, retired))
+				f.n.config.SmartWallet.EthRpcUrl = budgetRegistrationRPC(t).URL
+			}
+			p := f.prepare(t)
+			op := (*userop.UserOperationV07)(p.Operation)
+			targets, values, datas, err := aa.UnpackExecuteCalldata(op.CallData)
+			require.NoError(t, err)
+			calls := make([]aa.Call, len(targets))
+			for i := range targets {
+				calls[i] = aa.Call{Target: targets[i], Value: values[i], Data: datas[i]}
+			}
+			switch name {
+			case "omit reset":
+				calls = calls[1:]
+			case "positive approve":
+				calls[0].Data[len(calls[0].Data)-1] = 1
+			case "reorder":
+				calls[0], calls[len(calls)-1] = calls[len(calls)-1], calls[0]
+			case "install":
+				calls[len(calls)-1].Data = append(calls[len(calls)-1].Data, 0)
+			case "native value":
+				calls[0].Value = big.NewInt(1)
+			case "owner nonce":
+				op.Nonce, err = userop.EncodeNonceMAv2(0, userop.ValidationOptionGlobal, 1)
+				require.NoError(t, err)
+			case "carrier nonce":
+				p.Policy.Grant.CarrierNonce = new(big.Int).Add(op.Nonce, big.NewInt(1))
+			case "reset target":
+				p.ApprovalResets[0].Spender = common.HexToAddress("0xbad")
+			case "retirement":
+				p.Retirements = nil
+			}
+			op.CallData, err = aa.PackExecuteBatchMAv2(calls)
+			require.NoError(t, err)
+			// Recompute a fully coherent hash: validating an operation against itself
+			// cannot detect this discrepancy with the unchanged human review.
+			p.UserOpHash, err = op.GetUserOpHash(preset.EntryPointV07(), big.NewInt(testPolicyChain))
+			require.NoError(t, err)
+			data, err := json.Marshal(p)
+			require.NoError(t, err)
+			require.NoError(t, f.n.db.Set(budgetPreparationKey(f.user.Address, p.ID), data))
+			_, err = f.n.GetBudgetPolicyPreparation(f.user, f.in.Wallet, testPolicyChain, p.ID)
+			require.ErrorIs(t, err, ErrBudgetReadUnavailable)
+		})
+	}
 }

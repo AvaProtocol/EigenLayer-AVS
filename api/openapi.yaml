@@ -4021,6 +4021,12 @@ paths:
         v1 Sepolia USDC. Other live allowances requiring reset return 409
         BUDGET_RESET_UNSUPPORTED_TOKEN with token/spender; insufficient ETH returns
         409 BUDGET_FEE_INSUFFICIENT_ETH with neededWei/availableWei.
+        A known, unexpired legacy deferred signature returns 409
+        BUDGET_LEGACY_GRANT_PENDING with its latest outstanding deadline.
+        The default legacy signing window lasts up to 30 days. Revoking a
+        permission off chain does not invalidate its signature; migration must
+        wait until that window closes. This route offers no nonce-cancellation
+        remedy and an owner nonce change does not cancel a session-entity nonce.
 
         Legacy path (no budget/discovery, non-budget wallet):
         Allocates the policy id, validation entity, and session signer, builds
@@ -4103,6 +4109,10 @@ paths:
           description: |
             `SESSION_POLICY_BASE_CHANGED` — `basePolicyId` is not the runner's
             usable grant anymore. Prepare again.
+
+            `BUDGET_LEGACY_GRANT_PENDING` — an earlier deferred signature can
+            still install, even after off-chain revocation. The detail names
+            the latest deadline; the default window can last 30 days.
 
             `SESSION_POLICY_TARGET_UNRESOLVED` — there is no usable grant,
             and an enabled task moves funds to a target this prepare cannot

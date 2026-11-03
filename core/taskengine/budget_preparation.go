@@ -105,9 +105,14 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 	defer cancel()
 	// Bound unsigned records per owner atomically, without holding up session
 	// operations during RPC pricing. No wallet hold or authority write occurs.
-	lock := n.executionMutex("budget-prepare:" + user.Address.Hex())
-	lock.Lock()
-	defer lock.Unlock()
+	unlock, err := n.budgetPreparationLocks.acquire(ctx, user.Address)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err = n.checkBudgetPreparationCap(user.Address, now); err != nil {
 		return nil, err
 	}
@@ -122,12 +127,18 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 	if err != nil {
 		return nil, err
 	}
+	var legacyDeadline uint64
 	for _, p := range all {
 		// A deferred signature uses its own session nonce, so consuming the
 		// owner nonce cannot invalidate a not-yet-carried legacy install.
 		if p.Runner != nil && *p.Runner == in.Wallet && !isWalletBudget(p) && p.Grant != nil && !p.Grant.Applied() && len(p.Grant.OwnerSignature) > 0 && p.Grant.Deadline >= uint64(now.Unix()) {
-			return nil, &BudgetPolicyError{Code: BudgetLegacyGrantPendingCode, Detail: "An earlier signed permission may still install. Wait for its signing window to end before migrating to a budget."}
+			if p.Grant.Deadline > legacyDeadline {
+				legacyDeadline = p.Grant.Deadline
+			}
 		}
+	}
+	if legacyDeadline > 0 {
+		return nil, &BudgetPolicyError{Code: BudgetLegacyGrantPendingCode, Detail: fmt.Sprintf("An earlier signed permission may still install until %s. Legacy signing windows can last 30 days, and revoking in Ava does not cancel that signature. Budget migration must wait until this window closes.", time.Unix(int64(legacyDeadline), 0).UTC().Format(time.RFC3339))}
 	}
 	rem, err := n.resolveGrantRemainder(ctx, current, in.Wallet)
 	if err != nil {
@@ -183,12 +194,6 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 	if err != nil {
 		return nil, err
 	}
-	calls := make([]aa.Call, 0, len(resets)+2)
-	for _, row := range resets {
-		data := append(common.FromHex(selectorApprove), common.LeftPadBytes(row.Spender.Bytes(), 32)...)
-		data = append(data, make([]byte, 32)...)
-		calls = append(calls, aa.Call{Target: row.Token, Value: big.NewInt(0), Data: data})
-	}
 	// Include still-registered historical entities too. A prior off-chain revoke
 	// must not leave its live authority behind the new budget. Never truncate.
 	targets, err := onChainTeardownTargets(n.db, in.ChainID, user.Address, in.Wallet)
@@ -202,19 +207,12 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 			return nil, fmt.Errorf("%w: retirement registration is unavailable", ErrBudgetReadUnavailable)
 		}
 		if !cleared {
-			uninstall, uninstallErr := aa.SessionSignerUninstallFromInstall(target.EntityID, target.Grant.InstallCall)
-			if uninstallErr != nil {
-				return nil, uninstallErr
-			}
-			calls = append(calls, aa.Call{Target: in.Wallet, Value: big.NewInt(0), Data: uninstall})
 			retirements = append(retirements, target)
 		}
 	}
-	calls = append(calls, aa.Call{Target: in.Wallet, Value: big.NewInt(0), Data: install})
-	// The existing owner batch bounds the complete atomic batch. Never split
-	// resets and installation across separately signed operations.
-	if len(calls) > ownerBatchMaxCalls {
-		return nil, budgetInputError("the atomic budget batch exceeds %d calls", ownerBatchMaxCalls)
+	calls, err := budgetPreparationCalls(in.Wallet, resets, retirements, install)
+	if err != nil {
+		return nil, err
 	}
 	wallet, err := n.lookupOwnedWalletRecord(user, in.ChainID, in.Wallet)
 	if err != nil {
@@ -306,6 +304,9 @@ func (n *Engine) checkBudgetPreparationCap(owner common.Address, now time.Time) 
 	for _, row := range rows {
 		var p BudgetPolicyPreparation
 		if err := json.Unmarshal(row.Value, &p); err != nil {
+			if n.logger != nil {
+				n.logger.Error("Unreadable budget preparation blocks the owner limit check", "preparation_key", string(row.Key))
+			}
 			return fmt.Errorf("unreadable budget preparation: %w", err)
 		}
 		if p.State == ownerSubmissionPrepared && p.ExpiresAt > now.UnixMilli() {
@@ -340,10 +341,9 @@ func completeBudgetPairs(pairs []BudgetApprovalPair, current *model.SessionPolic
 			}
 		}
 	}
+	// Cross every known token with reset-required spenders. Original pairs for
+	// unchanged targets need no allowance read and must not inflate this set.
 	unique := make(map[BudgetApprovalPair]bool, len(pairs))
-	for _, pair := range pairs {
-		unique[pair] = true
-	}
 	for token := range tokens {
 		for spender := range spenders {
 			unique[BudgetApprovalPair{Token: token, Spender: spender}] = true
@@ -464,13 +464,12 @@ func (n *Engine) GetBudgetPolicyPreparation(user *model.User, wallet common.Addr
 	if op.Nonce == nil || op.CallGasLimit == nil || op.VerificationGasLimit == nil || op.PreVerificationGas == nil || op.MaxFeePerGas == nil || op.MaxPriorityFeePerGas == nil || len(op.Signature) != 0 || op.Sender != wallet || op.Paymaster != nil || len(op.PaymasterData) > 0 {
 		return nil, fmt.Errorf("%w: invalid stored budget operation", ErrBudgetReadUnavailable)
 	}
-	targets, values, datas, err := aa.UnpackExecuteCalldata(op.CallData)
-	if err != nil || len(targets) == 0 || len(targets) > ownerBatchMaxCalls {
-		return nil, fmt.Errorf("%w: invalid stored budget batch", ErrBudgetReadUnavailable)
+	if record.Policy.Grant.CarrierNonce == nil || record.Policy.Grant.CarrierNonce.Cmp(op.Nonce) != 0 {
+		return nil, fmt.Errorf("%w: stored budget nonce does not match its review", ErrBudgetReadUnavailable)
 	}
-	calls := make([]aa.Call, len(targets))
-	for i, target := range targets {
-		calls[i] = aa.Call{Target: target, Value: values[i], Data: datas[i]}
+	calls, err := budgetPreparationCalls(wallet, record.ApprovalResets, record.Retirements, record.Policy.Grant.InstallCall)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid stored budget batch", ErrBudgetReadUnavailable)
 	}
 	_, hash, err := validateBudgetOwnerOperation(&preset.PreparedOwnerUserOp{Operation: op}, wallet, chainID, calls)
 	if err != nil || hash != record.UserOpHash || preset.MaxOwnerGasCost(op).String() != record.MaxFeeWei {

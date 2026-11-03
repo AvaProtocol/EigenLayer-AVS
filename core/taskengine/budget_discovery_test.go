@@ -165,3 +165,15 @@ func TestBudgetRemovedTokenCannotBecomeUnrestrictedNativeRecipient(t *testing.T)
 	p := SessionPermissions{budgetMode: true, AllowedActions: []model.AllowedAction{{Target: &testRouterAddr, Selectors: []string{"0x04e45aaf"}}}, SpendCaps: []model.ERC20SpendCap{{Token: &testTokenAddr, Amount: "0"}}, NativeRecipients: []*common.Address{&testTokenAddr}, NativeSpendCap: &model.NativeSpendCap{Amount: "100"}, AllowContractRecipient: true, ValidUntilMs: time.Now().Add(time.Hour).UnixMilli()}
 	require.ErrorContains(t, p.Validate(), "budget token cannot also")
 }
+
+func TestBudgetApprovalReadsSkipTargetsThatNeedNoReset(t *testing.T) {
+	reads, resets, err := readBudgetApprovals(context.Background(), nil, common.HexToAddress("0x1234"), testPolicyChain, []BudgetApprovalPair{{Token: testTokenAddr, Spender: testRouterAddr}}, nil)
+	require.NoError(t, err)
+	require.Empty(t, reads)
+	require.Empty(t, resets)
+	p, _ := semanticsBudget()
+	draft := BudgetPolicyDraft{}
+	pairs, err := completeBudgetPairs([]BudgetApprovalPair{{Token: testTokenAddr, Spender: testRouterAddr}}, p, draft, nil)
+	require.NoError(t, err)
+	require.Empty(t, pairs)
+}

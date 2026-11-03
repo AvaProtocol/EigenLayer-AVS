@@ -244,10 +244,13 @@ func budgetResetTokenTested(chainID int64, token common.Address) bool {
 func readBudgetApprovals(ctx context.Context, caller aa.ContractCaller, wallet common.Address, chainID int64, pairs []BudgetApprovalPair, resetSpenders map[common.Address]bool) ([]BudgetApprovalReset, []BudgetApprovalReset, error) {
 	reads := make([]BudgetApprovalReset, 0, len(pairs))
 	resets := []BudgetApprovalReset{}
-	if len(pairs) > 0 && nilBudgetDependency(caller) {
-		return nil, nil, fmt.Errorf("%w: no allowance reader", ErrBudgetReadUnavailable)
-	}
 	for _, pair := range pairs {
+		if !resetSpenders[pair.Spender] {
+			continue
+		}
+		if nilBudgetDependency(caller) {
+			return nil, nil, fmt.Errorf("%w: no allowance reader", ErrBudgetReadUnavailable)
+		}
 		data := append(crypto.Keccak256([]byte("allowance(address,address)"))[:4], common.LeftPadBytes(wallet.Bytes(), 32)...)
 		data = append(data, common.LeftPadBytes(pair.Spender.Bytes(), 32)...)
 		result, err := caller.CallContract(ctx, ethereum.CallMsg{To: &pair.Token, Data: data}, nil)
