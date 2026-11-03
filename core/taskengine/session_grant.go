@@ -121,6 +121,7 @@ const defaultSigningWindow = 30 * 24 * time.Hour
 // PreparedSessionGrant is what the wallet signs, plus everything the gateway
 // must remember to accept the signature back.
 type PreparedSessionGrant struct {
+	BudgetPreparation *BudgetPolicyPreparation
 	// Digest is the EIP-712 hash the owner signs. Signed RAW — the account's
 	// fallback path skips the replay-safe rewrap during validateUserOp, so
 	// this is exactly what eth_signTypedData_v4 must produce.

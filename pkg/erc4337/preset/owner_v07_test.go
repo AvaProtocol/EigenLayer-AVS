@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -85,6 +86,7 @@ type ownerRPCFixture struct {
 	expectedHash                                       string
 	sent                                               map[string]interface{}
 	sponsorRefused                                     bool
+	estimatePrefundRefused                             bool
 }
 
 func newOwnerRPCFixture(t *testing.T) (*ownerRPCFixture, *config.SmartWalletConfig) {
@@ -195,6 +197,10 @@ func newOwnerRPCFixture(t *testing.T) (*ownerRPCFixture, *config.SmartWalletConf
 				t.Errorf("unexpected eth_call selector %s", selector)
 			}
 		case "eth_estimateUserOperationGas":
+			if f.estimatePrefundRefused {
+				rpcError = "AA21 didn't pay prefund"
+				break
+			}
 			f.estimateReads++
 			var operation map[string]interface{}
 			require.NoError(t, json.Unmarshal(req.Params[0], &operation))
@@ -393,5 +399,54 @@ func TestOwnerSponsorshipIsFinalizedBeforeSigning(t *testing.T) {
 	err = priceOperationV07(context.Background(), chain, client, testOp(), EntryPointV07(), sw, logger.EnsureLogger(nil))
 	require.Error(t, err)
 	require.True(t, strings.Contains(err.Error(), "sponsor"))
+	require.Zero(t, f.sendCount)
+}
+
+func TestBudgetSelfFundedOwnerPricingNeverSponsorsOrSends(t *testing.T) {
+	for _, deployed := range []bool{false, true} {
+		for _, balance := range []string{"0x0", "0x1", "0xde0b6b3a7640000"} {
+			t.Run(fmt.Sprintf("deployed=%v/balance=%s", deployed, balance), func(t *testing.T) {
+				f, sw := newOwnerRPCFixture(t)
+				f.deployed = deployed
+				f.balance = balance
+				sw.AlchemyPaymasterPolicyID = "must-not-use"
+				sw.DisableGasSponsorship = false
+				f.sponsorRefused = true
+				p, err := PrepareSelfFundedOwnerBatch(context.Background(), sw, f.owner, f.sender, big.NewInt(0), OwnerBatch{Calls: ownerTestCalls()}, nil)
+				require.Greater(t, f.estimateReads, 0, "even a zero wallet must get an exact gas quote: %v", err)
+				if balance != "0xde0b6b3a7640000" {
+					var fee *OwnerFundingError
+					require.ErrorAs(t, err, &fee)
+					require.Positive(t, fee.Required.Sign())
+					want, ok := new(big.Int).SetString(balance[2:], 16)
+					require.True(t, ok)
+					require.Equal(t, want, fee.Available)
+				} else {
+					require.NoError(t, err)
+					require.Nil(t, p.Operation.Paymaster)
+					require.Empty(t, p.Operation.Signature)
+					if deployed {
+						require.Nil(t, p.Operation.Factory)
+					} else {
+						require.NotNil(t, p.Operation.Factory)
+						require.NotEmpty(t, p.Operation.FactoryData)
+					}
+				}
+				require.False(t, sw.DisableGasSponsorship)
+				require.Equal(t, "must-not-use", sw.AlchemyPaymasterPolicyID)
+				require.Zero(t, f.sendCount)
+			})
+		}
+	}
+}
+
+func TestBudgetSelfFundedPrefundRefusalBeforeQuote(t *testing.T) {
+	f, sw := newOwnerRPCFixture(t)
+	f.estimatePrefundRefused = true
+	_, err := PrepareSelfFundedOwnerBatch(context.Background(), sw, f.owner, f.sender, big.NewInt(0), OwnerBatch{Calls: ownerTestCalls()}, nil)
+	var fee *OwnerFundingError
+	require.ErrorAs(t, err, &fee)
+	require.Nil(t, fee.Required, "never make up gas when estimation refused")
+	require.Nil(t, fee.Available)
 	require.Zero(t, f.sendCount)
 }

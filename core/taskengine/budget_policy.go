@@ -17,7 +17,7 @@ const (
 )
 
 // WalletBudgetInput describes owner totals, never a workflow's run count.
-// Only the future stored owner-operation preparation may sign this intent.
+// Only the stored owner-operation path may prepare this intent for signing.
 type WalletBudgetInput struct {
 	ERC20          []model.ERC20SpendCap
 	Native         *model.NativeSpendCap
@@ -27,8 +27,9 @@ type WalletBudgetInput struct {
 }
 
 type BudgetPolicyError struct {
-	Code   string
-	Detail string
+	Code    string
+	Detail  string
+	Details map[string]string
 }
 
 func (e *BudgetPolicyError) Error() string { return e.Code + ": " + e.Detail }

@@ -168,6 +168,22 @@ func PrepareOwnerUserOp(ctx context.Context, sw *config.SmartWalletConfig, owner
 }
 
 func PrepareOwnerBatch(ctx context.Context, sw *config.SmartWalletConfig, owner, sender common.Address, salt *big.Int, batch OwnerBatch, l logger.Logger) (*PreparedOwnerUserOp, error) {
+	return prepareOwnerBatch(ctx, sw, owner, sender, salt, batch, l, true)
+}
+
+// PrepareSelfFundedOwnerBatch prices first so an empty wallet can receive the
+// exact required fee. It never requests sponsorship and never broadcasts.
+func PrepareSelfFundedOwnerBatch(ctx context.Context, sw *config.SmartWalletConfig, owner, sender common.Address, salt *big.Int, batch OwnerBatch, l logger.Logger) (*PreparedOwnerUserOp, error) {
+	if sw == nil {
+		return nil, fmt.Errorf("nil owner chain configuration")
+	}
+	selfFunded := *sw
+	selfFunded.DisableGasSponsorship = true
+	selfFunded.AlchemyPaymasterPolicyID = ""
+	return prepareOwnerBatch(ctx, &selfFunded, owner, sender, salt, batch, l, false)
+}
+
+func prepareOwnerBatch(ctx context.Context, sw *config.SmartWalletConfig, owner, sender common.Address, salt *big.Int, batch OwnerBatch, l logger.Logger, initialPrefund bool) (*PreparedOwnerUserOp, error) {
 	calls, err := batch.estimationCalls()
 	if err != nil {
 		return nil, err
@@ -189,7 +205,7 @@ func PrepareOwnerBatch(ctx context.Context, sw *config.SmartWalletConfig, owner,
 		return nil, err
 	}
 	op := prepared.Operation
-	if sw.SponsorshipPolicyID() == "" {
+	if initialPrefund && sw.SponsorshipPolicyID() == "" {
 		if err = ensureSelfFundedPrefund(ctx, chain, EntryPointV07(), sender); err != nil {
 			return nil, err
 		}
@@ -204,6 +220,11 @@ func PrepareOwnerBatch(ctx context.Context, sw *config.SmartWalletConfig, owner,
 	}
 	defer bundler.Close()
 	if err = pricePreparedOwnerBatch(ctx, chain, bundler, op, sw, batch, l); err != nil {
+		if !initialPrefund && isPrefundError(err) {
+			// Some bundlers refuse before returning gas limits. Do not invent a
+			// maximum fee or switch to sponsorship; still give the Add ETH code.
+			return nil, &OwnerFundingError{cause: err}
+		}
 		return nil, err
 	}
 	if err = checkOwnerPrefund(ctx, chain, op); err != nil {
@@ -307,10 +328,24 @@ func checkOwnerPrefund(ctx context.Context, chain *ethclient.Client, op *userop.
 	}
 	available := new(big.Int).Add(new(big.Int).Sub(balance, value), new(big.Int).SetBytes(deposit))
 	if available.Cmp(MaxOwnerGasCost(op)) < 0 {
-		return fmt.Errorf("owner execution needs native gas prefund of at least %s wei; available %s wei", MaxOwnerGasCost(op), available)
+		return &OwnerFundingError{Required: MaxOwnerGasCost(op), Available: available}
 	}
 	return nil
 }
+
+type OwnerFundingError struct {
+	Required, Available *big.Int
+	cause               error
+}
+
+func (e *OwnerFundingError) Error() string {
+	if e.cause != nil {
+		return e.cause.Error()
+	}
+	return fmt.Sprintf("owner execution needs native gas prefund of at least %s wei; available %s wei", e.Required, e.Available)
+}
+
+func (e *OwnerFundingError) Unwrap() error { return e.cause }
 
 // ValidateOwnerUserOp rechecks live authority, code, nonce and funding. It never
 // repairs the operation; a change requires another prepare/review/signature.

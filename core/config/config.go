@@ -110,6 +110,11 @@ type Config struct {
 	// OwnerExecutionEnabled gates the new per-run owner-signature handoff.
 	// Default false; enabling it does not change session/Auto execution.
 	OwnerExecutionEnabled bool
+	// Read-only budget preparation is experimental and separate from relay.
+	// Submit remains disabled until durable holds and activation are implemented.
+	WalletBudgetPreparationEnabled bool
+	// Public EOA address of the trusted backend's discovery signing key.
+	WalletBudgetDiscoverySigner string
 
 	// Account abstraction config
 	SmartWallet *SmartWalletConfig
@@ -561,8 +566,10 @@ type ConfigRaw struct {
 	JwtSecret           string `yaml:"jwt_secret"`
 
 	// SessionSignerPrivateKey is required; see Config.SessionSignerPrivateKey.
-	SessionSignerPrivateKey string `yaml:"session_signer_private_key"`
-	OwnerExecutionEnabled   bool   `yaml:"owner_execution_enabled"`
+	SessionSignerPrivateKey        string `yaml:"session_signer_private_key"`
+	OwnerExecutionEnabled          bool   `yaml:"owner_execution_enabled"`
+	WalletBudgetPreparationEnabled bool   `yaml:"wallet_budget_preparation_enabled"`
+	WalletBudgetDiscoverySigner    string `yaml:"wallet_budget_discovery_signer"`
 
 	// REST rate-limit overrides; see Config.RestRateLimitPerSecond.
 	RestRateLimitPerSecond float64 `yaml:"rest_rate_limit_per_second"`
@@ -839,8 +846,10 @@ func NewConfig(configFilePath string) (*Config, error) {
 		BackupInterval: resolveBackupInterval(configRaw.BackupIntervalHours),
 		JwtSecret:      []byte(configRaw.JwtSecret),
 
-		SessionSignerPrivateKey: sessionSignerPrivateKey,
-		OwnerExecutionEnabled:   configRaw.OwnerExecutionEnabled,
+		SessionSignerPrivateKey:        sessionSignerPrivateKey,
+		OwnerExecutionEnabled:          configRaw.OwnerExecutionEnabled,
+		WalletBudgetPreparationEnabled: configRaw.WalletBudgetPreparationEnabled,
+		WalletBudgetDiscoverySigner:    configRaw.WalletBudgetDiscoverySigner,
 
 		RestRateLimitPerSecond: configRaw.RestRateLimitPerSecond,
 		RestRateLimitBurst:     configRaw.RestRateLimitBurst,
