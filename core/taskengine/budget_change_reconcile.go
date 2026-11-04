@@ -188,6 +188,9 @@ func (n *Engine) reconcileExternalBudgetNonce(ctx context.Context, h *BudgetHold
 		return err
 	}
 	defer v.Close()
+	if err = n.verifyBudgetInclusion(ctx, h.ChainID, v.Block(), observation.Block); err != nil {
+		return err
+	}
 	if err = v.CheckAuthorities(ctx, h.Owner, h.Wallet); err != nil {
 		for _, p := range records {
 			p.Reason = err.Error()
@@ -249,8 +252,8 @@ func (n *Engine) proveBudgetResets(ctx context.Context, p *BudgetPolicyPreparati
 		return fmt.Errorf("reset verification unavailable; Ava's runs remain paused")
 	}
 	defer view.Close()
-	if number != nil && view.Block().Hash != p.InclusionBlock.Hash {
-		return fmt.Errorf("inclusion evidence changed; Ava's runs remain paused")
+	if e = n.verifyBudgetInclusion(ctx, p.ChainID, view.Block(), p.InclusionBlock); e != nil {
+		return e
 	}
 	for _, r := range p.ApprovalResets {
 		data := append(crypto.Keccak256([]byte("allowance(address,address)"))[:4], common.LeftPadBytes(p.Wallet.Bytes(), 32)...)
@@ -267,12 +270,46 @@ func (n *Engine) proveBudgetResets(ctx context.Context, p *BudgetPolicyPreparati
 	return view.VerifyCanonical(ctx)
 }
 
+// A canonical older block cannot prove anything about a later inclusion.
+// Also bind that inclusion's hash when reading a newer repair/authority view,
+// so a reorg cannot turn an orphaned observation into a settled change.
+func (n *Engine) verifyBudgetInclusion(ctx context.Context, chain int64, snapshot, inclusion BudgetBlock) error {
+	if inclusion.Hash == (common.Hash{}) || snapshot.Number < inclusion.Number {
+		return fmt.Errorf("%w: snapshot predates inclusion; Ava's runs remain paused", ErrBudgetReadUnavailable)
+	}
+	if snapshot.Number == inclusion.Number {
+		if snapshot.Hash != inclusion.Hash {
+			return fmt.Errorf("%w: inclusion evidence changed; Ava's runs remain paused", ErrBudgetReadUnavailable)
+		}
+		return nil
+	}
+	view, err := n.budgetBackend().View(ctx, chain, new(big.Int).SetUint64(inclusion.Number))
+	if err != nil {
+		return fmt.Errorf("%w: inclusion evidence unavailable; Ava's runs remain paused", ErrBudgetReadUnavailable)
+	}
+	defer view.Close()
+	if view.Block() != inclusion {
+		return fmt.Errorf("%w: inclusion evidence changed; Ava's runs remain paused", ErrBudgetReadUnavailable)
+	}
+	return view.VerifyCanonical(ctx)
+}
+
 //nolint:gocyclo // Linear owner-cancel checks; pricing never submits or changes the held nonce.
 func (n *Engine) PrepareBudgetCancel(ctx context.Context, user *model.User, wallet common.Address, chain int64, id string) (*BudgetPolicyPreparation, error) {
 	if e := n.requireOwnedWallet(user, wallet); e != nil {
 		return nil, e
 	}
 	if e := n.requireBudgetSigning(chain); e != nil {
+		return nil, e
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	unlockPreparation, e := n.budgetPreparationLocks.acquire(ctx, user.Address)
+	if e != nil {
+		return nil, e
+	}
+	defer unlockPreparation()
+	if e = n.checkBudgetPreparationCap(user.Address, time.Now()); e != nil {
 		return nil, e
 	}
 	release, e := n.budgetSendLocks.acquire(ctx, budgetGateKey(chain, user.Address, wallet))

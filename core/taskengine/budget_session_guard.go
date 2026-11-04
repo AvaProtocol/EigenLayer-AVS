@@ -49,7 +49,7 @@ func (n *Engine) guardBudgetSessionSend(ctx context.Context, chain int64, owner,
 		release()
 		return nil, e
 	}
-	var keys [][]byte
+	flights := map[string]budgetSessionFlight{}
 	return &preset.SessionSendLease{Release: release, BeforeBroadcast: func(_ context.Context, op *userop.UserOperationV07) error {
 		if op == nil || op.Nonce == nil {
 			return fmt.Errorf("invalid session operation")
@@ -67,7 +67,7 @@ func (n *Engine) guardBudgetSessionSend(ctx context.Context, chain int64, owner,
 		if e = n.db.Set(key, raw); e != nil {
 			return e
 		}
-		keys = append(keys, key)
+		flights[string(key)] = f
 		return nil
 	}, Settled: func(_ context.Context, receipt *types.Receipt) error {
 		if receipt == nil || receipt.BlockNumber == nil {
@@ -77,11 +77,56 @@ func (n *Engine) guardBudgetSessionSend(ctx context.Context, chain int64, owner,
 		if e != nil {
 			return e
 		}
-		// Watermark and flight deletion are atomic. An interrupted confirmation
-		// keeps a flight, so a later budget read must prove its nonce consumed.
-		return atomicBudgetWrite(n.db, map[string][]byte{string(budgetWatermarkKey(chain, owner, wallet)): raw}, keys...)
+		// A lower-nonce retry can settle while an earlier higher-nonce signature
+		// remains executable. Only an included operation proves consumption;
+		// receipt arrival is not settlement of every broadcast in this lease.
+		deletes := consumedBudgetFlightKeys(receipt, wallet, flights)
+		return atomicBudgetWrite(n.db, map[string][]byte{string(budgetWatermarkKey(chain, owner, wallet)): raw}, deletes...)
 	}}, nil
 }
+
+func consumedBudgetFlightKeys(receipt *types.Receipt, wallet common.Address, flights map[string]budgetSessionFlight) [][]byte {
+	byHash := make(map[common.Hash]budgetSessionFlight, len(flights))
+	for _, flight := range flights {
+		byHash[flight.Hash] = flight
+	}
+	consumed := map[string]*big.Int{}
+	for _, log := range receipt.Logs {
+		if !budgetSessionInclusionLog(receipt, log, wallet) {
+			continue
+		}
+		flight, ok := byHash[log.Topics[1]]
+		nonce := new(big.Int).SetBytes(log.Data[:32])
+		if !ok || nonce.String() != flight.Nonce {
+			continue
+		}
+		key := new(big.Int).Rsh(new(big.Int).Set(nonce), 64).String()
+		if previous := consumed[key]; previous == nil || nonce.Cmp(previous) > 0 {
+			consumed[key] = nonce
+		}
+	}
+	var deletes [][]byte
+	for key, flight := range flights {
+		nonce, ok := new(big.Int).SetString(flight.Nonce, 10)
+		if !ok {
+			continue
+		}
+		nonceKey := new(big.Int).Rsh(new(big.Int).Set(nonce), 64).String()
+		if confirmed := consumed[nonceKey]; confirmed != nil && nonce.Cmp(confirmed) <= 0 {
+			deletes = append(deletes, []byte(key))
+		}
+	}
+	return deletes
+}
+
+func budgetSessionInclusionLog(receipt *types.Receipt, log *types.Log, wallet common.Address) bool {
+	if log == nil || log.Removed || log.Address != preset.EntryPointV07() || len(log.Topics) != 4 || len(log.Data) != 128 {
+		return false
+	}
+	return log.Topics[0] == budgetUserOpEvent && log.Topics[2] == common.BytesToHash(wallet.Bytes()) &&
+		log.BlockHash == receipt.BlockHash && log.BlockNumber == receipt.BlockNumber.Uint64()
+}
+
 func (n *Engine) checkBudgetSessionFlights(ctx context.Context, p *BudgetPolicyPreparation, v budgetChainView) error {
 	rows, e := n.db.GetByPrefix(budgetFlightPrefix(p.ChainID, p.Owner, p.Wallet))
 	if e != nil {

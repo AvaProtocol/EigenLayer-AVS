@@ -3649,7 +3649,7 @@ func (n *Engine) TriggerWorkflowWithContext(ctx context.Context, user *model.Use
 	if budgetErr != nil {
 		return nil, budgetErr
 	}
-	releaseBudget()
+	defer releaseBudget()
 
 	// For manual block triggers, instruct the operator to trigger immediately with current block
 	if payload.TriggerType == avsproto.TriggerType_TRIGGER_TYPE_BLOCK {
@@ -3748,7 +3748,7 @@ func (n *Engine) TriggerWorkflowWithContext(ctx context.Context, user *model.Use
 
 	if payload.IsBlocking {
 		executor := NewExecutor(n.ResolveSmartWalletConfig(n.defaultChainID()), n.db, n.logger, n, n.priceService)
-		execution, runErr := executor.RunTaskWithContext(ctx, task, &queueTaskData)
+		execution, runErr := executor.runTaskWithBudgetLease(ctx, task, &queueTaskData)
 		if runErr != nil {
 			n.logger.Error("failed to run blocking task", runErr)
 			// For blocking execution, return the error to the caller

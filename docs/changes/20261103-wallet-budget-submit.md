@@ -54,9 +54,10 @@ preparation IDs or budget input.
 
 Before the first relay, one canonical snapshot checks the old permission,
 remaining token/native caps, task set, legacy signatures, account identity,
-owner nonce, reset allowances, entity reservation and retirement calls. Owner
-factory/identity/nonce/funding reads use that block number; allowance and module
-reads use its hash, and the hash is checked again before the marker. A changed
+owner nonce, native-recipient bytecode, reset allowances, entity reservation and
+retirement calls. Owner factory/identity/nonce/funding reads use that block
+number; recipient code, allowance and module reads use its hash, and the hash
+is checked again before the marker. A changed
 base or derivation returns `SESSION_POLICY_BASE_CHANGED`; failed reads are not
 interpreted as zero. There is no reprice or automatic second operation.
 
@@ -87,6 +88,9 @@ unresolved prior flight or a snapshot older than a confirmed session receipt.
 This prevents a spend immediately before submit from being restored by stale
 remaining amounts. An unresolved session flight must settle before that submit
 can proceed; it is never silently forgotten because of a timeout.
+An included lower-nonce retry does not clear an earlier higher-nonce signature.
+Only matching EntryPoint inclusion evidence clears flights on that nonce key
+whose sequence is proven consumed; unresolved higher or unrelated nonces stay.
 
 The hold controls Ava's sends. A stolen session key can still spend outside
 the gateway during the change window, bounded by its old on-chain remainder.
@@ -95,8 +99,10 @@ This is the residual risk accepted in the contract, not an on-chain freeze.
 On-demand runs return `BUDGET_CHANGING` before creating an execution when a hold
 is open. Scheduled jobs remain durable and deferred, without a failed execution
 or retry/execution-count increment. They rejoin the queue when checked again;
-recovery restores all deferred wakeups, including backlogs over the buffer size.
-A runner gate covers the whole workflow, and a separate send gate covers raw
+Recovery restores pending as well as deferred wakeups, including interrupted
+recovery and backlogs over the buffer size. In-progress work is not replayed.
+A runner gate covers admission through setup/enqueue and the whole blocking
+workflow without reacquisition, and a separate send gate covers raw
 session sends and all their nonce/gas retry broadcasts. Startup installs the
 guard; every send reconciles that wallet's stored holds before proceeding.
 
@@ -108,6 +114,13 @@ token/spender in `reason`. The owner can revoke it through the approval scan;
 with the hold still blocking Ava's approvals, a later current-state recheck can
 complete activation. Activation, superseding the old permission, settling all
 attempts and releasing the hold commit atomically.
+Repair and external-nonce recovery require a snapshot at least as new as the
+observed inclusion, with that inclusion hash still canonical. A lagging but
+canonical pre-inclusion block cannot release the hold.
+
+Cancellation preparation shares the ordinary per-owner preparation lock and
+64-review limit, checked before pricing. Unsent stale reviews never enter a
+durable hold, so their expiry cannot break recovery of submitted attempts.
 
 Direct owner broadcasts are found through the canonical EntryPoint event, not
 bundler receipt absence. An unknown consuming operation never activates a
@@ -130,8 +143,11 @@ Offline coverage includes mounted HTTP prepare/sign/submit/recovery, deployed
 and counterfactual accounts, strict request/chain parsing, final-block pinning,
 storage failures before and after relay, TTL removal, restart, old-signature and
 fee guards, pending entity collision, stale spend/allowances, replacement/cancel,
-reset read failure/repair, unknown consuming nonce/authority, queue deferral and
-single spend after resume. The live tests skip in ordinary CI.
+reset read failure/repair, stale and orphaned recovery snapshots, native
+recipients changing to delegated/contract code, unknown consuming
+nonce/authority, lower-nonce retry flights, admission races, concurrent normal
+and cancel preparation limits, interrupted queue recovery and single spend
+after resume. The live tests skip in ordinary CI.
 
 Opt-in Sepolia command:
 

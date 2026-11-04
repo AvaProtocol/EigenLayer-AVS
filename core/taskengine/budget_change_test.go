@@ -32,6 +32,10 @@ type budgetChangeFake struct {
 	caller          func(ethereum.CallMsg) ([]byte, error)
 	sending         chan struct{}
 	releaseSend     chan struct{}
+	latestBlock     uint64
+	blockHashes     map[uint64]common.Hash
+	recipientCode   map[common.Address][]byte
+	codeReadError   error
 }
 type budgetFakeView struct {
 	f     *budgetChangeFake
@@ -40,10 +44,23 @@ type budgetFakeView struct {
 
 func (f *budgetChangeFake) View(_ context.Context, _ int64, number *big.Int) (budgetChainView, error) {
 	b := uint64(10)
+	if f.observation != nil {
+		b = f.observation.Block.Number + 1
+	}
+	if f.latestBlock != 0 {
+		b = f.latestBlock
+	}
 	if number != nil {
 		b = number.Uint64()
 	}
-	return &budgetFakeView{f: f, block: BudgetBlock{Number: b, Hash: common.BigToHash(new(big.Int).SetUint64(b))}}, nil
+	hash := common.BigToHash(new(big.Int).SetUint64(b))
+	if override, ok := f.blockHashes[b]; ok {
+		hash = override
+	}
+	return &budgetFakeView{f: f, block: BudgetBlock{Number: b, Hash: hash}}, nil
+}
+func (v *budgetFakeView) CodeAt(_ context.Context, address common.Address) ([]byte, error) {
+	return v.f.recipientCode[address], v.f.codeReadError
 }
 func (v *budgetFakeView) Block() BudgetBlock                    { return v.block }
 func (v *budgetFakeView) Close()                                {}

@@ -31,13 +31,17 @@ func TestBudgetReadUsesRPCBlockHashAndDetectsReorg(t *testing.T) {
 			// Keep the server's hash, including header fields unknown to a
 			// client. A reconstructed minimal Header cannot have this hash.
 			result = map[string]interface{}{"number": "0xa", "hash": canonical.Load(), "newForkHeaderField": "0x9999"}
-		case "eth_call":
+		case "eth_call", "eth_getCode":
 			var at struct {
 				BlockHash common.Hash `json:"blockHash"`
 			}
 			require.NoError(t, json.Unmarshal(req.Params[1], &at))
 			require.Equal(t, common.HexToHash("0x123456"), at.BlockHash)
-			result = "0x" + common.Bytes2Hex(common.LeftPadBytes(big.NewInt(7).Bytes(), 32))
+			if req.Method == "eth_getCode" {
+				result = "0x6000"
+			} else {
+				result = "0x" + common.Bytes2Hex(common.LeftPadBytes(big.NewInt(7).Bytes(), 32))
+			}
 		default:
 			t.Errorf("unexpected method %s", req.Method)
 		}
@@ -55,6 +59,9 @@ func TestBudgetReadUsesRPCBlockHashAndDetectsReorg(t *testing.T) {
 	out, err := v.CallContract(context.Background(), ethereum.CallMsg{To: &to}, nil)
 	require.NoError(t, err)
 	require.Equal(t, big.NewInt(7), new(big.Int).SetBytes(out))
+	code, err := v.CodeAt(context.Background(), to)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x60, 0x00}, code)
 	require.NoError(t, v.VerifyCanonical(context.Background()))
 	canonical.Store(common.HexToHash("0xdead"))
 	require.ErrorContains(t, v.VerifyCanonical(context.Background()), "no longer canonical")

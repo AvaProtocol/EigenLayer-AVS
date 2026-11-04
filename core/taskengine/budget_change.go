@@ -344,9 +344,10 @@ func (n *Engine) SubmitBudgetPolicyPreparation(ctx context.Context, user *model.
 	if e = n.saveBudgetTransition(p, h, pending...); e != nil {
 		return nil, e
 	}
-	// The durable hold now refuses authority mutations. Keep the exact runner
-	// gates through relay, but let unrelated wallets on this authority shard
-	// read their policies while the bundler answers.
+	// The durable hold now refuses legacy policy prepare, submit and revoke
+	// for this wallet. Keep the exact runner gates through relay, but let
+	// unrelated wallets on this authority shard read their policies while
+	// the bundler answers.
 	unlockAuthority()
 	op := *(*userop.UserOperationV07)(p.Operation)
 	op.Signature = framed
@@ -468,6 +469,16 @@ func (n *Engine) recheckBudgetDerivation(ctx context.Context, p *BudgetPolicyPre
 		return signerErr
 	}
 	draft.Permissions.SessionSigner = &signer
+	draft.Permissions.CodeAt = memoizeCodeAt(func(address common.Address) ([]byte, error) {
+		code, readErr := v.CodeAt(ctx, address)
+		if readErr != nil {
+			return nil, fmt.Errorf("%w: native recipient code", ErrBudgetReadUnavailable)
+		}
+		return code, nil
+	})
+	if e = draft.Permissions.Validate(); e != nil {
+		return e
+	}
 	a, _ = json.Marshal(draft)
 	b, _ = json.Marshal(p.Draft)
 	if string(a) != string(b) {

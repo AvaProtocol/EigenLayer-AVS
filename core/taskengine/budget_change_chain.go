@@ -19,6 +19,7 @@ import (
 type budgetChainView interface {
 	aa.ContractCaller
 	Block() BudgetBlock
+	CodeAt(context.Context, common.Address) ([]byte, error)
 	Nonce(context.Context, common.Address) (*big.Int, error)
 	ValidateOwner(context.Context, *BudgetPolicyPreparation) error
 	CheckAuthorities(context.Context, common.Address, common.Address) error
@@ -94,6 +95,9 @@ func budgetBlockAt(ctx context.Context, client *ethclient.Client, number *big.In
 }
 func (v *pinnedBudgetView) Block() BudgetBlock { return v.block }
 func (v *pinnedBudgetView) Close()             { v.chain.Close() }
+func (v *pinnedBudgetView) CodeAt(ctx context.Context, address common.Address) ([]byte, error) {
+	return v.chain.CodeAtHash(ctx, address, v.block.Hash)
+}
 func (v *pinnedBudgetView) CallContract(ctx context.Context, msg ethereum.CallMsg, _ *big.Int) ([]byte, error) {
 	return v.chain.CallContractAtHash(ctx, msg, v.block.Hash)
 }

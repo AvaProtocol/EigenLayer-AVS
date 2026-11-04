@@ -110,3 +110,37 @@ func TestDeferredStopPreservesJobForRestart(t *testing.T) {
 	_, err = db.GetKey(q.getJobKey(jobDeferred, id))
 	require.NoError(t, err)
 }
+
+func TestDeferredInterruptedRecoveryRestoresPendingButNotInProgress(t *testing.T) {
+	db := testutil.TestMustDB()
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	q := New(db, testutil.GetLogger(), &QueueOption{Prefix: "interrupted"})
+	for id := uint64(1); id <= 1005; id++ {
+		raw, err := encodeJob(&Job{ID: id, Type: "run", Name: "task"})
+		require.NoError(t, err)
+		require.NoError(t, db.Set(q.getJobKey(jobDeferred, id), raw))
+	}
+	running, err := encodeJob(&Job{ID: 1006, Type: "run", Name: "already-spending"})
+	require.NoError(t, err)
+	require.NoError(t, db.Set(q.getJobKey(jobInProgress, 1006), running))
+	require.NoError(t, q.MustStart())
+	// Recovery has moved all rows, but its wakeup producer cannot finish
+	// without a consumer because the backlog exceeds the channel buffer.
+	require.NoError(t, q.Stop())
+	q = New(db, testutil.GetLogger(), &QueueOption{Prefix: "interrupted"})
+	require.NoError(t, q.MustStart())
+	t.Cleanup(func() { require.NoError(t, q.Stop()) })
+	seen := map[uint64]bool{}
+	for len(seen) < 1005 {
+		select {
+		case id := <-q.eventCh:
+			require.LessOrEqual(t, id, uint64(1005), "in-progress work must never be replayed")
+			require.False(t, seen[id])
+			seen[id] = true
+		case <-time.After(time.Second):
+			t.Fatal("second restart lost a persisted pending job")
+		}
+	}
+	_, err = db.GetKey(q.getJobKey(jobInProgress, 1006))
+	require.NoError(t, err)
+}

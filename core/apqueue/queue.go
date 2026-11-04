@@ -74,7 +74,6 @@ func (q *Queue) MustStart() error {
 	if restoreErr != nil {
 		return restoreErr
 	}
-	restored := make([]uint64, 0, len(rows))
 	for _, row := range rows {
 		j, e := decodeJob(row.Value)
 		if e != nil {
@@ -83,7 +82,21 @@ func (q *Queue) MustStart() error {
 		if e = q.db.Move(row.Key, q.getJobKey(jobPending, j.ID)); e != nil {
 			return e
 		}
-		restored = append(restored, j.ID)
+	}
+	// A prior process may have moved a deferred row to pending and stopped
+	// before delivering its in-memory wakeup. Only pending rows are restored;
+	// replaying an in-progress execution could duplicate its side effects.
+	rows, restoreErr = q.db.GetByPrefix(q.getQueueKeyPrefix(jobPending))
+	if restoreErr != nil {
+		return restoreErr
+	}
+	restored := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		job, decodeErr := decodeJob(row.Value)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		restored = append(restored, job.ID)
 	}
 	// Do not drop wakeups when recovery exceeds the channel buffer. The
 	// producer waits for workers, and Stop also releases it.
