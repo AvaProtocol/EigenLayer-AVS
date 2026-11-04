@@ -26,10 +26,12 @@ import (
 //     alter what the owner signed — the signature would then fail, but only
 //     on chain, at execution, for a user who already consented.
 type SessionPolicy struct {
-	ID      string          `json:"id"`
-	Owner   *common.Address `json:"owner"`
-	Runner  *common.Address `json:"runner"` // the smart wallet this grants on
-	ChainID int64           `json:"chain_id"`
+	// Pending owner-signed budgets are visible but never usable before activation.
+	AwaitingBudgetActivation bool            `json:"awaiting_budget_activation,omitempty"`
+	ID                       string          `json:"id"`
+	Owner                    *common.Address `json:"owner"`
+	Runner                   *common.Address `json:"runner"` // the smart wallet this grants on
+	ChainID                  int64           `json:"chain_id"`
 
 	// EntityID is the validation entity this grant occupies on the account.
 	// Unique per ACCOUNT, allocated when the policy is created, never 0 —
@@ -232,7 +234,7 @@ func (g *SessionGrantAuthorization) NeedsOnChainCleanup() bool {
 
 // Usable reports whether this policy can authorize an operation right now.
 func (p *SessionPolicy) Usable() bool {
-	if p == nil || p.Grant == nil {
+	if p == nil || p.Grant == nil || p.AwaitingBudgetActivation {
 		return false
 	}
 	return p.Status == SessionPolicyPending || p.Status == SessionPolicyActive
@@ -292,7 +294,14 @@ func (p *SessionPolicy) Validate() error {
 	if len(p.Grant.InstallCall) == 0 {
 		return fmt.Errorf("session policy %s has no install calldata", p.ID)
 	}
-	if len(p.Grant.OwnerSignature) == 0 {
+	// An activated budget was installed by a separately owner-signed operation.
+	// There is no deferred signature to replay. Pending records may never use
+	// this exception, even if their claimed sizing is budget.
+	ownerInstalledBudget := p.EffectiveSizing() == BudgetSizingBudget &&
+		p.Status == SessionPolicyActive && !p.AwaitingBudgetActivation && p.Grant.Applied() &&
+		len(common.FromHex(p.Grant.AppliedUserOpHash)) == common.HashLength &&
+		common.HexToHash(p.Grant.AppliedUserOpHash) != (common.Hash{})
+	if len(p.Grant.OwnerSignature) == 0 && !ownerInstalledBudget {
 		return fmt.Errorf("session policy %s has no owner signature", p.ID)
 	}
 	if p.Grant.CarrierNonce == nil {

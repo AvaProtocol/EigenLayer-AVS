@@ -84,6 +84,13 @@ func SendUserOpMAv2(
 		return nil, nil, err
 	}
 
+	lease, err := acquireSessionSend(ctx, smartWalletConfig.ChainID, owner, sender)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer lease.Release()
+	ctx = context.WithValue(ctx, sessionSendLeaseKey{}, lease)
+
 	// A caller that supplies no authorization gets the stored grant for THIS
 	// wallet — looked up only now, because grants are keyed by the smart
 	// wallet's address and the sender is not known until it is resolved.
@@ -360,6 +367,11 @@ func SendUserOpMAv2(
 		// validation-level failure; the next operation heals it through the
 		// consumed-carrier-nonce path above.
 		return op, nil, err
+	}
+	if receipt != nil && lease.Settled != nil {
+		if err := lease.Settled(ctx, receipt); err != nil {
+			return op, receipt, err
+		}
 	}
 	if installsGrant {
 		if receipt == nil {

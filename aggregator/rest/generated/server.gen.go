@@ -95,12 +95,15 @@ type ServerInterface interface {
 	// List the wallet's session policies
 	// (GET /wallets/{address}/policies)
 	ListWalletPolicies(ctx echo.Context, address EthereumAddress, params ListWalletPoliciesParams) error
-	// Read an owned unsigned budget preparation
+	// Recover an owned budget preparation or durable change
 	// (GET /wallets/{address}/policies/preparations/{id})
 	GetWalletBudgetPreparation(ctx echo.Context, address EthereumAddress, id Ulid, params GetWalletBudgetPreparationParams) error
-	// Reserved signature-only budget handoff (not enabled yet)
+	// Prepare a self-funded owner cancellation on the held nonce
+	// (POST /wallets/{address}/policies/preparations/{id}:cancel)
+	PrepareWalletBudgetCancel(ctx echo.Context, address EthereumAddress, id Ulid, params PrepareWalletBudgetCancelParams) error
+	// Relay one stored owner-signed budget operation
 	// (POST /wallets/{address}/policies/preparations/{id}:submit)
-	SubmitWalletBudgetPreparation(ctx echo.Context, address EthereumAddress, id Ulid) error
+	SubmitWalletBudgetPreparation(ctx echo.Context, address EthereumAddress, id Ulid, params SubmitWalletBudgetPreparationParams) error
 	// Revoke a session policy
 	// (DELETE /wallets/{address}/policies/{policyId})
 	RevokeWalletPolicy(ctx echo.Context, address EthereumAddress, policyId Ulid, params RevokeWalletPolicyParams) error
@@ -784,6 +787,41 @@ func (w *ServerInterfaceWrapper) GetWalletBudgetPreparation(ctx echo.Context) er
 	return err
 }
 
+// PrepareWalletBudgetCancel converts echo context to params.
+func (w *ServerInterfaceWrapper) PrepareWalletBudgetCancel(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "address" -------------
+	var address EthereumAddress
+
+	err = runtime.BindStyledParameterWithOptions("simple", "address", ctx.Param("address"), &address, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter address: %s", err))
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id Ulid
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", ctx.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter id: %s", err))
+	}
+
+	ctx.Set(BearerAuthScopes, []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PrepareWalletBudgetCancelParams
+	// ------------- Optional query parameter "chainId" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "chainId", ctx.QueryParams(), &params.ChainId)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter chainId: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.PrepareWalletBudgetCancel(ctx, address, id, params)
+	return err
+}
+
 // SubmitWalletBudgetPreparation converts echo context to params.
 func (w *ServerInterfaceWrapper) SubmitWalletBudgetPreparation(ctx echo.Context) error {
 	var err error
@@ -805,8 +843,17 @@ func (w *ServerInterfaceWrapper) SubmitWalletBudgetPreparation(ctx echo.Context)
 
 	ctx.Set(BearerAuthScopes, []string{})
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SubmitWalletBudgetPreparationParams
+	// ------------- Optional query parameter "chainId" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "chainId", ctx.QueryParams(), &params.ChainId)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter chainId: %s", err))
+	}
+
 	// Invoke the callback with all the unmarshaled arguments
-	err = w.Handler.SubmitWalletBudgetPreparation(ctx, address, id)
+	err = w.Handler.SubmitWalletBudgetPreparation(ctx, address, id, params)
 	return err
 }
 
@@ -1266,6 +1313,7 @@ func RegisterHandlersWithBaseURL(router EchoRouter, si ServerInterface, baseURL 
 	router.POST(baseURL+"/wallets/:address/delegation:submit", wrapper.SubmitEoaDelegation)
 	router.GET(baseURL+"/wallets/:address/policies", wrapper.ListWalletPolicies)
 	router.GET(baseURL+"/wallets/:address/policies/preparations/:id", wrapper.GetWalletBudgetPreparation)
+	router.POST(baseURL+"/wallets/:address/policies/preparations/:id:cancel", wrapper.PrepareWalletBudgetCancel)
 	router.POST(baseURL+"/wallets/:address/policies/preparations/:id:submit", wrapper.SubmitWalletBudgetPreparation)
 	router.DELETE(baseURL+"/wallets/:address/policies/:policyId", wrapper.RevokeWalletPolicy)
 	router.GET(baseURL+"/wallets/:address/policies/:policyId", wrapper.GetWalletPolicy)
@@ -2469,14 +2517,85 @@ func (response GetWalletBudgetPreparation409ApplicationProblemPlusJSONResponse) 
 	return json.NewEncoder(w).Encode(response)
 }
 
+type PrepareWalletBudgetCancelRequestObject struct {
+	Address EthereumAddress `json:"address"`
+	Id      Ulid            `json:"id"`
+	Params  PrepareWalletBudgetCancelParams
+}
+
+type PrepareWalletBudgetCancelResponseObject interface {
+	VisitPrepareWalletBudgetCancelResponse(w http.ResponseWriter) error
+}
+
+type PrepareWalletBudgetCancel200JSONResponse PreparedPolicy
+
+func (response PrepareWalletBudgetCancel200JSONResponse) VisitPrepareWalletBudgetCancelResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PrepareWalletBudgetCancel401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response PrepareWalletBudgetCancel401ApplicationProblemPlusJSONResponse) VisitPrepareWalletBudgetCancelResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PrepareWalletBudgetCancel403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response PrepareWalletBudgetCancel403ApplicationProblemPlusJSONResponse) VisitPrepareWalletBudgetCancelResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PrepareWalletBudgetCancel404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response PrepareWalletBudgetCancel404ApplicationProblemPlusJSONResponse) VisitPrepareWalletBudgetCancelResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PrepareWalletBudgetCancel409ApplicationProblemPlusJSONResponse Problem
+
+func (response PrepareWalletBudgetCancel409ApplicationProblemPlusJSONResponse) VisitPrepareWalletBudgetCancelResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type SubmitWalletBudgetPreparationRequestObject struct {
 	Address EthereumAddress `json:"address"`
 	Id      Ulid            `json:"id"`
+	Params  SubmitWalletBudgetPreparationParams
 	Body    *SubmitWalletBudgetPreparationJSONRequestBody
 }
 
 type SubmitWalletBudgetPreparationResponseObject interface {
 	VisitSubmitWalletBudgetPreparationResponse(w http.ResponseWriter) error
+}
+
+type SubmitWalletBudgetPreparation200JSONResponse PreparedPolicy
+
+func (response SubmitWalletBudgetPreparation200JSONResponse) VisitSubmitWalletBudgetPreparationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
 }
 
 type SubmitWalletBudgetPreparation400ApplicationProblemPlusJSONResponse struct {
@@ -2512,11 +2631,31 @@ func (response SubmitWalletBudgetPreparation403ApplicationProblemPlusJSONRespons
 	return json.NewEncoder(w).Encode(response)
 }
 
+type SubmitWalletBudgetPreparation404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response SubmitWalletBudgetPreparation404ApplicationProblemPlusJSONResponse) VisitSubmitWalletBudgetPreparationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type SubmitWalletBudgetPreparation409ApplicationProblemPlusJSONResponse Problem
 
 func (response SubmitWalletBudgetPreparation409ApplicationProblemPlusJSONResponse) VisitSubmitWalletBudgetPreparationResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SubmitWalletBudgetPreparation503ApplicationProblemPlusJSONResponse Problem
+
+func (response SubmitWalletBudgetPreparation503ApplicationProblemPlusJSONResponse) VisitSubmitWalletBudgetPreparationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -3555,10 +3694,13 @@ type StrictServerInterface interface {
 	// List the wallet's session policies
 	// (GET /wallets/{address}/policies)
 	ListWalletPolicies(ctx context.Context, request ListWalletPoliciesRequestObject) (ListWalletPoliciesResponseObject, error)
-	// Read an owned unsigned budget preparation
+	// Recover an owned budget preparation or durable change
 	// (GET /wallets/{address}/policies/preparations/{id})
 	GetWalletBudgetPreparation(ctx context.Context, request GetWalletBudgetPreparationRequestObject) (GetWalletBudgetPreparationResponseObject, error)
-	// Reserved signature-only budget handoff (not enabled yet)
+	// Prepare a self-funded owner cancellation on the held nonce
+	// (POST /wallets/{address}/policies/preparations/{id}:cancel)
+	PrepareWalletBudgetCancel(ctx context.Context, request PrepareWalletBudgetCancelRequestObject) (PrepareWalletBudgetCancelResponseObject, error)
+	// Relay one stored owner-signed budget operation
 	// (POST /wallets/{address}/policies/preparations/{id}:submit)
 	SubmitWalletBudgetPreparation(ctx context.Context, request SubmitWalletBudgetPreparationRequestObject) (SubmitWalletBudgetPreparationResponseObject, error)
 	// Revoke a session policy
@@ -4364,12 +4506,40 @@ func (sh *strictHandler) GetWalletBudgetPreparation(ctx echo.Context, address Et
 	return nil
 }
 
+// PrepareWalletBudgetCancel operation middleware
+func (sh *strictHandler) PrepareWalletBudgetCancel(ctx echo.Context, address EthereumAddress, id Ulid, params PrepareWalletBudgetCancelParams) error {
+	var request PrepareWalletBudgetCancelRequestObject
+
+	request.Address = address
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.PrepareWalletBudgetCancel(ctx.Request().Context(), request.(PrepareWalletBudgetCancelRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PrepareWalletBudgetCancel")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(PrepareWalletBudgetCancelResponseObject); ok {
+		return validResponse.VisitPrepareWalletBudgetCancelResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
 // SubmitWalletBudgetPreparation operation middleware
-func (sh *strictHandler) SubmitWalletBudgetPreparation(ctx echo.Context, address EthereumAddress, id Ulid) error {
+func (sh *strictHandler) SubmitWalletBudgetPreparation(ctx echo.Context, address EthereumAddress, id Ulid, params SubmitWalletBudgetPreparationParams) error {
 	var request SubmitWalletBudgetPreparationRequestObject
 
 	request.Address = address
 	request.Id = id
+	request.Params = params
 
 	var body SubmitWalletBudgetPreparationJSONRequestBody
 	if err := ctx.Bind(&body); err != nil {

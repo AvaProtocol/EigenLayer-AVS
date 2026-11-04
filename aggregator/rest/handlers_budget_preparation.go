@@ -3,8 +3,10 @@ package rest
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/labstack/echo/v4"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
@@ -19,7 +21,7 @@ func (s *Server) GetWalletBudgetPreparation(ctx echo.Context, address generated.
 		return err
 	}
 	chainID := policyChainID(ctx, params.ChainId)
-	record, err := s.engine.GetBudgetPolicyPreparation(user, wallet, chainID, id)
+	record, err := s.engine.GetBudgetPolicyPreparationWithContext(ctx.Request().Context(), user, wallet, chainID, id)
 	if err != nil {
 		return mapPolicyError(err)
 	}
@@ -30,22 +32,45 @@ func (s *Server) GetWalletBudgetPreparation(ctx echo.Context, address generated.
 	return ctx.JSON(http.StatusOK, out)
 }
 
-func (s *Server) SubmitWalletBudgetPreparation(ctx echo.Context, address generated.EthereumAddress, _ generated.Ulid) error {
-	if _, _, err := s.policyAuth(ctx, OpSubmitWalletBudgetPreparation, address); err != nil {
+func (s *Server) SubmitWalletBudgetPreparation(ctx echo.Context, address generated.EthereumAddress, id generated.Ulid, params generated.SubmitWalletBudgetPreparationParams) error {
+	user, wallet, err := s.policyAuth(ctx, OpSubmitWalletBudgetPreparation, address)
+	if err != nil {
 		return err
 	}
 	var body struct {
 		Signature string `json:"signature"`
 	}
-	if err := decodeOwnerExecutionBody(ctx, &body); err != nil {
+	if err = decodeOwnerExecutionBody(ctx, &body); err != nil {
 		return badRequest("POLICIES_BAD_BODY", "Invalid request body", err.Error())
 	}
-	if len(common.FromHex(body.Signature)) != 65 {
+	signature, err := hexutil.Decode(body.Signature)
+	if err != nil || len(signature) != 65 {
 		return badRequest("POLICIES_BAD_SIGNATURE", "Invalid signature", "signature must be 65 bytes.")
 	}
-	// No signature is verified, stored or relayed until holds, reconciliation
-	// and activation exist. In particular this never delegates to /executions.
-	return mapPolicyError(&taskengine.BudgetPolicyError{Code: taskengine.BudgetHandoffRequiredCode, Detail: "Budget submission is not enabled until durable holds and activation are implemented."})
+	record, err := s.engine.SubmitBudgetPolicyPreparation(ctx.Request().Context(), user, wallet, policyChainID(ctx, params.ChainId), id, signature)
+	if err != nil {
+		return mapPolicyError(err)
+	}
+	out, err := budgetPreparationToAPI(record)
+	if err != nil {
+		return err
+	}
+	return ctx.JSON(http.StatusOK, out)
+}
+func (s *Server) PrepareWalletBudgetCancel(ctx echo.Context, address generated.EthereumAddress, id generated.Ulid, params generated.PrepareWalletBudgetCancelParams) error {
+	user, wallet, err := s.policyAuth(ctx, OpPrepareWalletBudgetCancel, address)
+	if err != nil {
+		return err
+	}
+	record, err := s.engine.PrepareBudgetCancel(ctx.Request().Context(), user, wallet, policyChainID(ctx, params.ChainId), id)
+	if err != nil {
+		return mapPolicyError(err)
+	}
+	out, err := budgetPreparationToAPI(record)
+	if err != nil {
+		return err
+	}
+	return ctx.JSON(http.StatusOK, out)
 }
 
 func budgetDiscoveryFromAPI(raw *generated.BudgetApprovalDiscovery) (*taskengine.BudgetApprovalDiscovery, error) {
@@ -97,8 +122,38 @@ func budgetPreparationToAPI(p *taskengine.BudgetPolicyPreparation) (generated.Pr
 	out := generated.PreparedPolicy{PolicyId: policy.ID, ChainId: policy.ChainID, EntityId: int64(policy.EntityID), SessionSigner: policy.SessionSigner.Hex(), Deadline: int64(policy.Grant.Deadline), ValidUntil: policy.ValidUntil,
 		PreparationId: &id, Budget: &budget, ApprovalResets: &resets, UnmeteredPermissions: &budget.UnmeteredPermissions,
 		Signing: &generated.PolicySigning{Kind: generated.PolicySigningKind("owner_operation"), PreparationId: &id, UserOp: &operation, UserOpHash: &hash, MaxFeeWei: &p.MaxFeeWei, ExpiresAt: &p.ExpiresAt, SigningMethod: &method, EntryPoint: &entry}}
+	state := generated.BudgetChangeState(p.State)
+	out.State = &state
+	if p.Reason != "" {
+		out.Reason = &p.Reason
+	}
+	out.IsCancel = &p.IsCancel
+	if p.TransactionHash != (common.Hash{}) {
+		hash := p.TransactionHash.Hex()
+		out.TransactionHash = &hash
+	}
+	if p.FinalBlock.Number > 0 {
+		number := int64(p.FinalBlock.Number)
+		out.FinalReadBlock = &number
+	}
+	if p.InclusionBlock.Number > 0 {
+		number := int64(p.InclusionBlock.Number)
+		out.InclusionBlock = &number
+	}
 	// Reuse the ordinary row/change mapping without creating typed data or a
 	// deferred digest. The stored operation is the sole signing payload.
 	applySkillPrepare(&out, &taskengine.PreparedSessionGrant{Policy: policy, SkillChanges: &p.Draft.Changes, EchoPermissions: &p.Draft.Permissions})
+	return out, nil
+}
+
+func budgetSubmitParams(ctx echo.Context) (generated.SubmitWalletBudgetPreparationParams, error) {
+	var out generated.SubmitWalletBudgetPreparationParams
+	if raw := ctx.QueryParam("chainId"); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value <= 0 {
+			return out, badRequest("POLICIES_BAD_CHAIN", "Invalid chain", "chainId must be a positive integer.")
+		}
+		out.ChainId = &value
+	}
 	return out, nil
 }

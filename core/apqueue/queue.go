@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
@@ -14,8 +15,10 @@ type Queue struct {
 	db     storage.Storage
 	dbLock sync.Mutex
 
-	closeCh chan bool
-	eventCh chan uint64
+	closeCh  chan bool
+	eventCh  chan uint64
+	stopOnce sync.Once
+	deferred sync.WaitGroup
 
 	prefix string
 
@@ -67,6 +70,48 @@ func (q *Queue) MustStart() error {
 		panic(err)
 	}
 
+	rows, restoreErr := q.db.GetByPrefix(q.getQueueKeyPrefix(jobDeferred))
+	if restoreErr != nil {
+		return restoreErr
+	}
+	for _, row := range rows {
+		j, e := decodeJob(row.Value)
+		if e != nil {
+			return e
+		}
+		if e = q.db.Move(row.Key, q.getJobKey(jobPending, j.ID)); e != nil {
+			return e
+		}
+	}
+	// A prior process may have moved a deferred row to pending and stopped
+	// before delivering its in-memory wakeup. Only pending rows are restored;
+	// replaying an in-progress execution could duplicate its side effects.
+	rows, restoreErr = q.db.GetByPrefix(q.getQueueKeyPrefix(jobPending))
+	if restoreErr != nil {
+		return restoreErr
+	}
+	restored := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		job, decodeErr := decodeJob(row.Value)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		restored = append(restored, job.ID)
+	}
+	// Do not drop wakeups when recovery exceeds the channel buffer. The
+	// producer waits for workers, and Stop also releases it.
+	q.deferred.Add(1)
+	go func() {
+		defer q.deferred.Done()
+		for _, id := range restored {
+			select {
+			case q.eventCh <- id:
+			case <-q.closeCh:
+				return
+			}
+		}
+	}()
+
 	return err
 }
 
@@ -79,6 +124,10 @@ func (q *Queue) Recover() error {
 
 // stop Queue and Release resources
 func (q *Queue) Stop() error {
+	q.dbLock.Lock()
+	q.stopOnce.Do(func() { close(q.closeCh) })
+	q.dbLock.Unlock()
+	q.deferred.Wait()
 	// release sequence to avoid wasting counter
 	err := q.seq.Release()
 	if err != nil {
@@ -212,4 +261,54 @@ func (q *Queue) getQueueKeyPrefix(status jobStatus) []byte {
 
 func (q *Queue) getJobKey(status jobStatus, jID uint64) []byte {
 	return append(q.getQueueKeyPrefix(status), []byte(fmt.Sprintf("%d", jID))...)
+}
+
+// deferJob keeps a paused run outside the pending queue to avoid starving other
+// wallets. A restart restores deferred rows; no execution counter is advanced.
+func (q *Queue) deferJob(job *Job, delay time.Duration) error {
+	key := q.getJobKey(jobDeferred, job.ID)
+	q.dbLock.Lock()
+	err := q.db.Move(q.getJobKey(jobInProgress, job.ID), key)
+	if err != nil {
+		q.dbLock.Unlock()
+		return err
+	}
+	select {
+	case <-q.closeCh:
+		q.dbLock.Unlock()
+		return nil // the durable deferred row is recovered at the next start
+	default:
+	}
+	q.deferred.Add(1)
+	q.dbLock.Unlock()
+	go q.resumeDeferred(key, job.ID, delay)
+	return nil
+}
+
+func (q *Queue) resumeDeferred(key []byte, id uint64, delay time.Duration) {
+	defer q.deferred.Done()
+	ticker := time.NewTicker(delay)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-q.closeCh:
+			return
+		case <-ticker.C:
+			q.dbLock.Lock()
+			err := q.db.Move(key, q.getJobKey(jobPending, id))
+			q.dbLock.Unlock()
+			if isKeyNotFound(err) { // task cleanup won the race
+				return
+			}
+			if err != nil {
+				q.logger.Error("failed to resume paused job", "job_id", id, "error", err)
+				continue
+			}
+			select {
+			case q.eventCh <- id:
+			case <-q.closeCh:
+			}
+			return
+		}
+	}
 }

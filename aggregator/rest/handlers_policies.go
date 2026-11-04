@@ -602,7 +602,7 @@ func mapPolicyError(err error) error {
 			status = http.StatusServiceUnavailable
 		} else if budgetError.Code == taskengine.BudgetPreparationLimitCode {
 			status = http.StatusTooManyRequests
-		} else if budgetError.Code == taskengine.BudgetHandoffRequiredCode || budgetError.Code == taskengine.BudgetReplaceRefusedCode || budgetError.Code == taskengine.BudgetDiscoveryRequiredCode || budgetError.Code == taskengine.BudgetResetUnsupportedCode || budgetError.Code == taskengine.BudgetFeeInsufficientCode || budgetError.Code == taskengine.BudgetLegacyGrantPendingCode {
+		} else if budgetError.Code == taskengine.BudgetAuthorityUnknownCode || budgetError.Code == taskengine.BudgetChangingCode || budgetError.Code == taskengine.BudgetFeeCeilingCode || budgetError.Code == taskengine.BudgetRouteUnsupportedCode || budgetError.Code == taskengine.BudgetHandoffRequiredCode || budgetError.Code == taskengine.BudgetReplaceRefusedCode || budgetError.Code == taskengine.BudgetDiscoveryRequiredCode || budgetError.Code == taskengine.BudgetResetUnsupportedCode || budgetError.Code == taskengine.BudgetFeeInsufficientCode || budgetError.Code == taskengine.BudgetLegacyGrantPendingCode {
 			status = http.StatusConflict
 		}
 		return &restmw.HTTPError{Status: status, Code: budgetError.Code, Title: "Budget request refused", Detail: budgetError.Detail, Token: budgetError.Details["token"], Spender: budgetError.Details["spender"], NeededWei: budgetError.Details["neededWei"], AvailableWei: budgetError.Details["availableWei"]}

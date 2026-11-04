@@ -74,6 +74,11 @@ func GetSenderAddressMAv2(conn *ethclient.Client, owner common.Address, salt *bi
 // GetSenderAddressMAv2WithContext derives through the factory with the caller's
 // deadline. Owner preparation must not outlive an abandoned signing request.
 func GetSenderAddressMAv2WithContext(ctx context.Context, conn *ethclient.Client, owner common.Address, salt *big.Int) (*common.Address, error) {
+	return GetSenderAddressMAv2At(ctx, conn, owner, salt, nil)
+}
+
+// GetSenderAddressMAv2At pins the factory read to the owner's final snapshot.
+func GetSenderAddressMAv2At(ctx context.Context, conn *ethclient.Client, owner common.Address, salt, block *big.Int) (*common.Address, error) {
 	if conn == nil {
 		return nil, fmt.Errorf("nil eth client")
 	}
@@ -89,7 +94,7 @@ func GetSenderAddressMAv2WithContext(ctx context.Context, conn *ethclient.Client
 		return nil, fmt.Errorf("packing getAddressSemiModular: %w", err)
 	}
 	factory := MAv2FactoryAddress()
-	out, err := conn.CallContract(ctx, ethereum.CallMsg{To: &factory, Data: callData}, nil)
+	out, err := conn.CallContract(ctx, ethereum.CallMsg{To: &factory, Data: callData}, block)
 	if err != nil {
 		return nil, fmt.Errorf("getAddressSemiModular on factory %s for owner %s salt %s: %w",
 			factory.Hex(), owner.Hex(), salt.String(), err)

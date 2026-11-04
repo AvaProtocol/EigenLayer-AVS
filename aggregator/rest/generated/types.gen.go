@@ -55,6 +55,18 @@ const (
 	Moralis BudgetApprovalDiscoverySource = "moralis"
 )
 
+// Defines values for BudgetChangeState.
+const (
+	BudgetChangeStateActive     BudgetChangeState = "active"
+	BudgetChangeStatePrepared   BudgetChangeState = "prepared"
+	BudgetChangeStateRejected   BudgetChangeState = "rejected"
+	BudgetChangeStateReverted   BudgetChangeState = "reverted"
+	BudgetChangeStateSubmitted  BudgetChangeState = "submitted"
+	BudgetChangeStateSubmitting BudgetChangeState = "submitting"
+	BudgetChangeStateSuperseded BudgetChangeState = "superseded"
+	BudgetChangeStateUnsent     BudgetChangeState = "unsent"
+)
+
 // Defines values for BudgetRetirementState.
 const (
 	Registered BudgetRetirementState = "registered"
@@ -366,9 +378,9 @@ const (
 
 // Defines values for WithdrawResponseStatus.
 const (
-	WithdrawResponseStatusConfirmed WithdrawResponseStatus = "confirmed"
-	WithdrawResponseStatusFailed    WithdrawResponseStatus = "failed"
-	WithdrawResponseStatusPending   WithdrawResponseStatus = "pending"
+	Confirmed WithdrawResponseStatus = "confirmed"
+	Failed    WithdrawResponseStatus = "failed"
+	Pending   WithdrawResponseStatus = "pending"
 )
 
 // Defines values for WorkflowCompletionReason.
@@ -589,6 +601,14 @@ type BudgetApprovalReset struct {
 	// Token Lowercase or checksummed hex EOA / contract address.
 	Token EthereumAddress `json:"token"`
 }
+
+// BudgetChangeState prepared expires after ten minutes; that window limits only the first
+// relay. submitting, submitted and rejected remain recoverable without
+// expiry and keep Ava runs paused. A bundler rejection is not final.
+// active, reverted and superseded are settled. unsent is possible only
+// before a submitting marker. Successful inclusion stays submitted until
+// reset verification passes; activation and hold release are atomic.
+type BudgetChangeState string
 
 // BudgetNativeRow defines model for BudgetNativeRow.
 type BudgetNativeRow struct {
@@ -1763,8 +1783,13 @@ type PreparedPolicy struct {
 	// Prefer `erc20SpendCaps` when capping more than one token; this
 	// field remains the one-token alias (must match one entry of that
 	// array when both are sent). Native ETH is not this list.
-	Erc20SpendCap    *Erc20SpendCap     `json:"erc20SpendCap,omitempty"`
-	Erc20SpendCaps   *[]Erc20SpendCap   `json:"erc20SpendCaps,omitempty"`
+	Erc20SpendCap  *Erc20SpendCap   `json:"erc20SpendCap,omitempty"`
+	Erc20SpendCaps *[]Erc20SpendCap `json:"erc20SpendCaps,omitempty"`
+	FinalReadBlock *int64           `json:"finalReadBlock,omitempty"`
+	InclusionBlock *int64           `json:"inclusionBlock,omitempty"`
+
+	// IsCancel A successful cancel settles as active with isCancel true; it consumes the nonce and does not activate a new permission.
+	IsCancel         *bool              `json:"isCancel,omitempty"`
 	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
 	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
 
@@ -1772,7 +1797,8 @@ type PreparedPolicy struct {
 	PolicyId Ulid `json:"policyId"`
 
 	// PreparationId ULID identifier (26-char Crockford base32).
-	PreparationId *Ulid `json:"preparationId,omitempty"`
+	PreparationId *Ulid   `json:"preparationId,omitempty"`
+	Reason        *string `json:"reason,omitempty"`
 
 	// SessionSigner Lowercase or checksummed hex EOA / contract address.
 	SessionSigner EthereumAddress `json:"sessionSigner"`
@@ -1781,6 +1807,17 @@ type PreparedPolicy struct {
 	// typedData. Preparation is gated off by default. This preparation-only
 	// slice never relays a budget operation; signature submit remains refused.
 	Signing *PolicySigning `json:"signing,omitempty"`
+
+	// State prepared expires after ten minutes; that window limits only the first
+	// relay. submitting, submitted and rejected remain recoverable without
+	// expiry and keep Ava runs paused. A bundler rejection is not final.
+	// active, reverted and superseded are settled. unsent is possible only
+	// before a submitting marker. Successful inclusion stays submitted until
+	// reset verification passes; activation and hold release are atomic.
+	State *BudgetChangeState `json:"state,omitempty"`
+
+	// TransactionHash Arbitrary-length hex-encoded byte string.
+	TransactionHash *Hex `json:"transactionHash,omitempty"`
 
 	// TypedData The exact eth_signTypedData_v4 payload for the owner's wallet.
 	TypedData            map[string]interface{} `json:"typedData,omitempty"`
@@ -2716,12 +2753,15 @@ type WalletBudget struct {
 	LiveApprovals *[]LiveApproval  `json:"liveApprovals,omitempty"`
 	Native        *BudgetNativeRow `json:"native,omitempty"`
 
-	// PendingChange Reserved for stored budget preparations; omitted in this slice.
+	// PendingChange Latest durable budget change. A rejected or reset-unverified change explains why runs remain paused.
 	PendingChange *struct {
 		// PolicyId ULID identifier (26-char Crockford base32).
-		PolicyId Ulid                           `json:"policyId"`
-		Reason   *string                        `json:"reason,omitempty"`
-		State    WalletBudgetPendingChangeState `json:"state"`
+		PolicyId Ulid `json:"policyId"`
+
+		// PreparationId ULID identifier (26-char Crockford base32).
+		PreparationId *Ulid                          `json:"preparationId,omitempty"`
+		Reason        *string                        `json:"reason,omitempty"`
+		State         WalletBudgetPendingChangeState `json:"state"`
 	} `json:"pendingChange,omitempty"`
 
 	// PolicyId ULID identifier (26-char Crockford base32).
@@ -3057,10 +3097,24 @@ type GetWalletBudgetPreparationParams struct {
 	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
+// PrepareWalletBudgetCancelParams defines parameters for PrepareWalletBudgetCancel.
+type PrepareWalletBudgetCancelParams struct {
+	// ChainId The chain to operate on (a single value). Omit to use the aggregator
+	// default (the request's JWT `aud` chain, then the gateway default).
+	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
+}
+
 // SubmitWalletBudgetPreparationJSONBody defines parameters for SubmitWalletBudgetPreparation.
 type SubmitWalletBudgetPreparationJSONBody struct {
 	// Signature Arbitrary-length hex-encoded byte string.
 	Signature Hex `json:"signature"`
+}
+
+// SubmitWalletBudgetPreparationParams defines parameters for SubmitWalletBudgetPreparation.
+type SubmitWalletBudgetPreparationParams struct {
+	// ChainId The chain to operate on (a single value). Omit to use the aggregator
+	// default (the request's JWT `aud` chain, then the gateway default).
+	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
 // RevokeWalletPolicyParams defines parameters for RevokeWalletPolicy.

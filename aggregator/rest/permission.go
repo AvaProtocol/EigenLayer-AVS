@@ -82,6 +82,7 @@ const (
 	OpGetWalletBudget               = "getWalletBudget"
 	OpGetWalletBudgetPreparation    = "getWalletBudgetPreparation"
 	OpSubmitWalletBudgetPreparation = "submitWalletBudgetPreparation"
+	OpPrepareWalletBudgetCancel     = "prepareWalletBudgetCancel"
 	OpRevokeWalletPolicy            = "revokeWalletPolicy"
 
 	OpListSecrets  = "listSecrets"
@@ -156,6 +157,7 @@ var permissionMap = map[string]Level{
 	OpGetWalletBudget:               LevelUserRefusePartner,
 	OpGetWalletBudgetPreparation:    LevelUserRefusePartner,
 	OpSubmitWalletBudgetPreparation: LevelUserRefusePartner,
+	OpPrepareWalletBudgetCancel:     LevelUserRefusePartner,
 	OpRevokeWalletPolicy:            LevelUserRefusePartner,
 
 	// Monitoring: remains open (matches today's handler; product may lock later).

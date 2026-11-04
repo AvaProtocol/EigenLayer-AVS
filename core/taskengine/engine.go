@@ -336,6 +336,9 @@ type Engine struct {
 	// the dedicated self-funded owner preparation service.
 	budgetOwnerPrepareOverride ownerBudgetPrepareFunc
 	budgetPreparationLocks     budgetPreparationLockSet
+	budgetWorkflowLocks        budgetPreparationLockSet
+	budgetSendLocks            budgetPreparationLockSet
+	budgetChangeBackend        budgetChangeBackend
 }
 
 // executionLockShards bounds the per-execution resume locks to a fixed set of mutexes.
@@ -3640,6 +3643,13 @@ func (n *Engine) TriggerWorkflowWithContext(ctx context.Context, user *model.Use
 	if !task.IsRunable() {
 		return nil, status.Errorf(codes.FailedPrecondition, TaskIsNotRunnable)
 	}
+	// Refuse on-demand runs before creating a pending execution or notifying
+	// an operator. Scheduled runs instead retain their existing queue entry.
+	releaseBudget, budgetErr := n.budgetWorkflowLease(ctx, task)
+	if budgetErr != nil {
+		return nil, budgetErr
+	}
+	defer releaseBudget()
 
 	// For manual block triggers, instruct the operator to trigger immediately with current block
 	if payload.TriggerType == avsproto.TriggerType_TRIGGER_TYPE_BLOCK {
@@ -3738,7 +3748,7 @@ func (n *Engine) TriggerWorkflowWithContext(ctx context.Context, user *model.Use
 
 	if payload.IsBlocking {
 		executor := NewExecutor(n.ResolveSmartWalletConfig(n.defaultChainID()), n.db, n.logger, n, n.priceService)
-		execution, runErr := executor.RunTaskWithContext(ctx, task, &queueTaskData)
+		execution, runErr := executor.runTaskWithBudgetLease(ctx, task, &queueTaskData)
 		if runErr != nil {
 			n.logger.Error("failed to run blocking task", runErr)
 			// For blocking execution, return the error to the caller

@@ -546,6 +546,7 @@ func NextFreeSessionEntityID(
 func (n *Engine) InstallSessionResolver() {
 	n.sessionChainReads = true
 	preset.SetSessionResolver(newSessionResolver(n.db, configuredSessionSigner(n.config), n.teardownVerifier(), n.windowVerifier()))
+	preset.SetSessionSendGuard(n.guardBudgetSessionSend)
 	preset.SetEOA7702AccountLookup(func(chainID int64, owner, sender common.Address) (bool, error) {
 		if n.db == nil {
 			return false, nil

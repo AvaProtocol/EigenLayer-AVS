@@ -321,6 +321,7 @@ enum ErrorCode {
   WRITE_PREREQUISITE_FAILED = 4008;       // Write skipped because an upstream write did not succeed
   SESSION_POLICY_EXPIRED = 4009;         // The permission ended; owner must renew it
   BUDGET_USED_UP = 4010;                 // error_details: token, needed, remaining
+  BUDGET_CHANGING = 4012;              // Wallet/chain paused for an owner budget change
   BUDGET_ENDED = 4011;                   // error_details: validUntil (unix milliseconds)
   
   // 5000-5999: External Service errors

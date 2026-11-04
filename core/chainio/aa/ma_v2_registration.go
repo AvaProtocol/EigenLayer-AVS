@@ -33,10 +33,16 @@ type validationView struct {
 // EntityRegisteredOnChain returns true for any remaining registration state.
 // Empty/malformed RPC replies are errors, never proof that authority is gone.
 func EntityRegisteredOnChain(ctx context.Context, client ContractCaller, account common.Address, entity uint32) (bool, error) {
+	return ModuleEntityRegisteredOnChain(ctx, client, account, SingleSignerValidationModuleAddress(), entity)
+}
+
+// ModuleEntityRegisteredOnChain also checks entities installed directly by the
+// owner, including validation modules the gateway has never used.
+func ModuleEntityRegisteredOnChain(ctx context.Context, client ContractCaller, account, module common.Address, entity uint32) (bool, error) {
 	if client == nil {
 		return false, fmt.Errorf("no chain client")
 	}
-	moduleEntity := PackModuleEntity(SingleSignerValidationModuleAddress(), entity)
+	moduleEntity := PackModuleEntity(module, entity)
 	data, err := validationViewABI.Pack("getValidationData", moduleEntity)
 	if err != nil {
 		return false, err

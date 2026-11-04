@@ -111,10 +111,12 @@ type Config struct {
 	// Default false; enabling it does not change session/Auto execution.
 	OwnerExecutionEnabled bool
 	// Read-only budget preparation is experimental and separate from relay.
-	// Submit remains disabled until durable holds and activation are implemented.
+	// Budget submission requires the separate, Sepolia-only signing flag.
 	WalletBudgetPreparationEnabled bool
 	// Public EOA address of the trusted backend's discovery signing key.
 	WalletBudgetDiscoverySigner string
+	WalletBudgetSigningEnabled  bool
+	WalletBudgetMaxFeeWei       string
 
 	// Account abstraction config
 	SmartWallet *SmartWalletConfig
@@ -570,6 +572,8 @@ type ConfigRaw struct {
 	OwnerExecutionEnabled          bool   `yaml:"owner_execution_enabled"`
 	WalletBudgetPreparationEnabled bool   `yaml:"wallet_budget_preparation_enabled"`
 	WalletBudgetDiscoverySigner    string `yaml:"wallet_budget_discovery_signer"`
+	WalletBudgetSigningEnabled     bool   `yaml:"wallet_budget_signing_enabled"`
+	WalletBudgetMaxFeeWei          string `yaml:"wallet_budget_max_fee_wei"`
 
 	// REST rate-limit overrides; see Config.RestRateLimitPerSecond.
 	RestRateLimitPerSecond float64 `yaml:"rest_rate_limit_per_second"`
@@ -850,6 +854,8 @@ func NewConfig(configFilePath string) (*Config, error) {
 		OwnerExecutionEnabled:          configRaw.OwnerExecutionEnabled,
 		WalletBudgetPreparationEnabled: configRaw.WalletBudgetPreparationEnabled,
 		WalletBudgetDiscoverySigner:    configRaw.WalletBudgetDiscoverySigner,
+		WalletBudgetSigningEnabled:     configRaw.WalletBudgetSigningEnabled,
+		WalletBudgetMaxFeeWei:          configRaw.WalletBudgetMaxFeeWei,
 
 		RestRateLimitPerSecond: configRaw.RestRateLimitPerSecond,
 		RestRateLimitBurst:     configRaw.RestRateLimitBurst,

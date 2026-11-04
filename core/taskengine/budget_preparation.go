@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	badger "github.com/dgraph-io/badger/v4"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/oklog/ulid/v2"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -30,30 +29,37 @@ const BudgetPreparationLimitCode = "BUDGET_PREPARATION_LIMIT"
 type ownerBudgetPrepareFunc func(context.Context, *config.SmartWalletConfig, common.Address, common.Address, *big.Int, preset.OwnerBatch, logger.Logger) (*preset.PreparedOwnerUserOp, error)
 
 // BudgetPolicyPreparation is the stored review, not a usable permission.
-// Its operation is priced and unsigned; this slice has no relay path.
+// Its operation stays priced and unsigned in storage, including after relay.
 type BudgetPolicyPreparation struct {
-	ID             string                      `json:"id"`
-	Owner          common.Address              `json:"owner"`
-	Wallet         common.Address              `json:"wallet"`
-	ChainID        int64                       `json:"chainId"`
-	CreatedAt      int64                       `json:"createdAt"`
-	ExpiresAt      int64                       `json:"expiresAt"`
-	State          string                      `json:"state"`
-	Operation      *storedOwnerOperation       `json:"operation"`
-	UserOpHash     common.Hash                 `json:"userOpHash"`
-	MaxFeeWei      string                      `json:"maxFeeWei"`
-	Identity       preset.OwnerAccountIdentity `json:"identity"`
-	Salt           *big.Int                    `json:"salt"`
-	Intent         budgetPreparationIntent     `json:"intent"`
-	Base           *model.SessionPolicy        `json:"base,omitempty"`
-	Remainder      GrantRemainder              `json:"remainder"`
-	EnabledTasks   []json.RawMessage           `json:"enabledTasks"`
-	Draft          *BudgetPolicyDraft          `json:"draft"`
-	Policy         *model.SessionPolicy        `json:"policy"`
-	ApprovalReads  []BudgetApprovalReset       `json:"approvalReads"`
-	ApprovalResets []BudgetApprovalReset       `json:"approvalResets"`
-	Retirements    []*model.SessionPolicy      `json:"retirements"`
-	Budget         *WalletBudget               `json:"budget"`
+	Reason              string                      `json:"reason,omitempty"`
+	IsCancel            bool                        `json:"isCancel,omitempty"`
+	SubmittedAt         int64                       `json:"submittedAt,omitempty"`
+	FinalBlock          BudgetBlock                 `json:"finalBlock,omitempty"`
+	InclusionBlock      BudgetBlock                 `json:"inclusionBlock,omitempty"`
+	TransactionHash     common.Hash                 `json:"transactionHash,omitempty"`
+	ResetRepairRequired bool                        `json:"resetRepairRequired,omitempty"`
+	ID                  string                      `json:"id"`
+	Owner               common.Address              `json:"owner"`
+	Wallet              common.Address              `json:"wallet"`
+	ChainID             int64                       `json:"chainId"`
+	CreatedAt           int64                       `json:"createdAt"`
+	ExpiresAt           int64                       `json:"expiresAt"`
+	State               string                      `json:"state"`
+	Operation           *storedOwnerOperation       `json:"operation"`
+	UserOpHash          common.Hash                 `json:"userOpHash"`
+	MaxFeeWei           string                      `json:"maxFeeWei"`
+	Identity            preset.OwnerAccountIdentity `json:"identity"`
+	Salt                *big.Int                    `json:"salt"`
+	Intent              budgetPreparationIntent     `json:"intent"`
+	Base                *model.SessionPolicy        `json:"base,omitempty"`
+	Remainder           GrantRemainder              `json:"remainder"`
+	EnabledTasks        []json.RawMessage           `json:"enabledTasks"`
+	Draft               *BudgetPolicyDraft          `json:"draft"`
+	Policy              *model.SessionPolicy        `json:"policy"`
+	ApprovalReads       []BudgetApprovalReset       `json:"approvalReads"`
+	ApprovalResets      []BudgetApprovalReset       `json:"approvalResets"`
+	Retirements         []*model.SessionPolicy      `json:"retirements"`
+	Budget              *WalletBudget               `json:"budget"`
 }
 
 type budgetPreparationIntent struct {
@@ -153,6 +159,10 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 	if err != nil {
 		return nil, err
 	}
+	if err = refuseUnsupportedBudgetRoutes(in.ChainID, draft.Permissions); err != nil {
+		return nil, err
+	}
+
 	if err = n.bindNativeRecipientChecks(in.ChainID, &draft.Permissions); err != nil {
 		return nil, err
 	}
@@ -233,14 +243,7 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 	if err != nil {
 		var fee *preset.OwnerFundingError
 		if errors.As(err, &fee) {
-			details := map[string]string{}
-			if fee.Required != nil {
-				details["neededWei"] = fee.Required.String()
-			}
-			if fee.Available != nil {
-				details["availableWei"] = fee.Available.String()
-			}
-			return nil, &BudgetPolicyError{Code: BudgetFeeInsufficientCode, Detail: "Add ETH for network fees, then prepare the budget again.", Details: details}
+			return nil, budgetFundingRefusal(fee)
 		}
 		return nil, fmt.Errorf("budget owner operation could not be prepared: %w", err)
 	}
@@ -252,7 +255,7 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 	policyID := strings.ToLower(ulid.Make().String())
 	policy := &model.SessionPolicy{ID: policyID, Owner: &user.Address, Runner: &in.Wallet, ChainID: in.ChainID, EntityID: entity, SessionSigner: &signer, AgentLabel: in.AgentLabel, Justification: in.Justification,
 		Status: model.SessionPolicyPending, Sizing: model.BudgetSizingBudget, ValidUntil: draft.Permissions.ValidUntilMs, CreatedAt: now.UnixMilli(), BudgetStartedAt: draft.StartedAt, BudgetStartAmounts: draft.StartAmounts, BudgetStartNative: draft.StartNative,
-		Grant: &model.SessionGrantAuthorization{InstallCall: install, CarrierNonce: new(big.Int).Set(op.Nonce), Deadline: uint64(expires / 1000)}}
+		Grant: &model.SessionGrantAuthorization{InstallCall: install, CarrierNonce: new(big.Int).Set(op.Nonce), Deadline: uint64(expires / 1000), RequiresExecuteUserOp: true}}
 	attachDeclaredPermissions(policy, draft.Permissions)
 	view, err := preparedBudgetView(policy, current, *draft, now)
 	if err != nil {
@@ -279,6 +282,10 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 	if !bytes.Equal(before, after) {
 		return nil, newBaseChanged(latest)
 	}
+	if err = n.checkBudgetFee(record); err != nil {
+		return nil, err
+	}
+
 	data, err := json.Marshal(record)
 	if err != nil {
 		return nil, err
@@ -430,52 +437,25 @@ func preparedBudgetView(policy, current *model.SessionPolicy, draft BudgetPolicy
 }
 
 //nolint:gocyclo // Corrupt stored reviews fail closed before mapping any optional nested fields.
-func (n *Engine) GetBudgetPolicyPreparation(user *model.User, wallet common.Address, chainID int64, id string) (*BudgetPolicyPreparation, error) {
-	if err := n.requireOwnedWallet(user, wallet); err != nil {
-		return nil, err
+func (n *Engine) GetBudgetPolicyPreparation(user *model.User, wallet common.Address, chain int64, id string) (*BudgetPolicyPreparation, error) {
+	return n.GetBudgetPolicyPreparationWithContext(context.Background(), user, wallet, chain, id)
+}
+func (n *Engine) GetBudgetPolicyPreparationWithContext(ctx context.Context, user *model.User, wallet common.Address, chain int64, id string) (*BudgetPolicyPreparation, error) {
+	p, e := n.loadBudgetChange(user, wallet, chain, id)
+	if e != nil {
+		return nil, e
 	}
-	if err := n.requireServedChain(chainID); err != nil {
-		return nil, err
+	if p.State == ownerSubmissionPrepared {
+		if n.config == nil || !n.config.WalletBudgetPreparationEnabled {
+			return nil, budgetHandoffRequired()
+		}
+		if p.ExpiresAt <= time.Now().UnixMilli() {
+			return nil, ErrSessionPolicyNotFound
+		}
+		return p, nil
 	}
-	if n.config == nil || !n.config.WalletBudgetPreparationEnabled {
-		return nil, budgetHandoffRequired()
+	if e = n.ReconcileBudgetChanges(ctx, chain, user.Address, wallet); e != nil {
+		return nil, e
 	}
-	data, err := n.db.GetKey(budgetPreparationKey(user.Address, id))
-	if errors.Is(err, badger.ErrKeyNotFound) {
-		return nil, ErrSessionPolicyNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	var record BudgetPolicyPreparation
-	if err = json.Unmarshal(data, &record); err != nil {
-		return nil, fmt.Errorf("%w: unreadable budget preparation", ErrBudgetReadUnavailable)
-	}
-	if record.Owner != user.Address || record.Wallet != wallet || record.ChainID != chainID || record.ExpiresAt <= time.Now().UnixMilli() {
-		return nil, ErrSessionPolicyNotFound
-	}
-	if record.ID != id || record.State != ownerSubmissionPrepared || record.Operation == nil || record.Policy == nil || record.Draft == nil || record.Budget == nil {
-		return nil, fmt.Errorf("%w: invalid stored budget preparation", ErrBudgetReadUnavailable)
-	}
-	if record.Policy.Owner == nil || *record.Policy.Owner != user.Address || record.Policy.Runner == nil || *record.Policy.Runner != wallet || record.Policy.ChainID != chainID || record.Policy.SessionSigner == nil || record.Policy.Grant == nil {
-		return nil, fmt.Errorf("%w: invalid stored budget identity", ErrBudgetReadUnavailable)
-	}
-	op := (*userop.UserOperationV07)(record.Operation)
-	if op.Nonce == nil || op.CallGasLimit == nil || op.VerificationGasLimit == nil || op.PreVerificationGas == nil || op.MaxFeePerGas == nil || op.MaxPriorityFeePerGas == nil || len(op.Signature) != 0 || op.Sender != wallet || op.Paymaster != nil || len(op.PaymasterData) > 0 {
-		return nil, fmt.Errorf("%w: invalid stored budget operation", ErrBudgetReadUnavailable)
-	}
-	if record.Policy.Grant.CarrierNonce == nil || record.Policy.Grant.CarrierNonce.Cmp(op.Nonce) != 0 {
-		return nil, fmt.Errorf("%w: stored budget nonce does not match its review", ErrBudgetReadUnavailable)
-	}
-	calls, err := budgetPreparationCalls(wallet, record.ApprovalResets, record.Retirements, record.Policy.Grant.InstallCall)
-	if err != nil {
-		return nil, fmt.Errorf("%w: invalid stored budget batch", ErrBudgetReadUnavailable)
-	}
-	_, hash, err := validateBudgetOwnerOperation(&preset.PreparedOwnerUserOp{Operation: op}, wallet, chainID, calls)
-	if err != nil || hash != record.UserOpHash || preset.MaxOwnerGasCost(op).String() != record.MaxFeeWei {
-		return nil, fmt.Errorf("%w: stored budget operation does not match its review", ErrBudgetReadUnavailable)
-	}
-	// Runtime validators are rebound at submit; only declared data is persisted.
-	record.Draft.Permissions.budgetMode = true
-	return &record, nil
+	return n.loadBudgetChange(user, wallet, chain, id)
 }

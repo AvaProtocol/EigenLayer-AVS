@@ -43,7 +43,7 @@ func budgetNarrowing(detail string) error {
 }
 
 func budgetHandoffRequired() error {
-	return &BudgetPolicyError{Code: BudgetHandoffRequiredCode, Detail: "Budget changes require a stored owner-signed operation. That signing path is not enabled yet."}
+	return &BudgetPolicyError{Code: BudgetHandoffRequiredCode, Detail: "Budget changes require the enabled, stored owner-signed preparation and submit flow."}
 }
 
 // Explicit budget input must never reach the legacy EIP-712 grant builder.

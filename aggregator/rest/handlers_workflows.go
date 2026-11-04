@@ -262,6 +262,10 @@ func (s *Server) TriggerWorkflow(ctx echo.Context, id generated.Ulid) error {
 
 	resp, err := s.engine.TriggerWorkflowWithContext(ctx.Request().Context(), user, req)
 	if err != nil {
+		var budgetError *taskengine.BudgetPolicyError
+		if errors.As(err, &budgetError) {
+			return mapPolicyError(err)
+		}
 		return notFoundOrError(err)
 	}
 

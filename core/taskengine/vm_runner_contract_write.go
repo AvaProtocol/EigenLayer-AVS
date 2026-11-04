@@ -2632,7 +2632,7 @@ func isBudgetMethodRefusal(result *avsproto.ContractWriteNode_MethodResult) bool
 		return false
 	}
 	switch result.ErrorCode {
-	case avsproto.ErrorCode_BUDGET_USED_UP, avsproto.ErrorCode_BUDGET_ENDED:
+	case avsproto.ErrorCode_BUDGET_USED_UP, avsproto.ErrorCode_BUDGET_ENDED, avsproto.ErrorCode_BUDGET_CHANGING:
 		return true
 	case avsproto.ErrorCode_RPC_NODE_ERROR:
 		return strings.HasPrefix(result.Error, BudgetReadUnavailableCode+":")

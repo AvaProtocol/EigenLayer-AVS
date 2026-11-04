@@ -384,8 +384,20 @@ func registerColonActionShimRoutes(api *echo.Group, s *Server) {
 		return s.SubmitWalletPolicy(c, generated.EthereumAddress(c.Param("address")))
 	})
 	api.POST("/wallets/:address/policies/preparations/:id"+colonActionShim+"submit", func(c echo.Context) error {
-		return s.SubmitWalletBudgetPreparation(c, c.Param("address"), c.Param("id"))
+		params, err := budgetSubmitParams(c)
+		if err != nil {
+			return err
+		}
+		return s.SubmitWalletBudgetPreparation(c, c.Param("address"), c.Param("id"), params)
 	})
+	api.POST("/wallets/:address/policies/preparations/:id"+colonActionShim+"cancel", func(c echo.Context) error {
+		params, err := budgetSubmitParams(c)
+		if err != nil {
+			return err
+		}
+		return s.PrepareWalletBudgetCancel(c, c.Param("address"), c.Param("id"), generated.PrepareWalletBudgetCancelParams(params))
+	})
+
 	api.POST("/wallets/:address/delegation"+colonActionShim+"prepare", func(c echo.Context) error {
 		return s.PrepareEoaDelegation(c, generated.EthereumAddress(c.Param("address")))
 	})

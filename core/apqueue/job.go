@@ -10,7 +10,8 @@ type jobStatus string
 const (
 	// Use a single char to save space
 	// jobPending : waiting to be processed
-	jobPending jobStatus = "q"
+	jobPending  jobStatus = "q"
+	jobDeferred jobStatus = "h"
 	// jobInProgress : processing in progress
 	jobInProgress = "p"
 	// jobComplete : processing complete
@@ -24,6 +25,8 @@ func (s jobStatus) String() string {
 	switch s {
 	case jobPending:
 		return "pending"
+	case jobDeferred:
+		return "deferred"
 	case jobInProgress:
 		return "in_progress"
 	case jobComplete:
@@ -40,6 +43,8 @@ func (s jobStatus) HumanReadable() string {
 	switch s {
 	case jobPending:
 		return "⏳ pending"
+	case jobDeferred:
+		return "⏸ deferred"
 	case jobInProgress:
 		return "🔄 in_progress"
 	case jobComplete:

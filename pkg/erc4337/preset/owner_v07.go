@@ -3,6 +3,7 @@ package preset
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -36,6 +37,10 @@ type PreparedOwnerUserOp struct {
 
 var implementationSlot = common.HexToHash("0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc")
 
+// ErrOwnerStateChanged means a successful read no longer matches the review.
+// A failed RPC is deliberately not classified as a changed account.
+var ErrOwnerStateChanged = errors.New("owner account state changed")
+
 // This deployed alchemy.sma-bytecode.1.0.0 implementation validates the EIP-191
 // digest. Later versions can validate the raw userOp hash instead: trusting the
 // factory's current implementation would advertise the wrong signing recipe
@@ -68,7 +73,7 @@ func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, sw *confi
 	if err != nil || actualChain.Cmp(big.NewInt(sw.ChainID)) != 0 {
 		return nil, fmt.Errorf("owner execution chain RPC does not match chain %d", sw.ChainID)
 	}
-	ownerCode, err := chain.CodeAt(ctx, owner, nil)
+	ownerCode, err := chain.CodeAt(ctx, owner, ownerReadBlock(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("checking owner code: %w", err)
 	}
@@ -81,9 +86,9 @@ func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, sw *confi
 		if err := sw.ValidateSMA7702(); err != nil {
 			return nil, err
 		}
-		implCode, err := chain.CodeAt(ctx, sw.SMA7702Delegate, nil)
-		if err != nil {
-			return nil, fmt.Errorf("reading owner SMA-7702 implementation: %w", err)
+		implCode, implErr := chain.CodeAt(ctx, sw.SMA7702Delegate, ownerReadBlock(ctx))
+		if implErr != nil {
+			return nil, fmt.Errorf("reading owner SMA-7702 implementation: %w", implErr)
 		}
 		if err := sw.AssertSMA7702Designation(ownerCode, implCode); err != nil {
 			return nil, err
@@ -100,7 +105,7 @@ func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, sw *confi
 	} else if sender == owner {
 		return nil, fmt.Errorf("EOA_DELEGATION_MISSING: owner EOA must already designate the pinned SMA-7702 implementation")
 	}
-	derived, err := aa.GetSenderAddressMAv2WithContext(ctx, chain, owner, salt)
+	derived, err := aa.GetSenderAddressMAv2At(ctx, chain, owner, salt, ownerReadBlock(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +113,7 @@ func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, sw *confi
 		return nil, fmt.Errorf("owner execution sender does not match the MA v2 factory derivation")
 	}
 	factory := aa.MAv2FactoryAddress()
-	factoryCode, err := chain.CodeAt(ctx, factory, nil)
+	factoryCode, err := chain.CodeAt(ctx, factory, ownerReadBlock(ctx))
 	if err != nil || len(factoryCode) == 0 {
 		return nil, fmt.Errorf("MA v2 factory code is unavailable")
 	}
@@ -120,11 +125,11 @@ func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, sw *confi
 	if impl != common.HexToAddress(ownerPersonalSignImplementation) {
 		return nil, fmt.Errorf("MA v2 implementation %s is not verified for owner personal_sign", impl.Hex())
 	}
-	implCode, err := chain.CodeAt(ctx, impl, nil)
+	implCode, err := chain.CodeAt(ctx, impl, ownerReadBlock(ctx))
 	if err != nil || len(implCode) == 0 {
 		return nil, fmt.Errorf("MA v2 implementation code is unavailable")
 	}
-	code, err := chain.CodeAt(ctx, sender, nil)
+	code, err := chain.CodeAt(ctx, sender, ownerReadBlock(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("checking owner account code: %w", err)
 	}
@@ -135,7 +140,7 @@ func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, sw *confi
 	if len(code) == 0 {
 		return identity, nil // counterfactual: factory/salt fix the owner and code
 	}
-	storedImpl, err := chain.StorageAt(ctx, sender, implementationSlot, nil)
+	storedImpl, err := chain.StorageAt(ctx, sender, implementationSlot, ownerReadBlock(ctx))
 	if err != nil || common.BytesToAddress(storedImpl) != impl {
 		return nil, fmt.Errorf("owner account is not the factory's supported MA v2 implementation")
 	}
@@ -158,7 +163,7 @@ func inspectOwnerValidation(ctx context.Context, chain *ethclient.Client, sender
 }
 
 func ownerView(ctx context.Context, chain *ethclient.Client, to common.Address, signature string) ([]byte, error) {
-	return chain.CallContract(ctx, ethereum.CallMsg{To: &to, Data: crypto.Keccak256([]byte(signature))[:4]}, nil)
+	return chain.CallContract(ctx, ethereum.CallMsg{To: &to, Data: crypto.Keccak256([]byte(signature))[:4]}, ownerReadBlock(ctx))
 }
 
 // PrepareOwnerUserOp builds and prices a batch without signing or broadcasting.
@@ -310,7 +315,7 @@ func checkOwnerPrefund(ctx context.Context, chain *ethclient.Client, op *userop.
 	if value.Sign() == 0 && op.Paymaster != nil {
 		return nil
 	}
-	balance, err := chain.BalanceAt(ctx, op.Sender, nil)
+	balance, err := chain.BalanceAt(ctx, op.Sender, ownerReadBlock(ctx))
 	if err != nil {
 		return err
 	}
@@ -322,7 +327,7 @@ func checkOwnerPrefund(ctx context.Context, chain *ethclient.Client, op *userop.
 	}
 	entry := EntryPointV07()
 	data := append(crypto.Keccak256([]byte("balanceOf(address)"))[:4], common.LeftPadBytes(op.Sender.Bytes(), 32)...)
-	deposit, err := chain.CallContract(ctx, ethereum.CallMsg{To: &entry, Data: data}, nil)
+	deposit, err := chain.CallContract(ctx, ethereum.CallMsg{To: &entry, Data: data}, ownerReadBlock(ctx))
 	if err != nil || len(deposit) != 32 {
 		return fmt.Errorf("reading owner execution EntryPoint prefund")
 	}
@@ -370,14 +375,14 @@ func ValidateOwnerUserOp(ctx context.Context, sw *config.SmartWalletConfig, owne
 		return err
 	}
 	if *identity != prepared.Identity {
-		return fmt.Errorf("owner account code or implementation changed; prepare again")
+		return fmt.Errorf("%w: owner account code or implementation changed; prepare again", ErrOwnerStateChanged)
 	}
 	nonce, err := NextNonceV07(ctx, chain.Client(), EntryPointV07(), op.Sender, userop.FallbackSignerEntityID, userop.ValidationOptionGlobal)
 	if err != nil {
 		return err
 	}
 	if op.Nonce.Cmp(nonce) != 0 {
-		return fmt.Errorf("owner nonce changed; prepare again")
+		return fmt.Errorf("%w: owner nonce changed; prepare again", ErrOwnerStateChanged)
 	}
 	return checkOwnerPrefund(ctx, chain, op)
 }
