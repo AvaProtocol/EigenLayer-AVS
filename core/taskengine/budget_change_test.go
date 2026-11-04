@@ -137,6 +137,24 @@ func budgetMined(p *BudgetPolicyPreparation, success bool) *budgetObservation {
 	nonce := new(big.Int).Add((*userop.UserOperationV07)(p.Operation).Nonce, big.NewInt(1))
 	return &budgetObservation{Nonce: nonce, Hash: p.UserOpHash, Success: success, Block: BudgetBlock{Number: 11, Hash: common.BigToHash(big.NewInt(11))}, TransactionHash: common.HexToHash("0xabc")}
 }
+
+func TestBudgetSubmitReportsLatestLegacyGrantDeadlineAfterPrepare(t *testing.T) {
+	f, p, backend, signature := newBudgetChangeTest(t)
+	earlier := uint64(time.Now().Add(time.Hour).Unix())
+	later := earlier + 3600
+	// These signatures did not exist when the budget operation was prepared.
+	storeOutstandingLegacyBudgetGrant(t, f, earlier)
+	storeOutstandingLegacyBudgetGrant(t, f, later)
+
+	_, err := f.n.SubmitBudgetPolicyPreparation(context.Background(), f.user, f.in.Wallet, testPolicyChain, p.ID, signature)
+	var refusal *BudgetPolicyError
+	require.ErrorAs(t, err, &refusal)
+	require.Equal(t, BudgetLegacyGrantPendingCode, refusal.Code)
+	require.Equal(t, int64(later)*1000, refusal.LegacyGrantDeadline)
+	require.Equal(t, "An outstanding legacy signature can still install.", refusal.Detail)
+	require.Zero(t, backend.sent.Load())
+}
+
 func TestBudgetSubmitActivatesOnlyAfterReceiptAndResetProof(t *testing.T) {
 	f, p, b, sig := newBudgetChangeTest(t)
 	result, e := f.n.SubmitBudgetPolicyPreparation(context.Background(), f.user, f.in.Wallet, testPolicyChain, p.ID, sig)

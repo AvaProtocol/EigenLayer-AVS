@@ -30,6 +30,9 @@ type BudgetPolicyError struct {
 	Code    string
 	Detail  string
 	Details map[string]string
+	// Latest outstanding legacy signature deadline, in Unix milliseconds.
+	// Set only for BudgetLegacyGrantPendingCode.
+	LegacyGrantDeadline int64
 }
 
 func (e *BudgetPolicyError) Error() string { return e.Code + ": " + e.Detail }

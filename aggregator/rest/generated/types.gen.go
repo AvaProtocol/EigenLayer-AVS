@@ -1863,6 +1863,10 @@ type Problem struct {
 	// Instance URI / opaque ID identifying this specific occurrence (e.g., request id).
 	Instance *string `json:"instance,omitempty"`
 
+	// LegacyGrantDeadline Latest outstanding legacy signature deadline, in unix milliseconds.
+	// Set only on BUDGET_LEGACY_GRANT_PENDING.
+	LegacyGrantDeadline *int64 `json:"legacyGrantDeadline,omitempty"`
+
 	// MissingActions Planned calls the grant does not allow.
 	MissingActions *[]AllowedAction `json:"missingActions,omitempty"`
 	NeededWei      *string          `json:"neededWei,omitempty"`

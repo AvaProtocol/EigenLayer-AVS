@@ -419,10 +419,8 @@ func (n *Engine) recheckBudgetDerivation(ctx context.Context, p *BudgetPolicyPre
 	if e != nil {
 		return e
 	}
-	for _, old := range all {
-		if old.Runner != nil && *old.Runner == p.Wallet && !isWalletBudget(old) && old.Grant != nil && !old.Grant.Applied() && len(old.Grant.OwnerSignature) > 0 && old.Grant.Deadline >= uint64(time.Now().Unix()) {
-			return &BudgetPolicyError{Code: BudgetLegacyGrantPendingCode, Detail: "An outstanding legacy signature can still install."}
-		}
+	if legacyDeadline := latestOutstandingLegacyGrantDeadline(all, p.Wallet, time.Now()); legacyDeadline > 0 {
+		return &BudgetPolicyError{Code: BudgetLegacyGrantPendingCode, Detail: "An outstanding legacy signature can still install.", LegacyGrantDeadline: int64(legacyDeadline) * 1000}
 	}
 	rem, e := readBudgetRemainder(ctx, current, p.Wallet, v)
 	if e != nil {

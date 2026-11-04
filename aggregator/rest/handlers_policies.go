@@ -605,7 +605,11 @@ func mapPolicyError(err error) error {
 		} else if budgetError.Code == taskengine.BudgetAuthorityUnknownCode || budgetError.Code == taskengine.BudgetChangingCode || budgetError.Code == taskengine.BudgetFeeCeilingCode || budgetError.Code == taskengine.BudgetRouteUnsupportedCode || budgetError.Code == taskengine.BudgetHandoffRequiredCode || budgetError.Code == taskengine.BudgetReplaceRefusedCode || budgetError.Code == taskengine.BudgetDiscoveryRequiredCode || budgetError.Code == taskengine.BudgetResetUnsupportedCode || budgetError.Code == taskengine.BudgetFeeInsufficientCode || budgetError.Code == taskengine.BudgetLegacyGrantPendingCode {
 			status = http.StatusConflict
 		}
-		return &restmw.HTTPError{Status: status, Code: budgetError.Code, Title: "Budget request refused", Detail: budgetError.Detail, Token: budgetError.Details["token"], Spender: budgetError.Details["spender"], NeededWei: budgetError.Details["neededWei"], AvailableWei: budgetError.Details["availableWei"]}
+		problem := &restmw.HTTPError{Status: status, Code: budgetError.Code, Title: "Budget request refused", Detail: budgetError.Detail, Token: budgetError.Details["token"], Spender: budgetError.Details["spender"], NeededWei: budgetError.Details["neededWei"], AvailableWei: budgetError.Details["availableWei"]}
+		if budgetError.Code == taskengine.BudgetLegacyGrantPendingCode {
+			problem.LegacyGrantDeadline = budgetError.LegacyGrantDeadline
+		}
+		return problem
 	case errors.Is(err, taskengine.ErrBudgetReadUnavailable):
 		return &restmw.HTTPError{Status: http.StatusServiceUnavailable, Code: taskengine.BudgetReadUnavailableCode, Title: "Budget couldn't be prepared", Detail: "A required chain read is unavailable. Try again."}
 	case errors.As(err, &conflict):
