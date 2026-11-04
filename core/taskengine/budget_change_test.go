@@ -27,6 +27,8 @@ type budgetChangeFake struct {
 	reset           int64
 	readError       bool
 	validationError error
+	viewError       error
+	canonicalError  error
 	changed         bool
 	authorityError  error
 	caller          func(ethereum.CallMsg) ([]byte, error)
@@ -43,6 +45,9 @@ type budgetFakeView struct {
 }
 
 func (f *budgetChangeFake) View(_ context.Context, _ int64, number *big.Int) (budgetChainView, error) {
+	if f.viewError != nil {
+		return nil, f.viewError
+	}
 	b := uint64(10)
 	if f.observation != nil {
 		b = f.observation.Block.Number + 1
@@ -64,7 +69,7 @@ func (v *budgetFakeView) CodeAt(_ context.Context, address common.Address) ([]by
 }
 func (v *budgetFakeView) Block() BudgetBlock                    { return v.block }
 func (v *budgetFakeView) Close()                                {}
-func (v *budgetFakeView) VerifyCanonical(context.Context) error { return nil }
+func (v *budgetFakeView) VerifyCanonical(context.Context) error { return v.f.canonicalError }
 func (v *budgetFakeView) ValidateOwner(context.Context, *BudgetPolicyPreparation) error {
 	return v.f.validationError
 }

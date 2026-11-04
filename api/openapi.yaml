@@ -286,6 +286,22 @@ components:
         token: { $ref: '#/components/schemas/EthereumAddress' }
         spender: { $ref: '#/components/schemas/EthereumAddress' }
         neededWei: { type: string, pattern: '^[0-9]+$' }
+        submissionStarted:
+          type: boolean
+          description: |
+            Budget signature-only submit send boundary, when known. False
+            proves this request was refused before attempting the durable
+            first-send marker, so it did not relay an operation. True includes
+            uncertain marker/storage failures and repeat submits; check the
+            existing preparation and never infer that nothing was sent.
+            Absent means unknown, including older gateways. A lost response
+            also means unknown. Never infer this from HTTP status or prose.
+        ownerDelegate:
+          $ref: '#/components/schemas/EthereumAddress'
+          description: |
+            Observed EIP-7702 delegate of the owner, only on
+            EOA_DELEGATION_MISSING from owner execution or budget preparation
+            and submission. Absent for non-designation code or unknown state.
         legacyGrantDeadline:
           type: integer
           format: int64
@@ -3379,6 +3395,13 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: |
+            EOA_DELEGATION_MISSING — owner account code is not supported.
+            ownerDelegate names the observed EIP-7702 delegate, when present.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '412':
           description: Checks, source compatibility, funding or pricing failed; refresh the preparation.
           content:
@@ -3434,6 +3457,13 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            EOA_DELEGATION_MISSING — owner account code is not supported.
+            ownerDelegate names the observed EIP-7702 delegate, when present.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '412':
           description: Preparation is stale or rejected; prepare, review and sign again.
           content:
@@ -4016,6 +4046,12 @@ paths:
         An outstanding legacy signature found by the submit-time recheck returns
         409 BUDGET_LEGACY_GRANT_PENDING with legacyGrantDeadline, the latest
         outstanding signature deadline in unix milliseconds.
+        Errors include submissionStarted when the send boundary is known.
+        False means this completed request never attempted its first-send marker
+        or relay; the client may let the owner try signing again. True or an
+        absent field requires reading the same preparation, with no second
+        operation. A lost reply always requires reconciliation. A 503 alone
+        does not distinguish pre-send checks from post-send storage failures.
       parameters:
         - $ref: '#/components/parameters/ChainIdQuery'
       requestBody:
@@ -4047,7 +4083,8 @@ paths:
           description: |
             Budget submission is not enabled, or a first-submit recheck refused
             the operation. BUDGET_LEGACY_GRANT_PENDING includes
-            legacyGrantDeadline in unix milliseconds.
+            legacyGrantDeadline in unix milliseconds. EOA_DELEGATION_MISSING
+            includes ownerDelegate when the owner has an EIP-7702 designation.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -4108,6 +4145,8 @@ paths:
         v1 Sepolia USDC. Other live allowances requiring reset return 409
         BUDGET_RESET_UNSUPPORTED_TOKEN with token/spender; insufficient ETH returns
         409 BUDGET_FEE_INSUFFICIENT_ETH with neededWei/availableWei.
+        An incompatible delegated owner returns 409 EOA_DELEGATION_MISSING
+        with ownerDelegate when the observed code is an EIP-7702 designation.
         A quote above wallet_budget_max_fee_wei (default 0.005 ETH) returns
         409 BUDGET_FEE_CEILING_EXCEEDED. Unsupported Permit2, NFT/operator or
         unaudited spending targets return 409 BUDGET_ROUTE_UNSUPPORTED.

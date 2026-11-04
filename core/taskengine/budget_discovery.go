@@ -254,7 +254,10 @@ func readBudgetApprovals(ctx context.Context, caller aa.ContractCaller, wallet c
 		data := append(crypto.Keccak256([]byte("allowance(address,address)"))[:4], common.LeftPadBytes(wallet.Bytes(), 32)...)
 		data = append(data, common.LeftPadBytes(pair.Spender.Bytes(), 32)...)
 		result, err := caller.CallContract(ctx, ethereum.CallMsg{To: &pair.Token, Data: data}, nil)
-		if err != nil || len(result) != 32 {
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: allowance for %s/%s is unavailable: %w", ErrBudgetReadUnavailable, pair.Token.Hex(), pair.Spender.Hex(), err)
+		}
+		if len(result) != 32 {
 			return nil, nil, fmt.Errorf("%w: allowance for %s/%s is unavailable", ErrBudgetReadUnavailable, pair.Token.Hex(), pair.Spender.Hex())
 		}
 		amount := new(big.Int).SetBytes(result)

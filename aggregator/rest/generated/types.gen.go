@@ -1871,6 +1871,9 @@ type Problem struct {
 	MissingActions *[]AllowedAction `json:"missingActions,omitempty"`
 	NeededWei      *string          `json:"neededWei,omitempty"`
 
+	// OwnerDelegate Lowercase or checksummed hex EOA / contract address.
+	OwnerDelegate *EthereumAddress `json:"ownerDelegate,omitempty"`
+
 	// PolicyId Usable session grant involved in this failure, when there is one.
 	// Set on `SESSION_POLICY_BASE_CHANGED`, `SESSION_POLICY_NOT_COVERING`,
 	// `SESSION_POLICY_TARGET_UNRESOLVED`, `SESSION_POLICY_NATIVE_UNSIZED`,
@@ -1890,6 +1893,15 @@ type Problem struct {
 
 	// Status HTTP status code (echoed for clients that surface only the body).
 	Status int32 `json:"status"`
+
+	// SubmissionStarted Budget signature-only submit send boundary, when known. False
+	// proves this request was refused before attempting the durable
+	// first-send marker, so it did not relay an operation. True includes
+	// uncertain marker/storage failures and repeat submits; check the
+	// existing preparation and never infer that nothing was sent.
+	// Absent means unknown, including older gateways. A lost response
+	// also means unknown. Never infer this from HTTP status or prose.
+	SubmissionStarted *bool `json:"submissionStarted,omitempty"`
 
 	// Title Short, human-readable summary.
 	Title string `json:"title"`

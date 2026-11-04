@@ -458,6 +458,11 @@ func ownerPreconditionError(err error, format string) error {
 	if err == nil {
 		return nil
 	}
+	if errors.Is(err, config.ErrEOADelegationMissing) {
+		// Keep the typed observed delegate through to REST, not a prose-only
+		// gRPC precondition that loses machine-readable refusal metadata.
+		return err
+	}
 	if errors.Is(err, config.ErrEOA7702ExecuteDisabled) {
 		return status.Error(codes.FailedPrecondition, config.EOA7702ExecuteDisabledDetail)
 	}

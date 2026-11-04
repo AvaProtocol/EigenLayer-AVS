@@ -1673,6 +1673,15 @@ func (response SubmitExecution404ApplicationProblemPlusJSONResponse) VisitSubmit
 	return json.NewEncoder(w).Encode(response)
 }
 
+type SubmitExecution409ApplicationProblemPlusJSONResponse Problem
+
+func (response SubmitExecution409ApplicationProblemPlusJSONResponse) VisitSubmitExecutionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type SubmitExecution412ApplicationProblemPlusJSONResponse Problem
 
 func (response SubmitExecution412ApplicationProblemPlusJSONResponse) VisitSubmitExecutionResponse(w http.ResponseWriter) error {
@@ -3547,6 +3556,15 @@ type PrepareWorkflow403ApplicationProblemPlusJSONResponse struct {
 func (response PrepareWorkflow403ApplicationProblemPlusJSONResponse) VisitPrepareWorkflowResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PrepareWorkflow409ApplicationProblemPlusJSONResponse Problem
+
+func (response PrepareWorkflow409ApplicationProblemPlusJSONResponse) VisitPrepareWorkflowResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
 
 	return json.NewEncoder(w).Encode(response)
 }

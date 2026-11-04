@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -24,6 +25,22 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOwnerPreparationReportsObservedDelegationWithoutAcceptingIt(t *testing.T) {
+	delegate := common.HexToAddress("0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B")
+	for _, deployed := range []bool{false, true} {
+		f, sw := newOwnerRPCFixture(t)
+		f.deployed = deployed
+		f.ownerCode = append([]byte{0xef, 0x01, 0x00}, delegate.Bytes()...)
+		_, err := PrepareOwnerUserOp(context.Background(), sw, f.owner, f.sender, big.NewInt(0), ownerTestCalls(), nil)
+		require.ErrorIs(t, err, config.ErrEOADelegationMissing)
+		var delegation *OwnerDelegationError
+		require.True(t, errors.As(err, &delegation))
+		require.Equal(t, delegate, delegation.Delegate)
+		require.Zero(t, f.estimateReads)
+		require.Zero(t, f.sendCount)
+	}
+}
 
 func TestOwnerSignatureIsRawHashPersonalSign(t *testing.T) {
 	key, err := crypto.GenerateKey()

@@ -204,6 +204,7 @@ func TestAssertSMA7702Designation(t *testing.T) {
 	t.Run("short code fails", func(t *testing.T) {
 		err := c.AssertSMA7702Designation([]byte{0xef, 0x01, 0x00}, impl)
 		require.ErrorContains(t, err, "EOA_DELEGATION_MISSING")
+		require.ErrorIs(t, err, ErrEOADelegationMissing)
 	})
 	t.Run("wrong prefix fails", func(t *testing.T) {
 		code := designation(c.SMA7702Delegate)
@@ -213,6 +214,7 @@ func TestAssertSMA7702Designation(t *testing.T) {
 	t.Run("wrong delegate fails", func(t *testing.T) {
 		other := common.HexToAddress("0x000000000000000000000000000000000000dEaD")
 		require.ErrorContains(t, c.AssertSMA7702Designation(designation(other), impl), "EOA_DELEGATION_MISSING")
+		require.ErrorIs(t, c.AssertSMA7702Designation(designation(other), impl), ErrEOADelegationMissing)
 	})
 	t.Run("wrong impl hash fails", func(t *testing.T) {
 		require.ErrorContains(t, c.AssertSMA7702Designation(designation(c.SMA7702Delegate), []byte("other")), "impl hash")

@@ -2,7 +2,6 @@ package taskengine
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -15,7 +14,7 @@ import (
 // ErrEOADelegationMissing: the EOA is not designated to the pinned SMA-7702
 // (K13). Mapped to problem code EOA_DELEGATION_MISSING. Never inferred from
 // type-4 tx status.
-var ErrEOADelegationMissing = errors.New("EOA_DELEGATION_MISSING")
+var ErrEOADelegationMissing = config.ErrEOADelegationMissing
 
 // StoreEOA7702Wallet upserts the B2 record: Address==Owner, no factory/salt,
 // Delegate = canonical SMA-7702. Does not write the salt secondary index

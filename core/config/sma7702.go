@@ -11,6 +11,9 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
+// ErrEOADelegationMissing is shared with the owner-operation and policy paths.
+var ErrEOADelegationMissing = errors.New("EOA_DELEGATION_MISSING")
+
 // Canonical SMA-7702 pin from Track B spike B0 (PR #798). Byte-identical on
 // Ethereum Sepolia and Base mainnet: 23,741 bytes at the delegate address.
 // Comparison is K13: eoa code[0:3]==0xef0100 && code[3:23]==delegate &&
@@ -155,18 +158,18 @@ func (c *SmartWalletConfig) AssertSMA7702Designation(eoaCode, implCode []byte) e
 		if c != nil {
 			chainID = c.ChainID
 		}
-		return fmt.Errorf("EOA_DELEGATION_MISSING: SMA-7702 pin is not configured for chain_id=%d", chainID)
+		return fmt.Errorf("%w: SMA-7702 pin is not configured for chain_id=%d", ErrEOADelegationMissing, chainID)
 	}
 	if !IsSMA7702Designation(eoaCode, c.SMA7702Delegate) {
 		return fmt.Errorf(
-			"EOA_DELEGATION_MISSING: eoa code is not ef0100||%s (len=%d)",
-			c.SMA7702Delegate.Hex(), len(eoaCode))
+			"%w: eoa code is not ef0100||%s (len=%d)",
+			ErrEOADelegationMissing, c.SMA7702Delegate.Hex(), len(eoaCode))
 	}
 	got := crypto.Keccak256Hash(implCode)
 	if got != c.SMA7702ImplHash {
 		return fmt.Errorf(
-			"EOA_DELEGATION_MISSING: impl hash %s want %s (delegate %s)",
-			got.Hex(), c.SMA7702ImplHash.Hex(), c.SMA7702Delegate.Hex())
+			"%w: impl hash %s want %s (delegate %s)",
+			ErrEOADelegationMissing, got.Hex(), c.SMA7702ImplHash.Hex(), c.SMA7702Delegate.Hex())
 	}
 	return nil
 }

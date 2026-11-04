@@ -13,6 +13,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/labstack/echo/v4"
 	"google.golang.org/grpc/codes"
@@ -124,6 +125,9 @@ func (s *Server) reportOwnerExecutionError(err error) error {
 }
 
 func mapOwnerExecutionError(err error) error {
+	if errors.Is(err, config.ErrEOADelegationMissing) {
+		return ownerDelegationHTTP(err)
+	}
 	st, ok := status.FromError(err)
 	if ok {
 		switch st.Code() {
@@ -147,6 +151,17 @@ func mapOwnerExecutionError(err error) error {
 		}
 	}
 	return &restmw.HTTPError{Status: http.StatusBadGateway, Code: "OWNER_EXECUTION_FAILED", Title: "Owner execution unavailable"}
+}
+
+func ownerDelegationHTTP(err error) *restmw.HTTPError {
+	problem := &restmw.HTTPError{Status: http.StatusConflict, Code: "EOA_DELEGATION_MISSING",
+		Title:  "Owner wallet account setup is not supported",
+		Detail: "Switch the owner wallet back to a regular account in your wallet, then check again.", Cause: err}
+	var delegation *preset.OwnerDelegationError
+	if errors.As(err, &delegation) && delegation.Delegate != (common.Address{}) {
+		problem.OwnerDelegate = delegation.Delegate.Hex()
+	}
+	return problem
 }
 
 func ownerExecutionDisabled(message string) bool {

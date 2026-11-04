@@ -250,7 +250,13 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 		if errors.As(err, &fee) {
 			return nil, budgetFundingRefusal(fee)
 		}
-		return nil, fmt.Errorf("budget owner operation could not be prepared: %w", err)
+		if errors.Is(err, ErrEOADelegationMissing) {
+			return nil, err
+		}
+		// Pricing/identity/configuration failures are gateway-side failures,
+		// not malformed policy input. Keep their cause for diagnostics while
+		// REST returns its authored 503 instead of a raw 400 detail.
+		return nil, fmt.Errorf("%w: budget owner operation could not be prepared: %w", ErrBudgetReadUnavailable, err)
 	}
 	op, hash, err := validateBudgetOwnerOperation(priced, in.Wallet, in.ChainID, calls)
 	if err != nil {

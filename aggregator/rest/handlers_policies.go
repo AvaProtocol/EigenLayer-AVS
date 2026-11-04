@@ -611,7 +611,7 @@ func mapPolicyError(err error) error {
 		}
 		return problem
 	case errors.Is(err, taskengine.ErrBudgetReadUnavailable):
-		return &restmw.HTTPError{Status: http.StatusServiceUnavailable, Code: taskengine.BudgetReadUnavailableCode, Title: "Budget couldn't be prepared", Detail: "A required chain read is unavailable. Try again."}
+		return &restmw.HTTPError{Status: http.StatusServiceUnavailable, Code: taskengine.BudgetReadUnavailableCode, Title: "Budget couldn't be prepared", Detail: "A required chain read is unavailable. Try again.", Cause: err}
 	case errors.As(err, &conflict):
 		return policyConflictHTTP(conflict)
 	case errors.As(err, &refusal):
@@ -631,8 +631,7 @@ func mapPolicyError(err error) error {
 	case errors.Is(err, taskengine.ErrSessionWalletNotMAv2):
 		return badRequest("SESSION_WALLET_NOT_MA_V2", err.Error(), "")
 	case errors.Is(err, taskengine.ErrEOADelegationMissing):
-		return &restmw.HTTPError{Status: http.StatusConflict, Code: "EOA_DELEGATION_MISSING",
-			Title: "EOA is not delegated to SMA-7702", Detail: err.Error()}
+		return ownerDelegationHTTP(err)
 	case errors.Is(err, taskengine.ErrSessionChainNotServed):
 		// Distinct from POLICIES_REJECTED so a client can tell "wrong chain"
 		// from "bad grant" and re-prepare against a chain we serve.

@@ -234,7 +234,7 @@ func budgetCancelCalls(wallet common.Address) []aa.Call {
 // operation. The marker, hold and pending policy are committed before the RPC.
 //
 //nolint:gocyclo // Ordered submit checks with one durable marker; no alternate relay path.
-func (n *Engine) SubmitBudgetPolicyPreparation(ctx context.Context, user *model.User, wallet common.Address, chain int64, id string, signature []byte) (*BudgetPolicyPreparation, error) {
+func (n *Engine) SubmitBudgetPolicyPreparation(ctx context.Context, user *model.User, wallet common.Address, chain int64, id string, signature []byte) (result *BudgetPolicyPreparation, submitErr error) {
 	if e := n.requireOwnedWallet(user, wallet); e != nil {
 		return nil, e
 	}
@@ -257,6 +257,15 @@ func (n *Engine) SubmitBudgetPolicyPreparation(ctx context.Context, user *model.
 	if e != nil {
 		return nil, e
 	}
+	// Only a loaded, locked preparation can establish whether sending started.
+	// Missing/failed loads make no claim. A marker write is treated as uncertain
+	// even if storage reports an error: never invite a second operation then.
+	submissionStarted := p.State != ownerSubmissionPrepared
+	defer func() {
+		if submitErr != nil {
+			submitErr = &BudgetSubmitError{Cause: submitErr, SubmissionStarted: submissionStarted}
+		}
+	}()
 	if p.State == ownerSubmissionPrepared {
 		if e = n.requireBudgetSigning(chain); e != nil {
 			return nil, e
@@ -280,7 +289,7 @@ func (n *Engine) SubmitBudgetPolicyPreparation(ctx context.Context, user *model.
 	}
 	view, e := n.budgetBackend().View(ctx, chain, nil)
 	if e != nil {
-		return nil, fmt.Errorf("%w: final budget snapshot", ErrBudgetReadUnavailable)
+		return nil, fmt.Errorf("%w: final budget snapshot: %w", ErrBudgetReadUnavailable, e)
 	}
 	defer view.Close()
 	if e = n.checkBudgetSessionFlights(ctx, p, view); e != nil {
@@ -294,7 +303,10 @@ func (n *Engine) SubmitBudgetPolicyPreparation(ctx context.Context, user *model.
 		if errors.As(e, &funding) {
 			return nil, budgetFundingRefusal(funding)
 		}
-		return nil, fmt.Errorf("%w: owner identity, nonce or fee recheck", ErrBudgetReadUnavailable)
+		if errors.Is(e, ErrEOADelegationMissing) {
+			return nil, e
+		}
+		return nil, fmt.Errorf("%w: owner identity, nonce or fee recheck: %w", ErrBudgetReadUnavailable, e)
 	}
 	if e = view.CheckAuthorities(ctx, p.Owner, p.Wallet); e != nil {
 		return nil, e
@@ -341,6 +353,7 @@ func (n *Engine) SubmitBudgetPolicyPreparation(ctx context.Context, user *model.
 		}
 		pending = append(pending, p.Policy)
 	}
+	submissionStarted = true
 	if e = n.saveBudgetTransition(p, h, pending...); e != nil {
 		return nil, e
 	}
@@ -470,7 +483,7 @@ func (n *Engine) recheckBudgetDerivation(ctx context.Context, p *BudgetPolicyPre
 	draft.Permissions.CodeAt = memoizeCodeAt(func(address common.Address) ([]byte, error) {
 		code, readErr := v.CodeAt(ctx, address)
 		if readErr != nil {
-			return nil, fmt.Errorf("%w: native recipient code", ErrBudgetReadUnavailable)
+			return nil, fmt.Errorf("%w: native recipient code: %w", ErrBudgetReadUnavailable, readErr)
 		}
 		return code, nil
 	})
@@ -518,7 +531,7 @@ func (n *Engine) recheckBudgetDerivation(ctx context.Context, p *BudgetPolicyPre
 	if (*userop.UserOperationV07)(p.Operation).Factory == nil {
 		occupied, e := aa.EntityRegisteredOnChain(ctx, v, p.Wallet, p.Policy.EntityID)
 		if e != nil {
-			return fmt.Errorf("%w: entity registration", ErrBudgetReadUnavailable)
+			return fmt.Errorf("%w: entity registration: %w", ErrBudgetReadUnavailable, e)
 		}
 		if occupied {
 			return ErrSessionEntityTaken
@@ -536,7 +549,7 @@ func (n *Engine) recheckBudgetRetirements(ctx context.Context, p *BudgetPolicyPr
 	for _, target := range targets {
 		registered, readErr := aa.EntityRegisteredOnChain(ctx, v, p.Wallet, target.EntityID)
 		if readErr != nil {
-			return fmt.Errorf("%w: retirement registration", ErrBudgetReadUnavailable)
+			return fmt.Errorf("%w: retirement registration: %w", ErrBudgetReadUnavailable, readErr)
 		}
 		if registered {
 			retirements = append(retirements, target)
@@ -568,7 +581,7 @@ func readBudgetRemainder(ctx context.Context, p *model.SessionPolicy, wallet com
 		if cap.Token != nil {
 			a, e := aa.ReadERC20SpendLimit(ctx, caller, p.EntityID, *cap.Token, wallet)
 			if e != nil {
-				return r, fmt.Errorf("%w: remaining token budget", ErrBudgetReadUnavailable)
+				return r, fmt.Errorf("%w: remaining token budget: %w", ErrBudgetReadUnavailable, e)
 			}
 			r.ERC20[*cap.Token] = a
 		}
@@ -576,7 +589,7 @@ func readBudgetRemainder(ctx context.Context, p *model.SessionPolicy, wallet com
 	if p.NativeSpendCap != nil {
 		a, e := aa.ReadNativeSpendLimit(ctx, caller, p.EntityID, wallet)
 		if e != nil {
-			return r, fmt.Errorf("%w: remaining native budget", ErrBudgetReadUnavailable)
+			return r, fmt.Errorf("%w: remaining native budget: %w", ErrBudgetReadUnavailable, e)
 		}
 		r.Native = a
 	}
