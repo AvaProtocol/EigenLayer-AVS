@@ -42,20 +42,21 @@ type ProblemNeed struct {
 }
 
 type Problem struct {
-	Token           string          `json:"token,omitempty"`
-	Spender         string          `json:"spender,omitempty"`
-	NeededWei       string          `json:"neededWei,omitempty"`
-	AvailableWei    string          `json:"availableWei,omitempty"`
-	Type            string          `json:"type"`
-	Title           string          `json:"title"`
-	Status          int             `json:"status"`
-	Detail          string          `json:"detail,omitempty"`
-	Instance        string          `json:"instance,omitempty"`
-	Code            string          `json:"code,omitempty"`
-	PolicyID        string          `json:"policyId,omitempty"`
-	AffectedTaskIDs []string        `json:"affectedTaskIds,omitempty"`
-	MissingActions  []ProblemAction `json:"missingActions,omitempty"`
-	Required        *ProblemNeed    `json:"required,omitempty"`
+	Token               string          `json:"token,omitempty"`
+	Spender             string          `json:"spender,omitempty"`
+	NeededWei           string          `json:"neededWei,omitempty"`
+	AvailableWei        string          `json:"availableWei,omitempty"`
+	LegacyGrantDeadline int64           `json:"legacyGrantDeadline,omitempty"`
+	Type                string          `json:"type"`
+	Title               string          `json:"title"`
+	Status              int             `json:"status"`
+	Detail              string          `json:"detail,omitempty"`
+	Instance            string          `json:"instance,omitempty"`
+	Code                string          `json:"code,omitempty"`
+	PolicyID            string          `json:"policyId,omitempty"`
+	AffectedTaskIDs     []string        `json:"affectedTaskIds,omitempty"`
+	MissingActions      []ProblemAction `json:"missingActions,omitempty"`
+	Required            *ProblemNeed    `json:"required,omitempty"`
 	// Recipient, Delegate and AcknowledgedDelegate name the native
 	// recipient a prepare or submit refused for its code.
 	Recipient            string `json:"recipient,omitempty"`
@@ -73,18 +74,19 @@ const genericServerErrorDetail = "An internal error occurred while processing th
 // Problem fields directly. Anything else (echo.HTTPError, plain errors)
 // gets best-effort-mapped to a Problem by ProblemErrorHandler.
 type HTTPError struct {
-	Token           string
-	Spender         string
-	NeededWei       string
-	AvailableWei    string
-	Status          int
-	Code            string
-	Title           string
-	Detail          string
-	PolicyID        string
-	AffectedTaskIDs []string
-	MissingActions  []ProblemAction
-	Required        *ProblemNeed
+	Token               string
+	Spender             string
+	NeededWei           string
+	AvailableWei        string
+	LegacyGrantDeadline int64
+	Status              int
+	Code                string
+	Title               string
+	Detail              string
+	PolicyID            string
+	AffectedTaskIDs     []string
+	MissingActions      []ProblemAction
+	Required            *ProblemNeed
 	// Native recipient refusals (Problem.Recipient and friends).
 	Recipient            string
 	Delegate             string
@@ -150,6 +152,7 @@ func ProblemErrorHandler(logger sdklogging.Logger) echo.HTTPErrorHandler {
 		switch {
 		case errors.As(err, &typed):
 			p.Token, p.Spender, p.NeededWei, p.AvailableWei = typed.Token, typed.Spender, typed.NeededWei, typed.AvailableWei
+			p.LegacyGrantDeadline = typed.LegacyGrantDeadline
 			p.Status = typed.Status
 			p.Code = typed.Code
 			p.Title = typed.Title

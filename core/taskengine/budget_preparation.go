@@ -79,6 +79,20 @@ func budgetPreparationKey(owner common.Address, id string) []byte {
 	return append(budgetPreparationPrefix(owner), id...)
 }
 
+func latestOutstandingLegacyGrantDeadline(policies []*model.SessionPolicy, wallet common.Address, now time.Time) uint64 {
+	var latest uint64
+	for _, p := range policies {
+		// A deferred signature uses its own session nonce, so consuming the
+		// owner nonce cannot invalidate a not-yet-carried legacy install.
+		if p.Runner != nil && *p.Runner == wallet && !isWalletBudget(p) && p.Grant != nil && !p.Grant.Applied() && len(p.Grant.OwnerSignature) > 0 && p.Grant.Deadline >= uint64(now.Unix()) {
+			if p.Grant.Deadline > latest {
+				latest = p.Grant.Deadline
+			}
+		}
+	}
+	return latest
+}
+
 //nolint:gocyclo // Linear fail-closed preparation: no authority is written between its validation stages.
 func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in SessionPolicyInput) (*PreparedSessionGrant, error) {
 	if err := n.requireServedChain(in.ChainID); err != nil {
@@ -133,18 +147,9 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 	if err != nil {
 		return nil, err
 	}
-	var legacyDeadline uint64
-	for _, p := range all {
-		// A deferred signature uses its own session nonce, so consuming the
-		// owner nonce cannot invalidate a not-yet-carried legacy install.
-		if p.Runner != nil && *p.Runner == in.Wallet && !isWalletBudget(p) && p.Grant != nil && !p.Grant.Applied() && len(p.Grant.OwnerSignature) > 0 && p.Grant.Deadline >= uint64(now.Unix()) {
-			if p.Grant.Deadline > legacyDeadline {
-				legacyDeadline = p.Grant.Deadline
-			}
-		}
-	}
+	legacyDeadline := latestOutstandingLegacyGrantDeadline(all, in.Wallet, now)
 	if legacyDeadline > 0 {
-		return nil, &BudgetPolicyError{Code: BudgetLegacyGrantPendingCode, Detail: fmt.Sprintf("An earlier signed permission may still install until %s. Legacy signing windows can last 30 days, and revoking in Ava does not cancel that signature. Budget migration must wait until this window closes.", time.Unix(int64(legacyDeadline), 0).UTC().Format(time.RFC3339))}
+		return nil, &BudgetPolicyError{Code: BudgetLegacyGrantPendingCode, Detail: fmt.Sprintf("An earlier signed permission may still install until %s. Legacy signing windows can last 30 days, and revoking in Ava does not cancel that signature. Budget migration must wait until this window closes.", time.Unix(int64(legacyDeadline), 0).UTC().Format(time.RFC3339)), LegacyGrantDeadline: int64(legacyDeadline) * 1000}
 	}
 	rem, err := n.resolveGrantRemainder(ctx, current, in.Wallet)
 	if err != nil {

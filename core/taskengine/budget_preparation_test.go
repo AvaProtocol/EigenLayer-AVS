@@ -19,6 +19,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -248,6 +249,7 @@ func TestBudgetPreparationLegacyOutstandingSignatureAndMigration(t *testing.T) {
 				var e *BudgetPolicyError
 				require.ErrorAs(t, err, &e)
 				require.Equal(t, tc.want, e.Code)
+				require.Equal(t, int64(p.Grant.Deadline)*1000, e.LegacyGrantDeadline)
 				require.Contains(t, e.Detail, time.Unix(int64(p.Grant.Deadline), 0).UTC().Format(time.RFC3339))
 				require.Contains(t, e.Detail, "30 days")
 				require.Contains(t, e.Detail, "revoking in Ava does not cancel")
@@ -267,6 +269,38 @@ func TestBudgetPreparationLegacyOutstandingSignatureAndMigration(t *testing.T) {
 			require.JSONEq(t, string(before), string(data))
 		})
 	}
+}
+
+// Revoking the stored permission does not invalidate its deferred signature.
+func storeOutstandingLegacyBudgetGrant(t *testing.T, f *budgetPrepareFixture, deadline uint64) *model.SessionPolicy {
+	t.Helper()
+	p, _ := semanticsBudget()
+	p.ID = ulid.Make().String()
+	p.Owner = &f.user.Address
+	p.Runner = &f.in.Wallet
+	p.SessionSigner = &f.user.Address
+	p.Sizing = model.BudgetSizingWorkflow
+	p.BudgetStartAmounts, p.BudgetStartNative, p.BudgetStartedAt = nil, nil, 0
+	p.Status = model.SessionPolicyRevoked
+	p.Grant = &model.SessionGrantAuthorization{InstallCall: []byte{1}, CarrierNonce: big.NewInt(0), OwnerSignature: make([]byte, 65), Deadline: deadline}
+	require.NoError(t, StoreSessionPolicy(f.n.db, p))
+	return p
+}
+
+func TestBudgetPreparationReportsLatestLegacyGrantDeadline(t *testing.T) {
+	f := newBudgetPrepareFixture(t)
+	earlier := uint64(time.Now().Add(time.Hour).Unix())
+	later := earlier + 3600
+	storeOutstandingLegacyBudgetGrant(t, f, earlier)
+	storeOutstandingLegacyBudgetGrant(t, f, later)
+
+	_, err := f.n.PrepareSessionPolicy(f.user, f.in)
+	var refusal *BudgetPolicyError
+	require.ErrorAs(t, err, &refusal)
+	require.Equal(t, BudgetLegacyGrantPendingCode, refusal.Code)
+	require.Equal(t, int64(later)*1000, refusal.LegacyGrantDeadline)
+	require.Contains(t, refusal.Detail, time.Unix(int64(later), 0).UTC().Format(time.RFC3339))
+	require.Zero(t, f.backend.prepared.Load())
 }
 
 func TestBudgetPreparationCapIsAtomic(t *testing.T) {

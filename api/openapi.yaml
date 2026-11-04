@@ -286,6 +286,12 @@ components:
         token: { $ref: '#/components/schemas/EthereumAddress' }
         spender: { $ref: '#/components/schemas/EthereumAddress' }
         neededWei: { type: string, pattern: '^[0-9]+$' }
+        legacyGrantDeadline:
+          type: integer
+          format: int64
+          description: |
+            Latest outstanding legacy signature deadline, in unix milliseconds.
+            Set only on BUDGET_LEGACY_GRANT_PENDING.
         availableWei: { type: string, pattern: '^[0-9]+$' }
         affectedTaskIds:
           type: array
@@ -4007,6 +4013,9 @@ paths:
         Rejected or unknown sends keep the hold until the nonce is consumed.
         Successful inclusion stays submitted until reset proof passes; activation
         and hold release are atomic. Signing is self-funded and fee capped.
+        An outstanding legacy signature found by the submit-time recheck returns
+        409 BUDGET_LEGACY_GRANT_PENDING with legacyGrantDeadline, the latest
+        outstanding signature deadline in unix milliseconds.
       parameters:
         - $ref: '#/components/parameters/ChainIdQuery'
       requestBody:
@@ -4035,7 +4044,10 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
-          description: Budget submission is not enabled.
+          description: |
+            Budget submission is not enabled, or a first-submit recheck refused
+            the operation. BUDGET_LEGACY_GRANT_PENDING includes
+            legacyGrantDeadline in unix milliseconds.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -4104,7 +4116,8 @@ paths:
         refused with BUDGET_CHANGING while the wallet/chain hold is open;
         scheduled runs wait without consuming an execution.
         A known, unexpired legacy deferred signature returns 409
-        BUDGET_LEGACY_GRANT_PENDING with its latest outstanding deadline.
+        BUDGET_LEGACY_GRANT_PENDING with legacyGrantDeadline, the latest
+        outstanding signature deadline in unix milliseconds.
         The default legacy signing window lasts up to 30 days. Revoking a
         permission off chain does not invalidate its signature; migration must
         wait until that window closes. This route offers no nonce-cancellation
@@ -4193,8 +4206,9 @@ paths:
             usable grant anymore. Prepare again.
 
             `BUDGET_LEGACY_GRANT_PENDING` — an earlier deferred signature can
-            still install, even after off-chain revocation. The detail names
-            the latest deadline; the default window can last 30 days.
+            still install, even after off-chain revocation. legacyGrantDeadline
+            is the latest outstanding signature deadline in unix milliseconds;
+            the default window can last 30 days.
 
             `SESSION_POLICY_TARGET_UNRESOLVED` — there is no usable grant,
             and an enabled task moves funds to a target this prepare cannot
