@@ -552,3 +552,21 @@ func (bs *BadgerStorage) Backup(ctx context.Context, w io.Writer, since uint64) 
 func (bs *BadgerStorage) Load(ctx context.Context, r io.Reader) error {
 	return bs.db.Load(r, 16) // 16 is a good default for the number of concurrent threads
 }
+
+// AtomicWrite commits a small authority transition all-or-nothing. Unlike
+// BatchWrite it never splits a transaction or discards a commit error.
+func (s *BadgerStorage) AtomicWrite(updates map[string][]byte, deletes [][]byte) error {
+	return s.db.Update(func(txn *badger.Txn) error {
+		for k, v := range updates {
+			if err := txn.Set([]byte(k), v); err != nil {
+				return err
+			}
+		}
+		for _, k := range deletes {
+			if err := txn.Delete(k); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}

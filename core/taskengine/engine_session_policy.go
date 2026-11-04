@@ -389,6 +389,9 @@ func (n *Engine) PrepareSessionPolicyWithContext(ctx context.Context, user *mode
 	lock := sessionAuthorityLock(in.ChainID, user.Address, in.Wallet)
 	lock.Lock()
 	defer lock.Unlock()
+	if err = budgetHoldPresent(n.db, in.ChainID, user.Address, in.Wallet); err != nil {
+		return nil, err
+	}
 	if err := n.refuseBudgetStatelessReplacement(user, in); err != nil {
 		return nil, err
 	}
@@ -591,6 +594,9 @@ func (n *Engine) SubmitSessionPolicy(
 	lock := sessionAuthorityLock(in.ChainID, user.Address, in.Wallet)
 	lock.Lock()
 	defer lock.Unlock()
+	if err = budgetHoldPresent(n.db, in.ChainID, user.Address, in.Wallet); err != nil {
+		return nil, nil, err
+	}
 	if err := n.refuseBudgetStatelessReplacement(user, in); err != nil {
 		return nil, nil, err
 	}
@@ -759,6 +765,9 @@ func (n *Engine) RevokeSessionPolicyByID(user *model.User, chainID int64, wallet
 	lock.Lock()
 	defer lock.Unlock()
 
+	if err = budgetHoldPresent(n.db, chainID, user.Address, wallet); err != nil {
+		return false, false, nil, err
+	}
 	policy, err := n.GetSessionPolicyByID(user, chainID, wallet, policyID)
 	if err != nil {
 		return false, false, nil, err

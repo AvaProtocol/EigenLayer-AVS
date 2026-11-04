@@ -2298,9 +2298,10 @@ components:
           $ref: '#/components/schemas/WalletBudgetInput'
           description: |
             Owner totals, independent of workflow run counts. Budget signing
-            requires the stored owner-operation handoff. Until that path is
-            implemented this input returns 409 BUDGET_HANDOFF_REQUIRED and
-            never produces a legacy deferred-install signature.
+            requires the stored owner-operation handoff, with separate
+            preparation and signing flags. It never produces a legacy
+            deferred-install signature. Signing is Sepolia-only, self-funded,
+            and subject to the configurable maximum fee (default 0.005 ETH).
         chainId: { $ref: '#/components/schemas/ChainId' }
         agentLabel:
           type: string
@@ -2399,10 +2400,29 @@ components:
             above are ignored. The response's permission fields are the
             merged set and must be echoed to submit.
 
+    BudgetChangeState:
+      type: string
+      enum: [prepared, submitting, submitted, active, reverted, rejected, unsent, superseded]
+      description: |
+        prepared expires after ten minutes; that window limits only the first
+        relay. submitting, submitted and rejected remain recoverable without
+        expiry and keep Ava runs paused. A bundler rejection is not final.
+        active, reverted and superseded are settled. unsent is possible only
+        before a submitting marker. Successful inclusion stays submitted until
+        reset verification passes; activation and hold release are atomic.
+
     PreparedPolicy:
       type: object
       required: [policyId, chainId, entityId, sessionSigner, deadline, validUntil]
       properties:
+        state: { $ref: '#/components/schemas/BudgetChangeState' }
+        reason: { type: string }
+        transactionHash: { $ref: '#/components/schemas/Hex' }
+        inclusionBlock: { type: integer, format: int64 }
+        finalReadBlock: { type: integer, format: int64 }
+        isCancel:
+          type: boolean
+          description: A successful cancel settles as active with isCancel true; it consumes the nonce and does not activate a new permission.
         preparationId: { $ref: '#/components/schemas/Ulid' }
         signing: { $ref: '#/components/schemas/PolicySigning' }
         budget: { $ref: '#/components/schemas/WalletBudget' }
@@ -2828,12 +2848,13 @@ components:
           type: object
           required: [policyId, state]
           properties:
+            preparationId: { $ref: '#/components/schemas/Ulid' }
             policyId: { $ref: '#/components/schemas/Ulid' }
             state:
               type: string
               enum: [prepared, submitting, submitted, reverted, rejected, unsent, superseded]
             reason: { type: string }
-          description: Reserved for stored budget preparations; omitted in this slice.
+          description: Latest durable budget change. A rejected or reset-unverified change explains why runs remain paused.
         readAt: { type: integer, format: int64 }
 
     SubmitPolicyResponse:
@@ -3943,7 +3964,7 @@ paths:
     get:
       tags: [Policies]
       operationId: getWalletBudgetPreparation
-      summary: Read an owned unsigned budget preparation
+      summary: Recover an owned budget preparation or durable change
       parameters:
         - $ref: '#/components/parameters/ChainIdQuery'
       responses:
@@ -3974,10 +3995,17 @@ paths:
     post:
       tags: [Policies]
       operationId: submitWalletBudgetPreparation
-      summary: Reserved signature-only budget handoff (not enabled yet)
+      summary: Relay one stored owner-signed budget operation
       description: |
-        This slice always refuses with BUDGET_HANDOFF_REQUIRED. It neither
-        broadcasts nor activates a grant. Holds and activation must land first.
+        Feature off by default, Sepolia only. First submit requires an unexpired
+        preparation. Submit accepts only a personal_sign signature of the raw
+        userOpHash. A durable hold and submitting marker precede relay of the
+        exact operation. Repeat calls reconcile the hash without rebroadcasting.
+        Rejected or unknown sends keep the hold until the nonce is consumed.
+        Successful inclusion stays submitted until reset proof passes; activation
+        and hold release are atomic. Signing is self-funded and fee capped.
+      parameters:
+        - $ref: '#/components/parameters/ChainIdQuery'
       requestBody:
         required: true
         content:
@@ -3989,11 +4017,54 @@ paths:
               properties:
                 signature: { $ref: '#/components/schemas/Hex' }
       responses:
+        '200':
+          description: Stored change and its current state; active only after reset proof.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PreparedPolicy' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: Required chain or storage evidence is unavailable; no unsafe hold release.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
           description: Budget submission is not enabled.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /wallets/{address}/policies/preparations/{id}:cancel:
+    parameters:
+      - name: address
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/EthereumAddress' }
+      - name: id
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Ulid' }
+    post:
+      tags: [Policies]
+      operationId: prepareWalletBudgetCancel
+      summary: Prepare a self-funded owner cancellation on the held nonce
+      description: Returns a fresh signing review containing only an owner no-op. Submit its id and signature through the budget submit route. Never broadcasts automatically.
+      parameters:
+        - $ref: '#/components/parameters/ChainIdQuery'
+      responses:
+        '200':
+          description: Exact priced cancellation operation to review and sign.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PreparedPolicy' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: No includable held nonce, unsupported chain or signing disabled.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -4013,7 +4084,8 @@ paths:
         operation and the exact intent/read/derived review. It requires a fresh
         signed approvalDiscovery, explicitly self-funds, and returns signing.kind
         owner_operation (personal_sign of raw userOpHash). It creates no usable
-        policy or hold. Budget submit remains refused until activation exists.
+        policy or hold. Budget submit needs the separate off-by-default
+        wallet_budget_signing_enabled flag and is limited to Sepolia.
         GET /wallets/{address}/policies/preparations/{id} recovers the same review.
         Missing/stale discovery returns 409 BUDGET_DISCOVERY_REQUIRED; incomplete
         discovery or failed reads return 503; 64 live unsigned records per owner
@@ -4021,6 +4093,13 @@ paths:
         v1 Sepolia USDC. Other live allowances requiring reset return 409
         BUDGET_RESET_UNSUPPORTED_TOKEN with token/spender; insufficient ETH returns
         409 BUDGET_FEE_INSUFFICIENT_ETH with neededWei/availableWei.
+        A quote above wallet_budget_max_fee_wei (default 0.005 ETH) returns
+        409 BUDGET_FEE_CEILING_EXCEEDED. Unsupported Permit2, NFT/operator or
+        unaudited spending targets return 409 BUDGET_ROUTE_UNSUPPORTED.
+        A live unknown validation authority returns BUDGET_AUTHORITY_UNKNOWN;
+        remove it in the wallet and check again. Ava's session operations are
+        refused with BUDGET_CHANGING while the wallet/chain hold is open;
+        scheduled runs wait without consuming an execution.
         A known, unexpired legacy deferred signature returns 409
         BUDGET_LEGACY_GRANT_PENDING with its latest outstanding deadline.
         The default legacy signing window lasts up to 30 days. Revoking a

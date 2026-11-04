@@ -23,22 +23,23 @@ import (
 )
 
 type budgetPrepareFixture struct {
-	n       *Engine
-	user    *model.User
-	in      SessionPolicyInput
-	key     *ecdsa.PrivateKey
-	backend *ownerBackendFixture
-	calls   []aa.Call
+	n        *Engine
+	user     *model.User
+	in       SessionPolicyInput
+	key      *ecdsa.PrivateKey
+	ownerKey *ecdsa.PrivateKey
+	backend  *ownerBackendFixture
+	calls    []aa.Call
 }
 
 func newBudgetPrepareFixture(t *testing.T) *budgetPrepareFixture {
 	t.Helper()
-	n, _, _, owner, wallet := newPolicyTestEngine(t)
+	n, _, ownerKey, owner, wallet := newPolicyTestEngine(t)
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	n.config.WalletBudgetPreparationEnabled = true
 	n.config.WalletBudgetDiscoverySigner = crypto.PubkeyToAddress(key.PublicKey).Hex()
-	f := &budgetPrepareFixture{n: n, user: &model.User{Address: owner}, key: key, backend: &ownerBackendFixture{}}
+	f := &budgetPrepareFixture{n: n, user: &model.User{Address: owner}, key: key, ownerKey: ownerKey, backend: &ownerBackendFixture{}}
 	n.budgetOwnerPrepareOverride = func(ctx context.Context, sw *config.SmartWalletConfig, owner, sender common.Address, salt *big.Int, batch preset.OwnerBatch, l logger.Logger) (*preset.PreparedOwnerUserOp, error) {
 		require.True(t, sw.DisableGasSponsorship)
 		require.Empty(t, sw.AlchemyPaymasterPolicyID)

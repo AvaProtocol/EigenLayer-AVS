@@ -11,9 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
+	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -25,7 +27,7 @@ import (
 
 // Real mounted routes, storage, attestation verification, account inspection and
 // pricing. Only chain/bundler I/O is mocked; no private test override or send.
-func TestBudgetPreparationHTTPStorageAndNoRelay(t *testing.T) {
+func TestBudgetPreparationHTTPStorageAndSignedLifecycle(t *testing.T) {
 	for _, deployed := range []bool{true, false} {
 		t.Run(map[bool]string{true: "deployed", false: "counterfactual"}[deployed], func(t *testing.T) {
 			r := newPolicyRig(t)
@@ -39,7 +41,14 @@ func TestBudgetPreparationHTTPStorageAndNoRelay(t *testing.T) {
 			token := common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
 			spender := common.HexToAddress("0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E")
 			var sends, estimates atomic.Int32
+			var pinnedOwnerReads atomic.Int32
 			zeroBalance := atomic.Bool{}
+			sendEnabled := atomic.Bool{}
+			mined := atomic.Bool{}
+			var submittedHash atomic.Value
+			header := func(number int64) *types.Header {
+				return &types.Header{Number: big.NewInt(number), Difficulty: big.NewInt(0), GasLimit: 30000000, BaseFee: big.NewInt(1), Extra: []byte{}}
+			}
 			chain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				var rpcReq struct {
 					ID     json.RawMessage   `json:"id"`
@@ -47,6 +56,16 @@ func TestBudgetPreparationHTTPStorageAndNoRelay(t *testing.T) {
 					Params []json.RawMessage `json:"params"`
 				}
 				require.NoError(t, json.NewDecoder(req.Body).Decode(&rpcReq))
+				if sendEnabled.Load() && !mined.Load() {
+					switch rpcReq.Method {
+					case "eth_getCode", "eth_getStorageAt", "eth_getBalance", "eth_call":
+						last := string(rpcReq.Params[len(rpcReq.Params)-1])
+						if !strings.Contains(last, "blockHash") {
+							require.Equal(t, `"0x1"`, last, "all owner identity/nonce/fee reads must use the final canonical block")
+							pinnedOwnerReads.Add(1)
+						}
+					}
+				}
 				var result interface{}
 				switch rpcReq.Method {
 				case "eth_chainId":
@@ -66,7 +85,11 @@ func TestBudgetPreparationHTTPStorageAndNoRelay(t *testing.T) {
 						result = "0x0"
 					}
 				case "eth_getBlockByNumber":
-					result = &types.Header{Number: big.NewInt(1), Difficulty: big.NewInt(0), GasLimit: 30000000, BaseFee: big.NewInt(1), Extra: []byte{}}
+					number := int64(1)
+					if mined.Load() {
+						number = 2
+					}
+					result = header(number)
 				case "eth_maxPriorityFeePerGas", "rundler_maxPriorityFeePerGas":
 					result = "0x3b9aca00"
 				case "eth_call":
@@ -90,14 +113,24 @@ func TestBudgetPreparationHTTPStorageAndNoRelay(t *testing.T) {
 					case sel("entryPoint()"):
 						value = common.LeftPadBytes(preset.EntryPointV07().Bytes(), 32)
 					case sel("getNonce(address,uint192)"):
-						value = common.LeftPadBytes(new(big.Int).Lsh(new(big.Int).SetBytes(data[36:68]), 64).Bytes(), 32)
+						full := new(big.Int).Lsh(new(big.Int).SetBytes(data[36:68]), 64)
+						if mined.Load() {
+							full.Add(full, big.NewInt(1))
+						}
+						value = common.LeftPadBytes(full.Bytes(), 32)
+					case sel("getValidationData(bytes24)"):
+						for _, n := range []int64{32, 0, 128, 160, 192, 0, 0, 0} {
+							value = append(value, common.LeftPadBytes(big.NewInt(n).Bytes(), 32)...)
+						}
+					case sel("erc20SpendLimits(uint32,address,address)"):
+						value = common.LeftPadBytes(big.NewInt(1000).Bytes(), 32)
 					case sel("signers(uint32,address)"):
 						value = make([]byte, 32)
 					case sel("balanceOf(address)"):
 						value = make([]byte, 32)
 					case sel("allowance(address,address)"):
 						value = make([]byte, 32)
-						if common.BytesToAddress(data[36:]) == spender {
+						if common.BytesToAddress(data[36:]) == spender && !mined.Load() {
 							value = common.LeftPadBytes(big.NewInt(123).Bytes(), 32)
 						}
 					default:
@@ -107,7 +140,21 @@ func TestBudgetPreparationHTTPStorageAndNoRelay(t *testing.T) {
 				case "eth_estimateUserOperationGas":
 					estimates.Add(1)
 					result = map[string]string{"callGasLimit": "0x186a0", "verificationGasLimit": "0xc350", "preVerificationGas": "0x7530"}
-				case "eth_sendUserOperation", "alchemy_requestGasAndPaymasterAndData":
+				case "eth_getLogs":
+					result = []types.Log{}
+					if mined.Load() && strings.Contains(strings.ToLower(string(rpcReq.Params[0])), strings.ToLower(preset.EntryPointV07().Hex())) {
+						nonce := new(big.Int).Lsh(big.NewInt(1), 64)
+						data := common.LeftPadBytes(nonce.Bytes(), 32)
+						for _, n := range []int64{1, 1000, 1000} {
+							data = append(data, common.LeftPadBytes(big.NewInt(n).Bytes(), 32)...)
+						}
+						result = []types.Log{{Address: preset.EntryPointV07(), Topics: []common.Hash{crypto.Keccak256Hash([]byte("UserOperationEvent(bytes32,address,address,uint256,bool,uint256,uint256)")), submittedHash.Load().(common.Hash), common.BytesToHash(r.wallet.Bytes()), {}}, Data: data, BlockNumber: 2, BlockHash: header(2).Hash(), TxHash: common.HexToHash("0xabc")}}
+					}
+				case "eth_sendUserOperation":
+					sends.Add(1)
+					require.True(t, sendEnabled.Load())
+					result = submittedHash.Load().(common.Hash).Hex()
+				case "alchemy_requestGasAndPaymasterAndData":
 					sends.Add(1)
 					t.Errorf("budget preparation must not send or sponsor")
 					result = nil
@@ -190,6 +237,13 @@ func TestBudgetPreparationHTTPStorageAndNoRelay(t *testing.T) {
 			refusal := call(http.MethodPost, path+"/preparations/"+id+":submit", map[string]interface{}{"signature": "0x" + strings.Repeat("11", 65)}, 409)
 			require.Equal(t, taskengine.BudgetHandoffRequiredCode, refusal["code"])
 			call(http.MethodPost, path+"/preparations/"+id+":submit", map[string]interface{}{"signature": "0x" + strings.Repeat("11", 65), "userOp": operation}, 400)
+			for _, malformed := range []string{strings.Repeat("11", 65), "0x" + strings.Repeat("11", 65) + "zz", "0x1", "0x"} {
+				call(http.MethodPost, path+"/preparations/"+id+":submit", map[string]interface{}{"signature": malformed}, 400)
+			}
+			for _, query := range []string{"not-a-chain", "0", "-1", "999999999999999999999999999999"} {
+				call(http.MethodPost, path+"/preparations/"+id+":submit?chainId="+query, map[string]interface{}{"signature": "0x" + strings.Repeat("11", 65)}, 400)
+				call(http.MethodPost, path+"/preparations/"+id+":cancel?chainId="+query, nil, 400)
+			}
 			policies, err := taskengine.ListSessionPolicies(r.db, policyTestChain, r.owner)
 			require.NoError(t, err)
 			require.Empty(t, policies)
@@ -201,6 +255,24 @@ func TestBudgetPreparationHTTPStorageAndNoRelay(t *testing.T) {
 			require.NotEmpty(t, fee["neededWei"])
 			require.Equal(t, "0", fee["availableWei"])
 			require.Zero(t, sends.Load())
+			zeroBalance.Store(false)
+			cfg.WalletBudgetSigningEnabled = true
+			sendEnabled.Store(true)
+			userHash := common.HexToHash(signing["userOpHash"].(string))
+			submittedHash.Store(userHash)
+			ownerSignature, err := crypto.Sign(accounts.TextHash(userHash.Bytes()), r.ownerKey)
+			require.NoError(t, err)
+			sent := call(http.MethodPost, path+"/preparations/"+id+":submit?chainId=11155111", map[string]interface{}{"signature": hexutil.Encode(ownerSignature)}, 200)
+			require.Equal(t, "submitted", sent["state"])
+			require.Positive(t, pinnedOwnerReads.Load())
+			require.EqualValues(t, 1, sends.Load())
+			pending := call(http.MethodGet, path+"/preparations/"+id+"?chainId=11155111", nil, 200)
+			require.Equal(t, "submitted", pending["state"])
+			mined.Store(true)
+			active := call(http.MethodGet, path+"/preparations/"+id+"?chainId=11155111", nil, 200)
+			require.Equal(t, "active", active["state"])
+			call(http.MethodPost, path+"/preparations/"+id+":submit?chainId=11155111", map[string]interface{}{"signature": hexutil.Encode(ownerSignature)}, 200)
+			require.EqualValues(t, 1, sends.Load())
 		})
 	}
 }
@@ -208,7 +280,9 @@ func TestBudgetPreparationHTTPStorageAndNoRelay(t *testing.T) {
 func TestBudgetPreparationRoutesRequireUserAndRefusePartner(t *testing.T) {
 	r := newPolicyRig(t)
 	addr := r.wallet.Hex()
-	handler := func(c echo.Context) error { return r.server.SubmitWalletBudgetPreparation(c, addr, "01test") }
+	handler := func(c echo.Context) error {
+		return r.server.SubmitWalletBudgetPreparation(c, addr, "01test", generated.SubmitWalletBudgetPreparationParams{})
+	}
 	rec := r.call(t, map[string]string{"signature": "0x" + strings.Repeat("11", 65)}, handler, map[string]string{"X-Partner-Assertion": "not-authority"})
 	require.Equal(t, http.StatusForbidden, rec.Code)
 	// Newly reserved operations are user-only in the shared permission map.

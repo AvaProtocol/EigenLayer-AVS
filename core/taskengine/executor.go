@@ -217,6 +217,14 @@ func (x *WorkflowExecutor) RunTask(task *model.Workflow, queueData *QueueExecuti
 // propagated to wallet-ownership validation so a cancelled request interrupts
 // in-flight chain-worker derivations.
 func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.Workflow, queueData *QueueExecutionData) (*avsproto.Execution, error) {
+	if x.engine != nil {
+		release, err := x.engine.budgetWorkflowLease(ctx, task)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+	}
+
 	// Load secrets for the task
 	secrets, err := LoadSecretForTask(x.db, task)
 	if err != nil {

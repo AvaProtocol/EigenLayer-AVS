@@ -35,6 +35,20 @@ func walletBudgetToAPI(b *taskengine.WalletBudget) generated.WalletBudget {
 	out := generated.WalletBudget{ChainId: b.ChainID, PolicyId: generated.Ulid(b.PolicyID),
 		Status: generated.WalletBudgetStatus(b.Status), Sizing: generated.BudgetSizing(b.Sizing), ValidUntil: b.ValidUntil,
 		ReadAt: b.ReadAt, Erc20: []generated.BudgetTokenRow{}, UnmeteredPermissions: []generated.UnmeteredPermission{}}
+	if b.PendingChange != nil {
+		value := b.PendingChange
+		id := value.PreparationID
+		//nolint:revive // Anonymous response type must match the generated field names.
+		out.PendingChange = &struct {
+			PolicyId      generated.Ulid                           `json:"policyId"`
+			PreparationId *generated.Ulid                          `json:"preparationId,omitempty"`
+			Reason        *string                                  `json:"reason,omitempty"`
+			State         generated.WalletBudgetPendingChangeState `json:"state"`
+		}{PolicyId: value.PolicyID, PreparationId: &id, State: generated.WalletBudgetPendingChangeState(value.State)}
+		if value.Reason != "" {
+			out.PendingChange.Reason = &value.Reason
+		}
+	}
 	if b.StartedAt != 0 {
 		out.StartedAt = &b.StartedAt
 	}

@@ -26,7 +26,7 @@ func (q *Queue) CleanupOrphanedJobs() (*CleanupStats, error) {
 	q.logger.Debug("starting orphaned jobs cleanup")
 
 	// Get all jobs from different queues
-	for _, status := range []jobStatus{jobPending, jobInProgress, jobFailed} {
+	for _, status := range []jobStatus{jobPending, jobDeferred, jobInProgress, jobFailed} {
 		prefix := q.getQueueKeyPrefix(status)
 
 		// Get all jobs with this status

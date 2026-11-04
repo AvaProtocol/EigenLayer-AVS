@@ -73,6 +73,7 @@ type BudgetRetirement struct {
 }
 
 type WalletBudget struct {
+	PendingChange        *BudgetPendingChange      `json:"pendingChange,omitempty"`
 	ChainID              int64                     `json:"chainId"`
 	PolicyID             string                    `json:"policyId"`
 	Status               model.SessionPolicyStatus `json:"status"`
@@ -92,8 +93,24 @@ func (n *Engine) GetWalletBudget(ctx context.Context, user *model.User, chainID 
 	if err := n.requireOwnedWallet(user, wallet); err != nil {
 		return nil, err
 	}
+	if err := n.ReconcileBudgetChanges(ctx, chainID, user.Address, wallet); err != nil {
+		return nil, fmt.Errorf("%w: budget reconciliation", ErrBudgetReadUnavailable)
+	}
+	pending, err := n.pendingBudgetChange(user, chainID, wallet)
+	if err != nil {
+		return nil, err
+	}
 	policy, retired, err := n.walletBudgetPolicySnapshot(chainID, user.Address, wallet)
 	if err != nil {
+		if errors.Is(err, ErrSessionPolicyNotFound) && pending != nil {
+			preview := *pending.Budget
+			preview.ERC20 = []BudgetTokenRow{}
+			preview.Native = nil
+			preview.StartedAt = 0
+			preview.Status = model.SessionPolicyPending
+			preview.PendingChange = budgetPending(pending)
+			return &preview, nil
+		}
 		return nil, err
 	}
 	var client *ethclient.Client
@@ -111,7 +128,14 @@ func (n *Engine) GetWalletBudget(ctx context.Context, user *model.User, chainID 
 	if client != nil {
 		caller = client
 	}
-	return ReadWalletBudget(ctx, policy, retired, caller, time.Now())
+	out, err := ReadWalletBudget(ctx, policy, retired, caller, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if pending != nil {
+		out.PendingChange = budgetPending(pending)
+	}
+	return out, nil
 }
 
 func (n *Engine) walletBudgetPolicySnapshot(chainID int64, owner, wallet common.Address) (*model.SessionPolicy, []*model.SessionPolicy, error) {

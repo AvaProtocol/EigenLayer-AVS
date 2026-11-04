@@ -1,8 +1,10 @@
 package apqueue
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 
@@ -73,6 +75,13 @@ func (w *Worker) ProcessSignal(jid uint64) {
 		err = fmt.Errorf("unsupported job type: %s", job.Type)
 	}
 
+	var deferred interface{ RetryAfter() time.Duration }
+	if errors.As(err, &deferred) && deferred.RetryAfter() > 0 {
+		if e := w.q.deferJob(job, deferred.RetryAfter()); e != nil {
+			w.logger.Error("failed to defer paused job", "error", e)
+		}
+		return
+	}
 	if err == nil {
 		if markErr := w.q.markJobDone(job, jobComplete); markErr != nil {
 			w.logger.Error("failed to mark job as complete", "error", markErr, "job_id", jid)

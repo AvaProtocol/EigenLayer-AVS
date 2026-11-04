@@ -15,10 +15,15 @@ environment: development
 # after configuring the chain/bundler; Auto/session execution is unaffected.
 owner_execution_enabled: false
 
-# Read-only wallet budget preparations. Submit/activation are not enabled yet.
+# Read-only wallet budget preparations. Signing needs the separate flag below.
 wallet_budget_preparation_enabled: false
 # Public signer address of the trusted backend approval-inventory service.
 wallet_budget_discovery_signer: ""
+# Sepolia-only owner-signed budget changes. Keep off until the live release
+# gates and discovery canary pass. No paymaster; the wallet pays network fees.
+wallet_budget_signing_enabled: false
+# Maximum fee per priced budget operation, in wei (default 0.005 ETH).
+wallet_budget_max_fee_wei: "5000000000000000"
 
 db_path: /tmp/ap-avs/gateway
 # Honored when set. Empty → `{db_path}_backup`. Periodic writes only when

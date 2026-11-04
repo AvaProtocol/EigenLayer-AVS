@@ -264,7 +264,7 @@ func NextNonceV07(ctx context.Context, client *rpc.Client, entryPoint, sender co
 	if err := client.CallContext(ctx, &out, "eth_call", map[string]interface{}{
 		"to":   entryPoint.Hex(),
 		"data": fmt.Sprintf("0x%x", data),
-	}, "latest"); err != nil {
+	}, ownerReadBlockTag(ctx)); err != nil {
 		return nil, fmt.Errorf("EntryPoint.getNonce: %w", err)
 	}
 	full, err := parseHexBig(out, "nonce")
@@ -467,6 +467,10 @@ func sendUserOpV07(ctx context.Context, client *rpc.Client, op *userop.UserOpera
 }
 
 func rawSendUserOpV07(ctx context.Context, client *rpc.Client, op *userop.UserOperationV07, entryPoint common.Address) (common.Hash, error) {
+	if err := beforeSessionBroadcast(ctx, op); err != nil {
+		return common.Hash{}, err
+	}
+
 	payload, err := json.Marshal(op)
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("marshaling user operation: %w", err)

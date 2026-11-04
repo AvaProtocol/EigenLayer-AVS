@@ -136,6 +136,9 @@ func permissionRefusalCode(err error) avsproto.ErrorCode {
 		return avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED
 	}
 	message := err.Error()
+	if strings.Contains(message, BudgetChangingCode+":") {
+		return avsproto.ErrorCode_BUDGET_CHANGING
+	}
 	if strings.HasPrefix(message, SessionPolicyExpiredCode+":") || strings.Contains(message, ": "+SessionPolicyExpiredCode+":") {
 		return avsproto.ErrorCode_SESSION_POLICY_EXPIRED
 	}
